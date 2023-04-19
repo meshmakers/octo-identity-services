@@ -1,0 +1,44 @@
+﻿@using Microsoft.Extensions.Hosting
+@using Microsoft.AspNetCore.Hosting
+@model Meshmakers.Octo.Backend.IdentityServices.ViewModels.Shared.ErrorViewModel
+
+@inject IWebHostEnvironment Host
+
+@{
+    var error = Model.Error?.Error;
+    var errorDescription = Host.IsDevelopment() ? Model.Error?.ErrorDescription : null;
+    var requestId = Model.Error?.RequestId;
+}
+
+<div class="error-page">
+    <div class="page-header">
+        <h1>@IdentityTexts.Backend_General_Error_Title</h1>
+    </div>
+
+    <div class="row">
+        <div class="col-sm-6 centered">
+            <div class="alert alert-danger">
+                @IdentityTexts.Backend_General_Error_Label
+
+                @if (error != null)
+                {
+                    <strong>
+                        <em>
+                            : @error
+                        </em>
+                    </strong>
+
+                    if (errorDescription != null)
+                    {
+                        <div>@errorDescription</div>
+                    }
+                }
+            </div>
+
+            @if (requestId != null)
+            {
+                <div class="request-id">Request Id: @requestId</div>
+            }
+        </div>
+    </div>
+</div>

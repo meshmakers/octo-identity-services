@@ -1,0 +1,22 @@
+@model Meshmakers.Octo.Backend.IdentityServices.ViewModels.Consent.ConsentViewModel
+
+@if (Model.IdentityScopes != null && Model.IdentityScopes.Any())
+{
+    <div class="mdc-card">
+        <div class=" octo-card-content">
+
+            <div class="octo-card__primary">
+                <p class="octo-card__title mdc-typography mdc-typography--headline6">@IdentityTexts.Backend_Identity_Consent_PersonalInformation_Label</p>
+            </div>
+
+            <div class="mdc-card__content">
+                <ul class="list-group list-group-flush">
+                    @foreach (var scope in Model.IdentityScopes)
+                    {
+                        <partial name="_ScopeListItem" model="@scope"/>
+                    }
+                </ul>
+            </div>
+        </div>
+    </div>
+}

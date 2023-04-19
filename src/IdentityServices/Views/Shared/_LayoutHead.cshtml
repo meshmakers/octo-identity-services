@@ -1,0 +1,18 @@
+﻿@using Meshmakers.Octo.Backend.IdentityServices.Services
+@using Microsoft.AspNetCore.Mvc.TagHelpers
+@inject IOemService OemService;
+<head>
+    <meta charset="utf-8"/>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+    <title>@ViewData["Title"] - @OemOptions.Value.ApplicationName</title>
+    
+    <link href="@OemService.StyleBundle" rel="stylesheet" asp-append-version="true"/>
+    <script src="@OemService.JsBundle" asp-append-version="true" async></script>
+
+
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,400,500,700"/>
+    <style>
+      body { font-family: Roboto, sans-serif; }
+    </style>
+
+</head>

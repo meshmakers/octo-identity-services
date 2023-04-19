@@ -1,0 +1,40 @@
+﻿<Project Sdk="Microsoft.NET.Sdk.Razor">
+
+    <PropertyGroup>
+        <AssemblyName>Meshmakers.Octo.Backend.Authentication</AssemblyName>
+        <PackageIcon>meshmakers64.png</PackageIcon>
+        <PackageId>Meshmakers.Octo.Backend.Authentication</PackageId>
+        <PackageLicenseFile>LICENSE</PackageLicenseFile>
+        <PackageProjectUrl>https://www.meshmakers.io</PackageProjectUrl>
+        <RepositoryUrl>https://github.com/meshmakers/octomesh</RepositoryUrl>
+        <RootNamespace>Meshmakers.Octo.Backend.Authentication</RootNamespace>
+        <TargetFramework>net7.0</TargetFramework>
+        <AddRazorSupportForMvc>true</AddRazorSupportForMvc>
+    </PropertyGroup>
+
+    <ItemGroup>
+        <FrameworkReference Include="Microsoft.AspNetCore.App" />
+    </ItemGroup>
+
+    <ItemGroup>
+        <PackageReference Include="Microsoft.AspNetCore.Authentication.Google" Version="6.0.11" />
+        <PackageReference Include="Microsoft.AspNetCore.Authentication.MicrosoftAccount" Version="6.0.11" />
+        <PackageReference Include="Microsoft.AspNetCore.Authentication.OpenIdConnect" Version="6.0.11" />
+        <PackageReference Include="Novell.Directory.Ldap.NETStandard" Version="3.6.0" />
+    </ItemGroup>
+
+    <ItemGroup>
+        <ProjectReference Include="..\octo-common-services\src\Infrastructure\Infrastructure.csproj" />
+        <ProjectReference Include="..\octo-core\src\SystematizedData\Persistence\Persistence.csproj" />
+        <ProjectReference Include="..\IdentityServices.Resources\IdentityServices.Resources.csproj" />
+    </ItemGroup>
+
+    <ItemGroup>
+        <None Include="..\..\assets\meshmakers64.png">
+            <Pack>True</Pack>
+            <PackagePath />
+            <Link>meshmakers64.png</Link>
+        </None>
+    </ItemGroup>
+
+</Project>

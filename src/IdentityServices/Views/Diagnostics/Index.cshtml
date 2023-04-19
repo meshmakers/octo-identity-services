@@ -1,0 +1,85 @@
+@model Meshmakers.Octo.Backend.IdentityServices.ViewModels.Diagnostics.DiagnosticsViewModel
+@{
+    ViewBag.Title = IdentityTexts.Backend_Identity_Navigation_Diagnostics_Title;
+}
+<div class="row justify-content-center">
+    @if (Model.AuthenticateResult?.Principal != null)
+    {
+        <div class="col-3">
+            <div class="mdc-card">
+                <div class=" octo-card-content">
+
+                    <div class="octo-card__primary">
+                        <h1 class="octo-card__title mdc-typography mdc-typography--headline1">@IdentityTexts.Backend_Identity_Claims_Label</h1>
+                    </div>
+
+                    <div class="mdc-card__content">
+
+                        <dl>
+                            @foreach (var claim in Model.AuthenticateResult.Principal.Claims)
+                            {
+                                <dt>@claim.Type</dt>
+                                <dd>@claim.Value</dd>
+                            }
+                        </dl>
+                    </div>
+                </div>
+            </div>
+        </div>
+    }
+
+    @if (Model.AuthenticateResult?.Properties != null)
+    {
+        <div class="col-3">
+            <div class="mdc-card">
+                <div class=" octo-card-content">
+
+                    <div class="octo-card__primary">
+                        <h1 class="octo-card__title mdc-typography mdc-typography--headline1">@IdentityTexts.Backend_Identity_Properties_Label</h1>
+                    </div>
+
+                    <div class="card__content">
+                        <dl>
+                            @foreach (var prop in Model.AuthenticateResult.Properties.Items)
+                            {
+                                <dt>@prop.Key</dt>
+                                <dd>@prop.Value</dd>
+                            }
+                        </dl>
+                    </div>
+                </div>
+            </div>
+        </div>
+    }
+
+    @if (Model.Clients != null)
+    {
+        <div class="col-3">
+            <div class="mdc-card">
+                <div class=" octo-card-content">
+
+                    <div class="octo-card__primary">
+                        <h1 class="octo-card__title mdc-typography mdc-typography--headline1">@IdentityTexts.Backend_Identity_Clients_Label</h1>
+                    </div>
+
+                    <div class="card__content">
+
+                        @if (Model.Clients.Any())
+                        {
+                            <ul>
+                                @foreach (var client in Model.Clients)
+                                {
+                                    <li>@client</li>
+                                }
+                            </ul>
+                        }
+                        else
+                        {
+                            <p>@IdentityTexts.Backend_Identity_Clients_NoClientsFound</p>
+                        }
+                    </div>
+                </div>
+            </div>
+        </div>
+    }
+</div>
