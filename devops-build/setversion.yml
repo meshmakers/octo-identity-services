@@ -7,7 +7,7 @@ steps:
     InsertAttributes: true
     FileEncoding: 'auto'
     GeneratePackageOnBuild: false
-    Authors: Meshmakers GmbH and contributor
+    Authors: Meshmakers GmbH and contributors
     Company: $(Company)
     Product: $(Build.SourceBranchName) - $(Build.SourceVersion) (release)
     Copyright: $(Copyright)
