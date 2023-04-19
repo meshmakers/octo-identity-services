@@ -1,0 +1,51 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+
+    <PropertyGroup>
+        <AssemblyName>Meshmakers.Octo.Backend.PolicyServices</AssemblyName>
+        <PackageIcon>meshmakers64.png</PackageIcon>
+        <PackageLicenseFile>LICENSE</PackageLicenseFile>
+        <PackageProjectUrl>https://www.meshmakers.io</PackageProjectUrl>
+        <RepositoryUrl>https://github.com/meshmakers/octomesh</RepositoryUrl>
+        <RootNamespace>Meshmakers.Octo.Backend.PolicyServices</RootNamespace>
+        <UserSecretsId>8159171C-9B4D-4461-99AD-DAC198FFBF48</UserSecretsId>
+        <TargetFramework>net7.0</TargetFramework>
+    </PropertyGroup>
+
+    <PropertyGroup Condition=" '$(Configuration)' == 'Debug' ">
+        <OutputPath>..\..\\bin\Debug\PolicyServices</OutputPath>
+        <DocumentationFile>../../bin/Debug/PolicyServices/Meshmakers.Octo.Backend.PolicyServices.xml</DocumentationFile>
+    </PropertyGroup>
+
+    <PropertyGroup Condition=" '$(Configuration)' == 'Release' ">
+        <OutputPath>..\..\bin\Release\PolicyServices</OutputPath>
+        <DocumentationFile>../../bin/Debug/PolicyServices/Meshmakers.Octo.Backend.PolicyServices.xml</DocumentationFile>
+    </PropertyGroup>
+
+    <ItemGroup>
+        <Content Update="nlog.Debug.config">
+            <ExcludeFromSingleFile>true</ExcludeFromSingleFile>
+            <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+            <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
+        </Content>
+        <Content Update="nlog.Release.config">
+            <ExcludeFromSingleFile>true</ExcludeFromSingleFile>
+            <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+            <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
+        </Content>
+    </ItemGroup>
+
+    <ItemGroup>
+        <PackageReference Include="Microsoft.AspNetCore.Authentication.JwtBearer" Version="7.0.2" />
+        <PackageReference Include="NLog.Web.AspNetCore" Version="5.2.1" />
+        <PackageReference Include="Swashbuckle.AspNetCore" Version="6.5.0" />
+        <PackageReference Include="Microsoft.AspNetCore.Mvc.Versioning.ApiExplorer" Version="5.0.0" />
+
+    </ItemGroup>
+
+    <ItemGroup>
+      <ProjectReference Include="$(OctoCommonServicesPath)src\Common\Common.csproj" />
+      <ProjectReference Include="$(OctoCorePath)src\SystematizedData\Persistence\Persistence.csproj" />
+    </ItemGroup>
+
+
+</Project>
