@@ -1,0 +1,31 @@
+.swagger-ui .topbar {
+    background-color: #49A4D5;
+}
+
+select {
+    border-radius: 15px !important;
+    border: none !important;
+}
+
+.authorization-error {
+    font-size: 1.5em;
+    color: red;
+}
+
+/*Hides the client id field*/
+#client_id {
+    display: none;
+}
+
+label[for=client_id] {
+    display: none;
+}
+
+/*Hides the client secret field*/
+#client_secret {
+    display: none;
+}
+
+label[for=client_secret] {
+    display: none;
+}

@@ -1,0 +1,47 @@
+{
+  "name": "octo-identity",
+  "version": "1.0.0",
+  "description": "",
+  "main": "app.js",
+  "scripts": {
+    "build": "webpack build --config webpack.config.js",
+    "build:oem": "webpack build --config webpack.config.js --output-path ./wwwroot/oem"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "@material/button": "^14.0.0",
+    "@material/card": "^14.0.0",
+    "@material/checkbox": "^14.0.0",
+    "@material/floating-label": "^14.0.0",
+    "@material/form-field": "^14.0.0",
+    "@material/line-ripple": "^14.0.0",
+    "@material/notched-outline": "^14.0.0",
+    "@material/ripple": "^14.0.0",
+    "@material/textfield": "^14.0.0",
+    "@material/theme": "^14.0.0",
+    "bootstrap": "^5.2.2",
+    "popper.js": "^1.16.1"
+  },
+  "devDependencies": {
+    "@babel/core": "^7.20.2",
+    "@babel/preset-env": "^7.20.2",
+    "@fortawesome/fontawesome-svg-core": "^6.2.0",
+    "@fortawesome/free-brands-svg-icons": "^6.2.0",
+    "@fortawesome/free-regular-svg-icons": "^6.2.0",
+    "@fortawesome/free-solid-svg-icons": "^6.2.0",
+    "autoprefixer": "^10.4.13",
+    "babel-loader": "^9.1.0",
+    "css-loader": "^6.7.2",
+    "extract-loader": "^5.1.0",
+    "file-loader": "^6.2.0",
+    "postcss-loader": "^7.0.1",
+    "sass": "^1.56.1",
+    "sass-loader": "^13.2.0",
+    "style-loader": "^3.3.1",
+    "webpack": "^5.75.0",
+    "webpack-cli": "^4.10.0",
+    "webpack-dev-server": "^4.11.1"
+  }
+}

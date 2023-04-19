@@ -1,0 +1,446 @@
+<root>
+    <resheader name="resmimetype">
+        <value>text/microsoft-resx</value>
+    </resheader>
+    <resheader name="version">
+        <value>1.3</value>
+    </resheader>
+    <resheader name="reader">
+        <value>System.Resources.ResXResourceReader, System.Windows.Forms, Version=2.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
+    </resheader>
+    <resheader name="writer">
+        <value>System.Resources.ResXResourceWriter, System.Windows.Forms, Version=2.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
+    </resheader>
+    <data name="Backend_Identity_LogIn_Validation_Username" xml:space="preserve">
+        <value>Das Feld Benutzername ist erforderlich.</value>
+    </data>
+    <data name="Backend_Identity_LogIn_Validation_Password" xml:space="preserve">
+        <value>Das Feld Passwort ist erforderlich.</value>
+    </data>
+    <data name="Backend_Identity_Login_Password_Label" xml:space="preserve">
+        <value>Passwort</value>
+    </data>
+    <data name="Backend_Identity_Login_Local" xml:space="preserve">
+        <value>Verwende dein Konto</value>
+    </data>
+    <data name="Backend_Identity_Login_InvalidUserPassword" xml:space="preserve">
+        <value>Ungültiger Benutzername oder Passwort</value>
+    </data>
+    <data name="Backend_Identity_Login_Cancel_Button" xml:space="preserve">
+        <value>Abbrechen</value>
+    </data>
+    <data name="Backend_Identity_LoggedOut_RedirectMessage" xml:space="preserve">
+        <value>Du wirst nun abgemeldet. In wenigen Sekunden wirst du weitergeleitet...</value>
+    </data>
+    <data name="Backend_Identity_Home_Welcome_Label" xml:space="preserve">
+        <value>Willkommen zu {0}, {1}!</value>
+    </data>
+    <data name="Backend_Identity_Home_QuickAccess_Header" xml:space="preserve">
+        <value>Schnellzugriff</value>
+    </data>
+    <data name="Backend_Identity_Navigation_Diagnostics_Header" xml:space="preserve">
+        <value>Diagnose</value>
+    </data>
+    <data name="Backend_Identity_Navigation_Diagnostics_Title" xml:space="preserve">
+        <value>Diagnoseinformation</value>
+    </data>
+    <data name="Backend_Identity_ResetPassword_PasswordComplexity" xml:space="preserve">
+        <value>Das Passwort muss sich aus folgenden Zeichen zusammensetzen: {0}</value>
+    </data>
+    <data name="Backend_Identity_UserSchema_Roles_DisplayName" xml:space="preserve">
+        <value>Rollen</value>
+    </data>
+    <data name="Backend_Identity_NewPassword_Label" xml:space="preserve">
+        <value>Neues Passwort</value>
+    </data>
+    <data name="Backend_Identity_Profile_Title" xml:space="preserve">
+        <value>Profil</value>
+    </data>
+    <data name="Backend_Identity_Profile_Welcome" xml:space="preserve">
+        <value>Willkommen, {0}</value>
+    </data>
+    <data name="Backend_Identity_Properties_Label" xml:space="preserve">
+        <value>Eigenschaften</value>
+    </data>
+    <data name="Backend_Identity_UserInfo_FirstName_Label" xml:space="preserve">
+        <value>Vorname</value>
+    </data>
+    <data name="Backend_Identity_UserInfo_LastName_Label" xml:space="preserve">
+        <value>Nachname</value>
+    </data>
+    <data name="Backend_Identity_UserInfo_Id_Label" xml:space="preserve">
+        <value>ID:</value>
+    </data>
+    <data name="Backend_Identity_UserInfo_Header" xml:space="preserve">
+        <value>Profilinformation</value>
+    </data>
+    <data name="Backend_Identity_Setup_Title" xml:space="preserve">
+        <value>Setup</value>
+    </data>
+    <data name="Backend_Identity_Login_Username_Label" xml:space="preserve">
+        <value>E-Mail</value>
+    </data>
+    <data name="Backend_Identity_Common_No" xml:space="preserve">
+        <value>Nein</value>
+    </data>
+    <data name="Backend_Identity_Common_Yes" xml:space="preserve">
+        <value>Ja</value>
+    </data>
+    <data name="Backend_Identity_Consent_Allow_Label" xml:space="preserve">
+        <value>Ja, erlauben</value>
+    </data>
+    <data name="Backend_Identity_Consent_Disallow_Label" xml:space="preserve">
+        <value>Nein, nicht erlauben</value>
+    </data>
+    <data name="Backend_Identity_CurrentPassword_Label" xml:space="preserve">
+        <value>Aktuelles Passwort</value>
+    </data>
+    <data name="Backend_Identity_Forgot_Password_Title" xml:space="preserve">
+        <value>Passwort vergessen</value>
+    </data>
+    <data name="Backend_Identity_General_Password_Label" xml:space="preserve">
+        <value>Passwort</value>
+    </data>
+    <data name="Backend_Identity_General_Username_Label" xml:space="preserve">
+        <value>Benutzername</value>
+    </data>
+    <data name="Backend_Identity_Grant_Created_Label" xml:space="preserve">
+        <value>Erstellt: {0}</value>
+    </data>
+    <data name="Backend_Identity_Privacy_Title" xml:space="preserve">
+        <value>Datenschutz-Bestimmungen</value>
+    </data>
+    <data name="Backend_Identity_Navigation_Redirect_Header" xml:space="preserve">
+        <value>Wenn du fertig bist, kannst du diese Registerkarte schließen.</value>
+    </data>
+    <data name="Backend_Identity_SetPassword_Subtitle" xml:space="preserve">
+        <value>Du hast keinen lokalen Benutzernamen/Passwort für {0}. Füge ein lokales Konto hinzu, damit du dich ohne zusätzlichen Anbieter anmelden kannst.</value>
+    </data>
+    <data name="Backend_Identity_Setup_Status_UsersAlreadyConfigured" xml:space="preserve">
+        <value>Identity Service ist bereits konfiguriert.</value>
+    </data>
+    <data name="Backend_Identity_Setup_Subtitle" xml:space="preserve">
+        <value>Identitätsdienste sind nicht konfiguriert. Bitte erstelle die Anmeldeinformationen für den ersten Benutzer mit Administratorzugriff.</value>
+    </data>
+    <data name="Backend_Identity_Success_Redirected_Soon_Message" xml:space="preserve">
+        <value>Du wirst in wenigen Sekunden weitergeleitet...</value>
+    </data>
+    <data name="Backend_Identity_UserCode_Header" xml:space="preserve">
+        <value>Benutzercode</value>
+    </data>
+    <data name="Backend_Identity_UserInfo_FailedAttempts_Label" xml:space="preserve">
+        <value>Fehlgeschlagene Anmeldeversuche</value>
+    </data>
+    <data name="Backend_Identity_UserSchema_Roles_Description" xml:space="preserve">
+        <value>Die Rollen, denen der Benutzer zugewiesen ist</value>
+    </data>
+    <data name="Backend_Identity_Navigation_Login_Header" xml:space="preserve">
+        <value>Anmeldung</value>
+    </data>
+    <data name="Backend_Identity_Login_Login_Button" xml:space="preserve">
+        <value>Anmeldung</value>
+    </data>
+    <data name="Backend_Identity_Navigation_Manage_Header" xml:space="preserve">
+        <value>Profil verwalten</value>
+    </data>
+    <data name="Backend_Identity_Navigation_Profile_Header" xml:space="preserve">
+        <value>Profil</value>
+    </data>
+    <data name="Backend_Identity_Navigation_Redirect_Description" xml:space="preserve">
+        <value>Wenn du fertig sind, kannst du diese Registerkarte schließen.</value>
+    </data>
+    <data name="Backend_Identity_Reset_Email_Sent_Successfully" xml:space="preserve">
+        <value>Wir haben eine E-Mail gesendet. Bitte folge den Anweisungen, um das Passwort zurückzusetzen.</value>
+    </data>
+    <data name="Backend_Identity_Navigation_ManageLogIns_Header" xml:space="preserve">
+        <value>Anmeldungen verwalten</value>
+    </data>
+    <data name="Backend_Identity_Navigation_Logout_Header" xml:space="preserve">
+        <value>Ausloggen</value>
+    </data>
+    <data name="Backend_Identity_Setup_Create_Button" xml:space="preserve">
+        <value>Erzeugen</value>
+    </data>
+    <data name="Backend_Identity_Setup_Status_PasswordComplexity" xml:space="preserve">
+        <value>Das Passwort entspricht nicht den Mindestanforderungen.</value>
+    </data>
+    <data name="Backend_Identity_Setup_Status_PasswordMissing" xml:space="preserve">
+        <value>Es wurde kein Passwort definiert.</value>
+    </data>
+    <data name="Backend_Identity_Navigation_DiscoveryDocument_Header" xml:space="preserve">
+        <value>OAuth2-Discovery-Dokument</value>
+    </data>
+    <data name="Backend_Identity_Navigation_Grants_Header" xml:space="preserve">
+        <value>Genehmigungen</value>
+    </data>
+    <data name="Backend_Identity_SetPassword_Title" xml:space="preserve">
+        <value>Lokales Passwort festlegen</value>
+    </data>
+    <data name="Backend_Identity_ManageLogins_Subtitle" xml:space="preserve">
+        <value>Diese Liste zeigt Verbindungen deines Accounts zu weiteren Anbietern.</value>
+    </data>
+    <data name="Backend_Identity_ManageLogins_Title" xml:space="preserve">
+        <value>Anmeldungen verwalten</value>
+    </data>
+    <data name="Backend_Identity_ManageProfile_Subtitle" xml:space="preserve">
+        <value>Ändee deine Kontoeinstellungen</value>
+    </data>
+    <data name="Backend_Identity_Navigation_API_Header" xml:space="preserve">
+        <value>API-Dokumentation (Swagger)</value>
+    </data>
+    <data name="Backend_Identity_Manage_StatusMessage_SetPasswordSuccess" xml:space="preserve">
+        <value>Dein Passwort wurde festgelegt.</value>
+    </data>
+    <data name="Backend_Identity_Msg_You_Can_Login_With_New_Password" xml:space="preserve">
+        <value>Du kannst dich nun mit deinem neuen Passwort anmelden.</value>
+    </data>
+    <data name="Backend_Identity_Navigation_ChangePassword_Header" xml:space="preserve">
+        <value>Passwort ändern</value>
+    </data>
+    <data name="Backend_Identity_Navigation_DeviceLogin_Header" xml:space="preserve">
+        <value>Gerät autorisieren</value>
+    </data>
+    <data name="Backend_Identity_Navigation_Development_Header" xml:space="preserve">
+        <value>Entwicklung</value>
+    </data>
+    <data name="Backend_Identity_Login_Title" xml:space="preserve">
+        <value>Anmeldung</value>
+    </data>
+    <data name="Backend_Identity_Login_RememberMe_Label" xml:space="preserve">
+        <value>An mich erinnern</value>
+    </data>
+    <data name="Backend_Identity_Logout_Title" xml:space="preserve">
+        <value>Ausloggen</value>
+    </data>
+    <data name="Backend_Identity_Logout_LogoutMessage" xml:space="preserve">
+        <value>Möchten du dich von {0} abmelden?</value>
+    </data>
+    <data name="Backend_Identity_ManageLogins_NoCurrentOrOtherLogins_Message" xml:space="preserve">
+        <value>Es sind keine registrierten Logins vorhanden</value>
+    </data>
+    <data name="Backend_General_Submit_Button" xml:space="preserve">
+        <value>Absenden</value>
+    </data>
+    <data name="Backend_General_Submit_Header" xml:space="preserve">
+        <value>Absenden</value>
+    </data>
+    <data name="Backend_General_Error_Title" xml:space="preserve">
+        <value>Fehler</value>
+    </data>
+    <data name="Backend_General_Error_Label" xml:space="preserve">
+        <value>Es gab einen Fehler</value>
+    </data>
+    <data name="Backend_General_Validation_Title" xml:space="preserve">
+        <value>Bitte überprüfe deine Eingaben</value>
+    </data>
+    <data name="Backend_General_Title_Success" xml:space="preserve">
+        <value>Erfolg</value>
+    </data>
+    <data name="Backend_IdentityServices_Api_FullAccess" xml:space="preserve">
+        <value>Vollständiger Zugriff auf die Identitäts-API</value>
+    </data>
+    <data name="Backend_IdentityServices_Api_ReadOnlyAccess" xml:space="preserve">
+        <value>Lesezugriff auf die Identitäts-API</value>
+    </data>
+    <data name="Backend_IdentityServices_UserSchema_Swagger_DisplayName" xml:space="preserve">
+        <value>Identity Services Swagger-Benutzeroberfläche</value>
+    </data>
+    <data name="Backend_Identity_AccessDenied_Body" xml:space="preserve">
+        <value>Du hast keinen Zugriff auf diese Ressource.</value>
+    </data>
+    <data name="Backend_Identity_AccessDenied_Title" xml:space="preserve">
+        <value>Zugriff abgelehnt</value>
+    </data>
+    <data name="Backend_Identity_Actions_ChangePassword_Header" xml:space="preserve">
+        <value>Passwort ändern</value>
+    </data>
+    <data name="Backend_Identity_Actions_CreatePassword_Header" xml:space="preserve">
+        <value>Erstelle ein lokales Passwort</value>
+    </data>
+    <data name="Backend_Identity_Actions_Grants_Header" xml:space="preserve">
+        <value>Genehmigungen</value>
+    </data>
+    <data name="Backend_Identity_Grant_ApiGrants_Title" xml:space="preserve">
+        <value>Genehmigungen API</value>
+    </data>
+    <data name="Backend_Identity_Grant_Body" xml:space="preserve">
+        <value>Nachfolgend findest du die Liste der Anwendungen und Resourcen auf die du Zugriff hast.</value>
+    </data>
+    <data name="Backend_Identity_ManageProfile_Title" xml:space="preserve">
+        <value>Verwalte dein Konto</value>
+    </data>
+    <data name="Backend_Identity_Manage_StatusMessage_ChangePasswordSuccess" xml:space="preserve">
+        <value>Dein Passwort wurde geändert</value>
+    </data>
+    <data name="Backend_Identity_Manage_StatusMessage_Error" xml:space="preserve">
+        <value>Ein Fehler ist aufgetreten</value>
+    </data>
+    <data name="Backend_Identity_Manage_StatusMessage_RemoveLoginSuccess" xml:space="preserve">
+        <value>Das externe Login wurde entfernt</value>
+    </data>
+    <data name="Backend_Identity_Manage_StatusMessage_AddLoginSuccess" xml:space="preserve">
+        <value>Das externe Login wurde hinzugefügt</value>
+    </data>
+    <data name="Backend_Identity_Login_External" xml:space="preserve">
+        <value>Verbinden mit</value>
+    </data>
+    <data name="Backend_Identity_Login_Error_InvalidClient_Title" xml:space="preserve">
+        <value>Ungültige Login-Anfrage</value>
+    </data>
+    <data name="Backend_Identity_Login_Error_InvalidClient_Body" xml:space="preserve">
+        <value>Für diesen Client sind keine Anmeldeschemata konfiguriert.</value>
+    </data>
+    <data name="Backend_Identity_Login_Email_Label" xml:space="preserve">
+        <value>E-Mail</value>
+    </data>
+    <data name="Backend_Identity_LoggedOut_Title" xml:space="preserve">
+        <value>Abgemeldet</value>
+    </data>
+    <data name="Backend_Identity_LoggedOut_LoggedOutMessage" xml:space="preserve">
+        <value>Du bist nun abgemeldet. Du wirst in wenigen Sekunden weitergeleitet...</value>
+    </data>
+    <data name="Backend_Identity_Home_Title" xml:space="preserve">
+        <value>Startseite</value>
+    </data>
+    <data name="Backend_Identity_Grant_IdentityGrants_Title" xml:space="preserve">
+        <value>Identitätsgenehmigungen</value>
+    </data>
+    <data name="Backend_Identity_Grant_NoAccessGranted" xml:space="preserve">
+        <value>Du hast keinen Zugriff auf Anwendungen gewährt</value>
+    </data>
+    <data name="Backend_Identity_Grant_RevokeAccess_Label" xml:space="preserve">
+        <value>Zugriffsrechte entziehen</value>
+    </data>
+    <data name="Backend_Identity_Grant_Subtitle" xml:space="preserve">
+        <value>Nachfolgend findest du eine Liste der genehmigten Anwendungen und die Namen der Ressourcen, auf die Zugriff haben.</value>
+    </data>
+    <data name="Backend_Identity_Home_Introduction_Label" xml:space="preserve">
+        <value>{0} Identitätsdienste ermöglichen die zentrale Verwaltung und Authentifizierung von Benutzern.</value>
+    </data>
+    <data name="Backend_Identity_Grant_Title" xml:space="preserve">
+        <value>Clientanwendungszugriff</value>
+    </data>
+    <data name="Backend_Identity_Grant_Expires_Label" xml:space="preserve">
+        <value>Läuft ab: {0}</value>
+    </data>
+    <data name="Backend_Identity_Forgot_Password_Link" xml:space="preserve">
+        <value>Hast du dein Passwort vergessen?</value>
+    </data>
+    <data name="Backend_Identity_Forgot_Password_Enter_Email" xml:space="preserve">
+        <value>Gebe deine E-Mail Adresse ein</value>
+    </data>
+    <data name="Backend_Identity_Email_Verification_Success" xml:space="preserve">
+        <value>E-Mail erfolgreich verifiziert</value>
+    </data>
+    <data name="Backend_Identity_Device_Success_Title" xml:space="preserve">
+        <value>Authentifizierung erfolgreich</value>
+    </data>
+    <data name="Backend_Identity_DeviceAuthorized_Title" xml:space="preserve">
+        <value>Gerät autorisiert</value>
+    </data>
+    <data name="Backend_Identity_DeviceCaptureUserCode_Validation_UserCode" xml:space="preserve">
+        <value>Das Benutzercodefeld ist erforderlich.</value>
+    </data>
+    <data name="Backend_Identity_Device_Authorize_Title" xml:space="preserve">
+        <value>Gerät autorisieren</value>
+    </data>
+    <data name="Backend_Identity_Device_Authorize_Subtitle" xml:space="preserve">
+        <value>Bitte gebe den auf dem Gerät angezeigten Code ein</value>
+    </data>
+    <data name="Backend_Identity_Device_Success_Message" xml:space="preserve">
+        <value>Du hast das Gerät erfolgreich autorisiert.</value>
+    </data>
+    <data name="Backend_Identity_Device_Success_Header" xml:space="preserve">
+        <value>Erfolg</value>
+    </data>
+    <data name="Backend_Identity_Device_SubHeader" xml:space="preserve">
+        <value>Bitte gebe den auf dem Gerät angezeigten Code ein.</value>
+    </data>
+    <data name="Backend_Identity_Device_Header" xml:space="preserve">
+        <value>Benutzercode</value>
+    </data>
+    <data name="Backend_Identity_Device_Confirmation_Title" xml:space="preserve">
+        <value>Validiere den Gerätezugriff</value>
+    </data>
+    <data name="Backend_Identity_Device_Confirmation_Message" xml:space="preserve">
+        <value>Bitte bestätige, dass die Autorisierungsanfrage den folgenden Code enthält: {0}.</value>
+    </data>
+    <data name="Backend_Identity_Device_Capture_Title" xml:space="preserve">
+        <value>Erfasse den Benutzercode des Geräts</value>
+    </data>
+    <data name="Backend_Identity_Consent_Tile" xml:space="preserve">
+        <value>Zustimmung</value>
+    </data>
+    <data name="Backend_Identity_Consent_UncheckGrants_Label" xml:space="preserve">
+        <value>Deaktiviere die Berechtigungen, die du nicht erteilen möchtest.</value>
+    </data>
+    <data name="Backend_Identity_Consent_PersonalInformation_Label" xml:space="preserve">
+        <value>Persönliche Informationen</value>
+    </data>
+    <data name="Backend_Identity_Consent_RememberDecision_Label" xml:space="preserve">
+        <value>Meine Entscheidung speichern</value>
+    </data>
+    <data name="Backend_Identity_Consent_RequestPermission_Label" xml:space="preserve">
+        <value>bittet um deine Erlaubnis</value>
+    </data>
+    <data name="Backend_Identity_Consent_ApplicationAccess_Label" xml:space="preserve">
+        <value>Anwendungszugriff</value>
+    </data>
+    <data name="Backend_Identity_ConfirmNewPassword_Label" xml:space="preserve">
+        <value>Bestätige neues Passwort</value>
+    </data>
+    <data name="Backend_Identity_Clients_NoClientsFound" xml:space="preserve">
+        <value>Keine Anwendungen gefunden.</value>
+    </data>
+    <data name="Backend_Identity_Clients_Label" xml:space="preserve">
+        <value>Anwendungen</value>
+    </data>
+    <data name="Backend_Identity_Claims_Label" xml:space="preserve">
+        <value>Forderung</value>
+    </data>
+    <data name="Backend_Identity_ChangePassword_Validation_CurrentPassword" xml:space="preserve">
+        <value>Das Feld für das aktuelle Passwort ist erforderlich.</value>
+    </data>
+    <data name="Backend_Identity_ChangePassword_Validation_Match" xml:space="preserve">
+        <value>Das neue Passwort und das Bestätigungspasswort stimmen nicht überein.</value>
+    </data>
+    <data name="Backend_Identity_ChangePassword_Validation_NewPassword" xml:space="preserve">
+        <value>Das neue Passwortfeld ist erforderlich.</value>
+    </data>
+    <data name="Backend_Identity_ChangePassword_Validation_NewPassword_MinMax" xml:space="preserve">
+        <value>Das {0} muss mindestens {2} und darf höchstens {1} Zeichen lang sein.</value>
+    </data>
+    <data name="Backend_Identity_ChangePassword_Button_Label" xml:space="preserve">
+        <value>Passwort ändern</value>
+    </data>
+    <data name="Backend_Identity_Actions_ManageLogins_Header" xml:space="preserve">
+        <value>Anmeldungen verwalten ({0} vorhanden)</value>
+    </data>
+    <data name="Backend_Identity_Actions_Header" xml:space="preserve">
+        <value>Aktionen</value>
+    </data>
+    <data name="Backend_Identity_ChangePassword_SubTitle" xml:space="preserve">
+        <value>Gebe dein aktuelles und ein neues Passwort ein</value>
+    </data>
+    <data name="Backend_Identity_ChangePassword_Title" xml:space="preserve">
+        <value>Ändere dein Passwort</value>
+    </data>
+    <data name="Backend_Identity_ResetPassword_SubTitle" xml:space="preserve">
+        <value>Gib dein neues Passwort ein</value>
+    </data>
+    <data name="Backend_Identity_ResetPassword_Title" xml:space="preserve">
+        <value>Erstelle dein Passwort</value>
+    </data>
+    <data name="Backend_Identity_ConfirmNewPassword_PasswordMismatch" xml:space="preserve">
+        <value>Passwörter stimmen nicht überein</value>
+    </data>
+    <data name="Backend_Identity_ConfirmNewPassword_PasswordRequired" xml:space="preserve">
+        <value>Passwort wird benötigt</value>
+    </data>
+    <data name="Backend_Identity_Login_LdapUser_Label" xml:space="preserve">
+        <value>Benutzername</value>
+    </data>
+    <data name="Backend_Identity_ResetPassword_Button_Label" xml:space="preserve">
+        <value>OK</value>
+    </data>
+</root>

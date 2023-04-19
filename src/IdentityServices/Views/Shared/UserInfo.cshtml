@@ -1,0 +1,45 @@
+@model Meshmakers.Octo.Backend.IdentityServices.ViewModels.Shared.UserInfoViewModel
+
+<div class="mdc-card m-2">
+    <div class=" octo-card-content">
+
+        <div class="octo-card__primary">
+            <h5 class="octo-card__title mdc-typography mdc-typography--headline5">@IdentityTexts.Backend_Identity_UserInfo_Header</h5>
+        </div>
+
+        <div class="mdc-card__content">
+
+            <table>
+                <tr>
+                    <td>@IdentityTexts.Backend_Identity_UserInfo_Id_Label</td>
+                    <td>@Model.Id</td>
+                </tr>
+                <tr>
+                    <td>@IdentityTexts.Backend_Identity_General_Username_Label</td>
+                    <td>@Model.UserName</td>
+                </tr>
+                <tr>
+                    <td>@IdentityTexts.Backend_Identity_UserInfo_FirstName_Label</td>
+                    <td>@Model.FirstName</td>
+                </tr>
+                <tr>
+                    <td>@IdentityTexts.Backend_Identity_UserInfo_LastName_Label</td>
+                    <td>@Model.FirstName</td>
+                </tr>
+                <tr>
+                    <td>@IdentityTexts.Backend_Identity_Login_Email_Label</td>
+                    <td>@Model.EMail</td>
+                </tr>
+                <tr>
+                    <td>@IdentityTexts.Backend_Identity_UserInfo_FailedAttempts_Label</td>
+                    <td>@Model.AccessFailedCount</td>
+                </tr>
+            </table>
+        </div>
+    </div>
+</div>
+<style>
+       th, td { 
+            padding:5px 
+        } 
+</style>
