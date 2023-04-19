@@ -1,0 +1,88 @@
+name: $(MajorVersion).$(MinorVersion).$(date:yyMM).$(DayOfMonth)$(rev:rrr)
+
+trigger:
+  batch: true
+  branches:
+    include:
+      - master
+      - release-1.0
+      - release-2.
+  
+variables:
+  buildConfiguration: 'Release'
+  buildPlatform: 'any cpu'
+  solutionFile: "Meshmakers.Octo.sln"
+  Company: "meshmakers GmbH"
+  Copyright: "(c) 2022-2023 meshmakers GmbH"
+
+stages:
+ - stage: Build
+   jobs:
+     - job: local build
+       displayName: "Build nuget and execute tests"
+       pool:
+         name: Gerald-Local-Linux
+       steps:
+         - checkout: self
+           clean: true
+           submodules: true
+         - template: setversion.yml
+         - task: DotNetCoreCLI@2
+           displayName: 'Build'
+           inputs:
+             command: 'build'
+             projects:  $(SolutionFile)
+             arguments: '--configuration $(BuildConfiguration)'
+         - task: DotNetCoreCLI@2
+           displayName: 'Test'
+           inputs:
+             command: 'test'
+             projects: |
+               '**/*Tests.csproj'
+               !'**/*SystemTests.csproj'
+             testRunTitle: 'CI'
+         - task: PublishSymbols@2
+           displayName: Publish symbols path
+           continueOnError: True
+           inputs:
+             SearchPattern: '**\bin\**\*.pdb'
+             PublishSymbols: false
+             SymbolServerType: TeamServices
+         - task: CopyFiles@2
+           displayName: 'Copy Files from $(Build.SourcesDirectory)/bin/$(BuildConfiguration)/**/*.nupkg to $(build.artifactstagingdirectory)'
+           inputs:
+             SourceFolder: $(Build.SourcesDirectory)
+             Contents: |
+               bin/$(BuildConfiguration)/**/*.nupkg
+             TargetFolder: $(build.artifactstagingdirectory)
+         - task: PowerShell@2
+           displayName: 'Create versioninfo file'
+           inputs:
+             targetType: 'inline'
+             script: |
+               New-Item $(build.artifactstagingdirectory)/versioninfo.txt
+               Set-Content $(build.artifactstagingdirectory)/versioninfo.txt $(Build.BuildNumber)
+         - task: PublishBuildArtifacts@1
+           displayName: 'Publish Artifact: local'
+           inputs:
+             ArtifactName: local
+     - job: linux
+       displayName: Docker build
+       pool:
+         name: Gerald-Local-Linux
+       steps:
+        - checkout: self
+          clean: true
+          submodules: true
+        - template: setversion.yml
+        - template: buildAndPushDockerImage.yml
+          parameters:
+            ContainerRegistry: 'dockerhub@ianitor'
+            Repository: meshmakers/octo-mesh-identity-services
+            Dockerfile: src/Backend/IdentityServices/Dockerfile
+        - template: buildAndPushDockerImage.yml
+          parameters:
+            ContainerRegistry: 'dockerhub@ianitor'
+            Repository: meshmakers/octo-mesh-policy-services
+            Dockerfile: src/Backend/PolicyServices/Dockerfile            
+
