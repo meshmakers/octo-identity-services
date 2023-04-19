@@ -1,7 +1,7 @@
 <Project>
     <PropertyGroup>
         <OctoCorePath>$(MSBuildThisFileDirectory)src/octo-core/</OctoCorePath>
-        <OctoCommonServicesPath>$(MSBuildThisFileDirectory)src/octo-common-services</OctoCommonServicesPath>
+        <OctoCommonServicesPath>$(MSBuildThisFileDirectory)src/octo-common-services/</OctoCommonServicesPath>
         <Authors>meshmakers GmbH</Authors>
         <Company>meshmakers GmbH</Company>
         <Copyright>https://www.meshmakers.io</Copyright>

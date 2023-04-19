@@ -24,8 +24,8 @@
     </ItemGroup>
 
     <ItemGroup>
-        <ProjectReference Include="..\octo-common-services\src\Infrastructure\Infrastructure.csproj" />
-        <ProjectReference Include="..\octo-core\src\SystematizedData\Persistence\Persistence.csproj" />
+        <ProjectReference Include="$(OctoCommonServicesPath)src\Infrastructure\Infrastructure.csproj" />
+        <ProjectReference Include="$(OctoCorePath)src\SystematizedData\Persistence\Persistence.csproj" />
         <ProjectReference Include="..\IdentityServices.Resources\IdentityServices.Resources.csproj" />
     </ItemGroup>
 
