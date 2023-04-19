@@ -44,8 +44,8 @@
 
 
     <ItemGroup>
-        <ProjectReference Include="..\octo-common-services\src\Common\Common.csproj" />
-        <ProjectReference Include="..\octo-common-services\src\Swagger\Swagger.csproj" />
+        <ProjectReference Include="$(OctoCommonServicesPath)src\Common\Common.csproj" />
+        <ProjectReference Include="$(OctoCommonServicesPath)src\Swagger\Swagger.csproj" />
         <ProjectReference Include="..\Authentication\Authentication.csproj" />
         <ProjectReference Include="..\IdentityServices.Resources\IdentityServices.Resources.csproj" />
     </ItemGroup>
