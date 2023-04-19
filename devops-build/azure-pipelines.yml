@@ -18,7 +18,7 @@ variables:
 stages:
  - stage: Build
    jobs:
-     - job: local build
+     - job: local_build
        displayName: "Build nuget and execute tests"
        pool:
          name: Gerald-Local-Linux
