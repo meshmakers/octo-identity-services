@@ -1,7 +1,11 @@
 <Project>
     <PropertyGroup>
-        <OctoCorePath>$(MSBuildThisFileDirectory)src/octo-core/</OctoCorePath>
-        <OctoCommonServicesPath>$(MSBuildThisFileDirectory)src/octo-common-services/</OctoCommonServicesPath>
+        <BaseDirectoryBuildPath>$([MSBuild]::GetPathOfFileAbove('Directory.Build.props', '$(MSBuildThisFileDirectory)../'))</BaseDirectoryBuildPath>
+    </PropertyGroup>
+    <Import Condition="Exists($(BaseDirectoryBuildPath))" Project="$(BaseDirectoryBuildPath)" />
+    <PropertyGroup>
+        <OctoCorePath Condition=" '$(OctoCorePath)' == '' ">$(MSBuildThisFileDirectory)src/octo-core/</OctoCorePath>
+        <OctoCommonServicesPath Condition=" '$(OctoCommonServicesPath)' == '' ">$(MSBuildThisFileDirectory)src/octo-common-services/</OctoCommonServicesPath>
         <Authors>meshmakers GmbH</Authors>
         <Company>meshmakers GmbH</Company>
         <Copyright>https://www.meshmakers.io</Copyright>
