@@ -59,19 +59,28 @@ internal class MicrosoftAdAuthentication
 
         var userId = new Guid(userIdBytes).ToString();
         var userName = entry.GetAttribute(UserFullNameAttributeName).StringValue;
-        var givenName = entry.GetAttribute(GivenNameAttribute).StringValue;
-        var sn = entry.GetAttribute(SurNameAttribute).StringValue;
-        var mail = entry.GetAttribute(MailAttribute).StringValue;
-
-
         var claims = new List<Claim>
         {
             new(ClaimTypes.Name, userName),
             new(ClaimTypes.NameIdentifier, userId),
-            new(ClaimTypes.GivenName, givenName),
-            new(ClaimTypes.Surname, sn),
-            new(ClaimTypes.Email, mail),
+
         };
+        
+        if (entry.GetAttributeSet().ContainsKey(GivenNameAttribute))
+        {
+            var value = entry.GetAttribute(GivenNameAttribute).StringValue;
+            claims.Add(new(ClaimTypes.GivenName, value));
+        }
+        if (entry.GetAttributeSet().ContainsKey(SurNameAttribute))
+        {
+            var value = entry.GetAttribute(SurNameAttribute).StringValue;
+            claims.Add(new(ClaimTypes.Surname, value));
+        }
+        if (entry.GetAttributeSet().ContainsKey(MailAttribute))
+        {
+            var value = entry.GetAttribute(MailAttribute).StringValue;
+            claims.Add(new(ClaimTypes.Email, value));
+        }
         
         foreach (var groupName in groupNames)
         {
