@@ -2,7 +2,6 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Security.Claims;
-using System.Threading;
 using System.Threading.Tasks;
 using Duende.IdentityServer;
 using Duende.IdentityServer.Events;
@@ -24,7 +23,7 @@ public class ExternalController : Controller
 {
     private readonly IEventService _events;
     private readonly IIdentityServerInteractionService _interaction;
-    private readonly IRoleStore<OctoRole> _roleStore;
+    private readonly RoleManager<OctoRole> _roleManager;
     private readonly ILogger<ExternalController> _logger;
     private readonly SignInManager<OctoUser> _signInManager;
     private readonly UserManager<OctoUser> _userManager;
@@ -33,14 +32,14 @@ public class ExternalController : Controller
         UserManager<OctoUser> userManager,
         SignInManager<OctoUser> signInManager,
         IIdentityServerInteractionService interaction,
-        IRoleStore<OctoRole> roleStore,
+        RoleManager<OctoRole> roleManager,
         IEventService events,
         ILogger<ExternalController> logger)
     {
         _userManager = userManager;
         _signInManager = signInManager;
         _interaction = interaction;
-        _roleStore = roleStore;
+        _roleManager = roleManager;
         _events = events;
         _logger = logger;
     }
@@ -146,7 +145,7 @@ public class ExternalController : Controller
         var rolesRequested = claims.Where(x => x.Type == JwtClaimTypes.Role).Select(x => x.Value).ToList();
         foreach (var roleName in rolesRequested.ToArray())
         {
-            var role = await _roleStore.FindByNameAsync(roleName, CancellationToken.None);
+            var role = await _roleManager.FindByNameAsync(roleName);
             if (role == null)
             {
                 rolesRequested.Remove(roleName);
