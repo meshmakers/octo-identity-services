@@ -18,5 +18,5 @@ public class MicrosoftAdLoginViewModel
     [HiddenInput]
     public string? XsrfId { get; set; }
     [HiddenInput]
-    public string ReturnUrl { get; set; } = null!;
+    public string? ReturnUrl { get; set; } = null!;
 }

@@ -1,5 +1,9 @@
 using System.Threading.Tasks;
+using Duende.IdentityServer.Events;
+using Duende.IdentityServer.Models;
+using Duende.IdentityServer.Services;
 using Meshmakers.Octo.Backend.Authentication.ViewModels;
+using Meshmakers.Octo.Backend.IdentityServices.Resources;
 using Meshmakers.Octo.SystematizedData.Persistence.SystemEntities;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Identity;
@@ -11,10 +15,16 @@ namespace Meshmakers.Octo.Backend.Authentication.Controllers;
 public class OpenLdapController : Controller
 {
     private readonly SignInManager<OctoUser> _signInManager;
+    private readonly IIdentityServerInteractionService _interaction;
+    private readonly IEventService _events;
 
-    public OpenLdapController(SignInManager<OctoUser> signInManager)
+    public OpenLdapController(SignInManager<OctoUser> signInManager,
+        IIdentityServerInteractionService interaction,
+        IEventService events)
     {
         _signInManager = signInManager;
+        _interaction = interaction;
+        _events = events;
     }
 
     [HttpGet]
@@ -30,12 +40,40 @@ public class OpenLdapController : Controller
             };
             return View(loginViewModel);
         }
+
         return Unauthorized(ModelState);
     }
 
     [HttpPost]
-    public async Task<IActionResult> Login(OpenLdapLoginViewModel login)
+    public async Task<IActionResult> Login(OpenLdapLoginViewModel login, string button)
     {
+        var context = await _interaction.GetAuthorizationContextAsync(login.ReturnUrl);
+
+        // the user clicked the "cancel" button
+        if (button != "login")
+        {
+            if (context != null)
+            {
+                // if the user cancels, send a result back into IdentityServer as if they 
+                // denied the consent (even if this client does not require consent).
+                // this will send back an access denied OIDC error response to the client.
+                await _interaction.DenyAuthorizationAsync(context, AuthorizationError.AccessDenied);
+
+                // we can trust model.ReturnUrl since GetAuthorizationContextAsync returned non-null
+                if (context.IsNativeClient())
+                    // The client is native, so this change in how to
+                    // return the response is for better UX for the end user.
+                {
+                    return this.LoadingPage("Redirect", login.ReturnUrl);
+                }
+
+                return Redirect(login.ReturnUrl ?? "~/");
+            }
+
+            // since we don't have a valid context, then we just go back to the home page
+            return Redirect("~/");
+        }
+
         if (ModelState.IsValid)
         {
             var authenticateResult = await HttpContext.AuthenticateAsync(login.LoginProvider);
@@ -44,9 +82,12 @@ public class OpenLdapController : Controller
             {
                 var props = _signInManager.ConfigureExternalAuthenticationProperties(login.LoginProvider, login.ReturnUrl, login.XsrfId);
                 await HttpContext.SignInAsync(IdentityConstants.ExternalScheme, authenticateResult.Principal, props);
-                return Redirect(login.ReturnUrl);
+                return Redirect(login.ReturnUrl ?? "~/");
             }
-            return Unauthorized();
+
+            await _events.RaiseAsync(new UserLoginFailureEvent(login.UserName, "invalid credentials",
+                clientId: context?.Client.ClientId));
+            ModelState.AddModelError(string.Empty, IdentityTexts.Backend_Identity_Login_InvalidUserPassword);
         }
 
         return View("Index", login);

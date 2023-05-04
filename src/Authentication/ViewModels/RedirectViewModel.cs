@@ -1,4 +1,4 @@
-namespace Meshmakers.Octo.Backend.IdentityServices.ViewModels.Account;
+namespace Meshmakers.Octo.Backend.Authentication.ViewModels;
 
 public class RedirectViewModel
 {

@@ -12,10 +12,9 @@ public class DiagnosticsViewModel
     {
         AuthenticateResult = result;
 
-        if (result?.Properties != null && result.Properties.Items.ContainsKey("client_list"))
+        if (result?.Properties != null && result.Properties.Items.TryGetValue("client_list", out var item) && item != null)
         {
-            var encoded = result.Properties.Items["client_list"];
-            var bytes = Base64Url.Decode(encoded);
+            var bytes = Base64Url.Decode(item);
             var value = Encoding.UTF8.GetString(bytes);
 
             Clients = JsonConvert.DeserializeObject<string[]>(value);

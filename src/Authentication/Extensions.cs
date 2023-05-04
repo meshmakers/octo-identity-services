@@ -1,32 +1,15 @@
 using System;
 using Duende.IdentityServer.Models;
-using Meshmakers.Octo.Backend.IdentityServices.ViewModels.Account;
+using Meshmakers.Octo.Backend.Authentication.ViewModels;
 using Microsoft.AspNetCore.Mvc;
 
-namespace Meshmakers.Octo.Backend.IdentityServices.Controllers;
+namespace Meshmakers.Octo.Backend.Authentication;
 
 /// <summary>
-///     Internal used extensions
+///     Identity Service specific extensions
 /// </summary>
-internal static class Extensions
+public static class Extensions
 {
-    // /// <summary>
-    // /// Determines whether the client is configured to use PKCE.
-    // /// </summary>
-    // /// <param name="store">The store.</param>
-    // /// <param name="client_id">The client identifier.</param>
-    // /// <returns></returns>
-    // public static async Task<bool> IsPkceClientAsync(this IClientStore store, string client_id)
-    // {
-    //     if (!string.IsNullOrWhiteSpace(client_id))
-    //     {
-    //         var client = await store.FindEnabledClientByIdAsync(client_id);
-    //         return client?.RequirePkce == true;
-    //     }
-    //
-    //     return false;
-    // }
-
     /// <summary>
     ///     Checks if the redirect URI is for a native client.
     /// </summary>
