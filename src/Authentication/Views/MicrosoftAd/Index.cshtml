@@ -13,7 +13,7 @@
 <div class="row justify-content-center">
     <div class="col-sm-4">
         <form asp-controller="MicrosoftAd" asp-action="Login" asp-route-returnurl="@Model.ReturnUrl" method="post">
-
+            <input type="hidden" asp-for="ReturnUrl"/>
             <div class="mdc-card">
                 <div class=" octo-card-content">
 

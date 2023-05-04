@@ -8,6 +8,7 @@ using Duende.IdentityServer.Models;
 using Duende.IdentityServer.Services;
 using Duende.IdentityServer.Stores;
 using IdentityModel;
+using Meshmakers.Octo.Backend.Authentication;
 using Meshmakers.Octo.Backend.IdentityServices.Resources;
 using Meshmakers.Octo.Backend.IdentityServices.Services;
 using Meshmakers.Octo.Backend.IdentityServices.ViewModels.Account;
@@ -22,11 +23,7 @@ using Microsoft.Extensions.DependencyInjection;
 namespace Meshmakers.Octo.Backend.IdentityServices.Controllers.Account;
 
 /// <summary>
-///     This sample controller implements a typical login/logout/provision workflow for local and external accounts.
-///     The login service encapsulates the interactions with the user data store. This data store is in-memory only and
-///     cannot be used for production!
-///     The interaction service provides a way for the UI to communicate with identity server for validation and context
-///     retrieval
+///     Implements the login/logout functionality of identity server
 /// </summary>
 [AllowAnonymous]
 public class AccountController : Controller
@@ -111,15 +108,18 @@ public class AccountController : Controller
             return Redirect("~/");
         }
 
-        if (ModelState.IsValid)
+        if (ModelState.IsValid && model.Username != null && model.Password != null)
         {
             var result =
                 await _signInManager.PasswordSignInAsync(model.Username, model.Password, model.RememberLogin, true);
             if (result.Succeeded)
             {
                 var user = await _userManager.FindByNameAsync(model.Username);
-                await _events.RaiseAsync(new UserLoginSuccessEvent(user.UserName, user.Id.ToString(), user.UserName,
-                    clientId: context?.Client.ClientId));
+                if (user != null)
+                {
+                    await _events.RaiseAsync(new UserLoginSuccessEvent(user.UserName, user.Id.ToString(), user.UserName,
+                        clientId: context?.Client.ClientId));
+                }
 
                 if (context != null)
                 {
@@ -269,7 +269,7 @@ public class AccountController : Controller
             Text = IdentityTexts.Backend_Identity_Reset_Email_Sent_Successfully
         });
     }
-    
+
     [HttpGet]
     public IActionResult AccessDenied()
     {

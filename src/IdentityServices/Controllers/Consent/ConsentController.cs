@@ -7,6 +7,7 @@ using Duende.IdentityServer.Extensions;
 using Duende.IdentityServer.Models;
 using Duende.IdentityServer.Services;
 using Duende.IdentityServer.Validation;
+using Meshmakers.Octo.Backend.Authentication;
 using Meshmakers.Octo.Backend.IdentityServices.ViewModels.Consent;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
