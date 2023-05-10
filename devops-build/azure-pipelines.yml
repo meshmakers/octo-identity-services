@@ -8,7 +8,7 @@ trigger:
   branches:
     exclude:
       - dev
-  
+
 variables:
   buildConfiguration: 'Release'
   buildPlatform: 'any cpu'
@@ -18,79 +18,68 @@ variables:
   isRelease: ${{ startsWith(variables['Build.SourceBranch'], 'refs/tags/r') }}
   MajorVersion: 0
   MinorVersion: 0
-  
+
 stages:
- - stage: Build
-   jobs:       
-     - job: linux
-       displayName: Docker build
-       pool:
-         name: Gerald-Local-Linux
-       steps:
-        - checkout: self
-          clean: true
-          submodules: true
-        - task: PowerShell@2
-          inputs:
-            targetType: 'inline'
-            script: |
-              Write-Host "Source Branch $(Build.SourceBranch)"
-              Write-Host "Source Branch Name $(Build.SourceBranchName)"
-              $branch = '$(Build.SourceBranch)'
-              $branchName = '$(Build.SourceBranchName)'
-              if ($branch.StartsWith("refs/tags/r")) {
-                $major = [int]$branchName.Split(".")[0].substring(1)
-                $minor = [int]$branchName.Split(".")[1]
-                $revision = [int]$branchName.Split(".")[2]
-                $buildNumber = "$major.$minor.$revision.0"
-                Write-Host "##vso[task.setvariable variable=MajorVersion;]$major"
-                Write-Host "##vso[task.setvariable variable=MinorVersion;]$minor"
-                Write-Host "Setting build number to $buildNumber"
-                Write-Host "##vso[build.updatebuildnumber]$buildNumber"
-              }
-          displayName: 'Set build number'          
-        - template: setversion.yml
-        - task: DotNetCoreCLI@2
-          displayName: 'Build'
-          inputs:
-            command: 'build'
-            projects:  $(SolutionFile)
-            arguments: '--configuration $(BuildConfiguration)'
-        - task: DotNetCoreCLI@2
-          displayName: 'Test'
-          inputs:
-            command: 'test'
-            projects: |
-              '**/*Tests.csproj'
-              !'**/*SystemTests.csproj'
-            testRunTitle: 'CI'
-        - task: PublishSymbols@2
-          displayName: Publish symbols path
-          continueOnError: True
-          inputs:
-            SearchPattern: '**\bin\**\*.pdb'
-            PublishSymbols: false
-            SymbolServerType: TeamServices
-        - task: PowerShell@2
-          displayName: 'Create versioninfo file'
-          inputs:
-            targetType: 'inline'
-            script: |
-              New-Item $(build.artifactstagingdirectory)/versioninfo.txt
-              Set-Content $(build.artifactstagingdirectory)/versioninfo.txt $(Build.BuildNumber)
-        - template: buildAndPushDockerImage.yml
-          parameters:
-            ContainerRegistry: 'dockerhub@ianitor'
-            Repository: meshmakers/octo-mesh-identity-services
-            Dockerfile: src/IdentityServices/Dockerfile
-            IsRelease: ${{ variables.isRelease }}
-        - template: buildAndPushDockerImage.yml
-          parameters:
-            ContainerRegistry: 'dockerhub@ianitor'
-            Repository: meshmakers/octo-mesh-policy-services
-            Dockerfile: src/PolicyServices/Dockerfile 
-            IsRelease: ${{ variables.isRelease }}
-        - task: PublishBuildArtifacts@1
-          displayName: 'Publish Artifact: local'
-          inputs:
-            ArtifactName: local          
+  - stage: Build
+    jobs:
+      - job: linux
+        displayName: Docker build
+        pool:
+          name: Gerald-Local-Linux
+        steps:
+          - checkout: self
+            clean: true
+            submodules: true
+          - task: PowerShell@2
+            inputs:
+              targetType: 'inline'
+              script: |
+                Write-Host "Source Branch $(Build.SourceBranch)"
+                Write-Host "Source Branch Name $(Build.SourceBranchName)"
+                $branch = '$(Build.SourceBranch)'
+                $branchName = '$(Build.SourceBranchName)'
+                if ($branch.StartsWith("refs/tags/r")) {
+                  $major = [int]$branchName.Split(".")[0].substring(1)
+                  $minor = [int]$branchName.Split(".")[1]
+                  $revision = [int]$branchName.Split(".")[2]
+                  $buildNumber = "$major.$minor.$revision.0"
+                  Write-Host "##vso[task.setvariable variable=MajorVersion;]$major"
+                  Write-Host "##vso[task.setvariable variable=MinorVersion;]$minor"
+                  Write-Host "Setting build number to $buildNumber"
+                  Write-Host "##vso[build.updatebuildnumber]$buildNumber"
+                }
+            displayName: 'Set build number'
+          - template: setversion.yml
+          - task: DotNetCoreCLI@2
+            displayName: 'Test'
+            inputs:
+              command: 'test'
+              projects: |
+                '**/*Tests.csproj'
+                !'**/*SystemTests.csproj'
+              testRunTitle: 'CI'
+          - task: PowerShell@2
+            displayName: 'Create versioninfo file'
+            inputs:
+              targetType: 'inline'
+              script: |
+                New-Item $(build.artifactstagingdirectory)/versioninfo.txt
+                Set-Content $(build.artifactstagingdirectory)/versioninfo.txt $(Build.BuildNumber)
+          - template: buildAndPushDockerImage.yml
+            parameters:
+              ContainerRegistry: 'dockerhub@ianitor'
+              Repository: meshmakers/octo-mesh-identity-services
+              Dockerfile: src/IdentityServices/Dockerfile
+              IsRelease: ${{ variables.isRelease }}
+          - template: buildAndPushDockerImage.yml
+            parameters:
+              ContainerRegistry: 'dockerhub@ianitor'
+              Repository: meshmakers/octo-mesh-policy-services
+              Dockerfile: src/PolicyServices/Dockerfile
+              IsRelease: ${{ variables.isRelease }}
+          - task: PublishBuildArtifacts@1
+            displayName: 'Publish Artifact: local'
+            inputs:
+              ArtifactName: local
+ 
+
