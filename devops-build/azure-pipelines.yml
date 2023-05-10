@@ -64,13 +64,13 @@ stages:
             ContainerRegistry: 'dockerhub@ianitor'
             Repository: meshmakers/octo-mesh-identity-services
             Dockerfile: src/IdentityServices/Dockerfile
-            IsRelease: $(isRelease)
+            IsRelease: $(variables.isRelease)
         - template: buildAndPushDockerImage.yml
           parameters:
             ContainerRegistry: 'dockerhub@ianitor'
             Repository: meshmakers/octo-mesh-policy-services
             Dockerfile: src/PolicyServices/Dockerfile 
-            IsRelease: $(isRelease)
+            IsRelease: $(variables.isRelease)
         - task: PublishBuildArtifacts@1
           displayName: 'Publish Artifact: local'
           inputs:
