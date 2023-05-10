@@ -6,7 +6,7 @@ parameters:
   - name: Dockerfile
     type: string
   - name: IsRelease
-    type: string
+    type: boolean
     
 steps:
 - task: Docker@2
