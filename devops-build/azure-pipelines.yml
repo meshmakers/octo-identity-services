@@ -64,7 +64,7 @@ stages:
             ContainerRegistry: 'dockerhub@ianitor'
             Repository: meshmakers/octo-mesh-identity-services
             Dockerfile: src/IdentityServices/Dockerfile
-            IsRelease: $(variables.isRelease)
+            IsRelease: $(isRelease)
         - template: buildAndPushDockerImage.yml
           parameters:
             ContainerRegistry: 'dockerhub@ianitor'
