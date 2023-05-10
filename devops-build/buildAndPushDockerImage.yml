@@ -21,7 +21,7 @@ steps:
       $(Build.BuildNumber)
 
 - task: Docker@2
-  condition: eq(parameters.IsRelease, true)
+  condition: ${{ eq(parameters.IsRelease, true) }}
   displayName: Push ${{ parameters.Repository }}
   inputs:
     command: push
