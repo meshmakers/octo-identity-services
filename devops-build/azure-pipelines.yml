@@ -2,11 +2,12 @@ name: $(MajorVersion).$(MinorVersion).$(date:yyMM).$(DayOfMonth)$(rev:rrr)
 
 trigger:
   batch: true
-  branches:
+  tags:
     include:
-      - main
-      - release-1.0
-      - release-2.
+      - 'r*'
+  branches:
+    exclude:
+      - dev
   
 variables:
   buildConfiguration: 'Release'
@@ -14,58 +15,13 @@ variables:
   solutionFile: "Octo.Identity.sln"
   Company: "meshmakers GmbH"
   Copyright: "(c) 2022-2023 meshmakers GmbH"
-
+  isRelease: $[startsWith(variables['Build.SourceBranch'], 'refs/tags/r')]
+  MajorVersion: 0
+  MinorVersion: 0
+  
 stages:
  - stage: Build
-   jobs:
-     - job: local_build
-       displayName: "Build nuget and execute tests"
-       pool:
-         name: Gerald-Local-Linux
-       steps:
-         - checkout: self
-           clean: true
-           submodules: true
-         - template: setversion.yml
-         - task: DotNetCoreCLI@2
-           displayName: 'Build'
-           inputs:
-             command: 'build'
-             projects:  $(SolutionFile)
-             arguments: '--configuration $(BuildConfiguration)'
-         - task: DotNetCoreCLI@2
-           displayName: 'Test'
-           inputs:
-             command: 'test'
-             projects: |
-               '**/*Tests.csproj'
-               !'**/*SystemTests.csproj'
-             testRunTitle: 'CI'
-         - task: PublishSymbols@2
-           displayName: Publish symbols path
-           continueOnError: True
-           inputs:
-             SearchPattern: '**\bin\**\*.pdb'
-             PublishSymbols: false
-             SymbolServerType: TeamServices
-         - task: CopyFiles@2
-           displayName: 'Copy Files from $(Build.SourcesDirectory)/bin/$(BuildConfiguration)/**/*.nupkg to $(build.artifactstagingdirectory)'
-           inputs:
-             SourceFolder: $(Build.SourcesDirectory)
-             Contents: |
-               bin/$(BuildConfiguration)/**/*.nupkg
-             TargetFolder: $(build.artifactstagingdirectory)
-         - task: PowerShell@2
-           displayName: 'Create versioninfo file'
-           inputs:
-             targetType: 'inline'
-             script: |
-               New-Item $(build.artifactstagingdirectory)/versioninfo.txt
-               Set-Content $(build.artifactstagingdirectory)/versioninfo.txt $(Build.BuildNumber)
-         - task: PublishBuildArtifacts@1
-           displayName: 'Publish Artifact: local'
-           inputs:
-             ArtifactName: local
+   jobs:       
      - job: linux
        displayName: Docker build
        pool:
@@ -75,14 +31,47 @@ stages:
           clean: true
           submodules: true
         - template: setversion.yml
+        - task: DotNetCoreCLI@2
+          displayName: 'Build'
+          inputs:
+            command: 'build'
+            projects:  $(SolutionFile)
+            arguments: '--configuration $(BuildConfiguration)'
+        - task: DotNetCoreCLI@2
+          displayName: 'Test'
+          inputs:
+            command: 'test'
+            projects: |
+              '**/*Tests.csproj'
+              !'**/*SystemTests.csproj'
+            testRunTitle: 'CI'
+        - task: PublishSymbols@2
+          displayName: Publish symbols path
+          continueOnError: True
+          inputs:
+            SearchPattern: '**\bin\**\*.pdb'
+            PublishSymbols: false
+            SymbolServerType: TeamServices
+        - task: PowerShell@2
+          displayName: 'Create versioninfo file'
+          inputs:
+            targetType: 'inline'
+            script: |
+              New-Item $(build.artifactstagingdirectory)/versioninfo.txt
+              Set-Content $(build.artifactstagingdirectory)/versioninfo.txt $(Build.BuildNumber)
         - template: buildAndPushDockerImage.yml
           parameters:
             ContainerRegistry: 'dockerhub@ianitor'
             Repository: meshmakers/octo-mesh-identity-services
             Dockerfile: src/IdentityServices/Dockerfile
+            IsRelease: $(isRelease)
         - template: buildAndPushDockerImage.yml
           parameters:
             ContainerRegistry: 'dockerhub@ianitor'
             Repository: meshmakers/octo-mesh-policy-services
-            Dockerfile: src/PolicyServices/Dockerfile            
-
+            Dockerfile: src/PolicyServices/Dockerfile 
+            IsRelease: $(isRelease)
+        - task: PublishBuildArtifacts@1
+          displayName: 'Publish Artifact: local'
+          inputs:
+            ArtifactName: local          
