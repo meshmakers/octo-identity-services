@@ -30,6 +30,25 @@ stages:
         - checkout: self
           clean: true
           submodules: true
+        - task: PowerShell@2
+          inputs:
+            targetType: 'inline'
+            script: |
+              Write-Host "Source Branch $(Build.SourceBranch)"
+              Write-Host "Source Branch Name $(Build.SourceBranchName)"
+              $branch = '$(Build.SourceBranch)'
+              $branchName = '$(Build.SourceBranchName)'
+              if ($branch.StartsWith("refs/tags/r")) {
+                $major = [int]$branchName.Split(".")[0].substring(1)
+                $minor = [int]$branchName.Split(".")[1]
+                $revision = [int]$branchName.Split(".")[2]
+                $buildNumber = "$major.$minor.$revision.0"
+                Write-Host "##vso[task.setvariable variable=MajorVersion;]$major"
+                Write-Host "##vso[task.setvariable variable=MinorVersion;]$minor"
+                Write-Host "Setting build number to $buildNumber"
+                Write-Host "##vso[build.updatebuildnumber]$buildNumber"
+              }
+          displayName: 'Set build number'          
         - template: setversion.yml
         - task: DotNetCoreCLI@2
           displayName: 'Build'
