@@ -5,7 +5,9 @@ parameters:
     type: string
   - name: Dockerfile
     type: string
-
+  - name: IsRelease
+    type: string
+    
 steps:
 - task: Docker@2
   displayName: Build ${{ parameters.Repository }}
@@ -19,6 +21,7 @@ steps:
       $(Build.BuildNumber)
 
 - task: Docker@2
+  condition: eq(parameters.IsRelease, true)
   displayName: Push ${{ parameters.Repository }}
   inputs:
     command: push
