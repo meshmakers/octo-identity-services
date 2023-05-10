@@ -15,7 +15,7 @@ variables:
   solutionFile: "Octo.Identity.sln"
   Company: "meshmakers GmbH"
   Copyright: "(c) 2022-2023 meshmakers GmbH"
-  isRelease: $[startsWith(variables['Build.SourceBranch'], 'refs/tags/r')]
+  isRelease: ${{ startsWith(variables['Build.SourceBranch'], 'refs/tags/r') }}
   MajorVersion: 0
   MinorVersion: 0
   
@@ -64,13 +64,13 @@ stages:
             ContainerRegistry: 'dockerhub@ianitor'
             Repository: meshmakers/octo-mesh-identity-services
             Dockerfile: src/IdentityServices/Dockerfile
-            IsRelease: variables.isRelease
+            IsRelease: $(isRelease)
         - template: buildAndPushDockerImage.yml
           parameters:
             ContainerRegistry: 'dockerhub@ianitor'
             Repository: meshmakers/octo-mesh-policy-services
             Dockerfile: src/PolicyServices/Dockerfile 
-            IsRelease: variables.isRelease
+            IsRelease: $(isRelease)
         - task: PublishBuildArtifacts@1
           displayName: 'Publish Artifact: local'
           inputs:
