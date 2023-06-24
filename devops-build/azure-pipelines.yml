@@ -15,7 +15,7 @@ variables:
   solutionFile: "Octo.Identity.sln"
   Company: "meshmakers GmbH"
   Copyright: "(c) 2022-2023 meshmakers GmbH"
-  isRelease: ${{ startsWith(variables['Build.SourceBranch'], 'refs/tags/r') }}
+  isRelease: true #${{ startsWith(variables['Build.SourceBranch'], 'refs/tags/r') }}
   MajorVersion: 0
   MinorVersion: 0
 
