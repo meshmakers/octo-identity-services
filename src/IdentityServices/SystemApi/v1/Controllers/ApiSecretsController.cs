@@ -6,7 +6,7 @@ using Duende.IdentityServer.Models;
 using IdentityModel;
 using Meshmakers.Common.Shared;
 using Meshmakers.Octo.Backend.Common.ApiErrors;
-using Meshmakers.Octo.Backend.DistributedCache;
+using Meshmakers.Octo.Common.DistributedCache;
 using Meshmakers.Octo.Common.Shared.DataTransferObjects;
 using Meshmakers.Octo.SystematizedData.Persistence.SystemEntities;
 using Meshmakers.Octo.SystematizedData.Persistence.SystemStores;
@@ -329,7 +329,7 @@ public class ApiSecretsController : ControllerBase
         
         var decodedSecretValue = secretValue.DecodeBase64();
 
-        var octoClient = (OctoClient)await _octoClientStore.FindClientByIdAsync(clientId);
+        var octoClient = await _octoClientStore.FindClientByIdAsync(clientId);
         if (octoClient == null)
         {
             return NotFound(new NotFoundError($"Client with id '{clientId}' does not exist."));
@@ -348,7 +348,7 @@ public class ApiSecretsController : ControllerBase
 
         try
         {
-            await _octoClientStore.UpdateAsync(clientId, octoClient);
+            await _octoClientStore.UpdateAsync(clientId, (OctoClient) octoClient);
             await ClearCacheAsync();
             return Ok();
         }
