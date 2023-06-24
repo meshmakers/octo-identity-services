@@ -6,7 +6,7 @@ using System.Threading.Tasks;
 using Duende.IdentityServer.Models;
 using IdentityModel;
 using Meshmakers.Octo.Backend.Common.ApiErrors;
-using Meshmakers.Octo.Backend.DistributedCache;
+using Meshmakers.Octo.Common.DistributedCache;
 using Meshmakers.Octo.Common.Shared;
 using Meshmakers.Octo.Common.Shared.DataTransferObjects;
 using Meshmakers.Octo.SystematizedData.Persistence.SystemEntities;
@@ -111,7 +111,7 @@ public class ClientsController : ControllerBase
     [Authorize(IdentityServiceConstants.IdentityApiReadWritePolicy)]
     public async Task<IActionResult> Post([Required] [FromBody] ClientDto clientDto)
     {
-        if (!ModelState.IsValid)
+        if (!ModelState.IsValid || clientDto.ClientId == null)
         {
             return BadRequest(ModelState);
         }
@@ -161,7 +161,7 @@ public class ClientsController : ControllerBase
             return BadRequest(ModelState);
         }
 
-        var appClient = (OctoClient)await _octoClientStore.FindClientByIdAsync(id);
+        var appClient = await _octoClientStore.FindClientByIdAsync(id);
         if (appClient == null)
         {
             return NotFound(new NotFoundError($"Client with id '{id}' does not exist."));
@@ -171,7 +171,7 @@ public class ClientsController : ControllerBase
 
         try
         {
-            await _octoClientStore.UpdateAsync(id, appClient);
+            await _octoClientStore.UpdateAsync(id, (OctoClient)appClient);
             await ClearCacheAsync();
         }
         catch (Exception e)
@@ -192,7 +192,7 @@ public class ClientsController : ControllerBase
     [Authorize(IdentityServiceConstants.IdentityApiReadWritePolicy)]
     public async Task<IActionResult> Delete([Required] string id)
     {
-        var appClient = (OctoClient)await _octoClientStore.FindClientByIdAsync(id);
+        var appClient = await _octoClientStore.FindClientByIdAsync(id);
         if (appClient == null)
         {
             return NotFound(new NotFoundError($"Client with id '{id}' does not exist."));
@@ -254,19 +254,20 @@ public class ClientsController : ControllerBase
         }
         if (clientDto.AllowedGrantTypes != null)
         {
-            applicationClient.AllowedGrantTypes = clientDto.AllowedGrantTypes?.ToList();
+            applicationClient.AllowedGrantTypes = clientDto.AllowedGrantTypes?.ToList() ?? new List<string>();
         }
         if (clientDto.RedirectUris != null)
         {
-            applicationClient.RedirectUris = clientDto.RedirectUris?.ToList();
+            applicationClient.RedirectUris = clientDto.RedirectUris?.ToList() ?? new List<string>();
         }
         if (clientDto.PostLogoutRedirectUris != null)
         {
-            applicationClient.PostLogoutRedirectUris = clientDto.PostLogoutRedirectUris?.ToList();
+            applicationClient.PostLogoutRedirectUris = clientDto.PostLogoutRedirectUris?.ToList() ??
+                                                       new List<string>();
         }
         if (clientDto.AllowedCorsOrigins != null)
         {
-            applicationClient.AllowedCorsOrigins = clientDto.AllowedCorsOrigins?.ToList();
+            applicationClient.AllowedCorsOrigins = clientDto.AllowedCorsOrigins?.ToList() ?? new List<string>();
         }
         if (clientDto.AllowedScopes != null)
         {

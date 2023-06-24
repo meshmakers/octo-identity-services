@@ -1,4 +1,4 @@
-using Meshmakers.Octo.Backend.DistributedCache;
+using Meshmakers.Octo.Common.DistributedCache;
 using Microsoft.Extensions.Options;
 
 namespace Meshmakers.Octo.Backend.PolicyServices.Configuration;
@@ -19,7 +19,7 @@ internal class ConfigureDistributeCacheWithPubSubOptions : IConfigureNamedOption
         Configure(Options.DefaultName, options);
     }
 
-    public void Configure(string name, DistributeCacheWithPubSubOptions options)
+    public void Configure(string? name, DistributeCacheWithPubSubOptions options)
     {
         options.Host = _octoPolicyServiceOptions.Value.RedisCacheHost;
         options.Password = _octoPolicyServiceOptions.Value.RedisCachePassword;

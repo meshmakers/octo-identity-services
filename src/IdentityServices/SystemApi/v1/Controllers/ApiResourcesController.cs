@@ -5,7 +5,7 @@ using System.Linq;
 using System.Threading.Tasks;
 using IdentityModel;
 using Meshmakers.Octo.Backend.Common.ApiErrors;
-using Meshmakers.Octo.Backend.DistributedCache;
+using Meshmakers.Octo.Common.DistributedCache;
 using Meshmakers.Octo.Common.Shared.DataTransferObjects;
 using Meshmakers.Octo.SystematizedData.Persistence.SystemEntities;
 using Meshmakers.Octo.SystematizedData.Persistence.SystemStores;
@@ -102,7 +102,7 @@ public class ApiResourcesController : ControllerBase
     [Authorize(IdentityServiceConstants.IdentityApiReadWritePolicy)]
     public async Task<IActionResult> Post([Required] [FromBody] ApiResourceDto apiResourceDto)
     {
-        if (!ModelState.IsValid)
+        if (!ModelState.IsValid || apiResourceDto.Name == null)
         {
             return BadRequest(ModelState);
         }
@@ -138,7 +138,7 @@ public class ApiResourcesController : ControllerBase
     [Authorize(IdentityServiceConstants.IdentityApiReadWritePolicy)]
     public async Task<IActionResult> Put([Required] string name, [Required] [FromBody] ApiResourceDto apiResourceDto)
     {
-        if (!ModelState.IsValid)
+        if (!ModelState.IsValid || apiResourceDto.Name == null)
         {
             return BadRequest(ModelState);
         }
@@ -219,6 +219,11 @@ public class ApiResourcesController : ControllerBase
     
     private void ApplyToApiResource(OctoApiResource apiResource, ApiResourceDto apiResourceDto)
     {
+        if (string.IsNullOrWhiteSpace(apiResourceDto.Name))
+        {
+            throw new InvalidOperationException("API Resource name cannot be null or empty.");
+        }
+        
         apiResource.Enabled = apiResourceDto.IsEnabled;
         apiResource.Name = apiResourceDto.Name;
         apiResource.DisplayName = apiResourceDto.DisplayName;
@@ -233,7 +238,7 @@ public class ApiResourcesController : ControllerBase
         {
             apiResource.Scopes = apiResourceDto.Scopes;
         }
-        apiResource.AllowedAccessTokenSigningAlgorithms = apiResourceDto.AllowedAccessTokenSigningAlgorithms?.ToList();
+        apiResource.AllowedAccessTokenSigningAlgorithms = apiResourceDto.AllowedAccessTokenSigningAlgorithms?.ToList() ?? new List<string>();
 
     }
 }

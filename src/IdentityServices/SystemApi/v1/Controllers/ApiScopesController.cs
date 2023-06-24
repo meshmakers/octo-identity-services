@@ -6,7 +6,7 @@ using System.Threading.Tasks;
 using Duende.IdentityServer.Models;
 using IdentityModel;
 using Meshmakers.Octo.Backend.Common.ApiErrors;
-using Meshmakers.Octo.Backend.DistributedCache;
+using Meshmakers.Octo.Common.DistributedCache;
 using Meshmakers.Octo.Common.Shared.DataTransferObjects;
 using Meshmakers.Octo.SystematizedData.Persistence.SystemEntities;
 using Meshmakers.Octo.SystematizedData.Persistence.SystemStores;
@@ -103,7 +103,7 @@ public class ApiScopesController : ControllerBase
     [Authorize(IdentityServiceConstants.IdentityApiReadWritePolicy)]
     public async Task<IActionResult> Post([Required] [FromBody] ApiScopeDto scopeDto)
     {
-        if (!ModelState.IsValid)
+        if (!ModelState.IsValid || scopeDto.Name == null)
         {
             return BadRequest(ModelState);
         }
@@ -223,6 +223,11 @@ public class ApiScopesController : ControllerBase
     
     private void ApplyToApiScope(OctoApiScope apiScope, ApiScopeDto apiScopeDto)
     {
+        if (string.IsNullOrWhiteSpace(apiScopeDto.Name))
+        {
+            throw new InvalidOperationException("Scope name cannot be null or empty.");
+        }
+        
         apiScope.Enabled = apiScopeDto.IsEnabled;
         apiScope.Name = apiScopeDto.Name;
         apiScope.DisplayName = apiScopeDto.DisplayName;
