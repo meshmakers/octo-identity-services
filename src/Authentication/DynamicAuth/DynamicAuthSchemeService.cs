@@ -2,6 +2,7 @@
 using System.Linq;
 using System.Threading.Tasks;
 using Meshmakers.Octo.Common.DistributedCache;
+using Meshmakers.Octo.Common.Shared.DistributedCache;
 using Meshmakers.Octo.SystematizedData.Persistence.SystemEntities;
 using Meshmakers.Octo.SystematizedData.Persistence.SystemStores;
 using Microsoft.AspNetCore.Authentication;
