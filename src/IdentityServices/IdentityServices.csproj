@@ -37,7 +37,7 @@
     <ItemGroup>
         <PackageReference Include="AspNetCore.Identity.Mongo" Version="8.3.3" />
         <PackageReference Include="AutoMapper.Extensions.Microsoft.DependencyInjection" Version="12.0.1" />
-        <PackageReference Include="Duende.IdentityServer.AspNetIdentity" Version="6.3.2" />
+        <PackageReference Include="Duende.IdentityServer.AspNetIdentity" Version="6.3.3" />
         <PackageReference Include="Microsoft.AspNetCore.Authentication.JwtBearer" Version="7.0.7" />
         <PackageReference Include="NLog.Web.AspNetCore" Version="5.3.0" />
     </ItemGroup>
