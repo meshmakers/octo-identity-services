@@ -6,7 +6,6 @@ using System.Threading.Tasks;
 using Duende.IdentityServer.Models;
 using IdentityModel;
 using Meshmakers.Octo.Backend.Common.ApiErrors;
-using Meshmakers.Octo.Common.DistributedCache;
 using Meshmakers.Octo.Common.Shared;
 using Meshmakers.Octo.Common.Shared.DataTransferObjects;
 using Meshmakers.Octo.Common.Shared.DistributedCache;

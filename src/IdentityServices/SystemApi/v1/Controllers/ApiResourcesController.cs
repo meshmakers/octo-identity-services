@@ -5,7 +5,7 @@ using System.Linq;
 using System.Threading.Tasks;
 using IdentityModel;
 using Meshmakers.Octo.Backend.Common.ApiErrors;
-using Meshmakers.Octo.Common.DistributedCache;
+using Meshmakers.Octo.Common.Shared;
 using Meshmakers.Octo.Common.Shared.DataTransferObjects;
 using Meshmakers.Octo.Common.Shared.DistributedCache;
 using Meshmakers.Octo.SystematizedData.Persistence.SystemEntities;
