@@ -14,8 +14,6 @@ variables:
   - group: OctoDefault
   - name: solutionFile
     value: 'Octo.Identity.sln'
-  - name: solutionFile
-    value: 'Octo.Identity.sln'
   - name: isRelease
     value: true #${{ startsWith(variables['Build.SourceBranch'], 'refs/tags/r') }}
 
@@ -30,7 +28,6 @@ stages:
           - checkout: self
             clean: true
             submodules: true
-
           - task: InstallSSHKey@0
             inputs:
               knownHostsEntry: '$(SSHKnownHosts)'
