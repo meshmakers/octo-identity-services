@@ -33,7 +33,7 @@ stages:
 
           - task: InstallSSHKey@0
             inputs:
-              knownHostsEntry: 'github.com'
+              knownHostsEntry: '$(SSHKnownHosts)'
               sshPublicKey: '$(SSHPublicKey)'
               sshPassphrase: '$(SSHPassphrase)'
               sshKeySecureFile: 'id_rsa'
