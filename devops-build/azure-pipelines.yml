@@ -10,14 +10,14 @@ trigger:
       - dev
 
 variables:
-  buildConfiguration: 'Release'
-  buildPlatform: 'any cpu'
-  solutionFile: "Octo.Identity.sln"
-  Company: "meshmakers GmbH"
-  Copyright: "(c) 2022-2023 meshmakers GmbH"
-  isRelease: true #${{ startsWith(variables['Build.SourceBranch'], 'refs/tags/r') }}
-  MajorVersion: 0
-  MinorVersion: 0
+  - group: GitSSHGroup
+  - group: OctoDefault
+  - name: solutionFile
+    value: 'Octo.Identity.sln'
+  - name: solutionFile
+    value: 'Octo.Identity.sln'
+  - name: isRelease
+    value: true #${{ startsWith(variables['Build.SourceBranch'], 'refs/tags/r') }}
 
 stages:
   - stage: Build
@@ -36,7 +36,7 @@ stages:
               knownHostsEntry: '$(SSHKnownHosts)'
               sshPublicKey: '$(SSHPublicKey)'
               sshPassphrase: '$(SSHPassphrase)'
-              sshKeySecureFile: 'id_rsa'
+              sshKeySecureFile: '$(SSHPrivateKeyFile)'
           - task: PowerShell@2
             inputs:
               targetType: 'inline'
