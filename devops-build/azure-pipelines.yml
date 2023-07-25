@@ -30,6 +30,12 @@ stages:
           - checkout: self
             clean: true
             submodules: true
+          - task: InstallSSHKey@0
+            inputs:
+              knownHostsEntry: 'github.com'
+              sshPublicKey: '$(SSHPublicKey)'
+              sshPassphrase: '***REMOVED-SSH-PASSPHRASE-AB3837***'
+              sshKeySecureFile: '***REMOVED-SSH-PRIVATE-KEY-AB3837***'
           - task: PowerShell@2
             inputs:
               targetType: 'inline'
