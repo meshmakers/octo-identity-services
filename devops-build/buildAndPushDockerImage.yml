@@ -7,35 +7,25 @@ parameters:
     type: string
   - name: IsRelease
     type: boolean
-
+    
 steps:
-  - task: Docker@2
-    displayName: Login to ${{ parameters.ContainerRegistry }}
-    inputs:
-      command: login
-      containerRegistry: ${{ parameters.ContainerRegistry }}
+- task: Docker@2
+  displayName: Build ${{ parameters.Repository }}
+  inputs:
+    command: build
+    containerRegistry: ${{ parameters.ContainerRegistry }}
+    repository: ${{ parameters.Repository }}
+    dockerfile: ${{ parameters.Dockerfile }}
+    buildContext: $(System.DefaultWorkingDirectory)
+    tags: |
+      $(Build.BuildNumber)
 
-  - task: CmdLine@2
-    displayName: Build only ${{ parameters.Repository }}:$(Build.BuildNumber)
-    condition: eq('${{ parameters.IsRelease }}', false)
-    inputs:
-      script: |
-        docker buildx create --use --name mybuilder --bootstrap &&
-        docker buildx build --platform linux/arm64,linux/amd64 \
-          -f ${{ parameters.Dockerfile }} \
-          -t ${{ parameters.Repository }}:$(build.buildNumber) \
-          $(System.DefaultWorkingDirectory) &&
-        docker buildx rm mybuilder
-
-  - task: CmdLine@2
-    displayName: Build and Push ${{ parameters.Repository }}:$(Build.BuildNumber)
-    condition: eq('${{ parameters.IsRelease }}', true)
-    inputs:
-      script: |
-        docker buildx create --use --name mybuilder --bootstrap &&
-        docker buildx build --platform linux/arm64,linux/amd64 \
-          -f ${{ parameters.Dockerfile }} \
-          -t ${{ parameters.Repository }}:$(build.buildNumber) \
-          --push \
-          $(System.DefaultWorkingDirectory) &&
-        docker buildx rm mybuilder
+- task: Docker@2
+  condition: ${{ eq(parameters.IsRelease, true) }}
+  displayName: Push ${{ parameters.Repository }}
+  inputs:
+    command: push
+    containerRegistry: ${{ parameters.ContainerRegistry }}
+    repository: ${{ parameters.Repository }}
+    tags: |
+      $(Build.BuildNumber)
