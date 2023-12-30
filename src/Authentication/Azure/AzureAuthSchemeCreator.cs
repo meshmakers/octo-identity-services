@@ -1,15 +1,13 @@
-﻿using System;
-using System.Net.Http;
-using Meshmakers.Octo.Backend.Authentication.DynamicAuth;
-using Meshmakers.Octo.SystematizedData.Persistence.SystemEntities;
+﻿using Meshmakers.Octo.Backend.Authentication.DynamicAuth;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.OpenIdConnect;
 using Microsoft.IdentityModel.Protocols;
 using Microsoft.IdentityModel.Protocols.OpenIdConnect;
+using Persistence.IdentityCkModel.ConstructionKit.Generated.System.Identity.v1;
 
 namespace Meshmakers.Octo.Backend.Authentication.Azure;
 
-internal class AzureAuthSchemeCreator : IAuthSchemeCreator<AzureAdIdentityProvider>
+internal class AzureAuthSchemeCreator : IAuthSchemeCreator<RtAzureEntraIdentityProvider>
 {
     private readonly IDynamicAuthOptionsBuilder<OpenIdConnectOptions> _openIdConnectAuthOptions;
 
@@ -22,9 +20,9 @@ internal class AzureAuthSchemeCreator : IAuthSchemeCreator<AzureAdIdentityProvid
         _openIdConnectAuthOptions = openIdConnectAuthOptions;
     }
 
-    public AuthenticationScheme Create(AzureAdIdentityProvider identityProvider)
+    public AuthenticationScheme Create(RtAzureEntraIdentityProvider identityProvider)
     {
-        var options = _openIdConnectAuthOptions.CreateOptions(identityProvider.Alias);
+        var options = _openIdConnectAuthOptions.CreateOptions(identityProvider.Name);
 
         options.Authority = $"https://login.microsoftonline.com/{identityProvider.TenantId}";
         options.ClientId = identityProvider.ClientIdGroupAzureAd;
@@ -43,7 +41,7 @@ internal class AzureAuthSchemeCreator : IAuthSchemeCreator<AzureAdIdentityProvid
 
         options.Validate();
 
-        return new AuthenticationScheme(identityProvider.Alias, identityProvider.Alias, typeof(OpenIdConnectHandler));
+        return new AuthenticationScheme(identityProvider.Name, identityProvider.DisplayName, typeof(OpenIdConnectHandler));
     }
 
     /// <summary>

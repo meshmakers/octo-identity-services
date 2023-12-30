@@ -1,5 +1,4 @@
-﻿using System.Collections.Generic;
-using Meshmakers.Octo.Backend.IdentityServices.ViewModels.Shared;
+﻿using Meshmakers.Octo.Backend.IdentityServices.ViewModels.Shared;
 using Microsoft.AspNetCore.Identity;
 
 namespace Meshmakers.Octo.Backend.IdentityServices.ViewModels.Manage;

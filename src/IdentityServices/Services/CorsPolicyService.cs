@@ -1,7 +1,5 @@
-﻿using System.Linq;
-using System.Threading.Tasks;
-using Duende.IdentityServer.Services;
-using Meshmakers.Octo.SystematizedData.Persistence.SystemStores;
+﻿using Duende.IdentityServer.Services;
+using IdentityServerPersistence.SystemStores;
 
 #pragma warning disable 1591
 
@@ -20,7 +18,7 @@ public class CorsPolicyService : ICorsPolicyService
     public async Task<bool> IsOriginAllowedAsync(string origin)
     {
         var clients = await _clientStore.GetClients();
-        var result = clients.Any(x => x.AllowedCorsOrigins?.Contains(origin) ?? false);
+        var result = clients.Any(x => x.AllowedCorsOrigins.Contains(origin));
         return result;
     }
 }

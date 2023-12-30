@@ -1,6 +1,4 @@
-using System;
 using System.Text.Encodings.Web;
-using System.Threading.Tasks;
 using Meshmakers.Octo.Backend.Authentication.Connection;
 using Meshmakers.Octo.Backend.Authentication.Controllers;
 using Meshmakers.Octo.Backend.Authentication.Options;
@@ -15,7 +13,8 @@ public class OpenLdapAuthenticationHandler : AuthenticationHandler<LdapOptions>
 {
     private readonly ILdapConnectionFactory _ldapConnectionFactory;
 
-    public OpenLdapAuthenticationHandler(IOptionsMonitor<LdapOptions> options, ILoggerFactory logger, UrlEncoder encoder, ISystemClock clock, ILdapConnectionFactory ldapConnectionFactory) : base(options, logger, encoder, clock)
+    public OpenLdapAuthenticationHandler(IOptionsMonitor<LdapOptions> options, ILoggerFactory logger, UrlEncoder encoder,
+        ILdapConnectionFactory ldapConnectionFactory) : base(options, logger, encoder)
     {
         _ldapConnectionFactory = ldapConnectionFactory;
     }
@@ -25,9 +24,7 @@ public class OpenLdapAuthenticationHandler : AuthenticationHandler<LdapOptions>
     {
         if (!Context.Request.Form.TryGetValue("Username", out var username) ||
             !Context.Request.Form.TryGetValue("Password", out var password))
-        {
             return AuthenticateResult.Fail("Username or password missing");
-        }
 
         try
         {
@@ -46,7 +43,8 @@ public class OpenLdapAuthenticationHandler : AuthenticationHandler<LdapOptions>
 
     protected override Task HandleChallengeAsync(AuthenticationProperties properties)
     {
-        var url = QueryHelpers.AddQueryString($"/{AuthenticationConstants.ExternalLoginRoute}/{OpenLdapController.RouteName}", properties.Items);
+        var url = QueryHelpers.AddQueryString($"/{AuthenticationConstants.ExternalLoginRoute}/{OpenLdapController.RouteName}",
+            properties.Items);
         Context.Response.Redirect(url);
         return Task.CompletedTask;
     }

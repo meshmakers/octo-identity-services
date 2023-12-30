@@ -1,14 +1,12 @@
-﻿using System.Linq;
-using System.Threading.Tasks;
-using Duende.IdentityServer.Extensions;
+﻿using Duende.IdentityServer.Extensions;
 using Duende.IdentityServer.Services;
+using IdentityServerPersistence;
 using Meshmakers.Octo.Backend.IdentityServices.ViewModels.Home;
 using Meshmakers.Octo.Backend.IdentityServices.ViewModels.Shared;
-using Meshmakers.Octo.SystematizedData.Persistence.SystemEntities;
 using Microsoft.AspNetCore.Diagnostics;
-using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Mvc;
+using Persistence.IdentityCkModel.ConstructionKit.Generated.System.Identity.v1;
 
 #pragma warning disable 1591
 
@@ -18,9 +16,9 @@ namespace Meshmakers.Octo.Backend.IdentityServices.Controllers.Home;
 public class HomeController : Controller
 {
     private readonly IIdentityServerInteractionService _interaction;
-    private readonly UserManager<OctoUser> _userManager;
+    private readonly UserManager<RtUser> _userManager;
 
-    public HomeController(IIdentityServerInteractionService interaction, UserManager<OctoUser> userManager)
+    public HomeController(IIdentityServerInteractionService interaction, UserManager<RtUser> userManager)
     {
         _interaction = interaction;
         _userManager = userManager;
@@ -28,22 +26,14 @@ public class HomeController : Controller
 
     public async Task<IActionResult> Index()
     {
-        if (!_userManager.Users.Any())
-        {
-            return RedirectToAction("Index", "Setup");
-        }
+        if (!_userManager.Users.Any()) return RedirectToAction("Index", "Setup");
 
-        if (!User.IsAuthenticated())
-        {
-            return Redirect("~/Account/Login");
-        }
+        if (!User.IsAuthenticated()) return Redirect("~/Account/Login");
 
         var user = await GetCurrentUserAsync();
         if (user == null)
             // Same cookie - but ids to not match - new database?
-        {
             return Redirect("~/Account/Login");
-        }
 
         var vm = new HomeViewModel
         {
@@ -52,7 +42,7 @@ public class HomeController : Controller
             EMail = user.Email,
             UserName = user.UserName,
             AccessFailedCount = user.AccessFailedCount,
-            Id = user.Id.ToString()
+            Id = user.RtId.ToString()
         };
 
         return View(vm);
@@ -65,25 +55,20 @@ public class HomeController : Controller
     {
         var exceptionHandlerPathFeature = HttpContext.Features.Get<IExceptionHandlerPathFeature>();
 
-        if (exceptionHandlerPathFeature?.Path?.StartsWith($"/{IdentityServiceConstants.ApiPathPrefix}") ?? false)
-        {
+        if (exceptionHandlerPathFeature?.Path.StartsWith($"/{IdentityServiceConstants.ApiPathPrefix}") ?? false)
             return new StatusCodeResult(StatusCodes.Status500InternalServerError);
-        }
 
         var vm = new ErrorViewModel();
 
         // retrieve error details from identity server
         var message = await _interaction.GetErrorContextAsync(errorId);
-        if (message != null)
-        {
-            vm.Error = message;
-        }
+        if (message != null) vm.Error = message;
 
         return View("Error", vm);
     }
 
-    private Task<OctoUser?> GetCurrentUserAsync()
+    private Task<RtUser?> GetCurrentUserAsync()
     {
-        return _userManager.GetUserAsync(HttpContext.User)!;
+        return _userManager.GetUserAsync(HttpContext.User);
     }
 }

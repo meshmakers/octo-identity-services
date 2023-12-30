@@ -1,26 +1,23 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
     <PropertyGroup>
-        <TargetFramework>net7.0</TargetFramework>
-        <ImplicitUsings>enable</ImplicitUsings>
-        <Nullable>enable</Nullable>
         <AssemblyName>Meshmakers.Octo.Backend.IdentityServices.Resources</AssemblyName>
         <RootNamespace>Meshmakers.Octo.Backend.IdentityServices.Resources</RootNamespace>
     </PropertyGroup>
 
     <ItemGroup>
-      <EmbeddedResource Update="IdentityTexts.resx">
-        <Generator>PublicResXFileCodeGenerator</Generator>
-        <LastGenOutput>IdentityTexts.Designer.cs</LastGenOutput>
-      </EmbeddedResource>
+        <EmbeddedResource Update="IdentityTexts.resx">
+            <Generator>PublicResXFileCodeGenerator</Generator>
+            <LastGenOutput>IdentityTexts.Designer.cs</LastGenOutput>
+        </EmbeddedResource>
     </ItemGroup>
 
     <ItemGroup>
-      <Compile Update="IdentityTexts.Designer.cs">
-        <DesignTime>True</DesignTime>
-        <AutoGen>True</AutoGen>
-        <DependentUpon>IdentityTexts.resx</DependentUpon>
-      </Compile>
+        <Compile Update="IdentityTexts.Designer.cs">
+            <DesignTime>True</DesignTime>
+            <AutoGen>True</AutoGen>
+            <DependentUpon>IdentityTexts.resx</DependentUpon>
+        </Compile>
     </ItemGroup>
 
 </Project>

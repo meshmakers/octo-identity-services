@@ -1,0 +1,21 @@
+"$schema": "https://schemas.meshmakers.cloud/construction-kit-elements.schema.json"
+types:
+  - typeId: Resource
+    derivedFromCkTypeId: System/Entity
+    isFinal: false
+    isAbstract: true
+    attributes:
+      - id: System/Enabled
+        name: Enabled
+      - id: System/Name
+        name: Name
+      - id: System/DisplayName
+        name: DisplayName
+        isOptional: true
+      - id: System/Description
+        name: Description
+        isOptional: true
+      - id: System.Identity/ResourceClaims
+        name: Claims
+      - id: System.Identity/ShowInDiscoveryDocument
+        name: ShowInDiscoveryDocument

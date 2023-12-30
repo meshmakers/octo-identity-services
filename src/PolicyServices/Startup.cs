@@ -1,18 +1,13 @@
 #pragma warning disable 1591
-using Meshmakers.Octo.Backend.Common;
-using Meshmakers.Octo.Backend.DistributedCache;
+using IdentityServerPersistence.Configuration;
 using Meshmakers.Octo.Backend.PolicyServices.Configuration;
 using Meshmakers.Octo.Backend.PolicyServices.Services;
 using Meshmakers.Octo.Common.Shared;
-using Meshmakers.Octo.SystematizedData.Persistence;
-using Meshmakers.Octo.SystematizedData.Persistence.Configuration;
-using Meshmakers.Octo.SystematizedData.Persistence.SystemStores;
-using Microsoft.AspNetCore.Builder;
-using Microsoft.AspNetCore.Hosting;
+using Meshmakers.Octo.Communication.Contracts;
+using Meshmakers.Octo.Runtime.Contracts.MongoDb;
+using Meshmakers.Octo.Runtime.Contracts.MongoDb.Configuration;
+using Meshmakers.Octo.Services.Common;
 using Microsoft.AspNetCore.Mvc.ApiExplorer;
-using Microsoft.Extensions.Configuration;
-using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Options;
 using Swashbuckle.AspNetCore.SwaggerGen;
 
@@ -34,15 +29,15 @@ public class Startup
         services.Configure<OctoSystemConfiguration>(options => Configuration.GetSection("System").Bind(options));
 
 
-        services.ConfigureOptions<ConfigureDistributeCacheWithPubSubOptions>();
+        services.ConfigureOptions<ConfigureDistributionEventHubOptions>();
         services.ConfigureOptions<ConfigureJwtBearerOptions>();
 
-        services.AddTransient<IOctoResourceStore, ResourceStore>();
-        services.AddTransient<IOctoPermissionStore, PermissionStore>();
-        services.AddSingleton<ISystemContext, SystemContext>();
         services.AddTransient<IUserSchemaService, UserSchemaService>();
 
-        services.AddDistributedPubSubCache();
+        services.AddOctoServiceInfrastructure("PolicyService");
+
+        services.AddRuntimeEngine()
+            .AddMongoDbRuntimeRepository();
 
         services.AddAuthentication()
             .AddJwtBearer(jwt => { jwt.Audience = CommonConstants.PolicyApi; });
@@ -74,19 +69,13 @@ public class Startup
     }
 
     // This method gets called by the runtime. Use this method to configure the HTTP request pipeline.
-    public void Configure(IApplicationBuilder app, IWebHostEnvironment env, ISystemContext systemContext,
+    public void Configure(IApplicationBuilder app, IHost host, IWebHostEnvironment env, ISystemContext systemContext,
         IApiVersionDescriptionProvider apiVersionDescriptionProvider, IUserSchemaService userSchemaService)
     {
-        if (env.IsDevelopment())
-        {
-            app.UseDeveloperExceptionPage();
-        }
+        if (env.IsDevelopment()) app.UseDeveloperExceptionPage();
 
         app.UseCors();
         app.UseHttpsRedirection();
-
-        app.UseOctoPersistence();
-
 
         app.UseRouting();
 

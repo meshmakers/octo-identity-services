@@ -1,9 +1,5 @@
 ﻿#pragma warning disable 1591
-using System;
 using Microsoft.AspNetCore;
-using Microsoft.AspNetCore.Hosting;
-using Microsoft.Extensions.Configuration;
-using Microsoft.Extensions.Logging;
 using NLog;
 using NLog.Web;
 using LogLevel = Microsoft.Extensions.Logging.LogLevel;
@@ -12,20 +8,11 @@ namespace Meshmakers.Octo.Backend.IdentityServices;
 
 public class Program
 {
-    private static string GetNLogConfigFileName()
-    {
-#if DEBUG
-        return "nlog.Debug.config";
-#else
-            return "nlog.Release.config";
-#endif
-    }
-
     public static void Main(string[] args)
     {
         // NLog: setup the logger first to catch all errors
-        var nlogFactory = NLogBuilder.ConfigureNLog(GetNLogConfigFileName());
-        var logger = nlogFactory.GetCurrentClassLogger();
+        var nLogFactory = LogManager.Setup().RegisterNLogWeb().LoadConfigurationFromFile("nlog.config").LogFactory;
+        var logger = nLogFactory.GetCurrentClassLogger();
         try
         {
             logger.Debug("init main");
@@ -44,7 +31,7 @@ public class Program
         }
     }
 
-    public static IWebHostBuilder CreateWebHostBuilder(string[] args)
+    private static IWebHostBuilder CreateWebHostBuilder(string[] args)
     {
         return WebHost.CreateDefaultBuilder(args)
             .ConfigureAppConfiguration((hostingContext, config) =>

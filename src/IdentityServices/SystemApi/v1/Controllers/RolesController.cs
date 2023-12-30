@@ -1,16 +1,14 @@
-using System;
-using System.Collections.Generic;
 using System.ComponentModel.DataAnnotations;
-using System.Linq;
-using System.Threading.Tasks;
 using IdentityModel;
-using Meshmakers.Octo.Backend.Common.ApiErrors;
-using Meshmakers.Octo.Common.Shared.DataTransferObjects;
-using Meshmakers.Octo.SystematizedData.Persistence.SystemEntities;
+using IdentityServerPersistence;
+using Meshmakers.Octo.Communication.Contracts.DataTransferObjects;
+using Meshmakers.Octo.ConstructionKit.Contracts;
+using Meshmakers.Octo.Services.Common.ApiErrors;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Mvc;
 using MongoDB.Bson;
+using Persistence.IdentityCkModel.ConstructionKit.Generated.System.Identity.v1;
 
 namespace Meshmakers.Octo.Backend.IdentityServices.SystemApi.v1.Controllers;
 
@@ -23,13 +21,13 @@ namespace Meshmakers.Octo.Backend.IdentityServices.SystemApi.v1.Controllers;
 [ApiVersion(IdentityServiceConstants.ApiVersion1)]
 public class RolesController : ControllerBase
 {
-    private readonly RoleManager<OctoRole> _roleManager;
+    private readonly RoleManager<RtRole> _roleManager;
 
     /// <summary>
     ///     Constructor
     /// </summary>
     /// <param name="roleManager">The storage service of roles</param>
-    public RolesController(RoleManager<OctoRole> roleManager)
+    public RolesController(RoleManager<RtRole> roleManager)
     {
         _roleManager = roleManager;
     }
@@ -41,15 +39,32 @@ public class RolesController : ControllerBase
     /// <returns></returns>
     [HttpGet]
     [Authorize(IdentityServiceConstants.IdentityApiReadOnlyPolicy)]
+    public IEnumerable<RoleDto> Get()
+    {
+        var list = new List<RoleDto>();
+        foreach (var applicationRole in _roleManager.Roles)
+        {
+            var roleDto = CreateRoleDto(applicationRole);
+            list.Add(roleDto);
+        }
+
+        return list;
+    }
+
+    // GET system/v1/roles
+    /// <summary>
+    ///     Returns all existing roles
+    /// </summary>
+    /// <returns></returns>
+    [HttpGet("GetPaged")]
+    [Authorize(IdentityServiceConstants.IdentityApiReadOnlyPolicy)]
     public PagedResult<RoleDto> Get([Required] [FromQuery] PagingParams pagingParams)
     {
         var list = new List<RoleDto>();
 
         var query = _roleManager.Roles.AsQueryable();
         if (!string.IsNullOrWhiteSpace(pagingParams.Filter))
-        {
             query = _roleManager.Roles.Where(x => x.Name != null && x.Name.ToLower().Contains(pagingParams.Filter.ToLower()));
-        }
 
         foreach (var octoRole in query.Skip(pagingParams.Skip).Take(pagingParams.Take))
         {
@@ -62,7 +77,7 @@ public class RolesController : ControllerBase
         var header = pagedResult.GetHeader();
         if (header != null)
         {
-            Response.Headers.Add("X-Pagination", header.ToJson());
+            Response.Headers.Append("X-Pagination", header.ToJson());
         }
 
         return pagedResult;
@@ -79,10 +94,7 @@ public class RolesController : ControllerBase
     public async Task<IActionResult> Get([Required] string roleName)
     {
         var role = await _roleManager.FindByNameAsync(roleName);
-        if (role == null)
-        {
-            return NotFound();
-        }
+        if (role == null) return NotFound();
 
         return Ok(CreateRoleDto(role));
     }
@@ -97,21 +109,15 @@ public class RolesController : ControllerBase
     [Authorize(IdentityServiceConstants.IdentityApiReadWritePolicy)]
     public async Task<IActionResult> Post([Required] [FromBody] RoleDto roleDto)
     {
-        if (!ModelState.IsValid)
-        {
-            return BadRequest(ModelState);
-        }
+        if (!ModelState.IsValid) return BadRequest(ModelState);
 
-        var octoRole = new OctoRole();
+        var octoRole = new RtRole();
         ApplyToRole(octoRole, roleDto);
 
         try
         {
             var result = await _roleManager.CreateAsync(octoRole);
-            if (result.Succeeded)
-            {
-                return Ok();
-            }
+            if (result.Succeeded) return Ok();
 
             return BadRequest(new OperationFailedError("Creation of role failed",
                 result.Errors.Select(x => new FailedDetails { Code = x.Code, Description = x.Description })));
@@ -133,26 +139,17 @@ public class RolesController : ControllerBase
     [Authorize(IdentityServiceConstants.IdentityApiReadWritePolicy)]
     public async Task<IActionResult> Put([Required] string roleName, [Required] [FromBody] RoleDto roleDto)
     {
-        if (!ModelState.IsValid)
-        {
-            return BadRequest(ModelState);
-        }
+        if (!ModelState.IsValid) return BadRequest(ModelState);
 
         var octoRole = await _roleManager.FindByNameAsync(roleName);
-        if (octoRole == null)
-        {
-            return NotFound(new NotFoundError($"Role '{roleName}' not found."));
-        }
+        if (octoRole == null) return NotFound(new NotFoundError($"Role '{roleName}' not found."));
 
         ApplyToRole(octoRole, roleDto);
 
         try
         {
             var result = await _roleManager.UpdateAsync(octoRole);
-            if (result.Succeeded)
-            {
-                return Ok();
-            }
+            if (result.Succeeded) return Ok();
 
             return BadRequest(new OperationFailedError("Update of role failed",
                 result.Errors.Select(x => new FailedDetails { Code = x.Code, Description = x.Description })));
@@ -174,18 +171,12 @@ public class RolesController : ControllerBase
     public async Task<IActionResult> Delete([Required] string roleName)
     {
         var octoRole = await _roleManager.FindByNameAsync(roleName);
-        if (octoRole == null)
-        {
-            return NotFound(new NotFoundError($"Role '{roleName}' not found."));
-        }
+        if (octoRole == null) return NotFound(new NotFoundError($"Role '{roleName}' not found."));
 
         try
         {
             var result = await _roleManager.DeleteAsync(octoRole);
-            if (result.Succeeded)
-            {
-                return Ok();
-            }
+            if (result.Succeeded) return Ok();
 
             return BadRequest(new OperationFailedError("Delete of role failed",
                 result.Errors.Select(x => new FailedDetails { Code = x.Code, Description = x.Description })));
@@ -196,22 +187,19 @@ public class RolesController : ControllerBase
         }
     }
 
-    internal static RoleDto CreateRoleDto(OctoRole octoRole)
+    internal static RoleDto CreateRoleDto(RtRole octoRole)
     {
         var roleDto = new RoleDto
         {
-            Id = octoRole.Id.ToString(),
+            Id = octoRole.RtId.ToString(),
             Name = octoRole.Name
         };
         return roleDto;
     }
 
-    private void ApplyToRole(OctoRole octoRole, RoleDto roleDto)
+    private void ApplyToRole(RtRole octoRole, RoleDto roleDto)
     {
-        if (!string.IsNullOrWhiteSpace(roleDto.Id))
-        {
-            octoRole.Id = new ObjectId(roleDto.Id);
-        }
+        if (!string.IsNullOrWhiteSpace(roleDto.Id)) octoRole.RtId = new OctoObjectId(roleDto.Id);
 
         octoRole.Name = roleDto.Name;
     }

@@ -1,10 +1,16 @@
 namespace Meshmakers.Octo.Backend.PolicyServices.Configuration;
 
+/// <summary>
+///     Provides options for the Octo Policy Service
+/// </summary>
 public class OctoPolicyOptions
 {
+    /// <summary>
+    ///     Initializes a new instance of the <see cref="OctoPolicyOptions" /> class.
+    /// </summary>
     public OctoPolicyOptions()
     {
-        RedisCacheHost = "localhost";
+        BrokerHost = "localhost";
         AuthorityUrl = "https://localhost:5003";
     }
 
@@ -14,12 +20,17 @@ public class OctoPolicyOptions
     public string AuthorityUrl { get; set; }
 
     /// <summary>
-    ///     Gets or sets the redis cache host name
+    ///     Gets or sets the RabbitMq host name
     /// </summary>
-    public string RedisCacheHost { get; set; }
+    public string BrokerHost { get; set; }
+    
+    /// <summary>
+    ///     Gets or sets the RabbitMq user
+    /// </summary>
+    public string? BrokerUser { get; set; }
 
     /// <summary>
-    ///     Gets or sets the redis cache password
+    ///     Gets or sets the RabbitMq password
     /// </summary>
-    public string RedisCachePassword { get; set; }
+    public string? BrokerPassword { get; set; }
 }

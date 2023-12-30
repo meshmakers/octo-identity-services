@@ -1,4 +1,3 @@
-using System;
 using Duende.IdentityServer.Models;
 using Meshmakers.Octo.Backend.Authentication.ViewModels;
 using Microsoft.AspNetCore.Mvc;

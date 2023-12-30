@@ -1,6 +1,3 @@
-using System;
-using System.Linq;
-using System.Threading.Tasks;
 using Duende.IdentityServer;
 using Duende.IdentityServer.Events;
 using Duende.IdentityServer.Extensions;
@@ -13,12 +10,11 @@ using Meshmakers.Octo.Backend.IdentityServices.Resources;
 using Meshmakers.Octo.Backend.IdentityServices.Services;
 using Meshmakers.Octo.Backend.IdentityServices.ViewModels.Account;
 using Meshmakers.Octo.Backend.IdentityServices.ViewModels.Shared;
-using Meshmakers.Octo.SystematizedData.Persistence.SystemEntities;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Mvc;
-using Microsoft.Extensions.DependencyInjection;
+using Persistence.IdentityCkModel.ConstructionKit.Generated.System.Identity.v1;
 
 namespace Meshmakers.Octo.Backend.IdentityServices.Controllers.Account;
 
@@ -29,17 +25,17 @@ namespace Meshmakers.Octo.Backend.IdentityServices.Controllers.Account;
 public class AccountController : Controller
 {
     private readonly IClientStore _clientStore;
+    private readonly IUserEmailInteractionService _emailInteractionService;
     private readonly IEventService _events;
     private readonly IIdentityServerInteractionService _interaction;
     private readonly IAuthenticationSchemeProvider _schemeProvider;
-    private readonly SignInManager<OctoUser> _signInManager;
-    private readonly UserManager<OctoUser> _userManager;
-    private readonly IUserEmailInteractionService _emailInteractionService;
+    private readonly SignInManager<RtUser> _signInManager;
+    private readonly UserManager<RtUser> _userManager;
 
 
     public AccountController(
-        UserManager<OctoUser> userManager,
-        SignInManager<OctoUser> signInManager,
+        UserManager<RtUser> userManager,
+        SignInManager<RtUser> signInManager,
         IIdentityServerInteractionService interaction,
         IClientStore clientStore,
         IAuthenticationSchemeProvider schemeProvider,
@@ -66,9 +62,7 @@ public class AccountController : Controller
 
         if (vm.IsExternalLoginOnly)
             // we only have one option for logging in and it's an external provider
-        {
             return RedirectToAction("Challenge", "External", new { scheme = vm.ExternalLoginScheme, returnUrl });
-        }
 
         return View(vm);
     }
@@ -97,9 +91,7 @@ public class AccountController : Controller
                 if (context.IsNativeClient())
                     // The client is native, so this change in how to
                     // return the response is for better UX for the end user.
-                {
                     return this.LoadingPage("Redirect", model.ReturnUrl);
-                }
 
                 return Redirect(model.ReturnUrl ?? "~/");
             }
@@ -116,34 +108,24 @@ public class AccountController : Controller
             {
                 var user = await _userManager.FindByNameAsync(model.Username);
                 if (user != null)
-                {
-                    await _events.RaiseAsync(new UserLoginSuccessEvent(user.UserName, user.Id.ToString(), user.UserName,
+                    await _events.RaiseAsync(new UserLoginSuccessEvent(user.UserName, user.RtId.ToString(), user.UserName,
                         clientId: context?.Client.ClientId));
-                }
 
                 if (context != null)
                 {
                     if (context.IsNativeClient())
                         // The client is native, so this change in how to
                         // return the response is for better UX for the end user.
-                    {
                         return this.LoadingPage("Redirect", model.ReturnUrl);
-                    }
 
                     // we can trust model.ReturnUrl since GetAuthorizationContextAsync returned non-null
                     return Redirect(model.ReturnUrl ?? "~/");
                 }
 
                 // request for a local page
-                if (Url.IsLocalUrl(model.ReturnUrl))
-                {
-                    return Redirect(model.ReturnUrl);
-                }
+                if (Url.IsLocalUrl(model.ReturnUrl)) return Redirect(model.ReturnUrl);
 
-                if (string.IsNullOrEmpty(model.ReturnUrl))
-                {
-                    return Redirect("~/");
-                }
+                if (string.IsNullOrEmpty(model.ReturnUrl)) return Redirect("~/");
 
                 // user might have clicked on a malicious link - should be logged
                 throw new Exception("invalid return URL");
@@ -172,9 +154,7 @@ public class AccountController : Controller
         if (vm.ShowLogoutPrompt == false)
             // if the request for logout was properly authenticated from IdentityServer, then
             // we don't need to show the prompt and can just log the user out directly.
-        {
             return await Logout(vm);
-        }
 
         return View(vm);
     }
@@ -214,7 +194,7 @@ public class AccountController : Controller
     }
 
     /// <summary>
-    /// Endpoint to confirm an email address
+    ///     Endpoint to confirm an email address
     /// </summary>
     /// <param name="id">The generated guid to confirm the email address</param>
     /// <returns></returns>
@@ -225,7 +205,7 @@ public class AccountController : Controller
         try
         {
             var redirectUri = await _emailInteractionService.ValidateEmailNotificationTokenAsync(id);
-            var successVm = new SuccessViewModel()
+            var successVm = new SuccessViewModel
             {
                 Operation = IdentityTexts.Backend_General_Title_Success,
                 Text = IdentityTexts.Backend_Identity_Email_Verification_Success,
@@ -253,17 +233,14 @@ public class AccountController : Controller
         try
         {
             var user = await _userManager.FindByEmailAsync(vm.UserName);
-            if (user != null)
-            {
-                await _emailInteractionService.SendPasswordResetNotificationAsync(user);
-            }
+            if (user != null) await _emailInteractionService.SendPasswordResetNotificationAsync(user);
         }
         catch (Exception)
         {
             // we are not going to notify the user that an email address it not found.
         }
 
-        return View("Success", new SuccessViewModel()
+        return View("Success", new SuccessViewModel
         {
             Operation = IdentityTexts.Backend_General_Title_Success,
             Text = IdentityTexts.Backend_Identity_Reset_Email_Sent_Successfully
@@ -295,10 +272,7 @@ public class AccountController : Controller
                 Username = context.LoginHint
             };
 
-            if (!local)
-            {
-                vm.ExternalProviders = new[] { new ExternalProvider { AuthenticationScheme = context.IdP } };
-            }
+            if (!local) vm.ExternalProviders = new[] { new ExternalProvider { AuthenticationScheme = context.IdP } };
 
             return vm;
         }
@@ -321,11 +295,10 @@ public class AccountController : Controller
             {
                 allowLocal = client.EnableLocalLogin;
 
-                if (client.IdentityProviderRestrictions != null && client.IdentityProviderRestrictions.Any())
-                {
-                    providers = providers.Where(provider =>
-                        client.IdentityProviderRestrictions.Contains(provider.AuthenticationScheme)).ToList();
-                }
+                if (client.IdentityProviderRestrictions.Any())
+                    providers = providers.Where(provider => !string.IsNullOrWhiteSpace(provider.AuthenticationScheme) &&
+                                                            client.IdentityProviderRestrictions.Contains(provider.AuthenticationScheme))
+                        .ToList();
             }
         }
 
@@ -359,7 +332,7 @@ public class AccountController : Controller
         }
 
         var context = await _interaction.GetLogoutContextAsync(logoutId);
-        if (context?.ShowSignoutPrompt == false)
+        if (context.ShowSignoutPrompt == false)
         {
             // it's safe to automatically sign-out
             vm.ShowLogoutPrompt = false;
@@ -379,9 +352,9 @@ public class AccountController : Controller
         var vm = new LoggedOutViewModel
         {
             AutomaticRedirectAfterSignOut = AccountOptions.AutomaticRedirectAfterSignOut,
-            PostLogoutRedirectUri = logout?.PostLogoutRedirectUri,
-            ClientName = string.IsNullOrEmpty(logout?.ClientName) ? logout?.ClientId : logout.ClientName,
-            SignOutIframeUrl = logout?.SignOutIFrameUrl,
+            PostLogoutRedirectUri = logout.PostLogoutRedirectUri,
+            ClientName = string.IsNullOrEmpty(logout.ClientName) ? logout.ClientId : logout.ClientName,
+            SignOutIframeUrl = logout.SignOutIFrameUrl,
             LogoutId = logoutId
         };
 

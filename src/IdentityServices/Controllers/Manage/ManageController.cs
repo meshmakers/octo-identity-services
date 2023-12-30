@@ -1,32 +1,28 @@
 ﻿#pragma warning disable 1591
 
-using System;
-using System.Linq;
-using System.Threading.Tasks;
 using Meshmakers.Octo.Backend.IdentityServices.Resources;
 using Meshmakers.Octo.Backend.IdentityServices.Services;
 using Meshmakers.Octo.Backend.IdentityServices.ViewModels.Manage;
 using Meshmakers.Octo.Backend.IdentityServices.ViewModels.Shared;
-using Meshmakers.Octo.SystematizedData.Persistence.SystemEntities;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Mvc;
-using Microsoft.Extensions.Logging;
+using Persistence.IdentityCkModel.ConstructionKit.Generated.System.Identity.v1;
 
 namespace Meshmakers.Octo.Backend.IdentityServices.Controllers.Manage;
 
 [Authorize]
 public class ManageController : Controller
 {
-    private readonly ILogger _logger;
     private readonly IUserEmailInteractionService _emailInteractionService;
-    private readonly SignInManager<OctoUser> _signInManager;
-    private readonly UserManager<OctoUser> _userManager;
+    private readonly ILogger _logger;
+    private readonly SignInManager<RtUser> _signInManager;
+    private readonly UserManager<RtUser> _userManager;
 
     public ManageController(
-        UserManager<OctoUser> userManager,
-        SignInManager<OctoUser> signInManager,
+        UserManager<RtUser> userManager,
+        SignInManager<RtUser> signInManager,
         IUserEmailInteractionService emailInteractionService,
         ILoggerFactory loggerFactory)
     {
@@ -51,10 +47,7 @@ public class ManageController : Controller
                         : "";
 
         var user = await GetCurrentUserAsync();
-        if (user == null)
-        {
-            return View("Error");
-        }
+        if (user == null) return View("Error");
 
         var model = new IndexViewModel
         {
@@ -63,7 +56,7 @@ public class ManageController : Controller
             EMail = user.Email,
             UserName = user.UserName,
             AccessFailedCount = user.AccessFailedCount,
-            Id = user.Id.ToString(),
+            Id = user.RtId.ToString(),
             HasPassword = await _userManager.HasPasswordAsync(user),
             Logins = await _userManager.GetLoginsAsync(user),
             BrowserRemembered = await _signInManager.IsTwoFactorClientRememberedAsync(user)
@@ -79,7 +72,8 @@ public class ManageController : Controller
     {
         ManageMessageId? message = ManageMessageId.Error;
         var user = await GetCurrentUserAsync();
-        if (user != null)
+        if (user != null && account.LoginProvider != null
+                         && account.ProviderKey != null)
         {
             var result = await _userManager.RemoveLoginAsync(user, account.LoginProvider, account.ProviderKey);
             if (result.Succeeded)
@@ -105,31 +99,25 @@ public class ManageController : Controller
     [AllowAnonymous]
     public IActionResult ResetPassword(string id)
     {
-        if (!ModelState.IsValid)
-        {
-            return View("Error", new ErrorViewModel("Token is missing."));
-        }
-        
+        if (!ModelState.IsValid) return View("Error", new ErrorViewModel("Token is missing."));
+
         var vm = new ResetPasswordViewModel
         {
-            Token = id,
+            Token = id
         };
         return View(vm);
     }
-    
+
     [HttpPost]
     [AllowAnonymous]
     public async Task<IActionResult> ResetPassword([FromForm] ResetPasswordViewModel vm)
     {
-        if (!ModelState.IsValid)
-        {
-            return View(vm);
-        }
+        if (!ModelState.IsValid) return View(vm);
 
         try
         {
             var redirectUrl = await _emailInteractionService.ValidateAndResetPasswordAsync(vm.Token!, vm.NewPassword!);
-            var successViewModel = new SuccessViewModel()
+            var successViewModel = new SuccessViewModel
             {
                 Operation = IdentityTexts.Backend_Identity_Manage_StatusMessage_ChangePasswordSuccess,
                 Text = IdentityTexts.Backend_Identity_Msg_You_Can_Login_With_New_Password,
@@ -139,16 +127,13 @@ public class ManageController : Controller
         }
         catch (PasswordComplexityTooLowException e)
         {
-            foreach (var error in e.Errors)
-            {
-                ModelState.AddModelError(string.Empty, error.Description);
-            }
+            foreach (var error in e.Errors) ModelState.AddModelError(string.Empty, error.Description);
         }
         catch (Exception e)
         {
             ModelState.AddModelError(string.Empty, e.Message);
         }
-        
+
         var resetPasswordViewModel = new ResetPasswordViewModel
         {
             Token = vm.Token
@@ -162,19 +147,16 @@ public class ManageController : Controller
     [ValidateAntiForgeryToken]
     public async Task<IActionResult> ChangePassword(ChangePasswordViewModel model)
     {
-        if (!ModelState.IsValid)
-        {
-            return View(model);
-        }
+        if (!ModelState.IsValid) return View(model);
 
         var user = await GetCurrentUserAsync();
         if (user != null)
         {
-            var result = await _userManager.ChangePasswordAsync(user, model.OldPassword, model.NewPassword);
+            var result = await _userManager.ChangePasswordAsync(user, model.OldPassword!, model.NewPassword!);
             if (result.Succeeded)
             {
                 await _signInManager.SignInAsync(user, false);
-                _logger.LogInformation(3, "User changed their password successfully.");
+                _logger.LogInformation(3, "User changed their password successfully");
                 return RedirectToAction(nameof(Index), new { Message = ManageMessageId.ChangePasswordSuccess });
             }
 
@@ -199,15 +181,12 @@ public class ManageController : Controller
     [ValidateAntiForgeryToken]
     public async Task<IActionResult> SetPassword(SetPasswordViewModel model)
     {
-        if (!ModelState.IsValid)
-        {
-            return View(model);
-        }
+        if (!ModelState.IsValid) return View(model);
 
         var user = await GetCurrentUserAsync();
         if (user != null)
         {
-            var result = await _userManager.AddPasswordAsync(user, model.NewPassword);
+            var result = await _userManager.AddPasswordAsync(user, model.NewPassword!);
             if (result.Succeeded)
             {
                 await _signInManager.SignInAsync(user, false);
@@ -234,10 +213,7 @@ public class ManageController : Controller
                         ? IdentityTexts.Backend_Identity_Manage_StatusMessage_Error
                         : "";
         var user = await GetCurrentUserAsync();
-        if (user == null)
-        {
-            return View("Error");
-        }
+        if (user == null) return View("Error");
 
         var userLogins = await _userManager.GetLoginsAsync(user);
 
@@ -270,16 +246,10 @@ public class ManageController : Controller
     public async Task<ActionResult> LinkLoginCallback()
     {
         var user = await GetCurrentUserAsync();
-        if (user == null)
-        {
-            return View("Error");
-        }
+        if (user == null) return View("Error");
 
         var info = await _signInManager.GetExternalLoginInfoAsync(await _userManager.GetUserIdAsync(user));
-        if (info == null)
-        {
-            return RedirectToAction(nameof(ManageLogins), new { Message = ManageMessageId.Error });
-        }
+        if (info == null) return RedirectToAction(nameof(ManageLogins), new { Message = ManageMessageId.Error });
 
         var result = await _userManager.AddLoginAsync(user, info);
         var message = ManageMessageId.Error;
@@ -297,10 +267,7 @@ public class ManageController : Controller
 
     private void AddErrors(IdentityResult result)
     {
-        foreach (var error in result.Errors)
-        {
-            ModelState.AddModelError(string.Empty, error.Description);
-        }
+        foreach (var error in result.Errors) ModelState.AddModelError(string.Empty, error.Description);
     }
 
     public enum ManageMessageId
@@ -312,7 +279,7 @@ public class ManageController : Controller
         Error
     }
 
-    private Task<OctoUser> GetCurrentUserAsync()
+    private Task<RtUser?> GetCurrentUserAsync()
     {
         return _userManager.GetUserAsync(HttpContext.User);
     }

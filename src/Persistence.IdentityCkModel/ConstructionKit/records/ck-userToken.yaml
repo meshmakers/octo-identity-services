@@ -1,0 +1,15 @@
+"$schema": "https://schemas.meshmakers.cloud/construction-kit-elements.schema.json"
+records:
+  - recordId: UserToken
+    isFinal: true
+    isAbstract: false
+    attributes:
+      - id: System.Identity/LoginProvider
+        name: LoginProvider
+      - id: System/Name
+        name: Name
+      - id: System.Identity/UserId
+        name: UserId
+      - id: System.Identity/Value
+        name: Value
+        isOptional: true

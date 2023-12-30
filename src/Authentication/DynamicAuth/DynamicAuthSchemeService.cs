@@ -1,12 +1,7 @@
-﻿using System;
-using System.Linq;
-using System.Threading.Tasks;
-using Meshmakers.Octo.Common.Shared;
-using Meshmakers.Octo.Common.Shared.DistributedCache;
-using Meshmakers.Octo.SystematizedData.Persistence.SystemEntities;
-using Meshmakers.Octo.SystematizedData.Persistence.SystemStores;
+﻿using IdentityServerPersistence.SystemStores;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Identity;
+using Persistence.IdentityCkModel.ConstructionKit.Generated.System.Identity.v1;
 
 namespace Meshmakers.Octo.Backend.Authentication.DynamicAuth;
 
@@ -35,66 +30,55 @@ internal class DynamicAuthSchemeService : IDynamicAuthSchemeService
     /// <param name="sgIdentityProviderStore">Data storage of identity providers</param>
     /// <param name="schemeProvider">Scheme provider</param>
     /// <param name="authSchemeCreatorFactory">Factory to resolve creators of auth providers.</param>
-    /// <param name="distributedCache">Memory cache do distribute events (if identity providers has changed.</param>
     public DynamicAuthSchemeService(IOctoIdentityProviderStore sgIdentityProviderStore,
         IAuthenticationSchemeProvider schemeProvider,
-        IAuthSchemeCreatorFactory authSchemeCreatorFactory,
-        IDistributedWithPubSubCache distributedCache)
+        IAuthSchemeCreatorFactory authSchemeCreatorFactory)
     {
         _sgIdentityProviderStore = sgIdentityProviderStore;
         _schemeProvider = schemeProvider;
         _authSchemeCreatorFactory = authSchemeCreatorFactory;
-
-        var channel = distributedCache.Subscribe<string>(CacheCommon.KeyIdentityProviderUpdate);
-        channel.OnMessage(async _ => { await ConfigureAsync(); });
     }
-
+    
     /// <inheritdoc />
-    public async Task ConfigureAsync()
+    public async Task ConfigureAsync(string? tenantId)
     {
         // Remove all schemes
         var allSchemes = await _schemeProvider.GetAllSchemesAsync();
         var filteredSchemes = allSchemes.Where(x => !ExcludedSchemes.Contains(x.Name));
-        foreach (var authenticationScheme in filteredSchemes)
-        {
-            _schemeProvider.RemoveScheme(authenticationScheme.Name);
-        }
+        foreach (var authenticationScheme in filteredSchemes) _schemeProvider.RemoveScheme(authenticationScheme.Name);
 
         // Add schemes based on identity providers
         var identityProviders = await _sgIdentityProviderStore.GetAllAsync();
         foreach (var identityProvider in identityProviders)
         {
-            if (!identityProvider.IsEnabled)
-            {
-                continue;
-            }
+            if (!identityProvider.Enabled) continue;
 
             AuthenticationScheme scheme;
             switch (identityProvider)
             {
-                case GoogleIdentityProvider googleIdentityProvider:
-                    scheme = _authSchemeCreatorFactory.GetCreator<GoogleIdentityProvider>()
+                case RtGoogleIdentityProvider googleIdentityProvider:
+                    scheme = _authSchemeCreatorFactory.GetCreator<RtGoogleIdentityProvider>()
                         .Create(googleIdentityProvider);
                     break;
-                case MicrosoftIdentityProvider microsoftIdentityProvider:
-                    scheme = _authSchemeCreatorFactory.GetCreator<MicrosoftIdentityProvider>()
+                case RtMicrosoftIdentityProvider microsoftIdentityProvider:
+                    scheme = _authSchemeCreatorFactory.GetCreator<RtMicrosoftIdentityProvider>()
                         .Create(microsoftIdentityProvider);
                     break;
-                case AzureAdIdentityProvider azureAdIdentityProvider:
-                    scheme = _authSchemeCreatorFactory.GetCreator<AzureAdIdentityProvider>()
+                case RtAzureEntraIdentityProvider azureAdIdentityProvider:
+                    scheme = _authSchemeCreatorFactory.GetCreator<RtAzureEntraIdentityProvider>()
                         .Create(azureAdIdentityProvider);
                     break;
-                
-                case OpenLdapIdentityProvider openLdapIdentityProvider:
-                    scheme = _authSchemeCreatorFactory.GetCreator<OpenLdapIdentityProvider>()
+
+                case RtOpenLdapIdentityProvider openLdapIdentityProvider:
+                    scheme = _authSchemeCreatorFactory.GetCreator<RtOpenLdapIdentityProvider>()
                         .Create(openLdapIdentityProvider);
                     break;
-                
-                case MicrosoftAdIdentityProvider microsoftAdIdentityProvider:
-                    scheme = _authSchemeCreatorFactory.GetCreator<MicrosoftAdIdentityProvider>()
+
+                case RtMicrosoftAdIdentityProvider microsoftAdIdentityProvider:
+                    scheme = _authSchemeCreatorFactory.GetCreator<RtMicrosoftAdIdentityProvider>()
                         .Create(microsoftAdIdentityProvider);
                     break;
-                
+
                 default:
                     throw new NotImplementedException(
                         $"Identity provider '{identityProvider.Type}' is not supported.");

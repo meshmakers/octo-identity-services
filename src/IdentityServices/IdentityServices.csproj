@@ -6,7 +6,6 @@
         <DockerDefaultTargetOS>Linux</DockerDefaultTargetOS>
         <RootNamespace>Meshmakers.Octo.Backend.IdentityServices</RootNamespace>
         <UserSecretsId>173d8e91-b831-4e8a-a43f-672c57e6a4da</UserSecretsId>
-        <TargetFramework>net7.0</TargetFramework>
     </PropertyGroup>
 
     <PropertyGroup>
@@ -26,28 +25,26 @@
     </PropertyGroup>
 
     <ItemGroup>
-        <None Include="nlog.Debug.config">
-            <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-        </None>
-        <None Include="nlog.Release.config">
+        <None Include="nlog.config">
             <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
         </None>
     </ItemGroup>
 
     <ItemGroup>
-        <PackageReference Include="AspNetCore.Identity.Mongo" Version="8.3.3" />
-        <PackageReference Include="AutoMapper.Extensions.Microsoft.DependencyInjection" Version="12.0.1" />
-        <PackageReference Include="Duende.IdentityServer.AspNetIdentity" Version="6.3.3" />
-        <PackageReference Include="Microsoft.AspNetCore.Authentication.JwtBearer" Version="7.0.7" />
-        <PackageReference Include="NLog.Web.AspNetCore" Version="5.3.0" />
+        <PackageReference Include="AspNetCore.Identity.Mongo" Version="8.3.3"/>
+        <PackageReference Include="AutoMapper.Extensions.Microsoft.DependencyInjection" Version="12.0.1"/>
+        <PackageReference Include="Microsoft.AspNetCore.Authentication.JwtBearer" Version="8.0.0" />
+        <PackageReference Include="NLog.Web.AspNetCore" Version="5.3.8" />
+        <PackageReference Include="Meshmakers.Octo.Communication.Contracts" Version="3.0.4" GeneratePathProperty="true" />
     </ItemGroup>
 
 
     <ItemGroup>
-        <ProjectReference Include="$(OctoCommonServicesPath)src\Common\Common.csproj" />
-        <ProjectReference Include="$(OctoCommonServicesPath)src\Swagger\Swagger.csproj" />
-        <ProjectReference Include="..\Authentication\Authentication.csproj" />
-        <ProjectReference Include="..\IdentityServices.Resources\IdentityServices.Resources.csproj" />
+        <ProjectReference Include="$(OctoCommonServicesPath)src\Common\Common.csproj"/>
+        <ProjectReference Include="$(OctoCommonServicesPath)src\Swagger\Swagger.csproj"/>
+        <ProjectReference Include="..\Authentication\Authentication.csproj"/>
+        <ProjectReference Include="..\IdentityServices.Resources\IdentityServices.Resources.csproj"/>
+        <ProjectReference Include="$(OctoCorePath)src\Common\Notifications\Notifications.csproj"/>
     </ItemGroup>
 
 
@@ -94,10 +91,14 @@
             <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
         </Content>
         <Content Include="app.scss">
-          <ExcludeFromSingleFile>true</ExcludeFromSingleFile>
-          <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
+            <ExcludeFromSingleFile>true</ExcludeFromSingleFile>
+            <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
         </Content>
     </ItemGroup>
 
+    <!-- Copy the contracts xml file to the output directory -->
+    <Target Name="TakeAction" AfterTargets="Build">
+        <Copy SourceFiles="$(PkgMeshmakers_Octo_Communication_Contracts)\lib\net8.0\Meshmakers.Octo.Communication.Contracts.xml" DestinationFolder="$(TargetDir)" />
+    </Target>
 
 </Project>

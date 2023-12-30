@@ -13,6 +13,5 @@ public class MicrosoftAdIndexModel
     [FromQuery(Name = "LoginProvider")]
     public string LoginProvider { get; set; } = null!;
 
-    [FromQuery]
-    public string? XsrfId { get; set; }
+    [FromQuery] public string? XsrfId { get; set; }
 }

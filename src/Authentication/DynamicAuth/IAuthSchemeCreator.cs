@@ -1,5 +1,5 @@
-﻿using Meshmakers.Octo.SystematizedData.Persistence.SystemEntities;
-using Microsoft.AspNetCore.Authentication;
+﻿using Microsoft.AspNetCore.Authentication;
+using Persistence.IdentityCkModel.ConstructionKit.Generated.System.Identity.v1;
 
 namespace Meshmakers.Octo.Backend.Authentication.DynamicAuth;
 
@@ -7,7 +7,7 @@ namespace Meshmakers.Octo.Backend.Authentication.DynamicAuth;
 ///     Creates a Authentication scheme and the required options based on the <see cref="TAuthProvider" /> type.
 /// </summary>
 /// <typeparam name="TAuthProvider"></typeparam>
-public interface IAuthSchemeCreator<in TAuthProvider> where TAuthProvider : OctoIdentityProvider
+public interface IAuthSchemeCreator<in TAuthProvider> where TAuthProvider : RtIdentityProvider
 {
     /// <summary>
     ///     Create the AuthenticationScheme and configure the options required for the handler.

@@ -1,5 +1,4 @@
-﻿using System;
-using Meshmakers.Common.Shared;
+﻿using Meshmakers.Common.Shared;
 
 namespace Meshmakers.Octo.Backend.Authentication;
 

@@ -1,0 +1,148 @@
+"$schema": "https://schemas.meshmakers.cloud/construction-kit-elements.schema.json"
+types:
+  - typeId: Client
+    derivedFromCkTypeId: System/Entity
+    isFinal: true
+    isAbstract: false
+    attributes:
+      - id: System/Enabled
+        name: Enabled
+
+      - id: System.Identity/ClientId
+        name: ClientId
+
+      - id: System.Identity/ProtocolType
+        name: ProtocolType
+
+      - id: System.Identity/Secrets
+        name: ClientSecrets
+
+      - id: System.Identity/RequireClientSecret
+        name: RequireClientSecret
+
+      - id: System/Name
+        name: ClientName
+        isOptional: true
+
+      - id: System/Description
+        name: Description
+        isOptional: true
+
+      - id: System.Identity/ClientUri
+        name: ClientUri
+        isOptional: true
+
+      - id: System.Identity/LogoUri
+        name: LogoUri
+        isOptional: true
+
+      - id: System.Identity/RequireConsent
+        name: RequireConsent
+        isOptional: true
+
+      - id: System.Identity/AllowRememberConsent
+        name: AllowRememberConsent
+
+      - id: System.Identity/AllowedGrantTypes
+        name: AllowedGrantTypes
+
+      - id: System.Identity/RequirePkce
+        name: RequirePkce
+
+      - id: System.Identity/AllowPlainTextPkce
+        name: AllowPlainTextPkce
+
+      - id: System.Identity/RequireRequestObject
+        name: RequireRequestObject
+
+      - id: System.Identity/AllowAccessTokensViaBrowser
+        name: AllowAccessTokensViaBrowser
+
+      - id: System.Identity/RequireDPoP
+        name: RequireDPoP
+
+      - id: System.Identity/DPoPValidationMode
+        name: DPoPValidationMode
+
+      - id: System.Identity/DPoPClockSkew
+        name: DPoPClockSkew
+      - id: System.Identity/RedirectUris
+        name: RedirectUris
+
+      - id: System.Identity/PostLogoutRedirectUris
+        name: PostLogoutRedirectUris
+      - id: System.Identity/FrontChannelLogoutUri
+        name: FrontChannelLogoutUri
+        isOptional: true
+      - id: System.Identity/FrontChannelLogoutSessionRequired
+        name: FrontChannelLogoutSessionRequired
+      - id: System.Identity/BackChannelLogoutUri
+        name: BackChannelLogoutUri
+        isOptional: true
+      - id: System.Identity/BackChannelLogoutSessionRequired
+        name: BackChannelLogoutSessionRequired
+      - id: System.Identity/AllowOfflineAccess
+        name: AllowOfflineAccess
+      - id: System.Identity/AllowedScopes
+        name: AllowedScopes
+      - id: System.Identity/AlwaysIncludeUserClaimsInIdToken
+        name: AlwaysIncludeUserClaimsInIdToken
+      - id: System.Identity/IdentityTokenLifetime
+        name: IdentityTokenLifetime
+      - id: System.Identity/AllowedIdentityTokenSigningAlgorithms
+        name: AllowedIdentityTokenSigningAlgorithms
+      - id: System.Identity/AccessTokenLifetime
+        name: AccessTokenLifetime
+      - id: System.Identity/AuthorizationCodeLifetime
+        name: AuthorizationCodeLifetime
+      - id: System.Identity/AbsoluteRefreshTokenLifetime
+        name: AbsoluteRefreshTokenLifetime
+      - id: System.Identity/SlidingRefreshTokenLifetime
+        name: SlidingRefreshTokenLifetime
+      - id: System.Identity/ConsentLifetime
+        name: ConsentLifetime
+        isOptional: true
+      - id: System.Identity/UpdateAccessTokenClaimsOnRefresh
+        name: UpdateAccessTokenClaimsOnRefresh
+      - id: System.Identity/RefreshTokenExpiration
+        name: RefreshTokenExpiration
+      - id: System.Identity/AccessTokenType
+        name: AccessTokenType
+      - id: System.Identity/EnableLocalLogin
+        name: EnableLocalLogin
+      - id: System.Identity/IdentityProviderRestrictions
+        name: IdentityProviderRestrictions
+      - id: System.Identity/IncludeJwtId
+        name: IncludeJwtId
+      - id: System.Identity/ClientClaims
+        name: ClientClaims
+      - id: System.Identity/AlwaysSendClientClaims
+        name: AlwaysSendClientClaims
+      - id: System.Identity/ClientClaimsPrefix
+        name: ClientClaimsPrefix
+        isOptional: true
+      - id: System.Identity/PairWiseSubjectSalt
+        name: PairWiseSubjectSalt
+        isOptional: true
+      - id: System.Identity/UserSsoLifetime
+        name: UserSsoLifetime
+        isOptional: true
+      - id: System.Identity/UserCodeType
+        name: UserCodeType
+        isOptional: true
+      - id: System.Identity/DeviceCodeLifetime
+        name: DeviceCodeLifetime
+      - id: System.Identity/CibaLifetime
+        name: CibaLifetime
+        isOptional: true
+      - id: System.Identity/PollingInterval
+        name: PollingInterval
+        isOptional: true
+      - id: System.Identity/CoordinateLifetimeWithUserSession
+        name: CoordinateLifetimeWithUserSession
+        isOptional: true
+      - id: System.Identity/AllowedCorsOrigins
+        name: AllowedCorsOrigins
+      - id: System.Identity/InitiateLoginUri
+        name: InitiateLoginUri
+        isOptional: true

@@ -1,6 +1,5 @@
 using Duende.IdentityServer.Stores;
 using Meshmakers.Octo.Backend.IdentityServices.Services;
-using Microsoft.Extensions.DependencyInjection;
 
 namespace Meshmakers.Octo.Backend.IdentityServices.Configuration;
 

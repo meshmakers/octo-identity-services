@@ -2,7 +2,7 @@
   "profiles": {
     "Meshmakers.Octo.Backend.IdentityServices": {
       "commandName": "Project",
-      "launchBrowser": true,
+      "launchBrowser": false,
       "environmentVariables": {
         "ASPNETCORE_ENVIRONMENT": "Development"
       },

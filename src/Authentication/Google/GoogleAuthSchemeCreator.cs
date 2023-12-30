@@ -1,11 +1,11 @@
 ﻿using Meshmakers.Octo.Backend.Authentication.DynamicAuth;
-using Meshmakers.Octo.SystematizedData.Persistence.SystemEntities;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.Google;
+using Persistence.IdentityCkModel.ConstructionKit.Generated.System.Identity.v1;
 
 namespace Meshmakers.Octo.Backend.Authentication.Google;
 
-internal class GoogleAuthSchemeCreator : IAuthSchemeCreator<GoogleIdentityProvider>
+internal class GoogleAuthSchemeCreator : IAuthSchemeCreator<RtGoogleIdentityProvider>
 {
     private readonly IDynamicAuthOptionsBuilder<GoogleOptions> _googleAuthOptionsBuilder;
 
@@ -19,12 +19,12 @@ internal class GoogleAuthSchemeCreator : IAuthSchemeCreator<GoogleIdentityProvid
     }
 
 
-    public AuthenticationScheme Create(GoogleIdentityProvider identityProvider)
+    public AuthenticationScheme Create(RtGoogleIdentityProvider identityProvider)
     {
-        var options = _googleAuthOptionsBuilder.CreateOptions(identityProvider.Alias);
+        var options = _googleAuthOptionsBuilder.CreateOptions(identityProvider.Name);
         options.ClientId = identityProvider.ClientId;
         options.ClientSecret = identityProvider.ClientSecret;
 
-        return new AuthenticationScheme(identityProvider.Alias, identityProvider.Alias, typeof(GoogleHandler));
+        return new AuthenticationScheme(identityProvider.Name, identityProvider.DisplayName, typeof(GoogleHandler));
     }
 }

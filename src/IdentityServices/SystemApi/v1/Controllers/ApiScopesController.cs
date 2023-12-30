@@ -1,18 +1,17 @@
-using System;
-using System.Collections.Generic;
 using System.ComponentModel.DataAnnotations;
-using System.Linq;
-using System.Threading.Tasks;
 using Duende.IdentityServer.Models;
 using IdentityModel;
-using Meshmakers.Octo.Backend.Common.ApiErrors;
-using Meshmakers.Octo.Common.Shared;
-using Meshmakers.Octo.Common.Shared.DataTransferObjects;
-using Meshmakers.Octo.Common.Shared.DistributedCache;
-using Meshmakers.Octo.SystematizedData.Persistence.SystemEntities;
-using Meshmakers.Octo.SystematizedData.Persistence.SystemStores;
+using IdentityServerPersistence;
+using IdentityServerPersistence.SystemStores;
+using Meshmakers.Octo.Common.DistributionEventHub.Services;
+using Meshmakers.Octo.Communication.Contracts.DataTransferObjects;
+using Meshmakers.Octo.Runtime.Contracts.RepositoryEntities;
+using Meshmakers.Octo.Services.Common.ApiErrors;
+using Meshmakers.Octo.Services.Common.DistributionEventHub.Messages;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using MongoDB.Bson;
+using Persistence.IdentityCkModel.ConstructionKit.Generated.System.Identity.v1;
 
 namespace Meshmakers.Octo.Backend.IdentityServices.SystemApi.v1.Controllers;
 
@@ -22,15 +21,15 @@ namespace Meshmakers.Octo.Backend.IdentityServices.SystemApi.v1.Controllers;
 [ApiVersion(IdentityServiceConstants.ApiVersion1)]
 public class ApiScopesController : ControllerBase
 {
+    private readonly IDistributionEventHubService _distributionEventHubService;
     private readonly IOctoResourceStore _octoResourceStore;
-    private readonly IDistributedWithPubSubCache _distributedCache;
 
-    public ApiScopesController(IOctoResourceStore octoResourceStore, IDistributedWithPubSubCache distributedCache)
+    public ApiScopesController(IOctoResourceStore octoResourceStore, IDistributionEventHubService distributionEventHubService)
     {
         _octoResourceStore = octoResourceStore;
-        _distributedCache = distributedCache;
+        _distributionEventHubService = distributionEventHubService;
     }
-    
+
     // GET: system/v1/apiScopes
     /// <summary>
     ///     Returns all API scope definitions
@@ -43,7 +42,7 @@ public class ApiScopesController : ControllerBase
         var resources = await _octoResourceStore.GetAllResourcesAsync();
         return resources.ApiScopes.Select(CreateApiScopeDto);
     }
-    
+
     // GET system/v1/apiScopes/getPaged
     /// <summary>
     ///     Returns all API scope using paging
@@ -68,12 +67,12 @@ public class ApiScopesController : ControllerBase
         var header = pagedResult.GetHeader();
         if (header != null)
         {
-            Response.Headers.Add("X-Pagination", header.ToJson());
+            Response.Headers.Append("X-Pagination", header.ToJson());
         }
 
         return pagedResult;
     }
-    
+
     // GET api/apiScopes/5
     /// <summary>
     ///     Returns scope information based on it's scope name
@@ -86,14 +85,11 @@ public class ApiScopesController : ControllerBase
     {
         var scopes = await _octoResourceStore.FindApiScopesByNameAsync(new[] { name });
         var scope = scopes.FirstOrDefault();
-        if (scope == null)
-        {
-            return NotFound();
-        }
+        if (scope == null) return NotFound();
 
         return Ok(CreateApiScopeDto(scope));
     }
-    
+
     /// <summary>
     ///     Creates a new scope
     /// </summary>
@@ -104,17 +100,12 @@ public class ApiScopesController : ControllerBase
     [Authorize(IdentityServiceConstants.IdentityApiReadWritePolicy)]
     public async Task<IActionResult> Post([Required] [FromBody] ApiScopeDto scopeDto)
     {
-        if (!ModelState.IsValid || scopeDto.Name == null)
-        {
-            return BadRequest(ModelState);
-        }
+        if (!ModelState.IsValid || scopeDto.Name == null) return BadRequest(ModelState);
 
-        if ((await _octoResourceStore.FindApiScopesByNameAsync(new[]{scopeDto.Name})).Any())
-        {
+        if ((await _octoResourceStore.FindApiScopesByNameAsync(new[] { scopeDto.Name })).Any())
             return Conflict($"Scope with name '{scopeDto.Name}' already exists.");
-        }
 
-        var apiScope = new OctoApiScope();
+        var apiScope = new RtApiScope();
         ApplyToApiScope(apiScope, scopeDto);
 
         try
@@ -128,7 +119,7 @@ public class ApiScopesController : ControllerBase
             return BadRequest(new InternalServerError(e.Message));
         }
     }
-    
+
     // PUT api/apiScopes/5
     /// <summary>
     ///     Updates a scope
@@ -140,16 +131,10 @@ public class ApiScopesController : ControllerBase
     [Authorize(IdentityServiceConstants.IdentityApiReadWritePolicy)]
     public async Task<IActionResult> Put([Required] string name, [Required] [FromBody] ApiScopeDto scopeDto)
     {
-        if (!ModelState.IsValid)
-        {
-            return BadRequest(ModelState);
-        }
+        if (!ModelState.IsValid) return BadRequest(ModelState);
 
-        var apiScope = (await _octoResourceStore.FindApiScopesByNameAsync(new[] { name })).FirstOrDefault() as OctoApiScope;
-        if (apiScope == null)
-        {
-            return NotFound(new NotFoundError($"Scope with name '{name}' does not exist."));
-        }
+        var apiScope = await _octoResourceStore.GetApiScopeByNameAsync(name);
+        if (apiScope == null) return NotFound(new NotFoundError($"Scope with name '{name}' does not exist."));
 
         ApplyToApiScope(apiScope, scopeDto);
 
@@ -165,7 +150,7 @@ public class ApiScopesController : ControllerBase
 
         return Ok();
     }
-    
+
     // DELETE api/apiScopes/5
     /// <summary>
     ///     Deletes a scope
@@ -176,20 +161,14 @@ public class ApiScopesController : ControllerBase
     [Authorize(IdentityServiceConstants.IdentityApiReadWritePolicy)]
     public async Task<IActionResult> Delete([Required] string name)
     {
-        if (!ModelState.IsValid)
-        {
-            return BadRequest(ModelState);
-        }
-        
-        var octoApiScope = (await _octoResourceStore.FindApiScopesByNameAsync(new[] { name })).FirstOrDefault() as OctoApiScope;
-        if (octoApiScope == null)
-        {
-            return NotFound(new NotFoundError($"Scope with name '{name}' does not exist."));
-        }
+        if (!ModelState.IsValid) return BadRequest(ModelState);
+
+        var octoApiScope = await _octoResourceStore.GetApiScopeByNameAsync(name);
+        if (octoApiScope == null) return NotFound(new NotFoundError($"Scope with name '{name}' does not exist."));
 
         try
         {
-            await _octoResourceStore.DeleteApiScopeAsync(octoApiScope.Id);
+            await _octoResourceStore.DeleteApiScopeAsync(octoApiScope.RtId);
             await ClearCacheAsync();
         }
         catch (Exception e)
@@ -199,12 +178,12 @@ public class ApiScopesController : ControllerBase
 
         return Ok();
     }
-    
-    private async Task ClearCacheAsync()
+
+    private Task ClearCacheAsync(string? tenantId = null)
     {
-        await _distributedCache.PublishAsync(CacheCommon.KeyCorsClients, Guid.NewGuid().ToString());
+        return _distributionEventHubService.PublishAsync(new CorsClientsUpdate(tenantId));
     }
-    
+
     private ApiScopeDto CreateApiScopeDto(ApiScope apiScope)
     {
         var apiScopeDto = new ApiScopeDto
@@ -216,29 +195,23 @@ public class ApiScopesController : ControllerBase
             ShowInDiscoveryDocument = apiScope.ShowInDiscoveryDocument,
             UserClaims = apiScope.UserClaims,
             IsRequired = apiScope.Required,
-            IsEmphasize = apiScope.Emphasize,
+            IsEmphasize = apiScope.Emphasize
         };
-        
+
         return apiScopeDto;
     }
-    
-    private void ApplyToApiScope(OctoApiScope apiScope, ApiScopeDto apiScopeDto)
+
+    private void ApplyToApiScope(RtApiScope apiScope, ApiScopeDto apiScopeDto)
     {
-        if (string.IsNullOrWhiteSpace(apiScopeDto.Name))
-        {
-            throw new InvalidOperationException("Scope name cannot be null or empty.");
-        }
-        
+        if (string.IsNullOrWhiteSpace(apiScopeDto.Name)) throw new InvalidOperationException("Scope name cannot be null or empty.");
+
         apiScope.Enabled = apiScopeDto.IsEnabled;
         apiScope.Name = apiScopeDto.Name;
         apiScope.DisplayName = apiScopeDto.DisplayName;
         apiScope.Description = apiScopeDto.Description;
         apiScope.ShowInDiscoveryDocument = apiScopeDto.ShowInDiscoveryDocument;
-        if (apiScopeDto.UserClaims != null)
-        {
-            apiScope.UserClaims = apiScopeDto.UserClaims.ToList();
-        }
-        apiScope.Required = apiScopeDto.IsRequired;
-        apiScope.Emphasize = apiScopeDto.IsEmphasize;
+        if (apiScopeDto.UserClaims != null) apiScope.Claims = new AttributeStringValueList(apiScopeDto.UserClaims.ToList());
+        apiScope.IsRequired = apiScopeDto.IsRequired;
+        apiScope.IsEmphasized = apiScopeDto.IsEmphasize;
     }
 }
