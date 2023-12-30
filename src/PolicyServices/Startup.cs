@@ -1,8 +1,6 @@
 #pragma warning disable 1591
-using IdentityServerPersistence.Configuration;
 using Meshmakers.Octo.Backend.PolicyServices.Configuration;
 using Meshmakers.Octo.Backend.PolicyServices.Services;
-using Meshmakers.Octo.Common.Shared;
 using Meshmakers.Octo.Communication.Contracts;
 using Meshmakers.Octo.Runtime.Contracts.MongoDb;
 using Meshmakers.Octo.Runtime.Contracts.MongoDb.Configuration;

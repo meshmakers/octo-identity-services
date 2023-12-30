@@ -1,6 +1,6 @@
+using Meshmakers.Common.Shared;
 using Meshmakers.Octo.Backend.Authentication.DynamicAuth;
 using Meshmakers.Octo.Common.DistributionEventHub.Consumers;
-using Meshmakers.Octo.Common.Shared;
 using Meshmakers.Octo.Services.Common.DistributionEventHub.Messages;
 using Microsoft.Extensions.Logging;
 
@@ -31,7 +31,7 @@ public class IdentityProviderUpdateConsumer : IDistributedConsumer<IdentityProvi
     {
         _logger.LogInformation("Cors client update for tenant received: {Text}", context.Message.TenantId);
 
-        var key = context.Message.TenantId?.MakeKey();
+        var key = context.Message.TenantId?.NormalizeString();
 
         _authSchemeService.ConfigureAsync(key);
 
