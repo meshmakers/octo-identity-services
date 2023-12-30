@@ -1,18 +1,16 @@
-﻿using System;
-using System.ComponentModel.DataAnnotations;
-using System.Linq;
-using System.Threading.Tasks;
+﻿using System.ComponentModel.DataAnnotations;
 using AutoMapper;
 using IdentityModel;
-using Meshmakers.Octo.Common.Shared;
-using Meshmakers.Octo.Common.Shared.DataTransferObjects;
-using Meshmakers.Octo.Common.Shared.DistributedCache;
-using Meshmakers.Octo.SystematizedData.Persistence.DataAccess;
-using Meshmakers.Octo.SystematizedData.Persistence.SystemEntities;
-using Meshmakers.Octo.SystematizedData.Persistence.SystemStores;
+using IdentityServerPersistence;
+using IdentityServerPersistence.SystemStores;
+using Meshmakers.Octo.Common.DistributionEventHub.Services;
+using Meshmakers.Octo.Communication.Contracts.DataTransferObjects;
+using Meshmakers.Octo.ConstructionKit.Contracts;
+using Meshmakers.Octo.Runtime.Contracts.MongoDb;
+using Meshmakers.Octo.Services.Common.DistributionEventHub.Messages;
 using Microsoft.AspNetCore.Authorization;
-using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
+using Persistence.IdentityCkModel.ConstructionKit.Generated.System.Identity.v1;
 
 namespace Meshmakers.Octo.Backend.IdentityServices.SystemApi.v1.Controllers;
 
@@ -25,7 +23,7 @@ namespace Meshmakers.Octo.Backend.IdentityServices.SystemApi.v1.Controllers;
 [ApiVersion(IdentityServiceConstants.ApiVersion1)]
 public class IdentityProvidersController : ControllerBase
 {
-    private readonly IDistributedWithPubSubCache _distributedCache;
+    private readonly IDistributionEventHubService _distributionEventHubService;
     private readonly IOctoIdentityProviderStore _identityProviderStore;
     private readonly IMapper _mapper;
 
@@ -34,13 +32,13 @@ public class IdentityProvidersController : ControllerBase
     /// </summary>
     /// <param name="identityProviderStore"></param>
     /// <param name="mapper"></param>
-    /// <param name="distributedCache"></param>
+    /// <param name="distributionEventHubService"></param>
     public IdentityProvidersController(IOctoIdentityProviderStore identityProviderStore, IMapper mapper,
-        IDistributedWithPubSubCache distributedCache)
+        IDistributionEventHubService distributionEventHubService)
     {
         _identityProviderStore = identityProviderStore;
         _mapper = mapper;
-        _distributedCache = distributedCache;
+        _distributionEventHubService = distributionEventHubService;
     }
 
     /// <summary>
@@ -70,11 +68,8 @@ public class IdentityProvidersController : ControllerBase
     [Authorize(IdentityServiceConstants.IdentityApiReadOnlyPolicy)]
     public async Task<ActionResult<IdentityProvidersResult>> Get([Required] string id)
     {
-        var identityProvider = await _identityProviderStore.GetAsync(id);
-        if (identityProvider == null)
-        {
-            return NotFound();
-        }
+        var identityProvider = await _identityProviderStore.GetByNameAsync(id);
+        if (identityProvider == null) return NotFound();
 
         return new IdentityProvidersResult
         {
@@ -97,7 +92,7 @@ public class IdentityProvidersController : ControllerBase
     public async Task<ActionResult<IdentityProviderDto>> AddNewIdentityProviderAsync(
         [FromBody] IdentityProviderDto identityProviderDto)
     {
-        var identityProvider = _mapper.Map<OctoIdentityProvider>(identityProviderDto);
+        var identityProvider = _mapper.Map<RtIdentityProvider>(identityProviderDto);
 
         await HandleWriteExceptionAsync(async () => await _identityProviderStore.StoreAsync(identityProvider));
         await ClearCacheAsync();
@@ -115,10 +110,7 @@ public class IdentityProvidersController : ControllerBase
     [Authorize(IdentityServiceConstants.IdentityApiReadWritePolicy)]
     public async Task<IActionResult> DeleteIdentityProviderAsync([Required] string id)
     {
-        if (!ModelState.IsValid)
-        {
-            return BadRequest(ModelState);
-        }
+        if (!ModelState.IsValid) return BadRequest(ModelState);
 
         await _identityProviderStore.RemoveAsync(id);
         await ClearCacheAsync();
@@ -145,13 +137,10 @@ public class IdentityProvidersController : ControllerBase
     public async Task<ActionResult<IdentityProviderDto>> ReplaceProviderAsync([FromRoute] [Required] string id,
         [FromBody] [Required] IdentityProviderDto identityProviderDto)
     {
-        if (identityProviderDto == null)
-        {
-            throw new ArgumentNullException(nameof(identityProviderDto));
-        }
+        if (identityProviderDto == null) throw new ArgumentNullException(nameof(identityProviderDto));
 
-        var identityProvider = _mapper.Map<OctoIdentityProvider>(identityProviderDto);
-        identityProvider.Id = id;
+        var identityProvider = _mapper.Map<RtIdentityProvider>(identityProviderDto);
+        identityProvider.RtId = new OctoObjectId(id);
 
         await HandleWriteExceptionAsync(async () => await _identityProviderStore.StoreAsync(identityProvider));
         await ClearCacheAsync();
@@ -172,8 +161,8 @@ public class IdentityProvidersController : ControllerBase
         }
     }
 
-    private async Task ClearCacheAsync()
+    private Task ClearCacheAsync(string? tenantId = null)
     {
-        await _distributedCache.PublishAsync(CacheCommon.KeyIdentityProviderUpdate, Guid.NewGuid().ToString());
+        return _distributionEventHubService.PublishAsync(new IdentityProviderUpdate(tenantId));
     }
 }

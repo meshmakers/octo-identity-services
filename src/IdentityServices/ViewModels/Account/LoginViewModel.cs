@@ -1,6 +1,3 @@
-using System.Collections.Generic;
-using System.Linq;
-
 namespace Meshmakers.Octo.Backend.IdentityServices.ViewModels.Account;
 
 public class LoginViewModel : LoginInputModel
@@ -12,7 +9,7 @@ public class LoginViewModel : LoginInputModel
     public IEnumerable<ExternalProvider>? ExternalProviders { get; set; }
 
     public IEnumerable<ExternalProvider>? VisibleExternalProviders =>
-            ExternalProviders?.Where(x => !string.IsNullOrWhiteSpace(x.DisplayName));
+        ExternalProviders?.Where(x => !string.IsNullOrWhiteSpace(x.DisplayName));
 
     public bool IsExternalLoginOnly => EnableLocalLogin == false && ExternalProviders?.Count() == 1;
 

@@ -1,11 +1,11 @@
 ﻿using Meshmakers.Octo.Backend.Authentication.DynamicAuth;
-using Meshmakers.Octo.SystematizedData.Persistence.SystemEntities;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.MicrosoftAccount;
+using Persistence.IdentityCkModel.ConstructionKit.Generated.System.Identity.v1;
 
 namespace Meshmakers.Octo.Backend.Authentication.Microsoft;
 
-internal class MicrosoftAuthSchemeCreator : IAuthSchemeCreator<MicrosoftIdentityProvider>
+internal class MicrosoftAuthSchemeCreator : IAuthSchemeCreator<RtMicrosoftIdentityProvider>
 {
     private readonly IDynamicAuthOptionsBuilder<MicrosoftAccountOptions> _micAuthOptions;
 
@@ -18,13 +18,13 @@ internal class MicrosoftAuthSchemeCreator : IAuthSchemeCreator<MicrosoftIdentity
         _micAuthOptions = micAuthOptions;
     }
 
-    public AuthenticationScheme Create(MicrosoftIdentityProvider identityProvider)
+    public AuthenticationScheme Create(RtMicrosoftIdentityProvider identityProvider)
     {
-        var options = _micAuthOptions.CreateOptions(identityProvider.Alias);
+        var options = _micAuthOptions.CreateOptions(identityProvider.Name);
         options.ClientId = identityProvider.ClientId;
         options.ClientSecret = identityProvider.ClientSecret;
 
-        return new AuthenticationScheme(identityProvider.Alias, identityProvider.Alias,
+        return new AuthenticationScheme(identityProvider.Name, identityProvider.DisplayName,
             typeof(MicrosoftAccountHandler));
     }
 }

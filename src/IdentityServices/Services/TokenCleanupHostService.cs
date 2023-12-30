@@ -1,9 +1,5 @@
-using System;
-using System.Threading;
-using System.Threading.Tasks;
-using Meshmakers.Octo.SystematizedData.Persistence.SystemStores;
-using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Extensions.Hosting;
+using IdentityServerPersistence.Configuration.Options;
+using IdentityServerPersistence.SystemStores;
 using Microsoft.Extensions.Options;
 using NLog;
 
@@ -31,10 +27,7 @@ internal class TokenCleanupHostService : IHostedService
     {
         if (_identityOptions.Value.EnableTokenCleanup)
         {
-            if (_source != null)
-            {
-                throw new InvalidOperationException("Already started. Call Stop first.");
-            }
+            if (_source != null) throw new InvalidOperationException("Already started. Call Stop first.");
 
             Logger.Debug("Starting grant removal");
 
@@ -51,9 +44,8 @@ internal class TokenCleanupHostService : IHostedService
         if (_identityOptions.Value.EnableTokenCleanup)
         {
             if (_source == null)
-            {
-                throw new InvalidOperationException("Not started. Call Start first.");
-            }
+                // Nothing was initialized, so exit.
+                return Task.CompletedTask;
 
             Logger.Debug("Stopping grant removal");
 

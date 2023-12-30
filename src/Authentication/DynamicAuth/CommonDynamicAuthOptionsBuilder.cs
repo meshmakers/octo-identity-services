@@ -11,6 +11,5 @@ public class CommonDynamicAuthOptionsBuilder<THandler, TOptions> : DynamicAuthOp
         IOptionsFactory<TOptions> optionsFactory, IOptionsMonitorCache<TOptions> optionsMonitorCache)
         : base(authOptions, optionsFactory, optionsMonitorCache)
     {
-        
     }
 }

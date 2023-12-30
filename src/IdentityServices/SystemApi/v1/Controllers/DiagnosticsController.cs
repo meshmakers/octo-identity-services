@@ -1,5 +1,6 @@
 using IdentityModel;
-using Meshmakers.Octo.Common.Shared.DataTransferObjects;
+using IdentityServerPersistence;
+using Meshmakers.Octo.Communication.Contracts.DataTransferObjects;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 

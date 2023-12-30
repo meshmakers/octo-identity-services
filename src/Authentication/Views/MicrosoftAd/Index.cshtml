@@ -36,8 +36,8 @@
                                 </label>
                                 <span asp-validation-for="Email" class="sg-validation-error"></span>
                             </div>
-                            
-                           <div class="form-group octo-input-group">
+
+                            <div class="form-group octo-input-group">
                                 <label class="mdc-text-field octo-login-input mdc-text-field--outlined">
                                     <span class="mdc-notched-outline">
                                         <span class="mdc-notched-outline__leading"></span>
@@ -51,24 +51,24 @@
                                 <span asp-validation-for="Password" class="sg-validation-error"></span>
                             </div>
 
-                           <div class="mdc-form-field">
-                               <div class="mdc-checkbox">
-                                   <input type="checkbox"
-                                          class="mdc-checkbox__native-control"
-                                          id="cb-remember" asp-for="RememberLogin"/>
-                                   <div class="mdc-checkbox__background">
-                                       <svg class="mdc-checkbox__checkmark"
-                                            viewBox="0 0 24 24">
-                                           <path class="mdc-checkbox__checkmark-path"
-                                                 fill="none"
-                                                 d="M1.73,12.91 8.1,19.28 22.79,4.59"/>
-                                       </svg>
-                                       <div class="mdc-checkbox__mixedmark"></div>
-                                   </div>
-                                   <div class="mdc-checkbox__ripple"></div>
-                               </div>
-                               <label for="cb-remember" class="octo-label">@IdentityTexts.Backend_Identity_Login_RememberMe_Label</label>
-                           </div>
+                            <div class="mdc-form-field">
+                                <div class="mdc-checkbox">
+                                    <input type="checkbox"
+                                           class="mdc-checkbox__native-control"
+                                           id="cb-remember" asp-for="RememberLogin"/>
+                                    <div class="mdc-checkbox__background">
+                                        <svg class="mdc-checkbox__checkmark"
+                                             viewBox="0 0 24 24">
+                                            <path class="mdc-checkbox__checkmark-path"
+                                                  fill="none"
+                                                  d="M1.73,12.91 8.1,19.28 22.79,4.59"/>
+                                        </svg>
+                                        <div class="mdc-checkbox__mixedmark"></div>
+                                    </div>
+                                    <div class="mdc-checkbox__ripple"></div>
+                                </div>
+                                <label for="cb-remember" class="octo-label">@IdentityTexts.Backend_Identity_Login_RememberMe_Label</label>
+                            </div>
                         </fieldset>
                         <input asp-for="XsrfId" type="hidden"/>
                         <input asp-for="LoginProvider" type="hidden"/>
@@ -78,7 +78,7 @@
 
                         <button class="mdc-button mdc-button--raised mdc-button mdc-card__action mdc-card__action--button"
                                 name="button" type="submit" value="login">
-                                @IdentityTexts.Backend_Identity_Login_Login_Button
+                            @IdentityTexts.Backend_Identity_Login_Login_Button
                         </button>
 
 

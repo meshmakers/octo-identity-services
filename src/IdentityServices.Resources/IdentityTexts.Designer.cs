@@ -908,5 +908,143 @@ namespace Meshmakers.Octo.Backend.IdentityServices.Resources {
                 return ResourceManager.GetString("Backend_Identity_Login_LdapUser_Label", resourceCulture);
             }
         }
+        
+        public static string Backend_Persistence_Identity_DefaultIdentityError {
+            get {
+                return ResourceManager.GetString("Backend_Persistence_Identity_DefaultIdentityError", resourceCulture);
+            }
+        }
+        
+        public static string Backend_Persistence_Identity_RecoveryCodeRedemptionFailed {
+            get {
+                return ResourceManager.GetString("Backend_Persistence_Identity_RecoveryCodeRedemptionFailed", resourceCulture);
+            }
+        }
+        
+        public static string Backend_Persistence_Identity_DuplicateEmail {
+            get {
+                return ResourceManager.GetString("Backend_Persistence_Identity_DuplicateEmail", resourceCulture);
+            }
+        }
+        
+        public static string Backend_Persistence_Identity_DuplicateUserName {
+            get {
+                return ResourceManager.GetString("Backend_Persistence_Identity_DuplicateUserName", resourceCulture);
+            }
+        }
+        
+        public static string Backend_Persistence_Identity_DuplicateRoleName {
+            get {
+                return ResourceManager.GetString("Backend_Persistence_Identity_DuplicateRoleName", resourceCulture);
+            }
+        }
+        
+        public static string Backend_Persistence_Identity_InvalidUserName {
+            get {
+                return ResourceManager.GetString("Backend_Persistence_Identity_InvalidUserName", resourceCulture);
+            }
+        }
+        
+        public static string Backend_Persistence_Identity_PasswordRequiresDigit {
+            get {
+                return ResourceManager.GetString("Backend_Persistence_Identity_PasswordRequiresDigit", resourceCulture);
+            }
+        }
+        
+        public static string Backend_Persistence_Identity_PasswordRequiresUniqueChars {
+            get {
+                return ResourceManager.GetString("Backend_Persistence_Identity_PasswordRequiresUniqueChars", resourceCulture);
+            }
+        }
+        
+        public static string Backend_Persistence_Identity_PasswordRequiresUpper {
+            get {
+                return ResourceManager.GetString("Backend_Persistence_Identity_PasswordRequiresUpper", resourceCulture);
+            }
+        }
+        
+        public static string Backend_Persistence_Identity_PasswordRequiresNonAlphanumeric {
+            get {
+                return ResourceManager.GetString("Backend_Persistence_Identity_PasswordRequiresNonAlphanumeric", resourceCulture);
+            }
+        }
+        
+        public static string Backend_Persistence_Identity_PasswordRequiresLower {
+            get {
+                return ResourceManager.GetString("Backend_Persistence_Identity_PasswordRequiresLower", resourceCulture);
+            }
+        }
+        
+        public static string Backend_Persistence_Identity_PasswordTooShort {
+            get {
+                return ResourceManager.GetString("Backend_Persistence_Identity_PasswordTooShort", resourceCulture);
+            }
+        }
+        
+        public static string Backend_Persistence_Identity_UserAlreadyHasPassword {
+            get {
+                return ResourceManager.GetString("Backend_Persistence_Identity_UserAlreadyHasPassword", resourceCulture);
+            }
+        }
+        
+        public static string Backend_Persistence_Identity_UserAlreadyInRole {
+            get {
+                return ResourceManager.GetString("Backend_Persistence_Identity_UserAlreadyInRole", resourceCulture);
+            }
+        }
+        
+        public static string Backend_Persistence_Identity_UserNotInRole {
+            get {
+                return ResourceManager.GetString("Backend_Persistence_Identity_UserNotInRole", resourceCulture);
+            }
+        }
+        
+        public static string Backend_Persistence_Identity_UserLockoutNotEnabled {
+            get {
+                return ResourceManager.GetString("Backend_Persistence_Identity_UserLockoutNotEnabled", resourceCulture);
+            }
+        }
+        
+        public static string Backend_Persistence_Identity_InvalidEmail {
+            get {
+                return ResourceManager.GetString("Backend_Persistence_Identity_InvalidEmail", resourceCulture);
+            }
+        }
+        
+        public static string Backend_Persistence_Identity_InvalidRoleName {
+            get {
+                return ResourceManager.GetString("Backend_Persistence_Identity_InvalidRoleName", resourceCulture);
+            }
+        }
+        
+        public static string Backend_Persistence_Identity_InvalidToken {
+            get {
+                return ResourceManager.GetString("Backend_Persistence_Identity_InvalidToken", resourceCulture);
+            }
+        }
+        
+        public static string Backend_Persistence_Identity_LoginAlreadyAssociated {
+            get {
+                return ResourceManager.GetString("Backend_Persistence_Identity_LoginAlreadyAssociated", resourceCulture);
+            }
+        }
+        
+        public static string Backend_Persistence_Identity_PasswordMismatch {
+            get {
+                return ResourceManager.GetString("Backend_Persistence_Identity_PasswordMismatch", resourceCulture);
+            }
+        }
+        
+        public static string Backend_Persistence_Identity_ConcurrencyFailure {
+            get {
+                return ResourceManager.GetString("Backend_Persistence_Identity_ConcurrencyFailure", resourceCulture);
+            }
+        }
+        
+        public static string Backend_Identity_Setup_Status_EMailMissing {
+            get {
+                return ResourceManager.GetString("Backend_Identity_Setup_Status_EMailMissing", resourceCulture);
+            }
+        }
     }
 }

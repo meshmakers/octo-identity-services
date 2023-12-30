@@ -1,5 +1,4 @@
-﻿using System.Threading.Tasks;
-using Meshmakers.Octo.Backend.IdentityServices.ViewModels.Diagnostics;
+﻿using Meshmakers.Octo.Backend.IdentityServices.ViewModels.Diagnostics;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;

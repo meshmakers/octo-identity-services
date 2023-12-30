@@ -1,6 +1,3 @@
-using System.Collections.Generic;
-using System.Linq;
-using System.Threading.Tasks;
 using Duende.IdentityServer;
 using Duende.IdentityServer.Events;
 using Duende.IdentityServer.Extensions;
@@ -11,7 +8,6 @@ using Meshmakers.Octo.Backend.Authentication;
 using Meshmakers.Octo.Backend.IdentityServices.ViewModels.Consent;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
-using Microsoft.Extensions.Logging;
 
 namespace Meshmakers.Octo.Backend.IdentityServices.Controllers.Consent;
 
@@ -44,10 +40,7 @@ public class ConsentController : Controller
     public async Task<IActionResult> Index(string returnUrl)
     {
         var vm = await BuildViewModelAsync(returnUrl);
-        if (vm != null)
-        {
-            return View("Index", vm);
-        }
+        if (vm != null) return View("Index", vm);
 
         return View("Error");
     }
@@ -67,22 +60,14 @@ public class ConsentController : Controller
             if (context?.IsNativeClient() == true)
                 // The client is native, so this change in how to
                 // return the response is for better UX for the end user.
-            {
                 return this.LoadingPage("Redirect", result.RedirectUri);
-            }
 
             return Redirect(result.RedirectUri);
         }
 
-        if (result.HasValidationError && result.ValidationError != null)
-        {
-            ModelState.AddModelError(string.Empty, result.ValidationError);
-        }
+        if (result.HasValidationError && result.ValidationError != null) ModelState.AddModelError(string.Empty, result.ValidationError);
 
-        if (result.ShowView)
-        {
-            return View("Index", result.ViewModel);
-        }
+        if (result.ShowView) return View("Index", result.ViewModel);
 
         return View("Error");
     }
@@ -96,10 +81,7 @@ public class ConsentController : Controller
 
         // validate return url is still valid
         var request = await _interaction.GetAuthorizationContextAsync(model.ReturnUrl);
-        if (request == null)
-        {
-            return result;
-        }
+        if (request == null) return result;
 
         ConsentResponse? grantedConsent = null;
 
@@ -120,10 +102,8 @@ public class ConsentController : Controller
             {
                 var scopes = model.ScopesConsented;
                 if (ConsentOptions.EnableOfflineAccess == false)
-                {
                     scopes = scopes.Where(x =>
                         x != IdentityServerConstants.StandardScopes.OfflineAccess);
-                }
 
                 grantedConsent = new ConsentResponse
                 {
@@ -168,10 +148,7 @@ public class ConsentController : Controller
     private async Task<ConsentViewModel?> BuildViewModelAsync(string? returnUrl, ConsentInputModel? model = null)
     {
         var request = await _interaction.GetAuthorizationContextAsync(returnUrl);
-        if (request != null)
-        {
-            return CreateConsentViewModel(model, returnUrl, request);
-        }
+        if (request != null) return CreateConsentViewModel(model, returnUrl, request);
 
         _logger.LogError("No consent request matching request: {ReturnUrl}", returnUrl);
 
@@ -212,11 +189,9 @@ public class ConsentController : Controller
         }
 
         if (ConsentOptions.EnableOfflineAccess && request.ValidatedResources.Resources.OfflineAccess)
-        {
             apiScopes.Add(GetOfflineAccessScope(
                 vm.ScopesConsented.Contains(IdentityServerConstants.StandardScopes.OfflineAccess) ||
                 model == null));
-        }
 
         vm.ApiScopes = apiScopes;
 
@@ -239,10 +214,7 @@ public class ConsentController : Controller
     public ScopeViewModel CreateScopeViewModel(ParsedScopeValue parsedScopeValue, ApiScope apiScope, bool check)
     {
         var displayName = apiScope.DisplayName ?? apiScope.Name;
-        if (!string.IsNullOrWhiteSpace(parsedScopeValue.ParsedParameter))
-        {
-            displayName += ":" + parsedScopeValue.ParsedParameter;
-        }
+        if (!string.IsNullOrWhiteSpace(parsedScopeValue.ParsedParameter)) displayName += ":" + parsedScopeValue.ParsedParameter;
 
         return new ScopeViewModel
         {

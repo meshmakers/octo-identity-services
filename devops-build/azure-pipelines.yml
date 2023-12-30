@@ -27,7 +27,7 @@ stages:
         steps:
           - checkout: self
             clean: true
-            submodules: true
+            submodules: recursive
           - task: InstallSSHKey@0
             inputs:
               knownHostsEntry: '$(SSHKnownHosts)'

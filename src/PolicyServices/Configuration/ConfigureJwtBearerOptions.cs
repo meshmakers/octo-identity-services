@@ -18,7 +18,7 @@ internal class ConfigureJwtBearerOptions : IConfigureNamedOptions<JwtBearerOptio
         Configure(Options.DefaultName, options);
     }
 
-    public void Configure(string name, JwtBearerOptions options)
+    public void Configure(string? name, JwtBearerOptions options)
     {
         options.Authority = _policyServicesOptions.Value.AuthorityUrl.EnsureEndsWith("/");
     }

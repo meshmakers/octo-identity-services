@@ -1,35 +1,35 @@
-using System.Collections.Generic;
-using System.Threading.Tasks;
 using Duende.IdentityServer;
 using Duende.IdentityServer.Models;
 using IdentityModel;
+using IdentityServerPersistence.Configuration.Options;
+using IdentityServerPersistence.SystemStores;
 using Meshmakers.Common.Shared;
 using Meshmakers.Octo.Backend.IdentityServices.Resources;
-using Meshmakers.Octo.Common.Shared;
-using Meshmakers.Octo.SystematizedData.Persistence;
-using Meshmakers.Octo.SystematizedData.Persistence.SystemEntities;
-using Meshmakers.Octo.SystematizedData.Persistence.SystemStores;
+using Meshmakers.Octo.Backend.Infrastructure.Services;
+using Meshmakers.Octo.Communication.Contracts;
+using Meshmakers.Octo.ConstructionKit.Contracts;
+using Meshmakers.Octo.Runtime.Contracts.MongoDb;
+using Meshmakers.Octo.Runtime.Contracts.RepositoryEntities;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.Extensions.Options;
+using Persistence.IdentityCkModel.ConstructionKit.Generated.System.Identity.v1;
 
-namespace Meshmakers.Octo.Backend.IdentityServices.Services;
+namespace IdentityServerPersistence.Services;
 
-internal class UserSchemaService : IUserSchemaService
+internal class DefaultConfigurationCreatorService : IDefaultConfigurationCreatorService
 {
     private readonly IOctoClientStore _clientStore;
     private readonly IOctoIdentityProviderStore _octoIdentityProviderStore;
     private readonly OctoIdentityServicesOptions _octoIdentityServicesOptions;
     private readonly IOctoResourceStore _resourceStore;
-    private readonly RoleManager<OctoRole> _roleManager;
+    private readonly RoleManager<RtRole> _roleManager;
     private readonly ISystemContext _systemContext;
-    private readonly UserManager<OctoUser> _userManager;
 
-    public UserSchemaService(ISystemContext systemContext, UserManager<OctoUser> userManager,
-        RoleManager<OctoRole> roleManager, IOctoClientStore clientStore, IOctoResourceStore resourceStore,
+    public DefaultConfigurationCreatorService(ISystemContext systemContext,
+        RoleManager<RtRole> roleManager, IOctoClientStore clientStore, IOctoResourceStore resourceStore,
         IOctoIdentityProviderStore octoIdentityProviderStore, IOptions<OctoIdentityServicesOptions> octoIdentityOptions)
     {
         _systemContext = systemContext;
-        _userManager = userManager;
         _roleManager = roleManager;
         _clientStore = clientStore;
         _resourceStore = resourceStore;
@@ -37,15 +37,22 @@ internal class UserSchemaService : IUserSchemaService
         _octoIdentityServicesOptions = octoIdentityOptions.Value;
     }
 
-    public async Task SetupAsync()
+    public async Task SetupAsync(string? tenantId)
     {
-        using var session = await _systemContext.StartSystemSessionAsync();
-        session.StartTransaction();
+        if (!await _systemContext.IsSystemTenantExistingAsync())
+        {
+            await _systemContext.CreateSystemTenantAsync();
+        }
 
-        var version =
+        await ImportCkModel();
+
+        using var session = await _systemContext.GetSystemSessionAsync();
+        session.StartTransaction();
+        
+        var identityConfiguration =
             await _systemContext.GetConfigurationAsync(session, IdentityServiceConstants.IdentitySchemaVersionKey,
-                0);
-        if (version < IdentityServiceConstants.IdentitySchemaVersionValue)
+                new DefaultConfigurationVersion { Version = -1 });
+        if (identityConfiguration == null || identityConfiguration.Version < IdentityServiceConstants.IdentitySchemaVersionValue)
         {
             await CreateClients();
             await CreateUsersAndRoles();
@@ -56,7 +63,27 @@ internal class UserSchemaService : IUserSchemaService
             await CreateIdentityProvider();
 
             await _systemContext.SetConfigurationAsync(session, IdentityServiceConstants.IdentitySchemaVersionKey,
-                IdentityServiceConstants.IdentitySchemaVersionValue);
+                new DefaultConfigurationVersion { Version = IdentityServiceConstants.IdentitySchemaVersionValue });
+        }
+
+        await session.CommitTransactionAsync();
+    }
+
+    private async Task ImportCkModel()
+    {
+        using var session = await _systemContext.GetSystemSessionAsync();
+        session.StartTransaction();
+
+        if (!await _systemContext.IsCkModelExistingAsync(session, SystemIdentityCkIds.ModelId))
+        {
+            // We ensure that at least the system tenant contains a valid ck model.Other tenants
+            // need to be enabled manually by a admin.
+            OperationResult operationResult = new();
+            await _systemContext.ImportCkModelAsync(session, SystemIdentityCkIds.ModelId, operationResult);
+            if (operationResult.HasErrors || operationResult.HasFatalErrors)
+            {
+                throw InitializationException.ImportCkModelFailed(_systemContext.TenantId, operationResult.GetMessages());
+            }
         }
 
         await session.CommitTransactionAsync();
@@ -64,31 +91,33 @@ internal class UserSchemaService : IUserSchemaService
 
     private async Task CreateIdentityProvider()
     {
-        var googleProvider = await _octoIdentityProviderStore.GetAsync(CommonConstants.GoogleIdentityProvider);
+        var googleProvider = await _octoIdentityProviderStore.GetByNameAsync(CommonConstants.GoogleIdentityProvider);
         if (googleProvider == null)
         {
-            googleProvider = new GoogleIdentityProvider
+            googleProvider = new RtGoogleIdentityProvider
             {
-                IsEnabled = false,
+                Enabled = false,
                 ClientId = "392724150963-34b8f10j23nm1rg31vi64lrb07o3aaga.apps.googleusercontent.com",
                 ClientSecret = "i0MW0fbgOiwazab4msWeBnnl",
-                Type = IdentityProviderTypes.Google,
-                Alias = CommonConstants.GoogleIdentityProvider
+                Type = RtIdentityProviderTypesEnum.Google,
+                Name = CommonConstants.GoogleIdentityProvider,
+                DisplayName = CommonConstants.GoogleIdentityProvider
             };
 
             await _octoIdentityProviderStore.StoreAsync(googleProvider);
         }
 
-        var microsoftProvider = await _octoIdentityProviderStore.GetAsync(CommonConstants.MicrosoftIdentityProvider);
+        var microsoftProvider = await _octoIdentityProviderStore.GetByNameAsync(CommonConstants.MicrosoftIdentityProvider);
         if (microsoftProvider == null)
         {
-            microsoftProvider = new MicrosoftIdentityProvider
+            microsoftProvider = new RtMicrosoftIdentityProvider
             {
-                IsEnabled = false,
+                Enabled = false,
                 ClientId = "9697862a-d54b-429a-8526-8e0693c9ecba",
                 ClientSecret = "z8H3]C/:VQ=bJE3jCXLP4F@L-/NwoI@J",
-                Type = IdentityProviderTypes.Microsoft,
-                Alias = CommonConstants.MicrosoftIdentityProvider
+                Type = RtIdentityProviderTypesEnum.Microsoft,
+                Name = CommonConstants.MicrosoftIdentityProvider,
+                DisplayName = CommonConstants.MicrosoftIdentityProvider
             };
 
             await _octoIdentityProviderStore.StoreAsync(microsoftProvider);
@@ -105,13 +134,13 @@ internal class UserSchemaService : IUserSchemaService
 
     private async Task CreateApiResources()
     {
-        await _resourceStore.GetOrCreateApiResourceAsync(new OctoApiResource
+        await _resourceStore.GetOrCreateApiResourceAsync(new RtApiResource
         {
             Name = CommonConstants.IdentityApi,
             DisplayName = CommonConstants.IdentityApiDisplayName,
             Description = CommonConstants.IdentityApiDescription,
             Enabled = true,
-            Scopes = new List<string>
+            Scopes = new AttributeStringValueList
             {
                 CommonConstants.IdentityApiFullAccess,
                 CommonConstants.IdentityApiReadOnly
@@ -138,32 +167,32 @@ internal class UserSchemaService : IUserSchemaService
         var adminRole = await _roleManager.FindByNameAsync(CommonConstants.AdministratorsRole);
         if (adminRole == null)
         {
-            adminRole = new OctoRole
+            adminRole = new RtRole
             {
                 Name = CommonConstants.AdministratorsRole,
-                Claims = new List<IdentityRoleClaim<string>>()
+                Claims = new AttributeRecordValueList<RtRoleClaimRecord>()
             };
             await _roleManager.CreateAsync(adminRole);
         }
-        
+
         var developerRole = await _roleManager.FindByNameAsync(CommonConstants.DevelopersRole);
         if (developerRole == null)
         {
-            developerRole = new OctoRole
+            developerRole = new RtRole
             {
                 Name = CommonConstants.DevelopersRole,
-                Claims = new List<IdentityRoleClaim<string>>()
+                Claims = new AttributeRecordValueList<RtRoleClaimRecord>()
             };
             await _roleManager.CreateAsync(developerRole);
         }
-        
+
         var managerRole = await _roleManager.FindByNameAsync(CommonConstants.ManagersRole);
         if (managerRole == null)
         {
-            managerRole = new OctoRole
+            managerRole = new RtRole
             {
                 Name = CommonConstants.ManagersRole,
-                Claims = new List<IdentityRoleClaim<string>>()
+                Claims = new AttributeRecordValueList<RtRoleClaimRecord>()
             };
             await _roleManager.CreateAsync(managerRole);
         }
@@ -171,10 +200,10 @@ internal class UserSchemaService : IUserSchemaService
         var userRole = await _roleManager.FindByNameAsync(CommonConstants.UsersRole);
         if (userRole == null)
         {
-            userRole = new OctoRole
+            userRole = new RtRole
             {
                 Name = CommonConstants.UsersRole,
-                Claims = new List<IdentityRoleClaim<string>>()
+                Claims = new AttributeRecordValueList<RtRoleClaimRecord>()
             };
             await _roleManager.CreateAsync(userRole);
         }
@@ -185,17 +214,18 @@ internal class UserSchemaService : IUserSchemaService
         var octoToolClient = await _clientStore.FindClientByIdAsync(CommonConstants.OctoToolClientId);
         if (octoToolClient == null)
         {
-            var appClient = new OctoClient
+            var appClient = new RtClient
             {
+                Enabled = true,
                 ClientId = CommonConstants.OctoToolClientId,
 
                 // no interactive user, use the clientId/secret for authentication
-                AllowedGrantTypes = new[] { OidcConstants.GrantTypes.DeviceCode },
+                AllowedGrantTypes = new AttributeStringValueList { OidcConstants.GrantTypes.DeviceCode },
 
                 // secret for authentication
-                ClientSecrets =
+                ClientSecrets = new AttributeRecordValueList<RtSecretRecord>
                 {
-                    new Secret(CommonConstants.OctoToolClientSecret.Sha256())
+                    new() { Value = CommonConstants.OctoToolClientSecret.Sha256() }
                 },
 
                 AllowOfflineAccess = true,
@@ -220,19 +250,20 @@ internal class UserSchemaService : IUserSchemaService
             await _clientStore.FindClientByIdAsync(CommonConstants.IdentityServicesSwaggerClientId);
         if (octoIdentityServiceSwaggerClient == null)
         {
-            var appClient = new OctoClient
+            var appClient = new RtClient
             {
+                Enabled = true,
                 ClientId = CommonConstants.IdentityServicesSwaggerClientId,
 
                 ClientName = IdentityTexts.Backend_IdentityServices_UserSchema_Swagger_DisplayName,
                 ClientUri = _octoIdentityServicesOptions.AuthorityUrl,
 
-                AllowedGrantTypes = new[] { OidcConstants.GrantTypes.AuthorizationCode },
+                AllowedGrantTypes = new AttributeStringValueList { OidcConstants.GrantTypes.AuthorizationCode },
 
                 RequirePkce = true,
                 RequireClientSecret = false,
 
-                AccessTokenType = AccessTokenType.Jwt,
+                AccessTokenType = RtTokenTypeEnum.Jwt,
                 AllowAccessTokensViaBrowser = true,
                 AlwaysIncludeUserClaimsInIdToken = true,
 

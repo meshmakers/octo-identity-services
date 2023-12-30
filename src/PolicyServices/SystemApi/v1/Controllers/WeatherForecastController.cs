@@ -1,14 +1,12 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Linq;
-using IdentityModel;
+﻿using IdentityModel;
 using Meshmakers.Octo.Backend.PolicyServices.SystemApi.v1.Models;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
-using Microsoft.Extensions.Logging;
 
 namespace Meshmakers.Octo.Backend.PolicyServices.SystemApi.v1.Controllers;
 
+/// <summary>
+/// </summary>
 [Authorize(AuthenticationSchemes = OidcConstants.AuthenticationSchemes.AuthorizationHeaderBearer)]
 [Route("system/v{version:apiVersion}/[controller]")]
 [ApiController]
@@ -22,11 +20,17 @@ public class WeatherForecastController : ControllerBase
 
     private readonly ILogger<WeatherForecastController> _logger;
 
+    /// <summary>
+    /// </summary>
+    /// <param name="logger"></param>
     public WeatherForecastController(ILogger<WeatherForecastController> logger)
     {
         _logger = logger;
     }
 
+    /// <summary>
+    /// </summary>
+    /// <returns></returns>
     [HttpGet]
     public IEnumerable<WeatherForecast> Get()
     {

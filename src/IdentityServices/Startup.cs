@@ -1,33 +1,30 @@
-﻿using System.Collections.Generic;
-using Duende.IdentityServer.Services;
+﻿using Duende.IdentityServer.Services;
+using IdentityServerPersistence;
+using IdentityServerPersistence.Configuration.Options;
+using IdentityServerPersistence.SystemStores;
 using Meshmakers.Octo.Backend.Authentication.DynamicAuth;
-using Meshmakers.Octo.Backend.Common;
-using Meshmakers.Octo.Backend.Common.Authorization;
-using Meshmakers.Octo.Backend.DistributedCache;
 using Meshmakers.Octo.Backend.IdentityServices.Configuration;
+using Meshmakers.Octo.Backend.IdentityServices.Consumers;
 using Meshmakers.Octo.Backend.IdentityServices.Resources;
+using Meshmakers.Octo.Backend.IdentityServices.Routing;
 using Meshmakers.Octo.Backend.IdentityServices.Services;
 using Meshmakers.Octo.Backend.Infrastructure.CredentialGenerator;
+using Meshmakers.Octo.Backend.Infrastructure.Middleware;
+using Meshmakers.Octo.Backend.Infrastructure.Services;
 using Meshmakers.Octo.Backend.Swagger.Configuration;
-using Meshmakers.Octo.Common.Shared;
-using Meshmakers.Octo.Common.Shared.DataTransferObjects;
-using Meshmakers.Octo.Common.Shared.Services;
-using Meshmakers.Octo.Services.Common.Cors;
-using Meshmakers.Octo.SystematizedData.Persistence;
-using Meshmakers.Octo.SystematizedData.Persistence.Configuration;
-using Meshmakers.Octo.SystematizedData.Persistence.SystemEntities;
-using Meshmakers.Octo.SystematizedData.Persistence.SystemStores;
+using Meshmakers.Octo.Communication.Contracts;
+using Meshmakers.Octo.Communication.Contracts.DataTransferObjects;
+using Meshmakers.Octo.Communication.Contracts.Services;
+using Meshmakers.Octo.Runtime.Contracts.MongoDb.Configuration;
+using Meshmakers.Octo.Services.Common;
+using Meshmakers.Octo.Services.Common.Authorization;
+using Meshmakers.Octo.Services.Common.DistributionEventHub.Commands;
+using Meshmakers.Octo.SystematizedData.Persistence.Notifications;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
-using Microsoft.AspNetCore.Builder;
-using Microsoft.AspNetCore.Cors.Infrastructure;
-using Microsoft.AspNetCore.Hosting;
-using Microsoft.AspNetCore.Http;
-using Microsoft.Extensions.Configuration;
-using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
-using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Options;
 using Microsoft.IdentityModel.Logging;
+using Persistence.IdentityCkModel.ConstructionKit.Generated.System.Identity.v1;
 
 namespace Meshmakers.Octo.Backend.IdentityServices;
 
@@ -75,18 +72,17 @@ public class Startup
             Configuration.GetSection("System").Bind(options));
         services.Configure<EmailInteractionConfiguration>(options =>
             Configuration.GetSection("EmailInteraction").Bind(options));
-
+        services.Configure<RouteOptions>(options =>
+            options.ConstraintMap.Add("tenantId", typeof(TenantIdRouteConstraint)));
         services.Configure<IISOptions>(iis =>
         {
             iis.AuthenticationDisplayName = "Windows";
             iis.AutomaticAuthentication = false;
         });
 
-        services.ConfigureOptions<ConfigureDistributeCacheWithPubSubOptions>();
-        services.AddDistributedPubSubCache();
+        services.ConfigureOptions<ConfigureDistributionEventHubOptions>();
 
         services.AddScoped<INotificationRepository, EntityNotificationRepository>();
-        services.AddTransient<IUserSchemaService, UserSchemaService>();
         services.AddScoped<ICorsPolicyService, CorsPolicyService>();
         services.AddTransient<ICredentialGenerator, CredentialGenerator>();
 
@@ -96,20 +92,22 @@ public class Startup
             .AddOpenIdConnect()
             .AddOpenLdapAuthentication()
             .AddMicrosoftAdAuthentication();
-
-        services.AddInitializationService<UserSchemaInitializer>();
-        services.AddTransient<IUserSchemaService, UserSchemaService>();
-
-        services.AddSingleton<ICorsPolicyProvider, CorsPolicyProvider>();
+        
         services.AddCors();
 
-        services.AddOctoPersistence();
+        services.AddRuntimeEngine()
+            .AddOctoIdentityPersistence(configureDistributionEventHub: c =>
+            {
+                c.AddCommandConsumer<CreateIdentityDataCommandRequestConsumer, CreateIdentityDataCommandRequest>("identity::create-identity-data");
+            });
+
+        services.AddInitializationService<DefaultConfigurationInitializationService>();
 
         // Add IdentityServer 4 for authentication using OpenID
         var identityServerBuilder = services.AddIdentityServer(serverOptions =>
             {
                 serverOptions.LicenseKey =
-                    "eyJhbGciOiJQUzI1NiIsImtpZCI6IklkZW50aXR5U2VydmVyTGljZW5zZWtleS83Y2VhZGJiNzgxMzA0NjllODgwNjg5MTAyNTQxNGYxNiIsInR5cCI6ImxpY2Vuc2Urand0In0.eyJpc3MiOiJodHRwczovL2R1ZW5kZXNvZnR3YXJlLmNvbSIsImF1ZCI6IklkZW50aXR5U2VydmVyIiwiaWF0IjoxNjYwNTUyMjIyLCJleHAiOjE2OTIwODgyMjIsImNvbXBhbnlfbmFtZSI6ImdlcmFsZC5sb2NobmVyQHNhbHpidXJnZGV2LmF0IiwiY29udGFjdF9pbmZvIjoiZ2VyYWxkLmxvY2huZXJAc2FsemJ1cmdkZXYuYXQiLCJlZGl0aW9uIjoiQ29tbXVuaXR5In0.lNj4QYlQ4uuYZkf3gmO7PWzqFb125bpFugNJ5NIu9DyjvWtUnIeneXt5IbnysJqhXe2812u7xPNTQQXx7Xj18i6egTMgKs9HlbKz4tJEsgHt-H413Otqf86VTAyuLAcyJWPHdu2fAba9VUYLxXNbpE_SgLsMg7of6stDLVi6N2cURLWfiQNnPXMOHmS4HceUcqV11CTUzvlfMYlQoWt1TyAsCHNLoceWAuN6rqRLlRU4D0LoMFIQLJ4CA--rqq7U072JnaChrZww5xdfekwboASZ9G3c-PZ5XNeTe_NPbo8_e8rRQJghx5lwvmBXAK7IFbE_S5czmhbxDMm5inj5gA";
+                    "eyJhbGciOiJQUzI1NiIsImtpZCI6IklkZW50aXR5U2VydmVyTGljZW5zZWtleS83Y2VhZGJiNzgxMzA0NjllODgwNjg5MTAyNTQxNGYxNiIsInR5cCI6ImxpY2Vuc2Urand0In0.eyJpc3MiOiJodHRwczovL2R1ZW5kZXNvZnR3YXJlLmNvbSIsImF1ZCI6IklkZW50aXR5U2VydmVyIiwiaWF0IjoxNjkzNTA2MjA2LCJleHAiOjE3MjUxMjg2MDYsImNvbXBhbnlfbmFtZSI6ImdlcmFsZC5sb2NobmVyQHNhbHpidXJnZGV2LmF0IiwiY29udGFjdF9pbmZvIjoiZ2VyYWxkLmxvY2huZXJAc2FsemJ1cmdkZXYuYXQiLCJlZGl0aW9uIjoiQ29tbXVuaXR5In0.ekFErBcoKSZ20zgpX0UKoV5vWleMvy8BN6iY7l_30sQyzH_dmsBtVW0G04URgxPgmtMNK7IsQtceyyNhxKr_8ofqiXPArsO2lfm_KXfHfaANUeBFsHfE3H_ajw8U8VjIlBTy3cFkbLUGMDuyDll96xLMlNo03GH9kU7iqMVSzfg5MRmycXppxZ8pCQLwgHxw5TbnGNKol5J7EQIWPiMSfergNdTG_YJpGyjNHdedaWE6rpyRiPDgFTGn4QqVYifD1gpPKkGJnEaIFS5Pv97JOMMv_DEDvZ3U1M4wkJdQJ2PFdND3bEAESWN7LImy66-kXYnsEhPgBRWhpK4FkyFiVg";
                 serverOptions.Events.RaiseErrorEvents = true;
                 serverOptions.Events.RaiseInformationEvents = true;
                 serverOptions.Events.RaiseFailureEvents = true;
@@ -118,7 +116,7 @@ public class Startup
             .AddClientStore<IOctoClientStore>()
             .AddResourceStore<ResourceStore>()
             .AddPersistedGrantStore<PersistentGrantStore>()
-            .AddAspNetIdentity<OctoUser>()
+            .AddAspNetIdentity<RtUser>()
             .AddProfileService<UserProfileService>()
             .AddCorsPolicyService<CorsPolicyService>()
             .AddAppAuthRedirectUriValidator()
@@ -132,14 +130,10 @@ public class Startup
         services.ConfigureOptions<ConfigureOctoSwaggerOptions>();
 
         if (_webHostEnvironment.IsDevelopment())
-        {
             identityServerBuilder
                 .AddDeveloperSigningCredential();
-        }
         else
-        {
             identityServerBuilder.AddOctoSigningCredential();
-        }
 
         services.TryAddEnumerable(ServiceDescriptor
             .Singleton<IPostConfigureOptions<JwtBearerOptions>, JwtBearerPostConfigureOptions>());
@@ -193,7 +187,6 @@ public class Startup
         services.AddMvc();
 
         services.AddAutoMapper(typeof(Startup));
-
     }
 
     /// <summary>
@@ -227,13 +220,12 @@ public class Startup
         app.UseCors();
 
         // Conversion of request query jwt token to cookie for switch from dashboard to hangfire ui dashboard
+        app.UseMiddleware<TenantMiddleware>();
         app.UseMiddleware<CookieBasedAuthorizationMiddleware>();
 
         app.UseHttpsRedirection();
         app.UseStaticFiles();
         app.UseCookiePolicy();
-
-        app.UseOctoPersistence();
 
         app.UseOctoApiVersioningAndDocumentation();
 
@@ -253,6 +245,11 @@ public class Startup
 
         app.UseAuthorization();
 
-        app.UseEndpoints(endpoints => { endpoints.MapDefaultControllerRoute(); });
+        app.UseEndpoints(endpoints =>
+        {
+            endpoints.MapDefaultControllerRoute();
+            endpoints.MapControllerRoute("default",
+                "{tenantId:tenantId=System}/{controller=Home}/{action=Index}/{id?}");
+        });
     }
 }

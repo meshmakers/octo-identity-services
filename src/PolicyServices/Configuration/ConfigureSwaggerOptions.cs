@@ -1,8 +1,4 @@
-using System;
-using System.IO;
-using System.Reflection;
 using Microsoft.AspNetCore.Mvc.ApiExplorer;
-using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
 using Microsoft.OpenApi.Models;
 using Swashbuckle.AspNetCore.SwaggerGen;
@@ -32,8 +28,8 @@ public class ConfigureSwaggerOptions : IConfigureOptions<SwaggerGenOptions>
         _provider = provider;
     }
 
-    private static string XmlCommentsFilePath =>
-        Path.ChangeExtension(new Uri(typeof(Startup).GetTypeInfo().Assembly.GetName().CodeBase).LocalPath, ".xml");
+    // private static string XmlCommentsFilePath =>
+    //     Path.ChangeExtension(new Uri(typeof(Startup).GetTypeInfo().Assembly.GetName().CodeBase).LocalPath, ".xml");
 
     /// <inheritdoc />
     public void Configure(SwaggerGenOptions options)
@@ -41,11 +37,9 @@ public class ConfigureSwaggerOptions : IConfigureOptions<SwaggerGenOptions>
         // add a swagger document for each discovered API version
         // note: you might choose to skip or document deprecated API versions differently
         foreach (var description in _provider.ApiVersionDescriptions)
-        {
             options.SwaggerDoc(description.GroupName, CreateInfoForApiVersion(description));
-        }
 
-        options.IncludeXmlComments(XmlCommentsFilePath);
+        // options.IncludeXmlComments(XmlCommentsFilePath);
     }
 
     private static OpenApiInfo CreateInfoForApiVersion(ApiVersionDescription description)
@@ -59,10 +53,7 @@ public class ConfigureSwaggerOptions : IConfigureOptions<SwaggerGenOptions>
             License = new OpenApiLicense { Name = "MIT", Url = new Uri("https://opensource.org/licenses/MIT") }
         };
 
-        if (description.IsDeprecated)
-        {
-            info.Description += " This API version has been deprecated.";
-        }
+        if (description.IsDeprecated) info.Description += " This API version has been deprecated.";
 
         return info;
     }

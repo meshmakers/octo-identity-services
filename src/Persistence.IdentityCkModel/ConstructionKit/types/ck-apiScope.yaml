@@ -1,0 +1,12 @@
+"$schema": "https://schemas.meshmakers.cloud/construction-kit-elements.schema.json"
+types:
+  - typeId: ApiScope
+    derivedFromCkTypeId: System.Identity/Resource
+    isFinal: true
+    isAbstract: false
+    attributes:
+      - id: System.Identity/IsEmphasized
+        name: IsEmphasized
+      - id: System.Identity/IsRequired
+        name: IsRequired
+  

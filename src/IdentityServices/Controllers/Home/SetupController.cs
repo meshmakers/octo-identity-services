@@ -1,13 +1,11 @@
-﻿using System.Linq;
-using System.Threading.Tasks;
+﻿using System.Diagnostics;
 using Meshmakers.Octo.Backend.IdentityServices.Resources;
 using Meshmakers.Octo.Backend.IdentityServices.ViewModels.Setup;
 using Meshmakers.Octo.Backend.Infrastructure.CredentialGenerator;
-using Meshmakers.Octo.Common.Shared;
-using Meshmakers.Octo.SystematizedData.Persistence.SystemEntities;
+using Meshmakers.Octo.Communication.Contracts;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Mvc;
-using Microsoft.Extensions.Logging;
+using Persistence.IdentityCkModel.ConstructionKit.Generated.System.Identity.v1;
 
 namespace Meshmakers.Octo.Backend.IdentityServices.Controllers.Home;
 
@@ -16,11 +14,11 @@ public class SetupController : Controller
 {
     private readonly ICredentialGenerator _credentialGenerator;
     private readonly ILogger<SetupController> _logger;
-    private readonly RoleManager<OctoRole> _roleManager;
-    private readonly UserManager<OctoUser> _userManager;
+    private readonly RoleManager<RtRole> _roleManager;
+    private readonly UserManager<RtUser> _userManager;
 
-    public SetupController(ILogger<SetupController> logger, UserManager<OctoUser> userManager,
-        RoleManager<OctoRole> roleManager, ICredentialGenerator credentialGenerator)
+    public SetupController(ILogger<SetupController> logger, UserManager<RtUser> userManager,
+        RoleManager<RtRole> roleManager, ICredentialGenerator credentialGenerator)
     {
         _logger = logger;
         _userManager = userManager;
@@ -30,10 +28,7 @@ public class SetupController : Controller
 
     public IActionResult Index()
     {
-        if (_userManager.Users.Any())
-        {
-            return RedirectToAction("Index", "Home");
-        }
+        if (_userManager.Users.Any()) return RedirectToAction("Index", "Home");
 
         return View();
     }
@@ -41,17 +36,20 @@ public class SetupController : Controller
     [HttpPost]
     public async Task<IActionResult> Index(SetupViewModel model)
     {
-        if (!ModelState.IsValid)
-        {
-            return View(model);
-        }
+        if (!ModelState.IsValid) return View(model);
 
         if (_userManager.Users.Any())
         {
             ModelState.AddModelError(string.Empty, IdentityTexts.Backend_Identity_Setup_Status_UsersAlreadyConfigured);
             return View(model);
         }
-        
+
+        if (string.IsNullOrWhiteSpace(model.EMailAddress))
+        {
+            ModelState.AddModelError(string.Empty, IdentityTexts.Backend_Identity_Setup_Status_EMailMissing);
+            return View(model);
+        }
+
         if (string.IsNullOrWhiteSpace(model.NewPassword))
         {
             ModelState.AddModelError(string.Empty, IdentityTexts.Backend_Identity_Setup_Status_PasswordMissing);
@@ -63,7 +61,6 @@ public class SetupController : Controller
             ModelState.AddModelError(string.Empty, IdentityTexts.Backend_Identity_Setup_Status_PasswordComplexity);
             return View(model);
         }
-
         var adminRole = await _roleManager.FindByNameAsync(CommonConstants.AdministratorsRole);
         if (adminRole == null)
         {
@@ -76,9 +73,10 @@ public class SetupController : Controller
         var adminUser = await _userManager.FindByNameAsync(model.EMailAddress);
         if (adminUser == null)
         {
-            adminUser = new OctoUser { UserName = model.EMailAddress, Email = model.EMailAddress };
+            adminUser = new RtUser { UserName = model.EMailAddress, Email = model.EMailAddress };
 
             await _userManager.CreateAsync(adminUser, model.NewPassword);
+            Debug.Assert(adminRole.NormalizedName != null, "adminRole.NormalizedName != null");
             await _userManager.AddToRoleAsync(adminUser, adminRole.NormalizedName);
         }
 

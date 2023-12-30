@@ -1,5 +1,4 @@
-﻿using System;
-using Meshmakers.Octo.SystematizedData.Persistence.SystemEntities;
+﻿using Persistence.IdentityCkModel.ConstructionKit.Generated.System.Identity.v1;
 
 namespace Meshmakers.Octo.Backend.Authentication.DynamicAuth;
 
@@ -14,5 +13,5 @@ internal interface IAuthSchemeCreatorFactory
     /// <typeparam name="TAuthProvider">Type of the <see cref="OctoIdentityProvider" /></typeparam>
     /// <exception cref="InvalidOperationException">Is thrown when the requested creator could not be resolved via DI.</exception>
     IAuthSchemeCreator<TAuthProvider> GetCreator<TAuthProvider>()
-        where TAuthProvider : OctoIdentityProvider;
+        where TAuthProvider : RtIdentityProvider;
 }

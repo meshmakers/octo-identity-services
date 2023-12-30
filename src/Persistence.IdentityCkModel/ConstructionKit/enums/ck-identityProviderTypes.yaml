@@ -1,0 +1,12 @@
+$schema: https://schemas.meshmakers.cloud/construction-kit-elements.schema.json
+enums:
+  - enumId: IdentityProviderTypes
+    values:
+      - key: 0
+        name: AzureEntra
+      - key: 1
+        name: Google
+      - key: 2
+        name: Microsoft
+      - key: 3
+        name: OpenLDAP

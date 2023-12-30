@@ -1,15 +1,12 @@
-using System.Linq;
-using System.Threading.Tasks;
 using IdentityModel;
+using IdentityServerPersistence;
 using Meshmakers.Octo.Backend.Infrastructure.CredentialGenerator;
-using Meshmakers.Octo.Common.Shared;
-using Meshmakers.Octo.Common.Shared.DataTransferObjects;
-using Meshmakers.Octo.SystematizedData.Persistence.SystemEntities;
+using Meshmakers.Octo.Communication.Contracts;
+using Meshmakers.Octo.Communication.Contracts.DataTransferObjects;
 using Microsoft.AspNetCore.Authorization;
-using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Mvc;
-using Microsoft.Extensions.Logging;
+using Persistence.IdentityCkModel.ConstructionKit.Generated.System.Identity.v1;
 
 namespace Meshmakers.Octo.Backend.IdentityServices.SystemApi.v1.Controllers;
 
@@ -21,10 +18,10 @@ public class SetupController : ControllerBase
 {
     private readonly ICredentialGenerator _credentialGenerator;
     private readonly ILogger<SetupController> _logger;
-    private readonly RoleManager<OctoRole> _roleManager;
-    private readonly UserManager<OctoUser> _userManager;
+    private readonly RoleManager<RtRole> _roleManager;
+    private readonly UserManager<RtUser> _userManager;
 
-    public SetupController(UserManager<OctoUser> userManager, RoleManager<OctoRole> roleManager,
+    public SetupController(UserManager<RtUser> userManager, RoleManager<RtRole> roleManager,
         ILogger<SetupController> logger,
         ICredentialGenerator credentialGenerator)
     {
@@ -47,14 +44,13 @@ public class SetupController : ControllerBase
     [HttpPost]
     public async Task<IActionResult> AddAdminUser([FromBody] AdminUserDto adminUserDto)
     {
-        if (!ModelState.IsValid)
+        if (!ModelState.IsValid) return BadRequest(ModelState);
+
+        if (_userManager.Users.Any()) return NotFound("The request is not valid for this configuration.");
+        if (string.IsNullOrWhiteSpace(adminUserDto.EMail))
         {
-            return BadRequest(ModelState);
-        }
-        
-        if (_userManager.Users.Any())
-        {
-            return NotFound("The request is not valid for this configuration.");
+            _logger.LogInformation("E-Mail value is missing");
+            return StatusCode(StatusCodes.Status406NotAcceptable);
         }
 
         if (string.IsNullOrWhiteSpace(adminUserDto.Password))
@@ -75,21 +71,21 @@ public class SetupController : ControllerBase
             _logger.LogInformation("No Administrator-Role has been found");
             return StatusCode(StatusCodes.Status406NotAcceptable);
         }
-        
+
         var developerRole = await _roleManager.FindByNameAsync(CommonConstants.DevelopersRole);
         if (developerRole == null)
         {
             _logger.LogInformation("No Developer-Role has been found");
             return StatusCode(StatusCodes.Status406NotAcceptable);
         }
-        
+
         var managersRole = await _roleManager.FindByNameAsync(CommonConstants.ManagersRole);
         if (managersRole == null)
         {
             _logger.LogInformation("No Managers-Role has been found");
             return StatusCode(StatusCodes.Status406NotAcceptable);
         }
-        
+
         var usersRole = await _roleManager.FindByNameAsync(CommonConstants.UsersRole);
         if (usersRole == null)
         {
@@ -100,13 +96,13 @@ public class SetupController : ControllerBase
         var adminUser = await _userManager.FindByNameAsync(adminUserDto.EMail);
         if (adminUser == null)
         {
-            adminUser = new OctoUser { UserName = adminUserDto.EMail, Email = adminUserDto.EMail };
+            adminUser = new RtUser { UserName = adminUserDto.EMail, Email = adminUserDto.EMail };
 
             await _userManager.CreateAsync(adminUser, adminUserDto.Password);
-            await _userManager.AddToRoleAsync(adminUser, adminRole.Id.ToString());
-            await _userManager.AddToRoleAsync(adminUser, developerRole.Id.ToString());
-            await _userManager.AddToRoleAsync(adminUser, managersRole.Id.ToString());
-            await _userManager.AddToRoleAsync(adminUser, usersRole.Id.ToString());
+            await _userManager.AddToRoleAsync(adminUser, adminRole.RtId.ToString());
+            await _userManager.AddToRoleAsync(adminUser, developerRole.RtId.ToString());
+            await _userManager.AddToRoleAsync(adminUser, managersRole.RtId.ToString());
+            await _userManager.AddToRoleAsync(adminUser, usersRole.RtId.ToString());
         }
 
         return Ok();

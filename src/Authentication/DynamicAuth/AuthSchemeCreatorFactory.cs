@@ -1,6 +1,5 @@
-﻿using System;
-using Meshmakers.Octo.SystematizedData.Persistence.SystemEntities;
-using Microsoft.Extensions.DependencyInjection;
+﻿using Microsoft.Extensions.DependencyInjection;
+using Persistence.IdentityCkModel.ConstructionKit.Generated.System.Identity.v1;
 
 namespace Meshmakers.Octo.Backend.Authentication.DynamicAuth;
 
@@ -19,7 +18,7 @@ internal class AuthSchemeCreatorFactory : IAuthSchemeCreatorFactory
     /// <inheritdoc />
     /// >
     public IAuthSchemeCreator<TAuthProvider> GetCreator<TAuthProvider>()
-        where TAuthProvider : OctoIdentityProvider
+        where TAuthProvider : RtIdentityProvider
     {
         var requestedType = typeof(IAuthSchemeCreator<>).MakeGenericType(typeof(TAuthProvider));
 

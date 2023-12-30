@@ -1,6 +1,6 @@
-﻿namespace Meshmakers.Octo.Backend.IdentityServices;
+﻿namespace IdentityServerPersistence;
 
-internal static class IdentityServiceConstants
+public static class IdentityServiceConstants
 {
     public const string ApiPathPrefix = "system/v{version:apiVersion}";
     public const string ApiVersion1 = "1.0";
@@ -9,4 +9,5 @@ internal static class IdentityServiceConstants
     public const string IdentityApiReadWritePolicy = "IdentityApiReadWritePolicy";
     public const string IdentitySchemaVersionKey = "IdentityService";
     public const int IdentitySchemaVersionValue = 2;
+
 }

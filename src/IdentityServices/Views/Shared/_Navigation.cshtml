@@ -1,8 +1,8 @@
 ﻿@using Duende.IdentityServer.Extensions
-@using Meshmakers.Octo.SystematizedData.Persistence.SystemEntities
+@using Persistence.IdentityCkModel.ConstructionKit.Generated.System.Identity.v1
 @using Microsoft.AspNetCore.Identity
 @using Microsoft.AspNetCore.Mvc.TagHelpers
-@inject UserManager<OctoUser> UserManager
+@inject UserManager<RtUser> UserManager
 
 @{
     var user = await UserManager.GetUserAsync(User);
@@ -11,7 +11,7 @@
     if (user != null)
     {
         hasPassword = await UserManager.HasPasswordAsync(user);
-        isDeveloper = user.Roles.Contains("Developer");
+        isDeveloper = user.RoleIds?.Contains("Developer") ?? false;
     }
 }
 

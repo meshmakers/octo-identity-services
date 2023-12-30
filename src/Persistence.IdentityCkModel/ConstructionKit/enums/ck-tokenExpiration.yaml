@@ -1,0 +1,8 @@
+$schema: https://schemas.meshmakers.cloud/construction-kit-elements.schema.json
+enums:
+  - enumId: TokenExpiration
+    values:
+      - key: 0
+        name: Sliding
+      - key: 1
+        name: Absolute

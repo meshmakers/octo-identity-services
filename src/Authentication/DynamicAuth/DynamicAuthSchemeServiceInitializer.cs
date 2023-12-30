@@ -1,9 +1,8 @@
-﻿using System.Threading.Tasks;
-using Meshmakers.Octo.Backend.Infrastructure.Initialization;
+﻿using Meshmakers.Octo.Backend.Infrastructure.Initialization;
 
 namespace Meshmakers.Octo.Backend.Authentication.DynamicAuth;
 
-public class DynamicAuthSchemeServiceInitializer : IAsyncInitializationService
+internal class DynamicAuthSchemeServiceInitializer : IAsyncInitializationService
 {
     private readonly IDynamicAuthSchemeService _dynamicAuthSchemeService;
 
@@ -12,8 +11,10 @@ public class DynamicAuthSchemeServiceInitializer : IAsyncInitializationService
         _dynamicAuthSchemeService = dynamicAuthSchemeService;
     }
 
+    public int Order => 50;
+
     public async Task InitializeAsync()
     {
-        await _dynamicAuthSchemeService.ConfigureAsync();
+        await _dynamicAuthSchemeService.ConfigureAsync(null);
     }
 }

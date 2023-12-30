@@ -5,7 +5,7 @@
 
 @{
     ViewBag.Title = IdentityTexts.Backend_Identity_Login_Title;
-    Layout = OemOptions.Value.HideNavigation ? "_LayoutNoNavigation": "_Layout";
+    Layout = OemOptions.Value.HideNavigation ? "_LayoutNoNavigation" : "_Layout";
 }
 
 <div class="row justify-content-center">
@@ -64,8 +64,8 @@
                                 {
                                     <div>
                                         <a class="nav-link"
-                                            asp-controller="Account"
-                                            asp-action="ForgotPassword">
+                                           asp-controller="Account"
+                                           asp-action="ForgotPassword">
                                             @IdentityTexts.Backend_Identity_Forgot_Password_Link
                                         </a>
                                     </div>

@@ -2,38 +2,34 @@
 
     <PropertyGroup>
         <AssemblyName>Meshmakers.Octo.Backend.Authentication</AssemblyName>
-        <PackageIcon>meshmakers64.png</PackageIcon>
         <PackageId>Meshmakers.Octo.Backend.Authentication</PackageId>
-        <PackageLicenseFile>LICENSE</PackageLicenseFile>
-        <PackageProjectUrl>https://www.meshmakers.io</PackageProjectUrl>
-        <RepositoryUrl>https://github.com/meshmakers/octomesh</RepositoryUrl>
         <RootNamespace>Meshmakers.Octo.Backend.Authentication</RootNamespace>
-        <TargetFramework>net7.0</TargetFramework>
         <AddRazorSupportForMvc>true</AddRazorSupportForMvc>
     </PropertyGroup>
 
     <ItemGroup>
-        <FrameworkReference Include="Microsoft.AspNetCore.App" />
+        <FrameworkReference Include="Microsoft.AspNetCore.App"/>
     </ItemGroup>
 
     <ItemGroup>
-        <PackageReference Include="Duende.IdentityServer.AspNetIdentity" Version="6.3.3" />
-        <PackageReference Include="Microsoft.AspNetCore.Authentication.Google" Version="7.0.7" />
-        <PackageReference Include="Microsoft.AspNetCore.Authentication.MicrosoftAccount" Version="7.0.7" />
-        <PackageReference Include="Microsoft.AspNetCore.Authentication.OpenIdConnect" Version="7.0.7" />
-        <PackageReference Include="Novell.Directory.Ldap.NETStandard" Version="3.6.0" />
+        <PackageReference Include="Duende.IdentityServer.AspNetIdentity" Version="6.3.7" />
+        <PackageReference Include="Microsoft.AspNetCore.Authentication.Google" Version="8.0.0" />
+        <PackageReference Include="Microsoft.AspNetCore.Authentication.MicrosoftAccount" Version="8.0.0" />
+        <PackageReference Include="Microsoft.AspNetCore.Authentication.OpenIdConnect" Version="8.0.0" />
+        <PackageReference Include="Novell.Directory.Ldap.NETStandard" Version="3.6.0"/>
     </ItemGroup>
 
     <ItemGroup>
-        <ProjectReference Include="$(OctoCommonServicesPath)src\Infrastructure\Infrastructure.csproj" />
-        <ProjectReference Include="$(OctoCorePath)src\SystematizedData\Persistence\Persistence.csproj" />
-        <ProjectReference Include="..\IdentityServices.Resources\IdentityServices.Resources.csproj" />
+        <ProjectReference Include="$(OctoCommonServicesPath)src\Infrastructure\Infrastructure.csproj"/>
+        <ProjectReference Include="..\IdentityServerPersistence\IdentityServerPersistence.csproj"/>
+        <ProjectReference Include="..\IdentityServices.Resources\IdentityServices.Resources.csproj"/>
+        <ProjectReference Include="..\Persistence.IdentityCkModel\Persistence.IdentityCkModel.csproj"/>
     </ItemGroup>
 
     <ItemGroup>
         <None Include="..\..\assets\meshmakers64.png">
             <Pack>True</Pack>
-            <PackagePath />
+            <PackagePath/>
             <Link>meshmakers64.png</Link>
         </None>
     </ItemGroup>

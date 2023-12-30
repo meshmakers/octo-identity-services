@@ -6,10 +6,14 @@
         <value>1.3</value>
     </resheader>
     <resheader name="reader">
-        <value>System.Resources.ResXResourceReader, System.Windows.Forms, Version=2.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
+        <value>System.Resources.ResXResourceReader, System.Windows.Forms, Version=2.0.0.0, Culture=neutral,
+            PublicKeyToken=b77a5c561934e089
+        </value>
     </resheader>
     <resheader name="writer">
-        <value>System.Resources.ResXResourceWriter, System.Windows.Forms, Version=2.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
+        <value>System.Resources.ResXResourceWriter, System.Windows.Forms, Version=2.0.0.0, Culture=neutral,
+            PublicKeyToken=b77a5c561934e089
+        </value>
     </resheader>
     <data name="Backend_Identity_LogIn_Validation_Username" xml:space="preserve">
         <value>Das Feld Benutzername ist erforderlich.</value>
@@ -442,5 +446,74 @@
     </data>
     <data name="Backend_Identity_ResetPassword_Button_Label" xml:space="preserve">
         <value>OK</value>
+    </data>
+    <data name="Backend_Persistence_Identity_DefaultIdentityError" xml:space="preserve">
+        <value>Ein unbekannter Fehler ist aufgetreten.</value>
+    </data>
+    <data name="Backend_Persistence_Identity_RecoveryCodeRedemptionFailed" xml:space="preserve">
+        <value>Das Einlösen des Wiederherstellungscodes ist fehlgeschlagen.</value>
+    </data>
+    <data name="Backend_Persistence_Identity_DuplicateEmail" xml:space="preserve">
+        <value>E-Mail '{0}' ist bereits vergeben.</value>
+    </data>
+    <data name="Backend_Persistence_Identity_DuplicateUserName" xml:space="preserve">
+        <value>Der Benutzername '{0}' ist bereits vergeben.</value>
+    </data>
+    <data name="Backend_Persistence_Identity_DuplicateRoleName" xml:space="preserve">
+        <value>Der Rollenname '{0}' ist bereits vergeben.</value>
+    </data>
+    <data name="Backend_Persistence_Identity_InvalidUserName" xml:space="preserve">
+        <value>Benutzername '{0}' ist ungültig, darf nur Buchstaben oder Ziffern enthalten.</value>
+    </data>
+    <data name="Backend_Persistence_Identity_PasswordRequiresDigit" xml:space="preserve">
+        <value>wörter müssen mindestens eine Ziffer ('0'-'9') haben.</value>
+    </data>
+    <data name="Backend_Persistence_Identity_PasswordRequiresUniqueChars" xml:space="preserve">
+        <value>Passwörter müssen mindestens {0} verschiedene Zeichen enthalten.</value>
+    </data>
+    <data name="Backend_Persistence_Identity_PasswordRequiresUpper" xml:space="preserve">
+        <value>Passwörter müssen mindestens einen Großbuchstaben ('A'-'Z') enthalten.</value>
+    </data>
+    <data name="Backend_Persistence_Identity_PasswordRequiresNonAlphanumeric" xml:space="preserve">
+        <value>Passwörter müssen mindestens ein nicht alphanumerisches Zeichen enthalten.</value>
+    </data>
+    <data name="Backend_Persistence_Identity_PasswordRequiresLower" xml:space="preserve">
+        <value>Passwörter müssen mindestens einen Kleinbuchstaben ('a'-'z') enthalten.</value>
+    </data>
+    <data name="Backend_Persistence_Identity_PasswordTooShort" xml:space="preserve">
+        <value>Passwörter müssen mindestens {0} Zeichen lang sein.</value>
+    </data>
+    <data name="Backend_Persistence_Identity_UserAlreadyHasPassword" xml:space="preserve">
+        <value>Der Benutzer hat bereits ein Passwort festgelegt.</value>
+    </data>
+    <data name="Backend_Persistence_Identity_UserAlreadyInRole" xml:space="preserve">
+        <value>Benutzer bereits in Rolle '{0}'.</value>
+    </data>
+    <data name="Backend_Persistence_Identity_UserNotInRole" xml:space="preserve">
+        <value>Der Benutzer hat nicht die Rolle '{0}'.</value>
+    </data>
+    <data name="Backend_Persistence_Identity_UserLockoutNotEnabled" xml:space="preserve">
+        <value>Die Sperrung ist für diesen Benutzer nicht aktiviert.</value>
+    </data>
+    <data name="Backend_Persistence_Identity_InvalidEmail" xml:space="preserve">
+        <value>E-Mail '{0}' ist ungültig.</value>
+    </data>
+    <data name="Backend_Persistence_Identity_InvalidRoleName" xml:space="preserve">
+        <value>Der Rollenname '{0}' ist ungültig.</value>
+    </data>
+    <data name="Backend_Persistence_Identity_InvalidToken" xml:space="preserve">
+        <value>Ungültiges Token.</value>
+    </data>
+    <data name="Backend_Persistence_Identity_LoginAlreadyAssociated" xml:space="preserve">
+        <value>Ein Benutzer mit diesem Login existiert bereits.</value>
+    </data>
+    <data name="Backend_Persistence_Identity_PasswordMismatch" xml:space="preserve">
+        <value>Falsches Passwort.</value>
+    </data>
+    <data name="Backend_Persistence_Identity_ConcurrencyFailure" xml:space="preserve">
+        <value>Optimistischer Parallelitätsfehler, Objekt wurde geändert.</value>
+    </data>
+    <data name="Backend_Identity_Setup_Status_EMailMissing" xml:space="preserve">
+        <value>Es wurde keine E-Mailadresse definiert.</value>
     </data>
 </root>

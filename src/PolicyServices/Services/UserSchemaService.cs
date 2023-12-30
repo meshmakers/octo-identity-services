@@ -1,10 +1,9 @@
-using System.Collections.Generic;
-using System.Threading.Tasks;
 using Duende.IdentityServer.Models;
-using Meshmakers.Octo.Common.Shared;
-using Meshmakers.Octo.SystematizedData.Persistence;
-using Meshmakers.Octo.SystematizedData.Persistence.SystemEntities;
-using Meshmakers.Octo.SystematizedData.Persistence.SystemStores;
+using IdentityServerPersistence.SystemStores;
+using Meshmakers.Octo.Communication.Contracts;
+using Meshmakers.Octo.Runtime.Contracts.MongoDb;
+using Meshmakers.Octo.Runtime.Contracts.RepositoryEntities;
+using Persistence.IdentityCkModel.ConstructionKit.Generated.System.Identity.v1;
 
 namespace Meshmakers.Octo.Backend.PolicyServices.Services;
 
@@ -24,21 +23,24 @@ internal class UserSchemaService : IUserSchemaService
 
     public async Task SetupAsync()
     {
-        using var session = await _systemContext.StartSystemSessionAsync();
+        using var session = await _systemContext.GetSystemSessionAsync();
         session.StartTransaction();
 
-        var version =
+        var policyConfiguration =
             await _systemContext.GetConfigurationAsync(session,
-                PolicyServiceConstants.PolicyServiceSchemaVersionKey, 0);
-        if (version < PolicyServiceConstants.PolicyServiceSchemaVersionValue)
+                PolicyServiceConstants.PolicyServiceSchemaVersionKey,
+                new PolicyConfiguration { Version = PolicyServiceConstants.PolicyServiceSchemaVersionValue });
+        if (policyConfiguration == null || policyConfiguration.Version < PolicyServiceConstants.PolicyServiceSchemaVersionValue)
         {
             await CreateApiScopes();
             await CreateApiResources();
             await CreateSystemPermissions();
 
             await _systemContext.SetConfigurationAsync(session,
-                PolicyServiceConstants.PolicyServiceSchemaVersionKey,
-                PolicyServiceConstants.PolicyServiceSchemaVersionValue);
+                PolicyServiceConstants.PolicyServiceSchemaVersionKey, new PolicyConfiguration
+                {
+                    Version = PolicyServiceConstants.PolicyServiceSchemaVersionValue
+                });
         }
 
         await session.CommitTransactionAsync();
@@ -62,17 +64,22 @@ internal class UserSchemaService : IUserSchemaService
 
     private async Task CreateApiResources()
     {
-        await _resourceStore.GetOrCreateApiResourceAsync(new OctoApiResource
+        await _resourceStore.GetOrCreateApiResourceAsync(new RtApiResource
         {
             Name = CommonConstants.PolicyApi,
             DisplayName = CommonConstants.PolicyApiDisplayName,
             Description = CommonConstants.PolicyApiDescription,
             Enabled = true,
-            Scopes = new List<string>
+            Scopes = new AttributeStringValueList
             {
                 CommonConstants.PolicyApiFullAccess,
                 CommonConstants.PolicyApiReadOnly
             }
         });
+    }
+
+    private class PolicyConfiguration
+    {
+        public int Version { get; set; }
     }
 }
