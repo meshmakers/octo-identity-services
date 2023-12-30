@@ -6,6 +6,7 @@
         <DockerDefaultTargetOS>Linux</DockerDefaultTargetOS>
         <RootNamespace>Meshmakers.Octo.Backend.IdentityServices</RootNamespace>
         <UserSecretsId>173d8e91-b831-4e8a-a43f-672c57e6a4da</UserSecretsId>
+        <CopyDocumentationFilesFromPackages>true</CopyDocumentationFilesFromPackages>
     </PropertyGroup>
 
     <PropertyGroup>
@@ -35,7 +36,6 @@
         <PackageReference Include="AutoMapper.Extensions.Microsoft.DependencyInjection" Version="12.0.1"/>
         <PackageReference Include="Microsoft.AspNetCore.Authentication.JwtBearer" Version="8.0.0" />
         <PackageReference Include="NLog.Web.AspNetCore" Version="5.3.8" />
-        <PackageReference Include="Meshmakers.Octo.Communication.Contracts" Version="3.0.4" GeneratePathProperty="true" />
     </ItemGroup>
 
 
@@ -95,10 +95,5 @@
             <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
         </Content>
     </ItemGroup>
-
-    <!-- Copy the contracts xml file to the output directory -->
-    <Target Name="TakeAction" AfterTargets="Build">
-        <Copy SourceFiles="$(PkgMeshmakers_Octo_Communication_Contracts)\lib\net8.0\Meshmakers.Octo.Communication.Contracts.xml" DestinationFolder="$(TargetDir)" />
-    </Target>
 
 </Project>
