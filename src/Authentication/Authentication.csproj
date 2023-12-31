@@ -5,6 +5,8 @@
         <PackageId>Meshmakers.Octo.Backend.Authentication</PackageId>
         <RootNamespace>Meshmakers.Octo.Backend.Authentication</RootNamespace>
         <AddRazorSupportForMvc>true</AddRazorSupportForMvc>
+        <Configurations>Debug;Release;DebugL</Configurations>
+        <Platforms>AnyCPU</Platforms>
     </PropertyGroup>
 
     <ItemGroup>

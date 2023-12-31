@@ -7,22 +7,12 @@
         <RootNamespace>Meshmakers.Octo.Backend.IdentityServices</RootNamespace>
         <UserSecretsId>173d8e91-b831-4e8a-a43f-672c57e6a4da</UserSecretsId>
         <CopyDocumentationFilesFromPackages>true</CopyDocumentationFilesFromPackages>
-    </PropertyGroup>
-
-    <PropertyGroup>
+        <Configurations>Debug;Release;DebugL</Configurations>
+        <Platforms>AnyCPU</Platforms>
+        <OutputPath>..\..\bin\$(Configuration)\</OutputPath>
+        <DocumentationFile>..\..\bin\$(Configuration)\$(AssemblyName).xml</DocumentationFile>
         <GenerateDocumentationFile>true</GenerateDocumentationFile>
         <NoWarn>$(NoWarn);1591</NoWarn>
-    </PropertyGroup>
-
-
-    <PropertyGroup Condition=" '$(Configuration)' == 'Debug' ">
-        <OutputPath>../../bin/Debug/IdentityServices/</OutputPath>
-        <DocumentationFile>../../bin/Debug/IdentityServices/Meshmakers.Octo.Backend.IdentityServices.xml</DocumentationFile>
-    </PropertyGroup>
-
-    <PropertyGroup Condition=" '$(Configuration)' == 'Release' ">
-        <OutputPath>../../bin/Release/IdentityServices/</OutputPath>
-        <DocumentationFile>../../bin/Release/IdentityServices/Meshmakers.Octo.Backend.IdentityServices.xml</DocumentationFile>
     </PropertyGroup>
 
     <ItemGroup>
