@@ -1,4 +1,4 @@
-﻿using Meshmakers.Octo.Backend.Infrastructure.Initialization;
+﻿using Meshmakers.Octo.Services.Infrastructure.Initialization;
 
 namespace Meshmakers.Octo.Backend.Authentication.DynamicAuth;
 

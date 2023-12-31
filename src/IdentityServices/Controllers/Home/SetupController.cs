@@ -1,8 +1,8 @@
 ﻿using System.Diagnostics;
 using Meshmakers.Octo.Backend.IdentityServices.Resources;
 using Meshmakers.Octo.Backend.IdentityServices.ViewModels.Setup;
-using Meshmakers.Octo.Backend.Infrastructure.CredentialGenerator;
 using Meshmakers.Octo.Communication.Contracts;
+using Meshmakers.Octo.Services.Infrastructure.CredentialGenerator;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Mvc;
 using Persistence.IdentityCkModel.ConstructionKit.Generated.System.Identity.v1;

@@ -4,11 +4,11 @@ using IdentityServerPersistence.Configuration.Options;
 using IdentityServerPersistence.SystemStores;
 using Meshmakers.Common.Shared;
 using Meshmakers.Octo.Backend.IdentityServices.Configuration;
-using Meshmakers.Octo.Backend.Infrastructure.Services;
 using Meshmakers.Octo.Communication.Contracts.Services;
 using Meshmakers.Octo.Runtime.Contracts.MongoDb;
 using Meshmakers.Octo.Runtime.Contracts.Repositories.Query;
-using Meshmakers.Octo.SystematizedData.Persistence.Notifications.ConstructionKit.Generated.System.Notification.v1;
+using Meshmakers.Octo.Services.Infrastructure.Services;
+using Meshmakers.Octo.Services.Notifications.ConstructionKit.Generated.System.Notification.v1;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.Extensions.Options;
 using Persistence.IdentityCkModel.ConstructionKit.Generated.System.Identity.v1;
@@ -79,7 +79,7 @@ public class UserEmailInteractionService : IUserEmailInteractionService
             return;
         }
 
-        await _notificationRepository.AddEMailMessageAsync(_emailConfiguration.NotificationTenant!, user.Email, template.SubjectTemplate!,
+        await _notificationRepository.AddEMailMessageAsync(_emailConfiguration.NotificationTenant!, user.Email, template.SubjectTemplate,
             messageBody);
     }
 

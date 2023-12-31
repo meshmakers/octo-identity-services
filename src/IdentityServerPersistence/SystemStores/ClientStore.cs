@@ -1,11 +1,10 @@
 ﻿using AutoMapper;
 using Duende.IdentityServer.Models;
-using IdentityServerPersistence.Services;
 using Meshmakers.Common.Shared;
-using Meshmakers.Octo.Backend.Infrastructure.Services;
 using Meshmakers.Octo.Runtime.Contracts;
 using Meshmakers.Octo.Runtime.Contracts.MongoDb.Repository;
 using Meshmakers.Octo.Runtime.Contracts.Repositories.Query;
+using Meshmakers.Octo.Services.Infrastructure.Services;
 using Persistence.IdentityCkModel.ConstructionKit.Generated.System.Identity.v1;
 
 namespace IdentityServerPersistence.SystemStores;

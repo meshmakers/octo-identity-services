@@ -1,8 +1,8 @@
 using IdentityModel;
 using IdentityServerPersistence;
-using Meshmakers.Octo.Backend.Infrastructure.CredentialGenerator;
 using Meshmakers.Octo.Communication.Contracts;
 using Meshmakers.Octo.Communication.Contracts.DataTransferObjects;
+using Meshmakers.Octo.Services.Infrastructure.CredentialGenerator;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Mvc;

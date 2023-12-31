@@ -42,9 +42,9 @@
     <ItemGroup>
         <ProjectReference Include="$(OctoCommonServicesPath)src\Common\Common.csproj"/>
         <ProjectReference Include="$(OctoCommonServicesPath)src\Swagger\Swagger.csproj"/>
+        <ProjectReference Include="$(OctoCommonServicesPath)src\Notifications\Notifications.csproj"/>
         <ProjectReference Include="..\Authentication\Authentication.csproj"/>
         <ProjectReference Include="..\IdentityServices.Resources\IdentityServices.Resources.csproj"/>
-        <ProjectReference Include="$(OctoCorePath)src\Common\Notifications\Notifications.csproj"/>
     </ItemGroup>
 
 
