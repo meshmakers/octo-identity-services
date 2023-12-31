@@ -4,16 +4,10 @@
         <AssemblyName>Meshmakers.Octo.Backend.PolicyServices</AssemblyName>
         <RootNamespace>Meshmakers.Octo.Backend.PolicyServices</RootNamespace>
         <UserSecretsId>8159171C-9B4D-4461-99AD-DAC198FFBF48</UserSecretsId>
-    </PropertyGroup>
-
-    <PropertyGroup Condition=" '$(Configuration)' == 'Debug' ">
-        <OutputPath>..\..\\bin\Debug\PolicyServices</OutputPath>
-        <DocumentationFile>../../bin/Debug/PolicyServices/Meshmakers.Octo.Backend.PolicyServices.xml</DocumentationFile>
-    </PropertyGroup>
-
-    <PropertyGroup Condition=" '$(Configuration)' == 'Release' ">
-        <OutputPath>..\..\bin\Release\PolicyServices</OutputPath>
-        <DocumentationFile>../../bin/Debug/PolicyServices/Meshmakers.Octo.Backend.PolicyServices.xml</DocumentationFile>
+        <Configurations>Debug;Release;DebugL</Configurations>
+        <Platforms>AnyCPU</Platforms>
+        <OutputPath>..\..\bin\$(Configuration)\</OutputPath>
+        <DocumentationFile>..\..\bin\$(Configuration)\$(AssemblyName).xml</DocumentationFile>
     </PropertyGroup>
 
     <ItemGroup>

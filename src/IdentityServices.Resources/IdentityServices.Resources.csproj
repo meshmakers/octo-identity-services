@@ -3,6 +3,8 @@
     <PropertyGroup>
         <AssemblyName>Meshmakers.Octo.Backend.IdentityServices.Resources</AssemblyName>
         <RootNamespace>Meshmakers.Octo.Backend.IdentityServices.Resources</RootNamespace>
+        <Configurations>Debug;Release;DebugL</Configurations>
+        <Platforms>AnyCPU</Platforms>
     </PropertyGroup>
 
     <ItemGroup>

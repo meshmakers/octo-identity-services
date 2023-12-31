@@ -1,5 +1,10 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
+    <PropertyGroup>
+      <Configurations>Debug;Release;DebugL</Configurations>
+      <Platforms>AnyCPU</Platforms>
+    </PropertyGroup>
+
     <ItemGroup>
         <PackageReference Include="AutoMapper.Extensions.Microsoft.DependencyInjection" Version="12.0.1"/>
         <PackageReference Include="Duende.IdentityServer" Version="6.3.7" />
