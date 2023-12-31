@@ -28,11 +28,11 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "IdentityServerPersistence",
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Persistence.SystemCkModel", "src\octo-common-services\src\octo-core\src\Common\Persistence.SystemCkModel\Persistence.SystemCkModel.csproj", "{6F1AD426-3D2E-4A6C-B1F5-3DD5C9A70EA8}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Notifications", "src\octo-common-services\src\octo-core\src\Common\Notifications\Notifications.csproj", "{B48F3789-62D6-429C-9875-F031D8C228F0}"
-EndProject
 Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "tests", "tests", "{C15436E4-4071-452D-9492-17EA55067874}"
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Persistence.SystemTests", "src\octo-common-services\src\octo-core\tests\Persistence.SystemTests\Persistence.SystemTests.csproj", "{E2C29BD7-0C6E-4244-B0EC-FF4E3AC85BCC}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Notifications", "src\octo-common-services\src\Notifications\Notifications.csproj", "{02C28B56-A1E4-4489-ACBE-FF0085D2EE54}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
@@ -88,14 +88,14 @@ Global
 		{6F1AD426-3D2E-4A6C-B1F5-3DD5C9A70EA8}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{6F1AD426-3D2E-4A6C-B1F5-3DD5C9A70EA8}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{6F1AD426-3D2E-4A6C-B1F5-3DD5C9A70EA8}.Release|Any CPU.Build.0 = Release|Any CPU
-		{B48F3789-62D6-429C-9875-F031D8C228F0}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
-		{B48F3789-62D6-429C-9875-F031D8C228F0}.Debug|Any CPU.Build.0 = Debug|Any CPU
-		{B48F3789-62D6-429C-9875-F031D8C228F0}.Release|Any CPU.ActiveCfg = Release|Any CPU
-		{B48F3789-62D6-429C-9875-F031D8C228F0}.Release|Any CPU.Build.0 = Release|Any CPU
 		{E2C29BD7-0C6E-4244-B0EC-FF4E3AC85BCC}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
 		{E2C29BD7-0C6E-4244-B0EC-FF4E3AC85BCC}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{E2C29BD7-0C6E-4244-B0EC-FF4E3AC85BCC}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{E2C29BD7-0C6E-4244-B0EC-FF4E3AC85BCC}.Release|Any CPU.Build.0 = Release|Any CPU
+		{02C28B56-A1E4-4489-ACBE-FF0085D2EE54}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{02C28B56-A1E4-4489-ACBE-FF0085D2EE54}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{02C28B56-A1E4-4489-ACBE-FF0085D2EE54}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{02C28B56-A1E4-4489-ACBE-FF0085D2EE54}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(NestedProjects) = preSolution
 		{B62EB965-80B5-4547-9CDC-92ECE2737B89} = {48DDCE79-CF0A-43A9-B995-7649D58C07A1}
@@ -104,8 +104,8 @@ Global
 		{D8986868-D585-4973-9D7B-9192447C2142} = {AF91F7B3-12FF-44AF-BBBE-A4A8C7340D78}
 		{740AFCFC-718B-4B7B-B46D-62B3D68A047D} = {AF91F7B3-12FF-44AF-BBBE-A4A8C7340D78}
 		{6F1AD426-3D2E-4A6C-B1F5-3DD5C9A70EA8} = {AF91F7B3-12FF-44AF-BBBE-A4A8C7340D78}
-		{B48F3789-62D6-429C-9875-F031D8C228F0} = {AF91F7B3-12FF-44AF-BBBE-A4A8C7340D78}
 		{AF91F7B3-12FF-44AF-BBBE-A4A8C7340D78} = {48DDCE79-CF0A-43A9-B995-7649D58C07A1}
 		{E2C29BD7-0C6E-4244-B0EC-FF4E3AC85BCC} = {C15436E4-4071-452D-9492-17EA55067874}
+		{02C28B56-A1E4-4489-ACBE-FF0085D2EE54} = {48DDCE79-CF0A-43A9-B995-7649D58C07A1}
 	EndGlobalSection
 EndGlobal
