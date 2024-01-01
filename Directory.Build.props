@@ -4,8 +4,8 @@
     </PropertyGroup>
     <Import Condition="Exists($(BaseDirectoryBuildPath))" Project="$(BaseDirectoryBuildPath)"/>
     <PropertyGroup>
-        <OctoCorePath Condition=" '$(OctoCorePath)' == '' ">$(MSBuildThisFileDirectory)src/octo-common-services/src/octo-core/</OctoCorePath>
         <OctoCommonServicesPath Condition=" '$(OctoCommonServicesPath)' == '' ">$(MSBuildThisFileDirectory)src/octo-common-services/</OctoCommonServicesPath>
+        <OctoConstructionKitPath Condition=" '$(OctoConstructionKitPath)' == '' ">$(OctoCommonServicesPath)src/octo-construction-kit-engine-mongodb/</OctoConstructionKitPath>
         <Authors>meshmakers GmbH and Contributors</Authors>
         <Company>meshmakers GmbH and Contributors</Company>
         <Copyright>(c) 2022-2024 meshmakers GmbH</Copyright>

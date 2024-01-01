@@ -13,7 +13,7 @@
 
     <ItemGroup>
         <ProjectReference Include="..\IdentityServices.Resources\IdentityServices.Resources.csproj"/>
-        <ProjectReference Include="$(OctoCorePath)src\MongoDb\Runtime.Engine.MongoDb\Runtime.Engine.MongoDb.csproj"/>
+        <ProjectReference Include="$(OctoConstructionKitPath)src\MongoDb\Runtime.Engine.MongoDb\Runtime.Engine.MongoDb.csproj"/>
         <ProjectReference Include="$(OctoCommonServicesPath)src\Common\Common.csproj"/>
         <ProjectReference Include="$(OctoCommonServicesPath)src\Infrastructure\Infrastructure.csproj"/>
         <ProjectReference Include="..\Persistence.IdentityCkModel\Persistence.IdentityCkModel.csproj"/>

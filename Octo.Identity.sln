@@ -4,7 +4,7 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Authentication", "src\Authe
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Infrastructure", "src\octo-common-services\src\Infrastructure\Infrastructure.csproj", "{B62EB965-80B5-4547-9CDC-92ECE2737B89}"
 EndProject
-Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "octo-core", "octo-core", "{AF91F7B3-12FF-44AF-BBBE-A4A8C7340D78}"
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "octo-construction-kit", "octo-construction-kit", "{AF91F7B3-12FF-44AF-BBBE-A4A8C7340D78}"
 EndProject
 Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "octo-common-services", "octo-common-services", "{48DDCE79-CF0A-43A9-B995-7649D58C07A1}"
 EndProject
@@ -18,21 +18,21 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Swagger", "src\octo-common-
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "PolicyServices", "src\PolicyServices\PolicyServices.csproj", "{E61A11C3-3B3F-4D16-A007-62D8096A63B4}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Runtime.Contracts.MongoDb", "src\octo-common-services\src\octo-core\src\MongoDb\Runtime.Contracts.MongoDb\Runtime.Contracts.MongoDb.csproj", "{D8986868-D585-4973-9D7B-9192447C2142}"
-EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Runtime.Engine.MongoDb", "src\octo-common-services\src\octo-core\src\MongoDb\Runtime.Engine.MongoDb\Runtime.Engine.MongoDb.csproj", "{740AFCFC-718B-4B7B-B46D-62B3D68A047D}"
-EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Persistence.IdentityCkModel", "src\Persistence.IdentityCkModel\Persistence.IdentityCkModel.csproj", "{26B615B1-5B51-4864-8661-AF476B4F48A7}"
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "IdentityServerPersistence", "src\IdentityServerPersistence\IdentityServerPersistence.csproj", "{43D1EF17-936E-4D27-9BDB-52E0B8FCCEAC}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Persistence.SystemCkModel", "src\octo-common-services\src\octo-core\src\Common\Persistence.SystemCkModel\Persistence.SystemCkModel.csproj", "{6F1AD426-3D2E-4A6C-B1F5-3DD5C9A70EA8}"
-EndProject
 Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "tests", "tests", "{C15436E4-4071-452D-9492-17EA55067874}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Persistence.SystemTests", "src\octo-common-services\src\octo-core\tests\Persistence.SystemTests\Persistence.SystemTests.csproj", "{E2C29BD7-0C6E-4244-B0EC-FF4E3AC85BCC}"
-EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Notifications", "src\octo-common-services\src\Notifications\Notifications.csproj", "{02C28B56-A1E4-4489-ACBE-FF0085D2EE54}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "SystemCkModel", "src\octo-common-services\src\octo-construction-kit-engine-mongodb\src\Common\SystemCkModel\SystemCkModel.csproj", "{1A8FCDC4-E244-41F9-9333-567A2C9BB322}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Runtime.Contracts.MongoDb", "src\octo-common-services\src\octo-construction-kit-engine-mongodb\src\MongoDb\Runtime.Contracts.MongoDb\Runtime.Contracts.MongoDb.csproj", "{4D779D7D-F277-427E-9AAE-9A84BC640CB9}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Runtime.Engine.MongoDb", "src\octo-common-services\src\octo-construction-kit-engine-mongodb\src\MongoDb\Runtime.Engine.MongoDb\Runtime.Engine.MongoDb.csproj", "{42FC864B-15CB-416C-937C-D4A2D84107B5}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Persistence.SystemTests", "src\octo-common-services\src\octo-construction-kit-engine-mongodb\tests\Persistence.SystemTests\Persistence.SystemTests.csproj", "{AA5C45C5-2C67-43FC-9EA0-FBFDC6F4154E}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
@@ -83,18 +83,6 @@ Global
 		{E61A11C3-3B3F-4D16-A007-62D8096A63B4}.Release|Any CPU.Build.0 = Release|Any CPU
 		{E61A11C3-3B3F-4D16-A007-62D8096A63B4}.DebugL|Any CPU.ActiveCfg = DebugL|Any CPU
 		{E61A11C3-3B3F-4D16-A007-62D8096A63B4}.DebugL|Any CPU.Build.0 = DebugL|Any CPU
-		{D8986868-D585-4973-9D7B-9192447C2142}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
-		{D8986868-D585-4973-9D7B-9192447C2142}.Debug|Any CPU.Build.0 = Debug|Any CPU
-		{D8986868-D585-4973-9D7B-9192447C2142}.Release|Any CPU.ActiveCfg = Release|Any CPU
-		{D8986868-D585-4973-9D7B-9192447C2142}.Release|Any CPU.Build.0 = Release|Any CPU
-		{D8986868-D585-4973-9D7B-9192447C2142}.DebugL|Any CPU.ActiveCfg = DebugL|Any CPU
-		{D8986868-D585-4973-9D7B-9192447C2142}.DebugL|Any CPU.Build.0 = DebugL|Any CPU
-		{740AFCFC-718B-4B7B-B46D-62B3D68A047D}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
-		{740AFCFC-718B-4B7B-B46D-62B3D68A047D}.Debug|Any CPU.Build.0 = Debug|Any CPU
-		{740AFCFC-718B-4B7B-B46D-62B3D68A047D}.Release|Any CPU.ActiveCfg = Release|Any CPU
-		{740AFCFC-718B-4B7B-B46D-62B3D68A047D}.Release|Any CPU.Build.0 = Release|Any CPU
-		{740AFCFC-718B-4B7B-B46D-62B3D68A047D}.DebugL|Any CPU.ActiveCfg = DebugL|Any CPU
-		{740AFCFC-718B-4B7B-B46D-62B3D68A047D}.DebugL|Any CPU.Build.0 = DebugL|Any CPU
 		{26B615B1-5B51-4864-8661-AF476B4F48A7}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
 		{26B615B1-5B51-4864-8661-AF476B4F48A7}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{26B615B1-5B51-4864-8661-AF476B4F48A7}.Release|Any CPU.ActiveCfg = Release|Any CPU
@@ -107,34 +95,46 @@ Global
 		{43D1EF17-936E-4D27-9BDB-52E0B8FCCEAC}.Release|Any CPU.Build.0 = Release|Any CPU
 		{43D1EF17-936E-4D27-9BDB-52E0B8FCCEAC}.DebugL|Any CPU.ActiveCfg = DebugL|Any CPU
 		{43D1EF17-936E-4D27-9BDB-52E0B8FCCEAC}.DebugL|Any CPU.Build.0 = DebugL|Any CPU
-		{6F1AD426-3D2E-4A6C-B1F5-3DD5C9A70EA8}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
-		{6F1AD426-3D2E-4A6C-B1F5-3DD5C9A70EA8}.Debug|Any CPU.Build.0 = Debug|Any CPU
-		{6F1AD426-3D2E-4A6C-B1F5-3DD5C9A70EA8}.Release|Any CPU.ActiveCfg = Release|Any CPU
-		{6F1AD426-3D2E-4A6C-B1F5-3DD5C9A70EA8}.Release|Any CPU.Build.0 = Release|Any CPU
-		{6F1AD426-3D2E-4A6C-B1F5-3DD5C9A70EA8}.DebugL|Any CPU.ActiveCfg = DebugL|Any CPU
-		{6F1AD426-3D2E-4A6C-B1F5-3DD5C9A70EA8}.DebugL|Any CPU.Build.0 = DebugL|Any CPU
-		{E2C29BD7-0C6E-4244-B0EC-FF4E3AC85BCC}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
-		{E2C29BD7-0C6E-4244-B0EC-FF4E3AC85BCC}.Debug|Any CPU.Build.0 = Debug|Any CPU
-		{E2C29BD7-0C6E-4244-B0EC-FF4E3AC85BCC}.Release|Any CPU.ActiveCfg = Release|Any CPU
-		{E2C29BD7-0C6E-4244-B0EC-FF4E3AC85BCC}.Release|Any CPU.Build.0 = Release|Any CPU
-		{E2C29BD7-0C6E-4244-B0EC-FF4E3AC85BCC}.DebugL|Any CPU.ActiveCfg = DebugL|Any CPU
-		{E2C29BD7-0C6E-4244-B0EC-FF4E3AC85BCC}.DebugL|Any CPU.Build.0 = DebugL|Any CPU
 		{02C28B56-A1E4-4489-ACBE-FF0085D2EE54}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
 		{02C28B56-A1E4-4489-ACBE-FF0085D2EE54}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{02C28B56-A1E4-4489-ACBE-FF0085D2EE54}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{02C28B56-A1E4-4489-ACBE-FF0085D2EE54}.Release|Any CPU.Build.0 = Release|Any CPU
 		{02C28B56-A1E4-4489-ACBE-FF0085D2EE54}.DebugL|Any CPU.ActiveCfg = DebugL|Any CPU
 		{02C28B56-A1E4-4489-ACBE-FF0085D2EE54}.DebugL|Any CPU.Build.0 = DebugL|Any CPU
+		{1A8FCDC4-E244-41F9-9333-567A2C9BB322}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{1A8FCDC4-E244-41F9-9333-567A2C9BB322}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{1A8FCDC4-E244-41F9-9333-567A2C9BB322}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{1A8FCDC4-E244-41F9-9333-567A2C9BB322}.Release|Any CPU.Build.0 = Release|Any CPU
+		{1A8FCDC4-E244-41F9-9333-567A2C9BB322}.DebugL|Any CPU.ActiveCfg = DebugL|Any CPU
+		{1A8FCDC4-E244-41F9-9333-567A2C9BB322}.DebugL|Any CPU.Build.0 = DebugL|Any CPU
+		{4D779D7D-F277-427E-9AAE-9A84BC640CB9}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{4D779D7D-F277-427E-9AAE-9A84BC640CB9}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{4D779D7D-F277-427E-9AAE-9A84BC640CB9}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{4D779D7D-F277-427E-9AAE-9A84BC640CB9}.Release|Any CPU.Build.0 = Release|Any CPU
+		{4D779D7D-F277-427E-9AAE-9A84BC640CB9}.DebugL|Any CPU.ActiveCfg = DebugL|Any CPU
+		{4D779D7D-F277-427E-9AAE-9A84BC640CB9}.DebugL|Any CPU.Build.0 = DebugL|Any CPU
+		{42FC864B-15CB-416C-937C-D4A2D84107B5}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{42FC864B-15CB-416C-937C-D4A2D84107B5}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{42FC864B-15CB-416C-937C-D4A2D84107B5}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{42FC864B-15CB-416C-937C-D4A2D84107B5}.Release|Any CPU.Build.0 = Release|Any CPU
+		{42FC864B-15CB-416C-937C-D4A2D84107B5}.DebugL|Any CPU.ActiveCfg = DebugL|Any CPU
+		{42FC864B-15CB-416C-937C-D4A2D84107B5}.DebugL|Any CPU.Build.0 = DebugL|Any CPU
+		{AA5C45C5-2C67-43FC-9EA0-FBFDC6F4154E}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{AA5C45C5-2C67-43FC-9EA0-FBFDC6F4154E}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{AA5C45C5-2C67-43FC-9EA0-FBFDC6F4154E}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{AA5C45C5-2C67-43FC-9EA0-FBFDC6F4154E}.Release|Any CPU.Build.0 = Release|Any CPU
+		{AA5C45C5-2C67-43FC-9EA0-FBFDC6F4154E}.DebugL|Any CPU.ActiveCfg = DebugL|Any CPU
+		{AA5C45C5-2C67-43FC-9EA0-FBFDC6F4154E}.DebugL|Any CPU.Build.0 = DebugL|Any CPU
 	EndGlobalSection
 	GlobalSection(NestedProjects) = preSolution
 		{B62EB965-80B5-4547-9CDC-92ECE2737B89} = {48DDCE79-CF0A-43A9-B995-7649D58C07A1}
 		{4F56615E-D07D-48B1-B8C2-E3381B998772} = {48DDCE79-CF0A-43A9-B995-7649D58C07A1}
 		{2B06D1E3-17BA-4480-B66B-BF1798823D2F} = {48DDCE79-CF0A-43A9-B995-7649D58C07A1}
-		{D8986868-D585-4973-9D7B-9192447C2142} = {AF91F7B3-12FF-44AF-BBBE-A4A8C7340D78}
-		{740AFCFC-718B-4B7B-B46D-62B3D68A047D} = {AF91F7B3-12FF-44AF-BBBE-A4A8C7340D78}
-		{6F1AD426-3D2E-4A6C-B1F5-3DD5C9A70EA8} = {AF91F7B3-12FF-44AF-BBBE-A4A8C7340D78}
 		{AF91F7B3-12FF-44AF-BBBE-A4A8C7340D78} = {48DDCE79-CF0A-43A9-B995-7649D58C07A1}
-		{E2C29BD7-0C6E-4244-B0EC-FF4E3AC85BCC} = {C15436E4-4071-452D-9492-17EA55067874}
 		{02C28B56-A1E4-4489-ACBE-FF0085D2EE54} = {48DDCE79-CF0A-43A9-B995-7649D58C07A1}
+		{1A8FCDC4-E244-41F9-9333-567A2C9BB322} = {AF91F7B3-12FF-44AF-BBBE-A4A8C7340D78}
+		{4D779D7D-F277-427E-9AAE-9A84BC640CB9} = {AF91F7B3-12FF-44AF-BBBE-A4A8C7340D78}
+		{42FC864B-15CB-416C-937C-D4A2D84107B5} = {AF91F7B3-12FF-44AF-BBBE-A4A8C7340D78}
+		{AA5C45C5-2C67-43FC-9EA0-FBFDC6F4154E} = {C15436E4-4071-452D-9492-17EA55067874}
 	EndGlobalSection
 EndGlobal
