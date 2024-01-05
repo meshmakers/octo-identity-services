@@ -1,7 +1,7 @@
 using System.Security.Claims;
 using Meshmakers.Common.Shared;
 using Meshmakers.Octo.ConstructionKit.Contracts;
-using Meshmakers.Octo.Runtime.Contracts.MongoDb;
+using Meshmakers.Octo.Runtime.Contracts;
 using Meshmakers.Octo.Runtime.Contracts.MongoDb.Repository;
 using Meshmakers.Octo.Runtime.Contracts.Repositories.Query;
 using Meshmakers.Octo.Runtime.Contracts.RepositoryEntities;
@@ -184,7 +184,10 @@ public sealed class OctoRoleStore :
         ArgumentValidation.Validate(nameof(role), role);
 
         var dbRole = await FindByIdAsync(ConvertIdToString(role.RtId), cancellationToken).ConfigureAwait(false);
-        if (dbRole == null) throw NotExistingException.RoleWithIdDoesNotExist(role.RtId);
+        if (dbRole == null)
+        {
+            throw NotExistingException.RoleWithIdDoesNotExist(role.RtId);
+        }
 
         return dbRole.Claims?.Select(e => new Claim(e.ClaimType, e.ClaimValue)).ToList() ?? new List<Claim>();
     }
@@ -229,7 +232,10 @@ public sealed class OctoRoleStore :
 
     private void ThrowIfDisposed()
     {
-        if (_disposed) throw new ObjectDisposedException(GetType().Name);
+        if (_disposed)
+        {
+            throw new ObjectDisposedException(GetType().Name);
+        }
     }
 
     private OctoObjectId ConvertIdFromString(string id)

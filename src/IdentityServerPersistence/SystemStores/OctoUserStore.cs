@@ -9,7 +9,6 @@ using Meshmakers.Octo.Runtime.Contracts.RepositoryEntities;
 using Meshmakers.Octo.Services.Infrastructure.Services;
 using Microsoft.AspNetCore.Identity;
 using Persistence.IdentityCkModel.ConstructionKit.Generated.System.Identity.v1;
-using PersistenceException = Meshmakers.Octo.Runtime.Contracts.MongoDb.PersistenceException;
 
 namespace IdentityServerPersistence.SystemStores;
 
@@ -143,7 +142,9 @@ public sealed class OctoUserStore :
 
             var entry = await FindTokenAsync(session, user, loginProvider, name);
             if (entry != null && user.UserTokens != null)
+            {
                 user.UserTokens.RemoveAll(x => x.LoginProvider == entry.LoginProvider && x.Name == entry.Name);
+            }
 
             await session.CommitTransactionAsync();
         }
@@ -165,7 +166,10 @@ public sealed class OctoUserStore :
             session.StartTransaction();
 
             var rtUserTokenRecord = await FindTokenAsync(session, user, loginProvider, name);
-            if (rtUserTokenRecord == null) throw NotExistingException.UserTokenDoesNotExist(user.RtId, loginProvider, name);
+            if (rtUserTokenRecord == null)
+            {
+                throw NotExistingException.UserTokenDoesNotExist(user.RtId, loginProvider, name);
+            }
 
             await session.CommitTransactionAsync();
 
@@ -320,6 +324,7 @@ public sealed class OctoUserStore :
         ArgumentValidation.Validate(nameof(newClaim), newClaim);
 
         if (user.Claims != null)
+        {
             foreach (var userClaim in user.Claims
                          .Where(uc =>
                              uc.ClaimValue == claim.Value &&
@@ -329,6 +334,7 @@ public sealed class OctoUserStore :
                 userClaim.ClaimValue = newClaim.Value;
                 userClaim.ClaimType = newClaim.Type;
             }
+        }
 
         return Task.CompletedTask;
     }
@@ -421,7 +427,10 @@ public sealed class OctoUserStore :
         ArgumentValidation.Validate(nameof(user), user);
 
         var dbUser = await GetUserByIdAsync(user.RtId, cancellationToken).ConfigureAwait(true);
-        if (dbUser == null) throw NotExistingException.UserWithIdDoesNotExist(user.RtId);
+        if (dbUser == null)
+        {
+            throw NotExistingException.UserWithIdDoesNotExist(user.RtId);
+        }
 
         var source =
             dbUser.Claims?.Select(x => new Claim(x.ClaimType, x.ClaimValue));
@@ -486,7 +495,10 @@ public sealed class OctoUserStore :
 
         var result = await _tenantRepository.GetRtEntitiesByTypeAsync<RtUser>(session, dataQueryOperation);
         await session.CommitTransactionAsync();
-        if (!result.Items.Any()) throw NotExistingException.UserDoesNotExist(normalizedEmail);
+        if (!result.Items.Any())
+        {
+            throw NotExistingException.UserDoesNotExist(normalizedEmail);
+        }
 
         return result.Items.First();
     }
@@ -669,7 +681,11 @@ public sealed class OctoUserStore :
         ArgumentValidation.Validate(nameof(user), user);
 
         var dbUser = await GetUserByIdAsync(user.RtId, cancellationToken).ConfigureAwait(false);
-        if (dbUser == null) throw NotExistingException.UserWithIdDoesNotExist(user.RtId);
+        if (dbUser == null)
+        {
+            throw NotExistingException.UserWithIdDoesNotExist(user.RtId);
+        }
+
         var source = dbUser.UserLogins?.Select(
             x =>
                 new UserLoginInfo(x.LoginProvider, x.ProviderKey, x.ProviderDisplayName));
@@ -773,7 +789,10 @@ public sealed class OctoUserStore :
         ArgumentValidation.ValidateString(nameof(normalizedRoleName), normalizedRoleName);
 
         var roleAsync = await FindRoleAsync(normalizedRoleName, cancellationToken);
-        if (roleAsync == null) return;
+        if (roleAsync == null)
+        {
+            return;
+        }
 
         user.RoleIds?.Remove(ConvertIdToString(roleAsync.RtId));
     }
@@ -788,7 +807,10 @@ public sealed class OctoUserStore :
         ArgumentValidation.ValidateString(nameof(normalizedRoleName), normalizedRoleName);
 
         var roleAsync = await FindRoleAsync(normalizedRoleName, cancellationToken);
-        if (roleAsync == null) return new List<RtUser>();
+        if (roleAsync == null)
+        {
+            return new List<RtUser>();
+        }
 
         using var session = await _tenantRepository.GetSessionAsync().ConfigureAwait(false);
         session.StartTransaction();
@@ -811,14 +833,24 @@ public sealed class OctoUserStore :
 
 
         var dbUser = await GetUserByIdAsync(user.RtId, cancellationToken).ConfigureAwait(true);
-        if (dbUser == null) throw NotExistingException.UserWithIdDoesNotExist(user.RtId);
+        if (dbUser == null)
+        {
+            throw NotExistingException.UserWithIdDoesNotExist(user.RtId);
+        }
 
         var roles = new List<string>();
-        if (dbUser.RoleIds == null) return roles;
+        if (dbUser.RoleIds == null)
+        {
+            return roles;
+        }
+
         foreach (var roleRtIdString in dbUser.RoleIds)
         {
             var role = await GetRoleByIdAsync(ConvertIdFromString(roleRtIdString), cancellationToken).ConfigureAwait(true);
-            if (!string.IsNullOrWhiteSpace(role.Name)) roles.Add(role.Name);
+            if (!string.IsNullOrWhiteSpace(role.Name))
+            {
+                roles.Add(role.Name);
+            }
         }
 
         return roles;
@@ -834,11 +866,17 @@ public sealed class OctoUserStore :
         ArgumentValidation.Validate(nameof(user), user);
 
         var dbUser = await GetUserByIdAsync(user.RtId, cancellationToken).ConfigureAwait(true);
-        if (dbUser == null) throw NotExistingException.UserWithIdDoesNotExist(user.RtId);
+        if (dbUser == null)
+        {
+            throw NotExistingException.UserWithIdDoesNotExist(user.RtId);
+        }
 
         var role = await FindRoleAsync(normalizedRoleName, cancellationToken).ConfigureAwait(true);
 
-        if (role == null) return false;
+        if (role == null)
+        {
+            return false;
+        }
 
         return dbUser.RoleIds?.Contains(ConvertIdToString(role.RtId)) ?? false;
     }
@@ -884,7 +922,10 @@ public sealed class OctoUserStore :
 
         var token = await GetTokenAsync(user, InternalLoginProvider, RecoveryCodeTokenName, cancellationToken);
         var source = token?.Split(';');
-        if (source == null || !source.Contains(code)) return false;
+        if (source == null || !source.Contains(code))
+        {
+            return false;
+        }
 
 
         var recoveryCodes = new List<string>(source.Where(s => s != code));
@@ -924,7 +965,10 @@ public sealed class OctoUserStore :
 
     private void ThrowIfDisposed()
     {
-        if (_disposed) throw new ObjectDisposedException(GetType().Name);
+        if (_disposed)
+        {
+            throw new ObjectDisposedException(GetType().Name);
+        }
     }
 
     private OctoObjectId ConvertIdFromString(string id)

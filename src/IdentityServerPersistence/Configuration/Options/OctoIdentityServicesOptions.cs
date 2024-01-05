@@ -19,7 +19,7 @@ public class OctoIdentityServicesOptions
     ///     Gets or sets the RabbitMq host name
     /// </summary>
     public string BrokerHost { get; set; }
-    
+
     /// <summary>
     ///     Gets or sets the RabbitMq user
     /// </summary>

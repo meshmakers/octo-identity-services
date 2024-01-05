@@ -109,7 +109,10 @@ internal class LdapConnection : ILdapConnection
 
     protected virtual void Dispose(bool disposing)
     {
-        if (_disposed) return;
+        if (_disposed)
+        {
+            return;
+        }
 
         if (disposing)
         {
@@ -159,7 +162,11 @@ internal class LdapConnection : ILdapConnection
                 string.Empty, Novell.Directory.Ldap.LdapConnection.ScopeBase, "(objectClass=*)", new[] { _rootDseAttrName },
                 false, null, null);
             var entry = searchQueue.GetLdapEntries().FirstOrDefault();
-            if (entry == null) throw new NotSupportedException("LDAP search did not returned results.");
+            if (entry == null)
+            {
+                throw new NotSupportedException("LDAP search did not returned results.");
+            }
+
             var attribute = entry.GetAttribute(_rootDseAttrName);
             return attribute.StringValue;
         }
@@ -219,7 +226,10 @@ internal class LdapConnection : ILdapConnection
             }
 
             // If the page had only one entry, check if last entry was entered twice
-            if (pageIndex == 2) CheckIfLastEntryTwice(ldapEntries);
+            if (pageIndex == 2)
+            {
+                CheckIfLastEntryTwice(ldapEntries);
+            }
         }
 
         return ldapEntries;
@@ -256,7 +266,9 @@ internal class LdapConnection : ILdapConnection
             var secondLastEntry = ldapEntries.ElementAt(ldapEntries.Count - 2);
             if (lastEntry.CompareTo(secondLastEntry) == 0)
                 // The last two objects are the same. Remove last one.
+            {
                 ldapEntries.Remove(lastEntry);
+            }
         }
     }
 }

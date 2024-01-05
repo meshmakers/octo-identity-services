@@ -93,7 +93,10 @@ public class ClientsController : ControllerBase
     public async Task<IActionResult> Get([Required] string id)
     {
         var client = await _octoClientStore.FindRtClientByIdAsync(id);
-        if (client == null) return NotFound();
+        if (client == null)
+        {
+            return NotFound();
+        }
 
         return Ok(CreateClientDto(client));
     }
@@ -108,10 +111,15 @@ public class ClientsController : ControllerBase
     [Authorize(IdentityServiceConstants.IdentityApiReadWritePolicy)]
     public async Task<IActionResult> Post([Required] [FromBody] ClientDto clientDto)
     {
-        if (!ModelState.IsValid || clientDto.ClientId == null) return BadRequest(ModelState);
+        if (!ModelState.IsValid || clientDto.ClientId == null)
+        {
+            return BadRequest(ModelState);
+        }
 
         if (await _octoClientStore.FindClientByIdAsync(clientDto.ClientId) != null)
+        {
             return Conflict($"Client with id '{clientDto.ClientId}' already exists.");
+        }
 
         var appClient = new RtClient
         {
@@ -148,10 +156,16 @@ public class ClientsController : ControllerBase
     [Authorize(IdentityServiceConstants.IdentityApiReadWritePolicy)]
     public async Task<IActionResult> Put([Required] string id, [Required] [FromBody] ClientDto clientDto)
     {
-        if (!ModelState.IsValid) return BadRequest(ModelState);
+        if (!ModelState.IsValid)
+        {
+            return BadRequest(ModelState);
+        }
 
         var appClient = await _octoClientStore.FindRtClientByIdAsync(id);
-        if (appClient == null) return NotFound(new NotFoundError($"Client with id '{id}' does not exist."));
+        if (appClient == null)
+        {
+            return NotFound(new NotFoundError($"Client with id '{id}' does not exist."));
+        }
 
         ApplyToClient(appClient, clientDto);
 
@@ -179,7 +193,10 @@ public class ClientsController : ControllerBase
     public async Task<IActionResult> Delete([Required] string id)
     {
         var appClient = await _octoClientStore.FindClientByIdAsync(id);
-        if (appClient == null) return NotFound(new NotFoundError($"Client with id '{id}' does not exist."));
+        if (appClient == null)
+        {
+            return NotFound(new NotFoundError($"Client with id '{id}' does not exist."));
+        }
 
         try
         {
@@ -219,43 +236,72 @@ public class ClientsController : ControllerBase
 
     private void ApplyToClient(RtClient applicationClient, ClientDto clientDto)
     {
-        if (clientDto.IsEnabled.HasValue) applicationClient.Enabled = clientDto.IsEnabled.Value;
+        if (clientDto.IsEnabled.HasValue)
+        {
+            applicationClient.Enabled = clientDto.IsEnabled.Value;
+        }
 
-        if (!string.IsNullOrEmpty(clientDto.ClientId)) applicationClient.ClientId = clientDto.ClientId;
+        if (!string.IsNullOrEmpty(clientDto.ClientId))
+        {
+            applicationClient.ClientId = clientDto.ClientId;
+        }
 
-        if (!string.IsNullOrEmpty(clientDto.ClientName)) applicationClient.ClientName = clientDto.ClientName;
+        if (!string.IsNullOrEmpty(clientDto.ClientName))
+        {
+            applicationClient.ClientName = clientDto.ClientName;
+        }
 
-        if (!string.IsNullOrEmpty(clientDto.ClientUri)) applicationClient.ClientUri = clientDto.ClientUri;
+        if (!string.IsNullOrEmpty(clientDto.ClientUri))
+        {
+            applicationClient.ClientUri = clientDto.ClientUri;
+        }
 
         if (clientDto.AllowedGrantTypes != null)
+        {
             applicationClient.AllowedGrantTypes = new AttributeStringValueList(
                 clientDto.AllowedGrantTypes?.ToList() ?? new List<string>());
+        }
 
         if (clientDto.RedirectUris != null)
+        {
             applicationClient.RedirectUris = new AttributeStringValueList(
                 clientDto.RedirectUris?.ToList() ?? new List<string>());
+        }
 
         if (clientDto.PostLogoutRedirectUris != null)
+        {
             applicationClient.PostLogoutRedirectUris = new AttributeStringValueList(
                 clientDto.PostLogoutRedirectUris?.ToList() ??
                 new List<string>());
+        }
 
         if (clientDto.AllowedCorsOrigins != null)
+        {
             applicationClient.AllowedCorsOrigins = new AttributeStringValueList(
                 clientDto.AllowedCorsOrigins?.ToList() ?? new List<string>());
+        }
 
         if (clientDto.AllowedScopes != null)
+        {
             applicationClient.AllowedScopes = new AttributeStringValueList(
                 CommonConstants.OctoDefaultScopes.Concat(clientDto.AllowedScopes).Distinct().ToList());
+        }
         else
+        {
             applicationClient.AllowedScopes = new AttributeStringValueList(CommonConstants.OctoDefaultScopes.ToList());
+        }
 
-        if (clientDto.IsOfflineAccessEnabled.HasValue) applicationClient.AllowOfflineAccess = clientDto.IsOfflineAccessEnabled.Value;
+        if (clientDto.IsOfflineAccessEnabled.HasValue)
+        {
+            applicationClient.AllowOfflineAccess = clientDto.IsOfflineAccessEnabled.Value;
+        }
 
         if (!string.IsNullOrWhiteSpace(clientDto.ClientSecret))
+        {
             applicationClient.ClientSecrets = new AttributeRecordValueList<RtSecretRecord>
             {
                 new() { Value = clientDto.ClientSecret.Sha256() }
             };
+        }
     }
 }

@@ -85,7 +85,10 @@ public class ApiScopesController : ControllerBase
     {
         var scopes = await _octoResourceStore.FindApiScopesByNameAsync(new[] { name });
         var scope = scopes.FirstOrDefault();
-        if (scope == null) return NotFound();
+        if (scope == null)
+        {
+            return NotFound();
+        }
 
         return Ok(CreateApiScopeDto(scope));
     }
@@ -100,10 +103,15 @@ public class ApiScopesController : ControllerBase
     [Authorize(IdentityServiceConstants.IdentityApiReadWritePolicy)]
     public async Task<IActionResult> Post([Required] [FromBody] ApiScopeDto scopeDto)
     {
-        if (!ModelState.IsValid || scopeDto.Name == null) return BadRequest(ModelState);
+        if (!ModelState.IsValid || scopeDto.Name == null)
+        {
+            return BadRequest(ModelState);
+        }
 
         if ((await _octoResourceStore.FindApiScopesByNameAsync(new[] { scopeDto.Name })).Any())
+        {
             return Conflict($"Scope with name '{scopeDto.Name}' already exists.");
+        }
 
         var apiScope = new RtApiScope();
         ApplyToApiScope(apiScope, scopeDto);
@@ -131,10 +139,16 @@ public class ApiScopesController : ControllerBase
     [Authorize(IdentityServiceConstants.IdentityApiReadWritePolicy)]
     public async Task<IActionResult> Put([Required] string name, [Required] [FromBody] ApiScopeDto scopeDto)
     {
-        if (!ModelState.IsValid) return BadRequest(ModelState);
+        if (!ModelState.IsValid)
+        {
+            return BadRequest(ModelState);
+        }
 
         var apiScope = await _octoResourceStore.GetApiScopeByNameAsync(name);
-        if (apiScope == null) return NotFound(new NotFoundError($"Scope with name '{name}' does not exist."));
+        if (apiScope == null)
+        {
+            return NotFound(new NotFoundError($"Scope with name '{name}' does not exist."));
+        }
 
         ApplyToApiScope(apiScope, scopeDto);
 
@@ -161,10 +175,16 @@ public class ApiScopesController : ControllerBase
     [Authorize(IdentityServiceConstants.IdentityApiReadWritePolicy)]
     public async Task<IActionResult> Delete([Required] string name)
     {
-        if (!ModelState.IsValid) return BadRequest(ModelState);
+        if (!ModelState.IsValid)
+        {
+            return BadRequest(ModelState);
+        }
 
         var octoApiScope = await _octoResourceStore.GetApiScopeByNameAsync(name);
-        if (octoApiScope == null) return NotFound(new NotFoundError($"Scope with name '{name}' does not exist."));
+        if (octoApiScope == null)
+        {
+            return NotFound(new NotFoundError($"Scope with name '{name}' does not exist."));
+        }
 
         try
         {
@@ -203,14 +223,21 @@ public class ApiScopesController : ControllerBase
 
     private void ApplyToApiScope(RtApiScope apiScope, ApiScopeDto apiScopeDto)
     {
-        if (string.IsNullOrWhiteSpace(apiScopeDto.Name)) throw new InvalidOperationException("Scope name cannot be null or empty.");
+        if (string.IsNullOrWhiteSpace(apiScopeDto.Name))
+        {
+            throw new InvalidOperationException("Scope name cannot be null or empty.");
+        }
 
         apiScope.Enabled = apiScopeDto.IsEnabled;
         apiScope.Name = apiScopeDto.Name;
         apiScope.DisplayName = apiScopeDto.DisplayName;
         apiScope.Description = apiScopeDto.Description;
         apiScope.ShowInDiscoveryDocument = apiScopeDto.ShowInDiscoveryDocument;
-        if (apiScopeDto.UserClaims != null) apiScope.Claims = new AttributeStringValueList(apiScopeDto.UserClaims.ToList());
+        if (apiScopeDto.UserClaims != null)
+        {
+            apiScope.Claims = new AttributeStringValueList(apiScopeDto.UserClaims.ToList());
+        }
+
         apiScope.IsRequired = apiScopeDto.IsRequired;
         apiScope.IsEmphasized = apiScopeDto.IsEmphasize;
     }

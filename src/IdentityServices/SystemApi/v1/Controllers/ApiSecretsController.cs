@@ -41,10 +41,16 @@ public class ApiSecretsController : ControllerBase
     [Authorize(IdentityServiceConstants.IdentityApiReadOnlyPolicy)]
     public async Task<IActionResult> GetClient([Required] string clientId)
     {
-        if (!ModelState.IsValid) return BadRequest(ModelState);
+        if (!ModelState.IsValid)
+        {
+            return BadRequest(ModelState);
+        }
 
         var client = await _octoClientStore.FindClientByIdAsync(clientId);
-        if (client == null) return NotFound();
+        if (client == null)
+        {
+            return NotFound();
+        }
 
         return Ok(client.ClientSecrets.Select(CreateApiSecret));
     }
@@ -58,15 +64,25 @@ public class ApiSecretsController : ControllerBase
     [Authorize(IdentityServiceConstants.IdentityApiReadOnlyPolicy)]
     public async Task<IActionResult> GetClientSecret([Required] string clientId, [Required] string secretValue)
     {
-        if (!ModelState.IsValid) return BadRequest(ModelState);
+        if (!ModelState.IsValid)
+        {
+            return BadRequest(ModelState);
+        }
 
         var decodedSecretValue = secretValue.DecodeBase64();
 
         var client = await _octoClientStore.FindClientByIdAsync(clientId);
-        if (client == null) return NotFound(new NotFoundError($"Client '{clientId}' not found"));
+        if (client == null)
+        {
+            return NotFound(new NotFoundError($"Client '{clientId}' not found"));
+        }
 
         var secret = client.ClientSecrets.FirstOrDefault(x => x.Value == decodedSecretValue);
-        if (secret == null) return NotFound(new NotFoundError($"API secret '{decodedSecretValue}' not found"));
+        if (secret == null)
+        {
+            return NotFound(new NotFoundError($"API secret '{decodedSecretValue}' not found"));
+        }
+
         return Ok(CreateApiSecret(secret));
     }
 
@@ -79,11 +95,17 @@ public class ApiSecretsController : ControllerBase
     [Authorize(IdentityServiceConstants.IdentityApiReadOnlyPolicy)]
     public async Task<IActionResult> GetApiResource([Required] string apiResourceName)
     {
-        if (!ModelState.IsValid) return BadRequest(ModelState);
+        if (!ModelState.IsValid)
+        {
+            return BadRequest(ModelState);
+        }
 
         var apiResources = await _octoResourceStore.FindApiResourcesByNameAsync(new[] { apiResourceName });
         var apiResource = apiResources.FirstOrDefault();
-        if (apiResource == null) return NotFound();
+        if (apiResource == null)
+        {
+            return NotFound();
+        }
 
         return Ok(apiResource.ApiSecrets.Select(CreateApiSecret));
     }
@@ -97,16 +119,26 @@ public class ApiSecretsController : ControllerBase
     [Authorize(IdentityServiceConstants.IdentityApiReadOnlyPolicy)]
     public async Task<IActionResult> GetApiResourceSecret([Required] string apiResourceName, [Required] string secretValue)
     {
-        if (!ModelState.IsValid) return BadRequest(ModelState);
+        if (!ModelState.IsValid)
+        {
+            return BadRequest(ModelState);
+        }
 
         var decodedSecretValue = secretValue.DecodeBase64();
 
         var apiResources = await _octoResourceStore.FindApiResourcesByNameAsync(new[] { apiResourceName });
         var apiResource = apiResources.FirstOrDefault();
-        if (apiResource == null) return NotFound(new NotFoundError($"API resource '{apiResourceName}' not found"));
+        if (apiResource == null)
+        {
+            return NotFound(new NotFoundError($"API resource '{apiResourceName}' not found"));
+        }
 
         var secret = apiResource.ApiSecrets.FirstOrDefault(x => x.Value == decodedSecretValue);
-        if (secret == null) return NotFound(new NotFoundError($"API secret '{decodedSecretValue}' not found"));
+        if (secret == null)
+        {
+            return NotFound(new NotFoundError($"API secret '{decodedSecretValue}' not found"));
+        }
+
         return Ok(CreateApiSecret(secret));
     }
 
@@ -121,10 +153,16 @@ public class ApiSecretsController : ControllerBase
     [Authorize(IdentityServiceConstants.IdentityApiReadWritePolicy)]
     public async Task<IActionResult> PostClient([Required] string clientId, [Required] [FromBody] ApiSecretDto secretDto)
     {
-        if (!ModelState.IsValid) return BadRequest(ModelState);
+        if (!ModelState.IsValid)
+        {
+            return BadRequest(ModelState);
+        }
 
         var client = await _octoClientStore.FindRtClientByIdAsync(clientId);
-        if (client == null) return NotFound();
+        if (client == null)
+        {
+            return NotFound();
+        }
 
         secretDto.ValueClearText = Guid.NewGuid().ToString();
         secretDto.ValueEncrypted = secretDto.ValueClearText.Sha256();
@@ -156,10 +194,16 @@ public class ApiSecretsController : ControllerBase
     [Authorize(IdentityServiceConstants.IdentityApiReadWritePolicy)]
     public async Task<IActionResult> PostApiResource([Required] string apiResourceName, [Required] [FromBody] ApiSecretDto secretDto)
     {
-        if (!ModelState.IsValid) return BadRequest(ModelState);
+        if (!ModelState.IsValid)
+        {
+            return BadRequest(ModelState);
+        }
 
         var apiResource = await _octoResourceStore.GetApiResourceByNameAsync(apiResourceName);
-        if (apiResource == null) return NotFound();
+        if (apiResource == null)
+        {
+            return NotFound();
+        }
 
         secretDto.ValueClearText = Guid.NewGuid().ToString();
         secretDto.ValueEncrypted = secretDto.ValueClearText.Sha256();
@@ -191,13 +235,23 @@ public class ApiSecretsController : ControllerBase
     [Authorize(IdentityServiceConstants.IdentityApiReadWritePolicy)]
     public async Task<IActionResult> PutClient([Required] string clientId, [Required] [FromBody] ApiSecretDto apiSecretDto)
     {
-        if (!ModelState.IsValid) return BadRequest(ModelState);
+        if (!ModelState.IsValid)
+        {
+            return BadRequest(ModelState);
+        }
 
         var client = await _octoClientStore.FindRtClientByIdAsync(clientId);
-        if (client == null) return NotFound();
+        if (client == null)
+        {
+            return NotFound();
+        }
 
         var secrets = client.ClientSecrets.Where(x => x.Value == apiSecretDto.ValueEncrypted).ToArray();
-        if (!secrets.Any()) return NotFound(new NotFoundError($"Secret with value '{apiSecretDto.ValueEncrypted}' does not exist."));
+        if (!secrets.Any())
+        {
+            return NotFound(new NotFoundError($"Secret with value '{apiSecretDto.ValueEncrypted}' does not exist."));
+        }
+
         var secret = secrets.First();
         ApplyToApiSecret(secret, apiSecretDto);
 
@@ -225,13 +279,23 @@ public class ApiSecretsController : ControllerBase
     [Authorize(IdentityServiceConstants.IdentityApiReadWritePolicy)]
     public async Task<IActionResult> PutApiResource([Required] string apiResourceName, [Required] [FromBody] ApiSecretDto apiSecretDto)
     {
-        if (!ModelState.IsValid) return BadRequest(ModelState);
+        if (!ModelState.IsValid)
+        {
+            return BadRequest(ModelState);
+        }
 
         var apiResource = await _octoResourceStore.GetApiResourceByNameAsync(apiResourceName);
-        if (apiResource == null) return NotFound();
+        if (apiResource == null)
+        {
+            return NotFound();
+        }
 
         var secrets = apiResource.ApiSecrets.Where(x => x.Value == apiSecretDto.ValueEncrypted).ToArray();
-        if (!secrets.Any()) return NotFound(new NotFoundError($"Secret with value '{apiSecretDto.ValueEncrypted}' does not exist."));
+        if (!secrets.Any())
+        {
+            return NotFound(new NotFoundError($"Secret with value '{apiSecretDto.ValueEncrypted}' does not exist."));
+        }
+
         var secret = secrets.First();
         ApplyToApiSecret(secret, apiSecretDto);
 
@@ -260,17 +324,29 @@ public class ApiSecretsController : ControllerBase
     [Authorize(IdentityServiceConstants.IdentityApiReadWritePolicy)]
     public async Task<IActionResult> DeleteSecretOfClient([Required] string clientId, [Required] string secretValue)
     {
-        if (!ModelState.IsValid) return BadRequest(ModelState);
+        if (!ModelState.IsValid)
+        {
+            return BadRequest(ModelState);
+        }
 
         var decodedSecretValue = secretValue.DecodeBase64();
 
         var octoClient = await _octoClientStore.FindRtClientByIdAsync(clientId);
-        if (octoClient == null) return NotFound(new NotFoundError($"Client with id '{clientId}' does not exist."));
+        if (octoClient == null)
+        {
+            return NotFound(new NotFoundError($"Client with id '{clientId}' does not exist."));
+        }
 
         var secrets = octoClient.ClientSecrets.Where(x => x.Value == decodedSecretValue).ToArray();
-        if (!secrets.Any()) return NotFound(new NotFoundError($"Secret with value '{decodedSecretValue}' does not exist."));
+        if (!secrets.Any())
+        {
+            return NotFound(new NotFoundError($"Secret with value '{decodedSecretValue}' does not exist."));
+        }
 
-        foreach (var secret in secrets) octoClient.ClientSecrets.Remove(secret);
+        foreach (var secret in secrets)
+        {
+            octoClient.ClientSecrets.Remove(secret);
+        }
 
         try
         {
@@ -296,17 +372,29 @@ public class ApiSecretsController : ControllerBase
     [Authorize(IdentityServiceConstants.IdentityApiReadWritePolicy)]
     public async Task<IActionResult> DeleteSecretOfApiResource([Required] string apiResourceName, [Required] string secretValue)
     {
-        if (!ModelState.IsValid) return BadRequest(ModelState);
+        if (!ModelState.IsValid)
+        {
+            return BadRequest(ModelState);
+        }
 
         var decodedSecretValue = secretValue.DecodeBase64();
 
         var apiResource = await _octoResourceStore.GetApiResourceByNameAsync(apiResourceName);
-        if (apiResource == null) return NotFound();
+        if (apiResource == null)
+        {
+            return NotFound();
+        }
 
         var secrets = apiResource.ApiSecrets.Where(x => x.Value == decodedSecretValue).ToArray();
-        if (!secrets.Any()) return NotFound(new NotFoundError($"Secret with value '{decodedSecretValue}' does not exist."));
+        if (!secrets.Any())
+        {
+            return NotFound(new NotFoundError($"Secret with value '{decodedSecretValue}' does not exist."));
+        }
 
-        foreach (var secret in secrets) apiResource.ApiSecrets.Remove(secret);
+        foreach (var secret in secrets)
+        {
+            apiResource.ApiSecrets.Remove(secret);
+        }
 
         try
         {
@@ -324,7 +412,7 @@ public class ApiSecretsController : ControllerBase
     {
         return _distributionEventHubService.PublishAsync(new CorsClientsUpdate(tenantId));
     }
-    
+
     private ApiSecretDto CreateApiSecret(Secret secret)
     {
         var apiSecretDto = new ApiSecretDto

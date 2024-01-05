@@ -28,7 +28,10 @@ public class SetupController : Controller
 
     public IActionResult Index()
     {
-        if (_userManager.Users.Any()) return RedirectToAction("Index", "Home");
+        if (_userManager.Users.Any())
+        {
+            return RedirectToAction("Index", "Home");
+        }
 
         return View();
     }
@@ -36,7 +39,10 @@ public class SetupController : Controller
     [HttpPost]
     public async Task<IActionResult> Index(SetupViewModel model)
     {
-        if (!ModelState.IsValid) return View(model);
+        if (!ModelState.IsValid)
+        {
+            return View(model);
+        }
 
         if (_userManager.Users.Any())
         {
@@ -61,6 +67,7 @@ public class SetupController : Controller
             ModelState.AddModelError(string.Empty, IdentityTexts.Backend_Identity_Setup_Status_PasswordComplexity);
             return View(model);
         }
+
         var adminRole = await _roleManager.FindByNameAsync(CommonConstants.AdministratorsRole);
         if (adminRole == null)
         {

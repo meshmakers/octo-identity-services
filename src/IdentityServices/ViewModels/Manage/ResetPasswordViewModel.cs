@@ -12,10 +12,15 @@ public class ResetPasswordViewModel : IValidatableObject
     public IEnumerable<ValidationResult> Validate(ValidationContext validationContext)
     {
         if (NewPassword is null || ConfirmPassword is null)
+        {
             yield return new ValidationResult(IdentityTexts.Backend_Identity_ConfirmNewPassword_PasswordRequired,
                 new[] { nameof(NewPassword) });
+        }
+
         if (NewPassword != ConfirmPassword)
+        {
             yield return new ValidationResult(IdentityTexts.Backend_Identity_ConfirmNewPassword_PasswordMismatch,
                 new[] { nameof(NewPassword) });
+        }
     }
 }

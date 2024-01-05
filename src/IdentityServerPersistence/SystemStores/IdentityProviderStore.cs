@@ -40,7 +40,7 @@ public class IdentityProviderStore : IOctoIdentityProviderStore
         var session = await _tenantRepository.GetSessionAsync();
         session.StartTransaction();
 
-        DataQueryOperation dataQueryOperation = DataQueryOperation.Create();
+        var dataQueryOperation = DataQueryOperation.Create();
 
         var result = await _tenantRepository.GetRtEntitiesByTypeAsync<RtIdentityProvider>(session, dataQueryOperation);
         await session.CommitTransactionAsync();

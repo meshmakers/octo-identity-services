@@ -40,12 +40,17 @@ public class ExternalController : Controller
     [HttpGet]
     public Task<IActionResult> Challenge(string provider, string returnUrl)
     {
-        if (string.IsNullOrEmpty(returnUrl)) returnUrl = "~/";
+        if (string.IsNullOrEmpty(returnUrl))
+        {
+            returnUrl = "~/";
+        }
 
         // validate returnUrl - either it is a valid OIDC URL or back to a local page
         if (Url.IsLocalUrl(returnUrl) == false && _interaction.IsValidReturnUrl(returnUrl) == false)
             // user might have clicked on a malicious link - should be logged
+        {
             throw new Exception("invalid return URL");
+        }
 
         var redirectUrl = Url.Action("Callback", "External", new { ReturnUrl = returnUrl });
         var properties = _signInManager.ConfigureExternalAuthenticationProperties(provider, redirectUrl);
@@ -63,10 +68,16 @@ public class ExternalController : Controller
     {
         // read external identity from the temporary cookie
         var result = await HttpContext.AuthenticateAsync(IdentityConstants.ExternalScheme);
-        if (result.Succeeded != true) throw new Exception("External authentication error");
+        if (result.Succeeded != true)
+        {
+            throw new Exception("External authentication error");
+        }
 
         var info = await _signInManager.GetExternalLoginInfoAsync();
-        if (info == null) return Redirect("~/");
+        if (info == null)
+        {
+            return Redirect("~/");
+        }
 
         var user = await _userManager.FindByLoginAsync(info.LoginProvider, info.ProviderKey);
 
@@ -76,8 +87,10 @@ public class ExternalController : Controller
             // this might be where you might initiate a custom workflow for user registration
             // in this sample we don't show how that would be done, as our sample implementation
             // simply auto-provisions new external user
+        {
             user = await AutoProvisionUserAsync(info.LoginProvider, info.ProviderKey,
                 info.Principal.Claims.ToList());
+        }
 
         await SynchronizeGroups(info.Principal.Claims, user);
 
@@ -114,7 +127,9 @@ public class ExternalController : Controller
         // validate return URL and redirect back to authorization endpoint or a local page
         //var returnUrl = result.Properties.Items["returnUrl"];
         if (!string.IsNullOrWhiteSpace(returnUrl) && (_interaction.IsValidReturnUrl(returnUrl) || Url.IsLocalUrl(returnUrl)))
+        {
             return Redirect(returnUrl);
+        }
 
         return Redirect("~/");
     }
@@ -126,17 +141,29 @@ public class ExternalController : Controller
         foreach (var roleName in rolesRequested.ToArray())
         {
             var role = await _roleManager.FindByNameAsync(roleName);
-            if (role == null) rolesRequested.Remove(roleName);
+            if (role == null)
+            {
+                rolesRequested.Remove(roleName);
+            }
         }
 
         // check which roles has to be added or removed.
         var rolesToRemove = user.RoleIds?.Except(rolesRequested).ToList();
         var rolesToAdd = rolesRequested.ToList();
-        if (user.RoleIds != null) rolesToAdd = rolesToAdd.Except(user.RoleIds).ToList();
+        if (user.RoleIds != null)
+        {
+            rolesToAdd = rolesToAdd.Except(user.RoleIds).ToList();
+        }
 
-        if (rolesToRemove != null && rolesToRemove.Any()) await _userManager.RemoveFromRolesAsync(user, rolesToRemove);
+        if (rolesToRemove != null && rolesToRemove.Any())
+        {
+            await _userManager.RemoveFromRolesAsync(user, rolesToRemove);
+        }
 
-        if (rolesToAdd.Any()) await _userManager.AddToRolesAsync(user, rolesToAdd);
+        if (rolesToAdd.Any())
+        {
+            await _userManager.AddToRolesAsync(user, rolesToAdd);
+        }
     }
 
     private async Task<RtUser> AutoProvisionUserAsync(string provider, string providerUserId, IList<Claim> claims)
@@ -158,22 +185,38 @@ public class ExternalController : Controller
         else
         {
             if (givenName != null && familyName != null)
+            {
                 filtered.Add(new Claim(JwtClaimTypes.Name, givenName + " " + familyName));
+            }
             else if (givenName != null)
+            {
                 filtered.Add(new Claim(JwtClaimTypes.Name, givenName));
-            else if (familyName != null) filtered.Add(new Claim(JwtClaimTypes.Name, familyName));
+            }
+            else if (familyName != null)
+            {
+                filtered.Add(new Claim(JwtClaimTypes.Name, familyName));
+            }
         }
 
         // first name
-        if (!string.IsNullOrEmpty(givenName)) filtered.Add(new Claim(JwtClaimTypes.GivenName, givenName));
+        if (!string.IsNullOrEmpty(givenName))
+        {
+            filtered.Add(new Claim(JwtClaimTypes.GivenName, givenName));
+        }
 
         // family name
-        if (!string.IsNullOrEmpty(familyName)) filtered.Add(new Claim(JwtClaimTypes.FamilyName, familyName));
+        if (!string.IsNullOrEmpty(familyName))
+        {
+            filtered.Add(new Claim(JwtClaimTypes.FamilyName, familyName));
+        }
 
         // email
         var email = claims.FirstOrDefault(x => x.Type == JwtClaimTypes.Email)?.Value ??
                     claims.FirstOrDefault(x => x.Type == ClaimTypes.Email)?.Value;
-        if (email != null) filtered.Add(new Claim(JwtClaimTypes.Email, email));
+        if (email != null)
+        {
+            filtered.Add(new Claim(JwtClaimTypes.Email, email));
+        }
 
         var user = new RtUser
         {
@@ -185,16 +228,25 @@ public class ExternalController : Controller
         };
 
         var identityResult = await _userManager.CreateAsync(user);
-        if (!identityResult.Succeeded) throw new Exception(identityResult.Errors.First().Description);
+        if (!identityResult.Succeeded)
+        {
+            throw new Exception(identityResult.Errors.First().Description);
+        }
 
         if (filtered.Any())
         {
             identityResult = await _userManager.AddClaimsAsync(user, filtered);
-            if (!identityResult.Succeeded) throw new Exception(identityResult.Errors.First().Description);
+            if (!identityResult.Succeeded)
+            {
+                throw new Exception(identityResult.Errors.First().Description);
+            }
         }
 
         identityResult = await _userManager.AddLoginAsync(user, new UserLoginInfo(provider, providerUserId, name));
-        if (!identityResult.Succeeded) throw new Exception(identityResult.Errors.First().Description);
+        if (!identityResult.Succeeded)
+        {
+            throw new Exception(identityResult.Errors.First().Description);
+        }
 
         return user;
     }
@@ -206,10 +258,16 @@ public class ExternalController : Controller
         // if the external system sent a session id claim, copy it over
         // so we can use it for single sign-out
         var sid = externalResult.Principal?.Claims.FirstOrDefault(x => x.Type == JwtClaimTypes.SessionId);
-        if (sid != null) localClaims.Add(new Claim(JwtClaimTypes.SessionId, sid.Value));
+        if (sid != null)
+        {
+            localClaims.Add(new Claim(JwtClaimTypes.SessionId, sid.Value));
+        }
 
         // if the external provider issued an id_token, we'll keep it for sign out
         var idToken = externalResult.Properties?.GetTokenValue("id_token");
-        if (idToken != null) localSignInProps.StoreTokens(new[] { new AuthenticationToken { Name = "id_token", Value = idToken } });
+        if (idToken != null)
+        {
+            localSignInProps.StoreTokens(new[] { new AuthenticationToken { Name = "id_token", Value = idToken } });
+        }
     }
 }

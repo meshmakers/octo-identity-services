@@ -26,14 +26,22 @@ public class HomeController : Controller
 
     public async Task<IActionResult> Index()
     {
-        if (!_userManager.Users.Any()) return RedirectToAction("Index", "Setup");
+        if (!_userManager.Users.Any())
+        {
+            return RedirectToAction("Index", "Setup");
+        }
 
-        if (!User.IsAuthenticated()) return Redirect("~/Account/Login");
+        if (!User.IsAuthenticated())
+        {
+            return Redirect("~/Account/Login");
+        }
 
         var user = await GetCurrentUserAsync();
         if (user == null)
             // Same cookie - but ids to not match - new database?
+        {
             return Redirect("~/Account/Login");
+        }
 
         var vm = new HomeViewModel
         {
@@ -56,13 +64,18 @@ public class HomeController : Controller
         var exceptionHandlerPathFeature = HttpContext.Features.Get<IExceptionHandlerPathFeature>();
 
         if (exceptionHandlerPathFeature?.Path.StartsWith($"/{IdentityServiceConstants.ApiPathPrefix}") ?? false)
+        {
             return new StatusCodeResult(StatusCodes.Status500InternalServerError);
+        }
 
         var vm = new ErrorViewModel();
 
         // retrieve error details from identity server
         var message = await _interaction.GetErrorContextAsync(errorId);
-        if (message != null) vm.Error = message;
+        if (message != null)
+        {
+            vm.Error = message;
+        }
 
         return View("Error", vm);
     }

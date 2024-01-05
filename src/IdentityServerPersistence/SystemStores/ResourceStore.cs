@@ -200,7 +200,10 @@ public class ResourceStore : IOctoResourceStore
             session.StartTransaction();
 
             var apiScope = (await FindRtApiScopesByNameAsync(new[] { name })).FirstOrDefault();
-            if (apiScope == null) throw new NotExistingException($"API scope with name '{name}' does not exist.");
+            if (apiScope == null)
+            {
+                throw new NotExistingException($"API scope with name '{name}' does not exist.");
+            }
 
             await _tenantRepository.ReplaceOneRtEntityByIdAsync(session, apiScope.RtId, newApiScope);
 
@@ -217,7 +220,10 @@ public class ResourceStore : IOctoResourceStore
             session.StartTransaction();
 
             var apiResource = (await FindRtApiResourcesByNameAsync(new[] { apiResourceName })).FirstOrDefault();
-            if (apiResource == null) throw new NotExistingException($"API resource with name '{apiResourceName}' does not exist.");
+            if (apiResource == null)
+            {
+                throw new NotExistingException($"API resource with name '{apiResourceName}' does not exist.");
+            }
 
             await _tenantRepository.ReplaceOneRtEntityByIdAsync(session, apiResource.RtId, newApiResource);
 
@@ -279,7 +285,7 @@ public class ResourceStore : IOctoResourceStore
         using (var session = await _tenantRepository.GetSessionAsync())
         {
             session.StartTransaction();
-            DataQueryOperation dataQueryOperation = DataQueryOperation.Create();
+            var dataQueryOperation = DataQueryOperation.Create();
             var identityResources = await _tenantRepository.GetRtEntitiesByTypeAsync<RtIdentityResource>(session, dataQueryOperation);
             var apiResources = await _tenantRepository.GetRtEntitiesByTypeAsync<RtApiResource>(session, dataQueryOperation);
             var apiScopes = await _tenantRepository.GetRtEntitiesByTypeAsync<RtApiScope>(session, dataQueryOperation);

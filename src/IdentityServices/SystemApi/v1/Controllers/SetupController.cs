@@ -44,9 +44,16 @@ public class SetupController : ControllerBase
     [HttpPost]
     public async Task<IActionResult> AddAdminUser([FromBody] AdminUserDto adminUserDto)
     {
-        if (!ModelState.IsValid) return BadRequest(ModelState);
+        if (!ModelState.IsValid)
+        {
+            return BadRequest(ModelState);
+        }
 
-        if (_userManager.Users.Any()) return NotFound("The request is not valid for this configuration.");
+        if (_userManager.Users.Any())
+        {
+            return NotFound("The request is not valid for this configuration.");
+        }
+
         if (string.IsNullOrWhiteSpace(adminUserDto.EMail))
         {
             _logger.LogInformation("E-Mail value is missing");

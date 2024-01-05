@@ -23,10 +23,11 @@ namespace Meshmakers.Octo.Backend.IdentityServices.SystemApi.v1.Controllers;
 public class ApiResourcesController : ControllerBase
 {
     private readonly IDistributionEventHubService _distributionEventHubService;
-    private readonly IOctoResourceStore _octoResourceStore;
     private readonly IMapper _mapper;
+    private readonly IOctoResourceStore _octoResourceStore;
 
-    public ApiResourcesController(IOctoResourceStore octoResourceStore, IMapper mapper, IDistributionEventHubService distributionEventHubService)
+    public ApiResourcesController(IOctoResourceStore octoResourceStore, IMapper mapper,
+        IDistributionEventHubService distributionEventHubService)
     {
         _octoResourceStore = octoResourceStore;
         _mapper = mapper;
@@ -107,10 +108,15 @@ public class ApiResourcesController : ControllerBase
     [Authorize(IdentityServiceConstants.IdentityApiReadWritePolicy)]
     public async Task<IActionResult> Post([Required] [FromBody] ApiResourceDto apiResourceDto)
     {
-        if (!ModelState.IsValid || apiResourceDto.Name == null) return BadRequest(ModelState);
+        if (!ModelState.IsValid || apiResourceDto.Name == null)
+        {
+            return BadRequest(ModelState);
+        }
 
         if ((await _octoResourceStore.FindApiResourcesByNameAsync(new[] { apiResourceDto.Name })).Any())
+        {
             return Conflict($"API resource with name '{apiResourceDto.Name}' already exists.");
+        }
 
         var apiResource = new RtApiResource();
         ApplyToRtApiResource(apiResource, apiResourceDto);
@@ -138,10 +144,16 @@ public class ApiResourcesController : ControllerBase
     [Authorize(IdentityServiceConstants.IdentityApiReadWritePolicy)]
     public async Task<IActionResult> Put([Required] string name, [Required] [FromBody] ApiResourceDto apiResourceDto)
     {
-        if (!ModelState.IsValid || apiResourceDto.Name == null) return BadRequest(ModelState);
+        if (!ModelState.IsValid || apiResourceDto.Name == null)
+        {
+            return BadRequest(ModelState);
+        }
 
         var octoApiResource = await _octoResourceStore.GetApiResourceByNameAsync(apiResourceDto.Name);
-        if (octoApiResource == null) return NotFound(new NotFoundError($"API resource with name '{name}' does not exist."));
+        if (octoApiResource == null)
+        {
+            return NotFound(new NotFoundError($"API resource with name '{name}' does not exist."));
+        }
 
         ApplyToRtApiResource(octoApiResource, apiResourceDto);
 
@@ -170,7 +182,10 @@ public class ApiResourcesController : ControllerBase
     public async Task<IActionResult> Delete([Required] string name)
     {
         var octoApiResource = await _octoResourceStore.GetApiResourceByNameAsync(name);
-        if (octoApiResource == null) return NotFound(new NotFoundError($"API resource with name '{name}' does not exist."));
+        if (octoApiResource == null)
+        {
+            return NotFound(new NotFoundError($"API resource with name '{name}' does not exist."));
+        }
 
         try
         {
@@ -207,11 +222,13 @@ public class ApiResourcesController : ControllerBase
 
         return apiResourceDto;
     }
-    
+
     private void ApplyToRtApiResource(RtApiResource apiResource, ApiResourceDto apiResourceDto)
     {
         if (string.IsNullOrWhiteSpace(apiResourceDto.Name))
+        {
             throw new InvalidOperationException("API Resource name cannot be null or empty.");
+        }
 
         apiResource.Enabled = apiResourceDto.IsEnabled;
         apiResource.Name = apiResourceDto.Name;
@@ -219,9 +236,15 @@ public class ApiResourcesController : ControllerBase
         apiResource.Description = apiResourceDto.Description;
         apiResource.ShowInDiscoveryDocument = apiResourceDto.ShowInDiscoveryDocument;
         apiResource.RequireResourceIndicator = apiResourceDto.RequireResourceIndicator;
-        if (apiResourceDto.UserClaims != null) apiResource.Claims = new AttributeStringValueList(apiResourceDto.UserClaims.ToList());
+        if (apiResourceDto.UserClaims != null)
+        {
+            apiResource.Claims = new AttributeStringValueList(apiResourceDto.UserClaims.ToList());
+        }
 
-        if (apiResourceDto.Scopes != null) apiResource.Scopes = new AttributeStringValueList(apiResourceDto.Scopes.ToList());
+        if (apiResourceDto.Scopes != null)
+        {
+            apiResource.Scopes = new AttributeStringValueList(apiResourceDto.Scopes.ToList());
+        }
 
         apiResource.AllowedAccessTokenSigningAlgorithms = new AttributeStringValueList(
             apiResourceDto.AllowedAccessTokenSigningAlgorithms?.ToList() ?? new List<string>());

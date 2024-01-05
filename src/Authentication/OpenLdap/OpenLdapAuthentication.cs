@@ -35,7 +35,10 @@ internal class OpenLdapAuthentication
             parameters.Attrs = new[] { UserIdAttributeName, UserFullNameAttributeName, MailAttribute };
         }).FirstOrDefault();
 
-        if (entry == null) throw new ArgumentException("Could not authenticate user.");
+        if (entry == null)
+        {
+            throw new ArgumentException("Could not authenticate user.");
+        }
 
         return Task.FromResult(LdapEntryToUser(entry));
     }
@@ -47,7 +50,9 @@ internal class OpenLdapAuthentication
         var mail = entry.GetAttribute(MailAttribute).StringValue;
 
         if (string.IsNullOrWhiteSpace(userId) || string.IsNullOrWhiteSpace(userName))
+        {
             throw new ArgumentException("Could not authenticate user.");
+        }
 
         var claims = new List<Claim>
         {

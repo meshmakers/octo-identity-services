@@ -7,16 +7,17 @@ using Microsoft.Extensions.Logging;
 namespace Meshmakers.Octo.Backend.Authentication.Consumers;
 
 /// <summary>
-/// Consumer for <see cref="CorsClientsUpdate"/> messages.
+///     Consumer for <see cref="CorsClientsUpdate" /> messages.
 /// </summary>
 public class IdentityProviderUpdateConsumer : IDistributedConsumer<IdentityProviderUpdate>
 {
-    // TODO: This consumer needs to be configured by AddConsumer<T> in the service collection.
-    readonly ILogger<IdentityProviderUpdateConsumer> _logger;
     private readonly IDynamicAuthSchemeService _authSchemeService;
 
+    // TODO: This consumer needs to be configured by AddConsumer<T> in the service collection.
+    private readonly ILogger<IdentityProviderUpdateConsumer> _logger;
+
     /// <summary>
-    /// Constructor.
+    ///     Constructor.
     /// </summary>
     /// <param name="logger"></param>
     /// <param name="authSchemeService"></param>

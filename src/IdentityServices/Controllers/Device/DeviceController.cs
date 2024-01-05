@@ -35,10 +35,16 @@ public class DeviceController : Controller
     {
         var userCodeParamName = _options.Value.UserInteraction.DeviceVerificationUserCodeParameter;
         string? userCode = Request.Query[userCodeParamName];
-        if (string.IsNullOrWhiteSpace(userCode)) return View("UserCodeCapture");
+        if (string.IsNullOrWhiteSpace(userCode))
+        {
+            return View("UserCodeCapture");
+        }
 
         var vm = await BuildViewModelAsync(userCode);
-        if (vm == null) return View("Error");
+        if (vm == null)
+        {
+            return View("Error");
+        }
 
         vm.ConfirmUserCode = true;
         return View("UserCodeConfirmation", vm);
@@ -49,7 +55,10 @@ public class DeviceController : Controller
     public async Task<IActionResult> UserCodeCapture(string userCode)
     {
         var vm = await BuildViewModelAsync(userCode);
-        if (vm == null) return View("Error");
+        if (vm == null)
+        {
+            return View("Error");
+        }
 
         return View("UserCodeConfirmation", vm);
     }
@@ -58,10 +67,16 @@ public class DeviceController : Controller
     [ValidateAntiForgeryToken]
     public async Task<IActionResult> Callback(DeviceAuthorizationInputModel model)
     {
-        if (model == null) throw new ArgumentNullException(nameof(model));
+        if (model == null)
+        {
+            throw new ArgumentNullException(nameof(model));
+        }
 
         var result = await ProcessConsent(model);
-        if (result.HasValidationError) return View("Error");
+        if (result.HasValidationError)
+        {
+            return View("Error");
+        }
 
         return View("Success");
     }
@@ -69,10 +84,16 @@ public class DeviceController : Controller
     private async Task<ProcessConsentResult> ProcessConsent(DeviceAuthorizationInputModel model)
     {
         var result = new ProcessConsentResult();
-        if (string.IsNullOrWhiteSpace(model.UserCode)) return result;
+        if (string.IsNullOrWhiteSpace(model.UserCode))
+        {
+            return result;
+        }
 
         var request = await _interaction.GetAuthorizationContextAsync(model.UserCode);
-        if (request == null) return result;
+        if (request == null)
+        {
+            return result;
+        }
 
         ConsentResponse? grantedConsent = null;
 
@@ -93,7 +114,9 @@ public class DeviceController : Controller
             {
                 var scopes = model.ScopesConsented;
                 if (ConsentOptions.EnableOfflineAccess == false)
+                {
                     scopes = scopes.Where(x => x != IdentityServerConstants.StandardScopes.OfflineAccess);
+                }
 
                 grantedConsent = new ConsentResponse
                 {
@@ -138,9 +161,16 @@ public class DeviceController : Controller
     private async Task<DeviceAuthorizationViewModel?> BuildViewModelAsync(string? userCode,
         DeviceAuthorizationInputModel? model = null)
     {
-        if (string.IsNullOrWhiteSpace(userCode)) return null;
+        if (string.IsNullOrWhiteSpace(userCode))
+        {
+            return null;
+        }
+
         var request = await _interaction.GetAuthorizationContextAsync(userCode);
-        if (request != null) return CreateConsentViewModel(userCode, model, request);
+        if (request != null)
+        {
+            return CreateConsentViewModel(userCode, model, request);
+        }
 
         return null;
     }
@@ -178,8 +208,10 @@ public class DeviceController : Controller
         }
 
         if (ConsentOptions.EnableOfflineAccess && request.ValidatedResources.Resources.OfflineAccess)
+        {
             apiScopes.Add(GetOfflineAccessScope(
                 vm.ScopesConsented.Contains(IdentityServerConstants.StandardScopes.OfflineAccess) || model == null));
+        }
 
         vm.ApiScopes = apiScopes;
 

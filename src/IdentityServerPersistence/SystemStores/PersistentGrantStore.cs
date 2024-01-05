@@ -144,9 +144,13 @@ public class PersistentGrantStore : IOctoPersistentGrantStore
 
         var persistedGrant = await GetRtPersistentGrantByKeyAsync(session, grant.GrantKey);
         if (persistedGrant == null)
+        {
             await _tenantRepository.InsertOneRtEntityAsync(session, grant);
+        }
         else
+        {
             await _tenantRepository.ReplaceOneRtEntityByIdAsync(session, persistedGrant.RtId, grant);
+        }
 
         await session.CommitTransactionAsync();
     }
@@ -214,10 +218,13 @@ public class PersistentGrantStore : IOctoPersistentGrantStore
             Logger.Info($"Removing {found} grants");
 
             if (found > 0)
+            {
                 try
                 {
                     foreach (var persistedGrant in expiredGrants)
+                    {
                         await _tenantRepository.DeleteOneRtEntityByRtIdAsync<RtPersistedGrant>(session, persistedGrant.RtId);
+                    }
                 }
                 catch (OperationFailedException ex)
                 {
@@ -225,6 +232,7 @@ public class PersistentGrantStore : IOctoPersistentGrantStore
                     // we want to essentially ignore this, and keep working
                     Logger.Debug($"Concurrency exception removing expired grants: {ex.Message}");
                 }
+            }
         }
     }
 }

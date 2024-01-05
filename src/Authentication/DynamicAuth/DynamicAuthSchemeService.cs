@@ -38,20 +38,26 @@ internal class DynamicAuthSchemeService : IDynamicAuthSchemeService
         _schemeProvider = schemeProvider;
         _authSchemeCreatorFactory = authSchemeCreatorFactory;
     }
-    
+
     /// <inheritdoc />
     public async Task ConfigureAsync(string? tenantId)
     {
         // Remove all schemes
         var allSchemes = await _schemeProvider.GetAllSchemesAsync();
         var filteredSchemes = allSchemes.Where(x => !ExcludedSchemes.Contains(x.Name));
-        foreach (var authenticationScheme in filteredSchemes) _schemeProvider.RemoveScheme(authenticationScheme.Name);
+        foreach (var authenticationScheme in filteredSchemes)
+        {
+            _schemeProvider.RemoveScheme(authenticationScheme.Name);
+        }
 
         // Add schemes based on identity providers
         var identityProviders = await _sgIdentityProviderStore.GetAllAsync();
         foreach (var identityProvider in identityProviders)
         {
-            if (!identityProvider.Enabled) continue;
+            if (!identityProvider.Enabled)
+            {
+                continue;
+            }
 
             AuthenticationScheme scheme;
             switch (identityProvider)

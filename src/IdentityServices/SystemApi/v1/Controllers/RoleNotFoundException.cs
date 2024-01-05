@@ -1,5 +1,3 @@
-using System.Runtime.Serialization;
-
 #pragma warning disable 1591
 
 namespace Meshmakers.Octo.Backend.IdentityServices.SystemApi.v1.Controllers;
