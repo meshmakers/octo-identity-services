@@ -22,7 +22,6 @@ public sealed class OctoRoleStore :
     {
         _tenantRepository = multiTenancyResolverService.GetTenantRepository();
         ErrorDescriber = describer ?? new IdentityErrorDescriber();
-        Roles = _tenantRepository.AsQueryable<RtRole>();
     }
 
     public IdentityErrorDescriber ErrorDescriber { get; }
@@ -176,7 +175,7 @@ public sealed class OctoRoleStore :
         _disposed = true;
     }
 
-    public IQueryable<RtRole> Roles { get; }
+    public IQueryable<RtRole> Roles => _tenantRepository.AsQueryable<RtRole>();
 
     public async Task<IList<Claim>> GetClaimsAsync(RtRole role, CancellationToken cancellationToken = default)
     {
