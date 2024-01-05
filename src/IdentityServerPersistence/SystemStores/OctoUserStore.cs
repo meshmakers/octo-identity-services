@@ -40,7 +40,6 @@ public sealed class OctoUserStore :
         _tenantRepository = multiTenancyResolverService.GetTenantRepository();
 
         ErrorDescriber = describer ?? new IdentityErrorDescriber();
-        Users = _tenantRepository.AsQueryable<RtUser>();
     }
 
     private IdentityErrorDescriber ErrorDescriber { get; }
@@ -83,7 +82,7 @@ public sealed class OctoUserStore :
     //             Builders<RtUser>.Update.AddToSet<TFieldValue>(expression, value), cancellationToken: cancellationToken)
     //         .ConfigureAwait(false);
     // }
-    public IQueryable<RtUser> Users { get; }
+    public IQueryable<RtUser> Users => _tenantRepository.AsQueryable<RtUser>();
 
     public async Task SetTokenAsync(
         RtUser user,
