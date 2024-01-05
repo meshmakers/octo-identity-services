@@ -64,7 +64,9 @@ public class RolesController : ControllerBase
 
         var query = _roleManager.Roles.AsQueryable();
         if (!string.IsNullOrWhiteSpace(pagingParams.Filter))
+        {
             query = _roleManager.Roles.Where(x => x.Name != null && x.Name.ToLower().Contains(pagingParams.Filter.ToLower()));
+        }
 
         foreach (var octoRole in query.Skip(pagingParams.Skip).Take(pagingParams.Take))
         {
@@ -94,7 +96,10 @@ public class RolesController : ControllerBase
     public async Task<IActionResult> Get([Required] string roleName)
     {
         var role = await _roleManager.FindByNameAsync(roleName);
-        if (role == null) return NotFound();
+        if (role == null)
+        {
+            return NotFound();
+        }
 
         return Ok(CreateRoleDto(role));
     }
@@ -109,7 +114,10 @@ public class RolesController : ControllerBase
     [Authorize(IdentityServiceConstants.IdentityApiReadWritePolicy)]
     public async Task<IActionResult> Post([Required] [FromBody] RoleDto roleDto)
     {
-        if (!ModelState.IsValid) return BadRequest(ModelState);
+        if (!ModelState.IsValid)
+        {
+            return BadRequest(ModelState);
+        }
 
         var octoRole = new RtRole();
         ApplyToRole(octoRole, roleDto);
@@ -117,7 +125,10 @@ public class RolesController : ControllerBase
         try
         {
             var result = await _roleManager.CreateAsync(octoRole);
-            if (result.Succeeded) return Ok();
+            if (result.Succeeded)
+            {
+                return Ok();
+            }
 
             return BadRequest(new OperationFailedError("Creation of role failed",
                 result.Errors.Select(x => new FailedDetails { Code = x.Code, Description = x.Description })));
@@ -139,17 +150,26 @@ public class RolesController : ControllerBase
     [Authorize(IdentityServiceConstants.IdentityApiReadWritePolicy)]
     public async Task<IActionResult> Put([Required] string roleName, [Required] [FromBody] RoleDto roleDto)
     {
-        if (!ModelState.IsValid) return BadRequest(ModelState);
+        if (!ModelState.IsValid)
+        {
+            return BadRequest(ModelState);
+        }
 
         var octoRole = await _roleManager.FindByNameAsync(roleName);
-        if (octoRole == null) return NotFound(new NotFoundError($"Role '{roleName}' not found."));
+        if (octoRole == null)
+        {
+            return NotFound(new NotFoundError($"Role '{roleName}' not found."));
+        }
 
         ApplyToRole(octoRole, roleDto);
 
         try
         {
             var result = await _roleManager.UpdateAsync(octoRole);
-            if (result.Succeeded) return Ok();
+            if (result.Succeeded)
+            {
+                return Ok();
+            }
 
             return BadRequest(new OperationFailedError("Update of role failed",
                 result.Errors.Select(x => new FailedDetails { Code = x.Code, Description = x.Description })));
@@ -171,12 +191,18 @@ public class RolesController : ControllerBase
     public async Task<IActionResult> Delete([Required] string roleName)
     {
         var octoRole = await _roleManager.FindByNameAsync(roleName);
-        if (octoRole == null) return NotFound(new NotFoundError($"Role '{roleName}' not found."));
+        if (octoRole == null)
+        {
+            return NotFound(new NotFoundError($"Role '{roleName}' not found."));
+        }
 
         try
         {
             var result = await _roleManager.DeleteAsync(octoRole);
-            if (result.Succeeded) return Ok();
+            if (result.Succeeded)
+            {
+                return Ok();
+            }
 
             return BadRequest(new OperationFailedError("Delete of role failed",
                 result.Errors.Select(x => new FailedDetails { Code = x.Code, Description = x.Description })));
@@ -199,7 +225,10 @@ public class RolesController : ControllerBase
 
     private void ApplyToRole(RtRole octoRole, RoleDto roleDto)
     {
-        if (!string.IsNullOrWhiteSpace(roleDto.Id)) octoRole.RtId = new OctoObjectId(roleDto.Id);
+        if (!string.IsNullOrWhiteSpace(roleDto.Id))
+        {
+            octoRole.RtId = new OctoObjectId(roleDto.Id);
+        }
 
         octoRole.Name = roleDto.Name;
     }

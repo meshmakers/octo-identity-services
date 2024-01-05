@@ -23,31 +23,30 @@ public class CreateIdentityDataCommandRequestConsumer(ISystemContext systemConte
         }
 
         var tenantRepository = tenantContext.GetTenantRepository();
-        
+
         using var session = await tenantRepository.GetSessionAsync();
         try
         {
             session.StartTransaction();
-            
+
             foreach (var distApiScopeDto in context.Message.ApiScopes)
             {
                 await CreateApiScopeIfNotExistAsync(session, tenantRepository, distApiScopeDto);
             }
-            
+
             foreach (var distApiResourcesDto in context.Message.ApiResources)
             {
                 await CreateApiResourceIfNotExistAsync(session, tenantRepository, distApiResourcesDto);
             }
-            
+
             foreach (var distClientDto in context.Message.Clients)
             {
                 await CreateClientIfNotExistAsync(session, tenantRepository, distClientDto);
             }
 
             await session.CommitTransactionAsync();
-            
-            await context.RespondAsync(new GenericCommandResponse());
 
+            await context.RespondAsync(new GenericCommandResponse());
         }
         catch (Exception e)
         {
@@ -56,7 +55,8 @@ public class CreateIdentityDataCommandRequestConsumer(ISystemContext systemConte
         }
     }
 
-    private async Task CreateApiScopeIfNotExistAsync(IOctoSession session, ITenantRepository tenantRepository, DistApiScopeDto distApiScopeDto)
+    private async Task CreateApiScopeIfNotExistAsync(IOctoSession session, ITenantRepository tenantRepository,
+        DistApiScopeDto distApiScopeDto)
     {
         var dataQueryOperation = DataQueryOperation.Create()
             .FieldFilter(nameof(RtApiScope.Name), FieldFilterOperator.Equals, distApiScopeDto.Name);
@@ -73,8 +73,9 @@ public class CreateIdentityDataCommandRequestConsumer(ISystemContext systemConte
             await tenantRepository.InsertOneRtEntityAsync(session, rtApiScope);
         }
     }
-    
-    private async Task CreateApiResourceIfNotExistAsync(IOctoSession session, ITenantRepository tenantRepository, DistApiResourcesDto distApiResourcesDto)
+
+    private async Task CreateApiResourceIfNotExistAsync(IOctoSession session, ITenantRepository tenantRepository,
+        DistApiResourcesDto distApiResourcesDto)
     {
         var dataQueryOperation = DataQueryOperation.Create()
             .FieldFilter(nameof(RtApiResource.Name), FieldFilterOperator.Equals, distApiResourcesDto.Name);
@@ -93,7 +94,7 @@ public class CreateIdentityDataCommandRequestConsumer(ISystemContext systemConte
             await tenantRepository.InsertOneRtEntityAsync(session, rtApiResource);
         }
     }
-    
+
     private async Task CreateClientIfNotExistAsync(IOctoSession session, ITenantRepository tenantRepository, DistClientDto distClientDto)
     {
         var dataQueryOperation = DataQueryOperation.Create()
@@ -121,7 +122,7 @@ public class CreateIdentityDataCommandRequestConsumer(ISystemContext systemConte
                 RequireConsent = distClientDto.RequireConsent,
 
                 RedirectUris = new AttributeStringValueList(distClientDto.RedirectUris.ToList()),
-                PostLogoutRedirectUris = new AttributeStringValueList(distClientDto.PostLogoutRedirectUris.ToList()), 
+                PostLogoutRedirectUris = new AttributeStringValueList(distClientDto.PostLogoutRedirectUris.ToList()),
                 AllowedCorsOrigins = new AttributeStringValueList(distClientDto.AllowedCorsOrigins.ToList()),
                 AllowOfflineAccess = distClientDto.AllowOfflineAccess,
                 AllowedScopes = new AttributeStringValueList(distClientDto.AllowedScopes.ToList())

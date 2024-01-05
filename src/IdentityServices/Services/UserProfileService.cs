@@ -32,9 +32,15 @@ public class UserProfileService : ProfileService<RtUser>
         var principal = await base.GetUserClaimsAsync(user)!;
         var identity = principal.Identities.First();
 
-        if (!string.IsNullOrEmpty(user.LastName)) identity.AddClaim(new Claim("family_name", user.LastName));
+        if (!string.IsNullOrEmpty(user.LastName))
+        {
+            identity.AddClaim(new Claim("family_name", user.LastName));
+        }
 
-        if (!string.IsNullOrEmpty(user.FirstName)) identity.AddClaim(new Claim("given_name", user.FirstName));
+        if (!string.IsNullOrEmpty(user.FirstName))
+        {
+            identity.AddClaim(new Claim("given_name", user.FirstName));
+        }
 
         return principal;
     }

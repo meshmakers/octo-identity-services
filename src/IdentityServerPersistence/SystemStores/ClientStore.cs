@@ -38,7 +38,10 @@ public class ClientStore : IOctoClientStore
         session.StartTransaction();
 
         var client = await GetClientByClientId(session, clientId);
-        if (client == null) throw new NotExistingException($"Client id '{clientId}' does not exist.");
+        if (client == null)
+        {
+            throw new NotExistingException($"Client id '{clientId}' does not exist.");
+        }
 
         await _tenantRepository.DeleteOneRtEntityByRtIdAsync<RtClient>(session, client.RtId);
 
@@ -60,7 +63,10 @@ public class ClientStore : IOctoClientStore
 
         await session.CommitTransactionAsync();
         var client = result.Items.FirstOrDefault();
-        if (client == null) return null;
+        if (client == null)
+        {
+            return null;
+        }
 
         return client;
     }
@@ -77,7 +83,7 @@ public class ClientStore : IOctoClientStore
         var session = await _tenantRepository.GetSessionAsync();
         session.StartTransaction();
 
-        DataQueryOperation dataQueryOperation = DataQueryOperation.Create();
+        var dataQueryOperation = DataQueryOperation.Create();
 
         var result = await _tenantRepository.GetRtEntitiesByTypeAsync<RtClient>(session, dataQueryOperation);
 
@@ -93,7 +99,10 @@ public class ClientStore : IOctoClientStore
         session.StartTransaction();
 
         var dbClient = await GetClientByClientId(session, clientId);
-        if (dbClient == null) throw new NotExistingException($"Client id '{clientId}' does not exist.");
+        if (dbClient == null)
+        {
+            throw new NotExistingException($"Client id '{clientId}' does not exist.");
+        }
 
         await _tenantRepository.ReplaceOneRtEntityByIdAsync(session, dbClient.RtId, client);
 

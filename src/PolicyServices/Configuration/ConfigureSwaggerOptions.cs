@@ -37,7 +37,9 @@ public class ConfigureSwaggerOptions : IConfigureOptions<SwaggerGenOptions>
         // add a swagger document for each discovered API version
         // note: you might choose to skip or document deprecated API versions differently
         foreach (var description in _provider.ApiVersionDescriptions)
+        {
             options.SwaggerDoc(description.GroupName, CreateInfoForApiVersion(description));
+        }
 
         // options.IncludeXmlComments(XmlCommentsFilePath);
     }
@@ -53,7 +55,10 @@ public class ConfigureSwaggerOptions : IConfigureOptions<SwaggerGenOptions>
             License = new OpenApiLicense { Name = "MIT", Url = new Uri("https://opensource.org/licenses/MIT") }
         };
 
-        if (description.IsDeprecated) info.Description += " This API version has been deprecated.";
+        if (description.IsDeprecated)
+        {
+            info.Description += " This API version has been deprecated.";
+        }
 
         return info;
     }

@@ -69,7 +69,10 @@ public class IdentityProvidersController : ControllerBase
     public async Task<ActionResult<IdentityProvidersResult>> Get([Required] string id)
     {
         var identityProvider = await _identityProviderStore.GetByNameAsync(id);
-        if (identityProvider == null) return NotFound();
+        if (identityProvider == null)
+        {
+            return NotFound();
+        }
 
         return new IdentityProvidersResult
         {
@@ -110,7 +113,10 @@ public class IdentityProvidersController : ControllerBase
     [Authorize(IdentityServiceConstants.IdentityApiReadWritePolicy)]
     public async Task<IActionResult> DeleteIdentityProviderAsync([Required] string id)
     {
-        if (!ModelState.IsValid) return BadRequest(ModelState);
+        if (!ModelState.IsValid)
+        {
+            return BadRequest(ModelState);
+        }
 
         await _identityProviderStore.RemoveAsync(id);
         await ClearCacheAsync();
@@ -137,7 +143,10 @@ public class IdentityProvidersController : ControllerBase
     public async Task<ActionResult<IdentityProviderDto>> ReplaceProviderAsync([FromRoute] [Required] string id,
         [FromBody] [Required] IdentityProviderDto identityProviderDto)
     {
-        if (identityProviderDto == null) throw new ArgumentNullException(nameof(identityProviderDto));
+        if (identityProviderDto == null)
+        {
+            throw new ArgumentNullException(nameof(identityProviderDto));
+        }
 
         var identityProvider = _mapper.Map<RtIdentityProvider>(identityProviderDto);
         identityProvider.RtId = new OctoObjectId(id);

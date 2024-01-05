@@ -1,5 +1,4 @@
-﻿using System.Runtime.Serialization;
-using Meshmakers.Octo.ConstructionKit.Contracts;
+﻿using Meshmakers.Octo.ConstructionKit.Contracts;
 
 namespace IdentityServerPersistence.SystemStores;
 

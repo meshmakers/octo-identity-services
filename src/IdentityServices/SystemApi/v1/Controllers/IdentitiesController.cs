@@ -106,7 +106,10 @@ public class IdentitiesController : ControllerBase
         var octoUser = await _userManager.FindByNameAsync(userName) ??
                        await _userManager.FindByEmailAsync(userName) ??
                        await _userManager.FindByIdAsync(userName);
-        if (octoUser == null) return NotFound();
+        if (octoUser == null)
+        {
+            return NotFound();
+        }
 
         return Ok(await CreateUserDto(octoUser, _userManager));
     }
@@ -122,7 +125,10 @@ public class IdentitiesController : ControllerBase
     [Authorize(IdentityServiceConstants.IdentityApiReadWritePolicy)]
     public async Task<IActionResult> Post([Required] [FromBody] RegisterUserDto userDto)
     {
-        if (!ModelState.IsValid) return BadRequest(ModelState);
+        if (!ModelState.IsValid)
+        {
+            return BadRequest(ModelState);
+        }
 
         var applicationUser = new RtUser();
 
@@ -183,10 +189,16 @@ public class IdentitiesController : ControllerBase
     [Authorize(IdentityServiceConstants.IdentityApiReadWritePolicy)]
     public async Task<IActionResult> Put([Required] string userName, [Required] [FromBody] UserDto userDto)
     {
-        if (!ModelState.IsValid) return BadRequest(ModelState);
+        if (!ModelState.IsValid)
+        {
+            return BadRequest(ModelState);
+        }
 
         var applicationUser = await _userManager.FindByNameAsync(userName);
-        if (applicationUser == null) return NotFound(new NotFoundError($"User name '{userName}' not found."));
+        if (applicationUser == null)
+        {
+            return NotFound(new NotFoundError($"User name '{userName}' not found."));
+        }
 
         try
         {
@@ -200,7 +212,10 @@ public class IdentitiesController : ControllerBase
         try
         {
             var result = await _userManager.UpdateAsync(applicationUser);
-            if (result.Succeeded) return Ok();
+            if (result.Succeeded)
+            {
+                return Ok();
+            }
 
             return GetBadRequestResultWithErrorDescription("Update of user failed", result.Errors);
         }
@@ -222,12 +237,18 @@ public class IdentitiesController : ControllerBase
     [Authorize(IdentityServiceConstants.IdentityApiReadWritePolicy)]
     public async Task<IActionResult> ResetPassword([Required] string userName, [Required] string password)
     {
-        if (!ModelState.IsValid) return BadRequest(ModelState);
+        if (!ModelState.IsValid)
+        {
+            return BadRequest(ModelState);
+        }
 
         try
         {
             var user = await _userManager.FindByNameAsync(userName);
-            if (user == null) return NotFound(new NotFoundError($"User '{userName}' not found."));
+            if (user == null)
+            {
+                return NotFound(new NotFoundError($"User '{userName}' not found."));
+            }
 
             var token = await _userManager.GeneratePasswordResetTokenAsync(user);
 
@@ -256,15 +277,24 @@ public class IdentitiesController : ControllerBase
     [Authorize(IdentityServiceConstants.IdentityApiReadWritePolicy)]
     public async Task<IActionResult> Delete([Required] string userName)
     {
-        if (!ModelState.IsValid) return BadRequest(ModelState);
+        if (!ModelState.IsValid)
+        {
+            return BadRequest(ModelState);
+        }
 
         var applicationUser = await _userManager.FindByNameAsync(userName);
-        if (applicationUser == null) return NotFound(new NotFoundError($"User name '{userName}' not found."));
+        if (applicationUser == null)
+        {
+            return NotFound(new NotFoundError($"User name '{userName}' not found."));
+        }
 
         try
         {
             var result = await _userManager.DeleteAsync(applicationUser);
-            if (result.Succeeded) return Ok();
+            if (result.Succeeded)
+            {
+                return Ok();
+            }
 
             return GetBadRequestResultWithErrorDescription("Delete of user failed", result.Errors);
         }
@@ -286,13 +316,21 @@ public class IdentitiesController : ControllerBase
     public async Task<IActionResult> AssignUserToRole([Required] string userId, [Required] string roleId)
     {
         var user = await _userManager.FindByIdAsync(userId);
-        if (user == null) return NotFound(new NotFoundError($"User with id '{userId}' not found."));
+        if (user == null)
+        {
+            return NotFound(new NotFoundError($"User with id '{userId}' not found."));
+        }
 
         var role = await _roleManager.FindByIdAsync(roleId);
-        if (role == null) return NotFound(new NotFoundError($"Role with id '{roleId}' not found."));
+        if (role == null)
+        {
+            return NotFound(new NotFoundError($"Role with id '{roleId}' not found."));
+        }
 
         if (user.RoleIds?.Contains(roleId) ?? false)
+        {
             return BadRequest(new OperationFailedError($"User '{user.UserName}' already has role '{role.Name}'"));
+        }
 
         user.RoleIds ??= new AttributeStringValueList();
         user.RoleIds.Add(roleId);
@@ -312,13 +350,21 @@ public class IdentitiesController : ControllerBase
     public async Task<IActionResult> RemoveRoleFromUser([Required] string userId, [Required] string roleId)
     {
         var user = await _userManager.FindByIdAsync(userId);
-        if (user == null) return NotFound(new NotFoundError($"User with id '{userId}' not found."));
+        if (user == null)
+        {
+            return NotFound(new NotFoundError($"User with id '{userId}' not found."));
+        }
 
         var role = await _roleManager.FindByIdAsync(roleId);
-        if (role == null) return NotFound(new NotFoundError($"Role with id '{roleId}' not found."));
+        if (role == null)
+        {
+            return NotFound(new NotFoundError($"Role with id '{roleId}' not found."));
+        }
 
         if (!user.RoleIds?.Contains(roleId) ?? false)
+        {
             return BadRequest(new OperationFailedError($"User '{user.UserName}' doesn't have role '{role.Name}'"));
+        }
 
         user.RoleIds?.Remove(roleId);
         await _userManager.UpdateAsync(user);
@@ -342,7 +388,10 @@ public class IdentitiesController : ControllerBase
         foreach (var role in await userManager.GetRolesAsync(applicationUser))
         {
             var rtRole = await _roleManager.FindByNameAsync(role);
-            if (rtRole != null) roles.Add(RolesController.CreateRoleDto(rtRole));
+            if (rtRole != null)
+            {
+                roles.Add(RolesController.CreateRoleDto(rtRole));
+            }
         }
 
         userDto.Roles = roles;
@@ -355,17 +404,28 @@ public class IdentitiesController : ControllerBase
         var roleIds = new List<string>();
 
         if (userDto.Roles != null)
+        {
             foreach (var roleDto in userDto.Roles)
             {
-                if (roleDto.Id == null) continue;
+                if (roleDto.Id == null)
+                {
+                    continue;
+                }
 
                 var role = await _roleManager.FindByIdAsync(roleDto.Id);
-                if (role == null) throw new RoleNotFoundException($"Role '{roleDto.Name}' does not exist.");
+                if (role == null)
+                {
+                    throw new RoleNotFoundException($"Role '{roleDto.Name}' does not exist.");
+                }
 
                 roleIds.Add(role.RtId.ToString());
             }
+        }
 
-        if (!string.IsNullOrWhiteSpace(userDto.Name)) octoUser.UserName = userDto.Name;
+        if (!string.IsNullOrWhiteSpace(userDto.Name))
+        {
+            octoUser.UserName = userDto.Name;
+        }
 
         octoUser.RoleIds ??= new AttributeStringValueList();
         octoUser.RoleIds?.Clear();

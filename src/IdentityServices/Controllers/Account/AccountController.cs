@@ -62,7 +62,9 @@ public class AccountController : Controller
 
         if (vm.IsExternalLoginOnly)
             // we only have one option for logging in and it's an external provider
+        {
             return RedirectToAction("Challenge", "External", new { scheme = vm.ExternalLoginScheme, returnUrl });
+        }
 
         return View(vm);
     }
@@ -91,7 +93,9 @@ public class AccountController : Controller
                 if (context.IsNativeClient())
                     // The client is native, so this change in how to
                     // return the response is for better UX for the end user.
+                {
                     return this.LoadingPage("Redirect", model.ReturnUrl);
+                }
 
                 return Redirect(model.ReturnUrl ?? "~/");
             }
@@ -108,24 +112,34 @@ public class AccountController : Controller
             {
                 var user = await _userManager.FindByNameAsync(model.Username);
                 if (user != null)
+                {
                     await _events.RaiseAsync(new UserLoginSuccessEvent(user.UserName, user.RtId.ToString(), user.UserName,
                         clientId: context?.Client.ClientId));
+                }
 
                 if (context != null)
                 {
                     if (context.IsNativeClient())
                         // The client is native, so this change in how to
                         // return the response is for better UX for the end user.
+                    {
                         return this.LoadingPage("Redirect", model.ReturnUrl);
+                    }
 
                     // we can trust model.ReturnUrl since GetAuthorizationContextAsync returned non-null
                     return Redirect(model.ReturnUrl ?? "~/");
                 }
 
                 // request for a local page
-                if (Url.IsLocalUrl(model.ReturnUrl)) return Redirect(model.ReturnUrl);
+                if (Url.IsLocalUrl(model.ReturnUrl))
+                {
+                    return Redirect(model.ReturnUrl);
+                }
 
-                if (string.IsNullOrEmpty(model.ReturnUrl)) return Redirect("~/");
+                if (string.IsNullOrEmpty(model.ReturnUrl))
+                {
+                    return Redirect("~/");
+                }
 
                 // user might have clicked on a malicious link - should be logged
                 throw new Exception("invalid return URL");
@@ -154,7 +168,9 @@ public class AccountController : Controller
         if (vm.ShowLogoutPrompt == false)
             // if the request for logout was properly authenticated from IdentityServer, then
             // we don't need to show the prompt and can just log the user out directly.
+        {
             return await Logout(vm);
+        }
 
         return View(vm);
     }
@@ -233,7 +249,10 @@ public class AccountController : Controller
         try
         {
             var user = await _userManager.FindByEmailAsync(vm.UserName);
-            if (user != null) await _emailInteractionService.SendPasswordResetNotificationAsync(user);
+            if (user != null)
+            {
+                await _emailInteractionService.SendPasswordResetNotificationAsync(user);
+            }
         }
         catch (Exception)
         {
@@ -272,7 +291,10 @@ public class AccountController : Controller
                 Username = context.LoginHint
             };
 
-            if (!local) vm.ExternalProviders = new[] { new ExternalProvider { AuthenticationScheme = context.IdP } };
+            if (!local)
+            {
+                vm.ExternalProviders = new[] { new ExternalProvider { AuthenticationScheme = context.IdP } };
+            }
 
             return vm;
         }
@@ -296,9 +318,11 @@ public class AccountController : Controller
                 allowLocal = client.EnableLocalLogin;
 
                 if (client.IdentityProviderRestrictions.Any())
+                {
                     providers = providers.Where(provider => !string.IsNullOrWhiteSpace(provider.AuthenticationScheme) &&
                                                             client.IdentityProviderRestrictions.Contains(provider.AuthenticationScheme))
                         .ToList();
+                }
             }
         }
 

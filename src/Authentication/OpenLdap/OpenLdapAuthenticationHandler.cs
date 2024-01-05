@@ -24,7 +24,9 @@ public class OpenLdapAuthenticationHandler : AuthenticationHandler<LdapOptions>
     {
         if (!Context.Request.Form.TryGetValue("Username", out var username) ||
             !Context.Request.Form.TryGetValue("Password", out var password))
+        {
             return AuthenticateResult.Fail("Username or password missing");
+        }
 
         try
         {

@@ -27,7 +27,10 @@ internal class TokenCleanupHostService : IHostedService
     {
         if (_identityOptions.Value.EnableTokenCleanup)
         {
-            if (_source != null) throw new InvalidOperationException("Already started. Call Stop first.");
+            if (_source != null)
+            {
+                throw new InvalidOperationException("Already started. Call Stop first.");
+            }
 
             Logger.Debug("Starting grant removal");
 
@@ -45,7 +48,9 @@ internal class TokenCleanupHostService : IHostedService
         {
             if (_source == null)
                 // Nothing was initialized, so exit.
+            {
                 return Task.CompletedTask;
+            }
 
             Logger.Debug("Stopping grant removal");
 

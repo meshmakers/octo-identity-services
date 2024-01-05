@@ -48,7 +48,7 @@ internal class DefaultConfigurationCreatorService : IDefaultConfigurationCreator
 
         using var session = await _systemContext.GetSystemSessionAsync();
         session.StartTransaction();
-        
+
         var identityConfiguration =
             await _systemContext.GetConfigurationAsync(session, IdentityServiceConstants.IdentitySchemaVersionKey,
                 new DefaultConfigurationVersion { Version = -1 });

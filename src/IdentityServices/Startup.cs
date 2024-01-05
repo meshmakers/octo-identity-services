@@ -92,13 +92,14 @@ public class Startup
             .AddOpenIdConnect()
             .AddOpenLdapAuthentication()
             .AddMicrosoftAdAuthentication();
-        
+
         services.AddCors();
 
         services.AddRuntimeEngine()
             .AddOctoIdentityPersistence(configureDistributionEventHub: c =>
             {
-                c.AddCommandConsumer<CreateIdentityDataCommandRequestConsumer, CreateIdentityDataCommandRequest>("identity::create-identity-data");
+                c.AddCommandConsumer<CreateIdentityDataCommandRequestConsumer, CreateIdentityDataCommandRequest>(
+                    "identity::create-identity-data");
             });
 
         services.AddInitializationService<DefaultConfigurationInitializationService>();
@@ -130,10 +131,14 @@ public class Startup
         services.ConfigureOptions<ConfigureOctoSwaggerOptions>();
 
         if (_webHostEnvironment.IsDevelopment())
+        {
             identityServerBuilder
                 .AddDeveloperSigningCredential();
+        }
         else
+        {
             identityServerBuilder.AddOctoSigningCredential();
+        }
 
         services.TryAddEnumerable(ServiceDescriptor
             .Singleton<IPostConfigureOptions<JwtBearerOptions>, JwtBearerPostConfigureOptions>());

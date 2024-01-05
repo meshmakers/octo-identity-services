@@ -10,7 +10,7 @@ internal class ConfigureDistributionEventHubOptions : IConfigureNamedOptions<Dis
     private readonly IOptions<OctoPolicyOptions> _octoPolicyServiceOptions;
     private readonly IOptions<OctoSystemConfiguration> _octoSystemConfiguration;
 
-    public ConfigureDistributionEventHubOptions(IOptions<OctoPolicyOptions> octoPolicyServiceOptions, 
+    public ConfigureDistributionEventHubOptions(IOptions<OctoPolicyOptions> octoPolicyServiceOptions,
         IOptions<OctoSystemConfiguration> octoSystemConfiguration)
     {
         _octoPolicyServiceOptions = octoPolicyServiceOptions;

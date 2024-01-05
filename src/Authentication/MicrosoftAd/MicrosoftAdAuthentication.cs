@@ -36,7 +36,10 @@ internal class MicrosoftAdAuthentication
             parameters.Filter = $"{UserPrincipalNameAttribute}={username}";
         }).SingleOrDefault();
 
-        if (entry == null) throw new InvalidOperationException("Could not authenticate user.");
+        if (entry == null)
+        {
+            throw new InvalidOperationException("Could not authenticate user.");
+        }
 
         var ldapGroupHandler = new LdapGroupHandler(_options.UserBaseDn, UserPrincipalNameAttribute);
         var groupNames = ldapGroupHandler.GetGroupsForUser(connection, username);
@@ -47,7 +50,10 @@ internal class MicrosoftAdAuthentication
     private ExternalLoginInfo LdapEntryToUser(LdapEntry entry, List<string> groupNames)
     {
         var userIdBytes = entry.GetAttribute(UserIdAttributeName)?.ByteValue;
-        if (userIdBytes == null) throw new InvalidOperationException("Could not authenticate user.");
+        if (userIdBytes == null)
+        {
+            throw new InvalidOperationException("Could not authenticate user.");
+        }
 
         var userId = new Guid(userIdBytes).ToString();
         var userName = entry.GetAttribute(UserFullNameAttributeName).StringValue;
@@ -75,7 +81,10 @@ internal class MicrosoftAdAuthentication
             claims.Add(new Claim(ClaimTypes.Email, value));
         }
 
-        foreach (var groupName in groupNames) claims.Add(new Claim(JwtClaimTypes.Role, groupName));
+        foreach (var groupName in groupNames)
+        {
+            claims.Add(new Claim(JwtClaimTypes.Role, groupName));
+        }
 
         var claimsIdentity = new ClaimsIdentity(claims, _options.Name);
         var claimsPrincipal = new ClaimsPrincipal(claimsIdentity);

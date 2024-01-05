@@ -54,7 +54,9 @@ public class UserEmailInteractionService : IUserEmailInteractionService
     public async Task SendWelcomeNotificationAsync(RtUser user)
     {
         if (!CanSendEmail(user))
+        {
             return;
+        }
 
         var confirmationToken = await GenerateConfirmEmailTokenAsync(user);
 
@@ -86,7 +88,9 @@ public class UserEmailInteractionService : IUserEmailInteractionService
     public async Task SendWelcomeNotificationWithoutPasswordAsync(RtUser user)
     {
         if (!CanSendEmail(user))
+        {
             return;
+        }
 
         var confirmationToken = await GenerateResetPasswordTokenAsync(user);
 
@@ -155,7 +159,10 @@ public class UserEmailInteractionService : IUserEmailInteractionService
     public async Task SendPasswordResetNotificationAsync(RtUser user)
     {
         if (!CanSendEmail(user))
+        {
             return;
+        }
+
         var confirmationToken = await GenerateResetPasswordTokenAsync(user);
 
         var template = await GetNotificationTemplateAsync(ResetPasswordEmailTemplateName);
@@ -211,8 +218,10 @@ public class UserEmailInteractionService : IUserEmailInteractionService
         var result = await _userManager.ResetPasswordAsync(user, data.ConfirmationToken, newPassword);
 
         if (!result.Succeeded)
+        {
             throw PasswordComplexityTooLowException.PasswordChangeFailed(string.Join(", ", result.Errors.Select(x => x.Code)),
                 result.Errors);
+        }
 
         // we know the user email address is valid so we can set it to confirmed.
 
@@ -267,16 +276,25 @@ public class UserEmailInteractionService : IUserEmailInteractionService
     private string? GetName(RtUser user)
     {
         if (!string.IsNullOrEmpty(user.FirstName))
+        {
             return user.FirstName;
+        }
+
         if (!string.IsNullOrEmpty(user.UserName))
+        {
             return user.UserName;
+        }
+
         return user.Email;
     }
 
     private bool CanSendEmail(RtUser user)
     {
         if (!_emailConfiguration.EnableEmailNotifications ||
-            string.IsNullOrWhiteSpace(_emailConfiguration.NotificationTenant)) return false;
+            string.IsNullOrWhiteSpace(_emailConfiguration.NotificationTenant))
+        {
+            return false;
+        }
 
         if (!MailAddress.TryCreate(user.Email, out _))
         {
@@ -306,14 +324,16 @@ public class UserEmailInteractionService : IUserEmailInteractionService
         var templateEntity = result.Items.Single();
 
         ValidateTemplate(templateEntity);
-        
+
         return templateEntity;
     }
 
     private void ValidateTemplate(RtNotificationTemplate template)
     {
         if (string.IsNullOrWhiteSpace(template.SubjectTemplate) || string.IsNullOrWhiteSpace(template.BodyTemplate))
+        {
             throw UserEmailInteractionException.TemplateInvalid(template.RtWellKnownName!);
+        }
     }
 
     private bool ShouldSkipRendering(RtNotificationTemplate template)

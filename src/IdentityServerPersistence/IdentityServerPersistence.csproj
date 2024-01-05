@@ -1,19 +1,19 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
     <PropertyGroup>
-      <Configurations>Debug;Release;DebugL</Configurations>
-      <Platforms>AnyCPU</Platforms>
+        <Configurations>Debug;Release;DebugL</Configurations>
+        <Platforms>AnyCPU</Platforms>
     </PropertyGroup>
 
     <ItemGroup>
         <PackageReference Include="AutoMapper.Extensions.Microsoft.DependencyInjection" Version="12.0.1"/>
-        <PackageReference Include="Duende.IdentityServer" Version="6.3.7" />
+        <PackageReference Include="Duende.IdentityServer" Version="6.3.7"/>
         <FrameworkReference Include="Microsoft.AspNetCore.App"/>
     </ItemGroup>
 
     <ItemGroup>
         <ProjectReference Include="..\IdentityServices.Resources\IdentityServices.Resources.csproj"/>
-        <ProjectReference Include="$(OctoConstructionKitPath)src\MongoDb\Runtime.Engine.MongoDb\Runtime.Engine.MongoDb.csproj"/>
+        <ProjectReference Include="$(OctoConstructionKitPath)src\Runtime.Engine.MongoDb\Runtime.Engine.MongoDb.csproj"/>
         <ProjectReference Include="$(OctoCommonServicesPath)src\Common\Common.csproj"/>
         <ProjectReference Include="$(OctoCommonServicesPath)src\Infrastructure\Infrastructure.csproj"/>
         <ProjectReference Include="..\Persistence.IdentityCkModel\Persistence.IdentityCkModel.csproj"/>

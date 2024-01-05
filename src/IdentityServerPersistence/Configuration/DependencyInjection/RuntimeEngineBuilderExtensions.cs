@@ -9,9 +9,9 @@ using Meshmakers.Octo.Services.Common.Cors;
 using Meshmakers.Octo.Services.Infrastructure.Services;
 using Microsoft.AspNetCore.Cors.Infrastructure;
 using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Identity;
 using Persistence.IdentityCkModel.ConstructionKit.Generated.System.Identity.v1;
 // ReSharper disable once CheckNamespace
-using Microsoft.AspNetCore.Identity;
 
 // ReSharper disable once CheckNamespace
 namespace Microsoft.Extensions.DependencyInjection;
@@ -44,10 +44,10 @@ public static class RuntimeEngineBuilderExtensions
         builder.Services.AddScoped<IOctoResourceStore, ResourceStore>();
         builder.Services.AddScoped<IOctoPersistentGrantStore, PersistentGrantStore>();
         builder.Services.AddScoped<IOctoIdentityProviderStore, IdentityProviderStore>();
-        
+
         builder.Services.AddSingleton<CorsPolicyProvider>();
         builder.Services.AddSingleton<ICorsPolicyProvider>(provider => provider.GetRequiredService<CorsPolicyProvider>());
-        
+
         builder.Services.AddAutoMapper(cfg =>
         {
             cfg.CreateMap<RtClient, Client>();
@@ -97,8 +97,10 @@ public static class RuntimeEngineBuilderExtensions
             .AddErrorDescriber<OctoErrorDescriber>();
 
         if (builder.RoleType != null)
+        {
             builder.Services.AddScoped(
                 typeof(IRoleStore<>).MakeGenericType(builder.RoleType), typeof(OctoRoleStore));
+        }
 
         builder.Services.AddScoped(
             typeof(IUserStore<>).MakeGenericType(builder.UserType), typeof(OctoUserStore));

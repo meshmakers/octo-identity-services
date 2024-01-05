@@ -47,7 +47,10 @@ public class ManageController : Controller
                         : "";
 
         var user = await GetCurrentUserAsync();
-        if (user == null) return View("Error");
+        if (user == null)
+        {
+            return View("Error");
+        }
 
         var model = new IndexViewModel
         {
@@ -99,7 +102,10 @@ public class ManageController : Controller
     [AllowAnonymous]
     public IActionResult ResetPassword(string id)
     {
-        if (!ModelState.IsValid) return View("Error", new ErrorViewModel("Token is missing."));
+        if (!ModelState.IsValid)
+        {
+            return View("Error", new ErrorViewModel("Token is missing."));
+        }
 
         var vm = new ResetPasswordViewModel
         {
@@ -112,7 +118,10 @@ public class ManageController : Controller
     [AllowAnonymous]
     public async Task<IActionResult> ResetPassword([FromForm] ResetPasswordViewModel vm)
     {
-        if (!ModelState.IsValid) return View(vm);
+        if (!ModelState.IsValid)
+        {
+            return View(vm);
+        }
 
         try
         {
@@ -127,7 +136,10 @@ public class ManageController : Controller
         }
         catch (PasswordComplexityTooLowException e)
         {
-            foreach (var error in e.Errors) ModelState.AddModelError(string.Empty, error.Description);
+            foreach (var error in e.Errors)
+            {
+                ModelState.AddModelError(string.Empty, error.Description);
+            }
         }
         catch (Exception e)
         {
@@ -147,7 +159,10 @@ public class ManageController : Controller
     [ValidateAntiForgeryToken]
     public async Task<IActionResult> ChangePassword(ChangePasswordViewModel model)
     {
-        if (!ModelState.IsValid) return View(model);
+        if (!ModelState.IsValid)
+        {
+            return View(model);
+        }
 
         var user = await GetCurrentUserAsync();
         if (user != null)
@@ -181,7 +196,10 @@ public class ManageController : Controller
     [ValidateAntiForgeryToken]
     public async Task<IActionResult> SetPassword(SetPasswordViewModel model)
     {
-        if (!ModelState.IsValid) return View(model);
+        if (!ModelState.IsValid)
+        {
+            return View(model);
+        }
 
         var user = await GetCurrentUserAsync();
         if (user != null)
@@ -213,7 +231,10 @@ public class ManageController : Controller
                         ? IdentityTexts.Backend_Identity_Manage_StatusMessage_Error
                         : "";
         var user = await GetCurrentUserAsync();
-        if (user == null) return View("Error");
+        if (user == null)
+        {
+            return View("Error");
+        }
 
         var userLogins = await _userManager.GetLoginsAsync(user);
 
@@ -246,10 +267,16 @@ public class ManageController : Controller
     public async Task<ActionResult> LinkLoginCallback()
     {
         var user = await GetCurrentUserAsync();
-        if (user == null) return View("Error");
+        if (user == null)
+        {
+            return View("Error");
+        }
 
         var info = await _signInManager.GetExternalLoginInfoAsync(await _userManager.GetUserIdAsync(user));
-        if (info == null) return RedirectToAction(nameof(ManageLogins), new { Message = ManageMessageId.Error });
+        if (info == null)
+        {
+            return RedirectToAction(nameof(ManageLogins), new { Message = ManageMessageId.Error });
+        }
 
         var result = await _userManager.AddLoginAsync(user, info);
         var message = ManageMessageId.Error;
@@ -267,7 +294,10 @@ public class ManageController : Controller
 
     private void AddErrors(IdentityResult result)
     {
-        foreach (var error in result.Errors) ModelState.AddModelError(string.Empty, error.Description);
+        foreach (var error in result.Errors)
+        {
+            ModelState.AddModelError(string.Empty, error.Description);
+        }
     }
 
     public enum ManageMessageId

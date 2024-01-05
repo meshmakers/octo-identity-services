@@ -22,10 +22,14 @@ public class PermissionStore : IOctoPermissionStore
 
         var persistentPermission = await GetPermissionById(octoPermission.PermissionId);
         if (persistentPermission == null)
+        {
             await _tenantRepository.InsertOneRtEntityAsync(session, octoPermission);
+        }
         else
+        {
             await _tenantRepository.ReplaceOneRtEntityByIdAsync(session, persistentPermission.RtId,
                 octoPermission);
+        }
 
         await session.CommitTransactionAsync();
     }

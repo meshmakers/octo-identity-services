@@ -12,11 +12,13 @@ internal static class LdapSearchQueueExtensions
     {
         var entries = new List<LdapEntry>();
         while (searchQueue != null && searchQueue.GetResponse() is { } ldapMessage)
+        {
             if (ldapMessage is LdapSearchResult searchResult)
             {
                 var entry = searchResult.Entry;
                 entries.Add(entry);
             }
+        }
 
         return entries;
     }

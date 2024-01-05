@@ -9,5 +9,4 @@ public static class IdentityServiceConstants
     public const string IdentityApiReadWritePolicy = "IdentityApiReadWritePolicy";
     public const string IdentitySchemaVersionKey = "IdentityService";
     public const int IdentitySchemaVersionValue = 2;
-
 }

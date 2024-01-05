@@ -8,7 +8,8 @@ types:
     name: ClientId
   - id: System.Identity/ClientSecret
     name: ClientSecret
-- typeId: Client
+- isCollectionRoot: true
+  typeId: Client
   derivedFromCkTypeId: System/Entity
   isFinal: true
   attributes:
@@ -146,7 +147,8 @@ types:
     name: Scopes
   - id: System.Identity/AllowedAccessTokenSigningAlgorithms
     name: AllowedAccessTokenSigningAlgorithms
-- typeId: IdentityProvider
+- isCollectionRoot: true
+  typeId: IdentityProvider
   derivedFromCkTypeId: System/Entity
   isAbstract: true
   attributes:
@@ -177,7 +179,8 @@ types:
     name: IsEmphasized
   - id: System.Identity/IsRequired
     name: IsRequired
-- typeId: Role
+- isCollectionRoot: true
+  typeId: Role
   derivedFromCkTypeId: System/Entity
   isFinal: true
   attributes:
@@ -210,7 +213,8 @@ types:
     name: ClientIdGroupAzureAd
   - id: System.Identity/ClientSecret
     name: ClientSecretGroupAzureAd
-- typeId: PersistedGrant
+- isCollectionRoot: true
+  typeId: PersistedGrant
   derivedFromCkTypeId: System/Entity
   isFinal: true
   attributes:
@@ -251,7 +255,8 @@ types:
     name: UserBaseDn
   - id: System.Identity/UserNameAttribute
     name: UserNameAttribute
-- typeId: PermissionRole
+- isCollectionRoot: true
+  typeId: PermissionRole
   derivedFromCkTypeId: System/Entity
   isFinal: true
   attributes:
@@ -263,7 +268,8 @@ types:
     name: SubjectIds
   - id: System.Identity/IdentityRoleIds
     name: IdentityRoleIds
-- typeId: Permission
+- isCollectionRoot: true
+  typeId: Permission
   derivedFromCkTypeId: System/Entity
   isFinal: true
   attributes:
@@ -279,7 +285,8 @@ types:
     name: ClientId
   - id: System.Identity/ClientSecret
     name: ClientSecret
-- typeId: User
+- isCollectionRoot: true
+  typeId: User
   derivedFromCkTypeId: System/Entity
   isFinal: true
   attributes:
@@ -358,7 +365,8 @@ types:
     name: UseTls
   - id: System.Identity/HostPort
     name: HostPort
-- typeId: Resource
+- isCollectionRoot: true
+  typeId: Resource
   derivedFromCkTypeId: System/Entity
   isAbstract: true
   attributes:

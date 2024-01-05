@@ -19,14 +19,23 @@ public class LdapGroupHandler
         var groups = new Stack<string>();
         var uniqueGroups = new HashSet<string>();
 
-        foreach (var group in GetGroupsForUserCore(ldapConnection, userName)) groups.Push(group);
+        foreach (var group in GetGroupsForUserCore(ldapConnection, userName))
+        {
+            groups.Push(group);
+        }
 
         while (groups.Count > 0)
         {
             var group = groups.Pop();
-            if (uniqueGroups.Add(group)) yield return group;
+            if (uniqueGroups.Add(group))
+            {
+                yield return group;
+            }
 
-            foreach (var parentGroup in GetGroupsForUserCore(ldapConnection, group)) groups.Push(parentGroup);
+            foreach (var parentGroup in GetGroupsForUserCore(ldapConnection, group))
+            {
+                groups.Push(parentGroup);
+            }
         }
     }
 
@@ -43,18 +52,26 @@ public class LdapGroupHandler
 
         foreach (var entry in entries)
         foreach (var value in HandleEntry(entry))
+        {
             yield return value;
+        }
 
         IEnumerable<string> HandleEntry(LdapEntry entry)
         {
             var attr = entry.GetAttribute("memberOf");
 
-            if (attr == null) yield break;
+            if (attr == null)
+            {
+                yield break;
+            }
 
             foreach (var value in attr.StringValueArray)
             {
                 var groupName = GetGroup(value);
-                if (!string.IsNullOrEmpty(groupName)) yield return groupName;
+                if (!string.IsNullOrEmpty(groupName))
+                {
+                    yield return groupName;
+                }
             }
         }
 
@@ -62,7 +79,10 @@ public class LdapGroupHandler
         {
             var match = Regex.Match(value, "^CN=([^,]*)");
 
-            if (!match.Success) return null;
+            if (!match.Success)
+            {
+                return null;
+            }
 
             return match.Groups[1].Value;
         }

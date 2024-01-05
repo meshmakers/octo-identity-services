@@ -70,7 +70,10 @@ public class Startup
     public void Configure(IApplicationBuilder app, IHost host, IWebHostEnvironment env, ISystemContext systemContext,
         IApiVersionDescriptionProvider apiVersionDescriptionProvider, IUserSchemaService userSchemaService)
     {
-        if (env.IsDevelopment()) app.UseDeveloperExceptionPage();
+        if (env.IsDevelopment())
+        {
+            app.UseDeveloperExceptionPage();
+        }
 
         app.UseCors();
         app.UseHttpsRedirection();
