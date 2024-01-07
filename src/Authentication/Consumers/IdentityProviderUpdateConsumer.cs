@@ -12,8 +12,6 @@ namespace Meshmakers.Octo.Backend.Authentication.Consumers;
 public class IdentityProviderUpdateConsumer : IDistributedConsumer<IdentityProviderUpdate>
 {
     private readonly IDynamicAuthSchemeService _authSchemeService;
-
-    // TODO: This consumer needs to be configured by AddConsumer<T> in the service collection.
     private readonly ILogger<IdentityProviderUpdateConsumer> _logger;
 
     /// <summary>
@@ -32,7 +30,7 @@ public class IdentityProviderUpdateConsumer : IDistributedConsumer<IdentityProvi
     {
         _logger.LogInformation("Cors client update for tenant received: {Text}", context.Message.TenantId);
 
-        var key = context.Message.TenantId?.NormalizeString();
+        var key = context.Message.TenantId.NormalizeString();
 
         _authSchemeService.ConfigureAsync(key);
 

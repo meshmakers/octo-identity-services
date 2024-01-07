@@ -408,9 +408,9 @@ public class ApiSecretsController : ControllerBase
         }
     }
 
-    private Task ClearCacheAsync(string? tenantId = null)
+    private Task ClearCacheAsync()
     {
-        return _distributionEventHubService.PublishAsync(new CorsClientsUpdate(tenantId));
+        return _distributionEventHubService.PublishAsync(new CorsClientsUpdate(_octoResourceStore.TenantId));
     }
 
     private ApiSecretDto CreateApiSecret(Secret secret)

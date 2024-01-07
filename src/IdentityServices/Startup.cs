@@ -2,6 +2,7 @@
 using IdentityServerPersistence;
 using IdentityServerPersistence.Configuration.Options;
 using IdentityServerPersistence.SystemStores;
+using Meshmakers.Octo.Backend.Authentication.Consumers;
 using Meshmakers.Octo.Backend.Authentication.DynamicAuth;
 using Meshmakers.Octo.Backend.IdentityServices.Configuration;
 using Meshmakers.Octo.Backend.IdentityServices.Consumers;
@@ -15,6 +16,7 @@ using Meshmakers.Octo.Runtime.Contracts.MongoDb.Configuration;
 using Meshmakers.Octo.Services.Common;
 using Meshmakers.Octo.Services.Common.Authorization;
 using Meshmakers.Octo.Services.Common.DistributionEventHub.Commands;
+using Meshmakers.Octo.Services.Common.DistributionEventHub.Messages;
 using Meshmakers.Octo.Services.Infrastructure.CredentialGenerator;
 using Meshmakers.Octo.Services.Infrastructure.Middleware;
 using Meshmakers.Octo.Services.Infrastructure.Services;
@@ -94,15 +96,16 @@ public class Startup
             .AddMicrosoftAdAuthentication();
 
         services.AddCors();
-
+        
         services.AddRuntimeEngine()
             .AddOctoIdentityPersistence(configureDistributionEventHub: c =>
             {
+                c.AddBroadcastEventConsumer<IdentityProviderUpdateConsumer, IdentityProviderUpdate>();
+                
                 c.AddCommandConsumer<CreateIdentityDataCommandRequestConsumer, CreateIdentityDataCommandRequest>(
                     "identity::create-identity-data");
             });
 
-        services.AddInitializationService<DefaultConfigurationInitializationService>();
 
         // Add IdentityServer 4 for authentication using OpenID
         var identityServerBuilder = services.AddIdentityServer(serverOptions =>

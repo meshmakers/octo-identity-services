@@ -18,6 +18,8 @@ public class IdentityProviderStore : IOctoIdentityProviderStore
         _tenantRepository = multiTenancyResolverService.GetTenantRepository();
         _mapper = mapper;
     }
+    
+    public string TenantId => _tenantRepository.TenantId;
 
     public async Task<RtIdentityProvider?> GetByNameAsync(string name)
     {

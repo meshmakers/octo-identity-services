@@ -38,8 +38,14 @@ internal class DefaultConfigurationCreatorService : IDefaultConfigurationCreator
         _octoIdentityServicesOptions = octoIdentityOptions.Value;
     }
 
-    public async Task SetupAsync(string? tenantId)
+    public async Task SetupAsync(string tenantId)
     {
+        if (tenantId != _systemContext.TenantId)
+        {
+            // Currently we only support the system tenant.
+            return;
+        }
+        
         if (!await _systemContext.IsSystemTenantExistingAsync())
         {
             await _systemContext.CreateSystemTenantAsync();

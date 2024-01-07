@@ -10,5 +10,5 @@ public interface IDynamicAuthSchemeService
     ///     Configures authentication schemes.
     /// </summary>
     /// <returns></returns>
-    Task ConfigureAsync(string? tenantId);
+    Task ConfigureAsync(string tenantId);
 }

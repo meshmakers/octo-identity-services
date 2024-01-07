@@ -170,8 +170,8 @@ public class IdentityProvidersController : ControllerBase
         }
     }
 
-    private Task ClearCacheAsync(string? tenantId = null)
+    private Task ClearCacheAsync()
     {
-        return _distributionEventHubService.PublishAsync(new IdentityProviderUpdate(tenantId));
+        return _distributionEventHubService.PublishAsync(new IdentityProviderUpdate(_identityProviderStore.TenantId));
     }
 }

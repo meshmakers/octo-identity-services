@@ -1,13 +1,16 @@
-﻿using Meshmakers.Octo.Services.Infrastructure.Initialization;
+﻿using Meshmakers.Octo.Runtime.Contracts.MongoDb;
+using Meshmakers.Octo.Services.Infrastructure.Initialization;
 
 namespace Meshmakers.Octo.Backend.Authentication.DynamicAuth;
 
 internal class DynamicAuthSchemeServiceInitializer : IAsyncInitializationService
 {
+    private readonly ISystemContext _systemContext;
     private readonly IDynamicAuthSchemeService _dynamicAuthSchemeService;
 
-    public DynamicAuthSchemeServiceInitializer(IDynamicAuthSchemeService dynamicAuthSchemeService)
+    public DynamicAuthSchemeServiceInitializer(ISystemContext systemContext, IDynamicAuthSchemeService dynamicAuthSchemeService)
     {
+        _systemContext = systemContext;
         _dynamicAuthSchemeService = dynamicAuthSchemeService;
     }
 
@@ -15,6 +18,6 @@ internal class DynamicAuthSchemeServiceInitializer : IAsyncInitializationService
 
     public async Task InitializeAsync()
     {
-        await _dynamicAuthSchemeService.ConfigureAsync(null);
+        await _dynamicAuthSchemeService.ConfigureAsync(_systemContext.TenantId);
     }
 }
