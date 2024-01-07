@@ -40,7 +40,7 @@ internal class DynamicAuthSchemeService : IDynamicAuthSchemeService
     }
 
     /// <inheritdoc />
-    public async Task ConfigureAsync(string? tenantId)
+    public async Task ConfigureAsync(string tenantId)
     {
         // Remove all schemes
         var allSchemes = await _schemeProvider.GetAllSchemesAsync();

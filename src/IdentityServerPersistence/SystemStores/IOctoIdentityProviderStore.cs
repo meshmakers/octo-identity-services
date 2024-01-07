@@ -4,6 +4,8 @@ namespace IdentityServerPersistence.SystemStores;
 
 public interface IOctoIdentityProviderStore
 {
+    public string TenantId { get; }
+    
     Task<RtIdentityProvider?> GetByNameAsync(string name);
 
     Task<IEnumerable<RtIdentityProvider>> GetAllAsync();

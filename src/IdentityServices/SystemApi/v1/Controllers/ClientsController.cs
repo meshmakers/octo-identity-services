@@ -211,9 +211,9 @@ public class ClientsController : ControllerBase
         return Ok();
     }
 
-    private Task ClearCacheAsync(string? tenantId = null)
+    private Task ClearCacheAsync()
     {
-        return _distributionEventHubService.PublishAsync(new CorsClientsUpdate(tenantId));
+        return _distributionEventHubService.PublishAsync(new CorsClientsUpdate(_octoClientStore.TenantId));
     }
 
     private ClientDto CreateClientDto(RtClient applicationClient)

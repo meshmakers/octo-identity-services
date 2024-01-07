@@ -19,6 +19,8 @@ public class ResourceStore : IOctoResourceStore
         _tenantRepository = multiTenancyResolverService.GetTenantRepository();
         _mapper = mapper;
     }
+    
+    public string TenantId => _tenantRepository.TenantId;
 
     public async Task CreateApiResourceAsync(RtApiResource apiResource)
     {

@@ -17,7 +17,7 @@ public class CreateIdentityDataCommandRequestConsumer(ISystemContext systemConte
         var message = context.Message;
 
         ITenantContext tenantContext = systemContext;
-        if (message.TenantId != null)
+        if (message.TenantId != systemContext.TenantId)
         {
             tenantContext = await systemContext.GetChildTenantContextAsync(message.TenantId);
         }

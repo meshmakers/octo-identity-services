@@ -7,6 +7,7 @@ namespace IdentityServerPersistence.SystemStores;
 
 public interface IOctoResourceStore : IResourceStore
 {
+    public string TenantId { get; }
     Task CreateApiResourceAsync(RtApiResource apiResource);
     Task CreateIdentityResourceAsync(RtIdentityResource identityResource);
     Task CreateApiScopeAsync(RtApiScope apiScope);
