@@ -22,19 +22,19 @@
     </ItemGroup>
 
     <ItemGroup>
-        <PackageReference Include="AspNetCore.Identity.Mongo" Version="8.3.3"/>
-        <PackageReference Include="AutoMapper.Extensions.Microsoft.DependencyInjection" Version="12.0.1"/>
-        <PackageReference Include="Microsoft.AspNetCore.Authentication.JwtBearer" Version="8.0.0"/>
-        <PackageReference Include="NLog.Web.AspNetCore" Version="5.3.8"/>
+        <PackageReference Include="AspNetCore.Identity.Mongo" Version="8.3.3" />
+        <PackageReference Include="AutoMapper.Extensions.Microsoft.DependencyInjection" Version="12.0.1" />
+        <PackageReference Include="Microsoft.AspNetCore.Authentication.JwtBearer" Version="8.0.1" />
+        <PackageReference Include="NLog.Web.AspNetCore" Version="5.3.8" />
     </ItemGroup>
 
 
     <ItemGroup>
-        <ProjectReference Include="$(OctoCommonServicesPath)src\Common\Common.csproj"/>
-        <ProjectReference Include="$(OctoCommonServicesPath)src\Swagger\Swagger.csproj"/>
-        <ProjectReference Include="$(OctoCommonServicesPath)src\Notifications\Notifications.csproj"/>
-        <ProjectReference Include="..\Authentication\Authentication.csproj"/>
-        <ProjectReference Include="..\IdentityServices.Resources\IdentityServices.Resources.csproj"/>
+        <ProjectReference Include="$(OctoCommonServicesPath)src\Common\Common.csproj" />
+        <ProjectReference Include="$(OctoCommonServicesPath)src\Swagger\Swagger.csproj" />
+        <ProjectReference Include="$(OctoCommonServicesPath)src\Notifications\Notifications.csproj" />
+        <ProjectReference Include="..\Authentication\Authentication.csproj" />
+        <ProjectReference Include="..\IdentityServices.Resources\IdentityServices.Resources.csproj" />
     </ItemGroup>
 
 
