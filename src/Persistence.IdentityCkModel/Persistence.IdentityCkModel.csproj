@@ -1,27 +1,20 @@
 <Project Sdk="Microsoft.NET.Sdk">
     
     <PropertyGroup>
-        <OctoSkipCkCompile Condition="'$(Configuration)'=='Release'">true</OctoSkipCkCompile>
         <Configurations>Debug;Release;DebugL</Configurations>
         <Platforms>AnyCPU</Platforms>
+        <OctoGenerateCkModelServiceClass>true</OctoGenerateCkModelServiceClass>
     </PropertyGroup>
 
     <ItemGroup Condition="'$(Configuration)'!='DebugL'">
-        <PackageReference Include="Meshmakers.Octo.ConstructionKit.SourceGeneration" OutputItemType="Analyzer" ReferenceOutputAssembly="false" Version="3.0.25" PrivateAssets="all" />
-        <PackageReference Include="Meshmakers.Octo.Runtime.Contracts" Version="3.0.25" />
+        <PackageReference Include="Meshmakers.Octo.ConstructionKit.SourceGeneration" OutputItemType="Analyzer" ReferenceOutputAssembly="false" Version="3.0.26" PrivateAssets="all" />
+        <PackageReference Include="Meshmakers.Octo.ConstructionKit.MsBuildTasks" Version="3.0.26" PrivateAssets="all" />
+        <PackageReference Include="Meshmakers.Octo.Runtime.Contracts" Version="3.0.26" />
     </ItemGroup>
 
     <ItemGroup Condition="'$(Configuration)'=='DebugL'">
         <PackageReference Include="Meshmakers.Octo.ConstructionKit.SourceGeneration" OutputItemType="Analyzer" ReferenceOutputAssembly="false" Version="999.0.0" PrivateAssets="all" />
+        <PackageReference Include="Meshmakers.Octo.ConstructionKit.MsBuildTasks" Version="999.0.0" PrivateAssets="all" />
         <PackageReference Include="Meshmakers.Octo.Runtime.Contracts" Version="999.0.0" />
-    </ItemGroup>
-
-    <ItemGroup>
-        <None Remove="ConstructionKit\ck-*.yaml" />
-        <EmbeddedResource Include="ConstructionKit\ck-*.yaml">
-            <GenerateCkModelServiceClass>true</GenerateCkModelServiceClass>
-        </EmbeddedResource>
-        <None Remove="ConstructionKit\ck-*.cache.json" />
-        <AdditionalFiles Include="ConstructionKit\ck-*.cache.json" />
     </ItemGroup>
 </Project>
