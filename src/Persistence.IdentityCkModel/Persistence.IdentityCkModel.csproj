@@ -4,6 +4,7 @@
         <Configurations>Debug;Release;DebugL</Configurations>
         <Platforms>AnyCPU</Platforms>
         <OctoGenerateCkModelServiceClass>true</OctoGenerateCkModelServiceClass>
+        <OctoSkipCkCompile Condition="'$(Configuration)'=='Release'">true</OctoSkipCkCompile>
     </PropertyGroup>
 
     <ItemGroup Condition="'$(Configuration)'!='DebugL'">
