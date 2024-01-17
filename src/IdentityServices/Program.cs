@@ -47,6 +47,8 @@ public class Program
                 logging.ClearProviders();
                 logging.SetMinimumLevel(LogLevel.Trace);
             })
+            .UseContentRoot(Directory.GetCurrentDirectory())
+            .UseWebRoot("wwwroot")
             .UseNLog() // NLog: setup NLog for Dependency injection
             .UseStartup<Startup>();
     }
