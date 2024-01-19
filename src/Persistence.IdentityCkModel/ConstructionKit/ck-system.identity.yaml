@@ -1,13 +1,39 @@
 $schema: https://schemas.meshmakers.cloud/construction-kit-compiled.schema.json
 types:
-- typeId: GoogleIdentityProvider
+- typeId: ApiResource
+  derivedFromCkTypeId: System.Identity/Resource
+  isFinal: true
+  attributes:
+  - id: System.Identity/RequireResourceIndicator
+    name: RequireResourceIndicator
+  - id: System.Identity/Secrets
+    name: ApiSecrets
+  - id: System.Identity/Scopes
+    name: Scopes
+  - id: System.Identity/AllowedAccessTokenSigningAlgorithms
+    name: AllowedAccessTokenSigningAlgorithms
+- typeId: ApiScope
+  derivedFromCkTypeId: System.Identity/Resource
+  isFinal: true
+  attributes:
+  - id: System.Identity/IsEmphasized
+    name: IsEmphasized
+  - id: System.Identity/IsRequired
+    name: IsRequired
+- typeId: AzureEntraIdentityProvider
   derivedFromCkTypeId: System.Identity/IdentityProvider
   isFinal: true
   attributes:
+  - id: System/TenantId
+    name: TenantId
+  - id: System.Identity/Authority
+    name: Authority
   - id: System.Identity/ClientId
-    name: ClientId
+    name: ClientIdGroupGraphApi
+  - id: System.Identity/ClientIdGroupAzureAd
+    name: ClientIdGroupAzureAd
   - id: System.Identity/ClientSecret
-    name: ClientSecret
+    name: ClientSecretGroupAzureAd
 - isCollectionRoot: true
   typeId: Client
   derivedFromCkTypeId: System/Entity
@@ -135,18 +161,14 @@ types:
   - id: System.Identity/InitiateLoginUri
     name: InitiateLoginUri
     isOptional: true
-- typeId: ApiResource
-  derivedFromCkTypeId: System.Identity/Resource
+- typeId: GoogleIdentityProvider
+  derivedFromCkTypeId: System.Identity/IdentityProvider
   isFinal: true
   attributes:
-  - id: System.Identity/RequireResourceIndicator
-    name: RequireResourceIndicator
-  - id: System.Identity/Secrets
-    name: ApiSecrets
-  - id: System.Identity/Scopes
-    name: Scopes
-  - id: System.Identity/AllowedAccessTokenSigningAlgorithms
-    name: AllowedAccessTokenSigningAlgorithms
+  - id: System.Identity/ClientId
+    name: ClientId
+  - id: System.Identity/ClientSecret
+    name: ClientSecret
 - isCollectionRoot: true
   typeId: IdentityProvider
   derivedFromCkTypeId: System/Entity
@@ -163,14 +185,6 @@ types:
   - id: System/Description
     name: Description
     isOptional: true
-- typeId: ApiScope
-  derivedFromCkTypeId: System.Identity/Resource
-  isFinal: true
-  attributes:
-  - id: System.Identity/IsEmphasized
-    name: IsEmphasized
-  - id: System.Identity/IsRequired
-    name: IsRequired
 - typeId: IdentityResource
   derivedFromCkTypeId: System.Identity/Resource
   isFinal: true
@@ -179,40 +193,60 @@ types:
     name: IsEmphasized
   - id: System.Identity/IsRequired
     name: IsRequired
+- typeId: MicrosoftAdIdentityProvider
+  derivedFromCkTypeId: System.Identity/IdentityProvider
+  isFinal: true
+  attributes:
+  - id: System.Identity/HostAddress
+    name: HostAddress
+  - id: System.Identity/UseTls
+    name: UseTls
+  - id: System.Identity/HostPort
+    name: HostPort
+- typeId: MicrosoftIdentityProvider
+  derivedFromCkTypeId: System.Identity/IdentityProvider
+  isFinal: true
+  attributes:
+  - id: System.Identity/ClientId
+    name: ClientId
+  - id: System.Identity/ClientSecret
+    name: ClientSecret
+- typeId: OpenLdapIdentityProvider
+  derivedFromCkTypeId: System.Identity/IdentityProvider
+  isFinal: true
+  attributes:
+  - id: System.Identity/HostAddress
+    name: HostAddress
+  - id: System.Identity/UseTls
+    name: UseTls
+  - id: System.Identity/HostPort
+    name: HostPort
+  - id: System.Identity/UserBaseDn
+    name: UserBaseDn
+  - id: System.Identity/UserNameAttribute
+    name: UserNameAttribute
 - isCollectionRoot: true
-  typeId: Role
+  typeId: Permission
+  derivedFromCkTypeId: System/Entity
+  isFinal: true
+  attributes:
+  - id: System.Identity/PermissionId
+    name: PermissionId
+  - id: System.Identity/IdentityRoleIds
+    name: IdentityRoleIds
+- isCollectionRoot: true
+  typeId: PermissionRole
   derivedFromCkTypeId: System/Entity
   isFinal: true
   attributes:
   - id: System/Name
     name: Name
-    isOptional: true
-  - id: System.Identity/NormalizedName
-    name: NormalizedName
-    isOptional: true
-  - id: System.Identity/ConcurrencyStamp
-    name: ConcurrencyStamp
+  - id: System.Identity/RoleId
+    name: RoleId
   - id: System.Identity/SubjectIds
     name: SubjectIds
   - id: System.Identity/IdentityRoleIds
     name: IdentityRoleIds
-  - id: System.Identity/RoleClaims
-    name: Claims
-    isOptional: true
-- typeId: AzureEntraIdentityProvider
-  derivedFromCkTypeId: System.Identity/IdentityProvider
-  isFinal: true
-  attributes:
-  - id: System/TenantId
-    name: TenantId
-  - id: System.Identity/Authority
-    name: Authority
-  - id: System.Identity/ClientId
-    name: ClientIdGroupGraphApi
-  - id: System.Identity/ClientIdGroupAzureAd
-    name: ClientIdGroupAzureAd
-  - id: System.Identity/ClientSecret
-    name: ClientSecretGroupAzureAd
 - isCollectionRoot: true
   typeId: PersistedGrant
   derivedFromCkTypeId: System/Entity
@@ -241,50 +275,45 @@ types:
     isOptional: true
   - id: System.Identity/Data
     name: Data
-- typeId: OpenLdapIdentityProvider
-  derivedFromCkTypeId: System.Identity/IdentityProvider
-  isFinal: true
-  attributes:
-  - id: System.Identity/HostAddress
-    name: HostAddress
-  - id: System.Identity/UseTls
-    name: UseTls
-  - id: System.Identity/HostPort
-    name: HostPort
-  - id: System.Identity/UserBaseDn
-    name: UserBaseDn
-  - id: System.Identity/UserNameAttribute
-    name: UserNameAttribute
 - isCollectionRoot: true
-  typeId: PermissionRole
+  typeId: Resource
+  derivedFromCkTypeId: System/Entity
+  isAbstract: true
+  attributes:
+  - id: System/Enabled
+    name: Enabled
+  - id: System/Name
+    name: Name
+  - id: System/DisplayName
+    name: DisplayName
+    isOptional: true
+  - id: System/Description
+    name: Description
+    isOptional: true
+  - id: System.Identity/ResourceClaims
+    name: Claims
+  - id: System.Identity/ShowInDiscoveryDocument
+    name: ShowInDiscoveryDocument
+- isCollectionRoot: true
+  typeId: Role
   derivedFromCkTypeId: System/Entity
   isFinal: true
   attributes:
   - id: System/Name
     name: Name
-  - id: System.Identity/RoleId
-    name: RoleId
+    isOptional: true
+  - id: System.Identity/NormalizedName
+    name: NormalizedName
+    isOptional: true
+  - id: System.Identity/ConcurrencyStamp
+    name: ConcurrencyStamp
   - id: System.Identity/SubjectIds
     name: SubjectIds
   - id: System.Identity/IdentityRoleIds
     name: IdentityRoleIds
-- isCollectionRoot: true
-  typeId: Permission
-  derivedFromCkTypeId: System/Entity
-  isFinal: true
-  attributes:
-  - id: System.Identity/PermissionId
-    name: PermissionId
-  - id: System.Identity/IdentityRoleIds
-    name: IdentityRoleIds
-- typeId: MicrosoftIdentityProvider
-  derivedFromCkTypeId: System.Identity/IdentityProvider
-  isFinal: true
-  attributes:
-  - id: System.Identity/ClientId
-    name: ClientId
-  - id: System.Identity/ClientSecret
-    name: ClientSecret
+  - id: System.Identity/RoleClaims
+    name: Claims
+    isOptional: true
 - isCollectionRoot: true
   typeId: User
   derivedFromCkTypeId: System/Entity
@@ -355,35 +384,6 @@ types:
     - attributeNames:
       - NormalizedEmail
       - NormalizedUserName
-- typeId: MicrosoftAdIdentityProvider
-  derivedFromCkTypeId: System.Identity/IdentityProvider
-  isFinal: true
-  attributes:
-  - id: System.Identity/HostAddress
-    name: HostAddress
-  - id: System.Identity/UseTls
-    name: UseTls
-  - id: System.Identity/HostPort
-    name: HostPort
-- isCollectionRoot: true
-  typeId: Resource
-  derivedFromCkTypeId: System/Entity
-  isAbstract: true
-  attributes:
-  - id: System/Enabled
-    name: Enabled
-  - id: System/Name
-    name: Name
-  - id: System/DisplayName
-    name: DisplayName
-    isOptional: true
-  - id: System/Description
-    name: Description
-    isOptional: true
-  - id: System.Identity/ResourceClaims
-    name: Claims
-  - id: System.Identity/ShowInDiscoveryDocument
-    name: ShowInDiscoveryDocument
 associationRoles: []
 attributes:
 - id: UserName
@@ -803,6 +803,22 @@ attributes:
   valueType: String
   description: Gets or sets the name of the user attribute.
 records:
+- recordId: ClientClaim
+  isFinal: true
+  attributes:
+  - id: System.Identity/ClaimType
+    name: ClaimType
+  - id: System.Identity/ClaimValue
+    name: ClaimValue
+  - id: System.Identity/ClaimValueType
+    name: ClaimValueType
+- recordId: RoleClaim
+  isFinal: true
+  attributes:
+  - id: System.Identity/ClaimType
+    name: ClaimType
+  - id: System.Identity/ClaimValue
+    name: ClaimValue
 - recordId: Secret
   isFinal: true
   attributes:
@@ -817,27 +833,6 @@ records:
     isOptional: true
   - id: System.Identity/SecretType
     name: Type
-- recordId: ClientClaim
-  isFinal: true
-  attributes:
-  - id: System.Identity/ClaimType
-    name: ClaimType
-  - id: System.Identity/ClaimValue
-    name: ClaimValue
-  - id: System.Identity/ClaimValueType
-    name: ClaimValueType
-- recordId: UserToken
-  isFinal: true
-  attributes:
-  - id: System.Identity/LoginProvider
-    name: LoginProvider
-  - id: System/Name
-    name: Name
-  - id: System.Identity/UserId
-    name: UserId
-  - id: System.Identity/Value
-    name: Value
-    isOptional: true
 - recordId: UserClaim
   isFinal: true
   attributes:
@@ -859,21 +854,19 @@ records:
     isOptional: true
   - id: System.Identity/UserId
     name: UserId
-- recordId: RoleClaim
+- recordId: UserToken
   isFinal: true
   attributes:
-  - id: System.Identity/ClaimType
-    name: ClaimType
-  - id: System.Identity/ClaimValue
-    name: ClaimValue
+  - id: System.Identity/LoginProvider
+    name: LoginProvider
+  - id: System/Name
+    name: Name
+  - id: System.Identity/UserId
+    name: UserId
+  - id: System.Identity/Value
+    name: Value
+    isOptional: true
 enums:
-- enumId: TokenUsage
-  useFlags: false
-  values:
-  - key: 0
-    name: ReUse
-  - key: 1
-    name: OneTimeOnly
 - enumId: IdentityProviderTypes
   useFlags: false
   values:
@@ -885,13 +878,6 @@ enums:
     name: Microsoft
   - key: 3
     name: OpenLDAP
-- enumId: TokenType
-  useFlags: false
-  values:
-  - key: 0
-    name: Jwt
-  - key: 1
-    name: Reference
 - enumId: TokenExpiration
   useFlags: false
   values:
@@ -899,6 +885,20 @@ enums:
     name: Sliding
   - key: 1
     name: Absolute
+- enumId: TokenType
+  useFlags: false
+  values:
+  - key: 0
+    name: Jwt
+  - key: 1
+    name: Reference
+- enumId: TokenUsage
+  useFlags: false
+  values:
+  - key: 0
+    name: ReUse
+  - key: 1
+    name: OneTimeOnly
 modelId: System.Identity
 dependencies:
 - System

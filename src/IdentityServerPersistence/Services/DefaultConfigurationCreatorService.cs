@@ -78,22 +78,17 @@ internal class DefaultConfigurationCreatorService : IDefaultConfigurationCreator
 
     private async Task ImportCkModel()
     {
-        using var session = await _systemContext.GetSystemSessionAsync();
-        session.StartTransaction();
-
-        if (!await _systemContext.IsCkModelExistingAsync(session, SystemIdentityCkIds.ModelId))
+        if (!await _systemContext.IsCkModelExistingAsync(SystemIdentityCkIds.ModelId))
         {
             // We ensure that at least the system tenant contains a valid ck model.Other tenants
             // need to be enabled manually by a admin.
             OperationResult operationResult = new();
-            await _systemContext.ImportCkModelAsync(session, SystemIdentityCkIds.ModelId, operationResult);
+            await _systemContext.ImportCkModelAsync(SystemIdentityCkIds.ModelId, operationResult);
             if (operationResult.HasErrors || operationResult.HasFatalErrors)
             {
                 throw InitializationException.ImportCkModelFailed(_systemContext.TenantId, operationResult.GetMessages());
             }
         }
-
-        await session.CommitTransactionAsync();
     }
 
     private async Task CreateIdentityProvider()
