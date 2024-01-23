@@ -24,6 +24,7 @@ public class OpenLdapSchemeCreator : IAuthSchemeCreator<RtOpenLdapIdentityProvid
         options.UserBaseDn = identityProvider.UserBaseDn;
         options.UserNameAttribute = identityProvider.UserNameAttribute;
 
-        return new AuthenticationScheme(identityProvider.Name, identityProvider.DisplayName, typeof(OpenLdapAuthenticationHandler));
+        var displayName = identityProvider.DisplayName ?? identityProvider.Name;
+        return new AuthenticationScheme(identityProvider.Name, displayName, typeof(OpenLdapAuthenticationHandler));
     }
 }

@@ -25,6 +25,7 @@ internal class GoogleAuthSchemeCreator : IAuthSchemeCreator<RtGoogleIdentityProv
         options.ClientId = identityProvider.ClientId;
         options.ClientSecret = identityProvider.ClientSecret;
 
-        return new AuthenticationScheme(identityProvider.Name, identityProvider.DisplayName, typeof(GoogleHandler));
+        var displayName = identityProvider.DisplayName ?? identityProvider.Name;
+        return new AuthenticationScheme(identityProvider.Name, displayName, typeof(GoogleHandler));
     }
 }

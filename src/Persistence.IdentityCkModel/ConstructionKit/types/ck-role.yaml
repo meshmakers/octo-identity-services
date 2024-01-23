@@ -13,9 +13,6 @@ types:
         name: NormalizedName
         isOptional: true
 
-      - id: System.Identity/ConcurrencyStamp
-        name: ConcurrencyStamp
-
       - id: System.Identity/SubjectIds
         name: SubjectIds
 

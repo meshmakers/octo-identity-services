@@ -22,19 +22,19 @@ internal class DynamicAuthSchemeService : IDynamicAuthSchemeService
 
     private readonly IAuthSchemeCreatorFactory _authSchemeCreatorFactory;
     private readonly IAuthenticationSchemeProvider _schemeProvider;
-    private readonly IOctoIdentityProviderStore _sgIdentityProviderStore;
+    private readonly IOctoIdentityProviderStore _identityProviderStore;
 
     /// <summary>
     ///     Constructor
     /// </summary>
-    /// <param name="sgIdentityProviderStore">Data storage of identity providers</param>
+    /// <param name="identityProviderStore">Data storage of identity providers</param>
     /// <param name="schemeProvider">Scheme provider</param>
     /// <param name="authSchemeCreatorFactory">Factory to resolve creators of auth providers.</param>
-    public DynamicAuthSchemeService(IOctoIdentityProviderStore sgIdentityProviderStore,
+    public DynamicAuthSchemeService(IOctoIdentityProviderStore identityProviderStore,
         IAuthenticationSchemeProvider schemeProvider,
         IAuthSchemeCreatorFactory authSchemeCreatorFactory)
     {
-        _sgIdentityProviderStore = sgIdentityProviderStore;
+        _identityProviderStore = identityProviderStore;
         _schemeProvider = schemeProvider;
         _authSchemeCreatorFactory = authSchemeCreatorFactory;
     }
@@ -51,10 +51,10 @@ internal class DynamicAuthSchemeService : IDynamicAuthSchemeService
         }
 
         // Add schemes based on identity providers
-        var identityProviders = await _sgIdentityProviderStore.GetAllAsync();
+        var identityProviders = await _identityProviderStore.GetAllAsync();
         foreach (var identityProvider in identityProviders)
         {
-            if (!identityProvider.Enabled)
+            if (!identityProvider.IsEnabled)
             {
                 continue;
             }
@@ -87,7 +87,7 @@ internal class DynamicAuthSchemeService : IDynamicAuthSchemeService
 
                 default:
                     throw new NotImplementedException(
-                        $"Identity provider '{identityProvider.Type}' is not supported.");
+                        $"Identity provider '{identityProvider.CkTypeId}' is not supported.");
             }
 
             _schemeProvider.AddScheme(scheme);

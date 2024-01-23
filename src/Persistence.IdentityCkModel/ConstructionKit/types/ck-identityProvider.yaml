@@ -8,11 +8,10 @@ types:
       - id: System/Name
         name: Name
       - id: System/Enabled
-        name: Enabled
-      - id: System.Identity/IdentityProviderType
-        name: Type
+        name: IsEnabled
       - id: System/DisplayName
         name: DisplayName
+        isOptional: true
       - id: System/Description
         name: Description
         isOptional: true

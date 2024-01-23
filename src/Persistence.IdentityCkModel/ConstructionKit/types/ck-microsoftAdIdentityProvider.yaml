@@ -5,9 +5,9 @@ types:
     isFinal: true
     isAbstract: false
     attributes:
-      - id: System.Identity/HostAddress
-        name: HostAddress
+      - id: System.Identity/Host
+        name: Host
       - id: System.Identity/UseTls
         name: UseTls
-      - id: System.Identity/HostPort
-        name: HostPort
+      - id: System.Identity/Port
+        name: Port

@@ -98,10 +98,9 @@ internal class DefaultConfigurationCreatorService : IDefaultConfigurationCreator
         {
             googleProvider = new RtGoogleIdentityProvider
             {
-                Enabled = false,
+                IsEnabled = false,
                 ClientId = "392724150963-34b8f10j23nm1rg31vi64lrb07o3aaga.apps.googleusercontent.com",
                 ClientSecret = "i0MW0fbgOiwazab4msWeBnnl",
-                Type = RtIdentityProviderTypesEnum.Google,
                 Name = CommonConstants.GoogleIdentityProvider,
                 DisplayName = CommonConstants.GoogleIdentityProvider
             };
@@ -114,10 +113,9 @@ internal class DefaultConfigurationCreatorService : IDefaultConfigurationCreator
         {
             microsoftProvider = new RtMicrosoftIdentityProvider
             {
-                Enabled = false,
+                IsEnabled = false,
                 ClientId = "9697862a-d54b-429a-8526-8e0693c9ecba",
                 ClientSecret = "z8H3]C/:VQ=bJE3jCXLP4F@L-/NwoI@J",
-                Type = RtIdentityProviderTypesEnum.Microsoft,
                 Name = CommonConstants.MicrosoftIdentityProvider,
                 DisplayName = CommonConstants.MicrosoftIdentityProvider
             };
