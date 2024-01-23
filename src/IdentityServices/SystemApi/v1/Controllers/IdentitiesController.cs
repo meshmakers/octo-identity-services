@@ -53,12 +53,12 @@ public class IdentitiesController : ControllerBase
     /// <returns></returns>
     [HttpGet]
     [Authorize(IdentityServiceConstants.IdentityApiReadOnlyPolicy)]
-    public async Task<IEnumerable<UserDto>> Get()
+    public IEnumerable<UserDto> Get()
     {
         var list = new List<UserDto>();
         foreach (var applicationUser in _userManager.Users)
         {
-            var userDto = await CreateUserDto(applicationUser, _userManager);
+            var userDto = CreateUserDto(applicationUser);
             list.Add(userDto);
         }
 
@@ -72,12 +72,12 @@ public class IdentitiesController : ControllerBase
     /// <returns></returns>
     [HttpGet("GetPaged")]
     [Authorize(IdentityServiceConstants.IdentityApiReadOnlyPolicy)]
-    public async Task<PagedResult<UserDto>> Get([Required] [FromQuery] PagingParams pagingParams)
+    public PagedResult<UserDto> Get([Required] [FromQuery] PagingParams pagingParams)
     {
         var list = new List<UserDto>();
         foreach (var applicationUser in _userManager.Users.Skip(pagingParams.Skip).Take(pagingParams.Take))
         {
-            var userDto = await CreateUserDto(applicationUser, _userManager);
+            var userDto = CreateUserDto(applicationUser);
             list.Add(userDto);
         }
 
@@ -111,7 +111,7 @@ public class IdentitiesController : ControllerBase
             return NotFound();
         }
 
-        return Ok(await CreateUserDto(octoUser, _userManager));
+        return Ok(CreateUserDto(octoUser));
     }
 
 
@@ -134,7 +134,7 @@ public class IdentitiesController : ControllerBase
 
         try
         {
-            await ApplyToUser(applicationUser, userDto);
+            await ApplyRegisterUserToUser(applicationUser, userDto);
         }
         catch (RoleNotFoundException e)
         {
@@ -202,7 +202,7 @@ public class IdentitiesController : ControllerBase
 
         try
         {
-            await ApplyToUser(applicationUser, userDto);
+            ApplyUserToUserDto(applicationUser, userDto);
         }
         catch (RoleNotFoundException e)
         {
@@ -304,74 +304,74 @@ public class IdentitiesController : ControllerBase
         }
     }
 
-    // PUT system/v1/identities/5/roles/1
+    // PUT system/v1/identities/demo/roles/users
     /// <summary>
     ///     adds a role from an user
     /// </summary>
-    /// <param name="userId">The user id</param>
-    /// <param name="roleId">the role id</param>
+    /// <param name="userName">The user name</param>
+    /// <param name="roleName">the role name</param>
     /// <returns></returns>
-    [HttpPut("{userId}/roles/{roleId}")]
+    [HttpPut("{userName}/roles/{roleName}")]
     [Authorize(IdentityServiceConstants.IdentityApiReadWritePolicy)]
-    public async Task<IActionResult> AssignUserToRole([Required] string userId, [Required] string roleId)
+    public async Task<IActionResult> AddUserToRole([Required] string userName, [Required] string roleName)
     {
-        var user = await _userManager.FindByIdAsync(userId);
+        var user = await _userManager.FindByNameAsync(userName);
         if (user == null)
         {
-            return NotFound(new NotFoundError($"User with id '{userId}' not found."));
+            return NotFound(new NotFoundError($"User with name '{userName}' not found."));
         }
 
-        var role = await _roleManager.FindByIdAsync(roleId);
+        var role = await _roleManager.FindByNameAsync(roleName);
         if (role == null)
         {
-            return NotFound(new NotFoundError($"Role with id '{roleId}' not found."));
+            return NotFound(new NotFoundError($"Role with name '{roleName}' not found."));
         }
 
-        if (user.RoleIds?.Contains(roleId) ?? false)
+        if (user.RoleIds?.Contains(role.RtId.ToString()) ?? false)
         {
             return BadRequest(new OperationFailedError($"User '{user.UserName}' already has role '{role.Name}'"));
         }
 
         user.RoleIds ??= new AttributeStringValueList();
-        user.RoleIds.Add(roleId);
+        user.RoleIds.Add(role.RtId.ToString());
         await _userManager.UpdateAsync(user);
         return Ok();
     }
 
-    // DELETE system/v1/identities/5/roles/1
+    // DELETE system/v1/identities/demo/roles/Users
     /// <summary>
     ///     removes a role from an user
     /// </summary>
-    /// <param name="userId">The user id</param>
-    /// <param name="roleId">the role id</param>
+    /// <param name="userName">The user id</param>
+    /// <param name="roleName">the role id</param>
     /// <returns></returns>
-    [HttpDelete("{userId}/roles/{roleId}")]
+    [HttpDelete("{userName}/roles/{roleName}")]
     [Authorize(IdentityServiceConstants.IdentityApiReadWritePolicy)]
-    public async Task<IActionResult> RemoveRoleFromUser([Required] string userId, [Required] string roleId)
+    public async Task<IActionResult> RemoveRoleFromUser([Required] string userName, [Required] string roleName)
     {
-        var user = await _userManager.FindByIdAsync(userId);
+        var user = await _userManager.FindByNameAsync(userName);
         if (user == null)
         {
-            return NotFound(new NotFoundError($"User with id '{userId}' not found."));
+            return NotFound(new NotFoundError($"User with name '{userName}' not found."));
         }
 
-        var role = await _roleManager.FindByIdAsync(roleId);
+        var role = await _roleManager.FindByNameAsync(roleName);
         if (role == null)
         {
-            return NotFound(new NotFoundError($"Role with id '{roleId}' not found."));
+            return NotFound(new NotFoundError($"Role with name '{roleName}' not found."));
         }
 
-        if (!user.RoleIds?.Contains(roleId) ?? false)
+        if (!user.RoleIds?.Contains(role.RtId.ToString()) ?? false)
         {
             return BadRequest(new OperationFailedError($"User '{user.UserName}' doesn't have role '{role.Name}'"));
         }
 
-        user.RoleIds?.Remove(roleId);
+        user.RoleIds?.Remove(role.RtId.ToString());
         await _userManager.UpdateAsync(user);
         return Ok();
     }
 
-    private async Task<UserDto> CreateUserDto(RtUser applicationUser, UserManager<RtUser> userManager)
+    private UserDto CreateUserDto(RtUser applicationUser)
     {
         var userDto = new UserDto
         {
@@ -384,22 +384,10 @@ public class IdentitiesController : ControllerBase
                    applicationUser.Claims?.FirstOrDefault(x => x.ClaimType == JwtClaimTypes.Name)?.ClaimValue
         };
 
-        var roles = new List<RoleDto>();
-        foreach (var role in await userManager.GetRolesAsync(applicationUser))
-        {
-            var rtRole = await _roleManager.FindByNameAsync(role);
-            if (rtRole != null)
-            {
-                roles.Add(RolesController.CreateRoleDto(rtRole));
-            }
-        }
-
-        userDto.Roles = roles;
-
         return userDto;
     }
-
-    private async Task ApplyToUser(RtUser octoUser, UserDto userDto)
+    
+    private async Task ApplyRegisterUserToUser(RtUser octoUser, RegisterUserDto userDto)
     {
         var roleIds = new List<string>();
 
@@ -422,14 +410,20 @@ public class IdentitiesController : ControllerBase
             }
         }
 
+        ApplyUserToUserDto(octoUser, userDto);
+
+        octoUser.RoleIds ??= new AttributeStringValueList();
+        octoUser.RoleIds?.Clear();
+        octoUser.RoleIds?.AddRange(roleIds);
+    }
+
+    private void ApplyUserToUserDto(RtUser octoUser, UserDto userDto)
+    {
         if (!string.IsNullOrWhiteSpace(userDto.Name))
         {
             octoUser.UserName = userDto.Name;
         }
 
-        octoUser.RoleIds ??= new AttributeStringValueList();
-        octoUser.RoleIds?.Clear();
-        octoUser.RoleIds?.AddRange(roleIds);
         octoUser.Email = userDto.Email;
         octoUser.FirstName = userDto.FirstName;
         octoUser.LastName = userDto.LastName;

@@ -110,14 +110,12 @@ public class ExternalController : Controller
         await _events.RaiseAsync(
             new UserLoginSuccessEvent(info.LoginProvider, info.ProviderKey, user.RtId.ToString(), name));
 
-        var clock = HttpContext.RequestServices.GetRequiredService<TimeProvider>();
-
         var identityServerUser = new IdentityServerUser(user.RtId.ToString())
         {
             DisplayName = name,
             IdentityProvider = info.LoginProvider,
             AdditionalClaims = additionalLocalClaims.ToArray(),
-            AuthenticationTime = clock.GetTimestamp().ToDateTimeFromEpoch()
+            AuthenticationTime = DateTime.UtcNow
         };
         await HttpContext.SignInAsync(identityServerUser, localSignInProps);
 

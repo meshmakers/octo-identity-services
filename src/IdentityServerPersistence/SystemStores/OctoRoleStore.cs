@@ -46,20 +46,13 @@ public sealed class OctoRoleStore :
     {
         cancellationToken.ThrowIfCancellationRequested();
         ThrowIfDisposed();
-        var currentConcurrencyStamp = role != null ? role.ConcurrencyStamp : throw new ArgumentNullException(nameof(role));
-        role.ConcurrencyStamp = Guid.NewGuid().ToString();
 
         using var session = await _tenantRepository.GetSessionAsync().ConfigureAwait(false);
         session.StartTransaction();
 
-        var fieldFilters = new List<FieldFilter>
-        {
-            new(nameof(RtRole.ConcurrencyStamp), FieldFilterOperator.Equals, currentConcurrencyStamp)
-        };
-
         try
         {
-            await _tenantRepository.ReplaceOneRtEntityAsync(session, fieldFilters, role).ConfigureAwait(false);
+            await _tenantRepository.ReplaceOneRtEntityByIdAsync(session, role.RtId, role).ConfigureAwait(false);
             await session.CommitTransactionAsync();
             return IdentityResult.Success;
         }
@@ -78,15 +71,9 @@ public sealed class OctoRoleStore :
         using var session = await _tenantRepository.GetSessionAsync().ConfigureAwait(false);
         session.StartTransaction();
 
-        List<FieldFilter> fieldFilters = new()
-        {
-            new FieldFilter(nameof(RtRole.ConcurrencyStamp), FieldFilterOperator.Equals, role.ConcurrencyStamp),
-            new FieldFilter(nameof(RtRole.RtId), FieldFilterOperator.Equals, role.RtId)
-        };
-
         try
         {
-            await _tenantRepository.DeleteOneRtEntityAsync<RtRole>(session, fieldFilters).ConfigureAwait(false);
+            await _tenantRepository.DeleteOneRtEntityByRtIdAsync<RtRole>(session, role.RtId).ConfigureAwait(false);
             await session.CommitTransactionAsync().ConfigureAwait(false);
             return IdentityResult.Success;
         }

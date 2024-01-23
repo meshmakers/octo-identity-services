@@ -61,14 +61,14 @@ public class IdentityProvidersController : ControllerBase
     /// <summary>
     ///     Returns identity provider information based on it's name
     /// </summary>
-    /// <param name="id">ID of the identity provider</param>
+    /// <param name="rtId">ID of the identity provider</param>
     /// <returns>An Object that describes the identity provider.</returns>
-    [HttpGet("{id}")]
+    [HttpGet("{rtId}")]
     [ProducesResponseType(typeof(IdentityProvidersResult), StatusCodes.Status200OK)]
     [Authorize(IdentityServiceConstants.IdentityApiReadOnlyPolicy)]
-    public async Task<ActionResult<IdentityProvidersResult>> Get([Required] string id)
+    public async Task<ActionResult<IdentityProvidersResult>> Get([Required] OctoObjectId rtId)
     {
-        var identityProvider = await _identityProviderStore.GetByNameAsync(id);
+        var identityProvider = await _identityProviderStore.GetByIdAsync(rtId);
         if (identityProvider == null)
         {
             return NotFound();
@@ -105,20 +105,20 @@ public class IdentityProvidersController : ControllerBase
     /// <summary>
     ///     Delete an existing identity provider.
     /// </summary>
-    /// <param name="id">The ID of the identity provider to be deleted</param>
+    /// <param name="rtId">The ID of the identity provider to be deleted</param>
     /// <response code="200">The identity provider was deleted.</response>
     /// <response code="401">Unauthorized. You need to authenticate in order to use the API.</response>
     /// <response code="404">The identity provider to be deleted does not exist.</response>
-    [HttpDelete("{id}")]
+    [HttpDelete("{rtId}")]
     [Authorize(IdentityServiceConstants.IdentityApiReadWritePolicy)]
-    public async Task<IActionResult> DeleteIdentityProviderAsync([Required] string id)
+    public async Task<IActionResult> DeleteIdentityProviderAsync([Required] OctoObjectId rtId)
     {
         if (!ModelState.IsValid)
         {
             return BadRequest(ModelState);
         }
 
-        await _identityProviderStore.RemoveAsync(id);
+        await _identityProviderStore.RemoveAsync(rtId);
         await ClearCacheAsync();
         return Ok();
     }
@@ -127,7 +127,7 @@ public class IdentityProvidersController : ControllerBase
     ///     Replace the data of an existing provider.
     /// </summary>
     /// <remarks>Updates an existing provider with the specified ID with the provided data.</remarks>
-    /// <param name="id">ID of an existing provider</param>
+    /// <param name="rtId">ID of an existing provider</param>
     /// <param name="identityProviderDto">The configuration for the new identity provider.</param>
     /// <response code="200">Returns the provider.</response>
     /// <response code="400">
@@ -136,11 +136,11 @@ public class IdentityProvidersController : ControllerBase
     /// </response>
     /// <response code="401">Unauthorized. You need to authenticate in order to use the API.</response>
     /// <response code="404">Provider with this ID not found.</response>
-    [HttpPut("{id}")]
+    [HttpPut("{rtId}")]
     [ProducesResponseType(typeof(IdentityProviderDto), StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(UniquenessViolationErrorResponse), StatusCodes.Status400BadRequest)]
     [Authorize(IdentityServiceConstants.IdentityApiReadWritePolicy)]
-    public async Task<ActionResult<IdentityProviderDto>> ReplaceProviderAsync([FromRoute] [Required] string id,
+    public async Task<ActionResult<IdentityProviderDto>> ReplaceProviderAsync([FromRoute] [Required] OctoObjectId rtId,
         [FromBody] [Required] IdentityProviderDto identityProviderDto)
     {
         if (identityProviderDto == null)
@@ -149,7 +149,7 @@ public class IdentityProvidersController : ControllerBase
         }
 
         var identityProvider = _mapper.Map<RtIdentityProvider>(identityProviderDto);
-        identityProvider.RtId = new OctoObjectId(id);
+        identityProvider.RtId = rtId;
 
         await HandleWriteExceptionAsync(async () => await _identityProviderStore.StoreAsync(identityProvider));
         await ClearCacheAsync();
@@ -165,8 +165,8 @@ public class IdentityProvidersController : ControllerBase
         catch (DuplicateKeyException ex)
         {
             // Currently, only the alias must be unique. Mongodb does not provide an easy way of finding out which unique property was violated.
-            throw new DuplicateKeyException("Alias must be unique", typeof(IdentityProviderDto),
-                new[] { nameof(IdentityProviderDto.Alias) }, ex);
+            throw new DuplicateKeyException("Name must be unique", typeof(IdentityProviderDto),
+                new[] { nameof(IdentityProviderDto.Name) }, ex);
         }
     }
 

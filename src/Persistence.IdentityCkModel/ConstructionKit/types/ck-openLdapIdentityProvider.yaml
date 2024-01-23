@@ -5,11 +5,11 @@ types:
     isFinal: true
     isAbstract: false
     attributes:
-      - id: System.Identity/HostAddress
+      - id: System.Identity/Host
         name: HostAddress
       - id: System.Identity/UseTls
         name: UseTls
-      - id: System.Identity/HostPort
+      - id: System.Identity/Port
         name: HostPort
       - id: System.Identity/UserBaseDn
         name: UserBaseDn

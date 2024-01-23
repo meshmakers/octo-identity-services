@@ -17,11 +17,12 @@ public class MicrosoftAdSchemeCreator : IAuthSchemeCreator<RtMicrosoftAdIdentity
     public AuthenticationScheme Create(RtMicrosoftAdIdentityProvider identityProvider)
     {
         var options = _optionsBuilder.CreateOptions(identityProvider.Name);
-        options.Host = identityProvider.HostAddress;
-        options.Port = identityProvider.HostPort;
+        options.Host = identityProvider.Host;
+        options.Port = identityProvider.Port;
         options.UseTls = identityProvider.UseTls;
         options.Name = identityProvider.Name;
-
-        return new AuthenticationScheme(identityProvider.Name, identityProvider.DisplayName, typeof(MicrosoftAdAuthenticationHandler));
+        
+        var displayName = identityProvider.DisplayName ?? identityProvider.Name;
+        return new AuthenticationScheme(identityProvider.Name, displayName, typeof(MicrosoftAdAuthenticationHandler));
     }
 }

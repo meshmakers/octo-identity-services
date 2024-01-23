@@ -34,12 +34,6 @@ attributes:
     valueType: String
     description: A random value that should change whenever a users credentials have been compromised.
 
-  - id: ConcurrencyStamp
-    valueType: String
-    description: A random value that should change whenever a users credentials have been changed.
-    defaultValues:
-      - ""
-
   - id: PhoneNumber
     valueType: String
     description: The phone number of the user.
@@ -411,10 +405,6 @@ attributes:
   - id: InitiateLoginUri
     valueType: String
     description: Gets of sets a URI that can be used to initiate login from the IdentityServer host or a third party.
-  - id: IdentityProviderType
-    valueType: Enum
-    valueCkEnumId: System.Identity/IdentityProviderTypes
-    description: Gets or sets the type of the identity provider
   - id: Authority
     valueType: String
     description: Gets or sets the URI of the provider, or discovery endpoint for OpenID Connect discovery.
@@ -430,7 +420,7 @@ attributes:
     defaultValues:
       - true
     description: Gets or sets a value indicating whether the client will be shown in the discovery document. Defaults to true.
-  - id: HostAddress
+  - id: Host
     valueType: String
     description: Gets or sets the host address of the identity provider.
   - id: UseTls
@@ -438,7 +428,7 @@ attributes:
     description: Gets or sets if the connection to the identity provider should use TLS. Defaults to true.
     defaultValues:
       - true
-  - id: HostPort
+  - id: Port
     valueType: Int
     description: Gets or sets the host port of the identity provider.
     defaultValues:

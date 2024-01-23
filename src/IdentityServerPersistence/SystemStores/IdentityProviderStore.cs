@@ -36,6 +36,18 @@ public class IdentityProviderStore : IOctoIdentityProviderStore
         await session.CommitTransactionAsync();
         return result.Items.SingleOrDefault();
     }
+    
+    public async Task<RtIdentityProvider?> GetByIdAsync(OctoObjectId rtId)
+    {
+        var session = await _tenantRepository.GetSessionAsync();
+        session.StartTransaction();
+
+        var result = await _tenantRepository.GetRtEntityByRtIdAsync<RtIdentityProvider>(session, rtId);
+
+        await session.CommitTransactionAsync();
+        return result;
+    }
+
 
     public async Task<IEnumerable<RtIdentityProvider>> GetAllAsync()
     {
@@ -67,15 +79,13 @@ public class IdentityProviderStore : IOctoIdentityProviderStore
 
         await session.CommitTransactionAsync();
     }
-
-    public async Task RemoveAsync(string id)
+    
+    public async Task RemoveAsync(OctoObjectId rtId)
     {
-        ArgumentValidation.ValidateString(nameof(id), id);
-
         var session = await _tenantRepository.GetSessionAsync();
         session.StartTransaction();
 
-        await _tenantRepository.DeleteOneRtEntityByRtIdAsync<RtIdentityProvider>(session, new OctoObjectId(id));
+        await _tenantRepository.DeleteOneRtEntityByRtIdAsync<RtIdentityProvider>(session, rtId);
 
         await session.CommitTransactionAsync();
     }

@@ -24,7 +24,8 @@ internal class MicrosoftAuthSchemeCreator : IAuthSchemeCreator<RtMicrosoftIdenti
         options.ClientId = identityProvider.ClientId;
         options.ClientSecret = identityProvider.ClientSecret;
 
-        return new AuthenticationScheme(identityProvider.Name, identityProvider.DisplayName,
+        var displayName = identityProvider.DisplayName ?? identityProvider.Name;
+        return new AuthenticationScheme(identityProvider.Name, displayName,
             typeof(MicrosoftAccountHandler));
     }
 }

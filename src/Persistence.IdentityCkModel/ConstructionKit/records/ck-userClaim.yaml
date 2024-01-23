@@ -10,4 +10,5 @@ records:
         name: ClaimValue
       - id: System.Identity/UserId
         name: UserId
+        isOptional: true
     

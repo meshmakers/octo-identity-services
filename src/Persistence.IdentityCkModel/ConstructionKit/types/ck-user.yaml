@@ -44,9 +44,6 @@ types:
         name: SecurityStamp
         isOptional: true
 
-      - id: System.Identity/ConcurrencyStamp
-        name: ConcurrencyStamp
-
       - id: System.Identity/PhoneNumber
         name: PhoneNumber
         isOptional: true

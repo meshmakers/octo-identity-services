@@ -44,44 +44,6 @@ public sealed class OctoUserStore :
 
     private IdentityErrorDescriber ErrorDescriber { get; }
 
-    //
-    // private async Task UpdateAsync<TFieldValue>(
-    //     RtUser user,
-    //     Expression<Func<RtUser, TFieldValue>> expression,
-    //     TFieldValue value,
-    //     CancellationToken cancellationToken = default)
-    // {
-    //     if (user == null)
-    //         throw new ArgumentNullException(nameof(user));
-    //     UpdateResult updateResult = await _userCollection
-    //         .UpdateOneAsync<RtUser>((Expression<Func<RtUser, bool>>)(x => x.Id.Equals(user.Id)),
-    //             Builders<RtUser>.Update.Set<TFieldValue>(expression, value), cancellationToken: cancellationToken)
-    //         .ConfigureAwait(false);
-    // }
-    //
-    // private async Task AddAsync<TFieldValue>(
-    //     RtUser user,
-    //     Expression<Func<RtUser, IEnumerable<TFieldValue>>> expression,
-    //     TFieldValue value,
-    //     CancellationToken cancellationToken = default)
-    // {
-    //     if (user == null)
-    //     {
-    //         throw new ArgumentNullException(nameof(user));
-    //     }
-    //     
-    //     using var session = await _tenantRepository.GetSessionAsync();
-    //     session.StartTransaction();
-    //     
-    //     await _tenantRepository.InsertOneRtEntityAsync(session, user);
-    //
-    //     await session.CommitTransactionAsync();
-    //
-    //     UpdateResult updateResult = await _userCollection
-    //         .UpdateOneAsync<RtUser>((Expression<Func<RtUser, bool>>)(x => x.Id.Equals(user.Id)),
-    //             Builders<RtUser>.Update.AddToSet<TFieldValue>(expression, value), cancellationToken: cancellationToken)
-    //         .ConfigureAwait(false);
-    // }
     public IQueryable<RtUser> Users => _tenantRepository.AsQueryable<RtUser>();
 
     public async Task SetTokenAsync(
@@ -213,15 +175,9 @@ public sealed class OctoUserStore :
         using var session = await _tenantRepository.GetSessionAsync().ConfigureAwait(false);
         session.StartTransaction();
 
-        List<FieldFilter> fieldFilters = new()
-        {
-            new FieldFilter(nameof(RtUser.ConcurrencyStamp), FieldFilterOperator.Equals, user.ConcurrencyStamp),
-            new FieldFilter(nameof(RtUser.RtId), FieldFilterOperator.Equals, user.RtId)
-        };
-
         try
         {
-            await _tenantRepository.DeleteOneRtEntityAsync<RtUser>(session, fieldFilters).ConfigureAwait(false);
+            await _tenantRepository.DeleteOneRtEntityByRtIdAsync<RtUser>(session, user.RtId).ConfigureAwait(false);
             await session.CommitTransactionAsync().ConfigureAwait(false);
             return IdentityResult.Success;
         }
@@ -262,20 +218,13 @@ public sealed class OctoUserStore :
     {
         cancellationToken.ThrowIfCancellationRequested();
         ThrowIfDisposed();
-        var currentConcurrencyStamp = user != null ? user.ConcurrencyStamp : throw new ArgumentNullException(nameof(user));
-        user.ConcurrencyStamp = Guid.NewGuid().ToString();
 
         using var session = await _tenantRepository.GetSessionAsync().ConfigureAwait(false);
         session.StartTransaction();
 
-        var fieldFilters = new List<FieldFilter>
-        {
-            new(nameof(RtUser.ConcurrencyStamp), FieldFilterOperator.Equals, currentConcurrencyStamp)
-        };
-
         try
         {
-            await _tenantRepository.ReplaceOneRtEntityAsync(session, fieldFilters, user).ConfigureAwait(false);
+            await _tenantRepository.ReplaceOneRtEntityByIdAsync(session, user.RtId, user).ConfigureAwait(false);
             await session.CommitTransactionAsync();
             return IdentityResult.Success;
         }
@@ -362,37 +311,19 @@ public sealed class OctoUserStore :
         ThrowIfDisposed();
         ArgumentValidation.Validate(nameof(claim), claim);
 
-
         using var session = await _tenantRepository.GetSessionAsync().ConfigureAwait(false);
         session.StartTransaction();
+        
+        var dataQueryOperation = DataQueryOperation.Create()
+            .MatchField(nameof(RtUser.Claims), FieldFilterCriteria.Create()
+                .FieldEquals(nameof(RtUserClaimRecord.ClaimType), claim.Type)
+                .FieldEquals(nameof(RtUserClaimRecord.ClaimValue), claim.Value));
 
-        // TODO: Fix here
-        // DataQueryOperation dataQueryOperation = new()
-        // {
-        //     FieldFilters = new List<FieldFilter>
-        //     {
-        //         new (nameof(RtUser.Claims), FieldFilterOperator.Equals, normalizedUserName)
-        //     }
-        // };
-        //
-        // var result = await _tenantRepository.GetRtEntitiesByTypeAsync<RtUser>(session, dataQueryOperation);
-        //
-        // await session.CommitTransactionAsync();
-        //
-        // if (!result.Items.Any())
-        // {
-        //     throw NotExistingException.UserWithNameDoesNotExist(normalizedUserName);
-        // }
-        //
+        var result = await _tenantRepository.GetRtEntitiesByTypeAsync<RtUser>(session, dataQueryOperation).ConfigureAwait(false);
+        
+        await session.CommitTransactionAsync().ConfigureAwait(false);
 
-        // return (IList<RtUser>)(await _userCollection
-        //     .WhereAsync<RtUser>(
-        //         (Expression<Func<RtUser, bool>>)(u =>
-        //             u.Claims.Any<IdentityUserClaim<string>>(
-        //                 (Func<IdentityUserClaim<string>, bool>)(c => c.ClaimType == claim.Type && c.ClaimValue == claim.Value))),
-        //         cancellationToken).ConfigureAwait(false)).ToList<RtUser>();
-        await session.CommitTransactionAsync();
-        return new List<RtUser>();
+        return result.Items.ToList();
     }
 
     public Task<string?> GetNormalizedUserNameAsync(RtUser user, CancellationToken cancellationToken = default)
@@ -660,15 +591,16 @@ public sealed class OctoUserStore :
         using var session = await _tenantRepository.GetSessionAsync().ConfigureAwait(false);
         session.StartTransaction();
 
-        // TODO: Fix here
-        //
-        // return await _userCollection
-        //     .FirstOrDefaultAsync<RtUser>(
-        //         (Expression<Func<RtUser, bool>>)(u =>
-        //             u.Logins.Any<IdentityUserLogin<string>>((Func<IdentityUserLogin<string>, bool>)(l =>
-        //                 l.LoginProvider == loginProvider && l.ProviderKey == providerKey))), cancellationToken).ConfigureAwait(true);
+        var dataQueryOperation = DataQueryOperation.Create()
+            .MatchField(nameof(RtUser.UserLogins), FieldFilterCriteria.Create()
+                .FieldEquals(nameof(RtUserLoginRecord.LoginProvider), loginProvider)
+                .FieldEquals(nameof(RtUserLoginRecord.ProviderKey), providerKey));
+
+        var resultSet = await _tenantRepository.GetRtEntitiesByTypeAsync<RtUser>(session, dataQueryOperation).ConfigureAwait(false);
+        
         await session.CommitTransactionAsync();
-        return null!;
+        
+        return resultSet.Items.FirstOrDefault();
     }
 
     public async Task<IList<UserLoginInfo>> GetLoginsAsync(
