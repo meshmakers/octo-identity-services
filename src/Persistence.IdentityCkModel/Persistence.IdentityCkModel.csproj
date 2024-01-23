@@ -8,9 +8,9 @@
     </PropertyGroup>
 
     <ItemGroup Condition="'$(Configuration)'!='DebugL'">
-        <PackageReference Include="Meshmakers.Octo.ConstructionKit.SourceGeneration" OutputItemType="Analyzer" ReferenceOutputAssembly="false" Version="3.0.34" PrivateAssets="all" />
-        <PackageReference Include="Meshmakers.Octo.ConstructionKit.MsBuildTasks" Version="3.0.34" PrivateAssets="all" />
-        <PackageReference Include="Meshmakers.Octo.Runtime.Contracts" Version="3.0.34" />
+        <PackageReference Include="Meshmakers.Octo.ConstructionKit.SourceGeneration" OutputItemType="Analyzer" ReferenceOutputAssembly="false" Version="3.0.35" PrivateAssets="all" />
+        <PackageReference Include="Meshmakers.Octo.ConstructionKit.MsBuildTasks" Version="3.0.35" PrivateAssets="all" />
+        <PackageReference Include="Meshmakers.Octo.Runtime.Contracts" Version="3.0.35" />
     </ItemGroup>
 
     <ItemGroup Condition="'$(Configuration)'=='DebugL'">
