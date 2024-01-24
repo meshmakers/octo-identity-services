@@ -13,25 +13,25 @@ public class MapperProfile : Profile
             .Include<RtMicrosoftIdentityProvider, MicrosoftIdentityProviderDto>()
             .Include<RtMicrosoftAdIdentityProvider, MicrosoftAdProviderDto>()
             .Include<RtOpenLdapIdentityProvider, OpenLdapProviderDto>()
-            .Include<RtAzureEntraIdentityProvider, AzureEntraProviderDto>();
+            .Include<RtAzureEntraIdIdentityProvider, AzureEntraIdProviderDto>();
 
         CreateMap<RtGoogleIdentityProvider, GoogleIdentityProviderDto>();
         CreateMap<RtMicrosoftIdentityProvider, MicrosoftIdentityProviderDto>();
         CreateMap<RtMicrosoftAdIdentityProvider, MicrosoftAdProviderDto>();
         CreateMap<RtOpenLdapIdentityProvider, OpenLdapProviderDto>();
-        CreateMap<RtAzureEntraIdentityProvider, AzureEntraProviderDto>();
+        CreateMap<RtAzureEntraIdIdentityProvider, AzureEntraIdProviderDto>();
 
         CreateMap<IdentityProviderDto, RtIdentityProvider>()
             .Include<GoogleIdentityProviderDto, RtGoogleIdentityProvider>()
             .Include<MicrosoftIdentityProviderDto, RtMicrosoftIdentityProvider>()
             .Include<MicrosoftAdProviderDto, RtMicrosoftAdIdentityProvider>()
             .Include<OpenLdapProviderDto, RtOpenLdapIdentityProvider>()
-            .Include<AzureEntraProviderDto, RtAzureEntraIdentityProvider>();
+            .Include<AzureEntraIdProviderDto, RtAzureEntraIdIdentityProvider>();
 
         CreateMap<GoogleIdentityProviderDto, RtGoogleIdentityProvider>();
         CreateMap<MicrosoftIdentityProviderDto, RtMicrosoftIdentityProvider>();
         CreateMap<MicrosoftAdProviderDto, RtMicrosoftAdIdentityProvider>();
         CreateMap<OpenLdapProviderDto, RtOpenLdapIdentityProvider>();
-        CreateMap<AzureEntraProviderDto, RtAzureEntraIdentityProvider>();
+        CreateMap<AzureEntraIdProviderDto, RtAzureEntraIdIdentityProvider>();
     }
 }

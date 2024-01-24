@@ -5,9 +5,9 @@ using Microsoft.IdentityModel.Protocols;
 using Microsoft.IdentityModel.Protocols.OpenIdConnect;
 using Persistence.IdentityCkModel.ConstructionKit.Generated.System.Identity.v1;
 
-namespace Meshmakers.Octo.Backend.Authentication.Azure;
+namespace Meshmakers.Octo.Backend.Authentication.AzureEntraId;
 
-internal class AzureAuthSchemeCreator : IAuthSchemeCreator<RtAzureEntraIdentityProvider>
+internal class AzureEntraIdAuthSchemeCreator : IAuthSchemeCreator<RtAzureEntraIdIdentityProvider>
 {
     private readonly IDynamicAuthOptionsBuilder<OpenIdConnectOptions> _openIdConnectAuthOptions;
 
@@ -15,21 +15,21 @@ internal class AzureAuthSchemeCreator : IAuthSchemeCreator<RtAzureEntraIdentityP
     ///     ctor
     /// </summary>
     /// <param name="openIdConnectAuthOptions">Authentication builder for OpenId provider</param>
-    public AzureAuthSchemeCreator(IDynamicAuthOptionsBuilder<OpenIdConnectOptions> openIdConnectAuthOptions)
+    public AzureEntraIdAuthSchemeCreator(IDynamicAuthOptionsBuilder<OpenIdConnectOptions> openIdConnectAuthOptions)
     {
         _openIdConnectAuthOptions = openIdConnectAuthOptions;
     }
 
-    public AuthenticationScheme Create(RtAzureEntraIdentityProvider identityProvider)
+    public AuthenticationScheme Create(RtAzureEntraIdIdentityProvider identityProvider)
     {
         var options = _openIdConnectAuthOptions.CreateOptions(identityProvider.Name);
 
         options.Authority = $"https://login.microsoftonline.com/{identityProvider.TenantId}";
-        options.ClientId = identityProvider.ClientIdGroupAzureAd;
-        options.ClientSecret = identityProvider.ClientSecretGroupAzureAd;
+        options.ClientId = identityProvider.ClientId;
+        options.ClientSecret = identityProvider.ClientSecret;
         options.CallbackPath = "/auth/signin-callback";
         options.TokenValidationParameters.NameClaimType = "name";
-        options.TokenValidationParameters.ValidAudience = identityProvider.ClientIdGroupAzureAd;
+        options.TokenValidationParameters.ValidAudience = identityProvider.ClientId;
 
         options.MetadataAddress = AuthenticationConstants.GetOidcMetadataAddress(options.Authority);
 
@@ -41,7 +41,8 @@ internal class AzureAuthSchemeCreator : IAuthSchemeCreator<RtAzureEntraIdentityP
 
         options.Validate();
 
-        return new AuthenticationScheme(identityProvider.Name, identityProvider.DisplayName, typeof(OpenIdConnectHandler));
+        var displayName = identityProvider.DisplayName ?? identityProvider.Name;
+        return new AuthenticationScheme(identityProvider.Name, displayName, typeof(OpenIdConnectHandler));
     }
 
     /// <summary>

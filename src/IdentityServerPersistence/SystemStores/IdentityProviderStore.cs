@@ -29,7 +29,8 @@ public class IdentityProviderStore : IOctoIdentityProviderStore
         session.StartTransaction();
 
         var dataQueryOperation = DataQueryOperation.Create()
-            .FieldFilter(nameof(RtIdentityProvider.Name), FieldFilterOperator.Equals, name);
+            .FieldEquals(nameof(RtIdentityProvider.Name), name)
+            .FieldEquals(nameof(RtIdentityProvider.IsEnabled), true);
 
         var result = await _tenantRepository.GetRtEntitiesByTypeAsync<RtIdentityProvider>(session, dataQueryOperation);
 
