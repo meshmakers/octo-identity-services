@@ -26,14 +26,12 @@ public class IdentityProviderUpdateConsumer : IDistributedConsumer<IdentityProvi
     }
 
     /// <inheritdoc />
-    public Task ConsumeAsync(IDistributedContext<IdentityProviderUpdate> context)
+    public async Task ConsumeAsync(IDistributedContext<IdentityProviderUpdate> context)
     {
         _logger.LogInformation("Cors client update for tenant received: {Text}", context.Message.TenantId);
 
-        var key = context.Message.TenantId.NormalizeString();
+        var tenantId = context.Message.TenantId.NormalizeString();
 
-        _authSchemeService.ConfigureAsync(key);
-
-        return Task.CompletedTask;
+        await _authSchemeService.ConfigureAsync(tenantId);
     }
 }

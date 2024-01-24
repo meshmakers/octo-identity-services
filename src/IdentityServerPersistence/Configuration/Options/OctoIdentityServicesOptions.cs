@@ -30,9 +30,19 @@ public class OctoIdentityServicesOptions
     /// </summary>
     public string? BrokerPassword { get; set; }
 
+    /// <summary>
+    /// Gets or sets the public URL of the Identity service.
+    /// </summary>
     public string AuthorityUrl { get; set; }
 
+    /// <summary>
+    /// Gets or sets the path to the certificate file used for signing tokens.
+    /// </summary>
     public string? KeyFilePath { get; set; }
+    
+    /// <summary>
+    /// Gets or sets the password for the certificate file used for signing tokens.
+    /// </summary>
     public string? KeyFilePassword { get; set; }
 
     /// <summary>
@@ -46,7 +56,7 @@ public class OctoIdentityServicesOptions
     public int TokenCleanupInterval { get; set; }
 
     /// <summary>
-    ///     Configure the <see cref="Meshmakers.Octo.Backend.IdentityServices.Controllers.SecurityHeadersAttribute" /> so that displaying
+    ///     Configure the SecurityHeaders so that displaying
     ///     Identity service in an iframe is allowed.
     /// </summary>
     public bool AllowDisplayInIframe { get; set; }

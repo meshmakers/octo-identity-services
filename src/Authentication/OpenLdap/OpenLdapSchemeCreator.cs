@@ -17,8 +17,8 @@ public class OpenLdapSchemeCreator : IAuthSchemeCreator<RtOpenLdapIdentityProvid
     public AuthenticationScheme Create(RtOpenLdapIdentityProvider identityProvider)
     {
         var options = _optionsBuilder.CreateOptions(identityProvider.Name);
-        options.Host = identityProvider.HostAddress;
-        options.Port = identityProvider.HostPort;
+        options.Host = identityProvider.Host;
+        options.Port = identityProvider.Port;
         options.UseTls = identityProvider.UseTls;
         options.Name = identityProvider.Name;
         options.UserBaseDn = identityProvider.UserBaseDn;
