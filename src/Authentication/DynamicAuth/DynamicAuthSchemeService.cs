@@ -70,9 +70,9 @@ internal class DynamicAuthSchemeService : IDynamicAuthSchemeService
                     scheme = _authSchemeCreatorFactory.GetCreator<RtMicrosoftIdentityProvider>()
                         .Create(microsoftIdentityProvider);
                     break;
-                case RtAzureEntraIdentityProvider azureAdIdentityProvider:
-                    scheme = _authSchemeCreatorFactory.GetCreator<RtAzureEntraIdentityProvider>()
-                        .Create(azureAdIdentityProvider);
+                case RtAzureEntraIdIdentityProvider rtAzureEntraIdIdentityProvider:
+                    scheme = _authSchemeCreatorFactory.GetCreator<RtAzureEntraIdIdentityProvider>()
+                        .Create(rtAzureEntraIdIdentityProvider);
                     break;
 
                 case RtOpenLdapIdentityProvider openLdapIdentityProvider:

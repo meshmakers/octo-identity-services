@@ -96,7 +96,7 @@ public class IdentityProvidersController : ControllerBase
         [FromBody] IdentityProviderDto identityProviderDto)
     {
         var identityProvider = _mapper.Map<RtIdentityProvider>(identityProviderDto);
-
+        
         await HandleWriteExceptionAsync(async () => await _identityProviderStore.StoreAsync(identityProvider));
         await SendIdentityProviderUpdate();
         return _mapper.Map<IdentityProviderDto>(identityProvider);

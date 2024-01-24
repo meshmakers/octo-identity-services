@@ -1,7 +1,6 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk.Web">
 
     <PropertyGroup>
-        <AspNetCoreHostingModel>InProcess</AspNetCoreHostingModel>
         <AssemblyName>Meshmakers.Octo.Backend.IdentityServices</AssemblyName>
         <DockerDefaultTargetOS>Linux</DockerDefaultTargetOS>
         <RootNamespace>Meshmakers.Octo.Backend.IdentityServices</RootNamespace>

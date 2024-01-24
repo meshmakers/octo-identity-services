@@ -82,7 +82,7 @@ try
     builder.Services.AddDynamicAuthentication()
         .AddGoogle()
         .AddMicrosoft()
-        .AddOpenIdConnect()
+        .AddAzureEntraId()
         .AddOpenLdapAuthentication()
         .AddMicrosoftAdAuthentication();
 

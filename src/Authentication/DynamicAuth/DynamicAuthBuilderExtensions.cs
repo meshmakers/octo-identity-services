@@ -1,4 +1,4 @@
-﻿using Meshmakers.Octo.Backend.Authentication.Azure;
+﻿using Meshmakers.Octo.Backend.Authentication.AzureEntraId;
 using Meshmakers.Octo.Backend.Authentication.Connection;
 using Meshmakers.Octo.Backend.Authentication.Google;
 using Meshmakers.Octo.Backend.Authentication.Microsoft;
@@ -16,11 +16,11 @@ namespace Meshmakers.Octo.Backend.Authentication.DynamicAuth;
 
 public static class DynamicAuthBuilderExtensions
 {
-    public static IDynamicAuthBuilder AddOpenIdConnect(this IDynamicAuthBuilder builder)
+    public static IDynamicAuthBuilder AddAzureEntraId(this IDynamicAuthBuilder builder)
     {
         builder.Services.AddTransient<IDynamicAuthOptionsBuilder<OpenIdConnectOptions>,
             OpenIdDynamicAuthOptionsBuilder>();
-        builder.Services.AddTransient<IAuthSchemeCreator<RtAzureEntraIdentityProvider>, AzureAuthSchemeCreator>();
+        builder.Services.AddTransient<IAuthSchemeCreator<RtAzureEntraIdIdentityProvider>, AzureEntraIdAuthSchemeCreator>();
 
         return builder;
     }

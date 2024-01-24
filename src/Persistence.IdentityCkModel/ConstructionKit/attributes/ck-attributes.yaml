@@ -408,9 +408,6 @@ attributes:
   - id: Authority
     valueType: String
     description: Gets or sets the URI of the provider, or discovery endpoint for OpenID Connect discovery.
-  - id: ClientIdGroupAzureAd
-    valueType: String
-    description: Gets or sets the client id of the Azure AD application.
   - id: ClientSecret
     valueType: String
     description: Gets or sets the client secret of the application.
