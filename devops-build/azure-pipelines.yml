@@ -6,8 +6,9 @@ trigger:
     include:
       - 'r*'
   branches:
-    exclude:
-      - dev
+    include:
+      - dev/*
+      - main
 
 variables:
   - group: GitSSHGroup
