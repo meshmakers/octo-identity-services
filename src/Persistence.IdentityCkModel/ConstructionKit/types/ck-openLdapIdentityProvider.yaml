@@ -6,11 +6,11 @@ types:
     isAbstract: false
     attributes:
       - id: System.Identity/Host
-        name: HostAddress
+        name: Host
       - id: System.Identity/UseTls
         name: UseTls
       - id: System.Identity/Port
-        name: HostPort
+        name: Port
       - id: System.Identity/UserBaseDn
         name: UserBaseDn
       - id: System.Identity/UserNameAttribute

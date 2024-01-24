@@ -98,7 +98,7 @@ public class IdentityProvidersController : ControllerBase
         var identityProvider = _mapper.Map<RtIdentityProvider>(identityProviderDto);
 
         await HandleWriteExceptionAsync(async () => await _identityProviderStore.StoreAsync(identityProvider));
-        await ClearCacheAsync();
+        await SendIdentityProviderUpdate();
         return _mapper.Map<IdentityProviderDto>(identityProvider);
     }
 
@@ -119,7 +119,7 @@ public class IdentityProvidersController : ControllerBase
         }
 
         await _identityProviderStore.RemoveAsync(rtId);
-        await ClearCacheAsync();
+        await SendIdentityProviderUpdate();
         return Ok();
     }
 
@@ -152,7 +152,7 @@ public class IdentityProvidersController : ControllerBase
         identityProvider.RtId = rtId;
 
         await HandleWriteExceptionAsync(async () => await _identityProviderStore.StoreAsync(identityProvider));
-        await ClearCacheAsync();
+        await SendIdentityProviderUpdate();
         return Ok(identityProviderDto);
     }
 
@@ -170,7 +170,7 @@ public class IdentityProvidersController : ControllerBase
         }
     }
 
-    private Task ClearCacheAsync()
+    private Task SendIdentityProviderUpdate()
     {
         return _distributionEventHubService.PublishAsync(new IdentityProviderUpdate(_identityProviderStore.TenantId));
     }
