@@ -2,9 +2,6 @@ name: $(MajorVersion).$(MinorVersion).$(date:yyMM).$(DayOfMonth)$(rev:rrr)
 
 trigger:
   batch: true
-  tags:
-    include:
-      - 'r*'
   branches:
     include:
       - dev/*

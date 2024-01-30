@@ -7,15 +7,9 @@
         <OctoCompileCkModel Condition="'$(Configuration)'=='Release'">false</OctoCompileCkModel>
     </PropertyGroup>
 
-    <ItemGroup Condition="'$(Configuration)'!='DebugL'">
-        <PackageReference Include="Meshmakers.Octo.ConstructionKit.SourceGeneration" OutputItemType="Analyzer" ReferenceOutputAssembly="false" Version="3.0.36" PrivateAssets="all" />
-        <PackageReference Include="Meshmakers.Octo.ConstructionKit.MsBuildTasks" Version="3.0.36" PrivateAssets="all" />
-        <PackageReference Include="Meshmakers.Octo.Runtime.Contracts" Version="3.0.36" />
-    </ItemGroup>
-
-    <ItemGroup Condition="'$(Configuration)'=='DebugL'">
-        <PackageReference Include="Meshmakers.Octo.ConstructionKit.SourceGeneration" OutputItemType="Analyzer" ReferenceOutputAssembly="false" Version="999.0.0" PrivateAssets="all" />
-        <PackageReference Include="Meshmakers.Octo.ConstructionKit.MsBuildTasks" Version="999.0.0" PrivateAssets="all" />
-        <PackageReference Include="Meshmakers.Octo.Runtime.Contracts" Version="999.0.0" />
+    <ItemGroup>
+        <PackageReference Include="Meshmakers.Octo.ConstructionKit.SourceGeneration" OutputItemType="Analyzer" ReferenceOutputAssembly="false" Version="$(OctoVersion)" PrivateAssets="all" />
+        <PackageReference Include="Meshmakers.Octo.ConstructionKit.MsBuildTasks" Version="$(OctoVersion)" PrivateAssets="all" />
+        <PackageReference Include="Meshmakers.Octo.Runtime.Contracts" Version="$(OctoVersion)" />
     </ItemGroup>
 </Project>
