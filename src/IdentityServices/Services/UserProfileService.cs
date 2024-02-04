@@ -29,7 +29,7 @@ public class UserProfileService : ProfileService<RtUser>
     /// <returns></returns>
     protected override async Task<ClaimsPrincipal> GetUserClaimsAsync(RtUser user)
     {
-        var principal = await base.GetUserClaimsAsync(user)!;
+        var principal = await base.GetUserClaimsAsync(user);
         var identity = principal.Identities.First();
 
         if (!string.IsNullOrEmpty(user.LastName))

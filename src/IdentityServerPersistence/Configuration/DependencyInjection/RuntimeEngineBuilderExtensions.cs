@@ -1,9 +1,11 @@
 using Duende.IdentityServer.Models;
+using IdentityServerPersistence.AutoMap;
 using IdentityServerPersistence.Configuration.DependencyInjection;
 using IdentityServerPersistence.Services;
 using IdentityServerPersistence.SystemStores;
 using Meshmakers.Octo.Common.DistributionEventHub.Configuration;
 using Meshmakers.Octo.Runtime.Contracts.MongoDb.Configuration;
+using Meshmakers.Octo.Runtime.Contracts.RepositoryEntities;
 using Meshmakers.Octo.Runtime.Engine.Configuration.DependencyInjection;
 using Meshmakers.Octo.Services.Common.Cors;
 using Meshmakers.Octo.Services.Infrastructure.Services;
@@ -11,7 +13,6 @@ using Microsoft.AspNetCore.Cors.Infrastructure;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Identity;
 using Persistence.IdentityCkModel.ConstructionKit.Generated.System.Identity.v1;
-// ReSharper disable once CheckNamespace
 
 // ReSharper disable once CheckNamespace
 namespace Microsoft.Extensions.DependencyInjection;
@@ -48,8 +49,12 @@ public static class RuntimeEngineBuilderExtensions
         builder.Services.AddSingleton<CorsPolicyProvider>();
         builder.Services.AddSingleton<ICorsPolicyProvider>(provider => provider.GetRequiredService<CorsPolicyProvider>());
 
+        builder.Services.AddSingleton<AttributeStringValueListConverter>();
         builder.Services.AddAutoMapper(cfg =>
         {
+            cfg.CreateMap<ICollection<string>, IAttributeValueList<string>>()
+                .ConvertUsing<AttributeStringValueListConverter>();
+
             cfg.CreateMap<RtClient, Client>();
             cfg.CreateMap<RtPersistedGrant, PersistedGrant>()
                 .ForMember(dest => dest.Type, opt => opt.MapFrom(src => src.GrantType))
@@ -58,10 +63,12 @@ public static class RuntimeEngineBuilderExtensions
                 .ForMember(dest => dest.Expiration, opt => opt.MapFrom(src => src.ExpirationDateTime));
             cfg.CreateMap<RtIdentityResource, IdentityResource>()
                 .ForMember(dest => dest.Emphasize, opt => opt.MapFrom(src => src.IsEmphasized))
-                .ForMember(dest => dest.Required, opt => opt.MapFrom(src => src.IsRequired));
+                .ForMember(dest => dest.Required, opt => opt.MapFrom(src => src.IsRequired))
+                .ForMember(dest => dest.UserClaims, opt => opt.MapFrom(src => src.Claims));
             cfg.CreateMap<IdentityResource, RtIdentityResource>()
                 .ForMember(dest => dest.IsEmphasized, opt => opt.MapFrom(src => src.Emphasize))
-                .ForMember(dest => dest.IsRequired, opt => opt.MapFrom(src => src.Required));
+                .ForMember(dest => dest.IsRequired, opt => opt.MapFrom(src => src.Required))
+                .ForMember(dest => dest.Claims, opt => opt.MapFrom(src => src.UserClaims));
 
             cfg.CreateMap<RtSecretRecord, Secret>();
             cfg.CreateMap<PersistedGrant, RtPersistedGrant>()
@@ -71,13 +78,20 @@ public static class RuntimeEngineBuilderExtensions
                 .ForMember(dest => dest.CreationDateTime, opt => opt.MapFrom(src => src.CreationTime))
                 .ForMember(dest => dest.ExpirationDateTime, opt => opt.MapFrom(src => src.Expiration));
 
-            cfg.CreateMap<RtApiResource, ApiResource>();
+            cfg.CreateMap<RtApiResource, ApiResource>()
+                .ForMember(dest => dest.UserClaims, opt => opt.MapFrom(src => src.Claims));
+
+            cfg.CreateMap<ApiResource, RtApiResource>()
+                .ForMember(dest => dest.Claims, opt => opt.MapFrom(src => src.UserClaims));
+
             cfg.CreateMap<RtApiScope, ApiScope>()
                 .ForMember(dest => dest.Emphasize, opt => opt.MapFrom(src => src.IsEmphasized))
-                .ForMember(dest => dest.Required, opt => opt.MapFrom(src => src.IsRequired));
+                .ForMember(dest => dest.Required, opt => opt.MapFrom(src => src.IsRequired))
+                .ForMember(dest => dest.UserClaims, opt => opt.MapFrom(src => src.Claims));
             cfg.CreateMap<ApiScope, RtApiScope>()
                 .ForMember(dest => dest.IsEmphasized, opt => opt.MapFrom(src => src.Emphasize))
-                .ForMember(dest => dest.IsRequired, opt => opt.MapFrom(src => src.Required));
+                .ForMember(dest => dest.IsRequired, opt => opt.MapFrom(src => src.Required))
+                .ForMember(dest => dest.Claims, opt => opt.MapFrom(src => src.UserClaims));
         });
 
         AddIdentity(builder.Services, setupAction);
