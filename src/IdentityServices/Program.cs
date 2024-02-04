@@ -40,7 +40,12 @@ try
 {
     logger.Debug("init main");
 
-    var builder = WebApplication.CreateBuilder(args);
+    var builder = WebApplication.CreateBuilder(new WebApplicationOptions
+    {
+        Args = args,
+        ContentRootPath = Directory.GetCurrentDirectory(),
+        WebRootPath = "wwwroot",
+    });
 
     // NLog: Setup NLog for Dependency injection
     builder.Logging.ClearProviders();
@@ -200,7 +205,7 @@ try
         // The default HSTS value is 30 days. You may want to change this for production scenarios, see https://aka.ms/aspnetcore-hsts.
         app.UseHsts();
     }
-    
+
     // Because we are behind an ingress the tls connection is terminated at the ingress itself,
     // the cluster is itself secure and so we reduce complexity by running http, but the discovery
     // documents should always show https.
