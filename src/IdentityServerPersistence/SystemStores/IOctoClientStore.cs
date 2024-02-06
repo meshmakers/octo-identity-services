@@ -1,10 +1,9 @@
 ﻿using Duende.IdentityServer.Stores;
-using Meshmakers.Octo.Services.Common.Cors;
 using Persistence.IdentityCkModel.ConstructionKit.Generated.System.Identity.v1;
 
 namespace IdentityServerPersistence.SystemStores;
 
-public interface IOctoClientStore : IClientStore, IKnownOriginsProvider
+public interface IOctoClientStore : IClientStore
 {
     public string TenantId { get; }
     

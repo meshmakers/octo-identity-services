@@ -10,7 +10,6 @@ using Meshmakers.Octo.Runtime.Engine.Configuration.DependencyInjection;
 using Meshmakers.Octo.Services.Common.Cors;
 using Meshmakers.Octo.Services.Infrastructure.Services;
 using Microsoft.AspNetCore.Cors.Infrastructure;
-using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Identity;
 using Persistence.IdentityCkModel.ConstructionKit.Generated.System.Identity.v1;
 
@@ -38,10 +37,8 @@ public static class RuntimeEngineBuilderExtensions
 
         // Add services of Identity module
         builder.Services.AddTransient<IDefaultConfigurationCreatorService, DefaultConfigurationCreatorService>();
-        builder.Services.AddScoped<IMultiTenancyResolverService, MultiTenancyResolverService>();
-        builder.Services.AddSingleton<IHttpContextAccessor, HttpContextAccessor>();
+
         builder.Services.AddScoped<IOctoClientStore, ClientStore>();
-        builder.Services.AddScoped<IKnownOriginsProvider>(provider => provider.GetRequiredService<IOctoClientStore>());
         builder.Services.AddScoped<IOctoResourceStore, ResourceStore>();
         builder.Services.AddScoped<IOctoPersistentGrantStore, PersistentGrantStore>();
         builder.Services.AddScoped<IOctoIdentityProviderStore, IdentityProviderStore>();

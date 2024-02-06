@@ -111,12 +111,7 @@ public class ClientStore : IOctoClientStore
         await session.CommitTransactionAsync();
     }
 
-    public async Task<IReadOnlyCollection<string>> GetKnownOriginsAsync()
-    {
-        var clients = await GetClients();
-        var origins = clients.SelectMany(x => x.AllowedCorsOrigins);
-        return new List<string>(origins);
-    }
+
 
     private async Task<RtClient?> GetClientByClientId(IOctoSession session, string clientId)
     {
