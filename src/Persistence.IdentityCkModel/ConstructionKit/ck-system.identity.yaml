@@ -1,9 +1,34 @@
 $schema: https://schemas.meshmakers.cloud/construction-kit-compiled.schema.json
 types:
-- typeId: GoogleIdentityProvider
+- typeId: ApiResource
+  derivedFromCkTypeId: System.Identity-1.0.0/Resource-1.0.0
+  isFinal: true
+  attributes:
+  - id: System.Identity-1.0.0/RequireResourceIndicator-1.0.0
+    name: RequireResourceIndicator
+  - id: System.Identity-1.0.0/Secrets-1.0.0
+    name: ApiSecrets
+  - id: System.Identity-1.0.0/Scopes-1.0.0
+    name: Scopes
+  - id: System.Identity-1.0.0/AllowedAccessTokenSigningAlgorithms-1.0.0
+    name: AllowedAccessTokenSigningAlgorithms
+- typeId: ApiScope
+  derivedFromCkTypeId: System.Identity-1.0.0/Resource-1.0.0
+  isFinal: true
+  attributes:
+  - id: System.Identity-1.0.0/IsEmphasized-1.0.0
+    name: IsEmphasized
+  - id: System.Identity-1.0.0/IsRequired-1.0.0
+    name: IsRequired
+- typeId: AzureEntraIdIdentityProvider
   derivedFromCkTypeId: System.Identity-1.0.0/IdentityProvider-1.0.0
   isFinal: true
   attributes:
+  - id: System-1.0.0/TenantId-1.0.0
+    name: TenantId
+  - id: System.Identity-1.0.0/Authority-1.0.0
+    name: Authority
+    isOptional: true
   - id: System.Identity-1.0.0/ClientId-1.0.0
     name: ClientId
   - id: System.Identity-1.0.0/ClientSecret-1.0.0
@@ -135,18 +160,14 @@ types:
   - id: System.Identity-1.0.0/InitiateLoginUri-1.0.0
     name: InitiateLoginUri
     isOptional: true
-- typeId: ApiResource
-  derivedFromCkTypeId: System.Identity-1.0.0/Resource-1.0.0
+- typeId: GoogleIdentityProvider
+  derivedFromCkTypeId: System.Identity-1.0.0/IdentityProvider-1.0.0
   isFinal: true
   attributes:
-  - id: System.Identity-1.0.0/RequireResourceIndicator-1.0.0
-    name: RequireResourceIndicator
-  - id: System.Identity-1.0.0/Secrets-1.0.0
-    name: ApiSecrets
-  - id: System.Identity-1.0.0/Scopes-1.0.0
-    name: Scopes
-  - id: System.Identity-1.0.0/AllowedAccessTokenSigningAlgorithms-1.0.0
-    name: AllowedAccessTokenSigningAlgorithms
+  - id: System.Identity-1.0.0/ClientId-1.0.0
+    name: ClientId
+  - id: System.Identity-1.0.0/ClientSecret-1.0.0
+    name: ClientSecret
 - isCollectionRoot: true
   typeId: IdentityProvider
   derivedFromCkTypeId: System-1.0.0/Entity-1.0.0
@@ -162,14 +183,6 @@ types:
   - id: System-1.0.0/Description-1.0.0
     name: Description
     isOptional: true
-- typeId: ApiScope
-  derivedFromCkTypeId: System.Identity-1.0.0/Resource-1.0.0
-  isFinal: true
-  attributes:
-  - id: System.Identity-1.0.0/IsEmphasized-1.0.0
-    name: IsEmphasized
-  - id: System.Identity-1.0.0/IsRequired-1.0.0
-    name: IsRequired
 - typeId: IdentityResource
   derivedFromCkTypeId: System.Identity-1.0.0/Resource-1.0.0
   isFinal: true
@@ -178,37 +191,60 @@ types:
     name: IsEmphasized
   - id: System.Identity-1.0.0/IsRequired-1.0.0
     name: IsRequired
+- typeId: MicrosoftAdIdentityProvider
+  derivedFromCkTypeId: System.Identity-1.0.0/IdentityProvider-1.0.0
+  isFinal: true
+  attributes:
+  - id: System.Identity-1.0.0/Host-1.0.0
+    name: Host
+  - id: System.Identity-1.0.0/UseTls-1.0.0
+    name: UseTls
+  - id: System.Identity-1.0.0/Port-1.0.0
+    name: Port
+- typeId: MicrosoftIdentityProvider
+  derivedFromCkTypeId: System.Identity-1.0.0/IdentityProvider-1.0.0
+  isFinal: true
+  attributes:
+  - id: System.Identity-1.0.0/ClientId-1.0.0
+    name: ClientId
+  - id: System.Identity-1.0.0/ClientSecret-1.0.0
+    name: ClientSecret
+- typeId: OpenLdapIdentityProvider
+  derivedFromCkTypeId: System.Identity-1.0.0/IdentityProvider-1.0.0
+  isFinal: true
+  attributes:
+  - id: System.Identity-1.0.0/Host-1.0.0
+    name: Host
+  - id: System.Identity-1.0.0/UseTls-1.0.0
+    name: UseTls
+  - id: System.Identity-1.0.0/Port-1.0.0
+    name: Port
+  - id: System.Identity-1.0.0/UserBaseDn-1.0.0
+    name: UserBaseDn
+  - id: System.Identity-1.0.0/UserNameAttribute-1.0.0
+    name: UserNameAttribute
 - isCollectionRoot: true
-  typeId: Role
+  typeId: Permission
+  derivedFromCkTypeId: System-1.0.0/Entity-1.0.0
+  isFinal: true
+  attributes:
+  - id: System.Identity-1.0.0/PermissionId-1.0.0
+    name: PermissionId
+  - id: System.Identity-1.0.0/IdentityRoleIds-1.0.0
+    name: IdentityRoleIds
+- isCollectionRoot: true
+  typeId: PermissionRole
   derivedFromCkTypeId: System-1.0.0/Entity-1.0.0
   isFinal: true
   attributes:
   - id: System-1.0.0/Name-1.0.0
     name: Name
-    isOptional: true
-  - id: System.Identity-1.0.0/NormalizedName-1.0.0
-    name: NormalizedName
-    isOptional: true
+  - id: System.Identity-1.0.0/RoleId-1.0.0
+    name: RoleId
   - id: System.Identity-1.0.0/SubjectIds-1.0.0
     name: SubjectIds
   - id: System.Identity-1.0.0/IdentityRoleIds-1.0.0
     name: IdentityRoleIds
-  - id: System.Identity-1.0.0/RoleClaims-1.0.0
-    name: Claims
-    isOptional: true
-- typeId: AzureEntraIdIdentityProvider
-  derivedFromCkTypeId: System.Identity-1.0.0/IdentityProvider-1.0.0
-  isFinal: true
-  attributes:
-  - id: System-1.0.0/TenantId-1.0.0
-    name: TenantId
-  - id: System.Identity-1.0.0/Authority-1.0.0
-    name: Authority
-    isOptional: true
-  - id: System.Identity-1.0.0/ClientId-1.0.0
-    name: ClientId
-  - id: System.Identity-1.0.0/ClientSecret-1.0.0
-    name: ClientSecret
 - isCollectionRoot: true
   typeId: PersistedGrant
   derivedFromCkTypeId: System-1.0.0/Entity-1.0.0
@@ -237,50 +273,43 @@ types:
     isOptional: true
   - id: System.Identity-1.0.0/Data-1.0.0
     name: Data
-- typeId: OpenLdapIdentityProvider
-  derivedFromCkTypeId: System.Identity-1.0.0/IdentityProvider-1.0.0
-  isFinal: true
-  attributes:
-  - id: System.Identity-1.0.0/Host-1.0.0
-    name: Host
-  - id: System.Identity-1.0.0/UseTls-1.0.0
-    name: UseTls
-  - id: System.Identity-1.0.0/Port-1.0.0
-    name: Port
-  - id: System.Identity-1.0.0/UserBaseDn-1.0.0
-    name: UserBaseDn
-  - id: System.Identity-1.0.0/UserNameAttribute-1.0.0
-    name: UserNameAttribute
 - isCollectionRoot: true
-  typeId: PermissionRole
+  typeId: Resource
+  derivedFromCkTypeId: System-1.0.0/Entity-1.0.0
+  isAbstract: true
+  attributes:
+  - id: System-1.0.0/Enabled-1.0.0
+    name: Enabled
+  - id: System-1.0.0/Name-1.0.0
+    name: Name
+  - id: System-1.0.0/DisplayName-1.0.0
+    name: DisplayName
+    isOptional: true
+  - id: System-1.0.0/Description-1.0.0
+    name: Description
+    isOptional: true
+  - id: System.Identity-1.0.0/ResourceClaims-1.0.0
+    name: Claims
+  - id: System.Identity-1.0.0/ShowInDiscoveryDocument-1.0.0
+    name: ShowInDiscoveryDocument
+- isCollectionRoot: true
+  typeId: Role
   derivedFromCkTypeId: System-1.0.0/Entity-1.0.0
   isFinal: true
   attributes:
   - id: System-1.0.0/Name-1.0.0
     name: Name
-  - id: System.Identity-1.0.0/RoleId-1.0.0
-    name: RoleId
+    isOptional: true
+  - id: System.Identity-1.0.0/NormalizedName-1.0.0
+    name: NormalizedName
+    isOptional: true
   - id: System.Identity-1.0.0/SubjectIds-1.0.0
     name: SubjectIds
   - id: System.Identity-1.0.0/IdentityRoleIds-1.0.0
     name: IdentityRoleIds
-- isCollectionRoot: true
-  typeId: Permission
-  derivedFromCkTypeId: System-1.0.0/Entity-1.0.0
-  isFinal: true
-  attributes:
-  - id: System.Identity-1.0.0/PermissionId-1.0.0
-    name: PermissionId
-  - id: System.Identity-1.0.0/IdentityRoleIds-1.0.0
-    name: IdentityRoleIds
-- typeId: MicrosoftIdentityProvider
-  derivedFromCkTypeId: System.Identity-1.0.0/IdentityProvider-1.0.0
-  isFinal: true
-  attributes:
-  - id: System.Identity-1.0.0/ClientId-1.0.0
-    name: ClientId
-  - id: System.Identity-1.0.0/ClientSecret-1.0.0
-    name: ClientSecret
+  - id: System.Identity-1.0.0/RoleClaims-1.0.0
+    name: Claims
+    isOptional: true
 - isCollectionRoot: true
   typeId: User
   derivedFromCkTypeId: System-1.0.0/Entity-1.0.0
@@ -349,289 +378,64 @@ types:
   - id: System.Identity-1.0.0/UserTokens-1.0.0
     name: UserTokens
     isOptional: true
-- typeId: MicrosoftAdIdentityProvider
-  derivedFromCkTypeId: System.Identity-1.0.0/IdentityProvider-1.0.0
-  isFinal: true
-  attributes:
-  - id: System.Identity-1.0.0/Host-1.0.0
-    name: Host
-  - id: System.Identity-1.0.0/UseTls-1.0.0
-    name: UseTls
-  - id: System.Identity-1.0.0/Port-1.0.0
-    name: Port
-- isCollectionRoot: true
-  typeId: Resource
-  derivedFromCkTypeId: System-1.0.0/Entity-1.0.0
-  isAbstract: true
-  attributes:
-  - id: System-1.0.0/Enabled-1.0.0
-    name: Enabled
-  - id: System-1.0.0/Name-1.0.0
-    name: Name
-  - id: System-1.0.0/DisplayName-1.0.0
-    name: DisplayName
-    isOptional: true
-  - id: System-1.0.0/Description-1.0.0
-    name: Description
-    isOptional: true
-  - id: System.Identity-1.0.0/ResourceClaims-1.0.0
-    name: Claims
-  - id: System.Identity-1.0.0/ShowInDiscoveryDocument-1.0.0
-    name: ShowInDiscoveryDocument
 associationRoles: []
 attributes:
-- id: UserName
-  valueType: String
-  description: The user name.
-- id: NormalizedUserName
-  valueType: String
-  description: The normalized user name.
-- id: NormalizedName
-  valueType: String
-  description: The normalized name.
-- id: Email
-  valueType: String
-  description: The email address of the user.
-- id: NormalizedEmail
-  valueType: String
-  description: The normalized email address of the user.
-- id: EmailConfirmed
-  valueType: Boolean
+- id: AbsoluteRefreshTokenLifetime
+  valueType: Int
   defaultValues:
-  - false
-  description: Indicates if the email address of the user has been confirmed.
-- id: PasswordHash
-  valueType: String
-  description: The salted and hashed representation of the password for this user.
-- id: SecurityStamp
-  valueType: String
-  description: A random value that should change whenever a users credentials have been compromised.
-- id: PhoneNumber
-  valueType: String
-  description: The phone number of the user.
-- id: PhoneNumberConfirmed
-  valueType: Boolean
-  defaultValues:
-  - false
-  description: Indicates if the phone number of the user has been confirmed.
-- id: TwoFactorEnabled
-  valueType: Boolean
-  defaultValues:
-  - false
-  description: Indicates if two factor authentication is enabled for the user.
-- id: LockoutEnd
-  valueType: DateTimeOffset
-  description: The date and time, in UTC, when any user lockout ends.
-- id: LockoutEnabled
-  valueType: Boolean
-  defaultValues:
-  - false
-  description: Flag indicating if the user could be locked out.
+  - 2592000
+  description: Maximum lifetime of a refresh token in seconds. Defaults to 2592000 seconds / 30 days
 - id: AccessFailedCount
   valueType: Int
   defaultValues:
   - 0
   description: The number of failed login attempts for the current user.
-- id: ResetPasswordOnLogin
-  valueType: Boolean
+- id: AccessTokenLifetime
+  valueType: Int
   defaultValues:
-  - true
-  description: Force the user to change the password after the next login.
-- id: FirstName
-  valueType: String
-  description: The first name of the user.
-- id: LastName
-  valueType: String
-  description: The last name of the user.
-- id: RoleIds
-  valueType: StringArray
-  description: The id of roles the user is a member of.
-- id: ClaimType
-  valueType: String
-  description: The type of the claim.
-- id: ClaimValue
-  valueType: String
-  description: The value of the claim.
-- id: ClaimValueType
-  valueType: String
-  description: The value type of the claim.
-- id: UserId
-  valueType: String
-- id: RoleId
-  valueType: String
-- id: LoginProvider
-  valueType: String
-- id: ProviderKey
-  valueType: String
-- id: ProviderDisplayName
-  valueType: String
-- id: UserClaims
-  valueType: RecordArray
-  valueCkRecordId: System.Identity-1.0.0/UserClaim-1.0.0
-  description: The claims of the user.
-- id: RoleClaims
-  valueType: RecordArray
-  valueCkRecordId: System.Identity-1.0.0/RoleClaim-1.0.0
-  description: The claims of a role.
-- id: UserLogins
-  valueType: RecordArray
-  valueCkRecordId: System.Identity-1.0.0/UserLogin-1.0.0
-  description: The existing logins of the user.
-- id: UserTokens
-  valueType: RecordArray
-  valueCkRecordId: System.Identity-1.0.0/UserToken-1.0.0
-  description: The tokens of the user.
-- id: SubjectIds
-  valueType: StringArray
-  defaultValues: []
-- id: IdentityRoleIds
-  valueType: StringArray
-  defaultValues: []
-- id: GrantKey
-  valueType: String
-- id: GrantType
-  valueType: String
-- id: SubjectId
-  valueType: String
-- id: SessionId
-  valueType: String
-- id: ClientId
-  valueType: String
-- id: CreationDateTime
-  valueType: DateTime
-- id: ExpirationDateTime
-  valueType: DateTime
-- id: ConsumedDateTime
-  valueType: DateTime
-- id: Data
-  valueType: String
-- id: PermissionId
-  valueType: String
-- id: ResourceClaims
-  valueType: StringArray
-  defaultValues: []
-- id: IsRequired
-  valueType: Boolean
+  - 3600
+  description: Lifetime of access token in seconds (defaults to 3600 seconds / 1 hour)
+- id: AccessTokenType
+  valueType: Enum
+  valueCkEnumId: System.Identity-1.0.0/TokenType-1.0.0
   defaultValues:
-  - false
-  description: Specifies whether the user can de-select the scope on the consent screen (if the consent screen wants to implement such a feature). Defaults to false.
-- id: IsEmphasized
-  valueType: Boolean
-  defaultValues:
-  - false
-  description: Specifies whether the consent screen will emphasize this scope (if the consent screen wants to implement such a feature). Defaults to false.
-- id: Value
-  valueType: String
-- id: SecretType
-  valueType: String
-  defaultValues:
-  - SharedSecret
-- id: RequireResourceIndicator
-  valueType: Boolean
-  defaultValues:
-  - false
-- id: Secrets
-  valueType: RecordArray
-  valueCkRecordId: System.Identity-1.0.0/Secret-1.0.0
-  defaultValues: []
-- id: Scopes
-  valueType: StringArray
-  description: Models the scopes this API resource allows.
-- id: AllowedAccessTokenSigningAlgorithms
-  valueType: StringArray
-  defaultValues: []
-  description: Signing algorithm for access token. If empty, will use the server default signing algorithm.
-- id: ProtocolType
-  valueType: String
-  defaultValues:
-  - oidc
-- id: RequireClientSecret
-  valueType: Boolean
-  defaultValues:
-  - true
-- id: ClientUri
-  valueType: String
-  description: URI to further information about client (used on consent screen)
-- id: LogoUri
-  valueType: String
-  description: URI to client logo (used on consent screen)
-- id: RequireConsent
-  valueType: Boolean
-  defaultValues:
-  - false
-  description: Specifies whether a consent screen is required. Defaults to false.
-- id: AllowRememberConsent
-  valueType: Boolean
-  defaultValues:
-  - true
-  description: Specifies whether user can choose to store consent decisions (defaults to true)
-- id: AllowedGrantTypes
-  valueType: StringArray
-  description: Specifies the allowed grant types (legal combinations of AuthorizationCode, Implicit, Hybrid, ResourceOwner, ClientCredentials). Defaults to Implicit.
-- id: RequirePkce
-  valueType: Boolean
-  defaultValues:
-  - true
-  description: Specifies whether a proof key is required for authorization code based token requests (defaults to true).
-- id: AllowPlainTextPkce
-  valueType: Boolean
-  defaultValues:
-  - false
-  description: Specifies whether a proof key can be sent using plain method (not recommended and defaults to false).
-- id: RequireRequestObject
-  valueType: Boolean
-  defaultValues:
-  - false
-  description: Specifies whether the client must use a request object on authorize requests (defaults to false).
+  - 0
+  description: Specifies whether the access token is a reference token or a self contained JWT token (defaults to Jwt).
 - id: AllowAccessTokensViaBrowser
   valueType: Boolean
   defaultValues:
   - false
   description: Controls whether access tokens are transmitted via the browser for this client
-- id: RequireDPoP
-  valueType: Boolean
-  defaultValues:
-  - false
-  description: Specifies whether a DPoP (Demonstrating Proof-of-Possession) token is required to be used by this client (defaults to false)
-- id: DPoPValidationMode
-  valueType: Int
-  defaultValues:
-  - 1
-  description: Enum setting to control validation for the DPoP proof token expiration.
-- id: DPoPClockSkew
-  valueType: TimeSpan
-  defaultValues:
-  - 00:05:00
-  description: Clock skew used in validating the client's DPoP proof token 'iat' claim value. Defaults to 5 minutes.
-- id: RedirectUris
-  valueType: StringArray
-  defaultValues: []
-  description: Specifies allowed URIs to return tokens or authorization codes to.
-- id: PostLogoutRedirectUris
-  valueType: StringArray
-  defaultValues: []
-  description: Specifies allowed URIs to redirect to after logout
-- id: FrontChannelLogoutUri
-  valueType: String
-  description: Specifies logout URI at client for HTTP front-channel based logout.
-- id: FrontChannelLogoutSessionRequired
-  valueType: Boolean
-  defaultValues:
-  - true
-  description: Specifies if the user's session id should be sent to the FrontChannelLogoutUri. Defaults to true.
-- id: BackChannelLogoutUri
-  valueType: String
-  description: Specifies logout URI at client for HTTP back-channel based logout.
-- id: BackChannelLogoutSessionRequired
-  valueType: Boolean
-  defaultValues:
-  - true
-  description: Specifies if the user's session id should be sent to the BackChannelLogoutUri. Defaults to true.
 - id: AllowOfflineAccess
   valueType: Boolean
   defaultValues:
   - false
   description: Specifies whether this client can request refresh tokens (defaults to false)
+- id: AllowPlainTextPkce
+  valueType: Boolean
+  defaultValues:
+  - false
+  description: Specifies whether a proof key can be sent using plain method (not recommended and defaults to false).
+- id: AllowRememberConsent
+  valueType: Boolean
+  defaultValues:
+  - true
+  description: Specifies whether user can choose to store consent decisions (defaults to true)
+- id: AllowedAccessTokenSigningAlgorithms
+  valueType: StringArray
+  defaultValues: []
+  description: Signing algorithm for access token. If empty, will use the server default signing algorithm.
+- id: AllowedCorsOrigins
+  valueType: StringArray
+  defaultValues: []
+  description: Gets or sets the allowed CORS origins for JavaScript clients.
+- id: AllowedGrantTypes
+  valueType: StringArray
+  description: Specifies the allowed grant types (legal combinations of AuthorizationCode, Implicit, Hybrid, ResourceOwner, ClientCredentials). Defaults to Implicit.
+- id: AllowedIdentityTokenSigningAlgorithms
+  valueType: StringArray
+  defaultValues: []
+  description: Signing algorithm for identity token. If empty, will use the server default signing algorithm.
 - id: AllowedScopes
   valueType: StringArray
   defaultValues: []
@@ -641,150 +445,362 @@ attributes:
   defaultValues:
   - false
   description: When requesting both an id token and access token, should the user claims always be added to the id token instead of requiring the client to use the userinfo endpoint.
-- id: IdentityTokenLifetime
-  valueType: Int
+- id: AlwaysSendClientClaims
+  valueType: Boolean
   defaultValues:
-  - 300
-  description: Lifetime of identity token in seconds (defaults to 300 seconds / 5 minutes)
-- id: AllowedIdentityTokenSigningAlgorithms
-  valueType: StringArray
-  defaultValues: []
-  description: Signing algorithm for identity token. If empty, will use the server default signing algorithm.
-- id: AccessTokenLifetime
-  valueType: Int
-  defaultValues:
-  - 3600
-  description: Lifetime of access token in seconds (defaults to 3600 seconds / 1 hour)
+  - false
+  description: Gets or sets a value indicating whether client claims should be always included in the access tokens - or only for client credentials flow.
+- id: Authority
+  valueType: String
+  description: Gets or sets the URI of the provider, or discovery endpoint for OpenID Connect discovery.
 - id: AuthorizationCodeLifetime
   valueType: Int
   defaultValues:
   - 300
   description: Lifetime of authorization code in seconds (defaults to 300 seconds / 5 minutes)
-- id: AbsoluteRefreshTokenLifetime
-  valueType: Int
+- id: BackChannelLogoutSessionRequired
+  valueType: Boolean
   defaultValues:
-  - 2592000
-  description: Maximum lifetime of a refresh token in seconds. Defaults to 2592000 seconds / 30 days
-- id: SlidingRefreshTokenLifetime
+  - true
+  description: Specifies if the user's session id should be sent to the BackChannelLogoutUri. Defaults to true.
+- id: BackChannelLogoutUri
+  valueType: String
+  description: Specifies logout URI at client for HTTP back-channel based logout.
+- id: CibaLifetime
   valueType: Int
+  description: The backchannel authentication request lifetime in seconds.
+- id: ClaimType
+  valueType: String
+  description: The type of the claim.
+- id: ClaimValue
+  valueType: String
+  description: The value of the claim.
+- id: ClaimValueType
+  valueType: String
+  description: The value type of the claim.
+- id: ClientClaims
+  valueType: RecordArray
+  valueCkRecordId: System.Identity-1.0.0/ClientClaim-1.0.0
+  defaultValues: []
+  description: Gets or sets the client claims to be sent to the user info endpoint.
+- id: ClientClaimsPrefix
+  valueType: String
   defaultValues:
-  - 1296000
-  description: Sliding lifetime of a refresh token in seconds. Defaults to 1296000 seconds / 15 days
+  - client_
+  description: Gets or sets a value to prefix it on client claim types. Defaults to client_.
+- id: ClientId
+  valueType: String
+- id: ClientSecret
+  valueType: String
+  defaultValues: []
+  description: Gets or sets the client secret of the application.
+- id: ClientUri
+  valueType: String
+  description: URI to further information about client (used on consent screen)
 - id: ConsentLifetime
   valueType: Int
   description: Lifetime of a user consent in seconds. Defaults to null (no expiration)
-- id: RefreshTokenUsage
-  valueType: Enum
-  valueCkEnumId: System.Identity-1.0.0/TokenUsage-1.0.0
-  description: Gets or sets a value indicating whether the refresh token should be updated on a refresh token request.
-- id: UpdateAccessTokenClaimsOnRefresh
+- id: ConsumedDateTime
+  valueType: DateTime
+- id: CoordinateLifetimeWithUserSession
+  valueType: Boolean
+  description: When enabled, the client's token lifetimes (e.g. refresh tokens) will be tied to the user's session lifetime.
+- id: CreationDateTime
+  valueType: DateTime
+- id: DPoPClockSkew
+  valueType: TimeSpan
+  defaultValues:
+  - 00:05:00
+  description: Clock skew used in validating the client's DPoP proof token 'iat' claim value. Defaults to 5 minutes.
+- id: DPoPValidationMode
+  valueType: Int
+  defaultValues:
+  - 1
+  description: Enum setting to control validation for the DPoP proof token expiration.
+- id: Data
+  valueType: String
+- id: DeviceCodeLifetime
+  valueType: Int
+  defaultValues:
+  - 300
+  description: Specifies the lifetime (in seconds) of the device code. Defaults to 300 seconds / 5 minutes.
+- id: Email
+  valueType: String
+  description: The email address of the user.
+- id: EmailConfirmed
   valueType: Boolean
   defaultValues:
   - false
-  description: Indicates whether the access token (and its claims) should be updated on a refresh token request.
+  description: Indicates if the email address of the user has been confirmed.
+- id: EnableLocalLogin
+  valueType: Boolean
+  defaultValues:
+  - true
+  description: Specifies if this client can use local accounts. Defaults to true.
+- id: ExpirationDateTime
+  valueType: DateTime
+- id: FirstName
+  valueType: String
+  description: The first name of the user.
+- id: FrontChannelLogoutSessionRequired
+  valueType: Boolean
+  defaultValues:
+  - true
+  description: Specifies if the user's session id should be sent to the FrontChannelLogoutUri. Defaults to true.
+- id: FrontChannelLogoutUri
+  valueType: String
+  description: Specifies logout URI at client for HTTP front-channel based logout.
+- id: GrantKey
+  valueType: String
+- id: GrantType
+  valueType: String
+- id: Host
+  valueType: String
+  description: Gets or sets the host address of the identity provider.
+- id: IdentityProviderRestrictions
+  valueType: StringArray
+  defaultValues: []
+  description: Specifies which external IdPs can be used with this client (if list is empty all IdPs are allowed). Defaults to empty.
+- id: IdentityRoleIds
+  valueType: StringArray
+  defaultValues: []
+- id: IdentityTokenLifetime
+  valueType: Int
+  defaultValues:
+  - 300
+  description: Lifetime of identity token in seconds (defaults to 300 seconds / 5 minutes)
+- id: IncludeJwtId
+  valueType: Boolean
+  defaultValues:
+  - true
+  description: Value indicating whether JWT access tokens should include an identifier. Defaults to true.
+- id: InitiateLoginUri
+  valueType: String
+  description: Gets of sets a URI that can be used to initiate login from the IdentityServer host or a third party.
+- id: IsEmphasized
+  valueType: Boolean
+  defaultValues:
+  - false
+  description: Specifies whether the consent screen will emphasize this scope (if the consent screen wants to implement such a feature). Defaults to false.
+- id: IsRequired
+  valueType: Boolean
+  defaultValues:
+  - false
+  description: Specifies whether the user can de-select the scope on the consent screen (if the consent screen wants to implement such a feature). Defaults to false.
+- id: LastName
+  valueType: String
+  description: The last name of the user.
+- id: LockoutEnabled
+  valueType: Boolean
+  defaultValues:
+  - false
+  description: Flag indicating if the user could be locked out.
+- id: LockoutEnd
+  valueType: DateTimeOffset
+  description: The date and time, in UTC, when any user lockout ends.
+- id: LoginProvider
+  valueType: String
+- id: LogoUri
+  valueType: String
+  description: URI to client logo (used on consent screen)
+- id: NormalizedEmail
+  valueType: String
+  description: The normalized email address of the user.
+- id: NormalizedName
+  valueType: String
+  description: The normalized name.
+- id: NormalizedUserName
+  valueType: String
+  description: The normalized user name.
+- id: PairWiseSubjectSalt
+  valueType: String
+  description: Gets or sets a salt value used in pair-wise subjectId generation for users of this client.
+- id: PasswordHash
+  valueType: String
+  description: The salted and hashed representation of the password for this user.
+- id: PermissionId
+  valueType: String
+- id: PhoneNumber
+  valueType: String
+  description: The phone number of the user.
+- id: PhoneNumberConfirmed
+  valueType: Boolean
+  defaultValues:
+  - false
+  description: Indicates if the phone number of the user has been confirmed.
+- id: PollingInterval
+  valueType: Int
+  description: The backchannel authentication request polling interval in seconds.
+- id: Port
+  valueType: Int
+  defaultValues:
+  - 636
+  description: Gets or sets the host port of the identity provider.
+- id: PostLogoutRedirectUris
+  valueType: StringArray
+  defaultValues: []
+  description: Specifies allowed URIs to redirect to after logout
+- id: ProtocolType
+  valueType: String
+  defaultValues:
+  - oidc
+- id: ProviderDisplayName
+  valueType: String
+- id: ProviderKey
+  valueType: String
+- id: RedirectUris
+  valueType: StringArray
+  defaultValues: []
+  description: Specifies allowed URIs to return tokens or authorization codes to.
 - id: RefreshTokenExpiration
   valueType: Enum
   valueCkEnumId: System.Identity-1.0.0/TokenExpiration-1.0.0
   defaultValues:
   - 1
   description: Gets or sets a value indicating whether the access token (and its claims) should be updated on a refresh token request.
-- id: AccessTokenType
+- id: RefreshTokenUsage
   valueType: Enum
-  valueCkEnumId: System.Identity-1.0.0/TokenType-1.0.0
-  defaultValues:
-  - 0
-  description: Specifies whether the access token is a reference token or a self contained JWT token (defaults to Jwt).
-- id: EnableLocalLogin
+  valueCkEnumId: System.Identity-1.0.0/TokenUsage-1.0.0
+  description: Gets or sets a value indicating whether the refresh token should be updated on a refresh token request.
+- id: RequireClientSecret
   valueType: Boolean
   defaultValues:
   - true
-  description: Specifies if this client can use local accounts. Defaults to true.
-- id: IdentityProviderRestrictions
-  valueType: StringArray
-  defaultValues: []
-  description: Specifies which external IdPs can be used with this client (if list is empty all IdPs are allowed). Defaults to empty.
-- id: IncludeJwtId
-  valueType: Boolean
-  defaultValues:
-  - true
-  description: Value indicating whether JWT access tokens should include an identifier. Defaults to true.
-- id: ClientClaims
-  valueType: RecordArray
-  valueCkRecordId: System.Identity-1.0.0/ClientClaim-1.0.0
-  defaultValues: []
-  description: Gets or sets the client claims to be sent to the user info endpoint.
-- id: AlwaysSendClientClaims
+- id: RequireConsent
   valueType: Boolean
   defaultValues:
   - false
-  description: Gets or sets a value indicating whether client claims should be always included in the access tokens - or only for client credentials flow.
-- id: ClientClaimsPrefix
-  valueType: String
-  defaultValues:
-  - client_
-  description: Gets or sets a value to prefix it on client claim types. Defaults to client_.
-- id: PairWiseSubjectSalt
-  valueType: String
-  description: Gets or sets a salt value used in pair-wise subjectId generation for users of this client.
-- id: UserSsoLifetime
-  valueType: Int
-  description: Lifetime of user's single sign-on session (in seconds). Defaults to null (no expiration).
-- id: UserCodeType
-  valueType: String
-  description: Specifies the user code type for the device flow. Defaults to null.
-- id: DeviceCodeLifetime
-  valueType: Int
-  defaultValues:
-  - 300
-  description: Specifies the lifetime (in seconds) of the device code. Defaults to 300 seconds / 5 minutes.
-- id: CibaLifetime
-  valueType: Int
-  description: The backchannel authentication request lifetime in seconds.
-- id: PollingInterval
-  valueType: Int
-  description: The backchannel authentication request polling interval in seconds.
-- id: CoordinateLifetimeWithUserSession
+  description: Specifies whether a consent screen is required. Defaults to false.
+- id: RequireDPoP
   valueType: Boolean
-  description: When enabled, the client's token lifetimes (e.g. refresh tokens) will be tied to the user's session lifetime.
-- id: AllowedCorsOrigins
+  defaultValues:
+  - false
+  description: Specifies whether a DPoP (Demonstrating Proof-of-Possession) token is required to be used by this client (defaults to false)
+- id: RequirePkce
+  valueType: Boolean
+  defaultValues:
+  - true
+  description: Specifies whether a proof key is required for authorization code based token requests (defaults to true).
+- id: RequireRequestObject
+  valueType: Boolean
+  defaultValues:
+  - false
+  description: Specifies whether the client must use a request object on authorize requests (defaults to false).
+- id: RequireResourceIndicator
+  valueType: Boolean
+  defaultValues:
+  - false
+- id: ResetPasswordOnLogin
+  valueType: Boolean
+  defaultValues:
+  - true
+  description: Force the user to change the password after the next login.
+- id: ResourceClaims
   valueType: StringArray
   defaultValues: []
-  description: Gets or sets the allowed CORS origins for JavaScript clients.
-- id: InitiateLoginUri
+- id: RoleClaims
+  valueType: RecordArray
+  valueCkRecordId: System.Identity-1.0.0/RoleClaim-1.0.0
+  description: The claims of a role.
+- id: RoleId
   valueType: String
-  description: Gets of sets a URI that can be used to initiate login from the IdentityServer host or a third party.
-- id: Authority
+- id: RoleIds
+  valueType: StringArray
+  description: The id of roles the user is a member of.
+- id: Scopes
+  valueType: StringArray
+  description: Models the scopes this API resource allows.
+- id: SecretType
   valueType: String
-  description: Gets or sets the URI of the provider, or discovery endpoint for OpenID Connect discovery.
-- id: ClientSecret
-  valueType: String
+  defaultValues:
+  - SharedSecret
+- id: Secrets
+  valueType: RecordArray
+  valueCkRecordId: System.Identity-1.0.0/Secret-1.0.0
   defaultValues: []
-  description: Gets or sets the client secret of the application.
+- id: SecurityStamp
+  valueType: String
+  description: A random value that should change whenever a users credentials have been compromised.
+- id: SessionId
+  valueType: String
 - id: ShowInDiscoveryDocument
   valueType: Boolean
   defaultValues:
   - true
   description: Gets or sets a value indicating whether the client will be shown in the discovery document. Defaults to true.
-- id: Host
+- id: SlidingRefreshTokenLifetime
+  valueType: Int
+  defaultValues:
+  - 1296000
+  description: Sliding lifetime of a refresh token in seconds. Defaults to 1296000 seconds / 15 days
+- id: SubjectId
   valueType: String
-  description: Gets or sets the host address of the identity provider.
+- id: SubjectIds
+  valueType: StringArray
+  defaultValues: []
+- id: TwoFactorEnabled
+  valueType: Boolean
+  defaultValues:
+  - false
+  description: Indicates if two factor authentication is enabled for the user.
+- id: UpdateAccessTokenClaimsOnRefresh
+  valueType: Boolean
+  defaultValues:
+  - false
+  description: Indicates whether the access token (and its claims) should be updated on a refresh token request.
 - id: UseTls
   valueType: Boolean
   defaultValues:
   - true
   description: Gets or sets if the connection to the identity provider should use TLS. Defaults to true.
-- id: Port
-  valueType: Int
-  defaultValues:
-  - 636
-  description: Gets or sets the host port of the identity provider.
 - id: UserBaseDn
   valueType: String
   description: Gets or sets the base DN of the user.
+- id: UserClaims
+  valueType: RecordArray
+  valueCkRecordId: System.Identity-1.0.0/UserClaim-1.0.0
+  description: The claims of the user.
+- id: UserCodeType
+  valueType: String
+  description: Specifies the user code type for the device flow. Defaults to null.
+- id: UserId
+  valueType: String
+- id: UserLogins
+  valueType: RecordArray
+  valueCkRecordId: System.Identity-1.0.0/UserLogin-1.0.0
+  description: The existing logins of the user.
+- id: UserName
+  valueType: String
+  description: The user name.
 - id: UserNameAttribute
   valueType: String
   description: Gets or sets the name of the user attribute.
+- id: UserSsoLifetime
+  valueType: Int
+  description: Lifetime of user's single sign-on session (in seconds). Defaults to null (no expiration).
+- id: UserTokens
+  valueType: RecordArray
+  valueCkRecordId: System.Identity-1.0.0/UserToken-1.0.0
+  description: The tokens of the user.
+- id: Value
+  valueType: String
 records:
+- recordId: ClientClaim
+  isFinal: true
+  attributes:
+  - id: System.Identity-1.0.0/ClaimType-1.0.0
+    name: ClaimType
+  - id: System.Identity-1.0.0/ClaimValue-1.0.0
+    name: ClaimValue
+  - id: System.Identity-1.0.0/ClaimValueType-1.0.0
+    name: ClaimValueType
+- recordId: RoleClaim
+  isFinal: true
+  attributes:
+  - id: System.Identity-1.0.0/ClaimType-1.0.0
+    name: ClaimType
+  - id: System.Identity-1.0.0/ClaimValue-1.0.0
+    name: ClaimValue
 - recordId: Secret
   isFinal: true
   attributes:
@@ -799,27 +815,6 @@ records:
     isOptional: true
   - id: System.Identity-1.0.0/SecretType-1.0.0
     name: Type
-- recordId: ClientClaim
-  isFinal: true
-  attributes:
-  - id: System.Identity-1.0.0/ClaimType-1.0.0
-    name: ClaimType
-  - id: System.Identity-1.0.0/ClaimValue-1.0.0
-    name: ClaimValue
-  - id: System.Identity-1.0.0/ClaimValueType-1.0.0
-    name: ClaimValueType
-- recordId: UserToken
-  isFinal: true
-  attributes:
-  - id: System.Identity-1.0.0/LoginProvider-1.0.0
-    name: LoginProvider
-  - id: System-1.0.0/Name-1.0.0
-    name: Name
-  - id: System.Identity-1.0.0/UserId-1.0.0
-    name: UserId
-  - id: System.Identity-1.0.0/Value-1.0.0
-    name: Value
-    isOptional: true
 - recordId: UserClaim
   isFinal: true
   attributes:
@@ -842,28 +837,19 @@ records:
     isOptional: true
   - id: System.Identity-1.0.0/UserId-1.0.0
     name: UserId
-- recordId: RoleClaim
+- recordId: UserToken
   isFinal: true
   attributes:
-  - id: System.Identity-1.0.0/ClaimType-1.0.0
-    name: ClaimType
-  - id: System.Identity-1.0.0/ClaimValue-1.0.0
-    name: ClaimValue
+  - id: System.Identity-1.0.0/LoginProvider-1.0.0
+    name: LoginProvider
+  - id: System-1.0.0/Name-1.0.0
+    name: Name
+  - id: System.Identity-1.0.0/UserId-1.0.0
+    name: UserId
+  - id: System.Identity-1.0.0/Value-1.0.0
+    name: Value
+    isOptional: true
 enums:
-- enumId: TokenUsage
-  useFlags: false
-  values:
-  - key: 0
-    name: ReUse
-  - key: 1
-    name: OneTimeOnly
-- enumId: TokenType
-  useFlags: false
-  values:
-  - key: 0
-    name: Jwt
-  - key: 1
-    name: Reference
 - enumId: TokenExpiration
   useFlags: false
   values:
@@ -871,6 +857,20 @@ enums:
     name: Sliding
   - key: 1
     name: Absolute
+- enumId: TokenType
+  useFlags: false
+  values:
+  - key: 0
+    name: Jwt
+  - key: 1
+    name: Reference
+- enumId: TokenUsage
+  useFlags: false
+  values:
+  - key: 0
+    name: ReUse
+  - key: 1
+    name: OneTimeOnly
 modelId: System.Identity
 dependencies:
 - System

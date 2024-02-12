@@ -4,6 +4,7 @@ using IdentityServerPersistence.Configuration.DependencyInjection;
 using IdentityServerPersistence.Services;
 using IdentityServerPersistence.SystemStores;
 using Meshmakers.Octo.Common.DistributionEventHub.Configuration;
+using Meshmakers.Octo.Communication.Contracts.DataTransferObjects;
 using Meshmakers.Octo.Runtime.Contracts.MongoDb.Configuration;
 using Meshmakers.Octo.Runtime.Contracts.RepositoryEntities;
 using Meshmakers.Octo.Runtime.Engine.Configuration.DependencyInjection;
@@ -89,6 +90,20 @@ public static class RuntimeEngineBuilderExtensions
                 .ForMember(dest => dest.IsEmphasized, opt => opt.MapFrom(src => src.Emphasize))
                 .ForMember(dest => dest.IsRequired, opt => opt.MapFrom(src => src.Required))
                 .ForMember(dest => dest.Claims, opt => opt.MapFrom(src => src.UserClaims));
+
+            cfg.CreateMap<RtRole, RoleDto>()
+                .ForMember(dest => dest.Id, opt => opt.MapFrom(src => src.RtId))
+                .ForMember(dest => dest.Name, opt => opt.MapFrom(src => src.Name))
+                .ReverseMap()
+                .ForMember(dest => dest.RtId, x => x.Ignore())
+                .ForMember(dest => dest.CkTypeId, x => x.Ignore());
+
+            cfg.CreateMap<RtUser, UserDto>()
+                .ForMember(dest => dest.UserId, opt => opt.MapFrom(src => src.RtId))
+                .ForMember(dest => dest.Name, opt => opt.MapFrom(src => src.UserName))
+                .ReverseMap()
+                .ForMember(dest => dest.RtId, x => x.Ignore())
+                .ForMember(dest => dest.CkTypeId, x => x.Ignore());
         });
 
         AddIdentity(builder.Services, setupAction);
