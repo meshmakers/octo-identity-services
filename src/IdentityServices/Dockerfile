@@ -6,6 +6,7 @@ EXPOSE 443
 FROM mcr.microsoft.com/dotnet/sdk:8.0-bookworm-slim AS build
 WORKDIR /src
 COPY . .
+ENV NUGET_XMLDOC_MODE=none
 WORKDIR "/src/src/IdentityServices"
 RUN dotnet build "IdentityServices.csproj" -c Release
 

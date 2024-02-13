@@ -84,4 +84,21 @@
         </Content>
     </ItemGroup>
 
+
+    <ItemGroup>
+      <_ContentIncludedByDefault Remove="test\nlog.config" />
+      <_ContentIncludedByDefault Remove="test\web.config" />
+      <_ContentIncludedByDefault Remove="test\appsettings.Development.json" />
+      <_ContentIncludedByDefault Remove="test\appsettings.json" />
+      <_ContentIncludedByDefault Remove="test\keys\is-signing-key-675D6064D97B269D8BE86236321E495C.json" />
+      <_ContentIncludedByDefault Remove="test\keys\is-signing-key-AA0770129D65AE8B4E7196855478FE54.json" />
+      <_ContentIncludedByDefault Remove="test\keys\is-signing-key-AB531929985D47B6F2426BFDFADA5EF5.json" />
+      <_ContentIncludedByDefault Remove="test\keys\is-signing-key-B57A3203657D6980977B949DF4C2EF06.json" />
+      <_ContentIncludedByDefault Remove="test\keys\is-signing-key-F5DD0338263D2C43B50351656440805F.json" />
+      <_ContentIncludedByDefault Remove="test\Meshmakers.Octo.Backend.IdentityServices.deps.json" />
+      <_ContentIncludedByDefault Remove="test\Meshmakers.Octo.Backend.IdentityServices.runtimeconfig.json" />
+      <_ContentIncludedByDefault Remove="test\package-lock.json" />
+      <_ContentIncludedByDefault Remove="test\package.json" />
+    </ItemGroup>
+
 </Project>
