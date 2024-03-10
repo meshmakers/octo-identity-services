@@ -30,8 +30,6 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Runtime.Contracts.MongoDb",
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Runtime.Engine.MongoDb", "src\octo-common-services\src\octo-construction-kit-engine-mongodb\src\Runtime.Engine.MongoDb\Runtime.Engine.MongoDb.csproj", "{42FC864B-15CB-416C-937C-D4A2D84107B5}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Persistence.SystemTests", "src\octo-common-services\src\octo-construction-kit-engine-mongodb\tests\Persistence.SystemTests\Persistence.SystemTests.csproj", "{AA5C45C5-2C67-43FC-9EA0-FBFDC6F4154E}"
-EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -111,12 +109,6 @@ Global
 		{42FC864B-15CB-416C-937C-D4A2D84107B5}.Release|Any CPU.Build.0 = Release|Any CPU
 		{42FC864B-15CB-416C-937C-D4A2D84107B5}.DebugL|Any CPU.ActiveCfg = DebugL|Any CPU
 		{42FC864B-15CB-416C-937C-D4A2D84107B5}.DebugL|Any CPU.Build.0 = DebugL|Any CPU
-		{AA5C45C5-2C67-43FC-9EA0-FBFDC6F4154E}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
-		{AA5C45C5-2C67-43FC-9EA0-FBFDC6F4154E}.Debug|Any CPU.Build.0 = Debug|Any CPU
-		{AA5C45C5-2C67-43FC-9EA0-FBFDC6F4154E}.Release|Any CPU.ActiveCfg = Release|Any CPU
-		{AA5C45C5-2C67-43FC-9EA0-FBFDC6F4154E}.Release|Any CPU.Build.0 = Release|Any CPU
-		{AA5C45C5-2C67-43FC-9EA0-FBFDC6F4154E}.DebugL|Any CPU.ActiveCfg = DebugL|Any CPU
-		{AA5C45C5-2C67-43FC-9EA0-FBFDC6F4154E}.DebugL|Any CPU.Build.0 = DebugL|Any CPU
 	EndGlobalSection
 	GlobalSection(NestedProjects) = preSolution
 		{B62EB965-80B5-4547-9CDC-92ECE2737B89} = {48DDCE79-CF0A-43A9-B995-7649D58C07A1}
@@ -125,6 +117,5 @@ Global
 		{02C28B56-A1E4-4489-ACBE-FF0085D2EE54} = {48DDCE79-CF0A-43A9-B995-7649D58C07A1}
 		{4D779D7D-F277-427E-9AAE-9A84BC640CB9} = {AF91F7B3-12FF-44AF-BBBE-A4A8C7340D78}
 		{42FC864B-15CB-416C-937C-D4A2D84107B5} = {AF91F7B3-12FF-44AF-BBBE-A4A8C7340D78}
-		{AA5C45C5-2C67-43FC-9EA0-FBFDC6F4154E} = {C15436E4-4071-452D-9492-17EA55067874}
 	EndGlobalSection
 EndGlobal
