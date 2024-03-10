@@ -5,7 +5,7 @@ using Meshmakers.Octo.Communication.Contracts;
 using Meshmakers.Octo.Services.Infrastructure.CredentialGenerator;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Mvc;
-using Persistence.IdentityCkModel.ConstructionKit.Generated.System.Identity.v1;
+using Persistence.IdentityCkModel.Generated.System.Identity.v1;
 
 namespace Meshmakers.Octo.Backend.IdentityServices.Controllers.Home;
 

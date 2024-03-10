@@ -1,5 +1,5 @@
 ﻿using Microsoft.Extensions.DependencyInjection;
-using Persistence.IdentityCkModel.ConstructionKit.Generated.System.Identity.v1;
+using Persistence.IdentityCkModel.Generated.System.Identity.v1;
 
 namespace Meshmakers.Octo.Backend.Authentication.DynamicAuth;
 

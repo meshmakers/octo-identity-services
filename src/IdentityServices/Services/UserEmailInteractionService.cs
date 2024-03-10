@@ -8,10 +8,10 @@ using Meshmakers.Octo.Communication.Contracts.Services;
 using Meshmakers.Octo.Runtime.Contracts.MongoDb;
 using Meshmakers.Octo.Runtime.Contracts.Repositories.Query;
 using Meshmakers.Octo.Services.Infrastructure.Services;
-using Meshmakers.Octo.Services.Notifications.ConstructionKit.Generated.System.Notification.v1;
+using Meshmakers.Octo.Services.Notifications.Generated.System.Notification.v1;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.Extensions.Options;
-using Persistence.IdentityCkModel.ConstructionKit.Generated.System.Identity.v1;
+using Persistence.IdentityCkModel.Generated.System.Identity.v1;
 
 namespace Meshmakers.Octo.Backend.IdentityServices.Services;
 

@@ -1,5 +1,5 @@
 ﻿using Duende.IdentityServer.Stores;
-using Persistence.IdentityCkModel.ConstructionKit.Generated.System.Identity.v1;
+using Persistence.IdentityCkModel.Generated.System.Identity.v1;
 
 namespace IdentityServerPersistence.SystemStores;
 

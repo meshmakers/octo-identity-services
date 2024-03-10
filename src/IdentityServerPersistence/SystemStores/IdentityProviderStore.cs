@@ -4,7 +4,7 @@ using Meshmakers.Octo.ConstructionKit.Contracts;
 using Meshmakers.Octo.Runtime.Contracts.MongoDb.Repository;
 using Meshmakers.Octo.Runtime.Contracts.Repositories.Query;
 using Meshmakers.Octo.Services.Infrastructure.Services;
-using Persistence.IdentityCkModel.ConstructionKit.Generated.System.Identity.v1;
+using Persistence.IdentityCkModel.Generated.System.Identity.v1;
 
 namespace IdentityServerPersistence.SystemStores;
 
