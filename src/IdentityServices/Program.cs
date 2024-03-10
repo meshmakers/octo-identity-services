@@ -29,7 +29,7 @@ using Microsoft.Extensions.Options;
 using Microsoft.IdentityModel.Logging;
 using NLog;
 using NLog.Web;
-using Persistence.IdentityCkModel.ConstructionKit.Generated.System.Identity.v1;
+using Persistence.IdentityCkModel.Generated.System.Identity.v1;
 using LogLevel = Microsoft.Extensions.Logging.LogLevel;
 
 // NLog: setup the logger first to catch all errors

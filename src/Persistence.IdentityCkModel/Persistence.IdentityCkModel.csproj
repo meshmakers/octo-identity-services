@@ -4,7 +4,7 @@
         <Configurations>Debug;Release;DebugL</Configurations>
         <Platforms>AnyCPU</Platforms>
         <OctoGenerateCkModelServiceClass>true</OctoGenerateCkModelServiceClass>
-        <OctoCompileCkModel Condition="'$(Configuration)'=='Release'">false</OctoCompileCkModel>
+        <OctoPublishCkModel>true</OctoPublishCkModel>
     </PropertyGroup>
 
     <ItemGroup>
@@ -12,4 +12,9 @@
         <PackageReference Include="Meshmakers.Octo.ConstructionKit.MsBuildTasks" Version="$(OctoVersion)" PrivateAssets="all" />
         <PackageReference Include="Meshmakers.Octo.Runtime.Contracts" Version="$(OctoVersion)" />
     </ItemGroup>
+
+    <ItemGroup>
+        <ConstructionKitFolder Visible="false" Include="$(MSBuildProjectDirectory)\ConstructionKit"/>
+    </ItemGroup>
+
 </Project>
