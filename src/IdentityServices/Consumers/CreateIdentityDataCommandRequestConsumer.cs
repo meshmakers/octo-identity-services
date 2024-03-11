@@ -10,7 +10,10 @@ using Persistence.IdentityCkModel.Generated.System.Identity.v1;
 
 namespace Meshmakers.Octo.Backend.IdentityServices.Consumers;
 
-public class CreateIdentityDataCommandRequestConsumer(ISystemContext systemContext) : IDistributedConsumer<CreateIdentityDataCommandRequest>
+public class CreateIdentityDataCommandRequestConsumer(
+    ILogger<CreateIdentityDataCommandRequestConsumer> logger,
+    ISystemContext systemContext)
+    : IDistributedConsumer<CreateIdentityDataCommandRequest>
 {
     public async Task ConsumeAsync(IDistributedContext<CreateIdentityDataCommandRequest> context)
     {
@@ -23,6 +26,15 @@ public class CreateIdentityDataCommandRequestConsumer(ISystemContext systemConte
         }
 
         var tenantRepository = tenantContext.GetTenantRepository();
+        
+        // That means that the tenant is not configured to use a 
+        // own identity management. We do nothing in this case and return information to the producer
+        if (!await tenantContext.IsCkModelExistingAsync(SystemIdentityCkIds.ModelId))
+        {
+            await context.RespondAsync(new EnumCommandResponse<CreateIdentityDataResult>
+                { Response = CreateIdentityDataResult.FailedTenantHasNoIdentityCk });
+            return;
+        }
 
         using var session = await tenantRepository.GetSessionAsync();
         try
@@ -46,11 +58,12 @@ public class CreateIdentityDataCommandRequestConsumer(ISystemContext systemConte
 
             await session.CommitTransactionAsync();
 
-            await context.RespondAsync(new GenericCommandResponse());
+            await context.RespondAsync(new EnumCommandResponse<CreateIdentityDataResult>
+                { Response = CreateIdentityDataResult.Success });
         }
         catch (Exception e)
         {
-            Console.WriteLine(e);
+            logger.LogError(e, "Error while creating identity data");
             throw;
         }
     }
@@ -95,7 +108,8 @@ public class CreateIdentityDataCommandRequestConsumer(ISystemContext systemConte
         }
     }
 
-    private async Task CreateClientIfNotExistAsync(IOctoSession session, ITenantRepository tenantRepository, DistClientDto distClientDto)
+    private async Task CreateClientIfNotExistAsync(IOctoSession session, ITenantRepository tenantRepository,
+        DistClientDto distClientDto)
     {
         var dataQueryOperation = DataQueryOperation.Create()
             .FieldFilter(nameof(RtClient.ClientId), FieldFilterOperator.Equals, distClientDto.ClientId);
