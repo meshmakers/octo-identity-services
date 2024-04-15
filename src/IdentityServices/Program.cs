@@ -86,6 +86,7 @@ try
 
     builder.Services.AddDynamicAuthentication()
         .AddGoogle()
+        .AddFacebook()
         .AddMicrosoft()
         .AddAzureEntraId()
         .AddOpenLdapAuthentication()

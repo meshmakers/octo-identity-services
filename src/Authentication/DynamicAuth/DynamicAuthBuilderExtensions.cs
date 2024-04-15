@@ -1,10 +1,12 @@
 ﻿using Meshmakers.Octo.Backend.Authentication.AzureEntraId;
 using Meshmakers.Octo.Backend.Authentication.Connection;
+using Meshmakers.Octo.Backend.Authentication.Facebook;
 using Meshmakers.Octo.Backend.Authentication.Google;
 using Meshmakers.Octo.Backend.Authentication.Microsoft;
 using Meshmakers.Octo.Backend.Authentication.MicrosoftAd;
 using Meshmakers.Octo.Backend.Authentication.OpenLdap;
 using Meshmakers.Octo.Backend.Authentication.Options;
+using Microsoft.AspNetCore.Authentication.Facebook;
 using Microsoft.AspNetCore.Authentication.Google;
 using Microsoft.AspNetCore.Authentication.MicrosoftAccount;
 using Microsoft.AspNetCore.Authentication.OpenIdConnect;
@@ -33,7 +35,15 @@ public static class DynamicAuthBuilderExtensions
 
         return builder;
     }
+    
+    public static IDynamicAuthBuilder AddFacebook(this IDynamicAuthBuilder builder)
+    {
+        builder.Services.AddTransient<IDynamicAuthOptionsBuilder<FacebookOptions>,
+            OAuthDynamicAuthOptionsBuilder<FacebookHandler, FacebookOptions>>();
+        builder.Services.AddTransient<IAuthSchemeCreator<RtFacebookIdentityProvider>, FacebookAuthSchemeCreator>();
 
+        return builder;
+    }
     public static IDynamicAuthBuilder AddMicrosoft(this IDynamicAuthBuilder builder)
     {
         builder.Services.AddTransient<IDynamicAuthOptionsBuilder<MicrosoftAccountOptions>,
