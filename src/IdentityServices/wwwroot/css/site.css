@@ -5,9 +5,9 @@ for details on configuring this project to bundle and minify static web assets. 
 /*       Custom styles for OEMs       */
 /* ---------------------------------- */
 html {
-    --octo-primary-color: #3f51b5;
-    --octo-secondary-color: #ff4081;
-    --octo-background-color: #000;
+    --octo-primary-color: #4d9685;
+    --octo-secondary-color: #9DB4B7;
+    --octo-background-color: #121721;
 }
 
 .navbar-toggler-icon {
@@ -25,7 +25,7 @@ html {
 }
 
 .octo-label {
-    color: black;
+    color: var(--octo-secondary-color);
 }
 
 .octo-login-input {
@@ -69,12 +69,12 @@ body {
     white-space: nowrap;
     /* Set the fixed height of the footer here */
     height: 60px;
-    background: white;
+    background: var(--octo-primary-color);
     line-height: 60px; /* Vertically center the text there */
 }
 
 .main {
-
+    background: var(--octo-background-color);
 }
 
 .octo-navbar {

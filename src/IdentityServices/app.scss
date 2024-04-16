@@ -1,8 +1,15 @@
+
+
 @use "@material/theme" with (
-  $primary: #3f51b5,
-  $secondary: #ff4081,
-  $background: #000,
+  $primary: #4d9685,  
+  $secondary: #9DB4B7, 
+  $background: #121721,  
+  $on-primary: #000000,  
+  $on-secondary: #000000,  
+  $surface: #17222b,  
+  $error: #CF6679, 
 );
+
 @use '@material/button/mdc-button';
 @use '@material/button';
 @use "@material/checkbox";
@@ -13,9 +20,27 @@
 @use "@material/notched-outline/mdc-notched-outline";
 @use "@material/textfield";
 
+
+html body {
+  background-color: #121721 !important;
+  --bs-heading-color: #4d9685;
+  --bs-body-color: #4d9685;
+  --bs-nav-link-color:#4d9685 !important;
+  --bs-dropdown-bg:#121721;
+  --bs-dropdown-link-color:#4d9685 !important;
+}
+
+.dropdown-menu {
+  --bs-nav-link-color: #4d9685 !important;
+  --bs-dropdown-bg: #121721;
+  --bs-dropdown-link-color: #4d9685 !important;
+}
+
+// Apply core styles for each component
 @include card.core-styles;
 @include checkbox.core-styles;
 @include form-field.core-styles;
 @include textfield.core-styles;
 
-
+// Additional styling for dark theme specific overrides if necessary
+//@include theme.theme-styles;  // Ensuring dark theme is applied across all components
