@@ -53,7 +53,7 @@ internal class DefaultConfigurationCreatorService : IDefaultConfigurationCreator
 
         await ImportCkModel();
 
-        using var session = await _systemContext.GetSystemSessionAsync();
+        using var session = await _systemContext.GetAdminSessionAsync();
         session.StartTransaction();
 
         var identityConfiguration =
