@@ -23,7 +23,7 @@ internal class UserSchemaService : IUserSchemaService
 
     public async Task SetupAsync()
     {
-        using var session = await _systemContext.GetSystemSessionAsync();
+        using var session = await _systemContext.GetAdminSessionAsync();
         session.StartTransaction();
 
         var policyConfiguration =
