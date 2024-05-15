@@ -23,11 +23,14 @@
 
 html body {
   background-color: #121721 !important;
-  --bs-heading-color: #4d9685;
-  --bs-body-color: #4d9685;
+  --bs-heading-color: white;
+  --bs-body-color: white;
   --bs-nav-link-color:#4d9685 !important;
+  //--bs-navbar-hover-color: #4d9685!important;
+  //--bs-navbar-brand-hover-color: #4d9685!important;
   --bs-dropdown-bg:#121721;
   --bs-dropdown-link-color:#4d9685 !important;
+  --bs-body-bg:#121721 !important;
 }
 
 .dropdown-menu {
