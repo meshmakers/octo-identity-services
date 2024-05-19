@@ -516,4 +516,7 @@
     <data name="Backend_Identity_Setup_Status_EMailMissing" xml:space="preserve">
         <value>Es wurde keine E-Mailadresse definiert.</value>
     </data>
+    <data name="Backend_Persistence_Identity_CommonError" xml:space="preserve">
+        <value>Der Admin-User kann nicht erstelt werden. Bitte prüfe deine Eingaben.</value>
+    </data>
 </root>

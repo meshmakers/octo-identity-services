@@ -1,4 +1,5 @@
 ﻿@using Duende.IdentityServer.Extensions
+@using Meshmakers.Octo.Communication.Contracts
 @using Persistence.IdentityCkModel.Generated.System.Identity.v1
 @using Microsoft.AspNetCore.Identity
 @using Microsoft.AspNetCore.Mvc.TagHelpers
@@ -7,11 +8,11 @@
 @{
     var user = await UserManager.GetUserAsync(User);
     var hasPassword = false;
-    var isDeveloper = false;
+    var isInDevelopmentRole = false;
     if (user != null)
     {
         hasPassword = await UserManager.HasPasswordAsync(user);
-        isDeveloper = user.RoleIds?.Contains("Developer") ?? false;
+        isInDevelopmentRole = await UserManager.IsInRoleAsync(user, CommonConstants.DevelopmentRole);
     }
 }
 
@@ -67,13 +68,13 @@
                         </ul>
                     </li>
 
-                    @if (isDeveloper)
+                    @if (isInDevelopmentRole)
                     {
                         <li class="nav-item dropdown">
                             <a class="nav-link dropdown-toggle" href="#" id="navbarDropdown" role="button" data-bs-toggle="dropdown" aria-expanded="false">
                                 @IdentityTexts.Backend_Identity_Navigation_Development_Header
                             </a>
-                            <ul class="dropdown-menu" aria-labelledby="navbarDropdown">
+                            <ul class="dropdown-menu dropdown-menu-dark" aria-labelledby="navbarDropdown">
                                 <li>
                                 <a class="dropdown-item" href="~/swagger/">@IdentityTexts.Backend_Identity_Navigation_API_Header</a>
                                 <li>

@@ -1046,5 +1046,11 @@ namespace Meshmakers.Octo.Backend.IdentityServices.Resources {
                 return ResourceManager.GetString("Backend_Identity_Setup_Status_EMailMissing", resourceCulture);
             }
         }
+        
+        public static string Backend_Persistence_Identity_CommonError {
+            get {
+                return ResourceManager.GetString("Backend_Persistence_Identity_CommonError", resourceCulture);
+            }
+        }
     }
 }

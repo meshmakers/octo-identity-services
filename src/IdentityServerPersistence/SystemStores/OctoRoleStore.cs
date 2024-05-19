@@ -94,7 +94,7 @@ public sealed class OctoRoleStore :
     {
         cancellationToken.ThrowIfCancellationRequested();
         ThrowIfDisposed();
-        return role != null ? Task.FromResult(role.Name) : throw new ArgumentNullException(nameof(role));
+        return role != null ? Task.FromResult<string?>(role.Name) : throw new ArgumentNullException(nameof(role));
     }
 
     public Task SetRoleNameAsync(RtRole role, string? roleName, CancellationToken cancellationToken = default)
@@ -103,7 +103,11 @@ public sealed class OctoRoleStore :
         ThrowIfDisposed();
         ArgumentValidation.Validate(nameof(role), role);
 
-        role.Name = roleName;
+        if (!string.IsNullOrWhiteSpace(roleName))
+        {
+            role.Name = roleName;
+        }
+
         return Task.CompletedTask;
     }
 
@@ -111,7 +115,7 @@ public sealed class OctoRoleStore :
     {
         cancellationToken.ThrowIfCancellationRequested();
         ThrowIfDisposed();
-        return role != null ? Task.FromResult(role.NormalizedName) : throw new ArgumentNullException(nameof(role));
+        return role != null ? Task.FromResult<string?>(role.NormalizedName) : throw new ArgumentNullException(nameof(role));
     }
 
     public Task SetNormalizedRoleNameAsync(
@@ -123,7 +127,10 @@ public sealed class OctoRoleStore :
         ThrowIfDisposed();
         ArgumentValidation.Validate(nameof(role), role);
 
-        role.NormalizedName = normalizedRoleName;
+        if (!string.IsNullOrWhiteSpace(normalizedRoleName))
+        {
+            role.NormalizedName = normalizedRoleName;
+        }
         return Task.CompletedTask;
     }
 

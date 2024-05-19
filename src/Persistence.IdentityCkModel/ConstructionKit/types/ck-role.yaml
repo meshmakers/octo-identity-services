@@ -7,11 +7,9 @@ types:
     attributes:
       - id: System/Name
         name: Name
-        isOptional: true
 
       - id: System.Identity/NormalizedName
         name: NormalizedName
-        isOptional: true
 
       - id: System.Identity/SubjectIds
         name: SubjectIds
