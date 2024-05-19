@@ -68,11 +68,23 @@ public class PersistentGrantStore : IOctoPersistentGrantStore
         var session = await _tenantRepository.GetSessionAsync();
         session.StartTransaction();
 
-        var dataQueryOperation = DataQueryOperation.Create()
-            .FieldFilter(nameof(RtPersistedGrant.SubjectId), FieldFilterOperator.Equals, filter.SubjectId)
-            .FieldFilter(nameof(RtPersistedGrant.SessionId), FieldFilterOperator.Equals, filter.SessionId)
-            .FieldFilter(nameof(RtPersistedGrant.ClientId), FieldFilterOperator.Equals, filter.ClientId)
-            .FieldFilter(nameof(RtPersistedGrant.GrantType), FieldFilterOperator.Equals, filter.Type);
+        var dataQueryOperation = DataQueryOperation.Create();
+        if(filter.SubjectId != null)
+        {
+            dataQueryOperation.FieldFilter(nameof(RtPersistedGrant.SubjectId), FieldFilterOperator.Equals, filter.SubjectId);
+        }
+        if(filter.SessionId != null)
+        {
+            dataQueryOperation.FieldFilter(nameof(RtPersistedGrant.SessionId), FieldFilterOperator.Equals, filter.SessionId);
+        }
+        if(filter.SessionId != null)
+        {
+            dataQueryOperation.FieldFilter(nameof(RtPersistedGrant.ClientId), FieldFilterOperator.Equals, filter.ClientId);
+        }
+        if(filter.Type != null)
+        {
+            dataQueryOperation.FieldFilter(nameof(RtPersistedGrant.GrantType), FieldFilterOperator.Equals, filter.Type);
+        }
 
         var result = await _tenantRepository.GetRtEntitiesByTypeAsync<RtPersistedGrant>(session,
             dataQueryOperation);
@@ -102,13 +114,23 @@ public class PersistentGrantStore : IOctoPersistentGrantStore
         var session = await _tenantRepository.GetSessionAsync();
         session.StartTransaction();
 
-        var fieldFilters = new List<FieldFilter>
+        var fieldFilters = new List<FieldFilter>();
+        if (!string.IsNullOrWhiteSpace(filter.SubjectId))
         {
-            new(nameof(RtPersistedGrant.SubjectId), FieldFilterOperator.Equals, filter.SubjectId),
-            new(nameof(RtPersistedGrant.SessionId), FieldFilterOperator.Equals, filter.SessionId),
-            new(nameof(RtPersistedGrant.ClientId), FieldFilterOperator.Equals, filter.ClientId),
-            new(nameof(RtPersistedGrant.GrantType), FieldFilterOperator.Equals, filter.Type)
-        };
+            fieldFilters.Add(new(nameof(RtPersistedGrant.SubjectId), FieldFilterOperator.Equals, filter.SubjectId));
+        }
+        if (!string.IsNullOrWhiteSpace(filter.SessionId))
+        {
+            fieldFilters.Add(new(nameof(RtPersistedGrant.SessionId), FieldFilterOperator.Equals, filter.SessionId));
+        }
+        if (!string.IsNullOrWhiteSpace(filter.ClientId))
+        {
+            fieldFilters.Add(new(nameof(RtPersistedGrant.ClientId), FieldFilterOperator.Equals, filter.ClientId));
+        }
+        if (!string.IsNullOrWhiteSpace(filter.Type))
+        {
+            fieldFilters.Add(new(nameof(RtPersistedGrant.GrantType), FieldFilterOperator.Equals, filter.Type));
+        }
         await _tenantRepository.DeleteOneRtEntityAsync<RtPersistedGrant>(session, fieldFilters);
 
         await session.CommitTransactionAsync();
