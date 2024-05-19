@@ -523,4 +523,7 @@
     <data name="Backend_Identity_Setup_Status_EMailMissing" xml:space="preserve">
     <value>No E-Mail address has been defined.</value>
   </data>
+  <data name="Backend_Persistence_Identity_CommonError" xml:space="preserve">
+    <value> Please check your input values.</value>
+  </data>
 </root>

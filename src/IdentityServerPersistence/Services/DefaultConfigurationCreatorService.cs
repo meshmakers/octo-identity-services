@@ -164,48 +164,25 @@ internal class DefaultConfigurationCreatorService : IDefaultConfigurationCreator
 
     private async Task CreateUsersAndRoles()
     {
-        var adminRole = await _roleManager.FindByNameAsync(CommonConstants.AdministratorsRole);
-        if (adminRole == null)
-        {
-            adminRole = new RtRole
-            {
-                Name = CommonConstants.AdministratorsRole,
-                Claims = new AttributeRecordValueList<RtRoleClaimRecord>()
-            };
-            await _roleManager.CreateAsync(adminRole);
-        }
+        await TryCreateRole(CommonConstants.TenantManagementRole);
+        await TryCreateRole(CommonConstants.UserManagementRole);
+        await TryCreateRole(CommonConstants.CommunicationManagementRole);
+        await TryCreateRole(CommonConstants.DevelopmentRole);
+        await TryCreateRole(CommonConstants.AdminPanelManagementRole);
+        await TryCreateRole(CommonConstants.BotManagementRole);
+    }
 
-        var developerRole = await _roleManager.FindByNameAsync(CommonConstants.DevelopersRole);
-        if (developerRole == null)
+    private async Task TryCreateRole(string roleName)
+    {
+        var rtRole = await _roleManager.FindByNameAsync(roleName);
+        if (rtRole == null)
         {
-            developerRole = new RtRole
+            rtRole = new RtRole
             {
-                Name = CommonConstants.DevelopersRole,
+                Name = roleName,
                 Claims = new AttributeRecordValueList<RtRoleClaimRecord>()
             };
-            await _roleManager.CreateAsync(developerRole);
-        }
-
-        var managerRole = await _roleManager.FindByNameAsync(CommonConstants.ManagersRole);
-        if (managerRole == null)
-        {
-            managerRole = new RtRole
-            {
-                Name = CommonConstants.ManagersRole,
-                Claims = new AttributeRecordValueList<RtRoleClaimRecord>()
-            };
-            await _roleManager.CreateAsync(managerRole);
-        }
-
-        var userRole = await _roleManager.FindByNameAsync(CommonConstants.UsersRole);
-        if (userRole == null)
-        {
-            userRole = new RtRole
-            {
-                Name = CommonConstants.UsersRole,
-                Claims = new AttributeRecordValueList<RtRoleClaimRecord>()
-            };
-            await _roleManager.CreateAsync(userRole);
+            await _roleManager.CreateAsync(rtRole);
         }
     }
 

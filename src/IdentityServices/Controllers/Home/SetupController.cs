@@ -1,7 +1,9 @@
 ﻿using System.Diagnostics;
 using Meshmakers.Octo.Backend.IdentityServices.Resources;
+using Meshmakers.Octo.Backend.IdentityServices.Services;
 using Meshmakers.Octo.Backend.IdentityServices.ViewModels.Setup;
 using Meshmakers.Octo.Communication.Contracts;
+using Meshmakers.Octo.Communication.Contracts.DataTransferObjects;
 using Meshmakers.Octo.Services.Infrastructure.CredentialGenerator;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Mvc;
@@ -13,17 +15,19 @@ namespace Meshmakers.Octo.Backend.IdentityServices.Controllers.Home;
 public class SetupController : Controller
 {
     private readonly ICredentialGenerator _credentialGenerator;
+    private readonly IUserManagementService _userManagementService;
     private readonly ILogger<SetupController> _logger;
     private readonly RoleManager<RtRole> _roleManager;
     private readonly UserManager<RtUser> _userManager;
 
     public SetupController(ILogger<SetupController> logger, UserManager<RtUser> userManager,
-        RoleManager<RtRole> roleManager, ICredentialGenerator credentialGenerator)
+        RoleManager<RtRole> roleManager, ICredentialGenerator credentialGenerator, IUserManagementService userManagementService)
     {
         _logger = logger;
         _userManager = userManager;
         _roleManager = roleManager;
         _credentialGenerator = credentialGenerator;
+        _userManagementService = userManagementService;
     }
 
     public IActionResult Index()
@@ -61,32 +65,31 @@ public class SetupController : Controller
             ModelState.AddModelError(string.Empty, IdentityTexts.Backend_Identity_Setup_Status_PasswordMissing);
             return View(model);
         }
-
+        
         if (!_credentialGenerator.CheckPassword(model.NewPassword))
         {
             ModelState.AddModelError(string.Empty, IdentityTexts.Backend_Identity_Setup_Status_PasswordComplexity);
             return View(model);
         }
 
-        var adminRole = await _roleManager.FindByNameAsync(CommonConstants.AdministratorsRole);
-        if (adminRole == null)
+        try
         {
-            _logger.LogInformation("No Administrator-Role has been found");
-
-            ModelState.AddModelError(string.Empty, IdentityTexts.Backend_General_Error_Label);
+            await _userManagementService.CreateAdminUserAsync(new AdminUserDto
+            {
+                EMail = model.EMailAddress,
+                Password = model.NewPassword
+            });
+            return RedirectToAction("Index", "Home");
+        }
+        catch (UsersAlreadyConfiguredException)
+        {
+            ModelState.AddModelError(string.Empty, IdentityTexts.Backend_Identity_Setup_Status_UsersAlreadyConfigured);
             return View(model);
         }
-
-        var adminUser = await _userManager.FindByNameAsync(model.EMailAddress);
-        if (adminUser == null)
+        catch (UserManagementException)
         {
-            adminUser = new RtUser { UserName = model.EMailAddress, Email = model.EMailAddress };
-
-            await _userManager.CreateAsync(adminUser, model.NewPassword);
-            Debug.Assert(adminRole.NormalizedName != null, "adminRole.NormalizedName != null");
-            await _userManager.AddToRoleAsync(adminUser, adminRole.NormalizedName);
+            ModelState.AddModelError(string.Empty, IdentityTexts.Backend_Persistence_Identity_CommonError);
+            return View(model);
         }
-
-        return RedirectToAction("Index", "Home");
     }
 }

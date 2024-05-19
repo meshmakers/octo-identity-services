@@ -60,6 +60,7 @@ try
 
     builder.Services.AddOemServices(builder.Configuration);
     builder.Services.AddScoped<IUserEmailInteractionService, UserEmailInteractionService>();
+    builder.Services.AddScoped<IUserManagementService, UserManagementService>();
     builder.Services.AddScoped<IMarkdownRenderService, MarkdownRenderService>();
 
     builder.Services.Configure<OctoIdentityServicesOptions>(options =>
