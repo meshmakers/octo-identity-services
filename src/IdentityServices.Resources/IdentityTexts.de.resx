@@ -187,7 +187,7 @@
         <value>Anmeldungen verwalten</value>
     </data>
     <data name="Backend_Identity_ManageProfile_Subtitle" xml:space="preserve">
-        <value>Ändee deine Kontoeinstellungen</value>
+        <value>Ändere deine Kontoeinstellungen</value>
     </data>
     <data name="Backend_Identity_Navigation_API_Header" xml:space="preserve">
         <value>API-Dokumentation (Swagger)</value>
