@@ -1,3 +1,5 @@
+import './app.scss';
+import './site.scss';
 import "bootstrap/dist/js/bootstrap.min"
 import "bootstrap/dist/css/bootstrap.min.css"
 import {dom, library} from "@fortawesome/fontawesome-svg-core";

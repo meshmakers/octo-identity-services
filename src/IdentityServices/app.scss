@@ -1,43 +1,54 @@
 
+$octo-primary: #4d9685;
+$octo-secondary: #9DB4B7;
+$octo-background: #121721;
+$octo-on-primary: #000000;
+$octo-on-secondary: #000000;
+$octo-surface: #17222b;
+$octo-error: #CF6679;
 
-@use "@material/theme" with (
-  $primary: #4d9685,  
-  $secondary: #9DB4B7, 
-  $background: #121721,  
-  $on-primary: #000000,  
-  $on-secondary: #000000,  
-  $surface: #17222b,  
-  $error: #CF6679, 
+@use '@material/theme' with (
+  $primary: $octo-primary,  
+  $secondary: $octo-secondary, 
+  $background: $octo-background,  
+  $on-primary: $octo-on-primary,  
+  $on-secondary: $octo-on-secondary,  
+  $surface: $octo-surface,  
+  $error: $octo-error, 
 );
 
 @use '@material/button/mdc-button';
 @use '@material/button';
-@use "@material/checkbox";
-@use "@material/form-field";
-@use "@material/card";
-@use "@material/floating-label/mdc-floating-label";
-@use "@material/line-ripple/mdc-line-ripple";
-@use "@material/notched-outline/mdc-notched-outline";
-@use "@material/textfield";
+@use '@material/checkbox';
+@use '@material/form-field';
+@use '@material/card';
+@use '@material/floating-label/mdc-floating-label';
+@use '@material/line-ripple/mdc-line-ripple';
+@use '@material/notched-outline/mdc-notched-outline';
+@use '@material/textfield';
 
 
 html body {
-  background-color: #121721 !important;
+  font-family: Roboto, sans-serif;
+  background-color: $octo-background !important;
   --bs-heading-color: white;
   --bs-body-color: white;
-  --bs-nav-link-color:#4d9685 !important;
-  //--bs-navbar-hover-color: #4d9685!important;
-  //--bs-navbar-brand-hover-color: #4d9685!important;
-  --bs-dropdown-bg:#121721;
-  --bs-dropdown-link-color:#4d9685 !important;
-  --bs-body-bg:#121721 !important;
+  //--bs-nav-link-color:$octo-primary !important;
+  --bs-link-color: #{$octo-primary};
+  --bs-link-hover-color: #{$octo-secondary};
+  --bs-dropdown-bg:#{$octo-background};
+  --bs-dropdown-link-color: #{$octo-primary};
+  --bs-body-bg: #{$octo-background};
+  --octo-primary-color: #{$octo-primary};
+  --octo-secondary-color: #{$octo-secondary};
+  --octo-background-color:#{$octo-background};
 }
 
-.dropdown-menu {
-  --bs-nav-link-color: #4d9685 !important;
-  --bs-dropdown-bg: #121721;
-  --bs-dropdown-link-color: #4d9685 !important;
-}
+//.dropdown-menu {
+//  --bs-nav-link-color: #{$octo-primary};
+//  --bs-dropdown-bg: #{$octo-background};
+//  --bs-dropdown-link-color: #{$octo-primary};
+//}
 
 // Apply core styles for each component
 @include card.core-styles;
