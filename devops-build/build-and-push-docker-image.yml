@@ -32,7 +32,7 @@ steps:
   displayName: Tag docker image for for private ${{ parameters.Repository }}
   inputs:
     command: tag
-    arguments: ${{ parameters.Repository }}:$(Build.BuildNumber) $(DockerRegistryPrivateConnection)/${{ parameters.Repository }}:$(Build.BuildNumber)      
+    arguments: ${{ parameters.Repository }}:$(Build.BuildNumber) $(DockerRegistryPrivateUri)/${{ parameters.Repository }}:$(Build.BuildNumber)      
       
 - task: Docker@2
   condition: ${{ eq(parameters.IsRelease, false) }}
