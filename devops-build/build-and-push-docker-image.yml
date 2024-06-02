@@ -19,13 +19,20 @@ steps:
 
 - task: Docker@2
   condition: ${{ eq(parameters.IsRelease, true) }}
-  displayName: Push ${{ parameters.Repository }}
+  displayName: Push to public ${{ parameters.Repository }}
   inputs:
     command: push
     containerRegistry: $(DockerRegistryPublicConnection)
     repository: ${{ parameters.Repository }}
     tags: |
       $(Build.BuildNumber)
+      
+- task: Docker@2
+  condition: ${{ eq(parameters.IsRelease, false) }}
+  displayName: Tag Docker image for Docker Hub
+  inputs:
+    command: tag
+    arguments: ${{ parameters.Repository }}:$(buildVersion) $(DockerRegistryPrivateConnection)/${{ parameters.Repository }}:$(Build.BuildNumber)      
       
 - task: Docker@2
   condition: ${{ eq(parameters.IsRelease, false) }}
