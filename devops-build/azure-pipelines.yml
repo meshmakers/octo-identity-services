@@ -12,6 +12,7 @@ trigger:
 
 variables:
   - group: GitSSHGroup
+  - group: ApiKeys
   - group: OctoDefault
   - name: solutionFile
     value: 'Octo.Identity.sln'
