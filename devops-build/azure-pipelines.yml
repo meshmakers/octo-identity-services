@@ -70,15 +70,13 @@ stages:
               script: |
                 New-Item $(build.artifactstagingdirectory)/versioninfo.txt
                 Set-Content $(build.artifactstagingdirectory)/versioninfo.txt $(Build.BuildNumber)
-          - template: buildAndPushDockerImage.yml
+          - template: build-and-push-docker-image.yml
             parameters:
-              ContainerRegistry: 'dockerhub@ianitor'
               Repository: meshmakers/octo-mesh-identity-services
               Dockerfile: src/IdentityServices/Dockerfile
               IsRelease: ${{ variables.isRelease }}
-          - template: buildAndPushDockerImage.yml
+          - template: build-and-push-docker-image.yml
             parameters:
-              ContainerRegistry: 'dockerhub@ianitor'
               Repository: meshmakers/octo-mesh-policy-services
               Dockerfile: src/PolicyServices/Dockerfile
               IsRelease: ${{ variables.isRelease }}

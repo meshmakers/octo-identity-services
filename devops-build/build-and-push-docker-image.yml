@@ -1,6 +1,4 @@
 parameters:
-  - name: ContainerRegistry
-    type: string
   - name: Repository
     type: string
   - name: Dockerfile
@@ -13,7 +11,6 @@ steps:
   displayName: Build ${{ parameters.Repository }}
   inputs:
     command: build
-    containerRegistry: ${{ parameters.ContainerRegistry }}
     repository: ${{ parameters.Repository }}
     dockerfile: ${{ parameters.Dockerfile }}
     buildContext: $(System.DefaultWorkingDirectory)
@@ -25,7 +22,17 @@ steps:
   displayName: Push ${{ parameters.Repository }}
   inputs:
     command: push
-    containerRegistry: ${{ parameters.ContainerRegistry }}
+    containerRegistry: $(DockerRegistryPublicConnection)
+    repository: ${{ parameters.Repository }}
+    tags: |
+      $(Build.BuildNumber)
+      
+- task: Docker@2
+  condition: ${{ eq(parameters.IsRelease, false) }}
+  displayName: Push to private ${{ parameters.Repository }}
+  inputs:
+    command: push
+    containerRegistry: $(DockerRegistryPrivateConnection)
     repository: ${{ parameters.Repository }}
     tags: |
       $(Build.BuildNumber)
