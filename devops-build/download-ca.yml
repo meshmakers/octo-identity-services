@@ -1,0 +1,12 @@
+steps:
+- task: DownloadSecureFile@1
+  name: nuget_ca
+  displayName: 'Download CA certificate'
+  inputs:
+    secureFile: '$(NugetPrivateServerCa)'
+- task: PowerShell@2
+  displayName: 'Read certificate content into variable'
+  inputs:
+    targetType: 'inline'
+    script: |
+      Copy-Item $(nuget_ca.secureFilePath) $(System.DefaultWorkingDirectory)/$(NugetPrivateServerCa)

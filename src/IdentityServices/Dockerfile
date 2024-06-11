@@ -8,7 +8,7 @@ FROM mcr.microsoft.com/dotnet/sdk:8.0-bookworm-slim AS build
 ARG OCTO_PRIVATE_NUGET_SERVICE
 ARG OCTO_PRIVATE_NUGET_CERTIFICATE
 
-RUN echo "${OCTO_PRIVATE_NUGET_CERTIFICATE}" > /usr/local/share/ca-certificates/nugetca.crt &&
+COPY ${OCTO_PRIVATE_NUGET_CERTIFICATE} /usr/local/share/ca-certificates/nugetca.crt
 RUN chmod 644 /usr/local/share/ca-certificates/nugetca.crt && update-ca-certificates
 
 WORKDIR /src

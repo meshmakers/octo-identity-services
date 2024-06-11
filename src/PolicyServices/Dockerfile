@@ -4,8 +4,16 @@ EXPOSE 80
 EXPOSE 443
 
 FROM mcr.microsoft.com/dotnet/sdk:8.0-bookworm-slim AS build
+
+ARG OCTO_PRIVATE_NUGET_SERVICE
+ARG OCTO_PRIVATE_NUGET_CERTIFICATE
+
+COPY ${OCTO_PRIVATE_NUGET_CERTIFICATE} /usr/local/share/ca-certificates/nugetca.crt
+RUN chmod 644 /usr/local/share/ca-certificates/nugetca.crt && update-ca-certificates
+
 WORKDIR /src
 COPY . .
+ENV NUGET_XMLDOC_MODE=none
 WORKDIR "/src/src/PolicyServices"
 RUN dotnet build "PolicyServices.csproj" -c Release 
 
