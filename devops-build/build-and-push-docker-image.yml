@@ -5,7 +5,7 @@ parameters:
     type: string
   - name: IsRelease
     type: boolean
-    
+
 steps:
 - task: Docker@2
   displayName: Build ${{ parameters.Repository }}
@@ -14,6 +14,7 @@ steps:
     repository: ${{ parameters.Repository }}
     dockerfile: ${{ parameters.Dockerfile }}
     buildContext: $(System.DefaultWorkingDirectory)
+    arguments: '--build-arg OCTO_PRIVATE_NUGET_SERVICE="$(NugetPrivateServer)" --build-arg OCTO_PRIVATE_NUGET_CERTIFICATE="$(NugetPrivateServerCa)"'
     tags: |
       $(Build.BuildNumber)
 
