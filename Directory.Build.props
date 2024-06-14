@@ -2,7 +2,7 @@
     <PropertyGroup>
         <OctoRootDirectoryPropsFilePath>$([MSBuild]::GetPathOfFileAbove('Directory.Build.props', '$(MSBuildThisFileDirectory)../'))</OctoRootDirectoryPropsFilePath>
         <OctoUserPropsFilePath>$([MSBuild]::GetPathOfFileAbove('Octo.User.props', '$(MSBuildThisFileDirectory)'))</OctoUserPropsFilePath>
-        <OctoRepoRootPath>$(MSBuildThisFileDirectory)../</OctoRepoRootPath>
+        <OctoRepoRootPath>$(MSBuildThisFileDirectory)</OctoRepoRootPath>
         <OctoRepoRootPath Condition="'$(OctoRootDirectoryPropsFilePath)'!=''">$([System.IO.Path]::GetDirectoryName($(OctoRootDirectoryPropsFilePath)))</OctoRepoRootPath>
     </PropertyGroup>
     <!-- Import an custom file to overwrite versions etc. -->
