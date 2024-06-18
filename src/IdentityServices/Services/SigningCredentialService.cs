@@ -1,9 +1,7 @@
-using System.Collections.Generic;
-using System.IO;
 using System.Security.Cryptography.X509Certificates;
-using System.Threading.Tasks;
 using Duende.IdentityServer.Models;
 using Duende.IdentityServer.Stores;
+using IdentityServerPersistence.Configuration.Options;
 using Meshmakers.Common.Shared;
 using Microsoft.Extensions.Options;
 using Microsoft.IdentityModel.Tokens;

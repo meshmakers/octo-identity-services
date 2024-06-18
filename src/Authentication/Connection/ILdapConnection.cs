@@ -1,5 +1,3 @@
-using System;
-using System.Collections.Generic;
 using Novell.Directory.Ldap;
 
 namespace Meshmakers.Octo.Backend.Authentication.Connection;

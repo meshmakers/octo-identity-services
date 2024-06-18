@@ -1,6 +1,4 @@
-using System;
 using System.Text.Encodings.Web;
-using System.Threading.Tasks;
 using Meshmakers.Octo.Backend.Authentication.Connection;
 using Meshmakers.Octo.Backend.Authentication.Controllers;
 using Meshmakers.Octo.Backend.Authentication.Options;
@@ -15,7 +13,8 @@ public class MicrosoftAdAuthenticationHandler : AuthenticationHandler<LdapOption
 {
     private readonly ILdapConnectionFactory _ldapConnectionFactory;
 
-    public MicrosoftAdAuthenticationHandler(IOptionsMonitor<LdapOptions> options, ILoggerFactory logger, UrlEncoder encoder, ISystemClock clock, ILdapConnectionFactory ldapConnectionFactory) : base(options, logger, encoder, clock)
+    public MicrosoftAdAuthenticationHandler(IOptionsMonitor<LdapOptions> options, ILoggerFactory logger, UrlEncoder encoder,
+        ILdapConnectionFactory ldapConnectionFactory) : base(options, logger, encoder)
     {
         _ldapConnectionFactory = ldapConnectionFactory;
     }
@@ -45,7 +44,8 @@ public class MicrosoftAdAuthenticationHandler : AuthenticationHandler<LdapOption
 
     protected override Task HandleChallengeAsync(AuthenticationProperties properties)
     {
-        var url = QueryHelpers.AddQueryString($"/{AuthenticationConstants.ExternalLoginRoute}/{MicrosoftAdController.RouteName}", properties.Items);
+        var url = QueryHelpers.AddQueryString($"/{AuthenticationConstants.ExternalLoginRoute}/{MicrosoftAdController.RouteName}",
+            properties.Items);
         Context.Response.Redirect(url);
         return Task.CompletedTask;
     }

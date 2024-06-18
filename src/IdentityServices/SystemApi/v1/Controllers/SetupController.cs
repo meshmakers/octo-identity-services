@@ -1,15 +1,10 @@
-using System.Linq;
-using System.Threading.Tasks;
 using IdentityModel;
-using Meshmakers.Octo.Backend.Infrastructure.CredentialGenerator;
-using Meshmakers.Octo.Common.Shared;
-using Meshmakers.Octo.Common.Shared.DataTransferObjects;
-using Meshmakers.Octo.SystematizedData.Persistence.SystemEntities;
+using IdentityServerPersistence;
+using Meshmakers.Octo.Backend.IdentityServices.Resources;
+using Meshmakers.Octo.Backend.IdentityServices.Services;
+using Meshmakers.Octo.Communication.Contracts.DataTransferObjects;
 using Microsoft.AspNetCore.Authorization;
-using Microsoft.AspNetCore.Http;
-using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Mvc;
-using Microsoft.Extensions.Logging;
 
 namespace Meshmakers.Octo.Backend.IdentityServices.SystemApi.v1.Controllers;
 
@@ -17,23 +12,9 @@ namespace Meshmakers.Octo.Backend.IdentityServices.SystemApi.v1.Controllers;
 [Route(IdentityServiceConstants.ApiPathPrefix + "/[controller]")]
 [ApiController]
 [ApiVersion(IdentityServiceConstants.ApiVersion1)]
-public class SetupController : ControllerBase
+public class SetupController(ILogger<SetupController> logger, IUserManagementService userManagementService)
+    : ControllerBase
 {
-    private readonly ICredentialGenerator _credentialGenerator;
-    private readonly ILogger<SetupController> _logger;
-    private readonly RoleManager<OctoRole> _roleManager;
-    private readonly UserManager<OctoUser> _userManager;
-
-    public SetupController(UserManager<OctoUser> userManager, RoleManager<OctoRole> roleManager,
-        ILogger<SetupController> logger,
-        ICredentialGenerator credentialGenerator)
-    {
-        _userManager = userManager;
-        _roleManager = roleManager;
-        _logger = logger;
-        _credentialGenerator = credentialGenerator;
-    }
-
     /// <summary>
     ///     Configures identity services in the case no user is existing.
     /// </summary>
@@ -51,64 +32,20 @@ public class SetupController : ControllerBase
         {
             return BadRequest(ModelState);
         }
-        
-        if (_userManager.Users.Any())
-        {
-            return NotFound("The request is not valid for this configuration.");
-        }
 
-        if (string.IsNullOrWhiteSpace(adminUserDto.Password))
+        try
         {
-            _logger.LogInformation("Password value is missing");
+            await userManagementService.CreateAdminUserAsync(adminUserDto);
+            return Ok();
+        }
+        catch (UsersAlreadyConfiguredException)
+        {
+            return NotFound(IdentityTexts.Backend_Identity_Setup_Status_UsersAlreadyConfigured);
+        }
+        catch (UserManagementException e)
+        {
+            logger.LogError(e, "{Message}", e.Message);
             return StatusCode(StatusCodes.Status406NotAcceptable);
         }
-
-        if (!_credentialGenerator.CheckPassword(adminUserDto.Password))
-        {
-            _logger.LogInformation("The password does not comply with the minimum requirements");
-            return StatusCode(StatusCodes.Status406NotAcceptable);
-        }
-
-        var adminRole = await _roleManager.FindByNameAsync(CommonConstants.AdministratorsRole);
-        if (adminRole == null)
-        {
-            _logger.LogInformation("No Administrator-Role has been found");
-            return StatusCode(StatusCodes.Status406NotAcceptable);
-        }
-        
-        var developerRole = await _roleManager.FindByNameAsync(CommonConstants.DevelopersRole);
-        if (developerRole == null)
-        {
-            _logger.LogInformation("No Developer-Role has been found");
-            return StatusCode(StatusCodes.Status406NotAcceptable);
-        }
-        
-        var managersRole = await _roleManager.FindByNameAsync(CommonConstants.ManagersRole);
-        if (managersRole == null)
-        {
-            _logger.LogInformation("No Managers-Role has been found");
-            return StatusCode(StatusCodes.Status406NotAcceptable);
-        }
-        
-        var usersRole = await _roleManager.FindByNameAsync(CommonConstants.UsersRole);
-        if (usersRole == null)
-        {
-            _logger.LogInformation("No Users-Role has been found");
-            return StatusCode(StatusCodes.Status406NotAcceptable);
-        }
-
-        var adminUser = await _userManager.FindByNameAsync(adminUserDto.EMail);
-        if (adminUser == null)
-        {
-            adminUser = new OctoUser { UserName = adminUserDto.EMail, Email = adminUserDto.EMail };
-
-            await _userManager.CreateAsync(adminUser, adminUserDto.Password);
-            await _userManager.AddToRoleAsync(adminUser, adminRole.Id.ToString());
-            await _userManager.AddToRoleAsync(adminUser, developerRole.Id.ToString());
-            await _userManager.AddToRoleAsync(adminUser, managersRole.Id.ToString());
-            await _userManager.AddToRoleAsync(adminUser, usersRole.Id.ToString());
-        }
-
-        return Ok();
     }
 }

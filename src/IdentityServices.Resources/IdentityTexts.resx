@@ -1,9 +1,9 @@
 <?xml version="1.0" encoding="utf-8"?>
 
 <root>
-    <xsd:schema id="root" xmlns="" xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns:msdata="urn:schemas-microsoft-com:xml-msdata">
+    <xsd:schema xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns:msdata="urn:schemas-microsoft-com:xml-msdata" id="root" xmlns="">
         <xsd:element name="root" msdata:IsDataSet="true">
-            
+
         </xsd:element>
     </xsd:schema>
     <resheader name="resmimetype">
@@ -13,10 +13,14 @@
         <value>1.3</value>
     </resheader>
     <resheader name="reader">
-        <value>System.Resources.ResXResourceReader, System.Windows.Forms, Version=2.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
+        <value>System.Resources.ResXResourceReader, System.Windows.Forms, Version=2.0.0.0, Culture=neutral,
+            PublicKeyToken=b77a5c561934e089
+        </value>
     </resheader>
     <resheader name="writer">
-        <value>System.Resources.ResXResourceWriter, System.Windows.Forms, Version=2.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
+        <value>System.Resources.ResXResourceWriter, System.Windows.Forms, Version=2.0.0.0, Culture=neutral,
+            PublicKeyToken=b77a5c561934e089
+        </value>
     </resheader>
     <data name="Backend_IdentityServices_UserSchema_Swagger_DisplayName" xml:space="preserve">
     <value>Identity Services Swagger UI</value>
@@ -449,5 +453,77 @@
     </data>
     <data name="Backend_Identity_Login_LdapUser_Label" xml:space="preserve">
         <value>Username</value>
-    </data>    
+    </data>
+    <data name="Backend_Persistence_Identity_DefaultIdentityError" xml:space="preserve">
+        <value>An unknown failure has occurred.</value>
+    </data>
+    <data name="Backend_Persistence_Identity_RecoveryCodeRedemptionFailed" xml:space="preserve">
+        <value>Recovery code redemption failed.</value>
+    </data>
+    <data name="Backend_Persistence_Identity_DuplicateEmail" xml:space="preserve">
+        <value>Email '{0}' is already taken.</value>
+    </data>
+    <data name="Backend_Persistence_Identity_DuplicateUserName" xml:space="preserve">
+        <value>Username '{0}' is already taken.</value>
+    </data>
+    <data name="Backend_Persistence_Identity_DuplicateRoleName" xml:space="preserve">
+        <value>Role name '{0}' is already taken.</value>
+    </data>
+    <data name="Backend_Persistence_Identity_InvalidUserName" xml:space="preserve">
+        <value>Username '{0}' is invalid, can only contain letters or digits.</value>
+    </data>
+    <data name="Backend_Persistence_Identity_PasswordRequiresDigit" xml:space="preserve">
+        <value>Passwords must have at least one digit ('0'-'9').</value>
+    </data>
+    <data name="Backend_Persistence_Identity_PasswordRequiresUniqueChars" xml:space="preserve">
+        <value>Passwords must use at least {0} different characters.</value>
+    </data>
+    <data name="Backend_Persistence_Identity_PasswordRequiresUpper" xml:space="preserve">
+        <value>Passwords must have at least one uppercase ('A'-'Z').</value>
+    </data>
+    <data name="Backend_Persistence_Identity_PasswordRequiresNonAlphanumeric" xml:space="preserve">
+        <value>Passwords must have at least one non alphanumeric character.</value>
+    </data>
+    <data name="Backend_Persistence_Identity_PasswordRequiresLower" xml:space="preserve">
+        <value>Passwords must have at least one lowercase ('a'-'z').</value>
+    </data>
+    <data name="Backend_Persistence_Identity_PasswordTooShort" xml:space="preserve">
+        <value>Passwords must be at least {0} characters.</value>
+    </data>
+    <data name="Backend_Persistence_Identity_UserAlreadyHasPassword" xml:space="preserve">
+        <value>User already has a password set.</value>
+    </data>
+    <data name="Backend_Persistence_Identity_UserAlreadyInRole" xml:space="preserve">
+        <value>User already in role '{0}'.</value>
+    </data>
+    <data name="Backend_Persistence_Identity_UserNotInRole" xml:space="preserve">
+        <value>User is not in role '{0}'.</value>
+    </data>
+    <data name="Backend_Persistence_Identity_UserLockoutNotEnabled" xml:space="preserve">
+        <value>Lockout is not enabled for this user.</value>
+    </data>
+    <data name="Backend_Persistence_Identity_InvalidEmail" xml:space="preserve">
+        <value>Email '{0}' is invalid.</value>
+    </data>
+    <data name="Backend_Persistence_Identity_InvalidRoleName" xml:space="preserve">
+        <value>Role name '{0}' is invalid.</value>
+    </data>
+    <data name="Backend_Persistence_Identity_InvalidToken" xml:space="preserve">
+        <value>Invalid token.</value>
+    </data>
+    <data name="Backend_Persistence_Identity_LoginAlreadyAssociated" xml:space="preserve">
+        <value>A user with this login already exists.</value>
+    </data>
+    <data name="Backend_Persistence_Identity_PasswordMismatch" xml:space="preserve">
+        <value>Incorrect password.</value>
+    </data>
+    <data name="Backend_Persistence_Identity_ConcurrencyFailure" xml:space="preserve">
+        <value>Optimistic concurrency failure, object has been modified.</value>
+    </data>
+    <data name="Backend_Identity_Setup_Status_EMailMissing" xml:space="preserve">
+    <value>No E-Mail address has been defined.</value>
+  </data>
+  <data name="Backend_Persistence_Identity_CommonError" xml:space="preserve">
+    <value> Please check your input values.</value>
+  </data>
 </root>

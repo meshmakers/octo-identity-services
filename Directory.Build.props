@@ -1,15 +1,37 @@
 <Project>
     <PropertyGroup>
-        <BaseDirectoryBuildPath>$([MSBuild]::GetPathOfFileAbove('Directory.Build.props', '$(MSBuildThisFileDirectory)../'))</BaseDirectoryBuildPath>
+        <OctoRootDirectoryPropsFilePath>$([MSBuild]::GetPathOfFileAbove('Directory.Build.props', '$(MSBuildThisFileDirectory)../'))</OctoRootDirectoryPropsFilePath>
+        <OctoUserPropsFilePath>$([MSBuild]::GetPathOfFileAbove('Octo.User.props', '$(MSBuildThisFileDirectory)'))</OctoUserPropsFilePath>
+        <OctoRepoRootPath>$(MSBuildThisFileDirectory)</OctoRepoRootPath>
+        <OctoRepoRootPath Condition="'$(OctoRootDirectoryPropsFilePath)'!=''">$([System.IO.Path]::GetDirectoryName($(OctoRootDirectoryPropsFilePath)))</OctoRepoRootPath>
     </PropertyGroup>
-    <Import Condition="Exists($(BaseDirectoryBuildPath))" Project="$(BaseDirectoryBuildPath)" />
+    <!-- Import an custom file to overwrite versions etc. -->
+    <Import Condition="'$(OctoRootDirectoryPropsFilePath)'=='' And Exists($(OctoUserPropsFilePath))" Project="$(OctoUserPropsFilePath)"/>
+    <!-- Import the Directory.Build.props file of the root directory -->
+    <Import Condition="Exists($(OctoRootDirectoryPropsFilePath))" Project="$(OctoRootDirectoryPropsFilePath)"/>
     <PropertyGroup>
-        <OctoCorePath Condition=" '$(OctoCorePath)' == '' ">$(MSBuildThisFileDirectory)src/octo-core/</OctoCorePath>
         <OctoCommonServicesPath Condition=" '$(OctoCommonServicesPath)' == '' ">$(MSBuildThisFileDirectory)src/octo-common-services/</OctoCommonServicesPath>
-        <Authors>meshmakers GmbH</Authors>
-        <Company>meshmakers GmbH</Company>
-        <Copyright>https://www.meshmakers.io</Copyright>
+        <OctoConstructionKitPath Condition=" '$(OctoConstructionKitPath)' == '' ">$(OctoCommonServicesPath)src/octo-construction-kit-engine-mongodb/</OctoConstructionKitPath>
+        <Authors>meshmakers GmbH and Contributors</Authors>
+        <Company>meshmakers GmbH and Contributors</Company>
+        <Copyright>(c) 2022-2024 meshmakers GmbH</Copyright>
         <LangVersion>latestmajor</LangVersion>
         <Nullable>enable</Nullable>
+        <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+        <ImplicitUsings>true</ImplicitUsings>
+        <RepositoryUrl>https://github.com/meshmakers/octo-identity-services</RepositoryUrl>
+        <PackageIcon>meshmakers64.png</PackageIcon>
+        <PackageLicenseFile>LICENSE</PackageLicenseFile>
+        <PackageProjectUrl>https://www.meshmakers.io</PackageProjectUrl>
+        <PackageTags>Octo data mesh iot</PackageTags>
+        <TargetFramework>net8.0</TargetFramework>
+        <OctoVersion Condition="'$(Configuration)'=='DebugL'">999.0.0</OctoVersion>
+        <OctoVersion Condition="'$(OctoNugetPrivateServer)'!='' And '$(OctoVersion)'==''">0.0.*</OctoVersion>
+        <OctoVersion Condition="'$(OctoNugetPrivateServer)'=='' And '$(OctoVersion)'==''">3.1.*</OctoVersion>
+        <Version Condition="'$(Configuration)'=='DebugL'">999.0.0</Version>
+        <PackageVersion Condition="'$(Configuration)'=='DebugL'">999.0.0</PackageVersion>
+        <RestoreSources Condition="'$(RestoreSources)'==''">https://api.nuget.org/v3/index.json</RestoreSources>
+        <RestoreSources Condition="'$(OctoNugetPrivateServer)'!=''">$(RestoreSources);$(OctoNugetPrivateServer)</RestoreSources>
+        <RestoreSources Condition="'$(Configuration)'=='DebugL'">$(RestoreSources);$(OctoRepoRootPath)../nuget</RestoreSources>
     </PropertyGroup>
 </Project>

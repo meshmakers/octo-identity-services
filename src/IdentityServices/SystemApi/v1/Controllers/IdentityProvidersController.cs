@@ -1,18 +1,16 @@
-﻿using System;
-using System.ComponentModel.DataAnnotations;
-using System.Linq;
-using System.Threading.Tasks;
+﻿using System.ComponentModel.DataAnnotations;
 using AutoMapper;
 using IdentityModel;
-using Meshmakers.Octo.Common.Shared;
-using Meshmakers.Octo.Common.Shared.DataTransferObjects;
-using Meshmakers.Octo.Common.Shared.DistributedCache;
-using Meshmakers.Octo.SystematizedData.Persistence.DataAccess;
-using Meshmakers.Octo.SystematizedData.Persistence.SystemEntities;
-using Meshmakers.Octo.SystematizedData.Persistence.SystemStores;
+using IdentityServerPersistence;
+using IdentityServerPersistence.SystemStores;
+using Meshmakers.Octo.Common.DistributionEventHub.Services;
+using Meshmakers.Octo.Communication.Contracts.DataTransferObjects;
+using Meshmakers.Octo.ConstructionKit.Contracts;
+using Meshmakers.Octo.Runtime.Contracts.MongoDb;
+using Meshmakers.Octo.Services.Common.DistributionEventHub.Messages;
 using Microsoft.AspNetCore.Authorization;
-using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
+using Persistence.IdentityCkModel.Generated.System.Identity.v1;
 
 namespace Meshmakers.Octo.Backend.IdentityServices.SystemApi.v1.Controllers;
 
@@ -25,7 +23,7 @@ namespace Meshmakers.Octo.Backend.IdentityServices.SystemApi.v1.Controllers;
 [ApiVersion(IdentityServiceConstants.ApiVersion1)]
 public class IdentityProvidersController : ControllerBase
 {
-    private readonly IDistributedWithPubSubCache _distributedCache;
+    private readonly IDistributionEventHubService _distributionEventHubService;
     private readonly IOctoIdentityProviderStore _identityProviderStore;
     private readonly IMapper _mapper;
 
@@ -34,13 +32,13 @@ public class IdentityProvidersController : ControllerBase
     /// </summary>
     /// <param name="identityProviderStore"></param>
     /// <param name="mapper"></param>
-    /// <param name="distributedCache"></param>
+    /// <param name="distributionEventHubService"></param>
     public IdentityProvidersController(IOctoIdentityProviderStore identityProviderStore, IMapper mapper,
-        IDistributedWithPubSubCache distributedCache)
+        IDistributionEventHubService distributionEventHubService)
     {
         _identityProviderStore = identityProviderStore;
         _mapper = mapper;
-        _distributedCache = distributedCache;
+        _distributionEventHubService = distributionEventHubService;
     }
 
     /// <summary>
@@ -63,14 +61,14 @@ public class IdentityProvidersController : ControllerBase
     /// <summary>
     ///     Returns identity provider information based on it's name
     /// </summary>
-    /// <param name="id">ID of the identity provider</param>
+    /// <param name="rtId">ID of the identity provider</param>
     /// <returns>An Object that describes the identity provider.</returns>
-    [HttpGet("{id}")]
+    [HttpGet("{rtId}")]
     [ProducesResponseType(typeof(IdentityProvidersResult), StatusCodes.Status200OK)]
     [Authorize(IdentityServiceConstants.IdentityApiReadOnlyPolicy)]
-    public async Task<ActionResult<IdentityProvidersResult>> Get([Required] string id)
+    public async Task<ActionResult<IdentityProvidersResult>> Get([Required] OctoObjectId rtId)
     {
-        var identityProvider = await _identityProviderStore.GetAsync(id);
+        var identityProvider = await _identityProviderStore.GetByIdAsync(rtId);
         if (identityProvider == null)
         {
             return NotFound();
@@ -97,31 +95,31 @@ public class IdentityProvidersController : ControllerBase
     public async Task<ActionResult<IdentityProviderDto>> AddNewIdentityProviderAsync(
         [FromBody] IdentityProviderDto identityProviderDto)
     {
-        var identityProvider = _mapper.Map<OctoIdentityProvider>(identityProviderDto);
-
+        var identityProvider = _mapper.Map<RtIdentityProvider>(identityProviderDto);
+        
         await HandleWriteExceptionAsync(async () => await _identityProviderStore.StoreAsync(identityProvider));
-        await ClearCacheAsync();
+        await SendIdentityProviderUpdate();
         return _mapper.Map<IdentityProviderDto>(identityProvider);
     }
 
     /// <summary>
     ///     Delete an existing identity provider.
     /// </summary>
-    /// <param name="id">The ID of the identity provider to be deleted</param>
+    /// <param name="rtId">The ID of the identity provider to be deleted</param>
     /// <response code="200">The identity provider was deleted.</response>
     /// <response code="401">Unauthorized. You need to authenticate in order to use the API.</response>
     /// <response code="404">The identity provider to be deleted does not exist.</response>
-    [HttpDelete("{id}")]
+    [HttpDelete("{rtId}")]
     [Authorize(IdentityServiceConstants.IdentityApiReadWritePolicy)]
-    public async Task<IActionResult> DeleteIdentityProviderAsync([Required] string id)
+    public async Task<IActionResult> DeleteIdentityProviderAsync([Required] OctoObjectId rtId)
     {
         if (!ModelState.IsValid)
         {
             return BadRequest(ModelState);
         }
 
-        await _identityProviderStore.RemoveAsync(id);
-        await ClearCacheAsync();
+        await _identityProviderStore.RemoveAsync(rtId);
+        await SendIdentityProviderUpdate();
         return Ok();
     }
 
@@ -129,7 +127,7 @@ public class IdentityProvidersController : ControllerBase
     ///     Replace the data of an existing provider.
     /// </summary>
     /// <remarks>Updates an existing provider with the specified ID with the provided data.</remarks>
-    /// <param name="id">ID of an existing provider</param>
+    /// <param name="rtId">ID of an existing provider</param>
     /// <param name="identityProviderDto">The configuration for the new identity provider.</param>
     /// <response code="200">Returns the provider.</response>
     /// <response code="400">
@@ -138,11 +136,11 @@ public class IdentityProvidersController : ControllerBase
     /// </response>
     /// <response code="401">Unauthorized. You need to authenticate in order to use the API.</response>
     /// <response code="404">Provider with this ID not found.</response>
-    [HttpPut("{id}")]
+    [HttpPut("{rtId}")]
     [ProducesResponseType(typeof(IdentityProviderDto), StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(UniquenessViolationErrorResponse), StatusCodes.Status400BadRequest)]
     [Authorize(IdentityServiceConstants.IdentityApiReadWritePolicy)]
-    public async Task<ActionResult<IdentityProviderDto>> ReplaceProviderAsync([FromRoute] [Required] string id,
+    public async Task<ActionResult<IdentityProviderDto>> ReplaceProviderAsync([FromRoute] [Required] OctoObjectId rtId,
         [FromBody] [Required] IdentityProviderDto identityProviderDto)
     {
         if (identityProviderDto == null)
@@ -150,11 +148,11 @@ public class IdentityProvidersController : ControllerBase
             throw new ArgumentNullException(nameof(identityProviderDto));
         }
 
-        var identityProvider = _mapper.Map<OctoIdentityProvider>(identityProviderDto);
-        identityProvider.Id = id;
+        var identityProvider = _mapper.Map<RtIdentityProvider>(identityProviderDto);
+        identityProvider.RtId = rtId;
 
         await HandleWriteExceptionAsync(async () => await _identityProviderStore.StoreAsync(identityProvider));
-        await ClearCacheAsync();
+        await SendIdentityProviderUpdate();
         return Ok(identityProviderDto);
     }
 
@@ -167,13 +165,13 @@ public class IdentityProvidersController : ControllerBase
         catch (DuplicateKeyException ex)
         {
             // Currently, only the alias must be unique. Mongodb does not provide an easy way of finding out which unique property was violated.
-            throw new DuplicateKeyException("Alias must be unique", typeof(IdentityProviderDto),
-                new[] { nameof(IdentityProviderDto.Alias) }, ex);
+            throw new DuplicateKeyException("Name must be unique", typeof(IdentityProviderDto),
+                new[] { nameof(IdentityProviderDto.Name) }, ex);
         }
     }
 
-    private async Task ClearCacheAsync()
+    private Task SendIdentityProviderUpdate()
     {
-        await _distributedCache.PublishAsync(CacheCommon.KeyIdentityProviderUpdate, Guid.NewGuid().ToString());
+        return _distributionEventHubService.PublishAsync(new IdentityProviderUpdate(_identityProviderStore.TenantId));
     }
 }

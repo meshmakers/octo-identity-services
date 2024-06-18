@@ -1,20 +1,13 @@
-using System;
-using System.Collections.Generic;
-using System.Linq;
 using System.Security.Claims;
-using System.Threading.Tasks;
 using Duende.IdentityServer;
 using Duende.IdentityServer.Events;
 using Duende.IdentityServer.Services;
 using IdentityModel;
-using Meshmakers.Octo.SystematizedData.Persistence.SystemEntities;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authorization;
-using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Mvc;
-using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Extensions.Logging;
+using Persistence.IdentityCkModel.Generated.System.Identity.v1;
 
 namespace Meshmakers.Octo.Backend.IdentityServices.Controllers.Account;
 
@@ -23,29 +16,26 @@ public class ExternalController : Controller
 {
     private readonly IEventService _events;
     private readonly IIdentityServerInteractionService _interaction;
-    private readonly RoleManager<OctoRole> _roleManager;
-    private readonly ILogger<ExternalController> _logger;
-    private readonly SignInManager<OctoUser> _signInManager;
-    private readonly UserManager<OctoUser> _userManager;
+    private readonly RoleManager<RtRole> _roleManager;
+    private readonly SignInManager<RtUser> _signInManager;
+    private readonly UserManager<RtUser> _userManager;
 
     public ExternalController(
-        UserManager<OctoUser> userManager,
-        SignInManager<OctoUser> signInManager,
+        UserManager<RtUser> userManager,
+        SignInManager<RtUser> signInManager,
         IIdentityServerInteractionService interaction,
-        RoleManager<OctoRole> roleManager,
-        IEventService events,
-        ILogger<ExternalController> logger)
+        RoleManager<RtRole> roleManager,
+        IEventService events)
     {
         _userManager = userManager;
         _signInManager = signInManager;
         _interaction = interaction;
         _roleManager = roleManager;
         _events = events;
-        _logger = logger;
     }
 
     /// <summary>
-    /// initiate roundtrip to external authentication provider
+    ///     initiate roundtrip to external authentication provider
     /// </summary>
     [HttpGet]
     public Task<IActionResult> Challenge(string provider, string returnUrl)
@@ -57,12 +47,12 @@ public class ExternalController : Controller
 
         // validate returnUrl - either it is a valid OIDC URL or back to a local page
         if (Url.IsLocalUrl(returnUrl) == false && _interaction.IsValidReturnUrl(returnUrl) == false)
-        {
             // user might have clicked on a malicious link - should be logged
+        {
             throw new Exception("invalid return URL");
         }
 
-        var redirectUrl = Url.Action("Callback", "External", new {ReturnUrl = returnUrl});
+        var redirectUrl = Url.Action("Callback", "External", new { ReturnUrl = returnUrl });
         var properties = _signInManager.ConfigureExternalAuthenticationProperties(provider, redirectUrl);
         return Task.FromResult<IActionResult>(Challenge(properties, provider));
     }
@@ -71,75 +61,78 @@ public class ExternalController : Controller
     ///     PostApiResource processing of external authentication
     /// </summary>
     /// <summary>
-    /// Post processing of external authentication
+    ///     Post processing of external authentication
     /// </summary>
     [HttpGet]
     public async Task<IActionResult> Callback(string? returnUrl = null)
     {
-      // read external identity from the temporary cookie
-      var result = await HttpContext.AuthenticateAsync(IdentityConstants.ExternalScheme);
-      if (result.Succeeded != true)
-      {
-        throw new Exception("External authentication error");
-      }
+        // read external identity from the temporary cookie
+        var result = await HttpContext.AuthenticateAsync(IdentityConstants.ExternalScheme);
+        if (result.Succeeded != true)
+        {
+            throw new Exception("External authentication error");
+        }
 
-      var info = await _signInManager.GetExternalLoginInfoAsync();
-      var user = await _userManager.FindByLoginAsync(info.LoginProvider, info.ProviderKey);
+        var info = await _signInManager.GetExternalLoginInfoAsync();
+        if (info == null)
+        {
+            return Redirect("~/");
+        }
+
+        var user = await _userManager.FindByLoginAsync(info.LoginProvider, info.ProviderKey);
 
 
-      // lookup our user and external provider info
-      if (user == null)
-      {
-        // this might be where you might initiate a custom workflow for user registration
-        // in this sample we don't show how that would be done, as our sample implementation
-        // simply auto-provisions new external user
-        user = await AutoProvisionUserAsync(info.LoginProvider, info.ProviderKey,
-            info.Principal.Claims.ToList());
-      }
+        // lookup our user and external provider info
+        if (user == null)
+            // this might be where you might initiate a custom workflow for user registration
+            // in this sample we don't show how that would be done, as our sample implementation
+            // simply auto-provisions new external user
+        {
+            user = await AutoProvisionUserAsync(info.LoginProvider, info.ProviderKey,
+                info.Principal.Claims.ToList());
+        }
 
-      await SynchronizeGroups(info.Principal.Claims, user);
+        await SynchronizeGroups(info.Principal.Claims, user);
 
-      // this allows us to collect any additional claims or properties
-      // for the specific protocols used and store them in the local auth cookie.
-      // this is typically used to store data needed for sign out from those protocols.
-      var additionalLocalClaims = new List<Claim>();
-      var localSignInProps = new AuthenticationProperties();
-      ProcessLoginCallbackForOidc(result, additionalLocalClaims, localSignInProps);
+        // this allows us to collect any additional claims or properties
+        // for the specific protocols used and store them in the local auth cookie.
+        // this is typically used to store data needed for sign out from those protocols.
+        var additionalLocalClaims = new List<Claim>();
+        var localSignInProps = new AuthenticationProperties();
+        ProcessLoginCallbackForOidc(result, additionalLocalClaims, localSignInProps);
 
-      // issue authentication cookie for user
-      // we must issue the cookie manually, and can't use the SignInManager because
-      // it doesn't expose an API to issue additional claims from the login workflow
-      var principal = await _signInManager.CreateUserPrincipalAsync(user);
-      additionalLocalClaims.AddRange(principal.Claims);
-      var name = principal.FindFirst(JwtClaimTypes.Name)?.Value ?? user.Id.ToString();
-      await _events.RaiseAsync(
-        new UserLoginSuccessEvent(info.LoginProvider, info.ProviderKey, user.Id.ToString(), name));
-      
-      var clock= HttpContext.RequestServices.GetRequiredService<ISystemClock>();
+        // issue authentication cookie for user
+        // we must issue the cookie manually, and can't use the SignInManager because
+        // it doesn't expose an API to issue additional claims from the login workflow
+        var principal = await _signInManager.CreateUserPrincipalAsync(user);
+        additionalLocalClaims.AddRange(principal.Claims);
+        var name = principal.FindFirst(JwtClaimTypes.Name)?.Value ?? user.RtId.ToString();
+        await _events.RaiseAsync(
+            new UserLoginSuccessEvent(info.LoginProvider, info.ProviderKey, user.RtId.ToString(), name));
 
-      var identityServerUser = new IdentityServerUser(user.Id.ToString())
-      {
-          DisplayName = name,
-          IdentityProvider = info.LoginProvider,  
-          AdditionalClaims = additionalLocalClaims.ToArray(),
-          AuthenticationTime = clock.UtcNow.UtcDateTime
-      };
-      await HttpContext.SignInAsync(identityServerUser, localSignInProps);
-      
-      // delete temporary cookie used during external authentication
-      await HttpContext.SignOutAsync(IdentityConstants.ExternalScheme);
+        var identityServerUser = new IdentityServerUser(user.RtId.ToString())
+        {
+            DisplayName = name,
+            IdentityProvider = info.LoginProvider,
+            AdditionalClaims = additionalLocalClaims.ToArray(),
+            AuthenticationTime = DateTime.UtcNow
+        };
+        await HttpContext.SignInAsync(identityServerUser, localSignInProps);
 
-      // validate return URL and redirect back to authorization endpoint or a local page
-      //var returnUrl = result.Properties.Items["returnUrl"];
-      if (!string.IsNullOrWhiteSpace(returnUrl) && (_interaction.IsValidReturnUrl(returnUrl) || Url.IsLocalUrl(returnUrl)))
-      {
-        return Redirect(returnUrl);
-      }
+        // delete temporary cookie used during external authentication
+        await HttpContext.SignOutAsync(IdentityConstants.ExternalScheme);
 
-      return Redirect("~/");
+        // validate return URL and redirect back to authorization endpoint or a local page
+        //var returnUrl = result.Properties.Items["returnUrl"];
+        if (!string.IsNullOrWhiteSpace(returnUrl) && (_interaction.IsValidReturnUrl(returnUrl) || Url.IsLocalUrl(returnUrl)))
+        {
+            return Redirect(returnUrl);
+        }
+
+        return Redirect("~/");
     }
 
-    private async Task SynchronizeGroups(IEnumerable<Claim> claims, OctoUser user)
+    private async Task SynchronizeGroups(IEnumerable<Claim> claims, RtUser user)
     {
         // Get roles of identity provider and check if they exist in octo mesh
         var rolesRequested = claims.Where(x => x.Type == JwtClaimTypes.Role).Select(x => x.Value).ToList();
@@ -151,12 +144,16 @@ public class ExternalController : Controller
                 rolesRequested.Remove(roleName);
             }
         }
-        
+
         // check which roles has to be added or removed.
-        var rolesToRemove = user.Roles.Except(rolesRequested).ToList();
-        var rolesToAdd = rolesRequested.Except(user.Roles).ToList();
-    
-        if (rolesToRemove.Any())
+        var rolesToRemove = user.RoleIds?.Except(rolesRequested).ToList();
+        var rolesToAdd = rolesRequested.ToList();
+        if (user.RoleIds != null)
+        {
+            rolesToAdd = rolesToAdd.Except(user.RoleIds).ToList();
+        }
+
+        if (rolesToRemove != null && rolesToRemove.Any())
         {
             await _userManager.RemoveFromRolesAsync(user, rolesToRemove);
         }
@@ -167,89 +164,92 @@ public class ExternalController : Controller
         }
     }
 
-    private async Task<OctoUser> AutoProvisionUserAsync(string provider, string providerUserId, IList<Claim> claims)
+    private async Task<RtUser> AutoProvisionUserAsync(string provider, string providerUserId, IList<Claim> claims)
     {
-      // create a list of claims that we want to transfer into our store
-      var filtered = new List<Claim>();
+        // create a list of claims that we want to transfer into our store
+        var filtered = new List<Claim>();
 
-      // user's display name
-      var name = claims.FirstOrDefault(x => x.Type == JwtClaimTypes.Name)?.Value ??
-                 claims.FirstOrDefault(x => x.Type == ClaimTypes.Name)?.Value;
-      var givenName = claims.FirstOrDefault(x => x.Type == JwtClaimTypes.GivenName)?.Value ??
-                  claims.FirstOrDefault(x => x.Type == ClaimTypes.GivenName)?.Value;
-      var familyName = claims.FirstOrDefault(x => x.Type == JwtClaimTypes.FamilyName)?.Value ??
-                 claims.FirstOrDefault(x => x.Type == ClaimTypes.Surname)?.Value;
-      if (name != null)
-      {
-        filtered.Add(new Claim(JwtClaimTypes.Name, name));
-      }
-      else
-      {
-        if (givenName != null && familyName != null)
+        // user's display name
+        var name = claims.FirstOrDefault(x => x.Type == JwtClaimTypes.Name)?.Value ??
+                   claims.FirstOrDefault(x => x.Type == ClaimTypes.Name)?.Value;
+        var givenName = claims.FirstOrDefault(x => x.Type == JwtClaimTypes.GivenName)?.Value ??
+                        claims.FirstOrDefault(x => x.Type == ClaimTypes.GivenName)?.Value;
+        var familyName = claims.FirstOrDefault(x => x.Type == JwtClaimTypes.FamilyName)?.Value ??
+                         claims.FirstOrDefault(x => x.Type == ClaimTypes.Surname)?.Value;
+        if (name != null)
         {
-          filtered.Add(new Claim(JwtClaimTypes.Name, givenName + " " + familyName));
+            filtered.Add(new Claim(JwtClaimTypes.Name, name));
         }
-        else if (givenName != null)
+        else
         {
-          filtered.Add(new Claim(JwtClaimTypes.Name, givenName));
+            if (givenName != null && familyName != null)
+            {
+                filtered.Add(new Claim(JwtClaimTypes.Name, givenName + " " + familyName));
+            }
+            else if (givenName != null)
+            {
+                filtered.Add(new Claim(JwtClaimTypes.Name, givenName));
+            }
+            else if (familyName != null)
+            {
+                filtered.Add(new Claim(JwtClaimTypes.Name, familyName));
+            }
         }
-        else if (familyName != null)
+
+        // first name
+        if (!string.IsNullOrEmpty(givenName))
         {
-          filtered.Add(new Claim(JwtClaimTypes.Name, familyName));
+            filtered.Add(new Claim(JwtClaimTypes.GivenName, givenName));
         }
-      }
-      
-      // first name
-      if (!string.IsNullOrEmpty(givenName))
-      {
-          filtered.Add(new Claim(JwtClaimTypes.GivenName, givenName));
-      }
-      
-      // family name
-      if (!string.IsNullOrEmpty(familyName))
-      {
-          filtered.Add(new Claim(JwtClaimTypes.FamilyName, familyName));
-      }
 
-      // email
-      var email = claims.FirstOrDefault(x => x.Type == JwtClaimTypes.Email)?.Value ??
-                  claims.FirstOrDefault(x => x.Type == ClaimTypes.Email)?.Value;
-      if (email != null)
-      {
-        filtered.Add(new Claim(JwtClaimTypes.Email, email));
-      }
+        // family name
+        if (!string.IsNullOrEmpty(familyName))
+        {
+            filtered.Add(new Claim(JwtClaimTypes.FamilyName, familyName));
+        }
 
-      var user = new OctoUser {UserName = Guid.NewGuid().ToString(), 
-          FirstName = givenName, 
-          LastName = familyName,
-          Email = email,
-          EmailConfirmed = true};
+        // email
+        var email = claims.FirstOrDefault(x => x.Type == JwtClaimTypes.Email)?.Value ??
+                    claims.FirstOrDefault(x => x.Type == ClaimTypes.Email)?.Value;
+        if (email != null)
+        {
+            filtered.Add(new Claim(JwtClaimTypes.Email, email));
+        }
 
-      var identityResult = await _userManager.CreateAsync(user);
-      if (!identityResult.Succeeded)
-      {
-        throw new Exception(identityResult.Errors.First().Description);
-      }
+        var user = new RtUser
+        {
+            UserName = Guid.NewGuid().ToString(),
+            FirstName = givenName,
+            LastName = familyName,
+            Email = email,
+            EmailConfirmed = true
+        };
 
-      if (filtered.Any())
-      {
-        identityResult = await _userManager.AddClaimsAsync(user, filtered);
+        var identityResult = await _userManager.CreateAsync(user);
         if (!identityResult.Succeeded)
         {
-          throw new Exception(identityResult.Errors.First().Description);
+            throw new Exception(identityResult.Errors.First().Description);
         }
-      }
 
-      identityResult = await _userManager.AddLoginAsync(user, new UserLoginInfo(provider, providerUserId, name));
-      if (!identityResult.Succeeded)
-      {
-        throw new Exception(identityResult.Errors.First().Description);
-      }
+        if (filtered.Any())
+        {
+            identityResult = await _userManager.AddClaimsAsync(user, filtered);
+            if (!identityResult.Succeeded)
+            {
+                throw new Exception(identityResult.Errors.First().Description);
+            }
+        }
 
-      return user;
+        identityResult = await _userManager.AddLoginAsync(user, new UserLoginInfo(provider, providerUserId, name));
+        if (!identityResult.Succeeded)
+        {
+            throw new Exception(identityResult.Errors.First().Description);
+        }
+
+        return user;
     }
 
-    
+
     private void ProcessLoginCallbackForOidc(AuthenticateResult externalResult, List<Claim> localClaims,
         AuthenticationProperties localSignInProps)
     {
@@ -265,7 +265,7 @@ public class ExternalController : Controller
         var idToken = externalResult.Properties?.GetTokenValue("id_token");
         if (idToken != null)
         {
-            localSignInProps.StoreTokens(new[] {new AuthenticationToken {Name = "id_token", Value = idToken}});
+            localSignInProps.StoreTokens(new[] { new AuthenticationToken { Name = "id_token", Value = idToken } });
         }
     }
 }

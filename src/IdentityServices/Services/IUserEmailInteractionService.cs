@@ -1,31 +1,30 @@
-using System.Threading.Tasks;
-using Meshmakers.Octo.SystematizedData.Persistence.SystemEntities;
+using Persistence.IdentityCkModel.Generated.System.Identity.v1;
 
 namespace Meshmakers.Octo.Backend.IdentityServices.Services;
 
 /// <summary>
-/// A service that interacts with users via email to perform tasks like resetting the password, or confirming the email address.
+///     A service that interacts with users via email to perform tasks like resetting the password, or confirming the email address.
 /// </summary>
 public interface IUserEmailInteractionService
 {
     /// <summary>
-    /// Send a notification to the user, to confirm his email address.
+    ///     Send a notification to the user, to confirm his email address.
     /// </summary>
-    Task SendWelcomeNotificationAsync(OctoUser user);
-    
-    /// <summary>
-    /// Send a welcome Notification to the user, that allows him to reset his password.
-    /// </summary>
-    Task SendWelcomeNotificationWithoutPasswordAsync(OctoUser user);
+    Task SendWelcomeNotificationAsync(RtUser user);
 
     /// <summary>
-    /// Send a notification to the user to reset his password.
+    ///     Send a welcome Notification to the user, that allows him to reset his password.
+    /// </summary>
+    Task SendWelcomeNotificationWithoutPasswordAsync(RtUser user);
+
+    /// <summary>
+    ///     Send a notification to the user to reset his password.
     /// </summary>
     /// <param name="user"></param>
-    Task SendPasswordResetNotificationAsync(OctoUser user);
+    Task SendPasswordResetNotificationAsync(RtUser user);
 
     /// <summary>
-    /// Validate a token that was sent to the user to confirm his email address.
+    ///     Validate a token that was sent to the user to confirm his email address.
     /// </summary>
     /// <param name="token"></param>
     /// <returns>The url where the user should get redirected.</returns>
@@ -33,7 +32,7 @@ public interface IUserEmailInteractionService
     Task<string> ValidateEmailNotificationTokenAsync(string token);
 
     /// <summary>
-    /// Validate a token that was sent to the user to reset his password.
+    ///     Validate a token that was sent to the user to reset his password.
     /// </summary>
     /// <param name="token"></param>
     /// <param name="newPassword"></param>

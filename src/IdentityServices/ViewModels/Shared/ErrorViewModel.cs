@@ -9,7 +9,7 @@ public class ErrorViewModel
     public ErrorViewModel()
     {
     }
-    
+
     public ErrorViewModel(string error)
     {
         Error = new ErrorMessage { Error = error };

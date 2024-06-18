@@ -1,0 +1,8 @@
+$schema: https://schemas.meshmakers.cloud/construction-kit-elements.schema.json
+enums:
+  - enumId: TokenUsage
+    values:
+      - key: 0
+        name: ReUse
+      - key: 1
+        name: OneTimeOnly

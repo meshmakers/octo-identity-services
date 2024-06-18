@@ -1,17 +1,9 @@
-using System;
 using Meshmakers.Common.Shared;
 
 namespace Meshmakers.Octo.Backend.Authentication.Connection;
 
 internal class LdapConnectionContext
 {
-    public string Username { get; }
-    public string Password { get; }
-    public string Host { get; }
-    public int Port { get; }
-    public bool UseTls { get; }
-    public ConnectionType ConnectionType { get; }
-
     internal LdapConnectionContext(string username, string password, string host, int port, bool useTls, ConnectionType connectionType)
     {
         ArgumentValidation.ValidateInt(nameof(port), port, ushort.MinValue, ushort.MaxValue);
@@ -24,4 +16,10 @@ internal class LdapConnectionContext
         ConnectionType = connectionType;
     }
 
+    public string Username { get; }
+    public string Password { get; }
+    public string Host { get; }
+    public int Port { get; }
+    public bool UseTls { get; }
+    public ConnectionType ConnectionType { get; }
 }

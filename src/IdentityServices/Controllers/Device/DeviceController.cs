@@ -1,7 +1,3 @@
-using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Threading.Tasks;
 using Duende.IdentityServer;
 using Duende.IdentityServer.Configuration;
 using Duende.IdentityServer.Events;
@@ -88,6 +84,10 @@ public class DeviceController : Controller
     private async Task<ProcessConsentResult> ProcessConsent(DeviceAuthorizationInputModel model)
     {
         var result = new ProcessConsentResult();
+        if (string.IsNullOrWhiteSpace(model.UserCode))
+        {
+            return result;
+        }
 
         var request = await _interaction.GetAuthorizationContextAsync(model.UserCode);
         if (request == null)
@@ -161,6 +161,11 @@ public class DeviceController : Controller
     private async Task<DeviceAuthorizationViewModel?> BuildViewModelAsync(string? userCode,
         DeviceAuthorizationInputModel? model = null)
     {
+        if (string.IsNullOrWhiteSpace(userCode))
+        {
+            return null;
+        }
+
         var request = await _interaction.GetAuthorizationContextAsync(userCode);
         if (request != null)
         {
@@ -175,7 +180,7 @@ public class DeviceController : Controller
     {
         var vm = new DeviceAuthorizationViewModel
         {
-            UserCode = userCode,
+            UserCode = userCode ?? string.Empty,
             Description = model?.Description,
 
             RememberConsent = model?.RememberConsent ?? true,

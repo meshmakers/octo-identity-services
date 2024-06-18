@@ -1,18 +1,18 @@
-﻿using System;
-using System.Collections.Generic;
-using System.ComponentModel.DataAnnotations;
-using System.Linq;
-using System.Threading.Tasks;
+﻿using System.ComponentModel.DataAnnotations;
 using Duende.IdentityServer.Models;
 using IdentityModel;
-using Meshmakers.Octo.Backend.Common.ApiErrors;
-using Meshmakers.Octo.Common.Shared;
-using Meshmakers.Octo.Common.Shared.DataTransferObjects;
-using Meshmakers.Octo.Common.Shared.DistributedCache;
-using Meshmakers.Octo.SystematizedData.Persistence.SystemEntities;
-using Meshmakers.Octo.SystematizedData.Persistence.SystemStores;
+using IdentityServerPersistence;
+using IdentityServerPersistence.SystemStores;
+using Meshmakers.Octo.Common.DistributionEventHub.Services;
+using Meshmakers.Octo.Communication.Contracts;
+using Meshmakers.Octo.Communication.Contracts.DataTransferObjects;
+using Meshmakers.Octo.Runtime.Contracts.RepositoryEntities;
+using Meshmakers.Octo.Services.Common.ApiErrors;
+using Meshmakers.Octo.Services.Common.DistributionEventHub.Messages;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using MongoDB.Bson;
+using Persistence.IdentityCkModel.Generated.System.Identity.v1;
 
 namespace Meshmakers.Octo.Backend.IdentityServices.SystemApi.v1.Controllers;
 
@@ -25,18 +25,18 @@ namespace Meshmakers.Octo.Backend.IdentityServices.SystemApi.v1.Controllers;
 [ApiVersion(IdentityServiceConstants.ApiVersion1)]
 public class ClientsController : ControllerBase
 {
-    private readonly IDistributedWithPubSubCache _distributedCache;
+    private readonly IDistributionEventHubService _distributionEventHubService;
     private readonly IOctoClientStore _octoClientStore;
 
     /// <summary>
     ///     Constructor
     /// </summary>
     /// <param name="octoClientStore">The storage service of clients</param>
-    /// <param name="distributedCache">Distributed cache with REDIS</param>
-    public ClientsController(IOctoClientStore octoClientStore, IDistributedWithPubSubCache distributedCache)
+    /// <param name="distributionEventHubService">Distributed cache with REDIS</param>
+    public ClientsController(IOctoClientStore octoClientStore, IDistributionEventHubService distributionEventHubService)
     {
         _octoClientStore = octoClientStore;
-        _distributedCache = distributedCache;
+        _distributionEventHubService = distributionEventHubService;
     }
 
     // GET: system/v1/clients
@@ -76,7 +76,7 @@ public class ClientsController : ControllerBase
         var header = pagedResult.GetHeader();
         if (header != null)
         {
-            Response.Headers.Add("X-Pagination", header.ToJson());
+            Response.Headers.Append("X-Pagination", header.ToJson());
         }
 
         return pagedResult;
@@ -92,7 +92,7 @@ public class ClientsController : ControllerBase
     [Authorize(IdentityServiceConstants.IdentityApiReadOnlyPolicy)]
     public async Task<IActionResult> Get([Required] string id)
     {
-        var client = await _octoClientStore.FindClientByIdAsync(id);
+        var client = await _octoClientStore.FindRtClientByIdAsync(id);
         if (client == null)
         {
             return NotFound();
@@ -121,12 +121,12 @@ public class ClientsController : ControllerBase
             return Conflict($"Client with id '{clientDto.ClientId}' already exists.");
         }
 
-        var appClient = new OctoClient
+        var appClient = new RtClient
         {
             RequirePkce = true,
             RequireClientSecret = false,
 
-            AccessTokenType = AccessTokenType.Jwt,
+            AccessTokenType = RtTokenTypeEnum.Jwt,
             AllowAccessTokensViaBrowser = true,
             AlwaysIncludeUserClaimsInIdToken = true,
             RequireConsent = false
@@ -161,7 +161,7 @@ public class ClientsController : ControllerBase
             return BadRequest(ModelState);
         }
 
-        var appClient = await _octoClientStore.FindClientByIdAsync(id);
+        var appClient = await _octoClientStore.FindRtClientByIdAsync(id);
         if (appClient == null)
         {
             return NotFound(new NotFoundError($"Client with id '{id}' does not exist."));
@@ -171,7 +171,7 @@ public class ClientsController : ControllerBase
 
         try
         {
-            await _octoClientStore.UpdateAsync(id, (OctoClient)appClient);
+            await _octoClientStore.UpdateAsync(id, appClient);
             await ClearCacheAsync();
         }
         catch (Exception e)
@@ -211,12 +211,12 @@ public class ClientsController : ControllerBase
         return Ok();
     }
 
-    private async Task ClearCacheAsync()
+    private Task ClearCacheAsync()
     {
-        await _distributedCache.PublishAsync(CacheCommon.KeyCorsClients, Guid.NewGuid().ToString());
+        return _distributionEventHubService.PublishAsync(new CorsClientsUpdate(_octoClientStore.TenantId));
     }
 
-    private ClientDto CreateClientDto(Client applicationClient)
+    private ClientDto CreateClientDto(RtClient applicationClient)
     {
         var clientDto = new ClientDto
         {
@@ -234,49 +234,61 @@ public class ClientsController : ControllerBase
         return clientDto;
     }
 
-    private void ApplyToClient(Client applicationClient, ClientDto clientDto)
+    private void ApplyToClient(RtClient applicationClient, ClientDto clientDto)
     {
         if (clientDto.IsEnabled.HasValue)
         {
             applicationClient.Enabled = clientDto.IsEnabled.Value;
         }
+
         if (!string.IsNullOrEmpty(clientDto.ClientId))
         {
             applicationClient.ClientId = clientDto.ClientId;
         }
+
         if (!string.IsNullOrEmpty(clientDto.ClientName))
         {
             applicationClient.ClientName = clientDto.ClientName;
         }
+
         if (!string.IsNullOrEmpty(clientDto.ClientUri))
         {
             applicationClient.ClientUri = clientDto.ClientUri;
         }
+
         if (clientDto.AllowedGrantTypes != null)
         {
-            applicationClient.AllowedGrantTypes = clientDto.AllowedGrantTypes?.ToList() ?? new List<string>();
+            applicationClient.AllowedGrantTypes = new AttributeStringValueList(
+                clientDto.AllowedGrantTypes?.ToList() ?? new List<string>());
         }
+
         if (clientDto.RedirectUris != null)
         {
-            applicationClient.RedirectUris = clientDto.RedirectUris?.ToList() ?? new List<string>();
+            applicationClient.RedirectUris = new AttributeStringValueList(
+                clientDto.RedirectUris?.ToList() ?? new List<string>());
         }
+
         if (clientDto.PostLogoutRedirectUris != null)
         {
-            applicationClient.PostLogoutRedirectUris = clientDto.PostLogoutRedirectUris?.ToList() ??
-                                                       new List<string>();
+            applicationClient.PostLogoutRedirectUris = new AttributeStringValueList(
+                clientDto.PostLogoutRedirectUris?.ToList() ??
+                new List<string>());
         }
+
         if (clientDto.AllowedCorsOrigins != null)
         {
-            applicationClient.AllowedCorsOrigins = clientDto.AllowedCorsOrigins?.ToList() ?? new List<string>();
+            applicationClient.AllowedCorsOrigins = new AttributeStringValueList(
+                clientDto.AllowedCorsOrigins?.ToList() ?? new List<string>());
         }
+
         if (clientDto.AllowedScopes != null)
         {
-            applicationClient.AllowedScopes =
-                CommonConstants.OctoDefaultScopes.Concat(clientDto.AllowedScopes).Distinct().ToList();
+            applicationClient.AllowedScopes = new AttributeStringValueList(
+                CommonConstants.OctoDefaultScopes.Concat(clientDto.AllowedScopes).Distinct().ToList());
         }
         else
         {
-            applicationClient.AllowedScopes = CommonConstants.OctoDefaultScopes;
+            applicationClient.AllowedScopes = new AttributeStringValueList(CommonConstants.OctoDefaultScopes.ToList());
         }
 
         if (clientDto.IsOfflineAccessEnabled.HasValue)
@@ -286,9 +298,9 @@ public class ClientsController : ControllerBase
 
         if (!string.IsNullOrWhiteSpace(clientDto.ClientSecret))
         {
-            applicationClient.ClientSecrets = new[]
+            applicationClient.ClientSecrets = new AttributeRecordValueList<RtSecretRecord>
             {
-                new Secret(clientDto.ClientSecret.Sha256())
+                new() { Value = clientDto.ClientSecret.Sha256() }
             };
         }
     }

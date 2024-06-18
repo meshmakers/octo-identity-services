@@ -1,12 +1,8 @@
-﻿using System;
-using System.Linq;
-using System.Threading.Tasks;
-using Meshmakers.Octo.Common.Shared;
-using Meshmakers.Octo.Common.Shared.DistributedCache;
-using Meshmakers.Octo.SystematizedData.Persistence.SystemEntities;
-using Meshmakers.Octo.SystematizedData.Persistence.SystemStores;
+﻿using IdentityServerPersistence.SystemStores;
+using Meshmakers.Octo.Communication.Contracts.DataTransferObjects;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Identity;
+using Persistence.IdentityCkModel.Generated.System.Identity.v1;
 
 namespace Meshmakers.Octo.Backend.Authentication.DynamicAuth;
 
@@ -27,30 +23,25 @@ internal class DynamicAuthSchemeService : IDynamicAuthSchemeService
 
     private readonly IAuthSchemeCreatorFactory _authSchemeCreatorFactory;
     private readonly IAuthenticationSchemeProvider _schemeProvider;
-    private readonly IOctoIdentityProviderStore _sgIdentityProviderStore;
+    private readonly IOctoIdentityProviderStore _identityProviderStore;
 
     /// <summary>
     ///     Constructor
     /// </summary>
-    /// <param name="sgIdentityProviderStore">Data storage of identity providers</param>
+    /// <param name="identityProviderStore">Data storage of identity providers</param>
     /// <param name="schemeProvider">Scheme provider</param>
     /// <param name="authSchemeCreatorFactory">Factory to resolve creators of auth providers.</param>
-    /// <param name="distributedCache">Memory cache do distribute events (if identity providers has changed.</param>
-    public DynamicAuthSchemeService(IOctoIdentityProviderStore sgIdentityProviderStore,
+    public DynamicAuthSchemeService(IOctoIdentityProviderStore identityProviderStore,
         IAuthenticationSchemeProvider schemeProvider,
-        IAuthSchemeCreatorFactory authSchemeCreatorFactory,
-        IDistributedWithPubSubCache distributedCache)
+        IAuthSchemeCreatorFactory authSchemeCreatorFactory)
     {
-        _sgIdentityProviderStore = sgIdentityProviderStore;
+        _identityProviderStore = identityProviderStore;
         _schemeProvider = schemeProvider;
         _authSchemeCreatorFactory = authSchemeCreatorFactory;
-
-        var channel = distributedCache.Subscribe<string>(CacheCommon.KeyIdentityProviderUpdate);
-        channel.OnMessage(async _ => { await ConfigureAsync(); });
     }
 
     /// <inheritdoc />
-    public async Task ConfigureAsync()
+    public async Task ConfigureAsync(string tenantId)
     {
         // Remove all schemes
         var allSchemes = await _schemeProvider.GetAllSchemesAsync();
@@ -61,7 +52,7 @@ internal class DynamicAuthSchemeService : IDynamicAuthSchemeService
         }
 
         // Add schemes based on identity providers
-        var identityProviders = await _sgIdentityProviderStore.GetAllAsync();
+        var identityProviders = await _identityProviderStore.GetAllAsync();
         foreach (var identityProvider in identityProviders)
         {
             if (!identityProvider.IsEnabled)
@@ -72,32 +63,35 @@ internal class DynamicAuthSchemeService : IDynamicAuthSchemeService
             AuthenticationScheme scheme;
             switch (identityProvider)
             {
-                case GoogleIdentityProvider googleIdentityProvider:
-                    scheme = _authSchemeCreatorFactory.GetCreator<GoogleIdentityProvider>()
+                case RtGoogleIdentityProvider googleIdentityProvider:
+                    scheme = _authSchemeCreatorFactory.GetCreator<RtGoogleIdentityProvider>()
                         .Create(googleIdentityProvider);
                     break;
-                case MicrosoftIdentityProvider microsoftIdentityProvider:
-                    scheme = _authSchemeCreatorFactory.GetCreator<MicrosoftIdentityProvider>()
+                case RtMicrosoftIdentityProvider microsoftIdentityProvider:
+                    scheme = _authSchemeCreatorFactory.GetCreator<RtMicrosoftIdentityProvider>()
                         .Create(microsoftIdentityProvider);
                     break;
-                case AzureAdIdentityProvider azureAdIdentityProvider:
-                    scheme = _authSchemeCreatorFactory.GetCreator<AzureAdIdentityProvider>()
-                        .Create(azureAdIdentityProvider);
+                case RtAzureEntraIdIdentityProvider rtAzureEntraIdIdentityProvider:
+                    scheme = _authSchemeCreatorFactory.GetCreator<RtAzureEntraIdIdentityProvider>()
+                        .Create(rtAzureEntraIdIdentityProvider);
                     break;
-                
-                case OpenLdapIdentityProvider openLdapIdentityProvider:
-                    scheme = _authSchemeCreatorFactory.GetCreator<OpenLdapIdentityProvider>()
+
+                case RtOpenLdapIdentityProvider openLdapIdentityProvider:
+                    scheme = _authSchemeCreatorFactory.GetCreator<RtOpenLdapIdentityProvider>()
                         .Create(openLdapIdentityProvider);
                     break;
-                
-                case MicrosoftAdIdentityProvider microsoftAdIdentityProvider:
-                    scheme = _authSchemeCreatorFactory.GetCreator<MicrosoftAdIdentityProvider>()
+
+                case RtMicrosoftAdIdentityProvider microsoftAdIdentityProvider:
+                    scheme = _authSchemeCreatorFactory.GetCreator<RtMicrosoftAdIdentityProvider>()
                         .Create(microsoftAdIdentityProvider);
                     break;
-                
+                case RtFacebookIdentityProvider facebookIdentityProvider:
+                    scheme = _authSchemeCreatorFactory.GetCreator<RtFacebookIdentityProvider>()
+                        .Create(facebookIdentityProvider);
+                    break;
                 default:
                     throw new NotImplementedException(
-                        $"Identity provider '{identityProvider.Type}' is not supported.");
+                        $"Identity provider '{identityProvider.CkTypeId}' is not supported.");
             }
 
             _schemeProvider.AddScheme(scheme);

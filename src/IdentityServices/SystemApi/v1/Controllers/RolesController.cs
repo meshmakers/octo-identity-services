@@ -1,16 +1,16 @@
-using System;
-using System.Collections.Generic;
 using System.ComponentModel.DataAnnotations;
-using System.Linq;
-using System.Threading.Tasks;
+using AutoMapper;
 using IdentityModel;
-using Meshmakers.Octo.Backend.Common.ApiErrors;
-using Meshmakers.Octo.Common.Shared.DataTransferObjects;
-using Meshmakers.Octo.SystematizedData.Persistence.SystemEntities;
+using IdentityServerPersistence;
+using Meshmakers.Octo.Communication.Contracts.DataTransferObjects;
+using Meshmakers.Octo.Runtime.Contracts.MongoDb;
+using Meshmakers.Octo.Runtime.Contracts.Repositories.Query;
+using Meshmakers.Octo.Services.Common.ApiErrors;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Mvc;
 using MongoDB.Bson;
+using Persistence.IdentityCkModel.Generated.System.Identity.v1;
 
 namespace Meshmakers.Octo.Backend.IdentityServices.SystemApi.v1.Controllers;
 
@@ -23,14 +23,20 @@ namespace Meshmakers.Octo.Backend.IdentityServices.SystemApi.v1.Controllers;
 [ApiVersion(IdentityServiceConstants.ApiVersion1)]
 public class RolesController : ControllerBase
 {
-    private readonly RoleManager<OctoRole> _roleManager;
+    private readonly ISystemContext _systemContext;
+    private readonly IMapper _mapper;
+    private readonly RoleManager<RtRole> _roleManager;
 
     /// <summary>
     ///     Constructor
     /// </summary>
     /// <param name="roleManager">The storage service of roles</param>
-    public RolesController(RoleManager<OctoRole> roleManager)
+    /// <param name="systemContext">System context</param>
+    /// <param name="mapper">Automapper</param>
+    public RolesController(RoleManager<RtRole> roleManager, ISystemContext systemContext, IMapper mapper)
     {
+        _systemContext = systemContext;
+        _mapper = mapper;
         _roleManager = roleManager;
     }
 
@@ -41,28 +47,42 @@ public class RolesController : ControllerBase
     /// <returns></returns>
     [HttpGet]
     [Authorize(IdentityServiceConstants.IdentityApiReadOnlyPolicy)]
-    public PagedResult<RoleDto> Get([Required] [FromQuery] PagingParams pagingParams)
+    public IEnumerable<RoleDto> Get()
     {
-        var list = new List<RoleDto>();
+        var list = _mapper.Map<List<RoleDto>>(_roleManager.Roles);
 
-        var query = _roleManager.Roles.AsQueryable();
+        return list;
+    }
+
+    // GET system/v1/roles
+    /// <summary>
+    ///     Returns all existing roles
+    /// </summary>
+    /// <returns></returns>
+    [HttpGet("GetPaged")]
+    [Authorize(IdentityServiceConstants.IdentityApiReadOnlyPolicy)]
+    public async Task<PagedResult<RoleDto>> Get([Required] [FromQuery] PagingParams pagingParams)
+    {
+        var tenantRepository = _systemContext.GetSystemTenantRepository();
+
+        using var session = await tenantRepository.GetSessionAsync();
+        session.StartTransaction();
+
+        var dataOperation = DataQueryOperation.Create();
         if (!string.IsNullOrWhiteSpace(pagingParams.Filter))
         {
-            query = _roleManager.Roles.Where(x => x.Name != null && x.Name.ToLower().Contains(pagingParams.Filter.ToLower()));
+            dataOperation.FieldLike(nameof(RtRole.Name), pagingParams.Filter);
         }
 
-        foreach (var octoRole in query.Skip(pagingParams.Skip).Take(pagingParams.Take))
-        {
-            var roleDto = CreateRoleDto(octoRole);
-            list.Add(roleDto);
-        }
+        var resultSet = await tenantRepository.GetRtEntitiesByTypeAsync<RtRole>(session, dataOperation, pagingParams.Skip, pagingParams.Take);
+        var list = _mapper.Map<List<RoleDto>>(resultSet.Items);
 
-        var pagedResult = new PagedResult<RoleDto>(list, pagingParams.Skip, pagingParams.Take, query.Count());
+        var pagedResult = new PagedResult<RoleDto>(list, pagingParams.Skip, pagingParams.Take, resultSet.TotalCount);
 
         var header = pagedResult.GetHeader();
         if (header != null)
         {
-            Response.Headers.Add("X-Pagination", header.ToJson());
+            Response.Headers.Append("X-Pagination", header.ToJson());
         }
 
         return pagedResult;
@@ -78,13 +98,14 @@ public class RolesController : ControllerBase
     [Authorize(IdentityServiceConstants.IdentityApiReadOnlyPolicy)]
     public async Task<IActionResult> Get([Required] string roleName)
     {
-        var role = await _roleManager.FindByNameAsync(roleName);
-        if (role == null)
+        var rtRole = await _roleManager.FindByNameAsync(roleName);
+        if (rtRole == null)
         {
             return NotFound();
         }
 
-        return Ok(CreateRoleDto(role));
+        var roleDto = _mapper.Map<RoleDto>(rtRole);
+        return Ok(roleDto);
     }
 
     // POST system/v1/roles
@@ -102,12 +123,11 @@ public class RolesController : ControllerBase
             return BadRequest(ModelState);
         }
 
-        var octoRole = new OctoRole();
-        ApplyToRole(octoRole, roleDto);
+        var rtRole = _mapper.Map<RtRole>(roleDto);
 
         try
         {
-            var result = await _roleManager.CreateAsync(octoRole);
+            var result = await _roleManager.CreateAsync(rtRole);
             if (result.Succeeded)
             {
                 return Ok();
@@ -138,17 +158,17 @@ public class RolesController : ControllerBase
             return BadRequest(ModelState);
         }
 
-        var octoRole = await _roleManager.FindByNameAsync(roleName);
-        if (octoRole == null)
+        var rtRole = await _roleManager.FindByNameAsync(roleName);
+        if (rtRole == null)
         {
             return NotFound(new NotFoundError($"Role '{roleName}' not found."));
         }
 
-        ApplyToRole(octoRole, roleDto);
+        _mapper.Map(roleDto, rtRole);
 
         try
         {
-            var result = await _roleManager.UpdateAsync(octoRole);
+            var result = await _roleManager.UpdateAsync(rtRole);
             if (result.Succeeded)
             {
                 return Ok();
@@ -194,25 +214,5 @@ public class RolesController : ControllerBase
         {
             return BadRequest(new InternalServerError(e.Message));
         }
-    }
-
-    internal static RoleDto CreateRoleDto(OctoRole octoRole)
-    {
-        var roleDto = new RoleDto
-        {
-            Id = octoRole.Id.ToString(),
-            Name = octoRole.Name
-        };
-        return roleDto;
-    }
-
-    private void ApplyToRole(OctoRole octoRole, RoleDto roleDto)
-    {
-        if (!string.IsNullOrWhiteSpace(roleDto.Id))
-        {
-            octoRole.Id = new ObjectId(roleDto.Id);
-        }
-
-        octoRole.Name = roleDto.Name;
     }
 }

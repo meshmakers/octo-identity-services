@@ -2,14 +2,11 @@
 
     <PropertyGroup>
         <AssemblyName>Meshmakers.Octo.Backend.Authentication</AssemblyName>
-        <PackageIcon>meshmakers64.png</PackageIcon>
         <PackageId>Meshmakers.Octo.Backend.Authentication</PackageId>
-        <PackageLicenseFile>LICENSE</PackageLicenseFile>
-        <PackageProjectUrl>https://www.meshmakers.io</PackageProjectUrl>
-        <RepositoryUrl>https://github.com/meshmakers/octomesh</RepositoryUrl>
         <RootNamespace>Meshmakers.Octo.Backend.Authentication</RootNamespace>
-        <TargetFramework>net7.0</TargetFramework>
         <AddRazorSupportForMvc>true</AddRazorSupportForMvc>
+        <Configurations>Debug;Release;DebugL</Configurations>
+        <Platforms>AnyCPU</Platforms>
     </PropertyGroup>
 
     <ItemGroup>
@@ -17,17 +14,19 @@
     </ItemGroup>
 
     <ItemGroup>
-        <PackageReference Include="Duende.IdentityServer.AspNetIdentity" Version="6.3.3" />
-        <PackageReference Include="Microsoft.AspNetCore.Authentication.Google" Version="7.0.7" />
-        <PackageReference Include="Microsoft.AspNetCore.Authentication.MicrosoftAccount" Version="7.0.7" />
-        <PackageReference Include="Microsoft.AspNetCore.Authentication.OpenIdConnect" Version="7.0.7" />
+        <PackageReference Include="Duende.IdentityServer.AspNetIdentity" Version="7.0.4" />
+        <PackageReference Include="Microsoft.AspNetCore.Authentication.Google" Version="8.0.4" />
+        <PackageReference Include="Microsoft.AspNetCore.Authentication.MicrosoftAccount" Version="8.0.4" />
+        <PackageReference Include="Microsoft.AspNetCore.Authentication.OpenIdConnect" Version="8.0.4" />
+        <PackageReference Include="Microsoft.AspNetCore.Authentication.Facebook" Version="8.0.4" />
         <PackageReference Include="Novell.Directory.Ldap.NETStandard" Version="3.6.0" />
     </ItemGroup>
 
     <ItemGroup>
         <ProjectReference Include="$(OctoCommonServicesPath)src\Infrastructure\Infrastructure.csproj" />
-        <ProjectReference Include="$(OctoCorePath)src\SystematizedData\Persistence\Persistence.csproj" />
+        <ProjectReference Include="..\IdentityServerPersistence\IdentityServerPersistence.csproj" />
         <ProjectReference Include="..\IdentityServices.Resources\IdentityServices.Resources.csproj" />
+        <ProjectReference Include="..\Persistence.IdentityCkModel\Persistence.IdentityCkModel.csproj" />
     </ItemGroup>
 
     <ItemGroup>

@@ -1,6 +1,3 @@
-using System;
-using System.Linq;
-using System.Threading.Tasks;
 using Duende.IdentityServer;
 using Duende.IdentityServer.Events;
 using Duende.IdentityServer.Extensions;
@@ -13,12 +10,11 @@ using Meshmakers.Octo.Backend.IdentityServices.Resources;
 using Meshmakers.Octo.Backend.IdentityServices.Services;
 using Meshmakers.Octo.Backend.IdentityServices.ViewModels.Account;
 using Meshmakers.Octo.Backend.IdentityServices.ViewModels.Shared;
-using Meshmakers.Octo.SystematizedData.Persistence.SystemEntities;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Mvc;
-using Microsoft.Extensions.DependencyInjection;
+using Persistence.IdentityCkModel.Generated.System.Identity.v1;
 
 namespace Meshmakers.Octo.Backend.IdentityServices.Controllers.Account;
 
@@ -29,17 +25,17 @@ namespace Meshmakers.Octo.Backend.IdentityServices.Controllers.Account;
 public class AccountController : Controller
 {
     private readonly IClientStore _clientStore;
+    private readonly IUserEmailInteractionService _emailInteractionService;
     private readonly IEventService _events;
     private readonly IIdentityServerInteractionService _interaction;
     private readonly IAuthenticationSchemeProvider _schemeProvider;
-    private readonly SignInManager<OctoUser> _signInManager;
-    private readonly UserManager<OctoUser> _userManager;
-    private readonly IUserEmailInteractionService _emailInteractionService;
+    private readonly SignInManager<RtUser> _signInManager;
+    private readonly UserManager<RtUser> _userManager;
 
 
     public AccountController(
-        UserManager<OctoUser> userManager,
-        SignInManager<OctoUser> signInManager,
+        UserManager<RtUser> userManager,
+        SignInManager<RtUser> signInManager,
         IIdentityServerInteractionService interaction,
         IClientStore clientStore,
         IAuthenticationSchemeProvider schemeProvider,
@@ -117,7 +113,7 @@ public class AccountController : Controller
                 var user = await _userManager.FindByNameAsync(model.Username);
                 if (user != null)
                 {
-                    await _events.RaiseAsync(new UserLoginSuccessEvent(user.UserName, user.Id.ToString(), user.UserName,
+                    await _events.RaiseAsync(new UserLoginSuccessEvent(user.UserName, user.RtId.ToString(), user.UserName,
                         clientId: context?.Client.ClientId));
                 }
 
@@ -214,7 +210,7 @@ public class AccountController : Controller
     }
 
     /// <summary>
-    /// Endpoint to confirm an email address
+    ///     Endpoint to confirm an email address
     /// </summary>
     /// <param name="id">The generated guid to confirm the email address</param>
     /// <returns></returns>
@@ -225,7 +221,7 @@ public class AccountController : Controller
         try
         {
             var redirectUri = await _emailInteractionService.ValidateEmailNotificationTokenAsync(id);
-            var successVm = new SuccessViewModel()
+            var successVm = new SuccessViewModel
             {
                 Operation = IdentityTexts.Backend_General_Title_Success,
                 Text = IdentityTexts.Backend_Identity_Email_Verification_Success,
@@ -263,7 +259,7 @@ public class AccountController : Controller
             // we are not going to notify the user that an email address it not found.
         }
 
-        return View("Success", new SuccessViewModel()
+        return View("Success", new SuccessViewModel
         {
             Operation = IdentityTexts.Backend_General_Title_Success,
             Text = IdentityTexts.Backend_Identity_Reset_Email_Sent_Successfully
@@ -321,10 +317,11 @@ public class AccountController : Controller
             {
                 allowLocal = client.EnableLocalLogin;
 
-                if (client.IdentityProviderRestrictions != null && client.IdentityProviderRestrictions.Any())
+                if (client.IdentityProviderRestrictions.Any())
                 {
-                    providers = providers.Where(provider =>
-                        client.IdentityProviderRestrictions.Contains(provider.AuthenticationScheme)).ToList();
+                    providers = providers.Where(provider => !string.IsNullOrWhiteSpace(provider.AuthenticationScheme) &&
+                                                            client.IdentityProviderRestrictions.Contains(provider.AuthenticationScheme))
+                        .ToList();
                 }
             }
         }
@@ -359,7 +356,7 @@ public class AccountController : Controller
         }
 
         var context = await _interaction.GetLogoutContextAsync(logoutId);
-        if (context?.ShowSignoutPrompt == false)
+        if (context.ShowSignoutPrompt == false)
         {
             // it's safe to automatically sign-out
             vm.ShowLogoutPrompt = false;
@@ -379,9 +376,9 @@ public class AccountController : Controller
         var vm = new LoggedOutViewModel
         {
             AutomaticRedirectAfterSignOut = AccountOptions.AutomaticRedirectAfterSignOut,
-            PostLogoutRedirectUri = logout?.PostLogoutRedirectUri,
-            ClientName = string.IsNullOrEmpty(logout?.ClientName) ? logout?.ClientId : logout.ClientName,
-            SignOutIframeUrl = logout?.SignOutIFrameUrl,
+            PostLogoutRedirectUri = logout.PostLogoutRedirectUri,
+            ClientName = string.IsNullOrEmpty(logout.ClientName) ? logout.ClientId : logout.ClientName,
+            SignOutIframeUrl = logout.SignOutIFrameUrl,
             LogoutId = logoutId
         };
 

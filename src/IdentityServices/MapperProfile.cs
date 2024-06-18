@@ -1,6 +1,6 @@
 using AutoMapper;
-using Meshmakers.Octo.Common.Shared.DataTransferObjects;
-using Meshmakers.Octo.SystematizedData.Persistence.SystemEntities;
+using Meshmakers.Octo.Communication.Contracts.DataTransferObjects;
+using Persistence.IdentityCkModel.Generated.System.Identity.v1;
 
 namespace Meshmakers.Octo.Backend.IdentityServices;
 
@@ -8,30 +8,35 @@ public class MapperProfile : Profile
 {
     public MapperProfile()
     {
-        CreateMap<OctoIdentityProvider, IdentityProviderDto>()
-            .Include<GoogleIdentityProvider, GoogleIdentityProviderDto>()
-            .Include<MicrosoftIdentityProvider, MicrosoftIdentityProviderDto>()
-            .Include<MicrosoftAdIdentityProvider, MicrosoftAdProviderDto>()
-            .Include<OpenLdapIdentityProvider, OpenLdapProviderDto>()
-            .Include<AzureAdIdentityProvider, AzureAdProviderDto>();
+        CreateMap<RtIdentityProvider, IdentityProviderDto>()
+            .Include<RtGoogleIdentityProvider, GoogleIdentityProviderDto>()
+            .Include<RtMicrosoftIdentityProvider, MicrosoftIdentityProviderDto>()
+            .Include<RtMicrosoftAdIdentityProvider, MicrosoftAdProviderDto>()
+            .Include<RtOpenLdapIdentityProvider, OpenLdapProviderDto>()
+            .Include<RtAzureEntraIdIdentityProvider, AzureEntraIdProviderDto>()
+            .Include<RtFacebookIdentityProvider, FacebookIdentityProviderDto>();
 
-        CreateMap<GoogleIdentityProvider, GoogleIdentityProviderDto>();
-        CreateMap<MicrosoftIdentityProvider, MicrosoftIdentityProviderDto>();
-        CreateMap<MicrosoftAdIdentityProvider, MicrosoftAdProviderDto>();
-        CreateMap<OpenLdapIdentityProvider, OpenLdapProviderDto>();
-        CreateMap<AzureAdIdentityProvider, AzureAdProviderDto>();
+        CreateMap<RtGoogleIdentityProvider, GoogleIdentityProviderDto>();
+        CreateMap<RtMicrosoftIdentityProvider, MicrosoftIdentityProviderDto>();
+        CreateMap<RtMicrosoftAdIdentityProvider, MicrosoftAdProviderDto>();
+        CreateMap<RtOpenLdapIdentityProvider, OpenLdapProviderDto>();
+        CreateMap<RtAzureEntraIdIdentityProvider, AzureEntraIdProviderDto>();
+        CreateMap<RtFacebookIdentityProvider, FacebookIdentityProviderDto>();
 
-        CreateMap<IdentityProviderDto, OctoIdentityProvider>()
-            .Include<GoogleIdentityProviderDto, GoogleIdentityProvider>()
-            .Include<MicrosoftIdentityProviderDto, MicrosoftIdentityProvider>()
-            .Include<MicrosoftAdProviderDto, MicrosoftAdIdentityProvider>()
-            .Include<OpenLdapProviderDto, OpenLdapIdentityProvider>()
-            .Include<AzureAdProviderDto, AzureAdIdentityProvider>();
+        
+        CreateMap<IdentityProviderDto, RtIdentityProvider>()
+            .Include<GoogleIdentityProviderDto, RtGoogleIdentityProvider>()
+            .Include<MicrosoftIdentityProviderDto, RtMicrosoftIdentityProvider>()
+            .Include<MicrosoftAdProviderDto, RtMicrosoftAdIdentityProvider>()
+            .Include<OpenLdapProviderDto, RtOpenLdapIdentityProvider>()
+            .Include<AzureEntraIdProviderDto, RtAzureEntraIdIdentityProvider>()
+            .Include<FacebookIdentityProviderDto, RtFacebookIdentityProvider>();
 
-        CreateMap<GoogleIdentityProviderDto, GoogleIdentityProvider>();
-        CreateMap<MicrosoftIdentityProviderDto, MicrosoftIdentityProvider>();
-        CreateMap<MicrosoftAdProviderDto, MicrosoftAdIdentityProvider>();
-        CreateMap<OpenLdapProviderDto, OpenLdapIdentityProvider>();
-        CreateMap<AzureAdProviderDto, AzureAdIdentityProvider>();
+        CreateMap<GoogleIdentityProviderDto, RtGoogleIdentityProvider>();
+        CreateMap<MicrosoftIdentityProviderDto, RtMicrosoftIdentityProvider>();
+        CreateMap<MicrosoftAdProviderDto, RtMicrosoftAdIdentityProvider>();
+        CreateMap<OpenLdapProviderDto, RtOpenLdapIdentityProvider>();
+        CreateMap<AzureEntraIdProviderDto, RtAzureEntraIdIdentityProvider>();
+        CreateMap<FacebookIdentityProviderDto, RtFacebookIdentityProvider>();
     }
 }

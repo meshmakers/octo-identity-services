@@ -1,51 +1,36 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk.Web">
 
     <PropertyGroup>
-        <AspNetCoreHostingModel>InProcess</AspNetCoreHostingModel>
         <AssemblyName>Meshmakers.Octo.Backend.IdentityServices</AssemblyName>
         <DockerDefaultTargetOS>Linux</DockerDefaultTargetOS>
         <RootNamespace>Meshmakers.Octo.Backend.IdentityServices</RootNamespace>
         <UserSecretsId>173d8e91-b831-4e8a-a43f-672c57e6a4da</UserSecretsId>
-        <TargetFramework>net7.0</TargetFramework>
-    </PropertyGroup>
-
-    <PropertyGroup>
+        <CopyDocumentationFilesFromPackages>true</CopyDocumentationFilesFromPackages>
+        <Configurations>Debug;Release;DebugL</Configurations>
+        <Platforms>AnyCPU</Platforms>
+        <OutputPath>..\..\bin\$(Configuration)\</OutputPath>
+        <DocumentationFile>..\..\bin\$(Configuration)\$(AssemblyName).xml</DocumentationFile>
         <GenerateDocumentationFile>true</GenerateDocumentationFile>
         <NoWarn>$(NoWarn);1591</NoWarn>
     </PropertyGroup>
 
-
-    <PropertyGroup Condition=" '$(Configuration)' == 'Debug' ">
-        <OutputPath>../../bin/Debug/IdentityServices/</OutputPath>
-        <DocumentationFile>../../bin/Debug/IdentityServices/Meshmakers.Octo.Backend.IdentityServices.xml</DocumentationFile>
-    </PropertyGroup>
-
-    <PropertyGroup Condition=" '$(Configuration)' == 'Release' ">
-        <OutputPath>../../bin/Release/IdentityServices/</OutputPath>
-        <DocumentationFile>../../bin/Release/IdentityServices/Meshmakers.Octo.Backend.IdentityServices.xml</DocumentationFile>
-    </PropertyGroup>
-
     <ItemGroup>
-        <None Include="nlog.Debug.config">
-            <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-        </None>
-        <None Include="nlog.Release.config">
+        <None Include="nlog.config">
             <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
         </None>
     </ItemGroup>
 
     <ItemGroup>
         <PackageReference Include="AspNetCore.Identity.Mongo" Version="8.3.3" />
-        <PackageReference Include="AutoMapper.Extensions.Microsoft.DependencyInjection" Version="12.0.1" />
-        <PackageReference Include="Duende.IdentityServer.AspNetIdentity" Version="6.3.3" />
-        <PackageReference Include="Microsoft.AspNetCore.Authentication.JwtBearer" Version="7.0.7" />
-        <PackageReference Include="NLog.Web.AspNetCore" Version="5.3.0" />
+        <PackageReference Include="Microsoft.AspNetCore.Authentication.JwtBearer" Version="8.0.4" />
+        <PackageReference Include="NLog.Web.AspNetCore" Version="5.3.8" />
     </ItemGroup>
 
 
     <ItemGroup>
         <ProjectReference Include="$(OctoCommonServicesPath)src\Common\Common.csproj" />
         <ProjectReference Include="$(OctoCommonServicesPath)src\Swagger\Swagger.csproj" />
+        <ProjectReference Include="$(OctoCommonServicesPath)src\Notifications\Notifications.csproj" />
         <ProjectReference Include="..\Authentication\Authentication.csproj" />
         <ProjectReference Include="..\IdentityServices.Resources\IdentityServices.Resources.csproj" />
     </ItemGroup>
@@ -81,23 +66,35 @@
             <ExcludeFromSingleFile>true</ExcludeFromSingleFile>
             <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
         </Content>
-        <Content Update="wwwroot\favicon.ico">
-            <ExcludeFromSingleFile>true</ExcludeFromSingleFile>
-            <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
-        </Content>
-        <Content Update="wwwroot\favicon-32x32.png">
-            <ExcludeFromSingleFile>true</ExcludeFromSingleFile>
-            <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
-        </Content>
         <Content Update="wwwroot\css\swagger.css">
             <ExcludeFromSingleFile>true</ExcludeFromSingleFile>
             <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
         </Content>
         <Content Include="app.scss">
+            <ExcludeFromSingleFile>true</ExcludeFromSingleFile>
+            <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
+        </Content>
+        <Content Update="site.scss">
           <ExcludeFromSingleFile>true</ExcludeFromSingleFile>
           <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
         </Content>
     </ItemGroup>
 
+
+    <ItemGroup>
+      <_ContentIncludedByDefault Remove="test\nlog.config" />
+      <_ContentIncludedByDefault Remove="test\web.config" />
+      <_ContentIncludedByDefault Remove="test\appsettings.Development.json" />
+      <_ContentIncludedByDefault Remove="test\appsettings.json" />
+      <_ContentIncludedByDefault Remove="test\keys\is-signing-key-675D6064D97B269D8BE86236321E495C.json" />
+      <_ContentIncludedByDefault Remove="test\keys\is-signing-key-AA0770129D65AE8B4E7196855478FE54.json" />
+      <_ContentIncludedByDefault Remove="test\keys\is-signing-key-AB531929985D47B6F2426BFDFADA5EF5.json" />
+      <_ContentIncludedByDefault Remove="test\keys\is-signing-key-B57A3203657D6980977B949DF4C2EF06.json" />
+      <_ContentIncludedByDefault Remove="test\keys\is-signing-key-F5DD0338263D2C43B50351656440805F.json" />
+      <_ContentIncludedByDefault Remove="test\Meshmakers.Octo.Backend.IdentityServices.deps.json" />
+      <_ContentIncludedByDefault Remove="test\Meshmakers.Octo.Backend.IdentityServices.runtimeconfig.json" />
+      <_ContentIncludedByDefault Remove="test\package-lock.json" />
+      <_ContentIncludedByDefault Remove="test\package.json" />
+    </ItemGroup>
 
 </Project>

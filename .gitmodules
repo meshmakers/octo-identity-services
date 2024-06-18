@@ -1,6 +1,5 @@
 [submodule "src/octo-common-services"]
 	path = src/octo-common-services
 	url = git@github.com:meshmakers/octo-common-services.git
-[submodule "src/octo-core"]
-	path = src/octo-core
-	url = git@github.com:meshmakers/octo-core.git
+	branch = main
+

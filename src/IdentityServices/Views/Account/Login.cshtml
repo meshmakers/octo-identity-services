@@ -5,11 +5,11 @@
 
 @{
     ViewBag.Title = IdentityTexts.Backend_Identity_Login_Title;
-    Layout = OemOptions.Value.HideNavigation ? "_LayoutNoNavigation": "_Layout";
+    Layout = OemOptions.Value.HideNavigation ? "_LayoutNoNavigation" : "_Layout";
 }
 
 <div class="row justify-content-center">
-    <div class="col-sm-4">
+    <div class="col-sm-8 col-lg-6 col-xl-4">
         <h1>@IdentityTexts.Backend_Identity_Login_Title</h1>
     </div>
 </div>
@@ -21,7 +21,7 @@
 {
     <div class="row justify-content-center">
 
-        <div class="col-sm-4">
+        <div class="col-sm-8 col-lg-6 col-xl-4">
             <form asp-route="Login">
                 <input type="hidden" asp-for="ReturnUrl"/>
 
@@ -45,7 +45,7 @@
                                         </span>
                                         <input type="text" class="mdc-text-field__input" name="username" id="username" aria-labelledby="username">
                                     </label>
-                                    <span asp-validation-for="Username" class="sg-validation-error"></span>
+                                    <span asp-validation-for="Username" class="octo-validation-error"></span>
                                 </div>
                                 <div class="form-group octo-input-group">
                                     <label class="mdc-text-field octo-login-input mdc-text-field--outlined">
@@ -58,14 +58,14 @@
                                         </span>
                                         <input type="password" class="mdc-text-field__input" name="password" id="password" autocomplete="off" aria-labelledby="password">
                                     </label>
-                                    <span asp-validation-for="Password" class="sg-validation-error"></span>
+                                    <span asp-validation-for="Password" class="octo-validation-error"></span>
                                 </div>
                                 @if (EmailOptions.Value.EnableEmailNotifications)
                                 {
                                     <div>
                                         <a class="nav-link"
-                                            asp-controller="Account"
-                                            asp-action="ForgotPassword">
+                                           asp-controller="Account"
+                                           asp-action="ForgotPassword">
                                             @IdentityTexts.Backend_Identity_Forgot_Password_Link
                                         </a>
                                     </div>

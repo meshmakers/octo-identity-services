@@ -1,13 +1,10 @@
-using System;
-using System.Collections.Generic;
-using System.Linq;
 using System.Security.Claims;
-using System.Threading.Tasks;
 using IdentityModel;
 using Meshmakers.Octo.Backend.Authentication.Connection;
 using Meshmakers.Octo.Backend.Authentication.Options;
 using Microsoft.AspNetCore.Identity;
 using Novell.Directory.Ldap;
+using LdapConnection = Novell.Directory.Ldap.LdapConnection;
 
 namespace Meshmakers.Octo.Backend.Authentication.MicrosoftAd;
 
@@ -31,18 +28,19 @@ internal class MicrosoftAdAuthentication
 
     public Task<ExternalLoginInfo> AuthenticateAsync(string username, string password)
     {
-        using var connection = _connectionFactory.CreateLdapConnection(_options.Host, _options.Port, username, password, _options.UseTls, ConnectionType.MicrosoftActiveDirectory);
+        using var connection = _connectionFactory.CreateLdapConnection(_options.Host, _options.Port, username, password, _options.UseTls,
+            ConnectionType.MicrosoftActiveDirectory);
         var entry = connection.ExecuteQuery(parameters =>
         {
-            parameters.Scope = Novell.Directory.Ldap.LdapConnection.ScopeSub;
+            parameters.Scope = LdapConnection.ScopeSub;
             parameters.Filter = $"{UserPrincipalNameAttribute}={username}";
         }).SingleOrDefault();
-        
+
         if (entry == null)
         {
             throw new InvalidOperationException("Could not authenticate user.");
         }
-        
+
         var ldapGroupHandler = new LdapGroupHandler(_options.UserBaseDn, UserPrincipalNameAttribute);
         var groupNames = ldapGroupHandler.GetGroupsForUser(connection, username);
 
@@ -62,29 +60,30 @@ internal class MicrosoftAdAuthentication
         var claims = new List<Claim>
         {
             new(ClaimTypes.Name, userName),
-            new(ClaimTypes.NameIdentifier, userId),
-
+            new(ClaimTypes.NameIdentifier, userId)
         };
-        
+
         if (entry.GetAttributeSet().ContainsKey(GivenNameAttribute))
         {
             var value = entry.GetAttribute(GivenNameAttribute).StringValue;
-            claims.Add(new(ClaimTypes.GivenName, value));
+            claims.Add(new Claim(ClaimTypes.GivenName, value));
         }
+
         if (entry.GetAttributeSet().ContainsKey(SurNameAttribute))
         {
             var value = entry.GetAttribute(SurNameAttribute).StringValue;
-            claims.Add(new(ClaimTypes.Surname, value));
+            claims.Add(new Claim(ClaimTypes.Surname, value));
         }
+
         if (entry.GetAttributeSet().ContainsKey(MailAttribute))
         {
             var value = entry.GetAttribute(MailAttribute).StringValue;
-            claims.Add(new(ClaimTypes.Email, value));
+            claims.Add(new Claim(ClaimTypes.Email, value));
         }
-        
+
         foreach (var groupName in groupNames)
         {
-            claims.Add(new(JwtClaimTypes.Role, groupName));
+            claims.Add(new Claim(JwtClaimTypes.Role, groupName));
         }
 
         var claimsIdentity = new ClaimsIdentity(claims, _options.Name);

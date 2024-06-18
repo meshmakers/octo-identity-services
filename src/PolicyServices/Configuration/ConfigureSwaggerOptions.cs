@@ -1,8 +1,4 @@
-using System;
-using System.IO;
-using System.Reflection;
 using Microsoft.AspNetCore.Mvc.ApiExplorer;
-using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
 using Microsoft.OpenApi.Models;
 using Swashbuckle.AspNetCore.SwaggerGen;
@@ -32,8 +28,8 @@ public class ConfigureSwaggerOptions : IConfigureOptions<SwaggerGenOptions>
         _provider = provider;
     }
 
-    private static string XmlCommentsFilePath =>
-        Path.ChangeExtension(new Uri(typeof(Startup).GetTypeInfo().Assembly.GetName().CodeBase).LocalPath, ".xml");
+    // private static string XmlCommentsFilePath =>
+    //     Path.ChangeExtension(new Uri(typeof(Startup).GetTypeInfo().Assembly.GetName().CodeBase).LocalPath, ".xml");
 
     /// <inheritdoc />
     public void Configure(SwaggerGenOptions options)
@@ -45,7 +41,7 @@ public class ConfigureSwaggerOptions : IConfigureOptions<SwaggerGenOptions>
             options.SwaggerDoc(description.GroupName, CreateInfoForApiVersion(description));
         }
 
-        options.IncludeXmlComments(XmlCommentsFilePath);
+        // options.IncludeXmlComments(XmlCommentsFilePath);
     }
 
     private static OpenApiInfo CreateInfoForApiVersion(ApiVersionDescription description)

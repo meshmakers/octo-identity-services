@@ -1,0 +1,8 @@
+$schema: https://schemas.meshmakers.cloud/construction-kit-elements.schema.json
+enums:
+  - enumId: TokenType
+    values:
+      - key: 0
+        name: Jwt
+      - key: 1
+        name: Reference

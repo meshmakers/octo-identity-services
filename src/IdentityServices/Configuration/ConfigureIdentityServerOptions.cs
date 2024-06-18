@@ -1,4 +1,5 @@
 using Duende.IdentityServer.Configuration;
+using IdentityServerPersistence.Configuration.Options;
 using Meshmakers.Common.Shared;
 using Microsoft.Extensions.Options;
 

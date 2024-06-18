@@ -1,7 +1,7 @@
 namespace Meshmakers.Octo.Backend.IdentityServices.Configuration;
 
 /// <summary>
-/// This configuration resides in the database and is used to configure the identity server.
+///     This configuration resides in the database and is used to configure the identity server.
 /// </summary>
 public class EmailInteractionConfiguration
 {

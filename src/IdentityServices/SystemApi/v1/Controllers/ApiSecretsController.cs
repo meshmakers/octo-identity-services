@@ -1,18 +1,16 @@
-using System;
 using System.ComponentModel.DataAnnotations;
-using System.Linq;
-using System.Threading.Tasks;
 using Duende.IdentityServer.Models;
 using IdentityModel;
+using IdentityServerPersistence;
+using IdentityServerPersistence.SystemStores;
 using Meshmakers.Common.Shared;
-using Meshmakers.Octo.Backend.Common.ApiErrors;
-using Meshmakers.Octo.Common.Shared;
-using Meshmakers.Octo.Common.Shared.DataTransferObjects;
-using Meshmakers.Octo.Common.Shared.DistributedCache;
-using Meshmakers.Octo.SystematizedData.Persistence.SystemEntities;
-using Meshmakers.Octo.SystematizedData.Persistence.SystemStores;
+using Meshmakers.Octo.Common.DistributionEventHub.Services;
+using Meshmakers.Octo.Communication.Contracts.DataTransferObjects;
+using Meshmakers.Octo.Services.Common.ApiErrors;
+using Meshmakers.Octo.Services.Common.DistributionEventHub.Messages;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Persistence.IdentityCkModel.Generated.System.Identity.v1;
 
 namespace Meshmakers.Octo.Backend.IdentityServices.SystemApi.v1.Controllers;
 
@@ -22,17 +20,18 @@ namespace Meshmakers.Octo.Backend.IdentityServices.SystemApi.v1.Controllers;
 [ApiVersion(IdentityServiceConstants.ApiVersion1)]
 public class ApiSecretsController : ControllerBase
 {
+    private readonly IDistributionEventHubService _distributionEventHubService;
     private readonly IOctoClientStore _octoClientStore;
     private readonly IOctoResourceStore _octoResourceStore;
-    private readonly IDistributedWithPubSubCache _distributedCache;
 
-    public ApiSecretsController(IOctoClientStore octoClientStore, IOctoResourceStore octoResourceStore, IDistributedWithPubSubCache distributedCache)
+    public ApiSecretsController(IOctoClientStore octoClientStore, IOctoResourceStore octoResourceStore,
+        IDistributionEventHubService distributionEventHubService)
     {
         _octoClientStore = octoClientStore;
         _octoResourceStore = octoResourceStore;
-        _distributedCache = distributedCache;
+        _distributionEventHubService = distributionEventHubService;
     }
-    
+
     // GET system/v1/apiSecrets/client/xyz
     /// <summary>
     ///     Returns all secrets of the given client
@@ -46,7 +45,7 @@ public class ApiSecretsController : ControllerBase
         {
             return BadRequest(ModelState);
         }
-        
+
         var client = await _octoClientStore.FindClientByIdAsync(clientId);
         if (client == null)
         {
@@ -55,7 +54,7 @@ public class ApiSecretsController : ControllerBase
 
         return Ok(client.ClientSecrets.Select(CreateApiSecret));
     }
-    
+
     // GET system/v1/apiSecrets/client/xyz/secretValue
     /// <summary>
     ///     Returns a secret of the given client
@@ -71,7 +70,7 @@ public class ApiSecretsController : ControllerBase
         }
 
         var decodedSecretValue = secretValue.DecodeBase64();
-        
+
         var client = await _octoClientStore.FindClientByIdAsync(clientId);
         if (client == null)
         {
@@ -83,9 +82,10 @@ public class ApiSecretsController : ControllerBase
         {
             return NotFound(new NotFoundError($"API secret '{decodedSecretValue}' not found"));
         }
+
         return Ok(CreateApiSecret(secret));
     }
-    
+
     // GET system/v1/apiSecrets/apiResource/xyz
     /// <summary>
     ///     Returns all secrets of the given API resource
@@ -99,8 +99,8 @@ public class ApiSecretsController : ControllerBase
         {
             return BadRequest(ModelState);
         }
-        
-        var apiResources = await _octoResourceStore.FindApiResourcesByNameAsync(new []{apiResourceName});
+
+        var apiResources = await _octoResourceStore.FindApiResourcesByNameAsync(new[] { apiResourceName });
         var apiResource = apiResources.FirstOrDefault();
         if (apiResource == null)
         {
@@ -109,7 +109,7 @@ public class ApiSecretsController : ControllerBase
 
         return Ok(apiResource.ApiSecrets.Select(CreateApiSecret));
     }
-    
+
     // GET system/v1/apiSecrets/apiResource/xyz/secretValue
     /// <summary>
     ///     Returns a secret of the given API resource
@@ -123,10 +123,10 @@ public class ApiSecretsController : ControllerBase
         {
             return BadRequest(ModelState);
         }
-        
+
         var decodedSecretValue = secretValue.DecodeBase64();
-        
-        var apiResources = await _octoResourceStore.FindApiResourcesByNameAsync(new []{apiResourceName});
+
+        var apiResources = await _octoResourceStore.FindApiResourcesByNameAsync(new[] { apiResourceName });
         var apiResource = apiResources.FirstOrDefault();
         if (apiResource == null)
         {
@@ -138,9 +138,10 @@ public class ApiSecretsController : ControllerBase
         {
             return NotFound(new NotFoundError($"API secret '{decodedSecretValue}' not found"));
         }
+
         return Ok(CreateApiSecret(secret));
     }
-    
+
     /// <summary>
     ///     Creates new secret for client
     /// </summary>
@@ -156,8 +157,8 @@ public class ApiSecretsController : ControllerBase
         {
             return BadRequest(ModelState);
         }
-        
-        var client = await _octoClientStore.FindClientByIdAsync(clientId) as OctoClient;
+
+        var client = await _octoClientStore.FindRtClientByIdAsync(clientId);
         if (client == null)
         {
             return NotFound();
@@ -166,10 +167,10 @@ public class ApiSecretsController : ControllerBase
         secretDto.ValueClearText = Guid.NewGuid().ToString();
         secretDto.ValueEncrypted = secretDto.ValueClearText.Sha256();
 
-        Secret secret = new();
+        RtSecretRecord secret = new();
         ApplyToApiSecret(secret, secretDto);
         client.ClientSecrets.Add(secret);
-        
+
         try
         {
             await _octoClientStore.UpdateAsync(clientId, client);
@@ -181,7 +182,7 @@ public class ApiSecretsController : ControllerBase
             return BadRequest(new InternalServerError(e.Message));
         }
     }
-    
+
     /// <summary>
     ///     Creates new secret for an API resource
     /// </summary>
@@ -198,8 +199,7 @@ public class ApiSecretsController : ControllerBase
             return BadRequest(ModelState);
         }
 
-        var apiResources = await _octoResourceStore.FindApiResourcesByNameAsync(new []{apiResourceName});
-        var apiResource = apiResources.FirstOrDefault() as OctoApiResource;
+        var apiResource = await _octoResourceStore.GetApiResourceByNameAsync(apiResourceName);
         if (apiResource == null)
         {
             return NotFound();
@@ -208,10 +208,10 @@ public class ApiSecretsController : ControllerBase
         secretDto.ValueClearText = Guid.NewGuid().ToString();
         secretDto.ValueEncrypted = secretDto.ValueClearText.Sha256();
 
-        Secret secret = new();
+        RtSecretRecord secret = new();
         ApplyToApiSecret(secret, secretDto);
         apiResource.ApiSecrets.Add(secret);
-        
+
         try
         {
             await _octoResourceStore.UpdateApiResourceAsync(apiResourceName, apiResource);
@@ -223,7 +223,7 @@ public class ApiSecretsController : ControllerBase
             return BadRequest(new InternalServerError(e.Message));
         }
     }
-    
+
     // PUT system/v1/apiSecrets/apiResource/xyz
     /// <summary>
     ///     Updates a secret
@@ -240,17 +240,18 @@ public class ApiSecretsController : ControllerBase
             return BadRequest(ModelState);
         }
 
-        var client = await _octoClientStore.FindClientByIdAsync(clientId) as OctoClient;
+        var client = await _octoClientStore.FindRtClientByIdAsync(clientId);
         if (client == null)
         {
             return NotFound();
         }
-        
+
         var secrets = client.ClientSecrets.Where(x => x.Value == apiSecretDto.ValueEncrypted).ToArray();
         if (!secrets.Any())
         {
             return NotFound(new NotFoundError($"Secret with value '{apiSecretDto.ValueEncrypted}' does not exist."));
         }
+
         var secret = secrets.First();
         ApplyToApiSecret(secret, apiSecretDto);
 
@@ -266,7 +267,7 @@ public class ApiSecretsController : ControllerBase
 
         return Ok();
     }
-    
+
     // PUT system/v1/apiSecrets/apiResource/xyz
     /// <summary>
     ///     Updates a secret
@@ -283,18 +284,18 @@ public class ApiSecretsController : ControllerBase
             return BadRequest(ModelState);
         }
 
-        var apiResources = await _octoResourceStore.FindApiResourcesByNameAsync(new []{apiResourceName});
-        var apiResource = apiResources.FirstOrDefault() as OctoApiResource;
+        var apiResource = await _octoResourceStore.GetApiResourceByNameAsync(apiResourceName);
         if (apiResource == null)
         {
             return NotFound();
         }
-        
+
         var secrets = apiResource.ApiSecrets.Where(x => x.Value == apiSecretDto.ValueEncrypted).ToArray();
         if (!secrets.Any())
         {
             return NotFound(new NotFoundError($"Secret with value '{apiSecretDto.ValueEncrypted}' does not exist."));
         }
+
         var secret = secrets.First();
         ApplyToApiSecret(secret, apiSecretDto);
 
@@ -310,8 +311,8 @@ public class ApiSecretsController : ControllerBase
 
         return Ok();
     }
-    
-    
+
+
     // DELETE system/v1/apiSecrets/client/xyz/secretValue
     /// <summary>
     ///     Deletes a secret of given client
@@ -327,10 +328,10 @@ public class ApiSecretsController : ControllerBase
         {
             return BadRequest(ModelState);
         }
-        
+
         var decodedSecretValue = secretValue.DecodeBase64();
 
-        var octoClient = await _octoClientStore.FindClientByIdAsync(clientId);
+        var octoClient = await _octoClientStore.FindRtClientByIdAsync(clientId);
         if (octoClient == null)
         {
             return NotFound(new NotFoundError($"Client with id '{clientId}' does not exist."));
@@ -349,7 +350,7 @@ public class ApiSecretsController : ControllerBase
 
         try
         {
-            await _octoClientStore.UpdateAsync(clientId, (OctoClient) octoClient);
+            await _octoClientStore.UpdateAsync(clientId, octoClient);
             await ClearCacheAsync();
             return Ok();
         }
@@ -358,8 +359,8 @@ public class ApiSecretsController : ControllerBase
             return BadRequest(new InternalServerError(e.Message));
         }
     }
-    
-    
+
+
     // DELETE system/v1/apiSecrets/apiResource/xyz/secretValue
     /// <summary>
     ///     Deletes a secret of given api resource
@@ -375,11 +376,10 @@ public class ApiSecretsController : ControllerBase
         {
             return BadRequest(ModelState);
         }
-        
+
         var decodedSecretValue = secretValue.DecodeBase64();
 
-        var apiResources = await _octoResourceStore.FindApiResourcesByNameAsync(new []{apiResourceName});
-        var apiResource = apiResources.FirstOrDefault() as OctoApiResource;
+        var apiResource = await _octoResourceStore.GetApiResourceByNameAsync(apiResourceName);
         if (apiResource == null)
         {
             return NotFound();
@@ -407,12 +407,12 @@ public class ApiSecretsController : ControllerBase
             return BadRequest(new InternalServerError(e.Message));
         }
     }
-    
-    private async Task ClearCacheAsync()
+
+    private Task ClearCacheAsync()
     {
-        await _distributedCache.PublishAsync(CacheCommon.KeyCorsClients, Guid.NewGuid().ToString());
+        return _distributionEventHubService.PublishAsync(new CorsClientsUpdate(_octoResourceStore.TenantId));
     }
-    
+
     private ApiSecretDto CreateApiSecret(Secret secret)
     {
         var apiSecretDto = new ApiSecretDto
@@ -421,15 +421,14 @@ public class ApiSecretsController : ControllerBase
             Description = secret.Description,
             ValueEncrypted = secret.Value
         };
-        
+
         return apiSecretDto;
     }
-    
-    private void ApplyToApiSecret(Secret secret, ApiSecretDto apiSecretDto)
+
+    private void ApplyToApiSecret(RtSecretRecord secret, ApiSecretDto apiSecretDto)
     {
-        secret.Expiration = apiSecretDto.ExpirationDate;
+        secret.ExpirationDateTime = apiSecretDto.ExpirationDate;
         secret.Description = apiSecretDto.Description;
         secret.Value = apiSecretDto.ValueEncrypted;
     }
-    
 }

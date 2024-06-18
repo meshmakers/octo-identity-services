@@ -1,24 +1,23 @@
-using System.Threading.Tasks;
 using Duende.IdentityServer.Events;
 using Duende.IdentityServer.Models;
 using Duende.IdentityServer.Services;
 using Meshmakers.Octo.Backend.Authentication.ViewModels;
 using Meshmakers.Octo.Backend.IdentityServices.Resources;
-using Meshmakers.Octo.SystematizedData.Persistence.SystemEntities;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Mvc;
+using Persistence.IdentityCkModel.Generated.System.Identity.v1;
 
 namespace Meshmakers.Octo.Backend.Authentication.Controllers;
 
 [Route(AuthenticationConstants.ControllerRouteTemplate)]
 public class MicrosoftAdController : Controller
 {
-    private readonly SignInManager<OctoUser> _signInManager;
-    private readonly IIdentityServerInteractionService _interaction;
     private readonly IEventService _events;
+    private readonly IIdentityServerInteractionService _interaction;
+    private readonly SignInManager<RtUser> _signInManager;
 
-    public MicrosoftAdController(SignInManager<OctoUser> signInManager,
+    public MicrosoftAdController(SignInManager<RtUser> signInManager,
         IIdentityServerInteractionService interaction,
         IEventService events
     )
@@ -27,6 +26,8 @@ public class MicrosoftAdController : Controller
         _interaction = interaction;
         _events = events;
     }
+
+    public static string RouteName => nameof(MicrosoftAdController).Replace("Controller", "");
 
     [HttpGet]
     public IActionResult Index([FromQuery] MicrosoftAdIndexModel login)
@@ -93,6 +94,4 @@ public class MicrosoftAdController : Controller
 
         return View("Index", login);
     }
-
-    public static string RouteName => nameof(MicrosoftAdController).Replace("Controller", "");
 }

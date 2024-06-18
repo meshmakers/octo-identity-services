@@ -1,4 +1,3 @@
-using System.Collections.Generic;
 using Novell.Directory.Ldap;
 
 namespace Meshmakers.Octo.Backend.Authentication.Connection;
@@ -6,7 +5,7 @@ namespace Meshmakers.Octo.Backend.Authentication.Connection;
 internal static class LdapSearchQueueExtensions
 {
     /// <summary>
-    /// Gets LDAP entries from the LDAP search response.
+    ///     Gets LDAP entries from the LDAP search response.
     /// </summary>
     /// <returns>The list of the LDAP entries.</returns>
     internal static List<LdapEntry> GetLdapEntries(this LdapSearchQueue? searchQueue)

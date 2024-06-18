@@ -1,17 +1,18 @@
 ﻿@using Duende.IdentityServer.Extensions
-@using Meshmakers.Octo.SystematizedData.Persistence.SystemEntities
+@using Meshmakers.Octo.Communication.Contracts
+@using Persistence.IdentityCkModel.Generated.System.Identity.v1
 @using Microsoft.AspNetCore.Identity
 @using Microsoft.AspNetCore.Mvc.TagHelpers
-@inject UserManager<OctoUser> UserManager
+@inject UserManager<RtUser> UserManager
 
 @{
     var user = await UserManager.GetUserAsync(User);
     var hasPassword = false;
-    var isDeveloper = false;
+    var isInDevelopmentRole = false;
     if (user != null)
     {
         hasPassword = await UserManager.HasPasswordAsync(user);
-        isDeveloper = user.Roles.Contains("Developer");
+        isInDevelopmentRole = await UserManager.IsInRoleAsync(user, CommonConstants.DevelopmentRole);
     }
 }
 
@@ -19,8 +20,8 @@
     For more information on enabling MVC for empty projects, visit http://go.microsoft.com/fwlink/?LinkID=397860
 *@
 
-<header>
-    <nav class="navbar navbar-expand-md navbar-dark octo-navbar">
+<header class="header">
+    <nav class="navbar navbar-expand-md navbar-dark">
         <div class="order-0">
             <button class="navbar-toggler" type="button" data-toggle="collapse" data-target="#navbarSupportedContent" aria-controls="navbarSupportedContent" aria-expanded="false" aria-label="Toggle navigation">
                 <span class="navbar-toggler-icon"></span>
@@ -35,7 +36,7 @@
                         <a class="nav-link dropdown-toggle" href="#" id="navbarDropdown" role="button" data-bs-toggle="dropdown" aria-expanded="false">
                             @IdentityTexts.Backend_Identity_Navigation_Profile_Header
                         </a>
-                        <ul class="dropdown-menu" aria-labelledby="navbarDropdown">
+                        <ul class="dropdown-menu dropdown-menu-dark" aria-labelledby="navbarDropdown">
                             <li>
                                 <a class="dropdown-item" asp-area="" asp-controller="Manage" asp-action="Index">@IdentityTexts.Backend_Identity_Navigation_Manage_Header</a>
                             </li>
@@ -67,13 +68,13 @@
                         </ul>
                     </li>
 
-                    @if (isDeveloper)
+                    @if (isInDevelopmentRole)
                     {
                         <li class="nav-item dropdown">
                             <a class="nav-link dropdown-toggle" href="#" id="navbarDropdown" role="button" data-bs-toggle="dropdown" aria-expanded="false">
                                 @IdentityTexts.Backend_Identity_Navigation_Development_Header
                             </a>
-                            <ul class="dropdown-menu" aria-labelledby="navbarDropdown">
+                            <ul class="dropdown-menu dropdown-menu-dark" aria-labelledby="navbarDropdown">
                                 <li>
                                 <a class="dropdown-item" href="~/swagger/">@IdentityTexts.Backend_Identity_Navigation_API_Header</a>
                                 <li>
@@ -100,6 +101,9 @@
                     </li>
                 }
             </ul>
+            <div class="octo-spacer"></div>
+            <img src="/assets/MM-Logo-Schrift-WHT.svg" width="200px" alt="MeshMakers Logo">
         </div>
     </nav>
+    
 </header>

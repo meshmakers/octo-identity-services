@@ -2,20 +2,22 @@ name: $(MajorVersion).$(MinorVersion).$(date:yyMM).$(DayOfMonth)$(rev:rrr)
 
 trigger:
   batch: true
-  tags:
-    include:
-      - 'r*'
   branches:
+    include:
+      - dev/*
+      - main
+  tags:
     exclude:
-      - dev
+      - '*'
 
 variables:
   - group: GitSSHGroup
+  - group: ApiKeys
   - group: OctoDefault
   - name: solutionFile
     value: 'Octo.Identity.sln'
   - name: isRelease
-    value: true #${{ startsWith(variables['Build.SourceBranch'], 'refs/tags/r') }}
+    value: ${{ startsWith(variables['Build.SourceBranch'], 'refs/tags/r') }}
 
 stages:
   - stage: Build
@@ -27,7 +29,7 @@ stages:
         steps:
           - checkout: self
             clean: true
-            submodules: true
+            submodules: recursive
           - task: InstallSSHKey@0
             inputs:
               knownHostsEntry: '$(SSHKnownHosts)'
@@ -54,6 +56,7 @@ stages:
                 }
             displayName: 'Set build number'
           - template: setversion.yml
+          - template: download-ca.yml
           - task: DotNetCoreCLI@2
             displayName: 'Test'
             inputs:
@@ -69,15 +72,13 @@ stages:
               script: |
                 New-Item $(build.artifactstagingdirectory)/versioninfo.txt
                 Set-Content $(build.artifactstagingdirectory)/versioninfo.txt $(Build.BuildNumber)
-          - template: buildAndPushDockerImage.yml
+          - template: build-and-push-docker-image.yml
             parameters:
-              ContainerRegistry: 'dockerhub@ianitor'
               Repository: meshmakers/octo-mesh-identity-services
               Dockerfile: src/IdentityServices/Dockerfile
               IsRelease: ${{ variables.isRelease }}
-          - template: buildAndPushDockerImage.yml
+          - template: build-and-push-docker-image.yml
             parameters:
-              ContainerRegistry: 'dockerhub@ianitor'
               Repository: meshmakers/octo-mesh-policy-services
               Dockerfile: src/PolicyServices/Dockerfile
               IsRelease: ${{ variables.isRelease }}

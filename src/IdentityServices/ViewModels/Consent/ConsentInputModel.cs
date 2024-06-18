@@ -1,6 +1,4 @@
-﻿using System.Collections.Generic;
-
-namespace Meshmakers.Octo.Backend.IdentityServices.ViewModels.Consent;
+﻿namespace Meshmakers.Octo.Backend.IdentityServices.ViewModels.Consent;
 
 public class ConsentInputModel
 {

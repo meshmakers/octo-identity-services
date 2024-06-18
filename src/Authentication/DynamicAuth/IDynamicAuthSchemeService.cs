@@ -1,6 +1,4 @@
-﻿using System.Threading.Tasks;
-
-namespace Meshmakers.Octo.Backend.Authentication.DynamicAuth;
+﻿namespace Meshmakers.Octo.Backend.Authentication.DynamicAuth;
 
 /// <summary>
 ///     Interface of dynamic auth scheme service that allows to configure external identity
@@ -12,5 +10,5 @@ public interface IDynamicAuthSchemeService
     ///     Configures authentication schemes.
     /// </summary>
     /// <returns></returns>
-    Task ConfigureAsync();
+    Task ConfigureAsync(string tenantId);
 }

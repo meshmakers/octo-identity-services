@@ -1,0 +1,22 @@
+"$schema": "https://schemas.meshmakers.cloud/construction-kit-elements.schema.json"
+types:
+  - typeId: Role
+    derivedFromCkTypeId: System/Entity
+    isFinal: true
+    isAbstract: false
+    attributes:
+      - id: System/Name
+        name: Name
+
+      - id: System.Identity/NormalizedName
+        name: NormalizedName
+
+      - id: System.Identity/SubjectIds
+        name: SubjectIds
+
+      - id: System.Identity/IdentityRoleIds
+        name: IdentityRoleIds
+
+      - id: System.Identity/RoleClaims
+        name: Claims
+        isOptional: true

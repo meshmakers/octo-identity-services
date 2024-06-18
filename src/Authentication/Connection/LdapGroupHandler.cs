@@ -1,4 +1,3 @@
-using System.Collections.Generic;
 using System.Text.RegularExpressions;
 using Novell.Directory.Ldap;
 
@@ -14,26 +13,26 @@ public class LdapGroupHandler
         _searchBase = searchBase;
         _userNameAttributeName = userNameAttributeName;
     }
-    
+
     public IEnumerable<string> GetGroupsForUser(ILdapConnection ldapConnection, string userName)
     {
-        var groups       = new Stack<string>();
+        var groups = new Stack<string>();
         var uniqueGroups = new HashSet<string>();
 
-        foreach (string group in GetGroupsForUserCore(ldapConnection, userName))
+        foreach (var group in GetGroupsForUserCore(ldapConnection, userName))
         {
             groups.Push(group);
         }
 
         while (groups.Count > 0)
         {
-            string group = groups.Pop();
+            var group = groups.Pop();
             if (uniqueGroups.Add(group))
             {
                 yield return group;
             }
 
-            foreach (string parentGroup in GetGroupsForUserCore(ldapConnection, group))
+            foreach (var parentGroup in GetGroupsForUserCore(ldapConnection, group))
             {
                 groups.Push(parentGroup);
             }
@@ -47,30 +46,28 @@ public class LdapGroupHandler
             parameters.BaseDn = _searchBase;
             parameters.Filter = $"({_userNameAttributeName}={user})";
             parameters.Scope = Novell.Directory.Ldap.LdapConnection.ScopeSub;
-            parameters.Attrs = new[] { "cn", "memberOf"  };
+            parameters.Attrs = new[] { "cn", "memberOf" };
             parameters.TypesOnly = false;
         });
-        
+
         foreach (var entry in entries)
+        foreach (var value in HandleEntry(entry))
         {
-            foreach (string value in HandleEntry(entry))
-            {
-                yield return value;
-            }
+            yield return value;
         }
 
         IEnumerable<string> HandleEntry(LdapEntry entry)
         {
-            LdapAttribute attr = entry.GetAttribute("memberOf");
+            var attr = entry.GetAttribute("memberOf");
 
             if (attr == null)
             {
                 yield break;
             }
 
-            foreach (string value in attr.StringValueArray)
+            foreach (var value in attr.StringValueArray)
             {
-                string? groupName = GetGroup(value);
+                var groupName = GetGroup(value);
                 if (!string.IsNullOrEmpty(groupName))
                 {
                     yield return groupName;
@@ -80,7 +77,7 @@ public class LdapGroupHandler
 
         string? GetGroup(string value)
         {
-            Match match = Regex.Match(value, "^CN=([^,]*)");
+            var match = Regex.Match(value, "^CN=([^,]*)");
 
             if (!match.Success)
             {

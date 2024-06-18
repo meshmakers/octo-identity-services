@@ -6,6 +6,7 @@ public class ProcessConsentResult
 {
     public bool IsRedirect => RedirectUri != null;
     public string? RedirectUri { get; set; }
+
     // ReSharper disable once UnusedAutoPropertyAccessor.Global
     public Client? Client { get; set; }
 

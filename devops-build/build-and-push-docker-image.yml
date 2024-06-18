@@ -1,0 +1,44 @@
+parameters:
+  - name: Repository
+    type: string
+  - name: Dockerfile
+    type: string
+  - name: IsRelease
+    type: boolean
+
+steps:
+- task: Docker@2
+  displayName: Build ${{ parameters.Repository }}
+  inputs:
+    command: build
+    repository: ${{ parameters.Repository }}
+    dockerfile: ${{ parameters.Dockerfile }}
+    buildContext: $(System.DefaultWorkingDirectory)
+    arguments: '--build-arg OCTO_PRIVATE_NUGET_SERVICE="$(NugetPrivateServer)" --build-arg OCTO_PRIVATE_NUGET_CERTIFICATE="$(NugetPrivateServerCa)"'
+    tags: |
+      $(Build.BuildNumber)
+
+- task: Docker@2
+  condition: ${{ eq(parameters.IsRelease, true) }}
+  displayName: Push to public ${{ parameters.Repository }}
+  inputs:
+    command: push
+    containerRegistry: $(DockerRegistryPublicConnection)
+    repository: ${{ parameters.Repository }}
+    tags: |
+      $(Build.BuildNumber)
+      
+- task: Docker@2
+  displayName: Tag docker image for for private ${{ parameters.Repository }}
+  inputs:
+    command: tag
+    arguments: ${{ parameters.Repository }}:$(Build.BuildNumber) $(DockerRegistryPrivateUri)/${{ parameters.Repository }}:$(Build.BuildNumber)      
+      
+- task: Docker@2
+  displayName: Push to private ${{ parameters.Repository }}
+  inputs:
+    command: push
+    containerRegistry: $(DockerRegistryPrivateConnection)
+    repository: ${{ parameters.Repository }}
+    tags: |
+      $(Build.BuildNumber)

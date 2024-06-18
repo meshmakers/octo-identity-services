@@ -1,0 +1,91 @@
+"$schema": "https://schemas.meshmakers.cloud/construction-kit-elements.schema.json"
+types:
+  - typeId: User
+    derivedFromCkTypeId: System/Entity
+    isFinal: true
+    isAbstract: false
+    attributes:
+      - id: System.Identity/UserName
+        name: UserName
+        isOptional: true
+
+      - id: System.Identity/NormalizedUserName
+        name: NormalizedUserName
+        isOptional: true
+
+      - id: System.Identity/FirstName
+        name: FirstName
+        isOptional: true
+
+      - id: System.Identity/LastName
+        name: LastName
+        isOptional: true
+
+      - id: System/Description
+        name: Description
+        isOptional: true
+
+      - id: System.Identity/Email
+        name: Email
+        isOptional: true
+
+      - id: System.Identity/NormalizedEmail
+        name: NormalizedEmail
+        isOptional: true
+
+      - id: System.Identity/EmailConfirmed
+        name: EmailConfirmed
+
+      - id: System.Identity/PasswordHash
+        name: PasswordHash
+        isOptional: true
+
+      - id: System.Identity/SecurityStamp
+        name: SecurityStamp
+        isOptional: true
+
+      - id: System.Identity/PhoneNumber
+        name: PhoneNumber
+        isOptional: true
+
+      - id: System.Identity/PhoneNumberConfirmed
+        name: PhoneNumberConfirmed
+
+      - id: System.Identity/TwoFactorEnabled
+        name: TwoFactorEnabled
+
+      - id: System.Identity/LockoutEnd
+        name: LockoutEnd
+        isOptional: true
+
+      - id: System.Identity/LockoutEnabled
+        name: LockoutEnabled
+
+      - id: System.Identity/AccessFailedCount
+        name: AccessFailedCount
+
+      - id: System.Identity/ResetPasswordOnLogin
+        name: ResetPasswordOnLogin
+
+      - id: System.Identity/RoleIds
+        name: RoleIds
+        isOptional: true
+
+      - id: System.Identity/UserClaims
+        name: Claims
+        isOptional: true
+
+      - id: System.Identity/UserLogins
+        name: UserLogins
+        isOptional: true
+
+      - id: System.Identity/UserTokens
+        name: UserTokens
+        isOptional: true
+    
+    indexes:
+      - indexType: Ascending
+        fields:
+          - attributeNames:
+              - NormalizedEmail
+              - NormalizedUserName
