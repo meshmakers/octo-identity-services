@@ -14,6 +14,7 @@ using Meshmakers.Octo.Communication.Contracts;
 using Meshmakers.Octo.Communication.Contracts.DataTransferObjects;
 using Meshmakers.Octo.Communication.Contracts.Services;
 using Meshmakers.Octo.Runtime.Contracts.MongoDb.Configuration;
+using Meshmakers.Octo.Runtime.Contracts.MongoDb.Extensions;
 using Meshmakers.Octo.Services.Common;
 using Meshmakers.Octo.Services.Common.Authorization;
 using Meshmakers.Octo.Services.Common.DistributionEventHub.Commands;
@@ -22,6 +23,7 @@ using Meshmakers.Octo.Services.Infrastructure.CredentialGenerator;
 using Meshmakers.Octo.Services.Infrastructure.Middleware;
 using Meshmakers.Octo.Services.Infrastructure.Services;
 using Meshmakers.Octo.Services.Notifications;
+using Meshmakers.Octo.Services.Observability;
 using Meshmakers.Octo.Services.Swagger.Configuration;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.Extensions.DependencyInjection.Extensions;
@@ -46,6 +48,9 @@ try
         ContentRootPath = Directory.GetCurrentDirectory(),
         WebRootPath = "wwwroot",
     });
+
+    builder.AddObservability()
+        .AddSystemContextHealthCheck();
 
     // NLog: Setup NLog for Dependency injection
     builder.Logging.ClearProviders();
@@ -194,6 +199,8 @@ try
     builder.Services.AddAutoMapper(typeof(Program));
 
     var app = builder.Build();
+    
+    app.MapObservability();
 
     // Configure the HTTP request pipeline.
     if (app.Environment.IsDevelopment())
