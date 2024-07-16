@@ -1,7 +1,7 @@
 using Meshmakers.Octo.Common.DistributionEventHub.Consumers;
 using Meshmakers.Octo.Runtime.Contracts;
 using Meshmakers.Octo.Runtime.Contracts.MongoDb;
-using Meshmakers.Octo.Runtime.Contracts.MongoDb.Repository;
+using Meshmakers.Octo.Runtime.Contracts.MongoDb.Repositories;
 using Meshmakers.Octo.Runtime.Contracts.Repositories.Query;
 using Meshmakers.Octo.Runtime.Contracts.RepositoryEntities;
 using Meshmakers.Octo.Services.Common.DistributionEventHub.Commands;

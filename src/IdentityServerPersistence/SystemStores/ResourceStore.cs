@@ -2,7 +2,7 @@
 using Duende.IdentityServer.Models;
 using Meshmakers.Common.Shared;
 using Meshmakers.Octo.ConstructionKit.Contracts;
-using Meshmakers.Octo.Runtime.Contracts.MongoDb.Repository;
+using Meshmakers.Octo.Runtime.Contracts.MongoDb.Repositories;
 using Meshmakers.Octo.Runtime.Contracts.Repositories.Query;
 using Meshmakers.Octo.Services.Infrastructure.Services;
 using Persistence.IdentityCkModel.Generated.System.Identity.v1;
