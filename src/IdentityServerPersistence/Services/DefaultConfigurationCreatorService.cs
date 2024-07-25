@@ -170,6 +170,8 @@ internal class DefaultConfigurationCreatorService : IDefaultConfigurationCreator
         await TryCreateRole(CommonConstants.DevelopmentRole);
         await TryCreateRole(CommonConstants.AdminPanelManagementRole);
         await TryCreateRole(CommonConstants.BotManagementRole);
+        await TryCreateRole(CommonConstants.DashboardManagementRole);
+        await TryCreateRole(CommonConstants.DashboardViewerRole);
     }
 
     private async Task TryCreateRole(string roleName)
