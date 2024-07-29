@@ -12,37 +12,33 @@ using Persistence.IdentityCkModel.Generated.System.Identity.v1;
 
 namespace IdentityServerPersistence.SystemStores;
 
-public sealed class OctoUserStore :
-    IUserClaimStore<RtUser>,
-    IUserLoginStore<RtUser>,
-    IUserRoleStore<RtUser>,
-    IUserPasswordStore<RtUser>,
-    IUserSecurityStampStore<RtUser>,
-    IUserEmailStore<RtUser>,
-    IUserPhoneNumberStore<RtUser>,
-    IUserTwoFactorStore<RtUser>,
-    IUserLockoutStore<RtUser>,
-    IUserAuthenticatorKeyStore<RtUser>,
-    IUserAuthenticationTokenStore<RtUser>,
-    IUserTwoFactorRecoveryCodeStore<RtUser>,
-    IQueryableUserStore<RtUser>,
-    IProtectedUserStore<RtUser>
+public sealed class OctoUserStore(
+    IMultiTenancyResolverService multiTenancyResolverService,
+    IdentityErrorDescriber? describer)
+    :
+        IUserClaimStore<RtUser>,
+        IUserLoginStore<RtUser>,
+        IUserRoleStore<RtUser>,
+        IUserPasswordStore<RtUser>,
+        IUserSecurityStampStore<RtUser>,
+        IUserEmailStore<RtUser>,
+        IUserPhoneNumberStore<RtUser>,
+        IUserTwoFactorStore<RtUser>,
+        IUserLockoutStore<RtUser>,
+        IUserAuthenticatorKeyStore<RtUser>,
+        IUserAuthenticationTokenStore<RtUser>,
+        IUserTwoFactorRecoveryCodeStore<RtUser>,
+        IQueryableUserStore<RtUser>,
+        IProtectedUserStore<RtUser>
 {
     private const string InternalLoginProvider = "[AspNetUserStore]";
     private const string AuthenticatorKeyTokenName = "AuthenticatorKey";
     private const string RecoveryCodeTokenName = "RecoveryCodes";
 
-    private readonly ITenantRepository _tenantRepository;
+    private readonly ITenantRepository _tenantRepository = multiTenancyResolverService.GetTenantRepository();
     private bool _disposed;
 
-    public OctoUserStore(IMultiTenancyResolverService multiTenancyResolverService, IdentityErrorDescriber? describer)
-    {
-        _tenantRepository = multiTenancyResolverService.GetTenantRepository();
-
-        ErrorDescriber = describer ?? new IdentityErrorDescriber();
-    }
-
-    private IdentityErrorDescriber ErrorDescriber { get; }
+    private IdentityErrorDescriber ErrorDescriber { get; } = describer ?? new IdentityErrorDescriber();
 
     public IQueryable<RtUser> Users => _tenantRepository.AsQueryable<RtUser>();
 
@@ -57,34 +53,32 @@ public sealed class OctoUserStore :
         ThrowIfDisposed();
         ArgumentValidation.Validate(nameof(user), user);
 
-        using (var session = await _tenantRepository.GetSessionAsync())
+        using var session = await _tenantRepository.GetSessionAsync();
+        session.StartTransaction();
+
+        var token = await FindTokenAsync(session, user, loginProvider, name);
+        if (token == null)
         {
-            session.StartTransaction();
-
-            var token = await FindTokenAsync(session, user, loginProvider, name);
-            if (token == null)
+            user.UserTokens ??= new AttributeRecordValueList<RtUserTokenRecord>();
+            user.UserTokens.Add(new RtUserTokenRecord
             {
-                user.UserTokens ??= new AttributeRecordValueList<RtUserTokenRecord>();
-                user.UserTokens.Add(new RtUserTokenRecord
-                {
-                    UserId = user.RtId.ToString(),
-                    LoginProvider = loginProvider,
-                    Name = name,
-                    Value = value
-                });
-            }
-            else
-            {
-                token.Value = value;
-                user.UserTokens ??= new AttributeRecordValueList<RtUserTokenRecord>();
-                user.UserTokens[
-                        user.UserTokens.FindIndex(
-                            x => x.LoginProvider == token.LoginProvider && x.Name == token.Name)] =
-                    token;
-            }
-
-            await session.CommitTransactionAsync();
+                UserId = user.RtId.ToString(),
+                LoginProvider = loginProvider,
+                Name = name,
+                Value = value
+            });
         }
+        else
+        {
+            token.Value = value;
+            user.UserTokens ??= new AttributeRecordValueList<RtUserTokenRecord>();
+            user.UserTokens[
+                    user.UserTokens.FindIndex(
+                        x => x.LoginProvider == token.LoginProvider && x.Name == token.Name)] =
+                token;
+        }
+
+        await session.CommitTransactionAsync();
     }
 
     public async Task RemoveTokenAsync(
@@ -97,18 +91,16 @@ public sealed class OctoUserStore :
         ThrowIfDisposed();
         ArgumentValidation.Validate(nameof(user), user);
 
-        using (var session = await _tenantRepository.GetSessionAsync())
+        using var session = await _tenantRepository.GetSessionAsync();
+        session.StartTransaction();
+
+        var entry = await FindTokenAsync(session, user, loginProvider, name);
+        if (entry != null && user.UserTokens != null)
         {
-            session.StartTransaction();
-
-            var entry = await FindTokenAsync(session, user, loginProvider, name);
-            if (entry != null && user.UserTokens != null)
-            {
-                user.UserTokens.RemoveAll(x => x.LoginProvider == entry.LoginProvider && x.Name == entry.Name);
-            }
-
-            await session.CommitTransactionAsync();
+            user.UserTokens.RemoveAll(x => x.LoginProvider == entry.LoginProvider && x.Name == entry.Name);
         }
+
+        await session.CommitTransactionAsync();
     }
 
     public async Task<string?> GetTokenAsync(
@@ -122,20 +114,18 @@ public sealed class OctoUserStore :
 
         ArgumentValidation.Validate(nameof(user), user);
 
-        using (var session = await _tenantRepository.GetSessionAsync())
+        using var session = await _tenantRepository.GetSessionAsync();
+        session.StartTransaction();
+
+        var rtUserTokenRecord = await FindTokenAsync(session, user, loginProvider, name);
+        if (rtUserTokenRecord == null)
         {
-            session.StartTransaction();
-
-            var rtUserTokenRecord = await FindTokenAsync(session, user, loginProvider, name);
-            if (rtUserTokenRecord == null)
-            {
-                throw NotExistingException.UserTokenDoesNotExist(user.RtId, loginProvider, name);
-            }
-
-            await session.CommitTransactionAsync();
-
-            return rtUserTokenRecord.Value;
+            throw NotExistingException.UserTokenDoesNotExist(user.RtId, loginProvider, name);
         }
+
+        await session.CommitTransactionAsync();
+
+        return rtUserTokenRecord.Value;
     }
 
     public Task<string?> GetAuthenticatorKeyAsync(RtUser user, CancellationToken cancellationToken = default)
