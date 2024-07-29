@@ -11,20 +11,17 @@ using Persistence.IdentityCkModel.Generated.System.Identity.v1;
 
 namespace IdentityServerPersistence.SystemStores;
 
-public sealed class OctoRoleStore :
-    IQueryableRoleStore<RtRole>,
-    IRoleClaimStore<RtRole>
+public sealed class OctoRoleStore(
+    IMultiTenancyResolverService multiTenancyResolverService,
+    IdentityErrorDescriber? describer)
+    :
+        IQueryableRoleStore<RtRole>,
+        IRoleClaimStore<RtRole>
 {
-    private readonly ITenantRepository _tenantRepository;
+    private readonly ITenantRepository _tenantRepository = multiTenancyResolverService.GetTenantRepository();
     private bool _disposed;
 
-    public OctoRoleStore(IMultiTenancyResolverService multiTenancyResolverService, IdentityErrorDescriber? describer)
-    {
-        _tenantRepository = multiTenancyResolverService.GetTenantRepository();
-        ErrorDescriber = describer ?? new IdentityErrorDescriber();
-    }
-
-    public IdentityErrorDescriber ErrorDescriber { get; }
+    public IdentityErrorDescriber ErrorDescriber { get; } = describer ?? new IdentityErrorDescriber();
 
     public async Task<IdentityResult> CreateAsync(RtRole role, CancellationToken cancellationToken = default)
     {
@@ -171,18 +168,16 @@ public sealed class OctoRoleStore :
 
     public IQueryable<RtRole> Roles => _tenantRepository.AsQueryable<RtRole>();
 
-    public async Task<IList<Claim>> GetClaimsAsync(RtRole role, CancellationToken cancellationToken = default)
+    public Task<IList<Claim>> GetClaimsAsync(RtRole role, CancellationToken cancellationToken = default)
     {
         ThrowIfDisposed();
         ArgumentValidation.Validate(nameof(role), role);
 
-        var dbRole = await FindByIdAsync(ConvertIdToString(role.RtId), cancellationToken).ConfigureAwait(false);
-        if (dbRole == null)
-        {
-            throw NotExistingException.RoleWithIdDoesNotExist(role.RtId);
-        }
+        // This method is performance critical and should not access the database.
+        // It is expected that the role object is already loaded with the claims.
+        // Especially the userinfo endpoint is called very often and should not trigger too much database queries.
 
-        return dbRole.Claims?.Select(e => new Claim(e.ClaimType, e.ClaimValue)).ToList() ?? new List<Claim>();
+        return Task.FromResult<IList<Claim>>(role.Claims?.Select(e => new Claim(e.ClaimType, e.ClaimValue)).ToList() ?? new List<Claim>());
     }
 
     public async Task AddClaimAsync(RtRole role, Claim claim, CancellationToken cancellationToken = default)
