@@ -5,6 +5,7 @@
         <Platforms>AnyCPU</Platforms>
         <OctoGenerateCkModelServiceClass>true</OctoGenerateCkModelServiceClass>
         <OctoPublishCkModel>true</OctoPublishCkModel>
+        <OctoGenerateCkDocumentation Condition="$(OctoGenerateCkDocumentation) == ''">false</OctoGenerateCkDocumentation>
     </PropertyGroup>
 
     <ItemGroup>
