@@ -18,6 +18,8 @@ variables:
     value: 'Octo.Identity.sln'
   - name: isRelease
     value: ${{ startsWith(variables['Build.SourceBranch'], 'refs/tags/r') }}
+  - name: generateDocumentation
+    value: 'true'
 
 stages:
   - stage: Build
@@ -82,6 +84,9 @@ stages:
               Repository: meshmakers/octo-mesh-policy-services
               Dockerfile: src/PolicyServices/Dockerfile
               IsRelease: ${{ variables.isRelease }}
+          - template: generate-documentation.yml
+            parameters:
+              GenerateDocumentation: ${{ variables.generateDocumentation }}
           - task: PublishBuildArtifacts@1
             displayName: 'Publish Artifact: local'
             inputs:
