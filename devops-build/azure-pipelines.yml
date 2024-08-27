@@ -66,9 +66,11 @@ stages:
               Repository: meshmakers/octo-mesh-policy-services
               Dockerfile: src/PolicyServices/Dockerfile
               IsRelease: ${{ variables.isRelease }}
-          - template: generate-documentation.yml
-            parameters:
-              GenerateDocumentation: ${{ variables.generateDocumentation }}
+          - ${{ if eq(variables.generateDocumentation, true) }}:
+              - template: generate-documentation.yml
+                parameters:
+                  ConstructionKits:
+                    - '**/Persistence.IdentityCkModel.csproj'
           - task: PublishBuildArtifacts@1
             displayName: 'Publish Artifact: local'
             inputs:
