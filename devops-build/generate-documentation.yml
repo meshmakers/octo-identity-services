@@ -1,21 +1,21 @@
 ﻿parameters:
-  - name: GenerateDocumentation
-    type: boolean
+  - name: ConstructionKits
+    type: object
+    default: [ ]
 
 steps:
-  - task: DotNetCoreCLI@2
-    condition: ${{ eq(parameters.GenerateDocumentation, 'true') }}
-    displayName: 'Generate Documentation'
-    inputs:
-      command: 'build'
-      projects: '**/Persistence.IdentityCkModel.csproj'
-      arguments: '--configuration Release /p:OctoGenerateCkDocumentation=true'
+  - ${{ each ConstructionKit in parameters.ConstructionKits }}:
+      - task: DotNetCoreCLI@2
+        displayName: 'Generate Documentation'
+        inputs:
+          command: 'build'
+          projects: ${{ ConstructionKit }}
+          arguments: '--configuration Release /p:OctoGenerateCkDocumentation=true'
 
   - task: CopyFiles@2
-    condition: ${{ eq(parameters.GenerateDocumentation, 'true') }}
-    displayName: 'Copy Files from $(Build.SourcesDirectory)/**/*CkModel/**/out/**/*.md to $(build.artifactstagingdirectory)'
+    displayName: 'Copy Files from $(Build.SourcesDirectory)/**/octo-ck-libraries/**/out/**/*.md to $(build.artifactstagingdirectory)'
     inputs:
       SourceFolder: $(Build.SourcesDirectory)
       Contents: |
-        /**/*CkModel/**/out/**/*.md
+        /**/octo-ck-libraries/**/out/**/*.md
       TargetFolder: $(build.artifactstagingdirectory)
