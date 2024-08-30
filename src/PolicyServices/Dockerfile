@@ -18,7 +18,7 @@ WORKDIR "/src/src/PolicyServices"
 RUN dotnet build "PolicyServices.csproj" -c Release -p:OctoNugetPrivateServer=${OCTO_PRIVATE_NUGET_SERVICE}
 
 FROM build AS publish
-RUN dotnet publish "PolicyServices.csproj" -c Release -o /app
+RUN dotnet publish "PolicyServices.csproj" -c Release -p:OctoNugetPrivateServer=${OCTO_PRIVATE_NUGET_SERVICE} -o /app
 
 FROM base AS final
 WORKDIR /app
