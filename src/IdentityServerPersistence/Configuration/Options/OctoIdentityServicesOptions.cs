@@ -1,6 +1,8 @@
 ﻿// ReSharper disable UnusedAutoPropertyAccessor.Global
 // ReSharper disable AutoPropertyCanBeMadeGetOnly.Global
 
+using Meshmakers.Octo.Communication.Contracts.DataTransferObjects;
+
 #pragma warning disable 1591
 namespace IdentityServerPersistence.Configuration.Options;
 
@@ -13,6 +15,7 @@ public class OctoIdentityServicesOptions
         EnableTokenCleanup = true;
         TokenCleanupInterval = 60 * 60; // default: once an hour
         AllowDisplayInIframe = false;
+        MinLogLevel = LogLevelDto.Warn;
     }
 
     /// <summary>
@@ -60,4 +63,9 @@ public class OctoIdentityServicesOptions
     ///     Identity service in an iframe is allowed.
     /// </summary>
     public bool AllowDisplayInIframe { get; set; }
+    
+    /// <summary>
+    /// Gets or sets the minimal log level to be logged
+    /// </summary>
+    public LogLevelDto MinLogLevel { get; set; }
 }
