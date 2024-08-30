@@ -12,52 +12,51 @@ using Meshmakers.Octo.Runtime.Contracts.RepositoryEntities;
 using Meshmakers.Octo.Services.Infrastructure;
 using Meshmakers.Octo.Services.Infrastructure.Services;
 using Microsoft.AspNetCore.Identity;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Persistence.IdentityCkModel.Generated.System.Identity.v1;
 
 namespace IdentityServerPersistence.Services;
 
-internal class DefaultConfigurationCreatorService : IDefaultConfigurationCreatorService
+internal class DefaultConfigurationCreatorService(
+    ILogger<DefaultConfigurationCreatorService> logger,
+    ISystemContext systemContext,
+    IDiagnosticsService diagnosticsService,
+    RoleManager<RtRole> roleManager,
+    IOctoClientStore clientStore,
+    IOctoResourceStore resourceStore,
+    IOctoIdentityProviderStore octoIdentityProviderStore,
+    IOptions<OctoIdentityServicesOptions> octoIdentityOptions)
+    : DefaultConfigurationCreatorServiceBase(logger)
 {
-    private readonly IOctoClientStore _clientStore;
-    private readonly IOctoIdentityProviderStore _octoIdentityProviderStore;
-    private readonly OctoIdentityServicesOptions _octoIdentityServicesOptions;
-    private readonly IOctoResourceStore _resourceStore;
-    private readonly RoleManager<RtRole> _roleManager;
-    private readonly ISystemContext _systemContext;
-
-    public DefaultConfigurationCreatorService(ISystemContext systemContext,
-        RoleManager<RtRole> roleManager, IOctoClientStore clientStore, IOctoResourceStore resourceStore,
-        IOctoIdentityProviderStore octoIdentityProviderStore, IOptions<OctoIdentityServicesOptions> octoIdentityOptions)
+    public override async Task InitializeAsync()
     {
-        _systemContext = systemContext;
-        _roleManager = roleManager;
-        _clientStore = clientStore;
-        _resourceStore = resourceStore;
-        _octoIdentityProviderStore = octoIdentityProviderStore;
-        _octoIdentityServicesOptions = octoIdentityOptions.Value;
+        // Reconfigure the log level based on the configuration
+        await diagnosticsService.ReconfigureLogLevelAsync(octoIdentityOptions.Value.MinLogLevel);
+
+        await base.InitializeAsync();
     }
 
-    public async Task SetupAsync(string tenantId)
+    protected override async Task SetupTenantAsync(string tenantId)
     {
-        if (tenantId != _systemContext.TenantId)
+        if (tenantId != systemContext.TenantId)
         {
             // Currently we only support the system tenant.
             return;
         }
         
-        if (!await _systemContext.IsSystemTenantExistingAsync())
+        if (!await systemContext.IsSystemTenantExistingAsync())
         {
-            await _systemContext.CreateSystemTenantAsync();
+            await systemContext.CreateSystemTenantAsync();
         }
 
         await ImportCkModel();
 
-        using var session = await _systemContext.GetAdminSessionAsync();
+        using var session = await systemContext.GetAdminSessionAsync();
         session.StartTransaction();
 
         var identityConfiguration =
-            await _systemContext.GetConfigurationAsync(session, IdentityServiceConstants.IdentitySchemaVersionKey,
+            await systemContext.GetConfigurationAsync(session, IdentityServiceConstants.IdentitySchemaVersionKey,
                 new DefaultConfigurationVersion { Version = -1 });
         if (identityConfiguration == null || identityConfiguration.Version < IdentityServiceConstants.IdentitySchemaVersionValue)
         {
@@ -69,7 +68,7 @@ internal class DefaultConfigurationCreatorService : IDefaultConfigurationCreator
             await CreateIdentityResources();
             await CreateIdentityProvider();
 
-            await _systemContext.SetConfigurationAsync(session, IdentityServiceConstants.IdentitySchemaVersionKey,
+            await systemContext.SetConfigurationAsync(session, IdentityServiceConstants.IdentitySchemaVersionKey,
                 new DefaultConfigurationVersion { Version = IdentityServiceConstants.IdentitySchemaVersionValue });
         }
 
@@ -78,22 +77,22 @@ internal class DefaultConfigurationCreatorService : IDefaultConfigurationCreator
 
     private async Task ImportCkModel()
     {
-        if (!await _systemContext.IsCkModelExistingAsync(SystemIdentityCkIds.ModelId))
+        if (!await systemContext.IsCkModelExistingAsync(SystemIdentityCkIds.ModelId))
         {
             // We ensure that at least the system tenant contains a valid ck model.Other tenants
             // need to be enabled manually by a admin.
             OperationResult operationResult = new();
-            await _systemContext.ImportCkModelAsync(SystemIdentityCkIds.ModelId, operationResult);
+            await systemContext.ImportCkModelAsync(SystemIdentityCkIds.ModelId, operationResult);
             if (operationResult.HasErrors || operationResult.HasFatalErrors)
             {
-                throw InitializationException.ImportCkModelFailed(_systemContext.TenantId, operationResult.GetMessages());
+                throw InitializationException.ImportCkModelFailed(systemContext.TenantId, operationResult.GetMessages());
             }
         }
     }
 
     private async Task CreateIdentityProvider()
     {
-        var googleProvider = await _octoIdentityProviderStore.GetByNameAsync(CommonConstants.GoogleIdentityProvider);
+        var googleProvider = await octoIdentityProviderStore.GetByNameAsync(CommonConstants.GoogleIdentityProvider);
         if (googleProvider == null)
         {
             googleProvider = new RtGoogleIdentityProvider
@@ -105,10 +104,10 @@ internal class DefaultConfigurationCreatorService : IDefaultConfigurationCreator
                 DisplayName = CommonConstants.GoogleIdentityProvider
             };
 
-            await _octoIdentityProviderStore.StoreAsync(googleProvider);
+            await octoIdentityProviderStore.StoreAsync(googleProvider);
         }
 
-        var microsoftProvider = await _octoIdentityProviderStore.GetByNameAsync(CommonConstants.MicrosoftIdentityProvider);
+        var microsoftProvider = await octoIdentityProviderStore.GetByNameAsync(CommonConstants.MicrosoftIdentityProvider);
         if (microsoftProvider == null)
         {
             microsoftProvider = new RtMicrosoftIdentityProvider
@@ -120,21 +119,21 @@ internal class DefaultConfigurationCreatorService : IDefaultConfigurationCreator
                 DisplayName = CommonConstants.MicrosoftIdentityProvider
             };
 
-            await _octoIdentityProviderStore.StoreAsync(microsoftProvider);
+            await octoIdentityProviderStore.StoreAsync(microsoftProvider);
         }
     }
 
     private async Task CreateApiScopes()
     {
-        await _resourceStore.TryCreateApiScopeAsync(new ApiScope(CommonConstants.IdentityApiFullAccess,
+        await resourceStore.TryCreateApiScopeAsync(new ApiScope(CommonConstants.IdentityApiFullAccess,
             CommonConstants.IdentityApiFullAccessDisplayName));
-        await _resourceStore.TryCreateApiScopeAsync(new ApiScope(CommonConstants.IdentityApiReadOnly,
+        await resourceStore.TryCreateApiScopeAsync(new ApiScope(CommonConstants.IdentityApiReadOnly,
             CommonConstants.IdentityApiReadOnlyDisplayName));
     }
 
     private async Task CreateApiResources()
     {
-        await _resourceStore.GetOrCreateApiResourceAsync(new RtApiResource
+        await resourceStore.GetOrCreateApiResourceAsync(new RtApiResource
         {
             Name = CommonConstants.IdentityApi,
             DisplayName = CommonConstants.IdentityApiDisplayName,
@@ -150,10 +149,10 @@ internal class DefaultConfigurationCreatorService : IDefaultConfigurationCreator
 
     private async Task CreateIdentityResources()
     {
-        await _resourceStore.GetOrCreateIdentityResourceAsync(new IdentityResources.OpenId());
-        await _resourceStore.GetOrCreateIdentityResourceAsync(new IdentityResources.Profile());
-        await _resourceStore.GetOrCreateIdentityResourceAsync(new IdentityResources.Email());
-        await _resourceStore.GetOrCreateIdentityResourceAsync(new IdentityResource
+        await resourceStore.GetOrCreateIdentityResourceAsync(new IdentityResources.OpenId());
+        await resourceStore.GetOrCreateIdentityResourceAsync(new IdentityResources.Profile());
+        await resourceStore.GetOrCreateIdentityResourceAsync(new IdentityResources.Email());
+        await resourceStore.GetOrCreateIdentityResourceAsync(new IdentityResource
         {
             Name = JwtClaimTypes.Role,
             DisplayName = IdentityTexts.Backend_Identity_UserSchema_Roles_DisplayName,
@@ -176,7 +175,7 @@ internal class DefaultConfigurationCreatorService : IDefaultConfigurationCreator
 
     private async Task TryCreateRole(string roleName)
     {
-        var rtRole = await _roleManager.FindByNameAsync(roleName);
+        var rtRole = await roleManager.FindByNameAsync(roleName);
         if (rtRole == null)
         {
             rtRole = new RtRole
@@ -184,13 +183,13 @@ internal class DefaultConfigurationCreatorService : IDefaultConfigurationCreator
                 Name = roleName,
                 Claims = new AttributeRecordValueList<RtRoleClaimRecord>()
             };
-            await _roleManager.CreateAsync(rtRole);
+            await roleManager.CreateAsync(rtRole);
         }
     }
 
     private async Task CreateClients()
     {
-        var octoToolClient = await _clientStore.FindClientByIdAsync(CommonConstants.OctoToolClientId);
+        var octoToolClient = await clientStore.FindClientByIdAsync(CommonConstants.OctoToolClientId);
         if (octoToolClient == null)
         {
             var appClient = new RtClient
@@ -222,11 +221,11 @@ internal class DefaultConfigurationCreatorService : IDefaultConfigurationCreator
                 }
             };
 
-            await _clientStore.CreateAsync(appClient);
+            await clientStore.CreateAsync(appClient);
         }
 
         var octoIdentityServiceSwaggerClient =
-            await _clientStore.FindClientByIdAsync(CommonConstants.IdentityServicesSwaggerClientId);
+            await clientStore.FindClientByIdAsync(CommonConstants.IdentityServicesSwaggerClientId);
         if (octoIdentityServiceSwaggerClient == null)
         {
             var appClient = new RtClient
@@ -235,7 +234,7 @@ internal class DefaultConfigurationCreatorService : IDefaultConfigurationCreator
                 ClientId = CommonConstants.IdentityServicesSwaggerClientId,
 
                 ClientName = IdentityTexts.Backend_IdentityServices_UserSchema_Swagger_DisplayName,
-                ClientUri = _octoIdentityServicesOptions.AuthorityUrl,
+                ClientUri = octoIdentityOptions.Value.AuthorityUrl,
 
                 AllowedGrantTypes = new AttributeStringValueList { OidcConstants.GrantTypes.AuthorizationCode },
 
@@ -248,11 +247,11 @@ internal class DefaultConfigurationCreatorService : IDefaultConfigurationCreator
 
                 RedirectUris =
                 {
-                    _octoIdentityServicesOptions.AuthorityUrl.EnsureEndsWith("/swagger/oauth2-redirect.html")
+                    octoIdentityOptions.Value.AuthorityUrl.EnsureEndsWith("/swagger/oauth2-redirect.html")
                 },
 
-                PostLogoutRedirectUris = { _octoIdentityServicesOptions.AuthorityUrl.EnsureEndsWith("/") },
-                AllowedCorsOrigins = { _octoIdentityServicesOptions.AuthorityUrl.TrimEnd('/') },
+                PostLogoutRedirectUris = { octoIdentityOptions.Value.AuthorityUrl.EnsureEndsWith("/") },
+                AllowedCorsOrigins = { octoIdentityOptions.Value.AuthorityUrl.TrimEnd('/') },
                 AllowedScopes =
                 {
                     CommonConstants.Scopes.OpenId,
@@ -263,7 +262,7 @@ internal class DefaultConfigurationCreatorService : IDefaultConfigurationCreator
                     CommonConstants.IdentityApiReadOnly
                 }
             };
-            await _clientStore.CreateAsync(appClient);
+            await clientStore.CreateAsync(appClient);
         }
     }
 }
