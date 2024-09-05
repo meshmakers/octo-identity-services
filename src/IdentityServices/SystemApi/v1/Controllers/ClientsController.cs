@@ -213,7 +213,8 @@ public class ClientsController : ControllerBase
 
     private Task ClearCacheAsync()
     {
-        return _distributionEventHubService.PublishAsync(new CorsClientsUpdate(_octoClientStore.TenantId));
+        return _distributionEventHubService.PublishAsync(new CorsClientsUpdate(_octoClientStore.TenantId, 
+            Guid.NewGuid(), DateTime.Now));
     }
 
     private ClientDto CreateClientDto(RtClient applicationClient)

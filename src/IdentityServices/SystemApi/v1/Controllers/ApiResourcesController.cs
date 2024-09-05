@@ -202,7 +202,8 @@ public class ApiResourcesController : ControllerBase
 
     private Task ClearCacheAsync()
     {
-        return _distributionEventHubService.PublishAsync(new CorsClientsUpdate(_octoResourceStore.TenantId));
+        return _distributionEventHubService.PublishAsync(new CorsClientsUpdate(_octoResourceStore.TenantId,
+            Guid.NewGuid(), DateTime.Now));
     }
 
     private ApiResourceDto CreateApiResourceDto(ApiResource apiResource)
