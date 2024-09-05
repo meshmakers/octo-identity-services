@@ -46,15 +46,18 @@ public class DiagnosticsController : ControllerBase
     /// Reconfigures the log level of the service
     /// </summary>
     /// <param name="minLogLevel">The minimal log level to be logged.</param>
+    /// <param name="maxLogLevel">The maximal log level to be logged.</param>
+    /// <param name="loggerName">The name of the logger to be reconfigured.</param>
     /// <returns></returns>
     [HttpPost("reconfigureLogLevel")]
     [Authorize(IdentityServiceConstants.IdentityApiReadWritePolicy)]
-    public async Task<IActionResult> Enable([Required] LogLevelDto minLogLevel)
+    public async Task<IActionResult> ReconfigureLogLevelAsync([Required] LogLevelDto minLogLevel,
+        [Required] LogLevelDto maxLogLevel, string loggerName = "*")
     {
         try
         {
-            _logger.LogInformation("Reconfiguring log level to {MinLogLevel}", minLogLevel);
-            await _diagnosticsService.ReconfigureLogLevelAsync(minLogLevel);
+            _logger.LogInformation("Reconfiguring logger {LoggerName} log level to min level {MinLogLevel}, max level {MaxLoglevel}", loggerName, minLogLevel, maxLogLevel);
+            await _diagnosticsService.ReconfigureLogLevelAsync(minLogLevel, maxLogLevel, loggerName);
             return NoContent();
         }
         catch (Exception e)
