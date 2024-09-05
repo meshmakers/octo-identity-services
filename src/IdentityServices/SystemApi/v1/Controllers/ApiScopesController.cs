@@ -201,7 +201,8 @@ public class ApiScopesController : ControllerBase
 
     private Task ClearCacheAsync()
     {
-        return _distributionEventHubService.PublishAsync(new CorsClientsUpdate(_octoResourceStore.TenantId));
+        return _distributionEventHubService.PublishAsync(new CorsClientsUpdate(_octoResourceStore.TenantId,
+            Guid.NewGuid(), DateTime.Now));
     }
 
     private ApiScopeDto CreateApiScopeDto(ApiScope apiScope)
