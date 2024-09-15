@@ -20,6 +20,10 @@ variables:
     value: ${{ startsWith(variables['Build.SourceBranch'], 'refs/tags/r') }}
   - name: generateDocumentation
     value: 'true'
+  - name: MajorVersion
+    value: '0'
+  - name: MinorVersion
+    value: '1'
 
 stages:
   - stage: Build
