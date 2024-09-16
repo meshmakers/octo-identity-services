@@ -8,7 +8,10 @@ steps:
       Write-Host "Buildnumber $(Build.BuildNumber)"
       $branch = '$(Build.SourceBranch)'
       $buildNumber = '$(Build.BuildNumber)'
-      $versionString = $buildNumber.SubString(0, $buildNumber.IndexOf("-"))
+      $versionString = $buildNumber
+      if ($buildNumber.Contains("-")) {
+        $versionString = $buildNumber.SubString(0, $buildNumber.IndexOf("-"))
+      }
       $versionArray = $versionString.Split(".")
       $major = [int]$versionArray[0]
       $minor = [int]$versionArray[1]
