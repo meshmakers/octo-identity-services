@@ -106,7 +106,7 @@ try
             c.AddBroadcastEventConsumer<IdentityProviderUpdateConsumer, IdentityProviderUpdate>();
 
             c.AddCommandConsumer<CreateIdentityDataCommandRequestConsumer, CreateIdentityDataCommandRequest>(
-                "identity::create-identity-data");
+                QueueNames.CreateIdentityDataCommand);
         });
 
     // Add IdentityServer for authentication using OpenID
@@ -199,7 +199,7 @@ try
     builder.Services.AddAutoMapper(typeof(Program));
 
     var app = builder.Build();
-    
+
     app.MapObservability();
 
     // Configure the HTTP request pipeline.
