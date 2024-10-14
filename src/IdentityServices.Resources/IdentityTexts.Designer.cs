@@ -1052,5 +1052,11 @@ namespace Meshmakers.Octo.Backend.IdentityServices.Resources {
                 return ResourceManager.GetString("Backend_Persistence_Identity_CommonError", resourceCulture);
             }
         }
+        
+        public static string Backend_Identity_Logout_RootPage {
+            get {
+                return ResourceManager.GetString("Backend_Identity_Logout_RootPage", resourceCulture);
+            }
+        }
     }
 }

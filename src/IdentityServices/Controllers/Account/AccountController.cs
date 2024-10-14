@@ -293,7 +293,7 @@ public class AccountController : Controller
 
             if (!local)
             {
-                vm.ExternalProviders = new[] { new ExternalProvider { AuthenticationScheme = context.IdP } };
+                vm.ExternalProviders = [new ExternalProvider { AuthenticationScheme = context.IdP }];
             }
 
             return vm;
@@ -376,7 +376,7 @@ public class AccountController : Controller
         var vm = new LoggedOutViewModel
         {
             AutomaticRedirectAfterSignOut = AccountOptions.AutomaticRedirectAfterSignOut,
-            PostLogoutRedirectUri = logout.PostLogoutRedirectUri,
+            PostLogoutRedirectUri = logout.PostLogoutRedirectUri ?? "/",
             ClientName = string.IsNullOrEmpty(logout.ClientName) ? logout.ClientId : logout.ClientName,
             SignOutIframeUrl = logout.SignOutIFrameUrl,
             LogoutId = logoutId
