@@ -34,7 +34,7 @@
         <value>Abbrechen</value>
     </data>
     <data name="Backend_Identity_LoggedOut_RedirectMessage" xml:space="preserve">
-        <value>Du wirst nun abgemeldet. In wenigen Sekunden wirst du weitergeleitet...</value>
+        <value>Zurück zu {0}</value>
     </data>
     <data name="Backend_Identity_Home_Welcome_Label" xml:space="preserve">
         <value>Willkommen zu {0}, {1}!</value>
@@ -301,7 +301,7 @@
         <value>Abgemeldet</value>
     </data>
     <data name="Backend_Identity_LoggedOut_LoggedOutMessage" xml:space="preserve">
-        <value>Du bist nun abgemeldet. Du wirst in wenigen Sekunden weitergeleitet...</value>
+        <value>Du bist nun abgemeldet.</value>
     </data>
     <data name="Backend_Identity_Home_Title" xml:space="preserve">
         <value>Startseite</value>
@@ -518,5 +518,8 @@
     </data>
     <data name="Backend_Persistence_Identity_CommonError" xml:space="preserve">
         <value>Der Admin-User kann nicht erstelt werden. Bitte prüfe deine Eingaben.</value>
+    </data>
+    <data name="Backend_Identity_Logout_RootPage" xml:space="preserve">
+        <value>Zurück zum Log-In</value>
     </data>
 </root>

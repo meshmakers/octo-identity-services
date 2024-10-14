@@ -100,11 +100,11 @@
     <data name="Backend_Identity_Grant_Title" xml:space="preserve">
     <value>Client Application Access</value>
   </data>
-    <data name="Backend_Identity_LoggedOut_LoggedOutMessage" xml:space="preserve">
-    <value>You are now logged out. You are redirected in a few seconds...</value>
+  <data name="Backend_Identity_LoggedOut_LoggedOutMessage" xml:space="preserve">
+    <value>You are now logged out.</value>
   </data>
-    <data name="Backend_Identity_LoggedOut_RedirectMessage" xml:space="preserve">
-    <value>Click here to return to the {0} application.</value>
+  <data name="Backend_Identity_LoggedOut_RedirectMessage" xml:space="preserve">
+    <value>Back to {0}</value>
   </data>
     <data name="Backend_Identity_LoggedOut_Title" xml:space="preserve">
     <value>Logged out</value>
@@ -525,5 +525,8 @@
   </data>
   <data name="Backend_Persistence_Identity_CommonError" xml:space="preserve">
     <value> Please check your input values.</value>
+  </data>
+  <data name="Backend_Identity_Logout_RootPage" xml:space="preserve">
+    <value>Back to Log-In</value>
   </data>
 </root>
