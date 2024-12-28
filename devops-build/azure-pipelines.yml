@@ -54,11 +54,11 @@ stages:
                 !'**/*SystemTests.csproj'
               testRunTitle: 'CI'
           - task: CopyFiles@2
-            displayName: 'Copy Files from **/*.nupkg to $(build.artifactstagingdirectory)'
+            displayName: 'Copy Files from /**/octo-ck-libraries/**/out/**/*.yaml to $(build.artifactstagingdirectory)'
             inputs:
               SourceFolder: $(Build.SourcesDirectory)
               Contents: |
-                /**/octo-ck-libraries/**/out/**/*.yaml
+                **/octo-ck-libraries/**/out/**/*.yaml
               TargetFolder: $(build.artifactstagingdirectory)
           - task: PowerShell@2
             displayName: 'Create versioninfo file'
