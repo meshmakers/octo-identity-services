@@ -18,4 +18,5 @@ steps:
       SourceFolder: $(Build.SourcesDirectory)
       Contents: |
         /**/octo-ck-libraries/**/out/**/*.md
+        /**/octo-ck-libraries/**/out/*.yaml
       TargetFolder: $(build.artifactstagingdirectory)
