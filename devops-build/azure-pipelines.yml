@@ -46,6 +46,13 @@ stages:
           - template: set-version.yml
           - template: download-ca.yml
           - task: DotNetCoreCLI@2
+            displayName: 'Build'
+            inputs:
+              command: 'build'
+              projects: |
+                '$(solutionFile)'
+              testRunTitle: 'CI'
+          - task: DotNetCoreCLI@2
             displayName: 'Test'
             inputs:
               command: 'test'
