@@ -58,9 +58,7 @@ stages:
             inputs:
               SourceFolder: $(Build.SourcesDirectory)
               Contents: |
-                **/*.nupkg
-                **/bin/**/octo-ck-libraries/**/*.*
-                **/bin/**/documentation/**/*.*
+                /**/octo-ck-libraries/**/out/**/*.yaml
               TargetFolder: $(build.artifactstagingdirectory)
           - task: PowerShell@2
             displayName: 'Create versioninfo file'
