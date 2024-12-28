@@ -24,6 +24,8 @@ variables:
     value: '0'
   - name: MinorVersion
     value: '1'
+  - name: buildConfiguration
+    value: 'Release'
 
 stages:
   - stage: Build
