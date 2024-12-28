@@ -24,8 +24,6 @@ variables:
     value: '0'
   - name: MinorVersion
     value: '1'
-  - name: buildConfiguration
-    value: 'Release'
 
 stages:
   - stage: Build
@@ -48,13 +46,6 @@ stages:
           - template: set-version.yml
           - template: download-ca.yml
           - task: DotNetCoreCLI@2
-            displayName: 'Build src'
-            inputs:
-              command: 'build'
-              projects: |
-                src/**/*.csproj
-              arguments: '--configuration $(buildConfiguration)'
-          - task: DotNetCoreCLI@2
             displayName: 'Test'
             inputs:
               command: 'test'
@@ -62,13 +53,6 @@ stages:
                 '**/*Tests.csproj'
                 !'**/*SystemTests.csproj'
               testRunTitle: 'CI'
-          - task: CopyFiles@2
-            displayName: 'Copy Files from /**/octo-ck-libraries/**/out/**/*.yaml to $(build.artifactstagingdirectory)'
-            inputs:
-              SourceFolder: $(Build.SourcesDirectory)
-              Contents: |
-                **/octo-ck-libraries/**/out/**/*.yaml
-              TargetFolder: $(build.artifactstagingdirectory)
           - task: PowerShell@2
             displayName: 'Create versioninfo file'
             inputs:
