@@ -4,10 +4,10 @@ using IdentityServerPersistence.Configuration.Options;
 using IdentityServerPersistence.SystemStores;
 using Meshmakers.Common.Shared;
 using Meshmakers.Octo.Backend.IdentityServices.Configuration;
-using Meshmakers.Octo.Communication.Contracts.Services;
 using Meshmakers.Octo.Runtime.Contracts.MongoDb;
 using Meshmakers.Octo.Runtime.Contracts.Repositories.Query;
 using Meshmakers.Octo.Services.Infrastructure.Services;
+using Meshmakers.Octo.Services.Notifications;
 using Meshmakers.Octo.Services.Notifications.Generated.System.Notification.v1;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.Extensions.Options;
@@ -25,14 +25,14 @@ public class UserEmailInteractionService : IUserEmailInteractionService
     private readonly ILogger<UserEmailInteractionService> _logger;
     private readonly IMarkdownRenderService _markdownRenderService;
 
-    private readonly INotificationRepository _notificationRepository;
+    private readonly IEventRepository _eventRepository;
     private readonly IOptions<OctoIdentityServicesOptions> _options;
     private readonly IOctoPersistentGrantStore _persistedGrantStore;
     private readonly ISystemContext _systemContext;
     private readonly UserManager<RtUser> _userManager;
 
     public UserEmailInteractionService(
-        INotificationRepository notificationRepository,
+        IEventRepository eventRepository,
         IOptions<OctoIdentityServicesOptions> options,
         ILogger<UserEmailInteractionService> logger,
         ISystemContext systemContext,
@@ -41,7 +41,7 @@ public class UserEmailInteractionService : IUserEmailInteractionService
         IOctoPersistentGrantStore persistedGrantStore,
         IOptions<EmailInteractionConfiguration> emailOptions)
     {
-        _notificationRepository = notificationRepository;
+        _eventRepository = eventRepository;
         _options = options;
         _logger = logger;
         _systemContext = systemContext;
@@ -81,8 +81,8 @@ public class UserEmailInteractionService : IUserEmailInteractionService
             return;
         }
 
-        await _notificationRepository.AddEMailMessageAsync(_emailConfiguration.NotificationTenant!, user.Email, template.SubjectTemplate,
-            messageBody);
+        // await _eventRepository.AddEMailMessageAsync(_emailConfiguration.NotificationTenant!, user.Email, template.SubjectTemplate,
+        //     messageBody);
     }
 
     public async Task SendWelcomeNotificationWithoutPasswordAsync(RtUser user)
@@ -115,8 +115,8 @@ public class UserEmailInteractionService : IUserEmailInteractionService
             return;
         }
 
-        await _notificationRepository.AddEMailMessageAsync(_emailConfiguration.NotificationTenant!, user.Email, template.SubjectTemplate,
-            messageBody);
+        // await _eventRepository.AddEMailMessageAsync(_emailConfiguration.NotificationTenant!, user.Email, template.SubjectTemplate,
+        //     messageBody);
     }
 
     public async Task<string> ValidateEmailNotificationTokenAsync(string token)
@@ -187,8 +187,8 @@ public class UserEmailInteractionService : IUserEmailInteractionService
             return;
         }
 
-        await _notificationRepository.AddEMailMessageAsync(_emailConfiguration.NotificationTenant!, user.Email, template.SubjectTemplate,
-            messageBody);
+        // await _eventRepository.AddEMailMessageAsync(_emailConfiguration.NotificationTenant!, user.Email, template.SubjectTemplate,
+        //     messageBody);
     }
 
     public async Task<string> ValidateAndResetPasswordAsync(string token, string newPassword)
