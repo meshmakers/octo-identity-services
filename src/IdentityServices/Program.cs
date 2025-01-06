@@ -12,7 +12,6 @@ using Meshmakers.Octo.Backend.IdentityServices.Routing;
 using Meshmakers.Octo.Backend.IdentityServices.Services;
 using Meshmakers.Octo.Communication.Contracts;
 using Meshmakers.Octo.Communication.Contracts.DataTransferObjects;
-using Meshmakers.Octo.Communication.Contracts.Services;
 using Meshmakers.Octo.Runtime.Contracts.MongoDb.Configuration;
 using Meshmakers.Octo.Runtime.Contracts.MongoDb.Extensions;
 using Meshmakers.Octo.Services.Common;
@@ -22,7 +21,6 @@ using Meshmakers.Octo.Services.Common.DistributionEventHub.Messages;
 using Meshmakers.Octo.Services.Infrastructure.CredentialGenerator;
 using Meshmakers.Octo.Services.Infrastructure.Middleware;
 using Meshmakers.Octo.Services.Infrastructure.Services;
-using Meshmakers.Octo.Services.Notifications;
 using Meshmakers.Octo.Services.Observability;
 using Meshmakers.Octo.Services.Swagger.Configuration;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
@@ -64,6 +62,7 @@ try
 
 
     builder.Services.AddOemServices(builder.Configuration);
+    builder.Services.AddOctoNotification();
     builder.Services.AddScoped<IUserEmailInteractionService, UserEmailInteractionService>();
     builder.Services.AddScoped<IUserManagementService, UserManagementService>();
     builder.Services.AddScoped<IMarkdownRenderService, MarkdownRenderService>();
@@ -86,7 +85,6 @@ try
 
     builder.Services.ConfigureOptions<ConfigureDistributionEventHubOptions>();
 
-    builder.Services.AddScoped<INotificationRepository, EntityNotificationRepository>();
     builder.Services.AddScoped<ICorsPolicyService, CorsPolicyService>();
     builder.Services.AddTransient<ICredentialGenerator, CredentialGenerator>();
 
