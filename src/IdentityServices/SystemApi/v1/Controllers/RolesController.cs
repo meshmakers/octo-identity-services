@@ -1,4 +1,5 @@
 using System.ComponentModel.DataAnnotations;
+using Asp.Versioning;
 using AutoMapper;
 using IdentityModel;
 using IdentityServerPersistence;

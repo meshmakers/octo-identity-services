@@ -131,7 +131,7 @@ try
 
     // Add the extra configuration;
     builder.Services.ConfigureOptions<ConfigureIdentityServerOptions>();
-    builder.Services.ConfigureOptions<ConfigureOctoSwaggerOptions>();
+    builder.Services.ConfigureOptions<ConfigureOctoOpenApiOptions>();
 
     if (builder.Environment.IsDevelopment())
     {
@@ -169,8 +169,6 @@ try
 
     builder.Services.AddOctoApiVersioningAndDocumentation(options =>
     {
-        options.AddXmlDocAssembly<Program>();
-        options.AddXmlDocAssembly<ClientDto>();
         options.Scopes = new Dictionary<string, string>
         {
             {
@@ -188,7 +186,7 @@ try
 
         options.ClientId = CommonConstants.IdentityServicesSwaggerClientId;
         options.AppName = IdentityTexts.Backend_IdentityServices_UserSchema_Swagger_DisplayName;
-    });
+    }).AddVersion();
 
     builder.Services.AddAntiforgery(o => o.SuppressXFrameOptionsHeader = true);
 
