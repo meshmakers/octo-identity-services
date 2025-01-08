@@ -32,7 +32,7 @@ internal class SigningCredentialService : IValidationKeysStore, ISigningCredenti
         {
             Logger.Debug($"SigninCredentialExtension adding key from file {octoIdentityOptions.Value.KeyFilePath}");
 
-            var certificate = new X509Certificate2(octoIdentityOptions.Value.KeyFilePath,
+            var certificate = X509CertificateLoader.LoadPkcs12FromFile(octoIdentityOptions.Value.KeyFilePath,
                 octoIdentityOptions.Value.KeyFilePassword);
             _credential = new SigningCredentials(new X509SecurityKey(certificate), SecurityAlgorithms.RsaSha256);
 

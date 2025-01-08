@@ -1,4 +1,5 @@
 using System.ComponentModel.DataAnnotations;
+using Asp.Versioning;
 using AutoMapper;
 using Duende.IdentityServer.Models;
 using IdentityModel;
