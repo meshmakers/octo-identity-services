@@ -1,13 +1,14 @@
 #pragma warning disable 1591
+using Asp.Versioning.ApiExplorer;
+using Meshmakers.Octo.Backend.IdentityServices.Resources;
 using Meshmakers.Octo.Backend.PolicyServices.Configuration;
 using Meshmakers.Octo.Backend.PolicyServices.Services;
 using Meshmakers.Octo.Communication.Contracts;
 using Meshmakers.Octo.Runtime.Contracts.MongoDb;
 using Meshmakers.Octo.Runtime.Contracts.MongoDb.Configuration;
 using Meshmakers.Octo.Services.Common;
-using Microsoft.AspNetCore.Mvc.ApiExplorer;
+using Meshmakers.Octo.Services.Swagger.Configuration;
 using Microsoft.Extensions.Options;
-using Swashbuckle.AspNetCore.SwaggerGen;
 
 namespace Meshmakers.Octo.Backend.PolicyServices;
 
@@ -56,14 +57,31 @@ public class Startup
             });
         });
 
-        services.AddApiVersioning(options => options.ReportApiVersions = true);
-        services.AddVersionedApiExplorer();
+        services.AddOctoApiVersioningAndDocumentation(options =>
+        {
+            options.Scopes = new Dictionary<string, string>
+            {
+                {
+                    CommonConstants.IdentityApiFullAccess,
+                    IdentityTexts.Backend_IdentityServices_Api_FullAccess
+                },
+                {
+                    CommonConstants.IdentityApiReadOnly,
+                    IdentityTexts.Backend_IdentityServices_Api_ReadOnlyAccess
+                }
+            };
+
+            options.ApiTitle = "Policy Services API";
+            options.ApiDescription = "Octo Mesh Policy Services.";
+
+            options.ClientId = CommonConstants.IdentityServicesSwaggerClientId;
+            options.AppName = IdentityTexts.Backend_IdentityServices_UserSchema_Swagger_DisplayName;
+        }).AddVersion();
 
         //  services.AddMvc().SetCompatibilityVersion(CompatibilityVersion.Version_3_0);
         services.AddControllers();
 
-        services.AddTransient<IConfigureOptions<SwaggerGenOptions>, ConfigureSwaggerOptions>();
-        services.AddSwaggerGen();
+        services.AddTransient<IConfigureOptions<OctoOpenApiOptions>, ConfigureOctoOpenApiOptions>();
     }
 
     // This method gets called by the runtime. Use this method to configure the HTTP request pipeline.
