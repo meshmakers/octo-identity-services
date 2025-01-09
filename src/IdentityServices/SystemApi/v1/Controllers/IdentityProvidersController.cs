@@ -1,4 +1,5 @@
-﻿using System.ComponentModel.DataAnnotations;
+﻿using System.ComponentModel;
+using System.ComponentModel.DataAnnotations;
 using Asp.Versioning;
 using AutoMapper;
 using IdentityModel;
@@ -42,14 +43,10 @@ public class IdentityProvidersController : ControllerBase
         _distributionEventHubService = distributionEventHubService;
     }
 
-    /// <summary>
-    ///     Returns all identity providers.
-    /// </summary>
-    /// <response code="200">Returns all available identity providers.</response>
-    /// <response code="401">Unauthorized. You need to authenticate in order to use the API.</response>
     [HttpGet]
-    [ProducesResponseType(typeof(IdentityProvidersResult), StatusCodes.Status200OK)]
     [Authorize(IdentityServiceConstants.IdentityApiReadOnlyPolicy)]
+    [EndpointSummary("Returns all available identity providers.")]
+    [ProducesResponseType(typeof(IdentityProvidersResult), StatusCodes.Status200OK)]
     public async Task<ActionResult<IdentityProvidersResult>> GetIdentityProvidersAsync()
     {
         var identityProviders = await _identityProviderStore.GetAllAsync();
@@ -59,14 +56,11 @@ public class IdentityProvidersController : ControllerBase
         };
     }
 
-    /// <summary>
-    ///     Returns identity provider information based on it's name
-    /// </summary>
-    /// <param name="rtId">ID of the identity provider</param>
-    /// <returns>An Object that describes the identity provider.</returns>
     [HttpGet("{rtId}")]
     [ProducesResponseType(typeof(IdentityProvidersResult), StatusCodes.Status200OK)]
     [Authorize(IdentityServiceConstants.IdentityApiReadOnlyPolicy)]
+    [EndpointSummary("Returns an identity provider by its ID.")]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<ActionResult<IdentityProvidersResult>> Get([Required] OctoObjectId rtId)
     {
         var identityProvider = await _identityProviderStore.GetByIdAsync(rtId);
@@ -77,24 +71,17 @@ public class IdentityProvidersController : ControllerBase
 
         return new IdentityProvidersResult
         {
-            IdentityProviders = new[] { _mapper.Map<IdentityProviderDto>(identityProvider) }
+            IdentityProviders = [_mapper.Map<IdentityProviderDto>(identityProvider)]
         };
     }
 
-    /// <summary>
-    ///     Add a new identity provider.
-    /// </summary>
-    /// <param name="identityProviderDto">The configuration for the new identity provider.</param>
-    /// <response code="200">The new identity provider has been added successfully. </response>
-    /// <response code="400">The new identity provider could not be created because one or multiple fields were invalid. </response>
-    /// <response code="401">Unauthorized. You need to authenticate in order to use the API.</response>
-    /// <returns>Returns the configuration for the new identity provider.</returns>
     [HttpPost]
     [ProducesResponseType(typeof(IdentityProviderDto), StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(UniquenessViolationErrorResponse), StatusCodes.Status400BadRequest)]
     [Authorize(IdentityServiceConstants.IdentityApiReadWritePolicy)]
+    [EndpointSummary("Add a new identity provider.")]
     public async Task<ActionResult<IdentityProviderDto>> AddNewIdentityProviderAsync(
-        [FromBody] IdentityProviderDto identityProviderDto)
+        [FromBody] [Description("The configuration for the new identity provider.")] IdentityProviderDto identityProviderDto)
     {
         var identityProvider = _mapper.Map<RtIdentityProvider>(identityProviderDto);
 
@@ -103,16 +90,12 @@ public class IdentityProvidersController : ControllerBase
         return _mapper.Map<IdentityProviderDto>(identityProvider);
     }
 
-    /// <summary>
-    ///     Delete an existing identity provider.
-    /// </summary>
-    /// <param name="rtId">The ID of the identity provider to be deleted</param>
-    /// <response code="200">The identity provider was deleted.</response>
-    /// <response code="401">Unauthorized. You need to authenticate in order to use the API.</response>
-    /// <response code="404">The identity provider to be deleted does not exist.</response>
     [HttpDelete("{rtId}")]
     [Authorize(IdentityServiceConstants.IdentityApiReadWritePolicy)]
-    public async Task<IActionResult> DeleteIdentityProviderAsync([Required] OctoObjectId rtId)
+    [EndpointSummary("Delete an existing identity provider.")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> DeleteIdentityProviderAsync([Required] [Description("The ID of the identity provider to be deleted")] OctoObjectId rtId)
     {
         if (!ModelState.IsValid)
         {
@@ -124,25 +107,17 @@ public class IdentityProvidersController : ControllerBase
         return Ok();
     }
 
-    /// <summary>
-    ///     Replace the data of an existing provider.
-    /// </summary>
-    /// <remarks>Updates an existing provider with the specified ID with the provided data.</remarks>
-    /// <param name="rtId">ID of an existing provider</param>
-    /// <param name="identityProviderDto">The configuration for the new identity provider.</param>
-    /// <response code="200">Returns the provider.</response>
-    /// <response code="400">
-    ///     The provider could not be replaced/updated either due to invalid input or failure replace
-    ///     the provider when another provider with the same clientId already exists.
-    /// </response>
-    /// <response code="401">Unauthorized. You need to authenticate in order to use the API.</response>
-    /// <response code="404">Provider with this ID not found.</response>
     [HttpPut("{rtId}")]
     [ProducesResponseType(typeof(IdentityProviderDto), StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(UniquenessViolationErrorResponse), StatusCodes.Status400BadRequest)]
     [Authorize(IdentityServiceConstants.IdentityApiReadWritePolicy)]
-    public async Task<ActionResult<IdentityProviderDto>> ReplaceProviderAsync([FromRoute] [Required] OctoObjectId rtId,
-        [FromBody] [Required] IdentityProviderDto identityProviderDto)
+    [EndpointSummary("Replace an existing identity provider.")]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [ProducesResponseType(StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    public async Task<ActionResult<IdentityProviderDto>> ReplaceProviderAsync(
+        [FromRoute] [Required] [Description("ID of an existing provider")] OctoObjectId rtId,
+        [FromBody] [Required] [Description("The configuration for the new identity provider.")] IdentityProviderDto identityProviderDto)
     {
         if (identityProviderDto == null)
         {

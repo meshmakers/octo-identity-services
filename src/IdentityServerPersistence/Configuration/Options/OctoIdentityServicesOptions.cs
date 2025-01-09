@@ -3,7 +3,6 @@
 
 using Meshmakers.Octo.Communication.Contracts.DataTransferObjects;
 
-#pragma warning disable 1591
 namespace IdentityServerPersistence.Configuration.Options;
 
 public class OctoIdentityServicesOptions
@@ -15,7 +14,7 @@ public class OctoIdentityServicesOptions
         EnableTokenCleanup = true;
         TokenCleanupInterval = 60 * 60; // default: once an hour
         AllowDisplayInIframe = false;
-        MinLogLevel = LogLevelDto.Warn;
+        MinLogLevel = LogLevelDto.Trace;
     }
 
     /// <summary>

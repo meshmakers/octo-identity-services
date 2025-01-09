@@ -1,5 +1,4 @@
-﻿#pragma warning disable 1591
-namespace Meshmakers.Octo.Backend.IdentityServices.ViewModels.Account;
+﻿namespace Meshmakers.Octo.Backend.IdentityServices.ViewModels.Account;
 
 public class ExternalProvider
 {

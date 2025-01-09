@@ -1,5 +1,4 @@
-﻿#pragma warning disable 1591
-using Duende.IdentityServer.Services;
+﻿using Duende.IdentityServer.Services;
 using IdentityServerPersistence;
 using IdentityServerPersistence.Configuration.Options;
 using IdentityServerPersistence.SystemStores;
@@ -11,7 +10,6 @@ using Meshmakers.Octo.Backend.IdentityServices.Resources;
 using Meshmakers.Octo.Backend.IdentityServices.Routing;
 using Meshmakers.Octo.Backend.IdentityServices.Services;
 using Meshmakers.Octo.Communication.Contracts;
-using Meshmakers.Octo.Communication.Contracts.DataTransferObjects;
 using Meshmakers.Octo.Runtime.Contracts.MongoDb.Configuration;
 using Meshmakers.Octo.Runtime.Contracts.MongoDb.Extensions;
 using Meshmakers.Octo.Services.Common;
@@ -135,8 +133,7 @@ try
 
     if (builder.Environment.IsDevelopment())
     {
-        identityServerBuilder
-            .AddDeveloperSigningCredential();
+        identityServerBuilder.AddDeveloperSigningCredential();
     }
     else
     {
@@ -180,6 +177,18 @@ try
                 IdentityTexts.Backend_IdentityServices_Api_ReadOnlyAccess
             }
         };
+        
+        options.PolicyScopeMapping = new Dictionary<string, IEnumerable<string>>
+        {
+            {
+                IdentityServiceConstants.IdentityApiReadOnlyPolicy,
+                [CommonConstants.IdentityApiFullAccess, CommonConstants.IdentityApiReadOnly]
+            },
+            {
+                IdentityServiceConstants.IdentityApiReadWritePolicy,
+                [CommonConstants.IdentityApiFullAccess]
+            }
+        };
 
         options.ApiTitle = "Identity Services API";
         options.ApiDescription = "Octo Mesh Identity Services.";
@@ -212,7 +221,7 @@ try
     }
 
     // Because we are behind an ingress the tls connection is terminated at the ingress itself,
-    // the cluster is itself secure and so we reduce complexity by running http, but the discovery
+    // the cluster is itself secure, and so we reduce complexity by running http, but the discovery
     // documents should always show https.
     app.Use((context, next) =>
     {

@@ -65,11 +65,6 @@ stages:
               Repository: meshmakers/octo-mesh-identity-services
               Dockerfile: src/IdentityServices/Dockerfile
               IsRelease: ${{ variables.isRelease }}
-          - template: build-and-push-docker-image.yml
-            parameters:
-              Repository: meshmakers/octo-mesh-policy-services
-              Dockerfile: src/PolicyServices/Dockerfile
-              IsRelease: ${{ variables.isRelease }}
           - ${{ if eq(variables.generateDocumentation, true) }}:
               - template: generate-documentation.yml
                 parameters:

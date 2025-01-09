@@ -1,3 +1,4 @@
+using System.ComponentModel;
 using System.ComponentModel.DataAnnotations;
 using Asp.Versioning;
 using IdentityModel;
@@ -32,28 +33,23 @@ public class DiagnosticsController : ControllerBase
         _diagnosticsService = diagnosticsService;
     }
     
-    /// <summary>
-    ///     Returns a diagnostics information of the current authenticated user
-    /// </summary>
-    /// <returns></returns>
     [HttpGet]
+    [EndpointSummary("Returns a diagnostics information of the current authenticated user")]
+    [ProducesResponseType(typeof(DiagnosticsDto), StatusCodes.Status200OK)]
     public IActionResult Get()
     {
         var model = new DiagnosticsDto(HttpContext.User);
         return Ok(model);
     }
     
-    /// <summary>
-    /// Reconfigures the log level of the service
-    /// </summary>
-    /// <param name="minLogLevel">The minimal log level to be logged.</param>
-    /// <param name="maxLogLevel">The maximal log level to be logged.</param>
-    /// <param name="loggerName">The name of the logger to be reconfigured.</param>
-    /// <returns></returns>
     [HttpPost("reconfigureLogLevel")]
     [Authorize(IdentityServiceConstants.IdentityApiReadWritePolicy)]
-    public async Task<IActionResult> ReconfigureLogLevelAsync([Required] LogLevelDto minLogLevel,
-        [Required] LogLevelDto maxLogLevel, string loggerName = "*")
+    [EndpointSummary("Reconfigures the log level of the service")]
+    [ProducesResponseType(204)]
+    public async Task<IActionResult> ReconfigureLogLevelAsync(
+        [Required] [Description("The minimal log level to be logged.")] LogLevelDto minLogLevel,
+        [Required] [Description("The maximal log level to be logged.")] LogLevelDto maxLogLevel,
+        [Description("The name of the logger to be reconfigured.")] string loggerName = "*")
     {
         try
         {

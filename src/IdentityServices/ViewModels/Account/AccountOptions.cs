@@ -1,6 +1,4 @@
-﻿#pragma warning disable 1591
-
-using Meshmakers.Octo.Backend.IdentityServices.Resources;
+﻿using Meshmakers.Octo.Backend.IdentityServices.Resources;
 
 namespace Meshmakers.Octo.Backend.IdentityServices.ViewModels.Account;
 

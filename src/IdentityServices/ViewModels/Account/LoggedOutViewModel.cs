@@ -1,4 +1,3 @@
-#pragma warning disable 1591
 namespace Meshmakers.Octo.Backend.IdentityServices.ViewModels.Account;
 
 public class LoggedOutViewModel

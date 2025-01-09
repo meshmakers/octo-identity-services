@@ -32,12 +32,10 @@ public class ApiScopesController : ControllerBase
     }
 
     // GET: system/v1/apiScopes
-    /// <summary>
-    ///     Returns all API scope definitions
-    /// </summary>
-    /// <returns></returns>
     [HttpGet]
     [Authorize(IdentityServiceConstants.IdentityApiReadOnlyPolicy)]
+    [EndpointSummary("Returns all API scope definitions")]
+    [ProducesResponseType(typeof(IEnumerable<ApiScopeDto>), StatusCodes.Status200OK)]
     public async Task<IEnumerable<ApiScopeDto>> Get()
     {
         var resources = await _octoResourceStore.GetAllResourcesAsync();
@@ -45,12 +43,10 @@ public class ApiScopesController : ControllerBase
     }
 
     // GET system/v1/apiScopes/getPaged
-    /// <summary>
-    ///     Returns all API scope using paging
-    /// </summary>
-    /// <returns></returns>
     [HttpGet("GetPaged")]
     [Authorize(IdentityServiceConstants.IdentityApiReadOnlyPolicy)]
+    [EndpointSummary("Returns all API scope definitions using paging")]
+    [ProducesResponseType(typeof(PagedResult<ApiScopeDto>), StatusCodes.Status200OK)]
     public async Task<PagedResult<ApiScopeDto>> Get([Required] [FromQuery] PagingParams pagingParams)
     {
         var list = new List<ApiScopeDto>();
@@ -75,13 +71,10 @@ public class ApiScopesController : ControllerBase
     }
 
     // GET api/apiScopes/5
-    /// <summary>
-    ///     Returns scope information based on it's scope name
-    /// </summary>
-    /// <param name="name">Name of scope</param>
-    /// <returns>An Object that describes the scope.</returns>
     [HttpGet("{name}")]
     [Authorize(IdentityServiceConstants.IdentityApiReadOnlyPolicy)]
+    [EndpointSummary("Returns API scope information based on it's name")]
+    [ProducesResponseType(typeof(ApiScopeDto), StatusCodes.Status200OK)]
     public async Task<IActionResult> Get([Required] string name)
     {
         var scopes = await _octoResourceStore.FindApiScopesByNameAsync(new[] { name });
@@ -94,14 +87,11 @@ public class ApiScopesController : ControllerBase
         return Ok(CreateApiScopeDto(scope));
     }
 
-    /// <summary>
-    ///     Creates a new scope
-    /// </summary>
-    /// <param name="scopeDto">The scope data transfer object instance</param>
-    /// <returns></returns>
     // POST api/apiScopes
     [HttpPost]
     [Authorize(IdentityServiceConstants.IdentityApiReadWritePolicy)]
+    [EndpointSummary("Creates a new API scope")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
     public async Task<IActionResult> Post([Required] [FromBody] ApiScopeDto scopeDto)
     {
         if (!ModelState.IsValid || scopeDto.Name == null)
@@ -130,14 +120,10 @@ public class ApiScopesController : ControllerBase
     }
 
     // PUT api/apiScopes/5
-    /// <summary>
-    ///     Updates a scope
-    /// </summary>
-    /// <param name="name">Name of the scope</param>
-    /// <param name="scopeDto">The scope data transfer object instance</param>
-    /// <returns></returns>
     [HttpPut("{name}")]
     [Authorize(IdentityServiceConstants.IdentityApiReadWritePolicy)]
+    [EndpointSummary("Updates an API scope")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
     public async Task<IActionResult> Put([Required] string name, [Required] [FromBody] ApiScopeDto scopeDto)
     {
         if (!ModelState.IsValid)
@@ -167,13 +153,10 @@ public class ApiScopesController : ControllerBase
     }
 
     // DELETE api/apiScopes/5
-    /// <summary>
-    ///     Deletes a scope
-    /// </summary>
-    /// <param name="name">Name of scope</param>
-    /// <returns></returns>
     [HttpDelete("{name}")]
     [Authorize(IdentityServiceConstants.IdentityApiReadWritePolicy)]
+    [EndpointSummary("Deletes an API scope")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
     public async Task<IActionResult> Delete([Required] string name)
     {
         if (!ModelState.IsValid)

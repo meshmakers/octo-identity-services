@@ -1,5 +1,4 @@
-﻿#pragma warning disable 1591
-namespace Meshmakers.Octo.Backend.IdentityServices.ViewModels.Manage;
+﻿namespace Meshmakers.Octo.Backend.IdentityServices.ViewModels.Manage;
 
 public class RemoveLoginViewModel
 {

@@ -1,3 +1,4 @@
+using System.ComponentModel;
 using System.ComponentModel.DataAnnotations;
 using Asp.Versioning;
 using Duende.IdentityServer.Models;
@@ -34,12 +35,10 @@ public class ApiSecretsController : ControllerBase
     }
 
     // GET system/v1/apiSecrets/client/xyz
-    /// <summary>
-    ///     Returns all secrets of the given client
-    /// </summary>
-    /// <returns></returns>
     [HttpGet("client/{clientId}")]
     [Authorize(IdentityServiceConstants.IdentityApiReadOnlyPolicy)]
+    [EndpointSummary("Returns all secrets of the given client")]
+    [ProducesResponseType(typeof(IEnumerable<ApiSecretDto>), StatusCodes.Status200OK)]
     public async Task<IActionResult> GetClient([Required] string clientId)
     {
         if (!ModelState.IsValid)
@@ -57,12 +56,10 @@ public class ApiSecretsController : ControllerBase
     }
 
     // GET system/v1/apiSecrets/client/xyz/secretValue
-    /// <summary>
-    ///     Returns a secret of the given client
-    /// </summary>
-    /// <returns></returns>
     [HttpGet("client/{clientId}/{secretValue}")]
     [Authorize(IdentityServiceConstants.IdentityApiReadOnlyPolicy)]
+    [EndpointSummary("Returns a secret of the given client")]
+    [ProducesResponseType(typeof(ApiSecretDto), StatusCodes.Status200OK)]
     public async Task<IActionResult> GetClientSecret([Required] string clientId, [Required] string secretValue)
     {
         if (!ModelState.IsValid)
@@ -88,12 +85,10 @@ public class ApiSecretsController : ControllerBase
     }
 
     // GET system/v1/apiSecrets/apiResource/xyz
-    /// <summary>
-    ///     Returns all secrets of the given API resource
-    /// </summary>
-    /// <returns></returns>
     [HttpGet("apiResource/{apiResourceName}")]
     [Authorize(IdentityServiceConstants.IdentityApiReadOnlyPolicy)]
+    [EndpointSummary("Returns all secrets of the given API resource")]
+    [ProducesResponseType(typeof(IEnumerable<ApiSecretDto>), StatusCodes.Status200OK)]
     public async Task<IActionResult> GetApiResource([Required] string apiResourceName)
     {
         if (!ModelState.IsValid)
@@ -112,13 +107,12 @@ public class ApiSecretsController : ControllerBase
     }
 
     // GET system/v1/apiSecrets/apiResource/xyz/secretValue
-    /// <summary>
-    ///     Returns a secret of the given API resource
-    /// </summary>
-    /// <returns></returns>
     [HttpGet("apiResource/{apiResourceName}/{secretValue}")]
     [Authorize(IdentityServiceConstants.IdentityApiReadOnlyPolicy)]
-    public async Task<IActionResult> GetApiResourceSecret([Required] string apiResourceName, [Required] string secretValue)
+    [EndpointSummary("Returns a secret of the given API resource")]
+    [ProducesResponseType(typeof(ApiSecretDto), StatusCodes.Status200OK)]
+    public async Task<IActionResult> GetApiResourceSecret([Required] string apiResourceName,
+        [Required] string secretValue)
     {
         if (!ModelState.IsValid)
         {
@@ -143,16 +137,16 @@ public class ApiSecretsController : ControllerBase
         return Ok(CreateApiSecret(secret));
     }
 
-    /// <summary>
-    ///     Creates new secret for client
-    /// </summary>
-    /// <param name="clientId">Id of client to add secret</param>
-    /// <param name="secretDto">The secret data transfer object instance</param>
-    /// <returns></returns>
     // POST system/v1/apiSecrets/client/xyz
     [HttpPost("client/{clientId}")]
     [Authorize(IdentityServiceConstants.IdentityApiReadWritePolicy)]
-    public async Task<IActionResult> PostClient([Required] string clientId, [Required] [FromBody] ApiSecretDto secretDto)
+    [EndpointSummary("Creates a new secret for a client")]
+    [ProducesResponseType(typeof(ApiSecretDto), StatusCodes.Status200OK)]
+    public async Task<IActionResult> PostClient(
+        [Required] [Description("ID of client to add secret")]
+        string clientId,
+        [Required] [FromBody] [Description("The secret data transfer object instance")]
+        ApiSecretDto secretDto)
     {
         if (!ModelState.IsValid)
         {
@@ -184,16 +178,16 @@ public class ApiSecretsController : ControllerBase
         }
     }
 
-    /// <summary>
-    ///     Creates new secret for an API resource
-    /// </summary>
-    /// <param name="apiResourceName">Name of API resource to add secret</param>
-    /// <param name="secretDto">The secret data transfer object instance</param>
-    /// <returns></returns>
     // POST system/v1/apiSecrets/apiResource/xyz
     [HttpPost("apiResource/{apiResourceName}")]
     [Authorize(IdentityServiceConstants.IdentityApiReadWritePolicy)]
-    public async Task<IActionResult> PostApiResource([Required] string apiResourceName, [Required] [FromBody] ApiSecretDto secretDto)
+    [EndpointSummary("Creates a new secret for an API resource")]
+    [ProducesResponseType(typeof(ApiSecretDto), StatusCodes.Status200OK)]
+    public async Task<IActionResult> PostApiResource(
+        [Required] [Description("Name of API resource to add secret")]
+        string apiResourceName,
+        [Required] [FromBody] [Description("The secret data transfer object instance")]
+        ApiSecretDto secretDto)
     {
         if (!ModelState.IsValid)
         {
@@ -226,15 +220,15 @@ public class ApiSecretsController : ControllerBase
     }
 
     // PUT system/v1/apiSecrets/apiResource/xyz
-    /// <summary>
-    ///     Updates a secret
-    /// </summary>
-    /// <param name="clientId">ID of client</param>
-    /// <param name="apiSecretDto">The secret data transfer object instance</param>
-    /// <returns></returns>
     [HttpPut("client/{clientId}")]
     [Authorize(IdentityServiceConstants.IdentityApiReadWritePolicy)]
-    public async Task<IActionResult> PutClient([Required] string clientId, [Required] [FromBody] ApiSecretDto apiSecretDto)
+    [EndpointSummary("Updates a secret")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    public async Task<IActionResult> PutClient(
+        [Required] [Description("ID of client")]
+        string clientId,
+        [Required] [FromBody] [Description("The secret data transfer object instance")]
+        ApiSecretDto apiSecretDto)
     {
         if (!ModelState.IsValid)
         {
@@ -270,15 +264,15 @@ public class ApiSecretsController : ControllerBase
     }
 
     // PUT system/v1/apiSecrets/apiResource/xyz
-    /// <summary>
-    ///     Updates a secret
-    /// </summary>
-    /// <param name="apiResourceName">Name of the API resource</param>
-    /// <param name="apiSecretDto">The secret data transfer object instance</param>
-    /// <returns></returns>
     [HttpPut("apiResource/{apiResourceName}")]
     [Authorize(IdentityServiceConstants.IdentityApiReadWritePolicy)]
-    public async Task<IActionResult> PutApiResource([Required] string apiResourceName, [Required] [FromBody] ApiSecretDto apiSecretDto)
+    [EndpointSummary("Updates a secret")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    public async Task<IActionResult> PutApiResource(
+        [Required] [Description("Name of the API resource")]
+        string apiResourceName,
+        [Required] [FromBody] [Description("The secret data transfer object instance")]
+        ApiSecretDto apiSecretDto)
     {
         if (!ModelState.IsValid)
         {
@@ -315,15 +309,15 @@ public class ApiSecretsController : ControllerBase
 
 
     // DELETE system/v1/apiSecrets/client/xyz/secretValue
-    /// <summary>
-    ///     Deletes a secret of given client
-    /// </summary>
-    /// <param name="clientId">Id of the client</param>
-    /// <param name="secretValue">The sha256 value of the secret</param>
-    /// <returns></returns>
     [HttpDelete("client/{clientId}/{secretValue}")]
     [Authorize(IdentityServiceConstants.IdentityApiReadWritePolicy)]
-    public async Task<IActionResult> DeleteSecretOfClient([Required] string clientId, [Required] string secretValue)
+    [EndpointSummary("Deletes a secret of a client")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    public async Task<IActionResult> DeleteSecretOfClient(
+        [Required] [Description("ID of the client")]
+        string clientId,
+        [Required] [Description("The sha256 value of the secret")]
+        string secretValue)
     {
         if (!ModelState.IsValid)
         {
@@ -363,15 +357,15 @@ public class ApiSecretsController : ControllerBase
 
 
     // DELETE system/v1/apiSecrets/apiResource/xyz/secretValue
-    /// <summary>
-    ///     Deletes a secret of given api resource
-    /// </summary>
-    /// <param name="apiResourceName">Name of the API resource</param>
-    /// <param name="secretValue">The sha256 value of the secret</param>
-    /// <returns></returns>
     [HttpDelete("apiResource/{apiResourceName}/{secretValue}")]
     [Authorize(IdentityServiceConstants.IdentityApiReadWritePolicy)]
-    public async Task<IActionResult> DeleteSecretOfApiResource([Required] string apiResourceName, [Required] string secretValue)
+    [EndpointSummary("Deletes a secret of an API resource")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    public async Task<IActionResult> DeleteSecretOfApiResource(
+        [Required] [Description("Name of the API resource")]
+        string apiResourceName,
+        [Required] [Description("The sha256 value of the secret")]
+        string secretValue)
     {
         if (!ModelState.IsValid)
         {
@@ -411,7 +405,7 @@ public class ApiSecretsController : ControllerBase
 
     private Task ClearCacheAsync()
     {
-        return _distributionEventHubService.PublishAsync(new CorsClientsUpdate(_octoResourceStore.TenantId, 
+        return _distributionEventHubService.PublishAsync(new CorsClientsUpdate(_octoResourceStore.TenantId,
             Guid.NewGuid(), DateTime.Now));
     }
 

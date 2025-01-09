@@ -1,3 +1,4 @@
+using System.ComponentModel;
 using System.ComponentModel.DataAnnotations;
 using Asp.Versioning;
 using AutoMapper;
@@ -42,12 +43,10 @@ public class RolesController : ControllerBase
     }
 
     // GET system/v1/roles
-    /// <summary>
-    ///     Returns all existing roles
-    /// </summary>
-    /// <returns></returns>
     [HttpGet]
     [Authorize(IdentityServiceConstants.IdentityApiReadOnlyPolicy)]
+    [EndpointSummary("Returns all existing roles.")]
+    [ProducesResponseType(typeof(IEnumerable<RoleDto>), StatusCodes.Status200OK)]
     public IEnumerable<RoleDto> Get()
     {
         var list = _mapper.Map<List<RoleDto>>(_roleManager.Roles);
@@ -56,12 +55,10 @@ public class RolesController : ControllerBase
     }
 
     // GET system/v1/roles
-    /// <summary>
-    ///     Returns all existing roles
-    /// </summary>
-    /// <returns></returns>
     [HttpGet("GetPaged")]
     [Authorize(IdentityServiceConstants.IdentityApiReadOnlyPolicy)]
+    [EndpointSummary("Returns all existing roles.")]
+    [ProducesResponseType(typeof(IEnumerable<RoleDto>), StatusCodes.Status200OK)]
     public async Task<PagedResult<RoleDto>> Get([Required] [FromQuery] PagingParams pagingParams)
     {
         var tenantRepository = _systemContext.GetSystemTenantRepository();
@@ -75,7 +72,9 @@ public class RolesController : ControllerBase
             dataOperation.FieldLike(nameof(RtRole.Name), pagingParams.Filter);
         }
 
-        var resultSet = await tenantRepository.GetRtEntitiesByTypeAsync<RtRole>(session, dataOperation, pagingParams.Skip, pagingParams.Take);
+        var resultSet =
+            await tenantRepository.GetRtEntitiesByTypeAsync<RtRole>(session, dataOperation, pagingParams.Skip,
+                pagingParams.Take);
         var list = _mapper.Map<List<RoleDto>>(resultSet.Items);
 
         var pagedResult = new PagedResult<RoleDto>(list, pagingParams.Skip, pagingParams.Take, resultSet.TotalCount);
@@ -90,14 +89,11 @@ public class RolesController : ControllerBase
     }
 
     // GET system/v1/roles/names/{roleName}
-    /// <summary>
-    ///     Returns role information based on it's name
-    /// </summary>
-    /// <param name="roleName">Name of the role</param>
-    /// <returns>An Object that describes the role.</returns>
     [HttpGet("names/{roleName}")]
     [Authorize(IdentityServiceConstants.IdentityApiReadOnlyPolicy)]
-    public async Task<IActionResult> Get([Required] string roleName)
+    [EndpointSummary("Returns role information based on it's name")]
+    [ProducesResponseType(typeof(RoleDto), StatusCodes.Status200OK)]
+    public async Task<IActionResult> Get([Required] [Description("Name of the role")] string roleName)
     {
         var rtRole = await _roleManager.FindByNameAsync(roleName);
         if (rtRole == null)
@@ -110,14 +106,13 @@ public class RolesController : ControllerBase
     }
 
     // POST system/v1/roles
-    /// <summary>
-    ///     Creates a new role
-    /// </summary>
-    /// <param name="roleDto">The role data transfer object instance</param>
-    /// <returns></returns>
     [HttpPost]
     [Authorize(IdentityServiceConstants.IdentityApiReadWritePolicy)]
-    public async Task<IActionResult> Post([Required] [FromBody] RoleDto roleDto)
+    [EndpointSummary("Creates a new role.")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(InternalServerError), StatusCodes.Status400BadRequest)]
+    public async Task<IActionResult> Post(
+        [Required] [FromBody] [Description("The role data transfer object instance")] RoleDto roleDto)
     {
         if (!ModelState.IsValid)
         {
@@ -144,15 +139,13 @@ public class RolesController : ControllerBase
     }
 
     // PUT system/v1/role/5
-    /// <summary>
-    ///     Updates a role
-    /// </summary>
-    /// <param name="roleName">The role name</param>
-    /// <param name="roleDto">The role data transfer object instance</param>
-    /// <returns></returns>
     [HttpPut("{roleName}")]
     [Authorize(IdentityServiceConstants.IdentityApiReadWritePolicy)]
-    public async Task<IActionResult> Put([Required] string roleName, [Required] [FromBody] RoleDto roleDto)
+    [EndpointSummary("Updates a role.")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    public async Task<IActionResult> Put(
+        [Required] [Description("The role name")] string roleName,
+        [Required] [FromBody] [Description("The role data transfer object instance")] RoleDto roleDto)
     {
         if (!ModelState.IsValid)
         {
@@ -185,14 +178,11 @@ public class RolesController : ControllerBase
     }
 
     // DELETE system/v1/role/5
-    /// <summary>
-    ///     Deletes a role
-    /// </summary>
-    /// <param name="roleName">The role name</param>
-    /// <returns></returns>
     [HttpDelete("{roleName}")]
     [Authorize(IdentityServiceConstants.IdentityApiReadWritePolicy)]
-    public async Task<IActionResult> Delete([Required] string roleName)
+    [EndpointSummary("Deletes a role.")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    public async Task<IActionResult> Delete([Required] [Description("The role name")] string roleName)
     {
         var octoRole = await _roleManager.FindByNameAsync(roleName);
         if (octoRole == null)

@@ -36,12 +36,10 @@ public class ApiResourcesController : ControllerBase
     }
 
     // GET: system/v1/apiResources
-    /// <summary>
-    ///     Returns all API resources definitions
-    /// </summary>
-    /// <returns></returns>
     [HttpGet]
     [Authorize(IdentityServiceConstants.IdentityApiReadOnlyPolicy)]
+    [EndpointSummary("Returns all API resources definitions")]
+    [ProducesResponseType(typeof(IEnumerable<ApiResourceDto>), 200)]
     public async Task<IEnumerable<ApiResourceDto>> Get()
     {
         var resources = await _octoResourceStore.GetAllResourcesAsync();
@@ -49,12 +47,10 @@ public class ApiResourcesController : ControllerBase
     }
 
     // GET system/v1/apiResources/getPaged
-    /// <summary>
-    ///     Returns all API resources using paging
-    /// </summary>
-    /// <returns></returns>
     [HttpGet("GetPaged")]
     [Authorize(IdentityServiceConstants.IdentityApiReadOnlyPolicy)]
+    [EndpointSummary("Returns all API resources definitions using paging")]
+    [ProducesResponseType(typeof(PagedResult<ApiResourceDto>), 200)]
     public async Task<PagedResult<ApiResourceDto>> Get([Required] [FromQuery] PagingParams pagingParams)
     {
         var list = new List<ApiResourceDto>();
@@ -79,13 +75,10 @@ public class ApiResourcesController : ControllerBase
     }
 
     // GET api/apiResources/5
-    /// <summary>
-    ///     Returns API resource information based on it's name
-    /// </summary>
-    /// <param name="name">Name of API resource</param>
-    /// <returns>An Object that describes the API resource.</returns>
     [HttpGet("{name}")]
     [Authorize(IdentityServiceConstants.IdentityApiReadOnlyPolicy)]
+    [EndpointSummary("Returns API resource information based on it's name")]
+    [ProducesResponseType(typeof(ApiResourceDto), StatusCodes.Status200OK)]
     public async Task<IActionResult> Get([Required] string name)
     {
         var apiResource = await _octoResourceStore.GetApiResourceByNameAsync(name);
@@ -99,14 +92,11 @@ public class ApiResourcesController : ControllerBase
         return Ok(CreateApiResourceDto(nativeApiResource));
     }
 
-    /// <summary>
-    ///     Creates a new API resource
-    /// </summary>
-    /// <param name="apiResourceDto">The API resource data transfer object instance</param>
-    /// <returns></returns>
     // POST api/apiResources
     [HttpPost]
     [Authorize(IdentityServiceConstants.IdentityApiReadWritePolicy)]
+    [EndpointSummary("Creates a new API resource")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
     public async Task<IActionResult> Post([Required] [FromBody] ApiResourceDto apiResourceDto)
     {
         if (!ModelState.IsValid || apiResourceDto.Name == null)
@@ -135,14 +125,10 @@ public class ApiResourcesController : ControllerBase
     }
 
     // PUT api/apiResources/5
-    /// <summary>
-    ///     Updates an API resource
-    /// </summary>
-    /// <param name="name">Name of the API resource</param>
-    /// <param name="apiResourceDto">The API resource data transfer object instance</param>
-    /// <returns></returns>
     [HttpPut("{name}")]
     [Authorize(IdentityServiceConstants.IdentityApiReadWritePolicy)]
+    [EndpointSummary("Updates an API resource")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
     public async Task<IActionResult> Put([Required] string name, [Required] [FromBody] ApiResourceDto apiResourceDto)
     {
         if (!ModelState.IsValid || apiResourceDto.Name == null)
@@ -173,13 +159,10 @@ public class ApiResourcesController : ControllerBase
 
 
     // DELETE api/apiResources/5
-    /// <summary>
-    ///     Deletes an API resource
-    /// </summary>
-    /// <param name="name">Name of API resource</param>
-    /// <returns></returns>
     [HttpDelete("{name}")]
     [Authorize(IdentityServiceConstants.IdentityApiReadWritePolicy)]
+    [EndpointSummary("Deletes an API resource")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
     public async Task<IActionResult> Delete([Required] string name)
     {
         var octoApiResource = await _octoResourceStore.GetApiResourceByNameAsync(name);

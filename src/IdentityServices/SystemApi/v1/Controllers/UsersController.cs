@@ -1,4 +1,5 @@
-﻿using System.ComponentModel.DataAnnotations;
+﻿using System.ComponentModel;
+using System.ComponentModel.DataAnnotations;
 using Asp.Versioning;
 using AutoMapper;
 using IdentityModel;
@@ -60,6 +61,8 @@ public class UsersController : ControllerBase
     /// <returns></returns>
     [HttpGet]
     [Authorize(IdentityServiceConstants.IdentityApiReadOnlyPolicy)]
+    [EndpointSummary("Returns all existing users.")]
+    [ProducesResponseType(typeof(IEnumerable<UserDto>), StatusCodes.Status200OK)]
     public IEnumerable<UserDto> Get()
     {
         var list = _mapper.Map<List<UserDto>>(_userManager.Users);
@@ -74,6 +77,8 @@ public class UsersController : ControllerBase
     /// <returns></returns>
     [HttpGet("GetPaged")]
     [Authorize(IdentityServiceConstants.IdentityApiReadOnlyPolicy)]
+    [EndpointSummary("Returns all existing users.")]
+    [ProducesResponseType(typeof(IEnumerable<UserDto>), StatusCodes.Status200OK)]
     public PagedResult<UserDto> Get([Required] [FromQuery] PagingParams pagingParams)
     {
         var list = new List<UserDto>();
@@ -96,14 +101,12 @@ public class UsersController : ControllerBase
     }
 
     // GET system/v1/users/{userName}
-    /// <summary>
-    ///     Returns user information based on it's userName, email or id
-    /// </summary>
-    /// <param name="userName">Name of the user</param>
-    /// <returns>An Object that describes the user.</returns>
     [HttpGet("{userName}")]
     [Authorize(IdentityServiceConstants.IdentityApiReadOnlyPolicy)]
-    public async Task<IActionResult> Get([Required] string userName)
+    [EndpointSummary("Returns user information based on it's userName, email or id")]
+    [ProducesResponseType(typeof(UserDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> Get([Required] [Description("Name of the user")] string userName)
     {
         var rtUser = await _userManager.FindByNameAsync(userName) ??
                      await _userManager.FindByEmailAsync(userName) ??
@@ -118,14 +121,11 @@ public class UsersController : ControllerBase
     }
 
     // GET system/v1/users/{userName}
-    /// <summary>
-    ///     Returns user information based on it's userName, email or id
-    /// </summary>
-    /// <param name="userName">Name of the user</param>
-    /// <returns>An Object that describes the user.</returns>
     [HttpGet("{userName}/roles")]
     [Authorize(IdentityServiceConstants.IdentityApiReadOnlyPolicy)]
-    public async Task<IActionResult> GetUserRoles([Required] string userName)
+    [EndpointSummary("Returns user roles based on it's userName, email or id")]
+    [ProducesResponseType(typeof(IEnumerable<RoleDto>), StatusCodes.Status200OK)]
+    public async Task<IActionResult> GetUserRoles([Required] [Description("Name of the user")] string userName)
     {
         var octoUser = await _userManager.FindByNameAsync(userName) ??
                        await _userManager.FindByEmailAsync(userName) ??
@@ -154,14 +154,13 @@ public class UsersController : ControllerBase
 
 
     // POST system/v1/users
-    /// <summary>
-    ///     Creates a new user
-    /// </summary>
-    /// <param name="userDto">The user data transfer object instance</param>
-    /// <returns></returns>
     [HttpPost]
     [Authorize(IdentityServiceConstants.IdentityApiReadWritePolicy)]
-    public async Task<IActionResult> Post([Required] [FromBody] RegisterUserDto userDto)
+    [EndpointSummary("Creates a new user.")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    public async Task<IActionResult> Post(
+        [Required] [FromBody] [Description("The user data transfer object instance")]
+        RegisterUserDto userDto)
     {
         if (!ModelState.IsValid)
         {
@@ -208,15 +207,15 @@ public class UsersController : ControllerBase
     }
 
     // PUT system/v1/users/5
-    /// <summary>
-    ///     Updates an user
-    /// </summary>
-    /// <param name="userName">The user name</param>
-    /// <param name="userDto">The client data transfer object instance</param>
-    /// <returns></returns>
     [HttpPut("{userName}")]
     [Authorize(IdentityServiceConstants.IdentityApiReadWritePolicy)]
-    public async Task<IActionResult> Put([Required] string userName, [Required] [FromBody] UserDto userDto)
+    [EndpointSummary("Updates a user.")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    public async Task<IActionResult> Put(
+        [Required] [Description("The username")]
+        string userName,
+        [Required] [FromBody] [Description("The client data transfer object instance")]
+        UserDto userDto)
     {
         if (!ModelState.IsValid)
         {
@@ -248,16 +247,14 @@ public class UsersController : ControllerBase
     }
 
     // POST: system/v1/users/resetPassword
-    /// <summary>
-    ///     Resets the password of an user
-    /// </summary>
-    /// <param name="userName">The user name</param>
-    /// <param name="password">The new password</param>
-    /// <returns></returns>
     [HttpPost]
     [Route("ResetPassword")]
     [Authorize(IdentityServiceConstants.IdentityApiReadWritePolicy)]
-    public async Task<IActionResult> ResetPassword([Required] string userName, [Required] string password)
+    [EndpointSummary("Resets the password of an user.")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    public async Task<IActionResult> ResetPassword([Required] [Description("The username")] string userName,
+        [Required] [Description("The new password")]
+        string password)
     {
         if (!ModelState.IsValid)
         {
@@ -290,14 +287,11 @@ public class UsersController : ControllerBase
     }
 
     // DELETE system/v1/users/5
-    /// <summary>
-    ///     Deletes an user
-    /// </summary>
-    /// <param name="userName">The user name</param>
-    /// <returns></returns>
     [HttpDelete("{userName}")]
     [Authorize(IdentityServiceConstants.IdentityApiReadWritePolicy)]
-    public async Task<IActionResult> Delete([Required] string userName)
+    [EndpointSummary("Deletes an user.")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    public async Task<IActionResult> Delete([Required] [Description("The username")] string userName)
     {
         if (!ModelState.IsValid)
         {
@@ -327,15 +321,13 @@ public class UsersController : ControllerBase
     }
 
     // PUT system/v1/users/demo/roles/users
-    /// <summary>
-    ///     adds a role from an user
-    /// </summary>
-    /// <param name="userName">The user name</param>
-    /// <param name="roleIds">The role ids</param>
-    /// <returns></returns>
     [HttpPut("{userName}/roles")]
     [Authorize(IdentityServiceConstants.IdentityApiReadWritePolicy)]
-    public async Task<IActionResult> UpdateUserRoles([Required] string userName, [Required] [FromBody] IEnumerable<OctoObjectId> roleIds)
+    [EndpointSummary("Adds roles to an user.")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    public async Task<IActionResult> UpdateUserRoles([Required] [Description("The username")] string userName,
+        [Required] [FromBody] [Description("The role ids")]
+        IEnumerable<OctoObjectId> roleIds)
     {
         var user = await _userManager.FindByNameAsync(userName);
         if (user == null)
@@ -362,15 +354,13 @@ public class UsersController : ControllerBase
     }
 
     // PUT system/v1/users/demo/roles/users
-    /// <summary>
-    ///     adds a role from an user
-    /// </summary>
-    /// <param name="userName">The user name</param>
-    /// <param name="roleName">the role name</param>
-    /// <returns></returns>
     [HttpPut("{userName}/roles/{roleName}")]
     [Authorize(IdentityServiceConstants.IdentityApiReadWritePolicy)]
-    public async Task<IActionResult> AddUserToRole([Required] string userName, [Required] string roleName)
+    [EndpointSummary("Adds a role to a user.")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    public async Task<IActionResult> AddUserToRole([Required] [Description("The username")] string userName,
+        [Required] [Description("The role name")]
+        string roleName)
     {
         var user = await _userManager.FindByNameAsync(userName);
         if (user == null)
@@ -396,15 +386,13 @@ public class UsersController : ControllerBase
     }
 
     // DELETE system/v1/users/demo/roles/Users
-    /// <summary>
-    ///     removes a role from an user
-    /// </summary>
-    /// <param name="userName">The user id</param>
-    /// <param name="roleName">the role id</param>
-    /// <returns></returns>
     [HttpDelete("{userName}/roles/{roleName}")]
     [Authorize(IdentityServiceConstants.IdentityApiReadWritePolicy)]
-    public async Task<IActionResult> RemoveRoleFromUser([Required] string userName, [Required] string roleName)
+    [EndpointSummary("Removes a role from a user.")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    public async Task<IActionResult> RemoveRoleFromUser([Required] [Description("The username")] string userName,
+        [Required] [Description("The role name")]
+        string roleName)
     {
         var user = await _userManager.FindByNameAsync(userName);
         if (user == null)

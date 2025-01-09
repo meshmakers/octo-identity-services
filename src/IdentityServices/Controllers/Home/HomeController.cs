@@ -8,8 +8,6 @@ using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Mvc;
 using Persistence.IdentityCkModel.Generated.System.Identity.v1;
 
-#pragma warning disable 1591
-
 namespace Meshmakers.Octo.Backend.IdentityServices.Controllers.Home;
 
 [SecurityHeaders]
