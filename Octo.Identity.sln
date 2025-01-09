@@ -16,8 +16,6 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Common", "src\octo-common-s
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Swagger", "src\octo-common-services\src\Swagger\Swagger.csproj", "{2B06D1E3-17BA-4480-B66B-BF1798823D2F}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "PolicyServices", "src\PolicyServices\PolicyServices.csproj", "{E61A11C3-3B3F-4D16-A007-62D8096A63B4}"
-EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Persistence.IdentityCkModel", "src\Persistence.IdentityCkModel\Persistence.IdentityCkModel.csproj", "{26B615B1-5B51-4864-8661-AF476B4F48A7}"
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "IdentityServerPersistence", "src\IdentityServerPersistence\IdentityServerPersistence.csproj", "{43D1EF17-936E-4D27-9BDB-52E0B8FCCEAC}"
@@ -75,12 +73,6 @@ Global
 		{2B06D1E3-17BA-4480-B66B-BF1798823D2F}.Release|Any CPU.Build.0 = Release|Any CPU
 		{2B06D1E3-17BA-4480-B66B-BF1798823D2F}.DebugL|Any CPU.ActiveCfg = DebugL|Any CPU
 		{2B06D1E3-17BA-4480-B66B-BF1798823D2F}.DebugL|Any CPU.Build.0 = DebugL|Any CPU
-		{E61A11C3-3B3F-4D16-A007-62D8096A63B4}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
-		{E61A11C3-3B3F-4D16-A007-62D8096A63B4}.Debug|Any CPU.Build.0 = Debug|Any CPU
-		{E61A11C3-3B3F-4D16-A007-62D8096A63B4}.Release|Any CPU.ActiveCfg = Release|Any CPU
-		{E61A11C3-3B3F-4D16-A007-62D8096A63B4}.Release|Any CPU.Build.0 = Release|Any CPU
-		{E61A11C3-3B3F-4D16-A007-62D8096A63B4}.DebugL|Any CPU.ActiveCfg = DebugL|Any CPU
-		{E61A11C3-3B3F-4D16-A007-62D8096A63B4}.DebugL|Any CPU.Build.0 = DebugL|Any CPU
 		{26B615B1-5B51-4864-8661-AF476B4F48A7}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
 		{26B615B1-5B51-4864-8661-AF476B4F48A7}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{26B615B1-5B51-4864-8661-AF476B4F48A7}.Release|Any CPU.ActiveCfg = Release|Any CPU

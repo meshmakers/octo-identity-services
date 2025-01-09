@@ -27,6 +27,10 @@ public class SetupController(ILogger<SetupController> logger, IUserManagementSer
     /// </response>
     /// <response code="404">Not Found. The setting of the admin user is allowed only during installation.</response>
     [HttpPost]
+    [EndpointSummary("Configures identity services in the case no user is existing.")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<IActionResult> AddAdminUser([FromBody] AdminUserDto adminUserDto)
     {
         if (!ModelState.IsValid)

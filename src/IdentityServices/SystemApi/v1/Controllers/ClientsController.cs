@@ -1,4 +1,5 @@
-﻿using System.ComponentModel.DataAnnotations;
+﻿using System.ComponentModel;
+using System.ComponentModel.DataAnnotations;
 using Asp.Versioning;
 using Duende.IdentityServer.Models;
 using IdentityModel;
@@ -41,12 +42,10 @@ public class ClientsController : ControllerBase
     }
 
     // GET: system/v1/clients
-    /// <summary>
-    ///     Returns all client definitions
-    /// </summary>
-    /// <returns></returns>
     [HttpGet]
     [Authorize(IdentityServiceConstants.IdentityApiReadOnlyPolicy)]
+    [EndpointSummary("Returns all client definitions")]
+    [ProducesResponseType(typeof(IEnumerable<ClientDto>), StatusCodes.Status200OK)]
     public async Task<IEnumerable<ClientDto>> Get()
     {
         var clients = await _octoClientStore.GetClients();
@@ -54,12 +53,10 @@ public class ClientsController : ControllerBase
     }
 
     // GET system/v1/clients/getPaged
-    /// <summary>
-    ///     Returns all clients using paging
-    /// </summary>
-    /// <returns></returns>
     [HttpGet("GetPaged")]
     [Authorize(IdentityServiceConstants.IdentityApiReadOnlyPolicy)]
+    [EndpointSummary("Returns all client definitions using paging")]
+    [ProducesResponseType(typeof(PagedResult<ClientDto>), StatusCodes.Status200OK)]
     public async Task<PagedResult<ClientDto>> Get([Required] [FromQuery] PagingParams pagingParams)
     {
         var list = new List<ClientDto>();
@@ -83,15 +80,11 @@ public class ClientsController : ControllerBase
         return pagedResult;
     }
 
-    // GET api/Clients/5
-    /// <summary>
-    ///     Returns client information based on it's client id
-    /// </summary>
-    /// <param name="id">Id of the client</param>
-    /// <returns>An Object that describes the client.</returns>
     [HttpGet("{id}")]
     [Authorize(IdentityServiceConstants.IdentityApiReadOnlyPolicy)]
-    public async Task<IActionResult> Get([Required] string id)
+    [EndpointSummary("Returns client information based on it's client id")]
+    [ProducesResponseType(typeof(ClientDto), StatusCodes.Status200OK)]
+    public async Task<IActionResult> Get([Required] [Description("ID of the client")] string id)
     {
         var client = await _octoClientStore.FindRtClientByIdAsync(id);
         if (client == null)
@@ -102,15 +95,13 @@ public class ClientsController : ControllerBase
         return Ok(CreateClientDto(client));
     }
 
-    /// <summary>
-    ///     Creates a new client
-    /// </summary>
-    /// <param name="clientDto">The client data transfer object instance</param>
-    /// <returns></returns>
     // POST api/Clients
     [HttpPost]
     [Authorize(IdentityServiceConstants.IdentityApiReadWritePolicy)]
-    public async Task<IActionResult> Post([Required] [FromBody] ClientDto clientDto)
+    [EndpointSummary("Creates a new client")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    public async Task<IActionResult> Post(
+        [Required] [FromBody] [Description("The client data transfer object instance")] ClientDto clientDto)
     {
         if (!ModelState.IsValid || clientDto.ClientId == null)
         {
@@ -147,15 +138,13 @@ public class ClientsController : ControllerBase
     }
 
     // PUT api/Clients/5
-    /// <summary>
-    ///     Updates a client
-    /// </summary>
-    /// <param name="id">Id of the client</param>
-    /// <param name="clientDto">The client data transfer object instance</param>
-    /// <returns></returns>
     [HttpPut("{id}")]
     [Authorize(IdentityServiceConstants.IdentityApiReadWritePolicy)]
-    public async Task<IActionResult> Put([Required] string id, [Required] [FromBody] ClientDto clientDto)
+    [EndpointSummary("Updates a client")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    public async Task<IActionResult> Put(
+        [Required] [Description("ID of the client")] string id,
+        [Required] [FromBody] [Description("The client data transfer object instance")] ClientDto clientDto)
     {
         if (!ModelState.IsValid)
         {
@@ -184,14 +173,11 @@ public class ClientsController : ControllerBase
     }
 
     // DELETE api/Clients/5
-    /// <summary>
-    ///     Deletes a client
-    /// </summary>
-    /// <param name="id">Id of the client</param>
-    /// <returns></returns>
     [HttpDelete("{id}")]
     [Authorize(IdentityServiceConstants.IdentityApiReadWritePolicy)]
-    public async Task<IActionResult> Delete([Required] string id)
+    [EndpointSummary("Deletes a client")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    public async Task<IActionResult> Delete([Required] [Description("ID of the client")] string id)
     {
         var appClient = await _octoClientStore.FindClientByIdAsync(id);
         if (appClient == null)
@@ -214,7 +200,7 @@ public class ClientsController : ControllerBase
 
     private Task ClearCacheAsync()
     {
-        return _distributionEventHubService.PublishAsync(new CorsClientsUpdate(_octoClientStore.TenantId, 
+        return _distributionEventHubService.PublishAsync(new CorsClientsUpdate(_octoClientStore.TenantId,
             Guid.NewGuid(), DateTime.Now));
     }
 

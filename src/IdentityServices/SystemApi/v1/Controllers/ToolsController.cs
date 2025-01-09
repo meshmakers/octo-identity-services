@@ -15,12 +15,10 @@ namespace Meshmakers.Octo.Backend.IdentityServices.SystemApi.v1.Controllers;
 public class ToolsController
 {
     // GET: system/v1/tools/generatePassword
-    /// <summary>
-    ///     Generates a new password
-    /// </summary>
-    /// <returns></returns>
     [HttpGet("generatePassword")]
     [Authorize(IdentityServiceConstants.IdentityApiReadOnlyPolicy)]
+    [EndpointSummary("Generates a new password")]
+    [ProducesResponseType(typeof(GeneratedPasswordDto), StatusCodes.Status200OK)]
     public Task<GeneratedPasswordDto> Get()
     {
         return Task.FromResult(new GeneratedPasswordDto { Value = PasswordGenerator.GetRandomAlphanumericString(16) });

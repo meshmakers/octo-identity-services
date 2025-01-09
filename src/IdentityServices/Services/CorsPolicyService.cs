@@ -1,8 +1,6 @@
 ﻿using Duende.IdentityServer.Services;
 using IdentityServerPersistence.SystemStores;
 
-#pragma warning disable 1591
-
 namespace Meshmakers.Octo.Backend.IdentityServices.Services;
 
 public class CorsPolicyService : ICorsPolicyService
