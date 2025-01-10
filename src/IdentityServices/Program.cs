@@ -31,7 +31,7 @@ using NLog.Web;
 using Persistence.IdentityCkModel.Generated.System.Identity.v1;
 using LogLevel = Microsoft.Extensions.Logging.LogLevel;
 
-// NLog: setup the logger first to catch all errors
+// NLog: Setup the logger first to catch all errors
 var nLogFactory = LogManager.Setup().RegisterNLogWeb().LoadConfigurationFromFile("nlog.config").LogFactory;
 var logger = nLogFactory.GetCurrentClassLogger();
 
@@ -191,13 +191,9 @@ try
             }
         };
         
-        options.DataTransferObjectAssemblies =
+        options.XmlDocDataTransferObjectAssemblies =
         [
             typeof(ClientDto).Assembly
-        ];
-        options.OperationAssemblies =
-        [
-            typeof(Program).Assembly
         ];
 
         options.ApiTitle = "Identity Services API";
