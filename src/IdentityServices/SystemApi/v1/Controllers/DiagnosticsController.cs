@@ -45,7 +45,7 @@ public class DiagnosticsController : ControllerBase
     [HttpPost("reconfigureLogLevel")]
     [Authorize(IdentityServiceConstants.IdentityApiReadWritePolicy)]
     [EndpointSummary("Reconfigures the log level of the service")]
-    [ProducesResponseType(204)]
+    [ProducesResponseType(StatusCodes.Status204NoContent)]
     public async Task<IActionResult> ReconfigureLogLevelAsync(
         [Required] [Description("The minimal log level to be logged.")] LogLevelDto minLogLevel,
         [Required] [Description("The maximal log level to be logged.")] LogLevelDto maxLogLevel,

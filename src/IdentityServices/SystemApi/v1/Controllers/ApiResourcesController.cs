@@ -39,7 +39,7 @@ public class ApiResourcesController : ControllerBase
     [HttpGet]
     [Authorize(IdentityServiceConstants.IdentityApiReadOnlyPolicy)]
     [EndpointSummary("Returns all API resources definitions")]
-    [ProducesResponseType(typeof(IEnumerable<ApiResourceDto>), 200)]
+    [ProducesResponseType(typeof(IEnumerable<ApiResourceDto>), StatusCodes.Status200OK)]
     public async Task<IEnumerable<ApiResourceDto>> Get()
     {
         var resources = await _octoResourceStore.GetAllResourcesAsync();
@@ -50,7 +50,7 @@ public class ApiResourcesController : ControllerBase
     [HttpGet("GetPaged")]
     [Authorize(IdentityServiceConstants.IdentityApiReadOnlyPolicy)]
     [EndpointSummary("Returns all API resources definitions using paging")]
-    [ProducesResponseType(typeof(PagedResult<ApiResourceDto>), 200)]
+    [ProducesResponseType(typeof(PagedResult<ApiResourceDto>), StatusCodes.Status200OK)]
     public async Task<PagedResult<ApiResourceDto>> Get([Required] [FromQuery] PagingParams pagingParams)
     {
         var list = new List<ApiResourceDto>();
@@ -104,7 +104,7 @@ public class ApiResourcesController : ControllerBase
             return BadRequest(ModelState);
         }
 
-        if ((await _octoResourceStore.FindApiResourcesByNameAsync(new[] { apiResourceDto.Name })).Any())
+        if ((await _octoResourceStore.FindApiResourcesByNameAsync([apiResourceDto.Name])).Any())
         {
             return Conflict($"API resource with name '{apiResourceDto.Name}' already exists.");
         }
