@@ -10,6 +10,7 @@ using Meshmakers.Octo.Backend.IdentityServices.Resources;
 using Meshmakers.Octo.Backend.IdentityServices.Routing;
 using Meshmakers.Octo.Backend.IdentityServices.Services;
 using Meshmakers.Octo.Communication.Contracts;
+using Meshmakers.Octo.Communication.Contracts.DataTransferObjects;
 using Meshmakers.Octo.Runtime.Contracts.MongoDb.Configuration;
 using Meshmakers.Octo.Runtime.Contracts.MongoDb.Extensions;
 using Meshmakers.Octo.Services.Common;
@@ -189,6 +190,15 @@ try
                 [CommonConstants.IdentityApiFullAccess]
             }
         };
+        
+        options.DataTransferObjectAssemblies =
+        [
+            typeof(ClientDto).Assembly
+        ];
+        options.OperationAssemblies =
+        [
+            typeof(Program).Assembly
+        ];
 
         options.ApiTitle = "Identity Services API";
         options.ApiDescription = "Octo Mesh Identity Services.";
