@@ -10,6 +10,7 @@ using Persistence.IdentityCkModel.Generated.System.Identity.v1;
 
 namespace Meshmakers.Octo.Backend.IdentityServices.Consumers;
 
+// ReSharper disable once ClassNeverInstantiated.Global
 public class CreateIdentityDataCommandRequestConsumer(
     ILogger<CreateIdentityDataCommandRequestConsumer> logger,
     ISystemContext systemContext)
@@ -26,7 +27,7 @@ public class CreateIdentityDataCommandRequestConsumer(
         }
 
         var tenantRepository = tenantContext.GetTenantRepository();
-        
+
         // That means that the tenant is not configured to use a 
         // own identity management. We do nothing in this case and return information to the producer
         if (!await tenantContext.IsCkModelExistingAsync(SystemIdentityCkIds.ModelId))
@@ -41,19 +42,28 @@ public class CreateIdentityDataCommandRequestConsumer(
         {
             session.StartTransaction();
 
-            foreach (var distApiScopeDto in context.Message.ApiScopes)
+            if (context.Message.ApiScopes != null)
             {
-                await CreateApiScopeIfNotExistAsync(session, tenantRepository, distApiScopeDto);
+                foreach (var distApiScopeDto in context.Message.ApiScopes)
+                {
+                    await CreateApiScopeIfNotExistAsync(session, tenantRepository, distApiScopeDto);
+                }
             }
 
-            foreach (var distApiResourcesDto in context.Message.ApiResources)
+            if (context.Message.ApiResources != null)
             {
-                await CreateApiResourceIfNotExistAsync(session, tenantRepository, distApiResourcesDto);
+                foreach (var distApiResourcesDto in context.Message.ApiResources)
+                {
+                    await CreateApiResourceIfNotExistAsync(session, tenantRepository, distApiResourcesDto);
+                }
             }
 
-            foreach (var distClientDto in context.Message.Clients)
+            if (context.Message.Clients != null)
             {
-                await CreateClientIfNotExistAsync(session, tenantRepository, distClientDto);
+                foreach (var distClientDto in context.Message.Clients)
+                {
+                    await CreateClientIfNotExistAsync(session, tenantRepository, distClientDto);
+                }
             }
 
             await session.CommitTransactionAsync();
