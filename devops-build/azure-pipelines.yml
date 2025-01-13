@@ -34,15 +34,15 @@ stages:
           name: Gerald-Local-Linux
         steps:
           - template: update-build-number.yml
-          - checkout: self
-            clean: true
-            submodules: recursive
           - task: InstallSSHKey@0
             inputs:
               knownHostsEntry: '$(SSHKnownHosts)'
               sshPublicKey: '$(SSHPublicKey)'
               sshPassphrase: '$(SSHPassphrase)'
               sshKeySecureFile: '$(SSHPrivateKeyFile)'
+          - checkout: self
+            clean: true
+            submodules: recursive
           - template: set-version.yml
           - template: download-ca.yml
           - task: DotNetCoreCLI@2
