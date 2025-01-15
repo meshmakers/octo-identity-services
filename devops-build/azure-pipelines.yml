@@ -66,7 +66,7 @@ stages:
               testRunTitle: 'CI'
           - template: build-and-push-docker-image.yml
             parameters:
-              ContainerRegistry: 'dockerhub@ianitor'
+              ContainerRegistry: $(DockerRegistryPublicConnection)
               Repository: meshmakers/octo-mesh-identity-services
               Dockerfile: src/IdentityServices/Dockerfile
               PrivateRegistry: $(DockerRegistryPrivateUri)
