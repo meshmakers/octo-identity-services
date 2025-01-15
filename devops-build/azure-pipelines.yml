@@ -16,14 +16,16 @@ variables:
   - group: OctoDefault
   - name: solutionFile
     value: 'Octo.Identity.sln'
+  - name: artifactsFrameworkVersion
+    value: 'net9.0'    
+  - name: buildConfiguration
+    value: 'Release'
+  - name: buildPlatform
+    value: 'Any CPU'
   - name: isRelease
     value: ${{ startsWith(variables['Build.SourceBranch'], 'refs/tags/r') }}
-  - name: generateDocumentation
-    value: 'true'
-  - name: MajorVersion
-    value: '0'
-  - name: MinorVersion
-    value: '1'
+  - name: isMain
+    value: ${{ eq(variables['Build.SourceBranch'], 'refs/heads/main') }}    
 
 stages:
   - stage: Build
@@ -53,26 +55,16 @@ stages:
                 '**/*Tests.csproj'
                 !'**/*SystemTests.csproj'
               testRunTitle: 'CI'
-          - task: PowerShell@2
-            displayName: 'Create versioninfo file'
-            inputs:
-              targetType: 'inline'
-              script: |
-                New-Item $(build.artifactstagingdirectory)/versioninfo.txt
-                Set-Content $(build.artifactstagingdirectory)/versioninfo.txt $(Build.BuildNumber)
           - template: build-and-push-docker-image.yml
             parameters:
+              ContainerRegistry: 'dockerhub@ianitor'
               Repository: meshmakers/octo-mesh-identity-services
               Dockerfile: src/IdentityServices/Dockerfile
-              IsRelease: ${{ variables.isRelease }}
-          - ${{ if eq(variables.generateDocumentation, true) }}:
-              - template: generate-documentation.yml
-                parameters:
-                  ConstructionKits:
-                    - '**/Persistence.IdentityCkModel.csproj'
-          - task: PublishBuildArtifacts@1
-            displayName: 'Publish Artifact: local'
-            inputs:
-              ArtifactName: local
+              PrivateRegistry: $(DockerRegistryPrivateUri)
+          - template: handle-artifacts.yml
+            parameters:
+              constructionKitLibraryPaths:
+                - 'src/Persistence.IdentityCkModel/bin/$(buildConfiguration)/$(artifactsFrameworkVersion)/octo-ck-libraries/Persistence.IdentityCkModel'
+
  
 
