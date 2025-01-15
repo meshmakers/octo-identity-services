@@ -1,0 +1,52 @@
+parameters:
+  - name: apiDocumentationPaths
+    type: object
+    default: [ ]
+  - name: constructionKitLibraryPaths
+    type: object
+    default: [ ]
+
+steps:
+  - task: CopyFiles@2
+    displayName: 'Copy Files from **/*.nupkg to $(build.artifactstagingdirectory)'
+    inputs:
+      SourceFolder: $(Build.SourcesDirectory)
+      Contents: |
+        **/*.nupkg
+      TargetFolder: $(build.artifactstagingdirectory)/nuget
+      flattenFolders: true 
+  - ${{ each constructionKitLibraryPath in parameters.constructionKitLibraryPaths }}:
+      - task: CopyFiles@2
+        displayName: 'Copy Files from  for ${{ constructionKitLibraryPath }}/out/**/*.md to $(build.artifactstagingdirectory)'
+        inputs:
+          SourceFolder: ${{ constructionKitLibraryPath }}/out
+          Contents: |
+            /**/*.md
+            !*.yaml
+          TargetFolder: $(build.artifactstagingdirectory)/docs/technologyGuide/constructionKits/libraries
+      - task: CopyFiles@2
+        displayName: 'Copy construction kits ${{ constructionKitLibraryPath }}/out/*.yaml to $(build.artifactstagingdirectory)'
+        inputs:
+          SourceFolder: ${{ constructionKitLibraryPath }}/out
+          Contents: '*.yaml'
+          TargetFolder: $(build.artifactstagingdirectory)/ck-libraries
+          flattenFolders: true          
+
+  - ${{ each apiDocumentationPath in parameters.apiDocumentationPaths }}:
+      - task: CopyFiles@2
+        displayName: 'Copy docs ${{ apiDocumentationPath }} to $(build.artifactstagingdirectory)'
+        inputs:
+          SourceFolder: ${{ apiDocumentationPath }}
+          Contents: '**/*.*'
+          TargetFolder: $(build.artifactstagingdirectory)/docs
+  - task: PowerShell@2
+    displayName: 'Create version info file'
+    inputs:
+      targetType: 'inline'
+      script: |
+        New-Item $(build.artifactstagingdirectory)/versioninfo.txt
+        Set-Content $(build.artifactstagingdirectory)/versioninfo.txt $(Build.BuildNumber)
+  - task: PublishBuildArtifacts@1
+    displayName: 'Publish Artifact: local'
+    inputs:
+      ArtifactName: local        
