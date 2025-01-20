@@ -189,81 +189,90 @@ internal class DefaultConfigurationCreatorService(
 
     private async Task CreateClients()
     {
+        var appClient = new RtClient
+        {
+            Enabled = true,
+            ClientId = CommonConstants.OctoToolClientId,
+
+            // no interactive user, use the clientId/secret for authentication
+            AllowedGrantTypes = new AttributeStringValueList { OidcConstants.GrantTypes.DeviceCode },
+
+            // secret for authentication
+            ClientSecrets = new AttributeRecordValueList<RtSecretRecord>
+            {
+                new() { Value = CommonConstants.OctoToolClientSecret.Sha256() }
+            },
+
+            AllowOfflineAccess = true,
+
+            // scopes that client has access to
+            AllowedScopes =
+            {
+                IdentityServerConstants.StandardScopes.OpenId,
+                IdentityServerConstants.StandardScopes.Profile,
+                IdentityServerConstants.StandardScopes.Email,
+                JwtClaimTypes.Role,
+                CommonConstants.SystemApiFullAccess,
+                CommonConstants.IdentityApiFullAccess,
+                CommonConstants.BotApiFullAccess,
+                CommonConstants.CommunicationSystemApiFullAccess
+            }
+        };
+        
         var octoToolClient = await clientStore.FindClientByIdAsync(CommonConstants.OctoToolClientId);
         if (octoToolClient == null)
         {
-            var appClient = new RtClient
-            {
-                Enabled = true,
-                ClientId = CommonConstants.OctoToolClientId,
-
-                // no interactive user, use the clientId/secret for authentication
-                AllowedGrantTypes = new AttributeStringValueList { OidcConstants.GrantTypes.DeviceCode },
-
-                // secret for authentication
-                ClientSecrets = new AttributeRecordValueList<RtSecretRecord>
-                {
-                    new() { Value = CommonConstants.OctoToolClientSecret.Sha256() }
-                },
-
-                AllowOfflineAccess = true,
-
-                // scopes that client has access to
-                AllowedScopes =
-                {
-                    IdentityServerConstants.StandardScopes.OpenId,
-                    IdentityServerConstants.StandardScopes.Profile,
-                    IdentityServerConstants.StandardScopes.Email,
-                    JwtClaimTypes.Role,
-                    CommonConstants.SystemApiFullAccess,
-                    CommonConstants.IdentityApiFullAccess,
-                    CommonConstants.BotApiFullAccess,
-                    CommonConstants.CommunicationSystemApiFullAccess
-                }
-            };
-
             await clientStore.CreateAsync(appClient);
         }
+        else
+        {
+            await clientStore.UpdateAsync(octoToolClient.ClientId, appClient);
+        }
+        
+        appClient = new RtClient
+        {
+            Enabled = true,
+            ClientId = CommonConstants.IdentityServicesSwaggerClientId,
+
+            ClientName = IdentityTexts.Backend_IdentityServices_UserSchema_Swagger_DisplayName,
+            ClientUri = octoIdentityOptions.Value.AuthorityUrl,
+
+            AllowedGrantTypes = new AttributeStringValueList { OidcConstants.GrantTypes.AuthorizationCode },
+
+            RequirePkce = true,
+            RequireClientSecret = false,
+
+            AccessTokenType = RtTokenTypeEnum.Jwt,
+            AllowAccessTokensViaBrowser = true,
+            AlwaysIncludeUserClaimsInIdToken = true,
+
+            RedirectUris =
+            {
+                octoIdentityOptions.Value.AuthorityUrl.EnsureEndsWith("/swagger/oauth2-redirect.html")
+            },
+
+            PostLogoutRedirectUris = { octoIdentityOptions.Value.AuthorityUrl.EnsureEndsWith("/") },
+            AllowedCorsOrigins = { octoIdentityOptions.Value.AuthorityUrl.TrimEnd('/') },
+            AllowedScopes =
+            {
+                CommonConstants.Scopes.OpenId,
+                CommonConstants.Scopes.Profile,
+                CommonConstants.Scopes.Email,
+                JwtClaimTypes.Role,
+                CommonConstants.IdentityApiFullAccess,
+                CommonConstants.IdentityApiReadOnly
+            }
+        };
 
         var octoIdentityServiceSwaggerClient =
             await clientStore.FindClientByIdAsync(CommonConstants.IdentityServicesSwaggerClientId);
         if (octoIdentityServiceSwaggerClient == null)
         {
-            var appClient = new RtClient
-            {
-                Enabled = true,
-                ClientId = CommonConstants.IdentityServicesSwaggerClientId,
-
-                ClientName = IdentityTexts.Backend_IdentityServices_UserSchema_Swagger_DisplayName,
-                ClientUri = octoIdentityOptions.Value.AuthorityUrl,
-
-                AllowedGrantTypes = new AttributeStringValueList { OidcConstants.GrantTypes.AuthorizationCode },
-
-                RequirePkce = true,
-                RequireClientSecret = false,
-
-                AccessTokenType = RtTokenTypeEnum.Jwt,
-                AllowAccessTokensViaBrowser = true,
-                AlwaysIncludeUserClaimsInIdToken = true,
-
-                RedirectUris =
-                {
-                    octoIdentityOptions.Value.AuthorityUrl.EnsureEndsWith("/swagger/oauth2-redirect.html")
-                },
-
-                PostLogoutRedirectUris = { octoIdentityOptions.Value.AuthorityUrl.EnsureEndsWith("/") },
-                AllowedCorsOrigins = { octoIdentityOptions.Value.AuthorityUrl.TrimEnd('/') },
-                AllowedScopes =
-                {
-                    CommonConstants.Scopes.OpenId,
-                    CommonConstants.Scopes.Profile,
-                    CommonConstants.Scopes.Email,
-                    JwtClaimTypes.Role,
-                    CommonConstants.IdentityApiFullAccess,
-                    CommonConstants.IdentityApiReadOnly
-                }
-            };
             await clientStore.CreateAsync(appClient);
+        }
+        else
+        {
+            await clientStore.UpdateAsync(octoIdentityServiceSwaggerClient.ClientId, appClient);
         }
     }
 }
