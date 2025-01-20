@@ -123,35 +123,40 @@ public class CreateIdentityDataCommandRequestConsumer(
     {
         var dataQueryOperation = DataQueryOperation.Create()
             .FieldFilter(nameof(RtClient.ClientId), FieldFilterOperator.Equals, distClientDto.ClientId);
+        
+        var rtClient = new RtClient
+        {
+            Enabled = true,
+            ClientId = distClientDto.ClientId,
+
+            ClientName = distClientDto.ClientName,
+            ClientUri = distClientDto.ClientUri,
+
+            AllowedGrantTypes = new AttributeStringValueList(distClientDto.AllowedGrantTypes.ToList()),
+
+            RequirePkce = true,
+            RequireClientSecret = false,
+
+            AccessTokenType = RtTokenTypeEnum.Jwt,
+            AllowAccessTokensViaBrowser = true,
+            AlwaysIncludeUserClaimsInIdToken = true,
+            RequireConsent = distClientDto.RequireConsent,
+
+            RedirectUris = new AttributeStringValueList(distClientDto.RedirectUris.ToList()),
+            PostLogoutRedirectUris = new AttributeStringValueList(distClientDto.PostLogoutRedirectUris.ToList()),
+            AllowedCorsOrigins = new AttributeStringValueList(distClientDto.AllowedCorsOrigins.ToList()),
+            AllowOfflineAccess = distClientDto.AllowOfflineAccess,
+            AllowedScopes = new AttributeStringValueList(distClientDto.AllowedScopes.ToList())
+        };
 
         var result = await tenantRepository.GetRtEntitiesByTypeAsync<RtClient>(session, dataQueryOperation);
         if (!result.Items.Any())
         {
-            var rtClient = new RtClient
-            {
-                Enabled = true,
-                ClientId = distClientDto.ClientId,
-
-                ClientName = distClientDto.ClientName,
-                ClientUri = distClientDto.ClientUri,
-
-                AllowedGrantTypes = new AttributeStringValueList(distClientDto.AllowedGrantTypes.ToList()),
-
-                RequirePkce = true,
-                RequireClientSecret = false,
-
-                AccessTokenType = RtTokenTypeEnum.Jwt,
-                AllowAccessTokensViaBrowser = true,
-                AlwaysIncludeUserClaimsInIdToken = true,
-                RequireConsent = distClientDto.RequireConsent,
-
-                RedirectUris = new AttributeStringValueList(distClientDto.RedirectUris.ToList()),
-                PostLogoutRedirectUris = new AttributeStringValueList(distClientDto.PostLogoutRedirectUris.ToList()),
-                AllowedCorsOrigins = new AttributeStringValueList(distClientDto.AllowedCorsOrigins.ToList()),
-                AllowOfflineAccess = distClientDto.AllowOfflineAccess,
-                AllowedScopes = new AttributeStringValueList(distClientDto.AllowedScopes.ToList())
-            };
             await tenantRepository.InsertOneRtEntityAsync(session, rtClient);
+        }
+        else
+        {
+            await tenantRepository.ReplaceOneRtEntityByIdAsync(session, result.Items.First().RtId, rtClient);
         }
     }
 }
