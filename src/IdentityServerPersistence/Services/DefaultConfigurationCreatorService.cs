@@ -217,7 +217,8 @@ internal class DefaultConfigurationCreatorService(
                     JwtClaimTypes.Role,
                     CommonConstants.SystemApiFullAccess,
                     CommonConstants.IdentityApiFullAccess,
-                    CommonConstants.BotApiFullAccess
+                    CommonConstants.BotApiFullAccess,
+                    CommonConstants.CommunicationSystemApiFullAccess
                 }
             };
 
