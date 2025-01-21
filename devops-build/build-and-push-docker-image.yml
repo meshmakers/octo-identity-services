@@ -19,7 +19,7 @@ steps:
       containerRegistry: ${{ parameters.ContainerRegistry }}
 
   - task: CmdLine@2
-    condition: ${{ eq(variables.isRelease, true) }}
+    condition: eq(variables.isRelease, true)
     displayName: Build/Push to public ${{ parameters.Repository }}:$(Build.BuildNumber)
     inputs:
       script: |
