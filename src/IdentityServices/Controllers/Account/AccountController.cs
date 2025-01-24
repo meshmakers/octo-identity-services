@@ -5,15 +5,18 @@ using Duende.IdentityServer.Models;
 using Duende.IdentityServer.Services;
 using Duende.IdentityServer.Stores;
 using IdentityModel;
+using IdentityServerPersistence.SystemStores;
 using Meshmakers.Octo.Backend.Authentication;
 using Meshmakers.Octo.Backend.IdentityServices.Resources;
 using Meshmakers.Octo.Backend.IdentityServices.Services;
 using Meshmakers.Octo.Backend.IdentityServices.ViewModels.Account;
 using Meshmakers.Octo.Backend.IdentityServices.ViewModels.Shared;
+using Meshmakers.Octo.Runtime.Contracts.MongoDb.Configuration;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.Extensions.Options;
 using Persistence.IdentityCkModel.Generated.System.Identity.v1;
 
 namespace Meshmakers.Octo.Backend.IdentityServices.Controllers.Account;
@@ -27,6 +30,7 @@ public class AccountController : Controller
     private readonly IClientStore _clientStore;
     private readonly IUserEmailInteractionService _emailInteractionService;
     private readonly IEventService _events;
+    private readonly IOptions<OctoSystemConfiguration> _options;
     private readonly IIdentityServerInteractionService _interaction;
     private readonly IAuthenticationSchemeProvider _schemeProvider;
     private readonly SignInManager<RtUser> _signInManager;
@@ -40,6 +44,7 @@ public class AccountController : Controller
         IClientStore clientStore,
         IAuthenticationSchemeProvider schemeProvider,
         IEventService events,
+        IOptions<OctoSystemConfiguration> options,
         IUserEmailInteractionService emailInteractionService)
     {
         _userManager = userManager;
@@ -48,6 +53,7 @@ public class AccountController : Controller
         _clientStore = clientStore;
         _schemeProvider = schemeProvider;
         _events = events;
+        _options = options;
         _emailInteractionService = emailInteractionService;
     }
 
@@ -86,7 +92,7 @@ public class AccountController : Controller
             {
                 // if the user cancels, send a result back into IdentityServer as if they 
                 // denied the consent (even if this client does not require consent).
-                // this will send back an access denied OIDC error response to the client.
+                // this will send back access denied OIDC error response to the client.
                 await _interaction.DenyAuthorizationAsync(context, AuthorizationError.AccessDenied);
 
                 // we can trust model.ReturnUrl since GetAuthorizationContextAsync returned non-null
@@ -113,7 +119,8 @@ public class AccountController : Controller
                 var user = await _userManager.FindByNameAsync(model.Username);
                 if (user != null)
                 {
-                    await _events.RaiseAsync(new UserLoginSuccessEvent(user.UserName, user.RtId.ToString(), user.UserName,
+                    await _events.RaiseAsync(new UserLoginSuccessEvent(user.UserName, user.RtId.ToString(),
+                        user.UserName,
                         clientId: context?.Client.ClientId));
                 }
 
@@ -220,7 +227,8 @@ public class AccountController : Controller
     {
         try
         {
-            var redirectUri = await _emailInteractionService.ValidateEmailNotificationTokenAsync(id);
+            var redirectUri =
+                await _emailInteractionService.ValidateEmailNotificationTokenAsync(_options.Value.SystemTenantId, id);
             var successVm = new SuccessViewModel
             {
                 Operation = IdentityTexts.Backend_General_Title_Success,
@@ -251,7 +259,7 @@ public class AccountController : Controller
             var user = await _userManager.FindByEmailAsync(vm.UserName);
             if (user != null)
             {
-                await _emailInteractionService.SendPasswordResetNotificationAsync(user);
+                await _emailInteractionService.SendPasswordResetNotificationAsync(_options.Value.SystemTenantId, user);
             }
         }
         catch (Exception)
@@ -320,7 +328,8 @@ public class AccountController : Controller
                 if (client.IdentityProviderRestrictions.Any())
                 {
                     providers = providers.Where(provider => !string.IsNullOrWhiteSpace(provider.AuthenticationScheme) &&
-                                                            client.IdentityProviderRestrictions.Contains(provider.AuthenticationScheme))
+                                                            client.IdentityProviderRestrictions.Contains(
+                                                                provider.AuthenticationScheme))
                         .ToList();
                 }
             }

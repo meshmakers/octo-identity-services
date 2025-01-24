@@ -6,6 +6,5 @@ namespace Meshmakers.Octo.Backend.IdentityServices.Configuration;
 public class EmailInteractionConfiguration
 {
     public bool EnableEmailNotifications { get; set; }
-    public string? NotificationTenant { get; set; }
-    public string? RedirectAfterEmailInteraction { get; set; }
+    public string? RedirectAfterEmailInteractionUrl { get; set; }
 }

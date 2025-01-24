@@ -12,20 +12,14 @@ using Persistence.IdentityCkModel.Generated.System.Identity.v1;
 
 namespace IdentityServerPersistence.SystemStores;
 
-public class PersistentGrantStore : IOctoPersistentGrantStore
+public class PersistentGrantStore(IMultiTenancyResolverService multiTenancyResolverService, IMapper mapper)
+    : IOctoPersistentGrantStore
 {
     private const int TokenCleanupBatchSize = 50;
 
     private static readonly Logger Logger = LogManager.GetCurrentClassLogger();
-    private readonly IMapper _mapper;
 
-    private readonly ITenantRepository _tenantRepository;
-
-    public PersistentGrantStore(IMultiTenancyResolverService multiTenancyResolverService, IMapper mapper)
-    {
-        _tenantRepository = multiTenancyResolverService.GetTenantRepository();
-        _mapper = mapper;
-    }
+    private readonly ITenantRepository _tenantRepository = multiTenancyResolverService.GetTenantRepository();
 
     public async Task StoreAsync(PersistedGrant grant)
     {
@@ -90,7 +84,7 @@ public class PersistentGrantStore : IOctoPersistentGrantStore
             dataQueryOperation);
 
         await session.CommitTransactionAsync();
-        return result.Items.Select(_mapper.Map<PersistedGrant>);
+        return result.Items.Select(mapper.Map<PersistedGrant>);
     }
 
     public async Task RemoveAsync(string key)
@@ -179,7 +173,7 @@ public class PersistentGrantStore : IOctoPersistentGrantStore
 
     private RtPersistedGrant GetApplicationPersistedGrant(PersistedGrant grant)
     {
-        return _mapper.Map<RtPersistedGrant>(grant);
+        return mapper.Map<RtPersistedGrant>(grant);
     }
 
     public async Task RemoveAllAsync(string subjectId, string clientId, string type)
@@ -205,7 +199,7 @@ public class PersistentGrantStore : IOctoPersistentGrantStore
     private async Task<PersistedGrant?> GetAsync(IOctoSession session, string key)
     {
         var rtPersistentGrant = await GetRtPersistentGrantByKeyAsync(session, key);
-        return _mapper.Map<PersistedGrant>(rtPersistentGrant);
+        return mapper.Map<PersistedGrant>(rtPersistentGrant);
     }
 
     private async Task<RtPersistedGrant?> GetRtPersistentGrantByKeyAsync(IOctoSession session, string key)
