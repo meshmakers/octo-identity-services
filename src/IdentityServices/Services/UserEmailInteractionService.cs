@@ -3,7 +3,6 @@ using System.Text.Json;
 using IdentityServerPersistence.Configuration.Options;
 using IdentityServerPersistence.SystemStores;
 using Meshmakers.Common.Shared;
-using Meshmakers.Octo.Backend.IdentityServices.Configuration;
 using Meshmakers.Octo.Runtime.Contracts;
 using Meshmakers.Octo.Services.Notifications.Generated.System.Notification.v1;
 using Meshmakers.Octo.Services.Notifications.Services;
@@ -16,11 +15,11 @@ namespace Meshmakers.Octo.Backend.IdentityServices.Services;
 public class UserEmailInteractionService(
     IEventRepository eventRepository,
     INotificationService notificationService,
+    IIdentityConfigurationService identityConfigurationService,
     IOptions<OctoIdentityServicesOptions> options,
     ILogger<UserEmailInteractionService> logger,
     UserManager<RtUser> userManager,
-    IOctoPersistentGrantStore persistedGrantStore,
-    IOptions<EmailInteractionConfiguration> emailOptions)
+    IOctoPersistentGrantStore persistedGrantStore)
     : IUserEmailInteractionService
 {
     private const string WelcomeEmailTemplateName = "Welcome_Email_Template";
@@ -29,12 +28,12 @@ public class UserEmailInteractionService(
 
     public async Task SendWelcomeNotificationAsync(string tenantId, RtUser user)
     {
-        if (!CanSendEmail(tenantId, user))
+        if (!await CanSendEmail(tenantId, user))
         {
             return;
         }
 
-        var confirmationToken = await GenerateConfirmEmailTokenAsync(user);
+        var confirmationToken = await GenerateConfirmEmailTokenAsync(tenantId, user);
 
         var identityServerUrl = options.Value.AuthorityUrl.EnsureEndsWith("/");
 
@@ -50,12 +49,12 @@ public class UserEmailInteractionService(
 
     public async Task SendWelcomeNotificationWithoutPasswordAsync(string tenantId, RtUser user)
     {
-        if (!CanSendEmail(tenantId, user))
+        if (!await CanSendEmail(tenantId, user))
         {
             return;
         }
 
-        var confirmationToken = await GenerateResetPasswordTokenAsync(user);
+        var confirmationToken = await GenerateResetPasswordTokenAsync(tenantId, user);
         var identityServerUrl = options.Value.AuthorityUrl.EnsureEndsWith("/");
 
         var replaceFunctions = new Dictionary<string, Func<string>>
@@ -107,12 +106,12 @@ public class UserEmailInteractionService(
 
     public async Task SendPasswordResetNotificationAsync(string tenantId, RtUser user)
     {
-        if (!CanSendEmail(tenantId, user))
+        if (!await CanSendEmail(tenantId, user))
         {
             return;
         }
 
-        var confirmationToken = await GenerateResetPasswordTokenAsync(user);
+        var confirmationToken = await GenerateResetPasswordTokenAsync(tenantId, user);
         var identityServerUrl = options.Value.AuthorityUrl.EnsureEndsWith("/");
 
         var replaceFunctions = new Dictionary<string, Func<string>>
@@ -170,28 +169,29 @@ public class UserEmailInteractionService(
         return data.RedirectUrl;
     }
 
-    private async Task<string> GenerateResetPasswordTokenAsync(RtUser user)
+    private async Task<string> GenerateResetPasswordTokenAsync(string tenantId, RtUser user)
     {
-        return await GenerateAndPersistUserManagerToken(
+        return await GenerateAndPersistUserManagerToken(tenantId,
             () => userManager.GeneratePasswordResetTokenAsync(user),
             "Password Reset Token",
             user.RtId.ToString()
         );
     }
 
-    private async Task<string> GenerateConfirmEmailTokenAsync(RtUser user)
+    private async Task<string> GenerateConfirmEmailTokenAsync(string tenantId, RtUser user)
     {
-        return await GenerateAndPersistUserManagerToken(
+        return await GenerateAndPersistUserManagerToken(tenantId,
             () => userManager.GenerateEmailConfirmationTokenAsync(user),
             "Email Confirmation Token",
             user.RtId.ToString());
     }
 
-    private async Task<string> GenerateAndPersistUserManagerToken(Func<Task<string>> tokenGenerator,
+    private async Task<string> GenerateAndPersistUserManagerToken(string tenantId, Func<Task<string>> tokenGenerator,
         string tokenDescription, string userId)
     {
         var token = await tokenGenerator();
         var key = Guid.NewGuid().ToString();
+        var rtMailNotificationConfiguration = await identityConfigurationService.GetMailNotificationConfigurationAsync(tenantId);
         var grant = new RtPersistedGrant
         {
             GrantKey = key,
@@ -201,7 +201,7 @@ public class UserEmailInteractionService(
             Data = JsonSerializer.Serialize(new EmailConfirmationGrantData
             {
                 ConfirmationToken = token,
-                RedirectUrl = emailOptions.Value.RedirectAfterEmailInteractionUrl!,
+                RedirectUrl = rtMailNotificationConfiguration.RedirectAfterEmailInteractionUrl!,
                 UserId = userId
             })
         };
@@ -224,16 +224,17 @@ public class UserEmailInteractionService(
         return user.Email;
     }
 
-    private bool CanSendEmail(string tenantId, RtUser user)
+    private async Task<bool> CanSendEmail(string tenantId, RtUser user)
     {
-        if (!emailOptions.Value.EnableEmailNotifications)
+        var rtMailNotificationConfiguration = await identityConfigurationService.GetMailNotificationConfigurationAsync(tenantId);
+        if (!rtMailNotificationConfiguration.EnableEmailNotifications)
         {
             return false;
         }
 
         if (!MailAddress.TryCreate(user.Email, out _))
         {
-            eventRepository.StoreEventAsync(tenantId, RtEventLevelsEnum.Warning,
+            await eventRepository.StoreEventAsync(tenantId, RtEventSourcesEnum.IdentityService, RtEventLevelsEnum.Warning,
                 $"Email address {user.Email} of user {user.RtId} is not valid", user.ToRtEntityId());
             return false;
         }
@@ -245,7 +246,7 @@ public class UserEmailInteractionService(
     {
         if (string.IsNullOrWhiteSpace(user.Email))
         {
-            await eventRepository.StoreEventAsync(tenantId, RtEventLevelsEnum.Warning,
+            await eventRepository.StoreEventAsync(tenantId, RtEventSourcesEnum.IdentityService, RtEventLevelsEnum.Warning,
                 $"User with RtId '{user.RtId}' has no email address", user.ToRtEntityId());
             return;
         }

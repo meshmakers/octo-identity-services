@@ -11,6 +11,7 @@ using Meshmakers.Octo.Runtime.Contracts.MongoDb;
 using Meshmakers.Octo.Runtime.Contracts.RepositoryEntities;
 using Meshmakers.Octo.Services.Infrastructure;
 using Meshmakers.Octo.Services.Infrastructure.Services;
+using Meshmakers.Octo.Services.Notifications.Generated.System.Notification.v1;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
@@ -80,9 +81,21 @@ internal class DefaultConfigurationCreatorService(
         if (!await systemContext.IsCkModelExistingAsync(SystemIdentityCkIds.ModelId))
         {
             // We ensure that at least the system tenant contains a valid ck model.Other tenants
-            // need to be enabled manually by a admin.
+            // need to be enabled manually by an admin.
             OperationResult operationResult = new();
             await systemContext.ImportCkModelAsync(SystemIdentityCkIds.ModelId, operationResult);
+            if (operationResult.HasErrors || operationResult.HasFatalErrors)
+            {
+                throw InitializationException.ImportCkModelFailed(systemContext.TenantId, operationResult.GetMessages());
+            }
+        }
+        
+        if (!await systemContext.IsCkModelExistingAsync(SystemNotificationCkIds.ModelId))
+        {
+            // We ensure that at least the system tenant contains a valid ck model.Other tenants
+            // need to be enabled manually by an admin.
+            OperationResult operationResult = new();
+            await systemContext.ImportCkModelAsync(SystemNotificationCkIds.ModelId, operationResult);
             if (operationResult.HasErrors || operationResult.HasFatalErrors)
             {
                 throw InitializationException.ImportCkModelFailed(systemContext.TenantId, operationResult.GetMessages());

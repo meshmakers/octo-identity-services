@@ -1,6 +1,7 @@
-@using Meshmakers.Octo.Backend.IdentityServices.Configuration
+@using Meshmakers.Octo.Backend.IdentityServices.Services
+@using Microsoft.AspNetCore.Mvc.TagHelpers
 @model Meshmakers.Octo.Backend.IdentityServices.ViewModels.Account.LoginViewModel
-@inject IOptions<EmailInteractionConfiguration> EmailOptions;
+@inject IIdentityConfigurationService IdentityConfigurationService;
 @inject IOptions<OemOptions> OemOptions;
 
 @{
@@ -60,7 +61,7 @@
                                     </label>
                                     <span asp-validation-for="Password" class="octo-validation-error"></span>
                                 </div>
-                                @if (EmailOptions.Value.EnableEmailNotifications)
+                                @if ((await IdentityConfigurationService.GetMailNotificationConfigurationAsync(Model.TenantId)).EnableEmailNotifications)
                                 {
                                     <div>
                                         <a class="nav-link"

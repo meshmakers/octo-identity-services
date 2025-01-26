@@ -1058,5 +1058,17 @@ namespace Meshmakers.Octo.Backend.IdentityServices.Resources {
                 return ResourceManager.GetString("Backend_Identity_Logout_RootPage", resourceCulture);
             }
         }
+        
+        public static string IdentityService_ApiTitle {
+            get {
+                return ResourceManager.GetString("IdentityService_ApiTitle", resourceCulture);
+            }
+        }
+        
+        public static string IdentityService_ApiDescription {
+            get {
+                return ResourceManager.GetString("IdentityService_ApiDescription", resourceCulture);
+            }
+        }
     }
 }

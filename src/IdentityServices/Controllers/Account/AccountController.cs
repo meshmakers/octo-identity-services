@@ -295,6 +295,7 @@ public class AccountController : Controller
             var vm = new LoginViewModel
             {
                 EnableLocalLogin = local,
+                TenantId = _options.Value.SystemTenantId,
                 ReturnUrl = returnUrl ?? "",
                 Username = context.LoginHint
             };
@@ -339,6 +340,7 @@ public class AccountController : Controller
         {
             AllowRememberLogin = AccountOptions.AllowRememberLogin,
             EnableLocalLogin = allowLocal && AccountOptions.AllowLocalLogin,
+            TenantId = _options.Value.SystemTenantId,
             ReturnUrl = returnUrl,
             Username = context?.LoginHint,
             ExternalProviders = providers.ToArray()
