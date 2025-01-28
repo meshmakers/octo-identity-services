@@ -535,4 +535,43 @@
   <data name="IdentityService_ApiDescription" xml:space="preserve">
     <value>OctoMesh Identity Services API to manage users, roles, clients and autorization.</value>
   </data>
+  <data name="Backend_IdentityServices_UserSchema_WelcomeMailSubject" xml:space="preserve">
+    <value>Confirm your E-Mail (OctoMesh)</value>
+  </data>
+  <data name="Backend_IdentityServices_UserSchema_WelcomeMailBody" xml:space="preserve">
+    <value>Welcome to OctoMesh, ${Username}!
+
+you started leveraging the transformative power of OctoMesh to architect and manage robust data mesh solutions. 
+
+Please click [here](${IdentityServerUrl}account/confirmation?id=${ConfirmToken}) to confirm you E-Mail address.
+
+Thanks in advance,
+OctoMesh Identity Services</value>
+  </data>
+  <data name="Backend_IdentityServices_UserSchema_WelcomeMailWithNoPasswordBody" xml:space="preserve">
+    <value>Welcome to OctoMesh, ${Username}!
+
+you started leveraging the transformative power of OctoMesh to architect and manage robust data mesh solutions. 
+
+Please click [here](${IdentityServerUrl}account/confirmation?id=${ConfirmToken}) to confirm you E-Mail address and set your password to get access.
+
+Thanks in advance,
+OctoMesh Identity Services</value>
+  </data>
+  <data name="Backend_IdentityServices_UserSchema_WelcomeMailWithNoPasswordSubject" xml:space="preserve">
+    <value>Confirm your E-Mail (OctoMesh)</value>
+  </data>
+  <data name="Backend_IdentityServices_UserSchema_ResetPasswordMailBody" xml:space="preserve">
+    <value>Dear ${Username},
+
+somebody requested to reset the password of your account: ${Username}
+
+Please click [here](${IdentityServerUrl}manage/resetPassword?id=${ConfirmToken}) to reset your password.
+
+Thanks in advance,
+OctoMesh Identity Services</value>
+  </data>
+  <data name="Backend_IdentityServices_UserSchema_ResetPasswordMailSubject" xml:space="preserve">
+    <value>Reset password request (OctoMesh)</value>
+  </data>
 </root>

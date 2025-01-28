@@ -7,7 +7,9 @@ using Meshmakers.Common.Shared;
 using Meshmakers.Octo.Backend.IdentityServices.Resources;
 using Meshmakers.Octo.Communication.Contracts;
 using Meshmakers.Octo.ConstructionKit.Contracts;
+using Meshmakers.Octo.Runtime.Contracts;
 using Meshmakers.Octo.Runtime.Contracts.MongoDb;
+using Meshmakers.Octo.Runtime.Contracts.Repositories.Query;
 using Meshmakers.Octo.Runtime.Contracts.RepositoryEntities;
 using Meshmakers.Octo.Services.Infrastructure;
 using Meshmakers.Octo.Services.Infrastructure.Services;
@@ -45,7 +47,7 @@ internal class DefaultConfigurationCreatorService(
             // Currently we only support the system tenant.
             return;
         }
-        
+
         if (!await systemContext.IsSystemTenantExistingAsync())
         {
             await systemContext.CreateSystemTenantAsync();
@@ -59,7 +61,8 @@ internal class DefaultConfigurationCreatorService(
         var identityConfiguration =
             await systemContext.GetConfigurationAsync(session, IdentityServiceConstants.IdentitySchemaVersionKey,
                 new DefaultConfigurationVersion { Version = -1 });
-        if (identityConfiguration == null || identityConfiguration.Version < IdentityServiceConstants.IdentitySchemaVersionValue)
+        if (identityConfiguration == null ||
+            identityConfiguration.Version < IdentityServiceConstants.IdentitySchemaVersionValue)
         {
             await CreateClients();
             await CreateUsersAndRoles();
@@ -68,6 +71,7 @@ internal class DefaultConfigurationCreatorService(
             await CreateApiResources();
             await CreateIdentityResources();
             await CreateIdentityProvider();
+            await CreateTenantConfiguration(session);
 
             await systemContext.SetConfigurationAsync(session, IdentityServiceConstants.IdentitySchemaVersionKey,
                 new DefaultConfigurationVersion { Version = IdentityServiceConstants.IdentitySchemaVersionValue });
@@ -86,10 +90,11 @@ internal class DefaultConfigurationCreatorService(
             await systemContext.ImportCkModelAsync(SystemIdentityCkIds.ModelId, operationResult);
             if (operationResult.HasErrors || operationResult.HasFatalErrors)
             {
-                throw InitializationException.ImportCkModelFailed(systemContext.TenantId, operationResult.GetMessages());
+                throw InitializationException.ImportCkModelFailed(systemContext.TenantId,
+                    operationResult.GetMessages());
             }
         }
-        
+
         if (!await systemContext.IsCkModelExistingAsync(SystemNotificationCkIds.ModelId))
         {
             // We ensure that at least the system tenant contains a valid ck model.Other tenants
@@ -98,7 +103,8 @@ internal class DefaultConfigurationCreatorService(
             await systemContext.ImportCkModelAsync(SystemNotificationCkIds.ModelId, operationResult);
             if (operationResult.HasErrors || operationResult.HasFatalErrors)
             {
-                throw InitializationException.ImportCkModelFailed(systemContext.TenantId, operationResult.GetMessages());
+                throw InitializationException.ImportCkModelFailed(systemContext.TenantId,
+                    operationResult.GetMessages());
             }
         }
     }
@@ -120,7 +126,8 @@ internal class DefaultConfigurationCreatorService(
             await octoIdentityProviderStore.StoreAsync(googleProvider);
         }
 
-        var microsoftProvider = await octoIdentityProviderStore.GetByNameAsync(CommonConstants.MicrosoftIdentityProvider);
+        var microsoftProvider =
+            await octoIdentityProviderStore.GetByNameAsync(CommonConstants.MicrosoftIdentityProvider);
         if (microsoftProvider == null)
         {
             microsoftProvider = new RtMicrosoftIdentityProvider
@@ -231,7 +238,7 @@ internal class DefaultConfigurationCreatorService(
                 CommonConstants.CommunicationSystemApiFullAccess
             }
         };
-        
+
         var octoToolClient = await clientStore.FindClientByIdAsync(CommonConstants.OctoToolClientId);
         if (octoToolClient == null)
         {
@@ -241,7 +248,7 @@ internal class DefaultConfigurationCreatorService(
         {
             await clientStore.UpdateAsync(octoToolClient.ClientId, appClient);
         }
-        
+
         appClient = new RtClient
         {
             Enabled = true,
@@ -286,6 +293,76 @@ internal class DefaultConfigurationCreatorService(
         else
         {
             await clientStore.UpdateAsync(octoIdentityServiceSwaggerClient.ClientId, appClient);
+        }
+    }
+
+    private async Task CreateTenantConfiguration(IOctoSession session)
+    {
+        var tenantRepository = systemContext.GetSystemTenantRepositoryAsAdmin();
+
+        var dataQueryOperation = DataQueryOperation.Create()
+            .FieldEquals(nameof(RtEntity.RtWellKnownName),
+                IdentityServiceConstants.MailNotificationConfigurationName);
+        var r = await tenantRepository.GetRtEntitiesByTypeAsync<RtMailNotificationConfiguration>(session, dataQueryOperation);
+        if (r.TotalCount == 0)
+        {
+            var rtMailNotificationConfiguration = new RtMailNotificationConfiguration
+            {
+                RtWellKnownName = IdentityServiceConstants.MailNotificationConfigurationName,
+                EnableEmailNotifications = false
+            };
+            await tenantRepository.InsertOneRtEntityAsync(session, rtMailNotificationConfiguration);
+        }
+
+        dataQueryOperation = DataQueryOperation.Create()
+            .FieldEquals(nameof(RtEntity.RtWellKnownName),
+                IdentityServiceConstants.WelcomeEmailTemplateName);
+        r = await tenantRepository.GetRtEntitiesByTypeAsync<RtMailNotificationConfiguration>(session, dataQueryOperation);
+        if (r.TotalCount == 0)
+        {
+            var welcomeMailTemplate = new RtNotificationTemplate
+            {
+                RtWellKnownName = IdentityServiceConstants.WelcomeEmailTemplateName,
+                Type = RtNotificationTypesEnum.EMail,
+                RenderingType = RtRenderingTypesEnum.Plain,
+                SubjectTemplate = IdentityTexts.Backend_IdentityServices_UserSchema_WelcomeMailSubject,
+                BodyTemplate = IdentityTexts.Backend_IdentityServices_UserSchema_WelcomeMailBody
+            };
+            await tenantRepository.InsertOneRtEntityAsync(session, welcomeMailTemplate);
+        }
+
+        dataQueryOperation = DataQueryOperation.Create()
+            .FieldEquals(nameof(RtEntity.RtWellKnownName),
+                IdentityServiceConstants.WelcomeEmailWithNoPasswordTemplateName);
+        r = await tenantRepository.GetRtEntitiesByTypeAsync<RtMailNotificationConfiguration>(session, dataQueryOperation);
+        if (r.TotalCount == 0)
+        {
+            var welcomeMailWithNoPasswordTemplate = new RtNotificationTemplate
+            {
+                RtWellKnownName = IdentityServiceConstants.WelcomeEmailWithNoPasswordTemplateName,
+                Type = RtNotificationTypesEnum.EMail,
+                RenderingType = RtRenderingTypesEnum.Plain,
+                SubjectTemplate = IdentityTexts.Backend_IdentityServices_UserSchema_WelcomeMailWithNoPasswordSubject,
+                BodyTemplate = IdentityTexts.Backend_IdentityServices_UserSchema_WelcomeMailWithNoPasswordBody
+            };
+            await tenantRepository.InsertOneRtEntityAsync(session, welcomeMailWithNoPasswordTemplate);
+        }
+
+        dataQueryOperation = DataQueryOperation.Create()
+            .FieldEquals(nameof(RtEntity.RtWellKnownName),
+                IdentityServiceConstants.ResetPasswordEmailTemplateName);
+        r = await tenantRepository.GetRtEntitiesByTypeAsync<RtMailNotificationConfiguration>(session, dataQueryOperation);
+        if (r.TotalCount == 0)
+        {
+            var resetPasswordMailTemplate = new RtNotificationTemplate
+            {
+                RtWellKnownName = IdentityServiceConstants.ResetPasswordEmailTemplateName,
+                Type = RtNotificationTypesEnum.EMail,
+                RenderingType = RtRenderingTypesEnum.Plain,
+                SubjectTemplate = IdentityTexts.Backend_IdentityServices_UserSchema_ResetPasswordMailSubject,
+                BodyTemplate = IdentityTexts.Backend_IdentityServices_UserSchema_ResetPasswordMailBody
+            };
+            await tenantRepository.InsertOneRtEntityAsync(session, resetPasswordMailTemplate);
         }
     }
 }

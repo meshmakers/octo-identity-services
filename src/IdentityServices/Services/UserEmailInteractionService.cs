@@ -1,5 +1,6 @@
 using System.Net.Mail;
 using System.Text.Json;
+using IdentityServerPersistence;
 using IdentityServerPersistence.Configuration.Options;
 using IdentityServerPersistence.SystemStores;
 using Meshmakers.Common.Shared;
@@ -22,10 +23,6 @@ public class UserEmailInteractionService(
     IOctoPersistentGrantStore persistedGrantStore)
     : IUserEmailInteractionService
 {
-    private const string WelcomeEmailTemplateName = "Welcome_Email_Template";
-    private const string ResetPasswordEmailTemplateName = "Reset_Password_Email_Template";
-    private const string WelcomeEmailWithNoPasswordTemplateName = "Welcome_Email_With_No_Password_Template";
-
     public async Task SendWelcomeNotificationAsync(string tenantId, RtUser user)
     {
         if (!await CanSendEmail(tenantId, user))
@@ -41,10 +38,10 @@ public class UserEmailInteractionService(
         {
             { "Username", () => GetName(user) ?? "" },
             { "IdentityServerUrl", () => identityServerUrl },
-            { "id", () => confirmationToken }
+            { "ConfirmToken", () => confirmationToken }
         };
 
-        await SendNotificationAsync(tenantId, WelcomeEmailTemplateName, user, replaceFunctions);
+        await SendNotificationAsync(tenantId, IdentityServiceConstants.WelcomeEmailTemplateName, user, replaceFunctions);
     }
 
     public async Task SendWelcomeNotificationWithoutPasswordAsync(string tenantId, RtUser user)
@@ -61,10 +58,10 @@ public class UserEmailInteractionService(
         {
             { "Username", () => GetName(user) ?? "" },
             { "IdentityServerUrl", () => identityServerUrl },
-            { "id", () => confirmationToken }
+            { "ConfirmToken", () => confirmationToken }
         };
 
-        await SendNotificationAsync(tenantId, WelcomeEmailWithNoPasswordTemplateName, user, replaceFunctions);
+        await SendNotificationAsync(tenantId, IdentityServiceConstants.WelcomeEmailWithNoPasswordTemplateName, user, replaceFunctions);
     }
 
     public async Task<string> ValidateEmailNotificationTokenAsync(string tenantId, string token)
@@ -118,11 +115,11 @@ public class UserEmailInteractionService(
         {
             { "Username", () => GetName(user) ?? "" },
             { "IdentityServerUrl", () => identityServerUrl },
-            { "id", () => confirmationToken }
+            { "ConfirmToken", () => confirmationToken }
         };
 
         
-        await SendNotificationAsync(tenantId, ResetPasswordEmailTemplateName, user, replaceFunctions);
+        await SendNotificationAsync(tenantId, IdentityServiceConstants.ResetPasswordEmailTemplateName, user, replaceFunctions);
     }
 
     public async Task<string> ValidateAndResetPasswordAsync(string tenantId, string token, string newPassword)
@@ -171,7 +168,7 @@ public class UserEmailInteractionService(
 
     private async Task<string> GenerateResetPasswordTokenAsync(string tenantId, RtUser user)
     {
-        return await GenerateAndPersistUserManagerToken(tenantId,
+        return await GenerateAndPersistUserManagerToken(tenantId, "password_reset",
             () => userManager.GeneratePasswordResetTokenAsync(user),
             "Password Reset Token",
             user.RtId.ToString()
@@ -180,13 +177,13 @@ public class UserEmailInteractionService(
 
     private async Task<string> GenerateConfirmEmailTokenAsync(string tenantId, RtUser user)
     {
-        return await GenerateAndPersistUserManagerToken(tenantId,
+        return await GenerateAndPersistUserManagerToken(tenantId, "email_confirmation",
             () => userManager.GenerateEmailConfirmationTokenAsync(user),
             "Email Confirmation Token",
             user.RtId.ToString());
     }
 
-    private async Task<string> GenerateAndPersistUserManagerToken(string tenantId, Func<Task<string>> tokenGenerator,
+    private async Task<string> GenerateAndPersistUserManagerToken(string tenantId, string grantType, Func<Task<string>> tokenGenerator,
         string tokenDescription, string userId)
     {
         var token = await tokenGenerator();
@@ -195,6 +192,9 @@ public class UserEmailInteractionService(
         var grant = new RtPersistedGrant
         {
             GrantKey = key,
+            SubjectId = userId,
+            ClientId = "-",
+            GrantType = grantType,
             CreationDateTime = DateTime.UtcNow,
             ExpirationDateTime = DateTime.UtcNow.AddHours(1),
             Description = tokenDescription,

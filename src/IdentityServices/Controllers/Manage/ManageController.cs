@@ -92,15 +92,6 @@ public class ManageController : Controller
         return RedirectToAction(nameof(ManageLogins), new { Message = message });
     }
 
-
-    //
-    // GET: /Manage/ChangePassword
-    [HttpGet]
-    public IActionResult ChangePassword()
-    {
-        return View();
-    }
-
     [HttpGet]
     [AllowAnonymous]
     public IActionResult ResetPassword(string id)
@@ -156,6 +147,15 @@ public class ManageController : Controller
             Token = vm.Token
         };
         return View(resetPasswordViewModel);
+    }
+    
+    //
+    // GET: /Manage/ChangePassword
+    [HttpGet]
+    public IActionResult ChangePassword()
+    {
+        var vm = new ChangePasswordViewModel();
+        return View(vm);
     }
 
     //
