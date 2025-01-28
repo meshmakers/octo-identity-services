@@ -16,6 +16,7 @@ types:
 
       - id: System.Identity/SessionId
         name: SessionId
+        isOptional: true
 
       - id: System.Identity/ClientId
         name: ClientId

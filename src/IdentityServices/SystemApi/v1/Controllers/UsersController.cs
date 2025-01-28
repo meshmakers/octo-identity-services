@@ -7,11 +7,13 @@ using IdentityServerPersistence;
 using Meshmakers.Octo.Backend.IdentityServices.Services;
 using Meshmakers.Octo.Communication.Contracts.DataTransferObjects;
 using Meshmakers.Octo.ConstructionKit.Contracts;
+using Meshmakers.Octo.Runtime.Contracts.MongoDb.Configuration;
 using Meshmakers.Octo.Runtime.Contracts.RepositoryEntities;
 using Meshmakers.Octo.Services.Common.ApiErrors;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.Extensions.Options;
 using MongoDB.Bson;
 using Persistence.IdentityCkModel.Generated.System.Identity.v1;
 
@@ -29,6 +31,7 @@ public class UsersController : ControllerBase
     private readonly ILogger<UsersController> _logger;
     private readonly RoleManager<RtRole> _roleManager;
     private readonly IMapper _mapper;
+    private readonly IOptions<OctoSystemConfiguration> _options;
     private readonly IUserEmailInteractionService _userEmailInteractionService;
     private readonly UserManager<RtUser> _userManager;
 
@@ -38,18 +41,21 @@ public class UsersController : ControllerBase
     /// <param name="userManager">The storage service of users</param>
     /// <param name="roleManager">The storage service of roles</param>
     /// <param name="mapper"></param>
+    /// <param name="options"></param>
     /// <param name="userEmailInteractionService"></param>
     /// <param name="logger">Logger</param>
     public UsersController(
         UserManager<RtUser> userManager,
         RoleManager<RtRole> roleManager,
         IMapper mapper,
+        IOptions<OctoSystemConfiguration> options,
         IUserEmailInteractionService userEmailInteractionService,
         ILogger<UsersController> logger)
     {
         _userManager = userManager;
         _roleManager = roleManager;
         _mapper = mapper;
+        _options = options;
         _userEmailInteractionService = userEmailInteractionService;
         _logger = logger;
     }
@@ -191,11 +197,12 @@ public class UsersController : ControllerBase
                     return GetBadRequestResultWithErrorDescription("Creation of user failed", result.Errors);
                 }
 
-                await _userEmailInteractionService.SendWelcomeNotificationAsync(rtUser);
+                await _userEmailInteractionService.SendWelcomeNotificationAsync(_options.Value.SystemTenantId, rtUser);
             }
             else
             {
-                await _userEmailInteractionService.SendWelcomeNotificationWithoutPasswordAsync(rtUser);
+                await _userEmailInteractionService.SendWelcomeNotificationWithoutPasswordAsync(
+                    _options.Value.SystemTenantId, rtUser);
             }
 
             return Ok();
@@ -274,7 +281,8 @@ public class UsersController : ControllerBase
             var result = await _userManager.ResetPasswordAsync(user, token, password);
             if (result.Succeeded)
             {
-                await _userEmailInteractionService.SendPasswordResetNotificationAsync(user);
+                await _userEmailInteractionService.SendPasswordResetNotificationAsync(_options.Value.SystemTenantId,
+                    user);
                 return Ok();
             }
 

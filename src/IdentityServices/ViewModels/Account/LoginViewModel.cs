@@ -5,6 +5,8 @@ public class LoginViewModel : LoginInputModel
     public bool AllowRememberLogin { get; set; }
 
     public bool EnableLocalLogin { get; set; }
+    
+    public required string TenantId { get; set; }
 
     public IEnumerable<ExternalProvider>? ExternalProviders { get; set; }
 

@@ -1,0 +1,11 @@
+$schema: https://schemas.meshmakers.cloud/construction-kit-elements.schema.json
+types:
+  - typeId: MailNotificationConfiguration
+    derivedFromCkTypeId: System/Configuration
+    isFinal: true
+    attributes:
+      - id: ${thisModel}/EnableEmailNotifications
+        name: EnableEmailNotifications
+      - id: ${thisModel}/RedirectAfterEmailInteractionUrl
+        name: RedirectAfterEmailInteractionUrl
+        isOptional: true

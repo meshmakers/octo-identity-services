@@ -1,0 +1,10 @@
+"$schema": "https://schemas.meshmakers.cloud/construction-kit-elements.schema.json"
+attributes:
+  - id: EnableEmailNotifications
+    valueType: Boolean
+    description: Enable email notifications
+    defaultValues:
+      - false  
+  - id: RedirectAfterEmailInteractionUrl
+    valueType: String
+    description: Redirect after email interaction URL

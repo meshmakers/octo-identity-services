@@ -1058,5 +1058,53 @@ namespace Meshmakers.Octo.Backend.IdentityServices.Resources {
                 return ResourceManager.GetString("Backend_Identity_Logout_RootPage", resourceCulture);
             }
         }
+        
+        public static string IdentityService_ApiTitle {
+            get {
+                return ResourceManager.GetString("IdentityService_ApiTitle", resourceCulture);
+            }
+        }
+        
+        public static string IdentityService_ApiDescription {
+            get {
+                return ResourceManager.GetString("IdentityService_ApiDescription", resourceCulture);
+            }
+        }
+        
+        public static string Backend_IdentityServices_UserSchema_WelcomeMailSubject {
+            get {
+                return ResourceManager.GetString("Backend_IdentityServices_UserSchema_WelcomeMailSubject", resourceCulture);
+            }
+        }
+        
+        public static string Backend_IdentityServices_UserSchema_WelcomeMailBody {
+            get {
+                return ResourceManager.GetString("Backend_IdentityServices_UserSchema_WelcomeMailBody", resourceCulture);
+            }
+        }
+        
+        public static string Backend_IdentityServices_UserSchema_WelcomeMailWithNoPasswordBody {
+            get {
+                return ResourceManager.GetString("Backend_IdentityServices_UserSchema_WelcomeMailWithNoPasswordBody", resourceCulture);
+            }
+        }
+        
+        public static string Backend_IdentityServices_UserSchema_WelcomeMailWithNoPasswordSubject {
+            get {
+                return ResourceManager.GetString("Backend_IdentityServices_UserSchema_WelcomeMailWithNoPasswordSubject", resourceCulture);
+            }
+        }
+        
+        public static string Backend_IdentityServices_UserSchema_ResetPasswordMailBody {
+            get {
+                return ResourceManager.GetString("Backend_IdentityServices_UserSchema_ResetPasswordMailBody", resourceCulture);
+            }
+        }
+        
+        public static string Backend_IdentityServices_UserSchema_ResetPasswordMailSubject {
+            get {
+                return ResourceManager.GetString("Backend_IdentityServices_UserSchema_ResetPasswordMailSubject", resourceCulture);
+            }
+        }
     }
 }

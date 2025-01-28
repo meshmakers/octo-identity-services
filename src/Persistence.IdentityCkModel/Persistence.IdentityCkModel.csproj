@@ -12,6 +12,7 @@
         <PackageReference Include="Meshmakers.Octo.ConstructionKit.SourceGeneration" OutputItemType="Analyzer" ReferenceOutputAssembly="false" Version="$(OctoVersion)" PrivateAssets="all" />
         <PackageReference Include="Meshmakers.Octo.ConstructionKit.MsBuildTasks" Version="$(OctoVersion)" PrivateAssets="all" />
         <PackageReference Include="Meshmakers.Octo.Runtime.Contracts" Version="$(OctoVersion)" />
+        <PackageReference Include="Meshmakers.Octo.ConstructionKit.Models.System" Version="$(OctoVersion)" />
     </ItemGroup>
 
     <ItemGroup>
