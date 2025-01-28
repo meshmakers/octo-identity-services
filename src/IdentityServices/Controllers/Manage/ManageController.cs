@@ -2,10 +2,12 @@
 using Meshmakers.Octo.Backend.IdentityServices.Services;
 using Meshmakers.Octo.Backend.IdentityServices.ViewModels.Manage;
 using Meshmakers.Octo.Backend.IdentityServices.ViewModels.Shared;
+using Meshmakers.Octo.Runtime.Contracts.MongoDb.Configuration;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.Extensions.Options;
 using Persistence.IdentityCkModel.Generated.System.Identity.v1;
 
 namespace Meshmakers.Octo.Backend.IdentityServices.Controllers.Manage;
@@ -14,6 +16,7 @@ namespace Meshmakers.Octo.Backend.IdentityServices.Controllers.Manage;
 public class ManageController : Controller
 {
     private readonly IUserEmailInteractionService _emailInteractionService;
+    private readonly IOptions<OctoSystemConfiguration> _options;
     private readonly ILogger _logger;
     private readonly SignInManager<RtUser> _signInManager;
     private readonly UserManager<RtUser> _userManager;
@@ -22,11 +25,13 @@ public class ManageController : Controller
         UserManager<RtUser> userManager,
         SignInManager<RtUser> signInManager,
         IUserEmailInteractionService emailInteractionService,
+        IOptions<OctoSystemConfiguration> options,
         ILoggerFactory loggerFactory)
     {
         _userManager = userManager;
         _signInManager = signInManager;
         _emailInteractionService = emailInteractionService;
+        _options = options;
         _logger = loggerFactory.CreateLogger<ManageController>();
     }
 
@@ -87,15 +92,6 @@ public class ManageController : Controller
         return RedirectToAction(nameof(ManageLogins), new { Message = message });
     }
 
-
-    //
-    // GET: /Manage/ChangePassword
-    [HttpGet]
-    public IActionResult ChangePassword()
-    {
-        return View();
-    }
-
     [HttpGet]
     [AllowAnonymous]
     public IActionResult ResetPassword(string id)
@@ -123,7 +119,9 @@ public class ManageController : Controller
 
         try
         {
-            var redirectUrl = await _emailInteractionService.ValidateAndResetPasswordAsync(vm.Token!, vm.NewPassword!);
+            var redirectUrl =
+                await _emailInteractionService.ValidateAndResetPasswordAsync(_options.Value.SystemTenantId, vm.Token!,
+                    vm.NewPassword!);
             var successViewModel = new SuccessViewModel
             {
                 Operation = IdentityTexts.Backend_Identity_Manage_StatusMessage_ChangePasswordSuccess,
@@ -149,6 +147,15 @@ public class ManageController : Controller
             Token = vm.Token
         };
         return View(resetPasswordViewModel);
+    }
+    
+    //
+    // GET: /Manage/ChangePassword
+    [HttpGet]
+    public IActionResult ChangePassword()
+    {
+        var vm = new ChangePasswordViewModel();
+        return View(vm);
     }
 
     //

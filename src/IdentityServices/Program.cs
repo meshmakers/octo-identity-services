@@ -20,6 +20,8 @@ using Meshmakers.Octo.Services.Common.DistributionEventHub.Messages;
 using Meshmakers.Octo.Services.Infrastructure.CredentialGenerator;
 using Meshmakers.Octo.Services.Infrastructure.Middleware;
 using Meshmakers.Octo.Services.Infrastructure.Services;
+using Meshmakers.Octo.Services.Notifications.Generated.System.Notification.v1;
+using Meshmakers.Octo.Services.Notifications.Services;
 using Meshmakers.Octo.Services.Observability;
 using Meshmakers.Octo.Services.Swagger.Configuration;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
@@ -64,14 +66,14 @@ try
     builder.Services.AddOctoNotification();
     builder.Services.AddScoped<IUserEmailInteractionService, UserEmailInteractionService>();
     builder.Services.AddScoped<IUserManagementService, UserManagementService>();
-    builder.Services.AddScoped<IMarkdownRenderService, MarkdownRenderService>();
+    builder.Services
+        .AddSingletonMultipleInterfaces<IdentityConfigurationService, IIdentityConfigurationService,
+            ITenantConfigurationService>();
 
     builder.Services.Configure<OctoIdentityServicesOptions>(options =>
         builder.Configuration.GetSection("Identity").Bind(options));
     builder.Services.Configure<OctoSystemConfiguration>(options =>
         builder.Configuration.GetSection("System").Bind(options));
-    builder.Services.Configure<EmailInteractionConfiguration>(options =>
-        builder.Configuration.GetSection("EmailInteraction").Bind(options));
     builder.Services.Configure<RouteOptions>(options =>
         options.ConstraintMap.Add("tenantId", typeof(TenantIdRouteConstraint)));
 
@@ -196,8 +198,8 @@ try
             typeof(ClientDto).Assembly
         ];
 
-        options.ApiTitle = "Identity Services API";
-        options.ApiDescription = "Octo Mesh Identity Services.";
+        options.ApiTitle = IdentityTexts.IdentityService_ApiTitle;
+        options.ApiDescription = IdentityTexts.IdentityService_ApiDescription;
 
         options.ClientId = CommonConstants.IdentityServicesSwaggerClientId;
         options.AppName = IdentityTexts.Backend_IdentityServices_UserSchema_Swagger_DisplayName;
@@ -265,6 +267,14 @@ try
 
     app.MapDefaultControllerRoute();
     app.MapControllerRoute("default", "{tenantId:tenantId=System}/{controller=Home}/{action=Index}/{id?}");
+    
+    // Initialisierung abfangen
+    app.Lifetime.ApplicationStarted.Register(() =>
+    {
+        var eventRepository = app.Services.GetRequiredService<IEventRepository>();
+        eventRepository.StoreSystemInformationEvent(RtEventSourcesEnum.IdentityService,
+            "Identity Services started.");
+    });
 
     app.Run();
 }
