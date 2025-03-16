@@ -191,6 +191,8 @@ internal class DefaultConfigurationCreatorService(
         await TryCreateRole(CommonConstants.BotManagementRole);
         await TryCreateRole(CommonConstants.DashboardManagementRole);
         await TryCreateRole(CommonConstants.DashboardViewerRole);
+        await TryCreateRole(CommonConstants.ReportingManagementRole);
+        await TryCreateRole(CommonConstants.ReportingViewerRole);
     }
 
     private async Task TryCreateRole(string roleName)
@@ -235,7 +237,8 @@ internal class DefaultConfigurationCreatorService(
                 CommonConstants.SystemApiFullAccess,
                 CommonConstants.IdentityApiFullAccess,
                 CommonConstants.BotApiFullAccess,
-                CommonConstants.CommunicationSystemApiFullAccess
+                CommonConstants.CommunicationSystemApiFullAccess,
+                CommonConstants.ReportingSystemApiFullAccess,
             }
         };
 
