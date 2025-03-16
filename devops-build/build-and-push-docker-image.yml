@@ -20,7 +20,7 @@ steps:
 
   - task: CmdLine@2
     condition: eq(variables.isRelease, true)
-    displayName: Build/Push to public ${{ parameters.Repository }}:$(Build.BuildNumber)
+    displayName: Build/Push to public/private ${{ parameters.Repository }}:$(Build.BuildNumber)
     inputs:
       script: |
         docker buildx create --use --name mybuilder --bootstrap --config ~/buildkitd.default.toml &&
@@ -28,12 +28,13 @@ steps:
           --build-arg OCTO_PRIVATE_NUGET_SERVICE="$(NugetPrivateServer)" --build-arg OCTO_PRIVATE_NUGET_CERTIFICATE="$(NugetPrivateServerCa)" \
           -f ${{ parameters.Dockerfile }} \
           -t ${{ parameters.Repository }}:$(Build.BuildNumber) \
+          -t ${{ parameters.PrivateRegistry }}/${{ parameters.Repository }}:$(Build.BuildNumber) \
           --push \
           $(System.DefaultWorkingDirectory) &&
         docker buildx rm mybuilder
 
   - task: CmdLine@2
-    condition: or(eq(variables.isMain, true), eq(variables.isRelease, true))
+    condition: and(eq(variables.isMain, true), eq(variables.isRelease, false))
     displayName: Build/Push to private ${{ parameters.Repository }}:$(Build.BuildNumber)
     inputs:
       script: |
