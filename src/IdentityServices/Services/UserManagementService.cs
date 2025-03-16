@@ -50,6 +50,10 @@ public class UserManagementService(
             await TryAddRole(adminUser, CommonConstants.CommunicationManagementRole);
             await TryAddRole(adminUser, CommonConstants.BotManagementRole);
             await TryAddRole(adminUser, CommonConstants.AdminPanelManagementRole);
+            await TryAddRole(adminUser, CommonConstants.DashboardViewerRole);
+            await TryAddRole(adminUser, CommonConstants.DashboardManagementRole);
+            await TryAddRole(adminUser, CommonConstants.ReportingManagementRole);
+            await TryAddRole(adminUser, CommonConstants.ReportingViewerRole);
         }
     }
     
