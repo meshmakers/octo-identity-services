@@ -13,6 +13,7 @@ using Meshmakers.Octo.Services.Infrastructure.Services;
 using Microsoft.AspNetCore.Cors.Infrastructure;
 using Microsoft.AspNetCore.Identity;
 using Persistence.IdentityCkModel.Generated.System.Identity.v1;
+using Meshmakers.Octo.Services.Common;
 
 // ReSharper disable once CheckNamespace
 namespace Microsoft.Extensions.DependencyInjection;
@@ -37,7 +38,9 @@ public static class RuntimeEngineBuilderExtensions
         builder.Services.AddCkModelSystemIdentity();
 
         // Add services of Identity module
-        builder.Services.AddTransient<IDefaultConfigurationCreatorService, DefaultConfigurationCreatorService>();
+        builder.Services
+            .AddScopedMultipleInterfaces<DefaultConfigurationCreatorService, IDefaultConfigurationCreatorService,
+                IConfigurationService>();
 
         builder.Services.AddScoped<IOctoClientStore, ClientStore>();
         builder.Services.AddScoped<IOctoResourceStore, ResourceStore>();

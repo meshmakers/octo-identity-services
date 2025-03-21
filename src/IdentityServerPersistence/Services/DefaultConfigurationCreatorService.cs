@@ -30,7 +30,7 @@ internal class DefaultConfigurationCreatorService(
     IOctoResourceStore resourceStore,
     IOctoIdentityProviderStore octoIdentityProviderStore,
     IOptions<OctoIdentityServicesOptions> octoIdentityOptions)
-    : DefaultConfigurationCreatorServiceBase(logger)
+    : DefaultConfigurationCreatorServiceBase(logger), IConfigurationService
 {
     public override async Task InitializeAsync()
     {
@@ -367,5 +367,25 @@ internal class DefaultConfigurationCreatorService(
             };
             await tenantRepository.InsertOneRtEntityAsync(session, resetPasswordMailTemplate);
         }
+    }
+
+    public Task EnableAsync(string tenantId)
+    {
+        return Task.CompletedTask;
+    }
+
+    public Task DisableAsync(string tenantId)
+    {
+        return Task.CompletedTask;
+    }
+
+    public Task<bool> IsEnabledAsync(string tenantId)
+    {
+        return Task.FromResult(true);
+    }
+
+    public bool CanBeEnabled()
+    {
+        return false;
     }
 }
