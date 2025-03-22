@@ -22,32 +22,33 @@ internal class OpenLdapAuthentication
         _options = options;
     }
 
-    public Task<ExternalLoginInfo> AuthenticateAsync(string username, string password)
+    public async Task<ExternalLoginInfo> AuthenticateAsync(string username, string password)
     {
         var userDn = $"{_options.UserNameAttribute}={username},{_options.UserBaseDn}";
 
         using var connection = _connectionFactory.CreateLdapConnection(_options.Host, _options.Port, userDn, password, _options.UseTls,
             ConnectionType.OpenLdap);
-        var entry = connection.ExecuteQuery(parameters =>
+        var result = await connection.ExecuteQueryAsync(parameters =>
         {
             parameters.BaseDn = userDn;
             parameters.Scope = LdapConnection.ScopeSub;
-            parameters.Attrs = new[] { UserIdAttributeName, UserFullNameAttributeName, MailAttribute };
-        }).FirstOrDefault();
+            parameters.Attrs = [UserIdAttributeName, UserFullNameAttributeName, MailAttribute];
+        });
+        var entry = result.FirstOrDefault();
 
         if (entry == null)
         {
             throw new ArgumentException("Could not authenticate user.");
         }
 
-        return Task.FromResult(LdapEntryToUser(entry));
+        return LdapEntryToUser(entry);
     }
 
     private ExternalLoginInfo LdapEntryToUser(LdapEntry entry)
     {
-        var userId = entry.GetAttribute(UserIdAttributeName)?.StringValue;
-        var userName = entry.GetAttribute(UserFullNameAttributeName)?.StringValue;
-        var mail = entry.GetAttribute(MailAttribute).StringValue;
+        var userId = entry.Get(UserIdAttributeName)?.StringValue;
+        var userName = entry.Get(UserFullNameAttributeName)?.StringValue;
+        var mail = entry.Get(MailAttribute).StringValue;
 
         if (string.IsNullOrWhiteSpace(userId) || string.IsNullOrWhiteSpace(userName))
         {

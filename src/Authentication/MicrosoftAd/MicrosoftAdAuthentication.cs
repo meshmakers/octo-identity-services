@@ -26,15 +26,16 @@ internal class MicrosoftAdAuthentication
         _options = options;
     }
 
-    public Task<ExternalLoginInfo> AuthenticateAsync(string username, string password)
+    public async Task<ExternalLoginInfo> AuthenticateAsync(string username, string password)
     {
         using var connection = _connectionFactory.CreateLdapConnection(_options.Host, _options.Port, username, password, _options.UseTls,
             ConnectionType.MicrosoftActiveDirectory);
-        var entry = connection.ExecuteQuery(parameters =>
+        var result = await connection.ExecuteQueryAsync(parameters =>
         {
             parameters.Scope = LdapConnection.ScopeSub;
             parameters.Filter = $"{UserPrincipalNameAttribute}={username}";
-        }).SingleOrDefault();
+        });
+        var entry = result.SingleOrDefault();
 
         if (entry == null)
         {
@@ -42,21 +43,21 @@ internal class MicrosoftAdAuthentication
         }
 
         var ldapGroupHandler = new LdapGroupHandler(_options.UserBaseDn, UserPrincipalNameAttribute);
-        var groupNames = ldapGroupHandler.GetGroupsForUser(connection, username);
+        var groupNames = ldapGroupHandler.GetGroupsForUserAsync(connection, username);
 
-        return Task.FromResult(LdapEntryToUser(entry, groupNames.ToList()));
+        return await LdapEntryToUser(entry, groupNames);
     }
 
-    private ExternalLoginInfo LdapEntryToUser(LdapEntry entry, List<string> groupNames)
+    private async Task<ExternalLoginInfo> LdapEntryToUser(LdapEntry entry, IAsyncEnumerable<string> groupNames)
     {
-        var userIdBytes = entry.GetAttribute(UserIdAttributeName)?.ByteValue;
+        var userIdBytes = entry.GetOrDefault(UserIdAttributeName)?.ByteValue;
         if (userIdBytes == null)
         {
             throw new InvalidOperationException("Could not authenticate user.");
         }
 
         var userId = new Guid(userIdBytes).ToString();
-        var userName = entry.GetAttribute(UserFullNameAttributeName).StringValue;
+        var userName = entry.Get(UserFullNameAttributeName).StringValue;
         var claims = new List<Claim>
         {
             new(ClaimTypes.Name, userName),
@@ -65,23 +66,23 @@ internal class MicrosoftAdAuthentication
 
         if (entry.GetAttributeSet().ContainsKey(GivenNameAttribute))
         {
-            var value = entry.GetAttribute(GivenNameAttribute).StringValue;
+            var value = entry.Get(GivenNameAttribute).StringValue;
             claims.Add(new Claim(ClaimTypes.GivenName, value));
         }
 
         if (entry.GetAttributeSet().ContainsKey(SurNameAttribute))
         {
-            var value = entry.GetAttribute(SurNameAttribute).StringValue;
+            var value = entry.Get(SurNameAttribute).StringValue;
             claims.Add(new Claim(ClaimTypes.Surname, value));
         }
 
         if (entry.GetAttributeSet().ContainsKey(MailAttribute))
         {
-            var value = entry.GetAttribute(MailAttribute).StringValue;
+            var value = entry.Get(MailAttribute).StringValue;
             claims.Add(new Claim(ClaimTypes.Email, value));
         }
 
-        foreach (var groupName in groupNames)
+        await foreach (var groupName in groupNames)
         {
             claims.Add(new Claim(JwtClaimTypes.Role, groupName));
         }
