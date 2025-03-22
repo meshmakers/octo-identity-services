@@ -7,7 +7,7 @@ using IdentityServerPersistence;
 using Meshmakers.Octo.Communication.Contracts.DataTransferObjects;
 using Meshmakers.Octo.Runtime.Contracts.MongoDb;
 using Meshmakers.Octo.Runtime.Contracts.Repositories.Query;
-using Meshmakers.Octo.Services.Common.ApiErrors;
+using Meshmakers.Octo.Services.Contracts.ApiErrors;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Mvc;

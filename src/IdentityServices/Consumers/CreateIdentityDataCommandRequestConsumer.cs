@@ -4,8 +4,8 @@ using Meshmakers.Octo.Runtime.Contracts.MongoDb;
 using Meshmakers.Octo.Runtime.Contracts.MongoDb.Repositories;
 using Meshmakers.Octo.Runtime.Contracts.Repositories.Query;
 using Meshmakers.Octo.Runtime.Contracts.RepositoryEntities;
-using Meshmakers.Octo.Services.Common.DistributionEventHub.Commands;
-using Meshmakers.Octo.Services.Common.DistributionEventHub.Commands.Payloads;
+using Meshmakers.Octo.Services.Contracts.DistributionEventHub.Commands;
+using Meshmakers.Octo.Services.Contracts.DistributionEventHub.Commands.Payloads;
 using Persistence.IdentityCkModel.Generated.System.Identity.v1;
 
 namespace Meshmakers.Octo.Backend.IdentityServices.Consumers;
