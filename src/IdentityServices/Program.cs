@@ -13,10 +13,10 @@ using Meshmakers.Octo.Communication.Contracts;
 using Meshmakers.Octo.Communication.Contracts.DataTransferObjects;
 using Meshmakers.Octo.Runtime.Contracts.MongoDb.Configuration;
 using Meshmakers.Octo.Runtime.Contracts.MongoDb.Extensions;
-using Meshmakers.Octo.Services.Common;
-using Meshmakers.Octo.Services.Common.Authorization;
-using Meshmakers.Octo.Services.Common.DistributionEventHub.Commands;
-using Meshmakers.Octo.Services.Common.DistributionEventHub.Messages;
+using Meshmakers.Octo.Services.Contracts.DistributionEventHub.Commands;
+using Meshmakers.Octo.Services.Contracts.DistributionEventHub.Messages;
+using Meshmakers.Octo.Services.Infrastructure;
+using Meshmakers.Octo.Services.Infrastructure.Configuration;
 using Meshmakers.Octo.Services.Infrastructure.CredentialGenerator;
 using Meshmakers.Octo.Services.Infrastructure.Middleware;
 using Meshmakers.Octo.Services.Infrastructure.Services;
@@ -155,14 +155,14 @@ try
         options.AddPolicy(IdentityServiceConstants.IdentityApiReadOnlyPolicy, authorizationPolicyBuilder =>
         {
             // require IdentityApiFullAccess or IdentityApiReadOnly
-            authorizationPolicyBuilder.RequireClaim(BackendCommon.ClaimScope, CommonConstants.IdentityApiFullAccess,
+            authorizationPolicyBuilder.RequireClaim(InfrastructureCommon.ClaimScope, CommonConstants.IdentityApiFullAccess,
                 CommonConstants.IdentityApiReadOnly);
         });
 
         options.AddPolicy(IdentityServiceConstants.IdentityApiReadWritePolicy, authorizationPolicyBuilder =>
         {
             // require IdentityApiFullAccess
-            authorizationPolicyBuilder.RequireClaim(BackendCommon.ClaimScope,
+            authorizationPolicyBuilder.RequireClaim(InfrastructureCommon.ClaimScope,
                 CommonConstants.IdentityApiFullAccess);
         });
     });
@@ -240,8 +240,8 @@ try
     app.UseCors();
 
     // Conversion of request query jwt token to cookie for switch from dashboard to hangfire ui dashboard
-    app.UseMiddleware<TenantMiddleware>();
-    app.UseMiddleware<CookieBasedAuthorizationMiddleware>();
+    app.UseOctoTenants();
+    app.UseOctoCookieBasedAuthentication();
 
     app.UseHttpsRedirection();
     app.UseStaticFiles();

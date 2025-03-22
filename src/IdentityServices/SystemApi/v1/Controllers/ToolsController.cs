@@ -2,7 +2,7 @@ using Asp.Versioning;
 using IdentityModel;
 using IdentityServerPersistence;
 using Meshmakers.Octo.Communication.Contracts.DataTransferObjects;
-using Meshmakers.Octo.Services.Common;
+using Meshmakers.Octo.Services.Infrastructure;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 

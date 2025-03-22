@@ -8,12 +8,12 @@ using Meshmakers.Octo.Communication.Contracts.DataTransferObjects;
 using Meshmakers.Octo.Runtime.Contracts.MongoDb.Configuration;
 using Meshmakers.Octo.Runtime.Contracts.RepositoryEntities;
 using Meshmakers.Octo.Runtime.Engine.Configuration.DependencyInjection;
-using Meshmakers.Octo.Services.Common.Cors;
+using Meshmakers.Octo.Services.Infrastructure;
+using Meshmakers.Octo.Services.Infrastructure.Cors;
 using Meshmakers.Octo.Services.Infrastructure.Services;
 using Microsoft.AspNetCore.Cors.Infrastructure;
 using Microsoft.AspNetCore.Identity;
 using Persistence.IdentityCkModel.Generated.System.Identity.v1;
-using Meshmakers.Octo.Services.Common;
 
 // ReSharper disable once CheckNamespace
 namespace Microsoft.Extensions.DependencyInjection;
@@ -46,9 +46,6 @@ public static class RuntimeEngineBuilderExtensions
         builder.Services.AddScoped<IOctoResourceStore, ResourceStore>();
         builder.Services.AddScoped<IOctoPersistentGrantStore, PersistentGrantStore>();
         builder.Services.AddScoped<IOctoIdentityProviderStore, IdentityProviderStore>();
-
-        builder.Services.AddSingleton<CorsPolicyProvider>();
-        builder.Services.AddSingleton<ICorsPolicyProvider>(provider => provider.GetRequiredService<CorsPolicyProvider>());
 
         builder.Services.AddSingleton<AttributeStringValueListConverter>();
         builder.Services.AddAutoMapper(cfg =>

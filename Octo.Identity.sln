@@ -12,8 +12,6 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "IdentityServices.Resources"
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "IdentityServices", "src\IdentityServices\IdentityServices.csproj", "{50173EF9-8DF9-4DBB-847D-D26576784C0E}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Common", "src\octo-common-services\src\Common\Common.csproj", "{4F56615E-D07D-48B1-B8C2-E3381B998772}"
-EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Swagger", "src\octo-common-services\src\Swagger\Swagger.csproj", "{2B06D1E3-17BA-4480-B66B-BF1798823D2F}"
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Persistence.IdentityCkModel", "src\Persistence.IdentityCkModel\Persistence.IdentityCkModel.csproj", "{26B615B1-5B51-4864-8661-AF476B4F48A7}"
@@ -29,6 +27,8 @@ EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Runtime.Engine.MongoDb", "src\octo-common-services\src\octo-construction-kit-engine-mongodb\src\Runtime.Engine.MongoDb\Runtime.Engine.MongoDb.csproj", "{42FC864B-15CB-416C-937C-D4A2D84107B5}"
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Observability", "src\octo-common-services\src\Observability\Observability.csproj", "{6B17D23E-1E2F-4787-91BE-166B59CCDA32}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Contracts", "src\octo-common-services\src\Contracts\Contracts.csproj", "{AA714781-072E-4942-B087-C0B0E7E9333B}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
@@ -61,12 +61,6 @@ Global
 		{50173EF9-8DF9-4DBB-847D-D26576784C0E}.Release|Any CPU.Build.0 = Release|Any CPU
 		{50173EF9-8DF9-4DBB-847D-D26576784C0E}.DebugL|Any CPU.ActiveCfg = DebugL|Any CPU
 		{50173EF9-8DF9-4DBB-847D-D26576784C0E}.DebugL|Any CPU.Build.0 = DebugL|Any CPU
-		{4F56615E-D07D-48B1-B8C2-E3381B998772}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
-		{4F56615E-D07D-48B1-B8C2-E3381B998772}.Debug|Any CPU.Build.0 = Debug|Any CPU
-		{4F56615E-D07D-48B1-B8C2-E3381B998772}.Release|Any CPU.ActiveCfg = Release|Any CPU
-		{4F56615E-D07D-48B1-B8C2-E3381B998772}.Release|Any CPU.Build.0 = Release|Any CPU
-		{4F56615E-D07D-48B1-B8C2-E3381B998772}.DebugL|Any CPU.ActiveCfg = DebugL|Any CPU
-		{4F56615E-D07D-48B1-B8C2-E3381B998772}.DebugL|Any CPU.Build.0 = DebugL|Any CPU
 		{2B06D1E3-17BA-4480-B66B-BF1798823D2F}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
 		{2B06D1E3-17BA-4480-B66B-BF1798823D2F}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{2B06D1E3-17BA-4480-B66B-BF1798823D2F}.Release|Any CPU.ActiveCfg = Release|Any CPU
@@ -109,14 +103,20 @@ Global
 		{6B17D23E-1E2F-4787-91BE-166B59CCDA32}.Release|Any CPU.Build.0 = Release|Any CPU
 		{6B17D23E-1E2F-4787-91BE-166B59CCDA32}.DebugL|Any CPU.ActiveCfg = DebugL|Any CPU
 		{6B17D23E-1E2F-4787-91BE-166B59CCDA32}.DebugL|Any CPU.Build.0 = DebugL|Any CPU
+		{AA714781-072E-4942-B087-C0B0E7E9333B}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{AA714781-072E-4942-B087-C0B0E7E9333B}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{AA714781-072E-4942-B087-C0B0E7E9333B}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{AA714781-072E-4942-B087-C0B0E7E9333B}.Release|Any CPU.Build.0 = Release|Any CPU
+		{AA714781-072E-4942-B087-C0B0E7E9333B}.DebugL|Any CPU.ActiveCfg = DebugL|Any CPU
+		{AA714781-072E-4942-B087-C0B0E7E9333B}.DebugL|Any CPU.Build.0 = DebugL|Any CPU
 	EndGlobalSection
 	GlobalSection(NestedProjects) = preSolution
 		{B62EB965-80B5-4547-9CDC-92ECE2737B89} = {48DDCE79-CF0A-43A9-B995-7649D58C07A1}
-		{4F56615E-D07D-48B1-B8C2-E3381B998772} = {48DDCE79-CF0A-43A9-B995-7649D58C07A1}
 		{2B06D1E3-17BA-4480-B66B-BF1798823D2F} = {48DDCE79-CF0A-43A9-B995-7649D58C07A1}
 		{02C28B56-A1E4-4489-ACBE-FF0085D2EE54} = {48DDCE79-CF0A-43A9-B995-7649D58C07A1}
 		{4D779D7D-F277-427E-9AAE-9A84BC640CB9} = {AF91F7B3-12FF-44AF-BBBE-A4A8C7340D78}
 		{42FC864B-15CB-416C-937C-D4A2D84107B5} = {AF91F7B3-12FF-44AF-BBBE-A4A8C7340D78}
 		{6B17D23E-1E2F-4787-91BE-166B59CCDA32} = {48DDCE79-CF0A-43A9-B995-7649D58C07A1}
+		{AA714781-072E-4942-B087-C0B0E7E9333B} = {48DDCE79-CF0A-43A9-B995-7649D58C07A1}
 	EndGlobalSection
 EndGlobal
