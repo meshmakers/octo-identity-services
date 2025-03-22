@@ -14,12 +14,12 @@ public class LdapGroupHandler
         _userNameAttributeName = userNameAttributeName;
     }
 
-    public IEnumerable<string> GetGroupsForUser(ILdapConnection ldapConnection, string userName)
+    public async IAsyncEnumerable<string> GetGroupsForUserAsync(ILdapConnection ldapConnection, string userName)
     {
         var groups = new Stack<string>();
         var uniqueGroups = new HashSet<string>();
 
-        foreach (var group in GetGroupsForUserCore(ldapConnection, userName))
+        await foreach (var group in GetGroupsForUserCoreAsync(ldapConnection, userName))
         {
             groups.Push(group);
         }
@@ -32,21 +32,21 @@ public class LdapGroupHandler
                 yield return group;
             }
 
-            foreach (var parentGroup in GetGroupsForUserCore(ldapConnection, group))
+            await foreach (var parentGroup in GetGroupsForUserCoreAsync(ldapConnection, group))
             {
                 groups.Push(parentGroup);
             }
         }
     }
 
-    private IEnumerable<string> GetGroupsForUserCore(ILdapConnection ldapConnection, string user)
+    private async IAsyncEnumerable<string> GetGroupsForUserCoreAsync(ILdapConnection ldapConnection, string user)
     {
-        var entries = ldapConnection.ExecuteQuery(parameters =>
+        var entries = await ldapConnection.ExecuteQueryAsync(parameters =>
         {
             parameters.BaseDn = _searchBase;
             parameters.Filter = $"({_userNameAttributeName}={user})";
             parameters.Scope = Novell.Directory.Ldap.LdapConnection.ScopeSub;
-            parameters.Attrs = new[] { "cn", "memberOf" };
+            parameters.Attrs = ["cn", "memberOf"];
             parameters.TypesOnly = false;
         });
 
@@ -58,7 +58,7 @@ public class LdapGroupHandler
 
         IEnumerable<string> HandleEntry(LdapEntry entry)
         {
-            var attr = entry.GetAttribute("memberOf");
+            var attr = entry.GetOrDefault("memberOf");
 
             if (attr == null)
             {

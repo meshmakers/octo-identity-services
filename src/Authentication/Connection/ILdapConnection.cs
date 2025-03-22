@@ -4,5 +4,5 @@ namespace Meshmakers.Octo.Backend.Authentication.Connection;
 
 public interface ILdapConnection : IDisposable
 {
-    public List<LdapEntry> ExecuteQuery(Action<LdapSearchParameters> configureSearchParams);
+    public Task<List<LdapEntry>> ExecuteQueryAsync(Action<LdapSearchParameters> configureSearchParams);
 }

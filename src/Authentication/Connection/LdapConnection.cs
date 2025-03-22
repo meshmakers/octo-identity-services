@@ -1,4 +1,3 @@
-using System.Diagnostics.CodeAnalysis;
 using Meshmakers.Common.Shared;
 using Microsoft.Extensions.Logging;
 using Novell.Directory.Ldap;
@@ -40,50 +39,45 @@ internal class LdapConnection : ILdapConnection
     /// <summary>
     ///     Property used to access the ldap connection.
     /// </summary>
-    [AllowNull]
-    private Novell.Directory.Ldap.LdapConnection Connection
+    private async Task<Novell.Directory.Ldap.LdapConnection> GetConnectionAsync()
     {
-        get
+        if (_connection == null || _connection.Connected != true)
         {
-            if (_connection == null || _connection.Connected != true)
+            _connection = new Novell.Directory.Ldap.LdapConnection { SecureSocketLayer = _context.UseTls };
+            try
             {
-                _connection = new Novell.Directory.Ldap.LdapConnection { SecureSocketLayer = _context.UseTls };
-                try
-                {
-                    _connection.Connect(_context.Host, _context.Port);
-                }
-                catch (LdapException e)
-                {
-                    _logger.LogError(e, "Cannot connect to the LDAP server");
-
-                    // throw NotSupported rather than InvalidOperationException, since the authentication source is scoped and does not do reconnects
-                    throw new NotSupportedException("Cannot connect to the LDAP server.", e);
-                }
+                await _connection.ConnectAsync(_context.Host, _context.Port);
             }
+            catch (LdapException e)
+            {
+                _logger.LogError(e, "Cannot connect to the LDAP server");
 
-            return _connection;
+                // throw NotSupported rather than InvalidOperationException, since the authentication source is scoped and does not do reconnects
+                throw new NotSupportedException("Cannot connect to the LDAP server.", e);
+            }
         }
 
-        set
-        {
-            _connection?.Disconnect();
-
-            _connection = value;
-        }
+        return _connection;
     }
 
-    public List<LdapEntry> ExecuteQuery(Action<LdapSearchParameters> configureSearchParams)
+    private void Disconnect()
+    {
+        _connection?.Disconnect();
+        _connection = null;
+    }
+
+    public async Task<List<LdapEntry>> ExecuteQueryAsync(Action<LdapSearchParameters> configureSearchParams)
     {
         ArgumentValidation.Validate<Action<LdapSearchParameters>>(nameof(configureSearchParams), configureSearchParams);
 
         // Try VLV search only if not already connected to connection without VLV (searchQueue)
         if (_connectedWithoutVlv == false)
         {
-            BindBrowsingUser();
+            await BindBrowsingUserAsync();
             try
             {
-                // Try search with virtual list view (VLV), which supports paged results
-                return SearchWithVirtualList(configureSearchParams);
+                // Try to search with virtual list view (VLV), which supports paged results
+                return await SearchWithVirtualListAsync(configureSearchParams);
             }
             catch (NotSupportedException)
             {
@@ -97,8 +91,8 @@ internal class LdapConnection : ILdapConnection
 
         // If search with VLV did not work then try search with search queue
         // This search does not support paged results. There may be a max results limit.
-        BindBrowsingUser();
-        return SearchWithSearchQueue(configureSearchParams);
+        await BindBrowsingUserAsync();
+        return await SearchWithSearchQueueAsync(configureSearchParams);
     }
 
     public void Dispose()
@@ -123,7 +117,7 @@ internal class LdapConnection : ILdapConnection
         _disposed = true;
     }
 
-    private List<LdapEntry> SearchWithSearchQueue(
+    private async Task<List<LdapEntry>> SearchWithSearchQueueAsync(
         Action<LdapSearchParameters> configureSearchParams)
     {
         var parameters = new LdapSearchParameters();
@@ -131,8 +125,9 @@ internal class LdapConnection : ILdapConnection
 
         try
         {
-            var searchQueue = Connection.Search(
-                parameters.BaseDn ?? GetRootDse(),
+            var connection = await GetConnectionAsync();
+            var searchQueue = await connection.SearchAsync(
+                parameters.BaseDn ?? await GetRootDse(),
                 parameters.Scope,
                 parameters.Filter,
                 parameters.Attrs,
@@ -150,16 +145,18 @@ internal class LdapConnection : ILdapConnection
 
     private void DisableVirtualListView()
     {
-        Connection = null;
+        Disconnect();
         _connectedWithoutVlv = true;
     }
 
-    private string GetRootDse()
+    private async Task<string> GetRootDse()
     {
         try
         {
-            var searchQueue = Connection.Search(
-                string.Empty, Novell.Directory.Ldap.LdapConnection.ScopeBase, "(objectClass=*)", new[] { _rootDseAttrName },
+            var connection = await GetConnectionAsync();
+            var searchQueue = await connection.SearchAsync(
+                string.Empty, Novell.Directory.Ldap.LdapConnection.ScopeBase, "(objectClass=*)",
+                [_rootDseAttrName],
                 false, null, null);
             var entry = searchQueue.GetLdapEntries().FirstOrDefault();
             if (entry == null)
@@ -167,7 +164,7 @@ internal class LdapConnection : ILdapConnection
                 throw new NotSupportedException("LDAP search did not returned results.");
             }
 
-            var attribute = entry.GetAttribute(_rootDseAttrName);
+            var attribute = entry.Get(_rootDseAttrName);
             return attribute.StringValue;
         }
         catch (LdapException e)
@@ -183,7 +180,7 @@ internal class LdapConnection : ILdapConnection
     /// </summary>
     /// <param name="configureSearchParams">An action configuring the search parameters</param>
     /// <returns>A list of the found entries</returns>
-    private List<LdapEntry> SearchWithVirtualList(
+    private async Task<List<LdapEntry>> SearchWithVirtualListAsync(
         Action<LdapSearchParameters> configureSearchParams)
     {
         var parameters = new LdapSearchParameters();
@@ -199,23 +196,24 @@ internal class LdapConnection : ILdapConnection
         // break when we did not get a full page anymore
         while (pageIndex >= PageSize)
         {
+            var connection = await GetConnectionAsync();
             var ctrl = new LdapVirtualListControl(resultIndex, 0, PageSize - 1, 0);
-            var constraints = Connection.SearchConstraints;
-            constraints.SetControls(new LdapControl[] { ctrl, sort });
-            Connection.Constraints = constraints;
+            var constraints = connection.SearchConstraints;
+            constraints.SetControls([ctrl, sort]);
+            connection.Constraints = constraints;
 
             try
             {
-                var searchResults = Connection.Search(
-                    parameters.BaseDn ?? GetRootDse(),
+                var searchResults = await connection.SearchAsync(
+                    parameters.BaseDn ?? await GetRootDse(),
                     parameters.Scope,
                     parameters.Filter,
                     parameters.Attrs,
                     false);
                 pageIndex = 1;
-                while (searchResults.HasMore())
+                while (await searchResults.HasMoreAsync())
                 {
-                    ldapEntries.Add(searchResults.Next());
+                    ldapEntries.Add(await searchResults.NextAsync());
                     resultIndex++;
                     pageIndex++;
                 }
@@ -235,11 +233,12 @@ internal class LdapConnection : ILdapConnection
         return ldapEntries;
     }
 
-    private void BindBrowsingUser()
+    private async Task BindBrowsingUserAsync()
     {
         try
         {
-            Connection.Bind(_context.Username, _context.Password);
+            var connection = await GetConnectionAsync();
+            await connection.BindAsync(_context.Username, _context.Password);
         }
         catch (LdapException e)
         {
