@@ -1,5 +1,5 @@
 parameters:
-  - name: ContainerRegistry
+  - name: PublicRegistryServiceConnection
     type: string
   - name: Repository
     type: string
@@ -8,15 +8,18 @@ parameters:
   - name: Architecture
     type: string
     default: linux/amd64
-  - name: PrivateRegistry
+  - name: PrivateRegistryName
     type: string
+  - name: PublicRegistryName
+    type: string
+    default: docker.io
 
 steps:
   - task: Docker@2
-    displayName: Login to ${{ parameters.ContainerRegistry }}
+    displayName: Login to ${{ parameters.PublicRegistryServiceConnection }}
     inputs:
       command: login
-      containerRegistry: ${{ parameters.ContainerRegistry }}
+      containerRegistry: ${{ parameters.PublicRegistryServiceConnection }}
 
   - task: CmdLine@2
     condition: eq(variables.isRelease, true)
@@ -27,8 +30,8 @@ steps:
         docker buildx build --platform ${{ parameters.Architecture }} \
           --build-arg OCTO_PRIVATE_NUGET_SERVICE="$(NugetPrivateServer)" --build-arg OCTO_PRIVATE_NUGET_CERTIFICATE="$(NugetPrivateServerCa)" \
           -f ${{ parameters.Dockerfile }} \
-          -t ${{ parameters.Repository }}:$(Build.BuildNumber) \
-          -t ${{ parameters.PrivateRegistry }}/${{ parameters.Repository }}:$(Build.BuildNumber) \
+          -t ${{ parameters.PrivateRegistryName }}/${{ parameters.Repository }}:$(Build.BuildNumber) \
+          -t ${{ parameters.PublicRegistryName }}/${{ parameters.Repository }}:$(Build.BuildNumber) \
           --push \
           $(System.DefaultWorkingDirectory) &&
         docker buildx rm mybuilder
@@ -42,7 +45,7 @@ steps:
         docker buildx build --platform ${{ parameters.Architecture }} \
           --build-arg OCTO_PRIVATE_NUGET_SERVICE="$(NugetPrivateServer)" --build-arg OCTO_PRIVATE_NUGET_CERTIFICATE="$(NugetPrivateServerCa)" \
           -f ${{ parameters.Dockerfile }} \
-          -t ${{ parameters.PrivateRegistry }}/${{ parameters.Repository }}:$(Build.BuildNumber) \
+          -t ${{ parameters.PrivateRegistryName }}/${{ parameters.Repository }}:$(Build.BuildNumber) \
           --push \
           $(System.DefaultWorkingDirectory) &&
         docker buildx rm mybuilder
@@ -55,6 +58,6 @@ steps:
         docker buildx build --platform ${{ parameters.Architecture }} \
           --build-arg OCTO_PRIVATE_NUGET_SERVICE="$(NugetPrivateServer)" --build-arg OCTO_PRIVATE_NUGET_CERTIFICATE="$(NugetPrivateServerCa)" \
           -f ${{ parameters.Dockerfile }} \
-          -t ${{ parameters.PrivateRegistry }}/${{ parameters.Repository }}:$(Build.BuildNumber) \
+          -t ${{ parameters.PrivateRegistryName }}/${{ parameters.Repository }}:$(Build.BuildNumber) \
           $(System.DefaultWorkingDirectory) &&
         docker buildx rm mybuilder
