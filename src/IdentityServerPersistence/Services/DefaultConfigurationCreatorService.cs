@@ -234,7 +234,7 @@ internal class DefaultConfigurationCreatorService(
                 IdentityServerConstants.StandardScopes.Profile,
                 IdentityServerConstants.StandardScopes.Email,
                 JwtClaimTypes.Role,
-                CommonConstants.SystemApiFullAccess,
+                CommonConstants.AssetSystemApiFullAccess,
                 CommonConstants.IdentityApiFullAccess,
                 CommonConstants.BotApiFullAccess,
                 CommonConstants.CommunicationSystemApiFullAccess,
