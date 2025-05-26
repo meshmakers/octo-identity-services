@@ -28,7 +28,7 @@ public class CreateIdentityDataCommandRequestConsumer(
 
         var tenantRepository = tenantContext.GetTenantRepository();
 
-        // That means that the tenant is not configured to use a 
+        // That means that the tenant is not configured to use an
         // own identity management. We do nothing in this case and return information to the producer
         if (!await tenantContext.IsCkModelExistingAsync(SystemIdentityCkIds.ModelId))
         {
