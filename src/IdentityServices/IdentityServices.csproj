@@ -19,8 +19,8 @@
 
     <ItemGroup>
         <PackageReference Include="AspNetCore.Identity.Mongo" Version="10.1.0" />
-        <PackageReference Include="Microsoft.AspNetCore.Authentication.JwtBearer" Version="9.0.3" />
-        <PackageReference Include="NLog.Web.AspNetCore" Version="5.4.0" />
+        <PackageReference Include="Microsoft.AspNetCore.Authentication.JwtBearer" Version="9.0.5" />
+        <PackageReference Include="NLog.Web.AspNetCore" Version="5.5.0" />
     </ItemGroup>
 
 
