@@ -86,6 +86,6 @@ types:
     indexes:
       - indexType: Ascending
         fields:
-          - attributeNames:
+          - attributePaths:
               - NormalizedEmail
               - NormalizedUserName
