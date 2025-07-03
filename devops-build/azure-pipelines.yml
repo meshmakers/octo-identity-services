@@ -12,7 +12,7 @@ trigger:
 
 variables:
   - group: GitSSHGroup
-  - group: ApiKeys
+  - group: ApiKeys-mm-cloud
   - group: OctoDefault
   - name: solutionFile
     value: 'Octo.Identity.sln'
@@ -33,7 +33,7 @@ stages:
       - job: linux
         displayName: Docker build
         pool:
-          name: Gerald-Local-Linux
+          name: meshmakers-ci-agents
         steps:
           - template: update-build-number.yml
           - task: InstallSSHKey@0
