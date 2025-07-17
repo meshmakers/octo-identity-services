@@ -37,7 +37,7 @@ steps:
         docker buildx rm mybuilder
 
   - task: CmdLine@2
-    condition: and(eq(variables.isMain, true), eq(variables.isRelease, false))
+    condition: or(eq(variables.isMain, true), eq(variables.isTest, true), eq(variables.isRelease, true))
     displayName: Build/Push to private ${{ parameters.Repository }}:$(Build.BuildNumber)
     inputs:
       script: |
@@ -50,8 +50,8 @@ steps:
           $(System.DefaultWorkingDirectory) &&
         docker buildx rm mybuilder
   - task: CmdLine@2
-    condition: and(ne(variables.isMain, true), ne(variables.isRelease, true))
-    displayName: Build ONLY for non-main branch ${{ parameters.Repository }}:$(Build.BuildNumber)
+    condition: and(ne(variables.isMain, true), ne(variables.isTest, true), ne(variables.isRelease, true))
+    displayName: Build ONLY for non-main/test branch ${{ parameters.Repository }}:$(Build.BuildNumber)
     inputs:
       script: |
         docker buildx create --use --name mybuilder --bootstrap --config ~/buildkitd.default.toml &&
