@@ -14,7 +14,11 @@ public class OctoIdentityServicesOptions
         EnableTokenCleanup = true;
         TokenCleanupInterval = 60 * 60; // default: once an hour
         AllowDisplayInIframe = false;
+#if DEBUGL || DEBUG
         MinLogLevel = LogLevelDto.Trace;
+#else
+        MinLogLevel = LogLevelDto.Warn;
+#endif
     }
 
     /// <summary>
