@@ -20,7 +20,28 @@ steps:
       $buildNumberShort = "$major.$minor.$build"
       $buildNumberLong = "$major.$minor.$build.$revision"
       
+      $octoVersion = "0.1.*";
+      if ($branch.StartsWith("refs/heads/test/")) {
+        Write-host "Branch is test branch"
+        $branchName = '$(Build.SourceBranchName)'
+        $versionString = $branchName.SubString(0, $branchName.IndexOf("-"))
+        $newBranchName = $branchName.SubString($branchName.IndexOf("-") + 1)
+        Write-Host "Version string is $versionString"
+        $versionArray = $versionString.Split(".")
+        $major = [int]$versionArray[0]
+        $minor = [int]$versionArray[1]
+        $buildNumberShort = "$major.$minor.$build"
+        $buildNumberLong = "$major.$minor.$build.$revision"
+        $fullBuildNumber = "$major.$minor.$build.$revision-$newBranchName"
+        Write-Host "Setting build number to $buildNumberLong"
+        Write-Host "##vso[build.updatebuildnumber]$fullBuildNumber"
+      
+        $octoVersion = "$major.$minor.*"
+        Write-Host "Setting OctoVersion to $octoVersion"
+      }
+      
       if ($branch.StartsWith("refs/tags/r")) {
+        Write-host "Branch is release branch"
         $branchName = '$(Build.SourceBranchName)'
         $versionString = $branchName.SubString(1)
         $versionArray = $versionString.Split(".")
@@ -37,4 +58,5 @@ steps:
       Write-Host "##vso[task.setvariable variable=MinorVersion;]$minor"
       Write-Host "##vso[task.setvariable variable=BuildNumberShort;]$buildNumberShort"
       Write-Host "##vso[task.setvariable variable=BuildNumberLong;]$buildNumberLong"
+      Write-Host "##vso[task.setvariable variable=OctoVersion;]$octoVersion"
   displayName: 'Set build number'

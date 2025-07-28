@@ -18,7 +18,6 @@ using Meshmakers.Octo.Services.Contracts.DistributionEventHub.Messages;
 using Meshmakers.Octo.Services.Infrastructure;
 using Meshmakers.Octo.Services.Infrastructure.Configuration;
 using Meshmakers.Octo.Services.Infrastructure.CredentialGenerator;
-using Meshmakers.Octo.Services.Infrastructure.Middleware;
 using Meshmakers.Octo.Services.Infrastructure.Services;
 using Meshmakers.Octo.Services.Notifications.Generated.System.Notification.v1;
 using Meshmakers.Octo.Services.Notifications.Services;
@@ -111,8 +110,6 @@ try
     // Add IdentityServer for authentication using OpenID
     var identityServerBuilder = builder.Services.AddIdentityServer(serverOptions =>
         {
-            serverOptions.LicenseKey =
-                "eyJhbGciOiJQUzI1NiIsImtpZCI6IklkZW50aXR5U2VydmVyTGljZW5zZWtleS83Y2VhZGJiNzgxMzA0NjllODgwNjg5MTAyNTQxNGYxNiIsInR5cCI6ImxpY2Vuc2Urand0In0.eyJpc3MiOiJodHRwczovL2R1ZW5kZXNvZnR3YXJlLmNvbSIsImF1ZCI6IklkZW50aXR5U2VydmVyIiwiaWF0IjoxNzI0Mzk1MTUyLCJleHAiOjE3NTU5MzExNTIsImNvbXBhbnlfbmFtZSI6ImdlcmFsZC5sb2NobmVyQHNhbHpidXJnZGV2LmF0IiwiY29udGFjdF9pbmZvIjoiZ2VyYWxkLmxvY2huZXJAc2FsemJ1cmdkZXYuYXQiLCJlZGl0aW9uIjoiQ29tbXVuaXR5In0.FAmDK4UWFuh83RpqFtVR4lSktDfGVGsow1qjTNyhlkZqUJwFtO7z_d9wmGle1lUbxbB0JtKD6BHxhPlnqMvaj1jOQlSkLoz9T9IV3FrZgvK-09nPJUyt0__fdCbIQPrTE3Wri0OsxNOnOz8be0KWeyuLCZxCPZPLRzpDamjITiiG3mBHS-EFxZnNhLsn7VJwKMsi7efVZ1JOwggqqZbZ49phKQSe7dWFHMs8w3F-lhNURnJIRjZ6JuRSOiYClFFA1rO23dtfGatjQdKwYkSvsPJTDMwBdGip7FcAtiTNi_SBjI2GtOao7VD1rSUOxI5o9-VPzC9wi_V2v7ZGYc7hxQ";
             serverOptions.Events.RaiseErrorEvents = true;
             serverOptions.Events.RaiseInformationEvents = true;
             serverOptions.Events.RaiseFailureEvents = true;
@@ -127,12 +124,13 @@ try
         .AddAppAuthRedirectUriValidator()
         .AddJwtBearerClientAuthentication();
 
-    // Service that periodically cleans up tokens in grant database
+    // Service that periodically cleans up tokens in the grant database
     builder.Services.AddSingleton<IHostedService, TokenCleanupHostService>();
 
     // Add the extra configuration;
     builder.Services.ConfigureOptions<ConfigureIdentityServerOptions>();
     builder.Services.ConfigureOptions<ConfigureOctoOpenApiOptions>();
+    builder.Services.ConfigureOptions<ConfigureMapperConfigurationExpression>();
 
     if (builder.Environment.IsDevelopment())
     {
@@ -209,7 +207,9 @@ try
 
     builder.Services.AddMvc();
 
-    builder.Services.AddAutoMapper(typeof(Program));
+    builder.Services.AddAutoMapper(c=>
+    {
+    }, typeof(Program));
 
     var app = builder.Build();
 

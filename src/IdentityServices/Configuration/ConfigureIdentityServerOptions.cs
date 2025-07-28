@@ -1,20 +1,15 @@
 using Duende.IdentityServer.Configuration;
 using IdentityServerPersistence.Configuration.Options;
 using Meshmakers.Common.Shared;
+using Meshmakers.Octo.Services.Infrastructure;
 using Microsoft.Extensions.Options;
 
 namespace Meshmakers.Octo.Backend.IdentityServices.Configuration;
 
 // ReSharper disable once ClassNeverInstantiated.Global
-internal class ConfigureIdentityServerOptions : IConfigureNamedOptions<IdentityServerOptions>
+internal class ConfigureIdentityServerOptions(IOptions<OctoIdentityServicesOptions> octoIdentityOptions)
+    : IConfigureNamedOptions<IdentityServerOptions>
 {
-    private readonly IOptions<OctoIdentityServicesOptions> _octoIdentityOptions;
-
-    public ConfigureIdentityServerOptions(IOptions<OctoIdentityServicesOptions> octoIdentityOptions)
-    {
-        _octoIdentityOptions = octoIdentityOptions;
-    }
-
     public void Configure(IdentityServerOptions options)
     {
         Configure(Options.DefaultName, options);
@@ -22,6 +17,14 @@ internal class ConfigureIdentityServerOptions : IConfigureNamedOptions<IdentityS
 
     public void Configure(string? name, IdentityServerOptions options)
     {
-        options.IssuerUri = _octoIdentityOptions.Value.AuthorityUrl.EnsureEndsWith("/");
+        if (string.IsNullOrWhiteSpace(octoIdentityOptions.Value.IdentityServerLicenseKey))
+        {
+            throw InitializationException.EnsureLicenseKey(
+                "IdentityServer",
+                "OCTO_IDENTITY__IdentityServerLicenseKey");
+        }
+
+        options.IssuerUri = octoIdentityOptions.Value.AuthorityUrl.EnsureEndsWith("/");
+        options.LicenseKey = octoIdentityOptions.Value.IdentityServerLicenseKey;
     }
 }

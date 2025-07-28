@@ -94,11 +94,10 @@ public class PersistentGrantStore(IMultiTenancyResolverService multiTenancyResol
         var session = await _tenantRepository.GetSessionAsync();
         session.StartTransaction();
 
-        var fieldFilters = new List<FieldFilter>
-        {
-            new(nameof(RtPersistedGrant.GrantKey), FieldFilterOperator.Equals, key)
-        };
-        await _tenantRepository.DeleteOneRtEntityAsync<RtPersistedGrant>(session, fieldFilters);
+        var fieldFilterCriteria = FieldFilterCriteria.Create(LogicalOperator.And)
+            .Field(nameof(RtPersistedGrant.GrantKey), FieldFilterOperator.Equals, key);
+
+        await _tenantRepository.DeleteOneRtEntityAsync<RtPersistedGrant>(session, fieldFilterCriteria);
 
         await session.CommitTransactionAsync();
     }
@@ -108,24 +107,24 @@ public class PersistentGrantStore(IMultiTenancyResolverService multiTenancyResol
         var session = await _tenantRepository.GetSessionAsync();
         session.StartTransaction();
 
-        var fieldFilters = new List<FieldFilter>();
+        var fieldFilterCriteria = FieldFilterCriteria.Create(LogicalOperator.And);
         if (!string.IsNullOrWhiteSpace(filter.SubjectId))
         {
-            fieldFilters.Add(new(nameof(RtPersistedGrant.SubjectId), FieldFilterOperator.Equals, filter.SubjectId));
+            fieldFilterCriteria.FieldEquals(nameof(RtPersistedGrant.SubjectId), filter.SubjectId);
         }
         if (!string.IsNullOrWhiteSpace(filter.SessionId))
         {
-            fieldFilters.Add(new(nameof(RtPersistedGrant.SessionId), FieldFilterOperator.Equals, filter.SessionId));
+            fieldFilterCriteria.FieldEquals(nameof(RtPersistedGrant.SessionId), filter.SessionId);
         }
         if (!string.IsNullOrWhiteSpace(filter.ClientId))
         {
-            fieldFilters.Add(new(nameof(RtPersistedGrant.ClientId), FieldFilterOperator.Equals, filter.ClientId));
+            fieldFilterCriteria.FieldEquals(nameof(RtPersistedGrant.ClientId), filter.ClientId);
         }
         if (!string.IsNullOrWhiteSpace(filter.Type))
         {
-            fieldFilters.Add(new(nameof(RtPersistedGrant.GrantType), FieldFilterOperator.Equals, filter.Type));
+            fieldFilterCriteria.FieldEquals(nameof(RtPersistedGrant.GrantType), filter.Type);
         }
-        await _tenantRepository.DeleteOneRtEntityAsync<RtPersistedGrant>(session, fieldFilters);
+        await _tenantRepository.DeleteOneRtEntityAsync<RtPersistedGrant>(session, fieldFilterCriteria);
 
         await session.CommitTransactionAsync();
     }
@@ -185,13 +184,12 @@ public class PersistentGrantStore(IMultiTenancyResolverService multiTenancyResol
         var session = await _tenantRepository.GetSessionAsync();
         session.StartTransaction();
 
-        var fieldFilters = new List<FieldFilter>
-        {
-            new(nameof(RtPersistedGrant.SubjectId), FieldFilterOperator.Equals, subjectId),
-            new(nameof(RtPersistedGrant.ClientId), FieldFilterOperator.Equals, clientId),
-            new(nameof(RtPersistedGrant.GrantType), FieldFilterOperator.Equals, type)
-        };
-        await _tenantRepository.DeleteManyRtEntitiesAsync<RtPersistedGrant>(session, fieldFilters);
+        var fieldFilterCriteria = FieldFilterCriteria.Create(LogicalOperator.And)
+            .FieldEquals(nameof(RtPersistedGrant.SubjectId), subjectId)
+            .FieldEquals(nameof(RtPersistedGrant.ClientId), clientId)
+            .FieldEquals(nameof(RtPersistedGrant.GrantType), type);
+
+        await _tenantRepository.DeleteManyRtEntitiesAsync<RtPersistedGrant>(session, fieldFilterCriteria);
 
         await session.CommitTransactionAsync();
     }

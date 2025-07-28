@@ -28,7 +28,7 @@ steps:
       script: |
         docker buildx create --use --name mybuilder --bootstrap --config ~/buildkitd.default.toml &&
         docker buildx build --platform ${{ parameters.Architecture }} \
-          --build-arg OCTO_PRIVATE_NUGET_SERVICE="$(NugetPrivateServer)" --build-arg OCTO_PRIVATE_NUGET_CERTIFICATE="$(NugetPrivateServerCa)" \
+          --build-arg OCTO_PRIVATE_NUGET_SERVICE="$(NugetPrivateServer)" --build-arg OCTO_PRIVATE_NUGET_CERTIFICATE="$(NugetPrivateServerCa)" --build-arg OCTO_VERSION="$(OctoVersion)" \
           -f ${{ parameters.Dockerfile }} \
           -t ${{ parameters.PrivateRegistryName }}/${{ parameters.Repository }}:$(Build.BuildNumber) \
           -t ${{ parameters.PublicRegistryName }}/${{ parameters.Repository }}:$(Build.BuildNumber) \
@@ -37,26 +37,26 @@ steps:
         docker buildx rm mybuilder
 
   - task: CmdLine@2
-    condition: and(eq(variables.isMain, true), eq(variables.isRelease, false))
+    condition: or(eq(variables.isMain, true), eq(variables.isTest, true), eq(variables.isRelease, true))
     displayName: Build/Push to private ${{ parameters.Repository }}:$(Build.BuildNumber)
     inputs:
       script: |
         docker buildx create --use --name mybuilder --bootstrap --config ~/buildkitd.default.toml &&
         docker buildx build --platform ${{ parameters.Architecture }} \
-          --build-arg OCTO_PRIVATE_NUGET_SERVICE="$(NugetPrivateServer)" --build-arg OCTO_PRIVATE_NUGET_CERTIFICATE="$(NugetPrivateServerCa)" \
+          --build-arg OCTO_PRIVATE_NUGET_SERVICE="$(NugetPrivateServer)" --build-arg OCTO_PRIVATE_NUGET_CERTIFICATE="$(NugetPrivateServerCa)" --build-arg OCTO_VERSION="$(OctoVersion)" \
           -f ${{ parameters.Dockerfile }} \
           -t ${{ parameters.PrivateRegistryName }}/${{ parameters.Repository }}:$(Build.BuildNumber) \
           --push \
           $(System.DefaultWorkingDirectory) &&
         docker buildx rm mybuilder
   - task: CmdLine@2
-    condition: and(ne(variables.isMain, true), ne(variables.isRelease, true))
-    displayName: Build ONLY for non-main branch ${{ parameters.Repository }}:$(Build.BuildNumber)
+    condition: and(ne(variables.isMain, true), ne(variables.isTest, true), ne(variables.isRelease, true))
+    displayName: Build ONLY for non-main/test branch ${{ parameters.Repository }}:$(Build.BuildNumber)
     inputs:
       script: |
         docker buildx create --use --name mybuilder --bootstrap --config ~/buildkitd.default.toml &&
         docker buildx build --platform ${{ parameters.Architecture }} \
-          --build-arg OCTO_PRIVATE_NUGET_SERVICE="$(NugetPrivateServer)" --build-arg OCTO_PRIVATE_NUGET_CERTIFICATE="$(NugetPrivateServerCa)" \
+          --build-arg OCTO_PRIVATE_NUGET_SERVICE="$(NugetPrivateServer)" --build-arg OCTO_PRIVATE_NUGET_CERTIFICATE="$(NugetPrivateServerCa)" --build-arg OCTO_VERSION="$(OctoVersion)" \
           -f ${{ parameters.Dockerfile }} \
           -t ${{ parameters.PrivateRegistryName }}/${{ parameters.Repository }}:$(Build.BuildNumber) \
           $(System.DefaultWorkingDirectory) &&
