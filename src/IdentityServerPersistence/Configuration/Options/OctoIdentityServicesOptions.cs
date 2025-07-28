@@ -22,6 +22,16 @@ public class OctoIdentityServicesOptions
     }
 
     /// <summary>
+    /// The license key for the IdentityServer.
+    /// </summary>
+    public required string IdentityServerLicenseKey { get; set; }
+
+    /// <summary>
+    /// The license key for the AutoMapper.
+    /// </summary>
+    public required string AutoMapperLicenseKey { get; set; }
+
+    /// <summary>
     ///     Gets or sets the prefix for the OctoMesh installation instance.
     /// </summary>
     public string? InstancePrefix { get; set; }
