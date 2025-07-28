@@ -20,6 +20,7 @@ steps:
       $buildNumberShort = "$major.$minor.$build"
       $buildNumberLong = "$major.$minor.$build.$revision"
       
+      $octoVersion = "0.1.*";
       if ($branch.StartsWith("refs/heads/test/")) {
         Write-host "Branch is test branch"
         $branchName = '$(Build.SourceBranchName)'
@@ -37,7 +38,6 @@ steps:
       
         $octoVersion = "$major.$minor.*"
         Write-Host "Setting OctoVersion to $octoVersion"
-        Write-Host "##vso[task.setvariable variable=OctoVersion;]$octoVersion"
       }
       
       if ($branch.StartsWith("refs/tags/r")) {
@@ -58,4 +58,5 @@ steps:
       Write-Host "##vso[task.setvariable variable=MinorVersion;]$minor"
       Write-Host "##vso[task.setvariable variable=BuildNumberShort;]$buildNumberShort"
       Write-Host "##vso[task.setvariable variable=BuildNumberLong;]$buildNumberLong"
+      Write-Host "##vso[task.setvariable variable=OctoVersion;]$octoVersion"
   displayName: 'Set build number'
