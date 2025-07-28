@@ -34,6 +34,10 @@ steps:
         $fullBuildNumber = "$major.$minor.$build.$revision-$newBranchName"
         Write-Host "Setting build number to $buildNumberLong"
         Write-Host "##vso[build.updatebuildnumber]$fullBuildNumber"
+      
+        $octoVersion = "$major.$minor.*"
+        Write-Host "Setting OctoVersion to $octoVersion"
+        Write-Host "##vso[task.setvariable variable=OctoVersion;]$octoVersion"
       }
       
       if ($branch.StartsWith("refs/tags/r")) {
