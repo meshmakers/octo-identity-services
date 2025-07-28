@@ -18,7 +18,6 @@ using Meshmakers.Octo.Services.Contracts.DistributionEventHub.Messages;
 using Meshmakers.Octo.Services.Infrastructure;
 using Meshmakers.Octo.Services.Infrastructure.Configuration;
 using Meshmakers.Octo.Services.Infrastructure.CredentialGenerator;
-using Meshmakers.Octo.Services.Infrastructure.Middleware;
 using Meshmakers.Octo.Services.Infrastructure.Services;
 using Meshmakers.Octo.Services.Notifications.Generated.System.Notification.v1;
 using Meshmakers.Octo.Services.Notifications.Services;
@@ -111,8 +110,6 @@ try
     // Add IdentityServer for authentication using OpenID
     var identityServerBuilder = builder.Services.AddIdentityServer(serverOptions =>
         {
-            serverOptions.LicenseKey =
-                "***REMOVED-DUENDE-LICENSE-AB3837***";
             serverOptions.Events.RaiseErrorEvents = true;
             serverOptions.Events.RaiseInformationEvents = true;
             serverOptions.Events.RaiseFailureEvents = true;
@@ -127,12 +124,13 @@ try
         .AddAppAuthRedirectUriValidator()
         .AddJwtBearerClientAuthentication();
 
-    // Service that periodically cleans up tokens in grant database
+    // Service that periodically cleans up tokens in the grant database
     builder.Services.AddSingleton<IHostedService, TokenCleanupHostService>();
 
     // Add the extra configuration;
     builder.Services.ConfigureOptions<ConfigureIdentityServerOptions>();
     builder.Services.ConfigureOptions<ConfigureOctoOpenApiOptions>();
+    builder.Services.ConfigureOptions<ConfigureMapperConfigurationExpression>();
 
     if (builder.Environment.IsDevelopment())
     {
@@ -209,7 +207,9 @@ try
 
     builder.Services.AddMvc();
 
-    builder.Services.AddAutoMapper(typeof(Program));
+    builder.Services.AddAutoMapper(c=>
+    {
+    }, typeof(Program));
 
     var app = builder.Build();
 
