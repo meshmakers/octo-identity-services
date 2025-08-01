@@ -21,13 +21,9 @@
         <PackageReference Include="AspNetCore.Identity.Mongo" Version="10.1.0" />
         <PackageReference Include="Microsoft.AspNetCore.Authentication.JwtBearer" Version="9.0.7" />
         <PackageReference Include="NLog.Web.AspNetCore" Version="6.0.2" />
-    </ItemGroup>
-
-
-    <ItemGroup>
-        <ProjectReference Include="$(OctoCommonServicesPath)src\Swagger\Swagger.csproj" />
+        <PackageReference Include="Meshmakers.Octo.Services.Swagger" Version="$(OctoVersion)" />
+        <PackageReference Include="Meshmakers.Octo.Services.Observability" Version="$(OctoVersion)" />
         <ProjectReference Include="..\Authentication\Authentication.csproj" />
-        <ProjectReference Include="..\octo-common-services\src\Observability\Observability.csproj" />
     </ItemGroup>
 
 
