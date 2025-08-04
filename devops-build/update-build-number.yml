@@ -52,6 +52,9 @@ steps:
         $buildNumberLong = "$major.$minor.$build.0"
         Write-Host "Setting build number to $buildNumberLong"
         Write-Host "##vso[build.updatebuildnumber]$buildNumberLong"
+      
+        Write-Host "Setting OctoVersion to $buildNumberShort"
+        $octoVersion = $buildNumberShort
       }
       Write-Host "Setting build number short to '$buildNumberShort', build number long to '$buildNumberLong'"
       Write-Host "##vso[task.setvariable variable=MajorVersion;]$major"
