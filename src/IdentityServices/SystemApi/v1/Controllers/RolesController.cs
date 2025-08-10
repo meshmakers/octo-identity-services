@@ -5,10 +5,11 @@ using AutoMapper;
 using IdentityModel;
 using IdentityServerPersistence;
 using Meshmakers.Octo.Communication.Contracts.DataTransferObjects;
+using Meshmakers.Octo.Communication.Contracts.DataTransferObjects.ApiErrors;
 using Meshmakers.Octo.Runtime.Contracts.MongoDb;
 using Meshmakers.Octo.Runtime.Contracts.Repositories.Query;
-using Meshmakers.Octo.Services.Contracts.ApiErrors;
 using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Http.HttpResults;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Mvc;
 using MongoDB.Bson;
@@ -47,45 +48,60 @@ public class RolesController : ControllerBase
     [Authorize(IdentityServiceConstants.IdentityApiReadOnlyPolicy)]
     [EndpointSummary("Returns all existing roles.")]
     [ProducesResponseType(typeof(IEnumerable<RoleDto>), StatusCodes.Status200OK)]
-    public IEnumerable<RoleDto> Get()
+    [ProducesResponseType(typeof(InternalServerErrorDto), StatusCodes.Status500InternalServerError)]
+    public IActionResult Get()
     {
-        var list = _mapper.Map<List<RoleDto>>(_roleManager.Roles);
-
-        return list;
+        try
+        {
+            var list = _mapper.Map<List<RoleDto>>(_roleManager.Roles);
+            return Ok(list);
+        }
+        catch (Exception e)
+        {
+            return StatusCode(StatusCodes.Status500InternalServerError, new InternalServerErrorDto(e.Message));
+        }
     }
 
     // GET system/v1/roles
     [HttpGet("GetPaged")]
     [Authorize(IdentityServiceConstants.IdentityApiReadOnlyPolicy)]
     [EndpointSummary("Returns all existing roles.")]
-    [ProducesResponseType(typeof(IEnumerable<RoleDto>), StatusCodes.Status200OK)]
-    public async Task<PagedResult<RoleDto>> Get([Required] [FromQuery] PagingParams pagingParams)
+    [ProducesResponseType(typeof(PagedResult<RoleDto>), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(InternalServerErrorDto), StatusCodes.Status500InternalServerError)]
+    public async Task<IActionResult> Get([Required] [FromQuery] PagingParams pagingParams)
     {
-        var tenantRepository = _systemContext.GetSystemTenantRepository();
-
-        using var session = await tenantRepository.GetSessionAsync();
-        session.StartTransaction();
-
-        var dataOperation = DataQueryOperation.Create();
-        if (!string.IsNullOrWhiteSpace(pagingParams.Filter))
+        try
         {
-            dataOperation.FieldLike(nameof(RtRole.Name), pagingParams.Filter);
+            var tenantRepository = _systemContext.GetSystemTenantRepository();
+
+            using var session = await tenantRepository.GetSessionAsync();
+            session.StartTransaction();
+
+            var dataOperation = DataQueryOperation.Create();
+            if (!string.IsNullOrWhiteSpace(pagingParams.Filter))
+            {
+                dataOperation.FieldLike(nameof(RtRole.Name), pagingParams.Filter);
+            }
+
+            var resultSet =
+                await tenantRepository.GetRtEntitiesByTypeAsync<RtRole>(session, dataOperation, pagingParams.Skip,
+                    pagingParams.Take);
+            var list = _mapper.Map<List<RoleDto>>(resultSet.Items);
+
+            var pagedResult = new PagedResult<RoleDto>(list, pagingParams.Skip, pagingParams.Take, resultSet.TotalCount);
+
+            var header = pagedResult.GetHeader();
+            if (header != null)
+            {
+                Response.Headers.Append("X-Pagination", header.ToJson());
+            }
+
+            return Ok(pagedResult);
         }
-
-        var resultSet =
-            await tenantRepository.GetRtEntitiesByTypeAsync<RtRole>(session, dataOperation, pagingParams.Skip,
-                pagingParams.Take);
-        var list = _mapper.Map<List<RoleDto>>(resultSet.Items);
-
-        var pagedResult = new PagedResult<RoleDto>(list, pagingParams.Skip, pagingParams.Take, resultSet.TotalCount);
-
-        var header = pagedResult.GetHeader();
-        if (header != null)
+        catch (Exception e)
         {
-            Response.Headers.Append("X-Pagination", header.ToJson());
+            return StatusCode(StatusCodes.Status500InternalServerError, new InternalServerErrorDto(e.Message));
         }
-
-        return pagedResult;
     }
 
     // GET system/v1/roles/names/{roleName}
@@ -93,16 +109,25 @@ public class RolesController : ControllerBase
     [Authorize(IdentityServiceConstants.IdentityApiReadOnlyPolicy)]
     [EndpointSummary("Returns role information based on it's name")]
     [ProducesResponseType(typeof(RoleDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [ProducesResponseType(typeof(InternalServerErrorDto), StatusCodes.Status500InternalServerError)]
     public async Task<IActionResult> Get([Required] [Description("Name of the role")] string roleName)
     {
-        var rtRole = await _roleManager.FindByNameAsync(roleName);
-        if (rtRole == null)
+        try
         {
-            return NotFound();
-        }
+            var rtRole = await _roleManager.FindByNameAsync(roleName);
+            if (rtRole == null)
+            {
+                return NotFound();
+            }
 
-        var roleDto = _mapper.Map<RoleDto>(rtRole);
-        return Ok(roleDto);
+            var roleDto = _mapper.Map<RoleDto>(rtRole);
+            return Ok(roleDto);
+        }
+        catch (Exception e)
+        {
+            return StatusCode(StatusCodes.Status500InternalServerError, new InternalServerErrorDto(e.Message));
+        }
     }
 
     // POST system/v1/roles
@@ -110,31 +135,33 @@ public class RolesController : ControllerBase
     [Authorize(IdentityServiceConstants.IdentityApiReadWritePolicy)]
     [EndpointSummary("Creates a new role.")]
     [ProducesResponseType(StatusCodes.Status200OK)]
-    [ProducesResponseType(typeof(InternalServerError), StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(typeof(OperationFailedErrorDto), StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(typeof(InternalServerErrorDto), StatusCodes.Status500InternalServerError)]
     public async Task<IActionResult> Post(
         [Required] [FromBody] [Description("The role data transfer object instance")] RoleDto roleDto)
     {
-        if (!ModelState.IsValid)
-        {
-            return BadRequest(ModelState);
-        }
-
-        var rtRole = _mapper.Map<RtRole>(roleDto);
-
         try
         {
+            if (!ModelState.IsValid)
+            {
+                return BadRequest(ModelState);
+            }
+
+            var rtRole = _mapper.Map<RtRole>(roleDto);
+
             var result = await _roleManager.CreateAsync(rtRole);
             if (result.Succeeded)
             {
                 return Ok();
             }
 
-            return BadRequest(new OperationFailedError("Creation of role failed",
-                result.Errors.Select(x => new FailedDetails { Code = x.Code, Description = x.Description })));
+            return BadRequest(new OperationFailedErrorDto("Creation of role failed",
+                result.Errors.Select(x => new FailedDetailsDto { Code = x.Code, Description = x.Description })));
         }
         catch (Exception e)
         {
-            return BadRequest(new InternalServerError(e.Message));
+            return StatusCode(StatusCodes.Status500InternalServerError, new InternalServerErrorDto(e.Message));
         }
     }
 
@@ -143,37 +170,41 @@ public class RolesController : ControllerBase
     [Authorize(IdentityServiceConstants.IdentityApiReadWritePolicy)]
     [EndpointSummary("Updates a role.")]
     [ProducesResponseType(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(typeof(NotFoundErrorDto), StatusCodes.Status404NotFound)]
+    [ProducesResponseType(typeof(OperationFailedErrorDto), StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(typeof(InternalServerErrorDto), StatusCodes.Status500InternalServerError)]
     public async Task<IActionResult> Put(
         [Required] [Description("The role name")] string roleName,
         [Required] [FromBody] [Description("The role data transfer object instance")] RoleDto roleDto)
     {
-        if (!ModelState.IsValid)
-        {
-            return BadRequest(ModelState);
-        }
-
-        var rtRole = await _roleManager.FindByNameAsync(roleName);
-        if (rtRole == null)
-        {
-            return NotFound(new NotFoundError($"Role '{roleName}' not found."));
-        }
-
-        _mapper.Map(roleDto, rtRole);
-
         try
         {
+            if (!ModelState.IsValid)
+            {
+                return BadRequest(ModelState);
+            }
+
+            var rtRole = await _roleManager.FindByNameAsync(roleName);
+            if (rtRole == null)
+            {
+                return NotFound(new NotFoundErrorDto($"Role '{roleName}' not found."));
+            }
+
+            _mapper.Map(roleDto, rtRole);
+
             var result = await _roleManager.UpdateAsync(rtRole);
             if (result.Succeeded)
             {
                 return Ok();
             }
 
-            return BadRequest(new OperationFailedError("Update of role failed",
-                result.Errors.Select(x => new FailedDetails { Code = x.Code, Description = x.Description })));
+            return BadRequest(new OperationFailedErrorDto("Update of role failed",
+                result.Errors.Select(x => new FailedDetailsDto { Code = x.Code, Description = x.Description })));
         }
         catch (Exception e)
         {
-            return BadRequest(new InternalServerError(e.Message));
+            return StatusCode(StatusCodes.Status500InternalServerError, new InternalServerErrorDto(e.Message));
         }
     }
 
@@ -182,28 +213,31 @@ public class RolesController : ControllerBase
     [Authorize(IdentityServiceConstants.IdentityApiReadWritePolicy)]
     [EndpointSummary("Deletes a role.")]
     [ProducesResponseType(StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(NotFoundErrorDto), StatusCodes.Status404NotFound)]
+    [ProducesResponseType(typeof(OperationFailedErrorDto), StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(typeof(InternalServerErrorDto), StatusCodes.Status500InternalServerError)]
     public async Task<IActionResult> Delete([Required] [Description("The role name")] string roleName)
     {
-        var octoRole = await _roleManager.FindByNameAsync(roleName);
-        if (octoRole == null)
-        {
-            return NotFound(new NotFoundError($"Role '{roleName}' not found."));
-        }
-
         try
         {
+            var octoRole = await _roleManager.FindByNameAsync(roleName);
+            if (octoRole == null)
+            {
+                return NotFound(new NotFoundErrorDto($"Role '{roleName}' not found."));
+            }
+
             var result = await _roleManager.DeleteAsync(octoRole);
             if (result.Succeeded)
             {
                 return Ok();
             }
 
-            return BadRequest(new OperationFailedError("Delete of role failed",
-                result.Errors.Select(x => new FailedDetails { Code = x.Code, Description = x.Description })));
+            return BadRequest(new OperationFailedErrorDto("Delete of role failed",
+                result.Errors.Select(x => new FailedDetailsDto { Code = x.Code, Description = x.Description })));
         }
         catch (Exception e)
         {
-            return BadRequest(new InternalServerError(e.Message));
+            return StatusCode(StatusCodes.Status500InternalServerError, new InternalServerErrorDto(e.Message));
         }
     }
 }
