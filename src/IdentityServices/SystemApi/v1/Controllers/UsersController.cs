@@ -6,10 +6,10 @@ using IdentityModel;
 using IdentityServerPersistence;
 using Meshmakers.Octo.Backend.IdentityServices.Services;
 using Meshmakers.Octo.Communication.Contracts.DataTransferObjects;
+using Meshmakers.Octo.Communication.Contracts.DataTransferObjects.ApiErrors;
 using Meshmakers.Octo.ConstructionKit.Contracts;
 using Meshmakers.Octo.Runtime.Contracts.MongoDb.Configuration;
 using Meshmakers.Octo.Runtime.Contracts.RepositoryEntities;
-using Meshmakers.Octo.Services.Contracts.ApiErrors;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Mvc;
@@ -209,7 +209,7 @@ public class UsersController : ControllerBase
         }
         catch (Exception e)
         {
-            return BadRequest(new InternalServerError(e.Message));
+            return StatusCode(StatusCodes.Status500InternalServerError, new InternalServerErrorDto(e.Message));
         }
     }
 
@@ -232,7 +232,7 @@ public class UsersController : ControllerBase
         var rtUser = await _userManager.FindByNameAsync(userName);
         if (rtUser == null)
         {
-            return NotFound(new NotFoundError($"User name '{userName}' not found."));
+            return NotFound(new NotFoundErrorDto($"User name '{userName}' not found."));
         }
 
         _mapper.Map(userDto, rtUser);
@@ -249,7 +249,7 @@ public class UsersController : ControllerBase
         }
         catch (Exception e)
         {
-            return BadRequest(new InternalServerError(e.Message));
+            return StatusCode(StatusCodes.Status500InternalServerError, new InternalServerErrorDto(e.Message));
         }
     }
 
@@ -273,7 +273,7 @@ public class UsersController : ControllerBase
             var user = await _userManager.FindByNameAsync(userName);
             if (user == null)
             {
-                return NotFound(new NotFoundError($"User '{userName}' not found."));
+                return NotFound(new NotFoundErrorDto($"User '{userName}' not found."));
             }
 
             var token = await _userManager.GeneratePasswordResetTokenAsync(user);
@@ -290,7 +290,7 @@ public class UsersController : ControllerBase
         }
         catch (InvalidOperationException e)
         {
-            return BadRequest(new InternalServerError(e.Message));
+            return StatusCode(StatusCodes.Status500InternalServerError, new InternalServerErrorDto(e.Message));
         }
     }
 
@@ -309,7 +309,7 @@ public class UsersController : ControllerBase
         var applicationUser = await _userManager.FindByNameAsync(userName);
         if (applicationUser == null)
         {
-            return NotFound(new NotFoundError($"User name '{userName}' not found."));
+            return NotFound(new NotFoundErrorDto($"User name '{userName}' not found."));
         }
 
         try
@@ -324,7 +324,7 @@ public class UsersController : ControllerBase
         }
         catch (Exception e)
         {
-            return BadRequest(new InternalServerError(e.Message));
+            return StatusCode(StatusCodes.Status500InternalServerError, new InternalServerErrorDto(e.Message));
         }
     }
 
@@ -340,7 +340,7 @@ public class UsersController : ControllerBase
         var user = await _userManager.FindByNameAsync(userName);
         if (user == null)
         {
-            return NotFound(new NotFoundError($"User with name '{userName}' not found."));
+            return NotFound(new NotFoundErrorDto($"User with name '{userName}' not found."));
         }
 
         user.RoleIds ??= new AttributeStringValueList();
@@ -351,7 +351,7 @@ public class UsersController : ControllerBase
             var role = await _roleManager.FindByIdAsync(roleId.ToString());
             if (role == null)
             {
-                return NotFound(new NotFoundError($"Role with id '{roleId}' not found."));
+                return NotFound(new NotFoundErrorDto($"Role with id '{roleId}' not found."));
             }
 
             user.RoleIds?.Add(role.RtId.ToString());
@@ -373,18 +373,18 @@ public class UsersController : ControllerBase
         var user = await _userManager.FindByNameAsync(userName);
         if (user == null)
         {
-            return NotFound(new NotFoundError($"User with name '{userName}' not found."));
+            return NotFound(new NotFoundErrorDto($"User with name '{userName}' not found."));
         }
 
         var role = await _roleManager.FindByNameAsync(roleName);
         if (role == null)
         {
-            return NotFound(new NotFoundError($"Role with name '{roleName}' not found."));
+            return NotFound(new NotFoundErrorDto($"Role with name '{roleName}' not found."));
         }
 
         if (user.RoleIds?.Contains(role.RtId.ToString()) ?? false)
         {
-            return BadRequest(new OperationFailedError($"User '{user.UserName}' already has role '{role.Name}'"));
+            return BadRequest(new OperationFailedErrorDto($"User '{user.UserName}' already has role '{role.Name}'"));
         }
 
         user.RoleIds ??= new AttributeStringValueList();
@@ -405,18 +405,18 @@ public class UsersController : ControllerBase
         var user = await _userManager.FindByNameAsync(userName);
         if (user == null)
         {
-            return NotFound(new NotFoundError($"User with name '{userName}' not found."));
+            return NotFound(new NotFoundErrorDto($"User with name '{userName}' not found."));
         }
 
         var role = await _roleManager.FindByNameAsync(roleName);
         if (role == null)
         {
-            return NotFound(new NotFoundError($"Role with name '{roleName}' not found."));
+            return NotFound(new NotFoundErrorDto($"Role with name '{roleName}' not found."));
         }
 
         if (!user.RoleIds?.Contains(role.RtId.ToString()) ?? false)
         {
-            return BadRequest(new OperationFailedError($"User '{user.UserName}' doesn't have role '{role.Name}'"));
+            return BadRequest(new OperationFailedErrorDto($"User '{user.UserName}' doesn't have role '{role.Name}'"));
         }
 
         user.RoleIds?.Remove(role.RtId.ToString());
@@ -435,7 +435,7 @@ public class UsersController : ControllerBase
 
     private IActionResult GetBadRequestResultWithErrorDescription(string operation, IEnumerable<IdentityError> errors)
     {
-        return BadRequest(new OperationFailedError(operation,
-            errors.Select(x => new FailedDetails { Code = x.Code, Description = x.Description })));
+        return BadRequest(new OperationFailedErrorDto(operation,
+            errors.Select(x => new FailedDetailsDto { Code = x.Code, Description = x.Description })));
     }
 }

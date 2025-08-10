@@ -8,9 +8,10 @@ using IdentityServerPersistence.SystemStores;
 using Meshmakers.Common.Shared;
 using Meshmakers.Octo.Common.DistributionEventHub.Services;
 using Meshmakers.Octo.Communication.Contracts.DataTransferObjects;
-using Meshmakers.Octo.Services.Contracts.ApiErrors;
+using Meshmakers.Octo.Communication.Contracts.DataTransferObjects.ApiErrors;
 using Meshmakers.Octo.Services.Contracts.DistributionEventHub.Messages;
 using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Http.HttpResults;
 using Microsoft.AspNetCore.Mvc;
 using Persistence.IdentityCkModel.Generated.System.Identity.v1;
 
@@ -72,13 +73,13 @@ public class ApiSecretsController : ControllerBase
         var client = await _octoClientStore.FindClientByIdAsync(clientId);
         if (client == null)
         {
-            return NotFound(new NotFoundError($"Client '{clientId}' not found"));
+            return NotFound(new NotFoundErrorDto($"Client '{clientId}' not found"));
         }
 
         var secret = client.ClientSecrets.FirstOrDefault(x => x.Value == decodedSecretValue);
         if (secret == null)
         {
-            return NotFound(new NotFoundError($"API secret '{decodedSecretValue}' not found"));
+            return NotFound(new NotFoundErrorDto($"API secret '{decodedSecretValue}' not found"));
         }
 
         return Ok(CreateApiSecret(secret));
@@ -125,13 +126,13 @@ public class ApiSecretsController : ControllerBase
         var apiResource = apiResources.FirstOrDefault();
         if (apiResource == null)
         {
-            return NotFound(new NotFoundError($"API resource '{apiResourceName}' not found"));
+            return NotFound(new NotFoundErrorDto($"API resource '{apiResourceName}' not found"));
         }
 
         var secret = apiResource.ApiSecrets.FirstOrDefault(x => x.Value == decodedSecretValue);
         if (secret == null)
         {
-            return NotFound(new NotFoundError($"API secret '{decodedSecretValue}' not found"));
+            return NotFound(new NotFoundErrorDto($"API secret '{decodedSecretValue}' not found"));
         }
 
         return Ok(CreateApiSecret(secret));
@@ -174,7 +175,7 @@ public class ApiSecretsController : ControllerBase
         }
         catch (Exception e)
         {
-            return BadRequest(new InternalServerError(e.Message));
+            return BadRequest(new InternalServerErrorDto(e.Message));
         }
     }
 
@@ -215,7 +216,7 @@ public class ApiSecretsController : ControllerBase
         }
         catch (Exception e)
         {
-            return BadRequest(new InternalServerError(e.Message));
+            return BadRequest(new InternalServerErrorDto(e.Message));
         }
     }
 
@@ -244,7 +245,7 @@ public class ApiSecretsController : ControllerBase
         var secrets = client.ClientSecrets.Where(x => x.Value == apiSecretDto.ValueEncrypted).ToArray();
         if (!secrets.Any())
         {
-            return NotFound(new NotFoundError($"Secret with value '{apiSecretDto.ValueEncrypted}' does not exist."));
+            return NotFound(new NotFoundErrorDto($"Secret with value '{apiSecretDto.ValueEncrypted}' does not exist."));
         }
 
         var secret = secrets.First();
@@ -257,7 +258,7 @@ public class ApiSecretsController : ControllerBase
         }
         catch (Exception e)
         {
-            return BadRequest(new InternalServerError(e.Message));
+            return BadRequest(new InternalServerErrorDto(e.Message));
         }
 
         return Ok();
@@ -288,7 +289,7 @@ public class ApiSecretsController : ControllerBase
         var secrets = apiResource.ApiSecrets.Where(x => x.Value == apiSecretDto.ValueEncrypted).ToArray();
         if (!secrets.Any())
         {
-            return NotFound(new NotFoundError($"Secret with value '{apiSecretDto.ValueEncrypted}' does not exist."));
+            return NotFound(new NotFoundErrorDto($"Secret with value '{apiSecretDto.ValueEncrypted}' does not exist."));
         }
 
         var secret = secrets.First();
@@ -301,7 +302,7 @@ public class ApiSecretsController : ControllerBase
         }
         catch (Exception e)
         {
-            return BadRequest(new InternalServerError(e.Message));
+            return BadRequest(new InternalServerErrorDto(e.Message));
         }
 
         return Ok();
@@ -329,13 +330,13 @@ public class ApiSecretsController : ControllerBase
         var octoClient = await _octoClientStore.FindRtClientByIdAsync(clientId);
         if (octoClient == null)
         {
-            return NotFound(new NotFoundError($"Client with id '{clientId}' does not exist."));
+            return NotFound(new NotFoundErrorDto($"Client with id '{clientId}' does not exist."));
         }
 
         var secrets = octoClient.ClientSecrets.Where(x => x.Value == decodedSecretValue).ToArray();
         if (!secrets.Any())
         {
-            return NotFound(new NotFoundError($"Secret with value '{decodedSecretValue}' does not exist."));
+            return NotFound(new NotFoundErrorDto($"Secret with value '{decodedSecretValue}' does not exist."));
         }
 
         foreach (var secret in secrets)
@@ -351,7 +352,7 @@ public class ApiSecretsController : ControllerBase
         }
         catch (Exception e)
         {
-            return BadRequest(new InternalServerError(e.Message));
+            return BadRequest(new InternalServerErrorDto(e.Message));
         }
     }
 
@@ -383,7 +384,7 @@ public class ApiSecretsController : ControllerBase
         var secrets = apiResource.ApiSecrets.Where(x => x.Value == decodedSecretValue).ToArray();
         if (!secrets.Any())
         {
-            return NotFound(new NotFoundError($"Secret with value '{decodedSecretValue}' does not exist."));
+            return NotFound(new NotFoundErrorDto($"Secret with value '{decodedSecretValue}' does not exist."));
         }
 
         foreach (var secret in secrets)
@@ -399,7 +400,7 @@ public class ApiSecretsController : ControllerBase
         }
         catch (Exception e)
         {
-            return BadRequest(new InternalServerError(e.Message));
+            return BadRequest(new InternalServerErrorDto(e.Message));
         }
     }
 

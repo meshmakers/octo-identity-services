@@ -6,10 +6,11 @@ using IdentityServerPersistence;
 using IdentityServerPersistence.SystemStores;
 using Meshmakers.Octo.Common.DistributionEventHub.Services;
 using Meshmakers.Octo.Communication.Contracts.DataTransferObjects;
+using Meshmakers.Octo.Communication.Contracts.DataTransferObjects.ApiErrors;
 using Meshmakers.Octo.Runtime.Contracts.RepositoryEntities;
-using Meshmakers.Octo.Services.Contracts.ApiErrors;
 using Meshmakers.Octo.Services.Contracts.DistributionEventHub.Messages;
 using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Http.HttpResults;
 using Microsoft.AspNetCore.Mvc;
 using MongoDB.Bson;
 using Persistence.IdentityCkModel.Generated.System.Identity.v1;
@@ -115,7 +116,7 @@ public class ApiScopesController : ControllerBase
         }
         catch (Exception e)
         {
-            return BadRequest(new InternalServerError(e.Message));
+            return BadRequest(new InternalServerErrorDto(e.Message));
         }
     }
 
@@ -134,7 +135,7 @@ public class ApiScopesController : ControllerBase
         var apiScope = await _octoResourceStore.GetApiScopeByNameAsync(name);
         if (apiScope == null)
         {
-            return NotFound(new NotFoundError($"Scope with name '{name}' does not exist."));
+            return NotFound(new NotFoundErrorDto($"Scope with name '{name}' does not exist."));
         }
 
         ApplyToApiScope(apiScope, scopeDto);
@@ -146,7 +147,7 @@ public class ApiScopesController : ControllerBase
         }
         catch (Exception e)
         {
-            return BadRequest(new InternalServerError(e.Message));
+            return BadRequest(new InternalServerErrorDto(e.Message));
         }
 
         return Ok();
@@ -167,7 +168,7 @@ public class ApiScopesController : ControllerBase
         var octoApiScope = await _octoResourceStore.GetApiScopeByNameAsync(name);
         if (octoApiScope == null)
         {
-            return NotFound(new NotFoundError($"Scope with name '{name}' does not exist."));
+            return NotFound(new NotFoundErrorDto($"Scope with name '{name}' does not exist."));
         }
 
         try
@@ -177,7 +178,7 @@ public class ApiScopesController : ControllerBase
         }
         catch (Exception e)
         {
-            return BadRequest(new InternalServerError(e.Message));
+            return BadRequest(new InternalServerErrorDto(e.Message));
         }
 
         return Ok();

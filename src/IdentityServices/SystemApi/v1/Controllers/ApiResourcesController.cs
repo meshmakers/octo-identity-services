@@ -7,10 +7,11 @@ using IdentityServerPersistence;
 using IdentityServerPersistence.SystemStores;
 using Meshmakers.Octo.Common.DistributionEventHub.Services;
 using Meshmakers.Octo.Communication.Contracts.DataTransferObjects;
+using Meshmakers.Octo.Communication.Contracts.DataTransferObjects.ApiErrors;
 using Meshmakers.Octo.Runtime.Contracts.RepositoryEntities;
-using Meshmakers.Octo.Services.Contracts.ApiErrors;
 using Meshmakers.Octo.Services.Contracts.DistributionEventHub.Messages;
 using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Http.HttpResults;
 using Microsoft.AspNetCore.Mvc;
 using MongoDB.Bson;
 using Persistence.IdentityCkModel.Generated.System.Identity.v1;
@@ -40,10 +41,18 @@ public class ApiResourcesController : ControllerBase
     [Authorize(IdentityServiceConstants.IdentityApiReadOnlyPolicy)]
     [EndpointSummary("Returns all API resources definitions")]
     [ProducesResponseType(typeof(IEnumerable<ApiResourceDto>), StatusCodes.Status200OK)]
-    public async Task<IEnumerable<ApiResourceDto>> Get()
+    [ProducesResponseType(typeof(InternalServerErrorDto), StatusCodes.Status500InternalServerError)]
+    public async Task<IActionResult> Get()
     {
-        var resources = await _octoResourceStore.GetAllResourcesAsync();
-        return resources.ApiResources.Select(CreateApiResourceDto);
+        try
+        {
+            var resources = await _octoResourceStore.GetAllResourcesAsync();
+            return Ok(resources.ApiResources.Select(CreateApiResourceDto));
+        }
+        catch (Exception e)
+        {
+            return StatusCode(StatusCodes.Status500InternalServerError, new InternalServerErrorDto(e.Message));
+        }
     }
 
     // GET system/v1/apiResources/getPaged
@@ -51,27 +60,35 @@ public class ApiResourcesController : ControllerBase
     [Authorize(IdentityServiceConstants.IdentityApiReadOnlyPolicy)]
     [EndpointSummary("Returns all API resources definitions using paging")]
     [ProducesResponseType(typeof(PagedResult<ApiResourceDto>), StatusCodes.Status200OK)]
-    public async Task<PagedResult<ApiResourceDto>> Get([Required] [FromQuery] PagingParams pagingParams)
+    [ProducesResponseType(typeof(InternalServerErrorDto), StatusCodes.Status500InternalServerError)]
+    public async Task<IActionResult> Get([Required] [FromQuery] PagingParams pagingParams)
     {
-        var list = new List<ApiResourceDto>();
-
-        var apiResources = (await _octoResourceStore.GetAllResourcesAsync()).ApiResources;
-
-        foreach (var apiResource in apiResources.Skip(pagingParams.Skip).Take(pagingParams.Take))
+        try
         {
-            var apiResourceDto = CreateApiResourceDto(apiResource);
-            list.Add(apiResourceDto);
+            var list = new List<ApiResourceDto>();
+
+            var apiResources = (await _octoResourceStore.GetAllResourcesAsync()).ApiResources;
+
+            foreach (var apiResource in apiResources.Skip(pagingParams.Skip).Take(pagingParams.Take))
+            {
+                var apiResourceDto = CreateApiResourceDto(apiResource);
+                list.Add(apiResourceDto);
+            }
+
+            var pagedResult = new PagedResult<ApiResourceDto>(list, pagingParams.Skip, pagingParams.Take, apiResources.Count);
+
+            var header = pagedResult.GetHeader();
+            if (header != null)
+            {
+                Response.Headers.Append("X-Pagination", header.ToJson());
+            }
+
+            return Ok(pagedResult);
         }
-
-        var pagedResult = new PagedResult<ApiResourceDto>(list, pagingParams.Skip, pagingParams.Take, apiResources.Count);
-
-        var header = pagedResult.GetHeader();
-        if (header != null)
+        catch (Exception e)
         {
-            Response.Headers.Append("X-Pagination", header.ToJson());
+            return StatusCode(StatusCodes.Status500InternalServerError, new InternalServerErrorDto(e.Message));
         }
-
-        return pagedResult;
     }
 
     // GET api/apiResources/5
@@ -79,17 +96,26 @@ public class ApiResourcesController : ControllerBase
     [Authorize(IdentityServiceConstants.IdentityApiReadOnlyPolicy)]
     [EndpointSummary("Returns API resource information based on it's name")]
     [ProducesResponseType(typeof(ApiResourceDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [ProducesResponseType(typeof(InternalServerErrorDto), StatusCodes.Status500InternalServerError)]
     public async Task<IActionResult> Get([Required] string name)
     {
-        var apiResource = await _octoResourceStore.GetApiResourceByNameAsync(name);
-        if (apiResource == null)
+        try
         {
-            return NotFound();
+            var apiResource = await _octoResourceStore.GetApiResourceByNameAsync(name);
+            if (apiResource == null)
+            {
+                return NotFound();
+            }
+
+            var nativeApiResource = _mapper.Map<ApiResource>(apiResource);
+
+            return Ok(CreateApiResourceDto(nativeApiResource));
         }
-
-        var nativeApiResource = _mapper.Map<ApiResource>(apiResource);
-
-        return Ok(CreateApiResourceDto(nativeApiResource));
+        catch (Exception e)
+        {
+            return StatusCode(StatusCodes.Status500InternalServerError, new InternalServerErrorDto(e.Message));
+        }
     }
 
     // POST api/apiResources
@@ -97,30 +123,33 @@ public class ApiResourcesController : ControllerBase
     [Authorize(IdentityServiceConstants.IdentityApiReadWritePolicy)]
     [EndpointSummary("Creates a new API resource")]
     [ProducesResponseType(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status409Conflict)]
+    [ProducesResponseType(typeof(InternalServerErrorDto), StatusCodes.Status500InternalServerError)]
     public async Task<IActionResult> Post([Required] [FromBody] ApiResourceDto apiResourceDto)
     {
-        if (!ModelState.IsValid || apiResourceDto.Name == null)
-        {
-            return BadRequest(ModelState);
-        }
-
-        if ((await _octoResourceStore.FindApiResourcesByNameAsync([apiResourceDto.Name])).Any())
-        {
-            return Conflict($"API resource with name '{apiResourceDto.Name}' already exists.");
-        }
-
-        var apiResource = new RtApiResource();
-        ApplyToRtApiResource(apiResource, apiResourceDto);
-
         try
         {
+            if (!ModelState.IsValid || apiResourceDto.Name == null)
+            {
+                return BadRequest(ModelState);
+            }
+
+            if ((await _octoResourceStore.FindApiResourcesByNameAsync([apiResourceDto.Name])).Any())
+            {
+                return Conflict($"API resource with name '{apiResourceDto.Name}' already exists.");
+            }
+
+            var apiResource = new RtApiResource();
+            ApplyToRtApiResource(apiResource, apiResourceDto);
+
             await _octoResourceStore.CreateApiResourceAsync(apiResource);
             await ClearCacheAsync();
             return Ok();
         }
         catch (Exception e)
         {
-            return BadRequest(new InternalServerError(e.Message));
+            return StatusCode(StatusCodes.Status500InternalServerError, new InternalServerErrorDto(e.Message));
         }
     }
 
@@ -129,32 +158,34 @@ public class ApiResourcesController : ControllerBase
     [Authorize(IdentityServiceConstants.IdentityApiReadWritePolicy)]
     [EndpointSummary("Updates an API resource")]
     [ProducesResponseType(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(typeof(NotFoundErrorDto), StatusCodes.Status404NotFound)]
+    [ProducesResponseType(typeof(InternalServerErrorDto), StatusCodes.Status500InternalServerError)]
     public async Task<IActionResult> Put([Required] string name, [Required] [FromBody] ApiResourceDto apiResourceDto)
     {
-        if (!ModelState.IsValid || apiResourceDto.Name == null)
-        {
-            return BadRequest(ModelState);
-        }
-
-        var octoApiResource = await _octoResourceStore.GetApiResourceByNameAsync(apiResourceDto.Name);
-        if (octoApiResource == null)
-        {
-            return NotFound(new NotFoundError($"API resource with name '{name}' does not exist."));
-        }
-
-        ApplyToRtApiResource(octoApiResource, apiResourceDto);
-
         try
         {
+            if (!ModelState.IsValid || apiResourceDto.Name == null)
+            {
+                return BadRequest(ModelState);
+            }
+
+            var octoApiResource = await _octoResourceStore.GetApiResourceByNameAsync(apiResourceDto.Name);
+            if (octoApiResource == null)
+            {
+                return NotFound(new NotFoundErrorDto($"API resource with name '{name}' does not exist."));
+            }
+
+            ApplyToRtApiResource(octoApiResource, apiResourceDto);
+
             await _octoResourceStore.UpdateApiResourceAsync(name, octoApiResource);
             await ClearCacheAsync();
+            return Ok();
         }
         catch (Exception e)
         {
-            return BadRequest(new InternalServerError(e.Message));
+            return StatusCode(StatusCodes.Status500InternalServerError, new InternalServerErrorDto(e.Message));
         }
-
-        return Ok();
     }
 
 
@@ -163,25 +194,26 @@ public class ApiResourcesController : ControllerBase
     [Authorize(IdentityServiceConstants.IdentityApiReadWritePolicy)]
     [EndpointSummary("Deletes an API resource")]
     [ProducesResponseType(StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(NotFoundErrorDto), StatusCodes.Status404NotFound)]
+    [ProducesResponseType(typeof(InternalServerErrorDto), StatusCodes.Status500InternalServerError)]
     public async Task<IActionResult> Delete([Required] string name)
     {
-        var octoApiResource = await _octoResourceStore.GetApiResourceByNameAsync(name);
-        if (octoApiResource == null)
-        {
-            return NotFound(new NotFoundError($"API resource with name '{name}' does not exist."));
-        }
-
         try
         {
+            var octoApiResource = await _octoResourceStore.GetApiResourceByNameAsync(name);
+            if (octoApiResource == null)
+            {
+                return NotFound(new NotFoundErrorDto($"API resource with name '{name}' does not exist."));
+            }
+
             await _octoResourceStore.DeleteApiResourceAsync(octoApiResource.RtId);
             await ClearCacheAsync();
+            return Ok();
         }
         catch (Exception e)
         {
-            return BadRequest(new InternalServerError(e.Message));
+            return StatusCode(StatusCodes.Status500InternalServerError, new InternalServerErrorDto(e.Message));
         }
-
-        return Ok();
     }
 
     private Task ClearCacheAsync()

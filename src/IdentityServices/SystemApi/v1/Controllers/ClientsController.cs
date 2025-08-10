@@ -8,10 +8,11 @@ using IdentityServerPersistence.SystemStores;
 using Meshmakers.Octo.Common.DistributionEventHub.Services;
 using Meshmakers.Octo.Communication.Contracts;
 using Meshmakers.Octo.Communication.Contracts.DataTransferObjects;
+using Meshmakers.Octo.Communication.Contracts.DataTransferObjects.ApiErrors;
 using Meshmakers.Octo.Runtime.Contracts.RepositoryEntities;
-using Meshmakers.Octo.Services.Contracts.ApiErrors;
 using Meshmakers.Octo.Services.Contracts.DistributionEventHub.Messages;
 using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Http.HttpResults;
 using Microsoft.AspNetCore.Mvc;
 using MongoDB.Bson;
 using Persistence.IdentityCkModel.Generated.System.Identity.v1;
@@ -133,7 +134,7 @@ public class ClientsController : ControllerBase
         }
         catch (Exception e)
         {
-            return BadRequest(new InternalServerError(e.Message));
+            return BadRequest(new InternalServerErrorDto(e.Message));
         }
     }
 
@@ -154,7 +155,7 @@ public class ClientsController : ControllerBase
         var appClient = await _octoClientStore.FindRtClientByIdAsync(id);
         if (appClient == null)
         {
-            return NotFound(new NotFoundError($"Client with id '{id}' does not exist."));
+            return NotFound(new NotFoundErrorDto($"Client with id '{id}' does not exist."));
         }
 
         ApplyToClient(appClient, clientDto);
@@ -166,7 +167,7 @@ public class ClientsController : ControllerBase
         }
         catch (Exception e)
         {
-            return BadRequest(new InternalServerError(e.Message));
+            return BadRequest(new InternalServerErrorDto(e.Message));
         }
 
         return Ok();
@@ -182,7 +183,7 @@ public class ClientsController : ControllerBase
         var appClient = await _octoClientStore.FindClientByIdAsync(id);
         if (appClient == null)
         {
-            return NotFound(new NotFoundError($"Client with id '{id}' does not exist."));
+            return NotFound(new NotFoundErrorDto($"Client with id '{id}' does not exist."));
         }
 
         try
@@ -192,7 +193,7 @@ public class ClientsController : ControllerBase
         }
         catch (Exception e)
         {
-            return BadRequest(new InternalServerError(e.Message));
+            return BadRequest(new InternalServerErrorDto(e.Message));
         }
 
         return Ok();
