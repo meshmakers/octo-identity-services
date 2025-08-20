@@ -37,7 +37,7 @@ steps:
         docker buildx rm mybuilder
 
   - task: CmdLine@2
-    condition: or(eq(variables.isMain, true), eq(variables.isTest, true), eq(variables.isRelease, true))
+    condition: or(eq(variables.isTest, true), and(eq(variables.isMain, true), eq(variables.isRelease, false)))
     displayName: Build/Push to private ${{ parameters.Repository }}:$(Build.BuildNumber)
     inputs:
       script: |
