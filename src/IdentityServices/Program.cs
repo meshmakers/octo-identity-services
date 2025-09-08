@@ -18,6 +18,7 @@ using Meshmakers.Octo.Services.Contracts.DistributionEventHub.Messages;
 using Meshmakers.Octo.Services.Infrastructure;
 using Meshmakers.Octo.Services.Infrastructure.Configuration;
 using Meshmakers.Octo.Services.Infrastructure.CredentialGenerator;
+using Meshmakers.Octo.Services.Infrastructure.Migrations;
 using Meshmakers.Octo.Services.Infrastructure.Services;
 using Meshmakers.Octo.Services.Notifications.Generated.System.Notification.v1;
 using Meshmakers.Octo.Services.Notifications.Services;
@@ -210,6 +211,10 @@ try
     builder.Services.AddAutoMapper(c=>
     {
     }, typeof(Program));
+    
+    // Migrations are in the IdentityServerPersistence assembly
+    builder.Services.AddMigrations(typeof(IdentityServiceConstants).Assembly);
+    
 
     var app = builder.Build();
 
