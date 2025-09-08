@@ -16,4 +16,6 @@ public static class IdentityServiceConstants
     public const string ResetPasswordEmailTemplateName = "Reset_Password_Email_Template";
     public const string WelcomeEmailWithNoPasswordTemplateName = "Welcome_Email_With_No_Password_Template";
 
+    public const string IdentityMigrationVersionKey = "IdentityServiceMigrations";
+
 }

@@ -12,6 +12,7 @@ using Meshmakers.Octo.Runtime.Contracts.MongoDb;
 using Meshmakers.Octo.Runtime.Contracts.Repositories.Query;
 using Meshmakers.Octo.Runtime.Contracts.RepositoryEntities;
 using Meshmakers.Octo.Services.Infrastructure;
+using Meshmakers.Octo.Services.Infrastructure.Migrations;
 using Meshmakers.Octo.Services.Infrastructure.Services;
 using Meshmakers.Octo.Services.Notifications.Generated.System.Notification.v1;
 using Microsoft.AspNetCore.Identity;
@@ -29,7 +30,8 @@ internal class DefaultConfigurationCreatorService(
     IOctoClientStore clientStore,
     IOctoResourceStore resourceStore,
     IOctoIdentityProviderStore octoIdentityProviderStore,
-    IOptions<OctoIdentityServicesOptions> octoIdentityOptions)
+    IOptions<OctoIdentityServicesOptions> octoIdentityOptions,
+    MigrationService? migrationService)
     : DefaultConfigurationCreatorServiceBase(logger), IConfigurationService
 {
     public override async Task InitializeAsync()
@@ -42,6 +44,14 @@ internal class DefaultConfigurationCreatorService(
 
     protected override async Task SetupTenantAsync(string tenantId)
     {
+        // we run the migrations for each tenant context
+        if (migrationService != null)
+        {
+            var tenantContext = tenantId == systemContext.TenantId ? systemContext : await systemContext.GetChildTenantContextAsync(tenantId);
+            var adminSession = await tenantContext.GetAdminSessionAsync();
+            await migrationService.ExecuteMigrationsAsync(adminSession, tenantContext);
+        }
+        
         if (tenantId != systemContext.TenantId)
         {
             // Currently we only support the system tenant.
