@@ -208,7 +208,7 @@ try
 
     builder.Services.AddMvc();
 
-    builder.Services.AddAutoMapper(c=>
+    builder.Services.AddAutoMapper(_=>
     {
     }, typeof(Program));
     
