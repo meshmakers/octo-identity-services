@@ -5,21 +5,21 @@ using Microsoft.Extensions.Logging;
 
 namespace IdentityServerPersistence.Services.Migrations;
 
-[Migration(0, 1, IdentityServiceConstants.IdentityMigrationVersionKey)]
+[Migration(1, 2, IdentityServiceConstants.IdentityMigrationVersionKey)]
 // ReSharper disable once UnusedType.Global
-internal class InitialMigration(ILogger<InitialMigration> logger) : IMigration
+internal class CkTypeIndexMigration(ILogger<CkTypeIndexMigration> logger) : IMigration
 {
     public async Task<MigrationResult> MigrateAsync(IOctoAdminSession adminSession, ITenantContext tenantContext)
     {
         try
         {
-            await tenantContext.CreateRtAssociationIndexesAsync();
+            await tenantContext.UpdateIndexesAsync(adminSession);
             return MigrationResult.Success();
         }
         catch (Exception e)
         {
-            logger.LogError(e, "Failed to create RT association indexes");
-            return MigrationResult.Failure($"Failed to create RT association indexes: {e.Message}");
+            logger.LogError(e, "Failed to update indexes for tenant {TenantId}", tenantContext.TenantId);
+            return MigrationResult.Failure($"Failed to update indexes {e.Message}");
         }
     }
 }
