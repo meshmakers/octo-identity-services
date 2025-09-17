@@ -5,7 +5,7 @@ using Microsoft.Extensions.Logging;
 
 namespace IdentityServerPersistence.Services.Migrations;
 
-[Migration(1, 2, IdentityServiceConstants.IdentityMigrationVersionKey)]
+[Migration(1, 3, IdentityServiceConstants.IdentityMigrationVersionKey)]
 // ReSharper disable once UnusedType.Global
 internal class CkTypeIndexMigration(ILogger<CkTypeIndexMigration> logger) : IMigration
 {
