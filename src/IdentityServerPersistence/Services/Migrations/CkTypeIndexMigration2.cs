@@ -5,10 +5,10 @@ using Microsoft.Extensions.Logging;
 
 namespace IdentityServerPersistence.Services.Migrations;
 
-[Migration(1, 2, IdentityServiceConstants.IdentityMigrationVersionKey)]
+[Migration(2, 3, IdentityServiceConstants.IdentityMigrationVersionKey)]
 // ReSharper disable once UnusedType.Global
 // ReSharper disable once ClassNeverInstantiated.Global
-internal class CkTypeIndexMigration(ILogger<CkTypeIndexMigration> logger) : IMigration
+internal class CkTypeIndexMigration2(ILogger<CkTypeIndexMigration> logger) : IMigration
 {
     public async Task<MigrationResult> MigrateAsync(IOctoAdminSession adminSession, ITenantContext tenantContext)
     {
