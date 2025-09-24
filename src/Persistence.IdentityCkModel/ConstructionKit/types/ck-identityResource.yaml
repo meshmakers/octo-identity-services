@@ -1,11 +1,11 @@
 "$schema": "https://schemas.meshmakers.cloud/construction-kit-elements.schema.json"
 types:
   - typeId: IdentityResource
-    derivedFromCkTypeId: System.Identity/Resource
+    derivedFromCkTypeId: ${this}/Resource
     isFinal: true
     isAbstract: false
     attributes:
-      - id: System.Identity/IsEmphasized
+      - id: ${this}/IsEmphasized
         name: IsEmphasized
-      - id: System.Identity/IsRequired
+      - id: ${this}/IsRequired
         name: IsRequired

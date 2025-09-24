@@ -4,11 +4,11 @@ records:
     isFinal: true
     isAbstract: false
     attributes:
-      - id: System.Identity/ClaimType
+      - id: ${this}/ClaimType
         name: ClaimType
-      - id: System.Identity/ClaimValue
+      - id: ${this}/ClaimValue
         name: ClaimValue
-      - id: System.Identity/UserId
+      - id: ${this}/UserId
         name: UserId
         isOptional: true
     

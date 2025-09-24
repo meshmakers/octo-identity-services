@@ -1,18 +1,18 @@
 "$schema": "https://schemas.meshmakers.cloud/construction-kit-elements.schema.json"
 types:
   - typeId: PermissionRole
-    derivedFromCkTypeId: System/Entity
+    derivedFromCkTypeId: ${System}/Entity
     isFinal: true
     isAbstract: false
     attributes:
-      - id: System/Name
+      - id: ${System}/Name
         name: Name
 
-      - id: System.Identity/RoleId
+      - id: ${this}/RoleId
         name: RoleId
 
-      - id: System.Identity/SubjectIds
+      - id: ${this}/SubjectIds
         name: SubjectIds
 
-      - id: System.Identity/IdentityRoleIds
+      - id: ${this}/IdentityRoleIds
         name: IdentityRoleIds

@@ -1,40 +1,40 @@
 "$schema": "https://schemas.meshmakers.cloud/construction-kit-elements.schema.json"
 types:
   - typeId: PersistedGrant
-    derivedFromCkTypeId: System/Entity
+    derivedFromCkTypeId: ${System}/Entity
     isFinal: true
     isAbstract: false
     attributes:
-      - id: System.Identity/GrantKey
+      - id: ${this}/GrantKey
         name: GrantKey
 
-      - id: System.Identity/GrantType
+      - id: ${this}/GrantType
         name: GrantType
 
-      - id: System.Identity/SubjectId
+      - id: ${this}/SubjectId
         name: SubjectId
 
-      - id: System.Identity/SessionId
+      - id: ${this}/SessionId
         name: SessionId
         isOptional: true
 
-      - id: System.Identity/ClientId
+      - id: ${this}/ClientId
         name: ClientId
 
-      - id: System/Description
+      - id: ${System}/Description
         name: Description
         isOptional: true
 
-      - id: System.Identity/CreationDateTime
+      - id: ${this}/CreationDateTime
         name: CreationDateTime
 
-      - id: System.Identity/ExpirationDateTime
+      - id: ${this}/ExpirationDateTime
         name: ExpirationDateTime
         isOptional: true
 
-      - id: System.Identity/ConsumedDateTime
+      - id: ${this}/ConsumedDateTime
         name: ConsumedDateTime
         isOptional: true
 
-      - id: System.Identity/Data
+      - id: ${this}/Data
         name: Data
