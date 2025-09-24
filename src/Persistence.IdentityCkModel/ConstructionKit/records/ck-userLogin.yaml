@@ -4,12 +4,12 @@ records:
     isFinal: true
     isAbstract: false
     attributes:
-      - id: System.Identity/LoginProvider
+      - id: ${this}/LoginProvider
         name: LoginProvider
-      - id: System.Identity/ProviderKey
+      - id: ${this}/ProviderKey
         name: ProviderKey
-      - id: System.Identity/ProviderDisplayName
+      - id: ${this}/ProviderDisplayName
         name: ProviderDisplayName
         isOptional: true
-      - id: System.Identity/UserId
+      - id: ${this}/UserId
         name: UserId    

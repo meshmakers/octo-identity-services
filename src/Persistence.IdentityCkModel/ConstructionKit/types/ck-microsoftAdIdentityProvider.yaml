@@ -1,13 +1,13 @@
 "$schema": "https://schemas.meshmakers.cloud/construction-kit-elements.schema.json"
 types:
   - typeId: MicrosoftAdIdentityProvider
-    derivedFromCkTypeId: System.Identity/IdentityProvider
+    derivedFromCkTypeId: ${this}/IdentityProvider
     isFinal: true
     isAbstract: false
     attributes:
-      - id: System.Identity/Host
+      - id: ${this}/Host
         name: Host
-      - id: System.Identity/UseTls
+      - id: ${this}/UseTls
         name: UseTls
-      - id: System.Identity/Port
+      - id: ${this}/Port
         name: Port

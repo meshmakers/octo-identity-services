@@ -1,148 +1,148 @@
 "$schema": "https://schemas.meshmakers.cloud/construction-kit-elements.schema.json"
 types:
   - typeId: Client
-    derivedFromCkTypeId: System/Entity
+    derivedFromCkTypeId: ${System}/Entity
     isFinal: true
     isAbstract: false
     attributes:
-      - id: System/Enabled
+      - id: ${System}/Enabled
         name: Enabled
 
-      - id: System.Identity/ClientId
+      - id: ${this}/ClientId
         name: ClientId
 
-      - id: System.Identity/ProtocolType
+      - id: ${this}/ProtocolType
         name: ProtocolType
 
-      - id: System.Identity/Secrets
+      - id: ${this}/Secrets
         name: ClientSecrets
 
-      - id: System.Identity/RequireClientSecret
+      - id: ${this}/RequireClientSecret
         name: RequireClientSecret
 
-      - id: System/Name
+      - id: ${System}/Name
         name: ClientName
         isOptional: true
 
-      - id: System/Description
+      - id: ${System}/Description
         name: Description
         isOptional: true
 
-      - id: System.Identity/ClientUri
+      - id: ${this}/ClientUri
         name: ClientUri
         isOptional: true
 
-      - id: System.Identity/LogoUri
+      - id: ${this}/LogoUri
         name: LogoUri
         isOptional: true
 
-      - id: System.Identity/RequireConsent
+      - id: ${this}/RequireConsent
         name: RequireConsent
         isOptional: true
 
-      - id: System.Identity/AllowRememberConsent
+      - id: ${this}/AllowRememberConsent
         name: AllowRememberConsent
 
-      - id: System.Identity/AllowedGrantTypes
+      - id: ${this}/AllowedGrantTypes
         name: AllowedGrantTypes
 
-      - id: System.Identity/RequirePkce
+      - id: ${this}/RequirePkce
         name: RequirePkce
 
-      - id: System.Identity/AllowPlainTextPkce
+      - id: ${this}/AllowPlainTextPkce
         name: AllowPlainTextPkce
 
-      - id: System.Identity/RequireRequestObject
+      - id: ${this}/RequireRequestObject
         name: RequireRequestObject
 
-      - id: System.Identity/AllowAccessTokensViaBrowser
+      - id: ${this}/AllowAccessTokensViaBrowser
         name: AllowAccessTokensViaBrowser
 
-      - id: System.Identity/RequireDPoP
+      - id: ${this}/RequireDPoP
         name: RequireDPoP
 
-      - id: System.Identity/DPoPValidationMode
+      - id: ${this}/DPoPValidationMode
         name: DPoPValidationMode
 
-      - id: System.Identity/DPoPClockSkew
+      - id: ${this}/DPoPClockSkew
         name: DPoPClockSkew
-      - id: System.Identity/RedirectUris
+      - id: ${this}/RedirectUris
         name: RedirectUris
 
-      - id: System.Identity/PostLogoutRedirectUris
+      - id: ${this}/PostLogoutRedirectUris
         name: PostLogoutRedirectUris
-      - id: System.Identity/FrontChannelLogoutUri
+      - id: ${this}/FrontChannelLogoutUri
         name: FrontChannelLogoutUri
         isOptional: true
-      - id: System.Identity/FrontChannelLogoutSessionRequired
+      - id: ${this}/FrontChannelLogoutSessionRequired
         name: FrontChannelLogoutSessionRequired
-      - id: System.Identity/BackChannelLogoutUri
+      - id: ${this}/BackChannelLogoutUri
         name: BackChannelLogoutUri
         isOptional: true
-      - id: System.Identity/BackChannelLogoutSessionRequired
+      - id: ${this}/BackChannelLogoutSessionRequired
         name: BackChannelLogoutSessionRequired
-      - id: System.Identity/AllowOfflineAccess
+      - id: ${this}/AllowOfflineAccess
         name: AllowOfflineAccess
-      - id: System.Identity/AllowedScopes
+      - id: ${this}/AllowedScopes
         name: AllowedScopes
-      - id: System.Identity/AlwaysIncludeUserClaimsInIdToken
+      - id: ${this}/AlwaysIncludeUserClaimsInIdToken
         name: AlwaysIncludeUserClaimsInIdToken
-      - id: System.Identity/IdentityTokenLifetime
+      - id: ${this}/IdentityTokenLifetime
         name: IdentityTokenLifetime
-      - id: System.Identity/AllowedIdentityTokenSigningAlgorithms
+      - id: ${this}/AllowedIdentityTokenSigningAlgorithms
         name: AllowedIdentityTokenSigningAlgorithms
-      - id: System.Identity/AccessTokenLifetime
+      - id: ${this}/AccessTokenLifetime
         name: AccessTokenLifetime
-      - id: System.Identity/AuthorizationCodeLifetime
+      - id: ${this}/AuthorizationCodeLifetime
         name: AuthorizationCodeLifetime
-      - id: System.Identity/AbsoluteRefreshTokenLifetime
+      - id: ${this}/AbsoluteRefreshTokenLifetime
         name: AbsoluteRefreshTokenLifetime
-      - id: System.Identity/SlidingRefreshTokenLifetime
+      - id: ${this}/SlidingRefreshTokenLifetime
         name: SlidingRefreshTokenLifetime
-      - id: System.Identity/ConsentLifetime
+      - id: ${this}/ConsentLifetime
         name: ConsentLifetime
         isOptional: true
-      - id: System.Identity/UpdateAccessTokenClaimsOnRefresh
+      - id: ${this}/UpdateAccessTokenClaimsOnRefresh
         name: UpdateAccessTokenClaimsOnRefresh
-      - id: System.Identity/RefreshTokenExpiration
+      - id: ${this}/RefreshTokenExpiration
         name: RefreshTokenExpiration
-      - id: System.Identity/AccessTokenType
+      - id: ${this}/AccessTokenType
         name: AccessTokenType
-      - id: System.Identity/EnableLocalLogin
+      - id: ${this}/EnableLocalLogin
         name: EnableLocalLogin
-      - id: System.Identity/IdentityProviderRestrictions
+      - id: ${this}/IdentityProviderRestrictions
         name: IdentityProviderRestrictions
-      - id: System.Identity/IncludeJwtId
+      - id: ${this}/IncludeJwtId
         name: IncludeJwtId
-      - id: System.Identity/ClientClaims
+      - id: ${this}/ClientClaims
         name: ClientClaims
-      - id: System.Identity/AlwaysSendClientClaims
+      - id: ${this}/AlwaysSendClientClaims
         name: AlwaysSendClientClaims
-      - id: System.Identity/ClientClaimsPrefix
+      - id: ${this}/ClientClaimsPrefix
         name: ClientClaimsPrefix
         isOptional: true
-      - id: System.Identity/PairWiseSubjectSalt
+      - id: ${this}/PairWiseSubjectSalt
         name: PairWiseSubjectSalt
         isOptional: true
-      - id: System.Identity/UserSsoLifetime
+      - id: ${this}/UserSsoLifetime
         name: UserSsoLifetime
         isOptional: true
-      - id: System.Identity/UserCodeType
+      - id: ${this}/UserCodeType
         name: UserCodeType
         isOptional: true
-      - id: System.Identity/DeviceCodeLifetime
+      - id: ${this}/DeviceCodeLifetime
         name: DeviceCodeLifetime
-      - id: System.Identity/CibaLifetime
+      - id: ${this}/CibaLifetime
         name: CibaLifetime
         isOptional: true
-      - id: System.Identity/PollingInterval
+      - id: ${this}/PollingInterval
         name: PollingInterval
         isOptional: true
-      - id: System.Identity/CoordinateLifetimeWithUserSession
+      - id: ${this}/CoordinateLifetimeWithUserSession
         name: CoordinateLifetimeWithUserSession
         isOptional: true
-      - id: System.Identity/AllowedCorsOrigins
+      - id: ${this}/AllowedCorsOrigins
         name: AllowedCorsOrigins
-      - id: System.Identity/InitiateLoginUri
+      - id: ${this}/InitiateLoginUri
         name: InitiateLoginUri
         isOptional: true

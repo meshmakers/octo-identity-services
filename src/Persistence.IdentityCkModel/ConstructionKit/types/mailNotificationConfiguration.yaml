@@ -1,7 +1,7 @@
 $schema: https://schemas.meshmakers.cloud/construction-kit-elements.schema.json
 types:
   - typeId: MailNotificationConfiguration
-    derivedFromCkTypeId: System/Configuration
+    derivedFromCkTypeId: ${System}/Configuration
     isFinal: true
     attributes:
       - id: ${thisModel}/EnableEmailNotifications

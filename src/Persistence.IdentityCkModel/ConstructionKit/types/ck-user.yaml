@@ -1,85 +1,85 @@
 "$schema": "https://schemas.meshmakers.cloud/construction-kit-elements.schema.json"
 types:
   - typeId: User
-    derivedFromCkTypeId: System/Entity
+    derivedFromCkTypeId: ${System}/Entity
     isFinal: true
     isAbstract: false
     attributes:
-      - id: System.Identity/UserName
+      - id: ${this}/UserName
         name: UserName
         isOptional: true
 
-      - id: System.Identity/NormalizedUserName
+      - id: ${this}/NormalizedUserName
         name: NormalizedUserName
         isOptional: true
 
-      - id: System.Identity/FirstName
+      - id: ${this}/FirstName
         name: FirstName
         isOptional: true
 
-      - id: System.Identity/LastName
+      - id: ${this}/LastName
         name: LastName
         isOptional: true
 
-      - id: System/Description
+      - id: ${System}/Description
         name: Description
         isOptional: true
 
-      - id: System.Identity/Email
+      - id: ${this}/Email
         name: Email
         isOptional: true
 
-      - id: System.Identity/NormalizedEmail
+      - id: ${this}/NormalizedEmail
         name: NormalizedEmail
         isOptional: true
 
-      - id: System.Identity/EmailConfirmed
+      - id: ${this}/EmailConfirmed
         name: EmailConfirmed
 
-      - id: System.Identity/PasswordHash
+      - id: ${this}/PasswordHash
         name: PasswordHash
         isOptional: true
 
-      - id: System.Identity/SecurityStamp
+      - id: ${this}/SecurityStamp
         name: SecurityStamp
         isOptional: true
 
-      - id: System.Identity/PhoneNumber
+      - id: ${this}/PhoneNumber
         name: PhoneNumber
         isOptional: true
 
-      - id: System.Identity/PhoneNumberConfirmed
+      - id: ${this}/PhoneNumberConfirmed
         name: PhoneNumberConfirmed
 
-      - id: System.Identity/TwoFactorEnabled
+      - id: ${this}/TwoFactorEnabled
         name: TwoFactorEnabled
 
-      - id: System.Identity/LockoutEnd
+      - id: ${this}/LockoutEnd
         name: LockoutEnd
         isOptional: true
 
-      - id: System.Identity/LockoutEnabled
+      - id: ${this}/LockoutEnabled
         name: LockoutEnabled
 
-      - id: System.Identity/AccessFailedCount
+      - id: ${this}/AccessFailedCount
         name: AccessFailedCount
 
-      - id: System.Identity/ResetPasswordOnLogin
+      - id: ${this}/ResetPasswordOnLogin
         name: ResetPasswordOnLogin
 
-      - id: System.Identity/RoleIds
+      - id: ${this}/RoleIds
         name: RoleIds
         isOptional: true
 
-      - id: System.Identity/UserClaims
+      - id: ${this}/UserClaims
         name: Claims
         isOptional: true
 
-      - id: System.Identity/UserLogins
+      - id: ${this}/UserLogins
         name: UserLogins
         isOptional: true
 
-      - id: System.Identity/UserTokens
+      - id: ${this}/UserTokens
         name: UserTokens
         isOptional: true
     

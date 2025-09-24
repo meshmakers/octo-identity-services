@@ -113,22 +113,22 @@ attributes:
 
   - id: UserClaims
     valueType: RecordArray
-    valueCkRecordId: System.Identity/UserClaim
+    valueCkRecordId: ${this}/UserClaim
     description: The claims of the user.
 
   - id: RoleClaims
     valueType: RecordArray
-    valueCkRecordId: System.Identity/RoleClaim
+    valueCkRecordId: ${this}/RoleClaim
     description: The claims of a role.
 
   - id: UserLogins
     valueType: RecordArray
-    valueCkRecordId: System.Identity/UserLogin
+    valueCkRecordId: ${this}/UserLogin
     description: The existing logins of the user.
 
   - id: UserTokens
     valueType: RecordArray
-    valueCkRecordId: System.Identity/UserToken
+    valueCkRecordId: ${this}/UserToken
     description: The tokens of the user.
 
   - id: SubjectIds
@@ -184,7 +184,7 @@ attributes:
       - false
   - id: Secrets
     valueType: RecordArray
-    valueCkRecordId: System.Identity/Secret
+    valueCkRecordId: ${this}/Secret
     defaultValues: [ ]
   - id: Scopes
     valueType: StringArray
@@ -327,7 +327,7 @@ attributes:
     description: Lifetime of a user consent in seconds. Defaults to null (no expiration)
   - id: RefreshTokenUsage
     valueType: Enum
-    valueCkEnumId: System.Identity/TokenUsage
+    valueCkEnumId: ${this}/TokenUsage
     description: Gets or sets a value indicating whether the refresh token should be updated on a refresh token request.
   - id: UpdateAccessTokenClaimsOnRefresh
     valueType: Boolean
@@ -336,13 +336,13 @@ attributes:
       - false
   - id: RefreshTokenExpiration
     valueType: Enum
-    valueCkEnumId: System.Identity/TokenExpiration
+    valueCkEnumId: ${this}/TokenExpiration
     defaultValues:
       - 1
     description: Gets or sets a value indicating whether the access token (and its claims) should be updated on a refresh token request.
   - id: AccessTokenType
     valueType: Enum
-    valueCkEnumId: System.Identity/TokenType
+    valueCkEnumId: ${this}/TokenType
     defaultValues:
       - 0
     description: Specifies whether the access token is a reference token or a self contained JWT token (defaults to Jwt).
@@ -362,7 +362,7 @@ attributes:
     description: Value indicating whether JWT access tokens should include an identifier. Defaults to true.
   - id: ClientClaims
     valueType: RecordArray
-    valueCkRecordId: System.Identity/ClientClaim
+    valueCkRecordId: ${this}/ClientClaim
     description: Gets or sets the client claims to be sent to the user info endpoint.
     defaultValues: [ ]
   - id: AlwaysSendClientClaims
