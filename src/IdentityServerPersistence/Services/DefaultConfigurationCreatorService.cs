@@ -44,6 +44,17 @@ internal class DefaultConfigurationCreatorService(
 
     protected override async Task SetupTenantAsync(string tenantId)
     {
+        if (tenantId == systemContext.TenantId )
+
+        {
+            if (!await systemContext.IsSystemTenantExistingAsync())
+            {
+                await systemContext.CreateSystemTenantAsync();
+            }
+
+            await ImportCkModel();
+        }
+
         // we run the migrations for each tenant context
         if (migrationService != null)
         {
@@ -57,13 +68,6 @@ internal class DefaultConfigurationCreatorService(
             // Currently we only support the system tenant.
             return;
         }
-
-        if (!await systemContext.IsSystemTenantExistingAsync())
-        {
-            await systemContext.CreateSystemTenantAsync();
-        }
-
-        await ImportCkModel();
 
         using var session = await systemContext.GetAdminSessionAsync();
         session.StartTransaction();
