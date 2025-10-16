@@ -30,7 +30,7 @@ public class CreateIdentityDataCommandRequestConsumer(
 
         // That means that the tenant is not configured to use an
         // own identity management. We do nothing in this case and return information to the producer
-        if (!await tenantContext.IsCkModelExistingAsync(SystemIdentityCkIds.ModelId))
+        if (!await tenantContext.IsCkModelExistingAsync(SystemIdentityCkIds.CkModelId))
         {
             await context.RespondAsync(new EnumCommandResponse<CreateIdentityDataResult>
                 { Response = CreateIdentityDataResult.FailedTenantHasNoIdentityCk });

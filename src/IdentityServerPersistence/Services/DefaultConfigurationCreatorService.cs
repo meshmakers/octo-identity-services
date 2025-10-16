@@ -44,14 +44,18 @@ internal class DefaultConfigurationCreatorService(
 
     protected override async Task SetupTenantAsync(string tenantId)
     {
+        // 1st, we ensure that the system tenant and its ck model exists
         if (tenantId == systemContext.TenantId )
-
         {
             if (!await systemContext.IsSystemTenantExistingAsync())
             {
                 await systemContext.CreateSystemTenantAsync();
             }
 
+            // Ensure that the system ck model is available with the current version
+            await systemContext.EnsureSystemCkModelAsync();
+
+            // Ensure that the identity ck model and notification ck model is imported
             await ImportCkModel();
         }
 
@@ -96,12 +100,12 @@ internal class DefaultConfigurationCreatorService(
 
     private async Task ImportCkModel()
     {
-        if (!await systemContext.IsCkModelExistingAsync(SystemIdentityCkIds.ModelId))
+        if (!await systemContext.IsCkModelExistingAsync(SystemIdentityCkIds.CkModelId))
         {
             // We ensure that at least the system tenant contains a valid ck model.Other tenants
             // need to be enabled manually by an admin.
             OperationResult operationResult = new();
-            await systemContext.ImportCkModelAsync(SystemIdentityCkIds.ModelId, operationResult);
+            await systemContext.ImportCkModelAsync(SystemIdentityCkIds.CkModelId, operationResult);
             if (operationResult.HasErrors || operationResult.HasFatalErrors)
             {
                 throw InitializationException.ImportCkModelFailed(systemContext.TenantId,
@@ -109,12 +113,12 @@ internal class DefaultConfigurationCreatorService(
             }
         }
 
-        if (!await systemContext.IsCkModelExistingAsync(SystemNotificationCkIds.ModelId))
+        if (!await systemContext.IsCkModelExistingAsync(SystemNotificationCkIds.CkModelId))
         {
             // We ensure that at least the system tenant contains a valid ck model.Other tenants
             // need to be enabled manually by an admin.
             OperationResult operationResult = new();
-            await systemContext.ImportCkModelAsync(SystemNotificationCkIds.ModelId, operationResult);
+            await systemContext.ImportCkModelAsync(SystemNotificationCkIds.CkModelId, operationResult);
             if (operationResult.HasErrors || operationResult.HasFatalErrors)
             {
                 throw InitializationException.ImportCkModelFailed(systemContext.TenantId,
