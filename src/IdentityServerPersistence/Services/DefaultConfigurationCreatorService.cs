@@ -47,13 +47,16 @@ internal class DefaultConfigurationCreatorService(
         // 1st, we ensure that the system tenant and its ck model exists
         if (tenantId == systemContext.TenantId )
         {
+            // Ensure that the system ck model is available with the current version,
+            // This method ensures that the system repository database is already existing, but not
+            // up-to-date.
+            await systemContext.EnsureSystemCkModelAsync();
+
+            // So upgrades are done now. If it still does not exist -> create it from scratch.
             if (!await systemContext.IsSystemTenantExistingAsync())
             {
                 await systemContext.CreateSystemTenantAsync();
             }
-
-            // Ensure that the system ck model is available with the current version
-            await systemContext.EnsureSystemCkModelAsync();
 
             // Ensure that the identity ck model and notification ck model is imported
             await ImportCkModel();
