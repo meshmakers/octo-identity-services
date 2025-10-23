@@ -22,6 +22,7 @@ using Persistence.IdentityCkModel.Generated.System.Identity.v1;
 
 namespace IdentityServerPersistence.Services;
 
+// ReSharper disable once ClassNeverInstantiated.Global
 internal class DefaultConfigurationCreatorService(
     ILogger<DefaultConfigurationCreatorService> logger,
     ISystemContext systemContext,
@@ -45,7 +46,7 @@ internal class DefaultConfigurationCreatorService(
     protected override async Task SetupTenantAsync(string tenantId)
     {
         // 1st, we ensure that the system tenant and its ck model exists
-        if (tenantId == systemContext.TenantId )
+        if (tenantId == systemContext.TenantId)
         {
             // Ensure that the system ck model is available with the current version,
             // This method ensures that the system repository database is already existing, but not
@@ -57,19 +58,22 @@ internal class DefaultConfigurationCreatorService(
             {
                 await systemContext.CreateSystemTenantAsync();
             }
-
-            // Ensure that the identity ck model and notification ck model is imported
-            await ImportCkModel();
         }
+
+        var tenantContext = tenantId == systemContext.TenantId
+            ? systemContext
+            : await systemContext.GetChildTenantContextAsync(tenantId);
+
+        // Ensure that the identity ck model and notification ck model is imported
+        await ImportCkModel(tenantContext);
 
         // we run the migrations for each tenant context
         if (migrationService != null)
         {
-            var tenantContext = tenantId == systemContext.TenantId ? systemContext : await systemContext.GetChildTenantContextAsync(tenantId);
             var adminSession = await tenantContext.GetAdminSessionAsync();
             await migrationService.ExecuteMigrationsAsync(adminSession, tenantContext);
         }
-        
+
         if (tenantId != systemContext.TenantId)
         {
             // Currently we only support the system tenant.
@@ -101,30 +105,31 @@ internal class DefaultConfigurationCreatorService(
         await session.CommitTransactionAsync();
     }
 
-    private async Task ImportCkModel()
+    private async Task ImportCkModel(ITenantContext tenantContext)
     {
-        if (!await systemContext.IsCkModelExistingAsync(SystemIdentityCkIds.CkModelId))
+        if (!await tenantContext.IsCkModelExistingAsync(SystemIdentityCkIds.CkModelId) &&
+            tenantContext.TenantId == systemContext.TenantId)
         {
             // We ensure that at least the system tenant contains a valid ck model.Other tenants
             // need to be enabled manually by an admin.
             OperationResult operationResult = new();
-            await systemContext.ImportCkModelAsync(SystemIdentityCkIds.CkModelId, operationResult);
+            await tenantContext.ImportCkModelAsync(SystemIdentityCkIds.CkModelId, operationResult);
             if (operationResult.HasErrors || operationResult.HasFatalErrors)
             {
-                throw InitializationException.ImportCkModelFailed(systemContext.TenantId,
+                throw InitializationException.ImportCkModelFailed(tenantContext.TenantId,
                     operationResult.GetMessages());
             }
         }
 
-        if (!await systemContext.IsCkModelExistingAsync(SystemNotificationCkIds.CkModelId))
+        if (!await tenantContext.IsCkModelExistingAsync(SystemNotificationCkIds.CkModelId))
         {
             // We ensure that at least the system tenant contains a valid ck model.Other tenants
             // need to be enabled manually by an admin.
             OperationResult operationResult = new();
-            await systemContext.ImportCkModelAsync(SystemNotificationCkIds.CkModelId, operationResult);
+            await tenantContext.ImportCkModelAsync(SystemNotificationCkIds.CkModelId, operationResult);
             if (operationResult.HasErrors || operationResult.HasFatalErrors)
             {
-                throw InitializationException.ImportCkModelFailed(systemContext.TenantId,
+                throw InitializationException.ImportCkModelFailed(tenantContext.TenantId,
                     operationResult.GetMessages());
             }
         }
@@ -327,7 +332,8 @@ internal class DefaultConfigurationCreatorService(
         var dataQueryOperation = DataQueryOperation.Create()
             .FieldEquals(nameof(RtEntity.RtWellKnownName),
                 IdentityServiceConstants.MailNotificationConfigurationName);
-        var r = await tenantRepository.GetRtEntitiesByTypeAsync<RtMailNotificationConfiguration>(session, dataQueryOperation);
+        var r = await tenantRepository.GetRtEntitiesByTypeAsync<RtMailNotificationConfiguration>(session,
+            dataQueryOperation);
         if (r.TotalCount == 0)
         {
             var rtMailNotificationConfiguration = new RtMailNotificationConfiguration
@@ -341,7 +347,8 @@ internal class DefaultConfigurationCreatorService(
         dataQueryOperation = DataQueryOperation.Create()
             .FieldEquals(nameof(RtEntity.RtWellKnownName),
                 IdentityServiceConstants.WelcomeEmailTemplateName);
-        r = await tenantRepository.GetRtEntitiesByTypeAsync<RtMailNotificationConfiguration>(session, dataQueryOperation);
+        r = await tenantRepository.GetRtEntitiesByTypeAsync<RtMailNotificationConfiguration>(session,
+            dataQueryOperation);
         if (r.TotalCount == 0)
         {
             var welcomeMailTemplate = new RtNotificationTemplate
@@ -358,7 +365,8 @@ internal class DefaultConfigurationCreatorService(
         dataQueryOperation = DataQueryOperation.Create()
             .FieldEquals(nameof(RtEntity.RtWellKnownName),
                 IdentityServiceConstants.WelcomeEmailWithNoPasswordTemplateName);
-        r = await tenantRepository.GetRtEntitiesByTypeAsync<RtMailNotificationConfiguration>(session, dataQueryOperation);
+        r = await tenantRepository.GetRtEntitiesByTypeAsync<RtMailNotificationConfiguration>(session,
+            dataQueryOperation);
         if (r.TotalCount == 0)
         {
             var welcomeMailWithNoPasswordTemplate = new RtNotificationTemplate
@@ -375,7 +383,8 @@ internal class DefaultConfigurationCreatorService(
         dataQueryOperation = DataQueryOperation.Create()
             .FieldEquals(nameof(RtEntity.RtWellKnownName),
                 IdentityServiceConstants.ResetPasswordEmailTemplateName);
-        r = await tenantRepository.GetRtEntitiesByTypeAsync<RtMailNotificationConfiguration>(session, dataQueryOperation);
+        r = await tenantRepository.GetRtEntitiesByTypeAsync<RtMailNotificationConfiguration>(session,
+            dataQueryOperation);
         if (r.TotalCount == 0)
         {
             var resetPasswordMailTemplate = new RtNotificationTemplate
