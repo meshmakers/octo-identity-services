@@ -4,6 +4,7 @@ using Meshmakers.Common.Shared;
 using Meshmakers.Octo.ConstructionKit.Contracts;
 using Meshmakers.Octo.Runtime.Contracts;
 using Meshmakers.Octo.Runtime.Contracts.MongoDb.Repositories;
+using Meshmakers.Octo.Runtime.Contracts.Repositories;
 using Meshmakers.Octo.Runtime.Contracts.Repositories.Query;
 using Meshmakers.Octo.Runtime.Contracts.RepositoryEntities;
 using Meshmakers.Octo.Services.Infrastructure.Services;
@@ -73,8 +74,7 @@ public sealed class OctoUserStore(
             token.Value = value;
             user.UserTokens ??= new AttributeRecordValueList<RtUserTokenRecord>();
             user.UserTokens[
-                    user.UserTokens.FindIndex(
-                        x => x.LoginProvider == token.LoginProvider && x.Name == token.Name)] =
+                    user.UserTokens.FindIndex(x => x.LoginProvider == token.LoginProvider && x.Name == token.Name)] =
                 token;
         }
 
@@ -167,7 +167,8 @@ public sealed class OctoUserStore(
 
         try
         {
-            await _tenantRepository.DeleteOneRtEntityByRtIdAsync<RtUser>(session, user.RtId).ConfigureAwait(false);
+            await _tenantRepository.DeleteOneRtEntityByRtIdAsync<RtUser>(session, user.RtId, DeleteOptions.Erase)
+                .ConfigureAwait(false);
             await session.CommitTransactionAsync().ConfigureAwait(false);
             return IdentityResult.Success;
         }
@@ -194,10 +195,10 @@ public sealed class OctoUserStore(
         using var session = await _tenantRepository.GetSessionAsync().ConfigureAwait(false);
         session.StartTransaction();
 
-        var dataQueryOperation = DataQueryOperation.Create()
+        var queryOptions = RtEntityQueryOptions.Create()
             .FieldFilter(nameof(RtUser.NormalizedUserName), FieldFilterOperator.Equals, normalizedUserName);
 
-        var result = await _tenantRepository.GetRtEntitiesByTypeAsync<RtUser>(session, dataQueryOperation);
+        var result = await _tenantRepository.GetRtEntitiesByTypeAsync<RtUser>(session, queryOptions);
 
         await session.CommitTransactionAsync();
 
@@ -303,14 +304,15 @@ public sealed class OctoUserStore(
 
         using var session = await _tenantRepository.GetSessionAsync().ConfigureAwait(false);
         session.StartTransaction();
-        
-        var dataQueryOperation = DataQueryOperation.Create()
+
+        var queryOptions = RtEntityQueryOptions.Create()
             .MatchField(nameof(RtUser.Claims), FieldFilterCriteria.Create()
                 .FieldEquals(nameof(RtUserClaimRecord.ClaimType), claim.Type)
                 .FieldEquals(nameof(RtUserClaimRecord.ClaimValue), claim.Value));
 
-        var result = await _tenantRepository.GetRtEntitiesByTypeAsync<RtUser>(session, dataQueryOperation).ConfigureAwait(false);
-        
+        var result = await _tenantRepository.GetRtEntitiesByTypeAsync<RtUser>(session, queryOptions)
+            .ConfigureAwait(false);
+
         await session.CommitTransactionAsync().ConfigureAwait(false);
 
         return result.Items.ToList();
@@ -410,10 +412,10 @@ public sealed class OctoUserStore(
         using var session = await _tenantRepository.GetSessionAsync();
         session.StartTransaction();
 
-        var dataQueryOperation = DataQueryOperation.Create()
+        var queryOptions = RtEntityQueryOptions.Create()
             .FieldFilter(nameof(RtUser.NormalizedEmail), FieldFilterOperator.Equals, normalizedEmail);
 
-        var result = await _tenantRepository.GetRtEntitiesByTypeAsync<RtUser>(session, dataQueryOperation);
+        var result = await _tenantRepository.GetRtEntitiesByTypeAsync<RtUser>(session, queryOptions);
         await session.CommitTransactionAsync();
         if (!result.Items.Any())
         {
@@ -581,15 +583,16 @@ public sealed class OctoUserStore(
         using var session = await _tenantRepository.GetSessionAsync().ConfigureAwait(false);
         session.StartTransaction();
 
-        var dataQueryOperation = DataQueryOperation.Create()
+        var queryOptions = RtEntityQueryOptions.Create()
             .MatchField(nameof(RtUser.UserLogins), FieldFilterCriteria.Create()
                 .FieldEquals(nameof(RtUserLoginRecord.LoginProvider), loginProvider)
                 .FieldEquals(nameof(RtUserLoginRecord.ProviderKey), providerKey));
 
-        var resultSet = await _tenantRepository.GetRtEntitiesByTypeAsync<RtUser>(session, dataQueryOperation).ConfigureAwait(false);
-        
+        var resultSet = await _tenantRepository.GetRtEntitiesByTypeAsync<RtUser>(session, queryOptions)
+            .ConfigureAwait(false);
+
         await session.CommitTransactionAsync();
-        
+
         return resultSet.Items.FirstOrDefault();
     }
 
@@ -607,9 +610,8 @@ public sealed class OctoUserStore(
             throw NotExistingException.UserWithIdDoesNotExist(user.RtId);
         }
 
-        var source = dbUser.UserLogins?.Select(
-            x =>
-                new UserLoginInfo(x.LoginProvider, x.ProviderKey, x.ProviderDisplayName));
+        var source = dbUser.UserLogins?.Select(x =>
+            new UserLoginInfo(x.LoginProvider, x.ProviderKey, x.ProviderDisplayName));
 
         var userLoginInfos = source?.ToList() ?? new List<UserLoginInfo>();
         return userLoginInfos;
@@ -627,7 +629,9 @@ public sealed class OctoUserStore(
     {
         cancellationToken.ThrowIfCancellationRequested();
         ThrowIfDisposed();
-        return user != null ? Task.FromResult(user.PasswordHash != null) : throw new ArgumentNullException(nameof(user));
+        return user != null
+            ? Task.FromResult(user.PasswordHash != null)
+            : throw new ArgumentNullException(nameof(user));
     }
 
     public Task SetPasswordHashAsync(
@@ -654,7 +658,9 @@ public sealed class OctoUserStore(
     {
         cancellationToken.ThrowIfCancellationRequested();
         ThrowIfDisposed();
-        return user != null ? Task.FromResult(user.PhoneNumberConfirmed) : throw new ArgumentNullException(nameof(user));
+        return user != null
+            ? Task.FromResult(user.PhoneNumberConfirmed)
+            : throw new ArgumentNullException(nameof(user));
     }
 
     public Task SetPhoneNumberAsync(
@@ -736,10 +742,11 @@ public sealed class OctoUserStore(
         using var session = await _tenantRepository.GetSessionAsync().ConfigureAwait(false);
         session.StartTransaction();
 
-        var dataQueryOperation = DataQueryOperation.Create()
+        var queryOptions = RtEntityQueryOptions.Create()
             .FieldFilter(nameof(RtUser.RoleIds), FieldFilterOperator.AnyEq, ConvertIdToString(roleAsync.RtId));
 
-        var result = await _tenantRepository.GetRtEntitiesByTypeAsync<RtUser>(session, dataQueryOperation).ConfigureAwait(true);
+        var result = await _tenantRepository.GetRtEntitiesByTypeAsync<RtUser>(session, queryOptions)
+            .ConfigureAwait(true);
         await session.CommitTransactionAsync();
 
         return result.Items.ToList();
@@ -767,7 +774,8 @@ public sealed class OctoUserStore(
 
         foreach (var roleRtIdString in dbUser.RoleIds)
         {
-            var role = await GetRoleByIdAsync(ConvertIdFromString(roleRtIdString), cancellationToken).ConfigureAwait(true);
+            var role = await GetRoleByIdAsync(ConvertIdFromString(roleRtIdString), cancellationToken)
+                .ConfigureAwait(true);
             if (!string.IsNullOrWhiteSpace(role.Name))
             {
                 roles.Add(role.Name);
@@ -906,13 +914,13 @@ public sealed class OctoUserStore(
         string normalizedRoleName,
         CancellationToken cancellationToken = default)
     {
-        var dataQueryOperation = DataQueryOperation.Create()
+        var queryOptions = RtEntityQueryOptions.Create()
             .FieldFilter(nameof(RtRole.NormalizedName), FieldFilterOperator.Equals, normalizedRoleName);
 
         using var session = await _tenantRepository.GetSessionAsync();
         session.StartTransaction();
 
-        var result = await _tenantRepository.GetRtEntitiesByTypeAsync<RtRole>(session, dataQueryOperation);
+        var result = await _tenantRepository.GetRtEntitiesByTypeAsync<RtRole>(session, queryOptions);
         cancellationToken.ThrowIfCancellationRequested();
 
         await session.CommitTransactionAsync();

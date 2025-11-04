@@ -3,6 +3,7 @@ using Duende.IdentityServer.Models;
 using Meshmakers.Common.Shared;
 using Meshmakers.Octo.Runtime.Contracts;
 using Meshmakers.Octo.Runtime.Contracts.MongoDb.Repositories;
+using Meshmakers.Octo.Runtime.Contracts.Repositories;
 using Meshmakers.Octo.Runtime.Contracts.Repositories.Query;
 using Meshmakers.Octo.Services.Infrastructure.Services;
 using Persistence.IdentityCkModel.Generated.System.Identity.v1;
@@ -45,7 +46,7 @@ public class ClientStore : IOctoClientStore
             throw new NotExistingException($"Client id '{clientId}' does not exist.");
         }
 
-        await _tenantRepository.DeleteOneRtEntityByRtIdAsync<RtClient>(session, client.RtId);
+        await _tenantRepository.DeleteOneRtEntityByRtIdAsync<RtClient>(session, client.RtId, DeleteOptions.Erase);
 
         await session.CommitTransactionAsync();
     }
@@ -57,10 +58,10 @@ public class ClientStore : IOctoClientStore
         var session = await _tenantRepository.GetSessionAsync();
         session.StartTransaction();
 
-        var dataQueryOperation = DataQueryOperation.Create()
+        var queryOptions = RtEntityQueryOptions.Create()
             .FieldFilter(nameof(RtClient.ClientId), FieldFilterOperator.Equals, clientId);
 
-        var result = await _tenantRepository.GetRtEntitiesByTypeAsync<RtClient>(session, dataQueryOperation);
+        var result = await _tenantRepository.GetRtEntitiesByTypeAsync<RtClient>(session, queryOptions);
 
 
         await session.CommitTransactionAsync();
@@ -85,9 +86,9 @@ public class ClientStore : IOctoClientStore
         var session = await _tenantRepository.GetSessionAsync();
         session.StartTransaction();
 
-        var dataQueryOperation = DataQueryOperation.Create();
+        var queryOptions = RtEntityQueryOptions.Create();
 
-        var result = await _tenantRepository.GetRtEntitiesByTypeAsync<RtClient>(session, dataQueryOperation);
+        var result = await _tenantRepository.GetRtEntitiesByTypeAsync<RtClient>(session, queryOptions);
 
         await session.CommitTransactionAsync();
         return result.Items;
@@ -115,10 +116,10 @@ public class ClientStore : IOctoClientStore
 
     private async Task<RtClient?> GetClientByClientId(IOctoSession session, string clientId)
     {
-        var dataQueryOperation = DataQueryOperation.Create()
+        var queryOptions = RtEntityQueryOptions.Create()
             .FieldFilter(nameof(RtClient.ClientId), FieldFilterOperator.Equals, clientId);
 
-        var result = await _tenantRepository.GetRtEntitiesByTypeAsync<RtClient>(session, dataQueryOperation);
+        var result = await _tenantRepository.GetRtEntitiesByTypeAsync<RtClient>(session, queryOptions);
         return result.Items.FirstOrDefault();
     }
 }

@@ -3,6 +3,7 @@ using Meshmakers.Common.Shared;
 using Meshmakers.Octo.ConstructionKit.Contracts;
 using Meshmakers.Octo.Runtime.Contracts;
 using Meshmakers.Octo.Runtime.Contracts.MongoDb.Repositories;
+using Meshmakers.Octo.Runtime.Contracts.Repositories;
 using Meshmakers.Octo.Runtime.Contracts.Repositories.Query;
 using Meshmakers.Octo.Runtime.Contracts.RepositoryEntities;
 using Meshmakers.Octo.Services.Infrastructure.Services;
@@ -70,7 +71,7 @@ public sealed class OctoRoleStore(
 
         try
         {
-            await _tenantRepository.DeleteOneRtEntityByRtIdAsync<RtRole>(session, role.RtId).ConfigureAwait(false);
+            await _tenantRepository.DeleteOneRtEntityByRtIdAsync<RtRole>(session, role.RtId, DeleteOptions.Erase).ConfigureAwait(false);
             await session.CommitTransactionAsync().ConfigureAwait(false);
             return IdentityResult.Success;
         }
@@ -152,10 +153,10 @@ public sealed class OctoRoleStore(
         using var session = await _tenantRepository.GetSessionAsync().ConfigureAwait(false);
         session.StartTransaction();
 
-        var dataQueryOperation = DataQueryOperation.Create()
+        var queryOptions = RtEntityQueryOptions.Create()
             .FieldFilter(nameof(RtRole.NormalizedName), FieldFilterOperator.Equals, normalizedName);
 
-        var result = await _tenantRepository.GetRtEntitiesByTypeAsync<RtRole>(session, dataQueryOperation);
+        var result = await _tenantRepository.GetRtEntitiesByTypeAsync<RtRole>(session, queryOptions);
 
         await session.CommitTransactionAsync();
         return result.Items.FirstOrDefault();

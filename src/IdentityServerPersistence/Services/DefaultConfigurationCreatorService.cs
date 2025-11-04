@@ -329,11 +329,11 @@ internal class DefaultConfigurationCreatorService(
     {
         var tenantRepository = systemContext.GetSystemTenantRepositoryAsAdmin();
 
-        var dataQueryOperation = DataQueryOperation.Create()
+        var queryOptions = RtEntityQueryOptions.Create()
             .FieldEquals(nameof(RtEntity.RtWellKnownName),
                 IdentityServiceConstants.MailNotificationConfigurationName);
         var r = await tenantRepository.GetRtEntitiesByTypeAsync<RtMailNotificationConfiguration>(session,
-            dataQueryOperation);
+            queryOptions);
         if (r.TotalCount == 0)
         {
             var rtMailNotificationConfiguration = new RtMailNotificationConfiguration
@@ -344,11 +344,11 @@ internal class DefaultConfigurationCreatorService(
             await tenantRepository.InsertOneRtEntityAsync(session, rtMailNotificationConfiguration);
         }
 
-        dataQueryOperation = DataQueryOperation.Create()
+        queryOptions = RtEntityQueryOptions.Create()
             .FieldEquals(nameof(RtEntity.RtWellKnownName),
                 IdentityServiceConstants.WelcomeEmailTemplateName);
         r = await tenantRepository.GetRtEntitiesByTypeAsync<RtMailNotificationConfiguration>(session,
-            dataQueryOperation);
+            queryOptions);
         if (r.TotalCount == 0)
         {
             var welcomeMailTemplate = new RtNotificationTemplate
@@ -362,11 +362,11 @@ internal class DefaultConfigurationCreatorService(
             await tenantRepository.InsertOneRtEntityAsync(session, welcomeMailTemplate);
         }
 
-        dataQueryOperation = DataQueryOperation.Create()
+        queryOptions = RtEntityQueryOptions.Create()
             .FieldEquals(nameof(RtEntity.RtWellKnownName),
                 IdentityServiceConstants.WelcomeEmailWithNoPasswordTemplateName);
         r = await tenantRepository.GetRtEntitiesByTypeAsync<RtMailNotificationConfiguration>(session,
-            dataQueryOperation);
+            queryOptions);
         if (r.TotalCount == 0)
         {
             var welcomeMailWithNoPasswordTemplate = new RtNotificationTemplate
@@ -380,11 +380,11 @@ internal class DefaultConfigurationCreatorService(
             await tenantRepository.InsertOneRtEntityAsync(session, welcomeMailWithNoPasswordTemplate);
         }
 
-        dataQueryOperation = DataQueryOperation.Create()
+        queryOptions = RtEntityQueryOptions.Create()
             .FieldEquals(nameof(RtEntity.RtWellKnownName),
                 IdentityServiceConstants.ResetPasswordEmailTemplateName);
         r = await tenantRepository.GetRtEntitiesByTypeAsync<RtMailNotificationConfiguration>(session,
-            dataQueryOperation);
+            queryOptions);
         if (r.TotalCount == 0)
         {
             var resetPasswordMailTemplate = new RtNotificationTemplate

@@ -77,14 +77,14 @@ public class RolesController : ControllerBase
             using var session = await tenantRepository.GetSessionAsync();
             session.StartTransaction();
 
-            var dataOperation = DataQueryOperation.Create();
+            var queryOptions = RtEntityQueryOptions.Create();
             if (!string.IsNullOrWhiteSpace(pagingParams.Filter))
             {
-                dataOperation.FieldLike(nameof(RtRole.Name), pagingParams.Filter);
+                queryOptions.FieldLike(nameof(RtRole.Name), pagingParams.Filter);
             }
 
             var resultSet =
-                await tenantRepository.GetRtEntitiesByTypeAsync<RtRole>(session, dataOperation, pagingParams.Skip,
+                await tenantRepository.GetRtEntitiesByTypeAsync<RtRole>(session, queryOptions, pagingParams.Skip,
                     pagingParams.Take);
             var list = _mapper.Map<List<RoleDto>>(resultSet.Items);
 

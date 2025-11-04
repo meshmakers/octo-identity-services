@@ -41,10 +41,10 @@ public class PermissionStore : IOctoPermissionStore
         var session = await _tenantRepository.GetSessionAsync();
         session.StartTransaction();
 
-        var dataQueryOperation = DataQueryOperation.Create()
+        var queryOptions = RtEntityQueryOptions.Create()
             .FieldFilter(nameof(RtPermission.PermissionId), FieldFilterOperator.Equals, permissionId);
 
-        var result = await _tenantRepository.GetRtEntitiesByTypeAsync<RtPermission>(session, dataQueryOperation);
+        var result = await _tenantRepository.GetRtEntitiesByTypeAsync<RtPermission>(session, queryOptions);
 
         await session.CommitTransactionAsync();
         return result.Items.FirstOrDefault();
