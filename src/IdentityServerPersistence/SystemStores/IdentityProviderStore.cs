@@ -2,6 +2,7 @@ using AutoMapper;
 using Meshmakers.Common.Shared;
 using Meshmakers.Octo.ConstructionKit.Contracts;
 using Meshmakers.Octo.Runtime.Contracts.MongoDb.Repositories;
+using Meshmakers.Octo.Runtime.Contracts.Repositories;
 using Meshmakers.Octo.Runtime.Contracts.Repositories.Query;
 using Meshmakers.Octo.Services.Infrastructure.Services;
 using Persistence.IdentityCkModel.Generated.System.Identity.v1;
@@ -28,11 +29,11 @@ public class IdentityProviderStore : IOctoIdentityProviderStore
         var session = await _tenantRepository.GetSessionAsync();
         session.StartTransaction();
 
-        var dataQueryOperation = DataQueryOperation.Create()
+        var queryOptions = RtEntityQueryOptions.Create()
             .FieldEquals(nameof(RtIdentityProvider.Name), name)
             .FieldEquals(nameof(RtIdentityProvider.IsEnabled), true);
 
-        var result = await _tenantRepository.GetRtEntitiesByTypeAsync<RtIdentityProvider>(session, dataQueryOperation);
+        var result = await _tenantRepository.GetRtEntitiesByTypeAsync<RtIdentityProvider>(session, queryOptions);
 
         await session.CommitTransactionAsync();
         return result.Items.SingleOrDefault();
@@ -55,9 +56,9 @@ public class IdentityProviderStore : IOctoIdentityProviderStore
         var session = await _tenantRepository.GetSessionAsync();
         session.StartTransaction();
 
-        var dataQueryOperation = DataQueryOperation.Create();
+        var queryOptions = RtEntityQueryOptions.Create();
 
-        var result = await _tenantRepository.GetRtEntitiesByTypeAsync<RtIdentityProvider>(session, dataQueryOperation);
+        var result = await _tenantRepository.GetRtEntitiesByTypeAsync<RtIdentityProvider>(session, queryOptions);
         await session.CommitTransactionAsync();
 
         return result.Items;
@@ -86,7 +87,7 @@ public class IdentityProviderStore : IOctoIdentityProviderStore
         var session = await _tenantRepository.GetSessionAsync();
         session.StartTransaction();
 
-        await _tenantRepository.DeleteOneRtEntityByRtIdAsync<RtIdentityProvider>(session, rtId);
+        await _tenantRepository.DeleteOneRtEntityByRtIdAsync<RtIdentityProvider>(session, rtId, DeleteOptions.Erase);
 
         await session.CommitTransactionAsync();
     }

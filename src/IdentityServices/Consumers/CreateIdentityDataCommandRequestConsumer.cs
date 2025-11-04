@@ -81,10 +81,10 @@ public class CreateIdentityDataCommandRequestConsumer(
     private async Task CreateApiScopeIfNotExistAsync(IOctoSession session, ITenantRepository tenantRepository,
         DistApiScopeDto distApiScopeDto)
     {
-        var dataQueryOperation = DataQueryOperation.Create()
+        var queryOptions = RtEntityQueryOptions.Create()
             .FieldFilter(nameof(RtApiScope.Name), FieldFilterOperator.Equals, distApiScopeDto.Name);
 
-        var result = await tenantRepository.GetRtEntitiesByTypeAsync<RtApiScope>(session, dataQueryOperation);
+        var result = await tenantRepository.GetRtEntitiesByTypeAsync<RtApiScope>(session, queryOptions);
         if (!result.Items.Any())
         {
             var rtApiScope = new RtApiScope
@@ -100,10 +100,10 @@ public class CreateIdentityDataCommandRequestConsumer(
     private async Task CreateApiResourceIfNotExistAsync(IOctoSession session, ITenantRepository tenantRepository,
         DistApiResourcesDto distApiResourcesDto)
     {
-        var dataQueryOperation = DataQueryOperation.Create()
+        var queryOptions = RtEntityQueryOptions.Create()
             .FieldFilter(nameof(RtApiResource.Name), FieldFilterOperator.Equals, distApiResourcesDto.Name);
 
-        var result = await tenantRepository.GetRtEntitiesByTypeAsync<RtApiResource>(session, dataQueryOperation);
+        var result = await tenantRepository.GetRtEntitiesByTypeAsync<RtApiResource>(session, queryOptions);
         if (!result.Items.Any())
         {
             var rtApiResource = new RtApiResource
@@ -121,7 +121,7 @@ public class CreateIdentityDataCommandRequestConsumer(
     private async Task CreateClientIfNotExistAsync(IOctoSession session, ITenantRepository tenantRepository,
         DistClientDto distClientDto)
     {
-        var dataQueryOperation = DataQueryOperation.Create()
+        var queryOptions = RtEntityQueryOptions.Create()
             .FieldFilter(nameof(RtClient.ClientId), FieldFilterOperator.Equals, distClientDto.ClientId);
         
         var rtClient = new RtClient
@@ -149,7 +149,7 @@ public class CreateIdentityDataCommandRequestConsumer(
             AllowedScopes = new AttributeStringValueList(distClientDto.AllowedScopes.ToList())
         };
 
-        var result = await tenantRepository.GetRtEntitiesByTypeAsync<RtClient>(session, dataQueryOperation);
+        var result = await tenantRepository.GetRtEntitiesByTypeAsync<RtClient>(session, queryOptions);
         if (!result.Items.Any())
         {
             await tenantRepository.InsertOneRtEntityAsync(session, rtClient);
