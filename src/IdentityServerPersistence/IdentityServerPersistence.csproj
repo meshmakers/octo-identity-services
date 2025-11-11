@@ -6,7 +6,7 @@
     </PropertyGroup>
 
     <ItemGroup>
-        <PackageReference Include="AutoMapper" Version="15.0.1" />
+        <PackageReference Include="AutoMapper" Version="15.1.0" />
         <PackageReference Include="Duende.IdentityServer" Version="7.3.2" />
         <FrameworkReference Include="Microsoft.AspNetCore.App" />
     </ItemGroup>
