@@ -20,6 +20,8 @@ steps:
       $buildNumberShort = "$major.$minor.$build"
       $buildNumberLong = "$major.$minor.$build.$revision"
       
+      $octoPublishCatalog = "PrivateGitHubCatalog"
+      
       $octoVersion = "0.1.*";
       if ($branch.StartsWith("refs/heads/test/")) {
         Write-host "Branch is test branch"
@@ -53,6 +55,8 @@ steps:
         Write-Host "Setting build number to $buildNumberLong"
         Write-Host "##vso[build.updatebuildnumber]$buildNumberLong"
       
+        $octoPublishCatalog = "PublicGitHubCatalog"
+      
         Write-Host "Setting OctoVersion to $buildNumberShort"
         $octoVersion = $buildNumberShort
       }
@@ -62,4 +66,5 @@ steps:
       Write-Host "##vso[task.setvariable variable=BuildNumberShort;]$buildNumberShort"
       Write-Host "##vso[task.setvariable variable=BuildNumberLong;]$buildNumberLong"
       Write-Host "##vso[task.setvariable variable=OctoVersion;]$octoVersion"
+      Write-Host "##vso[task.setvariable variable=OctoPublishCatalog;]$octoPublishCatalog"
   displayName: 'Set build number'
