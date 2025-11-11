@@ -29,7 +29,9 @@ variables:
     value: ${{ eq(variables['Build.SourceBranch'], 'refs/heads/main') }}    
   - name: isTest
     value: ${{ startsWith(variables['Build.SourceBranch'], 'refs/heads/test') }}
-
+  - name: OctoLocalCatalogIsEnabled
+    value: 'false'
+    
 stages:
   - stage: Build
     jobs:
