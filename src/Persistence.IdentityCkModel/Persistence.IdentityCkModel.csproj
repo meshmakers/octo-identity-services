@@ -4,8 +4,8 @@
         <Configurations>Debug;Release;DebugL</Configurations>
         <Platforms>AnyCPU</Platforms>
         <OctoGenerateCkModelServiceClass>true</OctoGenerateCkModelServiceClass>
-        <OctoPublishCkModel Condition="'$(TargetFramework)' == 'net9.0'">true</OctoPublishCkModel>
-        <OctoGenerateCkDocumentation Condition="'$(TargetFramework)' == 'net9.0'">true</OctoGenerateCkDocumentation>
+        <OctoPublishCkModel Condition="'$(TargetFramework)' == 'net10.0'">true</OctoPublishCkModel>
+        <OctoGenerateCkDocumentation Condition="'$(TargetFramework)' == 'net10.0'">true</OctoGenerateCkDocumentation>
     </PropertyGroup>
 
     <ItemGroup>
