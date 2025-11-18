@@ -1,9 +1,9 @@
-FROM mcr.microsoft.com/dotnet/aspnet:9.0-nobleAS base
+FROM mcr.microsoft.com/dotnet/aspnet:10.0-nobleAS base
 WORKDIR /app
 EXPOSE 80
 EXPOSE 443
 
-FROM mcr.microsoft.com/dotnet/sdk:9.0-noble AS build
+FROM mcr.microsoft.com/dotnet/sdk:10.0-noble AS build
 
 ARG OCTO_PRIVATE_NUGET_SERVICE
 ARG OCTO_PRIVATE_NUGET_CERTIFICATE
