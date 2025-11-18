@@ -1,4 +1,4 @@
-FROM mcr.microsoft.com/dotnet/aspnet:10.0-nobleAS base
+FROM mcr.microsoft.com/dotnet/aspnet:10.0-noble AS base
 WORKDIR /app
 EXPOSE 80
 EXPOSE 443
