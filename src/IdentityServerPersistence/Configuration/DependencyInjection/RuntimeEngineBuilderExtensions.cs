@@ -35,7 +35,7 @@ public static class RuntimeEngineBuilderExtensions
         builder.AddMongoDbRuntimeRepository();
 
         // Add the construction kits as embedded repository
-        builder.Services.AddCkModelSystemIdentity();
+        builder.Services.AddCkModelSystemIdentityV1();
 
         // Add services of Identity module
         builder.Services
