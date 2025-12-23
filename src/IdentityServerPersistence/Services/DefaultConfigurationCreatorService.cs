@@ -18,7 +18,7 @@ using Meshmakers.Octo.Services.Notifications.Generated.System.Notification.v1;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
-using Persistence.IdentityCkModel.Generated.System.Identity.v1;
+using Persistence.IdentityCkModel.Generated.System.Identity.v2;
 
 namespace IdentityServerPersistence.Services;
 

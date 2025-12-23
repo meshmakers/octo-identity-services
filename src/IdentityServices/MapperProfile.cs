@@ -1,6 +1,6 @@
 using AutoMapper;
 using Meshmakers.Octo.Communication.Contracts.DataTransferObjects;
-using Persistence.IdentityCkModel.Generated.System.Identity.v1;
+using Persistence.IdentityCkModel.Generated.System.Identity.v2;
 
 namespace Meshmakers.Octo.Backend.IdentityServices;
 

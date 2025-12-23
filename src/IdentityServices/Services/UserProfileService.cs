@@ -1,7 +1,7 @@
 using System.Security.Claims;
 using Duende.IdentityServer.AspNetIdentity;
 using Microsoft.AspNetCore.Identity;
-using Persistence.IdentityCkModel.Generated.System.Identity.v1;
+using Persistence.IdentityCkModel.Generated.System.Identity.v2;
 
 namespace Meshmakers.Octo.Backend.IdentityServices.Services;
 
