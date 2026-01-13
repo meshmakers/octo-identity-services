@@ -8,12 +8,14 @@ using Meshmakers.Octo.Backend.IdentityServices.Resources;
 using Meshmakers.Octo.Communication.Contracts;
 using Meshmakers.Octo.ConstructionKit.Contracts;
 using Meshmakers.Octo.Runtime.Contracts;
+using Meshmakers.Octo.Runtime.Contracts.Blueprints;
 using Meshmakers.Octo.Runtime.Contracts.MongoDb;
 using Meshmakers.Octo.Runtime.Contracts.Repositories.Query;
 using Meshmakers.Octo.Runtime.Contracts.RepositoryEntities;
 using Meshmakers.Octo.Services.Infrastructure;
 using Meshmakers.Octo.Services.Infrastructure.Migrations;
 using Meshmakers.Octo.Services.Infrastructure.Services;
+using Meshmakers.Octo.ConstructionKit.Models.System.Generated.System.v2;
 using Meshmakers.Octo.Services.Notifications.Generated.System.Notification.v2;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.Extensions.Logging;
@@ -32,7 +34,8 @@ internal class DefaultConfigurationCreatorService(
     IOctoResourceStore resourceStore,
     IOctoIdentityProviderStore octoIdentityProviderStore,
     IOptions<OctoIdentityServicesOptions> octoIdentityOptions,
-    MigrationService? migrationService)
+    MigrationService? migrationService,
+    ICkModelUpgradeService? ckModelUpgradeService = null)
     : DefaultConfigurationCreatorServiceBase(logger), IConfigurationService
 {
     public override async Task InitializeAsync()
@@ -67,7 +70,10 @@ internal class DefaultConfigurationCreatorService(
         // Ensure that the identity ck model and notification ck model is imported
         await ImportCkModel(tenantContext);
 
-        // we run the migrations for each tenant context
+        // Run CK model data migrations (transforms existing runtime entities)
+        await RunCkModelMigrationsAsync(tenantContext);
+
+        // we run the infrastructure migrations for each tenant context
         if (migrationService != null)
         {
             var adminSession = await tenantContext.GetAdminSessionAsync();
@@ -417,5 +423,46 @@ internal class DefaultConfigurationCreatorService(
     public bool CanBeEnabled()
     {
         return false;
+    }
+
+    private async Task RunCkModelMigrationsAsync(ITenantContext tenantContext)
+    {
+        if (ckModelUpgradeService == null)
+        {
+            return;
+        }
+
+        var ckModelIds = new List<CkModelIdVersionRange>
+        {
+            // System CK model (base model, updated via EnsureSystemCkModelAsync)
+            SystemCkIds.CkModelId.ToVersionRange(),
+            // Identity and Notification CK models
+            SystemIdentityCkIds.CkModelId.ToVersionRange(),
+            SystemNotificationCkIds.CkModelId.ToVersionRange()
+        };
+
+        logger.LogInformation(
+            "Running CK model data migrations for tenant '{TenantId}' with {ModelCount} models",
+            tenantContext.TenantId, ckModelIds.Count);
+
+        var result = await ckModelUpgradeService.UpgradeModelsAsync(
+            tenantContext.TenantId,
+            ckModelIds,
+            new CkMigrationOptions { ContinueOnError = false },
+            CancellationToken.None);
+
+        if (!result.Success)
+        {
+            var errorMessage = $"CK model migration failed for tenant '{tenantContext.TenantId}': {string.Join("; ", result.Errors)}";
+            logger.LogError("{ErrorMessage}", errorMessage);
+            throw new InvalidOperationException(errorMessage);
+        }
+
+        if (result.TotalEntitiesAffected > 0)
+        {
+            logger.LogInformation(
+                "CK model data migrations completed for tenant '{TenantId}': {EntitiesAffected} entities affected",
+                tenantContext.TenantId, result.TotalEntitiesAffected);
+        }
     }
 }

@@ -30,7 +30,8 @@ public static class RuntimeEngineBuilderExtensions
 
         // Adding dependent octo modules
         builder.Services.AddOctoServiceInfrastructure("IdentityService", configureDistributionEventHub);
-        builder.AddMongoDbRuntimeRepository();
+        builder.AddMongoDbRuntimeRepository()
+            .AddMongoCkModelMigrationSupport();
 
         // Add the construction kits as embedded repository
         builder.Services.AddCkModelSystemIdentityV2();
