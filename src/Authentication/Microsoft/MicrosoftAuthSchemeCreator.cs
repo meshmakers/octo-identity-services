@@ -1,7 +1,7 @@
 ﻿using Meshmakers.Octo.Backend.Authentication.DynamicAuth;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.MicrosoftAccount;
-using Persistence.IdentityCkModel.Generated.System.Identity.v1;
+using Persistence.IdentityCkModel.Generated.System.Identity.v2;
 
 namespace Meshmakers.Octo.Backend.Authentication.Microsoft;
 

@@ -3,7 +3,7 @@ using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.OpenIdConnect;
 using Microsoft.IdentityModel.Protocols;
 using Microsoft.IdentityModel.Protocols.OpenIdConnect;
-using Persistence.IdentityCkModel.Generated.System.Identity.v1;
+using Persistence.IdentityCkModel.Generated.System.Identity.v2;
 
 namespace Meshmakers.Octo.Backend.Authentication.AzureEntraId;
 

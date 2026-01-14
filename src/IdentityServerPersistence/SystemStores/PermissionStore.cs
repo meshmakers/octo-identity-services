@@ -2,7 +2,7 @@ using Meshmakers.Common.Shared;
 using Meshmakers.Octo.Runtime.Contracts.MongoDb.Repositories;
 using Meshmakers.Octo.Runtime.Contracts.Repositories.Query;
 using Meshmakers.Octo.Services.Infrastructure.Services;
-using Persistence.IdentityCkModel.Generated.System.Identity.v1;
+using Persistence.IdentityCkModel.Generated.System.Identity.v2;
 
 namespace IdentityServerPersistence.SystemStores;
 

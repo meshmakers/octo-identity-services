@@ -1,7 +1,7 @@
 using Meshmakers.Octo.Backend.Authentication.DynamicAuth;
 using Meshmakers.Octo.Backend.Authentication.Options;
 using Microsoft.AspNetCore.Authentication;
-using Persistence.IdentityCkModel.Generated.System.Identity.v1;
+using Persistence.IdentityCkModel.Generated.System.Identity.v2;
 
 namespace Meshmakers.Octo.Backend.Authentication.OpenLdap;
 
