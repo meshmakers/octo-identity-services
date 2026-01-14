@@ -20,7 +20,7 @@ using Meshmakers.Octo.Services.Infrastructure.Configuration;
 using Meshmakers.Octo.Services.Infrastructure.CredentialGenerator;
 using Meshmakers.Octo.Services.Infrastructure.Migrations;
 using Meshmakers.Octo.Services.Infrastructure.Services;
-using Meshmakers.Octo.Services.Notifications.Generated.System.Notification.v1;
+using Meshmakers.Octo.Services.Notifications.Generated.System.Notification.v2;
 using Meshmakers.Octo.Services.Notifications.Services;
 using Meshmakers.Octo.Services.Observability;
 using Meshmakers.Octo.Services.Swagger.Configuration;
@@ -30,7 +30,7 @@ using Microsoft.Extensions.Options;
 using Microsoft.IdentityModel.Logging;
 using NLog;
 using NLog.Web;
-using Persistence.IdentityCkModel.Generated.System.Identity.v1;
+using Persistence.IdentityCkModel.Generated.System.Identity.v2;
 using LogLevel = Microsoft.Extensions.Logging.LogLevel;
 
 // NLog: Setup the logger first to catch all errors

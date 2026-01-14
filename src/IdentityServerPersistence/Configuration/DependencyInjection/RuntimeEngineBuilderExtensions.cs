@@ -9,11 +9,9 @@ using Meshmakers.Octo.Runtime.Contracts.MongoDb.Configuration;
 using Meshmakers.Octo.Runtime.Contracts.RepositoryEntities;
 using Meshmakers.Octo.Runtime.Engine.Configuration.DependencyInjection;
 using Meshmakers.Octo.Services.Infrastructure;
-using Meshmakers.Octo.Services.Infrastructure.Cors;
 using Meshmakers.Octo.Services.Infrastructure.Services;
-using Microsoft.AspNetCore.Cors.Infrastructure;
 using Microsoft.AspNetCore.Identity;
-using Persistence.IdentityCkModel.Generated.System.Identity.v1;
+using Persistence.IdentityCkModel.Generated.System.Identity.v2;
 
 // ReSharper disable once CheckNamespace
 namespace Microsoft.Extensions.DependencyInjection;
@@ -35,7 +33,7 @@ public static class RuntimeEngineBuilderExtensions
         builder.AddMongoDbRuntimeRepository();
 
         // Add the construction kits as embedded repository
-        builder.Services.AddCkModelSystemIdentityV1();
+        builder.Services.AddCkModelSystemIdentityV2();
 
         // Add services of Identity module
         builder.Services
