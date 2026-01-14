@@ -35,7 +35,8 @@ internal class DefaultConfigurationCreatorService(
     IOctoIdentityProviderStore octoIdentityProviderStore,
     IOptions<OctoIdentityServicesOptions> octoIdentityOptions,
     MigrationService? migrationService,
-    ICkModelUpgradeService? ckModelUpgradeService = null)
+    ICkModelUpgradeService? ckModelUpgradeService = null,
+    IRuntimeRepositoryProvider? runtimeRepositoryProvider = null)
     : DefaultConfigurationCreatorServiceBase(logger), IConfigurationService
 {
     public override async Task InitializeAsync()
@@ -48,6 +49,22 @@ internal class DefaultConfigurationCreatorService(
 
     protected override async Task SetupTenantAsync(string tenantId)
     {
+        // Capture schema versions BEFORE any CK model updates
+        // This must happen FIRST so we can detect version changes for migration
+        IReadOnlyDictionary<string, string>? previousSchemaVersions = null;
+        if (runtimeRepositoryProvider != null && ckModelUpgradeService != null)
+        {
+            previousSchemaVersions = await runtimeRepositoryProvider
+                .GetSchemaVersionsAsync(tenantId, CancellationToken.None);
+
+            if (previousSchemaVersions.Count > 0)
+            {
+                logger.LogDebug(
+                    "Captured {Count} schema versions before import for tenant '{TenantId}'",
+                    previousSchemaVersions.Count, tenantId);
+            }
+        }
+
         // 1st, we ensure that the system tenant and its ck model exists
         if (tenantId == systemContext.TenantId)
         {
@@ -71,7 +88,7 @@ internal class DefaultConfigurationCreatorService(
         await ImportCkModel(tenantContext);
 
         // Run CK model data migrations (transforms existing runtime entities)
-        await RunCkModelMigrationsAsync(tenantContext);
+        await RunCkModelMigrationsAsync(tenantContext, previousSchemaVersions);
 
         // we run the infrastructure migrations for each tenant context
         if (migrationService != null)
@@ -425,7 +442,9 @@ internal class DefaultConfigurationCreatorService(
         return false;
     }
 
-    private async Task RunCkModelMigrationsAsync(ITenantContext tenantContext)
+    private async Task RunCkModelMigrationsAsync(
+        ITenantContext tenantContext,
+        IReadOnlyDictionary<string, string>? previousSchemaVersions = null)
     {
         if (ckModelUpgradeService == null)
         {
@@ -449,6 +468,7 @@ internal class DefaultConfigurationCreatorService(
             tenantContext.TenantId,
             ckModelIds,
             new CkMigrationOptions { ContinueOnError = false },
+            previousSchemaVersions,
             CancellationToken.None);
 
         if (!result.Success)
