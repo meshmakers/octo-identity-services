@@ -1,0 +1,438 @@
+# Persistence Architecture
+
+## Overview
+
+The persistence layer uses the Octo Construction Kit (CK) code generation system to define entities in YAML, which are compiled to C# at build time. Data is stored in MongoDB via the Octo Runtime Engine.
+
+## Construction Kit Model System
+
+### What is the Construction Kit?
+
+The Construction Kit is Octo's code generation framework that:
+- Converts YAML model definitions into C# runtime entities
+- Provides compile-time type safety
+- Generates automatic MongoDB serialization
+- Creates documentation from model definitions
+
+### Model Location
+
+Models are defined in `src/Persistence.IdentityCkModel/ConstructionKit/`:
+
+```
+ConstructionKit/
+├── ckModel.yaml                 # Model metadata and dependencies
+├── attributes/
+│   ├── configuration-attributes.yaml
+│   └── identity-attributes.yaml
+├── types/
+│   ├── ck-client.yaml
+│   ├── ck-user.yaml
+│   ├── ck-role.yaml
+│   ├── ck-apiResource.yaml
+│   ├── ck-apiScope.yaml
+│   ├── ck-identityResource.yaml
+│   ├── ck-identityProvider.yaml
+│   ├── ck-persistedGrant.yaml
+│   └── ... (provider subtypes)
+├── records/
+│   ├── ck-clientClaim.yaml
+│   ├── ck-userClaim.yaml
+│   ├── ck-secret.yaml
+│   └── ...
+└── enums/
+    ├── ck-tokenExpiration.yaml
+    ├── ck-tokenType.yaml
+    └── ck-tokenUsage.yaml
+```
+
+### Model Metadata
+
+`ckModel.yaml` defines the model identity:
+
+```yaml
+"$schema": "https://schemas.meshmakers.cloud/construction-kit-meta.schema.json"
+modelId: "System.Identity-1.0.0"
+dependencies:
+  - "System-(,2.0)"
+```
+
+### Attribute Definitions
+
+Attributes define reusable property types:
+
+```yaml
+# identity-attributes.yaml
+- id: ClientId
+  valueType: String
+
+- id: AllowedGrantTypes
+  valueType: StringArray
+
+- id: UserClaims
+  valueType: RecordArray
+  valueCkRecordId: ${this}/UserClaim
+```
+
+**Value Types:**
+- `String` - Single string value
+- `StringArray` - Collection of strings
+- `Boolean` - True/false
+- `DateTime` / `DateTimeOffset` - Timestamps
+- `Int` - Integer
+- `RecordArray` - Collection of nested records
+- Enum references
+
+### Type Definitions
+
+Types define entities that map to MongoDB collections:
+
+```yaml
+# ck-client.yaml
+typeId: Client
+baseTypeId: ${System}/Entity
+isCollectionRoot: true
+attributes:
+  - id: ${this}/ClientId
+    indexes:
+      - indexType: Ascending
+  - id: ${this}/ClientName
+  - id: ${this}/AllowedGrantTypes
+  - id: ${this}/RedirectUris
+  - id: ${this}/ClientSecrets
+  # ... many more attributes
+```
+
+Key properties:
+- `isCollectionRoot: true` - Entity has its own MongoDB collection
+- `baseTypeId` - Inheritance from base entity type
+- `indexes` - MongoDB index definitions
+
+### Record Definitions
+
+Records define nested value objects (not separate collections):
+
+```yaml
+# ck-userClaim.yaml
+recordId: UserClaim
+attributes:
+  - id: ${this}/ClaimType
+  - id: ${this}/ClaimValue
+  - id: ${this}/ClaimValueType
+```
+
+Records are embedded within parent entities as arrays.
+
+## Code Generation Pipeline
+
+### Build Configuration
+
+In `Persistence.IdentityCkModel.csproj`:
+
+```xml
+<PropertyGroup>
+    <OctoGenerateCkModelServiceClass>true</OctoGenerateCkModelServiceClass>
+    <OctoPublishCkModel>true</OctoPublishCkModel>
+    <OctoGenerateCkDocumentation>true</OctoGenerateCkDocumentation>
+</PropertyGroup>
+
+<ItemGroup>
+    <PackageReference Include="Meshmakers.Octo.ConstructionKit.SourceGeneration"
+                      OutputItemType="Analyzer"
+                      ReferenceOutputAssembly="false" />
+</ItemGroup>
+```
+
+### Generation Process
+
+1. **Source Generation** - Roslyn analyzer processes YAML at compile time
+2. **Type Creation** - Generates C# classes with `Rt` prefix (Runtime)
+3. **Compilation** - Standard .NET compilation with generated code
+4. **Output** - Compiled assembly with runtime types
+
+### Generated Types
+
+All generated entities:
+- Inherit from `RtEntity` base class
+- Have immutable `CkTypeId` property
+- Use `OctoObjectId` for primary keys (`RtId`)
+- Support nested records with `AttributeRecordValueList<T>`
+- Are fully serializable to/from MongoDB BSON
+
+**Namespace:** `Persistence.IdentityCkModel.Generated.System.Identity.v1`
+
+**Examples:**
+- `RtClient` - OAuth/OIDC client
+- `RtUser` - User identity
+- `RtRole` - Role definition
+- `RtPersistedGrant` - OAuth tokens/grants
+- `RtApiResource`, `RtApiScope`, `RtIdentityResource`
+- `RtIdentityProvider` and subtypes
+
+## System Stores
+
+### Store Implementations
+
+Located in `src/IdentityServerPersistence/SystemStores/`:
+
+| Store | Interface | Purpose |
+|-------|-----------|---------|
+| `ClientStore` | `IOctoClientStore` | OAuth/OIDC clients |
+| `ResourceStore` | `IOctoResourceStore` | API resources, scopes, identity resources |
+| `PersistentGrantStore` | `IOctoPersistentGrantStore` | Tokens, grants, consent |
+| `IdentityProviderStore` | `IOctoIdentityProviderStore` | External identity providers |
+| `OctoUserStore` | `IUserStore<RtUser>` | ASP.NET Identity users |
+| `OctoRoleStore` | `IRoleStore<RtRole>` | ASP.NET Identity roles |
+| `PermissionStore` | `IOctoPermissionStore` | Custom permissions |
+
+### ClientStore
+
+Manages OAuth 2.0 / OIDC client configurations:
+
+```csharp
+public class ClientStore : IOctoClientStore
+{
+    public async Task<RtClient?> FindRtClientByIdAsync(string clientId)
+    {
+        var session = await _tenantRepository.GetSessionAsync();
+        var queryOptions = RtEntityQueryOptions.Create()
+            .FieldFilter(nameof(RtClient.ClientId), FieldFilterOperator.Equals, clientId);
+
+        var results = await _tenantRepository
+            .GetRtEntitiesByTypeAsync<RtClient>(session, queryOptions);
+
+        return results.FirstOrDefault();
+    }
+}
+```
+
+### PersistentGrantStore
+
+Handles OAuth tokens with expiration and cleanup:
+
+```csharp
+public class PersistentGrantStore : IOctoPersistentGrantStore
+{
+    public async Task RemoveExpiredGrantsAsync()
+    {
+        var session = await _tenantRepository.GetSessionAsync();
+        session.StartTransaction();
+
+        var queryOptions = RtEntityQueryOptions.Create()
+            .FieldFilter(nameof(RtPersistedGrant.ExpirationDate),
+                FieldFilterOperator.LessEqualThan,
+                DateTimeOffset.UtcNow);
+
+        // Batch deletion in chunks of 50
+        var expired = await _tenantRepository
+            .GetRtEntitiesByTypeAsync<RtPersistedGrant>(session, queryOptions, 0, 50);
+
+        foreach (var grant in expired)
+        {
+            await _tenantRepository.DeleteOneRtEntityByRtIdAsync<RtPersistedGrant>(
+                session, grant.RtId, DeleteOptions.Erase);
+        }
+
+        await session.CommitTransactionAsync();
+    }
+}
+```
+
+### OctoUserStore
+
+Implements full ASP.NET Core Identity interfaces:
+
+```csharp
+public class OctoUserStore :
+    IUserStore<RtUser>,
+    IUserPasswordStore<RtUser>,
+    IUserEmailStore<RtUser>,
+    IUserRoleStore<RtUser>,
+    IUserClaimStore<RtUser>,
+    IUserLoginStore<RtUser>,
+    IUserLockoutStore<RtUser>,
+    IUserTwoFactorStore<RtUser>,
+    IUserAuthenticatorKeyStore<RtUser>,
+    IUserTwoFactorRecoveryCodeStore<RtUser>,
+    IQueryableUserStore<RtUser>
+{
+    // Full user lifecycle management
+}
+```
+
+## MongoDB Integration
+
+### Repository Pattern
+
+All stores use `ITenantRepository` for data access:
+
+```csharp
+// Query with filters
+var queryOptions = RtEntityQueryOptions.Create()
+    .FieldFilter(nameof(RtClient.ClientId), FieldFilterOperator.Equals, clientId);
+var result = await _tenantRepository.GetRtEntitiesByTypeAsync<RtClient>(session, queryOptions);
+
+// Insert
+await _tenantRepository.InsertOneRtEntityAsync(session, entity);
+
+// Update (replace)
+await _tenantRepository.ReplaceOneRtEntityByIdAsync(session, entity.RtId, entity);
+
+// Delete
+await _tenantRepository.DeleteOneRtEntityByRtIdAsync<RtClient>(session, rtId, DeleteOptions.Erase);
+```
+
+### Query Options
+
+`RtEntityQueryOptions` provides fluent query building:
+
+```csharp
+var options = RtEntityQueryOptions.Create()
+    // Exact match
+    .FieldFilter(nameof(RtUser.NormalizedEmail), FieldFilterOperator.Equals, email)
+    // Array contains
+    .FieldFilter(nameof(RtUser.RoleIds), FieldFilterOperator.AnyEq, roleId)
+    // Range query
+    .FieldFilter(nameof(RtPersistedGrant.ExpirationDate),
+        FieldFilterOperator.LessEqualThan, DateTimeOffset.UtcNow)
+    // Nested record matching
+    .MatchField(nameof(RtUser.Claims), nestedCriteria);
+```
+
+**Filter Operators:**
+- `Equals` - Exact match
+- `In` - Match any in collection
+- `LessEqualThan` / `GreaterEqualThan` - Range queries
+- `AnyEq` - Array contains element
+
+### Transaction Support
+
+ACID transactions for multi-document operations:
+
+```csharp
+var session = await _tenantRepository.GetSessionAsync();
+session.StartTransaction();
+
+try
+{
+    await _tenantRepository.InsertOneRtEntityAsync(session, entity1);
+    await _tenantRepository.InsertOneRtEntityAsync(session, entity2);
+    await session.CommitTransactionAsync();
+}
+catch
+{
+    await session.AbortTransactionAsync();
+    throw;
+}
+```
+
+## Entity Relationships
+
+### Relationship Patterns
+
+```
+RtUser
+├── RoleIds: string[]           # Many-to-Many via ID array
+├── Claims: RtUserClaimRecord[]  # One-to-Many embedded
+├── UserLogins: RtUserLoginRecord[]
+└── UserTokens: RtUserTokenRecord[]
+
+RtClient
+├── ClientSecrets: RtSecretRecord[]
+├── ClientClaims: RtClientClaimRecord[]
+└── AllowedScopes: string[]
+
+RtRole
+└── Claims: RtRoleClaimRecord[]
+
+RtApiResource
+├── Scopes: string[]
+└── ApiSecrets: RtSecretRecord[]
+```
+
+### User-Role Relationship
+
+Roles are referenced by ID array, not embedded:
+
+```csharp
+// Add role to user
+user.RoleIds.Add(role.RtId.ToString());
+
+// Query user's roles
+var roleIds = user.RoleIds;
+var roles = await _roleStore.GetRolesByIdsAsync(roleIds);
+```
+
+## Migration System
+
+### Migration Pattern
+
+Migrations are versioned and auto-discovered:
+
+```csharp
+[Migration(0, 1, IdentityServiceConstants.IdentityMigrationVersionKey)]
+internal class InitialMigration : IMigration
+{
+    public async Task<MigrationResult> MigrateAsync(
+        IOctoAdminSession adminSession,
+        ITenantContext tenantContext)
+    {
+        // Create indexes, update schemas, etc.
+        return MigrationResult.Success();
+    }
+}
+```
+
+### Migration Versions
+
+| Version | Class | Purpose |
+|---------|-------|---------|
+| 0 → 1 | `InitialMigration` | Create RT association indexes |
+| 1 → 2 | `CkTypeIndexMigration` | Update CK type indexes |
+| 2 → 3 | `CkTypeIndexMigration2` | Additional index updates |
+
+### Registration
+
+Migrations are registered in `Program.cs`:
+
+```csharp
+builder.Services.AddMigrations(typeof(IdentityServiceConstants).Assembly);
+```
+
+Migrations run automatically on application startup.
+
+## AutoMapper Configuration
+
+Mapping between Duende models and CK runtime types:
+
+```csharp
+// Duende → CK Runtime
+CreateMap<Client, RtClient>()
+    .ForMember(dest => dest.ClientSecrets,
+        opt => opt.MapFrom(src => src.ClientSecrets));
+
+// CK Runtime → Duende
+CreateMap<RtClient, Client>()
+    .ForMember(dest => dest.ClientSecrets,
+        opt => opt.MapFrom(src => src.ClientSecrets));
+```
+
+**Custom Converters:**
+- `AttributeStringValueListConverter` - Maps `ICollection<string>` ↔ `IAttributeValueList<string>`
+
+## Dependency Injection Setup
+
+Store registration in `RuntimeEngineBuilderExtensions.AddOctoIdentityPersistence()`:
+
+```csharp
+builder.AddMongoDbRuntimeRepository();
+builder.Services.AddCkModelSystemIdentityV1();  // Register generated CK models
+
+builder.Services.AddScoped<IOctoClientStore, ClientStore>();
+builder.Services.AddScoped<IOctoResourceStore, ResourceStore>();
+builder.Services.AddScoped<IOctoPersistentGrantStore, PersistentGrantStore>();
+builder.Services.AddScoped<IOctoIdentityProviderStore, IdentityProviderStore>();
+
+builder.Services.AddIdentity<RtUser, RtRole>()
+    .AddUserStore<OctoUserStore>()
+    .AddRoleStore<OctoRoleStore>();
+```
