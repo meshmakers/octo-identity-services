@@ -1,0 +1,16 @@
+{
+  "defaultMode": "acceptEdits",
+  "permissions": {
+    "allow": [
+      "Bash",
+      "Write",
+      "Read"
+    ],
+    "deny": [
+      "Read(./.env*)",
+      "Write(./production/**)",
+      "Bash(rm -rf:*)",
+      "Bash(git push:*)"
+    ]
+  }
+}
