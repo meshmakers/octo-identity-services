@@ -72,10 +72,10 @@ stages:
             displayName: 'Test'
             inputs:
               command: 'test'
+              arguments: '--configuration $(buildConfiguration) -p:OctoNugetPrivateServer=$(nugetPrivateServer) /p:OctoPublishCkModel=false'
               projects: |
-                '**/*Tests.csproj'
-                !'**/*SystemTests.csproj'
-              testRunTitle: 'CI'
+                **/*Tests.csproj
+                !**/*SystemTests.csproj
           - template: build-and-push-docker-image.yml
             parameters:
               PublicRegistryServiceConnection: $(DockerRegistryPublicConnection)
