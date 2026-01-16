@@ -1,7 +1,6 @@
 using FluentAssertions;
 using IdentityServices.IntegrationTests.Fixtures;
 using Xunit;
-using Xunit.Abstractions;
 
 namespace IdentityServices.IntegrationTests.Persistence;
 
