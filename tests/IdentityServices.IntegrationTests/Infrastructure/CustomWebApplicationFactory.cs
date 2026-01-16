@@ -34,7 +34,7 @@ public class CustomWebApplicationFactory : WebApplicationFactory<Program>, IAsyn
     public string MongoConnectionString => _mongoContainer?.GetConnectionString()
         ?? throw new InvalidOperationException("MongoDB container not initialized");
 
-    public async Task InitializeAsync()
+    public async ValueTask InitializeAsync()
     {
         _mongoContainer = new MongoDbBuilder(_options.MongoDbImage)
             .WithReplicaSet()
@@ -115,7 +115,7 @@ public class CustomWebApplicationFactory : WebApplicationFactory<Program>, IAsyn
         await systemContext.CreateSystemTenantAsync();
     }
 
-    public new async Task DisposeAsync()
+    public new async ValueTask DisposeAsync()
     {
         if (_mongoContainer != null)
         {

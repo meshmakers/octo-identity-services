@@ -18,7 +18,7 @@ public class HealthCheckTests : IntegrationTestBase
     public async Task HealthEndpoint_ReturnsExpectedStatusCode()
     {
         // Act
-        var response = await Client.GetAsync("/health");
+        var response = await Client.GetAsync("/health", TestContext.Current.CancellationToken);
 
         // Assert
         // In the test environment, the system context health check may report unhealthy (503)
@@ -31,7 +31,7 @@ public class HealthCheckTests : IntegrationTestBase
     public async Task HomeEndpoint_ReturnsSuccessStatusCode()
     {
         // Act
-        var response = await Client.GetAsync("/");
+        var response = await Client.GetAsync("/", TestContext.Current.CancellationToken);
 
         // Assert
         response.IsSuccessStatusCode.Should().BeTrue();
