@@ -12,8 +12,12 @@ public abstract class IntegrationTestBase : IClassFixture<CustomWebApplicationFa
 
     protected IntegrationTestBase(CustomWebApplicationFactory factory)
     {
+        Console.Error.WriteLine("[IntegrationTestBase] Constructor called, creating HTTP client...");
+        Console.Error.Flush();
         Factory = factory;
         Client = factory.CreateClient();
+        Console.Error.WriteLine("[IntegrationTestBase] HTTP client created");
+        Console.Error.Flush();
         Client.DefaultRequestHeaders.Authorization =
             new AuthenticationHeaderValue("Bearer", "test-token");
     }

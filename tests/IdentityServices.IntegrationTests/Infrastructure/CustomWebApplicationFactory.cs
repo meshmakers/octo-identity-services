@@ -185,15 +185,23 @@ public class CustomWebApplicationFactory : WebApplicationFactory<Program>, IAsyn
 
     protected override void ConfigureWebHost(IWebHostBuilder builder)
     {
+        Console.Error.WriteLine("[WebFactory] ConfigureWebHost called");
+        Console.Error.Flush();
+
         builder.UseEnvironment("Testing");
 
         builder.ConfigureAppConfiguration((_, config) =>
         {
+            Console.Error.WriteLine("[WebFactory] ConfigureAppConfiguration called");
+            Console.Error.Flush();
             config.AddJsonFile("appsettings.test.json", optional: true);
         });
 
         builder.ConfigureTestServices(services =>
         {
+            Console.Error.WriteLine("[WebFactory] ConfigureTestServices called");
+            Console.Error.Flush();
+
             // Add test authentication handler as an additional scheme
             // Don't override the default schemes - IdentityServer needs its cookie auth
             services.AddAuthentication()
@@ -234,7 +242,13 @@ public class CustomWebApplicationFactory : WebApplicationFactory<Program>, IAsyn
             services.RemoveAll<IValidationKeysStore>();
             services.AddSingleton<ISigningCredentialStore, TestSigningCredentialStore>();
             services.AddSingleton<IValidationKeysStore, TestSigningCredentialStore>();
+
+            Console.Error.WriteLine("[WebFactory] ConfigureTestServices completed");
+            Console.Error.Flush();
         });
+
+        Console.Error.WriteLine("[WebFactory] ConfigureWebHost completed");
+        Console.Error.Flush();
     }
 }
 
