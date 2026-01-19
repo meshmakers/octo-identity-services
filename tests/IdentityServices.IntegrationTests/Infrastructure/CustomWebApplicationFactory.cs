@@ -2,6 +2,9 @@ using Duende.IdentityServer.Models;
 using Duende.IdentityServer.Stores;
 using IdentityServerPersistence.Configuration.Options;
 using IdentityServices.IntegrationTests.Configuration;
+using MassTransit;
+using Meshmakers.Octo.Common.DistributionEventHub;
+using Meshmakers.Octo.Common.DistributionEventHub.Services;
 using Meshmakers.Octo.Runtime.Contracts.MongoDb;
 using Meshmakers.Octo.Runtime.Contracts.MongoDb.Configuration;
 using Meshmakers.Octo.Runtime.Contracts.MongoDb.Services;
@@ -12,6 +15,7 @@ using Microsoft.AspNetCore.TestHost;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
+using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.IdentityModel.Tokens;
 using Testcontainers.MongoDb;
@@ -188,13 +192,27 @@ public class CustomWebApplicationFactory : WebApplicationFactory<Program>, IAsyn
         Console.Error.WriteLine("[WebFactory] ConfigureWebHost called");
         Console.Error.Flush();
 
-        builder.UseEnvironment("Testing");
+        // Disable RabbitMQ/Distribution Event Hub for tests
+        Environment.SetEnvironmentVariable("OCTO_System__DistributionEventHub__Enabled", "false");
+        Environment.SetEnvironmentVariable("OCTO_System__DistributionEventHub__HostName", "");
+
+        // Use Development environment to skip production-only services (like AddOctoSigningCredential)
+        builder.UseEnvironment("Development");
 
         builder.ConfigureAppConfiguration((_, config) =>
         {
             Console.Error.WriteLine("[WebFactory] ConfigureAppConfiguration called");
             Console.Error.Flush();
             config.AddJsonFile("appsettings.test.json", optional: true);
+
+            // Disable RabbitMQ/Distribution Event Hub for tests - must be set in configuration
+            config.AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["System:DistributionEventHub:Enabled"] = "false",
+                ["System:DistributionEventHub:HostName"] = "",
+                // Override BrokerHost to empty to prevent RabbitMQ connection attempts
+                ["Identity:BrokerHost"] = "",
+            });
         });
 
         builder.ConfigureTestServices(services =>
@@ -243,6 +261,28 @@ public class CustomWebApplicationFactory : WebApplicationFactory<Program>, IAsyn
             services.AddSingleton<ISigningCredentialStore, TestSigningCredentialStore>();
             services.AddSingleton<IValidationKeysStore, TestSigningCredentialStore>();
 
+            // Remove MassTransit hosted services that try to connect to RabbitMQ
+            // This is critical - MassTransit registers a hosted service that connects on startup
+            Console.Error.WriteLine("[WebFactory] Removing MassTransit hosted services...");
+            Console.Error.Flush();
+            var massTransitHostedServices = services
+                .Where(s => s.ServiceType == typeof(IHostedService) &&
+                            s.ImplementationType?.FullName?.Contains("MassTransit") == true)
+                .ToList();
+            foreach (var service in massTransitHostedServices)
+            {
+                Console.Error.WriteLine($"[WebFactory] Removing: {service.ImplementationType?.FullName}");
+                services.Remove(service);
+            }
+
+            // Replace IDistributionEventHubService with a no-op test implementation
+            services.RemoveAll<IDistributionEventHubService>();
+            services.AddSingleton<IDistributionEventHubService, TestDistributionEventHubService>();
+
+            // Replace ITenantNotifications with default (non-RabbitMQ) implementation
+            services.RemoveAll<ITenantNotifications>();
+            services.AddSingleton<ITenantNotifications, DefaultTenantNotifications>();
+
             Console.Error.WriteLine("[WebFactory] ConfigureTestServices completed");
             Console.Error.Flush();
         });
@@ -283,5 +323,37 @@ internal class TestSigningCredentialStore : ISigningCredentialStore, IValidation
     public Task<IEnumerable<SecurityKeyInfo>?> GetValidationKeysAsync()
     {
         return Task.FromResult<IEnumerable<SecurityKeyInfo>?>(_validationKeys);
+    }
+}
+
+/// <summary>
+/// Test implementation of IDistributionEventHubService that does nothing.
+/// This prevents the tests from trying to connect to RabbitMQ.
+/// </summary>
+internal class TestDistributionEventHubService : IDistributionEventHubService
+{
+    public Task PublishAsync<T>(T message, CancellationToken? cancellationToken = null) where T : class
+    {
+        // No-op for tests
+        return Task.CompletedTask;
+    }
+
+    public Task<Task> SendAsync<T>(Uri address, T message, CancellationToken? cancellationToken = null) where T : class
+    {
+        // No-op for tests - return completed task wrapped in another completed task
+        return Task.FromResult(Task.CompletedTask);
+    }
+
+    public Task ScheduleRecurringSendAsync<T>(T message, string destinationQueueAddress,
+        RecurringSchedulingOptions recurringSchedulingOptions) where T : class
+    {
+        // No-op for tests
+        return Task.CompletedTask;
+    }
+
+    public Task CancelScheduledRecurringSendAsync(string scheduleId, string scheduleGroup)
+    {
+        // No-op for tests
+        return Task.CompletedTask;
     }
 }
