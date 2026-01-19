@@ -69,16 +69,28 @@ stages:
               zipAfterPublish: false
               modifyOutputPath: false            
           - script: |
-              echo "Pre-pulling MongoDB image for integration tests..."
-              docker pull mongo:8.0.15 || echo "Warning: Failed to pre-pull MongoDB image, tests may take longer"
-            displayName: 'Pre-pull test container images'
+              echo "=== Docker Diagnostics ==="
+              echo "DOCKER_HOST: $DOCKER_HOST"
+              docker version || echo "ERROR: Docker not available"
+              docker info || echo "ERROR: Docker info failed"
+              echo ""
+              echo "=== Docker Network ==="
+              docker network ls || echo "ERROR: Cannot list networks"
+              docker network inspect bridge || echo "ERROR: Cannot inspect bridge network"
+              echo ""
+              echo "=== Pre-pulling MongoDB image ==="
+              docker pull mongo:8.0.15 || echo "Warning: Failed to pre-pull MongoDB image"
+              echo ""
+              echo "=== Docker Images ==="
+              docker images | grep -E "mongo|REPOSITORY" || echo "No mongo images found"
+            displayName: 'Docker diagnostics and pre-pull'
             env:
               DOCKER_HOST: unix:///var/run/docker.sock
           - task: DotNetCoreCLI@2
             displayName: 'Test'
             inputs:
               command: 'test'
-              arguments: '--configuration $(buildConfiguration) -p:OctoNugetPrivateServer=$(nugetPrivateServer) /p:OctoPublishCkModel=false'
+              arguments: '--configuration $(buildConfiguration) -p:OctoNugetPrivateServer=$(nugetPrivateServer) /p:OctoPublishCkModel=false --logger "console;verbosity=detailed"'
               projects: |
                 **/*Tests.csproj
                 !**/*SystemTests.csproj
