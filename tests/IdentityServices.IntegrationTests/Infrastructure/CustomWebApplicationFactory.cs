@@ -36,9 +36,11 @@ public class CustomWebApplicationFactory : WebApplicationFactory<Program>, IAsyn
 
     public async ValueTask InitializeAsync()
     {
-        Console.WriteLine($"[WebFactory] Starting MongoDB container with image: {_options.MongoDbImage}");
-        Console.WriteLine($"[WebFactory] DOCKER_HOST: {Environment.GetEnvironmentVariable("DOCKER_HOST") ?? "(not set)"}");
-        Console.WriteLine($"[WebFactory] TESTCONTAINERS_HOST_OVERRIDE: {Environment.GetEnvironmentVariable("TESTCONTAINERS_HOST_OVERRIDE") ?? "(not set)"}");
+        // Write to stderr for immediate output (stdout is buffered)
+        Console.Error.WriteLine($"[WebFactory] Starting MongoDB container with image: {_options.MongoDbImage}");
+        Console.Error.WriteLine($"[WebFactory] DOCKER_HOST: {Environment.GetEnvironmentVariable("DOCKER_HOST") ?? "(not set)"}");
+        Console.Error.WriteLine($"[WebFactory] TESTCONTAINERS_HOST_OVERRIDE: {Environment.GetEnvironmentVariable("TESTCONTAINERS_HOST_OVERRIDE") ?? "(not set)"}");
+        Console.Error.Flush();
 
         _mongoContainer = new MongoDbBuilder(_options.MongoDbImage)
             .WithReplicaSet()
@@ -48,20 +50,33 @@ public class CustomWebApplicationFactory : WebApplicationFactory<Program>, IAsyn
             .WithCleanUp(true) // Ensure cleanup even if Ryuk is disabled in CI
             .Build();
 
-        Console.WriteLine("[WebFactory] Container built, starting...");
+        Console.Error.WriteLine("[WebFactory] Container built, starting...");
+        Console.Error.Flush();
         var startTime = DateTime.UtcNow;
 
-        // Use explicit timeout for container startup (5 minutes should be enough for image pull + startup)
-        using var cts = new CancellationTokenSource(TimeSpan.FromMinutes(5));
-        await _mongoContainer.StartAsync(cts.Token);
+        // Use explicit timeout for container startup (2 minutes)
+        using var cts = new CancellationTokenSource(TimeSpan.FromMinutes(2));
+        try
+        {
+            await _mongoContainer.StartAsync(cts.Token);
+        }
+        catch (OperationCanceledException)
+        {
+            Console.Error.WriteLine("[WebFactory] ERROR: Container startup timed out after 2 minutes!");
+            Console.Error.Flush();
+            throw new TimeoutException("MongoDB container startup timed out after 2 minutes");
+        }
 
         var elapsed = DateTime.UtcNow - startTime;
-        Console.WriteLine($"[WebFactory] Container started in {elapsed.TotalSeconds:F1}s");
+        Console.Error.WriteLine($"[WebFactory] Container started in {elapsed.TotalSeconds:F1}s");
+        Console.Error.Flush();
 
         // Initialize system tenant before web host starts
-        Console.WriteLine("[WebFactory] Initializing system tenant...");
+        Console.Error.WriteLine("[WebFactory] Initializing system tenant...");
+        Console.Error.Flush();
         await InitializeSystemTenantAsync();
-        Console.WriteLine("[WebFactory] System tenant initialized");
+        Console.Error.WriteLine("[WebFactory] System tenant initialized");
+        Console.Error.Flush();
     }
 
     private async Task InitializeSystemTenantAsync()
@@ -74,7 +89,8 @@ public class CustomWebApplicationFactory : WebApplicationFactory<Program>, IAsyn
         var mappedPort = _mongoContainer.GetMappedPublicPort();
         // Use localhost like the working project - this works in DinD with shared docker.sock
         var databaseHost = $"localhost:{mappedPort}";
-        Console.WriteLine($"[WebFactory] MongoDB connection: {databaseHost}");
+        Console.Error.WriteLine($"[WebFactory] MongoDB connection: {databaseHost}");
+        Console.Error.Flush();
 
         // Build a temporary service provider for system tenant initialization
         var services = new ServiceCollection();
@@ -101,48 +117,59 @@ public class CustomWebApplicationFactory : WebApplicationFactory<Program>, IAsyn
         await using var provider = services.BuildServiceProvider();
         var systemContext = provider.GetRequiredService<ISystemContext>();
 
-        Console.WriteLine("[WebFactory] Ensuring system CK model...");
+        Console.Error.WriteLine("[WebFactory] Ensuring system CK model...");
+        Console.Error.Flush();
         // Ensure the system CK model is available
         await systemContext.EnsureSystemCkModelAsync();
-        Console.WriteLine("[WebFactory] System CK model ensured");
+        Console.Error.WriteLine("[WebFactory] System CK model ensured");
+        Console.Error.Flush();
 
         // Ensure clean state - delete if exists
-        Console.WriteLine("[WebFactory] Checking for existing system tenant...");
+        Console.Error.WriteLine("[WebFactory] Checking for existing system tenant...");
+        Console.Error.Flush();
         for (var i = 0; i < 10; i++)
         {
             try
             {
                 var exists = await systemContext.IsSystemTenantExistingAsync();
-                Console.WriteLine($"[WebFactory] Iteration {i}: System tenant exists = {exists}");
+                Console.Error.WriteLine($"[WebFactory] Iteration {i}: System tenant exists = {exists}");
+                Console.Error.Flush();
 
                 if (i == 0 && exists)
                 {
-                    Console.WriteLine("[WebFactory] Deleting existing system tenant...");
+                    Console.Error.WriteLine("[WebFactory] Deleting existing system tenant...");
+                    Console.Error.Flush();
                     await systemContext.DeleteSystemTenantAsync();
-                    Console.WriteLine("[WebFactory] System tenant deleted");
+                    Console.Error.WriteLine("[WebFactory] System tenant deleted");
+                    Console.Error.Flush();
                 }
 
                 if (await systemContext.IsSystemTenantExistingAsync())
                 {
-                    Console.WriteLine($"[WebFactory] Tenant still exists, waiting 1s (iteration {i})...");
+                    Console.Error.WriteLine($"[WebFactory] Tenant still exists, waiting 1s (iteration {i})...");
+                    Console.Error.Flush();
                     await Task.Delay(1000);
                     continue;
                 }
 
-                Console.WriteLine("[WebFactory] Tenant cleanup complete");
+                Console.Error.WriteLine("[WebFactory] Tenant cleanup complete");
+                Console.Error.Flush();
                 break;
             }
             catch (TenantException ex)
             {
-                Console.WriteLine($"[WebFactory] TenantException during cleanup: {ex.Message}");
+                Console.Error.WriteLine($"[WebFactory] TenantException during cleanup: {ex.Message}");
+                Console.Error.Flush();
                 // Ignore tenant exceptions during cleanup
             }
         }
 
         // Create system tenant
-        Console.WriteLine("[WebFactory] Creating system tenant...");
+        Console.Error.WriteLine("[WebFactory] Creating system tenant...");
+        Console.Error.Flush();
         await systemContext.CreateSystemTenantAsync();
-        Console.WriteLine("[WebFactory] System tenant created");
+        Console.Error.WriteLine("[WebFactory] System tenant created");
+        Console.Error.Flush();
     }
 
     public new async ValueTask DisposeAsync()
