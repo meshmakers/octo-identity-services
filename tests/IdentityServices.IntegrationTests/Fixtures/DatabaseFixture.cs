@@ -26,12 +26,17 @@ public class DatabaseFixture : ConfigurationFixture
             .WithName($"mongodb-identity-test-{Guid.NewGuid():N}")
             .WithUsername(_options.AdminUser)
             .WithPassword(_options.AdminUserPassword)
+            .WithCleanUp(true) // Ensure cleanup even if Ryuk is disabled in CI
             .Build();
 
-        await _mongoDbContainer.StartAsync();
+        // Use explicit timeout for container startup (5 minutes should be enough for image pull + startup)
+        using var cts = new CancellationTokenSource(TimeSpan.FromMinutes(5));
+        await _mongoDbContainer.StartAsync(cts.Token);
 
         var mappedPort = _mongoDbContainer.GetMappedPublicPort();
-        var databaseHost = $"localhost:{mappedPort}";
+        // Use container hostname which respects TESTCONTAINERS_HOST_OVERRIDE for DinD environments
+        var hostname = _mongoDbContainer.Hostname;
+        var databaseHost = $"{hostname}:{mappedPort}";
 
         // Configure services with the test container connections
         Services.Configure<OctoSystemConfiguration>(t =>
