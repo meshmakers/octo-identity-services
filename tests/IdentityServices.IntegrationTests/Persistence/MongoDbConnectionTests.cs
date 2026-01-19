@@ -29,7 +29,8 @@ public class MongoDbConnectionTests : IClassFixture<IdentityServicesFixture>
         // Assert
         connectionString.Should().NotBeNullOrEmpty();
         connectionString.Should().Contain("mongodb://");
-        connectionString.Should().Contain("localhost");
+        // Connection string contains either localhost or the TESTCONTAINERS_HOST_OVERRIDE IP
+        connectionString.Should().MatchRegex(@"(localhost|127\.0\.0\.1|172\.17\.0\.\d+)");
     }
 
     [Fact]
