@@ -45,9 +45,8 @@ public class DatabaseFixture : ConfigurationFixture
         Console.WriteLine($"[Testcontainers] Container started in {elapsed.TotalSeconds:F1}s");
 
         var mappedPort = _mongoDbContainer.GetMappedPublicPort();
-        // Use container hostname which respects TESTCONTAINERS_HOST_OVERRIDE for DinD environments
-        var hostname = _mongoDbContainer.Hostname;
-        var databaseHost = $"{hostname}:{mappedPort}";
+        // Use localhost like the working project - this works in DinD with shared docker.sock
+        var databaseHost = $"localhost:{mappedPort}";
         Console.WriteLine($"[Testcontainers] MongoDB available at: {databaseHost}");
 
         // Configure services with the test container connections

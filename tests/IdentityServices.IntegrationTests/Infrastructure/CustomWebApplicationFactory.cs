@@ -72,9 +72,8 @@ public class CustomWebApplicationFactory : WebApplicationFactory<Program>, IAsyn
         }
 
         var mappedPort = _mongoContainer.GetMappedPublicPort();
-        // Use container hostname which respects TESTCONTAINERS_HOST_OVERRIDE for DinD environments
-        var hostname = _mongoContainer.Hostname;
-        var databaseHost = $"{hostname}:{mappedPort}";
+        // Use localhost like the working project - this works in DinD with shared docker.sock
+        var databaseHost = $"localhost:{mappedPort}";
         Console.WriteLine($"[WebFactory] MongoDB connection: {databaseHost}");
 
         // Build a temporary service provider for system tenant initialization
@@ -165,9 +164,8 @@ public class CustomWebApplicationFactory : WebApplicationFactory<Program>, IAsyn
             if (_mongoContainer != null)
             {
                 var mappedPort = _mongoContainer.GetMappedPublicPort();
-                // Use container hostname which respects TESTCONTAINERS_HOST_OVERRIDE for DinD environments
-                var hostname = _mongoContainer.Hostname;
-                var databaseHost = $"{hostname}:{mappedPort}";
+                // Use localhost like the working project - this works in DinD with shared docker.sock
+                var databaseHost = $"localhost:{mappedPort}";
 
                 services.Configure<OctoSystemConfiguration>(t =>
                 {
