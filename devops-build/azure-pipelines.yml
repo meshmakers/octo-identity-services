@@ -68,6 +68,12 @@ stages:
               publishWebProjects: false
               zipAfterPublish: false
               modifyOutputPath: false            
+          - script: |
+              echo "Pre-pulling MongoDB image for integration tests..."
+              docker pull mongo:8.0.15 || echo "Warning: Failed to pre-pull MongoDB image, tests may take longer"
+            displayName: 'Pre-pull test container images'
+            env:
+              DOCKER_HOST: unix:///var/run/docker.sock
           - task: DotNetCoreCLI@2
             displayName: 'Test'
             inputs:
@@ -76,6 +82,12 @@ stages:
               projects: |
                 **/*Tests.csproj
                 !**/*SystemTests.csproj
+            env:
+              # Testcontainers configuration for DinD (Docker-in-Docker)
+              # Note: In K8s pods with shared network namespace, localhost should work
+              DOCKER_HOST: unix:///var/run/docker.sock
+              # Ryuk (resource reaper) can cause issues in constrained CI environments
+              TESTCONTAINERS_RYUK_DISABLED: 'true'
           - template: build-and-push-docker-image.yml
             parameters:
               PublicRegistryServiceConnection: $(DockerRegistryPublicConnection)

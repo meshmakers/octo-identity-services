@@ -41,9 +41,12 @@ public class CustomWebApplicationFactory : WebApplicationFactory<Program>, IAsyn
             .WithName($"mongodb-identity-webtest-{Guid.NewGuid():N}")
             .WithUsername(_options.AdminUser)
             .WithPassword(_options.AdminUserPassword)
+            .WithCleanUp(true) // Ensure cleanup even if Ryuk is disabled in CI
             .Build();
 
-        await _mongoContainer.StartAsync();
+        // Use explicit timeout for container startup (5 minutes should be enough for image pull + startup)
+        using var cts = new CancellationTokenSource(TimeSpan.FromMinutes(5));
+        await _mongoContainer.StartAsync(cts.Token);
 
         // Initialize system tenant before web host starts
         await InitializeSystemTenantAsync();
@@ -57,7 +60,9 @@ public class CustomWebApplicationFactory : WebApplicationFactory<Program>, IAsyn
         }
 
         var mappedPort = _mongoContainer.GetMappedPublicPort();
-        var databaseHost = $"localhost:{mappedPort}";
+        // Use container hostname which respects TESTCONTAINERS_HOST_OVERRIDE for DinD environments
+        var hostname = _mongoContainer.Hostname;
+        var databaseHost = $"{hostname}:{mappedPort}";
 
         // Build a temporary service provider for system tenant initialization
         var services = new ServiceCollection();
@@ -147,7 +152,9 @@ public class CustomWebApplicationFactory : WebApplicationFactory<Program>, IAsyn
             if (_mongoContainer != null)
             {
                 var mappedPort = _mongoContainer.GetMappedPublicPort();
-                var databaseHost = $"localhost:{mappedPort}";
+                // Use container hostname which respects TESTCONTAINERS_HOST_OVERRIDE for DinD environments
+                var hostname = _mongoContainer.Hostname;
+                var databaseHost = $"{hostname}:{mappedPort}";
 
                 services.Configure<OctoSystemConfiguration>(t =>
                 {
