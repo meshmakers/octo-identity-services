@@ -101,35 +101,48 @@ public class CustomWebApplicationFactory : WebApplicationFactory<Program>, IAsyn
         await using var provider = services.BuildServiceProvider();
         var systemContext = provider.GetRequiredService<ISystemContext>();
 
+        Console.WriteLine("[WebFactory] Ensuring system CK model...");
         // Ensure the system CK model is available
         await systemContext.EnsureSystemCkModelAsync();
+        Console.WriteLine("[WebFactory] System CK model ensured");
 
         // Ensure clean state - delete if exists
+        Console.WriteLine("[WebFactory] Checking for existing system tenant...");
         for (var i = 0; i < 10; i++)
         {
             try
             {
-                if (i == 0 && await systemContext.IsSystemTenantExistingAsync())
+                var exists = await systemContext.IsSystemTenantExistingAsync();
+                Console.WriteLine($"[WebFactory] Iteration {i}: System tenant exists = {exists}");
+
+                if (i == 0 && exists)
                 {
+                    Console.WriteLine("[WebFactory] Deleting existing system tenant...");
                     await systemContext.DeleteSystemTenantAsync();
+                    Console.WriteLine("[WebFactory] System tenant deleted");
                 }
 
                 if (await systemContext.IsSystemTenantExistingAsync())
                 {
+                    Console.WriteLine($"[WebFactory] Tenant still exists, waiting 1s (iteration {i})...");
                     await Task.Delay(1000);
                     continue;
                 }
 
+                Console.WriteLine("[WebFactory] Tenant cleanup complete");
                 break;
             }
-            catch (TenantException)
+            catch (TenantException ex)
             {
+                Console.WriteLine($"[WebFactory] TenantException during cleanup: {ex.Message}");
                 // Ignore tenant exceptions during cleanup
             }
         }
 
         // Create system tenant
+        Console.WriteLine("[WebFactory] Creating system tenant...");
         await systemContext.CreateSystemTenantAsync();
+        Console.WriteLine("[WebFactory] System tenant created");
     }
 
     public new async ValueTask DisposeAsync()
