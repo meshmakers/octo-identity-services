@@ -20,6 +20,11 @@ public class DatabaseFixture : ConfigurationFixture
 
     protected override async Task InitializeServicesAsync()
     {
+        Console.WriteLine($"[Testcontainers] Starting MongoDB container with image: {_options.MongoDbImage}");
+        Console.WriteLine($"[Testcontainers] DOCKER_HOST: {Environment.GetEnvironmentVariable("DOCKER_HOST") ?? "(not set)"}");
+        Console.WriteLine($"[Testcontainers] TESTCONTAINERS_HOST_OVERRIDE: {Environment.GetEnvironmentVariable("TESTCONTAINERS_HOST_OVERRIDE") ?? "(not set)"}");
+        Console.WriteLine($"[Testcontainers] TESTCONTAINERS_RYUK_DISABLED: {Environment.GetEnvironmentVariable("TESTCONTAINERS_RYUK_DISABLED") ?? "(not set)"}");
+
         // Start MongoDB test container with authentication
         _mongoDbContainer = new MongoDbBuilder(_options.MongoDbImage)
             .WithReplicaSet()
@@ -29,14 +34,21 @@ public class DatabaseFixture : ConfigurationFixture
             .WithCleanUp(true) // Ensure cleanup even if Ryuk is disabled in CI
             .Build();
 
+        Console.WriteLine("[Testcontainers] Container built, starting...");
+        var startTime = DateTime.UtcNow;
+
         // Use explicit timeout for container startup (5 minutes should be enough for image pull + startup)
         using var cts = new CancellationTokenSource(TimeSpan.FromMinutes(5));
         await _mongoDbContainer.StartAsync(cts.Token);
+
+        var elapsed = DateTime.UtcNow - startTime;
+        Console.WriteLine($"[Testcontainers] Container started in {elapsed.TotalSeconds:F1}s");
 
         var mappedPort = _mongoDbContainer.GetMappedPublicPort();
         // Use container hostname which respects TESTCONTAINERS_HOST_OVERRIDE for DinD environments
         var hostname = _mongoDbContainer.Hostname;
         var databaseHost = $"{hostname}:{mappedPort}";
+        Console.WriteLine($"[Testcontainers] MongoDB available at: {databaseHost}");
 
         // Configure services with the test container connections
         Services.Configure<OctoSystemConfiguration>(t =>
