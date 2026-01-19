@@ -84,10 +84,11 @@ stages:
                 !**/*SystemTests.csproj
             env:
               # Testcontainers configuration for DinD (Docker-in-Docker)
-              # Note: In K8s pods with shared network namespace, localhost should work
               DOCKER_HOST: unix:///var/run/docker.sock
               # Ryuk (resource reaper) can cause issues in constrained CI environments
               TESTCONTAINERS_RYUK_DISABLED: 'true'
+              # Host override for DinD: use Docker bridge gateway IP to reach containers
+              TESTCONTAINERS_HOST_OVERRIDE: '172.17.0.1'
           - template: build-and-push-docker-image.yml
             parameters:
               PublicRegistryServiceConnection: $(DockerRegistryPublicConnection)
