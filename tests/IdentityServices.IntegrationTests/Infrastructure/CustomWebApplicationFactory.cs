@@ -36,6 +36,10 @@ public class CustomWebApplicationFactory : WebApplicationFactory<Program>, IAsyn
 
     public async ValueTask InitializeAsync()
     {
+        Console.WriteLine($"[WebFactory] Starting MongoDB container with image: {_options.MongoDbImage}");
+        Console.WriteLine($"[WebFactory] DOCKER_HOST: {Environment.GetEnvironmentVariable("DOCKER_HOST") ?? "(not set)"}");
+        Console.WriteLine($"[WebFactory] TESTCONTAINERS_HOST_OVERRIDE: {Environment.GetEnvironmentVariable("TESTCONTAINERS_HOST_OVERRIDE") ?? "(not set)"}");
+
         _mongoContainer = new MongoDbBuilder(_options.MongoDbImage)
             .WithReplicaSet()
             .WithName($"mongodb-identity-webtest-{Guid.NewGuid():N}")
@@ -44,12 +48,20 @@ public class CustomWebApplicationFactory : WebApplicationFactory<Program>, IAsyn
             .WithCleanUp(true) // Ensure cleanup even if Ryuk is disabled in CI
             .Build();
 
+        Console.WriteLine("[WebFactory] Container built, starting...");
+        var startTime = DateTime.UtcNow;
+
         // Use explicit timeout for container startup (5 minutes should be enough for image pull + startup)
         using var cts = new CancellationTokenSource(TimeSpan.FromMinutes(5));
         await _mongoContainer.StartAsync(cts.Token);
 
+        var elapsed = DateTime.UtcNow - startTime;
+        Console.WriteLine($"[WebFactory] Container started in {elapsed.TotalSeconds:F1}s");
+
         // Initialize system tenant before web host starts
+        Console.WriteLine("[WebFactory] Initializing system tenant...");
         await InitializeSystemTenantAsync();
+        Console.WriteLine("[WebFactory] System tenant initialized");
     }
 
     private async Task InitializeSystemTenantAsync()
@@ -63,6 +75,7 @@ public class CustomWebApplicationFactory : WebApplicationFactory<Program>, IAsyn
         // Use container hostname which respects TESTCONTAINERS_HOST_OVERRIDE for DinD environments
         var hostname = _mongoContainer.Hostname;
         var databaseHost = $"{hostname}:{mappedPort}";
+        Console.WriteLine($"[WebFactory] MongoDB connection: {databaseHost}");
 
         // Build a temporary service provider for system tenant initialization
         var services = new ServiceCollection();
