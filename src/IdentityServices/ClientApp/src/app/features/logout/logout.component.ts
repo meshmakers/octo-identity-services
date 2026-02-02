@@ -98,13 +98,25 @@ export class LogoutComponent implements OnInit {
 
     this.authApi.logout({ logoutId: this.logoutId }).subscribe({
       next: (result) => {
+        const tenantId = this.route.snapshot.params['tenantId'] || 'System';
+
+        // Build logged-out URL with optional return URI from IdentityServer context
+        let loggedOutUrl = `/${tenantId}/logged-out`;
+
         if (result.postLogoutRedirectUri) {
-          window.location.href = result.postLogoutRedirectUri;
-        } else {
-          // Navigate to logged-out page
-          const tenantId = this.route.snapshot.params['tenantId'] || 'System';
-          window.location.href = `/${tenantId}/logged-out`;
+          loggedOutUrl += `?returnUri=${encodeURIComponent(result.postLogoutRedirectUri)}`;
         }
+
+        // Execute sign-out iframe if provided (for federated sign-out)
+        if (result.signOutIframeUrl) {
+          // Create hidden iframe to trigger sign-out at other apps
+          const iframe = document.createElement('iframe');
+          iframe.style.display = 'none';
+          iframe.src = result.signOutIframeUrl;
+          document.body.appendChild(iframe);
+        }
+
+        window.location.href = loggedOutUrl;
       },
       error: () => {
         this.submitting = false;

@@ -1,4 +1,4 @@
-import { Component, inject } from '@angular/core';
+import { Component, inject, OnInit } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { ActivatedRoute } from '@angular/router';
 import { LcarsPanelComponent } from '../../shared/components/lcars-panel/lcars-panel.component';
@@ -30,6 +30,11 @@ import { LcarsHeaderComponent } from '../../shared/components/lcars-header/lcars
           </p>
 
           <div class="lcars-actions">
+            @if (returnUri) {
+              <a [href]="returnUri" class="lcars-button-primary">
+                Return to Application
+              </a>
+            }
             <a [href]="'/' + tenantId + '/login'" class="lcars-button-outline">
               Sign in again
             </a>
@@ -40,8 +45,14 @@ import { LcarsHeaderComponent } from '../../shared/components/lcars-header/lcars
   `,
   styleUrl: './logged-out.component.scss'
 })
-export class LoggedOutComponent {
+export class LoggedOutComponent implements OnInit {
   private route = inject(ActivatedRoute);
+
+  returnUri: string | null = null;
+
+  ngOnInit(): void {
+    this.returnUri = this.route.snapshot.queryParams['returnUri'] || null;
+  }
 
   get tenantId(): string {
     return this.route.snapshot.params['tenantId'] || 'System';

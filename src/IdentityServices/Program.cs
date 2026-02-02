@@ -281,7 +281,8 @@ try
             context => !context.Request.Path.StartsWithSegments("/api") &&
                        !context.Request.Path.StartsWithSegments("/connect") &&
                        !context.Request.Path.StartsWithSegments("/.well-known") &&
-                       !context.Request.Path.Value!.Contains("/api/"),
+                       !context.Request.Path.Value!.Contains("/api/") &&
+                       !(context.Request.Path.Value?.StartsWith("/system/v", StringComparison.OrdinalIgnoreCase) ?? false),
             appBranch =>
             {
                 appBranch.UseSpa(spa =>
