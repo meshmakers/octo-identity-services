@@ -1,9 +1,9 @@
-FROM mcr.microsoft.com/dotnet/aspnet:10.0-noble AS base
+FROM meshmakers/dotnet_aspnetcore-runtime-node:1.2.1.0 AS base
 WORKDIR /app
 EXPOSE 80
 EXPOSE 443
 
-FROM mcr.microsoft.com/dotnet/sdk:10.0-noble AS build
+FROM meshmakers/dotnet_sdk-node:1.2.1.0 AS build
 
 ARG OCTO_PRIVATE_NUGET_SERVICE
 ARG OCTO_PRIVATE_NUGET_CERTIFICATE

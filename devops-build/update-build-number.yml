@@ -19,10 +19,24 @@ steps:
       $revision = [int]$versionArray[3]
       $buildNumberShort = "$major.$minor.$build"
       $buildNumberLong = "$major.$minor.$build.$revision"
-      
+
       $octoPublishCatalog = "PrivateGitHubCatalog"
-      
+
       $octoVersion = "0.1.*";
+
+      # Handle dev branches - sanitize branch name for Docker tags
+      # Docker tags only allow: lowercase/uppercase letters, digits, underscores, periods, hyphens
+      if ($branch.StartsWith("refs/heads/dev/")) {
+        Write-host "Branch is dev branch"
+        $branchName = '$(Build.SourceBranchName)'
+        # Replace # with _ to make it valid for Docker tags
+        $sanitizedBranchName = $branchName.Replace("#", "_")
+        $fullBuildNumber = "$major.$minor.$build.$revision-$sanitizedBranchName"
+        Write-Host "Sanitized branch name from '$branchName' to '$sanitizedBranchName'"
+        Write-Host "Setting build number to $fullBuildNumber"
+        Write-Host "##vso[build.updatebuildnumber]$fullBuildNumber"
+      }
+
       if ($branch.StartsWith("refs/heads/test/")) {
         Write-host "Branch is test branch"
         $branchName = '$(Build.SourceBranchName)'
