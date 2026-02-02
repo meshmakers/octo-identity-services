@@ -288,7 +288,7 @@ try
                 appBranch.UseSpa(spa =>
                 {
                     spa.Options.SourcePath = "ClientApp";
-                    spa.UseProxyToSpaDevelopmentServer("http://localhost:44400");
+                    spa.UseProxyToSpaDevelopmentServer("https://localhost:44400");
                 });
             });
     }

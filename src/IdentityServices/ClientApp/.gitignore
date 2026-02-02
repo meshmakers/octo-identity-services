@@ -15,5 +15,9 @@ dist/
 .DS_Store
 Thumbs.db
 
+# SSL certificates (symlinks to ASP.NET Core dev certs)
+localhost.crt
+localhost.key
+
 # Angular cache
 .angular/
