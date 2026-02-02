@@ -125,7 +125,7 @@ public class PersistentGrantStore(IMultiTenancyResolverService multiTenancyResol
         {
             fieldFilterCriteria.FieldEquals(nameof(RtPersistedGrant.GrantType), filter.Type);
         }
-        await _tenantRepository.DeleteOneRtEntityAsync<RtPersistedGrant>(session, fieldFilterCriteria, DeleteOptions.Erase);
+        await _tenantRepository.DeleteManyRtEntitiesAsync<RtPersistedGrant>(session, fieldFilterCriteria, DeleteOptions.Erase);
 
         await session.CommitTransactionAsync();
     }

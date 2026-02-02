@@ -26,6 +26,7 @@ public class AuthApiController : ControllerBase
     private readonly SignInManager<RtUser> _signInManager;
     private readonly UserManager<RtUser> _userManager;
     private readonly IEventService _events;
+    private readonly IPersistedGrantStore _persistedGrantStore;
 
     public AuthApiController(
         IIdentityServerInteractionService interaction,
@@ -33,7 +34,8 @@ public class AuthApiController : ControllerBase
         IClientStore clientStore,
         SignInManager<RtUser> signInManager,
         UserManager<RtUser> userManager,
-        IEventService events)
+        IEventService events,
+        IPersistedGrantStore persistedGrantStore)
     {
         _interaction = interaction;
         _schemeProvider = schemeProvider;
@@ -41,6 +43,7 @@ public class AuthApiController : ControllerBase
         _signInManager = signInManager;
         _userManager = userManager;
         _events = events;
+        _persistedGrantStore = persistedGrantStore;
     }
 
     /// <summary>
@@ -270,9 +273,18 @@ public class AuthApiController : ControllerBase
 
         if (User.Identity?.IsAuthenticated == true)
         {
+            var subjectId = User.GetSubjectId();
+
+            // Revoke all persisted grants (refresh tokens, etc.) for this user
+            // This ensures that clients cannot use refresh tokens after logout
+            await _persistedGrantStore.RemoveAllAsync(new PersistedGrantFilter
+            {
+                SubjectId = subjectId
+            });
+
             await _signInManager.SignOutAsync();
             await _events.RaiseAsync(new UserLogoutSuccessEvent(
-                User.GetSubjectId(),
+                subjectId,
                 User.GetDisplayName()));
         }
 
