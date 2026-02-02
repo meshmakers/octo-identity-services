@@ -146,7 +146,13 @@ public class CreateIdentityDataCommandRequestConsumer(
             PostLogoutRedirectUris = new AttributeStringValueList(distClientDto.PostLogoutRedirectUris.ToList()),
             AllowedCorsOrigins = new AttributeStringValueList(distClientDto.AllowedCorsOrigins.ToList()),
             AllowOfflineAccess = distClientDto.AllowOfflineAccess,
-            AllowedScopes = new AttributeStringValueList(distClientDto.AllowedScopes.ToList())
+            AllowedScopes = new AttributeStringValueList(distClientDto.AllowedScopes.ToList()),
+
+            // Single Logout (SLO) configuration
+            FrontChannelLogoutUri = distClientDto.FrontChannelLogoutUri,
+            FrontChannelLogoutSessionRequired = distClientDto.FrontChannelLogoutSessionRequired,
+            BackChannelLogoutUri = distClientDto.BackChannelLogoutUri,
+            BackChannelLogoutSessionRequired = distClientDto.BackChannelLogoutSessionRequired
         };
 
         var result = await tenantRepository.GetRtEntitiesByTypeAsync<RtClient>(session, queryOptions);

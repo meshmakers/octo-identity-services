@@ -218,7 +218,12 @@ public class ClientsController : ControllerBase
             PostLogoutRedirectUris = applicationClient.PostLogoutRedirectUris,
             AllowedCorsOrigins = applicationClient.AllowedCorsOrigins,
             AllowedScopes = applicationClient.AllowedScopes,
-            IsOfflineAccessEnabled = applicationClient.AllowOfflineAccess
+            IsOfflineAccessEnabled = applicationClient.AllowOfflineAccess,
+            // Single Logout (SLO) fields
+            FrontChannelLogoutUri = applicationClient.FrontChannelLogoutUri,
+            FrontChannelLogoutSessionRequired = applicationClient.FrontChannelLogoutSessionRequired,
+            BackChannelLogoutUri = applicationClient.BackChannelLogoutUri,
+            BackChannelLogoutSessionRequired = applicationClient.BackChannelLogoutSessionRequired
         };
         return clientDto;
     }
@@ -291,6 +296,27 @@ public class ClientsController : ControllerBase
             {
                 new() { Value = clientDto.ClientSecret.Sha256() }
             };
+        }
+
+        // Single Logout (SLO) fields
+        if (!string.IsNullOrEmpty(clientDto.FrontChannelLogoutUri))
+        {
+            applicationClient.FrontChannelLogoutUri = clientDto.FrontChannelLogoutUri;
+        }
+
+        if (clientDto.FrontChannelLogoutSessionRequired.HasValue)
+        {
+            applicationClient.FrontChannelLogoutSessionRequired = clientDto.FrontChannelLogoutSessionRequired.Value;
+        }
+
+        if (!string.IsNullOrEmpty(clientDto.BackChannelLogoutUri))
+        {
+            applicationClient.BackChannelLogoutUri = clientDto.BackChannelLogoutUri;
+        }
+
+        if (clientDto.BackChannelLogoutSessionRequired.HasValue)
+        {
+            applicationClient.BackChannelLogoutSessionRequired = clientDto.BackChannelLogoutSessionRequired.Value;
         }
     }
 }

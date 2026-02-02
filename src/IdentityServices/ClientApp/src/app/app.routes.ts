@@ -36,6 +36,11 @@ export const routes: Routes = [
           .then(m => m.LoggedOutComponent)
       },
       {
+        path: 'logout/callback',
+        loadComponent: () => import('./features/logout-callback/logout-callback.component')
+          .then(m => m.LogoutCallbackComponent)
+      },
+      {
         path: 'consent',
         loadComponent: () => import('./features/consent/consent.component')
           .then(m => m.ConsentComponent)

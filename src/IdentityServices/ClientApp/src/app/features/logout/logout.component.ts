@@ -96,6 +96,8 @@ export class LogoutComponent implements OnInit {
 
     this.authApi.logout({ logoutId: this.logoutId }).subscribe({
       next: (result) => {
+        console.log('[SLO] Logout result:', result);
+
         const tenantId = this.route.snapshot.params['tenantId'] || 'System';
 
         // Build logged-out URL with optional return URI from IdentityServer context
@@ -105,16 +107,38 @@ export class LogoutComponent implements OnInit {
           loggedOutUrl += `?returnUri=${encodeURIComponent(result.postLogoutRedirectUri)}`;
         }
 
-        // Execute sign-out iframe if provided (for federated sign-out)
+        // Execute sign-out iframe if provided (for federated sign-out / SLO)
         if (result.signOutIframeUrl) {
+          console.log('[SLO] Creating sign-out iframe with URL:', result.signOutIframeUrl);
+
           // Create hidden iframe to trigger sign-out at other apps
           const iframe = document.createElement('iframe');
           iframe.style.display = 'none';
           iframe.src = result.signOutIframeUrl;
           document.body.appendChild(iframe);
-        }
 
-        window.location.href = loggedOutUrl;
+          // Wait for iframe to load before redirecting to ensure clients are notified
+          iframe.onload = () => {
+            console.log('[SLO] Sign-out iframe loaded successfully');
+            // Give a small additional delay for client iframes to process
+            setTimeout(() => {
+              window.location.href = loggedOutUrl;
+            }, 500);
+          };
+
+          iframe.onerror = (err) => {
+            console.error('[SLO] Sign-out iframe failed to load:', err);
+          };
+
+          // Fallback timeout in case iframe fails to load
+          setTimeout(() => {
+            console.log('[SLO] Fallback timeout - redirecting');
+            window.location.href = loggedOutUrl;
+          }, 3000);
+        } else {
+          console.log('[SLO] No signOutIframeUrl provided - skipping federated logout');
+          window.location.href = loggedOutUrl;
+        }
       },
       error: () => {
         this.submitting = false;
