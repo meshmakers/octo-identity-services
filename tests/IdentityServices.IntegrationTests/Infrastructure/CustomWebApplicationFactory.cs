@@ -255,6 +255,13 @@ public class CustomWebApplicationFactory : WebApplicationFactory<Program>, IAsyn
                 opts.EnableTokenCleanup = false;
             });
 
+            // Configure cookie settings for testing (allow non-secure cookies over HTTP)
+            services.ConfigureApplicationCookie(options =>
+            {
+                options.Cookie.SecurePolicy = Microsoft.AspNetCore.Http.CookieSecurePolicy.None;
+                options.Cookie.SameSite = Microsoft.AspNetCore.Http.SameSiteMode.Lax;
+            });
+
             // Replace signing credential stores with test implementations
             services.RemoveAll<ISigningCredentialStore>();
             services.RemoveAll<IValidationKeysStore>();

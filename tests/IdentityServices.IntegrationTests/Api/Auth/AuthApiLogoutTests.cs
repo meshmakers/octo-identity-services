@@ -95,37 +95,35 @@ public class AuthApiLogoutTests : IntegrationTestBase
         result!.Success.Should().BeTrue();
     }
 
-    [Fact(Skip = "Grant revocation requires cookie-based authentication which is not available in the test setup")]
+    [Fact]
     public async Task Logout_RevokesRefreshTokens()
     {
-        // NOTE: This test requires actual cookie-based authentication to work.
-        // The logout endpoint only revokes grants when User.Identity.IsAuthenticated is true,
-        // which requires going through the actual login flow and using cookies.
-        // Our test authentication handler (TestAuthHandler) is not invoked because
-        // it's registered as a secondary scheme. To fully test grant revocation,
-        // you would need to: 1) Login via the login endpoint, 2) Capture the auth cookie,
-        // 3) Use that cookie for the logout request.
-
         // Arrange
-        var subjectId = $"logout-test-{Guid.NewGuid():N}";
-        var clientId = "test-client";
         var ct = TestContext.Current.CancellationToken;
+        var userName = $"logout_revoke_{Guid.NewGuid():N}";
+        var password = "Test123!";
+
+        // Create a test user and get their ID (which will be the subjectId for grants)
+        var user = await CreateTestUserAsync(userName, password: password);
+        var subjectId = user.RtId.ToString();
 
         // Create multiple refresh tokens for the user
-        await CreatePersistedGrantAsync(subjectId, clientId);
-        await CreatePersistedGrantAsync(subjectId, clientId);
+        await CreatePersistedGrantAsync(subjectId, "test-client");
+        await CreatePersistedGrantAsync(subjectId, "test-client");
         await CreatePersistedGrantAsync(subjectId, "another-client");
 
         // Verify grants exist
         var initialCount = await GetGrantCountForSubjectAsync(subjectId);
         initialCount.Should().Be(3);
 
-        // Create a client with the subject ID as the authenticated user
-        var client = CreateAuthenticatedClient(userId: subjectId);
+        // Login to get an authenticated session with cookies
+        var client = await LoginAndGetAuthenticatedClientAsync(userName, password, ct);
+        client.Should().NotBeNull("Login should succeed");
+
         var request = new LogoutRequestDto { LogoutId = "" };
 
         // Act
-        var response = await client.PostAsJsonAsync(AuthApiUrl("logout"), request, ct);
+        var response = await client!.PostAsJsonAsync(AuthApiUrl("logout"), request, ct);
 
         // Assert
         response.StatusCode.Should().Be(HttpStatusCode.OK);
@@ -162,14 +160,17 @@ public class AuthApiLogoutTests : IntegrationTestBase
         result!.Success.Should().BeTrue();
     }
 
-    [Fact(Skip = "Grant revocation requires cookie-based authentication which is not available in the test setup")]
+    [Fact]
     public async Task Logout_WithMultipleClientsGrants_RevokesAllGrants()
     {
-        // NOTE: See Logout_RevokesRefreshTokens for explanation of why this test is skipped.
-
         // Arrange
-        var subjectId = $"multi-client-{Guid.NewGuid():N}";
         var ct = TestContext.Current.CancellationToken;
+        var userName = $"logout_multi_{Guid.NewGuid():N}";
+        var password = "Test123!";
+
+        // Create a test user and get their ID
+        var user = await CreateTestUserAsync(userName, password: password);
+        var subjectId = user.RtId.ToString();
 
         // Create grants for multiple clients
         await CreatePersistedGrantAsync(subjectId, "client-1");
@@ -179,11 +180,14 @@ public class AuthApiLogoutTests : IntegrationTestBase
         var initialCount = await GetGrantCountForSubjectAsync(subjectId);
         initialCount.Should().Be(3);
 
-        var client = CreateAuthenticatedClient(userId: subjectId);
+        // Login to get an authenticated session
+        var client = await LoginAndGetAuthenticatedClientAsync(userName, password, ct);
+        client.Should().NotBeNull("Login should succeed");
+
         var request = new LogoutRequestDto { LogoutId = "" };
 
         // Act
-        var response = await client.PostAsJsonAsync(AuthApiUrl("logout"), request, ct);
+        var response = await client!.PostAsJsonAsync(AuthApiUrl("logout"), request, ct);
 
         // Assert
         response.StatusCode.Should().Be(HttpStatusCode.OK);
@@ -195,26 +199,33 @@ public class AuthApiLogoutTests : IntegrationTestBase
         finalCount.Should().Be(0);
     }
 
-    [Fact(Skip = "Grant revocation requires cookie-based authentication which is not available in the test setup")]
+    [Fact]
     public async Task Logout_DoesNotAffectOtherUsersGrants()
     {
-        // NOTE: See Logout_RevokesRefreshTokens for explanation of why this test is skipped.
-
         // Arrange
-        var subjectId1 = $"user1-{Guid.NewGuid():N}";
-        var subjectId2 = $"user2-{Guid.NewGuid():N}";
-        var clientId = "test-client";
         var ct = TestContext.Current.CancellationToken;
+        var userName1 = $"logout_user1_{Guid.NewGuid():N}";
+        var userName2 = $"logout_user2_{Guid.NewGuid():N}";
+        var password = "Test123!";
+
+        // Create two test users
+        var user1 = await CreateTestUserAsync(userName1, password: password);
+        var user2 = await CreateTestUserAsync(userName2, password: password);
+        var subjectId1 = user1.RtId.ToString();
+        var subjectId2 = user2.RtId.ToString();
 
         // Create grants for two different users
-        await CreatePersistedGrantAsync(subjectId1, clientId);
-        await CreatePersistedGrantAsync(subjectId2, clientId);
+        await CreatePersistedGrantAsync(subjectId1, "test-client");
+        await CreatePersistedGrantAsync(subjectId2, "test-client");
 
-        var client = CreateAuthenticatedClient(userId: subjectId1);
+        // Login as user1
+        var client = await LoginAndGetAuthenticatedClientAsync(userName1, password, ct);
+        client.Should().NotBeNull("Login should succeed");
+
         var request = new LogoutRequestDto { LogoutId = "" };
 
         // Act
-        var response = await client.PostAsJsonAsync(AuthApiUrl("logout"), request, ct);
+        var response = await client!.PostAsJsonAsync(AuthApiUrl("logout"), request, ct);
 
         // Assert
         response.StatusCode.Should().Be(HttpStatusCode.OK);

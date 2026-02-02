@@ -2,6 +2,7 @@ using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using System.Text.Json;
 using IdentityServerPersistence.SystemStores;
+using Meshmakers.Octo.Backend.IdentityServices.Controllers.Api;
 using Meshmakers.Octo.Runtime.Contracts.MongoDb.Repositories;
 using Meshmakers.Octo.Runtime.Contracts.Repositories;
 using Meshmakers.Octo.Runtime.Contracts.Repositories.Query;
@@ -118,6 +119,53 @@ public abstract class IntegrationTestBase : IClassFixture<CustomWebApplicationFa
             }
         }
 
+        return client;
+    }
+
+    /// <summary>
+    /// Creates an HTTP client with cookie support that can perform real login.
+    /// This client preserves cookies across requests, enabling cookie-based authentication.
+    /// </summary>
+    protected HttpClient CreateCookieClient()
+    {
+        // Create client with cookie handling enabled
+        var client = Factory.CreateClient(new Microsoft.AspNetCore.Mvc.Testing.WebApplicationFactoryClientOptions
+        {
+            HandleCookies = true,
+            AllowAutoRedirect = false // Don't auto-redirect so we can capture cookies
+        });
+        return client;
+    }
+
+    /// <summary>
+    /// Performs a real login and returns an HTTP client with the authentication cookie.
+    /// This enables testing of endpoints that require cookie-based authentication.
+    /// </summary>
+    /// <param name="userName">The username to login with</param>
+    /// <param name="password">The password to login with</param>
+    /// <returns>An HTTP client with authentication cookies, or null if login failed</returns>
+    protected async Task<HttpClient?> LoginAndGetAuthenticatedClientAsync(
+        string userName,
+        string password,
+        CancellationToken ct = default)
+    {
+        var client = CreateCookieClient();
+
+        var loginRequest = new { Username = userName, Password = password, RememberLogin = true };
+        var response = await client.PostAsJsonAsync(AuthApiUrl("login"), loginRequest, ct);
+
+        if (!response.IsSuccessStatusCode)
+        {
+            return null;
+        }
+
+        var result = await response.Content.ReadFromJsonAsync<LoginResultDto>(ct);
+        if (result?.Success != true)
+        {
+            return null;
+        }
+
+        // The client now has the authentication cookie set
         return client;
     }
 
