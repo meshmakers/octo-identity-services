@@ -11,8 +11,40 @@
       <span class="lcars-loading__text">Loading</span>
     </div>
 
+    <!-- Already Authenticated -->
+    <ng-container *ngIf="!loading && context?.isAuthenticated && !showLoginForm">
+      <div class="lcars-already-authenticated">
+        <div class="lcars-already-authenticated__icon">
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" width="48" height="48">
+            <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 3c1.66 0 3 1.34 3 3s-1.34 3-3 3-3-1.34-3-3 1.34-3 3-3zm0 14.2c-2.5 0-4.71-1.28-6-3.22.03-1.99 4-3.08 6-3.08 1.99 0 5.97 1.09 6 3.08-1.29 1.94-3.5 3.22-6 3.22z"/>
+          </svg>
+        </div>
+        <div class="lcars-already-authenticated__message">
+          You are signed in as
+        </div>
+        <div class="lcars-already-authenticated__username">
+          {{ context?.username }}
+        </div>
+
+        <div class="lcars-actions lcars-actions--stacked">
+          <button
+            type="button"
+            class="lcars-button-primary"
+            (click)="continueAsUser()">
+            Continue to Profile
+          </button>
+          <button
+            type="button"
+            class="lcars-button-secondary"
+            (click)="signOutAndSignIn()">
+            Sign in as different user
+          </button>
+        </div>
+      </div>
+    </ng-container>
+
     <!-- Login Form -->
-    <ng-container *ngIf="!loading">
+    <ng-container *ngIf="!loading && (!context?.isAuthenticated || showLoginForm)">
       <!-- Client Info -->
       <div *ngIf="context?.clientName" class="lcars-client-info">
         <div class="lcars-client-info__logo" *ngIf="context?.clientLogoUrl">
@@ -95,6 +127,9 @@
 
       <!-- Footer Links -->
       <div class="lcars-footer-links">
+        <a *ngIf="showLoginForm" href="javascript:void(0)" (click)="cancelSwitchUser()">
+          Cancel
+        </a>
         <a [routerLink]="['/', tenantId, 'forgot-password']">Forgot password?</a>
       </div>
     </ng-container>

@@ -83,6 +83,14 @@ public class AuthApiController : ControllerBase
             }
         }
 
+        // Check if user is already authenticated
+        var isAuthenticated = User.Identity?.IsAuthenticated ?? false;
+        string? username = null;
+        if (isAuthenticated)
+        {
+            username = User.Identity?.Name;
+        }
+
         return new LoginContextDto
         {
             ReturnUrl = returnUrl ?? string.Empty,
@@ -90,7 +98,9 @@ public class AuthApiController : ControllerBase
             ClientLogoUrl = clientLogoUrl,
             ExternalProviders = providers,
             AllowRememberLogin = true,
-            EnableLocalLogin = allowLocal
+            EnableLocalLogin = allowLocal,
+            IsAuthenticated = isAuthenticated,
+            Username = username
         };
     }
 
@@ -421,6 +431,8 @@ public record LoginContextDto
     public IEnumerable<ExternalProviderDto> ExternalProviders { get; init; } = [];
     public bool AllowRememberLogin { get; init; }
     public bool EnableLocalLogin { get; init; }
+    public bool IsAuthenticated { get; init; }
+    public string? Username { get; init; }
 }
 
 public record LoginRequestDto

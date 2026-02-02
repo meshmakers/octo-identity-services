@@ -142,6 +142,28 @@
   }
 }
 
+@mixin lcars-button-secondary {
+  @include lcars-button-base;
+  background: transparent;
+  border: 1px solid rgba($ash-blue, 0.5);
+  color: #ffffff;
+
+  &:hover:not(:disabled) {
+    color: $octo-mint;
+    border-color: rgba($octo-mint, 0.5);
+    background: rgba($octo-mint, 0.1);
+  }
+
+  &:active:not(:disabled) {
+    background: rgba($octo-mint, 0.15);
+  }
+
+  &:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+}
+
 @mixin lcars-button-outline {
   @include lcars-button-base;
   background: transparent;

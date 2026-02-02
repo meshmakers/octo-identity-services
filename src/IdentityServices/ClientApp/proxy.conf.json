@@ -1,9 +1,14 @@
 {
-  "/System/api": {
+  "/api": {
     "target": "https://localhost:5003",
     "secure": false,
     "changeOrigin": true,
-    "logLevel": "debug"
+    "pathRewrite": { "^/api": "/System/api" }
+  },
+  "/System/api": {
+    "target": "https://localhost:5003",
+    "secure": false,
+    "changeOrigin": true
   },
   "/connect": {
     "target": "https://localhost:5003",

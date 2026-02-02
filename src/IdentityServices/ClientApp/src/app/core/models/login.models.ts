@@ -10,6 +10,8 @@ export interface LoginContext {
   externalProviders: ExternalProvider[];
   allowRememberLogin: boolean;
   enableLocalLogin: boolean;
+  isAuthenticated: boolean;
+  username?: string;
 }
 
 export interface LoginRequest {

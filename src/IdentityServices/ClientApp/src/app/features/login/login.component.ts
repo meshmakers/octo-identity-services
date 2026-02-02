@@ -32,6 +32,7 @@ export class LoginComponent implements OnInit {
   submitting = false;
   errorMessage?: string;
   context?: LoginContext;
+  showLoginForm = false; // Used to override isAuthenticated and show login form
 
   // Form data
   username = '';
@@ -64,7 +65,8 @@ export class LoginComponent implements OnInit {
           returnUrl: this.returnUrl,
           externalProviders: [],
           allowRememberLogin: true,
-          enableLocalLogin: true
+          enableLocalLogin: true,
+          isAuthenticated: false
         };
       }
     });
@@ -112,5 +114,24 @@ export class LoginComponent implements OnInit {
 
   get showLocalLogin(): boolean {
     return this.context?.enableLocalLogin ?? true;
+  }
+
+  continueAsUser(): void {
+    // Navigate to profile/manage page
+    this.router.navigate(['/', this.tenantId, 'manage']);
+  }
+
+  signOutAndSignIn(): void {
+    // Just show the login form - don't log out yet
+    // The new login will replace the current session
+    this.showLoginForm = true;
+  }
+
+  cancelSwitchUser(): void {
+    // Go back to the "already authenticated" view
+    this.showLoginForm = false;
+    this.username = '';
+    this.password = '';
+    this.errorMessage = undefined;
   }
 }
