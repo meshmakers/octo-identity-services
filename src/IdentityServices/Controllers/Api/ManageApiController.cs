@@ -1,3 +1,6 @@
+using System.Text;
+using System.Text.Encodings.Web;
+using Meshmakers.Octo.Backend.IdentityServices.Services;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Identity;
@@ -14,18 +17,32 @@ namespace Meshmakers.Octo.Backend.IdentityServices.Controllers.Api;
 [Authorize]
 public class ManageApiController : ControllerBase
 {
+    private const string AuthenticatorUriFormat = "otpauth://totp/{0}:{1}?secret={2}&issuer={0}&digits=6";
+    private const string InternalLoginProvider = "[AspNetUserStore]";
+    private const string AuthenticatorKeyTokenName = "AuthenticatorKey";
+    private const string RecoveryCodeTokenName = "RecoveryCodes";
+
     private readonly UserManager<RtUser> _userManager;
     private readonly SignInManager<RtUser> _signInManager;
     private readonly IAuthenticationSchemeProvider _schemeProvider;
+    private readonly UrlEncoder _urlEncoder;
+    private readonly IQrCodeService _qrCodeService;
+    private readonly IUserAuthenticationTokenStore<RtUser> _tokenStore;
 
     public ManageApiController(
         UserManager<RtUser> userManager,
         SignInManager<RtUser> signInManager,
-        IAuthenticationSchemeProvider schemeProvider)
+        IAuthenticationSchemeProvider schemeProvider,
+        UrlEncoder urlEncoder,
+        IQrCodeService qrCodeService,
+        IUserStore<RtUser> userStore)
     {
         _userManager = userManager;
         _signInManager = signInManager;
         _schemeProvider = schemeProvider;
+        _urlEncoder = urlEncoder;
+        _qrCodeService = qrCodeService;
+        _tokenStore = (IUserAuthenticationTokenStore<RtUser>)userStore;
     }
 
     /// <summary>
@@ -286,6 +303,222 @@ public class ManageApiController : ControllerBase
         await _signInManager.RefreshSignInAsync(user);
         return new PasswordResultDto { Success = true };
     }
+
+    #region Two-Factor Authentication
+
+    /// <summary>
+    /// Get the current user's two-factor authentication status
+    /// </summary>
+    [HttpGet("2fa/status")]
+    public async Task<ActionResult<TwoFactorStatusDto>> GetTwoFactorStatus()
+    {
+        var user = await _userManager.GetUserAsync(User);
+        if (user == null)
+        {
+            return NotFound();
+        }
+
+        var hasAuthenticator = !string.IsNullOrEmpty(await _userManager.GetAuthenticatorKeyAsync(user));
+        var recoveryCodesCount = await _userManager.CountRecoveryCodesAsync(user);
+
+        return new TwoFactorStatusDto
+        {
+            Enabled = await _userManager.GetTwoFactorEnabledAsync(user),
+            HasAuthenticator = hasAuthenticator,
+            RecoveryCodesLeft = recoveryCodesCount
+        };
+    }
+
+    /// <summary>
+    /// Setup authenticator app for two-factor authentication
+    /// </summary>
+    [HttpPost("2fa/authenticator/setup")]
+    public async Task<ActionResult<AuthenticatorSetupDto>> SetupAuthenticator()
+    {
+        var user = await _userManager.GetUserAsync(User);
+        if (user == null)
+        {
+            return NotFound();
+        }
+
+        // Get or create authenticator key
+        var unformattedKey = await _userManager.GetAuthenticatorKeyAsync(user);
+        if (string.IsNullOrEmpty(unformattedKey))
+        {
+            await _userManager.ResetAuthenticatorKeyAsync(user);
+            unformattedKey = await _userManager.GetAuthenticatorKeyAsync(user);
+        }
+
+        if (string.IsNullOrEmpty(unformattedKey))
+        {
+            return BadRequest("Failed to generate authenticator key");
+        }
+
+        var email = await _userManager.GetEmailAsync(user) ?? user.UserName ?? "user";
+        var qrCodeUri = GenerateQrCodeUri("OctoMesh", email, unformattedKey);
+        var qrCodeImage = _qrCodeService.GenerateQrCodeWithLogo(qrCodeUri);
+
+        return new AuthenticatorSetupDto
+        {
+            SharedKey = FormatKey(unformattedKey),
+            QrCodeUri = qrCodeUri,
+            QrCodeImage = qrCodeImage
+        };
+    }
+
+    /// <summary>
+    /// Verify the authenticator code and enable two-factor authentication
+    /// </summary>
+    [HttpPost("2fa/authenticator/verify")]
+    public async Task<ActionResult<VerifyAuthenticatorResultDto>> VerifyAuthenticator([FromBody] VerifyAuthenticatorRequestDto request)
+    {
+        var user = await _userManager.GetUserAsync(User);
+        if (user == null)
+        {
+            return new VerifyAuthenticatorResultDto
+            {
+                Success = false,
+                ErrorMessage = "User not found"
+            };
+        }
+
+        // Strip spaces and hyphens from the code
+        var verificationCode = request.Code.Replace(" ", string.Empty).Replace("-", string.Empty);
+
+        var isTokenValid = await _userManager.VerifyTwoFactorTokenAsync(
+            user,
+            _userManager.Options.Tokens.AuthenticatorTokenProvider,
+            verificationCode);
+
+        if (!isTokenValid)
+        {
+            return new VerifyAuthenticatorResultDto
+            {
+                Success = false,
+                ErrorMessage = "Verification code is invalid"
+            };
+        }
+
+        // Enable 2FA
+        await _userManager.SetTwoFactorEnabledAsync(user, true);
+
+        // Generate recovery codes
+        var recoveryCodes = await _userManager.GenerateNewTwoFactorRecoveryCodesAsync(user, 10);
+
+        return new VerifyAuthenticatorResultDto
+        {
+            Success = true,
+            RecoveryCodes = recoveryCodes ?? []
+        };
+    }
+
+    /// <summary>
+    /// Disable two-factor authentication
+    /// </summary>
+    [HttpPost("2fa/disable")]
+    public async Task<ActionResult<DisableTwoFactorResultDto>> DisableTwoFactor([FromBody] DisableTwoFactorRequestDto request)
+    {
+        var user = await _userManager.GetUserAsync(User);
+        if (user == null)
+        {
+            return new DisableTwoFactorResultDto
+            {
+                Success = false,
+                ErrorMessage = "User not found"
+            };
+        }
+
+        // Verify the code before disabling
+        var verificationCode = request.Code.Replace(" ", string.Empty).Replace("-", string.Empty);
+
+        var isTokenValid = await _userManager.VerifyTwoFactorTokenAsync(
+            user,
+            _userManager.Options.Tokens.AuthenticatorTokenProvider,
+            verificationCode);
+
+        if (!isTokenValid)
+        {
+            return new DisableTwoFactorResultDto
+            {
+                Success = false,
+                ErrorMessage = "Verification code is invalid"
+            };
+        }
+
+        // Disable 2FA
+        var result = await _userManager.SetTwoFactorEnabledAsync(user, false);
+        if (!result.Succeeded)
+        {
+            return new DisableTwoFactorResultDto
+            {
+                Success = false,
+                ErrorMessage = "Failed to disable two-factor authentication"
+            };
+        }
+
+        // Remove authenticator key and recovery codes tokens entirely
+        await _tokenStore.RemoveTokenAsync(user, InternalLoginProvider, AuthenticatorKeyTokenName, CancellationToken.None);
+        await _tokenStore.RemoveTokenAsync(user, InternalLoginProvider, RecoveryCodeTokenName, CancellationToken.None);
+
+        // Update the user to persist the token changes
+        await _userManager.UpdateAsync(user);
+        await _signInManager.RefreshSignInAsync(user);
+
+        return new DisableTwoFactorResultDto { Success = true };
+    }
+
+    /// <summary>
+    /// Generate new recovery codes
+    /// </summary>
+    [HttpPost("2fa/recovery-codes/generate")]
+    public async Task<ActionResult<GenerateRecoveryCodesResultDto>> GenerateRecoveryCodes()
+    {
+        var user = await _userManager.GetUserAsync(User);
+        if (user == null)
+        {
+            return NotFound();
+        }
+
+        var isTwoFactorEnabled = await _userManager.GetTwoFactorEnabledAsync(user);
+        if (!isTwoFactorEnabled)
+        {
+            return BadRequest("Cannot generate recovery codes when two-factor authentication is not enabled");
+        }
+
+        var recoveryCodes = await _userManager.GenerateNewTwoFactorRecoveryCodesAsync(user, 10);
+
+        return new GenerateRecoveryCodesResultDto
+        {
+            RecoveryCodes = recoveryCodes ?? []
+        };
+    }
+
+    private string FormatKey(string unformattedKey)
+    {
+        var result = new StringBuilder();
+        var currentPosition = 0;
+        while (currentPosition + 4 < unformattedKey.Length)
+        {
+            result.Append(unformattedKey.AsSpan(currentPosition, 4)).Append(' ');
+            currentPosition += 4;
+        }
+        if (currentPosition < unformattedKey.Length)
+        {
+            result.Append(unformattedKey.AsSpan(currentPosition));
+        }
+        return result.ToString().ToLowerInvariant();
+    }
+
+    private string GenerateQrCodeUri(string issuer, string email, string unformattedKey)
+    {
+        return string.Format(
+            AuthenticatorUriFormat,
+            _urlEncoder.Encode(issuer),
+            _urlEncoder.Encode(email),
+            unformattedKey);
+    }
+
+    #endregion
 }
 
 #region DTOs
@@ -346,6 +579,50 @@ public record PasswordResultDto
     public bool Success { get; init; }
     public string? ErrorMessage { get; init; }
     public IEnumerable<string>? Errors { get; init; }
+}
+
+// Two-Factor Authentication DTOs
+
+public record TwoFactorStatusDto
+{
+    public bool Enabled { get; init; }
+    public bool HasAuthenticator { get; init; }
+    public int RecoveryCodesLeft { get; init; }
+}
+
+public record AuthenticatorSetupDto
+{
+    public string SharedKey { get; init; } = string.Empty;
+    public string QrCodeUri { get; init; } = string.Empty;
+    public string QrCodeImage { get; init; } = string.Empty;
+}
+
+public record VerifyAuthenticatorRequestDto
+{
+    public string Code { get; init; } = string.Empty;
+}
+
+public record VerifyAuthenticatorResultDto
+{
+    public bool Success { get; init; }
+    public string? ErrorMessage { get; init; }
+    public IEnumerable<string> RecoveryCodes { get; init; } = [];
+}
+
+public record DisableTwoFactorRequestDto
+{
+    public string Code { get; init; } = string.Empty;
+}
+
+public record DisableTwoFactorResultDto
+{
+    public bool Success { get; init; }
+    public string? ErrorMessage { get; init; }
+}
+
+public record GenerateRecoveryCodesResultDto
+{
+    public IEnumerable<string> RecoveryCodes { get; init; } = [];
 }
 
 #endregion

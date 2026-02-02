@@ -73,6 +73,7 @@ import { UserProfile } from '../../core/models/manage.models';
                 <span class="status-badge" [class.status-badge--success]="profile.twoFactorEnabled" [class.status-badge--warning]="!profile.twoFactorEnabled">
                   {{ profile.twoFactorEnabled ? 'Enabled' : 'Disabled' }}
                 </span>
+                <a routerLink="2fa" class="action-link">Manage</a>
               </span>
             </div>
 

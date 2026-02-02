@@ -42,3 +42,40 @@ export interface RemoveExternalLoginRequest {
   loginProvider: string;
   providerKey: string;
 }
+
+// Two-Factor Authentication Types
+
+export interface TwoFactorStatus {
+  enabled: boolean;
+  hasAuthenticator: boolean;
+  recoveryCodesLeft: number;
+}
+
+export interface AuthenticatorSetup {
+  sharedKey: string;
+  qrCodeUri: string;
+  qrCodeImage: string;
+}
+
+export interface VerifyAuthenticatorRequest {
+  code: string;
+}
+
+export interface VerifyAuthenticatorResult {
+  success: boolean;
+  errorMessage?: string;
+  recoveryCodes: string[];
+}
+
+export interface DisableTwoFactorRequest {
+  code: string;
+}
+
+export interface DisableTwoFactorResult {
+  success: boolean;
+  errorMessage?: string;
+}
+
+export interface GenerateRecoveryCodesResult {
+  recoveryCodes: string[];
+}

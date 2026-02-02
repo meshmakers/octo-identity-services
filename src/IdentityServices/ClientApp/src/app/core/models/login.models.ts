@@ -27,6 +27,8 @@ export interface LoginResult {
   errorMessage?: string;
   isLockedOut?: boolean;
   requiresTwoFactor?: boolean;
+  canUseTotpAuthenticator?: boolean;
+  canUseEmailCode?: boolean;
 }
 
 export interface LogoutContext {
@@ -72,4 +74,31 @@ export interface ResetPasswordResult {
 
 export interface ValidateResetTokenResult {
   isValid: boolean;
+}
+
+// Two-Factor Authentication Types
+
+export interface TwoFactorLoginRequest {
+  code: string;
+  rememberMachine: boolean;
+}
+
+export interface TwoFactorEmailLoginRequest {
+  code: string;
+  rememberMachine: boolean;
+}
+
+export interface TwoFactorLoginResult {
+  success: boolean;
+  redirectUrl?: string;
+  errorMessage?: string;
+}
+
+export interface RecoveryCodeLoginRequest {
+  recoveryCode: string;
+}
+
+export interface SendTwoFactorEmailResult {
+  success: boolean;
+  errorMessage?: string;
 }

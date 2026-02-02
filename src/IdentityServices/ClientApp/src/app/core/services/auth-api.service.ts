@@ -13,7 +13,12 @@ import {
   ForgotPasswordResult,
   ResetPasswordRequest,
   ResetPasswordResult,
-  ValidateResetTokenResult
+  ValidateResetTokenResult,
+  TwoFactorLoginRequest,
+  TwoFactorEmailLoginRequest,
+  TwoFactorLoginResult,
+  RecoveryCodeLoginRequest,
+  SendTwoFactorEmailResult
 } from '../models/login.models';
 
 @Injectable({ providedIn: 'root' })
@@ -62,5 +67,23 @@ export class AuthApiService {
     return this.http.get<ValidateResetTokenResult>('/api/auth/validate-reset-token', {
       params: { email, token }
     });
+  }
+
+  // === Two-Factor Authentication ===
+
+  loginTwoFactor(request: TwoFactorLoginRequest): Observable<TwoFactorLoginResult> {
+    return this.http.post<TwoFactorLoginResult>('/api/auth/login-2fa', request);
+  }
+
+  loginTwoFactorEmail(request: TwoFactorEmailLoginRequest): Observable<TwoFactorLoginResult> {
+    return this.http.post<TwoFactorLoginResult>('/api/auth/login-2fa-email', request);
+  }
+
+  sendTwoFactorEmail(): Observable<SendTwoFactorEmailResult> {
+    return this.http.post<SendTwoFactorEmailResult>('/api/auth/send-2fa-email', {});
+  }
+
+  loginRecovery(request: RecoveryCodeLoginRequest): Observable<TwoFactorLoginResult> {
+    return this.http.post<TwoFactorLoginResult>('/api/auth/login-recovery', request);
   }
 }

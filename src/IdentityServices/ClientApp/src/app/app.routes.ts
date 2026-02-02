@@ -16,6 +16,11 @@ export const routes: Routes = [
           .then(m => m.LoginComponent)
       },
       {
+        path: '2fa-login',
+        loadComponent: () => import('./features/login/two-factor-login.component')
+          .then(m => m.TwoFactorLoginComponent)
+      },
+      {
         path: 'forgot-password',
         loadComponent: () => import('./features/login/forgot-password.component')
           .then(m => m.ForgotPasswordComponent)
@@ -77,6 +82,21 @@ export const routes: Routes = [
             path: 'logins',
             loadComponent: () => import('./features/manage/external-logins.component')
               .then(m => m.ExternalLoginsComponent)
+          },
+          {
+            path: '2fa',
+            loadComponent: () => import('./features/manage/two-factor/two-factor-status.component')
+              .then(m => m.TwoFactorStatusComponent)
+          },
+          {
+            path: '2fa/setup',
+            loadComponent: () => import('./features/manage/two-factor/authenticator-setup.component')
+              .then(m => m.AuthenticatorSetupComponent)
+          },
+          {
+            path: '2fa/recovery-codes',
+            loadComponent: () => import('./features/manage/two-factor/recovery-codes.component')
+              .then(m => m.RecoveryCodesComponent)
           }
         ]
       },

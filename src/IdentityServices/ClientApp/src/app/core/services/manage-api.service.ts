@@ -7,7 +7,14 @@ import {
   SetPasswordRequest,
   PasswordResult,
   RemoveExternalLoginRequest,
-  ExternalLoginInfo
+  ExternalLoginInfo,
+  TwoFactorStatus,
+  AuthenticatorSetup,
+  VerifyAuthenticatorRequest,
+  VerifyAuthenticatorResult,
+  DisableTwoFactorRequest,
+  DisableTwoFactorResult,
+  GenerateRecoveryCodesResult
 } from '../models/manage.models';
 import { ExternalProvider } from '../models/login.models';
 
@@ -49,5 +56,27 @@ export class ManageApiService {
 
   removeExternalLogin(request: RemoveExternalLoginRequest): Observable<PasswordResult> {
     return this.http.post<PasswordResult>('/api/manage/remove-external-login', request);
+  }
+
+  // === Two-Factor Authentication ===
+
+  getTwoFactorStatus(): Observable<TwoFactorStatus> {
+    return this.http.get<TwoFactorStatus>('/api/manage/2fa/status');
+  }
+
+  setupAuthenticator(): Observable<AuthenticatorSetup> {
+    return this.http.post<AuthenticatorSetup>('/api/manage/2fa/authenticator/setup', {});
+  }
+
+  verifyAuthenticator(request: VerifyAuthenticatorRequest): Observable<VerifyAuthenticatorResult> {
+    return this.http.post<VerifyAuthenticatorResult>('/api/manage/2fa/authenticator/verify', request);
+  }
+
+  disableTwoFactor(request: DisableTwoFactorRequest): Observable<DisableTwoFactorResult> {
+    return this.http.post<DisableTwoFactorResult>('/api/manage/2fa/disable', request);
+  }
+
+  generateRecoveryCodes(): Observable<GenerateRecoveryCodesResult> {
+    return this.http.post<GenerateRecoveryCodesResult>('/api/manage/2fa/recovery-codes/generate', {});
   }
 }

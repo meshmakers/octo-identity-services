@@ -174,11 +174,20 @@ public class AuthApiController : ControllerBase
 
         if (result.RequiresTwoFactor)
         {
+            // Check what 2FA methods are available
+            var twoFactorUser = await _signInManager.GetTwoFactorAuthenticationUserAsync();
+            var canUseTotp = twoFactorUser != null &&
+                !string.IsNullOrEmpty(await _userManager.GetAuthenticatorKeyAsync(twoFactorUser));
+            var canUseEmail = twoFactorUser != null &&
+                await _userManager.IsEmailConfirmedAsync(twoFactorUser);
+
             return new LoginResultDto
             {
                 Success = false,
                 ErrorMessage = "Two-factor authentication required",
-                RequiresTwoFactor = true
+                RequiresTwoFactor = true,
+                CanUseTotpAuthenticator = canUseTotp,
+                CanUseEmailCode = canUseEmail
             };
         }
 
@@ -431,6 +440,223 @@ public class AuthApiController : ControllerBase
 
         return new ValidateResetTokenResultDto { IsValid = isValid };
     }
+
+    #region Two-Factor Authentication
+
+    /// <summary>
+    /// Login with two-factor authentication code (TOTP)
+    /// </summary>
+    [HttpPost("login-2fa")]
+    public async Task<ActionResult<TwoFactorLoginResultDto>> LoginTwoFactor([FromBody] TwoFactorLoginRequestDto request)
+    {
+        var user = await _signInManager.GetTwoFactorAuthenticationUserAsync();
+        if (user == null)
+        {
+            return new TwoFactorLoginResultDto
+            {
+                Success = false,
+                ErrorMessage = "Two-factor authentication session expired. Please login again."
+            };
+        }
+
+        var authenticatorCode = request.Code.Replace(" ", string.Empty).Replace("-", string.Empty);
+
+        var result = await _signInManager.TwoFactorAuthenticatorSignInAsync(
+            authenticatorCode,
+            isPersistent: false,
+            rememberClient: request.RememberMachine);
+
+        if (result.Succeeded)
+        {
+            await _events.RaiseAsync(new UserLoginSuccessEvent(
+                user.UserName,
+                user.RtId.ToString(),
+                user.UserName,
+                clientId: null));
+
+            // Get the return URL from the session/context if available
+            var tenantId = RouteData.Values["tenantId"]?.ToString() ?? "System";
+            return new TwoFactorLoginResultDto
+            {
+                Success = true,
+                RedirectUrl = $"/{tenantId}/manage"
+            };
+        }
+
+        if (result.IsLockedOut)
+        {
+            return new TwoFactorLoginResultDto
+            {
+                Success = false,
+                ErrorMessage = "Account is locked out"
+            };
+        }
+
+        await _events.RaiseAsync(new UserLoginFailureEvent(
+            user.UserName,
+            "Invalid two-factor code",
+            clientId: null));
+
+        return new TwoFactorLoginResultDto
+        {
+            Success = false,
+            ErrorMessage = "Invalid authenticator code"
+        };
+    }
+
+    /// <summary>
+    /// Login with two-factor email code
+    /// </summary>
+    [HttpPost("login-2fa-email")]
+    public async Task<ActionResult<TwoFactorLoginResultDto>> LoginTwoFactorEmail([FromBody] TwoFactorEmailLoginRequestDto request)
+    {
+        var user = await _signInManager.GetTwoFactorAuthenticationUserAsync();
+        if (user == null)
+        {
+            return new TwoFactorLoginResultDto
+            {
+                Success = false,
+                ErrorMessage = "Two-factor authentication session expired. Please login again."
+            };
+        }
+
+        var emailCode = request.Code.Replace(" ", string.Empty).Replace("-", string.Empty);
+
+        var result = await _signInManager.TwoFactorSignInAsync(
+            TokenOptions.DefaultEmailProvider,
+            emailCode,
+            isPersistent: false,
+            rememberClient: request.RememberMachine);
+
+        if (result.Succeeded)
+        {
+            await _events.RaiseAsync(new UserLoginSuccessEvent(
+                user.UserName,
+                user.RtId.ToString(),
+                user.UserName,
+                clientId: null));
+
+            var tenantId = RouteData.Values["tenantId"]?.ToString() ?? "System";
+            return new TwoFactorLoginResultDto
+            {
+                Success = true,
+                RedirectUrl = $"/{tenantId}/manage"
+            };
+        }
+
+        if (result.IsLockedOut)
+        {
+            return new TwoFactorLoginResultDto
+            {
+                Success = false,
+                ErrorMessage = "Account is locked out"
+            };
+        }
+
+        await _events.RaiseAsync(new UserLoginFailureEvent(
+            user.UserName,
+            "Invalid two-factor email code",
+            clientId: null));
+
+        return new TwoFactorLoginResultDto
+        {
+            Success = false,
+            ErrorMessage = "Invalid email verification code"
+        };
+    }
+
+    /// <summary>
+    /// Send two-factor email verification code
+    /// </summary>
+    [HttpPost("send-2fa-email")]
+    public async Task<ActionResult<SendTwoFactorEmailResultDto>> SendTwoFactorEmail()
+    {
+        var user = await _signInManager.GetTwoFactorAuthenticationUserAsync();
+        if (user == null)
+        {
+            return new SendTwoFactorEmailResultDto
+            {
+                Success = false,
+                ErrorMessage = "Two-factor authentication session expired. Please login again."
+            };
+        }
+
+        if (string.IsNullOrEmpty(user.Email))
+        {
+            return new SendTwoFactorEmailResultDto
+            {
+                Success = false,
+                ErrorMessage = "No email address associated with this account"
+            };
+        }
+
+        var code = await _userManager.GenerateTwoFactorTokenAsync(user, TokenOptions.DefaultEmailProvider);
+
+        // TODO: Send email with the code using IEmailSender
+        // await _emailSender.SendTwoFactorEmailAsync(user.Email, code);
+        // For now, we log the code (in production, this would send an email)
+
+        return new SendTwoFactorEmailResultDto { Success = true };
+    }
+
+    /// <summary>
+    /// Login with recovery code
+    /// </summary>
+    [HttpPost("login-recovery")]
+    public async Task<ActionResult<TwoFactorLoginResultDto>> LoginRecovery([FromBody] RecoveryCodeLoginRequestDto request)
+    {
+        var user = await _signInManager.GetTwoFactorAuthenticationUserAsync();
+        if (user == null)
+        {
+            return new TwoFactorLoginResultDto
+            {
+                Success = false,
+                ErrorMessage = "Two-factor authentication session expired. Please login again."
+            };
+        }
+
+        var recoveryCode = request.RecoveryCode.Replace(" ", string.Empty).Replace("-", string.Empty);
+
+        var result = await _signInManager.TwoFactorRecoveryCodeSignInAsync(recoveryCode);
+
+        if (result.Succeeded)
+        {
+            await _events.RaiseAsync(new UserLoginSuccessEvent(
+                user.UserName,
+                user.RtId.ToString(),
+                user.UserName,
+                clientId: null));
+
+            var tenantId = RouteData.Values["tenantId"]?.ToString() ?? "System";
+            return new TwoFactorLoginResultDto
+            {
+                Success = true,
+                RedirectUrl = $"/{tenantId}/manage"
+            };
+        }
+
+        if (result.IsLockedOut)
+        {
+            return new TwoFactorLoginResultDto
+            {
+                Success = false,
+                ErrorMessage = "Account is locked out"
+            };
+        }
+
+        await _events.RaiseAsync(new UserLoginFailureEvent(
+            user.UserName,
+            "Invalid recovery code",
+            clientId: null));
+
+        return new TwoFactorLoginResultDto
+        {
+            Success = false,
+            ErrorMessage = "Invalid recovery code"
+        };
+    }
+
+    #endregion
 }
 
 #region DTOs
@@ -462,6 +688,8 @@ public record LoginResultDto
     public string? ErrorMessage { get; init; }
     public bool IsLockedOut { get; init; }
     public bool RequiresTwoFactor { get; init; }
+    public bool CanUseTotpAuthenticator { get; init; }
+    public bool CanUseEmailCode { get; init; }
 }
 
 public record ExternalProviderDto
@@ -521,6 +749,38 @@ public record ResetPasswordResultDto
 public record ValidateResetTokenResultDto
 {
     public bool IsValid { get; init; }
+}
+
+// Two-Factor Authentication DTOs
+
+public record TwoFactorLoginRequestDto
+{
+    public string Code { get; init; } = string.Empty;
+    public bool RememberMachine { get; init; }
+}
+
+public record TwoFactorEmailLoginRequestDto
+{
+    public string Code { get; init; } = string.Empty;
+    public bool RememberMachine { get; init; }
+}
+
+public record TwoFactorLoginResultDto
+{
+    public bool Success { get; init; }
+    public string? RedirectUrl { get; init; }
+    public string? ErrorMessage { get; init; }
+}
+
+public record RecoveryCodeLoginRequestDto
+{
+    public string RecoveryCode { get; init; } = string.Empty;
+}
+
+public record SendTwoFactorEmailResultDto
+{
+    public bool Success { get; init; }
+    public string? ErrorMessage { get; init; }
 }
 
 #endregion

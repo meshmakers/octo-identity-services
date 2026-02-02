@@ -57,13 +57,30 @@ public sealed class OctoUserStore(
         using var session = await _tenantRepository.GetSessionAsync();
         session.StartTransaction();
 
-        var token = await FindTokenAsync(session, user, loginProvider, name);
-        if (token == null)
+        // Get the user from the database to modify its tokens
+        var dbUser = await _tenantRepository.GetRtEntityByRtIdAsync<RtUser>(session, user.RtId);
+        if (dbUser == null)
         {
-            user.UserTokens ??= new AttributeRecordValueList<RtUserTokenRecord>();
-            user.UserTokens.Add(new RtUserTokenRecord
+            await session.AbortTransactionAsync();
+            return;
+        }
+
+        var token = dbUser.UserTokens?.FirstOrDefault(x => x.LoginProvider == loginProvider && x.Name == name);
+
+        // If value is null or empty, remove the token entirely
+        if (string.IsNullOrEmpty(value))
+        {
+            if (token != null && dbUser.UserTokens != null)
             {
-                UserId = user.RtId.ToString(),
+                dbUser.UserTokens.RemoveAll(x => x.LoginProvider == loginProvider && x.Name == name);
+            }
+        }
+        else if (token == null)
+        {
+            dbUser.UserTokens ??= new AttributeRecordValueList<RtUserTokenRecord>();
+            dbUser.UserTokens.Add(new RtUserTokenRecord
+            {
+                UserId = dbUser.RtId.ToString(),
                 LoginProvider = loginProvider,
                 Name = name,
                 Value = value
@@ -72,11 +89,15 @@ public sealed class OctoUserStore(
         else
         {
             token.Value = value;
-            user.UserTokens ??= new AttributeRecordValueList<RtUserTokenRecord>();
-            user.UserTokens[
-                    user.UserTokens.FindIndex(x => x.LoginProvider == token.LoginProvider && x.Name == token.Name)] =
-                token;
+            var tokenIndex = dbUser.UserTokens!.FindIndex(x => x.LoginProvider == loginProvider && x.Name == name);
+            dbUser.UserTokens[tokenIndex] = token;
         }
+
+        // Persist the updated user back to the database
+        await _tenantRepository.ReplaceOneRtEntityByIdAsync(session, dbUser.RtId, dbUser);
+
+        // Also update the in-memory user object
+        user.UserTokens = dbUser.UserTokens;
 
         await session.CommitTransactionAsync();
     }
@@ -94,10 +115,24 @@ public sealed class OctoUserStore(
         using var session = await _tenantRepository.GetSessionAsync();
         session.StartTransaction();
 
-        var entry = await FindTokenAsync(session, user, loginProvider, name);
-        if (entry != null && user.UserTokens != null)
+        // Get the user from the database to modify its tokens
+        var dbUser = await _tenantRepository.GetRtEntityByRtIdAsync<RtUser>(session, user.RtId);
+        if (dbUser == null)
         {
-            user.UserTokens.RemoveAll(x => x.LoginProvider == entry.LoginProvider && x.Name == entry.Name);
+            await session.AbortTransactionAsync();
+            return;
+        }
+
+        var entry = dbUser.UserTokens?.FirstOrDefault(x => x.LoginProvider == loginProvider && x.Name == name);
+        if (entry != null && dbUser.UserTokens != null)
+        {
+            dbUser.UserTokens.RemoveAll(x => x.LoginProvider == entry.LoginProvider && x.Name == entry.Name);
+
+            // Persist the updated user back to the database
+            await _tenantRepository.ReplaceOneRtEntityByIdAsync(session, dbUser.RtId, dbUser);
+
+            // Also update the in-memory user object
+            user.UserTokens = dbUser.UserTokens;
         }
 
         await session.CommitTransactionAsync();
@@ -118,14 +153,11 @@ public sealed class OctoUserStore(
         session.StartTransaction();
 
         var rtUserTokenRecord = await FindTokenAsync(session, user, loginProvider, name);
-        if (rtUserTokenRecord == null)
-        {
-            throw NotExistingException.UserTokenDoesNotExist(user.RtId, loginProvider, name);
-        }
 
         await session.CommitTransactionAsync();
 
-        return rtUserTokenRecord.Value;
+        // Return null if token doesn't exist - this is the expected behavior per ASP.NET Core Identity contract
+        return rtUserTokenRecord?.Value;
     }
 
     public Task<string?> GetAuthenticatorKeyAsync(RtUser user, CancellationToken cancellationToken = default)
@@ -835,7 +867,10 @@ public sealed class OctoUserStore(
         IEnumerable<string> recoveryCodes,
         CancellationToken cancellationToken = default)
     {
-        var str = string.Join(";", recoveryCodes);
+        // Normalize codes to match how ASP.NET Core Identity normalizes them during redemption
+        // (upper case, no hyphens or spaces)
+        var normalizedCodes = recoveryCodes.Select(c => c.ToUpperInvariant().Replace("-", "").Replace(" ", ""));
+        var str = string.Join(";", normalizedCodes);
         return SetTokenAsync(user, InternalLoginProvider, RecoveryCodeTokenName, str, cancellationToken);
     }
 

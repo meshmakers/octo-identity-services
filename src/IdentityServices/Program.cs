@@ -9,6 +9,8 @@ using Meshmakers.Octo.Backend.IdentityServices.Consumers;
 using Meshmakers.Octo.Backend.IdentityServices.Resources;
 using Meshmakers.Octo.Backend.IdentityServices.Routing;
 using Meshmakers.Octo.Backend.IdentityServices.Services;
+using IQrCodeService = Meshmakers.Octo.Backend.IdentityServices.Services.IQrCodeService;
+using QrCodeService = Meshmakers.Octo.Backend.IdentityServices.Services.QrCodeService;
 using Meshmakers.Octo.Communication.Contracts;
 using Meshmakers.Octo.Communication.Contracts.DataTransferObjects;
 using Meshmakers.Octo.Runtime.Contracts.MongoDb.Configuration;
@@ -66,6 +68,7 @@ try
     builder.Services.AddOctoNotification();
     builder.Services.AddScoped<IUserEmailInteractionService, UserEmailInteractionService>();
     builder.Services.AddScoped<IUserManagementService, UserManagementService>();
+    builder.Services.AddSingleton<IQrCodeService, QrCodeService>();
     builder.Services
         .AddSingletonMultipleInterfaces<IdentityConfigurationService, IIdentityConfigurationService,
             ITenantConfigurationService>();

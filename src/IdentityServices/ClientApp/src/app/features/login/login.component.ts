@@ -93,6 +93,16 @@ export class LoginComponent implements OnInit {
         this.submitting = false;
         if (result.success && result.redirectUrl) {
           window.location.href = result.redirectUrl;
+        } else if (result.requiresTwoFactor) {
+          // Redirect to 2FA page with capability information
+          this.router.navigate(['..', '2fa-login'], {
+            relativeTo: this.route,
+            queryParams: {
+              returnUrl: this.returnUrl,
+              totp: result.canUseTotpAuthenticator ? 'true' : 'false',
+              email: result.canUseEmailCode ? 'true' : 'false'
+            }
+          });
         } else {
           this.errorMessage = result.errorMessage || 'Login failed';
         }

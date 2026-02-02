@@ -256,11 +256,36 @@ public class CustomWebApplicationFactory : WebApplicationFactory<Program>, IAsyn
             });
 
             // Configure cookie settings for testing (allow non-secure cookies over HTTP)
+            // Configure ALL Identity cookies - Application, External, TwoFactorUserId, TwoFactorRememberMe
             services.ConfigureApplicationCookie(options =>
             {
                 options.Cookie.SecurePolicy = Microsoft.AspNetCore.Http.CookieSecurePolicy.None;
                 options.Cookie.SameSite = Microsoft.AspNetCore.Http.SameSiteMode.Lax;
             });
+
+            services.ConfigureExternalCookie(options =>
+            {
+                options.Cookie.SecurePolicy = Microsoft.AspNetCore.Http.CookieSecurePolicy.None;
+                options.Cookie.SameSite = Microsoft.AspNetCore.Http.SameSiteMode.Lax;
+            });
+
+            // Configure Two-Factor User ID cookie (used between PasswordSignIn and 2FA verification)
+            services.Configure<Microsoft.AspNetCore.Authentication.Cookies.CookieAuthenticationOptions>(
+                Microsoft.AspNetCore.Identity.IdentityConstants.TwoFactorUserIdScheme,
+                options =>
+                {
+                    options.Cookie.SecurePolicy = Microsoft.AspNetCore.Http.CookieSecurePolicy.None;
+                    options.Cookie.SameSite = Microsoft.AspNetCore.Http.SameSiteMode.Lax;
+                });
+
+            // Configure Two-Factor Remember Me cookie
+            services.Configure<Microsoft.AspNetCore.Authentication.Cookies.CookieAuthenticationOptions>(
+                Microsoft.AspNetCore.Identity.IdentityConstants.TwoFactorRememberMeScheme,
+                options =>
+                {
+                    options.Cookie.SecurePolicy = Microsoft.AspNetCore.Http.CookieSecurePolicy.None;
+                    options.Cookie.SameSite = Microsoft.AspNetCore.Http.SameSiteMode.Lax;
+                });
 
             // Replace signing credential stores with test implementations
             services.RemoveAll<ISigningCredentialStore>();
