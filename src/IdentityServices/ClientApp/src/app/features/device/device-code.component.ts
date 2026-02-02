@@ -1,4 +1,4 @@
-import { Component, inject } from '@angular/core';
+import { Component, inject, OnInit } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { Router, ActivatedRoute } from '@angular/router';
@@ -57,13 +57,23 @@ import { LcarsHeaderComponent } from '../../shared/components/lcars-header/lcars
   `,
   styleUrl: './device-code.component.scss'
 })
-export class DeviceCodeComponent {
+export class DeviceCodeComponent implements OnInit {
   private router = inject(Router);
   private route = inject(ActivatedRoute);
 
   userCode = '';
   submitting = false;
   errorMessage?: string;
+
+  ngOnInit(): void {
+    // Check if userCode is provided in URL query params
+    const userCodeFromUrl = this.route.snapshot.queryParams['userCode'];
+    if (userCodeFromUrl) {
+      this.userCode = userCodeFromUrl.toUpperCase();
+      // Auto-navigate to confirmation page
+      this.onSubmit();
+    }
+  }
 
   onSubmit(): void {
     if (!this.userCode) return;

@@ -10,7 +10,8 @@
   &__user-menu {
     position: absolute;
     top: calc(-1 * var(--lcars-spacing-lg));
-    right: 0;
+    left: 50%;
+    transform: translateX(-50%);
     z-index: 10;
   }
 

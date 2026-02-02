@@ -163,6 +163,60 @@ LdapAuthenticationHandler.HandleAuthenticateAsync()
 Continue with External Provider Flow (Callback)
 ```
 
+### Device Authorization Flow (RFC 8628)
+
+The device authorization flow is designed for devices with limited input capabilities (CLI tools, smart TVs, etc.). The Octo CLI uses this flow for user authentication.
+
+```
+CLI initiates device authorization
+        │
+        ▼
+POST /connect/deviceauthorization
+        │
+        ├── Returns: device_code, user_code, verification_uri
+        └── CLI displays user_code and verification URL
+        │
+        ▼
+User opens verification URL in browser
+        │
+        ▼
+GET /{tenantId}/device?userCode={userCode}
+        │
+        ├── Angular SPA loads device-code component
+        ├── If userCode in URL params, auto-navigates to confirm
+        └── Otherwise, user enters code manually
+        │
+        ▼
+GET /api/device/context?userCode={userCode}
+        │
+        ├── Validates device code
+        ├── Returns: client info, scopes requested
+        └── User reviews permissions
+        │
+        ▼
+POST /api/device/allow (or /deny)
+        │
+        ├── Grants or denies authorization
+        └── Shows success/error message
+        │
+        ▼
+CLI polls: POST /connect/token (grant_type=device_code)
+        │
+        ├── Pending: authorization_pending error
+        ├── Denied: access_denied error
+        └── Approved: Returns access_token (no refresh_token)
+```
+
+**Important Notes**:
+
+1. **No Refresh Token**: The device flow does not request `offline_access` scope by default. The returned access token must be used directly. When the token expires, the user must re-authenticate.
+
+2. **URL Parameters**: The device authorization URL supports passing `userCode` as a query parameter (`?userCode=123456`). When present, the Angular SPA automatically navigates to the confirmation page.
+
+3. **CLI Integration**: The `octo-cli` tool's `AuthenticationService` handles both scenarios:
+   - With refresh token: Attempts token refresh before expiration
+   - Without refresh token: Uses access token directly
+
 ## Scheme Creation Patterns
 
 ### OAuth Provider Pattern

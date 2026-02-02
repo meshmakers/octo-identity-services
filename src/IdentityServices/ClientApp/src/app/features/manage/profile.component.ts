@@ -85,12 +85,13 @@ import { UserProfile } from '../../core/models/manage.models';
                 <a routerLink="logins" class="action-link">Manage</a>
               </span>
             </div>
-          </div>
 
-          <div class="profile-actions">
-            <a routerLink="../grants" class="lcars-button-outline">
-              View App Permissions
-            </a>
+            <div class="profile-item">
+              <span class="profile-item__label">App Permissions</span>
+              <span class="profile-item__value">
+                <a routerLink="../grants" class="action-link">View Granted Apps</a>
+              </span>
+            </div>
           </div>
         </ng-container>
 

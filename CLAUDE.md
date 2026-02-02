@@ -122,23 +122,48 @@ Build image using `src/IdentityServices/Dockerfile`. Requires build args:
 
 ## Documentation Guidelines
 
-**IMPORTANT:** Follow these documentation rules strictly:
+**CRITICAL REQUIREMENT:** Documentation MUST be updated after EVERY change. This is mandatory, not optional.
 
-1. **Language**: All documentation MUST be written in English. This includes:
-   - README.md files
-   - Concept documents
-   - Code comments
-   - API documentation
-   - Architecture documents
+### Language Requirement
 
-2. **Keep Documentation Current**: Always update documentation when making changes:
-   - `README.md` - Project overview, setup instructions, usage
-   - `docs/` folder - Concept documents, architecture decisions
-   - Code comments - Keep inline documentation accurate
-   - This `CLAUDE.md` file - Update when project structure changes
+All documentation MUST be written in **English**. This includes:
+- README.md files
+- Concept documents in `docs/`
+- Code comments
+- API documentation
+- Architecture documents
+- CLAUDE.md files
 
-3. **When Adding Features**:
-   - Update README.md with new functionality
-   - Document new API endpoints
-   - Add/update concept documents for architectural changes
-   - Keep build instructions current
+### Mandatory Documentation Updates
+
+After making ANY code changes, you MUST update the relevant documentation:
+
+1. **For Bug Fixes**:
+   - Document the fix in relevant architecture docs if it clarifies behavior
+   - Update troubleshooting sections if applicable
+
+2. **For New Features**:
+   - Update `docs/` with new feature documentation
+   - Add API endpoint documentation for new endpoints
+   - Update architecture documents if new patterns are introduced
+   - Update this `CLAUDE.md` if project structure changes
+
+3. **For Refactoring**:
+   - Update architecture documents to reflect new structure
+   - Update code flow diagrams if applicable
+
+4. **For Configuration Changes**:
+   - Update `docs/configuration.md` with new options
+   - Update environment variable documentation
+
+### Documentation Files
+
+| File | When to Update |
+|------|----------------|
+| `docs/README.md` | Project overview changes |
+| `docs/architecture-overview.md` | Structural changes |
+| `docs/authentication.md` | Auth flow changes |
+| `docs/persistence.md` | Data layer changes |
+| `docs/system-api.md` | API endpoint changes |
+| `docs/configuration.md` | Config option changes |
+| `CLAUDE.md` | Project structure changes |

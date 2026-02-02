@@ -46,6 +46,7 @@ import { GrantInfo } from '../../core/models/grants.models';
             <p>No applications have been granted access to your account.</p>
           </div>
 
+          <div class="grants-grid">
           <div *ngFor="let grant of grants" class="grant-card">
             <div class="grant-card__header">
               <div class="grant-card__logo" *ngIf="grant.clientLogoUrl">
@@ -91,6 +92,7 @@ import { GrantInfo } from '../../core/models/grants.models';
                 {{ revokingGrant === grant.clientId ? 'Revoking...' : 'Revoke Access' }}
               </button>
             </div>
+          </div>
           </div>
 
           <div class="lcars-actions">

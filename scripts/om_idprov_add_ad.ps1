@@ -1,0 +1,1 @@
+octo-cli -c AddAdIdentityProvider -n testdom -h testdom.mm.local -e true -p 389 

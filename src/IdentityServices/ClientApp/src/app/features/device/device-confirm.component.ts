@@ -85,7 +85,7 @@ import { DeviceAuthorizationContext, ScopeItem } from '../../core/models/consent
           </div>
         </ng-container>
 
-        <div *ngIf="!loading && !context" class="error-state">
+        <div *ngIf="!loading && !context && !success" class="error-state">
           <div class="lcars-error-message">
             {{ errorMessage || 'Invalid or expired device code.' }}
           </div>

@@ -7,7 +7,7 @@
 }
 
 .lcars-auth-container {
-  @include lcars-centered-container(560px);
+  @include lcars-centered-container(900px);
 }
 
 .description {
@@ -38,11 +38,19 @@
   }
 }
 
+.grants-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(380px, 1fr));
+  gap: var(--lcars-spacing-md);
+  margin-bottom: var(--lcars-spacing-md);
+}
+
 .grant-card {
   @include lcars-panel(false);
-  margin-bottom: var(--lcars-spacing-md);
   padding: var(--lcars-spacing-lg);
   border-left: 4px solid $octo-mint;
+  display: flex;
+  flex-direction: column;
 
   &__header {
     display: flex;
@@ -90,6 +98,7 @@
 
   &__scopes {
     margin-bottom: var(--lcars-spacing-md);
+    flex: 1;
   }
 
   &__meta {
