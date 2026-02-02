@@ -14,8 +14,6 @@ import { UserProfile } from '../../core/models/manage.models';
     <div class="lcars-auth-container">
       <app-lcars-panel>
         <app-lcars-header
-          primaryText="OCTO"
-          secondaryText="IDENTITY"
           subtitle="Your Profile">
         </app-lcars-header>
 

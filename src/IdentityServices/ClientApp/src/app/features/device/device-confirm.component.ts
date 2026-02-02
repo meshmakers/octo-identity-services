@@ -22,8 +22,6 @@ import { DeviceAuthorizationContext, ScopeItem } from '../../core/models/consent
     <div class="lcars-auth-container">
       <app-lcars-panel>
         <app-lcars-header
-          primaryText="OCTO"
-          secondaryText="IDENTITY"
           subtitle="Authorize Device">
         </app-lcars-header>
 

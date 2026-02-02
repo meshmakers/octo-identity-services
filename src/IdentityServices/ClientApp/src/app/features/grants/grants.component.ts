@@ -14,8 +14,6 @@ import { GrantInfo } from '../../core/models/grants.models';
     <div class="lcars-auth-container">
       <app-lcars-panel>
         <app-lcars-header
-          primaryText="OCTO"
-          secondaryText="IDENTITY"
           subtitle="Application Permissions">
         </app-lcars-header>
 

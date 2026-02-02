@@ -27,8 +27,9 @@ import { AuthApiService } from '../../../core/services/auth-api.service';
         <img [src]="logoUrl" [alt]="(oemService.config | async)?.appName || 'Logo'" />
       </div>
       <div class="lcars-header__title">
-        <span class="title-primary">{{ primaryText }}</span>
-        <span class="title-secondary" *ngIf="secondaryText">{{ secondaryText }}</span>
+        <span class="title-prefix">{{ primaryText }}</span>
+        <span class="title-main">{{ secondaryText }}</span>
+        <span class="title-suffix" *ngIf="suffixText">{{ suffixText }}</span>
       </div>
       <p class="lcars-header__subtitle" *ngIf="subtitle">{{ subtitle }}</p>
     </header>
@@ -37,7 +38,8 @@ import { AuthApiService } from '../../../core/services/auth-api.service';
 })
 export class LcarsHeaderComponent implements OnInit {
   @Input() primaryText = 'OCTO';
-  @Input() secondaryText = 'IDENTITY';
+  @Input() secondaryText = 'MESH';
+  @Input() suffixText = 'Identity';
   @Input() subtitle?: string;
   @Input() showLogo = true;
   @Input() showUserMenu = true;

@@ -12,8 +12,6 @@ import { LcarsHeaderComponent } from '../../shared/components/lcars-header/lcars
     <div class="lcars-auth-container">
       <app-lcars-panel variant="success">
         <app-lcars-header
-          primaryText="OCTO"
-          secondaryText="IDENTITY"
           subtitle="Signed out">
         </app-lcars-header>
 

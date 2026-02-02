@@ -15,8 +15,6 @@ import { ChangePasswordRequest } from '../../core/models/manage.models';
     <div class="lcars-auth-container">
       <app-lcars-panel [variant]="success ? 'success' : 'default'">
         <app-lcars-header
-          primaryText="OCTO"
-          secondaryText="IDENTITY"
           subtitle="Change Password">
         </app-lcars-header>
 

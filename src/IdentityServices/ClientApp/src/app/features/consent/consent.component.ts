@@ -22,8 +22,6 @@ import { ConsentContext, ScopeItem } from '../../core/models/consent.models';
     <div class="lcars-auth-container">
       <app-lcars-panel>
         <app-lcars-header
-          primaryText="OCTO"
-          secondaryText="IDENTITY"
           subtitle="Authorize Application">
         </app-lcars-header>
 

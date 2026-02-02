@@ -20,8 +20,6 @@ import { AuthApiService } from '../../core/services/auth-api.service';
     <div class="lcars-auth-container">
       <app-lcars-panel>
         <app-lcars-header
-          primaryText="OCTO"
-          secondaryText="IDENTITY"
           subtitle="Set new password"
           [showUserMenu]="false">
         </app-lcars-header>

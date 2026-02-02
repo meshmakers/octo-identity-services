@@ -14,8 +14,6 @@ import { LogoutContext } from '../../core/models/login.models';
     <div class="lcars-auth-container">
       <app-lcars-panel>
         <app-lcars-header
-          primaryText="OCTO"
-          secondaryText="IDENTITY"
           subtitle="Sign out">
         </app-lcars-header>
 

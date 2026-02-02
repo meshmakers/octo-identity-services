@@ -13,8 +13,6 @@ import { ErrorContext } from '../../core/models/error.models';
     <div class="lcars-auth-container">
       <app-lcars-panel variant="error">
         <app-lcars-header
-          primaryText="OCTO"
-          secondaryText="IDENTITY"
           subtitle="Error">
         </app-lcars-header>
 

@@ -13,9 +13,8 @@ import { LcarsHeaderComponent } from '../../shared/components/lcars-header/lcars
     <div class="lcars-auth-container">
       <app-lcars-panel>
         <app-lcars-header
-          primaryText="OCTO"
-          secondaryText="IDENTITY"
-          subtitle="Device Authorization">
+          subtitle="Device Authorization"
+          [showUserMenu]="false">
         </app-lcars-header>
 
         <div class="device-content">
@@ -33,7 +32,7 @@ import { LcarsHeaderComponent } from '../../shared/components/lcars-header/lcars
                 [(ngModel)]="userCode"
                 required
                 autocomplete="off"
-                placeholder="Enter code (e.g., ABCD-1234)"
+                placeholder="123456789"
                 class="user-code-input"
                 [disabled]="submitting" />
             </div>

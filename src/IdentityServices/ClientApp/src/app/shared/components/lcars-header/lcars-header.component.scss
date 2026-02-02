@@ -27,17 +27,32 @@
   &__title {
     display: flex;
     justify-content: center;
-    gap: var(--lcars-spacing-sm);
+    align-items: baseline;
+    gap: var(--lcars-spacing-xs);
     flex-wrap: wrap;
 
-    .title-primary {
-      @include lcars-title-primary;
+    .title-prefix {
       font-size: var(--lcars-font-size-xl);
+      font-weight: 700;
+      letter-spacing: 2px;
+      color: $octo-mint;
+      text-shadow: 0 0 15px rgba($octo-mint, 0.6);
     }
 
-    .title-secondary {
-      @include lcars-title-secondary;
+    .title-main {
       font-size: var(--lcars-font-size-xl);
+      font-weight: 700;
+      letter-spacing: 2px;
+      color: $neo-cyan;
+      text-shadow: 0 0 15px rgba($neo-cyan, 0.6);
+    }
+
+    .title-suffix {
+      font-size: var(--lcars-font-size-base);
+      font-weight: 400;
+      letter-spacing: 1px;
+      color: $ash-blue;
+      margin-left: 4px;
     }
   }
 

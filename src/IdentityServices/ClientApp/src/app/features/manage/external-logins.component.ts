@@ -21,8 +21,6 @@ import { ExternalProvider } from '../../core/models/login.models';
     <div class="lcars-auth-container">
       <app-lcars-panel>
         <app-lcars-header
-          primaryText="OCTO"
-          secondaryText="IDENTITY"
           subtitle="External Logins">
         </app-lcars-header>
 
