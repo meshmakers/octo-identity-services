@@ -275,6 +275,17 @@ public class CustomWebApplicationFactory : WebApplicationFactory<Program>, IAsyn
                 services.Remove(service);
             }
 
+            // Remove DynamicAuthSchemeServiceInitializer that tries to load identity providers
+            // before the CK model is fully cached. It's registered as IAsyncInitializationService.
+            var dynamicAuthServices = services
+                .Where(s => s.ImplementationType?.FullName?.Contains("DynamicAuthSchemeServiceInitializer") == true)
+                .ToList();
+            foreach (var service in dynamicAuthServices)
+            {
+                Console.Error.WriteLine($"[WebFactory] Removing: {service.ImplementationType?.FullName}");
+                services.Remove(service);
+            }
+
             // Replace IDistributionEventHubService with a no-op test implementation
             services.RemoveAll<IDistributionEventHubService>();
             services.AddSingleton<IDistributionEventHubService, TestDistributionEventHubService>();
