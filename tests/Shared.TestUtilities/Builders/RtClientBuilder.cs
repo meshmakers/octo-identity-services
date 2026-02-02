@@ -118,5 +118,65 @@ public class RtClientBuilder
         return this;
     }
 
+    public RtClientBuilder WithFrontChannelLogoutUri(string uri)
+    {
+        _client.FrontChannelLogoutUri = uri;
+        return this;
+    }
+
+    public RtClientBuilder WithBackChannelLogoutUri(string uri)
+    {
+        _client.BackChannelLogoutUri = uri;
+        return this;
+    }
+
+    public RtClientBuilder WithFrontChannelLogoutSessionRequired(bool required = true)
+    {
+        _client.FrontChannelLogoutSessionRequired = required;
+        return this;
+    }
+
+    public RtClientBuilder WithBackChannelLogoutSessionRequired(bool required = true)
+    {
+        _client.BackChannelLogoutSessionRequired = required;
+        return this;
+    }
+
+    public RtClientBuilder WithClientUri(string uri)
+    {
+        _client.ClientUri = uri;
+        return this;
+    }
+
+    public RtClientBuilder WithLogoUri(string uri)
+    {
+        _client.LogoUri = uri;
+        return this;
+    }
+
+    public RtClientBuilder WithAllowRememberConsent(bool allow = true)
+    {
+        _client.AllowRememberConsent = allow;
+        return this;
+    }
+
+    public RtClientBuilder WithAllowOfflineAccess(bool allow = true)
+    {
+        _client.AllowOfflineAccess = allow;
+        return this;
+    }
+
+    public RtClientBuilder WithRefreshTokenLifetime(int seconds)
+    {
+        _client.AbsoluteRefreshTokenLifetime = seconds;
+        return this;
+    }
+
+    public RtClientBuilder WithIdentityTokenLifetime(int seconds)
+    {
+        _client.IdentityTokenLifetime = seconds;
+        return this;
+    }
+
     public RtClient Build() => _client;
 }
