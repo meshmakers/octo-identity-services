@@ -40,8 +40,13 @@ export class AuthApiService {
   }
 
   initiateExternalLogin(scheme: string, returnUrl: string): void {
-    // Redirect to the external login endpoint
-    const url = `/api/auth/external-login?scheme=${encodeURIComponent(scheme)}&returnUrl=${encodeURIComponent(returnUrl)}`;
+    // Extract tenant ID from current URL path (first segment after /)
+    // The backend route requires: /{tenantId}/api/auth/external-login
+    // window.location.href bypasses Angular's HTTP interceptor, so we must include tenant ID manually
+    const pathSegments = window.location.pathname.split('/').filter(s => s);
+    const tenantId = pathSegments[0] || 'System';
+
+    const url = `/${tenantId}/api/auth/external-login?scheme=${encodeURIComponent(scheme)}&returnUrl=${encodeURIComponent(returnUrl)}`;
     window.location.href = url;
   }
 

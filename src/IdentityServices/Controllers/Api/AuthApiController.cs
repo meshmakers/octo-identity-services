@@ -1,9 +1,11 @@
+using System.Security.Claims;
 using Duende.IdentityServer;
 using Duende.IdentityServer.Events;
 using Duende.IdentityServer.Extensions;
 using Duende.IdentityServer.Models;
 using Duende.IdentityServer.Services;
 using Duende.IdentityServer.Stores;
+using Meshmakers.Octo.ConstructionKit.Contracts;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Identity;
@@ -27,6 +29,7 @@ public class AuthApiController : ControllerBase
     private readonly UserManager<RtUser> _userManager;
     private readonly IEventService _events;
     private readonly IPersistedGrantStore _persistedGrantStore;
+    private readonly ILogger<AuthApiController> _logger;
 
     public AuthApiController(
         IIdentityServerInteractionService interaction,
@@ -35,7 +38,8 @@ public class AuthApiController : ControllerBase
         SignInManager<RtUser> signInManager,
         UserManager<RtUser> userManager,
         IEventService events,
-        IPersistedGrantStore persistedGrantStore)
+        IPersistedGrantStore persistedGrantStore,
+        ILogger<AuthApiController> logger)
     {
         _interaction = interaction;
         _schemeProvider = schemeProvider;
@@ -44,6 +48,7 @@ public class AuthApiController : ControllerBase
         _userManager = userManager;
         _events = events;
         _persistedGrantStore = persistedGrantStore;
+        _logger = logger;
     }
 
     /// <summary>
@@ -241,18 +246,154 @@ public class AuthApiController : ControllerBase
     [HttpGet("external-callback")]
     public async Task<IActionResult> ExternalLoginCallback()
     {
+        // 1. Authenticate from external cookie
         var result = await HttpContext.AuthenticateAsync(IdentityServerConstants.ExternalCookieAuthenticationScheme);
         if (!result.Succeeded)
         {
-            return Redirect("/error?error=External authentication failed");
+            _logger.LogWarning("External authentication failed: {Error}", result.Failure?.Message);
+            var tenantId = RouteData.Values["tenantId"]?.ToString() ?? "System";
+            return Redirect($"/{tenantId}/error?error=External authentication failed");
         }
 
+        // 2. Extract external login info
+        var externalUser = result.Principal;
+        var claims = externalUser?.Claims.ToList() ?? [];
+
+        var provider = result.Properties?.Items["scheme"] ??
+                       result.Properties?.Items[".AuthScheme"] ??
+                       claims.FirstOrDefault(c => c.Type == "idp")?.Value;
         var returnUrl = result.Properties?.Items["returnUrl"] ?? "~/";
 
-        // Process external login result and sign in the user
-        // This would typically involve creating/finding the user and signing them in
+        // Get unique identifier from provider
+        var userIdClaim = claims.FirstOrDefault(c => c.Type == ClaimTypes.NameIdentifier) ??
+                          claims.FirstOrDefault(c => c.Type == "sub");
 
-        return Redirect(returnUrl);
+        if (userIdClaim == null || string.IsNullOrEmpty(provider))
+        {
+            _logger.LogWarning("External login missing required claims. Provider: {Provider}, UserIdClaim: {UserIdClaim}",
+                provider, userIdClaim?.Value);
+            var tenantId = RouteData.Values["tenantId"]?.ToString() ?? "System";
+            return Redirect($"/{tenantId}/error?error=Invalid external login - missing required claims");
+        }
+
+        _logger.LogInformation("Processing external login callback for provider {Provider}, user {UserId}",
+            provider, userIdClaim.Value);
+
+        // 3. Find existing user by external login
+        var user = await _userManager.FindByLoginAsync(provider, userIdClaim.Value);
+
+        if (user == null)
+        {
+            // 4a. Try to find user by email (for account linking)
+            var emailClaim = claims.FirstOrDefault(c => c.Type == ClaimTypes.Email);
+            if (emailClaim != null && !string.IsNullOrEmpty(emailClaim.Value))
+            {
+                user = await _userManager.FindByEmailAsync(emailClaim.Value);
+                if (user != null)
+                {
+                    _logger.LogInformation("Found existing user {UserName} by email {Email}, linking external login",
+                        user.UserName, emailClaim.Value);
+                }
+            }
+
+            if (user == null)
+            {
+                // 4b. Create new user from external provider
+                user = await CreateUserFromExternalProvider(claims, provider);
+                if (user == null)
+                {
+                    var tenantId = RouteData.Values["tenantId"]?.ToString() ?? "System";
+                    return Redirect($"/{tenantId}/error?error=Failed to create user account");
+                }
+
+                _logger.LogInformation("Created new user {UserName} from external provider {Provider}",
+                    user.UserName, provider);
+            }
+
+            // 5. Link external login to user
+            var addLoginResult = await _userManager.AddLoginAsync(
+                user,
+                new UserLoginInfo(provider, userIdClaim.Value, provider));
+
+            if (!addLoginResult.Succeeded)
+            {
+                _logger.LogError("Failed to add external login for user {UserName}: {Errors}",
+                    user.UserName,
+                    string.Join(", ", addLoginResult.Errors.Select(e => e.Description)));
+            }
+            else
+            {
+                _logger.LogInformation("Linked external login {Provider} to user {UserName}",
+                    provider, user.UserName);
+            }
+        }
+
+        // 6. Sign in the user
+        await _signInManager.SignInAsync(user, isPersistent: false);
+
+        await _events.RaiseAsync(new UserLoginSuccessEvent(
+            user.UserName,
+            user.RtId.ToString(),
+            user.UserName,
+            clientId: null));
+
+        // 7. Clean up external cookie
+        await HttpContext.SignOutAsync(IdentityServerConstants.ExternalCookieAuthenticationScheme);
+
+        // 8. Handle return URL
+        if (_interaction.IsValidReturnUrl(returnUrl) || Url.IsLocalUrl(returnUrl))
+        {
+            return Redirect(returnUrl);
+        }
+
+        var defaultTenantId = RouteData.Values["tenantId"]?.ToString() ?? "System";
+        return Redirect($"/{defaultTenantId}/manage");
+    }
+
+    /// <summary>
+    /// Creates a new user from external provider claims
+    /// </summary>
+    private async Task<RtUser?> CreateUserFromExternalProvider(List<Claim> claims, string provider)
+    {
+        var email = claims.FirstOrDefault(c => c.Type == ClaimTypes.Email)?.Value;
+        var name = claims.FirstOrDefault(c => c.Type == ClaimTypes.Name)?.Value;
+        var givenName = claims.FirstOrDefault(c => c.Type == ClaimTypes.GivenName)?.Value;
+        var surname = claims.FirstOrDefault(c => c.Type == ClaimTypes.Surname)?.Value;
+
+        // Generate username from email or provider + unique id
+        var userName = email ?? $"{provider}_{Guid.NewGuid():N}";
+
+        // Ensure username is unique
+        var existingUser = await _userManager.FindByNameAsync(userName);
+        if (existingUser != null)
+        {
+            userName = $"{userName}_{Guid.NewGuid().ToString("N")[..8]}";
+        }
+
+        var user = new RtUser
+        {
+            RtId = new OctoObjectId(Guid.NewGuid().ToString("N")),
+            UserName = userName,
+            NormalizedUserName = userName.ToUpperInvariant(),
+            Email = email,
+            NormalizedEmail = email?.ToUpperInvariant(),
+            EmailConfirmed = email != null, // Trust external provider's email verification
+            FirstName = givenName ?? string.Empty,
+            LastName = surname ?? string.Empty,
+            SecurityStamp = Guid.NewGuid().ToString()
+        };
+
+        var result = await _userManager.CreateAsync(user);
+
+        if (!result.Succeeded)
+        {
+            _logger.LogError("Failed to create user from external provider {Provider}: {Errors}",
+                provider,
+                string.Join(", ", result.Errors.Select(e => e.Description)));
+            return null;
+        }
+
+        return user;
     }
 
     /// <summary>
