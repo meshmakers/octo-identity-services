@@ -1,0 +1,232 @@
+@use '../../../styles/lcars-variables' as *;
+@use '../../../styles/lcars-mixins' as *;
+
+:host {
+  display: block;
+  flex: 1;
+}
+
+.lcars-auth-container {
+  @include lcars-centered-container(420px);
+
+  & {
+    background-image:
+      radial-gradient(ellipse at 20% 80%, rgba($octo-mint, 0.05) 0%, transparent 50%),
+      radial-gradient(ellipse at 80% 20%, rgba($neo-cyan, 0.05) 0%, transparent 50%);
+  }
+}
+
+// Client info section
+.lcars-client-info {
+  display: flex;
+  align-items: center;
+  gap: var(--lcars-spacing-md);
+  margin-bottom: var(--lcars-spacing-lg);
+  padding-bottom: var(--lcars-spacing-lg);
+  border-bottom: 1px solid rgba($octo-mint, 0.2);
+
+  &__logo {
+    width: 48px;
+    height: 48px;
+    border-radius: var(--lcars-radius-sm);
+    background: rgba($iron-navy, 0.5);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    overflow: hidden;
+
+    img {
+      max-width: 100%;
+      max-height: 100%;
+      object-fit: contain;
+    }
+  }
+
+  &__details {
+    flex: 1;
+  }
+
+  &__name {
+    color: #ffffff;
+    font-weight: 600;
+    font-size: var(--lcars-font-size-md);
+  }
+}
+
+// Form styling
+.lcars-form-group {
+  @include lcars-form-group;
+
+  label {
+    @include lcars-uppercase-label;
+    color: $ash-blue;
+  }
+
+  input[type="text"],
+  input[type="password"] {
+    @include lcars-input;
+    width: 100%;
+  }
+}
+
+// Checkbox styling
+.lcars-checkbox-group {
+  display: flex;
+  align-items: center;
+  gap: var(--lcars-spacing-sm);
+  margin: var(--lcars-spacing-md) 0;
+
+  .lcars-checkbox {
+    width: 18px;
+    height: 18px;
+    appearance: none;
+    border: 1px solid rgba($ash-blue, 0.5);
+    background: rgba($deep-sea, 0.8);
+    border-radius: var(--lcars-radius-sm);
+    cursor: pointer;
+    transition: all var(--lcars-transition-fast);
+    position: relative;
+
+    &:hover:not(:disabled) {
+      border-color: rgba($octo-mint, 0.5);
+    }
+
+    &:checked {
+      background: $octo-mint;
+      border-color: $octo-mint;
+
+      &::after {
+        content: '';
+        position: absolute;
+        top: 2px;
+        left: 6px;
+        width: 4px;
+        height: 8px;
+        border: solid #000;
+        border-width: 0 2px 2px 0;
+        transform: rotate(45deg);
+      }
+    }
+
+    &:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
+  }
+
+  label {
+    text-transform: none;
+    font-size: var(--lcars-font-size-base);
+    color: #ffffff;
+    cursor: pointer;
+  }
+}
+
+// Divider
+.lcars-divider {
+  display: flex;
+  align-items: center;
+  gap: var(--lcars-spacing-md);
+  margin: var(--lcars-spacing-lg) 0;
+  color: $ash-blue;
+  font-size: var(--lcars-font-size-sm);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+
+  &::before,
+  &::after {
+    content: '';
+    flex: 1;
+    height: 1px;
+    background: linear-gradient(90deg, transparent, rgba($ash-blue, 0.3), transparent);
+  }
+}
+
+// External providers grid
+.lcars-providers {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--lcars-spacing-sm);
+  justify-content: center;
+}
+
+// Actions
+.lcars-actions {
+  margin-top: var(--lcars-spacing-lg);
+
+  &--stacked {
+    display: flex;
+    flex-direction: column;
+    gap: var(--lcars-spacing-md);
+  }
+}
+
+.lcars-button-primary {
+  @include lcars-button-primary;
+  width: 100%;
+  padding: var(--lcars-spacing-md) var(--lcars-spacing-lg);
+  font-size: var(--lcars-font-size-base);
+}
+
+// Error message
+.lcars-error-message {
+  background: rgba($bubblegum, 0.1);
+  border: 1px solid rgba($bubblegum, 0.3);
+  border-radius: var(--lcars-radius-sm);
+  color: $bubblegum;
+  padding: var(--lcars-spacing-md);
+  margin-bottom: var(--lcars-spacing-md);
+  font-size: var(--lcars-font-size-sm);
+}
+
+// Loading state
+.lcars-loading {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--lcars-spacing-md);
+  padding: var(--lcars-spacing-xl);
+
+  &__spinner {
+    width: 40px;
+    height: 40px;
+    border: 3px solid rgba($octo-mint, 0.2);
+    border-top-color: $octo-mint;
+    border-radius: 50%;
+    animation: spin 1s linear infinite;
+  }
+
+  &__text {
+    color: $ash-blue;
+    font-size: var(--lcars-font-size-sm);
+    text-transform: uppercase;
+    letter-spacing: 1px;
+  }
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+// Footer links
+.lcars-footer-links {
+  display: flex;
+  justify-content: center;
+  gap: var(--lcars-spacing-lg);
+  margin-top: var(--lcars-spacing-lg);
+  padding-top: var(--lcars-spacing-md);
+
+  a {
+    color: $ash-blue;
+    font-size: var(--lcars-font-size-sm);
+    text-decoration: none;
+    transition: color var(--lcars-transition-fast);
+
+    &:hover {
+      color: $octo-mint;
+    }
+  }
+}

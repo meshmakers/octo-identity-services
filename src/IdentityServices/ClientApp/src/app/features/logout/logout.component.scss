@@ -1,0 +1,75 @@
+@use '../../../styles/lcars-variables' as *;
+@use '../../../styles/lcars-mixins' as *;
+
+:host {
+  display: block;
+  flex: 1;
+}
+
+.lcars-auth-container {
+  @include lcars-centered-container(420px);
+}
+
+.logout-content {
+  text-align: center;
+}
+
+.logout-message {
+  color: #ffffff;
+  font-size: var(--lcars-font-size-md);
+  margin-bottom: var(--lcars-spacing-lg);
+}
+
+.logout-client {
+  color: $ash-blue;
+  font-size: var(--lcars-font-size-base);
+  margin-bottom: var(--lcars-spacing-xl);
+
+  strong {
+    color: $octo-mint;
+  }
+}
+
+.lcars-actions {
+  display: flex;
+  flex-direction: column;
+  gap: var(--lcars-spacing-md);
+}
+
+.lcars-button-primary {
+  @include lcars-button-primary;
+  width: 100%;
+  padding: var(--lcars-spacing-md);
+}
+
+.lcars-button-outline {
+  @include lcars-button-outline;
+  width: 100%;
+  padding: var(--lcars-spacing-md);
+}
+
+.lcars-loading {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--lcars-spacing-md);
+  padding: var(--lcars-spacing-xl);
+
+  &__spinner {
+    width: 40px;
+    height: 40px;
+    border: 3px solid rgba($octo-mint, 0.2);
+    border-top-color: $octo-mint;
+    border-radius: 50%;
+    animation: spin 1s linear infinite;
+  }
+
+  &__text {
+    @include lcars-uppercase-label;
+    color: $ash-blue;
+  }
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}

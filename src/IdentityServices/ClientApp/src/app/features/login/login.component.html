@@ -1,0 +1,104 @@
+<div class="lcars-auth-container">
+  <app-lcars-panel>
+    <app-lcars-header
+      primaryText="OCTO"
+      secondaryText="IDENTITY"
+      subtitle="Sign in to continue"
+      [showUserMenu]="false">
+    </app-lcars-header>
+
+    <!-- Loading State -->
+    <div *ngIf="loading" class="lcars-loading">
+      <div class="lcars-loading__spinner"></div>
+      <span class="lcars-loading__text">Loading</span>
+    </div>
+
+    <!-- Login Form -->
+    <ng-container *ngIf="!loading">
+      <!-- Client Info -->
+      <div *ngIf="context?.clientName" class="lcars-client-info">
+        <div class="lcars-client-info__logo" *ngIf="context?.clientLogoUrl">
+          <img [src]="context!.clientLogoUrl" [alt]="context!.clientName" />
+        </div>
+        <div class="lcars-client-info__details">
+          <span class="lcars-client-info__name">{{ context!.clientName }}</span>
+        </div>
+      </div>
+
+      <!-- Error Message -->
+      <div *ngIf="errorMessage" class="lcars-error-message">
+        {{ errorMessage }}
+      </div>
+
+      <!-- Local Login Form -->
+      <form *ngIf="showLocalLogin" (ngSubmit)="onSubmit()" #loginForm="ngForm">
+        <div class="lcars-form-group">
+          <label for="username">Username</label>
+          <input
+            type="text"
+            id="username"
+            name="username"
+            [(ngModel)]="username"
+            required
+            autocomplete="username"
+            [disabled]="submitting"
+            placeholder="Enter your username" />
+        </div>
+
+        <div class="lcars-form-group">
+          <label for="password">Password</label>
+          <input
+            type="password"
+            id="password"
+            name="password"
+            [(ngModel)]="password"
+            required
+            autocomplete="current-password"
+            [disabled]="submitting"
+            placeholder="Enter your password" />
+        </div>
+
+        <div class="lcars-checkbox-group" *ngIf="context?.allowRememberLogin">
+          <input
+            type="checkbox"
+            id="rememberLogin"
+            name="rememberLogin"
+            [(ngModel)]="rememberLogin"
+            class="lcars-checkbox"
+            [disabled]="submitting" />
+          <label for="rememberLogin">Remember me</label>
+        </div>
+
+        <div class="lcars-actions lcars-actions--stacked">
+          <button
+            type="submit"
+            class="lcars-button-primary"
+            [disabled]="submitting || !username || !password">
+            <span *ngIf="!submitting">Sign In</span>
+            <span *ngIf="submitting">Signing in...</span>
+          </button>
+        </div>
+      </form>
+
+      <!-- Divider -->
+      <div *ngIf="showLocalLogin && hasExternalProviders" class="lcars-divider">
+        or continue with
+      </div>
+
+      <!-- External Providers -->
+      <div *ngIf="hasExternalProviders" class="lcars-providers">
+        <app-external-provider-button
+          *ngFor="let provider of context?.externalProviders"
+          [provider]="provider"
+          [disabled]="submitting"
+          (login)="onExternalLogin($event)">
+        </app-external-provider-button>
+      </div>
+
+      <!-- Footer Links -->
+      <div class="lcars-footer-links">
+        <a [routerLink]="['/', tenantId, 'forgot-password']">Forgot password?</a>
+      </div>
+    </ng-container>
+  </app-lcars-panel>
+</div>

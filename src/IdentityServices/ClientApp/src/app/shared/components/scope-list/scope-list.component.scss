@@ -1,0 +1,113 @@
+@use '../../../../styles/lcars-variables' as *;
+@use '../../../../styles/lcars-mixins' as *;
+
+.lcars-scope-list {
+  &__header {
+    @include lcars-uppercase-label;
+    color: var(--octo-mint);
+    margin-bottom: var(--lcars-spacing-md);
+    padding-bottom: var(--lcars-spacing-sm);
+    border-bottom: 1px solid rgba($octo-mint, 0.2);
+  }
+
+  &__items {
+    display: flex;
+    flex-direction: column;
+    gap: var(--lcars-spacing-xs);
+  }
+}
+
+.lcars-scope-item {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--lcars-spacing-md);
+  padding: var(--lcars-spacing-sm);
+  border-radius: var(--lcars-radius-sm);
+  transition: background var(--lcars-transition-fast);
+
+  &:hover {
+    background: rgba($octo-mint, 0.05);
+  }
+
+  &--emphasized {
+    background: rgba($octo-mint, 0.08);
+    border-left: 3px solid var(--octo-mint);
+    padding-left: calc(var(--lcars-spacing-sm) - 3px);
+  }
+
+  .lcars-checkbox {
+    flex-shrink: 0;
+    width: 18px;
+    height: 18px;
+    margin-top: 2px;
+    appearance: none;
+    border: 1px solid rgba($ash-blue, 0.5);
+    background: rgba($deep-sea, 0.8);
+    border-radius: var(--lcars-radius-sm);
+    cursor: pointer;
+    transition: all var(--lcars-transition-fast);
+    position: relative;
+
+    &:hover:not(:disabled) {
+      border-color: rgba($octo-mint, 0.5);
+    }
+
+    &:checked {
+      background: var(--octo-mint);
+      border-color: var(--octo-mint);
+
+      &::after {
+        content: '';
+        position: absolute;
+        top: 2px;
+        left: 6px;
+        width: 4px;
+        height: 8px;
+        border: solid #000;
+        border-width: 0 2px 2px 0;
+        transform: rotate(45deg);
+      }
+    }
+
+    &:disabled {
+      opacity: 0.6;
+      cursor: not-allowed;
+    }
+
+    &:focus-visible {
+      outline: 2px solid var(--octo-mint);
+      outline-offset: 2px;
+    }
+  }
+
+  &__content {
+    flex: 1;
+    cursor: pointer;
+    display: flex;
+    flex-direction: column;
+    gap: var(--lcars-spacing-xs);
+  }
+
+  &__name {
+    color: #ffffff;
+    font-weight: 500;
+    font-size: var(--lcars-font-size-base);
+    display: flex;
+    align-items: center;
+    gap: var(--lcars-spacing-sm);
+  }
+
+  &__description {
+    color: var(--ash-blue);
+    font-size: var(--lcars-font-size-sm);
+  }
+
+  &__required {
+    @include lcars-uppercase-label;
+    color: var(--toffee);
+    font-size: var(--lcars-font-size-xs);
+    padding: 2px 6px;
+    background: rgba($toffee, 0.15);
+    border-radius: var(--lcars-radius-sm);
+  }
+}

@@ -1,0 +1,116 @@
+import { Component, OnInit, inject } from '@angular/core';
+import { CommonModule } from '@angular/common';
+import { FormsModule } from '@angular/forms';
+import { ActivatedRoute, Router, RouterLink } from '@angular/router';
+import { LcarsPanelComponent } from '../../shared/components/lcars-panel/lcars-panel.component';
+import { LcarsHeaderComponent } from '../../shared/components/lcars-header/lcars-header.component';
+import { ExternalProviderButtonComponent } from '../../shared/components/external-provider-button/external-provider-button.component';
+import { AuthApiService } from '../../core/services/auth-api.service';
+import { LoginContext, LoginRequest, ExternalProvider } from '../../core/models/login.models';
+
+@Component({
+  selector: 'app-login',
+  standalone: true,
+  imports: [
+    CommonModule,
+    FormsModule,
+    RouterLink,
+    LcarsPanelComponent,
+    LcarsHeaderComponent,
+    ExternalProviderButtonComponent
+  ],
+  templateUrl: './login.component.html',
+  styleUrl: './login.component.scss'
+})
+export class LoginComponent implements OnInit {
+  private route = inject(ActivatedRoute);
+  private router = inject(Router);
+  private authApi = inject(AuthApiService);
+
+  // State
+  loading = true;
+  submitting = false;
+  errorMessage?: string;
+  context?: LoginContext;
+
+  // Form data
+  username = '';
+  password = '';
+  rememberLogin = false;
+
+  // Computed
+  returnUrl = '';
+  tenantId = 'System';
+
+  ngOnInit(): void {
+    this.tenantId = this.route.snapshot.params['tenantId'] || 'System';
+    this.returnUrl = this.route.snapshot.queryParams['ReturnUrl'] || '';
+
+    this.loadContext();
+  }
+
+  private loadContext(): void {
+    this.loading = true;
+    this.authApi.getLoginContext(this.returnUrl).subscribe({
+      next: (context) => {
+        this.context = context;
+        this.loading = false;
+      },
+      error: (error) => {
+        console.error('Failed to load login context', error);
+        this.loading = false;
+        // Use default context on error
+        this.context = {
+          returnUrl: this.returnUrl,
+          externalProviders: [],
+          allowRememberLogin: true,
+          enableLocalLogin: true
+        };
+      }
+    });
+  }
+
+  onSubmit(): void {
+    if (!this.username || !this.password) {
+      this.errorMessage = 'Please enter username and password';
+      return;
+    }
+
+    this.submitting = true;
+    this.errorMessage = undefined;
+
+    const request: LoginRequest = {
+      username: this.username,
+      password: this.password,
+      rememberLogin: this.rememberLogin,
+      returnUrl: this.returnUrl
+    };
+
+    this.authApi.login(request).subscribe({
+      next: (result) => {
+        this.submitting = false;
+        if (result.success && result.redirectUrl) {
+          window.location.href = result.redirectUrl;
+        } else {
+          this.errorMessage = result.errorMessage || 'Login failed';
+        }
+      },
+      error: (error) => {
+        this.submitting = false;
+        this.errorMessage = error.error?.message || 'An error occurred during login';
+      }
+    });
+  }
+
+  onExternalLogin(provider: ExternalProvider): void {
+    this.authApi.initiateExternalLogin(provider.scheme, this.returnUrl);
+  }
+
+  get hasExternalProviders(): boolean {
+    return (this.context?.externalProviders?.length ?? 0) > 0;
+  }
+
+  get showLocalLogin(): boolean {
+    return this.context?.enableLocalLogin ?? true;
+  }
+}

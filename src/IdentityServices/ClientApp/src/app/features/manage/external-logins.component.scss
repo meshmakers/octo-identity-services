@@ -1,0 +1,138 @@
+@use '../../../styles/lcars-variables' as *;
+@use '../../../styles/lcars-mixins' as *;
+
+:host {
+  display: block;
+  flex: 1;
+}
+
+.lcars-auth-container {
+  @include lcars-centered-container(480px);
+}
+
+.logins-section {
+  margin-bottom: var(--lcars-spacing-xl);
+}
+
+.section-title {
+  @include lcars-uppercase-label;
+  color: $octo-mint;
+  font-size: var(--lcars-font-size-sm);
+  margin-bottom: var(--lcars-spacing-md);
+  padding-bottom: var(--lcars-spacing-sm);
+  border-bottom: 2px solid rgba($octo-mint, 0.3);
+}
+
+.empty-state {
+  color: $ash-blue;
+  text-align: center;
+  padding: var(--lcars-spacing-lg);
+  font-style: italic;
+}
+
+.login-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: var(--lcars-spacing-md);
+  background: rgba($iron-navy, 0.3);
+  border-radius: var(--lcars-radius-sm);
+  margin-bottom: var(--lcars-spacing-sm);
+  border-left: 3px solid $octo-mint;
+
+  &__info {
+    display: flex;
+    flex-direction: column;
+    gap: var(--lcars-spacing-xs);
+  }
+
+  &__provider {
+    color: #ffffff;
+    font-weight: 500;
+  }
+
+  &__key {
+    color: $ash-blue;
+    font-size: var(--lcars-font-size-sm);
+    font-family: var(--lcars-font-mono);
+  }
+}
+
+.lcars-button-flat-error {
+  @include lcars-button-base;
+  background: transparent;
+  border: none;
+  color: $bubblegum;
+  padding: var(--lcars-spacing-xs) var(--lcars-spacing-sm);
+
+  &:hover:not(:disabled) {
+    background: rgba($bubblegum, 0.1);
+  }
+
+  &:disabled {
+    opacity: 0.5;
+  }
+}
+
+.providers-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--lcars-spacing-sm);
+  justify-content: center;
+}
+
+.lcars-actions {
+  display: flex;
+  justify-content: center;
+  margin-top: var(--lcars-spacing-lg);
+}
+
+.lcars-button-outline {
+  @include lcars-button-outline;
+  padding: var(--lcars-spacing-sm) var(--lcars-spacing-xl);
+}
+
+.lcars-success-message {
+  background: rgba(#4caf50, 0.1);
+  border: 1px solid rgba(#4caf50, 0.3);
+  border-radius: var(--lcars-radius-sm);
+  color: #4caf50;
+  padding: var(--lcars-spacing-md);
+  margin-bottom: var(--lcars-spacing-md);
+  text-align: center;
+}
+
+.lcars-error-message {
+  background: rgba($bubblegum, 0.1);
+  border: 1px solid rgba($bubblegum, 0.3);
+  border-radius: var(--lcars-radius-sm);
+  color: $bubblegum;
+  padding: var(--lcars-spacing-md);
+  margin-bottom: var(--lcars-spacing-md);
+}
+
+.lcars-loading {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--lcars-spacing-md);
+  padding: var(--lcars-spacing-xl);
+
+  &__spinner {
+    width: 40px;
+    height: 40px;
+    border: 3px solid rgba($octo-mint, 0.2);
+    border-top-color: $octo-mint;
+    border-radius: 50%;
+    animation: spin 1s linear infinite;
+  }
+
+  &__text {
+    @include lcars-uppercase-label;
+    color: $ash-blue;
+  }
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}

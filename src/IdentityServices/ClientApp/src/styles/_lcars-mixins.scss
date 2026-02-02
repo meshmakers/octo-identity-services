@@ -1,0 +1,306 @@
+// =============================================================================
+// LCARS DESIGN SYSTEM - Mixins
+// Reusable styling patterns for LCARS components
+// =============================================================================
+
+@use 'lcars-variables' as *;
+
+// === Panel Mixins ===
+
+@mixin lcars-panel($asymmetric: true) {
+  background: var(--lcars-panel-bg-solid);
+  border: var(--lcars-panel-border);
+  box-shadow: var(--lcars-shadow-panel);
+
+  @if $asymmetric {
+    border-radius: var(--lcars-radius-asymmetric);
+  } @else {
+    border-radius: var(--lcars-radius-md);
+  }
+}
+
+@mixin lcars-panel-elevated {
+  @include lcars-panel;
+  background: linear-gradient(180deg, var(--surface-elevated), rgba(7, 23, 43, 0.95));
+}
+
+// === Glow Effects ===
+
+@mixin lcars-glow($color: $octo-mint, $intensity: 0.4) {
+  box-shadow: 0 0 10px rgba($color, $intensity);
+}
+
+@mixin lcars-glow-strong($color: $octo-mint) {
+  box-shadow: 0 0 15px rgba($color, 0.5);
+}
+
+@mixin lcars-text-glow($color: $octo-mint, $intensity: 0.5) {
+  text-shadow: 0 0 10px rgba($color, $intensity);
+}
+
+// === Header & Footer Bars ===
+
+@mixin lcars-header-bar($height: 8px) {
+  height: $height;
+  background: linear-gradient(90deg, var(--octo-mint), var(--neo-cyan));
+  border-radius: var(--lcars-radius-sm) var(--lcars-radius-sm) 0 0;
+}
+
+@mixin lcars-footer-bars {
+  display: flex;
+  gap: 4px;
+  height: 6px;
+  padding: 0 var(--lcars-spacing-md);
+
+  .bar-mint {
+    flex: 3;
+    background: linear-gradient(90deg, var(--octo-mint), var(--neo-cyan));
+    border-radius: var(--lcars-radius-sm);
+  }
+
+  .bar-violet {
+    flex: 1;
+    background: var(--royal-violet);
+    border-radius: var(--lcars-radius-sm);
+  }
+
+  .bar-toffee {
+    flex: 1;
+    background: var(--toffee);
+    border-radius: var(--lcars-radius-sm);
+  }
+}
+
+// === Typography ===
+
+@mixin lcars-uppercase-label {
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  font-size: var(--lcars-font-size-sm);
+  font-weight: 600;
+  font-family: var(--lcars-font-primary);
+}
+
+@mixin lcars-title {
+  font-family: var(--lcars-font-primary);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 2px;
+}
+
+@mixin lcars-title-primary {
+  @include lcars-title;
+  color: var(--octo-mint);
+  @include lcars-text-glow($octo-mint);
+}
+
+@mixin lcars-title-secondary {
+  @include lcars-title;
+  color: var(--neo-cyan);
+  @include lcars-text-glow($neo-cyan);
+}
+
+// === Buttons ===
+
+@mixin lcars-button-base {
+  font-family: var(--lcars-font-primary);
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  border-radius: var(--lcars-radius-sm);
+  transition: all var(--lcars-transition-fast);
+  cursor: pointer;
+  outline: none;
+
+  &:focus-visible {
+    outline: 2px solid var(--octo-mint);
+    outline-offset: 2px;
+  }
+}
+
+@mixin lcars-button-primary {
+  @include lcars-button-base;
+  background: linear-gradient(180deg, rgba($octo-mint, 0.3), rgba($octo-mint, 0.15));
+  border: 1px solid rgba($octo-mint, 0.5);
+  color: #ffffff;
+
+  &:hover:not(:disabled) {
+    background: linear-gradient(180deg, rgba($octo-mint, 0.4), rgba($octo-mint, 0.25));
+    border-color: $octo-mint;
+    box-shadow: var(--lcars-glow-primary);
+  }
+
+  &:active:not(:disabled) {
+    background: linear-gradient(180deg, rgba($octo-mint, 0.5), rgba($octo-mint, 0.35));
+  }
+
+  &:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+    background: rgba($ash-blue, 0.2);
+    border-color: rgba($ash-blue, 0.3);
+  }
+}
+
+@mixin lcars-button-outline {
+  @include lcars-button-base;
+  background: transparent;
+  border: 1px solid rgba($ash-blue, 0.5);
+  color: $ash-blue;
+
+  &:hover:not(:disabled) {
+    color: $octo-mint;
+    border-color: rgba($octo-mint, 0.5);
+    background: rgba($octo-mint, 0.1);
+    box-shadow: var(--lcars-glow-primary);
+  }
+
+  &:active:not(:disabled) {
+    background: rgba($octo-mint, 0.15);
+  }
+
+  &:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+}
+
+@mixin lcars-button-error {
+  @include lcars-button-base;
+  background: linear-gradient(180deg, rgba($bubblegum, 0.2), rgba($bubblegum, 0.1));
+  border: 1px solid rgba($bubblegum, 0.4);
+  color: $bubblegum;
+
+  &:hover:not(:disabled) {
+    background: linear-gradient(180deg, rgba($bubblegum, 0.3), rgba($bubblegum, 0.2));
+    border-color: rgba($bubblegum, 0.6);
+    box-shadow: var(--lcars-glow-error);
+  }
+
+  &:active:not(:disabled) {
+    background: linear-gradient(180deg, rgba($bubblegum, 0.4), rgba($bubblegum, 0.25));
+  }
+}
+
+// === Input Fields ===
+
+@mixin lcars-input {
+  background: rgba($deep-sea, 0.8);
+  border: 1px solid rgba($ash-blue, 0.3);
+  border-radius: var(--lcars-radius-sm);
+  color: #ffffff;
+  font-family: var(--lcars-font-primary);
+  padding: var(--lcars-spacing-sm) var(--lcars-spacing-md);
+  transition: all var(--lcars-transition-fast);
+
+  &::placeholder {
+    color: rgba($ash-blue, 0.7);
+  }
+
+  &:hover:not(:disabled):not(:focus) {
+    border-color: rgba($octo-mint, 0.5);
+  }
+
+  &:focus {
+    border-color: $octo-mint;
+    box-shadow: var(--lcars-glow-primary);
+    outline: none;
+  }
+
+  &:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+
+  &.invalid,
+  &.ng-invalid.ng-touched {
+    border-color: $bubblegum;
+
+    &:focus {
+      box-shadow: var(--lcars-glow-error);
+    }
+  }
+}
+
+// === Animations ===
+
+@mixin lcars-pulse-animation($name: pulse-glow) {
+  @keyframes #{$name} {
+    0%, 100% {
+      opacity: 1;
+      transform: scale(1);
+    }
+    50% {
+      opacity: 0.7;
+      transform: scale(1.05);
+    }
+  }
+}
+
+@mixin lcars-fade-in($duration: 0.3s) {
+  animation: lcars-fade-in $duration ease-out;
+
+  @keyframes lcars-fade-in {
+    from {
+      opacity: 0;
+      transform: translateY(-10px);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+}
+
+// === Utility Mixins ===
+
+@mixin lcars-scrollbar {
+  &::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+  }
+
+  &::-webkit-scrollbar-track {
+    background: rgba($deep-sea, 0.5);
+    border-radius: 4px;
+  }
+
+  &::-webkit-scrollbar-thumb {
+    background: rgba($octo-mint, 0.3);
+    border-radius: 4px;
+
+    &:hover {
+      background: rgba($octo-mint, 0.5);
+    }
+  }
+}
+
+@mixin lcars-focus-ring {
+  &:focus-visible {
+    outline: 2px solid var(--octo-mint);
+    outline-offset: 2px;
+  }
+}
+
+// === Layout Mixins ===
+
+@mixin lcars-centered-container($max-width: 480px) {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  min-height: 100vh;
+  padding: var(--lcars-spacing-lg);
+
+  > * {
+    width: 100%;
+    max-width: $max-width;
+  }
+}
+
+@mixin lcars-form-group {
+  display: flex;
+  flex-direction: column;
+  gap: var(--lcars-spacing-xs);
+  margin-bottom: var(--lcars-spacing-md);
+}

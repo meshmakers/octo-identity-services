@@ -206,7 +206,8 @@ try
 
     builder.Services.AddAntiforgery(o => o.SuppressXFrameOptionsHeader = true);
 
-    builder.Services.AddMvc();
+    // API Controllers only (no MVC views)
+    builder.Services.AddControllers();
 
     builder.Services.AddAutoMapper(_=>
     {
@@ -228,7 +229,6 @@ try
     }
     else
     {
-        app.UseExceptionHandler("/Home/Error");
         // The default HSTS value is 30 days. You may want to change this for production scenarios, see https://aka.ms/aspnetcore-hsts.
         app.UseHsts();
     }
@@ -270,8 +270,32 @@ try
 
     app.UseAuthorization();
 
-    app.MapDefaultControllerRoute();
-    app.MapControllerRoute("default", "{tenantId:tenantId=System}/{controller=Home}/{action=Index}/{id?}");
+    // Map API controllers - MUST come before UseEndpoints middleware runs
+    app.MapControllers();
+
+    // SPA configuration for Angular frontend
+    // UseWhen ensures SPA proxy only handles non-API requests
+    if (app.Environment.IsDevelopment())
+    {
+        app.UseWhen(
+            context => !context.Request.Path.StartsWithSegments("/api") &&
+                       !context.Request.Path.StartsWithSegments("/connect") &&
+                       !context.Request.Path.StartsWithSegments("/.well-known") &&
+                       !context.Request.Path.Value!.Contains("/api/"),
+            appBranch =>
+            {
+                appBranch.UseSpa(spa =>
+                {
+                    spa.Options.SourcePath = "ClientApp";
+                    spa.UseProxyToSpaDevelopmentServer("http://localhost:44400");
+                });
+            });
+    }
+    else
+    {
+        // In production/staging, serve pre-built Angular files from wwwroot
+        app.MapFallbackToFile("index.html");
+    }
     
     // Initialisierung abfangen
     app.Lifetime.ApplicationStarted.Register(() =>

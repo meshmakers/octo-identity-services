@@ -1,0 +1,73 @@
+export interface ExternalProvider {
+  scheme: string;
+  displayName: string;
+}
+
+export interface LoginContext {
+  returnUrl: string;
+  clientName?: string;
+  clientLogoUrl?: string;
+  externalProviders: ExternalProvider[];
+  allowRememberLogin: boolean;
+  enableLocalLogin: boolean;
+}
+
+export interface LoginRequest {
+  username: string;
+  password: string;
+  rememberLogin: boolean;
+  returnUrl: string;
+}
+
+export interface LoginResult {
+  success: boolean;
+  redirectUrl?: string;
+  errorMessage?: string;
+  isLockedOut?: boolean;
+  requiresTwoFactor?: boolean;
+}
+
+export interface LogoutContext {
+  logoutId: string;
+  showLogoutPrompt: boolean;
+  postLogoutRedirectUri?: string;
+  clientName?: string;
+}
+
+export interface LogoutRequest {
+  logoutId: string;
+}
+
+export interface LogoutResult {
+  success: boolean;
+  postLogoutRedirectUri?: string;
+  clientName?: string;
+  signOutIframeUrl?: string;
+  automaticRedirectAfterSignOut: boolean;
+}
+
+export interface ForgotPasswordRequest {
+  email: string;
+}
+
+export interface ForgotPasswordResult {
+  success: boolean;
+  errorMessage?: string;
+}
+
+export interface ResetPasswordRequest {
+  email: string;
+  token: string;
+  newPassword: string;
+  confirmPassword: string;
+}
+
+export interface ResetPasswordResult {
+  success: boolean;
+  errorMessage?: string;
+  errors?: string[];
+}
+
+export interface ValidateResetTokenResult {
+  isValid: boolean;
+}

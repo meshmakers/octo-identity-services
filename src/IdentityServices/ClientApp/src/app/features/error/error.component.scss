@@ -1,0 +1,80 @@
+@use '../../../styles/lcars-variables' as *;
+@use '../../../styles/lcars-mixins' as *;
+
+:host {
+  display: block;
+  flex: 1;
+}
+
+.lcars-auth-container {
+  @include lcars-centered-container(480px);
+}
+
+.error-content {
+  text-align: center;
+}
+
+.error-icon {
+  width: 64px;
+  height: 64px;
+  margin: 0 auto var(--lcars-spacing-lg);
+  color: $bubblegum;
+
+  svg {
+    width: 100%;
+    height: 100%;
+    filter: drop-shadow(0 0 10px rgba($bubblegum, 0.5));
+  }
+}
+
+.error-title {
+  color: #ffffff;
+  font-size: var(--lcars-font-size-lg);
+  margin-bottom: var(--lcars-spacing-md);
+}
+
+.error-message {
+  color: $bubblegum;
+  font-size: var(--lcars-font-size-base);
+  margin-bottom: var(--lcars-spacing-sm);
+}
+
+.error-description {
+  color: $ash-blue;
+  font-size: var(--lcars-font-size-sm);
+  margin-bottom: var(--lcars-spacing-lg);
+}
+
+.error-details {
+  display: flex;
+  flex-direction: column;
+  gap: var(--lcars-spacing-xs);
+  margin-bottom: var(--lcars-spacing-xl);
+  padding: var(--lcars-spacing-md);
+  background: rgba($iron-navy, 0.5);
+  border-radius: var(--lcars-radius-sm);
+
+  &__label {
+    @include lcars-uppercase-label;
+    color: $ash-blue;
+  }
+
+  &__value {
+    font-family: var(--lcars-font-mono);
+    font-size: var(--lcars-font-size-sm);
+    color: $toffee;
+    word-break: break-all;
+  }
+}
+
+.lcars-actions {
+  display: flex;
+  justify-content: center;
+}
+
+.lcars-button-outline {
+  @include lcars-button-outline;
+  display: inline-block;
+  padding: var(--lcars-spacing-sm) var(--lcars-spacing-xl);
+  text-decoration: none;
+}
