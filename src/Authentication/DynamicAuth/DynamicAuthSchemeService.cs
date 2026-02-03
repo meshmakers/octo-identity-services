@@ -90,7 +90,7 @@ internal class DynamicAuthSchemeService : IDynamicAuthSchemeService
                         .Create(facebookIdentityProvider);
                     break;
                 default:
-                    throw new NotImplementedException(
+                    throw new InvalidOperationException(
                         $"Identity provider '{identityProvider.CkTypeId}' is not supported.");
             }
 

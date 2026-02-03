@@ -1,6 +1,5 @@
 using System.Text.Encodings.Web;
 using Meshmakers.Octo.Backend.Authentication.Connection;
-using Meshmakers.Octo.Backend.Authentication.Controllers;
 using Meshmakers.Octo.Backend.Authentication.Options;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.WebUtilities;
@@ -45,8 +44,14 @@ public class OpenLdapAuthenticationHandler : AuthenticationHandler<LdapOptions>
 
     protected override Task HandleChallengeAsync(AuthenticationProperties properties)
     {
-        var url = QueryHelpers.AddQueryString($"/{AuthenticationConstants.ExternalLoginRoute}/{OpenLdapController.RouteName}",
-            properties.Items);
+        // Redirect to SPA LDAP login page
+        var queryParams = new Dictionary<string, string?>
+        {
+            ["scheme"] = Options.Name,
+            ["name"] = Options.Name,
+            ["returnUrl"] = properties.RedirectUri
+        };
+        var url = QueryHelpers.AddQueryString("/System/ldap-login", queryParams);
         Context.Response.Redirect(url);
         return Task.CompletedTask;
     }

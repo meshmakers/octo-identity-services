@@ -57,6 +57,10 @@ public class QrCodeService : IQrCodeService
     /// <inheritdoc />
     public string GenerateQrCodeWithLogo(string content)
     {
+        // TODO: Implement logo overlay using System.Drawing.Common (Phase 6 of 2FA plan)
+        // The _logoImage field is loaded but not yet used. Need to overlay it on the QR code center.
+        // See: https://dev.azure.com/meshmakers/OctoMesh/_workitems/edit/3332
+
         // Use higher error correction level (H = 30%) to allow for logo overlay
         using var qrGenerator = new QRCodeGenerator();
         using var qrCodeData = qrGenerator.CreateQrCode(content, QRCodeGenerator.ECCLevel.H);
