@@ -21,6 +21,11 @@ export const routes: Routes = [
           .then(m => m.TwoFactorLoginComponent)
       },
       {
+        path: 'ldap-login',
+        loadComponent: () => import('./features/login/ldap-login.component')
+          .then(m => m.LdapLoginComponent)
+      },
+      {
         path: 'forgot-password',
         loadComponent: () => import('./features/login/forgot-password.component')
           .then(m => m.ForgotPasswordComponent)

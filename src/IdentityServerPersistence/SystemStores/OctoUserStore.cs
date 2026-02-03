@@ -449,12 +449,9 @@ public sealed class OctoUserStore(
 
         var result = await _tenantRepository.GetRtEntitiesByTypeAsync<RtUser>(session, queryOptions);
         await session.CommitTransactionAsync();
-        if (!result.Items.Any())
-        {
-            throw NotExistingException.UserDoesNotExist(normalizedEmail);
-        }
 
-        return result.Items.First();
+        // Return null if user not found - per ASP.NET Core Identity IUserEmailStore contract
+        return result.Items.FirstOrDefault();
     }
 
     public Task<string?> GetNormalizedEmailAsync(RtUser user, CancellationToken cancellationToken = default)

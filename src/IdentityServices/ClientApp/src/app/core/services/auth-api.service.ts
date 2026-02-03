@@ -18,7 +18,9 @@ import {
   TwoFactorEmailLoginRequest,
   TwoFactorLoginResult,
   RecoveryCodeLoginRequest,
-  SendTwoFactorEmailResult
+  SendTwoFactorEmailResult,
+  LdapLoginRequest,
+  LdapLoginResult
 } from '../models/login.models';
 
 @Injectable({ providedIn: 'root' })
@@ -90,5 +92,11 @@ export class AuthApiService {
 
   loginRecovery(request: RecoveryCodeLoginRequest): Observable<TwoFactorLoginResult> {
     return this.http.post<TwoFactorLoginResult>('/api/auth/login-recovery', request);
+  }
+
+  // === LDAP Authentication ===
+
+  ldapLogin(request: LdapLoginRequest): Observable<LdapLoginResult> {
+    return this.http.post<LdapLoginResult>('/api/auth/ldap-login', request);
   }
 }

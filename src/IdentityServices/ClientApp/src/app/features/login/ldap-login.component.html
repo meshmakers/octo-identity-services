@@ -1,0 +1,72 @@
+<div class="lcars-auth-container">
+  <app-lcars-panel>
+    <app-lcars-header
+      [subtitle]="'Sign in with ' + providerName"
+      [showUserMenu]="false">
+    </app-lcars-header>
+
+    <!-- Provider Info -->
+    <div class="lcars-provider-info">
+      <div class="lcars-provider-info__icon">
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" width="32" height="32">
+          <path d="M12 1L3 5v6c0 5.55 3.84 10.74 9 12 5.16-1.26 9-6.45 9-12V5l-9-4zm0 10.99h7c-.53 4.12-3.28 7.79-7 8.94V12H5V6.3l7-3.11v8.8z"/>
+        </svg>
+      </div>
+      <div class="lcars-provider-info__name">{{ providerName }}</div>
+      <div class="lcars-provider-info__description">
+        Enter your directory credentials to sign in
+      </div>
+    </div>
+
+    <!-- Error Message -->
+    <div *ngIf="errorMessage" class="lcars-error-message">
+      {{ errorMessage }}
+    </div>
+
+    <!-- Login Form -->
+    <form (ngSubmit)="onSubmit()" #ldapForm="ngForm">
+      <div class="lcars-form-group">
+        <label for="username">Username</label>
+        <input
+          type="text"
+          id="username"
+          name="username"
+          [(ngModel)]="username"
+          required
+          autocomplete="username"
+          [disabled]="submitting"
+          placeholder="Enter your directory username" />
+      </div>
+
+      <div class="lcars-form-group">
+        <label for="password">Password</label>
+        <input
+          type="password"
+          id="password"
+          name="password"
+          [(ngModel)]="password"
+          required
+          autocomplete="current-password"
+          [disabled]="submitting"
+          placeholder="Enter your password" />
+      </div>
+
+      <div class="lcars-actions lcars-actions--stacked">
+        <button
+          type="submit"
+          class="lcars-button-primary"
+          [disabled]="submitting || !username || !password">
+          <span *ngIf="!submitting">Sign In</span>
+          <span *ngIf="submitting">Signing in...</span>
+        </button>
+        <button
+          type="button"
+          class="lcars-button-secondary"
+          (click)="onCancel()"
+          [disabled]="submitting">
+          Back to Login
+        </button>
+      </div>
+    </form>
+  </app-lcars-panel>
+</div>

@@ -115,7 +115,19 @@ export class LoginComponent implements OnInit {
   }
 
   onExternalLogin(provider: ExternalProvider): void {
-    this.authApi.initiateExternalLogin(provider.scheme, this.returnUrl);
+    if (provider.isLdap) {
+      // LDAP providers use a form-based login page
+      this.router.navigate(['/', this.tenantId, 'ldap-login'], {
+        queryParams: {
+          scheme: provider.scheme,
+          name: provider.displayName,
+          returnUrl: this.returnUrl
+        }
+      });
+    } else {
+      // OAuth providers redirect to external provider
+      this.authApi.initiateExternalLogin(provider.scheme, this.returnUrl);
+    }
   }
 
   get hasExternalProviders(): boolean {

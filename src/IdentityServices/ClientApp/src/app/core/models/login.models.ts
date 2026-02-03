@@ -1,6 +1,7 @@
 export interface ExternalProvider {
   scheme: string;
   displayName: string;
+  isLdap: boolean;
 }
 
 export interface LoginContext {
@@ -100,5 +101,20 @@ export interface RecoveryCodeLoginRequest {
 
 export interface SendTwoFactorEmailResult {
   success: boolean;
+  errorMessage?: string;
+}
+
+// LDAP Authentication Types
+
+export interface LdapLoginRequest {
+  scheme: string;
+  username: string;
+  password: string;
+  returnUrl?: string;
+}
+
+export interface LdapLoginResult {
+  success: boolean;
+  redirectUrl?: string;
   errorMessage?: string;
 }

@@ -1,0 +1,105 @@
+@use '../../../styles/lcars-variables' as *;
+@use '../../../styles/lcars-mixins' as *;
+
+:host {
+  display: block;
+  flex: 1;
+}
+
+.lcars-auth-container {
+  @include lcars-centered-container(420px);
+
+  & {
+    background-image:
+      radial-gradient(ellipse at 20% 80%, rgba($octo-mint, 0.05) 0%, transparent 50%),
+      radial-gradient(ellipse at 80% 20%, rgba($neo-cyan, 0.05) 0%, transparent 50%);
+  }
+}
+
+// Provider info section
+.lcars-provider-info {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  margin-bottom: var(--lcars-spacing-lg);
+  padding-bottom: var(--lcars-spacing-lg);
+  border-bottom: 1px solid rgba($octo-mint, 0.2);
+
+  &__icon {
+    width: 64px;
+    height: 64px;
+    border-radius: var(--lcars-radius-md);
+    background: rgba($iron-navy, 0.5);
+    border: 1px solid rgba($octo-mint, 0.3);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    margin-bottom: var(--lcars-spacing-md);
+    color: $octo-mint;
+  }
+
+  &__name {
+    color: #ffffff;
+    font-weight: 600;
+    font-size: var(--lcars-font-size-lg);
+    margin-bottom: var(--lcars-spacing-xs);
+  }
+
+  &__description {
+    color: $ash-blue;
+    font-size: var(--lcars-font-size-sm);
+  }
+}
+
+// Form styling
+.lcars-form-group {
+  @include lcars-form-group;
+
+  label {
+    @include lcars-uppercase-label;
+    color: $ash-blue;
+  }
+
+  input[type="text"],
+  input[type="password"] {
+    @include lcars-input;
+    width: 100%;
+  }
+}
+
+// Actions
+.lcars-actions {
+  margin-top: var(--lcars-spacing-lg);
+
+  &--stacked {
+    display: flex;
+    flex-direction: column;
+    gap: var(--lcars-spacing-md);
+  }
+}
+
+.lcars-button-primary {
+  @include lcars-button-primary;
+  width: 100%;
+  padding: var(--lcars-spacing-md) var(--lcars-spacing-lg);
+  font-size: var(--lcars-font-size-base);
+}
+
+.lcars-button-secondary {
+  @include lcars-button-secondary;
+  width: 100%;
+  padding: var(--lcars-spacing-md) var(--lcars-spacing-lg);
+  font-size: var(--lcars-font-size-base);
+}
+
+// Error message
+.lcars-error-message {
+  background: rgba($bubblegum, 0.1);
+  border: 1px solid rgba($bubblegum, 0.3);
+  border-radius: var(--lcars-radius-sm);
+  color: $bubblegum;
+  padding: var(--lcars-spacing-md);
+  margin-bottom: var(--lcars-spacing-md);
+  font-size: var(--lcars-font-size-sm);
+}
