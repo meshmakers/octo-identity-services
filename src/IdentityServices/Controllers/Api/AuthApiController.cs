@@ -265,16 +265,24 @@ public class AuthApiController : ControllerBase
     [HttpGet("external-callback")]
     public async Task<IActionResult> ExternalLoginCallback()
     {
-        // Get tenant ID early for error handling
-        string tenantId;
+        // Default tenant ID for error handling
+        const string defaultTenantId = "System";
+
         try
         {
-            tenantId = RouteData?.Values["tenantId"]?.ToString() ?? "System";
+            return await ExternalLoginCallbackInternal();
         }
-        catch
+        catch (Exception ex)
         {
-            tenantId = "System";
+            _logger.LogError(ex, "Unhandled exception in ExternalLoginCallback");
+            return Redirect($"/{defaultTenantId}/error?error=External authentication failed");
         }
+    }
+
+    private async Task<IActionResult> ExternalLoginCallbackInternal()
+    {
+        // Get tenant ID early for error handling
+        var tenantId = RouteData?.Values["tenantId"]?.ToString() ?? "System";
 
         // 1. Authenticate from external cookie
         AuthenticateResult result;
