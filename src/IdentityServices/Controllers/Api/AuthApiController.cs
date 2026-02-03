@@ -265,6 +265,17 @@ public class AuthApiController : ControllerBase
     [HttpGet("external-callback")]
     public async Task<IActionResult> ExternalLoginCallback()
     {
+        // Get tenant ID early for error handling
+        string tenantId;
+        try
+        {
+            tenantId = RouteData?.Values["tenantId"]?.ToString() ?? "System";
+        }
+        catch
+        {
+            tenantId = "System";
+        }
+
         // 1. Authenticate from external cookie
         AuthenticateResult result;
         try
@@ -274,14 +285,12 @@ public class AuthApiController : ControllerBase
         catch (Exception ex)
         {
             _logger.LogWarning(ex, "External authentication threw exception");
-            var tenantId = RouteData.Values["tenantId"]?.ToString() ?? "System";
             return Redirect($"/{tenantId}/error?error=External authentication failed");
         }
 
         if (!result.Succeeded)
         {
             _logger.LogWarning("External authentication failed: {Error}", result.Failure?.Message);
-            var tenantId = RouteData.Values["tenantId"]?.ToString() ?? "System";
             return Redirect($"/{tenantId}/error?error=External authentication failed");
         }
 
@@ -302,7 +311,6 @@ public class AuthApiController : ControllerBase
         {
             _logger.LogWarning("External login missing required claims. Provider: {Provider}, UserIdClaim: {UserIdClaim}",
                 provider, userIdClaim?.Value);
-            var tenantId = RouteData.Values["tenantId"]?.ToString() ?? "System";
             return Redirect($"/{tenantId}/error?error=Invalid external login - missing required claims");
         }
 
@@ -341,7 +349,6 @@ public class AuthApiController : ControllerBase
                 user = await CreateUserFromExternalProvider(claims, provider);
                 if (user == null)
                 {
-                    var tenantId = RouteData.Values["tenantId"]?.ToString() ?? "System";
                     return Redirect($"/{tenantId}/error?error=Failed to create user account");
                 }
 
@@ -385,8 +392,7 @@ public class AuthApiController : ControllerBase
             return Redirect(returnUrl);
         }
 
-        var defaultTenantId = RouteData.Values["tenantId"]?.ToString() ?? "System";
-        return Redirect($"/{defaultTenantId}/manage");
+        return Redirect($"/{tenantId}/manage");
     }
 
     /// <summary>
