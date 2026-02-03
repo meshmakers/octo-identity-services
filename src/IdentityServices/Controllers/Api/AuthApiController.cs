@@ -266,7 +266,18 @@ public class AuthApiController : ControllerBase
     public async Task<IActionResult> ExternalLoginCallback()
     {
         // 1. Authenticate from external cookie
-        var result = await HttpContext.AuthenticateAsync(IdentityServerConstants.ExternalCookieAuthenticationScheme);
+        AuthenticateResult result;
+        try
+        {
+            result = await HttpContext.AuthenticateAsync(IdentityServerConstants.ExternalCookieAuthenticationScheme);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "External authentication threw exception");
+            var tenantId = RouteData.Values["tenantId"]?.ToString() ?? "System";
+            return Redirect($"/{tenantId}/error?error=External authentication failed");
+        }
+
         if (!result.Succeeded)
         {
             _logger.LogWarning("External authentication failed: {Error}", result.Failure?.Message);
