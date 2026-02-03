@@ -5,6 +5,7 @@ using Duende.IdentityServer.Extensions;
 using Duende.IdentityServer.Models;
 using Duende.IdentityServer.Services;
 using Duende.IdentityServer.Stores;
+using Meshmakers.Octo.Backend.Authentication.Services;
 using Meshmakers.Octo.ConstructionKit.Contracts;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authorization;
@@ -29,6 +30,7 @@ public class AuthApiController : ControllerBase
     private readonly UserManager<RtUser> _userManager;
     private readonly IEventService _events;
     private readonly IPersistedGrantStore _persistedGrantStore;
+    private readonly ILdapAuthenticationService _ldapAuthService;
     private readonly ILogger<AuthApiController> _logger;
 
     public AuthApiController(
@@ -39,6 +41,7 @@ public class AuthApiController : ControllerBase
         UserManager<RtUser> userManager,
         IEventService events,
         IPersistedGrantStore persistedGrantStore,
+        ILdapAuthenticationService ldapAuthService,
         ILogger<AuthApiController> logger)
     {
         _interaction = interaction;
@@ -48,6 +51,7 @@ public class AuthApiController : ControllerBase
         _userManager = userManager;
         _events = events;
         _persistedGrantStore = persistedGrantStore;
+        _ldapAuthService = ldapAuthService;
         _logger = logger;
     }
 
@@ -60,14 +64,20 @@ public class AuthApiController : ControllerBase
         var context = await _interaction.GetAuthorizationContextAsync(returnUrl);
         var schemes = await _schemeProvider.GetAllSchemesAsync();
 
-        var providers = schemes
-            .Where(x => x.DisplayName != null)
-            .Select(x => new ExternalProviderDto
+        // Build providers list with LDAP detection
+        var externalSchemes = schemes.Where(x => x.DisplayName != null).ToList();
+        var providers = new List<ExternalProviderDto>();
+
+        foreach (var scheme in externalSchemes)
+        {
+            var isLdap = await _ldapAuthService.IsLdapSchemeAsync(scheme.Name);
+            providers.Add(new ExternalProviderDto
             {
-                Scheme = x.Name,
-                DisplayName = x.DisplayName ?? x.Name
-            })
-            .ToList();
+                Scheme = scheme.Name,
+                DisplayName = scheme.DisplayName ?? scheme.Name,
+                IsLdap = isLdap
+            });
+        }
 
         var allowLocal = true;
         string? clientName = null;
@@ -210,15 +220,21 @@ public class AuthApiController : ControllerBase
     public async Task<ActionResult<IEnumerable<ExternalProviderDto>>> GetExternalProviders()
     {
         var schemes = await _schemeProvider.GetAllSchemesAsync();
+        var externalSchemes = schemes.Where(x => x.DisplayName != null).ToList();
+        var providers = new List<ExternalProviderDto>();
 
-        return schemes
-            .Where(x => x.DisplayName != null)
-            .Select(x => new ExternalProviderDto
+        foreach (var scheme in externalSchemes)
+        {
+            var isLdap = await _ldapAuthService.IsLdapSchemeAsync(scheme.Name);
+            providers.Add(new ExternalProviderDto
             {
-                Scheme = x.Name,
-                DisplayName = x.DisplayName ?? x.Name
-            })
-            .ToList();
+                Scheme = scheme.Name,
+                DisplayName = scheme.DisplayName ?? scheme.Name,
+                IsLdap = isLdap
+            });
+        }
+
+        return providers;
     }
 
     /// <summary>
@@ -798,6 +814,145 @@ public class AuthApiController : ControllerBase
     }
 
     #endregion
+
+    #region LDAP Authentication
+
+    /// <summary>
+    /// Login with LDAP credentials (OpenLDAP or Microsoft AD)
+    /// </summary>
+    [HttpPost("ldap-login")]
+    public async Task<ActionResult<LdapLoginResultDto>> LdapLogin([FromBody] LdapLoginRequestDto request)
+    {
+        // 1. Validate the scheme is an LDAP provider
+        if (!await _ldapAuthService.IsLdapSchemeAsync(request.Scheme))
+        {
+            return new LdapLoginResultDto
+            {
+                Success = false,
+                ErrorMessage = "Invalid authentication scheme"
+            };
+        }
+
+        // 2. Authenticate against LDAP
+        var authResult = await _ldapAuthService.AuthenticateAsync(
+            request.Scheme,
+            request.Username,
+            request.Password);
+
+        if (!authResult.Succeeded || authResult.LoginInfo == null)
+        {
+            await _events.RaiseAsync(new UserLoginFailureEvent(
+                request.Username,
+                authResult.ErrorMessage ?? "LDAP authentication failed",
+                clientId: null));
+
+            return new LdapLoginResultDto
+            {
+                Success = false,
+                ErrorMessage = authResult.ErrorMessage ?? "Invalid username or password"
+            };
+        }
+
+        var loginInfo = authResult.LoginInfo;
+        var claims = loginInfo.Principal.Claims.ToList();
+
+        // 3. Find existing user by external login
+        var user = await _userManager.FindByLoginAsync(
+            loginInfo.LoginProvider,
+            loginInfo.ProviderKey);
+
+        if (user == null)
+        {
+            // 4a. Try to find user by email (for account linking)
+            var emailClaim = claims.FirstOrDefault(c => c.Type == ClaimTypes.Email);
+            if (emailClaim != null && !string.IsNullOrEmpty(emailClaim.Value))
+            {
+                user = await _userManager.FindByEmailAsync(emailClaim.Value);
+                if (user != null)
+                {
+                    _logger.LogInformation(
+                        "Found existing user {UserName} by email {Email}, linking LDAP login",
+                        user.UserName, emailClaim.Value);
+                }
+            }
+
+            if (user == null)
+            {
+                // 4b. Create new user from LDAP info
+                user = await CreateUserFromExternalProvider(claims, loginInfo.LoginProvider);
+                if (user == null)
+                {
+                    return new LdapLoginResultDto
+                    {
+                        Success = false,
+                        ErrorMessage = "Failed to create user account"
+                    };
+                }
+
+                _logger.LogInformation(
+                    "Created new user {UserName} from LDAP provider {Provider}",
+                    user.UserName, loginInfo.LoginProvider);
+            }
+
+            // 5. Link LDAP login to user
+            var addLoginResult = await _userManager.AddLoginAsync(
+                user,
+                new UserLoginInfo(
+                    loginInfo.LoginProvider,
+                    loginInfo.ProviderKey,
+                    loginInfo.ProviderDisplayName));
+
+            if (!addLoginResult.Succeeded)
+            {
+                _logger.LogError(
+                    "Failed to add LDAP login for user {UserName}: {Errors}",
+                    user.UserName,
+                    string.Join(", ", addLoginResult.Errors.Select(e => e.Description)));
+            }
+            else
+            {
+                _logger.LogInformation(
+                    "Linked LDAP login {Provider} to user {UserName}",
+                    loginInfo.LoginProvider, user.UserName);
+            }
+        }
+
+        // 6. Sign in the user
+        await _signInManager.SignInAsync(user, isPersistent: false);
+
+        await _events.RaiseAsync(new UserLoginSuccessEvent(
+            user.UserName,
+            user.RtId.ToString(),
+            user.UserName,
+            clientId: null));
+
+        // 7. Handle return URL
+        var redirectUrl = request.ReturnUrl;
+        if (string.IsNullOrEmpty(redirectUrl) ||
+            !(_interaction.IsValidReturnUrl(redirectUrl) || Url.IsLocalUrl(redirectUrl)))
+        {
+            var tenantId = RouteData.Values["tenantId"]?.ToString() ?? "System";
+            redirectUrl = $"/{tenantId}/manage";
+        }
+
+        return new LdapLoginResultDto
+        {
+            Success = true,
+            RedirectUrl = redirectUrl
+        };
+    }
+
+    /// <summary>
+    /// Check if a scheme is an LDAP-based authentication provider
+    /// </summary>
+    [HttpGet("is-ldap-scheme")]
+    public async Task<ActionResult<IsLdapSchemeResultDto>> IsLdapScheme([FromQuery] string scheme)
+    {
+        var isLdap = await _ldapAuthService.IsLdapSchemeAsync(scheme);
+        return new IsLdapSchemeResultDto { IsLdap = isLdap };
+    }
+
+    #endregion
 }
 
 #region DTOs
@@ -837,6 +992,7 @@ public record ExternalProviderDto
 {
     public string Scheme { get; init; } = string.Empty;
     public string DisplayName { get; init; } = string.Empty;
+    public bool IsLdap { get; init; }
 }
 
 public record LogoutContextDto
@@ -922,6 +1078,28 @@ public record SendTwoFactorEmailResultDto
 {
     public bool Success { get; init; }
     public string? ErrorMessage { get; init; }
+}
+
+// LDAP Authentication DTOs
+
+public record LdapLoginRequestDto
+{
+    public string Scheme { get; init; } = string.Empty;
+    public string Username { get; init; } = string.Empty;
+    public string Password { get; init; } = string.Empty;
+    public string? ReturnUrl { get; init; }
+}
+
+public record LdapLoginResultDto
+{
+    public bool Success { get; init; }
+    public string? RedirectUrl { get; init; }
+    public string? ErrorMessage { get; init; }
+}
+
+public record IsLdapSchemeResultDto
+{
+    public bool IsLdap { get; init; }
 }
 
 #endregion
