@@ -243,9 +243,12 @@ public class AuthApiController : ControllerBase
     [HttpGet("external-login")]
     public IActionResult ExternalLogin([FromQuery] string scheme, [FromQuery] string? returnUrl)
     {
+        // Include tenantId in callback URL - required for route generation
+        var tenantId = RouteData.Values["tenantId"]?.ToString() ?? "System";
+
         var props = new AuthenticationProperties
         {
-            RedirectUri = Url.Action(nameof(ExternalLoginCallback)),
+            RedirectUri = Url.Action(nameof(ExternalLoginCallback), new { tenantId }),
             Items =
             {
                 { "returnUrl", returnUrl },
@@ -295,20 +298,29 @@ public class AuthApiController : ControllerBase
         _logger.LogInformation("Processing external login callback for provider {Provider}, user {UserId}",
             provider, userIdClaim.Value);
 
+        // Log all claims for debugging
+        _logger.LogDebug("External provider claims received:");
+        foreach (var claim in claims)
+        {
+            _logger.LogDebug("  Claim: {Type} = {Value}", claim.Type, claim.Value);
+        }
+
         // 3. Find existing user by external login
         var user = await _userManager.FindByLoginAsync(provider, userIdClaim.Value);
 
         if (user == null)
         {
             // 4a. Try to find user by email (for account linking)
-            var emailClaim = claims.FirstOrDefault(c => c.Type == ClaimTypes.Email);
-            if (emailClaim != null && !string.IsNullOrEmpty(emailClaim.Value))
+            var email = GetEmailFromClaims(claims);
+            _logger.LogDebug("Extracted email from claims: {Email}", email ?? "(null)");
+
+            if (!string.IsNullOrEmpty(email))
             {
-                user = await _userManager.FindByEmailAsync(emailClaim.Value);
+                user = await _userManager.FindByEmailAsync(email);
                 if (user != null)
                 {
                     _logger.LogInformation("Found existing user {UserName} by email {Email}, linking external login",
-                        user.UserName, emailClaim.Value);
+                        user.UserName, email);
                 }
             }
 
@@ -371,10 +383,14 @@ public class AuthApiController : ControllerBase
     /// </summary>
     private async Task<RtUser?> CreateUserFromExternalProvider(List<Claim> claims, string provider)
     {
-        var email = claims.FirstOrDefault(c => c.Type == ClaimTypes.Email)?.Value;
-        var name = claims.FirstOrDefault(c => c.Type == ClaimTypes.Name)?.Value;
-        var givenName = claims.FirstOrDefault(c => c.Type == ClaimTypes.GivenName)?.Value;
-        var surname = claims.FirstOrDefault(c => c.Type == ClaimTypes.Surname)?.Value;
+        // Try multiple claim types (different providers use different formats)
+        var email = GetEmailFromClaims(claims);
+        var name = claims.FirstOrDefault(c => c.Type == ClaimTypes.Name)?.Value
+                   ?? claims.FirstOrDefault(c => c.Type == "name")?.Value;
+        var givenName = claims.FirstOrDefault(c => c.Type == ClaimTypes.GivenName)?.Value
+                        ?? claims.FirstOrDefault(c => c.Type == "given_name")?.Value;
+        var surname = claims.FirstOrDefault(c => c.Type == ClaimTypes.Surname)?.Value
+                      ?? claims.FirstOrDefault(c => c.Type == "family_name")?.Value;
 
         // Generate username from email or provider + unique id
         var userName = email ?? $"{provider}_{Guid.NewGuid():N}";
@@ -410,6 +426,33 @@ public class AuthApiController : ControllerBase
         }
 
         return user;
+    }
+
+    /// <summary>
+    /// Extracts email from claims, trying multiple claim types used by different providers
+    /// </summary>
+    private static string? GetEmailFromClaims(List<Claim> claims)
+    {
+        // Try standard email claims first
+        var email = claims.FirstOrDefault(c => c.Type == ClaimTypes.Email)?.Value
+                    ?? claims.FirstOrDefault(c => c.Type == "email")?.Value;
+
+        if (!string.IsNullOrEmpty(email))
+            return email;
+
+        // Azure Entra ID often uses UPN (User Principal Name) as email
+        var upn = claims.FirstOrDefault(c => c.Type == ClaimTypes.Upn)?.Value
+                  ?? claims.FirstOrDefault(c => c.Type == "upn")?.Value;
+
+        if (!string.IsNullOrEmpty(upn) && upn.Contains('@'))
+            return upn;
+
+        // Fallback to preferred_username if it looks like an email
+        var preferredUsername = claims.FirstOrDefault(c => c.Type == "preferred_username")?.Value;
+        if (!string.IsNullOrEmpty(preferredUsername) && preferredUsername.Contains('@'))
+            return preferredUsername;
+
+        return null;
     }
 
     /// <summary>
@@ -864,15 +907,15 @@ public class AuthApiController : ControllerBase
         if (user == null)
         {
             // 4a. Try to find user by email (for account linking)
-            var emailClaim = claims.FirstOrDefault(c => c.Type == ClaimTypes.Email);
-            if (emailClaim != null && !string.IsNullOrEmpty(emailClaim.Value))
+            var email = GetEmailFromClaims(claims);
+            if (!string.IsNullOrEmpty(email))
             {
-                user = await _userManager.FindByEmailAsync(emailClaim.Value);
+                user = await _userManager.FindByEmailAsync(email);
                 if (user != null)
                 {
                     _logger.LogInformation(
                         "Found existing user {UserName} by email {Email}, linking LDAP login",
-                        user.UserName, emailClaim.Value);
+                        user.UserName, email);
                 }
             }
 

@@ -8,7 +8,7 @@ export interface OemConfig {
 }
 
 export const defaultOemConfig: OemConfig = {
-  appName: 'Octo Identity',
+  appName: 'OctoMesh Identity',
   logoUrl: '/assets/images/logo.svg',
   hideNavigation: false
 };

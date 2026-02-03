@@ -29,7 +29,7 @@ public class OemApiController : ControllerBase
         // Use defaults for now - can be extended with tenant-specific configuration
         return new OemConfigDto
         {
-            AppName = "Octo Identity",
+            AppName = "OctoMesh Identity",
             LogoUrl = null,
             FaviconUrl = _oemService.Favicon,
             PrimaryColor = null,
@@ -43,7 +43,7 @@ public class OemApiController : ControllerBase
 
 public record OemConfigDto
 {
-    public string AppName { get; init; } = "Octo Identity";
+    public string AppName { get; init; } = "OctoMesh Identity";
     public string? LogoUrl { get; init; }
     public string? FaviconUrl { get; init; }
     public string? PrimaryColor { get; init; }
