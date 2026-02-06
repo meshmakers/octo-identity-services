@@ -349,5 +349,6 @@ Setup scripts are located in `/scripts/`:
 |--------|-------------|
 | `om_idprov_add_google.ps1` | Add Google identity provider |
 | `om_idprov_add_microsoft.ps1` | Add Microsoft Account identity provider |
+| `om_idprov_add_facebook.ps1` | Add Facebook identity provider |
 
 Edit these scripts with your credentials before running.
