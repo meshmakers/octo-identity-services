@@ -2,6 +2,7 @@ import { Component, OnInit, inject } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { ActivatedRoute, Router } from '@angular/router';
+import { HttpErrorResponse } from '@angular/common/http';
 import { LcarsPanelComponent } from '../../shared/components/lcars-panel/lcars-panel.component';
 import { LcarsHeaderComponent } from '../../shared/components/lcars-header/lcars-header.component';
 import { ScopeListComponent } from '../../shared/components/scope-list/scope-list.component';
@@ -135,7 +136,17 @@ export class DeviceConfirmComponent implements OnInit {
         this.context = context;
         this.loading = false;
       },
-      error: (error) => {
+      error: (error: HttpErrorResponse) => {
+        // If 401 Unauthorized, redirect to login with return URL back to this page
+        if (error.status === 401) {
+          const tenantId = this.route.snapshot.params['tenantId'] || 'System';
+          const returnUrl = `/${tenantId}/device/confirm?userCode=${encodeURIComponent(this.userCode)}`;
+          this.router.navigate(['/', tenantId, 'login'], {
+            queryParams: { returnUrl }
+          });
+          return;
+        }
+
         this.loading = false;
         this.errorMessage = error.error?.message || 'Invalid or expired device code.';
       }

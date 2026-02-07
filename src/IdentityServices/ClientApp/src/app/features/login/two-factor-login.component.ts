@@ -221,7 +221,10 @@ export class TwoFactorLoginComponent implements OnInit {
 
   ngOnInit(): void {
     this.tenantId = this.route.snapshot.params['tenantId'] || 'System';
-    this.returnUrl = this.route.snapshot.queryParams['returnUrl'] || '';
+    // Support both 'ReturnUrl' (from IdentityServer) and 'returnUrl' (from Angular navigation)
+    this.returnUrl = this.route.snapshot.queryParams['ReturnUrl']
+                  || this.route.snapshot.queryParams['returnUrl']
+                  || '';
 
     // Get capabilities from query params (set by login redirect)
     this.canUseTotp = this.route.snapshot.queryParams['totp'] !== 'false';
@@ -248,7 +251,8 @@ export class TwoFactorLoginComponent implements OnInit {
 
     this.authApi.loginTwoFactor({
       code: this.totpCode,
-      rememberMachine: this.rememberMachine
+      rememberMachine: this.rememberMachine,
+      returnUrl: this.returnUrl || undefined
     }).subscribe({
       next: (result) => this.handleResult(result),
       error: (error) => this.handleError(error)
@@ -281,7 +285,8 @@ export class TwoFactorLoginComponent implements OnInit {
 
     this.authApi.loginTwoFactorEmail({
       code: this.emailCode,
-      rememberMachine: this.rememberMachine
+      rememberMachine: this.rememberMachine,
+      returnUrl: this.returnUrl || undefined
     }).subscribe({
       next: (result) => this.handleResult(result),
       error: (error) => this.handleError(error)
@@ -293,7 +298,8 @@ export class TwoFactorLoginComponent implements OnInit {
     this.errorMessage = undefined;
 
     this.authApi.loginRecovery({
-      recoveryCode: this.recoveryCode
+      recoveryCode: this.recoveryCode,
+      returnUrl: this.returnUrl || undefined
     }).subscribe({
       next: (result) => this.handleResult(result),
       error: (error) => this.handleError(error)
@@ -302,10 +308,14 @@ export class TwoFactorLoginComponent implements OnInit {
 
   private handleResult(result: { success: boolean; redirectUrl?: string; errorMessage?: string }): void {
     this.submitting = false;
-    if (result.success && result.redirectUrl) {
-      window.location.href = result.redirectUrl;
-    } else if (result.success) {
-      this.router.navigate(['/', this.tenantId, 'manage']);
+    if (result.success) {
+      // Use redirectUrl from result, or fall back to returnUrl, or manage page
+      const redirectTo = result.redirectUrl || this.returnUrl;
+      if (redirectTo) {
+        window.location.href = redirectTo;
+      } else {
+        this.router.navigate(['/', this.tenantId, 'manage']);
+      }
     } else {
       this.errorMessage = result.errorMessage || 'Verification failed';
     }

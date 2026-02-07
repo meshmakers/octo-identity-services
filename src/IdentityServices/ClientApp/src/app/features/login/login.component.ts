@@ -45,7 +45,10 @@ export class LoginComponent implements OnInit {
 
   ngOnInit(): void {
     this.tenantId = this.route.snapshot.params['tenantId'] || 'System';
-    this.returnUrl = this.route.snapshot.queryParams['ReturnUrl'] || '';
+    // Support both 'ReturnUrl' (from IdentityServer) and 'returnUrl' (from Angular navigation)
+    this.returnUrl = this.route.snapshot.queryParams['ReturnUrl']
+                  || this.route.snapshot.queryParams['returnUrl']
+                  || '';
 
     this.loadContext();
   }

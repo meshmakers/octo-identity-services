@@ -82,11 +82,13 @@ export interface ValidateResetTokenResult {
 export interface TwoFactorLoginRequest {
   code: string;
   rememberMachine: boolean;
+  returnUrl?: string;
 }
 
 export interface TwoFactorEmailLoginRequest {
   code: string;
   rememberMachine: boolean;
+  returnUrl?: string;
 }
 
 export interface TwoFactorLoginResult {
@@ -97,6 +99,7 @@ export interface TwoFactorLoginResult {
 
 export interface RecoveryCodeLoginRequest {
   recoveryCode: string;
+  returnUrl?: string;
 }
 
 export interface SendTwoFactorEmailResult {

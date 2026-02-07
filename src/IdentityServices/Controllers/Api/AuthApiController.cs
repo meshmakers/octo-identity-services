@@ -154,21 +154,17 @@ public class AuthApiController : ControllerBase
                 user?.UserName,
                 clientId: context?.Client?.ClientId));
 
-            if (context != null)
-            {
-                return new LoginResultDto
-                {
-                    Success = true,
-                    RedirectUrl = request.ReturnUrl
-                };
-            }
-
-            // No context - redirect to manage page with tenant ID
+            // Use return URL if valid, otherwise redirect to manage page
             var tenantId = RouteData.Values["tenantId"]?.ToString() ?? "System";
+            var redirectUrl = !string.IsNullOrEmpty(request.ReturnUrl) &&
+                              (_interaction.IsValidReturnUrl(request.ReturnUrl) || Url.IsLocalUrl(request.ReturnUrl))
+                ? request.ReturnUrl
+                : $"/{tenantId}/manage";
+
             return new LoginResultDto
             {
                 Success = true,
-                RedirectUrl = $"/{tenantId}/manage"
+                RedirectUrl = redirectUrl
             };
         }
 
@@ -699,12 +695,17 @@ public class AuthApiController : ControllerBase
                 user.UserName,
                 clientId: null));
 
-            // Get the return URL from the session/context if available
+            // Use the return URL from request, or default to manage page
             var tenantId = RouteData.Values["tenantId"]?.ToString() ?? "System";
+            var redirectUrl = !string.IsNullOrEmpty(request.ReturnUrl) &&
+                              (_interaction.IsValidReturnUrl(request.ReturnUrl) || Url.IsLocalUrl(request.ReturnUrl))
+                ? request.ReturnUrl
+                : $"/{tenantId}/manage";
+
             return new TwoFactorLoginResultDto
             {
                 Success = true,
-                RedirectUrl = $"/{tenantId}/manage"
+                RedirectUrl = redirectUrl
             };
         }
 
@@ -761,11 +762,17 @@ public class AuthApiController : ControllerBase
                 user.UserName,
                 clientId: null));
 
+            // Use the return URL from request, or default to manage page
             var tenantId = RouteData.Values["tenantId"]?.ToString() ?? "System";
+            var redirectUrl = !string.IsNullOrEmpty(request.ReturnUrl) &&
+                              (_interaction.IsValidReturnUrl(request.ReturnUrl) || Url.IsLocalUrl(request.ReturnUrl))
+                ? request.ReturnUrl
+                : $"/{tenantId}/manage";
+
             return new TwoFactorLoginResultDto
             {
                 Success = true,
-                RedirectUrl = $"/{tenantId}/manage"
+                RedirectUrl = redirectUrl
             };
         }
 
@@ -852,11 +859,17 @@ public class AuthApiController : ControllerBase
                 user.UserName,
                 clientId: null));
 
+            // Use the return URL from request, or default to manage page
             var tenantId = RouteData.Values["tenantId"]?.ToString() ?? "System";
+            var redirectUrl = !string.IsNullOrEmpty(request.ReturnUrl) &&
+                              (_interaction.IsValidReturnUrl(request.ReturnUrl) || Url.IsLocalUrl(request.ReturnUrl))
+                ? request.ReturnUrl
+                : $"/{tenantId}/manage";
+
             return new TwoFactorLoginResultDto
             {
                 Success = true,
-                RedirectUrl = $"/{tenantId}/manage"
+                RedirectUrl = redirectUrl
             };
         }
 
@@ -1122,12 +1135,14 @@ public record TwoFactorLoginRequestDto
 {
     public string Code { get; init; } = string.Empty;
     public bool RememberMachine { get; init; }
+    public string? ReturnUrl { get; init; }
 }
 
 public record TwoFactorEmailLoginRequestDto
 {
     public string Code { get; init; } = string.Empty;
     public bool RememberMachine { get; init; }
+    public string? ReturnUrl { get; init; }
 }
 
 public record TwoFactorLoginResultDto
@@ -1140,6 +1155,7 @@ public record TwoFactorLoginResultDto
 public record RecoveryCodeLoginRequestDto
 {
     public string RecoveryCode { get; init; } = string.Empty;
+    public string? ReturnUrl { get; init; }
 }
 
 public record SendTwoFactorEmailResultDto
