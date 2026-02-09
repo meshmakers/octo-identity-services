@@ -1,4 +1,5 @@
 "$schema": "https://schemas.meshmakers.cloud/construction-kit-meta.schema.json"
-modelId: System.Identity-2.0.0
+modelId: System.Identity-1.0.0
 dependencies:
-  - System-[2.0,3.0)
+  - System-2.0.2
+
