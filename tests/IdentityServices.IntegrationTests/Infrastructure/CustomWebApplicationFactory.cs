@@ -5,13 +5,10 @@ using IdentityServices.IntegrationTests.Configuration;
 using MassTransit;
 using Meshmakers.Octo.Common.DistributionEventHub;
 using Meshmakers.Octo.Common.DistributionEventHub.Services;
-using Meshmakers.Octo.ConstructionKit.Contracts;
-using Meshmakers.Octo.ConstructionKit.Contracts.Services;
 using Meshmakers.Octo.Runtime.Contracts.MongoDb;
 using Meshmakers.Octo.Runtime.Contracts.MongoDb.Configuration;
 using Meshmakers.Octo.Runtime.Contracts.MongoDb.Services;
 using Meshmakers.Octo.Runtime.Engine.MongoDb.Services.Defaults;
-using Meshmakers.Octo.Services.Notifications.Generated.System.Notification.v2;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.AspNetCore.TestHost;
@@ -21,7 +18,6 @@ using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.IdentityModel.Tokens;
-using Persistence.IdentityCkModel.Generated.System.Identity.v2;
 using Testcontainers.MongoDb;
 using Xunit;
 
@@ -110,10 +106,6 @@ public class CustomWebApplicationFactory : WebApplicationFactory<Program>, IAsyn
                 _ => new OctoSystemConfiguration(),
                 configureDistributionEventHub: null);
 
-        // Register the System.Notification CK model so it is imported during system tenant creation.
-        // The main application registers this via AddOctoNotification() in Program.cs.
-        services.AddCkModelSystemNotificationV2();
-
         services.AddSingleton<ITenantNotifications, DefaultTenantNotifications>();
 
         services.Configure<OctoSystemConfiguration>(t =>
@@ -182,38 +174,6 @@ public class CustomWebApplicationFactory : WebApplicationFactory<Program>, IAsyn
         await systemContext.CreateSystemTenantAsync();
         Console.Error.WriteLine("[WebFactory] System tenant created");
         Console.Error.Flush();
-
-        // Import CK models to the system tenant BEFORE the web app starts.
-        // The DefaultConfigurationCreatorService normally handles this during startup,
-        // but by then the CK cache may already be loaded without these models.
-        // ImportCkModelAsync does NOT reload the CK cache, so models must be in MongoDB
-        // before the first cache load occurs.
-        await ImportCkModelsToSystemTenantAsync(systemContext);
-    }
-
-    private static async Task ImportCkModelsToSystemTenantAsync(ISystemContext systemContext)
-    {
-        if (!await systemContext.IsCkModelExistingAsync(SystemIdentityCkIds.CkModelId))
-        {
-            var operationResult = new OperationResult();
-            await systemContext.ImportCkModelAsync(SystemIdentityCkIds.CkModelId, operationResult);
-            if (operationResult.HasErrors || operationResult.HasFatalErrors)
-            {
-                throw new InvalidOperationException(
-                    $"Failed to import System.Identity CK model: {operationResult.GetMessages()}");
-            }
-        }
-
-        if (!await systemContext.IsCkModelExistingAsync(SystemNotificationCkIds.CkModelId))
-        {
-            var operationResult = new OperationResult();
-            await systemContext.ImportCkModelAsync(SystemNotificationCkIds.CkModelId, operationResult);
-            if (operationResult.HasErrors || operationResult.HasFatalErrors)
-            {
-                throw new InvalidOperationException(
-                    $"Failed to import System.Notification CK model: {operationResult.GetMessages()}");
-            }
-        }
     }
 
     public new async ValueTask DisposeAsync()
