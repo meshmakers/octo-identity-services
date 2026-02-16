@@ -28,6 +28,7 @@ using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Options;
 using Microsoft.IdentityModel.Logging;
+using Microsoft.AspNetCore.DataProtection;
 using NLog;
 using NLog.Web;
 using Persistence.IdentityCkModel.Generated.System.Identity.v2;
@@ -74,6 +75,14 @@ try
         builder.Configuration.GetSection("Identity").Bind(options));
     builder.Services.Configure<OctoSystemConfiguration>(options =>
         builder.Configuration.GetSection("System").Bind(options));
+
+    var dataProtectionKeysPath = builder.Configuration.GetSection("Identity")["DataProtectionKeysPath"];
+    if (!string.IsNullOrEmpty(dataProtectionKeysPath))
+    {
+        builder.Services.AddDataProtection()
+            .PersistKeysToFileSystem(new DirectoryInfo(dataProtectionKeysPath))
+            .SetApplicationName("OctoIdentityServices");
+    }
     builder.Services.Configure<RouteOptions>(options =>
         options.ConstraintMap.Add("tenantId", typeof(TenantIdRouteConstraint)));
 

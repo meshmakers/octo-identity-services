@@ -86,4 +86,10 @@ public class OctoIdentityServicesOptions
     /// Gets or sets the minimal log level to be logged
     /// </summary>
     public LogLevelDto MinLogLevel { get; set; }
+
+    /// <summary>
+    /// Gets or sets the path where ASP.NET Data Protection keys are persisted.
+    /// When set, keys are stored on the filesystem at this path to survive pod restarts.
+    /// </summary>
+    public string? DataProtectionKeysPath { get; set; }
 }
