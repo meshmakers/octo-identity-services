@@ -74,6 +74,19 @@ Environment variables are prefixed with `OCTO_`. Key configuration sections:
 
 User secrets ID: `173d8e91-b831-4e8a-a43f-672c57e6a4da`
 
+### Data Protection Key Persistence
+
+ASP.NET Data Protection keys are used to encrypt refresh tokens, antiforgery tokens, and OAuth state. By default, keys are stored in-memory and lost on pod restart, which invalidates all active sessions.
+
+To persist keys across redeployments, set the `DataProtectionKeysPath` option:
+
+- **Environment variable**: `OCTO_IDENTITY__DataProtectionKeysPath=/var/dpapi-keys`
+- **Options class**: `OctoIdentityServicesOptions.DataProtectionKeysPath` (`src/IdentityServerPersistence/Configuration/Options/OctoIdentityServicesOptions.cs`)
+
+When configured, keys are stored as XML files in the specified directory via `PersistKeysToFileSystem()`. In Kubernetes, this path is backed by a PersistentVolumeClaim created by the Helm chart (`octo-helm-core/src/octo-mesh`) when `services.identity.dataProtection.enabled: true`.
+
+The application name is set to `OctoIdentityServices` via `SetApplicationName()` to ensure key isolation.
+
 ## Docker
 
 Build image using `src/IdentityServices/Dockerfile`. Requires build args:
