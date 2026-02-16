@@ -218,7 +218,8 @@ public class ClientsController : ControllerBase
             PostLogoutRedirectUris = applicationClient.PostLogoutRedirectUris,
             AllowedCorsOrigins = applicationClient.AllowedCorsOrigins,
             AllowedScopes = applicationClient.AllowedScopes,
-            IsOfflineAccessEnabled = applicationClient.AllowOfflineAccess
+            IsOfflineAccessEnabled = applicationClient.AllowOfflineAccess,
+            RequireClientSecret = applicationClient.RequireClientSecret
         };
         return clientDto;
     }
@@ -283,6 +284,11 @@ public class ClientsController : ControllerBase
         if (clientDto.IsOfflineAccessEnabled.HasValue)
         {
             applicationClient.AllowOfflineAccess = clientDto.IsOfflineAccessEnabled.Value;
+        }
+
+        if (clientDto.RequireClientSecret.HasValue)
+        {
+            applicationClient.RequireClientSecret = clientDto.RequireClientSecret.Value;
         }
 
         if (!string.IsNullOrWhiteSpace(clientDto.ClientSecret))
