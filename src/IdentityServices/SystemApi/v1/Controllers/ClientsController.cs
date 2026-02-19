@@ -224,6 +224,7 @@ public class ClientsController : ControllerBase
             FrontChannelLogoutSessionRequired = applicationClient.FrontChannelLogoutSessionRequired,
             BackChannelLogoutUri = applicationClient.BackChannelLogoutUri,
             BackChannelLogoutSessionRequired = applicationClient.BackChannelLogoutSessionRequired
+            RequireClientSecret = applicationClient.RequireClientSecret
         };
         return clientDto;
     }
@@ -288,6 +289,11 @@ public class ClientsController : ControllerBase
         if (clientDto.IsOfflineAccessEnabled.HasValue)
         {
             applicationClient.AllowOfflineAccess = clientDto.IsOfflineAccessEnabled.Value;
+        }
+
+        if (clientDto.RequireClientSecret.HasValue)
+        {
+            applicationClient.RequireClientSecret = clientDto.RequireClientSecret.Value;
         }
 
         if (!string.IsNullOrWhiteSpace(clientDto.ClientSecret))
