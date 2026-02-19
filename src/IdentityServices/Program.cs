@@ -276,30 +276,8 @@ try
     // Map API controllers - MUST come before UseEndpoints middleware runs
     app.MapControllers();
 
-    // SPA configuration for Angular frontend
-    // UseWhen ensures SPA proxy only handles non-API requests
-    if (app.Environment.IsDevelopment())
-    {
-        app.UseWhen(
-            context => !context.Request.Path.StartsWithSegments("/api") &&
-                       !context.Request.Path.StartsWithSegments("/connect") &&
-                       !context.Request.Path.StartsWithSegments("/.well-known") &&
-                       !context.Request.Path.Value!.Contains("/api/") &&
-                       !(context.Request.Path.Value?.StartsWith("/system/v", StringComparison.OrdinalIgnoreCase) ?? false),
-            appBranch =>
-            {
-                appBranch.UseSpa(spa =>
-                {
-                    spa.Options.SourcePath = "ClientApp";
-                    spa.UseProxyToSpaDevelopmentServer("https://localhost:44400");
-                });
-            });
-    }
-    else
-    {
-        // In production/staging, serve pre-built Angular files from wwwroot
-        app.MapFallbackToFile("index.html");
-    }
+    // Serve pre-built Angular files from wwwroot for all environments
+    app.MapFallbackToFile("index.html");
     
     // Initialisierung abfangen
     app.Lifetime.ApplicationStarted.Register(() =>

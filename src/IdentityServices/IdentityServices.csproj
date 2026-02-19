@@ -10,8 +10,6 @@
         <DefaultItemExcludes>$(DefaultItemExcludes);$(SpaRoot)node_modules\**</DefaultItemExcludes>
         <DockerDefaultTargetOS>Linux</DockerDefaultTargetOS>
         <IsPackable>false</IsPackable>
-        <SpaProxyLaunchCommand>npm start</SpaProxyLaunchCommand>
-        <SpaProxyServerUrl>https://localhost:44400</SpaProxyServerUrl>
         <TypeScriptCompileBlocked>true</TypeScriptCompileBlocked>
         <TypeScriptToolsVersion>Latest</TypeScriptToolsVersion>
         <CopyDocumentationFilesFromPackages>true</CopyDocumentationFilesFromPackages>
@@ -29,8 +27,6 @@
     <ItemGroup>
         <PackageReference Include="AspNetCore.Identity.Mongo" Version="10.1.0" />
         <PackageReference Include="Microsoft.AspNetCore.Authentication.JwtBearer" Version="10.0.2" />
-        <PackageReference Include="Microsoft.AspNetCore.SpaProxy" Version="10.0.2" />
-        <PackageReference Include="Microsoft.AspNetCore.SpaServices.Extensions" Version="10.0.2" />
         <PackageReference Include="NLog.Web.AspNetCore" Version="6.1.0" />
         <PackageReference Include="Meshmakers.Octo.Services.Swagger" Version="$(OctoVersion)" />
         <PackageReference Include="Meshmakers.Octo.Services.Observability" Version="$(OctoVersion)" />
@@ -54,24 +50,32 @@
       <_ContentIncludedByDefault Remove="ClientApp\dist\identity-ui\prerendered-routes.json" />
     </ItemGroup>
 
-    <Target Name="DebugEnsureNodeEnv" BeforeTargets="Build" Condition=" '$(Configuration)' == 'Debug' And !Exists('$(SpaRoot)node_modules') ">
-        <!-- Ensure Node.js is installed -->
+    <!-- Build Angular ClientApp if dist output does not exist yet -->
+    <Target Name="BuildClientApp" BeforeTargets="Build" Condition="!Exists('$(SpaRoot)dist\index.html')">
         <Exec Command="node --version" ContinueOnError="true">
             <Output TaskParameter="ExitCode" PropertyName="ErrorCode" />
         </Exec>
         <Error Condition="'$(ErrorCode)' != '0'" Text="Node.js is required to build and run this project. To continue, please install Node.js from https://nodejs.org/, and then restart your command prompt or IDE." />
-        <Message Importance="high" Text="Restoring dependencies using 'npm'. This may take several minutes..." />
-        <Exec WorkingDirectory="$(SpaRoot)" Command="npm install" />
+        <Message Importance="high" Text="Installing npm dependencies for ClientApp..." />
+        <Exec WorkingDirectory="$(SpaRoot)" Command="npm install" Condition="!Exists('$(SpaRoot)node_modules')" />
+        <Message Importance="high" Text="Building Angular ClientApp..." />
+        <Exec WorkingDirectory="$(SpaRoot)" Command="npm run build" />
     </Target>
 
+    <!-- Copy Angular dist output to wwwroot in build output directory -->
+    <Target Name="CopyClientAppToOutput" AfterTargets="Build" Condition="Exists('$(SpaRoot)dist\index.html')">
+        <ItemGroup>
+            <ClientAppDistFiles Include="$(SpaRoot)dist\**\*" />
+        </ItemGroup>
+        <Copy SourceFiles="@(ClientAppDistFiles)" DestinationFolder="$(OutDir)wwwroot\%(RecursiveDir)" SkipUnchangedFiles="true" />
+    </Target>
+
+    <!-- Publish: ensure fresh production build of Angular ClientApp -->
     <Target Name="PublishRunWebpack" AfterTargets="ComputeFilesToPublish">
-        <!-- As part of publishing, ensure the JS resources are freshly built in production mode -->
         <Exec WorkingDirectory="$(SpaRoot)" Command="npm install" />
         <Exec WorkingDirectory="$(SpaRoot)" Command="npm run build -- --configuration production" />
-
-        <!-- Include the newly-built files in the publish output -->
         <ItemGroup>
-            <DistFiles Include="$(SpaRoot)dist\browser\**" />
+            <DistFiles Include="$(SpaRoot)dist\**" />
             <ResolvedFileToPublish Include="@(DistFiles->'%(FullPath)')" Exclude="@(ResolvedFileToPublish)">
                 <RelativePath>wwwroot\%(RecursiveDir)%(FileName)%(Extension)</RelativePath>
                 <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
