@@ -275,7 +275,11 @@ public class ExternalLoginTests : IntegrationTestBase
     public async Task ExternalCallback_WithoutExternalCookie_ReturnsError()
     {
         // Arrange
-        var client = CreateAnonymousClient();
+        // Use a client that does NOT follow redirects so we can inspect the actual response
+        var client = Factory.CreateClient(new Microsoft.AspNetCore.Mvc.Testing.WebApplicationFactoryClientOptions
+        {
+            AllowAutoRedirect = false
+        });
         var ct = TestContext.Current.CancellationToken;
 
         // Act
@@ -283,9 +287,7 @@ public class ExternalLoginTests : IntegrationTestBase
         var response = await client.GetAsync(AuthApiUrl("external-callback"), ct);
 
         // Assert
-        // Should return an error - either a redirect to error page or an error status code
-        // In some test environments (CI), the authentication middleware may throw before
-        // the controller action runs, resulting in 500. This is acceptable error behavior.
+        // Should return a redirect to error page or an error status code
         response.StatusCode.Should().BeOneOf(
             HttpStatusCode.Found,
             HttpStatusCode.Redirect,
