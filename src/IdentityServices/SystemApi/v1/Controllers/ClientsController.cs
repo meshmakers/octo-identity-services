@@ -223,7 +223,7 @@ public class ClientsController : ControllerBase
             FrontChannelLogoutUri = applicationClient.FrontChannelLogoutUri,
             FrontChannelLogoutSessionRequired = applicationClient.FrontChannelLogoutSessionRequired,
             BackChannelLogoutUri = applicationClient.BackChannelLogoutUri,
-            BackChannelLogoutSessionRequired = applicationClient.BackChannelLogoutSessionRequired
+            BackChannelLogoutSessionRequired = applicationClient.BackChannelLogoutSessionRequired,
             RequireClientSecret = applicationClient.RequireClientSecret
         };
         return clientDto;
