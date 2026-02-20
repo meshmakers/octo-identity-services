@@ -32,7 +32,7 @@ public class DiagnosticsController : ControllerBase
         _logger = logger;
         _diagnosticsService = diagnosticsService;
     }
-    
+
     [HttpGet]
     [EndpointSummary("Returns a diagnostics information of the current authenticated user")]
     [ProducesResponseType(typeof(DiagnosticsDto), StatusCodes.Status200OK)]
@@ -41,14 +41,14 @@ public class DiagnosticsController : ControllerBase
         var model = new DiagnosticsDto(HttpContext.User);
         return Ok(model);
     }
-    
+
     [HttpPost("reconfigureLogLevel")]
     [Authorize(IdentityServiceConstants.IdentityApiReadWritePolicy)]
     [EndpointSummary("Reconfigures the log level of the service")]
     [ProducesResponseType(StatusCodes.Status204NoContent)]
     public async Task<IActionResult> ReconfigureLogLevelAsync(
-        [Required] [Description("The minimal log level to be logged.")] LogLevelDto minLogLevel,
-        [Required] [Description("The maximal log level to be logged.")] LogLevelDto maxLogLevel,
+        [Required][Description("The minimal log level to be logged.")] LogLevelDto minLogLevel,
+        [Required][Description("The maximal log level to be logged.")] LogLevelDto maxLogLevel,
         [Description("The name of the logger to be reconfigured.")] string loggerName = "*")
     {
         try

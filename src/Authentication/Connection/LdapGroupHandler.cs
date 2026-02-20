@@ -51,10 +51,10 @@ public class LdapGroupHandler
         });
 
         foreach (var entry in entries)
-        foreach (var value in HandleEntry(entry))
-        {
-            yield return value;
-        }
+            foreach (var value in HandleEntry(entry))
+            {
+                yield return value;
+            }
 
         IEnumerable<string> HandleEntry(LdapEntry entry)
         {

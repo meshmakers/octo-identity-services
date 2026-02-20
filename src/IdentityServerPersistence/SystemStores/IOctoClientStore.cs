@@ -6,7 +6,7 @@ namespace IdentityServerPersistence.SystemStores;
 public interface IOctoClientStore : IClientStore
 {
     public string TenantId { get; }
-    
+
     Task<IEnumerable<RtClient>> GetClients();
 
     Task CreateAsync(RtClient client);

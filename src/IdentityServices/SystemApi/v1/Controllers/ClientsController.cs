@@ -1,7 +1,6 @@
 ﻿using System.ComponentModel;
 using System.ComponentModel.DataAnnotations;
 using Asp.Versioning;
-using Duende.IdentityServer.Models;
 using IdentityModel;
 using IdentityServerPersistence;
 using IdentityServerPersistence.SystemStores;
@@ -9,12 +8,12 @@ using Meshmakers.Octo.Common.DistributionEventHub.Services;
 using Meshmakers.Octo.Communication.Contracts;
 using Meshmakers.Octo.Communication.Contracts.DataTransferObjects;
 using Meshmakers.Octo.Communication.Contracts.DataTransferObjects.ApiErrors;
+using Duende.IdentityServer.Models;
+using MongoDB.Bson;
 using Meshmakers.Octo.Runtime.Contracts.RepositoryEntities;
 using Meshmakers.Octo.Services.Contracts.DistributionEventHub.Messages;
 using Microsoft.AspNetCore.Authorization;
-using Microsoft.AspNetCore.Http.HttpResults;
 using Microsoft.AspNetCore.Mvc;
-using MongoDB.Bson;
 using Persistence.IdentityCkModel.Generated.System.Identity.v2;
 
 namespace Meshmakers.Octo.Backend.IdentityServices.SystemApi.v1.Controllers;
@@ -58,7 +57,7 @@ public class ClientsController : ControllerBase
     [Authorize(IdentityServiceConstants.IdentityApiReadOnlyPolicy)]
     [EndpointSummary("Returns all client definitions using paging")]
     [ProducesResponseType(typeof(PagedResult<ClientDto>), StatusCodes.Status200OK)]
-    public async Task<PagedResult<ClientDto>> Get([Required] [FromQuery] PagingParams pagingParams)
+    public async Task<PagedResult<ClientDto>> Get([Required][FromQuery] PagingParams pagingParams)
     {
         var list = new List<ClientDto>();
 
@@ -85,7 +84,7 @@ public class ClientsController : ControllerBase
     [Authorize(IdentityServiceConstants.IdentityApiReadOnlyPolicy)]
     [EndpointSummary("Returns client information based on it's client id")]
     [ProducesResponseType(typeof(ClientDto), StatusCodes.Status200OK)]
-    public async Task<IActionResult> Get([Required] [Description("ID of the client")] string id)
+    public async Task<IActionResult> Get([Required][Description("ID of the client")] string id)
     {
         var client = await _octoClientStore.FindRtClientByIdAsync(id);
         if (client == null)
@@ -102,7 +101,7 @@ public class ClientsController : ControllerBase
     [EndpointSummary("Creates a new client")]
     [ProducesResponseType(StatusCodes.Status200OK)]
     public async Task<IActionResult> Post(
-        [Required] [FromBody] [Description("The client data transfer object instance")] ClientDto clientDto)
+        [Required][FromBody][Description("The client data transfer object instance")] ClientDto clientDto)
     {
         if (!ModelState.IsValid || clientDto.ClientId == null)
         {
@@ -144,8 +143,8 @@ public class ClientsController : ControllerBase
     [EndpointSummary("Updates a client")]
     [ProducesResponseType(StatusCodes.Status200OK)]
     public async Task<IActionResult> Put(
-        [Required] [Description("ID of the client")] string id,
-        [Required] [FromBody] [Description("The client data transfer object instance")] ClientDto clientDto)
+        [Required][Description("ID of the client")] string id,
+        [Required][FromBody][Description("The client data transfer object instance")] ClientDto clientDto)
     {
         if (!ModelState.IsValid)
         {
@@ -178,7 +177,7 @@ public class ClientsController : ControllerBase
     [Authorize(IdentityServiceConstants.IdentityApiReadWritePolicy)]
     [EndpointSummary("Deletes a client")]
     [ProducesResponseType(StatusCodes.Status200OK)]
-    public async Task<IActionResult> Delete([Required] [Description("ID of the client")] string id)
+    public async Task<IActionResult> Delete([Required][Description("ID of the client")] string id)
     {
         var appClient = await _octoClientStore.FindClientByIdAsync(id);
         if (appClient == null)
@@ -205,7 +204,7 @@ public class ClientsController : ControllerBase
             Guid.NewGuid(), DateTime.Now));
     }
 
-    private ClientDto CreateClientDto(RtClient applicationClient)
+    private static ClientDto CreateClientDto(RtClient applicationClient)
     {
         var clientDto = new ClientDto
         {

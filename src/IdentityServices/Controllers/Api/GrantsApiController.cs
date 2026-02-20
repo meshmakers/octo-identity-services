@@ -3,9 +3,7 @@ using Duende.IdentityServer.Extensions;
 using Duende.IdentityServer.Services;
 using Duende.IdentityServer.Stores;
 using Microsoft.AspNetCore.Authorization;
-using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Mvc;
-using Persistence.IdentityCkModel.Generated.System.Identity.v2;
 
 namespace Meshmakers.Octo.Backend.IdentityServices.Controllers.Api;
 
@@ -21,20 +19,17 @@ public class GrantsApiController : ControllerBase
     private readonly IClientStore _clientStore;
     private readonly IResourceStore _resourceStore;
     private readonly IEventService _events;
-    private readonly UserManager<RtUser> _userManager;
 
     public GrantsApiController(
         IIdentityServerInteractionService interaction,
         IClientStore clientStore,
         IResourceStore resourceStore,
-        IEventService events,
-        UserManager<RtUser> userManager)
+        IEventService events)
     {
         _interaction = interaction;
         _clientStore = clientStore;
         _resourceStore = resourceStore;
         _events = events;
-        _userManager = userManager;
     }
 
     /// <summary>

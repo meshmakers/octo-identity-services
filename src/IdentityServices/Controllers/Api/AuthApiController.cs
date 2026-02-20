@@ -21,48 +21,26 @@ namespace Meshmakers.Octo.Backend.IdentityServices.Controllers.Api;
 [ApiController]
 [Route("{tenantId}/api/auth")]
 [AllowAnonymous]
-public class AuthApiController : ControllerBase
+public class AuthApiController(
+    IIdentityServerInteractionService interaction,
+    IAuthenticationSchemeProvider schemeProvider,
+    IClientStore clientStore,
+    SignInManager<RtUser> signInManager,
+    UserManager<RtUser> userManager,
+    IEventService events,
+    IPersistedGrantStore persistedGrantStore,
+    ILdapAuthenticationService ldapAuthService,
+    ILogger<AuthApiController> logger)
+    : ControllerBase
 {
-    private readonly IIdentityServerInteractionService _interaction;
-    private readonly IAuthenticationSchemeProvider _schemeProvider;
-    private readonly IClientStore _clientStore;
-    private readonly SignInManager<RtUser> _signInManager;
-    private readonly UserManager<RtUser> _userManager;
-    private readonly IEventService _events;
-    private readonly IPersistedGrantStore _persistedGrantStore;
-    private readonly ILdapAuthenticationService _ldapAuthService;
-    private readonly ILogger<AuthApiController> _logger;
-
-    public AuthApiController(
-        IIdentityServerInteractionService interaction,
-        IAuthenticationSchemeProvider schemeProvider,
-        IClientStore clientStore,
-        SignInManager<RtUser> signInManager,
-        UserManager<RtUser> userManager,
-        IEventService events,
-        IPersistedGrantStore persistedGrantStore,
-        ILdapAuthenticationService ldapAuthService,
-        ILogger<AuthApiController> logger)
-    {
-        _interaction = interaction;
-        _schemeProvider = schemeProvider;
-        _clientStore = clientStore;
-        _signInManager = signInManager;
-        _userManager = userManager;
-        _events = events;
-        _persistedGrantStore = persistedGrantStore;
-        _ldapAuthService = ldapAuthService;
-        _logger = logger;
-    }
-
     /// <summary>
     /// Get the login context for building the login UI
     /// </summary>
     [HttpGet("login-context")]
     public async Task<ActionResult<LoginContextDto>> GetLoginContext([FromQuery] string? returnUrl)
     {
-        var context = await _interaction.GetAuthorizationContextAsync(returnUrl);
-        var schemes = await _schemeProvider.GetAllSchemesAsync();
+        var context = await interaction.GetAuthorizationContextAsync(returnUrl);
+        var schemes = await schemeProvider.GetAllSchemesAsync();
 
         // Build providers list with LDAP detection
         var externalSchemes = schemes.Where(x => x.DisplayName != null).ToList();
@@ -70,7 +48,7 @@ public class AuthApiController : ControllerBase
 
         foreach (var scheme in externalSchemes)
         {
-            var isLdap = await _ldapAuthService.IsLdapSchemeAsync(scheme.Name);
+            var isLdap = await ldapAuthService.IsLdapSchemeAsync(scheme.Name);
             providers.Add(new ExternalProviderDto
             {
                 Scheme = scheme.Name,
@@ -83,9 +61,9 @@ public class AuthApiController : ControllerBase
         string? clientName = null;
         string? clientLogoUrl = null;
 
-        if (context?.Client?.ClientId != null)
+        if (context?.Client.ClientId != null)
         {
-            var client = await _clientStore.FindEnabledClientByIdAsync(context.Client.ClientId);
+            var client = await clientStore.FindEnabledClientByIdAsync(context.Client.ClientId);
             if (client != null)
             {
                 allowLocal = client.EnableLocalLogin;
@@ -128,7 +106,7 @@ public class AuthApiController : ControllerBase
     [HttpPost("login")]
     public async Task<ActionResult<LoginResultDto>> Login([FromBody] LoginRequestDto request)
     {
-        var context = await _interaction.GetAuthorizationContextAsync(request.ReturnUrl);
+        var context = await interaction.GetAuthorizationContextAsync(request.ReturnUrl);
 
         if (string.IsNullOrEmpty(request.Username) || string.IsNullOrEmpty(request.Password))
         {
@@ -139,7 +117,7 @@ public class AuthApiController : ControllerBase
             };
         }
 
-        var result = await _signInManager.PasswordSignInAsync(
+        var result = await signInManager.PasswordSignInAsync(
             request.Username,
             request.Password,
             request.RememberLogin,
@@ -147,17 +125,17 @@ public class AuthApiController : ControllerBase
 
         if (result.Succeeded)
         {
-            var user = await _userManager.FindByNameAsync(request.Username);
-            await _events.RaiseAsync(new UserLoginSuccessEvent(
+            var user = await userManager.FindByNameAsync(request.Username);
+            await events.RaiseAsync(new UserLoginSuccessEvent(
                 user?.UserName,
                 user?.RtId.ToString(),
                 user?.UserName,
-                clientId: context?.Client?.ClientId));
+                clientId: context?.Client.ClientId));
 
             // Use return URL if valid, otherwise redirect to manage page
             var tenantId = RouteData.Values["tenantId"]?.ToString() ?? "System";
             var redirectUrl = !string.IsNullOrEmpty(request.ReturnUrl) &&
-                              (_interaction.IsValidReturnUrl(request.ReturnUrl) || Url.IsLocalUrl(request.ReturnUrl))
+                              (interaction.IsValidReturnUrl(request.ReturnUrl) || Url.IsLocalUrl(request.ReturnUrl))
                 ? request.ReturnUrl
                 : $"/{tenantId}/manage";
 
@@ -168,10 +146,10 @@ public class AuthApiController : ControllerBase
             };
         }
 
-        await _events.RaiseAsync(new UserLoginFailureEvent(
+        await events.RaiseAsync(new UserLoginFailureEvent(
             request.Username,
             "Invalid credentials",
-            clientId: context?.Client?.ClientId));
+            clientId: context?.Client.ClientId));
 
         if (result.IsLockedOut)
         {
@@ -186,11 +164,11 @@ public class AuthApiController : ControllerBase
         if (result.RequiresTwoFactor)
         {
             // Check what 2FA methods are available
-            var twoFactorUser = await _signInManager.GetTwoFactorAuthenticationUserAsync();
+            var twoFactorUser = await signInManager.GetTwoFactorAuthenticationUserAsync();
             var canUseTotp = twoFactorUser != null &&
-                !string.IsNullOrEmpty(await _userManager.GetAuthenticatorKeyAsync(twoFactorUser));
+                !string.IsNullOrEmpty(await userManager.GetAuthenticatorKeyAsync(twoFactorUser));
             var canUseEmail = twoFactorUser != null &&
-                await _userManager.IsEmailConfirmedAsync(twoFactorUser);
+                await userManager.IsEmailConfirmedAsync(twoFactorUser);
 
             return new LoginResultDto
             {
@@ -215,13 +193,13 @@ public class AuthApiController : ControllerBase
     [HttpGet("external-providers")]
     public async Task<ActionResult<IEnumerable<ExternalProviderDto>>> GetExternalProviders()
     {
-        var schemes = await _schemeProvider.GetAllSchemesAsync();
+        var schemes = await schemeProvider.GetAllSchemesAsync();
         var externalSchemes = schemes.Where(x => x.DisplayName != null).ToList();
         var providers = new List<ExternalProviderDto>();
 
         foreach (var scheme in externalSchemes)
         {
-            var isLdap = await _ldapAuthService.IsLdapSchemeAsync(scheme.Name);
+            var isLdap = await ldapAuthService.IsLdapSchemeAsync(scheme.Name);
             providers.Add(new ExternalProviderDto
             {
                 Scheme = scheme.Name,
@@ -270,7 +248,7 @@ public class AuthApiController : ControllerBase
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Unhandled exception in ExternalLoginCallback");
+            logger.LogError(ex, "Unhandled exception in ExternalLoginCallback");
             return Redirect($"/{defaultTenantId}/error?error=External authentication failed");
         }
     }
@@ -278,7 +256,7 @@ public class AuthApiController : ControllerBase
     private async Task<IActionResult> ExternalLoginCallbackInternal()
     {
         // Get tenant ID early for error handling
-        var tenantId = RouteData?.Values["tenantId"]?.ToString() ?? "System";
+        var tenantId = RouteData.Values["tenantId"]?.ToString() ?? "System";
 
         // 1. Authenticate from external cookie
         AuthenticateResult result;
@@ -288,13 +266,13 @@ public class AuthApiController : ControllerBase
         }
         catch (Exception ex)
         {
-            _logger.LogWarning(ex, "External authentication threw exception");
+            logger.LogWarning(ex, "External authentication threw exception");
             return Redirect($"/{tenantId}/error?error=External authentication failed");
         }
 
         if (!result.Succeeded)
         {
-            _logger.LogWarning("External authentication failed: {Error}", result.Failure?.Message);
+            logger.LogWarning("External authentication failed: {Error}", result.Failure?.Message);
             return Redirect($"/{tenantId}/error?error=External authentication failed");
         }
 
@@ -313,36 +291,36 @@ public class AuthApiController : ControllerBase
 
         if (userIdClaim == null || string.IsNullOrEmpty(provider))
         {
-            _logger.LogWarning("External login missing required claims. Provider: {Provider}, UserIdClaim: {UserIdClaim}",
+            logger.LogWarning("External login missing required claims. Provider: {Provider}, UserIdClaim: {UserIdClaim}",
                 provider, userIdClaim?.Value);
             return Redirect($"/{tenantId}/error?error=Invalid external login - missing required claims");
         }
 
-        _logger.LogInformation("Processing external login callback for provider {Provider}, user {UserId}",
+        logger.LogInformation("Processing external login callback for provider {Provider}, user {UserId}",
             provider, userIdClaim.Value);
 
         // Log all claims for debugging
-        _logger.LogDebug("External provider claims received:");
+        logger.LogDebug("External provider claims received:");
         foreach (var claim in claims)
         {
-            _logger.LogDebug("  Claim: {Type} = {Value}", claim.Type, claim.Value);
+            logger.LogDebug("  Claim: {Type} = {Value}", claim.Type, claim.Value);
         }
 
         // 3. Find existing user by external login
-        var user = await _userManager.FindByLoginAsync(provider, userIdClaim.Value);
+        var user = await userManager.FindByLoginAsync(provider, userIdClaim.Value);
 
         if (user == null)
         {
             // 4a. Try to find user by email (for account linking)
             var email = GetEmailFromClaims(claims);
-            _logger.LogDebug("Extracted email from claims: {Email}", email ?? "(null)");
+            logger.LogDebug("Extracted email from claims: {Email}", email ?? "(null)");
 
             if (!string.IsNullOrEmpty(email))
             {
-                user = await _userManager.FindByEmailAsync(email);
+                user = await userManager.FindByEmailAsync(email);
                 if (user != null)
                 {
-                    _logger.LogInformation("Found existing user {UserName} by email {Email}, linking external login",
+                    logger.LogInformation("Found existing user {UserName} by email {Email}, linking external login",
                         user.UserName, email);
                 }
             }
@@ -356,32 +334,32 @@ public class AuthApiController : ControllerBase
                     return Redirect($"/{tenantId}/error?error=Failed to create user account");
                 }
 
-                _logger.LogInformation("Created new user {UserName} from external provider {Provider}",
+                logger.LogInformation("Created new user {UserName} from external provider {Provider}",
                     user.UserName, provider);
             }
 
             // 5. Link external login to user
-            var addLoginResult = await _userManager.AddLoginAsync(
+            var addLoginResult = await userManager.AddLoginAsync(
                 user,
                 new UserLoginInfo(provider, userIdClaim.Value, provider));
 
             if (!addLoginResult.Succeeded)
             {
-                _logger.LogError("Failed to add external login for user {UserName}: {Errors}",
+                logger.LogError("Failed to add external login for user {UserName}: {Errors}",
                     user.UserName,
                     string.Join(", ", addLoginResult.Errors.Select(e => e.Description)));
             }
             else
             {
-                _logger.LogInformation("Linked external login {Provider} to user {UserName}",
+                logger.LogInformation("Linked external login {Provider} to user {UserName}",
                     provider, user.UserName);
             }
         }
 
         // 6. Sign in the user
-        await _signInManager.SignInAsync(user, isPersistent: false);
+        await signInManager.SignInAsync(user, isPersistent: false);
 
-        await _events.RaiseAsync(new UserLoginSuccessEvent(
+        await events.RaiseAsync(new UserLoginSuccessEvent(
             user.UserName,
             user.RtId.ToString(),
             user.UserName,
@@ -391,7 +369,7 @@ public class AuthApiController : ControllerBase
         await HttpContext.SignOutAsync(IdentityServerConstants.ExternalCookieAuthenticationScheme);
 
         // 8. Handle return URL
-        if (_interaction.IsValidReturnUrl(returnUrl) || Url.IsLocalUrl(returnUrl))
+        if (interaction.IsValidReturnUrl(returnUrl) || Url.IsLocalUrl(returnUrl))
         {
             return Redirect(returnUrl);
         }
@@ -406,8 +384,6 @@ public class AuthApiController : ControllerBase
     {
         // Try multiple claim types (different providers use different formats)
         var email = GetEmailFromClaims(claims);
-        var name = claims.FirstOrDefault(c => c.Type == ClaimTypes.Name)?.Value
-                   ?? claims.FirstOrDefault(c => c.Type == "name")?.Value;
         var givenName = claims.FirstOrDefault(c => c.Type == ClaimTypes.GivenName)?.Value
                         ?? claims.FirstOrDefault(c => c.Type == "given_name")?.Value;
         var surname = claims.FirstOrDefault(c => c.Type == ClaimTypes.Surname)?.Value
@@ -417,7 +393,7 @@ public class AuthApiController : ControllerBase
         var userName = email ?? $"{provider}_{Guid.NewGuid():N}";
 
         // Ensure username is unique
-        var existingUser = await _userManager.FindByNameAsync(userName);
+        var existingUser = await userManager.FindByNameAsync(userName);
         if (existingUser != null)
         {
             userName = $"{userName}_{Guid.NewGuid().ToString("N")[..8]}";
@@ -436,11 +412,11 @@ public class AuthApiController : ControllerBase
             SecurityStamp = Guid.NewGuid().ToString()
         };
 
-        var result = await _userManager.CreateAsync(user);
+        var result = await userManager.CreateAsync(user);
 
         if (!result.Succeeded)
         {
-            _logger.LogError("Failed to create user from external provider {Provider}: {Errors}",
+            logger.LogError("Failed to create user from external provider {Provider}: {Errors}",
                 provider,
                 string.Join(", ", result.Errors.Select(e => e.Description)));
             return null;
@@ -482,14 +458,14 @@ public class AuthApiController : ControllerBase
     [HttpGet("logout-context")]
     public async Task<ActionResult<LogoutContextDto>> GetLogoutContext([FromQuery] string? logoutId)
     {
-        var context = await _interaction.GetLogoutContextAsync(logoutId);
+        var context = await interaction.GetLogoutContextAsync(logoutId);
 
         return new LogoutContextDto
         {
             LogoutId = logoutId ?? string.Empty,
-            ShowLogoutPrompt = context?.ShowSignoutPrompt ?? true,
-            PostLogoutRedirectUri = context?.PostLogoutRedirectUri,
-            ClientName = context?.ClientName
+            ShowLogoutPrompt = context.ShowSignoutPrompt,
+            PostLogoutRedirectUri = context.PostLogoutRedirectUri,
+            ClientName = context.ClientName
         };
     }
 
@@ -499,7 +475,7 @@ public class AuthApiController : ControllerBase
     [HttpPost("logout")]
     public async Task<ActionResult<LogoutResultDto>> Logout([FromBody] LogoutRequestDto request)
     {
-        var context = await _interaction.GetLogoutContextAsync(request.LogoutId);
+        var context = await interaction.GetLogoutContextAsync(request.LogoutId);
 
         if (User.Identity?.IsAuthenticated == true)
         {
@@ -507,13 +483,13 @@ public class AuthApiController : ControllerBase
 
             // Revoke all persisted grants (refresh tokens, etc.) for this user
             // This ensures that clients cannot use refresh tokens after logout
-            await _persistedGrantStore.RemoveAllAsync(new PersistedGrantFilter
+            await persistedGrantStore.RemoveAllAsync(new PersistedGrantFilter
             {
                 SubjectId = subjectId
             });
 
-            await _signInManager.SignOutAsync();
-            await _events.RaiseAsync(new UserLogoutSuccessEvent(
+            await signInManager.SignOutAsync();
+            await events.RaiseAsync(new UserLogoutSuccessEvent(
                 subjectId,
                 User.GetDisplayName()));
         }
@@ -521,9 +497,9 @@ public class AuthApiController : ControllerBase
         return new LogoutResultDto
         {
             Success = true,
-            PostLogoutRedirectUri = context?.PostLogoutRedirectUri,
-            ClientName = context?.ClientName,
-            SignOutIframeUrl = context?.SignOutIFrameUrl,
+            PostLogoutRedirectUri = context.PostLogoutRedirectUri,
+            ClientName = context.ClientName,
+            SignOutIframeUrl = context.SignOutIFrameUrl,
             AutomaticRedirectAfterSignOut = true
         };
     }
@@ -543,7 +519,7 @@ public class AuthApiController : ControllerBase
             };
         }
 
-        var user = await _userManager.FindByEmailAsync(request.Email);
+        var user = await userManager.FindByEmailAsync(request.Email);
 
         // Always return success to prevent email enumeration attacks
         if (user == null)
@@ -552,7 +528,7 @@ public class AuthApiController : ControllerBase
         }
 
         // Generate password reset token
-        var token = await _userManager.GeneratePasswordResetTokenAsync(user);
+        var token = await userManager.GeneratePasswordResetTokenAsync(user);
 
         // TODO: Send email with reset link
         // For now, we'll log the token (in production, this would send an email)
@@ -606,7 +582,7 @@ public class AuthApiController : ControllerBase
             };
         }
 
-        var user = await _userManager.FindByEmailAsync(request.Email);
+        var user = await userManager.FindByEmailAsync(request.Email);
         if (user == null)
         {
             // Don't reveal that the user doesn't exist
@@ -617,7 +593,7 @@ public class AuthApiController : ControllerBase
             };
         }
 
-        var result = await _userManager.ResetPasswordAsync(user, request.Token, request.NewPassword);
+        var result = await userManager.ResetPasswordAsync(user, request.Token, request.NewPassword);
 
         if (result.Succeeded)
         {
@@ -646,16 +622,16 @@ public class AuthApiController : ControllerBase
             return new ValidateResetTokenResultDto { IsValid = false };
         }
 
-        var user = await _userManager.FindByEmailAsync(email);
+        var user = await userManager.FindByEmailAsync(email);
         if (user == null)
         {
             return new ValidateResetTokenResultDto { IsValid = false };
         }
 
         // Verify the token is valid
-        var isValid = await _userManager.VerifyUserTokenAsync(
+        var isValid = await userManager.VerifyUserTokenAsync(
             user,
-            _userManager.Options.Tokens.PasswordResetTokenProvider,
+            userManager.Options.Tokens.PasswordResetTokenProvider,
             "ResetPassword",
             token);
 
@@ -670,7 +646,7 @@ public class AuthApiController : ControllerBase
     [HttpPost("login-2fa")]
     public async Task<ActionResult<TwoFactorLoginResultDto>> LoginTwoFactor([FromBody] TwoFactorLoginRequestDto request)
     {
-        var user = await _signInManager.GetTwoFactorAuthenticationUserAsync();
+        var user = await signInManager.GetTwoFactorAuthenticationUserAsync();
         if (user == null)
         {
             return new TwoFactorLoginResultDto
@@ -682,14 +658,14 @@ public class AuthApiController : ControllerBase
 
         var authenticatorCode = request.Code.Replace(" ", string.Empty).Replace("-", string.Empty);
 
-        var result = await _signInManager.TwoFactorAuthenticatorSignInAsync(
+        var result = await signInManager.TwoFactorAuthenticatorSignInAsync(
             authenticatorCode,
             isPersistent: false,
             rememberClient: request.RememberMachine);
 
         if (result.Succeeded)
         {
-            await _events.RaiseAsync(new UserLoginSuccessEvent(
+            await events.RaiseAsync(new UserLoginSuccessEvent(
                 user.UserName,
                 user.RtId.ToString(),
                 user.UserName,
@@ -698,7 +674,7 @@ public class AuthApiController : ControllerBase
             // Use the return URL from request, or default to manage page
             var tenantId = RouteData.Values["tenantId"]?.ToString() ?? "System";
             var redirectUrl = !string.IsNullOrEmpty(request.ReturnUrl) &&
-                              (_interaction.IsValidReturnUrl(request.ReturnUrl) || Url.IsLocalUrl(request.ReturnUrl))
+                              (interaction.IsValidReturnUrl(request.ReturnUrl) || Url.IsLocalUrl(request.ReturnUrl))
                 ? request.ReturnUrl
                 : $"/{tenantId}/manage";
 
@@ -718,7 +694,7 @@ public class AuthApiController : ControllerBase
             };
         }
 
-        await _events.RaiseAsync(new UserLoginFailureEvent(
+        await events.RaiseAsync(new UserLoginFailureEvent(
             user.UserName,
             "Invalid two-factor code",
             clientId: null));
@@ -736,7 +712,7 @@ public class AuthApiController : ControllerBase
     [HttpPost("login-2fa-email")]
     public async Task<ActionResult<TwoFactorLoginResultDto>> LoginTwoFactorEmail([FromBody] TwoFactorEmailLoginRequestDto request)
     {
-        var user = await _signInManager.GetTwoFactorAuthenticationUserAsync();
+        var user = await signInManager.GetTwoFactorAuthenticationUserAsync();
         if (user == null)
         {
             return new TwoFactorLoginResultDto
@@ -748,7 +724,7 @@ public class AuthApiController : ControllerBase
 
         var emailCode = request.Code.Replace(" ", string.Empty).Replace("-", string.Empty);
 
-        var result = await _signInManager.TwoFactorSignInAsync(
+        var result = await signInManager.TwoFactorSignInAsync(
             TokenOptions.DefaultEmailProvider,
             emailCode,
             isPersistent: false,
@@ -756,7 +732,7 @@ public class AuthApiController : ControllerBase
 
         if (result.Succeeded)
         {
-            await _events.RaiseAsync(new UserLoginSuccessEvent(
+            await events.RaiseAsync(new UserLoginSuccessEvent(
                 user.UserName,
                 user.RtId.ToString(),
                 user.UserName,
@@ -765,7 +741,7 @@ public class AuthApiController : ControllerBase
             // Use the return URL from request, or default to manage page
             var tenantId = RouteData.Values["tenantId"]?.ToString() ?? "System";
             var redirectUrl = !string.IsNullOrEmpty(request.ReturnUrl) &&
-                              (_interaction.IsValidReturnUrl(request.ReturnUrl) || Url.IsLocalUrl(request.ReturnUrl))
+                              (interaction.IsValidReturnUrl(request.ReturnUrl) || Url.IsLocalUrl(request.ReturnUrl))
                 ? request.ReturnUrl
                 : $"/{tenantId}/manage";
 
@@ -785,7 +761,7 @@ public class AuthApiController : ControllerBase
             };
         }
 
-        await _events.RaiseAsync(new UserLoginFailureEvent(
+        await events.RaiseAsync(new UserLoginFailureEvent(
             user.UserName,
             "Invalid two-factor email code",
             clientId: null));
@@ -803,7 +779,7 @@ public class AuthApiController : ControllerBase
     [HttpPost("send-2fa-email")]
     public async Task<ActionResult<SendTwoFactorEmailResultDto>> SendTwoFactorEmail()
     {
-        var user = await _signInManager.GetTwoFactorAuthenticationUserAsync();
+        var user = await signInManager.GetTwoFactorAuthenticationUserAsync();
         if (user == null)
         {
             return new SendTwoFactorEmailResultDto
@@ -822,7 +798,7 @@ public class AuthApiController : ControllerBase
             };
         }
 
-        var code = await _userManager.GenerateTwoFactorTokenAsync(user, TokenOptions.DefaultEmailProvider);
+        var code = await userManager.GenerateTwoFactorTokenAsync(user, TokenOptions.DefaultEmailProvider);
 
         // TODO: Send email with the code using IEmailSender
         // await _emailSender.SendTwoFactorEmailAsync(user.Email, code);
@@ -837,7 +813,7 @@ public class AuthApiController : ControllerBase
     [HttpPost("login-recovery")]
     public async Task<ActionResult<TwoFactorLoginResultDto>> LoginRecovery([FromBody] RecoveryCodeLoginRequestDto request)
     {
-        var user = await _signInManager.GetTwoFactorAuthenticationUserAsync();
+        var user = await signInManager.GetTwoFactorAuthenticationUserAsync();
         if (user == null)
         {
             return new TwoFactorLoginResultDto
@@ -849,11 +825,11 @@ public class AuthApiController : ControllerBase
 
         var recoveryCode = request.RecoveryCode.Replace(" ", string.Empty).Replace("-", string.Empty);
 
-        var result = await _signInManager.TwoFactorRecoveryCodeSignInAsync(recoveryCode);
+        var result = await signInManager.TwoFactorRecoveryCodeSignInAsync(recoveryCode);
 
         if (result.Succeeded)
         {
-            await _events.RaiseAsync(new UserLoginSuccessEvent(
+            await events.RaiseAsync(new UserLoginSuccessEvent(
                 user.UserName,
                 user.RtId.ToString(),
                 user.UserName,
@@ -862,7 +838,7 @@ public class AuthApiController : ControllerBase
             // Use the return URL from request, or default to manage page
             var tenantId = RouteData.Values["tenantId"]?.ToString() ?? "System";
             var redirectUrl = !string.IsNullOrEmpty(request.ReturnUrl) &&
-                              (_interaction.IsValidReturnUrl(request.ReturnUrl) || Url.IsLocalUrl(request.ReturnUrl))
+                              (interaction.IsValidReturnUrl(request.ReturnUrl) || Url.IsLocalUrl(request.ReturnUrl))
                 ? request.ReturnUrl
                 : $"/{tenantId}/manage";
 
@@ -882,7 +858,7 @@ public class AuthApiController : ControllerBase
             };
         }
 
-        await _events.RaiseAsync(new UserLoginFailureEvent(
+        await events.RaiseAsync(new UserLoginFailureEvent(
             user.UserName,
             "Invalid recovery code",
             clientId: null));
@@ -905,7 +881,7 @@ public class AuthApiController : ControllerBase
     public async Task<ActionResult<LdapLoginResultDto>> LdapLogin([FromBody] LdapLoginRequestDto request)
     {
         // 1. Validate the scheme is an LDAP provider
-        if (!await _ldapAuthService.IsLdapSchemeAsync(request.Scheme))
+        if (!await ldapAuthService.IsLdapSchemeAsync(request.Scheme))
         {
             return new LdapLoginResultDto
             {
@@ -915,14 +891,14 @@ public class AuthApiController : ControllerBase
         }
 
         // 2. Authenticate against LDAP
-        var authResult = await _ldapAuthService.AuthenticateAsync(
+        var authResult = await ldapAuthService.AuthenticateAsync(
             request.Scheme,
             request.Username,
             request.Password);
 
         if (!authResult.Succeeded || authResult.LoginInfo == null)
         {
-            await _events.RaiseAsync(new UserLoginFailureEvent(
+            await events.RaiseAsync(new UserLoginFailureEvent(
                 request.Username,
                 authResult.ErrorMessage ?? "LDAP authentication failed",
                 clientId: null));
@@ -938,7 +914,7 @@ public class AuthApiController : ControllerBase
         var claims = loginInfo.Principal.Claims.ToList();
 
         // 3. Find existing user by external login
-        var user = await _userManager.FindByLoginAsync(
+        var user = await userManager.FindByLoginAsync(
             loginInfo.LoginProvider,
             loginInfo.ProviderKey);
 
@@ -948,10 +924,10 @@ public class AuthApiController : ControllerBase
             var email = GetEmailFromClaims(claims);
             if (!string.IsNullOrEmpty(email))
             {
-                user = await _userManager.FindByEmailAsync(email);
+                user = await userManager.FindByEmailAsync(email);
                 if (user != null)
                 {
-                    _logger.LogInformation(
+                    logger.LogInformation(
                         "Found existing user {UserName} by email {Email}, linking LDAP login",
                         user.UserName, email);
                 }
@@ -970,13 +946,13 @@ public class AuthApiController : ControllerBase
                     };
                 }
 
-                _logger.LogInformation(
+                logger.LogInformation(
                     "Created new user {UserName} from LDAP provider {Provider}",
                     user.UserName, loginInfo.LoginProvider);
             }
 
             // 5. Link LDAP login to user
-            var addLoginResult = await _userManager.AddLoginAsync(
+            var addLoginResult = await userManager.AddLoginAsync(
                 user,
                 new UserLoginInfo(
                     loginInfo.LoginProvider,
@@ -985,23 +961,23 @@ public class AuthApiController : ControllerBase
 
             if (!addLoginResult.Succeeded)
             {
-                _logger.LogError(
+                logger.LogError(
                     "Failed to add LDAP login for user {UserName}: {Errors}",
                     user.UserName,
                     string.Join(", ", addLoginResult.Errors.Select(e => e.Description)));
             }
             else
             {
-                _logger.LogInformation(
+                logger.LogInformation(
                     "Linked LDAP login {Provider} to user {UserName}",
                     loginInfo.LoginProvider, user.UserName);
             }
         }
 
         // 6. Sign in the user
-        await _signInManager.SignInAsync(user, isPersistent: false);
+        await signInManager.SignInAsync(user, isPersistent: false);
 
-        await _events.RaiseAsync(new UserLoginSuccessEvent(
+        await events.RaiseAsync(new UserLoginSuccessEvent(
             user.UserName,
             user.RtId.ToString(),
             user.UserName,
@@ -1010,7 +986,7 @@ public class AuthApiController : ControllerBase
         // 7. Handle return URL
         var redirectUrl = request.ReturnUrl;
         if (string.IsNullOrEmpty(redirectUrl) ||
-            !(_interaction.IsValidReturnUrl(redirectUrl) || Url.IsLocalUrl(redirectUrl)))
+            !(interaction.IsValidReturnUrl(redirectUrl) || Url.IsLocalUrl(redirectUrl)))
         {
             var tenantId = RouteData.Values["tenantId"]?.ToString() ?? "System";
             redirectUrl = $"/{tenantId}/manage";
@@ -1029,7 +1005,7 @@ public class AuthApiController : ControllerBase
     [HttpGet("is-ldap-scheme")]
     public async Task<ActionResult<IsLdapSchemeResultDto>> IsLdapScheme([FromQuery] string scheme)
     {
-        var isLdap = await _ldapAuthService.IsLdapSchemeAsync(scheme);
+        var isLdap = await ldapAuthService.IsLdapSchemeAsync(scheme);
         return new IsLdapSchemeResultDto { IsLdap = isLdap };
     }
 

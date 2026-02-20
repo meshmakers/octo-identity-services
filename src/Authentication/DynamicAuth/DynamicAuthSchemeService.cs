@@ -1,5 +1,4 @@
 ﻿using IdentityServerPersistence.SystemStores;
-using Meshmakers.Octo.Communication.Contracts.DataTransferObjects;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Identity;
 using Persistence.IdentityCkModel.Generated.System.Identity.v2;

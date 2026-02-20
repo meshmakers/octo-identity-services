@@ -33,7 +33,7 @@ public class CreateIdentityDataCommandRequestConsumer(
         if (!await tenantContext.IsCkModelExistingAsync(SystemIdentityCkIds.CkModelId))
         {
             await context.RespondAsync(new EnumCommandResponse<CreateIdentityDataResult>
-                { Response = CreateIdentityDataResult.FailedTenantHasNoIdentityCk });
+            { Response = CreateIdentityDataResult.FailedTenantHasNoIdentityCk });
             return;
         }
 
@@ -69,7 +69,7 @@ public class CreateIdentityDataCommandRequestConsumer(
             await session.CommitTransactionAsync();
 
             await context.RespondAsync(new EnumCommandResponse<CreateIdentityDataResult>
-                { Response = CreateIdentityDataResult.Success });
+            { Response = CreateIdentityDataResult.Success });
         }
         catch (Exception e)
         {
@@ -78,7 +78,7 @@ public class CreateIdentityDataCommandRequestConsumer(
         }
     }
 
-    private async Task CreateApiScopeIfNotExistAsync(IOctoSession session, ITenantRepository tenantRepository,
+    private static async Task CreateApiScopeIfNotExistAsync(IOctoSession session, ITenantRepository tenantRepository,
         DistApiScopeDto distApiScopeDto)
     {
         var queryOptions = RtEntityQueryOptions.Create()
@@ -97,7 +97,7 @@ public class CreateIdentityDataCommandRequestConsumer(
         }
     }
 
-    private async Task CreateApiResourceIfNotExistAsync(IOctoSession session, ITenantRepository tenantRepository,
+    private static async Task CreateApiResourceIfNotExistAsync(IOctoSession session, ITenantRepository tenantRepository,
         DistApiResourcesDto distApiResourcesDto)
     {
         var queryOptions = RtEntityQueryOptions.Create()
@@ -118,12 +118,12 @@ public class CreateIdentityDataCommandRequestConsumer(
         }
     }
 
-    private async Task CreateClientIfNotExistAsync(IOctoSession session, ITenantRepository tenantRepository,
+    private static async Task CreateClientIfNotExistAsync(IOctoSession session, ITenantRepository tenantRepository,
         DistClientDto distClientDto)
     {
         var queryOptions = RtEntityQueryOptions.Create()
             .FieldFilter(nameof(RtClient.ClientId), FieldFilterOperator.Equals, distClientDto.ClientId);
-        
+
         var rtClient = new RtClient
         {
             Enabled = true,

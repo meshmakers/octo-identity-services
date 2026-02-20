@@ -1,6 +1,5 @@
 using IdentityServerPersistence.Configuration.Options;
 using Meshmakers.Common.Shared;
-using Meshmakers.Octo.Services.Swagger;
 using Meshmakers.Octo.Services.Swagger.Configuration;
 using Microsoft.Extensions.Options;
 

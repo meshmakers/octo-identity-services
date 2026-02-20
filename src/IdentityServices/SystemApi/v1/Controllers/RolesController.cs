@@ -8,11 +8,10 @@ using Meshmakers.Octo.Communication.Contracts.DataTransferObjects;
 using Meshmakers.Octo.Communication.Contracts.DataTransferObjects.ApiErrors;
 using Meshmakers.Octo.Runtime.Contracts.MongoDb;
 using Meshmakers.Octo.Runtime.Contracts.Repositories.Query;
+using MongoDB.Bson;
 using Microsoft.AspNetCore.Authorization;
-using Microsoft.AspNetCore.Http.HttpResults;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Mvc;
-using MongoDB.Bson;
 using Persistence.IdentityCkModel.Generated.System.Identity.v2;
 
 namespace Meshmakers.Octo.Backend.IdentityServices.SystemApi.v1.Controllers;
@@ -68,7 +67,7 @@ public class RolesController : ControllerBase
     [EndpointSummary("Returns all existing roles.")]
     [ProducesResponseType(typeof(PagedResult<RoleDto>), StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(InternalServerErrorDto), StatusCodes.Status500InternalServerError)]
-    public async Task<IActionResult> Get([Required] [FromQuery] PagingParams pagingParams)
+    public async Task<IActionResult> Get([Required][FromQuery] PagingParams pagingParams)
     {
         try
         {
@@ -111,7 +110,7 @@ public class RolesController : ControllerBase
     [ProducesResponseType(typeof(RoleDto), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     [ProducesResponseType(typeof(InternalServerErrorDto), StatusCodes.Status500InternalServerError)]
-    public async Task<IActionResult> Get([Required] [Description("Name of the role")] string roleName)
+    public async Task<IActionResult> Get([Required][Description("Name of the role")] string roleName)
     {
         try
         {
@@ -139,7 +138,7 @@ public class RolesController : ControllerBase
     [ProducesResponseType(typeof(OperationFailedErrorDto), StatusCodes.Status400BadRequest)]
     [ProducesResponseType(typeof(InternalServerErrorDto), StatusCodes.Status500InternalServerError)]
     public async Task<IActionResult> Post(
-        [Required] [FromBody] [Description("The role data transfer object instance")] RoleDto roleDto)
+        [Required][FromBody][Description("The role data transfer object instance")] RoleDto roleDto)
     {
         try
         {
@@ -175,8 +174,8 @@ public class RolesController : ControllerBase
     [ProducesResponseType(typeof(OperationFailedErrorDto), StatusCodes.Status400BadRequest)]
     [ProducesResponseType(typeof(InternalServerErrorDto), StatusCodes.Status500InternalServerError)]
     public async Task<IActionResult> Put(
-        [Required] [Description("The role name")] string roleName,
-        [Required] [FromBody] [Description("The role data transfer object instance")] RoleDto roleDto)
+        [Required][Description("The role name")] string roleName,
+        [Required][FromBody][Description("The role data transfer object instance")] RoleDto roleDto)
     {
         try
         {
@@ -216,7 +215,7 @@ public class RolesController : ControllerBase
     [ProducesResponseType(typeof(NotFoundErrorDto), StatusCodes.Status404NotFound)]
     [ProducesResponseType(typeof(OperationFailedErrorDto), StatusCodes.Status400BadRequest)]
     [ProducesResponseType(typeof(InternalServerErrorDto), StatusCodes.Status500InternalServerError)]
-    public async Task<IActionResult> Delete([Required] [Description("The role name")] string roleName)
+    public async Task<IActionResult> Delete([Required][Description("The role name")] string roleName)
     {
         try
         {

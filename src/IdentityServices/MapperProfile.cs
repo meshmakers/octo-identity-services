@@ -23,7 +23,7 @@ public class MapperProfile : Profile
         CreateMap<RtAzureEntraIdIdentityProvider, AzureEntraIdProviderDto>();
         CreateMap<RtFacebookIdentityProvider, FacebookIdentityProviderDto>();
 
-        
+
         CreateMap<IdentityProviderDto, RtIdentityProvider>()
             .Include<GoogleIdentityProviderDto, RtGoogleIdentityProvider>()
             .Include<MicrosoftIdentityProviderDto, RtMicrosoftIdentityProvider>()

@@ -64,19 +64,19 @@ public class PersistentGrantStore(IMultiTenancyResolverService multiTenancyResol
         session.StartTransaction();
 
         var queryOptions = RtEntityQueryOptions.Create();
-        if(filter.SubjectId != null)
+        if (filter.SubjectId != null)
         {
             queryOptions.FieldFilter(nameof(RtPersistedGrant.SubjectId), FieldFilterOperator.Equals, filter.SubjectId);
         }
-        if(filter.SessionId != null)
+        if (filter.SessionId != null)
         {
             queryOptions.FieldFilter(nameof(RtPersistedGrant.SessionId), FieldFilterOperator.Equals, filter.SessionId);
         }
-        if(filter.SessionId != null)
+        if (filter.SessionId != null)
         {
             queryOptions.FieldFilter(nameof(RtPersistedGrant.ClientId), FieldFilterOperator.Equals, filter.ClientId);
         }
-        if(filter.Type != null)
+        if (filter.Type != null)
         {
             queryOptions.FieldFilter(nameof(RtPersistedGrant.GrantType), FieldFilterOperator.Equals, filter.Type);
         }

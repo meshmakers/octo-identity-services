@@ -6,13 +6,6 @@ namespace Meshmakers.Octo.Backend.IdentityServices.Services;
 public interface IQrCodeService
 {
     /// <summary>
-    /// Generates a QR code image for the given content.
-    /// </summary>
-    /// <param name="content">The content to encode in the QR code.</param>
-    /// <returns>A base64-encoded PNG image of the QR code.</returns>
-    string GenerateQrCode(string content);
-
-    /// <summary>
     /// Generates a QR code image with the Octo logo in the center.
     /// </summary>
     /// <param name="content">The content to encode in the QR code.</param>

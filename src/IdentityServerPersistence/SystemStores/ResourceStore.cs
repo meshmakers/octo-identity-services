@@ -99,16 +99,6 @@ public class ResourceStore(IMultiTenancyResolverService multiTenancyResolverServ
         await session.CommitTransactionAsync();
     }
 
-    public async Task DeleteIdentityResourceAsync(OctoObjectId resourceId)
-    {
-        using var session = await _tenantRepository.GetSessionAsync();
-        session.StartTransaction();
-
-        await _tenantRepository.DeleteOneRtEntityByRtIdAsync<RtIdentityResource>(session, resourceId, DeleteOptions.Erase);
-
-        await session.CommitTransactionAsync();
-    }
-
     public async Task DeleteApiScopeAsync(OctoObjectId resourceId)
     {
         using var session = await _tenantRepository.GetSessionAsync();

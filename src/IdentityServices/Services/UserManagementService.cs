@@ -56,7 +56,7 @@ public class UserManagementService(
             await TryAddRole(adminUser, CommonConstants.ReportingViewerRole);
         }
     }
-    
+
     private async Task TryAddRole(RtUser user, string roleName)
     {
         var rtRole = await roleManager.FindByNameAsync(roleName);

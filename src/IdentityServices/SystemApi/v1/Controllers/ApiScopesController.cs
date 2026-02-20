@@ -7,12 +7,11 @@ using IdentityServerPersistence.SystemStores;
 using Meshmakers.Octo.Common.DistributionEventHub.Services;
 using Meshmakers.Octo.Communication.Contracts.DataTransferObjects;
 using Meshmakers.Octo.Communication.Contracts.DataTransferObjects.ApiErrors;
+using MongoDB.Bson;
 using Meshmakers.Octo.Runtime.Contracts.RepositoryEntities;
 using Meshmakers.Octo.Services.Contracts.DistributionEventHub.Messages;
 using Microsoft.AspNetCore.Authorization;
-using Microsoft.AspNetCore.Http.HttpResults;
 using Microsoft.AspNetCore.Mvc;
-using MongoDB.Bson;
 using Persistence.IdentityCkModel.Generated.System.Identity.v2;
 
 namespace Meshmakers.Octo.Backend.IdentityServices.SystemApi.v1.Controllers;
@@ -48,7 +47,7 @@ public class ApiScopesController : ControllerBase
     [Authorize(IdentityServiceConstants.IdentityApiReadOnlyPolicy)]
     [EndpointSummary("Returns all API scope definitions using paging")]
     [ProducesResponseType(typeof(PagedResult<ApiScopeDto>), StatusCodes.Status200OK)]
-    public async Task<PagedResult<ApiScopeDto>> Get([Required] [FromQuery] PagingParams pagingParams)
+    public async Task<PagedResult<ApiScopeDto>> Get([Required][FromQuery] PagingParams pagingParams)
     {
         var list = new List<ApiScopeDto>();
 
@@ -93,7 +92,7 @@ public class ApiScopesController : ControllerBase
     [Authorize(IdentityServiceConstants.IdentityApiReadWritePolicy)]
     [EndpointSummary("Creates a new API scope")]
     [ProducesResponseType(StatusCodes.Status200OK)]
-    public async Task<IActionResult> Post([Required] [FromBody] ApiScopeDto scopeDto)
+    public async Task<IActionResult> Post([Required][FromBody] ApiScopeDto scopeDto)
     {
         if (!ModelState.IsValid || scopeDto.Name == null)
         {
@@ -125,7 +124,7 @@ public class ApiScopesController : ControllerBase
     [Authorize(IdentityServiceConstants.IdentityApiReadWritePolicy)]
     [EndpointSummary("Updates an API scope")]
     [ProducesResponseType(StatusCodes.Status200OK)]
-    public async Task<IActionResult> Put([Required] string name, [Required] [FromBody] ApiScopeDto scopeDto)
+    public async Task<IActionResult> Put([Required] string name, [Required][FromBody] ApiScopeDto scopeDto)
     {
         if (!ModelState.IsValid)
         {
@@ -190,7 +189,7 @@ public class ApiScopesController : ControllerBase
             Guid.NewGuid(), DateTime.Now));
     }
 
-    private ApiScopeDto CreateApiScopeDto(ApiScope apiScope)
+    private static ApiScopeDto CreateApiScopeDto(ApiScope apiScope)
     {
         var apiScopeDto = new ApiScopeDto
         {
@@ -207,7 +206,7 @@ public class ApiScopesController : ControllerBase
         return apiScopeDto;
     }
 
-    private void ApplyToApiScope(RtApiScope apiScope, ApiScopeDto apiScopeDto)
+    private static void ApplyToApiScope(RtApiScope apiScope, ApiScopeDto apiScopeDto)
     {
         if (string.IsNullOrWhiteSpace(apiScopeDto.Name))
         {

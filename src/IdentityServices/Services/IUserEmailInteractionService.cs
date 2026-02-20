@@ -28,20 +28,4 @@ public interface IUserEmailInteractionService
     /// <param name="user">User that receives the notification.</param>
     Task SendPasswordResetNotificationAsync(string tenantId, RtUser user);
 
-    /// <summary>
-    ///     Validate a token that was sent to the user to confirm his email address.
-    /// </summary>
-    /// <param name="tenantId">The tenant id the user like to log in to.</param>
-    /// <param name="token"></param>
-    /// <returns>The url where the user should get redirected.</returns>
-    /// <exception cref="UserEmailInteractionException">Is thrown when the token can't be validated.</exception>
-    Task<string> ValidateEmailNotificationTokenAsync(string tenantId, string token);
-
-    /// <summary>
-    ///     Validate a token that was sent to the user to reset his password.
-    /// </summary>
-    /// <param name="tenantId">The tenant id the user like to log in to.</param>
-    /// <param name="token"></param>
-    /// <param name="newPassword"></param>
-    Task<string> ValidateAndResetPasswordAsync(string tenantId, string token, string newPassword);
 }

@@ -932,12 +932,12 @@ public sealed class OctoUserStore(
         }
     }
 
-    private OctoObjectId ConvertIdFromString(string id)
+    private static OctoObjectId ConvertIdFromString(string id)
     {
         return new OctoObjectId(id);
     }
 
-    private string ConvertIdToString(OctoObjectId id)
+    private static string ConvertIdToString(OctoObjectId id)
     {
         return id.ToString();
     }

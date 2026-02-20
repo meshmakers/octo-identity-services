@@ -1,4 +1,3 @@
-using AutoMapper;
 using Meshmakers.Common.Shared;
 using Meshmakers.Octo.ConstructionKit.Contracts;
 using Meshmakers.Octo.Runtime.Contracts.MongoDb.Repositories;
@@ -11,15 +10,13 @@ namespace IdentityServerPersistence.SystemStores;
 
 public class IdentityProviderStore : IOctoIdentityProviderStore
 {
-    private readonly IMapper _mapper;
     private readonly ITenantRepository _tenantRepository;
 
-    public IdentityProviderStore(IMultiTenancyResolverService multiTenancyResolverService, IMapper mapper)
+    public IdentityProviderStore(IMultiTenancyResolverService multiTenancyResolverService)
     {
         _tenantRepository = multiTenancyResolverService.GetTenantRepository();
-        _mapper = mapper;
     }
-    
+
     public string TenantId => _tenantRepository.TenantId;
 
     public async Task<RtIdentityProvider?> GetByNameAsync(string name)
@@ -38,7 +35,7 @@ public class IdentityProviderStore : IOctoIdentityProviderStore
         await session.CommitTransactionAsync();
         return result.Items.SingleOrDefault();
     }
-    
+
     public async Task<RtIdentityProvider?> GetByIdAsync(OctoObjectId rtId)
     {
         var session = await _tenantRepository.GetSessionAsync();
@@ -81,7 +78,7 @@ public class IdentityProviderStore : IOctoIdentityProviderStore
 
         await session.CommitTransactionAsync();
     }
-    
+
     public async Task RemoveAsync(OctoObjectId rtId)
     {
         var session = await _tenantRepository.GetSessionAsync();

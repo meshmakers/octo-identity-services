@@ -191,7 +191,7 @@ try
                 IdentityTexts.Backend_IdentityServices_Api_ReadOnlyAccess
             }
         };
-        
+
         options.PolicyScopeMapping = new Dictionary<string, IEnumerable<string>>
         {
             {
@@ -203,7 +203,7 @@ try
                 [CommonConstants.IdentityApiFullAccess]
             }
         };
-        
+
         options.XmlDocDataTransferObjectAssemblies =
         [
             typeof(ClientDto).Assembly
@@ -221,13 +221,13 @@ try
     // API Controllers only (no MVC views)
     builder.Services.AddControllers();
 
-    builder.Services.AddAutoMapper(_=>
+    builder.Services.AddAutoMapper(_ =>
     {
     }, typeof(Program));
-    
+
     // Migrations are in the IdentityServerPersistence assembly
     builder.Services.AddMigrations(typeof(IdentityServiceConstants).Assembly);
-    
+
 
     var app = builder.Build();
 
@@ -287,7 +287,7 @@ try
 
     // Serve pre-built Angular files from wwwroot for all environments
     app.MapFallbackToFile("index.html");
-    
+
     // Initialisierung abfangen
     app.Lifetime.ApplicationStarted.Register(() =>
     {

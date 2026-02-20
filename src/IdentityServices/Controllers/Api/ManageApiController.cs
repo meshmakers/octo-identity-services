@@ -493,7 +493,7 @@ public class ManageApiController : ControllerBase
         };
     }
 
-    private string FormatKey(string unformattedKey)
+    private static string FormatKey(string unformattedKey)
     {
         var result = new StringBuilder();
         var currentPosition = 0;
