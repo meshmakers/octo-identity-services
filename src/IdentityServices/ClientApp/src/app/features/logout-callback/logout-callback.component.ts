@@ -110,11 +110,28 @@ export class LogoutCallbackComponent implements OnInit {
   private notifyParent(): void {
     // If loaded in an iframe, notify the parent window
     if (window.parent !== window) {
+      const parentOrigin = this.getParentOrigin();
+      if (!parentOrigin) {
+        return;
+      }
+
       try {
-        window.parent.postMessage({ type: 'logout-complete' }, '*');
+        window.parent.postMessage({ type: 'logout-complete' }, parentOrigin);
       } catch {
         // Cross-origin restrictions may prevent this
       }
     }
+  }
+
+  private getParentOrigin(): string | null {
+    try {
+      if (document.referrer) {
+        const referrerUrl = new URL(document.referrer);
+        return referrerUrl.origin;
+      }
+    } catch {
+      // Ignore malformed referrer URLs
+    }
+    return null;
   }
 }

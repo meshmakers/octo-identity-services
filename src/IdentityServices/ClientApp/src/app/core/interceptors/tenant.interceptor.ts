@@ -1,4 +1,5 @@
 import { HttpInterceptorFn } from '@angular/common/http';
+import { getTenantIdFromUrl } from '../utils/tenant.utils';
 
 /**
  * HTTP interceptor that prepends the tenant ID to API calls.
@@ -10,31 +11,9 @@ export const tenantInterceptor: HttpInterceptorFn = (req, next) => {
     return next(req);
   }
 
-  // Get tenant ID from the current URL path
+  // Prepend tenant ID to the URL
   const tenantId = getTenantIdFromUrl();
-
-  if (tenantId) {
-    // Prepend tenant ID to the URL
-    const modifiedUrl = `/${tenantId}${req.url}`;
-    const modifiedReq = req.clone({ url: modifiedUrl });
-    return next(modifiedReq);
-  }
-
-  return next(req);
+  const modifiedUrl = `/${tenantId}${req.url}`;
+  const modifiedReq = req.clone({ url: modifiedUrl });
+  return next(modifiedReq);
 };
-
-/**
- * Extract tenant ID from the current browser URL.
- * URL pattern: /{tenantId}/login, /{tenantId}/logout, etc.
- */
-function getTenantIdFromUrl(): string | null {
-  const path = window.location.pathname;
-  const segments = path.split('/').filter(s => s.length > 0);
-
-  // First segment should be the tenant ID
-  if (segments.length > 0) {
-    return segments[0];
-  }
-
-  return 'System'; // Default fallback
-}

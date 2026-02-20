@@ -4,6 +4,7 @@ import { Router, ActivatedRoute } from '@angular/router';
 import { OemService } from '../../../core/services/oem.service';
 import { AuthStateService } from '../../../core/services/auth-state.service';
 import { AuthApiService } from '../../../core/services/auth-api.service';
+import { getTenantIdFromUrl } from '../../../core/utils/tenant.utils';
 
 @Component({
   selector: 'app-lcars-header',
@@ -58,9 +59,7 @@ export class LcarsHeaderComponent implements OnInit {
   }
 
   onLogout(): void {
-    // Get tenant ID from current URL
-    const pathSegments = window.location.pathname.split('/').filter(s => s);
-    const tenantId = pathSegments[0] || 'System';
+    const tenantId = getTenantIdFromUrl();
 
     this.authApi.logout({ logoutId: '' }).subscribe({
       next: () => {

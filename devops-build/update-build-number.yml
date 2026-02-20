@@ -25,12 +25,12 @@ steps:
       $octoVersion = "0.1.*";
 
       # Handle dev branches - sanitize branch name for Docker tags
-      # Docker tags only allow: lowercase/uppercase letters, digits, underscores, periods, hyphens
+      # Docker tags only allow: letters, digits, underscores, periods, and hyphens
       if ($branch.StartsWith("refs/heads/dev/")) {
         Write-host "Branch is dev branch"
         $branchName = '$(Build.SourceBranchName)'
-        # Replace # with _ to make it valid for Docker tags
-        $sanitizedBranchName = $branchName.Replace("#", "_")
+        # Replace any character not allowed in Docker tags with _
+        $sanitizedBranchName = $branchName -replace '[^a-zA-Z0-9_.-]', '_'
         $fullBuildNumber = "$major.$minor.$build.$revision-$sanitizedBranchName"
         Write-Host "Sanitized branch name from '$branchName' to '$sanitizedBranchName'"
         Write-Host "Setting build number to $fullBuildNumber"

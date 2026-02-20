@@ -1,6 +1,7 @@
 import { Injectable, inject } from '@angular/core';
 import { HttpClient } from '@angular/common/http';
 import { Observable } from 'rxjs';
+import { getTenantIdFromUrl } from '../utils/tenant.utils';
 import {
   LoginContext,
   LoginRequest,
@@ -42,11 +43,8 @@ export class AuthApiService {
   }
 
   initiateExternalLogin(scheme: string, returnUrl: string): void {
-    // Extract tenant ID from current URL path (first segment after /)
-    // The backend route requires: /{tenantId}/api/auth/external-login
     // window.location.href bypasses Angular's HTTP interceptor, so we must include tenant ID manually
-    const pathSegments = window.location.pathname.split('/').filter(s => s);
-    const tenantId = pathSegments[0] || 'System';
+    const tenantId = getTenantIdFromUrl();
 
     const url = `/${tenantId}/api/auth/external-login?scheme=${encodeURIComponent(scheme)}&returnUrl=${encodeURIComponent(returnUrl)}`;
     window.location.href = url;
