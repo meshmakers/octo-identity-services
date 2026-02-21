@@ -1,0 +1,24 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
+  <!-- Background: Deep Sea -->
+  <rect width="32" height="32" rx="4" fill="#07172b"/>
+
+  <!-- Shield outline: Octo Mint -->
+  <path d="M16 4 L26 8 L26 16 C26 22 21 27 16 28 C11 27 6 22 6 16 L6 8 Z"
+        fill="none"
+        stroke="#64ceb9"
+        stroke-width="2"/>
+
+  <!-- Lock body: Neo Cyan -->
+  <rect x="12" y="14" width="8" height="7" rx="1" fill="#00a8dc"/>
+
+  <!-- Lock shackle: Octo Mint -->
+  <path d="M13 14 L13 12 C13 10 14.5 9 16 9 C17.5 9 19 10 19 12 L19 14"
+        fill="none"
+        stroke="#64ceb9"
+        stroke-width="2"
+        stroke-linecap="round"/>
+
+  <!-- Keyhole: Deep Sea -->
+  <circle cx="16" cy="17" r="1.2" fill="#07172b"/>
+  <rect x="15.4" y="17" width="1.2" height="2" fill="#07172b"/>
+</svg>

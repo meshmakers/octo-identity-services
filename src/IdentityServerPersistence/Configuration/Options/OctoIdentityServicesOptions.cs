@@ -60,7 +60,7 @@ public class OctoIdentityServicesOptions
     /// Gets or sets the path to the certificate file used for signing tokens.
     /// </summary>
     public string? KeyFilePath { get; set; }
-    
+
     /// <summary>
     /// Gets or sets the password for the certificate file used for signing tokens.
     /// </summary>
@@ -81,7 +81,7 @@ public class OctoIdentityServicesOptions
     ///     Identity service in an iframe is allowed.
     /// </summary>
     public bool AllowDisplayInIframe { get; set; }
-    
+
     /// <summary>
     /// Gets or sets the minimal log level to be logged
     /// </summary>

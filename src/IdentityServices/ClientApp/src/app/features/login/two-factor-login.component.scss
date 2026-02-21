@@ -1,0 +1,172 @@
+@use '../../../styles/lcars-variables' as *;
+@use '../../../styles/lcars-mixins' as *;
+
+:host {
+  display: block;
+  flex: 1;
+}
+
+.lcars-auth-container {
+  @include lcars-centered-container(420px);
+}
+
+.method-tabs {
+  display: flex;
+  gap: var(--lcars-spacing-sm);
+  margin-bottom: var(--lcars-spacing-xl);
+  border-bottom: 1px solid rgba($ash-blue, 0.2);
+  padding-bottom: var(--lcars-spacing-md);
+}
+
+.method-tab {
+  flex: 1;
+  padding: var(--lcars-spacing-sm) var(--lcars-spacing-md);
+  background: transparent;
+  border: 1px solid rgba($ash-blue, 0.3);
+  border-radius: var(--lcars-radius-sm);
+  color: $ash-blue;
+  font-size: var(--lcars-font-size-sm);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  cursor: pointer;
+  transition: all var(--lcars-transition-fast);
+
+  &:hover {
+    border-color: $octo-mint;
+    color: $octo-mint;
+  }
+
+  &--active {
+    background: rgba($octo-mint, 0.2);
+    border-color: $octo-mint;
+    color: $octo-mint;
+  }
+}
+
+.method-description {
+  color: $ash-blue;
+  font-size: var(--lcars-font-size-sm);
+  text-align: center;
+  margin-bottom: var(--lcars-spacing-lg);
+}
+
+.lcars-form-group {
+  @include lcars-form-group;
+
+  label {
+    @include lcars-uppercase-label;
+    color: $ash-blue;
+  }
+
+  input[type="text"] {
+    @include lcars-input;
+    width: 100%;
+    text-align: center;
+    font-size: var(--lcars-font-size-lg);
+    letter-spacing: 4px;
+    font-family: 'Roboto Mono', monospace;
+  }
+}
+
+.lcars-checkbox-group {
+  margin-top: var(--lcars-spacing-md);
+}
+
+.lcars-checkbox {
+  display: flex;
+  align-items: center;
+  gap: var(--lcars-spacing-sm);
+  cursor: pointer;
+
+  input[type="checkbox"] {
+    width: 18px;
+    height: 18px;
+    accent-color: $octo-mint;
+  }
+
+  &__label {
+    color: $ash-blue;
+    font-size: var(--lcars-font-size-sm);
+  }
+}
+
+.lcars-actions {
+  display: flex;
+  flex-direction: column;
+  gap: var(--lcars-spacing-md);
+  margin-top: var(--lcars-spacing-lg);
+}
+
+.lcars-button-primary {
+  @include lcars-button-primary;
+  width: 100%;
+  padding: var(--lcars-spacing-md);
+}
+
+.lcars-button-outline {
+  @include lcars-button-outline;
+  width: 100%;
+  padding: var(--lcars-spacing-md);
+}
+
+.lcars-error-message {
+  background: rgba($bubblegum, 0.1);
+  border: 1px solid rgba($bubblegum, 0.3);
+  border-radius: var(--lcars-radius-sm);
+  color: $bubblegum;
+  padding: var(--lcars-spacing-md);
+  margin-bottom: var(--lcars-spacing-md);
+  font-size: var(--lcars-font-size-sm);
+  text-align: center;
+}
+
+.success-message {
+  background: rgba(#4caf50, 0.1);
+  border: 1px solid rgba(#4caf50, 0.3);
+  border-radius: var(--lcars-radius-sm);
+  color: #4caf50;
+  padding: var(--lcars-spacing-md);
+  margin-bottom: var(--lcars-spacing-lg);
+  font-size: var(--lcars-font-size-sm);
+  text-align: center;
+}
+
+.warning-message {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--lcars-spacing-md);
+  background: rgba($toffee, 0.1);
+  border: 1px solid rgba($toffee, 0.3);
+  border-radius: var(--lcars-radius-sm);
+  padding: var(--lcars-spacing-md);
+  margin-bottom: var(--lcars-spacing-lg);
+
+  svg {
+    flex-shrink: 0;
+    width: 24px;
+    height: 24px;
+    color: $toffee;
+  }
+
+  p {
+    color: $toffee;
+    font-size: var(--lcars-font-size-sm);
+    margin: 0;
+  }
+}
+
+.back-link {
+  margin-top: var(--lcars-spacing-xl);
+  text-align: center;
+
+  a {
+    color: $ash-blue;
+    font-size: var(--lcars-font-size-sm);
+    text-decoration: none;
+    transition: color var(--lcars-transition-fast);
+
+    &:hover {
+      color: $octo-mint;
+    }
+  }
+}

@@ -1,0 +1,61 @@
+@use '../../../styles/lcars-variables' as *;
+@use '../../../styles/lcars-mixins' as *;
+
+:host {
+  display: block;
+  flex: 1;
+}
+
+.lcars-auth-container {
+  @include lcars-centered-container(420px);
+}
+
+.device-content {
+  text-align: center;
+}
+
+.device-description {
+  color: $ash-blue;
+  font-size: var(--lcars-font-size-base);
+  margin-bottom: var(--lcars-spacing-xl);
+}
+
+.lcars-form-group {
+  @include lcars-form-group;
+  text-align: left;
+
+  label {
+    @include lcars-uppercase-label;
+    color: $ash-blue;
+  }
+}
+
+.user-code-input {
+  @include lcars-input;
+  width: 100%;
+  text-align: center;
+  font-size: var(--lcars-font-size-lg);
+  font-family: var(--lcars-font-mono);
+  letter-spacing: 4px;
+  text-transform: uppercase;
+}
+
+.lcars-actions {
+  margin-top: var(--lcars-spacing-lg);
+}
+
+.lcars-button-primary {
+  @include lcars-button-primary;
+  width: 100%;
+  padding: var(--lcars-spacing-md);
+}
+
+.lcars-error-message {
+  background: rgba($bubblegum, 0.1);
+  border: 1px solid rgba($bubblegum, 0.3);
+  border-radius: var(--lcars-radius-sm);
+  color: $bubblegum;
+  padding: var(--lcars-spacing-md);
+  margin-bottom: var(--lcars-spacing-md);
+  font-size: var(--lcars-font-size-sm);
+}

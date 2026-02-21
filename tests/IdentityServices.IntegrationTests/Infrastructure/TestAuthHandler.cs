@@ -19,6 +19,13 @@ public class TestAuthHandler : AuthenticationHandler<TestAuthHandlerOptions>
 {
     public const string SchemeName = "TestScheme";
 
+    // Custom headers that can be used to override default values per-request
+    public const string UserIdHeader = "X-Test-UserId";
+    public const string UserNameHeader = "X-Test-UserName";
+    public const string EmailHeader = "X-Test-Email";
+    public const string RoleHeader = "X-Test-Role";
+    public const string ScopeHeader = "X-Test-Scope";
+
     public TestAuthHandler(
         IOptionsMonitor<TestAuthHandlerOptions> options,
         ILoggerFactory logger,
@@ -28,21 +35,58 @@ public class TestAuthHandler : AuthenticationHandler<TestAuthHandlerOptions>
 
     protected override Task<AuthenticateResult> HandleAuthenticateAsync()
     {
-        var claims = new List<Claim>
+        // Check if the request has an Authorization header
+        if (!Request.Headers.ContainsKey("Authorization"))
         {
-            new(ClaimTypes.NameIdentifier, Options.DefaultUserId),
-            new(ClaimTypes.Name, Options.DefaultUserName),
-            new(ClaimTypes.Email, Options.DefaultEmail)
-        };
-
-        foreach (var scope in Options.Scopes)
-        {
-            claims.Add(new Claim("scope", scope));
+            return Task.FromResult(AuthenticateResult.NoResult());
         }
 
-        foreach (var role in Options.Roles)
+        // Read values from headers or fall back to defaults
+        var userId = GetHeaderValue(UserIdHeader, Options.DefaultUserId);
+        var userName = GetHeaderValue(UserNameHeader, Options.DefaultUserName);
+        var email = GetHeaderValue(EmailHeader, Options.DefaultEmail);
+
+        var claims = new List<Claim>
         {
-            claims.Add(new Claim(ClaimTypes.Role, role));
+            new(ClaimTypes.NameIdentifier, userId),
+            new(ClaimTypes.Name, userName),
+            new(ClaimTypes.Email, email),
+            // IdentityServer uses "sub" claim for User.GetSubjectId()
+            new("sub", userId)
+        };
+
+        // Add scopes from headers or defaults
+        var scopes = GetHeaderValues(ScopeHeader);
+        if (scopes.Any())
+        {
+            foreach (var scope in scopes)
+            {
+                claims.Add(new Claim("scope", scope));
+            }
+        }
+        else
+        {
+            foreach (var scope in Options.Scopes)
+            {
+                claims.Add(new Claim("scope", scope));
+            }
+        }
+
+        // Add roles from headers or defaults
+        var roles = GetHeaderValues(RoleHeader);
+        if (roles.Any())
+        {
+            foreach (var role in roles)
+            {
+                claims.Add(new Claim(ClaimTypes.Role, role));
+            }
+        }
+        else
+        {
+            foreach (var role in Options.Roles)
+            {
+                claims.Add(new Claim(ClaimTypes.Role, role));
+            }
         }
 
         var identity = new ClaimsIdentity(claims, SchemeName);
@@ -50,5 +94,23 @@ public class TestAuthHandler : AuthenticationHandler<TestAuthHandlerOptions>
         var ticket = new AuthenticationTicket(principal, SchemeName);
 
         return Task.FromResult(AuthenticateResult.Success(ticket));
+    }
+
+    private string GetHeaderValue(string headerName, string defaultValue)
+    {
+        if (Request.Headers.TryGetValue(headerName, out var values) && values.Count > 0)
+        {
+            return values.First() ?? defaultValue;
+        }
+        return defaultValue;
+    }
+
+    private IEnumerable<string> GetHeaderValues(string headerName)
+    {
+        if (Request.Headers.TryGetValue(headerName, out var values))
+        {
+            return values.Where(v => !string.IsNullOrEmpty(v)).Cast<string>();
+        }
+        return Enumerable.Empty<string>();
     }
 }

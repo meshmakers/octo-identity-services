@@ -1,0 +1,416 @@
+// =============================================================================
+// LCARS DESIGN SYSTEM - Component Styles
+// Pre-built component styles for common UI patterns
+// =============================================================================
+
+@use 'lcars-variables' as *;
+@use 'lcars-mixins' as *;
+
+// === Login Panel ===
+
+.lcars-login-panel {
+  @include lcars-panel;
+  max-width: 420px;
+  width: 100%;
+  overflow: hidden;
+
+  &__header {
+    @include lcars-header-bar;
+  }
+
+  &__content {
+    padding: var(--lcars-spacing-xl);
+  }
+
+  &__footer {
+    @include lcars-footer-bars;
+    padding-bottom: var(--lcars-spacing-md);
+  }
+}
+
+// === Auth Container (centered layout) ===
+
+.lcars-auth-container {
+  background: var(--deep-sea);
+  background-image:
+    radial-gradient(ellipse at 20% 80%, rgba($octo-mint, 0.05) 0%, transparent 50%),
+    radial-gradient(ellipse at 80% 20%, rgba($neo-cyan, 0.05) 0%, transparent 50%);
+  @include lcars-centered-container(420px);
+}
+
+// === Logo ===
+
+.lcars-logo {
+  display: flex;
+  justify-content: center;
+  margin-bottom: var(--lcars-spacing-xl);
+
+  img {
+    max-height: 60px;
+    width: auto;
+  }
+}
+
+// === Title Section ===
+
+.lcars-title-section {
+  text-align: center;
+  margin-bottom: var(--lcars-spacing-xl);
+
+  &__primary {
+    @include lcars-title-primary;
+    font-size: var(--lcars-font-size-xl);
+    margin: 0;
+  }
+
+  &__secondary {
+    @include lcars-title-secondary;
+    font-size: var(--lcars-font-size-xl);
+    margin: 0;
+  }
+
+  &__subtitle {
+    color: $ash-blue;
+    font-size: var(--lcars-font-size-base);
+    margin-top: var(--lcars-spacing-sm);
+    font-weight: 400;
+  }
+}
+
+// === Form Group ===
+
+.lcars-form-group {
+  @include lcars-form-group;
+
+  label {
+    @include lcars-uppercase-label;
+    color: $ash-blue;
+  }
+}
+
+// === Divider with Text ===
+
+.lcars-divider {
+  display: flex;
+  align-items: center;
+  gap: var(--lcars-spacing-md);
+  margin: var(--lcars-spacing-lg) 0;
+  color: $ash-blue;
+  font-size: var(--lcars-font-size-sm);
+
+  &::before,
+  &::after {
+    content: '';
+    flex: 1;
+    height: 1px;
+    background: linear-gradient(90deg, transparent, rgba($ash-blue, 0.3), transparent);
+  }
+}
+
+// === External Providers Grid ===
+
+.lcars-providers {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--lcars-spacing-sm);
+  justify-content: center;
+}
+
+.lcars-provider-button {
+  @include lcars-button-outline;
+  display: flex;
+  align-items: center;
+  gap: var(--lcars-spacing-sm);
+  padding: var(--lcars-spacing-sm) var(--lcars-spacing-md);
+  min-width: 120px;
+  justify-content: center;
+
+  fa-icon {
+    font-size: 1.1em;
+  }
+
+  // Provider-specific colors
+  &.provider-google {
+    &:hover {
+      border-color: #ea4335;
+      color: #ea4335;
+      box-shadow: 0 0 10px rgba(234, 67, 53, 0.3);
+    }
+  }
+
+  &.provider-microsoft,
+  &.provider-azuread {
+    &:hover {
+      border-color: #00a4ef;
+      color: #00a4ef;
+      box-shadow: 0 0 10px rgba(0, 164, 239, 0.3);
+    }
+  }
+
+  &.provider-facebook {
+    &:hover {
+      border-color: #1877f2;
+      color: #1877f2;
+      box-shadow: 0 0 10px rgba(24, 119, 242, 0.3);
+    }
+  }
+
+  &.provider-apple {
+    &:hover {
+      border-color: #ffffff;
+      color: #ffffff;
+      box-shadow: 0 0 10px rgba(255, 255, 255, 0.3);
+    }
+  }
+}
+
+// === Checkbox Group ===
+
+.lcars-checkbox-group {
+  display: flex;
+  align-items: center;
+  gap: var(--lcars-spacing-sm);
+  margin: var(--lcars-spacing-md) 0;
+
+  label {
+    text-transform: none;
+    font-size: var(--lcars-font-size-base);
+    color: #ffffff;
+    cursor: pointer;
+  }
+}
+
+// === Action Buttons ===
+
+.lcars-actions {
+  display: flex;
+  gap: var(--lcars-spacing-md);
+  margin-top: var(--lcars-spacing-lg);
+
+  &--centered {
+    justify-content: center;
+  }
+
+  &--spread {
+    justify-content: space-between;
+  }
+
+  &--stacked {
+    flex-direction: column;
+  }
+}
+
+.lcars-button-primary {
+  @include lcars-button-primary;
+  padding: var(--lcars-spacing-sm) var(--lcars-spacing-lg);
+  font-size: var(--lcars-font-size-base);
+  width: 100%;
+}
+
+.lcars-button-outline {
+  @include lcars-button-outline;
+  padding: var(--lcars-spacing-sm) var(--lcars-spacing-lg);
+  font-size: var(--lcars-font-size-base);
+}
+
+.lcars-button-error {
+  @include lcars-button-error;
+  padding: var(--lcars-spacing-sm) var(--lcars-spacing-lg);
+  font-size: var(--lcars-font-size-base);
+}
+
+// === Error Message ===
+
+.lcars-error-message {
+  background: rgba($bubblegum, 0.1);
+  border: 1px solid rgba($bubblegum, 0.3);
+  border-radius: var(--lcars-radius-sm);
+  color: $bubblegum;
+  padding: var(--lcars-spacing-md);
+  margin-bottom: var(--lcars-spacing-md);
+  font-size: var(--lcars-font-size-sm);
+}
+
+// === Success Message ===
+
+.lcars-success-message {
+  background: rgba($success-color, 0.1);
+  border: 1px solid rgba($success-color, 0.3);
+  border-radius: var(--lcars-radius-sm);
+  color: $success-color;
+  padding: var(--lcars-spacing-md);
+  margin-bottom: var(--lcars-spacing-md);
+  font-size: var(--lcars-font-size-sm);
+  text-align: center;
+}
+
+// === Info Box ===
+
+.lcars-info-box {
+  background: rgba($neo-cyan, 0.1);
+  border: 1px solid rgba($neo-cyan, 0.3);
+  border-radius: var(--lcars-radius-sm);
+  color: #ffffff;
+  padding: var(--lcars-spacing-md);
+  margin-bottom: var(--lcars-spacing-md);
+
+  &__title {
+    @include lcars-uppercase-label;
+    color: $neo-cyan;
+    margin-bottom: var(--lcars-spacing-xs);
+  }
+
+  &__content {
+    font-size: var(--lcars-font-size-base);
+  }
+}
+
+// === Scope List (for Consent) ===
+
+.lcars-scope-list {
+  &__header {
+    @include lcars-uppercase-label;
+    color: $octo-mint;
+    margin-bottom: var(--lcars-spacing-md);
+    padding-bottom: var(--lcars-spacing-sm);
+    border-bottom: 1px solid rgba($octo-mint, 0.2);
+  }
+
+  &__items {
+    display: flex;
+    flex-direction: column;
+    gap: var(--lcars-spacing-sm);
+  }
+}
+
+.lcars-scope-item {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--lcars-spacing-md);
+  padding: var(--lcars-spacing-sm);
+  border-radius: var(--lcars-radius-sm);
+  transition: background var(--lcars-transition-fast);
+
+  &:hover {
+    background: rgba($octo-mint, 0.05);
+  }
+
+  &__content {
+    flex: 1;
+  }
+
+  &__name {
+    color: #ffffff;
+    font-weight: 500;
+    display: block;
+  }
+
+  &__description {
+    color: $ash-blue;
+    font-size: var(--lcars-font-size-sm);
+    display: block;
+    margin-top: var(--lcars-spacing-xs);
+  }
+
+  &__required {
+    @include lcars-uppercase-label;
+    color: $toffee;
+    font-size: var(--lcars-font-size-xs);
+    margin-left: var(--lcars-spacing-sm);
+  }
+}
+
+// === Client Info (for Consent) ===
+
+.lcars-client-info {
+  display: flex;
+  align-items: center;
+  gap: var(--lcars-spacing-md);
+  margin-bottom: var(--lcars-spacing-lg);
+  padding-bottom: var(--lcars-spacing-lg);
+  border-bottom: 1px solid rgba($octo-mint, 0.2);
+
+  &__logo {
+    width: 48px;
+    height: 48px;
+    border-radius: var(--lcars-radius-sm);
+    background: rgba($iron-navy, 0.5);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    overflow: hidden;
+
+    img {
+      max-width: 100%;
+      max-height: 100%;
+    }
+  }
+
+  &__details {
+    flex: 1;
+  }
+
+  &__name {
+    color: #ffffff;
+    font-weight: 600;
+    font-size: var(--lcars-font-size-md);
+  }
+
+  &__url {
+    color: $ash-blue;
+    font-size: var(--lcars-font-size-sm);
+  }
+}
+
+// === Footer Links ===
+
+.lcars-footer-links {
+  display: flex;
+  justify-content: center;
+  gap: var(--lcars-spacing-lg);
+  margin-top: var(--lcars-spacing-lg);
+  padding-top: var(--lcars-spacing-md);
+
+  a {
+    color: $ash-blue;
+    font-size: var(--lcars-font-size-sm);
+    text-decoration: none;
+    transition: color var(--lcars-transition-fast);
+
+    &:hover {
+      color: $octo-mint;
+    }
+  }
+}
+
+// === Loading Overlay ===
+
+.lcars-loading {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--lcars-spacing-md);
+  padding: var(--lcars-spacing-xl);
+
+  &__spinner {
+    width: 40px;
+    height: 40px;
+    border: 3px solid rgba($octo-mint, 0.2);
+    border-top-color: $octo-mint;
+    border-radius: 50%;
+    animation: lcars-spin 1s linear infinite;
+  }
+
+  &__text {
+    color: $ash-blue;
+    font-size: var(--lcars-font-size-sm);
+    @include lcars-uppercase-label;
+  }
+}
+
+@keyframes lcars-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}

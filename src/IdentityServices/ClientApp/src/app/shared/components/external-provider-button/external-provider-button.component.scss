@@ -1,0 +1,65 @@
+@use '../../../../styles/lcars-variables' as *;
+@use '../../../../styles/lcars-mixins' as *;
+
+.lcars-provider-button {
+  @include lcars-button-outline;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--lcars-spacing-sm);
+  padding: var(--lcars-spacing-sm) var(--lcars-spacing-md);
+  min-width: 130px;
+  justify-content: center;
+
+  fa-icon {
+    font-size: 1.1em;
+  }
+
+  // Provider-specific hover colors
+  &.provider-google {
+    &:hover:not(:disabled) {
+      border-color: #ea4335;
+      color: #ea4335;
+      background: rgba(234, 67, 53, 0.1);
+      box-shadow: 0 0 10px rgba(234, 67, 53, 0.3);
+    }
+  }
+
+  &.provider-microsoft,
+  &.provider-azuread {
+    &:hover:not(:disabled) {
+      border-color: #00a4ef;
+      color: #00a4ef;
+      background: rgba(0, 164, 239, 0.1);
+      box-shadow: 0 0 10px rgba(0, 164, 239, 0.3);
+    }
+  }
+
+  &.provider-facebook {
+    &:hover:not(:disabled) {
+      border-color: #1877f2;
+      color: #1877f2;
+      background: rgba(24, 119, 242, 0.1);
+      box-shadow: 0 0 10px rgba(24, 119, 242, 0.3);
+    }
+  }
+
+  &.provider-apple {
+    &:hover:not(:disabled) {
+      border-color: #ffffff;
+      color: #ffffff;
+      background: rgba(255, 255, 255, 0.1);
+      box-shadow: 0 0 10px rgba(255, 255, 255, 0.3);
+    }
+  }
+
+  &.provider-ldap,
+  &.provider-openldap,
+  &.provider-activedirectory {
+    &:hover:not(:disabled) {
+      border-color: var(--royal-violet);
+      color: var(--royal-violet);
+      background: rgba(108, 77, 168, 0.1);
+      box-shadow: 0 0 10px rgba(108, 77, 168, 0.3);
+    }
+  }
+}

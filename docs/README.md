@@ -8,6 +8,7 @@ This documentation provides a comprehensive architectural deep-dive into the Oct
 |----------|-------------|
 | [Architecture Overview](architecture-overview.md) | High-level system architecture, project structure, and technology stack |
 | [Authentication](authentication.md) | Dynamic authentication framework, identity providers, and authentication flows |
+| [External Identity Provider Setup](external-identity-provider-setup.md) | Step-by-step setup guides for Google, Microsoft, Facebook, Azure Entra ID |
 | [Persistence](persistence.md) | Data layer, Construction Kit model, and MongoDB integration |
 | [System API](system-api.md) | REST API reference, endpoints, and authorization |
 | [Configuration](configuration.md) | Environment variables, build configurations, and deployment |

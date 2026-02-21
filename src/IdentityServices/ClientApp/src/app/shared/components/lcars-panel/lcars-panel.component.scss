@@ -1,0 +1,51 @@
+@use '../../../../styles/lcars-variables' as *;
+@use '../../../../styles/lcars-mixins' as *;
+
+.lcars-panel {
+  @include lcars-panel;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+
+  &__header {
+    @include lcars-header-bar;
+    flex-shrink: 0;
+  }
+
+  &__content {
+    flex: 1;
+    padding: var(--lcars-spacing-xl);
+  }
+
+  &__footer {
+    @include lcars-footer-bars;
+    flex-shrink: 0;
+    padding-bottom: var(--lcars-spacing-md);
+  }
+
+  // Error variant
+  &--error {
+    .lcars-panel__header {
+      background: linear-gradient(90deg, var(--bubblegum), var(--toffee));
+    }
+
+    .lcars-panel__footer {
+      .bar-mint {
+        background: linear-gradient(90deg, var(--bubblegum), var(--toffee));
+      }
+    }
+  }
+
+  // Success variant
+  &--success {
+    .lcars-panel__header {
+      background: linear-gradient(90deg, #4caf50, var(--octo-mint));
+    }
+
+    .lcars-panel__footer {
+      .bar-mint {
+        background: linear-gradient(90deg, #4caf50, var(--octo-mint));
+      }
+    }
+  }
+}

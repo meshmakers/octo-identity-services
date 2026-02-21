@@ -74,6 +74,44 @@ Environment variables are prefixed with `OCTO_`. Key configuration sections:
 
 User secrets ID: `173d8e91-b831-4e8a-a43f-672c57e6a4da`
 
+## Angular ClientApp (LCARS UI)
+
+The Identity Services includes an Angular SPA frontend in `src/IdentityServices/ClientApp/` with LCARS theme styling.
+
+### Angular Build Commands
+
+```bash
+cd src/IdentityServices/ClientApp
+
+# Install dependencies
+npm install
+
+# Development server
+npm start
+
+# Production build
+npm run build
+
+# Run tests
+npm test
+```
+
+### Angular Project Structure
+
+- `src/app/core/` - Services, interceptors, models
+- `src/app/shared/` - Reusable LCARS components (lcars-panel, lcars-header, etc.)
+- `src/app/features/` - Feature components (login, logout, consent, device, manage, grants, error)
+- `src/styles/` - LCARS design system (variables, mixins, Kendo overrides)
+
+### API Controllers for Angular SPA
+
+Located in `Controllers/Api/`:
+- `AuthApiController` - Login, logout, external providers
+- `ConsentApiController` - OAuth consent flow
+- `DeviceApiController` - Device authorization flow
+- `ManageApiController` - User profile, password, external logins
+- `GrantsApiController` - OAuth grants management
+- `OemApiController` - OEM configuration
 ### Data Protection Key Persistence
 
 ASP.NET Data Protection keys are used to encrypt refresh tokens, antiforgery tokens, and OAuth state. By default, keys are stored in-memory and lost on pod restart, which invalidates all active sessions.
@@ -93,3 +131,51 @@ Build image using `src/IdentityServices/Dockerfile`. Requires build args:
 - `OCTO_PRIVATE_NUGET_SERVICE`: Private NuGet feed URL
 - `OCTO_PRIVATE_NUGET_CERTIFICATE`: Path to CA certificate
 - `OCTO_VERSION`: Package version to use
+
+## Documentation Guidelines
+
+**CRITICAL REQUIREMENT:** Documentation MUST be updated after EVERY change. This is mandatory, not optional.
+
+### Language Requirement
+
+All documentation MUST be written in **English**. This includes:
+- README.md files
+- Concept documents in `docs/`
+- Code comments
+- API documentation
+- Architecture documents
+- CLAUDE.md files
+
+### Mandatory Documentation Updates
+
+After making ANY code changes, you MUST update the relevant documentation:
+
+1. **For Bug Fixes**:
+   - Document the fix in relevant architecture docs if it clarifies behavior
+   - Update troubleshooting sections if applicable
+
+2. **For New Features**:
+   - Update `docs/` with new feature documentation
+   - Add API endpoint documentation for new endpoints
+   - Update architecture documents if new patterns are introduced
+   - Update this `CLAUDE.md` if project structure changes
+
+3. **For Refactoring**:
+   - Update architecture documents to reflect new structure
+   - Update code flow diagrams if applicable
+
+4. **For Configuration Changes**:
+   - Update `docs/configuration.md` with new options
+   - Update environment variable documentation
+
+### Documentation Files
+
+| File | When to Update |
+|------|----------------|
+| `docs/README.md` | Project overview changes |
+| `docs/architecture-overview.md` | Structural changes |
+| `docs/authentication.md` | Auth flow changes |
+| `docs/persistence.md` | Data layer changes |
+| `docs/system-api.md` | API endpoint changes |
+| `docs/configuration.md` | Config option changes |
+| `CLAUDE.md` | Project structure changes |

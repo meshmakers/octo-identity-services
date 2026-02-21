@@ -1,0 +1,200 @@
+// =============================================================================
+// LCARS Identity UI - Main Stylesheet
+// =============================================================================
+
+// Import LCARS Design System
+@use 'lcars-variables' as *;
+@use 'lcars-mixins' as *;
+@use 'lcars-kendo-overrides';
+@use 'lcars-components';
+
+// === CSS Reset & Base Styles ===
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html {
+  font-size: 16px;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+body {
+  margin: 0;
+  padding: 0;
+  font-family: var(--lcars-font-primary);
+  font-size: var(--lcars-font-size-base);
+  line-height: 1.5;
+  color: #ffffff;
+  background: var(--deep-sea);
+  min-height: 100vh;
+}
+
+// === Typography ===
+
+h1, h2, h3, h4, h5, h6 {
+  margin: 0;
+  font-family: var(--lcars-font-primary);
+  font-weight: 600;
+}
+
+h1 {
+  font-size: var(--lcars-font-size-2xl);
+}
+
+h2 {
+  font-size: var(--lcars-font-size-xl);
+}
+
+h3 {
+  font-size: var(--lcars-font-size-lg);
+}
+
+h4 {
+  font-size: var(--lcars-font-size-md);
+}
+
+p {
+  margin: 0 0 var(--lcars-spacing-md);
+}
+
+a {
+  color: var(--octo-mint);
+  text-decoration: none;
+  transition: color var(--lcars-transition-fast);
+
+  &:hover {
+    color: var(--neo-cyan);
+    text-decoration: underline;
+  }
+
+  &:focus-visible {
+    outline: 2px solid var(--octo-mint);
+    outline-offset: 2px;
+  }
+}
+
+// === Form Elements ===
+
+input,
+textarea,
+select,
+button {
+  font-family: inherit;
+  font-size: inherit;
+}
+
+input[type="text"],
+input[type="password"],
+input[type="email"],
+input[type="number"],
+textarea {
+  width: 100%;
+  @include lcars-input;
+}
+
+button {
+  cursor: pointer;
+
+  &:disabled {
+    cursor: not-allowed;
+  }
+}
+
+// === Utility Classes ===
+
+.text-center {
+  text-align: center;
+}
+
+.text-right {
+  text-align: right;
+}
+
+.text-muted {
+  color: var(--ash-blue);
+}
+
+.text-primary {
+  color: var(--octo-mint);
+}
+
+.text-error {
+  color: var(--bubblegum);
+}
+
+.mt-sm { margin-top: var(--lcars-spacing-sm); }
+.mt-md { margin-top: var(--lcars-spacing-md); }
+.mt-lg { margin-top: var(--lcars-spacing-lg); }
+.mt-xl { margin-top: var(--lcars-spacing-xl); }
+
+.mb-sm { margin-bottom: var(--lcars-spacing-sm); }
+.mb-md { margin-bottom: var(--lcars-spacing-md); }
+.mb-lg { margin-bottom: var(--lcars-spacing-lg); }
+.mb-xl { margin-bottom: var(--lcars-spacing-xl); }
+
+.hidden {
+  display: none !important;
+}
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+// === Scrollbar ===
+
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: rgba($deep-sea, 0.5);
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb {
+  background: rgba($octo-mint, 0.3);
+  border-radius: 4px;
+
+  &:hover {
+    background: rgba($octo-mint, 0.5);
+  }
+}
+
+// === Focus Styles ===
+
+:focus {
+  outline: none;
+}
+
+:focus-visible {
+  outline: 2px solid var(--octo-mint);
+  outline-offset: 2px;
+}
+
+// === Selection ===
+
+::selection {
+  background: rgba($octo-mint, 0.3);
+  color: #ffffff;
+}
+
+// === Angular Specific ===
+
+router-outlet + * {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+}

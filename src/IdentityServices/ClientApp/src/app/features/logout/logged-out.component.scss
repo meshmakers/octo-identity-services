@@ -1,0 +1,46 @@
+@use '../../../styles/lcars-variables' as *;
+@use '../../../styles/lcars-mixins' as *;
+
+:host {
+  display: block;
+  flex: 1;
+}
+
+.lcars-auth-container {
+  @include lcars-centered-container(420px);
+}
+
+.logged-out-content {
+  text-align: center;
+}
+
+.success-icon {
+  width: 64px;
+  height: 64px;
+  margin: 0 auto var(--lcars-spacing-lg);
+  color: #4caf50;
+
+  svg {
+    width: 100%;
+    height: 100%;
+    filter: drop-shadow(0 0 10px rgba(76, 175, 80, 0.5));
+  }
+}
+
+.logged-out-message {
+  color: #ffffff;
+  font-size: var(--lcars-font-size-md);
+  margin-bottom: var(--lcars-spacing-xl);
+}
+
+.lcars-actions {
+  display: flex;
+  justify-content: center;
+}
+
+.lcars-button-outline {
+  @include lcars-button-outline;
+  display: inline-block;
+  padding: var(--lcars-spacing-sm) var(--lcars-spacing-xl);
+  text-decoration: none;
+}

@@ -112,5 +112,29 @@ public class RtUserBuilder
         return this;
     }
 
+    public RtUserBuilder WithAuthenticatorKey(string key)
+    {
+        _user.UserTokens ??= new AttributeRecordValueList<RtUserTokenRecord>();
+        _user.UserTokens.Add(new RtUserTokenRecord
+        {
+            LoginProvider = "[AspNetUserStore]",
+            Name = "AuthenticatorKey",
+            Value = key
+        });
+        return this;
+    }
+
+    public RtUserBuilder WithRecoveryCodes(IEnumerable<string> codes)
+    {
+        _user.UserTokens ??= new AttributeRecordValueList<RtUserTokenRecord>();
+        _user.UserTokens.Add(new RtUserTokenRecord
+        {
+            LoginProvider = "[AspNetUserStore]",
+            Name = "RecoveryCodes",
+            Value = string.Join(";", codes)
+        });
+        return this;
+    }
+
     public RtUser Build() => _user;
 }

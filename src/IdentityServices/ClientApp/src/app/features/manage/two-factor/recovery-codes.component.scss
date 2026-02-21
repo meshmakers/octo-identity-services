@@ -1,0 +1,132 @@
+@use '../../../../styles/lcars-variables' as *;
+@use '../../../../styles/lcars-mixins' as *;
+
+:host {
+  display: block;
+  flex: 1;
+}
+
+.lcars-auth-container {
+  @include lcars-centered-container(480px);
+}
+
+.warning-section {
+  display: flex;
+  gap: var(--lcars-spacing-md);
+  background: rgba($toffee, 0.1);
+  border: 1px solid rgba($toffee, 0.3);
+  border-radius: var(--lcars-radius-md);
+  padding: var(--lcars-spacing-lg);
+  margin-bottom: var(--lcars-spacing-xl);
+}
+
+.warning-icon {
+  flex-shrink: 0;
+  width: 32px;
+  height: 32px;
+  color: $toffee;
+
+  svg {
+    width: 100%;
+    height: 100%;
+  }
+}
+
+.warning-text {
+  color: $toffee;
+  font-size: var(--lcars-font-size-sm);
+  line-height: 1.6;
+  margin: 0;
+
+  strong {
+    color: #ffffff;
+  }
+}
+
+.recovery-codes {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: var(--lcars-spacing-sm);
+  margin-bottom: var(--lcars-spacing-xl);
+  background: rgba($deep-sea, 0.8);
+  border: 1px solid rgba($octo-mint, 0.2);
+  border-radius: var(--lcars-radius-md);
+  padding: var(--lcars-spacing-lg);
+}
+
+.recovery-code {
+  font-family: 'Roboto Mono', monospace;
+  font-size: var(--lcars-font-size-base);
+  background: rgba($octo-mint, 0.1);
+  padding: var(--lcars-spacing-sm) var(--lcars-spacing-md);
+  border-radius: var(--lcars-radius-sm);
+  color: $octo-mint;
+  text-align: center;
+  border: 1px solid rgba($octo-mint, 0.3);
+}
+
+.info-section {
+  text-align: center;
+  padding: var(--lcars-spacing-xl);
+}
+
+.info-text {
+  color: $ash-blue;
+  font-size: var(--lcars-font-size-sm);
+  margin-bottom: var(--lcars-spacing-lg);
+}
+
+.lcars-actions {
+  display: flex;
+  flex-direction: column;
+  gap: var(--lcars-spacing-md);
+  margin-top: var(--lcars-spacing-lg);
+}
+
+.lcars-button-primary {
+  @include lcars-button-primary;
+  width: 100%;
+  padding: var(--lcars-spacing-md);
+}
+
+.lcars-button-outline {
+  @include lcars-button-outline;
+  width: 100%;
+  padding: var(--lcars-spacing-md);
+}
+
+.lcars-loading {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--lcars-spacing-md);
+  padding: var(--lcars-spacing-xl);
+
+  &__spinner {
+    width: 40px;
+    height: 40px;
+    border: 3px solid rgba($octo-mint, 0.2);
+    border-top-color: $octo-mint;
+    border-radius: 50%;
+    animation: spin 1s linear infinite;
+  }
+
+  &__text {
+    @include lcars-uppercase-label;
+    color: $ash-blue;
+  }
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+.lcars-error-message {
+  background: rgba($bubblegum, 0.1);
+  border: 1px solid rgba($bubblegum, 0.3);
+  border-radius: var(--lcars-radius-sm);
+  color: $bubblegum;
+  padding: var(--lcars-spacing-md);
+  font-size: var(--lcars-font-size-sm);
+  text-align: center;
+}

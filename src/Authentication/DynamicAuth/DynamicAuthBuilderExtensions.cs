@@ -35,7 +35,7 @@ public static class DynamicAuthBuilderExtensions
 
         return builder;
     }
-    
+
     public static IDynamicAuthBuilder AddFacebook(this IDynamicAuthBuilder builder)
     {
         builder.Services.AddTransient<IDynamicAuthOptionsBuilder<FacebookOptions>,

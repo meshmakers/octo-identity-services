@@ -20,8 +20,8 @@ public class ClientStore : IOctoClientStore
         _tenantRepository = multiTenancyResolverService.GetTenantRepository();
         _mapper = mapper;
     }
-    
-    public string TenantId => _tenantRepository.TenantId;   
+
+    public string TenantId => _tenantRepository.TenantId;
 
     public async Task CreateAsync(RtClient octoClient)
     {

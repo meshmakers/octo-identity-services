@@ -18,7 +18,6 @@ public class UserEmailInteractionService(
     INotificationService notificationService,
     IIdentityConfigurationService identityConfigurationService,
     IOptions<OctoIdentityServicesOptions> options,
-    ILogger<UserEmailInteractionService> logger,
     UserManager<RtUser> userManager,
     IOctoPersistentGrantStore persistedGrantStore)
     : IUserEmailInteractionService
@@ -64,43 +63,6 @@ public class UserEmailInteractionService(
         await SendNotificationAsync(tenantId, IdentityServiceConstants.WelcomeEmailWithNoPasswordTemplateName, user, replaceFunctions);
     }
 
-    public async Task<string> ValidateEmailNotificationTokenAsync(string tenantId, string token)
-    {
-        var grant = await persistedGrantStore.GetAsync(token);
-        if (grant == null)
-        {
-            logger.LogDebug("Confirm email token {Token} not found", token);
-            throw UserEmailInteractionException.InvalidToken();
-        }
-
-        var data = JsonSerializer.Deserialize<EmailConfirmationGrantData>(grant.Data);
-        if (data == null)
-        {
-            logger.LogDebug("Can't deserialize data for confirm email token {Token}", token);
-            throw UserEmailInteractionException.InvalidToken();
-        }
-
-
-        var user = await userManager.FindByIdAsync(data.UserId);
-        if (user == null)
-        {
-            logger.LogDebug("User {UserId} not found", data.UserId);
-            throw UserEmailInteractionException.UnknownUser();
-        }
-
-        var result = await userManager.ConfirmEmailAsync(user, data.ConfirmationToken);
-
-        if (!result.Succeeded)
-        {
-            logger.LogDebug("Confirm email token {Token} failed with errors: {Errors}", token,
-                result.Errors.Select(x => x.Code));
-            throw UserEmailInteractionException.InvalidToken();
-        }
-
-        return data.RedirectUrl;
-    }
-
-
     public async Task SendPasswordResetNotificationAsync(string tenantId, RtUser user)
     {
         if (!await CanSendEmail(tenantId, user))
@@ -118,52 +80,8 @@ public class UserEmailInteractionService(
             { "ConfirmToken", () => confirmationToken }
         };
 
-        
+
         await SendNotificationAsync(tenantId, IdentityServiceConstants.ResetPasswordEmailTemplateName, user, replaceFunctions);
-    }
-
-    public async Task<string> ValidateAndResetPasswordAsync(string tenantId, string token, string newPassword)
-    {
-        var grant = await persistedGrantStore.GetAsync(token);
-        if (grant == null)
-        {
-            logger.LogDebug("Confirm email token {Token} not found", token);
-            throw UserEmailInteractionException.InvalidToken();
-        }
-
-        var data = JsonSerializer.Deserialize<EmailConfirmationGrantData>(grant.Data);
-        if (data == null)
-        {
-            logger.LogDebug("Can't deserialize data for confirm email token {Token}", token);
-            throw UserEmailInteractionException.InvalidToken();
-        }
-
-        var user = await userManager.FindByIdAsync(data.UserId);
-        if (user == null)
-        {
-            logger.LogDebug("User {UserId} not found", data.UserId);
-            throw UserEmailInteractionException.UnknownUser();
-        }
-
-        var result = await userManager.ResetPasswordAsync(user, data.ConfirmationToken, newPassword);
-
-        if (!result.Succeeded)
-        {
-            throw PasswordComplexityTooLowException.PasswordChangeFailed(
-                string.Join(", ", result.Errors.Select(x => x.Code)),
-                result.Errors);
-        }
-
-        // we know the user email address is valid so we can set it to confirmed.
-
-        if (!user.EmailConfirmed)
-        {
-            var emailToken = await userManager.GenerateEmailConfirmationTokenAsync(user);
-            await userManager.ConfirmEmailAsync(user, emailToken);
-        }
-
-
-        return data.RedirectUrl;
     }
 
     private async Task<string> GenerateResetPasswordTokenAsync(string tenantId, RtUser user)
@@ -209,7 +127,7 @@ public class UserEmailInteractionService(
         return key;
     }
 
-    private string? GetName(RtUser user)
+    private static string? GetName(RtUser user)
     {
         if (!string.IsNullOrEmpty(user.FirstName))
         {
@@ -241,7 +159,7 @@ public class UserEmailInteractionService(
 
         return true;
     }
-    
+
     private async Task SendNotificationAsync(string tenantId, string templateName, RtUser user, Dictionary<string, Func<string>> replaceFunctions)
     {
         if (string.IsNullOrWhiteSpace(user.Email))

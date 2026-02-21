@@ -26,5 +26,12 @@ internal class ConfigureIdentityServerOptions(IOptions<OctoIdentityServicesOptio
 
         options.IssuerUri = octoIdentityOptions.Value.AuthorityUrl.EnsureEndsWith("/");
         options.LicenseKey = octoIdentityOptions.Value.IdentityServerLicenseKey;
+
+        // Configure Angular SPA routes for IdentityServer UI
+        options.UserInteraction.LoginUrl = "/System/login";
+        options.UserInteraction.LogoutUrl = "/System/logout";
+        options.UserInteraction.ConsentUrl = "/System/consent";
+        options.UserInteraction.ErrorUrl = "/System/error";
+        options.UserInteraction.DeviceVerificationUrl = "/System/device";
     }
 }

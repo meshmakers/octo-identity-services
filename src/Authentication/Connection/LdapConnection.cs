@@ -257,14 +257,14 @@ internal class LdapConnection : ILdapConnection
     ///     its last entry again. As a result the ldapEntries-list will have the last entry twice.
     /// </summary>
     /// <param name="ldapEntries">A list of the entries which will be modified in-place</param>
-    private void CheckIfLastEntryTwice(List<LdapEntry> ldapEntries)
+    private static void CheckIfLastEntryTwice(List<LdapEntry> ldapEntries)
     {
         if (ldapEntries.Count >= 2)
         {
             var lastEntry = ldapEntries.Last();
             var secondLastEntry = ldapEntries.ElementAt(ldapEntries.Count - 2);
             if (lastEntry.CompareTo(secondLastEntry) == 0)
-                // The last two objects are the same. Remove last one.
+            // The last two objects are the same. Remove last one.
             {
                 ldapEntries.Remove(lastEntry);
             }
