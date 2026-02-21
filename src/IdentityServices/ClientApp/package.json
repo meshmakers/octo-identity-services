@@ -10,7 +10,8 @@
     "watch": "ng build --watch --configuration development",
     "test": "ng test",
     "lint": "ng lint",
-    "extract-i18n": "ng extract-i18n"
+    "extract-i18n": "ng extract-i18n",
+    "postinstall": "node -e \"var s=require('path').join(__dirname,'src/environments/version.ts');require('fs').existsSync(s)?require('child_process').execSync('node \\\"'+s+'\\\"',{stdio:'inherit'}):console.log('Version generation skipped')\""
   },
   "private": true,
   "dependencies": {

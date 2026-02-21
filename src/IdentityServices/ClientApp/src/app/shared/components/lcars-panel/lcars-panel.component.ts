@@ -1,5 +1,6 @@
 import { Component, Input } from '@angular/core';
 import { CommonModule } from '@angular/common';
+import { VERSION } from '../../../../environments/currentVersion';
 
 @Component({
   selector: 'app-lcars-panel',
@@ -15,6 +16,7 @@ import { CommonModule } from '@angular/common';
         <div class="bar-mint"></div>
         <div class="bar-violet"></div>
         <div class="bar-toffee"></div>
+        <span class="version-label">v{{ version }}</span>
       </div>
     </div>
   `,
@@ -22,4 +24,5 @@ import { CommonModule } from '@angular/common';
 })
 export class LcarsPanelComponent {
   @Input() variant: 'default' | 'error' | 'success' = 'default';
+  protected readonly version = VERSION.version;
 }
