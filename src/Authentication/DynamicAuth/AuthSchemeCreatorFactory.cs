@@ -4,7 +4,6 @@ using Persistence.IdentityCkModel.Generated.System.Identity.v2;
 namespace Meshmakers.Octo.Backend.Authentication.DynamicAuth;
 
 /// <inheritdoc />
-/// >
 internal class AuthSchemeCreatorFactory : IAuthSchemeCreatorFactory
 {
     private readonly IServiceProvider _provider;
@@ -16,7 +15,6 @@ internal class AuthSchemeCreatorFactory : IAuthSchemeCreatorFactory
 
 
     /// <inheritdoc />
-    /// >
     public IAuthSchemeCreator<TAuthProvider> GetCreator<TAuthProvider>()
         where TAuthProvider : RtIdentityProvider
     {

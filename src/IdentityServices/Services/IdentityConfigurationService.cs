@@ -12,7 +12,7 @@ public class IdentityConfigurationService(ISystemContext systemContext)
 
     public Task<RtMailNotificationConfiguration> GetMailNotificationConfigurationAsync(string tenantId)
     {
-        return GetOrRetrieveConfiguration<RtMailNotificationConfiguration>(tenantId, 
+        return GetOrRetrieveConfiguration<RtMailNotificationConfiguration>(tenantId,
             IdentityServiceConstants.MailNotificationConfigurationName);
     }
 }

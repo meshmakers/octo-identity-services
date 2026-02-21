@@ -11,3 +11,9 @@ types:
         name: UseTls
       - id: ${this}/Port
         name: Port
+      - id: ${this}/UserBaseDn
+        name: UserBaseDn
+        isOptional: true
+      - id: ${this}/UserNameAttribute
+        name: UserNameAttribute
+        isOptional: true

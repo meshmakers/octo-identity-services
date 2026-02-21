@@ -1,0 +1,1 @@
+octo-cli -c AddAzureEntryIdIdentityProvider -n "meshmakers" -e true --tenantId "***REMOVED-ENTRA-TENANT-ID-AB3837***" --clientId "***REMOVED-ENTRA-CLIENT-ID-AB3837***" --clientSecret "***REMOVED-ENTRA-SECRET-AB3837***"

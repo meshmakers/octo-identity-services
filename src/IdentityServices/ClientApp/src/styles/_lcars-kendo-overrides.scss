@@ -1,0 +1,260 @@
+// =============================================================================
+// LCARS DESIGN SYSTEM - Kendo UI Overrides
+// Custom styling for Kendo Angular components to match LCARS theme
+// =============================================================================
+
+@use 'lcars-variables' as *;
+@use 'lcars-mixins' as *;
+
+// === Buttons ===
+
+.k-button {
+  @include lcars-button-base;
+}
+
+.k-button-solid-primary {
+  @include lcars-button-primary;
+}
+
+.k-button-solid-error {
+  @include lcars-button-error;
+}
+
+.k-button-outline,
+.k-button-outline-base,
+.k-button-outline-primary {
+  @include lcars-button-outline;
+}
+
+.k-button-flat {
+  @include lcars-button-base;
+  background: transparent;
+  border: none;
+  color: $ash-blue;
+
+  &:hover:not(:disabled) {
+    color: $octo-mint;
+    background: rgba($octo-mint, 0.1);
+  }
+}
+
+.k-button-flat-error {
+  @include lcars-button-base;
+  background: transparent;
+  border: none;
+  color: $bubblegum;
+
+  &:hover:not(:disabled) {
+    background: rgba($bubblegum, 0.1);
+  }
+}
+
+// Button group
+.k-button-group {
+  .k-button {
+    border-radius: 0;
+
+    &:first-child {
+      border-radius: var(--lcars-radius-sm) 0 0 var(--lcars-radius-sm);
+    }
+
+    &:last-child {
+      border-radius: 0 var(--lcars-radius-sm) var(--lcars-radius-sm) 0;
+    }
+  }
+}
+
+// === Input Fields ===
+
+.k-textbox,
+.k-input,
+.k-input-solid {
+  @include lcars-input;
+}
+
+.k-input-inner {
+  background: transparent;
+  color: inherit;
+  font-family: var(--lcars-font-primary);
+}
+
+.k-floating-label-container {
+  .k-label {
+    color: $ash-blue;
+    font-family: var(--lcars-font-primary);
+    font-size: var(--lcars-font-size-sm);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+  }
+
+  &.k-focus,
+  &.k-empty:focus-within {
+    .k-label {
+      color: $octo-mint;
+    }
+  }
+}
+
+// Input validation states
+.k-input.k-invalid,
+.k-textbox.k-invalid {
+  border-color: $bubblegum;
+
+  &:focus {
+    box-shadow: var(--lcars-glow-error);
+  }
+}
+
+// === Checkboxes ===
+
+.k-checkbox {
+  border: 1px solid rgba($ash-blue, 0.5);
+  background: rgba($deep-sea, 0.8);
+  border-radius: var(--lcars-radius-sm);
+  transition: all var(--lcars-transition-fast);
+
+  &:hover:not(:disabled) {
+    border-color: rgba($octo-mint, 0.5);
+  }
+
+  &:checked,
+  &.k-checked {
+    background: $octo-mint;
+    border-color: $octo-mint;
+  }
+
+  &:focus {
+    box-shadow: var(--lcars-glow-primary);
+  }
+
+  &:disabled {
+    opacity: 0.5;
+  }
+}
+
+.k-checkbox-label {
+  color: #ffffff;
+  font-family: var(--lcars-font-primary);
+  font-size: var(--lcars-font-size-base);
+}
+
+// === Labels ===
+
+.k-label,
+label {
+  color: $ash-blue;
+  font-family: var(--lcars-font-primary);
+  font-size: var(--lcars-font-size-sm);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  font-weight: 500;
+}
+
+// === Form Hints & Errors ===
+
+.k-form-hint {
+  color: rgba($ash-blue, 0.8);
+  font-size: var(--lcars-font-size-xs);
+}
+
+.k-form-error {
+  color: $bubblegum;
+  font-size: var(--lcars-font-size-xs);
+}
+
+// === Dividers / Separators ===
+
+.k-hr {
+  border-color: rgba($octo-mint, 0.2);
+}
+
+// === Cards ===
+
+.k-card {
+  @include lcars-panel;
+  overflow: hidden;
+}
+
+.k-card-header {
+  @include lcars-header-bar;
+  padding: 0;
+}
+
+.k-card-body {
+  padding: var(--lcars-spacing-lg);
+  background: transparent;
+}
+
+.k-card-footer {
+  padding: var(--lcars-spacing-md);
+  border-top: 1px solid rgba($octo-mint, 0.2);
+}
+
+// === Popups & Dropdowns ===
+
+.k-popup {
+  background: var(--surface-elevated);
+  border: var(--lcars-panel-border);
+  border-radius: var(--lcars-radius-md);
+  box-shadow: var(--lcars-shadow-dropdown);
+}
+
+// === Animation Classes ===
+
+.k-animation-container {
+  z-index: var(--lcars-z-dropdown);
+}
+
+// === Loading Indicators ===
+
+.k-loader {
+  color: $octo-mint;
+}
+
+.k-loader-primary {
+  color: $octo-mint;
+}
+
+// === Notification / Toast ===
+
+.k-notification {
+  @include lcars-panel(false);
+
+  &.k-notification-success {
+    border-color: rgba($success-color, 0.5);
+    background: linear-gradient(180deg, rgba($success-color, 0.2), rgba($success-color, 0.1));
+  }
+
+  &.k-notification-error {
+    border-color: rgba($bubblegum, 0.5);
+    background: linear-gradient(180deg, rgba($bubblegum, 0.2), rgba($bubblegum, 0.1));
+  }
+
+  &.k-notification-warning {
+    border-color: rgba($toffee, 0.5);
+    background: linear-gradient(180deg, rgba($toffee, 0.2), rgba($toffee, 0.1));
+  }
+
+  &.k-notification-info {
+    border-color: rgba($neo-cyan, 0.5);
+    background: linear-gradient(180deg, rgba($neo-cyan, 0.2), rgba($neo-cyan, 0.1));
+  }
+}
+
+// === Tooltips ===
+
+.k-tooltip {
+  background: var(--iron-navy);
+  border: var(--lcars-panel-border);
+  border-radius: var(--lcars-radius-sm);
+  color: #ffffff;
+  font-family: var(--lcars-font-primary);
+  font-size: var(--lcars-font-size-sm);
+}
+
+// === Icon Styling ===
+
+.k-icon,
+.k-svg-icon {
+  color: inherit;
+}

@@ -1,0 +1,112 @@
+// =============================================================================
+// LCARS DESIGN SYSTEM - Variables
+// Based on Octo Brand Manual and Refinery Studio Implementation
+// =============================================================================
+
+// === Brand Colors (from Octo Brand Manual) ===
+$octo-mint: #64ceb9;           // Primary accent, glow effects
+$neo-cyan: #00a8dc;            // Secondary highlights
+
+// === Secondary Colors ===
+$indigogo: #546fbd;            // Panel accents
+$royal-violet: #6c4da8;        // LCARS-typical accent
+$toffee: #da9162;              // Warm accent, warnings
+$bubblegum: #ec658f;           // Alerts, errors
+$lilac-glow: #c861d6;          // Hover states, glow effects
+
+// === Neutral Colors ===
+$ash-blue: #9292a6;            // Inactive elements, secondary text
+$iron-navy: #394555;           // Surface, panels
+$deep-sea: #07172b;            // Background (NEVER use pure black!)
+$surface-elevated: #1f2e40;    // Elevated surfaces
+
+// === Semantic Colors ===
+$success-color: #4caf50;
+$warning-color: $toffee;
+$error-color: $bubblegum;
+$info-color: $neo-cyan;
+
+// === CSS Custom Properties ===
+:root {
+  // Brand Colors
+  --octo-mint: #{$octo-mint};
+  --octo-mint-rgb: 100, 206, 185;
+  --neo-cyan: #{$neo-cyan};
+  --neo-cyan-rgb: 0, 168, 220;
+  --deep-sea: #{$deep-sea};
+  --deep-sea-rgb: 7, 23, 43;
+  --iron-navy: #{$iron-navy};
+  --iron-navy-rgb: 57, 69, 85;
+  --surface-elevated: #{$surface-elevated};
+  --surface-elevated-rgb: 31, 46, 64;
+  --ash-blue: #{$ash-blue};
+  --ash-blue-rgb: 146, 146, 166;
+  --bubblegum: #{$bubblegum};
+  --bubblegum-rgb: 236, 101, 143;
+  --toffee: #{$toffee};
+  --toffee-rgb: 218, 145, 98;
+  --royal-violet: #{$royal-violet};
+  --royal-violet-rgb: 108, 77, 168;
+  --indigogo: #{$indigogo};
+  --lilac-glow: #{$lilac-glow};
+
+  // Typography
+  --lcars-font-primary: 'Montserrat', 'Roboto', 'Helvetica Neue', sans-serif;
+  --lcars-font-mono: 'Roboto Mono', 'Consolas', monospace;
+
+  // Font Sizes
+  --lcars-font-size-xs: 0.65rem;
+  --lcars-font-size-sm: 0.75rem;
+  --lcars-font-size-base: 0.875rem;
+  --lcars-font-size-md: 1rem;
+  --lcars-font-size-lg: 1.25rem;
+  --lcars-font-size-xl: 1.5rem;
+  --lcars-font-size-2xl: 2rem;
+
+  // Glow Effects
+  --lcars-glow-primary: 0 0 10px rgba(100, 206, 185, 0.4);
+  --lcars-glow-primary-strong: 0 0 15px rgba(100, 206, 185, 0.5);
+  --lcars-glow-cyan: 0 0 10px rgba(0, 168, 220, 0.4);
+  --lcars-glow-error: 0 0 10px rgba(236, 101, 143, 0.4);
+  --lcars-glow-warning: 0 0 10px rgba(218, 145, 98, 0.4);
+  --lcars-glow-violet: 0 0 10px rgba(108, 77, 168, 0.4);
+
+  // Border Radius (asymmetric = LCARS-typical)
+  --lcars-radius-sm: 4px;
+  --lcars-radius-md: 8px;
+  --lcars-radius-lg: 16px;
+  --lcars-radius-xl: 24px;
+  --lcars-radius-asymmetric: 4px 16px 16px 4px;
+  --lcars-radius-asymmetric-reverse: 16px 4px 4px 16px;
+  --lcars-radius-pill: 50px;
+
+  // Spacing
+  --lcars-spacing-xs: 4px;
+  --lcars-spacing-sm: 8px;
+  --lcars-spacing-md: 16px;
+  --lcars-spacing-lg: 24px;
+  --lcars-spacing-xl: 32px;
+  --lcars-spacing-2xl: 48px;
+
+  // Panel Styling
+  --lcars-panel-border: 1px solid rgba(100, 206, 185, 0.2);
+  --lcars-panel-border-strong: 1px solid rgba(100, 206, 185, 0.4);
+  --lcars-panel-bg: rgba(31, 46, 64, 0.6);
+  --lcars-panel-bg-solid: #{$surface-elevated};
+
+  // Shadows
+  --lcars-shadow-panel: 0 4px 20px rgba(0, 0, 0, 0.3), 0 0 20px rgba(100, 206, 185, 0.08);
+  --lcars-shadow-dropdown: 0 4px 20px rgba(0, 0, 0, 0.4), 0 0 15px rgba(100, 206, 185, 0.1);
+  --lcars-shadow-inset: inset 0 0 20px rgba(100, 206, 185, 0.05);
+
+  // Transitions
+  --lcars-transition-fast: 150ms ease;
+  --lcars-transition-normal: 250ms ease;
+  --lcars-transition-slow: 400ms ease;
+
+  // Z-Index Layers
+  --lcars-z-base: 1;
+  --lcars-z-dropdown: 100;
+  --lcars-z-modal: 1000;
+  --lcars-z-toast: 2000;
+}

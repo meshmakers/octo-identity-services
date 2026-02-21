@@ -1,0 +1,28 @@
+{
+  "/api": {
+    "target": "https://localhost:5003",
+    "secure": false,
+    "changeOrigin": true,
+    "pathRewrite": { "^/api": "/System/api" }
+  },
+  "/System/api": {
+    "target": "https://localhost:5003",
+    "secure": false,
+    "changeOrigin": true
+  },
+  "/connect": {
+    "target": "https://localhost:5003",
+    "secure": false,
+    "changeOrigin": true
+  },
+  "/.well-known": {
+    "target": "https://localhost:5003",
+    "secure": false,
+    "changeOrigin": true
+  },
+  "/system/v": {
+    "target": "https://localhost:5003",
+    "secure": false,
+    "changeOrigin": true
+  }
+}

@@ -5,7 +5,7 @@ using Microsoft.Extensions.Options;
 
 namespace Meshmakers.Octo.Backend.IdentityServices.Configuration;
 
-public class ConfigureMapperConfigurationExpression(IOptions<OctoIdentityServicesOptions> octoIdentityOptions): IConfigureNamedOptions<MapperConfigurationExpression>
+public class ConfigureMapperConfigurationExpression(IOptions<OctoIdentityServicesOptions> octoIdentityOptions) : IConfigureNamedOptions<MapperConfigurationExpression>
 {
     public void Configure(MapperConfigurationExpression options)
     {

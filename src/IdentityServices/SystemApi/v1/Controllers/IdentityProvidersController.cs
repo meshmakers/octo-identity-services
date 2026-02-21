@@ -81,7 +81,7 @@ public class IdentityProvidersController : ControllerBase
     [Authorize(IdentityServiceConstants.IdentityApiReadWritePolicy)]
     [EndpointSummary("Add a new identity provider.")]
     public async Task<ActionResult<IdentityProviderDto>> AddNewIdentityProviderAsync(
-        [FromBody] [Description("The configuration for the new identity provider.")] IdentityProviderDto identityProviderDto)
+        [FromBody][Description("The configuration for the new identity provider.")] IdentityProviderDto identityProviderDto)
     {
         var identityProvider = _mapper.Map<RtIdentityProvider>(identityProviderDto);
 
@@ -95,7 +95,7 @@ public class IdentityProvidersController : ControllerBase
     [EndpointSummary("Delete an existing identity provider.")]
     [ProducesResponseType(StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
-    public async Task<IActionResult> DeleteIdentityProviderAsync([Required] [Description("The ID of the identity provider to be deleted")] OctoObjectId rtId)
+    public async Task<IActionResult> DeleteIdentityProviderAsync([Required][Description("The ID of the identity provider to be deleted")] OctoObjectId rtId)
     {
         if (!ModelState.IsValid)
         {
@@ -116,8 +116,8 @@ public class IdentityProvidersController : ControllerBase
     [ProducesResponseType(StatusCodes.Status401Unauthorized)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     public async Task<ActionResult<IdentityProviderDto>> ReplaceProviderAsync(
-        [FromRoute] [Required] [Description("ID of an existing provider")] OctoObjectId rtId,
-        [FromBody] [Required] [Description("The configuration for the new identity provider.")] IdentityProviderDto identityProviderDto)
+        [FromRoute][Required][Description("ID of an existing provider")] OctoObjectId rtId,
+        [FromBody][Required][Description("The configuration for the new identity provider.")] IdentityProviderDto identityProviderDto)
     {
         if (identityProviderDto == null)
         {
@@ -132,7 +132,7 @@ public class IdentityProvidersController : ControllerBase
         return Ok(identityProviderDto);
     }
 
-    private async Task HandleWriteExceptionAsync(Func<Task> action)
+    private static async Task HandleWriteExceptionAsync(Func<Task> action)
     {
         try
         {

@@ -11,7 +11,6 @@ using Meshmakers.Octo.Communication.Contracts.DataTransferObjects;
 using Meshmakers.Octo.Communication.Contracts.DataTransferObjects.ApiErrors;
 using Meshmakers.Octo.Services.Contracts.DistributionEventHub.Messages;
 using Microsoft.AspNetCore.Authorization;
-using Microsoft.AspNetCore.Http.HttpResults;
 using Microsoft.AspNetCore.Mvc;
 using Persistence.IdentityCkModel.Generated.System.Identity.v2;
 
@@ -410,7 +409,7 @@ public class ApiSecretsController : ControllerBase
             Guid.NewGuid(), DateTime.Now));
     }
 
-    private ApiSecretDto CreateApiSecret(Secret secret)
+    private static ApiSecretDto CreateApiSecret(Secret secret)
     {
         var apiSecretDto = new ApiSecretDto
         {
@@ -422,7 +421,7 @@ public class ApiSecretsController : ControllerBase
         return apiSecretDto;
     }
 
-    private void ApplyToApiSecret(RtSecretRecord secret, ApiSecretDto apiSecretDto)
+    private static void ApplyToApiSecret(RtSecretRecord secret, ApiSecretDto apiSecretDto)
     {
         secret.ExpirationDateTime = apiSecretDto.ExpirationDate;
         secret.Description = apiSecretDto.Description;

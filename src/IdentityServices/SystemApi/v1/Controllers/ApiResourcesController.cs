@@ -8,12 +8,11 @@ using IdentityServerPersistence.SystemStores;
 using Meshmakers.Octo.Common.DistributionEventHub.Services;
 using Meshmakers.Octo.Communication.Contracts.DataTransferObjects;
 using Meshmakers.Octo.Communication.Contracts.DataTransferObjects.ApiErrors;
+using MongoDB.Bson;
 using Meshmakers.Octo.Runtime.Contracts.RepositoryEntities;
 using Meshmakers.Octo.Services.Contracts.DistributionEventHub.Messages;
 using Microsoft.AspNetCore.Authorization;
-using Microsoft.AspNetCore.Http.HttpResults;
 using Microsoft.AspNetCore.Mvc;
-using MongoDB.Bson;
 using Persistence.IdentityCkModel.Generated.System.Identity.v2;
 
 namespace Meshmakers.Octo.Backend.IdentityServices.SystemApi.v1.Controllers;
@@ -61,7 +60,7 @@ public class ApiResourcesController : ControllerBase
     [EndpointSummary("Returns all API resources definitions using paging")]
     [ProducesResponseType(typeof(PagedResult<ApiResourceDto>), StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(InternalServerErrorDto), StatusCodes.Status500InternalServerError)]
-    public async Task<IActionResult> Get([Required] [FromQuery] PagingParams pagingParams)
+    public async Task<IActionResult> Get([Required][FromQuery] PagingParams pagingParams)
     {
         try
         {
@@ -126,7 +125,7 @@ public class ApiResourcesController : ControllerBase
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     [ProducesResponseType(StatusCodes.Status409Conflict)]
     [ProducesResponseType(typeof(InternalServerErrorDto), StatusCodes.Status500InternalServerError)]
-    public async Task<IActionResult> Post([Required] [FromBody] ApiResourceDto apiResourceDto)
+    public async Task<IActionResult> Post([Required][FromBody] ApiResourceDto apiResourceDto)
     {
         try
         {
@@ -161,7 +160,7 @@ public class ApiResourcesController : ControllerBase
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     [ProducesResponseType(typeof(NotFoundErrorDto), StatusCodes.Status404NotFound)]
     [ProducesResponseType(typeof(InternalServerErrorDto), StatusCodes.Status500InternalServerError)]
-    public async Task<IActionResult> Put([Required] string name, [Required] [FromBody] ApiResourceDto apiResourceDto)
+    public async Task<IActionResult> Put([Required] string name, [Required][FromBody] ApiResourceDto apiResourceDto)
     {
         try
         {
@@ -222,7 +221,7 @@ public class ApiResourcesController : ControllerBase
             Guid.NewGuid(), DateTime.Now));
     }
 
-    private ApiResourceDto CreateApiResourceDto(ApiResource apiResource)
+    private static ApiResourceDto CreateApiResourceDto(ApiResource apiResource)
     {
         var apiResourceDto = new ApiResourceDto
         {
@@ -240,7 +239,7 @@ public class ApiResourcesController : ControllerBase
         return apiResourceDto;
     }
 
-    private void ApplyToRtApiResource(RtApiResource apiResource, ApiResourceDto apiResourceDto)
+    private static void ApplyToRtApiResource(RtApiResource apiResource, ApiResourceDto apiResourceDto)
     {
         if (string.IsNullOrWhiteSpace(apiResourceDto.Name))
         {

@@ -28,6 +28,9 @@
         <!-- Assertions -->
         <PackageReference Include="FluentAssertions" Version="8.8.0" />
 
+        <!-- TOTP Code Generation -->
+        <PackageReference Include="Otp.NET" Version="1.4.0" />
+
         <!-- Integration Testing -->
         <PackageReference Include="Microsoft.AspNetCore.Mvc.Testing" Version="10.0.2" />
 
@@ -49,6 +52,9 @@
 
     <ItemGroup>
         <Content Include="appsettings.test.json">
+            <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+        </Content>
+        <Content Include="xunit.runner.json">
             <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
         </Content>
     </ItemGroup>

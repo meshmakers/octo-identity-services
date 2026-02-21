@@ -1,0 +1,168 @@
+@use '../../../styles/lcars-variables' as *;
+@use '../../../styles/lcars-mixins' as *;
+
+:host {
+  display: block;
+  flex: 1;
+}
+
+.lcars-auth-container {
+  @include lcars-centered-container(480px);
+}
+
+.lcars-client-info {
+  display: flex;
+  align-items: center;
+  gap: var(--lcars-spacing-md);
+  margin-bottom: var(--lcars-spacing-lg);
+  padding-bottom: var(--lcars-spacing-lg);
+  border-bottom: 1px solid rgba($octo-mint, 0.2);
+
+  &__logo {
+    width: 48px;
+    height: 48px;
+    border-radius: var(--lcars-radius-sm);
+    background: rgba($iron-navy, 0.5);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    overflow: hidden;
+
+    img {
+      max-width: 100%;
+      max-height: 100%;
+      object-fit: contain;
+    }
+  }
+
+  &__details {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    gap: var(--lcars-spacing-xs);
+  }
+
+  &__name {
+    color: #ffffff;
+    font-weight: 600;
+    font-size: var(--lcars-font-size-md);
+  }
+
+  &__url {
+    color: $ash-blue;
+    font-size: var(--lcars-font-size-sm);
+  }
+}
+
+.consent-description {
+  color: $ash-blue;
+  font-size: var(--lcars-font-size-base);
+  margin-bottom: var(--lcars-spacing-lg);
+}
+
+app-scope-list {
+  display: block;
+  margin-bottom: var(--lcars-spacing-lg);
+}
+
+.lcars-checkbox-group {
+  display: flex;
+  align-items: center;
+  gap: var(--lcars-spacing-sm);
+  margin: var(--lcars-spacing-lg) 0;
+  padding-top: var(--lcars-spacing-md);
+  border-top: 1px solid rgba($octo-mint, 0.2);
+
+  .lcars-checkbox {
+    width: 18px;
+    height: 18px;
+    appearance: none;
+    border: 1px solid rgba($ash-blue, 0.5);
+    background: rgba($deep-sea, 0.8);
+    border-radius: var(--lcars-radius-sm);
+    cursor: pointer;
+    transition: all var(--lcars-transition-fast);
+    position: relative;
+
+    &:hover:not(:disabled) {
+      border-color: rgba($octo-mint, 0.5);
+    }
+
+    &:checked {
+      background: $octo-mint;
+      border-color: $octo-mint;
+
+      &::after {
+        content: '';
+        position: absolute;
+        top: 2px;
+        left: 6px;
+        width: 4px;
+        height: 8px;
+        border: solid #000;
+        border-width: 0 2px 2px 0;
+        transform: rotate(45deg);
+      }
+    }
+  }
+
+  label {
+    color: #ffffff;
+    font-size: var(--lcars-font-size-base);
+    cursor: pointer;
+  }
+}
+
+.lcars-actions {
+  display: flex;
+  gap: var(--lcars-spacing-md);
+  margin-top: var(--lcars-spacing-lg);
+}
+
+.lcars-button-primary {
+  @include lcars-button-primary;
+  flex: 1;
+  padding: var(--lcars-spacing-md);
+}
+
+.lcars-button-error {
+  @include lcars-button-error;
+  flex: 1;
+  padding: var(--lcars-spacing-md);
+}
+
+.lcars-error-message {
+  background: rgba($bubblegum, 0.1);
+  border: 1px solid rgba($bubblegum, 0.3);
+  border-radius: var(--lcars-radius-sm);
+  color: $bubblegum;
+  padding: var(--lcars-spacing-md);
+  margin-bottom: var(--lcars-spacing-md);
+  font-size: var(--lcars-font-size-sm);
+}
+
+.lcars-loading {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--lcars-spacing-md);
+  padding: var(--lcars-spacing-xl);
+
+  &__spinner {
+    width: 40px;
+    height: 40px;
+    border: 3px solid rgba($octo-mint, 0.2);
+    border-top-color: $octo-mint;
+    border-radius: 50%;
+    animation: spin 1s linear infinite;
+  }
+
+  &__text {
+    @include lcars-uppercase-label;
+    color: $ash-blue;
+  }
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}

@@ -1,0 +1,104 @@
+@use '../../../../styles/lcars-variables' as *;
+@use '../../../../styles/lcars-mixins' as *;
+
+.lcars-header {
+  position: relative;
+  text-align: center;
+  margin-bottom: var(--lcars-spacing-xl);
+  padding-top: var(--lcars-spacing-xl);
+
+  &__user-menu {
+    position: absolute;
+    top: calc(-1 * var(--lcars-spacing-lg));
+    left: 50%;
+    transform: translateX(-50%);
+    z-index: 10;
+  }
+
+  &__logo {
+    margin-bottom: var(--lcars-spacing-lg);
+
+    img {
+      max-height: 50px;
+      width: auto;
+    }
+  }
+
+  &__title {
+    display: flex;
+    justify-content: center;
+    align-items: baseline;
+    gap: var(--lcars-spacing-xs);
+    flex-wrap: wrap;
+
+    .title-prefix {
+      font-size: var(--lcars-font-size-xl);
+      font-weight: 700;
+      letter-spacing: 2px;
+      color: $octo-mint;
+      text-shadow: 0 0 15px rgba($octo-mint, 0.6);
+    }
+
+    .title-main {
+      font-size: var(--lcars-font-size-xl);
+      font-weight: 700;
+      letter-spacing: 2px;
+      color: $neo-cyan;
+      text-shadow: 0 0 15px rgba($neo-cyan, 0.6);
+    }
+
+    .title-suffix {
+      font-size: var(--lcars-font-size-base);
+      font-weight: 400;
+      letter-spacing: 1px;
+      color: $ash-blue;
+      margin-left: 4px;
+    }
+  }
+
+  &__subtitle {
+    color: var(--ash-blue);
+    font-size: var(--lcars-font-size-base);
+    margin: var(--lcars-spacing-sm) 0 0 0;
+    font-weight: 400;
+  }
+}
+
+.user-indicator {
+  display: flex;
+  align-items: center;
+  gap: var(--lcars-spacing-md);
+  padding: var(--lcars-spacing-sm) var(--lcars-spacing-md);
+  background: rgba(0, 0, 0, 0.3);
+  border-radius: var(--lcars-radius-sm);
+  border: 1px solid var(--octo-mint);
+
+  &__name {
+    color: var(--octo-mint);
+    font-size: var(--lcars-font-size-sm);
+    font-weight: 500;
+    max-width: 200px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  &__logout {
+    background: transparent;
+    border: 1px solid var(--neo-cyan);
+    color: var(--neo-cyan);
+    padding: var(--lcars-spacing-xs) var(--lcars-spacing-sm);
+    font-size: var(--lcars-font-size-xs);
+    font-family: var(--font-primary);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    cursor: pointer;
+    border-radius: var(--lcars-radius-sm);
+    transition: all 0.2s ease;
+
+    &:hover {
+      background: var(--neo-cyan);
+      color: var(--deep-sea);
+    }
+  }
+}

@@ -47,7 +47,7 @@ internal class TokenCleanupHostService : IHostedService
         if (_identityOptions.Value.EnableTokenCleanup)
         {
             if (_source == null)
-                // Nothing was initialized, so exit.
+            // Nothing was initialized, so exit.
             {
                 return Task.CompletedTask;
             }

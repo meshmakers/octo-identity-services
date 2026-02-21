@@ -2,9 +2,16 @@
 
     <PropertyGroup>
         <AssemblyName>Meshmakers.Octo.Backend.IdentityServices</AssemblyName>
-        <DockerDefaultTargetOS>Linux</DockerDefaultTargetOS>
         <RootNamespace>Meshmakers.Octo.Backend.IdentityServices</RootNamespace>
         <UserSecretsId>173d8e91-b831-4e8a-a43f-672c57e6a4da</UserSecretsId>
+        <!-- SPA Configuration -->
+        <SpaRoot>ClientApp\</SpaRoot>
+        <BuildServerSideRenderer>false</BuildServerSideRenderer>
+        <DefaultItemExcludes>$(DefaultItemExcludes);$(SpaRoot)node_modules\**</DefaultItemExcludes>
+        <DockerDefaultTargetOS>Linux</DockerDefaultTargetOS>
+        <IsPackable>false</IsPackable>
+        <TypeScriptCompileBlocked>true</TypeScriptCompileBlocked>
+        <TypeScriptToolsVersion>Latest</TypeScriptToolsVersion>
         <CopyDocumentationFilesFromPackages>true</CopyDocumentationFilesFromPackages>
         <Configurations>Debug;Release;DebugL</Configurations>
         <Platforms>AnyCPU</Platforms>
@@ -24,48 +31,58 @@
         <PackageReference Include="Meshmakers.Octo.Communication.Contracts" Version="$(OctoVersion)" />
         <PackageReference Include="Meshmakers.Octo.Services.Swagger" Version="$(OctoVersion)" />
         <PackageReference Include="Meshmakers.Octo.Services.Observability" Version="$(OctoVersion)" />
+        <PackageReference Include="QRCoder" Version="1.6.0" />
         <ProjectReference Include="..\Authentication\Authentication.csproj" />
     </ItemGroup>
 
 
     <ItemGroup>
-        <Content Update="package.json">
-            <ExcludeFromSingleFile>true</ExcludeFromSingleFile>
-            <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-            <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
-        </Content>
-        <Content Update="Views\Shared\_ApplicationAccess.cshtml">
-            <ExcludeFromSingleFile>true</ExcludeFromSingleFile>
-            <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
-        </Content>
-        <Content Update="Views\Shared\_PersonalInfo.cshtml">
-            <ExcludeFromSingleFile>true</ExcludeFromSingleFile>
-            <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
-        </Content>
-        <Content Update="Views\Shared\UserInfo.cshtml">
-            <ExcludeFromSingleFile>true</ExcludeFromSingleFile>
-            <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
-        </Content>
-        <Content Update="Views\Diagnostics\Index.cshtml">
-            <ExcludeFromSingleFile>true</ExcludeFromSingleFile>
-            <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
-        </Content>
-        <Content Update="Views\Setup\Index.cshtml">
-            <ExcludeFromSingleFile>true</ExcludeFromSingleFile>
-            <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
-        </Content>
-        <Content Update="wwwroot\js\bundle.js">
-            <ExcludeFromSingleFile>true</ExcludeFromSingleFile>
-            <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
-        </Content>
-        <Content Include="app.scss">
-            <ExcludeFromSingleFile>true</ExcludeFromSingleFile>
-            <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
-        </Content>
-        <Content Update="site.scss">
-          <ExcludeFromSingleFile>true</ExcludeFromSingleFile>
-          <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
-        </Content>
+        <!-- Don't publish the SPA source files, but do show them in the project files list -->
+        <Content Remove="$(SpaRoot)**" />
+        <None Remove="$(SpaRoot)**" />
+        <None Include="$(SpaRoot)**" Exclude="$(SpaRoot)node_modules\**" />
     </ItemGroup>
+
+    <ItemGroup>
+        <Folder Include="wwwroot\" />
+    </ItemGroup>
+
+    <ItemGroup>
+      <_ContentIncludedByDefault Remove="ClientApp\dist\identity-ui\prerendered-routes.json" />
+    </ItemGroup>
+
+    <!-- Build Angular ClientApp if dist output does not exist yet -->
+    <Target Name="BuildClientApp" BeforeTargets="Build" Condition="!Exists('$(SpaRoot)dist\index.html')">
+        <Exec Command="node --version" ContinueOnError="true">
+            <Output TaskParameter="ExitCode" PropertyName="ErrorCode" />
+        </Exec>
+        <Error Condition="'$(ErrorCode)' != '0'" Text="Node.js is required to build and run this project. To continue, please install Node.js from https://nodejs.org/, and then restart your command prompt or IDE." />
+        <Message Importance="high" Text="Installing npm dependencies for ClientApp..." />
+        <Exec WorkingDirectory="$(SpaRoot)" Command="npm install" Condition="!Exists('$(SpaRoot)node_modules')" />
+        <Message Importance="high" Text="Building Angular ClientApp..." />
+        <Exec WorkingDirectory="$(SpaRoot)" Command="npm run build" />
+    </Target>
+
+    <!-- Copy Angular dist output to wwwroot in build output directory -->
+    <Target Name="CopyClientAppToOutput" AfterTargets="Build" Condition="Exists('$(SpaRoot)dist\index.html')">
+        <ItemGroup>
+            <ClientAppDistFiles Include="$(SpaRoot)dist\**\*" />
+        </ItemGroup>
+        <Copy SourceFiles="@(ClientAppDistFiles)" DestinationFolder="$(OutDir)wwwroot\%(RecursiveDir)" SkipUnchangedFiles="true" />
+    </Target>
+
+    <!-- Publish: ensure fresh production build of Angular ClientApp -->
+    <Target Name="PublishRunWebpack" AfterTargets="ComputeFilesToPublish">
+        <Exec WorkingDirectory="$(SpaRoot)" Command="npm install" />
+        <Exec WorkingDirectory="$(SpaRoot)" Command="npm run build -- --configuration production" />
+        <ItemGroup>
+            <DistFiles Include="$(SpaRoot)dist\**" />
+            <ResolvedFileToPublish Include="@(DistFiles->'%(FullPath)')" Exclude="@(ResolvedFileToPublish)">
+                <RelativePath>wwwroot\%(RecursiveDir)%(FileName)%(Extension)</RelativePath>
+                <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
+                <ExcludeFromSingleFile>true</ExcludeFromSingleFile>
+            </ResolvedFileToPublish>
+        </ItemGroup>
+    </Target>
 
 </Project>

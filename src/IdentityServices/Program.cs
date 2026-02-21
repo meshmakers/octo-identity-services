@@ -9,6 +9,8 @@ using Meshmakers.Octo.Backend.IdentityServices.Consumers;
 using Meshmakers.Octo.Backend.IdentityServices.Resources;
 using Meshmakers.Octo.Backend.IdentityServices.Routing;
 using Meshmakers.Octo.Backend.IdentityServices.Services;
+using IQrCodeService = Meshmakers.Octo.Backend.IdentityServices.Services.IQrCodeService;
+using QrCodeService = Meshmakers.Octo.Backend.IdentityServices.Services.QrCodeService;
 using Meshmakers.Octo.Communication.Contracts;
 using Meshmakers.Octo.Communication.Contracts.DataTransferObjects;
 using Meshmakers.Octo.Runtime.Contracts.MongoDb.Configuration;
@@ -67,6 +69,7 @@ try
     builder.Services.AddOctoNotification();
     builder.Services.AddScoped<IUserEmailInteractionService, UserEmailInteractionService>();
     builder.Services.AddScoped<IUserManagementService, UserManagementService>();
+    builder.Services.AddSingleton<IQrCodeService, QrCodeService>();
     builder.Services
         .AddSingletonMultipleInterfaces<IdentityConfigurationService, IIdentityConfigurationService,
             ITenantConfigurationService>();
@@ -188,7 +191,7 @@ try
                 IdentityTexts.Backend_IdentityServices_Api_ReadOnlyAccess
             }
         };
-        
+
         options.PolicyScopeMapping = new Dictionary<string, IEnumerable<string>>
         {
             {
@@ -200,7 +203,7 @@ try
                 [CommonConstants.IdentityApiFullAccess]
             }
         };
-        
+
         options.XmlDocDataTransferObjectAssemblies =
         [
             typeof(ClientDto).Assembly
@@ -215,15 +218,16 @@ try
 
     builder.Services.AddAntiforgery(o => o.SuppressXFrameOptionsHeader = true);
 
-    builder.Services.AddMvc();
+    // API Controllers only (no MVC views)
+    builder.Services.AddControllers();
 
-    builder.Services.AddAutoMapper(_=>
+    builder.Services.AddAutoMapper(_ =>
     {
     }, typeof(Program));
-    
+
     // Migrations are in the IdentityServerPersistence assembly
     builder.Services.AddMigrations(typeof(IdentityServiceConstants).Assembly);
-    
+
 
     var app = builder.Build();
 
@@ -237,7 +241,6 @@ try
     }
     else
     {
-        app.UseExceptionHandler("/Home/Error");
         // The default HSTS value is 30 days. You may want to change this for production scenarios, see https://aka.ms/aspnetcore-hsts.
         app.UseHsts();
     }
@@ -279,9 +282,12 @@ try
 
     app.UseAuthorization();
 
-    app.MapDefaultControllerRoute();
-    app.MapControllerRoute("default", "{tenantId:tenantId=System}/{controller=Home}/{action=Index}/{id?}");
-    
+    // Map API controllers - MUST come before UseEndpoints middleware runs
+    app.MapControllers();
+
+    // Serve pre-built Angular files from wwwroot for all environments
+    app.MapFallbackToFile("index.html");
+
     // Initialisierung abfangen
     app.Lifetime.ApplicationStarted.Register(() =>
     {

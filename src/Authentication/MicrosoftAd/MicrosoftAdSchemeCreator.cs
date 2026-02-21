@@ -21,7 +21,9 @@ public class MicrosoftAdSchemeCreator : IAuthSchemeCreator<RtMicrosoftAdIdentity
         options.Port = identityProvider.Port;
         options.UseTls = identityProvider.UseTls;
         options.Name = identityProvider.Name;
-        
+        options.UserBaseDn = identityProvider.UserBaseDn ?? string.Empty;
+        options.UserNameAttribute = identityProvider.UserNameAttribute ?? string.Empty;
+
         var displayName = identityProvider.DisplayName ?? identityProvider.Name;
         return new AuthenticationScheme(identityProvider.Name, displayName, typeof(MicrosoftAdAuthenticationHandler));
     }

@@ -15,7 +15,6 @@ public interface IOctoResourceStore : IResourceStore
     Task<RtApiScope> TryCreateApiScopeAsync(ApiScope apiScope);
     Task<RtApiResource> GetOrCreateApiResourceAsync(RtApiResource apiResource);
     Task DeleteApiResourceAsync(OctoObjectId resourceId);
-    Task DeleteIdentityResourceAsync(OctoObjectId resourceId);
     Task DeleteApiScopeAsync(OctoObjectId resourceId);
 
     Task<RtApiResource?> GetApiResourceByNameAsync(string apiResourceName);

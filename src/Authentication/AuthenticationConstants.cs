@@ -5,7 +5,6 @@ namespace Meshmakers.Octo.Backend.Authentication;
 public static class AuthenticationConstants
 {
     public const string ExternalLoginRoute = "ExternalLogin";
-    public const string ControllerRouteTemplate = ExternalLoginRoute + "/[controller]";
 
     /// <summary>
     ///     Authentication scheme name used for Bearer

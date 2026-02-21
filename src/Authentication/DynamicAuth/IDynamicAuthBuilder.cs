@@ -1,4 +1,5 @@
-﻿using Microsoft.Extensions.DependencyInjection;
+﻿using Meshmakers.Octo.Backend.Authentication.Services;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 
 namespace Meshmakers.Octo.Backend.Authentication.DynamicAuth;
@@ -26,6 +27,7 @@ public class DynamicAuthBuilder : IDynamicAuthBuilder
     {
         Services.TryAddScoped<IDynamicAuthSchemeService, DynamicAuthSchemeService>();
         Services.TryAddScoped<IAuthSchemeCreatorFactory, AuthSchemeCreatorFactory>();
+        Services.TryAddScoped<ILdapAuthenticationService, LdapAuthenticationService>();
         Services.AddInitializationService<DynamicAuthSchemeServiceInitializer>();
     }
 }
