@@ -279,6 +279,14 @@ public class CustomWebApplicationFactory : WebApplicationFactory<Program>, IAsyn
             services.RemoveAll<IDistributionEventHubService>();
             services.AddSingleton<IDistributionEventHubService, TestDistributionEventHubService>();
 
+            // Replace IEventHubControl with a no-op to prevent EventHubStartupService
+            // from calling busControl.StartAsync() which tries to connect to RabbitMQ.
+            // Note: Removing MassTransit hosted services above is not sufficient because
+            // HostedInitializer (not a MassTransit service) runs EventHubStartupService
+            // which starts the bus via IEventHubControl.
+            services.RemoveAll<IEventHubControl>();
+            services.AddSingleton<IEventHubControl, TestEventHubControl>();
+
             // Replace ITenantNotifications with default (non-RabbitMQ) implementation
             services.RemoveAll<ITenantNotifications>();
             services.AddSingleton<ITenantNotifications, DefaultTenantNotifications>();
@@ -356,4 +364,28 @@ internal class TestDistributionEventHubService : IDistributionEventHubService
         // No-op for tests
         return Task.CompletedTask;
     }
+}
+
+/// <summary>
+/// Test implementation of IEventHubControl that does nothing.
+/// This prevents EventHubStartupService from starting the MassTransit bus
+/// which would try to connect to RabbitMQ.
+/// </summary>
+internal class TestEventHubControl : IEventHubControl
+{
+    public Task StartAsync(CancellationToken cancellationToken = default) => Task.CompletedTask;
+
+    public Task StopAsync(CancellationToken cancellationToken = default) => Task.CompletedTask;
+
+    public EndpointHandle RegisterRoutedEventConsumer<TMessage>(string destinationAddress, Func<TMessage, Task> handler)
+        where TMessage : class =>
+        throw new NotSupportedException("Not available in tests");
+
+    public EndpointHandle RegisterRoutedEventConsumer<TMessage>(Func<TMessage, Task> handler)
+        where TMessage : class =>
+        throw new NotSupportedException("Not available in tests");
+
+    public EndpointHandle RegisterCommandConsumer<TMessage>(string commandName, ExecuteCommandHandler<TMessage> handler)
+        where TMessage : class =>
+        throw new NotSupportedException("Not available in tests");
 }
