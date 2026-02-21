@@ -21,3 +21,6 @@ localhost.key
 
 # Angular cache
 .angular/
+
+# Auto-generated version file
+src/environments/currentVersion.ts

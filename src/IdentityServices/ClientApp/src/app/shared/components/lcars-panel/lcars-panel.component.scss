@@ -21,6 +21,18 @@
     @include lcars-footer-bars;
     flex-shrink: 0;
     padding-bottom: var(--lcars-spacing-md);
+    position: relative;
+
+    .version-label {
+      position: absolute;
+      right: var(--lcars-spacing-md);
+      bottom: var(--lcars-spacing-md);
+      font-family: var(--lcars-font-mono);
+      font-size: var(--lcars-font-size-xs);
+      color: var(--ash-blue);
+      letter-spacing: 0.05em;
+      opacity: 0.7;
+    }
   }
 
   // Error variant
