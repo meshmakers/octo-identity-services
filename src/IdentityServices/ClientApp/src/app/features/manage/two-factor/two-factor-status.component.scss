@@ -1,3 +1,4 @@
+@use 'sass:color';
 @use '../../../../styles/lcars-variables' as *;
 @use '../../../../styles/lcars-mixins' as *;
 
@@ -124,7 +125,7 @@
   border-color: $bubblegum;
 
   &:hover:not(:disabled) {
-    background: darken($bubblegum, 10%);
+    background: color.adjust($bubblegum, $lightness: -10%);
   }
 }
 
@@ -136,7 +137,7 @@
   border-color: $toffee;
 
   &:hover:not(:disabled) {
-    background: darken($toffee, 10%);
+    background: color.adjust($toffee, $lightness: -10%);
   }
 }
 
