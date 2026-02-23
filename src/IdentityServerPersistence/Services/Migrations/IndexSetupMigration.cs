@@ -5,25 +5,23 @@ using Microsoft.Extensions.Logging;
 
 namespace IdentityServerPersistence.Services.Migrations;
 
-[Migration(5, 6, IdentityServiceConstants.IdentityMigrationVersionKey,
-    "Add rtState index for RtEntity and RtAssociation collections")]
+[Migration(0, 7, IdentityServiceConstants.IdentityMigrationVersionKey,
+    "Consolidated index setup: RT association indexes, CK type indexes, rtState indexes")]
 // ReSharper disable once UnusedType.Global
-// ReSharper disable once ClassNeverInstantiated.Global
-internal class RtStateIndexMigration(ILogger<RtStateIndexMigration> logger) : IMigration
+internal class IndexSetupMigration(ILogger<IndexSetupMigration> logger) : IMigration
 {
     public async Task<MigrationResult> MigrateAsync(IOctoAdminSession adminSession, ITenantContext tenantContext)
     {
         try
         {
-            logger.LogInformation("Updating indexes for tenant {TenantId} to add rtState index",
-                tenantContext.TenantId);
+            logger.LogInformation("Setting up all indexes for tenant {TenantId}", tenantContext.TenantId);
             await tenantContext.UpdateIndexesAsync(adminSession);
             return MigrationResult.Success();
         }
         catch (Exception e)
         {
-            logger.LogError(e, "Failed to update indexes for tenant {TenantId}", tenantContext.TenantId);
-            return MigrationResult.Failure($"Failed to update indexes: {e.Message}");
+            logger.LogError(e, "Failed to set up indexes for tenant {TenantId}", tenantContext.TenantId);
+            return MigrationResult.Failure($"Failed to set up indexes: {e.Message}");
         }
     }
 }
