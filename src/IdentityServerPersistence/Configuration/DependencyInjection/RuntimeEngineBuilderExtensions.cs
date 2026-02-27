@@ -99,9 +99,19 @@ public static class RuntimeEngineBuilderExtensions
             cfg.CreateMap<RtUser, UserDto>()
                 .ForMember(dest => dest.UserId, opt => opt.MapFrom(src => src.RtId))
                 .ForMember(dest => dest.Name, opt => opt.MapFrom(src => src.UserName))
+                .ForMember(dest => dest.ExternalLogins, opt => opt.MapFrom(src =>
+                    src.UserLogins != null
+                        ? src.UserLogins.Select(l => new ExternalLoginDto
+                        {
+                            LoginProvider = l.LoginProvider,
+                            ProviderDisplayName = l.ProviderDisplayName ?? l.LoginProvider,
+                            ProviderKey = l.ProviderKey
+                        }).ToList()
+                        : null))
                 .ReverseMap()
                 .ForMember(dest => dest.RtId, x => x.Ignore())
-                .ForMember(dest => dest.CkTypeId, x => x.Ignore());
+                .ForMember(dest => dest.CkTypeId, x => x.Ignore())
+                .ForMember(dest => dest.UserLogins, x => x.Ignore());
         });
 
         AddIdentity(builder.Services, setupAction);

@@ -220,11 +220,32 @@ public class CustomWebApplicationFactory : WebApplicationFactory<Program>, IAsyn
             Console.Error.WriteLine("[WebFactory] ConfigureTestServices called");
             Console.Error.Flush();
 
-            // Add test authentication handler as an additional scheme
-            // Don't override the default schemes - IdentityServer needs its cookie auth
+            // Add test authentication handler as an additional scheme.
+            // Don't override the default schemes - IdentityServer needs its cookie auth.
             services.AddAuthentication()
                 .AddScheme<TestAuthHandlerOptions, TestAuthHandler>(
                     TestAuthHandler.SchemeName, _ => { });
+
+            // Configure the JWT Bearer scheme to forward all operations to the test
+            // handler. This allows System API controllers (which require
+            // AuthenticationSchemes = "Bearer") to use the test handler.
+            // Remove JWT configure/post-configure services that would try to
+            // connect to an authority or override our forwarding configuration.
+            var jwtConfigureServices = services
+                .Where(s =>
+                    s.ImplementationType?.Name == "ConfigureJwtBearerOptions" ||
+                    s.ImplementationType?.FullName == "Microsoft.AspNetCore.Authentication.JwtBearer.JwtBearerPostConfigureOptions")
+                .ToList();
+            foreach (var svc in jwtConfigureServices)
+            {
+                services.Remove(svc);
+            }
+
+            services.PostConfigure<Microsoft.AspNetCore.Authentication.JwtBearer.JwtBearerOptions>(
+                "Bearer", options =>
+                {
+                    options.ForwardDefault = TestAuthHandler.SchemeName;
+                });
 
             // Configure MongoDB connection using the test container
             if (_mongoContainer != null)

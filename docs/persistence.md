@@ -105,7 +105,11 @@ attributes:
 Key properties:
 - `isCollectionRoot: true` - Entity has its own MongoDB collection
 - `baseTypeId` - Inheritance from base entity type
-- `indexes` - MongoDB index definitions
+- `indexes` - MongoDB index definitions (supports `Ascending`, `UniqueNotDeleted`, etc.)
+
+**User Entity Indexes:**
+- `Ascending` on `NormalizedEmail` - Efficient email lookups. Note: Multiple users can share the same email (e.g., a local user and external provider users). External logins create dedicated user accounts with provider-prefixed usernames to prevent privilege escalation (Bug 3430).
+- `Ascending` on `NormalizedUserName` - Efficient username lookups.
 
 ### Record Definitions
 

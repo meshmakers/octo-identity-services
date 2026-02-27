@@ -37,6 +37,7 @@ The System API provides RESTful endpoints for managing identity resources includ
 | PUT | `/users/{userName}` | ReadWrite | Update user |
 | PUT | `/users/{userName}/roles` | ReadWrite | Replace all user roles |
 | PUT | `/users/{userName}/roles/{roleName}` | ReadWrite | Add role to user |
+| POST | `/users/{userName}/merge` | ReadWrite | Merge source user into target user |
 | DELETE | `/users/{userName}` | ReadWrite | Delete user |
 | DELETE | `/users/{userName}/roles/{roleName}` | ReadWrite | Remove role from user |
 
@@ -62,7 +63,21 @@ The System API provides RESTful endpoints for managing identity resources includ
   "name": "string",
   "resetPasswordOnLogin": true
 }
+
+// MergeUsersRequestDto (POST /users/{userName}/merge)
+{
+  "sourceUserName": "string"  // User whose external logins will be transferred
+}
 ```
+
+**Merge Users:**
+
+Transfers all external logins (e.g., Google, Microsoft) from the source user to the target user, then deletes the source user. This is useful for consolidating duplicate accounts created by external identity providers.
+
+- `{userName}` in the URL is the **target** user (kept after merge)
+- `sourceUserName` in the body is the user whose logins are transferred and who is deleted
+- Returns 404 if either user does not exist
+- Returns 400 if attempting to merge a user into itself
 
 ### Clients (`/system/v1/clients`)
 
@@ -407,6 +422,19 @@ Content-Type: application/json
 GET /system/v1/users/GetPaged?skip=20&take=10 HTTP/1.1
 Host: identity.example.com
 Authorization: Bearer eyJhbGciOiJSUzI1NiIs...
+```
+
+### Merge Users
+
+```http
+POST /system/v1/users/john.doe/merge HTTP/1.1
+Host: identity.example.com
+Authorization: Bearer eyJhbGciOiJSUzI1NiIs...
+Content-Type: application/json
+
+{
+  "sourceUserName": "Google_john.doe@example.com"
+}
 ```
 
 ### Add Role to User
