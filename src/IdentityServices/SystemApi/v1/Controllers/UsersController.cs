@@ -393,6 +393,96 @@ public class UsersController : ControllerBase
         return Ok();
     }
 
+    // POST system/v1/users/{userName}/merge
+    /// <summary>
+    ///     Merges external logins from a source user into the target user, then deletes the source user.
+    ///     This is useful for consolidating duplicate accounts created by external identity providers.
+    /// </summary>
+    [HttpPost("{userName}/merge")]
+    [Authorize(IdentityServiceConstants.IdentityApiReadWritePolicy)]
+    [EndpointSummary("Merges external logins from source user into target user and deletes source user.")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    public async Task<IActionResult> MergeUsers(
+        [Required] [Description("The target username (this user will be kept)")]
+        string userName,
+        [Required] [FromBody] [Description("The merge request containing the source username")]
+        MergeUsersRequestDto mergeRequest)
+    {
+        if (!ModelState.IsValid)
+        {
+            return BadRequest(ModelState);
+        }
+
+        var targetUser = await _userManager.FindByNameAsync(userName);
+        if (targetUser == null)
+        {
+            return NotFound(new NotFoundErrorDto($"Target user '{userName}' not found."));
+        }
+
+        var sourceUser = await _userManager.FindByNameAsync(mergeRequest.SourceUserName);
+        if (sourceUser == null)
+        {
+            return NotFound(new NotFoundErrorDto($"Source user '{mergeRequest.SourceUserName}' not found."));
+        }
+
+        if (targetUser.RtId == sourceUser.RtId)
+        {
+            return BadRequest(new OperationFailedErrorDto("Cannot merge a user into itself."));
+        }
+
+        try
+        {
+            // Get source user's external logins
+            var sourceLogins = await _userManager.GetLoginsAsync(sourceUser);
+
+            // Transfer each login: first remove from source, then add to target.
+            // UserManager.AddLoginAsync internally calls FindByLoginAsync to check
+            // if the login is already associated with any user. If we don't remove
+            // the login from the source user first, AddLoginAsync will fail with
+            // LoginAlreadyAssociated because the source user still owns the login.
+            foreach (var login in sourceLogins)
+            {
+                var removeResult = await _userManager.RemoveLoginAsync(
+                    sourceUser, login.LoginProvider, login.ProviderKey);
+                if (!removeResult.Succeeded)
+                {
+                    LogIdentityError("Remove login from source during merge", removeResult.Errors);
+                    return GetBadRequestResultWithErrorDescription(
+                        $"Failed to remove login '{login.LoginProvider}' from source user", removeResult.Errors);
+                }
+
+                var addResult = await _userManager.AddLoginAsync(targetUser, login);
+                if (!addResult.Succeeded)
+                {
+                    LogIdentityError("Add login during merge", addResult.Errors);
+                    return GetBadRequestResultWithErrorDescription(
+                        $"Failed to transfer login '{login.LoginProvider}' to target user", addResult.Errors);
+                }
+            }
+
+            // Delete the source user
+            var deleteResult = await _userManager.DeleteAsync(sourceUser);
+            if (!deleteResult.Succeeded)
+            {
+                LogIdentityError("Delete source user during merge", deleteResult.Errors);
+                return GetBadRequestResultWithErrorDescription(
+                    "Failed to delete source user after merge", deleteResult.Errors);
+            }
+
+            _logger.LogInformation(
+                "Successfully merged user '{SourceUser}' into '{TargetUser}'. Transferred {LoginCount} external login(s)",
+                mergeRequest.SourceUserName, userName, sourceLogins.Count);
+
+            return Ok();
+        }
+        catch (Exception e)
+        {
+            return StatusCode(StatusCodes.Status500InternalServerError, new InternalServerErrorDto(e.Message));
+        }
+    }
+
     // DELETE system/v1/users/demo/roles/Users
     [HttpDelete("{userName}/roles/{roleName}")]
     [Authorize(IdentityServiceConstants.IdentityApiReadWritePolicy)]

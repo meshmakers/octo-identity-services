@@ -612,17 +612,17 @@ public sealed class OctoUserStore(
         using var session = await _tenantRepository.GetSessionAsync().ConfigureAwait(false);
         session.StartTransaction();
 
-        var queryOptions = RtEntityQueryOptions.Create()
-            .MatchField(nameof(RtUser.UserLogins), FieldFilterCriteria.Create()
-                .FieldEquals(nameof(RtUserLoginRecord.LoginProvider), loginProvider)
-                .FieldEquals(nameof(RtUserLoginRecord.ProviderKey), providerKey));
-
-        var resultSet = await _tenantRepository.GetRtEntitiesByTypeAsync<RtUser>(session, queryOptions)
+        // Load all users and filter by UserLogins in C#.
+        // The MatchField/ElemMatch query on embedded CK records does not
+        // correctly resolve attribute paths, causing it to never match.
+        var resultSet = await _tenantRepository.GetRtEntitiesByTypeAsync<RtUser>(session, RtEntityQueryOptions.Create())
             .ConfigureAwait(false);
 
         await session.CommitTransactionAsync();
 
-        return resultSet.Items.FirstOrDefault();
+        return resultSet.Items.FirstOrDefault(u =>
+            u.UserLogins?.Any(l =>
+                l.LoginProvider == loginProvider && l.ProviderKey == providerKey) == true);
     }
 
     public async Task<IList<UserLoginInfo>> GetLoginsAsync(

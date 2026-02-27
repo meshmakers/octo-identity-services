@@ -311,32 +311,19 @@ public class AuthApiController(
 
         if (user == null)
         {
-            // 4a. Try to find user by email (for account linking)
-            var email = GetEmailFromClaims(claims);
-            logger.LogDebug("Extracted email from claims: {Email}", email ?? "(null)");
-
-            if (!string.IsNullOrEmpty(email))
-            {
-                user = await userManager.FindByEmailAsync(email);
-                if (user != null)
-                {
-                    logger.LogInformation("Found existing user {UserName} by email {Email}, linking external login",
-                        user.UserName, email);
-                }
-            }
-
+            // 4. Create new user from external provider claims.
+            // SECURITY: We intentionally do NOT auto-link external logins to existing users
+            // found by email. An attacker could register a Google/Microsoft account with the
+            // same email as an existing local user and inherit their roles and permissions.
+            // Instead, each external provider login always creates a dedicated external user.
+            user = await CreateUserFromExternalProvider(claims, provider);
             if (user == null)
             {
-                // 4b. Create new user from external provider
-                user = await CreateUserFromExternalProvider(claims, provider);
-                if (user == null)
-                {
-                    return Redirect($"/{tenantId}/error?error=Failed to create user account");
-                }
-
-                logger.LogInformation("Created new user {UserName} from external provider {Provider}",
-                    user.UserName, provider);
+                return Redirect($"/{tenantId}/error?error=Failed to create user account");
             }
+
+            logger.LogInformation("Created new user {UserName} from external provider {Provider}",
+                user.UserName, provider);
 
             // 5. Link external login to user
             var addLoginResult = await userManager.AddLoginAsync(
@@ -378,7 +365,10 @@ public class AuthApiController(
     }
 
     /// <summary>
-    /// Creates a new user from external provider claims
+    /// Creates a new dedicated user from external provider claims.
+    /// Each external provider login creates its own user account. This prevents privilege
+    /// escalation where an external identity could inherit roles of an existing local user
+    /// with the same email address.
     /// </summary>
     private async Task<RtUser?> CreateUserFromExternalProvider(List<Claim> claims, string provider)
     {
@@ -389,10 +379,13 @@ public class AuthApiController(
         var surname = claims.FirstOrDefault(c => c.Type == ClaimTypes.Surname)?.Value
                       ?? claims.FirstOrDefault(c => c.Type == "family_name")?.Value;
 
-        // Generate username from email or provider + unique id
-        var userName = email ?? $"{provider}_{Guid.NewGuid():N}";
+        // Generate a unique username that includes the provider to avoid collisions
+        // with local users or users from other providers.
+        var userName = !string.IsNullOrEmpty(email)
+            ? $"{provider}_{email}"
+            : $"{provider}_{Guid.NewGuid():N}";
 
-        // Ensure username is unique
+        // Ensure username is unique (handles edge cases like same email across providers)
         var existingUser = await userManager.FindByNameAsync(userName);
         if (existingUser != null)
         {
@@ -920,36 +913,23 @@ public class AuthApiController(
 
         if (user == null)
         {
-            // 4a. Try to find user by email (for account linking)
-            var email = GetEmailFromClaims(claims);
-            if (!string.IsNullOrEmpty(email))
-            {
-                user = await userManager.FindByEmailAsync(email);
-                if (user != null)
-                {
-                    logger.LogInformation(
-                        "Found existing user {UserName} by email {Email}, linking LDAP login",
-                        user.UserName, email);
-                }
-            }
-
+            // 4. Create new user from LDAP info.
+            // SECURITY: We intentionally do NOT auto-link LDAP logins to existing users
+            // found by email. This prevents privilege escalation where an LDAP user could
+            // inherit the roles of an existing local user with the same email address.
+            user = await CreateUserFromExternalProvider(claims, loginInfo.LoginProvider);
             if (user == null)
             {
-                // 4b. Create new user from LDAP info
-                user = await CreateUserFromExternalProvider(claims, loginInfo.LoginProvider);
-                if (user == null)
+                return new LdapLoginResultDto
                 {
-                    return new LdapLoginResultDto
-                    {
-                        Success = false,
-                        ErrorMessage = "Failed to create user account"
-                    };
-                }
-
-                logger.LogInformation(
-                    "Created new user {UserName} from LDAP provider {Provider}",
-                    user.UserName, loginInfo.LoginProvider);
+                    Success = false,
+                    ErrorMessage = "Failed to create user account"
+                };
             }
+
+            logger.LogInformation(
+                "Created new user {UserName} from LDAP provider {Provider}",
+                user.UserName, loginInfo.LoginProvider);
 
             // 5. Link LDAP login to user
             var addLoginResult = await userManager.AddLoginAsync(

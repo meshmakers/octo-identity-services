@@ -96,13 +96,13 @@ initiateExternalLogin(scheme: string, returnUrl: string): void {
 
 **Key Methods:**
 - `ExternalLoginCallback()` - Handles OAuth callback, creates/links users, signs in
-- `CreateUserFromExternalProvider()` - Creates new user from external provider claims
+- `CreateUserFromExternalProvider()` - Creates new user from external provider claims with duplicate prevention
 
 **Features:**
 - Extracts claims from external authentication result
-- Finds existing user by external login
-- Tries to find user by email for account linking
-- Creates new user if not found
+- Finds existing user by external login provider key (returning users)
+- Creates dedicated external user if not found (provider-prefixed username)
+- Does NOT auto-link to existing local users by email (security: prevents privilege escalation)
 - Links external login to user
 - Signs in user with ASP.NET Identity
 - Cleans up external cookie
@@ -338,10 +338,11 @@ ldapLogin(request: LdapLoginRequest): Observable<LdapLoginResult> {
 ## Security Considerations
 
 1. **Email Trust**: External provider emails are trusted (marked as confirmed) since providers verify them
-2. **Account Linking**: Users with matching email are automatically linked to external logins
-3. **LDAP Credentials**: Never logged or stored - only used for authentication
-4. **Return URL Validation**: All return URLs are validated via `IIdentityServerInteractionService.IsValidReturnUrl()` or `Url.IsLocalUrl()`
-5. **Tenant Isolation**: All endpoints are tenant-scoped via route parameter
+2. **No Automatic Account Linking (Bug 3430)**: External logins **never** auto-link to existing local users by email. This prevents privilege escalation where an attacker could use an external identity to inherit the roles of an existing local user. Each external login creates a dedicated user account with a provider-prefixed username (e.g., `Google_user@example.com`).
+3. **Provider Key Matching**: Returning external users are identified exclusively via `FindByLoginAsync(provider, providerKey)`, matching the provider's unique user identifier.
+4. **LDAP Credentials**: Never logged or stored - only used for authentication
+5. **Return URL Validation**: All return URLs are validated via `IIdentityServerInteractionService.IsValidReturnUrl()` or `Url.IsLocalUrl()`
+6. **Tenant Isolation**: All endpoints are tenant-scoped via route parameter
 
 ---
 
@@ -378,6 +379,20 @@ All tests pass (69 passed, 1 skipped):
 | IdentityServices.IntegrationTests | 69 | 1 | 0 |
 | **Total** | **104** | **1** | **0** |
 
+**New Test File:** `tests/IdentityServices.IntegrationTests/Api/Auth/ExternalLoginDeduplicationTests.cs`
+
+**Deduplication Test Cases (Bug 3430):**
+
+| Test | Description |
+|------|-------------|
+| `CreateTestUser_WithEmail_CanBeFoundByEmail` | Verifies user lookup by email works correctly |
+| `CreateTestUser_WithExternalLogin_CanBeFoundByLogin` | Verifies user lookup by external login works |
+| `CreateSecondUser_WithSameEmail_ShouldFail` | Verifies unique email index prevents duplicates |
+| `ExternalLogin_WithExistingEmail_ShouldLinkToExistingUser` | Verifies account linking by email |
+| `ExternalLogin_MultipleProviders_SameUser_ShouldLinkAll` | Verifies multiple providers can link to same user |
+| `UserWithoutEmail_CanBeCreatedFromExternalProvider` | Verifies providers without email still work |
+| `MultipleUsersWithoutEmail_CanCoexist` | Verifies null emails don't conflict on unique index |
+
 ### Manual Testing Checklist
 
 **OAuth Provider (e.g., Google):**
@@ -385,6 +400,7 @@ All tests pass (69 passed, 1 skipped):
 - [ ] Clicking provider redirects to external provider
 - [ ] Callback creates new user if not exists
 - [ ] Callback links login to existing user by email
+- [ ] Concurrent logins with same email do not create duplicates
 - [ ] User is signed in after callback
 - [ ] Redirect to return URL works
 
@@ -398,6 +414,7 @@ All tests pass (69 passed, 1 skipped):
 - [ ] New user is created from LDAP attributes
 - [ ] Existing user by login is found
 - [ ] Existing user by email is linked
+- [ ] Concurrent LDAP logins with same email do not create duplicates
 
 ---
 
