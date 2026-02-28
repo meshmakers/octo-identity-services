@@ -8,7 +8,7 @@ import {
   faFacebook,
   faApple
 } from '@fortawesome/free-brands-svg-icons';
-import { faServer, faNetworkWired } from '@fortawesome/free-solid-svg-icons';
+import { faServer, faNetworkWired, faBuilding } from '@fortawesome/free-solid-svg-icons';
 import { ExternalProvider } from '../../../core/models/login.models';
 
 @Component({
@@ -45,6 +45,9 @@ export class ExternalProviderButtonComponent {
   };
 
   getIcon(): IconDefinition {
+    if (this.provider.isParentTenant) {
+      return faBuilding;
+    }
     const scheme = this.provider.scheme.toLowerCase();
     return this.iconMap[scheme] || faServer;
   }

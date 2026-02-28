@@ -88,6 +88,10 @@ internal class DynamicAuthSchemeService : IDynamicAuthSchemeService
                     scheme = _authSchemeCreatorFactory.GetCreator<RtFacebookIdentityProvider>()
                         .Create(facebookIdentityProvider);
                     break;
+                case RtOctoTenantIdentityProvider:
+                    // No ASP.NET auth scheme needed — cross-tenant auth is handled internally
+                    // by CrossTenantAuthenticationService, not via OIDC redirect.
+                    continue;
                 default:
                     throw new InvalidOperationException(
                         $"Identity provider '{identityProvider.CkTypeId}' is not supported.");

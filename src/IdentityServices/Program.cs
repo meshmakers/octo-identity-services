@@ -7,12 +7,14 @@ using Meshmakers.Octo.Backend.Authentication.DynamicAuth;
 using Meshmakers.Octo.Backend.IdentityServices.Configuration;
 using Meshmakers.Octo.Backend.IdentityServices.Consumers;
 using Meshmakers.Octo.Backend.IdentityServices.Resources;
+using Meshmakers.Octo.Backend.IdentityServices.Middleware;
 using Meshmakers.Octo.Backend.IdentityServices.Routing;
 using Meshmakers.Octo.Backend.IdentityServices.Services;
 using IQrCodeService = Meshmakers.Octo.Backend.IdentityServices.Services.IQrCodeService;
 using QrCodeService = Meshmakers.Octo.Backend.IdentityServices.Services.QrCodeService;
 using Meshmakers.Octo.Communication.Contracts;
 using Meshmakers.Octo.Communication.Contracts.DataTransferObjects;
+using Meshmakers.Octo.Runtime.Contracts.MongoDb;
 using Meshmakers.Octo.Runtime.Contracts.MongoDb.Configuration;
 using Meshmakers.Octo.Runtime.Contracts.MongoDb.Extensions;
 using Meshmakers.Octo.Services.Contracts.DistributionEventHub.Commands;
@@ -268,6 +270,27 @@ try
 
     app.UseRouting();
 
+    // After routing, re-resolve the tenant from the route parameter for v1 API requests.
+    // The global TenantMiddleware runs before routing and defaults to the system tenant.
+    // This middleware overrides that with the actual tenant from the route, so that scoped
+    // services (e.g., OctoUserStore) receive the correct tenant repository.
+    app.Use(async (context, next) =>
+    {
+        var tenantId = context.GetRouteValue(InfrastructureCommon.TenantIdRoute) as string;
+        if (!string.IsNullOrWhiteSpace(tenantId))
+        {
+            var systemContext = context.RequestServices.GetRequiredService<ISystemContext>();
+            var tenantRepository = await systemContext.TryFindTenantRepositoryAsync(tenantId);
+            if (tenantRepository != null)
+            {
+                context.Items[InfrastructureCommon.TenantRepositoryName] = tenantRepository;
+                context.Items[InfrastructureCommon.TenantIdName] = tenantRepository.TenantId;
+            }
+        }
+
+        await next();
+    });
+
     var supportedCultures = new[] { "en", "de" };
     var localizationOptions = new RequestLocalizationOptions().SetDefaultCulture(supportedCultures[0])
         .AddSupportedCultures(supportedCultures)
@@ -278,6 +301,7 @@ try
     // The sequence of the add statements in the configure function is of importance.
     // app.UseAuthentication()
     // !!!UseIdentityServer calls already UseAuthentication; comes before app.UseMvc();
+    app.UseTenantLoginRedirect();
     app.UseIdentityServer();
 
     app.UseAuthorization();

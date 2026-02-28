@@ -60,9 +60,12 @@ public class ManageApiController : ControllerBase
         var logins = await _userManager.GetLoginsAsync(user);
         var hasPassword = await _userManager.HasPasswordAsync(user);
 
+        var tenantId = RouteData.Values["tenantId"]?.ToString() ?? string.Empty;
+
         return new UserProfileDto
         {
             Id = user.RtId.ToString(),
+            TenantId = tenantId,
             UserName = user.UserName ?? string.Empty,
             Email = user.Email,
             EmailConfirmed = user.EmailConfirmed,
@@ -526,6 +529,7 @@ public class ManageApiController : ControllerBase
 public record UserProfileDto
 {
     public string Id { get; init; } = string.Empty;
+    public string TenantId { get; init; } = string.Empty;
     public string UserName { get; init; } = string.Empty;
     public string? Email { get; init; }
     public bool EmailConfirmed { get; init; }

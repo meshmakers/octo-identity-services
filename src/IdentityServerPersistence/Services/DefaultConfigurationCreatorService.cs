@@ -97,9 +97,13 @@ internal class DefaultConfigurationCreatorService(
             await migrationService.ExecuteMigrationsAsync(adminSession, tenantContext);
         }
 
+        // Create default roles for every tenant (needed for cross-tenant role mapping)
+        await CreateUsersAndRoles();
+
         if (tenantId != systemContext.TenantId)
         {
-            // Currently we only support the system tenant.
+            // Auto-create OctoTenantIdentityProvider for child tenants with a parent tenant
+            await CreateOctoTenantIdentityProviderAsync(tenantId, tenantContext);
             return;
         }
 
@@ -113,7 +117,6 @@ internal class DefaultConfigurationCreatorService(
             identityConfiguration.Version < IdentityServiceConstants.IdentitySchemaVersionValue)
         {
             await CreateClients();
-            await CreateUsersAndRoles();
 
             await CreateApiScopes();
             await CreateApiResources();
@@ -130,11 +133,11 @@ internal class DefaultConfigurationCreatorService(
 
     private async Task ImportCkModel(ITenantContext tenantContext)
     {
-        if (!await tenantContext.IsCkModelExistingAsync(SystemIdentityCkIds.CkModelId) &&
-            tenantContext.TenantId == systemContext.TenantId)
+        if (!await tenantContext.IsCkModelExistingAsync(SystemIdentityCkIds.CkModelId))
         {
-            // We ensure that at least the system tenant contains a valid ck model.Other tenants
-            // need to be enabled manually by an admin.
+            // Install the Identity CK model in all tenants (needed for cross-tenant authentication
+            // and role mapping). The model is required for ExternalTenantUserMapping and
+            // OctoTenantIdentityProvider entities.
             OperationResult operationResult = new();
             await tenantContext.ImportCkModelAsync(SystemIdentityCkIds.CkModelId, operationResult);
             if (operationResult.HasErrors || operationResult.HasFatalErrors)
@@ -440,6 +443,67 @@ internal class DefaultConfigurationCreatorService(
     public bool CanBeEnabled()
     {
         return false;
+    }
+
+    private async Task CreateOctoTenantIdentityProviderAsync(string tenantId, ITenantContext tenantContext)
+    {
+        try
+        {
+            // Query the system tenant for the RtTenant record to find ParentTenantId
+            var systemRepo = systemContext.GetSystemTenantRepositoryAsAdmin();
+            using var systemSession = await systemContext.GetAdminSessionAsync();
+            systemSession.StartTransaction();
+
+            var queryOptions = RtEntityQueryOptions.Create()
+                .FieldEquals(nameof(RtTenant.TenantId), tenantId);
+            var tenantResult = await systemRepo.GetRtEntitiesByTypeAsync<RtTenant>(systemSession, queryOptions);
+            await systemSession.CommitTransactionAsync();
+
+            var rtTenant = tenantResult.Items.FirstOrDefault();
+            if (rtTenant == null || string.IsNullOrEmpty(rtTenant.ParentTenantId))
+            {
+                return;
+            }
+
+            // Check if OctoTenantIdentityProvider already exists in the child tenant
+            var childRepo = tenantContext.GetTenantRepositoryAsAdmin();
+            using var childSession = await tenantContext.GetAdminSessionAsync();
+            childSession.StartTransaction();
+
+            var providerQuery = RtEntityQueryOptions.Create();
+            var providerResult =
+                await childRepo.GetRtEntitiesByTypeAsync<RtOctoTenantIdentityProvider>(childSession, providerQuery);
+
+            if (providerResult.Items.Any(p =>
+                    string.Equals(p.ParentTenantId, rtTenant.ParentTenantId, StringComparison.OrdinalIgnoreCase)))
+            {
+                await childSession.CommitTransactionAsync();
+                return;
+            }
+
+            // Create the provider
+            var provider = new RtOctoTenantIdentityProvider
+            {
+                Name = $"ParentTenant_{rtTenant.ParentTenantId}",
+                IsEnabled = true,
+                DisplayName = $"Login via {rtTenant.ParentTenantId}",
+                ParentTenantId = rtTenant.ParentTenantId
+            };
+
+            await childRepo.InsertOneRtEntityAsync(childSession, provider);
+            await childSession.CommitTransactionAsync();
+
+            logger.LogInformation(
+                "Auto-created OctoTenantIdentityProvider for tenant '{TenantId}' pointing to parent '{ParentTenantId}'",
+                tenantId, rtTenant.ParentTenantId);
+        }
+        catch (Exception e)
+        {
+            logger.LogWarning(e,
+                "Failed to auto-create OctoTenantIdentityProvider for tenant '{TenantId}'. " +
+                "The provider can be created manually or will be created by the migration on next startup.",
+                tenantId);
+        }
     }
 
     private async Task RunCkModelMigrationsAsync(

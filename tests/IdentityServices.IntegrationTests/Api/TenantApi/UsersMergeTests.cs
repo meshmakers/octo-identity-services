@@ -9,10 +9,10 @@ using Persistence.IdentityCkModel.Generated.System.Identity.v2;
 using Shared.TestUtilities.Builders;
 using Xunit;
 
-namespace IdentityServices.IntegrationTests.Api.SystemApi;
+namespace IdentityServices.IntegrationTests.Api.TenantApi;
 
 /// <summary>
-/// Integration tests for the POST system/v1/users/{userName}/merge endpoint.
+/// Integration tests for the POST {tenantId}/v1/users/{userName}/merge endpoint.
 /// Verifies that external logins can be transferred between users and that
 /// the source user is deleted after a successful merge.
 /// </summary>
@@ -21,8 +21,6 @@ public class UsersMergeTests : IntegrationTestBase
     public UsersMergeTests(CustomWebApplicationFactory factory) : base(factory)
     {
     }
-
-    private static string SystemApiUrl(string path) => $"/system/v1/{path.TrimStart('/')}";
 
     [Fact]
     public async Task MergeUsers_TransfersExternalLoginsAndDeletesSource()
@@ -48,7 +46,7 @@ public class UsersMergeTests : IntegrationTestBase
 
         // Act - Merge source into target
         var response = await PostAsync(
-            SystemApiUrl($"users/{targetUserName}/merge"),
+            TenantApiUrl($"users/{targetUserName}/merge"),
             new { sourceUserName });
 
         // Assert - Merge should succeed
@@ -99,7 +97,7 @@ public class UsersMergeTests : IntegrationTestBase
 
         // Act
         var response = await PostAsync(
-            SystemApiUrl($"users/{targetUserName}/merge"),
+            TenantApiUrl($"users/{targetUserName}/merge"),
             new { sourceUserName });
 
         // Assert
@@ -130,7 +128,7 @@ public class UsersMergeTests : IntegrationTestBase
 
         // Act
         var response = await PostAsync(
-            SystemApiUrl($"users/{targetUserName}/merge"),
+            TenantApiUrl($"users/{targetUserName}/merge"),
             new { sourceUserName });
 
         // Assert - Merge should succeed even with no logins to transfer
@@ -155,7 +153,7 @@ public class UsersMergeTests : IntegrationTestBase
 
         // Act
         var response = await PostAsync(
-            SystemApiUrl($"users/nonexistent-target-{Guid.NewGuid():N}/merge"),
+            TenantApiUrl($"users/nonexistent-target-{Guid.NewGuid():N}/merge"),
             new { sourceUserName });
 
         // Assert
@@ -171,7 +169,7 @@ public class UsersMergeTests : IntegrationTestBase
 
         // Act
         var response = await PostAsync(
-            SystemApiUrl($"users/{targetUserName}/merge"),
+            TenantApiUrl($"users/{targetUserName}/merge"),
             new { sourceUserName = $"nonexistent-source-{Guid.NewGuid():N}" });
 
         // Assert
@@ -187,7 +185,7 @@ public class UsersMergeTests : IntegrationTestBase
 
         // Act
         var response = await PostAsync(
-            SystemApiUrl($"users/{userName}/merge"),
+            TenantApiUrl($"users/{userName}/merge"),
             new { sourceUserName = userName });
 
         // Assert
@@ -267,7 +265,7 @@ public class UsersMergeTests : IntegrationTestBase
 
         // Act - Merge source into target
         var response = await PostAsync(
-            SystemApiUrl($"users/{targetUserName}/merge"),
+            TenantApiUrl($"users/{targetUserName}/merge"),
             new { sourceUserName });
 
         // Assert - Merge should succeed
@@ -324,7 +322,7 @@ public class UsersMergeTests : IntegrationTestBase
 
         // Act
         var response = await PostAsync(
-            SystemApiUrl($"users/{targetUserName}/merge"),
+            TenantApiUrl($"users/{targetUserName}/merge"),
             new { sourceUserName });
 
         // Assert

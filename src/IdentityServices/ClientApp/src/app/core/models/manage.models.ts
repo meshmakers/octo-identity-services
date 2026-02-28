@@ -1,5 +1,6 @@
 export interface UserProfile {
   id: string;
+  tenantId: string;
   userName: string;
   email?: string;
   emailConfirmed: boolean;

@@ -3,12 +3,14 @@ using System.Net.Http.Json;
 using System.Text.Json;
 using IdentityServerPersistence.SystemStores;
 using Meshmakers.Octo.Backend.IdentityServices.Controllers.Api;
+using Meshmakers.Octo.Runtime.Contracts.MongoDb.Configuration;
 using Meshmakers.Octo.Runtime.Contracts.MongoDb.Repositories;
 using Meshmakers.Octo.Runtime.Contracts.Repositories;
 using Meshmakers.Octo.Runtime.Contracts.Repositories.Query;
 using Meshmakers.Octo.Services.Infrastructure.Services;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Options;
 using Persistence.IdentityCkModel.Generated.System.Identity.v2;
 using Shared.TestUtilities.Builders;
 using Xunit;
@@ -23,6 +25,11 @@ public abstract class IntegrationTestBase : IClassFixture<CustomWebApplicationFa
     protected readonly HttpClient Client;
     protected readonly CustomWebApplicationFactory Factory;
 
+    /// <summary>
+    /// The normalized system tenant ID resolved from <see cref="OctoSystemConfiguration"/>.
+    /// </summary>
+    protected string NormalizedSystemTenantId { get; }
+
     protected IntegrationTestBase(CustomWebApplicationFactory factory)
     {
         Console.Error.WriteLine("[IntegrationTestBase] Constructor called, creating HTTP client...");
@@ -33,6 +40,9 @@ public abstract class IntegrationTestBase : IClassFixture<CustomWebApplicationFa
         Console.Error.Flush();
         Client.DefaultRequestHeaders.Authorization =
             new AuthenticationHeaderValue("Bearer", "test-token");
+
+        var systemConfig = factory.Services.GetRequiredService<IOptions<OctoSystemConfiguration>>();
+        NormalizedSystemTenantId = systemConfig.Value.SystemTenantId.Trim().ToLowerInvariant();
     }
 
     #region HTTP Helper Methods
@@ -355,6 +365,16 @@ public abstract class IntegrationTestBase : IClassFixture<CustomWebApplicationFa
     #endregion
 
     #region URL Helper Methods
+
+    /// <summary>
+    /// Builds a versioned tenant API URL (e.g., /{tenantId}/v1/...).
+    /// Uses the normalized system tenant ID from configuration by default.
+    /// </summary>
+    protected string TenantApiUrl(string path, string? tenantId = null)
+    {
+        tenantId ??= NormalizedSystemTenantId;
+        return $"/{tenantId}/v1/{path.TrimStart('/')}";
+    }
 
     /// <summary>
     /// Builds an API URL with the tenant ID prefix.

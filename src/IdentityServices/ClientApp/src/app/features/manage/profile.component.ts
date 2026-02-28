@@ -27,6 +27,11 @@ import { UserProfile } from '../../core/models/manage.models';
             <h3 class="section-title">Account Information</h3>
 
             <div class="profile-item">
+              <span class="profile-item__label">Tenant</span>
+              <span class="profile-item__value">{{ profile.tenantId }}</span>
+            </div>
+
+            <div class="profile-item">
               <span class="profile-item__label">Username</span>
               <span class="profile-item__value">{{ profile.userName }}</span>
             </div>

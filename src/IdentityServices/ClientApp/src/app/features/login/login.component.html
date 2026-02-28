@@ -55,6 +55,11 @@
         </div>
       </div>
 
+      <!-- Parent Tenant Hint -->
+      <div *ngIf="parentTenantHint" class="lcars-info-message">
+        {{ parentTenantHint }}
+      </div>
+
       <!-- Error Message -->
       <div *ngIf="errorMessage" class="lcars-error-message">
         {{ errorMessage }}

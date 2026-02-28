@@ -2,7 +2,7 @@
 
 public static class IdentityServiceConstants
 {
-    public const string ApiPathPrefix = "system/v{version:apiVersion}";
+    public const string ApiPathPrefix = "{tenantId:tenantId}/v{version:apiVersion}";
     public const string ApiVersion1 = "1.0";
 
     public const string IdentityApiReadOnlyPolicy = "IdentityApiReadOnlyPolicy";

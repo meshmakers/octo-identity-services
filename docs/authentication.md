@@ -368,6 +368,129 @@ Identity providers can be updated at runtime:
 
 No server restart required.
 
+## Cross-Tenant Authentication
+
+### Overview
+
+Cross-tenant authentication enables users from a parent tenant to log in to child tenants without requiring separate user accounts. The Identity Service validates credentials against parent tenant databases internally — this is **not** OIDC federation but an internal credential-delegation mechanism.
+
+### Key Components
+
+| Component | Location | Purpose |
+|-----------|----------|---------|
+| `RtOctoTenantIdentityProvider` | CK Model | Configures a parent-tenant auth link |
+| `RtExternalTenantUserMapping` | CK Model | Maps parent-tenant user to child-tenant roles |
+| `ICrossTenantAuthenticationService` | `IdentityServerPersistence/Services/` | Validates credentials across tenant hierarchy |
+| `IExternalTenantUserMappingStore` | `IdentityServerPersistence/SystemStores/` | CRUD for cross-tenant user mappings |
+| `ExternalTenantUserMappingsController` | `TenantApi/v1/Controllers/` | REST API for managing mappings |
+
+### Tenant Hierarchy
+
+Tenants form a hierarchy via `RtOctoTenantIdentityProvider` entries:
+- Each child tenant can have one or more `OctoTenantIdentityProvider` pointing to parent tenants
+- Authentication walks **up** the hierarchy (child → parent → grandparent)
+- A user in "octosystem" (root) can access all descendant tenants
+- Lateral access (sibling-to-sibling) is not permitted
+
+### Cross-Tenant Login Flow
+
+```
+User submits credentials at child tenant login
+        │
+        ▼
+Try local authentication (existing SignInManager flow)
+        │
+        ├── Success ──► Normal local login
+        │
+        └── Failure ──► Check for OctoTenantIdentityProvider
+                │
+                ▼
+        CrossTenantAuthenticationService.AuthenticateAsync()
+                │
+                ├── Walk up tenant hierarchy
+                ├── For each parent: find user by username
+                ├── Validate password via IPasswordHasher
+                ├── Check lockout status
+                ├── Max depth limit (10 levels)
+                ├── Circular reference detection
+                │
+                ├── Not found in any parent ──► Login failed
+                │
+                └── Found ──► Find/create ExternalTenantUserMapping
+                        │
+                        ▼
+                Create local session with:
+                  - Mapped roles from ExternalTenantUserMapping
+                  - "home_tenant_id" claim in token
+                  - Username prefixed with "xt_" (cross-tenant)
+```
+
+### Tenant Switch Flow
+
+Users already authenticated in a parent tenant can switch to a child tenant without re-entering credentials:
+
+```
+GET /{tenantId}/api/auth/accessible-tenants
+        │
+        └── Returns child tenants where user has role mappings
+        │
+        ▼
+POST /{targetTenantId}/api/auth/tenant-switch
+        │
+        ├── Validate source tenant is ancestor of target
+        ├── Find user in source tenant
+        ├── Return mapped roles for target tenant
+        │
+        ├── Access denied ──► 200 { success: false }
+        │
+        └── Access granted ──► 200 { success: true, roles: [...] }
+```
+
+### CK Model Types
+
+**OctoTenantIdentityProvider** (derives from IdentityProvider):
+- `ParentTenantId` (String) — The tenant ID of the parent tenant
+
+**ExternalTenantUserMapping** (derives from Entity):
+- `SourceTenantId` (String) — The tenant where the user resides
+- `SourceUserId` (String) — The user's RtId in the source tenant
+- `SourceUserName` (String) — Display name
+- `MappedRoleIds` (StringArray, optional) — Roles assigned in the child tenant
+
+### Identity CK Model Installation
+
+The Identity CK model and default roles are installed in **all** tenants (not just the system tenant). This ensures:
+- Cross-tenant user mappings can be stored in any tenant
+- Default roles are available for role mapping in every tenant
+
+### Token Claims
+
+Cross-tenant users receive a `home_tenant_id` claim in their tokens, indicating which tenant owns their actual user account.
+
+### Tenant-Aware Login Redirects
+
+When IdentityServer's `/connect/authorize` endpoint determines the user isn't authenticated, it redirects to the configured login URL (default: `/System/login`). The `TenantLoginRedirectMiddleware` intercepts these 302 redirects and rewrites the tenant prefix based on `acr_values` in the authorize request.
+
+**How it works:**
+
+1. OIDC client includes `acr_values=tenant:{tenantId}` in the authorize request
+2. IdentityServer redirects to `/System/login?ReturnUrl=...` (with `acr_values` encoded in the ReturnUrl)
+3. The middleware parses `acr_values` from the ReturnUrl, extracts `tenant:{tenantId}`
+4. Rewrites the redirect to `/{tenantId}/login?ReturnUrl=...`
+
+**Affected paths:** `/login`, `/consent`, `/logout`, `/error`, `/device`
+
+**Backward compatibility:** Without `acr_values`, the redirect goes to `/System/login` as before.
+
+### Auto-Creation of OctoTenantIdentityProvider
+
+When a child tenant has a `ParentTenantId` set on its `RtTenant` record, the `RtOctoTenantIdentityProvider` is automatically created:
+
+- **New tenants**: During `SetupTenantAsync`, after CK model import and role creation
+- **Existing tenants**: Via the `OctoTenantIdentityProviderMigration` (migration version 8→9)
+
+Both mechanisms are idempotent — they check for an existing provider before creating one.
+
 ## Security Considerations
 
 ### Scheme Isolation

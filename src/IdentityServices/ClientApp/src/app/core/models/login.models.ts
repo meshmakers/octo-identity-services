@@ -2,6 +2,7 @@ export interface ExternalProvider {
   scheme: string;
   displayName: string;
   isLdap: boolean;
+  isParentTenant: boolean;
 }
 
 export interface LoginContext {

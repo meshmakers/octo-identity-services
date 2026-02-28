@@ -435,4 +435,24 @@ attributes:
     description: Gets or sets the base DN of the user.
   - id: UserNameAttribute
     valueType: String
-    description: Gets or sets the name of the user attribute.          
+    description: Gets or sets the name of the user attribute.
+
+  - id: ParentTenantId
+    valueType: String
+    description: The tenant ID of the parent tenant that provides user authentication.
+
+  - id: SourceTenantId
+    valueType: String
+    description: The tenant ID where the user's account resides.
+
+  - id: SourceUserId
+    valueType: String
+    description: The RtId of the user in the source tenant.
+
+  - id: SourceUserName
+    valueType: String
+    description: The username for display purposes.
+
+  - id: MappedRoleIds
+    valueType: StringArray
+    description: The role IDs assigned to the mapped user in this tenant.

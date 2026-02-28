@@ -14,7 +14,7 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Persistence.IdentityCkModel.Generated.System.Identity.v2;
 
-namespace Meshmakers.Octo.Backend.IdentityServices.SystemApi.v1.Controllers;
+namespace Meshmakers.Octo.Backend.IdentityServices.TenantApi.v1.Controllers;
 
 /// <summary>
 ///     REST Controller for identity provider management
