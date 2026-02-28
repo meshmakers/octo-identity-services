@@ -10,6 +10,7 @@ public class OctoIdentityServicesOptions
     public OctoIdentityServicesOptions()
     {
         AuthorityUrl = "https://localhost:5003";
+        RefineryStudioUrl = "https://localhost:4200";
         BrokerHost = "localhost";
         EnableTokenCleanup = true;
         TokenCleanupInterval = 60 * 60; // default: once an hour
@@ -92,4 +93,12 @@ public class OctoIdentityServicesOptions
     /// When set, keys are stored on the filesystem at this path to survive pod restarts.
     /// </summary>
     public string? DataProtectionKeysPath { get; set; }
+
+    /// <summary>
+    /// Gets or sets the public URL of the Data Refinery Studio SPA.
+    /// Used to auto-provision the <c>octo-data-refinery-studio</c> OIDC client with correct
+    /// redirect URIs, post-logout URIs, CORS origins, and front-channel logout URI.
+    /// When null or empty, the Refinery Studio client is not auto-provisioned.
+    /// </summary>
+    public string? RefineryStudioUrl { get; set; }
 }

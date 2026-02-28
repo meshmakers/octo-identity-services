@@ -71,7 +71,7 @@ The service supports hierarchical cross-tenant authentication where parent-tenan
 - `POST /{childTenantId}/api/auth/cross-tenant-login` — Exchanges the token for a session in the child tenant
 - The Angular login component automatically attempts token-based auto-login when clicking "LOGIN VIA {parent}" and falls back to credential entry if no parent session exists
 
-The Identity CK model and default roles are installed in all tenants (not just the system tenant). Cross-tenant users receive a `home_tenant_id` claim in their tokens.
+The Identity CK model, default roles, identity resources, API scopes, API resources, and OIDC clients are provisioned to **all tenants** (not just the system tenant) during startup. This ensures OAuth/OIDC flows work when targeting any tenant. The identity service writes its data directly to child tenant databases (including the `octo-data-refinery-studio` SPA client when `RefineryStudioUrl` is configured), while other services (asset-repo, bot, etc.) send their data via the Distribution Event Hub. Cross-tenant users receive a `home_tenant_id` claim in their tokens.
 
 - **`TenantLoginRedirectMiddleware`**: Intercepts IdentityServer's 302 redirects to `/System/login` and rewrites the tenant prefix based on `acr_values=tenant:{tenantId}` in the authorize request ReturnUrl. Registered before `UseIdentityServer()` in the middleware pipeline.
 - **Auto-creation of `RtOctoTenantIdentityProvider`**: When a tenant has `ParentTenantId` set, the provider is auto-created during `SetupTenantAsync` (new tenants) and via `OctoTenantIdentityProviderMigration` (existing tenants, migration 8→9).
@@ -104,6 +104,11 @@ Two authorization policies:
 Environment variables are prefixed with `OCTO_`. Key configuration sections:
 - `Identity`: Identity service options
 - `System`: System configuration
+
+Key identity options (`OctoIdentityServicesOptions`):
+- `AuthorityUrl`: Public URL of the Identity service (default: `https://localhost:5003`)
+- `RefineryStudioUrl`: Public URL of the Data Refinery Studio SPA. When set, the `octo-data-refinery-studio` OIDC client is auto-provisioned in all tenants with correct redirect URIs, CORS origins, and front-channel logout. Example: `OCTO_IDENTITY__RefineryStudioUrl=https://studio.example.com`
+- `DataProtectionKeysPath`: Filesystem path for persisting ASP.NET Data Protection keys
 
 User secrets ID: `173d8e91-b831-4e8a-a43f-672c57e6a4da`
 

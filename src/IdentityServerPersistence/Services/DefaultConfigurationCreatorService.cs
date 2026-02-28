@@ -9,6 +9,7 @@ using Meshmakers.Octo.Communication.Contracts;
 using Meshmakers.Octo.ConstructionKit.Contracts;
 using Meshmakers.Octo.Runtime.Contracts;
 using Meshmakers.Octo.Runtime.Contracts.MongoDb;
+using Meshmakers.Octo.Runtime.Contracts.MongoDb.Repositories;
 using Meshmakers.Octo.Runtime.Contracts.Repositories.Query;
 using Meshmakers.Octo.Runtime.Contracts.RepositoryEntities;
 using Meshmakers.Octo.Services.Infrastructure;
@@ -39,6 +40,8 @@ internal class DefaultConfigurationCreatorService(
     IRuntimeRepositoryProvider? runtimeRepositoryProvider = null)
     : DefaultConfigurationCreatorServiceBase(logger), IConfigurationService
 {
+    private const string RefineryStudioClientId = "octo-data-refinery-studio";
+
     public override async Task InitializeAsync()
     {
         // Reconfigure the log level based on the configuration
@@ -104,6 +107,10 @@ internal class DefaultConfigurationCreatorService(
         {
             // Auto-create OctoTenantIdentityProvider for child tenants with a parent tenant
             await CreateOctoTenantIdentityProviderAsync(tenantId, tenantContext);
+
+            // Ensure identity data (resources, scopes, clients) exists in child tenants
+            // so that OAuth/OIDC flows work when targeting a child tenant
+            await EnsureIdentityDataInChildTenantAsync(tenantContext);
             return;
         }
 
@@ -349,6 +356,62 @@ internal class DefaultConfigurationCreatorService(
         {
             await clientStore.UpdateAsync(octoIdentityServiceSwaggerClient.ClientId, appClient);
         }
+
+        // Refinery Studio SPA client (only if URL is configured)
+        var refineryStudioUrl = octoIdentityOptions.Value.RefineryStudioUrl;
+        if (!string.IsNullOrWhiteSpace(refineryStudioUrl))
+        {
+            var refineryStudioClient = new RtClient
+            {
+                Enabled = true,
+                ClientId = RefineryStudioClientId,
+                ClientName = "Data Refinery Studio",
+                ClientUri = refineryStudioUrl,
+
+                AllowedGrantTypes = new AttributeStringValueList { OidcConstants.GrantTypes.AuthorizationCode },
+
+                RequirePkce = true,
+                RequireClientSecret = false,
+                RequireConsent = false,
+
+                AccessTokenType = RtTokenTypeEnum.Jwt,
+                AllowAccessTokensViaBrowser = true,
+                AlwaysIncludeUserClaimsInIdToken = true,
+
+                RedirectUris = { refineryStudioUrl.EnsureEndsWith("/") },
+                PostLogoutRedirectUris = { refineryStudioUrl.EnsureEndsWith("/") },
+                AllowedCorsOrigins = { refineryStudioUrl.TrimEnd('/') },
+                AllowOfflineAccess = true,
+
+                AllowedScopes =
+                {
+                    CommonConstants.Scopes.OpenId,
+                    CommonConstants.Scopes.Profile,
+                    CommonConstants.Scopes.Email,
+                    JwtClaimTypes.Role,
+                    CommonConstants.AssetSystemApiFullAccess,
+                    CommonConstants.IdentityApiFullAccess,
+                    CommonConstants.BotApiFullAccess,
+                    CommonConstants.CommunicationSystemApiFullAccess,
+                    CommonConstants.CommunicationTenantApiFullAccess,
+                    CommonConstants.ReportingSystemApiFullAccess,
+                    CommonConstants.ReportingTenantApiFullAccess,
+                },
+
+                FrontChannelLogoutUri = refineryStudioUrl.EnsureEndsWith("/logout/callback"),
+                FrontChannelLogoutSessionRequired = true
+            };
+
+            var existingRefineryStudioClient = await clientStore.FindClientByIdAsync(RefineryStudioClientId);
+            if (existingRefineryStudioClient == null)
+            {
+                await clientStore.CreateAsync(refineryStudioClient);
+            }
+            else
+            {
+                await clientStore.UpdateAsync(existingRefineryStudioClient.ClientId, refineryStudioClient);
+            }
+        }
     }
 
     private async Task CreateTenantConfiguration(IOctoSession session)
@@ -503,6 +566,233 @@ internal class DefaultConfigurationCreatorService(
                 "Failed to auto-create OctoTenantIdentityProvider for tenant '{TenantId}'. " +
                 "The provider can be created manually or will be created by the migration on next startup.",
                 tenantId);
+        }
+    }
+
+    private async Task EnsureIdentityDataInChildTenantAsync(ITenantContext tenantContext)
+    {
+        try
+        {
+            var childRepo = tenantContext.GetTenantRepositoryAsAdmin();
+            using var session = await tenantContext.GetAdminSessionAsync();
+            session.StartTransaction();
+
+            // Identity Resources (required for all OAuth/OIDC flows)
+            await EnsureIdentityResourceAsync(session, childRepo, "openid", "Your user identifier",
+                required: true, claims: new[] { "sub" });
+            await EnsureIdentityResourceAsync(session, childRepo, "profile", "User profile",
+                claims: new[]
+                {
+                    "name", "family_name", "given_name", "middle_name", "nickname",
+                    "preferred_username", "profile", "picture", "website", "gender",
+                    "birthdate", "zoneinfo", "locale", "updated_at"
+                });
+            await EnsureIdentityResourceAsync(session, childRepo, "email", "Your email address",
+                claims: new[] { "email", "email_verified" });
+            await EnsureIdentityResourceAsync(session, childRepo, JwtClaimTypes.Role,
+                IdentityTexts.Backend_Identity_UserSchema_Roles_DisplayName,
+                description: IdentityTexts.Backend_Identity_UserSchema_Roles_Description,
+                claims: new[] { JwtClaimTypes.Role });
+
+            // API Scopes
+            await EnsureApiScopeAsync(session, childRepo,
+                CommonConstants.IdentityApiFullAccess, CommonConstants.IdentityApiFullAccessDisplayName);
+            await EnsureApiScopeAsync(session, childRepo,
+                CommonConstants.IdentityApiReadOnly, CommonConstants.IdentityApiReadOnlyDisplayName);
+
+            // API Resources
+            await EnsureApiResourceAsync(session, childRepo,
+                CommonConstants.IdentityApi, CommonConstants.IdentityApiDisplayName,
+                CommonConstants.IdentityApiDescription,
+                new[] { CommonConstants.IdentityApiFullAccess, CommonConstants.IdentityApiReadOnly });
+
+            // Clients
+            await EnsureClientInChildTenantAsync(session, childRepo, new RtClient
+            {
+                Enabled = true,
+                ClientId = CommonConstants.OctoToolClientId,
+                AllowedGrantTypes = new AttributeStringValueList { OidcConstants.GrantTypes.DeviceCode },
+                ClientSecrets = new AttributeRecordValueList<RtSecretRecord>
+                {
+                    new() { Value = CommonConstants.OctoToolClientSecret.Sha256() }
+                },
+                AllowOfflineAccess = true,
+                AllowedScopes =
+                {
+                    IdentityServerConstants.StandardScopes.OpenId,
+                    IdentityServerConstants.StandardScopes.Profile,
+                    IdentityServerConstants.StandardScopes.Email,
+                    JwtClaimTypes.Role,
+                    CommonConstants.AssetSystemApiFullAccess,
+                    CommonConstants.IdentityApiFullAccess,
+                    CommonConstants.BotApiFullAccess,
+                    CommonConstants.CommunicationSystemApiFullAccess,
+                    CommonConstants.ReportingSystemApiFullAccess,
+                }
+            });
+
+            await EnsureClientInChildTenantAsync(session, childRepo, new RtClient
+            {
+                Enabled = true,
+                ClientId = CommonConstants.IdentityServicesSwaggerClientId,
+                ClientName = IdentityTexts.Backend_IdentityServices_UserSchema_Swagger_DisplayName,
+                ClientUri = octoIdentityOptions.Value.AuthorityUrl,
+                AllowedGrantTypes = new AttributeStringValueList { OidcConstants.GrantTypes.AuthorizationCode },
+                RequirePkce = true,
+                RequireClientSecret = false,
+                AccessTokenType = RtTokenTypeEnum.Jwt,
+                AllowAccessTokensViaBrowser = true,
+                AlwaysIncludeUserClaimsInIdToken = true,
+                RedirectUris =
+                {
+                    octoIdentityOptions.Value.AuthorityUrl.EnsureEndsWith("/swagger/oauth2-redirect.html")
+                },
+                PostLogoutRedirectUris = { octoIdentityOptions.Value.AuthorityUrl.EnsureEndsWith("/") },
+                AllowedCorsOrigins = { octoIdentityOptions.Value.AuthorityUrl.TrimEnd('/') },
+                AllowedScopes =
+                {
+                    CommonConstants.Scopes.OpenId,
+                    CommonConstants.Scopes.Profile,
+                    CommonConstants.Scopes.Email,
+                    JwtClaimTypes.Role,
+                    CommonConstants.IdentityApiFullAccess,
+                    CommonConstants.IdentityApiReadOnly
+                }
+            });
+
+            // Refinery Studio SPA client (only if URL is configured)
+            var refineryStudioUrl = octoIdentityOptions.Value.RefineryStudioUrl;
+            if (!string.IsNullOrWhiteSpace(refineryStudioUrl))
+            {
+                await EnsureClientInChildTenantAsync(session, childRepo, new RtClient
+                {
+                    Enabled = true,
+                    ClientId = RefineryStudioClientId,
+                    ClientName = "Data Refinery Studio",
+                    ClientUri = refineryStudioUrl,
+                    AllowedGrantTypes =
+                        new AttributeStringValueList { OidcConstants.GrantTypes.AuthorizationCode },
+                    RequirePkce = true,
+                    RequireClientSecret = false,
+                    RequireConsent = false,
+                    AccessTokenType = RtTokenTypeEnum.Jwt,
+                    AllowAccessTokensViaBrowser = true,
+                    AlwaysIncludeUserClaimsInIdToken = true,
+                    RedirectUris = { refineryStudioUrl.EnsureEndsWith("/") },
+                    PostLogoutRedirectUris = { refineryStudioUrl.EnsureEndsWith("/") },
+                    AllowedCorsOrigins = { refineryStudioUrl.TrimEnd('/') },
+                    AllowOfflineAccess = true,
+                    AllowedScopes =
+                    {
+                        CommonConstants.Scopes.OpenId,
+                        CommonConstants.Scopes.Profile,
+                        CommonConstants.Scopes.Email,
+                        JwtClaimTypes.Role,
+                        CommonConstants.AssetSystemApiFullAccess,
+                        CommonConstants.IdentityApiFullAccess,
+                        CommonConstants.BotApiFullAccess,
+                        CommonConstants.CommunicationSystemApiFullAccess,
+                        CommonConstants.CommunicationTenantApiFullAccess,
+                        CommonConstants.ReportingSystemApiFullAccess,
+                        CommonConstants.ReportingTenantApiFullAccess,
+                    },
+                    FrontChannelLogoutUri = refineryStudioUrl.EnsureEndsWith("/logout/callback"),
+                    FrontChannelLogoutSessionRequired = true
+                });
+            }
+
+            await session.CommitTransactionAsync();
+
+            logger.LogInformation(
+                "Ensured identity data (resources, scopes, clients) exists in child tenant '{TenantId}'",
+                tenantContext.TenantId);
+        }
+        catch (Exception e)
+        {
+            logger.LogWarning(e,
+                "Failed to ensure identity data in child tenant '{TenantId}'. " +
+                "Data will be created on next startup.",
+                tenantContext.TenantId);
+        }
+    }
+
+    private static async Task EnsureIdentityResourceAsync(
+        IOctoSession session, ITenantRepository childRepo,
+        string name, string displayName,
+        string? description = null, bool required = false, string[]? claims = null)
+    {
+        var queryOptions = RtEntityQueryOptions.Create()
+            .FieldFilter(nameof(RtIdentityResource.Name), FieldFilterOperator.Equals, name);
+        var result = await childRepo.GetRtEntitiesByTypeAsync<RtIdentityResource>(session, queryOptions);
+        if (!result.Items.Any())
+        {
+            var resource = new RtIdentityResource
+            {
+                Name = name,
+                DisplayName = displayName,
+                Description = description,
+                Enabled = true,
+                IsRequired = required,
+                ShowInDiscoveryDocument = true,
+                Claims = new AttributeStringValueList(claims?.ToList() ?? new List<string>())
+            };
+            await childRepo.InsertOneRtEntityAsync(session, resource);
+        }
+    }
+
+    private static async Task EnsureApiScopeAsync(
+        IOctoSession session, ITenantRepository childRepo,
+        string name, string displayName)
+    {
+        var queryOptions = RtEntityQueryOptions.Create()
+            .FieldFilter(nameof(RtApiScope.Name), FieldFilterOperator.Equals, name);
+        var result = await childRepo.GetRtEntitiesByTypeAsync<RtApiScope>(session, queryOptions);
+        if (!result.Items.Any())
+        {
+            var scope = new RtApiScope
+            {
+                Name = name,
+                DisplayName = displayName,
+                Enabled = true
+            };
+            await childRepo.InsertOneRtEntityAsync(session, scope);
+        }
+    }
+
+    private static async Task EnsureApiResourceAsync(
+        IOctoSession session, ITenantRepository childRepo,
+        string name, string displayName, string description, string[] scopes)
+    {
+        var queryOptions = RtEntityQueryOptions.Create()
+            .FieldFilter(nameof(RtApiResource.Name), FieldFilterOperator.Equals, name);
+        var result = await childRepo.GetRtEntitiesByTypeAsync<RtApiResource>(session, queryOptions);
+        if (!result.Items.Any())
+        {
+            var resource = new RtApiResource
+            {
+                Name = name,
+                DisplayName = displayName,
+                Description = description,
+                Enabled = true,
+                Scopes = new AttributeStringValueList(scopes.ToList())
+            };
+            await childRepo.InsertOneRtEntityAsync(session, resource);
+        }
+    }
+
+    private static async Task EnsureClientInChildTenantAsync(
+        IOctoSession session, ITenantRepository childRepo, RtClient client)
+    {
+        var queryOptions = RtEntityQueryOptions.Create()
+            .FieldFilter(nameof(RtClient.ClientId), FieldFilterOperator.Equals, client.ClientId);
+        var result = await childRepo.GetRtEntitiesByTypeAsync<RtClient>(session, queryOptions);
+        if (!result.Items.Any())
+        {
+            await childRepo.InsertOneRtEntityAsync(session, client);
+        }
+        else
+        {
+            await childRepo.ReplaceOneRtEntityByIdAsync(session, result.Items.First().RtId, client);
         }
     }
 

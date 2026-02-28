@@ -532,6 +532,54 @@ When a child tenant has a `ParentTenantId` set on its `RtTenant` record, the `Rt
 
 Both mechanisms are idempotent — they check for an existing provider before creating one.
 
+## Per-Tenant Identity Data Provisioning
+
+### Problem
+
+IdentityServer resolves clients, API scopes, API resources, and identity resources from the **current tenant's database**. When a user accesses a child tenant (e.g., `meshtest`), the OAuth flow calls `/{tenantId}/connect/authorize` which looks up the client in that tenant's MongoDB. If the client doesn't exist there, the flow fails.
+
+### Solution
+
+Identity data is automatically provisioned to **all tenants** (not just the system tenant) during service startup:
+
+**Identity Service** (`DefaultConfigurationCreatorService`):
+- Creates identity resources (`openid`, `profile`, `email`, `role`), API scopes, API resources, and clients (`octo-cli`, swagger, `octo-data-refinery-studio`) directly in each child tenant's database during `SetupTenantAsync`
+- Uses the child tenant's repository for direct writes (not via the message bus)
+
+**Other Services** (Asset Repository, Communication Controller, Bot, Reporting):
+- Send their client, scope, and resource definitions to the Identity Service via `CreateIdentityDataCommandRequest` messages on the Distribution Event Hub
+- The `DefaultConfigurationCreatorServiceStandardized` base class sends these messages for **every tenant** during startup
+- The `CreateIdentityDataCommandRequestConsumer` in the Identity Service creates the data in the correct tenant's database
+
+### Data Created Per Tenant
+
+| Entity Type | Created By | Examples |
+|-------------|-----------|----------|
+| Identity Resources | Identity Service | `openid`, `profile`, `email`, `role` |
+| Identity API Scopes | Identity Service | `identityAPI.full_access`, `identityAPI.read_only` |
+| Identity Clients | Identity Service | `octo-cli`, `octo-idenityServices-swagger`, `octo-data-refinery-studio`* |
+| Asset Repo Clients | Asset Repository Service | `octo-assetRepositoryServices`, swagger client |
+| Communication Clients | Communication Controller | swagger client |
+| Bot Clients | Bot Service | `octo-botServices`, swagger client |
+| Reporting Clients | Reporting Service | `octo-reportingServices`, swagger client |
+
+*\* Only provisioned when `RefineryStudioUrl` is configured in `OctoIdentityServicesOptions`.*
+
+### Refinery Studio Client
+
+The `octo-data-refinery-studio` client is a public SPA (no client secret) using Authorization Code + PKCE. Unlike other service clients, the Refinery Studio has no .NET backend that auto-provisions itself. The identity service provisions this client directly when `RefineryStudioUrl` is configured:
+
+- **Environment variable**: `OCTO_IDENTITY__RefineryStudioUrl=https://studio.example.com`
+- **Grant type**: Authorization Code with PKCE
+- **Scopes**: `openid`, `profile`, `email`, `role`, `assetSystemAPI.full_access`, `identityAPI.full_access`, `botAPI.full_access`, `communicationSystemAPI.full_access`, `communicationTenantAPI.full_access`, `reportingSystemAPI.full_access`, `reportingTenantAPI.full_access`
+- **Offline access**: Enabled (refresh tokens)
+- **Front-channel logout**: `{RefineryStudioUrl}/logout/callback`
+
+### Version Tracking
+
+- **System tenant**: Uses a configuration version key to avoid re-sending data on every restart
+- **Child tenants**: Always ensures data exists (the consumer is idempotent — creates if missing, replaces if existing)
+
 ## Per-Tenant Cookie Scoping
 
 ### Problem
