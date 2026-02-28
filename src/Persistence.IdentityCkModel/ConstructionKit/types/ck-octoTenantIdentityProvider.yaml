@@ -1,0 +1,10 @@
+"$schema": "https://schemas.meshmakers.cloud/construction-kit-elements.schema.json"
+types:
+  - typeId: OctoTenantIdentityProvider
+    description: "Identity provider that delegates authentication to a parent tenant."
+    derivedFromCkTypeId: ${this}/IdentityProvider
+    isFinal: true
+    isAbstract: false
+    attributes:
+      - id: ${this}/ParentTenantId
+        name: ParentTenantId

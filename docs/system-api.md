@@ -1,14 +1,16 @@
-# System API Reference
+# Identity API Reference
 
 ## Overview
 
-The System API provides RESTful endpoints for managing identity resources including users, clients, roles, API resources, and identity providers.
+The Identity API provides RESTful endpoints for managing identity resources including users, clients, roles, API resources, and identity providers.
 
-**Base Path:** `system/v{version:apiVersion}` (e.g., `system/v1`)
+**Base Path:** `{tenantId}/v1` (e.g., `octosystem/v1` for the default system tenant, `MyTenant/v1` for a specific tenant)
 
 **API Version:** 1.0
 
 **Authentication:** Bearer Token (OIDC Authorization Header)
+
+All endpoints are tenant-scoped via the `{tenantId}` route parameter. The system tenant ID defaults to `OctoSystem` (normalized to `octosystem` in URLs) and is configurable via `OctoSystemConfiguration.SystemTenantId`. For system-level resources (clients, API resources, scopes, secrets, diagnostics, setup, tools), use the system tenant ID (e.g., `octosystem/v1/clients`).
 
 ## Authorization Policies
 
@@ -24,7 +26,7 @@ The System API provides RESTful endpoints for managing identity resources includ
 
 ## Endpoints
 
-### Users (`/system/v1/users`)
+### Users (`/{tenantId}/v1/users`)
 
 | Method | Endpoint | Policy | Description |
 |--------|----------|--------|-------------|
@@ -79,7 +81,7 @@ Transfers all external logins (e.g., Google, Microsoft) from the source user to 
 - Returns 404 if either user does not exist
 - Returns 400 if attempting to merge a user into itself
 
-### Clients (`/system/v1/clients`)
+### Clients (`/{tenantId}/v1/clients`)
 
 | Method | Endpoint | Policy | Description |
 |--------|----------|--------|-------------|
@@ -109,7 +111,7 @@ Transfers all external logins (e.g., Google, Microsoft) from the source user to 
 }
 ```
 
-### Roles (`/system/v1/roles`)
+### Roles (`/{tenantId}/v1/roles`)
 
 | Method | Endpoint | Policy | Description |
 |--------|----------|--------|-------------|
@@ -130,7 +132,7 @@ Transfers all external logins (e.g., Google, Microsoft) from the source user to 
 }
 ```
 
-### API Resources (`/system/v1/apiResources`)
+### API Resources (`/{tenantId}/v1/apiResources`)
 
 | Method | Endpoint | Policy | Description |
 |--------|----------|--------|-------------|
@@ -158,7 +160,7 @@ Transfers all external logins (e.g., Google, Microsoft) from the source user to 
 }
 ```
 
-### API Scopes (`/system/v1/apiScopes`)
+### API Scopes (`/{tenantId}/v1/apiScopes`)
 
 | Method | Endpoint | Policy | Description |
 |--------|----------|--------|-------------|
@@ -185,7 +187,7 @@ Transfers all external logins (e.g., Google, Microsoft) from the source user to 
 }
 ```
 
-### API Secrets (`/system/v1/apiSecrets`)
+### API Secrets (`/{tenantId}/v1/apiSecrets`)
 
 #### Client Secrets
 
@@ -221,7 +223,7 @@ Transfers all external logins (e.g., Google, Microsoft) from the source user to 
 
 **Note:** Secret values are auto-generated GUIDs. The clear text is returned only once during creation.
 
-### Identity Providers (`/system/v1/identityProviders`)
+### Identity Providers (`/{tenantId}/v1/identityProviders`)
 
 | Method | Endpoint | Policy | Description |
 |--------|----------|--------|-------------|
@@ -247,7 +249,45 @@ Transfers all external logins (e.g., Google, Microsoft) from the source user to 
 }
 ```
 
-### Diagnostics (`/system/v1/diagnostics`)
+### External Tenant User Mappings (`/{tenantId}/v1/externalTenantUserMappings`)
+
+Manages cross-tenant user role mappings. Each mapping links a user from a parent (source) tenant to roles in the current (child) tenant.
+
+| Method | Endpoint | Policy | Description |
+|--------|----------|--------|-------------|
+| GET | `/externalTenantUserMappings` | ReadOnly | Get all mappings (supports `skip`, `take`, `sourceTenantId` filter) |
+| GET | `/externalTenantUserMappings/{rtId}` | ReadOnly | Get mapping by ID |
+| POST | `/externalTenantUserMappings` | ReadWrite | Create new mapping |
+| PUT | `/externalTenantUserMappings/{rtId}` | ReadWrite | Update mapping (change roles) |
+| DELETE | `/externalTenantUserMappings/{rtId}` | ReadWrite | Delete mapping |
+
+**Request/Response DTOs:**
+
+```typescript
+// ExternalTenantUserMappingDto (Response)
+{
+  "id": "string",
+  "sourceTenantId": "string",
+  "sourceUserId": "string",
+  "sourceUserName": "string",
+  "roleIds": ["string"]
+}
+
+// CreateExternalTenantUserMappingDto (POST)
+{
+  "sourceTenantId": "string",  // Required
+  "sourceUserId": "string",    // Required
+  "sourceUserName": "string",  // Required
+  "roleIds": ["string"]        // Optional
+}
+
+// UpdateExternalTenantUserMappingDto (PUT)
+{
+  "roleIds": ["string"]  // New role assignments
+}
+```
+
+### Diagnostics (`/{tenantId}/v1/diagnostics`)
 
 | Method | Endpoint | Policy | Description |
 |--------|----------|--------|-------------|
@@ -261,7 +301,7 @@ Transfers all external logins (e.g., Google, Microsoft) from the source user to 
 ?minLogLevel=Debug&maxLogLevel=Error&loggerName=Meshmakers
 ```
 
-### Setup (`/system/v1/setup`)
+### Setup (`/{tenantId}/v1/setup`)
 
 | Method | Endpoint | Policy | Description |
 |--------|----------|--------|-------------|
@@ -281,7 +321,7 @@ Transfers all external logins (e.g., Google, Microsoft) from the source user to 
 }
 ```
 
-### Tools (`/system/v1/tools`)
+### Tools (`/{tenantId}/v1/tools`)
 
 | Method | Endpoint | Policy | Description |
 |--------|----------|--------|-------------|
@@ -301,7 +341,7 @@ Transfers all external logins (e.g., Google, Microsoft) from the source user to 
 ### Request Parameters
 
 ```
-GET /system/v1/users/GetPaged?skip=0&take=100
+GET /{tenantId}/v1/users/GetPaged?skip=0&take=100
 ```
 
 | Parameter | Type | Default | Description |
@@ -381,10 +421,12 @@ These events ensure cache consistency across multiple service instances.
 
 ## Example Requests
 
+All examples use `octosystem` as the tenant ID (the default system tenant ID). The system tenant ID is configurable via `OctoSystemConfiguration.SystemTenantId`. Replace with any tenant ID as needed.
+
 ### Create User
 
 ```http
-POST /system/v1/users HTTP/1.1
+POST /octosystem/v1/users HTTP/1.1
 Host: identity.example.com
 Authorization: Bearer eyJhbGciOiJSUzI1NiIs...
 Content-Type: application/json
@@ -400,7 +442,7 @@ Content-Type: application/json
 ### Create OAuth Client
 
 ```http
-POST /system/v1/clients HTTP/1.1
+POST /octosystem/v1/clients HTTP/1.1
 Host: identity.example.com
 Authorization: Bearer eyJhbGciOiJSUzI1NiIs...
 Content-Type: application/json
@@ -419,7 +461,7 @@ Content-Type: application/json
 ### Get Paginated Users
 
 ```http
-GET /system/v1/users/GetPaged?skip=20&take=10 HTTP/1.1
+GET /octosystem/v1/users/GetPaged?skip=20&take=10 HTTP/1.1
 Host: identity.example.com
 Authorization: Bearer eyJhbGciOiJSUzI1NiIs...
 ```
@@ -427,7 +469,7 @@ Authorization: Bearer eyJhbGciOiJSUzI1NiIs...
 ### Merge Users
 
 ```http
-POST /system/v1/users/john.doe/merge HTTP/1.1
+POST /octosystem/v1/users/john.doe/merge HTTP/1.1
 Host: identity.example.com
 Authorization: Bearer eyJhbGciOiJSUzI1NiIs...
 Content-Type: application/json
@@ -440,7 +482,7 @@ Content-Type: application/json
 ### Add Role to User
 
 ```http
-PUT /system/v1/users/john.doe/roles/Admin HTTP/1.1
+PUT /octosystem/v1/users/john.doe/roles/Admin HTTP/1.1
 Host: identity.example.com
 Authorization: Bearer eyJhbGciOiJSUzI1NiIs...
 ```

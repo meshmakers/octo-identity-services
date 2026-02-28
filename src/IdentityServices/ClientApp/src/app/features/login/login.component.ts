@@ -31,6 +31,7 @@ export class LoginComponent implements OnInit {
   loading = true;
   submitting = false;
   errorMessage?: string;
+  parentTenantHint?: string;
   context?: LoginContext;
   showLoginForm = false; // Used to override isAuthenticated and show login form
 
@@ -127,6 +128,12 @@ export class LoginComponent implements OnInit {
           returnUrl: this.returnUrl
         }
       });
+    } else if (provider.isParentTenant) {
+      // Parent tenant providers use the regular login form with cross-tenant authentication.
+      // Show a hint and focus the username field.
+      this.parentTenantHint = `Enter your ${provider.displayName.replace('Login via ', '')} credentials below.`;
+      this.errorMessage = undefined;
+      setTimeout(() => document.getElementById('username')?.focus());
     } else {
       // OAuth providers redirect to external provider
       this.authApi.initiateExternalLogin(provider.scheme, this.returnUrl);

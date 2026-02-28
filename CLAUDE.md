@@ -54,15 +54,32 @@ This service depends on Octo framework packages (versioned via `$(OctoVersion)` 
 
 ### Construction Kit (CK) Model
 
-The `Persistence.IdentityCkModel` project uses YAML-based model definitions that are transformed into C# code at build time. Model files are in `src/Persistence.IdentityCkModel/ConstructionKit/`. The model ID is `System.Identity-1.0.0` with dependency on `System-(,2.0)`.
+The `Persistence.IdentityCkModel` project uses YAML-based model definitions that are transformed into C# code at build time. Model files are in `src/Persistence.IdentityCkModel/ConstructionKit/`. The model ID is `System.Identity-2.1.0` with dependency on `System-[2.0,3.0)`.
+
+### Cross-Tenant Authentication
+
+The service supports hierarchical cross-tenant authentication where parent-tenant users can log in to child tenants:
+
+- **`RtOctoTenantIdentityProvider`**: CK type linking a child tenant to a parent tenant for auth delegation
+- **`RtExternalTenantUserMapping`**: CK type mapping a parent-tenant user to roles in the child tenant
+- **`CrossTenantAuthenticationService`**: Walks the tenant hierarchy to validate credentials against parent tenant databases
+- **`ExternalTenantUserMappingStore`**: Persistence for cross-tenant user role mappings
+- **`ExternalTenantUserMappingsController`**: System API CRUD for managing mappings
+
+The Identity CK model and default roles are installed in all tenants (not just the system tenant). Cross-tenant users receive a `home_tenant_id` claim in their tokens.
+
+- **`TenantLoginRedirectMiddleware`**: Intercepts IdentityServer's 302 redirects to `/System/login` and rewrites the tenant prefix based on `acr_values=tenant:{tenantId}` in the authorize request ReturnUrl. Registered before `UseIdentityServer()` in the middleware pipeline.
+- **Auto-creation of `RtOctoTenantIdentityProvider`**: When a tenant has `ParentTenantId` set, the provider is auto-created during `SetupTenantAsync` (new tenants) and via `OctoTenantIdentityProviderMigration` (existing tenants, migration 8→9).
 
 ### Multi-Tenancy
 
 The service supports multi-tenancy via tenant ID in routes. The route pattern is `{tenantId:tenantId=System}/{controller=Home}/{action=Index}/{id?}`.
 
-### API Versioning
+### API Versioning and Route Prefix
 
-System API endpoints use path prefix `system/v{version:apiVersion}` with version 1.0. Two authorization policies:
+All API endpoints use a single tenant-scoped route prefix: `{tenantId:tenantId}/v{version:apiVersion}` (e.g., `octosystem/v1` for the default system tenant, `MyTenant/v1` for a specific tenant). The system tenant ID defaults to `OctoSystem` (normalized to lowercase in URLs) and is configurable via `OctoSystemConfiguration.SystemTenantId`.
+
+Two authorization policies:
 - `IdentityApiReadOnlyPolicy`: Requires `IdentityApiFullAccess` or `IdentityApiReadOnly` scope
 - `IdentityApiReadWritePolicy`: Requires `IdentityApiFullAccess` scope
 
@@ -106,7 +123,7 @@ npm test
 ### API Controllers for Angular SPA
 
 Located in `Controllers/Api/`:
-- `AuthApiController` - Login, logout, external providers
+- `AuthApiController` - Login, logout, external providers, cross-tenant auth, tenant switch
 - `ConsentApiController` - OAuth consent flow
 - `DeviceApiController` - Device authorization flow
 - `ManageApiController` - User profile, password, external logins

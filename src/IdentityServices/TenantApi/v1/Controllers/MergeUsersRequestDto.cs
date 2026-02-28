@@ -1,6 +1,6 @@
 using System.ComponentModel.DataAnnotations;
 
-namespace Meshmakers.Octo.Backend.IdentityServices.SystemApi.v1.Controllers;
+namespace Meshmakers.Octo.Backend.IdentityServices.TenantApi.v1.Controllers;
 
 /// <summary>
 ///     Request DTO for merging two users. External logins from the source user

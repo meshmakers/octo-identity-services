@@ -289,10 +289,11 @@ Logging is configured via `nlog.config`:
 
 ### Runtime Log Level Changes
 
-Log levels can be changed at runtime via the System API:
+Log levels can be changed at runtime via the API:
 
 ```http
-POST /system/v1/diagnostics/reconfigureLogLevel?minLogLevel=Debug&maxLogLevel=Error
+POST /{tenantId}/v1/diagnostics/reconfigureLogLevel?minLogLevel=Debug&maxLogLevel=Error
+# Example: POST /octosystem/v1/diagnostics/reconfigureLogLevel?minLogLevel=Debug&maxLogLevel=Error
 ```
 
 ## Health Checks

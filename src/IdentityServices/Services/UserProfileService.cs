@@ -42,6 +42,17 @@ public class UserProfileService : ProfileService<RtUser>
             identity.AddClaim(new Claim("given_name", user.FirstName));
         }
 
+        // If the user is a cross-tenant user, include the home_tenant_id claim.
+        // Cross-tenant users have usernames prefixed with "xt_" followed by the source tenant ID.
+        if (user.UserName != null && user.UserName.StartsWith("xt_"))
+        {
+            var parts = user.UserName.Split('_', 3);
+            if (parts.Length >= 3)
+            {
+                identity.AddClaim(new Claim("home_tenant_id", parts[1]));
+            }
+        }
+
         return principal;
     }
 }

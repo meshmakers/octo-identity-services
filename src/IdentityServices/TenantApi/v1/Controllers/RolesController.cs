@@ -6,15 +6,15 @@ using IdentityModel;
 using IdentityServerPersistence;
 using Meshmakers.Octo.Communication.Contracts.DataTransferObjects;
 using Meshmakers.Octo.Communication.Contracts.DataTransferObjects.ApiErrors;
-using Meshmakers.Octo.Runtime.Contracts.MongoDb;
 using Meshmakers.Octo.Runtime.Contracts.Repositories.Query;
+using Meshmakers.Octo.Services.Infrastructure.Services;
 using MongoDB.Bson;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Mvc;
 using Persistence.IdentityCkModel.Generated.System.Identity.v2;
 
-namespace Meshmakers.Octo.Backend.IdentityServices.SystemApi.v1.Controllers;
+namespace Meshmakers.Octo.Backend.IdentityServices.TenantApi.v1.Controllers;
 
 /// <summary>
 ///     REST Controller for role management
@@ -25,7 +25,7 @@ namespace Meshmakers.Octo.Backend.IdentityServices.SystemApi.v1.Controllers;
 [ApiVersion(IdentityServiceConstants.ApiVersion1)]
 public class RolesController : ControllerBase
 {
-    private readonly ISystemContext _systemContext;
+    private readonly IMultiTenancyResolverService _multiTenancyResolverService;
     private readonly IMapper _mapper;
     private readonly RoleManager<RtRole> _roleManager;
 
@@ -33,11 +33,11 @@ public class RolesController : ControllerBase
     ///     Constructor
     /// </summary>
     /// <param name="roleManager">The storage service of roles</param>
-    /// <param name="systemContext">System context</param>
+    /// <param name="multiTenancyResolverService">Multi-tenancy resolver service</param>
     /// <param name="mapper">Automapper</param>
-    public RolesController(RoleManager<RtRole> roleManager, ISystemContext systemContext, IMapper mapper)
+    public RolesController(RoleManager<RtRole> roleManager, IMultiTenancyResolverService multiTenancyResolverService, IMapper mapper)
     {
-        _systemContext = systemContext;
+        _multiTenancyResolverService = multiTenancyResolverService;
         _mapper = mapper;
         _roleManager = roleManager;
     }
@@ -71,7 +71,7 @@ public class RolesController : ControllerBase
     {
         try
         {
-            var tenantRepository = _systemContext.GetSystemTenantRepository();
+            var tenantRepository = _multiTenancyResolverService.GetTenantRepository();
 
             using var session = await tenantRepository.GetSessionAsync();
             session.StartTransaction();
