@@ -71,6 +71,17 @@ The Identity CK model and default roles are installed in all tenants (not just t
 - **`TenantLoginRedirectMiddleware`**: Intercepts IdentityServer's 302 redirects to `/System/login` and rewrites the tenant prefix based on `acr_values=tenant:{tenantId}` in the authorize request ReturnUrl. Registered before `UseIdentityServer()` in the middleware pipeline.
 - **Auto-creation of `RtOctoTenantIdentityProvider`**: When a tenant has `ParentTenantId` set, the provider is auto-created during `SetupTenantAsync` (new tenants) and via `OctoTenantIdentityProviderMigration` (existing tenants, migration 8→9).
 
+### Per-Tenant Cookie Scoping
+
+Auth cookies are scoped per tenant via `TenantCookieManager` (`src/IdentityServices/Cookies/TenantCookieManager.cs`). This prevents cross-tenant session leakage by appending `.{tenantId}` to cookie names (e.g., `.AspNetCore.Identity.Application.sbeg`).
+
+Key components:
+- **`TenantCookieManager`**: Custom `ICookieManager` that scopes `Identity.Application`, `idsrv`, and `idsrv.session` cookies per tenant
+- **`OidcTenantResolutionMiddleware`**: Resolves tenant for `/connect/*` OIDC endpoints from `acr_values` or `id_token_hint`
+- **`UserProfileService`**: Adds `tenant_id` claim to identity tokens (used by endsession for cookie resolution)
+
+See `docs/authentication.md` for detailed architecture and edge cases.
+
 ### Multi-Tenancy
 
 The service supports multi-tenancy via tenant ID in routes. The route pattern is `{tenantId:tenantId=System}/{controller=Home}/{action=Index}/{id?}`.

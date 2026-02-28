@@ -491,6 +491,67 @@ When a child tenant has a `ParentTenantId` set on its `RtTenant` record, the `Rt
 
 Both mechanisms are idempotent — they check for an existing provider before creating one.
 
+## Per-Tenant Cookie Scoping
+
+### Problem
+
+Without cookie scoping, all tenants share a single `Identity.Application` auth cookie at path `/`. When a user logs into tenant "sbeg", the cookie is sent for all tenant routes. Navigating to `/octosystem/manage` sends the same cookie, but `UserManager` looks up the user in octosystem's database — user not found — 404.
+
+### Solution: TenantCookieManager
+
+A custom `ICookieManager` (`src/IdentityServices/Cookies/TenantCookieManager.cs`) wraps `ChunkingCookieManager` and appends `.{tenantId}` (lowercased) to scoped cookie names based on `HttpContext.Items["tenantId"]`.
+
+**Scoped cookies** (tenant suffix added):
+- `.AspNetCore.Identity.Application` → `.AspNetCore.Identity.Application.sbeg`
+- `idsrv` → `idsrv.sbeg`
+- `idsrv.session` → `idsrv.session.sbeg`
+
+**Global cookies** (unchanged):
+- `Identity.External` — written at `/signin-google` (no tenant in URL)
+- `Identity.TwoFactorUserId`, `Identity.TwoFactorRememberMe` — short-lived, single login flow
+
+### OIDC Endpoint Tenant Resolution
+
+OIDC endpoints (`/connect/*`) don't include a `{tenantId}` route segment. The `OidcTenantResolutionMiddleware` resolves the tenant before authentication:
+
+| Endpoint | Tenant Source |
+|----------|--------------|
+| `/connect/authorize` | `acr_values=tenant:{tenantId}` from query string |
+| `/connect/endsession` | `id_token_hint` JWT payload → `tenant_id` claim; fallback to `acr_values` |
+
+The middleware runs after routing, before `UseIdentityServer()`:
+
+```
+UseRouting()
+→ inline middleware (re-resolve tenant from route values)
+→ UseOidcTenantResolution()
+→ UseTenantLoginRedirect()
+→ UseIdentityServer()
+```
+
+### tenant_id Claim
+
+`UserProfileService.GetUserClaimsAsync()` adds a `tenant_id` claim to identity tokens. This claim is used by `OidcTenantResolutionMiddleware` to extract the tenant from `id_token_hint` during logout (`/connect/endsession`).
+
+### Key Behaviors
+
+| Scenario | Behavior |
+|----------|----------|
+| External login (`/signin-google`) | External cookie remains global; auth cookie scoped at callback |
+| Tenant switch | New tenant-scoped cookie written; old tenant cookie unaffected |
+| Concurrent sessions | Each tenant has its own cookie; user can be logged into multiple tenants |
+| `/connect/authorize` without `acr_values` | Falls back to system tenant cookie |
+| `/connect/endsession` without `id_token_hint` | No tenant; user appears unauthenticated |
+| Existing global cookies after deploy | Not found by TenantCookieManager; users re-login (one-time) |
+
+### Key Files
+
+| File | Purpose |
+|------|---------|
+| `src/IdentityServices/Cookies/TenantCookieManager.cs` | Cookie name scoping by tenant |
+| `src/IdentityServices/Middleware/OidcTenantResolutionMiddleware.cs` | Tenant resolution for `/connect/*` endpoints |
+| `src/IdentityServices/Services/UserProfileService.cs` | Adds `tenant_id` claim to tokens |
+
 ## Security Considerations
 
 ### Scheme Isolation

@@ -273,8 +273,15 @@ public class AuthApiController(
     [HttpGet("external-login")]
     public IActionResult ExternalLogin([FromQuery] string scheme, [FromQuery] string? returnUrl)
     {
-        // Include tenantId in callback URL - required for route generation
         var tenantId = RouteData.Values["tenantId"]?.ToString() ?? "System";
+
+        // OctoTenantIdentityProvider (cross-tenant) has no ASP.NET auth handler.
+        // Cross-tenant login works via password entry on the login form, not via
+        // external redirect. Redirect back to login if the client calls this by mistake.
+        if (scheme.StartsWith("octo-tenant-", StringComparison.OrdinalIgnoreCase))
+        {
+            return Redirect($"/{tenantId}/login{(string.IsNullOrEmpty(returnUrl) ? "" : $"?returnUrl={Uri.EscapeDataString(returnUrl)}")}");
+        }
 
         var props = new AuthenticationProperties
         {

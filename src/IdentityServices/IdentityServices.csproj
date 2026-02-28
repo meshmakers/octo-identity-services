@@ -19,6 +19,10 @@
     </PropertyGroup>
 
     <ItemGroup>
+        <InternalsVisibleTo Include="IdentityServices.UnitTests" />
+    </ItemGroup>
+
+    <ItemGroup>
         <None Include="nlog.config">
             <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
         </None>

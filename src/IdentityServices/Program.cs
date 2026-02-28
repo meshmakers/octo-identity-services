@@ -6,6 +6,7 @@ using Meshmakers.Octo.Backend.Authentication.Consumers;
 using Meshmakers.Octo.Backend.Authentication.DynamicAuth;
 using Meshmakers.Octo.Backend.IdentityServices.Configuration;
 using Meshmakers.Octo.Backend.IdentityServices.Consumers;
+using Meshmakers.Octo.Backend.IdentityServices.Cookies;
 using Meshmakers.Octo.Backend.IdentityServices.Resources;
 using Meshmakers.Octo.Backend.IdentityServices.Middleware;
 using Meshmakers.Octo.Backend.IdentityServices.Routing;
@@ -28,6 +29,7 @@ using Meshmakers.Octo.Services.Notifications.Generated.System.Notification.v2;
 using Meshmakers.Octo.Services.Notifications.Services;
 using Meshmakers.Octo.Services.Observability;
 using Meshmakers.Octo.Services.Swagger.Configuration;
+using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Options;
@@ -138,6 +140,13 @@ try
         .AddCorsPolicyService<CorsPolicyService>()
         .AddAppAuthRedirectUriValidator()
         .AddJwtBearerClientAuthentication();
+
+    // Scope auth cookies per tenant to prevent cross-tenant session leakage.
+    // Identity.Application and idsrv cookies get a .{tenantId} suffix.
+    var tenantCookieManager = new TenantCookieManager();
+    builder.Services.ConfigureApplicationCookie(o => o.CookieManager = tenantCookieManager);
+    builder.Services.Configure<CookieAuthenticationOptions>("idsrv", o => o.CookieManager = tenantCookieManager);
+    builder.Services.Configure<CookieAuthenticationOptions>("idsrv.session", o => o.CookieManager = tenantCookieManager);
 
     // Service that periodically cleans up tokens in the grant database
     builder.Services.AddSingleton<IHostedService, TokenCleanupHostService>();
@@ -301,6 +310,7 @@ try
     // The sequence of the add statements in the configure function is of importance.
     // app.UseAuthentication()
     // !!!UseIdentityServer calls already UseAuthentication; comes before app.UseMvc();
+    app.UseOidcTenantResolution();
     app.UseTenantLoginRedirect();
     app.UseIdentityServer();
 

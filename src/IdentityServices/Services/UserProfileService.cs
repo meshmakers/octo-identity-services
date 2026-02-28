@@ -1,5 +1,6 @@
 using System.Security.Claims;
 using Duende.IdentityServer.AspNetIdentity;
+using Meshmakers.Octo.Services.Infrastructure;
 using Microsoft.AspNetCore.Identity;
 using Persistence.IdentityCkModel.Generated.System.Identity.v2;
 
@@ -8,17 +9,22 @@ namespace Meshmakers.Octo.Backend.IdentityServices.Services;
 // ReSharper disable once ClassNeverInstantiated.Global
 public class UserProfileService : ProfileService<RtUser>
 {
+    private readonly IHttpContextAccessor _httpContextAccessor;
+
     // ReSharper disable once UnusedMember.Global
-    public UserProfileService(UserManager<RtUser> userManager, IUserClaimsPrincipalFactory<RtUser> claimsFactory) : base(userManager,
-        claimsFactory)
+    public UserProfileService(UserManager<RtUser> userManager, IUserClaimsPrincipalFactory<RtUser> claimsFactory,
+        IHttpContextAccessor httpContextAccessor) : base(userManager, claimsFactory)
     {
+        _httpContextAccessor = httpContextAccessor;
     }
 
     // ReSharper disable once UnusedMember.Global
     // ReSharper disable once ContextualLoggerProblem
     public UserProfileService(UserManager<RtUser> userManager, IUserClaimsPrincipalFactory<RtUser> claimsFactory,
+        IHttpContextAccessor httpContextAccessor,
         ILogger<ProfileService<RtUser>> logger) : base(userManager, claimsFactory, logger)
     {
+        _httpContextAccessor = httpContextAccessor;
     }
 
 
@@ -40,6 +46,14 @@ public class UserProfileService : ProfileService<RtUser>
         if (!string.IsNullOrEmpty(user.FirstName))
         {
             identity.AddClaim(new Claim("given_name", user.FirstName));
+        }
+
+        // Include tenant_id claim so that /connect/endsession can resolve the correct
+        // tenant-scoped cookie from the id_token_hint JWT payload.
+        var tenantId = _httpContextAccessor.HttpContext?.Items[InfrastructureCommon.TenantIdName] as string;
+        if (!string.IsNullOrEmpty(tenantId))
+        {
+            identity.AddClaim(new Claim("tenant_id", tenantId));
         }
 
         // If the user is a cross-tenant user, include the home_tenant_id claim.
