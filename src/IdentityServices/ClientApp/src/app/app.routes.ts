@@ -1,12 +1,6 @@
 import { Routes } from '@angular/router';
 
 export const routes: Routes = [
-  // Legacy route: /Manage redirects to /System/manage (for backwards compatibility)
-  {
-    path: 'Manage',
-    redirectTo: 'System/manage',
-    pathMatch: 'full'
-  },
   {
     path: ':tenantId',
     children: [
@@ -119,11 +113,13 @@ export const routes: Routes = [
   },
   {
     path: '',
-    redirectTo: 'System/login',
-    pathMatch: 'full'
+    pathMatch: 'full',
+    loadComponent: () => import('./features/redirect/root-redirect.component')
+      .then(m => m.RootRedirectComponent)
   },
   {
     path: '**',
-    redirectTo: 'System/login'
+    loadComponent: () => import('./features/redirect/root-redirect.component')
+      .then(m => m.RootRedirectComponent)
   }
 ];

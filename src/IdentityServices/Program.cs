@@ -319,6 +319,10 @@ try
     // Map API controllers - MUST come before UseEndpoints middleware runs
     app.MapControllers();
 
+    // Redirect root path to the system tenant's login page
+    app.MapGet("/", (IOptions<OctoSystemConfiguration> systemConfig) =>
+        Results.Redirect($"/{systemConfig.Value.SystemTenantId}/login"));
+
     // Serve pre-built Angular files from wwwroot for all environments
     app.MapFallbackToFile("index.html");
 

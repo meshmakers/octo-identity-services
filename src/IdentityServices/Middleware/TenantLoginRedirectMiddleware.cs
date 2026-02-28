@@ -1,24 +1,23 @@
+using Meshmakers.Octo.Runtime.Contracts.MongoDb.Configuration;
 using Microsoft.AspNetCore.WebUtilities;
+using Microsoft.Extensions.Options;
 using Microsoft.Extensions.Primitives;
 
 namespace Meshmakers.Octo.Backend.IdentityServices.Middleware;
 
 /// <summary>
-/// Middleware that intercepts IdentityServer's 302 redirects to /System/login (and other UI pages)
+/// Middleware that intercepts IdentityServer's 302 redirects to /{systemTenantId}/login (and other UI pages)
 /// and rewrites the tenant prefix based on <c>acr_values=tenant:{tenantId}</c> in the ReturnUrl.
 /// This enables OIDC clients to direct users to tenant-specific login pages by passing
 /// <c>acr_values=tenant:{tenantId}</c> in the authorize request.
 /// </summary>
-internal class TenantLoginRedirectMiddleware(RequestDelegate next, ILogger<TenantLoginRedirectMiddleware> logger)
+internal class TenantLoginRedirectMiddleware(
+    RequestDelegate next,
+    ILogger<TenantLoginRedirectMiddleware> logger,
+    IOptions<OctoSystemConfiguration> octoSystemConfiguration)
 {
-    private static readonly string[] InteractionPrefixes =
-    [
-        "/System/login",
-        "/System/consent",
-        "/System/logout",
-        "/System/error",
-        "/System/device"
-    ];
+    private readonly string _systemTenantId = octoSystemConfiguration.Value.SystemTenantId;
+    private readonly string _systemTenantPrefix = $"/{octoSystemConfiguration.Value.SystemTenantId}";
 
     public async Task InvokeAsync(HttpContext context)
     {
@@ -35,24 +34,32 @@ internal class TenantLoginRedirectMiddleware(RequestDelegate next, ILogger<Tenan
             return;
         }
 
-        // Check if the redirect target is one of the IdentityServer UI paths
-        var isInteractionRedirect = Array.Exists(InteractionPrefixes,
-            prefix => location.StartsWith(prefix, StringComparison.OrdinalIgnoreCase));
+        // Check if the redirect target starts with the system tenant prefix followed by a known UI path
+        if (!location.StartsWith(_systemTenantPrefix, StringComparison.OrdinalIgnoreCase))
+        {
+            return;
+        }
 
-        if (!isInteractionRedirect)
+        // Verify the path after the system tenant prefix is a known interaction path
+        var pathAfterTenant = location.AsSpan(_systemTenantPrefix.Length);
+        if (!pathAfterTenant.StartsWith("/login", StringComparison.OrdinalIgnoreCase) &&
+            !pathAfterTenant.StartsWith("/consent", StringComparison.OrdinalIgnoreCase) &&
+            !pathAfterTenant.StartsWith("/logout", StringComparison.OrdinalIgnoreCase) &&
+            !pathAfterTenant.StartsWith("/error", StringComparison.OrdinalIgnoreCase) &&
+            !pathAfterTenant.StartsWith("/device", StringComparison.OrdinalIgnoreCase))
         {
             return;
         }
 
         var tenantId = ExtractTenantFromLocation(location);
         if (string.IsNullOrEmpty(tenantId) ||
-            string.Equals(tenantId, "System", StringComparison.OrdinalIgnoreCase))
+            string.Equals(tenantId, _systemTenantId, StringComparison.OrdinalIgnoreCase))
         {
             return;
         }
 
-        // Rewrite /System/... to /{tenantId}/...
-        var newLocation = $"/{tenantId}" + location.Substring("/System".Length);
+        // Rewrite /{systemTenantId}/... to /{tenantId}/...
+        var newLocation = $"/{tenantId}" + location.Substring(_systemTenantPrefix.Length);
         context.Response.Headers.Location = newLocation;
 
         logger.LogDebug(

@@ -469,18 +469,20 @@ Cross-tenant users receive a `home_tenant_id` claim in their tokens, indicating 
 
 ### Tenant-Aware Login Redirects
 
-When IdentityServer's `/connect/authorize` endpoint determines the user isn't authenticated, it redirects to the configured login URL (default: `/System/login`). The `TenantLoginRedirectMiddleware` intercepts these 302 redirects and rewrites the tenant prefix based on `acr_values` in the authorize request.
+When IdentityServer's `/connect/authorize` endpoint determines the user isn't authenticated, it redirects to the configured login URL. The login URL prefix uses the configured system tenant ID (`OctoSystemConfiguration.SystemTenantId`, default "OctoSystem"), e.g., `/{systemTenantId}/login`. The `TenantLoginRedirectMiddleware` intercepts these 302 redirects and rewrites the tenant prefix based on `acr_values` in the authorize request.
 
 **How it works:**
 
 1. OIDC client includes `acr_values=tenant:{tenantId}` in the authorize request
-2. IdentityServer redirects to `/System/login?ReturnUrl=...` (with `acr_values` encoded in the ReturnUrl)
+2. IdentityServer redirects to `/{systemTenantId}/login?ReturnUrl=...` (with `acr_values` encoded in the ReturnUrl)
 3. The middleware parses `acr_values` from the ReturnUrl, extracts `tenant:{tenantId}`
 4. Rewrites the redirect to `/{tenantId}/login?ReturnUrl=...`
 
 **Affected paths:** `/login`, `/consent`, `/logout`, `/error`, `/device`
 
-**Backward compatibility:** Without `acr_values`, the redirect goes to `/System/login` as before.
+**Backward compatibility:** Without `acr_values`, the redirect goes to `/{systemTenantId}/login`.
+
+**Configuration:** Both `ConfigureIdentityServerOptions` and `TenantLoginRedirectMiddleware` read the system tenant ID from `IOptions<OctoSystemConfiguration>`. A server-side redirect in `Program.cs` also routes the root path `/` to `/{systemTenantId}/login`.
 
 ### Auto-Creation of OctoTenantIdentityProvider
 
