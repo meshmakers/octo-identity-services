@@ -1,4 +1,5 @@
 using System.Security.Claims;
+using System.Text.Json;
 using Duende.IdentityServer;
 using Duende.IdentityServer.Events;
 using Duende.IdentityServer.Extensions;
@@ -11,6 +12,7 @@ using Meshmakers.Octo.Backend.Authentication.Services;
 using Meshmakers.Octo.ConstructionKit.Contracts;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.DataProtection;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Mvc;
 using Persistence.IdentityCkModel.Generated.System.Identity.v2;
@@ -35,6 +37,7 @@ public class AuthApiController(
     ICrossTenantAuthenticationService crossTenantAuthService,
     IExternalTenantUserMappingStore externalTenantUserMappingStore,
     IOctoIdentityProviderStore identityProviderStore,
+    IDataProtectionProvider dataProtectionProvider,
     ILogger<AuthApiController> logger)
     : ControllerBase
 {
@@ -1130,6 +1133,146 @@ public class AuthApiController(
 
     #region Cross-Tenant / Tenant Switch
 
+    private const string CrossTenantLoginPurpose = "CrossTenantLogin";
+    private static readonly TimeSpan CrossTenantTokenExpiry = TimeSpan.FromSeconds(60);
+
+    /// <summary>
+    /// Generates a short-lived, encrypted token for cross-tenant auto-login.
+    /// The caller must be authenticated in the current (parent) tenant.
+    /// The token can be exchanged via cross-tenant-login on the target tenant.
+    /// </summary>
+    [HttpPost("cross-tenant-token")]
+    public async Task<ActionResult<CrossTenantTokenResultDto>> GetCrossTenantToken(
+        [FromBody] CrossTenantTokenRequestDto request)
+    {
+        var currentTenantId = RouteData.Values["tenantId"]?.ToString() ?? "System";
+        var userId = User.FindFirst("sub")?.Value;
+
+        if (string.IsNullOrEmpty(userId))
+        {
+            return Unauthorized();
+        }
+
+        // Validate that the current tenant is an ancestor of the target tenant
+        var crossTenantResult = await crossTenantAuthService.ValidateCrossTenantAccessAsync(
+            request.TargetTenantId, currentTenantId, userId);
+
+        if (crossTenantResult == null)
+        {
+            return Forbid();
+        }
+
+        // Create a DataProtection-encrypted token
+        var protector = dataProtectionProvider.CreateProtector(CrossTenantLoginPurpose);
+        var payload = JsonSerializer.Serialize(new CrossTenantTokenPayload
+        {
+            SourceTenantId = currentTenantId,
+            SourceUserId = userId,
+            TargetTenantId = request.TargetTenantId,
+            Timestamp = DateTimeOffset.UtcNow.ToUnixTimeSeconds()
+        });
+        var token = protector.Protect(payload);
+
+        return new CrossTenantTokenResultDto { Token = token };
+    }
+
+    /// <summary>
+    /// Exchanges a cross-tenant token for a session in the current (child) tenant.
+    /// No authentication required — the token itself proves the caller's identity.
+    /// </summary>
+    [HttpPost("cross-tenant-login")]
+    public async Task<ActionResult<LoginResultDto>> CrossTenantLogin(
+        [FromBody] CrossTenantLoginRequestDto request)
+    {
+        var currentTenantId = RouteData.Values["tenantId"]?.ToString() ?? "System";
+
+        // Unprotect and validate the token
+        CrossTenantTokenPayload payload;
+        try
+        {
+            var protector = dataProtectionProvider.CreateProtector(CrossTenantLoginPurpose);
+            var json = protector.Unprotect(request.Token);
+            payload = JsonSerializer.Deserialize<CrossTenantTokenPayload>(json)!;
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex, "Failed to unprotect cross-tenant login token");
+            return new LoginResultDto
+            {
+                Success = false,
+                ErrorMessage = "Invalid or expired cross-tenant token"
+            };
+        }
+
+        // Validate expiry (60 seconds)
+        var tokenAge = DateTimeOffset.UtcNow - DateTimeOffset.FromUnixTimeSeconds(payload.Timestamp);
+        if (tokenAge > CrossTenantTokenExpiry)
+        {
+            return new LoginResultDto
+            {
+                Success = false,
+                ErrorMessage = "Cross-tenant token has expired"
+            };
+        }
+
+        // Validate target tenant matches current route
+        if (!string.Equals(payload.TargetTenantId, currentTenantId, StringComparison.OrdinalIgnoreCase))
+        {
+            return new LoginResultDto
+            {
+                Success = false,
+                ErrorMessage = "Token was issued for a different tenant"
+            };
+        }
+
+        // Build CrossTenantAuthResult from validated token payload
+        var crossTenantResult = await crossTenantAuthService.ValidateCrossTenantAccessAsync(
+            currentTenantId, payload.SourceTenantId, payload.SourceUserId);
+
+        if (crossTenantResult == null)
+        {
+            return new LoginResultDto
+            {
+                Success = false,
+                ErrorMessage = "Cross-tenant access denied"
+            };
+        }
+
+        // Find or create the local shadow user
+        var localUser = await FindOrCreateCrossTenantUserAsync(crossTenantResult, currentTenantId);
+        if (localUser == null)
+        {
+            return new LoginResultDto
+            {
+                Success = false,
+                ErrorMessage = "Failed to create local user in target tenant"
+            };
+        }
+
+        // Sign in
+        await signInManager.SignInAsync(localUser, isPersistent: false);
+
+        await events.RaiseAsync(new UserLoginSuccessEvent(
+            localUser.UserName,
+            localUser.RtId.ToString(),
+            localUser.UserName,
+            clientId: null));
+
+        // Compute redirect URL
+        var redirectUrl = request.ReturnUrl;
+        if (string.IsNullOrEmpty(redirectUrl) ||
+            !(interaction.IsValidReturnUrl(redirectUrl) || Url.IsLocalUrl(redirectUrl)))
+        {
+            redirectUrl = $"/{currentTenantId}/manage";
+        }
+
+        return new LoginResultDto
+        {
+            Success = true,
+            RedirectUrl = redirectUrl
+        };
+    }
+
     /// <summary>
     /// Returns child tenants where the current user has role mappings.
     /// The user must be authenticated.
@@ -1377,6 +1520,30 @@ public record IsLdapSchemeResultDto
 }
 
 // Cross-Tenant / Tenant Switch DTOs
+
+public record CrossTenantTokenRequestDto
+{
+    public string TargetTenantId { get; init; } = string.Empty;
+}
+
+public record CrossTenantTokenResultDto
+{
+    public string Token { get; init; } = string.Empty;
+}
+
+public record CrossTenantLoginRequestDto
+{
+    public string Token { get; init; } = string.Empty;
+    public string? ReturnUrl { get; init; }
+}
+
+internal record CrossTenantTokenPayload
+{
+    public string SourceTenantId { get; init; } = string.Empty;
+    public string SourceUserId { get; init; } = string.Empty;
+    public string TargetTenantId { get; init; } = string.Empty;
+    public long Timestamp { get; init; }
+}
 
 public record AccessibleTenantDto
 {

@@ -108,6 +108,17 @@ export interface SendTwoFactorEmailResult {
   errorMessage?: string;
 }
 
+// Cross-Tenant Auto-Login Types
+
+export interface CrossTenantTokenResult {
+  token: string;
+}
+
+export interface CrossTenantLoginRequest {
+  token: string;
+  returnUrl: string;
+}
+
 // LDAP Authentication Types
 
 export interface LdapLoginRequest {

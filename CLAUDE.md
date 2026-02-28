@@ -66,6 +66,11 @@ The service supports hierarchical cross-tenant authentication where parent-tenan
 - **`ExternalTenantUserMappingStore`**: Persistence for cross-tenant user role mappings
 - **`ExternalTenantUserMappingsController`**: System API CRUD for managing mappings
 
+**Cross-tenant auto-login** (token-based, no credential re-entry):
+- `POST /{parentTenantId}/api/auth/cross-tenant-token` — Generates a DataProtection-encrypted token (60s expiry) for the authenticated parent-tenant user
+- `POST /{childTenantId}/api/auth/cross-tenant-login` — Exchanges the token for a session in the child tenant
+- The Angular login component automatically attempts token-based auto-login when clicking "LOGIN VIA {parent}" and falls back to credential entry if no parent session exists
+
 The Identity CK model and default roles are installed in all tenants (not just the system tenant). Cross-tenant users receive a `home_tenant_id` claim in their tokens.
 
 - **`TenantLoginRedirectMiddleware`**: Intercepts IdentityServer's 302 redirects to `/System/login` and rewrites the tenant prefix based on `acr_values=tenant:{tenantId}` in the authorize request ReturnUrl. Registered before `UseIdentityServer()` in the middleware pipeline.
@@ -134,7 +139,7 @@ npm test
 ### API Controllers for Angular SPA
 
 Located in `Controllers/Api/`:
-- `AuthApiController` - Login, logout, external providers, cross-tenant auth, tenant switch
+- `AuthApiController` - Login, logout, external providers, cross-tenant auth, cross-tenant auto-login (token-based), tenant switch
 - `ConsentApiController` - OAuth consent flow
 - `DeviceApiController` - Device authorization flow
 - `ManageApiController` - User profile, password, external logins

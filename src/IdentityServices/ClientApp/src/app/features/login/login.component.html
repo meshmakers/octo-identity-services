@@ -1,7 +1,7 @@
 <div class="lcars-auth-container">
   <app-lcars-panel>
     <app-lcars-header
-      subtitle="Sign in to continue"
+      [subtitle]="'Sign in to ' + tenantId"
       [showUserMenu]="false">
     </app-lcars-header>
 

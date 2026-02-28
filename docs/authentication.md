@@ -425,6 +425,45 @@ Try local authentication (existing SignInManager flow)
                   - Username prefixed with "xt_" (cross-tenant)
 ```
 
+### Cross-Tenant Auto-Login Flow (Token-Based)
+
+When a user is already authenticated in a parent tenant (e.g., OctoSystem) and navigates to a child tenant's login page, the UI automatically attempts a token-based cross-tenant login without requiring credential re-entry.
+
+```
+User clicks "LOGIN VIA OCTOSYSTEM" on child tenant login page
+        │
+        ▼
+POST /{parentTenantId}/api/auth/cross-tenant-token
+  (browser sends parent tenant's scoped cookie automatically)
+        │
+        ├── 401/403 (no parent session) ──► Fall back to "Enter credentials" hint
+        │
+        └── 200 { token: "..." } (DataProtection-encrypted, 60s expiry)
+                │
+                ▼
+POST /{childTenantId}/api/auth/cross-tenant-login
+  (exchanges token for a session in the child tenant)
+        │
+        ├── Token invalid/expired ──► Show error
+        ├── Target tenant mismatch ──► Show error
+        │
+        └── Token valid ──► Find/create local xt_ user
+                ├── Sign in via SignInManager (writes child-scoped cookie)
+                └── Redirect to ReturnUrl or /{childTenantId}/manage
+```
+
+**Token payload** (DataProtection-encrypted with purpose `CrossTenantLogin`):
+- `SourceTenantId`: The parent tenant that issued the token
+- `SourceUserId`: The authenticated user's ID in the parent tenant
+- `TargetTenantId`: The child tenant this token is valid for
+- `Timestamp`: Token creation time (tokens expire after 60 seconds)
+
+**Edge cases:**
+- No parent session (401): UI falls back to credential entry hint (existing behavior)
+- Expired token (>60s): Returns error; user can click the button again
+- Target tenant mismatch: Returns error (token was issued for a different tenant)
+- No cross-tenant mapping: `FindOrCreateCrossTenantUserAsync` creates one with default roles
+
 ### Tenant Switch Flow
 
 Users already authenticated in a parent tenant can switch to a child tenant without re-entering credentials:
