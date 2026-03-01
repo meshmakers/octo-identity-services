@@ -644,8 +644,13 @@ OIDC endpoints (`/connect/*`) don't include a `{tenantId}` route segment. The `O
 
 | Endpoint | Tenant Source |
 |----------|--------------|
-| `/connect/authorize` | `acr_values=tenant:{tenantId}` from query string |
+| `/connect/authorize` | `acr_values=tenant:{tenantId}` from query string; also captures `code` → tenant mapping from 302 response |
+| `/connect/token` | Authorization code → tenant mapping (captured during authorize); sets tenant context for user/client lookups |
 | `/connect/endsession` | `id_token_hint` JWT payload → `tenant_id` claim; fallback to `acr_values` |
+
+**Authorization code → tenant mapping:** During `/connect/authorize`, the middleware registers an `OnStarting` callback that captures the authorization code from the 302 redirect `Location` header and maps it to the resolved tenant ID in an in-memory `ConcurrentDictionary`. When `/connect/token` is called with `grant_type=authorization_code`, the middleware reads the `code` from the form body, looks up the tenant from the mapping, and sets the correct tenant context. This ensures `OctoUserStore`, `ClientStore`, and other per-tenant stores use the correct tenant database during the token exchange. The mapping entries expire after 10 minutes and are cleaned up opportunistically.
+
+**Note:** `PersistentGrantStore` always uses the system tenant database (regardless of the per-request tenant context) to ensure grants are accessible from both `/connect/authorize` and `/connect/token`, and by the `TokenCleanupHostService` which runs without HTTP context.
 
 The middleware runs after routing, before `UseIdentityServer()`:
 

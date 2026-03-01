@@ -87,13 +87,33 @@ External identity provider schemes (Google, Microsoft, Azure Entra ID, Facebook,
 - **`AuthApiController`**: Filters schemes by tenant prefix (`{tenantId}:`) in `GetLoginContext` and `GetExternalProviders` endpoints. The full prefixed scheme name is passed to the frontend and back for challenge/login calls.
 - **`IdentityProviderUpdateConsumer`**: Runtime reconfiguration only affects the specific tenant's schemes.
 
+### Centralized Grant Storage
+
+The `PersistentGrantStore` always uses the **system tenant database** for all OIDC grants (authorization codes, refresh tokens, consent grants), regardless of the current HTTP tenant context. This is critical because:
+
+- `/connect/authorize` resolves tenant from `acr_values=tenant:{tenantId}` via `OidcTenantResolutionMiddleware`
+- `/connect/token` resolves tenant from the authorization code → tenant mapping (see below), but `PersistentGrantStore` bypasses the per-request tenant and always uses the system DB
+- `TokenCleanupHostService` runs without HTTP context
+
+Storing grants centrally ensures the authorization code created during authorize can always be found during the token exchange. Grant keys (authorization codes, refresh tokens) are globally unique, so there is no collision risk across tenants.
+
+### Token Endpoint Tenant Resolution
+
+The `/connect/token` endpoint has no `{tenantId}` route segment or `acr_values` parameter. To ensure `OctoUserStore`, `ClientStore`, and other per-tenant stores use the correct tenant database, `OidcTenantResolutionMiddleware` maintains an in-memory authorization code → tenant mapping:
+
+1. During `/connect/authorize`, after the tenant is resolved from `acr_values`, an `OnStarting` callback captures the authorization code from the 302 redirect `Location` header
+2. The code → tenantId pair is stored in a static `ConcurrentDictionary` (entries expire after 10 minutes)
+3. During `/connect/token` with `grant_type=authorization_code`, the middleware reads the `code` from the form body, looks up the tenant, and sets `HttpContext.Items` accordingly
+
+This ensures all per-request stores (user, client, resource) query the correct tenant database. `PersistentGrantStore` is unaffected — it always uses the system tenant regardless.
+
 ### Per-Tenant Cookie Scoping
 
 Auth cookies are scoped per tenant via `TenantCookieManager` (`src/IdentityServices/Cookies/TenantCookieManager.cs`). This prevents cross-tenant session leakage by appending `.{tenantId}` to cookie names (e.g., `.AspNetCore.Identity.Application.sbeg`).
 
 Key components:
 - **`TenantCookieManager`**: Custom `ICookieManager` that scopes `Identity.Application`, `idsrv`, and `idsrv.session` cookies per tenant
-- **`OidcTenantResolutionMiddleware`**: Resolves tenant for `/connect/*` OIDC endpoints from `acr_values` or `id_token_hint`
+- **`OidcTenantResolutionMiddleware`**: Resolves tenant for `/connect/*` OIDC endpoints from `acr_values`, `id_token_hint`, or authorization code → tenant mapping
 - **`UserProfileService`**: Adds `tenant_id` claim to identity tokens (used by endsession for cookie resolution)
 
 See `docs/authentication.md` for detailed architecture and edge cases.

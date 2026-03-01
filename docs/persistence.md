@@ -211,11 +211,16 @@ public class ClientStore : IOctoClientStore
 
 ### PersistentGrantStore
 
-Handles OAuth tokens with expiration and cleanup:
+Handles OAuth tokens with expiration and cleanup. **Grants are always stored in the system tenant database**, regardless of which tenant the OIDC request targets. This avoids mismatches between the `/connect/authorize` endpoint (which resolves tenant from `acr_values`) and the `/connect/token` endpoint (which has no tenant context). The `TokenCleanupHostService` also runs without HTTP context, so centralizing grants ensures expired grants are always cleaned up.
 
 ```csharp
-public class PersistentGrantStore : IOctoPersistentGrantStore
+public class PersistentGrantStore(ISystemContext systemContext, IMapper mapper)
+    : IOctoPersistentGrantStore
 {
+    // Always use system tenant — grants are transient, keyed by unique keys,
+    // and must be accessible across authorize and token endpoints.
+    private readonly ITenantRepository _tenantRepository = systemContext.GetSystemTenantRepository();
+
     public async Task RemoveExpiredGrantsAsync()
     {
         var session = await _tenantRepository.GetSessionAsync();

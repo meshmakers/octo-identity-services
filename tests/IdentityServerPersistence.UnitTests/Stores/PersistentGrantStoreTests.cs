@@ -4,11 +4,11 @@ using Duende.IdentityServer.Stores;
 using FluentAssertions;
 using IdentityServerPersistence.SystemStores;
 using Meshmakers.Octo.Runtime.Contracts;
+using Meshmakers.Octo.Runtime.Contracts.MongoDb;
 using Meshmakers.Octo.Runtime.Contracts.MongoDb.Repositories;
 using Meshmakers.Octo.Runtime.Contracts.Repositories;
 using Meshmakers.Octo.Runtime.Contracts.Repositories.Query;
 using Meshmakers.Octo.Runtime.Engine.Repositories.Query;
-using Meshmakers.Octo.Services.Infrastructure.Services;
 using NSubstitute;
 using Persistence.IdentityCkModel.Generated.System.Identity.v2;
 using Shared.TestUtilities.Builders;
@@ -21,13 +21,13 @@ public class PersistentGrantStoreTests
 {
     private readonly ITenantRepository _tenantRepository;
     private readonly IMapper _mapper;
-    private readonly IMultiTenancyResolverService _multiTenancyResolver;
+    private readonly ISystemContext _systemContext;
     private readonly PersistentGrantStore _sut;
     private readonly FakeOctoSession _session;
 
     public PersistentGrantStoreTests()
     {
-        _multiTenancyResolver = Substitute.For<IMultiTenancyResolverService>();
+        _systemContext = Substitute.For<ISystemContext>();
         _mapper = Substitute.For<IMapper>();
         _session = new FakeOctoSession();
 
@@ -36,9 +36,9 @@ public class PersistentGrantStoreTests
         _tenantRepository.GetSessionAsync()
             .Returns(Task.FromResult<IOctoSession>(_session));
 
-        _multiTenancyResolver.GetTenantRepository().Returns(_tenantRepository);
+        _systemContext.GetSystemTenantRepository().Returns(_tenantRepository);
 
-        _sut = new PersistentGrantStore(_multiTenancyResolver, _mapper);
+        _sut = new PersistentGrantStore(_systemContext, _mapper);
     }
 
     #region StoreAsync Tests

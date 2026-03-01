@@ -105,6 +105,58 @@ public class OidcTenantResolutionMiddlewareTests
         result.Should().BeNull();
     }
 
+    [Fact]
+    public void ExtractCodeFromRedirectUri_WithAbsoluteUri_ReturnsCode()
+    {
+        var result = OidcTenantResolutionMiddleware.ExtractCodeFromRedirectUri(
+            "https://localhost:4200/callback?code=ABC123&state=xyz");
+
+        result.Should().Be("ABC123");
+    }
+
+    [Fact]
+    public void ExtractCodeFromRedirectUri_WithRelativeUri_ReturnsCode()
+    {
+        var result = OidcTenantResolutionMiddleware.ExtractCodeFromRedirectUri(
+            "/callback?code=DEF456&state=xyz");
+
+        result.Should().Be("DEF456");
+    }
+
+    [Fact]
+    public void ExtractCodeFromRedirectUri_WithNoCodeParam_ReturnsNull()
+    {
+        var result = OidcTenantResolutionMiddleware.ExtractCodeFromRedirectUri(
+            "https://localhost:4200/callback?state=xyz");
+
+        result.Should().BeNull();
+    }
+
+    [Fact]
+    public void ExtractCodeFromRedirectUri_WithNoQueryString_ReturnsNull()
+    {
+        var result = OidcTenantResolutionMiddleware.ExtractCodeFromRedirectUri(
+            "https://localhost:4200/callback");
+
+        result.Should().BeNull();
+    }
+
+    [Fact]
+    public void ExtractCodeFromRedirectUri_WithNull_ReturnsNull()
+    {
+        var result = OidcTenantResolutionMiddleware.ExtractCodeFromRedirectUri(null);
+
+        result.Should().BeNull();
+    }
+
+    [Fact]
+    public void ExtractCodeFromRedirectUri_WithEmptyString_ReturnsNull()
+    {
+        var result = OidcTenantResolutionMiddleware.ExtractCodeFromRedirectUri("");
+
+        result.Should().BeNull();
+    }
+
     private static string Base64UrlEncode(string input)
     {
         var bytes = System.Text.Encoding.UTF8.GetBytes(input);

@@ -7,20 +7,25 @@ using Meshmakers.Octo.Runtime.Contracts.MongoDb;
 using Meshmakers.Octo.Runtime.Contracts.MongoDb.Repositories;
 using Meshmakers.Octo.Runtime.Contracts.Repositories;
 using Meshmakers.Octo.Runtime.Contracts.Repositories.Query;
-using Meshmakers.Octo.Services.Infrastructure.Services;
 using NLog;
 using Persistence.IdentityCkModel.Generated.System.Identity.v2;
 
 namespace IdentityServerPersistence.SystemStores;
 
-public class PersistentGrantStore(IMultiTenancyResolverService multiTenancyResolverService, IMapper mapper)
+/// <remarks>
+/// Grants are always stored in the system tenant database regardless of the current HTTP tenant context.
+/// This avoids mismatches between the <c>/connect/authorize</c> endpoint (which resolves tenant from
+/// <c>acr_values</c>) and the <c>/connect/token</c> endpoint (which has no tenant context), ensuring
+/// the authorization code can always be found during the token exchange.
+/// </remarks>
+public class PersistentGrantStore(ISystemContext systemContext, IMapper mapper)
     : IOctoPersistentGrantStore
 {
     private const int TokenCleanupBatchSize = 50;
 
     private static readonly Logger Logger = LogManager.GetCurrentClassLogger();
 
-    private readonly ITenantRepository _tenantRepository = multiTenancyResolverService.GetTenantRepository();
+    private readonly ITenantRepository _tenantRepository = systemContext.GetSystemTenantRepository();
 
     public async Task StoreAsync(PersistedGrant grant)
     {
@@ -72,7 +77,7 @@ public class PersistentGrantStore(IMultiTenancyResolverService multiTenancyResol
         {
             queryOptions.FieldFilter(nameof(RtPersistedGrant.SessionId), FieldFilterOperator.Equals, filter.SessionId);
         }
-        if (filter.SessionId != null)
+        if (filter.ClientId != null)
         {
             queryOptions.FieldFilter(nameof(RtPersistedGrant.ClientId), FieldFilterOperator.Equals, filter.ClientId);
         }

@@ -34,14 +34,29 @@ internal class TenantLoginRedirectMiddleware(
             return;
         }
 
+        // IdentityServer may return absolute URLs (https://host/OctoSystem/login?...)
+        // or relative paths (/OctoSystem/login?...). Extract the path portion for matching.
+        string pathAndQuery;
+        string locationPrefix;
+        if (Uri.TryCreate(location, UriKind.Absolute, out var absoluteUri))
+        {
+            pathAndQuery = absoluteUri.PathAndQuery;
+            locationPrefix = location.Substring(0, location.Length - pathAndQuery.Length);
+        }
+        else
+        {
+            pathAndQuery = location;
+            locationPrefix = string.Empty;
+        }
+
         // Check if the redirect target starts with the system tenant prefix followed by a known UI path
-        if (!location.StartsWith(_systemTenantPrefix, StringComparison.OrdinalIgnoreCase))
+        if (!pathAndQuery.StartsWith(_systemTenantPrefix, StringComparison.OrdinalIgnoreCase))
         {
             return;
         }
 
         // Verify the path after the system tenant prefix is a known interaction path
-        var pathAfterTenant = location.AsSpan(_systemTenantPrefix.Length);
+        var pathAfterTenant = pathAndQuery.AsSpan(_systemTenantPrefix.Length);
         if (!pathAfterTenant.StartsWith("/login", StringComparison.OrdinalIgnoreCase) &&
             !pathAfterTenant.StartsWith("/consent", StringComparison.OrdinalIgnoreCase) &&
             !pathAfterTenant.StartsWith("/logout", StringComparison.OrdinalIgnoreCase) &&
@@ -51,15 +66,15 @@ internal class TenantLoginRedirectMiddleware(
             return;
         }
 
-        var tenantId = ExtractTenantFromLocation(location);
+        var tenantId = ExtractTenantFromLocation(pathAndQuery);
         if (string.IsNullOrEmpty(tenantId) ||
             string.Equals(tenantId, _systemTenantId, StringComparison.OrdinalIgnoreCase))
         {
             return;
         }
 
-        // Rewrite /{systemTenantId}/... to /{tenantId}/...
-        var newLocation = $"/{tenantId}" + location.Substring(_systemTenantPrefix.Length);
+        // Rewrite /{systemTenantId}/... to /{tenantId}/..., preserving the scheme+host prefix if absolute
+        var newLocation = locationPrefix + $"/{tenantId}" + pathAndQuery.Substring(_systemTenantPrefix.Length);
         context.Response.Headers.Location = newLocation;
 
         logger.LogDebug(
@@ -67,18 +82,18 @@ internal class TenantLoginRedirectMiddleware(
             location, newLocation, tenantId);
     }
 
-    private static string? ExtractTenantFromLocation(string location)
+    private static string? ExtractTenantFromLocation(string pathAndQuery)
     {
-        // The location looks like:
-        // /System/login?ReturnUrl=%2Fconnect%2Fauthorize%2Fcallback%3F...%26acr_values%3Dtenant%3Achild1
+        // The pathAndQuery looks like:
+        // /OctoSystem/login?ReturnUrl=%2Fconnect%2Fauthorize%2Fcallback%3F...%26acr_values%3Dtenant%3Achild1
         // We parse the ReturnUrl, then extract acr_values from it.
-        var queryIndex = location.IndexOf('?');
+        var queryIndex = pathAndQuery.IndexOf('?');
         if (queryIndex < 0)
         {
             return null;
         }
 
-        var queryString = location.Substring(queryIndex);
+        var queryString = pathAndQuery.Substring(queryIndex);
         var queryParams = QueryHelpers.ParseQuery(queryString);
 
         if (!queryParams.TryGetValue("ReturnUrl", out var returnUrl) ||
