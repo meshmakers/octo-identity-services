@@ -353,6 +353,10 @@ RtApiResource
 └── ApiSecrets: RtSecretRecord[]
 ```
 
+### Child Tenant Role Provisioning
+
+All 10 default roles (TenantManagement, UserManagement, CommunicationManagement, Development, AdminPanelManagement, BotManagement, DashboardManagement, DashboardViewer, ReportingManagement, ReportingViewer) are provisioned to child tenants during `EnsureIdentityDataInChildTenantAsync()`. This uses the same `childRepo` pattern as clients and resources — querying by `NormalizedName` and inserting if missing. Roles are required in child tenants for per-tenant user management and cross-tenant role mapping.
+
 ### User-Role Relationship
 
 Roles are referenced by ID array, not embedded:

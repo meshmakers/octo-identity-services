@@ -606,6 +606,18 @@ internal class DefaultConfigurationCreatorService(
                 CommonConstants.IdentityApiDescription,
                 new[] { CommonConstants.IdentityApiFullAccess, CommonConstants.IdentityApiReadOnly });
 
+            // Roles (required for per-tenant user management and cross-tenant role mapping)
+            await EnsureRoleInChildTenantAsync(session, childRepo, CommonConstants.TenantManagementRole);
+            await EnsureRoleInChildTenantAsync(session, childRepo, CommonConstants.UserManagementRole);
+            await EnsureRoleInChildTenantAsync(session, childRepo, CommonConstants.CommunicationManagementRole);
+            await EnsureRoleInChildTenantAsync(session, childRepo, CommonConstants.DevelopmentRole);
+            await EnsureRoleInChildTenantAsync(session, childRepo, CommonConstants.AdminPanelManagementRole);
+            await EnsureRoleInChildTenantAsync(session, childRepo, CommonConstants.BotManagementRole);
+            await EnsureRoleInChildTenantAsync(session, childRepo, CommonConstants.DashboardManagementRole);
+            await EnsureRoleInChildTenantAsync(session, childRepo, CommonConstants.DashboardViewerRole);
+            await EnsureRoleInChildTenantAsync(session, childRepo, CommonConstants.ReportingManagementRole);
+            await EnsureRoleInChildTenantAsync(session, childRepo, CommonConstants.ReportingViewerRole);
+
             // Clients
             await EnsureClientInChildTenantAsync(session, childRepo, new RtClient
             {
@@ -704,7 +716,7 @@ internal class DefaultConfigurationCreatorService(
             await session.CommitTransactionAsync();
 
             logger.LogInformation(
-                "Ensured identity data (resources, scopes, clients) exists in child tenant '{TenantId}'",
+                "Ensured identity data (resources, scopes, roles, clients) exists in child tenant '{TenantId}'",
                 tenantContext.TenantId);
         }
         catch (Exception e)
@@ -793,6 +805,24 @@ internal class DefaultConfigurationCreatorService(
         else
         {
             await childRepo.ReplaceOneRtEntityByIdAsync(session, result.Items.First().RtId, client);
+        }
+    }
+
+    private static async Task EnsureRoleInChildTenantAsync(
+        IOctoSession session, ITenantRepository childRepo, string roleName)
+    {
+        var queryOptions = RtEntityQueryOptions.Create()
+            .FieldFilter(nameof(RtRole.NormalizedName), FieldFilterOperator.Equals, roleName.ToUpperInvariant());
+        var result = await childRepo.GetRtEntitiesByTypeAsync<RtRole>(session, queryOptions);
+        if (!result.Items.Any())
+        {
+            var role = new RtRole
+            {
+                Name = roleName,
+                NormalizedName = roleName.ToUpperInvariant(),
+                Claims = new AttributeRecordValueList<RtRoleClaimRecord>()
+            };
+            await childRepo.InsertOneRtEntityAsync(session, role);
         }
     }
 
