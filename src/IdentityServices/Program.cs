@@ -315,6 +315,7 @@ try
     app.UseIdentityServer();
 
     app.UseAuthorization();
+    app.UseOctoTenantAuthorization();
 
     // Map API controllers - MUST come before UseEndpoints middleware runs
     app.MapControllers();

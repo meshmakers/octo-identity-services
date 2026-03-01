@@ -114,9 +114,22 @@ Auth cookies are scoped per tenant via `TenantCookieManager` (`src/IdentityServi
 Key components:
 - **`TenantCookieManager`**: Custom `ICookieManager` that scopes `Identity.Application`, `idsrv`, and `idsrv.session` cookies per tenant
 - **`OidcTenantResolutionMiddleware`**: Resolves tenant for `/connect/*` OIDC endpoints from `acr_values`, `id_token_hint`, or authorization code → tenant mapping
-- **`UserProfileService`**: Adds `tenant_id` claim to identity tokens (used by endsession for cookie resolution)
+- **`UserProfileService`**: Adds `tenant_id` and `allowed_tenants` claims to tokens (used by endsession for cookie resolution and by backend middleware for tenant authorization)
 
 See `docs/authentication.md` for detailed architecture and edge cases.
+
+### Multi-Tenant Token Validation
+
+Access tokens include `allowed_tenants` claims listing all tenants a user may access. Backend middleware validates the route tenant against these claims.
+
+Key components:
+- **`IAllowedTenantsResolver`** / **`AllowedTenantsResolver`** (`IdentityServerPersistence/Services/`): Resolves allowed tenants at token issuance time by checking cross-tenant user mappings across child tenants
+- **`UserProfileService.GetProfileDataAsync`**: Overrides the base class to add `allowed_tenants` claims to all issued tokens
+- **`TenantAuthorizationMiddleware`** (`octo-common-services`): Validates route tenant against `allowed_tenants` claims; registered after `UseAuthorization()` in all backend services
+
+The resolver algorithm: always includes the login tenant; for cross-tenant users (xt_), includes the home tenant; then queries `RtExternalTenantUserMapping` in each child tenant for matching source user mappings.
+
+See `docs/authentication.md` § "Multi-Tenant Token Validation" for full architecture details.
 
 ### Multi-Tenancy
 

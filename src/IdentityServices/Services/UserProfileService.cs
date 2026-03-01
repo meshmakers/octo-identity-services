@@ -1,5 +1,8 @@
 using System.Security.Claims;
 using Duende.IdentityServer.AspNetIdentity;
+using Duende.IdentityServer.Extensions;
+using Duende.IdentityServer.Models;
+using IdentityServerPersistence.Services;
 using Meshmakers.Octo.Services.Infrastructure;
 using Microsoft.AspNetCore.Identity;
 using Persistence.IdentityCkModel.Generated.System.Identity.v2;
@@ -10,23 +13,46 @@ namespace Meshmakers.Octo.Backend.IdentityServices.Services;
 public class UserProfileService : ProfileService<RtUser>
 {
     private readonly IHttpContextAccessor _httpContextAccessor;
+    private readonly IAllowedTenantsResolver _allowedTenantsResolver;
 
     // ReSharper disable once UnusedMember.Global
     public UserProfileService(UserManager<RtUser> userManager, IUserClaimsPrincipalFactory<RtUser> claimsFactory,
-        IHttpContextAccessor httpContextAccessor) : base(userManager, claimsFactory)
+        IHttpContextAccessor httpContextAccessor, IAllowedTenantsResolver allowedTenantsResolver)
+        : base(userManager, claimsFactory)
     {
         _httpContextAccessor = httpContextAccessor;
+        _allowedTenantsResolver = allowedTenantsResolver;
     }
 
     // ReSharper disable once UnusedMember.Global
     // ReSharper disable once ContextualLoggerProblem
     public UserProfileService(UserManager<RtUser> userManager, IUserClaimsPrincipalFactory<RtUser> claimsFactory,
-        IHttpContextAccessor httpContextAccessor,
+        IHttpContextAccessor httpContextAccessor, IAllowedTenantsResolver allowedTenantsResolver,
         ILogger<ProfileService<RtUser>> logger) : base(userManager, claimsFactory, logger)
     {
         _httpContextAccessor = httpContextAccessor;
+        _allowedTenantsResolver = allowedTenantsResolver;
     }
 
+    public override async Task GetProfileDataAsync(ProfileDataRequestContext context)
+    {
+        await base.GetProfileDataAsync(context);
+
+        // Always include allowed_tenants — regardless of requested claim types
+        var user = await FindUserAsync(context.Subject.GetSubjectId());
+        if (user != null)
+        {
+            var loginTenantId = _httpContextAccessor.HttpContext?.Items[InfrastructureCommon.TenantIdName] as string;
+            if (!string.IsNullOrEmpty(loginTenantId))
+            {
+                var allowedTenants = await _allowedTenantsResolver.ResolveAsync(loginTenantId, user);
+                foreach (var tenantId in allowedTenants)
+                {
+                    context.IssuedClaims.Add(new Claim("allowed_tenants", tenantId));
+                }
+            }
+        }
+    }
 
     /// <summary>
     ///     We add custom data to the claims of the user.

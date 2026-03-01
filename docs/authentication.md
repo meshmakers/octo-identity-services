@@ -685,6 +685,83 @@ UseRouting()
 | `src/IdentityServices/Middleware/OidcTenantResolutionMiddleware.cs` | Tenant resolution for `/connect/*` endpoints |
 | `src/IdentityServices/Services/UserProfileService.cs` | Adds `tenant_id` claim to tokens |
 
+## Multi-Tenant Token Validation
+
+### Overview
+
+Access tokens contain `allowed_tenants` claims that list all tenants a user is authorized to access. Backend middleware validates the route tenant against these claims, ensuring tokens are only valid for authorized tenants.
+
+### Architecture
+
+```
+Token Issuance (Login)
+        │
+        ▼
+UserProfileService.GetProfileDataAsync()
+        │
+        ▼
+AllowedTenantsResolver.ResolveAsync()
+        │
+        ├── Always include the login tenant
+        ├── For cross-tenant users (xt_): include home tenant
+        ├── Get all child tenants from system context
+        └── For each child: check RtExternalTenantUserMapping
+        │
+        ▼
+Access token includes: allowed_tenants: ["tenant1", "tenant2", ...]
+```
+
+### Key Components
+
+| Component | Location | Purpose |
+|-----------|----------|---------|
+| `IAllowedTenantsResolver` | `IdentityServerPersistence/Services/` | Resolves allowed tenants for a user |
+| `AllowedTenantsResolver` | `IdentityServerPersistence/Services/` | Default implementation using cross-tenant mappings |
+| `UserProfileService` | `IdentityServices/Services/` | Overrides `GetProfileDataAsync` to add claims |
+| `TenantAuthorizationMiddleware` | `octo-common-services` | Validates route tenant against claims |
+
+### AllowedTenantsResolver Algorithm
+
+1. **Always include the login tenant** (the tenant the user authenticated against)
+2. **Cross-tenant users** (`xt_{homeTenant}_{username}`): include the home tenant
+3. **Determine source identity**: For cross-tenant users, resolve the source user in the home tenant; for regular users, use the login tenant + user ID
+4. **Query child tenants**: Get all child tenants via `ITenantContext.GetChildTenantsAsync()`
+5. **Check mappings**: For each child tenant, query `RtExternalTenantUserMapping` for matching `SourceTenantId` + `SourceUserId`
+6. **Include matching tenants**: Add each child tenant with a valid mapping to the result
+
+### TenantAuthorizationMiddleware
+
+Placed after `UseAuthentication()` + `UseAuthorization()` in each service's pipeline:
+
+- **Skips unauthenticated requests** (let auth middleware handle 401)
+- **Skips client-credentials tokens** (no `sub` claim = service-to-service calls)
+- **Skips requests without a route tenant** (system endpoints)
+- **Denies access if no `allowed_tenants` claims** (old tokens before this feature)
+- **Validates route tenant** against allowed list (case-insensitive comparison)
+
+### Token Claims
+
+```json
+{
+  "sub": "user-id",
+  "tenant_id": "meshtest",
+  "allowed_tenants": ["meshtest", "sbeg", "octosystem"],
+  "home_tenant_id": "octosystem"
+}
+```
+
+### Frontend Integration
+
+The `AuthorizeService` in `@meshmakers/shared-auth`:
+- Parses `allowed_tenants` from the access token JWT payload
+- Exposes `allowedTenants` signal and `isTenantAllowed(tenantId)` method
+- The tenant list data source filters tenants by `allowed_tenants`
+- The HTTP error interceptor shows a user-friendly message on 403 responses
+
+### Performance
+
+The resolver runs **only at token issuance time** (login, token refresh), not per-request. The number of tenants is typically small (< 100), making the per-tenant mapping query acceptable.
+
 ## Security Considerations
 
 ### Scheme Isolation

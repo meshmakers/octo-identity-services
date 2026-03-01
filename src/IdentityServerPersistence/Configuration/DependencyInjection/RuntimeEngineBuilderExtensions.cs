@@ -46,6 +46,7 @@ public static class RuntimeEngineBuilderExtensions
         builder.Services.AddScoped<IOctoIdentityProviderStore, IdentityProviderStore>();
         builder.Services.AddScoped<IExternalTenantUserMappingStore, ExternalTenantUserMappingStore>();
         builder.Services.AddScoped<ICrossTenantAuthenticationService, CrossTenantAuthenticationService>();
+        builder.Services.AddScoped<IAllowedTenantsResolver, AllowedTenantsResolver>();
 
         builder.Services.AddSingleton<AttributeStringValueListConverter>();
         builder.Services.AddAutoMapper(cfg =>
