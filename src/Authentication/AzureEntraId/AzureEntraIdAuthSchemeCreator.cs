@@ -20,9 +20,10 @@ internal class AzureEntraIdAuthSchemeCreator : IAuthSchemeCreator<RtAzureEntraId
         _openIdConnectAuthOptions = openIdConnectAuthOptions;
     }
 
-    public AuthenticationScheme Create(RtAzureEntraIdIdentityProvider identityProvider)
+    public AuthenticationScheme Create(RtAzureEntraIdIdentityProvider identityProvider, string? schemeNameOverride = null)
     {
-        var options = _openIdConnectAuthOptions.CreateOptions(identityProvider.Name);
+        var schemeName = schemeNameOverride ?? identityProvider.Name;
+        var options = _openIdConnectAuthOptions.CreateOptions(schemeName);
 
         options.Authority = $"https://login.microsoftonline.com/{identityProvider.TenantId}";
         options.ClientId = identityProvider.ClientId;
@@ -46,7 +47,7 @@ internal class AzureEntraIdAuthSchemeCreator : IAuthSchemeCreator<RtAzureEntraId
         options.Validate();
 
         var displayName = identityProvider.DisplayName ?? identityProvider.Name;
-        return new AuthenticationScheme(identityProvider.Name, displayName, typeof(OpenIdConnectHandler));
+        return new AuthenticationScheme(schemeName, displayName, typeof(OpenIdConnectHandler));
     }
 
     /// <summary>

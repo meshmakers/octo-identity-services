@@ -48,10 +48,14 @@ public class AuthApiController(
     public async Task<ActionResult<LoginContextDto>> GetLoginContext([FromQuery] string? returnUrl)
     {
         var context = await interaction.GetAuthorizationContextAsync(returnUrl);
+        var tenantId = RouteData.Values["tenantId"]?.ToString() ?? "System";
+        var prefix = $"{tenantId}:";
         var schemes = await schemeProvider.GetAllSchemesAsync();
 
-        // Build providers list with LDAP detection
-        var externalSchemes = schemes.Where(x => x.DisplayName != null).ToList();
+        // Build providers list with LDAP detection, filtered to this tenant's schemes
+        var externalSchemes = schemes
+            .Where(x => x.DisplayName != null && x.Name.StartsWith(prefix, StringComparison.Ordinal))
+            .ToList();
         var providers = new List<ExternalProviderDto>();
 
         foreach (var scheme in externalSchemes)
@@ -252,8 +256,12 @@ public class AuthApiController(
     [HttpGet("external-providers")]
     public async Task<ActionResult<IEnumerable<ExternalProviderDto>>> GetExternalProviders()
     {
+        var tenantId = RouteData.Values["tenantId"]?.ToString() ?? "System";
+        var prefix = $"{tenantId}:";
         var schemes = await schemeProvider.GetAllSchemesAsync();
-        var externalSchemes = schemes.Where(x => x.DisplayName != null).ToList();
+        var externalSchemes = schemes
+            .Where(x => x.DisplayName != null && x.Name.StartsWith(prefix, StringComparison.Ordinal))
+            .ToList();
         var providers = new List<ExternalProviderDto>();
 
         foreach (var scheme in externalSchemes)
