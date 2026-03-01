@@ -141,9 +141,26 @@ npm start
 # Production build
 npm run build
 
+# Linting (REQUIRED before every commit)
+npm run lint
+
 # Run tests
 npm test
 ```
+
+### Linting (REQUIRED)
+
+**CRITICAL: Always run the linter before every commit!**
+
+```bash
+cd src/IdentityServices/ClientApp
+npx ng lint
+```
+
+The CI/CD pipeline will fail if there are any lint errors. Common issues:
+- **Unused imports**: Run with `--fix` flag to auto-remove (`npx ng lint --fix`)
+- **Unused variables**: Prefix with `_` (e.g., `_unusedParam`)
+- **Empty functions**: Add a comment or remove the empty function
 
 ### Angular Project Structure
 

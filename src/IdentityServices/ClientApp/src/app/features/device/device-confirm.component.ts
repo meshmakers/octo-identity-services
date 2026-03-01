@@ -7,7 +7,7 @@ import { LcarsPanelComponent } from '../../shared/components/lcars-panel/lcars-p
 import { LcarsHeaderComponent } from '../../shared/components/lcars-header/lcars-header.component';
 import { ScopeListComponent } from '../../shared/components/scope-list/scope-list.component';
 import { ConsentApiService } from '../../core/services/consent-api.service';
-import { DeviceAuthorizationContext, ScopeItem } from '../../core/models/consent.models';
+import { DeviceAuthorizationContext } from '../../core/models/consent.models';
 
 @Component({
   selector: 'app-device-confirm',
