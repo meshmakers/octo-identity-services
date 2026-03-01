@@ -31,7 +31,6 @@ export class LoginComponent implements OnInit {
   loading = true;
   submitting = false;
   errorMessage?: string;
-  parentTenantHint?: string;
   context?: LoginContext;
   showLoginForm = false; // Used to override isAuthenticated and show login form
 
@@ -51,15 +50,23 @@ export class LoginComponent implements OnInit {
                   || this.route.snapshot.queryParams['returnUrl']
                   || '';
 
-    this.loadContext();
+    const crossTenantAutoLogin = this.route.snapshot.queryParams['crossTenantAutoLogin'];
+    if (crossTenantAutoLogin) {
+      this.stripQueryParam('crossTenantAutoLogin');
+    }
+
+    this.loadContext(crossTenantAutoLogin);
   }
 
-  private loadContext(): void {
+  private loadContext(autoLoginParentTenantId?: string): void {
     this.loading = true;
     this.authApi.getLoginContext(this.returnUrl).subscribe({
       next: (context) => {
         this.context = context;
         this.loading = false;
+        if (autoLoginParentTenantId) {
+          this.performCrossTenantAutoLogin(autoLoginParentTenantId);
+        }
       },
       error: (error) => {
         console.error('Failed to load login context', error);
@@ -133,41 +140,61 @@ export class LoginComponent implements OnInit {
       const parentTenantId = provider.scheme.replace('octo-tenant-', '');
       this.submitting = true;
       this.errorMessage = undefined;
-      this.parentTenantHint = undefined;
 
-      // Step 1: Try to get a cross-tenant token from the parent tenant.
-      // The browser sends the parent's scoped cookie automatically.
-      this.authApi.getCrossTenantToken(parentTenantId, this.tenantId).subscribe({
-        next: (tokenResult) => {
-          // Step 2: Exchange the token for a session in the current (child) tenant
-          this.authApi.crossTenantLogin({ token: tokenResult.token, returnUrl: this.returnUrl }).subscribe({
-            next: (loginResult) => {
-              this.submitting = false;
-              if (loginResult.success && loginResult.redirectUrl) {
-                window.location.href = loginResult.redirectUrl;
-              } else if (loginResult.success) {
-                this.router.navigate(['/', this.tenantId, 'manage']);
-              } else {
-                this.errorMessage = loginResult.errorMessage || 'Cross-tenant login failed';
-              }
-            },
-            error: () => {
-              this.submitting = false;
-              this.errorMessage = 'Cross-tenant login failed';
-            }
-          });
-        },
-        error: () => {
-          // 401/403 = no active session in parent tenant → fall back to credential entry
-          this.submitting = false;
-          this.parentTenantHint = `Enter your ${provider.displayName.replace('Login via ', '')} credentials below.`;
-          setTimeout(() => document.getElementById('username')?.focus());
-        }
-      });
+      this.performCrossTenantLogin(parentTenantId);
     } else {
       // OAuth providers redirect to external provider
       this.authApi.initiateExternalLogin(provider.scheme, this.returnUrl);
     }
+  }
+
+  private stripQueryParam(param: string): void {
+    const params = { ...this.route.snapshot.queryParams };
+    delete params[param];
+    this.router.navigate([], { relativeTo: this.route, queryParams: params, replaceUrl: true });
+  }
+
+  private performCrossTenantAutoLogin(parentTenantId: string): void {
+    this.submitting = true;
+    this.errorMessage = undefined;
+    this.performCrossTenantLogin(parentTenantId);
+  }
+
+  private performCrossTenantLogin(parentTenantId: string): void {
+    // Step 1: Try to get a cross-tenant token from the parent tenant.
+    // The browser sends the parent's scoped cookie automatically.
+    this.authApi.getCrossTenantToken(parentTenantId, this.tenantId).subscribe({
+      next: (tokenResult) => {
+        // Step 2: Exchange the token for a session in the current (child) tenant
+        this.authApi.crossTenantLogin({ token: tokenResult.token, returnUrl: this.returnUrl }).subscribe({
+          next: (loginResult) => {
+            this.submitting = false;
+            if (loginResult.success && loginResult.redirectUrl) {
+              window.location.href = loginResult.redirectUrl;
+            } else if (loginResult.success) {
+              this.router.navigate(['/', this.tenantId, 'manage']);
+            } else {
+              this.errorMessage = loginResult.errorMessage || 'Cross-tenant login failed';
+            }
+          },
+          error: () => {
+            this.submitting = false;
+            this.errorMessage = 'Cross-tenant login failed';
+          }
+        });
+      },
+      error: () => {
+        // No active session in parent tenant → redirect to parent's login page.
+        // After authenticating there, the user is redirected back with crossTenantAutoLogin
+        // to auto-complete the token exchange.
+        this.submitting = false;
+        const childReturnUrl = `/${this.tenantId}/login`
+          + `?returnUrl=${encodeURIComponent(this.returnUrl)}`
+          + `&crossTenantAutoLogin=${encodeURIComponent(parentTenantId)}`;
+        window.location.href = `/${parentTenantId}/login`
+          + `?returnUrl=${encodeURIComponent(childReturnUrl)}`;
+      }
+    });
   }
 
   get hasExternalProviders(): boolean {

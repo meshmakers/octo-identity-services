@@ -46,6 +46,16 @@ DynamicAuth/
 └── OpenIdDynamicAuthOptionsBuilder.cs# OIDC-specific options
 ```
 
+### Multi-Tenant Scheme Isolation
+
+Authentication schemes are **tenant-prefixed** using the format `{tenantId}:{providerName}` so that all tenants' schemes coexist safely in the singleton `IAuthenticationSchemeProvider`. For example, if tenant `octosystem` has a Google provider and tenant `meshtest` has its own Google provider with different credentials, the registered scheme names are `octosystem:Google` and `meshtest:Google` respectively.
+
+Key design decisions:
+- **Scheme name**: `{tenantId}:{providerName}` — the colon separator is safe (not used in tenant IDs or provider names)
+- **Display name**: Unchanged — users see "Google", "Microsoft", etc.
+- **Options cache**: Since ASP.NET Core keys options by scheme name, different tenants' OAuth credentials are automatically isolated
+- **Frontend**: Receives the full prefixed scheme name in the `Scheme` field and passes it back unchanged for challenge/login calls
+
 ### Initialization Flow
 
 ```
@@ -54,19 +64,24 @@ Application Startup
         ▼
 DynamicAuthSchemeServiceInitializer.InitializeAsync() [Order: 50]
         │
-        ▼
-DynamicAuthSchemeService.ConfigureAsync()
+        ├── ConfigureAsync(systemTenantId)
+        │
+        ├── GetChildTenantsAsync() — load all child tenants
+        │
+        └── For each child tenant:
+                └── ConfigureAsync(tenant.TenantId)
         │
         ▼
-Load enabled providers from IOctoIdentityProviderStore
+DynamicAuthSchemeService.ConfigureAsync(tenantId)
         │
-        ▼
-┌───────────────────────────────────────┐
-│  For each provider:                   │
-│  1. Get IAuthSchemeCreator<TProvider> │
-│  2. Creator builds AuthenticationScheme│
-│  3. Add scheme to provider            │
-└───────────────────────────────────────┘
+        ├── Remove only schemes with prefix "{tenantId}:"
+        │
+        ├── Load providers directly from tenant's database
+        │   (via ISystemContext.FindTenantRepositoryAsync, bypassing HTTP-scoped store)
+        │
+        └── For each enabled provider:
+                ├── Create scheme with name "{tenantId}:{providerName}"
+                └── Register scheme in IAuthenticationSchemeProvider
 ```
 
 ### Service Registration
@@ -234,19 +249,22 @@ CLI polls: POST /connect/token (grant_type=device_code)
 
 ## Scheme Creation Patterns
 
+All scheme creators accept an optional `schemeNameOverride` parameter. When provided (e.g., a tenant-prefixed name like `octosystem:Google`), the scheme is registered under that name instead of the provider's `Name` property. The display name remains unchanged.
+
 ### OAuth Provider Pattern
 
 ```csharp
 public class GoogleAuthSchemeCreator : IAuthSchemeCreator<RtGoogleIdentityProvider>
 {
-    public AuthenticationScheme Create(RtGoogleIdentityProvider provider)
+    public AuthenticationScheme Create(RtGoogleIdentityProvider provider, string? schemeNameOverride = null)
     {
-        var options = _builder.CreateOptions(provider.Name);
+        var schemeName = schemeNameOverride ?? provider.Name;
+        var options = _builder.CreateOptions(schemeName);
         options.ClientId = provider.ClientId;
         options.ClientSecret = provider.ClientSecret;
 
         return new AuthenticationScheme(
-            provider.Name,
+            schemeName,
             provider.DisplayName ?? provider.Name,
             typeof(GoogleHandler)
         );
@@ -259,9 +277,10 @@ public class GoogleAuthSchemeCreator : IAuthSchemeCreator<RtGoogleIdentityProvid
 ```csharp
 public class AzureEntraIdAuthSchemeCreator : IAuthSchemeCreator<RtAzureEntraIdIdentityProvider>
 {
-    public AuthenticationScheme Create(RtAzureEntraIdIdentityProvider provider)
+    public AuthenticationScheme Create(RtAzureEntraIdIdentityProvider provider, string? schemeNameOverride = null)
     {
-        var options = _builder.CreateOptions(provider.Name);
+        var schemeName = schemeNameOverride ?? provider.Name;
+        var options = _builder.CreateOptions(schemeName);
         options.Authority = $"https://login.microsoftonline.com/{provider.TenantId}";
         options.ClientId = provider.ClientId;
         options.ClientSecret = provider.ClientSecret;
@@ -275,7 +294,7 @@ public class AzureEntraIdAuthSchemeCreator : IAuthSchemeCreator<RtAzureEntraIdId
         );
 
         return new AuthenticationScheme(
-            provider.Name,
+            schemeName,
             provider.DisplayName ?? provider.Name,
             typeof(OpenIdConnectHandler)
         );
@@ -288,9 +307,10 @@ public class AzureEntraIdAuthSchemeCreator : IAuthSchemeCreator<RtAzureEntraIdId
 ```csharp
 public class OpenLdapSchemeCreator : IAuthSchemeCreator<RtOpenLdapIdentityProvider>
 {
-    public AuthenticationScheme Create(RtOpenLdapIdentityProvider provider)
+    public AuthenticationScheme Create(RtOpenLdapIdentityProvider provider, string? schemeNameOverride = null)
     {
-        var options = _builder.CreateOptions(provider.Name);
+        var schemeName = schemeNameOverride ?? provider.Name;
+        var options = _builder.CreateOptions(schemeName);
         options.Host = provider.Host;
         options.Port = provider.Port;
         options.UseTls = provider.UseTls;
@@ -298,7 +318,7 @@ public class OpenLdapSchemeCreator : IAuthSchemeCreator<RtOpenLdapIdentityProvid
         options.UserNameAttribute = provider.UserNameAttribute;
 
         return new AuthenticationScheme(
-            provider.Name,
+            schemeName,
             provider.DisplayName ?? provider.Name,
             typeof(OpenLdapAuthenticationHandler)
         );
@@ -361,10 +381,11 @@ LDAP attributes are mapped to standard claims:
 Identity providers can be updated at runtime:
 
 1. Admin updates provider via System API
-2. `IdentityProviderUpdate` event is published
+2. `IdentityProviderUpdate` event is published with the tenant ID
 3. `IdentityProviderUpdateConsumer` receives event
-4. `DynamicAuthSchemeService.ConfigureAsync()` is called
-5. Old schemes are removed, new schemes are added
+4. `DynamicAuthSchemeService.ConfigureAsync(tenantId)` is called
+5. Only schemes for that specific tenant (prefix `{tenantId}:`) are removed and re-added
+6. Other tenants' schemes are unaffected
 
 No server restart required.
 
@@ -425,9 +446,9 @@ Try local authentication (existing SignInManager flow)
                   - Username prefixed with "xt_" (cross-tenant)
 ```
 
-### Cross-Tenant Auto-Login Flow (Token-Based)
+### Cross-Tenant Auto-Login Flow (Token-Based with Redirect)
 
-When a user is already authenticated in a parent tenant (e.g., OctoSystem) and navigates to a child tenant's login page, the UI automatically attempts a token-based cross-tenant login without requiring credential re-entry.
+When a user clicks "LOGIN VIA OCTOSYSTEM" on a child tenant's login page, the UI first attempts a token-based cross-tenant login. If the user has no active session in the parent tenant, the UI redirects to the parent tenant's login page where all authentication methods (Google, Microsoft, Azure Entra ID, LDAP, password) are available. After authenticating there, the user is redirected back and the token flow completes automatically.
 
 ```
 User clicks "LOGIN VIA OCTOSYSTEM" on child tenant login page
@@ -436,7 +457,24 @@ User clicks "LOGIN VIA OCTOSYSTEM" on child tenant login page
 POST /{parentTenantId}/api/auth/cross-tenant-token
   (browser sends parent tenant's scoped cookie automatically)
         │
-        ├── 401/403 (no parent session) ──► Fall back to "Enter credentials" hint
+        ├── 401/403 (no parent session)
+        │       │
+        │       ▼
+        │   Redirect to /{parentTenantId}/login
+        │     ?returnUrl=/{childTenantId}/login?returnUrl={orig}&crossTenantAutoLogin={parentTenantId}
+        │       │
+        │       ▼
+        │   User authenticates at parent tenant (any method: Google, LDAP, password, etc.)
+        │       │
+        │       ▼
+        │   Parent tenant redirects back to /{childTenantId}/login
+        │     ?returnUrl={orig}&crossTenantAutoLogin={parentTenantId}
+        │       │
+        │       ▼
+        │   Login component detects crossTenantAutoLogin query param
+        │       │
+        │       ▼
+        │   Auto-triggers token flow (same as success path below)
         │
         └── 200 { token: "..." } (DataProtection-encrypted, 60s expiry)
                 │
@@ -459,7 +497,8 @@ POST /{childTenantId}/api/auth/cross-tenant-login
 - `Timestamp`: Token creation time (tokens expire after 60 seconds)
 
 **Edge cases:**
-- No parent session (401): UI falls back to credential entry hint (existing behavior)
+- No parent session (401): Redirects to parent login page; after auth, redirects back with `crossTenantAutoLogin` param for automatic token exchange
+- Loop prevention: `crossTenantAutoLogin` param is stripped from the URL immediately; on failure after redirect, an error message is shown without retrying
 - Expired token (>60s): Returns error; user can click the button again
 - Target tenant mismatch: Returns error (token was issued for a different tenant)
 - No cross-tenant mapping: `FindOrCreateCrossTenantUserAsync` creates one with default roles
@@ -644,7 +683,7 @@ UseRouting()
 ## Security Considerations
 
 ### Scheme Isolation
-External authentication uses a temporary cookie scheme (`IdentityConstants.ExternalScheme`) that is cleared after processing.
+Authentication schemes are tenant-prefixed (`{tenantId}:{providerName}`) so each tenant's identity providers are isolated in the singleton `IAuthenticationSchemeProvider`. The `AuthApiController` filters schemes by tenant prefix, ensuring that only the current tenant's providers are shown on the login page. External authentication uses a temporary cookie scheme (`IdentityConstants.ExternalScheme`) that is cleared after processing.
 
 ### Claim Validation
 External claims are validated against configured Octo users. Unknown users can be auto-provisioned if configured.
