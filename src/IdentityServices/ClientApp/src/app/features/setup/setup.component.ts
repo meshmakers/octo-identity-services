@@ -53,9 +53,14 @@ export class SetupComponent implements OnInit {
         // Setup is required — show the form
         this.loading = false;
       },
-      error: () => {
-        // 404 means users already exist — redirect to login
-        this.router.navigate(['/', this.tenantId, 'login']);
+      error: (error) => {
+        if (error?.status === 404) {
+          // 404 means users already exist — redirect to login
+          this.router.navigate(['/', this.tenantId, 'login']);
+        } else {
+          this.loading = false;
+          this.errorMessage = error?.error?.errorMessage || 'Unable to check setup status. Please try again.';
+        }
       }
     });
   }
