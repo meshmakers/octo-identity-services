@@ -536,6 +536,36 @@ public class AuthApiController(
         var existingUser = await userManager.FindByNameAsync(crossTenantUserName);
         if (existingUser != null)
         {
+            // Sync profile fields from the source tenant on each login
+            var needsUpdate = false;
+
+            if (!string.Equals(existingUser.FirstName, crossTenantResult.FirstName ?? string.Empty, StringComparison.Ordinal))
+            {
+                existingUser.FirstName = crossTenantResult.FirstName ?? string.Empty;
+                needsUpdate = true;
+            }
+            if (!string.Equals(existingUser.LastName, crossTenantResult.LastName ?? string.Empty, StringComparison.Ordinal))
+            {
+                existingUser.LastName = crossTenantResult.LastName ?? string.Empty;
+                needsUpdate = true;
+            }
+            if (!string.Equals(existingUser.Email, crossTenantResult.Email, StringComparison.OrdinalIgnoreCase))
+            {
+                existingUser.Email = crossTenantResult.Email;
+                existingUser.NormalizedEmail = crossTenantResult.Email?.ToUpperInvariant();
+                needsUpdate = true;
+            }
+
+            if (needsUpdate)
+            {
+                var updateResult = await userManager.UpdateAsync(existingUser);
+                if (!updateResult.Succeeded)
+                {
+                    logger.LogWarning("Failed to update cross-tenant user profile for '{UserName}': {Errors}",
+                        crossTenantUserName, string.Join(", ", updateResult.Errors.Select(e => e.Description)));
+                }
+            }
+
             return existingUser;
         }
 
