@@ -209,6 +209,24 @@ public class UserManagementServiceTests
         await _userManager.DidNotReceive().CreateAsync(Arg.Any<RtUser>(), Arg.Any<string>());
     }
 
+    [Fact]
+    public async Task CreateAdminUserAsync_WhenCreateAsyncFails_ThrowsUserManagementException()
+    {
+        // Arrange
+        var dto = new AdminUserDto { EMail = "admin@test.com", Password = "SecurePass123!" };
+        _userManager.Users.Returns(Enumerable.Empty<RtUser>().AsQueryable());
+        _credentialGenerator.CheckPassword(dto.Password).Returns(true);
+        _userManager.FindByNameAsync(dto.EMail).Returns((RtUser?)null);
+        _userManager.CreateAsync(Arg.Any<RtUser>(), dto.Password)
+            .Returns(IdentityResult.Failed(new IdentityError { Code = "DuplicateUserName", Description = "User already exists" }));
+
+        // Act
+        var act = () => _sut.CreateAdminUserAsync(dto);
+
+        // Assert
+        await act.Should().ThrowAsync<UserManagementException>();
+    }
+
     private void SetupAllRequiredRoles()
     {
         var roles = new[]
