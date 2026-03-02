@@ -261,13 +261,13 @@ Transfers all external logins (e.g., Google, Microsoft) from the source user to 
 ?minLogLevel=Debug&maxLogLevel=Error&loggerName=Meshmakers
 ```
 
-### Setup (`/system/v1/setup`)
+### Setup (`/system/v1/setup`) — System API (Bearer Auth)
 
 | Method | Endpoint | Policy | Description |
 |--------|----------|--------|-------------|
 | POST | `/setup` | None | Configure initial admin user |
 
-**Note:** Only available when no users exist in the system.
+**Note:** Only available when no users exist in the system. Requires Bearer token authentication (used by `octo-cli`).
 
 **Request DTO:**
 
@@ -275,9 +275,46 @@ Transfers all external logins (e.g., Google, Microsoft) from the source user to 
 // AdminUserDto
 {
   "email": "admin@example.com",
+  "password": "SecurePassword123!"
+}
+```
+
+### Setup (`/{tenantId}/api/setup`) — SPA API (Anonymous)
+
+| Method | Endpoint | Auth | Description |
+|--------|----------|------|-------------|
+| GET | `/{tenantId}/api/setup/status` | Anonymous | Check if initial setup is required |
+| POST | `/{tenantId}/api/setup/create-admin` | Anonymous | Create initial admin user |
+
+**Note:** Both endpoints return `404 Not Found` when users already exist, making the controller effectively invisible after setup is complete. This is the browser-facing counterpart of the System API setup endpoint.
+
+**GET /status Response:**
+
+```typescript
+// SetupStatusDto (200 if setup needed, 404 if users exist)
+{
+  "setupRequired": true
+}
+```
+
+**POST /create-admin Request:**
+
+```typescript
+// SetupAdminRequestDto
+{
+  "email": "admin@example.com",
   "password": "SecurePassword123!",
-  "firstName": "Admin",
-  "lastName": "User"
+  "confirmPassword": "SecurePassword123!"
+}
+```
+
+**POST /create-admin Response:**
+
+```typescript
+// SetupResultDto
+{
+  "success": true,
+  "errorMessage": null
 }
 ```
 

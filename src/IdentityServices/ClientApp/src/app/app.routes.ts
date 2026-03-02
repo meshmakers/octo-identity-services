@@ -11,6 +11,11 @@ export const routes: Routes = [
     path: ':tenantId',
     children: [
       {
+        path: 'setup',
+        loadComponent: () => import('./features/setup/setup.component')
+          .then(m => m.SetupComponent)
+      },
+      {
         path: 'login',
         loadComponent: () => import('./features/login/login.component')
           .then(m => m.LoginComponent)

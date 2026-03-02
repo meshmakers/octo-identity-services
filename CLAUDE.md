@@ -100,7 +100,7 @@ npm test
 
 - `src/app/core/` - Services, interceptors, models
 - `src/app/shared/` - Reusable LCARS components (lcars-panel, lcars-header, etc.)
-- `src/app/features/` - Feature components (login, logout, consent, device, manage, grants, error)
+- `src/app/features/` - Feature components (login, logout, consent, device, manage, grants, error, setup)
 - `src/styles/` - LCARS design system (variables, mixins, Kendo overrides)
 
 ### API Controllers for Angular SPA
@@ -112,6 +112,7 @@ Located in `Controllers/Api/`:
 - `ManageApiController` - User profile, password, external logins
 - `GrantsApiController` - OAuth grants management
 - `OemApiController` - OEM configuration
+- `SetupApiController` - Anonymous initial admin user setup (returns 404 after setup complete)
 ### Data Protection Key Persistence
 
 ASP.NET Data Protection keys are used to encrypt refresh tokens, antiforgery tokens, and OAuth state. By default, keys are stored in-memory and lost on pod restart, which invalidates all active sessions.
