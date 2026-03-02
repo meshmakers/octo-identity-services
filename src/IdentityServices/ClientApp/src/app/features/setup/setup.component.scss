@@ -1,0 +1,147 @@
+@use '../../../styles/lcars-variables' as *;
+@use '../../../styles/lcars-mixins' as *;
+
+:host {
+  display: block;
+  flex: 1;
+}
+
+.lcars-auth-container {
+  @include lcars-centered-container(420px);
+
+  & {
+    background-image:
+      radial-gradient(ellipse at 20% 80%, rgba($octo-mint, 0.05) 0%, transparent 50%),
+      radial-gradient(ellipse at 80% 20%, rgba($neo-cyan, 0.05) 0%, transparent 50%);
+  }
+}
+
+// Setup intro text
+.setup-intro {
+  margin-bottom: var(--lcars-spacing-lg);
+  padding-bottom: var(--lcars-spacing-lg);
+  border-bottom: 1px solid rgba($octo-mint, 0.2);
+
+  p {
+    color: $ash-blue;
+    font-size: var(--lcars-font-size-sm);
+    line-height: 1.6;
+    margin: 0;
+  }
+}
+
+// Form styling
+.lcars-form-group {
+  @include lcars-form-group;
+
+  label {
+    @include lcars-uppercase-label;
+    color: $ash-blue;
+  }
+
+  input[type="email"],
+  input[type="password"] {
+    @include lcars-input;
+    width: 100%;
+  }
+}
+
+// Actions
+.lcars-actions {
+  margin-top: var(--lcars-spacing-lg);
+
+  &--stacked {
+    display: flex;
+    flex-direction: column;
+    gap: var(--lcars-spacing-md);
+  }
+}
+
+.lcars-button-primary {
+  @include lcars-button-primary;
+  width: 100%;
+  padding: var(--lcars-spacing-md) var(--lcars-spacing-lg);
+  font-size: var(--lcars-font-size-base);
+}
+
+// Error message
+.lcars-error-message {
+  background: rgba($bubblegum, 0.1);
+  border: 1px solid rgba($bubblegum, 0.3);
+  border-radius: var(--lcars-radius-sm);
+  color: $bubblegum;
+  padding: var(--lcars-spacing-md);
+  margin-bottom: var(--lcars-spacing-md);
+  font-size: var(--lcars-font-size-sm);
+}
+
+.field-error {
+  color: $bubblegum;
+  font-size: var(--lcars-font-size-sm);
+  margin-top: calc(-1 * var(--lcars-spacing-sm));
+  margin-bottom: var(--lcars-spacing-md);
+}
+
+// Loading state
+.lcars-loading {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--lcars-spacing-md);
+  padding: var(--lcars-spacing-xl);
+
+  &__spinner {
+    width: 40px;
+    height: 40px;
+    border: 3px solid rgba($octo-mint, 0.2);
+    border-top-color: $octo-mint;
+    border-radius: 50%;
+    animation: spin 1s linear infinite;
+  }
+
+  &__text {
+    color: $ash-blue;
+    font-size: var(--lcars-font-size-sm);
+    text-transform: uppercase;
+    letter-spacing: 1px;
+  }
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+// Success state
+.success-message {
+  text-align: center;
+  padding: var(--lcars-spacing-xl) 0;
+
+  h3 {
+    color: $octo-mint;
+    font-size: var(--lcars-font-size-lg);
+    margin-bottom: var(--lcars-spacing-md);
+    text-transform: uppercase;
+  }
+
+  p {
+    color: $ash-blue;
+    margin-bottom: var(--lcars-spacing-xl);
+    line-height: 1.6;
+  }
+
+  .success-icon {
+    color: $octo-mint;
+    margin-bottom: var(--lcars-spacing-lg);
+  }
+
+  .lcars-button--primary {
+    @include lcars-button-primary;
+    display: inline-block;
+    padding: var(--lcars-spacing-md) var(--lcars-spacing-xl);
+    font-size: var(--lcars-font-size-base);
+    text-decoration: none;
+  }
+}

@@ -13,6 +13,7 @@ export interface LoginContext {
   enableLocalLogin: boolean;
   isAuthenticated: boolean;
   username?: string;
+  setupRequired: boolean;
 }
 
 export interface LoginRequest {
