@@ -265,7 +265,7 @@ Transfers all external logins (e.g., Google, Microsoft) from the source user to 
 
 | Method | Endpoint | Policy | Description |
 |--------|----------|--------|-------------|
-| POST | `/setup` | None | Configure initial admin user |
+| POST | `/setup` | Authenticated | Configure initial admin user |
 
 **Note:** Only available when no users exist in the system. Requires Bearer token authentication (used by `octo-cli`).
 
