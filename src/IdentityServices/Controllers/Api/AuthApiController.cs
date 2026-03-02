@@ -96,7 +96,8 @@ public class AuthApiController(
             AllowRememberLogin = true,
             EnableLocalLogin = allowLocal,
             IsAuthenticated = isAuthenticated,
-            Username = username
+            Username = username,
+            SetupRequired = !userManager.Users.Any()
         };
     }
 
@@ -1004,6 +1005,7 @@ public record LoginContextDto
     public bool EnableLocalLogin { get; init; }
     public bool IsAuthenticated { get; init; }
     public string? Username { get; init; }
+    public bool SetupRequired { get; init; }
 }
 
 public record LoginRequestDto
