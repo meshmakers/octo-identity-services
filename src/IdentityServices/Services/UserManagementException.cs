@@ -1,3 +1,5 @@
+using Microsoft.AspNetCore.Identity;
+
 namespace Meshmakers.Octo.Backend.IdentityServices.Services;
 
 public class UserManagementException : Exception
@@ -32,5 +34,11 @@ public class UserManagementException : Exception
     public static Exception RoleNotFound(string roleName)
     {
         return new UserManagementException($"No {roleName}-Role has been found");
+    }
+
+    public static Exception UserCreationFailed(IEnumerable<IdentityError> errors)
+    {
+        var descriptions = string.Join("; ", errors.Select(e => e.Description));
+        return new UserManagementException($"User creation failed: {descriptions}");
     }
 }
