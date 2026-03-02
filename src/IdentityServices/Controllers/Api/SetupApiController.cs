@@ -55,6 +55,15 @@ public class SetupApiController(
             return BadRequest(ModelState);
         }
 
+        if (request.Password != request.ConfirmPassword)
+        {
+            return Ok(new SetupResultDto
+            {
+                Success = false,
+                ErrorMessage = "Passwords do not match"
+            });
+        }
+
         try
         {
             var adminUserDto = new AdminUserDto
