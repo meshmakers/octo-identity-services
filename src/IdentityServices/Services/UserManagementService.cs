@@ -42,7 +42,11 @@ public class UserManagementService(
         {
             adminUser = new RtUser { UserName = adminUserDto.EMail, Email = adminUserDto.EMail };
 
-            await userManager.CreateAsync(adminUser, adminUserDto.Password);
+            var result = await userManager.CreateAsync(adminUser, adminUserDto.Password);
+            if (!result.Succeeded)
+            {
+                throw UserManagementException.UserCreationFailed(result.Errors);
+            }
 
             await TryAddRole(adminUser, CommonConstants.TenantManagementRole);
             await TryAddRole(adminUser, CommonConstants.UserManagementRole);
