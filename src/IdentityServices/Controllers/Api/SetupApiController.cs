@@ -1,3 +1,4 @@
+using System.ComponentModel.DataAnnotations;
 using Meshmakers.Octo.Backend.IdentityServices.Services;
 using Meshmakers.Octo.Communication.Contracts.DataTransferObjects;
 using Microsoft.AspNetCore.Authorization;
@@ -96,8 +97,14 @@ public record SetupStatusDto
 
 public record SetupAdminRequestDto
 {
+    [Required]
+    [EmailAddress]
     public string Email { get; init; } = string.Empty;
+
+    [Required]
     public string Password { get; init; } = string.Empty;
+
+    [Required]
     public string ConfirmPassword { get; init; } = string.Empty;
 }
 
