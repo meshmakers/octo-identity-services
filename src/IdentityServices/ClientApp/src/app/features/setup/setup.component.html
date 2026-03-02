@@ -85,7 +85,7 @@
           <button
             type="submit"
             class="lcars-button-primary"
-            [disabled]="submitting || !email || !password || !confirmPassword">
+            [disabled]="submitting || !email || !password || !confirmPassword || passwordMismatch">
             <span *ngIf="!submitting">Create Admin User</span>
             <span *ngIf="submitting">Creating...</span>
           </button>
