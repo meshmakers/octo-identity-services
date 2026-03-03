@@ -80,6 +80,13 @@
   }
 }
 
+.role-badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--lcars-spacing-sm);
+  padding: var(--lcars-spacing-sm) 0;
+}
+
 .action-link {
   color: $octo-mint;
   font-size: var(--lcars-font-size-sm);

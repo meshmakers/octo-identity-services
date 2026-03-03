@@ -55,8 +55,8 @@
       <_ContentIncludedByDefault Remove="ClientApp\dist\identity-ui\prerendered-routes.json" />
     </ItemGroup>
 
-    <!-- Build Angular ClientApp if dist output does not exist yet -->
-    <Target Name="BuildClientApp" BeforeTargets="Build" Condition="!Exists('$(SpaRoot)dist\index.html')">
+    <!-- Build Angular ClientApp on every build to ensure the frontend is up to date -->
+    <Target Name="BuildClientApp" BeforeTargets="Build">
         <Exec Command="node --version" ContinueOnError="true">
             <Output TaskParameter="ExitCode" PropertyName="ErrorCode" />
         </Exec>
@@ -69,10 +69,15 @@
 
     <!-- Copy Angular dist output to wwwroot in build output directory -->
     <Target Name="CopyClientAppToOutput" AfterTargets="Build" Condition="Exists('$(SpaRoot)dist\index.html')">
+        <!-- Clean stale files from previous builds to avoid serving outdated chunks -->
+        <ItemGroup>
+            <StaleWwwrootFiles Include="$(OutDir)wwwroot\**\*" Exclude="$(OutDir)wwwroot\images\**\*" />
+        </ItemGroup>
+        <Delete Files="@(StaleWwwrootFiles)" />
         <ItemGroup>
             <ClientAppDistFiles Include="$(SpaRoot)dist\**\*" />
         </ItemGroup>
-        <Copy SourceFiles="@(ClientAppDistFiles)" DestinationFolder="$(OutDir)wwwroot\%(RecursiveDir)" SkipUnchangedFiles="true" />
+        <Copy SourceFiles="@(ClientAppDistFiles)" DestinationFolder="$(OutDir)wwwroot\%(RecursiveDir)" SkipUnchangedFiles="false" />
     </Target>
 
     <!-- Publish: ensure fresh production build of Angular ClientApp -->

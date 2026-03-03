@@ -58,6 +58,26 @@ import { UserProfile } from '../../core/models/manage.models';
           </div>
 
           <div class="profile-section">
+            <h3 class="section-title">Roles</h3>
+            <div *ngIf="profile.roles?.length" class="role-badges">
+              <span *ngFor="let role of profile.roles" class="status-badge status-badge--info">{{ role }}</span>
+            </div>
+            <div *ngIf="!profile.roles?.length" class="profile-item">
+              <span class="profile-item__value">No roles assigned</span>
+            </div>
+          </div>
+
+          <div class="profile-section">
+            <h3 class="section-title">Allowed Tenants</h3>
+            <div *ngIf="profile.allowedTenants?.length" class="role-badges">
+              <span *ngFor="let tenant of profile.allowedTenants" class="status-badge status-badge--info">{{ tenant }}</span>
+            </div>
+            <div *ngIf="!profile.allowedTenants?.length" class="profile-item">
+              <span class="profile-item__value">No additional tenants</span>
+            </div>
+          </div>
+
+          <div class="profile-section">
             <h3 class="section-title">Security</h3>
 
             <div class="profile-item">

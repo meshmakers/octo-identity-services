@@ -9,6 +9,8 @@ export interface UserProfile {
   twoFactorEnabled: boolean;
   hasPassword: boolean;
   externalLogins: ExternalLoginInfo[];
+  roles: string[];
+  allowedTenants: string[];
 }
 
 export interface ExternalLoginInfo {
