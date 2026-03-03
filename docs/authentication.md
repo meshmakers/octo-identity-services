@@ -328,7 +328,7 @@ public class OpenLdapSchemeCreator : IAuthSchemeCreator<RtOpenLdapIdentityProvid
 
 ## Claims and Roles Synchronization
 
-External providers may include role/group claims. These are synchronized with Octo roles:
+External providers may include role/group claims. These are synchronized with Octo roles via CK associations:
 
 ```csharp
 private async Task SynchronizeGroups(IEnumerable<Claim> claims, RtUser user)
@@ -341,12 +341,12 @@ private async Task SynchronizeGroups(IEnumerable<Claim> claims, RtUser user)
     // Validate that roles exist in Octo
     var validRoles = await ValidateRolesExist(externalRoles);
 
-    // Update user's role assignments
-    var currentRoles = user.RoleIds;
+    // Update user's role assignments (via AssignedRole associations)
+    var currentRoles = await GetRolesAsync(user);
     var rolesToRemove = currentRoles.Except(validRoles);
     var rolesToAdd = validRoles.Except(currentRoles);
 
-    // Apply changes
+    // Apply changes (creates/deletes AssignedRole associations)
     foreach (var role in rolesToRemove)
         await RemoveFromRoleAsync(user, role);
     foreach (var role in rolesToAdd)
@@ -684,6 +684,53 @@ UseRouting()
 | `src/IdentityServices/Cookies/TenantCookieManager.cs` | Cookie name scoping by tenant |
 | `src/IdentityServices/Middleware/OidcTenantResolutionMiddleware.cs` | Tenant resolution for `/connect/*` endpoints |
 | `src/IdentityServices/Services/UserProfileService.cs` | Adds `tenant_id` claim to tokens |
+
+## Group-Based Role Inheritance
+
+### Overview
+
+Groups provide an organizational unit for role management. Instead of assigning roles directly to each user, roles can be assigned to groups. Users who are members of a group inherit all roles assigned to that group. Groups can also contain other groups (nested groups), enabling hierarchical role inheritance.
+
+All group relationships are stored as **CK associations** (not denormalized StringArray attributes), which is the idiomatic Octo CK approach for entity relationships.
+
+### Data Model
+
+The `RtGroup` CK type has:
+- **Attributes**: `GroupName` / `NormalizedGroupName` (display/lookup), `GroupDescription` (optional)
+- **Associations**:
+  - `AssignedRole` → `RtRole`: Roles assigned to the group (N:N)
+  - `GroupMember` → `RtUser`: Internal user members (N:N)
+  - `GroupMember` → `RtExternalTenantUserMapping`: External tenant user members (N:N)
+  - `ChildGroup` → `RtGroup`: Nested child groups (N:N)
+
+The `RtUser` CK type also uses:
+- `AssignedRole` → `RtRole`: Directly assigned roles (N:N)
+
+### Role Resolution
+
+During token issuance, `OctoUserStore.GetRolesAsync()` resolves both direct and group-inherited roles:
+
+1. Query the user's outbound `AssignedRole` associations for directly assigned role IDs
+2. Call `IGroupRoleResolver.ResolveEffectiveRoleIdsAsync(userRtId)`:
+   - Load all groups and check `GroupMember` associations to find groups containing the user
+   - Recursively follow `ChildGroup` associations to collect all `AssignedRole` targets from parent groups
+   - Use a visited set and max depth (10) to prevent circular traversal
+3. Merge both sets and resolve role IDs to role names
+4. All resolved role names are included as JWT `role` claims
+
+### Default TenantOwners Group
+
+Every tenant is provisioned with a `TenantOwners` group that has all default roles assigned (via `AssignedRole` associations). This provides a convenient way to grant full permissions: add a user to `TenantOwners` instead of assigning 10+ roles individually.
+
+### Key Components
+
+| Component | Location | Purpose |
+|-----------|----------|---------|
+| `IdentityAssociationConstants` | `IdentityServerPersistence/` | Association role ID constants (`AssignedRoleId`, `GroupMemberId`, `ChildGroupId`) |
+| `IGroupStore` / `GroupStore` | `IdentityServerPersistence/SystemStores/` | CRUD + association-based relationship management for groups |
+| `IGroupRoleResolver` / `GroupRoleResolver` | `IdentityServerPersistence/Services/` | Resolves effective role IDs from group memberships via associations |
+| `GroupsController` | `IdentityServices/TenantApi/v1/Controllers/` | REST API for group management |
+| `IdentityAssociationMigration` | `IdentityServerPersistence/Services/Migrations/` | Converts StringArray relationships to associations; creates TenantOwners group |
 
 ## Multi-Tenant Token Validation
 

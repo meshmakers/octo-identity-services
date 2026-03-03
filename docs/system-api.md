@@ -287,6 +287,68 @@ Manages cross-tenant user role mappings. Each mapping links a user from a parent
 }
 ```
 
+### Groups (`/{tenantId}/v1/groups`)
+
+Manages groups with role assignments. Users and other groups can be members. Group members inherit all roles assigned to their groups (including nested groups).
+
+| Method | Endpoint | Policy | Description |
+|--------|----------|--------|-------------|
+| GET | `/groups` | ReadOnly | Get all groups |
+| GET | `/groups/GetPaged` | ReadOnly | Get groups with pagination (`skip`, `take`) |
+| GET | `/groups/{rtId}` | ReadOnly | Get group by ID |
+| GET | `/groups/names/{groupName}` | ReadOnly | Get group by name |
+| POST | `/groups` | ReadWrite | Create new group |
+| PUT | `/groups/{rtId}` | ReadWrite | Update group name/description |
+| DELETE | `/groups/{rtId}` | ReadWrite | Delete group |
+| GET | `/groups/{rtId}/roles` | ReadOnly | Get assigned role IDs |
+| PUT | `/groups/{rtId}/roles` | ReadWrite | Replace role assignments |
+| GET | `/groups/{rtId}/members/users` | ReadOnly | Get user member IDs |
+| PUT | `/groups/{rtId}/members/users/{userId}` | ReadWrite | Add user to group |
+| DELETE | `/groups/{rtId}/members/users/{userId}` | ReadWrite | Remove user from group |
+| GET | `/groups/{rtId}/members/groups` | ReadOnly | Get nested group IDs |
+| PUT | `/groups/{rtId}/members/groups/{childGroupId}` | ReadWrite | Add nested group (rejects cycles) |
+| DELETE | `/groups/{rtId}/members/groups/{childGroupId}` | ReadWrite | Remove nested group |
+
+**Request/Response DTOs:**
+
+```typescript
+// GroupDto (Response)
+{
+  "id": "string",
+  "groupName": "string",
+  "groupDescription": "string",
+  "roleIds": ["string"],
+  "memberUserIds": ["string"],
+  "memberExternalUserIds": ["string"],
+  "memberGroupIds": ["string"]
+}
+
+// CreateGroupDto (POST)
+{
+  "groupName": "string",      // Required
+  "groupDescription": "string", // Optional
+  "roleIds": ["string"]       // Optional
+}
+
+// UpdateGroupDto (PUT)
+{
+  "groupName": "string",      // Required
+  "groupDescription": "string" // Optional
+}
+```
+
+**Default Groups:**
+
+Every tenant is provisioned with a `TenantOwners` group that has all default roles assigned. Adding a user to the `TenantOwners` group grants them all tenant permissions via group role inheritance.
+
+**Internal Storage:**
+
+Group relationships (role assignments, user members, external user members, nested groups) are stored as CK associations internally. The REST API shape is unchanged — `GroupDto` still returns `roleIds`, `memberUserIds`, `memberExternalUserIds`, and `memberGroupIds` arrays assembled from association queries.
+
+**Circular Group Prevention:**
+
+Adding a nested group (PUT `/{rtId}/members/groups/{childGroupId}`) validates that the operation would not create a cycle. If it would, the request is rejected with HTTP 400.
+
 ### Diagnostics (`/{tenantId}/v1/diagnostics`)
 
 | Method | Endpoint | Policy | Description |

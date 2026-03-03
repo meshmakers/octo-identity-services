@@ -67,10 +67,6 @@ types:
       - id: ${this}/ResetPasswordOnLogin
         name: ResetPasswordOnLogin
 
-      - id: ${this}/RoleIds
-        name: RoleIds
-        isOptional: true
-
       - id: ${this}/UserClaims
         name: Claims
         isOptional: true
@@ -82,7 +78,9 @@ types:
       - id: ${this}/UserTokens
         name: UserTokens
         isOptional: true
-    
+    associations:
+      - id: ${this}/AssignedRole
+        targetCkTypeId: ${this}/Role
     indexes:
       - indexType: Ascending
         fields:

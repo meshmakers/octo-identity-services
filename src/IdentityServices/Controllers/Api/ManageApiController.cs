@@ -1,6 +1,7 @@
 using System.Text;
 using System.Text.Encodings.Web;
 using IdentityServerPersistence.Services;
+using IdentityServerPersistence.SystemStores;
 using Meshmakers.Octo.Backend.IdentityServices.Services;
 using Meshmakers.Octo.Runtime.Contracts.MongoDb;
 using Microsoft.AspNetCore.Authentication;
@@ -32,6 +33,7 @@ public class ManageApiController : ControllerBase
     private readonly IUserAuthenticationTokenStore<RtUser> _tokenStore;
     private readonly IAllowedTenantsResolver _allowedTenantsResolver;
     private readonly ISystemContext _systemContext;
+    private readonly IGroupStore _groupStore;
 
     public ManageApiController(
         UserManager<RtUser> userManager,
@@ -41,7 +43,8 @@ public class ManageApiController : ControllerBase
         IQrCodeService qrCodeService,
         IUserStore<RtUser> userStore,
         IAllowedTenantsResolver allowedTenantsResolver,
-        ISystemContext systemContext)
+        ISystemContext systemContext,
+        IGroupStore groupStore)
     {
         _userManager = userManager;
         _signInManager = signInManager;
@@ -51,6 +54,7 @@ public class ManageApiController : ControllerBase
         _tokenStore = (IUserAuthenticationTokenStore<RtUser>)userStore;
         _allowedTenantsResolver = allowedTenantsResolver;
         _systemContext = systemContext;
+        _groupStore = groupStore;
     }
 
     /// <summary>
@@ -77,6 +81,19 @@ public class ManageApiController : ControllerBase
 
         var allowedTenants = await _allowedTenantsResolver.ResolveAsync(tenantId, user);
 
+        // Resolve group memberships via associations
+        var allGroups = (await _groupStore.GetAllAsync()).ToList();
+        var userRtIdString = user.RtId.ToString();
+        var groupNames = new List<string>();
+        foreach (var group in allGroups)
+        {
+            var memberUserIds = await _groupStore.GetMemberUserIdsAsync(group.RtId);
+            if (memberUserIds.Contains(userRtIdString) && !string.IsNullOrEmpty(group.GroupName))
+            {
+                groupNames.Add(group.GroupName);
+            }
+        }
+
         return new UserProfileDto
         {
             Id = user.RtId.ToString(),
@@ -95,7 +112,8 @@ public class ManageApiController : ControllerBase
                 ProviderKey = l.ProviderKey
             }).ToList(),
             Roles = roles,
-            AllowedTenants = allowedTenants
+            AllowedTenants = allowedTenants,
+            Groups = groupNames
         };
     }
 
@@ -557,6 +575,7 @@ public record UserProfileDto
     public IEnumerable<ExternalLoginInfoDto> ExternalLogins { get; init; } = [];
     public IEnumerable<string> Roles { get; init; } = [];
     public IEnumerable<string> AllowedTenants { get; init; } = [];
+    public IEnumerable<string> Groups { get; init; } = [];
 }
 
 public record ExternalLoginInfoDto

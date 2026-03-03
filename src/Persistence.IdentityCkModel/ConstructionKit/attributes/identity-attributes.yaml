@@ -456,3 +456,16 @@ attributes:
   - id: MappedRoleIds
     valueType: StringArray
     description: The role IDs assigned to the mapped user in this tenant.
+
+  - id: GroupName
+    valueType: String
+    description: The display name of the group.
+
+  - id: NormalizedGroupName
+    valueType: String
+    description: The normalized (uppercase) group name for case-insensitive lookup.
+
+  - id: GroupDescription
+    valueType: String
+    description: An optional description of the group's purpose.
+

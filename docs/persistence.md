@@ -21,6 +21,8 @@ Models are defined in `src/Persistence.IdentityCkModel/ConstructionKit/`:
 ```
 ConstructionKit/
 ├── ckModel.yaml                 # Model metadata and dependencies
+├── associations/
+│   └── identity-associations.yaml  # Association role definitions
 ├── attributes/
 │   ├── configuration-attributes.yaml
 │   └── identity-attributes.yaml
@@ -28,6 +30,7 @@ ConstructionKit/
 │   ├── ck-client.yaml
 │   ├── ck-user.yaml
 │   ├── ck-role.yaml
+│   ├── ck-group.yaml
 │   ├── ck-apiResource.yaml
 │   ├── ck-apiScope.yaml
 │   ├── ck-identityResource.yaml
@@ -51,7 +54,7 @@ ConstructionKit/
 
 ```yaml
 "$schema": "https://schemas.meshmakers.cloud/construction-kit-meta.schema.json"
-modelId: "System.Identity-1.0.0"
+modelId: "System.Identity-2.3.0"
 dependencies:
   - "System-(,2.0)"
 ```
@@ -111,6 +114,32 @@ Key properties:
 - `Ascending` on `NormalizedEmail` - Efficient email lookups. Note: Multiple users can share the same email (e.g., a local user and external provider users). External logins create dedicated user accounts with provider-prefixed usernames to prevent privilege escalation (Bug 3430).
 - `Ascending` on `NormalizedUserName` - Efficient username lookups.
 
+**Group Entity (`ck-group.yaml`):**
+
+Groups are organizational units that can be assigned roles. Users and other groups can be members, enabling hierarchical role inheritance. All relationships are modeled as CK associations (not denormalized attributes).
+
+| Attribute | ValueType | Description |
+|-----------|-----------|-------------|
+| `GroupName` | String | Display name |
+| `NormalizedGroupName` | String | Uppercase for case-insensitive lookup |
+| `GroupDescription` | String (optional) | Purpose description |
+
+| Association | Target Type | Description |
+|-------------|-------------|-------------|
+| `AssignedRole` | Role | Assigned roles (N:N) |
+| `GroupMember` | User | Internal user members (N:N) |
+| `GroupMember` | ExternalTenantUserMapping | External tenant user members (N:N) |
+| `ChildGroup` | Group | Nested child groups (N:N) |
+
+**Group Entity Indexes:**
+- `Ascending` on `NormalizedGroupName` - Efficient name lookups.
+
+**User Entity Associations:**
+
+| Association | Target Type | Description |
+|-------------|-------------|-------------|
+| `AssignedRole` | Role | Directly assigned roles (N:N) |
+
 ### Record Definitions
 
 Records define nested value objects (not separate collections):
@@ -162,12 +191,13 @@ All generated entities:
 - Support nested records with `AttributeRecordValueList<T>`
 - Are fully serializable to/from MongoDB BSON
 
-**Namespace:** `Persistence.IdentityCkModel.Generated.System.Identity.v1`
+**Namespace:** `Persistence.IdentityCkModel.Generated.System.Identity.v2`
 
 **Examples:**
 - `RtClient` - OAuth/OIDC client
 - `RtUser` - User identity
 - `RtRole` - Role definition
+- `RtGroup` - Role group with user/group members
 - `RtPersistedGrant` - OAuth tokens/grants
 - `RtApiResource`, `RtApiScope`, `RtIdentityResource`
 - `RtIdentityProvider` and subtypes
@@ -187,6 +217,7 @@ Located in `src/IdentityServerPersistence/SystemStores/`:
 | `OctoUserStore` | `IUserStore<RtUser>` | ASP.NET Identity users |
 | `OctoRoleStore` | `IRoleStore<RtRole>` | ASP.NET Identity roles |
 | `PermissionStore` | `IOctoPermissionStore` | Custom permissions |
+| `GroupStore` | `IGroupStore` | Role groups with member management |
 
 ### ClientStore
 
@@ -299,7 +330,7 @@ var options = RtEntityQueryOptions.Create()
     // Exact match
     .FieldFilter(nameof(RtUser.NormalizedEmail), FieldFilterOperator.Equals, email)
     // Array contains
-    .FieldFilter(nameof(RtUser.RoleIds), FieldFilterOperator.AnyEq, roleId)
+    .FieldFilter(nameof(RtClient.AllowedScopes), FieldFilterOperator.AnyEq, scope)
     // Range query
     .FieldFilter(nameof(RtPersistedGrant.ExpirationDate),
         FieldFilterOperator.LessEqualThan, DateTimeOffset.UtcNow)
@@ -340,10 +371,16 @@ catch
 
 ```
 RtUser
-├── RoleIds: string[]           # Many-to-Many via ID array
+├── AssignedRole → RtRole       # Many-to-Many via CK association
 ├── Claims: RtUserClaimRecord[]  # One-to-Many embedded
 ├── UserLogins: RtUserLoginRecord[]
 └── UserTokens: RtUserTokenRecord[]
+
+RtGroup
+├── AssignedRole → RtRole                    # Many-to-Many via CK association
+├── GroupMember → RtUser                     # Many-to-Many via CK association
+├── GroupMember → RtExternalTenantUserMapping # Many-to-Many via CK association
+└── ChildGroup → RtGroup                     # Many-to-Many via CK association
 
 RtClient
 ├── ClientSecrets: RtSecretRecord[]
@@ -364,16 +401,50 @@ All 10 default roles (TenantManagement, UserManagement, CommunicationManagement,
 
 ### User-Role Relationship
 
-Roles are referenced by ID array, not embedded:
+User roles are modeled as `AssignedRole` CK associations (not embedded arrays):
 
 ```csharp
-// Add role to user
-user.RoleIds.Add(role.RtId.ToString());
+// Add role to user (via OctoUserStore / IUserRoleStore)
+await userManager.AddToRoleAsync(user, roleName);
+// Internally creates an AssignedRole association: User → Role
 
-// Query user's roles
-var roleIds = user.RoleIds;
-var roles = await _roleStore.GetRolesByIdsAsync(roleIds);
+// Query user's roles (via association queries)
+var roles = await userManager.GetRolesAsync(user);
+// Queries outbound AssignedRole associations + group-inherited roles
 ```
+
+### Association-Based Relationships
+
+All identity relationships use CK associations defined in `identity-associations.yaml`:
+
+| Association Role | Origin | Target | Description |
+|-----------------|--------|--------|-------------|
+| `AssignedRole` | User or Group | Role | Role assignments (N:N) |
+| `GroupMember` | Group | User or ExternalTenantUserMapping | Group membership (N:N) |
+| `ChildGroup` | Parent Group | Child Group | Nested group hierarchy (N:N) |
+
+Association constants are defined in `IdentityAssociationConstants`:
+- `AssignedRoleId`: `System.Identity/AssignedRole`
+- `GroupMemberId`: `System.Identity/GroupMember`
+- `ChildGroupId`: `System.Identity/ChildGroup`
+
+**Group Role Resolution** (`IGroupRoleResolver` / `GroupRoleResolver`):
+
+When `OctoUserStore.GetRolesAsync()` is called during token issuance, it:
+1. Queries the user's direct `AssignedRole` associations for directly assigned roles
+2. Calls `IGroupRoleResolver.ResolveEffectiveRoleIdsAsync(userRtId)` to find all groups where the user is a member (via `GroupMember` associations)
+3. Recursively traverses `ChildGroup` associations, collecting all `AssignedRole` targets from parent groups
+4. Uses a visited set and max depth of 10 to prevent circular traversal
+5. Returns the union of direct and group-inherited role IDs
+
+The same logic applies to `IsInRoleAsync`. For external cross-tenant users, `ResolveEffectiveRoleIdsForExternalUserAsync` checks `GroupMember` associations targeting `ExternalTenantUserMapping` entities instead.
+
+### Default TenantOwners Group
+
+Every tenant is provisioned with a `TenantOwners` group that has all 10 default roles assigned (via `AssignedRole` associations). This group is:
+- Created during `DefaultConfigurationCreatorService.SetupTenantAsync()` for new tenants
+- Provisioned to child tenants via `EnsureGroupInChildTenantAsync()`
+- Migrated to existing tenants via `IdentityAssociationMigration` (migration 9→10)
 
 ## Migration System
 
@@ -402,6 +473,9 @@ internal class InitialMigration : IMigration
 | 0 → 1 | `InitialMigration` | Create RT association indexes |
 | 1 → 2 | `CkTypeIndexMigration` | Update CK type indexes |
 | 2 → 3 | `CkTypeIndexMigration2` | Additional index updates |
+| 9 → 10 | `IdentityAssociationMigration` | Convert StringArray relationships to CK associations; create TenantOwners group |
+
+Current schema version: `IdentitySchemaVersionValue = 11`
 
 ### Registration
 
@@ -444,6 +518,9 @@ builder.Services.AddScoped<IOctoClientStore, ClientStore>();
 builder.Services.AddScoped<IOctoResourceStore, ResourceStore>();
 builder.Services.AddScoped<IOctoPersistentGrantStore, PersistentGrantStore>();
 builder.Services.AddScoped<IOctoIdentityProviderStore, IdentityProviderStore>();
+
+builder.Services.AddScoped<IGroupStore, GroupStore>();
+builder.Services.AddScoped<IGroupRoleResolver, GroupRoleResolver>();
 
 builder.Services.AddIdentity<RtUser, RtRole>()
     .AddUserStore<OctoUserStore>()

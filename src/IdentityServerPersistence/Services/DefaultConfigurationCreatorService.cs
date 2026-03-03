@@ -34,6 +34,7 @@ internal class DefaultConfigurationCreatorService(
     IOctoClientStore clientStore,
     IOctoResourceStore resourceStore,
     IOctoIdentityProviderStore octoIdentityProviderStore,
+    IGroupStore groupStore,
     IOptions<OctoIdentityServicesOptions> octoIdentityOptions,
     MigrationService? migrationService,
     ICkModelUpgradeService? ckModelUpgradeService = null,
@@ -102,6 +103,9 @@ internal class DefaultConfigurationCreatorService(
 
         // Create default roles for every tenant (needed for cross-tenant role mapping)
         await CreateUsersAndRoles();
+
+        // Create default groups (e.g. TenantOwners) for every tenant
+        await CreateDefaultGroupsAsync();
 
         if (tenantId != systemContext.TenantId)
         {
@@ -252,6 +256,55 @@ internal class DefaultConfigurationCreatorService(
         await TryCreateRole(CommonConstants.DashboardViewerRole);
         await TryCreateRole(CommonConstants.ReportingManagementRole);
         await TryCreateRole(CommonConstants.ReportingViewerRole);
+    }
+
+    private async Task CreateDefaultGroupsAsync()
+    {
+        // Collect all default role RtIds
+        var defaultRoleNames = new[]
+        {
+            CommonConstants.TenantManagementRole,
+            CommonConstants.UserManagementRole,
+            CommonConstants.CommunicationManagementRole,
+            CommonConstants.DevelopmentRole,
+            CommonConstants.AdminPanelManagementRole,
+            CommonConstants.BotManagementRole,
+            CommonConstants.DashboardManagementRole,
+            CommonConstants.DashboardViewerRole,
+            CommonConstants.ReportingManagementRole,
+            CommonConstants.ReportingViewerRole
+        };
+
+        var roleIds = new List<string>();
+        foreach (var roleName in defaultRoleNames)
+        {
+            var role = await roleManager.FindByNameAsync(roleName);
+            if (role != null)
+            {
+                roleIds.Add(role.RtId.ToString());
+            }
+        }
+
+        var normalizedName = CommonConstants.TenantOwnersGroup.ToUpperInvariant();
+        var existingGroup = await groupStore.FindByNameAsync(normalizedName);
+        if (existingGroup == null)
+        {
+            var tenantOwnersGroup = new RtGroup
+            {
+                RtId = new OctoObjectId(Guid.NewGuid().ToString("N")),
+                GroupName = CommonConstants.TenantOwnersGroup,
+                NormalizedGroupName = normalizedName,
+                GroupDescription = "Default group with all roles assigned. Members inherit all tenant permissions."
+            };
+
+            await groupStore.StoreAsync(tenantOwnersGroup);
+            await groupStore.SetRoleIdsAsync(tenantOwnersGroup.RtId, roleIds);
+        }
+        else
+        {
+            // Ensure all current roles are included (new roles may have been added)
+            await groupStore.SetRoleIdsAsync(existingGroup.RtId, roleIds);
+        }
     }
 
     private async Task TryCreateRole(string roleName)
@@ -618,6 +671,9 @@ internal class DefaultConfigurationCreatorService(
             await EnsureRoleInChildTenantAsync(session, childRepo, CommonConstants.ReportingManagementRole);
             await EnsureRoleInChildTenantAsync(session, childRepo, CommonConstants.ReportingViewerRole);
 
+            // TenantOwners group
+            await EnsureGroupInChildTenantAsync(session, childRepo);
+
             // Clients
             await EnsureClientInChildTenantAsync(session, childRepo, new RtClient
             {
@@ -823,6 +879,70 @@ internal class DefaultConfigurationCreatorService(
                 Claims = new AttributeRecordValueList<RtRoleClaimRecord>()
             };
             await childRepo.InsertOneRtEntityAsync(session, role);
+        }
+    }
+
+    private static async Task EnsureGroupInChildTenantAsync(
+        IOctoSession session, ITenantRepository childRepo)
+    {
+        var normalizedName = CommonConstants.TenantOwnersGroup.ToUpperInvariant();
+        var queryOptions = RtEntityQueryOptions.Create()
+            .FieldEquals(nameof(RtGroup.NormalizedGroupName), normalizedName);
+        var result = await childRepo.GetRtEntitiesByTypeAsync<RtGroup>(session, queryOptions);
+
+        // Collect all role RtIds in the child tenant
+        var roleResult = await childRepo.GetRtEntitiesByTypeAsync<RtRole>(session, RtEntityQueryOptions.Create());
+        var roleIds = roleResult.Items.Select(r => r.RtId.ToString()).ToList();
+
+        RtGroup group;
+        if (!result.Items.Any())
+        {
+            group = new RtGroup
+            {
+                RtId = new OctoObjectId(Guid.NewGuid().ToString("N")),
+                GroupName = CommonConstants.TenantOwnersGroup,
+                NormalizedGroupName = normalizedName,
+                GroupDescription = "Default group with all roles assigned. Members inherit all tenant permissions."
+            };
+            await childRepo.InsertOneRtEntityAsync(session, group);
+        }
+        else
+        {
+            group = result.Items.First();
+        }
+
+        // Ensure all role associations exist
+        var groupEntityId = group.ToRtEntityId();
+        var roleCkTypeId = RtEntityExtensions.GetRtCkTypeId<RtRole>();
+
+        // Get current role associations
+        var currentAssociations = await childRepo.GetRtAssociationsAsync(
+            session,
+            groupEntityId,
+            RtAssociationExtendedQueryOptions.Create(
+                GraphDirections.Outbound,
+                roleId: IdentityAssociationConstants.AssignedRoleId));
+
+        var currentRoleIds = currentAssociations.Items
+            .Select(a => a.TargetRtId.ToString())
+            .ToHashSet();
+
+        var updates = new List<AssociationUpdateInfo>();
+        foreach (var roleId in roleIds)
+        {
+            if (!currentRoleIds.Contains(roleId))
+            {
+                updates.Add(AssociationUpdateInfo.CreateInsert(
+                    groupEntityId,
+                    new RtEntityId(roleCkTypeId, new OctoObjectId(roleId)),
+                    IdentityAssociationConstants.AssignedRoleId));
+            }
+        }
+
+        if (updates.Count > 0)
+        {
+            var opResult = new OperationResult();
+            await childRepo.ApplyChangesAsync(session, updates, opResult);
         }
     }
 

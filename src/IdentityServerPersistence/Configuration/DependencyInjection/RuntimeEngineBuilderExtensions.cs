@@ -45,6 +45,8 @@ public static class RuntimeEngineBuilderExtensions
         builder.Services.AddScoped<IOctoPersistentGrantStore, PersistentGrantStore>();
         builder.Services.AddScoped<IOctoIdentityProviderStore, IdentityProviderStore>();
         builder.Services.AddScoped<IExternalTenantUserMappingStore, ExternalTenantUserMappingStore>();
+        builder.Services.AddScoped<IGroupStore, GroupStore>();
+        builder.Services.AddScoped<IGroupRoleResolver, GroupRoleResolver>();
         builder.Services.AddScoped<ICrossTenantAuthenticationService, CrossTenantAuthenticationService>();
         builder.Services.AddScoped<IAllowedTenantsResolver, AllowedTenantsResolver>();
 

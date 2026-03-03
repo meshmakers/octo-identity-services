@@ -11,6 +11,7 @@ export interface UserProfile {
   externalLogins: ExternalLoginInfo[];
   roles: string[];
   allowedTenants: string[];
+  groups: string[];
 }
 
 export interface ExternalLoginInfo {

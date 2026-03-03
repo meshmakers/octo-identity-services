@@ -68,6 +68,16 @@ import { UserProfile } from '../../core/models/manage.models';
           </div>
 
           <div class="profile-section">
+            <h3 class="section-title">Groups</h3>
+            <div *ngIf="profile.groups?.length" class="role-badges">
+              <span *ngFor="let group of profile.groups" class="status-badge status-badge--info">{{ group }}</span>
+            </div>
+            <div *ngIf="!profile.groups?.length" class="profile-item">
+              <span class="profile-item__value">No group memberships</span>
+            </div>
+          </div>
+
+          <div class="profile-section">
             <h3 class="section-title">Allowed Tenants</h3>
             <div *ngIf="profile.allowedTenants?.length" class="role-badges">
               <span *ngFor="let tenant of profile.allowedTenants" class="status-badge status-badge--info">{{ tenant }}</span>

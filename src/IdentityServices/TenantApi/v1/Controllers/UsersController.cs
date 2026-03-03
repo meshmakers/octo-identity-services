@@ -141,16 +141,15 @@ public class UsersController : ControllerBase
         }
 
 
+        // Get role names via UserManager (which queries AssignedRole associations + group roles)
+        var roleNames = await _userManager.GetRolesAsync(octoUser);
         List<RoleDto> roles = new();
-        if (octoUser.RoleIds != null)
+        foreach (var roleName in roleNames)
         {
-            foreach (var octoUserRoleId in octoUser.RoleIds)
+            var role = await _roleManager.FindByNameAsync(roleName);
+            if (role != null)
             {
-                var role = await _roleManager.FindByIdAsync(octoUserRoleId);
-                if (role != null)
-                {
-                    roles.Add(_mapper.Map<RoleDto>(role));
-                }
+                roles.Add(_mapper.Map<RoleDto>(role));
             }
         }
 
@@ -342,9 +341,14 @@ public class UsersController : ControllerBase
             return NotFound(new NotFoundErrorDto($"User with name '{userName}' not found."));
         }
 
-        user.RoleIds ??= new AttributeStringValueList();
-        user.RoleIds.Clear();
+        // Remove all current direct roles
+        var currentRoles = await _userManager.GetRolesAsync(user);
+        foreach (var roleName in currentRoles)
+        {
+            await _userManager.RemoveFromRoleAsync(user, roleName.ToUpperInvariant());
+        }
 
+        // Add the requested roles
         foreach (var roleId in roleIds)
         {
             var role = await _roleManager.FindByIdAsync(roleId.ToString());
@@ -353,10 +357,12 @@ public class UsersController : ControllerBase
                 return NotFound(new NotFoundErrorDto($"Role with id '{roleId}' not found."));
             }
 
-            user.RoleIds?.Add(role.RtId.ToString());
+            if (role.NormalizedName != null)
+            {
+                await _userManager.AddToRoleAsync(user, role.NormalizedName);
+            }
         }
 
-        await _userManager.UpdateAsync(user);
         return Ok();
     }
 
@@ -381,14 +387,16 @@ public class UsersController : ControllerBase
             return NotFound(new NotFoundErrorDto($"Role with name '{roleName}' not found."));
         }
 
-        if (user.RoleIds?.Contains(role.RtId.ToString()) ?? false)
+        if (role.NormalizedName != null && await _userManager.IsInRoleAsync(user, role.NormalizedName))
         {
             return BadRequest(new OperationFailedErrorDto($"User '{user.UserName}' already has role '{role.Name}'"));
         }
 
-        user.RoleIds ??= new AttributeStringValueList();
-        user.RoleIds.Add(role.RtId.ToString());
-        await _userManager.UpdateAsync(user);
+        if (role.NormalizedName != null)
+        {
+            await _userManager.AddToRoleAsync(user, role.NormalizedName);
+        }
+
         return Ok();
     }
 
@@ -503,13 +511,16 @@ public class UsersController : ControllerBase
             return NotFound(new NotFoundErrorDto($"Role with name '{roleName}' not found."));
         }
 
-        if (!user.RoleIds?.Contains(role.RtId.ToString()) ?? false)
+        if (role.NormalizedName != null && !await _userManager.IsInRoleAsync(user, role.NormalizedName))
         {
             return BadRequest(new OperationFailedErrorDto($"User '{user.UserName}' doesn't have role '{role.Name}'"));
         }
 
-        user.RoleIds?.Remove(role.RtId.ToString());
-        await _userManager.UpdateAsync(user);
+        if (role.NormalizedName != null)
+        {
+            await _userManager.RemoveFromRoleAsync(user, role.NormalizedName);
+        }
+
         return Ok();
     }
 
