@@ -38,12 +38,15 @@ public class UserProfileService : ProfileService<RtUser>
     {
         await base.GetProfileDataAsync(context);
 
-        // Always include allowed_tenants — regardless of requested claim types
-        var user = await FindUserAsync(context.Subject.GetSubjectId());
-        if (user != null)
+        var loginTenantId = _httpContextAccessor.HttpContext?.Items[InfrastructureCommon.TenantIdName] as string;
+        if (!string.IsNullOrEmpty(loginTenantId))
         {
-            var loginTenantId = _httpContextAccessor.HttpContext?.Items[InfrastructureCommon.TenantIdName] as string;
-            if (!string.IsNullOrEmpty(loginTenantId))
+            // Always include tenant_id so the SPA can detect tenant mismatch and force re-auth
+            context.IssuedClaims.Add(new Claim("tenant_id", loginTenantId));
+
+            // Always include allowed_tenants — regardless of requested claim types
+            var user = await FindUserAsync(context.Subject.GetSubjectId());
+            if (user != null)
             {
                 var allowedTenants = await _allowedTenantsResolver.ResolveAsync(loginTenantId, user);
                 foreach (var tenantId in allowedTenants)
