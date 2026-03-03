@@ -137,10 +137,7 @@ public class GroupsController(IGroupStore groupStore) : ControllerBase
             await groupStore.SetRoleIdsAsync(group.RtId, dto.RoleIds);
         }
 
-        return CreatedAtAction(
-            nameof(GetById),
-            new { rtId = group.RtId },
-            await MapToDtoAsync(group));
+        return StatusCode(StatusCodes.Status201Created, await MapToDtoAsync(group));
     }
 
     /// <summary>
