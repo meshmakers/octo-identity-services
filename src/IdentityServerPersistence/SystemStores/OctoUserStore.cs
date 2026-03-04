@@ -837,6 +837,45 @@ public sealed class OctoUserStore(
         return users;
     }
 
+    public async Task<IList<string>> GetDirectRolesAsync(RtUser user, CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        ThrowIfDisposed();
+
+        ArgumentValidation.Validate(nameof(user), user);
+
+        var dbUser = await GetUserByIdAsync(user.RtId, cancellationToken).ConfigureAwait(true);
+        if (dbUser == null)
+        {
+            throw NotExistingException.UserWithIdDoesNotExist(user.RtId);
+        }
+
+        using var session = await _tenantRepository.GetSessionAsync();
+        session.StartTransaction();
+
+        var associations = await _tenantRepository.GetRtAssociationsAsync(
+            session,
+            dbUser.ToRtEntityId(),
+            RtAssociationExtendedQueryOptions.Create(
+                GraphDirections.Outbound,
+                roleId: IdentityAssociationConstants.AssignedRoleId));
+
+        await session.CommitTransactionAsync();
+
+        var roles = new List<string>();
+        foreach (var assoc in associations.Items)
+        {
+            var role = await GetRoleByIdAsync(ConvertIdFromString(assoc.TargetRtId.ToString()), cancellationToken)
+                .ConfigureAwait(true);
+            if (!string.IsNullOrWhiteSpace(role.Name))
+            {
+                roles.Add(role.Name);
+            }
+        }
+
+        return roles;
+    }
+
     public async Task<IList<string>> GetRolesAsync(RtUser user, CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();

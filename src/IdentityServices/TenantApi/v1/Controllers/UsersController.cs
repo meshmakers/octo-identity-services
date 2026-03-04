@@ -4,6 +4,7 @@ using Asp.Versioning;
 using AutoMapper;
 using IdentityModel;
 using IdentityServerPersistence;
+using IdentityServerPersistence.SystemStores;
 using Meshmakers.Octo.Backend.IdentityServices.Services;
 using Meshmakers.Octo.Communication.Contracts.DataTransferObjects;
 using Meshmakers.Octo.Communication.Contracts.DataTransferObjects.ApiErrors;
@@ -33,6 +34,7 @@ public class UsersController : ControllerBase
     private readonly IMultiTenancyResolverService _multiTenancyResolverService;
     private readonly IUserEmailInteractionService _userEmailInteractionService;
     private readonly UserManager<RtUser> _userManager;
+    private readonly OctoUserStore _octoUserStore;
 
     /// <summary>
     ///     Constructor
@@ -42,6 +44,7 @@ public class UsersController : ControllerBase
     /// <param name="mapper"></param>
     /// <param name="multiTenancyResolverService">Multi-tenancy resolver service</param>
     /// <param name="userEmailInteractionService"></param>
+    /// <param name="userStore">The user store for direct role queries</param>
     /// <param name="logger">Logger</param>
     public UsersController(
         UserManager<RtUser> userManager,
@@ -49,6 +52,7 @@ public class UsersController : ControllerBase
         IMapper mapper,
         IMultiTenancyResolverService multiTenancyResolverService,
         IUserEmailInteractionService userEmailInteractionService,
+        IUserStore<RtUser> userStore,
         ILogger<UsersController> logger)
     {
         _userManager = userManager;
@@ -56,6 +60,7 @@ public class UsersController : ControllerBase
         _mapper = mapper;
         _multiTenancyResolverService = multiTenancyResolverService;
         _userEmailInteractionService = userEmailInteractionService;
+        _octoUserStore = (OctoUserStore)userStore;
         _logger = logger;
     }
 
@@ -156,6 +161,34 @@ public class UsersController : ControllerBase
         return Ok(roles);
     }
 
+    // GET system/v1/users/{userName}/directRoles
+    [HttpGet("{userName}/directRoles")]
+    [Authorize(IdentityServiceConstants.IdentityApiReadOnlyPolicy)]
+    [EndpointSummary("Returns only directly assigned user roles (excluding group-inherited roles)")]
+    [ProducesResponseType(typeof(IEnumerable<RoleDto>), StatusCodes.Status200OK)]
+    public async Task<IActionResult> GetUserDirectRoles([Required][Description("Name of the user")] string userName)
+    {
+        var octoUser = await _userManager.FindByNameAsync(userName) ??
+                       await _userManager.FindByEmailAsync(userName) ??
+                       await _userManager.FindByIdAsync(userName);
+        if (octoUser == null)
+        {
+            return NotFound();
+        }
+
+        var roleNames = await _octoUserStore.GetDirectRolesAsync(octoUser);
+        List<RoleDto> roles = new();
+        foreach (var roleName in roleNames)
+        {
+            var role = await _roleManager.FindByNameAsync(roleName);
+            if (role != null)
+            {
+                roles.Add(_mapper.Map<RoleDto>(role));
+            }
+        }
+
+        return Ok(roles);
+    }
 
     // POST system/v1/users
     [HttpPost]
@@ -341,9 +374,9 @@ public class UsersController : ControllerBase
             return NotFound(new NotFoundErrorDto($"User with name '{userName}' not found."));
         }
 
-        // Remove all current direct roles
-        var currentRoles = await _userManager.GetRolesAsync(user);
-        foreach (var roleName in currentRoles)
+        // Remove only directly assigned roles (not group-inherited ones)
+        var currentDirectRoles = await _octoUserStore.GetDirectRolesAsync(user);
+        foreach (var roleName in currentDirectRoles)
         {
             await _userManager.RemoveFromRoleAsync(user, roleName.ToUpperInvariant());
         }

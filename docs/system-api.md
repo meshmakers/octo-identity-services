@@ -33,11 +33,12 @@ All endpoints are tenant-scoped via the `{tenantId}` route parameter. The system
 | GET | `/users` | ReadOnly | Get all users |
 | GET | `/users/GetPaged` | ReadOnly | Get paginated users |
 | GET | `/users/{userName}` | ReadOnly | Get user by name, email, or ID |
-| GET | `/users/{userName}/roles` | ReadOnly | Get user's roles |
+| GET | `/users/{userName}/roles` | ReadOnly | Get user's roles (direct + group-inherited) |
+| GET | `/users/{userName}/directRoles` | ReadOnly | Get user's directly assigned roles only |
 | POST | `/users` | ReadWrite | Create new user |
 | POST | `/users/ResetPassword` | ReadWrite | Reset user password |
 | PUT | `/users/{userName}` | ReadWrite | Update user |
-| PUT | `/users/{userName}/roles` | ReadWrite | Replace all user roles |
+| PUT | `/users/{userName}/roles` | ReadWrite | Replace user's direct role assignments |
 | PUT | `/users/{userName}/roles/{roleName}` | ReadWrite | Add role to user |
 | POST | `/users/{userName}/merge` | ReadWrite | Merge source user into target user |
 | DELETE | `/users/{userName}` | ReadWrite | Delete user |
