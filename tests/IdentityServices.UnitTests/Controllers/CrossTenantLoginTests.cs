@@ -206,6 +206,8 @@ public class CrossTenantLoginTests
         };
         _userManager.FindByNameAsync("xt_OctoSystem_admin")
             .Returns(localUser);
+        _userManager.UpdateAsync(Arg.Any<RtUser>())
+            .Returns(IdentityResult.Success);
 
         _interaction.IsValidReturnUrl(Arg.Any<string>()).Returns(false);
 
@@ -324,6 +326,8 @@ public class CrossTenantLoginTests
         };
         _userManager.FindByNameAsync("xt_OctoSystem_admin")
             .Returns(localUser);
+        _userManager.UpdateAsync(Arg.Any<RtUser>())
+            .Returns(IdentityResult.Success);
 
         var returnUrl = "/meshtest/connect/authorize?client_id=test";
         _interaction.IsValidReturnUrl(returnUrl).Returns(true);

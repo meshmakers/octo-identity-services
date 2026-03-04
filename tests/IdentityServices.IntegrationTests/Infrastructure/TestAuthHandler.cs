@@ -55,6 +55,14 @@ public class TestAuthHandler : AuthenticationHandler<TestAuthHandlerOptions>
             new("sub", userId)
         };
 
+        // Add allowed_tenants claim from the route tenant so TenantAuthorizationMiddleware passes.
+        // Extract the tenant ID from the first path segment (e.g., "/octosystem/v1/users" → "octosystem").
+        var pathSegments = Request.Path.Value?.Split('/', StringSplitOptions.RemoveEmptyEntries);
+        if (pathSegments is { Length: > 0 })
+        {
+            claims.Add(new Claim("allowed_tenants", pathSegments[0]));
+        }
+
         // Add scopes from headers or defaults
         var scopes = GetHeaderValues(ScopeHeader);
         if (scopes.Any())

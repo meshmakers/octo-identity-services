@@ -660,6 +660,13 @@ public class AuthApiController(
             });
 
             await signInManager.SignOutAsync();
+
+            // Also sign out from the IdentityServer session cookie scheme ("idsrv").
+            // signInManager.SignOutAsync() only clears the Identity.Application cookie,
+            // but the idsrv cookie maintains the SSO session. Without clearing it,
+            // clients redirecting back will get a new authorization code automatically.
+            await HttpContext.SignOutAsync(IdentityServerConstants.DefaultCookieAuthenticationScheme);
+
             await events.RaiseAsync(new UserLogoutSuccessEvent(
                 subjectId,
                 User.GetDisplayName()));
