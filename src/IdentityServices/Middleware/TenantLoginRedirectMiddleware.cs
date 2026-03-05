@@ -45,7 +45,7 @@ internal class TenantLoginRedirectMiddleware(
         if (Uri.TryCreate(location, UriKind.Absolute, out var absoluteUri))
         {
             pathAndQuery = absoluteUri.PathAndQuery;
-            locationPrefix = location.Substring(0, location.Length - pathAndQuery.Length);
+            locationPrefix = absoluteUri.GetLeftPart(UriPartial.Authority);
         }
         else
         {
