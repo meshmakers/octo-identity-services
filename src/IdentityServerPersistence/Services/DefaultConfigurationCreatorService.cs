@@ -115,6 +115,13 @@ internal class DefaultConfigurationCreatorService(
             // Ensure identity data (resources, scopes, clients) exists in child tenants
             // so that OAuth/OIDC flows work when targeting a child tenant
             await EnsureIdentityDataInChildTenantAsync(tenantContext);
+
+            // Ensure mail notification config and templates exist in child tenants
+            var childRepo = tenantContext.GetTenantRepositoryAsAdmin();
+            using var childSession = await tenantContext.GetAdminSessionAsync();
+            childSession.StartTransaction();
+            await CreateTenantConfiguration(childSession, childRepo);
+            await childSession.CommitTransactionAsync();
             return;
         }
 
@@ -133,7 +140,7 @@ internal class DefaultConfigurationCreatorService(
             await CreateApiResources();
             await CreateIdentityResources();
             await CreateIdentityProvider();
-            await CreateTenantConfiguration(session);
+            await CreateTenantConfiguration(session, systemContext.GetSystemTenantRepositoryAsAdmin());
 
             await systemContext.SetConfigurationAsync(session, IdentityServiceConstants.IdentitySchemaVersionKey,
                 new DefaultConfigurationVersion { Version = IdentityServiceConstants.IdentitySchemaVersionValue });
@@ -467,10 +474,8 @@ internal class DefaultConfigurationCreatorService(
         }
     }
 
-    private async Task CreateTenantConfiguration(IOctoSession session)
+    private async Task CreateTenantConfiguration(IOctoSession session, ITenantRepository tenantRepository)
     {
-        var tenantRepository = systemContext.GetSystemTenantRepositoryAsAdmin();
-
         var queryOptions = RtEntityQueryOptions.Create()
             .FieldEquals(nameof(RtEntity.RtWellKnownName),
                 IdentityServiceConstants.MailNotificationConfigurationName);
