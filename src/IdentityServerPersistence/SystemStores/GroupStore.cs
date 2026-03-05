@@ -12,14 +12,18 @@ namespace IdentityServerPersistence.SystemStores;
 public class GroupStore(
     IMultiTenancyResolverService multiTenancyResolverService) : IGroupStore
 {
-    private readonly ITenantRepository _tenantRepository = multiTenancyResolverService.GetTenantRepository();
+    // IMPORTANT: Do NOT capture the tenant repository in a field initializer.
+    // This service may be constructed during authentication (via OctoUserStore → GroupRoleResolver),
+    // before the inline middleware has resolved the tenant from the route. Resolving lazily ensures
+    // each call uses the current tenant context from HttpContext.Items.
+    private ITenantRepository GetRepository() => multiTenancyResolverService.GetTenantRepository();
 
     public async Task<RtGroup?> FindByIdAsync(OctoObjectId rtId)
     {
-        var session = await _tenantRepository.GetSessionAsync();
+        var session = await GetRepository().GetSessionAsync();
         session.StartTransaction();
 
-        var result = await _tenantRepository
+        var result = await GetRepository()
             .GetRtEntityByRtIdAsync<RtGroup>(session, rtId);
         await session.CommitTransactionAsync();
 
@@ -28,13 +32,13 @@ public class GroupStore(
 
     public async Task<RtGroup?> FindByNameAsync(string normalizedGroupName)
     {
-        var session = await _tenantRepository.GetSessionAsync();
+        var session = await GetRepository().GetSessionAsync();
         session.StartTransaction();
 
         var queryOptions = RtEntityQueryOptions.Create()
             .FieldEquals(nameof(RtGroup.NormalizedGroupName), normalizedGroupName);
 
-        var result = await _tenantRepository
+        var result = await GetRepository()
             .GetRtEntitiesByTypeAsync<RtGroup>(session, queryOptions);
         await session.CommitTransactionAsync();
 
@@ -43,11 +47,11 @@ public class GroupStore(
 
     public async Task<IEnumerable<RtGroup>> GetAllAsync(int? skip = null, int? take = null)
     {
-        var session = await _tenantRepository.GetSessionAsync();
+        var session = await GetRepository().GetSessionAsync();
         session.StartTransaction();
 
         var queryOptions = RtEntityQueryOptions.Create();
-        var result = await _tenantRepository
+        var result = await GetRepository()
             .GetRtEntitiesByTypeAsync<RtGroup>(session, queryOptions, skip, take);
         await session.CommitTransactionAsync();
 
@@ -56,18 +60,18 @@ public class GroupStore(
 
     public async Task StoreAsync(RtGroup group)
     {
-        var session = await _tenantRepository.GetSessionAsync();
+        var session = await GetRepository().GetSessionAsync();
         session.StartTransaction();
 
-        var existing = await _tenantRepository
+        var existing = await GetRepository()
             .GetRtEntityByRtIdAsync<RtGroup>(session, group.RtId);
         if (existing == null)
         {
-            await _tenantRepository.InsertOneRtEntityAsync(session, group);
+            await GetRepository().InsertOneRtEntityAsync(session, group);
         }
         else
         {
-            await _tenantRepository.ReplaceOneRtEntityByIdAsync(session, group.RtId, group);
+            await GetRepository().ReplaceOneRtEntityByIdAsync(session, group.RtId, group);
         }
 
         await session.CommitTransactionAsync();
@@ -75,10 +79,10 @@ public class GroupStore(
 
     public async Task RemoveAsync(OctoObjectId rtId)
     {
-        var session = await _tenantRepository.GetSessionAsync();
+        var session = await GetRepository().GetSessionAsync();
         session.StartTransaction();
 
-        await _tenantRepository
+        await GetRepository()
             .DeleteOneRtEntityByRtIdAsync<RtGroup>(session, rtId, DeleteOptions.Erase);
 
         await session.CommitTransactionAsync();
@@ -90,17 +94,17 @@ public class GroupStore(
 
     public async Task<IReadOnlyList<string>> GetRoleIdsAsync(OctoObjectId groupRtId)
     {
-        var session = await _tenantRepository.GetSessionAsync();
+        var session = await GetRepository().GetSessionAsync();
         session.StartTransaction();
 
-        var group = await _tenantRepository.GetRtEntityByRtIdAsync<RtGroup>(session, groupRtId);
+        var group = await GetRepository().GetRtEntityByRtIdAsync<RtGroup>(session, groupRtId);
         if (group == null)
         {
             await session.CommitTransactionAsync();
             return [];
         }
 
-        var associations = await _tenantRepository.GetRtAssociationsAsync(
+        var associations = await GetRepository().GetRtAssociationsAsync(
             session,
             group.ToRtEntityId(),
             RtAssociationExtendedQueryOptions.Create(
@@ -113,10 +117,10 @@ public class GroupStore(
 
     public async Task SetRoleIdsAsync(OctoObjectId groupRtId, IReadOnlyList<string> roleIds)
     {
-        var session = await _tenantRepository.GetSessionAsync();
+        var session = await GetRepository().GetSessionAsync();
         session.StartTransaction();
 
-        var group = await _tenantRepository.GetRtEntityByRtIdAsync<RtGroup>(session, groupRtId);
+        var group = await GetRepository().GetRtEntityByRtIdAsync<RtGroup>(session, groupRtId);
         if (group == null)
         {
             await session.CommitTransactionAsync();
@@ -126,7 +130,7 @@ public class GroupStore(
         var groupEntityId = group.ToRtEntityId();
 
         // Get current associations
-        var currentAssociations = await _tenantRepository.GetRtAssociationsAsync(
+        var currentAssociations = await GetRepository().GetRtAssociationsAsync(
             session,
             groupEntityId,
             RtAssociationExtendedQueryOptions.Create(
@@ -168,7 +172,7 @@ public class GroupStore(
         if (updates.Count > 0)
         {
             var opResult = new OperationResult();
-            await _tenantRepository.ApplyChangesAsync(session, updates, opResult);
+            await GetRepository().ApplyChangesAsync(session, updates, opResult);
         }
 
         await session.CommitTransactionAsync();
@@ -236,10 +240,10 @@ public class GroupStore(
         OctoObjectId originRtId,
         RtCkId<CkAssociationRoleId> roleId) where TTarget : RtEntity, new()
     {
-        var session = await _tenantRepository.GetSessionAsync();
+        var session = await GetRepository().GetSessionAsync();
         session.StartTransaction();
 
-        var origin = await _tenantRepository.GetRtEntityByRtIdAsync<RtGroup>(session, originRtId);
+        var origin = await GetRepository().GetRtEntityByRtIdAsync<RtGroup>(session, originRtId);
         if (origin == null)
         {
             await session.CommitTransactionAsync();
@@ -247,7 +251,7 @@ public class GroupStore(
         }
 
         var targetCkTypeId = RtEntityExtensions.GetRtCkTypeId<TTarget>();
-        var associations = await _tenantRepository.GetRtAssociationsAsync(
+        var associations = await GetRepository().GetRtAssociationsAsync(
             session,
             origin.ToRtEntityId(),
             RtAssociationExtendedQueryOptions.Create(
@@ -266,10 +270,10 @@ public class GroupStore(
         string targetRtIdString,
         RtCkId<CkAssociationRoleId> roleId) where TTarget : RtEntity, new()
     {
-        var session = await _tenantRepository.GetSessionAsync();
+        var session = await GetRepository().GetSessionAsync();
         session.StartTransaction();
 
-        var origin = await _tenantRepository.GetRtEntityByRtIdAsync<RtGroup>(session, originRtId);
+        var origin = await GetRepository().GetRtEntityByRtIdAsync<RtGroup>(session, originRtId);
         if (origin == null)
         {
             await session.CommitTransactionAsync();
@@ -280,7 +284,7 @@ public class GroupStore(
         var targetEntityId = new RtEntityId(targetCkTypeId, new OctoObjectId(targetRtIdString));
 
         // Check if association already exists
-        var existing = await _tenantRepository.GetRtAssociationOrDefaultAsync(
+        var existing = await GetRepository().GetRtAssociationOrDefaultAsync(
             session, origin.ToRtEntityId(), targetEntityId, roleId);
         if (existing != null)
         {
@@ -294,7 +298,7 @@ public class GroupStore(
         };
 
         var opResult = new OperationResult();
-        await _tenantRepository.ApplyChangesAsync(session, updates, opResult);
+        await GetRepository().ApplyChangesAsync(session, updates, opResult);
         await session.CommitTransactionAsync();
     }
 
@@ -303,10 +307,10 @@ public class GroupStore(
         string targetRtIdString,
         RtCkId<CkAssociationRoleId> roleId) where TTarget : RtEntity, new()
     {
-        var session = await _tenantRepository.GetSessionAsync();
+        var session = await GetRepository().GetSessionAsync();
         session.StartTransaction();
 
-        var origin = await _tenantRepository.GetRtEntityByRtIdAsync<RtGroup>(session, originRtId);
+        var origin = await GetRepository().GetRtEntityByRtIdAsync<RtGroup>(session, originRtId);
         if (origin == null)
         {
             await session.CommitTransactionAsync();
@@ -322,7 +326,7 @@ public class GroupStore(
         };
 
         var opResult = new OperationResult();
-        await _tenantRepository.ApplyChangesAsync(session, updates, opResult);
+        await GetRepository().ApplyChangesAsync(session, updates, opResult);
         await session.CommitTransactionAsync();
     }
 }

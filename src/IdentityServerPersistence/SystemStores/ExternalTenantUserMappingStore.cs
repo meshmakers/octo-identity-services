@@ -10,19 +10,20 @@ namespace IdentityServerPersistence.SystemStores;
 public class ExternalTenantUserMappingStore(
     IMultiTenancyResolverService multiTenancyResolverService) : IExternalTenantUserMappingStore
 {
-    private readonly ITenantRepository _tenantRepository = multiTenancyResolverService.GetTenantRepository();
+    // Resolve lazily to ensure correct tenant context (see GroupStore for explanation)
+    private ITenantRepository GetRepository() => multiTenancyResolverService.GetTenantRepository();
 
     public async Task<RtExternalTenantUserMapping?> FindBySourceUserAsync(
         string sourceTenantId, string sourceUserId)
     {
-        var session = await _tenantRepository.GetSessionAsync();
+        var session = await GetRepository().GetSessionAsync();
         session.StartTransaction();
 
         var queryOptions = RtEntityQueryOptions.Create()
             .FieldEquals(nameof(RtExternalTenantUserMapping.SourceTenantId), sourceTenantId)
             .FieldEquals(nameof(RtExternalTenantUserMapping.SourceUserId), sourceUserId);
 
-        var result = await _tenantRepository
+        var result = await GetRepository()
             .GetRtEntitiesByTypeAsync<RtExternalTenantUserMapping>(session, queryOptions);
         await session.CommitTransactionAsync();
 
@@ -32,11 +33,11 @@ public class ExternalTenantUserMappingStore(
     public async Task<IEnumerable<RtExternalTenantUserMapping>> GetAllAsync(
         int? skip = null, int? take = null)
     {
-        var session = await _tenantRepository.GetSessionAsync();
+        var session = await GetRepository().GetSessionAsync();
         session.StartTransaction();
 
         var queryOptions = RtEntityQueryOptions.Create();
-        var result = await _tenantRepository
+        var result = await GetRepository()
             .GetRtEntitiesByTypeAsync<RtExternalTenantUserMapping>(session, queryOptions, skip, take);
         await session.CommitTransactionAsync();
 
@@ -46,13 +47,13 @@ public class ExternalTenantUserMappingStore(
     public async Task<IEnumerable<RtExternalTenantUserMapping>> GetBySourceTenantAsync(
         string sourceTenantId)
     {
-        var session = await _tenantRepository.GetSessionAsync();
+        var session = await GetRepository().GetSessionAsync();
         session.StartTransaction();
 
         var queryOptions = RtEntityQueryOptions.Create()
             .FieldEquals(nameof(RtExternalTenantUserMapping.SourceTenantId), sourceTenantId);
 
-        var result = await _tenantRepository
+        var result = await GetRepository()
             .GetRtEntitiesByTypeAsync<RtExternalTenantUserMapping>(session, queryOptions);
         await session.CommitTransactionAsync();
 
@@ -61,18 +62,18 @@ public class ExternalTenantUserMappingStore(
 
     public async Task StoreAsync(RtExternalTenantUserMapping mapping)
     {
-        var session = await _tenantRepository.GetSessionAsync();
+        var session = await GetRepository().GetSessionAsync();
         session.StartTransaction();
 
-        var existing = await _tenantRepository
+        var existing = await GetRepository()
             .GetRtEntityByRtIdAsync<RtExternalTenantUserMapping>(session, mapping.RtId);
         if (existing == null)
         {
-            await _tenantRepository.InsertOneRtEntityAsync(session, mapping);
+            await GetRepository().InsertOneRtEntityAsync(session, mapping);
         }
         else
         {
-            await _tenantRepository.ReplaceOneRtEntityByIdAsync(session, mapping.RtId, mapping);
+            await GetRepository().ReplaceOneRtEntityByIdAsync(session, mapping.RtId, mapping);
         }
 
         await session.CommitTransactionAsync();
@@ -80,10 +81,10 @@ public class ExternalTenantUserMappingStore(
 
     public async Task RemoveAsync(OctoObjectId rtId)
     {
-        var session = await _tenantRepository.GetSessionAsync();
+        var session = await GetRepository().GetSessionAsync();
         session.StartTransaction();
 
-        await _tenantRepository
+        await GetRepository()
             .DeleteOneRtEntityByRtIdAsync<RtExternalTenantUserMapping>(session, rtId, DeleteOptions.Erase);
 
         await session.CommitTransactionAsync();
@@ -91,10 +92,10 @@ public class ExternalTenantUserMappingStore(
 
     public async Task<RtExternalTenantUserMapping?> GetByIdAsync(OctoObjectId rtId)
     {
-        var session = await _tenantRepository.GetSessionAsync();
+        var session = await GetRepository().GetSessionAsync();
         session.StartTransaction();
 
-        var result = await _tenantRepository
+        var result = await GetRepository()
             .GetRtEntityByRtIdAsync<RtExternalTenantUserMapping>(session, rtId);
         await session.CommitTransactionAsync();
 
