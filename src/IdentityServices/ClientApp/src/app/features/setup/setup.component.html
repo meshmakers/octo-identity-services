@@ -1,0 +1,96 @@
+<div class="lcars-auth-container">
+  <app-lcars-panel>
+    <app-lcars-header
+      subtitle="Initial System Setup"
+      [showUserMenu]="false">
+    </app-lcars-header>
+
+    <!-- Loading State -->
+    <div *ngIf="loading" class="lcars-loading">
+      <div class="lcars-loading__spinner"></div>
+      <span class="lcars-loading__text">Checking setup status</span>
+    </div>
+
+    <!-- Success State -->
+    <div *ngIf="success" class="success-message">
+      <div class="success-icon">
+        <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path>
+          <polyline points="22 4 12 14.01 9 11.01"></polyline>
+        </svg>
+      </div>
+      <h3>Setup Complete</h3>
+      <p>The admin user has been created successfully. You can now sign in.</p>
+      <a [routerLink]="['/', tenantId, 'login']" class="lcars-button lcars-button--primary">
+        Sign In
+      </a>
+    </div>
+
+    <!-- Setup Form -->
+    <ng-container *ngIf="!loading && !success">
+      <div class="setup-intro">
+        <p>No users have been configured yet. Create the initial admin account to get started.</p>
+      </div>
+
+      <!-- Error Message -->
+      <div *ngIf="errorMessage" class="lcars-error-message">
+        {{ errorMessage }}
+      </div>
+
+      <form (ngSubmit)="onSubmit()" #setupForm="ngForm">
+        <div class="lcars-form-group">
+          <label for="email">Email</label>
+          <input
+            type="email"
+            id="email"
+            name="email"
+            [(ngModel)]="email"
+            required
+            autocomplete="email"
+            [disabled]="submitting"
+            placeholder="Enter admin email" />
+        </div>
+
+        <div class="lcars-form-group">
+          <label for="password">Password</label>
+          <input
+            type="password"
+            id="password"
+            name="password"
+            [(ngModel)]="password"
+            required
+            autocomplete="new-password"
+            [disabled]="submitting"
+            placeholder="Enter password" />
+        </div>
+
+        <div class="lcars-form-group">
+          <label for="confirmPassword">Confirm Password</label>
+          <input
+            type="password"
+            id="confirmPassword"
+            name="confirmPassword"
+            [(ngModel)]="confirmPassword"
+            required
+            autocomplete="new-password"
+            [disabled]="submitting"
+            placeholder="Confirm password" />
+        </div>
+
+        <div *ngIf="passwordMismatch" class="field-error">
+          Passwords do not match
+        </div>
+
+        <div class="lcars-actions lcars-actions--stacked">
+          <button
+            type="submit"
+            class="lcars-button-primary"
+            [disabled]="submitting || !email || !password || !confirmPassword || passwordMismatch">
+            <span *ngIf="!submitting">Create Admin User</span>
+            <span *ngIf="submitting">Creating...</span>
+          </button>
+        </div>
+      </form>
+    </ng-container>
+  </app-lcars-panel>
+</div>

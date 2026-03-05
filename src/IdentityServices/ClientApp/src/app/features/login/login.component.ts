@@ -62,6 +62,10 @@ export class LoginComponent implements OnInit {
     this.loading = true;
     this.authApi.getLoginContext(this.returnUrl).subscribe({
       next: (context) => {
+        if (context.setupRequired) {
+          this.router.navigate(['/', this.tenantId, 'setup']);
+          return;
+        }
         this.context = context;
         this.loading = false;
         if (autoLoginParentTenantId) {
@@ -77,7 +81,8 @@ export class LoginComponent implements OnInit {
           externalProviders: [],
           allowRememberLogin: true,
           enableLocalLogin: true,
-          isAuthenticated: false
+          isAuthenticated: false,
+          setupRequired: false
         };
       }
     });
