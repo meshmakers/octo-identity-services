@@ -5,10 +5,12 @@ using Duende.IdentityServer.Services;
 using Duende.IdentityServer.Stores;
 using FluentAssertions;
 using IdentityServerPersistence.Services;
+using IdentityServerPersistence.Services.Login;
 using IdentityServerPersistence.SystemStores;
 using Meshmakers.Octo.Backend.Authentication.Services;
 using Meshmakers.Octo.Backend.IdentityServices.Controllers.Api;
 using Meshmakers.Octo.ConstructionKit.Contracts;
+using Meshmakers.Octo.Services.Infrastructure.Services;
 using Microsoft.AspNetCore.DataProtection;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Identity;
@@ -44,6 +46,7 @@ public class CrossTenantLoginTests
         _crossTenantAuthService = Substitute.For<ICrossTenantAuthenticationService>();
         _externalTenantUserMappingStore = Substitute.For<IExternalTenantUserMappingStore>();
         var identityProviderStore = Substitute.For<IOctoIdentityProviderStore>();
+        var loginGroupAssignmentService = Substitute.For<ILoginGroupAssignmentService>();
         _dataProtectionProvider = new EphemeralDataProtectionProvider();
         var logger = Substitute.For<ILogger<AuthApiController>>();
 
@@ -70,6 +73,8 @@ public class CrossTenantLoginTests
             Substitute.For<Microsoft.AspNetCore.Authentication.IAuthenticationSchemeProvider>(),
             Substitute.For<IUserConfirmation<RtUser>>());
 
+        var multiTenancyResolver = Substitute.For<IMultiTenancyResolverService>();
+
         _sut = new AuthApiController(
             _interaction,
             schemeProvider,
@@ -82,7 +87,9 @@ public class CrossTenantLoginTests
             _crossTenantAuthService,
             _externalTenantUserMappingStore,
             identityProviderStore,
+            loginGroupAssignmentService,
             _dataProtectionProvider,
+            multiTenancyResolver,
             logger);
     }
 

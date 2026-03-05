@@ -7,9 +7,12 @@ using Duende.IdentityServer.Models;
 using Duende.IdentityServer.Services;
 using Duende.IdentityServer.Stores;
 using IdentityServerPersistence.Services;
+using IdentityServerPersistence.Services.Login;
 using IdentityServerPersistence.SystemStores;
 using Meshmakers.Octo.Backend.Authentication.Services;
 using Meshmakers.Octo.ConstructionKit.Contracts;
+using Meshmakers.Octo.Runtime.Contracts.Repositories.Query;
+using Meshmakers.Octo.Services.Infrastructure.Services;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.DataProtection;
@@ -37,7 +40,9 @@ public class AuthApiController(
     ICrossTenantAuthenticationService crossTenantAuthService,
     IExternalTenantUserMappingStore externalTenantUserMappingStore,
     IOctoIdentityProviderStore identityProviderStore,
+    ILoginGroupAssignmentService loginGroupAssignmentService,
     IDataProtectionProvider dataProtectionProvider,
+    IMultiTenancyResolverService multiTenancyResolverService,
     ILogger<AuthApiController> logger)
     : ControllerBase
 {
@@ -213,10 +218,41 @@ public class AuthApiController(
 
         if (crossTenantResult != null)
         {
+            // Check self-registration gate for cross-tenant providers
+            var octoTenantProviders = (await identityProviderStore.GetAllAsync())
+                .OfType<RtOctoTenantIdentityProvider>()
+                .Where(p => p.IsEnabled && string.Equals(p.ParentTenantId, crossTenantResult.SourceTenantId, StringComparison.OrdinalIgnoreCase))
+                .ToList();
+
+            var octoTenantProvider = octoTenantProviders.FirstOrDefault();
+
+            // Check if this is a new user (no existing local account)
+            var crossTenantUserName = $"xt_{crossTenantResult.SourceTenantId}_{crossTenantResult.SourceUserName}";
+            var existingCrossTenantUser = await userManager.FindByNameAsync(crossTenantUserName);
+
+            if (existingCrossTenantUser == null && octoTenantProvider is { AllowSelfRegistration: false })
+            {
+                logger.LogWarning("Self-registration denied for cross-tenant user '{UserName}' from tenant '{SourceTenant}'",
+                    crossTenantResult.SourceUserName, crossTenantResult.SourceTenantId);
+
+                return new LoginResultDto
+                {
+                    Success = false,
+                    ErrorMessage = "Self-registration is not allowed for this provider"
+                };
+            }
+
             // Cross-tenant auth succeeded — create or find a local user for the session
+            var isNewUser = existingCrossTenantUser == null;
             var localUser = await FindOrCreateCrossTenantUserAsync(crossTenantResult, tenantIdForCrossTenant);
             if (localUser != null)
             {
+                // Assign groups for newly created users
+                if (isNewUser)
+                {
+                    await loginGroupAssignmentService.AssignGroupsAsync(localUser, octoTenantProvider);
+                }
+
                 await signInManager.SignInAsync(localUser, request.RememberLogin);
 
                 await events.RaiseAsync(new UserLoginSuccessEvent(
@@ -385,7 +421,20 @@ public class AuthApiController(
 
         if (user == null)
         {
-            // 4. Create new user from external provider claims.
+            // 4a. Look up the identity provider to check self-registration
+            var providerName = provider.Contains(':') ? provider.Split(':', 2)[1] : provider;
+            var rtIdentityProvider = await identityProviderStore.GetByNameAsync(providerName);
+
+            // 4b. Check AllowSelfRegistration
+            if (rtIdentityProvider is { AllowSelfRegistration: false })
+            {
+                logger.LogWarning("Self-registration denied for provider {Provider}, user {UserId}",
+                    provider, userIdClaim.Value);
+                await HttpContext.SignOutAsync(IdentityServerConstants.ExternalCookieAuthenticationScheme);
+                return Redirect($"/{tenantId}/error?error=Self-registration is not allowed for this provider");
+            }
+
+            // 4c. Create new user from external provider claims.
             // SECURITY: We intentionally do NOT auto-link external logins to existing users
             // found by email. An attacker could register a Google/Microsoft account with the
             // same email as an existing local user and inherit their roles and permissions.
@@ -415,6 +464,9 @@ public class AuthApiController(
                 logger.LogInformation("Linked external login {Provider} to user {UserName}",
                     provider, user.UserName);
             }
+
+            // 6. Assign groups based on provider config and email domain rules
+            await loginGroupAssignmentService.AssignGroupsAsync(user, rtIdentityProvider);
         }
 
         // 6. Sign in the user
@@ -566,6 +618,12 @@ public class AuthApiController(
                 }
             }
 
+            // Sync roles from the mapping on each login
+            if (mapping != null)
+            {
+                await SyncMappedRolesAsync(existingUser, mapping);
+            }
+
             return existingUser;
         }
 
@@ -607,13 +665,7 @@ public class AuthApiController(
         }
 
         // Assign mapped roles to the user
-        if (mapping.MappedRoleIds != null)
-        {
-            foreach (var roleId in mapping.MappedRoleIds)
-            {
-                await userManager.AddToRoleAsync(user, roleId);
-            }
-        }
+        await SyncMappedRolesAsync(user, mapping);
 
         logger.LogInformation(
             "Created cross-tenant user '{UserName}' in tenant '{TenantId}' for source user '{SourceUser}' from tenant '{SourceTenant}'",
@@ -621,6 +673,53 @@ public class AuthApiController(
             crossTenantResult.SourceTenantId);
 
         return user;
+    }
+
+    /// <summary>
+    /// Syncs roles from an ExternalTenantUserMapping to the local cross-tenant user.
+    /// Queries roles directly from the tenant repository to avoid RoleManager tenant scoping issues,
+    /// then uses AddToRoleAsync with the resolved role names.
+    /// </summary>
+    private async Task SyncMappedRolesAsync(RtUser user, RtExternalTenantUserMapping mapping)
+    {
+        if (mapping.MappedRoleIds == null || mapping.MappedRoleIds.Count == 0)
+        {
+            return;
+        }
+
+        // Query all roles from the tenant repository directly to build an ID → name lookup.
+        // This avoids RoleManager/OctoRoleStore tenant resolution issues during cross-tenant login.
+        var tenantRepository = multiTenancyResolverService.GetTenantRepository();
+        var session = await tenantRepository.GetSessionAsync();
+        session.StartTransaction();
+
+        var allRolesResult = await tenantRepository
+            .GetRtEntitiesByTypeAsync<RtRole>(session, RtEntityQueryOptions.Create());
+        await session.CommitTransactionAsync();
+
+        var roleNameById = allRolesResult.Items
+            .ToDictionary(r => r.RtId.ToString(), r => r.Name);
+
+        var currentRoles = await userManager.GetRolesAsync(user);
+
+        foreach (var roleId in mapping.MappedRoleIds)
+        {
+            if (!roleNameById.TryGetValue(roleId, out var roleName) || string.IsNullOrEmpty(roleName))
+            {
+                logger.LogWarning("Mapped role ID '{RoleId}' not found in tenant, skipping", roleId);
+                continue;
+            }
+
+            if (!currentRoles.Contains(roleName, StringComparer.OrdinalIgnoreCase))
+            {
+                var result = await userManager.AddToRoleAsync(user, roleName);
+                if (!result.Succeeded)
+                {
+                    logger.LogWarning("Failed to assign role '{RoleName}' to user '{UserName}': {Errors}",
+                        roleName, user.UserName, string.Join(", ", result.Errors.Select(e => e.Description)));
+                }
+            }
+        }
     }
 
     /// <summary>
@@ -1098,7 +1197,25 @@ public class AuthApiController(
 
         if (user == null)
         {
-            // 4. Create new user from LDAP info.
+            // 4a. Look up the identity provider to check self-registration
+            var ldapProviderName = loginInfo.LoginProvider.Contains(':')
+                ? loginInfo.LoginProvider.Split(':', 2)[1]
+                : loginInfo.LoginProvider;
+            var rtLdapProvider = await identityProviderStore.GetByNameAsync(ldapProviderName);
+
+            // 4b. Check AllowSelfRegistration
+            if (rtLdapProvider is { AllowSelfRegistration: false })
+            {
+                logger.LogWarning("Self-registration denied for LDAP provider {Provider}, user {UserName}",
+                    loginInfo.LoginProvider, request.Username);
+                return new LdapLoginResultDto
+                {
+                    Success = false,
+                    ErrorMessage = "Self-registration is not allowed for this provider"
+                };
+            }
+
+            // 4c. Create new user from LDAP info.
             // SECURITY: We intentionally do NOT auto-link LDAP logins to existing users
             // found by email. This prevents privilege escalation where an LDAP user could
             // inherit the roles of an existing local user with the same email address.
@@ -1137,6 +1254,9 @@ public class AuthApiController(
                     "Linked LDAP login {Provider} to user {UserName}",
                     loginInfo.LoginProvider, user.UserName);
             }
+
+            // 6. Assign groups based on provider config and email domain rules
+            await loginGroupAssignmentService.AssignGroupsAsync(user, rtLdapProvider);
         }
 
         // 6. Sign in the user
@@ -1283,7 +1403,28 @@ public class AuthApiController(
             };
         }
 
+        // Check self-registration gate for cross-tenant token login
+        var tokenOctoTenantProviders = (await identityProviderStore.GetAllAsync())
+            .OfType<RtOctoTenantIdentityProvider>()
+            .Where(p => p.IsEnabled && string.Equals(p.ParentTenantId, payload.SourceTenantId, StringComparison.OrdinalIgnoreCase))
+            .ToList();
+
+        var tokenOctoTenantProvider = tokenOctoTenantProviders.FirstOrDefault();
+
+        var tokenCrossTenantUserName = $"xt_{crossTenantResult.SourceTenantId}_{crossTenantResult.SourceUserName}";
+        var existingTokenUser = await userManager.FindByNameAsync(tokenCrossTenantUserName);
+
+        if (existingTokenUser == null && tokenOctoTenantProvider is { AllowSelfRegistration: false })
+        {
+            return new LoginResultDto
+            {
+                Success = false,
+                ErrorMessage = "Self-registration is not allowed for this provider"
+            };
+        }
+
         // Find or create the local shadow user
+        var isNewTokenUser = existingTokenUser == null;
         var localUser = await FindOrCreateCrossTenantUserAsync(crossTenantResult, currentTenantId);
         if (localUser == null)
         {
@@ -1292,6 +1433,12 @@ public class AuthApiController(
                 Success = false,
                 ErrorMessage = "Failed to create local user in target tenant"
             };
+        }
+
+        // Assign groups for newly created users
+        if (isNewTokenUser)
+        {
+            await loginGroupAssignmentService.AssignGroupsAsync(localUser, tokenOctoTenantProvider);
         }
 
         // Sign in

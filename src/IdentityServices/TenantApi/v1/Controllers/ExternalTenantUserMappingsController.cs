@@ -170,6 +170,7 @@ public record ExternalTenantUserMappingDto
     public string SourceUserId { get; init; } = string.Empty;
     public string SourceUserName { get; init; } = string.Empty;
     public List<string> RoleIds { get; init; } = [];
+    public List<string> GroupNames { get; init; } = [];
 }
 
 public record CreateExternalTenantUserMappingDto

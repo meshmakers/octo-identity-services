@@ -14,7 +14,8 @@ public class MapperProfile : Profile
             .Include<RtMicrosoftAdIdentityProvider, MicrosoftAdProviderDto>()
             .Include<RtOpenLdapIdentityProvider, OpenLdapProviderDto>()
             .Include<RtAzureEntraIdIdentityProvider, AzureEntraIdProviderDto>()
-            .Include<RtFacebookIdentityProvider, FacebookIdentityProviderDto>();
+            .Include<RtFacebookIdentityProvider, FacebookIdentityProviderDto>()
+            .Include<RtOctoTenantIdentityProvider, OctoTenantIdentityProviderDto>();
 
         CreateMap<RtGoogleIdentityProvider, GoogleIdentityProviderDto>();
         CreateMap<RtMicrosoftIdentityProvider, MicrosoftIdentityProviderDto>();
@@ -22,6 +23,7 @@ public class MapperProfile : Profile
         CreateMap<RtOpenLdapIdentityProvider, OpenLdapProviderDto>();
         CreateMap<RtAzureEntraIdIdentityProvider, AzureEntraIdProviderDto>();
         CreateMap<RtFacebookIdentityProvider, FacebookIdentityProviderDto>();
+        CreateMap<RtOctoTenantIdentityProvider, OctoTenantIdentityProviderDto>();
 
 
         CreateMap<IdentityProviderDto, RtIdentityProvider>()
@@ -30,7 +32,8 @@ public class MapperProfile : Profile
             .Include<MicrosoftAdProviderDto, RtMicrosoftAdIdentityProvider>()
             .Include<OpenLdapProviderDto, RtOpenLdapIdentityProvider>()
             .Include<AzureEntraIdProviderDto, RtAzureEntraIdIdentityProvider>()
-            .Include<FacebookIdentityProviderDto, RtFacebookIdentityProvider>();
+            .Include<FacebookIdentityProviderDto, RtFacebookIdentityProvider>()
+            .Include<OctoTenantIdentityProviderDto, RtOctoTenantIdentityProvider>();
 
         CreateMap<GoogleIdentityProviderDto, RtGoogleIdentityProvider>();
         CreateMap<MicrosoftIdentityProviderDto, RtMicrosoftIdentityProvider>();
@@ -38,5 +41,11 @@ public class MapperProfile : Profile
         CreateMap<OpenLdapProviderDto, RtOpenLdapIdentityProvider>();
         CreateMap<AzureEntraIdProviderDto, RtAzureEntraIdIdentityProvider>();
         CreateMap<FacebookIdentityProviderDto, RtFacebookIdentityProvider>();
+        CreateMap<OctoTenantIdentityProviderDto, RtOctoTenantIdentityProvider>();
+
+        CreateMap<RtEmailDomainGroupRule, EmailDomainGroupRuleDto>()
+            .ReverseMap()
+            .ForMember(dest => dest.RtId, x => x.Ignore())
+            .ForMember(dest => dest.CkTypeId, x => x.Ignore());
     }
 }

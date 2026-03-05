@@ -2,6 +2,7 @@ using Duende.IdentityServer.Models;
 using IdentityServerPersistence.AutoMap;
 using IdentityServerPersistence.Configuration.DependencyInjection;
 using IdentityServerPersistence.Services;
+using IdentityServerPersistence.Services.Login;
 using IdentityServerPersistence.SystemStores;
 using Microsoft.AspNetCore.Identity;
 using Meshmakers.Octo.Common.DistributionEventHub.Configuration;
@@ -49,6 +50,8 @@ public static class RuntimeEngineBuilderExtensions
         builder.Services.AddScoped<IGroupRoleResolver, GroupRoleResolver>();
         builder.Services.AddScoped<ICrossTenantAuthenticationService, CrossTenantAuthenticationService>();
         builder.Services.AddScoped<IAllowedTenantsResolver, AllowedTenantsResolver>();
+        builder.Services.AddScoped<IEmailDomainGroupRuleStore, EmailDomainGroupRuleStore>();
+        builder.Services.AddScoped<ILoginGroupAssignmentService, LoginGroupAssignmentService>();
 
         builder.Services.AddSingleton<AttributeStringValueListConverter>();
         builder.Services.AddAutoMapper(cfg =>

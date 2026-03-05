@@ -36,6 +36,7 @@ ConstructionKit/
 │   ├── ck-identityResource.yaml
 │   ├── ck-identityProvider.yaml
 │   ├── ck-persistedGrant.yaml
+│   ├── ck-emailDomainGroupRule.yaml
 │   └── ... (provider subtypes)
 ├── records/
 │   ├── ck-clientClaim.yaml
@@ -474,8 +475,9 @@ internal class InitialMigration : IMigration
 | 1 → 2 | `CkTypeIndexMigration` | Update CK type indexes |
 | 2 → 3 | `CkTypeIndexMigration2` | Additional index updates |
 | 9 → 10 | `IdentityAssociationMigration` | Convert StringArray relationships to CK associations; create TenantOwners group |
+| 10 → 12 | `LoginConfigurationMigration` | Set AllowSelfRegistration=true on existing identity providers; create EmailDomainGroupRule indexes |
 
-Current schema version: `IdentitySchemaVersionValue = 11`
+Current schema version: `IdentitySchemaVersionValue = 12`
 
 ### Registration
 

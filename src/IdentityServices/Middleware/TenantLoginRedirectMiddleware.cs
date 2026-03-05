@@ -1,4 +1,5 @@
 using Meshmakers.Octo.Runtime.Contracts.MongoDb.Configuration;
+using Meshmakers.Octo.Services.Infrastructure;
 using Microsoft.AspNetCore.WebUtilities;
 using Microsoft.Extensions.Options;
 using Microsoft.Extensions.Primitives;
@@ -10,6 +11,9 @@ namespace Meshmakers.Octo.Backend.IdentityServices.Middleware;
 /// and rewrites the tenant prefix based on <c>acr_values=tenant:{tenantId}</c> in the ReturnUrl.
 /// This enables OIDC clients to direct users to tenant-specific login pages by passing
 /// <c>acr_values=tenant:{tenantId}</c> in the authorize request.
+/// For logout redirects (which carry a <c>logoutId</c> instead of a <c>ReturnUrl</c>), the middleware
+/// falls back to the tenant ID stored in <c>HttpContext.Items</c> by
+/// <see cref="OidcTenantResolutionMiddleware"/> (resolved from the <c>id_token_hint</c> JWT).
 /// </summary>
 internal class TenantLoginRedirectMiddleware(
     RequestDelegate next,
@@ -66,7 +70,8 @@ internal class TenantLoginRedirectMiddleware(
             return;
         }
 
-        var tenantId = ExtractTenantFromLocation(pathAndQuery);
+        var tenantId = ExtractTenantFromLocation(pathAndQuery)
+            ?? context.Items[InfrastructureCommon.TenantIdName] as string;
         if (string.IsNullOrEmpty(tenantId) ||
             string.Equals(tenantId, _systemTenantId, StringComparison.OrdinalIgnoreCase))
         {

@@ -206,18 +206,6 @@ public class GroupStore(
             groupRtId, IdentityAssociationConstants.GroupMemberId);
     }
 
-    public async Task AddMemberExternalUserAsync(OctoObjectId groupRtId, string externalUserId)
-    {
-        await AddOutboundAssociationAsync<RtExternalTenantUserMapping>(
-            groupRtId, externalUserId, IdentityAssociationConstants.GroupMemberId);
-    }
-
-    public async Task RemoveMemberExternalUserAsync(OctoObjectId groupRtId, string externalUserId)
-    {
-        await RemoveOutboundAssociationAsync<RtExternalTenantUserMapping>(
-            groupRtId, externalUserId, IdentityAssociationConstants.GroupMemberId);
-    }
-
     // ========================================
     // Child group associations (ChildGroup)
     // ========================================

@@ -469,3 +469,21 @@ attributes:
     valueType: String
     description: An optional description of the group's purpose.
 
+  - id: AllowSelfRegistration
+    valueType: Boolean
+    description: Controls whether new users can self-register via this identity provider. When false, only existing users can authenticate.
+    defaultValues:
+      - true
+
+  - id: DefaultGroupRtId
+    valueType: String
+    description: Optional RtId of a group to which new users are automatically added on first login via this provider.
+
+  - id: EmailDomainPattern
+    valueType: String
+    description: Email domain pattern to match (e.g., "meshmakers.com"). Matched against the domain part of the user's email.
+
+  - id: TargetGroupRtId
+    valueType: String
+    description: RtId of the group to which matching users are added.
+

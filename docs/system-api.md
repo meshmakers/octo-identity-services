@@ -244,9 +244,40 @@ Transfers all external logins (e.g., Google, Microsoft) from the source user to 
       "name": "string",
       "displayName": "string",
       "isEnabled": true,
+      "allowSelfRegistration": true,  // Controls if new users can self-register via this provider
+      "defaultGroupRtId": "string",   // Optional: Group to auto-assign on first login
       // Provider-specific fields...
     }
   ]
+}
+```
+
+### Email Domain Group Rules (`/{tenantId}/v1/emailDomainGroupRules`)
+
+Manages email domain to group mapping rules. When a new user logs in, their email domain is matched against these rules, and they are automatically added to the target group.
+
+| Method | Endpoint | Policy | Description |
+|--------|----------|--------|-------------|
+| GET | `/emailDomainGroupRules` | ReadOnly | Get all rules |
+| GET | `/emailDomainGroupRules/{rtId}` | ReadOnly | Get rule by ID |
+| POST | `/emailDomainGroupRules` | ReadWrite | Create new rule |
+| PUT | `/emailDomainGroupRules/{rtId}` | ReadWrite | Replace rule |
+| DELETE | `/emailDomainGroupRules/{rtId}` | ReadWrite | Delete rule |
+
+**Request/Response DTOs:**
+
+```typescript
+// EmailDomainGroupRuleDto
+{
+  "rtId": "string",               // Auto-generated on create
+  "emailDomainPattern": "string", // Required: e.g., "meshmakers.com"
+  "targetGroupRtId": "string",    // Required: RtId of the target group
+  "description": "string"         // Optional
+}
+
+// EmailDomainGroupRulesResult (GET all)
+{
+  "emailDomainGroupRules": [EmailDomainGroupRuleDto]
 }
 ```
 
@@ -349,6 +380,21 @@ Group relationships (role assignments, user members, external user members, nest
 **Circular Group Prevention:**
 
 Adding a nested group (PUT `/{rtId}/members/groups/{childGroupId}`) validates that the operation would not create a cycle. If it would, the request is rejected with HTTP 400.
+
+### Admin Provisioning (`/{tenantId}/v1/adminProvisioning/{targetTenantId}`)
+
+Cross-tenant provisioning controller routed via the system tenant. Allows users with TenantManagement role to pre-provision ExternalTenantUserMappings in a target tenant without needing `allowed_tenants` for that tenant.
+
+| Method | Endpoint | Policy | Description |
+|--------|----------|--------|-------------|
+| GET | `/adminProvisioning/{targetTenantId}` | ReadWrite | List all mappings in target tenant |
+| POST | `/adminProvisioning/{targetTenantId}` | ReadWrite | Create new mapping in target tenant |
+| POST | `/adminProvisioning/{targetTenantId}/provisionCurrentUser` | ReadWrite | Provision current user with all roles |
+| DELETE | `/adminProvisioning/{targetTenantId}/{mappingRtId}` | ReadWrite | Delete mapping in target tenant |
+
+**`provisionCurrentUser` endpoint:**
+
+Extracts `sub`, `preferred_username`, and `tenant_id` from the JWT, fetches all roles from the target tenant, and creates an `RtExternalTenantUserMapping` with all role IDs. Returns 200 with the existing mapping if one already exists for this user.
 
 ### Diagnostics (`/{tenantId}/v1/diagnostics`)
 

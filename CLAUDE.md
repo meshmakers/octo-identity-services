@@ -54,7 +54,7 @@ This service depends on Octo framework packages (versioned via `$(OctoVersion)` 
 
 ### Construction Kit (CK) Model
 
-The `Persistence.IdentityCkModel` project uses YAML-based model definitions that are transformed into C# code at build time. Model files are in `src/Persistence.IdentityCkModel/ConstructionKit/`. The model ID is `System.Identity-2.3.0` with dependency on `System-[2.0,3.0)`. Generated types live in namespace `Persistence.IdentityCkModel.Generated.System.Identity.v2`.
+The `Persistence.IdentityCkModel` project uses YAML-based model definitions that are transformed into C# code at build time. Model files are in `src/Persistence.IdentityCkModel/ConstructionKit/`. The model ID is `System.Identity-2.4.0` with dependency on `System-[2.0,3.0)`. Generated types live in namespace `Persistence.IdentityCkModel.Generated.System.Identity.v2`.
 
 ### Cross-Tenant Authentication
 
@@ -64,14 +64,36 @@ The service supports hierarchical cross-tenant authentication where parent-tenan
 - **`RtExternalTenantUserMapping`**: CK type mapping a parent-tenant user to roles in the child tenant
 - **`CrossTenantAuthenticationService`**: Walks the tenant hierarchy to validate credentials against parent tenant databases
 - **`ExternalTenantUserMappingStore`**: Persistence for cross-tenant user role mappings
-- **`ExternalTenantUserMappingsController`**: System API CRUD for managing mappings
+- **`ExternalTenantUserMappingsController`**: System API CRUD for managing mappings (per-tenant, requires `allowed_tenants`)
+- **`AdminProvisioningController`**: Cross-tenant provisioning via system tenant (see below)
 
 **Cross-tenant auto-login** (token-based, no credential re-entry):
 - `POST /{parentTenantId}/api/auth/cross-tenant-token` — Generates a DataProtection-encrypted token (60s expiry) for the authenticated parent-tenant user
 - `POST /{childTenantId}/api/auth/cross-tenant-login` — Exchanges the token for a session in the child tenant
 - The Angular login component automatically attempts token-based auto-login when clicking "LOGIN VIA {parent}". If no parent session exists, it redirects to the parent tenant's login page (where all auth methods are available); after authentication there, it redirects back with a `crossTenantAutoLogin` query param to auto-complete the token exchange
 
+**Cross-tenant role sync**: When a cross-tenant user logs in (via `FindOrCreateCrossTenantUserAsync`), `SyncMappedRolesAsync` resolves mapped role IDs to role names by querying the tenant repository directly (via `IMultiTenancyResolverService.GetTenantRepository()`), then calls `UserManager.AddToRoleAsync` with the role **name** (not ID). This runs on every login, ensuring existing users get role updates. Important: `RoleManager<RtRole>` must NOT be used for this — it may resolve to the wrong tenant context during cross-tenant login. The tenant repository approach reads from `HttpContext.Items["tenantRepository"]` which is correctly set by the inline middleware.
+
 The Identity CK model, default roles, identity resources, API scopes, API resources, and OIDC clients are provisioned to **all tenants** (not just the system tenant) during startup. This ensures OAuth/OIDC flows work when targeting any tenant. For child tenants, roles are written directly to the child tenant database via `EnsureRoleInChildTenantAsync()` using the same `childRepo` pattern as clients and resources. The identity service writes its data directly to child tenant databases (including the `octo-data-refinery-studio` SPA client when `RefineryStudioUrl` is configured), while other services (asset-repo, bot, etc.) send their data via the Distribution Event Hub. Cross-tenant users receive a `home_tenant_id` claim in their tokens.
+
+### Admin Provisioning (Cross-Tenant Pre-Provisioning)
+
+The `AdminProvisioningController` allows users with TenantManagement role to pre-provision cross-tenant user mappings in a **target tenant** without needing `allowed_tenants` for that tenant. It is routed via the system tenant: `{tenantId}/v1/adminProvisioning/{targetTenantId}`.
+
+This solves the chicken-and-egg problem: after creating a child tenant, the user doesn't have `allowed_tenants` for it yet, so the per-tenant `ExternalTenantUserMappingsController` is inaccessible. The admin provisioning controller uses `ISystemContext.TryFindTenantRepositoryAsync()` to access the target tenant's database directly.
+
+**Endpoints:**
+
+| Method | Route | Purpose |
+|--------|-------|---------|
+| `GET` | `/{targetTenantId}` | List all ExternalTenantUserMappings in target tenant |
+| `POST` | `/{targetTenantId}` | Create a new mapping in target tenant |
+| `POST` | `/{targetTenantId}/provisionCurrentUser` | Auto-provision current user with all roles |
+| `DELETE` | `/{targetTenantId}/{mappingRtId}` | Delete a mapping in target tenant |
+
+The `provisionCurrentUser` endpoint extracts `sub`, `preferred_username`, and `tenant_id` from the JWT, fetches all roles from the target tenant, and creates an `RtExternalTenantUserMapping` with all role IDs. It also adds the mapping as a member of the **TenantOwners** group (via `GroupMember` association), so the user inherits all roles through group membership. If a mapping already exists for the user, it returns the existing one.
+
+The `GET` endpoint returns `ExternalTenantUserMappingDto` with a `GroupNames` field populated by querying inbound `GroupMember` associations for each mapping entity.
 
 ### Group-Based Role Inheritance
 
@@ -93,11 +115,29 @@ Key components:
 - **`GroupsController`**: REST API at `{tenantId}/v1/groups` with full CRUD, role assignment, member management, and circular group prevention
 - **`TenantOwners`** group: Default group provisioned in every tenant with all 10 default roles. Created by `DefaultConfigurationCreatorService` and `IdentityAssociationMigration` (migration 9→10)
 
-Current identity schema version: `IdentitySchemaVersionValue = 11`
+Current identity schema version: `IdentitySchemaVersionValue = 12`
+
+### Login Configuration (Self-Registration & Auto-Group Assignment)
+
+Identity providers support login-time configuration via two attributes on the abstract `IdentityProvider` base type:
+
+- **`AllowSelfRegistration`** (bool, default true): When false, new users cannot self-register via this provider — only existing users can authenticate. Applies to all provider types (Google, Azure, OctoTenant, LDAP, etc.)
+- **`DefaultGroupRtId`** (string, optional): RtId of a group to which new users are automatically added on first login via this provider
+
+Additionally, **`EmailDomainGroupRule`** entities map email domain patterns to groups:
+- **`EmailDomainPattern`**: Domain to match (e.g., "meshmakers.com"), case-insensitive
+- **`TargetGroupRtId`**: Group to add matching users to
+- Unique index on `EmailDomainPattern`
+
+Key components:
+- **`ILoginGroupAssignmentService`** / **`LoginGroupAssignmentService`** (`IdentityServerPersistence/Services/Login/`): Orchestrates group assignment from provider defaults + email domain rules
+- **`IEmailDomainGroupRuleStore`** / **`EmailDomainGroupRuleStore`** (`IdentityServerPersistence/SystemStores/`): CRUD for email domain rules
+- **`EmailDomainGroupRulesController`** (`TenantApi/v1/Controllers/`): REST API at `{tenantId}/v1/emailDomainGroupRules`
+- **`AuthApiController`**: Self-registration gate + group assignment in external login callback, LDAP login, cross-tenant password login, and cross-tenant token login
 
 The **Refinery Studio identity management UI** (Users, Roles, Clients) is available for **all tenants**, not just the system tenant. The `IdentityService` in `@meshmakers/octo-services` resolves the current tenant via `TENANT_ID_PROVIDER` and routes API calls to `{tenantId}/v1/...`.
 
-- **`TenantLoginRedirectMiddleware`**: Intercepts IdentityServer's 302 redirects to `/System/login` and rewrites the tenant prefix based on `acr_values=tenant:{tenantId}` in the authorize request ReturnUrl. Registered before `UseIdentityServer()` in the middleware pipeline.
+- **`TenantLoginRedirectMiddleware`**: Intercepts IdentityServer's 302 redirects to `/System/login` (and `/logout`, `/consent`, etc.) and rewrites the tenant prefix based on `acr_values=tenant:{tenantId}` in the authorize request ReturnUrl. For logout redirects (which carry a `logoutId` instead of a `ReturnUrl`), the middleware falls back to the tenant ID stored in `HttpContext.Items` by `OidcTenantResolutionMiddleware` (resolved from the `id_token_hint` JWT). Registered before `UseIdentityServer()` in the middleware pipeline.
 - **Auto-creation of `RtOctoTenantIdentityProvider`**: When a tenant has `ParentTenantId` set, the provider is auto-created during `SetupTenantAsync` (new tenants) and via `OctoTenantIdentityProviderMigration` (existing tenants, migration 8→9).
 
 ### Multi-Tenant Auth Scheme Isolation
@@ -152,6 +192,24 @@ Key components:
 The resolver algorithm: always includes the login tenant; for cross-tenant users (xt_), includes the home tenant; then queries `RtExternalTenantUserMapping` in each child tenant for matching source user mappings.
 
 See `docs/authentication.md` § "Multi-Tenant Token Validation" for full architecture details.
+
+### Multi-Tenancy
+
+### Identity Provider REST API (IdentityProvidersController)
+
+The `IdentityProvidersController` exposes CRUD endpoints for identity provider configurations at `{tenantId}/v1/identityProviders`. All provider types are serialized/deserialized via JSON polymorphism on `IdentityProviderDto`:
+
+| Provider Type | DTO | Enum Value |
+|--------------|-----|------------|
+| Google | `GoogleIdentityProviderDto` | 0 |
+| Microsoft | `MicrosoftIdentityProviderDto` | 1 |
+| Azure Entra ID | `AzureEntraIdProviderDto` | 2 |
+| Microsoft AD | `MicrosoftAdProviderDto` | 3 |
+| OpenLDAP | `OpenLdapProviderDto` | 4 |
+| Facebook | `FacebookIdentityProviderDto` | 5 |
+| Octo Tenant | `OctoTenantIdentityProviderDto` | 6 |
+
+`OctoTenantIdentityProviderDto` has a `ParentTenantId` property identifying the parent tenant for cross-tenant authentication. AutoMapper maps between `RtOctoTenantIdentityProvider` and `OctoTenantIdentityProviderDto` in `MapperProfile`.
 
 ### Multi-Tenancy
 

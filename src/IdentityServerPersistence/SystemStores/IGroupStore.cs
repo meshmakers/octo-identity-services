@@ -76,16 +76,6 @@ public interface IGroupStore
     /// </summary>
     Task<IReadOnlyList<string>> GetMemberExternalUserIdsAsync(OctoObjectId groupRtId);
 
-    /// <summary>
-    /// Adds an external user mapping as a member of a group.
-    /// </summary>
-    Task AddMemberExternalUserAsync(OctoObjectId groupRtId, string externalUserId);
-
-    /// <summary>
-    /// Removes an external user mapping from a group.
-    /// </summary>
-    Task RemoveMemberExternalUserAsync(OctoObjectId groupRtId, string externalUserId);
-
     // ========================================
     // Child group associations (ChildGroup)
     // ========================================
