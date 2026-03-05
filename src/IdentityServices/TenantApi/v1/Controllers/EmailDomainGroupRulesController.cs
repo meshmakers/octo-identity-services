@@ -68,7 +68,8 @@ public class EmailDomainGroupRulesController(
         await HandleWriteExceptionAsync(async () => await emailDomainGroupRuleStore.StoreAsync(rule));
 
         var resultDto = mapper.Map<EmailDomainGroupRuleDto>(rule);
-        return CreatedAtAction(nameof(GetByIdAsync), new { rtId = rule.RtId }, resultDto);
+        var tenantId = HttpContext.GetRouteValue("tenantId") as string;
+        return CreatedAtAction(nameof(GetByIdAsync), new { tenantId, rtId = rule.RtId }, resultDto);
     }
 
     [HttpPut("{rtId}")]
