@@ -505,11 +505,13 @@ public class AuthApiController(
         var surname = claims.FirstOrDefault(c => c.Type == ClaimTypes.Surname)?.Value
                       ?? claims.FirstOrDefault(c => c.Type == "family_name")?.Value;
 
-        // Generate a unique username that includes the provider to avoid collisions
-        // with local users or users from other providers.
+        // Generate a unique username that includes the provider type to avoid collisions
+        // with local users or users from other providers. Strip the tenant prefix from
+        // tenant-scoped scheme names (e.g., "octosystem:Google" → "Google").
+        var providerName = provider.Contains(':') ? provider.Split(':', 2)[1] : provider;
         var userName = !string.IsNullOrEmpty(email)
-            ? $"{provider}_{email}"
-            : $"{provider}_{Guid.NewGuid():N}";
+            ? $"{providerName}_{email}"
+            : $"{providerName}_{Guid.NewGuid():N}";
 
         // Ensure username is unique (handles edge cases like same email across providers)
         var existingUser = await userManager.FindByNameAsync(userName);
