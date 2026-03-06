@@ -215,24 +215,24 @@ internal class DefaultConfigurationCreatorService(
 
     private async Task CreateApiScopes()
     {
-        await resourceStore.TryCreateApiScopeAsync(new ApiScope(CommonConstants.IdentityApiFullAccess,
-            CommonConstants.IdentityApiFullAccessDisplayName));
-        await resourceStore.TryCreateApiScopeAsync(new ApiScope(CommonConstants.IdentityApiReadOnly,
-            CommonConstants.IdentityApiReadOnlyDisplayName));
+        await resourceStore.TryCreateApiScopeAsync(new ApiScope(CommonConstants.OctoApiFullAccess,
+            CommonConstants.OctoApiFullAccessDisplayName));
+        await resourceStore.TryCreateApiScopeAsync(new ApiScope(CommonConstants.OctoApiReadOnly,
+            CommonConstants.OctoApiReadOnlyDisplayName));
     }
 
     private async Task CreateApiResources()
     {
         await resourceStore.GetOrCreateApiResourceAsync(new RtApiResource
         {
-            Name = CommonConstants.IdentityApi,
-            DisplayName = CommonConstants.IdentityApiDisplayName,
-            Description = CommonConstants.IdentityApiDescription,
+            Name = CommonConstants.OctoApi,
+            DisplayName = CommonConstants.OctoApiDisplayName,
+            Description = CommonConstants.OctoApiDescription,
             Enabled = true,
             Scopes = new AttributeStringValueList
             {
-                CommonConstants.IdentityApiFullAccess,
-                CommonConstants.IdentityApiReadOnly
+                CommonConstants.OctoApiFullAccess,
+                CommonConstants.OctoApiReadOnly
             }
         });
     }
@@ -353,11 +353,7 @@ internal class DefaultConfigurationCreatorService(
                 IdentityServerConstants.StandardScopes.Profile,
                 IdentityServerConstants.StandardScopes.Email,
                 JwtClaimTypes.Role,
-                CommonConstants.AssetSystemApiFullAccess,
-                CommonConstants.IdentityApiFullAccess,
-                CommonConstants.BotApiFullAccess,
-                CommonConstants.CommunicationSystemApiFullAccess,
-                CommonConstants.ReportingSystemApiFullAccess,
+                CommonConstants.OctoApiFullAccess,
             }
         };
 
@@ -401,8 +397,8 @@ internal class DefaultConfigurationCreatorService(
                 CommonConstants.Scopes.Profile,
                 CommonConstants.Scopes.Email,
                 JwtClaimTypes.Role,
-                CommonConstants.IdentityApiFullAccess,
-                CommonConstants.IdentityApiReadOnly
+                CommonConstants.OctoApiFullAccess,
+                CommonConstants.OctoApiReadOnly,
             }
         };
 
@@ -449,13 +445,7 @@ internal class DefaultConfigurationCreatorService(
                     CommonConstants.Scopes.Profile,
                     CommonConstants.Scopes.Email,
                     JwtClaimTypes.Role,
-                    CommonConstants.AssetSystemApiFullAccess,
-                    CommonConstants.IdentityApiFullAccess,
-                    CommonConstants.BotApiFullAccess,
-                    CommonConstants.CommunicationSystemApiFullAccess,
-                    CommonConstants.CommunicationTenantApiFullAccess,
-                    CommonConstants.ReportingSystemApiFullAccess,
-                    CommonConstants.ReportingTenantApiFullAccess,
+                    CommonConstants.OctoApiFullAccess,
                 },
 
                 FrontChannelLogoutUri = refineryStudioUrl.EnsureEndsWith("/logout/callback"),
@@ -654,15 +644,15 @@ internal class DefaultConfigurationCreatorService(
 
             // API Scopes
             await EnsureApiScopeAsync(session, childRepo,
-                CommonConstants.IdentityApiFullAccess, CommonConstants.IdentityApiFullAccessDisplayName);
+                CommonConstants.OctoApiFullAccess, CommonConstants.OctoApiFullAccessDisplayName);
             await EnsureApiScopeAsync(session, childRepo,
-                CommonConstants.IdentityApiReadOnly, CommonConstants.IdentityApiReadOnlyDisplayName);
+                CommonConstants.OctoApiReadOnly, CommonConstants.OctoApiReadOnlyDisplayName);
 
             // API Resources
             await EnsureApiResourceAsync(session, childRepo,
-                CommonConstants.IdentityApi, CommonConstants.IdentityApiDisplayName,
-                CommonConstants.IdentityApiDescription,
-                new[] { CommonConstants.IdentityApiFullAccess, CommonConstants.IdentityApiReadOnly });
+                CommonConstants.OctoApi, CommonConstants.OctoApiDisplayName,
+                CommonConstants.OctoApiDescription,
+                new[] { CommonConstants.OctoApiFullAccess, CommonConstants.OctoApiReadOnly });
 
             // Roles (required for per-tenant user management and cross-tenant role mapping)
             await EnsureRoleInChildTenantAsync(session, childRepo, CommonConstants.TenantManagementRole);
@@ -696,11 +686,7 @@ internal class DefaultConfigurationCreatorService(
                     IdentityServerConstants.StandardScopes.Profile,
                     IdentityServerConstants.StandardScopes.Email,
                     JwtClaimTypes.Role,
-                    CommonConstants.AssetSystemApiFullAccess,
-                    CommonConstants.IdentityApiFullAccess,
-                    CommonConstants.BotApiFullAccess,
-                    CommonConstants.CommunicationSystemApiFullAccess,
-                    CommonConstants.ReportingSystemApiFullAccess,
+                    CommonConstants.OctoApiFullAccess,
                 }
             });
 
@@ -728,8 +714,8 @@ internal class DefaultConfigurationCreatorService(
                     CommonConstants.Scopes.Profile,
                     CommonConstants.Scopes.Email,
                     JwtClaimTypes.Role,
-                    CommonConstants.IdentityApiFullAccess,
-                    CommonConstants.IdentityApiReadOnly
+                    CommonConstants.OctoApiFullAccess,
+                    CommonConstants.OctoApiReadOnly,
                 }
             });
 
@@ -761,13 +747,7 @@ internal class DefaultConfigurationCreatorService(
                         CommonConstants.Scopes.Profile,
                         CommonConstants.Scopes.Email,
                         JwtClaimTypes.Role,
-                        CommonConstants.AssetSystemApiFullAccess,
-                        CommonConstants.IdentityApiFullAccess,
-                        CommonConstants.BotApiFullAccess,
-                        CommonConstants.CommunicationSystemApiFullAccess,
-                        CommonConstants.CommunicationTenantApiFullAccess,
-                        CommonConstants.ReportingSystemApiFullAccess,
-                        CommonConstants.ReportingTenantApiFullAccess,
+                        CommonConstants.OctoApiFullAccess,
                     },
                     FrontChannelLogoutUri = refineryStudioUrl.EnsureEndsWith("/logout/callback"),
                     FrontChannelLogoutSessionRequired = true

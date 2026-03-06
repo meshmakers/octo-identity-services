@@ -170,22 +170,21 @@ try
     builder.Services.ConfigureOptions<ConfigureJwtBearerOptions>();
 
     builder.Services.AddAuthentication()
-        .AddJwtBearer(jwt => { jwt.Audience = CommonConstants.IdentityApi; });
+        .AddJwtBearer(jwt => { jwt.Audience = CommonConstants.OctoApi; });
 
     builder.Services.AddAuthorization(options =>
     {
         options.AddPolicy(IdentityServiceConstants.IdentityApiReadOnlyPolicy, authorizationPolicyBuilder =>
         {
-            // require IdentityApiFullAccess or IdentityApiReadOnly
-            authorizationPolicyBuilder.RequireClaim(InfrastructureCommon.ClaimScope, CommonConstants.IdentityApiFullAccess,
-                CommonConstants.IdentityApiReadOnly);
+            authorizationPolicyBuilder.RequireClaim(InfrastructureCommon.ClaimScope,
+                CommonConstants.OctoApiFullAccess,
+                CommonConstants.OctoApiReadOnly);
         });
 
         options.AddPolicy(IdentityServiceConstants.IdentityApiReadWritePolicy, authorizationPolicyBuilder =>
         {
-            // require IdentityApiFullAccess
             authorizationPolicyBuilder.RequireClaim(InfrastructureCommon.ClaimScope,
-                CommonConstants.IdentityApiFullAccess);
+                CommonConstants.OctoApiFullAccess);
         });
     });
 
@@ -194,11 +193,11 @@ try
         options.Scopes = new Dictionary<string, string>
         {
             {
-                CommonConstants.IdentityApiFullAccess,
+                CommonConstants.OctoApiFullAccess,
                 IdentityTexts.Backend_IdentityServices_Api_FullAccess
             },
             {
-                CommonConstants.IdentityApiReadOnly,
+                CommonConstants.OctoApiReadOnly,
                 IdentityTexts.Backend_IdentityServices_Api_ReadOnlyAccess
             }
         };
@@ -207,11 +206,11 @@ try
         {
             {
                 IdentityServiceConstants.IdentityApiReadOnlyPolicy,
-                [CommonConstants.IdentityApiFullAccess, CommonConstants.IdentityApiReadOnly]
+                [CommonConstants.OctoApiFullAccess, CommonConstants.OctoApiReadOnly]
             },
             {
                 IdentityServiceConstants.IdentityApiReadWritePolicy,
-                [CommonConstants.IdentityApiFullAccess]
+                [CommonConstants.OctoApiFullAccess]
             }
         };
 

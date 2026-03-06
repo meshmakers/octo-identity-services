@@ -11,7 +11,7 @@ public class TestAuthHandlerOptions : AuthenticationSchemeOptions
     public string DefaultUserId { get; set; } = "test-user-id";
     public string DefaultUserName { get; set; } = "Test User";
     public string DefaultEmail { get; set; } = "test@example.com";
-    public IEnumerable<string> Scopes { get; set; } = new[] { "identityAPI.full_access" };
+    public IEnumerable<string> Scopes { get; set; } = new[] { "octo_api" };
     public IEnumerable<string> Roles { get; set; } = Array.Empty<string>();
 }
 
