@@ -55,6 +55,19 @@ public class DeviceApiController : ControllerBase
             })
             .ToList();
 
+        if (request.ValidatedResources.Resources.OfflineAccess)
+        {
+            identityScopes.Add(new ScopeItemDto
+            {
+                Name = Duende.IdentityServer.IdentityServerConstants.StandardScopes.OfflineAccess,
+                DisplayName = "Offline Access",
+                Description = "Access to your applications when you are offline",
+                Emphasize = true,
+                Required = false,
+                Checked = true
+            });
+        }
+
         var apiScopes = request.ValidatedResources.Resources.ApiScopes
             .Select(s => new ScopeItemDto
             {
