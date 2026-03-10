@@ -198,7 +198,7 @@ public class AdminProvisioningController(
             {
                 return await ProvisionCurrentUserInternal(tenantRepository, userId, userName, tenantId);
             }
-            catch (CkCacheException) when (attempt < maxRetries)
+            catch (Exception ex) when ((ex is CkCacheException or TenantNotReadyException) && attempt < maxRetries)
             {
                 await Task.Delay(retryDelayMs * attempt);
             }
@@ -245,9 +245,17 @@ public class AdminProvisioningController(
             return Ok(MapToDto(existingMapping, existingGroupNames));
         }
 
-        // Get all roles from target tenant
+        // Get all roles from target tenant.
+        // If no roles exist yet, the default configuration has not been initialized —
+        // throw to trigger a retry in the caller.
         var roleResult = await tenantRepository
             .GetRtEntitiesByTypeAsync<RtRole>(session, RtEntityQueryOptions.Create());
+        if (!roleResult.Items.Any())
+        {
+            await session.CommitTransactionAsync();
+            throw new TenantNotReadyException("No roles found in target tenant — default configuration not yet initialized.");
+        }
+
         var roleIds = roleResult.Items.Select(r => r.RtId.ToString()).ToList();
 
         var mapping = new RtExternalTenantUserMapping
@@ -337,3 +345,8 @@ public class AdminProvisioningController(
             GroupNames = groupNames
         };
 }
+
+/// <summary>
+/// Thrown when the target tenant's default configuration (roles, groups) is not yet initialized.
+/// </summary>
+internal class TenantNotReadyException(string message) : Exception(message);
