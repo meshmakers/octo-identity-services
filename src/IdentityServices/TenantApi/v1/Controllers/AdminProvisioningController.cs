@@ -8,6 +8,7 @@ using Meshmakers.Octo.Communication.Contracts;
 using Meshmakers.Octo.ConstructionKit.Contracts;
 using Meshmakers.Octo.Runtime.Contracts;
 using Meshmakers.Octo.Runtime.Contracts.MongoDb;
+using Meshmakers.Octo.Runtime.Contracts.MongoDb.Repositories;
 using Meshmakers.Octo.Runtime.Contracts.Repositories;
 using Meshmakers.Octo.Runtime.Contracts.Repositories.Query;
 using Meshmakers.Octo.Runtime.Contracts.RepositoryEntities;
@@ -187,6 +188,29 @@ public class AdminProvisioningController(
             }
         }
 
+        // The target tenant may still be initializing (CK model import runs asynchronously after tenant creation).
+        // Retry with backoff if the CK cache is not yet populated.
+        const int maxRetries = 10;
+        const int retryDelayMs = 1000;
+        for (var attempt = 1; attempt <= maxRetries; attempt++)
+        {
+            try
+            {
+                return await ProvisionCurrentUserInternal(tenantRepository, userId, userName, tenantId);
+            }
+            catch (CkCacheException) when (attempt < maxRetries)
+            {
+                await Task.Delay(retryDelayMs * attempt);
+            }
+        }
+
+        return StatusCode(StatusCodes.Status503ServiceUnavailable,
+            $"Tenant '{targetTenantId}' is still initializing. Please try again shortly.");
+    }
+
+    private async Task<ActionResult<ExternalTenantUserMappingDto>> ProvisionCurrentUserInternal(
+        ITenantRepository tenantRepository, string userId, string userName, string tenantId)
+    {
         var session = await tenantRepository.GetSessionAsync();
         session.StartTransaction();
 
