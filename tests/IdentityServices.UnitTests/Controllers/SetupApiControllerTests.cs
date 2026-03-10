@@ -1,4 +1,5 @@
 using FluentAssertions;
+using IdentityServerPersistence.SystemStores;
 using Meshmakers.Octo.Backend.IdentityServices.Controllers.Api;
 using Meshmakers.Octo.Backend.IdentityServices.Services;
 using Meshmakers.Octo.Communication.Contracts.DataTransferObjects;
@@ -14,6 +15,7 @@ namespace IdentityServices.UnitTests.Controllers;
 public class SetupApiControllerTests
 {
     private readonly UserManager<RtUser> _userManager;
+    private readonly IExternalTenantUserMappingStore _externalTenantUserMappingStore;
     private readonly IUserManagementService _userManagementService;
     private readonly ILogger<SetupApiController> _logger;
     private readonly SetupApiController _sut;
@@ -24,22 +26,27 @@ public class SetupApiControllerTests
         _userManager = Substitute.For<UserManager<RtUser>>(
             userStore, null, null, null, null, null, null, null, null);
 
+        _externalTenantUserMappingStore = Substitute.For<IExternalTenantUserMappingStore>();
+        _externalTenantUserMappingStore.GetAllAsync(take: 1)
+            .Returns(Enumerable.Empty<RtExternalTenantUserMapping>());
+
         _userManagementService = Substitute.For<IUserManagementService>();
         _logger = Substitute.For<ILogger<SetupApiController>>();
 
-        _sut = new SetupApiController(_userManager, _userManagementService, _logger);
+        _sut = new SetupApiController(_userManager, _externalTenantUserMappingStore,
+            _userManagementService, _logger);
     }
 
     #region GetStatus Tests
 
     [Fact]
-    public void GetStatus_WhenNoUsersExist_ReturnsOkWithSetupRequired()
+    public async Task GetStatus_WhenNoUsersExist_ReturnsOkWithSetupRequired()
     {
         // Arrange
         _userManager.Users.Returns(Enumerable.Empty<RtUser>().AsQueryable());
 
         // Act
-        var result = _sut.GetStatus();
+        var result = await _sut.GetStatus();
 
         // Assert
         var okResult = result.Should().BeOfType<OkObjectResult>().Subject;
@@ -48,14 +55,29 @@ public class SetupApiControllerTests
     }
 
     [Fact]
-    public void GetStatus_WhenUsersExist_ReturnsNotFound()
+    public async Task GetStatus_WhenUsersExist_ReturnsNotFound()
     {
         // Arrange
         var existingUsers = new List<RtUser> { new() }.AsQueryable();
         _userManager.Users.Returns(existingUsers);
 
         // Act
-        var result = _sut.GetStatus();
+        var result = await _sut.GetStatus();
+
+        // Assert
+        result.Should().BeOfType<NotFoundResult>();
+    }
+
+    [Fact]
+    public async Task GetStatus_WhenExternalMappingsExist_ReturnsNotFound()
+    {
+        // Arrange
+        _userManager.Users.Returns(Enumerable.Empty<RtUser>().AsQueryable());
+        _externalTenantUserMappingStore.GetAllAsync(take: 1)
+            .Returns(new List<RtExternalTenantUserMapping> { new() });
+
+        // Act
+        var result = await _sut.GetStatus();
 
         // Assert
         result.Should().BeOfType<NotFoundResult>();
@@ -71,6 +93,27 @@ public class SetupApiControllerTests
         // Arrange
         var existingUsers = new List<RtUser> { new() }.AsQueryable();
         _userManager.Users.Returns(existingUsers);
+        var request = new SetupAdminRequestDto
+        {
+            Email = "admin@test.com",
+            Password = "SecurePass123!",
+            ConfirmPassword = "SecurePass123!"
+        };
+
+        // Act
+        var result = await _sut.CreateAdmin(request);
+
+        // Assert
+        result.Should().BeOfType<NotFoundResult>();
+    }
+
+    [Fact]
+    public async Task CreateAdmin_WhenExternalMappingsExist_ReturnsNotFound()
+    {
+        // Arrange
+        _userManager.Users.Returns(Enumerable.Empty<RtUser>().AsQueryable());
+        _externalTenantUserMappingStore.GetAllAsync(take: 1)
+            .Returns(new List<RtExternalTenantUserMapping> { new() });
         var request = new SetupAdminRequestDto
         {
             Email = "admin@test.com",

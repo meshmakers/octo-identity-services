@@ -131,6 +131,7 @@ public class AuthApiController(
             IsAuthenticated = isAuthenticated,
             Username = username,
             SetupRequired = !userManager.Users.Any()
+                           && !(await externalTenantUserMappingStore.GetAllAsync(take: 1)).Any()
         };
     }
 
