@@ -1,6 +1,8 @@
 using System.Collections.Concurrent;
+using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
+using IdentityServerPersistence.SystemStores;
 using Microsoft.AspNetCore.WebUtilities;
 using Meshmakers.Octo.Runtime.Contracts.MongoDb;
 using Meshmakers.Octo.Services.Infrastructure;
@@ -194,6 +196,21 @@ internal class OidcTenantResolutionMiddleware(
                     return entry.TenantId;
                 }
 
+                // Fallback: look up the tenant from the persistent grant store (survives service restarts)
+                if (refreshToken != null)
+                {
+                    var tenantId = await ResolveTenantFromPersistedGrantAsync(context, refreshToken);
+                    if (tenantId != null)
+                    {
+                        // Re-populate the in-memory cache for subsequent requests
+                        TokenToTenantMap[refreshToken] = (tenantId, DateTime.UtcNow.Add(RefreshTokenEntryLifetime));
+                        logger.LogDebug(
+                            "Resolved tenant '{TenantId}' from persistent grant store for /connect/token (recovered after restart)",
+                            tenantId);
+                        return tenantId;
+                    }
+                }
+
                 logger.LogDebug(
                     "No tenant mapping found for refresh token on /connect/token — user/client lookups will use system tenant");
             }
@@ -204,6 +221,32 @@ internal class OidcTenantResolutionMiddleware(
         }
 
         return null;
+    }
+
+    /// <summary>
+    /// Resolves the tenant ID from the persistent grant store by hashing the refresh token
+    /// to obtain the grant key and reading the Description field. This is the fallback path
+    /// used when the in-memory mapping is lost (e.g., after a service restart).
+    /// </summary>
+    private async Task<string?> ResolveTenantFromPersistedGrantAsync(HttpContext context, string refreshToken)
+    {
+        try
+        {
+            var grantStore = context.RequestServices.GetService<IOctoPersistentGrantStore>();
+            if (grantStore == null)
+            {
+                return null;
+            }
+
+            // Duende IdentityServer stores grant keys as SHA256 hex hashes of the token handle
+            var grantKey = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(refreshToken)));
+            return await grantStore.GetTenantByGrantKeyAsync(grantKey);
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex, "Failed to resolve tenant from persistent grant store");
+            return null;
+        }
     }
 
     /// <summary>

@@ -161,13 +161,18 @@ Storing grants centrally ensures the authorization code created during authorize
 
 ### Token Endpoint Tenant Resolution
 
-The `/connect/token` endpoint has no `{tenantId}` route segment or `acr_values` parameter. To ensure `OctoUserStore`, `ClientStore`, and other per-tenant stores use the correct tenant database, `OidcTenantResolutionMiddleware` maintains an in-memory authorization code → tenant mapping:
+The `/connect/token` endpoint has no `{tenantId}` route segment or `acr_values` parameter. To ensure `OctoUserStore`, `ClientStore`, and other per-tenant stores use the correct tenant database, `OidcTenantResolutionMiddleware` resolves tenant via a two-tier strategy:
 
-1. During `/connect/authorize`, after the tenant is resolved from `acr_values`, an `OnStarting` callback captures the authorization code from the 302 redirect `Location` header
-2. The code → tenantId pair is stored in a static `ConcurrentDictionary` (entries expire after 10 minutes)
-3. During `/connect/token` with `grant_type=authorization_code`, the middleware reads the `code` from the form body, looks up the tenant, and sets `HttpContext.Items` accordingly
+**Authorization codes:**
+1. During `/connect/authorize`, an `OnStarting` callback captures the authorization code from the 302 redirect and maps it to the tenant in an in-memory `ConcurrentDictionary` (10-minute expiry)
+2. During `/connect/token` with `grant_type=authorization_code`, the middleware reads `code` from the form body and looks up the tenant
 
-This ensures all per-request stores (user, client, resource) query the correct tenant database. `PersistentGrantStore` is unaffected — it always uses the system tenant regardless.
+**Refresh tokens (two-tier: in-memory + persistent):**
+1. When `/connect/token` returns a new refresh token, the middleware captures it in the in-memory cache (30-day expiry)
+2. `PersistentGrantStore` also stores the tenant ID in the `Description` field of the `RtPersistedGrant` entity
+3. On refresh, the middleware first checks the in-memory cache; if missing (e.g., after service restart), it hashes the token (SHA256) and queries the persistent grant store for the tenant, then re-populates the in-memory cache
+
+This two-tier approach ensures token refresh operations survive service restarts and deployments without requiring users to re-authenticate. `PersistentGrantStore` always uses the system tenant database regardless of the per-request tenant context.
 
 ### Per-Tenant Cookie Scoping
 

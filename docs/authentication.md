@@ -651,6 +651,10 @@ OIDC endpoints (`/connect/*`) don't include a `{tenantId}` route segment. The `O
 
 **Authorization code → tenant mapping:** During `/connect/authorize`, the middleware registers an `OnStarting` callback that captures the authorization code from the 302 redirect `Location` header and maps it to the resolved tenant ID in an in-memory `ConcurrentDictionary`. When `/connect/token` is called with `grant_type=authorization_code`, the middleware reads the `code` from the form body, looks up the tenant from the mapping, and sets the correct tenant context. This ensures `OctoUserStore`, `ClientStore`, and other per-tenant stores use the correct tenant database during the token exchange. The mapping entries expire after 10 minutes and are cleaned up opportunistically.
 
+**Refresh token → tenant mapping:** When `/connect/token` returns a successful response containing a `refresh_token`, the middleware captures the token and maps it to the current tenant ID in the in-memory cache (entries expire after 30 days). On subsequent refresh token exchanges, the middleware looks up the tenant from this mapping.
+
+**Persistent fallback for refresh tokens:** To survive service restarts, the tenant ID is also persisted in the `Description` field of the `RtPersistedGrant` entity in the system database. When the in-memory mapping is missing (e.g., after a restart or deployment), the middleware hashes the refresh token (SHA256) to obtain the grant key, queries the persistent grant store for the tenant, and re-populates the in-memory cache. This ensures token refresh operations continue to work seamlessly across deployments without requiring users to re-authenticate.
+
 **Note:** `PersistentGrantStore` always uses the system tenant database (regardless of the per-request tenant context) to ensure grants are accessible from both `/connect/authorize` and `/connect/token`, and by the `TokenCleanupHostService` which runs without HTTP context.
 
 The middleware runs after routing, before `UseIdentityServer()`:

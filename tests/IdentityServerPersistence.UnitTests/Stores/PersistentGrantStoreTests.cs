@@ -9,6 +9,7 @@ using Meshmakers.Octo.Runtime.Contracts.MongoDb.Repositories;
 using Meshmakers.Octo.Runtime.Contracts.Repositories;
 using Meshmakers.Octo.Runtime.Contracts.Repositories.Query;
 using Meshmakers.Octo.Runtime.Engine.Repositories.Query;
+using Microsoft.AspNetCore.Http;
 using NSubstitute;
 using Persistence.IdentityCkModel.Generated.System.Identity.v2;
 using Shared.TestUtilities.Builders;
@@ -38,7 +39,8 @@ public class PersistentGrantStoreTests
 
         _systemContext.GetSystemTenantRepository().Returns(_tenantRepository);
 
-        _sut = new PersistentGrantStore(_systemContext, _mapper);
+        var httpContextAccessor = Substitute.For<IHttpContextAccessor>();
+        _sut = new PersistentGrantStore(_systemContext, _mapper, httpContextAccessor);
     }
 
     #region StoreAsync Tests

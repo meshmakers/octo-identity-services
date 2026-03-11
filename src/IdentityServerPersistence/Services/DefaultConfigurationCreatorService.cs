@@ -146,6 +146,12 @@ internal class DefaultConfigurationCreatorService(
                 new DefaultConfigurationVersion { Version = IdentityServiceConstants.IdentitySchemaVersionValue });
         }
 
+        // Always ensure the Refinery Studio client is up-to-date, even when the schema version
+        // hasn't changed. Its configuration depends on runtime settings (RefineryStudioUrl) and
+        // may include critical flags like UpdateAccessTokenClaimsOnRefresh that must be applied
+        // to existing clients without requiring a schema version bump.
+        await EnsureRefineryStudioClientAsync();
+
         await session.CommitTransactionAsync();
     }
 
@@ -413,54 +419,67 @@ internal class DefaultConfigurationCreatorService(
             await clientStore.UpdateAsync(octoIdentityServiceSwaggerClient.ClientId, appClient);
         }
 
-        // Refinery Studio SPA client (only if URL is configured)
+        await EnsureRefineryStudioClientAsync();
+    }
+
+    /// <summary>
+    /// Ensures the Refinery Studio SPA OIDC client is up-to-date in the system tenant.
+    /// Called unconditionally at startup (outside the schema version check) because its
+    /// configuration depends on runtime settings and critical flags like
+    /// <c>UpdateAccessTokenClaimsOnRefresh</c>.
+    /// </summary>
+    private async Task EnsureRefineryStudioClientAsync()
+    {
         var refineryStudioUrl = octoIdentityOptions.Value.RefineryStudioUrl;
-        if (!string.IsNullOrWhiteSpace(refineryStudioUrl))
+        if (string.IsNullOrWhiteSpace(refineryStudioUrl))
         {
-            var refineryStudioClient = new RtClient
+            return;
+        }
+
+        var refineryStudioClient = new RtClient
+        {
+            Enabled = true,
+            ClientId = RefineryStudioClientId,
+            ClientName = "Data Refinery Studio",
+            ClientUri = refineryStudioUrl,
+
+            AllowedGrantTypes = new AttributeStringValueList { OidcConstants.GrantTypes.AuthorizationCode },
+
+            RequirePkce = true,
+            RequireClientSecret = false,
+            RequireConsent = false,
+
+            AccessTokenType = RtTokenTypeEnum.Jwt,
+            AllowAccessTokensViaBrowser = true,
+            AlwaysIncludeUserClaimsInIdToken = true,
+            UpdateAccessTokenClaimsOnRefresh = true,
+
+            RedirectUris = { refineryStudioUrl.EnsureEndsWith("/") },
+            PostLogoutRedirectUris = { refineryStudioUrl.EnsureEndsWith("/") },
+            AllowedCorsOrigins = { refineryStudioUrl.TrimEnd('/') },
+            AllowOfflineAccess = true,
+
+            AllowedScopes =
             {
-                Enabled = true,
-                ClientId = RefineryStudioClientId,
-                ClientName = "Data Refinery Studio",
-                ClientUri = refineryStudioUrl,
+                CommonConstants.Scopes.OpenId,
+                CommonConstants.Scopes.Profile,
+                CommonConstants.Scopes.Email,
+                JwtClaimTypes.Role,
+                CommonConstants.OctoApiFullAccess,
+            },
 
-                AllowedGrantTypes = new AttributeStringValueList { OidcConstants.GrantTypes.AuthorizationCode },
+            FrontChannelLogoutUri = refineryStudioUrl.EnsureEndsWith("/logout/callback"),
+            FrontChannelLogoutSessionRequired = true
+        };
 
-                RequirePkce = true,
-                RequireClientSecret = false,
-                RequireConsent = false,
-
-                AccessTokenType = RtTokenTypeEnum.Jwt,
-                AllowAccessTokensViaBrowser = true,
-                AlwaysIncludeUserClaimsInIdToken = true,
-
-                RedirectUris = { refineryStudioUrl.EnsureEndsWith("/") },
-                PostLogoutRedirectUris = { refineryStudioUrl.EnsureEndsWith("/") },
-                AllowedCorsOrigins = { refineryStudioUrl.TrimEnd('/') },
-                AllowOfflineAccess = true,
-
-                AllowedScopes =
-                {
-                    CommonConstants.Scopes.OpenId,
-                    CommonConstants.Scopes.Profile,
-                    CommonConstants.Scopes.Email,
-                    JwtClaimTypes.Role,
-                    CommonConstants.OctoApiFullAccess,
-                },
-
-                FrontChannelLogoutUri = refineryStudioUrl.EnsureEndsWith("/logout/callback"),
-                FrontChannelLogoutSessionRequired = true
-            };
-
-            var existingRefineryStudioClient = await clientStore.FindClientByIdAsync(RefineryStudioClientId);
-            if (existingRefineryStudioClient == null)
-            {
-                await clientStore.CreateAsync(refineryStudioClient);
-            }
-            else
-            {
-                await clientStore.UpdateAsync(existingRefineryStudioClient.ClientId, refineryStudioClient);
-            }
+        var existingRefineryStudioClient = await clientStore.FindClientByIdAsync(RefineryStudioClientId);
+        if (existingRefineryStudioClient == null)
+        {
+            await clientStore.CreateAsync(refineryStudioClient);
+        }
+        else
+        {
+            await clientStore.UpdateAsync(existingRefineryStudioClient.ClientId, refineryStudioClient);
         }
     }
 
@@ -737,6 +756,7 @@ internal class DefaultConfigurationCreatorService(
                     AccessTokenType = RtTokenTypeEnum.Jwt,
                     AllowAccessTokensViaBrowser = true,
                     AlwaysIncludeUserClaimsInIdToken = true,
+                    UpdateAccessTokenClaimsOnRefresh = true,
                     RedirectUris = { refineryStudioUrl.EnsureEndsWith("/") },
                     PostLogoutRedirectUris = { refineryStudioUrl.EnsureEndsWith("/") },
                     AllowedCorsOrigins = { refineryStudioUrl.TrimEnd('/') },

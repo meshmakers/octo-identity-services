@@ -7,6 +7,8 @@ using Meshmakers.Octo.Runtime.Contracts.MongoDb;
 using Meshmakers.Octo.Runtime.Contracts.MongoDb.Repositories;
 using Meshmakers.Octo.Runtime.Contracts.Repositories;
 using Meshmakers.Octo.Runtime.Contracts.Repositories.Query;
+using Meshmakers.Octo.Services.Infrastructure;
+using Microsoft.AspNetCore.Http;
 using NLog;
 using Persistence.IdentityCkModel.Generated.System.Identity.v2;
 
@@ -18,7 +20,10 @@ namespace IdentityServerPersistence.SystemStores;
 /// <c>acr_values</c>) and the <c>/connect/token</c> endpoint (which has no tenant context), ensuring
 /// the authorization code can always be found during the token exchange.
 /// </remarks>
-public class PersistentGrantStore(ISystemContext systemContext, IMapper mapper)
+public class PersistentGrantStore(
+    ISystemContext systemContext,
+    IMapper mapper,
+    IHttpContextAccessor httpContextAccessor)
     : IOctoPersistentGrantStore
 {
     private const int TokenCleanupBatchSize = 50;
@@ -29,6 +34,18 @@ public class PersistentGrantStore(ISystemContext systemContext, IMapper mapper)
 
     public async Task StoreAsync(PersistedGrant grant)
     {
+        // Store the current tenant ID in the Description field for refresh_token grants.
+        // This allows the OIDC tenant resolution middleware to recover the token-to-tenant
+        // mapping after a service restart by querying the persistent grant store.
+        if (string.Equals(grant.Type, "refresh_token", StringComparison.Ordinal))
+        {
+            var tenantId = httpContextAccessor.HttpContext?.Items[InfrastructureCommon.TenantIdName] as string;
+            if (!string.IsNullOrEmpty(tenantId))
+            {
+                grant.Description = tenantId;
+            }
+        }
+
         var session = await _tenantRepository.GetSessionAsync();
         session.StartTransaction();
 
@@ -174,6 +191,17 @@ public class PersistentGrantStore(ISystemContext systemContext, IMapper mapper)
         }
 
         await session.CommitTransactionAsync();
+    }
+
+    public async Task<string?> GetTenantByGrantKeyAsync(string grantKey)
+    {
+        var session = await _tenantRepository.GetSessionAsync();
+        session.StartTransaction();
+
+        var rtGrant = await GetRtPersistentGrantByKeyAsync(session, grantKey);
+
+        await session.CommitTransactionAsync();
+        return rtGrant?.Description;
     }
 
     private RtPersistedGrant GetApplicationPersistedGrant(PersistedGrant grant)
