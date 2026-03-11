@@ -757,7 +757,8 @@ AllowedTenantsResolver.ResolveAsync()
         ├── Always include the login tenant
         ├── For cross-tenant users (xt_): include home tenant
         ├── Get all child tenants from system context
-        └── For each child: check RtExternalTenantUserMapping
+        ├── For each child: check RtExternalTenantUserMapping
+        └── Walk up ancestor chain via OctoTenantIdentityProvider.ParentTenantId
         │
         ▼
 Access token includes: allowed_tenants: ["tenant1", "tenant2", ...]
@@ -776,10 +777,16 @@ Access token includes: allowed_tenants: ["tenant1", "tenant2", ...]
 
 1. **Always include the login tenant** (the tenant the user authenticated against)
 2. **Cross-tenant users** (`xt_{homeTenant}_{username}`): include the home tenant
-3. **Determine source identity**: For cross-tenant users, resolve the source user in the home tenant; for regular users, use the login tenant + user ID
-4. **Query child tenants**: Get all child tenants via `ITenantContext.GetChildTenantsAsync()`
-5. **Check mappings**: For each child tenant, query `RtExternalTenantUserMapping` for matching `SourceTenantId` + `SourceUserId`
-6. **Include matching tenants**: Add each child tenant with a valid mapping to the result
+3. **Walk up ancestor chain**: Starting from the login tenant, query `RtOctoTenantIdentityProvider.ParentTenantId`, add each ancestor (max depth: 10, with circular reference protection)
+4. **BFS down through descendants**: Starting from the source tenant (with original username) and login tenant (with login username), check child tenants for `ExternalTenantUserMapping` matching `SourceTenantId` + `SourceUserName`
+5. **Follow the xt_ username chain**: When a child match is found, the user's username in the child tenant follows the pattern `xt_{parentTenantId}_{parentUsername}`. This propagated username is used to check further descendants.
+
+This ensures cascading tenant hierarchies work correctly. Example: `octosystem → meshtest → subtenant1`:
+- Mapping in meshtest: `sourceTenantId=octosystem, sourceUserName=admin`
+- Mapping in subtenant1: `sourceTenantId=meshtest, sourceUserName=xt_octosystem_admin`
+- User "admin" logging into octosystem → BFS finds meshtest (sourceUserName=admin), then subtenant1 (sourceUserName=xt_octosystem_admin)
+- User "xt_octosystem_admin" logging into meshtest → BFS finds subtenant1 (sourceUserName=xt_octosystem_admin), ancestors add octosystem
+- User logging into subtenant1 → ancestors add meshtest and octosystem
 
 ### TenantAuthorizationMiddleware
 

@@ -15,20 +15,23 @@ public interface IAllowedTenantsResolver
 }
 
 /// <summary>
-///     Default implementation that resolves allowed tenants by checking cross-tenant user mappings
-///     across child tenants.
+///     Default implementation that resolves allowed tenants by walking up the ancestor chain,
+///     then doing a BFS down through descendant tenants checking cross-tenant user mappings.
+///     The BFS tracks the user's username at each tier to follow the xt_ naming chain.
 /// </summary>
 public class AllowedTenantsResolver(
     ISystemContext systemContext,
     ILogger<AllowedTenantsResolver> logger) : IAllowedTenantsResolver
 {
+    private const int MaxHierarchyDepth = 10;
+
     public async Task<IReadOnlyList<string>> ResolveAsync(string loginTenantId, RtUser user)
     {
         var allowedTenants = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { loginTenantId };
 
         // Determine the source identity for cross-tenant lookups
         string sourceTenantId;
-        string sourceUserId;
+        string sourceUserName;
 
         if (user.UserName != null && user.UserName.StartsWith("xt_"))
         {
@@ -39,105 +42,220 @@ public class AllowedTenantsResolver(
                 var homeTenantId = parts[1];
                 allowedTenants.Add(homeTenantId);
                 sourceTenantId = homeTenantId;
-
-                // For cross-tenant users, resolve the source user in the home tenant
-                var sourceUser = await FindSourceUserAsync(homeTenantId, user);
-                sourceUserId = sourceUser?.RtId.ToString() ?? user.RtId.ToString();
+                sourceUserName = parts[2]; // original username in home tenant
             }
             else
             {
                 sourceTenantId = loginTenantId;
-                sourceUserId = user.RtId.ToString();
+                sourceUserName = user.UserName;
             }
         }
         else
         {
             sourceTenantId = loginTenantId;
-            sourceUserId = user.RtId.ToString();
+            sourceUserName = user.UserName ?? string.Empty;
         }
 
-        // Get all child tenants and check for mappings
-        try
-        {
-            var tenantContext = await systemContext.FindTenantContextAsync(sourceTenantId);
-            var adminSession = await tenantContext.GetAdminSessionAsync();
-            var childTenants = await tenantContext.GetChildTenantsAsync(adminSession);
+        // Walk up the ancestor chain from the login tenant via OctoTenantIdentityProvider.ParentTenantId
+        await ResolveAncestorTenantsAsync(loginTenantId, allowedTenants);
 
-            foreach (var childTenant in childTenants.Items)
-            {
-                if (allowedTenants.Contains(childTenant.TenantId))
-                {
-                    continue;
-                }
+        // Build BFS seeds by unwinding the xt_ username chain through all tiers.
+        // e.g. (subtenant1, "xt_meshtest_xt_octosystem_admin") → (meshtest, "xt_octosystem_admin") → (octosystem, "admin")
+        var bfsSeeds = BuildUserNameChain(loginTenantId, user.UserName ?? string.Empty);
 
-                try
-                {
-                    var hasMapping = await HasExternalTenantUserMappingAsync(
-                        childTenant.TenantId, sourceTenantId, sourceUserId);
-                    if (hasMapping)
-                    {
-                        allowedTenants.Add(childTenant.TenantId);
-                    }
-                }
-                catch (Exception ex)
-                {
-                    logger.LogWarning(ex,
-                        "Failed to check external tenant user mapping in tenant '{ChildTenantId}' for user '{UserId}' from tenant '{SourceTenantId}'",
-                        childTenant.TenantId, sourceUserId, sourceTenantId);
-                }
-            }
-        }
-        catch (Exception ex)
-        {
-            logger.LogWarning(ex,
-                "Failed to resolve child tenants for source tenant '{SourceTenantId}'",
-                sourceTenantId);
-        }
+        await ResolveDescendantTenantsAsync(bfsSeeds, allowedTenants);
 
         logger.LogDebug(
-            "Resolved {Count} allowed tenants for user '{UserName}' (source: {SourceTenantId}/{SourceUserId}): {Tenants}",
-            allowedTenants.Count, user.UserName, sourceTenantId, sourceUserId,
+            "Resolved {Count} allowed tenants for user '{UserName}' (source: {SourceTenantId}): {Tenants}",
+            allowedTenants.Count, user.UserName, sourceTenantId,
             string.Join(", ", allowedTenants));
 
         return allowedTenants.ToList();
     }
 
-    private async Task<RtUser?> FindSourceUserAsync(string homeTenantId, RtUser crossTenantUser)
+    /// <summary>
+    ///     Builds the full (tenantId, username) chain by unwinding xt_ prefixes.
+    ///     e.g. (subtenant1, "xt_meshtest_xt_octosystem_admin")
+    ///        → (meshtest, "xt_octosystem_admin")
+    ///        → (octosystem, "admin")
+    /// </summary>
+    private static List<(string TenantId, string UserName)> BuildUserNameChain(
+        string loginTenantId, string userName)
+    {
+        var chain = new List<(string TenantId, string UserName)>();
+        var currentTenantId = loginTenantId;
+        var currentUserName = userName;
+        var visited = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        while (!string.IsNullOrEmpty(currentUserName) && visited.Add(currentTenantId))
+        {
+            chain.Add((currentTenantId, currentUserName));
+
+            if (!currentUserName.StartsWith("xt_"))
+            {
+                break;
+            }
+
+            var parts = currentUserName.Split('_', 3);
+            if (parts.Length < 3)
+            {
+                break;
+            }
+
+            currentTenantId = parts[1]; // home tenant
+            currentUserName = parts[2]; // username in home tenant
+        }
+
+        return chain;
+    }
+
+    /// <summary>
+    ///     BFS through descendant tenants. For each seed (tenantId, username), get child tenants
+    ///     and check for ExternalTenantUserMapping matching sourceUserName. When a match is found,
+    ///     enqueue the child with the cross-tenant username pattern: xt_{parentTenantId}_{parentUsername}.
+    /// </summary>
+    private async Task ResolveDescendantTenantsAsync(
+        List<(string TenantId, string UserName)> seeds, HashSet<string> allowedTenants)
+    {
+        var queue = new Queue<(string TenantId, string UserName)>(seeds);
+        // Track which parents we've already processed to avoid infinite loops
+        var processedParents = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        while (queue.Count > 0)
+        {
+            var (currentTenantId, currentUserName) = queue.Dequeue();
+
+            // Skip if we've already processed this tenant as a parent
+            if (!processedParents.Add(currentTenantId))
+            {
+                continue;
+            }
+
+            if (string.IsNullOrEmpty(currentUserName))
+            {
+                continue;
+            }
+
+            try
+            {
+                var tenantContext = await systemContext.FindTenantContextAsync(currentTenantId);
+                var adminSession = await tenantContext.GetAdminSessionAsync();
+                var childTenants = await tenantContext.GetChildTenantsAsync(adminSession);
+
+                foreach (var childTenant in childTenants.Items)
+                {
+                    // Skip children already in allowed tenants
+                    if (allowedTenants.Contains(childTenant.TenantId))
+                    {
+                        continue;
+                    }
+
+                    try
+                    {
+                        var hasMapping = await HasExternalTenantUserMappingByNameAsync(
+                            childTenant.TenantId, currentTenantId, currentUserName);
+                        if (hasMapping)
+                        {
+                            allowedTenants.Add(childTenant.TenantId);
+
+                            // The user in the child tenant will be: xt_{parentTenantId}_{parentUsername}
+                            var childUserName = $"xt_{currentTenantId}_{currentUserName}";
+                            queue.Enqueue((childTenant.TenantId, childUserName));
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        logger.LogWarning(ex,
+                            "Failed to check external tenant user mapping in tenant '{ChildTenantId}' for user '{UserName}' from tenant '{SourceTenantId}'",
+                            childTenant.TenantId, currentUserName, currentTenantId);
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                logger.LogWarning(ex,
+                    "Failed to resolve child tenants for tenant '{TenantId}'",
+                    currentTenantId);
+            }
+        }
+    }
+
+    private async Task ResolveAncestorTenantsAsync(string startTenantId, HashSet<string> allowedTenants)
+    {
+        var visited = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { startTenantId };
+        var currentTenantId = startTenantId;
+
+        for (var depth = 0; depth < MaxHierarchyDepth; depth++)
+        {
+            try
+            {
+                var providers = await GetOctoTenantProvidersInTenantAsync(currentTenantId);
+                var parentFound = false;
+
+                foreach (var provider in providers)
+                {
+                    if (string.IsNullOrEmpty(provider.ParentTenantId))
+                    {
+                        continue;
+                    }
+
+                    if (!visited.Add(provider.ParentTenantId))
+                    {
+                        // Circular reference — stop
+                        logger.LogWarning(
+                            "Circular reference detected in tenant hierarchy at '{TenantId}'",
+                            provider.ParentTenantId);
+                        return;
+                    }
+
+                    allowedTenants.Add(provider.ParentTenantId);
+                    currentTenantId = provider.ParentTenantId;
+                    parentFound = true;
+                    break; // Follow the first enabled provider's parent
+                }
+
+                if (!parentFound)
+                {
+                    break; // No parent — reached the root
+                }
+            }
+            catch (Exception ex)
+            {
+                logger.LogWarning(ex,
+                    "Failed to resolve ancestor tenants from tenant '{TenantId}'",
+                    currentTenantId);
+                break;
+            }
+        }
+    }
+
+    private async Task<IEnumerable<RtOctoTenantIdentityProvider>> GetOctoTenantProvidersInTenantAsync(
+        string tenantId)
     {
         try
         {
-            // The cross-tenant user in the child tenant has the original username embedded:
-            // xt_{homeTenant}_{originalUsername}
-            var parts = crossTenantUser.UserName!.Split('_', 3);
-            if (parts.Length < 3)
-            {
-                return null;
-            }
-
-            var originalUserName = parts[2];
-            var tenantRepository = await systemContext.FindTenantRepositoryAsync(homeTenantId);
+            var tenantRepository = await systemContext.FindTenantRepositoryAsync(tenantId);
             var session = await tenantRepository.GetSessionAsync();
             session.StartTransaction();
 
-            var queryOptions = RtEntityQueryOptions.Create()
-                .FieldEquals(nameof(RtUser.NormalizedUserName), originalUserName.ToUpperInvariant());
-
-            var result = await tenantRepository.GetRtEntitiesByTypeAsync<RtUser>(session, queryOptions);
+            var queryOptions = RtEntityQueryOptions.Create();
+            var result = await tenantRepository
+                .GetRtEntitiesByTypeAsync<RtOctoTenantIdentityProvider>(session, queryOptions);
             await session.CommitTransactionAsync();
 
-            return result.Items.SingleOrDefault();
+            return result.Items.Where(p => p.IsEnabled);
         }
         catch (Exception ex)
         {
             logger.LogWarning(ex,
-                "Failed to find source user for cross-tenant user '{UserName}' in tenant '{TenantId}'",
-                crossTenantUser.UserName, homeTenantId);
-            return null;
+                "Failed to query OctoTenantIdentityProviders in tenant '{TenantId}'",
+                tenantId);
+            return [];
         }
     }
 
-    private async Task<bool> HasExternalTenantUserMappingAsync(
-        string childTenantId, string sourceTenantId, string sourceUserId)
+    private async Task<bool> HasExternalTenantUserMappingByNameAsync(
+        string childTenantId, string sourceTenantId, string sourceUserName)
     {
         var tenantRepository = await systemContext.FindTenantRepositoryAsync(childTenantId);
         var session = await tenantRepository.GetSessionAsync();
@@ -145,7 +263,7 @@ public class AllowedTenantsResolver(
 
         var queryOptions = RtEntityQueryOptions.Create()
             .FieldEquals(nameof(RtExternalTenantUserMapping.SourceTenantId), sourceTenantId)
-            .FieldEquals(nameof(RtExternalTenantUserMapping.SourceUserId), sourceUserId);
+            .FieldEquals(nameof(RtExternalTenantUserMapping.SourceUserName), sourceUserName);
 
         var result = await tenantRepository
             .GetRtEntitiesByTypeAsync<RtExternalTenantUserMapping>(session, queryOptions);
