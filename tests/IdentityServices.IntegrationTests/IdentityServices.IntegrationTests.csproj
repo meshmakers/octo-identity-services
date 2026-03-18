@@ -17,7 +17,7 @@
             <PrivateAssets>all</PrivateAssets>
             <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
         </PackageReference>
-        <PackageReference Include="coverlet.collector" Version="6.0.4">
+        <PackageReference Include="coverlet.collector" Version="8.0.1">
             <PrivateAssets>all</PrivateAssets>
             <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
         </PackageReference>
@@ -29,20 +29,20 @@
         <PackageReference Include="FluentAssertions" Version="8.8.0" />
 
         <!-- TOTP Code Generation -->
-        <PackageReference Include="Otp.NET" Version="1.4.0" />
+        <PackageReference Include="Otp.NET" Version="1.4.1" />
 
         <!-- Integration Testing -->
-        <PackageReference Include="Microsoft.AspNetCore.Mvc.Testing" Version="10.0.2" />
+        <PackageReference Include="Microsoft.AspNetCore.Mvc.Testing" Version="10.0.5" />
 
         <!-- TestContainers for MongoDB -->
-        <PackageReference Include="Testcontainers.MongoDb" Version="4.10.0" />
+        <PackageReference Include="Testcontainers.MongoDb" Version="4.11.0" />
 
         <!-- Logging for xUnit -->
-        <PackageReference Include="MartinCostello.Logging.XUnit.v3" Version="0.7.0" />
+        <PackageReference Include="MartinCostello.Logging.XUnit.v3" Version="0.7.1" />
 
         <!-- Configuration -->
-        <PackageReference Include="Microsoft.Extensions.Configuration.Json" Version="10.0.2" />
-        <PackageReference Include="Microsoft.Extensions.Configuration.Binder" Version="10.0.2" />
+        <PackageReference Include="Microsoft.Extensions.Configuration.Json" Version="10.0.5" />
+        <PackageReference Include="Microsoft.Extensions.Configuration.Binder" Version="10.0.5" />
     </ItemGroup>
 
     <ItemGroup>
