@@ -35,9 +35,13 @@ public class IdentityCorsPolicyProvider : ICorsPolicyProvider
         _logger.LogInformation("Creating CORS policy for Identity API from client origins: {Origins}",
             string.Join(", ", origins));
 
-        var policyBuilder = new CorsPolicyBuilder()
-            .WithOrigins(origins)
-            .AllowAnyHeader()
+        var policyBuilder = new CorsPolicyBuilder();
+        if (origins.Length > 0)
+        {
+            policyBuilder.WithOrigins(origins);
+        }
+
+        policyBuilder.AllowAnyHeader()
             .AllowAnyMethod();
         _cachedPolicy = policyBuilder.Build();
 
