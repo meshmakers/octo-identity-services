@@ -2,6 +2,7 @@ export interface ExternalProvider {
   scheme: string;
   displayName: string;
   isLdap: boolean;
+  isParentTenant: boolean;
 }
 
 export interface LoginContext {
@@ -106,6 +107,17 @@ export interface RecoveryCodeLoginRequest {
 export interface SendTwoFactorEmailResult {
   success: boolean;
   errorMessage?: string;
+}
+
+// Cross-Tenant Auto-Login Types
+
+export interface CrossTenantTokenResult {
+  token: string;
+}
+
+export interface CrossTenantLoginRequest {
+  token: string;
+  returnUrl: string;
 }
 
 // LDAP Authentication Types

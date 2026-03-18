@@ -8,29 +8,25 @@ using Persistence.IdentityCkModel.Generated.System.Identity.v2;
 
 namespace IdentityServerPersistence.SystemStores;
 
-public class IdentityProviderStore : IOctoIdentityProviderStore
+public class IdentityProviderStore(IMultiTenancyResolverService multiTenancyResolverService)
+    : IOctoIdentityProviderStore
 {
-    private readonly ITenantRepository _tenantRepository;
+    private ITenantRepository TenantRepository => multiTenancyResolverService.GetTenantRepository();
 
-    public IdentityProviderStore(IMultiTenancyResolverService multiTenancyResolverService)
-    {
-        _tenantRepository = multiTenancyResolverService.GetTenantRepository();
-    }
-
-    public string TenantId => _tenantRepository.TenantId;
+    public string TenantId => TenantRepository.TenantId;
 
     public async Task<RtIdentityProvider?> GetByNameAsync(string name)
     {
         ArgumentValidation.ValidateString(nameof(name), name);
 
-        var session = await _tenantRepository.GetSessionAsync();
+        var session = await TenantRepository.GetSessionAsync();
         session.StartTransaction();
 
         var queryOptions = RtEntityQueryOptions.Create()
             .FieldEquals(nameof(RtIdentityProvider.Name), name)
             .FieldEquals(nameof(RtIdentityProvider.IsEnabled), true);
 
-        var result = await _tenantRepository.GetRtEntitiesByTypeAsync<RtIdentityProvider>(session, queryOptions);
+        var result = await TenantRepository.GetRtEntitiesByTypeAsync<RtIdentityProvider>(session, queryOptions);
 
         await session.CommitTransactionAsync();
         return result.Items.SingleOrDefault();
@@ -38,10 +34,10 @@ public class IdentityProviderStore : IOctoIdentityProviderStore
 
     public async Task<RtIdentityProvider?> GetByIdAsync(OctoObjectId rtId)
     {
-        var session = await _tenantRepository.GetSessionAsync();
+        var session = await TenantRepository.GetSessionAsync();
         session.StartTransaction();
 
-        var result = await _tenantRepository.GetRtEntityByRtIdAsync<RtIdentityProvider>(session, rtId);
+        var result = await TenantRepository.GetRtEntityByRtIdAsync<RtIdentityProvider>(session, rtId);
 
         await session.CommitTransactionAsync();
         return result;
@@ -50,12 +46,12 @@ public class IdentityProviderStore : IOctoIdentityProviderStore
 
     public async Task<IEnumerable<RtIdentityProvider>> GetAllAsync()
     {
-        var session = await _tenantRepository.GetSessionAsync();
+        var session = await TenantRepository.GetSessionAsync();
         session.StartTransaction();
 
         var queryOptions = RtEntityQueryOptions.Create();
 
-        var result = await _tenantRepository.GetRtEntitiesByTypeAsync<RtIdentityProvider>(session, queryOptions);
+        var result = await TenantRepository.GetRtEntitiesByTypeAsync<RtIdentityProvider>(session, queryOptions);
         await session.CommitTransactionAsync();
 
         return result.Items;
@@ -63,17 +59,17 @@ public class IdentityProviderStore : IOctoIdentityProviderStore
 
     public async Task StoreAsync(RtIdentityProvider identityProvider)
     {
-        var session = await _tenantRepository.GetSessionAsync();
+        var session = await TenantRepository.GetSessionAsync();
         session.StartTransaction();
 
-        var result = await _tenantRepository.GetRtEntityByRtIdAsync<RtIdentityProvider>(session, identityProvider.RtId);
+        var result = await TenantRepository.GetRtEntityByRtIdAsync<RtIdentityProvider>(session, identityProvider.RtId);
         if (result == null)
         {
-            await _tenantRepository.InsertOneRtEntityAsync(session, identityProvider);
+            await TenantRepository.InsertOneRtEntityAsync(session, identityProvider);
         }
         else
         {
-            await _tenantRepository.ReplaceOneRtEntityByIdAsync(session, identityProvider.RtId, identityProvider);
+            await TenantRepository.ReplaceOneRtEntityByIdAsync(session, identityProvider.RtId, identityProvider);
         }
 
         await session.CommitTransactionAsync();
@@ -81,10 +77,10 @@ public class IdentityProviderStore : IOctoIdentityProviderStore
 
     public async Task RemoveAsync(OctoObjectId rtId)
     {
-        var session = await _tenantRepository.GetSessionAsync();
+        var session = await TenantRepository.GetSessionAsync();
         session.StartTransaction();
 
-        await _tenantRepository.DeleteOneRtEntityByRtIdAsync<RtIdentityProvider>(session, rtId, DeleteOptions.Erase);
+        await TenantRepository.DeleteOneRtEntityByRtIdAsync<RtIdentityProvider>(session, rtId, DeleteOptions.Erase);
 
         await session.CommitTransactionAsync();
     }

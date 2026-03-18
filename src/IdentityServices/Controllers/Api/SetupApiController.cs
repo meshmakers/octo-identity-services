@@ -1,4 +1,5 @@
 using System.ComponentModel.DataAnnotations;
+using IdentityServerPersistence.SystemStores;
 using Meshmakers.Octo.Backend.IdentityServices.Services;
 using Meshmakers.Octo.Communication.Contracts.DataTransferObjects;
 using Microsoft.AspNetCore.Authorization;
@@ -18,6 +19,7 @@ namespace Meshmakers.Octo.Backend.IdentityServices.Controllers.Api;
 [AllowAnonymous]
 public class SetupApiController(
     UserManager<RtUser> userManager,
+    IExternalTenantUserMappingStore externalTenantUserMappingStore,
     IUserManagementService userManagementService,
     ILogger<SetupApiController> logger)
     : ControllerBase
@@ -28,9 +30,17 @@ public class SetupApiController(
     [HttpGet("status")]
     [ProducesResponseType(typeof(SetupStatusDto), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
-    public IActionResult GetStatus()
+    public async Task<IActionResult> GetStatus()
     {
         if (userManager.Users.Any())
+        {
+            return NotFound();
+        }
+
+        // Cross-tenant provisioning creates ExternalTenantUserMappings without local users.
+        // If mappings exist, the tenant is ready for cross-tenant login — no setup needed.
+        var mappings = await externalTenantUserMappingStore.GetAllAsync(take: 1);
+        if (mappings.Any())
         {
             return NotFound();
         }
@@ -47,6 +57,12 @@ public class SetupApiController(
     public async Task<IActionResult> CreateAdmin([FromBody] SetupAdminRequestDto request)
     {
         if (userManager.Users.Any())
+        {
+            return NotFound();
+        }
+
+        var mappings = await externalTenantUserMappingStore.GetAllAsync(take: 1);
+        if (mappings.Any())
         {
             return NotFound();
         }

@@ -1,0 +1,20 @@
+"$schema": "https://schemas.meshmakers.cloud/construction-kit-elements.schema.json"
+types:
+  - typeId: EmailDomainGroupRule
+    description: "Maps an email domain pattern to a group for automatic group assignment on user login."
+    derivedFromCkTypeId: ${System}/Entity
+    isFinal: true
+    isAbstract: false
+    attributes:
+      - id: ${this}/EmailDomainPattern
+        name: EmailDomainPattern
+      - id: ${this}/TargetGroupRtId
+        name: TargetGroupRtId
+      - id: ${System}/Description
+        name: Description
+        isOptional: true
+    indexes:
+      - indexType: Ascending
+        fields:
+          - attributePaths:
+              - EmailDomainPattern

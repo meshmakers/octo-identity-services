@@ -11,7 +11,7 @@ public class TestAuthHandlerOptions : AuthenticationSchemeOptions
     public string DefaultUserId { get; set; } = "test-user-id";
     public string DefaultUserName { get; set; } = "Test User";
     public string DefaultEmail { get; set; } = "test@example.com";
-    public IEnumerable<string> Scopes { get; set; } = new[] { "identityAPI.full_access" };
+    public IEnumerable<string> Scopes { get; set; } = new[] { "octo_api" };
     public IEnumerable<string> Roles { get; set; } = Array.Empty<string>();
 }
 
@@ -54,6 +54,14 @@ public class TestAuthHandler : AuthenticationHandler<TestAuthHandlerOptions>
             // IdentityServer uses "sub" claim for User.GetSubjectId()
             new("sub", userId)
         };
+
+        // Add allowed_tenants claim from the route tenant so TenantAuthorizationMiddleware passes.
+        // Extract the tenant ID from the first path segment (e.g., "/octosystem/v1/users" → "octosystem").
+        var pathSegments = Request.Path.Value?.Split('/', StringSplitOptions.RemoveEmptyEntries);
+        if (pathSegments is { Length: > 0 })
+        {
+            claims.Add(new Claim("allowed_tenants", pathSegments[0]));
+        }
 
         // Add scopes from headers or defaults
         var scopes = GetHeaderValues(ScopeHeader);

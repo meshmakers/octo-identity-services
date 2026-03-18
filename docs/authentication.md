@@ -46,6 +46,16 @@ DynamicAuth/
 └── OpenIdDynamicAuthOptionsBuilder.cs# OIDC-specific options
 ```
 
+### Multi-Tenant Scheme Isolation
+
+Authentication schemes are **tenant-prefixed** using the format `{tenantId}:{providerName}` so that all tenants' schemes coexist safely in the singleton `IAuthenticationSchemeProvider`. For example, if tenant `octosystem` has a Google provider and tenant `meshtest` has its own Google provider with different credentials, the registered scheme names are `octosystem:Google` and `meshtest:Google` respectively.
+
+Key design decisions:
+- **Scheme name**: `{tenantId}:{providerName}` — the colon separator is safe (not used in tenant IDs or provider names)
+- **Display name**: Unchanged — users see "Google", "Microsoft", etc.
+- **Options cache**: Since ASP.NET Core keys options by scheme name, different tenants' OAuth credentials are automatically isolated
+- **Frontend**: Receives the full prefixed scheme name in the `Scheme` field and passes it back unchanged for challenge/login calls
+
 ### Initialization Flow
 
 ```
@@ -54,19 +64,24 @@ Application Startup
         ▼
 DynamicAuthSchemeServiceInitializer.InitializeAsync() [Order: 50]
         │
-        ▼
-DynamicAuthSchemeService.ConfigureAsync()
+        ├── ConfigureAsync(systemTenantId)
+        │
+        ├── GetChildTenantsAsync() — load all child tenants
+        │
+        └── For each child tenant:
+                └── ConfigureAsync(tenant.TenantId)
         │
         ▼
-Load enabled providers from IOctoIdentityProviderStore
+DynamicAuthSchemeService.ConfigureAsync(tenantId)
         │
-        ▼
-┌───────────────────────────────────────┐
-│  For each provider:                   │
-│  1. Get IAuthSchemeCreator<TProvider> │
-│  2. Creator builds AuthenticationScheme│
-│  3. Add scheme to provider            │
-└───────────────────────────────────────┘
+        ├── Remove only schemes with prefix "{tenantId}:"
+        │
+        ├── Load providers directly from tenant's database
+        │   (via ISystemContext.FindTenantRepositoryAsync, bypassing HTTP-scoped store)
+        │
+        └── For each enabled provider:
+                ├── Create scheme with name "{tenantId}:{providerName}"
+                └── Register scheme in IAuthenticationSchemeProvider
 ```
 
 ### Service Registration
@@ -234,19 +249,22 @@ CLI polls: POST /connect/token (grant_type=device_code)
 
 ## Scheme Creation Patterns
 
+All scheme creators accept an optional `schemeNameOverride` parameter. When provided (e.g., a tenant-prefixed name like `octosystem:Google`), the scheme is registered under that name instead of the provider's `Name` property. The display name remains unchanged.
+
 ### OAuth Provider Pattern
 
 ```csharp
 public class GoogleAuthSchemeCreator : IAuthSchemeCreator<RtGoogleIdentityProvider>
 {
-    public AuthenticationScheme Create(RtGoogleIdentityProvider provider)
+    public AuthenticationScheme Create(RtGoogleIdentityProvider provider, string? schemeNameOverride = null)
     {
-        var options = _builder.CreateOptions(provider.Name);
+        var schemeName = schemeNameOverride ?? provider.Name;
+        var options = _builder.CreateOptions(schemeName);
         options.ClientId = provider.ClientId;
         options.ClientSecret = provider.ClientSecret;
 
         return new AuthenticationScheme(
-            provider.Name,
+            schemeName,
             provider.DisplayName ?? provider.Name,
             typeof(GoogleHandler)
         );
@@ -259,9 +277,10 @@ public class GoogleAuthSchemeCreator : IAuthSchemeCreator<RtGoogleIdentityProvid
 ```csharp
 public class AzureEntraIdAuthSchemeCreator : IAuthSchemeCreator<RtAzureEntraIdIdentityProvider>
 {
-    public AuthenticationScheme Create(RtAzureEntraIdIdentityProvider provider)
+    public AuthenticationScheme Create(RtAzureEntraIdIdentityProvider provider, string? schemeNameOverride = null)
     {
-        var options = _builder.CreateOptions(provider.Name);
+        var schemeName = schemeNameOverride ?? provider.Name;
+        var options = _builder.CreateOptions(schemeName);
         options.Authority = $"https://login.microsoftonline.com/{provider.TenantId}";
         options.ClientId = provider.ClientId;
         options.ClientSecret = provider.ClientSecret;
@@ -275,7 +294,7 @@ public class AzureEntraIdAuthSchemeCreator : IAuthSchemeCreator<RtAzureEntraIdId
         );
 
         return new AuthenticationScheme(
-            provider.Name,
+            schemeName,
             provider.DisplayName ?? provider.Name,
             typeof(OpenIdConnectHandler)
         );
@@ -288,9 +307,10 @@ public class AzureEntraIdAuthSchemeCreator : IAuthSchemeCreator<RtAzureEntraIdId
 ```csharp
 public class OpenLdapSchemeCreator : IAuthSchemeCreator<RtOpenLdapIdentityProvider>
 {
-    public AuthenticationScheme Create(RtOpenLdapIdentityProvider provider)
+    public AuthenticationScheme Create(RtOpenLdapIdentityProvider provider, string? schemeNameOverride = null)
     {
-        var options = _builder.CreateOptions(provider.Name);
+        var schemeName = schemeNameOverride ?? provider.Name;
+        var options = _builder.CreateOptions(schemeName);
         options.Host = provider.Host;
         options.Port = provider.Port;
         options.UseTls = provider.UseTls;
@@ -298,7 +318,7 @@ public class OpenLdapSchemeCreator : IAuthSchemeCreator<RtOpenLdapIdentityProvid
         options.UserNameAttribute = provider.UserNameAttribute;
 
         return new AuthenticationScheme(
-            provider.Name,
+            schemeName,
             provider.DisplayName ?? provider.Name,
             typeof(OpenLdapAuthenticationHandler)
         );
@@ -308,7 +328,7 @@ public class OpenLdapSchemeCreator : IAuthSchemeCreator<RtOpenLdapIdentityProvid
 
 ## Claims and Roles Synchronization
 
-External providers may include role/group claims. These are synchronized with Octo roles:
+External providers may include role/group claims. These are synchronized with Octo roles via CK associations:
 
 ```csharp
 private async Task SynchronizeGroups(IEnumerable<Claim> claims, RtUser user)
@@ -321,12 +341,12 @@ private async Task SynchronizeGroups(IEnumerable<Claim> claims, RtUser user)
     // Validate that roles exist in Octo
     var validRoles = await ValidateRolesExist(externalRoles);
 
-    // Update user's role assignments
-    var currentRoles = user.RoleIds;
+    // Update user's role assignments (via AssignedRole associations)
+    var currentRoles = await GetRolesAsync(user);
     var rolesToRemove = currentRoles.Except(validRoles);
     var rolesToAdd = validRoles.Except(currentRoles);
 
-    // Apply changes
+    // Apply changes (creates/deletes AssignedRole associations)
     foreach (var role in rolesToRemove)
         await RemoveFromRoleAsync(user, role);
     foreach (var role in rolesToAdd)
@@ -361,17 +381,450 @@ LDAP attributes are mapped to standard claims:
 Identity providers can be updated at runtime:
 
 1. Admin updates provider via System API
-2. `IdentityProviderUpdate` event is published
+2. `IdentityProviderUpdate` event is published with the tenant ID
 3. `IdentityProviderUpdateConsumer` receives event
-4. `DynamicAuthSchemeService.ConfigureAsync()` is called
-5. Old schemes are removed, new schemes are added
+4. `DynamicAuthSchemeService.ConfigureAsync(tenantId)` is called
+5. Only schemes for that specific tenant (prefix `{tenantId}:`) are removed and re-added
+6. Other tenants' schemes are unaffected
 
 No server restart required.
+
+## Cross-Tenant Authentication
+
+### Overview
+
+Cross-tenant authentication enables users from a parent tenant to log in to child tenants without requiring separate user accounts. The Identity Service validates credentials against parent tenant databases internally — this is **not** OIDC federation but an internal credential-delegation mechanism.
+
+### Key Components
+
+| Component | Location | Purpose |
+|-----------|----------|---------|
+| `RtOctoTenantIdentityProvider` | CK Model | Configures a parent-tenant auth link |
+| `RtExternalTenantUserMapping` | CK Model | Maps parent-tenant user to child-tenant roles |
+| `ICrossTenantAuthenticationService` | `IdentityServerPersistence/Services/` | Validates credentials across tenant hierarchy |
+| `IExternalTenantUserMappingStore` | `IdentityServerPersistence/SystemStores/` | CRUD for cross-tenant user mappings |
+| `ExternalTenantUserMappingsController` | `TenantApi/v1/Controllers/` | REST API for managing mappings |
+
+### Tenant Hierarchy
+
+Tenants form a hierarchy via `RtOctoTenantIdentityProvider` entries:
+- Each child tenant can have one or more `OctoTenantIdentityProvider` pointing to parent tenants
+- Authentication walks **up** the hierarchy (child → parent → grandparent)
+- A user in "octosystem" (root) can access all descendant tenants
+- Lateral access (sibling-to-sibling) is not permitted
+
+### Cross-Tenant Login Flow
+
+```
+User submits credentials at child tenant login
+        │
+        ▼
+Try local authentication (existing SignInManager flow)
+        │
+        ├── Success ──► Normal local login
+        │
+        └── Failure ──► Check for OctoTenantIdentityProvider
+                │
+                ▼
+        CrossTenantAuthenticationService.AuthenticateAsync()
+                │
+                ├── Walk up tenant hierarchy
+                ├── For each parent: find user by username
+                ├── Validate password via IPasswordHasher
+                ├── Check lockout status
+                ├── Max depth limit (10 levels)
+                ├── Circular reference detection
+                │
+                ├── Not found in any parent ──► Login failed
+                │
+                └── Found ──► Find/create ExternalTenantUserMapping
+                        │
+                        ▼
+                Create local session with:
+                  - Mapped roles from ExternalTenantUserMapping
+                  - "home_tenant_id" claim in token
+                  - Username prefixed with "xt_" (cross-tenant)
+```
+
+### Cross-Tenant Auto-Login Flow (Token-Based with Redirect)
+
+When a user clicks "LOGIN VIA OCTOSYSTEM" on a child tenant's login page, the UI first attempts a token-based cross-tenant login. If the user has no active session in the parent tenant, the UI redirects to the parent tenant's login page where all authentication methods (Google, Microsoft, Azure Entra ID, LDAP, password) are available. After authenticating there, the user is redirected back and the token flow completes automatically.
+
+```
+User clicks "LOGIN VIA OCTOSYSTEM" on child tenant login page
+        │
+        ▼
+POST /{parentTenantId}/api/auth/cross-tenant-token
+  (browser sends parent tenant's scoped cookie automatically)
+        │
+        ├── 401/403 (no parent session)
+        │       │
+        │       ▼
+        │   Redirect to /{parentTenantId}/login
+        │     ?returnUrl=/{childTenantId}/login?returnUrl={orig}&crossTenantAutoLogin={parentTenantId}
+        │       │
+        │       ▼
+        │   User authenticates at parent tenant (any method: Google, LDAP, password, etc.)
+        │       │
+        │       ▼
+        │   Parent tenant redirects back to /{childTenantId}/login
+        │     ?returnUrl={orig}&crossTenantAutoLogin={parentTenantId}
+        │       │
+        │       ▼
+        │   Login component detects crossTenantAutoLogin query param
+        │       │
+        │       ▼
+        │   Auto-triggers token flow (same as success path below)
+        │
+        └── 200 { token: "..." } (DataProtection-encrypted, 60s expiry)
+                │
+                ▼
+POST /{childTenantId}/api/auth/cross-tenant-login
+  (exchanges token for a session in the child tenant)
+        │
+        ├── Token invalid/expired ──► Show error
+        ├── Target tenant mismatch ──► Show error
+        │
+        └── Token valid ──► Find/create local xt_ user
+                ├── Sign in via SignInManager (writes child-scoped cookie)
+                └── Redirect to ReturnUrl or /{childTenantId}/manage
+```
+
+**Token payload** (DataProtection-encrypted with purpose `CrossTenantLogin`):
+- `SourceTenantId`: The parent tenant that issued the token
+- `SourceUserId`: The authenticated user's ID in the parent tenant
+- `TargetTenantId`: The child tenant this token is valid for
+- `Timestamp`: Token creation time (tokens expire after 60 seconds)
+
+**Edge cases:**
+- No parent session (401): Redirects to parent login page; after auth, redirects back with `crossTenantAutoLogin` param for automatic token exchange
+- Loop prevention: `crossTenantAutoLogin` param is stripped from the URL immediately; on failure after redirect, an error message is shown without retrying
+- Expired token (>60s): Returns error; user can click the button again
+- Target tenant mismatch: Returns error (token was issued for a different tenant)
+- No cross-tenant mapping: `FindOrCreateCrossTenantUserAsync` creates one with default roles
+- Role sync on every login: `SyncMappedRolesAsync` resolves role IDs to names via the tenant repository (not `RoleManager`) and calls `AddToRoleAsync` for any missing roles. This ensures existing users pick up role changes from updated mappings.
+
+### Tenant Switch Flow
+
+Users already authenticated in a parent tenant can switch to a child tenant without re-entering credentials:
+
+```
+GET /{tenantId}/api/auth/accessible-tenants
+        │
+        └── Returns child tenants where user has role mappings
+        │
+        ▼
+POST /{targetTenantId}/api/auth/tenant-switch
+        │
+        ├── Validate source tenant is ancestor of target
+        ├── Find user in source tenant
+        ├── Return mapped roles for target tenant
+        │
+        ├── Access denied ──► 200 { success: false }
+        │
+        └── Access granted ──► 200 { success: true, roles: [...] }
+```
+
+### CK Model Types
+
+**OctoTenantIdentityProvider** (derives from IdentityProvider):
+- `ParentTenantId` (String) — The tenant ID of the parent tenant
+
+**ExternalTenantUserMapping** (derives from Entity):
+- `SourceTenantId` (String) — The tenant where the user resides
+- `SourceUserId` (String) — The user's RtId in the source tenant
+- `SourceUserName` (String) — Display name
+- `MappedRoleIds` (StringArray, optional) — Roles assigned in the child tenant
+
+### Identity CK Model Installation
+
+The Identity CK model and default roles are installed in **all** tenants (not just the system tenant). This ensures:
+- Cross-tenant user mappings can be stored in any tenant
+- Default roles are available for role mapping in every tenant
+
+### Token Claims
+
+Cross-tenant users receive a `home_tenant_id` claim in their tokens, indicating which tenant owns their actual user account.
+
+### Tenant-Aware Login Redirects
+
+When IdentityServer's `/connect/authorize` endpoint determines the user isn't authenticated, it redirects to the configured login URL. The login URL prefix uses the configured system tenant ID (`OctoSystemConfiguration.SystemTenantId`, default "OctoSystem"), e.g., `/{systemTenantId}/login`. The `TenantLoginRedirectMiddleware` intercepts these 302 redirects and rewrites the tenant prefix based on `acr_values` in the authorize request.
+
+**How it works:**
+
+1. OIDC client includes `acr_values=tenant:{tenantId}` in the authorize request
+2. IdentityServer redirects to `/{systemTenantId}/login?ReturnUrl=...` (with `acr_values` encoded in the ReturnUrl)
+3. The middleware parses `acr_values` from the ReturnUrl, extracts `tenant:{tenantId}`
+4. Rewrites the redirect to `/{tenantId}/login?ReturnUrl=...`
+
+**Affected paths:** `/login`, `/consent`, `/logout`, `/error`, `/device`
+
+**Backward compatibility:** Without `acr_values`, the redirect goes to `/{systemTenantId}/login`.
+
+**Configuration:** Both `ConfigureIdentityServerOptions` and `TenantLoginRedirectMiddleware` read the system tenant ID from `IOptions<OctoSystemConfiguration>`. A server-side redirect in `Program.cs` also routes the root path `/` to `/{systemTenantId}/login`.
+
+### Auto-Creation of OctoTenantIdentityProvider
+
+When a child tenant has a `ParentTenantId` set on its `RtTenant` record, the `RtOctoTenantIdentityProvider` is automatically created:
+
+- **New tenants**: During `SetupTenantAsync`, after CK model import and role creation
+- **Existing tenants**: Via the `OctoTenantIdentityProviderMigration` (migration version 8→9)
+
+Both mechanisms are idempotent — they check for an existing provider before creating one.
+
+## Per-Tenant Identity Data Provisioning
+
+### Problem
+
+IdentityServer resolves clients, API scopes, API resources, and identity resources from the **current tenant's database**. When a user accesses a child tenant (e.g., `meshtest`), the OAuth flow calls `/{tenantId}/connect/authorize` which looks up the client in that tenant's MongoDB. If the client doesn't exist there, the flow fails.
+
+### Solution
+
+Identity data is automatically provisioned to **all tenants** (not just the system tenant) during service startup:
+
+**Identity Service** (`DefaultConfigurationCreatorService`):
+- Creates identity resources (`openid`, `profile`, `email`, `role`), API scopes, API resources, and clients (`octo-cli`, swagger, `octo-data-refinery-studio`) directly in each child tenant's database during `SetupTenantAsync`
+- Uses the child tenant's repository for direct writes (not via the message bus)
+
+**Other Services** (Asset Repository, Communication Controller, Bot, Reporting):
+- Send their client, scope, and resource definitions to the Identity Service via `CreateIdentityDataCommandRequest` messages on the Distribution Event Hub
+- The `DefaultConfigurationCreatorServiceStandardized` base class sends these messages for **every tenant** during startup
+- The `CreateIdentityDataCommandRequestConsumer` in the Identity Service creates the data in the correct tenant's database
+
+### Data Created Per Tenant
+
+| Entity Type | Created By | Examples |
+|-------------|-----------|----------|
+| Identity Resources | Identity Service | `openid`, `profile`, `email`, `role` |
+| Identity API Scopes | Identity Service | `identityAPI.full_access`, `identityAPI.read_only` |
+| Identity Clients | Identity Service | `octo-cli`, `octo-idenityServices-swagger`, `octo-data-refinery-studio`* |
+| Asset Repo Clients | Asset Repository Service | `octo-assetRepositoryServices`, swagger client |
+| Communication Clients | Communication Controller | swagger client |
+| Bot Clients | Bot Service | `octo-botServices`, swagger client |
+| Reporting Clients | Reporting Service | `octo-reportingServices`, swagger client |
+
+*\* Only provisioned when `RefineryStudioUrl` is configured in `OctoIdentityServicesOptions`.*
+
+### Refinery Studio Client
+
+The `octo-data-refinery-studio` client is a public SPA (no client secret) using Authorization Code + PKCE. Unlike other service clients, the Refinery Studio has no .NET backend that auto-provisions itself. The identity service provisions this client directly when `RefineryStudioUrl` is configured:
+
+- **Environment variable**: `OCTO_IDENTITY__RefineryStudioUrl=https://studio.example.com`
+- **Grant type**: Authorization Code with PKCE
+- **Scopes**: `openid`, `profile`, `email`, `role`, `assetSystemAPI.full_access`, `identityAPI.full_access`, `botAPI.full_access`, `communicationSystemAPI.full_access`, `communicationTenantAPI.full_access`, `reportingSystemAPI.full_access`, `reportingTenantAPI.full_access`
+- **Offline access**: Enabled (refresh tokens)
+- **Front-channel logout**: `{RefineryStudioUrl}/logout/callback`
+
+### Version Tracking
+
+- **System tenant**: Uses a configuration version key to avoid re-sending data on every restart
+- **Child tenants**: Always ensures data exists (the consumer is idempotent — creates if missing, replaces if existing)
+
+## Per-Tenant Cookie Scoping
+
+### Problem
+
+Without cookie scoping, all tenants share a single `Identity.Application` auth cookie at path `/`. When a user logs into tenant "sbeg", the cookie is sent for all tenant routes. Navigating to `/octosystem/manage` sends the same cookie, but `UserManager` looks up the user in octosystem's database — user not found — 404.
+
+### Solution: TenantCookieManager
+
+A custom `ICookieManager` (`src/IdentityServices/Cookies/TenantCookieManager.cs`) wraps `ChunkingCookieManager` and appends `.{tenantId}` (lowercased) to scoped cookie names based on `HttpContext.Items["tenantId"]`.
+
+**Scoped cookies** (tenant suffix added):
+- `.AspNetCore.Identity.Application` → `.AspNetCore.Identity.Application.sbeg`
+- `idsrv` → `idsrv.sbeg`
+- `idsrv.session` → `idsrv.session.sbeg`
+
+**Global cookies** (unchanged):
+- `Identity.External` — written at `/signin-google` (no tenant in URL)
+- `Identity.TwoFactorUserId`, `Identity.TwoFactorRememberMe` — short-lived, single login flow
+
+### OIDC Endpoint Tenant Resolution
+
+OIDC endpoints (`/connect/*`) don't include a `{tenantId}` route segment. The `OidcTenantResolutionMiddleware` resolves the tenant before authentication:
+
+| Endpoint | Tenant Source |
+|----------|--------------|
+| `/connect/authorize` | `acr_values=tenant:{tenantId}` from query string; also captures `code` → tenant mapping from 302 response |
+| `/connect/token` | Authorization code → tenant mapping (captured during authorize); sets tenant context for user/client lookups |
+| `/connect/endsession` | `id_token_hint` JWT payload → `tenant_id` claim; fallback to `acr_values` |
+
+**Authorization code → tenant mapping:** During `/connect/authorize`, the middleware registers an `OnStarting` callback that captures the authorization code from the 302 redirect `Location` header and maps it to the resolved tenant ID in an in-memory `ConcurrentDictionary`. When `/connect/token` is called with `grant_type=authorization_code`, the middleware reads the `code` from the form body, looks up the tenant from the mapping, and sets the correct tenant context. This ensures `OctoUserStore`, `ClientStore`, and other per-tenant stores use the correct tenant database during the token exchange. The mapping entries expire after 10 minutes and are cleaned up opportunistically.
+
+**Refresh token → tenant mapping:** When `/connect/token` returns a successful response containing a `refresh_token`, the middleware captures the token and maps it to the current tenant ID in the in-memory cache (entries expire after 30 days). On subsequent refresh token exchanges, the middleware looks up the tenant from this mapping.
+
+**Persistent fallback for refresh tokens:** To survive service restarts, the tenant ID is also persisted in the `Description` field of the `RtPersistedGrant` entity in the system database. When the in-memory mapping is missing (e.g., after a restart or deployment), the middleware hashes the refresh token (SHA256) to obtain the grant key, queries the persistent grant store for the tenant, and re-populates the in-memory cache. This ensures token refresh operations continue to work seamlessly across deployments without requiring users to re-authenticate.
+
+**Note:** `PersistentGrantStore` always uses the system tenant database (regardless of the per-request tenant context) to ensure grants are accessible from both `/connect/authorize` and `/connect/token`, and by the `TokenCleanupHostService` which runs without HTTP context.
+
+The middleware runs after routing, before `UseIdentityServer()`:
+
+```
+UseRouting()
+→ inline middleware (re-resolve tenant from route values)
+→ UseOidcTenantResolution()
+→ UseTenantLoginRedirect()
+→ UseIdentityServer()
+```
+
+### tenant_id Claim
+
+`UserProfileService.GetUserClaimsAsync()` adds a `tenant_id` claim to identity tokens. This claim is used by `OidcTenantResolutionMiddleware` to extract the tenant from `id_token_hint` during logout (`/connect/endsession`).
+
+### Key Behaviors
+
+| Scenario | Behavior |
+|----------|----------|
+| External login (`/signin-google`) | External cookie remains global; auth cookie scoped at callback |
+| Tenant switch | New tenant-scoped cookie written; old tenant cookie unaffected |
+| Concurrent sessions | Each tenant has its own cookie; user can be logged into multiple tenants |
+| `/connect/authorize` without `acr_values` | Falls back to system tenant cookie |
+| `/connect/endsession` without `id_token_hint` | No tenant; user appears unauthenticated |
+| Existing global cookies after deploy | Not found by TenantCookieManager; users re-login (one-time) |
+
+### Key Files
+
+| File | Purpose |
+|------|---------|
+| `src/IdentityServices/Cookies/TenantCookieManager.cs` | Cookie name scoping by tenant |
+| `src/IdentityServices/Middleware/OidcTenantResolutionMiddleware.cs` | Tenant resolution for `/connect/*` endpoints |
+| `src/IdentityServices/Services/UserProfileService.cs` | Adds `tenant_id` claim to tokens |
+
+## Group-Based Role Inheritance
+
+### Overview
+
+Groups provide an organizational unit for role management. Instead of assigning roles directly to each user, roles can be assigned to groups. Users who are members of a group inherit all roles assigned to that group. Groups can also contain other groups (nested groups), enabling hierarchical role inheritance.
+
+All group relationships are stored as **CK associations** (not denormalized StringArray attributes), which is the idiomatic Octo CK approach for entity relationships.
+
+### Data Model
+
+The `RtGroup` CK type has:
+- **Attributes**: `GroupName` / `NormalizedGroupName` (display/lookup), `GroupDescription` (optional)
+- **Associations**:
+  - `AssignedRole` → `RtRole`: Roles assigned to the group (N:N)
+  - `GroupMember` → `RtUser`: Internal user members (N:N)
+  - `GroupMember` → `RtExternalTenantUserMapping`: External tenant user members (N:N)
+  - `ChildGroup` → `RtGroup`: Nested child groups (N:N)
+
+The `RtUser` CK type also uses:
+- `AssignedRole` → `RtRole`: Directly assigned roles (N:N)
+
+### Role Resolution
+
+During token issuance, `OctoUserStore.GetRolesAsync()` resolves both direct and group-inherited roles:
+
+1. Query the user's outbound `AssignedRole` associations for directly assigned role IDs
+2. Call `IGroupRoleResolver.ResolveEffectiveRoleIdsAsync(userRtId)`:
+   - Load all groups and check `GroupMember` associations to find groups containing the user
+   - Recursively follow `ChildGroup` associations to collect all `AssignedRole` targets from parent groups
+   - Use a visited set and max depth (10) to prevent circular traversal
+3. Merge both sets and resolve role IDs to role names
+4. All resolved role names are included as JWT `role` claims
+
+### Default TenantOwners Group
+
+Every tenant is provisioned with a `TenantOwners` group that has all default roles assigned (via `AssignedRole` associations). This provides a convenient way to grant full permissions: add a user to `TenantOwners` instead of assigning 10+ roles individually.
+
+### Key Components
+
+| Component | Location | Purpose |
+|-----------|----------|---------|
+| `IdentityAssociationConstants` | `IdentityServerPersistence/` | Association role ID constants (`AssignedRoleId`, `GroupMemberId`, `ChildGroupId`) |
+| `IGroupStore` / `GroupStore` | `IdentityServerPersistence/SystemStores/` | CRUD + association-based relationship management for groups |
+| `IGroupRoleResolver` / `GroupRoleResolver` | `IdentityServerPersistence/Services/` | Resolves effective role IDs from group memberships via associations |
+| `GroupsController` | `IdentityServices/TenantApi/v1/Controllers/` | REST API for group management |
+| `IdentityAssociationMigration` | `IdentityServerPersistence/Services/Migrations/` | Converts StringArray relationships to associations; creates TenantOwners group |
+
+## Multi-Tenant Token Validation
+
+### Overview
+
+Access tokens contain `allowed_tenants` claims that list all tenants a user is authorized to access. Backend middleware validates the route tenant against these claims, ensuring tokens are only valid for authorized tenants.
+
+### Architecture
+
+```
+Token Issuance (Login)
+        │
+        ▼
+UserProfileService.GetProfileDataAsync()
+        │
+        ▼
+AllowedTenantsResolver.ResolveAsync()
+        │
+        ├── Always include the login tenant
+        ├── For cross-tenant users (xt_): include home tenant
+        ├── Get all child tenants from system context
+        ├── For each child: check RtExternalTenantUserMapping
+        └── Walk up ancestor chain via OctoTenantIdentityProvider.ParentTenantId
+        │
+        ▼
+Access token includes: allowed_tenants: ["tenant1", "tenant2", ...]
+```
+
+### Key Components
+
+| Component | Location | Purpose |
+|-----------|----------|---------|
+| `IAllowedTenantsResolver` | `IdentityServerPersistence/Services/` | Resolves allowed tenants for a user |
+| `AllowedTenantsResolver` | `IdentityServerPersistence/Services/` | Default implementation using cross-tenant mappings |
+| `UserProfileService` | `IdentityServices/Services/` | Overrides `GetProfileDataAsync` to add claims |
+| `TenantAuthorizationMiddleware` | `octo-common-services` | Validates route tenant against claims |
+
+### AllowedTenantsResolver Algorithm
+
+1. **Always include the login tenant** (the tenant the user authenticated against)
+2. **Cross-tenant users** (`xt_{homeTenant}_{username}`): include the home tenant
+3. **Walk up ancestor chain**: Starting from the login tenant, query `RtOctoTenantIdentityProvider.ParentTenantId`, add each ancestor (max depth: 10, with circular reference protection)
+4. **BFS down through descendants**: Starting from the source tenant (with original username) and login tenant (with login username), check child tenants for `ExternalTenantUserMapping` matching `SourceTenantId` + `SourceUserName`
+5. **Follow the xt_ username chain**: When a child match is found, the user's username in the child tenant follows the pattern `xt_{parentTenantId}_{parentUsername}`. This propagated username is used to check further descendants.
+
+This ensures cascading tenant hierarchies work correctly. Example: `octosystem → meshtest → subtenant1`:
+- Mapping in meshtest: `sourceTenantId=octosystem, sourceUserName=admin`
+- Mapping in subtenant1: `sourceTenantId=meshtest, sourceUserName=xt_octosystem_admin`
+- User "admin" logging into octosystem → BFS finds meshtest (sourceUserName=admin), then subtenant1 (sourceUserName=xt_octosystem_admin)
+- User "xt_octosystem_admin" logging into meshtest → BFS finds subtenant1 (sourceUserName=xt_octosystem_admin), ancestors add octosystem
+- User logging into subtenant1 → ancestors add meshtest and octosystem
+
+### TenantAuthorizationMiddleware
+
+Placed after `UseAuthentication()` + `UseAuthorization()` in each service's pipeline:
+
+- **Skips unauthenticated requests** (let auth middleware handle 401)
+- **Skips client-credentials tokens** (no `sub` claim = service-to-service calls)
+- **Skips requests without a route tenant** (system endpoints)
+- **Denies access if no `allowed_tenants` claims** (old tokens before this feature)
+- **Validates route tenant** against allowed list (case-insensitive comparison)
+
+### Token Claims
+
+```json
+{
+  "sub": "user-id",
+  "tenant_id": "meshtest",
+  "allowed_tenants": ["meshtest", "sbeg", "octosystem"],
+  "home_tenant_id": "octosystem"
+}
+```
+
+### Frontend Integration
+
+The `AuthorizeService` in `@meshmakers/shared-auth`:
+- Parses `allowed_tenants` from the access token JWT payload
+- Exposes `allowedTenants` signal and `isTenantAllowed(tenantId)` method
+- The tenant list data source filters tenants by `allowed_tenants`
+- The HTTP error interceptor shows a user-friendly message on 403 responses
+
+### Performance
+
+The resolver runs **only at token issuance time** (login, token refresh), not per-request. The number of tenants is typically small (< 100), making the per-tenant mapping query acceptable.
 
 ## Security Considerations
 
 ### Scheme Isolation
-External authentication uses a temporary cookie scheme (`IdentityConstants.ExternalScheme`) that is cleared after processing.
+Authentication schemes are tenant-prefixed (`{tenantId}:{providerName}`) so each tenant's identity providers are isolated in the singleton `IAuthenticationSchemeProvider`. The `AuthApiController` filters schemes by tenant prefix, ensuring that only the current tenant's providers are shown on the login page. External authentication uses a temporary cookie scheme (`IdentityConstants.ExternalScheme`) that is cleared after processing.
 
 ### Claim Validation
 External claims are validated against configured Octo users. Unknown users can be auto-provisioned if configured.

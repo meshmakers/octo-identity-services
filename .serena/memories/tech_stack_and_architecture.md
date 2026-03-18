@@ -15,7 +15,7 @@
 ```
 src/
 ├── IdentityServices/              # Main ASP.NET Core application (entry point)
-│   ├── SystemApi/v1/Controllers/  # REST API endpoints (versioned)
+│   ├── TenantApi/v1/Controllers/  # REST API endpoints (versioned)
 │   ├── Services/                  # Business logic services
 │   ├── Configuration/             # Options and configuration classes
 │   └── Program.cs                 # Application entry point

@@ -1,5 +1,6 @@
 export interface UserProfile {
   id: string;
+  tenantId: string;
   userName: string;
   email?: string;
   emailConfirmed: boolean;
@@ -8,6 +9,9 @@ export interface UserProfile {
   twoFactorEnabled: boolean;
   hasPassword: boolean;
   externalLogins: ExternalLoginInfo[];
+  roles: string[];
+  allowedTenants: string[];
+  groups: string[];
 }
 
 export interface ExternalLoginInfo {

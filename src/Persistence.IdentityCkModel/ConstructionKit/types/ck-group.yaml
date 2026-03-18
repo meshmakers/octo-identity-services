@@ -1,0 +1,29 @@
+"$schema": "https://schemas.meshmakers.cloud/construction-kit-elements.schema.json"
+types:
+  - typeId: Group
+    description: "A group that can be assigned roles. Users and other groups can be members."
+    derivedFromCkTypeId: ${System}/Entity
+    isFinal: true
+    isAbstract: false
+    attributes:
+      - id: ${this}/GroupName
+        name: GroupName
+      - id: ${this}/NormalizedGroupName
+        name: NormalizedGroupName
+      - id: ${this}/GroupDescription
+        name: GroupDescription
+        isOptional: true
+    associations:
+      - id: ${this}/AssignedRole
+        targetCkTypeId: ${this}/Role
+      - id: ${this}/GroupMember
+        targetCkTypeId: ${this}/User
+      - id: ${this}/GroupMember
+        targetCkTypeId: ${this}/ExternalTenantUserMapping
+      - id: ${this}/ChildGroup
+        targetCkTypeId: ${this}/Group
+    indexes:
+      - indexType: Ascending
+        fields:
+          - attributePaths:
+              - NormalizedGroupName

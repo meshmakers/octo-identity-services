@@ -1,5 +1,6 @@
 using System.Globalization;
 using System.Security.Claims;
+using IdentityServerPersistence.Services;
 using Meshmakers.Common.Shared;
 using Meshmakers.Octo.ConstructionKit.Contracts;
 using Meshmakers.Octo.Runtime.Contracts;
@@ -15,6 +16,7 @@ namespace IdentityServerPersistence.SystemStores;
 
 public sealed class OctoUserStore(
     IMultiTenancyResolverService multiTenancyResolverService,
+    IGroupRoleResolver groupRoleResolver,
     IdentityErrorDescriber? describer)
     :
         IUserClaimStore<RtUser>,
@@ -727,11 +729,33 @@ public sealed class OctoUserStore(
         ThrowIfDisposed();
         ArgumentValidation.Validate(nameof(user), user);
         ArgumentValidation.ValidateString(nameof(normalizedRoleName), normalizedRoleName);
-        user.RoleIds ??= new AttributeStringValueList();
-        user.RoleIds.Add(ConvertIdToString((await FindRoleAsync(normalizedRoleName, cancellationToken) ??
-                                            throw new InvalidOperationException(string.Format(
-                                                CultureInfo.CurrentCulture, "Role {0} does not exist.",
-                                                normalizedRoleName))).RtId));
+
+        var role = await FindRoleAsync(normalizedRoleName, cancellationToken) ??
+                   throw new InvalidOperationException(string.Format(
+                       CultureInfo.CurrentCulture, "Role {0} does not exist.",
+                       normalizedRoleName));
+
+        using var session = await _tenantRepository.GetSessionAsync();
+        session.StartTransaction();
+
+        var userEntityId = user.ToRtEntityId();
+        var roleEntityId = role.ToRtEntityId();
+
+        // Check if already assigned
+        var existing = await _tenantRepository.GetRtAssociationOrDefaultAsync(
+            session, userEntityId, roleEntityId, IdentityAssociationConstants.AssignedRoleId);
+        if (existing == null)
+        {
+            var updates = new List<AssociationUpdateInfo>
+            {
+                AssociationUpdateInfo.CreateInsert(userEntityId, roleEntityId,
+                    IdentityAssociationConstants.AssignedRoleId)
+            };
+            var opResult = new OperationResult();
+            await _tenantRepository.ApplyChangesAsync(session, updates, opResult);
+        }
+
+        await session.CommitTransactionAsync();
     }
 
     public async Task RemoveFromRoleAsync(
@@ -744,13 +768,26 @@ public sealed class OctoUserStore(
         ArgumentValidation.Validate(nameof(user), user);
         ArgumentValidation.ValidateString(nameof(normalizedRoleName), normalizedRoleName);
 
-        var roleAsync = await FindRoleAsync(normalizedRoleName, cancellationToken);
-        if (roleAsync == null)
+        var role = await FindRoleAsync(normalizedRoleName, cancellationToken);
+        if (role == null)
         {
             return;
         }
 
-        user.RoleIds?.Remove(ConvertIdToString(roleAsync.RtId));
+        using var session = await _tenantRepository.GetSessionAsync();
+        session.StartTransaction();
+
+        var updates = new List<AssociationUpdateInfo>
+        {
+            AssociationUpdateInfo.CreateDelete(
+                user.ToRtEntityId(),
+                role.ToRtEntityId(),
+                IdentityAssociationConstants.AssignedRoleId)
+        };
+        var opResult = new OperationResult();
+        await _tenantRepository.ApplyChangesAsync(session, updates, opResult);
+
+        await session.CommitTransactionAsync();
     }
 
     public async Task<IList<RtUser>> GetUsersInRoleAsync(
@@ -762,8 +799,8 @@ public sealed class OctoUserStore(
 
         ArgumentValidation.ValidateString(nameof(normalizedRoleName), normalizedRoleName);
 
-        var roleAsync = await FindRoleAsync(normalizedRoleName, cancellationToken);
-        if (roleAsync == null)
+        var role = await FindRoleAsync(normalizedRoleName, cancellationToken);
+        if (role == null)
         {
             return new List<RtUser>();
         }
@@ -771,14 +808,72 @@ public sealed class OctoUserStore(
         using var session = await _tenantRepository.GetSessionAsync().ConfigureAwait(false);
         session.StartTransaction();
 
-        var queryOptions = RtEntityQueryOptions.Create()
-            .FieldFilter(nameof(RtUser.RoleIds), FieldFilterOperator.AnyEq, ConvertIdToString(roleAsync.RtId));
+        // Query inbound AssignedRole associations on the role entity to find users assigned to it
+        var associations = await _tenantRepository.GetRtAssociationsAsync(
+            session,
+            role.ToRtEntityId(),
+            RtAssociationExtendedQueryOptions.Create(
+                GraphDirections.Inbound,
+                roleId: IdentityAssociationConstants.AssignedRoleId));
 
-        var result = await _tenantRepository.GetRtEntitiesByTypeAsync<RtUser>(session, queryOptions)
-            .ConfigureAwait(true);
+        var userCkTypeId = RtEntityExtensions.GetRtCkTypeId<RtUser>();
+        var userRtIds = associations.Items
+            .Where(a => a.OriginCkTypeId == userCkTypeId)
+            .Select(a => a.OriginRtId)
+            .ToList();
+
+        var users = new List<RtUser>();
+        foreach (var userRtId in userRtIds)
+        {
+            var user = await _tenantRepository.GetRtEntityByRtIdAsync<RtUser>(session, userRtId);
+            if (user != null)
+            {
+                users.Add(user);
+            }
+        }
+
         await session.CommitTransactionAsync();
 
-        return result.Items.ToList();
+        return users;
+    }
+
+    public async Task<IList<string>> GetDirectRolesAsync(RtUser user, CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        ThrowIfDisposed();
+
+        ArgumentValidation.Validate(nameof(user), user);
+
+        var dbUser = await GetUserByIdAsync(user.RtId, cancellationToken).ConfigureAwait(true);
+        if (dbUser == null)
+        {
+            throw NotExistingException.UserWithIdDoesNotExist(user.RtId);
+        }
+
+        using var session = await _tenantRepository.GetSessionAsync();
+        session.StartTransaction();
+
+        var associations = await _tenantRepository.GetRtAssociationsAsync(
+            session,
+            dbUser.ToRtEntityId(),
+            RtAssociationExtendedQueryOptions.Create(
+                GraphDirections.Outbound,
+                roleId: IdentityAssociationConstants.AssignedRoleId));
+
+        await session.CommitTransactionAsync();
+
+        var roles = new List<string>();
+        foreach (var assoc in associations.Items)
+        {
+            var role = await GetRoleByIdAsync(ConvertIdFromString(assoc.TargetRtId.ToString()), cancellationToken)
+                .ConfigureAwait(true);
+            if (!string.IsNullOrWhiteSpace(role.Name))
+            {
+                roles.Add(role.Name);
+            }
+        }
+
+        return roles;
     }
 
     public async Task<IList<string>> GetRolesAsync(RtUser user, CancellationToken cancellationToken = default)
@@ -788,20 +883,40 @@ public sealed class OctoUserStore(
 
         ArgumentValidation.Validate(nameof(user), user);
 
-
         var dbUser = await GetUserByIdAsync(user.RtId, cancellationToken).ConfigureAwait(true);
         if (dbUser == null)
         {
             throw NotExistingException.UserWithIdDoesNotExist(user.RtId);
         }
 
-        var roles = new List<string>();
-        if (dbUser.RoleIds == null)
+        // Collect direct role IDs from AssignedRole associations
+        var allRoleIds = new HashSet<string>();
+
+        using var session = await _tenantRepository.GetSessionAsync();
+        session.StartTransaction();
+
+        var associations = await _tenantRepository.GetRtAssociationsAsync(
+            session,
+            dbUser.ToRtEntityId(),
+            RtAssociationExtendedQueryOptions.Create(
+                GraphDirections.Outbound,
+                roleId: IdentityAssociationConstants.AssignedRoleId));
+
+        await session.CommitTransactionAsync();
+
+        foreach (var assoc in associations.Items)
         {
-            return roles;
+            allRoleIds.Add(assoc.TargetRtId.ToString());
         }
 
-        foreach (var roleRtIdString in dbUser.RoleIds)
+        // Merge group-inherited role IDs
+        var groupRoleIds = await groupRoleResolver.ResolveEffectiveRoleIdsAsync(
+            ConvertIdToString(dbUser.RtId));
+        allRoleIds.UnionWith(groupRoleIds);
+
+        // Resolve role IDs to role names
+        var roles = new List<string>();
+        foreach (var roleRtIdString in allRoleIds)
         {
             var role = await GetRoleByIdAsync(ConvertIdFromString(roleRtIdString), cancellationToken)
                 .ConfigureAwait(true);
@@ -836,7 +951,27 @@ public sealed class OctoUserStore(
             return false;
         }
 
-        return dbUser.RoleIds?.Contains(ConvertIdToString(role.RtId)) ?? false;
+        var roleIdString = ConvertIdToString(role.RtId);
+
+        // Check direct role assignment via AssignedRole association
+        using var session = await _tenantRepository.GetSessionAsync();
+        session.StartTransaction();
+
+        var existing = await _tenantRepository.GetRtAssociationOrDefaultAsync(
+            session, dbUser.ToRtEntityId(), role.ToRtEntityId(),
+            IdentityAssociationConstants.AssignedRoleId);
+
+        await session.CommitTransactionAsync();
+
+        if (existing != null)
+        {
+            return true;
+        }
+
+        // Check group-inherited roles
+        var groupRoleIds = await groupRoleResolver.ResolveEffectiveRoleIdsAsync(
+            ConvertIdToString(dbUser.RtId));
+        return groupRoleIds.Contains(roleIdString);
     }
 
     public Task<string?> GetSecurityStampAsync(RtUser user, CancellationToken cancellationToken = default)

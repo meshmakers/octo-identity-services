@@ -7,23 +7,45 @@ using Meshmakers.Octo.Runtime.Contracts.MongoDb;
 using Meshmakers.Octo.Runtime.Contracts.MongoDb.Repositories;
 using Meshmakers.Octo.Runtime.Contracts.Repositories;
 using Meshmakers.Octo.Runtime.Contracts.Repositories.Query;
-using Meshmakers.Octo.Services.Infrastructure.Services;
+using Meshmakers.Octo.Services.Infrastructure;
+using Microsoft.AspNetCore.Http;
 using NLog;
 using Persistence.IdentityCkModel.Generated.System.Identity.v2;
 
 namespace IdentityServerPersistence.SystemStores;
 
-public class PersistentGrantStore(IMultiTenancyResolverService multiTenancyResolverService, IMapper mapper)
+/// <remarks>
+/// Grants are always stored in the system tenant database regardless of the current HTTP tenant context.
+/// This avoids mismatches between the <c>/connect/authorize</c> endpoint (which resolves tenant from
+/// <c>acr_values</c>) and the <c>/connect/token</c> endpoint (which has no tenant context), ensuring
+/// the authorization code can always be found during the token exchange.
+/// </remarks>
+public class PersistentGrantStore(
+    ISystemContext systemContext,
+    IMapper mapper,
+    IHttpContextAccessor httpContextAccessor)
     : IOctoPersistentGrantStore
 {
     private const int TokenCleanupBatchSize = 50;
 
     private static readonly Logger Logger = LogManager.GetCurrentClassLogger();
 
-    private readonly ITenantRepository _tenantRepository = multiTenancyResolverService.GetTenantRepository();
+    private readonly ITenantRepository _tenantRepository = systemContext.GetSystemTenantRepository();
 
     public async Task StoreAsync(PersistedGrant grant)
     {
+        // Store the current tenant ID in the Description field for refresh_token grants.
+        // This allows the OIDC tenant resolution middleware to recover the token-to-tenant
+        // mapping after a service restart by querying the persistent grant store.
+        if (string.Equals(grant.Type, "refresh_token", StringComparison.Ordinal))
+        {
+            var tenantId = httpContextAccessor.HttpContext?.Items[InfrastructureCommon.TenantIdName] as string;
+            if (!string.IsNullOrEmpty(tenantId))
+            {
+                grant.Description = tenantId;
+            }
+        }
+
         var session = await _tenantRepository.GetSessionAsync();
         session.StartTransaction();
 
@@ -72,7 +94,7 @@ public class PersistentGrantStore(IMultiTenancyResolverService multiTenancyResol
         {
             queryOptions.FieldFilter(nameof(RtPersistedGrant.SessionId), FieldFilterOperator.Equals, filter.SessionId);
         }
-        if (filter.SessionId != null)
+        if (filter.ClientId != null)
         {
             queryOptions.FieldFilter(nameof(RtPersistedGrant.ClientId), FieldFilterOperator.Equals, filter.ClientId);
         }
@@ -169,6 +191,17 @@ public class PersistentGrantStore(IMultiTenancyResolverService multiTenancyResol
         }
 
         await session.CommitTransactionAsync();
+    }
+
+    public async Task<string?> GetTenantByGrantKeyAsync(string grantKey)
+    {
+        var session = await _tenantRepository.GetSessionAsync();
+        session.StartTransaction();
+
+        var rtGrant = await GetRtPersistentGrantByKeyAsync(session, grantKey);
+
+        await session.CommitTransactionAsync();
+        return rtGrant?.Description;
     }
 
     private RtPersistedGrant GetApplicationPersistedGrant(PersistedGrant grant)

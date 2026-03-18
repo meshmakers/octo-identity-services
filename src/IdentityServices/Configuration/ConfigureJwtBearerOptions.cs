@@ -30,6 +30,11 @@ internal class ConfigureJwtBearerOptions : IConfigureNamedOptions<JwtBearerOptio
     {
         options.Authority = _octoIdentityOptions.Value.AuthorityUrl.EnsureEndsWith("/");
 
+        // Disable inbound claim mapping so JWT claim types (sub, name, preferred_username,
+        // tenant_id, etc.) are preserved as-is instead of being remapped to long XML namespaces.
+        // This is required for controllers that read IdentityModel JwtClaimTypes from the token.
+        options.MapInboundClaims = false;
+
         // In development, disable HTTPS metadata requirement for self-signed certificates
         if (_environment.IsDevelopment())
         {

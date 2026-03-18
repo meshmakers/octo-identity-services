@@ -1,0 +1,23 @@
+"$schema": "https://schemas.meshmakers.cloud/construction-kit-elements.schema.json"
+types:
+  - typeId: ExternalTenantUserMapping
+    description: "Maps a user from a parent tenant to roles in this (child) tenant."
+    derivedFromCkTypeId: ${System}/Entity
+    isFinal: true
+    isAbstract: false
+    attributes:
+      - id: ${this}/SourceTenantId
+        name: SourceTenantId
+      - id: ${this}/SourceUserId
+        name: SourceUserId
+      - id: ${this}/SourceUserName
+        name: SourceUserName
+      - id: ${this}/MappedRoleIds
+        name: MappedRoleIds
+        isOptional: true
+    indexes:
+      - indexType: Ascending
+        fields:
+          - attributePaths:
+              - SourceTenantId
+              - SourceUserId

@@ -21,7 +21,9 @@ import {
   RecoveryCodeLoginRequest,
   SendTwoFactorEmailResult,
   LdapLoginRequest,
-  LdapLoginResult
+  LdapLoginResult,
+  CrossTenantTokenResult,
+  CrossTenantLoginRequest
 } from '../models/login.models';
 
 @Injectable({ providedIn: 'root' })
@@ -96,5 +98,20 @@ export class AuthApiService {
 
   ldapLogin(request: LdapLoginRequest): Observable<LdapLoginResult> {
     return this.http.post<LdapLoginResult>('/api/auth/ldap-login', request);
+  }
+
+  // === Cross-Tenant Auto-Login ===
+
+  getCrossTenantToken(parentTenantId: string, targetTenantId: string): Observable<CrossTenantTokenResult> {
+    // Use absolute URL to call the parent tenant's endpoint directly.
+    // The browser sends the parent tenant's cookie regardless of path.
+    return this.http.post<CrossTenantTokenResult>(
+      `/${parentTenantId}/api/auth/cross-tenant-token`,
+      { targetTenantId }
+    );
+  }
+
+  crossTenantLogin(request: CrossTenantLoginRequest): Observable<LoginResult> {
+    return this.http.post<LoginResult>('/api/auth/cross-tenant-login', request);
   }
 }

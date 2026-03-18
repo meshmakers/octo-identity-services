@@ -1,6 +1,9 @@
 using System.Text;
 using System.Text.Encodings.Web;
+using IdentityServerPersistence.Services;
+using IdentityServerPersistence.SystemStores;
 using Meshmakers.Octo.Backend.IdentityServices.Services;
+using Meshmakers.Octo.Runtime.Contracts.MongoDb;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Identity;
@@ -28,6 +31,9 @@ public class ManageApiController : ControllerBase
     private readonly UrlEncoder _urlEncoder;
     private readonly IQrCodeService _qrCodeService;
     private readonly IUserAuthenticationTokenStore<RtUser> _tokenStore;
+    private readonly IAllowedTenantsResolver _allowedTenantsResolver;
+    private readonly ISystemContext _systemContext;
+    private readonly IGroupStore _groupStore;
 
     public ManageApiController(
         UserManager<RtUser> userManager,
@@ -35,7 +41,10 @@ public class ManageApiController : ControllerBase
         IAuthenticationSchemeProvider schemeProvider,
         UrlEncoder urlEncoder,
         IQrCodeService qrCodeService,
-        IUserStore<RtUser> userStore)
+        IUserStore<RtUser> userStore,
+        IAllowedTenantsResolver allowedTenantsResolver,
+        ISystemContext systemContext,
+        IGroupStore groupStore)
     {
         _userManager = userManager;
         _signInManager = signInManager;
@@ -43,6 +52,9 @@ public class ManageApiController : ControllerBase
         _urlEncoder = urlEncoder;
         _qrCodeService = qrCodeService;
         _tokenStore = (IUserAuthenticationTokenStore<RtUser>)userStore;
+        _allowedTenantsResolver = allowedTenantsResolver;
+        _systemContext = systemContext;
+        _groupStore = groupStore;
     }
 
     /// <summary>
@@ -51,6 +63,12 @@ public class ManageApiController : ControllerBase
     [HttpGet("profile")]
     public async Task<ActionResult<UserProfileDto>> GetProfile()
     {
+        var tenantId = RouteData.Values["tenantId"]?.ToString() ?? string.Empty;
+        if (await _systemContext.TryFindTenantContextAsync(tenantId) == null)
+        {
+            return NotFound($"Tenant '{tenantId}' not found.");
+        }
+
         var user = await _userManager.GetUserAsync(User);
         if (user == null)
         {
@@ -59,10 +77,27 @@ public class ManageApiController : ControllerBase
 
         var logins = await _userManager.GetLoginsAsync(user);
         var hasPassword = await _userManager.HasPasswordAsync(user);
+        var roles = await _userManager.GetRolesAsync(user);
+
+        var allowedTenants = await _allowedTenantsResolver.ResolveAsync(tenantId, user);
+
+        // Resolve group memberships via associations
+        var allGroups = (await _groupStore.GetAllAsync()).ToList();
+        var userRtIdString = user.RtId.ToString();
+        var groupNames = new List<string>();
+        foreach (var group in allGroups)
+        {
+            var memberUserIds = await _groupStore.GetMemberUserIdsAsync(group.RtId);
+            if (memberUserIds.Contains(userRtIdString) && !string.IsNullOrEmpty(group.GroupName))
+            {
+                groupNames.Add(group.GroupName);
+            }
+        }
 
         return new UserProfileDto
         {
             Id = user.RtId.ToString(),
+            TenantId = tenantId,
             UserName = user.UserName ?? string.Empty,
             Email = user.Email,
             EmailConfirmed = user.EmailConfirmed,
@@ -75,7 +110,10 @@ public class ManageApiController : ControllerBase
                 LoginProvider = l.LoginProvider,
                 ProviderDisplayName = l.ProviderDisplayName ?? l.LoginProvider,
                 ProviderKey = l.ProviderKey
-            }).ToList()
+            }).ToList(),
+            Roles = roles,
+            AllowedTenants = allowedTenants,
+            Groups = groupNames
         };
     }
 
@@ -526,6 +564,7 @@ public class ManageApiController : ControllerBase
 public record UserProfileDto
 {
     public string Id { get; init; } = string.Empty;
+    public string TenantId { get; init; } = string.Empty;
     public string UserName { get; init; } = string.Empty;
     public string? Email { get; init; }
     public bool EmailConfirmed { get; init; }
@@ -534,6 +573,9 @@ public record UserProfileDto
     public bool TwoFactorEnabled { get; init; }
     public bool HasPassword { get; init; }
     public IEnumerable<ExternalLoginInfoDto> ExternalLogins { get; init; } = [];
+    public IEnumerable<string> Roles { get; init; } = [];
+    public IEnumerable<string> AllowedTenants { get; init; } = [];
+    public IEnumerable<string> Groups { get; init; } = [];
 }
 
 public record ExternalLoginInfoDto
