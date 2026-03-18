@@ -3,9 +3,13 @@ using IdentityServerPersistence.SystemStores;
 using Meshmakers.Octo.Backend.IdentityServices.Controllers.Api;
 using Meshmakers.Octo.Backend.IdentityServices.Services;
 using Meshmakers.Octo.Communication.Contracts.DataTransferObjects;
+using Meshmakers.Octo.Runtime.Contracts.MongoDb.Configuration;
+using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.Routing;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 using NSubstitute;
 using Persistence.IdentityCkModel.Generated.System.Identity.v2;
 using Xunit;
@@ -33,11 +37,58 @@ public class SetupApiControllerTests
         _userManagementService = Substitute.For<IUserManagementService>();
         _logger = Substitute.For<ILogger<SetupApiController>>();
 
+        var systemConfig = Options.Create(new OctoSystemConfiguration { SystemTenantId = "OctoSystem" });
+
         _sut = new SetupApiController(_userManager, _externalTenantUserMappingStore,
-            _userManagementService, _logger);
+            _userManagementService, systemConfig, _logger);
+
+        // Default: set route to system tenant
+        SetTenantRoute("octosystem");
+    }
+
+    private void SetTenantRoute(string tenantId)
+    {
+        var httpContext = new DefaultHttpContext();
+        httpContext.Request.RouteValues = new RouteValueDictionary { { "tenantId", tenantId } };
+        _sut.ControllerContext = new ControllerContext { HttpContext = httpContext };
     }
 
     #region GetStatus Tests
+
+    [Fact]
+    public async Task GetStatus_WhenNotSystemTenant_ReturnsNotFound()
+    {
+        // Arrange
+        SetTenantRoute("energytest");
+        _userManager.Users.Returns(Enumerable.Empty<RtUser>().AsQueryable());
+
+        // Act
+        var result = await _sut.GetStatus();
+
+        // Assert
+        result.Should().BeOfType<NotFoundResult>();
+    }
+
+    [Fact]
+    public async Task CreateAdmin_WhenNotSystemTenant_ReturnsNotFound()
+    {
+        // Arrange
+        SetTenantRoute("energytest");
+        _userManager.Users.Returns(Enumerable.Empty<RtUser>().AsQueryable());
+        var request = new SetupAdminRequestDto
+        {
+            Email = "admin@test.com",
+            Password = "SecurePass123!",
+            ConfirmPassword = "SecurePass123!"
+        };
+
+        // Act
+        var result = await _sut.CreateAdmin(request);
+
+        // Assert
+        result.Should().BeOfType<NotFoundResult>();
+        await _userManagementService.DidNotReceive().CreateAdminUserAsync(Arg.Any<AdminUserDto>());
+    }
 
     [Fact]
     public async Task GetStatus_WhenNoUsersExist_ReturnsOkWithSetupRequired()
