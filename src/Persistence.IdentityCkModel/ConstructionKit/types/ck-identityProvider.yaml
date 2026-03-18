@@ -15,3 +15,8 @@ types:
       - id: ${System}/Description
         name: Description
         isOptional: true
+      - id: ${this}/AllowSelfRegistration
+        name: AllowSelfRegistration
+      - id: ${this}/DefaultGroupRtId
+        name: DefaultGroupRtId
+        isOptional: true

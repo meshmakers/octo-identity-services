@@ -1,14 +1,21 @@
 using System.Security.Claims;
+using System.Text.Json;
 using Duende.IdentityServer;
 using Duende.IdentityServer.Events;
 using Duende.IdentityServer.Extensions;
 using Duende.IdentityServer.Models;
 using Duende.IdentityServer.Services;
 using Duende.IdentityServer.Stores;
+using IdentityServerPersistence.Services;
+using IdentityServerPersistence.Services.Login;
+using IdentityServerPersistence.SystemStores;
 using Meshmakers.Octo.Backend.Authentication.Services;
 using Meshmakers.Octo.ConstructionKit.Contracts;
+using Meshmakers.Octo.Runtime.Contracts.Repositories.Query;
+using Meshmakers.Octo.Services.Infrastructure.Services;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.DataProtection;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Mvc;
 using Persistence.IdentityCkModel.Generated.System.Identity.v2;
@@ -30,6 +37,12 @@ public class AuthApiController(
     IEventService events,
     IPersistedGrantStore persistedGrantStore,
     ILdapAuthenticationService ldapAuthService,
+    ICrossTenantAuthenticationService crossTenantAuthService,
+    IExternalTenantUserMappingStore externalTenantUserMappingStore,
+    IOctoIdentityProviderStore identityProviderStore,
+    ILoginGroupAssignmentService loginGroupAssignmentService,
+    IDataProtectionProvider dataProtectionProvider,
+    IMultiTenancyResolverService multiTenancyResolverService,
     ILogger<AuthApiController> logger)
     : ControllerBase
 {
@@ -40,10 +53,14 @@ public class AuthApiController(
     public async Task<ActionResult<LoginContextDto>> GetLoginContext([FromQuery] string? returnUrl)
     {
         var context = await interaction.GetAuthorizationContextAsync(returnUrl);
+        var tenantId = RouteData.Values["tenantId"]?.ToString() ?? "System";
+        var prefix = $"{tenantId}:";
         var schemes = await schemeProvider.GetAllSchemesAsync();
 
-        // Build providers list with LDAP detection
-        var externalSchemes = schemes.Where(x => x.DisplayName != null).ToList();
+        // Build providers list with LDAP detection, filtered to this tenant's schemes
+        var externalSchemes = schemes
+            .Where(x => x.DisplayName != null && x.Name.StartsWith(prefix, StringComparison.Ordinal))
+            .ToList();
         var providers = new List<ExternalProviderDto>();
 
         foreach (var scheme in externalSchemes)
@@ -55,6 +72,22 @@ public class AuthApiController(
                 DisplayName = scheme.DisplayName ?? scheme.Name,
                 IsLdap = isLdap
             });
+        }
+
+        // Add parent tenant identity providers (OctoTenantIdentityProvider)
+        var allIdentityProviders = await identityProviderStore.GetAllAsync();
+        foreach (var idp in allIdentityProviders.OfType<RtOctoTenantIdentityProvider>())
+        {
+            if (idp.IsEnabled && !string.IsNullOrEmpty(idp.ParentTenantId))
+            {
+                providers.Add(new ExternalProviderDto
+                {
+                    Scheme = $"octo-tenant-{idp.ParentTenantId}",
+                    DisplayName = idp.DisplayName ?? $"Login via {idp.ParentTenantId}",
+                    IsLdap = false,
+                    IsParentTenant = true
+                });
+            }
         }
 
         var allowLocal = true;
@@ -98,6 +131,7 @@ public class AuthApiController(
             IsAuthenticated = isAuthenticated,
             Username = username,
             SetupRequired = !userManager.Users.Any()
+                           && !(await externalTenantUserMappingStore.GetAllAsync(take: 1)).Any()
         };
     }
 
@@ -147,13 +181,11 @@ public class AuthApiController(
             };
         }
 
-        await events.RaiseAsync(new UserLoginFailureEvent(
-            request.Username,
-            "Invalid credentials",
-            clientId: context?.Client.ClientId));
-
         if (result.IsLockedOut)
         {
+            await events.RaiseAsync(new UserLoginFailureEvent(
+                request.Username, "Account locked out", clientId: context?.Client.ClientId));
+
             return new LoginResultDto
             {
                 Success = false,
@@ -181,6 +213,74 @@ public class AuthApiController(
             };
         }
 
+        // Local auth failed — try cross-tenant authentication
+        var tenantIdForCrossTenant = RouteData.Values["tenantId"]?.ToString() ?? "System";
+        var crossTenantResult = await crossTenantAuthService.AuthenticateAsync(
+            tenantIdForCrossTenant, request.Username, request.Password);
+
+        if (crossTenantResult != null)
+        {
+            // Check self-registration gate for cross-tenant providers
+            var octoTenantProviders = (await identityProviderStore.GetAllAsync())
+                .OfType<RtOctoTenantIdentityProvider>()
+                .Where(p => p.IsEnabled && string.Equals(p.ParentTenantId, crossTenantResult.SourceTenantId, StringComparison.OrdinalIgnoreCase))
+                .ToList();
+
+            var octoTenantProvider = octoTenantProviders.FirstOrDefault();
+
+            // Check if this is a new user (no existing local account)
+            var crossTenantUserName = $"xt_{crossTenantResult.SourceTenantId}_{crossTenantResult.SourceUserName}";
+            var existingCrossTenantUser = await userManager.FindByNameAsync(crossTenantUserName);
+
+            if (existingCrossTenantUser == null && octoTenantProvider is { AllowSelfRegistration: false })
+            {
+                logger.LogWarning("Self-registration denied for cross-tenant user '{UserName}' from tenant '{SourceTenant}'",
+                    crossTenantResult.SourceUserName, crossTenantResult.SourceTenantId);
+
+                return new LoginResultDto
+                {
+                    Success = false,
+                    ErrorMessage = "Self-registration is not allowed for this provider"
+                };
+            }
+
+            // Cross-tenant auth succeeded — create or find a local user for the session
+            var isNewUser = existingCrossTenantUser == null;
+            var localUser = await FindOrCreateCrossTenantUserAsync(crossTenantResult, tenantIdForCrossTenant);
+            if (localUser != null)
+            {
+                // Assign groups for newly created users
+                if (isNewUser)
+                {
+                    await loginGroupAssignmentService.AssignGroupsAsync(localUser, octoTenantProvider);
+                }
+
+                await signInManager.SignInAsync(localUser, request.RememberLogin);
+
+                await events.RaiseAsync(new UserLoginSuccessEvent(
+                    localUser.UserName,
+                    localUser.RtId.ToString(),
+                    localUser.UserName,
+                    clientId: context?.Client.ClientId));
+
+                var redirectUrl = !string.IsNullOrEmpty(request.ReturnUrl) &&
+                                  (interaction.IsValidReturnUrl(request.ReturnUrl) || Url.IsLocalUrl(request.ReturnUrl))
+                    ? request.ReturnUrl
+                    : $"/{tenantIdForCrossTenant}/manage";
+
+                return new LoginResultDto
+                {
+                    Success = true,
+                    RedirectUrl = redirectUrl
+                };
+            }
+        }
+
+        await events.RaiseAsync(new UserLoginFailureEvent(
+            request.Username,
+            "Invalid credentials",
+            clientId: context?.Client.ClientId));
+
         return new LoginResultDto
         {
             Success = false,
@@ -194,8 +294,12 @@ public class AuthApiController(
     [HttpGet("external-providers")]
     public async Task<ActionResult<IEnumerable<ExternalProviderDto>>> GetExternalProviders()
     {
+        var tenantId = RouteData.Values["tenantId"]?.ToString() ?? "System";
+        var prefix = $"{tenantId}:";
         var schemes = await schemeProvider.GetAllSchemesAsync();
-        var externalSchemes = schemes.Where(x => x.DisplayName != null).ToList();
+        var externalSchemes = schemes
+            .Where(x => x.DisplayName != null && x.Name.StartsWith(prefix, StringComparison.Ordinal))
+            .ToList();
         var providers = new List<ExternalProviderDto>();
 
         foreach (var scheme in externalSchemes)
@@ -218,8 +322,15 @@ public class AuthApiController(
     [HttpGet("external-login")]
     public IActionResult ExternalLogin([FromQuery] string scheme, [FromQuery] string? returnUrl)
     {
-        // Include tenantId in callback URL - required for route generation
         var tenantId = RouteData.Values["tenantId"]?.ToString() ?? "System";
+
+        // OctoTenantIdentityProvider (cross-tenant) has no ASP.NET auth handler.
+        // Cross-tenant login works via password entry on the login form, not via
+        // external redirect. Redirect back to login if the client calls this by mistake.
+        if (scheme.StartsWith("octo-tenant-", StringComparison.OrdinalIgnoreCase))
+        {
+            return Redirect($"/{tenantId}/login{(string.IsNullOrEmpty(returnUrl) ? "" : $"?returnUrl={Uri.EscapeDataString(returnUrl)}")}");
+        }
 
         var props = new AuthenticationProperties
         {
@@ -312,7 +423,20 @@ public class AuthApiController(
 
         if (user == null)
         {
-            // 4. Create new user from external provider claims.
+            // 4a. Look up the identity provider to check self-registration
+            var providerName = provider.Contains(':') ? provider.Split(':', 2)[1] : provider;
+            var rtIdentityProvider = await identityProviderStore.GetByNameAsync(providerName);
+
+            // 4b. Check AllowSelfRegistration
+            if (rtIdentityProvider is { AllowSelfRegistration: false })
+            {
+                logger.LogWarning("Self-registration denied for provider {Provider}, user {UserId}",
+                    provider, userIdClaim.Value);
+                await HttpContext.SignOutAsync(IdentityServerConstants.ExternalCookieAuthenticationScheme);
+                return Redirect($"/{tenantId}/error?error=Self-registration is not allowed for this provider");
+            }
+
+            // 4c. Create new user from external provider claims.
             // SECURITY: We intentionally do NOT auto-link external logins to existing users
             // found by email. An attacker could register a Google/Microsoft account with the
             // same email as an existing local user and inherit their roles and permissions.
@@ -342,6 +466,9 @@ public class AuthApiController(
                 logger.LogInformation("Linked external login {Provider} to user {UserName}",
                     provider, user.UserName);
             }
+
+            // 6. Assign groups based on provider config and email domain rules
+            await loginGroupAssignmentService.AssignGroupsAsync(user, rtIdentityProvider);
         }
 
         // 6. Sign in the user
@@ -380,11 +507,13 @@ public class AuthApiController(
         var surname = claims.FirstOrDefault(c => c.Type == ClaimTypes.Surname)?.Value
                       ?? claims.FirstOrDefault(c => c.Type == "family_name")?.Value;
 
-        // Generate a unique username that includes the provider to avoid collisions
-        // with local users or users from other providers.
+        // Generate a unique username that includes the provider type to avoid collisions
+        // with local users or users from other providers. Strip the tenant prefix from
+        // tenant-scoped scheme names (e.g., "octosystem:Google" → "Google").
+        var providerName = provider.Contains(':') ? provider.Split(':', 2)[1] : provider;
         var userName = !string.IsNullOrEmpty(email)
-            ? $"{provider}_{email}"
-            : $"{provider}_{Guid.NewGuid():N}";
+            ? $"{providerName}_{email}"
+            : $"{providerName}_{Guid.NewGuid():N}";
 
         // Ensure username is unique (handles edge cases like same email across providers)
         var existingUser = await userManager.FindByNameAsync(userName);
@@ -447,6 +576,157 @@ public class AuthApiController(
     }
 
     /// <summary>
+    /// Finds or creates a local user for a cross-tenant authenticated user.
+    /// The local user is linked to the source via an ExternalTenantUserMapping.
+    /// </summary>
+    private async Task<RtUser?> FindOrCreateCrossTenantUserAsync(
+        CrossTenantAuthResult crossTenantResult, string childTenantId)
+    {
+        // Check if a mapping already exists
+        var mapping = await externalTenantUserMappingStore.FindBySourceUserAsync(
+            crossTenantResult.SourceTenantId, crossTenantResult.SourceUserId);
+
+        // Generate a unique username for the cross-tenant user
+        var crossTenantUserName = $"xt_{crossTenantResult.SourceTenantId}_{crossTenantResult.SourceUserName}";
+
+        var existingUser = await userManager.FindByNameAsync(crossTenantUserName);
+        if (existingUser != null)
+        {
+            // Sync profile fields from the source tenant on each login
+            var needsUpdate = false;
+
+            if (!string.Equals(existingUser.FirstName, crossTenantResult.FirstName ?? string.Empty, StringComparison.Ordinal))
+            {
+                existingUser.FirstName = crossTenantResult.FirstName ?? string.Empty;
+                needsUpdate = true;
+            }
+            if (!string.Equals(existingUser.LastName, crossTenantResult.LastName ?? string.Empty, StringComparison.Ordinal))
+            {
+                existingUser.LastName = crossTenantResult.LastName ?? string.Empty;
+                needsUpdate = true;
+            }
+            if (!string.Equals(existingUser.Email, crossTenantResult.Email, StringComparison.OrdinalIgnoreCase))
+            {
+                existingUser.Email = crossTenantResult.Email;
+                existingUser.NormalizedEmail = crossTenantResult.Email?.ToUpperInvariant();
+                needsUpdate = true;
+            }
+
+            if (needsUpdate)
+            {
+                var updateResult = await userManager.UpdateAsync(existingUser);
+                if (!updateResult.Succeeded)
+                {
+                    logger.LogWarning("Failed to update cross-tenant user profile for '{UserName}': {Errors}",
+                        crossTenantUserName, string.Join(", ", updateResult.Errors.Select(e => e.Description)));
+                }
+            }
+
+            // Sync roles from the mapping on each login
+            if (mapping != null)
+            {
+                await SyncMappedRolesAsync(existingUser, mapping);
+            }
+
+            return existingUser;
+        }
+
+        // Create a local user for this cross-tenant login
+        var user = new RtUser
+        {
+            RtId = new OctoObjectId(Guid.NewGuid().ToString("N")),
+            UserName = crossTenantUserName,
+            NormalizedUserName = crossTenantUserName.ToUpperInvariant(),
+            Email = crossTenantResult.Email,
+            NormalizedEmail = crossTenantResult.Email?.ToUpperInvariant(),
+            EmailConfirmed = true,
+            FirstName = crossTenantResult.FirstName ?? string.Empty,
+            LastName = crossTenantResult.LastName ?? string.Empty,
+            SecurityStamp = Guid.NewGuid().ToString()
+        };
+
+        var createResult = await userManager.CreateAsync(user);
+        if (!createResult.Succeeded)
+        {
+            logger.LogError(
+                "Failed to create cross-tenant user '{UserName}': {Errors}",
+                crossTenantUserName,
+                string.Join(", ", createResult.Errors.Select(e => e.Description)));
+            return null;
+        }
+
+        // Create the mapping if it doesn't exist
+        if (mapping == null)
+        {
+            mapping = new RtExternalTenantUserMapping
+            {
+                RtId = new OctoObjectId(Guid.NewGuid().ToString("N")),
+                SourceTenantId = crossTenantResult.SourceTenantId,
+                SourceUserId = crossTenantResult.SourceUserId,
+                SourceUserName = crossTenantResult.SourceUserName
+            };
+            await externalTenantUserMappingStore.StoreAsync(mapping);
+        }
+
+        // Assign mapped roles to the user
+        await SyncMappedRolesAsync(user, mapping);
+
+        logger.LogInformation(
+            "Created cross-tenant user '{UserName}' in tenant '{TenantId}' for source user '{SourceUser}' from tenant '{SourceTenant}'",
+            crossTenantUserName, childTenantId, crossTenantResult.SourceUserName,
+            crossTenantResult.SourceTenantId);
+
+        return user;
+    }
+
+    /// <summary>
+    /// Syncs roles from an ExternalTenantUserMapping to the local cross-tenant user.
+    /// Queries roles directly from the tenant repository to avoid RoleManager tenant scoping issues,
+    /// then uses AddToRoleAsync with the resolved role names.
+    /// </summary>
+    private async Task SyncMappedRolesAsync(RtUser user, RtExternalTenantUserMapping mapping)
+    {
+        if (mapping.MappedRoleIds == null || mapping.MappedRoleIds.Count == 0)
+        {
+            return;
+        }
+
+        // Query all roles from the tenant repository directly to build an ID → name lookup.
+        // This avoids RoleManager/OctoRoleStore tenant resolution issues during cross-tenant login.
+        var tenantRepository = multiTenancyResolverService.GetTenantRepository();
+        var session = await tenantRepository.GetSessionAsync();
+        session.StartTransaction();
+
+        var allRolesResult = await tenantRepository
+            .GetRtEntitiesByTypeAsync<RtRole>(session, RtEntityQueryOptions.Create());
+        await session.CommitTransactionAsync();
+
+        var roleNameById = allRolesResult.Items
+            .ToDictionary(r => r.RtId.ToString(), r => r.Name);
+
+        var currentRoles = await userManager.GetRolesAsync(user);
+
+        foreach (var roleId in mapping.MappedRoleIds)
+        {
+            if (!roleNameById.TryGetValue(roleId, out var roleName) || string.IsNullOrEmpty(roleName))
+            {
+                logger.LogWarning("Mapped role ID '{RoleId}' not found in tenant, skipping", roleId);
+                continue;
+            }
+
+            if (!currentRoles.Contains(roleName, StringComparer.OrdinalIgnoreCase))
+            {
+                var result = await userManager.AddToRoleAsync(user, roleName);
+                if (!result.Succeeded)
+                {
+                    logger.LogWarning("Failed to assign role '{RoleName}' to user '{UserName}': {Errors}",
+                        roleName, user.UserName, string.Join(", ", result.Errors.Select(e => e.Description)));
+                }
+            }
+        }
+    }
+
+    /// <summary>
     /// Get the logout context
     /// </summary>
     [HttpGet("logout-context")]
@@ -483,6 +763,13 @@ public class AuthApiController(
             });
 
             await signInManager.SignOutAsync();
+
+            // Also sign out from the IdentityServer session cookie scheme ("idsrv").
+            // signInManager.SignOutAsync() only clears the Identity.Application cookie,
+            // but the idsrv cookie maintains the SSO session. Without clearing it,
+            // clients redirecting back will get a new authorization code automatically.
+            await HttpContext.SignOutAsync(IdentityServerConstants.DefaultCookieAuthenticationScheme);
+
             await events.RaiseAsync(new UserLogoutSuccessEvent(
                 subjectId,
                 User.GetDisplayName()));
@@ -914,7 +1201,25 @@ public class AuthApiController(
 
         if (user == null)
         {
-            // 4. Create new user from LDAP info.
+            // 4a. Look up the identity provider to check self-registration
+            var ldapProviderName = loginInfo.LoginProvider.Contains(':')
+                ? loginInfo.LoginProvider.Split(':', 2)[1]
+                : loginInfo.LoginProvider;
+            var rtLdapProvider = await identityProviderStore.GetByNameAsync(ldapProviderName);
+
+            // 4b. Check AllowSelfRegistration
+            if (rtLdapProvider is { AllowSelfRegistration: false })
+            {
+                logger.LogWarning("Self-registration denied for LDAP provider {Provider}, user {UserName}",
+                    loginInfo.LoginProvider, request.Username);
+                return new LdapLoginResultDto
+                {
+                    Success = false,
+                    ErrorMessage = "Self-registration is not allowed for this provider"
+                };
+            }
+
+            // 4c. Create new user from LDAP info.
             // SECURITY: We intentionally do NOT auto-link LDAP logins to existing users
             // found by email. This prevents privilege escalation where an LDAP user could
             // inherit the roles of an existing local user with the same email address.
@@ -953,6 +1258,9 @@ public class AuthApiController(
                     "Linked LDAP login {Provider} to user {UserName}",
                     loginInfo.LoginProvider, user.UserName);
             }
+
+            // 6. Assign groups based on provider config and email domain rules
+            await loginGroupAssignmentService.AssignGroupsAsync(user, rtLdapProvider);
         }
 
         // 6. Sign in the user
@@ -988,6 +1296,269 @@ public class AuthApiController(
     {
         var isLdap = await ldapAuthService.IsLdapSchemeAsync(scheme);
         return new IsLdapSchemeResultDto { IsLdap = isLdap };
+    }
+
+    #endregion
+
+    #region Cross-Tenant / Tenant Switch
+
+    private const string CrossTenantLoginPurpose = "CrossTenantLogin";
+    private static readonly TimeSpan CrossTenantTokenExpiry = TimeSpan.FromSeconds(60);
+
+    /// <summary>
+    /// Generates a short-lived, encrypted token for cross-tenant auto-login.
+    /// The caller must be authenticated in the current (parent) tenant.
+    /// The token can be exchanged via cross-tenant-login on the target tenant.
+    /// </summary>
+    [HttpPost("cross-tenant-token")]
+    public async Task<ActionResult<CrossTenantTokenResultDto>> GetCrossTenantToken(
+        [FromBody] CrossTenantTokenRequestDto request)
+    {
+        var currentTenantId = RouteData.Values["tenantId"]?.ToString() ?? "System";
+        var userId = User.FindFirst("sub")?.Value;
+
+        if (string.IsNullOrEmpty(userId))
+        {
+            return Unauthorized();
+        }
+
+        // Validate that the current tenant is an ancestor of the target tenant
+        var crossTenantResult = await crossTenantAuthService.ValidateCrossTenantAccessAsync(
+            request.TargetTenantId, currentTenantId, userId);
+
+        if (crossTenantResult == null)
+        {
+            return Forbid();
+        }
+
+        // Create a DataProtection-encrypted token
+        var protector = dataProtectionProvider.CreateProtector(CrossTenantLoginPurpose);
+        var payload = JsonSerializer.Serialize(new CrossTenantTokenPayload
+        {
+            SourceTenantId = currentTenantId,
+            SourceUserId = userId,
+            TargetTenantId = request.TargetTenantId,
+            Timestamp = DateTimeOffset.UtcNow.ToUnixTimeSeconds()
+        });
+        var token = protector.Protect(payload);
+
+        return new CrossTenantTokenResultDto { Token = token };
+    }
+
+    /// <summary>
+    /// Exchanges a cross-tenant token for a session in the current (child) tenant.
+    /// No authentication required — the token itself proves the caller's identity.
+    /// </summary>
+    [HttpPost("cross-tenant-login")]
+    public async Task<ActionResult<LoginResultDto>> CrossTenantLogin(
+        [FromBody] CrossTenantLoginRequestDto request)
+    {
+        var currentTenantId = RouteData.Values["tenantId"]?.ToString() ?? "System";
+
+        // Unprotect and validate the token
+        CrossTenantTokenPayload payload;
+        try
+        {
+            var protector = dataProtectionProvider.CreateProtector(CrossTenantLoginPurpose);
+            var json = protector.Unprotect(request.Token);
+            payload = JsonSerializer.Deserialize<CrossTenantTokenPayload>(json)!;
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex, "Failed to unprotect cross-tenant login token");
+            return new LoginResultDto
+            {
+                Success = false,
+                ErrorMessage = "Invalid or expired cross-tenant token"
+            };
+        }
+
+        // Validate expiry (60 seconds)
+        var tokenAge = DateTimeOffset.UtcNow - DateTimeOffset.FromUnixTimeSeconds(payload.Timestamp);
+        if (tokenAge > CrossTenantTokenExpiry)
+        {
+            return new LoginResultDto
+            {
+                Success = false,
+                ErrorMessage = "Cross-tenant token has expired"
+            };
+        }
+
+        // Validate target tenant matches current route
+        if (!string.Equals(payload.TargetTenantId, currentTenantId, StringComparison.OrdinalIgnoreCase))
+        {
+            return new LoginResultDto
+            {
+                Success = false,
+                ErrorMessage = "Token was issued for a different tenant"
+            };
+        }
+
+        // Build CrossTenantAuthResult from validated token payload
+        var crossTenantResult = await crossTenantAuthService.ValidateCrossTenantAccessAsync(
+            currentTenantId, payload.SourceTenantId, payload.SourceUserId);
+
+        if (crossTenantResult == null)
+        {
+            return new LoginResultDto
+            {
+                Success = false,
+                ErrorMessage = "Cross-tenant access denied"
+            };
+        }
+
+        // Check self-registration gate for cross-tenant token login
+        var tokenOctoTenantProviders = (await identityProviderStore.GetAllAsync())
+            .OfType<RtOctoTenantIdentityProvider>()
+            .Where(p => p.IsEnabled && string.Equals(p.ParentTenantId, payload.SourceTenantId, StringComparison.OrdinalIgnoreCase))
+            .ToList();
+
+        var tokenOctoTenantProvider = tokenOctoTenantProviders.FirstOrDefault();
+
+        var tokenCrossTenantUserName = $"xt_{crossTenantResult.SourceTenantId}_{crossTenantResult.SourceUserName}";
+        var existingTokenUser = await userManager.FindByNameAsync(tokenCrossTenantUserName);
+
+        if (existingTokenUser == null && tokenOctoTenantProvider is { AllowSelfRegistration: false })
+        {
+            return new LoginResultDto
+            {
+                Success = false,
+                ErrorMessage = "Self-registration is not allowed for this provider"
+            };
+        }
+
+        // Find or create the local shadow user
+        var isNewTokenUser = existingTokenUser == null;
+        var localUser = await FindOrCreateCrossTenantUserAsync(crossTenantResult, currentTenantId);
+        if (localUser == null)
+        {
+            return new LoginResultDto
+            {
+                Success = false,
+                ErrorMessage = "Failed to create local user in target tenant"
+            };
+        }
+
+        // Assign groups for newly created users
+        if (isNewTokenUser)
+        {
+            await loginGroupAssignmentService.AssignGroupsAsync(localUser, tokenOctoTenantProvider);
+        }
+
+        // Sign in
+        await signInManager.SignInAsync(localUser, isPersistent: false);
+
+        await events.RaiseAsync(new UserLoginSuccessEvent(
+            localUser.UserName,
+            localUser.RtId.ToString(),
+            localUser.UserName,
+            clientId: null));
+
+        // Compute redirect URL
+        var redirectUrl = request.ReturnUrl;
+        if (string.IsNullOrEmpty(redirectUrl) ||
+            !(interaction.IsValidReturnUrl(redirectUrl) || Url.IsLocalUrl(redirectUrl)))
+        {
+            redirectUrl = $"/{currentTenantId}/manage";
+        }
+
+        return new LoginResultDto
+        {
+            Success = true,
+            RedirectUrl = redirectUrl
+        };
+    }
+
+    /// <summary>
+    /// Returns child tenants where the current user has role mappings.
+    /// The user must be authenticated.
+    /// </summary>
+    [HttpGet("accessible-tenants")]
+    public async Task<ActionResult<List<AccessibleTenantDto>>> GetAccessibleTenants()
+    {
+        var tenantId = RouteData.Values["tenantId"]?.ToString() ?? "System";
+        var userId = User.FindFirst("sub")?.Value;
+
+        if (string.IsNullOrEmpty(userId))
+        {
+            return Unauthorized();
+        }
+
+        // Get all mappings in the current tenant that point to this user's home tenant
+        var homeTenantId = User.FindFirst("home_tenant_id")?.Value ?? tenantId;
+        var mappings = await externalTenantUserMappingStore.GetBySourceTenantAsync(homeTenantId);
+
+        // For each mapping where the source user matches, return the tenant info
+        var accessibleTenants = new List<AccessibleTenantDto>();
+        foreach (var mapping in mappings)
+        {
+            if (mapping.SourceUserId == userId || mapping.SourceUserName == User.Identity?.Name)
+            {
+                accessibleTenants.Add(new AccessibleTenantDto
+                {
+                    TenantId = tenantId,
+                    Roles = mapping.MappedRoleIds?.ToList() ?? []
+                });
+            }
+        }
+
+        return accessibleTenants;
+    }
+
+    /// <summary>
+    /// Switches the current user's session to the target tenant without re-entering credentials.
+    /// Validates that the current user's home tenant is an ancestor of the target tenant.
+    /// </summary>
+    [HttpPost("tenant-switch")]
+    public async Task<ActionResult<TenantSwitchResultDto>> SwitchTenant(
+        [FromBody] TenantSwitchRequestDto request)
+    {
+        var targetTenantId = RouteData.Values["tenantId"]?.ToString() ?? "System";
+        var currentUserId = User.FindFirst("sub")?.Value;
+
+        if (string.IsNullOrEmpty(currentUserId))
+        {
+            return Unauthorized();
+        }
+
+        var sourceTenantId = request.SourceTenantId;
+        var sourceUserId = request.SourceUserId ?? currentUserId;
+
+        var crossTenantResult = await crossTenantAuthService.ValidateCrossTenantAccessAsync(
+            targetTenantId, sourceTenantId, sourceUserId);
+
+        if (crossTenantResult == null)
+        {
+            return new TenantSwitchResultDto
+            {
+                Success = false,
+                ErrorMessage = "Access to target tenant denied"
+            };
+        }
+
+        // Find or create a local user in the target tenant
+        var localUser = await FindOrCreateCrossTenantUserAsync(crossTenantResult, targetTenantId);
+        if (localUser == null)
+        {
+            return new TenantSwitchResultDto
+            {
+                Success = false,
+                ErrorMessage = "Failed to create local user in target tenant"
+            };
+        }
+
+        // Sign in as the local user
+        await signInManager.SignInAsync(localUser, isPersistent: false);
+
+        // Get the roles for the response
+        var roles = await userManager.GetRolesAsync(localUser);
+
+        return new TenantSwitchResultDto
+        {
+            Success = true,
+            TenantId = targetTenantId,
+            Roles = roles.ToList()
+        };
     }
 
     #endregion
@@ -1032,6 +1603,7 @@ public record ExternalProviderDto
     public string Scheme { get; init; } = string.Empty;
     public string DisplayName { get; init; } = string.Empty;
     public bool IsLdap { get; init; }
+    public bool IsParentTenant { get; init; }
 }
 
 public record LogoutContextDto
@@ -1142,6 +1714,53 @@ public record LdapLoginResultDto
 public record IsLdapSchemeResultDto
 {
     public bool IsLdap { get; init; }
+}
+
+// Cross-Tenant / Tenant Switch DTOs
+
+public record CrossTenantTokenRequestDto
+{
+    public string TargetTenantId { get; init; } = string.Empty;
+}
+
+public record CrossTenantTokenResultDto
+{
+    public string Token { get; init; } = string.Empty;
+}
+
+public record CrossTenantLoginRequestDto
+{
+    public string Token { get; init; } = string.Empty;
+    public string? ReturnUrl { get; init; }
+}
+
+internal record CrossTenantTokenPayload
+{
+    public string SourceTenantId { get; init; } = string.Empty;
+    public string SourceUserId { get; init; } = string.Empty;
+    public string TargetTenantId { get; init; } = string.Empty;
+    public long Timestamp { get; init; }
+}
+
+public record AccessibleTenantDto
+{
+    public string TenantId { get; init; } = string.Empty;
+    public string? TenantName { get; init; }
+    public List<string> Roles { get; init; } = [];
+}
+
+public record TenantSwitchRequestDto
+{
+    public string SourceTenantId { get; init; } = string.Empty;
+    public string? SourceUserId { get; init; }
+}
+
+public record TenantSwitchResultDto
+{
+    public bool Success { get; init; }
+    public string? TenantId { get; init; }
+    public List<string>? Roles { get; init; }
+    public string? ErrorMessage { get; init; }
 }
 
 #endregion

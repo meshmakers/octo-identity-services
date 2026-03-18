@@ -37,7 +37,7 @@
 
 ### Controller Naming
 - Controllers end with `Controller` suffix
-- Located in `src/IdentityServices/SystemApi/v{version}/Controllers/`
+- Located in `src/IdentityServices/TenantApi/v{version}/Controllers/`
 - Examples: `UsersController`, `ClientsController`, `RolesController`
 
 ## API Conventions
@@ -53,8 +53,7 @@ public class ExampleController : ControllerBase
 ```
 
 ### Route Patterns
-- Base path: `/system/v{version:apiVersion}/`
-- Multi-tenant routes: `/{tenantId:tenantId}/...`
+- Base path: `/{tenantId:tenantId}/v{version:apiVersion}/`
 - API versioning via route constraint
 
 ### Authorization
@@ -163,7 +162,7 @@ builder.Services.AddTransient<IMyStore, MyStore>();
 ```
 
 ### Adding API Endpoints
-1. Create controller in `SystemApi/v{version}/Controllers/`
+1. Create controller in `TenantApi/v{version}/Controllers/`
 2. Inherit from `ControllerBase`
 3. Apply route attribute: `[Route(IdentityServiceConstants.ApiPathPrefix)]`
 4. Apply authorization: `[Authorize(Policy = ...)]`

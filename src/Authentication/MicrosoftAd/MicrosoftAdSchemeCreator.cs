@@ -14,9 +14,10 @@ public class MicrosoftAdSchemeCreator : IAuthSchemeCreator<RtMicrosoftAdIdentity
         _optionsBuilder = optionsBuilder;
     }
 
-    public AuthenticationScheme Create(RtMicrosoftAdIdentityProvider identityProvider)
+    public AuthenticationScheme Create(RtMicrosoftAdIdentityProvider identityProvider, string? schemeNameOverride = null)
     {
-        var options = _optionsBuilder.CreateOptions(identityProvider.Name);
+        var schemeName = schemeNameOverride ?? identityProvider.Name;
+        var options = _optionsBuilder.CreateOptions(schemeName);
         options.Host = identityProvider.Host;
         options.Port = identityProvider.Port;
         options.UseTls = identityProvider.UseTls;
@@ -25,6 +26,6 @@ public class MicrosoftAdSchemeCreator : IAuthSchemeCreator<RtMicrosoftAdIdentity
         options.UserNameAttribute = identityProvider.UserNameAttribute ?? string.Empty;
 
         var displayName = identityProvider.DisplayName ?? identityProvider.Name;
-        return new AuthenticationScheme(identityProvider.Name, displayName, typeof(MicrosoftAdAuthenticationHandler));
+        return new AuthenticationScheme(schemeName, displayName, typeof(MicrosoftAdAuthenticationHandler));
     }
 }

@@ -6,13 +6,16 @@ using Meshmakers.Octo.Backend.Authentication.Consumers;
 using Meshmakers.Octo.Backend.Authentication.DynamicAuth;
 using Meshmakers.Octo.Backend.IdentityServices.Configuration;
 using Meshmakers.Octo.Backend.IdentityServices.Consumers;
+using Meshmakers.Octo.Backend.IdentityServices.Cookies;
 using Meshmakers.Octo.Backend.IdentityServices.Resources;
+using Meshmakers.Octo.Backend.IdentityServices.Middleware;
 using Meshmakers.Octo.Backend.IdentityServices.Routing;
 using Meshmakers.Octo.Backend.IdentityServices.Services;
 using IQrCodeService = Meshmakers.Octo.Backend.IdentityServices.Services.IQrCodeService;
 using QrCodeService = Meshmakers.Octo.Backend.IdentityServices.Services.QrCodeService;
 using Meshmakers.Octo.Communication.Contracts;
 using Meshmakers.Octo.Communication.Contracts.DataTransferObjects;
+using Meshmakers.Octo.Runtime.Contracts.MongoDb;
 using Meshmakers.Octo.Runtime.Contracts.MongoDb.Configuration;
 using Meshmakers.Octo.Runtime.Contracts.MongoDb.Extensions;
 using Meshmakers.Octo.Services.Contracts.DistributionEventHub.Commands;
@@ -26,6 +29,8 @@ using Meshmakers.Octo.Services.Notifications.Generated.System.Notification.v2;
 using Meshmakers.Octo.Services.Notifications.Services;
 using Meshmakers.Octo.Services.Observability;
 using Meshmakers.Octo.Services.Swagger.Configuration;
+using Microsoft.AspNetCore.Cors.Infrastructure;
+using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Options;
@@ -110,6 +115,8 @@ try
         .AddMicrosoftAdAuthentication();
 
     builder.Services.AddCors();
+    builder.Services.AddSingleton<IdentityCorsPolicyProvider>();
+    builder.Services.AddSingleton<ICorsPolicyProvider>(sp => sp.GetRequiredService<IdentityCorsPolicyProvider>());
 
     builder.Services.AddRuntimeEngine()
         .AddOctoIdentityPersistence(configureDistributionEventHub: c =>
@@ -137,6 +144,13 @@ try
         .AddAppAuthRedirectUriValidator()
         .AddJwtBearerClientAuthentication();
 
+    // Scope auth cookies per tenant to prevent cross-tenant session leakage.
+    // Identity.Application and idsrv cookies get a .{tenantId} suffix.
+    var tenantCookieManager = new TenantCookieManager();
+    builder.Services.ConfigureApplicationCookie(o => o.CookieManager = tenantCookieManager);
+    builder.Services.Configure<CookieAuthenticationOptions>("idsrv", o => o.CookieManager = tenantCookieManager);
+    builder.Services.Configure<CookieAuthenticationOptions>("idsrv.session", o => o.CookieManager = tenantCookieManager);
+
     // Service that periodically cleans up tokens in the grant database
     builder.Services.AddSingleton<IHostedService, TokenCleanupHostService>();
 
@@ -159,22 +173,21 @@ try
     builder.Services.ConfigureOptions<ConfigureJwtBearerOptions>();
 
     builder.Services.AddAuthentication()
-        .AddJwtBearer(jwt => { jwt.Audience = CommonConstants.IdentityApi; });
+        .AddJwtBearer(jwt => { jwt.Audience = CommonConstants.OctoApi; });
 
     builder.Services.AddAuthorization(options =>
     {
         options.AddPolicy(IdentityServiceConstants.IdentityApiReadOnlyPolicy, authorizationPolicyBuilder =>
         {
-            // require IdentityApiFullAccess or IdentityApiReadOnly
-            authorizationPolicyBuilder.RequireClaim(InfrastructureCommon.ClaimScope, CommonConstants.IdentityApiFullAccess,
-                CommonConstants.IdentityApiReadOnly);
+            authorizationPolicyBuilder.RequireClaim(InfrastructureCommon.ClaimScope,
+                CommonConstants.OctoApiFullAccess,
+                CommonConstants.OctoApiReadOnly);
         });
 
         options.AddPolicy(IdentityServiceConstants.IdentityApiReadWritePolicy, authorizationPolicyBuilder =>
         {
-            // require IdentityApiFullAccess
             authorizationPolicyBuilder.RequireClaim(InfrastructureCommon.ClaimScope,
-                CommonConstants.IdentityApiFullAccess);
+                CommonConstants.OctoApiFullAccess);
         });
     });
 
@@ -183,11 +196,11 @@ try
         options.Scopes = new Dictionary<string, string>
         {
             {
-                CommonConstants.IdentityApiFullAccess,
+                CommonConstants.OctoApiFullAccess,
                 IdentityTexts.Backend_IdentityServices_Api_FullAccess
             },
             {
-                CommonConstants.IdentityApiReadOnly,
+                CommonConstants.OctoApiReadOnly,
                 IdentityTexts.Backend_IdentityServices_Api_ReadOnlyAccess
             }
         };
@@ -196,11 +209,11 @@ try
         {
             {
                 IdentityServiceConstants.IdentityApiReadOnlyPolicy,
-                [CommonConstants.IdentityApiFullAccess, CommonConstants.IdentityApiReadOnly]
+                [CommonConstants.OctoApiFullAccess, CommonConstants.OctoApiReadOnly]
             },
             {
                 IdentityServiceConstants.IdentityApiReadWritePolicy,
-                [CommonConstants.IdentityApiFullAccess]
+                [CommonConstants.OctoApiFullAccess]
             }
         };
 
@@ -268,6 +281,27 @@ try
 
     app.UseRouting();
 
+    // After routing, re-resolve the tenant from the route parameter for v1 API requests.
+    // The global TenantMiddleware runs before routing and defaults to the system tenant.
+    // This middleware overrides that with the actual tenant from the route, so that scoped
+    // services (e.g., OctoUserStore) receive the correct tenant repository.
+    app.Use(async (context, next) =>
+    {
+        var tenantId = context.GetRouteValue(InfrastructureCommon.TenantIdRoute) as string;
+        if (!string.IsNullOrWhiteSpace(tenantId))
+        {
+            var systemContext = context.RequestServices.GetRequiredService<ISystemContext>();
+            var tenantRepository = await systemContext.TryFindTenantRepositoryAsync(tenantId);
+            if (tenantRepository != null)
+            {
+                context.Items[InfrastructureCommon.TenantRepositoryName] = tenantRepository;
+                context.Items[InfrastructureCommon.TenantIdName] = tenantRepository.TenantId;
+            }
+        }
+
+        await next();
+    });
+
     var supportedCultures = new[] { "en", "de" };
     var localizationOptions = new RequestLocalizationOptions().SetDefaultCulture(supportedCultures[0])
         .AddSupportedCultures(supportedCultures)
@@ -278,12 +312,19 @@ try
     // The sequence of the add statements in the configure function is of importance.
     // app.UseAuthentication()
     // !!!UseIdentityServer calls already UseAuthentication; comes before app.UseMvc();
+    app.UseOidcTenantResolution();
+    app.UseTenantLoginRedirect();
     app.UseIdentityServer();
 
     app.UseAuthorization();
+    app.UseOctoTenantAuthorization();
 
     // Map API controllers - MUST come before UseEndpoints middleware runs
     app.MapControllers();
+
+    // Redirect root path to the system tenant's login page
+    app.MapGet("/", (IOptions<OctoSystemConfiguration> systemConfig) =>
+        Results.Redirect($"/{systemConfig.Value.SystemTenantId}/login"));
 
     // Serve pre-built Angular files from wwwroot for all environments
     app.MapFallbackToFile("index.html");

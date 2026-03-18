@@ -69,7 +69,7 @@ The main ASP.NET Core web application and system entry point.
 - `Controllers/Account/` - Login, logout, password management
 - `Controllers/Consent/` - OAuth consent flow UI
 - `Controllers/Device/` - Device authorization flow
-- `SystemApi/v1/Controllers/` - REST API for identity management
+- `TenantApi/v1/Controllers/` - REST API for identity management
 
 ### Authentication (`src/Authentication/`)
 

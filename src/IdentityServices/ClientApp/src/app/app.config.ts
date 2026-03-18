@@ -10,7 +10,7 @@ import { OemService } from './core/services/oem.service';
 
 function initializeApp(): () => Promise<void> {
   const oemService = inject(OemService);
-  return () => firstValueFrom(oemService.loadConfig()).then(() => {});
+  return () => firstValueFrom(oemService.loadConfig()).then(() => undefined);
 }
 
 export const appConfig: ApplicationConfig = {

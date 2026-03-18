@@ -9,6 +9,7 @@ using Meshmakers.Octo.Communication.Contracts;
 using Meshmakers.Octo.ConstructionKit.Contracts;
 using Meshmakers.Octo.Runtime.Contracts;
 using Meshmakers.Octo.Runtime.Contracts.MongoDb;
+using Meshmakers.Octo.Runtime.Contracts.MongoDb.Repositories;
 using Meshmakers.Octo.Runtime.Contracts.Repositories.Query;
 using Meshmakers.Octo.Runtime.Contracts.RepositoryEntities;
 using Meshmakers.Octo.Services.Infrastructure;
@@ -33,12 +34,15 @@ internal class DefaultConfigurationCreatorService(
     IOctoClientStore clientStore,
     IOctoResourceStore resourceStore,
     IOctoIdentityProviderStore octoIdentityProviderStore,
+    IGroupStore groupStore,
     IOptions<OctoIdentityServicesOptions> octoIdentityOptions,
     MigrationService? migrationService,
     ICkModelUpgradeService? ckModelUpgradeService = null,
     IRuntimeRepositoryProvider? runtimeRepositoryProvider = null)
     : DefaultConfigurationCreatorServiceBase(logger), IConfigurationService
 {
+    private const string RefineryStudioClientId = "octo-data-refinery-studio";
+
     public override async Task InitializeAsync()
     {
         // Reconfigure the log level based on the configuration
@@ -97,9 +101,27 @@ internal class DefaultConfigurationCreatorService(
             await migrationService.ExecuteMigrationsAsync(adminSession, tenantContext);
         }
 
+        // Create default roles for every tenant (needed for cross-tenant role mapping)
+        await CreateUsersAndRoles();
+
+        // Create default groups (e.g. TenantOwners) for every tenant
+        await CreateDefaultGroupsAsync();
+
         if (tenantId != systemContext.TenantId)
         {
-            // Currently we only support the system tenant.
+            // Auto-create OctoTenantIdentityProvider for child tenants with a parent tenant
+            await CreateOctoTenantIdentityProviderAsync(tenantId, tenantContext);
+
+            // Ensure identity data (resources, scopes, clients) exists in child tenants
+            // so that OAuth/OIDC flows work when targeting a child tenant
+            await EnsureIdentityDataInChildTenantAsync(tenantContext);
+
+            // Ensure mail notification config and templates exist in child tenants
+            var childRepo = tenantContext.GetTenantRepositoryAsAdmin();
+            using var childSession = await tenantContext.GetAdminSessionAsync();
+            childSession.StartTransaction();
+            await CreateTenantConfiguration(childSession, childRepo);
+            await childSession.CommitTransactionAsync();
             return;
         }
 
@@ -113,28 +135,33 @@ internal class DefaultConfigurationCreatorService(
             identityConfiguration.Version < IdentityServiceConstants.IdentitySchemaVersionValue)
         {
             await CreateClients();
-            await CreateUsersAndRoles();
 
             await CreateApiScopes();
             await CreateApiResources();
             await CreateIdentityResources();
             await CreateIdentityProvider();
-            await CreateTenantConfiguration(session);
+            await CreateTenantConfiguration(session, systemContext.GetSystemTenantRepositoryAsAdmin());
 
             await systemContext.SetConfigurationAsync(session, IdentityServiceConstants.IdentitySchemaVersionKey,
                 new DefaultConfigurationVersion { Version = IdentityServiceConstants.IdentitySchemaVersionValue });
         }
+
+        // Always ensure the Refinery Studio client is up-to-date, even when the schema version
+        // hasn't changed. Its configuration depends on runtime settings (RefineryStudioUrl) and
+        // may include critical flags like UpdateAccessTokenClaimsOnRefresh that must be applied
+        // to existing clients without requiring a schema version bump.
+        await EnsureRefineryStudioClientAsync();
 
         await session.CommitTransactionAsync();
     }
 
     private async Task ImportCkModel(ITenantContext tenantContext)
     {
-        if (!await tenantContext.IsCkModelExistingAsync(SystemIdentityCkIds.CkModelId) &&
-            tenantContext.TenantId == systemContext.TenantId)
+        if (!await tenantContext.IsCkModelExistingAsync(SystemIdentityCkIds.CkModelId))
         {
-            // We ensure that at least the system tenant contains a valid ck model.Other tenants
-            // need to be enabled manually by an admin.
+            // Install the Identity CK model in all tenants (needed for cross-tenant authentication
+            // and role mapping). The model is required for ExternalTenantUserMapping and
+            // OctoTenantIdentityProvider entities.
             OperationResult operationResult = new();
             await tenantContext.ImportCkModelAsync(SystemIdentityCkIds.CkModelId, operationResult);
             if (operationResult.HasErrors || operationResult.HasFatalErrors)
@@ -194,24 +221,24 @@ internal class DefaultConfigurationCreatorService(
 
     private async Task CreateApiScopes()
     {
-        await resourceStore.TryCreateApiScopeAsync(new ApiScope(CommonConstants.IdentityApiFullAccess,
-            CommonConstants.IdentityApiFullAccessDisplayName));
-        await resourceStore.TryCreateApiScopeAsync(new ApiScope(CommonConstants.IdentityApiReadOnly,
-            CommonConstants.IdentityApiReadOnlyDisplayName));
+        await resourceStore.TryCreateApiScopeAsync(new ApiScope(CommonConstants.OctoApiFullAccess,
+            CommonConstants.OctoApiFullAccessDisplayName));
+        await resourceStore.TryCreateApiScopeAsync(new ApiScope(CommonConstants.OctoApiReadOnly,
+            CommonConstants.OctoApiReadOnlyDisplayName));
     }
 
     private async Task CreateApiResources()
     {
         await resourceStore.GetOrCreateApiResourceAsync(new RtApiResource
         {
-            Name = CommonConstants.IdentityApi,
-            DisplayName = CommonConstants.IdentityApiDisplayName,
-            Description = CommonConstants.IdentityApiDescription,
+            Name = CommonConstants.OctoApi,
+            DisplayName = CommonConstants.OctoApiDisplayName,
+            Description = CommonConstants.OctoApiDescription,
             Enabled = true,
             Scopes = new AttributeStringValueList
             {
-                CommonConstants.IdentityApiFullAccess,
-                CommonConstants.IdentityApiReadOnly
+                CommonConstants.OctoApiFullAccess,
+                CommonConstants.OctoApiReadOnly
             }
         });
     }
@@ -242,6 +269,55 @@ internal class DefaultConfigurationCreatorService(
         await TryCreateRole(CommonConstants.DashboardViewerRole);
         await TryCreateRole(CommonConstants.ReportingManagementRole);
         await TryCreateRole(CommonConstants.ReportingViewerRole);
+    }
+
+    private async Task CreateDefaultGroupsAsync()
+    {
+        // Collect all default role RtIds
+        var defaultRoleNames = new[]
+        {
+            CommonConstants.TenantManagementRole,
+            CommonConstants.UserManagementRole,
+            CommonConstants.CommunicationManagementRole,
+            CommonConstants.DevelopmentRole,
+            CommonConstants.AdminPanelManagementRole,
+            CommonConstants.BotManagementRole,
+            CommonConstants.DashboardManagementRole,
+            CommonConstants.DashboardViewerRole,
+            CommonConstants.ReportingManagementRole,
+            CommonConstants.ReportingViewerRole
+        };
+
+        var roleIds = new List<string>();
+        foreach (var roleName in defaultRoleNames)
+        {
+            var role = await roleManager.FindByNameAsync(roleName);
+            if (role != null)
+            {
+                roleIds.Add(role.RtId.ToString());
+            }
+        }
+
+        var normalizedName = CommonConstants.TenantOwnersGroup.ToUpperInvariant();
+        var existingGroup = await groupStore.FindByNameAsync(normalizedName);
+        if (existingGroup == null)
+        {
+            var tenantOwnersGroup = new RtGroup
+            {
+                RtId = new OctoObjectId(Guid.NewGuid().ToString("N")),
+                GroupName = CommonConstants.TenantOwnersGroup,
+                NormalizedGroupName = normalizedName,
+                GroupDescription = "Default group with all roles assigned. Members inherit all tenant permissions."
+            };
+
+            await groupStore.StoreAsync(tenantOwnersGroup);
+            await groupStore.SetRoleIdsAsync(tenantOwnersGroup.RtId, roleIds);
+        }
+        else
+        {
+            // Ensure all current roles are included (new roles may have been added)
+            await groupStore.SetRoleIdsAsync(existingGroup.RtId, roleIds);
+        }
     }
 
     private async Task TryCreateRole(string roleName)
@@ -283,11 +359,7 @@ internal class DefaultConfigurationCreatorService(
                 IdentityServerConstants.StandardScopes.Profile,
                 IdentityServerConstants.StandardScopes.Email,
                 JwtClaimTypes.Role,
-                CommonConstants.AssetSystemApiFullAccess,
-                CommonConstants.IdentityApiFullAccess,
-                CommonConstants.BotApiFullAccess,
-                CommonConstants.CommunicationSystemApiFullAccess,
-                CommonConstants.ReportingSystemApiFullAccess,
+                CommonConstants.OctoApiFullAccess,
             }
         };
 
@@ -331,8 +403,8 @@ internal class DefaultConfigurationCreatorService(
                 CommonConstants.Scopes.Profile,
                 CommonConstants.Scopes.Email,
                 JwtClaimTypes.Role,
-                CommonConstants.IdentityApiFullAccess,
-                CommonConstants.IdentityApiReadOnly
+                CommonConstants.OctoApiFullAccess,
+                CommonConstants.OctoApiReadOnly,
             }
         };
 
@@ -346,12 +418,73 @@ internal class DefaultConfigurationCreatorService(
         {
             await clientStore.UpdateAsync(octoIdentityServiceSwaggerClient.ClientId, appClient);
         }
+
+        await EnsureRefineryStudioClientAsync();
     }
 
-    private async Task CreateTenantConfiguration(IOctoSession session)
+    /// <summary>
+    /// Ensures the Refinery Studio SPA OIDC client is up-to-date in the system tenant.
+    /// Called unconditionally at startup (outside the schema version check) because its
+    /// configuration depends on runtime settings and critical flags like
+    /// <c>UpdateAccessTokenClaimsOnRefresh</c>.
+    /// </summary>
+    private async Task EnsureRefineryStudioClientAsync()
     {
-        var tenantRepository = systemContext.GetSystemTenantRepositoryAsAdmin();
+        var refineryStudioUrl = octoIdentityOptions.Value.RefineryStudioUrl;
+        if (string.IsNullOrWhiteSpace(refineryStudioUrl))
+        {
+            return;
+        }
 
+        var refineryStudioClient = new RtClient
+        {
+            Enabled = true,
+            ClientId = RefineryStudioClientId,
+            ClientName = "Data Refinery Studio",
+            ClientUri = refineryStudioUrl,
+
+            AllowedGrantTypes = new AttributeStringValueList { OidcConstants.GrantTypes.AuthorizationCode },
+
+            RequirePkce = true,
+            RequireClientSecret = false,
+            RequireConsent = false,
+
+            AccessTokenType = RtTokenTypeEnum.Jwt,
+            AllowAccessTokensViaBrowser = true,
+            AlwaysIncludeUserClaimsInIdToken = true,
+            UpdateAccessTokenClaimsOnRefresh = true,
+
+            RedirectUris = { refineryStudioUrl.EnsureEndsWith("/") },
+            PostLogoutRedirectUris = { refineryStudioUrl.EnsureEndsWith("/") },
+            AllowedCorsOrigins = { refineryStudioUrl.TrimEnd('/') },
+            AllowOfflineAccess = true,
+
+            AllowedScopes =
+            {
+                CommonConstants.Scopes.OpenId,
+                CommonConstants.Scopes.Profile,
+                CommonConstants.Scopes.Email,
+                JwtClaimTypes.Role,
+                CommonConstants.OctoApiFullAccess,
+            },
+
+            FrontChannelLogoutUri = refineryStudioUrl.EnsureEndsWith("/logout/callback"),
+            FrontChannelLogoutSessionRequired = true
+        };
+
+        var existingRefineryStudioClient = await clientStore.FindClientByIdAsync(RefineryStudioClientId);
+        if (existingRefineryStudioClient == null)
+        {
+            await clientStore.CreateAsync(refineryStudioClient);
+        }
+        else
+        {
+            await clientStore.UpdateAsync(existingRefineryStudioClient.ClientId, refineryStudioClient);
+        }
+    }
+
+    private async Task CreateTenantConfiguration(IOctoSession session, ITenantRepository tenantRepository)
+    {
         var queryOptions = RtEntityQueryOptions.Create()
             .FieldEquals(nameof(RtEntity.RtWellKnownName),
                 IdentityServiceConstants.MailNotificationConfigurationName);
@@ -440,6 +573,382 @@ internal class DefaultConfigurationCreatorService(
     public bool CanBeEnabled()
     {
         return false;
+    }
+
+    private async Task CreateOctoTenantIdentityProviderAsync(string tenantId, ITenantContext tenantContext)
+    {
+        try
+        {
+            // Query the system tenant for the RtTenant record to find ParentTenantId
+            var systemRepo = systemContext.GetSystemTenantRepositoryAsAdmin();
+            using var systemSession = await systemContext.GetAdminSessionAsync();
+            systemSession.StartTransaction();
+
+            var queryOptions = RtEntityQueryOptions.Create()
+                .FieldEquals(nameof(RtTenant.TenantId), tenantId);
+            var tenantResult = await systemRepo.GetRtEntitiesByTypeAsync<RtTenant>(systemSession, queryOptions);
+            await systemSession.CommitTransactionAsync();
+
+            var rtTenant = tenantResult.Items.FirstOrDefault();
+            if (rtTenant == null || string.IsNullOrEmpty(rtTenant.ParentTenantId))
+            {
+                return;
+            }
+
+            // Check if OctoTenantIdentityProvider already exists in the child tenant
+            var childRepo = tenantContext.GetTenantRepositoryAsAdmin();
+            using var childSession = await tenantContext.GetAdminSessionAsync();
+            childSession.StartTransaction();
+
+            var providerQuery = RtEntityQueryOptions.Create();
+            var providerResult =
+                await childRepo.GetRtEntitiesByTypeAsync<RtOctoTenantIdentityProvider>(childSession, providerQuery);
+
+            if (providerResult.Items.Any(p =>
+                    string.Equals(p.ParentTenantId, rtTenant.ParentTenantId, StringComparison.OrdinalIgnoreCase)))
+            {
+                await childSession.CommitTransactionAsync();
+                return;
+            }
+
+            // Create the provider
+            var provider = new RtOctoTenantIdentityProvider
+            {
+                Name = $"ParentTenant_{rtTenant.ParentTenantId}",
+                IsEnabled = true,
+                DisplayName = $"Login via {rtTenant.ParentTenantId}",
+                ParentTenantId = rtTenant.ParentTenantId
+            };
+
+            await childRepo.InsertOneRtEntityAsync(childSession, provider);
+            await childSession.CommitTransactionAsync();
+
+            logger.LogInformation(
+                "Auto-created OctoTenantIdentityProvider for tenant '{TenantId}' pointing to parent '{ParentTenantId}'",
+                tenantId, rtTenant.ParentTenantId);
+        }
+        catch (Exception e)
+        {
+            logger.LogWarning(e,
+                "Failed to auto-create OctoTenantIdentityProvider for tenant '{TenantId}'. " +
+                "The provider can be created manually or will be created by the migration on next startup.",
+                tenantId);
+        }
+    }
+
+    private async Task EnsureIdentityDataInChildTenantAsync(ITenantContext tenantContext)
+    {
+        try
+        {
+            var childRepo = tenantContext.GetTenantRepositoryAsAdmin();
+            using var session = await tenantContext.GetAdminSessionAsync();
+            session.StartTransaction();
+
+            // Identity Resources (required for all OAuth/OIDC flows)
+            await EnsureIdentityResourceAsync(session, childRepo, "openid", "Your user identifier",
+                required: true, claims: new[] { "sub" });
+            await EnsureIdentityResourceAsync(session, childRepo, "profile", "User profile",
+                claims: new[]
+                {
+                    "name", "family_name", "given_name", "middle_name", "nickname",
+                    "preferred_username", "profile", "picture", "website", "gender",
+                    "birthdate", "zoneinfo", "locale", "updated_at"
+                });
+            await EnsureIdentityResourceAsync(session, childRepo, "email", "Your email address",
+                claims: new[] { "email", "email_verified" });
+            await EnsureIdentityResourceAsync(session, childRepo, JwtClaimTypes.Role,
+                IdentityTexts.Backend_Identity_UserSchema_Roles_DisplayName,
+                description: IdentityTexts.Backend_Identity_UserSchema_Roles_Description,
+                claims: new[] { JwtClaimTypes.Role });
+
+            // API Scopes
+            await EnsureApiScopeAsync(session, childRepo,
+                CommonConstants.OctoApiFullAccess, CommonConstants.OctoApiFullAccessDisplayName);
+            await EnsureApiScopeAsync(session, childRepo,
+                CommonConstants.OctoApiReadOnly, CommonConstants.OctoApiReadOnlyDisplayName);
+
+            // API Resources
+            await EnsureApiResourceAsync(session, childRepo,
+                CommonConstants.OctoApi, CommonConstants.OctoApiDisplayName,
+                CommonConstants.OctoApiDescription,
+                new[] { CommonConstants.OctoApiFullAccess, CommonConstants.OctoApiReadOnly });
+
+            // Roles (required for per-tenant user management and cross-tenant role mapping)
+            await EnsureRoleInChildTenantAsync(session, childRepo, CommonConstants.TenantManagementRole);
+            await EnsureRoleInChildTenantAsync(session, childRepo, CommonConstants.UserManagementRole);
+            await EnsureRoleInChildTenantAsync(session, childRepo, CommonConstants.CommunicationManagementRole);
+            await EnsureRoleInChildTenantAsync(session, childRepo, CommonConstants.DevelopmentRole);
+            await EnsureRoleInChildTenantAsync(session, childRepo, CommonConstants.AdminPanelManagementRole);
+            await EnsureRoleInChildTenantAsync(session, childRepo, CommonConstants.BotManagementRole);
+            await EnsureRoleInChildTenantAsync(session, childRepo, CommonConstants.DashboardManagementRole);
+            await EnsureRoleInChildTenantAsync(session, childRepo, CommonConstants.DashboardViewerRole);
+            await EnsureRoleInChildTenantAsync(session, childRepo, CommonConstants.ReportingManagementRole);
+            await EnsureRoleInChildTenantAsync(session, childRepo, CommonConstants.ReportingViewerRole);
+
+            // TenantOwners group
+            await EnsureGroupInChildTenantAsync(session, childRepo);
+
+            // Clients
+            await EnsureClientInChildTenantAsync(session, childRepo, new RtClient
+            {
+                Enabled = true,
+                ClientId = CommonConstants.OctoToolClientId,
+                AllowedGrantTypes = new AttributeStringValueList { OidcConstants.GrantTypes.DeviceCode },
+                ClientSecrets = new AttributeRecordValueList<RtSecretRecord>
+                {
+                    new() { Value = CommonConstants.OctoToolClientSecret.Sha256() }
+                },
+                AllowOfflineAccess = true,
+                AllowedScopes =
+                {
+                    IdentityServerConstants.StandardScopes.OpenId,
+                    IdentityServerConstants.StandardScopes.Profile,
+                    IdentityServerConstants.StandardScopes.Email,
+                    JwtClaimTypes.Role,
+                    CommonConstants.OctoApiFullAccess,
+                }
+            });
+
+            await EnsureClientInChildTenantAsync(session, childRepo, new RtClient
+            {
+                Enabled = true,
+                ClientId = CommonConstants.IdentityServicesSwaggerClientId,
+                ClientName = IdentityTexts.Backend_IdentityServices_UserSchema_Swagger_DisplayName,
+                ClientUri = octoIdentityOptions.Value.AuthorityUrl,
+                AllowedGrantTypes = new AttributeStringValueList { OidcConstants.GrantTypes.AuthorizationCode },
+                RequirePkce = true,
+                RequireClientSecret = false,
+                AccessTokenType = RtTokenTypeEnum.Jwt,
+                AllowAccessTokensViaBrowser = true,
+                AlwaysIncludeUserClaimsInIdToken = true,
+                RedirectUris =
+                {
+                    octoIdentityOptions.Value.AuthorityUrl.EnsureEndsWith("/swagger/oauth2-redirect.html")
+                },
+                PostLogoutRedirectUris = { octoIdentityOptions.Value.AuthorityUrl.EnsureEndsWith("/") },
+                AllowedCorsOrigins = { octoIdentityOptions.Value.AuthorityUrl.TrimEnd('/') },
+                AllowedScopes =
+                {
+                    CommonConstants.Scopes.OpenId,
+                    CommonConstants.Scopes.Profile,
+                    CommonConstants.Scopes.Email,
+                    JwtClaimTypes.Role,
+                    CommonConstants.OctoApiFullAccess,
+                    CommonConstants.OctoApiReadOnly,
+                }
+            });
+
+            // Refinery Studio SPA client (only if URL is configured)
+            var refineryStudioUrl = octoIdentityOptions.Value.RefineryStudioUrl;
+            if (!string.IsNullOrWhiteSpace(refineryStudioUrl))
+            {
+                await EnsureClientInChildTenantAsync(session, childRepo, new RtClient
+                {
+                    Enabled = true,
+                    ClientId = RefineryStudioClientId,
+                    ClientName = "Data Refinery Studio",
+                    ClientUri = refineryStudioUrl,
+                    AllowedGrantTypes =
+                        new AttributeStringValueList { OidcConstants.GrantTypes.AuthorizationCode },
+                    RequirePkce = true,
+                    RequireClientSecret = false,
+                    RequireConsent = false,
+                    AccessTokenType = RtTokenTypeEnum.Jwt,
+                    AllowAccessTokensViaBrowser = true,
+                    AlwaysIncludeUserClaimsInIdToken = true,
+                    UpdateAccessTokenClaimsOnRefresh = true,
+                    RedirectUris = { refineryStudioUrl.EnsureEndsWith("/") },
+                    PostLogoutRedirectUris = { refineryStudioUrl.EnsureEndsWith("/") },
+                    AllowedCorsOrigins = { refineryStudioUrl.TrimEnd('/') },
+                    AllowOfflineAccess = true,
+                    AllowedScopes =
+                    {
+                        CommonConstants.Scopes.OpenId,
+                        CommonConstants.Scopes.Profile,
+                        CommonConstants.Scopes.Email,
+                        JwtClaimTypes.Role,
+                        CommonConstants.OctoApiFullAccess,
+                    },
+                    FrontChannelLogoutUri = refineryStudioUrl.EnsureEndsWith("/logout/callback"),
+                    FrontChannelLogoutSessionRequired = true
+                });
+            }
+
+            await session.CommitTransactionAsync();
+
+            logger.LogInformation(
+                "Ensured identity data (resources, scopes, roles, clients) exists in child tenant '{TenantId}'",
+                tenantContext.TenantId);
+        }
+        catch (Exception e)
+        {
+            logger.LogWarning(e,
+                "Failed to ensure identity data in child tenant '{TenantId}'. " +
+                "Data will be created on next startup.",
+                tenantContext.TenantId);
+        }
+    }
+
+    private static async Task EnsureIdentityResourceAsync(
+        IOctoSession session, ITenantRepository childRepo,
+        string name, string displayName,
+        string? description = null, bool required = false, string[]? claims = null)
+    {
+        var queryOptions = RtEntityQueryOptions.Create()
+            .FieldFilter(nameof(RtIdentityResource.Name), FieldFilterOperator.Equals, name);
+        var result = await childRepo.GetRtEntitiesByTypeAsync<RtIdentityResource>(session, queryOptions);
+        if (!result.Items.Any())
+        {
+            var resource = new RtIdentityResource
+            {
+                Name = name,
+                DisplayName = displayName,
+                Description = description,
+                Enabled = true,
+                IsRequired = required,
+                ShowInDiscoveryDocument = true,
+                Claims = new AttributeStringValueList(claims?.ToList() ?? new List<string>())
+            };
+            await childRepo.InsertOneRtEntityAsync(session, resource);
+        }
+    }
+
+    private static async Task EnsureApiScopeAsync(
+        IOctoSession session, ITenantRepository childRepo,
+        string name, string displayName)
+    {
+        var queryOptions = RtEntityQueryOptions.Create()
+            .FieldFilter(nameof(RtApiScope.Name), FieldFilterOperator.Equals, name);
+        var result = await childRepo.GetRtEntitiesByTypeAsync<RtApiScope>(session, queryOptions);
+        if (!result.Items.Any())
+        {
+            var scope = new RtApiScope
+            {
+                Name = name,
+                DisplayName = displayName,
+                Enabled = true
+            };
+            await childRepo.InsertOneRtEntityAsync(session, scope);
+        }
+    }
+
+    private static async Task EnsureApiResourceAsync(
+        IOctoSession session, ITenantRepository childRepo,
+        string name, string displayName, string description, string[] scopes)
+    {
+        var queryOptions = RtEntityQueryOptions.Create()
+            .FieldFilter(nameof(RtApiResource.Name), FieldFilterOperator.Equals, name);
+        var result = await childRepo.GetRtEntitiesByTypeAsync<RtApiResource>(session, queryOptions);
+        if (!result.Items.Any())
+        {
+            var resource = new RtApiResource
+            {
+                Name = name,
+                DisplayName = displayName,
+                Description = description,
+                Enabled = true,
+                Scopes = new AttributeStringValueList(scopes.ToList())
+            };
+            await childRepo.InsertOneRtEntityAsync(session, resource);
+        }
+    }
+
+    private static async Task EnsureClientInChildTenantAsync(
+        IOctoSession session, ITenantRepository childRepo, RtClient client)
+    {
+        var queryOptions = RtEntityQueryOptions.Create()
+            .FieldFilter(nameof(RtClient.ClientId), FieldFilterOperator.Equals, client.ClientId);
+        var result = await childRepo.GetRtEntitiesByTypeAsync<RtClient>(session, queryOptions);
+        if (!result.Items.Any())
+        {
+            await childRepo.InsertOneRtEntityAsync(session, client);
+        }
+        else
+        {
+            await childRepo.ReplaceOneRtEntityByIdAsync(session, result.Items.First().RtId, client);
+        }
+    }
+
+    private static async Task EnsureRoleInChildTenantAsync(
+        IOctoSession session, ITenantRepository childRepo, string roleName)
+    {
+        var queryOptions = RtEntityQueryOptions.Create()
+            .FieldFilter(nameof(RtRole.NormalizedName), FieldFilterOperator.Equals, roleName.ToUpperInvariant());
+        var result = await childRepo.GetRtEntitiesByTypeAsync<RtRole>(session, queryOptions);
+        if (!result.Items.Any())
+        {
+            var role = new RtRole
+            {
+                Name = roleName,
+                NormalizedName = roleName.ToUpperInvariant(),
+                Claims = new AttributeRecordValueList<RtRoleClaimRecord>()
+            };
+            await childRepo.InsertOneRtEntityAsync(session, role);
+        }
+    }
+
+    private static async Task EnsureGroupInChildTenantAsync(
+        IOctoSession session, ITenantRepository childRepo)
+    {
+        var normalizedName = CommonConstants.TenantOwnersGroup.ToUpperInvariant();
+        var queryOptions = RtEntityQueryOptions.Create()
+            .FieldEquals(nameof(RtGroup.NormalizedGroupName), normalizedName);
+        var result = await childRepo.GetRtEntitiesByTypeAsync<RtGroup>(session, queryOptions);
+
+        // Collect all role RtIds in the child tenant
+        var roleResult = await childRepo.GetRtEntitiesByTypeAsync<RtRole>(session, RtEntityQueryOptions.Create());
+        var roleIds = roleResult.Items.Select(r => r.RtId.ToString()).ToList();
+
+        RtGroup group;
+        if (!result.Items.Any())
+        {
+            group = new RtGroup
+            {
+                RtId = new OctoObjectId(Guid.NewGuid().ToString("N")),
+                GroupName = CommonConstants.TenantOwnersGroup,
+                NormalizedGroupName = normalizedName,
+                GroupDescription = "Default group with all roles assigned. Members inherit all tenant permissions."
+            };
+            await childRepo.InsertOneRtEntityAsync(session, group);
+        }
+        else
+        {
+            group = result.Items.First();
+        }
+
+        // Ensure all role associations exist
+        var groupEntityId = group.ToRtEntityId();
+        var roleCkTypeId = RtEntityExtensions.GetRtCkTypeId<RtRole>();
+
+        // Get current role associations
+        var currentAssociations = await childRepo.GetRtAssociationsAsync(
+            session,
+            groupEntityId,
+            RtAssociationExtendedQueryOptions.Create(
+                GraphDirections.Outbound,
+                roleId: IdentityAssociationConstants.AssignedRoleId));
+
+        var currentRoleIds = currentAssociations.Items
+            .Select(a => a.TargetRtId.ToString())
+            .ToHashSet();
+
+        var updates = new List<AssociationUpdateInfo>();
+        foreach (var roleId in roleIds)
+        {
+            if (!currentRoleIds.Contains(roleId))
+            {
+                updates.Add(AssociationUpdateInfo.CreateInsert(
+                    groupEntityId,
+                    new RtEntityId(roleCkTypeId, new OctoObjectId(roleId)),
+                    IdentityAssociationConstants.AssignedRoleId));
+            }
+        }
+
+        if (updates.Count > 0)
+        {
+            var opResult = new OperationResult();
+            await childRepo.ApplyChangesAsync(session, updates, opResult);
+        }
     }
 
     private async Task RunCkModelMigrationsAsync(

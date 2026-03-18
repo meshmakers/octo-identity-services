@@ -57,12 +57,6 @@ public class RtUserBuilder
         return this;
     }
 
-    public RtUserBuilder WithRoles(params string[] roleIds)
-    {
-        _user.RoleIds = new AttributeStringValueList(roleIds.ToList());
-        return this;
-    }
-
     public RtUserBuilder WithTwoFactorEnabled(bool enabled = true)
     {
         _user.TwoFactorEnabled = enabled;

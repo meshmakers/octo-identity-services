@@ -278,6 +278,7 @@ public class CustomWebApplicationFactory : WebApplicationFactory<Program>, IAsyn
 
             // Configure cookie settings for testing (allow non-secure cookies over HTTP)
             // Configure ALL Identity cookies - Application, External, TwoFactorUserId, TwoFactorRememberMe
+            // TenantCookieManager is already registered in Program.cs; ensure test cookie settings are compatible
             services.ConfigureApplicationCookie(options =>
             {
                 options.Cookie.SecurePolicy = Microsoft.AspNetCore.Http.CookieSecurePolicy.None;

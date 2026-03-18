@@ -12,7 +12,11 @@ public interface IAuthSchemeCreator<in TAuthProvider> where TAuthProvider : RtId
     /// <summary>
     ///     Create the AuthenticationScheme and configure the options required for the handler.
     /// </summary>
-    /// <param name="identityProvider"></param>
+    /// <param name="identityProvider">The identity provider configuration.</param>
+    /// <param name="schemeNameOverride">
+    ///     Optional override for the scheme name. When provided, the scheme is registered under this name
+    ///     (e.g. a tenant-prefixed name) instead of the provider's <see cref="RtIdentityProvider.Name" />.
+    /// </param>
     /// <returns></returns>
-    public AuthenticationScheme Create(TAuthProvider identityProvider);
+    public AuthenticationScheme Create(TAuthProvider identityProvider, string? schemeNameOverride = null);
 }

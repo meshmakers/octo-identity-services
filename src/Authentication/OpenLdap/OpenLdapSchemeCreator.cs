@@ -14,9 +14,10 @@ public class OpenLdapSchemeCreator : IAuthSchemeCreator<RtOpenLdapIdentityProvid
         _optionsBuilder = optionsBuilder;
     }
 
-    public AuthenticationScheme Create(RtOpenLdapIdentityProvider identityProvider)
+    public AuthenticationScheme Create(RtOpenLdapIdentityProvider identityProvider, string? schemeNameOverride = null)
     {
-        var options = _optionsBuilder.CreateOptions(identityProvider.Name);
+        var schemeName = schemeNameOverride ?? identityProvider.Name;
+        var options = _optionsBuilder.CreateOptions(schemeName);
         options.Host = identityProvider.Host;
         options.Port = identityProvider.Port;
         options.UseTls = identityProvider.UseTls;
@@ -25,6 +26,6 @@ public class OpenLdapSchemeCreator : IAuthSchemeCreator<RtOpenLdapIdentityProvid
         options.UserNameAttribute = identityProvider.UserNameAttribute;
 
         var displayName = identityProvider.DisplayName ?? identityProvider.Name;
-        return new AuthenticationScheme(identityProvider.Name, displayName, typeof(OpenLdapAuthenticationHandler));
+        return new AuthenticationScheme(schemeName, displayName, typeof(OpenLdapAuthenticationHandler));
     }
 }

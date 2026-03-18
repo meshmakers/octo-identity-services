@@ -18,16 +18,17 @@ internal class MicrosoftAuthSchemeCreator : IAuthSchemeCreator<RtMicrosoftIdenti
         _micAuthOptions = micAuthOptions;
     }
 
-    public AuthenticationScheme Create(RtMicrosoftIdentityProvider identityProvider)
+    public AuthenticationScheme Create(RtMicrosoftIdentityProvider identityProvider, string? schemeNameOverride = null)
     {
-        var options = _micAuthOptions.CreateOptions(identityProvider.Name);
+        var schemeName = schemeNameOverride ?? identityProvider.Name;
+        var options = _micAuthOptions.CreateOptions(schemeName);
         options.ClientId = identityProvider.ClientId;
         options.ClientSecret = identityProvider.ClientSecret;
         // Sign in to IdentityServer's external cookie scheme so ExternalLoginCallback can read it
         options.SignInScheme = AuthenticationConstants.IdentityServerConstants.ExternalCookieAuthenticationScheme;
 
         var displayName = identityProvider.DisplayName ?? identityProvider.Name;
-        return new AuthenticationScheme(identityProvider.Name, displayName,
+        return new AuthenticationScheme(schemeName, displayName,
             typeof(MicrosoftAccountHandler));
     }
 }

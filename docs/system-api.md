@@ -1,14 +1,16 @@
-# System API Reference
+# Identity API Reference
 
 ## Overview
 
-The System API provides RESTful endpoints for managing identity resources including users, clients, roles, API resources, and identity providers.
+The Identity API provides RESTful endpoints for managing identity resources including users, clients, roles, API resources, and identity providers.
 
-**Base Path:** `system/v{version:apiVersion}` (e.g., `system/v1`)
+**Base Path:** `{tenantId}/v1` (e.g., `octosystem/v1` for the default system tenant, `MyTenant/v1` for a specific tenant)
 
 **API Version:** 1.0
 
 **Authentication:** Bearer Token (OIDC Authorization Header)
+
+All endpoints are tenant-scoped via the `{tenantId}` route parameter. The system tenant ID defaults to `OctoSystem` (normalized to `octosystem` in URLs) and is configurable via `OctoSystemConfiguration.SystemTenantId`. For system-level resources (clients, API resources, scopes, secrets, diagnostics, setup, tools), use the system tenant ID (e.g., `octosystem/v1/clients`).
 
 ## Authorization Policies
 
@@ -24,18 +26,19 @@ The System API provides RESTful endpoints for managing identity resources includ
 
 ## Endpoints
 
-### Users (`/system/v1/users`)
+### Users (`/{tenantId}/v1/users`)
 
 | Method | Endpoint | Policy | Description |
 |--------|----------|--------|-------------|
 | GET | `/users` | ReadOnly | Get all users |
 | GET | `/users/GetPaged` | ReadOnly | Get paginated users |
 | GET | `/users/{userName}` | ReadOnly | Get user by name, email, or ID |
-| GET | `/users/{userName}/roles` | ReadOnly | Get user's roles |
+| GET | `/users/{userName}/roles` | ReadOnly | Get user's roles (direct + group-inherited) |
+| GET | `/users/{userName}/directRoles` | ReadOnly | Get user's directly assigned roles only |
 | POST | `/users` | ReadWrite | Create new user |
 | POST | `/users/ResetPassword` | ReadWrite | Reset user password |
 | PUT | `/users/{userName}` | ReadWrite | Update user |
-| PUT | `/users/{userName}/roles` | ReadWrite | Replace all user roles |
+| PUT | `/users/{userName}/roles` | ReadWrite | Replace user's direct role assignments |
 | PUT | `/users/{userName}/roles/{roleName}` | ReadWrite | Add role to user |
 | POST | `/users/{userName}/merge` | ReadWrite | Merge source user into target user |
 | DELETE | `/users/{userName}` | ReadWrite | Delete user |
@@ -79,7 +82,7 @@ Transfers all external logins (e.g., Google, Microsoft) from the source user to 
 - Returns 404 if either user does not exist
 - Returns 400 if attempting to merge a user into itself
 
-### Clients (`/system/v1/clients`)
+### Clients (`/{tenantId}/v1/clients`)
 
 | Method | Endpoint | Policy | Description |
 |--------|----------|--------|-------------|
@@ -109,7 +112,7 @@ Transfers all external logins (e.g., Google, Microsoft) from the source user to 
 }
 ```
 
-### Roles (`/system/v1/roles`)
+### Roles (`/{tenantId}/v1/roles`)
 
 | Method | Endpoint | Policy | Description |
 |--------|----------|--------|-------------|
@@ -130,7 +133,7 @@ Transfers all external logins (e.g., Google, Microsoft) from the source user to 
 }
 ```
 
-### API Resources (`/system/v1/apiResources`)
+### API Resources (`/{tenantId}/v1/apiResources`)
 
 | Method | Endpoint | Policy | Description |
 |--------|----------|--------|-------------|
@@ -158,7 +161,7 @@ Transfers all external logins (e.g., Google, Microsoft) from the source user to 
 }
 ```
 
-### API Scopes (`/system/v1/apiScopes`)
+### API Scopes (`/{tenantId}/v1/apiScopes`)
 
 | Method | Endpoint | Policy | Description |
 |--------|----------|--------|-------------|
@@ -185,7 +188,7 @@ Transfers all external logins (e.g., Google, Microsoft) from the source user to 
 }
 ```
 
-### API Secrets (`/system/v1/apiSecrets`)
+### API Secrets (`/{tenantId}/v1/apiSecrets`)
 
 #### Client Secrets
 
@@ -221,7 +224,7 @@ Transfers all external logins (e.g., Google, Microsoft) from the source user to 
 
 **Note:** Secret values are auto-generated GUIDs. The clear text is returned only once during creation.
 
-### Identity Providers (`/system/v1/identityProviders`)
+### Identity Providers (`/{tenantId}/v1/identityProviders`)
 
 | Method | Endpoint | Policy | Description |
 |--------|----------|--------|-------------|
@@ -241,13 +244,159 @@ Transfers all external logins (e.g., Google, Microsoft) from the source user to 
       "name": "string",
       "displayName": "string",
       "isEnabled": true,
+      "allowSelfRegistration": true,  // Controls if new users can self-register via this provider
+      "defaultGroupRtId": "string",   // Optional: Group to auto-assign on first login
       // Provider-specific fields...
     }
   ]
 }
 ```
 
-### Diagnostics (`/system/v1/diagnostics`)
+### Email Domain Group Rules (`/{tenantId}/v1/emailDomainGroupRules`)
+
+Manages email domain to group mapping rules. When a new user logs in, their email domain is matched against these rules, and they are automatically added to the target group.
+
+| Method | Endpoint | Policy | Description |
+|--------|----------|--------|-------------|
+| GET | `/emailDomainGroupRules` | ReadOnly | Get all rules |
+| GET | `/emailDomainGroupRules/{rtId}` | ReadOnly | Get rule by ID |
+| POST | `/emailDomainGroupRules` | ReadWrite | Create new rule |
+| PUT | `/emailDomainGroupRules/{rtId}` | ReadWrite | Replace rule |
+| DELETE | `/emailDomainGroupRules/{rtId}` | ReadWrite | Delete rule |
+
+**Request/Response DTOs:**
+
+```typescript
+// EmailDomainGroupRuleDto
+{
+  "rtId": "string",               // Auto-generated on create
+  "emailDomainPattern": "string", // Required: e.g., "meshmakers.com"
+  "targetGroupRtId": "string",    // Required: RtId of the target group
+  "description": "string"         // Optional
+}
+
+// EmailDomainGroupRulesResult (GET all)
+{
+  "emailDomainGroupRules": [EmailDomainGroupRuleDto]
+}
+```
+
+### External Tenant User Mappings (`/{tenantId}/v1/externalTenantUserMappings`)
+
+Manages cross-tenant user role mappings. Each mapping links a user from a parent (source) tenant to roles in the current (child) tenant.
+
+| Method | Endpoint | Policy | Description |
+|--------|----------|--------|-------------|
+| GET | `/externalTenantUserMappings` | ReadOnly | Get all mappings (supports `skip`, `take`, `sourceTenantId` filter) |
+| GET | `/externalTenantUserMappings/{rtId}` | ReadOnly | Get mapping by ID |
+| POST | `/externalTenantUserMappings` | ReadWrite | Create new mapping |
+| PUT | `/externalTenantUserMappings/{rtId}` | ReadWrite | Update mapping (change roles) |
+| DELETE | `/externalTenantUserMappings/{rtId}` | ReadWrite | Delete mapping |
+
+**Request/Response DTOs:**
+
+```typescript
+// ExternalTenantUserMappingDto (Response)
+{
+  "id": "string",
+  "sourceTenantId": "string",
+  "sourceUserId": "string",
+  "sourceUserName": "string",
+  "roleIds": ["string"]
+}
+
+// CreateExternalTenantUserMappingDto (POST)
+{
+  "sourceTenantId": "string",  // Required
+  "sourceUserId": "string",    // Required
+  "sourceUserName": "string",  // Required
+  "roleIds": ["string"]        // Optional
+}
+
+// UpdateExternalTenantUserMappingDto (PUT)
+{
+  "roleIds": ["string"]  // New role assignments
+}
+```
+
+### Groups (`/{tenantId}/v1/groups`)
+
+Manages groups with role assignments. Users and other groups can be members. Group members inherit all roles assigned to their groups (including nested groups).
+
+| Method | Endpoint | Policy | Description |
+|--------|----------|--------|-------------|
+| GET | `/groups` | ReadOnly | Get all groups |
+| GET | `/groups/GetPaged` | ReadOnly | Get groups with pagination (`skip`, `take`) |
+| GET | `/groups/{rtId}` | ReadOnly | Get group by ID |
+| GET | `/groups/names/{groupName}` | ReadOnly | Get group by name |
+| POST | `/groups` | ReadWrite | Create new group |
+| PUT | `/groups/{rtId}` | ReadWrite | Update group name/description |
+| DELETE | `/groups/{rtId}` | ReadWrite | Delete group |
+| GET | `/groups/{rtId}/roles` | ReadOnly | Get assigned role IDs |
+| PUT | `/groups/{rtId}/roles` | ReadWrite | Replace role assignments |
+| GET | `/groups/{rtId}/members/users` | ReadOnly | Get user member IDs |
+| PUT | `/groups/{rtId}/members/users/{userId}` | ReadWrite | Add user to group |
+| DELETE | `/groups/{rtId}/members/users/{userId}` | ReadWrite | Remove user from group |
+| GET | `/groups/{rtId}/members/groups` | ReadOnly | Get nested group IDs |
+| PUT | `/groups/{rtId}/members/groups/{childGroupId}` | ReadWrite | Add nested group (rejects cycles) |
+| DELETE | `/groups/{rtId}/members/groups/{childGroupId}` | ReadWrite | Remove nested group |
+
+**Request/Response DTOs:**
+
+```typescript
+// GroupDto (Response)
+{
+  "id": "string",
+  "groupName": "string",
+  "groupDescription": "string",
+  "roleIds": ["string"],
+  "memberUserIds": ["string"],
+  "memberExternalUserIds": ["string"],
+  "memberGroupIds": ["string"]
+}
+
+// CreateGroupDto (POST)
+{
+  "groupName": "string",      // Required
+  "groupDescription": "string", // Optional
+  "roleIds": ["string"]       // Optional
+}
+
+// UpdateGroupDto (PUT)
+{
+  "groupName": "string",      // Required
+  "groupDescription": "string" // Optional
+}
+```
+
+**Default Groups:**
+
+Every tenant is provisioned with a `TenantOwners` group that has all default roles assigned. Adding a user to the `TenantOwners` group grants them all tenant permissions via group role inheritance.
+
+**Internal Storage:**
+
+Group relationships (role assignments, user members, external user members, nested groups) are stored as CK associations internally. The REST API shape is unchanged — `GroupDto` still returns `roleIds`, `memberUserIds`, `memberExternalUserIds`, and `memberGroupIds` arrays assembled from association queries.
+
+**Circular Group Prevention:**
+
+Adding a nested group (PUT `/{rtId}/members/groups/{childGroupId}`) validates that the operation would not create a cycle. If it would, the request is rejected with HTTP 400.
+
+### Admin Provisioning (`/{tenantId}/v1/adminProvisioning/{targetTenantId}`)
+
+Cross-tenant provisioning controller routed via the system tenant. Allows users with TenantManagement role to pre-provision ExternalTenantUserMappings in a target tenant without needing `allowed_tenants` for that tenant.
+
+| Method | Endpoint | Policy | Description |
+|--------|----------|--------|-------------|
+| GET | `/adminProvisioning/{targetTenantId}` | ReadWrite | List all mappings in target tenant |
+| POST | `/adminProvisioning/{targetTenantId}` | ReadWrite | Create new mapping in target tenant |
+| POST | `/adminProvisioning/{targetTenantId}/provisionCurrentUser` | ReadWrite | Provision current user with all roles |
+| DELETE | `/adminProvisioning/{targetTenantId}/{mappingRtId}` | ReadWrite | Delete mapping in target tenant |
+
+**`provisionCurrentUser` endpoint:**
+
+Extracts `sub`, `preferred_username`, and `tenant_id` from the JWT, fetches all roles from the target tenant, and creates an `RtExternalTenantUserMapping` with all role IDs. Returns 200 with the existing mapping if one already exists for this user.
+
+### Diagnostics (`/{tenantId}/v1/diagnostics`)
 
 | Method | Endpoint | Policy | Description |
 |--------|----------|--------|-------------|
@@ -318,7 +467,7 @@ Transfers all external logins (e.g., Google, Microsoft) from the source user to 
 }
 ```
 
-### Tools (`/system/v1/tools`)
+### Tools (`/{tenantId}/v1/tools`)
 
 | Method | Endpoint | Policy | Description |
 |--------|----------|--------|-------------|
@@ -338,7 +487,7 @@ Transfers all external logins (e.g., Google, Microsoft) from the source user to 
 ### Request Parameters
 
 ```
-GET /system/v1/users/GetPaged?skip=0&take=100
+GET /{tenantId}/v1/users/GetPaged?skip=0&take=100
 ```
 
 | Parameter | Type | Default | Description |
@@ -418,10 +567,12 @@ These events ensure cache consistency across multiple service instances.
 
 ## Example Requests
 
+All examples use `octosystem` as the tenant ID (the default system tenant ID). The system tenant ID is configurable via `OctoSystemConfiguration.SystemTenantId`. Replace with any tenant ID as needed.
+
 ### Create User
 
 ```http
-POST /system/v1/users HTTP/1.1
+POST /octosystem/v1/users HTTP/1.1
 Host: identity.example.com
 Authorization: Bearer eyJhbGciOiJSUzI1NiIs...
 Content-Type: application/json
@@ -437,7 +588,7 @@ Content-Type: application/json
 ### Create OAuth Client
 
 ```http
-POST /system/v1/clients HTTP/1.1
+POST /octosystem/v1/clients HTTP/1.1
 Host: identity.example.com
 Authorization: Bearer eyJhbGciOiJSUzI1NiIs...
 Content-Type: application/json
@@ -456,7 +607,7 @@ Content-Type: application/json
 ### Get Paginated Users
 
 ```http
-GET /system/v1/users/GetPaged?skip=20&take=10 HTTP/1.1
+GET /octosystem/v1/users/GetPaged?skip=20&take=10 HTTP/1.1
 Host: identity.example.com
 Authorization: Bearer eyJhbGciOiJSUzI1NiIs...
 ```
@@ -464,7 +615,7 @@ Authorization: Bearer eyJhbGciOiJSUzI1NiIs...
 ### Merge Users
 
 ```http
-POST /system/v1/users/john.doe/merge HTTP/1.1
+POST /octosystem/v1/users/john.doe/merge HTTP/1.1
 Host: identity.example.com
 Authorization: Bearer eyJhbGciOiJSUzI1NiIs...
 Content-Type: application/json
@@ -477,7 +628,7 @@ Content-Type: application/json
 ### Add Role to User
 
 ```http
-PUT /system/v1/users/john.doe/roles/Admin HTTP/1.1
+PUT /octosystem/v1/users/john.doe/roles/Admin HTTP/1.1
 Host: identity.example.com
 Authorization: Bearer eyJhbGciOiJSUzI1NiIs...
 ```

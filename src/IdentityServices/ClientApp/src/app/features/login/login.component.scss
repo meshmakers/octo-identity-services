@@ -168,6 +168,17 @@
   font-size: var(--lcars-font-size-base);
 }
 
+// Info message (e.g., parent tenant login hint)
+.lcars-info-message {
+  background: rgba($neo-cyan, 0.1);
+  border: 1px solid rgba($neo-cyan, 0.3);
+  border-radius: var(--lcars-radius-sm);
+  color: $neo-cyan;
+  padding: var(--lcars-spacing-md);
+  margin-bottom: var(--lcars-spacing-md);
+  font-size: var(--lcars-font-size-sm);
+}
+
 // Error message
 .lcars-error-message {
   background: rgba($bubblegum, 0.1);

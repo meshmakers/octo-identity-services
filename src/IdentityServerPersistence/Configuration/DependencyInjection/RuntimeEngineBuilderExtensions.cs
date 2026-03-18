@@ -2,7 +2,9 @@ using Duende.IdentityServer.Models;
 using IdentityServerPersistence.AutoMap;
 using IdentityServerPersistence.Configuration.DependencyInjection;
 using IdentityServerPersistence.Services;
+using IdentityServerPersistence.Services.Login;
 using IdentityServerPersistence.SystemStores;
+using Microsoft.AspNetCore.Identity;
 using Meshmakers.Octo.Common.DistributionEventHub.Configuration;
 using Meshmakers.Octo.Communication.Contracts.DataTransferObjects;
 using Meshmakers.Octo.Runtime.Contracts.MongoDb.Configuration;
@@ -10,7 +12,6 @@ using Meshmakers.Octo.Runtime.Contracts.RepositoryEntities;
 using Meshmakers.Octo.Runtime.Engine.Configuration.DependencyInjection;
 using Meshmakers.Octo.Services.Infrastructure;
 using Meshmakers.Octo.Services.Infrastructure.Services;
-using Microsoft.AspNetCore.Identity;
 using Persistence.IdentityCkModel.Generated.System.Identity.v2;
 
 // ReSharper disable once CheckNamespace
@@ -44,6 +45,13 @@ public static class RuntimeEngineBuilderExtensions
         builder.Services.AddScoped<IOctoResourceStore, ResourceStore>();
         builder.Services.AddScoped<IOctoPersistentGrantStore, PersistentGrantStore>();
         builder.Services.AddScoped<IOctoIdentityProviderStore, IdentityProviderStore>();
+        builder.Services.AddScoped<IExternalTenantUserMappingStore, ExternalTenantUserMappingStore>();
+        builder.Services.AddScoped<IGroupStore, GroupStore>();
+        builder.Services.AddScoped<IGroupRoleResolver, GroupRoleResolver>();
+        builder.Services.AddScoped<ICrossTenantAuthenticationService, CrossTenantAuthenticationService>();
+        builder.Services.AddScoped<IAllowedTenantsResolver, AllowedTenantsResolver>();
+        builder.Services.AddScoped<IEmailDomainGroupRuleStore, EmailDomainGroupRuleStore>();
+        builder.Services.AddScoped<ILoginGroupAssignmentService, LoginGroupAssignmentService>();
 
         builder.Services.AddSingleton<AttributeStringValueListConverter>();
         builder.Services.AddAutoMapper(cfg =>
