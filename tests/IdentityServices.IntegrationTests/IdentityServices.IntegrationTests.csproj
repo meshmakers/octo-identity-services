@@ -22,12 +22,6 @@
             <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
         </PackageReference>
 
-        <!-- Mocking -->
-        <PackageReference Include="NSubstitute" Version="5.3.0" />
-
-        <!-- Assertions -->
-        <PackageReference Include="FluentAssertions" Version="8.8.0" />
-
         <!-- TOTP Code Generation -->
         <PackageReference Include="Otp.NET" Version="1.4.1" />
 
