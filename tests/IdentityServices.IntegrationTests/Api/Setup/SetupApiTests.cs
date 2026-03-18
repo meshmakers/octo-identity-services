@@ -109,9 +109,9 @@ public class SetupApiTests : IntegrationTestBase
 
     #region URL Helpers
 
-    private static string SetupApiUrl(string endpoint, string tenantId = DefaultTenantId)
+    private string SetupApiUrl(string endpoint, string? tenantId = null)
     {
-        return ApiUrl($"setup/{endpoint}", tenantId);
+        return ApiUrl($"setup/{endpoint}", tenantId ?? NormalizedSystemTenantId);
     }
 
     #endregion
