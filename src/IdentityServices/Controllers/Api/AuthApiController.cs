@@ -12,12 +12,14 @@ using IdentityServerPersistence.SystemStores;
 using Meshmakers.Octo.Backend.Authentication.Services;
 using Meshmakers.Octo.ConstructionKit.Contracts;
 using Meshmakers.Octo.Runtime.Contracts.Repositories.Query;
+using Meshmakers.Octo.Runtime.Contracts.MongoDb.Configuration;
 using Meshmakers.Octo.Services.Infrastructure.Services;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.DataProtection;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.Extensions.Options;
 using Persistence.IdentityCkModel.Generated.System.Identity.v2;
 
 namespace Meshmakers.Octo.Backend.IdentityServices.Controllers.Api;
@@ -43,6 +45,7 @@ public class AuthApiController(
     ILoginGroupAssignmentService loginGroupAssignmentService,
     IDataProtectionProvider dataProtectionProvider,
     IMultiTenancyResolverService multiTenancyResolverService,
+    IOptions<OctoSystemConfiguration> systemConfiguration,
     ILogger<AuthApiController> logger)
     : ControllerBase
 {
@@ -130,7 +133,8 @@ public class AuthApiController(
             EnableLocalLogin = allowLocal,
             IsAuthenticated = isAuthenticated,
             Username = username,
-            SetupRequired = !userManager.Users.Any()
+            SetupRequired = string.Equals(tenantId, systemConfiguration.Value.SystemTenantId, StringComparison.OrdinalIgnoreCase)
+                           && !userManager.Users.Any()
                            && !(await externalTenantUserMappingStore.GetAllAsync(take: 1)).Any()
         };
     }

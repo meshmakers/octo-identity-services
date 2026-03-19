@@ -9,6 +9,7 @@ using IdentityServerPersistence.Services.Login;
 using IdentityServerPersistence.SystemStores;
 using Meshmakers.Octo.Backend.Authentication.Services;
 using Meshmakers.Octo.Backend.IdentityServices.Controllers.Api;
+using Meshmakers.Octo.Runtime.Contracts.MongoDb.Configuration;
 using Meshmakers.Octo.ConstructionKit.Contracts;
 using Meshmakers.Octo.Services.Infrastructure.Services;
 using Microsoft.AspNetCore.DataProtection;
@@ -90,6 +91,7 @@ public class CrossTenantLoginTests
             loginGroupAssignmentService,
             _dataProtectionProvider,
             multiTenancyResolver,
+            Options.Create(new OctoSystemConfiguration { SystemTenantId = "OctoSystem" }),
             logger);
     }
 
