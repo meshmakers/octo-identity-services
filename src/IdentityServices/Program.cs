@@ -115,8 +115,6 @@ try
         .AddMicrosoftAdAuthentication();
 
     builder.Services.AddCors();
-    builder.Services.AddSingleton<IdentityCorsPolicyProvider>();
-    builder.Services.AddSingleton<ICorsPolicyProvider>(sp => sp.GetRequiredService<IdentityCorsPolicyProvider>());
 
     builder.Services.AddRuntimeEngine()
         .AddOctoIdentityPersistence(configureDistributionEventHub: c =>
@@ -126,6 +124,12 @@ try
             c.AddCommandConsumer<CreateIdentityDataCommandRequestConsumer, CreateIdentityDataCommandRequest>(
                 QueueNames.CreateIdentityDataCommand);
         });
+
+    // Register Identity-specific CORS policy provider AFTER AddOctoIdentityPersistence,
+    // which internally calls AddOctoServiceInfrastructure and registers its own ICorsPolicyProvider.
+    // The last registration wins in DI, so this must come after.
+    builder.Services.AddSingleton<IdentityCorsPolicyProvider>();
+    builder.Services.AddSingleton<ICorsPolicyProvider>(sp => sp.GetRequiredService<IdentityCorsPolicyProvider>());
 
     // Add IdentityServer for authentication using OpenID
     var identityServerBuilder = builder.Services.AddIdentityServer(serverOptions =>
