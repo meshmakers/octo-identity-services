@@ -15,6 +15,7 @@ export interface LoginContext {
   isAuthenticated: boolean;
   username?: string;
   setupRequired: boolean;
+  tenantUnavailable: boolean;
 }
 
 export interface LoginRequest {

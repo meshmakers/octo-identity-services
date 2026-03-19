@@ -11,8 +11,22 @@
       <span class="lcars-loading__text">Loading</span>
     </div>
 
+    <!-- Tenant Unavailable -->
+    <ng-container *ngIf="!loading && context?.tenantUnavailable">
+      <div class="lcars-already-authenticated">
+        <div class="lcars-already-authenticated__icon">
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" width="48" height="48">
+            <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-2h2v2zm0-4h-2V7h2v6z"/>
+          </svg>
+        </div>
+        <div class="lcars-already-authenticated__message">
+          This tenant is not available. Please contact your administrator.
+        </div>
+      </div>
+    </ng-container>
+
     <!-- Already Authenticated -->
-    <ng-container *ngIf="!loading && context?.isAuthenticated && !showLoginForm">
+    <ng-container *ngIf="!loading && !context?.tenantUnavailable && context?.isAuthenticated && !showLoginForm">
       <div class="lcars-already-authenticated">
         <div class="lcars-already-authenticated__icon">
           <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" width="48" height="48">
@@ -44,7 +58,7 @@
     </ng-container>
 
     <!-- Login Form -->
-    <ng-container *ngIf="!loading && (!context?.isAuthenticated || showLoginForm)">
+    <ng-container *ngIf="!loading && !context?.tenantUnavailable && (!context?.isAuthenticated || showLoginForm)">
       <!-- Client Info -->
       <div *ngIf="context?.clientName" class="lcars-client-info">
         <div class="lcars-client-info__logo" *ngIf="context?.clientLogoUrl">
