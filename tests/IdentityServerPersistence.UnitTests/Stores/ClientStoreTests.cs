@@ -93,4 +93,53 @@ public class ClientStoreTests
                 c.RequirePkce == true &&
                 c.AccessTokenLifetime == 3600));
     }
+
+    [Fact]
+    public void TenantRepository_ResolvesLazily_NotInConstructor()
+    {
+        // Arrange — set up resolver to return different repos on successive calls
+        var resolver = Substitute.For<IMultiTenancyResolverService>();
+        var mapper = Substitute.For<IMapper>();
+
+        // Constructor should NOT call GetTenantRepository
+        var store = new ClientStore(resolver, mapper);
+        resolver.DidNotReceive().GetTenantRepository();
+
+        // Act — accessing TenantId triggers lazy resolution
+        var repo = Substitute.For<ITenantRepository>();
+        repo.TenantId.Returns("lazy-tenant");
+        resolver.GetTenantRepository().Returns(repo);
+
+        var tenantId = store.TenantId;
+
+        // Assert
+        tenantId.Should().Be("lazy-tenant");
+        resolver.Received(1).GetTenantRepository();
+    }
+
+    [Fact]
+    public async Task CreateAsync_UsesCurrentTenantRepository_NotCachedFromConstructor()
+    {
+        // Arrange — simulate tenant switching between constructor and method call
+        var resolver = Substitute.For<IMultiTenancyResolverService>();
+        var mapper = Substitute.For<IMapper>();
+
+        var tenantARepo = Substitute.For<ITenantRepository>();
+        tenantARepo.TenantId.Returns("tenant-a");
+        var sessionA = new FakeOctoSession();
+        tenantARepo.GetSessionAsync().Returns(Task.FromResult<IOctoSession>(sessionA));
+
+        // Resolver returns tenant-a at method call time
+        resolver.GetTenantRepository().Returns(tenantARepo);
+
+        var store = new ClientStore(resolver, mapper);
+        var client = new RtClientBuilder().WithClientId("test").Build();
+
+        // Act
+        await store.CreateAsync(client);
+
+        // Assert — should have used tenant-a repo
+        await tenantARepo.Received(1).InsertOneRtEntityAsync(sessionA, client);
+        store.TenantId.Should().Be("tenant-a");
+    }
 }
