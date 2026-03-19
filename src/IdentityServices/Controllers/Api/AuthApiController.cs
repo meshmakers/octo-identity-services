@@ -123,6 +123,10 @@ public class AuthApiController(
             username = User.Identity?.Name;
         }
 
+        var isSystemTenant = string.Equals(tenantId, systemConfiguration.Value.SystemTenantId, StringComparison.OrdinalIgnoreCase);
+        var hasNoUsers = !userManager.Users.Any();
+        var hasNoMappings = !(await externalTenantUserMappingStore.GetAllAsync(take: 1)).Any();
+
         return new LoginContextDto
         {
             ReturnUrl = returnUrl ?? string.Empty,
@@ -133,9 +137,8 @@ public class AuthApiController(
             EnableLocalLogin = allowLocal,
             IsAuthenticated = isAuthenticated,
             Username = username,
-            SetupRequired = string.Equals(tenantId, systemConfiguration.Value.SystemTenantId, StringComparison.OrdinalIgnoreCase)
-                           && !userManager.Users.Any()
-                           && !(await externalTenantUserMappingStore.GetAllAsync(take: 1)).Any()
+            SetupRequired = isSystemTenant && hasNoUsers && hasNoMappings,
+            TenantUnavailable = !isSystemTenant && hasNoUsers && hasNoMappings
         };
     }
 
@@ -1581,6 +1584,7 @@ public record LoginContextDto
     public bool IsAuthenticated { get; init; }
     public string? Username { get; init; }
     public bool SetupRequired { get; init; }
+    public bool TenantUnavailable { get; init; }
 }
 
 public record LoginRequestDto

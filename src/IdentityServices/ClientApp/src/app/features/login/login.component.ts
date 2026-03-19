@@ -82,7 +82,8 @@ export class LoginComponent implements OnInit {
           allowRememberLogin: true,
           enableLocalLogin: true,
           isAuthenticated: false,
-          setupRequired: false
+          setupRequired: false,
+          tenantUnavailable: false
         };
       }
     });
