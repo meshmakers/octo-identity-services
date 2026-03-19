@@ -109,9 +109,6 @@ internal class DefaultConfigurationCreatorService(
 
         if (tenantId != systemContext.TenantId)
         {
-            // Auto-create OctoTenantIdentityProvider for child tenants with a parent tenant
-            await CreateOctoTenantIdentityProviderAsync(tenantId, tenantContext);
-
             // Ensure identity data (resources, scopes, clients) exists in child tenants
             // so that OAuth/OIDC flows work when targeting a child tenant
             await EnsureIdentityDataInChildTenantAsync(tenantContext);
@@ -573,67 +570,6 @@ internal class DefaultConfigurationCreatorService(
     public bool CanBeEnabled()
     {
         return false;
-    }
-
-    private async Task CreateOctoTenantIdentityProviderAsync(string tenantId, ITenantContext tenantContext)
-    {
-        try
-        {
-            // Query the system tenant for the RtTenant record to find ParentTenantId
-            var systemRepo = systemContext.GetSystemTenantRepositoryAsAdmin();
-            using var systemSession = await systemContext.GetAdminSessionAsync();
-            systemSession.StartTransaction();
-
-            var queryOptions = RtEntityQueryOptions.Create()
-                .FieldEquals(nameof(RtTenant.TenantId), tenantId);
-            var tenantResult = await systemRepo.GetRtEntitiesByTypeAsync<RtTenant>(systemSession, queryOptions);
-            await systemSession.CommitTransactionAsync();
-
-            var rtTenant = tenantResult.Items.FirstOrDefault();
-            if (rtTenant == null || string.IsNullOrEmpty(rtTenant.ParentTenantId))
-            {
-                return;
-            }
-
-            // Check if OctoTenantIdentityProvider already exists in the child tenant
-            var childRepo = tenantContext.GetTenantRepositoryAsAdmin();
-            using var childSession = await tenantContext.GetAdminSessionAsync();
-            childSession.StartTransaction();
-
-            var providerQuery = RtEntityQueryOptions.Create();
-            var providerResult =
-                await childRepo.GetRtEntitiesByTypeAsync<RtOctoTenantIdentityProvider>(childSession, providerQuery);
-
-            if (providerResult.Items.Any(p =>
-                    string.Equals(p.ParentTenantId, rtTenant.ParentTenantId, StringComparison.OrdinalIgnoreCase)))
-            {
-                await childSession.CommitTransactionAsync();
-                return;
-            }
-
-            // Create the provider
-            var provider = new RtOctoTenantIdentityProvider
-            {
-                Name = $"ParentTenant_{rtTenant.ParentTenantId}",
-                IsEnabled = true,
-                DisplayName = $"Login via {rtTenant.ParentTenantId}",
-                ParentTenantId = rtTenant.ParentTenantId
-            };
-
-            await childRepo.InsertOneRtEntityAsync(childSession, provider);
-            await childSession.CommitTransactionAsync();
-
-            logger.LogInformation(
-                "Auto-created OctoTenantIdentityProvider for tenant '{TenantId}' pointing to parent '{ParentTenantId}'",
-                tenantId, rtTenant.ParentTenantId);
-        }
-        catch (Exception e)
-        {
-            logger.LogWarning(e,
-                "Failed to auto-create OctoTenantIdentityProvider for tenant '{TenantId}'. " +
-                "The provider can be created manually or will be created by the migration on next startup.",
-                tenantId);
-        }
     }
 
     private async Task EnsureIdentityDataInChildTenantAsync(ITenantContext tenantContext)
