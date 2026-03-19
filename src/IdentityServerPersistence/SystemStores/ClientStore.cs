@@ -13,22 +13,24 @@ namespace IdentityServerPersistence.SystemStores;
 public class ClientStore : IOctoClientStore
 {
     private readonly IMapper _mapper;
-    private readonly ITenantRepository _tenantRepository;
+    private readonly IMultiTenancyResolverService _multiTenancyResolverService;
 
     public ClientStore(IMultiTenancyResolverService multiTenancyResolverService, IMapper mapper)
     {
-        _tenantRepository = multiTenancyResolverService.GetTenantRepository();
+        _multiTenancyResolverService = multiTenancyResolverService;
         _mapper = mapper;
     }
 
-    public string TenantId => _tenantRepository.TenantId;
+    private ITenantRepository TenantRepository => _multiTenancyResolverService.GetTenantRepository();
+
+    public string TenantId => TenantRepository.TenantId;
 
     public async Task CreateAsync(RtClient octoClient)
     {
-        var session = await _tenantRepository.GetSessionAsync();
+        var session = await TenantRepository.GetSessionAsync();
         session.StartTransaction();
 
-        await _tenantRepository.InsertOneRtEntityAsync(session, octoClient);
+        await TenantRepository.InsertOneRtEntityAsync(session, octoClient);
 
         await session.CommitTransactionAsync();
     }
@@ -37,7 +39,7 @@ public class ClientStore : IOctoClientStore
     {
         ArgumentValidation.ValidateString(nameof(clientId), clientId);
 
-        var session = await _tenantRepository.GetSessionAsync();
+        var session = await TenantRepository.GetSessionAsync();
         session.StartTransaction();
 
         var client = await GetClientByClientId(session, clientId);
@@ -46,7 +48,7 @@ public class ClientStore : IOctoClientStore
             throw new NotExistingException($"Client id '{clientId}' does not exist.");
         }
 
-        await _tenantRepository.DeleteOneRtEntityByRtIdAsync<RtClient>(session, client.RtId, DeleteOptions.Erase);
+        await TenantRepository.DeleteOneRtEntityByRtIdAsync<RtClient>(session, client.RtId, DeleteOptions.Erase);
 
         await session.CommitTransactionAsync();
     }
@@ -55,13 +57,13 @@ public class ClientStore : IOctoClientStore
     {
         ArgumentValidation.ValidateString(nameof(clientId), clientId);
 
-        var session = await _tenantRepository.GetSessionAsync();
+        var session = await TenantRepository.GetSessionAsync();
         session.StartTransaction();
 
         var queryOptions = RtEntityQueryOptions.Create()
             .FieldFilter(nameof(RtClient.ClientId), FieldFilterOperator.Equals, clientId);
 
-        var result = await _tenantRepository.GetRtEntitiesByTypeAsync<RtClient>(session, queryOptions);
+        var result = await TenantRepository.GetRtEntitiesByTypeAsync<RtClient>(session, queryOptions);
 
 
         await session.CommitTransactionAsync();
@@ -83,12 +85,12 @@ public class ClientStore : IOctoClientStore
 
     public async Task<IEnumerable<RtClient>> GetClients()
     {
-        var session = await _tenantRepository.GetSessionAsync();
+        var session = await TenantRepository.GetSessionAsync();
         session.StartTransaction();
 
         var queryOptions = RtEntityQueryOptions.Create();
 
-        var result = await _tenantRepository.GetRtEntitiesByTypeAsync<RtClient>(session, queryOptions);
+        var result = await TenantRepository.GetRtEntitiesByTypeAsync<RtClient>(session, queryOptions);
 
         await session.CommitTransactionAsync();
         return result.Items;
@@ -98,7 +100,7 @@ public class ClientStore : IOctoClientStore
     {
         ArgumentValidation.ValidateString(nameof(clientId), clientId);
 
-        var session = await _tenantRepository.GetSessionAsync();
+        var session = await TenantRepository.GetSessionAsync();
         session.StartTransaction();
 
         var dbClient = await GetClientByClientId(session, clientId);
@@ -107,7 +109,7 @@ public class ClientStore : IOctoClientStore
             throw new NotExistingException($"Client id '{clientId}' does not exist.");
         }
 
-        await _tenantRepository.ReplaceOneRtEntityByIdAsync(session, dbClient.RtId, client);
+        await TenantRepository.ReplaceOneRtEntityByIdAsync(session, dbClient.RtId, client);
 
         await session.CommitTransactionAsync();
     }
@@ -119,7 +121,7 @@ public class ClientStore : IOctoClientStore
         var queryOptions = RtEntityQueryOptions.Create()
             .FieldFilter(nameof(RtClient.ClientId), FieldFilterOperator.Equals, clientId);
 
-        var result = await _tenantRepository.GetRtEntitiesByTypeAsync<RtClient>(session, queryOptions);
+        var result = await TenantRepository.GetRtEntitiesByTypeAsync<RtClient>(session, queryOptions);
         return result.Items.FirstOrDefault();
     }
 }
