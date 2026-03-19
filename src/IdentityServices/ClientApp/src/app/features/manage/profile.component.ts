@@ -59,30 +59,30 @@ import { UserProfile } from '../../core/models/manage.models';
 
           <div class="profile-section">
             <h3 class="section-title">Roles</h3>
-            <div *ngIf="profile.roles?.length" class="role-badges">
+            <div *ngIf="profile.roles.length" class="role-badges">
               <span *ngFor="let role of profile.roles" class="status-badge status-badge--info">{{ role }}</span>
             </div>
-            <div *ngIf="!profile.roles?.length" class="profile-item">
+            <div *ngIf="!profile.roles.length" class="profile-item">
               <span class="profile-item__value">No roles assigned</span>
             </div>
           </div>
 
           <div class="profile-section">
             <h3 class="section-title">Groups</h3>
-            <div *ngIf="profile.groups?.length" class="role-badges">
+            <div *ngIf="profile.groups.length" class="role-badges">
               <span *ngFor="let group of profile.groups" class="status-badge status-badge--info">{{ group }}</span>
             </div>
-            <div *ngIf="!profile.groups?.length" class="profile-item">
+            <div *ngIf="!profile.groups.length" class="profile-item">
               <span class="profile-item__value">No group memberships</span>
             </div>
           </div>
 
           <div class="profile-section">
             <h3 class="section-title">Allowed Tenants</h3>
-            <div *ngIf="profile.allowedTenants?.length" class="role-badges">
+            <div *ngIf="profile.allowedTenants.length" class="role-badges">
               <span *ngFor="let tenant of profile.allowedTenants" class="status-badge status-badge--info">{{ tenant }}</span>
             </div>
-            <div *ngIf="!profile.allowedTenants?.length" class="profile-item">
+            <div *ngIf="!profile.allowedTenants.length" class="profile-item">
               <span class="profile-item__value">No additional tenants</span>
             </div>
           </div>
