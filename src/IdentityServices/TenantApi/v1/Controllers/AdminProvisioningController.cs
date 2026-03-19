@@ -4,6 +4,7 @@ using System.Security.Claims;
 using Asp.Versioning;
 using IdentityModel;
 using IdentityServerPersistence;
+using Meshmakers.Octo.Backend.Authentication.DynamicAuth;
 using Meshmakers.Octo.Communication.Contracts;
 using Meshmakers.Octo.ConstructionKit.Contracts;
 using Meshmakers.Octo.Runtime.Contracts;
@@ -27,7 +28,9 @@ namespace Meshmakers.Octo.Backend.IdentityServices.TenantApi.v1.Controllers;
 [ApiController]
 [ApiVersion(IdentityServiceConstants.ApiVersion1)]
 public class AdminProvisioningController(
-    ISystemContext systemContext) : ControllerBase
+    ISystemContext systemContext,
+    IDynamicAuthSchemeService dynamicAuthSchemeService,
+    ILogger<AdminProvisioningController> logger) : ControllerBase
 {
     /// <summary>
     /// Returns all external tenant user mappings in the target tenant.
@@ -127,6 +130,9 @@ public class AdminProvisioningController(
         session.StartTransaction();
         await tenantRepository.InsertOneRtEntityAsync(session, mapping);
         await session.CommitTransactionAsync();
+
+        // Ensure OctoTenantIdentityProvider exists so cross-tenant login works
+        await EnsureOctoTenantIdentityProviderAsync(tenantRepository, targetTenantId, dto.SourceTenantId);
 
         return Created(string.Empty, MapToDto(mapping, []));
     }
@@ -269,6 +275,9 @@ public class AdminProvisioningController(
 
         await tenantRepository.InsertOneRtEntityAsync(session, mapping);
 
+        // Ensure OctoTenantIdentityProvider exists so cross-tenant login works
+        await EnsureOctoTenantIdentityProviderAsync(tenantRepository, tenantRepository.TenantId, tenantId);
+
         // Add mapping as member of TenantOwners group
         var groupNames = new List<string>();
         var groupQuery = RtEntityQueryOptions.Create()
@@ -331,6 +340,45 @@ public class AdminProvisioningController(
         await session.CommitTransactionAsync();
 
         return Ok();
+    }
+
+    /// <summary>
+    /// Ensures the OctoTenantIdentityProvider exists in the target tenant, pointing to the source tenant.
+    /// This enables "LOGIN VIA {sourceTenant}" on the target tenant's login page.
+    /// </summary>
+    private async Task EnsureOctoTenantIdentityProviderAsync(
+        ITenantRepository tenantRepository, string targetTenantId, string sourceTenantId)
+    {
+        var session = await tenantRepository.GetSessionAsync();
+        session.StartTransaction();
+
+        var existingResult = await tenantRepository
+            .GetRtEntitiesByTypeAsync<RtOctoTenantIdentityProvider>(session, RtEntityQueryOptions.Create());
+
+        if (existingResult.Items.Any(p =>
+                string.Equals(p.ParentTenantId, sourceTenantId, StringComparison.OrdinalIgnoreCase)))
+        {
+            await session.CommitTransactionAsync();
+            return;
+        }
+
+        var provider = new RtOctoTenantIdentityProvider
+        {
+            Name = $"ParentTenant_{sourceTenantId}",
+            IsEnabled = true,
+            DisplayName = $"Login via {sourceTenantId}",
+            ParentTenantId = sourceTenantId
+        };
+
+        await tenantRepository.InsertOneRtEntityAsync(session, provider);
+        await session.CommitTransactionAsync();
+
+        // Refresh auth schemes so the new provider is immediately available
+        await dynamicAuthSchemeService.ConfigureAsync(targetTenantId);
+
+        logger.LogInformation(
+            "Created OctoTenantIdentityProvider in tenant '{TargetTenantId}' pointing to '{SourceTenantId}'",
+            targetTenantId, sourceTenantId);
     }
 
     private static ExternalTenantUserMappingDto MapToDto(
