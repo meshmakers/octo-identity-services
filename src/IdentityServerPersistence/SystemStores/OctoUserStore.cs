@@ -38,12 +38,12 @@ public sealed class OctoUserStore(
     private const string AuthenticatorKeyTokenName = "AuthenticatorKey";
     private const string RecoveryCodeTokenName = "RecoveryCodes";
 
-    private readonly ITenantRepository _tenantRepository = multiTenancyResolverService.GetTenantRepository();
+    private ITenantRepository TenantRepository => multiTenancyResolverService.GetTenantRepository();
     private bool _disposed;
 
     private IdentityErrorDescriber ErrorDescriber { get; } = describer ?? new IdentityErrorDescriber();
 
-    public IQueryable<RtUser> Users => _tenantRepository.AsQueryable<RtUser>();
+    public IQueryable<RtUser> Users => TenantRepository.AsQueryable<RtUser>();
 
     public async Task SetTokenAsync(
         RtUser user,
@@ -56,11 +56,11 @@ public sealed class OctoUserStore(
         ThrowIfDisposed();
         ArgumentValidation.Validate(nameof(user), user);
 
-        using var session = await _tenantRepository.GetSessionAsync();
+        using var session = await TenantRepository.GetSessionAsync();
         session.StartTransaction();
 
         // Get the user from the database to modify its tokens
-        var dbUser = await _tenantRepository.GetRtEntityByRtIdAsync<RtUser>(session, user.RtId);
+        var dbUser = await TenantRepository.GetRtEntityByRtIdAsync<RtUser>(session, user.RtId);
         if (dbUser == null)
         {
             await session.AbortTransactionAsync();
@@ -96,7 +96,7 @@ public sealed class OctoUserStore(
         }
 
         // Persist the updated user back to the database
-        await _tenantRepository.ReplaceOneRtEntityByIdAsync(session, dbUser.RtId, dbUser);
+        await TenantRepository.ReplaceOneRtEntityByIdAsync(session, dbUser.RtId, dbUser);
 
         // Also update the in-memory user object
         user.UserTokens = dbUser.UserTokens;
@@ -114,11 +114,11 @@ public sealed class OctoUserStore(
         ThrowIfDisposed();
         ArgumentValidation.Validate(nameof(user), user);
 
-        using var session = await _tenantRepository.GetSessionAsync();
+        using var session = await TenantRepository.GetSessionAsync();
         session.StartTransaction();
 
         // Get the user from the database to modify its tokens
-        var dbUser = await _tenantRepository.GetRtEntityByRtIdAsync<RtUser>(session, user.RtId);
+        var dbUser = await TenantRepository.GetRtEntityByRtIdAsync<RtUser>(session, user.RtId);
         if (dbUser == null)
         {
             await session.AbortTransactionAsync();
@@ -131,7 +131,7 @@ public sealed class OctoUserStore(
             dbUser.UserTokens.RemoveAll(x => x.LoginProvider == entry.LoginProvider && x.Name == entry.Name);
 
             // Persist the updated user back to the database
-            await _tenantRepository.ReplaceOneRtEntityByIdAsync(session, dbUser.RtId, dbUser);
+            await TenantRepository.ReplaceOneRtEntityByIdAsync(session, dbUser.RtId, dbUser);
 
             // Also update the in-memory user object
             user.UserTokens = dbUser.UserTokens;
@@ -151,7 +151,7 @@ public sealed class OctoUserStore(
 
         ArgumentValidation.Validate(nameof(user), user);
 
-        using var session = await _tenantRepository.GetSessionAsync();
+        using var session = await TenantRepository.GetSessionAsync();
         session.StartTransaction();
 
         var rtUserTokenRecord = await FindTokenAsync(session, user, loginProvider, name);
@@ -181,10 +181,10 @@ public sealed class OctoUserStore(
         ThrowIfDisposed();
         ArgumentValidation.Validate(nameof(user), user);
 
-        using var session = await _tenantRepository.GetSessionAsync().ConfigureAwait(false);
+        using var session = await TenantRepository.GetSessionAsync().ConfigureAwait(false);
         session.StartTransaction();
 
-        await _tenantRepository.InsertOneRtEntityAsync(session, user).ConfigureAwait(false);
+        await TenantRepository.InsertOneRtEntityAsync(session, user).ConfigureAwait(false);
 
         await session.CommitTransactionAsync().ConfigureAwait(false);
         return IdentityResult.Success;
@@ -196,12 +196,12 @@ public sealed class OctoUserStore(
         ThrowIfDisposed();
         ArgumentValidation.Validate(nameof(user), user);
 
-        using var session = await _tenantRepository.GetSessionAsync().ConfigureAwait(false);
+        using var session = await TenantRepository.GetSessionAsync().ConfigureAwait(false);
         session.StartTransaction();
 
         try
         {
-            await _tenantRepository.DeleteOneRtEntityByRtIdAsync<RtUser>(session, user.RtId, DeleteOptions.Erase)
+            await TenantRepository.DeleteOneRtEntityByRtIdAsync<RtUser>(session, user.RtId, DeleteOptions.Erase)
                 .ConfigureAwait(false);
             await session.CommitTransactionAsync().ConfigureAwait(false);
             return IdentityResult.Success;
@@ -226,13 +226,13 @@ public sealed class OctoUserStore(
         cancellationToken.ThrowIfCancellationRequested();
         ThrowIfDisposed();
 
-        using var session = await _tenantRepository.GetSessionAsync().ConfigureAwait(false);
+        using var session = await TenantRepository.GetSessionAsync().ConfigureAwait(false);
         session.StartTransaction();
 
         var queryOptions = RtEntityQueryOptions.Create()
             .FieldFilter(nameof(RtUser.NormalizedUserName), FieldFilterOperator.Equals, normalizedUserName);
 
-        var result = await _tenantRepository.GetRtEntitiesByTypeAsync<RtUser>(session, queryOptions);
+        var result = await TenantRepository.GetRtEntitiesByTypeAsync<RtUser>(session, queryOptions);
 
         await session.CommitTransactionAsync();
 
@@ -244,12 +244,12 @@ public sealed class OctoUserStore(
         cancellationToken.ThrowIfCancellationRequested();
         ThrowIfDisposed();
 
-        using var session = await _tenantRepository.GetSessionAsync().ConfigureAwait(false);
+        using var session = await TenantRepository.GetSessionAsync().ConfigureAwait(false);
         session.StartTransaction();
 
         try
         {
-            await _tenantRepository.ReplaceOneRtEntityByIdAsync(session, user.RtId, user).ConfigureAwait(false);
+            await TenantRepository.ReplaceOneRtEntityByIdAsync(session, user.RtId, user).ConfigureAwait(false);
             await session.CommitTransactionAsync();
             return IdentityResult.Success;
         }
@@ -336,7 +336,7 @@ public sealed class OctoUserStore(
         ThrowIfDisposed();
         ArgumentValidation.Validate(nameof(claim), claim);
 
-        using var session = await _tenantRepository.GetSessionAsync().ConfigureAwait(false);
+        using var session = await TenantRepository.GetSessionAsync().ConfigureAwait(false);
         session.StartTransaction();
 
         var queryOptions = RtEntityQueryOptions.Create()
@@ -344,7 +344,7 @@ public sealed class OctoUserStore(
                 .FieldEquals(nameof(RtUserClaimRecord.ClaimType), claim.Type)
                 .FieldEquals(nameof(RtUserClaimRecord.ClaimValue), claim.Value));
 
-        var result = await _tenantRepository.GetRtEntitiesByTypeAsync<RtUser>(session, queryOptions)
+        var result = await TenantRepository.GetRtEntitiesByTypeAsync<RtUser>(session, queryOptions)
             .ConfigureAwait(false);
 
         await session.CommitTransactionAsync().ConfigureAwait(false);
@@ -443,13 +443,13 @@ public sealed class OctoUserStore(
         cancellationToken.ThrowIfCancellationRequested();
         ThrowIfDisposed();
 
-        using var session = await _tenantRepository.GetSessionAsync();
+        using var session = await TenantRepository.GetSessionAsync();
         session.StartTransaction();
 
         var queryOptions = RtEntityQueryOptions.Create()
             .FieldFilter(nameof(RtUser.NormalizedEmail), FieldFilterOperator.Equals, normalizedEmail);
 
-        var result = await _tenantRepository.GetRtEntitiesByTypeAsync<RtUser>(session, queryOptions);
+        var result = await TenantRepository.GetRtEntitiesByTypeAsync<RtUser>(session, queryOptions);
         await session.CommitTransactionAsync();
 
         // Return null if user not found - per ASP.NET Core Identity IUserEmailStore contract
@@ -611,13 +611,13 @@ public sealed class OctoUserStore(
         cancellationToken.ThrowIfCancellationRequested();
         ThrowIfDisposed();
 
-        using var session = await _tenantRepository.GetSessionAsync().ConfigureAwait(false);
+        using var session = await TenantRepository.GetSessionAsync().ConfigureAwait(false);
         session.StartTransaction();
 
         // Load all users and filter by UserLogins in C#.
         // The MatchField/ElemMatch query on embedded CK records does not
         // correctly resolve attribute paths, causing it to never match.
-        var resultSet = await _tenantRepository.GetRtEntitiesByTypeAsync<RtUser>(session, RtEntityQueryOptions.Create())
+        var resultSet = await TenantRepository.GetRtEntitiesByTypeAsync<RtUser>(session, RtEntityQueryOptions.Create())
             .ConfigureAwait(false);
 
         await session.CommitTransactionAsync();
@@ -735,14 +735,14 @@ public sealed class OctoUserStore(
                        CultureInfo.CurrentCulture, "Role {0} does not exist.",
                        normalizedRoleName));
 
-        using var session = await _tenantRepository.GetSessionAsync();
+        using var session = await TenantRepository.GetSessionAsync();
         session.StartTransaction();
 
         var userEntityId = user.ToRtEntityId();
         var roleEntityId = role.ToRtEntityId();
 
         // Check if already assigned
-        var existing = await _tenantRepository.GetRtAssociationOrDefaultAsync(
+        var existing = await TenantRepository.GetRtAssociationOrDefaultAsync(
             session, userEntityId, roleEntityId, IdentityAssociationConstants.AssignedRoleId);
         if (existing == null)
         {
@@ -752,7 +752,7 @@ public sealed class OctoUserStore(
                     IdentityAssociationConstants.AssignedRoleId)
             };
             var opResult = new OperationResult();
-            await _tenantRepository.ApplyChangesAsync(session, updates, opResult);
+            await TenantRepository.ApplyChangesAsync(session, updates, opResult);
         }
 
         await session.CommitTransactionAsync();
@@ -774,7 +774,7 @@ public sealed class OctoUserStore(
             return;
         }
 
-        using var session = await _tenantRepository.GetSessionAsync();
+        using var session = await TenantRepository.GetSessionAsync();
         session.StartTransaction();
 
         var updates = new List<AssociationUpdateInfo>
@@ -785,7 +785,7 @@ public sealed class OctoUserStore(
                 IdentityAssociationConstants.AssignedRoleId)
         };
         var opResult = new OperationResult();
-        await _tenantRepository.ApplyChangesAsync(session, updates, opResult);
+        await TenantRepository.ApplyChangesAsync(session, updates, opResult);
 
         await session.CommitTransactionAsync();
     }
@@ -805,11 +805,11 @@ public sealed class OctoUserStore(
             return new List<RtUser>();
         }
 
-        using var session = await _tenantRepository.GetSessionAsync().ConfigureAwait(false);
+        using var session = await TenantRepository.GetSessionAsync().ConfigureAwait(false);
         session.StartTransaction();
 
         // Query inbound AssignedRole associations on the role entity to find users assigned to it
-        var associations = await _tenantRepository.GetRtAssociationsAsync(
+        var associations = await TenantRepository.GetRtAssociationsAsync(
             session,
             role.ToRtEntityId(),
             RtAssociationExtendedQueryOptions.Create(
@@ -825,7 +825,7 @@ public sealed class OctoUserStore(
         var users = new List<RtUser>();
         foreach (var userRtId in userRtIds)
         {
-            var user = await _tenantRepository.GetRtEntityByRtIdAsync<RtUser>(session, userRtId);
+            var user = await TenantRepository.GetRtEntityByRtIdAsync<RtUser>(session, userRtId);
             if (user != null)
             {
                 users.Add(user);
@@ -850,10 +850,10 @@ public sealed class OctoUserStore(
             throw NotExistingException.UserWithIdDoesNotExist(user.RtId);
         }
 
-        using var session = await _tenantRepository.GetSessionAsync();
+        using var session = await TenantRepository.GetSessionAsync();
         session.StartTransaction();
 
-        var associations = await _tenantRepository.GetRtAssociationsAsync(
+        var associations = await TenantRepository.GetRtAssociationsAsync(
             session,
             dbUser.ToRtEntityId(),
             RtAssociationExtendedQueryOptions.Create(
@@ -892,10 +892,10 @@ public sealed class OctoUserStore(
         // Collect direct role IDs from AssignedRole associations
         var allRoleIds = new HashSet<string>();
 
-        using var session = await _tenantRepository.GetSessionAsync();
+        using var session = await TenantRepository.GetSessionAsync();
         session.StartTransaction();
 
-        var associations = await _tenantRepository.GetRtAssociationsAsync(
+        var associations = await TenantRepository.GetRtAssociationsAsync(
             session,
             dbUser.ToRtEntityId(),
             RtAssociationExtendedQueryOptions.Create(
@@ -954,10 +954,10 @@ public sealed class OctoUserStore(
         var roleIdString = ConvertIdToString(role.RtId);
 
         // Check direct role assignment via AssignedRole association
-        using var session = await _tenantRepository.GetSessionAsync();
+        using var session = await TenantRepository.GetSessionAsync();
         session.StartTransaction();
 
-        var existing = await _tenantRepository.GetRtAssociationOrDefaultAsync(
+        var existing = await TenantRepository.GetRtAssociationOrDefaultAsync(
             session, dbUser.ToRtEntityId(), role.ToRtEntityId(),
             IdentityAssociationConstants.AssignedRoleId);
 
@@ -1084,10 +1084,10 @@ public sealed class OctoUserStore(
         var queryOptions = RtEntityQueryOptions.Create()
             .FieldFilter(nameof(RtRole.NormalizedName), FieldFilterOperator.Equals, normalizedRoleName);
 
-        using var session = await _tenantRepository.GetSessionAsync();
+        using var session = await TenantRepository.GetSessionAsync();
         session.StartTransaction();
 
-        var result = await _tenantRepository.GetRtEntitiesByTypeAsync<RtRole>(session, queryOptions);
+        var result = await TenantRepository.GetRtEntitiesByTypeAsync<RtRole>(session, queryOptions);
         cancellationToken.ThrowIfCancellationRequested();
 
         await session.CommitTransactionAsync();
@@ -1100,7 +1100,7 @@ public sealed class OctoUserStore(
         string loginProvider,
         string name)
     {
-        var local = await _tenantRepository.GetRtEntityByRtIdAsync<RtUser>(session, user.RtId).ConfigureAwait(false);
+        var local = await TenantRepository.GetRtEntityByRtIdAsync<RtUser>(session, user.RtId).ConfigureAwait(false);
         var tokenAsync = local?.UserTokens?.FirstOrDefault(x => x.LoginProvider == loginProvider && x.Name == name);
 
         return tokenAsync;
@@ -1109,11 +1109,11 @@ public sealed class OctoUserStore(
     private async Task<RtUser?> GetUserByIdAsync(OctoObjectId rtId,
         CancellationToken cancellationToken = default)
     {
-        using var session = await _tenantRepository.GetSessionAsync();
+        using var session = await TenantRepository.GetSessionAsync();
         session.StartTransaction();
 
 
-        var result = await _tenantRepository.GetRtEntityByRtIdAsync<RtUser>(session, rtId);
+        var result = await TenantRepository.GetRtEntityByRtIdAsync<RtUser>(session, rtId);
         cancellationToken.ThrowIfCancellationRequested();
 
         await session.CommitTransactionAsync();
@@ -1124,11 +1124,11 @@ public sealed class OctoUserStore(
     private async Task<RtRole> GetRoleByIdAsync(OctoObjectId rtId,
         CancellationToken cancellationToken = default)
     {
-        using var session = await _tenantRepository.GetSessionAsync();
+        using var session = await TenantRepository.GetSessionAsync();
         session.StartTransaction();
 
 
-        var result = await _tenantRepository.GetRtEntityByRtIdAsync<RtRole>(session, rtId);
+        var result = await TenantRepository.GetRtEntityByRtIdAsync<RtRole>(session, rtId);
         cancellationToken.ThrowIfCancellationRequested();
 
         await session.CommitTransactionAsync();
