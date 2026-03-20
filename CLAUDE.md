@@ -20,9 +20,13 @@ dotnet build Octo.Identity.sln -c DebugL  # Local development with version 999.0
 # Run the identity service
 dotnet run --project src/IdentityServices/IdentityServices.csproj
 
-# Run tests (no test projects currently exist in solution)
-dotnet test Octo.Identity.sln
+# Run tests
+dotnet test Octo.Identity.sln -c Release
 ```
+
+## Pre-Commit Rule (CRITICAL)
+
+**ALWAYS run `dotnet test Octo.Identity.sln -c Release` locally before committing and pushing.** This catches compilation errors, test failures, and regressions before CI. Multiple CI failures were caused by not doing this — local validation is mandatory.
 
 ## Build Configurations
 
