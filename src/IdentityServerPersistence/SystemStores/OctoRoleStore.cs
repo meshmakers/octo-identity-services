@@ -19,7 +19,7 @@ public sealed class OctoRoleStore(
         IQueryableRoleStore<RtRole>,
         IRoleClaimStore<RtRole>
 {
-    private readonly ITenantRepository _tenantRepository = multiTenancyResolverService.GetTenantRepository();
+    private ITenantRepository TenantRepository => multiTenancyResolverService.GetTenantRepository();
     private bool _disposed;
 
     public IdentityErrorDescriber ErrorDescriber { get; } = describer ?? new IdentityErrorDescriber();
@@ -30,10 +30,10 @@ public sealed class OctoRoleStore(
         ThrowIfDisposed();
         ArgumentValidation.Validate(nameof(role), role);
 
-        using var session = await _tenantRepository.GetSessionAsync().ConfigureAwait(false);
+        using var session = await TenantRepository.GetSessionAsync().ConfigureAwait(false);
         session.StartTransaction();
 
-        await _tenantRepository.InsertOneRtEntityAsync(session, role).ConfigureAwait(false);
+        await TenantRepository.InsertOneRtEntityAsync(session, role).ConfigureAwait(false);
 
         await session.CommitTransactionAsync();
 
@@ -45,12 +45,12 @@ public sealed class OctoRoleStore(
         cancellationToken.ThrowIfCancellationRequested();
         ThrowIfDisposed();
 
-        using var session = await _tenantRepository.GetSessionAsync().ConfigureAwait(false);
+        using var session = await TenantRepository.GetSessionAsync().ConfigureAwait(false);
         session.StartTransaction();
 
         try
         {
-            await _tenantRepository.ReplaceOneRtEntityByIdAsync(session, role.RtId, role).ConfigureAwait(false);
+            await TenantRepository.ReplaceOneRtEntityByIdAsync(session, role.RtId, role).ConfigureAwait(false);
             await session.CommitTransactionAsync();
             return IdentityResult.Success;
         }
@@ -66,12 +66,12 @@ public sealed class OctoRoleStore(
         ThrowIfDisposed();
         ArgumentValidation.Validate(nameof(role), role);
 
-        using var session = await _tenantRepository.GetSessionAsync().ConfigureAwait(false);
+        using var session = await TenantRepository.GetSessionAsync().ConfigureAwait(false);
         session.StartTransaction();
 
         try
         {
-            await _tenantRepository.DeleteOneRtEntityByRtIdAsync<RtRole>(session, role.RtId, DeleteOptions.Erase).ConfigureAwait(false);
+            await TenantRepository.DeleteOneRtEntityByRtIdAsync<RtRole>(session, role.RtId, DeleteOptions.Erase).ConfigureAwait(false);
             await session.CommitTransactionAsync().ConfigureAwait(false);
             return IdentityResult.Success;
         }
@@ -137,10 +137,10 @@ public sealed class OctoRoleStore(
         cancellationToken.ThrowIfCancellationRequested();
         ThrowIfDisposed();
 
-        using var session = await _tenantRepository.GetSessionAsync().ConfigureAwait(false);
+        using var session = await TenantRepository.GetSessionAsync().ConfigureAwait(false);
         session.StartTransaction();
 
-        var result = await _tenantRepository.GetRtEntityByRtIdAsync<RtRole>(session, ConvertIdFromString(roleId)).ConfigureAwait(false);
+        var result = await TenantRepository.GetRtEntityByRtIdAsync<RtRole>(session, ConvertIdFromString(roleId)).ConfigureAwait(false);
         await session.CommitTransactionAsync().ConfigureAwait(false);
         return result;
     }
@@ -150,13 +150,13 @@ public sealed class OctoRoleStore(
         cancellationToken.ThrowIfCancellationRequested();
         ThrowIfDisposed();
 
-        using var session = await _tenantRepository.GetSessionAsync().ConfigureAwait(false);
+        using var session = await TenantRepository.GetSessionAsync().ConfigureAwait(false);
         session.StartTransaction();
 
         var queryOptions = RtEntityQueryOptions.Create()
             .FieldFilter(nameof(RtRole.NormalizedName), FieldFilterOperator.Equals, normalizedName);
 
-        var result = await _tenantRepository.GetRtEntitiesByTypeAsync<RtRole>(session, queryOptions);
+        var result = await TenantRepository.GetRtEntitiesByTypeAsync<RtRole>(session, queryOptions);
 
         await session.CommitTransactionAsync();
         return result.Items.FirstOrDefault();
@@ -167,7 +167,7 @@ public sealed class OctoRoleStore(
         _disposed = true;
     }
 
-    public IQueryable<RtRole> Roles => _tenantRepository.AsQueryable<RtRole>();
+    public IQueryable<RtRole> Roles => TenantRepository.AsQueryable<RtRole>();
 
     public Task<IList<Claim>> GetClaimsAsync(RtRole role, CancellationToken cancellationToken = default)
     {
@@ -196,10 +196,10 @@ public sealed class OctoRoleStore(
         role.Claims ??= new AttributeRecordValueList<RtRoleClaimRecord>();
         role.Claims.Add(rtRoleClaimRecord);
 
-        using var session = await _tenantRepository.GetSessionAsync().ConfigureAwait(false);
+        using var session = await TenantRepository.GetSessionAsync().ConfigureAwait(false);
         session.StartTransaction();
 
-        await _tenantRepository.ReplaceOneRtEntityByIdAsync(session, role.RtId, role).ConfigureAwait(false);
+        await TenantRepository.ReplaceOneRtEntityByIdAsync(session, role.RtId, role).ConfigureAwait(false);
         await session.CommitTransactionAsync();
     }
 
@@ -211,10 +211,10 @@ public sealed class OctoRoleStore(
 
         role.Claims?.RemoveAll(x => x.ClaimType == claim.Type && x.ClaimValue == claim.Value);
 
-        using var session = await _tenantRepository.GetSessionAsync().ConfigureAwait(false);
+        using var session = await TenantRepository.GetSessionAsync().ConfigureAwait(false);
         session.StartTransaction();
 
-        await _tenantRepository.ReplaceOneRtEntityByIdAsync(session, role.RtId, role).ConfigureAwait(false);
+        await TenantRepository.ReplaceOneRtEntityByIdAsync(session, role.RtId, role).ConfigureAwait(false);
 
         await session.CommitTransactionAsync();
     }

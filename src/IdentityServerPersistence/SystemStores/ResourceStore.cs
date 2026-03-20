@@ -13,36 +13,36 @@ namespace IdentityServerPersistence.SystemStores;
 public class ResourceStore(IMultiTenancyResolverService multiTenancyResolverService, IMapper mapper)
     : IOctoResourceStore
 {
-    private readonly ITenantRepository _tenantRepository = multiTenancyResolverService.GetTenantRepository();
+    private ITenantRepository TenantRepository => multiTenancyResolverService.GetTenantRepository();
 
-    public string TenantId => _tenantRepository.TenantId;
+    public string TenantId => TenantRepository.TenantId;
 
     public async Task CreateApiResourceAsync(RtApiResource apiResource)
     {
-        using var session = await _tenantRepository.GetSessionAsync();
+        using var session = await TenantRepository.GetSessionAsync();
         session.StartTransaction();
 
-        await _tenantRepository.InsertOneRtEntityAsync(session, apiResource);
+        await TenantRepository.InsertOneRtEntityAsync(session, apiResource);
 
         await session.CommitTransactionAsync();
     }
 
     public async Task CreateIdentityResourceAsync(RtIdentityResource identityResource)
     {
-        using var session = await _tenantRepository.GetSessionAsync();
+        using var session = await TenantRepository.GetSessionAsync();
         session.StartTransaction();
 
-        await _tenantRepository.InsertOneRtEntityAsync(session, identityResource);
+        await TenantRepository.InsertOneRtEntityAsync(session, identityResource);
 
         await session.CommitTransactionAsync();
     }
 
     public async Task CreateApiScopeAsync(RtApiScope apiScope)
     {
-        using var session = await _tenantRepository.GetSessionAsync();
+        using var session = await TenantRepository.GetSessionAsync();
         session.StartTransaction();
 
-        await _tenantRepository.InsertOneRtEntityAsync(session, apiScope);
+        await TenantRepository.InsertOneRtEntityAsync(session, apiScope);
 
         await session.CommitTransactionAsync();
     }
@@ -91,20 +91,20 @@ public class ResourceStore(IMultiTenancyResolverService multiTenancyResolverServ
 
     public async Task DeleteApiResourceAsync(OctoObjectId resourceId)
     {
-        using var session = await _tenantRepository.GetSessionAsync();
+        using var session = await TenantRepository.GetSessionAsync();
         session.StartTransaction();
 
-        await _tenantRepository.DeleteOneRtEntityByRtIdAsync<RtApiResource>(session, resourceId, DeleteOptions.Erase);
+        await TenantRepository.DeleteOneRtEntityByRtIdAsync<RtApiResource>(session, resourceId, DeleteOptions.Erase);
 
         await session.CommitTransactionAsync();
     }
 
     public async Task DeleteApiScopeAsync(OctoObjectId resourceId)
     {
-        using var session = await _tenantRepository.GetSessionAsync();
+        using var session = await TenantRepository.GetSessionAsync();
         session.StartTransaction();
 
-        await _tenantRepository.DeleteOneRtEntityByRtIdAsync<RtApiScope>(session, resourceId, DeleteOptions.Erase);
+        await TenantRepository.DeleteOneRtEntityByRtIdAsync<RtApiScope>(session, resourceId, DeleteOptions.Erase);
 
         await session.CommitTransactionAsync();
     }
@@ -113,13 +113,13 @@ public class ResourceStore(IMultiTenancyResolverService multiTenancyResolverServ
     {
         ArgumentValidation.ValidateString(nameof(apiResourceName), apiResourceName);
 
-        using var session = await _tenantRepository.GetSessionAsync();
+        using var session = await TenantRepository.GetSessionAsync();
         session.StartTransaction();
 
         var queryOptions = RtEntityQueryOptions.Create()
             .FieldFilter(nameof(RtApiResource.Name), FieldFilterOperator.Equals, apiResourceName);
 
-        var result = await _tenantRepository.GetRtEntitiesByTypeAsync<RtApiResource>(session, queryOptions);
+        var result = await TenantRepository.GetRtEntitiesByTypeAsync<RtApiResource>(session, queryOptions);
 
         await session.CommitTransactionAsync();
 
@@ -130,13 +130,13 @@ public class ResourceStore(IMultiTenancyResolverService multiTenancyResolverServ
     {
         ArgumentValidation.ValidateString(nameof(identityResourceName), identityResourceName);
 
-        using var session = await _tenantRepository.GetSessionAsync();
+        using var session = await TenantRepository.GetSessionAsync();
         session.StartTransaction();
 
         var queryOptions = RtEntityQueryOptions.Create()
             .FieldFilter(nameof(RtIdentityResource.Name), FieldFilterOperator.Equals, identityResourceName);
 
-        var result = await _tenantRepository.GetRtEntitiesByTypeAsync<RtIdentityResource>(session, queryOptions);
+        var result = await TenantRepository.GetRtEntitiesByTypeAsync<RtIdentityResource>(session, queryOptions);
 
         await session.CommitTransactionAsync();
 
@@ -147,13 +147,13 @@ public class ResourceStore(IMultiTenancyResolverService multiTenancyResolverServ
     {
         ArgumentValidation.ValidateString(nameof(apiScopeName), apiScopeName);
 
-        using var session = await _tenantRepository.GetSessionAsync();
+        using var session = await TenantRepository.GetSessionAsync();
         session.StartTransaction();
 
         var queryOptions = RtEntityQueryOptions.Create()
             .FieldFilter(nameof(RtApiScope.Name), FieldFilterOperator.Equals, apiScopeName);
 
-        var result = await _tenantRepository.GetRtEntitiesByTypeAsync<RtApiScope>(session, queryOptions);
+        var result = await TenantRepository.GetRtEntitiesByTypeAsync<RtApiScope>(session, queryOptions);
 
         await session.CommitTransactionAsync();
 
@@ -164,7 +164,7 @@ public class ResourceStore(IMultiTenancyResolverService multiTenancyResolverServ
     {
         ArgumentValidation.ValidateString(nameof(name), name);
 
-        using var session = await _tenantRepository.GetSessionAsync();
+        using var session = await TenantRepository.GetSessionAsync();
         session.StartTransaction();
 
         var apiScope = (await FindRtApiScopesByNameAsync(new[] { name })).FirstOrDefault();
@@ -173,7 +173,7 @@ public class ResourceStore(IMultiTenancyResolverService multiTenancyResolverServ
             throw new NotExistingException($"API scope with name '{name}' does not exist.");
         }
 
-        await _tenantRepository.ReplaceOneRtEntityByIdAsync(session, apiScope.RtId, newApiScope);
+        await TenantRepository.ReplaceOneRtEntityByIdAsync(session, apiScope.RtId, newApiScope);
 
         await session.CommitTransactionAsync();
     }
@@ -182,7 +182,7 @@ public class ResourceStore(IMultiTenancyResolverService multiTenancyResolverServ
     {
         ArgumentValidation.ValidateString(nameof(apiResourceName), apiResourceName);
 
-        using var session = await _tenantRepository.GetSessionAsync();
+        using var session = await TenantRepository.GetSessionAsync();
         session.StartTransaction();
 
         var apiResource = (await FindRtApiResourcesByNameAsync(new[] { apiResourceName })).FirstOrDefault();
@@ -191,7 +191,7 @@ public class ResourceStore(IMultiTenancyResolverService multiTenancyResolverServ
             throw new NotExistingException($"API resource with name '{apiResourceName}' does not exist.");
         }
 
-        await _tenantRepository.ReplaceOneRtEntityByIdAsync(session, apiResource.RtId, newApiResource);
+        await TenantRepository.ReplaceOneRtEntityByIdAsync(session, apiResource.RtId, newApiResource);
 
         await session.CommitTransactionAsync();
     }
@@ -199,13 +199,13 @@ public class ResourceStore(IMultiTenancyResolverService multiTenancyResolverServ
     public async Task<IEnumerable<IdentityResource>> FindIdentityResourcesByScopeNameAsync(
         IEnumerable<string> scopeNames)
     {
-        using var session = await _tenantRepository.GetSessionAsync();
+        using var session = await TenantRepository.GetSessionAsync();
         session.StartTransaction();
 
         var queryOptions = RtEntityQueryOptions.Create()
             .FieldFilter(nameof(RtIdentityResource.Name), FieldFilterOperator.In, scopeNames);
 
-        var result = await _tenantRepository.GetRtEntitiesByTypeAsync<RtIdentityResource>(session, queryOptions);
+        var result = await TenantRepository.GetRtEntitiesByTypeAsync<RtIdentityResource>(session, queryOptions);
 
         await session.CommitTransactionAsync();
 
@@ -221,13 +221,13 @@ public class ResourceStore(IMultiTenancyResolverService multiTenancyResolverServ
 
     public async Task<IEnumerable<ApiResource>> FindApiResourcesByScopeNameAsync(IEnumerable<string> scopeNames)
     {
-        using var session = await _tenantRepository.GetSessionAsync();
+        using var session = await TenantRepository.GetSessionAsync();
         session.StartTransaction();
 
         var queryOptions = RtEntityQueryOptions.Create()
             .FieldFilter(nameof(RtApiResource.Scopes), FieldFilterOperator.In, scopeNames);
 
-        var result = await _tenantRepository.GetRtEntitiesByTypeAsync<RtApiResource>(session, queryOptions);
+        var result = await TenantRepository.GetRtEntitiesByTypeAsync<RtApiResource>(session, queryOptions);
 
         await session.CommitTransactionAsync();
 
@@ -243,12 +243,12 @@ public class ResourceStore(IMultiTenancyResolverService multiTenancyResolverServ
 
     public async Task<Resources> GetAllResourcesAsync()
     {
-        using var session = await _tenantRepository.GetSessionAsync();
+        using var session = await TenantRepository.GetSessionAsync();
         session.StartTransaction();
         var queryOptions = RtEntityQueryOptions.Create();
-        var identityResources = await _tenantRepository.GetRtEntitiesByTypeAsync<RtIdentityResource>(session, queryOptions);
-        var apiResources = await _tenantRepository.GetRtEntitiesByTypeAsync<RtApiResource>(session, queryOptions);
-        var apiScopes = await _tenantRepository.GetRtEntitiesByTypeAsync<RtApiScope>(session, queryOptions);
+        var identityResources = await TenantRepository.GetRtEntitiesByTypeAsync<RtIdentityResource>(session, queryOptions);
+        var apiResources = await TenantRepository.GetRtEntitiesByTypeAsync<RtApiResource>(session, queryOptions);
+        var apiScopes = await TenantRepository.GetRtEntitiesByTypeAsync<RtApiScope>(session, queryOptions);
 
         await session.CommitTransactionAsync();
 
@@ -259,13 +259,13 @@ public class ResourceStore(IMultiTenancyResolverService multiTenancyResolverServ
 
     public async Task<IEnumerable<RtApiScope>> FindRtApiScopesByNameAsync(IEnumerable<string> scopeNames)
     {
-        using var session = await _tenantRepository.GetSessionAsync();
+        using var session = await TenantRepository.GetSessionAsync();
         session.StartTransaction();
 
         var queryOptions = RtEntityQueryOptions.Create()
             .FieldFilter(nameof(RtApiScope.Name), FieldFilterOperator.In, scopeNames);
 
-        var result = await _tenantRepository.GetRtEntitiesByTypeAsync<RtApiScope>(session, queryOptions);
+        var result = await TenantRepository.GetRtEntitiesByTypeAsync<RtApiScope>(session, queryOptions);
 
         await session.CommitTransactionAsync();
 
@@ -274,13 +274,13 @@ public class ResourceStore(IMultiTenancyResolverService multiTenancyResolverServ
 
     public async Task<IEnumerable<RtApiResource>> FindRtApiResourcesByNameAsync(IEnumerable<string> apiResourceNames)
     {
-        using var session = await _tenantRepository.GetSessionAsync();
+        using var session = await TenantRepository.GetSessionAsync();
         session.StartTransaction();
 
         var queryOptions = RtEntityQueryOptions.Create()
             .FieldFilter(nameof(RtApiResource.Name), FieldFilterOperator.In, apiResourceNames);
 
-        var result = await _tenantRepository.GetRtEntitiesByTypeAsync<RtApiResource>(session, queryOptions);
+        var result = await TenantRepository.GetRtEntitiesByTypeAsync<RtApiResource>(session, queryOptions);
 
         await session.CommitTransactionAsync();
 
