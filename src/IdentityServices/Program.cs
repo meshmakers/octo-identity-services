@@ -148,6 +148,9 @@ try
         .AddAppAuthRedirectUriValidator()
         .AddJwtBearerClientAuthentication();
 
+    // Persist IdentityServer error/failure events to OctoMesh runtime event log
+    builder.Services.AddTransient<IEventSink, OctoEventSink>();
+
     // Scope auth cookies per tenant to prevent cross-tenant session leakage.
     // Identity.Application and idsrv cookies get a .{tenantId} suffix.
     var tenantCookieManager = new TenantCookieManager();
