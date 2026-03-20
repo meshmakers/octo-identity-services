@@ -1,5 +1,6 @@
 using Duende.IdentityServer.Events;
 using Duende.IdentityServer.Services;
+using Meshmakers.Octo.Services.Infrastructure;
 using Meshmakers.Octo.Services.Notifications.Generated.System.Notification.v2;
 using Meshmakers.Octo.Services.Notifications.Services;
 
@@ -7,10 +8,11 @@ namespace Meshmakers.Octo.Backend.IdentityServices.Services;
 
 /// <summary>
 /// Custom IdentityServer event sink that persists error and failure events
-/// to the OctoMesh runtime event log.
+/// to the OctoMesh runtime event log in the affected tenant.
 /// </summary>
 internal class OctoEventSink(
     IEventRepository eventRepository,
+    IHttpContextAccessor httpContextAccessor,
     ILogger<OctoEventSink> logger) : IEventSink
 {
     public async Task PersistAsync(Event evt)
@@ -21,12 +23,23 @@ internal class OctoEventSink(
         }
 
         var message = FormatEventMessage(evt);
+        var tenantId = httpContextAccessor.HttpContext?.Items[InfrastructureCommon.TenantIdName] as string;
 
         try
         {
-            await eventRepository.StoreSystemErrorEvent(
-                RtEventSourcesEnum.IdentityService,
-                message);
+            if (!string.IsNullOrWhiteSpace(tenantId))
+            {
+                await eventRepository.StoreErrorEvent(
+                    tenantId,
+                    RtEventSourcesEnum.IdentityService,
+                    message);
+            }
+            else
+            {
+                await eventRepository.StoreSystemErrorEvent(
+                    RtEventSourcesEnum.IdentityService,
+                    message);
+            }
         }
         catch (Exception ex)
         {
