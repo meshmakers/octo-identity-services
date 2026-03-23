@@ -1,14 +1,15 @@
-﻿using Duende.IdentityServer.Services;
-using IdentityServerPersistence.SystemStores;
+using Duende.IdentityServer.Services;
 
 namespace Meshmakers.Octo.Backend.IdentityServices.Services;
 
-public class CorsPolicyService(IOctoClientStore clientStore) : ICorsPolicyService
+/// <summary>
+///     Duende IdentityServer CORS policy service that delegates to <see cref="IdentityCorsPolicyProvider"/>
+///     to check allowed origins across all tenants.
+/// </summary>
+public class CorsPolicyService(IdentityCorsPolicyProvider corsPolicyProvider) : ICorsPolicyService
 {
-    public async Task<bool> IsOriginAllowedAsync(string origin)
+    public Task<bool> IsOriginAllowedAsync(string origin)
     {
-        var clients = await clientStore.GetClients();
-        var result = clients.Any(x => x.AllowedCorsOrigins.Contains(origin));
-        return result;
+        return corsPolicyProvider.IsOriginAllowedAsync(origin);
     }
 }
