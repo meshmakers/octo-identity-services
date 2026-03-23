@@ -120,6 +120,7 @@ try
         .AddOctoIdentityPersistence(configureDistributionEventHub: c =>
         {
             c.AddBroadcastEventConsumer<IdentityProviderUpdateConsumer, IdentityProviderUpdate>();
+            c.AddBroadcastEventConsumer<IdentityCorsClientsUpdateConsumer, CorsClientsUpdate>();
 
             c.AddCommandConsumer<CreateIdentityDataCommandRequestConsumer, CreateIdentityDataCommandRequest>(
                 QueueNames.CreateIdentityDataCommand);
