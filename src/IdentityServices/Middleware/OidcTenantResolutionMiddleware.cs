@@ -5,7 +5,9 @@ using System.Text.Json;
 using IdentityServerPersistence.SystemStores;
 using Microsoft.AspNetCore.WebUtilities;
 using Meshmakers.Octo.Runtime.Contracts.MongoDb;
+using Meshmakers.Octo.Runtime.Contracts.MongoDb.Configuration;
 using Meshmakers.Octo.Services.Infrastructure;
+using Microsoft.Extensions.Options;
 
 namespace Meshmakers.Octo.Backend.IdentityServices.Middleware;
 
@@ -35,7 +37,8 @@ namespace Meshmakers.Octo.Backend.IdentityServices.Middleware;
 /// </remarks>
 internal class OidcTenantResolutionMiddleware(
     RequestDelegate next,
-    ILogger<OidcTenantResolutionMiddleware> logger)
+    ILogger<OidcTenantResolutionMiddleware> logger,
+    IOptions<OctoSystemConfiguration> octoSystemConfiguration)
 {
     /// <summary>
     /// Maps authorization codes and refresh tokens to tenant IDs. Authorization codes are captured
@@ -57,15 +60,21 @@ internal class OidcTenantResolutionMiddleware(
             await TryResolveTenantAsync(context, path);
         }
 
+        var resolvedTenantId = context.Items[InfrastructureCommon.TenantIdName] as string;
+
         // For /connect/token with a resolved tenant, wrap the response body to capture
         // refresh tokens from the JSON response for future tenant resolution.
         var isTokenEndpoint = path != null &&
             path.StartsWith("/connect/token", StringComparison.OrdinalIgnoreCase);
-        var resolvedTenantId = isTokenEndpoint
-            ? context.Items[InfrastructureCommon.TenantIdName] as string
-            : null;
 
-        if (resolvedTenantId != null)
+        // For /connect/deviceauthorization with a resolved tenant, wrap the response body
+        // to rewrite verification_uri and verification_uri_complete to the tenant-specific path.
+        var isDeviceAuthEndpoint = path != null &&
+            path.StartsWith("/connect/deviceauthorization", StringComparison.OrdinalIgnoreCase);
+
+        var needsResponseCapture = resolvedTenantId != null && (isTokenEndpoint || isDeviceAuthEndpoint);
+
+        if (needsResponseCapture)
         {
             var originalBody = context.Response.Body;
             using var memoryStream = new MemoryStream();
@@ -76,7 +85,23 @@ internal class OidcTenantResolutionMiddleware(
             memoryStream.Position = 0;
             if (context.Response.StatusCode == StatusCodes.Status200OK)
             {
-                CaptureRefreshTokenFromResponse(memoryStream, resolvedTenantId);
+                if (isTokenEndpoint)
+                {
+                    CaptureRefreshTokenFromResponse(memoryStream, resolvedTenantId!);
+                }
+                else if (isDeviceAuthEndpoint)
+                {
+                    CaptureDeviceCodeFromResponse(memoryStream, resolvedTenantId!);
+                    memoryStream.Position = 0;
+                    var rewritten = RewriteDeviceVerificationUrls(memoryStream, resolvedTenantId!);
+                    if (rewritten != null)
+                    {
+                        context.Response.ContentLength = rewritten.Length;
+                        memoryStream.SetLength(0);
+                        memoryStream.Write(rewritten);
+                    }
+                }
+
                 memoryStream.Position = 0;
             }
 
@@ -106,6 +131,10 @@ internal class OidcTenantResolutionMiddleware(
                     return Task.CompletedTask;
                 });
             }
+        }
+        else if (path.StartsWith("/connect/deviceauthorization", StringComparison.OrdinalIgnoreCase))
+        {
+            tenantId = await ExtractTenantFromFormAcrValuesAsync(context);
         }
         else if (path.StartsWith("/connect/token", StringComparison.OrdinalIgnoreCase))
         {
@@ -185,6 +214,19 @@ internal class OidcTenantResolutionMiddleware(
 
                 logger.LogWarning(
                     "No tenant mapping found for authorization code on /connect/token — user/client lookups will use system tenant");
+            }
+            else if (string.Equals(grantType, "urn:ietf:params:oauth:grant-type:device_code", StringComparison.Ordinal))
+            {
+                var deviceCode = form["device_code"].FirstOrDefault();
+                if (deviceCode != null && TokenToTenantMap.TryGetValue($"device:{deviceCode}", out var entry))
+                {
+                    logger.LogDebug("Resolved tenant '{TenantId}' from device code for /connect/token",
+                        entry.TenantId);
+                    return entry.TenantId;
+                }
+
+                logger.LogWarning(
+                    "No tenant mapping found for device code on /connect/token — user/client lookups will use system tenant");
             }
             else if (string.Equals(grantType, "refresh_token", StringComparison.Ordinal))
             {
@@ -320,6 +362,22 @@ internal class OidcTenantResolutionMiddleware(
         }
     }
 
+    private static async Task<string?> ExtractTenantFromFormAcrValuesAsync(HttpContext context)
+    {
+        if (!context.Request.HasFormContentType)
+        {
+            return null;
+        }
+
+        var form = await context.Request.ReadFormAsync();
+        if (!form.TryGetValue("acr_values", out var acrValues))
+        {
+            return null;
+        }
+
+        return ParseTenantFromAcrValues(acrValues.ToString());
+    }
+
     private static string? ExtractTenantFromAcrValues(HttpContext context)
     {
         if (!context.Request.Query.TryGetValue("acr_values", out var acrValues))
@@ -399,6 +457,64 @@ internal class OidcTenantResolutionMiddleware(
         }
 
         return null;
+    }
+
+    /// <summary>
+    /// Captures the device code from the device authorization JSON response and maps it to the tenant ID.
+    /// The device code is later used to resolve the tenant during the token exchange.
+    /// </summary>
+    private void CaptureDeviceCodeFromResponse(MemoryStream responseBody, string tenantId)
+    {
+        try
+        {
+            using var doc = JsonDocument.Parse(responseBody);
+            if (doc.RootElement.TryGetProperty("device_code", out var deviceCodeElement))
+            {
+                var deviceCode = deviceCodeElement.GetString();
+                if (!string.IsNullOrEmpty(deviceCode))
+                {
+                    TokenToTenantMap[$"device:{deviceCode}"] =
+                        (tenantId, DateTime.UtcNow.Add(AuthCodeEntryLifetime));
+                    logger.LogDebug("Captured device code → tenant '{TenantId}' mapping", tenantId);
+                    CleanupExpiredEntries();
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex, "Failed to capture device code from response");
+        }
+    }
+
+    /// <summary>
+    /// Rewrites <c>verification_uri</c> and <c>verification_uri_complete</c> in the device authorization
+    /// JSON response to use the resolved tenant ID instead of the system tenant prefix.
+    /// </summary>
+    private byte[]? RewriteDeviceVerificationUrls(MemoryStream responseBody, string tenantId)
+    {
+        try
+        {
+            var json = Encoding.UTF8.GetString(responseBody.ToArray());
+            var systemTenantId = octoSystemConfiguration.Value.SystemTenantId;
+            var systemPath = $"/{systemTenantId}/device";
+            var tenantPath = $"/{tenantId}/device";
+
+            if (!json.Contains(systemPath, StringComparison.OrdinalIgnoreCase))
+            {
+                return null;
+            }
+
+            var rewritten = json.Replace(systemPath, tenantPath, StringComparison.OrdinalIgnoreCase);
+            logger.LogDebug(
+                "Rewrote device verification URLs from '{SystemPath}' to '{TenantPath}'",
+                systemPath, tenantPath);
+            return Encoding.UTF8.GetBytes(rewritten);
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex, "Failed to rewrite device verification URLs");
+            return null;
+        }
     }
 }
 
