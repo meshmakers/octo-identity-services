@@ -144,6 +144,12 @@ internal class OidcTenantResolutionMiddleware(
         {
             tenantId = ExtractTenantFromIdTokenHint(context) ?? ExtractTenantFromAcrValues(context);
         }
+        else if (path.StartsWith("/connect/userinfo", StringComparison.OrdinalIgnoreCase)
+                 || path.StartsWith("/connect/introspect", StringComparison.OrdinalIgnoreCase)
+                 || path.StartsWith("/connect/revocation", StringComparison.OrdinalIgnoreCase))
+        {
+            tenantId = ExtractTenantFromBearerToken(context);
+        }
 
         if (string.IsNullOrEmpty(tenantId))
         {
@@ -414,6 +420,24 @@ internal class OidcTenantResolutionMiddleware(
         }
 
         return ExtractTenantFromJwtPayload(idTokenHint.ToString());
+    }
+
+    /// <summary>
+    /// Extracts the <c>tenant_id</c> claim from the Bearer access token in the Authorization header.
+    /// Used for endpoints like <c>/connect/userinfo</c>, <c>/connect/introspect</c>, and
+    /// <c>/connect/revocation</c> that receive an access token but have no tenant route segment.
+    /// </summary>
+    private string? ExtractTenantFromBearerToken(HttpContext context)
+    {
+        var authorization = context.Request.Headers.Authorization.ToString();
+        if (string.IsNullOrEmpty(authorization) ||
+            !authorization.StartsWith("Bearer ", StringComparison.OrdinalIgnoreCase))
+        {
+            return null;
+        }
+
+        var token = authorization["Bearer ".Length..].Trim();
+        return ExtractTenantFromJwtPayload(token);
     }
 
     /// <summary>
