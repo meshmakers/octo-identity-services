@@ -66,6 +66,8 @@ internal class OctoEventSink(
                     parts.Add($"ClientId: {tokenEvt.ClientId}");
                 if (!string.IsNullOrWhiteSpace(tokenEvt.Error))
                     parts.Add($"Error: {tokenEvt.Error}");
+                if (!string.IsNullOrWhiteSpace(tokenEvt.Scopes))
+                    parts.Add($"Scopes: {tokenEvt.Scopes}");
                 break;
             case UserLoginFailureEvent loginEvt:
                 parts.Add($"Username: {loginEvt.Username}");
