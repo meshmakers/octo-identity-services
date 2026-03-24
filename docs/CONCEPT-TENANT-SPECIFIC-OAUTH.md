@@ -126,3 +126,142 @@ Each tenant can configure its own set of identity providers (local credentials, 
 ### Concurrent Multi-Tenant Sessions
 
 Per-tenant cookie scoping (`TenantCookieManager`) allows users to be authenticated in multiple tenants simultaneously without session conflicts. Each tenant's auth cookie is suffixed with the tenant ID (e.g., `.AspNetCore.Identity.Application.meshtest`).
+
+## 9. Home Realm Discovery When No `acr_values` Provided
+
+### Problem
+
+Some OAuth clients cannot include `acr_values` in the authorize request. For example, Grafana's built-in OAuth login has a single, global `auth_url` -- there is no way to dynamically set `acr_values` per user or per organization. Since users exist only in their respective tenants (not in the System-Tenant), the authorize request fails without tenant context.
+
+A naive solution would be a tenant selector dropdown, but this exposes tenant names to unauthenticated users -- an information disclosure risk that enables targeted attacks.
+
+### Solution: Email-Based Home Realm Discovery
+
+When `/connect/authorize` is called **without** `acr_values=tenant:{tenantId}`, the Identity Server prompts the user for their email address and resolves the tenant from the email domain. No tenant names are ever exposed to the browser.
+
+This follows the industry-standard Home Realm Discovery (HRD) pattern used by Microsoft, Google, and Okta.
+
+### Flow
+
+```
+OAuth Client                Identity Server
+  |                              |
+  |-- /connect/authorize ------->|
+  |   (no acr_values)            |
+  |                              |
+  |                              |-- Show "Enter your email" page
+  |                              |
+  |                              |<-- User enters: gerald@meshmakers.com
+  |                              |
+  |                              |-- Lookup: meshmakers.com → meshtest
+  |                              |
+  |                              |-- Redirect to /connect/authorize
+  |                              |   with acr_values=tenant:meshtest
+  |                              |   (re-enters standard flow)
+  |                              |
+  |                              |-- Redirect to /meshtest/login
+  |                              |
+  |                              |   ... normal login flow ...
+  |                              |
+  |<-- Token -------------------|
+  |   tenant_id = meshtest       |
+```
+
+### Data Model: `TenantEmailDomain`
+
+A new CK type in the Identity CK Model that maps email domains to tenants. Stored in the **system tenant database** (global scope, not per-tenant).
+
+| Attribute | Type | Description | Example |
+|-----------|------|-------------|---------|
+| `EmailDomain` | String | Email domain (lowercase, unique index) | `meshmakers.com` |
+| `TenantId` | String | Target tenant ID | `meshtest` |
+
+Multiple domains can map to the same tenant (e.g., `meshmakers.com` and `meshmakers.de` both map to `meshtest`).
+
+### Multi-Tenant Users
+
+If a user's email domain maps to multiple tenants (e.g., an admin with access to `meshtest` and `sbeg`), the HRD page shows **only those matched tenants** -- not the full tenant list. This is safe because the attacker would need a valid email domain to trigger the disambiguation, and even then only sees tenants associated with that domain.
+
+For the common case (one domain → one tenant), the user sees no tenant selection at all.
+
+### Implementation Requirements
+
+| Component | Change |
+|-----------|--------|
+| `OidcTenantResolutionMiddleware` | When no `acr_values` tenant is found, redirect to HRD page instead of defaulting to System-Tenant |
+| **New: HRD Page** | Angular component with email input. Calls backend API to resolve tenant from email domain. On success, redirects back to `/connect/authorize` with `acr_values=tenant:{resolved}` |
+| **New: `TenantEmailDomain` CK Type** | CK model definition in `ConstructionKit/` with `EmailDomain` and `TenantId` attributes |
+| **New: `TenantEmailDomainStore`** | Persistence store for email domain → tenant mappings (system tenant database) |
+| **New: `HrdApiController`** | API endpoint `POST /api/auth/resolve-tenant` accepting `{ email }` and returning `{ tenantId }` or `{ tenants: [...] }` for disambiguation |
+| **New: `TenantEmailDomainsController`** | System API CRUD at `{tenantId}/v1/tenantEmailDomains` for managing domain mappings |
+| `TenantLoginRedirectMiddleware` | No change -- receives the selected tenant via the existing `acr_values` mechanism |
+
+### Preserving the OIDC Request
+
+After the user enters their email and the tenant is resolved, the Identity Server redirects the browser back to `/connect/authorize` with the original parameters plus `acr_values=tenant:{resolvedTenant}`. This re-enters the standard flow with no middleware changes.
+
+The original authorize request URL (including `client_id`, `redirect_uri`, `scope`, `state`, `code_challenge`) is passed to the HRD page as a `returnUrl` query parameter, identical to how the existing login page receives it.
+
+### Security Considerations
+
+| Concern | Mitigation |
+|---------|------------|
+| **Tenant name enumeration** | No tenant names are shown. The HRD page only accepts an email and returns a redirect -- the tenant ID appears only in the server-side redirect URL, not in the API response to the browser |
+| **Email enumeration** | The API should return the same response shape regardless of whether the email domain is recognized. For unknown domains, show a generic "No account found" error without revealing whether the domain exists |
+| **Brute-force domain probing** | Rate-limit the `/api/auth/resolve-tenant` endpoint. Consider CAPTCHA after repeated failures from the same IP |
+| **Timing attacks** | Ensure consistent response times for known and unknown domains |
+
+### Relationship to `EmailDomainGroupRule`
+
+The existing `EmailDomainGroupRule` maps email domains to **groups within a tenant** (for auto-assignment on first login). The new `TenantEmailDomain` maps email domains to **tenants** (for HRD). These are separate concerns at different levels:
+
+- `TenantEmailDomain`: "Which tenant does this user belong to?" (system-level, used before login)
+- `EmailDomainGroupRule`: "Which group should this user join?" (tenant-level, used during login)
+
+## 10. Grafana Integration: Tenant-to-Organization Mapping
+
+### Architecture
+
+Grafana uses a single OAuth login for all users. With Home Realm Discovery (Section 9), users enter their email during login and are automatically directed to the correct tenant. The resulting token contains a `tenant_id` claim that Grafana uses to assign the user to the correct Grafana Organization.
+
+### Grafana Configuration
+
+```yaml
+auth.generic_oauth:
+  # Standard OAuth settings
+  auth_url: https://connect.example.com/connect/authorize
+  token_url: https://connect.example.com/connect/token
+  api_url: https://connect.example.com/connect/userinfo
+
+  # Map tenant_id claim to Grafana Organization
+  org_attribute_path: tenant_id
+  org_mapping: "meshtest:1:Editor sbeg:2:Viewer"
+```
+
+The `org_mapping` format is `tenantId:grafanaOrgId:role`, space-separated for multiple mappings. This maps each `tenant_id` value to a specific Grafana Organization with a default role.
+
+### Two-Token Architecture
+
+Grafana requires two separate OAuth flows with different purposes:
+
+| Token | Purpose | Client ID | Scopes | How Obtained |
+|-------|---------|-----------|--------|--------------|
+| **Grafana Login Token** | Grafana session + org mapping | `grafana` | `openid profile email role` (read-only) | Grafana built-in OAuth login (with HRD email prompt) |
+| **Plugin Tenant Token** | OctoMesh API calls with `tenant_id` claim | `grafana-datasource` | `openid profile email assetTenantAPI.full_access offline_access` | Plugin backend via popup (with `acr_values`) |
+
+The Grafana Login Token is obtained once during Grafana login (tenant resolved via email-based HRD). The Plugin Tenant Token is obtained per datasource when the user first queries data -- because the user already has an SSO cookie from the Grafana login, this popup completes silently without a password prompt.
+
+### Grafana OctoMesh Datasource Plugin
+
+The datasource plugin includes a Go backend that manages tenant-specific OAuth tokens independently from Grafana's built-in OAuth. See `grafana-octo-mesh-datasource/docs/grafana-tenant-auth.md` for the plugin architecture.
+
+### Organization Switching
+
+When a user needs to access a different tenant:
+
+1. User switches Grafana Organization (UI menu)
+2. The OctoMesh datasource in that org has a different `tenantId`
+3. Plugin backend checks token cache -- if no token for this tenant, shows "Authenticate" prompt
+4. User clicks Authenticate -- popup opens with `acr_values=tenant:{newTenantId}`
+5. If SSO cookie exists for that tenant: token issued silently (no login)
+6. If no SSO cookie: full login for the new tenant (one-time)
