@@ -155,7 +155,11 @@ try
     // Scope auth cookies per tenant to prevent cross-tenant session leakage.
     // Identity.Application and idsrv cookies get a .{tenantId} suffix.
     var tenantCookieManager = new TenantCookieManager();
-    builder.Services.ConfigureApplicationCookie(o => o.CookieManager = tenantCookieManager);
+    builder.Services.ConfigureApplicationCookie(o =>
+    {
+        o.CookieManager = tenantCookieManager;
+        o.SlidingExpiration = true;
+    });
     builder.Services.Configure<CookieAuthenticationOptions>("idsrv", o => o.CookieManager = tenantCookieManager);
     builder.Services.Configure<CookieAuthenticationOptions>("idsrv.session", o => o.CookieManager = tenantCookieManager);
 

@@ -30,6 +30,7 @@ namespace Meshmakers.Octo.Backend.IdentityServices.Controllers.Api;
 [ApiController]
 [Route("{tenantId}/api/auth")]
 [AllowAnonymous]
+[IgnoreAntiforgeryToken]
 public class AuthApiController(
     IIdentityServerInteractionService interaction,
     IAuthenticationSchemeProvider schemeProvider,
