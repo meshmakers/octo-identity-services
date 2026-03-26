@@ -161,6 +161,11 @@ export class LoginComponent implements OnInit {
   }
 
   private performCrossTenantAutoLogin(parentTenantId: string): void {
+    // Guard: if the parent tenant is the same as the current tenant, there's nothing to auto-login.
+    // This happens when the redirect chain lands back on the parent's own login page after cookie expiry.
+    if (parentTenantId.toLowerCase() === this.tenantId.toLowerCase()) {
+      return;
+    }
     this.submitting = true;
     this.errorMessage = undefined;
     this.performCrossTenantLogin(parentTenantId);
