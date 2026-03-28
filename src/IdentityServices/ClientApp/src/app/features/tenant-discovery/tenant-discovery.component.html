@@ -1,0 +1,105 @@
+<div class="lcars-auth-container">
+  <app-lcars-panel>
+    <app-lcars-header
+      subtitle="Select your organization"
+      [showUserMenu]="false">
+    </app-lcars-header>
+
+    <!-- Loading State -->
+    <div *ngIf="loading" class="lcars-loading">
+      <div class="lcars-loading__spinner"></div>
+      <span class="lcars-loading__text">Looking up your organization</span>
+    </div>
+
+    <!-- Step 1: Email/Username Input -->
+    <ng-container *ngIf="!loading && step === 'input'">
+      <div class="lcars-discovery-intro">
+        Enter your email address or username to find your organization.
+      </div>
+
+      <form (ngSubmit)="onLookup()" #discoveryForm="ngForm">
+        <div class="lcars-form-group">
+          <label for="emailOrUsername">Email or Username</label>
+          <input
+            type="text"
+            id="emailOrUsername"
+            name="emailOrUsername"
+            [(ngModel)]="emailOrUsername"
+            required
+            autocomplete="username"
+            placeholder="e.g. user&#64;example.com" />
+        </div>
+
+        <div class="lcars-actions lcars-actions--stacked">
+          <button
+            type="submit"
+            class="lcars-button-primary"
+            [disabled]="!emailOrUsername.trim()">
+            Continue
+          </button>
+        </div>
+      </form>
+    </ng-container>
+
+    <!-- Step 2: Tenant Selection -->
+    <ng-container *ngIf="!loading && step === 'select'">
+      <div class="lcars-discovery-intro">
+        Multiple organizations found for <strong>{{ emailOrUsername }}</strong>.
+        Please select your organization:
+      </div>
+
+      <div class="lcars-tenant-list">
+        <label
+          *ngFor="let tenant of discoveredTenants"
+          class="lcars-tenant-option"
+          [class.lcars-tenant-option--selected]="selectedTenant === tenant">
+          <input
+            type="radio"
+            name="tenant"
+            [value]="tenant"
+            [(ngModel)]="selectedTenant" />
+          <span class="lcars-tenant-option__name">{{ tenant }}</span>
+        </label>
+      </div>
+
+      <div class="lcars-actions lcars-actions--stacked">
+        <button
+          type="button"
+          class="lcars-button-primary"
+          [disabled]="!selectedTenant"
+          (click)="onSelectTenant()">
+          Continue
+        </button>
+        <button
+          type="button"
+          class="lcars-button-secondary"
+          (click)="onBack()">
+          Back
+        </button>
+      </div>
+    </ng-container>
+
+    <!-- Error State -->
+    <ng-container *ngIf="!loading && step === 'error'">
+      <div class="lcars-already-authenticated">
+        <div class="lcars-already-authenticated__icon">
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" width="48" height="48">
+            <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-2h2v2zm0-4h-2V7h2v6z"/>
+          </svg>
+        </div>
+        <div class="lcars-already-authenticated__message">
+          {{ errorMessage }}
+        </div>
+      </div>
+
+      <div class="lcars-actions lcars-actions--stacked">
+        <button
+          type="button"
+          class="lcars-button-secondary"
+          (click)="onBack()">
+          Try again
+        </button>
+      </div>
+    </ng-container>
+  </app-lcars-panel>
+</div>

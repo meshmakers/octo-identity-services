@@ -36,6 +36,7 @@ using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Options;
 using Microsoft.IdentityModel.Logging;
 using Microsoft.AspNetCore.DataProtection;
+using System.Threading.RateLimiting;
 using NLog;
 using NLog.Web;
 using Persistence.IdentityCkModel.Generated.System.Identity.v2;
@@ -102,6 +103,25 @@ try
     });
 
     builder.Services.ConfigureOptions<ConfigureDistributionEventHubOptions>();
+
+    builder.Services.AddRateLimiter(options =>
+    {
+        options.AddPolicy("tenant-discovery", httpContext =>
+            RateLimitPartition.GetSlidingWindowLimiter(
+                httpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown",
+                _ => new SlidingWindowRateLimiterOptions
+                {
+                    PermitLimit = 5,
+                    Window = TimeSpan.FromMinutes(1),
+                    SegmentsPerWindow = 2,
+                    QueueLimit = 0
+                }));
+        options.OnRejected = async (context, _) =>
+        {
+            context.HttpContext.Response.StatusCode = StatusCodes.Status429TooManyRequests;
+            await context.HttpContext.Response.WriteAsync("Too many requests. Please try again later.");
+        };
+    });
 
     builder.Services.AddScoped<ICorsPolicyService, CorsPolicyService>();
     builder.Services.AddTransient<ICredentialGenerator, CredentialGenerator>();
@@ -320,6 +340,8 @@ try
         .AddSupportedUICultures(supportedCultures);
 
     app.UseRequestLocalization(localizationOptions);
+
+    app.UseRateLimiter();
 
     // The sequence of the add statements in the configure function is of importance.
     // app.UseAuthentication()
