@@ -559,7 +559,7 @@ When IdentityServer's `/connect/authorize` endpoint determines the user isn't au
 
 **Affected paths:** `/login`, `/consent`, `/logout`, `/error`, `/device`
 
-**Backward compatibility:** Without `acr_values`, the redirect goes to `/{systemTenantId}/login`.
+**Without `acr_values`:** The `OidcTenantResolutionMiddleware` redirects to `/tenant-discovery?returnUrl={authorizeUrl}` where the user can enter their email/username to discover their tenant. After tenant selection, the flow restarts with `acr_values` appended. A `octo_last_tenant` cookie shortcuts this on repeat visits.
 
 **Configuration:** Both `ConfigureIdentityServerOptions` and `TenantLoginRedirectMiddleware` read the system tenant ID from `IOptions<OctoSystemConfiguration>`. A server-side redirect in `Program.cs` also routes the root path `/` to `/{systemTenantId}/login`.
 
@@ -678,7 +678,7 @@ UseRouting()
 | External login (`/signin-google`) | External cookie remains global; auth cookie scoped at callback |
 | Tenant switch | New tenant-scoped cookie written; old tenant cookie unaffected |
 | Concurrent sessions | Each tenant has its own cookie; user can be logged into multiple tenants |
-| `/connect/authorize` without `acr_values` | Falls back to system tenant cookie |
+| `/connect/authorize` without `acr_values` | Redirects to `/tenant-discovery` for email-first tenant lookup |
 | `/connect/endsession` without `id_token_hint` | No tenant; user appears unauthenticated |
 | Existing global cookies after deploy | Not found by TenantCookieManager; users re-login (one-time) |
 

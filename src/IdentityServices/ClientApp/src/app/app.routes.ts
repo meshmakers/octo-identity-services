@@ -2,6 +2,11 @@ import { Routes } from '@angular/router';
 
 export const routes: Routes = [
   {
+    path: 'tenant-discovery',
+    loadComponent: () => import('./features/tenant-discovery/tenant-discovery.component')
+      .then(m => m.TenantDiscoveryComponent)
+  },
+  {
     path: ':tenantId',
     children: [
       {

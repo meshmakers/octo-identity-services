@@ -11,6 +11,11 @@ export const tenantInterceptor: HttpInterceptorFn = (req, next) => {
     return next(req);
   }
 
+  // Tenant discovery endpoint has no tenant prefix — pass through unchanged
+  if (req.url.startsWith('/api/tenant-discovery/')) {
+    return next(req);
+  }
+
   // Prepend tenant ID to the URL
   const tenantId = getTenantIdFromUrl();
   const modifiedUrl = `/${tenantId}${req.url}`;

@@ -3,6 +3,7 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using IdentityServerPersistence.SystemStores;
+using Microsoft.AspNetCore.Http.Extensions;
 using Microsoft.AspNetCore.WebUtilities;
 using Meshmakers.Octo.Runtime.Contracts.MongoDb;
 using Meshmakers.Octo.Runtime.Contracts.MongoDb.Configuration;
@@ -51,13 +52,19 @@ internal class OidcTenantResolutionMiddleware(
     private static readonly TimeSpan AuthCodeEntryLifetime = TimeSpan.FromMinutes(10);
     private static readonly TimeSpan RefreshTokenEntryLifetime = TimeSpan.FromDays(30);
 
+    private const string LastTenantCookieName = "octo_last_tenant";
+
     public async Task InvokeAsync(HttpContext context)
     {
         var path = context.Request.Path.Value;
 
         if (path != null && path.StartsWith("/connect/", StringComparison.OrdinalIgnoreCase))
         {
-            await TryResolveTenantAsync(context, path);
+            var handled = await TryResolveTenantAsync(context, path);
+            if (handled)
+            {
+                return; // Response already written (redirect to tenant discovery)
+            }
         }
 
         var resolvedTenantId = context.Items[InfrastructureCommon.TenantIdName] as string;
@@ -114,7 +121,11 @@ internal class OidcTenantResolutionMiddleware(
         }
     }
 
-    private async Task TryResolveTenantAsync(HttpContext context, string path)
+    /// <summary>
+    /// Tries to resolve the tenant from the request. Returns <c>true</c> if the response was
+    /// already written (e.g., redirect to tenant discovery), meaning the caller should not call <c>next()</c>.
+    /// </summary>
+    private async Task<bool> TryResolveTenantAsync(HttpContext context, string path)
     {
         string? tenantId = null;
 
@@ -130,6 +141,35 @@ internal class OidcTenantResolutionMiddleware(
                     CaptureAuthorizationCode(context, capturedTenantId);
                     return Task.CompletedTask;
                 });
+            }
+            else
+            {
+                // No acr_values=tenant:X — redirect to tenant discovery page.
+                // Check for a last-used tenant cookie as a shortcut.
+                if (context.Request.Cookies.TryGetValue(LastTenantCookieName, out var lastTenant)
+                    && !string.IsNullOrEmpty(lastTenant))
+                {
+                    // Validate that the tenant still exists before using the cookie
+                    var sysCtxForCookie = context.RequestServices.GetRequiredService<ISystemContext>();
+                    var lastTenantRepo = await sysCtxForCookie.TryFindTenantRepositoryAsync(lastTenant);
+                    if (lastTenantRepo != null)
+                    {
+                        // Redirect back to authorize with acr_values appended
+                        var originalUrl = context.Request.GetEncodedUrl();
+                        var separator = originalUrl.Contains('?') ? "&" : "?";
+                        var redirectUrl = $"{originalUrl}{separator}acr_values={Uri.EscapeDataString($"tenant:{lastTenant}")}";
+                        context.Response.Redirect(redirectUrl);
+                        logger.LogDebug("Redirecting to authorize with last-used tenant '{TenantId}' from cookie", lastTenant);
+                        return true;
+                    }
+                }
+
+                // No cookie or invalid tenant — redirect to tenant discovery page
+                var authorizeUrl = context.Request.GetEncodedUrl();
+                var discoveryUrl = $"/tenant-discovery?returnUrl={Uri.EscapeDataString(authorizeUrl)}";
+                context.Response.Redirect(discoveryUrl);
+                logger.LogDebug("No acr_values on /connect/authorize — redirecting to tenant discovery");
+                return true;
             }
         }
         else if (path.StartsWith("/connect/deviceauthorization", StringComparison.OrdinalIgnoreCase))
@@ -153,21 +193,22 @@ internal class OidcTenantResolutionMiddleware(
 
         if (string.IsNullOrEmpty(tenantId))
         {
-            return;
+            return false;
         }
 
-        var systemContext = context.RequestServices.GetRequiredService<ISystemContext>();
-        var tenantRepository = await systemContext.TryFindTenantRepositoryAsync(tenantId);
+        var sysCtx = context.RequestServices.GetRequiredService<ISystemContext>();
+        var tenantRepository = await sysCtx.TryFindTenantRepositoryAsync(tenantId);
         if (tenantRepository == null)
         {
             logger.LogWarning("OIDC tenant resolution: tenant '{TenantId}' not found", tenantId);
-            return;
+            return false;
         }
 
         context.Items[InfrastructureCommon.TenantRepositoryName] = tenantRepository;
         context.Items[InfrastructureCommon.TenantIdName] = tenantRepository.TenantId;
 
         logger.LogDebug("OIDC tenant resolved to '{TenantId}' for {Path}", tenantRepository.TenantId, path);
+        return false;
     }
 
     /// <summary>

@@ -252,6 +252,13 @@ internal class DefaultConfigurationCreatorService(
             Description = IdentityTexts.Backend_Identity_UserSchema_Roles_Description,
             UserClaims = new List<string> { JwtClaimTypes.Role }
         });
+        await resourceStore.GetOrCreateIdentityResourceAsync(new IdentityResource
+        {
+            Name = "allowed_tenants",
+            DisplayName = "Allowed Tenants",
+            Description = "Tenants the user is allowed to access",
+            UserClaims = new List<string> { "allowed_tenants" }
+        });
     }
 
     private async Task CreateUsersAndRoles()
@@ -462,6 +469,7 @@ internal class DefaultConfigurationCreatorService(
                 CommonConstants.Scopes.Profile,
                 CommonConstants.Scopes.Email,
                 JwtClaimTypes.Role,
+                "allowed_tenants",
                 CommonConstants.OctoApiFullAccess,
             },
 
@@ -596,6 +604,10 @@ internal class DefaultConfigurationCreatorService(
                 IdentityTexts.Backend_Identity_UserSchema_Roles_DisplayName,
                 description: IdentityTexts.Backend_Identity_UserSchema_Roles_Description,
                 claims: new[] { JwtClaimTypes.Role });
+            await EnsureIdentityResourceAsync(session, childRepo, "allowed_tenants",
+                "Allowed Tenants",
+                description: "Tenants the user is allowed to access",
+                claims: new[] { "allowed_tenants" });
 
             // API Scopes
             await EnsureApiScopeAsync(session, childRepo,
