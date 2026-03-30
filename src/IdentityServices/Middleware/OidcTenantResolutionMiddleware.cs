@@ -184,13 +184,16 @@ internal class OidcTenantResolutionMiddleware(
 
                 if (sessionTenants.Count > 1)
                 {
-                    // Multiple active sessions — redirect to tenant discovery with pre-resolved tenants
-                    var knownTenants = string.Join(",", sessionTenants);
+                    // Multiple active sessions — redirect to tenant discovery without
+                    // pre-resolved tenants. Session cookies are per-browser (not per-user),
+                    // so passing them as knownTenants could show tenants the current user
+                    // doesn't belong to. The discovery page requires email/username input
+                    // to verify actual tenant membership.
                     var discoveryUrl =
-                        $"/tenant-discovery?returnUrl={Uri.EscapeDataString(authorizeUrl)}&knownTenants={Uri.EscapeDataString(knownTenants)}";
+                        $"/tenant-discovery?returnUrl={Uri.EscapeDataString(authorizeUrl)}";
                     context.Response.Redirect(discoveryUrl);
                     logger.LogDebug(
-                        "Multiple session cookies found ({Count} tenants) — redirecting to tenant discovery with known tenants",
+                        "Multiple session cookies found ({Count} tenants) — redirecting to tenant discovery",
                         sessionTenants.Count);
                     return true;
                 }
