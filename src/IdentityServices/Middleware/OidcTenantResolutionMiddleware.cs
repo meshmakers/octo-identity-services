@@ -52,8 +52,6 @@ internal class OidcTenantResolutionMiddleware(
     private static readonly TimeSpan AuthCodeEntryLifetime = TimeSpan.FromMinutes(10);
     private static readonly TimeSpan RefreshTokenEntryLifetime = TimeSpan.FromDays(30);
 
-    private const string LastTenantCookieName = "octo_last_tenant";
-
     public async Task InvokeAsync(HttpContext context)
     {
         var path = context.Request.Path.Value;
@@ -144,27 +142,7 @@ internal class OidcTenantResolutionMiddleware(
             }
             else
             {
-                // No acr_values=tenant:X — redirect to tenant discovery page.
-                // Check for a last-used tenant cookie as a shortcut.
-                if (context.Request.Cookies.TryGetValue(LastTenantCookieName, out var lastTenant)
-                    && !string.IsNullOrEmpty(lastTenant))
-                {
-                    // Validate that the tenant still exists before using the cookie
-                    var sysCtxForCookie = context.RequestServices.GetRequiredService<ISystemContext>();
-                    var lastTenantRepo = await sysCtxForCookie.TryFindTenantRepositoryAsync(lastTenant);
-                    if (lastTenantRepo != null)
-                    {
-                        // Redirect back to authorize with acr_values appended
-                        var originalUrl = context.Request.GetEncodedUrl();
-                        var separator = originalUrl.Contains('?') ? "&" : "?";
-                        var redirectUrl = $"{originalUrl}{separator}acr_values={Uri.EscapeDataString($"tenant:{lastTenant}")}";
-                        context.Response.Redirect(redirectUrl);
-                        logger.LogDebug("Redirecting to authorize with last-used tenant '{TenantId}' from cookie", lastTenant);
-                        return true;
-                    }
-                }
-
-                // No cookie or invalid tenant — redirect to tenant discovery page
+                // No acr_values=tenant:X — redirect to tenant discovery page
                 var authorizeUrl = context.Request.GetEncodedUrl();
                 var discoveryUrl = $"/tenant-discovery?returnUrl={Uri.EscapeDataString(authorizeUrl)}";
                 context.Response.Redirect(discoveryUrl);
