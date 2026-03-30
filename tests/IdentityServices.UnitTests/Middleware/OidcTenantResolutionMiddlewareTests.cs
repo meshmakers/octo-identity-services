@@ -157,6 +157,64 @@ public class OidcTenantResolutionMiddlewareTests
         result.Should().BeNull();
     }
 
+    [Fact]
+    public void ExtractCodeFromFormPostBody_WithStandardFormPost_ReturnsCode()
+    {
+        var html = """
+            <html><body>
+            <form method='post' action='https://localhost:5001/signin-oidc'>
+                <input type='hidden' name='code' value='AUTH_CODE_123' />
+                <input type='hidden' name='state' value='some_state' />
+            </form>
+            </body></html>
+            """;
+        using var stream = new MemoryStream(System.Text.Encoding.UTF8.GetBytes(html));
+
+        var result = OidcTenantResolutionMiddleware.ExtractCodeFromFormPostBody(stream);
+
+        result.Should().Be("AUTH_CODE_123");
+    }
+
+    [Fact]
+    public void ExtractCodeFromFormPostBody_WithDoubleQuotes_ReturnsCode()
+    {
+        var html = """
+            <form method="post" action="https://localhost:5001/signin-oidc">
+                <input type="hidden" name="code" value="MY_CODE_456" />
+            </form>
+            """;
+        using var stream = new MemoryStream(System.Text.Encoding.UTF8.GetBytes(html));
+
+        var result = OidcTenantResolutionMiddleware.ExtractCodeFromFormPostBody(stream);
+
+        result.Should().Be("MY_CODE_456");
+    }
+
+    [Fact]
+    public void ExtractCodeFromFormPostBody_WithNoCodeField_ReturnsNull()
+    {
+        var html = """
+            <form method='post' action='https://localhost:5001/signin-oidc'>
+                <input type='hidden' name='state' value='some_state' />
+            </form>
+            """;
+        using var stream = new MemoryStream(System.Text.Encoding.UTF8.GetBytes(html));
+
+        var result = OidcTenantResolutionMiddleware.ExtractCodeFromFormPostBody(stream);
+
+        result.Should().BeNull();
+    }
+
+    [Fact]
+    public void ExtractCodeFromFormPostBody_WithEmptyBody_ReturnsNull()
+    {
+        using var stream = new MemoryStream();
+
+        var result = OidcTenantResolutionMiddleware.ExtractCodeFromFormPostBody(stream);
+
+        result.Should().BeNull();
+    }
+
     private static string Base64UrlEncode(string input)
     {
         var bytes = System.Text.Encoding.UTF8.GetBytes(input);

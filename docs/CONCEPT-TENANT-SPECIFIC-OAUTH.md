@@ -74,7 +74,7 @@ The issued access token contains tenant-specific claims:
 
 | Component | Responsibility |
 |-----------|---------------|
-| `OidcTenantResolutionMiddleware` | Parses `acr_values=tenant:{tenantId}` from the authorize request and sets the tenant context |
+| `OidcTenantResolutionMiddleware` | Parses `acr_values=tenant:{tenantId}` from the authorize request, sets the tenant context, and captures authorization codes from both 302 redirects and `form_post` HTML responses |
 | `TenantLoginRedirectMiddleware` | Rewrites the login redirect from `/System/login` to `/{tenantId}/login` |
 | `UserProfileService` | Adds `tenant_id` and `allowed_tenants` claims to the issued token |
 | `OctoUserStore` | Resolves user identity and roles from the correct tenant database |

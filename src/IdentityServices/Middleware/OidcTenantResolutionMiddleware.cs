@@ -2,6 +2,7 @@ using System.Collections.Concurrent;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
+using System.Text.RegularExpressions;
 using IdentityServerPersistence.SystemStores;
 using Microsoft.AspNetCore.Http.Extensions;
 using Microsoft.AspNetCore.WebUtilities;
@@ -43,14 +44,22 @@ internal class OidcTenantResolutionMiddleware(
 {
     /// <summary>
     /// Maps authorization codes and refresh tokens to tenant IDs. Authorization codes are captured
-    /// from <c>/connect/authorize</c> 302 responses; refresh tokens are captured from
-    /// <c>/connect/token</c> JSON responses. Used by <c>/connect/token</c> to set the correct
-    /// tenant context for user/client/resource lookups.
+    /// from <c>/connect/authorize</c> responses (both 302 redirects and form_post HTML bodies);
+    /// refresh tokens are captured from <c>/connect/token</c> JSON responses. Used by
+    /// <c>/connect/token</c> to set the correct tenant context for user/client/resource lookups.
     /// </summary>
     private static readonly ConcurrentDictionary<string, (string TenantId, DateTime Expiry)> TokenToTenantMap = new();
 
     private static readonly TimeSpan AuthCodeEntryLifetime = TimeSpan.FromMinutes(10);
     private static readonly TimeSpan RefreshTokenEntryLifetime = TimeSpan.FromDays(30);
+
+    /// <summary>
+    /// Matches the authorization code from an HTML form_post response body.
+    /// IdentityServer returns <c>&lt;input type='hidden' name='code' value='...' /&gt;</c>.
+    /// </summary>
+    private static readonly Regex FormPostCodePattern = new(
+        @"name=[""']code[""']\s+value=[""']([^""']+)[""']",
+        RegexOptions.IgnoreCase | RegexOptions.Compiled);
 
     public async Task InvokeAsync(HttpContext context)
     {
@@ -77,7 +86,14 @@ internal class OidcTenantResolutionMiddleware(
         var isDeviceAuthEndpoint = path != null &&
             path.StartsWith("/connect/deviceauthorization", StringComparison.OrdinalIgnoreCase);
 
-        var needsResponseCapture = resolvedTenantId != null && (isTokenEndpoint || isDeviceAuthEndpoint);
+        // For /connect/authorize with a resolved tenant, wrap the response body to capture
+        // the authorization code from both 302 redirects (response_mode=query) and
+        // 200 HTML responses (response_mode=form_post).
+        var isAuthorizeEndpoint = path != null &&
+            path.StartsWith("/connect/authorize", StringComparison.OrdinalIgnoreCase);
+
+        var needsResponseCapture = resolvedTenantId != null &&
+            (isTokenEndpoint || isDeviceAuthEndpoint || isAuthorizeEndpoint);
 
         if (needsResponseCapture)
         {
@@ -88,7 +104,13 @@ internal class OidcTenantResolutionMiddleware(
             await next(context);
 
             memoryStream.Position = 0;
-            if (context.Response.StatusCode == StatusCodes.Status200OK)
+
+            if (isAuthorizeEndpoint)
+            {
+                CaptureAuthorizationCode(context, memoryStream, resolvedTenantId!);
+                memoryStream.Position = 0;
+            }
+            else if (context.Response.StatusCode == StatusCodes.Status200OK)
             {
                 if (isTokenEndpoint)
                 {
@@ -133,12 +155,8 @@ internal class OidcTenantResolutionMiddleware(
 
             if (!string.IsNullOrEmpty(tenantId))
             {
-                var capturedTenantId = tenantId;
-                context.Response.OnStarting(() =>
-                {
-                    CaptureAuthorizationCode(context, capturedTenantId);
-                    return Task.CompletedTask;
-                });
+                // Authorization code capture is handled in InvokeAsync via response body interception,
+                // which supports both 302 redirects (response_mode=query) and 200 HTML responses (response_mode=form_post).
             }
             else
             {
@@ -225,25 +243,33 @@ internal class OidcTenantResolutionMiddleware(
     }
 
     /// <summary>
-    /// Captures the authorization code from a 302 redirect response and maps it to the tenant ID.
-    /// Called via <see cref="HttpResponse.OnStarting"/> after IdentityServer has set the Location header.
+    /// Captures the authorization code from the authorize response and maps it to the tenant ID.
+    /// Supports both 302 redirects (<c>response_mode=query</c>, code in Location header) and
+    /// 200 HTML responses (<c>response_mode=form_post</c>, code in hidden form field).
     /// </summary>
-    private void CaptureAuthorizationCode(HttpContext context, string tenantId)
+    private void CaptureAuthorizationCode(HttpContext context, MemoryStream responseBody, string tenantId)
     {
-        if (context.Response.StatusCode != StatusCodes.Status302Found)
+        string? code = null;
+
+        if (context.Response.StatusCode == StatusCodes.Status302Found)
         {
-            return;
+            var location = context.Response.Headers.Location.ToString();
+            code = ExtractCodeFromRedirectUri(location);
+        }
+        else if (context.Response.StatusCode == StatusCodes.Status200OK)
+        {
+            code = ExtractCodeFromFormPostBody(responseBody);
         }
 
-        var location = context.Response.Headers.Location.ToString();
-        var code = ExtractCodeFromRedirectUri(location);
         if (code == null)
         {
             return;
         }
 
         TokenToTenantMap[code] = (tenantId, DateTime.UtcNow.Add(AuthCodeEntryLifetime));
-        logger.LogDebug("Captured authorization code → tenant '{TenantId}' mapping", tenantId);
+        logger.LogDebug(
+            "Captured authorization code → tenant '{TenantId}' mapping (response status {StatusCode})",
+            tenantId, context.Response.StatusCode);
 
         CleanupExpiredEntries();
     }
@@ -408,6 +434,25 @@ internal class OidcTenantResolutionMiddleware(
         }
 
         return null;
+    }
+
+    /// <summary>
+    /// Extracts the <c>code</c> value from an OAuth2 <c>response_mode=form_post</c> HTML response body.
+    /// IdentityServer returns an HTML page with a self-submitting form containing hidden fields
+    /// such as <c>&lt;input type='hidden' name='code' value='...' /&gt;</c>.
+    /// </summary>
+    internal static string? ExtractCodeFromFormPostBody(MemoryStream responseBody)
+    {
+        try
+        {
+            var html = Encoding.UTF8.GetString(responseBody.ToArray());
+            var match = FormPostCodePattern.Match(html);
+            return match.Success ? match.Groups[1].Value : null;
+        }
+        catch
+        {
+            return null;
+        }
     }
 
     /// <summary>
