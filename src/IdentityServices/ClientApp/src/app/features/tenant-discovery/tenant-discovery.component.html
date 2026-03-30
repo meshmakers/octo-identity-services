@@ -44,7 +44,9 @@
     <!-- Step 2: Tenant Selection -->
     <ng-container *ngIf="!loading && step === 'select'">
       <div class="lcars-discovery-intro">
-        Multiple organizations found for <strong>{{ emailOrUsername }}</strong>.
+        @if (emailOrUsername) {
+          Multiple organizations found for <strong>{{ emailOrUsername }}</strong>.
+        }
         Please select your organization:
       </div>
 
@@ -70,12 +72,14 @@
           (click)="onSelectTenant()">
           Continue
         </button>
-        <button
-          type="button"
-          class="lcars-button-secondary"
-          (click)="onBack()">
-          Back
-        </button>
+        @if (!fromSessionCookies) {
+          <button
+            type="button"
+            class="lcars-button-secondary"
+            (click)="onBack()">
+            Back
+          </button>
+        }
       </div>
     </ng-container>
 
