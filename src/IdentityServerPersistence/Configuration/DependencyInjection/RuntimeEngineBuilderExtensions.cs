@@ -49,6 +49,7 @@ public static class RuntimeEngineBuilderExtensions
         builder.Services.AddScoped<IGroupStore, GroupStore>();
         builder.Services.AddScoped<IGroupRoleResolver, GroupRoleResolver>();
         builder.Services.AddScoped<ICrossTenantAuthenticationService, CrossTenantAuthenticationService>();
+        builder.Services.AddScoped<ICrossTenantUserProvisioningService, CrossTenantUserProvisioningService>();
         builder.Services.AddScoped<IAllowedTenantsResolver, AllowedTenantsResolver>();
         builder.Services.AddScoped<IEmailDomainGroupRuleStore, EmailDomainGroupRuleStore>();
         builder.Services.AddScoped<ILoginGroupAssignmentService, LoginGroupAssignmentService>();

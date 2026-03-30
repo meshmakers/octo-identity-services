@@ -11,7 +11,6 @@ using Meshmakers.Octo.Backend.Authentication.Services;
 using Meshmakers.Octo.Backend.IdentityServices.Controllers.Api;
 using Meshmakers.Octo.Runtime.Contracts.MongoDb.Configuration;
 using Meshmakers.Octo.ConstructionKit.Contracts;
-using Meshmakers.Octo.Services.Infrastructure.Services;
 using Microsoft.AspNetCore.DataProtection;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Identity;
@@ -34,6 +33,7 @@ public class CrossTenantLoginTests
     private readonly UserManager<RtUser> _userManager;
     private readonly IEventService _events;
     private readonly IExternalTenantUserMappingStore _externalTenantUserMappingStore;
+    private readonly ICrossTenantUserProvisioningService _crossTenantUserProvisioningService;
     private readonly AuthApiController _sut;
 
     public CrossTenantLoginTests()
@@ -74,7 +74,7 @@ public class CrossTenantLoginTests
             Substitute.For<Microsoft.AspNetCore.Authentication.IAuthenticationSchemeProvider>(),
             Substitute.For<IUserConfirmation<RtUser>>());
 
-        var multiTenancyResolver = Substitute.For<IMultiTenancyResolverService>();
+        _crossTenantUserProvisioningService = Substitute.For<ICrossTenantUserProvisioningService>();
 
         _sut = new AuthApiController(
             _interaction,
@@ -90,7 +90,7 @@ public class CrossTenantLoginTests
             identityProviderStore,
             loginGroupAssignmentService,
             _dataProtectionProvider,
-            multiTenancyResolver,
+            _crossTenantUserProvisioningService,
             Options.Create(new OctoSystemConfiguration { SystemTenantId = "OctoSystem" }),
             logger);
     }
@@ -213,10 +213,9 @@ public class CrossTenantLoginTests
             RtId = new OctoObjectId(Guid.NewGuid().ToString("N")),
             UserName = "xt_OctoSystem_admin"
         };
-        _userManager.FindByNameAsync("xt_OctoSystem_admin")
+        _crossTenantUserProvisioningService.FindOrCreateCrossTenantUserAsync(
+                Arg.Any<CrossTenantAuthResult>(), Arg.Any<string>())
             .Returns(localUser);
-        _userManager.UpdateAsync(Arg.Any<RtUser>())
-            .Returns(IdentityResult.Success);
 
         _interaction.IsValidReturnUrl(Arg.Any<string>()).Returns(false);
 
@@ -333,10 +332,9 @@ public class CrossTenantLoginTests
             RtId = new OctoObjectId(Guid.NewGuid().ToString("N")),
             UserName = "xt_OctoSystem_admin"
         };
-        _userManager.FindByNameAsync("xt_OctoSystem_admin")
+        _crossTenantUserProvisioningService.FindOrCreateCrossTenantUserAsync(
+                Arg.Any<CrossTenantAuthResult>(), Arg.Any<string>())
             .Returns(localUser);
-        _userManager.UpdateAsync(Arg.Any<RtUser>())
-            .Returns(IdentityResult.Success);
 
         var returnUrl = "/meshtest/connect/authorize?client_id=test";
         _interaction.IsValidReturnUrl(returnUrl).Returns(true);
