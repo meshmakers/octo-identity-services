@@ -142,10 +142,45 @@ internal class OidcTenantResolutionMiddleware(
             }
             else
             {
-                // No acr_values=tenant:X — redirect to tenant discovery page
+                // No acr_values=tenant:X — check for existing session cookies before
+                // redirecting to tenant discovery page
                 var authorizeUrl = context.Request.GetEncodedUrl();
-                var discoveryUrl = $"/tenant-discovery?returnUrl={Uri.EscapeDataString(authorizeUrl)}";
-                context.Response.Redirect(discoveryUrl);
+                var sessionTenants = FindTenantIdsFromSessionCookies(context);
+
+                if (sessionTenants.Count == 1)
+                {
+                    // Single active session — redirect directly with acr_values, skip discovery
+                    var singleTenant = sessionTenants[0];
+                    var url = new Uri(authorizeUrl, UriKind.Absolute);
+                    var query = QueryHelpers.ParseQuery(url.Query);
+                    query["acr_values"] = $"tenant:{singleTenant}";
+                    var newUrl = QueryHelpers.AddQueryString(
+                        url.GetLeftPart(UriPartial.Path),
+                        query.ToDictionary(k => k.Key, v => (string?)v.Value.ToString()));
+                    context.Response.Redirect(newUrl);
+                    logger.LogDebug(
+                        "Single session cookie found for tenant '{TenantId}' — redirecting with acr_values",
+                        singleTenant);
+                    return true;
+                }
+
+                if (sessionTenants.Count > 1)
+                {
+                    // Multiple active sessions — redirect to tenant discovery with pre-resolved tenants
+                    var knownTenants = string.Join(",", sessionTenants);
+                    var discoveryUrl =
+                        $"/tenant-discovery?returnUrl={Uri.EscapeDataString(authorizeUrl)}&knownTenants={Uri.EscapeDataString(knownTenants)}";
+                    context.Response.Redirect(discoveryUrl);
+                    logger.LogDebug(
+                        "Multiple session cookies found ({Count} tenants) — redirecting to tenant discovery with known tenants",
+                        sessionTenants.Count);
+                    return true;
+                }
+
+                // No active sessions — redirect to tenant discovery page (email input)
+                var fallbackDiscoveryUrl =
+                    $"/tenant-discovery?returnUrl={Uri.EscapeDataString(authorizeUrl)}";
+                context.Response.Redirect(fallbackDiscoveryUrl);
                 logger.LogDebug("No acr_values on /connect/authorize — redirecting to tenant discovery");
                 return true;
             }
@@ -373,6 +408,46 @@ internal class OidcTenantResolutionMiddleware(
         }
 
         return null;
+    }
+
+    /// <summary>
+    /// Scans request cookies for tenant-scoped identity session cookies
+    /// (<c>.AspNetCore.Identity.Application.{tenantId}</c>) to detect existing sessions.
+    /// Returns the list of tenant IDs that have active session cookies.
+    /// </summary>
+    private static List<string> FindTenantIdsFromSessionCookies(HttpContext context)
+    {
+        const string cookiePrefix = ".AspNetCore.Identity.Application.";
+        var tenantIds = new List<string>();
+
+        foreach (var cookieName in context.Request.Cookies.Keys)
+        {
+            if (!cookieName.StartsWith(cookiePrefix, StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            var suffix = cookieName[cookiePrefix.Length..];
+
+            // Skip chunked cookie segments (e.g., ".AspNetCore.Identity.Application.tenantC1")
+            // Real tenant IDs don't end with C followed by digits
+            if (suffix.Length > 1 && suffix[^1] is >= '0' and <= '9' && suffix[^2..^1] == "C")
+            {
+                // Might be a chunk — extract tenant without the chunk suffix
+                var chunkIndex = suffix.LastIndexOf('C');
+                if (chunkIndex > 0 && suffix[(chunkIndex + 1)..].All(char.IsDigit))
+                {
+                    suffix = suffix[..chunkIndex];
+                }
+            }
+
+            if (!string.IsNullOrEmpty(suffix) && !tenantIds.Contains(suffix, StringComparer.OrdinalIgnoreCase))
+            {
+                tenantIds.Add(suffix);
+            }
+        }
+
+        return tenantIds;
     }
 
     private static void CleanupExpiredEntries()

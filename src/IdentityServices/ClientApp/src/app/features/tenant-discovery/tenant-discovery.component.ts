@@ -36,6 +36,7 @@ export class TenantDiscoveryComponent implements OnInit {
   // Form data
   emailOrUsername = '';
   selectedTenant = '';
+  fromSessionCookies = false;
 
   // Results
   discoveredTenants: string[] = [];
@@ -45,6 +46,27 @@ export class TenantDiscoveryComponent implements OnInit {
 
   ngOnInit(): void {
     this.returnUrl = this.route.snapshot.queryParams['returnUrl'] || '';
+
+    // Check if tenants were pre-resolved from existing session cookies
+    const knownTenants = this.route.snapshot.queryParams['knownTenants'];
+    if (knownTenants && this.returnUrl) {
+      const tenants = knownTenants.split(',').filter((t: string) => t.trim());
+
+      if (tenants.length === 1) {
+        // Single known tenant — redirect immediately
+        this.redirectWithTenant(tenants[0]);
+        return;
+      }
+
+      if (tenants.length > 1) {
+        // Multiple known tenants — skip email input, go directly to selection
+        this.discoveredTenants = tenants;
+        this.selectedTenant = tenants[0];
+        this.fromSessionCookies = true;
+        this.step = 'select';
+        return;
+      }
+    }
   }
 
   onLookup(): void {
