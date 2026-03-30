@@ -105,11 +105,6 @@ export class TenantDiscoveryComponent implements OnInit {
   }
 
   private redirectWithTenant(tenantId: string): void {
-    // Set cookie for future shortcut (expires in 30 days)
-    const expires = new Date();
-    expires.setDate(expires.getDate() + 30);
-    document.cookie = `octo_last_tenant=${encodeURIComponent(tenantId)};path=/;expires=${expires.toUTCString()};SameSite=Lax`;
-
     // Append acr_values=tenant:{tenantId} to the original authorize URL
     try {
       const url = new URL(this.returnUrl, window.location.origin);
