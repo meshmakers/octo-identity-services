@@ -2,8 +2,12 @@ using Duende.IdentityServer.Events;
 using Duende.IdentityServer.Extensions;
 using Duende.IdentityServer.Models;
 using Duende.IdentityServer.Services;
+using IdentityServerPersistence.Services;
+using IdentityServerPersistence.SystemStores;
 using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Mvc;
+using Persistence.IdentityCkModel.Generated.System.Identity.v2;
 
 namespace Meshmakers.Octo.Backend.IdentityServices.Controllers.Api;
 
@@ -13,18 +17,17 @@ namespace Meshmakers.Octo.Backend.IdentityServices.Controllers.Api;
 [ApiController]
 [Route("{tenantId}/api/device")]
 [Authorize]
-public class DeviceApiController : ControllerBase
+public class DeviceApiController(
+    IDeviceFlowInteractionService deviceInteraction,
+    IEventService events,
+    ICrossTenantAuthenticationService crossTenantAuthService,
+    ICrossTenantUserProvisioningService crossTenantUserProvisioningService,
+    IOctoIdentityProviderStore identityProviderStore,
+    UserManager<RtUser> userManager,
+    SignInManager<RtUser> signInManager,
+    ILogger<DeviceApiController> logger)
+    : ControllerBase
 {
-    private readonly IDeviceFlowInteractionService _deviceInteraction;
-    private readonly IEventService _events;
-
-    public DeviceApiController(
-        IDeviceFlowInteractionService deviceInteraction,
-        IEventService events)
-    {
-        _deviceInteraction = deviceInteraction;
-        _events = events;
-    }
 
     /// <summary>
     /// Get device authorization context
@@ -37,7 +40,7 @@ public class DeviceApiController : ControllerBase
             return BadRequest("User code is required");
         }
 
-        var request = await _deviceInteraction.GetAuthorizationContextAsync(userCode);
+        var request = await deviceInteraction.GetAuthorizationContextAsync(userCode);
         if (request == null)
         {
             return NotFound("Invalid or expired device code");
@@ -98,7 +101,7 @@ public class DeviceApiController : ControllerBase
     [HttpPost("authorize")]
     public async Task<ActionResult<DeviceAuthorizationResultDto>> Authorize([FromBody] DeviceAuthorizationRequestDto request)
     {
-        var context = await _deviceInteraction.GetAuthorizationContextAsync(request.UserCode);
+        var context = await deviceInteraction.GetAuthorizationContextAsync(request.UserCode);
         if (context == null)
         {
             return new DeviceAuthorizationResultDto
@@ -108,6 +111,75 @@ public class DeviceApiController : ControllerBase
             };
         }
 
+        // Check if the authenticated user exists in the current tenant (cross-tenant scenario).
+        // The user's session cookie is from a parent tenant (e.g. octosystem), authenticated
+        // via the device confirmation page. The cookie subject points to a user that only exists
+        // in the parent tenant's database. We need to provision a local shadow user in the child
+        // tenant before approving the device code, otherwise the DeviceCodeValidator will fail
+        // with invalid_grant when it can't find the user.
+        var routeTenantId = RouteData.Values["tenantId"]?.ToString() ?? "System";
+        var subjectId = User.GetSubjectId();
+        var existingUser = await userManager.FindByIdAsync(subjectId);
+
+        if (existingUser == null)
+        {
+            // User doesn't exist in the current tenant — this is a cross-tenant scenario.
+            // Try to find the user's home tenant by walking up the tenant hierarchy.
+            logger.LogInformation(
+                "Device authorization: user '{SubjectId}' not found in tenant '{TenantId}', attempting cross-tenant provisioning",
+                subjectId, routeTenantId);
+
+            // Find which tenant the user actually belongs to by checking OctoTenantIdentityProviders
+            var identityProviders = (await identityProviderStore.GetAllAsync())
+                .OfType<RtOctoTenantIdentityProvider>()
+                .Where(p => p.IsEnabled)
+                .ToList();
+
+            CrossTenantAuthResult? crossTenantResult = null;
+            foreach (var provider in identityProviders)
+            {
+                crossTenantResult = await crossTenantAuthService.ValidateCrossTenantAccessAsync(
+                    routeTenantId, provider.ParentTenantId!, subjectId);
+                if (crossTenantResult != null)
+                {
+                    break;
+                }
+            }
+
+            if (crossTenantResult == null)
+            {
+                logger.LogWarning(
+                    "Cross-tenant access denied for device authorization: user '{SubjectId}' in tenant '{RouteTenant}'",
+                    subjectId, routeTenantId);
+
+                return new DeviceAuthorizationResultDto
+                {
+                    Success = false,
+                    ErrorMessage = "Cross-tenant access denied"
+                };
+            }
+
+            var localUser = await crossTenantUserProvisioningService.FindOrCreateCrossTenantUserAsync(
+                crossTenantResult, routeTenantId);
+
+            if (localUser == null)
+            {
+                return new DeviceAuthorizationResultDto
+                {
+                    Success = false,
+                    ErrorMessage = "Failed to create local user in target tenant"
+                };
+            }
+
+            // Re-sign-in as the local shadow user so the device code grant is associated
+            // with a user that exists in the target tenant's database.
+            await signInManager.SignInAsync(localUser, isPersistent: false);
+
+            logger.LogInformation(
+                "Cross-tenant device authorization: provisioned user '{UserName}' in tenant '{TenantId}'",
+                localUser.UserName, routeTenantId);
+        }
+
         var grantedConsent = new ConsentResponse
         {
             RememberConsent = request.RememberConsent,
@@ -115,9 +187,9 @@ public class DeviceApiController : ControllerBase
             Description = request.Description
         };
 
-        await _deviceInteraction.HandleRequestAsync(request.UserCode, grantedConsent);
+        await deviceInteraction.HandleRequestAsync(request.UserCode, grantedConsent);
 
-        await _events.RaiseAsync(new ConsentGrantedEvent(
+        await events.RaiseAsync(new ConsentGrantedEvent(
             User.GetSubjectId(),
             context.Client?.ClientId ?? "unknown",
             context.ValidatedResources.RawScopeValues,
@@ -136,7 +208,7 @@ public class DeviceApiController : ControllerBase
     [HttpPost("deny")]
     public async Task<ActionResult<DeviceAuthorizationResultDto>> Deny([FromBody] DeviceDenyRequestDto request)
     {
-        var context = await _deviceInteraction.GetAuthorizationContextAsync(request.UserCode);
+        var context = await deviceInteraction.GetAuthorizationContextAsync(request.UserCode);
         if (context == null)
         {
             return new DeviceAuthorizationResultDto
@@ -146,11 +218,11 @@ public class DeviceApiController : ControllerBase
             };
         }
 
-        await _deviceInteraction.HandleRequestAsync(
+        await deviceInteraction.HandleRequestAsync(
             request.UserCode,
             new ConsentResponse { Error = AuthorizationError.AccessDenied });
 
-        await _events.RaiseAsync(new ConsentDeniedEvent(
+        await events.RaiseAsync(new ConsentDeniedEvent(
             User.GetSubjectId(),
             context.Client?.ClientId ?? "unknown",
             context.ValidatedResources.RawScopeValues));
