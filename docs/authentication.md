@@ -645,11 +645,11 @@ OIDC endpoints (`/connect/*`) don't include a `{tenantId}` route segment. The `O
 
 | Endpoint | Tenant Source |
 |----------|--------------|
-| `/connect/authorize` | `acr_values=tenant:{tenantId}` from query string; also captures `code` → tenant mapping from 302 response |
+| `/connect/authorize` | `acr_values=tenant:{tenantId}` from query string; captures `code` → tenant mapping from both 302 redirects (`response_mode=query`) and 200 HTML responses (`response_mode=form_post`) |
 | `/connect/token` | Authorization code → tenant mapping (captured during authorize); sets tenant context for user/client lookups |
 | `/connect/endsession` | `id_token_hint` JWT payload → `tenant_id` claim; fallback to `acr_values` |
 
-**Authorization code → tenant mapping:** During `/connect/authorize`, the middleware registers an `OnStarting` callback that captures the authorization code from the 302 redirect `Location` header and maps it to the resolved tenant ID in an in-memory `ConcurrentDictionary`. When `/connect/token` is called with `grant_type=authorization_code`, the middleware reads the `code` from the form body, looks up the tenant from the mapping, and sets the correct tenant context. This ensures `OctoUserStore`, `ClientStore`, and other per-tenant stores use the correct tenant database during the token exchange. The mapping entries expire after 10 minutes and are cleaned up opportunistically.
+**Authorization code → tenant mapping:** During `/connect/authorize`, the middleware wraps the response body to capture the authorization code and maps it to the resolved tenant ID in an in-memory `ConcurrentDictionary`. This supports both `response_mode=query` (code extracted from the 302 redirect `Location` header) and `response_mode=form_post` (code extracted from the hidden `<input name='code'>` field in the 200 HTML response). The `form_post` mode is used by server-side OIDC clients such as the Asset Repository Services' GraphQL Playground. When `/connect/token` is called with `grant_type=authorization_code`, the middleware reads the `code` from the form body, looks up the tenant from the mapping, and sets the correct tenant context. This ensures `OctoUserStore`, `ClientStore`, and other per-tenant stores use the correct tenant database during the token exchange. The mapping entries expire after 10 minutes and are cleaned up opportunistically.
 
 **Refresh token → tenant mapping:** When `/connect/token` returns a successful response containing a `refresh_token`, the middleware captures the token and maps it to the current tenant ID in the in-memory cache (entries expire after 30 days). On subsequent refresh token exchanges, the middleware looks up the tenant from this mapping.
 

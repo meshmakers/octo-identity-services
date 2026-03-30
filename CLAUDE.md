@@ -185,7 +185,7 @@ Storing grants centrally ensures the authorization code created during authorize
 The `/connect/token` endpoint has no `{tenantId}` route segment or `acr_values` parameter. To ensure `OctoUserStore`, `ClientStore`, and other per-tenant stores use the correct tenant database, `OidcTenantResolutionMiddleware` resolves tenant via a two-tier strategy:
 
 **Authorization codes:**
-1. During `/connect/authorize`, an `OnStarting` callback captures the authorization code from the 302 redirect and maps it to the tenant in an in-memory `ConcurrentDictionary` (10-minute expiry)
+1. During `/connect/authorize`, the middleware wraps the response body and captures the authorization code, mapping it to the tenant in an in-memory `ConcurrentDictionary` (10-minute expiry). Supports both `response_mode=query` (code from 302 Location header) and `response_mode=form_post` (code from hidden form field in 200 HTML response, used by server-side OIDC clients like the Asset Repository Services' GraphQL Playground)
 2. During `/connect/token` with `grant_type=authorization_code`, the middleware reads `code` from the form body and looks up the tenant
 
 **Refresh tokens (two-tier: in-memory + persistent):**
