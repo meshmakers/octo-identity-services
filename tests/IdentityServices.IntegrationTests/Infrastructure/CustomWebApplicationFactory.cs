@@ -429,6 +429,13 @@ internal class TestDistributionEventHubService : IDistributionEventHubService
         // No-op for tests
         return Task.CompletedTask;
     }
+
+    public Task<Task> SendToExchangeAsync<T>(string exchangeName, string routingKey, T message,
+        CancellationToken? cancellationToken = null) where T : class
+    {
+        // No-op for tests
+        return Task.FromResult(Task.CompletedTask);
+    }
 }
 
 /// <summary>
@@ -448,6 +455,10 @@ internal class TestEventHubControl : IEventHubControl
 
     public EndpointHandle RegisterRoutedEventConsumer<TMessage>(Func<TMessage, Task> handler)
         where TMessage : class =>
+        throw new NotSupportedException("Not available in tests");
+
+    public EndpointHandle RegisterRoutedEventConsumer<TMessage>(string exchangeName, string routingKey,
+        Func<TMessage, Task> handler) where TMessage : class =>
         throw new NotSupportedException("Not available in tests");
 
     public EndpointHandle RegisterCommandConsumer<TMessage>(string commandName, ExecuteCommandHandler<TMessage> handler)
