@@ -1,14 +1,12 @@
 using System.Collections.Concurrent;
-using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
-using IdentityServerPersistence.SystemStores;
-using Microsoft.AspNetCore.Http.Extensions;
-using Microsoft.AspNetCore.WebUtilities;
 using Meshmakers.Octo.Runtime.Contracts.MongoDb;
 using Meshmakers.Octo.Runtime.Contracts.MongoDb.Configuration;
 using Meshmakers.Octo.Services.Infrastructure;
+using Microsoft.AspNetCore.Http.Extensions;
+using Microsoft.AspNetCore.WebUtilities;
 using Microsoft.Extensions.Options;
 
 namespace Meshmakers.Octo.Backend.IdentityServices.Middleware;
@@ -320,26 +318,31 @@ internal class OidcTenantResolutionMiddleware(
             else if (string.Equals(grantType, "refresh_token", StringComparison.Ordinal))
             {
                 var refreshToken = form["refresh_token"].FirstOrDefault();
-                if (refreshToken != null && TokenToTenantMap.TryGetValue(refreshToken, out var entry))
+
+                // Prefer acr_values from the client — the SPA knows which tenant it's in
+                // and sends acr_values=tenant:{tenantId} with every refresh token request.
+                // This takes priority over the in-memory cache, which may be stale or
+                // polluted from a previous request that fell back to the system tenant.
+                var acrTenantId = ParseTenantFromAcrValues(form["acr_values"].ToString());
+                if (!string.IsNullOrEmpty(acrTenantId))
                 {
-                    logger.LogDebug("Resolved tenant '{TenantId}' from refresh token for /connect/token",
-                        entry.TenantId);
-                    return entry.TenantId;
+                    if (refreshToken != null)
+                    {
+                        TokenToTenantMap[refreshToken] = (acrTenantId, DateTime.UtcNow.Add(RefreshTokenEntryLifetime));
+                    }
+
+                    logger.LogDebug(
+                        "Resolved tenant '{TenantId}' from acr_values for refresh_token on /connect/token",
+                        acrTenantId);
+                    return acrTenantId;
                 }
 
-                // Fallback: look up the tenant from the persistent grant store (survives service restarts)
-                if (refreshToken != null)
+                // Fallback: in-memory cache (for clients that don't send acr_values)
+                if (refreshToken != null && TokenToTenantMap.TryGetValue(refreshToken, out var entry))
                 {
-                    var tenantId = await ResolveTenantFromPersistedGrantAsync(context, refreshToken);
-                    if (tenantId != null)
-                    {
-                        // Re-populate the in-memory cache for subsequent requests
-                        TokenToTenantMap[refreshToken] = (tenantId, DateTime.UtcNow.Add(RefreshTokenEntryLifetime));
-                        logger.LogDebug(
-                            "Resolved tenant '{TenantId}' from persistent grant store for /connect/token (recovered after restart)",
-                            tenantId);
-                        return tenantId;
-                    }
+                    logger.LogDebug("Resolved tenant '{TenantId}' from refresh token cache for /connect/token",
+                        entry.TenantId);
+                    return entry.TenantId;
                 }
 
                 logger.LogDebug(
@@ -352,32 +355,6 @@ internal class OidcTenantResolutionMiddleware(
         }
 
         return null;
-    }
-
-    /// <summary>
-    /// Resolves the tenant ID from the persistent grant store by hashing the refresh token
-    /// to obtain the grant key and reading the Description field. This is the fallback path
-    /// used when the in-memory mapping is lost (e.g., after a service restart).
-    /// </summary>
-    private async Task<string?> ResolveTenantFromPersistedGrantAsync(HttpContext context, string refreshToken)
-    {
-        try
-        {
-            var grantStore = context.RequestServices.GetService<IOctoPersistentGrantStore>();
-            if (grantStore == null)
-            {
-                return null;
-            }
-
-            // Duende IdentityServer stores grant keys as SHA256 hex hashes of the token handle
-            var grantKey = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(refreshToken)));
-            return await grantStore.GetTenantByGrantKeyAsync(grantKey);
-        }
-        catch (Exception ex)
-        {
-            logger.LogWarning(ex, "Failed to resolve tenant from persistent grant store");
-            return null;
-        }
     }
 
     /// <summary>
