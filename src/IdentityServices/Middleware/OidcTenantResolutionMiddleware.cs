@@ -318,16 +318,11 @@ internal class OidcTenantResolutionMiddleware(
             else if (string.Equals(grantType, "refresh_token", StringComparison.Ordinal))
             {
                 var refreshToken = form["refresh_token"].FirstOrDefault();
-                if (refreshToken != null && TokenToTenantMap.TryGetValue(refreshToken, out var entry))
-                {
-                    logger.LogDebug("Resolved tenant '{TenantId}' from refresh token for /connect/token",
-                        entry.TenantId);
-                    return entry.TenantId;
-                }
 
-                // Fallback: read acr_values=tenant:{tenantId} from the form body.
-                // The SPA sends this with every refresh token request so the Identity Server
-                // can resolve the correct tenant even when the in-memory cache is lost.
+                // Prefer acr_values from the client — the SPA knows which tenant it's in
+                // and sends acr_values=tenant:{tenantId} with every refresh token request.
+                // This takes priority over the in-memory cache, which may be stale or
+                // polluted from a previous request that fell back to the system tenant.
                 var acrTenantId = ParseTenantFromAcrValues(form["acr_values"].ToString());
                 if (!string.IsNullOrEmpty(acrTenantId))
                 {
@@ -340,6 +335,14 @@ internal class OidcTenantResolutionMiddleware(
                         "Resolved tenant '{TenantId}' from acr_values for refresh_token on /connect/token",
                         acrTenantId);
                     return acrTenantId;
+                }
+
+                // Fallback: in-memory cache (for clients that don't send acr_values)
+                if (refreshToken != null && TokenToTenantMap.TryGetValue(refreshToken, out var entry))
+                {
+                    logger.LogDebug("Resolved tenant '{TenantId}' from refresh token cache for /connect/token",
+                        entry.TenantId);
+                    return entry.TenantId;
                 }
 
                 logger.LogDebug(
