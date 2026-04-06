@@ -1,15 +1,16 @@
 using System.Collections.Concurrent;
-using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
-using IdentityServerPersistence.SystemStores;
-using Microsoft.AspNetCore.Http.Extensions;
-using Microsoft.AspNetCore.WebUtilities;
 using Meshmakers.Octo.Runtime.Contracts.MongoDb;
 using Meshmakers.Octo.Runtime.Contracts.MongoDb.Configuration;
+using Meshmakers.Octo.Runtime.Contracts.Repositories;
+using Meshmakers.Octo.Runtime.Contracts.Repositories.Query;
 using Meshmakers.Octo.Services.Infrastructure;
+using Microsoft.AspNetCore.Http.Extensions;
+using Microsoft.AspNetCore.WebUtilities;
 using Microsoft.Extensions.Options;
+using Persistence.IdentityCkModel.Generated.System.Identity.v2;
 
 namespace Meshmakers.Octo.Backend.IdentityServices.Middleware;
 
@@ -327,18 +328,68 @@ internal class OidcTenantResolutionMiddleware(
                     return entry.TenantId;
                 }
 
-                // Fallback: look up the tenant from the persistent grant store (survives service restarts)
-                if (refreshToken != null)
+                // Fallback: resolve tenant from session cookies (survives service restarts).
+                // The browser sends tenant-scoped session cookies with the token request,
+                // which allows us to determine the correct tenant without an in-memory cache.
+                var sessionTenants = FindTenantIdsFromSessionCookies(context);
+                if (sessionTenants.Count == 1)
                 {
-                    var tenantId = await ResolveTenantFromPersistedGrantAsync(context, refreshToken);
-                    if (tenantId != null)
+                    var tenantId = sessionTenants[0];
+                    if (refreshToken != null)
                     {
-                        // Re-populate the in-memory cache for subsequent requests
                         TokenToTenantMap[refreshToken] = (tenantId, DateTime.UtcNow.Add(RefreshTokenEntryLifetime));
-                        logger.LogDebug(
-                            "Resolved tenant '{TenantId}' from persistent grant store for /connect/token (recovered after restart)",
-                            tenantId);
-                        return tenantId;
+                    }
+
+                    logger.LogDebug(
+                        "Resolved tenant '{TenantId}' from session cookie for /connect/token (recovered after restart)",
+                        tenantId);
+                    return tenantId;
+                }
+
+                if (sessionTenants.Count > 1)
+                {
+                    // Multiple active sessions — try to find the grant in each tenant's database
+                    var sysCtx = context.RequestServices.GetRequiredService<ISystemContext>();
+                    foreach (var candidateTenantId in sessionTenants)
+                    {
+                        var tenantRepo = await sysCtx.TryFindTenantRepositoryAsync(candidateTenantId);
+                        if (tenantRepo == null)
+                        {
+                            continue;
+                        }
+
+                        // Check if this tenant's database contains a refresh_token grant
+                        // for the current session (identified by the idsrv.session cookie)
+                        var sessionId = context.Request.Cookies["idsrv.session"];
+                        if (string.IsNullOrEmpty(sessionId))
+                        {
+                            continue;
+                        }
+
+                        var session = await tenantRepo.GetSessionAsync();
+                        session.StartTransaction();
+
+                        var queryOptions = RtEntityQueryOptions.Create()
+                            .FieldFilter("SessionId", FieldFilterOperator.Equals, sessionId)
+                            .FieldFilter("GrantType", FieldFilterOperator.Equals, "refresh_token");
+
+                        var result =
+                            await tenantRepo.GetRtEntitiesByTypeAsync<RtPersistedGrant>(session, queryOptions);
+                        await session.CommitTransactionAsync();
+
+                        if (result.Items.Any())
+                        {
+                            if (refreshToken != null)
+                            {
+                                TokenToTenantMap[refreshToken] =
+                                    (candidateTenantId, DateTime.UtcNow.Add(RefreshTokenEntryLifetime));
+                            }
+
+                            logger.LogDebug(
+                                "Resolved tenant '{TenantId}' by searching tenant databases for /connect/token (recovered after restart)",
+                                candidateTenantId);
+                            return candidateTenantId;
+                        }
                     }
                 }
 
@@ -352,32 +403,6 @@ internal class OidcTenantResolutionMiddleware(
         }
 
         return null;
-    }
-
-    /// <summary>
-    /// Resolves the tenant ID from the persistent grant store by hashing the refresh token
-    /// to obtain the grant key and reading the Description field. This is the fallback path
-    /// used when the in-memory mapping is lost (e.g., after a service restart).
-    /// </summary>
-    private async Task<string?> ResolveTenantFromPersistedGrantAsync(HttpContext context, string refreshToken)
-    {
-        try
-        {
-            var grantStore = context.RequestServices.GetService<IOctoPersistentGrantStore>();
-            if (grantStore == null)
-            {
-                return null;
-            }
-
-            // Duende IdentityServer stores grant keys as SHA256 hex hashes of the token handle
-            var grantKey = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(refreshToken)));
-            return await grantStore.GetTenantByGrantKeyAsync(grantKey);
-        }
-        catch (Exception ex)
-        {
-            logger.LogWarning(ex, "Failed to resolve tenant from persistent grant store");
-            return null;
-        }
     }
 
     /// <summary>
