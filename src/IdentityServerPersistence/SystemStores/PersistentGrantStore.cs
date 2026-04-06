@@ -32,7 +32,7 @@ public class PersistentGrantStore(
 
     public async Task StoreAsync(PersistedGrant grant)
     {
-        var session = await TenantRepository.GetSessionAsync();
+        using var session = await TenantRepository.GetSessionAsync();
         session.StartTransaction();
 
         var persistedGrant = await GetRtPersistentGrantByKeyAsync(session, grant.Key);
@@ -56,7 +56,7 @@ public class PersistentGrantStore(
     {
         ArgumentValidation.ValidateString(nameof(key), key);
 
-        var session = await TenantRepository.GetSessionAsync();
+        using var session = await TenantRepository.GetSessionAsync();
         session.StartTransaction();
 
         var result = await GetAsync(session, key);
@@ -68,7 +68,7 @@ public class PersistentGrantStore(
 
     public async Task<IEnumerable<PersistedGrant>> GetAllAsync(PersistedGrantFilter filter)
     {
-        var session = await TenantRepository.GetSessionAsync();
+        using var session = await TenantRepository.GetSessionAsync();
         session.StartTransaction();
 
         var queryOptions = RtEntityQueryOptions.Create();
@@ -100,7 +100,7 @@ public class PersistentGrantStore(
     {
         ArgumentValidation.ValidateString(nameof(key), key);
 
-        var session = await TenantRepository.GetSessionAsync();
+        using var session = await TenantRepository.GetSessionAsync();
         session.StartTransaction();
 
         var fieldFilterCriteria = FieldFilterCriteria.Create(LogicalOperators.And)
@@ -113,7 +113,7 @@ public class PersistentGrantStore(
 
     public async Task RemoveAllAsync(PersistedGrantFilter filter)
     {
-        var session = await TenantRepository.GetSessionAsync();
+        using var session = await TenantRepository.GetSessionAsync();
         session.StartTransaction();
 
         var fieldFilterCriteria = FieldFilterCriteria.Create(LogicalOperators.And);
@@ -163,7 +163,7 @@ public class PersistentGrantStore(
 
     public async Task StoreAsync(RtPersistedGrant grant)
     {
-        var session = await TenantRepository.GetSessionAsync();
+        using var session = await TenantRepository.GetSessionAsync();
         session.StartTransaction();
 
         var persistedGrant = await GetRtPersistentGrantByKeyAsync(session, grant.GrantKey);
@@ -190,7 +190,7 @@ public class PersistentGrantStore(
         ArgumentValidation.ValidateString(nameof(clientId), clientId);
         ArgumentValidation.ValidateString(nameof(type), type);
 
-        var session = await TenantRepository.GetSessionAsync();
+        using var session = await TenantRepository.GetSessionAsync();
         session.StartTransaction();
 
         var fieldFilterCriteria = FieldFilterCriteria.Create(LogicalOperators.And)
@@ -242,18 +242,25 @@ public class PersistentGrantStore(
 
             if (found > 0)
             {
-                try
+                var deletedCount = 0;
+                foreach (var persistedGrant in expiredGrants)
                 {
-                    foreach (var persistedGrant in expiredGrants)
+                    try
                     {
                         await TenantRepository.DeleteOneRtEntityByRtIdAsync<RtPersistedGrant>(session, persistedGrant.RtId, DeleteOptions.Erase);
+                        deletedCount++;
+                    }
+                    catch (OperationFailedException ex)
+                    {
+                        Logger.Debug("Concurrency exception removing expired grant '{RtId}': {Message}",
+                            persistedGrant.RtId, ex.Message);
                     }
                 }
-                catch (OperationFailedException ex)
+
+                if (deletedCount == 0)
                 {
-                    // we get this if/when someone else already deleted the records
-                    // we want to essentially ignore this, and keep working
-                    Logger.Debug($"Concurrency exception removing expired grants: {ex.Message}");
+                    Logger.Warn("Stopping expired grant cleanup because no grants could be deleted from the current batch due to concurrency conflicts");
+                    break;
                 }
             }
         }

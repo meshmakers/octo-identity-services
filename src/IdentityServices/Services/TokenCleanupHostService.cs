@@ -161,7 +161,7 @@ internal class TokenCleanupHostService : IHostedService
                 .FieldFilter(nameof(RtPersistedGrant.ExpirationDateTime), FieldFilterOperator.LessEqualThan,
                     DateTime.UtcNow);
 
-            var session = await tenantRepository.GetSessionAsync();
+            using var session = await tenantRepository.GetSessionAsync();
             session.StartTransaction();
 
             while (found >= TokenCleanupBatchSize)
@@ -176,17 +176,29 @@ internal class TokenCleanupHostService : IHostedService
                     Logger.Info("Removing {Count} expired grants from tenant '{TenantId}'",
                         found, tenantRepository.TenantId);
 
-                    try
+                    var deletedCount = 0;
+                    foreach (var persistedGrant in expiredGrants)
                     {
-                        foreach (var persistedGrant in expiredGrants)
+                        try
                         {
                             await tenantRepository.DeleteOneRtEntityByRtIdAsync<RtPersistedGrant>(session,
                                 persistedGrant.RtId, DeleteOptions.Erase);
+                            deletedCount++;
+                        }
+                        catch (OperationFailedException ex)
+                        {
+                            Logger.Debug(
+                                "Concurrency exception removing expired grant '{RtId}' for tenant '{TenantId}': {Message}",
+                                persistedGrant.RtId, tenantRepository.TenantId, ex.Message);
                         }
                     }
-                    catch (OperationFailedException ex)
+
+                    if (deletedCount == 0)
                     {
-                        Logger.Debug("Concurrency exception removing expired grants: {Message}", ex.Message);
+                        Logger.Warn(
+                            "Stopping expired grant cleanup for tenant '{TenantId}' because no grants could be deleted from the current batch due to concurrency conflicts",
+                            tenantRepository.TenantId);
+                        break;
                     }
                 }
             }
