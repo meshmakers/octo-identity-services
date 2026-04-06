@@ -3,13 +3,14 @@ using Duende.IdentityServer.Models;
 using Duende.IdentityServer.Stores;
 using FluentAssertions;
 using IdentityServerPersistence.SystemStores;
+using Meshmakers.Octo.ConstructionKit.Contracts;
 using Meshmakers.Octo.Runtime.Contracts;
 using Meshmakers.Octo.Runtime.Contracts.MongoDb;
 using Meshmakers.Octo.Runtime.Contracts.MongoDb.Repositories;
 using Meshmakers.Octo.Runtime.Contracts.Repositories;
 using Meshmakers.Octo.Runtime.Contracts.Repositories.Query;
 using Meshmakers.Octo.Runtime.Engine.Repositories.Query;
-using Microsoft.AspNetCore.Http;
+using Meshmakers.Octo.Services.Infrastructure.Services;
 using NSubstitute;
 using Persistence.IdentityCkModel.Generated.System.Identity.v2;
 using Shared.TestUtilities.Builders;
@@ -22,13 +23,11 @@ public class PersistentGrantStoreTests
 {
     private readonly ITenantRepository _tenantRepository;
     private readonly IMapper _mapper;
-    private readonly ISystemContext _systemContext;
     private readonly PersistentGrantStore _sut;
     private readonly FakeOctoSession _session;
 
     public PersistentGrantStoreTests()
     {
-        _systemContext = Substitute.For<ISystemContext>();
         _mapper = Substitute.For<IMapper>();
         _session = new FakeOctoSession();
 
@@ -37,10 +36,10 @@ public class PersistentGrantStoreTests
         _tenantRepository.GetSessionAsync()
             .Returns(Task.FromResult<IOctoSession>(_session));
 
-        _systemContext.GetSystemTenantRepository().Returns(_tenantRepository);
+        var multiTenancyResolver = Substitute.For<IMultiTenancyResolverService>();
+        multiTenancyResolver.GetTenantRepository().Returns(_tenantRepository);
 
-        var httpContextAccessor = Substitute.For<IHttpContextAccessor>();
-        _sut = new PersistentGrantStore(_systemContext, _mapper, httpContextAccessor);
+        _sut = new PersistentGrantStore(multiTenancyResolver, _mapper);
     }
 
     #region StoreAsync Tests
@@ -424,6 +423,124 @@ public class PersistentGrantStoreTests
             existingGrant.RtId,
             newGrant);
         _session.CommitCount.Should().Be(1);
+    }
+
+    #endregion
+
+    #region RemoveExpiredGrantsAsync Tests
+
+    [Fact]
+    public async Task RemoveExpiredGrantsAsync_WithExpiredGrants_RemovesThemInBatches()
+    {
+        // Arrange: First call returns a batch, second call returns empty
+        var expiredGrant = new RtPersistedGrantBuilder()
+            .WithKey("expired-key")
+            .Expired()
+            .Build();
+
+        var callCount = 0;
+        _tenantRepository
+            .GetRtEntitiesByTypeAsync<RtPersistedGrant>(
+                Arg.Any<IOctoSession>(),
+                Arg.Any<RtEntityQueryOptions>(),
+                Arg.Any<int>(),
+                Arg.Any<int>())
+            .Returns(_ =>
+            {
+                callCount++;
+                if (callCount == 1)
+                {
+                    return Task.FromResult<IResultSet<RtPersistedGrant>>(
+                        new ResultSet<RtPersistedGrant>([expiredGrant], 1, null, null));
+                }
+                return Task.FromResult<IResultSet<RtPersistedGrant>>(
+                    new ResultSet<RtPersistedGrant>([], 0, null, null));
+            });
+
+        // Act
+        await _sut.RemoveExpiredGrantsAsync();
+
+        // Assert
+        await _tenantRepository.Received(1).DeleteOneRtEntityByRtIdAsync<RtPersistedGrant>(
+            Arg.Any<IOctoSession>(), expiredGrant.RtId, DeleteOptions.Erase);
+    }
+
+    [Fact]
+    public async Task RemoveExpiredGrantsAsync_WithConcurrencyFailureOnAllDeletes_TerminatesLoop()
+    {
+        // Arrange: Return a batch of expired grants, but all deletes fail with concurrency errors
+        var expiredGrant1 = new RtPersistedGrantBuilder().WithKey("expired-1").Expired().Build();
+        var expiredGrant2 = new RtPersistedGrantBuilder().WithKey("expired-2").Expired().Build();
+
+        _tenantRepository
+            .GetRtEntitiesByTypeAsync<RtPersistedGrant>(
+                Arg.Any<IOctoSession>(),
+                Arg.Any<RtEntityQueryOptions>(),
+                Arg.Any<int>(),
+                Arg.Any<int>())
+            .Returns(Task.FromResult<IResultSet<RtPersistedGrant>>(
+                new ResultSet<RtPersistedGrant>([expiredGrant1, expiredGrant2], 2, null, null)));
+
+        _tenantRepository
+            .DeleteOneRtEntityByRtIdAsync<RtPersistedGrant>(
+                Arg.Any<IOctoSession>(), Arg.Any<OctoObjectId>(), Arg.Any<DeleteOptions>())
+            .Returns<Task>(_ => throw OperationFailedException.DatabaseOperationFailed(
+                "DeleteOne", new Exception("Concurrency conflict")));
+
+        // Act - should terminate without infinite loop
+        await _sut.RemoveExpiredGrantsAsync();
+
+        // Assert: The loop should have broken after the first batch where no deletes succeeded.
+        // It should NOT have re-queried endlessly.
+        await _tenantRepository.Received(2).DeleteOneRtEntityByRtIdAsync<RtPersistedGrant>(
+            Arg.Any<IOctoSession>(), Arg.Any<OctoObjectId>(), DeleteOptions.Erase);
+    }
+
+    [Fact]
+    public async Task RemoveExpiredGrantsAsync_WithPartialConcurrencyFailure_ContinuesProcessing()
+    {
+        // Arrange: Return a full batch (>= TokenCleanupBatchSize) where one delete succeeds
+        // and one fails, then an empty batch on second query
+        var grants = Enumerable.Range(0, 50).Select(i =>
+            new RtPersistedGrantBuilder().WithKey($"grant-{i}").Expired().Build()).ToList();
+
+        var callCount = 0;
+        _tenantRepository
+            .GetRtEntitiesByTypeAsync<RtPersistedGrant>(
+                Arg.Any<IOctoSession>(),
+                Arg.Any<RtEntityQueryOptions>(),
+                Arg.Any<int>(),
+                Arg.Any<int>())
+            .Returns(_ =>
+            {
+                callCount++;
+                if (callCount == 1)
+                {
+                    return Task.FromResult<IResultSet<RtPersistedGrant>>(
+                        new ResultSet<RtPersistedGrant>(grants, grants.Count, null, null));
+                }
+                return Task.FromResult<IResultSet<RtPersistedGrant>>(
+                    new ResultSet<RtPersistedGrant>([], 0, null, null));
+            });
+
+        // First grant delete succeeds, all others throw concurrency error
+        _tenantRepository
+            .DeleteOneRtEntityByRtIdAsync<RtPersistedGrant>(
+                Arg.Any<IOctoSession>(), grants[0].RtId, Arg.Any<DeleteOptions>())
+            .Returns(Task.CompletedTask);
+        _tenantRepository
+            .DeleteOneRtEntityByRtIdAsync<RtPersistedGrant>(
+                Arg.Any<IOctoSession>(),
+                Arg.Is<OctoObjectId>(id => id != grants[0].RtId),
+                Arg.Any<DeleteOptions>())
+            .Returns<Task>(_ => throw OperationFailedException.DatabaseOperationFailed(
+                "DeleteOne", new Exception("Concurrency conflict")));
+
+        // Act
+        await _sut.RemoveExpiredGrantsAsync();
+
+        // Assert: Should have continued (deletedCount > 0) and queried for the next batch
+        callCount.Should().Be(2);
     }
 
     #endregion
