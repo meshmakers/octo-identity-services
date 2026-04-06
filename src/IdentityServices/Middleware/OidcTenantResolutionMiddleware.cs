@@ -4,13 +4,10 @@ using System.Text.Json;
 using System.Text.RegularExpressions;
 using Meshmakers.Octo.Runtime.Contracts.MongoDb;
 using Meshmakers.Octo.Runtime.Contracts.MongoDb.Configuration;
-using Meshmakers.Octo.Runtime.Contracts.Repositories;
-using Meshmakers.Octo.Runtime.Contracts.Repositories.Query;
 using Meshmakers.Octo.Services.Infrastructure;
 using Microsoft.AspNetCore.Http.Extensions;
 using Microsoft.AspNetCore.WebUtilities;
 using Microsoft.Extensions.Options;
-using Persistence.IdentityCkModel.Generated.System.Identity.v2;
 
 namespace Meshmakers.Octo.Backend.IdentityServices.Middleware;
 
@@ -328,69 +325,21 @@ internal class OidcTenantResolutionMiddleware(
                     return entry.TenantId;
                 }
 
-                // Fallback: resolve tenant from session cookies (survives service restarts).
-                // The browser sends tenant-scoped session cookies with the token request,
-                // which allows us to determine the correct tenant without an in-memory cache.
-                var sessionTenants = FindTenantIdsFromSessionCookies(context);
-                if (sessionTenants.Count == 1)
+                // Fallback: read acr_values=tenant:{tenantId} from the form body.
+                // The SPA sends this with every refresh token request so the Identity Server
+                // can resolve the correct tenant even when the in-memory cache is lost.
+                var acrTenantId = ParseTenantFromAcrValues(form["acr_values"].ToString());
+                if (!string.IsNullOrEmpty(acrTenantId))
                 {
-                    var tenantId = sessionTenants[0];
                     if (refreshToken != null)
                     {
-                        TokenToTenantMap[refreshToken] = (tenantId, DateTime.UtcNow.Add(RefreshTokenEntryLifetime));
+                        TokenToTenantMap[refreshToken] = (acrTenantId, DateTime.UtcNow.Add(RefreshTokenEntryLifetime));
                     }
 
                     logger.LogDebug(
-                        "Resolved tenant '{TenantId}' from session cookie for /connect/token (recovered after restart)",
-                        tenantId);
-                    return tenantId;
-                }
-
-                if (sessionTenants.Count > 1)
-                {
-                    // Multiple active sessions — try to find the grant in each tenant's database
-                    var sysCtx = context.RequestServices.GetRequiredService<ISystemContext>();
-                    foreach (var candidateTenantId in sessionTenants)
-                    {
-                        var tenantRepo = await sysCtx.TryFindTenantRepositoryAsync(candidateTenantId);
-                        if (tenantRepo == null)
-                        {
-                            continue;
-                        }
-
-                        // Check if this tenant's database contains a refresh_token grant
-                        // for the current session (identified by the idsrv.session cookie)
-                        var sessionId = context.Request.Cookies["idsrv.session"];
-                        if (string.IsNullOrEmpty(sessionId))
-                        {
-                            continue;
-                        }
-
-                        var session = await tenantRepo.GetSessionAsync();
-                        session.StartTransaction();
-
-                        var queryOptions = RtEntityQueryOptions.Create()
-                            .FieldFilter("SessionId", FieldFilterOperator.Equals, sessionId)
-                            .FieldFilter("GrantType", FieldFilterOperator.Equals, "refresh_token");
-
-                        var result =
-                            await tenantRepo.GetRtEntitiesByTypeAsync<RtPersistedGrant>(session, queryOptions);
-                        await session.CommitTransactionAsync();
-
-                        if (result.Items.Any())
-                        {
-                            if (refreshToken != null)
-                            {
-                                TokenToTenantMap[refreshToken] =
-                                    (candidateTenantId, DateTime.UtcNow.Add(RefreshTokenEntryLifetime));
-                            }
-
-                            logger.LogDebug(
-                                "Resolved tenant '{TenantId}' by searching tenant databases for /connect/token (recovered after restart)",
-                                candidateTenantId);
-                            return candidateTenantId;
-                        }
-                    }
+                        "Resolved tenant '{TenantId}' from acr_values for refresh_token on /connect/token",
+                        acrTenantId);
+                    return acrTenantId;
                 }
 
                 logger.LogDebug(
