@@ -222,6 +222,8 @@ internal class DefaultConfigurationCreatorService(
             CommonConstants.OctoApiFullAccessDisplayName));
         await resourceStore.TryCreateApiScopeAsync(new ApiScope(CommonConstants.OctoApiReadOnly,
             CommonConstants.OctoApiReadOnlyDisplayName));
+        await resourceStore.TryCreateApiScopeAsync(new ApiScope(CommonConstants.OctoApiDataModelManagement,
+            CommonConstants.OctoApiDataModelManagementDisplayName));
     }
 
     private async Task CreateApiResources()
@@ -235,7 +237,8 @@ internal class DefaultConfigurationCreatorService(
             Scopes = new AttributeStringValueList
             {
                 CommonConstants.OctoApiFullAccess,
-                CommonConstants.OctoApiReadOnly
+                CommonConstants.OctoApiReadOnly,
+                CommonConstants.OctoApiDataModelManagement
             }
         });
     }
@@ -273,6 +276,7 @@ internal class DefaultConfigurationCreatorService(
         await TryCreateRole(CommonConstants.DashboardViewerRole);
         await TryCreateRole(CommonConstants.ReportingManagementRole);
         await TryCreateRole(CommonConstants.ReportingViewerRole);
+        await TryCreateRole(CommonConstants.DataModelManagementRole);
     }
 
     private async Task CreateDefaultGroupsAsync()
@@ -289,7 +293,8 @@ internal class DefaultConfigurationCreatorService(
             CommonConstants.DashboardManagementRole,
             CommonConstants.DashboardViewerRole,
             CommonConstants.ReportingManagementRole,
-            CommonConstants.ReportingViewerRole
+            CommonConstants.ReportingViewerRole,
+            CommonConstants.DataModelManagementRole
         };
 
         var roleIds = new List<string>();
