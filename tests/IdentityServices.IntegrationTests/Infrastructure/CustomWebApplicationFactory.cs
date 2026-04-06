@@ -430,11 +430,11 @@ internal class TestDistributionEventHubService : IDistributionEventHubService
         return Task.CompletedTask;
     }
 
-    public Task<Task> SendToExchangeAsync<T>(string exchangeName, string routingKey, T message,
+    public Task SendToExchangeAsync<T>(string exchangeName, string routingKey, T message,
         CancellationToken? cancellationToken = null) where T : class
     {
         // No-op for tests
-        return Task.FromResult(Task.CompletedTask);
+        return Task.CompletedTask;
     }
 }
 
