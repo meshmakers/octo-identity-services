@@ -25,12 +25,18 @@ public class PersistentGrantStore(
     : IOctoPersistentGrantStore
 {
     private const int TokenCleanupBatchSize = 50;
+    private const int MaxRetryAttempts = 3;
 
     private static readonly Logger Logger = LogManager.GetCurrentClassLogger();
 
     private ITenantRepository TenantRepository => multiTenancyResolverService.GetTenantRepository();
 
     public async Task StoreAsync(PersistedGrant grant)
+    {
+        await ExecuteWithRetryAsync(() => StoreInternalAsync(grant));
+    }
+
+    private async Task StoreInternalAsync(PersistedGrant grant)
     {
         using var session = await TenantRepository.GetSessionAsync();
         session.StartTransaction();
@@ -163,6 +169,11 @@ public class PersistentGrantStore(
 
     public async Task StoreAsync(RtPersistedGrant grant)
     {
+        await ExecuteWithRetryAsync(() => StoreRtGrantInternalAsync(grant));
+    }
+
+    private async Task StoreRtGrantInternalAsync(RtPersistedGrant grant)
+    {
         using var session = await TenantRepository.GetSessionAsync();
         session.StartTransaction();
 
@@ -216,6 +227,32 @@ public class PersistentGrantStore(
 
         var result = await TenantRepository.GetRtEntitiesByTypeAsync<RtPersistedGrant>(session, queryOptions);
         return result.Items.FirstOrDefault();
+    }
+
+    /// <summary>
+    ///     Executes an action with retry logic for MongoDB write conflicts.
+    ///     When multiple tabs refresh tokens simultaneously, their transactions
+    ///     can collide on the same grant document. MongoDB recommends retrying
+    ///     on transient write conflicts.
+    /// </summary>
+    private static async Task ExecuteWithRetryAsync(Func<Task> action)
+    {
+        for (var attempt = 1; attempt <= MaxRetryAttempts; attempt++)
+        {
+            try
+            {
+                await action();
+                return;
+            }
+            catch (MongoDB.Driver.MongoCommandException ex) when (
+                attempt < MaxRetryAttempts &&
+                ex.Message.Contains("Write conflict", StringComparison.OrdinalIgnoreCase))
+            {
+                Logger.Warn("Write conflict on grant store attempt {Attempt}/{MaxAttempts}, retrying",
+                    attempt, MaxRetryAttempts);
+                await Task.Delay(50 * attempt); // 50ms, 100ms backoff
+            }
+        }
     }
 
     /// <summary>
