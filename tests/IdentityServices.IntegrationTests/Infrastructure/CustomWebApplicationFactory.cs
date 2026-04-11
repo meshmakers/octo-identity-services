@@ -436,6 +436,14 @@ internal class TestDistributionEventHubService : IDistributionEventHubService
         // No-op for tests
         return Task.CompletedTask;
     }
+
+    public Task<TResponse> GetCommandResponseAsync<TRequest, TResponse>(string commandAddress, TRequest request,
+        CancellationToken cancellationToken = default, TimeSpan? timeout = default)
+        where TRequest : class where TResponse : class
+    {
+        // No-op for tests
+        throw new NotImplementedException("GetCommandResponseAsync is not supported in test stub");
+    }
 }
 
 /// <summary>
