@@ -473,11 +473,14 @@ public class AuthApiController(
                     provider, user.UserName);
             }
 
-            // 6. Assign groups based on provider config and email domain rules
+            // 6. Assign groups based on provider config and email domain rules (first login only)
             await loginGroupAssignmentService.AssignGroupsAsync(user, rtIdentityProvider);
         }
 
-        // 6. Sign in the user
+        // 7. Sync external identity group claims (e.g., AD groups) on every login
+        await loginGroupAssignmentService.SyncExternalGroupClaimsAsync(user, claims);
+
+        // 8. Sign in the user
         await signInManager.SignInAsync(user, isPersistent: false);
 
         await events.RaiseAsync(new UserLoginSuccessEvent(
@@ -1114,11 +1117,14 @@ public class AuthApiController(
                     loginInfo.LoginProvider, user.UserName);
             }
 
-            // 6. Assign groups based on provider config and email domain rules
+            // 6. Assign groups based on provider config and email domain rules (first login only)
             await loginGroupAssignmentService.AssignGroupsAsync(user, rtLdapProvider);
         }
 
-        // 6. Sign in the user
+        // 7. Sync external identity group claims (e.g., AD groups) on every login
+        await loginGroupAssignmentService.SyncExternalGroupClaimsAsync(user, claims);
+
+        // 8. Sign in the user
         await signInManager.SignInAsync(user, isPersistent: false);
 
         await events.RaiseAsync(new UserLoginSuccessEvent(

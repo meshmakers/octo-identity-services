@@ -1,9 +1,11 @@
+using System.Security.Claims;
 using Persistence.IdentityCkModel.Generated.System.Identity.v2;
 
 namespace IdentityServerPersistence.Services.Login;
 
 /// <summary>
-/// Assigns groups to a newly created user based on provider configuration and email domain rules.
+/// Assigns groups to a newly created user based on provider configuration and email domain rules,
+/// and synchronizes external identity group claims (e.g., AD group memberships) on every login.
 /// </summary>
 public interface ILoginGroupAssignmentService
 {
@@ -12,7 +14,13 @@ public interface ILoginGroupAssignmentService
     /// 1. The provider's DefaultGroupRtId (if set)
     /// 2. Email domain group rules matching the user's email
     /// </summary>
-    /// <param name="user">The newly created user</param>
-    /// <param name="provider">The identity provider used for login (may be null)</param>
     Task AssignGroupsAsync(RtUser user, RtIdentityProvider? provider);
+
+    /// <summary>
+    /// Synchronizes external identity role claims (e.g., AD group names) with OctoMesh group memberships.
+    /// Matches role claims against existing OctoMesh groups by name and adds the user as a member.
+    /// Also removes the user from groups that no longer appear in the external claims.
+    /// Called on every login to keep group memberships in sync with the external identity provider.
+    /// </summary>
+    Task SyncExternalGroupClaimsAsync(RtUser user, IReadOnlyList<Claim> externalClaims);
 }
