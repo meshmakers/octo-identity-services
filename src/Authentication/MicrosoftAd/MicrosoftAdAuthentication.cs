@@ -1,8 +1,10 @@
 using System.Security.Claims;
+using System.Text.RegularExpressions;
 using IdentityModel;
 using Meshmakers.Octo.Backend.Authentication.Connection;
 using Meshmakers.Octo.Backend.Authentication.Options;
 using Microsoft.AspNetCore.Identity;
+using Microsoft.Extensions.Logging;
 using Novell.Directory.Ldap;
 using LdapConnection = Novell.Directory.Ldap.LdapConnection;
 
@@ -18,12 +20,14 @@ internal class MicrosoftAdAuthentication
     private const string MailAttribute = "mail";
 
     private readonly ILdapConnectionFactory _connectionFactory;
+    private readonly ILogger _logger;
     private readonly LdapOptions _options;
 
-    public MicrosoftAdAuthentication(ILdapConnectionFactory connectionFactory, LdapOptions options)
+    public MicrosoftAdAuthentication(ILdapConnectionFactory connectionFactory, LdapOptions options, ILogger logger)
     {
         _connectionFactory = connectionFactory;
         _options = options;
+        _logger = logger;
     }
 
     public async Task<ExternalLoginInfo> AuthenticateAsync(string username, string password)
@@ -42,13 +46,56 @@ internal class MicrosoftAdAuthentication
             throw new InvalidOperationException("Could not authenticate user.");
         }
 
-        var ldapGroupHandler = new LdapGroupHandler(_options.UserBaseDn, UserPrincipalNameAttribute);
-        var groupNames = ldapGroupHandler.GetGroupsForUserAsync(connection, username);
+        // Extract group names directly from the user entry's memberOf attribute
+        // instead of making a separate LDAP query via LdapGroupHandler, which can fail
+        // silently when the LDAP connection is in a degraded state after VLV fallback
+        List<string> groupNames;
+        try
+        {
+            groupNames = ExtractGroupNamesFromEntry(entry);
+            _logger.LogInformation("Extracted {Count} AD group(s) for user '{Username}': [{Groups}]",
+                groupNames.Count, username, string.Join(", ", groupNames));
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex,
+                "Failed to extract AD group memberships from memberOf attribute for user '{Username}'. User will be authenticated without group claims.",
+                username);
+            groupNames = [];
+        }
 
-        return await LdapEntryToUser(entry, groupNames);
+        return LdapEntryToUser(entry, groupNames);
     }
 
-    private async Task<ExternalLoginInfo> LdapEntryToUser(LdapEntry entry, IAsyncEnumerable<string> groupNames)
+    private List<string> ExtractGroupNamesFromEntry(LdapEntry entry)
+    {
+        var groups = new List<string>();
+        var memberOfAttr = entry.GetOrDefault("memberOf");
+        if (memberOfAttr == null)
+        {
+            _logger.LogWarning("User LDAP entry has no 'memberOf' attribute. No AD groups will be mapped.");
+            return groups;
+        }
+
+        _logger.LogInformation("Found {Count} memberOf values in LDAP entry", memberOfAttr.StringValueArray.Length);
+
+        foreach (var dn in memberOfAttr.StringValueArray)
+        {
+            var match = Regex.Match(dn, "^CN=([^,]*)");
+            if (match.Success)
+            {
+                groups.Add(match.Groups[1].Value);
+            }
+            else
+            {
+                _logger.LogWarning("Could not extract CN from memberOf DN: '{Dn}'", dn);
+            }
+        }
+
+        return groups;
+    }
+
+    private ExternalLoginInfo LdapEntryToUser(LdapEntry entry, List<string> groupNames)
     {
         var userIdBytes = entry.GetOrDefault(UserIdAttributeName)?.ByteValue;
         if (userIdBytes == null)
@@ -82,7 +129,7 @@ internal class MicrosoftAdAuthentication
             claims.Add(new Claim(ClaimTypes.Email, value));
         }
 
-        await foreach (var groupName in groupNames)
+        foreach (var groupName in groupNames)
         {
             claims.Add(new Claim(JwtClaimTypes.Role, groupName));
         }

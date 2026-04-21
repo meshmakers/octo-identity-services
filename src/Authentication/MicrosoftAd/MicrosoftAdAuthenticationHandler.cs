@@ -29,7 +29,7 @@ public class MicrosoftAdAuthenticationHandler : AuthenticationHandler<LdapOption
 
         try
         {
-            var authentication = new MicrosoftAdAuthentication(_ldapConnectionFactory, Options);
+            var authentication = new MicrosoftAdAuthentication(_ldapConnectionFactory, Options, Logger);
             var info = await authentication.AuthenticateAsync(email!, password!);
             return AuthenticateResult.Success(new AuthenticationTicket(info.Principal, Options.Name));
         }

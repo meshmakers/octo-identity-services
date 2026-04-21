@@ -69,7 +69,7 @@ public class LdapAuthenticationService : ILdapAuthenticationService
             }
             else if (authScheme.HandlerType == typeof(MicrosoftAdAuthenticationHandler))
             {
-                var authentication = new MicrosoftAdAuthentication(_ldapConnectionFactory, options);
+                var authentication = new MicrosoftAdAuthentication(_ldapConnectionFactory, options, _logger);
                 var loginInfo = await authentication.AuthenticateAsync(username, password);
                 _logger.LogInformation("Microsoft AD authentication successful for user {Username} on scheme {Scheme}",
                     username, scheme);
