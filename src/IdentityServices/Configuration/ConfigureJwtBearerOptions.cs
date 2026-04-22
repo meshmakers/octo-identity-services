@@ -28,7 +28,13 @@ internal class ConfigureJwtBearerOptions : IConfigureNamedOptions<JwtBearerOptio
 
     public void Configure(string? name, JwtBearerOptions options)
     {
-        options.Authority = _octoIdentityOptions.Value.AuthorityUrl.EnsureEndsWith("/");
+        var authorityUrl = _octoIdentityOptions.Value.AuthorityUrl.EnsureEndsWith("/");
+        options.Authority = authorityUrl;
+
+        // Explicitly set the valid issuer so token validation does not depend on fetching
+        // the OIDC discovery document. This prevents IDX10204 errors during startup when
+        // the identity service cannot yet reach its own discovery endpoint.
+        options.TokenValidationParameters.ValidIssuer = authorityUrl;
 
         // Disable inbound claim mapping so JWT claim types (sub, name, preferred_username,
         // tenant_id, etc.) are preserved as-is instead of being remapped to long XML namespaces.
