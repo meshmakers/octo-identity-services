@@ -513,9 +513,9 @@ internal class DefaultConfigurationCreatorService(
         queryOptions = RtEntityQueryOptions.Create()
             .FieldEquals(nameof(RtEntity.RtWellKnownName),
                 IdentityServiceConstants.WelcomeEmailTemplateName);
-        r = await tenantRepository.GetRtEntitiesByTypeAsync<RtMailNotificationConfiguration>(session,
+        var mailTemplateResultSet = await tenantRepository.GetRtEntitiesByTypeAsync<RtNotificationTemplate>(session,
             queryOptions);
-        if (r.TotalCount == 0)
+        if (mailTemplateResultSet.TotalCount == 0)
         {
             var welcomeMailTemplate = new RtNotificationTemplate
             {
@@ -531,9 +531,9 @@ internal class DefaultConfigurationCreatorService(
         queryOptions = RtEntityQueryOptions.Create()
             .FieldEquals(nameof(RtEntity.RtWellKnownName),
                 IdentityServiceConstants.WelcomeEmailWithNoPasswordTemplateName);
-        r = await tenantRepository.GetRtEntitiesByTypeAsync<RtMailNotificationConfiguration>(session,
+        mailTemplateResultSet = await tenantRepository.GetRtEntitiesByTypeAsync<RtNotificationTemplate>(session,
             queryOptions);
-        if (r.TotalCount == 0)
+        if (mailTemplateResultSet.TotalCount == 0)
         {
             var welcomeMailWithNoPasswordTemplate = new RtNotificationTemplate
             {
@@ -549,9 +549,9 @@ internal class DefaultConfigurationCreatorService(
         queryOptions = RtEntityQueryOptions.Create()
             .FieldEquals(nameof(RtEntity.RtWellKnownName),
                 IdentityServiceConstants.ResetPasswordEmailTemplateName);
-        r = await tenantRepository.GetRtEntitiesByTypeAsync<RtMailNotificationConfiguration>(session,
+        mailTemplateResultSet = await tenantRepository.GetRtEntitiesByTypeAsync<RtNotificationTemplate>(session,
             queryOptions);
-        if (r.TotalCount == 0)
+        if (mailTemplateResultSet.TotalCount == 0)
         {
             var resetPasswordMailTemplate = new RtNotificationTemplate
             {
