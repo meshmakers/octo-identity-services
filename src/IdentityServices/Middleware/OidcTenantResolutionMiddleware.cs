@@ -52,13 +52,6 @@ internal class OidcTenantResolutionMiddleware(
     private static readonly TimeSpan RefreshTokenEntryLifetime = TimeSpan.FromDays(30);
 
     /// <summary>
-    /// Lifetime of a PAR <c>request_uri</c> → tenant mapping. PAR request_uris are short-lived
-    /// (typically 60–90 seconds in Duende IdentityServer), so a 5-minute window safely covers the
-    /// time between <c>/connect/par</c> and the follow-up <c>/connect/authorize?request_uri=...</c>.
-    /// </summary>
-    private static readonly TimeSpan ParRequestUriEntryLifetime = TimeSpan.FromMinutes(5);
-
-    /// <summary>
     /// Matches the authorization code from an HTML form_post response body.
     /// IdentityServer returns <c>&lt;input type='hidden' name='code' value='...' /&gt;</c>.
     /// </summary>
@@ -97,15 +90,8 @@ internal class OidcTenantResolutionMiddleware(
         var isAuthorizeEndpoint = path != null &&
             path.StartsWith("/connect/authorize", StringComparison.OrdinalIgnoreCase);
 
-        // For /connect/par with a resolved tenant, wrap the response body to capture
-        // the issued request_uri from the PAR JSON response (RFC 9126).
-        // The follow-up /connect/authorize?request_uri=... uses the captured mapping
-        // to recover the tenant context (since acr_values is not on the URL anymore).
-        var isParEndpoint = path != null &&
-            path.StartsWith("/connect/par", StringComparison.OrdinalIgnoreCase);
-
         var needsResponseCapture = resolvedTenantId != null &&
-            (isTokenEndpoint || isDeviceAuthEndpoint || isAuthorizeEndpoint || isParEndpoint);
+            (isTokenEndpoint || isDeviceAuthEndpoint || isAuthorizeEndpoint);
 
         if (needsResponseCapture)
         {
@@ -120,13 +106,6 @@ internal class OidcTenantResolutionMiddleware(
             if (isAuthorizeEndpoint)
             {
                 CaptureAuthorizationCode(context, memoryStream, resolvedTenantId!);
-                memoryStream.Position = 0;
-            }
-            else if (isParEndpoint &&
-                     (context.Response.StatusCode == StatusCodes.Status201Created ||
-                      context.Response.StatusCode == StatusCodes.Status200OK))
-            {
-                CaptureRequestUriFromParResponse(memoryStream, resolvedTenantId!);
                 memoryStream.Position = 0;
             }
             else if (context.Response.StatusCode == StatusCodes.Status200OK)
@@ -170,15 +149,7 @@ internal class OidcTenantResolutionMiddleware(
 
         if (path.StartsWith("/connect/authorize", StringComparison.OrdinalIgnoreCase))
         {
-            // PAR (RFC 9126): when the client used /connect/par, the follow-up authorize call
-            // carries only request_uri=urn:ietf:params:oauth:request_uri:... — the tenant was
-            // resolved during /connect/par and stored in TokenToTenantMap.
-            tenantId = ExtractTenantFromRequestUri(context);
-
-            if (string.IsNullOrEmpty(tenantId))
-            {
-                tenantId = ExtractTenantFromAcrValues(context);
-            }
+            tenantId = ExtractTenantFromAcrValues(context);
 
             if (!string.IsNullOrEmpty(tenantId))
             {
@@ -232,13 +203,6 @@ internal class OidcTenantResolutionMiddleware(
                 logger.LogDebug("No acr_values on /connect/authorize — redirecting to tenant discovery");
                 return true;
             }
-        }
-        else if (path.StartsWith("/connect/par", StringComparison.OrdinalIgnoreCase))
-        {
-            // RFC 9126 Pushed Authorization Request: the client POSTs the full set of
-            // authorization parameters (including acr_values=tenant:X) to /connect/par and
-            // receives a request_uri to use on the subsequent /connect/authorize call.
-            tenantId = await ExtractTenantFromFormAcrValuesAsync(context);
         }
         else if (path.StartsWith("/connect/deviceauthorization", StringComparison.OrdinalIgnoreCase))
         {
@@ -563,61 +527,6 @@ internal class OidcTenantResolutionMiddleware(
         }
 
         return ParseTenantFromAcrValues(acrValues.ToString());
-    }
-
-    /// <summary>
-    /// Resolves the tenant for a <c>/connect/authorize?request_uri=...</c> call by looking up the
-    /// previously captured <see cref="TokenToTenantMap"/> entry produced during <c>/connect/par</c>.
-    /// </summary>
-    private string? ExtractTenantFromRequestUri(HttpContext context)
-    {
-        if (!context.Request.Query.TryGetValue("request_uri", out var requestUriValues))
-        {
-            return null;
-        }
-
-        var requestUri = requestUriValues.FirstOrDefault();
-        if (string.IsNullOrEmpty(requestUri))
-        {
-            return null;
-        }
-
-        if (TokenToTenantMap.TryGetValue(requestUri, out var entry))
-        {
-            logger.LogDebug("Resolved tenant '{TenantId}' from PAR request_uri on /connect/authorize",
-                entry.TenantId);
-            return entry.TenantId;
-        }
-
-        return null;
-    }
-
-    /// <summary>
-    /// Captures the <c>request_uri</c> from a successful <c>/connect/par</c> JSON response
-    /// (RFC 9126) and maps it to the tenant ID. The follow-up <c>/connect/authorize?request_uri=...</c>
-    /// uses this mapping to recover the tenant context.
-    /// </summary>
-    private void CaptureRequestUriFromParResponse(MemoryStream responseBody, string tenantId)
-    {
-        try
-        {
-            using var doc = JsonDocument.Parse(responseBody);
-            if (doc.RootElement.TryGetProperty("request_uri", out var requestUriElement))
-            {
-                var requestUri = requestUriElement.GetString();
-                if (!string.IsNullOrEmpty(requestUri))
-                {
-                    TokenToTenantMap[requestUri] =
-                        (tenantId, DateTime.UtcNow.Add(ParRequestUriEntryLifetime));
-                    logger.LogDebug("Captured PAR request_uri → tenant '{TenantId}' mapping", tenantId);
-                    CleanupExpiredEntries();
-                }
-            }
-        }
-        catch (Exception ex)
-        {
-            logger.LogWarning(ex, "Failed to capture PAR request_uri from response");
-        }
     }
 
     internal static string? ParseTenantFromAcrValues(string acrValues)
