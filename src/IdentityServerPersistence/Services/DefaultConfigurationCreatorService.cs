@@ -277,6 +277,9 @@ internal class DefaultConfigurationCreatorService(
         await TryCreateRole(CommonConstants.ReportingManagementRole);
         await TryCreateRole(CommonConstants.ReportingViewerRole);
         await TryCreateRole(CommonConstants.DataModelManagementRole);
+        await TryCreateRole(CommonConstants.StreamDataAdminRole);
+        await TryCreateRole(CommonConstants.StreamDataWriterRole);
+        await TryCreateRole(CommonConstants.StreamDataReaderRole);
     }
 
     private async Task CreateDefaultGroupsAsync()
@@ -294,7 +297,10 @@ internal class DefaultConfigurationCreatorService(
             CommonConstants.DashboardViewerRole,
             CommonConstants.ReportingManagementRole,
             CommonConstants.ReportingViewerRole,
-            CommonConstants.DataModelManagementRole
+            CommonConstants.DataModelManagementRole,
+            CommonConstants.StreamDataAdminRole,
+            CommonConstants.StreamDataWriterRole,
+            CommonConstants.StreamDataReaderRole
         };
 
         var roleIds = new List<string>();
@@ -637,6 +643,9 @@ internal class DefaultConfigurationCreatorService(
             await EnsureRoleInChildTenantAsync(session, childRepo, CommonConstants.DashboardViewerRole);
             await EnsureRoleInChildTenantAsync(session, childRepo, CommonConstants.ReportingManagementRole);
             await EnsureRoleInChildTenantAsync(session, childRepo, CommonConstants.ReportingViewerRole);
+            await EnsureRoleInChildTenantAsync(session, childRepo, CommonConstants.StreamDataAdminRole);
+            await EnsureRoleInChildTenantAsync(session, childRepo, CommonConstants.StreamDataWriterRole);
+            await EnsureRoleInChildTenantAsync(session, childRepo, CommonConstants.StreamDataReaderRole);
 
             // TenantOwners group
             await EnsureGroupInChildTenantAsync(session, childRepo);
