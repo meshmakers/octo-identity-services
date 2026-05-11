@@ -228,12 +228,22 @@ internal class DefaultConfigurationCreatorService(
 
     private async Task CreateApiResources()
     {
-        await resourceStore.GetOrCreateApiResourceAsync(new RtApiResource
+        var apiResource = await resourceStore.GetOrCreateApiResourceAsync(new RtApiResource
         {
             Name = CommonConstants.OctoApi,
             DisplayName = CommonConstants.OctoApiDisplayName,
             Description = CommonConstants.OctoApiDescription,
             Enabled = true,
+            // Claims here are added to access tokens issued for this API resource. Without
+            // `role` here the access token carries only `scope: ["role", ...]` but no actual
+            // role claim, so backend authorization checks (e.g., StreamData lifecycle endpoints)
+            // always fail even when the ID token contains the roles. The matching identity
+            // resource only puts the claim in the ID token; the API resource is the access-token
+            // path. AutoMapper exposes this property as `UserClaims` on the API DTO.
+            Claims = new AttributeStringValueList
+            {
+                JwtClaimTypes.Role
+            },
             Scopes = new AttributeStringValueList
             {
                 CommonConstants.OctoApiFullAccess,
@@ -241,6 +251,18 @@ internal class DefaultConfigurationCreatorService(
                 CommonConstants.OctoApiDataModelManagement
             }
         });
+
+        // Backfill the role claim on existing API resource records — `GetOrCreateApiResourceAsync`
+        // is create-only, so tenants provisioned before this change still carry the empty Claims
+        // list and would never see roles in their access tokens. Idempotent: only updates when the
+        // claim is actually missing.
+        var existingClaims = apiResource.Claims?.ToList() ?? new List<string>();
+        if (!existingClaims.Contains(JwtClaimTypes.Role))
+        {
+            existingClaims.Add(JwtClaimTypes.Role);
+            apiResource.Claims = new AttributeStringValueList(existingClaims);
+            await resourceStore.UpdateApiResourceAsync(apiResource.Name, apiResource);
+        }
     }
 
     private async Task CreateIdentityResources()
@@ -277,6 +299,9 @@ internal class DefaultConfigurationCreatorService(
         await TryCreateRole(CommonConstants.ReportingManagementRole);
         await TryCreateRole(CommonConstants.ReportingViewerRole);
         await TryCreateRole(CommonConstants.DataModelManagementRole);
+        await TryCreateRole(CommonConstants.StreamDataAdminRole);
+        await TryCreateRole(CommonConstants.StreamDataWriterRole);
+        await TryCreateRole(CommonConstants.StreamDataReaderRole);
     }
 
     private async Task CreateDefaultGroupsAsync()
@@ -294,7 +319,10 @@ internal class DefaultConfigurationCreatorService(
             CommonConstants.DashboardViewerRole,
             CommonConstants.ReportingManagementRole,
             CommonConstants.ReportingViewerRole,
-            CommonConstants.DataModelManagementRole
+            CommonConstants.DataModelManagementRole,
+            CommonConstants.StreamDataAdminRole,
+            CommonConstants.StreamDataWriterRole,
+            CommonConstants.StreamDataReaderRole
         };
 
         var roleIds = new List<string>();
@@ -620,11 +648,15 @@ internal class DefaultConfigurationCreatorService(
             await EnsureApiScopeAsync(session, childRepo,
                 CommonConstants.OctoApiReadOnly, CommonConstants.OctoApiReadOnlyDisplayName);
 
-            // API Resources
+            // API Resources — `role` must be in Claims so the access token carries the role
+            // claim. Without it, scope=role makes it through but the actual claim doesn't, and
+            // backend authorization checks (e.g., StreamDataAdmin on archive lifecycle endpoints)
+            // see no roles and reject every request.
             await EnsureApiResourceAsync(session, childRepo,
                 CommonConstants.OctoApi, CommonConstants.OctoApiDisplayName,
                 CommonConstants.OctoApiDescription,
-                new[] { CommonConstants.OctoApiFullAccess, CommonConstants.OctoApiReadOnly });
+                new[] { CommonConstants.OctoApiFullAccess, CommonConstants.OctoApiReadOnly },
+                new[] { JwtClaimTypes.Role });
 
             // Roles (required for per-tenant user management and cross-tenant role mapping)
             await EnsureRoleInChildTenantAsync(session, childRepo, CommonConstants.TenantManagementRole);
@@ -637,6 +669,9 @@ internal class DefaultConfigurationCreatorService(
             await EnsureRoleInChildTenantAsync(session, childRepo, CommonConstants.DashboardViewerRole);
             await EnsureRoleInChildTenantAsync(session, childRepo, CommonConstants.ReportingManagementRole);
             await EnsureRoleInChildTenantAsync(session, childRepo, CommonConstants.ReportingViewerRole);
+            await EnsureRoleInChildTenantAsync(session, childRepo, CommonConstants.StreamDataAdminRole);
+            await EnsureRoleInChildTenantAsync(session, childRepo, CommonConstants.StreamDataWriterRole);
+            await EnsureRoleInChildTenantAsync(session, childRepo, CommonConstants.StreamDataReaderRole);
 
             // TenantOwners group
             await EnsureGroupInChildTenantAsync(session, childRepo);
@@ -787,7 +822,7 @@ internal class DefaultConfigurationCreatorService(
 
     private static async Task EnsureApiResourceAsync(
         IOctoSession session, ITenantRepository childRepo,
-        string name, string displayName, string description, string[] scopes)
+        string name, string displayName, string description, string[] scopes, string[] claims)
     {
         var queryOptions = RtEntityQueryOptions.Create()
             .FieldFilter(nameof(RtApiResource.Name), FieldFilterOperator.Equals, name);
@@ -800,9 +835,23 @@ internal class DefaultConfigurationCreatorService(
                 DisplayName = displayName,
                 Description = description,
                 Enabled = true,
-                Scopes = new AttributeStringValueList(scopes.ToList())
+                Scopes = new AttributeStringValueList(scopes.ToList()),
+                Claims = new AttributeStringValueList(claims.ToList())
             };
             await childRepo.InsertOneRtEntityAsync(session, resource);
+            return;
+        }
+
+        // Backfill missing claims on existing records so tenants provisioned before claims were
+        // configured still issue access tokens with the expected user claims (e.g., `role`).
+        var existing = result.Items.First();
+        var existingClaims = existing.Claims?.ToList() ?? new List<string>();
+        var missing = claims.Where(c => !existingClaims.Contains(c)).ToList();
+        if (missing.Count > 0)
+        {
+            existingClaims.AddRange(missing);
+            existing.Claims = new AttributeStringValueList(existingClaims);
+            await childRepo.ReplaceOneRtEntityByIdAsync(session, existing.RtId, existing);
         }
     }
 
