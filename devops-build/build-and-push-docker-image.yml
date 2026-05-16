@@ -49,6 +49,16 @@ steps:
           --push \
           $(System.DefaultWorkingDirectory) &&
         docker buildx rm mybuilder
+
+  - task: CmdLine@2
+    condition: and(eq(variables.isMain, true), eq(variables.isRelease, false))
+    displayName: Tag ${{ parameters.Repository }}:main-latest (rolling)
+    inputs:
+      script: |
+        docker buildx imagetools create \
+          --tag ${{ parameters.PrivateRegistryName }}/${{ parameters.Repository }}:main-latest \
+          ${{ parameters.PrivateRegistryName }}/${{ parameters.Repository }}:$(Build.BuildNumber)
+
   - task: CmdLine@2
     condition: and(ne(variables.isMain, true), ne(variables.isTest, true), ne(variables.isRelease, true))
     displayName: Build ONLY for non-main/test branch ${{ parameters.Repository }}:$(Build.BuildNumber)
