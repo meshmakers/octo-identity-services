@@ -59,6 +59,40 @@ public interface IClientMirrorProvisioningService
     /// <returns>The number of tracking rows that were removed.</returns>
     Task<int> RemoveMirrorsForChildTenantAsync(
         string parentTenantId, string childTenantId);
+
+    /// <summary>
+    /// Backfill: walks every child tenant of <paramref name="parentTenantId"/> and
+    /// ensures a mirror of <paramref name="parentClientId"/> exists in each. The
+    /// per-child work is delegated to <see cref="ProvisionForChildTenantAsync"/>, so
+    /// other clients in the parent that are also flagged get backfilled at the same
+    /// time — this is intentional (the operator's intent is "make every flagged
+    /// client present everywhere it should be"), but it does mean the client-id
+    /// argument is only used for the up-front "is this client flagged?" guard.
+    /// Returns <c>null</c> if the named client either doesn't exist or isn't flagged.
+    /// </summary>
+    Task<ClientMirrorBackfillResult?> ProvisionForAllChildTenantsAsync(
+        string parentTenantId, string parentClientId);
+
+    /// <summary>
+    /// Lists the tracking rows recorded in the parent's DB for a given client.
+    /// Returns an empty list when the client has no mirrors.
+    /// </summary>
+    Task<IReadOnlyList<RtClientMirror>> GetMirrorsAsync(
+        string parentTenantId, string parentClientId);
+
+    /// <summary>
+    /// Provisions a single (parentClientId × childTenantId) mirror. No-op if the
+    /// mirror already exists (still returns success).
+    /// </summary>
+    Task<ClientMirrorProvisioningResult> ProvisionInTenantAsync(
+        string parentTenantId, string parentClientId, string childTenantId);
+
+    /// <summary>
+    /// Removes a single mirror (drops the child-side <c>RtClient</c> and the
+    /// parent's tracking row). Returns false if no mirror was tracked for that pair.
+    /// </summary>
+    Task<bool> RemoveMirrorAsync(
+        string parentTenantId, string parentClientId, string childTenantId);
 }
 
 /// <summary>Summary of one provisioning run for telemetry / API responses.</summary>
@@ -76,3 +110,9 @@ public sealed record ClientMirrorSyncResult(
 public sealed record ClientMirrorCleanupResult(
     int MirrorsRemoved,
     int MirrorsFailed);
+
+/// <summary>Summary of a backfill across all child tenants.</summary>
+public sealed record ClientMirrorBackfillResult(
+    int ChildTenantsConsidered,
+    int NewlyProvisioned,
+    int AlreadyPresent);

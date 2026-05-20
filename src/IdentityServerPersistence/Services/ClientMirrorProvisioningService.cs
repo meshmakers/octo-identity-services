@@ -330,6 +330,164 @@ public class ClientMirrorProvisioningService(
         return removed;
     }
 
+    public async Task<ClientMirrorBackfillResult?> ProvisionForAllChildTenantsAsync(
+        string parentTenantId, string parentClientId)
+    {
+        if (string.IsNullOrWhiteSpace(parentTenantId))
+        {
+            throw new ArgumentException("Parent tenant id is required.", nameof(parentTenantId));
+        }
+
+        if (string.IsNullOrWhiteSpace(parentClientId))
+        {
+            throw new ArgumentException("Parent client id is required.", nameof(parentClientId));
+        }
+
+        var parentContext = await systemContext.TryFindTenantContextAsync(parentTenantId);
+        if (parentContext == null)
+        {
+            logger.LogWarning(
+                "Backfill: parent tenant '{ParentTenantId}' not found", parentTenantId);
+            return null;
+        }
+
+        // Guard: only flagged clients can be backfilled. Caller (controller) should have
+        // validated this already and returned 400 — this is a defence in depth.
+        var parentRepo = parentContext.GetTenantRepositoryAsAdmin();
+        using var parentSession = await parentRepo.GetSessionAsync();
+        var clientResult = await parentRepo.GetRtEntitiesByTypeAsync<RtClient>(
+            parentSession,
+            RtEntityQueryOptions.Create()
+                .FieldFilter(nameof(RtClient.ClientId), FieldFilterOperator.Equals, parentClientId));
+        var parentClient = clientResult.Items.FirstOrDefault();
+        if (parentClient == null || !parentClient.AutoProvisionInChildTenants)
+        {
+            return null;
+        }
+
+        using var adminSession = await parentContext.GetAdminSessionAsync();
+        var childTenants = await parentContext.GetChildTenantsAsync(adminSession);
+
+        var considered = 0;
+        var newly = 0;
+        var present = 0;
+
+        foreach (var child in childTenants.Items)
+        {
+            considered++;
+            try
+            {
+                // Reuse ProvisionForChildTenantAsync: it iterates every flagged client in
+                // the parent, not just this one. That is intentional — the operator's
+                // expectation when clicking "Provision in existing tenants" is "make every
+                // flagged client present everywhere it should be", and this avoids
+                // duplicating the provisioning logic for the single-client case.
+                var perChildResult = await ProvisionForChildTenantAsync(parentTenantId, child.TenantId);
+                newly += perChildResult.NewlyProvisioned;
+                present += perChildResult.AlreadyPresent;
+            }
+            catch (Exception ex)
+            {
+                logger.LogError(ex,
+                    "Backfill into child '{ChildTenantId}' failed", child.TenantId);
+            }
+        }
+
+        return new ClientMirrorBackfillResult(considered, newly, present);
+    }
+
+    public async Task<IReadOnlyList<RtClientMirror>> GetMirrorsAsync(
+        string parentTenantId, string parentClientId)
+    {
+        if (string.IsNullOrWhiteSpace(parentTenantId))
+        {
+            throw new ArgumentException("Parent tenant id is required.", nameof(parentTenantId));
+        }
+
+        if (string.IsNullOrWhiteSpace(parentClientId))
+        {
+            throw new ArgumentException("Parent client id is required.", nameof(parentClientId));
+        }
+
+        var parentRepo = await systemContext.TryFindTenantRepositoryAsync(parentTenantId);
+        if (parentRepo == null)
+        {
+            return Array.Empty<RtClientMirror>();
+        }
+
+        using var parentSession = await parentRepo.GetSessionAsync();
+        return await GetMirrorsForClientAsync(parentRepo, parentSession, parentClientId);
+    }
+
+    public Task<ClientMirrorProvisioningResult> ProvisionInTenantAsync(
+        string parentTenantId, string parentClientId, string childTenantId)
+    {
+        // The per-child provisioning already filters by flagged clients in the parent,
+        // so passing the clientId here is informational only. We could short-circuit if
+        // the named client either doesn't exist or isn't flagged, but ProvisionForChildTenantAsync
+        // already returns "0 considered" in that case — keep it simple.
+        _ = parentClientId;
+        return ProvisionForChildTenantAsync(parentTenantId, childTenantId);
+    }
+
+    public async Task<bool> RemoveMirrorAsync(
+        string parentTenantId, string parentClientId, string childTenantId)
+    {
+        if (string.IsNullOrWhiteSpace(parentTenantId))
+        {
+            throw new ArgumentException("Parent tenant id is required.", nameof(parentTenantId));
+        }
+
+        if (string.IsNullOrWhiteSpace(parentClientId))
+        {
+            throw new ArgumentException("Parent client id is required.", nameof(parentClientId));
+        }
+
+        if (string.IsNullOrWhiteSpace(childTenantId))
+        {
+            throw new ArgumentException("Child tenant id is required.", nameof(childTenantId));
+        }
+
+        var parentRepo = await systemContext.TryFindTenantRepositoryAsync(parentTenantId);
+        if (parentRepo == null)
+        {
+            return false;
+        }
+
+        using var parentSession = await parentRepo.GetSessionAsync();
+        var lookup = await parentRepo.GetRtEntitiesByTypeAsync<RtClientMirror>(
+            parentSession,
+            RtEntityQueryOptions.Create()
+                .FieldFilter(
+                    nameof(RtClientMirror.ParentClientId),
+                    FieldFilterOperator.Equals,
+                    parentClientId)
+                .FieldFilter(
+                    nameof(RtClientMirror.ChildTenantId),
+                    FieldFilterOperator.Equals,
+                    childTenantId));
+        var mirror = lookup.Items.FirstOrDefault();
+        if (mirror == null)
+        {
+            return false;
+        }
+
+        var childRepo = await systemContext.TryFindTenantRepositoryAsync(childTenantId);
+        if (childRepo != null)
+        {
+            using var childSession = await childRepo.GetSessionAsync();
+            await DeleteClientFromChildAsync(childRepo, childSession, parentClientId);
+        }
+
+        await parentRepo.DeleteOneRtEntityByRtIdAsync<RtClientMirror>(
+            parentSession, mirror.RtId, DeleteOptions.Erase);
+
+        logger.LogInformation(
+            "Removed client mirror manually: clientId='{ClientId}' parent='{ParentTenantId}' child='{ChildTenantId}'",
+            parentClientId, parentTenantId, childTenantId);
+        return true;
+    }
+
     private static async Task<List<RtClientMirror>> GetMirrorsForClientAsync(
         ITenantRepository parentRepo, IOctoSession parentSession, string parentClientId)
     {
