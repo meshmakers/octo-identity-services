@@ -507,3 +507,7 @@ attributes:
     defaultValues:
       - 0
 
+  - id: ProvisionedByParentTenantId
+    valueType: String
+    description: When set on a Client living in a child tenant, marks this record as a mirror of a parent-tenant client identified by the given tenant id. Sub-tenant admins surface this as a read-only "Provisioned by parent tenant" indicator; the operator cannot edit the client locally — changes must go through the parent.
+

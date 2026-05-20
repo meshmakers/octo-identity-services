@@ -149,3 +149,7 @@ types:
 
       - id: ${this}/AutoProvisionInChildTenants
         name: AutoProvisionInChildTenants
+
+      - id: ${this}/ProvisionedByParentTenantId
+        name: ProvisionedByParentTenantId
+        isOptional: true

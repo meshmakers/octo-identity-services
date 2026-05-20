@@ -104,7 +104,7 @@ public class ClientMirrorProvisioningService(
             // 2a. Materialize the mirror client in the child tenant's DB. Same idempotent
             //     query-or-insert pattern used by DefaultConfigurationCreatorService for
             //     the built-in OctoTool/Studio/Swagger clients.
-            var mirror = CreateMirrorClient(parentClient);
+            var mirror = CreateMirrorClient(parentTenantId, parentClient);
             await UpsertClientInChildAsync(childRepo, childSession, mirror);
 
             // 2b. Record the tracking row in the parent's DB.
@@ -181,7 +181,7 @@ public class ClientMirrorProvisioningService(
                 }
 
                 using var childSession = await childRepo.GetSessionAsync();
-                var updatedMirror = CreateMirrorClient(parentClient);
+                var updatedMirror = CreateMirrorClient(parentTenantId, parentClient);
                 await UpsertClientInChildAsync(childRepo, childSession, updatedMirror);
 
                 mirror.SecretHashVersion += 1;
@@ -522,7 +522,7 @@ public class ClientMirrorProvisioningService(
     /// <c>AutoProvisionInChildTenants</c> is intentionally NOT propagated — only the parent
     /// owns the flag; a mirror is never itself a source of further mirroring.
     /// </summary>
-    private static RtClient CreateMirrorClient(RtClient parentClient)
+    private static RtClient CreateMirrorClient(string parentTenantId, RtClient parentClient)
     {
         return new RtClient
         {
@@ -580,7 +580,8 @@ public class ClientMirrorProvisioningService(
             CoordinateLifetimeWithUserSession = parentClient.CoordinateLifetimeWithUserSession,
             AllowedCorsOrigins = parentClient.AllowedCorsOrigins,
             InitiateLoginUri = parentClient.InitiateLoginUri,
-            AutoProvisionInChildTenants = false
+            AutoProvisionInChildTenants = false,
+            ProvisionedByParentTenantId = parentTenantId
         };
     }
 

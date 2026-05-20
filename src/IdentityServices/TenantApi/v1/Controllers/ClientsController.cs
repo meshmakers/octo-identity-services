@@ -224,7 +224,8 @@ public class ClientsController : ControllerBase
             BackChannelLogoutUri = applicationClient.BackChannelLogoutUri,
             BackChannelLogoutSessionRequired = applicationClient.BackChannelLogoutSessionRequired,
             RequireClientSecret = applicationClient.RequireClientSecret,
-            AutoProvisionInChildTenants = applicationClient.AutoProvisionInChildTenants
+            AutoProvisionInChildTenants = applicationClient.AutoProvisionInChildTenants,
+            ProvisionedByParentTenantId = applicationClient.ProvisionedByParentTenantId
         };
         return clientDto;
     }
