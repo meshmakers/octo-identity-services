@@ -155,7 +155,23 @@ backfill existing sub-tenants; the operator must explicitly trigger
 `provisionInExistingTenants` for that (or wait for the next service
 startup, which runs the same provisioning loop).
 
-The CLI commands and the Studio UI are tracked under **ADO #4046–#4051**
+**End-to-end coverage (#4046 — done):**
+`tests/IdentityServices.IntegrationTests/Persistence/ClientMirrorProvisioningIntegrationTests.cs`
+exercises the full stack against a Testcontainers-backed MongoDB:
+fresh-child provision, idempotency on repeat, backfill into three
+pre-existing children, secret rotation propagating + version bump,
+client-delete cleanup, tenant-delete tracking-row cleanup. Tests reuse
+the existing `IdentityServicesFixture` and call
+`IDefaultConfigurationCreatorService.SetupAsync(...)` to seed CK models
+into both the system tenant and the new child tenants — this is also the
+real production path, so the integration coverage includes the
+`DefaultConfigurationCreatorService` ↔ `IClientMirrorProvisioningService`
+hookup added in #4043. `ServiceCollectionFixture` now registers
+`AddMigrations(typeof(IdentityServiceConstants).Assembly)` so the same
+constructor parameter that production resolves to `MigrationService` is
+satisfied in tests too.
+
+The CLI commands and the Studio UI are tracked under **ADO #4047–#4051**
 (Epic 3054).
 
 ### Default-Configuration Provisioning
