@@ -10,7 +10,7 @@ public class RtPersistedGrantBuilder
 {
     private readonly RtPersistedGrant _grant = new()
     {
-        RtId = new OctoObjectId(Guid.NewGuid().ToString("N")),
+        RtId = OctoObjectId.GenerateNewId(),
         GrantKey = Guid.NewGuid().ToString("N"),
         GrantType = "refresh_token",
         SubjectId = "default-subject",

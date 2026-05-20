@@ -78,7 +78,7 @@ public class CrossTenantUserProvisioningService(
         // Create a local user for this cross-tenant login
         var user = new RtUser
         {
-            RtId = new OctoObjectId(Guid.NewGuid().ToString("N")),
+            RtId = OctoObjectId.GenerateNewId(),
             UserName = crossTenantUserName,
             NormalizedUserName = crossTenantUserName.ToUpperInvariant(),
             Email = crossTenantResult.Email,
@@ -104,7 +104,7 @@ public class CrossTenantUserProvisioningService(
         {
             mapping = new RtExternalTenantUserMapping
             {
-                RtId = new OctoObjectId(Guid.NewGuid().ToString("N")),
+                RtId = OctoObjectId.GenerateNewId(),
                 SourceTenantId = crossTenantResult.SourceTenantId,
                 SourceUserId = crossTenantResult.SourceUserId,
                 SourceUserName = crossTenantResult.SourceUserName

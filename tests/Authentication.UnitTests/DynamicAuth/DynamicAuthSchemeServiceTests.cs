@@ -31,7 +31,7 @@ public class DynamicAuthSchemeServiceTests
         // Arrange
         var googleProvider = new RtGoogleIdentityProvider
         {
-            RtId = new OctoObjectId(Guid.NewGuid().ToString("N")),
+            RtId = OctoObjectId.GenerateNewId(),
             Name = "Google",
             IsEnabled = true,
             ClientId = "google-client-id",
@@ -54,7 +54,7 @@ public class DynamicAuthSchemeServiceTests
         // Arrange
         var microsoftProvider = new RtMicrosoftIdentityProvider
         {
-            RtId = new OctoObjectId(Guid.NewGuid().ToString("N")),
+            RtId = OctoObjectId.GenerateNewId(),
             Name = "Microsoft",
             IsEnabled = true,
             ClientId = "microsoft-client-id",
@@ -93,19 +93,19 @@ public class DynamicAuthSchemeServiceTests
         {
             new RtGoogleIdentityProvider
             {
-                RtId = new OctoObjectId(Guid.NewGuid().ToString("N")),
+                RtId = OctoObjectId.GenerateNewId(),
                 Name = "Google",
                 IsEnabled = true
             },
             new RtMicrosoftIdentityProvider
             {
-                RtId = new OctoObjectId(Guid.NewGuid().ToString("N")),
+                RtId = OctoObjectId.GenerateNewId(),
                 Name = "Microsoft",
                 IsEnabled = true
             },
             new RtAzureEntraIdIdentityProvider
             {
-                RtId = new OctoObjectId(Guid.NewGuid().ToString("N")),
+                RtId = OctoObjectId.GenerateNewId(),
                 Name = "AzureEntraId",
                 IsEnabled = false
             }

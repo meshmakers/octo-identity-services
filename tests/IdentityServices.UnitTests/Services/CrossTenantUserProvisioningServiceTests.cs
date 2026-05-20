@@ -57,7 +57,7 @@ public class CrossTenantUserProvisioningServiceTests
         var crossTenantResult = CreateCrossTenantResult();
         var existingUser = new RtUser
         {
-            RtId = new OctoObjectId(Guid.NewGuid().ToString("N")),
+            RtId = OctoObjectId.GenerateNewId(),
             UserName = "xt_octosystem_admin@test.com",
             FirstName = "Admin",
             LastName = "User",
@@ -89,7 +89,7 @@ public class CrossTenantUserProvisioningServiceTests
 
         var existingUser = new RtUser
         {
-            RtId = new OctoObjectId(Guid.NewGuid().ToString("N")),
+            RtId = OctoObjectId.GenerateNewId(),
             UserName = "xt_octosystem_admin@test.com",
             FirstName = "OldFirst",
             LastName = "OldLast",
@@ -121,14 +121,14 @@ public class CrossTenantUserProvisioningServiceTests
         var crossTenantResult = CreateCrossTenantResult();
         var existingUser = new RtUser
         {
-            RtId = new OctoObjectId(Guid.NewGuid().ToString("N")),
+            RtId = OctoObjectId.GenerateNewId(),
             UserName = "xt_octosystem_admin@test.com",
             FirstName = "Admin",
             LastName = "User",
             Email = "admin@test.com"
         };
 
-        var roleRtId = new OctoObjectId(Guid.NewGuid().ToString("N"));
+        var roleRtId = OctoObjectId.GenerateNewId();
         var role = new RtRole
         {
             RtId = roleRtId,
@@ -137,7 +137,7 @@ public class CrossTenantUserProvisioningServiceTests
 
         var mapping = new RtExternalTenantUserMapping
         {
-            RtId = new OctoObjectId(Guid.NewGuid().ToString("N")),
+            RtId = OctoObjectId.GenerateNewId(),
             SourceTenantId = "octosystem",
             SourceUserId = "source-user-id",
             SourceUserName = "admin@test.com",
@@ -256,7 +256,7 @@ public class CrossTenantUserProvisioningServiceTests
         var crossTenantResult = CreateCrossTenantResult();
         var existingMapping = new RtExternalTenantUserMapping
         {
-            RtId = new OctoObjectId(Guid.NewGuid().ToString("N")),
+            RtId = OctoObjectId.GenerateNewId(),
             SourceTenantId = "octosystem",
             SourceUserId = "source-user-id",
             SourceUserName = "admin@test.com"

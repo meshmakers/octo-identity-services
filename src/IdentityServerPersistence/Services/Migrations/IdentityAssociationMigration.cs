@@ -207,7 +207,7 @@ internal class IdentityAssociationMigration(
         {
             group = new RtGroup
             {
-                RtId = new OctoObjectId(Guid.NewGuid().ToString("N")),
+                RtId = OctoObjectId.GenerateNewId(),
                 GroupName = CommonConstants.TenantOwnersGroup,
                 NormalizedGroupName = normalizedName,
                 GroupDescription =

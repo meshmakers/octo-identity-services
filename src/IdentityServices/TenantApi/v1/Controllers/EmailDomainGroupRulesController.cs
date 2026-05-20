@@ -63,7 +63,7 @@ public class EmailDomainGroupRulesController(
         [FromBody][Description("The email domain group rule to create.")] EmailDomainGroupRuleDto dto)
     {
         var rule = mapper.Map<RtEmailDomainGroupRule>(dto);
-        rule.RtId = new OctoObjectId(Guid.NewGuid().ToString("N"));
+        rule.RtId = OctoObjectId.GenerateNewId();
 
         await HandleWriteExceptionAsync(async () => await emailDomainGroupRuleStore.StoreAsync(rule));
 

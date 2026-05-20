@@ -8,7 +8,7 @@ public class RtClientBuilder
 {
     private readonly RtClient _client = new()
     {
-        RtId = new OctoObjectId(Guid.NewGuid().ToString("N")),
+        RtId = OctoObjectId.GenerateNewId(),
         ClientId = "default-client",
         ClientName = "Default Client",
         Enabled = true,

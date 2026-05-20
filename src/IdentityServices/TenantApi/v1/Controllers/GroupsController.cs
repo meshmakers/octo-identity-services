@@ -123,7 +123,7 @@ public class GroupsController(IGroupStore groupStore) : ControllerBase
 
         var group = new RtGroup
         {
-            RtId = new OctoObjectId(Guid.NewGuid().ToString("N")),
+            RtId = OctoObjectId.GenerateNewId(),
             GroupName = dto.GroupName,
             NormalizedGroupName = dto.GroupName.ToUpperInvariant(),
             GroupDescription = dto.GroupDescription

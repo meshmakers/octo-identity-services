@@ -8,7 +8,7 @@ public class RtUserBuilder
 {
     private readonly RtUser _user = new()
     {
-        RtId = new OctoObjectId(Guid.NewGuid().ToString("N")),
+        RtId = OctoObjectId.GenerateNewId(),
         UserName = "defaultuser",
         Email = "default@test.com",
         NormalizedUserName = "DEFAULTUSER",
