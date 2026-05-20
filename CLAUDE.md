@@ -136,8 +136,27 @@ back to the primary operation (client update, client delete, tenant delete).
 The next startup-time provisioning loop re-converges the state for any
 mirror that fell behind because of a transient failure.
 
-The management REST endpoints, the CLI commands, and the Studio UI are
-tracked under **ADO #4045–#4051** (Epic 3054).
+**Management REST endpoints (#4045 — done):** all under
+`{tenantId}/v1/clients/{clientId}/...`:
+
+| Method | Path | Purpose |
+|---|---|---|
+| `GET` | `mirrors` | List the sub-tenants this client has been auto-provisioned into. |
+| `POST` | `mirrors/provisionInExistingTenants` | Backfill — provision into every existing sub-tenant of the caller. Requires the client to be flagged (400 otherwise). |
+| `POST` | `mirrors/provisionInTenant?childTenantId=…` | One-shot provision into a specific sub-tenant. |
+| `DELETE` | `mirrors/{childTenantId}` | Remove a single mirror (drops both the child-side `RtClient` and the parent's tracking row). |
+| `PATCH` | `autoProvisionInChildTenants` | Flip the `AutoProvisionInChildTenants` flag on the client without rewriting the full client object. Body: `{ "enabled": true|false }`. |
+
+Backed by `ClientMirrorController` + `ClientAutoProvisionFlagController` in
+`TenantApi/v1/Controllers/`. The `PATCH` flow piggybacks on
+`ClientStore.UpdateAsync` so the post-commit upkeep hook (#4044) fires
+automatically — flipping the flag from `false` → `true` does **not**
+backfill existing sub-tenants; the operator must explicitly trigger
+`provisionInExistingTenants` for that (or wait for the next service
+startup, which runs the same provisioning loop).
+
+The CLI commands and the Studio UI are tracked under **ADO #4046–#4051**
+(Epic 3054).
 
 ### Default-Configuration Provisioning
 
