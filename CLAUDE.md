@@ -78,6 +78,34 @@ The service supports hierarchical cross-tenant authentication where parent-tenan
 
 **Cross-tenant role sync**: When a cross-tenant user logs in (via `FindOrCreateCrossTenantUserAsync`), `SyncMappedRolesAsync` resolves mapped role IDs to role names by querying the tenant repository directly (via `IMultiTenancyResolverService.GetTenantRepository()`), then calls `UserManager.AddToRoleAsync` with the role **name** (not ID). This runs on every login, ensuring existing users get role updates. Important: `RoleManager<RtRole>` must NOT be used for this — it may resolve to the wrong tenant context during cross-tenant login. The tenant repository approach reads from `HttpContext.Items["tenantRepository"]` which is correctly set by the inline middleware.
 
+### Multi-Tenant Client Credentials (Auto-Provisioning) — Phase 1 in flight
+
+Schema groundwork for the cross-tenant ClientCredentials feature lives in CK
+model `System.Identity-2.5.0` (schema version 15):
+
+- `RtClient.AutoProvisionInChildTenants` (bool, default `false`): when set on
+  a parent-tenant client, every new sub-tenant gets a mirror of this client
+  auto-provisioned. Enables a single ClientCredentials identity (typically a
+  CI/CD agent) to reach every tenant on the instance with the same
+  `ClientId` / secret pair, without per-tenant manual setup. Default `false`
+  preserves the existing single-tenant behaviour for every client that
+  pre-dates this feature.
+- `RtClientMirror` (new CK type): one row per (parentClientId × childTenantId)
+  pair. Lives in the **parent tenant's** identity DB and tracks
+  `ParentClientId`, `ParentTenantId`, `ChildTenantId`, `ProvisionedAt`,
+  `SecretHashVersion`. Unique index on `(ParentClientId, ChildTenantId)`.
+  `SecretHashVersion` is a monotonic counter that the parent's secret-rotation
+  consumer bumps on every rotation, so mirrors that fell behind can be
+  detected and re-synced.
+
+The `TenantCreated` consumer that actually populates the mirrors, the upkeep
+consumers (secret rotation / client update / client delete / tenant delete),
+the management REST endpoints, the CLI commands, and the Studio UI are
+tracked under **ADO #4042–#4051** (Epic 3054). Concept lives in
+`octo-communication-controller-services/docs/concepts/cicd-workload-deployment.md`.
+
+### Default-Configuration Provisioning
+
 The Identity CK model, default roles, identity resources, API scopes, API resources, and OIDC clients are provisioned to **all tenants** (not just the system tenant) during startup. This ensures OAuth/OIDC flows work when targeting any tenant. For child tenants, roles are written directly to the child tenant database via `EnsureRoleInChildTenantAsync()` using the same `childRepo` pattern as clients and resources. The identity service writes its data directly to child tenant databases (including the `octo-data-refinery-studio` SPA client when `RefineryStudioUrl` is configured), while other services (asset-repo, bot, etc.) send their data via the Distribution Event Hub. Cross-tenant users receive a `home_tenant_id` claim in their tokens.
 
 ### Admin Provisioning (Cross-Tenant Pre-Provisioning)

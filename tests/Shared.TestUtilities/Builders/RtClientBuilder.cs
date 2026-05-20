@@ -178,5 +178,11 @@ public class RtClientBuilder
         return this;
     }
 
+    public RtClientBuilder WithAutoProvisionInChildTenants(bool enabled = true)
+    {
+        _client.AutoProvisionInChildTenants = enabled;
+        return this;
+    }
+
     public RtClient Build() => _client;
 }

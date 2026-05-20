@@ -1,0 +1,28 @@
+"$schema": "https://schemas.meshmakers.cloud/construction-kit-elements.schema.json"
+types:
+  - typeId: ClientMirror
+    description: "Tracks a ClientCredentials client that the parent tenant has auto-provisioned into a child tenant. Lives in the parent tenant's database. One row per (parentClientId × childTenantId) pair."
+    derivedFromCkTypeId: ${System}/Entity
+    isFinal: true
+    isAbstract: false
+    attributes:
+      - id: ${this}/ClientId
+        name: ParentClientId
+      - id: ${this}/ParentTenantId
+        name: ParentTenantId
+      - id: ${this}/ChildTenantId
+        name: ChildTenantId
+      - id: ${this}/ProvisionedAt
+        name: ProvisionedAt
+      - id: ${this}/SecretHashVersion
+        name: SecretHashVersion
+    indexes:
+      - indexType: Unique
+        fields:
+          - attributePaths:
+              - ParentClientId
+              - ChildTenantId
+      - indexType: Ascending
+        fields:
+          - attributePaths:
+              - ChildTenantId

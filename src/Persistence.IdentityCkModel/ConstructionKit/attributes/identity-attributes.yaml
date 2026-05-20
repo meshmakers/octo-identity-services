@@ -487,3 +487,23 @@ attributes:
     valueType: String
     description: RtId of the group to which matching users are added.
 
+  - id: AutoProvisionInChildTenants
+    valueType: Boolean
+    description: When true, the client is auto-provisioned (mirrored) into every new child tenant of the tenant it lives in. Enables a single client identity (e.g. CI/CD service) to reach many tenants without per-tenant manual setup.
+    defaultValues:
+      - false
+
+  - id: ChildTenantId
+    valueType: String
+    description: The tenant ID of the child tenant in a parent-child mirror relationship.
+
+  - id: ProvisionedAt
+    valueType: DateTime
+    description: UTC timestamp when the mirror was provisioned.
+
+  - id: SecretHashVersion
+    valueType: Int
+    description: Monotonic counter incremented on every secret rotation of the parent client. Used to detect mirrors that fell behind on a rotation.
+    defaultValues:
+      - 0
+
