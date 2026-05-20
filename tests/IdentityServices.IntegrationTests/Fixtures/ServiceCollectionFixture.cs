@@ -1,8 +1,10 @@
+using IdentityServerPersistence;
 using MartinCostello.Logging.XUnit;
 using Meshmakers.Octo.Runtime.Contracts.MongoDb;
 using Meshmakers.Octo.Runtime.Contracts.MongoDb.Configuration;
 using Meshmakers.Octo.Runtime.Contracts.MongoDb.Services;
 using Meshmakers.Octo.Runtime.Engine.MongoDb.Services.Defaults;
+using Meshmakers.Octo.Services.Infrastructure.Migrations;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Xunit;
@@ -30,6 +32,13 @@ public abstract class ServiceCollectionFixture : ITestOutputHelperAccessor, IAsy
 
         // Replace tenant notifications with default implementation (no RabbitMQ in tests)
         Services.AddSingleton<ITenantNotifications, DefaultTenantNotifications>();
+
+        // MigrationService + the identity-service migrations themselves. Production
+        // wires this in Program.cs; tests that exercise DefaultConfigurationCreatorService
+        // (e.g. ClientMirrorProvisioningIntegrationTests) hit a DI failure without it
+        // because the service has a required (nullable but resolved-by-DI) MigrationService
+        // ctor argument.
+        Services.AddMigrations(typeof(IdentityServiceConstants).Assembly);
 
         // Add logging with xUnit output
         Services.AddLogging(loggingBuilder =>
