@@ -54,6 +54,7 @@ public static class RuntimeEngineBuilderExtensions
         builder.Services.AddScoped<IEmailDomainGroupRuleStore, EmailDomainGroupRuleStore>();
         builder.Services.AddScoped<ILoginGroupAssignmentService, LoginGroupAssignmentService>();
         builder.Services.AddScoped<ITenantDiscoveryService, TenantDiscoveryService>();
+        builder.Services.AddScoped<IClientMirrorProvisioningService, ClientMirrorProvisioningService>();
 
         builder.Services.AddSingleton<AttributeStringValueListConverter>();
         builder.Services.AddAutoMapper(cfg =>

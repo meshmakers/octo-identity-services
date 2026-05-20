@@ -98,11 +98,27 @@ model `System.Identity-2.5.0` (schema version 15):
   consumer bumps on every rotation, so mirrors that fell behind can be
   detected and re-synced.
 
-The `TenantCreated` consumer that actually populates the mirrors, the upkeep
-consumers (secret rotation / client update / client delete / tenant delete),
-the management REST endpoints, the CLI commands, and the Studio UI are
-tracked under **ADO #4042–#4051** (Epic 3054). Concept lives in
+**Provisioning service (#4043 — done):**
+`IClientMirrorProvisioningService.ProvisionForChildTenantAsync(parentTenantId, childTenantId)`
+in `IdentityServerPersistence/Services/` walks the parent's flagged clients
+and (idempotently) materialises each as an `RtClient` in the child tenant's
+identity DB, then writes a tracking `RtClientMirror` row in the parent. Uses
+`ISystemContext.TryFindTenantRepositoryAsync` for both repos. The mirror's
+`AutoProvisionInChildTenants` is forced to `false` so a mirror can never
+itself become a source of further mirroring.
+
+**Setup-time hook:** `DefaultConfigurationCreatorService.SetupTenantAsync`
+invokes `ProvisionForChildTenantAsync(systemContext.TenantId, tenantId)` for
+every child tenant. Runs on every startup → mirrors are also backfilled
+automatically for tenants that pre-date the flag being set on the parent.
+Provisioning failures are logged but never break tenant setup. **Open
+question (intentional):** parent is hard-wired to `systemContext.TenantId` —
+nested customer sub-tenants are out of scope for v1, see
 `octo-communication-controller-services/docs/concepts/cicd-workload-deployment.md`.
+
+The upkeep consumers (secret rotation / client update / client delete /
+tenant delete), the management REST endpoints, the CLI commands, and the
+Studio UI are tracked under **ADO #4044–#4051** (Epic 3054).
 
 ### Default-Configuration Provisioning
 
