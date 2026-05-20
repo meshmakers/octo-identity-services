@@ -201,4 +201,164 @@ public class ClientMirrorProvisioningServiceTests
                 _childSession, Arg.Any<RtEntityQueryOptions>())
             .Returns(queryResult);
     }
+
+    // ----- SyncMirrorsForClientAsync ---------------------------------------
+
+    [Fact]
+    public async Task Sync_NoMirrorsForClient_ReturnsZeroNoUpdates()
+    {
+        var client = new RtClientBuilder()
+            .WithClientId("ci-deploy")
+            .WithAutoProvisionInChildTenants()
+            .Build();
+        SetupParentMirrorLookup(client.ClientId, Array.Empty<RtClientMirror>());
+
+        var result = await _sut.SyncMirrorsForClientAsync(ParentTenantId, client);
+
+        result.Should().Be(new ClientMirrorSyncResult(0, 0));
+        await _childRepo.DidNotReceiveWithAnyArgs()
+            .ReplaceOneRtEntityByIdAsync(default!, default!, default(RtClient)!);
+    }
+
+    [Fact]
+    public async Task Sync_OneMirror_PropagatesAndBumpsVersion()
+    {
+        var client = new RtClientBuilder()
+            .WithClientId("ci-deploy")
+            .WithSecret("SharedSecret", "rotated-hash")
+            .WithAutoProvisionInChildTenants()
+            .Build();
+        var existingMirror = new RtClientMirrorBuilder()
+            .WithParentClientId("ci-deploy")
+            .WithParentTenantId(ParentTenantId)
+            .WithChildTenantId(ChildTenantId)
+            .WithSecretHashVersion(2)
+            .Build();
+        SetupParentMirrorLookup(client.ClientId, new[] { existingMirror });
+
+        // Child has an existing mirror client (from a previous provisioning) → replace path.
+        var staleChildClient = new RtClientBuilder()
+            .WithClientId("ci-deploy")
+            .WithSecret("SharedSecret", "stale-hash")
+            .Build();
+        SetupChildClientLookup(client.ClientId, new[] { staleChildClient });
+
+        var result = await _sut.SyncMirrorsForClientAsync(ParentTenantId, client);
+
+        result.Should().Be(new ClientMirrorSyncResult(1, 0));
+        await _childRepo.Received(1).ReplaceOneRtEntityByIdAsync(
+            _childSession,
+            staleChildClient.RtId,
+            Arg.Is<RtClient>(c => c.ClientId == "ci-deploy"));
+        await _parentRepo.Received(1).ReplaceOneRtEntityByIdAsync(
+            _parentSession,
+            existingMirror.RtId,
+            Arg.Is<RtClientMirror>(m => m.SecretHashVersion == 3));
+    }
+
+    [Fact]
+    public async Task Sync_ChildTenantMissing_CountsAsFailedNoCrash()
+    {
+        var client = new RtClientBuilder()
+            .WithClientId("ci-deploy")
+            .WithAutoProvisionInChildTenants()
+            .Build();
+        var lostChildMirror = new RtClientMirrorBuilder()
+            .WithParentClientId("ci-deploy")
+            .WithChildTenantId("gone-tenant")
+            .Build();
+        SetupParentMirrorLookup(client.ClientId, new[] { lostChildMirror });
+        _systemContext.TryFindTenantRepositoryAsync("gone-tenant").Returns((ITenantRepository?)null);
+
+        var result = await _sut.SyncMirrorsForClientAsync(ParentTenantId, client);
+
+        result.Should().Be(new ClientMirrorSyncResult(0, 1));
+    }
+
+    // ----- RemoveMirrorsForClientAsync -------------------------------------
+
+    [Fact]
+    public async Task RemoveForClient_NoMirrors_ReturnsZero()
+    {
+        SetupParentMirrorLookup("ci-deploy", Array.Empty<RtClientMirror>());
+
+        var result = await _sut.RemoveMirrorsForClientAsync(ParentTenantId, "ci-deploy");
+
+        result.Should().Be(new ClientMirrorCleanupResult(0, 0));
+    }
+
+    [Fact]
+    public async Task RemoveForClient_DropsChildClientAndTrackingRow()
+    {
+        var mirror = new RtClientMirrorBuilder()
+            .WithParentClientId("ci-deploy")
+            .WithChildTenantId(ChildTenantId)
+            .Build();
+        SetupParentMirrorLookup("ci-deploy", new[] { mirror });
+        var childClient = new RtClientBuilder().WithClientId("ci-deploy").Build();
+        SetupChildClientLookup("ci-deploy", new[] { childClient });
+
+        var result = await _sut.RemoveMirrorsForClientAsync(ParentTenantId, "ci-deploy");
+
+        result.Should().Be(new ClientMirrorCleanupResult(1, 0));
+        await _childRepo.Received(1).DeleteOneRtEntityByRtIdAsync<RtClient>(
+            _childSession, childClient.RtId, Arg.Any<DeleteOptions>());
+        await _parentRepo.Received(1).DeleteOneRtEntityByRtIdAsync<RtClientMirror>(
+            _parentSession, mirror.RtId, Arg.Any<DeleteOptions>());
+    }
+
+    [Fact]
+    public async Task RemoveForClient_ChildTenantGone_StillRemovesTrackingRow()
+    {
+        var mirror = new RtClientMirrorBuilder()
+            .WithParentClientId("ci-deploy")
+            .WithChildTenantId("gone-tenant")
+            .Build();
+        SetupParentMirrorLookup("ci-deploy", new[] { mirror });
+        _systemContext.TryFindTenantRepositoryAsync("gone-tenant").Returns((ITenantRepository?)null);
+
+        var result = await _sut.RemoveMirrorsForClientAsync(ParentTenantId, "ci-deploy");
+
+        result.MirrorsRemoved.Should().Be(1);
+        await _parentRepo.Received(1).DeleteOneRtEntityByRtIdAsync<RtClientMirror>(
+            _parentSession, mirror.RtId, Arg.Any<DeleteOptions>());
+    }
+
+    // ----- RemoveMirrorsForChildTenantAsync --------------------------------
+
+    [Fact]
+    public async Task RemoveForChildTenant_DropsAllRowsPointingAtTenant()
+    {
+        var mirrorA = new RtClientMirrorBuilder()
+            .WithParentClientId("ci-deploy")
+            .WithChildTenantId(ChildTenantId)
+            .Build();
+        var mirrorB = new RtClientMirrorBuilder()
+            .WithParentClientId("ci-watcher")
+            .WithChildTenantId(ChildTenantId)
+            .Build();
+        var queryResult = Substitute.For<IResultSet<RtClientMirror>>();
+        queryResult.Items.Returns(new[] { mirrorA, mirrorB });
+        _parentRepo.GetRtEntitiesByTypeAsync<RtClientMirror>(
+                _parentSession, Arg.Any<RtEntityQueryOptions>())
+            .Returns(queryResult);
+
+        var removed = await _sut.RemoveMirrorsForChildTenantAsync(ParentTenantId, ChildTenantId);
+
+        removed.Should().Be(2);
+        await _parentRepo.Received(1).DeleteOneRtEntityByRtIdAsync<RtClientMirror>(
+            _parentSession, mirrorA.RtId, Arg.Any<DeleteOptions>());
+        await _parentRepo.Received(1).DeleteOneRtEntityByRtIdAsync<RtClientMirror>(
+            _parentSession, mirrorB.RtId, Arg.Any<DeleteOptions>());
+    }
+
+    [Fact]
+    public async Task RemoveForChildTenant_ParentMissing_ReturnsZero()
+    {
+        _systemContext.TryFindTenantRepositoryAsync(ParentTenantId).Returns((ITenantRepository?)null);
+
+        var removed = await _sut.RemoveMirrorsForChildTenantAsync(ParentTenantId, ChildTenantId);
+
+        removed.Should().Be(0);
+    }
 }

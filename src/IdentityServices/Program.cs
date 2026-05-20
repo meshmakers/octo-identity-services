@@ -141,6 +141,7 @@ try
         {
             c.AddBroadcastEventConsumer<IdentityProviderUpdateConsumer, IdentityProviderUpdate>();
             c.AddBroadcastEventConsumer<IdentityCorsClientsUpdateConsumer, CorsClientsUpdate>();
+            c.AddBroadcastEventConsumer<IdentityTenantManagementConsumer, PreDeleteTenant>();
 
             c.AddCommandConsumer<CreateIdentityDataCommandRequestConsumer, CreateIdentityDataCommandRequest>(
                 QueueNames.CreateIdentityDataCommand);

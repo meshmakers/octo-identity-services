@@ -131,6 +131,233 @@ public class ClientMirrorProvisioningService(
             AlreadyPresent: alreadyPresent);
     }
 
+    public async Task<ClientMirrorSyncResult> SyncMirrorsForClientAsync(
+        string parentTenantId, RtClient parentClient)
+    {
+        if (string.IsNullOrWhiteSpace(parentTenantId))
+        {
+            throw new ArgumentException("Parent tenant id is required.", nameof(parentTenantId));
+        }
+
+        ArgumentNullException.ThrowIfNull(parentClient);
+
+        if (string.IsNullOrWhiteSpace(parentClient.ClientId))
+        {
+            throw new ArgumentException("Parent client must have a ClientId.", nameof(parentClient));
+        }
+
+        var parentRepo = await systemContext.TryFindTenantRepositoryAsync(parentTenantId);
+        if (parentRepo == null)
+        {
+            logger.LogWarning(
+                "Skipping mirror sync: parent tenant '{ParentTenantId}' not found",
+                parentTenantId);
+            return new ClientMirrorSyncResult(0, 0);
+        }
+
+        using var parentSession = await parentRepo.GetSessionAsync();
+        var mirrors = await GetMirrorsForClientAsync(parentRepo, parentSession, parentClient.ClientId);
+
+        if (mirrors.Count == 0)
+        {
+            return new ClientMirrorSyncResult(0, 0);
+        }
+
+        var synced = 0;
+        var failed = 0;
+
+        foreach (var mirror in mirrors)
+        {
+            try
+            {
+                var childRepo = await systemContext.TryFindTenantRepositoryAsync(mirror.ChildTenantId);
+                if (childRepo == null)
+                {
+                    logger.LogWarning(
+                        "Mirror sync: child tenant '{ChildTenantId}' not found, leaving stale tracking row",
+                        mirror.ChildTenantId);
+                    failed++;
+                    continue;
+                }
+
+                using var childSession = await childRepo.GetSessionAsync();
+                var updatedMirror = CreateMirrorClient(parentClient);
+                await UpsertClientInChildAsync(childRepo, childSession, updatedMirror);
+
+                mirror.SecretHashVersion += 1;
+                await parentRepo.ReplaceOneRtEntityByIdAsync(parentSession, mirror.RtId, mirror);
+
+                synced++;
+                logger.LogInformation(
+                    "Synced client mirror: clientId='{ClientId}' parent='{ParentTenantId}' child='{ChildTenantId}' version={Version}",
+                    parentClient.ClientId, parentTenantId, mirror.ChildTenantId, mirror.SecretHashVersion);
+            }
+            catch (Exception ex)
+            {
+                failed++;
+                logger.LogError(ex,
+                    "Failed to sync mirror clientId='{ClientId}' into child '{ChildTenantId}'",
+                    parentClient.ClientId, mirror.ChildTenantId);
+            }
+        }
+
+        return new ClientMirrorSyncResult(synced, failed);
+    }
+
+    public async Task<ClientMirrorCleanupResult> RemoveMirrorsForClientAsync(
+        string parentTenantId, string parentClientId)
+    {
+        if (string.IsNullOrWhiteSpace(parentTenantId))
+        {
+            throw new ArgumentException("Parent tenant id is required.", nameof(parentTenantId));
+        }
+
+        if (string.IsNullOrWhiteSpace(parentClientId))
+        {
+            throw new ArgumentException("Parent client id is required.", nameof(parentClientId));
+        }
+
+        var parentRepo = await systemContext.TryFindTenantRepositoryAsync(parentTenantId);
+        if (parentRepo == null)
+        {
+            logger.LogWarning(
+                "Skipping mirror removal: parent tenant '{ParentTenantId}' not found",
+                parentTenantId);
+            return new ClientMirrorCleanupResult(0, 0);
+        }
+
+        using var parentSession = await parentRepo.GetSessionAsync();
+        var mirrors = await GetMirrorsForClientAsync(parentRepo, parentSession, parentClientId);
+
+        if (mirrors.Count == 0)
+        {
+            return new ClientMirrorCleanupResult(0, 0);
+        }
+
+        var removed = 0;
+        var failed = 0;
+
+        foreach (var mirror in mirrors)
+        {
+            try
+            {
+                var childRepo = await systemContext.TryFindTenantRepositoryAsync(mirror.ChildTenantId);
+                if (childRepo != null)
+                {
+                    using var childSession = await childRepo.GetSessionAsync();
+                    await DeleteClientFromChildAsync(childRepo, childSession, parentClientId);
+                }
+                // If the child tenant is gone, the client is gone too — just drop the
+                // tracking row. RemoveMirrorsForChildTenantAsync would otherwise need to
+                // run; doing it here keeps the parent-side state consistent regardless.
+
+                await parentRepo.DeleteOneRtEntityByRtIdAsync<RtClientMirror>(
+                    parentSession, mirror.RtId, DeleteOptions.Erase);
+
+                removed++;
+                logger.LogInformation(
+                    "Removed client mirror: clientId='{ClientId}' parent='{ParentTenantId}' child='{ChildTenantId}'",
+                    parentClientId, parentTenantId, mirror.ChildTenantId);
+            }
+            catch (Exception ex)
+            {
+                failed++;
+                logger.LogError(ex,
+                    "Failed to remove mirror clientId='{ClientId}' in child '{ChildTenantId}'",
+                    parentClientId, mirror.ChildTenantId);
+            }
+        }
+
+        return new ClientMirrorCleanupResult(removed, failed);
+    }
+
+    public async Task<int> RemoveMirrorsForChildTenantAsync(
+        string parentTenantId, string childTenantId)
+    {
+        if (string.IsNullOrWhiteSpace(parentTenantId))
+        {
+            throw new ArgumentException("Parent tenant id is required.", nameof(parentTenantId));
+        }
+
+        if (string.IsNullOrWhiteSpace(childTenantId))
+        {
+            throw new ArgumentException("Child tenant id is required.", nameof(childTenantId));
+        }
+
+        var parentRepo = await systemContext.TryFindTenantRepositoryAsync(parentTenantId);
+        if (parentRepo == null)
+        {
+            logger.LogWarning(
+                "Skipping mirror-by-tenant cleanup: parent tenant '{ParentTenantId}' not found",
+                parentTenantId);
+            return 0;
+        }
+
+        using var parentSession = await parentRepo.GetSessionAsync();
+        var result = await parentRepo.GetRtEntitiesByTypeAsync<RtClientMirror>(
+            parentSession,
+            RtEntityQueryOptions.Create()
+                .FieldFilter(
+                    nameof(RtClientMirror.ChildTenantId),
+                    FieldFilterOperator.Equals,
+                    childTenantId));
+
+        var mirrors = result.Items.ToList();
+        var removed = 0;
+        foreach (var mirror in mirrors)
+        {
+            try
+            {
+                await parentRepo.DeleteOneRtEntityByRtIdAsync<RtClientMirror>(
+                    parentSession, mirror.RtId, DeleteOptions.Erase);
+                removed++;
+            }
+            catch (Exception ex)
+            {
+                logger.LogError(ex,
+                    "Failed to drop mirror tracking row {RtId} for child '{ChildTenantId}'",
+                    mirror.RtId, childTenantId);
+            }
+        }
+
+        if (removed > 0)
+        {
+            logger.LogInformation(
+                "Dropped {Count} mirror tracking row(s) for deleted child tenant '{ChildTenantId}' (parent '{ParentTenantId}')",
+                removed, childTenantId, parentTenantId);
+        }
+
+        return removed;
+    }
+
+    private static async Task<List<RtClientMirror>> GetMirrorsForClientAsync(
+        ITenantRepository parentRepo, IOctoSession parentSession, string parentClientId)
+    {
+        var result = await parentRepo.GetRtEntitiesByTypeAsync<RtClientMirror>(
+            parentSession,
+            RtEntityQueryOptions.Create()
+                .FieldFilter(
+                    nameof(RtClientMirror.ParentClientId),
+                    FieldFilterOperator.Equals,
+                    parentClientId));
+        return result.Items.ToList();
+    }
+
+    private static async Task DeleteClientFromChildAsync(
+        ITenantRepository childRepo, IOctoSession childSession, string clientId)
+    {
+        var existing = await childRepo.GetRtEntitiesByTypeAsync<RtClient>(
+            childSession,
+            RtEntityQueryOptions.Create()
+                .FieldFilter(nameof(RtClient.ClientId), FieldFilterOperator.Equals, clientId));
+        var found = existing.Items.FirstOrDefault();
+        if (found != null)
+        {
+            await childRepo.DeleteOneRtEntityByRtIdAsync<RtClient>(
+                childSession, found.RtId, DeleteOptions.Erase);
+        }
+    }
+
     /// <summary>
     /// Returns a copy of the parent client suitable for insertion into the child tenant's DB:
     /// fresh <c>RtId</c>, identical <c>ClientId</c> + secrets + scopes + everything else.
