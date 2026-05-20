@@ -117,7 +117,7 @@ public class AdminProvisioningController(
 
         var mapping = new RtExternalTenantUserMapping
         {
-            RtId = new OctoObjectId(Guid.NewGuid().ToString("N")),
+            RtId = OctoObjectId.GenerateNewId(),
             SourceTenantId = dto.SourceTenantId,
             SourceUserId = dto.SourceUserId,
             SourceUserName = dto.SourceUserName,
@@ -266,7 +266,7 @@ public class AdminProvisioningController(
 
         var mapping = new RtExternalTenantUserMapping
         {
-            RtId = new OctoObjectId(Guid.NewGuid().ToString("N")),
+            RtId = OctoObjectId.GenerateNewId(),
             SourceTenantId = tenantId,
             SourceUserId = userId,
             SourceUserName = userName,

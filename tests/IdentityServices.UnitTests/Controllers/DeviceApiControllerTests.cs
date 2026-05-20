@@ -138,13 +138,14 @@ public class DeviceApiControllerTests
     public async Task Authorize_WithLocalUser_SucceedsWithoutCrossTenantProvisioning()
     {
         // Arrange
-        var userId = Guid.NewGuid().ToString("N");
+        var userRtId = OctoObjectId.GenerateNewId();
+        var userId = userRtId.ToString();
         SetupControllerContext("meshtest", CreateAuthenticatedUser(userId));
         SetupDeviceInteractionReturnsContext("valid-code");
 
         var localUser = new RtUser
         {
-            RtId = new OctoObjectId(userId),
+            RtId = userRtId,
             UserName = "localuser"
         };
         _userManager.FindByIdAsync(userId).Returns(localUser);
@@ -190,7 +191,7 @@ public class DeviceApiControllerTests
         // Tenant has an OctoTenantIdentityProvider pointing to octosystem
         var provider = new RtOctoTenantIdentityProvider
         {
-            RtId = new OctoObjectId(Guid.NewGuid().ToString("N")),
+            RtId = OctoObjectId.GenerateNewId(),
             IsEnabled = true,
             ParentTenantId = "octosystem"
         };
@@ -211,7 +212,7 @@ public class DeviceApiControllerTests
         // Shadow user is provisioned
         var shadowUser = new RtUser
         {
-            RtId = new OctoObjectId(Guid.NewGuid().ToString("N")),
+            RtId = OctoObjectId.GenerateNewId(),
             UserName = "xt_octosystem_admin@test.com"
         };
         _crossTenantUserProvisioningService
@@ -252,7 +253,7 @@ public class DeviceApiControllerTests
 
         var provider = new RtOctoTenantIdentityProvider
         {
-            RtId = new OctoObjectId(Guid.NewGuid().ToString("N")),
+            RtId = OctoObjectId.GenerateNewId(),
             IsEnabled = true,
             ParentTenantId = "octosystem"
         };
@@ -291,7 +292,7 @@ public class DeviceApiControllerTests
 
         var provider = new RtOctoTenantIdentityProvider
         {
-            RtId = new OctoObjectId(Guid.NewGuid().ToString("N")),
+            RtId = OctoObjectId.GenerateNewId(),
             IsEnabled = true,
             ParentTenantId = "octosystem"
         };
@@ -366,7 +367,7 @@ public class DeviceApiControllerTests
         // Provider is disabled
         var disabledProvider = new RtOctoTenantIdentityProvider
         {
-            RtId = new OctoObjectId(Guid.NewGuid().ToString("N")),
+            RtId = OctoObjectId.GenerateNewId(),
             IsEnabled = false,
             ParentTenantId = "octosystem"
         };

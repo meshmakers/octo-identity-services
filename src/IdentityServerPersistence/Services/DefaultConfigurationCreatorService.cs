@@ -341,7 +341,7 @@ internal class DefaultConfigurationCreatorService(
         {
             var tenantOwnersGroup = new RtGroup
             {
-                RtId = new OctoObjectId(Guid.NewGuid().ToString("N")),
+                RtId = OctoObjectId.GenerateNewId(),
                 GroupName = CommonConstants.TenantOwnersGroup,
                 NormalizedGroupName = normalizedName,
                 GroupDescription = "Default group with all roles assigned. Members inherit all tenant permissions."
@@ -906,12 +906,12 @@ internal class DefaultConfigurationCreatorService(
         {
             group = new RtGroup
             {
-                RtId = new OctoObjectId(Guid.NewGuid().ToString("N")),
+                RtId = OctoObjectId.GenerateNewId(),
                 GroupName = CommonConstants.TenantOwnersGroup,
                 NormalizedGroupName = normalizedName,
                 GroupDescription = "Default group with all roles assigned. Members inherit all tenant permissions."
             };
-            await childRepo.InsertOneRtEntityAsync(session, group);
+    await childRepo.InsertOneRtEntityAsync(session, group);
         }
         else
         {

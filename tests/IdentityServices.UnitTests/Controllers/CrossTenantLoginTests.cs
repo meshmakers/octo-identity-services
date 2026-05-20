@@ -210,7 +210,7 @@ public class CrossTenantLoginTests
 
         var localUser = new RtUser
         {
-            RtId = new OctoObjectId(Guid.NewGuid().ToString("N")),
+            RtId = OctoObjectId.GenerateNewId(),
             UserName = "xt_OctoSystem_admin"
         };
         _crossTenantUserProvisioningService.FindOrCreateCrossTenantUserAsync(
@@ -329,7 +329,7 @@ public class CrossTenantLoginTests
 
         var localUser = new RtUser
         {
-            RtId = new OctoObjectId(Guid.NewGuid().ToString("N")),
+            RtId = OctoObjectId.GenerateNewId(),
             UserName = "xt_OctoSystem_admin"
         };
         _crossTenantUserProvisioningService.FindOrCreateCrossTenantUserAsync(

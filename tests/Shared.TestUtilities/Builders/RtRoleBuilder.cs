@@ -8,7 +8,7 @@ public class RtRoleBuilder
 {
     private readonly RtRole _role = new()
     {
-        RtId = new OctoObjectId(Guid.NewGuid().ToString("N")),
+        RtId = OctoObjectId.GenerateNewId(),
         Name = "DefaultRole",
         NormalizedName = "DEFAULTROLE"
     };

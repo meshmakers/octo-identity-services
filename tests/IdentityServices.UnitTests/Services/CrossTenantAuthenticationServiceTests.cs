@@ -264,7 +264,7 @@ public class CrossTenantAuthenticationServiceTests
     {
         return new RtOctoTenantIdentityProvider
         {
-            RtId = new OctoObjectId(Guid.NewGuid().ToString("N")),
+            RtId = OctoObjectId.GenerateNewId(),
             Name = $"Provider_{parentTenantId}",
             IsEnabled = isEnabled,
             ParentTenantId = parentTenantId
@@ -275,7 +275,7 @@ public class CrossTenantAuthenticationServiceTests
     {
         return new RtUser
         {
-            RtId = new OctoObjectId(Guid.NewGuid().ToString("N")),
+            RtId = OctoObjectId.GenerateNewId(),
             UserName = userName,
             NormalizedUserName = userName.ToUpperInvariant(),
             PasswordHash = "hashed-password",

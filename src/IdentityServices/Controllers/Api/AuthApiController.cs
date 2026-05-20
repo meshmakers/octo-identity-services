@@ -533,7 +533,7 @@ public class AuthApiController(
 
         var user = new RtUser
         {
-            RtId = new OctoObjectId(Guid.NewGuid().ToString("N")),
+            RtId = OctoObjectId.GenerateNewId(),
             UserName = userName,
             NormalizedUserName = userName.ToUpperInvariant(),
             Email = email,
