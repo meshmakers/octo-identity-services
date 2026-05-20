@@ -223,7 +223,8 @@ public class ClientsController : ControllerBase
             FrontChannelLogoutSessionRequired = applicationClient.FrontChannelLogoutSessionRequired,
             BackChannelLogoutUri = applicationClient.BackChannelLogoutUri,
             BackChannelLogoutSessionRequired = applicationClient.BackChannelLogoutSessionRequired,
-            RequireClientSecret = applicationClient.RequireClientSecret
+            RequireClientSecret = applicationClient.RequireClientSecret,
+            AutoProvisionInChildTenants = applicationClient.AutoProvisionInChildTenants
         };
         return clientDto;
     }
@@ -322,6 +323,17 @@ public class ClientsController : ControllerBase
         if (clientDto.BackChannelLogoutSessionRequired.HasValue)
         {
             applicationClient.BackChannelLogoutSessionRequired = clientDto.BackChannelLogoutSessionRequired.Value;
+        }
+
+        // Phase 1 multi-tenant client credentials (#4042–#4047). When the caller sets
+        // AutoProvisionInChildTenants on POST or PUT, it lands on the RtClient.
+        // ClientStore.UpdateAsync's post-commit hook (#4044) then fans out to mirrors.
+        // For initial CREATE the flag is recorded but no backfill happens until the
+        // operator triggers provisionInExistingTenants or a new tenant is created —
+        // matches the PATCH behaviour for symmetry.
+        if (clientDto.AutoProvisionInChildTenants.HasValue)
+        {
+            applicationClient.AutoProvisionInChildTenants = clientDto.AutoProvisionInChildTenants.Value;
         }
     }
 }
