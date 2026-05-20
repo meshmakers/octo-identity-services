@@ -37,6 +37,7 @@ internal class DefaultConfigurationCreatorService(
     IGroupStore groupStore,
     IOptions<OctoIdentityServicesOptions> octoIdentityOptions,
     MigrationService? migrationService,
+    IClientMirrorProvisioningService? clientMirrorProvisioningService = null,
     ICkModelUpgradeService? ckModelUpgradeService = null,
     IRuntimeRepositoryProvider? runtimeRepositoryProvider = null)
     : DefaultConfigurationCreatorServiceBase(logger), IConfigurationService
@@ -119,6 +120,41 @@ internal class DefaultConfigurationCreatorService(
             childSession.StartTransaction();
             await CreateTenantConfiguration(childSession, childRepo);
             await childSession.CommitTransactionAsync();
+
+            // Multi-tenant client credentials (Phase 1 — ADO #4043): mirror every
+            // system-tenant client that is flagged `AutoProvisionInChildTenants` into
+            // this child tenant. Idempotent — runs on every startup so backfill happens
+            // naturally for tenants that pre-date the flag being set.
+            //
+            // Parent resolution: hard-wired to the system tenant for v1. Nested customer
+            // sub-tenants (a child of a child) is an open question documented in
+            // `octo-communication-controller-services/docs/concepts/cicd-workload-deployment.md`.
+            if (clientMirrorProvisioningService != null)
+            {
+                try
+                {
+                    var result = await clientMirrorProvisioningService
+                        .ProvisionForChildTenantAsync(systemContext.TenantId, tenantId);
+                    if (result.NewlyProvisioned > 0 || result.AlreadyPresent > 0)
+                    {
+                        logger.LogInformation(
+                            "Client mirror provisioning for '{TenantId}': considered={Considered}, " +
+                            "newly provisioned={New}, already present={Existing}",
+                            tenantId,
+                            result.FlaggedClientsConsidered,
+                            result.NewlyProvisioned,
+                            result.AlreadyPresent);
+                    }
+                }
+                catch (Exception ex)
+                {
+                    // Provisioning failure must not break tenant setup. Surface it loudly,
+                    // operator can re-trigger via the backfill endpoint (#4045) once that lands.
+                    logger.LogError(ex,
+                        "Client mirror provisioning failed for child tenant '{TenantId}'", tenantId);
+                }
+            }
+
             return;
         }
 
