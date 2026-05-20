@@ -51,6 +51,13 @@ public class ClientMirrorProvisioningIntegrationTests : IClassFixture<IdentitySe
             "the flagged client must reach the new child");
         (await ChildHasClientAsync(systemContext, childTenantId, clientId)).Should().BeTrue();
         (await ParentHasMirrorAsync(systemContext, clientId, childTenantId)).Should().BeTrue();
+
+        // The child-side mirror must carry the marker so sub-tenant admins know
+        // it's not their own client (#4050).
+        var childClient = await FindChildClientAsync(systemContext, childTenantId, clientId);
+        childClient!.ProvisionedByParentTenantId.Should().Be(systemContext.TenantId);
+        childClient.AutoProvisionInChildTenants.Should().BeFalse(
+            "a mirror must never itself trigger further mirroring");
     }
 
     [Fact]
