@@ -116,9 +116,28 @@ question (intentional):** parent is hard-wired to `systemContext.TenantId` —
 nested customer sub-tenants are out of scope for v1, see
 `octo-communication-controller-services/docs/concepts/cicd-workload-deployment.md`.
 
-The upkeep consumers (secret rotation / client update / client delete /
-tenant delete), the management REST endpoints, the CLI commands, and the
-Studio UI are tracked under **ADO #4044–#4051** (Epic 3054).
+**Upkeep hooks (#4044 — done):**
+
+- `ClientStore.UpdateAsync` fires `SyncMirrorsForClientAsync` after commit
+  when the post-update client carries `AutoProvisionInChildTenants=true`.
+  Propagates secret rotation / scope / lifetime changes onto every mirror
+  and bumps each mirror's `SecretHashVersion`.
+- `ClientStore.DeleteAsync` fires `RemoveMirrorsForClientAsync` after commit
+  when the deleted client was flagged. Removes the child-tenant
+  `RtClient` records and the parent's tracking rows together.
+- `IdentityTenantManagementConsumer` (in `IdentityServices/Consumers/`)
+  subscribes to `PreDeleteTenant` and calls
+  `RemoveMirrorsForChildTenantAsync(systemContext.TenantId, deletedTenantId)`.
+  The mirror's child-side `RtClient` is gone with the tenant DB, so this
+  only drops the parent's tracking rows.
+
+All three paths are best-effort: failures are logged and **do not** bubble
+back to the primary operation (client update, client delete, tenant delete).
+The next startup-time provisioning loop re-converges the state for any
+mirror that fell behind because of a transient failure.
+
+The management REST endpoints, the CLI commands, and the Studio UI are
+tracked under **ADO #4045–#4051** (Epic 3054).
 
 ### Default-Configuration Provisioning
 
