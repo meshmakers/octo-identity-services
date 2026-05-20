@@ -4,6 +4,7 @@ using Asp.Versioning;
 using IdentityModel;
 using IdentityServerPersistence;
 using IdentityServerPersistence.SystemStores;
+using Meshmakers.Octo.Communication.Contracts.DataTransferObjects;
 using Meshmakers.Octo.ConstructionKit.Contracts;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -463,31 +464,3 @@ public class GroupsController(IGroupStore groupStore) : ControllerBase
     }
 }
 
-public record GroupDto
-{
-    public OctoObjectId? Id { get; init; }
-    public string GroupName { get; init; } = string.Empty;
-    public string? GroupDescription { get; init; }
-    public List<string> RoleIds { get; init; } = [];
-    public List<string> MemberUserIds { get; init; } = [];
-    public List<string> MemberExternalUserIds { get; init; } = [];
-    public List<string> MemberGroupIds { get; init; } = [];
-}
-
-public record CreateGroupDto
-{
-    [Required]
-    public string GroupName { get; init; } = string.Empty;
-
-    public string? GroupDescription { get; init; }
-
-    public List<string>? RoleIds { get; init; }
-}
-
-public record UpdateGroupDto
-{
-    [Required]
-    public string GroupName { get; init; } = string.Empty;
-
-    public string? GroupDescription { get; init; }
-}

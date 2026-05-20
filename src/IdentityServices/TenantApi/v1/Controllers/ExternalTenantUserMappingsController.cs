@@ -4,6 +4,7 @@ using Asp.Versioning;
 using IdentityModel;
 using IdentityServerPersistence;
 using IdentityServerPersistence.SystemStores;
+using Meshmakers.Octo.Communication.Contracts.DataTransferObjects;
 using Meshmakers.Octo.Communication.Contracts.DataTransferObjects.ApiErrors;
 using Meshmakers.Octo.ConstructionKit.Contracts;
 using Meshmakers.Octo.Runtime.Contracts.RepositoryEntities;
@@ -163,31 +164,3 @@ public class ExternalTenantUserMappingsController(
         };
 }
 
-public record ExternalTenantUserMappingDto
-{
-    public OctoObjectId? Id { get; init; }
-    public string SourceTenantId { get; init; } = string.Empty;
-    public string SourceUserId { get; init; } = string.Empty;
-    public string SourceUserName { get; init; } = string.Empty;
-    public List<string> RoleIds { get; init; } = [];
-    public List<string> GroupNames { get; init; } = [];
-}
-
-public record CreateExternalTenantUserMappingDto
-{
-    [Required]
-    public string SourceTenantId { get; init; } = string.Empty;
-
-    [Required]
-    public string SourceUserId { get; init; } = string.Empty;
-
-    [Required]
-    public string SourceUserName { get; init; } = string.Empty;
-
-    public List<string>? RoleIds { get; init; }
-}
-
-public record UpdateExternalTenantUserMappingDto
-{
-    public List<string>? RoleIds { get; init; }
-}
