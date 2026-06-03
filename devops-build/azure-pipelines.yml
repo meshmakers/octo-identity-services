@@ -26,11 +26,20 @@ variables:
   - name: isRelease
     value: ${{ startsWith(variables['Build.SourceBranch'], 'refs/tags/r') }}
   - name: isMain
-    value: ${{ eq(variables['Build.SourceBranch'], 'refs/heads/main') }}    
+    value: ${{ eq(variables['Build.SourceBranch'], 'refs/heads/main') }}
   - name: isTest
     value: ${{ startsWith(variables['Build.SourceBranch'], 'refs/heads/test') }}
   - name: OctoLocalCatalogIsEnabled
     value: 'false'
+  # Public catalog publishing is restricted to main and release tags. Feature/dev branches
+  # build and validate but must never write to the shared gh-pages catalog (incident:
+  # Industry.Basic-2.1.1 pinned by downstream models without itself being published).
+  - ${{ if or(eq(variables['Build.SourceBranch'], 'refs/heads/main'), startsWith(variables['Build.SourceBranch'], 'refs/tags/r')) }}:
+    - name: effectivePublishCatalog
+      value: $(OctoPublishCatalog)
+  - ${{ else }}:
+    - name: effectivePublishCatalog
+      value: LocalFileSystemCatalog
     
 stages:
   - stage: Build
@@ -64,7 +73,7 @@ stages:
             inputs:
               command: 'build'
               projects:  $(SolutionFile)
-              arguments: '--configuration $(BuildConfiguration) /p:OctoNugetPrivateServer=$(nugetPrivateServer) /p:OctoPublishCatalog="$(OctoPublishCatalog)" /p:OctoPrivateGitHubApiKey=$(GitHubPAT) /p:OctoPublicGitHubApiKey=$(GitHubPAT)'
+              arguments: '--configuration $(BuildConfiguration) /p:OctoNugetPrivateServer=$(nugetPrivateServer) /p:OctoPublishCatalog="$(effectivePublishCatalog)" /p:OctoPrivateGitHubApiKey=$(GitHubPAT) /p:OctoPublicGitHubApiKey=$(GitHubPAT)'
               publishWebProjects: false
               zipAfterPublish: false
               modifyOutputPath: false            
