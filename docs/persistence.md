@@ -556,7 +556,7 @@ The per-tenant `.AspNetCore.Identity.Application.{tenantId}` cookie carries only
 
 ### Write-Conflict Retry
 
-Concurrent session renewals (e.g., two browser tabs calling protected endpoints simultaneously) can trigger a MongoDB `WriteConflictException` on the same session document. `ServerSideSessionStore` uses the shared `MongoWriteRetry` helper (also used by `PersistentGrantStore`) to retry these transient conflicts transparently, without propagating errors to the user.
+Concurrent session renewals (e.g., two browser tabs calling protected endpoints simultaneously) can trigger a transient MongoDB write conflict (`MongoCommandException` with a 'Write conflict' message) on the same session document. `ServerSideSessionStore` uses the shared `MongoWriteRetry` helper (also used by `PersistentGrantStore`) to retry these transient conflicts transparently, without propagating errors to the user.
 
 ## Data Protection Key Ring
 

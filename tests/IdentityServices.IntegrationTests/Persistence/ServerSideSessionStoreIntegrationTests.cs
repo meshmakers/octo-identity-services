@@ -170,6 +170,36 @@ public class ServerSideSessionStoreIntegrationTests : IClassFixture<IdentityServ
     }
 
     [Fact]
+    public async Task UpdateSessionAsync_MissingSession_RecreatesIt()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        await _fixture.InitializeAsync();
+        await EnsureSystemSetupAsync();
+
+        // Use a key that has never been created — simulates a renewal that races the cleanup sweep
+        var key = $"sess-{Guid.NewGuid():N}";
+        var session = new ServerSideSession
+        {
+            Key = key,
+            Scheme = "idsrv",
+            SubjectId = $"sub-{Guid.NewGuid():N}",
+            SessionId = $"sid-{Guid.NewGuid():N}",
+            Created = DateTime.UtcNow,
+            Renewed = DateTime.UtcNow,
+            Expires = DateTime.UtcNow.AddHours(1),
+            Ticket = "recreated-ticket"
+        };
+
+        var store = CreateStore();
+        await store.UpdateSessionAsync(session, ct);
+
+        var retrieved = await store.GetSessionAsync(key, ct);
+
+        retrieved.Should().NotBeNull("UpdateSessionAsync must insert a new document when none exists");
+        retrieved!.Ticket.Should().Be("recreated-ticket");
+    }
+
+    [Fact]
     public async Task DeleteSessionAsync_RemovesDocument()
     {
         var ct = TestContext.Current.CancellationToken;

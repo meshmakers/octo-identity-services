@@ -190,7 +190,7 @@ Full per-tenant ASP.NET auth tickets (~3 KB each, sent with every request and on
 
 **Session lookup semantics:** `GetSessionAsync` treats expired-but-not-yet-cleaned records as missing (returns `null`). Expired records are physically removed by Duende's built-in background sweep (`GetAndRemoveExpiredSessionsAsync`), which runs every 10 minutes by default. The sweep follows the `TokenCleanupHostService` pattern: it iterates the system tenant plus all child tenants to cover every per-tenant session store.
 
-**Write-conflict retry:** Concurrent session renewals (two browser tabs refreshing simultaneously) can cause a MongoDB `WriteConflictException`. `ServerSideSessionStore` shares the `MongoWriteRetry` helper (also used by `PersistentGrantStore`) to retry transient write conflicts transparently.
+**Write-conflict retry:** Concurrent session renewals (two browser tabs refreshing simultaneously) can trigger a transient MongoDB write conflict (`MongoCommandException` with a 'Write conflict' message). `ServerSideSessionStore` shares the `MongoWriteRetry` helper (also used by `PersistentGrantStore`) to retry transient write conflicts transparently.
 
 ### Default-Configuration Provisioning
 
