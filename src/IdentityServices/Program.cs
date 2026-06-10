@@ -36,6 +36,8 @@ using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Options;
 using Microsoft.IdentityModel.Logging;
 using Microsoft.AspNetCore.DataProtection;
+using Microsoft.AspNetCore.DataProtection.KeyManagement;
+using Microsoft.AspNetCore.DataProtection.Repositories;
 using System.Threading.RateLimiting;
 using NLog;
 using NLog.Web;
@@ -85,13 +87,15 @@ try
     builder.Services.Configure<OctoSystemConfiguration>(options =>
         builder.Configuration.GetSection("System").Bind(options));
 
-    var dataProtectionKeysPath = builder.Configuration.GetSection("Identity")["DataProtectionKeysPath"];
-    if (!string.IsNullOrEmpty(dataProtectionKeysPath))
-    {
-        builder.Services.AddDataProtection()
-            .PersistKeysToFileSystem(new DirectoryInfo(dataProtectionKeysPath))
-            .SetApplicationName("OctoIdentityServices");
-    }
+    // ASP.NET Data Protection: the key ring is persisted in MongoDB (system tenant) — ALWAYS ON,
+    // shared by all pods. Identity:DataProtectionKeysPath is no longer a persistence target; if it
+    // is set and contains legacy key-*.xml files (old chart still mounts the PVC), they are
+    // imported ONCE by DataProtectionKeyStore so existing sessions survive the migration.
+    builder.Services.AddSingleton<IXmlRepository, DataProtectionKeyStore>();
+    builder.Services.AddOptions<KeyManagementOptions>()
+        .Configure<IXmlRepository>((options, repository) => options.XmlRepository = repository);
+    builder.Services.AddDataProtection()
+        .SetApplicationName("OctoIdentityServices");
     builder.Services.Configure<RouteOptions>(options =>
         options.ConstraintMap.Add("tenantId", typeof(TenantIdRouteConstraint)));
 
@@ -166,6 +170,7 @@ try
         .AddPersistedGrantStore<PersistentGrantStore>()
         .AddAspNetIdentity<RtUser>()
         .AddProfileService<UserProfileService>()
+        .AddServerSideSessions<ServerSideSessionStore>()
         .AddCorsPolicyService<CorsPolicyService>()
         .AddAppAuthRedirectUriValidator()
         .AddJwtBearerClientAuthentication();
@@ -180,6 +185,9 @@ try
     {
         o.CookieManager = tenantCookieManager;
         o.SlidingExpiration = true;
+        // With server-side sessions this bounds BOTH the cookie and the session record.
+        // Explicit (was: 14-day framework default) — sliding, so active users stay signed in.
+        o.ExpireTimeSpan = TimeSpan.FromDays(7);
     });
     builder.Services.Configure<CookieAuthenticationOptions>("idsrv", o => o.CookieManager = tenantCookieManager);
     builder.Services.Configure<CookieAuthenticationOptions>("idsrv.session", o => o.CookieManager = tenantCookieManager);

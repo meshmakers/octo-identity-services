@@ -38,6 +38,14 @@ export OCTO_Identity__SigningCertificatePassword="secret"
 }
 ```
 
+Key options in `OctoIdentityServicesOptions`:
+
+| Option | Env variable | Description |
+|--------|-------------|-------------|
+| `AuthorityUrl` | `OCTO_IDENTITY__AuthorityUrl` | Public URL of the Identity service (default: `https://localhost:5003`) |
+| `RefineryStudioUrl` | `OCTO_IDENTITY__RefineryStudioUrl` | Public URL of the Data Refinery Studio SPA. When set, the `octo-data-refinery-studio` OIDC client is auto-provisioned in all tenants. |
+| `DataProtectionKeysPath` | `OCTO_IDENTITY__DataProtectionKeysPath` | **Legacy / seed-only.** When set and the directory contains `key-*.xml` files, those keys are imported once into MongoDB at startup (zero-logout migration from the old PVC). Safe to leave unset in new deployments — DataProtection keys are always stored in MongoDB (`RtDataProtectionKey`, system tenant). |
+
 ### Configuration Sources
 
 Configuration is loaded in this order (later sources override earlier):
