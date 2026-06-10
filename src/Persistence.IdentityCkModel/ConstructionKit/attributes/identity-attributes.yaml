@@ -511,3 +511,31 @@ attributes:
     valueType: String
     description: When set on a Client living in a child tenant, marks this record as a mirror of a parent-tenant client identified by the given tenant id. Sub-tenant admins surface this as a read-only "Provisioned by parent tenant" indicator; the operator cannot edit the client locally — changes must go through the parent.
 
+  - id: SessionKey
+    valueType: String
+    description: Unique key of a Duende server-side session (the only value stored in the browser cookie).
+
+  - id: Scheme
+    valueType: String
+    description: The ASP.NET authentication scheme that produced the session ticket.
+
+  - id: DisplayName
+    valueType: String
+    description: Optional display name of the user owning the session.
+
+  - id: RenewalDateTime
+    valueType: DateTime
+    description: UTC timestamp of the last sliding-expiration renewal of the session.
+
+  - id: Ticket
+    valueType: String
+    description: The serialized, data-protected ASP.NET authentication ticket of a server-side session.
+
+  - id: FriendlyName
+    valueType: String
+    description: Friendly name of an ASP.NET Data Protection key-ring element (format key-{guid}).
+
+  - id: XmlData
+    valueType: String
+    description: The raw XML payload of a Data Protection key-ring element.
+
