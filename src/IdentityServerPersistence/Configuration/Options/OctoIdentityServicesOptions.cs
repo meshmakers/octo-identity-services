@@ -89,8 +89,10 @@ public class OctoIdentityServicesOptions
     public LogLevelDto MinLogLevel { get; set; }
 
     /// <summary>
-    /// Gets or sets the path where ASP.NET Data Protection keys are persisted.
-    /// When set, keys are stored on the filesystem at this path to survive pod restarts.
+    /// LEGACY/SEED-ONLY: former filesystem path for ASP.NET Data Protection keys.
+    /// Keys are now always persisted in MongoDB (system tenant). When this path is set and
+    /// contains key-*.xml files, they are imported once at first key-ring load so existing
+    /// sessions survive the migration. Safe to remove after all environments have migrated.
     /// </summary>
     public string? DataProtectionKeysPath { get; set; }
 
