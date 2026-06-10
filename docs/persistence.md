@@ -476,8 +476,9 @@ internal class InitialMigration : IMigration
 | 2 → 3 | `CkTypeIndexMigration2` | Additional index updates |
 | 9 → 10 | `IdentityAssociationMigration` | Convert StringArray relationships to CK associations; create TenantOwners group |
 | 10 → 12 | `LoginConfigurationMigration` | Set AllowSelfRegistration=true on existing identity providers; create EmailDomainGroupRule indexes |
+| 16 → 17 | `ServerSideSessionMigration` | Refresh indexes for `RtServerSideSession` (Unique `SessionKey`, ascending `SubjectId`/`SessionId`/`ExpirationDateTime`) and `RtDataProtectionKey` (Unique `FriendlyName`) |
 
-Current schema version: `IdentitySchemaVersionValue = 12`
+Current schema version: `IdentitySchemaVersionValue = 17`
 
 ### Registration
 
@@ -528,3 +529,51 @@ builder.Services.AddIdentity<RtUser, RtRole>()
     .AddUserStore<OctoUserStore>()
     .AddRoleStore<OctoRoleStore>();
 ```
+
+## Server-Side Sessions
+
+### Storage Model
+
+Duende server-side sessions are stored per-tenant in MongoDB as `RtServerSideSession` entities (CK type, `System.Identity-2.7.0`). The `ServerSideSessionStore` (`src/IdentityServerPersistence/SystemStores/`) implements Duende's `IServerSideSessionStore` against the tenant's CK runtime repository.
+
+| Attribute | Index | Description |
+|-----------|-------|-------------|
+| `SessionKey` | Unique | Short random key carried in the browser cookie |
+| `SubjectId` | Ascending | User subject ID for per-user session queries |
+| `SessionId` | Ascending | IdentityServer session correlation |
+| `ExpirationDateTime` | Ascending | Used by the expiry sweep to find stale records |
+| `Ticket` | — | Encrypted ASP.NET auth ticket (the full payload) |
+| `Created` / `Renewed` | — | Audit timestamps |
+| `DisplayName` | — | Optional display name for session management UI |
+
+The per-tenant `.AspNetCore.Identity.Application.{tenantId}` cookie carries only the `SessionKey` (hundreds of bytes) rather than the full encrypted ticket (~3 KB). `TenantCookieManager` naming is unchanged.
+
+### Expiry and Cleanup Semantics
+
+- `GetSessionAsync` returns `null` for records whose `ExpirationDateTime` is in the past (expired-is-a-miss). The expired document remains in MongoDB until the background sweep runs.
+- `GetAndRemoveExpiredSessionsAsync` is called by Duende's built-in background sweep (default interval: 10 minutes). The sweep iterates the system tenant plus all child tenants, following the same `TokenCleanupHostService` pattern used for OIDC grants.
+- Session lifetime is controlled by `ConfigureApplicationCookie` `ExpireTimeSpan = 7 days` sliding. Both the cookie and the session record share this window; renewing the cookie (`SlidingExpiration = true`) also updates `RtServerSideSession.ExpirationDateTime`.
+
+### Write-Conflict Retry
+
+Concurrent session renewals (e.g., two browser tabs calling protected endpoints simultaneously) can trigger a MongoDB `WriteConflictException` on the same session document. `ServerSideSessionStore` uses the shared `MongoWriteRetry` helper (also used by `PersistentGrantStore`) to retry these transient conflicts transparently, without propagating errors to the user.
+
+## Data Protection Key Ring
+
+### Storage Model
+
+ASP.NET Data Protection keys are stored as `RtDataProtectionKey` entities in the **system tenant** MongoDB database. `DataProtectionKeyStore : IXmlRepository` (registered as a singleton) serializes each key as its XML representation. The application name `OctoIdentityServices` (set via `SetApplicationName()`) is unchanged from the previous file-based implementation, preserving all existing protected payloads.
+
+| Attribute | Index | Description |
+|-----------|-------|-------------|
+| `FriendlyName` | Unique | Key identifier (e.g., `key-{guid}`) used by the DataProtection framework |
+| `XmlData` | — | Full XML key representation including the encryption envelope |
+
+### Seed-Once Migration from Legacy File Path
+
+When `OCTO_IDENTITY__DataProtectionKeysPath` is set and the directory contains `key-*.xml` files, the service imports those files into MongoDB **once** at startup. After a successful import, the environment variable can be removed from all deployments. This ensures a zero-logout upgrade from the old PVC-backed file storage.
+
+### Failure Modes
+
+- **MongoDB unreachable at first unprotect**: The DataProtection framework calls `IXmlRepository.GetAllElements()` before any protected payload can be read. If MongoDB is unavailable at this point the service fails fast with a clear exception rather than silently falling back to in-memory keys, preventing a split-brain key situation.
+- **Corrupted key document**: A document whose `XmlData` cannot be parsed as a valid DataProtection XML element causes a loud failure by design. This matches the framework's default behaviour and surfaces data corruption early rather than allowing silent decryption failures.

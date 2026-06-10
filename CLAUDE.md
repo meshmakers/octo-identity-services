@@ -58,7 +58,7 @@ This service depends on Octo framework packages (versioned via `$(OctoVersion)` 
 
 ### Construction Kit (CK) Model
 
-The `Persistence.IdentityCkModel` project uses YAML-based model definitions that are transformed into C# code at build time. Model files are in `src/Persistence.IdentityCkModel/ConstructionKit/`. The model ID is `System.Identity-2.4.0` with dependency on `System-[2.0,3.0)`. Generated types live in namespace `Persistence.IdentityCkModel.Generated.System.Identity.v2`.
+The `Persistence.IdentityCkModel` project uses YAML-based model definitions that are transformed into C# code at build time. Model files are in `src/Persistence.IdentityCkModel/ConstructionKit/`. The model ID is `System.Identity-2.7.0` with dependency on `System-[2.0,3.0)`. Generated types live in namespace `Persistence.IdentityCkModel.Generated.System.Identity.v2`.
 
 ### Cross-Tenant Authentication
 
@@ -174,6 +174,24 @@ satisfied in tests too.
 The CLI commands and the Studio UI are tracked under **ADO #4047–#4051**
 (Epic 3054).
 
+### Server-Side Sessions (cookie-bloat fix)
+
+Full per-tenant ASP.NET auth tickets (~3 KB each, sent with every request and on OAuth loopback-callback redirects) were overflowing small loopback servers and bloating all browser traffic. Duende server-side sessions are now enabled via `.AddServerSideSessions<ServerSideSessionStore>()`.
+
+**What changed:**
+- The per-tenant `.AspNetCore.Identity.Application.{tenantId}` cookie now carries **only a short session key** (hundreds of bytes) instead of the full encrypted ticket. The ticket itself lives in MongoDB per-tenant via the CK runtime.
+- `TenantCookieManager` naming convention (`{name}.{tenantId}`) is **unchanged**.
+- `ConfigureApplicationCookie` sets `ExpireTimeSpan = 7 days` sliding; this bounds both the cookie lifetime and the session record lifetime.
+- `ServerSideSessionStore` (in `IdentityServerPersistence/SystemStores/`) implements Duende's `IServerSideSessionStore` against the per-tenant CK runtime repository.
+
+**CK types added in System.Identity-2.7.0 (migration 16 → 17):**
+- `RtServerSideSession`: stores the encrypted ticket with a **Unique** `SessionKey` index and ascending indexes on `SubjectId`, `SessionId`, and `ExpirationDateTime`.
+- `RtDataProtectionKey`: stores the DataProtection key ring (see Data Protection Key Persistence section).
+
+**Session lookup semantics:** `GetSessionAsync` treats expired-but-not-yet-cleaned records as missing (returns `null`). Expired records are physically removed by Duende's built-in background sweep (`GetAndRemoveExpiredSessionsAsync`), which runs every 10 minutes by default. The sweep follows the `TokenCleanupHostService` pattern: it iterates the system tenant plus all child tenants to cover every per-tenant session store.
+
+**Write-conflict retry:** Concurrent session renewals (two browser tabs refreshing simultaneously) can cause a MongoDB `WriteConflictException`. `ServerSideSessionStore` shares the `MongoWriteRetry` helper (also used by `PersistentGrantStore`) to retry transient write conflicts transparently.
+
 ### Default-Configuration Provisioning
 
 The Identity CK model, default roles, identity resources, API scopes, API resources, and OIDC clients are provisioned to **all tenants** (not just the system tenant) during startup. This ensures OAuth/OIDC flows work when targeting any tenant. For child tenants, roles are written directly to the child tenant database via `EnsureRoleInChildTenantAsync()` using the same `childRepo` pattern as clients and resources. The identity service writes its data directly to child tenant databases (including the `octo-data-refinery-studio` SPA client when `RefineryStudioUrl` is configured), while other services (asset-repo, bot, etc.) send their data via the Distribution Event Hub. Cross-tenant users receive a `home_tenant_id` claim in their tokens.
@@ -219,7 +237,7 @@ Key components:
 - **`GroupsController`**: REST API at `{tenantId}/v1/groups` with full CRUD, role assignment, member management, and circular group prevention
 - **`TenantOwners`** group: Default group provisioned in every tenant with all 10 default roles. Created by `DefaultConfigurationCreatorService` and `IdentityAssociationMigration` (migration 9→10)
 
-Current identity schema version: `IdentitySchemaVersionValue = 12`
+Current identity schema version: `IdentitySchemaVersionValue = 17`
 
 ### Login Configuration (Self-Registration & Auto-Group Assignment)
 
@@ -386,7 +404,7 @@ Environment variables are prefixed with `OCTO_`. Key configuration sections:
 Key identity options (`OctoIdentityServicesOptions`):
 - `AuthorityUrl`: Public URL of the Identity service (default: `https://localhost:5003`)
 - `RefineryStudioUrl`: Public URL of the Data Refinery Studio SPA. When set, the `octo-data-refinery-studio` OIDC client is auto-provisioned in all tenants with correct redirect URIs, CORS origins, and front-channel logout. Example: `OCTO_IDENTITY__RefineryStudioUrl=https://studio.example.com`
-- `DataProtectionKeysPath`: Filesystem path for persisting ASP.NET Data Protection keys
+- `DataProtectionKeysPath`: **Legacy / seed-only.** When set and the directory contains `key-*.xml` files, those keys are imported once into MongoDB at startup (zero-logout migration from old PVC). Safe to leave unset in new deployments; DataProtection keys are now always persisted in MongoDB.
 
 User secrets ID: `173d8e91-b831-4e8a-a43f-672c57e6a4da`
 
@@ -448,16 +466,9 @@ Located in `Controllers/Api/`:
 - `SetupApiController` - Anonymous initial admin user setup (returns 404 after setup complete)
 ### Data Protection Key Persistence
 
-ASP.NET Data Protection keys are used to encrypt refresh tokens, antiforgery tokens, and OAuth state. By default, keys are stored in-memory and lost on pod restart, which invalidates all active sessions.
+ASP.NET Data Protection keys are always persisted in MongoDB (system tenant, `RtDataProtectionKey` entities) via `DataProtectionKeyStore : IXmlRepository` (registered as a singleton). The application name remains `OctoIdentityServices` (set via `SetApplicationName()`), so key isolation is unchanged from the previous file-based implementation.
 
-To persist keys across redeployments, set the `DataProtectionKeysPath` option:
-
-- **Environment variable**: `OCTO_IDENTITY__DataProtectionKeysPath=/var/dpapi-keys`
-- **Options class**: `OctoIdentityServicesOptions.DataProtectionKeysPath` (`src/IdentityServerPersistence/Configuration/Options/OctoIdentityServicesOptions.cs`)
-
-When configured, keys are stored as XML files in the specified directory via `PersistKeysToFileSystem()`. In Kubernetes, this path is backed by a PersistentVolumeClaim created by the Helm chart (`octo-helm-core/src/octo-mesh`) when `services.identity.dataProtection.enabled: true`.
-
-The application name is set to `OctoIdentityServices` via `SetApplicationName()` to ensure key isolation.
+The `DataProtectionKeysPath` option (`OCTO_IDENTITY__DataProtectionKeysPath`) is **legacy / seed-only**: when set and the directory contains `key-*.xml` files, those keys are imported once into MongoDB on startup (zero-logout migration from the old PVC). After the import succeeds the path can be left unset in all new deployments. The Helm chart's `services.identity.dataProtection` toggle and the associated PVC have been removed; ship order is identity image first, then the updated chart.
 
 ## Docker
 
