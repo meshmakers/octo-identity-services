@@ -64,7 +64,11 @@ public class ServerSideSessionStore(
     public async Task CreateSessionAsync(ServerSideSession session, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(session);
+        await MongoWriteRetry.ExecuteWithRetryAsync(() => CreateSessionInternalAsync(session));
+    }
 
+    private async Task CreateSessionInternalAsync(ServerSideSession session)
+    {
         var rtSession = mapper.Map<RtServerSideSession>(session);
         rtSession.RtId = OctoObjectId.GenerateNewId();
 
@@ -77,7 +81,11 @@ public class ServerSideSessionStore(
     public async Task UpdateSessionAsync(ServerSideSession session, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(session);
+        await MongoWriteRetry.ExecuteWithRetryAsync(() => UpdateSessionInternalAsync(session));
+    }
 
+    private async Task UpdateSessionInternalAsync(ServerSideSession session)
+    {
         using var octoSession = await TenantRepository.GetSessionAsync();
         octoSession.StartTransaction();
 
@@ -182,6 +190,8 @@ public class ServerSideSessionStore(
 
             foreach (var tenant in tenantList)
             {
+                if (cancellationToken.IsCancellationRequested) { break; }
+
                 if (removed.Count >= count)
                 {
                     break;
