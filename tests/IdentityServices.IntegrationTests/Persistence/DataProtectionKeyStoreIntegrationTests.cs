@@ -92,20 +92,17 @@ public class DataProtectionKeyStoreIntegrationTests : IClassFixture<IdentityServ
     }
 
     /// <summary>
-    /// Verifies the seed-import code path: key-*.xml files placed in a temp directory are
-    /// imported into MongoDB when the store calls <c>GetAllElements()</c> on an empty collection,
-    /// and a second store instance (without the file path) retrieves the same elements from Mongo.
+    /// Verifies that keys stored via <c>StoreElement</c> by one store instance are visible to a
+    /// second, independent store instance — confirming that MongoDB is the authoritative backing
+    /// store and that no instance-level caching causes isolation.
     /// </summary>
     /// <remarks>
-    /// The seed fires only when the DataProtectionKey collection is EMPTY. This test uses
-    /// unique, recognisable XML IDs and asserts with contains-semantics so it remains robust
-    /// regardless of whether other tests have already stored DP keys. If the seed fires (empty
-    /// DB), the unique keys are found. If the seed does NOT fire (non-empty DB), this test
-    /// falls back to verifying the same keys via the direct <c>StoreElement</c> path to confirm
-    /// persistence across store instances — the core contract under test.
+    /// The seed-import (zero-logout migration) code path is covered in isolation by
+    /// <see cref="DataProtectionKeySeedIntegrationTests.GetAllElements_EmptyStore_SeedsFromLegacyPath"/>,
+    /// which runs against a guaranteed-empty collection in its own class fixture.
     /// </remarks>
     [Fact]
-    public async Task GetAllElements_EmptyStore_SeedsFromLegacyPath()
+    public async Task StoredKeys_SurviveAcrossStoreInstances()
     {
         var ct = TestContext.Current.CancellationToken;
         await _fixture.InitializeAsync();
