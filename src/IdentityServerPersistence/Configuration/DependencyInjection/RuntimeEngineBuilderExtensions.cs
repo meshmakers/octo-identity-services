@@ -85,6 +85,17 @@ public static class RuntimeEngineBuilderExtensions
                 .ForMember(dest => dest.CreationDateTime, opt => opt.MapFrom(src => src.CreationTime))
                 .ForMember(dest => dest.ExpirationDateTime, opt => opt.MapFrom(src => src.Expiration));
 
+            cfg.CreateMap<RtServerSideSession, Duende.IdentityServer.Models.ServerSideSession>()
+                .ForMember(dest => dest.Key, opt => opt.MapFrom(src => src.SessionKey))
+                .ForMember(dest => dest.Created, opt => opt.MapFrom(src => src.CreationDateTime))
+                .ForMember(dest => dest.Renewed, opt => opt.MapFrom(src => src.RenewalDateTime))
+                .ForMember(dest => dest.Expires, opt => opt.MapFrom(src => src.ExpirationDateTime));
+            cfg.CreateMap<Duende.IdentityServer.Models.ServerSideSession, RtServerSideSession>()
+                .ForMember(dest => dest.SessionKey, opt => opt.MapFrom(src => src.Key))
+                .ForMember(dest => dest.CreationDateTime, opt => opt.MapFrom(src => src.Created))
+                .ForMember(dest => dest.RenewalDateTime, opt => opt.MapFrom(src => src.Renewed))
+                .ForMember(dest => dest.ExpirationDateTime, opt => opt.MapFrom(src => src.Expires));
+
             cfg.CreateMap<RtApiResource, ApiResource>()
                 .ForMember(dest => dest.UserClaims, opt => opt.MapFrom(src => src.Claims));
 

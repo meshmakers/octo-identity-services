@@ -1,0 +1,19 @@
+"$schema": "https://schemas.meshmakers.cloud/construction-kit-elements.schema.json"
+types:
+  - typeId: DataProtectionKey
+    description: "ASP.NET Data Protection key-ring element. Service-global data persisted in the system tenant so every identity pod shares one key ring (replaces the file-system/PVC key store)."
+    derivedFromCkTypeId: ${System}/Entity
+    isFinal: true
+    isAbstract: false
+    attributes:
+      - id: ${this}/FriendlyName
+        name: FriendlyName
+      - id: ${this}/XmlData
+        name: XmlData
+      - id: ${this}/CreationDateTime
+        name: CreationDateTime
+    indexes:
+      - indexType: Unique
+        fields:
+          - attributePaths:
+              - FriendlyName

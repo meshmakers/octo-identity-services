@@ -639,6 +639,14 @@ A custom `ICookieManager` (`src/IdentityServices/Cookies/TenantCookieManager.cs`
 - `Identity.External` — written at `/signin-google` (no tenant in URL)
 - `Identity.TwoFactorUserId`, `Identity.TwoFactorRememberMe` — short-lived, single login flow
 
+### Server-Side Session Tickets
+
+Auth cookies now carry only a short **server-side session key** (hundreds of bytes) rather than the full encrypted ticket (~3 KB per tenant). The ticket itself is stored server-side in MongoDB per tenant via the CK runtime (`RtServerSideSession`). This was introduced to fix cookie-bloat on OAuth loopback-callback servers (e.g., the CLI device-auth flow and backend OIDC clients) that rejected responses containing several large per-tenant cookies.
+
+`TenantCookieManager` naming convention (`.AspNetCore.Identity.Application.{tenantId}`, `idsrv.{tenantId}`, `idsrv.session.{tenantId}`) is **unchanged** — browsers and clients see the same cookie names as before.
+
+Session lifetime is controlled by `ExpireTimeSpan = 7 days` sliding on `ConfigureApplicationCookie`. Both the browser cookie and the server-side record share this window, so sliding expiry (activity extends the session) behaves identically to the old full-ticket approach from a user perspective. Logout and inactivity expiry semantics are unchanged: explicit logout removes the session record immediately; an expired record is treated as missing on the next request, causing re-authentication.
+
 ### OIDC Endpoint Tenant Resolution
 
 OIDC endpoints (`/connect/*`) don't include a `{tenantId}` route segment. The `OidcTenantResolutionMiddleware` resolves the tenant before authentication:

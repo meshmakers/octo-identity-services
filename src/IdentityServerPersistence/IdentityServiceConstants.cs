@@ -8,7 +8,7 @@ public static class IdentityServiceConstants
     public const string IdentityApiReadOnlyPolicy = "IdentityApiReadOnlyPolicy";
     public const string IdentityApiReadWritePolicy = "IdentityApiReadWritePolicy";
     public const string IdentitySchemaVersionKey = "IdentityService";
-    public const int IdentitySchemaVersionValue = 16;
+    public const int IdentitySchemaVersionValue = 17;
 
     public const string MailNotificationConfigurationName = "MailNotificationConfiguration";
 
