@@ -54,7 +54,7 @@ public class AuthApiController(
     [HttpGet("login-context")]
     public async Task<ActionResult<LoginContextDto>> GetLoginContext([FromQuery] string? returnUrl)
     {
-        var context = await interaction.GetAuthorizationContextAsync(returnUrl);
+        var context = await interaction.GetAuthorizationContextAsync(returnUrl, HttpContext.RequestAborted);
         var tenantId = RouteData.Values["tenantId"]?.ToString() ?? "System";
         var prefix = $"{tenantId}:";
         var schemes = await schemeProvider.GetAllSchemesAsync();
@@ -98,7 +98,7 @@ public class AuthApiController(
 
         if (context?.Client.ClientId != null)
         {
-            var client = await clientStore.FindEnabledClientByIdAsync(context.Client.ClientId);
+            var client = await clientStore.FindEnabledClientByIdAsync(context.Client.ClientId, HttpContext.RequestAborted);
             if (client != null)
             {
                 allowLocal = client.EnableLocalLogin;
@@ -147,7 +147,7 @@ public class AuthApiController(
     [HttpPost("login")]
     public async Task<ActionResult<LoginResultDto>> Login([FromBody] LoginRequestDto request)
     {
-        var context = await interaction.GetAuthorizationContextAsync(request.ReturnUrl);
+        var context = await interaction.GetAuthorizationContextAsync(request.ReturnUrl, HttpContext.RequestAborted);
 
         if (string.IsNullOrEmpty(request.Username) || string.IsNullOrEmpty(request.Password))
         {
@@ -171,7 +171,7 @@ public class AuthApiController(
                 user?.UserName,
                 user?.RtId.ToString(),
                 user?.UserName,
-                clientId: context?.Client.ClientId));
+                clientId: context?.Client.ClientId), HttpContext.RequestAborted);
 
             // Use return URL if valid, otherwise redirect to manage page
             var tenantId = RouteData.Values["tenantId"]?.ToString() ?? "System";
@@ -190,7 +190,7 @@ public class AuthApiController(
         if (result.IsLockedOut)
         {
             await events.RaiseAsync(new UserLoginFailureEvent(
-                request.Username, "Account locked out", clientId: context?.Client.ClientId));
+                request.Username, "Account locked out", clientId: context?.Client.ClientId), HttpContext.RequestAborted);
 
             return new LoginResultDto
             {
@@ -267,7 +267,7 @@ public class AuthApiController(
                     localUser.UserName,
                     localUser.RtId.ToString(),
                     localUser.UserName,
-                    clientId: context?.Client.ClientId));
+                    clientId: context?.Client.ClientId), HttpContext.RequestAborted);
 
                 var redirectUrl = !string.IsNullOrEmpty(request.ReturnUrl) &&
                                   (interaction.IsValidReturnUrl(request.ReturnUrl) || Url.IsLocalUrl(request.ReturnUrl))
@@ -285,7 +285,7 @@ public class AuthApiController(
         await events.RaiseAsync(new UserLoginFailureEvent(
             request.Username,
             "Invalid credentials",
-            clientId: context?.Client.ClientId));
+            clientId: context?.Client.ClientId), HttpContext.RequestAborted);
 
         return new LoginResultDto
         {
@@ -487,7 +487,7 @@ public class AuthApiController(
             user.UserName,
             user.RtId.ToString(),
             user.UserName,
-            clientId: null));
+            clientId: null), HttpContext.RequestAborted);
 
         // 7. Clean up external cookie
         await HttpContext.SignOutAsync(IdentityServerConstants.ExternalCookieAuthenticationScheme);
@@ -590,7 +590,7 @@ public class AuthApiController(
     [HttpGet("logout-context")]
     public async Task<ActionResult<LogoutContextDto>> GetLogoutContext([FromQuery] string? logoutId)
     {
-        var context = await interaction.GetLogoutContextAsync(logoutId);
+        var context = await interaction.GetLogoutContextAsync(logoutId, HttpContext.RequestAborted);
 
         return new LogoutContextDto
         {
@@ -607,7 +607,7 @@ public class AuthApiController(
     [HttpPost("logout")]
     public async Task<ActionResult<LogoutResultDto>> Logout([FromBody] LogoutRequestDto request)
     {
-        var context = await interaction.GetLogoutContextAsync(request.LogoutId);
+        var context = await interaction.GetLogoutContextAsync(request.LogoutId, HttpContext.RequestAborted);
 
         if (User.Identity?.IsAuthenticated == true)
         {
@@ -618,7 +618,7 @@ public class AuthApiController(
             await persistedGrantStore.RemoveAllAsync(new PersistedGrantFilter
             {
                 SubjectId = subjectId
-            });
+            }, HttpContext.RequestAborted);
 
             await signInManager.SignOutAsync();
 
@@ -630,7 +630,7 @@ public class AuthApiController(
 
             await events.RaiseAsync(new UserLogoutSuccessEvent(
                 subjectId,
-                User.GetDisplayName()));
+                User.GetDisplayName()), HttpContext.RequestAborted);
         }
 
         return new LogoutResultDto
@@ -808,7 +808,7 @@ public class AuthApiController(
                 user.UserName,
                 user.RtId.ToString(),
                 user.UserName,
-                clientId: null));
+                clientId: null), HttpContext.RequestAborted);
 
             // Use the return URL from request, or default to manage page
             var tenantId = RouteData.Values["tenantId"]?.ToString() ?? "System";
@@ -836,7 +836,7 @@ public class AuthApiController(
         await events.RaiseAsync(new UserLoginFailureEvent(
             user.UserName,
             "Invalid two-factor code",
-            clientId: null));
+            clientId: null), HttpContext.RequestAborted);
 
         return new TwoFactorLoginResultDto
         {
@@ -875,7 +875,7 @@ public class AuthApiController(
                 user.UserName,
                 user.RtId.ToString(),
                 user.UserName,
-                clientId: null));
+                clientId: null), HttpContext.RequestAborted);
 
             // Use the return URL from request, or default to manage page
             var tenantId = RouteData.Values["tenantId"]?.ToString() ?? "System";
@@ -903,7 +903,7 @@ public class AuthApiController(
         await events.RaiseAsync(new UserLoginFailureEvent(
             user.UserName,
             "Invalid two-factor email code",
-            clientId: null));
+            clientId: null), HttpContext.RequestAborted);
 
         return new TwoFactorLoginResultDto
         {
@@ -972,7 +972,7 @@ public class AuthApiController(
                 user.UserName,
                 user.RtId.ToString(),
                 user.UserName,
-                clientId: null));
+                clientId: null), HttpContext.RequestAborted);
 
             // Use the return URL from request, or default to manage page
             var tenantId = RouteData.Values["tenantId"]?.ToString() ?? "System";
@@ -1000,7 +1000,7 @@ public class AuthApiController(
         await events.RaiseAsync(new UserLoginFailureEvent(
             user.UserName,
             "Invalid recovery code",
-            clientId: null));
+            clientId: null), HttpContext.RequestAborted);
 
         return new TwoFactorLoginResultDto
         {
@@ -1040,7 +1040,7 @@ public class AuthApiController(
             await events.RaiseAsync(new UserLoginFailureEvent(
                 request.Username,
                 authResult.ErrorMessage ?? "LDAP authentication failed",
-                clientId: null));
+                clientId: null), HttpContext.RequestAborted);
 
             return new LdapLoginResultDto
             {
@@ -1131,7 +1131,7 @@ public class AuthApiController(
             user.UserName,
             user.RtId.ToString(),
             user.UserName,
-            clientId: null));
+            clientId: null), HttpContext.RequestAborted);
 
         // 7. Handle return URL
         var redirectUrl = request.ReturnUrl;
@@ -1313,7 +1313,7 @@ public class AuthApiController(
             localUser.UserName,
             localUser.RtId.ToString(),
             localUser.UserName,
-            clientId: null));
+            clientId: null), HttpContext.RequestAborted);
 
         // Compute redirect URL
         var redirectUrl = request.ReturnUrl;

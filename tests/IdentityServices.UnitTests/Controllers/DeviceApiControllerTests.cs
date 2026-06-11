@@ -102,7 +102,7 @@ public class DeviceApiControllerTests
             Client = new Client { ClientId = "octo-cli", ClientName = "Octo CLI" },
             ValidatedResources = new ResourceValidationResult()
         };
-        _deviceInteraction.GetAuthorizationContextAsync(userCode)
+        _deviceInteraction.GetAuthorizationContextAsync(userCode, Arg.Any<CancellationToken>())
             .Returns(context);
     }
 
@@ -115,7 +115,7 @@ public class DeviceApiControllerTests
         var userId = Guid.NewGuid().ToString("N");
         SetupControllerContext("meshtest", CreateAuthenticatedUser(userId));
 
-        _deviceInteraction.GetAuthorizationContextAsync("invalid-code")
+        _deviceInteraction.GetAuthorizationContextAsync("invalid-code", Arg.Any<CancellationToken>())
             .Returns((DeviceFlowAuthorizationRequest?)null);
 
         // Act
@@ -170,7 +170,7 @@ public class DeviceApiControllerTests
             .SignInAsync(Arg.Any<RtUser>(), Arg.Any<bool>());
 
         // Should still handle the device request
-        await _deviceInteraction.Received(1).HandleRequestAsync("valid-code", Arg.Any<ConsentResponse>());
+        await _deviceInteraction.Received(1).HandleRequestAsync("valid-code", Arg.Any<ConsentResponse>(), Arg.Any<CancellationToken>());
     }
 
     #endregion
@@ -238,7 +238,7 @@ public class DeviceApiControllerTests
         await _signInManager.Received(1).SignInAsync(shadowUser, false);
 
         // Should still handle the device request
-        await _deviceInteraction.Received(1).HandleRequestAsync("valid-code", Arg.Any<ConsentResponse>());
+        await _deviceInteraction.Received(1).HandleRequestAsync("valid-code", Arg.Any<ConsentResponse>(), Arg.Any<CancellationToken>());
     }
 
     [Fact]
@@ -277,7 +277,7 @@ public class DeviceApiControllerTests
 
         // Should NOT handle the device request
         await _deviceInteraction.DidNotReceive()
-            .HandleRequestAsync(Arg.Any<string>(), Arg.Any<ConsentResponse>());
+            .HandleRequestAsync(Arg.Any<string>(), Arg.Any<ConsentResponse>(), Arg.Any<CancellationToken>());
     }
 
     [Fact]
@@ -325,7 +325,7 @@ public class DeviceApiControllerTests
         result.Value.ErrorMessage.Should().Contain("Failed to create local user");
 
         await _deviceInteraction.DidNotReceive()
-            .HandleRequestAsync(Arg.Any<string>(), Arg.Any<ConsentResponse>());
+            .HandleRequestAsync(Arg.Any<string>(), Arg.Any<ConsentResponse>(), Arg.Any<CancellationToken>());
     }
 
     [Fact]
@@ -409,7 +409,7 @@ public class DeviceApiControllerTests
         result.Value.Should().NotBeNull();
         result.Value!.Success.Should().BeTrue();
         await _deviceInteraction.Received(1).HandleRequestAsync("valid-code",
-            Arg.Is<ConsentResponse>(c => c.Error == AuthorizationError.AccessDenied));
+            Arg.Is<ConsentResponse>(c => c.Error == InteractionError.AccessDenied), Arg.Any<CancellationToken>());
     }
 
     [Fact]
@@ -419,7 +419,7 @@ public class DeviceApiControllerTests
         var userId = Guid.NewGuid().ToString("N");
         SetupControllerContext("meshtest", CreateAuthenticatedUser(userId));
 
-        _deviceInteraction.GetAuthorizationContextAsync("invalid-code")
+        _deviceInteraction.GetAuthorizationContextAsync("invalid-code", Arg.Any<CancellationToken>())
             .Returns((DeviceFlowAuthorizationRequest?)null);
 
         // Act
@@ -453,7 +453,7 @@ public class DeviceApiControllerTests
     {
         // Arrange
         SetupControllerContext("meshtest");
-        _deviceInteraction.GetAuthorizationContextAsync("bad-code")
+        _deviceInteraction.GetAuthorizationContextAsync("bad-code", Arg.Any<CancellationToken>())
             .Returns((DeviceFlowAuthorizationRequest?)null);
 
         // Act

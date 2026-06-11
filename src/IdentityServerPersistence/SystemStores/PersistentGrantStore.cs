@@ -30,7 +30,7 @@ public class PersistentGrantStore(
 
     private ITenantRepository TenantRepository => multiTenancyResolverService.GetTenantRepository();
 
-    public async Task StoreAsync(PersistedGrant grant)
+    public async Task StoreAsync(PersistedGrant grant, CancellationToken cancellationToken = default)
     {
         await MongoWriteRetry.ExecuteWithRetryAsync(() => StoreInternalAsync(grant));
     }
@@ -57,7 +57,7 @@ public class PersistentGrantStore(
         await session.CommitTransactionAsync();
     }
 
-    public async Task<PersistedGrant?> GetAsync(string key)
+    public async Task<PersistedGrant?> GetAsync(string key, CancellationToken cancellationToken = default)
     {
         ArgumentValidation.ValidateString(nameof(key), key);
 
@@ -71,7 +71,7 @@ public class PersistentGrantStore(
     }
 
 
-    public async Task<IEnumerable<PersistedGrant>> GetAllAsync(PersistedGrantFilter filter)
+    public async Task<IReadOnlyCollection<PersistedGrant>> GetAllAsync(PersistedGrantFilter filter, CancellationToken cancellationToken = default)
     {
         using var session = await TenantRepository.GetSessionAsync();
         session.StartTransaction();
@@ -98,10 +98,10 @@ public class PersistentGrantStore(
             queryOptions);
 
         await session.CommitTransactionAsync();
-        return result.Items.Select(mapper.Map<PersistedGrant>);
+        return result.Items.Select(mapper.Map<PersistedGrant>).ToList();
     }
 
-    public async Task RemoveAsync(string key)
+    public async Task RemoveAsync(string key, CancellationToken cancellationToken = default)
     {
         ArgumentValidation.ValidateString(nameof(key), key);
 
@@ -116,7 +116,7 @@ public class PersistentGrantStore(
         await session.CommitTransactionAsync();
     }
 
-    public async Task RemoveAllAsync(PersistedGrantFilter filter)
+    public async Task RemoveAllAsync(PersistedGrantFilter filter, CancellationToken cancellationToken = default)
     {
         using var session = await TenantRepository.GetSessionAsync();
         session.StartTransaction();

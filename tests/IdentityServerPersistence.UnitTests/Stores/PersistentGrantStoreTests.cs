@@ -61,7 +61,7 @@ public class PersistentGrantStoreTests
         SetupEmptyQueryResult();
 
         // Act
-        await _sut.StoreAsync(grant);
+        await _sut.StoreAsync(grant, TestContext.Current.CancellationToken);
 
         // Assert
         _session.TransactionStartCount.Should().Be(1);
@@ -93,7 +93,7 @@ public class PersistentGrantStoreTests
         SetupQueryResult(existingRtGrant);
 
         // Act
-        await _sut.StoreAsync(grant);
+        await _sut.StoreAsync(grant, TestContext.Current.CancellationToken);
 
         // Assert
         _session.TransactionStartCount.Should().Be(1);
@@ -123,7 +123,7 @@ public class PersistentGrantStoreTests
         _mapper.Map<PersistedGrant>(rtGrant).Returns(expectedGrant);
 
         // Act
-        var result = await _sut.GetAsync("test-key");
+        var result = await _sut.GetAsync("test-key", TestContext.Current.CancellationToken);
 
         // Assert
         result.Should().NotBeNull();
@@ -140,7 +140,7 @@ public class PersistentGrantStoreTests
         _mapper.Map<PersistedGrant>(null).Returns((PersistedGrant?)null);
 
         // Act
-        var result = await _sut.GetAsync("non-existent-key");
+        var result = await _sut.GetAsync("non-existent-key", TestContext.Current.CancellationToken);
 
         // Assert
         result.Should().BeNull();
@@ -174,7 +174,7 @@ public class PersistentGrantStoreTests
         var filter = new PersistedGrantFilter { SubjectId = "subject-1" };
 
         // Act
-        var results = await _sut.GetAllAsync(filter);
+        var results = await _sut.GetAllAsync(filter, TestContext.Current.CancellationToken);
 
         // Assert
         results.Should().HaveCount(2);
@@ -190,7 +190,7 @@ public class PersistentGrantStoreTests
         var filter = new PersistedGrantFilter { SubjectId = "non-existent-subject" };
 
         // Act
-        var results = await _sut.GetAllAsync(filter);
+        var results = await _sut.GetAllAsync(filter, TestContext.Current.CancellationToken);
 
         // Assert
         results.Should().BeEmpty();
@@ -207,7 +207,7 @@ public class PersistentGrantStoreTests
         var key = "test-key";
 
         // Act
-        await _sut.RemoveAsync(key);
+        await _sut.RemoveAsync(key, TestContext.Current.CancellationToken);
 
         // Assert
         _session.TransactionStartCount.Should().Be(1);
@@ -242,7 +242,7 @@ public class PersistentGrantStoreTests
         var filter = new PersistedGrantFilter { SubjectId = "test-subject" };
 
         // Act
-        await _sut.RemoveAllAsync(filter);
+        await _sut.RemoveAllAsync(filter, TestContext.Current.CancellationToken);
 
         // Assert
         _session.TransactionStartCount.Should().Be(1);
@@ -278,7 +278,7 @@ public class PersistentGrantStoreTests
         };
 
         // Act
-        await _sut.RemoveAllAsync(filter);
+        await _sut.RemoveAllAsync(filter, TestContext.Current.CancellationToken);
 
         // Assert
         await _tenantRepository.Received(1).DeleteManyRtEntitiesAsync<RtPersistedGrant>(
@@ -298,7 +298,7 @@ public class PersistentGrantStoreTests
         };
 
         // Act
-        await _sut.RemoveAllAsync(filter);
+        await _sut.RemoveAllAsync(filter, TestContext.Current.CancellationToken);
 
         // Assert
         await _tenantRepository.Received(1).DeleteManyRtEntitiesAsync<RtPersistedGrant>(
@@ -319,7 +319,7 @@ public class PersistentGrantStoreTests
         };
 
         // Act
-        await _sut.RemoveAllAsync(filter);
+        await _sut.RemoveAllAsync(filter, TestContext.Current.CancellationToken);
 
         // Assert
         await _tenantRepository.Received(1).DeleteManyRtEntitiesAsync<RtPersistedGrant>(
@@ -342,7 +342,7 @@ public class PersistentGrantStoreTests
         };
 
         // Act
-        await _sut.RemoveAllAsync(filter);
+        await _sut.RemoveAllAsync(filter, TestContext.Current.CancellationToken);
 
         // Assert
         await _tenantRepository.Received(1).DeleteManyRtEntitiesAsync<RtPersistedGrant>(

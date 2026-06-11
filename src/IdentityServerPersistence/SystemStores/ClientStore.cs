@@ -112,11 +112,30 @@ public class ClientStore : IOctoClientStore
         return client;
     }
 
-    public async Task<Client?> FindClientByIdAsync(string clientId)
+    public async Task<Client?> FindClientByIdAsync(string clientId, CancellationToken ct = default)
     {
         var client = await FindRtClientByIdAsync(clientId);
 
+        ct.ThrowIfCancellationRequested();
         return _mapper.Map<Client>(client);
+    }
+
+    public async IAsyncEnumerable<Client> GetAllClientsAsync(
+        [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken ct = default)
+    {
+        var session = await TenantRepository.GetSessionAsync();
+        session.StartTransaction();
+
+        var queryOptions = RtEntityQueryOptions.Create();
+        var result = await TenantRepository.GetRtEntitiesByTypeAsync<RtClient>(session, queryOptions);
+
+        await session.CommitTransactionAsync();
+
+        foreach (var rtClient in result.Items)
+        {
+            ct.ThrowIfCancellationRequested();
+            yield return _mapper.Map<Client>(rtClient);
+        }
     }
 
     public async Task<IEnumerable<RtClient>> GetClients()

@@ -371,7 +371,7 @@ public class CustomWebApplicationFactory : WebApplicationFactory<Program>, IAsyn
 internal class TestSigningCredentialStore : ISigningCredentialStore, IValidationKeysStore
 {
     private readonly SigningCredentials _signingCredentials;
-    private readonly IEnumerable<SecurityKeyInfo> _validationKeys;
+    private readonly IReadOnlyCollection<SecurityKeyInfo> _validationKeys;
 
     public TestSigningCredentialStore()
     {
@@ -388,14 +388,14 @@ internal class TestSigningCredentialStore : ISigningCredentialStore, IValidation
         };
     }
 
-    public Task<SigningCredentials?> GetSigningCredentialsAsync()
+    public Task<SigningCredentials?> GetSigningCredentialsAsync(CancellationToken cancellationToken = default)
     {
         return Task.FromResult<SigningCredentials?>(_signingCredentials);
     }
 
-    public Task<IEnumerable<SecurityKeyInfo>?> GetValidationKeysAsync()
+    public Task<IReadOnlyCollection<SecurityKeyInfo>> GetValidationKeysAsync(CancellationToken cancellationToken = default)
     {
-        return Task.FromResult<IEnumerable<SecurityKeyInfo>?>(_validationKeys);
+        return Task.FromResult(_validationKeys);
     }
 }
 

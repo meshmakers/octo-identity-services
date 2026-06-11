@@ -436,7 +436,7 @@ internal class DefaultConfigurationCreatorService(
             }
         };
 
-        var octoToolClient = await clientStore.FindClientByIdAsync(CommonConstants.OctoToolClientId);
+        var octoToolClient = await clientStore.FindClientByIdAsync(CommonConstants.OctoToolClientId, CancellationToken.None);
         if (octoToolClient == null)
         {
             await clientStore.CreateAsync(appClient);
@@ -482,7 +482,7 @@ internal class DefaultConfigurationCreatorService(
         };
 
         var octoIdentityServiceSwaggerClient =
-            await clientStore.FindClientByIdAsync(CommonConstants.IdentityServicesSwaggerClientId);
+            await clientStore.FindClientByIdAsync(CommonConstants.IdentityServicesSwaggerClientId, CancellationToken.None);
         if (octoIdentityServiceSwaggerClient == null)
         {
             await clientStore.CreateAsync(appClient);
@@ -546,7 +546,7 @@ internal class DefaultConfigurationCreatorService(
             FrontChannelLogoutSessionRequired = true
         };
 
-        var existingRefineryStudioClient = await clientStore.FindClientByIdAsync(RefineryStudioClientId);
+        var existingRefineryStudioClient = await clientStore.FindClientByIdAsync(RefineryStudioClientId, CancellationToken.None);
         if (existingRefineryStudioClient == null)
         {
             await clientStore.CreateAsync(refineryStudioClient);

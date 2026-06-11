@@ -38,15 +38,15 @@ public class GrantsApiController : ControllerBase
     [HttpGet]
     public async Task<ActionResult<IEnumerable<GrantInfoDto>>> GetGrants()
     {
-        var grants = await _interaction.GetAllUserGrantsAsync();
+        var grants = await _interaction.GetAllUserGrantsAsync(HttpContext.RequestAborted);
         var list = new List<GrantInfoDto>();
 
         foreach (var grant in grants)
         {
-            var client = await _clientStore.FindClientByIdAsync(grant.ClientId);
+            var client = await _clientStore.FindClientByIdAsync(grant.ClientId, HttpContext.RequestAborted);
             if (client == null) continue;
 
-            var resources = await _resourceStore.FindResourcesByScopeAsync(grant.Scopes);
+            var resources = await _resourceStore.FindResourcesByScopeAsync(grant.Scopes, HttpContext.RequestAborted);
 
             var identityScopes = resources.IdentityResources
                 .Select(r => r.DisplayName ?? r.Name)
@@ -88,11 +88,11 @@ public class GrantsApiController : ControllerBase
             };
         }
 
-        await _interaction.RevokeUserConsentAsync(request.ClientId);
+        await _interaction.RevokeUserConsentAsync(request.ClientId, HttpContext.RequestAborted);
 
         await _events.RaiseAsync(new GrantsRevokedEvent(
             User.GetSubjectId(),
-            request.ClientId));
+            request.ClientId), HttpContext.RequestAborted);
 
         return new RevokeGrantResultDto { Success = true };
     }

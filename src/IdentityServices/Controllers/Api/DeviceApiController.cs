@@ -40,7 +40,7 @@ public class DeviceApiController(
             return BadRequest("User code is required");
         }
 
-        var request = await deviceInteraction.GetAuthorizationContextAsync(userCode);
+        var request = await deviceInteraction.GetAuthorizationContextAsync(userCode, HttpContext.RequestAborted);
         if (request == null)
         {
             return NotFound("Invalid or expired device code");
@@ -101,7 +101,7 @@ public class DeviceApiController(
     [HttpPost("authorize")]
     public async Task<ActionResult<DeviceAuthorizationResultDto>> Authorize([FromBody] DeviceAuthorizationRequestDto request)
     {
-        var context = await deviceInteraction.GetAuthorizationContextAsync(request.UserCode);
+        var context = await deviceInteraction.GetAuthorizationContextAsync(request.UserCode, HttpContext.RequestAborted);
         if (context == null)
         {
             return new DeviceAuthorizationResultDto
@@ -187,14 +187,14 @@ public class DeviceApiController(
             Description = request.Description
         };
 
-        await deviceInteraction.HandleRequestAsync(request.UserCode, grantedConsent);
+        await deviceInteraction.HandleRequestAsync(request.UserCode, grantedConsent, HttpContext.RequestAborted);
 
         await events.RaiseAsync(new ConsentGrantedEvent(
             User.GetSubjectId(),
             context.Client?.ClientId ?? "unknown",
             context.ValidatedResources.RawScopeValues,
             request.ScopesConsented ?? [],
-            request.RememberConsent));
+            request.RememberConsent), HttpContext.RequestAborted);
 
         return new DeviceAuthorizationResultDto
         {
@@ -208,7 +208,7 @@ public class DeviceApiController(
     [HttpPost("deny")]
     public async Task<ActionResult<DeviceAuthorizationResultDto>> Deny([FromBody] DeviceDenyRequestDto request)
     {
-        var context = await deviceInteraction.GetAuthorizationContextAsync(request.UserCode);
+        var context = await deviceInteraction.GetAuthorizationContextAsync(request.UserCode, HttpContext.RequestAborted);
         if (context == null)
         {
             return new DeviceAuthorizationResultDto
@@ -220,12 +220,13 @@ public class DeviceApiController(
 
         await deviceInteraction.HandleRequestAsync(
             request.UserCode,
-            new ConsentResponse { Error = AuthorizationError.AccessDenied });
+            new ConsentResponse { Error = InteractionError.AccessDenied },
+            HttpContext.RequestAborted);
 
         await events.RaiseAsync(new ConsentDeniedEvent(
             User.GetSubjectId(),
             context.Client?.ClientId ?? "unknown",
-            context.ValidatedResources.RawScopeValues));
+            context.ValidatedResources.RawScopeValues), HttpContext.RequestAborted);
 
         return new DeviceAuthorizationResultDto
         {

@@ -14,7 +14,7 @@ internal class SigningCredentialService : IValidationKeysStore, ISigningCredenti
     private static readonly Logger Logger = LogManager.GetCurrentClassLogger();
     private readonly SigningCredentials? _credential;
 
-    private readonly IEnumerable<SecurityKeyInfo>? _keys;
+    private readonly IReadOnlyCollection<SecurityKeyInfo> _keys = Array.Empty<SecurityKeyInfo>();
 
     /// <summary>
     ///     Initializes a new instance
@@ -53,7 +53,7 @@ internal class SigningCredentialService : IValidationKeysStore, ISigningCredenti
     ///     Gets the signing credentials.
     /// </summary>
     /// <returns></returns>
-    public Task<SigningCredentials?> GetSigningCredentialsAsync()
+    public Task<SigningCredentials?> GetSigningCredentialsAsync(CancellationToken cancellationToken = default)
     {
         return Task.FromResult(_credential);
     }
@@ -62,7 +62,7 @@ internal class SigningCredentialService : IValidationKeysStore, ISigningCredenti
     ///     Gets all validation keys.
     /// </summary>
     /// <returns></returns>
-    public Task<IEnumerable<SecurityKeyInfo>?> GetValidationKeysAsync()
+    public Task<IReadOnlyCollection<SecurityKeyInfo>> GetValidationKeysAsync(CancellationToken cancellationToken = default)
     {
         return Task.FromResult(_keys);
     }

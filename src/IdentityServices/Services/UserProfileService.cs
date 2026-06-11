@@ -34,9 +34,9 @@ public class UserProfileService : ProfileService<RtUser>
         _allowedTenantsResolver = allowedTenantsResolver;
     }
 
-    public override async Task GetProfileDataAsync(ProfileDataRequestContext context)
+    public override async Task GetProfileDataAsync(ProfileDataRequestContext context, CancellationToken cancellationToken = default)
     {
-        await base.GetProfileDataAsync(context);
+        await base.GetProfileDataAsync(context, cancellationToken);
 
         var loginTenantId = _httpContextAccessor.HttpContext?.Items[InfrastructureCommon.TenantIdName] as string;
         if (!string.IsNullOrEmpty(loginTenantId))
