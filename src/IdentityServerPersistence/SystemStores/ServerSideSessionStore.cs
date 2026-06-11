@@ -220,8 +220,8 @@ public class ServerSideSessionStore(
         return removed;
     }
 
-    public async Task<QueryResult<ServerSideSession>> QuerySessionsAsync(SessionQuery? filter = null,
-        CancellationToken cancellationToken = default)
+    public async Task<QueryResult<ServerSideSession>> QuerySessionsAsync(CancellationToken cancellationToken = default,
+        SessionQuery? filter = null)
     {
         using var session = await TenantRepository.GetSessionAsync();
         session.StartTransaction();

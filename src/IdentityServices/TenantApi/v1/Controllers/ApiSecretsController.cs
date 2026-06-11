@@ -46,7 +46,7 @@ public class ApiSecretsController : ControllerBase
             return BadRequest(ModelState);
         }
 
-        var client = await _octoClientStore.FindClientByIdAsync(clientId);
+        var client = await _octoClientStore.FindClientByIdAsync(clientId, HttpContext.RequestAborted);
         if (client == null)
         {
             return NotFound();
@@ -69,7 +69,7 @@ public class ApiSecretsController : ControllerBase
 
         var decodedSecretValue = secretValue.DecodeBase64();
 
-        var client = await _octoClientStore.FindClientByIdAsync(clientId);
+        var client = await _octoClientStore.FindClientByIdAsync(clientId, HttpContext.RequestAborted);
         if (client == null)
         {
             return NotFound(new NotFoundErrorDto($"Client '{clientId}' not found"));
@@ -96,7 +96,7 @@ public class ApiSecretsController : ControllerBase
             return BadRequest(ModelState);
         }
 
-        var apiResources = await _octoResourceStore.FindApiResourcesByNameAsync(new[] { apiResourceName });
+        var apiResources = await _octoResourceStore.FindApiResourcesByNameAsync(new[] { apiResourceName }, HttpContext.RequestAborted);
         var apiResource = apiResources.FirstOrDefault();
         if (apiResource == null)
         {
@@ -121,7 +121,7 @@ public class ApiSecretsController : ControllerBase
 
         var decodedSecretValue = secretValue.DecodeBase64();
 
-        var apiResources = await _octoResourceStore.FindApiResourcesByNameAsync(new[] { apiResourceName });
+        var apiResources = await _octoResourceStore.FindApiResourcesByNameAsync(new[] { apiResourceName }, HttpContext.RequestAborted);
         var apiResource = apiResources.FirstOrDefault();
         if (apiResource == null)
         {

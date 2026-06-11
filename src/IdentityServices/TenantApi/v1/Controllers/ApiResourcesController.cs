@@ -45,7 +45,7 @@ public class ApiResourcesController : ControllerBase
     {
         try
         {
-            var resources = await _octoResourceStore.GetAllResourcesAsync();
+            var resources = await _octoResourceStore.GetAllResourcesAsync(HttpContext.RequestAborted);
             return Ok(resources.ApiResources.Select(CreateApiResourceDto));
         }
         catch (Exception e)
@@ -66,7 +66,7 @@ public class ApiResourcesController : ControllerBase
         {
             var list = new List<ApiResourceDto>();
 
-            var apiResources = (await _octoResourceStore.GetAllResourcesAsync()).ApiResources;
+            var apiResources = (await _octoResourceStore.GetAllResourcesAsync(HttpContext.RequestAborted)).ApiResources;
 
             foreach (var apiResource in apiResources.Skip(pagingParams.Skip).Take(pagingParams.Take))
             {
@@ -134,7 +134,7 @@ public class ApiResourcesController : ControllerBase
                 return BadRequest(ModelState);
             }
 
-            if ((await _octoResourceStore.FindApiResourcesByNameAsync([apiResourceDto.Name])).Any())
+            if ((await _octoResourceStore.FindApiResourcesByNameAsync([apiResourceDto.Name], HttpContext.RequestAborted)).Any())
             {
                 return Conflict($"API resource with name '{apiResourceDto.Name}' already exists.");
             }

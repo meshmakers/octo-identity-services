@@ -8,7 +8,7 @@ namespace Meshmakers.Octo.Backend.IdentityServices.Services;
 /// </summary>
 public class CorsPolicyService(IdentityCorsPolicyProvider corsPolicyProvider) : ICorsPolicyService
 {
-    public Task<bool> IsOriginAllowedAsync(string origin)
+    public Task<bool> IsOriginAllowedAsync(string origin, CancellationToken cancellationToken = default)
     {
         return corsPolicyProvider.IsOriginAllowedAsync(origin);
     }

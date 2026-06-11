@@ -108,7 +108,7 @@ public class ClientsController : ControllerBase
             return BadRequest(ModelState);
         }
 
-        if (await _octoClientStore.FindClientByIdAsync(clientDto.ClientId) != null)
+        if (await _octoClientStore.FindClientByIdAsync(clientDto.ClientId, HttpContext.RequestAborted) != null)
         {
             return Conflict($"Client with id '{clientDto.ClientId}' already exists.");
         }
@@ -179,7 +179,7 @@ public class ClientsController : ControllerBase
     [ProducesResponseType(StatusCodes.Status200OK)]
     public async Task<IActionResult> Delete([Required][Description("ID of the client")] string id)
     {
-        var appClient = await _octoClientStore.FindClientByIdAsync(id);
+        var appClient = await _octoClientStore.FindClientByIdAsync(id, HttpContext.RequestAborted);
         if (appClient == null)
         {
             return NotFound(new NotFoundErrorDto($"Client with id '{id}' does not exist."));

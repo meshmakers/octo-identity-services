@@ -33,7 +33,7 @@ public class ConsentApiController : ControllerBase
     [HttpGet]
     public async Task<ActionResult<ConsentContextDto>> GetConsentContext([FromQuery] string? returnUrl)
     {
-        var request = await _interaction.GetAuthorizationContextAsync(returnUrl);
+        var request = await _interaction.GetAuthorizationContextAsync(returnUrl, HttpContext.RequestAborted);
         if (request == null)
         {
             return NotFound("Invalid consent request");
@@ -97,7 +97,7 @@ public class ConsentApiController : ControllerBase
     [HttpPost("grant")]
     public async Task<ActionResult<ConsentResultDto>> GrantConsent([FromBody] ConsentRequestDto request)
     {
-        var context = await _interaction.GetAuthorizationContextAsync(request.ReturnUrl);
+        var context = await _interaction.GetAuthorizationContextAsync(request.ReturnUrl, HttpContext.RequestAborted);
         if (context == null)
         {
             return new ConsentResultDto
@@ -123,14 +123,14 @@ public class ConsentApiController : ControllerBase
             Description = request.Description
         };
 
-        await _interaction.GrantConsentAsync(context, grantedConsent);
+        await _interaction.GrantConsentAsync(context, grantedConsent, HttpContext.RequestAborted);
 
         await _events.RaiseAsync(new ConsentGrantedEvent(
             User.GetSubjectId(),
             context.Client.ClientId,
             context.ValidatedResources.RawScopeValues,
             request.ScopesConsented,
-            request.RememberConsent));
+            request.RememberConsent), HttpContext.RequestAborted);
 
         return new ConsentResultDto
         {
@@ -145,7 +145,7 @@ public class ConsentApiController : ControllerBase
     [HttpPost("deny")]
     public async Task<ActionResult<ConsentResultDto>> DenyConsent([FromBody] ConsentDenyRequestDto request)
     {
-        var context = await _interaction.GetAuthorizationContextAsync(request.ReturnUrl);
+        var context = await _interaction.GetAuthorizationContextAsync(request.ReturnUrl, HttpContext.RequestAborted);
         if (context == null)
         {
             return new ConsentResultDto
@@ -155,12 +155,12 @@ public class ConsentApiController : ControllerBase
             };
         }
 
-        await _interaction.DenyAuthorizationAsync(context, AuthorizationError.AccessDenied);
+        await _interaction.DenyAuthorizationAsync(context, InteractionError.AccessDenied, HttpContext.RequestAborted);
 
         await _events.RaiseAsync(new ConsentDeniedEvent(
             User.GetSubjectId(),
             context.Client.ClientId,
-            context.ValidatedResources.RawScopeValues));
+            context.ValidatedResources.RawScopeValues), HttpContext.RequestAborted);
 
         return new ConsentResultDto
         {

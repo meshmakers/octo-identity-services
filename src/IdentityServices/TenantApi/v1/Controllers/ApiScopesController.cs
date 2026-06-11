@@ -38,7 +38,7 @@ public class ApiScopesController : ControllerBase
     [ProducesResponseType(typeof(IEnumerable<ApiScopeDto>), StatusCodes.Status200OK)]
     public async Task<IEnumerable<ApiScopeDto>> Get()
     {
-        var resources = await _octoResourceStore.GetAllResourcesAsync();
+        var resources = await _octoResourceStore.GetAllResourcesAsync(HttpContext.RequestAborted);
         return resources.ApiScopes.Select(CreateApiScopeDto);
     }
 
@@ -51,7 +51,7 @@ public class ApiScopesController : ControllerBase
     {
         var list = new List<ApiScopeDto>();
 
-        var scopes = (await _octoResourceStore.GetAllResourcesAsync()).ApiScopes;
+        var scopes = (await _octoResourceStore.GetAllResourcesAsync(HttpContext.RequestAborted)).ApiScopes;
 
         foreach (var apiResource in scopes.Skip(pagingParams.Skip).Take(pagingParams.Take))
         {
@@ -77,7 +77,7 @@ public class ApiScopesController : ControllerBase
     [ProducesResponseType(typeof(ApiScopeDto), StatusCodes.Status200OK)]
     public async Task<IActionResult> Get([Required] string name)
     {
-        var scopes = await _octoResourceStore.FindApiScopesByNameAsync(new[] { name });
+        var scopes = await _octoResourceStore.FindApiScopesByNameAsync(new[] { name }, HttpContext.RequestAborted);
         var scope = scopes.FirstOrDefault();
         if (scope == null)
         {
@@ -99,7 +99,7 @@ public class ApiScopesController : ControllerBase
             return BadRequest(ModelState);
         }
 
-        if ((await _octoResourceStore.FindApiScopesByNameAsync(new[] { scopeDto.Name })).Any())
+        if ((await _octoResourceStore.FindApiScopesByNameAsync(new[] { scopeDto.Name }, HttpContext.RequestAborted)).Any())
         {
             return Conflict($"Scope with name '{scopeDto.Name}' already exists.");
         }

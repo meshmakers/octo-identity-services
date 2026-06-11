@@ -196,8 +196,8 @@ public class ResourceStore(IMultiTenancyResolverService multiTenancyResolverServ
         await session.CommitTransactionAsync();
     }
 
-    public async Task<IEnumerable<IdentityResource>> FindIdentityResourcesByScopeNameAsync(
-        IEnumerable<string> scopeNames)
+    public async Task<IReadOnlyCollection<IdentityResource>> FindIdentityResourcesByScopeNameAsync(
+        IEnumerable<string> scopeNames, CancellationToken cancellationToken = default)
     {
         using var session = await TenantRepository.GetSessionAsync();
         session.StartTransaction();
@@ -209,17 +209,17 @@ public class ResourceStore(IMultiTenancyResolverService multiTenancyResolverServ
 
         await session.CommitTransactionAsync();
 
-        return result.Items.Select(mapper.Map<IdentityResource>);
+        return result.Items.Select(mapper.Map<IdentityResource>).ToList();
     }
 
-    public async Task<IEnumerable<ApiScope>> FindApiScopesByNameAsync(IEnumerable<string> scopeNames)
+    public async Task<IReadOnlyCollection<ApiScope>> FindApiScopesByNameAsync(IEnumerable<string> scopeNames, CancellationToken cancellationToken = default)
     {
         var result = await FindRtApiScopesByNameAsync(scopeNames);
 
-        return result.Select(mapper.Map<ApiScope>);
+        return result.Select(mapper.Map<ApiScope>).ToList();
     }
 
-    public async Task<IEnumerable<ApiResource>> FindApiResourcesByScopeNameAsync(IEnumerable<string> scopeNames)
+    public async Task<IReadOnlyCollection<ApiResource>> FindApiResourcesByScopeNameAsync(IEnumerable<string> scopeNames, CancellationToken cancellationToken = default)
     {
         using var session = await TenantRepository.GetSessionAsync();
         session.StartTransaction();
@@ -231,17 +231,17 @@ public class ResourceStore(IMultiTenancyResolverService multiTenancyResolverServ
 
         await session.CommitTransactionAsync();
 
-        return result.Items.Select(mapper.Map<ApiResource>);
+        return result.Items.Select(mapper.Map<ApiResource>).ToList();
     }
 
-    public async Task<IEnumerable<ApiResource>> FindApiResourcesByNameAsync(IEnumerable<string> apiResourceNames)
+    public async Task<IReadOnlyCollection<ApiResource>> FindApiResourcesByNameAsync(IEnumerable<string> apiResourceNames, CancellationToken cancellationToken = default)
     {
         var result = await FindRtApiResourcesByNameAsync(apiResourceNames);
 
-        return result.Select(mapper.Map<ApiResource>);
+        return result.Select(mapper.Map<ApiResource>).ToList();
     }
 
-    public async Task<Resources> GetAllResourcesAsync()
+    public async Task<Resources> GetAllResourcesAsync(CancellationToken cancellationToken = default)
     {
         using var session = await TenantRepository.GetSessionAsync();
         session.StartTransaction();

@@ -15,7 +15,7 @@ internal class OctoEventSink(
     IHttpContextAccessor httpContextAccessor,
     ILogger<OctoEventSink> logger) : IEventSink
 {
-    public async Task PersistAsync(Event evt)
+    public async Task PersistAsync(Event evt, CancellationToken cancellationToken = default)
     {
         if (evt.EventType is not (EventTypes.Error or EventTypes.Failure))
         {

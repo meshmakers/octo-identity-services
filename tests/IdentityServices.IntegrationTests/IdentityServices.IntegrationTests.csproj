@@ -11,13 +11,13 @@
 
     <ItemGroup>
         <!-- Test Framework -->
-        <PackageReference Include="Microsoft.NET.Test.Sdk" Version="18.5.1" />
+        <PackageReference Include="Microsoft.NET.Test.Sdk" Version="18.6.0" />
         <PackageReference Include="xunit.v3" Version="3.2.2" />
         <PackageReference Include="xunit.runner.visualstudio" Version="3.1.5">
             <PrivateAssets>all</PrivateAssets>
             <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
         </PackageReference>
-        <PackageReference Include="coverlet.collector" Version="10.0.0">
+        <PackageReference Include="coverlet.collector" Version="10.0.1">
             <PrivateAssets>all</PrivateAssets>
             <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
         </PackageReference>
@@ -26,17 +26,17 @@
         <PackageReference Include="Otp.NET" Version="1.4.1" />
 
         <!-- Integration Testing -->
-        <PackageReference Include="Microsoft.AspNetCore.Mvc.Testing" Version="10.0.7" />
+        <PackageReference Include="Microsoft.AspNetCore.Mvc.Testing" Version="10.0.9" />
 
         <!-- TestContainers for MongoDB -->
-        <PackageReference Include="Testcontainers.MongoDb" Version="4.11.0" />
+        <PackageReference Include="Testcontainers.MongoDb" Version="4.12.0" />
 
         <!-- Logging for xUnit -->
         <PackageReference Include="MartinCostello.Logging.XUnit.v3" Version="0.7.1" />
 
         <!-- Configuration -->
-        <PackageReference Include="Microsoft.Extensions.Configuration.Json" Version="10.0.7" />
-        <PackageReference Include="Microsoft.Extensions.Configuration.Binder" Version="10.0.7" />
+        <PackageReference Include="Microsoft.Extensions.Configuration.Json" Version="10.0.9" />
+        <PackageReference Include="Microsoft.Extensions.Configuration.Binder" Version="10.0.9" />
     </ItemGroup>
 
     <ItemGroup>
