@@ -74,11 +74,28 @@ steps:
         Write-Host "Setting OctoVersion to $buildNumberShort"
         $octoVersion = $buildNumberShort
       }
+      # CK model publish routing: only main and release tags publish to the GitHub
+      # catalogs; every other branch publishes to the run-isolated local catalog.
+      # Mirrors octo-pipeline-templates/templates/steps/update-build-number.yml
+      # (tpl-v0.3.0, AB#4167) until this repo migrates to the shared template.
+      $effectivePublishCatalog = "LocalFileSystemCatalog"
+      if ($branch -eq "refs/heads/main" -or $branch.StartsWith("refs/tags/r")) {
+        $effectivePublishCatalog = $octoPublishCatalog
+      }
+
+      # Per-run local CK catalog root: Agent.TempDirectory is purged per job, so a
+      # feature-branch publish can never leak into another build on this agent.
+      $octoLocalCatalogRootPath = "$(Agent.TempDirectory)/octo-local-catalog"
+
       Write-Host "Setting build number short to '$buildNumberShort', build number long to '$buildNumberLong'"
+      Write-Host "Setting effectivePublishCatalog to '$effectivePublishCatalog'"
+      Write-Host "Setting OctoLocalCatalogRootPath to '$octoLocalCatalogRootPath'"
       Write-Host "##vso[task.setvariable variable=MajorVersion;]$major"
       Write-Host "##vso[task.setvariable variable=MinorVersion;]$minor"
       Write-Host "##vso[task.setvariable variable=BuildNumberShort;]$buildNumberShort"
       Write-Host "##vso[task.setvariable variable=BuildNumberLong;]$buildNumberLong"
       Write-Host "##vso[task.setvariable variable=OctoVersion;]$octoVersion"
       Write-Host "##vso[task.setvariable variable=OctoPublishCatalog;]$octoPublishCatalog"
+      Write-Host "##vso[task.setvariable variable=effectivePublishCatalog;]$effectivePublishCatalog"
+      Write-Host "##vso[task.setvariable variable=OctoLocalCatalogRootPath;]$octoLocalCatalogRootPath"
   displayName: 'Set build number'
