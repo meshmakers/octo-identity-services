@@ -1,0 +1,139 @@
+# Root-level CI pipeline using shared templates from octo-pipeline-templates.
+#
+# This pipeline coexists with devops-build/azure-pipelines.yml during the
+# Phase 1-services pilot of the YAML migration (octo-mesh-deployment's
+# docs/pipeline-architecture-concept.md §6.2). A NEW ADO build definition
+# pointing at THIS file runs in parallel with the legacy CI (def 91 still
+# reads devops-build/azure-pipelines.yml); once two green runs land on main
+# + a test branch, the existing def's yamlFilename can be flipped to this
+# file and devops-build/ deleted in a follow-up commit.
+#
+# Service-train (release-services-train.yml) keeps queueing def 91 by ID — no
+# train change needed regardless of which YAML def 91 ends up pointing at,
+# because the new file produces identical artifacts (build number, OctoVersion,
+# Docker image tag, CK library outputs).
+#
+# Identity-specific quirks preserved from the legacy YAML:
+#   - InstallSSHKey + submodules:recursive — Octo.User.props etc. pulled from
+#     private GitHub submodule via SSH
+#   - download-ca step — internal Meshmakers root CA needed by dotnet restore
+#     against the private NuGet feed
+#   - Docker pre-pull of mongo:8.0.15 — Testcontainers in
+#     IdentityServices.IntegrationTests starts a Mongo container; pre-pulling
+#     avoids first-test-flake during the pull
+#   - TESTCONTAINERS_HOST_OVERRIDE=172.17.0.1 — DinD on the hosted agent needs
+#     the bridge gateway IP for the test process to reach the spawned containers
+#   - constructionKitLibraryPaths: Persistence.IdentityCkModel publishes a CK
+#     library YAML next to its nupkg
+
+name: $(MajorVersion).$(MinorVersion).$(date:yyMM).$(DayOfMonth)$(rev:rrr)-$(Build.SourceBranchName)
+
+resources:
+  repositories:
+    - repository: pipelineTemplates
+      type: github
+      name: meshmakers/octo-pipeline-templates
+      endpoint: meshmakers-access-token
+      ref: refs/tags/tpl-v0.3.0
+
+trigger:
+  batch: true
+  branches:
+    include:
+      - dev/*
+      - test/*
+      - main
+  tags:
+    exclude:
+      - '*'
+
+variables:
+  - group: GitSSHGroup
+  - group: ApiKeys-mm-cloud
+  - group: OctoDefault
+  - name: solutionFile
+    value: 'Octo.Identity.sln'
+  - name: artifactsFrameworkVersion
+    value: 'net10.0'
+  - name: buildConfiguration
+    value: 'Release'
+  - name: buildPlatform
+    value: 'Any CPU'
+  - name: isRelease
+    value: ${{ startsWith(variables['Build.SourceBranch'], 'refs/tags/r') }}
+  - name: isMain
+    value: ${{ eq(variables['Build.SourceBranch'], 'refs/heads/main') }}
+  - name: isTest
+    value: ${{ startsWith(variables['Build.SourceBranch'], 'refs/heads/test') }}
+
+stages:
+  - stage: Build
+    jobs:
+      - job: linux
+        displayName: 'Build, test, and push Docker image'
+        pool:
+          name: meshmakers-ci-agents
+        steps:
+          - template: templates/steps/update-build-number.yml@pipelineTemplates
+          - task: InstallSSHKey@0
+            displayName: 'Install SSH key for private submodules'
+            inputs:
+              knownHostsEntry: '$(SSHKnownHosts)'
+              sshPublicKey: '$(SSHPublicKey)'
+              sshPassphrase: '$(SSHPassphrase)'
+              sshKeySecureFile: '$(SSHPrivateKeyFile)'
+          - checkout: self
+            clean: true
+            submodules: recursive
+          - template: templates/steps/set-version.yml@pipelineTemplates
+          - template: templates/steps/download-ca.yml@pipelineTemplates
+          - task: DotNetCoreCLI@2
+            displayName: 'Restore NuGet packages'
+            inputs:
+              command: 'restore'
+              projects: '$(solutionFile)'
+              restoreArguments: '--force /p:OctoNugetPrivateServer=$(nugetPrivateServer)'
+              noCache: true
+          - task: DotNetCoreCLI@2
+            displayName: 'Build'
+            inputs:
+              command: 'build'
+              projects: '$(solutionFile)'
+              arguments: '--configuration $(buildConfiguration) /p:OctoNugetPrivateServer=$(nugetPrivateServer) /p:OctoPublishCatalog="$(effectivePublishCatalog)" /p:OctoPrivateGitHubApiKey=$(GitHubPAT) /p:OctoPublicGitHubApiKey=$(GitHubPAT)'
+              publishWebProjects: false
+              zipAfterPublish: false
+              modifyOutputPath: false
+          - script: |
+              echo "=== Docker Diagnostics ==="
+              echo "DOCKER_HOST: $DOCKER_HOST"
+              docker version || echo "ERROR: Docker not available"
+              docker info || echo "ERROR: Docker info failed"
+              echo ""
+              echo "=== Pre-pulling MongoDB image for Testcontainers ==="
+              docker pull mongo:8.0.15 || echo "Warning: Failed to pre-pull MongoDB image"
+            displayName: 'Docker diagnostics + Mongo pre-pull'
+            env:
+              DOCKER_HOST: unix:///var/run/docker.sock
+          - task: DotNetCoreCLI@2
+            displayName: 'Test'
+            inputs:
+              command: 'test'
+              arguments: '--configuration $(buildConfiguration) -p:OctoNugetPrivateServer=$(nugetPrivateServer) /p:OctoPublishCkModel=false --logger "console;verbosity=detailed"'
+              projects: |
+                **/*Tests.csproj
+                !**/*SystemTests.csproj
+            env:
+              DOCKER_HOST: unix:///var/run/docker.sock
+              TESTCONTAINERS_RYUK_DISABLED: 'true'
+              TESTCONTAINERS_HOST_OVERRIDE: '172.17.0.1'
+          - template: templates/steps/build-and-push-docker.yml@pipelineTemplates
+            parameters:
+              publicRegistryServiceConnection: $(DockerRegistryPublicConnection)
+              privateRegistryName: $(DockerRegistryPrivateUri)
+              repository: meshmakers/octo-mesh-identity-services
+              dockerfile: src/IdentityServices/Dockerfile
+              enableMainLatestTag: true
+          - template: templates/steps/handle-artifacts.yml@pipelineTemplates
+            parameters:
+              constructionKitLibraryPaths:
+                - 'src/Persistence.IdentityCkModel/bin/$(buildConfiguration)/$(artifactsFrameworkVersion)/octo-ck-libraries/Persistence.IdentityCkModel'
