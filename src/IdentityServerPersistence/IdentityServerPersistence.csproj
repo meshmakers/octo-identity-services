@@ -13,9 +13,9 @@
 
     <ItemGroup>
         <ProjectReference Include="..\IdentityServices.Resources\IdentityServices.Resources.csproj" />
-        <PackageReference Include="Meshmakers.Octo.Runtime.Engine.MongoDb" Version="$(OctoVersion)" />
-        <PackageReference Include="Meshmakers.Octo.Services.Infrastructure" Version="$(OctoVersion)" />
-        <PackageReference Include="Meshmakers.Octo.Services.Notifications" Version="$(OctoVersion)" />
+        <PackageReference Include="Meshmakers.Octo.Runtime.Engine.MongoDb" Version="$(OctoCoreLibVersion)" />
+        <PackageReference Include="Meshmakers.Octo.Services.Infrastructure" Version="$(OctoCoreLibVersion)" />
+        <PackageReference Include="Meshmakers.Octo.Services.Notifications" Version="$(OctoCoreLibVersion)" />
         <ProjectReference Include="..\Persistence.IdentityCkModel\Persistence.IdentityCkModel.csproj" />
     </ItemGroup>
 
