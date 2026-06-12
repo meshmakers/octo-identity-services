@@ -6,7 +6,13 @@ using Testcontainers.MongoDb;
 namespace IdentityServices.IntegrationTests.Fixtures;
 
 /// <summary>
-/// Fixture that starts MongoDB test container.
+///     Fixture that starts a MongoDB Testcontainer with a replica set (required for transactions).
+///
+///     Container-bringup pattern matches octo-construction-kit-engine-mongodb /
+///     octo-ai-services — Testcontainers' rs.initiate() handshake and mongo's keyfile-init
+///     entrypoint race with port binding on CI agents under load (build 34386 hung 40+ min
+///     in a sibling service due to exit-48 on 27017 inside the entrypoint restart). The
+///     retry loop with a *fresh* container per attempt is the proven fix.
 /// </summary>
 public class DatabaseFixture : ConfigurationFixture
 {
@@ -25,26 +31,58 @@ public class DatabaseFixture : ConfigurationFixture
         Console.WriteLine($"[Testcontainers] TESTCONTAINERS_HOST_OVERRIDE: {Environment.GetEnvironmentVariable("TESTCONTAINERS_HOST_OVERRIDE") ?? "(not set)"}");
         Console.WriteLine($"[Testcontainers] TESTCONTAINERS_RYUK_DISABLED: {Environment.GetEnvironmentVariable("TESTCONTAINERS_RYUK_DISABLED") ?? "(not set)"}");
 
-        // Start MongoDB test container with authentication
-        _mongoDbContainer = new MongoDbBuilder(_options.MongoDbImage)
-            .WithReplicaSet()
-            .WithName($"mongodb-identity-test-{Guid.NewGuid():N}")
-            .WithUsername(_options.AdminUser)
-            .WithPassword(_options.AdminUserPassword)
-            .WithCleanUp(true) // Ensure cleanup even if Ryuk is disabled in CI
-            .Build();
+        const int maxAttempts = 3;
+        var perAttemptTimeout = TimeSpan.FromMinutes(2);
 
-        Console.WriteLine("[Testcontainers] Container built, starting...");
-        var startTime = DateTime.UtcNow;
+        for (var attempt = 1; attempt <= maxAttempts; attempt++)
+        {
+            Console.WriteLine($"[Testcontainers] StartAsync attempt {attempt}/{maxAttempts}");
 
-        // Use explicit timeout for container startup (5 minutes should be enough for image pull + startup)
-        using var cts = new CancellationTokenSource(TimeSpan.FromMinutes(5));
-        await _mongoDbContainer.StartAsync(cts.Token);
+            // No WithCleanUp(true) — Ryuk's TCP handshake blocks silently on the self-hosted
+            // DinD agent; DisposeServicesAsync handles cleanup explicitly.
+            _mongoDbContainer = new MongoDbBuilder(_options.MongoDbImage)
+                .WithReplicaSet()
+                .WithName($"mongodb-identity-test-{Guid.NewGuid():N}")
+                .WithUsername(_options.AdminUser)
+                .WithPassword(_options.AdminUserPassword)
+                .Build();
 
-        var elapsed = DateTime.UtcNow - startTime;
-        Console.WriteLine($"[Testcontainers] Container started in {elapsed.TotalSeconds:F1}s");
+            using var startCts = new CancellationTokenSource(perAttemptTimeout);
+            var startTime = DateTime.UtcNow;
 
-        var mappedPort = _mongoDbContainer.GetMappedPublicPort();
+            try
+            {
+                await _mongoDbContainer.StartAsync(startCts.Token);
+                var elapsed = DateTime.UtcNow - startTime;
+                Console.WriteLine($"[Testcontainers] Container started in {elapsed.TotalSeconds:F1}s");
+                break;
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine(
+                    $"[Testcontainers] StartAsync attempt {attempt}/{maxAttempts} failed: {ex.GetType().Name}: {ex.Message}");
+
+                try
+                {
+                    await _mongoDbContainer.DisposeAsync();
+                }
+                catch (Exception disposeEx)
+                {
+                    Console.WriteLine($"[Testcontainers]   Disposal of failed container also threw: {disposeEx.Message}");
+                }
+
+                _mongoDbContainer = null;
+
+                if (attempt == maxAttempts)
+                {
+                    throw;
+                }
+
+                await Task.Delay(TimeSpan.FromSeconds(2 * attempt));
+            }
+        }
+
+        var mappedPort = _mongoDbContainer!.GetMappedPublicPort();
         // Use localhost like the working project - this works in DinD with shared docker.sock
         var databaseHost = $"localhost:{mappedPort}";
         Console.WriteLine($"[Testcontainers] MongoDB available at: {databaseHost}");
