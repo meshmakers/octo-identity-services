@@ -281,14 +281,15 @@ internal class OidcTenantResolutionMiddleware(
 
     /// <summary>
     /// Captures the authorization code from the authorize response and maps it to the tenant ID.
-    /// Supports both 302 redirects (<c>response_mode=query</c>, code in Location header) and
-    /// 200 HTML responses (<c>response_mode=form_post</c>, code in hidden form field).
+    /// Supports both redirects (<c>response_mode=query</c>, code in Location header — Duende 7 emits
+    /// 302 Found, Duende 8 emits 303 See Other) and 200 HTML responses (<c>response_mode=form_post</c>,
+    /// code in hidden form field).
     /// </summary>
     private void CaptureAuthorizationCode(HttpContext context, MemoryStream responseBody, string tenantId)
     {
         string? code = null;
 
-        if (context.Response.StatusCode == StatusCodes.Status302Found)
+        if (context.Response.StatusCode is StatusCodes.Status302Found or StatusCodes.Status303SeeOther)
         {
             var location = context.Response.Headers.Location.ToString();
             code = ExtractCodeFromRedirectUri(location);

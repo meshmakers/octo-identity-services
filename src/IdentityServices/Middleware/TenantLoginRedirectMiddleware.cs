@@ -7,8 +7,11 @@ using Microsoft.Extensions.Primitives;
 namespace Meshmakers.Octo.Backend.IdentityServices.Middleware;
 
 /// <summary>
-/// Middleware that intercepts IdentityServer's 302 redirects to /{systemTenantId}/login (and other UI pages)
-/// and rewrites the tenant prefix based on <c>acr_values=tenant:{tenantId}</c> in the ReturnUrl.
+/// Middleware that intercepts IdentityServer's interaction-page redirects (302 Found or 303 See Other)
+/// to /{systemTenantId}/login (and /consent, /logout, /error, /device) and rewrites the tenant prefix
+/// based on <c>acr_values=tenant:{tenantId}</c> in the ReturnUrl.
+/// Duende IdentityServer 8 changed the contract from 302 to 303 for all AuthorizeInteractionPageResult
+/// writers; both must be accepted so the rewrite still fires.
 /// This enables OIDC clients to direct users to tenant-specific login pages by passing
 /// <c>acr_values=tenant:{tenantId}</c> in the authorize request.
 /// For logout redirects (which carry a <c>logoutId</c> instead of a <c>ReturnUrl</c>), the middleware
@@ -27,7 +30,7 @@ internal class TenantLoginRedirectMiddleware(
     {
         await next(context);
 
-        if (context.Response.StatusCode != 302)
+        if (context.Response.StatusCode is not (StatusCodes.Status302Found or StatusCodes.Status303SeeOther))
         {
             return;
         }
