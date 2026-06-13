@@ -834,6 +834,35 @@ internal class DefaultConfigurationCreatorService(
                 Claims = new AttributeStringValueList(claims?.ToList() ?? new List<string>())
             };
             await childRepo.InsertOneRtEntityAsync(session, resource);
+            return;
+        }
+
+        // Phase 2 option (b) of the platform-services concept: backfill missing claims on
+        // existing IdentityResource records so tenants provisioned against an older Identity
+        // schema version still issue ID tokens with the current claim set after a restore /
+        // cross-cluster move. Mirrors EnsureApiResourceAsync's claims-backfill, which has
+        // been in place since refinery-studio started requiring the `role` claim on the
+        // ApiResource. Without this, a tenant restored from a backup that predates the
+        // claim's addition would silently miss it — refinery-studio would still load, but
+        // any per-user role check would fail because the claim never makes it into the
+        // access token.
+        //
+        // Backfill is additive only: claims not already present are added, existing claims
+        // are left alone. Other attributes (DisplayName, Description, IsRequired) are
+        // intentionally NOT overwritten — operators may have customised those.
+        if (claims is null || claims.Length == 0)
+        {
+            return;
+        }
+
+        var existing = result.Items.First();
+        var existingClaims = existing.Claims?.ToList() ?? new List<string>();
+        var missing = claims.Where(c => !existingClaims.Contains(c)).ToList();
+        if (missing.Count > 0)
+        {
+            existingClaims.AddRange(missing);
+            existing.Claims = new AttributeStringValueList(existingClaims);
+            await childRepo.ReplaceOneRtEntityByIdAsync(session, existing.RtId, existing);
         }
     }
 
