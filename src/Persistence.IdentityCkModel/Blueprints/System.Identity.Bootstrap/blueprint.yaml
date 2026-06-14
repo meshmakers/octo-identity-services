@@ -1,0 +1,25 @@
+$schema: https://schemas.meshmakers.cloud/blueprint-meta.schema.json
+blueprintId: System.Identity.Bootstrap-1.0.0
+description: |
+  Service-managed Identity tenant seed — system + every child tenant. Provides
+  the default role set (14 roles), the five OIDC identity resources, three API
+  scopes (full-access / read-only / data-model-management), the OctoApi resource,
+  the OAuth client baseline (OctoTool / IdentityServices Swagger / Refinery
+  Studio SPA) and the TenantOwners group with full role assignment.
+
+  Following the OctoMesh "System.* = service-managed" convention this blueprint
+  is auto-applied by the Identity service on tenant Enable / startup once Phase 3
+  PR #3 enables the `RefreshTenantStateAsync` override. PR #4 replaces the
+  imperative SetupTenantAsync seed block; the schema-version row
+  IdentityService=17 is retired in favour of per-tenant BlueprintInstallation
+  rows (deleted in PR #5). Refinery Studio surfaces this blueprint as read-only.
+
+  The Refinery Studio client's `RedirectUris`, `AllowedCorsOrigins` and
+  `FrontChannelLogoutUri` use the `${octo.identity.refineryStudioUrl}` variable
+  resolved at apply time by `IdentityBlueprintVariableProvider` (PR #3). When
+  the cluster has the URL unset the blueprint still applies — the entity is
+  seeded with empty placeholder values so the OIDC failure on user login is
+  obvious instead of silently swallowed.
+
+ckModelDependencies:
+  - System.Identity-[2.7.0,3.0)
