@@ -135,7 +135,7 @@ internal class DefaultConfigurationCreatorService(
         // we run the infrastructure migrations for each tenant context
         if (migrationService != null)
         {
-            var adminSession = await tenantContext.GetAdminSessionAsync();
+            using var adminSession = await tenantContext.GetAdminSessionAsync();
             await migrationService.ExecuteMigrationsAsync(adminSession, tenantContext);
         }
 
