@@ -1,3 +1,4 @@
+using IdentityServerPersistence.SystemStores;
 using Meshmakers.Octo.ConstructionKit.Contracts;
 using Meshmakers.Octo.Runtime.Contracts;
 using Meshmakers.Octo.Runtime.Contracts.MongoDb;
@@ -92,12 +93,21 @@ internal class PreBlueprintCleanupMigration(
             totalDeleted += await DeletePreBlueprintEntitiesAsync<RtGroup>(
                 tenantRepository, session, tenantContext.TenantId);
 
+            // Orphan associations: any RtAssociation targeting a System.Identity entity whose
+            // rtId is outside the blueprint range now points at a deleted row. Left in place,
+            // OctoUserStore.GetRoleByIdAsync etc. throws NotExistingException on every user
+            // lookup that touches the orphan. Walk the per-User / per-Group assignments and drop
+            // the dangling targets.
+            var orphanedAssociations = await DeleteOrphanIdentityAssociationsAsync(
+                tenantRepository, session, tenantContext.TenantId);
+
             await session.CommitTransactionAsync();
 
             logger.LogInformation(
-                "Pre-blueprint cleanup completed for tenant '{TenantId}': {Deleted} entities deleted. " +
-                "System.Identity.Bootstrap blueprint will land its stable-rtId seed on the next ApplyBlueprint call.",
-                tenantContext.TenantId, totalDeleted);
+                "Pre-blueprint cleanup completed for tenant '{TenantId}': {Deleted} entities deleted, " +
+                "{OrphanAssociations} orphan associations removed. System.Identity.Bootstrap blueprint " +
+                "will land its stable-rtId seed on the next ApplyBlueprint call.",
+                tenantContext.TenantId, totalDeleted, orphanedAssociations);
 
             return MigrationResult.Success();
         }
@@ -157,5 +167,78 @@ internal class PreBlueprintCleanupMigration(
     {
         return rtId.CompareTo(BlueprintRangeStart) >= 0
                && rtId.CompareTo(BlueprintRangeEndExclusive) < 0;
+    }
+
+    /// <summary>
+    ///     Walks every RtAssociation in the tenant, drops the rows whose target points at a
+    ///     System.Identity entity outside the blueprint's stable rtId range. Covers the User →
+    ///     Role assignments that the deleted user-store rows still carried, as well as any
+    ///     surviving Group → Role / Group → User associations that the entity-cleanup pass
+    ///     left dangling (the entity rows are gone but the inbound edges survived).
+    /// </summary>
+    private async Task<int> DeleteOrphanIdentityAssociationsAsync(
+        ITenantRepository tenantRepository,
+        IOctoSession session,
+        string tenantId)
+    {
+        // The engine exposes outbound-association reads per origin entity, not a bulk
+        // "give me every association" query. Walk the Users + ExternalTenantUserMappings — the
+        // two CK types that could still own a stale AssignedRole edge to a deleted role — and
+        // drop the edges whose target is outside the blueprint's stable rtId range.
+        // Group → Role edges are owned by RtGroup; the only group that survives this migration
+        // is the new TenantOwners (rtId 660…40, recreated by the blueprint), so any pre-existing
+        // group-side orphan is already gone with the entity itself.
+        var deleted = 0;
+        deleted += await CleanRoleEdgesForOriginTypeAsync<RtUser>(
+            tenantRepository, session, tenantId);
+        deleted += await CleanRoleEdgesForOriginTypeAsync<RtExternalTenantUserMapping>(
+            tenantRepository, session, tenantId);
+
+        if (deleted > 0)
+        {
+            logger.LogInformation(
+                "Pre-blueprint cleanup: deleted {Count} orphan AssignedRole associations for tenant '{TenantId}'",
+                deleted, tenantId);
+        }
+
+        return deleted;
+    }
+
+    private static async Task<int> CleanRoleEdgesForOriginTypeAsync<TOrigin>(
+        ITenantRepository tenantRepository,
+        IOctoSession session,
+        string tenantId)
+        where TOrigin : RtEntity, new()
+    {
+        var origins = await tenantRepository
+            .GetRtEntitiesByTypeAsync<TOrigin>(session, RtEntityQueryOptions.Create());
+
+        var deleted = 0;
+        foreach (var origin in origins.Items)
+        {
+            var queryOptions = RtAssociationExtendedQueryOptions.Create(
+                GraphDirections.Outbound,
+                roleId: IdentityAssociationConstants.AssignedRoleId);
+            var edges = await tenantRepository.GetRtAssociationsAsync(
+                session, origin.ToRtEntityId(), queryOptions);
+
+            foreach (var edge in edges.Items)
+            {
+                if (IsBlueprintRtId(edge.TargetRtId))
+                {
+                    continue;
+                }
+
+                var update = AssociationUpdateInfo.CreateDelete(
+                    new RtEntityId(edge.OriginCkTypeId, edge.OriginRtId),
+                    new RtEntityId(edge.TargetCkTypeId, edge.TargetRtId),
+                    edge.AssociationRoleId!);
+                var opResult = new OperationResult();
+                await tenantRepository.ApplyChangesAsync(session, new[] { update }, opResult);
+                deleted++;
+            }
+        }
+
+        return deleted;
     }
 }
