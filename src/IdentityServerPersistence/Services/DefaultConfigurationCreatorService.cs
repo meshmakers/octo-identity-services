@@ -39,12 +39,11 @@ internal class DefaultConfigurationCreatorService(
       IConfigurationService
 {
     /// <summary>
-    ///     Phase 3 PR #3: declares the namespace prefix the Base class uses to recognise
-    ///     embedded blueprints this service owns. Today the only such blueprint is
-    ///     <c>System.Identity.Bootstrap-1.0.0</c> (shipped by PR #2). PR #4 cuts
-    ///     <see cref="SetupTenantAsync"/> over to apply the blueprint unconditionally; the
-    ///     <see cref="RefreshTenantStateAsync"/> path is still flag-gated until PR #5 ships
-    ///     and removes the flag.
+    ///     Namespace prefix the Base class uses to discover embedded blueprints this service
+    ///     owns. Anything starting with <c>System.Identity.</c> is treated as a service-managed
+    ///     blueprint and auto-applied by <see cref="SetupTenantAsync"/> on cold init and by
+    ///     <see cref="RefreshTenantStateAsync"/> on every tenant lifecycle event. Today the
+    ///     only such blueprint is <c>System.Identity.Bootstrap-1.0.0</c>.
     /// </summary>
     protected override string? ServiceManagedBlueprintPrefix => "System.Identity.";
 
@@ -52,8 +51,9 @@ internal class DefaultConfigurationCreatorService(
     ///     Re-applies the <c>System.Identity.Bootstrap-1.0.0</c> blueprint on every tenant
     ///     lifecycle event (Enable / Restore / DeferTenantStart=false). Together with the
     ///     unconditional apply in <see cref="SetupTenantAsync"/> this guarantees the seed
-    ///     entities stay aligned with the embedded blueprint version on every restart —
-    ///     no operator action is required when the blueprint version bumps.
+    ///     entities stay aligned with the embedded blueprint version. Operators still drive
+    ///     blueprint version bumps via image deploys; the engine then picks up the new
+    ///     version on the next pod restart or lifecycle event without further intervention.
     /// </summary>
     /// <remarks>
     ///     <c>throwOnFailure: false</c> so a transient blueprint failure (e.g. catalog lookup
