@@ -352,7 +352,7 @@ entities:
         value: true
       - id: System.Identity/RequireResourceIndicator
         value: false
-      - id: System.Identity/ApiSecrets
+      - id: System.Identity/Secrets
         value: []
       - id: System.Identity/Scopes
         value:
@@ -393,7 +393,7 @@ entities:
         value: oidc
       - id: System.Identity/RequireClientSecret
         value: false
-      - id: System.Identity/ClientSecrets
+      - id: System.Identity/Secrets
         value: []
       - id: System.Identity/AllowedGrantTypes
         value:
@@ -451,7 +451,7 @@ entities:
         value: oidc
       - id: System.Identity/RequireClientSecret
         value: false
-      - id: System.Identity/ClientSecrets
+      - id: System.Identity/Secrets
         value: []
       - id: System.Identity/AllowedGrantTypes
         value:
@@ -497,7 +497,7 @@ entities:
         value: oidc
       - id: System.Identity/RequireClientSecret
         value: false
-      - id: System.Identity/ClientSecrets
+      - id: System.Identity/Secrets
         value: []
       - id: System.Identity/AllowedGrantTypes
         value:
