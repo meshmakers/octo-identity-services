@@ -7,6 +7,7 @@ using IdentityServerPersistence.SystemStores;
 using Microsoft.AspNetCore.Identity;
 using Meshmakers.Octo.Common.DistributionEventHub.Configuration;
 using Meshmakers.Octo.Communication.Contracts.DataTransferObjects;
+using Meshmakers.Octo.Runtime.Contracts.Blueprints;
 using Meshmakers.Octo.Runtime.Contracts.MongoDb.Configuration;
 using Meshmakers.Octo.Runtime.Contracts.RepositoryEntities;
 using Meshmakers.Octo.Runtime.Engine.Configuration.DependencyInjection;
@@ -35,6 +36,14 @@ public static class RuntimeEngineBuilderExtensions
 
         // Add the construction kits as embedded repository
         builder.Services.AddCkModelSystemIdentityV2();
+
+        // Phase 3 PR #3: Identity-specific blueprint variable provider. Replaces the engine's
+        // default IBlueprintVariableProvider (which is TryAdded inside AddRuntimeEngine) with
+        // a richer one that exposes octo.identity.authorityUrl and octo.identity.refineryStudioUrl
+        // in addition to the standard octo.* variables. Must be a plain AddTransient (not Try*) so
+        // it wins over the engine default; BlueprintService consumes the SINGULAR registration
+        // and the last add wins.
+        builder.Services.AddTransient<IBlueprintVariableProvider, IdentityBlueprintVariableProvider>();
 
         // Add services of Identity module
         builder.Services
