@@ -5,6 +5,7 @@ using Meshmakers.Octo.Runtime.Contracts.MongoDb.Configuration;
 using Meshmakers.Octo.Runtime.Contracts.MongoDb.Services;
 using Meshmakers.Octo.Runtime.Engine.MongoDb.Services.Defaults;
 using Meshmakers.Octo.Services.Infrastructure.Migrations;
+using Meshmakers.Octo.Services.Notifications.Services;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Xunit;
@@ -22,6 +23,14 @@ public abstract class ServiceCollectionFixture : ITestOutputHelperAccessor, IAsy
     protected ServiceCollectionFixture()
     {
         Services = new ServiceCollection();
+
+        // System.Notification CK model + services. Production Program.cs registers this via
+        // AddOctoNotification(); the fixture has to mirror it because Phase 3 PR #4 made
+        // SetupTenantAsync call CreateTenantConfiguration unconditionally (previously it was
+        // gated by the IdentitySchemaVersion < 17 check, which test setups skipped). Without
+        // this registration RtNotificationTemplate / RtMailNotificationConfiguration BSON
+        // class maps are missing and GetRtEntitiesByTypeAsync throws InvalidCastException.
+        Services.AddOctoNotification();
 
         // Add runtime engine with identity persistence for testing
         // Note: We pass null for configureDistributionEventHub to skip RabbitMQ setup

@@ -23,3 +23,5 @@ description: |
 
 ckModelDependencies:
   - System.Identity-[2.7.0,3.0)
+
+seedDataPath: seed-data/entities.yaml

@@ -34,6 +34,15 @@ public static class RuntimeEngineBuilderExtensions
         builder.Services.AddOctoServiceInfrastructure("IdentityService", configureDistributionEventHub);
         builder.AddMongoDbRuntimeRepository();
 
+        // Persist blueprint installation + history rows in MongoDB (RtEntity_SystemBlueprintInstallation
+        // and RtEntity_SystemBlueprintHistory). Without this the engine defaults to
+        // InMemoryTenantBlueprintInstallations, which silently drops the rows on every restart —
+        // engine logs still report "1 blueprints installed" but no MongoDB row lands, breaking
+        // Studio's blueprint listing and idempotent re-apply detection. Mirrors what
+        // CommunicationController / AiServices / AssetRepo / PlatformServices already register
+        // in their respective Program.cs; Identity was the outlier.
+        builder.AddMongoBlueprintSupport();
+
         // Add the construction kits as embedded repository
         builder.Services.AddCkModelSystemIdentityV2();
 
