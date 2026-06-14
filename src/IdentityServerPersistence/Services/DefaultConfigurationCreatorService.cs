@@ -39,45 +39,29 @@ internal class DefaultConfigurationCreatorService(
       IConfigurationService
 {
     /// <summary>
-    ///     Phase 3 PR #3: declares the namespace prefix the Base class uses to recognise
-    ///     embedded blueprints this service owns. Today the only such blueprint is
-    ///     <c>System.Identity.Bootstrap-1.0.0</c> (shipped by PR #2). PR #4 cuts
-    ///     <see cref="SetupTenantAsync"/> over to apply the blueprint unconditionally; the
-    ///     <see cref="RefreshTenantStateAsync"/> path is still flag-gated until PR #5 ships
-    ///     and removes the flag.
+    ///     Namespace prefix the Base class uses to discover embedded blueprints this service
+    ///     owns. Anything starting with <c>System.Identity.</c> is treated as a service-managed
+    ///     blueprint and auto-applied by <see cref="SetupTenantAsync"/> on cold init and by
+    ///     <see cref="RefreshTenantStateAsync"/> on every tenant lifecycle event. Today the
+    ///     only such blueprint is <c>System.Identity.Bootstrap-1.0.0</c>.
     /// </summary>
     protected override string? ServiceManagedBlueprintPrefix => "System.Identity.";
 
     /// <summary>
-    ///     Phase 3 PR #3: feature-flagged blueprint apply on the lifecycle path
-    ///     (Enable / Restore / DeferTenantStart=false). The imperative seed in
-    ///     <see cref="SetupTenantAsync"/> still runs unchanged — when the flag is on, the
-    ///     blueprint apply runs <strong>alongside</strong> it so we can observe
-    ///     <c>BlueprintInstallation</c> rows appear without disturbing the existing seed.
-    ///     PR #4 cuts <c>SetupTenantAsync</c> over to the blueprint and this hook becomes
-    ///     unconditional; PR #5 removes the feature flag.
+    ///     Re-applies the <c>System.Identity.Bootstrap-1.0.0</c> blueprint on every tenant
+    ///     lifecycle event (Enable / Restore / DeferTenantStart=false). Together with the
+    ///     unconditional apply in <see cref="SetupTenantAsync"/> this guarantees the seed
+    ///     entities stay aligned with the embedded blueprint version. Operators still drive
+    ///     blueprint version bumps via image deploys; the engine then picks up the new
+    ///     version on the next pod restart or lifecycle event without further intervention.
     /// </summary>
     /// <remarks>
-    ///     <para>
-    ///         <c>throwOnFailure: false</c> so a transient blueprint failure (e.g. catalog
-    ///         lookup hiccup) does not knock a tenant offline during the burn-in phase.
-    ///         Failures are logged + surfaced via
-    ///         <see cref="DefaultConfigurationCreatorServiceBase.OnServiceManagedBlueprintApplyFailedAsync"/>.
-    ///     </para>
-    ///     <para>
-    ///         When <see cref="OctoIdentityServicesOptions.UseBlueprintBootstrap"/> is false
-    ///         (the default), this override is a no-op — the base's empty implementation is
-    ///         effectively still in play and the imperative seed remains the sole source of
-    ///         truth for the tenant's identity entities.
-    ///     </para>
+    ///     <c>throwOnFailure: false</c> so a transient blueprint failure (e.g. catalog lookup
+    ///     hiccup) does not knock a tenant offline. Failures are logged + surfaced via
+    ///     <see cref="DefaultConfigurationCreatorServiceBase.OnServiceManagedBlueprintApplyFailedAsync"/>.
     /// </remarks>
     protected override async Task RefreshTenantStateAsync(string tenantId)
     {
-        if (!octoIdentityOptions.Value.UseBlueprintBootstrap)
-        {
-            return;
-        }
-
         await ApplyServiceManagedBlueprintsAsync(tenantId, throwOnFailure: false).ConfigureAwait(false);
     }
 

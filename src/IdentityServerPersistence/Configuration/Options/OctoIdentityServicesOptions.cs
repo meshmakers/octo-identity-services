@@ -103,17 +103,4 @@ public class OctoIdentityServicesOptions
     /// When null or empty, the Refinery Studio client is not auto-provisioned.
     /// </summary>
     public string? RefineryStudioUrl { get; set; }
-
-    /// <summary>
-    /// Phase 3 / PR #3 feature flag: when <c>true</c>, the service-managed
-    /// <c>System.Identity.Bootstrap-1.0.0</c> blueprint is auto-applied via the
-    /// <c>RefreshTenantStateAsync</c> hook on every tenant Enable / lifecycle event. The
-    /// legacy imperative seed in <c>SetupTenantAsync</c> still runs; the blueprint apply
-    /// runs alongside it so we can validate the BlueprintInstallation rows appear without
-    /// disturbing the existing seed (test-2 burn-in). PR #4 cuts the imperative seed over
-    /// to the blueprint and this flag becomes unconditionally true; PR #5 deletes the flag.
-    /// Defaults to <c>false</c> — no behaviour change until an operator opts in via
-    /// <c>OCTO_IDENTITY__UseBlueprintBootstrap=true</c>.
-    /// </summary>
-    public bool UseBlueprintBootstrap { get; set; }
 }
