@@ -49,35 +49,19 @@ internal class DefaultConfigurationCreatorService(
     protected override string? ServiceManagedBlueprintPrefix => "System.Identity.";
 
     /// <summary>
-    ///     Phase 3 PR #3: feature-flagged blueprint apply on the lifecycle path
-    ///     (Enable / Restore / DeferTenantStart=false). The imperative seed in
-    ///     <see cref="SetupTenantAsync"/> still runs unchanged — when the flag is on, the
-    ///     blueprint apply runs <strong>alongside</strong> it so we can observe
-    ///     <c>BlueprintInstallation</c> rows appear without disturbing the existing seed.
-    ///     PR #4 cuts <c>SetupTenantAsync</c> over to the blueprint and this hook becomes
-    ///     unconditional; PR #5 removes the feature flag.
+    ///     Re-applies the <c>System.Identity.Bootstrap-1.0.0</c> blueprint on every tenant
+    ///     lifecycle event (Enable / Restore / DeferTenantStart=false). Together with the
+    ///     unconditional apply in <see cref="SetupTenantAsync"/> this guarantees the seed
+    ///     entities stay aligned with the embedded blueprint version on every restart —
+    ///     no operator action is required when the blueprint version bumps.
     /// </summary>
     /// <remarks>
-    ///     <para>
-    ///         <c>throwOnFailure: false</c> so a transient blueprint failure (e.g. catalog
-    ///         lookup hiccup) does not knock a tenant offline during the burn-in phase.
-    ///         Failures are logged + surfaced via
-    ///         <see cref="DefaultConfigurationCreatorServiceBase.OnServiceManagedBlueprintApplyFailedAsync"/>.
-    ///     </para>
-    ///     <para>
-    ///         When <see cref="OctoIdentityServicesOptions.UseBlueprintBootstrap"/> is false
-    ///         (the default), this override is a no-op — the base's empty implementation is
-    ///         effectively still in play and the imperative seed remains the sole source of
-    ///         truth for the tenant's identity entities.
-    ///     </para>
+    ///     <c>throwOnFailure: false</c> so a transient blueprint failure (e.g. catalog lookup
+    ///     hiccup) does not knock a tenant offline. Failures are logged + surfaced via
+    ///     <see cref="DefaultConfigurationCreatorServiceBase.OnServiceManagedBlueprintApplyFailedAsync"/>.
     /// </remarks>
     protected override async Task RefreshTenantStateAsync(string tenantId)
     {
-        if (!octoIdentityOptions.Value.UseBlueprintBootstrap)
-        {
-            return;
-        }
-
         await ApplyServiceManagedBlueprintsAsync(tenantId, throwOnFailure: false).ConfigureAwait(false);
     }
 
