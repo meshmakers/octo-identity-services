@@ -101,6 +101,13 @@ public class CustomWebApplicationFactory : WebApplicationFactory<Program>, IAsyn
 
         services.AddLogging(builder => builder.AddConsole());
 
+        // System.Notification CK model + services. Production Program.cs registers this via
+        // AddOctoNotification(); the factory has to mirror it because Phase 3 PR #4 made
+        // SetupTenantAsync call CreateTenantConfiguration unconditionally. Without this
+        // registration RtNotificationTemplate / RtMailNotificationConfiguration BSON class
+        // maps are missing and GetRtEntitiesByTypeAsync throws InvalidCastException.
+        services.AddOctoNotification();
+
         services.AddRuntimeEngine()
             .AddOctoIdentityPersistence(
                 _ => new OctoSystemConfiguration(),

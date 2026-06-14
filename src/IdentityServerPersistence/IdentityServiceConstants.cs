@@ -18,4 +18,12 @@ public static class IdentityServiceConstants
 
     public const string IdentityMigrationVersionKey = "IdentityServiceMigrations";
 
+    /// <summary>
+    /// Phase 3 PR #4: TenantConfiguration row used by <c>PreBlueprintCleanupMigration</c> to hand
+    /// captured User → Role and ExternalTenantUserMapping → Role assignments (by role name) over
+    /// to the post-blueprint restore step in
+    /// <c>DefaultConfigurationCreatorService.SetupTenantAsync</c>. The row is deleted after the
+    /// restore completes, so its presence on tenant startup is the gate that runs the restore.
+    /// </summary>
+    public const string PendingPostBlueprintRoleAssignmentsKey = "PendingPostBlueprintRoleAssignments";
 }
