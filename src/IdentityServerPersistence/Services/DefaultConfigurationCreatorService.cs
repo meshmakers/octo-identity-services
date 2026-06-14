@@ -7,7 +7,9 @@ using Meshmakers.Common.Shared;
 using Meshmakers.Octo.Backend.IdentityServices.Resources;
 using Meshmakers.Octo.Communication.Contracts;
 using Meshmakers.Octo.ConstructionKit.Contracts;
+using Meshmakers.Octo.ConstructionKit.Contracts.BlueprintCatalogs;
 using Meshmakers.Octo.Runtime.Contracts;
+using Meshmakers.Octo.Runtime.Contracts.Blueprints;
 using Meshmakers.Octo.Runtime.Contracts.MongoDb;
 using Meshmakers.Octo.Runtime.Contracts.MongoDb.Repositories;
 using Meshmakers.Octo.Runtime.Contracts.Repositories.Query;
@@ -39,10 +41,58 @@ internal class DefaultConfigurationCreatorService(
     MigrationService? migrationService,
     IClientMirrorProvisioningService? clientMirrorProvisioningService = null,
     ICkModelUpgradeService? ckModelUpgradeService = null,
-    IRuntimeRepositoryProvider? runtimeRepositoryProvider = null)
-    : DefaultConfigurationCreatorServiceBase(logger), IConfigurationService
+    IRuntimeRepositoryProvider? runtimeRepositoryProvider = null,
+    IBlueprintService? blueprintService = null,
+    IEnumerable<IBlueprintEmbeddedSource>? embeddedBlueprintSources = null)
+    : DefaultConfigurationCreatorServiceBase(logger, blueprintService, embeddedBlueprintSources),
+      IConfigurationService
 {
     private const string RefineryStudioClientId = "octo-data-refinery-studio";
+
+    /// <summary>
+    ///     Phase 3 PR #3: signals to the Base class that any embedded blueprint whose name
+    ///     starts with <c>System.Identity.</c> is auto-applied via
+    ///     <see cref="DefaultConfigurationCreatorServiceBase.ApplyServiceManagedBlueprintsAsync"/>.
+    ///     Today the only such blueprint is <c>System.Identity.Bootstrap-1.0.0</c> (shipped
+    ///     by PR #2). The actual call site is gated by
+    ///     <see cref="OctoIdentityServicesOptions.UseBlueprintBootstrap"/> in
+    ///     <see cref="RefreshTenantStateAsync"/> below; flag stays false until test-2 burn-in
+    ///     confirms the apply is non-disruptive.
+    /// </summary>
+    protected override string? ServiceManagedBlueprintPrefix => "System.Identity.";
+
+    /// <summary>
+    ///     Phase 3 PR #3: feature-flagged blueprint apply on the lifecycle path
+    ///     (Enable / Restore / DeferTenantStart=false). The imperative seed in
+    ///     <see cref="SetupTenantAsync"/> still runs unchanged — when the flag is on, the
+    ///     blueprint apply runs <strong>alongside</strong> it so we can observe
+    ///     <c>BlueprintInstallation</c> rows appear without disturbing the existing seed.
+    ///     PR #4 cuts <c>SetupTenantAsync</c> over to the blueprint and this hook becomes
+    ///     unconditional; PR #5 removes the feature flag.
+    /// </summary>
+    /// <remarks>
+    ///     <para>
+    ///         <c>throwOnFailure: false</c> so a transient blueprint failure (e.g. catalog
+    ///         lookup hiccup) does not knock a tenant offline during the burn-in phase.
+    ///         Failures are logged + surfaced via
+    ///         <see cref="DefaultConfigurationCreatorServiceBase.OnServiceManagedBlueprintApplyFailedAsync"/>.
+    ///     </para>
+    ///     <para>
+    ///         When <see cref="OctoIdentityServicesOptions.UseBlueprintBootstrap"/> is false
+    ///         (the default), this override is a no-op — the base's empty implementation is
+    ///         effectively still in play and the imperative seed remains the sole source of
+    ///         truth for the tenant's identity entities.
+    ///     </para>
+    /// </remarks>
+    protected override async Task RefreshTenantStateAsync(string tenantId)
+    {
+        if (!octoIdentityOptions.Value.UseBlueprintBootstrap)
+        {
+            return;
+        }
+
+        await ApplyServiceManagedBlueprintsAsync(tenantId, throwOnFailure: false).ConfigureAwait(false);
+    }
 
     public override async Task InitializeAsync()
     {

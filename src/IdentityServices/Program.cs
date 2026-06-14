@@ -141,9 +141,10 @@ try
 
     builder.Services.AddCors();
 
-    // Service-managed Identity tenant seed (Phase 3 PR #2). Registered as an
-    // embedded blueprint source — dead code in this PR; PR #3 wires
-    // ApplyServiceManagedBlueprintsAsync via the RefreshTenantStateAsync override.
+    // Service-managed Identity tenant seed (Phase 3 PR #2). Auto-applied on the
+    // RefreshTenantStateAsync hook in DefaultConfigurationCreatorService — gated by
+    // OctoIdentityServicesOptions.UseBlueprintBootstrap (PR #3). PR #4 cuts SetupTenantAsync
+    // over to the blueprint and the flag becomes unconditional; PR #5 removes the flag.
     builder.Services.AddBlueprintSystemIdentityBootstrapV1();
 
     builder.Services.AddRuntimeEngine()
