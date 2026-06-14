@@ -41,6 +41,7 @@ using Microsoft.AspNetCore.DataProtection.Repositories;
 using System.Threading.RateLimiting;
 using NLog;
 using NLog.Web;
+using Persistence.IdentityCkModel.Generated.Blueprints.SystemIdentityBootstrap.v1;
 using Persistence.IdentityCkModel.Generated.System.Identity.v2;
 using LogLevel = Microsoft.Extensions.Logging.LogLevel;
 
@@ -139,6 +140,11 @@ try
         .AddMicrosoftAdAuthentication();
 
     builder.Services.AddCors();
+
+    // Service-managed Identity tenant seed (Phase 3 PR #2). Registered as an
+    // embedded blueprint source — dead code in this PR; PR #3 wires
+    // ApplyServiceManagedBlueprintsAsync via the RefreshTenantStateAsync override.
+    builder.Services.AddBlueprintSystemIdentityBootstrapV1();
 
     builder.Services.AddRuntimeEngine()
         .AddOctoIdentityPersistence(configureDistributionEventHub: c =>

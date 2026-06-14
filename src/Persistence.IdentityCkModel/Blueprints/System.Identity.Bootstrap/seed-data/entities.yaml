@@ -1,0 +1,591 @@
+$schema: https://schemas.meshmakers.cloud/runtime-model.schema.json
+dependencies:
+  - System.Identity-2.7.0
+entities:
+
+  # ===========================================================================
+  # ROLES (660…01 – 660…0E) — fourteen built-in roles. Names match
+  # `Meshmakers.Octo.Communication.Contracts.CommonConstants.*Role`. The seed
+  # writes Name + NormalizedName only; SubjectIds / IdentityRoleIds / RoleClaims
+  # are populated at runtime by IdentityServer's RoleManager and must not be
+  # reset by a blueprint re-apply (force: true). They are marked
+  # isRuntimeState in CK model 2.7.0+ so the engine's
+  # PreserveRuntimeStateAttributesAsync keeps existing values on re-apply.
+  # ===========================================================================
+
+  - rtId: '660000000000000000000001'
+    ckTypeId: System.Identity/Role
+    rtWellKnownName: TenantManagement
+    attributes:
+      - id: System/Name
+        value: TenantManagement
+      - id: System.Identity/NormalizedName
+        value: TENANTMANAGEMENT
+
+  - rtId: '660000000000000000000002'
+    ckTypeId: System.Identity/Role
+    rtWellKnownName: UserManagement
+    attributes:
+      - id: System/Name
+        value: UserManagement
+      - id: System.Identity/NormalizedName
+        value: USERMANAGEMENT
+
+  - rtId: '660000000000000000000003'
+    ckTypeId: System.Identity/Role
+    rtWellKnownName: CommunicationManagement
+    attributes:
+      - id: System/Name
+        value: CommunicationManagement
+      - id: System.Identity/NormalizedName
+        value: COMMUNICATIONMANAGEMENT
+
+  - rtId: '660000000000000000000004'
+    ckTypeId: System.Identity/Role
+    rtWellKnownName: Development
+    attributes:
+      - id: System/Name
+        value: Development
+      - id: System.Identity/NormalizedName
+        value: DEVELOPMENT
+
+  - rtId: '660000000000000000000005'
+    ckTypeId: System.Identity/Role
+    rtWellKnownName: AdminPanelManagement
+    attributes:
+      - id: System/Name
+        value: AdminPanelManagement
+      - id: System.Identity/NormalizedName
+        value: ADMINPANELMANAGEMENT
+
+  - rtId: '660000000000000000000006'
+    ckTypeId: System.Identity/Role
+    rtWellKnownName: BotManagement
+    attributes:
+      - id: System/Name
+        value: BotManagement
+      - id: System.Identity/NormalizedName
+        value: BOTMANAGEMENT
+
+  - rtId: '660000000000000000000007'
+    ckTypeId: System.Identity/Role
+    rtWellKnownName: DashboardManagement
+    attributes:
+      - id: System/Name
+        value: DashboardManagement
+      - id: System.Identity/NormalizedName
+        value: DASHBOARDMANAGEMENT
+
+  - rtId: '660000000000000000000008'
+    ckTypeId: System.Identity/Role
+    rtWellKnownName: DashboardViewer
+    attributes:
+      - id: System/Name
+        value: DashboardViewer
+      - id: System.Identity/NormalizedName
+        value: DASHBOARDVIEWER
+
+  - rtId: '660000000000000000000009'
+    ckTypeId: System.Identity/Role
+    rtWellKnownName: ReportingManagement
+    attributes:
+      - id: System/Name
+        value: ReportingManagement
+      - id: System.Identity/NormalizedName
+        value: REPORTINGMANAGEMENT
+
+  - rtId: '66000000000000000000000A'
+    ckTypeId: System.Identity/Role
+    rtWellKnownName: ReportingViewer
+    attributes:
+      - id: System/Name
+        value: ReportingViewer
+      - id: System.Identity/NormalizedName
+        value: REPORTINGVIEWER
+
+  - rtId: '66000000000000000000000B'
+    ckTypeId: System.Identity/Role
+    rtWellKnownName: DataModelManagement
+    attributes:
+      - id: System/Name
+        value: DataModelManagement
+      - id: System.Identity/NormalizedName
+        value: DATAMODELMANAGEMENT
+
+  - rtId: '66000000000000000000000C'
+    ckTypeId: System.Identity/Role
+    rtWellKnownName: StreamDataAdmin
+    attributes:
+      - id: System/Name
+        value: StreamDataAdmin
+      - id: System.Identity/NormalizedName
+        value: STREAMDATAADMIN
+
+  - rtId: '66000000000000000000000D'
+    ckTypeId: System.Identity/Role
+    rtWellKnownName: StreamDataWriter
+    attributes:
+      - id: System/Name
+        value: StreamDataWriter
+      - id: System.Identity/NormalizedName
+        value: STREAMDATAWRITER
+
+  - rtId: '66000000000000000000000E'
+    ckTypeId: System.Identity/Role
+    rtWellKnownName: StreamDataReader
+    attributes:
+      - id: System/Name
+        value: StreamDataReader
+      - id: System.Identity/NormalizedName
+        value: STREAMDATAREADER
+
+  # ===========================================================================
+  # IDENTITY RESOURCES (660…0F – 660…13)
+  # ===========================================================================
+
+  - rtId: '66000000000000000000000F'
+    ckTypeId: System.Identity/IdentityResource
+    rtWellKnownName: openid
+    attributes:
+      - id: System/Enabled
+        value: true
+      - id: System/Name
+        value: openid
+      - id: System/DisplayName
+        value: Your user identifier
+      - id: System.Identity/ResourceClaims
+        value:
+          - sub
+      - id: System.Identity/ShowInDiscoveryDocument
+        value: true
+      - id: System.Identity/IsRequired
+        value: true
+      - id: System.Identity/IsEmphasized
+        value: false
+
+  - rtId: '660000000000000000000010'
+    ckTypeId: System.Identity/IdentityResource
+    rtWellKnownName: profile
+    attributes:
+      - id: System/Enabled
+        value: true
+      - id: System/Name
+        value: profile
+      - id: System/DisplayName
+        value: User profile
+      - id: System.Identity/ResourceClaims
+        value:
+          - name
+          - family_name
+          - given_name
+          - middle_name
+          - nickname
+          - preferred_username
+          - profile
+          - picture
+          - website
+          - gender
+          - birthdate
+          - zoneinfo
+          - locale
+          - updated_at
+      - id: System.Identity/ShowInDiscoveryDocument
+        value: true
+      - id: System.Identity/IsRequired
+        value: false
+      - id: System.Identity/IsEmphasized
+        value: false
+
+  - rtId: '660000000000000000000011'
+    ckTypeId: System.Identity/IdentityResource
+    rtWellKnownName: email
+    attributes:
+      - id: System/Enabled
+        value: true
+      - id: System/Name
+        value: email
+      - id: System/DisplayName
+        value: Your email address
+      - id: System.Identity/ResourceClaims
+        value:
+          - email
+          - email_verified
+      - id: System.Identity/ShowInDiscoveryDocument
+        value: true
+      - id: System.Identity/IsRequired
+        value: false
+      - id: System.Identity/IsEmphasized
+        value: false
+
+  - rtId: '660000000000000000000012'
+    ckTypeId: System.Identity/IdentityResource
+    rtWellKnownName: role
+    attributes:
+      - id: System/Enabled
+        value: true
+      - id: System/Name
+        value: role
+      - id: System/DisplayName
+        value: Roles
+      - id: System/Description
+        value: The roles the user is assigned to
+      - id: System.Identity/ResourceClaims
+        value:
+          - role
+      - id: System.Identity/ShowInDiscoveryDocument
+        value: true
+      - id: System.Identity/IsRequired
+        value: false
+      - id: System.Identity/IsEmphasized
+        value: false
+
+  - rtId: '660000000000000000000013'
+    ckTypeId: System.Identity/IdentityResource
+    rtWellKnownName: allowed_tenants
+    attributes:
+      - id: System/Enabled
+        value: true
+      - id: System/Name
+        value: allowed_tenants
+      - id: System/DisplayName
+        value: Allowed Tenants
+      - id: System/Description
+        value: Tenants the user is allowed to access
+      - id: System.Identity/ResourceClaims
+        value:
+          - allowed_tenants
+      - id: System.Identity/ShowInDiscoveryDocument
+        value: true
+      - id: System.Identity/IsRequired
+        value: false
+      - id: System.Identity/IsEmphasized
+        value: false
+
+  # ===========================================================================
+  # API SCOPES (660…14 – 660…16) — names match
+  # CommonConstants.OctoApi{FullAccess,ReadOnly,DataModelManagement}.
+  # The child-tenant write-through path does NOT seed
+  # octo_api.data_model_management — that scope is system-tenant-only. Phase 3
+  # ships the full set in every tenant for parity; admins who restrict it for
+  # a child tenant disable it on the entity (Enabled=false) afterwards.
+  # ===========================================================================
+
+  - rtId: '660000000000000000000014'
+    ckTypeId: System.Identity/ApiScope
+    rtWellKnownName: octo_api
+    attributes:
+      - id: System/Enabled
+        value: true
+      - id: System/Name
+        value: octo_api
+      - id: System/DisplayName
+        value: Full access to all Octo platform APIs
+      - id: System.Identity/ResourceClaims
+        value: []
+      - id: System.Identity/ShowInDiscoveryDocument
+        value: true
+      - id: System.Identity/IsRequired
+        value: false
+      - id: System.Identity/IsEmphasized
+        value: false
+
+  - rtId: '660000000000000000000015'
+    ckTypeId: System.Identity/ApiScope
+    rtWellKnownName: octo_api.read_only
+    attributes:
+      - id: System/Enabled
+        value: true
+      - id: System/Name
+        value: octo_api.read_only
+      - id: System/DisplayName
+        value: Read-only access to all Octo platform APIs
+      - id: System.Identity/ResourceClaims
+        value: []
+      - id: System.Identity/ShowInDiscoveryDocument
+        value: true
+      - id: System.Identity/IsRequired
+        value: false
+      - id: System.Identity/IsEmphasized
+        value: false
+
+  - rtId: '660000000000000000000016'
+    ckTypeId: System.Identity/ApiScope
+    rtWellKnownName: octo_api.data_model_management
+    attributes:
+      - id: System/Enabled
+        value: true
+      - id: System/Name
+        value: octo_api.data_model_management
+      - id: System/DisplayName
+        value: Manage construction kit data models
+      - id: System.Identity/ResourceClaims
+        value: []
+      - id: System.Identity/ShowInDiscoveryDocument
+        value: true
+      - id: System.Identity/IsRequired
+        value: false
+      - id: System.Identity/IsEmphasized
+        value: false
+
+  # ===========================================================================
+  # API RESOURCES (660…20) — OctoApi advertises all three scopes plus the
+  # `role` user claim so role-based authorization works on every protected
+  # endpoint.
+  # ===========================================================================
+
+  - rtId: '660000000000000000000020'
+    ckTypeId: System.Identity/ApiResource
+    rtWellKnownName: octoAPI
+    attributes:
+      - id: System/Enabled
+        value: true
+      - id: System/Name
+        value: octoAPI
+      - id: System/DisplayName
+        value: Octo API
+      - id: System/Description
+        value: Unified access to all Octo platform APIs
+      - id: System.Identity/ResourceClaims
+        value:
+          - role
+      - id: System.Identity/ShowInDiscoveryDocument
+        value: true
+      - id: System.Identity/RequireResourceIndicator
+        value: false
+      - id: System.Identity/Secrets
+        value: []
+      - id: System.Identity/Scopes
+        value:
+          - octo_api
+          - octo_api.read_only
+          - octo_api.data_model_management
+      - id: System.Identity/AllowedAccessTokenSigningAlgorithms
+        value: []
+
+  # ===========================================================================
+  # CLIENTS (660…30 – 660…32). The full attribute set is large — every
+  # property the imperative seed sets explicitly is mirrored here. Attributes
+  # not configured by the seed (claims, custom prefixes, CIBA settings) get
+  # the IdentityServer default the engine derives from the CK model defaults.
+  # ===========================================================================
+
+  # --------------------------------------------------------------------------
+  # 660…30 — Refinery Studio (OIDC SPA, authorization code + PKCE). URLs use
+  # the ${octo.identity.refineryStudioUrl} variable resolved at apply time by
+  # IdentityBlueprintVariableProvider (PR #3). When the option is unset the
+  # placeholder resolves to the empty string and the OIDC flow fails on user
+  # login — the configuration error is then visible to the operator instead
+  # of silently swallowed.
+  # --------------------------------------------------------------------------
+  - rtId: '660000000000000000000030'
+    ckTypeId: System.Identity/Client
+    rtWellKnownName: RefineryStudioClient
+    attributes:
+      - id: System/Enabled
+        value: true
+      - id: System.Identity/ClientId
+        value: octo-data-refinery-studio
+      - id: System/Name
+        value: Data Refinery Studio
+      - id: System.Identity/ClientUri
+        value: '${octo.identity.refineryStudioUrl}'
+      - id: System.Identity/ProtocolType
+        value: oidc
+      - id: System.Identity/RequireClientSecret
+        value: false
+      - id: System.Identity/Secrets
+        value: []
+      - id: System.Identity/AllowedGrantTypes
+        value:
+          - authorization_code
+      - id: System.Identity/RequirePkce
+        value: true
+      - id: System.Identity/RequireConsent
+        value: false
+      - id: System.Identity/AllowAccessTokensViaBrowser
+        value: true
+      - id: System.Identity/AlwaysIncludeUserClaimsInIdToken
+        value: true
+      - id: System.Identity/UpdateAccessTokenClaimsOnRefresh
+        value: true
+      - id: System.Identity/AccessTokenType
+        value: 0   # Jwt
+      - id: System.Identity/RedirectUris
+        value:
+          - '${octo.identity.refineryStudioUrl}/'
+      - id: System.Identity/PostLogoutRedirectUris
+        value:
+          - '${octo.identity.refineryStudioUrl}/'
+      - id: System.Identity/AllowedCorsOrigins
+        value:
+          - '${octo.identity.refineryStudioUrl}'
+      - id: System.Identity/FrontChannelLogoutUri
+        value: '${octo.identity.refineryStudioUrl}/logout/callback'
+      - id: System.Identity/FrontChannelLogoutSessionRequired
+        value: true
+      - id: System.Identity/AllowOfflineAccess
+        value: true
+      - id: System.Identity/AllowedScopes
+        value:
+          - openid
+          - profile
+          - email
+          - role
+          - allowed_tenants
+          - octo_api
+      - id: System.Identity/AutoProvisionInChildTenants
+        value: true
+
+  # --------------------------------------------------------------------------
+  # 660…31 — OctoTool / octo-cli (device-code flow, no PKCE, no client secret)
+  # --------------------------------------------------------------------------
+  - rtId: '660000000000000000000031'
+    ckTypeId: System.Identity/Client
+    rtWellKnownName: OctoToolClient
+    attributes:
+      - id: System/Enabled
+        value: true
+      - id: System.Identity/ClientId
+        value: octo-cli
+      - id: System.Identity/ProtocolType
+        value: oidc
+      - id: System.Identity/RequireClientSecret
+        value: false
+      - id: System.Identity/Secrets
+        value: []
+      - id: System.Identity/AllowedGrantTypes
+        value:
+          - urn:ietf:params:oauth:grant-type:device_code
+      - id: System.Identity/RequirePkce
+        value: false
+      - id: System.Identity/AllowOfflineAccess
+        value: true
+      - id: System.Identity/AllowedScopes
+        value:
+          - openid
+          - profile
+          - email
+          - role
+          - octo_api
+      - id: System.Identity/RedirectUris
+        value: []
+      - id: System.Identity/PostLogoutRedirectUris
+        value: []
+      - id: System.Identity/AllowedCorsOrigins
+        value: []
+      - id: System.Identity/AutoProvisionInChildTenants
+        value: true
+
+  # --------------------------------------------------------------------------
+  # 660…32 — Identity Services Swagger UI (authorization code + PKCE; URLs
+  # derived from OctoIdentityServicesOptions.AuthorityUrl via
+  # ${octo.identity.authorityUrl})
+  # --------------------------------------------------------------------------
+  - rtId: '660000000000000000000032'
+    ckTypeId: System.Identity/Client
+    rtWellKnownName: IdentityServicesSwaggerClient
+    attributes:
+      - id: System/Enabled
+        value: true
+      - id: System.Identity/ClientId
+        value: octo-idenityServices-swagger
+      - id: System/Name
+        value: Identity Services Swagger UI
+      - id: System.Identity/ClientUri
+        value: '${octo.identity.authorityUrl}'
+      - id: System.Identity/ProtocolType
+        value: oidc
+      - id: System.Identity/RequireClientSecret
+        value: false
+      - id: System.Identity/Secrets
+        value: []
+      - id: System.Identity/AllowedGrantTypes
+        value:
+          - authorization_code
+      - id: System.Identity/RequirePkce
+        value: true
+      - id: System.Identity/AllowAccessTokensViaBrowser
+        value: true
+      - id: System.Identity/AlwaysIncludeUserClaimsInIdToken
+        value: true
+      - id: System.Identity/AccessTokenType
+        value: 0   # Jwt
+      - id: System.Identity/RedirectUris
+        value:
+          - '${octo.identity.authorityUrl}/swagger/oauth2-redirect.html'
+      - id: System.Identity/PostLogoutRedirectUris
+        value:
+          - '${octo.identity.authorityUrl}/'
+      - id: System.Identity/AllowedCorsOrigins
+        value:
+          - '${octo.identity.authorityUrl}'
+      - id: System.Identity/AllowedScopes
+        value:
+          - openid
+          - profile
+          - email
+          - role
+          - octo_api
+          - octo_api.read_only
+      - id: System.Identity/AutoProvisionInChildTenants
+        value: true
+
+  # ===========================================================================
+  # GROUPS (660…40) — TenantOwners group with every built-in role assigned via
+  # the AssignedRole association. Replaces the runtime SetRoleIdsAsync
+  # reconciliation in CreateDefaultGroupsAsync.
+  # ===========================================================================
+
+  - rtId: '660000000000000000000040'
+    ckTypeId: System.Identity/Group
+    rtWellKnownName: TenantOwners
+    attributes:
+      - id: System.Identity/GroupName
+        value: TenantOwners
+      - id: System.Identity/NormalizedGroupName
+        value: TENANTOWNERS
+      - id: System.Identity/GroupDescription
+        value: Default group with all roles assigned. Members inherit all tenant permissions.
+    associations:
+      - roleId: System.Identity/AssignedRole
+        targetRtId: '660000000000000000000001'
+        targetCkTypeId: System.Identity/Role
+      - roleId: System.Identity/AssignedRole
+        targetRtId: '660000000000000000000002'
+        targetCkTypeId: System.Identity/Role
+      - roleId: System.Identity/AssignedRole
+        targetRtId: '660000000000000000000003'
+        targetCkTypeId: System.Identity/Role
+      - roleId: System.Identity/AssignedRole
+        targetRtId: '660000000000000000000004'
+        targetCkTypeId: System.Identity/Role
+      - roleId: System.Identity/AssignedRole
+        targetRtId: '660000000000000000000005'
+        targetCkTypeId: System.Identity/Role
+      - roleId: System.Identity/AssignedRole
+        targetRtId: '660000000000000000000006'
+        targetCkTypeId: System.Identity/Role
+      - roleId: System.Identity/AssignedRole
+        targetRtId: '660000000000000000000007'
+        targetCkTypeId: System.Identity/Role
+      - roleId: System.Identity/AssignedRole
+        targetRtId: '660000000000000000000008'
+        targetCkTypeId: System.Identity/Role
+      - roleId: System.Identity/AssignedRole
+        targetRtId: '660000000000000000000009'
+        targetCkTypeId: System.Identity/Role
+      - roleId: System.Identity/AssignedRole
+        targetRtId: '66000000000000000000000A'
+        targetCkTypeId: System.Identity/Role
+      - roleId: System.Identity/AssignedRole
+        targetRtId: '66000000000000000000000B'
+        targetCkTypeId: System.Identity/Role
+      - roleId: System.Identity/AssignedRole
+        targetRtId: '66000000000000000000000C'
+        targetCkTypeId: System.Identity/Role
+      - roleId: System.Identity/AssignedRole
+        targetRtId: '66000000000000000000000D'
+        targetCkTypeId: System.Identity/Role
+      - roleId: System.Identity/AssignedRole
+        targetRtId: '66000000000000000000000E'
+        targetCkTypeId: System.Identity/Role
