@@ -192,16 +192,16 @@ internal class PreBlueprintCleanupMigration(
         string tenantId)
     {
         // The engine exposes outbound-association reads per origin entity, not a bulk
-        // "give me every association" query. Walk the Users + ExternalTenantUserMappings — the
-        // two CK types that could still own a stale AssignedRole edge to a deleted role — and
-        // drop the edges whose target is outside the blueprint's stable rtId range.
-        // Group → Role edges are owned by RtGroup; the only group that survives this migration
-        // is the new TenantOwners (rtId 660…40, recreated by the blueprint), so any pre-existing
-        // group-side orphan is already gone with the entity itself.
+        // "give me every association" query. Walk Users (the CK type that owns an outbound
+        // AssignedRole edge per the System.Identity schema) and drop edges whose target sits
+        // outside the blueprint's stable rtId range. Group → Role edges are owned by RtGroup;
+        // the only group that survives this migration is the new TenantOwners (rtId 660…40,
+        // recreated by the blueprint), so any pre-existing group-side orphan is already gone
+        // with the entity itself. ExternalTenantUserMapping does NOT carry AssignedRole
+        // associations (the schema disallows it) — its role assignments live in the
+        // MappedRoleIds attribute and are remapped in the capture/restore steps instead.
         var deleted = 0;
         deleted += await CleanRoleEdgesForOriginTypeAsync<RtUser>(
-            tenantRepository, session, tenantId);
-        deleted += await CleanRoleEdgesForOriginTypeAsync<RtExternalTenantUserMapping>(
             tenantRepository, session, tenantId);
 
         if (deleted > 0)
@@ -283,7 +283,7 @@ internal class PreBlueprintCleanupMigration(
 
         await CaptureRoleNamesForOriginTypeAsync<RtUser>(
             tenantRepository, session, pending.UserRoles);
-        await CaptureRoleNamesForOriginTypeAsync<RtExternalTenantUserMapping>(
+        await CaptureMappedRoleNamesForExternalMappingsAsync(
             tenantRepository, session, pending.ExternalMappingRoles);
 
         if (pending.UserRoles.Count > 0 || pending.ExternalMappingRoles.Count > 0)
@@ -336,6 +336,57 @@ internal class PreBlueprintCleanupMigration(
             if (names.Count > 0)
             {
                 target[origin.RtId.ToString()] = names;
+            }
+        }
+    }
+
+    /// <summary>
+    ///     ExternalTenantUserMapping stores role assignments differently from User: its
+    ///     <c>MappedRoleIds</c> attribute holds the list of role rtIds directly (per the
+    ///     System.Identity-2.7.0 CK schema), not as outbound AssignedRole edges. Walk every
+    ///     mapping, read the OLD role rtIds from that attribute, resolve each to a role name,
+    ///     and stash the result in <paramref name="target"/>.
+    /// </summary>
+    private static async Task CaptureMappedRoleNamesForExternalMappingsAsync(
+        ITenantRepository tenantRepository,
+        IOctoSession session,
+        Dictionary<string, List<string>> target)
+    {
+        var mappings = await tenantRepository
+            .GetRtEntitiesByTypeAsync<RtExternalTenantUserMapping>(session, RtEntityQueryOptions.Create());
+
+        foreach (var mapping in mappings.Items)
+        {
+            if (mapping.MappedRoleIds is not { Count: > 0 })
+            {
+                continue;
+            }
+
+            var names = new List<string>();
+            foreach (var roleIdStr in mapping.MappedRoleIds)
+            {
+                if (!OctoObjectId.TryParse(roleIdStr, out var roleRtId))
+                {
+                    continue;
+                }
+
+                // Pre-skip stable-rtId entries — those came from a partially-migrated tenant
+                // and don't need restoration. We only re-attach the OLD random-ObjectId ones.
+                if (IsBlueprintRtId(roleRtId))
+                {
+                    continue;
+                }
+
+                var role = await tenantRepository.GetRtEntityByRtIdAsync<RtRole>(session, roleRtId);
+                if (role?.Name is { Length: > 0 } name)
+                {
+                    names.Add(name);
+                }
+            }
+
+            if (names.Count > 0)
+            {
+                target[mapping.RtId.ToString()] = names;
             }
         }
     }

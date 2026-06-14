@@ -245,11 +245,15 @@ internal class DefaultConfigurationCreatorService(
 
         var restored = 0;
         var userCkTypeId = RtEntityExtensions.GetRtCkTypeId<RtUser>();
-        var mappingCkTypeId = RtEntityExtensions.GetRtCkTypeId<RtExternalTenantUserMapping>();
         var roleCkTypeId = RtEntityExtensions.GetRtCkTypeId<RtRole>();
 
+        // Users: re-emit AssignedRole associations (the schema-defined edge type for User → Role).
         restored += await ReattachAsync(pending.UserRoles, userCkTypeId);
-        restored += await ReattachAsync(pending.ExternalMappingRoles, mappingCkTypeId);
+
+        // ExternalTenantUserMapping: roles live in the MappedRoleIds attribute (per the
+        // System.Identity CK schema; no AssignedRole edges are allowed). Resolve each captured
+        // role name to the new stable rtId and rewrite the attribute in place.
+        restored += await RewriteMappedRoleIdsAsync(pending.ExternalMappingRoles);
 
         await writeSession.CommitTransactionAsync();
 
@@ -299,6 +303,48 @@ internal class DefaultConfigurationCreatorService(
                     await tenantRepository.ApplyChangesAsync(writeSession, new[] { update }, opResult);
                     count++;
                 }
+            }
+
+            return count;
+        }
+
+        async Task<int> RewriteMappedRoleIdsAsync(Dictionary<string, List<string>> mappingRoles)
+        {
+            var count = 0;
+            foreach (var (mappingRtIdHex, roleNames) in mappingRoles)
+            {
+                var mappingRtId = new OctoObjectId(mappingRtIdHex);
+                var mapping = await tenantRepository
+                    .GetRtEntityByRtIdAsync<RtExternalTenantUserMapping>(writeSession, mappingRtId);
+                if (mapping == null)
+                {
+                    continue;
+                }
+
+                var resolved = new List<string>();
+                foreach (var roleName in roleNames)
+                {
+                    if (rolesByName.TryGetValue(roleName, out var newRoleRtId))
+                    {
+                        resolved.Add(newRoleRtId.ToString());
+                    }
+                    else
+                    {
+                        logger.LogWarning(
+                            "Post-blueprint role restore: role '{RoleName}' captured for mapping " +
+                            "{MappingRtId} not found among the blueprint-seeded roles in tenant " +
+                            "'{TenantId}'. Entry dropped from MappedRoleIds.",
+                            roleName, mappingRtIdHex, tenantContext.TenantId);
+                    }
+                }
+
+                mapping.MappedRoleIds = new AttributeStringValueList(resolved);
+                var update = EntityUpdateInfo<RtExternalTenantUserMapping>.CreateUpdate(
+                    mapping.ToRtEntityId(), mapping);
+                var opResult = new OperationResult();
+                await tenantRepository.ApplyChangesAsync(
+                    writeSession, new[] { update }, opResult);
+                count += resolved.Count;
             }
 
             return count;
