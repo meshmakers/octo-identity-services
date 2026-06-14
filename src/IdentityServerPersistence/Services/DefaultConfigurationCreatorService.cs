@@ -1,4 +1,7 @@
+using IdentityServerPersistence;
 using IdentityServerPersistence.Configuration.Options;
+using IdentityServerPersistence.Services.Migrations;
+using IdentityServerPersistence.SystemStores;
 using Meshmakers.Octo.Backend.IdentityServices.Resources;
 using Meshmakers.Octo.ConstructionKit.Contracts;
 using Meshmakers.Octo.ConstructionKit.Contracts.BlueprintCatalogs;
@@ -153,6 +156,15 @@ internal class DefaultConfigurationCreatorService(
         // in pod logs immediately instead of silently breaking OIDC.
         await ApplyServiceManagedBlueprintsAsync(tenantId, throwOnFailure: true);
 
+        // Phase 3 PR #4 post-blueprint restore: PreBlueprintCleanupMigration captures every
+        // User → Role and ExternalTenantUserMapping → Role assignment by role NAME into
+        // SystemConfiguration[PendingPostBlueprintRoleAssignmentsKey] before deleting the OLD
+        // entities. Now that the blueprint has installed the NEW roles with stable rtIds
+        // (660…01..0E), look the names up and re-attach the assignments via fresh AssignedRole
+        // edges. The pending row is deleted on success — if Identity crashes mid-restore the
+        // next startup retries with the same data.
+        await RestorePendingRoleAssignmentsAsync(tenantContext);
+
         // Mail templates + RtMailNotificationConfiguration stay in code. They belong to the
         // System.Notification CK model, not System.Identity, and are a candidate for a separate
         // System.Notification.Bootstrap blueprint in a follow-up (concept doc §6).
@@ -196,6 +208,100 @@ internal class DefaultConfigurationCreatorService(
                 logger.LogError(ex,
                     "Client mirror provisioning failed for child tenant '{TenantId}'", tenantId);
             }
+        }
+    }
+
+    /// <summary>
+    /// Reads the PendingPostBlueprintRoleAssignments TenantConfiguration row written by
+    /// <c>PreBlueprintCleanupMigration</c>, looks up each captured role name against the blueprint's
+    /// stable-rtId Role entities, and replays an AssignedRole edge from every captured origin to
+    /// the matching new Role. Idempotent: a successful run deletes the row so the next startup
+    /// is a fast read-and-skip. If Identity crashes mid-restore the row stays and the next
+    /// startup retries with the same data — the restore is safe to run twice because the engine
+    /// silently no-ops when the same association already exists.
+    /// </summary>
+    private async Task RestorePendingRoleAssignmentsAsync(ITenantContext tenantContext)
+    {
+        using var session = await tenantContext.GetAdminSessionAsync();
+        var pending = await tenantContext.GetConfigurationAsync<PendingPostBlueprintRoleAssignments>(
+            session, IdentityServiceConstants.PendingPostBlueprintRoleAssignmentsKey,
+            defaultValue: null);
+        if (pending == null
+            || (pending.UserRoles.Count == 0 && pending.ExternalMappingRoles.Count == 0))
+        {
+            return;
+        }
+
+        var tenantRepository = tenantContext.GetTenantRepositoryAsAdmin();
+        using var writeSession = await tenantRepository.GetSessionAsync();
+        writeSession.StartTransaction();
+
+        // Build a name → new-Role-rtId index once from the blueprint-seeded entities.
+        var roles = await tenantRepository.GetRtEntitiesByTypeAsync<RtRole>(
+            writeSession, RtEntityQueryOptions.Create());
+        var rolesByName = roles.Items
+            .Where(r => r.Name is { Length: > 0 })
+            .ToDictionary(r => r.Name!, r => r.RtId, StringComparer.Ordinal);
+
+        var restored = 0;
+        var userCkTypeId = RtEntityExtensions.GetRtCkTypeId<RtUser>();
+        var mappingCkTypeId = RtEntityExtensions.GetRtCkTypeId<RtExternalTenantUserMapping>();
+        var roleCkTypeId = RtEntityExtensions.GetRtCkTypeId<RtRole>();
+
+        restored += await ReattachAsync(pending.UserRoles, userCkTypeId);
+        restored += await ReattachAsync(pending.ExternalMappingRoles, mappingCkTypeId);
+
+        await writeSession.CommitTransactionAsync();
+
+        // Pending row is cleared in a separate session so we don't tangle the configuration
+        // collection write with the AssignedRole edge writes above.
+        using (var clearSession = await tenantContext.GetAdminSessionAsync())
+        {
+            await tenantContext.SetConfigurationAsync(
+                clearSession,
+                IdentityServiceConstants.PendingPostBlueprintRoleAssignmentsKey,
+                new PendingPostBlueprintRoleAssignments());
+        }
+
+        logger.LogInformation(
+            "Post-blueprint role restore for tenant '{TenantId}': re-attached {Count} AssignedRole edges " +
+            "across {UserCount} users and {MappingCount} external mappings",
+            tenantContext.TenantId, restored,
+            pending.UserRoles.Count, pending.ExternalMappingRoles.Count);
+
+        return;
+
+        async Task<int> ReattachAsync(
+            Dictionary<string, List<string>> originGroup,
+            RtCkId<CkTypeId> originCkTypeId)
+        {
+            var count = 0;
+            foreach (var (originRtIdHex, roleNames) in originGroup)
+            {
+                var originRtId = new OctoObjectId(originRtIdHex);
+                foreach (var roleName in roleNames)
+                {
+                    if (!rolesByName.TryGetValue(roleName, out var newRoleRtId))
+                    {
+                        logger.LogWarning(
+                            "Post-blueprint role restore: role '{RoleName}' captured for origin " +
+                            "{OriginRtId} not found among the blueprint-seeded roles in tenant " +
+                            "'{TenantId}'. Edge skipped.",
+                            roleName, originRtIdHex, tenantContext.TenantId);
+                        continue;
+                    }
+
+                    var update = AssociationUpdateInfo.CreateInsert(
+                        new RtEntityId(originCkTypeId, originRtId),
+                        new RtEntityId(roleCkTypeId, newRoleRtId),
+                        IdentityAssociationConstants.AssignedRoleId);
+                    var opResult = new OperationResult();
+                    await tenantRepository.ApplyChangesAsync(writeSession, new[] { update }, opResult);
+                    count++;
+                }
+            }
+
+            return count;
         }
     }
 

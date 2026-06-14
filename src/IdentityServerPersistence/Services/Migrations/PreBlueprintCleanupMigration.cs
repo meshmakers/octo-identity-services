@@ -79,6 +79,21 @@ internal class PreBlueprintCleanupMigration(
             using var session = await tenantRepository.GetSessionAsync();
             session.StartTransaction();
 
+            // Phase 1 of Phase 3 PR #4 cutover: capture User → Role and
+            // ExternalTenantUserMapping → Role assignments BY NAME before any deletion. Persisted
+            // in SystemConfiguration[PendingPostBlueprintRoleAssignmentsKey] and consumed by
+            // DefaultConfigurationCreatorService.SetupTenantAsync after the blueprint has created
+            // the NEW Role entities with stable rtIds.
+            var pending = await CapturePendingRoleAssignmentsAsync(
+                tenantRepository, session, tenantContext, adminSession);
+
+            // Order matters: clean the associations FIRST while their targets still exist.
+            // The engine's ApplyChangesAsync validates target existence even for delete edges,
+            // so deleting Role/Client/Group entities BEFORE their inbound edges would fail with
+            // "Entity '...' does not exist" on the orphan-edge sweep.
+            var orphanedAssociations = await DeleteOrphanIdentityAssociationsAsync(
+                tenantRepository, session, tenantContext.TenantId);
+
             var totalDeleted = 0;
             totalDeleted += await DeletePreBlueprintEntitiesAsync<RtRole>(
                 tenantRepository, session, tenantContext.TenantId);
@@ -93,21 +108,16 @@ internal class PreBlueprintCleanupMigration(
             totalDeleted += await DeletePreBlueprintEntitiesAsync<RtGroup>(
                 tenantRepository, session, tenantContext.TenantId);
 
-            // Orphan associations: any RtAssociation targeting a System.Identity entity whose
-            // rtId is outside the blueprint range now points at a deleted row. Left in place,
-            // OctoUserStore.GetRoleByIdAsync etc. throws NotExistingException on every user
-            // lookup that touches the orphan. Walk the per-User / per-Group assignments and drop
-            // the dangling targets.
-            var orphanedAssociations = await DeleteOrphanIdentityAssociationsAsync(
-                tenantRepository, session, tenantContext.TenantId);
-
             await session.CommitTransactionAsync();
 
             logger.LogInformation(
                 "Pre-blueprint cleanup completed for tenant '{TenantId}': {Deleted} entities deleted, " +
-                "{OrphanAssociations} orphan associations removed. System.Identity.Bootstrap blueprint " +
-                "will land its stable-rtId seed on the next ApplyBlueprint call.",
-                tenantContext.TenantId, totalDeleted, orphanedAssociations);
+                "{OrphanAssociations} orphan associations removed, " +
+                "{PendingUsers} users + {PendingMappings} external mappings queued for post-blueprint " +
+                "role reassignment. System.Identity.Bootstrap blueprint will land its stable-rtId " +
+                "seed on the next ApplyBlueprint call.",
+                tenantContext.TenantId, totalDeleted, orphanedAssociations,
+                pending.UserRoles.Count, pending.ExternalMappingRoles.Count);
 
             return MigrationResult.Success();
         }
@@ -240,5 +250,93 @@ internal class PreBlueprintCleanupMigration(
         }
 
         return deleted;
+    }
+
+    /// <summary>
+    ///     Captures the role NAMES every <see cref="RtUser"/> and
+    ///     <see cref="RtExternalTenantUserMapping"/> currently holds via its outbound
+    ///     <c>AssignedRole</c> edges, persists the map in
+    ///     <c>SystemConfiguration[PendingPostBlueprintRoleAssignmentsKey]</c>, and returns it for
+    ///     logging. The post-blueprint restore in
+    ///     <c>DefaultConfigurationCreatorService.SetupTenantAsync</c> reads the same key and
+    ///     re-attaches each user to the new stable-rtId role with the matching name.
+    /// </summary>
+    /// <remarks>
+    ///     <para>
+    ///         The migration deletes the OLD Role entities after this captures, so reading role
+    ///         names must happen BEFORE the entity sweep — otherwise the lookups all return null
+    ///         and every user permanently loses every role they had.
+    ///     </para>
+    ///     <para>
+    ///         The capture pre-skips edges that already point at stable-rtId roles
+    ///         (<c>660…01..0E</c>) because those came from a half-applied blueprint state and
+    ///         don't need restoration.
+    ///     </para>
+    /// </remarks>
+    private async Task<PendingPostBlueprintRoleAssignments> CapturePendingRoleAssignmentsAsync(
+        ITenantRepository tenantRepository,
+        IOctoSession session,
+        ITenantContext tenantContext,
+        IOctoAdminSession adminSession)
+    {
+        var pending = new PendingPostBlueprintRoleAssignments();
+
+        await CaptureRoleNamesForOriginTypeAsync<RtUser>(
+            tenantRepository, session, pending.UserRoles);
+        await CaptureRoleNamesForOriginTypeAsync<RtExternalTenantUserMapping>(
+            tenantRepository, session, pending.ExternalMappingRoles);
+
+        if (pending.UserRoles.Count > 0 || pending.ExternalMappingRoles.Count > 0)
+        {
+            await tenantContext.SetConfigurationAsync(
+                adminSession,
+                IdentityServiceConstants.PendingPostBlueprintRoleAssignmentsKey,
+                pending);
+        }
+
+        return pending;
+    }
+
+    private static async Task CaptureRoleNamesForOriginTypeAsync<TOrigin>(
+        ITenantRepository tenantRepository,
+        IOctoSession session,
+        Dictionary<string, List<string>> target)
+        where TOrigin : RtEntity, new()
+    {
+        var origins = await tenantRepository
+            .GetRtEntitiesByTypeAsync<TOrigin>(session, RtEntityQueryOptions.Create());
+
+        foreach (var origin in origins.Items)
+        {
+            var queryOptions = RtAssociationExtendedQueryOptions.Create(
+                GraphDirections.Outbound,
+                roleId: IdentityAssociationConstants.AssignedRoleId);
+            var edges = await tenantRepository.GetRtAssociationsAsync(
+                session, origin.ToRtEntityId(), queryOptions);
+
+            var names = new List<string>();
+            foreach (var edge in edges.Items)
+            {
+                // Pre-skip stable-rtId targets — those came from a partially-applied blueprint
+                // and don't need restoration. Only OLD random-rtId edges go through the capture
+                // → blueprint apply → restore loop.
+                if (IsBlueprintRtId(edge.TargetRtId))
+                {
+                    continue;
+                }
+
+                var role = await tenantRepository.GetRtEntityByRtIdAsync<RtRole>(
+                    session, edge.TargetRtId);
+                if (role?.Name is { Length: > 0 } name)
+                {
+                    names.Add(name);
+                }
+            }
+
+            if (names.Count > 0)
+            {
+                target[origin.RtId.ToString()] = names;
+            }
+        }
     }
 }
