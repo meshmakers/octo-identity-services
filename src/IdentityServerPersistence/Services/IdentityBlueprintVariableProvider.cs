@@ -75,6 +75,14 @@ public sealed class IdentityBlueprintVariableProvider : IBlueprintVariableProvid
             ["octo.isSystemTenant"] = isSystemTenant ? "true" : "false",
             ["octo.identity.authorityUrl"] = (identitySnapshot.AuthorityUrl ?? string.Empty).TrimEnd('/'),
             ["octo.identity.refineryStudioUrl"] = (identitySnapshot.RefineryStudioUrl ?? string.Empty).TrimEnd('/'),
+            // Self-referential placeholders for the System.Notification.Bootstrap mail templates.
+            // ${Username}, ${IdentityServerUrl}, ${ConfirmToken} are substituted at email-send time
+            // by UserEmailInteractionService — NOT at blueprint apply. Registering them as
+            // self-refs makes the apply-time interpolator a silent no-op instead of emitting
+            // 12 warnings per first-apply tenant.
+            ["Username"] = "${Username}",
+            ["IdentityServerUrl"] = "${IdentityServerUrl}",
+            ["ConfirmToken"] = "${ConfirmToken}",
         };
 
         return Task.FromResult(variables);
