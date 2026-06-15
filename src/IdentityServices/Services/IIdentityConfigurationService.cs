@@ -1,5 +1,5 @@
 using Meshmakers.Octo.Services.Infrastructure.Services;
-using Persistence.IdentityCkModel.Generated.System.Identity.v2;
+using Meshmakers.Octo.Services.Notifications.Generated.System.Notification.v2;
 
 namespace Meshmakers.Octo.Backend.IdentityServices.Services;
 
