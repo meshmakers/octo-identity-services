@@ -24,9 +24,21 @@ dotnet run --project src/IdentityServices/IdentityServices.csproj
 dotnet test Octo.Identity.sln -c Release
 ```
 
-## Pre-Commit Rule (CRITICAL)
+## Pre-Commit & Pre-Push Rule (CRITICAL — NO EXCEPTIONS)
 
-**ALWAYS run `dotnet test Octo.Identity.sln -c Release` locally before committing and pushing.** This catches compilation errors, test failures, and regressions before CI. Multiple CI failures were caused by not doing this — local validation is mandatory.
+**IMMER vor JEDEM `git commit` UND vor JEDEM `git push` lokal die volle Test-Suite ausführen:**
+
+```bash
+dotnet test Octo.Identity.sln -c Release
+```
+
+- Gilt für **jeden** Commit und **jeden** Push — auch für vermeintlich triviale Änderungen, Doc-Updates, Renames oder "nur einen Index hinzufügen".
+- Gilt für Unit- **und** Integration-Tests. Wenn Testcontainers/Docker lokal nicht verfügbar sind, das **explizit** dem User melden und auf Freigabe warten — **nicht** stillschweigend nur Unit-Tests laufen lassen.
+- **Niemals** `--no-verify`, `git commit -n` oder Hook-Skips verwenden, um diese Regel zu umgehen.
+- **Niemals** auf "die CI fängt es schon ab" verlassen — die CI ist die letzte, nicht die erste Verteidigungslinie.
+- Bei rotem Test: erst fixen, dann committen. Niemals "fix in einem nachfolgenden Commit" versprechen.
+
+Build #35223 (PR #95) ist genau wegen Verstoß gegen diese Regel fehlgeschlagen. Wenn lokale Validierung übersprungen wird, sind alle anderen Pre-Commit-Regeln (Lint etc.) ebenfalls hinfällig.
 
 ## Build Configurations
 
