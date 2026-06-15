@@ -214,12 +214,23 @@ internal class DefaultConfigurationCreatorService(
         using var writeSession = await tenantRepository.GetSessionAsync();
         writeSession.StartTransaction();
 
-        // Build a name → new-Role-rtId index once from the blueprint-seeded entities.
+        // Build a name → new-Role-rtId index once from the blueprint-seeded entities. This used
+        // to be a straight `.ToDictionary(r => r.Name)` which crashed Identity startup on test-2
+        // 2026-06-15 when the broken pre-blueprint cleanup migration left a pair of
+        // <name="AdminPanelManagement", rtId=686a…> + <name="AdminPanelManagement", rtId=660…05>
+        // for every imperative-seed role. `An item with the same key has already been added`
+        // took the host down.
+        //
+        // Defensive build: tolerate duplicates by preferring the blueprint-range entity (660…
+        // first byte = 0x66, see PreBlueprintCleanupMigration.IsBlueprintRtId), log a structured
+        // warning so the duplicates are still visible and chasable, and continue. The companion
+        // PR #94 fix to the cleanup migration prevents the duplicates from forming in the first
+        // place; this safety net catches any future variant of the same trap (e.g. an operator
+        // who manually creates a duplicate Role.Name, or a blueprint-version bump that lands a
+        // new well-known name colliding with an operator role).
         var roles = await tenantRepository.GetRtEntitiesByTypeAsync<RtRole>(
             writeSession, RtEntityQueryOptions.Create());
-        var rolesByName = roles.Items
-            .Where(r => r.Name is { Length: > 0 })
-            .ToDictionary(r => r.Name!, r => r.RtId, StringComparer.Ordinal);
+        var rolesByName = BuildRoleNameIndex(roles.Items, tenantContext.TenantId, logger);
 
         var restored = 0;
         var userCkTypeId = RtEntityExtensions.GetRtCkTypeId<RtUser>();
@@ -423,5 +434,80 @@ internal class DefaultConfigurationCreatorService(
                 "CK model data migrations completed for tenant '{TenantId}': {EntitiesAffected} entities affected",
                 tenantContext.TenantId, result.TotalEntitiesAffected);
         }
+    }
+
+    /// <summary>
+    ///     Inclusive lower bound of the blueprint stable-rtId range
+    ///     (<c>System.Identity.Bootstrap-1.0.0</c> seed). First byte 0x66. Mirrors the constant
+    ///     in <c>PreBlueprintCleanupMigration</c>; duplicated here so the defensive role-index
+    ///     build does not take a dependency on the migration class purely for one comparison.
+    /// </summary>
+    internal static readonly OctoObjectId BlueprintRangeStart =
+        new("660000000000000000000000");
+
+    /// <summary>
+    ///     Exclusive upper bound of the blueprint stable-rtId range. ObjectId comparison is
+    ///     byte-by-byte.
+    /// </summary>
+    internal static readonly OctoObjectId BlueprintRangeEndExclusive =
+        new("670000000000000000000000");
+
+    internal static bool IsBlueprintRtId(OctoObjectId rtId)
+        => rtId.CompareTo(BlueprintRangeStart) >= 0
+           && rtId.CompareTo(BlueprintRangeEndExclusive) < 0;
+
+    /// <summary>
+    ///     Build a <c>name → rtId</c> dictionary that is tolerant of duplicate Role names.
+    /// </summary>
+    /// <remarks>
+    ///     <para>
+    ///         The unguarded <c>.ToDictionary(r =&gt; r.Name)</c> this replaces would crash with
+    ///         <see cref="ArgumentException"/> on any duplicate, taking the entire host down
+    ///         (test-2 2026-06-15 — pre-blueprint cleanup left <c>686a…cd</c> and
+    ///         <c>660…05</c> both named <c>AdminPanelManagement</c>). Identity refused to start
+    ///         and recovery required a backup restore.
+    ///     </para>
+    ///     <para>
+    ///         Defensive build: group by name, prefer the blueprint-range rtId (the only one the
+    ///         seed authored), and log a warning carrying every conflicting rtId so the data
+    ///         drift stays visible. PR #94 fixes the upstream migration so duplicates don't form
+    ///         in the first place; this safety net catches any future variant — operator-created
+    ///         duplicates, blueprint-version bumps that collide with operator names, half-applied
+    ///         restores.
+    ///     </para>
+    /// </remarks>
+    internal static Dictionary<string, OctoObjectId> BuildRoleNameIndex(
+        IEnumerable<RtRole> roles, string tenantId, ILogger logger)
+    {
+        var grouped = roles
+            .Where(r => r.Name is { Length: > 0 })
+            .GroupBy(r => r.Name!, StringComparer.Ordinal);
+
+        var index = new Dictionary<string, OctoObjectId>(StringComparer.Ordinal);
+        foreach (var group in grouped)
+        {
+            var entries = group.ToList();
+            // Prefer the blueprint-range entry; fall back to the first by rtId for stable
+            // selection across restarts when no blueprint entry exists yet.
+            var blueprintEntries = entries.Where(r => IsBlueprintRtId(r.RtId)).ToList();
+            var winner = blueprintEntries.Count > 0
+                ? blueprintEntries.OrderBy(r => r.RtId).First()
+                : entries.OrderBy(r => r.RtId).First();
+
+            if (entries.Count > 1)
+            {
+                logger.LogWarning(
+                    "Duplicate Role name '{RoleName}' in tenant '{TenantId}' — {Count} entries " +
+                    "(rtIds: {RtIds}). Using rtId '{WinnerRtId}' for post-blueprint role restore; " +
+                    "review whether the pre-blueprint cleanup left orphans.",
+                    group.Key, tenantId, entries.Count,
+                    string.Join(", ", entries.Select(r => r.RtId.ToString())),
+                    winner.RtId);
+            }
+
+            index[group.Key] = winner.RtId;
+        }
+
+        return index;
     }
 }
