@@ -223,9 +223,9 @@ internal class PreBlueprintCleanupMigration(
         if (deleted > 0 || preservedOperatorEntities > 0)
         {
             logger.LogInformation(
-                "Pre-blueprint cleanup: deleted {Count} known imperative-seed {Type} entities, " +
-                "preserved {Preserved} operator-created {Type} entities for tenant '{TenantId}'",
-                deleted, typeof(TEntity).Name, preservedOperatorEntities, typeof(TEntity).Name, tenantId);
+                "Pre-blueprint cleanup for {Type}: deleted {Count} known imperative-seed entities, " +
+                "preserved {Preserved} operator-created entities for tenant '{TenantId}'",
+                typeof(TEntity).Name, deleted, preservedOperatorEntities, tenantId);
         }
 
         return deleted;
