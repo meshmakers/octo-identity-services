@@ -39,13 +39,20 @@ internal class DefaultConfigurationCreatorService(
       IConfigurationService
 {
     /// <summary>
-    ///     Namespace prefix the Base class uses to discover embedded blueprints this service
-    ///     owns. Anything starting with <c>System.Identity.</c> is treated as a service-managed
-    ///     blueprint and auto-applied by <see cref="SetupTenantAsync"/> on cold init and by
-    ///     <see cref="RefreshTenantStateAsync"/> on every tenant lifecycle event. Today the
-    ///     only such blueprint is <c>System.Identity.Bootstrap-1.0.0</c>.
+    ///     Identity owns two blueprint namespaces: <c>System.Identity.</c> (its own bootstrap)
+    ///     and <c>System.Notification.</c> (the Notification bootstrap, which Identity drives
+    ///     because the templates are an Identity-side concern even though the CK types belong
+    ///     to <c>System.Notification</c>). The base class's single <see cref="ServiceManagedBlueprintPrefix"/>
+    ///     can only carry one prefix, so we override <see cref="IsServiceManagedBlueprint"/>
+    ///     instead and short-circuit to the two-prefix match. Auto-applied by
+    ///     <see cref="SetupTenantAsync"/> on cold init and by <see cref="RefreshTenantStateAsync"/>
+    ///     on every tenant lifecycle event.
     /// </summary>
-    protected override string? ServiceManagedBlueprintPrefix => "System.Identity.";
+    protected override bool IsServiceManagedBlueprint(BlueprintId blueprintId)
+    {
+        return blueprintId.Name.StartsWith("System.Identity.", StringComparison.Ordinal)
+               || blueprintId.Name.StartsWith("System.Notification.", StringComparison.Ordinal);
+    }
 
     /// <summary>
     ///     Re-applies the <c>System.Identity.Bootstrap-1.0.0</c> blueprint on every tenant
@@ -148,19 +155,6 @@ internal class DefaultConfigurationCreatorService(
         // edges. The pending row is deleted on success — if Identity crashes mid-restore the
         // next startup retries with the same data.
         await RestorePendingRoleAssignmentsAsync(tenantContext);
-
-        // Mail templates + RtMailNotificationConfiguration stay in code. They belong to the
-        // System.Notification CK model, not System.Identity, and are a candidate for a separate
-        // System.Notification.Bootstrap blueprint in a follow-up (concept doc §6).
-        var configRepo = tenantId == systemContext.TenantId
-            ? systemContext.GetSystemTenantRepositoryAsAdmin()
-            : tenantContext.GetTenantRepositoryAsAdmin();
-        using (var configSession = await tenantContext.GetAdminSessionAsync())
-        {
-            configSession.StartTransaction();
-            await CreateTenantConfiguration(configSession, configRepo);
-            await configSession.CommitTransactionAsync();
-        }
 
         // Child-tenant client mirror provisioning runs AFTER the blueprint apply has guaranteed
         // the parent tenant's RtClient entities exist. Idempotent — runs on every startup so
@@ -365,78 +359,6 @@ internal class DefaultConfigurationCreatorService(
         }
     }
 
-
-    private async Task CreateTenantConfiguration(IOctoSession session, ITenantRepository tenantRepository)
-    {
-        var queryOptions = RtEntityQueryOptions.Create()
-            .FieldEquals(nameof(RtEntity.RtWellKnownName),
-                IdentityServiceConstants.MailNotificationConfigurationName);
-        var r = await tenantRepository.GetRtEntitiesByTypeAsync<RtMailNotificationConfiguration>(session,
-            queryOptions);
-        if (r.TotalCount == 0)
-        {
-            var rtMailNotificationConfiguration = new RtMailNotificationConfiguration
-            {
-                RtWellKnownName = IdentityServiceConstants.MailNotificationConfigurationName,
-                EnableEmailNotifications = false
-            };
-            await tenantRepository.InsertOneRtEntityAsync(session, rtMailNotificationConfiguration);
-        }
-
-        queryOptions = RtEntityQueryOptions.Create()
-            .FieldEquals(nameof(RtEntity.RtWellKnownName),
-                IdentityServiceConstants.WelcomeEmailTemplateName);
-        var mailTemplateResultSet = await tenantRepository.GetRtEntitiesByTypeAsync<RtNotificationTemplate>(session,
-            queryOptions);
-        if (mailTemplateResultSet.TotalCount == 0)
-        {
-            var welcomeMailTemplate = new RtNotificationTemplate
-            {
-                RtWellKnownName = IdentityServiceConstants.WelcomeEmailTemplateName,
-                Type = RtNotificationTypesEnum.EMail,
-                RenderingType = RtRenderingTypesEnum.Plain,
-                SubjectTemplate = IdentityTexts.Backend_IdentityServices_UserSchema_WelcomeMailSubject,
-                BodyTemplate = IdentityTexts.Backend_IdentityServices_UserSchema_WelcomeMailBody
-            };
-            await tenantRepository.InsertOneRtEntityAsync(session, welcomeMailTemplate);
-        }
-
-        queryOptions = RtEntityQueryOptions.Create()
-            .FieldEquals(nameof(RtEntity.RtWellKnownName),
-                IdentityServiceConstants.WelcomeEmailWithNoPasswordTemplateName);
-        mailTemplateResultSet = await tenantRepository.GetRtEntitiesByTypeAsync<RtNotificationTemplate>(session,
-            queryOptions);
-        if (mailTemplateResultSet.TotalCount == 0)
-        {
-            var welcomeMailWithNoPasswordTemplate = new RtNotificationTemplate
-            {
-                RtWellKnownName = IdentityServiceConstants.WelcomeEmailWithNoPasswordTemplateName,
-                Type = RtNotificationTypesEnum.EMail,
-                RenderingType = RtRenderingTypesEnum.Plain,
-                SubjectTemplate = IdentityTexts.Backend_IdentityServices_UserSchema_WelcomeMailWithNoPasswordSubject,
-                BodyTemplate = IdentityTexts.Backend_IdentityServices_UserSchema_WelcomeMailWithNoPasswordBody
-            };
-            await tenantRepository.InsertOneRtEntityAsync(session, welcomeMailWithNoPasswordTemplate);
-        }
-
-        queryOptions = RtEntityQueryOptions.Create()
-            .FieldEquals(nameof(RtEntity.RtWellKnownName),
-                IdentityServiceConstants.ResetPasswordEmailTemplateName);
-        mailTemplateResultSet = await tenantRepository.GetRtEntitiesByTypeAsync<RtNotificationTemplate>(session,
-            queryOptions);
-        if (mailTemplateResultSet.TotalCount == 0)
-        {
-            var resetPasswordMailTemplate = new RtNotificationTemplate
-            {
-                RtWellKnownName = IdentityServiceConstants.ResetPasswordEmailTemplateName,
-                Type = RtNotificationTypesEnum.EMail,
-                RenderingType = RtRenderingTypesEnum.Plain,
-                SubjectTemplate = IdentityTexts.Backend_IdentityServices_UserSchema_ResetPasswordMailSubject,
-                BodyTemplate = IdentityTexts.Backend_IdentityServices_UserSchema_ResetPasswordMailBody
-            };
-            await tenantRepository.InsertOneRtEntityAsync(session, resetPasswordMailTemplate);
-        }
-    }
 
     public Task EnableAsync(string tenantId)
     {
