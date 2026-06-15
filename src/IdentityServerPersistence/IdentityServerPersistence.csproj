@@ -19,4 +19,8 @@
         <ProjectReference Include="..\Persistence.IdentityCkModel\Persistence.IdentityCkModel.csproj" />
     </ItemGroup>
 
+    <ItemGroup>
+        <InternalsVisibleTo Include="IdentityServerPersistence.UnitTests" />
+    </ItemGroup>
+
 </Project>
