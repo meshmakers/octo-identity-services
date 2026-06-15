@@ -96,17 +96,23 @@ internal class PreBlueprintCleanupMigration(
 
             var totalDeleted = 0;
             totalDeleted += await DeletePreBlueprintEntitiesAsync<RtRole>(
-                tenantRepository, session, tenantContext.TenantId);
+                tenantRepository, session, tenantContext.TenantId,
+                r => r.Name, KnownPreBlueprintRoleNames);
             totalDeleted += await DeletePreBlueprintEntitiesAsync<RtIdentityResource>(
-                tenantRepository, session, tenantContext.TenantId);
+                tenantRepository, session, tenantContext.TenantId,
+                r => r.Name, KnownPreBlueprintIdentityResourceNames);
             totalDeleted += await DeletePreBlueprintEntitiesAsync<RtApiScope>(
-                tenantRepository, session, tenantContext.TenantId);
+                tenantRepository, session, tenantContext.TenantId,
+                s => s.Name, KnownPreBlueprintApiScopeNames);
             totalDeleted += await DeletePreBlueprintEntitiesAsync<RtApiResource>(
-                tenantRepository, session, tenantContext.TenantId);
+                tenantRepository, session, tenantContext.TenantId,
+                r => r.Name, KnownPreBlueprintApiResourceNames);
             totalDeleted += await DeletePreBlueprintEntitiesAsync<RtClient>(
-                tenantRepository, session, tenantContext.TenantId);
+                tenantRepository, session, tenantContext.TenantId,
+                c => c.ClientId, KnownPreBlueprintClientIds);
             totalDeleted += await DeletePreBlueprintEntitiesAsync<RtGroup>(
-                tenantRepository, session, tenantContext.TenantId);
+                tenantRepository, session, tenantContext.TenantId,
+                g => g.GroupName, KnownPreBlueprintGroupNames);
 
             await session.CommitTransactionAsync();
 
@@ -136,10 +142,24 @@ internal class PreBlueprintCleanupMigration(
     ///     the blueprint apply that runs immediately after must see a clean collection so its
     ///     stable-rtId upsert lands as an Insert, not as a duplicate-key conflict.
     /// </summary>
+    /// <param name="nameSelector">
+    ///     Returns the entity's primary identifying name attribute — <c>RtRole.Name</c>,
+    ///     <c>RtClient.ClientId</c>, <c>RtGroup.GroupName</c>, etc. This is the same attribute the
+    ///     pre-PR-#4 imperative seed wrote to identify the entity, so checking it against
+    ///     <paramref name="whitelistedNames"/> is the only reliable way to distinguish
+    ///     imperative-seed leftovers from operator-created entities (see the second hotfix note
+    ///     below).
+    /// </param>
+    /// <param name="whitelistedNames">
+    ///     The per-type subset of <c>seed-data/entities.yaml</c> names this call should consider
+    ///     for deletion. Anything outside the set is operator-created and must survive.
+    /// </param>
     private async Task<int> DeletePreBlueprintEntitiesAsync<TEntity>(
         ITenantRepository tenantRepository,
         IOctoSession session,
-        string tenantId)
+        string tenantId,
+        Func<TEntity, string?> nameSelector,
+        HashSet<string> whitelistedNames)
         where TEntity : RtEntity, new()
     {
         var result = await tenantRepository
@@ -154,21 +174,42 @@ internal class PreBlueprintCleanupMigration(
                 continue;
             }
 
-            // CRITICAL safety gate (hotfix for 17 → 18 incident on test-2):
-            // The original migration deleted every non-660… entity unconditionally and wiped
-            // operator-created Identity entities — CI service-principal clients, custom OAuth
-            // clients, AutoProvisionInChildTenants mirrors, custom roles/groups/scopes/resources.
-            // The blueprint apply that runs immediately after only re-seeds the well-known
-            // OctoMesh defaults (660…01..40), so the operator data is gone unless restored from
-            // backup.
+            // Two-layer safety gate.
             //
-            // Fix: delete only entities whose rtWellKnownName matches a known imperative-seed
-            // name (the set the original CreateRoles/CreateClients/… methods wrote). Anything
-            // with a different rtWellKnownName (or null) is operator-created and must be kept.
-            // The blueprint apply still lands its stable-rtId seed as Inserts because the
-            // deleted entities (same well-known names, random rtIds) free up the names.
-            if (string.IsNullOrEmpty(entity.RtWellKnownName)
-                || !KnownPreBlueprintWellKnownNames.Contains(entity.RtWellKnownName))
+            // First hotfix (test-2 2026-06-15 incident #1 — over-deletion): the original
+            // migration deleted every non-660… entity unconditionally and wiped operator-created
+            // Identity entities — CI service-principal clients, custom OAuth clients,
+            // AutoProvisionInChildTenants mirrors, custom roles/groups/scopes/resources. The
+            // blueprint apply that runs immediately after only re-seeds the well-known OctoMesh
+            // defaults (660…01..40), so operator data was gone unless restored from backup.
+            //
+            // Second hotfix (test-2 2026-06-15 incident #2 — under-deletion / duplicate-key
+            // crash): the first hotfix gated by `entity.RtWellKnownName`. That column was always
+            // null on the pre-PR-#4 imperative-seed entities (the legacy `CreateRoles` /
+            // `CreateClients` / … methods set the name attribute but did not write
+            // rtWellKnownName), so the gate preserved every pre-blueprint entity instead of just
+            // operator-created ones. The blueprint apply then created a SECOND 660…-range entity
+            // with the same name → `RestorePendingRoleAssignmentsAsync.ToDictionary` crashed with
+            // "An item with the same key has already been added. Key: AdminPanelManagement" and
+            // Identity refused to start.
+            //
+            // Correct gate: check the entity's PRIMARY NAME attribute (Role.Name,
+            // Client.ClientId, Group.GroupName, …) against the per-type whitelist. The
+            // imperative seed always wrote that attribute. Fall back to RtWellKnownName so a
+            // future seed iteration that does write the column is still recognised. Anything
+            // matching the whitelist is imperative-seed residue and is deleted; everything else
+            // (operator-named entities AND any seed names not in the whitelist) is preserved.
+            // The fallback is explicit IsNullOrEmpty (not `??`) because the generated CK type
+            // initialises the name field to `""` rather than `null` on a default-constructed
+            // entity, and `string? ?? fallback` only fires for the null branch.
+            var identifyingName = nameSelector(entity);
+            if (string.IsNullOrEmpty(identifyingName))
+            {
+                identifyingName = entity.RtWellKnownName;
+            }
+
+            if (string.IsNullOrEmpty(identifyingName)
+                || !whitelistedNames.Contains(identifyingName))
             {
                 preservedOperatorEntities++;
                 continue;
@@ -182,40 +223,52 @@ internal class PreBlueprintCleanupMigration(
         if (deleted > 0 || preservedOperatorEntities > 0)
         {
             logger.LogInformation(
-                "Pre-blueprint cleanup: deleted {Count} known imperative-seed {Type} entities, " +
-                "preserved {Preserved} operator-created {Type} entities for tenant '{TenantId}'",
-                deleted, typeof(TEntity).Name, preservedOperatorEntities, typeof(TEntity).Name, tenantId);
+                "Pre-blueprint cleanup for {Type}: deleted {Count} known imperative-seed entities, " +
+                "preserved {Preserved} operator-created entities for tenant '{TenantId}'",
+                typeof(TEntity).Name, deleted, preservedOperatorEntities, tenantId);
         }
 
         return deleted;
     }
 
     /// <summary>
-    ///     Whitelist of well-known names the pre-PR-#4 imperative seed wrote across
+    ///     Per-type whitelists of names the pre-PR-#4 imperative seed wrote across
     ///     <see cref="RtRole"/> / <see cref="RtIdentityResource"/> / <see cref="RtApiScope"/> /
-    ///     <see cref="RtApiResource"/> / <see cref="RtClient"/> / <see cref="RtGroup"/>. The
-    ///     hotfix uses this set as the additional gate the original migration was missing —
-    ///     entities outside the stable-rtId range AND outside this whitelist are
-    ///     operator-created and must survive.
+    ///     <see cref="RtApiResource"/> / <see cref="RtClient"/> / <see cref="RtGroup"/>. These are
+    ///     the additional gate the original (over-deleting) migration was missing — entities
+    ///     outside the stable-rtId range AND outside their type's whitelist are operator-created
+    ///     and must survive.
     /// </summary>
     /// <remarks>
     ///     <para>
-    ///         The list is the rtWellKnownName column of every seed entity in
-    ///         <c>src/Persistence.IdentityCkModel/Blueprints/System.Identity.Bootstrap/seed-data/entities.yaml</c>
+    ///         The names match the <c>rtWellKnownName</c> column of every seed entity in
+    ///         <c>octo-identity-services/src/Persistence.IdentityCkModel/Blueprints/System.Identity.Bootstrap/seed-data/entities.yaml</c>
     ///         — the blueprint is the 1:1 lift of the imperative seed, so the well-known-name
-    ///         contract is preserved across the migration even though the rtIds change.
+    ///         contract is preserved across the migration even though the rtIds change. They
+    ///         also match the primary-name attribute the imperative seed wrote
+    ///         (<c>RtRole.Name</c>, <c>RtClient.ClientId</c>, <c>RtGroup.GroupName</c>, …), which
+    ///         is what <see cref="DeletePreBlueprintEntitiesAsync{TEntity}"/> actually checks
+    ///         after the second hotfix.
     ///     </para>
     ///     <para>
-    ///         Adding a new well-known seed name to a future blueprint version means this set
-    ///         needs the same name appended IF the migration could ever run against a tenant
-    ///         that still has the equivalent imperative-seed entity. In practice migration 17 →
-    ///         18 only runs once per tenant; future blueprint additions are not subject to a
-    ///         pre-blueprint cleanup at all (their entities will start at 660… on first apply).
+    ///         Adding a new well-known seed name to a future blueprint version means the matching
+    ///         per-type set here needs the same name appended IF the migration could ever run
+    ///         against a tenant that still has the equivalent imperative-seed entity. In practice
+    ///         migration 17 → 18 only runs once per tenant; future blueprint additions are not
+    ///         subject to a pre-blueprint cleanup at all (their entities will start at 660… on
+    ///         first apply).
+    ///     </para>
+    ///     <para>
+    ///         Per-type partitioning is required so operator-created entities can carry the same
+    ///         name as a seed entity of a DIFFERENT type without being mis-classified. e.g. an
+    ///         operator-created Role called "octo_api" (the legacy API-scope name) would be
+    ///         wrongly deleted by a single-set whitelist — the Role gate only checks
+    ///         <see cref="KnownPreBlueprintRoleNames"/>.
     ///     </para>
     /// </remarks>
-    private static readonly HashSet<string> KnownPreBlueprintWellKnownNames = new(StringComparer.Ordinal)
+    private static readonly HashSet<string> KnownPreBlueprintRoleNames = new(StringComparer.Ordinal)
     {
-        // 14 default roles (CreateDefaultRoles)
+        // 14 default roles (legacy CreateDefaultRoles)
         "TenantManagement",
         "UserManagement",
         "CommunicationManagement",
@@ -230,25 +283,50 @@ internal class PreBlueprintCleanupMigration(
         "StreamDataAdmin",
         "StreamDataReader",
         "StreamDataWriter",
-        // 5 identity resources (CreateIdentityResources)
-        "openid",
-        "profile",
-        "email",
-        "role",
-        "allowed_tenants",
-        // 3 API scopes (CreateApiScopes)
-        "octo_api",
-        "octo_api.read_only",
-        "octo_api.data_model_management",
-        // 1 API resource (CreateApiResources)
-        "octoAPI",
-        // 3 clients (CreateClients)
-        "OctoToolClient",
-        "IdentityServicesSwaggerClient",
-        "RefineryStudioClient",
-        // 1 default group (CreateGroups)
-        "TenantOwners",
     };
+
+    private static readonly HashSet<string> KnownPreBlueprintIdentityResourceNames =
+        new(StringComparer.Ordinal)
+        {
+            // 5 identity resources (legacy CreateIdentityResources)
+            "openid",
+            "profile",
+            "email",
+            "role",
+            "allowed_tenants",
+        };
+
+    private static readonly HashSet<string> KnownPreBlueprintApiScopeNames =
+        new(StringComparer.Ordinal)
+        {
+            // 3 API scopes (legacy CreateApiScopes)
+            "octo_api",
+            "octo_api.read_only",
+            "octo_api.data_model_management",
+        };
+
+    private static readonly HashSet<string> KnownPreBlueprintApiResourceNames =
+        new(StringComparer.Ordinal)
+        {
+            // 1 API resource (legacy CreateApiResources)
+            "octoAPI",
+        };
+
+    private static readonly HashSet<string> KnownPreBlueprintClientIds =
+        new(StringComparer.Ordinal)
+        {
+            // 3 clients (legacy CreateClients) — ClientId, NOT a generic Name
+            "OctoToolClient",
+            "IdentityServicesSwaggerClient",
+            "RefineryStudioClient",
+        };
+
+    private static readonly HashSet<string> KnownPreBlueprintGroupNames =
+        new(StringComparer.Ordinal)
+        {
+            // 1 default group (legacy CreateGroups) — GroupName, NOT a generic Name
+            "TenantOwners",
+        };
 
     /// <summary>
     ///     True when <paramref name="rtId"/>'s underlying <see cref="OctoObjectId"/> falls inside

@@ -72,6 +72,33 @@ internal class PreBlueprintNotificationCleanupMigration(
     private static readonly OctoObjectId BlueprintRangeEndExclusive =
         new("690000000000000000000000");
 
+    /// <summary>
+    ///     Whitelist of <c>rtWellKnownName</c> values the legacy
+    ///     <c>DefaultConfigurationCreatorService.CreateTenantConfiguration</c> imperative seed
+    ///     wrote for <see cref="RtMailNotificationConfiguration"/> (1 singleton). Anything outside
+    ///     the blueprint range AND outside this set is operator-created and must survive — the
+    ///     blueprint apply that follows will leave the operator entity alone if its
+    ///     <c>rtWellKnownName</c> does not collide with the blueprint's stable name.
+    /// </summary>
+    private static readonly HashSet<string> KnownPreBlueprintConfigNames =
+        new(StringComparer.Ordinal)
+        {
+            IdentityServiceConstants.MailNotificationConfigurationName,
+        };
+
+    /// <summary>
+    ///     Whitelist of <c>rtWellKnownName</c> values the legacy imperative seed wrote for
+    ///     <see cref="RtNotificationTemplate"/> entities (3 mail templates consumed by
+    ///     <c>UserEmailInteractionService</c>).
+    /// </summary>
+    private static readonly HashSet<string> KnownPreBlueprintTemplateNames =
+        new(StringComparer.Ordinal)
+        {
+            IdentityServiceConstants.WelcomeEmailTemplateName,
+            IdentityServiceConstants.WelcomeEmailWithNoPasswordTemplateName,
+            IdentityServiceConstants.ResetPasswordEmailTemplateName,
+        };
+
     public async Task<MigrationResult> MigrateAsync(IOctoAdminSession adminSession, ITenantContext tenantContext)
     {
         try
@@ -81,10 +108,10 @@ internal class PreBlueprintNotificationCleanupMigration(
             session.StartTransaction();
 
             var deletedConfigs = await DeletePreBlueprintEntitiesAsync<RtMailNotificationConfiguration>(
-                tenantRepository, session, tenantContext.TenantId);
+                tenantRepository, session, tenantContext.TenantId, KnownPreBlueprintConfigNames);
 
             var deletedTemplates = await DeletePreBlueprintEntitiesAsync<RtNotificationTemplate>(
-                tenantRepository, session, tenantContext.TenantId);
+                tenantRepository, session, tenantContext.TenantId, KnownPreBlueprintTemplateNames);
 
             await session.CommitTransactionAsync();
 
@@ -104,21 +131,55 @@ internal class PreBlueprintNotificationCleanupMigration(
         }
     }
 
+    /// <summary>
+    ///     Deletes only entities whose <c>rtWellKnownName</c> matches a name the legacy
+    ///     imperative seed wrote (see <paramref name="whitelistedNames"/>). Everything else —
+    ///     including any operator-created custom configuration / template — is preserved.
+    /// </summary>
+    /// <remarks>
+    ///     <para>
+    ///         The earlier version of this migration deleted every non-680… entity
+    ///         unconditionally. That was the same over-deletion bug as
+    ///         <see cref="PreBlueprintCleanupMigration"/>'s first version, just without an
+    ///         already-shipped incident — no prod cluster had operator-created Notification
+    ///         entities yet, so the silent-data-loss path stayed asymptomatic. The whitelist gate
+    ///         here closes the door before any operator gets bitten.
+    ///     </para>
+    ///     <para>
+    ///         <see cref="RtMailNotificationConfiguration"/> and <see cref="RtNotificationTemplate"/>
+    ///         do not expose a separate Name attribute (per the System.Notification CK schema), so
+    ///         only <c>rtWellKnownName</c> is consulted. If the legacy seed did not set
+    ///         <c>rtWellKnownName</c> on its templates, those entities will be PRESERVED here and
+    ///         the blueprint apply will create a second copy in the 680… range. Duplicates are a
+    ///         visible, fixable state for an operator (two templates with the same purpose,
+    ///         picked arbitrarily at send time); silent over-deletion of an operator's
+    ///         customised template body is not.
+    ///     </para>
+    /// </remarks>
     private async Task<int> DeletePreBlueprintEntitiesAsync<TEntity>(
         ITenantRepository tenantRepository,
         IOctoSession session,
-        string tenantId)
+        string tenantId,
+        HashSet<string> whitelistedNames)
         where TEntity : RtEntity, new()
     {
         var all = await tenantRepository.GetRtEntitiesByTypeAsync<TEntity>(session,
             RtEntityQueryOptions.Create());
 
         var deleted = 0;
+        var preservedOperatorEntities = 0;
         foreach (var entity in all.Items)
         {
             if (entity.RtId.CompareTo(BlueprintRangeStart) >= 0
                 && entity.RtId.CompareTo(BlueprintRangeEndExclusive) < 0)
             {
+                continue;
+            }
+
+            if (string.IsNullOrEmpty(entity.RtWellKnownName)
+                || !whitelistedNames.Contains(entity.RtWellKnownName))
+            {
+                preservedOperatorEntities++;
                 continue;
             }
 
@@ -128,6 +189,14 @@ internal class PreBlueprintNotificationCleanupMigration(
                 "Tenant '{TenantId}': deleted pre-blueprint {Type} rtId={RtId} name={Name}",
                 tenantId, typeof(TEntity).Name, entity.RtId, entity.RtWellKnownName);
             deleted++;
+        }
+
+        if (deleted > 0 || preservedOperatorEntities > 0)
+        {
+            logger.LogInformation(
+                "Pre-blueprint Notification cleanup for {Type}: deleted {Count} known imperative-seed entities, " +
+                "preserved {Preserved} operator-created entities for tenant '{TenantId}'",
+                typeof(TEntity).Name, deleted, preservedOperatorEntities, tenantId);
         }
 
         return deleted;
