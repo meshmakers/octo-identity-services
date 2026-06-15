@@ -146,10 +146,31 @@ internal class PreBlueprintCleanupMigration(
             .GetRtEntitiesByTypeAsync<TEntity>(session, RtEntityQueryOptions.Create());
 
         var deleted = 0;
+        var preservedOperatorEntities = 0;
         foreach (var entity in result.Items)
         {
             if (IsBlueprintRtId(entity.RtId))
             {
+                continue;
+            }
+
+            // CRITICAL safety gate (hotfix for 17 → 18 incident on test-2):
+            // The original migration deleted every non-660… entity unconditionally and wiped
+            // operator-created Identity entities — CI service-principal clients, custom OAuth
+            // clients, AutoProvisionInChildTenants mirrors, custom roles/groups/scopes/resources.
+            // The blueprint apply that runs immediately after only re-seeds the well-known
+            // OctoMesh defaults (660…01..40), so the operator data is gone unless restored from
+            // backup.
+            //
+            // Fix: delete only entities whose rtWellKnownName matches a known imperative-seed
+            // name (the set the original CreateRoles/CreateClients/… methods wrote). Anything
+            // with a different rtWellKnownName (or null) is operator-created and must be kept.
+            // The blueprint apply still lands its stable-rtId seed as Inserts because the
+            // deleted entities (same well-known names, random rtIds) free up the names.
+            if (string.IsNullOrEmpty(entity.RtWellKnownName)
+                || !KnownPreBlueprintWellKnownNames.Contains(entity.RtWellKnownName))
+            {
+                preservedOperatorEntities++;
                 continue;
             }
 
@@ -158,15 +179,76 @@ internal class PreBlueprintCleanupMigration(
             deleted++;
         }
 
-        if (deleted > 0)
+        if (deleted > 0 || preservedOperatorEntities > 0)
         {
             logger.LogInformation(
-                "Pre-blueprint cleanup: deleted {Count} {Type} entities outside the stable rtId range for tenant '{TenantId}'",
-                deleted, typeof(TEntity).Name, tenantId);
+                "Pre-blueprint cleanup: deleted {Count} known imperative-seed {Type} entities, " +
+                "preserved {Preserved} operator-created {Type} entities for tenant '{TenantId}'",
+                deleted, typeof(TEntity).Name, preservedOperatorEntities, typeof(TEntity).Name, tenantId);
         }
 
         return deleted;
     }
+
+    /// <summary>
+    ///     Whitelist of well-known names the pre-PR-#4 imperative seed wrote across
+    ///     <see cref="RtRole"/> / <see cref="RtIdentityResource"/> / <see cref="RtApiScope"/> /
+    ///     <see cref="RtApiResource"/> / <see cref="RtClient"/> / <see cref="RtGroup"/>. The
+    ///     hotfix uses this set as the additional gate the original migration was missing —
+    ///     entities outside the stable-rtId range AND outside this whitelist are
+    ///     operator-created and must survive.
+    /// </summary>
+    /// <remarks>
+    ///     <para>
+    ///         The list is the rtWellKnownName column of every seed entity in
+    ///         <c>src/Persistence.IdentityCkModel/Blueprints/System.Identity.Bootstrap/seed-data/entities.yaml</c>
+    ///         — the blueprint is the 1:1 lift of the imperative seed, so the well-known-name
+    ///         contract is preserved across the migration even though the rtIds change.
+    ///     </para>
+    ///     <para>
+    ///         Adding a new well-known seed name to a future blueprint version means this set
+    ///         needs the same name appended IF the migration could ever run against a tenant
+    ///         that still has the equivalent imperative-seed entity. In practice migration 17 →
+    ///         18 only runs once per tenant; future blueprint additions are not subject to a
+    ///         pre-blueprint cleanup at all (their entities will start at 660… on first apply).
+    ///     </para>
+    /// </remarks>
+    private static readonly HashSet<string> KnownPreBlueprintWellKnownNames = new(StringComparer.Ordinal)
+    {
+        // 14 default roles (CreateDefaultRoles)
+        "TenantManagement",
+        "UserManagement",
+        "CommunicationManagement",
+        "Development",
+        "DashboardManagement",
+        "DashboardViewer",
+        "ReportingManagement",
+        "ReportingViewer",
+        "DataModelManagement",
+        "BotManagement",
+        "AdminPanelManagement",
+        "StreamDataAdmin",
+        "StreamDataReader",
+        "StreamDataWriter",
+        // 5 identity resources (CreateIdentityResources)
+        "openid",
+        "profile",
+        "email",
+        "role",
+        "allowed_tenants",
+        // 3 API scopes (CreateApiScopes)
+        "octo_api",
+        "octo_api.read_only",
+        "octo_api.data_model_management",
+        // 1 API resource (CreateApiResources)
+        "octoAPI",
+        // 3 clients (CreateClients)
+        "OctoToolClient",
+        "IdentityServicesSwaggerClient",
+        "RefineryStudioClient",
+        // 1 default group (CreateGroups)
+        "TenantOwners",
+    };
 
     /// <summary>
     ///     True when <paramref name="rtId"/>'s underlying <see cref="OctoObjectId"/> falls inside
