@@ -1,3 +1,4 @@
+using Meshmakers.Common.Shared;
 using Meshmakers.Octo.Runtime.Contracts.MongoDb;
 using Meshmakers.Octo.Runtime.Contracts.Repositories.Query;
 using Microsoft.AspNetCore.Authentication;
@@ -40,6 +41,11 @@ internal class DynamicAuthSchemeService : IDynamicAuthSchemeService
     /// <inheritdoc />
     public async Task ConfigureAsync(string tenantId)
     {
+        // Normalize so all (register / re-register / remove) operations agree on case.
+        // Schemes are stored once with the lower-cased name and looked up the same way; a
+        // PascalCase caller previously left stale schemes behind (and login pickers empty
+        // when the URL was lower-cased after a re-register). ADO #4199 Bug 3.
+        tenantId = tenantId.NormalizeString();
         var prefix = $"{tenantId}:";
 
         // Remove only THIS tenant's schemes (not all schemes)

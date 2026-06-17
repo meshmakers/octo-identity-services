@@ -1,8 +1,14 @@
 using FluentAssertions;
 using IdentityServerPersistence.SystemStores;
+using Meshmakers.Octo.Backend.Authentication.DynamicAuth;
 using Meshmakers.Octo.ConstructionKit.Contracts;
+using Meshmakers.Octo.Runtime.Contracts;
+using Meshmakers.Octo.Runtime.Contracts.MongoDb;
+using Meshmakers.Octo.Runtime.Contracts.MongoDb.Repositories;
+using Meshmakers.Octo.Runtime.Contracts.Repositories.Query;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.Google;
+using Microsoft.Extensions.Logging.Abstractions;
 using NSubstitute;
 using Persistence.IdentityCkModel.Generated.System.Identity.v2;
 using Xunit;
@@ -134,5 +140,40 @@ public class DynamicAuthSchemeServiceTests
         // Assert
         _schemeProvider.Received(1).AddScheme(scheme);
         _schemeProvider.Received(1).RemoveScheme("TestScheme");
+    }
+
+    // Regression for ADO #4199 Bug 3: ConfigureAsync must lower-case the tenant id so the
+    // registered scheme prefix matches the lower-cased lookup in AuthApiController (the URL
+    // path segment can be PascalCase when the system tenant config uses PascalCase, e.g.
+    // /OctoSystem/api/auth/external-providers). Without normalization the cleanup pass for a
+    // re-register would miss the lower-cased scheme and the duplicate would never be removed.
+    [Fact]
+    public async Task ConfigureAsync_PascalCaseTenantId_CleansUpLowercaseSchemes()
+    {
+        var systemContext = Substitute.For<ISystemContext>();
+        var factory = Substitute.For<IAuthSchemeCreatorFactory>();
+
+        var existing = new AuthenticationScheme("octosystem:meshmakers", "meshmakers", typeof(GoogleHandler));
+        var unrelated = new AuthenticationScheme("othertenant:foo", "foo", typeof(GoogleHandler));
+        _schemeProvider.GetAllSchemesAsync()
+            .Returns(Task.FromResult<IEnumerable<AuthenticationScheme>>(new[] { existing, unrelated }));
+
+        var tenantRepo = Substitute.For<ITenantRepository>();
+        var session = Substitute.For<IOctoSession>();
+        tenantRepo.GetSessionAsync().Returns(session);
+        var emptyResult = Substitute.For<IResultSet<RtIdentityProvider>>();
+        emptyResult.Items.Returns(Array.Empty<RtIdentityProvider>());
+        tenantRepo.GetRtEntitiesByTypeAsync<RtIdentityProvider>(session, Arg.Any<RtEntityQueryOptions>())
+            .Returns(emptyResult);
+        systemContext.FindTenantRepositoryAsync("octosystem").Returns(tenantRepo);
+
+        var sut = new DynamicAuthSchemeService(systemContext, _schemeProvider, factory,
+            NullLogger<DynamicAuthSchemeService>.Instance);
+
+        await sut.ConfigureAsync("OctoSystem");
+
+        _schemeProvider.Received(1).RemoveScheme("octosystem:meshmakers");
+        _schemeProvider.DidNotReceive().RemoveScheme("othertenant:foo");
+        await systemContext.Received(1).FindTenantRepositoryAsync("octosystem");
     }
 }

@@ -69,10 +69,50 @@ public class IdentityProviderStore(IMultiTenancyResolverService multiTenancyReso
         }
         else
         {
+            PreserveOAuthClientSecretIfOmitted(identityProvider, result);
             await TenantRepository.ReplaceOneRtEntityByIdAsync(session, identityProvider.RtId, identityProvider);
         }
 
         await session.CommitTransactionAsync();
+    }
+
+    // On update, the Refinery Studio UI deliberately omits ClientSecret when the user does not
+    // re-enter it ("Secret is stored encrypted on the server. SET NEW SECRET"). Without this
+    // preserve step the stored secret would be overwritten with null on every edit. ADO #4199.
+    //
+    // Note: the Rt strong-typed ClientSecret property throws InvalidAttributeValueException if
+    // the underlying attribute is null, so read via GetAttributeStringValueOrDefault and write
+    // back through the typed setter (which stores via the attribute dictionary).
+    private const string ClientSecretAttributeName = "ClientSecret";
+
+    private static void PreserveOAuthClientSecretIfOmitted(RtIdentityProvider incoming,
+        RtIdentityProvider existing)
+    {
+        switch (incoming)
+        {
+            case RtGoogleIdentityProvider g when existing is RtGoogleIdentityProvider exG
+                                                 && IsClientSecretOmitted(g):
+                g.ClientSecret = exG.ClientSecret;
+                break;
+            case RtMicrosoftIdentityProvider m when existing is RtMicrosoftIdentityProvider exM
+                                                    && IsClientSecretOmitted(m):
+                m.ClientSecret = exM.ClientSecret;
+                break;
+            case RtFacebookIdentityProvider f when existing is RtFacebookIdentityProvider exF
+                                                   && IsClientSecretOmitted(f):
+                f.ClientSecret = exF.ClientSecret;
+                break;
+            case RtAzureEntraIdIdentityProvider a when existing is RtAzureEntraIdIdentityProvider exA
+                                                       && IsClientSecretOmitted(a):
+                a.ClientSecret = exA.ClientSecret;
+                break;
+        }
+    }
+
+    private static bool IsClientSecretOmitted(RtIdentityProvider entity)
+    {
+        var value = entity.GetAttributeStringValueOrDefault(ClientSecretAttributeName);
+        return string.IsNullOrEmpty(value);
     }
 
     public async Task RemoveAsync(OctoObjectId rtId)

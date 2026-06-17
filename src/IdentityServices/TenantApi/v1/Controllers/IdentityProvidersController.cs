@@ -83,11 +83,32 @@ public class IdentityProvidersController : ControllerBase
     public async Task<ActionResult<IdentityProviderDto>> AddNewIdentityProviderAsync(
         [FromBody][Description("The configuration for the new identity provider.")] IdentityProviderDto identityProviderDto)
     {
+        // ClientSecret is no longer [Required] on the DTO because PUT must accept it being omitted
+        // (the existing secret is preserved). Creation still needs a secret, so enforce it here.
+        if (RequiresClientSecretOnCreate(identityProviderDto, out var missingFieldName))
+        {
+            ModelState.AddModelError(missingFieldName, $"The {missingFieldName} field is required.");
+            return ValidationProblem(ModelState);
+        }
+
         var identityProvider = _mapper.Map<RtIdentityProvider>(identityProviderDto);
 
         await HandleWriteExceptionAsync(async () => await _identityProviderStore.StoreAsync(identityProvider));
         await SendIdentityProviderUpdate();
         return _mapper.Map<IdentityProviderDto>(identityProvider);
+    }
+
+    private static bool RequiresClientSecretOnCreate(IdentityProviderDto dto, out string missingFieldName)
+    {
+        missingFieldName = nameof(GoogleIdentityProviderDto.ClientSecret);
+        return dto switch
+        {
+            GoogleIdentityProviderDto g => string.IsNullOrEmpty(g.ClientSecret),
+            MicrosoftIdentityProviderDto m => string.IsNullOrEmpty(m.ClientSecret),
+            FacebookIdentityProviderDto f => string.IsNullOrEmpty(f.ClientSecret),
+            AzureEntraIdProviderDto a => string.IsNullOrEmpty(a.ClientSecret),
+            _ => false
+        };
     }
 
     [HttpDelete("{rtId}")]
