@@ -30,6 +30,12 @@
     </ItemGroup>
 
     <ItemGroup>
+        <InternalsVisibleTo Include="Authentication.UnitTests" />
+        <!-- NSubstitute / Castle DynamicProxy needs to subclass internal interfaces. -->
+        <InternalsVisibleTo Include="DynamicProxyGenAssembly2" />
+    </ItemGroup>
+
+    <ItemGroup>
         <None Include="..\..\assets\meshmakers64.png">
             <Pack>True</Pack>
             <PackagePath />

@@ -1,6 +1,7 @@
 using System.Security.Claims;
 using System.Text.Json;
 using Duende.IdentityServer;
+using Meshmakers.Common.Shared;
 using Duende.IdentityServer.Events;
 using Duende.IdentityServer.Extensions;
 using Duende.IdentityServer.Models;
@@ -55,7 +56,12 @@ public class AuthApiController(
     public async Task<ActionResult<LoginContextDto>> GetLoginContext([FromQuery] string? returnUrl)
     {
         var context = await interaction.GetAuthorizationContextAsync(returnUrl, HttpContext.RequestAborted);
-        var tenantId = RouteData.Values["tenantId"]?.ToString() ?? "System";
+        // Normalize the route-derived tenant id: schemes are registered with the lower-cased
+        // tenant id (DynamicAuthSchemeServiceInitializer → systemContext.TenantId), but the URL
+        // path segment can be PascalCase (e.g. /OctoSystem/login when the system tenant config
+        // uses PascalCase). Without NormalizeString the case-sensitive StartsWith below would
+        // miss every scheme and the login picker would show nothing. ADO #4199 Bug 3.
+        var tenantId = (RouteData.Values["tenantId"]?.ToString() ?? "System").NormalizeString();
         var prefix = $"{tenantId}:";
         var schemes = await schemeProvider.GetAllSchemesAsync();
 
@@ -300,7 +306,9 @@ public class AuthApiController(
     [HttpGet("external-providers")]
     public async Task<ActionResult<IEnumerable<ExternalProviderDto>>> GetExternalProviders()
     {
-        var tenantId = RouteData.Values["tenantId"]?.ToString() ?? "System";
+        // See GetLoginContext above — schemes are registered lower-cased, the route segment may
+        // be PascalCase. Normalize to avoid an empty picker on /OctoSystem/api/auth/...
+        var tenantId = (RouteData.Values["tenantId"]?.ToString() ?? "System").NormalizeString();
         var prefix = $"{tenantId}:";
         var schemes = await schemeProvider.GetAllSchemesAsync();
         var externalSchemes = schemes
