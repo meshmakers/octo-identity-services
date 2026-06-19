@@ -1,3 +1,4 @@
+using IdentityServerPersistence;
 using Meshmakers.Octo.ConstructionKit.Contracts;
 using Meshmakers.Octo.Runtime.Contracts.RepositoryEntities;
 using Persistence.IdentityCkModel.Generated.System.Identity.v2;
@@ -16,9 +17,9 @@ public class RtClientBuilder
         RequireClientSecret = false,
         AllowedGrantTypes = new AttributeStringValueList { "authorization_code" },
         AllowedScopes = new AttributeStringValueList { "openid", "profile", "email" },
-        RedirectUris = new AttributeStringValueList(),
-        PostLogoutRedirectUris = new AttributeStringValueList(),
-        AllowedCorsOrigins = new AttributeStringValueList(),
+        RedirectUris = new AttributeRecordValueList<RtClientUriEntryRecord>(),
+        PostLogoutRedirectUris = new AttributeRecordValueList<RtClientUriEntryRecord>(),
+        AllowedCorsOrigins = new AttributeRecordValueList<RtClientUriEntryRecord>(),
         ProtocolType = "oidc"
     };
 
@@ -60,20 +61,31 @@ public class RtClientBuilder
 
     public RtClientBuilder WithRedirectUris(params string[] uris)
     {
-        _client.RedirectUris = new AttributeStringValueList(uris.ToList());
+        _client.RedirectUris = WrapAsBaseSourced(uris);
         return this;
     }
 
     public RtClientBuilder WithPostLogoutRedirectUris(params string[] uris)
     {
-        _client.PostLogoutRedirectUris = new AttributeStringValueList(uris.ToList());
+        _client.PostLogoutRedirectUris = WrapAsBaseSourced(uris);
         return this;
     }
 
     public RtClientBuilder WithCorsOrigins(params string[] origins)
     {
-        _client.AllowedCorsOrigins = new AttributeStringValueList(origins.ToList());
+        _client.AllowedCorsOrigins = WrapAsBaseSourced(origins);
         return this;
+    }
+
+    private static AttributeRecordValueList<RtClientUriEntryRecord> WrapAsBaseSourced(IEnumerable<string> uris)
+    {
+        var list = new AttributeRecordValueList<RtClientUriEntryRecord>();
+        foreach (var uri in uris)
+        {
+            list.Add(new RtClientUriEntryRecord { Uri = uri, Source = ClientUriSources.Base });
+        }
+
+        return list;
     }
 
     public RtClientBuilder WithSecret(string type, string value, string? description = null)

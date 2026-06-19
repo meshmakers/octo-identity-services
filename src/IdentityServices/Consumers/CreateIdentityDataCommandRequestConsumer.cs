@@ -142,9 +142,9 @@ public class CreateIdentityDataCommandRequestConsumer(
             AlwaysIncludeUserClaimsInIdToken = true,
             RequireConsent = distClientDto.RequireConsent,
 
-            RedirectUris = new AttributeStringValueList(distClientDto.RedirectUris.ToList()),
-            PostLogoutRedirectUris = new AttributeStringValueList(distClientDto.PostLogoutRedirectUris.ToList()),
-            AllowedCorsOrigins = new AttributeStringValueList(distClientDto.AllowedCorsOrigins.ToList()),
+            RedirectUris = WrapAsBaseSourcedUris(distClientDto.RedirectUris),
+            PostLogoutRedirectUris = WrapAsBaseSourcedUris(distClientDto.PostLogoutRedirectUris),
+            AllowedCorsOrigins = WrapAsBaseSourcedUris(distClientDto.AllowedCorsOrigins),
             AllowOfflineAccess = distClientDto.AllowOfflineAccess,
             AllowedScopes = new AttributeStringValueList(distClientDto.AllowedScopes.ToList()),
 
@@ -164,5 +164,24 @@ public class CreateIdentityDataCommandRequestConsumer(
         {
             await tenantRepository.ReplaceOneRtEntityByIdAsync(session, result.Items.First().RtId, rtClient);
         }
+    }
+
+    /// <summary>
+    ///     Wraps cross-service-pushed URI strings as <see cref="ClientUriEntry"/> records with
+    ///     <c>Source = <see cref="IdentityServerPersistence.ClientUriSources.Base"/></c>. Reason: the
+    ///     distribution-event-hub identity bootstrap mirrors blueprint-managed clients into child
+    ///     tenants, so these entries are conceptually blueprint-seeded data flowing across services
+    ///     and DO get rewritten on every blueprint re-apply — which is fine because the next event-hub
+    ///     message re-creates them.
+    /// </summary>
+    private static AttributeRecordValueList<RtClientUriEntryRecord> WrapAsBaseSourcedUris(IEnumerable<string> uris)
+    {
+        var list = new AttributeRecordValueList<RtClientUriEntryRecord>();
+        foreach (var uri in uris)
+        {
+            list.Add(new RtClientUriEntryRecord { Uri = uri, Source = IdentityServerPersistence.ClientUriSources.Base });
+        }
+
+        return list;
     }
 }

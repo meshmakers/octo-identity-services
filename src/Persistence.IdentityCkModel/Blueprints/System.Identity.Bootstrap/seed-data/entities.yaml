@@ -412,13 +412,28 @@ entities:
         value: 0   # Jwt
       - id: System.Identity/RedirectUris
         value:
-          - '${octo.identity.refineryStudioUrl}/'
+          - ckRecordId: System.Identity/ClientUriEntry
+            attributes:
+              - id: System.Identity/Uri
+                value: '${octo.identity.refineryStudioUrl}/'
+              - id: System.Identity/Source
+                value: base
       - id: System.Identity/PostLogoutRedirectUris
         value:
-          - '${octo.identity.refineryStudioUrl}/'
+          - ckRecordId: System.Identity/ClientUriEntry
+            attributes:
+              - id: System.Identity/Uri
+                value: '${octo.identity.refineryStudioUrl}/'
+              - id: System.Identity/Source
+                value: base
       - id: System.Identity/AllowedCorsOrigins
         value:
-          - '${octo.identity.refineryStudioUrl}'
+          - ckRecordId: System.Identity/ClientUriEntry
+            attributes:
+              - id: System.Identity/Uri
+                value: '${octo.identity.refineryStudioUrl}'
+              - id: System.Identity/Source
+                value: base
       - id: System.Identity/FrontChannelLogoutUri
         value: '${octo.identity.refineryStudioUrl}/logout/callback'
       - id: System.Identity/FrontChannelLogoutSessionRequired
@@ -512,13 +527,28 @@ entities:
         value: 0   # Jwt
       - id: System.Identity/RedirectUris
         value:
-          - '${octo.identity.authorityUrl}/swagger/oauth2-redirect.html'
+          - ckRecordId: System.Identity/ClientUriEntry
+            attributes:
+              - id: System.Identity/Uri
+                value: '${octo.identity.authorityUrl}/swagger/oauth2-redirect.html'
+              - id: System.Identity/Source
+                value: base
       - id: System.Identity/PostLogoutRedirectUris
         value:
-          - '${octo.identity.authorityUrl}/'
+          - ckRecordId: System.Identity/ClientUriEntry
+            attributes:
+              - id: System.Identity/Uri
+                value: '${octo.identity.authorityUrl}/'
+              - id: System.Identity/Source
+                value: base
       - id: System.Identity/AllowedCorsOrigins
         value:
-          - '${octo.identity.authorityUrl}'
+          - ckRecordId: System.Identity/ClientUriEntry
+            attributes:
+              - id: System.Identity/Uri
+                value: '${octo.identity.authorityUrl}'
+              - id: System.Identity/Source
+                value: base
       - id: System.Identity/AllowedScopes
         value:
           - openid
@@ -567,13 +597,28 @@ entities:
         value: 0   # Jwt
       - id: System.Identity/RedirectUris
         value:
-          - '${octo.mcp.publicUrl}/swagger/oauth2-redirect.html'
+          - ckRecordId: System.Identity/ClientUriEntry
+            attributes:
+              - id: System.Identity/Uri
+                value: '${octo.mcp.publicUrl}/swagger/oauth2-redirect.html'
+              - id: System.Identity/Source
+                value: base
       - id: System.Identity/PostLogoutRedirectUris
         value:
-          - '${octo.mcp.publicUrl}/'
+          - ckRecordId: System.Identity/ClientUriEntry
+            attributes:
+              - id: System.Identity/Uri
+                value: '${octo.mcp.publicUrl}/'
+              - id: System.Identity/Source
+                value: base
       - id: System.Identity/AllowedCorsOrigins
         value:
-          - '${octo.mcp.publicUrl}'
+          - ckRecordId: System.Identity/ClientUriEntry
+            attributes:
+              - id: System.Identity/Uri
+                value: '${octo.mcp.publicUrl}'
+              - id: System.Identity/Source
+                value: base
       - id: System.Identity/AllowedScopes
         value:
           - openid
