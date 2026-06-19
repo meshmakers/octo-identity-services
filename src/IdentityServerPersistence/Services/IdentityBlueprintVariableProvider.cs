@@ -80,8 +80,11 @@ public sealed class IdentityBlueprintVariableProvider : IBlueprintVariableProvid
         var environment = baseSnapshot.Environment ?? OctoBlueprintVariablesOptions.DefaultEnvironment;
         var isSystemTenant = string.Equals(tenantId, systemTenantId, StringComparison.OrdinalIgnoreCase);
 
-        var scheme = string.IsNullOrEmpty(baseSnapshot.Scheme) ? "https" : baseSnapshot.Scheme;
-        var domain = (baseSnapshot.Domain ?? string.Empty).TrimEnd('/');
+        // Whitespace-only values are treated as unset and both fields are trimmed before
+        // the slash strip so an operator's stray `OCTO_BLUEPRINTS__SCHEME=" "` or
+        // `OCTO_BLUEPRINTS__DOMAIN="example.com/ "` cannot compose a malformed URL.
+        var scheme = string.IsNullOrWhiteSpace(baseSnapshot.Scheme) ? "https" : baseSnapshot.Scheme.Trim();
+        var domain = (baseSnapshot.Domain ?? string.Empty).Trim().TrimEnd('/');
 
         var variables = new Dictionary<string, string>(StringComparer.Ordinal)
         {
@@ -135,19 +138,26 @@ public sealed class IdentityBlueprintVariableProvider : IBlueprintVariableProvid
         string domain,
         IDictionary<string, string>? overrides)
     {
+        // Override: trim leading/trailing whitespace BEFORE slash-strip so a value
+        // entered as `" https://localhost:5017 "` lands as `https://localhost:5017`,
+        // not as `" https://localhost:5017 "` minus a slash that wasn't at the tail.
         if (overrides != null
             && overrides.TryGetValue(slug, out var explicitValue)
             && !string.IsNullOrWhiteSpace(explicitValue))
         {
-            return explicitValue.TrimEnd('/');
+            return explicitValue.Trim().TrimEnd('/');
         }
 
-        if (string.IsNullOrEmpty(domain))
+        // Domain: whitespace-only is unset. The caller (GetVariablesAsync) already
+        // trims the snapshot value once on the way in, but ResolvePublicUrl is
+        // exposed as a static helper so unit tests pass raw values directly — keep
+        // the guard inline so any caller benefits.
+        if (string.IsNullOrWhiteSpace(domain))
         {
             return string.Empty;
         }
 
-        return $"{scheme}://{slug}.{domain}";
+        return $"{scheme}://{slug}.{domain.Trim()}";
     }
 
     /// <summary>
