@@ -82,7 +82,7 @@ public class ClientMirrorProvisioningServiceTests
     }
 
     [Fact]
-    public async Task FlaggedClientWithExistingMirror_SkipsAsAlreadyPresent()
+    public async Task FlaggedClientWithExistingMirror_VerifiesChildSideButSkipsTrackingRow()
     {
         var client = new RtClientBuilder()
             .WithClientId("ci-deploy")
@@ -97,11 +97,27 @@ public class ClientMirrorProvisioningServiceTests
             .Build();
         SetupParentMirrorLookup(client.ClientId, new[] { existingMirror });
 
+        // The child already carries the mirror (matching the tracker). The upsert must still
+        // run so any duplicate-clientId stragglers get deduped and any divergent secret/scope
+        // state on the child gets pulled back into line with the parent. See the
+        // ClientMirrorProvisioningService.ProvisionForChildTenantAsync "already present"
+        // branch — re-enabled after the begdemo 2026-06-19 stale-mirror incident.
+        var existingChildClient = new RtClientBuilder()
+            .WithClientId("ci-deploy")
+            .Build();
+        SetupChildClientLookup(client.ClientId, new[] { existingChildClient });
+
         var result = await _sut.ProvisionForChildTenantAsync(ParentTenantId, ChildTenantId);
 
         result.Should().Be(new ClientMirrorProvisioningResult(1, 0, 1));
-        await _childRepo.DidNotReceiveWithAnyArgs().InsertOneRtEntityAsync(default!, default(RtClient)!);
+        // Tracking row is NOT re-inserted (the tracker already exists).
         await _parentRepo.DidNotReceiveWithAnyArgs().InsertOneRtEntityAsync(default!, default(RtClientMirror)!);
+        // Child-side entity IS reconciled with the parent's current state.
+        await _childRepo.DidNotReceiveWithAnyArgs().InsertOneRtEntityAsync(default!, default(RtClient)!);
+        await _childRepo.Received(1).ReplaceOneRtEntityByIdAsync(
+            _childSession,
+            existingChildClient.RtId,
+            Arg.Is<RtClient>(c => c.ClientId == "ci-deploy"));
     }
 
     [Fact]
