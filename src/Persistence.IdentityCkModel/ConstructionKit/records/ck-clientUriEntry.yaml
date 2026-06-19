@@ -1,0 +1,11 @@
+"$schema": "https://schemas.meshmakers.cloud/construction-kit-elements.schema.json"
+records:
+  - recordId: ClientUriEntry
+    isFinal: true
+    isAbstract: false
+    attributes:
+      - id: ${this}/Uri
+        name: Uri
+
+      - id: ${this}/Source
+        name: Source

@@ -213,9 +213,9 @@ public class ClientsController : ControllerBase
             ClientName = applicationClient.ClientName,
             ClientUri = applicationClient.ClientUri,
             AllowedGrantTypes = applicationClient.AllowedGrantTypes,
-            RedirectUris = applicationClient.RedirectUris,
-            PostLogoutRedirectUris = applicationClient.PostLogoutRedirectUris,
-            AllowedCorsOrigins = applicationClient.AllowedCorsOrigins,
+            RedirectUris = applicationClient.RedirectUris.Select(e => e.Uri).ToList(),
+            PostLogoutRedirectUris = applicationClient.PostLogoutRedirectUris.Select(e => e.Uri).ToList(),
+            AllowedCorsOrigins = applicationClient.AllowedCorsOrigins.Select(e => e.Uri).ToList(),
             AllowedScopes = applicationClient.AllowedScopes,
             IsOfflineAccessEnabled = applicationClient.AllowOfflineAccess,
             // Single Logout (SLO) fields
@@ -260,21 +260,17 @@ public class ClientsController : ControllerBase
 
         if (clientDto.RedirectUris != null)
         {
-            applicationClient.RedirectUris = new AttributeStringValueList(
-                clientDto.RedirectUris?.ToList() ?? new List<string>());
+            applicationClient.RedirectUris = WrapAsApiSourcedUris(clientDto.RedirectUris);
         }
 
         if (clientDto.PostLogoutRedirectUris != null)
         {
-            applicationClient.PostLogoutRedirectUris = new AttributeStringValueList(
-                clientDto.PostLogoutRedirectUris?.ToList() ??
-                new List<string>());
+            applicationClient.PostLogoutRedirectUris = WrapAsApiSourcedUris(clientDto.PostLogoutRedirectUris);
         }
 
         if (clientDto.AllowedCorsOrigins != null)
         {
-            applicationClient.AllowedCorsOrigins = new AttributeStringValueList(
-                clientDto.AllowedCorsOrigins?.ToList() ?? new List<string>());
+            applicationClient.AllowedCorsOrigins = WrapAsApiSourcedUris(clientDto.AllowedCorsOrigins);
         }
 
         if (clientDto.AllowedScopes != null)
@@ -336,5 +332,27 @@ public class ClientsController : ControllerBase
         {
             applicationClient.AutoProvisionInChildTenants = clientDto.AutoProvisionInChildTenants.Value;
         }
+    }
+
+    /// <summary>
+    ///     Wraps a caller-supplied list of URI strings as <see cref="ClientUriEntry"/> records with
+    ///     <c>Source = <see cref="ClientUriSources.Api"/></c> — the cleanup gate then preserves
+    ///     these entries across blueprint re-applies (an operator who added a URI through the API
+    ///     meant it to be persistent; see concept §4.5).
+    /// </summary>
+    private static AttributeRecordValueList<RtClientUriEntryRecord> WrapAsApiSourcedUris(IEnumerable<string>? uris)
+    {
+        var list = new AttributeRecordValueList<RtClientUriEntryRecord>();
+        if (uris == null)
+        {
+            return list;
+        }
+
+        foreach (var uri in uris)
+        {
+            list.Add(new RtClientUriEntryRecord { Uri = uri, Source = ClientUriSources.Api });
+        }
+
+        return list;
     }
 }
