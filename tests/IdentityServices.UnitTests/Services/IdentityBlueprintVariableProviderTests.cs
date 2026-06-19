@@ -286,4 +286,56 @@ public class IdentityBlueprintVariableProviderTests
 
         result.Should().Be("https://mcp.test-2.octo-mesh.com");
     }
+
+    [Fact]
+    public void ResolvePublicUrl_OverrideWithSurroundingWhitespace_IsTrimmed()
+    {
+        // Operator copy-pasted an URL with stray whitespace into the env var or
+        // appsettings — strip it before the slash-strip so the URL lands clean.
+        var overrides = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["mcp"] = "  https://localhost:5017/  ",
+        };
+
+        var result = IdentityBlueprintVariableProvider.ResolvePublicUrl(
+            "mcp", "https", string.Empty, overrides);
+
+        result.Should().Be("https://localhost:5017");
+    }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData("   ")]
+    [InlineData("\t")]
+    public void ResolvePublicUrl_WhitespaceOnlyDomainNoOverride_ReturnsEmpty(string rawDomain)
+    {
+        // Whitespace-only OCTO_BLUEPRINTS__DOMAIN must not compose
+        // "https://mcp.   " into the entity — treat it as unset.
+        var result = IdentityBlueprintVariableProvider.ResolvePublicUrl(
+            "mcp", "https", rawDomain, overrides: null);
+
+        result.Should().Be(string.Empty);
+    }
+
+    [Fact]
+    public async Task GetVariables_OctoScheme_WhitespaceOnlyFallsBackToDefault()
+    {
+        // Mirrors the engine's DefaultBlueprintVariableProvider behaviour: a
+        // whitespace-only Scheme is treated as unset and the default "https" wins.
+        var sut = CreateSut(new OctoBlueprintVariablesOptions { Scheme = "   " });
+
+        var variables = await sut.GetVariablesAsync("acme", TestContext.Current.CancellationToken);
+
+        variables["octo.scheme"].Should().Be("https");
+    }
+
+    [Fact]
+    public async Task GetVariables_OctoDomain_WhitespaceOnlyResolvesToEmptyString()
+    {
+        var sut = CreateSut(new OctoBlueprintVariablesOptions { Domain = "   " });
+
+        var variables = await sut.GetVariablesAsync("acme", TestContext.Current.CancellationToken);
+
+        variables["octo.domain"].Should().Be(string.Empty);
+    }
 }
