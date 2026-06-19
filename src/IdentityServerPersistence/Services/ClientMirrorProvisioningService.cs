@@ -97,6 +97,21 @@ public class ClientMirrorProvisioningService(
 
             if (existingMirrorResult.Items.Any())
             {
+                // Tracker says this client has been provisioned into this child before. Re-run the
+                // upsert anyway so the child-side entity converges on the parent's current state
+                // every startup. Two reasons this is load-bearing rather than wasteful:
+                //
+                //   * Duplicate-clientId healing: when a child tenant was restored from an older
+                //     backup or had a manually-edited copy of the same OAuth ClientId, the
+                //     dedup branch inside UpsertClientInChildAsync erases the stale row. Without
+                //     this re-call the tracker would forever say "already present" and the
+                //     duplicate would survive every restart (begdemo 2026-06-19 incident).
+                //   * Drift repair: secret rotation / scope changes on the parent that fell
+                //     behind on this child (e.g. a transient repo failure during SyncMirrorsForClient
+                //     post-commit hook) get re-applied on the next service restart, matching the
+                //     intent that the parent is the single source of truth for mirror state.
+                var mirrorForVerify = CreateMirrorClient(parentTenantId, parentClient);
+                await UpsertClientInChildAsync(childRepo, childSession, mirrorForVerify);
                 alreadyPresent++;
                 continue;
             }
@@ -585,21 +600,78 @@ public class ClientMirrorProvisioningService(
         };
     }
 
-    private static async Task UpsertClientInChildAsync(
+    /// <summary>
+    ///     Inclusive lower bound of the stable rtId range used by
+    ///     <c>System.Identity.Bootstrap-1.x.x</c> seed entities. Mirrors the same constant on
+    ///     <see cref="Services.Migrations.PreBlueprintCleanupMigration"/>; kept duplicated here to
+    ///     avoid a one-way dependency from the mirror service onto the migration class.
+    /// </summary>
+    private static readonly OctoObjectId StableRtIdRangeStart =
+        new("660000000000000000000000");
+
+    /// <summary>
+    ///     Exclusive upper bound. Anything &gt;= this is outside the blueprint range.
+    /// </summary>
+    private static readonly OctoObjectId StableRtIdRangeEndExclusive =
+        new("670000000000000000000000");
+
+    private async Task UpsertClientInChildAsync(
         ITenantRepository childRepo, IOctoSession childSession, RtClient mirror)
     {
         var queryOptions = RtEntityQueryOptions.Create()
             .FieldFilter(nameof(RtClient.ClientId), FieldFilterOperator.Equals, mirror.ClientId);
         var existing = await childRepo.GetRtEntitiesByTypeAsync<RtClient>(childSession, queryOptions);
-        if (existing.Items.Any())
-        {
-            // Reuse the existing RtId on the child side; secret/scope changes still propagate.
-            mirror.RtId = existing.Items.First().RtId;
-            await childRepo.ReplaceOneRtEntityByIdAsync(childSession, mirror.RtId, mirror);
-        }
-        else
+        var existingItems = existing.Items.ToList();
+
+        if (existingItems.Count == 0)
         {
             await childRepo.InsertOneRtEntityAsync(childSession, mirror);
+            return;
         }
+
+        // Multiple entries with the same OAuth ClientId are an inconsistent state — Duende's
+        // ClientStore.FindClientByIdAsync returns the first match and the other(s) become ghosts
+        // that fight back at every login attempt. Begdemo's 2026-06-19 stale staging/prod-URI
+        // copy alongside the freshly-applied blueprint client at 660…30 was the trigger to
+        // harden this path. The blueprint-managed entity (stable rtId 660…xx) is the canonical
+        // one — keep it and erase the rest. When no stable-rtId entry is found, fall back to
+        // the first match (preserves the original upsert semantics).
+        var canonical = existingItems.FirstOrDefault(IsBlueprintRtId)
+                        ?? existingItems[0];
+
+        if (existingItems.Count > 1)
+        {
+            foreach (var duplicate in existingItems)
+            {
+                if (duplicate.RtId.Equals(canonical.RtId))
+                {
+                    continue;
+                }
+
+                logger.LogWarning(
+                    "Removing duplicate RtClient with clientId='{ClientId}' rtId='{RtId}' from tenant '{TenantId}': "
+                    + "keeping canonical rtId='{CanonicalRtId}' (blueprint-stable={IsBlueprintStable}).",
+                    mirror.ClientId, duplicate.RtId, childRepo.TenantId, canonical.RtId,
+                    IsBlueprintRtId(canonical));
+
+                await childRepo.DeleteOneRtEntityByRtIdAsync<RtClient>(
+                    childSession, duplicate.RtId, DeleteOptions.Erase);
+            }
+        }
+
+        // Reuse the canonical RtId on the child side; secret/scope changes still propagate.
+        mirror.RtId = canonical.RtId;
+        await childRepo.ReplaceOneRtEntityByIdAsync(childSession, mirror.RtId, mirror);
+    }
+
+    private static bool IsBlueprintRtId(RtClient entity)
+    {
+        return IsBlueprintRtId(entity.RtId);
+    }
+
+    private static bool IsBlueprintRtId(OctoObjectId rtId)
+    {
+        return rtId.CompareTo(StableRtIdRangeStart) >= 0
+               && rtId.CompareTo(StableRtIdRangeEndExclusive) < 0;
     }
 }
