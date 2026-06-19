@@ -155,4 +155,135 @@ public class IdentityBlueprintVariableProviderTests
 
         variables["octo.identity.refineryStudioUrl"].Should().Be("");
     }
+
+    // -------------- AB#4208: scheme / domain / per-service public URL ----------------
+
+    [Fact]
+    public async Task GetVariables_OctoScheme_DefaultsToHttpsWhenUnset()
+    {
+        // Engine-level default — the Identity provider re-emits scheme/domain so the
+        // replacement provider stays a superset of DefaultBlueprintVariableProvider's
+        // contract.
+        var sut = CreateSut();
+
+        var variables = await sut.GetVariablesAsync("acme", TestContext.Current.CancellationToken);
+
+        variables["octo.scheme"].Should().Be("https");
+    }
+
+    [Fact]
+    public async Task GetVariables_OctoDomain_StripsTrailingSlashes()
+    {
+        var sut = CreateSut(new OctoBlueprintVariablesOptions
+        {
+            Domain = "test-2.octo-mesh.com/",
+        });
+
+        var variables = await sut.GetVariablesAsync("acme", TestContext.Current.CancellationToken);
+
+        variables["octo.domain"].Should().Be("test-2.octo-mesh.com");
+    }
+
+    [Fact]
+    public async Task GetVariables_McpPublicUrl_ComposedFromSchemeAndDomain()
+    {
+        // Cluster path: no per-service override → URL composed from the per-cluster base.
+        var sut = CreateSut(new OctoBlueprintVariablesOptions
+        {
+            Scheme = "https",
+            Domain = "test-2.octo-mesh.com",
+        });
+
+        var variables = await sut.GetVariablesAsync("acme", TestContext.Current.CancellationToken);
+
+        variables["octo.mcp.publicUrl"].Should().Be("https://mcp.test-2.octo-mesh.com");
+    }
+
+    [Fact]
+    public async Task GetVariables_McpPublicUrl_ExplicitOverrideWinsOverComposition()
+    {
+        // Dev path: Start-Octo runs MCP natively on localhost:5017 which does not fit the
+        // mcp.<domain> pattern. The explicit override wins so the blueprint substitution
+        // still lands a usable URL on the seed entity.
+        var sut = CreateSut(
+            new OctoBlueprintVariablesOptions
+            {
+                Scheme = "https",
+                Domain = "test-2.octo-mesh.com", // would compose if no override
+            },
+            new OctoIdentityServicesOptions
+            {
+                IdentityServerLicenseKey = "test",
+                AutoMapperLicenseKey = "test",
+                ServicePublicUrlOverrides = new(StringComparer.OrdinalIgnoreCase)
+                {
+                    ["mcp"] = "https://localhost:5017/",
+                },
+            });
+
+        var variables = await sut.GetVariablesAsync("acme", TestContext.Current.CancellationToken);
+
+        variables["octo.mcp.publicUrl"].Should().Be("https://localhost:5017");
+    }
+
+    [Fact]
+    public async Task GetVariables_McpPublicUrl_EmptyWhenNeitherSourceSet()
+    {
+        // Dev with no override AND no cluster domain → empty. The blueprint apply still
+        // succeeds; OIDC fails loudly on first MCP login, matching the RefineryStudioUrl
+        // contract.
+        var sut = CreateSut();
+
+        var variables = await sut.GetVariablesAsync("acme", TestContext.Current.CancellationToken);
+
+        variables["octo.mcp.publicUrl"].Should().Be("");
+    }
+
+    [Fact]
+    public void ResolvePublicUrl_OverrideTakesPrecedenceOverComposition()
+    {
+        var overrides = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["mcp"] = "https://localhost:5017",
+        };
+
+        var result = IdentityBlueprintVariableProvider.ResolvePublicUrl(
+            "mcp", "https", "test-2.octo-mesh.com", overrides);
+
+        result.Should().Be("https://localhost:5017");
+    }
+
+    [Fact]
+    public void ResolvePublicUrl_NoDomainNoOverride_ReturnsEmpty()
+    {
+        var result = IdentityBlueprintVariableProvider.ResolvePublicUrl(
+            "mcp", "https", string.Empty, overrides: null);
+
+        result.Should().Be(string.Empty);
+    }
+
+    [Fact]
+    public void ResolvePublicUrl_HonoursCustomScheme()
+    {
+        var result = IdentityBlueprintVariableProvider.ResolvePublicUrl(
+            "mcp", "http", "test-2.octo-mesh.com", overrides: null);
+
+        result.Should().Be("http://mcp.test-2.octo-mesh.com");
+    }
+
+    [Fact]
+    public void ResolvePublicUrl_WhitespaceOverride_FallsBackToComposition()
+    {
+        // Defensive: an operator who sets OCTO_IDENTITY__SERVICEPUBLICURLOVERRIDES__MCP=""
+        // by mistake should still get the composed URL, not an empty string in the entity.
+        var overrides = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["mcp"] = "   ",
+        };
+
+        var result = IdentityBlueprintVariableProvider.ResolvePublicUrl(
+            "mcp", "https", "test-2.octo-mesh.com", overrides);
+
+        result.Should().Be("https://mcp.test-2.octo-mesh.com");
+    }
 }
