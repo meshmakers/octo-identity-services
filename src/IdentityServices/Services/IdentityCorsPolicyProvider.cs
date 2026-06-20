@@ -116,9 +116,9 @@ public class IdentityCorsPolicyProvider : ICorsPolicyProvider
 
             foreach (var client in result.Items)
             {
-                foreach (var origin in client.AllowedCorsOrigins)
+                foreach (var entry in client.AllowedCorsOrigins)
                 {
-                    origins.Add(origin);
+                    origins.Add(entry.Uri);
                 }
             }
 

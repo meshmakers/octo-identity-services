@@ -1,11 +1,12 @@
 $schema: https://schemas.meshmakers.cloud/blueprint-meta.schema.json
-blueprintId: System.Identity.Bootstrap-1.0.0
+blueprintId: System.Identity.Bootstrap-1.1.1
 description: |
   Service-managed Identity tenant seed — system + every child tenant. Provides
   the default role set (14 roles), the five OIDC identity resources, three API
   scopes (full-access / read-only / data-model-management), the OctoApi resource,
   the OAuth client baseline (OctoTool / IdentityServices Swagger / Refinery
-  Studio SPA) and the TenantOwners group with full role assignment.
+  Studio SPA / MCP Services Swagger + Device) and the TenantOwners group with
+  full role assignment.
 
   Following the OctoMesh "System.* = service-managed" convention this blueprint
   is auto-applied by the Identity service on tenant Enable / startup once Phase 3
@@ -20,6 +21,18 @@ description: |
   the cluster has the URL unset the blueprint still applies — the entity is
   seeded with empty placeholder values so the OIDC failure on user login is
   obvious instead of silently swallowed.
+
+  1.1.0 (AB#4208): adds the two MCP-Service OIDC clients
+  (`octo-mcpServices-swagger`, `octo-mcpServices-device`) with
+  `AutoProvisionInChildTenants: true`. The seed entries reference the
+  `${octo.mcp.publicUrl}` variable resolved by the same
+  `IdentityBlueprintVariableProvider` from
+  `OctoIdentityServicesOptions.ServicePublicUrlOverrides["mcp"]` in dev OR
+  `${octo.scheme}://mcp.${octo.domain}` in cluster (engine-level scheme/domain
+  vars added in `octo-construction-kit-engine`). Replaces MCP's previous
+  `CreateIdentityDataCommandRequest`-based path which raced with Identity at
+  startup and was silently skipped on the System tenant after the first
+  successful apply because of the per-service version-key gate.
 
 ckModelDependencies:
   - System.Identity-[2.7.0,3.0)

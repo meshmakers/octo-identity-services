@@ -1,0 +1,62 @@
+$schema: https://schemas.meshmakers.cloud/ck-migration.schema.json
+sourceVersion: "2.8.0"
+targetVersion: "2.9.0"
+description: |
+  Lift Client URI list attributes from StringArray to RecordArray<ClientUriEntry>.
+
+  Phase 3 follow-up (AB#4209): the three URI lists on Client — RedirectUris,
+  PostLogoutRedirectUris, AllowedCorsOrigins — become record lists so each entry
+  can carry a Source marker. Existing scalar URI entries become records with
+  Source = "base" (i.e. they were managed by the blueprint seed and may be
+  rewritten by the cleanup gate on the next re-apply). REST-API-added URIs going
+  forward carry Source = "api"; overlay cmdlets write Source = "overlay:<name>".
+
+  See the concept doc at
+  octo-platform-services/docs/concepts/phase-3-followup-identity-local-dev-overlay.md
+  §4.5 for the full source taxonomy.
+
+steps:
+  - stepId: wrap-redirect-uris
+    description: "Lift Client.RedirectUris scalar entries into ClientUriEntry records (Source=base)"
+    action: Transform
+    target:
+      ckTypeId: System.Identity/Client
+    transform:
+      type: WrapScalarInRecord
+      sourceAttribute: RedirectUris
+      targetRecordCkRecordId: System.Identity/ClientUriEntry
+      recordValueAttribute: Uri
+      recordDefaults:
+        Source: base
+    onConflict: Skip
+    continueOnError: false
+
+  - stepId: wrap-post-logout-redirect-uris
+    description: "Lift Client.PostLogoutRedirectUris scalar entries into ClientUriEntry records (Source=base)"
+    action: Transform
+    target:
+      ckTypeId: System.Identity/Client
+    transform:
+      type: WrapScalarInRecord
+      sourceAttribute: PostLogoutRedirectUris
+      targetRecordCkRecordId: System.Identity/ClientUriEntry
+      recordValueAttribute: Uri
+      recordDefaults:
+        Source: base
+    onConflict: Skip
+    continueOnError: false
+
+  - stepId: wrap-allowed-cors-origins
+    description: "Lift Client.AllowedCorsOrigins scalar entries into ClientUriEntry records (Source=base)"
+    action: Transform
+    target:
+      ckTypeId: System.Identity/Client
+    transform:
+      type: WrapScalarInRecord
+      sourceAttribute: AllowedCorsOrigins
+      targetRecordCkRecordId: System.Identity/ClientUriEntry
+      recordValueAttribute: Uri
+      recordDefaults:
+        Source: base
+    onConflict: Skip
+    continueOnError: false

@@ -22,6 +22,7 @@
     <ItemGroup>
         <InternalsVisibleTo Include="IdentityServerPersistence.UnitTests" />
         <InternalsVisibleTo Include="IdentityServices.IntegrationTests" />
+        <InternalsVisibleTo Include="IdentityServices.UnitTests" />
     </ItemGroup>
 
 </Project>

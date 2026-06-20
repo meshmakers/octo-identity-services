@@ -412,13 +412,28 @@ entities:
         value: 0   # Jwt
       - id: System.Identity/RedirectUris
         value:
-          - '${octo.identity.refineryStudioUrl}/'
+          - ckRecordId: System.Identity/ClientUriEntry
+            attributes:
+              - id: System.Identity/Uri
+                value: '${octo.identity.refineryStudioUrl}/'
+              - id: System.Identity/Source
+                value: base
       - id: System.Identity/PostLogoutRedirectUris
         value:
-          - '${octo.identity.refineryStudioUrl}/'
+          - ckRecordId: System.Identity/ClientUriEntry
+            attributes:
+              - id: System.Identity/Uri
+                value: '${octo.identity.refineryStudioUrl}/'
+              - id: System.Identity/Source
+                value: base
       - id: System.Identity/AllowedCorsOrigins
         value:
-          - '${octo.identity.refineryStudioUrl}'
+          - ckRecordId: System.Identity/ClientUriEntry
+            attributes:
+              - id: System.Identity/Uri
+                value: '${octo.identity.refineryStudioUrl}'
+              - id: System.Identity/Source
+                value: base
       - id: System.Identity/FrontChannelLogoutUri
         value: '${octo.identity.refineryStudioUrl}/logout/callback'
       - id: System.Identity/FrontChannelLogoutSessionRequired
@@ -512,13 +527,28 @@ entities:
         value: 0   # Jwt
       - id: System.Identity/RedirectUris
         value:
-          - '${octo.identity.authorityUrl}/swagger/oauth2-redirect.html'
+          - ckRecordId: System.Identity/ClientUriEntry
+            attributes:
+              - id: System.Identity/Uri
+                value: '${octo.identity.authorityUrl}/swagger/oauth2-redirect.html'
+              - id: System.Identity/Source
+                value: base
       - id: System.Identity/PostLogoutRedirectUris
         value:
-          - '${octo.identity.authorityUrl}/'
+          - ckRecordId: System.Identity/ClientUriEntry
+            attributes:
+              - id: System.Identity/Uri
+                value: '${octo.identity.authorityUrl}/'
+              - id: System.Identity/Source
+                value: base
       - id: System.Identity/AllowedCorsOrigins
         value:
-          - '${octo.identity.authorityUrl}'
+          - ckRecordId: System.Identity/ClientUriEntry
+            attributes:
+              - id: System.Identity/Uri
+                value: '${octo.identity.authorityUrl}'
+              - id: System.Identity/Source
+                value: base
       - id: System.Identity/AllowedScopes
         value:
           - openid
@@ -527,6 +557,121 @@ entities:
           - role
           - octo_api
           - octo_api.read_only
+      - id: System.Identity/AutoProvisionInChildTenants
+        value: true
+
+  # --------------------------------------------------------------------------
+  # 660…33 — MCP Services Swagger UI (authorization code + PKCE; URLs derived
+  # from OctoIdentityServicesOptions.ServicePublicUrlOverrides["mcp"] in dev,
+  # or ${octo.scheme}://mcp.${octo.domain} in cluster — see
+  # IdentityBlueprintVariableProvider.ResolvePublicUrl). AB#4208.
+  # --------------------------------------------------------------------------
+  - rtId: '660000000000000000000033'
+    ckTypeId: System.Identity/Client
+    rtWellKnownName: McpServicesSwaggerClient
+    attributes:
+      - id: System/Enabled
+        value: true
+      - id: System.Identity/ClientId
+        value: octo-mcpServices-swagger
+      - id: System/Name
+        value: OctoMesh MCP Services Swagger Client
+      - id: System.Identity/ClientUri
+        value: '${octo.mcp.publicUrl}'
+      - id: System.Identity/ProtocolType
+        value: oidc
+      - id: System.Identity/RequireClientSecret
+        value: false
+      - id: System.Identity/Secrets
+        value: []
+      - id: System.Identity/AllowedGrantTypes
+        value:
+          - authorization_code
+      - id: System.Identity/RequirePkce
+        value: true
+      - id: System.Identity/AllowAccessTokensViaBrowser
+        value: true
+      - id: System.Identity/AlwaysIncludeUserClaimsInIdToken
+        value: true
+      - id: System.Identity/AccessTokenType
+        value: 0   # Jwt
+      - id: System.Identity/RedirectUris
+        value:
+          - ckRecordId: System.Identity/ClientUriEntry
+            attributes:
+              - id: System.Identity/Uri
+                value: '${octo.mcp.publicUrl}/swagger/oauth2-redirect.html'
+              - id: System.Identity/Source
+                value: base
+      - id: System.Identity/PostLogoutRedirectUris
+        value:
+          - ckRecordId: System.Identity/ClientUriEntry
+            attributes:
+              - id: System.Identity/Uri
+                value: '${octo.mcp.publicUrl}/'
+              - id: System.Identity/Source
+                value: base
+      - id: System.Identity/AllowedCorsOrigins
+        value:
+          - ckRecordId: System.Identity/ClientUriEntry
+            attributes:
+              - id: System.Identity/Uri
+                value: '${octo.mcp.publicUrl}'
+              - id: System.Identity/Source
+                value: base
+      - id: System.Identity/AllowedScopes
+        value:
+          - openid
+          - profile
+          - email
+          - role
+          - octo_api
+      - id: System.Identity/AutoProvisionInChildTenants
+        value: true
+
+  # --------------------------------------------------------------------------
+  # 660…34 — MCP Services Device Authorization Flow (CLI / AI clients like
+  # Claude Code). No redirect URIs, offline access enabled. AB#4208.
+  # --------------------------------------------------------------------------
+  - rtId: '660000000000000000000034'
+    ckTypeId: System.Identity/Client
+    rtWellKnownName: McpServicesDeviceClient
+    attributes:
+      - id: System/Enabled
+        value: true
+      - id: System.Identity/ClientId
+        value: octo-mcpServices-device
+      - id: System/Name
+        value: OctoMesh MCP Services Device Client
+      - id: System.Identity/ClientUri
+        value: '${octo.mcp.publicUrl}'
+      - id: System.Identity/ProtocolType
+        value: oidc
+      - id: System.Identity/RequireClientSecret
+        value: false
+      - id: System.Identity/Secrets
+        value: []
+      - id: System.Identity/AllowedGrantTypes
+        value:
+          - urn:ietf:params:oauth:grant-type:device_code
+      - id: System.Identity/RequirePkce
+        value: false
+      - id: System.Identity/AllowOfflineAccess
+        value: true
+      - id: System.Identity/AllowedScopes
+        value:
+          - openid
+          - profile
+          - email
+          - role
+          - octo_api
+          - offline_access
+      - id: System.Identity/RedirectUris
+        value: []
+      - id: System.Identity/PostLogoutRedirectUris
+        value: []
+      - id: System.Identity/AllowedCorsOrigins
+        value: []
       - id: System.Identity/AutoProvisionInChildTenants
         value: true
 

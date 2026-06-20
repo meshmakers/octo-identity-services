@@ -256,12 +256,14 @@ attributes:
     defaultValues:
       - 00:05:00
   - id: RedirectUris
-    valueType: StringArray
-    description: Specifies allowed URIs to return tokens or authorization codes to.
+    valueType: RecordArray
+    valueCkRecordId: ${this}/ClientUriEntry
+    description: Specifies allowed URIs to return tokens or authorization codes to. Each entry carries a Source marker so local-dev / operator overlay URIs can coexist with base (blueprint) URIs.
     defaultValues: [ ]
   - id: PostLogoutRedirectUris
-    valueType: StringArray
-    description: Specifies allowed URIs to redirect to after logout
+    valueType: RecordArray
+    valueCkRecordId: ${this}/ClientUriEntry
+    description: Specifies allowed URIs to redirect to after logout. Each entry carries a Source marker (see RedirectUris).
     defaultValues: [ ]
   - id: FrontChannelLogoutUri
     valueType: String
@@ -399,8 +401,9 @@ attributes:
     valueType: Boolean
     description: When enabled, the client's token lifetimes (e.g. refresh tokens) will be tied to the user's session lifetime.
   - id: AllowedCorsOrigins
-    valueType: StringArray
-    description: Gets or sets the allowed CORS origins for JavaScript clients.
+    valueType: RecordArray
+    valueCkRecordId: ${this}/ClientUriEntry
+    description: Gets or sets the allowed CORS origins for JavaScript clients. Each entry carries a Source marker (see RedirectUris).
     defaultValues: [ ]
   - id: InitiateLoginUri
     valueType: String
@@ -538,4 +541,14 @@ attributes:
   - id: XmlData
     valueType: String
     description: The raw XML payload of a Data Protection key-ring element.
+
+  - id: Uri
+    valueType: String
+    description: A single URI value carried by a ClientUriEntry record.
+
+  - id: Source
+    valueType: String
+    description: Provenance marker on a ClientUriEntry. "base" entries were authored by the blueprint seed (or by the cross-service identity-bootstrap consumer) and get rewritten on every blueprint re-apply. "api" entries were added by an operator through the public REST API and survive re-applies. "overlay:<name>" entries were added by a local-dev or operator overlay cmdlet and also survive re-applies; they are filtered out of `DumpTenant --clean` exports while base + api survive the export.
+    defaultValues:
+      - base
 
