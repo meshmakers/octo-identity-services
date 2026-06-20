@@ -1,0 +1,8 @@
+$schema: https://schemas.meshmakers.cloud/ck-migration-meta.schema.json
+ckModelId: System.Identity-2.9.0
+migrations:
+  - fromVersion: "2.8.0"
+    toVersion: "2.9.0"
+    scriptPath: 2.8.0-to-2.9.0.yaml
+    description: "Lift Client URI list attributes from StringArray to RecordArray<ClientUriEntry> (AB#4209 Step 1)"
+    breaking: false

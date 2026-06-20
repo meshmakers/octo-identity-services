@@ -103,4 +103,32 @@ public class OctoIdentityServicesOptions
     /// When null or empty, the Refinery Studio client is not auto-provisioned.
     /// </summary>
     public string? RefineryStudioUrl { get; set; }
+
+    /// <summary>
+    ///     Per-service public-URL overrides consumed by the blueprint apply pipeline. Keys are
+    ///     the service slug (e.g. <c>"mcp"</c>); values are the explicit URL to surface as
+    ///     <c>${octo.&lt;slug&gt;.publicUrl}</c> at blueprint apply time. Used in dev / Start-Octo
+    ///     environments where services run natively on localhost with different ports and the
+    ///     <c>${octo.scheme}://&lt;slug&gt;.${octo.domain}</c> composition pattern does not fit.
+    /// </summary>
+    /// <remarks>
+    ///     <para>
+    ///         Resolution order in <see cref="IdentityServerPersistence.Services.IdentityBlueprintVariableProvider"/>:
+    ///         <list type="number">
+    ///             <item>If this dictionary has an entry for the slug → use it verbatim.</item>
+    ///             <item>Else if <c>octo.domain</c> is non-empty →
+    ///                 <c>${octo.scheme}://&lt;slug&gt;.${octo.domain}</c>.</item>
+    ///             <item>Else → empty string (the blueprint apply still succeeds; the OIDC
+    ///                 failure at user login is the deliberate signal the operator forgot to
+    ///                 set the URL — same pattern as <see cref="RefineryStudioUrl"/>).</item>
+    ///         </list>
+    ///     </para>
+    ///     <para>
+    ///         Configure via <c>OCTO_IDENTITY__SERVICEPUBLICURLOVERRIDES__MCP=https://localhost:5017</c>
+    ///         in local dev. Cluster deployments leave it empty and rely on
+    ///         <c>OCTO_BLUEPRINTS__DOMAIN</c> + the composition pattern.
+    ///     </para>
+    /// </remarks>
+    public Dictionary<string, string> ServicePublicUrlOverrides { get; set; } =
+        new(StringComparer.OrdinalIgnoreCase);
 }
