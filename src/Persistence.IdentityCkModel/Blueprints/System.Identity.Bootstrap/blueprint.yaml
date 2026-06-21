@@ -1,5 +1,5 @@
 $schema: https://schemas.meshmakers.cloud/blueprint-meta.schema.json
-blueprintId: System.Identity.Bootstrap-1.1.1
+blueprintId: System.Identity.Bootstrap-1.1.2
 description: |
   Service-managed Identity tenant seed — system + every child tenant. Provides
   the default role set (14 roles), the five OIDC identity resources, three API
@@ -21,6 +21,16 @@ description: |
   the cluster has the URL unset the blueprint still applies — the entity is
   seeded with empty placeholder values so the OIDC failure on user login is
   obvious instead of silently swallowed.
+
+  1.1.2 (AB#4209 Step 2b): adds a `{{family.local-dev}}` placeholder to the
+  Refinery Studio client's `RedirectUris`, `PostLogoutRedirectUris` and
+  `AllowedCorsOrigins`. The placeholder is expanded at Identity startup by
+  `BlueprintClientUriFamilyResolver` from `OctoIdentityServicesOptions.UriFamilies`
+  (env config `OCTO_IDENTITY__URIFAMILIES__LOCAL-DEV__N=…`). Production
+  clusters that never set the family resolve the placeholder to zero entries
+  and stay clean. Local-dev clusters configure 0..N localhost URIs (Angular
+  4200, Vite 5173, ...) without manual per-machine seed edits or REST-API
+  injections.
 
   1.1.0 (AB#4208): adds the two MCP-Service OIDC clients
   (`octo-mcpServices-swagger`, `octo-mcpServices-device`) with
