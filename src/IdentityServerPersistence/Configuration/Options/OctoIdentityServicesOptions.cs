@@ -131,4 +131,40 @@ public class OctoIdentityServicesOptions
     /// </remarks>
     public Dictionary<string, string> ServicePublicUrlOverrides { get; set; } =
         new(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>
+    ///     Named families of additional URI entries injected into blueprint-managed
+    ///     <c>RtClient</c> URI lists at Identity startup via the <c>{{family.NAME}}</c>
+    ///     placeholder in the <c>System.Identity.Bootstrap</c> seed (AB#4209 Step 2b).
+    ///     Each placeholder expands to <em>all</em> entries under <paramref name="NAME"/>
+    ///     (0..N) with <c>Source = "family:NAME"</c> on the resulting <c>ClientUriEntry</c>
+    ///     records.
+    /// </summary>
+    /// <remarks>
+    ///     <para>
+    ///         Configure via repeated env vars, e.g.
+    ///         <c>OCTO_IDENTITY__URIFAMILIES__LOCAL-DEV__0=http://localhost:4200/</c>,
+    ///         <c>OCTO_IDENTITY__URIFAMILIES__LOCAL-DEV__1=http://localhost:5173/</c>.
+    ///         Empty / unset families resolve to no entries — the seed placeholder is
+    ///         dropped silently so production clusters that leave dev families unconfigured
+    ///         stay clean.
+    ///     </para>
+    ///     <para>
+    ///         Entries are stored verbatim. The resolver is intentionally dumb about list
+    ///         semantics (redirect-URI vs. CORS-origin): the operator is responsible for
+    ///         picking values that match the target list's format contract. When the same
+    ///         family is referenced from lists with incompatible formats (e.g. a trailing
+    ///         slash matters for redirect URIs but breaks CORS origins on some IdentityServer
+    ///         versions), configure two families with different names.
+    ///     </para>
+    ///     <para>
+    ///         Family entries are <em>ephemeral</em>: every blueprint re-apply regenerates
+    ///         them from the current configuration. The Step 2a preservation pass explicitly
+    ///         skips <c>Source: "family:*"</c> entries when capturing pre-apply state, so
+    ///         removing a family member from env config and restarting is enough to drop
+    ///         the URI from the DB — no manual cleanup needed.
+    ///     </para>
+    /// </remarks>
+    public Dictionary<string, List<string>> UriFamilies { get; set; } =
+        new(StringComparer.OrdinalIgnoreCase);
 }

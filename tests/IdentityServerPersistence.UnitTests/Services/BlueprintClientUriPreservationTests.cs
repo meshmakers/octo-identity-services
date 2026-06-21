@@ -16,6 +16,32 @@ public class BlueprintClientUriPreservationTests
     private static readonly OctoObjectId OperatorRtId = new("6a3527cf39424fc1460f66f1");
 
     [Fact]
+    public void Capture_SkipsFamilyExpandedEntries_OwnedByStep2bResolver()
+    {
+        // AB#4209 Step 2b — Source = "family:NAME" entries are ephemeral. The Step 2b resolver
+        // re-emits them on every blueprint apply from OctoIdentityServicesOptions.UriFamilies.
+        // Capturing them here would resurrect family members an operator just removed from env
+        // config, breaking the "family URIs follow the env config" contract.
+        var client = CreateClient(
+            rtId: BlueprintRtIdRefineryStudio,
+            clientId: "octo-data-refinery-studio",
+            redirectUris: new[]
+            {
+                ("https://studio.example/", ClientUriSources.Base),
+                ("http://localhost:4200/", "family:local-dev"),
+                ("http://localhost:5173/", "family:local-dev"),
+                ("https://operator.example/", ClientUriSources.Api),
+            });
+
+        var capture = BlueprintClientUriPreservation.Capture(new[] { client });
+
+        var entry = capture.Should().ContainKey(BlueprintRtIdRefineryStudio).WhoseValue;
+        entry.RedirectUris.Should().HaveCount(1);
+        entry.RedirectUris.Single().Uri.Should().Be("https://operator.example/");
+        entry.RedirectUris.Single().Source.Should().Be(ClientUriSources.Api);
+    }
+
+    [Fact]
     public void Capture_FiltersBaseSourcedEntries_KeepsOnlyApiAndOverlay()
     {
         var client = CreateClient(

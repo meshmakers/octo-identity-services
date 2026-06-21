@@ -39,4 +39,15 @@ public static class ClientUriSources
     ///     explain why there is no per-overlay constant here.
     /// </summary>
     public const string OverlayPrefix = "overlay:";
+
+    /// <summary>
+    ///     Prefix on every late-binding family-expanded source value (AB#4209 Step 2b). Entries
+    ///     with this prefix are <em>ephemeral</em>: <see cref="Services.BlueprintClientUriFamilyResolver"/>
+    ///     regenerates them on every blueprint apply from
+    ///     <see cref="Configuration.Options.OctoIdentityServicesOptions.UriFamilies"/> env config,
+    ///     and the Step 2a preservation pass explicitly skips this prefix when capturing pre-apply
+    ///     state. Removing a family member from env config and restarting Identity is enough to
+    ///     drop the URI from the DB — no manual cleanup needed.
+    /// </summary>
+    public const string FamilyPrefix = "family:";
 }

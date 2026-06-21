@@ -410,12 +410,24 @@ entities:
         value: true
       - id: System.Identity/AccessTokenType
         value: 0   # Jwt
+      # AB#4209 Step 2b — {{family.local-dev}} placeholder expanded at Identity startup by
+      # BlueprintClientUriFamilyResolver from OctoIdentityServicesOptions.UriFamilies. Each
+      # member becomes one entry with Source = "family:local-dev". Unconfigured local-dev
+      # family (production clusters) drops the placeholder silently. Members are stored
+      # verbatim — set values that match the target list's format contract (trailing slash
+      # for redirect/post-logout, no slash for CORS origin) or configure separate families.
       - id: System.Identity/RedirectUris
         value:
           - ckRecordId: System.Identity/ClientUriEntry
             attributes:
               - id: System.Identity/Uri
                 value: '${octo.identity.refineryStudioUrl}/'
+              - id: System.Identity/Source
+                value: base
+          - ckRecordId: System.Identity/ClientUriEntry
+            attributes:
+              - id: System.Identity/Uri
+                value: '{{family.local-dev}}'
               - id: System.Identity/Source
                 value: base
       - id: System.Identity/PostLogoutRedirectUris
@@ -426,12 +438,24 @@ entities:
                 value: '${octo.identity.refineryStudioUrl}/'
               - id: System.Identity/Source
                 value: base
+          - ckRecordId: System.Identity/ClientUriEntry
+            attributes:
+              - id: System.Identity/Uri
+                value: '{{family.local-dev}}'
+              - id: System.Identity/Source
+                value: base
       - id: System.Identity/AllowedCorsOrigins
         value:
           - ckRecordId: System.Identity/ClientUriEntry
             attributes:
               - id: System.Identity/Uri
                 value: '${octo.identity.refineryStudioUrl}'
+              - id: System.Identity/Source
+                value: base
+          - ckRecordId: System.Identity/ClientUriEntry
+            attributes:
+              - id: System.Identity/Uri
+                value: '{{family.local-dev}}'
               - id: System.Identity/Source
                 value: base
       - id: System.Identity/FrontChannelLogoutUri
