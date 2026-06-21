@@ -223,8 +223,16 @@ internal class DefaultConfigurationCreatorService(
         using var session = await tenantRepository.GetSessionAsync();
         session.StartTransaction();
 
+        // Push the blueprint-stable-rtId filter down to the query so we don't transfer every
+        // operator-created client only to discard it in BlueprintClientUriPreservation.Capture.
+        // BlueprintClientUriPreservation.IsBlueprintStableRtId still gates the in-memory side as
+        // defense-in-depth so the helper stays correct if a future caller hands it pre-loaded
+        // entities that include operator-created clients.
         var clients = await tenantRepository.GetRtEntitiesByTypeAsync<RtClient>(
-            session, RtEntityQueryOptions.Create());
+            session,
+            RtEntityQueryOptions.Create()
+                .FieldGreaterEqualThan("rtId", BlueprintClientUriPreservation.StableRtIdRangeStart)
+                .FieldLessThan("rtId", BlueprintClientUriPreservation.StableRtIdRangeEndExclusive));
 
         await session.CommitTransactionAsync();
 

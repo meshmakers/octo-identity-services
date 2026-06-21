@@ -1,3 +1,4 @@
+using IdentityServerPersistence;
 using Meshmakers.Octo.ConstructionKit.Contracts;
 using Meshmakers.Octo.Runtime.Contracts.RepositoryEntities;
 using Persistence.IdentityCkModel.Generated.System.Identity.v2;
@@ -39,8 +40,6 @@ namespace IdentityServerPersistence.Services;
 /// </remarks>
 internal static class BlueprintClientUriPreservation
 {
-    private const string SourceBase = "base";
-
     /// <summary>
     ///     Inclusive lower bound of the blueprint's stable rtId range. The first byte of every
     ///     <c>System.Identity.Bootstrap</c> seed-data rtId is <c>0x66</c>; everything outside this
@@ -50,7 +49,10 @@ internal static class BlueprintClientUriPreservation
         new("660000000000000000000000");
 
     /// <summary>
-    ///     Exclusive upper bound. ObjectId comparison is byte-by-byte.
+    ///     Exclusive upper bound. ObjectId comparison is byte-by-byte. Used both by
+    ///     <see cref="IsBlueprintStableRtId"/> (in-memory defense-in-depth) and by the query-level
+    ///     <c>FieldLessThan</c> filter in
+    ///     <see cref="DefaultConfigurationCreatorService.CaptureBlueprintClientNonBaseUrisAsync"/>.
     /// </summary>
     internal static readonly OctoObjectId StableRtIdRangeEndExclusive =
         new("670000000000000000000000");
@@ -136,7 +138,7 @@ internal static class BlueprintClientUriPreservation
         var result = new List<RtClientUriEntryRecord>();
         foreach (var entry in entries)
         {
-            if (!string.Equals(entry.Source, SourceBase, StringComparison.Ordinal))
+            if (!string.Equals(entry.Source, ClientUriSources.Base, StringComparison.Ordinal))
             {
                 result.Add(entry);
             }
@@ -179,9 +181,11 @@ internal static class BlueprintClientUriPreservation
 
 /// <summary>
 ///     Snapshot of non-base URI entries captured off a single blueprint-managed RtClient before a
-///     blueprint re-apply. The three lists are immutable copies of the relevant entries; the
-///     orchestration layer merges them back onto the post-apply client via
-///     <see cref="BlueprintClientUriPreservation.Merge"/>.
+///     blueprint re-apply. The three lists hold references to the captured
+///     <see cref="RtClientUriEntryRecord"/> instances (not clones) — safe because the apply re-loads
+///     the entities from MongoDB and <see cref="BlueprintClientUriPreservation.Merge"/> constructs
+///     new <see cref="RtClientUriEntryRecord"/> instances from the captured Uri / Source values on
+///     write-back, so nothing on the post-apply path ever mutates the captured records.
 /// </summary>
 internal sealed record NonBaseUriCapture(
     OctoObjectId ClientRtId,
