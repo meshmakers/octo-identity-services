@@ -145,7 +145,19 @@ internal class DefaultConfigurationCreatorService(
         // throwOnFailure: true — a failed Identity seed cannot leave a tenant in a half-provisioned
         // state. Treat as a fatal startup error; the tenant fails to come up and the failure surfaces
         // in pod logs immediately instead of silently breaking OIDC.
+        //
+        // AB#4209 Step 2 — source-aware URI preservation across the blueprint re-apply. Capture
+        // every Source != "base" entry on the 5 blueprint-managed clients (rtId 660…30..34) BEFORE
+        // the apply wipes the URI lists with the seed values, then merge the captured entries back
+        // in afterwards. Without this wrap any URI entry that the operator added through the REST
+        // API (Source = "api") or the future overlay cmdlet (Source = "overlay:<name>") would be
+        // destroyed on every Identity restart — silently regressing the operator's configuration.
+        // The capture / merge are idempotent: if the seed re-asserts a URI that previously held a
+        // non-base source, the seed value wins and the captured copy is dropped (Uri-keyed dedup
+        // in BlueprintClientUriPreservation.Merge).
+        var capturedNonBaseUris = await CaptureBlueprintClientNonBaseUrisAsync(tenantContext);
         await ApplyServiceManagedBlueprintsAsync(tenantId, throwOnFailure: true);
+        await RestoreBlueprintClientNonBaseUrisAsync(tenantContext, capturedNonBaseUris);
 
         // Phase 3 PR #4 post-blueprint restore: PreBlueprintCleanupMigration captures every
         // User → Role and ExternalTenantUserMapping → Role assignment by role NAME into
@@ -186,6 +198,117 @@ internal class DefaultConfigurationCreatorService(
                 logger.LogError(ex,
                     "Client mirror provisioning failed for child tenant '{TenantId}'", tenantId);
             }
+        }
+    }
+
+    /// <summary>
+    ///     AB#4209 Step 2 pre-blueprint pass: snapshot every <c>Source != "base"</c> URI entry
+    ///     on each blueprint-managed <see cref="RtClient"/> so the subsequent
+    ///     <see cref="DefaultConfigurationCreatorServiceBase.ApplyServiceManagedBlueprintsAsync"/>
+    ///     call can rewrite the URI lists from the seed without destroying operator-added URIs
+    ///     (REST-API <c>"api"</c> source) and overlay-cmdlet URIs (<c>"overlay:&lt;name&gt;"</c>
+    ///     source). The capture is restricted to the blueprint-stable rtId range (660…00..FF) —
+    ///     operator-created clients outside that range are left alone because the blueprint apply
+    ///     doesn't touch them anyway.
+    /// </summary>
+    /// <returns>
+    ///     A dictionary of per-client captures (empty when no preservation is needed). The caller
+    ///     hands this verbatim to <see cref="RestoreBlueprintClientNonBaseUrisAsync"/> after the
+    ///     apply.
+    /// </returns>
+    private async Task<IReadOnlyDictionary<OctoObjectId, NonBaseUriCapture>>
+        CaptureBlueprintClientNonBaseUrisAsync(ITenantContext tenantContext)
+    {
+        var tenantRepository = tenantContext.GetTenantRepositoryAsAdmin();
+        using var session = await tenantRepository.GetSessionAsync();
+        session.StartTransaction();
+
+        // Push the blueprint-stable-rtId filter down to the query so we don't transfer every
+        // operator-created client only to discard it in BlueprintClientUriPreservation.Capture.
+        // BlueprintClientUriPreservation.IsBlueprintStableRtId still gates the in-memory side as
+        // defense-in-depth so the helper stays correct if a future caller hands it pre-loaded
+        // entities that include operator-created clients.
+        var clients = await tenantRepository.GetRtEntitiesByTypeAsync<RtClient>(
+            session,
+            RtEntityQueryOptions.Create()
+                .FieldGreaterEqualThan("rtId", BlueprintClientUriPreservation.StableRtIdRangeStart)
+                .FieldLessThan("rtId", BlueprintClientUriPreservation.StableRtIdRangeEndExclusive));
+
+        await session.CommitTransactionAsync();
+
+        var captures = BlueprintClientUriPreservation.Capture(clients.Items);
+
+        if (captures.Count > 0)
+        {
+            logger.LogDebug(
+                "Captured non-base URI entries on {Count} blueprint-managed client(s) " +
+                "for tenant '{TenantId}' before blueprint apply",
+                captures.Count, tenantContext.TenantId);
+        }
+
+        return captures;
+    }
+
+    /// <summary>
+    ///     AB#4209 Step 2 post-blueprint pass: re-applies captured non-base URI entries on each
+    ///     blueprint-managed <see cref="RtClient"/> that the apply just rewrote. Each captured
+    ///     entry is appended only when its URI is not already present in the post-apply list — the
+    ///     seed wins on URI collisions, the captured copy wins on novel entries. Clients whose
+    ///     merge yields no append are not written back.
+    /// </summary>
+    private async Task RestoreBlueprintClientNonBaseUrisAsync(
+        ITenantContext tenantContext,
+        IReadOnlyDictionary<OctoObjectId, NonBaseUriCapture> captured)
+    {
+        if (captured.Count == 0)
+        {
+            return;
+        }
+
+        var tenantRepository = tenantContext.GetTenantRepositoryAsAdmin();
+        using var session = await tenantRepository.GetSessionAsync();
+        session.StartTransaction();
+
+        var restoredClients = 0;
+        var restoredEntries = 0;
+        foreach (var (clientRtId, capture) in captured)
+        {
+            var postApplyClient = await tenantRepository
+                .GetRtEntityByRtIdAsync<RtClient>(session, clientRtId);
+            if (postApplyClient == null)
+            {
+                // The apply removed the client entirely (e.g. blueprint version dropped one of the
+                // 660…30..34 entries). Don't recreate it from a stale mirror — that would resurrect
+                // a client the seed deliberately retired. Just drop the captured non-base entries.
+                logger.LogWarning(
+                    "Skipping non-base URI restore for clientId='{ClientId}' rtId='{RtId}' on " +
+                    "tenant '{TenantId}': client no longer exists after blueprint apply",
+                    capture.ClientId, clientRtId, tenantContext.TenantId);
+                continue;
+            }
+
+            var mutated = BlueprintClientUriPreservation.Merge(postApplyClient, capture);
+            if (!mutated)
+            {
+                // Every captured non-base entry collided with a seed URI — the merge is a no-op.
+                continue;
+            }
+
+            await tenantRepository.ReplaceOneRtEntityByIdAsync(session, clientRtId, postApplyClient);
+            restoredClients++;
+            restoredEntries += capture.RedirectUris.Count
+                               + capture.PostLogoutRedirectUris.Count
+                               + capture.AllowedCorsOrigins.Count;
+        }
+
+        await session.CommitTransactionAsync();
+
+        if (restoredClients > 0)
+        {
+            logger.LogInformation(
+                "Restored non-base URI entries on {Clients} blueprint-managed client(s) for " +
+                "tenant '{TenantId}' (up to {Entries} entries merged, post-apply seed collisions skipped)",
+                restoredClients, tenantContext.TenantId, restoredEntries);
         }
     }
 
