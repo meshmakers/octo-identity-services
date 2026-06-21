@@ -157,6 +157,13 @@ internal class DefaultConfigurationCreatorService(
         // in BlueprintClientUriPreservation.Merge).
         var capturedNonBaseUris = await CaptureBlueprintClientNonBaseUrisAsync(tenantContext);
         await ApplyServiceManagedBlueprintsAsync(tenantId, throwOnFailure: true);
+        // AB#4209 Step 2b — late-binding {{family.NAME}} URI expansion. The engine seed leaves
+        // {{family.*}} placeholders verbatim (its variable syntax is ${...}). This pass replaces
+        // each placeholder with one entry per configured family member from
+        // OctoIdentityServicesOptions.UriFamilies, tagging the new entries with
+        // Source = "family:NAME" so the Capture filter above skips them on the next re-apply —
+        // family URIs are ephemeral, regenerated fresh from env config every time.
+        await ExpandBlueprintClientUriFamiliesAsync(tenantContext);
         await RestoreBlueprintClientNonBaseUrisAsync(tenantContext, capturedNonBaseUris);
 
         // Phase 3 PR #4 post-blueprint restore: PreBlueprintCleanupMigration captures every
@@ -310,6 +317,105 @@ internal class DefaultConfigurationCreatorService(
                 "tenant '{TenantId}' (up to {Entries} entries merged, post-apply seed collisions skipped)",
                 restoredClients, tenantContext.TenantId, restoredEntries);
         }
+    }
+
+    /// <summary>
+    ///     AB#4209 Step 2b post-blueprint pass: reconciles every <c>family:*</c> entry in the
+    ///     three URI list attributes of each blueprint-managed <see cref="RtClient"/> against
+    ///     the current <see cref="OctoIdentityServicesOptions.UriFamilies"/> configuration. A
+    ///     family is associated with a (client, list) pair when either a <c>{{family.NAME}}</c>
+    ///     placeholder is present in that list (fresh seed apply) OR an existing
+    ///     <c>Source = "family:NAME"</c> entry is present (carried over from a previous run).
+    ///     For every such signal the existing family entries are dropped and replaced with one
+    ///     entry per current configured member.
+    /// </summary>
+    /// <remarks>
+    ///     Unconfigured / empty families produce zero entries — placeholders vanish and any
+    ///     stale entries from a previous expansion are removed. Production clusters that never
+    ///     set <c>UriFamilies</c> stay clean even across restart loops. CORS origins are
+    ///     normalised by <see cref="BlueprintClientUriFamilyResolver.NormaliseForList"/> so a
+    ///     family member that includes a trailing slash doesn't cause IdentityServer's
+    ///     <c>ValidatingClientStore</c> to reject the entire client config.
+    /// </remarks>
+    private async Task ExpandBlueprintClientUriFamiliesAsync(ITenantContext tenantContext)
+    {
+        var families = SnapshotFamilies();
+
+        var tenantRepository = tenantContext.GetTenantRepositoryAsAdmin();
+        using var session = await tenantRepository.GetSessionAsync();
+        session.StartTransaction();
+
+        // Same rtId-range filter as the Capture pass — only blueprint-stable clients are in scope.
+        var clients = await tenantRepository.GetRtEntitiesByTypeAsync<RtClient>(
+            session,
+            RtEntityQueryOptions.Create()
+                .FieldGreaterEqualThan("rtId", BlueprintClientUriFamilyResolver.StableRtIdRangeStart)
+                .FieldLessThan("rtId", BlueprintClientUriFamilyResolver.StableRtIdRangeEndExclusive));
+
+        var expansions = BlueprintClientUriFamilyResolver.Reconcile(clients.Items, families);
+        if (expansions.Count == 0)
+        {
+            await session.CommitTransactionAsync();
+            return;
+        }
+
+        var expandedClients = 0;
+        var expandedEntries = 0;
+        foreach (var (clientRtId, expansion) in expansions)
+        {
+            // Re-load to mutate against the freshest entity revision — the Expand pass walked the
+            // list snapshot from the bulk query above; the write-back uses the same load/mutate/save
+            // idiom as the Restore pass for symmetry.
+            var postApplyClient = await tenantRepository
+                .GetRtEntityByRtIdAsync<RtClient>(session, clientRtId);
+            if (postApplyClient == null)
+            {
+                logger.LogWarning(
+                    "Skipping URI family expansion for clientId='{ClientId}' rtId='{RtId}' on " +
+                    "tenant '{TenantId}': client no longer exists after blueprint apply",
+                    expansion.ClientId, clientRtId, tenantContext.TenantId);
+                continue;
+            }
+
+            BlueprintClientUriFamilyResolver.ApplyToClient(postApplyClient, expansion);
+
+            await tenantRepository.ReplaceOneRtEntityByIdAsync(session, clientRtId, postApplyClient);
+            expandedClients++;
+            expandedEntries += expansion.RedirectUris.Count
+                               + expansion.PostLogoutRedirectUris.Count
+                               + expansion.AllowedCorsOrigins.Count;
+        }
+
+        await session.CommitTransactionAsync();
+
+        logger.LogInformation(
+            "Reconciled URI family entries on {Clients} blueprint-managed client(s) for " +
+            "tenant '{TenantId}' ({TotalEntries} list entries written)",
+            expandedClients, tenantContext.TenantId, expandedEntries);
+    }
+
+    /// <summary>
+    ///     Materialises the current <see cref="OctoIdentityServicesOptions.UriFamilies"/> snapshot
+    ///     into the read-only shape the resolver expects. Bare-options is sufficient — the apply
+    ///     happens during the synchronous tenant-setup phase, well before IOptionsMonitor change
+    ///     listeners matter; a config reload after startup is out of scope for the boot-time
+    ///     expansion.
+    /// </summary>
+    private IReadOnlyDictionary<string, IReadOnlyList<string>> SnapshotFamilies()
+    {
+        var configured = octoIdentityOptions.Value.UriFamilies;
+        if (configured.Count == 0)
+        {
+            return new Dictionary<string, IReadOnlyList<string>>(StringComparer.OrdinalIgnoreCase);
+        }
+
+        var snapshot = new Dictionary<string, IReadOnlyList<string>>(
+            configured.Count, StringComparer.OrdinalIgnoreCase);
+        foreach (var (name, members) in configured)
+        {
+            snapshot[name] = members.ToArray();
+        }
+        return snapshot;
     }
 
     /// <summary>
