@@ -63,13 +63,30 @@ internal class DefaultConfigurationCreatorService(
     ///     version on the next pod restart or lifecycle event without further intervention.
     /// </summary>
     /// <remarks>
-    ///     <c>throwOnFailure: false</c> so a transient blueprint failure (e.g. catalog lookup
-    ///     hiccup) does not knock a tenant offline. Failures are logged + surfaced via
-    ///     <see cref="DefaultConfigurationCreatorServiceBase.OnServiceManagedBlueprintApplyFailedAsync"/>.
+    ///     <para>
+    ///         <c>throwOnFailure: false</c> so a transient blueprint failure (e.g. catalog
+    ///         lookup hiccup) does not knock a tenant offline. Failures are logged + surfaced
+    ///         via <see cref="DefaultConfigurationCreatorServiceBase.OnServiceManagedBlueprintApplyFailedAsync"/>.
+    ///     </para>
+    ///     <para>
+    ///         AB#4209 Step 2a/2b: the apply is wrapped via
+    ///         <see cref="ApplyServiceManagedBlueprintsWithUriPreservationAsync"/> so the
+    ///         lifecycle-event path on existing tenants (RefreshTenantStateAsync, the
+    ///         dominant path on long-lived clusters where every tenant has CK schemas
+    ///         already) sees the same URI source-preservation + family-reconciliation as
+    ///         the cold-init path in <see cref="SetupTenantAsync"/>. Without this wrap,
+    ///         test-2 / staging / prod runs would silently bypass Step 2a + Step 2b on
+    ///         every restart — confirmed by the test-2 smoke after PR #99's merge.
+    ///     </para>
     /// </remarks>
     protected override async Task RefreshTenantStateAsync(string tenantId)
     {
-        await ApplyServiceManagedBlueprintsAsync(tenantId, throwOnFailure: false).ConfigureAwait(false);
+        var tenantContext = tenantId == systemContext.TenantId
+            ? systemContext
+            : await systemContext.GetChildTenantContextAsync(tenantId);
+
+        await ApplyServiceManagedBlueprintsWithUriPreservationAsync(
+            tenantContext, tenantId, throwOnFailure: false).ConfigureAwait(false);
     }
 
     public override async Task InitializeAsync()
@@ -146,25 +163,13 @@ internal class DefaultConfigurationCreatorService(
         // state. Treat as a fatal startup error; the tenant fails to come up and the failure surfaces
         // in pod logs immediately instead of silently breaking OIDC.
         //
-        // AB#4209 Step 2 — source-aware URI preservation across the blueprint re-apply. Capture
-        // every Source != "base" entry on the 5 blueprint-managed clients (rtId 660…30..34) BEFORE
-        // the apply wipes the URI lists with the seed values, then merge the captured entries back
-        // in afterwards. Without this wrap any URI entry that the operator added through the REST
-        // API (Source = "api") or the future overlay cmdlet (Source = "overlay:<name>") would be
-        // destroyed on every Identity restart — silently regressing the operator's configuration.
-        // The capture / merge are idempotent: if the seed re-asserts a URI that previously held a
-        // non-base source, the seed value wins and the captured copy is dropped (Uri-keyed dedup
-        // in BlueprintClientUriPreservation.Merge).
-        var capturedNonBaseUris = await CaptureBlueprintClientNonBaseUrisAsync(tenantContext);
-        await ApplyServiceManagedBlueprintsAsync(tenantId, throwOnFailure: true);
-        // AB#4209 Step 2b — late-binding {{family.NAME}} URI expansion. The engine seed leaves
-        // {{family.*}} placeholders verbatim (its variable syntax is ${...}). This pass replaces
-        // each placeholder with one entry per configured family member from
-        // OctoIdentityServicesOptions.UriFamilies, tagging the new entries with
-        // Source = "family:NAME" so the Capture filter above skips them on the next re-apply —
-        // family URIs are ephemeral, regenerated fresh from env config every time.
-        await ExpandBlueprintClientUriFamiliesAsync(tenantContext);
-        await RestoreBlueprintClientNonBaseUrisAsync(tenantContext, capturedNonBaseUris);
+        // AB#4209 Step 2a/2b — source-aware URI preservation + late-binding family expansion
+        // wrapped around the blueprint apply. The helper is shared with
+        // RefreshTenantStateAsync so both the cold-init path (here) and the lifecycle-event
+        // path (refresh on existing tenants) get the same URI-lifecycle behaviour. See
+        // ApplyServiceManagedBlueprintsWithUriPreservationAsync below for the contract.
+        await ApplyServiceManagedBlueprintsWithUriPreservationAsync(
+            tenantContext, tenantId, throwOnFailure: true);
 
         // Phase 3 PR #4 post-blueprint restore: PreBlueprintCleanupMigration captures every
         // User → Role and ExternalTenantUserMapping → Role assignment by role NAME into
@@ -206,6 +211,50 @@ internal class DefaultConfigurationCreatorService(
                     "Client mirror provisioning failed for child tenant '{TenantId}'", tenantId);
             }
         }
+    }
+
+    /// <summary>
+    ///     Single source of truth for the AB#4209 Step 2a (preservation) + Step 2b
+    ///     (family reconciliation) URI lifecycle around an Identity blueprint apply.
+    ///     Called from BOTH <see cref="SetupTenantAsync"/> (cold-init per tenant) and
+    ///     <see cref="RefreshTenantStateAsync"/> (lifecycle-event refresh, the dominant
+    ///     path on long-lived clusters where every tenant already has CK schemas).
+    /// </summary>
+    /// <remarks>
+    ///     <para>
+    ///         Order: Capture non-base + non-family entries → apply blueprint (seed rewrites
+    ///         <c>base</c>-sourced entries) → reconcile family entries against current env
+    ///         config (placeholders dropped, family:* entries materialised / removed to
+    ///         match <see cref="OctoIdentityServicesOptions.UriFamilies"/>) → restore
+    ///         captured non-base entries (api / overlay:*) on top.
+    ///     </para>
+    ///     <para>
+    ///         <paramref name="throwOnFailure"/> is forwarded verbatim to
+    ///         <see cref="DefaultConfigurationCreatorServiceBase.ApplyServiceManagedBlueprintsAsync"/>:
+    ///         the cold-init path passes <c>true</c> (a failed seed leaves a half-provisioned
+    ///         tenant — fatal), the lifecycle-event path passes <c>false</c> (transient
+    ///         catalog hiccup must not knock an existing tenant offline). The Capture /
+    ///         Reconcile / Restore wraps run on both paths regardless — they are safe
+    ///         on either a fresh tenant or a long-lived one.
+    ///     </para>
+    ///     <para>
+    ///         Regression history: PR #98 (Step 2a) and PR #99 (Step 2b) originally inlined
+    ///         this wrap in <see cref="SetupTenantAsync"/> only. The test-2 smoke surfaced
+    ///         that production clusters bypass <see cref="SetupTenantAsync"/> on every
+    ///         restart (tenants already have schemas), routing through
+    ///         <see cref="RefreshTenantStateAsync"/> instead — which left both passes
+    ///         silently un-fired. Extracting the helper closes that gap.
+    ///     </para>
+    /// </remarks>
+    private async Task ApplyServiceManagedBlueprintsWithUriPreservationAsync(
+        ITenantContext tenantContext,
+        string tenantId,
+        bool throwOnFailure)
+    {
+        var capturedNonBaseUris = await CaptureBlueprintClientNonBaseUrisAsync(tenantContext);
+        await ApplyServiceManagedBlueprintsAsync(tenantId, throwOnFailure);
+        await ExpandBlueprintClientUriFamiliesAsync(tenantContext);
+        await RestoreBlueprintClientNonBaseUrisAsync(tenantContext, capturedNonBaseUris);
     }
 
     /// <summary>
