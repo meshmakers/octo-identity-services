@@ -4,6 +4,7 @@ using Asp.Versioning;
 using IdentityModel;
 using IdentityServerPersistence;
 using IdentityServerPersistence.SystemStores;
+using Meshmakers.Octo.Backend.IdentityServices.TenantApi.v1.Controllers.Dto;
 using Meshmakers.Octo.Common.DistributionEventHub.Services;
 using Meshmakers.Octo.Communication.Contracts;
 using Meshmakers.Octo.Communication.Contracts.DataTransferObjects;
@@ -170,6 +171,117 @@ public class ClientsController : ControllerBase
         }
 
         return Ok();
+    }
+
+    // POST: system/v1/clients/{id}/overlayUris
+    // AB#4209 Step 4 — declarative overlay URI write. The cmdlet caller (octo-tools
+    // Apply-IdentityOverlay → octo-cli ApplyClientOverlay → this endpoint) passes the three
+    // URI lists for one client; we dedupe each against the existing list contents and append
+    // new entries with Source = "overlay:<OverlayName>". The Step 2a preservation pass keeps
+    // them across blueprint re-apply; the future DumpTenant --clean filter strips them from
+    // sanitised exports. See concept doc §4.3 and §4.5.
+    [HttpPost("{id}/overlayUris")]
+    [Authorize(IdentityServiceConstants.IdentityApiReadWritePolicy)]
+    [EndpointSummary("Applies an overlay URI set to a client. Idempotent — duplicates are skipped.")]
+    [ProducesResponseType(typeof(ApplyOverlayUrisResultDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> ApplyOverlayUris(
+        [Required][Description("ID of the client")] string id,
+        [Required][FromBody][Description("Overlay URI declaration")] ApplyOverlayUrisDto dto)
+    {
+        if (!ModelState.IsValid)
+        {
+            return BadRequest(ModelState);
+        }
+
+        var redirectCount = dto.RedirectUris?.Count ?? 0;
+        var postLogoutCount = dto.PostLogoutRedirectUris?.Count ?? 0;
+        var corsCount = dto.AllowedCorsOrigins?.Count ?? 0;
+        if (redirectCount + postLogoutCount + corsCount == 0)
+        {
+            return BadRequest(new InternalServerErrorDto(
+                "At least one of RedirectUris, PostLogoutRedirectUris, or AllowedCorsOrigins must be non-empty."));
+        }
+
+        var appClient = await _octoClientStore.FindRtClientByIdAsync(id);
+        if (appClient == null)
+        {
+            return NotFound(new NotFoundErrorDto($"Client with id '{id}' does not exist."));
+        }
+
+        var sourceTag = ClientUriSources.OverlayPrefix + dto.OverlayName;
+        var redirectResult = AppendOverlayUris(appClient.RedirectUris, dto.RedirectUris, sourceTag);
+        var postLogoutResult = AppendOverlayUris(appClient.PostLogoutRedirectUris, dto.PostLogoutRedirectUris, sourceTag);
+        var corsResult = AppendOverlayUris(appClient.AllowedCorsOrigins, dto.AllowedCorsOrigins, sourceTag);
+
+        try
+        {
+            await _octoClientStore.UpdateAsync(id, appClient);
+            await ClearCacheAsync();
+        }
+        catch (Exception e)
+        {
+            return BadRequest(new InternalServerErrorDto(e.Message));
+        }
+
+        return Ok(new ApplyOverlayUrisResultDto
+        {
+            OverlayName = dto.OverlayName,
+            ClientId = appClient.ClientId,
+            RedirectUris = redirectResult,
+            PostLogoutRedirectUris = postLogoutResult,
+            AllowedCorsOrigins = corsResult
+        });
+    }
+
+    /// <summary>
+    ///     Appends each URI from <paramref name="incoming"/> to <paramref name="targetList"/>
+    ///     unless an entry with the same <c>Uri</c> already exists (regardless of source).
+    ///     Returns the per-list count breakdown for the response body.
+    /// </summary>
+    /// <remarks>
+    ///     Dedup is by URI string (Ordinal comparison) — matches the Step 2a Merge contract so
+    ///     re-running the overlay apply against the same DB is a no-op. Conflict policy: any
+    ///     existing source (base / api / overlay:* / family:*) wins, the overlay-incoming entry
+    ///     is silently dropped. Mirrors the concept doc §4.3 "skip-duplicate" rule.
+    /// </remarks>
+    private static ApplyOverlayUrisListCountDto AppendOverlayUris(
+        IAttributeValueList<RtClientUriEntryRecord> targetList,
+        List<string>? incoming,
+        string sourceTag)
+    {
+        if (incoming == null || incoming.Count == 0)
+        {
+            return new ApplyOverlayUrisListCountDto { Added = 0, SkippedDuplicate = 0 };
+        }
+
+        var existingUris = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var entry in targetList)
+        {
+            existingUris.Add(entry.Uri);
+        }
+
+        var added = 0;
+        var skipped = 0;
+        foreach (var uri in incoming)
+        {
+            if (string.IsNullOrWhiteSpace(uri))
+            {
+                continue;
+            }
+
+            if (!existingUris.Add(uri))
+            {
+                skipped++;
+                continue;
+            }
+
+            targetList.Add(new RtClientUriEntryRecord { Uri = uri, Source = sourceTag });
+            added++;
+        }
+
+        return new ApplyOverlayUrisListCountDto { Added = added, SkippedDuplicate = skipped };
     }
 
     // DELETE api/Clients/5
