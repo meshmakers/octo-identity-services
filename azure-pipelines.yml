@@ -133,6 +133,19 @@ stages:
               repository: meshmakers/octo-mesh-identity-services
               dockerfile: src/IdentityServices/Dockerfile
               enableMainLatestTag: true
+              # AB#4209 Step 4 PR 1 — pass the hotfix-train lib/comm version
+              # split into the Docker container so the Dockerfile's
+              # -p:OctoCoreLibVersion / -p:OctoCommVersion args receive the
+              # CI-set pipeline-variable value (tpl-v0.4.7 update-build-number.yml
+              # sets these on non-r-tag branches). Without them the Dockerfile
+              # falls through to the Directory.Build.props explicit pin (3.4.16
+              # post-b510924), which on main / PR builds resolves to a public-feed
+              # version that may not yet carry source-side additions.
+              # Remove once pipelineTemplates pin reaches tpl-v0.4.8 — that
+              # template defaults already include both extras.
+              extraBuildArgs: >-
+                --build-arg OCTO_CORE_LIB_VERSION="$(OctoCoreLibVersion)"
+                --build-arg OCTO_COMM_VERSION="$(OctoCommVersion)"
           - template: templates/steps/handle-artifacts.yml@pipelineTemplates
             parameters:
               constructionKitLibraryPaths:
