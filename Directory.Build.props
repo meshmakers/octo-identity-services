@@ -24,11 +24,18 @@
         <OctoVersion Condition="'$(OctoNugetPrivateServer)'!='' And '$(OctoVersion)'==''">0.1.*</OctoVersion>
         <OctoVersion Condition="'$(OctoNugetPrivateServer)'=='' And '$(OctoVersion)'==''">3.4.*</OctoVersion>
         <OctoCoreLibVersion Condition="'$(Configuration)'=='DebugL'">999.0.0</OctoCoreLibVersion>
-        <OctoCoreLibVersion Condition="'$(OctoNugetPrivateServer)'!='' And '$(OctoCoreLibVersion)'==''">0.1.*</OctoCoreLibVersion>
-        <OctoCoreLibVersion Condition="'$(OctoNugetPrivateServer)'=='' And '$(OctoCoreLibVersion)'==''">3.4.*</OctoCoreLibVersion>
+        <!-- Explicit pin for upstream OctoMesh core libs (Sdk, distributedEventHub,
+             common-services, construction-kit*). Bump per release. CI (tpl-v0.4.7+)
+             sets this var on main/test/dev branches (the var-set wins via the
+             ''=='' condition), but no longer overrides it on r-tag builds — there
+             this pin is the only source of truth, so a single-service hotfix can
+             depend on older lib versions than the service tag. -->
+        <OctoCoreLibVersion Condition="'$(OctoCoreLibVersion)'==''">3.4.16</OctoCoreLibVersion>
         <OctoCommVersion Condition="'$(Configuration)'=='DebugL'">999.0.0</OctoCommVersion>
-        <OctoCommVersion Condition="'$(OctoNugetPrivateServer)'!='' And '$(OctoCommVersion)'==''">0.1.*</OctoCommVersion>
-        <OctoCommVersion Condition="'$(OctoNugetPrivateServer)'=='' And '$(OctoCommVersion)'==''">3.4.*</OctoCommVersion>
+        <!-- Explicit pin for upstream Communication SDK (Sdk.Common.Web,
+             Sdk.MeshAdapter, communication-sdk). Same rules as OctoCoreLibVersion:
+             CI tpl-v0.4.7+ sets it on non-r-tag branches, r-tag uses this pin. -->
+        <OctoCommVersion Condition="'$(OctoCommVersion)'==''">3.4.16</OctoCommVersion>
         <Version Condition="'$(Configuration)'=='DebugL'">999.0.0</Version>
         <PackageVersion Condition="'$(Configuration)'=='DebugL'">999.0.0</PackageVersion>
         <RestoreSources Condition="'$(RestoreSources)'==''">https://api.nuget.org/v3/index.json</RestoreSources>
