@@ -139,7 +139,7 @@ public class ClientsControllerOverlayUrisTests
     public async Task ApplyOverlayUris_IsIdempotent_OnSecondCallSameInput()
     {
         // The cmdlet may run on every Start-Octo or every CI pipeline. Re-applying the same
-        // overlay must be a no-op (Added=0 across the board) — no DB churn, no log noise.
+        // overlay must be a no-op — Added=0 across the board AND no DB write / cache bust.
         var client = new RtClientBuilder()
             .WithClientId(ClientId)
             .WithRedirectUris("https://studio.example/")
@@ -162,6 +162,31 @@ public class ClientsControllerOverlayUrisTests
         secondDto.RedirectUris.SkippedDuplicate.Should().Be(1);
         // List doesn't grow past the seeded + first-apply state.
         client.RedirectUris.Should().HaveCount(2);
+
+        // The load-bearing part of the idempotency contract: only the first call writes.
+        // The second call MUST short-circuit before UpdateAsync (and the matching CorsClient
+        // cache-bust publish) so the cmdlet's repeated Start-Octo / CI runs don't churn
+        // rtChangedDateTime or invalidate the per-tenant CORS cache for nothing.
+        await _clientStore.Received(1).UpdateAsync(ClientId, client);
+    }
+
+    [Fact]
+    public async Task ApplyOverlayUris_AllWhitespaceInput_Returns400_AndDoesNotPersist()
+    {
+        // Whitespace-only payload is the same intent as all-null — both are no-ops and the
+        // endpoint should reject up front rather than silently load + walk the dedup path.
+        var client = new RtClientBuilder().WithClientId(ClientId).Build();
+        _clientStore.FindRtClientByIdAsync(ClientId).Returns(client);
+
+        var result = await _sut.ApplyOverlayUris(ClientId, new ApplyOverlayUrisDto
+        {
+            OverlayName = OverlayName,
+            RedirectUris = new List<string> { "   ", "" },
+            PostLogoutRedirectUris = new List<string> { "\t" }
+        });
+
+        result.Should().BeOfType<BadRequestObjectResult>();
+        await _clientStore.DidNotReceiveWithAnyArgs().UpdateAsync(default!, default!);
     }
 
     [Fact]

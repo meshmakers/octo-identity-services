@@ -195,13 +195,17 @@ public class ClientsController : ControllerBase
             return BadRequest(ModelState);
         }
 
-        var redirectCount = dto.RedirectUris?.Count ?? 0;
-        var postLogoutCount = dto.PostLogoutRedirectUris?.Count ?? 0;
-        var corsCount = dto.AllowedCorsOrigins?.Count ?? 0;
-        if (redirectCount + postLogoutCount + corsCount == 0)
+        // Count only non-whitespace inputs so a payload like {RedirectUris: ["   ", ""]}
+        // hits the same 400 as the all-null case below — both are no-op intent and the
+        // endpoint should reject them up front rather than walk the dedup path for nothing.
+        var meaningfulCount = CountNonWhitespace(dto.RedirectUris)
+                              + CountNonWhitespace(dto.PostLogoutRedirectUris)
+                              + CountNonWhitespace(dto.AllowedCorsOrigins);
+        if (meaningfulCount == 0)
         {
-            return BadRequest(new InternalServerErrorDto(
-                "At least one of RedirectUris, PostLogoutRedirectUris, or AllowedCorsOrigins must be non-empty."));
+            ModelState.AddModelError(nameof(dto),
+                "At least one of RedirectUris, PostLogoutRedirectUris, or AllowedCorsOrigins must contain a non-whitespace URI.");
+            return BadRequest(ModelState);
         }
 
         var appClient = await _octoClientStore.FindRtClientByIdAsync(id);
@@ -215,14 +219,22 @@ public class ClientsController : ControllerBase
         var postLogoutResult = AppendOverlayUris(appClient.PostLogoutRedirectUris, dto.PostLogoutRedirectUris, sourceTag);
         var corsResult = AppendOverlayUris(appClient.AllowedCorsOrigins, dto.AllowedCorsOrigins, sourceTag);
 
-        try
+        // No-op short-circuit: if every incoming URI hit the dedup branch, the client entity
+        // is byte-identical to what we loaded. Skipping the UpdateAsync + cache-bust holds
+        // the endpoint's "re-run is no DB churn / no cache invalidation" contract — important
+        // for the cmdlet caller that re-applies the overlay on every Start-Octo / CI run.
+        var totalAdded = redirectResult.Added + postLogoutResult.Added + corsResult.Added;
+        if (totalAdded > 0)
         {
-            await _octoClientStore.UpdateAsync(id, appClient);
-            await ClearCacheAsync();
-        }
-        catch (Exception e)
-        {
-            return BadRequest(new InternalServerErrorDto(e.Message));
+            try
+            {
+                await _octoClientStore.UpdateAsync(id, appClient);
+                await ClearCacheAsync();
+            }
+            catch (Exception e)
+            {
+                return BadRequest(new InternalServerErrorDto(e.Message));
+            }
         }
 
         return Ok(new ApplyOverlayUrisResultDto
@@ -233,6 +245,24 @@ public class ClientsController : ControllerBase
             PostLogoutRedirectUris = postLogoutResult,
             AllowedCorsOrigins = corsResult
         });
+    }
+
+    private static int CountNonWhitespace(List<string>? list)
+    {
+        if (list == null || list.Count == 0)
+        {
+            return 0;
+        }
+
+        var count = 0;
+        foreach (var item in list)
+        {
+            if (!string.IsNullOrWhiteSpace(item))
+            {
+                count++;
+            }
+        }
+        return count;
     }
 
     /// <summary>

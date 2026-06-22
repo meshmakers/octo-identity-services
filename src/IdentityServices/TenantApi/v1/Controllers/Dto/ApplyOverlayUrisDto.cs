@@ -59,8 +59,9 @@ public sealed class ApplyOverlayUrisDto
 
 /// <summary>
 ///     Response body for <c>POST /v1/clients/{id}/overlayUris</c> — per-list breakdown of
-///     URIs the endpoint added vs. skipped as duplicates. Cumulative totals across the three
-///     URI lists; per-URI logging happens in the cmdlet caller (see concept doc §4.3).
+///     URIs the endpoint added vs. skipped as duplicates. Three independent counts
+///     (RedirectUris / PostLogoutRedirectUris / AllowedCorsOrigins); per-URI logging
+///     happens in the cmdlet caller (see concept doc §4.3).
 /// </summary>
 public sealed class ApplyOverlayUrisResultDto
 {
