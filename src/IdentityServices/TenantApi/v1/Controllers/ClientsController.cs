@@ -4,6 +4,7 @@ using Asp.Versioning;
 using IdentityModel;
 using IdentityServerPersistence;
 using IdentityServerPersistence.SystemStores;
+using Meshmakers.Octo.Backend.IdentityServices.TenantApi.v1.Controllers.Dto;
 using Meshmakers.Octo.Common.DistributionEventHub.Services;
 using Meshmakers.Octo.Communication.Contracts;
 using Meshmakers.Octo.Communication.Contracts.DataTransferObjects;
@@ -244,6 +245,131 @@ public class ClientsController : ControllerBase
             PostLogoutRedirectUris = postLogoutResult,
             AllowedCorsOrigins = corsResult
         });
+    }
+
+    // DELETE: /{tenantId}/v1/clients/cleanOverlayEntries
+    // AB#4209 Step 5 PR 1 — strip overlay URI entries from every blueprint-managed
+    // RtClient in the tenant. Used by the future DumpTenant --clean orchestrator
+    // (bot-services clones the tenant DB to a temp DB, calls this against the temp DB,
+    // mongodumps the temp DB, drops it) so the resulting archive carries no overlay:*
+    // entries and is safe to re-import as Blueprint seed material.
+    //
+    // Without overlayName: strips every entry where Source starts with "overlay:" —
+    // every overlay across every overlayName goes away.
+    // With overlayName: strips only entries where Source matches "overlay:<name>"
+    // exactly — useful for per-overlay clean-out (e.g. drop gerald-laptop overlays
+    // but keep the shared local-dev ones).
+    //
+    // Idempotent — skips the UpdateAsync + cache bust for clients that had nothing to
+    // remove (matches the ApplyOverlayUris no-op contract on re-runs). See concept doc
+    // §4.5 (source taxonomy) and §4.7 (--clean filter rule).
+    //
+    // PHASE-3 MIGRATION CANDIDATE: when octo-platform-services grows to Phase 3
+    // (blueprint orchestration + cross-cutting tenant operations), this endpoint and
+    // the bot-services orchestration that calls it move under platform-services as the
+    // central tenant-clean-export flow. The endpoint stays here because identity-services
+    // is the owner of RtClient + ClientUriSources; the orchestration moves out.
+    [HttpDelete("cleanOverlayEntries")]
+    [Authorize(IdentityServiceConstants.IdentityApiReadWritePolicy)]
+    [EndpointSummary("Strips overlay URI entries from every client in the tenant. Idempotent — clients without matches are skipped (no DB write, no cache invalidation).")]
+    [ProducesResponseType(typeof(CleanOverlayEntriesResultDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    public async Task<IActionResult> CleanOverlayEntries(
+        [FromQuery][Description("Optional overlay name. Without it, every Source matching 'overlay:*' is removed. With it, only Source == 'overlay:<overlayName>' is removed (same regex constraint as ApplyOverlayUris).")] string? overlayName = null)
+    {
+        if (overlayName != null && !System.Text.RegularExpressions.Regex.IsMatch(overlayName, "^[A-Za-z0-9._-]+$"))
+        {
+            ModelState.AddModelError(nameof(overlayName),
+                "overlayName may only contain letters (A-Z, a-z), digits (0-9), and the characters '.', '-', and '_'.");
+            return BadRequest(ModelState);
+        }
+
+        // null = "match every overlay:* prefix"; non-null = "match overlay:<name> exactly"
+        var targetSource = overlayName != null
+            ? ClientUriSources.OverlayPrefix + overlayName
+            : null;
+
+        var allClients = await _octoClientStore.GetClients();
+        var perClientResults = new List<CleanOverlayEntriesClientResultDto>();
+        var totalRemoved = 0;
+
+        foreach (var client in allClients)
+        {
+            var redirectRemoved = RemoveOverlayEntries(client.RedirectUris, targetSource);
+            var postLogoutRemoved = RemoveOverlayEntries(client.PostLogoutRedirectUris, targetSource);
+            var corsRemoved = RemoveOverlayEntries(client.AllowedCorsOrigins, targetSource);
+
+            var clientTotal = redirectRemoved + postLogoutRemoved + corsRemoved;
+            if (clientTotal == 0)
+            {
+                continue;
+            }
+
+            try
+            {
+                await _octoClientStore.UpdateAsync(client.ClientId, client);
+            }
+            catch (Exception e)
+            {
+                return BadRequest(new InternalServerErrorDto(
+                    $"Failed to update client '{client.ClientId}' after removing {clientTotal} overlay entries: {e.Message}"));
+            }
+
+            perClientResults.Add(new CleanOverlayEntriesClientResultDto
+            {
+                ClientId = client.ClientId,
+                RedirectUrisRemoved = redirectRemoved,
+                PostLogoutRedirectUrisRemoved = postLogoutRemoved,
+                AllowedCorsOriginsRemoved = corsRemoved
+            });
+            totalRemoved += clientTotal;
+        }
+
+        // Cache invalidation is per-tenant, not per-client; bust once after the loop iff
+        // anything changed, mirroring the ApplyOverlayUris contract.
+        if (totalRemoved > 0)
+        {
+            await ClearCacheAsync();
+        }
+
+        return Ok(new CleanOverlayEntriesResultDto
+        {
+            OverlayName = overlayName,
+            ClientsAffected = perClientResults.Count,
+            TotalEntriesRemoved = totalRemoved,
+            ClientResults = perClientResults
+        });
+    }
+
+    /// <summary>
+    ///     Removes entries from <paramref name="targetList"/> whose <c>Source</c> matches the
+    ///     target. <paramref name="targetSource"/> = <c>null</c> matches every
+    ///     <c>overlay:*</c> prefix; non-null matches the exact source string. Returns the
+    ///     number of entries removed (0 if nothing matched).
+    /// </summary>
+    /// <remarks>
+    ///     Walks the list in reverse so the RemoveAt indices stay valid as entries vanish.
+    ///     <c>IAttributeValueList&lt;T&gt;</c> does not expose <c>RemoveAll</c>, hence the
+    ///     index loop.
+    /// </remarks>
+    private static int RemoveOverlayEntries(
+        IAttributeValueList<RtClientUriEntryRecord> targetList,
+        string? targetSource)
+    {
+        var removed = 0;
+        for (var i = targetList.Count - 1; i >= 0; i--)
+        {
+            var entry = targetList[i];
+            var matches = targetSource != null
+                ? string.Equals(entry.Source, targetSource, StringComparison.Ordinal)
+                : entry.Source.StartsWith(ClientUriSources.OverlayPrefix, StringComparison.Ordinal);
+            if (matches)
+            {
+                targetList.RemoveAt(i);
+                removed++;
+            }
+        }
+        return removed;
     }
 
     private static int CountNonWhitespace(List<string>? list)
