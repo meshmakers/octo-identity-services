@@ -4,7 +4,6 @@ using Asp.Versioning;
 using IdentityModel;
 using IdentityServerPersistence;
 using IdentityServerPersistence.SystemStores;
-using Meshmakers.Octo.Backend.IdentityServices.TenantApi.v1.Controllers.Dto;
 using Meshmakers.Octo.Common.DistributionEventHub.Services;
 using Meshmakers.Octo.Communication.Contracts;
 using Meshmakers.Octo.Communication.Contracts.DataTransferObjects;
