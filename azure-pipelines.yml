@@ -87,6 +87,16 @@ stages:
             submodules: recursive
           - template: templates/steps/set-version.yml@pipelineTemplates
           - template: templates/steps/download-ca.yml@pipelineTemplates
+          # The agent-side `dotnet build` below triggers the IdentityServices
+          # csproj BuildClientApp target (ng build) on the agent's Node. The
+          # default agent Node (24.14.x) is below Angular 22 / CLI 22's engine
+          # floor (^22.22.3 || ^24.15.0 || >=26.0.0), so ng build fails (MSB3073).
+          # Pin the agent to 24.15.x — the in-container build is handled by the
+          # Dockerfile's own Node install.
+          - task: UseNode@1
+            displayName: 'Install Node.js 24.15.x'
+            inputs:
+              version: '24.15.x'
           - task: DotNetCoreCLI@2
             displayName: 'Restore NuGet packages'
             inputs:
