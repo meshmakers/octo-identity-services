@@ -5,6 +5,17 @@ EXPOSE 443
 
 FROM meshmakers/dotnet_sdk-node:1.2.5.0 AS build
 
+# Angular 22 / Angular CLI 22 require Node >=22.22.3 (engine
+# ^22.22.3 || ^24.15.0 || >=26.0.0). The dotnet_sdk-node:1.2.5.0 base image
+# ships Node 22.13.0, which the CLI hard-refuses, so the in-container
+# `dotnet build` -> BuildClientApp Angular build would fail. Install Node 26
+# (the new org default, matching the other Tier 1 repos' CI) over the base via
+# the inherited nvm and put it first on PATH for the SPA build.
+# TODO: drop this once dotnet_sdk-node ships a Node 26 image tag.
+ENV NODE_VERSION=26.3.1
+RUN . "$NVM_DIR/nvm.sh" && nvm install ${NODE_VERSION} && nvm alias default ${NODE_VERSION}
+ENV PATH="/root/.nvm/versions/node/v${NODE_VERSION}/bin/:${PATH}"
+
 ARG OCTO_PRIVATE_NUGET_SERVICE
 ARG OCTO_PRIVATE_NUGET_CERTIFICATE
 ARG OCTO_VERSION
