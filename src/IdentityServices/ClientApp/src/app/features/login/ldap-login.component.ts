@@ -1,4 +1,4 @@
-import { Component, OnInit, inject } from '@angular/core';
+import { Component, OnInit, inject, ChangeDetectionStrategy } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { ActivatedRoute, Router } from '@angular/router';
@@ -17,6 +17,7 @@ import { LdapLoginRequest } from '../../core/models/login.models';
     LcarsHeaderComponent
   ],
   templateUrl: './ldap-login.component.html',
+  changeDetection: ChangeDetectionStrategy.Eager,
   styleUrl: './ldap-login.component.scss'
 })
 export class LdapLoginComponent implements OnInit {

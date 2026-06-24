@@ -1,4 +1,4 @@
-import { Component, inject } from '@angular/core';
+import { Component, inject, ChangeDetectionStrategy } from '@angular/core';
 import { RouterOutlet } from '@angular/router';
 import { OemService } from './core/services/oem.service';
 
@@ -11,6 +11,7 @@ import { OemService } from './core/services/oem.service';
       <router-outlet></router-outlet>
     </div>
   `,
+  changeDetection: ChangeDetectionStrategy.Eager,
   styles: [`
     .app-container {
       min-height: 100vh;

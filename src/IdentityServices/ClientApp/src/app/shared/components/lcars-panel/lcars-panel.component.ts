@@ -1,4 +1,4 @@
-import { Component, Input } from '@angular/core';
+import { Component, Input, ChangeDetectionStrategy } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { VERSION } from '../../../../environments/currentVersion';
 
@@ -20,6 +20,7 @@ import { VERSION } from '../../../../environments/currentVersion';
       </div>
     </div>
   `,
+  changeDetection: ChangeDetectionStrategy.Eager,
   styleUrl: './lcars-panel.component.scss'
 })
 export class LcarsPanelComponent {

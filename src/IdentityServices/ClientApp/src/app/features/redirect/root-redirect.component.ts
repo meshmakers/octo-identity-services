@@ -1,4 +1,4 @@
-import { Component, inject, OnInit } from '@angular/core';
+import { Component, inject, OnInit, ChangeDetectionStrategy } from '@angular/core';
 import { DOCUMENT } from '@angular/common';
 
 /**
@@ -9,6 +9,7 @@ import { DOCUMENT } from '@angular/common';
 @Component({
   selector: 'app-root-redirect',
   standalone: true,
+  changeDetection: ChangeDetectionStrategy.Eager,
   template: ''
 })
 export class RootRedirectComponent implements OnInit {

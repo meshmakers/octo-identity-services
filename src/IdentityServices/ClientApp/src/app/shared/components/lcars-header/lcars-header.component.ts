@@ -1,4 +1,4 @@
-import { Component, Input, inject, OnInit } from '@angular/core';
+import { Component, Input, inject, OnInit, ChangeDetectionStrategy } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { Router, ActivatedRoute } from '@angular/router';
 import { OemService } from '../../../core/services/oem.service';
@@ -35,6 +35,7 @@ import { getTenantIdFromUrl } from '../../../core/utils/tenant.utils';
       <p class="lcars-header__subtitle" *ngIf="subtitle">{{ subtitle }}</p>
     </header>
   `,
+  changeDetection: ChangeDetectionStrategy.Eager,
   styleUrl: './lcars-header.component.scss'
 })
 export class LcarsHeaderComponent implements OnInit {

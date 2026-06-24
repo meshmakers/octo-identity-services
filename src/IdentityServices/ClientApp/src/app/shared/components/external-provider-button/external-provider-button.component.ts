@@ -1,4 +1,4 @@
-import { Component, Input, Output, EventEmitter } from '@angular/core';
+import { Component, Input, Output, EventEmitter, ChangeDetectionStrategy } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FontAwesomeModule } from '@fortawesome/angular-fontawesome';
 import { IconDefinition } from '@fortawesome/fontawesome-svg-core';
@@ -26,6 +26,7 @@ import { ExternalProvider } from '../../../core/models/login.models';
       <span>{{ provider.displayName }}</span>
     </button>
   `,
+  changeDetection: ChangeDetectionStrategy.Eager,
   styleUrl: './external-provider-button.component.scss'
 })
 export class ExternalProviderButtonComponent {
