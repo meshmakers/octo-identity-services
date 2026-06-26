@@ -1,4 +1,4 @@
-import { Component, OnInit, inject } from '@angular/core';
+import { Component, OnInit, inject, ChangeDetectionStrategy } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { ActivatedRoute, Router, RouterLink } from '@angular/router';
@@ -17,6 +17,7 @@ import { SetupApiService } from '../../core/services/setup-api.service';
     LcarsHeaderComponent
   ],
   templateUrl: './setup.component.html',
+  changeDetection: ChangeDetectionStrategy.Eager,
   styleUrl: './setup.component.scss'
 })
 export class SetupComponent implements OnInit {

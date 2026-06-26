@@ -1,4 +1,4 @@
-import { Component, OnInit, inject } from '@angular/core';
+import { Component, OnInit, inject, ChangeDetectionStrategy } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { Router, ActivatedRoute } from '@angular/router';
 import { LcarsPanelComponent } from '../../../shared/components/lcars-panel/lcars-panel.component';
@@ -70,6 +70,7 @@ import { ManageApiService } from '../../../core/services/manage-api.service';
       </app-lcars-panel>
     </div>
   `,
+  changeDetection: ChangeDetectionStrategy.Eager,
   styleUrl: './recovery-codes.component.scss'
 })
 export class RecoveryCodesComponent implements OnInit {

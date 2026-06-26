@@ -1,4 +1,4 @@
-import { Component, OnInit, inject } from '@angular/core';
+import { Component, OnInit, inject, ChangeDetectionStrategy } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { ActivatedRoute } from '@angular/router';
@@ -22,6 +22,7 @@ interface TenantDiscoveryResult {
     LcarsHeaderComponent
   ],
   templateUrl: './tenant-discovery.component.html',
+  changeDetection: ChangeDetectionStrategy.Eager,
   styleUrl: './tenant-discovery.component.scss'
 })
 export class TenantDiscoveryComponent implements OnInit {

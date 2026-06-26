@@ -1,4 +1,4 @@
-import { Component, OnInit, inject } from '@angular/core';
+import { Component, OnInit, inject, ChangeDetectionStrategy } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { ActivatedRoute, Router } from '@angular/router';
@@ -104,6 +104,7 @@ import { DeviceAuthorizationContext } from '../../core/models/consent.models';
       </app-lcars-panel>
     </div>
   `,
+  changeDetection: ChangeDetectionStrategy.Eager,
   styleUrl: './device-confirm.component.scss'
 })
 export class DeviceConfirmComponent implements OnInit {

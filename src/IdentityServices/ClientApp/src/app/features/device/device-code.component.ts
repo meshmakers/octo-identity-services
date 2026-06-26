@@ -1,4 +1,4 @@
-import { Component, inject, OnInit } from '@angular/core';
+import { Component, inject, OnInit, ChangeDetectionStrategy } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { Router, ActivatedRoute } from '@angular/router';
@@ -54,6 +54,7 @@ import { LcarsHeaderComponent } from '../../shared/components/lcars-header/lcars
       </app-lcars-panel>
     </div>
   `,
+  changeDetection: ChangeDetectionStrategy.Eager,
   styleUrl: './device-code.component.scss'
 })
 export class DeviceCodeComponent implements OnInit {

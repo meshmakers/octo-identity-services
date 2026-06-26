@@ -1,4 +1,4 @@
-import { Component, Input, Output, EventEmitter } from '@angular/core';
+import { Component, Input, Output, EventEmitter, ChangeDetectionStrategy } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { ScopeItem } from '../../../core/models/consent.models';
@@ -37,6 +37,7 @@ import { ScopeItem } from '../../../core/models/consent.models';
       </div>
     </div>
   `,
+  changeDetection: ChangeDetectionStrategy.Eager,
   styleUrl: './scope-list.component.scss'
 })
 export class ScopeListComponent {

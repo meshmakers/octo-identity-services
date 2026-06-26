@@ -1,4 +1,4 @@
-import { Component, OnInit, inject } from '@angular/core';
+import { Component, OnInit, inject, ChangeDetectionStrategy } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { Router, ActivatedRoute, RouterLink } from '@angular/router';
@@ -117,6 +117,7 @@ import { TwoFactorStatus } from '../../../core/models/manage.models';
       </app-lcars-panel>
     </div>
   `,
+  changeDetection: ChangeDetectionStrategy.Eager,
   styleUrl: './two-factor-status.component.scss'
 })
 export class TwoFactorStatusComponent implements OnInit {

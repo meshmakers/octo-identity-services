@@ -1,4 +1,4 @@
-import { Component, inject, OnInit } from '@angular/core';
+import { Component, inject, OnInit, ChangeDetectionStrategy } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { ActivatedRoute } from '@angular/router';
 import { LcarsPanelComponent } from '../../shared/components/lcars-panel/lcars-panel.component';
@@ -41,6 +41,7 @@ import { LcarsHeaderComponent } from '../../shared/components/lcars-header/lcars
       </app-lcars-panel>
     </div>
   `,
+  changeDetection: ChangeDetectionStrategy.Eager,
   styleUrl: './logged-out.component.scss'
 })
 export class LoggedOutComponent implements OnInit {

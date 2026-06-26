@@ -1,4 +1,4 @@
-import { Component, OnInit } from '@angular/core';
+import { Component, OnInit, ChangeDetectionStrategy } from '@angular/core';
 import { CommonModule } from '@angular/common';
 
 /**
@@ -16,6 +16,7 @@ import { CommonModule } from '@angular/common';
       <div class="logout-callback__message">{{ message }}</div>
     </div>
   `,
+  changeDetection: ChangeDetectionStrategy.Eager,
   styles: [`
     .logout-callback {
       display: flex;

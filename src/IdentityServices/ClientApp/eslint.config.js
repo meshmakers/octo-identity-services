@@ -63,6 +63,10 @@ module.exports = tseslint.config(
       "@angular-eslint/no-empty-lifecycle-method": "error",
       // Relaxed
       "@typescript-eslint/no-explicit-any": "off",
+      // Disabled: conflicts with the Angular 22 change-detection-eager migration,
+      // which intentionally adds ChangeDetectionStrategy.Eager to every component
+      // to preserve pre-v22 CheckAlways behavior (OnPush is now the v22 default).
+      "@angular-eslint/prefer-on-push-component-change-detection": "off",
     },
   }
 );

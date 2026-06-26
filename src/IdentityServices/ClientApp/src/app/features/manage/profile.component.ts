@@ -1,4 +1,4 @@
-import { Component, OnInit, inject } from '@angular/core';
+import { Component, OnInit, inject, ChangeDetectionStrategy } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { RouterLink } from '@angular/router';
 import { LcarsPanelComponent } from '../../shared/components/lcars-panel/lcars-panel.component';
@@ -135,6 +135,7 @@ import { UserProfile } from '../../core/models/manage.models';
       </app-lcars-panel>
     </div>
   `,
+  changeDetection: ChangeDetectionStrategy.Eager,
   styleUrl: './profile.component.scss'
 })
 export class ProfileComponent implements OnInit {
