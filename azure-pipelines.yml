@@ -28,13 +28,24 @@
 
 name: $(MajorVersion).$(MinorVersion).$(date:yyMM).$(DayOfMonth)$(rev:rrr)-$(Build.SourceBranchName)
 
+parameters:
+  # Injected by the release train on r-tag builds so the whole chain pins the
+  # scheduler-determined lib/comm release version (forwarded to
+  # update-build-number.yml). Empty on normal branch CI / manual runs.
+  - name: octoCoreLibVersion
+    type: string
+    default: ''
+  - name: octoCommVersion
+    type: string
+    default: ''
+
 resources:
   repositories:
     - repository: pipelineTemplates
       type: github
       name: meshmakers/octo-pipeline-templates
       endpoint: meshmakers-access-token
-      ref: refs/tags/tpl-v0.4.9
+      ref: refs/tags/tpl-v0.4.11
 
 trigger:
   batch: true
@@ -75,6 +86,9 @@ stages:
           name: meshmakers-ci-agents
         steps:
           - template: templates/steps/update-build-number.yml@pipelineTemplates
+            parameters:
+              octoCoreLibVersionOverride: ${{ parameters.octoCoreLibVersion }}
+              octoCommVersionOverride: ${{ parameters.octoCommVersion }}
           - task: InstallSSHKey@0
             displayName: 'Install SSH key for private submodules'
             inputs:
