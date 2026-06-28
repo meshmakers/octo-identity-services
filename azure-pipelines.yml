@@ -31,13 +31,14 @@ name: $(MajorVersion).$(MinorVersion).$(date:yyMM).$(DayOfMonth)$(rev:rrr)-$(Bui
 parameters:
   # Injected by the release train on r-tag builds so the whole chain pins the
   # scheduler-determined lib/comm release version (forwarded to
-  # update-build-number.yml). Empty on normal branch CI / manual runs.
+  # update-build-number.yml). Default 'auto' = no override (version computed
+  # normally); the train injects the real version on r-tag.
   - name: octoCoreLibVersion
     type: string
-    default: ''
+    default: 'auto'
   - name: octoCommVersion
     type: string
-    default: ''
+    default: 'auto'
 
 resources:
   repositories:
@@ -87,8 +88,8 @@ stages:
         steps:
           - template: templates/steps/update-build-number.yml@pipelineTemplates
             parameters:
-              octoCoreLibVersionOverride: ${{ parameters.octoCoreLibVersion }}
-              octoCommVersionOverride: ${{ parameters.octoCommVersion }}
+              octoCoreLibVersionOverride: ${{ replace(parameters.octoCoreLibVersion, 'auto', '') }}
+              octoCommVersionOverride: ${{ replace(parameters.octoCommVersion, 'auto', '') }}
           - task: InstallSSHKey@0
             displayName: 'Install SSH key for private submodules'
             inputs:
