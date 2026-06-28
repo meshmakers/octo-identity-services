@@ -153,3 +153,6 @@ types:
       - id: ${this}/ProvisionedByParentTenantId
         name: ProvisionedByParentTenantId
         isOptional: true
+    associations:
+      - id: ${this}/AssignedRole
+        targetCkTypeId: ${this}/Role

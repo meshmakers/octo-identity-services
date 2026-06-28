@@ -20,6 +20,8 @@ types:
         targetCkTypeId: ${this}/User
       - id: ${this}/GroupMember
         targetCkTypeId: ${this}/ExternalTenantUserMapping
+      - id: ${this}/GroupMember
+        targetCkTypeId: ${this}/Client
       - id: ${this}/ChildGroup
         targetCkTypeId: ${this}/Group
     indexes:

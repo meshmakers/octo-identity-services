@@ -1,5 +1,5 @@
 $schema: https://schemas.meshmakers.cloud/ck-migration-meta.schema.json
-ckModelId: System.Identity-2.9.0
+ckModelId: System.Identity-2.10.0
 migrations:
   - fromVersion: "2.8.0"
     toVersion: "2.9.0"

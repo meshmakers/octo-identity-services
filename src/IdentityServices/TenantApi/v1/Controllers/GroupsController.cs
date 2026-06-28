@@ -315,6 +315,74 @@ public class GroupsController(IGroupStore groupStore) : ControllerBase
     }
 
     // ========================================
+    // Client members
+    // ========================================
+
+    /// <summary>
+    /// Gets the client member IDs of a group.
+    /// </summary>
+    [HttpGet("{rtId}/members/clients")]
+    [Authorize(IdentityServiceConstants.IdentityApiReadOnlyPolicy)]
+    [EndpointSummary("Gets the client member IDs of a group.")]
+    [ProducesResponseType(typeof(List<string>), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<ActionResult<List<string>>> GetClientMembers([Required] OctoObjectId rtId)
+    {
+        var group = await groupStore.FindByIdAsync(rtId);
+        if (group == null)
+        {
+            return NotFound();
+        }
+
+        var memberClientIds = await groupStore.GetMemberClientIdsAsync(rtId);
+        return Ok(memberClientIds.ToList());
+    }
+
+    /// <summary>
+    /// Adds a client to a group.
+    /// </summary>
+    [HttpPut("{rtId}/members/clients/{clientId}")]
+    [Authorize(IdentityServiceConstants.IdentityApiReadWritePolicy)]
+    [EndpointSummary("Adds a client to a group.")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> AddClientMember(
+        [Required] OctoObjectId rtId,
+        [Required] string clientId)
+    {
+        var group = await groupStore.FindByIdAsync(rtId);
+        if (group == null)
+        {
+            return NotFound();
+        }
+
+        await groupStore.AddMemberClientAsync(rtId, clientId);
+        return Ok();
+    }
+
+    /// <summary>
+    /// Removes a client from a group.
+    /// </summary>
+    [HttpDelete("{rtId}/members/clients/{clientId}")]
+    [Authorize(IdentityServiceConstants.IdentityApiReadWritePolicy)]
+    [EndpointSummary("Removes a client from a group.")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> RemoveClientMember(
+        [Required] OctoObjectId rtId,
+        [Required] string clientId)
+    {
+        var group = await groupStore.FindByIdAsync(rtId);
+        if (group == null)
+        {
+            return NotFound();
+        }
+
+        await groupStore.RemoveMemberClientAsync(rtId, clientId);
+        return Ok();
+    }
+
+    // ========================================
     // Nested group members
     // ========================================
 
@@ -449,6 +517,7 @@ public class GroupsController(IGroupStore groupStore) : ControllerBase
         var roleIds = await groupStore.GetRoleIdsAsync(group.RtId);
         var memberUserIds = await groupStore.GetMemberUserIdsAsync(group.RtId);
         var memberExternalUserIds = await groupStore.GetMemberExternalUserIdsAsync(group.RtId);
+        var memberClientIds = await groupStore.GetMemberClientIdsAsync(group.RtId);
         var memberGroupIds = await groupStore.GetMemberGroupIdsAsync(group.RtId);
 
         return new GroupDto
@@ -459,6 +528,7 @@ public class GroupsController(IGroupStore groupStore) : ControllerBase
             RoleIds = roleIds.ToList(),
             MemberUserIds = memberUserIds.ToList(),
             MemberExternalUserIds = memberExternalUserIds.ToList(),
+            MemberClientIds = memberClientIds.ToList(),
             MemberGroupIds = memberGroupIds.ToList()
         };
     }

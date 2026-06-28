@@ -211,6 +211,56 @@ public class GroupStore(
     }
 
     // ========================================
+    // Client member associations (GroupMember → Client)
+    // ========================================
+
+    public async Task<IReadOnlyList<string>> GetMemberClientIdsAsync(OctoObjectId groupRtId)
+    {
+        return await GetOutboundTargetIdsAsync<RtClient>(
+            groupRtId, IdentityAssociationConstants.GroupMemberId);
+    }
+
+    public async Task AddMemberClientAsync(OctoObjectId groupRtId, string clientId)
+    {
+        await AddOutboundAssociationAsync<RtClient>(
+            groupRtId, clientId, IdentityAssociationConstants.GroupMemberId);
+    }
+
+    public async Task RemoveMemberClientAsync(OctoObjectId groupRtId, string clientId)
+    {
+        await RemoveOutboundAssociationAsync<RtClient>(
+            groupRtId, clientId, IdentityAssociationConstants.GroupMemberId);
+    }
+
+    public async Task<IReadOnlyList<string>> GetAllMemberSubjectIdsAsync(OctoObjectId groupRtId)
+    {
+        var session = await GetRepository().GetSessionAsync();
+        session.StartTransaction();
+
+        var origin = await GetRepository().GetRtEntityByRtIdAsync<RtGroup>(session, groupRtId);
+        if (origin == null)
+        {
+            await session.CommitTransactionAsync();
+            return [];
+        }
+
+        // Return every GroupMember target regardless of its CK type (User / Client /
+        // ExternalTenantUserMapping). Child groups use a different association role (ChildGroup)
+        // and are therefore not included here.
+        var associations = await GetRepository().GetRtAssociationsAsync(
+            session,
+            origin.ToRtEntityId(),
+            RtAssociationExtendedQueryOptions.Create(
+                GraphDirections.Outbound,
+                roleId: IdentityAssociationConstants.GroupMemberId));
+        await session.CommitTransactionAsync();
+
+        return associations.Items
+            .Select(a => a.TargetRtId.ToString())
+            .ToList();
+    }
+
+    // ========================================
     // Child group associations (ChildGroup)
     // ========================================
 

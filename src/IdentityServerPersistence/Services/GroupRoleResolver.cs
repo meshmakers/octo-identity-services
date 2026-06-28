@@ -4,15 +4,16 @@ using Meshmakers.Octo.ConstructionKit.Contracts;
 namespace IdentityServerPersistence.Services;
 
 /// <summary>
-/// Resolves the effective role IDs for a user by traversing group memberships
-/// via CK associations, including nested groups with circular reference protection.
+/// Resolves the effective role IDs for a subject (user or client) by traversing group
+/// memberships via CK associations, including nested groups with circular reference protection.
 /// </summary>
 public interface IGroupRoleResolver
 {
     /// <summary>
-    /// Resolves all role IDs inherited from groups for the given user.
+    /// Resolves all role IDs inherited from groups for the given subject. The subject may be a
+    /// user or a client RtId — both are linked to groups via the same GroupMember association.
     /// </summary>
-    Task<IReadOnlySet<string>> ResolveEffectiveRoleIdsAsync(string userRtId);
+    Task<IReadOnlySet<string>> ResolveEffectiveRoleIdsAsync(string subjectRtId);
 
 }
 
@@ -20,16 +21,18 @@ internal class GroupRoleResolver(IGroupStore groupStore) : IGroupRoleResolver
 {
     private const int MaxDepth = 10;
 
-    public async Task<IReadOnlySet<string>> ResolveEffectiveRoleIdsAsync(string userRtId)
+    public async Task<IReadOnlySet<string>> ResolveEffectiveRoleIdsAsync(string subjectRtId)
     {
-        // Find all groups where this user is a member (via inbound GroupMember associations)
+        // Find all groups where this subject is a direct member (via GroupMember associations).
+        // GetAllMemberSubjectIdsAsync returns members of any CK type (user, client, external
+        // mapping), so the same traversal serves both user and client subjects.
         var allGroups = (await groupStore.GetAllAsync()).ToList();
 
         var directGroupIds = new List<OctoObjectId>();
         foreach (var group in allGroups)
         {
-            var memberUserIds = await groupStore.GetMemberUserIdsAsync(group.RtId);
-            if (memberUserIds.Contains(userRtId))
+            var memberIds = await groupStore.GetAllMemberSubjectIdsAsync(group.RtId);
+            if (memberIds.Contains(subjectRtId))
             {
                 directGroupIds.Add(group.RtId);
             }

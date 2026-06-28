@@ -77,6 +77,32 @@ public interface IGroupStore
     Task<IReadOnlyList<string>> GetMemberExternalUserIdsAsync(OctoObjectId groupRtId);
 
     // ========================================
+    // Client member associations (GroupMember → Client)
+    // ========================================
+
+    /// <summary>
+    /// Gets the client member RtIds of a group via GroupMember associations.
+    /// </summary>
+    Task<IReadOnlyList<string>> GetMemberClientIdsAsync(OctoObjectId groupRtId);
+
+    /// <summary>
+    /// Adds a client as a member of a group via GroupMember association.
+    /// </summary>
+    Task AddMemberClientAsync(OctoObjectId groupRtId, string clientId);
+
+    /// <summary>
+    /// Removes a client from a group via GroupMember association.
+    /// </summary>
+    Task RemoveMemberClientAsync(OctoObjectId groupRtId, string clientId);
+
+    /// <summary>
+    /// Gets the RtIds of <b>all</b> direct member subjects of a group (users, clients and external
+    /// user mappings) via GroupMember associations, regardless of the member's CK type. Used by the
+    /// role resolver to determine group membership for any subject (user or client).
+    /// </summary>
+    Task<IReadOnlyList<string>> GetAllMemberSubjectIdsAsync(OctoObjectId groupRtId);
+
+    // ========================================
     // Child group associations (ChildGroup)
     // ========================================
 

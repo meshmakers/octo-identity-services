@@ -1,13 +1,13 @@
 "$schema": "https://schemas.meshmakers.cloud/construction-kit-elements.schema.json"
 associationRoles:
   - id: AssignedRole
-    description: "Links an entity (User or Group) to an assigned Role."
+    description: "Links an entity (User, Client or Group) to an assigned Role."
     inboundName: AssignedEntities
     inboundMultiplicity: N
     outboundName: AssignedRoles
     outboundMultiplicity: N
   - id: GroupMember
-    description: "Links a Group to its member entities (Users or ExternalTenantUserMappings)."
+    description: "Links a Group to its member entities (Users, Clients or ExternalTenantUserMappings)."
     inboundName: MemberOfGroups
     inboundMultiplicity: N
     outboundName: Members

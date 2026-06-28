@@ -177,6 +177,7 @@ try
         .AddPersistedGrantStore<PersistentGrantStore>()
         .AddAspNetIdentity<RtUser>()
         .AddProfileService<UserProfileService>()
+        .AddCustomTokenRequestValidator<ClientCredentialsRoleTokenValidator>()
         .AddServerSideSessions<ServerSideSessionStore>()
         .AddCorsPolicyService<CorsPolicyService>()
         .AddAppAuthRedirectUriValidator()

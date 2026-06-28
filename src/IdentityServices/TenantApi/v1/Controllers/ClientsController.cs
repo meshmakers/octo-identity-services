@@ -29,16 +29,21 @@ public class ClientsController : ControllerBase
 {
     private readonly IDistributionEventHubService _distributionEventHubService;
     private readonly IOctoClientStore _octoClientStore;
+    private readonly IClientRoleStore _clientRoleStore;
 
     /// <summary>
     ///     Constructor
     /// </summary>
     /// <param name="octoClientStore">The storage service of clients</param>
     /// <param name="distributionEventHubService">Distributed cache with REDIS</param>
-    public ClientsController(IOctoClientStore octoClientStore, IDistributionEventHubService distributionEventHubService)
+    /// <param name="clientRoleStore">The store managing client role assignments</param>
+    public ClientsController(IOctoClientStore octoClientStore,
+        IDistributionEventHubService distributionEventHubService,
+        IClientRoleStore clientRoleStore)
     {
         _octoClientStore = octoClientStore;
         _distributionEventHubService = distributionEventHubService;
+        _clientRoleStore = clientRoleStore;
     }
 
     // GET: system/v1/clients
@@ -93,6 +98,96 @@ public class ClientsController : ControllerBase
         }
 
         return Ok(CreateClientDto(client));
+    }
+
+    // ========================================
+    // Role assignments (AssignedRole)
+    // ========================================
+
+    // GET system/v1/clients/{id}/roles
+    [HttpGet("{id}/roles")]
+    [Authorize(IdentityServiceConstants.IdentityApiReadOnlyPolicy)]
+    [EndpointSummary("Returns the role IDs directly assigned to a client.")]
+    [ProducesResponseType(typeof(List<string>), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> GetClientRoles([Required][Description("ID of the client")] string id)
+    {
+        var client = await _octoClientStore.FindRtClientByIdAsync(id);
+        if (client == null)
+        {
+            return NotFound(new NotFoundErrorDto($"Client with id '{id}' not found."));
+        }
+
+        var roleIds = await _clientRoleStore.GetDirectRoleIdsAsync(client.RtId);
+        return Ok(roleIds.ToList());
+    }
+
+    // PUT system/v1/clients/{id}/roles
+    [HttpPut("{id}/roles")]
+    [Authorize(IdentityServiceConstants.IdentityApiReadWritePolicy)]
+    [EndpointSummary("Replaces the directly-assigned roles of a client (replace-all).")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> UpdateClientRoles(
+        [Required][Description("ID of the client")] string id,
+        [Required][FromBody][Description("The role ids")] List<string> roleIds)
+    {
+        var client = await _octoClientStore.FindRtClientByIdAsync(id);
+        if (client == null)
+        {
+            return NotFound(new NotFoundErrorDto($"Client with id '{id}' not found."));
+        }
+
+        await _clientRoleStore.SetRoleIdsAsync(client.RtId, roleIds);
+        return Ok();
+    }
+
+    // PUT system/v1/clients/{id}/roles/{roleName}
+    [HttpPut("{id}/roles/{roleName}")]
+    [Authorize(IdentityServiceConstants.IdentityApiReadWritePolicy)]
+    [EndpointSummary("Assigns a single role (by name) to a client.")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> AddClientToRole(
+        [Required][Description("ID of the client")] string id,
+        [Required][Description("The role name")] string roleName)
+    {
+        var client = await _octoClientStore.FindRtClientByIdAsync(id);
+        if (client == null)
+        {
+            return NotFound(new NotFoundErrorDto($"Client with id '{id}' not found."));
+        }
+
+        try
+        {
+            await _clientRoleStore.AddRoleAsync(client.RtId, roleName);
+        }
+        catch (InvalidOperationException)
+        {
+            return NotFound(new NotFoundErrorDto($"Role with name '{roleName}' not found."));
+        }
+
+        return Ok();
+    }
+
+    // DELETE system/v1/clients/{id}/roles/{roleName}
+    [HttpDelete("{id}/roles/{roleName}")]
+    [Authorize(IdentityServiceConstants.IdentityApiReadWritePolicy)]
+    [EndpointSummary("Removes a single role (by name) from a client.")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> RemoveClientFromRole(
+        [Required][Description("ID of the client")] string id,
+        [Required][Description("The role name")] string roleName)
+    {
+        var client = await _octoClientStore.FindRtClientByIdAsync(id);
+        if (client == null)
+        {
+            return NotFound(new NotFoundErrorDto($"Client with id '{id}' not found."));
+        }
+
+        await _clientRoleStore.RemoveRoleAsync(client.RtId, roleName);
+        return Ok();
     }
 
     // POST api/Clients
@@ -474,6 +569,7 @@ public class ClientsController : ControllerBase
     {
         var clientDto = new ClientDto
         {
+            RtId = applicationClient.RtId.ToString(),
             IsEnabled = applicationClient.Enabled,
             ClientId = applicationClient.ClientId,
             ClientName = applicationClient.ClientName,

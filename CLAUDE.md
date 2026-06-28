@@ -251,6 +251,39 @@ Key components:
 
 Current identity schema version: `IdentitySchemaVersionValue = 17`
 
+### Client Role & Group Assignment (AB#4183)
+
+A **Client** (machine-to-machine identity) can be assigned roles and group memberships with the same
+semantics as a user, so a `client_credentials` access token carries the resolved role claims and can
+call role-protected endpoints (e.g. the `FromHttpRequest` trigger node). CK model bumped to
+`System.Identity-2.10.0`.
+
+- **CK model:** `Client` gains the `AssignedRole` association (Client → Role); `Group` accepts
+  `Client` as a `GroupMember` target (`ck-client.yaml` / `ck-group.yaml`). Adding associations is
+  additive schema — no data migration.
+- **`IClientRoleStore` / `ClientRoleStore`** (`IdentityServerPersistence/SystemStores/`): manages a
+  client's `AssignedRole` edges (`GetDirectRoleIds`, `SetRoleIds`, `AddRole`/`RemoveRole` by name) and
+  resolves the **effective role names** (direct + group-inherited) for token issuance. Audit-logged.
+- **`GroupRoleResolver`** is now subject-agnostic: `ResolveEffectiveRoleIdsAsync(subjectRtId)` works for
+  a user *or* a client. `GroupStore` gained `GetMemberClientIds` / `AddMemberClient` /
+  `RemoveMemberClient` and a type-agnostic `GetAllMemberSubjectIds` (used by the resolver).
+- **Token claims:** `ClientCredentialsRoleTokenValidator` (`IdentityServices/Services/`, an
+  `ICustomTokenRequestValidator` registered via `.AddCustomTokenRequestValidator<>()`) injects the
+  client's effective roles as **unprefixed `JwtClaimTypes.Role`** claims into the `client_credentials`
+  token — identical shape to user tokens. It clears the per-request `ClientClaimsPrefix` so consumers
+  need no client-specific code path.
+- **REST API:** `ClientsController` — `GET/PUT /clients/{id}/roles`, `PUT/DELETE /clients/{id}/roles/{roleName}`.
+  `GroupsController` — `GET/PUT/DELETE /groups/{rtId}/members/clients[/{clientId}]`. `GroupDto` gained
+  `MemberClientIds`; `ClientDto` gained `RtId` (read-only, identifies the client as a group member).
+- **Blueprint cleanup gate:** `PreBlueprintCleanupMigration` now sweeps orphan `AssignedRole` edges for
+  `RtClient` origins too (aligned with the user-side strategy). No capture/restore pass is needed for
+  clients — the feature postdates the imperative seed, so no client held a random-rtId role edge at the
+  one-time 17→18 cutover. Client role/group assignments are declarable in the blueprint seed via the
+  generic `associations:` block.
+- **Tests:** `tests/IdentityServices.IntegrationTests/Persistence/ClientRoleAssignmentIntegrationTests.cs`
+  (Testcontainers MongoDB) covers direct-role assignment, group-inherited roles via client membership,
+  and removal.
+
 ### Login Configuration (Self-Registration & Auto-Group Assignment)
 
 Identity providers support login-time configuration via two attributes on the abstract `IdentityProvider` base type:

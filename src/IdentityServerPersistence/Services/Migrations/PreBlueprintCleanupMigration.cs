@@ -360,8 +360,20 @@ internal class PreBlueprintCleanupMigration(
         // with the entity itself. ExternalTenantUserMapping does NOT carry AssignedRole
         // associations (the schema disallows it) — its role assignments live in the
         // MappedRoleIds attribute and are remapped in the capture/restore steps instead.
+        //
+        // Client → Role edges (AB#4183): Client now carries the same outbound AssignedRole edge
+        // as User. Operator-created clients survive the entity-cleanup whitelist gate, so we
+        // must run the same orphan-edge sweep over RtClient origins to drop any edge pointing at
+        // a now-deleted pre-blueprint role — aligning the client gate with the user gate so
+        // client assignments are neither under-deleted (left dangling) nor over-deleted (the
+        // sweep only removes edges whose target is outside the stable blueprint range, so
+        // client→stable-role and client→operator-role edges are preserved). No capture/restore
+        // pass is needed for clients: the client-role feature postdates the imperative seed, so
+        // no client ever held a random-rtId role edge at this one-time 17→18 cutover.
         var deleted = 0;
         deleted += await CleanRoleEdgesForOriginTypeAsync<RtUser>(
+            tenantRepository, session, tenantId);
+        deleted += await CleanRoleEdgesForOriginTypeAsync<RtClient>(
             tenantRepository, session, tenantId);
 
         if (deleted > 0)
