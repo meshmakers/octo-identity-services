@@ -113,6 +113,7 @@ stages:
             inputs:
               version: '24.15.x'
           - task: DotNetCoreCLI@2
+            retryCountOnTaskFailure: 2
             displayName: 'Restore NuGet packages'
             inputs:
               command: 'restore'
@@ -120,6 +121,7 @@ stages:
               restoreArguments: '--force /p:OctoNugetPrivateServer=$(nugetPrivateServer)'
               noCache: true
           - task: DotNetCoreCLI@2
+            retryCountOnTaskFailure: 2
             displayName: 'Build'
             inputs:
               command: 'build'
@@ -140,6 +142,7 @@ stages:
             env:
               DOCKER_HOST: unix:///var/run/docker.sock
           - task: DotNetCoreCLI@2
+            retryCountOnTaskFailure: 2
             displayName: 'Test'
             inputs:
               command: 'test'
