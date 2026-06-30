@@ -15,4 +15,4 @@
 #
 # Usage: Replace APP_ID and APP_SECRET with your values
 
-octo-cli -c AddOAuthIdentityProvider -n "Facebook" -e true --clientId "***REMOVED-FACEBOOK-APPID-AB3837***" --clientSecret "***REMOVED-FACEBOOK-SECRET-AB3837***" -t facebook
+octo-cli -c AddOAuthIdentityProvider -n "Facebook" -e true --clientId "YOUR_APP_ID" --clientSecret "YOUR_APP_SECRET" -t facebook
