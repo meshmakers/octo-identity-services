@@ -362,6 +362,41 @@ entities:
       - id: System.Identity/AllowedAccessTokenSigningAlgorithms
         value: []
 
+  # MCP resource indicator (RFC 8707). Interactive OAuth clients like Claude Code send
+  # resource=<mcp public url> on /connect/authorize; Duende matches the value exactly against an
+  # ApiResource Name. Without this, the request fails with invalid_target. The MCP server itself does
+  # not validate the audience (ValidateAudience=false), so this only satisfies the resource indicator.
+  # The trailing slash is required: the value must match byte-for-byte what the client transmits, and
+  # ${octo.mcp.publicUrl} resolves without a trailing slash.
+  - rtId: '660000000000000000000021'
+    ckTypeId: System.Identity/ApiResource
+    rtWellKnownName: mcpApi
+    attributes:
+      - id: System/Enabled
+        value: true
+      - id: System/Name
+        value: '${octo.mcp.publicUrl}/'
+      - id: System/DisplayName
+        value: Octo MCP API
+      - id: System/Description
+        value: Resource indicator for the MCP server (interactive OAuth clients such as Claude Code)
+      - id: System.Identity/ResourceClaims
+        value:
+          - role
+      - id: System.Identity/ShowInDiscoveryDocument
+        value: true
+      - id: System.Identity/RequireResourceIndicator
+        value: false
+      - id: System.Identity/Secrets
+        value: []
+      - id: System.Identity/Scopes
+        value:
+          - octo_api
+          - octo_api.read_only
+          - octo_api.data_model_management
+      - id: System.Identity/AllowedAccessTokenSigningAlgorithms
+        value: []
+
   # ===========================================================================
   # CLIENTS (660…30 – 660…32). The full attribute set is large — every
   # property the imperative seed sets explicitly is mirrored here. Attributes
@@ -627,6 +662,22 @@ entities:
                 value: '${octo.mcp.publicUrl}/swagger/oauth2-redirect.html'
               - id: System.Identity/Source
                 value: base
+          # Loopback callbacks for interactive OAuth clients (Claude Code `claude mcp login`
+          # with `--callback-port 8976`). Duende validates redirect_uri by exact match; the CLI
+          # runs its OAuth callback listener on this fixed loopback port. Both localhost and the
+          # 127.0.0.1 literal are registered because clients differ in which they use.
+          - ckRecordId: System.Identity/ClientUriEntry
+            attributes:
+              - id: System.Identity/Uri
+                value: 'http://localhost:8976/callback'
+              - id: System.Identity/Source
+                value: base
+          - ckRecordId: System.Identity/ClientUriEntry
+            attributes:
+              - id: System.Identity/Uri
+                value: 'http://127.0.0.1:8976/callback'
+              - id: System.Identity/Source
+                value: base
       - id: System.Identity/PostLogoutRedirectUris
         value:
           - ckRecordId: System.Identity/ClientUriEntry
@@ -650,6 +701,11 @@ entities:
           - email
           - role
           - octo_api
+          # Interactive OAuth clients (Claude Code) request offline_access for a refresh token so the
+          # session survives access-token expiry without a re-login. Requires AllowOfflineAccess below.
+          - offline_access
+      - id: System.Identity/AllowOfflineAccess
+        value: true
       - id: System.Identity/AutoProvisionInChildTenants
         value: true
 
