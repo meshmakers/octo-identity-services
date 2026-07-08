@@ -111,7 +111,13 @@ public class PersistentGrantStore(
         var fieldFilterCriteria = FieldFilterCriteria.Create(LogicalOperators.And)
             .Field(nameof(RtPersistedGrant.GrantKey), FieldFilterOperator.Equals, key);
 
-        await TenantRepository.DeleteOneRtEntityAsync<RtPersistedGrant>(session, fieldFilterCriteria, DeleteOptions.Erase);
+        // Duende's IPersistedGrantStore contract treats removing a non-existent grant as a
+        // no-op. DefaultConsentService.UpdateConsentAsync unconditionally removes the previous
+        // consent grant even when none was ever persisted (consent screen submitted without
+        // "remember my decision") — DeleteOne's exactly-one contract would turn that into a 500
+        // on the authorize callback. DeleteMany tolerates zero matches; GrantKey is unique, so
+        // the semantics are unchanged when the grant exists.
+        await TenantRepository.DeleteManyRtEntitiesAsync<RtPersistedGrant>(session, fieldFilterCriteria, DeleteOptions.Erase);
 
         await session.CommitTransactionAsync();
     }
