@@ -118,9 +118,7 @@ export class ConsentComponent implements OnInit {
   returnUrl = '';
 
   ngOnInit(): void {
-    this.returnUrl = this.route.snapshot.queryParams['ReturnUrl']
-                  || this.route.snapshot.queryParams['returnUrl']
-                  || '';
+    this.returnUrl = this.route.snapshot.queryParams['ReturnUrl'] || '';
     this.loadContext();
   }
 

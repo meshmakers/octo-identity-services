@@ -209,11 +209,9 @@ public class PersistentGrantStoreTests
         // Act
         await _sut.RemoveAsync(key, TestContext.Current.CancellationToken);
 
-        // Assert — RemoveAsync uses DeleteMany (not DeleteOne) so that removing a
-        // non-existent grant is a no-op per Duende's IPersistedGrantStore contract;
-        // GrantKey is unique, so the semantics for an existing grant are unchanged.
+        // Assert
         _session.TransactionStartCount.Should().Be(1);
-        await _tenantRepository.Received(1).DeleteManyRtEntitiesAsync<RtPersistedGrant>(
+        await _tenantRepository.Received(1).DeleteOneRtEntityAsync<RtPersistedGrant>(
             _session,
             Arg.Any<FieldFilterCriteria>(),
             DeleteOptions.Erase);
