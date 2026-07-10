@@ -195,8 +195,9 @@ public class AdminProvisioningController(
             }
         }
 
-        // The target tenant may still be initializing (CK model import runs asynchronously after tenant creation).
-        // Retry with backoff if the CK cache is not yet populated.
+        // The target tenant may still be initializing (CK model import + default-configuration
+        // seeding run asynchronously after tenant creation). Retry with backoff while the tenant is
+        // not ready, and once the budget is exhausted surface a clean 503 — not a generic 500.
         const int maxRetries = 10;
         const int retryDelayMs = 1000;
         for (var attempt = 1; attempt <= maxRetries; attempt++)
@@ -205,14 +206,55 @@ public class AdminProvisioningController(
             {
                 return await ProvisionCurrentUserInternal(tenantRepository, userId, userName, tenantId);
             }
-            catch (Exception ex) when ((ex is CkCacheException or TenantNotReadyException) && attempt < maxRetries)
+            catch (Exception ex) when (IsTenantInitializing(ex))
             {
+                logger.LogInformation(ex,
+                    "Target tenant '{TargetTenantId}' is not ready yet (attempt {Attempt}/{MaxRetries}).",
+                    targetTenantId, attempt, maxRetries);
+
+                // On the final attempt do NOT rethrow — the previous code's `attempt < maxRetries`
+                // guard let the last not-ready failure bubble up as a 500 (AB#4348). Return 503 so
+                // the operator/CLI gets an actionable "still initializing" signal instead.
+                if (attempt >= maxRetries)
+                {
+                    return StatusCode(StatusCodes.Status503ServiceUnavailable,
+                        $"Tenant '{targetTenantId}' is still initializing. Please try again shortly.");
+                }
+
                 await Task.Delay(retryDelayMs * attempt);
             }
         }
 
+        // Unreachable — the loop either returns a mapping or the 503 above — but the compiler needs
+        // a terminal return.
         return StatusCode(StatusCodes.Status503ServiceUnavailable,
             $"Tenant '{targetTenantId}' is still initializing. Please try again shortly.");
+    }
+
+    /// <summary>
+    /// Returns true when an exception indicates the target tenant is still being provisioned and the
+    /// provisioning should be retried: an unpopulated CK cache (<see cref="CkCacheException"/>), missing
+    /// default configuration / roles (<see cref="TenantNotReadyException"/>), or a freshly-provisioned
+    /// identity database whose first read fails with MongoDB errorCode 13 ("requires authentication")
+    /// because the tenant database user is not yet in place (AB#4348). Walks the inner-exception chain so
+    /// wrapped failures are matched too.
+    /// </summary>
+    private static bool IsTenantInitializing(Exception exception)
+    {
+        for (Exception? ex = exception; ex is not null; ex = ex.InnerException)
+        {
+            if (ex is CkCacheException or TenantNotReadyException)
+            {
+                return true;
+            }
+
+            if (ex is MongoDB.Driver.MongoCommandException { Code: 13 })
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private async Task<ActionResult<ExternalTenantUserMappingDto>> ProvisionCurrentUserInternal(
