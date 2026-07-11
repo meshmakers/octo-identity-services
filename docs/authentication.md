@@ -577,7 +577,7 @@ config — no CK schema change. The MCP server performs ALL exchanges with the d
 of how the user originally logged in (device flow or a DCR-registered client) — the subject_token is
 validated context-free with `ValidateAudience=false`, so it is not bound to the exchanging client. The
 interim `octo-mcpServices-interactive` client (rtId 660…035) was removed again in blueprint 1.1.5:
-interactive MCP clients self-register via Dynamic Client Registration (`octo-mcp-dyn-*`), and nothing
+interactive MCP clients self-register via Dynamic Client Registration (`octo-dcr-*`), and nothing
 ever consumed the static client (its fixed `:8976` loopback redirects never matched Claude Code's
 random-port callbacks).
 
@@ -928,7 +928,7 @@ their mirrors each cleanup interval. `PreBlueprintCleanupMigration` never sweeps
 Code) send `GET /connect/authorize` without a `scope` parameter even though the protected-resource
 metadata advertises `scopes_supported`; Duende hard-rejects that with "scope is missing".
 `DcrDefaultScopeMiddleware` (registered before `UseIdentityServer()`) injects the server-fixed DCR
-scope set (`DynamicClientRegistration.AllowedScopes`) into the query string when an `octo-mcp-dyn-*`
+scope set (`DynamicClientRegistration.AllowedScopes`) into the query string when an `octo-dcr-*`
 client omits `scope` — permitted by RFC 6749 §3.3 (server-defined default scope) and grants nothing
 the client could not have requested, since DCR scopes are server-fixed at registration anyway.
 Non-DCR clients are never touched.

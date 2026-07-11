@@ -25,7 +25,7 @@ description: |
   1.1.5 (AB#4338): removes the `octo-mcpServices-interactive` client (660…35)
   again. It was the interim path for interactive MCP clients before we learned
   that Claude Code requires RFC 7591 Dynamic Client Registration — such clients
-  now self-register (`octo-mcp-dyn-*`, server-side hard gate, see
+  now self-register (`octo-dcr-*`, server-side hard gate, see
   `docs/CONCEPT-MCP-DYNAMIC-CLIENT-REGISTRATION.md`), and nothing ever consumed
   the static client (its fixed :8976 loopback redirects never matched Claude
   Code's random-port callbacks). The blueprint engine deletes the entity from

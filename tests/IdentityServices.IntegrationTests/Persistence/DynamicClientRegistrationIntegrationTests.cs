@@ -50,7 +50,7 @@ public class DynamicClientRegistrationIntegrationTests : IClassFixture<IdentityS
 
         result.Outcome.Should().Be(DynamicClientRegistrationOutcome.Created);
         result.Response.Should().NotBeNull();
-        result.Response!.ClientId.Should().StartWith("octo-mcp-dyn-");
+        result.Response!.ClientId.Should().StartWith("octo-dcr-");
         result.Response.TokenEndpointAuthMethod.Should().Be("none");
         result.Response.Scope.Should().Contain("octo_api");
         result.Response.RedirectUris.Should().Contain(redirect);

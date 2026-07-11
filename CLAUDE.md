@@ -119,7 +119,7 @@ counterpart of the browser tenant-switch, for the MCP server:
   ALL exchanges with the device client regardless of how the user logged in
   (device flow or DCR-registered interactive client). The interim
   `octo-mcpServices-interactive` client (660…035) was removed again in blueprint
-  **1.1.5** — interactive MCP clients self-register via DCR (`octo-mcp-dyn-*`)
+  **1.1.5** — interactive MCP clients self-register via DCR (`octo-dcr-*`)
   and nothing ever consumed the static client.
 - **v1 issues no exchanged refresh token** (short-lived B tokens, re-exchanged from
   the still-valid A token). See `docs/CONCEPT-CROSS-TENANT-TOKEN-EXCHANGE.md` and

@@ -7,7 +7,7 @@ namespace Meshmakers.Octo.Backend.IdentityServices.Middleware;
 
 /// <summary>
 /// Defaults the <c>scope</c> parameter on <c>GET /connect/authorize</c> for dynamically-registered
-/// clients (<c>octo-mcp-dyn-*</c>, RFC 7591 / AB#4338) when the client omits it.
+/// clients (<c>octo-dcr-*</c>, RFC 7591 / AB#4338) when the client omits it.
 /// </summary>
 /// <remarks>
 /// <para>

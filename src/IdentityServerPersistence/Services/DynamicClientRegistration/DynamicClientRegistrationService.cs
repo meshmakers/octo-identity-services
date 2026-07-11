@@ -20,9 +20,11 @@ public sealed class DynamicClientRegistrationService(
 {
     /// <summary>
     ///     Client-id prefix of all dynamically-registered clients. Public so the authorize-time
-    ///     default-scope middleware can recognize DCR clients without a store lookup.
+    ///     default-scope middleware can recognize DCR clients without a store lookup. Deliberately
+    ///     product-neutral ("dcr" = Dynamic Client Registration): the feature is a generic identity
+    ///     capability — MCP clients (Claude Code) are merely its first consumer.
     /// </summary>
-    public const string ClientIdPrefix = "octo-mcp-dyn-";
+    public const string ClientIdPrefix = "octo-dcr-";
 
     public async Task<DynamicClientRegistrationResult> RegisterAsync(
         DynamicClientRegistrationRequest request, CancellationToken cancellationToken = default)
