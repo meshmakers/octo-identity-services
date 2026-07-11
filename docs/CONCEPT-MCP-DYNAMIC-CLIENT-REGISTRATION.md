@@ -53,36 +53,44 @@ support dynamic client registration" because our Duende exposes no `registration
 6. Claude Code sends `Authorization: Bearer` to `https://mcp/mcp` → AB#4315 validates → connected;
    per-tool `tenantId` selects the tenant to operate on (within allowed_tenants).
 
-## Tenant switching (already solved — do NOT scope the connection to a tenant)
+## Tenant switching (CORRECTED 2026-07-11 — one token = one operating tenant)
 
-Switching tenants is NOT done by re-connecting or by scoping the OAuth flow to one tenant. There are
-two distinct tenant concepts:
-- **Login tenant** — where the user authenticates (via §9 email-first discovery); becomes `tenant_id`
-  in the token. One-time (short-cut on repeat visits by the `octo_last_tenant` cookie).
-- **Operating tenant(s)** — which tenant's data a tool call acts on; the per-tool `tenantId` parameter,
-  bounded by the token's `allowed_tenants`.
+IMPORTANT correction: switching tenants is NOT free. The shared `TenantAuthorizationMiddleware`
+(octo-common-services) authorizes the route tenant **strictly against the token's `tenant_id` claim**;
+its own comment states `allowed_tenants` is used ONLY for tenant selection (the picker UI), NOT for
+authorization. A token with `tenant_id=energyiq` gets **403** at voestalpine's API even if voestalpine ∈
+`allowed_tenants`. Two tenant concepts:
+- **Login / operating tenant** — the one the user authenticated against; `tenant_id` in the token; the
+  ONLY tenant that token can act on.
+- **`allowed_tenants`** — which tenants the user MAY authenticate against (the picker), NOT tenants the
+  current token can access.
 
-The MCP server already reuses ONE session token across tenants: `McpSessionContext.TryGetAccessToken`
-pulls the session access token and the `*ClientContext` helpers feed it to
-`Create*Client(tenantId, accessToken)` per call; the backend service enforces `allowed_tenants`
-(`TenantAuthorizationMiddleware`). So a single token (with `allowed_tenants` resolved by
-`AllowedTenantsResolver`) lets Claude Code operate across ALL the user's tenants without re-auth.
+Consequences (verified live 2026-07-11):
+- The MCP server reuses ONE session token for every tool call (`McpSessionContext` +
+  `Create*Client(tenantId, token)`). For a `tenantId` ≠ the token's `tenant_id`, the backend 403s.
+  So **operating on another tenant requires a NEW token with that tenant's `tenant_id`** — i.e. a fresh
+  authentication against it. In-band, the MCP server does this via the device-code `authenticate` tool
+  (the tools cannot re-drive Claude Code's browser OAuth), hence the device-flow fallback on switch.
+- The tenantless `/mcp` endpoint + interactive DCR login is still correct for the INITIAL connection;
+  the DCR client stays tenant-agnostic. But per-switch re-auth is unavoidable under the current
+  `tenant_id`-based authorization model.
 
-Consequences for this design:
-- **Use the tenantless `/mcp` endpoint** (current config `https://localhost:5017/mcp`) — one
-  connection, one login, switch via the `tenantId` tool parameter.
-- **The DCR client is tenant-agnostic** — it is just the app identity; tenant rights come from the
-  USER (`allowed_tenants`), not the client. This is why registering it once (system + mirror) is
-  sufficient; it does not bind the session to a tenant.
-- **Reject M1 / tenant-scoped MCP URLs** — they would pin the connection to one tenant and BREAK
-  switching. Tenantless is strictly better here.
-- **Optional hardening (separate small task, octo-mcp-service):** the tenantless `/mcp` path does not
-  itself check that the per-tool `tenantId` ∈ `allowed_tenants` (today only the backend 403s). Add an
-  early `allowed_tenants` membership check in the MCP server so cross-tenant misuse fails fast with a
-  clear error instead of a downstream 403.
-- **Caveat:** this assumes the user's tenants are reachable via cross-tenant mappings / the tenant
-  hierarchy (so one login yields `allowed_tenants` covering them). Users holding SEPARATE, unlinked
-  accounts in different tenants would need a per-account login — out of scope; flag if it arises.
+Options for SEAMLESS switching (future, beyond AB#4338):
+- **REJECTED — naive token re-scope** (swap `tenant_id` on the existing token): INSECURE. The token
+  carries tenant-specific ROLES resolved in the login tenant; reusing them under another `tenant_id`
+  would grant the user the wrong tenant's rights (privilege leak). A valid token for tenant Y MUST
+  carry Y-roles, which can only be resolved in Y. This is exactly why the backend's strict `tenant_id`
+  check is correct.
+1. **Silent cross-tenant token issuance with role re-resolution** (the only secure seamless path).
+   Reuse the existing cross-tenant auto-login machinery (`/{parent}/api/auth/cross-tenant-token` →
+   `/{child}/api/auth/cross-tenant-login`, which re-resolves roles in the target via
+   `SyncMappedRolesAsync` / `ExternalTenantUserMapping` — no credential prompt, no role leak) and
+   extend it to mint a target-tenant **bearer access token** (today it yields a browser session).
+   Real, security-sensitive feature; its own work item.
+2. **Authorize on `allowed_tenants`** instead of strict `tenant_id` — REJECTED: would leak roles across
+   tenants (same reason as the naive re-scope). The strict check is deliberate.
+3. **Status quo**: re-auth (device or a fresh interactive login with `acr_values=tenant:<target>`) per
+   switch — the token is correctly minted against the target with target-tenant roles. Safe; works today.
 
 ## Phased implementation
 
