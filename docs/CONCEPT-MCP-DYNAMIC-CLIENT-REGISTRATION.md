@@ -175,7 +175,17 @@ intent). Dedupe + per-tenant cap already landed in Phase 2. Original Phase 4 det
 - `PreBlueprintCleanupMigration`: defensive early-continue on `DynamicRegistration=true` for `RtClient`
   (already safe via random ClientId ∉ whitelist; makes intent explicit).
 
-### Phase 5 — tests + live validation + docs (2–3 d)
+### Phase 5 — tests + docs ✅ DONE 2026-07-11 (live e2e still pending)
+- **DCR integration tests** (`DynamicClientRegistrationIntegrationTests`, Testcontainers, 8 tests, all
+  green): valid loopback → system-tenant client (DynamicRegistration + AutoProvision + PKCE + offline)
+  + mirrored into child; non-loopback / no-redirect / confidential-auth / bad-grant rejected; disabled →
+  Disabled; identical redirect set deduped → existing re-issued; per-tenant cap → CapExceeded.
+- **Docs**: `docs/authentication.md` § Dynamic Client Registration; `CLAUDE.md` config option.
+- **STILL PENDING: live Claude Code e2e** — needs the local identity restarted with
+  `OCTO_IDENTITY__DYNAMICCLIENTREGISTRATION__ENABLED=true`, then `claude mcp login` against
+  `https://localhost:5017/mcp` (email-first tenant-discovery in the browser).
+
+### Phase 5 (original checklist) (2–3 d)
 - Integration tests (Testcontainers Mongo, reuse `IdentityServicesFixture`): valid loopback register →
   RtClient in system tenant, random rtId, DynamicRegistration=true, mirrored; reject non-loopback /
   secret / bad-grant / bad-scope; dedupe re-issues; TTL sweep erases + demirrors; PreBlueprintCleanup

@@ -832,6 +832,42 @@ The `AuthorizeService` in `@meshmakers/shared-auth`:
 
 The resolver runs **only at token issuance time** (login, token refresh), not per-request. The number of tenants is typically small (< 100), making the per-tenant mapping query acceptable.
 
+## Dynamic Client Registration (RFC 7591) — AB#4338
+
+Spec-compliant interactive MCP clients (e.g. Claude Code) require **RFC 7591 Dynamic Client
+Registration** — they self-register a client at a `registration_endpoint` and do not accept a
+pre-registered `client_id`. A hand-rolled `POST /connect/register` endpoint supports this. It is
+**opt-in per deployment** (`OCTO_IDENTITY__DYNAMICCLIENTREGISTRATION__ENABLED`, default `false`);
+when disabled the endpoint returns 404 and `registration_endpoint` is not advertised in discovery.
+
+**Endpoint:** `POST /connect/register` (anonymous, per-IP rate-limited). Runs in the **system tenant**
+context. Returns 201 (created) / 200 (existing re-issued) / 400 (`invalid_redirect_uri` /
+`invalid_client_metadata`) / 403 (per-tenant cap) / 404 (disabled).
+
+**Security gate** (`DynamicClientRegistrationService`): registration is open (Claude Code sends no
+initial access token) but hard-constrained — **loopback redirect URIs only** (`127.0.0.1` / `[::1]` /
+`localhost`, http), **PKCE required**, **public client** (`token_endpoint_auth_method=none`, no secret),
+grant fixed to `authorization_code` (+`refresh_token`), and a **server-fixed scope allow-list** (client
+scopes are ignored). Per-IP rate limit + per-tenant cap + bounded TTL bound abuse.
+
+**Tenant model — reuses the shipped tenant-specific auth, no new machinery:**
+- The client is created in the **system tenant** with `DynamicRegistration=true` and
+  `AutoProvisionInChildTenants=true`, then mirrored into every tenant (via
+  `ClientMirrorProvisioningService`) — identical to the built-in `octo-mcpServices-*` clients.
+- The client is tenant-agnostic; the **user's** `allowed_tenants` (not the client) grants tenant access.
+  A DCR client sends `/connect/authorize` with no `acr_values`, so **§9 Email-First Tenant-Discovery**
+  resolves the tenant; the mirrored client is found in whatever tenant the user selects. Switching
+  tenants afterwards is the usual token + per-call tenant selection, not a new login.
+
+**Lifecycle:** `DynamicRegistrationExpiresAt` (registration + `ClientTtlDays`, default 90d) bounds
+lifetime. `ClientStore.FindClientByIdAsync` returns null for an expired dynamic client (immediate
+enforcement → `unauthorized_client`), and `TokenCleanupHostService` erases expired dynamic clients +
+their mirrors each cleanup interval. `PreBlueprintCleanupMigration` never sweeps a
+`DynamicRegistration=true` client. Registrations with an identical redirect-URI set are **deduped**
+(the existing non-expired client is re-issued) to avoid per-launch accumulation.
+
+See `docs/CONCEPT-MCP-DYNAMIC-CLIENT-REGISTRATION.md` for the full design and phasing.
+
 ## Security Considerations
 
 ### Scheme Isolation
