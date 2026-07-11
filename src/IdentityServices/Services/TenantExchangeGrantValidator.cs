@@ -1,10 +1,16 @@
 using Duende.IdentityServer.Events;
 using Duende.IdentityServer.Models;
 using Duende.IdentityServer.Services;
+using Duende.IdentityServer.Stores;
 using Duende.IdentityServer.Validation;
 using IdentityModel;
+using IdentityServerPersistence.Configuration.Options;
 using IdentityServerPersistence.Services;
+using Meshmakers.Common.Shared;
 using Meshmakers.Octo.Services.Infrastructure;
+using Microsoft.Extensions.Options;
+using Microsoft.IdentityModel.JsonWebTokens;
+using Microsoft.IdentityModel.Tokens;
 
 namespace Meshmakers.Octo.Backend.IdentityServices.Services;
 
@@ -40,7 +46,8 @@ namespace Meshmakers.Octo.Backend.IdentityServices.Services;
 ///     </para>
 /// </remarks>
 public class TenantExchangeGrantValidator(
-    ITokenValidator tokenValidator,
+    IValidationKeysStore validationKeysStore,
+    IOptions<OctoIdentityServicesOptions> octoIdentityOptions,
     ICrossTenantAuthenticationService crossTenantAuthService,
     ICrossTenantUserProvisioningService crossTenantUserProvisioningService,
     IHttpContextAccessor httpContextAccessor,
@@ -83,16 +90,31 @@ public class TenantExchangeGrantValidator(
             return;
         }
 
-        var validationResult = await tokenValidator.ValidateAccessTokenAsync(
-            subjectToken, null, cancellationToken);
-        if (validationResult.IsError)
+        // Validate the subject token OUT of the target-tenant request context — signature + issuer +
+        // lifetime only, ValidateAudience=false (as the whole platform does). Duende's
+        // ITokenValidator.ValidateAccessTokenAsync runs checks bound to the CURRENT request tenant, which
+        // here is the TARGET tenant B (resolved from acr_values) while the subject belongs to the SOURCE
+        // tenant A — e.g. the A user does not exist in B yet — so it wrongly rejects with invalid_token.
+        // Cross-tenant authorization is enforced separately below against the source tenant.
+        var validationKeys = await validationKeysStore.GetValidationKeysAsync();
+        var handler = new JsonWebTokenHandler();
+        var validation = await handler.ValidateTokenAsync(subjectToken, new TokenValidationParameters
         {
-            logger.LogWarning("Token exchange rejected: subject_token invalid ({Error})", validationResult.Error);
+            ValidateIssuer = true,
+            ValidIssuer = octoIdentityOptions.Value.AuthorityUrl.EnsureEndsWith("/"),
+            ValidateAudience = false,
+            ValidateLifetime = true,
+            IssuerSigningKeys = validationKeys.Select(k => k.Key)
+        });
+        if (!validation.IsValid)
+        {
+            logger.LogWarning("Token exchange rejected: subject_token invalid ({Error})",
+                validation.Exception?.Message ?? "validation failed");
             context.Result = Error(TokenRequestErrors.InvalidGrant, "subject_token is invalid or expired");
             return;
         }
 
-        var claims = (validationResult.Claims ?? []).ToList();
+        var claims = validation.ClaimsIdentity.Claims.ToList();
         var sourceUserId = claims.FirstOrDefault(c => c.Type == JwtClaimTypes.Subject)?.Value;
         var sourceTenantId = claims.FirstOrDefault(c => c.Type == "tenant_id")?.Value;
 
