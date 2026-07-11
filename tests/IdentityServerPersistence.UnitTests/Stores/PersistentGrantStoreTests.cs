@@ -211,7 +211,10 @@ public class PersistentGrantStoreTests
 
         // Assert
         _session.TransactionStartCount.Should().Be(1);
-        await _tenantRepository.Received(1).DeleteOneRtEntityAsync<RtPersistedGrant>(
+        // RemoveAsync uses DeleteMany (not DeleteOne) so removing a non-existent grant is a no-op
+        // per Duende's IPersistedGrantStore contract — DeleteOne's exactly-one semantics would 500
+        // the authorize callback when consent is submitted without a prior remembered grant.
+        await _tenantRepository.Received(1).DeleteManyRtEntitiesAsync<RtPersistedGrant>(
             _session,
             Arg.Any<FieldFilterCriteria>(),
             DeleteOptions.Erase);

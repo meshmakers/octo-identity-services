@@ -319,6 +319,15 @@ internal class PreBlueprintCleanupMigration(
             "OctoToolClient",
             "IdentityServicesSwaggerClient",
             "RefineryStudioClient",
+            // MCP clients: swagger + device were imperatively seeded by the MCP server's old
+            // CreateIdentityDataCommandRequest path (with random rtIds) before AB#4208 moved them into
+            // this blueprint with stable rtIds — a leftover random-rtId copy on the system tenant
+            // shadows the blueprint client (Duende takes the first match), so it must be swept here.
+            // interactive (AB#4338) never had an imperative copy; listed defensively so any future
+            // stray is cleaned up the same way.
+            "octo-mcpServices-swagger",
+            "octo-mcpServices-device",
+            "octo-mcpServices-interactive",
         };
 
     private static readonly HashSet<string> KnownPreBlueprintGroupNames =

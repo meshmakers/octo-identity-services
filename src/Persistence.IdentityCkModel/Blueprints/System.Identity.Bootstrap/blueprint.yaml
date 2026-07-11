@@ -1,12 +1,12 @@
 $schema: https://schemas.meshmakers.cloud/blueprint-meta.schema.json
-blueprintId: System.Identity.Bootstrap-1.1.2
+blueprintId: System.Identity.Bootstrap-1.1.3
 description: |
   Service-managed Identity tenant seed — system + every child tenant. Provides
   the default role set (14 roles), the five OIDC identity resources, three API
   scopes (full-access / read-only / data-model-management), the OctoApi resource,
-  the OAuth client baseline (OctoTool / IdentityServices Swagger / Refinery
-  Studio SPA / MCP Services Swagger + Device) and the TenantOwners group with
-  full role assignment.
+  the MCP resource indicator, the OAuth client baseline (OctoTool / IdentityServices
+  Swagger / Refinery Studio SPA / MCP Services Swagger + Device + Interactive) and
+  the TenantOwners group with full role assignment.
 
   Following the OctoMesh "System.* = service-managed" convention this blueprint
   is auto-applied by the Identity service on tenant Enable / startup once Phase 3
@@ -21,6 +21,20 @@ description: |
   the cluster has the URL unset the blueprint still applies — the entity is
   seeded with empty placeholder values so the OIDC failure on user login is
   obvious instead of silently swallowed.
+
+  1.1.3 (AB#4338): adds the interactive-MCP OAuth path for spec-compliant MCP
+  clients (Claude Code). New `mcpApi` ApiResource whose Name is
+  `${octo.mcp.publicUrl}/` — the RFC 8707 resource indicator such clients send;
+  Duende exact-matches it or rejects the token exchange with `invalid_target`.
+  It is an isolated protocol shim (same scopes as OctoApi, no resource server
+  validates it — the MCP server runs `ValidateAudience=false`), NOT a return to
+  per-service resources. New dedicated client `octo-mcpServices-interactive`
+  (authorization code + PKCE, loopback redirects `127.0.0.1:8976`/`localhost:8976`,
+  offline_access) — kept separate from the Swagger client so the CLI loopback flow
+  does not widen the browser client's redirect surface. Pairs with the MCP server's
+  RFC 9728 OAuth discovery (octo-mcp-service). The identity-side `${octo.mcp.publicUrl}`
+  must resolve byte-identical to the MCP chart's `mcp.publicUri` per environment
+  (trailing-slash normalized) or the resource indicator will not match.
 
   1.1.2 (AB#4209 Step 2b): adds a `{{family.local-dev}}` placeholder to the
   Refinery Studio client's `RedirectUris`, `PostLogoutRedirectUris` and

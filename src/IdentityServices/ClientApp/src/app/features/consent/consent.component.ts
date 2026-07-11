@@ -118,7 +118,12 @@ export class ConsentComponent implements OnInit {
   returnUrl = '';
 
   ngOnInit(): void {
-    this.returnUrl = this.route.snapshot.queryParams['ReturnUrl'] || '';
+    // Duende's ConsentPageResult sends the query param lowercase (`returnUrl`), unlike
+    // LoginPageResult which sends `ReturnUrl`. Accept both casings, otherwise the consent
+    // POST loses the return URL and the authorize flow dead-ends with "Invalid consent request".
+    this.returnUrl = this.route.snapshot.queryParams['ReturnUrl']
+                  || this.route.snapshot.queryParams['returnUrl']
+                  || '';
     this.loadContext();
   }
 
