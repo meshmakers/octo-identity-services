@@ -122,7 +122,20 @@ existing machinery.
   add index-refresh migration copied from `ClientProvisionedByParentMigration.cs` (additive → no data migration).
 - `ClientUriSources.cs`: add `Dynamic` source constant.
 
-### Phase 2 — registration endpoint + discovery (2 d)
+### Phase 2 — registration endpoint + discovery — ✅ DONE 2026-07-11 (build + suite green)
+Implemented: `DynamicClientRegistrationOptions` on `OctoIdentityServicesOptions` (Enabled default false,
+AllowedScopes, ClientTtlDays=90, MaxClientsPerTenant=100, RateLimitPermitsPerMinute=5); RFC 7591
+request/response/error DTOs; `IDynamicClientRegistrationService` + `DynamicClientRegistrationService`
+(validate gate → build RtClient in system tenant, DynamicRegistration=true + AutoProvisionInChildTenants=true
++ loopback redirects Source=dynamic + fixed scopes + TTL → InsertOneRtEntityAsync → ProvisionForAllChildTenantsAsync
+mirror → dedupe by redirect-uri set → per-tenant cap); `POST /connect/register` minimal-API endpoint
+(anonymous, rate-limited "dcr", 201/200/400/403/404 mapping); native-ish discovery via
+`Discovery.CustomEntries["registration_endpoint"]` gated on Enabled. NOTE: used CustomEntries (definitely
+works) instead of the `Discovery.DynamicClientRegistration.StaticRegistrationEndpoint` native option to
+avoid enum-name uncertainty — revisit if desired. Security gate is basic-but-real here (loopback/PKCE/
+public/fixed-scopes); Phase 3 adds the config polish. Original Phase 2 detail below.
+
+### Phase 2 (original checklist) (2 d)
 - `POST /connect/register` (system-tenant context — root path, no tenant prefix). RFC 7591 subset
   request/response DTOs (redirect_uris, grant_types, token_endpoint_auth_method, scope, client_name).
 - `DynamicClientRegistrationService` (`IdentityServerPersistence/Services/`): validate (Phase 3 gate);

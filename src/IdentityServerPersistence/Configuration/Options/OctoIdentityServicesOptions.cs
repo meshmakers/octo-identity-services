@@ -167,4 +167,50 @@ public class OctoIdentityServicesOptions
     /// </remarks>
     public Dictionary<string, List<string>> UriFamilies { get; set; } =
         new(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>
+    ///     RFC 7591 Dynamic Client Registration (AB#4338). Lets spec-compliant interactive MCP
+    ///     clients (e.g. Claude Code) self-register a public authorization-code+PKCE client instead
+    ///     of relying on a pre-seeded client id. Opt-in per deployment (default OFF) and hard-gated
+    ///     (loopback redirects, PKCE, no secret, fixed scopes, TTL, per-tenant cap, rate limit).
+    /// </summary>
+    public DynamicClientRegistrationOptions DynamicClientRegistration { get; set; } = new();
+}
+
+/// <summary>
+///     Configuration for the hand-rolled RFC 7591 Dynamic Client Registration endpoint
+///     (<c>POST /connect/register</c>). See <see cref="OctoIdentityServicesOptions.DynamicClientRegistration"/>.
+/// </summary>
+public class DynamicClientRegistrationOptions
+{
+    /// <summary>
+    ///     When false (default) the <c>/connect/register</c> endpoint returns 404 and the
+    ///     <c>registration_endpoint</c> is not advertised in discovery. Open registration is a
+    ///     meaningful attack surface, so it must be explicitly enabled per deployment.
+    /// </summary>
+    public bool Enabled { get; set; }
+
+    /// <summary>
+    ///     The exact scope set a dynamically-registered client is granted. Client-supplied scopes
+    ///     are ignored — the server fixes them. Includes <c>offline_access</c> for silent refresh.
+    /// </summary>
+    public List<string> AllowedScopes { get; set; } =
+        ["openid", "profile", "email", "role", "octo_api", "offline_access"];
+
+    /// <summary>
+    ///     Lifetime of a dynamically-registered client. The cleanup sweep erases dynamic clients
+    ///     past this age (measured from registration).
+    /// </summary>
+    public int ClientTtlDays { get; set; } = 90;
+
+    /// <summary>
+    ///     Maximum number of live dynamically-registered clients per tenant. Registration is
+    ///     refused once the cap is hit (dedupe of identical redirect sets keeps this low in practice).
+    /// </summary>
+    public int MaxClientsPerTenant { get; set; } = 100;
+
+    /// <summary>
+    ///     Per-IP sliding-window permit count per minute for the registration endpoint.
+    /// </summary>
+    public int RateLimitPermitsPerMinute { get; set; } = 5;
 }
