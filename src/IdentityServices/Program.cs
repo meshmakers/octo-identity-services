@@ -386,6 +386,7 @@ try
     // The sequence of the add statements in the configure function is of importance.
     // app.UseAuthentication()
     // !!!UseIdentityServer calls already UseAuthentication; comes before app.UseMvc();
+    app.UseDcrDefaultScope();
     app.UseOidcTenantResolution();
     app.UseTenantLoginRedirect();
     app.UseIdentityServer();

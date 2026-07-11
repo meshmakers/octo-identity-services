@@ -919,6 +919,15 @@ their mirrors each cleanup interval. `PreBlueprintCleanupMigration` never sweeps
 `DynamicRegistration=true` client. Registrations with an identical redirect-URI set are **deduped**
 (the existing non-expired client is re-issued) to avoid per-launch accumulation.
 
+**Scopeless authorize requests are defaulted:** some interactive MCP clients (observed with Claude
+Code) send `GET /connect/authorize` without a `scope` parameter even though the protected-resource
+metadata advertises `scopes_supported`; Duende hard-rejects that with "scope is missing".
+`DcrDefaultScopeMiddleware` (registered before `UseIdentityServer()`) injects the server-fixed DCR
+scope set (`DynamicClientRegistration.AllowedScopes`) into the query string when an `octo-mcp-dyn-*`
+client omits `scope` — permitted by RFC 6749 §3.3 (server-defined default scope) and grants nothing
+the client could not have requested, since DCR scopes are server-fixed at registration anyway.
+Non-DCR clients are never touched.
+
 See `docs/CONCEPT-MCP-DYNAMIC-CLIENT-REGISTRATION.md` for the full design and phasing.
 
 ## Security Considerations

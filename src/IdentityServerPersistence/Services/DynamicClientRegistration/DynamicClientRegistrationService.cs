@@ -18,7 +18,11 @@ public sealed class DynamicClientRegistrationService(
     ILogger<DynamicClientRegistrationService> logger)
     : IDynamicClientRegistrationService
 {
-    private const string ClientIdPrefix = "octo-mcp-dyn-";
+    /// <summary>
+    ///     Client-id prefix of all dynamically-registered clients. Public so the authorize-time
+    ///     default-scope middleware can recognize DCR clients without a store lookup.
+    /// </summary>
+    public const string ClientIdPrefix = "octo-mcp-dyn-";
 
     public async Task<DynamicClientRegistrationResult> RegisterAsync(
         DynamicClientRegistrationRequest request, CancellationToken cancellationToken = default)
