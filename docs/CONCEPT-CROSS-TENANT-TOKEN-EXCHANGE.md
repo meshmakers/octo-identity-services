@@ -32,12 +32,14 @@ login. No re-scope, no leak. Only the validator's authorize+resolve logic is new
    `home_tenant_id`, `preferred_username`. Reject if invalid/expired.
 1a. **Effective-source resolution (sibling-tenant fix):** the caller is usually itself a cross-tenant
    shadow user `xt_{home}_{orig}`, so `tenant_id=A` is a *sibling* of B (both children of the home
-   tenant), not an ancestor — the ancestry gate below would wrongly deny it. When the token carries
-   `home_tenant_id` and it differs from `tenant_id`, recover the HOME identity: strip the
-   `xt_{home}_` prefix from `preferred_username` → original user name, then
-   `FindUserIdByNameInTenantAsync(home, origName)` → home `sub`. Use (home, homeSub) as the effective
-   source for the gate. A direct user of A (no `home_tenant_id`, or it equals A) keeps (A, subA).
-   Unresolvable home identity → `UnauthorizedClient`.
+   tenant), not an ancestor — the ancestry gate below would wrongly deny it. The shadow user name is
+   read from the SOURCE tenant database (`FindUserNameByIdInTenantAsync(A, subA)`) — authoritative;
+   token claims like `home_tenant_id`/`preferred_username` are subject to API-resource claim
+   filtering and are typically ABSENT from access tokens, so they must not be relied on. If the name
+   matches `xt_{home}_{orig}` (same `Split('_', 3)` convention as `UserProfileService`), resolve the
+   home `sub` via `FindUserIdByNameInTenantAsync(home, orig)` and use (home, homeSub) as the
+   effective source for the gate. A direct user (no `xt_` prefix) keeps (A, subA). Unresolvable home
+   identity → `UnauthorizedClient`.
 2. **B-authorization gate:** `CrossTenantAuthenticationService.ValidateCrossTenantAccessAsync(B, source, subSource)` (walks hierarchy: source must be ancestor of B; source user exists). null → `UnauthorizedClient`. (Defense-in-depth: assert B ∈ `AllowedTenantsResolver.ResolveAsync(source,userSource)`.)
 3. **Re-resolve roles in B:** assert `HttpContext.Items[TenantId] == B`; `FindOrCreateCrossTenantUserAsync(result, B)` → B-shadow user with B roles (`SyncMappedRolesAsync` via `RtExternalTenantUserMapping`). Return principal with the B-shadow `sub`.
 4. **Audit** via `OctoEventSink`: {subjectA, tenantA, tenantB, shadowRtId, grantedRoles}, success + failure.

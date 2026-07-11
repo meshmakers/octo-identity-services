@@ -117,9 +117,6 @@ public class TenantExchangeGrantValidator(
         var claims = validation.ClaimsIdentity.Claims.ToList();
         var sourceUserId = claims.FirstOrDefault(c => c.Type == JwtClaimTypes.Subject)?.Value;
         var sourceTenantId = claims.FirstOrDefault(c => c.Type == "tenant_id")?.Value;
-        var homeTenantId = claims.FirstOrDefault(c => c.Type == "home_tenant_id")?.Value;
-        var userName = claims.FirstOrDefault(c => c.Type == JwtClaimTypes.PreferredUserName)?.Value
-                       ?? claims.FirstOrDefault(c => c.Type == JwtClaimTypes.Name)?.Value;
 
         if (string.IsNullOrEmpty(sourceUserId) || string.IsNullOrEmpty(sourceTenantId))
         {
@@ -155,31 +152,33 @@ public class TenantExchangeGrantValidator(
             return;
         }
 
-        // (b2) Determine the effective SOURCE identity. A cross-tenant user (shadow username
-        //      xt_{home}_{orig}, so the token carries home_tenant_id) must be exchanged from their HOME
-        //      tenant — the common ancestor of all tenants they can reach. The current tenant_id is often
-        //      a SIBLING of the target (both children of the home tenant) and thus NOT an ancestor of it,
-        //      so exchanging from it would be wrongly denied by the ancestry gate. A direct user of the
-        //      current tenant (no home_tenant_id, or home == current) keeps tenant_id + sub.
+        // (b2) Determine the effective SOURCE identity. A cross-tenant user is a shadow user named
+        //      xt_{home}_{orig} in the current tenant; they must be exchanged from their HOME tenant —
+        //      the common ancestor of all tenants they can reach. The current tenant_id is often a
+        //      SIBLING of the target (both children of the home tenant) and thus NOT an ancestor of it,
+        //      so exchanging from it would be wrongly denied by the ancestry gate. The shadow user name
+        //      is read from the SOURCE tenant database (authoritative) — access-token claims like
+        //      home_tenant_id/preferred_username are subject to API-resource claim filtering and may be
+        //      absent. A direct user (name without xt_ prefix) keeps tenant_id + sub.
         var effectiveSourceTenantId = sourceTenantId;
         var effectiveSourceUserId = sourceUserId;
-        if (!string.IsNullOrEmpty(homeTenantId) &&
-            !string.Equals(homeTenantId, sourceTenantId, StringComparison.OrdinalIgnoreCase))
+        var sourceUserName = await crossTenantAuthService.FindUserNameByIdInTenantAsync(
+            sourceTenantId, sourceUserId);
+        if (sourceUserName != null && sourceUserName.StartsWith("xt_", StringComparison.OrdinalIgnoreCase))
         {
-            var shadowPrefix = $"xt_{homeTenantId}_";
-            var originalUserName = !string.IsNullOrEmpty(userName) &&
-                                   userName.StartsWith(shadowPrefix, StringComparison.OrdinalIgnoreCase)
-                ? userName[shadowPrefix.Length..]
-                : userName;
+            // Same parsing convention as UserProfileService: xt_{homeTenantId}_{originalUserName}
+            var parts = sourceUserName.Split('_', 3);
+            var homeTenantId = parts.Length == 3 ? parts[1] : null;
+            var originalUserName = parts.Length == 3 ? parts[2] : null;
 
-            var homeUserId = string.IsNullOrEmpty(originalUserName)
+            var homeUserId = string.IsNullOrEmpty(homeTenantId) || string.IsNullOrEmpty(originalUserName)
                 ? null
                 : await crossTenantAuthService.FindUserIdByNameInTenantAsync(homeTenantId, originalUserName);
             if (string.IsNullOrEmpty(homeUserId))
             {
                 logger.LogWarning(
-                    "Token exchange denied: could not resolve home identity (user '{OriginalUserName}') in home tenant '{HomeTenantId}' for subject '{SourceUserId}'",
-                    originalUserName ?? "(none)", homeTenantId, sourceUserId);
+                    "Token exchange denied: could not resolve home identity (user '{OriginalUserName}') in home tenant '{HomeTenantId}' for shadow user '{ShadowUserName}'",
+                    originalUserName ?? "(none)", homeTenantId ?? "(none)", sourceUserName);
                 await RaiseFailureAsync(sourceUserId, sourceTenantId, targetTenantId,
                     "home identity not resolvable", cancellationToken);
                 context.Result = Error(TokenRequestErrors.UnauthorizedClient,
@@ -187,7 +186,7 @@ public class TenantExchangeGrantValidator(
                 return;
             }
 
-            effectiveSourceTenantId = homeTenantId;
+            effectiveSourceTenantId = homeTenantId!;
             effectiveSourceUserId = homeUserId;
         }
 

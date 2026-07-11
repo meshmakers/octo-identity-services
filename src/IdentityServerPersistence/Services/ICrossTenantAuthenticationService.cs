@@ -42,4 +42,14 @@ public interface ICrossTenantAuthenticationService
     /// <param name="userName">The user name (not the xt_-prefixed shadow name).</param>
     /// <returns>The user's RtId, or null if no such user exists in that tenant.</returns>
     Task<string?> FindUserIdByNameInTenantAsync(string tenantId, string userName);
+
+    /// <summary>
+    /// Resolves the user name of a user identified by RtId within a specific tenant. Used by the
+    /// token-exchange flow to detect a cross-tenant shadow user (name <c>xt_{home}_{orig}</c>)
+    /// authoritatively from the database instead of relying on optional token claims.
+    /// </summary>
+    /// <param name="tenantId">The tenant to look the user up in.</param>
+    /// <param name="userId">The user's RtId.</param>
+    /// <returns>The user name, or null if no such user exists in that tenant.</returns>
+    Task<string?> FindUserNameByIdInTenantAsync(string tenantId, string userId);
 }
