@@ -514,6 +514,16 @@ attributes:
     valueType: String
     description: When set on a Client living in a child tenant, marks this record as a mirror of a parent-tenant client identified by the given tenant id. Sub-tenant admins surface this as a read-only "Provisioned by parent tenant" indicator; the operator cannot edit the client locally — changes must go through the parent.
 
+  - id: DynamicRegistration
+    valueType: Boolean
+    description: When true, this Client was created at runtime via RFC 7591 Dynamic Client Registration (an interactive MCP client such as Claude Code self-registering), not seeded by a blueprint nor created via the System API. Distinguishes dynamic clients for lifecycle handling (TTL cleanup, per-tenant cap) and cleanup-gate protection. Default false = every pre-existing and operator-created client.
+    defaultValues:
+      - false
+
+  - id: DynamicRegistrationExpiresAt
+    valueType: DateTime
+    description: UTC expiry of a dynamically-registered Client (RFC 7591). The cleanup sweep erases dynamic clients past this instant. Unset for non-dynamic clients.
+
   - id: SessionKey
     valueType: String
     description: Unique key of a Duende server-side session (the only value stored in the browser cookie).
