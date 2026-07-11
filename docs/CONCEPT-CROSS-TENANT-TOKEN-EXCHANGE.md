@@ -25,8 +25,20 @@ B's `allowed_tenants`, and **B-resolved roles** automatically — the exact same
 login. No re-scope, no leak. Only the validator's authorize+resolve logic is new.
 
 **Validator sequence (fail-closed at each step):**
-1. Validate `subject_token` (Duende `ITokenValidator.ValidateAccessTokenAsync`) → extract A `sub`, `tenant_id=A`, username. Reject if invalid/expired.
-2. **B-authorization gate:** `CrossTenantAuthenticationService.ValidateCrossTenantAccessAsync(B, A, subA)` (walks hierarchy: A must be ancestor of B; A user exists). null → `UnauthorizedClient`. (Defense-in-depth: assert B ∈ `AllowedTenantsResolver.ResolveAsync(A,userA)`.)
+1. Validate `subject_token` **context-free** (`JsonWebTokenHandler.ValidateTokenAsync` against
+   `IValidationKeysStore` keys, `ValidateAudience=false`; NOT Duende
+   `ITokenValidator.ValidateAccessTokenAsync`, which runs in the B request-context and wrongly rejects
+   with `invalid_token` because the A user does not exist in B). Extract A `sub`, `tenant_id=A`,
+   `home_tenant_id`, `preferred_username`. Reject if invalid/expired.
+1a. **Effective-source resolution (sibling-tenant fix):** the caller is usually itself a cross-tenant
+   shadow user `xt_{home}_{orig}`, so `tenant_id=A` is a *sibling* of B (both children of the home
+   tenant), not an ancestor — the ancestry gate below would wrongly deny it. When the token carries
+   `home_tenant_id` and it differs from `tenant_id`, recover the HOME identity: strip the
+   `xt_{home}_` prefix from `preferred_username` → original user name, then
+   `FindUserIdByNameInTenantAsync(home, origName)` → home `sub`. Use (home, homeSub) as the effective
+   source for the gate. A direct user of A (no `home_tenant_id`, or it equals A) keeps (A, subA).
+   Unresolvable home identity → `UnauthorizedClient`.
+2. **B-authorization gate:** `CrossTenantAuthenticationService.ValidateCrossTenantAccessAsync(B, source, subSource)` (walks hierarchy: source must be ancestor of B; source user exists). null → `UnauthorizedClient`. (Defense-in-depth: assert B ∈ `AllowedTenantsResolver.ResolveAsync(source,userSource)`.)
 3. **Re-resolve roles in B:** assert `HttpContext.Items[TenantId] == B`; `FindOrCreateCrossTenantUserAsync(result, B)` → B-shadow user with B roles (`SyncMappedRolesAsync` via `RtExternalTenantUserMapping`). Return principal with the B-shadow `sub`.
 4. **Audit** via `OctoEventSink`: {subjectA, tenantA, tenantB, shadowRtId, grantedRoles}, success + failure.
 

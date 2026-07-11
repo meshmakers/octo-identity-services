@@ -209,6 +209,13 @@ public class CrossTenantAuthenticationService(
         return false;
     }
 
+    /// <inheritdoc />
+    public async Task<string?> FindUserIdByNameInTenantAsync(string tenantId, string userName)
+    {
+        var user = await FindUserByNameInTenantAsync(tenantId, userName);
+        return user?.RtId.ToString();
+    }
+
     private async Task<RtUser?> FindUserByNameInTenantAsync(string tenantId, string username)
     {
         try

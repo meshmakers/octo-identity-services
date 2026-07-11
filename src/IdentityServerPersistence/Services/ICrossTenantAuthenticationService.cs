@@ -32,4 +32,14 @@ public interface ICrossTenantAuthenticationService
     /// <returns>The authentication result, or null if access is denied.</returns>
     Task<CrossTenantAuthResult?> ValidateCrossTenantAccessAsync(
         string targetTenantId, string sourceTenantId, string sourceUserId);
+
+    /// <summary>
+    /// Resolves the RtId of a user identified by user name within a specific tenant. Used by the
+    /// token-exchange flow to recover a cross-tenant user's HOME identity (the common ancestor of all
+    /// their reachable tenants) from the home tenant + original user name.
+    /// </summary>
+    /// <param name="tenantId">The tenant to look the user up in.</param>
+    /// <param name="userName">The user name (not the xt_-prefixed shadow name).</param>
+    /// <returns>The user's RtId, or null if no such user exists in that tenant.</returns>
+    Task<string?> FindUserIdByNameInTenantAsync(string tenantId, string userName);
 }

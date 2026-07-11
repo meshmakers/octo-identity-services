@@ -96,7 +96,7 @@ public class TenantExchangeGrantValidator(
         // here is the TARGET tenant B (resolved from acr_values) while the subject belongs to the SOURCE
         // tenant A — e.g. the A user does not exist in B yet — so it wrongly rejects with invalid_token.
         // Cross-tenant authorization is enforced separately below against the source tenant.
-        var validationKeys = await validationKeysStore.GetValidationKeysAsync();
+        var validationKeys = await validationKeysStore.GetValidationKeysAsync(cancellationToken);
         var handler = new JsonWebTokenHandler();
         var validation = await handler.ValidateTokenAsync(subjectToken, new TokenValidationParameters
         {
@@ -117,6 +117,9 @@ public class TenantExchangeGrantValidator(
         var claims = validation.ClaimsIdentity.Claims.ToList();
         var sourceUserId = claims.FirstOrDefault(c => c.Type == JwtClaimTypes.Subject)?.Value;
         var sourceTenantId = claims.FirstOrDefault(c => c.Type == "tenant_id")?.Value;
+        var homeTenantId = claims.FirstOrDefault(c => c.Type == "home_tenant_id")?.Value;
+        var userName = claims.FirstOrDefault(c => c.Type == JwtClaimTypes.PreferredUserName)?.Value
+                       ?? claims.FirstOrDefault(c => c.Type == JwtClaimTypes.Name)?.Value;
 
         if (string.IsNullOrEmpty(sourceUserId) || string.IsNullOrEmpty(sourceTenantId))
         {
@@ -152,9 +155,45 @@ public class TenantExchangeGrantValidator(
             return;
         }
 
-        // (c) B-authorization gate: A must be an ancestor of B and the A user must exist.
+        // (b2) Determine the effective SOURCE identity. A cross-tenant user (shadow username
+        //      xt_{home}_{orig}, so the token carries home_tenant_id) must be exchanged from their HOME
+        //      tenant — the common ancestor of all tenants they can reach. The current tenant_id is often
+        //      a SIBLING of the target (both children of the home tenant) and thus NOT an ancestor of it,
+        //      so exchanging from it would be wrongly denied by the ancestry gate. A direct user of the
+        //      current tenant (no home_tenant_id, or home == current) keeps tenant_id + sub.
+        var effectiveSourceTenantId = sourceTenantId;
+        var effectiveSourceUserId = sourceUserId;
+        if (!string.IsNullOrEmpty(homeTenantId) &&
+            !string.Equals(homeTenantId, sourceTenantId, StringComparison.OrdinalIgnoreCase))
+        {
+            var shadowPrefix = $"xt_{homeTenantId}_";
+            var originalUserName = !string.IsNullOrEmpty(userName) &&
+                                   userName.StartsWith(shadowPrefix, StringComparison.OrdinalIgnoreCase)
+                ? userName[shadowPrefix.Length..]
+                : userName;
+
+            var homeUserId = string.IsNullOrEmpty(originalUserName)
+                ? null
+                : await crossTenantAuthService.FindUserIdByNameInTenantAsync(homeTenantId, originalUserName);
+            if (string.IsNullOrEmpty(homeUserId))
+            {
+                logger.LogWarning(
+                    "Token exchange denied: could not resolve home identity (user '{OriginalUserName}') in home tenant '{HomeTenantId}' for subject '{SourceUserId}'",
+                    originalUserName ?? "(none)", homeTenantId, sourceUserId);
+                await RaiseFailureAsync(sourceUserId, sourceTenantId, targetTenantId,
+                    "home identity not resolvable", cancellationToken);
+                context.Result = Error(TokenRequestErrors.UnauthorizedClient,
+                    "cross-tenant access to the target tenant is denied");
+                return;
+            }
+
+            effectiveSourceTenantId = homeTenantId;
+            effectiveSourceUserId = homeUserId;
+        }
+
+        // (c) B-authorization gate: the (home) source tenant must be an ancestor of B and its user exists.
         var crossTenantResult = await crossTenantAuthService.ValidateCrossTenantAccessAsync(
-            targetTenantId, sourceTenantId, sourceUserId);
+            targetTenantId, effectiveSourceTenantId, effectiveSourceUserId);
         if (crossTenantResult == null)
         {
             logger.LogWarning(
