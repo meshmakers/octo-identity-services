@@ -184,11 +184,15 @@ public class OctoIdentityServicesOptions
 public class DynamicClientRegistrationOptions
 {
     /// <summary>
-    ///     When false (default) the <c>/connect/register</c> endpoint returns 404 and the
-    ///     <c>registration_endpoint</c> is not advertised in discovery. Open registration is a
-    ///     meaningful attack surface, so it must be explicitly enabled per deployment.
+    ///     Enabled by default so spec-compliant interactive MCP clients (Claude Code) work out of the
+    ///     box. When set to false the <c>/connect/register</c> endpoint returns 404 and the
+    ///     <c>registration_endpoint</c> is not advertised in discovery. Registration is open but hard
+    ///     gated (loopback-only redirects, PKCE, public client, server-fixed scopes, per-IP rate limit,
+    ///     per-tenant cap, TTL), and a registered client still requires a real user login to obtain a
+    ///     token — so default-on is acceptable. Disable per deployment via
+    ///     <c>OCTO_IDENTITY__DYNAMICCLIENTREGISTRATION__ENABLED=false</c>.
     /// </summary>
-    public bool Enabled { get; set; }
+    public bool Enabled { get; set; } = true;
 
     /// <summary>
     ///     The exact scope set a dynamically-registered client is granted. Client-supplied scopes

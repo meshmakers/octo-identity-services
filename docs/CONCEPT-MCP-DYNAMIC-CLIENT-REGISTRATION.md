@@ -28,8 +28,9 @@ support dynamic client registration" because our Duende exposes no `registration
      platform's normal per-tenant client model, not a special case.
 
 3. **Registration is OPEN but hard-constrained.** Claude Code performs DCR with NO initial access token
-   (zero-config). An initial-access-token gate would be incompatible. Security instead via: opt-in per
-   deployment (default OFF), loopback-only redirect URIs, PKCE required, public client (no secret),
+   (zero-config). An initial-access-token gate would be incompatible. Security instead via: enabled by
+   default (opt-OUT per deployment — acceptable: loopback-only redirects give no phishing vector and a
+   registration alone yields no token), loopback-only redirect URIs, PKCE required, public client (no secret),
    grant fixed to authorization_code(+refresh), server-fixed scope allow-list + the mcp resource,
    per-IP rate limit, per-tenant client cap, bounded TTL, dedupe.
 

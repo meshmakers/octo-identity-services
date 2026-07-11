@@ -837,8 +837,10 @@ The resolver runs **only at token issuance time** (login, token refresh), not pe
 Spec-compliant interactive MCP clients (e.g. Claude Code) require **RFC 7591 Dynamic Client
 Registration** — they self-register a client at a `registration_endpoint` and do not accept a
 pre-registered `client_id`. A hand-rolled `POST /connect/register` endpoint supports this. It is
-**opt-in per deployment** (`OCTO_IDENTITY__DYNAMICCLIENTREGISTRATION__ENABLED`, default `false`);
-when disabled the endpoint returns 404 and `registration_endpoint` is not advertised in discovery.
+**enabled by default** (`OCTO_IDENTITY__DYNAMICCLIENTREGISTRATION__ENABLED`, default `true`); set it to
+`false` to disable per deployment, in which case the endpoint returns 404 and `registration_endpoint`
+is not advertised in discovery. Default-on is acceptable because the gate below is strict (loopback-only
+redirects → no phishing vector) and a registration alone grants no token.
 
 **Endpoint:** `POST /connect/register` (anonymous, per-IP rate-limited). Runs in the **system tenant**
 context. Returns 201 (created) / 200 (existing re-issued) / 400 (`invalid_redirect_uri` /
