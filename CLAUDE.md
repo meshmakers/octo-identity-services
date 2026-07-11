@@ -90,6 +90,39 @@ The service supports hierarchical cross-tenant authentication where parent-tenan
 
 **Cross-tenant role sync**: When a cross-tenant user logs in (via `FindOrCreateCrossTenantUserAsync`), `SyncMappedRolesAsync` resolves mapped role IDs to role names by querying the tenant repository directly (via `IMultiTenancyResolverService.GetTenantRepository()`), then calls `UserManager.AddToRoleAsync` with the role **name** (not ID). This runs on every login, ensuring existing users get role updates. Important: `RoleManager<RtRole>` must NOT be used for this — it may resolve to the wrong tenant context during cross-tenant login. The tenant repository approach reads from `HttpContext.Items["tenantRepository"]` which is correctly set by the inline middleware.
 
+**Cross-tenant token exchange (RFC 8693, AB#4338)** — the non-interactive
+counterpart of the browser tenant-switch, for the MCP server:
+
+- **`TenantExchangeGrantValidator`** (`IdentityServices/Services/`, a Duende
+  `IExtensionGrantValidator` for `grant_type=urn:ietf:params:oauth:grant-type:token-exchange`,
+  registered in `Program.cs` via `.AddExtensionGrantValidator<>()`): validates the
+  caller's home-tenant (A) access token (`subject_token`) via `ITokenValidator`,
+  reads the target tenant B from `acr_values=tenant:B`, asserts the request was
+  wired to B (fail closed → `invalid_target`), gates on
+  `ValidateCrossTenantAccessAsync(B, A, subA)` (→ `unauthorized_client`), then
+  `FindOrCreateCrossTenantUserAsync` for the B-shadow user and returns a
+  `GrantValidationResult` whose **`sub` is the B-shadow user's `RtId`**. This is
+  the security linchpin: the token runs on the B-shadow sub, so
+  `UserProfileService`/`OctoUserStore` stamp `tenant_id=B` + B-resolved roles
+  automatically — A's roles never leak into B. Reuses `CrossTenant*` services and
+  `AllowedTenantsResolver` unchanged.
+- **`OidcTenantResolutionMiddleware.ResolveTenantFromTokenRequestAsync`** has a
+  `token-exchange` branch that resolves B from `acr_values` exactly like the
+  `client_credentials` branch, wiring B's repo into `HttpContext.Items` before the
+  token is minted.
+- **Audit**: `TokenExchangeSuccessEvent` / `TokenExchangeFailureEvent`
+  (`IdentityServices/Services/TokenExchangeEvents.cs`). Failure events persist to
+  the runtime event log (`OctoEventSink`); success events are log-only.
+- **Clients**: the token-exchange grant is added to `AllowedGrantTypes` of the two
+  MCP clients (`octo-mcpServices-device` 660…034, `octo-mcpServices-interactive`
+  660…035) in the `System.Identity.Bootstrap` blueprint (bumped to **1.1.4**) —
+  additive client config, no CK schema change.
+- **v1 issues no exchanged refresh token** (short-lived B tokens, re-exchanged from
+  the still-valid A token). See `docs/CONCEPT-CROSS-TENANT-TOKEN-EXCHANGE.md` and
+  `docs/authentication.md` § Cross-Tenant Token Exchange. Coverage:
+  `tests/IdentityServices.IntegrationTests/Persistence/TenantExchangeIntegrationTests.cs`
+  (privilege-escalation regression: resolved roles == B subset, not A's full set).
+
 ### Multi-Tenant Client Credentials (Auto-Provisioning) — Phase 1 in flight
 
 Schema groundwork for the cross-tenant ClientCredentials feature lives in CK

@@ -525,6 +525,57 @@ POST /{targetTenantId}/api/auth/tenant-switch
         └── Access granted ──► 200 { success: true, roles: [...] }
 ```
 
+### Cross-Tenant Token Exchange (RFC 8693, AB#4338)
+
+For **non-interactive** clients (the MCP server), the browser tenant-switch flow above is replaced by
+an OAuth 2.0 Token Exchange grant. It lets an already-authenticated user obtain a **target-tenant (B)
+access token** from their current **home-tenant (A) access token** — no browser, no credential prompt —
+with roles **re-resolved in B**.
+
+```
+POST /connect/token
+  grant_type=urn:ietf:params:oauth:grant-type:token-exchange
+  subject_token={A access token}
+  subject_token_type=urn:ietf:params:oauth:token-type:access_token
+  acr_values=tenant:{B}
+  client_id=octo-mcpServices-device        (or octo-mcpServices-interactive)
+        │
+        ├── OidcTenantResolutionMiddleware reads acr_values=tenant:B and wires B's repo into
+        │   HttpContext.Items (same branch as client_credentials)
+        ▼
+  TenantExchangeGrantValidator (Duende IExtensionGrantValidator)
+        ├── (a) Validate subject_token via ITokenValidator → extract A sub, tenant_id=A, username
+        ├── (b) Read target B from acr_values; assert HttpContext tenant == B (fail closed → invalid_target)
+        ├── (c) ValidateCrossTenantAccessAsync(B, A, subA) → null ⇒ unauthorized_client
+        ├── (d) FindOrCreateCrossTenantUserAsync(result, B) → B-shadow user (xt_A_user)
+        └── Return GrantValidationResult(subject = B-shadow user's RtId, authenticationMethod="token_exchange")
+        │
+        ▼
+  Duende mints the token for the B-shadow sub → UserProfileService / OctoUserStore stamp
+  tenant_id=B + B's allowed_tenants + B-resolved roles automatically (same claim path as a login)
+```
+
+**Security linchpin.** The issued token runs on the **B-shadow user's** `sub` (`xt_{A}_{user}`),
+**never** the A user with a swapped `tenant_id`. Because the per-tenant profile / role stores key off
+that subject, the token carries B-resolved roles (the subset granted by B's
+`RtExternalTenantUserMapping`), so A's roles cannot leak into B. A naive re-scope of the A token would
+be a privilege escalation and is rejected by design. This is pinned by the
+`Exchange_ResolvesBSubsetRoles_NotParentFullRoles` integration test.
+
+**v1 issues no exchanged refresh token** — B access tokens are short-lived and re-exchanged from the
+still-valid A token on expiry, sidestepping cross-tenant refresh-token binding (A stays the single
+long-lived credential / root of trust).
+
+**Audit.** `TokenExchangeSuccessEvent` / `TokenExchangeFailureEvent` (in
+`IdentityServices/Services/`) carry `{sourceUserId, sourceTenantId, targetTenantId, shadowRtId/reason}`.
+Failure events are persisted to the runtime event log by `OctoEventSink`; success events are log-only
+(the sink persists only Error/Failure events).
+
+**Client enablement.** The two MCP clients `octo-mcpServices-device` (rtId 660…034) and
+`octo-mcpServices-interactive` (rtId 660…035) carry the token-exchange grant in their
+`AllowedGrantTypes` via the `System.Identity.Bootstrap` blueprint (bumped to 1.1.4). This is additive
+client config — no CK schema change.
+
 ### CK Model Types
 
 **OctoTenantIdentityProvider** (derives from IdentityProvider):

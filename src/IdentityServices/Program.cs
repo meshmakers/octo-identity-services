@@ -198,6 +198,9 @@ try
         .AddAspNetIdentity<RtUser>()
         .AddProfileService<UserProfileService>()
         .AddCustomTokenRequestValidator<ClientCredentialsRoleTokenValidator>()
+        // RFC 8693 Token Exchange (AB#4338): mints a target-tenant (B) access token from the
+        // user's home-tenant (A) access token, with roles re-resolved in B on the B-shadow sub.
+        .AddExtensionGrantValidator<TenantExchangeGrantValidator>()
         .AddServerSideSessions<ServerSideSessionStore>()
         .AddCorsPolicyService<CorsPolicyService>()
         .AddAppAuthRedirectUriValidator()

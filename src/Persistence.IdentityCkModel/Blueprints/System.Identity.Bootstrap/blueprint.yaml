@@ -1,5 +1,5 @@
 $schema: https://schemas.meshmakers.cloud/blueprint-meta.schema.json
-blueprintId: System.Identity.Bootstrap-1.1.3
+blueprintId: System.Identity.Bootstrap-1.1.4
 description: |
   Service-managed Identity tenant seed — system + every child tenant. Provides
   the default role set (14 roles), the five OIDC identity resources, three API
@@ -21,6 +21,16 @@ description: |
   the cluster has the URL unset the blueprint still applies — the entity is
   seeded with empty placeholder values so the OIDC failure on user login is
   obvious instead of silently swallowed.
+
+  1.1.4 (AB#4338): adds the RFC 8693 Token Exchange grant
+  (`urn:ietf:params:oauth:grant-type:token-exchange`) to the two MCP clients
+  `octo-mcpServices-device` (660…34) and `octo-mcpServices-interactive` (660…35).
+  This is additive client config — no CK schema change. It lets the MCP server
+  exchange the user's already-valid home-tenant (A) access token for a
+  target-tenant (B) access token with roles re-resolved in B, driven server-side
+  by `TenantExchangeGrantValidator`. The issued token runs on the B-shadow user
+  (`xt_A_user`) sub, so it carries `tenant_id=B` + B-resolved roles — no
+  privilege leak from A.
 
   1.1.3 (AB#4338): adds the interactive-MCP OAuth path for spec-compliant MCP
   clients (Claude Code). New `mcpApi` ApiResource whose Name is

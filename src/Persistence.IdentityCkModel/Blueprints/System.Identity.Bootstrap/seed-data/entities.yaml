@@ -714,6 +714,11 @@ entities:
       - id: System.Identity/AllowedGrantTypes
         value:
           - urn:ietf:params:oauth:grant-type:device_code
+          # AB#4338: RFC 8693 Token Exchange — lets the MCP server mint a
+          # target-tenant (B) access token from the user's already-valid A token
+          # (subject_token) without a browser prompt. Roles are re-resolved in B
+          # by the TenantExchangeGrantValidator; no privilege leak.
+          - urn:ietf:params:oauth:grant-type:token-exchange
       - id: System.Identity/RequirePkce
         value: false
       - id: System.Identity/AllowOfflineAccess
@@ -766,6 +771,10 @@ entities:
       - id: System.Identity/AllowedGrantTypes
         value:
           - authorization_code
+          # AB#4338: RFC 8693 Token Exchange — same purpose as on the device
+          # client, so a user who logged in interactively (Claude Code) can also
+          # obtain a target-tenant (B) token from their A token without a prompt.
+          - urn:ietf:params:oauth:grant-type:token-exchange
       - id: System.Identity/RequirePkce
         value: true
       - id: System.Identity/AccessTokenType
