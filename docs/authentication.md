@@ -538,7 +538,7 @@ POST /connect/token
   subject_token={A access token}
   subject_token_type=urn:ietf:params:oauth:token-type:access_token
   acr_values=tenant:{B}
-  client_id=octo-mcpServices-device        (or octo-mcpServices-interactive)
+  client_id=octo-mcpServices-device
         │
         ├── OidcTenantResolutionMiddleware reads acr_values=tenant:B and wires B's repo into
         │   HttpContext.Items (same branch as client_credentials)
@@ -571,10 +571,15 @@ long-lived credential / root of trust).
 Failure events are persisted to the runtime event log by `OctoEventSink`; success events are log-only
 (the sink persists only Error/Failure events).
 
-**Client enablement.** The two MCP clients `octo-mcpServices-device` (rtId 660…034) and
-`octo-mcpServices-interactive` (rtId 660…035) carry the token-exchange grant in their
-`AllowedGrantTypes` via the `System.Identity.Bootstrap` blueprint (bumped to 1.1.4). This is additive
-client config — no CK schema change.
+**Client enablement.** The `octo-mcpServices-device` client (rtId 660…034) carries the token-exchange
+grant in its `AllowedGrantTypes` via the `System.Identity.Bootstrap` blueprint. This is additive client
+config — no CK schema change. The MCP server performs ALL exchanges with the device client, regardless
+of how the user originally logged in (device flow or a DCR-registered client) — the subject_token is
+validated context-free with `ValidateAudience=false`, so it is not bound to the exchanging client. The
+interim `octo-mcpServices-interactive` client (rtId 660…035) was removed again in blueprint 1.1.5:
+interactive MCP clients self-register via Dynamic Client Registration (`octo-mcp-dyn-*`), and nothing
+ever consumed the static client (its fixed `:8976` loopback redirects never matched Claude Code's
+random-port callbacks).
 
 ### CK Model Types
 

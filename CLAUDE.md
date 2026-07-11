@@ -113,10 +113,14 @@ counterpart of the browser tenant-switch, for the MCP server:
 - **Audit**: `TokenExchangeSuccessEvent` / `TokenExchangeFailureEvent`
   (`IdentityServices/Services/TokenExchangeEvents.cs`). Failure events persist to
   the runtime event log (`OctoEventSink`); success events are log-only.
-- **Clients**: the token-exchange grant is added to `AllowedGrantTypes` of the two
-  MCP clients (`octo-mcpServices-device` 660…034, `octo-mcpServices-interactive`
-  660…035) in the `System.Identity.Bootstrap` blueprint (bumped to **1.1.4**) —
-  additive client config, no CK schema change.
+- **Clients**: the token-exchange grant is on `AllowedGrantTypes` of the
+  `octo-mcpServices-device` client (660…034) in the `System.Identity.Bootstrap`
+  blueprint — additive client config, no CK schema change. The MCP server performs
+  ALL exchanges with the device client regardless of how the user logged in
+  (device flow or DCR-registered interactive client). The interim
+  `octo-mcpServices-interactive` client (660…035) was removed again in blueprint
+  **1.1.5** — interactive MCP clients self-register via DCR (`octo-mcp-dyn-*`)
+  and nothing ever consumed the static client.
 - **v1 issues no exchanged refresh token** (short-lived B tokens, re-exchanged from
   the still-valid A token). See `docs/CONCEPT-CROSS-TENANT-TOKEN-EXCHANGE.md` and
   `docs/authentication.md` § Cross-Tenant Token Exchange. Coverage:

@@ -34,7 +34,12 @@ support dynamic client registration" because our Duende exposes no `registration
    grant fixed to authorization_code(+refresh), server-fixed scope allow-list + the mcp resource,
    per-IP rate limit, per-tenant client cap, bounded TTL, dedupe.
 
-4. **Keep the seeded `octo-mcpServices-interactive` client** as a fallback for non-DCR clients.
+4. ~~**Keep the seeded `octo-mcpServices-interactive` client** as a fallback for non-DCR clients.~~
+   **REVISED (blueprint 1.1.5):** the client was removed again. Nothing ever consumed it — Claude Code
+   registers via DCR (`octo-mcp-dyn-*`, random loopback ports; the static client's fixed `:8976`
+   redirects never matched), the MCP server itself uses the device client for device flow, refresh and
+   token exchange, and the Swagger UI has its own client. A deployment that disables DCR and needs a
+   pre-registered interactive client can re-create one explicitly.
 
 ## End-to-end flow (M2)
 1. Claude Code → `GET /.well-known/oauth-protected-resource/mcp` (octo-mcp-service) → `resource=https://mcp/`,

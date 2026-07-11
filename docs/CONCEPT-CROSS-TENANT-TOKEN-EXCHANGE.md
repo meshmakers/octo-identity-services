@@ -63,7 +63,8 @@ credential (root of trust). Add exchanged refresh tokens only if re-exchange lat
 ## Files
 Identity — ADD: `IdentityServices/Services/TenantExchangeGrantValidator.cs`. MODIFY: `Program.cs`
 (`.AddExtensionGrantValidator<>`), `OidcTenantResolutionMiddleware.cs` (token-exchange acr branch in
-`ResolveTenantFromTokenRequestAsync`), seed `entities.yaml` (add the grant to MCP clients 660…34/35),
+`ResolveTenantFromTokenRequestAsync`), seed `entities.yaml` (grant on the device client 660…34; the
+interim interactive client 660…35 was removed again in blueprint 1.1.5 — DCR covers interactive logins),
 `DynamicClientRegistrationService.cs` (allow-list the grant for DCR clients — decide). DO NOT touch
 `TenantAuthorizationMiddleware`/`PersistentGrantStore`/`UserProfileService`/`OctoUserStore`/
 `CrossTenant*`/`AllowedTenantsResolver` (the strict tenant_id check is CORRECT; the exchanged token

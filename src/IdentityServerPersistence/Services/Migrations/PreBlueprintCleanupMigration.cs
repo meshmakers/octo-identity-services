@@ -331,11 +331,10 @@ internal class PreBlueprintCleanupMigration(
             // CreateIdentityDataCommandRequest path (with random rtIds) before AB#4208 moved them into
             // this blueprint with stable rtIds — a leftover random-rtId copy on the system tenant
             // shadows the blueprint client (Duende takes the first match), so it must be swept here.
-            // interactive (AB#4338) never had an imperative copy; listed defensively so any future
-            // stray is cleaned up the same way.
+            // (octo-mcpServices-interactive was listed defensively while it existed; the client was
+            // removed from the blueprint in 1.1.5 — interactive MCP clients self-register via DCR.)
             "octo-mcpServices-swagger",
             "octo-mcpServices-device",
-            "octo-mcpServices-interactive",
         };
 
     private static readonly HashSet<string> KnownPreBlueprintGroupNames =

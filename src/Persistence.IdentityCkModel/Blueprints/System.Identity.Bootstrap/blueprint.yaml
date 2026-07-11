@@ -1,11 +1,11 @@
 $schema: https://schemas.meshmakers.cloud/blueprint-meta.schema.json
-blueprintId: System.Identity.Bootstrap-1.1.4
+blueprintId: System.Identity.Bootstrap-1.1.5
 description: |
   Service-managed Identity tenant seed — system + every child tenant. Provides
   the default role set (14 roles), the five OIDC identity resources, three API
   scopes (full-access / read-only / data-model-management), the OctoApi resource,
   the MCP resource indicator, the OAuth client baseline (OctoTool / IdentityServices
-  Swagger / Refinery Studio SPA / MCP Services Swagger + Device + Interactive) and
+  Swagger / Refinery Studio SPA / MCP Services Swagger + Device) and
   the TenantOwners group with full role assignment.
 
   Following the OctoMesh "System.* = service-managed" convention this blueprint
@@ -21,6 +21,17 @@ description: |
   the cluster has the URL unset the blueprint still applies — the entity is
   seeded with empty placeholder values so the OIDC failure on user login is
   obvious instead of silently swallowed.
+
+  1.1.5 (AB#4338): removes the `octo-mcpServices-interactive` client (660…35)
+  again. It was the interim path for interactive MCP clients before we learned
+  that Claude Code requires RFC 7591 Dynamic Client Registration — such clients
+  now self-register (`octo-mcp-dyn-*`, server-side hard gate, see
+  `docs/CONCEPT-MCP-DYNAMIC-CLIENT-REGISTRATION.md`), and nothing ever consumed
+  the static client (its fixed :8976 loopback redirects never matched Claude
+  Code's random-port callbacks). The blueprint engine deletes the entity from
+  every tenant on apply (locked entity no longer in seed). Token exchange stays
+  on the device client, which the MCP server uses for all exchanges regardless
+  of how the user logged in.
 
   1.1.4 (AB#4338): adds the RFC 8693 Token Exchange grant
   (`urn:ietf:params:oauth:grant-type:token-exchange`) to the two MCP clients
