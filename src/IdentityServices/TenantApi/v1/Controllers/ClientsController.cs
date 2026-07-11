@@ -587,7 +587,12 @@ public class ClientsController : ControllerBase
             BackChannelLogoutSessionRequired = applicationClient.BackChannelLogoutSessionRequired,
             RequireClientSecret = applicationClient.RequireClientSecret,
             AutoProvisionInChildTenants = applicationClient.AutoProvisionInChildTenants,
-            ProvisionedByParentTenantId = applicationClient.ProvisionedByParentTenantId
+            ProvisionedByParentTenantId = applicationClient.ProvisionedByParentTenantId,
+            // Read-only DCR flags (RFC 7591, AB#4338): emitted so management surfaces can mark
+            // dynamically registered clients; ApplyToClient never reads them back — they are
+            // owned by DynamicClientRegistrationService and the TTL sweep exclusively.
+            DynamicRegistration = applicationClient.DynamicRegistration,
+            DynamicRegistrationExpiresAt = applicationClient.DynamicRegistrationExpiresAt
         };
         return clientDto;
     }
@@ -694,6 +699,12 @@ public class ClientsController : ControllerBase
         {
             applicationClient.AutoProvisionInChildTenants = clientDto.AutoProvisionInChildTenants.Value;
         }
+
+        // DynamicRegistration / DynamicRegistrationExpiresAt are deliberately NOT applied
+        // (same read-only contract as ProvisionedByParentTenantId). They are owned by
+        // DynamicClientRegistrationService and the TTL sweep; accepting them here would let a
+        // caller flip an ordinary client into the DCR lifecycle (early TTL erasure) or pin a
+        // dynamic client past its TTL — both bypass the RFC 7591 hard gate (AB#4338).
     }
 
     /// <summary>

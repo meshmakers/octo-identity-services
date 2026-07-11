@@ -924,6 +924,12 @@ their mirrors each cleanup interval. `PreBlueprintCleanupMigration` never sweeps
 `DynamicRegistration=true` client. Registrations with an identical redirect-URI set are **deduped**
 (the existing non-expired client is re-issued) to avoid per-launch accumulation.
 
+**Management-surface exposure:** `ClientsController.CreateClientDto` emits `DynamicRegistration` +
+`DynamicRegistrationExpiresAt` read-only on the shared `ClientDto` (SDK ≥ the AB#4338 bump), so
+Studio / octo-cli / MCP tools can mark dynamic clients. `ApplyToClient` never reads them back —
+accepting them would let a caller move an ordinary client into (or a dynamic client out of) the
+DCR TTL lifecycle, bypassing the hard gate.
+
 **Scopeless authorize requests are defaulted:** some interactive MCP clients (observed with Claude
 Code) send `GET /connect/authorize` without a `scope` parameter even though the protected-resource
 metadata advertises `scopes_supported`; Duende hard-rejects that with "scope is missing".
