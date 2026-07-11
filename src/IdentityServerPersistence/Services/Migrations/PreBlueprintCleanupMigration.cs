@@ -174,6 +174,14 @@ internal class PreBlueprintCleanupMigration(
                 continue;
             }
 
+            // AB#4338: never sweep a dynamically-registered client (RFC 7591). Its random ClientId is
+            // not in any whitelist so the gate below already preserves it — this is belt-and-braces
+            // and documents intent. Only RtClient carries the flag.
+            if (entity is RtClient { DynamicRegistration: true })
+            {
+                continue;
+            }
+
             // Two-layer safety gate.
             //
             // First hotfix (test-2 2026-06-15 incident #1 — over-deletion): the original

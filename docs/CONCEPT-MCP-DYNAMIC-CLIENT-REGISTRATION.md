@@ -158,7 +158,17 @@ public/fixed-scopes); Phase 3 adds the config polish. Original Phase 2 detail be
   otherwise with RFC 7591 error codes. Open registration (no initial-access-token) — gated by the above
   + rate limit + cap + opt-in.
 
-### Phase 4 — lifecycle (1 d)
+### Phase 4 — lifecycle — ✅ DONE 2026-07-11 (build green; suite pending in this commit)
+Implemented: (1) **Immediate expiry enforcement** — `ClientStore.FindClientByIdAsync` returns null for a
+`DynamicRegistration=true` client past `DynamicRegistrationExpiresAt`, so Duende rejects it
+(`unauthorized_client`) regardless of sweep timing. (2) **TTL sweep** in `TokenCleanupHostService`
+(`RemoveExpiredDynamicClientsAsync`, runs each cleanup interval alongside grant cleanup): queries the
+system tenant for expired dynamic clients, `RemoveMirrorsForClientAsync` (drops child mirrors + tracking
+rows) then erases the system-tenant client. (3) **PreBlueprintCleanupMigration** defensive early-continue
+on `entity is RtClient { DynamicRegistration: true }` (already preserved via random ClientId; documents
+intent). Dedupe + per-tenant cap already landed in Phase 2. Original Phase 4 detail below.
+
+### Phase 4 (original checklist) (1 d)
 - TTL sweep: extend `TokenCleanupHostService` (iterates system + child tenants) to erase expired
   `DynamicRegistration=true` clients + their mirrors (`RemoveMirrorsForClientAsync`).
 - Per-tenant cap enforced at registration.
