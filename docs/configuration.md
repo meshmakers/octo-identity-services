@@ -38,6 +38,30 @@ export OCTO_Identity__SigningCertificatePassword="secret"
 }
 ```
 
+#### Blueprint Variables (`Blueprints` section)
+
+Inputs for the blueprint variable resolution (`IdentityBlueprintVariableProvider`), bound from the
+`Blueprints` section / `OCTO_BLUEPRINTS__*` environment variables (binding added in `Program.cs` —
+the runtime engine only registers the options class, it does not bind it). `Scheme` + `Domain` drive
+the `${octo.scheme}://<slug>.${octo.domain}` composition used by `${octo.mcp.publicUrl}` in the
+`System.Identity.Bootstrap` seed (mcpApi ApiResource Name, MCP client URIs). **If neither
+`Blueprints:Domain` nor the dev override `Identity:ServicePublicUrlOverrides:mcp` is set, the
+variable composes to an empty string and the blueprint seeds a broken mcpApi resource (`Name = "/"`)
+plus relative MCP client URIs — interactive MCP logins then fail with `invalid_target`** (seen live
+on test-2, AB#4338). In cluster deployments the helm chart wires these values; local dev uses
+`OCTO_IDENTITY__SERVICEPUBLICURLOVERRIDES__MCP` instead.
+
+```json
+{
+  "Blueprints": {
+    "Scheme": "https",
+    "Domain": "test-2.mm.cloud",
+    "Environment": "test",
+    "SystemTenantId": "OctoSystem"
+  }
+}
+```
+
 Key options in `OctoIdentityServicesOptions`:
 
 | Option | Env variable | Description |

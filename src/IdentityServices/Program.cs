@@ -16,6 +16,7 @@ using IQrCodeService = Meshmakers.Octo.Backend.IdentityServices.Services.IQrCode
 using QrCodeService = Meshmakers.Octo.Backend.IdentityServices.Services.QrCodeService;
 using Meshmakers.Octo.Communication.Contracts;
 using Meshmakers.Octo.Communication.Contracts.DataTransferObjects;
+using Meshmakers.Octo.Runtime.Contracts.Blueprints;
 using Meshmakers.Octo.Runtime.Contracts.MongoDb;
 using Meshmakers.Octo.Runtime.Contracts.MongoDb.Configuration;
 using Meshmakers.Octo.Runtime.Contracts.MongoDb.Extensions;
@@ -88,6 +89,13 @@ try
         builder.Configuration.GetSection("Identity").Bind(options));
     builder.Services.Configure<OctoSystemConfiguration>(options =>
         builder.Configuration.GetSection("System").Bind(options));
+    // Blueprint variable inputs (${octo.scheme}/${octo.domain}/${octo.environment}/...).
+    // AddRuntimeEngine only registers the options — it does NOT bind them; without this
+    // binding OCTO_BLUEPRINTS__* env vars are silently ignored, ${octo.mcp.publicUrl}
+    // composes to an empty string, and the blueprint seeds a broken mcpApi ApiResource
+    // Name ("/") plus relative MCP client URIs (seen live on test-2, AB#4338).
+    builder.Services.Configure<OctoBlueprintVariablesOptions>(options =>
+        builder.Configuration.GetSection(OctoBlueprintVariablesOptions.SectionName).Bind(options));
 
     // ASP.NET Data Protection: the key ring is persisted in MongoDB (system tenant) — ALWAYS ON,
     // shared by all pods. Identity:DataProtectionKeysPath is no longer a persistence target; if it
