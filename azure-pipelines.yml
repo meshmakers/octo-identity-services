@@ -165,6 +165,13 @@ stages:
               # / OCTO_COMM_VERSION) is now part of build-and-push-docker.yml's default
               # buildArgs (tpl-v0.4.8+), so the previous extraBuildArgs workaround was
               # removed when this repo's pin reached tpl-v0.4.9.
+              # AB#4359 — displayable service version for the SPA footer. The
+              # default buildArgs' OCTO_VERSION carries the floating NuGet pin
+              # ("0.1.*" on main, exact only on r-tags) and is useless for
+              # display; Build.BuildNumber matches the .NET InformationalVersion
+              # stamped by set-version.yml.
+              extraBuildArgs: >-
+                --build-arg OCTO_SERVICE_VERSION="$(Build.BuildNumber)"
           - template: templates/steps/handle-artifacts.yml@pipelineTemplates
             parameters:
               constructionKitLibraryPaths:

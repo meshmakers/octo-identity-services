@@ -31,6 +31,13 @@ ARG OCTO_VERSION
 # Surfaced by PR #102 build #35925.
 ARG OCTO_CORE_LIB_VERSION
 ARG OCTO_COMM_VERSION
+# AB#4359 — displayable service version for the SPA footer. OCTO_VERSION cannot
+# serve this purpose: on main/dev/test builds update-build-number.yml
+# deliberately sets OctoVersion to the floating NuGet pin "0.1.*" (exact only
+# on r-tags). The CI pipeline passes $(Build.BuildNumber) here via
+# extraBuildArgs — the same value set-version.yml stamps as the .NET
+# InformationalVersion.
+ARG OCTO_SERVICE_VERSION
 
 COPY ${OCTO_PRIVATE_NUGET_CERTIFICATE} /usr/local/share/ca-certificates/nugetca.crt
 RUN chmod 644 /usr/local/share/ca-certificates/nugetca.crt && update-ca-certificates
@@ -42,6 +49,7 @@ WORKDIR "/src/src/IdentityServices"
 RUN dotnet build "IdentityServices.csproj" -c Release \
     -p:OctoNugetPrivateServer=${OCTO_PRIVATE_NUGET_SERVICE} \
     ${OCTO_VERSION:+-p:OctoVersion=${OCTO_VERSION}} \
+    ${OCTO_SERVICE_VERSION:+-p:OctoServiceVersion=${OCTO_SERVICE_VERSION}} \
     ${OCTO_CORE_LIB_VERSION:+-p:OctoCoreLibVersion=${OCTO_CORE_LIB_VERSION}} \
     ${OCTO_COMM_VERSION:+-p:OctoCommVersion=${OCTO_COMM_VERSION}}
 
@@ -49,6 +57,7 @@ FROM build AS publish
 RUN dotnet publish "IdentityServices.csproj" -c Release \
     -p:OctoNugetPrivateServer=${OCTO_PRIVATE_NUGET_SERVICE} \
     ${OCTO_VERSION:+-p:OctoVersion=${OCTO_VERSION}} \
+    ${OCTO_SERVICE_VERSION:+-p:OctoServiceVersion=${OCTO_SERVICE_VERSION}} \
     ${OCTO_CORE_LIB_VERSION:+-p:OctoCoreLibVersion=${OCTO_CORE_LIB_VERSION}} \
     ${OCTO_COMM_VERSION:+-p:OctoCommVersion=${OCTO_COMM_VERSION}} \
     -o /app

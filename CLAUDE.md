@@ -544,10 +544,17 @@ The version label in the dialog footer (`lcars-panel`) comes from
 (runs on npm `postinstall` and explicitly from the MSBuild SPA targets). The
 generator prefers the `OCTO_VERSION` environment variable — injected by
 `BuildClientApp` / `PublishRunWebpack` in `IdentityServices.csproj` as
-`$(OctoVersion)`, which CI passes into the Docker build — and falls back to
-`package.json` (`0.0.0`) when the variable is unset or a wildcard NuGet pin
-(`0.1.*` / `3.4.*`). Local DebugL builds therefore show `v999.0.0`; CI images
-show the real service version. Never edit `currentVersion.ts` manually.
+`$(OctoServiceVersion)` — and falls back to `package.json` (`0.0.0`) when the
+variable is unset or a wildcard NuGet pin (`0.1.*` / `3.4.*`).
+
+`OctoServiceVersion` is fed by the CI Docker build as the
+`OCTO_SERVICE_VERSION` build arg carrying `$(Build.BuildNumber)` (see
+`azure-pipelines.yml` extraBuildArgs), matching the .NET InformationalVersion.
+**Do not use `$(OctoVersion)` for display**: on main/dev/test CI builds
+update-build-number.yml deliberately sets it to the floating NuGet pin
+`0.1.*`; it is exact only on r-tag builds. When `OctoServiceVersion` is not
+provided it falls back to `$(OctoVersion)`, so local DebugL builds show
+`v999.0.0`. Never edit `currentVersion.ts` manually.
 
 ### API Controllers for Angular SPA
 

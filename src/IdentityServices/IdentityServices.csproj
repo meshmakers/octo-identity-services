@@ -55,6 +55,17 @@
       <_ContentIncludedByDefault Remove="ClientApp\dist\identity-ui\prerendered-routes.json" />
     </ItemGroup>
 
+    <!-- Displayable service version for the SPA footer (AB#4359). Passed by the
+         Docker build as -p:OctoServiceVersion=$(Build.BuildNumber) via the
+         OCTO_SERVICE_VERSION build arg. NOTE: $(OctoVersion) is NOT usable for
+         display on CI — update-build-number.yml sets it to the floating NuGet
+         pin "0.1.*" on main/dev/test (exact only on r-tags). The fallback below
+         covers local builds (DebugL → 999.0.0) and r-tags; the generator
+         rejects wildcard values and falls back to package.json (0.0.0). -->
+    <PropertyGroup>
+        <OctoServiceVersion Condition="'$(OctoServiceVersion)'==''">$(OctoVersion)</OctoServiceVersion>
+    </PropertyGroup>
+
     <!-- Build Angular ClientApp on every build to ensure the frontend is up to date -->
     <Target Name="BuildClientApp" BeforeTargets="Build">
         <Exec Command="node --version" ContinueOnError="true">
@@ -63,11 +74,11 @@
         <Error Condition="'$(ErrorCode)' != '0'" Text="Node.js is required to build and run this project. To continue, please install Node.js from https://nodejs.org/, and then restart your command prompt or IDE." />
         <Message Importance="high" Text="Installing npm dependencies for ClientApp..." />
         <Exec WorkingDirectory="$(SpaRoot)" Command="npm install" Condition="!Exists('$(SpaRoot)node_modules')" />
-        <!-- Regenerate currentVersion.ts with $(OctoVersion) so the SPA footer
-             shows the service version instead of package.json's 0.0.0. Runs
-             explicitly because npm install (postinstall) is skipped when
-             node_modules already exists. -->
-        <Exec WorkingDirectory="$(SpaRoot)" Command="node src/environments/version.ts" EnvironmentVariables="OCTO_VERSION=$(OctoVersion)" />
+        <!-- Regenerate currentVersion.ts with the service version so the SPA
+             footer shows it instead of package.json's 0.0.0. Runs explicitly
+             because npm install (postinstall) is skipped when node_modules
+             already exists. -->
+        <Exec WorkingDirectory="$(SpaRoot)" Command="node src/environments/version.ts" EnvironmentVariables="OCTO_VERSION=$(OctoServiceVersion)" />
         <Message Importance="high" Text="Building Angular ClientApp..." />
         <Exec WorkingDirectory="$(SpaRoot)" Command="npm run build" />
     </Target>
@@ -88,7 +99,7 @@
     <!-- Publish: ensure fresh production build of Angular ClientApp -->
     <Target Name="PublishRunWebpack" AfterTargets="ComputeFilesToPublish">
         <Exec WorkingDirectory="$(SpaRoot)" Command="npm install" />
-        <Exec WorkingDirectory="$(SpaRoot)" Command="node src/environments/version.ts" EnvironmentVariables="OCTO_VERSION=$(OctoVersion)" />
+        <Exec WorkingDirectory="$(SpaRoot)" Command="node src/environments/version.ts" EnvironmentVariables="OCTO_VERSION=$(OctoServiceVersion)" />
         <Exec WorkingDirectory="$(SpaRoot)" Command="npm run build -- --configuration production" />
         <ItemGroup>
             <DistFiles Include="$(SpaRoot)dist\**" />
