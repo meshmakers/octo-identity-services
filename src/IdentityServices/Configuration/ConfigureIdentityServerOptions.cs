@@ -39,5 +39,14 @@ internal class ConfigureIdentityServerOptions(
         options.UserInteraction.ConsentUrl = $"/{systemTenantId}/consent";
         options.UserInteraction.ErrorUrl = $"/{systemTenantId}/error";
         options.UserInteraction.DeviceVerificationUrl = $"/{systemTenantId}/device";
+
+        // RFC 7591 Dynamic Client Registration (AB#4338): advertise the hand-rolled /connect/register
+        // endpoint in the discovery document so spec-compliant interactive MCP clients (e.g. Claude
+        // Code) can discover it. Only advertised when DCR is enabled for the deployment.
+        if (octoIdentityOptions.Value.DynamicClientRegistration.Enabled)
+        {
+            options.Discovery.CustomEntries["registration_endpoint"] =
+                octoIdentityOptions.Value.AuthorityUrl.EnsureEndsWith("/") + "connect/register";
+        }
     }
 }

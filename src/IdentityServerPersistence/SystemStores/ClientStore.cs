@@ -116,6 +116,15 @@ public class ClientStore : IOctoClientStore
     {
         var client = await FindRtClientByIdAsync(clientId);
 
+        // A dynamically-registered client (RFC 7591, AB#4338) past its TTL is treated as
+        // non-existent — Duende then rejects the request (unauthorized_client). This makes expiry
+        // effective immediately, independent of when the background sweep erases the record.
+        if (client is { DynamicRegistration: true, DynamicRegistrationExpiresAt: not null }
+            && client.DynamicRegistrationExpiresAt.Value <= DateTime.UtcNow)
+        {
+            return null;
+        }
+
         ct.ThrowIfCancellationRequested();
         return _mapper.Map<Client>(client);
     }

@@ -368,6 +368,27 @@ internal class OidcTenantResolutionMiddleware(
                 logger.LogWarning(
                     "No acr_values on /connect/token for client_credentials — client lookup will use system tenant");
             }
+            else if (string.Equals(grantType, "urn:ietf:params:oauth:grant-type:token-exchange",
+                         StringComparison.Ordinal))
+            {
+                // RFC 8693 Token Exchange (AB#4338): the target tenant (B) is specified via
+                // acr_values=tenant:{tenantId} in the form body, exactly like client_credentials.
+                // Wiring the B tenant repository into HttpContext.Items here is what lets
+                // TenantExchangeGrantValidator re-resolve the user's roles in B (and lets the
+                // minted token's per-tenant stores stamp tenant_id=B). The validator additionally
+                // asserts the resolved tenant equals the requested B and fails closed otherwise.
+                var acrTenantId = ParseTenantFromAcrValues(form["acr_values"].ToString());
+                if (!string.IsNullOrEmpty(acrTenantId))
+                {
+                    logger.LogDebug(
+                        "Resolved tenant '{TenantId}' from acr_values for token-exchange on /connect/token",
+                        acrTenantId);
+                    return acrTenantId;
+                }
+
+                logger.LogWarning(
+                    "No acr_values on /connect/token for token-exchange — token exchange will be rejected (no target tenant)");
+            }
             else if (string.Equals(grantType, "refresh_token", StringComparison.Ordinal))
             {
                 var refreshToken = form["refresh_token"].FirstOrDefault();

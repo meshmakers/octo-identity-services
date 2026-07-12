@@ -1,6 +1,7 @@
 ﻿using Duende.IdentityServer.Services;
 using IdentityServerPersistence;
 using IdentityServerPersistence.Configuration.Options;
+using IdentityServerPersistence.Services.DynamicClientRegistration;
 using IdentityServerPersistence.SystemStores;
 using Meshmakers.Octo.Backend.Authentication.Consumers;
 using Meshmakers.Octo.Backend.Authentication.DynamicAuth;
@@ -15,6 +16,7 @@ using IQrCodeService = Meshmakers.Octo.Backend.IdentityServices.Services.IQrCode
 using QrCodeService = Meshmakers.Octo.Backend.IdentityServices.Services.QrCodeService;
 using Meshmakers.Octo.Communication.Contracts;
 using Meshmakers.Octo.Communication.Contracts.DataTransferObjects;
+using Meshmakers.Octo.Runtime.Contracts.Blueprints;
 using Meshmakers.Octo.Runtime.Contracts.MongoDb;
 using Meshmakers.Octo.Runtime.Contracts.MongoDb.Configuration;
 using Meshmakers.Octo.Runtime.Contracts.MongoDb.Extensions;
@@ -87,6 +89,13 @@ try
         builder.Configuration.GetSection("Identity").Bind(options));
     builder.Services.Configure<OctoSystemConfiguration>(options =>
         builder.Configuration.GetSection("System").Bind(options));
+    // Blueprint variable inputs (${octo.scheme}/${octo.domain}/${octo.environment}/...).
+    // AddRuntimeEngine only registers the options — it does NOT bind them; without this
+    // binding OCTO_BLUEPRINTS__* env vars are silently ignored, ${octo.mcp.publicUrl}
+    // composes to an empty string, and the blueprint seeds a broken mcpApi ApiResource
+    // Name ("/") plus relative MCP client URIs (seen live on test-2, AB#4338).
+    builder.Services.Configure<OctoBlueprintVariablesOptions>(options =>
+        builder.Configuration.GetSection(OctoBlueprintVariablesOptions.SectionName).Bind(options));
 
     // ASP.NET Data Protection: the key ring is persisted in MongoDB (system tenant) — ALWAYS ON,
     // shared by all pods. Identity:DataProtectionKeysPath is no longer a persistence target; if it
@@ -121,6 +130,22 @@ try
                     SegmentsPerWindow = 2,
                     QueueLimit = 0
                 }));
+        // RFC 7591 Dynamic Client Registration (AB#4338): per-IP throttle on /connect/register.
+        options.AddPolicy("dcr", httpContext =>
+        {
+            var permit = httpContext.RequestServices
+                .GetRequiredService<IOptions<OctoIdentityServicesOptions>>()
+                .Value.DynamicClientRegistration.RateLimitPermitsPerMinute;
+            return RateLimitPartition.GetSlidingWindowLimiter(
+                httpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown",
+                _ => new SlidingWindowRateLimiterOptions
+                {
+                    PermitLimit = permit,
+                    Window = TimeSpan.FromMinutes(1),
+                    SegmentsPerWindow = 2,
+                    QueueLimit = 0
+                });
+        });
         options.OnRejected = async (context, _) =>
         {
             context.HttpContext.Response.StatusCode = StatusCodes.Status429TooManyRequests;
@@ -129,6 +154,9 @@ try
     });
 
     builder.Services.AddScoped<ICorsPolicyService, CorsPolicyService>();
+
+    // RFC 7591 Dynamic Client Registration for interactive MCP clients (AB#4338).
+    builder.Services.AddScoped<IDynamicClientRegistrationService, DynamicClientRegistrationService>();
     builder.Services.AddTransient<ICredentialGenerator, CredentialGenerator>();
 
     builder.Services.AddDynamicAuthentication()
@@ -178,6 +206,9 @@ try
         .AddAspNetIdentity<RtUser>()
         .AddProfileService<UserProfileService>()
         .AddCustomTokenRequestValidator<ClientCredentialsRoleTokenValidator>()
+        // RFC 8693 Token Exchange (AB#4338): mints a target-tenant (B) access token from the
+        // user's home-tenant (A) access token, with roles re-resolved in B on the B-shadow sub.
+        .AddExtensionGrantValidator<TenantExchangeGrantValidator>()
         .AddServerSideSessions<ServerSideSessionStore>()
         .AddCorsPolicyService<CorsPolicyService>()
         .AddAppAuthRedirectUriValidator()
@@ -363,6 +394,7 @@ try
     // The sequence of the add statements in the configure function is of importance.
     // app.UseAuthentication()
     // !!!UseIdentityServer calls already UseAuthentication; comes before app.UseMvc();
+    app.UseDcrDefaultScope();
     app.UseOidcTenantResolution();
     app.UseTenantLoginRedirect();
     app.UseIdentityServer();
@@ -372,6 +404,64 @@ try
 
     // Map API controllers - MUST come before UseEndpoints middleware runs
     app.MapControllers();
+
+    // RFC 7591 Dynamic Client Registration (AB#4338). Anonymous + rate-limited. Runs against the
+    // system tenant (the default at this root, non-tenant-prefixed path); the registered client is
+    // flagged for mirroring into every tenant so it resolves wherever the user authenticates via §9
+    // email-first tenant-discovery. Returns 404 when DCR is disabled for the deployment.
+    app.MapPost("/connect/register", async (
+            HttpContext context,
+            IDynamicClientRegistrationService dcrService,
+            IOptions<OctoIdentityServicesOptions> idOptions) =>
+        {
+            if (!idOptions.Value.DynamicClientRegistration.Enabled)
+            {
+                return Results.NotFound();
+            }
+
+            DynamicClientRegistrationRequest? request;
+            try
+            {
+                request = await context.Request.ReadFromJsonAsync<DynamicClientRegistrationRequest>(
+                    context.RequestAborted);
+            }
+            catch (Exception)
+            {
+                return Results.Json(
+                    new DynamicClientRegistrationError
+                    {
+                        Error = "invalid_client_metadata",
+                        ErrorDescription = "Malformed registration request body."
+                    }, statusCode: StatusCodes.Status400BadRequest);
+            }
+
+            if (request == null)
+            {
+                return Results.Json(
+                    new DynamicClientRegistrationError
+                    {
+                        Error = "invalid_client_metadata",
+                        ErrorDescription = "Empty registration request body."
+                    }, statusCode: StatusCodes.Status400BadRequest);
+            }
+
+            var result = await dcrService.RegisterAsync(request, context.RequestAborted);
+            return result.Outcome switch
+            {
+                DynamicClientRegistrationOutcome.Created =>
+                    Results.Json(result.Response, statusCode: StatusCodes.Status201Created),
+                DynamicClientRegistrationOutcome.ReturnedExisting =>
+                    Results.Json(result.Response, statusCode: StatusCodes.Status200OK),
+                DynamicClientRegistrationOutcome.Invalid =>
+                    Results.Json(result.Error, statusCode: StatusCodes.Status400BadRequest),
+                DynamicClientRegistrationOutcome.CapExceeded =>
+                    Results.Json(result.Error, statusCode: StatusCodes.Status403Forbidden),
+                DynamicClientRegistrationOutcome.Disabled => Results.NotFound(),
+                _ => Results.StatusCode(StatusCodes.Status500InternalServerError)
+            };
+        })
+        .AllowAnonymous()
+        .RequireRateLimiting("dcr");
 
     // Redirect root path to the system tenant's login page
     app.MapGet("/", (IOptions<OctoSystemConfiguration> systemConfig) =>

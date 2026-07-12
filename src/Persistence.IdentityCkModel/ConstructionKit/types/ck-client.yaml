@@ -153,6 +153,12 @@ types:
       - id: ${this}/ProvisionedByParentTenantId
         name: ProvisionedByParentTenantId
         isOptional: true
+
+      - id: ${this}/DynamicRegistration
+        name: DynamicRegistration
+      - id: ${this}/DynamicRegistrationExpiresAt
+        name: DynamicRegistrationExpiresAt
+        isOptional: true
     associations:
       - id: ${this}/AssignedRole
         targetCkTypeId: ${this}/Role

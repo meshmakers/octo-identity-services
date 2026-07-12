@@ -1,4 +1,5 @@
 using IdentityServerPersistence.Configuration.Options;
+using IdentityServerPersistence.Services;
 using Meshmakers.Octo.Runtime.Contracts;
 using Meshmakers.Octo.Runtime.Contracts.MongoDb;
 using Meshmakers.Octo.Runtime.Contracts.MongoDb.Repositories;
@@ -113,6 +114,10 @@ internal class TokenCleanupHostService : IHostedService
             // Clean up grants in the system tenant
             await RemoveExpiredGrantsForTenantAsync(systemContext.GetSystemTenantRepository());
 
+            // AB#4338: erase expired dynamically-registered clients (RFC 7591) + their mirrors.
+            // They live in the system tenant; removing mirrors cleans the child-tenant copies too.
+            await RemoveExpiredDynamicClientsAsync(serviceScope, systemContext);
+
             // Clean up grants in all child tenants
             if (!await systemContext.IsSystemTenantExistingAsync())
             {
@@ -148,6 +153,61 @@ internal class TokenCleanupHostService : IHostedService
         catch (Exception ex)
         {
             Logger.Error("Exception removing expired grants: {Message}", ex.Message);
+        }
+    }
+
+    private static async Task RemoveExpiredDynamicClientsAsync(IServiceScope scope, ISystemContext systemContext)
+    {
+        try
+        {
+            var systemRepo = systemContext.GetSystemTenantRepository();
+            var mirrorService = scope.ServiceProvider.GetRequiredService<IClientMirrorProvisioningService>();
+
+            List<RtClient> expired;
+            using (var session = await systemRepo.GetSessionAsync())
+            {
+                session.StartTransaction();
+                var query = await systemRepo.GetRtEntitiesByTypeAsync<RtClient>(session,
+                    RtEntityQueryOptions.Create()
+                        .FieldFilter(nameof(RtClient.DynamicRegistration), FieldFilterOperator.Equals, true));
+                var now = DateTime.UtcNow;
+                expired = query.Items
+                    .Where(c => c.DynamicRegistrationExpiresAt.HasValue &&
+                                c.DynamicRegistrationExpiresAt.Value <= now)
+                    .ToList();
+                await session.CommitTransactionAsync();
+            }
+
+            if (expired.Count == 0)
+            {
+                return;
+            }
+
+            Logger.Info("Removing {Count} expired dynamic client(s) from tenant '{TenantId}'",
+                expired.Count, systemRepo.TenantId);
+
+            foreach (var client in expired)
+            {
+                try
+                {
+                    // Remove child-tenant mirrors + parent tracking rows first, then the system client.
+                    await mirrorService.RemoveMirrorsForClientAsync(systemRepo.TenantId, client.ClientId);
+
+                    using var session = await systemRepo.GetSessionAsync();
+                    session.StartTransaction();
+                    await systemRepo.DeleteOneRtEntityByRtIdAsync<RtClient>(session, client.RtId, DeleteOptions.Erase);
+                    await session.CommitTransactionAsync();
+                }
+                catch (Exception ex)
+                {
+                    Logger.Error("Exception removing expired dynamic client '{ClientId}': {Message}",
+                        client.ClientId, ex.Message);
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.Error("Exception removing expired dynamic clients: {Message}", ex.Message);
         }
     }
 

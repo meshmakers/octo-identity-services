@@ -35,6 +35,15 @@ public static class ClientUriSources
     public const string Api = "api";
 
     /// <summary>
+    ///     Loopback redirect URIs written by RFC 7591 Dynamic Client Registration (AB#4338) on a
+    ///     <c>DynamicRegistration=true</c> client. Distinct from <see cref="Base"/> / <see cref="Api"/>
+    ///     so the cleanup gate and audit can tell dynamically-registered URIs apart. Like
+    ///     <see cref="Api"/> they are not rewritten by blueprint re-apply — dynamic clients are not
+    ///     blueprint-managed.
+    /// </summary>
+    public const string Dynamic = "dynamic";
+
+    /// <summary>
     ///     Prefix on every overlay-managed source value. <see cref="ClientUriSources"/> remarks
     ///     explain why there is no per-overlay constant here.
     /// </summary>

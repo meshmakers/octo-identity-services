@@ -525,6 +525,62 @@ POST /{targetTenantId}/api/auth/tenant-switch
         └── Access granted ──► 200 { success: true, roles: [...] }
 ```
 
+### Cross-Tenant Token Exchange (RFC 8693, AB#4338)
+
+For **non-interactive** clients (the MCP server), the browser tenant-switch flow above is replaced by
+an OAuth 2.0 Token Exchange grant. It lets an already-authenticated user obtain a **target-tenant (B)
+access token** from their current **home-tenant (A) access token** — no browser, no credential prompt —
+with roles **re-resolved in B**.
+
+```
+POST /connect/token
+  grant_type=urn:ietf:params:oauth:grant-type:token-exchange
+  subject_token={A access token}
+  subject_token_type=urn:ietf:params:oauth:token-type:access_token
+  acr_values=tenant:{B}
+  client_id=octo-mcpServices-device
+        │
+        ├── OidcTenantResolutionMiddleware reads acr_values=tenant:B and wires B's repo into
+        │   HttpContext.Items (same branch as client_credentials)
+        ▼
+  TenantExchangeGrantValidator (Duende IExtensionGrantValidator)
+        ├── (a) Validate subject_token via ITokenValidator → extract A sub, tenant_id=A, username
+        ├── (b) Read target B from acr_values; assert HttpContext tenant == B (fail closed → invalid_target)
+        ├── (c) ValidateCrossTenantAccessAsync(B, A, subA) → null ⇒ unauthorized_client
+        ├── (d) FindOrCreateCrossTenantUserAsync(result, B) → B-shadow user (xt_A_user)
+        └── Return GrantValidationResult(subject = B-shadow user's RtId, authenticationMethod="token_exchange")
+        │
+        ▼
+  Duende mints the token for the B-shadow sub → UserProfileService / OctoUserStore stamp
+  tenant_id=B + B's allowed_tenants + B-resolved roles automatically (same claim path as a login)
+```
+
+**Security linchpin.** The issued token runs on the **B-shadow user's** `sub` (`xt_{A}_{user}`),
+**never** the A user with a swapped `tenant_id`. Because the per-tenant profile / role stores key off
+that subject, the token carries B-resolved roles (the subset granted by B's
+`RtExternalTenantUserMapping`), so A's roles cannot leak into B. A naive re-scope of the A token would
+be a privilege escalation and is rejected by design. This is pinned by the
+`Exchange_ResolvesBSubsetRoles_NotParentFullRoles` integration test.
+
+**v1 issues no exchanged refresh token** — B access tokens are short-lived and re-exchanged from the
+still-valid A token on expiry, sidestepping cross-tenant refresh-token binding (A stays the single
+long-lived credential / root of trust).
+
+**Audit.** `TokenExchangeSuccessEvent` / `TokenExchangeFailureEvent` (in
+`IdentityServices/Services/`) carry `{sourceUserId, sourceTenantId, targetTenantId, shadowRtId/reason}`.
+Failure events are persisted to the runtime event log by `OctoEventSink`; success events are log-only
+(the sink persists only Error/Failure events).
+
+**Client enablement.** The `octo-mcpServices-device` client (rtId 660…034) carries the token-exchange
+grant in its `AllowedGrantTypes` via the `System.Identity.Bootstrap` blueprint. This is additive client
+config — no CK schema change. The MCP server performs ALL exchanges with the device client, regardless
+of how the user originally logged in (device flow or a DCR-registered client) — the subject_token is
+validated context-free with `ValidateAudience=false`, so it is not bound to the exchanging client. The
+interim `octo-mcpServices-interactive` client (rtId 660…035) was removed again in blueprint 1.1.5:
+interactive MCP clients self-register via Dynamic Client Registration (`octo-dcr-*`), and nothing
+ever consumed the static client (its fixed `:8976` loopback redirects never matched Claude Code's
+random-port callbacks).
+
 ### CK Model Types
 
 **OctoTenantIdentityProvider** (derives from IdentityProvider):
@@ -831,6 +887,59 @@ The `AuthorizeService` in `@meshmakers/shared-auth`:
 ### Performance
 
 The resolver runs **only at token issuance time** (login, token refresh), not per-request. The number of tenants is typically small (< 100), making the per-tenant mapping query acceptable.
+
+## Dynamic Client Registration (RFC 7591) — AB#4338
+
+Spec-compliant interactive MCP clients (e.g. Claude Code) require **RFC 7591 Dynamic Client
+Registration** — they self-register a client at a `registration_endpoint` and do not accept a
+pre-registered `client_id`. A hand-rolled `POST /connect/register` endpoint supports this. It is
+**enabled by default** (`OCTO_IDENTITY__DYNAMICCLIENTREGISTRATION__ENABLED`, default `true`); set it to
+`false` to disable per deployment, in which case the endpoint returns 404 and `registration_endpoint`
+is not advertised in discovery. Default-on is acceptable because the gate below is strict (loopback-only
+redirects → no phishing vector) and a registration alone grants no token.
+
+**Endpoint:** `POST /connect/register` (anonymous, per-IP rate-limited). Runs in the **system tenant**
+context. Returns 201 (created) / 200 (existing re-issued) / 400 (`invalid_redirect_uri` /
+`invalid_client_metadata`) / 403 (per-tenant cap) / 404 (disabled).
+
+**Security gate** (`DynamicClientRegistrationService`): registration is open (Claude Code sends no
+initial access token) but hard-constrained — **loopback redirect URIs only** (`127.0.0.1` / `[::1]` /
+`localhost`, http), **PKCE required**, **public client** (`token_endpoint_auth_method=none`, no secret),
+grant fixed to `authorization_code` (+`refresh_token`), and a **server-fixed scope allow-list** (client
+scopes are ignored). Per-IP rate limit + per-tenant cap + bounded TTL bound abuse.
+
+**Tenant model — reuses the shipped tenant-specific auth, no new machinery:**
+- The client is created in the **system tenant** with `DynamicRegistration=true` and
+  `AutoProvisionInChildTenants=true`, then mirrored into every tenant (via
+  `ClientMirrorProvisioningService`) — identical to the built-in `octo-mcpServices-*` clients.
+- The client is tenant-agnostic; the **user's** `allowed_tenants` (not the client) grants tenant access.
+  A DCR client sends `/connect/authorize` with no `acr_values`, so **§9 Email-First Tenant-Discovery**
+  resolves the tenant; the mirrored client is found in whatever tenant the user selects. Switching
+  tenants afterwards is the usual token + per-call tenant selection, not a new login.
+
+**Lifecycle:** `DynamicRegistrationExpiresAt` (registration + `ClientTtlDays`, default 90d) bounds
+lifetime. `ClientStore.FindClientByIdAsync` returns null for an expired dynamic client (immediate
+enforcement → `unauthorized_client`), and `TokenCleanupHostService` erases expired dynamic clients +
+their mirrors each cleanup interval. `PreBlueprintCleanupMigration` never sweeps a
+`DynamicRegistration=true` client. Registrations with an identical redirect-URI set are **deduped**
+(the existing non-expired client is re-issued) to avoid per-launch accumulation.
+
+**Management-surface exposure:** `ClientsController.CreateClientDto` emits `DynamicRegistration` +
+`DynamicRegistrationExpiresAt` read-only on the shared `ClientDto` (SDK ≥ the AB#4338 bump), so
+Studio / octo-cli / MCP tools can mark dynamic clients. `ApplyToClient` never reads them back —
+accepting them would let a caller move an ordinary client into (or a dynamic client out of) the
+DCR TTL lifecycle, bypassing the hard gate.
+
+**Scopeless authorize requests are defaulted:** some interactive MCP clients (observed with Claude
+Code) send `GET /connect/authorize` without a `scope` parameter even though the protected-resource
+metadata advertises `scopes_supported`; Duende hard-rejects that with "scope is missing".
+`DcrDefaultScopeMiddleware` (registered before `UseIdentityServer()`) injects the server-fixed DCR
+scope set (`DynamicClientRegistration.AllowedScopes`) into the query string when an `octo-dcr-*`
+client omits `scope` — permitted by RFC 6749 §3.3 (server-defined default scope) and grants nothing
+the client could not have requested, since DCR scopes are server-fixed at registration anyway.
+Non-DCR clients are never touched.
+
+See `docs/CONCEPT-MCP-DYNAMIC-CLIENT-REGISTRATION.md` for the full design and phasing.
 
 ## Security Considerations
 

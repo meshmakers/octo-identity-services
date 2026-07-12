@@ -362,6 +362,42 @@ entities:
       - id: System.Identity/AllowedAccessTokenSigningAlgorithms
         value: []
 
+  # MCP resource indicator (RFC 8707). Interactive OAuth clients like Claude Code send
+  # resource=<mcp public url> on /connect/authorize; Duende matches the value exactly against an
+  # ApiResource Name. Without this, the request fails with invalid_target. The MCP server itself does
+  # not validate the audience (ValidateAudience=false), so this only satisfies the resource indicator
+  # — it is an isolated protocol shim, NOT a per-service audience: it carries the same scopes as
+  # octoAPI (660…020) and no resource server validates it. The trailing slash is required: the value
+  # must match byte-for-byte what the client transmits, and ${octo.mcp.publicUrl} resolves without one.
+  - rtId: '660000000000000000000021'
+    ckTypeId: System.Identity/ApiResource
+    rtWellKnownName: mcpApi
+    attributes:
+      - id: System/Enabled
+        value: true
+      - id: System/Name
+        value: '${octo.mcp.publicUrl}/'
+      - id: System/DisplayName
+        value: Octo MCP API
+      - id: System/Description
+        value: Resource indicator for the MCP server (interactive OAuth clients such as Claude Code)
+      - id: System.Identity/ResourceClaims
+        value:
+          - role
+      - id: System.Identity/ShowInDiscoveryDocument
+        value: true
+      - id: System.Identity/RequireResourceIndicator
+        value: false
+      - id: System.Identity/Secrets
+        value: []
+      - id: System.Identity/Scopes
+        value:
+          - octo_api
+          - octo_api.read_only
+          - octo_api.data_model_management
+      - id: System.Identity/AllowedAccessTokenSigningAlgorithms
+        value: []
+
   # ===========================================================================
   # CLIENTS (660…30 – 660…32). The full attribute set is large — every
   # property the imperative seed sets explicitly is mirrored here. Attributes
@@ -678,6 +714,11 @@ entities:
       - id: System.Identity/AllowedGrantTypes
         value:
           - urn:ietf:params:oauth:grant-type:device_code
+          # AB#4338: RFC 8693 Token Exchange — lets the MCP server mint a
+          # target-tenant (B) access token from the user's already-valid A token
+          # (subject_token) without a browser prompt. Roles are re-resolved in B
+          # by the TenantExchangeGrantValidator; no privilege leak.
+          - urn:ietf:params:oauth:grant-type:token-exchange
       - id: System.Identity/RequirePkce
         value: false
       - id: System.Identity/AllowOfflineAccess

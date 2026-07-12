@@ -1,12 +1,12 @@
 $schema: https://schemas.meshmakers.cloud/blueprint-meta.schema.json
-blueprintId: System.Identity.Bootstrap-1.1.2
+blueprintId: System.Identity.Bootstrap-1.1.6
 description: |
   Service-managed Identity tenant seed — system + every child tenant. Provides
   the default role set (14 roles), the five OIDC identity resources, three API
   scopes (full-access / read-only / data-model-management), the OctoApi resource,
-  the OAuth client baseline (OctoTool / IdentityServices Swagger / Refinery
-  Studio SPA / MCP Services Swagger + Device) and the TenantOwners group with
-  full role assignment.
+  the MCP resource indicator, the OAuth client baseline (OctoTool / IdentityServices
+  Swagger / Refinery Studio SPA / MCP Services Swagger + Device) and
+  the TenantOwners group with full role assignment.
 
   Following the OctoMesh "System.* = service-managed" convention this blueprint
   is auto-applied by the Identity service on tenant Enable / startup once Phase 3
@@ -21,6 +21,54 @@ description: |
   the cluster has the URL unset the blueprint still applies — the entity is
   seeded with empty placeholder values so the OIDC failure on user login is
   obvious instead of silently swallowed.
+
+  1.1.6 (AB#4338): version-only bump to FORCE a seed re-import. The `mcpApi`
+  ApiResource Name is `${octo.mcp.publicUrl}/`, resolved at apply time by
+  `IdentityBlueprintVariableProvider`. On tenants where 1.1.5 was first applied by
+  an identity build that pre-dated commit 489a262 (which binds the
+  `OCTO_BLUEPRINTS__*` options section), `${octo.mcp.publicUrl}` resolved to empty,
+  so the resource was seeded with Name `/` — making the RFC 8707 resource indicator
+  the MCP client sends (`https://mcp.<domain>/`) fail validation (`invalid_target`,
+  surfaced as "Something went wrong" on the authorize page). A plain restart does
+  NOT fix it: the startup apply skips the seed import when the installed version is
+  unchanged. Bumping the version re-imports the seed, re-resolving
+  `${octo.mcp.publicUrl}` (now correct with 489a262) and rewriting the resource
+  Name in every tenant. Seed content is otherwise identical to 1.1.5.
+
+  1.1.5 (AB#4338): removes the `octo-mcpServices-interactive` client (660…35)
+  again. It was the interim path for interactive MCP clients before we learned
+  that Claude Code requires RFC 7591 Dynamic Client Registration — such clients
+  now self-register (`octo-dcr-*`, server-side hard gate, see
+  `docs/CONCEPT-MCP-DYNAMIC-CLIENT-REGISTRATION.md`), and nothing ever consumed
+  the static client (its fixed :8976 loopback redirects never matched Claude
+  Code's random-port callbacks). The blueprint engine deletes the entity from
+  every tenant on apply (locked entity no longer in seed). Token exchange stays
+  on the device client, which the MCP server uses for all exchanges regardless
+  of how the user logged in.
+
+  1.1.4 (AB#4338): adds the RFC 8693 Token Exchange grant
+  (`urn:ietf:params:oauth:grant-type:token-exchange`) to the two MCP clients
+  `octo-mcpServices-device` (660…34) and `octo-mcpServices-interactive` (660…35).
+  This is additive client config — no CK schema change. It lets the MCP server
+  exchange the user's already-valid home-tenant (A) access token for a
+  target-tenant (B) access token with roles re-resolved in B, driven server-side
+  by `TenantExchangeGrantValidator`. The issued token runs on the B-shadow user
+  (`xt_A_user`) sub, so it carries `tenant_id=B` + B-resolved roles — no
+  privilege leak from A.
+
+  1.1.3 (AB#4338): adds the interactive-MCP OAuth path for spec-compliant MCP
+  clients (Claude Code). New `mcpApi` ApiResource whose Name is
+  `${octo.mcp.publicUrl}/` — the RFC 8707 resource indicator such clients send;
+  Duende exact-matches it or rejects the token exchange with `invalid_target`.
+  It is an isolated protocol shim (same scopes as OctoApi, no resource server
+  validates it — the MCP server runs `ValidateAudience=false`), NOT a return to
+  per-service resources. New dedicated client `octo-mcpServices-interactive`
+  (authorization code + PKCE, loopback redirects `127.0.0.1:8976`/`localhost:8976`,
+  offline_access) — kept separate from the Swagger client so the CLI loopback flow
+  does not widen the browser client's redirect surface. Pairs with the MCP server's
+  RFC 9728 OAuth discovery (octo-mcp-service). The identity-side `${octo.mcp.publicUrl}`
+  must resolve byte-identical to the MCP chart's `mcp.publicUri` per environment
+  (trailing-slash normalized) or the resource indicator will not match.
 
   1.1.2 (AB#4209 Step 2b): adds a `{{family.local-dev}}` placeholder to the
   Refinery Studio client's `RedirectUris`, `PostLogoutRedirectUris` and

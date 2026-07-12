@@ -174,6 +174,14 @@ internal class PreBlueprintCleanupMigration(
                 continue;
             }
 
+            // AB#4338: never sweep a dynamically-registered client (RFC 7591). Its random ClientId is
+            // not in any whitelist so the gate below already preserves it — this is belt-and-braces
+            // and documents intent. Only RtClient carries the flag.
+            if (entity is RtClient { DynamicRegistration: true })
+            {
+                continue;
+            }
+
             // Two-layer safety gate.
             //
             // First hotfix (test-2 2026-06-15 incident #1 — over-deletion): the original
@@ -319,6 +327,14 @@ internal class PreBlueprintCleanupMigration(
             "OctoToolClient",
             "IdentityServicesSwaggerClient",
             "RefineryStudioClient",
+            // MCP clients: swagger + device were imperatively seeded by the MCP server's old
+            // CreateIdentityDataCommandRequest path (with random rtIds) before AB#4208 moved them into
+            // this blueprint with stable rtIds — a leftover random-rtId copy on the system tenant
+            // shadows the blueprint client (Duende takes the first match), so it must be swept here.
+            // (octo-mcpServices-interactive was listed defensively while it existed; the client was
+            // removed from the blueprint in 1.1.5 — interactive MCP clients self-register via DCR.)
+            "octo-mcpServices-swagger",
+            "octo-mcpServices-device",
         };
 
     private static readonly HashSet<string> KnownPreBlueprintGroupNames =
