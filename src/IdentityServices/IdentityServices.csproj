@@ -63,6 +63,11 @@
         <Error Condition="'$(ErrorCode)' != '0'" Text="Node.js is required to build and run this project. To continue, please install Node.js from https://nodejs.org/, and then restart your command prompt or IDE." />
         <Message Importance="high" Text="Installing npm dependencies for ClientApp..." />
         <Exec WorkingDirectory="$(SpaRoot)" Command="npm install" Condition="!Exists('$(SpaRoot)node_modules')" />
+        <!-- Regenerate currentVersion.ts with $(OctoVersion) so the SPA footer
+             shows the service version instead of package.json's 0.0.0. Runs
+             explicitly because npm install (postinstall) is skipped when
+             node_modules already exists. -->
+        <Exec WorkingDirectory="$(SpaRoot)" Command="node src/environments/version.ts" EnvironmentVariables="OCTO_VERSION=$(OctoVersion)" />
         <Message Importance="high" Text="Building Angular ClientApp..." />
         <Exec WorkingDirectory="$(SpaRoot)" Command="npm run build" />
     </Target>
@@ -83,6 +88,7 @@
     <!-- Publish: ensure fresh production build of Angular ClientApp -->
     <Target Name="PublishRunWebpack" AfterTargets="ComputeFilesToPublish">
         <Exec WorkingDirectory="$(SpaRoot)" Command="npm install" />
+        <Exec WorkingDirectory="$(SpaRoot)" Command="node src/environments/version.ts" EnvironmentVariables="OCTO_VERSION=$(OctoVersion)" />
         <Exec WorkingDirectory="$(SpaRoot)" Command="npm run build -- --configuration production" />
         <ItemGroup>
             <DistFiles Include="$(SpaRoot)dist\**" />
