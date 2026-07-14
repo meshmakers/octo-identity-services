@@ -1,12 +1,21 @@
 $schema: https://schemas.meshmakers.cloud/blueprint-meta.schema.json
-blueprintId: System.Identity.Bootstrap-1.1.6
+blueprintId: System.Identity.Bootstrap-1.2.0
 description: |
   Service-managed Identity tenant seed — system + every child tenant. Provides
   the default role set (14 roles), the five OIDC identity resources, three API
   scopes (full-access / read-only / data-model-management), the OctoApi resource,
   the MCP resource indicator, the OAuth client baseline (OctoTool / IdentityServices
-  Swagger / Refinery Studio SPA / MCP Services Swagger + Device) and
-  the TenantOwners group with full role assignment.
+  Swagger / Refinery Studio SPA / MCP Services Swagger + Device / Platform Services
+  Swagger) and the TenantOwners group with full role assignment.
+
+  1.2.0 (AB#4388): adds the `octo-platformServices-swagger` client (660…36) for
+  the Swagger UI now exposed by octo-platform-services (authorization code +
+  PKCE, same shape as the MCP Swagger client). URLs use the new
+  `${octo.platform.publicUrl}` variable ("platform" slug added to
+  `IdentityBlueprintVariableProvider.WellKnownServiceSlugs`), resolved from
+  `ServicePublicUrlOverrides["platform"]` in dev or
+  `${octo.scheme}://platform.${octo.domain}` in cluster. rtId 660…35 stays
+  skipped (removed octo-mcpServices-interactive client).
 
   Following the OctoMesh "System.* = service-managed" convention this blueprint
   is auto-applied by the Identity service on tenant Enable / startup once Phase 3

@@ -66,7 +66,7 @@ public sealed class IdentityBlueprintVariableProvider : IBlueprintVariableProvid
     ///     service-section name (e.g. <c>"mcp"</c> → <c>octo-mesh-mcp</c> chart) so the same
     ///     value can drive both the chart and the blueprint substitution.
     /// </remarks>
-    private static readonly string[] WellKnownServiceSlugs = ["mcp"];
+    private static readonly string[] WellKnownServiceSlugs = ["mcp", "platform"];
 
     /// <inheritdoc />
     public Task<IReadOnlyDictionary<string, string>> GetVariablesAsync(

@@ -227,6 +227,22 @@ public class IdentityBlueprintVariableProviderTests
     }
 
     [Fact]
+    public async Task GetVariables_PlatformPublicUrl_ComposedFromSchemeAndDomain()
+    {
+        // AB#4388: the platform slug drives the octo-platformServices-swagger client URIs
+        // in the System.Identity.Bootstrap seed, same composition rule as mcp.
+        var sut = CreateSut(new OctoBlueprintVariablesOptions
+        {
+            Scheme = "https",
+            Domain = "test-2.octo-mesh.com",
+        });
+
+        var variables = await sut.GetVariablesAsync("acme", TestContext.Current.CancellationToken);
+
+        variables["octo.platform.publicUrl"].Should().Be("https://platform.test-2.octo-mesh.com");
+    }
+
+    [Fact]
     public async Task GetVariables_McpPublicUrl_EmptyWhenNeitherSourceSet()
     {
         // Dev with no override AND no cluster domain → empty. The blueprint apply still

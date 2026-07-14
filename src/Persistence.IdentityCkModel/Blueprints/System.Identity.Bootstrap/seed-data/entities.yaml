@@ -740,6 +740,78 @@ entities:
       - id: System.Identity/AutoProvisionInChildTenants
         value: true
 
+  # --------------------------------------------------------------------------
+  # 660…36 — Platform Services Swagger UI (authorization code + PKCE; URLs
+  # derived from OctoIdentityServicesOptions.ServicePublicUrlOverrides["platform"]
+  # in dev, or ${octo.scheme}://platform.${octo.domain} in cluster — see
+  # IdentityBlueprintVariableProvider.ResolvePublicUrl). Same shape as the MCP
+  # Swagger client (660…33). AB#4388. (660…35 is intentionally skipped: it
+  # belonged to the removed octo-mcpServices-interactive client and stale
+  # copies may still exist on older tenants.)
+  # --------------------------------------------------------------------------
+  - rtId: '660000000000000000000036'
+    ckTypeId: System.Identity/Client
+    rtWellKnownName: PlatformServicesSwaggerClient
+    attributes:
+      - id: System/Enabled
+        value: true
+      - id: System.Identity/ClientId
+        value: octo-platformServices-swagger
+      - id: System/Name
+        value: OctoMesh Platform Services Swagger Client
+      - id: System.Identity/ClientUri
+        value: '${octo.platform.publicUrl}'
+      - id: System.Identity/ProtocolType
+        value: oidc
+      - id: System.Identity/RequireClientSecret
+        value: false
+      - id: System.Identity/Secrets
+        value: []
+      - id: System.Identity/AllowedGrantTypes
+        value:
+          - authorization_code
+      - id: System.Identity/RequirePkce
+        value: true
+      - id: System.Identity/AllowAccessTokensViaBrowser
+        value: true
+      - id: System.Identity/AlwaysIncludeUserClaimsInIdToken
+        value: true
+      - id: System.Identity/AccessTokenType
+        value: 0   # Jwt
+      - id: System.Identity/RedirectUris
+        value:
+          - ckRecordId: System.Identity/ClientUriEntry
+            attributes:
+              - id: System.Identity/Uri
+                value: '${octo.platform.publicUrl}/swagger/oauth2-redirect.html'
+              - id: System.Identity/Source
+                value: base
+      - id: System.Identity/PostLogoutRedirectUris
+        value:
+          - ckRecordId: System.Identity/ClientUriEntry
+            attributes:
+              - id: System.Identity/Uri
+                value: '${octo.platform.publicUrl}/'
+              - id: System.Identity/Source
+                value: base
+      - id: System.Identity/AllowedCorsOrigins
+        value:
+          - ckRecordId: System.Identity/ClientUriEntry
+            attributes:
+              - id: System.Identity/Uri
+                value: '${octo.platform.publicUrl}'
+              - id: System.Identity/Source
+                value: base
+      - id: System.Identity/AllowedScopes
+        value:
+          - openid
+          - profile
+          - email
+          - role
+          - octo_api
+      - id: System.Identity/AutoProvisionInChildTenants
+        value: true
+
   # ===========================================================================
   # GROUPS (660…40) — TenantOwners group with every built-in role assigned via
   # the AssignedRole association. Replaces the runtime SetRoleIdsAsync
