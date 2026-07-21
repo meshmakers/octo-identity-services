@@ -154,12 +154,15 @@ stages:
               DOCKER_HOST: unix:///var/run/docker.sock
               TESTCONTAINERS_RYUK_DISABLED: 'true'
               TESTCONTAINERS_HOST_OVERRIDE: '172.17.0.1'
+          # Multi-arch image (AB#4451): arm64 for Apple-Silicon kind clusters and
+          # edge devices, amd64 for the managed clusters.
           - template: templates/steps/build-and-push-docker.yml@pipelineTemplates
             parameters:
               publicRegistryServiceConnection: $(DockerRegistryPublicConnection)
               privateRegistryName: $(DockerRegistryPrivateUri)
               repository: meshmakers/octo-mesh-identity-services
               dockerfile: src/IdentityServices/Dockerfile
+              platforms: 'linux/arm64,linux/amd64'
               enableMainLatestTag: true
               # AB#4209 Step 4 PR 1 — the lib/comm version split (OCTO_CORE_LIB_VERSION
               # / OCTO_COMM_VERSION) is now part of build-and-push-docker.yml's default
