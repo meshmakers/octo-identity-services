@@ -73,6 +73,13 @@ All endpoints are tenant-scoped via the `{tenantId}` route parameter. The system
 }
 ```
 
+**Create User:**
+
+> User creation is atomic: when a password is supplied it is validated against the
+> password policy **before** the user record is created (`UserManager.CreateAsync(user, password)`).
+> A password that fails the policy returns `400 Bad Request` and persists no user
+> (AB#4503 - previously a rejected password left an orphaned account).
+
 **Merge Users:**
 
 Transfers all external logins (e.g., Google, Microsoft) from the source user to the target user, then deletes the source user. This is useful for consolidating duplicate accounts created by external identity providers.
