@@ -53,7 +53,7 @@ All endpoints are tenant-scoped via the `{tenantId}` route parameter. The system
   "lastName": "string",
   "email": "string",
   "name": "string",           // Display name
-  "password": "string",       // Required for creation
+  "password": "string",       // Optional; omit or leave empty to create an invite-style user with no password set
   "resetPasswordOnLogin": true
 }
 
@@ -79,6 +79,11 @@ All endpoints are tenant-scoped via the `{tenantId}` route parameter. The system
 > password policy **before** the user record is created (`UserManager.CreateAsync(user, password)`).
 > A password that fails the policy returns `400 Bad Request` and persists no user
 > (AB#4503 - previously a rejected password left an orphaned account).
+>
+> The `password` field is optional. When it is omitted or empty the user is created
+> without a password (`UserManager.CreateAsync(user)`) as an invite-style account and a
+> welcome notification is sent so the user can set their own password; such an account
+> cannot be used to log in until a password is set.
 
 **Merge Users:**
 

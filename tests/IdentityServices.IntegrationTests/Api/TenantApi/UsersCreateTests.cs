@@ -32,6 +32,12 @@ public class UsersCreateTests : IntegrationTestBase
         // Assert - the request is rejected
         response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
 
+        // Assert - the rejection is the Identity password policy, not model binding / DTO
+        // validation (whose 400 would not carry the "Password*" error codes). This guards
+        // against the test passing for the wrong reason if request validation ever changes.
+        var payload = await response.Content.ReadAsStringAsync(TestContext.Current.CancellationToken);
+        payload.Should().Contain("Password");
+
         // Assert - and, crucially, NO user was persisted (this assertion FAILS before the fix)
         using var scope = CreateScope();
         var userManager = scope.ServiceProvider.GetRequiredService<UserManager<RtUser>>();
