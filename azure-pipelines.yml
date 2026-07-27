@@ -46,7 +46,7 @@ resources:
       type: github
       name: meshmakers/octo-pipeline-templates
       endpoint: meshmakers-access-token
-      ref: refs/tags/tpl-v0.4.11
+      ref: refs/tags/tpl-v0.5.0
 
 trigger:
   batch: true
@@ -101,6 +101,13 @@ stages:
             clean: true
             submodules: recursive
           - template: templates/steps/set-version.yml@pipelineTemplates
+          # CK SemVer honesty gate (AB#4420): System.Identity is published
+          # DURING the dotnet build (/p:OctoPublishCatalog), so the gate must
+          # be able to fail first.
+          - template: templates/steps/validate-ck-versions.yml@pipelineTemplates
+            parameters:
+              constructionKitPaths:
+                - 'src/Persistence.IdentityCkModel/ConstructionKit'
           - template: templates/steps/download-ca.yml@pipelineTemplates
           # The agent-side `dotnet build` below triggers the IdentityServices
           # csproj BuildClientApp target (ng build) on the agent's Node. The
@@ -154,12 +161,15 @@ stages:
               DOCKER_HOST: unix:///var/run/docker.sock
               TESTCONTAINERS_RYUK_DISABLED: 'true'
               TESTCONTAINERS_HOST_OVERRIDE: '172.17.0.1'
+          # Multi-arch image (AB#4451): arm64 for Apple-Silicon kind clusters and
+          # edge devices, amd64 for the managed clusters.
           - template: templates/steps/build-and-push-docker.yml@pipelineTemplates
             parameters:
               publicRegistryServiceConnection: $(DockerRegistryPublicConnection)
               privateRegistryName: $(DockerRegistryPrivateUri)
               repository: meshmakers/octo-mesh-identity-services
               dockerfile: src/IdentityServices/Dockerfile
+              platforms: 'linux/arm64,linux/amd64'
               enableMainLatestTag: true
               # AB#4209 Step 4 PR 1 — the lib/comm version split (OCTO_CORE_LIB_VERSION
               # / OCTO_COMM_VERSION) is now part of build-and-push-docker.yml's default

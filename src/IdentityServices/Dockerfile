@@ -1,9 +1,12 @@
-FROM meshmakers/dotnet_aspnetcore-runtime-node:1.2.5.0 AS base
+FROM meshmakers/dotnet_aspnetcore-runtime-node:1.2.7.0 AS base
 WORKDIR /app
 EXPOSE 80
 EXPOSE 443
 
-FROM meshmakers/dotnet_sdk-node:1.2.5.0 AS build
+# Build on the native build platform (IL is portable, the Angular bundle is
+# arch-neutral) so multi-arch builds don't emulate the SDK or Node; the runtime
+# arch is selected by the `base`/`final` stages.
+FROM --platform=$BUILDPLATFORM meshmakers/dotnet_sdk-node:1.2.7.0 AS build
 
 # Angular 22 / Angular CLI 22 require Node >=22.22.3 (engine
 # ^22.22.3 || ^24.15.0 || >=26.0.0). The dotnet_sdk-node:1.2.5.0 base image
