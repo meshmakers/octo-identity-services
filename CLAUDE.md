@@ -489,6 +489,22 @@ Key identity options (`OctoIdentityServicesOptions`):
 - `DataProtectionKeysPath`: **Legacy / seed-only.** When set and the directory contains `key-*.xml` files, those keys are imported once into MongoDB at startup (zero-logout migration from old PVC). Safe to leave unset in new deployments; DataProtection keys are now always persisted in MongoDB.
 - `DynamicClientRegistration.Enabled` (env `OCTO_IDENTITY__DYNAMICCLIENTREGISTRATION__ENABLED`, default `true`): RFC 7591 Dynamic Client Registration (AB#4338) so interactive MCP clients (Claude Code) that require DCR can self-register a public authorization-code+PKCE client via `POST /connect/register`. Enabled by default (set `false` to disable per deployment). Hard-gated (loopback redirects, PKCE, no secret, server-fixed scopes, per-IP rate limit, per-tenant cap, TTL). Registers into the system tenant + mirrors to all tenants; tenant resolved at authorize by §9 email-first discovery. Also `AllowedScopes` / `ClientTtlDays` / `MaxClientsPerTenant` / `RateLimitPermitsPerMinute`. See `docs/authentication.md` § Dynamic Client Registration and `docs/CONCEPT-MCP-DYNAMIC-CLIENT-REGISTRATION.md`.
 
+### Password Policy (mirrored client-side — keep in sync)
+
+User passwords are validated by ASP.NET Core Identity's default `PasswordOptions`
+(minimum length 6; requires digit, lowercase, uppercase, and non-alphanumeric) — the
+policy is **not** overridden in this repo. `UsersController.Post` enforces it atomically
+via `UserManager.CreateAsync(rtUser, password)` (AB#4503 / Task 4516): an invalid password
+persists no user.
+
+**The Refinery Studio frontend duplicates this policy** in `octo-frontend-refinery-studio`
+(`src/octo-mesh-refinery-studio/src/app/shared/validators/password-policy.validator.ts`) as
+a pre-submit UX check — there is no endpoint exposing the policy over the wire. The two
+copies are kept in sync by hand: **if you override `PasswordOptions` here (or bump a
+`Require*` / `RequiredLength`), you MUST update that frontend validator and its inline message
+to match** (AB#4503 / Task 4524), otherwise the client-side hint silently diverges from what
+this service actually enforces.
+
 User secrets ID: `173d8e91-b831-4e8a-a43f-672c57e6a4da`
 
 ## Angular ClientApp (LCARS UI)

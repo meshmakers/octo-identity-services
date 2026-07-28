@@ -208,27 +208,28 @@ public class UsersController : ControllerBase
 
         try
         {
-            var result = await _userManager.CreateAsync(rtUser);
+            IdentityResult result;
+            if (!string.IsNullOrWhiteSpace(userDto.Password))
+            {
+                // Atomic: the password is validated BEFORE the user is persisted,
+                // so a policy failure never leaves an orphaned user (AB#4503).
+                result = await _userManager.CreateAsync(rtUser, userDto.Password);
+            }
+            else
+            {
+                result = await _userManager.CreateAsync(rtUser);
+            }
 
             if (!result.Succeeded)
             {
                 LogIdentityError("Create user", result.Errors);
-
                 return GetBadRequestResultWithErrorDescription("Creation of user failed", result.Errors);
             }
 
             if (!string.IsNullOrWhiteSpace(userDto.Password))
             {
-                var token = await _userManager.GeneratePasswordResetTokenAsync(rtUser);
-                result = await _userManager.ResetPasswordAsync(rtUser, token, userDto.Password);
-
-                if (!result.Succeeded)
-                {
-                    LogIdentityError("Reset Password", result.Errors);
-                    return GetBadRequestResultWithErrorDescription("Creation of user failed", result.Errors);
-                }
-
-                await _userEmailInteractionService.SendWelcomeNotificationAsync(_multiTenancyResolverService.GetTenantId(), rtUser);
+                await _userEmailInteractionService.SendWelcomeNotificationAsync(
+                    _multiTenancyResolverService.GetTenantId(), rtUser);
             }
             else
             {
