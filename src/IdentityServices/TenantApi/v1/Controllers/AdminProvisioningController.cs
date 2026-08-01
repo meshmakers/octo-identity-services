@@ -459,6 +459,113 @@ public class AdminProvisioningController(
     }
 
     /// <summary>
+    /// Returns the groups defined in the target tenant, offered as assignable options when creating a
+    /// cross-tenant user mapping. Assigning a group makes the mapping a GroupMember so the user inherits
+    /// the group's roles — the idiomatic, group-based grant.
+    /// </summary>
+    [HttpGet("groups")]
+    [Authorize(IdentityServiceConstants.IdentityApiReadWritePolicy)]
+    [EndpointSummary("Returns the groups defined in the target tenant.")]
+    [ProducesResponseType(typeof(IEnumerable<ProvisioningGroupDto>), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<ActionResult<IEnumerable<ProvisioningGroupDto>>> GetGroups(
+        [Required] string targetTenantId)
+    {
+        var tenantRepository = await systemContext.TryFindTenantRepositoryAsync(targetTenantId);
+        if (tenantRepository == null)
+        {
+            return NotFound($"Tenant '{targetTenantId}' not found.");
+        }
+
+        var session = await tenantRepository.GetSessionAsync();
+        session.StartTransaction();
+        var groupResult = await tenantRepository
+            .GetRtEntitiesByTypeAsync<RtGroup>(session, RtEntityQueryOptions.Create());
+        await session.CommitTransactionAsync();
+
+        return Ok(groupResult.Items.Select(g => new ProvisioningGroupDto
+        {
+            Id = g.RtId.ToString(),
+            Name = g.GroupName,
+            Description = g.GroupDescription
+        }));
+    }
+
+    /// <summary>
+    /// Creates a cross-tenant user mapping and makes it a member of the given target-tenant groups, so
+    /// the user inherits the groups' roles. This is the group-based counterpart of <see cref="Create"/>
+    /// and mirrors how <see cref="ProvisionCurrentUser"/> grants access via the TenantOwners group.
+    /// </summary>
+    [HttpPost("withGroups")]
+    [Authorize(IdentityServiceConstants.IdentityApiReadWritePolicy)]
+    [EndpointSummary("Creates a cross-tenant user mapping as a member of the given target-tenant groups.")]
+    [ProducesResponseType(typeof(ExternalTenantUserMappingDto), StatusCodes.Status201Created)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<ActionResult<ExternalTenantUserMappingDto>> CreateWithGroups(
+        [Required] string targetTenantId,
+        [Required][FromBody][Description("The mapping data with target-tenant group ids")]
+        CreateExternalTenantUserGroupMappingDto dto)
+    {
+        if (!ModelState.IsValid)
+        {
+            return BadRequest(ModelState);
+        }
+
+        var tenantRepository = await systemContext.TryFindTenantRepositoryAsync(targetTenantId);
+        if (tenantRepository == null)
+        {
+            return NotFound($"Tenant '{targetTenantId}' not found.");
+        }
+
+        var mapping = new RtExternalTenantUserMapping
+        {
+            RtId = OctoObjectId.GenerateNewId(),
+            SourceTenantId = dto.SourceTenantId,
+            SourceUserId = dto.SourceUserId,
+            SourceUserName = dto.SourceUserName,
+            MappedRoleIds = null
+        };
+
+        var session = await tenantRepository.GetSessionAsync();
+        session.StartTransaction();
+        await tenantRepository.InsertOneRtEntityAsync(session, mapping);
+
+        var groupNames = new List<string>();
+        if (dto.GroupIds is { Count: > 0 })
+        {
+            var updates = new List<AssociationUpdateInfo>();
+            foreach (var groupId in dto.GroupIds)
+            {
+                var group = await tenantRepository
+                    .GetRtEntityByRtIdAsync<RtGroup>(session, new OctoObjectId(groupId));
+                if (group == null)
+                {
+                    continue;
+                }
+
+                updates.Add(AssociationUpdateInfo.CreateInsert(
+                    group.ToRtEntityId(),
+                    mapping.ToRtEntityId(),
+                    IdentityAssociationConstants.GroupMemberId));
+                groupNames.Add(group.GroupName);
+            }
+
+            if (updates.Count > 0)
+            {
+                await tenantRepository.ApplyChangesAsync(session, updates, new OperationResult());
+            }
+        }
+
+        await session.CommitTransactionAsync();
+
+        // Ensure OctoTenantIdentityProvider exists so cross-tenant login works
+        await EnsureOctoTenantIdentityProviderAsync(tenantRepository, targetTenantId, dto.SourceTenantId);
+
+        return Created(string.Empty, MapToDto(mapping, groupNames));
+    }
+
+    /// <summary>
     /// Walks the target tenant's ancestor chain via <see cref="RtOctoTenantIdentityProvider.ParentTenantId"/>
     /// (breadth-first, cycle-safe, depth-capped) and returns every ancestor tenant id. These are the only
     /// tenants a cross-tenant mapping's SourceTenantId may legitimately reference.

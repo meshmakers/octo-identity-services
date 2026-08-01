@@ -3,6 +3,7 @@ using IdentityServerPersistence.Services;
 using IdentityServices.IntegrationTests.Fixtures;
 using Meshmakers.Octo.Backend.Authentication.DynamicAuth;
 using Meshmakers.Octo.Backend.IdentityServices.TenantApi.v1.Controllers;
+using Meshmakers.Octo.Communication.Contracts.DataTransferObjects;
 using Meshmakers.Octo.ConstructionKit.Contracts;
 using Meshmakers.Octo.Runtime.Contracts;
 using Meshmakers.Octo.Runtime.Contracts.MongoDb;
@@ -133,6 +134,58 @@ public class AdminProvisioningSourceUsersIntegrationTests : IClassFixture<Identi
         roles.Should().OnlyContain(r => !string.IsNullOrEmpty(r.Id) && !string.IsNullOrEmpty(r.Name));
     }
 
+    [Fact]
+    public async Task GetGroups_ReturnsTargetTenantGroups()
+    {
+        await _fixture.InitializeAsync();
+        var systemContext = _fixture.GetSystemContext();
+        await EnsureSystemSetupAsync();
+
+        var childTenantId = await CreateChildTenantAsync($"child-grp-{Guid.NewGuid():N}"[..24]);
+        await SeedGroupInTenantAsync(childTenantId, "TenantOwners");
+        await SeedGroupInTenantAsync(childTenantId, "Viewers");
+
+        var controller = CreateController(systemContext);
+
+        var action = await controller.GetGroups(childTenantId);
+        var groups = ((action.Result as OkObjectResult)!.Value as IEnumerable<ProvisioningGroupDto>)!.ToList();
+
+        groups.Select(g => g.Name).Should().Contain(new[] { "TenantOwners", "Viewers" });
+        groups.Should().OnlyContain(g => !string.IsNullOrEmpty(g.Id) && !string.IsNullOrEmpty(g.Name));
+    }
+
+    [Fact]
+    public async Task CreateWithGroups_MakesMappingAGroupMember()
+    {
+        await _fixture.InitializeAsync();
+        var systemContext = _fixture.GetSystemContext();
+        await EnsureSystemSetupAsync();
+
+        var childTenantId = await CreateChildTenantAsync($"child-cwg-{Guid.NewGuid():N}"[..24]);
+        var groupRtId = await SeedGroupInTenantAsync(childTenantId, "Viewers");
+
+        var marker = Guid.NewGuid().ToString("N")[..12];
+        var controller = CreateController(systemContext);
+
+        var action = await controller.CreateWithGroups(childTenantId, new CreateExternalTenantUserGroupMappingDto
+        {
+            SourceTenantId = systemContext.TenantId,
+            SourceUserId = OctoObjectId.GenerateNewId().ToString(),
+            SourceUserName = $"cwg-{marker}@example.io",
+            GroupIds = [groupRtId]
+        });
+
+        var created = (action.Result as CreatedResult)!.Value as ExternalTenantUserMappingDto;
+        created.Should().NotBeNull();
+        created!.GroupNames.Should().Contain("Viewers");
+
+        // Persisted: GetAll resolves the mapping's group membership via the inbound GroupMember edge.
+        var all = ((await controller.GetAll(childTenantId)).Result as OkObjectResult)!
+            .Value as IEnumerable<ExternalTenantUserMappingDto>;
+        all!.Single(m => m.SourceUserName == $"cwg-{marker}@example.io")
+            .GroupNames.Should().Contain("Viewers");
+    }
+
     // ---------- helpers ----------
 
     private AdminProvisioningController CreateController(ISystemContext systemContext)
@@ -258,6 +311,32 @@ public class AdminProvisioningSourceUsersIntegrationTests : IClassFixture<Identi
             await session.AbortTransactionAsync();
             throw;
         }
+    }
+
+    private async Task<string> SeedGroupInTenantAsync(string tenantId, string groupName)
+    {
+        var repo = await _fixture.GetSystemContext().TryFindTenantRepositoryAsync(tenantId);
+        repo.Should().NotBeNull();
+        var rtId = OctoObjectId.GenerateNewId();
+        using var session = await repo!.GetSessionAsync();
+        session.StartTransaction();
+        try
+        {
+            await repo.InsertOneRtEntityAsync(session, new RtGroup
+            {
+                RtId = rtId,
+                GroupName = groupName,
+                NormalizedGroupName = groupName.ToUpperInvariant()
+            });
+            await session.CommitTransactionAsync();
+        }
+        catch
+        {
+            await session.AbortTransactionAsync();
+            throw;
+        }
+
+        return rtId.ToString();
     }
 
     /// <summary>No-op auth-scheme service; the read-only endpoints under test never reconfigure schemes.</summary>

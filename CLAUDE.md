@@ -260,7 +260,9 @@ This solves the chicken-and-egg problem: after creating a child tenant, the user
 | `GET` | `/{targetTenantId}` | List all ExternalTenantUserMappings in target tenant |
 | `GET` | `/{targetTenantId}/sourceUsers?search=&take=` | Search provisionable users from the target's ancestor (parent) tenants — powers the Studio's cross-tenant user picker |
 | `GET` | `/{targetTenantId}/roles` | List the roles defined in the target tenant (assignable options for a mapping) |
-| `POST` | `/{targetTenantId}` | Create a new mapping in target tenant |
+| `GET` | `/{targetTenantId}/groups` | List the groups defined in the target tenant (assignable options for a mapping) |
+| `POST` | `/{targetTenantId}` | Create a new mapping in target tenant (direct role ids) |
+| `POST` | `/{targetTenantId}/withGroups` | Create a mapping and make it a member of the given target-tenant groups (group-based role inheritance) |
 | `POST` | `/{targetTenantId}/provisionCurrentUser` | Auto-provision current user with all roles |
 | `DELETE` | `/{targetTenantId}/{mappingRtId}` | Delete a mapping in target tenant |
 
@@ -270,6 +272,11 @@ The `sourceUsers` endpoint resolves the target's ancestor chain by walking
 because no other endpoint enumerates a parent tenant's directory — without it a picker had nothing to
 bind to, so an admin literally could not select a parent-tenant user. `roles` reads the target tenant's
 `RtRole` set directly via the system context (caller needs no `allowed_tenants` for the target).
+
+The Studio's **Add User** dialog grants access **group-based** (the idiomatic Octo path — roles are
+inherited through groups): it uses `groups` + `withGroups`, which makes the new mapping a `GroupMember`
+of the selected groups — the same mechanism `provisionCurrentUser` uses with `TenantOwners`. The direct
+`roles`/`POST` path (`MappedRoleIds`) remains for the CLI and role-level grants.
 
 > **Note:** the *per-tenant* `ExternalTenantUserMappingsController.Create` (used by `octo-cli
 > CreateExternalTenantUserMapping`) previously returned `CreatedAtAction(nameof(GetById), …)`, which
