@@ -386,6 +386,184 @@ public class AdminProvisioningController(
     }
 
     /// <summary>
+    /// Searches candidate users from the target tenant's ancestor (parent) tenants — the users that
+    /// may be provisioned as cross-tenant users into the target. Powers the Studio's user picker; no
+    /// endpoint otherwise enumerates a parent tenant's directory, which is why a picker was impossible
+    /// before. Matches on username OR email (case-insensitive, substring) and excludes cross-tenant
+    /// shadow users (<c>xt_</c> prefix). An empty <paramref name="search"/> returns the first users.
+    /// </summary>
+    [HttpGet("sourceUsers")]
+    [Authorize(IdentityServiceConstants.IdentityApiReadWritePolicy)]
+    [EndpointSummary("Searches provisionable users from the target tenant's ancestor tenants.")]
+    [ProducesResponseType(typeof(IEnumerable<ProvisioningSourceUserDto>), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<ActionResult<IEnumerable<ProvisioningSourceUserDto>>> GetSourceUsers(
+        [Required] string targetTenantId,
+        [FromQuery] string? search = null,
+        [FromQuery] int take = 20)
+    {
+        var targetRepository = await systemContext.TryFindTenantRepositoryAsync(targetTenantId);
+        if (targetRepository == null)
+        {
+            return NotFound($"Tenant '{targetTenantId}' not found.");
+        }
+
+        take = Math.Clamp(take, 1, 100);
+
+        var ancestorTenantIds = await ResolveAncestorTenantIdsAsync(targetTenantId);
+        if (ancestorTenantIds.Count == 0)
+        {
+            return Ok(Enumerable.Empty<ProvisioningSourceUserDto>());
+        }
+
+        var results = new List<ProvisioningSourceUserDto>();
+        foreach (var ancestorTenantId in ancestorTenantIds)
+        {
+            results.AddRange(await SearchUsersInTenantAsync(ancestorTenantId, search, take));
+            if (results.Count >= take)
+            {
+                break;
+            }
+        }
+
+        return Ok(results.Take(take));
+    }
+
+    /// <summary>
+    /// Returns the roles defined in the target tenant so the Studio can offer them as assignable
+    /// options when creating a cross-tenant user mapping. Read directly from the target tenant DB via
+    /// the system context (the caller need not have <c>allowed_tenants</c> for the target).
+    /// </summary>
+    [HttpGet("roles")]
+    [Authorize(IdentityServiceConstants.IdentityApiReadWritePolicy)]
+    [EndpointSummary("Returns the roles defined in the target tenant.")]
+    [ProducesResponseType(typeof(IEnumerable<ProvisioningRoleDto>), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<ActionResult<IEnumerable<ProvisioningRoleDto>>> GetRoles(
+        [Required] string targetTenantId)
+    {
+        var tenantRepository = await systemContext.TryFindTenantRepositoryAsync(targetTenantId);
+        if (tenantRepository == null)
+        {
+            return NotFound($"Tenant '{targetTenantId}' not found.");
+        }
+
+        var session = await tenantRepository.GetSessionAsync();
+        session.StartTransaction();
+        var roleResult = await tenantRepository
+            .GetRtEntitiesByTypeAsync<RtRole>(session, RtEntityQueryOptions.Create());
+        await session.CommitTransactionAsync();
+
+        return Ok(roleResult.Items
+            .Select(r => new ProvisioningRoleDto { Id = r.RtId.ToString(), Name = r.Name }));
+    }
+
+    /// <summary>
+    /// Walks the target tenant's ancestor chain via <see cref="RtOctoTenantIdentityProvider.ParentTenantId"/>
+    /// (breadth-first, cycle-safe, depth-capped) and returns every ancestor tenant id. These are the only
+    /// tenants a cross-tenant mapping's SourceTenantId may legitimately reference.
+    /// </summary>
+    private async Task<List<string>> ResolveAncestorTenantIdsAsync(string targetTenantId)
+    {
+        const int maxDepth = 10;
+        var visited = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { targetTenantId };
+        var ancestors = new List<string>();
+        var frontier = new Queue<string>();
+        frontier.Enqueue(targetTenantId);
+
+        for (var depth = 0; depth < maxDepth && frontier.Count > 0; depth++)
+        {
+            var levelSize = frontier.Count;
+            for (var i = 0; i < levelSize; i++)
+            {
+                var tenantId = frontier.Dequeue();
+                var repository = await systemContext.TryFindTenantRepositoryAsync(tenantId);
+                if (repository == null)
+                {
+                    continue;
+                }
+
+                var session = await repository.GetSessionAsync();
+                session.StartTransaction();
+                var providers = await repository
+                    .GetRtEntitiesByTypeAsync<RtOctoTenantIdentityProvider>(session, RtEntityQueryOptions.Create());
+                await session.CommitTransactionAsync();
+
+                foreach (var provider in providers.Items)
+                {
+                    if (!string.IsNullOrEmpty(provider.ParentTenantId) && visited.Add(provider.ParentTenantId))
+                    {
+                        ancestors.Add(provider.ParentTenantId);
+                        frontier.Enqueue(provider.ParentTenantId);
+                    }
+                }
+            }
+        }
+
+        return ancestors;
+    }
+
+    /// <summary>
+    /// Searches a single (ancestor) tenant's real users by username or email, excluding
+    /// <c>xt_</c> shadow users. An empty search returns the first users of the tenant.
+    /// </summary>
+    private async Task<List<ProvisioningSourceUserDto>> SearchUsersInTenantAsync(
+        string tenantId, string? search, int take)
+    {
+        var repository = await systemContext.TryFindTenantRepositoryAsync(tenantId);
+        if (repository == null)
+        {
+            return [];
+        }
+
+        var session = await repository.GetSessionAsync();
+        session.StartTransaction();
+
+        var users = new List<RtUser>();
+        if (string.IsNullOrWhiteSpace(search))
+        {
+            var allOptions = RtEntityQueryOptions.Create();
+            var allResult = await repository
+                .GetRtEntitiesByTypeAsync<RtUser>(session, allOptions, 0, take * 2);
+            users.AddRange(allResult.Items);
+        }
+        else
+        {
+            var normalized = search.Trim().ToUpperInvariant();
+
+            var byNameOptions = RtEntityQueryOptions.Create();
+            byNameOptions.FieldContains(nameof(RtUser.NormalizedUserName), normalized);
+            var byNameResult = await repository
+                .GetRtEntitiesByTypeAsync<RtUser>(session, byNameOptions, 0, take * 2);
+            users.AddRange(byNameResult.Items);
+
+            var byEmailOptions = RtEntityQueryOptions.Create();
+            byEmailOptions.FieldContains(nameof(RtUser.NormalizedEmail), normalized);
+            var byEmailResult = await repository
+                .GetRtEntitiesByTypeAsync<RtUser>(session, byEmailOptions, 0, take * 2);
+            users.AddRange(byEmailResult.Items);
+        }
+
+        await session.CommitTransactionAsync();
+
+        return users
+            .Where(u => u.UserName == null || !u.UserName.StartsWith("xt_", StringComparison.OrdinalIgnoreCase))
+            .GroupBy(u => u.RtId.ToString())
+            .Select(g => g.First())
+            .Select(u => new ProvisioningSourceUserDto
+            {
+                SourceTenantId = tenantId,
+                UserId = u.RtId.ToString(),
+                UserName = u.UserName ?? string.Empty,
+                Email = u.Email,
+                FirstName = u.FirstName,
+                LastName = u.LastName
+            })
+            .Take(take)
+            .ToList();
+    }
+
+    /// <summary>
     /// Ensures the OctoTenantIdentityProvider exists in the target tenant, pointing to the source tenant.
     /// This enables "LOGIN VIA {sourceTenant}" on the target tenant's login page.
     /// </summary>

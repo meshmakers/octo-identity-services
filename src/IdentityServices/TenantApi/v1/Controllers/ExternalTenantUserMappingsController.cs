@@ -100,10 +100,13 @@ public class ExternalTenantUserMappingsController(
 
         await mappingStore.StoreAsync(mapping);
 
-        return CreatedAtAction(
-            nameof(GetById),
-            new { rtId = mapping.RtId },
-            MapToDto(mapping));
+        // NB: use Created(location, value) rather than CreatedAtAction(nameof(GetById), …). The
+        // GetById action takes an OctoObjectId route value, for which no route template matches when
+        // MVC formats the 201 Location header — CreatedAtAction then threw
+        // "No route matches the supplied values" AFTER the entity was already stored, surfacing as a
+        // 500 to octo-cli (the mapping was created regardless). A relative self-link avoids the
+        // link-generation step entirely.
+        return Created($"{Request.Path}/{mapping.RtId}", MapToDto(mapping));
     }
 
     /// <summary>

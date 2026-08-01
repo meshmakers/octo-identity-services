@@ -258,9 +258,24 @@ This solves the chicken-and-egg problem: after creating a child tenant, the user
 | Method | Route | Purpose |
 |--------|-------|---------|
 | `GET` | `/{targetTenantId}` | List all ExternalTenantUserMappings in target tenant |
+| `GET` | `/{targetTenantId}/sourceUsers?search=&take=` | Search provisionable users from the target's ancestor (parent) tenants — powers the Studio's cross-tenant user picker |
+| `GET` | `/{targetTenantId}/roles` | List the roles defined in the target tenant (assignable options for a mapping) |
 | `POST` | `/{targetTenantId}` | Create a new mapping in target tenant |
 | `POST` | `/{targetTenantId}/provisionCurrentUser` | Auto-provision current user with all roles |
 | `DELETE` | `/{targetTenantId}/{mappingRtId}` | Delete a mapping in target tenant |
+
+The `sourceUsers` endpoint resolves the target's ancestor chain by walking
+`RtOctoTenantIdentityProvider.ParentTenantId` (breadth-first, cycle-safe) and searches each ancestor's
+`RtUser` by username OR email (case-insensitive substring), excluding `xt_` shadow users. It exists
+because no other endpoint enumerates a parent tenant's directory — without it a picker had nothing to
+bind to, so an admin literally could not select a parent-tenant user. `roles` reads the target tenant's
+`RtRole` set directly via the system context (caller needs no `allowed_tenants` for the target).
+
+> **Note:** the *per-tenant* `ExternalTenantUserMappingsController.Create` (used by `octo-cli
+> CreateExternalTenantUserMapping`) previously returned `CreatedAtAction(nameof(GetById), …)`, which
+> threw "No route matches the supplied values" while formatting the 201 Location header (the entity was
+> already stored) and surfaced as a 500. It now returns `Created(relativeSelfLink, dto)`. The
+> `AdminProvisioningController.Create` was never affected — it already used `Created(string.Empty, …)`.
 
 The `provisionCurrentUser` endpoint extracts `sub`, `preferred_username`, and `tenant_id` from the JWT, fetches all roles from the target tenant, and creates an `RtExternalTenantUserMapping` with all role IDs. It also adds the mapping as a member of the **TenantOwners** group (via `GroupMember` association), so the user inherits all roles through group membership. If a mapping already exists for the user, it returns the existing one.
 
