@@ -170,6 +170,10 @@ External login user creation follows a strict security model:
 
 4. **Separate database indexes**: The User CK model defines separate `Ascending` indexes on `NormalizedEmail` and `NormalizedUserName` for efficient lookups.
 
+5. **Provider-name character safety**: The generated username embeds the provider's configured `Name` (`{Name}_{email}`). ASP.NET Identity's `UserValidator` only accepts a limited character set, so a provider named with spaces or other special characters (e.g. `Microsoft Entra ID`) would make `UserManager.CreateAsync` fail with `InvalidUserName`, surfacing to the end user as **"Failed to create user account"** *after* an otherwise successful external login. Two defenses:
+   - **At configuration time**: `IdentityProvidersController` (the single write path used by the Studio UI, `octo-cli` and the MCP server) rejects a provider `Name` that is not `^[A-Za-z0-9._-]+$` with a `400 Bad Request`, so the problem is caught when the provider is created/updated.
+   - **At login time**: `AuthApiController.CreateUserFromExternalProvider` additionally sanitizes the provider label (`SanitizeUserNameComponent`) down to letters/digits/`. _ -` as a safety net for providers that were configured before this validation existed.
+
 ### LDAP Authentication Flow
 
 ```

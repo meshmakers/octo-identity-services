@@ -91,12 +91,34 @@ public class IdentityProvidersController : ControllerBase
             return ValidationProblem(ModelState);
         }
 
+        if (!IsProviderNameValid(identityProviderDto.Name))
+        {
+            ModelState.AddModelError(nameof(IdentityProviderDto.Name), ProviderNameValidationMessage);
+            return ValidationProblem(ModelState);
+        }
+
         var identityProvider = _mapper.Map<RtIdentityProvider>(identityProviderDto);
 
         await HandleWriteExceptionAsync(async () => await _identityProviderStore.StoreAsync(identityProvider));
         await SendIdentityProviderUpdate();
         return _mapper.Map<IdentityProviderDto>(identityProvider);
     }
+
+    // The provider Name is embedded verbatim into the just-in-time provisioned external
+    // user name ("{providerName}_{email}"). ASP.NET Identity's UserValidator only accepts a
+    // limited character set, so a name with spaces/parentheses/non-ASCII letters (e.g.
+    // "Microsoft Entra ID") makes UserManager.CreateAsync fail with InvalidUserName, which the
+    // user only sees as "Failed to create user account" AFTER a successful external login.
+    // Reject such names here — the single write path shared by the Studio UI, octo-cli and the
+    // MCP server — so the problem surfaces at configuration time instead of at login time.
+    internal const string ProviderNameValidationMessage =
+        "The Name may only contain ASCII letters, digits and the separators '.', '_' and '-' (no spaces or other special characters), because it is used to build user names for externally provisioned accounts.";
+
+    private static readonly System.Text.RegularExpressions.Regex ProviderNameRegex =
+        new("^[A-Za-z0-9._-]+$", System.Text.RegularExpressions.RegexOptions.Compiled);
+
+    internal static bool IsProviderNameValid(string? name)
+        => !string.IsNullOrWhiteSpace(name) && ProviderNameRegex.IsMatch(name);
 
     private static bool RequiresClientSecretOnCreate(IdentityProviderDto dto, out string missingFieldName)
     {
@@ -143,6 +165,12 @@ public class IdentityProvidersController : ControllerBase
         if (identityProviderDto == null)
         {
             throw new ArgumentNullException(nameof(identityProviderDto));
+        }
+
+        if (!IsProviderNameValid(identityProviderDto.Name))
+        {
+            ModelState.AddModelError(nameof(IdentityProviderDto.Name), ProviderNameValidationMessage);
+            return ValidationProblem(ModelState);
         }
 
         var identityProvider = _mapper.Map<RtIdentityProvider>(identityProviderDto);

@@ -528,9 +528,23 @@ public class AuthApiController(
         // with local users or users from other providers. Strip the tenant prefix from
         // tenant-scoped scheme names (e.g., "octosystem:Google" → "Google").
         var providerName = provider.Contains(':') ? provider.Split(':', 2)[1] : provider;
+
+        // Provider names are free-text (admin-defined) and may contain spaces or other
+        // characters that ASP.NET Identity's UserValidator rejects (only letters, digits
+        // and a small set of symbols are allowed). Because the provider label is embedded
+        // in the generated user name, an Entra/AD/OIDC provider named e.g. "Microsoft Entra ID"
+        // would make UserManager.CreateAsync fail with InvalidUserName, surfacing to the user
+        // as "Failed to create user account". Sanitize the label to letters/digits so the
+        // generated user name is always valid regardless of how the provider was named.
+        var safeProviderName = SanitizeUserNameComponent(providerName);
+        if (string.IsNullOrEmpty(safeProviderName))
+        {
+            safeProviderName = "External";
+        }
+
         var userName = !string.IsNullOrEmpty(email)
-            ? $"{providerName}_{email}"
-            : $"{providerName}_{Guid.NewGuid():N}";
+            ? $"{safeProviderName}_{email}"
+            : $"{safeProviderName}_{Guid.NewGuid():N}";
 
         // Ensure username is unique (handles edge cases like same email across providers)
         var existingUser = await userManager.FindByNameAsync(userName);
@@ -563,6 +577,26 @@ public class AuthApiController(
         }
 
         return user;
+    }
+
+    /// <summary>
+    /// Reduces a free-text component (typically an identity-provider name) to characters
+    /// that are safe to embed in an ASP.NET Identity user name — ASCII letters, digits and
+    /// the separators <c>. _ -</c>, all of which are part of the default
+    /// <see cref="UserOptions.AllowedUserNameCharacters"/> set. Everything the validator
+    /// would reject (spaces, parentheses, non-ASCII letters, …) is stripped. This is the
+    /// login-time safety net; <c>IdentityProvidersController</c> rejects such names at
+    /// configuration time so operators get immediate feedback instead of a broken login.
+    /// </summary>
+    internal static string SanitizeUserNameComponent(string? value)
+    {
+        if (string.IsNullOrEmpty(value))
+        {
+            return string.Empty;
+        }
+
+        return new string(value.Where(c =>
+            c is >= 'a' and <= 'z' or >= 'A' and <= 'Z' or >= '0' and <= '9' or '.' or '_' or '-').ToArray());
     }
 
     /// <summary>
