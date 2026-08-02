@@ -23,7 +23,8 @@ namespace Meshmakers.Octo.Backend.IdentityServices.TenantApi.v1.Controllers;
 [ApiController]
 [ApiVersion(IdentityServiceConstants.ApiVersion1)]
 public class ExternalTenantUserMappingsController(
-    IExternalTenantUserMappingStore mappingStore) : ControllerBase
+    IExternalTenantUserMappingStore mappingStore,
+    IGroupStore groupStore) : ControllerBase
 {
     /// <summary>
     /// Returns all external tenant user mappings.
@@ -48,7 +49,14 @@ public class ExternalTenantUserMappingsController(
             mappings = await mappingStore.GetAllAsync(skip, take);
         }
 
-        return Ok(mappings.Select(MapToDto));
+        var dtos = new List<ExternalTenantUserMappingDto>();
+        foreach (var mapping in mappings)
+        {
+            var groupNames = await groupStore.GetGroupNamesForExternalUserMappingAsync(mapping.RtId);
+            dtos.Add(MapToDto(mapping, groupNames));
+        }
+
+        return Ok(dtos);
     }
 
     /// <summary>
@@ -68,7 +76,8 @@ public class ExternalTenantUserMappingsController(
             return NotFound();
         }
 
-        return Ok(MapToDto(mapping));
+        var groupNames = await groupStore.GetGroupNamesForExternalUserMappingAsync(mapping.RtId);
+        return Ok(MapToDto(mapping, groupNames));
     }
 
     /// <summary>
@@ -156,14 +165,21 @@ public class ExternalTenantUserMappingsController(
         return Ok();
     }
 
+    // Create/Update responses: the per-tenant mapping is not yet (or not) a group member at that point,
+    // so group names are resolved only on the read paths (GetAll/GetById).
     private static ExternalTenantUserMappingDto MapToDto(RtExternalTenantUserMapping mapping) =>
+        MapToDto(mapping, []);
+
+    private static ExternalTenantUserMappingDto MapToDto(
+        RtExternalTenantUserMapping mapping, IReadOnlyList<string> groupNames) =>
         new()
         {
             Id = mapping.RtId,
             SourceTenantId = mapping.SourceTenantId,
             SourceUserId = mapping.SourceUserId,
             SourceUserName = mapping.SourceUserName,
-            RoleIds = mapping.MappedRoleIds?.ToList() ?? []
+            RoleIds = mapping.MappedRoleIds?.ToList() ?? [],
+            GroupNames = groupNames.ToList()
         };
 }
 

@@ -210,6 +210,54 @@ public class GroupStore(
             groupRtId, IdentityAssociationConstants.GroupMemberId);
     }
 
+    public async Task AddMemberExternalUserAsync(OctoObjectId groupRtId, string externalUserMappingRtId)
+    {
+        await AddOutboundAssociationAsync<RtExternalTenantUserMapping>(
+            groupRtId, externalUserMappingRtId, IdentityAssociationConstants.GroupMemberId);
+    }
+
+    public async Task RemoveMemberExternalUserAsync(OctoObjectId groupRtId, string externalUserMappingRtId)
+    {
+        await RemoveOutboundAssociationAsync<RtExternalTenantUserMapping>(
+            groupRtId, externalUserMappingRtId, IdentityAssociationConstants.GroupMemberId);
+    }
+
+    public async Task<IReadOnlyList<string>> GetGroupNamesForExternalUserMappingAsync(OctoObjectId mappingRtId)
+    {
+        var session = await GetRepository().GetSessionAsync();
+        session.StartTransaction();
+
+        var mapping = await GetRepository()
+            .GetRtEntityByRtIdAsync<RtExternalTenantUserMapping>(session, mappingRtId);
+        if (mapping == null)
+        {
+            await session.CommitTransactionAsync();
+            return [];
+        }
+
+        // Inbound GroupMember associations: Group --GroupMember--> ExternalTenantUserMapping.
+        var associations = await GetRepository().GetRtAssociationsAsync(
+            session,
+            mapping.ToRtEntityId(),
+            RtAssociationExtendedQueryOptions.Create(
+                GraphDirections.Inbound,
+                roleId: IdentityAssociationConstants.GroupMemberId));
+
+        var groupCkTypeId = RtEntityExtensions.GetRtCkTypeId<RtGroup>();
+        var groupNames = new List<string>();
+        foreach (var assoc in associations.Items.Where(a => a.OriginCkTypeId == groupCkTypeId))
+        {
+            var group = await GetRepository().GetRtEntityByRtIdAsync<RtGroup>(session, assoc.OriginRtId);
+            if (group != null)
+            {
+                groupNames.Add(group.GroupName);
+            }
+        }
+
+        await session.CommitTransactionAsync();
+        return groupNames;
+    }
+
     // ========================================
     // Client member associations (GroupMember → Client)
     // ========================================

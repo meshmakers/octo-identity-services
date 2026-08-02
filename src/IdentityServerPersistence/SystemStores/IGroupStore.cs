@@ -76,6 +76,23 @@ public interface IGroupStore
     /// </summary>
     Task<IReadOnlyList<string>> GetMemberExternalUserIdsAsync(OctoObjectId groupRtId);
 
+    /// <summary>
+    /// Adds an external-tenant-user mapping as a member of a group via a GroupMember association.
+    /// </summary>
+    Task AddMemberExternalUserAsync(OctoObjectId groupRtId, string externalUserMappingRtId);
+
+    /// <summary>
+    /// Removes an external-tenant-user mapping from a group.
+    /// </summary>
+    Task RemoveMemberExternalUserAsync(OctoObjectId groupRtId, string externalUserMappingRtId);
+
+    /// <summary>
+    /// Resolves the names of the groups an external-tenant-user mapping belongs to, via its
+    /// inbound GroupMember associations. Used to populate <c>ExternalTenantUserMappingDto.GroupNames</c>
+    /// so the mappings API reflects group-based grants (roles inherited via the group).
+    /// </summary>
+    Task<IReadOnlyList<string>> GetGroupNamesForExternalUserMappingAsync(OctoObjectId mappingRtId);
+
     // ========================================
     // Client member associations (GroupMember → Client)
     // ========================================
