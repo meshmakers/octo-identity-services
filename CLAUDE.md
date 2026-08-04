@@ -247,6 +247,28 @@ The Identity CK model, default roles, identity resources, API scopes, API resour
 
 **Deferred tenant startup is parallelized.** `DefaultConfigurationCreatorServiceStandardized.StartDeferredTenantsAsync` (in `octo-common-services`) processes the deferred identity-data setup and the per-tenant `StartTenantAsync` loop with `Parallel.ForEachAsync` and a bounded degree of `min(ProcessorCount, 8)`. This keeps the Identity-service cold start roughly linear in `tenants / parallelism` instead of `O(tenants)` — sequential per-tenant `CkModelUpgradeService` + `MigrationService` runs (~2-3s each) were the dominant cold-start cost (~44s for 13 tenants on test-2). MongoDB databases are tenant-isolated, so the work parallelizes safely; `_pendingIdentityDataTenantIds` is guarded with a `lock` and `failedTenants` is collected into a `ConcurrentBag`. `RetryFailedTenantsAsync` deliberately stays sequential to avoid bursting MongoDB on repeated failures.
 
+**A failed tenant setup is retried durably (AB#4690).** `SetupTenantAsync` applies the
+`System.Identity.Bootstrap` blueprint with `throwOnFailure: true`, and Identity derives from
+`DefaultConfigurationCreatorServiceBase`, whose `RetryFailedTenantsAsync` used to be a no-op — so a setup
+that threw once was lost. That happened in production when a tenant was deleted and recreated under the
+same database name: Identity's first access to the new database failed with MongoDB `errorCode 13`
+("requires authentication"), the setup aborted, and the tenant was left with **zero roles**, so
+`ProvisionCurrentUser` could only ever answer 503. Recovery required a pod restart. The creator now
+passes an `ITenantSetupRetryStore` to its base constructor: failures are recorded durably and
+`FailedTenantRetryBackgroundService` re-runs the setup until it succeeds (10 attempts, ≥60 s apart).
+
+**`CreateIdentityDataCommandRequestConsumer` reports whether the tenant is actually seeded.** It creates
+only the *caller's* API scopes, resources and clients; the tenant's own roles/groups come from
+`SetupTenantAsync`. Answering `Success` regardless made the asset repository record the tenant as fully
+provisioned while it had no roles. The consumer now checks for roles and answers
+`CreateIdentityDataResult.SuccessIdentityDataSeedPending` when there are none, which the caller treats as
+a retriable not-ready condition (AB#4690).
+
+**Manual recovery** for a tenant that is already stuck without roles, without restarting the service:
+`PUT {systemTenant}/v1/tenants/clearCache?childTenantId=<tenant>` on the asset repository publishes
+`PreUpdateTenant` + `PosUpdateTenant`, which makes every service — including this one — re-run
+`SetupAsync` for that tenant.
+
 ### Admin Provisioning (Cross-Tenant Pre-Provisioning)
 
 The `AdminProvisioningController` allows users with TenantManagement role to pre-provision cross-tenant user mappings in a **target tenant** without needing `allowed_tenants` for that tenant. It is routed via the system tenant: `{tenantId}/v1/adminProvisioning/{targetTenantId}`.

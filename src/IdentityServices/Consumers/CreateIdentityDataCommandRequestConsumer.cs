@@ -68,14 +68,47 @@ public class CreateIdentityDataCommandRequestConsumer(
 
             await session.CommitTransactionAsync();
 
+            // The work above only covers the *caller's* identity data (its API scopes, resources and
+            // clients). The tenant's own default configuration — roles, groups, TenantOwners — is seeded by
+            // this service's SetupTenantAsync via the System.Identity.Bootstrap blueprint, which runs on a
+            // completely different trigger and can fail independently. Reporting Success regardless made
+            // the caller mark the tenant fully provisioned while it had no roles at all, so no administrator
+            // could ever be provisioned (AB#4690). Report the difference instead of hiding it.
+            var seeded = await HasIdentityDataSeedAsync(tenantRepository);
+            if (!seeded)
+            {
+                logger.LogWarning(
+                    "Identity data for tenant '{TenantId}' was created, but the tenant has no roles yet — " +
+                    "its identity default configuration is not seeded. Reporting seed-pending so the caller retries.",
+                    message.TenantId);
+            }
+
             await context.RespondAsync(new EnumCommandResponse<CreateIdentityDataResult>
-            { Response = CreateIdentityDataResult.Success });
+            {
+                Response = seeded
+                    ? CreateIdentityDataResult.Success
+                    : CreateIdentityDataResult.SuccessIdentityDataSeedPending
+            });
         }
         catch (Exception e)
         {
             logger.LogError(e, "Error while creating identity data");
             throw;
         }
+    }
+
+    /// <summary>
+    /// True when the tenant's identity default configuration has been seeded. Roles are the discriminator:
+    /// they are what <c>ProvisionCurrentUser</c> needs and the first thing the
+    /// <c>System.Identity.Bootstrap</c> blueprint installs, so "no roles" is exactly the half-provisioned
+    /// state we must not report as success (AB#4690).
+    /// </summary>
+    private static async Task<bool> HasIdentityDataSeedAsync(ITenantRepository tenantRepository)
+    {
+        using var session = await tenantRepository.GetSessionAsync();
+        var roles = await tenantRepository.GetRtEntitiesByTypeAsync<RtRole>(session,
+            RtEntityQueryOptions.Create(), take: 1);
+        return roles.Items.Any();
     }
 
     private static async Task CreateApiScopeIfNotExistAsync(IOctoSession session, ITenantRepository tenantRepository,

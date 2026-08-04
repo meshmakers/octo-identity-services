@@ -9,6 +9,7 @@ using Meshmakers.Octo.Runtime.Contracts;
 using Meshmakers.Octo.Runtime.Contracts.Blueprints;
 using Meshmakers.Octo.Runtime.Contracts.MongoDb;
 using Meshmakers.Octo.Runtime.Contracts.MongoDb.Repositories;
+using Meshmakers.Octo.Runtime.Contracts.MongoDb.TenantLifecycle;
 using Meshmakers.Octo.Runtime.Contracts.Repositories.Query;
 using Meshmakers.Octo.Runtime.Contracts.RepositoryEntities;
 using Meshmakers.Octo.Services.Infrastructure;
@@ -34,8 +35,13 @@ internal class DefaultConfigurationCreatorService(
     ICkModelUpgradeService? ckModelUpgradeService = null,
     IRuntimeRepositoryProvider? runtimeRepositoryProvider = null,
     IBlueprintService? blueprintService = null,
-    IEnumerable<IBlueprintEmbeddedSource>? embeddedBlueprintSources = null)
-    : DefaultConfigurationCreatorServiceBase(logger, blueprintService, embeddedBlueprintSources),
+    IEnumerable<IBlueprintEmbeddedSource>? embeddedBlueprintSources = null,
+    // AB#4690 — Identity owns the roles/groups seed (System.Identity.Bootstrap). A setup that throws once
+    // used to be lost, leaving the tenant without roles until the pod restarted, so a failure is now
+    // recorded durably and retried by FailedTenantRetryBackgroundService.
+    ITenantSetupRetryStore? tenantSetupRetryStore = null)
+    : DefaultConfigurationCreatorServiceBase(logger, blueprintService, embeddedBlueprintSources,
+          tenantSetupRetryStore),
       IConfigurationService
 {
     /// <summary>
