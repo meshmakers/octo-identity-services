@@ -245,6 +245,22 @@ Full per-tenant ASP.NET auth tickets (~3 KB each, sent with every request and on
 
 The Identity CK model, default roles, identity resources, API scopes, API resources, and OIDC clients are provisioned to **all tenants** (not just the system tenant) during startup. This ensures OAuth/OIDC flows work when targeting any tenant. For child tenants, roles are written directly to the child tenant database via `EnsureRoleInChildTenantAsync()` using the same `childRepo` pattern as clients and resources. The identity service writes its data directly to child tenant databases (including the `octo-data-refinery-studio` SPA client when `RefineryStudioUrl` is configured), while other services (asset-repo, bot, etc.) send their data via the Distribution Event Hub. Cross-tenant users receive a `home_tenant_id` claim in their tokens.
 
+**The system tenant is only bootstrapped when its database is genuinely absent (AB#4762).**
+`SetupTenantAsync` used to call `CreateSystemTenantAsync()` whenever `IsSystemTenantExistingAsync()`
+returned false. That is false not only for a missing database but also for a **present, fully
+populated** one whose System CK model is absent or not at the exact expected version — the state
+`EnsureSystemCkModelAsync()` leaves behind when it swallows a `ModelValidationException`, e.g. while a
+dependency still lags during a version-bump rollout. The engine's create path then hit its
+database-exists guard inside the `try` whose `catch` dropped the database, **wiping the entire
+platform database at service startup**, with no user action involved.
+
+The caller now checks `systemContext.IsDatabaseExistingAsync(systemContext.DatabaseName)` first. When
+the database is there, it throws with the real cause instead: the System CK model needs repairing, and
+system-tenant setup is deliberately fatal (`DefaultConfigurationInitializationService`), so failing
+loudly and diagnosably is correct — repairing itself by dropping the platform database is not. The
+engine refuses the same case independently (`TenantException.SystemTenantDatabaseNotBootstrappable`),
+so this is defence in depth, not the only guard.
+
 **Deferred tenant startup is parallelized.** `DefaultConfigurationCreatorServiceStandardized.StartDeferredTenantsAsync` (in `octo-common-services`) processes the deferred identity-data setup and the per-tenant `StartTenantAsync` loop with `Parallel.ForEachAsync` and a bounded degree of `min(ProcessorCount, 8)`. This keeps the Identity-service cold start roughly linear in `tenants / parallelism` instead of `O(tenants)` — sequential per-tenant `CkModelUpgradeService` + `MigrationService` runs (~2-3s each) were the dominant cold-start cost (~44s for 13 tenants on test-2). MongoDB databases are tenant-isolated, so the work parallelizes safely; `_pendingIdentityDataTenantIds` is guarded with a `lock` and `failedTenants` is collected into a `ConcurrentBag`. `RetryFailedTenantsAsync` deliberately stays sequential to avoid bursting MongoDB on repeated failures.
 
 **A failed tenant setup is retried durably (AB#4690).** `SetupTenantAsync` applies the
