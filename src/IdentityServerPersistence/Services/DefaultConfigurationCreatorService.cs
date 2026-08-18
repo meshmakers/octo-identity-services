@@ -130,8 +130,26 @@ internal class DefaultConfigurationCreatorService(
             await systemContext.EnsureSystemCkModelAsync();
 
             // So upgrades are done now. If it still does not exist -> create it from scratch.
+            //
+            // "Does not exist" here means the System CK model is missing or not at the exact expected
+            // version — which is also true for a fully populated system database whose model import was
+            // skipped (EnsureSystemCkModelAsync swallows a ModelValidationException, e.g. while a
+            // dependency still lags during a version-bump rollout). Bootstrapping over such a database
+            // used to drop it in the create path's rollback, wiping the whole platform at service
+            // startup (AB#4762). Only bootstrap when the database is genuinely absent; otherwise report
+            // the real cause and let startup fail, because the CK model is what needs repairing.
             if (!await systemContext.IsSystemTenantExistingAsync())
             {
+                if (await systemContext.IsDatabaseExistingAsync(systemContext.DatabaseName))
+                {
+                    throw new InvalidOperationException(
+                        $"System database '{systemContext.DatabaseName}' exists but carries no usable System CK " +
+                        "model, so the system tenant cannot be bootstrapped over it. This usually means the " +
+                        "System CK model import was skipped or failed validation. Repair the System CK model of " +
+                        "that database; re-creating the system tenant is refused because it would drop the " +
+                        "database.");
+                }
+
                 await systemContext.CreateSystemTenantAsync();
             }
         }
