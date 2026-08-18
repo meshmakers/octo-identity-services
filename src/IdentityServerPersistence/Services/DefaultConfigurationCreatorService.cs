@@ -39,9 +39,13 @@ internal class DefaultConfigurationCreatorService(
     // AB#4690 — Identity owns the roles/groups seed (System.Identity.Bootstrap). A setup that throws once
     // used to be lost, leaving the tenant without roles until the pod restarted, so a failure is now
     // recorded durably and retried by FailedTenantRetryBackgroundService.
-    ITenantSetupRetryStore? tenantSetupRetryStore = null)
+    ITenantSetupRetryStore? tenantSetupRetryStore = null,
+    // AB#4829 — the base's Deleting gate: while a tenant delete's durable tombstone exists, setup is
+    // skipped so a late PosUpdateTenant echo can neither re-seed a retry row nor resurrect the dropped
+    // database via Identity's CK import.
+    ITenantLifecycleStore? tenantLifecycleStore = null)
     : DefaultConfigurationCreatorServiceBase(logger, blueprintService, embeddedBlueprintSources,
-          tenantSetupRetryStore),
+          tenantSetupRetryStore, tenantLifecycleStore),
       IConfigurationService
 {
     /// <summary>
