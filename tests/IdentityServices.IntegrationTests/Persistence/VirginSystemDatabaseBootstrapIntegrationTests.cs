@@ -1,7 +1,11 @@
+using System.Xml.Linq;
+using IdentityServerPersistence.Configuration.Options;
+using IdentityServerPersistence.SystemStores;
 using IdentityServices.IntegrationTests.Fixtures;
 using Meshmakers.Octo.Runtime.Contracts.MongoDb.Configuration;
 using Meshmakers.Octo.Runtime.Contracts.MongoDb.TenantLifecycle;
 using Meshmakers.Octo.Services.Infrastructure.Services;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
 using MongoDB.Bson;
 using MongoDB.Driver;
@@ -55,6 +59,41 @@ public class VirginSystemDatabaseBootstrapIntegrationTests : IClassFixture<Virgi
             _fixture.GetSystemContext().TenantId, "transient failure before bootstrap",
             TestContext.Current.CancellationToken);
 
+        var setup = _fixture.GetService<IDefaultConfigurationCreatorService>();
+        await setup.SetupAsync(_fixture.GetSystemContext().TenantId);
+
+        Assert.True(await _fixture.GetSystemContext().IsSystemTenantExistingAsync());
+        Assert.True(await IsSystemDatabaseUserExistingAsync());
+    }
+
+    [Fact]
+    public async Task DataProtectionKeyWrite_OnVirginServer_DoesNotArmTheBootstrapWedge()
+    {
+        await ResetToVirginAsync();
+
+        // The Data Protection hosted preload (AddDataProtection, registered before the setup
+        // initializer) attempts a key write against the not-yet-bootstrapped system database on a
+        // virgin server. Whatever that write does, it must not materialize the database into a state
+        // the shell classification no longer accepts — that would re-arm the AB#4854 wedge from a
+        // writer outside the InfrastructureCollections allowlist.
+        var keyStore = new DataProtectionKeyStore(_fixture.GetService<IServiceScopeFactory>(),
+            Options.Create(new OctoIdentityServicesOptions
+            {
+                IdentityServerLicenseKey = "test",
+                AutoMapperLicenseKey = "test"
+            }));
+        try
+        {
+            keyStore.StoreElement(new XElement("key", "virgin-probe"), "key-virgin-probe");
+        }
+        catch (Exception)
+        {
+            // The hosted preload treats a failed key persist as best-effort and swallows it.
+        }
+
+        Assert.True(await _fixture.GetSystemContext().IsSystemDatabaseBootstrappableAsync());
+
+        // And the platform still bootstraps afterwards.
         var setup = _fixture.GetService<IDefaultConfigurationCreatorService>();
         await setup.SetupAsync(_fixture.GetSystemContext().TenantId);
 

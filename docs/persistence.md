@@ -573,6 +573,18 @@ ASP.NET Data Protection keys are stored as `RtDataProtectionKey` entities in the
 
 When `OCTO_IDENTITY__DataProtectionKeysPath` is set and the directory contains `key-*.xml` files, the service imports those files into MongoDB **once** at startup. After a successful import, the environment variable can be removed from all deployments. This ensures a zero-logout upgrade from the old PVC-backed file storage.
 
+### Pre-Bootstrap Guard (AB#4854)
+
+The Data Protection key-ring preload (`AddDataProtection()`) runs before the setup initializer that
+bootstraps the system tenant. A key persisted at that point would materialize a collection in the
+not-yet-bootstrapped system database that lies outside the engine's infrastructure allowlist — the
+bootstrap then refuses the database and a fresh install wedges permanently. Whether such an early
+insert succeeds depends on whether the process CK cache happens to be warm, so the store makes the
+outcome deterministic: `StoreElement` throws (and the legacy file seed is skipped, without consuming
+its once-per-process latch) while `IsSystemTenantExistingAsync()` is false. The preload treats the
+failed persist as best-effort; the key is re-created and persisted on the first real Data Protection
+use after the bootstrap.
+
 ### Failure Modes
 
 - **MongoDB unreachable at first unprotect**: The DataProtection framework calls `IXmlRepository.GetAllElements()` before any protected payload can be read. If MongoDB is unavailable at this point the service fails fast with a clear exception rather than silently falling back to in-memory keys, preventing a split-brain key situation.
