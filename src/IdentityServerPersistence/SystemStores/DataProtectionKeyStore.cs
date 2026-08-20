@@ -63,7 +63,10 @@ public class DataProtectionKeyStore(
 
         var keys = await LoadAllKeysAsync(repository);
 
-        if (keys.Count == 0)
+        // The bootstrap guard mirrors StoreElementAsync. Skipping the seed does NOT set the
+        // _seedAttempted latch, so the legacy import still happens on the first load after the
+        // system tenant exists.
+        if (keys.Count == 0 && await systemContext.IsSystemTenantExistingAsync())
         {
             await TrySeedFromLegacyFilesAsync(repository);
             keys = await LoadAllKeysAsync(repository);
@@ -86,6 +89,19 @@ public class DataProtectionKeyStore(
     {
         using var scope = serviceScopeFactory.CreateScope();
         var systemContext = scope.ServiceProvider.GetRequiredService<ISystemContext>();
+
+        // Never persist into a system database the bootstrap has not created yet (AB#4854): the
+        // Data Protection key-ring preload runs before the setup initializer, and a key written
+        // here (as admin) materializes a collection outside the engine's infrastructure allowlist —
+        // the bootstrap then refuses the database and the fresh install wedges. The preload treats
+        // a failed persist as best-effort; the key is re-created and persisted on the first real
+        // Data Protection use after the bootstrap.
+        if (!await systemContext.IsSystemTenantExistingAsync())
+        {
+            throw new InvalidOperationException(
+                $"Data protection key '{friendlyName}' cannot be persisted before the system tenant is bootstrapped.");
+        }
+
         var repository = systemContext.GetSystemTenantRepositoryAsAdmin();
 
         await StoreElementInternalAsync(repository, element, friendlyName);
