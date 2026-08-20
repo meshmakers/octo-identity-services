@@ -140,11 +140,14 @@ internal class DefaultConfigurationCreatorService(
             // skipped (EnsureSystemCkModelAsync swallows a ModelValidationException, e.g. while a
             // dependency still lags during a version-bump rollout). Bootstrapping over such a database
             // used to drop it in the create path's rollback, wiping the whole platform at service
-            // startup (AB#4762). Only bootstrap when the database is genuinely absent; otherwise report
+            // startup (AB#4762). Only bootstrap when the database is genuinely absent — or exists only
+            // as an infrastructure shell materialized by the engine's own plumbing (lifecycle probe,
+            // setup-retry record) before this bootstrap ran; refusing over such a shell wedged every
+            // fresh install because the datasource user was never created (AB#4854). Otherwise report
             // the real cause and let startup fail, because the CK model is what needs repairing.
             if (!await systemContext.IsSystemTenantExistingAsync())
             {
-                if (await systemContext.IsDatabaseExistingAsync(systemContext.DatabaseName))
+                if (!await systemContext.IsSystemDatabaseBootstrappableAsync())
                 {
                     throw new InvalidOperationException(
                         $"System database '{systemContext.DatabaseName}' exists but carries no usable System CK " +
