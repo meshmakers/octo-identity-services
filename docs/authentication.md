@@ -946,6 +946,42 @@ Non-DCR clients are never touched.
 
 See `docs/CONCEPT-MCP-DYNAMIC-CLIENT-REGISTRATION.md` for the full design and phasing.
 
+## Authorize Error Page (AB#4950)
+
+When `/connect/authorize` fails validation, IdentityServer redirects the browser to
+`{tenantId}/error?errorId=<opaque>`. The `errorId` is a DataProtection-protected payload — it carries
+the error, not a database key — and is resolved through
+`IIdentityServerInteractionService.GetErrorContextAsync`, which is a non-destructive read, so the page
+survives a reload.
+
+`GET {tenantId}/api/auth/error-context?errorId=…` (`AuthApiController.GetErrorContext`, anonymous)
+resolves it and classifies the failure into `ErrorContextDto.Kind`:
+
+| Kind | Condition | What the page says |
+|---|---|---|
+| `unknown` | No id, or the id no longer resolves | Generic text; nothing is looked up |
+| `clientNotRegistered` | `ClientId` is set but no **enabled** client of that id exists in the route tenant | The application is not registered, or not enabled, for this workspace |
+| `invalidRedirectUri` | Client is known and the failure names `redirect_uri` | The application sent a return address not registered for it here |
+| `generic` | Anything else | IdentityServer's own wording |
+
+Two rules this endpoint deliberately follows:
+
+- **The back-link comes only from the registered client's `ClientUri`, never from the failed request's
+  `redirect_uri`.** The cases that land here are exactly "this client could not be validated" and "this
+  redirect_uri is not registered", so rendering the caller-supplied address as a link would make the
+  identity domain an open redirect and a phishing surface. Duende does not persist `RedirectUri` into
+  the `ErrorMessage` by default — that default is load-bearing, do not override it. A disabled client is
+  not offered as a destination either.
+- **Classification comes from the client lookup, not from matching the English description.**
+  `unauthorized_client` is emitted for unrelated causes too. The lookup stays inside the route tenant;
+  whether the same client exists in another tenant is never revealed, and the wording merges
+  "not registered" with "not enabled" because the enabled-filtering lookup cannot tell them apart.
+
+The SPA (`features/error/error.component.ts`) calls the endpoint only when an `errorId` is present and
+falls back to the pre-existing `?error=`/`?errorDescription=` query parameters — which the external-login
+callback still produces — whenever it is absent or the call fails. Raw OAuth codes, the description and
+the request/activity ids live in a collapsed "Technical details" block rather than in the headline.
+
 ## Security Considerations
 
 ### Scheme Isolation

@@ -45,6 +45,31 @@
   margin-bottom: var(--lcars-spacing-lg);
 }
 
+.error-hint {
+  color: $ash-blue;
+  font-size: var(--lcars-font-size-sm);
+  margin-bottom: var(--lcars-spacing-lg);
+}
+
+.error-technical {
+  width: 100%;
+  margin-bottom: var(--lcars-spacing-lg);
+  text-align: left;
+
+  summary {
+    @include lcars-uppercase-label;
+    color: $ash-blue;
+    cursor: pointer;
+    margin-bottom: var(--lcars-spacing-sm);
+  }
+
+  // Inside the disclosure the rows sit close together; the standalone spacing
+  // below is meant for a single block on the page.
+  .error-details {
+    margin-bottom: var(--lcars-spacing-sm);
+  }
+}
+
 .error-details {
   display: flex;
   flex-direction: column;
@@ -70,6 +95,8 @@
 .lcars-actions {
   display: flex;
   justify-content: center;
+  flex-wrap: wrap;
+  gap: var(--lcars-spacing-sm);
 }
 
 .lcars-button-outline {
