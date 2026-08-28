@@ -25,10 +25,22 @@ import {
   CrossTenantTokenResult,
   CrossTenantLoginRequest
 } from '../models/login.models';
+import { ErrorContext } from '../models/error.models';
 
 @Injectable({ providedIn: 'root' })
 export class AuthApiService {
   private http = inject(HttpClient);
+
+  /**
+   * Resolves the opaque `errorId` from IdentityServer's error redirect into
+   * something the error page can show — including a safe way back to the
+   * requesting application when the client is known.
+   */
+  getErrorContext(errorId: string): Observable<ErrorContext> {
+    return this.http.get<ErrorContext>('/api/auth/error-context', {
+      params: { errorId }
+    });
+  }
 
   getLoginContext(returnUrl: string): Observable<LoginContext> {
     return this.http.get<LoginContext>('/api/auth/login-context', {

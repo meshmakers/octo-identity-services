@@ -148,6 +148,89 @@ public class AuthApiController(
     }
 
     /// <summary>
+    ///     Resolves the opaque <c>errorId</c> that IdentityServer puts on its error redirect into
+    ///     something the error page can actually show, and — where it is safe — a way back to the
+    ///     application the user came from.
+    /// </summary>
+    /// <remarks>
+    ///     Without this the page only ever renders "An unexpected error occurred": it reads
+    ///     <c>?error</c>/<c>?errorDescription</c>, which only the external-login callback produces,
+    ///     while the authorize endpoint redirects with <c>?errorId</c>.
+    ///     <para>
+    ///         The back-link is taken from the registered client's <c>ClientUri</c> and never from
+    ///         the <c>redirect_uri</c> of the failed request: the two cases that land here are
+    ///         precisely "this client could not be validated" and "this redirect_uri is not
+    ///         registered", so echoing the caller-supplied address as a link would turn this page
+    ///         into an open redirect on the identity domain.
+    ///     </para>
+    ///     <para>
+    ///         The classification is done by looking the client up, not by matching the English
+    ///         error description — <c>unauthorized_client</c> is also emitted for unrelated causes.
+    ///         The lookup stays inside the route tenant; whether the client exists in some other
+    ///         tenant is deliberately not revealed.
+    ///     </para>
+    /// </remarks>
+    [HttpGet("error-context")]
+    public async Task<ActionResult<ErrorContextDto>> GetErrorContext([FromQuery] string? errorId)
+    {
+        var tenantId = RouteData.Values["tenantId"]?.ToString() ?? string.Empty;
+
+        var message = string.IsNullOrWhiteSpace(errorId)
+            ? null
+            : await interaction.GetErrorContextAsync(errorId, HttpContext.RequestAborted);
+
+        if (message == null)
+        {
+            // An expired or unknown id is not an error of its own — the page still has to render.
+            return new ErrorContextDto { Kind = ErrorContextKinds.Unknown, TenantId = tenantId };
+        }
+
+        Client? client = null;
+        if (!string.IsNullOrWhiteSpace(message.ClientId))
+        {
+            client = await clientStore.FindEnabledClientByIdAsync(message.ClientId,
+                HttpContext.RequestAborted);
+        }
+
+        var kind = ClassifyError(message, client);
+
+        return new ErrorContextDto
+        {
+            Kind = kind,
+            Error = message.Error,
+            ErrorDescription = message.ErrorDescription,
+            RequestId = message.RequestId,
+            ActivityId = message.ActivityId,
+            TenantId = tenantId,
+            ClientId = message.ClientId,
+            ClientName = client?.ClientName ?? message.ClientId,
+            // Only the administratively configured client URI is a safe link target.
+            ClientUrl = string.IsNullOrWhiteSpace(client?.ClientUri) ? null : client.ClientUri,
+            ClientLogoUrl = string.IsNullOrWhiteSpace(client?.LogoUri) ? null : client.LogoUri
+        };
+    }
+
+    private static string ClassifyError(ErrorMessage message, Client? client)
+    {
+        // A client id that no enabled client in this tenant answers to is a configuration state,
+        // not a crash: the application is either not registered here or disabled. The two are
+        // indistinguishable without a second query, so the copy names both.
+        if (!string.IsNullOrWhiteSpace(message.ClientId) && client == null)
+        {
+            return ErrorContextKinds.ClientNotRegistered;
+        }
+
+        if (client != null
+            && string.Equals(message.Error, "invalid_request", StringComparison.Ordinal)
+            && message.ErrorDescription?.Contains("redirect_uri", StringComparison.OrdinalIgnoreCase) == true)
+        {
+            return ErrorContextKinds.InvalidRedirectUri;
+        }
+
+        return ErrorContextKinds.Generic;
+    }
+
+    /// <summary>
     /// Process login credentials
     /// </summary>
     [HttpPost("login")]
@@ -1468,6 +1551,53 @@ public class AuthApiController(
 }
 
 #region DTOs
+
+/// <summary>
+///     The states <see cref="ErrorContextDto.Kind" /> can take. Kept as constants so the SPA and the
+///     tests agree on the spelling.
+/// </summary>
+public static class ErrorContextKinds
+{
+    /// <summary>The error id was missing, expired or not ours — nothing could be resolved.</summary>
+    public const string Unknown = "unknown";
+
+    /// <summary>An error we can describe no further than IdentityServer itself does.</summary>
+    public const string Generic = "generic";
+
+    /// <summary>The requested client is not registered — or not enabled — in this tenant.</summary>
+    public const string ClientNotRegistered = "clientNotRegistered";
+
+    /// <summary>The client is known, but sent a redirect address that is not registered for it.</summary>
+    public const string InvalidRedirectUri = "invalidRedirectUri";
+}
+
+public record ErrorContextDto
+{
+    /// <summary>See <see cref="ErrorContextKinds" />; drives which copy the page shows.</summary>
+    public string Kind { get; init; } = ErrorContextKinds.Generic;
+
+    /// <summary>Raw OAuth error code, for the technical-details block.</summary>
+    public string? Error { get; init; }
+
+    /// <summary>Raw IdentityServer description — developer-facing, not headline material.</summary>
+    public string? ErrorDescription { get; init; }
+
+    public string? RequestId { get; init; }
+    public string? ActivityId { get; init; }
+    public string TenantId { get; init; } = string.Empty;
+    public string? ClientId { get; init; }
+
+    /// <summary>Display name of the client, falling back to its id.</summary>
+    public string? ClientName { get; init; }
+
+    /// <summary>
+    ///     The client's registered <c>ClientUri</c> — the only address safe to offer as a way back.
+    ///     Never the <c>redirect_uri</c> of the failed request.
+    /// </summary>
+    public string? ClientUrl { get; init; }
+
+    public string? ClientLogoUrl { get; init; }
+}
 
 public record LoginContextDto
 {
