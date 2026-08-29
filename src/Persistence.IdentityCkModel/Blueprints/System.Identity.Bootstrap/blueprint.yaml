@@ -1,5 +1,5 @@
 $schema: https://schemas.meshmakers.cloud/blueprint-meta.schema.json
-blueprintId: System.Identity.Bootstrap-1.2.0
+blueprintId: System.Identity.Bootstrap-1.3.0
 description: |
   Service-managed Identity tenant seed — system + every child tenant. Provides
   the default role set (14 roles), the five OIDC identity resources, three API
@@ -16,6 +16,14 @@ description: |
   `ServicePublicUrlOverrides["platform"]` in dev or
   `${octo.scheme}://platform.${octo.domain}` in cluster. rtId 660…35 stays
   skipped (removed octo-mcpServices-interactive client).
+
+  1.3.0 (AB#4974): seeds the built-in data-permission protection of the identity
+  entities — DataPermission `identity.administration` (660…50) granted to the
+  UserManagement role, and the DataPolicy (660…51) targeting the sensitive
+  System.Identity types (users incl. password hashes, clients incl. secrets,
+  roles/groups, providers, grants, and the data-permission model itself).
+  Ships in AuditOnly; operators flip to Enforce per tenant after reviewing the
+  audit events (AB#4973 migration path). Requires System.Identity 2.12.0.
 
   Following the OctoMesh "System.* = service-managed" convention this blueprint
   is auto-applied by the Identity service on tenant Enable / startup once Phase 3
@@ -102,6 +110,6 @@ description: |
   successful apply because of the per-service version-key gate.
 
 ckModelDependencies:
-  - System.Identity-[2.7.0,3.0)
+  - System.Identity-[2.12.0,3.0)
 
 seedDataPath: seed-data/entities.yaml

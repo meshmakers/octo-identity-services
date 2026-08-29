@@ -1,6 +1,6 @@
 $schema: https://schemas.meshmakers.cloud/runtime-model.schema.json
 dependencies:
-  - System.Identity-2.7.0
+  - System.Identity-2.12.0
 entities:
 
   # ===========================================================================
@@ -30,6 +30,10 @@ entities:
         value: UserManagement
       - id: System.Identity/NormalizedName
         value: USERMANAGEMENT
+    associations:
+      - roleId: System.Identity/GrantsPermission
+        targetRtId: '660000000000000000000050'
+        targetCkTypeId: System.Identity/DataPermission
 
   - rtId: '660000000000000000000003'
     ckTypeId: System.Identity/Role
@@ -871,3 +875,52 @@ entities:
       - roleId: System.Identity/AssignedRole
         targetRtId: '66000000000000000000000E'
         targetCkTypeId: System.Identity/Role
+
+  # --- Data permissions (AB#4974): built-in protection of the identity entities. Seeded in
+  # AuditOnly first — flip to Enforce per tenant after the audit events are reviewed (the
+  # cross-tenant provisioning UI and similar consumers need the UserManagement role first).
+  # Policies are blueprint-owned: tenant customization = additional policies, never edits here.
+  - rtId: '660000000000000000000050'
+    ckTypeId: System.Identity/DataPermission
+    rtWellKnownName: IdentityAdministrationPermission
+    attributes:
+      - id: System.Identity/PermissionId
+        value: identity.administration
+      - id: System/Description
+        value: Read/write/delete access to the identity entities of the tenant (users, roles, groups, clients, providers, grants and the data-permission model itself).
+
+  - rtId: '660000000000000000000051'
+    ckTypeId: System.Identity/DataPolicy
+    rtWellKnownName: IdentityAdministrationPolicy
+    attributes:
+      - id: System.Identity/TargetCkTypeIds
+        value:
+          - System.Identity/User
+          - System.Identity/Role
+          - System.Identity/Group
+          - System.Identity/Client
+          - System.Identity/ClientMirror
+          - System.Identity/ExternalTenantUserMapping
+          - System.Identity/IdentityProvider
+          - System.Identity/Resource
+          - System.Identity/PersistedGrant
+          - System.Identity/ServerSideSession
+          - System.Identity/DataProtectionKey
+          - System.Identity/EmailDomainGroupRule
+          - System.Identity/Permission
+          - System.Identity/PermissionRole
+          - System.Identity/DataPermission
+          - System.Identity/DataPolicy
+      - id: System.Identity/PolicyActions
+        value:
+          - Read
+          - Write
+          - Delete
+      - id: System.Identity/PolicyScope
+        value: 0
+      - id: System.Identity/PolicyEnforcementMode
+        value: 1
+    associations:
+      - roleId: System.Identity/PolicyPermission
+        targetRtId: '660000000000000000000050'
+        targetCkTypeId: System.Identity/DataPermission
