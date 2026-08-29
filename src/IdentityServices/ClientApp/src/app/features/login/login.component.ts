@@ -34,6 +34,7 @@ export class LoginComponent implements OnInit {
   errorMessage?: string;
   context?: LoginContext;
   showLoginForm = false; // Used to override isAuthenticated and show login form
+  private handoffAlreadyBounced = false; // Guards the parent bounce against ping-ponging
 
   // Form data
   username = '';
@@ -52,8 +53,11 @@ export class LoginComponent implements OnInit {
                   || '';
 
     const crossTenantAutoLogin = this.route.snapshot.queryParams['crossTenantAutoLogin'];
-    if (crossTenantAutoLogin) {
-      this.stripQueryParam('crossTenantAutoLogin');
+    // Set when we already sent the user to the parent once. Without it a hand-off that keeps
+    // failing would ping-pong between parent and child forever.
+    this.handoffAlreadyBounced = this.route.snapshot.queryParams['xtBounced'] === '1';
+    if (crossTenantAutoLogin || this.handoffAlreadyBounced) {
+      this.stripQueryParams(['crossTenantAutoLogin', 'xtBounced']);
     }
 
     this.loadContext(crossTenantAutoLogin);
@@ -68,10 +72,32 @@ export class LoginComponent implements OnInit {
           return;
         }
         this.context = context;
-        this.loading = false;
+
+        // Coming back from the parent: finish what we started. The bounce guard set above stops
+        // this from starting another round trip if it fails again.
         if (autoLoginParentTenantId) {
+          this.loading = false;
           this.performCrossTenantAutoLogin(autoLoginParentTenantId);
+          return;
         }
+
+        // AB#4961: a pending request plus an existing session leaves nothing to ask. Continuing
+        // beats rendering "you are signed in as ..." with no way back to where the user was going.
+        if (context.isAuthenticated && this.returnUrl) {
+          this.continueToReturnUrl();
+          return;
+        }
+
+        // AB#4964: this tenant borrows its identity from exactly one parent, so the form below can
+        // only ever forward the credentials there anyway. Try the hand-off silently first — if the
+        // parent session is still alive the user never sees a second mask.
+        const parentTenantId = this.soleParentTenantId(context);
+        if (parentTenantId && !context.isAuthenticated && this.returnUrl) {
+          this.tryQuietCrossTenantHandoff(parentTenantId);
+          return;
+        }
+
+        this.loading = false;
       },
       error: (error) => {
         console.error('Failed to load login context', error);
@@ -155,10 +181,51 @@ export class LoginComponent implements OnInit {
     }
   }
 
-  private stripQueryParam(param: string): void {
+  private stripQueryParams(paramsToRemove: string[]): void {
     const params = { ...this.route.snapshot.queryParams };
-    delete params[param];
+    for (const param of paramsToRemove) {
+      delete params[param];
+    }
     this.router.navigate([], { relativeTo: this.route, queryParams: params, replaceUrl: true });
+  }
+
+  /**
+   * The parent tenant to hand off to, but only when it is the ONLY way into this tenant. With a
+   * second external provider the choice belongs to the user, and with none there is nothing to
+   * hand off to.
+   */
+  private soleParentTenantId(context: LoginContext): string | undefined {
+    if (context.externalProviders.length !== 1) {
+      return undefined;
+    }
+
+    const provider = context.externalProviders[0];
+    if (!provider.isParentTenant) {
+      return undefined;
+    }
+
+    const parentTenantId = provider.scheme.replace('octo-tenant-', '');
+    return parentTenantId.toLowerCase() === this.tenantId.toLowerCase()
+      ? undefined
+      : parentTenantId;
+  }
+
+  /**
+   * Completes the hand-off without asking, if the parent session is still alive.
+   *
+   * Deliberately does NOT fall back to the parent's login page: sending the user there unasked
+   * would strand anyone holding a local account in this tenant. A failure here just reveals the
+   * normal form, with the provider button still on it.
+   */
+  private tryQuietCrossTenantHandoff(parentTenantId: string): void {
+    this.authApi.getCrossTenantToken(parentTenantId, this.tenantId).subscribe({
+      next: (tokenResult) => this.redeemCrossTenantToken(tokenResult.token, () => {
+        this.loading = false;
+      }),
+      error: () => {
+        this.loading = false;
+      }
+    });
   }
 
   private performCrossTenantAutoLogin(parentTenantId: string): void {
@@ -177,36 +244,66 @@ export class LoginComponent implements OnInit {
     // The browser sends the parent's scoped cookie automatically.
     this.authApi.getCrossTenantToken(parentTenantId, this.tenantId).subscribe({
       next: (tokenResult) => {
-        // Step 2: Exchange the token for a session in the current (child) tenant
-        this.authApi.crossTenantLogin({ token: tokenResult.token, returnUrl: this.returnUrl }).subscribe({
-          next: (loginResult) => {
-            this.submitting = false;
-            if (loginResult.success && loginResult.redirectUrl) {
-              window.location.href = loginResult.redirectUrl;
-            } else if (loginResult.success) {
-              this.router.navigate(['/', this.tenantId, 'manage']);
-            } else {
-              this.errorMessage = loginResult.errorMessage || 'Cross-tenant login failed';
-            }
-          },
-          error: () => {
-            this.submitting = false;
-            this.errorMessage = 'Cross-tenant login failed';
-          }
+        this.redeemCrossTenantToken(tokenResult.token, (message) => {
+          this.submitting = false;
+          this.errorMessage = message;
         });
       },
       error: () => {
-        // No active session in parent tenant → redirect to parent's login page.
-        // After authenticating there, the user is redirected back with crossTenantAutoLogin
-        // to auto-complete the token exchange.
         this.submitting = false;
+
+        // No usable session in the parent tenant → authenticate there once, then come back and
+        // complete the exchange. Only ever once: if we have already been bounced, fall back to
+        // this tenant's own form rather than starting the round trip over.
+        if (this.handoffAlreadyBounced) {
+          this.errorMessage = 'Cross-tenant login failed';
+          return;
+        }
+
         const childReturnUrl = `/${this.tenantId}/login`
           + `?returnUrl=${encodeURIComponent(this.returnUrl)}`
-          + `&crossTenantAutoLogin=${encodeURIComponent(parentTenantId)}`;
+          + `&crossTenantAutoLogin=${encodeURIComponent(parentTenantId)}`
+          + '&xtBounced=1';
         window.location.href = `/${parentTenantId}/login`
           + `?returnUrl=${encodeURIComponent(childReturnUrl)}`;
       }
     });
+  }
+
+  /** Step 2 of the hand-off: redeem the parent's token for a session in this tenant. */
+  private redeemCrossTenantToken(token: string, onFailure: (message?: string) => void): void {
+    this.authApi.crossTenantLogin({ token, returnUrl: this.returnUrl }).subscribe({
+      next: (loginResult) => {
+        if (loginResult.success && loginResult.redirectUrl) {
+          window.location.href = loginResult.redirectUrl;
+        } else if (loginResult.success) {
+          this.submitting = false;
+          this.router.navigate(['/', this.tenantId, 'manage']);
+        } else {
+          onFailure(loginResult.errorMessage || 'Cross-tenant login failed');
+        }
+      },
+      error: () => onFailure('Cross-tenant login failed')
+    });
+  }
+
+  private continueToReturnUrl(): void {
+    // returnUrl is a server-side path — the IdentityServer authorize callback, or a child tenant's
+    // login page resuming a hand-off — so it needs a full navigation, not an Angular route.
+    if (!this.isSafeReturnUrl(this.returnUrl)) {
+      this.loading = false;
+      return;
+    }
+    window.location.href = this.returnUrl;
+  }
+
+  /**
+   * returnUrl arrives from the query string, so it may only ever be a site-relative path. Anything
+   * absolute or protocol-relative ("//evil.example", and "/\evil.example" which browsers treat the
+   * same way) would make this an open redirect.
+   */
+  private isSafeReturnUrl(url: string): boolean {
+    return /^\/(?![/\\])/.test(url);
   }
 
   get hasExternalProviders(): boolean {
@@ -218,6 +315,13 @@ export class LoginComponent implements OnInit {
   }
 
   continueAsUser(): void {
+    // AB#4961: when a request is pending, "continue" means finish it — not detour to the profile
+    // page, which used to drop the user out of whatever flow brought them here.
+    if (this.isSafeReturnUrl(this.returnUrl)) {
+      this.continueToReturnUrl();
+      return;
+    }
+
     // Navigate to profile/manage page
     this.router.navigate(['/', this.tenantId, 'manage']);
   }
