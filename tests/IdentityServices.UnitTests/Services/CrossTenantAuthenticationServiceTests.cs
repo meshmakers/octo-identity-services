@@ -257,6 +257,102 @@ public class CrossTenantAuthenticationServiceTests
         result.Should().BeNull();
     }
 
+    [Fact]
+    public async Task ValidateCrossTenantAccess_WithAncestorBehindAnotherProvider_Succeeds()
+    {
+        // Arrange: the target has TWO enabled providers and the one naming the source is enumerated
+        // SECOND. The walk used to descend into the first branch and abandon its siblings, so the
+        // real parent was never seen and access was denied by enumeration order alone (AB#4960).
+        SetupTenantWithProviders("target-tenant",
+        [
+            CreateTenantProvider("unrelated-tenant", isEnabled: true),
+            CreateTenantProvider("source-tenant", isEnabled: true)
+        ]);
+        SetupTenantWithNoProviders("unrelated-tenant");
+
+        var user = CreateUser("testuser");
+        SetupTenantWithUser("source-tenant", user);
+
+        // Act
+        var result = await _sut.ValidateCrossTenantAccessAsync(
+            "target-tenant", "source-tenant", user.RtId.ToString());
+
+        // Assert
+        result.Should().NotBeNull();
+        result!.SourceTenantId.Should().Be("source-tenant");
+    }
+
+    [Fact]
+    public async Task ValidateCrossTenantAccess_WithAncestorTransitivelyBehindAnotherProvider_Succeeds()
+    {
+        // Arrange: target -> [dead-end, mid] and mid -> source, so the ancestor sits two levels up on
+        // the branch that is NOT enumerated first.
+        SetupTenantWithProviders("target-tenant",
+        [
+            CreateTenantProvider("dead-end-tenant", isEnabled: true),
+            CreateTenantProvider("mid-tenant", isEnabled: true)
+        ]);
+        SetupTenantWithNoProviders("dead-end-tenant");
+        SetupTenantWithProviders("mid-tenant",
+            [CreateTenantProvider("source-tenant", isEnabled: true)]);
+
+        var user = CreateUser("testuser");
+        SetupTenantWithUser("source-tenant", user);
+
+        // Act
+        var result = await _sut.ValidateCrossTenantAccessAsync(
+            "target-tenant", "source-tenant", user.RtId.ToString());
+
+        // Assert
+        result.Should().NotBeNull();
+    }
+
+    [Fact]
+    public async Task ValidateCrossTenantAccess_WithConvergingProviders_StillResolvesAncestor()
+    {
+        // Arrange: target -> [mid-a, mid-b] and both -> shared-root -> source. Two branches converging
+        // on one tenant is normal in a graph; the duplicate must be skipped without aborting the walk.
+        SetupTenantWithProviders("target-tenant",
+        [
+            CreateTenantProvider("mid-a", isEnabled: true),
+            CreateTenantProvider("mid-b", isEnabled: true)
+        ]);
+        SetupTenantWithProviders("mid-a", [CreateTenantProvider("shared-root", isEnabled: true)]);
+        SetupTenantWithProviders("mid-b", [CreateTenantProvider("shared-root", isEnabled: true)]);
+        SetupTenantWithProviders("shared-root",
+            [CreateTenantProvider("source-tenant", isEnabled: true)]);
+
+        var user = CreateUser("testuser");
+        SetupTenantWithUser("source-tenant", user);
+
+        // Act
+        var result = await _sut.ValidateCrossTenantAccessAsync(
+            "target-tenant", "source-tenant", user.RtId.ToString());
+
+        // Assert
+        result.Should().NotBeNull();
+    }
+
+    [Fact]
+    public async Task ValidateCrossTenantAccess_WithDisabledProviderToSource_Fails()
+    {
+        // Arrange: the only provider naming the source is disabled. Considering every provider on a
+        // level must not soften the IsEnabled gate.
+        SetupTenantWithProviders("target-tenant",
+        [
+            CreateTenantProvider("unrelated-tenant", isEnabled: true),
+            CreateTenantProvider("source-tenant", isEnabled: false)
+        ]);
+        SetupTenantWithNoProviders("unrelated-tenant");
+
+        // Act
+        var result = await _sut.ValidateCrossTenantAccessAsync(
+            "target-tenant", "source-tenant", Guid.NewGuid().ToString("N"));
+
+        // Assert
+        result.Should().BeNull();
+    }
+
     #region Helper Methods
 
     private static RtOctoTenantIdentityProvider CreateTenantProvider(

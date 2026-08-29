@@ -169,41 +169,52 @@ public class CrossTenantAuthenticationService(
         return null;
     }
 
+    /// <summary>
+    ///     Breadth-first search over the identity-provider graph for <paramref name="ancestorTenantId" />.
+    /// </summary>
+    /// <remarks>
+    ///     A tenant may have SEVERAL enabled <c>OctoTenantIdentityProvider</c>s, so ancestry is a graph,
+    ///     not a chain. Descending into the first provider that yields an unvisited parent — and thereby
+    ///     abandoning its siblings on the same level — made the answer depend on store enumeration order
+    ///     and denied legitimate access (AB#4960): a tenant whose stale provider happened to be returned
+    ///     first hid its real parent, so every gate built on this check failed closed.
+    ///     <see cref="MaxHierarchyDepth" /> bounds the number of LEVELS walked, and <c>visited</c> keeps a
+    ///     cycle from looping.
+    /// </remarks>
     private async Task<bool> IsAncestorTenantAsync(string childTenantId, string ancestorTenantId)
     {
         var visited = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { childTenantId };
-        var currentTenantId = childTenantId;
+        var currentLevel = new List<string> { childTenantId };
 
-        for (var depth = 0; depth < MaxHierarchyDepth; depth++)
+        for (var depth = 0; depth < MaxHierarchyDepth && currentLevel.Count > 0; depth++)
         {
-            var providers = await GetOctoTenantProvidersInTenantAsync(currentTenantId);
-            var parentFound = false;
+            var nextLevel = new List<string>();
 
-            foreach (var provider in providers)
+            foreach (var tenantId in currentLevel)
             {
-                if (!provider.IsEnabled || string.IsNullOrEmpty(provider.ParentTenantId))
-                {
-                    continue;
-                }
+                var providers = await GetOctoTenantProvidersInTenantAsync(tenantId);
 
-                if (string.Equals(provider.ParentTenantId, ancestorTenantId,
-                        StringComparison.OrdinalIgnoreCase))
+                foreach (var provider in providers)
                 {
-                    return true;
-                }
+                    if (!provider.IsEnabled || string.IsNullOrEmpty(provider.ParentTenantId))
+                    {
+                        continue;
+                    }
 
-                if (visited.Add(provider.ParentTenantId))
-                {
-                    currentTenantId = provider.ParentTenantId;
-                    parentFound = true;
-                    break;
+                    if (string.Equals(provider.ParentTenantId, ancestorTenantId,
+                            StringComparison.OrdinalIgnoreCase))
+                    {
+                        return true;
+                    }
+
+                    if (visited.Add(provider.ParentTenantId))
+                    {
+                        nextLevel.Add(provider.ParentTenantId);
+                    }
                 }
             }
 
-            if (!parentFound)
-            {
-                break;
-            }
+            currentLevel = nextLevel;
         }
 
         return false;

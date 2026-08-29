@@ -180,52 +180,69 @@ public class AllowedTenantsResolver(
         }
     }
 
+    /// <summary>
+    ///     Breadth-first walk up the identity-provider graph, adding every reachable ancestor.
+    /// </summary>
+    /// <remarks>
+    ///     Mirrors <c>CrossTenantAuthenticationService.IsAncestorTenantAsync</c> and must stay in step with
+    ///     it: this method decides which tenants are OFFERED via <c>allowed_tenants</c>, that one decides
+    ///     which may actually be ENTERED. Two corrections in AB#4960:
+    ///     <list type="bullet">
+    ///         <item>
+    ///             It followed only the first provider per level, so a tenant with several enabled
+    ///             providers resolved its ancestry by store enumeration order and silently lost the rest.
+    ///         </item>
+    ///         <item>
+    ///             It never checked <c>IsEnabled</c> despite claiming to, so a parent reachable only
+    ///             through a DISABLED provider was offered and then refused by the gate.
+    ///         </item>
+    ///     </list>
+    ///     Revisiting a tenant is normal in a graph (two providers converging on one ancestor) and simply
+    ///     skipped; only <c>MaxHierarchyDepth</c> bounds the walk.
+    /// </remarks>
     private async Task ResolveAncestorTenantsAsync(string startTenantId, HashSet<string> allowedTenants)
     {
         var visited = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { startTenantId };
-        var currentTenantId = startTenantId;
+        var currentLevel = new List<string> { startTenantId };
 
-        for (var depth = 0; depth < MaxHierarchyDepth; depth++)
+        for (var depth = 0; depth < MaxHierarchyDepth && currentLevel.Count > 0; depth++)
         {
-            try
+            var nextLevel = new List<string>();
+
+            foreach (var tenantId in currentLevel)
             {
-                var providers = await GetOctoTenantProvidersInTenantAsync(currentTenantId);
-                var parentFound = false;
+                IEnumerable<RtOctoTenantIdentityProvider> providers;
+                try
+                {
+                    providers = await GetOctoTenantProvidersInTenantAsync(tenantId);
+                }
+                catch (Exception ex)
+                {
+                    // One unreadable tenant must not truncate the rest of the level.
+                    logger.LogWarning(ex,
+                        "Failed to resolve ancestor tenants from tenant '{TenantId}'",
+                        tenantId);
+                    continue;
+                }
 
                 foreach (var provider in providers)
                 {
-                    if (string.IsNullOrEmpty(provider.ParentTenantId))
+                    if (!provider.IsEnabled || string.IsNullOrEmpty(provider.ParentTenantId))
                     {
                         continue;
                     }
 
                     if (!visited.Add(provider.ParentTenantId))
                     {
-                        // Circular reference — stop
-                        logger.LogWarning(
-                            "Circular reference detected in tenant hierarchy at '{TenantId}'",
-                            provider.ParentTenantId);
-                        return;
+                        continue;
                     }
 
                     allowedTenants.Add(provider.ParentTenantId);
-                    currentTenantId = provider.ParentTenantId;
-                    parentFound = true;
-                    break; // Follow the first enabled provider's parent
+                    nextLevel.Add(provider.ParentTenantId);
                 }
+            }
 
-                if (!parentFound)
-                {
-                    break; // No parent — reached the root
-                }
-            }
-            catch (Exception ex)
-            {
-                logger.LogWarning(ex,
-                    "Failed to resolve ancestor tenants from tenant '{TenantId}'",
-                    currentTenantId);
-                break;
-            }
+            currentLevel = nextLevel;
         }
     }
 
