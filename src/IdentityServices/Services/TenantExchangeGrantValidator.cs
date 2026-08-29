@@ -5,6 +5,7 @@ using Duende.IdentityServer.Stores;
 using Duende.IdentityServer.Validation;
 using IdentityModel;
 using IdentityServerPersistence.Configuration.Options;
+using IdentityServerPersistence.SystemStores;
 using IdentityServerPersistence.Services;
 using Meshmakers.Common.Shared;
 using Meshmakers.Octo.Services.Infrastructure;
@@ -50,6 +51,7 @@ public class TenantExchangeGrantValidator(
     IOptions<OctoIdentityServicesOptions> octoIdentityOptions,
     ICrossTenantAuthenticationService crossTenantAuthService,
     ICrossTenantUserProvisioningService crossTenantUserProvisioningService,
+    IExternalTenantUserMappingStore externalTenantUserMappingStore,
     IHttpContextAccessor httpContextAccessor,
     IEventService events,
     ILogger<TenantExchangeGrantValidator> logger) : IExtensionGrantValidator
@@ -152,47 +154,10 @@ public class TenantExchangeGrantValidator(
             return;
         }
 
-        // (b2) Determine the effective SOURCE identity. A cross-tenant user is a shadow user named
-        //      xt_{home}_{orig} in the current tenant; they must be exchanged from their HOME tenant —
-        //      the common ancestor of all tenants they can reach. The current tenant_id is often a
-        //      SIBLING of the target (both children of the home tenant) and thus NOT an ancestor of it,
-        //      so exchanging from it would be wrongly denied by the ancestry gate. The shadow user name
-        //      is read from the SOURCE tenant database (authoritative) — access-token claims like
-        //      home_tenant_id/preferred_username are subject to API-resource claim filtering and may be
-        //      absent. A direct user (name without xt_ prefix) keeps tenant_id + sub.
-        var effectiveSourceTenantId = sourceTenantId;
-        var effectiveSourceUserId = sourceUserId;
-        var sourceUserName = await crossTenantAuthService.FindUserNameByIdInTenantAsync(
-            sourceTenantId, sourceUserId);
-        if (sourceUserName != null && sourceUserName.StartsWith("xt_", StringComparison.OrdinalIgnoreCase))
-        {
-            // Same parsing convention as UserProfileService: xt_{homeTenantId}_{originalUserName}
-            var parts = sourceUserName.Split('_', 3);
-            var homeTenantId = parts.Length == 3 ? parts[1] : null;
-            var originalUserName = parts.Length == 3 ? parts[2] : null;
+        // (b2)+(c) Pick the source identity and run the B-authorization gate on it.
+        var crossTenantResult = await ResolveExchangeSourceAsync(
+            targetTenantId, sourceTenantId, sourceUserId);
 
-            var homeUserId = string.IsNullOrEmpty(homeTenantId) || string.IsNullOrEmpty(originalUserName)
-                ? null
-                : await crossTenantAuthService.FindUserIdByNameInTenantAsync(homeTenantId, originalUserName);
-            if (string.IsNullOrEmpty(homeUserId))
-            {
-                logger.LogWarning(
-                    "Token exchange denied: could not resolve home identity (user '{OriginalUserName}') in home tenant '{HomeTenantId}' for shadow user '{ShadowUserName}'",
-                    originalUserName ?? "(none)", homeTenantId ?? "(none)", sourceUserName);
-                await RaiseFailureAsync(sourceUserId, sourceTenantId, targetTenantId,
-                    "home identity not resolvable", cancellationToken);
-                context.Result = Error(TokenRequestErrors.UnauthorizedClient,
-                    "cross-tenant access to the target tenant is denied");
-                return;
-            }
-
-            effectiveSourceTenantId = homeTenantId!;
-            effectiveSourceUserId = homeUserId;
-        }
-
-        // (c) B-authorization gate: the (home) source tenant must be an ancestor of B and its user exists.
-        var crossTenantResult = await crossTenantAuthService.ValidateCrossTenantAccessAsync(
-            targetTenantId, effectiveSourceTenantId, effectiveSourceUserId);
         if (crossTenantResult == null)
         {
             logger.LogWarning(
@@ -234,6 +199,88 @@ public class TenantExchangeGrantValidator(
 
         await events.RaiseAsync(new TokenExchangeSuccessEvent(
             sourceUserId, sourceTenantId, targetTenantId, shadowSubjectId), cancellationToken);
+    }
+
+    /// <summary>
+    ///     Picks the source identity to exchange from and runs the B-authorization gate on it.
+    ///     Returns <c>null</c> when no candidate may reach the target tenant.
+    /// </summary>
+    /// <remarks>
+    ///     Two shapes have to work:
+    ///     <list type="bullet">
+    ///         <item>
+    ///             The current tenant is an ANCESTOR of the target. It is then the tenant whose
+    ///             <c>ExternalTenantUserMapping</c> in B describes this user, so exchanging from it is
+    ///             what carries their roles across.
+    ///         </item>
+    ///         <item>
+    ///             The current tenant is a SIBLING of the target (both children of the same parent).
+    ///             It is not an ancestor, so the gate refuses it; such users are shadow users named
+    ///             <c>xt_{home}_{orig}</c> and must be exchanged from their HOME tenant instead.
+    ///         </item>
+    ///     </list>
+    ///     Rewriting to the home tenant unconditionally (before AB#4966) broke the first shape whenever
+    ///     the source was BOTH a shadow user AND an ancestor: the intermediate tenant's mapping was
+    ///     skipped, and the exchange silently returned a role-less token while provisioning a second,
+    ///     parallel shadow identity in the target. Both candidates are therefore offered, and the one
+    ///     that actually has a mapping in B wins. A candidate that merely passes the gate is kept as a
+    ///     fallback, so a hierarchy carrying no mapping at all behaves as it did before rather than
+    ///     being denied outright.
+    /// </remarks>
+    internal async Task<CrossTenantAuthResult?> ResolveExchangeSourceAsync(
+        string targetTenantId, string sourceTenantId, string sourceUserId)
+    {
+        var sourceUserName = await crossTenantAuthService.FindUserNameByIdInTenantAsync(
+            sourceTenantId, sourceUserId);
+
+        var candidates = new List<(string TenantId, string UserId)> { (sourceTenantId, sourceUserId) };
+
+        if (sourceUserName != null && sourceUserName.StartsWith("xt_", StringComparison.OrdinalIgnoreCase))
+        {
+            // Same parsing convention as UserProfileService: xt_{homeTenantId}_{originalUserName}
+            var parts = sourceUserName.Split('_', 3);
+            var homeTenantId = parts.Length == 3 ? parts[1] : null;
+            var originalUserName = parts.Length == 3 ? parts[2] : null;
+
+            var homeUserId = string.IsNullOrEmpty(homeTenantId) || string.IsNullOrEmpty(originalUserName)
+                ? null
+                : await crossTenantAuthService.FindUserIdByNameInTenantAsync(homeTenantId, originalUserName);
+
+            if (string.IsNullOrEmpty(homeUserId))
+            {
+                // Not fatal on its own — the immediate source may still be an ancestor of the target.
+                logger.LogWarning(
+                    "Token exchange: could not resolve home identity (user '{OriginalUserName}') in home tenant '{HomeTenantId}' for shadow user '{ShadowUserName}'",
+                    originalUserName ?? "(none)", homeTenantId ?? "(none)", sourceUserName);
+            }
+            else
+            {
+                candidates.Add((homeTenantId!, homeUserId));
+            }
+        }
+
+        CrossTenantAuthResult? authorizedWithoutMapping = null;
+
+        foreach (var (candidateTenantId, candidateUserId) in candidates)
+        {
+            var candidateResult = await crossTenantAuthService.ValidateCrossTenantAccessAsync(
+                targetTenantId, candidateTenantId, candidateUserId);
+            if (candidateResult == null)
+            {
+                continue;
+            }
+
+            authorizedWithoutMapping ??= candidateResult;
+
+            var mapping = await externalTenantUserMappingStore.FindBySourceUserAsync(
+                candidateTenantId, candidateUserId);
+            if (mapping != null)
+            {
+                return candidateResult;
+            }
+        }
+
+        return authorizedWithoutMapping;
     }
 
     private async Task RaiseFailureAsync(string sourceUserId, string sourceTenantId, string targetTenantId,
