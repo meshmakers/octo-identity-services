@@ -18,3 +18,15 @@ associationRoles:
     inboundMultiplicity: N
     outboundName: ChildGroups
     outboundMultiplicity: N
+  - id: GrantsPermission
+    description: "Links a Role to a granted DataPermission."
+    inboundName: GrantedToRoles
+    inboundMultiplicity: N
+    outboundName: GrantedPermissions
+    outboundMultiplicity: N
+  - id: PolicyPermission
+    description: "Links a DataPolicy to the DataPermission it belongs to."
+    inboundName: Policies
+    inboundMultiplicity: N
+    outboundName: Permission
+    outboundMultiplicity: One

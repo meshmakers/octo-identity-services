@@ -20,3 +20,6 @@ types:
       - id: ${this}/RoleClaims
         name: Claims
         isOptional: true
+    associations:
+      - id: ${this}/GrantsPermission
+        targetCkTypeId: ${this}/DataPermission
