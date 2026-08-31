@@ -352,6 +352,14 @@ entities:
       - id: System.Identity/ResourceClaims
         value:
           - role
+          # Caller identity for resource servers that attribute actions to the
+          # user without a userinfo round-trip — e.g. the mesh adapter's
+          # FromHttpRequest@2 principal ($.principal.email/.name feeds
+          # SourceSender on uploads). Access tokens carried no identity claims
+          # before, so those fields were always null.
+          - email
+          - name
+          - preferred_username
       - id: System.Identity/ShowInDiscoveryDocument
         value: true
       - id: System.Identity/RequireResourceIndicator
