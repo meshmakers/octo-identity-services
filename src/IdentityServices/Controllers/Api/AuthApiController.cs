@@ -327,7 +327,8 @@ public class AuthApiController(
             var crossTenantUserName = $"xt_{crossTenantResult.SourceTenantId}_{crossTenantResult.SourceUserName}";
             var existingCrossTenantUser = await userManager.FindByNameAsync(crossTenantUserName);
 
-            if (existingCrossTenantUser == null && octoTenantProvider is { AllowSelfRegistration: false })
+            if (existingCrossTenantUser == null && octoTenantProvider is { AllowSelfRegistration: false } &&
+                !await IsExplicitlyProvisionedAsync(crossTenantResult))
             {
                 logger.LogWarning("Self-registration denied for cross-tenant user '{UserName}' from tenant '{SourceTenant}'",
                     crossTenantResult.SourceUserName, crossTenantResult.SourceTenantId);
@@ -1404,7 +1405,8 @@ public class AuthApiController(
         var tokenCrossTenantUserName = $"xt_{crossTenantResult.SourceTenantId}_{crossTenantResult.SourceUserName}";
         var existingTokenUser = await userManager.FindByNameAsync(tokenCrossTenantUserName);
 
-        if (existingTokenUser == null && tokenOctoTenantProvider is { AllowSelfRegistration: false })
+        if (existingTokenUser == null && tokenOctoTenantProvider is { AllowSelfRegistration: false } &&
+            !await IsExplicitlyProvisionedAsync(crossTenantResult))
         {
             return new LoginResultDto
             {
@@ -1453,6 +1455,18 @@ public class AuthApiController(
             Success = true,
             RedirectUrl = redirectUrl
         };
+    }
+
+    /// <summary>
+    /// An ExternalTenantUserMapping created by an admin (e.g. via provisionCurrentUser) is explicit
+    /// provisioning, not self-registration: the first login must be allowed to create the local
+    /// shadow user even when the provider disallows self-registration (AB#5015).
+    /// </summary>
+    private async Task<bool> IsExplicitlyProvisionedAsync(CrossTenantAuthResult crossTenantResult)
+    {
+        var mapping = await externalTenantUserMappingStore.FindBySourceUserAsync(
+            crossTenantResult.SourceTenantId, crossTenantResult.SourceUserId);
+        return mapping != null;
     }
 
     /// <summary>

@@ -33,6 +33,7 @@ public class CrossTenantLoginTests
     private readonly UserManager<RtUser> _userManager;
     private readonly IEventService _events;
     private readonly IExternalTenantUserMappingStore _externalTenantUserMappingStore;
+    private readonly IOctoIdentityProviderStore _identityProviderStore;
     private readonly ICrossTenantUserProvisioningService _crossTenantUserProvisioningService;
     private readonly AuthApiController _sut;
 
@@ -46,7 +47,7 @@ public class CrossTenantLoginTests
         var ldapAuthService = Substitute.For<ILdapAuthenticationService>();
         _crossTenantAuthService = Substitute.For<ICrossTenantAuthenticationService>();
         _externalTenantUserMappingStore = Substitute.For<IExternalTenantUserMappingStore>();
-        var identityProviderStore = Substitute.For<IOctoIdentityProviderStore>();
+        _identityProviderStore = Substitute.For<IOctoIdentityProviderStore>();
         var loginGroupAssignmentService = Substitute.For<ILoginGroupAssignmentService>();
         _dataProtectionProvider = new EphemeralDataProtectionProvider();
         var logger = Substitute.For<ILogger<AuthApiController>>();
@@ -87,7 +88,7 @@ public class CrossTenantLoginTests
             ldapAuthService,
             _crossTenantAuthService,
             _externalTenantUserMappingStore,
-            identityProviderStore,
+            _identityProviderStore,
             loginGroupAssignmentService,
             _dataProtectionProvider,
             _crossTenantUserProvisioningService,
@@ -347,6 +348,97 @@ public class CrossTenantLoginTests
         result.Value.Should().NotBeNull();
         result.Value!.Success.Should().BeTrue();
         result.Value.RedirectUrl.Should().Be(returnUrl);
+    }
+
+    [Fact]
+    public async Task CrossTenantLogin_NewUser_SelfRegistrationDisabled_WithoutMapping_Fails()
+    {
+        // Arrange
+        var userId = Guid.NewGuid().ToString("N");
+        var token = await CreateValidTokenAsync(userId);
+
+        SetupControllerContext("meshtest");
+        SetupSelfRegistrationDisabledProvider();
+        _userManager.FindByNameAsync(Arg.Any<string>()).Returns((RtUser?)null);
+        _externalTenantUserMappingStore.FindBySourceUserAsync("OctoSystem", userId)
+            .Returns((RtExternalTenantUserMapping?)null);
+
+        // Act
+        var result = await _sut.CrossTenantLogin(
+            new CrossTenantLoginRequestDto { Token = token });
+
+        // Assert
+        result.Value.Should().NotBeNull();
+        result.Value!.Success.Should().BeFalse();
+        result.Value.ErrorMessage.Should().Contain("Self-registration");
+        await _signInManager.DidNotReceive().SignInAsync(Arg.Any<RtUser>(), Arg.Any<bool>());
+    }
+
+    [Fact]
+    public async Task CrossTenantLogin_NewUser_SelfRegistrationDisabled_WithMapping_Succeeds()
+    {
+        // Arrange: AB#5015 — an admin-provisioned mapping is explicit provisioning, not
+        // self-registration, so the first login must create the shadow user and succeed.
+        var userId = Guid.NewGuid().ToString("N");
+        var token = await CreateValidTokenAsync(userId);
+
+        SetupControllerContext("meshtest");
+        SetupSelfRegistrationDisabledProvider();
+        _userManager.FindByNameAsync(Arg.Any<string>()).Returns((RtUser?)null);
+        _externalTenantUserMappingStore.FindBySourceUserAsync("OctoSystem", userId)
+            .Returns(new RtExternalTenantUserMapping());
+
+        var localUser = new RtUser
+        {
+            RtId = OctoObjectId.GenerateNewId(),
+            UserName = "xt_OctoSystem_admin"
+        };
+        _crossTenantUserProvisioningService.FindOrCreateCrossTenantUserAsync(
+                Arg.Any<CrossTenantAuthResult>(), Arg.Any<string>())
+            .Returns(localUser);
+        _interaction.IsValidReturnUrl(Arg.Any<string>()).Returns(false);
+
+        // Act
+        var result = await _sut.CrossTenantLogin(
+            new CrossTenantLoginRequestDto { Token = token });
+
+        // Assert
+        result.Value.Should().NotBeNull();
+        result.Value!.Success.Should().BeTrue();
+        await _signInManager.Received(1).SignInAsync(localUser, false);
+    }
+
+    private async Task<string> CreateValidTokenAsync(string userId)
+    {
+        var user = CreateAuthenticatedUser(userId, "admin");
+        SetupControllerContext("OctoSystem", user);
+
+        _crossTenantAuthService.ValidateCrossTenantAccessAsync("meshtest", "OctoSystem", userId)
+            .Returns(new CrossTenantAuthResult
+            {
+                SourceTenantId = "OctoSystem",
+                SourceUserId = userId,
+                SourceUserName = "admin"
+            });
+
+        var tokenResult = await _sut.GetCrossTenantToken(
+            new CrossTenantTokenRequestDto { TargetTenantId = "meshtest" });
+        return tokenResult.Value!.Token;
+    }
+
+    private void SetupSelfRegistrationDisabledProvider()
+    {
+        _identityProviderStore.GetAllAsync().Returns(
+        [
+            new RtOctoTenantIdentityProvider
+            {
+                RtId = OctoObjectId.GenerateNewId(),
+                Name = "ParentTenant_OctoSystem",
+                ParentTenantId = "OctoSystem",
+                IsEnabled = true,
+                AllowSelfRegistration = false
+            }
+        ]);
     }
 
     [Fact]

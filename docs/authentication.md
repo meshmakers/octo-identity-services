@@ -506,6 +506,7 @@ POST /{childTenantId}/api/auth/cross-tenant-login
 - Expired token (>60s): Returns error; user can click the button again
 - Target tenant mismatch: Returns error (token was issued for a different tenant)
 - No cross-tenant mapping: `FindOrCreateCrossTenantUserAsync` creates one with default roles
+- Self-registration gate (AB#5015): when the `OctoTenantIdentityProvider` has `AllowSelfRegistration=false` and no local `xt_` shadow user exists yet, the login is denied — **unless** an `ExternalTenantUserMapping` exists in the target tenant for the source user (matched by `SourceTenantId` + `SourceUserId`). A mapping created by an admin (e.g. via `provisionCurrentUser`) is explicit provisioning, not self-registration, so the first login is allowed to create the shadow user. The same rule applies to the cross-tenant **password** login path in `AuthApiController.Login`.
 - Role sync on every login: `SyncMappedRolesAsync` resolves role IDs to names via the tenant repository (not `RoleManager`) and calls `AddToRoleAsync` for any missing roles. This ensures existing users pick up role changes from updated mappings.
 
 ### Tenant Switch Flow
