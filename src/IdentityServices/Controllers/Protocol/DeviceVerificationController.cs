@@ -131,11 +131,17 @@ public class DeviceVerificationController(
             TokenValidationParameters.DefaultAuthenticationType, Claims.Name, Claims.Role);
         await tokenClaimsService.PopulateUserClaimsAsync(identity, user, tenantId);
 
-        // Session-style claims for parity with interactive logins.
+        // Session-style claims for parity with interactive logins; the session id comes from
+        // the cookie session (stamped by OctoTicketStore) so logout can address it.
         identity.SetClaim(Claims.AuthenticationMethodReference, "pwd");
         identity.SetClaim("idp", "local");
-        identity.SetClaim(Claims.AuthenticationTime,
-            DateTimeOffset.UtcNow.ToUnixTimeSeconds().ToString());
+        var sessionId = User.FindFirstValue("sid");
+        if (!string.IsNullOrEmpty(sessionId))
+        {
+            identity.SetClaim("sid", sessionId);
+        }
+        identity.AddClaim(new Claim(Claims.AuthenticationTime,
+            DateTimeOffset.UtcNow.ToUnixTimeSeconds().ToString(), ClaimValueTypes.Integer64));
 
         // Honor the scope subset the user consented to (defaults to everything requested).
         var requestedScopes = result.Principal.GetScopes();

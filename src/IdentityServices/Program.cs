@@ -1,5 +1,4 @@
-﻿using Duende.IdentityServer.Services;
-using IdentityServerPersistence;
+﻿using IdentityServerPersistence;
 using IdentityServerPersistence.Configuration.Options;
 using IdentityServerPersistence.Services.DynamicClientRegistration;
 using IdentityServerPersistence.SystemStores;
@@ -36,6 +35,7 @@ using Meshmakers.Octo.Services.Observability;
 using Meshmakers.Octo.Services.Swagger.Configuration;
 using Microsoft.AspNetCore.Cors.Infrastructure;
 using Microsoft.AspNetCore.Authentication.Cookies;
+using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Options;
@@ -156,7 +156,6 @@ try
         };
     });
 
-    builder.Services.AddScoped<ICorsPolicyService, CorsPolicyService>();
 
     // RFC 7591 Dynamic Client Registration for interactive MCP clients (AB#4338).
     builder.Services.AddScoped<IDynamicClientRegistrationService, DynamicClientRegistrationService>();
@@ -195,44 +194,25 @@ try
     builder.Services.AddSingleton<IdentityCorsPolicyProvider>();
     builder.Services.AddSingleton<ICorsPolicyProvider>(sp => sp.GetRequiredService<IdentityCorsPolicyProvider>());
 
-    // Add IdentityServer for authentication using OpenID
-    var identityServerBuilder = builder.Services.AddIdentityServer(serverOptions =>
-        {
-            serverOptions.Events.RaiseErrorEvents = true;
-            serverOptions.Events.RaiseInformationEvents = true;
-            serverOptions.Events.RaiseFailureEvents = true;
-            serverOptions.Events.RaiseSuccessEvents = true;
-        })
-        .AddClientStore<IOctoClientStore>()
-        .AddResourceStore<ResourceStore>()
-        .AddPersistedGrantStore<PersistentGrantStore>()
-        .AddAspNetIdentity<RtUser>()
-        .AddProfileService<UserProfileService>()
-        .AddCustomTokenRequestValidator<ClientCredentialsRoleTokenValidator>()
-        // RFC 8693 Token Exchange (AB#4338): mints a target-tenant (B) access token from the
-        // user's home-tenant (A) access token, with roles re-resolved in B on the B-shadow sub.
-        .AddExtensionGrantValidator<TenantExchangeGrantValidator>()
-        .AddServerSideSessions<ServerSideSessionStore>()
-        .AddCorsPolicyService<CorsPolicyService>()
-        .AddAppAuthRedirectUriValidator()
-        .AddJwtBearerClientAuthentication();
+    // OpenIddict OAuth2/OIDC server (AB#4989/AB#4990) — replaces Duende IdentityServer.
+    // Protocol configuration, custom CK/MongoDB stores and Duende-parity token shaping live in
+    // OpenIddictConfiguration; principals are built by the passthrough controllers under
+    // Controllers/Protocol.
+    builder.AddOctoOpenIddict();
 
-    // Persist IdentityServer error/failure events to OctoMesh runtime event log
-    builder.Services.AddTransient<IEventSink, OctoEventSink>();
-
-    // AB#4989/AB#4990: claims parity layer for OpenIddict-issued tokens (tenant claims,
-    // effective client roles, audience resolution). Consumed by the OpenIddict interaction
-    // layer; registered up front so the migration commits can build on it.
+    // Claims parity layer for OpenIddict-issued tokens (tenant claims, effective client roles,
+    // audience resolution) + interaction facade for the SPA API controllers.
     builder.Services.AddScoped<IOctoTokenClaimsService, OctoTokenClaimsService>();
     builder.Services.AddScoped<TenantExchangeProcessor>();
     builder.Services.AddScoped<IIdentityAuditService, IdentityAuditService>();
-    // Server-side session ticket store (AB#4994); wired onto the application cookie with the
-    // OpenIddict swap (replaces Duende's AddServerSideSessions).
-    builder.Services.AddSingleton<OctoTicketStore>();
     builder.Services.AddScoped<IOctoInteractionService, OctoInteractionService>();
 
-    // Scope auth cookies per tenant to prevent cross-tenant session leakage.
-    // Identity.Application and idsrv cookies get a .{tenantId} suffix.
+    // Server-side sessions (AB#4994): the application cookie carries only a session key, the
+    // data-protected ticket lives per tenant in MongoDB (OctoTicketStore).
+    builder.Services.AddSingleton<OctoTicketStore>();
+
+    // Scope auth cookies per tenant to prevent cross-tenant session leakage:
+    // the Identity.Application cookie gets a .{tenantId} suffix.
     var tenantCookieManager = new TenantCookieManager();
     builder.Services.ConfigureApplicationCookie(o =>
     {
@@ -242,25 +222,15 @@ try
         // Explicit (was: 14-day framework default) — sliding, so active users stay signed in.
         o.ExpireTimeSpan = TimeSpan.FromDays(7);
     });
-    builder.Services.Configure<CookieAuthenticationOptions>(OctoAuthSchemes.ServerSsoCookieScheme, o => o.CookieManager = tenantCookieManager);
-    builder.Services.Configure<CookieAuthenticationOptions>(OctoAuthSchemes.ServerSsoSessionCookieScheme, o => o.CookieManager = tenantCookieManager);
+    builder.Services.AddOptions<CookieAuthenticationOptions>(IdentityConstants.ApplicationScheme)
+        .Configure<OctoTicketStore>((options, ticketStore) => options.SessionStore = ticketStore);
 
-    // Service that periodically cleans up tokens in the grant database
+    // Service that periodically cleans up expired sessions, OAuth tokens and legacy grants
     builder.Services.AddSingleton<IHostedService, TokenCleanupHostService>();
 
     // Add the extra configuration;
-    builder.Services.ConfigureOptions<ConfigureIdentityServerOptions>();
     builder.Services.ConfigureOptions<ConfigureOctoOpenApiOptions>();
     builder.Services.ConfigureOptions<ConfigureMapperConfigurationExpression>();
-
-    if (builder.Environment.IsDevelopment())
-    {
-        identityServerBuilder.AddDeveloperSigningCredential();
-    }
-    else
-    {
-        identityServerBuilder.AddOctoSigningCredential();
-    }
 
     builder.Services.TryAddEnumerable(ServiceDescriptor
         .Singleton<IPostConfigureOptions<JwtBearerOptions>, JwtBearerPostConfigureOptions>());
@@ -406,13 +376,9 @@ try
     app.UseRateLimiter();
 
     // The sequence of the add statements in the configure function is of importance.
-    // app.UseAuthentication()
-    // !!!UseIdentityServer calls already UseAuthentication; comes before app.UseMvc();
     app.UseDcrDefaultScope();
     app.UseOidcTenantResolution();
-    app.UseTenantLoginRedirect();
-    app.UseIdentityServer();
-
+    app.UseAuthentication();
     app.UseAuthorization();
     app.UseOctoTenantAuthorization();
 

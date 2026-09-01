@@ -1,5 +1,6 @@
 using FluentAssertions;
-using Duende.IdentityServer.Models;
+using System.Security.Cryptography;
+using System.Text;
 using Meshmakers.Octo.Backend.IdentityServices.OpenIddict;
 using Xunit;
 
@@ -18,34 +19,42 @@ public class OctoSecretHasherTests
     {
         const string secret = "my-service-account-secret";
 
-        // Reference: the exact extension Duende-based code paths used to store secrets.
-        OctoSecretHasher.HashSecret(secret).Should().Be(secret.Sha256());
+        // Reference: Duende's HashExtensions.Sha256() stored Base64(SHA-256(UTF8(secret))).
+        OctoSecretHasher.HashSecret(secret).Should().Be(DuendeSha256(secret));
     }
 
     [Fact]
     public void Matches_AcceptsDuendeSha256StoredHash()
     {
         const string secret = "golden-machine-secret";
-        OctoSecretHasher.Matches(secret, secret.Sha256()).Should().BeTrue();
+        OctoSecretHasher.Matches(secret, DuendeSha256(secret)).Should().BeTrue();
     }
 
     [Fact]
     public void Matches_AcceptsDuendeSha512StoredHash()
     {
         const string secret = "golden-machine-secret";
-        OctoSecretHasher.Matches(secret, secret.Sha512()).Should().BeTrue();
+        OctoSecretHasher.Matches(secret, DuendeSha512(secret)).Should().BeTrue();
     }
 
     [Fact]
     public void Matches_RejectsWrongSecret()
     {
-        OctoSecretHasher.Matches("wrong", "right".Sha256()).Should().BeFalse();
+        OctoSecretHasher.Matches("wrong", DuendeSha256("right")).Should().BeFalse();
     }
 
     [Fact]
     public void Matches_RejectsEmptyInputs()
     {
-        OctoSecretHasher.Matches("", "x".Sha256()).Should().BeFalse();
+        OctoSecretHasher.Matches("", DuendeSha256("x")).Should().BeFalse();
         OctoSecretHasher.Matches("x", "").Should().BeFalse();
     }
+
+    /// <summary>Reference implementation of Duende's HashExtensions.Sha256().</summary>
+    private static string DuendeSha256(string value)
+        => Convert.ToBase64String(SHA256.HashData(Encoding.UTF8.GetBytes(value)));
+
+    /// <summary>Reference implementation of Duende's HashExtensions.Sha512().</summary>
+    private static string DuendeSha512(string value)
+        => Convert.ToBase64String(SHA512.HashData(Encoding.UTF8.GetBytes(value)));
 }

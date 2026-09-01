@@ -8,13 +8,11 @@ namespace Meshmakers.Octo.Backend.Authentication;
 ///     <see cref="ExternalCookieScheme" />.
 /// </summary>
 /// <remarks>
-///     AB#4989 (OpenIddict migration): the values currently match the scheme names Duende
-///     IdentityServer registers, so introducing these constants changes no behavior. With the
-///     swap to OpenIddict the Duende-owned schemes (<see cref="ServerSsoCookieScheme" />,
-///     <see cref="ServerSsoSessionCookieScheme" />) disappear and
-///     <see cref="ExternalCookieScheme" /> switches to ASP.NET Identity's own external scheme.
-///     Cookie NAMES may change at that cutover (all sessions end anyway — see
-///     docs/CONCEPT-OPENIDDICT-MIGRATION.md §2) but must stay stable from then on.
+///     AB#4989/AB#4996: since the swap to OpenIddict the values are ASP.NET Identity's own
+///     scheme names — the Duende-owned schemes (<c>idsrv</c>, <c>idsrv.session</c>,
+///     <c>idsrv.external</c>) no longer exist. Cookie names changed at the cutover (all
+///     sessions ended by design, see docs/CONCEPT-OPENIDDICT-MIGRATION.md §2) and must stay
+///     stable from here on.
 /// </remarks>
 public static class OctoAuthSchemes
 {
@@ -26,22 +24,8 @@ public static class OctoAuthSchemes
 
     /// <summary>
     ///     The cookie scheme external providers sign in against before the callback
-    ///     converts the external identity into an application session.
-    ///     Currently Duende's <c>idsrv.external</c>; becomes <c>Identity.External</c>
-    ///     with the OpenIddict swap.
+    ///     converts the external identity into an application session
+    ///     (ASP.NET Identity's external scheme).
     /// </summary>
-    public const string ExternalCookieScheme = "idsrv.external";
-
-    /// <summary>
-    ///     Duende's own SSO session cookie scheme (<c>idsrv</c>). Signed out explicitly on
-    ///     logout so the SSO session does not survive <c>SignOutAsync</c> on the application
-    ///     cookie. Removed with the OpenIddict swap (OpenIddict has no separate SSO cookie).
-    /// </summary>
-    public const string ServerSsoCookieScheme = "idsrv";
-
-    /// <summary>
-    ///     Duende's session-management cookie scheme (<c>idsrv.session</c>, check-session
-    ///     iframe support). Removed with the OpenIddict swap.
-    /// </summary>
-    public const string ServerSsoSessionCookieScheme = "idsrv.session";
+    public const string ExternalCookieScheme = "Identity.External";
 }

@@ -80,7 +80,8 @@ public class TokenShapeGoldenTests : IntegrationTestBase
                 ["kty"] = obj["kty"]?.DeepClone(),
                 ["use"] = obj["use"]?.DeepClone(),
                 ["alg"] = obj["alg"]?.DeepClone(),
-                ["kid"] = obj["kid"]?.DeepClone()
+                // The key id is deployment-specific — pin only its presence.
+                ["kid"] = obj["kid"] != null ? "<kid>" : null
             });
         }
 
@@ -161,7 +162,8 @@ public class TokenShapeGoldenTests : IntegrationTestBase
 
         var authorizeResponse = await browser!.GetAsync(authorizeUrl, ct);
         ((int)authorizeResponse.StatusCode).Should().BeInRange(302, 303,
-            "an authenticated authorize request must redirect straight back to the client");
+            "an authenticated authorize request must redirect straight back to the client (body: {0})",
+            await authorizeResponse.Content.ReadAsStringAsync(ct));
         var location = authorizeResponse.Headers.Location!;
         location.ToString().Should().StartWith(redirectUri,
             "no interactive step (login/consent) may interrupt the flow for a first-party client");
@@ -241,13 +243,14 @@ public class TokenShapeGoldenTests : IntegrationTestBase
         browser.Should().NotBeNull();
 
         var userCode = deviceBody["user_code"]!.GetValue<string>();
-        var approveResponse = await browser!.PostAsJsonAsync(DeviceApiUrl("authorize"),
-            new DeviceAuthorizationRequestDto
+        var approveResponse = await browser!.PostAsync("/connect/deviceverification",
+            new FormUrlEncodedContent(new List<KeyValuePair<string, string>>
             {
-                UserCode = userCode,
-                ScopesConsented = ["openid", "profile", GoldenApiScope],
-                RememberConsent = false
-            }, ct);
+                new("user_code", userCode),
+                new("scopes_consented", "openid"),
+                new("scopes_consented", "profile"),
+                new("scopes_consented", GoldenApiScope)
+            }), ct);
         var approveRaw = await approveResponse.Content.ReadAsStringAsync(ct);
         approveResponse.StatusCode.Should().Be(HttpStatusCode.OK, "device approval failed: {0}", approveRaw);
 

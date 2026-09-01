@@ -41,7 +41,42 @@ public class OctoAccessTokenShapeHandler : IOpenIddictServerHandler<GenerateToke
     {
         ArgumentNullException.ThrowIfNull(context);
 
-        if (context.TokenType != TokenTypeHints.AccessToken)
+        // GenerateTokenContext reports the RFC 8693 token type identifier (URN form).
+        if (context.TokenType is "urn:ietf:params:oauth:token-type:id_token" or "id_token")
+        {
+            // Duende parity: id tokens carry no azp (aud == authorized party for our clients)
+            // and no OpenIddict-internal private claims.
+            var idTokenDescriptor = context.SecurityTokenDescriptor;
+            if (idTokenDescriptor?.Claims != null)
+            {
+                idTokenDescriptor.Claims.Remove(Claims.AuthorizedParty);
+                foreach (var key in idTokenDescriptor.Claims.Keys
+                             .Where(k => k.StartsWith("oi_", StringComparison.Ordinal)).ToList())
+                {
+                    idTokenDescriptor.Claims.Remove(key);
+                }
+            }
+
+            if (idTokenDescriptor?.Subject != null)
+            {
+                foreach (var claim in idTokenDescriptor.Subject.Claims
+                             .Where(c => c.Type == Claims.AuthorizedParty ||
+                                         c.Type.StartsWith("oi_", StringComparison.Ordinal)).ToList())
+                {
+                    idTokenDescriptor.Subject.TryRemoveClaim(claim);
+                }
+            }
+
+            // Duende parity: id tokens carry an nbf claim as well.
+            if (idTokenDescriptor != null)
+            {
+                idTokenDescriptor.NotBefore ??= DateTime.UtcNow;
+            }
+
+            return default;
+        }
+
+        if (context.TokenType is not (TokenTypeIdentifiers.AccessToken or TokenTypeHints.AccessToken))
         {
             return default;
         }
@@ -51,41 +86,50 @@ public class OctoAccessTokenShapeHandler : IOpenIddictServerHandler<GenerateToke
         context.PersistTokenPayload = false;
 
         var descriptor = context.SecurityTokenDescriptor;
-        if (descriptor?.Claims is null)
+
+        if (descriptor?.Claims != null)
         {
-            return default;
+            // Duende parity: one scope claim per value (JSON array), not a space-joined string.
+            if (descriptor.Claims.TryGetValue(Claims.Scope, out var scopeValue) &&
+                scopeValue is string scopeString && scopeString.Contains(' '))
+            {
+                descriptor.Claims[Claims.Scope] =
+                    scopeString.Split(' ', StringSplitOptions.RemoveEmptyEntries).ToList();
+            }
+
+            // Duende parity: client_credentials access tokens carry no sub claim — the platform's
+            // TenantAuthorizationMiddleware identifies service-to-service tokens by its absence.
+            if (context.Request?.IsClientCredentialsGrantType() == true)
+            {
+                descriptor.Claims.Remove(Claims.Subject);
+            }
+
+            // Strip OpenIddict-internal private claims — Duende tokens never carried them.
+            foreach (var key in descriptor.Claims.Keys
+                         .Where(k => k.StartsWith("oi_", StringComparison.Ordinal)).ToList())
+            {
+                descriptor.Claims.Remove(key);
+            }
         }
 
-        // Duende parity: one scope claim per value (JSON array), not a space-joined string.
-        if (descriptor.Claims.TryGetValue(Claims.Scope, out var scopeValue) &&
-            scopeValue is string scopeString && scopeString.Contains(' '))
+        if (descriptor?.Subject != null)
         {
-            descriptor.Claims[Claims.Scope] =
-                scopeString.Split(' ', StringSplitOptions.RemoveEmptyEntries).ToList();
-        }
+            if (context.Request?.IsClientCredentialsGrantType() == true)
+            {
+                descriptor.Subject.TryRemoveClaim(descriptor.Subject.FindFirst(Claims.Subject));
+            }
 
-        // Duende parity: client_credentials access tokens carry no sub claim — the platform's
-        // TenantAuthorizationMiddleware identifies service-to-service tokens by its absence.
-        if (context.Request?.IsClientCredentialsGrantType() == true)
-        {
-            descriptor.Claims.Remove(Claims.Subject);
-            descriptor.Subject?.TryRemoveClaim(descriptor.Subject.FindFirst(Claims.Subject));
-        }
-
-        // Strip OpenIddict-internal private claims — Duende tokens never carried them.
-        foreach (var key in descriptor.Claims.Keys.Where(k => k.StartsWith("oi_", StringComparison.Ordinal))
-                     .ToList())
-        {
-            descriptor.Claims.Remove(key);
-        }
-
-        if (descriptor.Subject != null)
-        {
             foreach (var claim in descriptor.Subject.Claims
                          .Where(c => c.Type.StartsWith("oi_", StringComparison.Ordinal)).ToList())
             {
                 descriptor.Subject.TryRemoveClaim(claim);
             }
+        }
+
+        // Duende parity: access tokens carry an nbf claim (OpenIddict omits it by default).
+        if (descriptor != null)
+        {
+            descriptor.NotBefore ??= DateTime.UtcNow;
         }
 
         return default;

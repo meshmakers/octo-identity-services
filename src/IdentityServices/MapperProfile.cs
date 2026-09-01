@@ -1,5 +1,4 @@
 using AutoMapper;
-using Duende.IdentityServer.Models;
 using Meshmakers.Octo.Communication.Contracts.DataTransferObjects;
 using Persistence.IdentityCkModel.Generated.System.Identity.v2;
 
@@ -9,22 +8,6 @@ public class MapperProfile : Profile
 {
     public MapperProfile()
     {
-        // Explicit RtClient → Duende.IdentityServer.Models.Client map.
-        //
-        // Until System.Identity-2.9.0 the URI lists on RtClient were IList<string>, so
-        // AutoMapper's name-convention auto-map handled the Duende projection silently. The
-        // 2.9.0 bump (AB#4209) changed each list to IList<ClientUriEntry> — convention can no
-        // longer map IList<ClientUriEntry> to ICollection<string> on the Duende side. The three
-        // ForMember rules below project entry.Uri; every other RtClient property still
-        // auto-maps by name into Client.
-        CreateMap<RtClient, Client>()
-            .ForMember(dest => dest.RedirectUris,
-                opt => opt.MapFrom(src => src.RedirectUris.Select(e => e.Uri).ToList()))
-            .ForMember(dest => dest.PostLogoutRedirectUris,
-                opt => opt.MapFrom(src => src.PostLogoutRedirectUris.Select(e => e.Uri).ToList()))
-            .ForMember(dest => dest.AllowedCorsOrigins,
-                opt => opt.MapFrom(src => src.AllowedCorsOrigins.Select(e => e.Uri).ToList()));
-
         CreateMap<RtIdentityProvider, IdentityProviderDto>()
             .Include<RtGoogleIdentityProvider, GoogleIdentityProviderDto>()
             .Include<RtMicrosoftIdentityProvider, MicrosoftIdentityProviderDto>()

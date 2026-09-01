@@ -1,7 +1,6 @@
 using System.ComponentModel;
 using System.ComponentModel.DataAnnotations;
 using Asp.Versioning;
-using IdentityModel;
 using IdentityServerPersistence;
 using IdentityServerPersistence.Services;
 using IdentityServerPersistence.SystemStores;
@@ -9,6 +8,7 @@ using Meshmakers.Octo.Communication.Contracts.DataTransferObjects;
 using Meshmakers.Octo.Communication.Contracts.DataTransferObjects.ApiErrors;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Meshmakers.Octo.Backend.Authentication;
 
 namespace Meshmakers.Octo.Backend.IdentityServices.TenantApi.v1.Controllers;
 
@@ -17,7 +17,7 @@ namespace Meshmakers.Octo.Backend.IdentityServices.TenantApi.v1.Controllers;
 /// auto-provisioned from the calling (parent) tenant into one or more child tenants
 /// because of the <c>AutoProvisionInChildTenants</c> flag.
 /// </summary>
-[Authorize(AuthenticationSchemes = OidcConstants.AuthenticationSchemes.AuthorizationHeaderBearer)]
+[Authorize(AuthenticationSchemes = AuthenticationConstants.BearerAuthenticationScheme)]
 [Route(IdentityServiceConstants.ApiPathPrefix + "/clients/{clientId}/mirrors")]
 [ApiController]
 [ApiVersion(IdentityServiceConstants.ApiVersion1)]
@@ -157,7 +157,7 @@ public class ClientMirrorController : ControllerBase
 /// Sub-resource on the existing clients route to flip <c>AutoProvisionInChildTenants</c>
 /// without requiring callers to PUT the full client object back.
 /// </summary>
-[Authorize(AuthenticationSchemes = OidcConstants.AuthenticationSchemes.AuthorizationHeaderBearer)]
+[Authorize(AuthenticationSchemes = AuthenticationConstants.BearerAuthenticationScheme)]
 [Route(IdentityServiceConstants.ApiPathPrefix + "/clients/{clientId}/autoProvisionInChildTenants")]
 [ApiController]
 [ApiVersion(IdentityServiceConstants.ApiVersion1)]

@@ -42,7 +42,32 @@ public class OpenIddictScopeStore(IOctoResourceStore resourceStore) : IOpenIddic
     public async ValueTask<RtApiScope?> FindByNameAsync(string name, CancellationToken cancellationToken)
     {
         var scope = await resourceStore.GetApiScopeByNameAsync(name);
-        return scope is { Enabled: true } ? scope : null;
+        if (scope is { Enabled: true })
+        {
+            return scope;
+        }
+
+        // OIDC identity resources (openid, profile, email, role, allowed_tenants, …) are stored
+        // as RtIdentityResource but are requestable scopes on the wire (Duende parity). Project
+        // them into the scope entity so OpenIddict's scope validation accepts them.
+        var identityResource = await resourceStore.GetIdentityResourceByNameAsync(name);
+        if (identityResource is { Enabled: true })
+        {
+            return new RtApiScope
+            {
+                RtId = identityResource.RtId,
+                Name = identityResource.Name,
+                DisplayName = identityResource.DisplayName,
+                Description = identityResource.Description,
+                Enabled = identityResource.Enabled,
+                ShowInDiscoveryDocument = identityResource.ShowInDiscoveryDocument,
+                Claims = identityResource.Claims,
+                IsEmphasized = identityResource.IsEmphasized,
+                IsRequired = identityResource.IsRequired
+            };
+        }
+
+        return null;
     }
 
     public async IAsyncEnumerable<RtApiScope> FindByNamesAsync(
@@ -64,7 +89,7 @@ public class OpenIddictScopeStore(IOctoResourceStore resourceStore) : IOpenIddic
         string resource,
         [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken cancellationToken)
     {
-        var apiResources = await resourceStore.FindApiResourcesByNameAsync([resource], cancellationToken);
+        var apiResources = await resourceStore.FindRtApiResourcesByNameAsync([resource]);
         foreach (var apiResource in apiResources)
         {
             foreach (var scopeName in apiResource.Scopes)
@@ -112,7 +137,7 @@ public class OpenIddictScopeStore(IOctoResourceStore resourceStore) : IOpenIddic
         RtApiScope scope, CancellationToken cancellationToken)
     {
         // Audience resolution: all enabled API resources carrying this scope (Duende parity).
-        var apiResources = await resourceStore.FindApiResourcesByScopeNameAsync([scope.Name], cancellationToken);
+        var apiResources = await resourceStore.FindRtApiResourcesByScopeNameAsync([scope.Name]);
         return apiResources
             .Where(r => r.Enabled)
             .Select(r => r.Name)

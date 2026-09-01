@@ -3,7 +3,7 @@
   "keys": [
     {
       "alg": "RS256",
-      "kid": "test-key-id",
+      "kid": "\u003Ckid\u003E",
       "kty": "RSA",
       "use": "sig"
     }

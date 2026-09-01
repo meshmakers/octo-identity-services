@@ -1,7 +1,4 @@
-﻿using AutoMapper;
-using Duende.IdentityServer.Models;
-using Duende.IdentityServer.Stores;
-using Meshmakers.Common.Shared;
+﻿using Meshmakers.Common.Shared;
 using Meshmakers.Octo.Runtime.Contracts;
 using Meshmakers.Octo.Runtime.Contracts.MongoDb;
 using Meshmakers.Octo.Runtime.Contracts.MongoDb.Repositories;
@@ -20,8 +17,7 @@ namespace IdentityServerPersistence.SystemStores;
 /// the request. This ensures proper data isolation per tenant.
 /// </remarks>
 public class PersistentGrantStore(
-    IMultiTenancyResolverService multiTenancyResolverService,
-    IMapper mapper)
+    IMultiTenancyResolverService multiTenancyResolverService)
     : IOctoPersistentGrantStore
 {
     private const int TokenCleanupBatchSize = 50;
@@ -29,125 +25,6 @@ public class PersistentGrantStore(
     private static readonly Logger Logger = LogManager.GetCurrentClassLogger();
 
     private ITenantRepository TenantRepository => multiTenancyResolverService.GetTenantRepository();
-
-    public async Task StoreAsync(PersistedGrant grant, CancellationToken cancellationToken = default)
-    {
-        await MongoWriteRetry.ExecuteWithRetryAsync(() => StoreInternalAsync(grant));
-    }
-
-    private async Task StoreInternalAsync(PersistedGrant grant)
-    {
-        using var session = await TenantRepository.GetSessionAsync();
-        session.StartTransaction();
-
-        var persistedGrant = await GetRtPersistentGrantByKeyAsync(session, grant.Key);
-        if (persistedGrant == null)
-        {
-            var appGrant = GetApplicationPersistedGrant(grant);
-
-            await TenantRepository.InsertOneRtEntityAsync(session, appGrant);
-        }
-        else
-        {
-            var appGrant = GetApplicationPersistedGrant(grant);
-
-            await TenantRepository.ReplaceOneRtEntityByIdAsync(session, persistedGrant.RtId, appGrant);
-        }
-
-        await session.CommitTransactionAsync();
-    }
-
-    public async Task<PersistedGrant?> GetAsync(string key, CancellationToken cancellationToken = default)
-    {
-        ArgumentValidation.ValidateString(nameof(key), key);
-
-        using var session = await TenantRepository.GetSessionAsync();
-        session.StartTransaction();
-
-        var result = await GetAsync(session, key);
-
-        await session.CommitTransactionAsync();
-        return result;
-    }
-
-
-    public async Task<IReadOnlyCollection<PersistedGrant>> GetAllAsync(PersistedGrantFilter filter, CancellationToken cancellationToken = default)
-    {
-        using var session = await TenantRepository.GetSessionAsync();
-        session.StartTransaction();
-
-        var queryOptions = RtEntityQueryOptions.Create();
-        if (filter.SubjectId != null)
-        {
-            queryOptions.FieldFilter(nameof(RtPersistedGrant.SubjectId), FieldFilterOperator.Equals, filter.SubjectId);
-        }
-        if (filter.SessionId != null)
-        {
-            queryOptions.FieldFilter(nameof(RtPersistedGrant.SessionId), FieldFilterOperator.Equals, filter.SessionId);
-        }
-        if (filter.ClientId != null)
-        {
-            queryOptions.FieldFilter(nameof(RtPersistedGrant.ClientId), FieldFilterOperator.Equals, filter.ClientId);
-        }
-        if (filter.Type != null)
-        {
-            queryOptions.FieldFilter(nameof(RtPersistedGrant.GrantType), FieldFilterOperator.Equals, filter.Type);
-        }
-
-        var result = await TenantRepository.GetRtEntitiesByTypeAsync<RtPersistedGrant>(session,
-            queryOptions);
-
-        await session.CommitTransactionAsync();
-        return result.Items.Select(mapper.Map<PersistedGrant>).ToList();
-    }
-
-    public async Task RemoveAsync(string key, CancellationToken cancellationToken = default)
-    {
-        ArgumentValidation.ValidateString(nameof(key), key);
-
-        using var session = await TenantRepository.GetSessionAsync();
-        session.StartTransaction();
-
-        var fieldFilterCriteria = FieldFilterCriteria.Create(LogicalOperators.And)
-            .Field(nameof(RtPersistedGrant.GrantKey), FieldFilterOperator.Equals, key);
-
-        // Duende's IPersistedGrantStore contract treats removing a non-existent grant as a
-        // no-op. DefaultConsentService.UpdateConsentAsync unconditionally removes the previous
-        // consent grant even when none was ever persisted (consent screen submitted without
-        // "remember my decision") — DeleteOne's exactly-one contract would turn that into a 500
-        // on the authorize callback. DeleteMany tolerates zero matches; GrantKey is unique, so
-        // the semantics are unchanged when the grant exists.
-        await TenantRepository.DeleteManyRtEntitiesAsync<RtPersistedGrant>(session, fieldFilterCriteria, DeleteOptions.Erase);
-
-        await session.CommitTransactionAsync();
-    }
-
-    public async Task RemoveAllAsync(PersistedGrantFilter filter, CancellationToken cancellationToken = default)
-    {
-        using var session = await TenantRepository.GetSessionAsync();
-        session.StartTransaction();
-
-        var fieldFilterCriteria = FieldFilterCriteria.Create(LogicalOperators.And);
-        if (!string.IsNullOrWhiteSpace(filter.SubjectId))
-        {
-            fieldFilterCriteria.FieldEquals(nameof(RtPersistedGrant.SubjectId), filter.SubjectId);
-        }
-        if (!string.IsNullOrWhiteSpace(filter.SessionId))
-        {
-            fieldFilterCriteria.FieldEquals(nameof(RtPersistedGrant.SessionId), filter.SessionId);
-        }
-        if (!string.IsNullOrWhiteSpace(filter.ClientId))
-        {
-            fieldFilterCriteria.FieldEquals(nameof(RtPersistedGrant.ClientId), filter.ClientId);
-        }
-        if (!string.IsNullOrWhiteSpace(filter.Type))
-        {
-            fieldFilterCriteria.FieldEquals(nameof(RtPersistedGrant.GrantType), filter.Type);
-        }
-        await TenantRepository.DeleteManyRtEntitiesAsync<RtPersistedGrant>(session, fieldFilterCriteria, DeleteOptions.Erase);
-
-        await session.CommitTransactionAsync();
-    }
 
     /// <summary>
     ///     Method to clear expired persisted grants.
@@ -193,36 +70,6 @@ public class PersistentGrantStore(
         }
 
         await session.CommitTransactionAsync();
-    }
-
-    private RtPersistedGrant GetApplicationPersistedGrant(PersistedGrant grant)
-    {
-        return mapper.Map<RtPersistedGrant>(grant);
-    }
-
-    public async Task RemoveAllAsync(string subjectId, string clientId, string type)
-    {
-        ArgumentValidation.ValidateString(nameof(subjectId), subjectId);
-        ArgumentValidation.ValidateString(nameof(clientId), clientId);
-        ArgumentValidation.ValidateString(nameof(type), type);
-
-        using var session = await TenantRepository.GetSessionAsync();
-        session.StartTransaction();
-
-        var fieldFilterCriteria = FieldFilterCriteria.Create(LogicalOperators.And)
-            .FieldEquals(nameof(RtPersistedGrant.SubjectId), subjectId)
-            .FieldEquals(nameof(RtPersistedGrant.ClientId), clientId)
-            .FieldEquals(nameof(RtPersistedGrant.GrantType), type);
-
-        await TenantRepository.DeleteManyRtEntitiesAsync<RtPersistedGrant>(session, fieldFilterCriteria, DeleteOptions.Erase);
-
-        await session.CommitTransactionAsync();
-    }
-
-    private async Task<PersistedGrant?> GetAsync(IOctoSession session, string key)
-    {
-        var rtPersistentGrant = await GetRtPersistentGrantByKeyAsync(session, key);
-        return mapper.Map<PersistedGrant>(rtPersistentGrant);
     }
 
     private async Task<RtPersistedGrant?> GetRtPersistentGrantByKeyAsync(IOctoSession session, string key)

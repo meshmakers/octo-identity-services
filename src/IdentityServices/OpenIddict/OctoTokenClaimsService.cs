@@ -102,7 +102,7 @@ internal class OctoTokenClaimsService(
             return [];
         }
 
-        var apiResources = await resourceStore.FindApiResourcesByScopeNameAsync(scopeNames, CancellationToken.None);
+        var apiResources = await resourceStore.FindRtApiResourcesByScopeNameAsync(scopeNames);
         return apiResources
             .Where(r => r.Enabled)
             .Select(r => r.Name)

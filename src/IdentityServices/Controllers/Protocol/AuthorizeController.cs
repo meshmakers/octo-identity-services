@@ -213,7 +213,9 @@ public class AuthorizeController(
         }
 
         // auth_time from the cookie issue time (Duende parity: time of the interactive login).
+        // OpenIddict requires the numeric claim value type.
         var authTime = (cookieResult.Properties?.IssuedUtc ?? DateTimeOffset.UtcNow).ToUnixTimeSeconds();
-        target.AddClaim(new Claim(Claims.AuthenticationTime, authTime.ToString()));
+        target.AddClaim(new Claim(Claims.AuthenticationTime, authTime.ToString(),
+            ClaimValueTypes.Integer64));
     }
 }

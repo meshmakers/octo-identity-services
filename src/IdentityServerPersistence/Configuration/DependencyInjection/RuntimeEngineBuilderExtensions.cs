@@ -1,4 +1,3 @@
-using Duende.IdentityServer.Models;
 using IdentityServerPersistence.AutoMap;
 using IdentityServerPersistence.Configuration.DependencyInjection;
 using IdentityServerPersistence.Services;
@@ -80,55 +79,6 @@ public static class RuntimeEngineBuilderExtensions
         {
             cfg.CreateMap<ICollection<string>, IAttributeValueList<string>>()
                 .ConvertUsing<AttributeStringValueListConverter>();
-
-            cfg.CreateMap<RtClient, Client>();
-            cfg.CreateMap<RtPersistedGrant, PersistedGrant>()
-                .ForMember(dest => dest.Type, opt => opt.MapFrom(src => src.GrantType))
-                .ForMember(dest => dest.Key, opt => opt.MapFrom(src => src.GrantKey))
-                .ForMember(dest => dest.CreationTime, opt => opt.MapFrom(src => src.CreationDateTime))
-                .ForMember(dest => dest.Expiration, opt => opt.MapFrom(src => src.ExpirationDateTime));
-            cfg.CreateMap<RtIdentityResource, IdentityResource>()
-                .ForMember(dest => dest.Emphasize, opt => opt.MapFrom(src => src.IsEmphasized))
-                .ForMember(dest => dest.Required, opt => opt.MapFrom(src => src.IsRequired))
-                .ForMember(dest => dest.UserClaims, opt => opt.MapFrom(src => src.Claims));
-            cfg.CreateMap<IdentityResource, RtIdentityResource>()
-                .ForMember(dest => dest.IsEmphasized, opt => opt.MapFrom(src => src.Emphasize))
-                .ForMember(dest => dest.IsRequired, opt => opt.MapFrom(src => src.Required))
-                .ForMember(dest => dest.Claims, opt => opt.MapFrom(src => src.UserClaims));
-
-            cfg.CreateMap<RtSecretRecord, Secret>();
-            cfg.CreateMap<PersistedGrant, RtPersistedGrant>()
-                .ForMember(dest => dest.GrantKey, opt => opt.MapFrom(src => src.Key))
-                .ForMember(dest => dest.GrantType, opt => opt.MapFrom(src => src.Type))
-                .ForMember(dest => dest.ConsumedDateTime, opt => opt.MapFrom(src => src.ConsumedTime))
-                .ForMember(dest => dest.CreationDateTime, opt => opt.MapFrom(src => src.CreationTime))
-                .ForMember(dest => dest.ExpirationDateTime, opt => opt.MapFrom(src => src.Expiration));
-
-            cfg.CreateMap<RtServerSideSession, Duende.IdentityServer.Models.ServerSideSession>()
-                .ForMember(dest => dest.Key, opt => opt.MapFrom(src => src.SessionKey))
-                .ForMember(dest => dest.Created, opt => opt.MapFrom(src => src.CreationDateTime))
-                .ForMember(dest => dest.Renewed, opt => opt.MapFrom(src => src.RenewalDateTime))
-                .ForMember(dest => dest.Expires, opt => opt.MapFrom(src => src.ExpirationDateTime));
-            cfg.CreateMap<Duende.IdentityServer.Models.ServerSideSession, RtServerSideSession>()
-                .ForMember(dest => dest.SessionKey, opt => opt.MapFrom(src => src.Key))
-                .ForMember(dest => dest.CreationDateTime, opt => opt.MapFrom(src => src.Created))
-                .ForMember(dest => dest.RenewalDateTime, opt => opt.MapFrom(src => src.Renewed))
-                .ForMember(dest => dest.ExpirationDateTime, opt => opt.MapFrom(src => src.Expires));
-
-            cfg.CreateMap<RtApiResource, ApiResource>()
-                .ForMember(dest => dest.UserClaims, opt => opt.MapFrom(src => src.Claims));
-
-            cfg.CreateMap<ApiResource, RtApiResource>()
-                .ForMember(dest => dest.Claims, opt => opt.MapFrom(src => src.UserClaims));
-
-            cfg.CreateMap<RtApiScope, ApiScope>()
-                .ForMember(dest => dest.Emphasize, opt => opt.MapFrom(src => src.IsEmphasized))
-                .ForMember(dest => dest.Required, opt => opt.MapFrom(src => src.IsRequired))
-                .ForMember(dest => dest.UserClaims, opt => opt.MapFrom(src => src.Claims));
-            cfg.CreateMap<ApiScope, RtApiScope>()
-                .ForMember(dest => dest.IsEmphasized, opt => opt.MapFrom(src => src.Emphasize))
-                .ForMember(dest => dest.IsRequired, opt => opt.MapFrom(src => src.Required))
-                .ForMember(dest => dest.Claims, opt => opt.MapFrom(src => src.UserClaims));
 
             cfg.CreateMap<RtRole, RoleDto>()
                 .ForMember(dest => dest.Id, opt => opt.MapFrom(src => src.RtId))

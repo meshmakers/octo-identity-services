@@ -94,7 +94,9 @@ public static class GoldenFile
         };
         if (!string.IsNullOrEmpty(token.Kid))
         {
-            header["kid"] = token.Kid;
+            // The key id is deployment-specific (which signing certificate is mounted), not part
+            // of the wire contract — pin only its presence.
+            header["kid"] = "<kid>";
         }
 
         var claims = new JsonObject();
@@ -132,6 +134,15 @@ public static class GoldenFile
         {
             if (body.TryGetPropertyValue(property, out var value))
             {
+                // Lifetimes are emitted as remaining seconds — OpenIddict may answer 3599 where
+                // Duende answered 3600. Round up to the full minute for a stable comparison.
+                if (property == "expires_in" && value is JsonValue lifetimeValue &&
+                    lifetimeValue.TryGetValue<long>(out var seconds))
+                {
+                    stable[property] = (long)(Math.Ceiling(seconds / 60.0) * 60);
+                    continue;
+                }
+
                 stable[property] = value?.DeepClone();
             }
         }

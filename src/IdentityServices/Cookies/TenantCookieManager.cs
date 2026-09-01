@@ -29,9 +29,7 @@ internal class TenantCookieManager : ICookieManager
 {
     private static readonly HashSet<string> ScopedCookieNames = new(StringComparer.OrdinalIgnoreCase)
     {
-        ".AspNetCore." + OctoAuthSchemes.ApplicationCookieScheme,
-        OctoAuthSchemes.ServerSsoCookieScheme,
-        OctoAuthSchemes.ServerSsoSessionCookieScheme
+        ".AspNetCore." + OctoAuthSchemes.ApplicationCookieScheme
     };
 
     private readonly ChunkingCookieManager _inner = new();

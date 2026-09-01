@@ -17,6 +17,7 @@ using Meshmakers.Octo.Runtime.Contracts.RepositoryEntities;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Persistence.IdentityCkModel.Generated.System.Identity.v2;
+using Meshmakers.Octo.Backend.Authentication;
 
 namespace Meshmakers.Octo.Backend.IdentityServices.TenantApi.v1.Controllers;
 
@@ -24,7 +25,7 @@ namespace Meshmakers.Octo.Backend.IdentityServices.TenantApi.v1.Controllers;
 /// REST Controller for pre-provisioning cross-tenant user mappings in a target tenant.
 /// Routed via the system tenant so that the calling user does not need allowed_tenants for the target tenant.
 /// </summary>
-[Authorize(AuthenticationSchemes = OidcConstants.AuthenticationSchemes.AuthorizationHeaderBearer)]
+[Authorize(AuthenticationSchemes = AuthenticationConstants.BearerAuthenticationScheme)]
 [Route(IdentityServiceConstants.ApiPathPrefix + "/[controller]/{targetTenantId}")]
 [ApiController]
 [ApiVersion(IdentityServiceConstants.ApiVersion1)]

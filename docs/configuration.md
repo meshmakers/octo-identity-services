@@ -38,20 +38,16 @@ export OCTO_Identity__SigningCertificatePassword="secret"
 }
 ```
 
-##### Duende license and key management
+##### Token signing (OpenIddict)
 
-`Identity:IdentityServerLicenseKey` (`OCTO_IDENTITY__IdentityServerLicenseKey`) carries the Duende
-IdentityServer license JWT. It is **optional** since AB#4989/AB#4990: the service starts without it
-(Duende 8 runs on a missing/expired license with log warnings only), which bridges the fleet until
-the OpenIddict migration removes Duende — and this setting — entirely. When set, the key is still
-passed to Duende. Since the switch to the Duende **Community Edition (V2)** license (AB#4988), Duende's
-**Automatic Key Management is disabled** in `ConfigureIdentityServerOptions`
-(`options.KeyManagement.Enabled = false`): the feature is not included in the Community license and
-Duende 8.x throws at startup when the option is enabled without it being licensed. The service never
-used automatic key management — token signing always comes from the static PKCS#12 certificate
-(`KeyFilePath` / `KeyFilePassword`) registered as `ISigningCredentialStore` via
-`AddOctoSigningCredential` (`SigningCredentialService`), so disabling the option changes no token or
-JWKS behavior.
+Since AB#4989/AB#4996 the OAuth2/OIDC server is **OpenIddict** (Duende IdentityServer removed).
+`Identity:IdentityServerLicenseKey` no longer exists. Token signing still comes from the static
+PKCS#12 certificate (`KeyFilePath` / `KeyFilePassword`), now registered via
+`AddSigningCertificate` in `OpenIddictConfiguration` — the JWKS is unchanged from the Duende
+setup, so access tokens issued before the migration keep validating. The same certificate is
+used as the encryption credential for OpenIddict-internal token payloads (authorization codes,
+refresh tokens, device codes — never access tokens, which stay plain signed RS256 JWTs). In the
+Development environment, development certificates are generated automatically.
 
 #### Blueprint Variables (`Blueprints` section)
 

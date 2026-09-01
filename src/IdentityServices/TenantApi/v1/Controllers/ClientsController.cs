@@ -1,14 +1,12 @@
 ﻿using System.ComponentModel;
 using System.ComponentModel.DataAnnotations;
 using Asp.Versioning;
-using IdentityModel;
 using IdentityServerPersistence;
 using IdentityServerPersistence.SystemStores;
 using Meshmakers.Octo.Common.DistributionEventHub.Services;
 using Meshmakers.Octo.Communication.Contracts;
 using Meshmakers.Octo.Communication.Contracts.DataTransferObjects;
 using Meshmakers.Octo.Communication.Contracts.DataTransferObjects.ApiErrors;
-using Duende.IdentityServer.Models;
 using MongoDB.Bson;
 using Meshmakers.Octo.Runtime.Contracts.RepositoryEntities;
 using Meshmakers.Octo.Services.Contracts.DistributionEventHub.Messages;
@@ -16,13 +14,14 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Persistence.IdentityCkModel.Generated.System.Identity.v2;
 using Meshmakers.Octo.Backend.IdentityServices.OpenIddict;
+using Meshmakers.Octo.Backend.Authentication;
 
 namespace Meshmakers.Octo.Backend.IdentityServices.TenantApi.v1.Controllers;
 
 /// <summary>
 ///     REST Controller for client management
 /// </summary>
-[Authorize(AuthenticationSchemes = OidcConstants.AuthenticationSchemes.AuthorizationHeaderBearer)]
+[Authorize(AuthenticationSchemes = AuthenticationConstants.BearerAuthenticationScheme)]
 [Route(IdentityServiceConstants.ApiPathPrefix + "/[controller]")]
 [ApiController]
 [ApiVersion(IdentityServiceConstants.ApiVersion1)]
@@ -204,7 +203,7 @@ public class ClientsController : ControllerBase
             return BadRequest(ModelState);
         }
 
-        if (await _octoClientStore.FindClientByIdAsync(clientDto.ClientId, HttpContext.RequestAborted) != null)
+        if (await _octoClientStore.FindRtClientByIdAsync(clientDto.ClientId) != null)
         {
             return Conflict($"Client with id '{clientDto.ClientId}' already exists.");
         }
@@ -541,7 +540,7 @@ public class ClientsController : ControllerBase
     [ProducesResponseType(StatusCodes.Status200OK)]
     public async Task<IActionResult> Delete([Required][Description("ID of the client")] string id)
     {
-        var appClient = await _octoClientStore.FindClientByIdAsync(id, HttpContext.RequestAborted);
+        var appClient = await _octoClientStore.FindRtClientByIdAsync(id);
         if (appClient == null)
         {
             return NotFound(new NotFoundErrorDto($"Client with id '{id}' does not exist."));

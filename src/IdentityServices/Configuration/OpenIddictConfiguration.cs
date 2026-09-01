@@ -50,7 +50,7 @@ public static class OpenIddictConfiguration
                 coreOptions.ReplaceTokenStore<RtOAuthToken, OpenIddictTokenStore>();
 
                 // Duende-hash-compatible client secret validation (existing secrets keep working).
-                coreOptions.ReplaceApplicationManager(typeof(OctoApplicationManager));
+                coreOptions.ReplaceApplicationManager<RtClient, OctoApplicationManager>();
 
                 // CRITICAL: OpenIddict's application/scope cache is process-wide while our
                 // stores resolve entities per request tenant — caching would leak clients
@@ -121,6 +121,37 @@ public static class OpenIddictConfiguration
 
                 // Device flow: render the verification result as the JSON DTO the SPA expects.
                 serverOptions.AddEventHandler(OctoDeviceVerificationResponseHandler.Descriptor);
+
+                // Duende parity: the device authorization response always carried the polling
+                // interval (5s); OpenIddict omits it (RFC 8628 defaults to 5 when absent).
+                serverOptions.AddEventHandler<OpenIddictServerEvents.ApplyDeviceAuthorizationResponseContext>(
+                    handlerBuilder => handlerBuilder.UseInlineHandler(context =>
+                    {
+                        if (string.IsNullOrEmpty(context.Response.Error) &&
+                            context.Response["interval"] is null)
+                        {
+                            context.Response["interval"] = 5;
+                        }
+
+                        return default;
+                    }));
+
+                // Duende parity: the token response always echoes the granted scopes. OpenIddict
+                // omits the scope member when granted == requested (RFC 6749 makes it optional),
+                // so absence here means the requested scopes were granted verbatim.
+                serverOptions.AddEventHandler<OpenIddictServerEvents.ApplyTokenResponseContext>(
+                    handlerBuilder => handlerBuilder.UseInlineHandler(context =>
+                    {
+                        if (string.IsNullOrEmpty(context.Response.Error) &&
+                            !string.IsNullOrEmpty(context.Response.AccessToken) &&
+                            string.IsNullOrEmpty((string?)context.Response.Scope) &&
+                            !string.IsNullOrEmpty(context.Request?.Scope))
+                        {
+                            context.Response.Scope = context.Request.Scope;
+                        }
+
+                        return default;
+                    }));
 
                 // RFC 7591 DCR: advertise the hand-rolled /connect/register endpoint in the
                 // discovery document when DCR is enabled (AB#4993 — replaces Duende's

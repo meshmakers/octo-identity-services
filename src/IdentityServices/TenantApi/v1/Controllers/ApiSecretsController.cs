@@ -1,8 +1,6 @@
 using System.ComponentModel;
 using System.ComponentModel.DataAnnotations;
 using Asp.Versioning;
-using Duende.IdentityServer.Models;
-using IdentityModel;
 using IdentityServerPersistence;
 using IdentityServerPersistence.SystemStores;
 using Meshmakers.Common.Shared;
@@ -14,10 +12,11 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Persistence.IdentityCkModel.Generated.System.Identity.v2;
 using Meshmakers.Octo.Backend.IdentityServices.OpenIddict;
+using Meshmakers.Octo.Backend.Authentication;
 
 namespace Meshmakers.Octo.Backend.IdentityServices.TenantApi.v1.Controllers;
 
-[Authorize(AuthenticationSchemes = OidcConstants.AuthenticationSchemes.AuthorizationHeaderBearer)]
+[Authorize(AuthenticationSchemes = AuthenticationConstants.BearerAuthenticationScheme)]
 [Route(IdentityServiceConstants.ApiPathPrefix + "/[controller]")]
 [ApiController]
 [ApiVersion(IdentityServiceConstants.ApiVersion1)]
@@ -47,7 +46,7 @@ public class ApiSecretsController : ControllerBase
             return BadRequest(ModelState);
         }
 
-        var client = await _octoClientStore.FindClientByIdAsync(clientId, HttpContext.RequestAborted);
+        var client = await _octoClientStore.FindRtClientByIdAsync(clientId);
         if (client == null)
         {
             return NotFound();
@@ -70,7 +69,7 @@ public class ApiSecretsController : ControllerBase
 
         var decodedSecretValue = secretValue.DecodeBase64();
 
-        var client = await _octoClientStore.FindClientByIdAsync(clientId, HttpContext.RequestAborted);
+        var client = await _octoClientStore.FindRtClientByIdAsync(clientId);
         if (client == null)
         {
             return NotFound(new NotFoundErrorDto($"Client '{clientId}' not found"));
@@ -97,7 +96,7 @@ public class ApiSecretsController : ControllerBase
             return BadRequest(ModelState);
         }
 
-        var apiResources = await _octoResourceStore.FindApiResourcesByNameAsync(new[] { apiResourceName }, HttpContext.RequestAborted);
+        var apiResources = await _octoResourceStore.FindRtApiResourcesByNameAsync(new[] { apiResourceName });
         var apiResource = apiResources.FirstOrDefault();
         if (apiResource == null)
         {
@@ -122,7 +121,7 @@ public class ApiSecretsController : ControllerBase
 
         var decodedSecretValue = secretValue.DecodeBase64();
 
-        var apiResources = await _octoResourceStore.FindApiResourcesByNameAsync(new[] { apiResourceName }, HttpContext.RequestAborted);
+        var apiResources = await _octoResourceStore.FindRtApiResourcesByNameAsync(new[] { apiResourceName });
         var apiResource = apiResources.FirstOrDefault();
         if (apiResource == null)
         {
@@ -410,13 +409,13 @@ public class ApiSecretsController : ControllerBase
             Guid.NewGuid(), DateTime.Now));
     }
 
-    private static ApiSecretDto CreateApiSecret(Secret secret)
+    private static ApiSecretDto CreateApiSecret(RtSecretRecord secret)
     {
         var apiSecretDto = new ApiSecretDto
         {
-            ExpirationDate = secret.Expiration,
+            ExpirationDate = secret.ExpirationDateTime,
             Description = secret.Description,
-            ValueEncrypted = secret.Value
+            ValueEncrypted = secret.Value ?? string.Empty
         };
 
         return apiSecretDto;

@@ -24,7 +24,7 @@
   },
   "header": {
     "alg": "RS256",
-    "kid": "test-key-id",
+    "kid": "\u003Ckid\u003E",
     "typ": "at\u002Bjwt"
   }
 }
