@@ -19,7 +19,7 @@ namespace IdentityServices.IntegrationTests.Persistence;
 /// <summary>
 ///     End-to-end checks of the cross-tenant RFC 8693 token-exchange role resolution (AB#4338)
 ///     against a real MongoDB (Testcontainers) with the full Octo runtime engine. These pin the
-///     <b>security linchpin</b> of <c>TenantExchangeGrantValidator</c>: the token minted for the
+///     <b>security linchpin</b> of <c>TenantExchangeProcessor</c>: the token minted for the
 ///     home-tenant (A) user runs on the <b>B-shadow user's</b> subject and therefore carries the
 ///     roles re-resolved <b>in B</b> — the subset granted by the child's
 ///     <c>RtExternalTenantUserMapping</c>, <b>not</b> A's full role set.
@@ -33,8 +33,8 @@ namespace IdentityServices.IntegrationTests.Persistence;
 ///     (the B-shadow user), then read the shadow user's effective roles through
 ///     <see cref="OctoUserStore.GetRolesAsync" /> — the same store that produces the token's
 ///     <c>role</c> claims — wired to the B tenant repository. This is the precise chain the grant
-///     validator relies on; only the Duende <c>subject_token</c> validation and
-///     <see cref="Duende.IdentityServer.Validation.GrantValidationResult" /> construction (unit
+///     validator relies on; only the <c>subject_token</c> validation and
+///     principal construction of <c>TenantExchangeProcessor</c> (unit
 ///     behaviour) are out of scope here.
 /// </remarks>
 [Collection("Sequential")]

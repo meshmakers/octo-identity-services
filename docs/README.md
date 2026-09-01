@@ -42,6 +42,6 @@ src/
 ### Key Technologies
 
 - **.NET 10** - Target framework
-- **Duende IdentityServer** - OAuth 2.0 / OpenID Connect implementation
+- **OpenIddict 7.6** - OAuth 2.0 / OpenID Connect implementation (migrated from Duende IdentityServer, Epic AB#4989 — see [CONCEPT-OPENIDDICT-MIGRATION.md](CONCEPT-OPENIDDICT-MIGRATION.md) and [openiddict-discovery-diff.md](openiddict-discovery-diff.md))
 - **MongoDB** - Data persistence via Octo Runtime Engine
 - **ASP.NET Core Identity** - User and role management
