@@ -176,7 +176,54 @@ access token as `subject_token`; the issued token runs on the **user's** `sub` b
 - **Audit:** `DelegationSuccessEvent` / `DelegationFailureEvent` (`DelegationEvents.cs`, category
   `Delegation`, IDs `50260` / `50261`). `OctoEventSink` persists failures and expands their fields.
 - **No seeded service account here** — the client must carry the URN in `AllowedGrantTypes` or Duende
-  rejects the request before the validator runs. Seeding the real pipeline service account is **AB#5027**.
+  rejects the request before the validator runs. The real pipeline service account is created by the
+  Communication Controller over the bus; see "Service-Account Clients over the Distribution Event Hub"
+  below (AB#5027).
+
+### Service-Account Clients over the Distribution Event Hub (AB#5027)
+
+The Communication Controller provisions one `client_credentials` service account per mesh adapter, so
+pipeline execution runs under a real identity. It can only reach this service **over the bus**: the
+REST `ClientsController` needs an `octo_api` bearer token, i.e. the very identity being created, and
+no client-credentials client with a secret is seeded anywhere. `CreateIdentityDataCommandRequestConsumer`
+therefore had to learn three things it could not do before — it hard-coded `RequireClientSecret=false`,
+never wrote a `ClientSecrets` entry and never touched an association:
+
+| `DistClientDto` field (octo-common-services `Meshmakers.Octo.Services.Contracts`) | Consumer behaviour |
+|---|---|
+| `ClientSecret` (**plaintext**, optional) | Hashed with the same `Sha256()` extension `ClientsController` uses (`Duende.IdentityServer.Models`) and written as the single `ClientSecrets` entry. **Never** persisted or logged in the clear. |
+| `RequireClientSecret` (default `false`) | Written verbatim. The default reproduces the previous hard-coded behaviour, so every pre-AB#5027 producer keeps creating public clients unchanged. |
+| `AssignedRoleNames` (optional) | Additive, idempotent `AssignedRole` edges — matched on `RtRole.NormalizedName` (upper-invariant). Roles not listed are never removed; an **unknown role name is logged and skipped**, not fatal, because the tenant's role seed runs on an independent trigger (the `SuccessIdentityDataSeedPending` case) and losing the whole identity-data setup over it would be far worse. |
+
+Two traps worth knowing:
+
+- 🔴 **The upsert branch preserves the existing secret when the DTO carries none.** The consumer
+  replaces an existing client wholesale (`ReplaceOneRtEntityByIdAsync`); without the preserve branch
+  the next identity-data pass would silently drop a live secret. Harmless while no bus client had
+  one — fatal now that a service account does. Sending the *same* plaintext again is therefore the
+  no-rotation path, and that is exactly what the controller does on every convergence pass.
+- 🔴 **`IClientRoleStore` cannot be used from the consumer.** It resolves its repository through
+  `IMultiTenancyResolverService.GetTenantRepository()`, i.e. the HTTP-scoped tenant; a bus consumer
+  has no HTTP context and would silently write into the **system** tenant. The `AssignedRole` edge is
+  written directly against the tenant repository the consumer resolved from the message.
+
+🔴 **An under-privileged service account fails silently.** The controller seeds the account with the
+`octo_api` scope plus `CommunicationManagement`. For the delegation grant above, the issued token
+carries the **intersection** of service-account and user roles — and an **empty intersection is a
+success**, not an error: a token is issued, it simply has no `role` claim, and role-gated consumers
+fail closed. A service account lacking the tenant's fachliche roles (e.g. Accounting) therefore makes
+the feature go quiet with no error anywhere. When setting up delegation for a tenant, grant
+`octo-pipeline-sa-{adapterRtId}` those roles as well —
+`PUT {tenantId}/v1/clients/{clientId}/roles/{roleName}` or `octo-cli AddClientToRole`.
+
+**Deployment order:** identity first, then the Communication Controller. An identity that predates
+this change ignores the new fields and would create a secretless client.
+
+Tests: `tests/IdentityServices.IntegrationTests/Persistence/ServiceAccountClientProvisioningIntegrationTests.cs`
+(hashed secret + both grant types + scope + role on create; a second run with the same secret rotates
+nothing and creates no duplicate client or role edge; a re-run without a secret preserves the existing
+one; a pre-AB#5027-shaped client stays public and secretless; an unknown role name is skipped instead
+of failing the setup).
 - **Tests:** `DelegatedIdentityResolverTests` (intersection arithmetic), `DelegationClaimCompositionTests`
   (the anti-placebo proof: real `GrantValidationResult` → real `ApplyDelegationClaims`),
   `OnBehalfOfGrantValidatorTests` (protocol adapter over a real `ExtensionGrantValidationContext` and a

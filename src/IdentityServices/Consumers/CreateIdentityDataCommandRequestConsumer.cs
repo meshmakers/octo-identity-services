@@ -1,7 +1,15 @@
+// Duende.IdentityServer.Models carries the Sha256() string extension the whole service hashes
+// client secrets with (ClientsController / ApiSecretsController use the same one) — do not swap it
+// for a hand-rolled SHA-256, a drift here silently makes every provisioned client unauthenticatable.
+using Duende.IdentityServer.Models;
+using IdentityModel;
+using IdentityServerPersistence;
 using Meshmakers.Octo.Common.DistributionEventHub.Consumers;
+using Meshmakers.Octo.ConstructionKit.Contracts;
 using Meshmakers.Octo.Runtime.Contracts;
 using Meshmakers.Octo.Runtime.Contracts.MongoDb;
 using Meshmakers.Octo.Runtime.Contracts.MongoDb.Repositories;
+using Meshmakers.Octo.Runtime.Contracts.Repositories;
 using Meshmakers.Octo.Runtime.Contracts.Repositories.Query;
 using Meshmakers.Octo.Runtime.Contracts.RepositoryEntities;
 using Meshmakers.Octo.Services.Contracts.DistributionEventHub.Commands;
@@ -151,7 +159,7 @@ public class CreateIdentityDataCommandRequestConsumer(
         }
     }
 
-    private static async Task CreateClientIfNotExistAsync(IOctoSession session, ITenantRepository tenantRepository,
+    private async Task CreateClientIfNotExistAsync(IOctoSession session, ITenantRepository tenantRepository,
         DistClientDto distClientDto)
     {
         var queryOptions = RtEntityQueryOptions.Create()
@@ -168,7 +176,10 @@ public class CreateIdentityDataCommandRequestConsumer(
             AllowedGrantTypes = new AttributeStringValueList(distClientDto.AllowedGrantTypes.ToList()),
 
             RequirePkce = true,
-            RequireClientSecret = false,
+            // AB#5027: was hard-coded false. Still false for every producer that predates the
+            // property, so nothing about the existing swagger/SPA clients changes; a
+            // client_credentials service account sets it to true and ships a secret below.
+            RequireClientSecret = distClientDto.RequireClientSecret,
 
             AccessTokenType = RtTokenTypeEnum.Jwt,
             AllowAccessTokensViaBrowser = true,
@@ -189,14 +200,131 @@ public class CreateIdentityDataCommandRequestConsumer(
         };
 
         var result = await tenantRepository.GetRtEntitiesByTypeAsync<RtClient>(session, queryOptions);
-        if (!result.Items.Any())
+        var existingClient = result.Items.FirstOrDefault();
+
+        // AB#5027 — client secret. The producer sends the PLAINTEXT; only the SHA-256 hash
+        // (Duende's shared-secret convention, identical to ClientsController) is ever stored, and
+        // the plaintext is never logged, never echoed and never persisted here.
+        //
+        // Order of preference is what makes a second provisioning run a no-op:
+        //   * a plaintext arrived  -> (re-)issue: replace the secret list with its hash.
+        //   * nothing arrived      -> PRESERVE whatever the existing client already has. Without
+        //     this the wholesale ReplaceOneRtEntityByIdAsync below would silently drop a live
+        //     secret on the next identity-data pass — harmless while no bus client had one,
+        //     fatal now that a service account does.
+        if (!string.IsNullOrWhiteSpace(distClientDto.ClientSecret))
+        {
+            rtClient.ClientSecrets = new AttributeRecordValueList<RtSecretRecord>
+            {
+                new() { Value = distClientDto.ClientSecret.Sha256() }
+            };
+        }
+        else if (existingClient != null)
+        {
+            rtClient.ClientSecrets = existingClient.ClientSecrets;
+        }
+
+        OctoObjectId clientRtId;
+        if (existingClient == null)
         {
             await tenantRepository.InsertOneRtEntityAsync(session, rtClient);
+            clientRtId = rtClient.RtId;
         }
         else
         {
-            await tenantRepository.ReplaceOneRtEntityByIdAsync(session, result.Items.First().RtId, rtClient);
+            clientRtId = existingClient.RtId;
+            await tenantRepository.ReplaceOneRtEntityByIdAsync(session, clientRtId, rtClient);
         }
+
+        await EnsureAssignedRolesAsync(session, tenantRepository, clientRtId, distClientDto);
+    }
+
+    /// <summary>
+    ///     AB#5027: assigns the requested roles to the client through the <c>AssignedRole</c>
+    ///     association — the same edge <c>ClientRoleStore</c> writes, so the roles land in the
+    ///     <c>client_credentials</c> token via <c>ClientCredentialsRoleTokenValidator</c>.
+    ///     <para>
+    ///     <c>IClientRoleStore</c> cannot be used from here: it resolves its repository through
+    ///     <c>IMultiTenancyResolverService.GetTenantRepository()</c>, i.e. the HTTP-scoped tenant, and
+    ///     this consumer runs on the message bus with no HTTP context — it would silently write into
+    ///     the system tenant. The association is therefore written directly against the tenant
+    ///     repository this consumer already resolved from the message.
+    ///     </para>
+    ///     <para>
+    ///     Additive and idempotent: existing edges are left alone, roles the DTO does not mention are
+    ///     never removed (the client may legitimately have been granted more by an operator), and an
+    ///     unknown role name is logged and skipped rather than failing the whole identity-data setup —
+    ///     the roles seed (<c>System.Identity.Bootstrap</c>) runs on an independent trigger and may
+    ///     legitimately not have landed yet, which the caller already handles via
+    ///     <see cref="CreateIdentityDataResult.SuccessIdentityDataSeedPending" />.
+    ///     </para>
+    /// </summary>
+    private async Task EnsureAssignedRolesAsync(IOctoSession session, ITenantRepository tenantRepository,
+        OctoObjectId clientRtId, DistClientDto distClientDto)
+    {
+        if (distClientDto.AssignedRoleNames == null || distClientDto.AssignedRoleNames.Length == 0)
+        {
+            return;
+        }
+
+        var clientEntityId = new RtEntityId(RtEntityExtensions.GetRtCkTypeId<RtClient>(), clientRtId);
+
+        var currentAssociations = await tenantRepository.GetRtAssociationsAsync(
+            session,
+            clientEntityId,
+            RtAssociationExtendedQueryOptions.Create(
+                GraphDirections.Outbound,
+                roleId: IdentityAssociationConstants.AssignedRoleId));
+        var currentRoleIds = currentAssociations.Items.Select(a => a.TargetRtId.ToString()).ToHashSet();
+
+        var roleCkTypeId = RtEntityExtensions.GetRtCkTypeId<RtRole>();
+        var updates = new List<AssociationUpdateInfo>();
+
+        foreach (var roleName in distClientDto.AssignedRoleNames.Distinct(StringComparer.OrdinalIgnoreCase))
+        {
+            // Role lookups key off the upper-invariant NormalizedName everywhere in this service.
+            var roleQuery = RtEntityQueryOptions.Create()
+                .FieldFilter(nameof(RtRole.NormalizedName), FieldFilterOperator.Equals,
+                    roleName.ToUpperInvariant());
+            var roles = await tenantRepository.GetRtEntitiesByTypeAsync<RtRole>(session, roleQuery, take: 1);
+            var role = roles.Items.FirstOrDefault();
+            if (role == null)
+            {
+                logger.LogWarning(
+                    "Role '{RoleName}' requested for client '{ClientId}' in tenant '{TenantId}' does not exist; " +
+                    "the client is created without it. Re-run the identity data setup once the tenant's role seed is in place.",
+                    roleName, distClientDto.ClientId, tenantRepository.TenantId);
+                continue;
+            }
+
+            if (currentRoleIds.Contains(role.RtId.ToString()))
+            {
+                continue;
+            }
+
+            updates.Add(AssociationUpdateInfo.CreateInsert(
+                clientEntityId,
+                new RtEntityId(roleCkTypeId, role.RtId),
+                IdentityAssociationConstants.AssignedRoleId));
+        }
+
+        if (updates.Count == 0)
+        {
+            return;
+        }
+
+        var operationResult = new OperationResult();
+        await tenantRepository.ApplyChangesAsync(session, updates, operationResult);
+        if (operationResult.HasErrors || operationResult.HasFatalErrors)
+        {
+            throw new InvalidOperationException(
+                $"Failed to assign roles to client '{distClientDto.ClientId}' in tenant '{tenantRepository.TenantId}': " +
+                string.Join("; ", operationResult.GetMessages()));
+        }
+
+        logger.LogInformation(
+            "Assigned {RoleCount} role(s) to client '{ClientId}' in tenant '{TenantId}'",
+            updates.Count, distClientDto.ClientId, tenantRepository.TenantId);
     }
 
     /// <summary>
