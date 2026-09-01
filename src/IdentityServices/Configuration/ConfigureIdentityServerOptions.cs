@@ -30,6 +30,12 @@ internal class ConfigureIdentityServerOptions(
         options.IssuerUri = octoIdentityOptions.Value.AuthorityUrl.EnsureEndsWith("/");
         options.LicenseKey = octoIdentityOptions.Value.IdentityServerLicenseKey;
 
+        // Automatic Key Management is not included in the Duende Community Edition (V2) license
+        // and Duende 8.x fails hard at startup when the option is enabled without the feature
+        // licensed (AB#4988). We never used it: signing keys come from the static PKCS12
+        // certificate registered via AddOctoSigningCredential (SigningCredentialService).
+        options.KeyManagement.Enabled = false;
+
         // Configure Angular SPA routes for IdentityServer UI.
         // Uses the configured system tenant ID (default "OctoSystem") as the URL prefix.
         // TenantLoginRedirectMiddleware rewrites these to the actual tenant when acr_values is present.

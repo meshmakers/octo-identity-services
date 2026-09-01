@@ -38,6 +38,19 @@ export OCTO_Identity__SigningCertificatePassword="secret"
 }
 ```
 
+##### Duende license and key management
+
+`Identity:IdentityServerLicenseKey` (`OCTO_IDENTITY__IdentityServerLicenseKey`) carries the Duende
+IdentityServer license JWT and is required — startup fails with an `InitializationException` when it
+is missing. Since the switch to the Duende **Community Edition (V2)** license (AB#4988), Duende's
+**Automatic Key Management is disabled** in `ConfigureIdentityServerOptions`
+(`options.KeyManagement.Enabled = false`): the feature is not included in the Community license and
+Duende 8.x throws at startup when the option is enabled without it being licensed. The service never
+used automatic key management — token signing always comes from the static PKCS#12 certificate
+(`KeyFilePath` / `KeyFilePassword`) registered as `ISigningCredentialStore` via
+`AddOctoSigningCredential` (`SigningCredentialService`), so disabling the option changes no token or
+JWKS behavior.
+
 #### Blueprint Variables (`Blueprints` section)
 
 Inputs for the blueprint variable resolution (`IdentityBlueprintVariableProvider`), bound from the
