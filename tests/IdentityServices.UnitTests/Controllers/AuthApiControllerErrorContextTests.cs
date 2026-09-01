@@ -1,12 +1,13 @@
-using Duende.IdentityServer.Models;
-using Duende.IdentityServer.Services;
-using Duende.IdentityServer.Stores;
 using FluentAssertions;
 using IdentityServerPersistence.Services;
 using IdentityServerPersistence.Services.Login;
 using IdentityServerPersistence.SystemStores;
 using Meshmakers.Octo.Backend.Authentication.Services;
 using Meshmakers.Octo.Backend.IdentityServices.Controllers.Api;
+using Meshmakers.Octo.Backend.IdentityServices.OpenIddict;
+using Meshmakers.Octo.Backend.IdentityServices.OpenIddict.Interaction;
+using Meshmakers.Octo.ConstructionKit.Contracts;
+using OpenIddict.Abstractions;
 using Meshmakers.Octo.Runtime.Contracts.MongoDb.Configuration;
 using Microsoft.AspNetCore.DataProtection;
 using Microsoft.AspNetCore.Http;
@@ -29,14 +30,14 @@ public class AuthApiControllerErrorContextTests
 {
     private const string TenantId = "tecob";
 
-    private readonly IIdentityServerInteractionService _interaction;
-    private readonly IClientStore _clientStore;
+    private readonly IOctoInteractionService _interaction;
+    private readonly IOctoClientStore _clientStore;
     private readonly AuthApiController _sut;
 
     public AuthApiControllerErrorContextTests()
     {
-        _interaction = Substitute.For<IIdentityServerInteractionService>();
-        _clientStore = Substitute.For<IClientStore>();
+        _interaction = Substitute.For<IOctoInteractionService>();
+        _clientStore = Substitute.For<IOctoClientStore>();
 
         var userStore = Substitute.For<IUserStore<RtUser>>();
         var userManager = Substitute.For<UserManager<RtUser>>(
@@ -65,8 +66,8 @@ public class AuthApiControllerErrorContextTests
             _clientStore,
             signInManager,
             userManager,
-            Substitute.For<IEventService>(),
-            Substitute.For<IPersistedGrantStore>(),
+            Substitute.For<IIdentityAuditService>(),
+            Substitute.For<IOpenIddictTokenStore<RtOAuthToken>>(),
             Substitute.For<ILdapAuthenticationService>(),
             Substitute.For<ICrossTenantAuthenticationService>(),
             Substitute.For<IExternalTenantUserMappingStore>(),
@@ -84,6 +85,18 @@ public class AuthApiControllerErrorContextTests
         };
     }
 
+    private static RtClient NewClient(Action<RtClient> configure)
+    {
+        var client = new RtClient
+        {
+            RtId = OctoObjectId.GenerateNewId(),
+            ClientId = "meshmakers-app",
+            Enabled = true
+        };
+        configure(client);
+        return client;
+    }
+
     private async Task<ErrorContextDto> GetContextAsync(string? errorId)
     {
         var result = await _sut.GetErrorContext(errorId);
@@ -97,16 +110,14 @@ public class AuthApiControllerErrorContextTests
 
         context.Kind.Should().Be(ErrorContextKinds.Unknown);
         context.TenantId.Should().Be(TenantId);
-        await _clientStore.DidNotReceiveWithAnyArgs()
-            .FindClientByIdAsync(default!, TestContext.Current.CancellationToken);
+        await _clientStore.DidNotReceiveWithAnyArgs().FindRtClientByIdAsync(default!);
     }
 
     [Fact]
     public async Task GetErrorContext_WithExpiredErrorId_ReportsUnknown()
     {
         // An id the message store no longer knows resolves to null; the page still has to render.
-        _interaction.GetErrorContextAsync("stale", Arg.Any<CancellationToken>())
-            .Returns((ErrorMessage?)null);
+        _interaction.GetErrorContext("stale").Returns((OctoErrorContext?)null);
 
         var context = await GetContextAsync("stale");
 
@@ -116,16 +127,16 @@ public class AuthApiControllerErrorContextTests
     [Fact]
     public async Task GetErrorContext_WhenClientIsUnknownInThisTenant_ReportsConfigurationStateWithoutBackLink()
     {
-        _interaction.GetErrorContextAsync("id", Arg.Any<CancellationToken>())
-            .Returns(new ErrorMessage
+        _interaction.GetErrorContext("id")
+            .Returns(new OctoErrorContext
             {
                 Error = "unauthorized_client",
                 ErrorDescription = "Unknown client or client not enabled",
                 ClientId = "meshmakers-app",
                 RequestId = "req-1"
             });
-        _clientStore.FindClientByIdAsync("meshmakers-app", Arg.Any<CancellationToken>())
-            .Returns((Client?)null);
+        _clientStore.FindRtClientByIdAsync("meshmakers-app")
+            .Returns((RtClient?)null);
 
         var context = await GetContextAsync("id");
 
@@ -139,21 +150,20 @@ public class AuthApiControllerErrorContextTests
     [Fact]
     public async Task GetErrorContext_WithInvalidRedirectUri_NamesTheClientAndOffersItsRegisteredUri()
     {
-        _interaction.GetErrorContextAsync("id", Arg.Any<CancellationToken>())
-            .Returns(new ErrorMessage
+        _interaction.GetErrorContext("id")
+            .Returns(new OctoErrorContext
             {
                 Error = "invalid_request",
                 ErrorDescription = "Invalid redirect_uri",
                 ClientId = "meshmakers-app"
             });
-        _clientStore.FindClientByIdAsync("meshmakers-app", Arg.Any<CancellationToken>())
-            .Returns(new Client
+        _clientStore.FindRtClientByIdAsync("meshmakers-app")
+            .Returns(NewClient(c =>
             {
-                ClientId = "meshmakers-app",
-                ClientName = "Accounting",
-                ClientUri = "https://accounting.meshmakers.cloud/",
-                LogoUri = "https://accounting.meshmakers.cloud/logo.svg"
-            });
+                c.ClientName = "Accounting";
+                c.ClientUri = "https://accounting.meshmakers.cloud/";
+                c.LogoUri = "https://accounting.meshmakers.cloud/logo.svg";
+            }));
 
         var context = await GetContextAsync("id");
 
@@ -166,15 +176,15 @@ public class AuthApiControllerErrorContextTests
     [Fact]
     public async Task GetErrorContext_WhenClientHasNoRegisteredUri_OffersNoBackLink()
     {
-        _interaction.GetErrorContextAsync("id", Arg.Any<CancellationToken>())
-            .Returns(new ErrorMessage
+        _interaction.GetErrorContext("id")
+            .Returns(new OctoErrorContext
             {
                 Error = "invalid_request",
                 ErrorDescription = "Invalid redirect_uri",
                 ClientId = "meshmakers-app"
             });
-        _clientStore.FindClientByIdAsync("meshmakers-app", Arg.Any<CancellationToken>())
-            .Returns(new Client { ClientId = "meshmakers-app", ClientName = "Accounting" });
+        _clientStore.FindRtClientByIdAsync("meshmakers-app")
+            .Returns(NewClient(c => c.ClientName = "Accounting"));
 
         var context = await GetContextAsync("id");
 
@@ -186,15 +196,15 @@ public class AuthApiControllerErrorContextTests
     {
         // unauthorized_client is emitted for more than the unknown-client case, so the
         // classification must come from the store lookup, not from the description text.
-        _interaction.GetErrorContextAsync("id", Arg.Any<CancellationToken>())
-            .Returns(new ErrorMessage
+        _interaction.GetErrorContext("id")
+            .Returns(new OctoErrorContext
             {
                 Error = "unauthorized_client",
                 ErrorDescription = "Invalid protocol",
                 ClientId = "meshmakers-app"
             });
-        _clientStore.FindClientByIdAsync("meshmakers-app", Arg.Any<CancellationToken>())
-            .Returns(new Client { ClientId = "meshmakers-app", ClientName = "Accounting" });
+        _clientStore.FindRtClientByIdAsync("meshmakers-app")
+            .Returns(NewClient(c => c.ClientName = "Accounting"));
 
         var context = await GetContextAsync("id");
 
@@ -204,24 +214,23 @@ public class AuthApiControllerErrorContextTests
     [Fact]
     public async Task GetErrorContext_WhenClientIsRegisteredButDisabled_ReadsAsNotRegistered()
     {
-        // FindEnabledClientByIdAsync filters on Enabled, so a disabled client is
+        // The error-context lookup filters on Enabled, so a disabled client is
         // indistinguishable from a missing one here — which is exactly why the copy
         // says "not registered, or not enabled".
-        _interaction.GetErrorContextAsync("id", Arg.Any<CancellationToken>())
-            .Returns(new ErrorMessage
+        _interaction.GetErrorContext("id")
+            .Returns(new OctoErrorContext
             {
                 Error = "unauthorized_client",
                 ErrorDescription = "Unknown client or client not enabled",
                 ClientId = "meshmakers-app"
             });
-        _clientStore.FindClientByIdAsync("meshmakers-app", Arg.Any<CancellationToken>())
-            .Returns(new Client
+        _clientStore.FindRtClientByIdAsync("meshmakers-app")
+            .Returns(NewClient(c =>
             {
-                ClientId = "meshmakers-app",
-                ClientName = "Accounting",
-                ClientUri = "https://accounting.meshmakers.cloud/",
-                Enabled = false
-            });
+                c.ClientName = "Accounting";
+                c.ClientUri = "https://accounting.meshmakers.cloud/";
+                c.Enabled = false;
+            }));
 
         var context = await GetContextAsync("id");
 

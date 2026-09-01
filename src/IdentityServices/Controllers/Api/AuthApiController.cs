@@ -1,17 +1,13 @@
 using System.Security.Claims;
 using System.Text.Json;
-using Duende.IdentityServer;
 using Meshmakers.Common.Shared;
-using Duende.IdentityServer.Events;
-using Duende.IdentityServer.Extensions;
-using Duende.IdentityServer.Models;
-using Duende.IdentityServer.Services;
-using Duende.IdentityServer.Stores;
 using IdentityServerPersistence.Services;
 using IdentityServerPersistence.Services.Login;
 using IdentityServerPersistence.SystemStores;
 using Meshmakers.Octo.Backend.Authentication;
 using Meshmakers.Octo.Backend.Authentication.Services;
+using Meshmakers.Octo.Backend.IdentityServices.OpenIddict;
+using Meshmakers.Octo.Backend.IdentityServices.OpenIddict.Interaction;
 using Meshmakers.Octo.ConstructionKit.Contracts;
 using Meshmakers.Octo.Runtime.Contracts.MongoDb.Configuration;
 using Microsoft.AspNetCore.Authentication;
@@ -32,13 +28,13 @@ namespace Meshmakers.Octo.Backend.IdentityServices.Controllers.Api;
 [AllowAnonymous]
 [IgnoreAntiforgeryToken]
 public class AuthApiController(
-    IIdentityServerInteractionService interaction,
+    IOctoInteractionService interaction,
     IAuthenticationSchemeProvider schemeProvider,
-    IClientStore clientStore,
+    IOctoClientStore clientStore,
     SignInManager<RtUser> signInManager,
     UserManager<RtUser> userManager,
-    IEventService events,
-    IPersistedGrantStore persistedGrantStore,
+    IIdentityAuditService auditService,
+    global::OpenIddict.Abstractions.IOpenIddictTokenStore<RtOAuthToken> oauthTokenStore,
     ILdapAuthenticationService ldapAuthService,
     ICrossTenantAuthenticationService crossTenantAuthService,
     IExternalTenantUserMappingStore externalTenantUserMappingStore,
@@ -50,13 +46,33 @@ public class AuthApiController(
     ILogger<AuthApiController> logger)
     : ControllerBase
 {
+    private string? GetSubjectId() =>
+        User.FindFirstValue("sub") ?? User.FindFirstValue(ClaimTypes.NameIdentifier);
+
+    /// <summary>Login success audit — log-only, matching the previous event-sink behavior.</summary>
+    private void LogLoginSuccess(string? username, string? subjectId, string? displayName, string? clientId = null)
+    {
+        logger.LogInformation(
+            "User login succeeded: user '{Username}' (sub '{SubjectId}', display '{DisplayName}', client '{ClientId}')",
+            username, subjectId, displayName, clientId ?? "(none)");
+    }
+
+    /// <summary>Login failure audit — persisted to the runtime event log (event-sink parity).</summary>
+    private async Task LogLoginFailureAsync(string? username, string reason, string? clientId = null)
+    {
+        logger.LogWarning("User login failed: user '{Username}' ({Reason}, client '{ClientId}')",
+            username, reason, clientId ?? "(none)");
+        await auditService.StoreFailureAsync("User Login Failure",
+            $"Username: {username} - {reason}");
+    }
+
     /// <summary>
     /// Get the login context for building the login UI
     /// </summary>
     [HttpGet("login-context")]
     public async Task<ActionResult<LoginContextDto>> GetLoginContext([FromQuery] string? returnUrl)
     {
-        var context = await interaction.GetAuthorizationContextAsync(returnUrl, HttpContext.RequestAborted);
+        var context = await interaction.GetAuthorizationContextAsync(returnUrl);
         // Normalize the route-derived tenant id: schemes are registered with the lower-cased
         // tenant id (DynamicAuthSchemeServiceInitializer → systemContext.TenantId), but the URL
         // path segment can be PascalCase (e.g. /OctoSystem/login when the system tenant config
@@ -103,21 +119,18 @@ public class AuthApiController(
         string? clientName = null;
         string? clientLogoUrl = null;
 
-        if (context?.Client.ClientId != null)
+        if (context != null)
         {
-            var client = await clientStore.FindEnabledClientByIdAsync(context.Client.ClientId, HttpContext.RequestAborted);
-            if (client != null)
-            {
-                allowLocal = client.EnableLocalLogin;
-                clientName = client.ClientName ?? client.ClientId;
-                clientLogoUrl = client.LogoUri;
+            var client = context.Client;
+            allowLocal = client.EnableLocalLogin;
+            clientName = client.ClientName ?? client.ClientId;
+            clientLogoUrl = client.LogoUri;
 
-                if (client.IdentityProviderRestrictions.Any())
-                {
-                    providers = providers
-                        .Where(p => client.IdentityProviderRestrictions.Contains(p.Scheme))
-                        .ToList();
-                }
+            if (client.IdentityProviderRestrictions?.Any() == true)
+            {
+                providers = providers
+                    .Where(p => client.IdentityProviderRestrictions.Contains(p.Scheme))
+                    .ToList();
             }
         }
 
@@ -178,7 +191,7 @@ public class AuthApiController(
 
         var message = string.IsNullOrWhiteSpace(errorId)
             ? null
-            : await interaction.GetErrorContextAsync(errorId, HttpContext.RequestAborted);
+            : interaction.GetErrorContext(errorId);
 
         if (message == null)
         {
@@ -186,11 +199,11 @@ public class AuthApiController(
             return new ErrorContextDto { Kind = ErrorContextKinds.Unknown, TenantId = tenantId };
         }
 
-        Client? client = null;
+        RtClient? client = null;
         if (!string.IsNullOrWhiteSpace(message.ClientId))
         {
-            client = await clientStore.FindEnabledClientByIdAsync(message.ClientId,
-                HttpContext.RequestAborted);
+            var candidate = await clientStore.FindRtClientByIdAsync(message.ClientId);
+            client = candidate is { Enabled: true } ? candidate : null;
         }
 
         var kind = ClassifyError(message, client);
@@ -201,7 +214,6 @@ public class AuthApiController(
             Error = message.Error,
             ErrorDescription = message.ErrorDescription,
             RequestId = message.RequestId,
-            ActivityId = message.ActivityId,
             TenantId = tenantId,
             ClientId = message.ClientId,
             ClientName = client?.ClientName ?? message.ClientId,
@@ -211,7 +223,7 @@ public class AuthApiController(
         };
     }
 
-    private static string ClassifyError(ErrorMessage message, Client? client)
+    private static string ClassifyError(OctoErrorContext message, RtClient? client)
     {
         // A client id that no enabled client in this tenant answers to is a configuration state,
         // not a crash: the application is either not registered here or disabled. The two are
@@ -237,7 +249,7 @@ public class AuthApiController(
     [HttpPost("login")]
     public async Task<ActionResult<LoginResultDto>> Login([FromBody] LoginRequestDto request)
     {
-        var context = await interaction.GetAuthorizationContextAsync(request.ReturnUrl, HttpContext.RequestAborted);
+        var context = await interaction.GetAuthorizationContextAsync(request.ReturnUrl);
 
         if (string.IsNullOrEmpty(request.Username) || string.IsNullOrEmpty(request.Password))
         {
@@ -257,11 +269,7 @@ public class AuthApiController(
         if (result.Succeeded)
         {
             var user = await userManager.FindByNameAsync(request.Username);
-            await events.RaiseAsync(new UserLoginSuccessEvent(
-                user?.UserName,
-                user?.RtId.ToString(),
-                user?.UserName,
-                clientId: context?.Client.ClientId), HttpContext.RequestAborted);
+            LogLoginSuccess(user?.UserName, user?.RtId.ToString(), user?.UserName, clientId: context?.Client.ClientId);
 
             // Use return URL if valid, otherwise redirect to manage page
             var tenantId = RouteData.Values["tenantId"]?.ToString() ?? "System";
@@ -279,8 +287,7 @@ public class AuthApiController(
 
         if (result.IsLockedOut)
         {
-            await events.RaiseAsync(new UserLoginFailureEvent(
-                request.Username, "Account locked out", clientId: context?.Client.ClientId), HttpContext.RequestAborted);
+            await LogLoginFailureAsync(request.Username, "Account locked out", clientId: context?.Client.ClientId);
 
             return new LoginResultDto
             {
@@ -354,11 +361,7 @@ public class AuthApiController(
 
                 await signInManager.SignInAsync(localUser, request.RememberLogin);
 
-                await events.RaiseAsync(new UserLoginSuccessEvent(
-                    localUser.UserName,
-                    localUser.RtId.ToString(),
-                    localUser.UserName,
-                    clientId: context?.Client.ClientId), HttpContext.RequestAborted);
+                LogLoginSuccess(localUser.UserName, localUser.RtId.ToString(), localUser.UserName, clientId: context?.Client.ClientId);
 
                 var redirectUrl = !string.IsNullOrEmpty(request.ReturnUrl) &&
                                   (interaction.IsValidReturnUrl(request.ReturnUrl) || Url.IsLocalUrl(request.ReturnUrl))
@@ -373,10 +376,7 @@ public class AuthApiController(
             }
         }
 
-        await events.RaiseAsync(new UserLoginFailureEvent(
-            request.Username,
-            "Invalid credentials",
-            clientId: context?.Client.ClientId), HttpContext.RequestAborted);
+        await LogLoginFailureAsync(request.Username, "Invalid credentials", clientId: context?.Client.ClientId);
 
         return new LoginResultDto
         {
@@ -576,11 +576,7 @@ public class AuthApiController(
         // 8. Sign in the user
         await signInManager.SignInAsync(user, isPersistent: false);
 
-        await events.RaiseAsync(new UserLoginSuccessEvent(
-            user.UserName,
-            user.RtId.ToString(),
-            user.UserName,
-            clientId: null), HttpContext.RequestAborted);
+        LogLoginSuccess(user.UserName, user.RtId.ToString(), user.UserName, clientId: null);
 
         // 7. Clean up external cookie
         await HttpContext.SignOutAsync(OctoAuthSchemes.ExternalCookieScheme);
@@ -717,14 +713,16 @@ public class AuthApiController(
     [HttpGet("logout-context")]
     public async Task<ActionResult<LogoutContextDto>> GetLogoutContext([FromQuery] string? logoutId)
     {
-        var context = await interaction.GetLogoutContextAsync(logoutId, HttpContext.RequestAborted);
+        var context = interaction.GetLogoutContext(logoutId);
 
         return new LogoutContextDto
         {
             LogoutId = logoutId ?? string.Empty,
-            ShowLogoutPrompt = context.ShowSignoutPrompt,
-            PostLogoutRedirectUri = context.PostLogoutRedirectUri,
-            ClientName = context.ClientName
+            // A logout initiated by a validated client request needs no prompt (Duende parity);
+            // a user-initiated logout (no logoutId context) asks for confirmation.
+            ShowLogoutPrompt = context == null,
+            PostLogoutRedirectUri = context?.PostLogoutRedirectUri,
+            ClientName = context?.ClientName
         };
     }
 
@@ -734,38 +732,35 @@ public class AuthApiController(
     [HttpPost("logout")]
     public async Task<ActionResult<LogoutResultDto>> Logout([FromBody] LogoutRequestDto request)
     {
-        var context = await interaction.GetLogoutContextAsync(request.LogoutId, HttpContext.RequestAborted);
+        var context = interaction.GetLogoutContext(request.LogoutId);
 
+        string? signOutIframeUrl = null;
         if (User.Identity?.IsAuthenticated == true)
         {
-            var subjectId = User.GetSubjectId();
+            var subjectId = GetSubjectId();
+            var sessionId = User.FindFirstValue("sid") ?? context?.SessionId;
 
-            // Revoke all persisted grants (refresh tokens, etc.) for this user
-            // This ensures that clients cannot use refresh tokens after logout
-            await persistedGrantStore.RemoveAllAsync(new PersistedGrantFilter
+            // Revoke all OAuth tokens (refresh tokens, pending codes) for this user so clients
+            // cannot silently keep access after logout (Duende persisted-grant parity).
+            if (!string.IsNullOrEmpty(subjectId))
             {
-                SubjectId = subjectId
-            }, HttpContext.RequestAborted);
+                await oauthTokenStore.RevokeBySubjectAsync(subjectId, HttpContext.RequestAborted);
+            }
 
             await signInManager.SignOutAsync();
 
-            // Also sign out from the IdentityServer session cookie scheme ("idsrv").
-            // signInManager.SignOutAsync() only clears the Identity.Application cookie,
-            // but the idsrv cookie maintains the SSO session. Without clearing it,
-            // clients redirecting back will get a new authorization code automatically.
-            await HttpContext.SignOutAsync(OctoAuthSchemes.ServerSsoCookieScheme);
+            logger.LogInformation("User '{SubjectId}' logged out", subjectId);
 
-            await events.RaiseAsync(new UserLogoutSuccessEvent(
-                subjectId,
-                User.GetDisplayName()), HttpContext.RequestAborted);
+            // Front-channel logout: notify clients that registered a FrontChannelLogoutUri.
+            signOutIframeUrl = $"/connect/endsession/callback?sid={Uri.EscapeDataString(sessionId ?? string.Empty)}";
         }
 
         return new LogoutResultDto
         {
             Success = true,
-            PostLogoutRedirectUri = context.PostLogoutRedirectUri,
-            ClientName = context.ClientName,
-            SignOutIframeUrl = context.SignOutIFrameUrl,
+            PostLogoutRedirectUri = context?.PostLogoutRedirectUri,
+            ClientName = context?.ClientName,
+            SignOutIframeUrl = signOutIframeUrl,
             AutomaticRedirectAfterSignOut = true
         };
     }
@@ -931,11 +926,7 @@ public class AuthApiController(
 
         if (result.Succeeded)
         {
-            await events.RaiseAsync(new UserLoginSuccessEvent(
-                user.UserName,
-                user.RtId.ToString(),
-                user.UserName,
-                clientId: null), HttpContext.RequestAborted);
+            LogLoginSuccess(user.UserName, user.RtId.ToString(), user.UserName, clientId: null);
 
             // Use the return URL from request, or default to manage page
             var tenantId = RouteData.Values["tenantId"]?.ToString() ?? "System";
@@ -960,10 +951,7 @@ public class AuthApiController(
             };
         }
 
-        await events.RaiseAsync(new UserLoginFailureEvent(
-            user.UserName,
-            "Invalid two-factor code",
-            clientId: null), HttpContext.RequestAborted);
+        await LogLoginFailureAsync(user.UserName, "Invalid two-factor code", clientId: null);
 
         return new TwoFactorLoginResultDto
         {
@@ -998,11 +986,7 @@ public class AuthApiController(
 
         if (result.Succeeded)
         {
-            await events.RaiseAsync(new UserLoginSuccessEvent(
-                user.UserName,
-                user.RtId.ToString(),
-                user.UserName,
-                clientId: null), HttpContext.RequestAborted);
+            LogLoginSuccess(user.UserName, user.RtId.ToString(), user.UserName, clientId: null);
 
             // Use the return URL from request, or default to manage page
             var tenantId = RouteData.Values["tenantId"]?.ToString() ?? "System";
@@ -1027,10 +1011,7 @@ public class AuthApiController(
             };
         }
 
-        await events.RaiseAsync(new UserLoginFailureEvent(
-            user.UserName,
-            "Invalid two-factor email code",
-            clientId: null), HttpContext.RequestAborted);
+        await LogLoginFailureAsync(user.UserName, "Invalid two-factor email code", clientId: null);
 
         return new TwoFactorLoginResultDto
         {
@@ -1095,11 +1076,7 @@ public class AuthApiController(
 
         if (result.Succeeded)
         {
-            await events.RaiseAsync(new UserLoginSuccessEvent(
-                user.UserName,
-                user.RtId.ToString(),
-                user.UserName,
-                clientId: null), HttpContext.RequestAborted);
+            LogLoginSuccess(user.UserName, user.RtId.ToString(), user.UserName, clientId: null);
 
             // Use the return URL from request, or default to manage page
             var tenantId = RouteData.Values["tenantId"]?.ToString() ?? "System";
@@ -1124,10 +1101,7 @@ public class AuthApiController(
             };
         }
 
-        await events.RaiseAsync(new UserLoginFailureEvent(
-            user.UserName,
-            "Invalid recovery code",
-            clientId: null), HttpContext.RequestAborted);
+        await LogLoginFailureAsync(user.UserName, "Invalid recovery code", clientId: null);
 
         return new TwoFactorLoginResultDto
         {
@@ -1164,10 +1138,7 @@ public class AuthApiController(
 
         if (!authResult.Succeeded || authResult.LoginInfo == null)
         {
-            await events.RaiseAsync(new UserLoginFailureEvent(
-                request.Username,
-                authResult.ErrorMessage ?? "LDAP authentication failed",
-                clientId: null), HttpContext.RequestAborted);
+            await LogLoginFailureAsync(request.Username, authResult.ErrorMessage ?? "LDAP authentication failed", clientId: null);
 
             return new LdapLoginResultDto
             {
@@ -1254,11 +1225,7 @@ public class AuthApiController(
         // 8. Sign in the user
         await signInManager.SignInAsync(user, isPersistent: false);
 
-        await events.RaiseAsync(new UserLoginSuccessEvent(
-            user.UserName,
-            user.RtId.ToString(),
-            user.UserName,
-            clientId: null), HttpContext.RequestAborted);
+        LogLoginSuccess(user.UserName, user.RtId.ToString(), user.UserName, clientId: null);
 
         // 7. Handle return URL
         var redirectUrl = request.ReturnUrl;
@@ -1437,11 +1404,7 @@ public class AuthApiController(
         // Sign in
         await signInManager.SignInAsync(localUser, isPersistent: false);
 
-        await events.RaiseAsync(new UserLoginSuccessEvent(
-            localUser.UserName,
-            localUser.RtId.ToString(),
-            localUser.UserName,
-            clientId: null), HttpContext.RequestAborted);
+        LogLoginSuccess(localUser.UserName, localUser.RtId.ToString(), localUser.UserName, clientId: null);
 
         // Compute redirect URL
         var redirectUrl = request.ReturnUrl;

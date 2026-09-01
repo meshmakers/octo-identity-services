@@ -12,6 +12,7 @@ using Meshmakers.Octo.Backend.IdentityServices.Cookies;
 using Meshmakers.Octo.Backend.IdentityServices.Resources;
 using Meshmakers.Octo.Backend.IdentityServices.Middleware;
 using Meshmakers.Octo.Backend.IdentityServices.OpenIddict;
+using Meshmakers.Octo.Backend.IdentityServices.OpenIddict.Interaction;
 using Meshmakers.Octo.Backend.IdentityServices.Routing;
 using Meshmakers.Octo.Backend.IdentityServices.Services;
 using IQrCodeService = Meshmakers.Octo.Backend.IdentityServices.Services.IQrCodeService;
@@ -228,6 +229,7 @@ try
     // Server-side session ticket store (AB#4994); wired onto the application cookie with the
     // OpenIddict swap (replaces Duende's AddServerSideSessions).
     builder.Services.AddSingleton<OctoTicketStore>();
+    builder.Services.AddScoped<IOctoInteractionService, OctoInteractionService>();
 
     // Scope auth cookies per tenant to prevent cross-tenant session leakage.
     // Identity.Application and idsrv cookies get a .{tenantId} suffix.

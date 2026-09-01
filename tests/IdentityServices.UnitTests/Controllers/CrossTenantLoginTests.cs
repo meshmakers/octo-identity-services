@@ -1,14 +1,14 @@
 using System.Security.Claims;
 using System.Text.Json;
-using Duende.IdentityServer.Models;
-using Duende.IdentityServer.Services;
-using Duende.IdentityServer.Stores;
 using FluentAssertions;
 using IdentityServerPersistence.Services;
 using IdentityServerPersistence.Services.Login;
 using IdentityServerPersistence.SystemStores;
 using Meshmakers.Octo.Backend.Authentication.Services;
 using Meshmakers.Octo.Backend.IdentityServices.Controllers.Api;
+using Meshmakers.Octo.Backend.IdentityServices.OpenIddict;
+using Meshmakers.Octo.Backend.IdentityServices.OpenIddict.Interaction;
+using OpenIddict.Abstractions;
 using Meshmakers.Octo.Runtime.Contracts.MongoDb.Configuration;
 using Meshmakers.Octo.ConstructionKit.Contracts;
 using Microsoft.AspNetCore.DataProtection;
@@ -27,11 +27,11 @@ namespace IdentityServices.UnitTests.Controllers;
 public class CrossTenantLoginTests
 {
     private readonly ICrossTenantAuthenticationService _crossTenantAuthService;
-    private readonly IIdentityServerInteractionService _interaction;
+    private readonly IOctoInteractionService _interaction;
     private readonly IDataProtectionProvider _dataProtectionProvider;
     private readonly SignInManager<RtUser> _signInManager;
     private readonly UserManager<RtUser> _userManager;
-    private readonly IEventService _events;
+    private readonly IIdentityAuditService _events;
     private readonly IExternalTenantUserMappingStore _externalTenantUserMappingStore;
     private readonly IOctoIdentityProviderStore _identityProviderStore;
     private readonly ICrossTenantUserProvisioningService _crossTenantUserProvisioningService;
@@ -39,11 +39,11 @@ public class CrossTenantLoginTests
 
     public CrossTenantLoginTests()
     {
-        _interaction = Substitute.For<IIdentityServerInteractionService>();
+        _interaction = Substitute.For<IOctoInteractionService>();
         var schemeProvider = Substitute.For<Microsoft.AspNetCore.Authentication.IAuthenticationSchemeProvider>();
-        var clientStore = Substitute.For<IClientStore>();
-        _events = Substitute.For<IEventService>();
-        var persistedGrantStore = Substitute.For<IPersistedGrantStore>();
+        var clientStore = Substitute.For<IdentityServerPersistence.SystemStores.IOctoClientStore>();
+        _events = Substitute.For<IIdentityAuditService>();
+        var persistedGrantStore = Substitute.For<IOpenIddictTokenStore<Persistence.IdentityCkModel.Generated.System.Identity.v2.RtOAuthToken>>();
         var ldapAuthService = Substitute.For<ILdapAuthenticationService>();
         _crossTenantAuthService = Substitute.For<ICrossTenantAuthenticationService>();
         _externalTenantUserMappingStore = Substitute.For<IExternalTenantUserMappingStore>();
