@@ -855,7 +855,7 @@ OIDC endpoints (`/connect/*`) don't include a `{tenantId}` route segment. The `O
 | `/connect/par` | `acr_values=tenant:{tenantId}` from form body (RFC 9126 Pushed Authorization Request); captures `request_uri` from JSON response → tenant mapping |
 | `/connect/authorize` | `request_uri` query parameter → tenant mapping (captured during PAR); fallback to `acr_values=tenant:{tenantId}` from query string; captures `code` → tenant mapping from both 302 redirects (`response_mode=query`) and 200 HTML responses (`response_mode=form_post`) |
 | `/connect/token` (authorization_code, device_code, refresh_token) | Authorization code / device code / refresh token → tenant mapping (captured earlier); sets tenant context for user/client lookups |
-| `/connect/token` (client_credentials, token exchange) | `acr_values=tenant:{tenantId}` from form body — **required**; without it the client lookup falls back to the system tenant, so tenant-registered clients fail with `invalid_client` |
+| `/connect/token` (client_credentials, token exchange) | `acr_values=tenant:{tenantId}` from form body — **required**; without it the client lookup falls back to the system tenant, so tenant-registered clients fail with `invalid_client`, and a **mirrored** client id is refused outright with `invalid_request` (AB#5058, see below) |
 | `/connect/endsession` | `id_token_hint` JWT payload → `tenant_id` claim; fallback to `acr_values` |
 
 **Pushed Authorization Request (PAR, RFC 9126):** When the client uses PAR, it POSTs the full set of authorization parameters (including `acr_values=tenant:{tenantId}`) to `/connect/par`. The server returns a `request_uri` (e.g., `urn:ietf:params:oauth:request_uri:...`); the subsequent `/connect/authorize` call carries only `request_uri` on the URL, no `acr_values`. The middleware extracts the tenant from the form body during `/connect/par`, captures the issued `request_uri` from the JSON response, and stores the mapping (5-minute lifetime). On `/connect/authorize?request_uri=...`, the middleware looks up the tenant from this mapping before falling back to query-string `acr_values`. PAR is enabled automatically by `Microsoft.AspNetCore.Authentication.OpenIdConnect` (.NET 9+) when the IdP advertises `pushed_authorization_request_endpoint` in its discovery document — which Duende IdentityServer does by default.
@@ -893,6 +893,53 @@ before the role branch, so a client without roles gets it too, and an existing `
 the client is not duplicated. Consumers narrow their exemption behind
 `TenantAuthorizationOptions.ServiceTokenEnforcement` in octo-common-services — default `LogOnly`,
 i.e. unchanged request behaviour plus an audit line per foreign-tenant access.
+
+**Ambiguous tenant binding is refused, not guessed (AB#5058).** The "otherwise the system tenant"
+half of the rule above rested on the idea that the directory which resolved the client is also the
+tenant the client belongs to. Client mirroring breaks that: `AutoProvisionInChildTenants` provisions
+the **same** `ClientId` with the **same** secret into every child tenant, so for a mirrored client id
+"found in the system tenant" says nothing about where the caller belongs — a caller holding a child
+tenant's credentials could omit `acr_values` and receive a system-tenant token, making every
+"is the caller in the system tenant" gate satisfiable with a service token.
+
+`ClientCredentialsRoleTokenValidator` therefore decides the binding **server-side** before stamping
+anything, from state the caller cannot influence:
+
+| Signal | Source | Verdict |
+|---|---|---|
+| `RtClient.AutoProvisionInChildTenants` | the resolved client record | ambiguous — declared fleet credential |
+| `RtClient.ProvisionedByParentTenantId` | the resolved client record | ambiguous — the record *is* a mirror |
+| `RtClientMirror` rows for the client id | system tenant | ambiguous — mirrors already materialized |
+| none of the above | — | unambiguous — system tenant stamped, as before |
+
+An ambiguous request is answered with `invalid_request` and the description
+*"acr_values=tenant:{tenantId} is required for this client: its client id exists in more than one
+tenant, so the issuing tenant cannot be determined from the request."*, and is audited as a
+`ClientCredentialsTenantAmbiguityEvent` (category `ClientCredentials`, ID `50580`) which
+`OctoEventSink` persists to the runtime event log. A failure of the mirror lookup itself **fails
+closed** — falling back to "system" there would reopen the hole. The probe runs only on the
+no-`acr_values` path, so callers that name their tenant (mesh adapter, AI services, octo-cli, the
+token-exchange and on-behalf-of grants) are untouched, as are unmirrored clients that omit it.
+
+⚠️ **Residual risk.** A mirror shares the parent's secret, so whoever holds a mirror's credentials
+also holds the parent's and can request the system tenant *explicitly*. No check at the token
+endpoint can tell those callers apart; the credential is instance-wide by construction of the
+mirroring feature. The validator logs a warning whenever a mirroring source obtains a system-tenant
+token, and system-route authorization must not treat `tenant_id == systemTenant` on a
+client-credentials token as proof of provenance on its own. A real fix requires per-tenant mirror
+secrets.
+
+**Integrator note.** If a `client_credentials` request that used to work now returns
+`invalid_request`, add `acr_values=tenant:{tenantId}` to the token request — for example:
+
+```bash
+curl -s https://connect.example.com/connect/token \
+  -d grant_type=client_credentials \
+  -d client_id=<client-id> \
+  -d client_secret=<secret> \
+  -d scope=octo_api \
+  -d acr_values=tenant:<tenantId>
+```
 
 ### Key Behaviors
 

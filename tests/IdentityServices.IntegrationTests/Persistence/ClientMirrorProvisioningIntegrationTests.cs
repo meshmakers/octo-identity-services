@@ -1,7 +1,14 @@
+using Duende.IdentityServer.Events;
+using Duende.IdentityServer.Models;
+using Duende.IdentityServer.Services;
+using Duende.IdentityServer.Validation;
 using FluentAssertions;
 using IdentityServerPersistence.Services;
+using IdentityServerPersistence.SystemStores;
 using IdentityServices.IntegrationTests.Fixtures;
+using Meshmakers.Octo.Backend.IdentityServices.Services;
 using Meshmakers.Octo.ConstructionKit.Contracts;
+using Microsoft.AspNetCore.Http;
 using Meshmakers.Octo.Runtime.Contracts;
 using Meshmakers.Octo.Runtime.Contracts.MongoDb;
 using Meshmakers.Octo.Runtime.Contracts.MongoDb.Repositories;
@@ -176,6 +183,66 @@ public class ClientMirrorProvisioningIntegrationTests : IClassFixture<IdentitySe
         (await ParentHasMirrorAsync(systemContext, clientId, doomedTenantId)).Should().BeFalse();
     }
 
+    /// <summary>
+    ///     AB#5058 — the token endpoint must refuse to guess a tenant for a mirrored client id.
+    ///     Runs the real <see cref="ClientCredentialsRoleTokenValidator" /> over the real mirror
+    ///     bookkeeping in MongoDB: the unit tests stub <c>GetMirrorsAsync</c>, so only this test
+    ///     proves that a mirror actually provisioned into a child tenant is what makes the id
+    ///     ambiguous.
+    /// </summary>
+    [Fact]
+    public async Task MirroredClient_TokenRequestWithoutAcrValues_IsRefused()
+    {
+        await _fixture.InitializeAsync();
+        var systemContext = _fixture.GetSystemContext();
+        await EnsureSystemSetupAsync();
+        var service = CreateService(systemContext);
+
+        var childTenantId = await CreateChildTenantAsync($"child-amb-{Guid.NewGuid():N}".Substring(0, 24));
+        var clientId = $"amb-{Guid.NewGuid():N}".Substring(0, 24);
+        await CreateFlaggedClientAsync(systemContext, clientId);
+        await service.ProvisionForChildTenantAsync(systemContext.TenantId, childTenantId);
+
+        // Same client id and secret now live in both tenants — "resolved in the system tenant" no
+        // longer implies "belongs to the system tenant".
+        (await ChildHasClientAsync(systemContext, childTenantId, clientId)).Should().BeTrue();
+
+        var context = CreateClientCredentialsContext(clientId);
+        await CreateTokenValidator(systemContext, clientId, service)
+            .ValidateAsync(context, TestContext.Current.CancellationToken);
+
+        context.Result!.IsError.Should().BeTrue("a mirrored client id has no unambiguous home tenant");
+        context.Result.Error.Should().Be("invalid_request");
+        context.Result.ValidatedRequest.ClientClaims.Should()
+            .NotContain(c => c.Type == ClientCredentialsRoleTokenValidator.TenantIdClaimType,
+                "the system tenant must never be stamped on a guess");
+    }
+
+    /// <summary>
+    ///     AB#5058 backwards-compatibility twin of the test above: a client that was never mirrored
+    ///     keeps the AB#5032 behaviour, so the callers that omit <c>acr_values</c> today are unaffected.
+    /// </summary>
+    [Fact]
+    public async Task UnmirroredClient_TokenRequestWithoutAcrValues_StillCarriesTheSystemTenant()
+    {
+        await _fixture.InitializeAsync();
+        var systemContext = _fixture.GetSystemContext();
+        await EnsureSystemSetupAsync();
+        var service = CreateService(systemContext);
+
+        var clientId = $"solo-{Guid.NewGuid():N}".Substring(0, 24);
+        await CreateUnflaggedClientAsync(systemContext, clientId);
+
+        var context = CreateClientCredentialsContext(clientId);
+        await CreateTokenValidator(systemContext, clientId, service)
+            .ValidateAsync(context, TestContext.Current.CancellationToken);
+
+        context.Result!.IsError.Should().BeFalse();
+        context.Result.ValidatedRequest.ClientClaims.Should()
+            .ContainSingle(c => c.Type == ClientCredentialsRoleTokenValidator.TenantIdClaimType)
+            .Which.Value.Should().Be(systemContext.TenantId);
+    }
+
     // ---------- helpers ----------
 
     private IClientMirrorProvisioningService CreateService(ISystemContext systemContext)
@@ -276,6 +343,121 @@ public class ClientMirrorProvisioningIntegrationTests : IClassFixture<IdentitySe
             await session.AbortTransactionAsync();
             throw;
         }
+    }
+
+    /// <summary>
+    ///     A <c>client_credentials</c> request that carried no <c>acr_values</c>: the middleware
+    ///     wrote nothing into <c>HttpContext.Items</c>, so the tenant is exactly what AB#5058 has to
+    ///     decide about.
+    /// </summary>
+    private static CustomTokenRequestValidationContext CreateClientCredentialsContext(string clientId)
+    {
+        var request = new ValidatedTokenRequest { GrantType = "client_credentials" };
+        request.SetClient(new Client { ClientId = clientId });
+        return new CustomTokenRequestValidationContext { Result = new TokenRequestValidationResult(request) };
+    }
+
+    /// <summary>
+    ///     Wires the real validator over the real mirror bookkeeping. Only the two collaborators
+    ///     that need an HTTP request scope in production (client store, client role store) are
+    ///     stubbed — the ambiguity decision itself runs against MongoDB.
+    /// </summary>
+    private ClientCredentialsRoleTokenValidator CreateTokenValidator(
+        ISystemContext systemContext, string clientId, IClientMirrorProvisioningService mirrorService)
+    {
+        var parentClient = FindSystemClientAsync(systemContext, clientId).GetAwaiter().GetResult();
+        return new ClientCredentialsRoleTokenValidator(
+            new StubClientStore(systemContext.TenantId, parentClient),
+            new StubClientRoleStore(),
+            mirrorService,
+            new StubEventService(),
+            new HttpContextAccessor(),
+            systemContext,
+            NullLogger<ClientCredentialsRoleTokenValidator>.Instance);
+    }
+
+    private static async Task<RtClient?> FindSystemClientAsync(ISystemContext systemContext, string clientId)
+    {
+        var repo = systemContext.GetSystemTenantRepositoryAsAdmin();
+        using var session = await repo.GetSessionAsync();
+        var result = await repo.GetRtEntitiesByTypeAsync<RtClient>(session,
+            RtEntityQueryOptions.Create().FieldFilter(nameof(RtClient.ClientId), FieldFilterOperator.Equals, clientId));
+        return result.Items.FirstOrDefault();
+    }
+
+    private static async Task CreateUnflaggedClientAsync(ISystemContext systemContext, string clientId)
+    {
+        var parentRepo = systemContext.GetSystemTenantRepositoryAsAdmin();
+        using var session = await parentRepo.GetSessionAsync();
+        session.StartTransaction();
+        try
+        {
+            await parentRepo.InsertOneRtEntityAsync(session, new RtClient
+            {
+                RtId = OctoObjectId.GenerateNewId(),
+                Enabled = true,
+                ClientId = clientId,
+                ProtocolType = "oidc",
+                RequireClientSecret = true,
+                AllowedGrantTypes = new AttributeStringValueList { "client_credentials" },
+                AllowedScopes = new AttributeStringValueList { "octo_api" },
+                ClientSecrets = new AttributeRecordValueList<RtSecretRecord>
+                {
+                    new() { Value = "test-hash", Type = "SharedSecret" }
+                },
+                AutoProvisionInChildTenants = false
+            });
+            await session.CommitTransactionAsync();
+        }
+        catch
+        {
+            await session.AbortTransactionAsync();
+            throw;
+        }
+    }
+
+    private sealed class StubClientStore(string tenantId, RtClient? client) : IOctoClientStore
+    {
+        public string TenantId { get; } = tenantId;
+
+        public Task<RtClient?> FindRtClientByIdAsync(string clientId) => Task.FromResult(client);
+
+        public Task<Client?> FindClientByIdAsync(string clientId, CancellationToken ct = default)
+            => Task.FromResult<Client?>(null);
+
+        public IAsyncEnumerable<Client> GetAllClientsAsync(CancellationToken ct = default)
+            => throw new NotSupportedException();
+
+        public Task<IEnumerable<RtClient>> GetClients() => throw new NotSupportedException();
+
+        public Task CreateAsync(RtClient c) => throw new NotSupportedException();
+
+        public Task UpdateAsync(string clientId, RtClient c) => throw new NotSupportedException();
+
+        public Task DeleteAsync(string clientId) => throw new NotSupportedException();
+    }
+
+    private sealed class StubClientRoleStore : IClientRoleStore
+    {
+        public Task<IReadOnlyList<string>> GetDirectRoleIdsAsync(OctoObjectId clientRtId)
+            => Task.FromResult<IReadOnlyList<string>>(Array.Empty<string>());
+
+        public Task SetRoleIdsAsync(OctoObjectId clientRtId, IReadOnlyList<string> roleIds)
+            => Task.CompletedTask;
+
+        public Task AddRoleAsync(OctoObjectId clientRtId, string roleName) => Task.CompletedTask;
+
+        public Task RemoveRoleAsync(OctoObjectId clientRtId, string roleName) => Task.CompletedTask;
+
+        public Task<IReadOnlySet<string>> GetEffectiveRoleNamesAsync(OctoObjectId clientRtId)
+            => Task.FromResult<IReadOnlySet<string>>(new HashSet<string>());
+    }
+
+    private sealed class StubEventService : IEventService
+    {
+        public Task RaiseAsync(Event evt, CancellationToken ct = default) => Task.CompletedTask;
+
+        public bool CanRaiseEventType(EventTypes evtType) => true;
     }
 
     private static async Task<bool> ChildHasClientAsync(

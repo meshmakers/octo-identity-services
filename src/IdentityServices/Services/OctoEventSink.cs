@@ -84,6 +84,12 @@ internal class OctoEventSink(
                 parts.Add($"TenantId: {delegationEvt.TenantId}");
                 parts.Add($"Reason: {delegationEvt.Reason}");
                 break;
+            // AB#5058: the operator's only durable trace of a caller that still relies on the
+            // removed implicit "no acr_values ⇒ system tenant" fall-back.
+            case ClientCredentialsTenantAmbiguityEvent ambiguityEvt:
+                parts.Add($"ClientId: {ambiguityEvt.ClientId}");
+                parts.Add($"Reason: {ambiguityEvt.Reason}");
+                break;
         }
 
         return string.Join(" - ", parts);

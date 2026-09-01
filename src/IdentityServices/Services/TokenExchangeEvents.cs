@@ -97,6 +97,9 @@ internal static class EventCategories
 
     /// <summary>Category for delegation ("on-behalf-of") events (AB#5026).</summary>
     public const string Delegation = "Delegation";
+
+    /// <summary>Category for <c>client_credentials</c> tenant-binding events (AB#5058).</summary>
+    public const string ClientCredentials = "ClientCredentials";
 }
 
 /// <summary>Stable event IDs for OctoMesh-defined IdentityServer events.</summary>
@@ -113,4 +116,9 @@ internal static class EventIds
 
     /// <summary>ID for <see cref="DelegationFailureEvent" /> (AB#5026 — work item number + digit).</summary>
     public const int DelegationFailure = 50261;
+
+    /// <summary>
+    ///     ID for <see cref="ClientCredentialsTenantAmbiguityEvent" /> (AB#5058 — work item number + digit).
+    /// </summary>
+    public const int ClientCredentialsTenantAmbiguity = 50580;
 }

@@ -1,7 +1,9 @@
 using Duende.IdentityServer.Models;
+using Duende.IdentityServer.Services;
 using Duende.IdentityServer.Validation;
 using FluentAssertions;
 using IdentityModel;
+using IdentityServerPersistence.Services;
 using IdentityServerPersistence.SystemStores;
 using Meshmakers.Octo.Backend.IdentityServices.Services;
 using Meshmakers.Octo.Runtime.Contracts.MongoDb;
@@ -9,6 +11,7 @@ using Meshmakers.Octo.Services.Infrastructure;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Logging.Abstractions;
 using NSubstitute;
+using Persistence.IdentityCkModel.Generated.System.Identity.v2;
 using Xunit;
 
 namespace IdentityServices.UnitTests.Services;
@@ -34,6 +37,11 @@ public class ClientCredentialsTokenClaimsTests
 
     private readonly IOctoClientStore _clientStore = Substitute.For<IOctoClientStore>();
     private readonly IClientRoleStore _clientRoleStore = Substitute.For<IClientRoleStore>();
+
+    private readonly IClientMirrorProvisioningService _mirrorService =
+        Substitute.For<IClientMirrorProvisioningService>();
+
+    private readonly IEventService _events = Substitute.For<IEventService>();
     private readonly ISystemContext _systemContext = Substitute.For<ISystemContext>();
     private readonly HttpContextAccessor _httpContextAccessor = new();
 
@@ -42,12 +50,13 @@ public class ClientCredentialsTokenClaimsTests
         _systemContext.TenantId.Returns(SystemTenantId);
         // No RtClient for this id — the role branch bails out, which is exactly the case that used
         // to leave the token without any custom claim at all.
-        _clientStore.FindRtClientByIdAsync(Arg.Any<string>()).Returns((Persistence.IdentityCkModel.Generated
-            .System.Identity.v2.RtClient?)null);
+        _clientStore.FindRtClientByIdAsync(Arg.Any<string>()).Returns((RtClient?)null);
+        _mirrorService.GetMirrorsAsync(Arg.Any<string>(), Arg.Any<string>())
+            .Returns((IReadOnlyList<RtClientMirror>)Array.Empty<RtClientMirror>());
     }
 
     private ClientCredentialsRoleTokenValidator CreateValidator() => new(
-        _clientStore, _clientRoleStore, _httpContextAccessor, _systemContext,
+        _clientStore, _clientRoleStore, _mirrorService, _events, _httpContextAccessor, _systemContext,
         NullLogger<ClientCredentialsRoleTokenValidator>.Instance);
 
     private static CustomTokenRequestValidationContext CreateContext(string grantType, string clientId = ClientId)

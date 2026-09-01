@@ -526,8 +526,8 @@ child tenant, so one credential pair was literally valid instance-wide.
 
 - The tenant comes from `HttpContext.Items[tenantId]`, which `OidcTenantResolutionMiddleware` wrote
   from `acr_values`. When no `acr_values` was sent, the client lookup ran against the **system
-  tenant** — so that is what is stamped. The claim always states which directory authenticated the
-  client; it is never simply omitted.
+  tenant** — so that is what was stamped. ⚠️ **That fall-back was narrowed by AB#5058 (below): it now
+  applies only when the client id is unambiguously bound to one tenant.**
 - The claim is emitted **before** the role branch, which returns early for a client with no roles —
   otherwise exactly the clients most likely to be legacy would keep shipping tenant-less tokens.
 - `ClientClaimsPrefix` is cleared (as it already was for roles), so the claim is `tenant_id`, not
@@ -552,6 +552,68 @@ Consumers narrow the exemption behind their own staged switch — see octo-commo
 (`OCTO_TENANTAUTHORIZATION__…`); its defaults keep today's behaviour.
 
 Tests: `tests/IdentityServices.UnitTests/Services/ClientCredentialsTokenClaimsTests.cs`.
+
+### Ambiguous Tenant Binding on `client_credentials` (AB#5058)
+
+AB#5032's fall-back — "no `acr_values` ⇒ the client store resolved against the system tenant, so
+stamp the system tenant" — **does not survive client mirroring**. `AutoProvisionInChildTenants`
+provisions the *same* `ClientId` with the *same* secret into every child tenant
+(`ClientMirrorProvisioningService.CreateMirrorClient` copies `ClientSecrets` verbatim). For such a
+client id, "found in the system tenant" is not evidence of "belongs to the system tenant" — the
+binding is **ambiguous**, and a caller holding a child tenant's credentials could simply omit
+`acr_values` and be handed a system-tenant token. Every authorization asking "is the caller in the
+system tenant" — which is what the system-route hardening (AB#5055) builds on — was therefore
+trivially satisfiable with a service token.
+
+`ClientCredentialsRoleTokenValidator` now **refuses to guess**. On a `client_credentials` request
+with no `acr_values` it decides the binding **server-side**, from state no caller can influence:
+
+| Signal | Where it lives | Meaning |
+|---|---|---|
+| `RtClient.AutoProvisionInChildTenants` | resolved client | declared fleet credential ⇒ ambiguous |
+| `RtClient.ProvisionedByParentTenantId` | resolved client | the resolved record *is* a mirror ⇒ ambiguous |
+| `RtClientMirror` rows for the client id | system tenant | mirrors already materialized ⇒ ambiguous |
+
+Ambiguous ⇒ `invalid_request` with a description naming the remedy, plus a persisted
+`ClientCredentialsTenantAmbiguityEvent` (category `ClientCredentials`, ID `50580`; expanded by
+`OctoEventSink`). Unambiguous ⇒ unchanged AB#5032 behaviour, system tenant stamped.
+
+- 🔴 **The mirror lookup fails closed.** A repository error rejects the request rather than falling
+  back to "system" — guessing there is exactly the escalation being closed. The blast radius is
+  bounded: the probe runs *only* on the no-`acr_values` path.
+- 🔴 **Ordering matters.** The ambiguity probe runs **before** `AddTenantIdClaim`, so a refused
+  request never carries a guessed `tenant_id`, and the AB#5032 invariant (claim stamped *before* the
+  role branch's early return) is preserved for every accepted request.
+- **Caller inventory (checked across the whole `dev` checkout, not assumed).** No production caller
+  is broken: `octo-mesh-adapter` `ServiceAccountTokenService` (all 3 call sites),
+  `octo-ai-services` `McpTokenIssuer` and `octo-cli` (via `AuthenticatorOptions.TenantId`, guarded
+  in `LogInClientCredentialsCommand`) all send `acr_values`. The only callers that omit it are the
+  `octo-sdk` sample `Sdk.GraphQlCodeGenSample` (never assigns `AuthenticatorOptions.TenantId`) and
+  the `curl` recipe in `demo-energy-iq/docs/data-access-fh-salzburg.md` — both use ordinary,
+  unmirrored clients, so both keep working. Three call sites set the parameter only *conditionally*
+  and would now surface a misconfiguration as a token error instead of a silent system-tenant token:
+  `octo-sdk` `AuthenticatorClient.BuildClientCredentialsTokenRequest`, the two auto-re-acquisition
+  branches of `octo-cli` `AuthenticationService`, and `ServiceAccountTokenService.EnsureTokenAsync`
+  (the only one of the adapter's three grants without a fail-closed tenant guard).
+- **No log-only stage.** The gap is an actual bypass, so an observing default would leave it open.
+  What *is* log-only is the part that cannot be closed here (next bullet).
+- ⚠️ **Residual, by construction of the mirroring feature.** A mirror shares the parent's secret, so
+  whoever holds a mirror's credentials also holds the parent's and can ask for the system tenant
+  *explicitly*. No token-endpoint check distinguishes those two callers. The validator logs a
+  warning whenever a mirroring source obtains a system-tenant token, and **AB#5055 must not treat
+  `tenant_id == systemTenant` on a client-credentials token as proof of provenance on its own.**
+  Closing it for real needs per-tenant mirror secrets.
+
+Tests: `tests/IdentityServices.UnitTests/Services/ClientCredentialsTenantAmbiguityTests.cs`
+(8 cases: flagged client / live mirror rows after the flag was switched off / mirror copy itself /
+lookup failure ⇒ all refused; role branch never reached; unmirrored client unchanged; mirrored
+client *with* `acr_values` unchanged and the probe not even consulted; the AB#5032 ordering
+invariant) and `Persistence/ClientMirrorProvisioningIntegrationTests.cs`
+(`MirroredClient_TokenRequestWithoutAcrValues_IsRefused` /
+`UnmirroredClient_TokenRequestWithoutAcrValues_StillCarriesTheSystemTenant` — the real validator over
+a real mirror in MongoDB; the unit tests stub `GetMirrorsAsync`, so only these prove that an actually
+provisioned mirror is what makes the id ambiguous). `IdentityServices.csproj` grants
+`InternalsVisibleTo` to the integration test project for the shared constants.
 
 ### Login Configuration (Self-Registration & Auto-Group Assignment)
 

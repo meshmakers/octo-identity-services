@@ -20,6 +20,9 @@
 
     <ItemGroup>
         <InternalsVisibleTo Include="IdentityServices.UnitTests" />
+        <!-- AB#5058: the tenant-ambiguity coverage runs the real ClientCredentialsRoleTokenValidator
+             against a real MongoDB, so it needs the claim-type / error-description constants. -->
+        <InternalsVisibleTo Include="IdentityServices.IntegrationTests" />
     </ItemGroup>
 
     <ItemGroup>
