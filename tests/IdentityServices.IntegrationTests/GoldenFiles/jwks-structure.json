@@ -1,0 +1,11 @@
+{
+  "jwksPath": "/.well-known/openid-configuration/jwks",
+  "keys": [
+    {
+      "alg": "RS256",
+      "kid": "test-key-id",
+      "kty": "RSA",
+      "use": "sig"
+    }
+  ]
+}
