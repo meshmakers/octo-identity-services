@@ -28,12 +28,9 @@ internal class SigningCredentialService : IValidationKeysStore, ISigningCredenti
         ArgumentValidation.ValidateString(nameof(octoIdentityOptions.Value.KeyFilePassword),
             octoIdentityOptions.Value.KeyFilePassword);
 
-        if (File.Exists(octoIdentityOptions.Value.KeyFilePath))
+        var certificate = SigningCertificateLoader.TryLoad(octoIdentityOptions.Value);
+        if (certificate != null)
         {
-            Logger.Debug($"SigninCredentialExtension adding key from file {octoIdentityOptions.Value.KeyFilePath}");
-
-            var certificate = X509CertificateLoader.LoadPkcs12FromFile(octoIdentityOptions.Value.KeyFilePath,
-                octoIdentityOptions.Value.KeyFilePassword);
             _credential = new SigningCredentials(new X509SecurityKey(certificate), SecurityAlgorithms.RsaSha256);
 
             var keyInfo = new SecurityKeyInfo
@@ -42,10 +39,6 @@ internal class SigningCredentialService : IValidationKeysStore, ISigningCredenti
                 SigningAlgorithm = _credential.Algorithm
             };
             _keys = new[] { keyInfo };
-        }
-        else
-        {
-            Logger.Error($"SigninCredentialExtension cannot find key file {octoIdentityOptions.Value.KeyFilePath}");
         }
     }
 

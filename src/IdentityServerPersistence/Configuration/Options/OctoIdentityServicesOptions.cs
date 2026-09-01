@@ -23,9 +23,11 @@ public class OctoIdentityServicesOptions
     }
 
     /// <summary>
-    /// The license key for the IdentityServer.
+    /// The license key for Duende IdentityServer. Optional since AB#4989/AB#4990: the service
+    /// starts without it (Duende 8 runs on an expired/missing license with log warnings only)
+    /// and the property is removed entirely once the OpenIddict migration lands.
     /// </summary>
-    public required string IdentityServerLicenseKey { get; set; }
+    public string? IdentityServerLicenseKey { get; set; }
 
     /// <summary>
     /// The license key for the AutoMapper.

@@ -20,15 +20,15 @@ internal class ConfigureIdentityServerOptions(
 
     public void Configure(string? name, IdentityServerOptions options)
     {
-        if (string.IsNullOrWhiteSpace(octoIdentityOptions.Value.IdentityServerLicenseKey))
-        {
-            throw InitializationException.EnsureLicenseKey(
-                "IdentityServer",
-                "OCTO_IDENTITY__IdentityServerLicenseKey");
-        }
-
         options.IssuerUri = octoIdentityOptions.Value.AuthorityUrl.EnsureEndsWith("/");
-        options.LicenseKey = octoIdentityOptions.Value.IdentityServerLicenseKey;
+
+        // AB#4989/AB#4990: the license key is no longer required at boot. Duende 8 keeps running
+        // on a missing/expired license (log warnings only), which carries the fleet until the
+        // OpenIddict swap removes Duende entirely.
+        if (!string.IsNullOrWhiteSpace(octoIdentityOptions.Value.IdentityServerLicenseKey))
+        {
+            options.LicenseKey = octoIdentityOptions.Value.IdentityServerLicenseKey;
+        }
 
         // Automatic Key Management is not included in the Duende Community Edition (V2) license
         // and Duende 8.x fails hard at startup when the option is enabled without the feature

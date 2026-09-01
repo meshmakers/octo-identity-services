@@ -30,7 +30,7 @@ internal class AzureEntraIdAuthSchemeCreator : IAuthSchemeCreator<RtAzureEntraId
         options.ClientSecret = identityProvider.ClientSecret;
         options.CallbackPath = "/auth/signin-callback";
         // Sign in to IdentityServer's external cookie scheme so ExternalLoginCallback can read it
-        options.SignInScheme = AuthenticationConstants.IdentityServerConstants.ExternalCookieAuthenticationScheme;
+        options.SignInScheme = OctoAuthSchemes.ExternalCookieScheme;
         // Request email scope to get user's email address
         options.Scope.Add("email");
         options.TokenValidationParameters.NameClaimType = "name";

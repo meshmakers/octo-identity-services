@@ -3,6 +3,7 @@ using IdentityServerPersistence;
 using IdentityServerPersistence.Configuration.Options;
 using IdentityServerPersistence.Services.DynamicClientRegistration;
 using IdentityServerPersistence.SystemStores;
+using Meshmakers.Octo.Backend.Authentication;
 using Meshmakers.Octo.Backend.Authentication.Consumers;
 using Meshmakers.Octo.Backend.Authentication.DynamicAuth;
 using Meshmakers.Octo.Backend.IdentityServices.Configuration;
@@ -10,6 +11,7 @@ using Meshmakers.Octo.Backend.IdentityServices.Consumers;
 using Meshmakers.Octo.Backend.IdentityServices.Cookies;
 using Meshmakers.Octo.Backend.IdentityServices.Resources;
 using Meshmakers.Octo.Backend.IdentityServices.Middleware;
+using Meshmakers.Octo.Backend.IdentityServices.OpenIddict;
 using Meshmakers.Octo.Backend.IdentityServices.Routing;
 using Meshmakers.Octo.Backend.IdentityServices.Services;
 using IQrCodeService = Meshmakers.Octo.Backend.IdentityServices.Services.IQrCodeService;
@@ -217,6 +219,11 @@ try
     // Persist IdentityServer error/failure events to OctoMesh runtime event log
     builder.Services.AddTransient<IEventSink, OctoEventSink>();
 
+    // AB#4989/AB#4990: claims parity layer for OpenIddict-issued tokens (tenant claims,
+    // effective client roles, audience resolution). Consumed by the OpenIddict interaction
+    // layer; registered up front so the migration commits can build on it.
+    builder.Services.AddScoped<IOctoTokenClaimsService, OctoTokenClaimsService>();
+
     // Scope auth cookies per tenant to prevent cross-tenant session leakage.
     // Identity.Application and idsrv cookies get a .{tenantId} suffix.
     var tenantCookieManager = new TenantCookieManager();
@@ -228,8 +235,8 @@ try
         // Explicit (was: 14-day framework default) — sliding, so active users stay signed in.
         o.ExpireTimeSpan = TimeSpan.FromDays(7);
     });
-    builder.Services.Configure<CookieAuthenticationOptions>("idsrv", o => o.CookieManager = tenantCookieManager);
-    builder.Services.Configure<CookieAuthenticationOptions>("idsrv.session", o => o.CookieManager = tenantCookieManager);
+    builder.Services.Configure<CookieAuthenticationOptions>(OctoAuthSchemes.ServerSsoCookieScheme, o => o.CookieManager = tenantCookieManager);
+    builder.Services.Configure<CookieAuthenticationOptions>(OctoAuthSchemes.ServerSsoSessionCookieScheme, o => o.CookieManager = tenantCookieManager);
 
     // Service that periodically cleans up tokens in the grant database
     builder.Services.AddSingleton<IHostedService, TokenCleanupHostService>();

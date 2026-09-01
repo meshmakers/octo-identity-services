@@ -10,6 +10,7 @@ using Duende.IdentityServer.Stores;
 using IdentityServerPersistence.Services;
 using IdentityServerPersistence.Services.Login;
 using IdentityServerPersistence.SystemStores;
+using Meshmakers.Octo.Backend.Authentication;
 using Meshmakers.Octo.Backend.Authentication.Services;
 using Meshmakers.Octo.ConstructionKit.Contracts;
 using Meshmakers.Octo.Runtime.Contracts.MongoDb.Configuration;
@@ -472,7 +473,7 @@ public class AuthApiController(
         AuthenticateResult result;
         try
         {
-            result = await HttpContext.AuthenticateAsync(IdentityServerConstants.ExternalCookieAuthenticationScheme);
+            result = await HttpContext.AuthenticateAsync(OctoAuthSchemes.ExternalCookieScheme);
         }
         catch (Exception ex)
         {
@@ -530,7 +531,7 @@ public class AuthApiController(
             {
                 logger.LogWarning("Self-registration denied for provider {Provider}, user {UserId}",
                     provider, userIdClaim.Value);
-                await HttpContext.SignOutAsync(IdentityServerConstants.ExternalCookieAuthenticationScheme);
+                await HttpContext.SignOutAsync(OctoAuthSchemes.ExternalCookieScheme);
                 return Redirect($"/{tenantId}/error?error=Self-registration is not allowed for this provider");
             }
 
@@ -582,7 +583,7 @@ public class AuthApiController(
             clientId: null), HttpContext.RequestAborted);
 
         // 7. Clean up external cookie
-        await HttpContext.SignOutAsync(IdentityServerConstants.ExternalCookieAuthenticationScheme);
+        await HttpContext.SignOutAsync(OctoAuthSchemes.ExternalCookieScheme);
 
         // 8. Handle return URL
         if (interaction.IsValidReturnUrl(returnUrl) || Url.IsLocalUrl(returnUrl))
@@ -752,7 +753,7 @@ public class AuthApiController(
             // signInManager.SignOutAsync() only clears the Identity.Application cookie,
             // but the idsrv cookie maintains the SSO session. Without clearing it,
             // clients redirecting back will get a new authorization code automatically.
-            await HttpContext.SignOutAsync(IdentityServerConstants.DefaultCookieAuthenticationScheme);
+            await HttpContext.SignOutAsync(OctoAuthSchemes.ServerSsoCookieScheme);
 
             await events.RaiseAsync(new UserLogoutSuccessEvent(
                 subjectId,

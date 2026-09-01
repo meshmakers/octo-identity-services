@@ -41,8 +41,10 @@ export OCTO_Identity__SigningCertificatePassword="secret"
 ##### Duende license and key management
 
 `Identity:IdentityServerLicenseKey` (`OCTO_IDENTITY__IdentityServerLicenseKey`) carries the Duende
-IdentityServer license JWT and is required — startup fails with an `InitializationException` when it
-is missing. Since the switch to the Duende **Community Edition (V2)** license (AB#4988), Duende's
+IdentityServer license JWT. It is **optional** since AB#4989/AB#4990: the service starts without it
+(Duende 8 runs on a missing/expired license with log warnings only), which bridges the fleet until
+the OpenIddict migration removes Duende — and this setting — entirely. When set, the key is still
+passed to Duende. Since the switch to the Duende **Community Edition (V2)** license (AB#4988), Duende's
 **Automatic Key Management is disabled** in `ConfigureIdentityServerOptions`
 (`options.KeyManagement.Enabled = false`): the feature is not included in the Community license and
 Duende 8.x throws at startup when the option is enabled without it being licensed. The service never

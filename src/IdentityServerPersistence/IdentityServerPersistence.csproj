@@ -8,6 +8,9 @@
     <ItemGroup>
         <PackageReference Include="AutoMapper" Version="16.2.0" />
         <PackageReference Include="Duende.IdentityServer" Version="8.0.6" />
+        <!-- AB#4989: store abstractions for the OpenIddict migration; the Duende package
+             above is removed with the final swap commit of the migration branch. -->
+        <PackageReference Include="OpenIddict.Abstractions" Version="7.6.0" />
         <FrameworkReference Include="Microsoft.AspNetCore.App" />
     </ItemGroup>
 

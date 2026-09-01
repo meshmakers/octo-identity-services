@@ -26,7 +26,7 @@ internal class FacebookAuthSchemeCreator : IAuthSchemeCreator<RtFacebookIdentity
         options.ClientId = identityProvider.ClientId;
         options.ClientSecret = identityProvider.ClientSecret;
         // Sign in to IdentityServer's external cookie scheme so ExternalLoginCallback can read it
-        options.SignInScheme = AuthenticationConstants.IdentityServerConstants.ExternalCookieAuthenticationScheme;
+        options.SignInScheme = OctoAuthSchemes.ExternalCookieScheme;
 
         var displayName = identityProvider.DisplayName ?? identityProvider.Name;
         return new AuthenticationScheme(schemeName, displayName, typeof(FacebookHandler));
