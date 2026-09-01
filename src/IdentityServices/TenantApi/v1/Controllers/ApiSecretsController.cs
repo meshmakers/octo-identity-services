@@ -13,6 +13,7 @@ using Meshmakers.Octo.Services.Contracts.DistributionEventHub.Messages;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Persistence.IdentityCkModel.Generated.System.Identity.v2;
+using Meshmakers.Octo.Backend.IdentityServices.OpenIddict;
 
 namespace Meshmakers.Octo.Backend.IdentityServices.TenantApi.v1.Controllers;
 
@@ -160,7 +161,7 @@ public class ApiSecretsController : ControllerBase
         }
 
         secretDto.ValueClearText = Guid.NewGuid().ToString();
-        secretDto.ValueEncrypted = secretDto.ValueClearText.Sha256();
+        secretDto.ValueEncrypted = OctoSecretHasher.HashSecret(secretDto.ValueClearText);
 
         RtSecretRecord secret = new();
         ApplyToApiSecret(secret, secretDto);
@@ -201,7 +202,7 @@ public class ApiSecretsController : ControllerBase
         }
 
         secretDto.ValueClearText = Guid.NewGuid().ToString();
-        secretDto.ValueEncrypted = secretDto.ValueClearText.Sha256();
+        secretDto.ValueEncrypted = OctoSecretHasher.HashSecret(secretDto.ValueClearText);
 
         RtSecretRecord secret = new();
         ApplyToApiSecret(secret, secretDto);

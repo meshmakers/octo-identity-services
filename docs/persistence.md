@@ -199,7 +199,8 @@ All generated entities:
 - `RtUser` - User identity
 - `RtRole` - Role definition
 - `RtGroup` - Role group with user/group members
-- `RtPersistedGrant` - OAuth tokens/grants
+- `RtPersistedGrant` - OAuth tokens/grants (Duende; superseded by the OpenIddict types below at the AB#4989 cutover)
+- `RtOAuthAuthorization`, `RtOAuthToken` - OpenIddict authorization/token model (AB#4991, model `System.Identity-2.12.0`)
 - `RtApiResource`, `RtApiScope`, `RtIdentityResource`
 - `RtIdentityProvider` and subtypes
 
@@ -213,7 +214,11 @@ Located in `src/IdentityServerPersistence/SystemStores/`:
 |-------|-----------|---------|
 | `ClientStore` | `IOctoClientStore` | OAuth/OIDC clients |
 | `ResourceStore` | `IOctoResourceStore` | API resources, scopes, identity resources |
-| `PersistentGrantStore` | `IOctoPersistentGrantStore` | Tokens, grants, consent |
+| `PersistentGrantStore` | `IOctoPersistentGrantStore` | Tokens, grants, consent (Duende) |
+| `OpenIddict/OpenIddictApplicationStore` | `IOpenIddictApplicationStore<RtClient>` | OpenIddict view of clients (read-only projection incl. `ClientPermissionsMapper` grant-type→permissions transform, AB#4991) |
+| `OpenIddict/OpenIddictScopeStore` | `IOpenIddictScopeStore<RtApiScope>` | OpenIddict view of API scopes incl. scope→audience resolution |
+| `OpenIddict/OpenIddictAuthorizationStore` | `IOpenIddictAuthorizationStore<RtOAuthAuthorization>` | OpenIddict authorizations (consent / flow links), per tenant |
+| `OpenIddict/OpenIddictTokenStore` | `IOpenIddictTokenStore<RtOAuthToken>` | OpenIddict tokens (codes, refresh, device/user codes), per tenant |
 | `IdentityProviderStore` | `IOctoIdentityProviderStore` | External identity providers |
 | `OctoUserStore` | `IUserStore<RtUser>` | ASP.NET Identity users |
 | `OctoRoleStore` | `IRoleStore<RtRole>` | ASP.NET Identity roles |

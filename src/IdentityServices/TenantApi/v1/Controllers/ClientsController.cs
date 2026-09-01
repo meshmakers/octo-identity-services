@@ -15,6 +15,7 @@ using Meshmakers.Octo.Services.Contracts.DistributionEventHub.Messages;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Persistence.IdentityCkModel.Generated.System.Identity.v2;
+using Meshmakers.Octo.Backend.IdentityServices.OpenIddict;
 
 namespace Meshmakers.Octo.Backend.IdentityServices.TenantApi.v1.Controllers;
 
@@ -664,7 +665,7 @@ public class ClientsController : ControllerBase
         {
             applicationClient.ClientSecrets = new AttributeRecordValueList<RtSecretRecord>
             {
-                new() { Value = clientDto.ClientSecret.Sha256() }
+                new() { Value = OctoSecretHasher.HashSecret(clientDto.ClientSecret) }
             };
         }
 

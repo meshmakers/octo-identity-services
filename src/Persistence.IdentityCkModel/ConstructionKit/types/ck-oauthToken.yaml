@@ -1,0 +1,61 @@
+"$schema": "https://schemas.meshmakers.cloud/construction-kit-elements.schema.json"
+types:
+  - typeId: OAuthToken
+    description: "OpenIddict token (AB#4989/AB#4991): server-side record of authorization codes, refresh tokens and device/user codes - status, lifetime and (for reference tokens) the protected payload looked up via the hashed ReferenceId. Replaces the token role of PersistedGrant after the Duende -> OpenIddict cutover. Stored per tenant like PersistedGrant (AB#1586)."
+    derivedFromCkTypeId: ${System}/Entity
+    isFinal: true
+    isAbstract: false
+    attributes:
+      - id: ${this}/AuthorizationRtId
+        name: AuthorizationRtId
+        isOptional: true
+      - id: ${this}/TokenType
+        name: TokenType
+        isOptional: true
+      - id: ${this}/ReferenceId
+        name: ReferenceId
+        isOptional: true
+      - id: ${this}/SubjectId
+        name: SubjectId
+        isOptional: true
+      - id: ${this}/ClientId
+        name: ClientId
+        isOptional: true
+      - id: ${this}/Status
+        name: Status
+        isOptional: true
+      - id: ${this}/Payload
+        name: Payload
+        isOptional: true
+      - id: ${this}/Properties
+        name: Properties
+        isOptional: true
+      - id: ${this}/CreationDateTime
+        name: CreationDateTime
+        isOptional: true
+      - id: ${this}/ExpirationDateTime
+        name: ExpirationDateTime
+        isOptional: true
+      - id: ${this}/RedemptionDateTime
+        name: RedemptionDateTime
+        isOptional: true
+    indexes:
+      # ReferenceId is only set for reference tokens (device/user codes); a unique index would
+      # collide on the many null values, so uniqueness is a store-level invariant (like the
+      # former PersistedGrant.GrantKey).
+      - indexType: Ascending
+        fields:
+          - attributePaths:
+              - ReferenceId
+      - indexType: Ascending
+        fields:
+          - attributePaths:
+              - SubjectId
+      - indexType: Ascending
+        fields:
+          - attributePaths:
+              - AuthorizationRtId
+      - indexType: Ascending
+        fields:
+          - attributePaths:
+              - ExpirationDateTime

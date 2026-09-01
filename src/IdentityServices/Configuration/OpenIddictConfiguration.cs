@@ -1,4 +1,7 @@
 using IdentityServerPersistence.Configuration.Options;
+using IdentityServerPersistence.SystemStores.OpenIddict;
+using Meshmakers.Octo.Backend.IdentityServices.OpenIddict;
+using Persistence.IdentityCkModel.Generated.System.Identity.v2;
 using Meshmakers.Common.Shared;
 using Meshmakers.Octo.Backend.IdentityServices.Services;
 using Meshmakers.Octo.Runtime.Contracts.MongoDb.Configuration;
@@ -34,8 +37,19 @@ public static class OpenIddictConfiguration
         builder.Services.AddOpenIddict()
             .AddCore(coreOptions =>
             {
-                // Entity resolution + custom stores over the existing Rt* CK entities are
-                // registered in AddOctoIdentityPersistence (AB#4991).
+                // Custom stores projecting the existing Rt* CK entities (AB#4991) — the data
+                // stays in place, only the mapping layer changes.
+                coreOptions.SetDefaultApplicationEntity<RtClient>();
+                coreOptions.SetDefaultScopeEntity<RtApiScope>();
+                coreOptions.SetDefaultAuthorizationEntity<RtOAuthAuthorization>();
+                coreOptions.SetDefaultTokenEntity<RtOAuthToken>();
+                coreOptions.ReplaceApplicationStore<RtClient, OpenIddictApplicationStore>();
+                coreOptions.ReplaceScopeStore<RtApiScope, OpenIddictScopeStore>();
+                coreOptions.ReplaceAuthorizationStore<RtOAuthAuthorization, OpenIddictAuthorizationStore>();
+                coreOptions.ReplaceTokenStore<RtOAuthToken, OpenIddictTokenStore>();
+
+                // Duende-hash-compatible client secret validation (existing secrets keep working).
+                coreOptions.ReplaceApplicationManager(typeof(OctoApplicationManager));
 
                 // CRITICAL: OpenIddict's application/scope cache is process-wide while our
                 // stores resolve entities per request tenant — caching would leak clients
