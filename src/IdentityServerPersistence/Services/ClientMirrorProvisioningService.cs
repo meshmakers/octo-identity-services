@@ -4,6 +4,7 @@ using Meshmakers.Octo.Runtime.Contracts.MongoDb;
 using Meshmakers.Octo.Runtime.Contracts.MongoDb.Repositories;
 using Meshmakers.Octo.Runtime.Contracts.Repositories;
 using Meshmakers.Octo.Runtime.Contracts.Repositories.Query;
+using Meshmakers.Octo.Runtime.Contracts.RepositoryEntities;
 using Microsoft.Extensions.Logging;
 using Persistence.IdentityCkModel.Generated.System.Identity.v2;
 
@@ -503,6 +504,110 @@ public class ClientMirrorProvisioningService(
         return true;
     }
 
+    public async Task<MirrorSecretRotationResult?> RotateMirrorSecretAsync(
+        string parentTenantId, string parentClientId, string childTenantId)
+    {
+        if (string.IsNullOrWhiteSpace(parentTenantId))
+        {
+            throw new ArgumentException("Parent tenant id is required.", nameof(parentTenantId));
+        }
+
+        if (string.IsNullOrWhiteSpace(parentClientId))
+        {
+            throw new ArgumentException("Parent client id is required.", nameof(parentClientId));
+        }
+
+        if (string.IsNullOrWhiteSpace(childTenantId))
+        {
+            throw new ArgumentException("Child tenant id is required.", nameof(childTenantId));
+        }
+
+        var parentRepo = await systemContext.TryFindTenantRepositoryAsync(parentTenantId);
+        if (parentRepo == null)
+        {
+            return null;
+        }
+
+        using var parentSession = await parentRepo.GetSessionAsync();
+
+        // The tracking row is the authority on "this client is mirrored into that tenant". Rotating
+        // against an untracked pair would mint a secret on some unrelated client that happens to
+        // share the id in the child tenant.
+        var lookup = await parentRepo.GetRtEntitiesByTypeAsync<RtClientMirror>(
+            parentSession,
+            RtEntityQueryOptions.Create()
+                .FieldFilter(
+                    nameof(RtClientMirror.ParentClientId),
+                    FieldFilterOperator.Equals,
+                    parentClientId)
+                .FieldFilter(
+                    nameof(RtClientMirror.ChildTenantId),
+                    FieldFilterOperator.Equals,
+                    childTenantId));
+        var mirrorRow = lookup.Items.FirstOrDefault();
+        if (mirrorRow == null)
+        {
+            return null;
+        }
+
+        var childRepo = await systemContext.TryFindTenantRepositoryAsync(childTenantId);
+        if (childRepo == null)
+        {
+            logger.LogWarning(
+                "Mirror secret rotation: child tenant '{ChildTenantId}' not found", childTenantId);
+            return null;
+        }
+
+        using var childSession = await childRepo.GetSessionAsync();
+        var existing = await childRepo.GetRtEntitiesByTypeAsync<RtClient>(
+            childSession,
+            RtEntityQueryOptions.Create()
+                .FieldFilter(nameof(RtClient.ClientId), FieldFilterOperator.Equals, parentClientId));
+        var childClient = existing.Items.FirstOrDefault();
+        if (childClient == null)
+        {
+            logger.LogWarning(
+                "Mirror secret rotation: client '{ClientId}' not present in child tenant '{ChildTenantId}' "
+                + "although a tracking row exists", parentClientId, childTenantId);
+            return null;
+        }
+
+        if (!ClientMirrorSecrets.IsConfidential(childClient))
+        {
+            return MirrorSecretRotationResult.PublicClient();
+        }
+
+        var plaintext = ClientMirrorSecrets.GenerateSecret();
+        var replacement = ClientMirrorSecrets.CreateOwnSecretRecord(plaintext);
+
+        var secrets = childClient.ClientSecrets ?? new AttributeRecordValueList<RtSecretRecord>();
+        var retained = secrets.Where(s => !ClientMirrorSecrets.IsOwnSecret(s)).ToList();
+        var rebuilt = new AttributeRecordValueList<RtSecretRecord>();
+        foreach (var secret in retained)
+        {
+            rebuilt.Add(secret);
+        }
+
+        rebuilt.Add(replacement);
+        childClient.ClientSecrets = rebuilt;
+        childClient.RequireClientSecret = true;
+
+        await childRepo.ReplaceOneRtEntityByIdAsync(childSession, childClient.RtId, childClient);
+
+        // Bump the same counter the parent-side rotation uses, so an operator reading the mirror
+        // list can see that this pair moved.
+        mirrorRow.SecretHashVersion += 1;
+        await parentRepo.ReplaceOneRtEntityByIdAsync(parentSession, mirrorRow.RtId, mirrorRow);
+
+        // 🔴 The plaintext is deliberately absent from this line and from every other log statement.
+        logger.LogInformation(
+            "Rotated the own secret of the mirror of client '{ClientId}' in tenant '{ChildTenantId}' "
+            + "(parent '{ParentTenantId}', version {Version})",
+            parentClientId, childTenantId, parentTenantId, mirrorRow.SecretHashVersion);
+
+        return MirrorSecretRotationResult.Issued(plaintext);
+    }
+
     private static async Task<List<RtClientMirror>> GetMirrorsForClientAsync(
         ITenantRepository parentRepo, IOctoSession parentSession, string parentClientId)
     {
@@ -537,6 +642,11 @@ public class ClientMirrorProvisioningService(
     /// <c>AutoProvisionInChildTenants</c> is intentionally NOT propagated — only the parent
     /// owns the flag; a mirror is never itself a source of further mirroring.
     /// </summary>
+    /// <remarks>
+    ///     The mirror's <b>own</b> secret (AB#5061) is not decided here — it depends on what the
+    ///     child tenant already holds, which only <see cref="UpsertClientInChildAsync" /> knows.
+    ///     This method produces the inherited state; that one reconciles the own secret on top.
+    /// </remarks>
     private static RtClient CreateMirrorClient(string parentTenantId, RtClient parentClient)
     {
         return new RtClient
@@ -545,7 +655,11 @@ public class ClientMirrorProvisioningService(
             Enabled = parentClient.Enabled,
             ClientId = parentClient.ClientId,
             ProtocolType = parentClient.ProtocolType,
-            ClientSecrets = parentClient.ClientSecrets,
+            // 🔴 Defensive copy. Assigning the parent's list by reference would make the own-secret
+            // reconciliation below mutate the *parent* client's in-memory secret list — and
+            // SyncMirrorsForClientAsync hands the same parent instance to every child in the loop,
+            // so each child would accumulate the previous children's secrets and write them back.
+            ClientSecrets = CopySecrets(parentClient.ClientSecrets),
             RequireClientSecret = parentClient.RequireClientSecret,
             ClientName = parentClient.ClientName,
             Description = parentClient.Description,
@@ -625,6 +739,7 @@ public class ClientMirrorProvisioningService(
 
         if (existingItems.Count == 0)
         {
+            ReconcileOwnSecret(mirror, existingChild: null, childRepo.TenantId);
             await childRepo.InsertOneRtEntityAsync(childSession, mirror);
             return;
         }
@@ -661,7 +776,89 @@ public class ClientMirrorProvisioningService(
 
         // Reuse the canonical RtId on the child side; secret/scope changes still propagate.
         mirror.RtId = canonical.RtId;
+        ReconcileOwnSecret(mirror, canonical, childRepo.TenantId);
         await childRepo.ReplaceOneRtEntityByIdAsync(childSession, mirror.RtId, mirror);
+    }
+
+    /// <summary>
+    ///     Gives the mirror of a confidential parent its <b>own</b> secret (AB#5061), so that
+    ///     possession of a child tenant's credentials proves that tenant and nothing more.
+    /// </summary>
+    /// <remarks>
+    ///     <para>
+    ///         🔴 <b>Preservation is the load-bearing half.</b> This runs on every provisioning pass
+    ///         and on every parent-side secret rotation, and the mirror written back is built from
+    ///         the <i>parent's</i> state — so without carrying the existing own secret across, each
+    ///         service restart would silently invalidate every per-tenant credential handed out so
+    ///         far. Exactly the trap already documented for the AB#5027 bus consumer, in the one
+    ///         other place a client is replaced wholesale.
+    ///     </para>
+    ///     <para>
+    ///         A public parent gets nothing: it has no secret to shadow, and inventing one would
+    ///         turn a public client into a confidential one in the child tenant only.
+    ///     </para>
+    ///     <para>
+    ///         ⚠️ The inherited copy of the parent's secret stays alongside it — see
+    ///         <see cref="ClientMirrorSecrets" /> for why, and for when it goes away.
+    ///     </para>
+    /// </remarks>
+    private void ReconcileOwnSecret(RtClient mirror, RtClient? existingChild, string childTenantId)
+    {
+        if (!ClientMirrorSecrets.IsConfidential(mirror))
+        {
+            return;
+        }
+
+        // An own secret already handed out for this tenant must survive. Never re-generate:
+        // the plaintext is unrecoverable, so a fresh hash would lock the holder out.
+        var carriedOver = existingChild is null ? null : ClientMirrorSecrets.FindOwnSecret(existingChild);
+        if (carriedOver != null)
+        {
+            mirror.ClientSecrets.Add(new RtSecretRecord
+            {
+                Type = carriedOver.Type,
+                Value = carriedOver.Value,
+                Description = carriedOver.Description
+            });
+            return;
+        }
+
+        // First materialization of this mirror. The generated plaintext is deliberately dropped
+        // here and never persisted or logged; the holder obtains a usable value by rotating
+        // (POST .../mirrors/{childTenantId}/secret), which is the only path that ever reveals one.
+        mirror.ClientSecrets.Add(ClientMirrorSecrets.CreateOwnSecretRecord(
+            ClientMirrorSecrets.GenerateSecret()));
+
+        logger.LogInformation(
+            "Provisioned an own secret for the mirror of client '{ClientId}' in tenant '{ChildTenantId}'. "
+            + "The inherited parent secret is still accepted there (AB#5061) — rotate the mirror secret "
+            + "and migrate the caller to close the instance-wide credential.",
+            mirror.ClientId, childTenantId);
+    }
+
+    /// <summary>
+    ///     Defensive copy of a secret list, so a mirror never shares the parent's list instance.
+    /// </summary>
+    private static AttributeRecordValueList<RtSecretRecord> CopySecrets(
+        IAttributeValueList<RtSecretRecord>? source)
+    {
+        var copy = new AttributeRecordValueList<RtSecretRecord>();
+        if (source == null)
+        {
+            return copy;
+        }
+
+        foreach (var secret in source)
+        {
+            copy.Add(new RtSecretRecord
+            {
+                Type = secret.Type,
+                Value = secret.Value,
+                Description = secret.Description
+            });
+        }
+
+        return copy;
     }
 
     private static bool IsBlueprintRtId(RtClient entity)

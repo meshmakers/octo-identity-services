@@ -243,6 +243,153 @@ public class ClientMirrorProvisioningIntegrationTests : IClassFixture<IdentitySe
             .Which.Value.Should().Be(systemContext.TenantId);
     }
 
+    // ---------- AB#5061: per-tenant mirror secrets ----------
+
+    /// <summary>
+    ///     The headline guarantee against a real database: the mirror materialized in the child
+    ///     tenant carries a secret that is <b>its own</b>, not the parent's copy.
+    /// </summary>
+    [Fact]
+    public async Task MirrorOfConfidentialClient_CarriesAnOwnSecret_DistinctFromTheParents()
+    {
+        await _fixture.InitializeAsync();
+        var systemContext = _fixture.GetSystemContext();
+        await EnsureSystemSetupAsync();
+        var service = CreateService(systemContext);
+
+        var childTenantId = await CreateChildTenantAsync($"child-own-{Guid.NewGuid():N}".Substring(0, 24));
+        var clientId = $"ownsec-{Guid.NewGuid():N}".Substring(0, 24);
+        await CreateFlaggedClientAsync(systemContext, clientId, secretHash: "parent-hash");
+        await service.ProvisionForChildTenantAsync(systemContext.TenantId, childTenantId);
+
+        var childClient = await FindChildClientAsync(systemContext, childTenantId, clientId);
+        childClient.Should().NotBeNull();
+
+        var ownSecret = ClientMirrorSecrets.FindOwnSecret(childClient!);
+        ownSecret.Should().NotBeNull("the mirror needs a credential that proves this tenant only");
+        ownSecret!.Value.Should().NotBe("parent-hash");
+
+        // ⚠️ …and the inherited parent secret is still there. That is the open half of AB#5061:
+        // ci-deploy / octo-ai-adapter / claude-agent still authenticate with it against child
+        // tenants, so it cannot be dropped in the same step.
+        childClient!.ClientSecrets.Select(s => s.Value).Should().Contain("parent-hash");
+    }
+
+    /// <summary>
+    ///     🔴 The preservation guarantee end to end. A parent-side secret rotation rewrites every
+    ///     mirror from the parent's state; the per-tenant credential must survive it, or every
+    ///     rotation would silently lock out everyone who was issued one.
+    /// </summary>
+    [Fact]
+    public async Task ParentSecretRotation_DoesNotInvalidateAnIssuedMirrorSecret()
+    {
+        await _fixture.InitializeAsync();
+        var systemContext = _fixture.GetSystemContext();
+        await EnsureSystemSetupAsync();
+        var service = CreateService(systemContext);
+
+        var childTenantId = await CreateChildTenantAsync($"child-keep-{Guid.NewGuid():N}".Substring(0, 24));
+        var clientId = $"keepsec-{Guid.NewGuid():N}".Substring(0, 24);
+        await CreateFlaggedClientAsync(systemContext, clientId, secretHash: "initial-hash");
+        await service.ProvisionForChildTenantAsync(systemContext.TenantId, childTenantId);
+
+        var issued = await service.RotateMirrorSecretAsync(systemContext.TenantId, clientId, childTenantId);
+        issued.Should().NotBeNull();
+        issued!.Secret.Should().NotBeNullOrWhiteSpace();
+        var issuedHash = ClientMirrorSecrets.Sha256(issued.Secret!);
+
+        var rotatedParent = await UpdateParentClientSecretAsync(systemContext, clientId, "rotated-hash");
+        await service.SyncMirrorsForClientAsync(systemContext.TenantId, rotatedParent);
+
+        var childClient = await FindChildClientAsync(systemContext, childTenantId, clientId);
+        childClient!.ClientSecrets.Select(s => s.Value).Should()
+            .Contain("rotated-hash", "the parent's new secret still propagates")
+            .And.Contain(issuedHash, "the tenant's own credential must survive a parent rotation");
+    }
+
+    /// <summary>
+    ///     Rotation is the only path that ever reveals a mirror secret, and it invalidates the
+    ///     previous one — this is both the distribution mechanism and the rotation mechanism.
+    /// </summary>
+    [Fact]
+    public async Task RotateMirrorSecret_IssuesAFreshValue_AndRetiresThePreviousOne()
+    {
+        await _fixture.InitializeAsync();
+        var systemContext = _fixture.GetSystemContext();
+        await EnsureSystemSetupAsync();
+        var service = CreateService(systemContext);
+
+        var childTenantId = await CreateChildTenantAsync($"child-rot2-{Guid.NewGuid():N}".Substring(0, 24));
+        var clientId = $"rotsec-{Guid.NewGuid():N}".Substring(0, 24);
+        await CreateFlaggedClientAsync(systemContext, clientId, secretHash: "parent-hash");
+        await service.ProvisionForChildTenantAsync(systemContext.TenantId, childTenantId);
+
+        var first = await service.RotateMirrorSecretAsync(systemContext.TenantId, clientId, childTenantId);
+        var second = await service.RotateMirrorSecretAsync(systemContext.TenantId, clientId, childTenantId);
+
+        first!.Secret.Should().NotBe(second!.Secret);
+
+        var childClient = await FindChildClientAsync(systemContext, childTenantId, clientId);
+        var storedValues = childClient!.ClientSecrets.Select(s => s.Value).ToList();
+
+        storedValues.Should().Contain(ClientMirrorSecrets.Sha256(second.Secret!));
+        storedValues.Should().NotContain(ClientMirrorSecrets.Sha256(first.Secret!),
+            "rotation must retire the superseded credential, not accumulate credentials");
+        childClient.ClientSecrets.Count(ClientMirrorSecrets.IsOwnSecret).Should().Be(1);
+        storedValues.Should().Contain("parent-hash", "rotation must not touch the inherited secret");
+    }
+
+    /// <summary>
+    ///     A public client — which is every mirrored client in the shipped seed — has no secret to
+    ///     scope per tenant, so there is nothing to issue and the request is refused rather than
+    ///     silently turning the mirror confidential.
+    /// </summary>
+    [Fact]
+    public async Task RotateMirrorSecret_ForAPublicClient_ReportsNotApplicable()
+    {
+        await _fixture.InitializeAsync();
+        var systemContext = _fixture.GetSystemContext();
+        await EnsureSystemSetupAsync();
+        var service = CreateService(systemContext);
+
+        var childTenantId = await CreateChildTenantAsync($"child-pub-{Guid.NewGuid():N}".Substring(0, 24));
+        var clientId = $"pubcli-{Guid.NewGuid():N}".Substring(0, 24);
+        await CreatePublicFlaggedClientAsync(systemContext, clientId);
+        await service.ProvisionForChildTenantAsync(systemContext.TenantId, childTenantId);
+
+        var childClient = await FindChildClientAsync(systemContext, childTenantId, clientId);
+        childClient!.ClientSecrets.Should().BeEmpty("a public client is mirrored unchanged");
+
+        var result = await service.RotateMirrorSecretAsync(systemContext.TenantId, clientId, childTenantId);
+
+        result.Should().NotBeNull();
+        result!.NotApplicable.Should().BeTrue();
+        result.Secret.Should().BeNull();
+    }
+
+    /// <summary>
+    ///     The tracking row is the authority on "this client is mirrored there". Without that guard,
+    ///     rotation would mint a secret onto any unrelated client that happens to share the id in
+    ///     the named tenant.
+    /// </summary>
+    [Fact]
+    public async Task RotateMirrorSecret_ForAnUntrackedPair_ReturnsNull()
+    {
+        await _fixture.InitializeAsync();
+        var systemContext = _fixture.GetSystemContext();
+        await EnsureSystemSetupAsync();
+        var service = CreateService(systemContext);
+
+        var childTenantId = await CreateChildTenantAsync($"child-untr-{Guid.NewGuid():N}".Substring(0, 24));
+        var clientId = $"untracked-{Guid.NewGuid():N}".Substring(0, 24);
+        await CreateFlaggedClientAsync(systemContext, clientId);
+        // Deliberately never provisioned into that tenant.
+
+        var result = await service.RotateMirrorSecretAsync(systemContext.TenantId, clientId, childTenantId);
+
+        result.Should().BeNull();
+    }
+
     // ---------- helpers ----------
 
     private IClientMirrorProvisioningService CreateService(ISystemContext systemContext)
@@ -308,6 +455,40 @@ public class ClientMirrorProvisioningIntegrationTests : IClassFixture<IdentitySe
                 AutoProvisionInChildTenants = true
             };
             await parentRepo.InsertOneRtEntityAsync(session, client);
+            await session.CommitTransactionAsync();
+        }
+        catch
+        {
+            await session.AbortTransactionAsync();
+            throw;
+        }
+    }
+
+    /// <summary>
+    ///     A flagged client of the shape every mirrored client in the shipped
+    ///     <c>System.Identity.Bootstrap</c> seed actually has: public, PKCE, no secret.
+    /// </summary>
+    private static async Task CreatePublicFlaggedClientAsync(
+        ISystemContext systemContext, string clientId)
+    {
+        var parentRepo = systemContext.GetSystemTenantRepositoryAsAdmin();
+        using var session = await parentRepo.GetSessionAsync();
+        session.StartTransaction();
+        try
+        {
+            await parentRepo.InsertOneRtEntityAsync(session, new RtClient
+            {
+                RtId = OctoObjectId.GenerateNewId(),
+                Enabled = true,
+                ClientId = clientId,
+                ProtocolType = "oidc",
+                RequireClientSecret = false,
+                RequirePkce = true,
+                AllowedGrantTypes = new AttributeStringValueList { "authorization_code" },
+                AllowedScopes = new AttributeStringValueList { "openid", "profile" },
+                ClientSecrets = new AttributeRecordValueList<RtSecretRecord>(),
+                AutoProvisionInChildTenants = true
+            });
             await session.CommitTransactionAsync();
         }
         catch

@@ -34,6 +34,72 @@ public class ClientMirrorControllerTests
         _sut = new ClientMirrorController(_clientStore, _mirrorService);
     }
 
+    // ----- POST mirrors/{childTenantId}/secret (AB#5061) --------------------
+
+    /// <summary>
+    ///     The happy path is the distribution mechanism: the caller gets the plaintext back once,
+    ///     because it is unrecoverable afterwards.
+    /// </summary>
+    [Fact]
+    public async Task RotateSecret_ReturnsTheIssuedSecretOnce()
+    {
+        _mirrorService.RotateMirrorSecretAsync(ParentTenantId, ClientId, ChildTenantId)
+            .Returns(MirrorSecretRotationResult.Issued("brand-new-secret"));
+
+        var result = await _sut.RotateSecret(ClientId, ChildTenantId);
+
+        var dto = result.Should().BeOfType<OkObjectResult>()
+            .Which.Value.Should().BeOfType<MirrorSecretResponseDto>().Subject;
+        dto.Secret.Should().Be("brand-new-secret");
+        dto.ClientId.Should().Be(ClientId);
+        dto.ChildTenantId.Should().Be(ChildTenantId);
+    }
+
+    /// <summary>
+    ///     🔴 The response DTO carries a live credential, so its <c>ToString</c> must not render it —
+    ///     a record's generated <c>ToString</c> prints every property, and any interpolation into a
+    ///     log line or exception message would leak the secret.
+    /// </summary>
+    [Fact]
+    public void MirrorSecretResponseDto_ToString_DoesNotRenderTheSecret()
+    {
+        var dto = new MirrorSecretResponseDto(ClientId, ChildTenantId, "brand-new-secret");
+
+        dto.ToString().Should().NotContain("brand-new-secret");
+        dto.ToString().Should().Contain(ClientId);
+    }
+
+    /// <summary>Same guarantee one layer down, on the service result.</summary>
+    [Fact]
+    public void MirrorSecretRotationResult_ToString_DoesNotRenderTheSecret()
+    {
+        MirrorSecretRotationResult.Issued("brand-new-secret").ToString()
+            .Should().NotContain("brand-new-secret");
+    }
+
+    [Fact]
+    public async Task RotateSecret_UntrackedPair_Returns404()
+    {
+        _mirrorService.RotateMirrorSecretAsync(ParentTenantId, ClientId, ChildTenantId)
+            .Returns((MirrorSecretRotationResult?)null);
+
+        var result = await _sut.RotateSecret(ClientId, ChildTenantId);
+
+        result.Should().BeOfType<NotFoundObjectResult>();
+    }
+
+    [Fact]
+    public async Task RotateSecret_PublicClient_Returns400()
+    {
+        _mirrorService.RotateMirrorSecretAsync(ParentTenantId, ClientId, ChildTenantId)
+            .Returns(MirrorSecretRotationResult.PublicClient());
+
+        var result = await _sut.RotateSecret(ClientId, ChildTenantId);
+
+        result.Should().BeOfType<BadRequestObjectResult>()
+            .Which.Value.Should().BeOfType<OperationFailedErrorDto>();
+    }
+
     // ----- GET mirrors -----------------------------------------------------
 
     [Fact]

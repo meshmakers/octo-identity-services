@@ -927,7 +927,52 @@ endpoint can tell those callers apart; the credential is instance-wide by constr
 mirroring feature. The validator logs a warning whenever a mirroring source obtains a system-tenant
 token, and system-route authorization must not treat `tenant_id == systemTenant` on a
 client-credentials token as proof of provenance on its own. A real fix requires per-tenant mirror
-secrets.
+secrets — **started in AB#5061, see below; still open.**
+
+### Per-Tenant Mirror Secrets (AB#5061) — step 1 of 2
+
+Every mirror of a **confidential** parent client now additionally carries its **own** generated
+secret, marked `Description = "octo:mirror-own-secret"`. Possession of it proves exactly one tenant,
+which is what the residual risk above needs. Public clients — which is every mirrored client in the
+shipped `System.Identity.Bootstrap` seed, plus every `octo-dcr-*` registration — are mirrored
+unchanged and get no secret.
+
+**Distribution.** Stored secrets are SHA-256 hashed and unrecoverable, so a secret that is never
+handed out is a credential nobody can use. It is therefore issued on demand and returned exactly
+once:
+
+```
+POST {parentTenantId}/v1/clients/{clientId}/mirrors/{childTenantId}/secret
+→ 200 { "clientId": "...", "childTenantId": "...", "secret": "<plaintext, shown once>" }
+→ 400 the parent client is public — nothing to issue
+→ 404 no mirror is tracked for that pair
+```
+
+Requires `IdentityApiFullAccess` in the **parent** tenant. Calling it again rotates and retires the
+previous value. Parent → child is legitimate delegation; the escalation being closed is the opposite
+direction. Nothing recoverable is persisted, and no endpoint reads a mirror secret back.
+
+🔴 **The own secret is preserved** across re-provisioning and across parent-side secret rotation.
+Both paths rewrite the mirror from the parent's state, so without preservation every service restart
+would silently invalidate every per-tenant credential issued so far.
+
+⚠️ **The gap is not closed yet.** The inherited copy of the parent secret is *still accepted*,
+because live fleet credentials authenticate with it against child tenants today — `ci-deploy` /
+`ci-deploy-{cluster}` (the workload-deployment pipeline, one Vault credential pair per cluster),
+`octo-ai-adapter` (`McpTokenIssuer`) and `claude-agent`. Removing it in the same step would break
+every workload rollout on every cluster. **Until the follow-up step removes the inherited secret,
+`tenant_id == systemTenant` on a client-credentials token remains unproven and AB#5055 stays
+blocked.** The migration sequence and the open end-state decision are in
+`docs/CONCEPT-PER-TENANT-MIRROR-SECRETS.md`.
+
+Tests: `tests/IdentityServerPersistence.UnitTests/Services/ClientMirrorOwnSecretTests.cs` (own secret
+distinct from the parent's, public client untouched, preservation across re-provisioning and parent
+rotation, no sibling-tenant secret leak, no secret in the rendered log output, and an explicit
+assertion that the inherited secret is *still* there),
+`ClientMirrorSecretsTests.cs` (hash convention pinned against published SHA-256 digests — a
+divergence would store rotated secrets in a shape the token endpoint cannot match) and
+`tests/IdentityServices.IntegrationTests/Persistence/ClientMirrorProvisioningIntegrationTests.cs`
+(the same over real MongoDB, plus rotation retiring the previous value).
 
 **Integrator note.** If a `client_credentials` request that used to work now returns
 `invalid_request`, add `acr_values=tenant:{tenantId}` to the token request — for example:

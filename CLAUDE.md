@@ -615,6 +615,57 @@ a real mirror in MongoDB; the unit tests stub `GetMirrorsAsync`, so only these p
 provisioned mirror is what makes the id ambiguous). `IdentityServices.csproj` grants
 `InternalsVisibleTo` to the integration test project for the shared constants.
 
+### Per-Tenant Mirror Secrets (AB#5061) — step 1 of 2, gap still open
+
+AB#5058 closed the *silent* half of the mirroring escalation. This is the start of the *explicit*
+half: a mirror shares the parent's secret, so a child credential **is** a parent credential and can
+ask for the system tenant outright.
+
+Every mirror of a **confidential** parent now additionally carries its **own** generated secret,
+marked `Description = "octo:mirror-own-secret"` (`ClientMirrorSecrets`). Public clients are mirrored
+unchanged — and every mirrored client in the shipped seed is public
+(`octo-data-refinery-studio`, `octo-cli`, the three swagger clients, `octo-mcpServices-device`), as is
+every `octo-dcr-*` registration. None of them can obtain a `client_credentials` token at all, which is
+why the fix could not simply forbid mirroring.
+
+- **Distribution is the whole design question**, not generation. Secrets are stored SHA-256 hashed and
+  are unrecoverable, and mirrors are materialized by a background loop with nobody present to receive
+  a plaintext. So the value is issued on demand and returned **once**:
+  `POST {parentTenant}/v1/clients/{clientId}/mirrors/{childTenantId}/secret` (`IdentityApiFullAccess`
+  in the **parent**; 400 for a public client, 404 for an untracked pair). Calling again rotates and
+  retires the previous value. Nothing recoverable is persisted and no endpoint reads a secret back —
+  deliberately avoiding both a new class of reversible stored credential and a `System.Identity`
+  schema bump, which would cascade through every dependent CK.
+- 🔴 **Preservation is load-bearing.** `ReconcileOwnSecret` carries an already-issued own secret across
+  re-provisioning *and* across parent-side secret rotation. Both paths rewrite the mirror from the
+  **parent's** state, so without it every service restart would silently invalidate every per-tenant
+  credential handed out. Same trap as the AB#5027 bus consumer's preserve branch.
+- 🔴 **`CreateMirrorClient` now deep-copies `ClientSecrets`.** It previously assigned the parent's list
+  *by reference*; appending an own secret to it would make `SyncMirrorsForClientAsync` hand child *N*
+  the secrets of children 1..*N-1* — a cumulative credential leak between sibling tenants.
+- ⚠️ **The inherited parent secret is still accepted, so the escalation is still open.** The caller
+  inventory (whole `dev` + `main` checkout) found live fleet credentials that authenticate with the
+  parent secret against child tenants and would break instantly: `ci-deploy` / `ci-deploy-{cluster}`
+  (workload-deployment pipeline, one Vault pair per cluster — its own comments state the intent),
+  `octo-ai-adapter` (`McpTokenIssuer`, one Helm/Vault pair per cluster) and `claude-agent`. None of
+  them appears in any git-tracked config; all three are created with
+  `octo-cli -c AddClientCredentialsClient … -apic`. **AB#5055 must keep treating
+  `tenant_id == systemTenant` on a client-credentials token as unproven** until the follow-up step
+  removes the inherited secret.
+- The migration sequence, and the open decision between "own secrets only" and "forbid confidential
+  mirroring entirely" (the counter-model being the per-tenant `octo-pipeline-sa-*` accounts of
+  AB#5027), are in `docs/CONCEPT-PER-TENANT-MIRROR-SECRETS.md`.
+
+Tests: `ClientMirrorOwnSecretTests` (own secret ≠ parent's, public client untouched, preservation on
+both rewrite paths, sibling-leak regression, no secret in the **rendered** log output via
+`CapturingLogger<T>`, and an explicit assertion that the inherited secret is *still* present — that
+test must be inverted when the gap closes), `ClientMirrorSecretsTests` (hash convention pinned against
+published SHA-256 digests; a divergence from Duende's `Sha256()` would store rotated secrets in a
+shape the token endpoint can never match), `ClientMirrorControllerTests` (endpoint branching plus
+`ToString()` redaction on both secret-carrying types) and
+`ClientMirrorProvisioningIntegrationTests` (the same over real MongoDB, plus rotation retiring the
+superseded value).
+
 ### Login Configuration (Self-Registration & Auto-Group Assignment)
 
 Identity providers support login-time configuration via two attributes on the abstract `IdentityProvider` base type:
