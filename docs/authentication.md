@@ -882,6 +882,18 @@ UseRouting()
 
 `UserProfileService.GetUserClaimsAsync()` adds a `tenant_id` claim to identity tokens. This claim is used by `OidcTenantResolutionMiddleware` to extract the tenant from `id_token_hint` during logout (`/connect/endsession`).
 
+**Client-credentials tokens (AB#5032).** `IProfileService` is only invoked for tokens with a subject,
+so `client_credentials` tokens never passed through `UserProfileService` and carried no `tenant_id` at
+all — which is why the backend tenant gates skipped them entirely, letting any client-credentials
+client of this authority address any tenant. `ClientCredentialsRoleTokenValidator`
+(`ICustomTokenRequestValidator`) now stamps the issuing tenant onto that grant as an unprefixed
+`tenant_id` client claim: the tenant from `acr_values=tenant:{tenantId}` when present, otherwise the
+system tenant (the directory the client store actually resolved the client from). It is emitted
+before the role branch, so a client without roles gets it too, and an existing `tenant_id` claim on
+the client is not duplicated. Consumers narrow their exemption behind
+`TenantAuthorizationOptions.ServiceTokenEnforcement` in octo-common-services — default `LogOnly`,
+i.e. unchanged request behaviour plus an audit line per foreign-tenant access.
+
 ### Key Behaviors
 
 | Scenario | Behavior |

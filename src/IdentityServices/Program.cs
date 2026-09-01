@@ -169,6 +169,11 @@ try
 
     builder.Services.AddCors();
 
+    // AB#5032: lets an operator narrow the client-credentials exemption of
+    // UseOctoTenantAuthorization() per environment (OCTO_TENANTAUTHORIZATION__…). The defaults
+    // reproduce the previous behaviour and only add the audit log.
+    builder.Services.AddOctoTenantAuthorization(builder.Configuration);
+
     // Service-managed Identity tenant seed: the single source of truth for Roles, OIDC
     // Identity Resources, API Scopes / Resources, OAuth Clients and the TenantOwners group.
     // Auto-applied by DefaultConfigurationCreatorService on every tenant setup and lifecycle

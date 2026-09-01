@@ -507,6 +507,52 @@ call role-protected endpoints (e.g. the `FromHttpRequest` trigger node). CK mode
   (Testcontainers MongoDB) covers direct-role assignment, group-inherited roles via client membership,
   and removal.
 
+### `tenant_id` on Client-Credentials Tokens (AB#5032)
+
+Until AB#5032 a `client_credentials` access token carried `client_id`, `scope` and (since AB#4183)
+`role` — but **no `tenant_id`**. `UserProfileService` is the only producer of that claim and Duende
+invokes `IProfileService` only for tokens with a subject, so the client-credentials grant never
+reached it. `acr_values=tenant:X` on `/connect/token` only selected which tenant's `ClientStore`
+resolved the client; nothing copied X into the token.
+
+Consequence downstream: every tenant gate on the platform (`TenantAuthorizationMiddleware` in
+octo-common-services, the MCP server's `RuntimeSecurityContextResolver`, the mesh adapter's
+`HttpRequestService`) detects "no `sub`" and **skips** — so with `ValidateAudience = false` on
+asset-repo / platform-services / MCP, *any* client-credentials client of this authority could address
+*any* tenant. Client mirroring (`AutoProvisionInChildTenants`) copies the same secret hash into every
+child tenant, so one credential pair was literally valid instance-wide.
+
+`ClientCredentialsRoleTokenValidator` therefore stamps the issuing tenant as well:
+
+- The tenant comes from `HttpContext.Items[tenantId]`, which `OidcTenantResolutionMiddleware` wrote
+  from `acr_values`. When no `acr_values` was sent, the client lookup ran against the **system
+  tenant** — so that is what is stamped. The claim always states which directory authenticated the
+  client; it is never simply omitted.
+- The claim is emitted **before** the role branch, which returns early for a client with no roles —
+  otherwise exactly the clients most likely to be legacy would keep shipping tenant-less tokens.
+- `ClientClaimsPrefix` is cleared (as it already was for roles), so the claim is `tenant_id`, not
+  `client_tenant_id`. Side effect worth knowing: any claim configured on the client itself is now
+  also emitted unprefixed. Nothing in the platform writes `RtClient.ClientClaims` today, and every
+  client with roles was already in that state.
+- An existing `tenant_id` in `ClientClaims` is left alone rather than duplicated — a duplicate turns
+  the consumers' single-valued `FindFirstValue` into an arbitrary pick.
+- Other grants are untouched: `UserProfileService` already provides `tenant_id` there, and adding it
+  as a *client* claim would duplicate it on every interactive token.
+
+Both big machine consumers already send `acr_values` and therefore get a *matching* tenant for free —
+verified in code, not assumed: `octo-ai-services` `McpTokenIssuer.AcquireAccessTokenAsync` adds
+`acr_values=tenant:{tenantId}` and caches one token **per tenant** (used against `/{tenantId}/mcp`),
+and `octo-mesh-adapter` `ServiceAccountTokenService` adds it from the adapter's own
+`ServiceAccountConfiguration.TenantId` on all three of its client-credentials call sites. So the
+`tenant_id` match alone carries them; no client-id allow-list is needed for either.
+
+Consumers narrow the exemption behind their own staged switch — see octo-common-services CLAUDE.md
+§ "Tenant Authorization — the service-token exemption". This service also calls
+`AddOctoTenantAuthorization(builder.Configuration)` so the switch is settable per environment
+(`OCTO_TENANTAUTHORIZATION__…`); its defaults keep today's behaviour.
+
+Tests: `tests/IdentityServices.UnitTests/Services/ClientCredentialsTokenClaimsTests.cs`.
+
 ### Login Configuration (Self-Registration & Auto-Group Assignment)
 
 Identity providers support login-time configuration via two attributes on the abstract `IdentityProvider` base type:
