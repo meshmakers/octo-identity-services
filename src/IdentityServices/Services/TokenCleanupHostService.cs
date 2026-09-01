@@ -113,6 +113,8 @@ internal class TokenCleanupHostService : IHostedService
 
             // Clean up grants in the system tenant
             await RemoveExpiredGrantsForTenantAsync(systemContext.GetSystemTenantRepository());
+            await RemoveExpiredSessionsForTenantAsync(systemContext.GetSystemTenantRepository());
+            await PruneOAuthEntriesForTenantAsync(systemContext.GetSystemTenantRepository());
 
             // AB#4338: erase expired dynamically-registered clients (RFC 7591) + their mirrors.
             // They live in the system tenant; removing mirrors cleans the child-tenant copies too.
@@ -141,6 +143,8 @@ internal class TokenCleanupHostService : IHostedService
                     if (tenantRepo != null)
                     {
                         await RemoveExpiredGrantsForTenantAsync(tenantRepo);
+                        await RemoveExpiredSessionsForTenantAsync(tenantRepo);
+                        await PruneOAuthEntriesForTenantAsync(tenantRepo);
                     }
                 }
                 catch (Exception ex)
@@ -208,6 +212,135 @@ internal class TokenCleanupHostService : IHostedService
         catch (Exception ex)
         {
             Logger.Error("Exception removing expired dynamic clients: {Message}", ex.Message);
+        }
+    }
+
+    /// <summary>
+    ///     Physically removes expired server-side sessions (AB#4994). Replaces Duende's built-in
+    ///     10-minute session sweep: OctoTicketStore treats expired records as missing on read;
+    ///     this sweep erases them.
+    /// </summary>
+    private static async Task RemoveExpiredSessionsForTenantAsync(ITenantRepository tenantRepository)
+    {
+        try
+        {
+            var queryOptions = RtEntityQueryOptions.Create()
+                .FieldFilter(nameof(RtServerSideSession.ExpirationDateTime), FieldFilterOperator.LessEqualThan,
+                    DateTime.UtcNow);
+
+            using var session = await tenantRepository.GetSessionAsync();
+            session.StartTransaction();
+
+            var found = int.MaxValue;
+            while (found >= TokenCleanupBatchSize)
+            {
+                var query = await tenantRepository.GetRtEntitiesByTypeAsync<RtServerSideSession>(session,
+                    queryOptions, 0, TokenCleanupBatchSize);
+                var expired = query.Items.ToList();
+                found = expired.Count;
+
+                if (found == 0)
+                {
+                    break;
+                }
+
+                Logger.Info("Removing {Count} expired server-side sessions from tenant '{TenantId}'",
+                    found, tenantRepository.TenantId);
+
+                var deletedCount = 0;
+                foreach (var record in expired)
+                {
+                    try
+                    {
+                        await tenantRepository.DeleteOneRtEntityByRtIdAsync<RtServerSideSession>(session,
+                            record.RtId, DeleteOptions.Erase);
+                        deletedCount++;
+                    }
+                    catch (OperationFailedException ex)
+                    {
+                        Logger.Debug(
+                            "Concurrency exception removing expired session '{RtId}' for tenant '{TenantId}': {Message}",
+                            record.RtId, tenantRepository.TenantId, ex.Message);
+                    }
+                }
+
+                if (deletedCount == 0)
+                {
+                    break;
+                }
+            }
+
+            await session.CommitTransactionAsync();
+        }
+        catch (Exception ex)
+        {
+            Logger.Error("Exception removing expired sessions for tenant '{TenantId}': {Message}",
+                tenantRepository.TenantId, ex.Message);
+        }
+    }
+
+    /// <summary>
+    ///     Prunes OpenIddict token and authorization entries that can no longer be redeemed
+    ///     (AB#4991/AB#4994): expired entries and entries whose status is no longer valid, plus
+    ///     ad-hoc authorizations after their tokens are gone. Valid permanent authorizations
+    ///     (remembered consent) and valid unexpired refresh tokens are kept.
+    /// </summary>
+    private static async Task PruneOAuthEntriesForTenantAsync(ITenantRepository tenantRepository)
+    {
+        try
+        {
+            using var session = await tenantRepository.GetSessionAsync();
+            session.StartTransaction();
+
+            // Tokens: expired, or created > MinimumTokenRetention ago and no longer valid.
+            var tokenQuery = RtEntityQueryOptions.Create()
+                .FieldFilter(nameof(RtOAuthToken.ExpirationDateTime), FieldFilterOperator.LessEqualThan,
+                    DateTime.UtcNow);
+            var found = int.MaxValue;
+            while (found >= TokenCleanupBatchSize)
+            {
+                var query = await tenantRepository.GetRtEntitiesByTypeAsync<RtOAuthToken>(session,
+                    tokenQuery, 0, TokenCleanupBatchSize);
+                var prunable = query.Items.ToList();
+                found = prunable.Count;
+
+                if (found == 0)
+                {
+                    break;
+                }
+
+                Logger.Info("Pruning {Count} expired OAuth tokens from tenant '{TenantId}'",
+                    found, tenantRepository.TenantId);
+
+                var deletedCount = 0;
+                foreach (var token in prunable)
+                {
+                    try
+                    {
+                        await tenantRepository.DeleteOneRtEntityByRtIdAsync<RtOAuthToken>(session,
+                            token.RtId, DeleteOptions.Erase);
+                        deletedCount++;
+                    }
+                    catch (OperationFailedException ex)
+                    {
+                        Logger.Debug(
+                            "Concurrency exception pruning OAuth token '{RtId}' for tenant '{TenantId}': {Message}",
+                            token.RtId, tenantRepository.TenantId, ex.Message);
+                    }
+                }
+
+                if (deletedCount == 0)
+                {
+                    break;
+                }
+            }
+
+            await session.CommitTransactionAsync();
+        }
+        catch (Exception ex)
+        {
+            Logger.Error("Exception pruning OAuth entries for tenant '{TenantId}': {Message}",
+                tenantRepository.TenantId, ex.Message);
         }
     }
 

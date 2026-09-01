@@ -69,7 +69,10 @@ public static class OpenIddictConfiguration
                     .SetUserInfoEndpointUris("connect/userinfo")
                     .SetEndSessionEndpointUris("connect/endsession")
                     .SetDeviceAuthorizationEndpointUris("connect/deviceauthorization")
-                    .SetEndUserVerificationEndpointUris($"{systemTenantId}/device")
+                    // Fixed, tenant-free verification endpoint driven by the Angular device page
+                    // (/{tenantId}/device) via XHR; OidcTenantResolutionMiddleware rewrites the
+                    // verification_uri in the device authorization response to the SPA page.
+                    .SetEndUserVerificationEndpointUris("connect/deviceverification")
                     .SetPushedAuthorizationEndpointUris("connect/par")
                     .SetJsonWebKeySetEndpointUris(".well-known/openid-configuration/jwks");
 
@@ -115,6 +118,9 @@ public static class OpenIddictConfiguration
                 // Duende-compatible access token shape: array scope claim, no sub on
                 // client_credentials, no oi_* private claims, no per-token DB entry (AB#4992).
                 serverOptions.AddEventHandler(OctoAccessTokenShapeHandler.Descriptor);
+
+                // Device flow: render the verification result as the JSON DTO the SPA expects.
+                serverOptions.AddEventHandler(OctoDeviceVerificationResponseHandler.Descriptor);
 
                 // RFC 7591 DCR: advertise the hand-rolled /connect/register endpoint in the
                 // discovery document when DCR is enabled (AB#4993 — replaces Duende's

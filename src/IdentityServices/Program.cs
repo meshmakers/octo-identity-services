@@ -225,6 +225,9 @@ try
     builder.Services.AddScoped<IOctoTokenClaimsService, OctoTokenClaimsService>();
     builder.Services.AddScoped<TenantExchangeProcessor>();
     builder.Services.AddScoped<IIdentityAuditService, IdentityAuditService>();
+    // Server-side session ticket store (AB#4994); wired onto the application cookie with the
+    // OpenIddict swap (replaces Duende's AddServerSideSessions).
+    builder.Services.AddSingleton<OctoTicketStore>();
 
     // Scope auth cookies per tenant to prevent cross-tenant session leakage.
     // Identity.Application and idsrv cookies get a .{tenantId} suffix.
