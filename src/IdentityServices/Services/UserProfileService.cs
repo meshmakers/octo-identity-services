@@ -2,6 +2,7 @@ using System.Security.Claims;
 using Duende.IdentityServer.AspNetIdentity;
 using Duende.IdentityServer.Extensions;
 using Duende.IdentityServer.Models;
+using IdentityModel;
 using IdentityServerPersistence.Services;
 using Meshmakers.Octo.Services.Infrastructure;
 using Microsoft.AspNetCore.Identity;
@@ -38,6 +39,11 @@ public class UserProfileService : ProfileService<RtUser>
     {
         await base.GetProfileDataAsync(context, cancellationToken);
 
+        // AB#5026 delegation: MUST run right after the base call, which has just resolved the user's
+        // FULL role set. See ApplyDelegationClaims for why leaving those in place would make the
+        // whole delegation grant a placebo.
+        ApplyDelegationClaims(context.Subject, context.IssuedClaims);
+
         var loginTenantId = _httpContextAccessor.HttpContext?.Items[InfrastructureCommon.TenantIdName] as string;
         if (!string.IsNullOrEmpty(loginTenantId))
         {
@@ -55,6 +61,59 @@ public class UserProfileService : ProfileService<RtUser>
                 }
             }
         }
+    }
+
+    /// <summary>
+    ///     Replaces the naturally resolved role claims with the delegation role intersection when the
+    ///     token is being issued for a delegation ("on-behalf-of") grant (AB#5026). Returns
+    ///     <c>true</c> when this was a delegated request.
+    /// </summary>
+    /// <remarks>
+    ///     <para>
+    ///         <b>This is the load-bearing half of the delegation grant.</b>
+    ///         <c>OnBehalfOfGrantValidator</c> issues the token for the <b>user's</b> <c>sub</c>, and
+    ///         Duende's <c>AddAspNetIdentity&lt;RtUser&gt;</c> + <see cref="ProfileService{TUser}" />
+    ///         pipeline therefore resolves that user's <b>full</b> role set from
+    ///         <c>OctoUserStore</c> and puts it into <see cref="ProfileDataRequestContext.IssuedClaims" />
+    ///         — exactly as for a normal login. Without stripping those, the role intersection
+    ///         computed by <c>IDelegatedIdentityResolver</c> would never reach the token and the
+    ///         delegation would silently grant the user's full authority.
+    ///     </para>
+    ///     <para>
+    ///         The intersection is carried on the grant result's subject as
+    ///         <see cref="DelegationConstants.DelegatedRoleClaimType" /> claims and re-emitted here as
+    ///         ordinary <c>role</c> claims, so downstream consumers need no delegation-specific code
+    ///         path. The <c>act</c> claim is added unconditionally to <c>IssuedClaims</c> — the same
+    ///         mechanism that gets <c>tenant_id</c> / <c>allowed_tenants</c> into tokens although
+    ///         neither is listed in the <c>octoAPI</c> ApiResource's user claims, so no blueprint /
+    ///         resource-claim change is needed for it.
+    ///     </para>
+    ///     <para>
+    ///         An empty intersection removes every role claim and adds none back: the token is issued
+    ///         but authorizes nothing, so role-gated consumers fail closed.
+    ///     </para>
+    /// </remarks>
+    internal static bool ApplyDelegationClaims(ClaimsPrincipal? subject, ICollection<Claim> issuedClaims)
+    {
+        var actClaim = subject?.FindFirst(DelegationConstants.ActClaimType);
+        if (actClaim == null)
+        {
+            return false;
+        }
+
+        foreach (var roleClaim in issuedClaims.Where(c => c.Type == JwtClaimTypes.Role).ToList())
+        {
+            issuedClaims.Remove(roleClaim);
+        }
+
+        issuedClaims.Add(new Claim(DelegationConstants.ActClaimType, actClaim.Value));
+
+        foreach (var delegatedRole in subject!.FindAll(DelegationConstants.DelegatedRoleClaimType))
+        {
+            issuedClaims.Add(new Claim(JwtClaimTypes.Role, delegatedRole.Value));
+        }
+
+        return true;
     }
 
     /// <summary>

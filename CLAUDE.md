@@ -127,6 +127,67 @@ counterpart of the browser tenant-switch, for the MCP server:
   `tests/IdentityServices.IntegrationTests/Persistence/TenantExchangeIntegrationTests.cs`
   (privilege-escalation regression: resolved roles == B subset, not A's full set).
 
+### Delegation / On-Behalf-Of Grant (AB#5026)
+
+A service-account `Client` authenticates with its own client credentials **and** presents a user's
+access token as `subject_token`; the issued token runs on the **user's** `sub` but carries only the
+**intersection** of both parties' effective roles, plus `act` = the service account's `client_id`.
+
+- **Grant type:** `urn:meshmakers:params:oauth:grant-type:on-behalf-of` — an **own URN**, deliberately
+  not the RFC 8693 token-exchange one. Duende binds one `IExtensionGrantValidator` per grant type, so
+  a shared URN would also share the per-client opt-in, and the only client carrying the token-exchange
+  grant today (`octo-mcpServices-device`) is a **public client with no secret**.
+- **`IDelegatedIdentityResolver` / `DelegatedIdentityResolver`** (`IdentityServerPersistence/Services/`):
+  the policy, **free of every Duende type** (prepares the OpenIddict migration, Epic 4989, and makes
+  the rule unit-testable without protocol mocks). Service-account roles via
+  `IClientRoleStore.GetEffectiveRoleNamesAsync`, user roles via `IUserRoleStore<RtUser>`
+  (= `OctoUserStore`); both therefore include **group-inherited** roles. Intersection compares role
+  names case-insensitively (role lookups key off the upper-invariant `NormalizedName` everywhere).
+  Unknown client / user return a `DelegationDenialReason`, never an exception.
+- **`OnBehalfOfGrantValidator`** (`IdentityServices/Services/`): a thin protocol adapter — raw
+  parameters → out-of-context `subject_token` validation (`JsonWebTokenHandler`, same rationale as
+  `TenantExchangeGrantValidator`) → same-tenant gate → resolver → `GrantValidationResult`. Registered
+  in `Program.cs` alongside the token-exchange validator (additive; `AddCustomTokenRequestValidator`
+  is **not** touched — that one is singular and already holds `ClientCredentialsRoleTokenValidator`).
+- 🔴 **`UserProfileService.ApplyDelegationClaims` is load-bearing.** Because the token runs on the
+  user's `sub`, `AddAspNetIdentity<RtUser>` + `ProfileService<RtUser>` resolve that user's **full**
+  role set into `IssuedClaims`. Left alone, the intersection never reaches the token and the grant is a
+  placebo. The method detects the `act` claim on `context.Subject` and replaces every `role` claim with
+  the intersection (carried as internal `octo_delegated_role` claims on the grant result). `act` is
+  added unconditionally to `IssuedClaims` — the proven `tenant_id` / `allowed_tenants` route — so **no
+  blueprint bump or `octoAPI` ResourceClaims change was needed**.
+- 🔴 **`OidcTenantResolutionMiddleware.ResolveTenantFromTokenRequestAsync` needed a new branch.** Its
+  if/else chain is a closed list of grant types; an unlisted URN falls through to `null`, no tenant is
+  wired into `HttpContext.Items`, and every per-tenant store reads the **system** tenant instead.
+- **Same-tenant only (v1):** `acr_values` tenant == request tenant == `subject_token.tenant_id`, else
+  `invalid_target`. Cross-tenant delegation is v2; the token-exchange grant covers cross-tenant today.
+- **Empty intersection is a success**, not an error — the token carries no `role` claim so role-gated
+  consumers fail closed.
+- 🔴 **`offline_access` is rejected with `invalid_scope`** (audited as a `DelegationFailureEvent`), not
+  just discouraged. The intersection is computed **at issuance**; a `grant_type=refresh_token` request
+  rebuilds the access token from the persisted grant and never re-enters an extension grant validator,
+  so the intersection would freeze and a role revoked on **either** side would keep working for the
+  refresh token's whole lifetime. The check sits in `OnBehalfOfGrantValidator` because Duende derives
+  its refresh-token decision (`ValidatedResources.Resources.OfflineAccess`) solely from the requested
+  scope and validates scopes **before** the extension grant runs — and because `GrantValidationResult`
+  has no "no refresh token" switch. `AllowOfflineAccess=false` on the client is a seeding convention,
+  not an invariant, so it is not relied on. The error description states the reason so an integrator
+  is not left guessing.
+- **Audit:** `DelegationSuccessEvent` / `DelegationFailureEvent` (`DelegationEvents.cs`, category
+  `Delegation`, IDs `50260` / `50261`). `OctoEventSink` persists failures and expands their fields.
+- **No seeded service account here** — the client must carry the URN in `AllowedGrantTypes` or Duende
+  rejects the request before the validator runs. Seeding the real pipeline service account is **AB#5027**.
+- **Tests:** `DelegatedIdentityResolverTests` (intersection arithmetic), `DelegationClaimCompositionTests`
+  (the anti-placebo proof: real `GrantValidationResult` → real `ApplyDelegationClaims`),
+  `OnBehalfOfGrantValidatorTests` (protocol adapter over a real `ExtensionGrantValidationContext` and a
+  genuinely signed `subject_token`: the `offline_access` refusal and the unchanged happy path — note it
+  must call `ValidatedTokenRequest.SetClient(...)`, since a plain `Client = …` initializer leaves
+  `ClientId` empty),
+  `OidcTenantResolutionMiddlewareTests` (new grant branch),
+  `Persistence/DelegatedIdentityIntegrationTests.cs` (real MongoDB, group-inherited roles on both sides).
+
+See `docs/authentication.md` § Delegation / On-Behalf-Of.
+
 ### Multi-Tenant Client Credentials (Auto-Provisioning) — Phase 1 in flight
 
 Schema groundwork for the cross-tenant ClientCredentials feature lives in CK

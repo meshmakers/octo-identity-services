@@ -585,6 +585,145 @@ interactive MCP clients self-register via Dynamic Client Registration (`octo-dcr
 ever consumed the static client (its fixed `:8976` loopback redirects never matched Claude Code's
 random-port callbacks).
 
+### Delegation / On-Behalf-Of (AB#5026)
+
+A **service account** (a machine-to-machine `Client`) can obtain an access token that runs on a
+**user's** identity, so work it performs on that user's behalf is attributable to the user and bounded
+by what *both* parties may do. This is the non-interactive counterpart of "act as this user" — it is
+**not** an impersonation grant: the service account can never exceed its own authority.
+
+```
+POST /connect/token
+  grant_type=urn:meshmakers:params:oauth:grant-type:on-behalf-of
+  client_id={service account}          ← authenticated with its own client credentials
+  client_secret={...}
+  subject_token={the user's access token}
+  subject_token_type=urn:ietf:params:oauth:token-type:access_token
+  acr_values=tenant:{tenantId}
+        │
+        ├── OidcTenantResolutionMiddleware reads acr_values=tenant:{tenantId} and wires that
+        │   tenant's repository into HttpContext.Items (same branch shape as client_credentials)
+        ▼
+  OnBehalfOfGrantValidator (Duende IExtensionGrantValidator)
+        ├── (a) Reject offline_access → invalid_scope (a refreshed token could not re-evaluate
+        │       the intersection; see "Refresh tokens are rejected" below)
+        ├── (b) Validate subject_token out-of-context (signature + issuer + lifetime,
+        │       ValidateAudience=false) → extract sub + tenant_id
+        ├── (c) Same-tenant gate: acr_values tenant == HttpContext tenant == subject_token tenant_id,
+        │       else fail closed → invalid_target
+        ├── (d) IDelegatedIdentityResolver.ResolveAsync(client_id, sub)
+        │        ├── service-account roles: IClientRoleStore.GetEffectiveRoleNamesAsync
+        │        ├── user roles:            OctoUserStore.GetRolesAsync (IUserRoleStore<RtUser>)
+        │        └── effective = INTERSECTION (case-insensitive on role names)
+        └── GrantValidationResult(subject = the USER's sub, authenticationMethod = "delegation",
+                                  claims  = act + the intersection)
+        │
+        ▼
+  UserProfileService.GetProfileDataAsync → ApplyDelegationClaims:
+        strips the user's naturally resolved role claims, emits the intersection as `role`,
+        and emits `act` = the service account's client_id
+```
+
+**The intersection is the whole point.** The delegated token carries
+`role = serviceAccountRoles ∩ userRoles`. A broadly privileged service account acting for a
+low-privilege user gets the user's narrow set; a narrow service account acting for an administrator
+gets the service account's narrow set. Both sides are resolved with the platform's normal effective-role
+machinery, so **group-inherited roles (including nested groups) count on both sides**.
+
+**Why `UserProfileService` has to intervene.** The token is issued for the *user's* `sub`, so Duende's
+`AddAspNetIdentity<RtUser>` + `ProfileService<RtUser>` pipeline resolves that user's **full** role set
+from `OctoUserStore` into `IssuedClaims`, exactly as for a login. Left in place, those claims would
+make the intersection a no-op and the grant a placebo that hands out the user's full authority.
+`UserProfileService.ApplyDelegationClaims` therefore detects the `act` claim on `context.Subject` and
+**replaces** every `role` claim with the intersection carried on the grant result. This is pinned by
+`tests/IdentityServices.UnitTests/Services/DelegationClaimCompositionTests.cs`.
+
+**Empty intersection ⇒ a token with no roles.** This is a successful grant, not an error: the token is
+issued, carries `act` and `sub` but no `role` claim, and every role-gated consumer therefore fails
+closed. Keeping the failure at the authorization boundary (where it is diagnosable) is deliberate;
+turning a role misconfiguration into an opaque token-endpoint error is not.
+
+**`act` claim.** Carries the service account's `client_id` as a flat string (RFC 8693 models `act` as a
+nested object; the flat form is what the consuming pipelines need — widening it later is a breaking
+change for consumers). It is added unconditionally to `IssuedClaims`, the same mechanism that gets
+`tenant_id` / `allowed_tenants` into tokens although neither appears in the `octoAPI` ApiResource's
+user claims — so **no blueprint or resource-claim change is required** for it.
+
+**Own grant-type URN — deliberately not the RFC 8693 token-exchange one.** Duende binds exactly one
+`IExtensionGrantValidator` per grant type, so a shared URN would also share the per-client opt-in.
+The only client carrying `urn:ietf:params:oauth:grant-type:token-exchange` today is
+`octo-mcpServices-device`, a **public client with no secret** (`RequireClientSecret: false`, empty
+`Secrets`) — under a shared URN that secretless client could mint delegated tokens. Separate URNs keep
+the two capabilities as separate, individually auditable `AllowedGrantTypes` entries.
+
+**Same tenant only (v1).** The tenant in `acr_values`, the `tenant_id` of the `subject_token` and the
+tenant the request was wired to must all match (case-insensitively); any divergence is rejected with
+`invalid_target`. Cross-tenant delegation (v2) would have to answer which tenant's role catalogue the
+intersection is taken in and how the service account proves reach into the other tenant. To move a
+user identity across tenants today, use the cross-tenant **token exchange** grant above.
+
+**Client enablement.** The calling client must list
+`urn:meshmakers:params:oauth:grant-type:on-behalf-of` in its `AllowedGrantTypes`; Duende rejects the
+request before the validator runs otherwise. Seeding the actual pipeline service account (client,
+secret and roles) is **AB#5027** — AB#5026 ships the grant only.
+
+**Refresh tokens are rejected, not merely discouraged.** A delegation request that carries
+`offline_access` among its scopes is refused with `invalid_scope`, and the rejection is audited as a
+`DelegationFailureEvent`. Delegated tokens are short-lived and re-minted from the still-valid user
+token instead.
+
+*Why it has to be a hard refusal.* The role intersection is computed **at issuance**, inside
+`OnBehalfOfGrantValidator`. A later `grant_type=refresh_token` request rebuilds the access token from
+the **persisted grant** and, by design, never re-enters an extension grant validator — there is no
+`subject_token` to re-validate and no hook to recompute anything. The intersection would therefore be
+frozen at first issuance, and a role revoked on **either** side (service account or user) would keep
+working for the refresh token's whole lifetime — exactly the authority creep the intersection exists to
+prevent. A documented warning is not an invariant, so the grant enforces it by construction.
+
+*Why the check lives in the validator.* Duende mints a refresh token iff
+`ValidatedResources.Resources.OfflineAccess` is set, and that flag is only ever derived from a
+requested `offline_access` scope. Duende's scope/resource validation runs **before** the extension
+grant validator, so refusing the request there is sufficient — nothing downstream can re-add
+`offline_access`. `GrantValidationResult` carries no "do not issue a refresh token" switch, so the
+result object cannot express the constraint, and silently clearing
+`ValidatedResources.Resources.OfflineAccess` would work mechanically but hand the integrator a token
+response missing the `refresh_token` they asked for with nothing explaining why. Relying instead on
+`AllowOfflineAccess=false` on every delegating client would be a seeding convention, not an invariant —
+any operator can flip it back on. The error description therefore spells out the reason. Pinned by
+`tests/IdentityServices.UnitTests/Services/OnBehalfOfGrantValidatorTests.cs`.
+
+**Error mapping:**
+
+| Condition | OAuth error |
+|---|---|
+| No authenticated client on the request | `invalid_client` |
+| `offline_access` among the requested scopes | `invalid_scope` |
+| Missing `subject_token`, wrong `subject_token_type`, missing `acr_values` | `invalid_request` |
+| `subject_token` invalid/expired, or lacking `sub` / `tenant_id` | `invalid_grant` |
+| Request tenant ≠ `acr_values` tenant, or `subject_token` tenant ≠ requested tenant | `invalid_target` |
+| Service account not provisioned in the tenant | `invalid_client` |
+| Subject does not resolve to a user in the tenant | `invalid_grant` |
+| Empty role intersection | *no error* — token issued without `role` claims |
+
+**Audit.** `DelegationSuccessEvent` / `DelegationFailureEvent`
+(`IdentityServices/Services/DelegationEvents.cs`, category `Delegation`, event IDs `50260` / `50261`)
+carry `{actorClientId, userSubjectId, tenantId, effectiveRoleCount | reason}`. Failure events are
+persisted to the runtime event log by `OctoEventSink` (which also expands their structured fields);
+success events are log-only, since the sink persists only Error/Failure events. A successful grant with
+**zero** effective roles is still audited as a success carrying `effectiveRoleCount = 0`.
+
+**Key files:**
+
+| File | Purpose |
+|---|---|
+| `src/IdentityServerPersistence/Services/IDelegatedIdentityResolver.cs` | Result / denial-reason contract |
+| `src/IdentityServerPersistence/Services/DelegatedIdentityResolver.cs` | The Duende-free intersection policy |
+| `src/IdentityServices/Services/DelegationConstants.cs` | Grant URN, `act` / internal claim types |
+| `src/IdentityServices/Services/OnBehalfOfGrantValidator.cs` | Protocol adapter (Duende extension grant) |
+| `src/IdentityServices/Services/UserProfileService.cs` | `ApplyDelegationClaims` — the role replacement |
+| `src/IdentityServices/Middleware/OidcTenantResolutionMiddleware.cs` | `acr_values` → tenant for the new grant |
+| `src/IdentityServices/Services/DelegationEvents.cs` | Audit events |
+
 ### CK Model Types
 
 **OctoTenantIdentityProvider** (derives from IdentityProvider):

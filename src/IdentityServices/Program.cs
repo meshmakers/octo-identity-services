@@ -209,6 +209,12 @@ try
         // RFC 8693 Token Exchange (AB#4338): mints a target-tenant (B) access token from the
         // user's home-tenant (A) access token, with roles re-resolved in B on the B-shadow sub.
         .AddExtensionGrantValidator<TenantExchangeGrantValidator>()
+        // Delegation / on-behalf-of (AB#5026): a service-account client presents a user's access
+        // token and receives a token running on the USER's sub with role = SA roles ∩ user roles and
+        // act = the service account. Its own grant-type URN, deliberately NOT the token-exchange one
+        // (see DelegationConstants.OnBehalfOfGrantType) — Duende binds one validator per grant type,
+        // so a shared URN would also share the per-client opt-in.
+        .AddExtensionGrantValidator<OnBehalfOfGrantValidator>()
         .AddServerSideSessions<ServerSideSessionStore>()
         .AddCorsPolicyService<CorsPolicyService>()
         .AddAppAuthRedirectUriValidator()

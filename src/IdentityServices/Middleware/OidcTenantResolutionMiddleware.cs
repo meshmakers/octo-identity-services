@@ -2,6 +2,7 @@ using System.Collections.Concurrent;
 using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
+using Meshmakers.Octo.Backend.IdentityServices.Services;
 using Meshmakers.Octo.Runtime.Contracts.MongoDb;
 using Meshmakers.Octo.Runtime.Contracts.MongoDb.Configuration;
 using Meshmakers.Octo.Services.Infrastructure;
@@ -316,7 +317,7 @@ internal class OidcTenantResolutionMiddleware(
     /// Resolves the tenant for a <c>/connect/token</c> request by reading the authorization code
     /// or refresh token from the form body and looking up the captured tenant mapping.
     /// </summary>
-    private async Task<string?> ResolveTenantFromTokenRequestAsync(HttpContext context)
+    internal async Task<string?> ResolveTenantFromTokenRequestAsync(HttpContext context)
     {
         context.Request.EnableBuffering();
 
@@ -388,6 +389,29 @@ internal class OidcTenantResolutionMiddleware(
 
                 logger.LogWarning(
                     "No acr_values on /connect/token for token-exchange — token exchange will be rejected (no target tenant)");
+            }
+            else if (string.Equals(grantType, DelegationConstants.OnBehalfOfGrantType, StringComparison.Ordinal))
+            {
+                // Delegation / on-behalf-of (AB#5026): the tenant is specified via
+                // acr_values=tenant:{tenantId} in the form body, exactly like client_credentials and
+                // token-exchange. This branch is MANDATORY, not cosmetic: without it an unknown
+                // grant type falls through to `return null`, no tenant is wired into
+                // HttpContext.Items, and every per-tenant store — the client store resolving the
+                // service account, the user store resolving the subject, and both role stores —
+                // silently reads the SYSTEM tenant instead of the requested one, producing an
+                // intersection over the wrong catalogues entirely. OnBehalfOfGrantValidator
+                // additionally asserts the resolved tenant equals the requested one and fails closed.
+                var acrTenantId = ParseTenantFromAcrValues(form["acr_values"].ToString());
+                if (!string.IsNullOrEmpty(acrTenantId))
+                {
+                    logger.LogDebug(
+                        "Resolved tenant '{TenantId}' from acr_values for on-behalf-of on /connect/token",
+                        acrTenantId);
+                    return acrTenantId;
+                }
+
+                logger.LogWarning(
+                    "No acr_values on /connect/token for on-behalf-of — delegation will be rejected (no target tenant)");
             }
             else if (string.Equals(grantType, "refresh_token", StringComparison.Ordinal))
             {

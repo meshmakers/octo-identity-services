@@ -94,6 +94,9 @@ internal static class EventCategories
 {
     /// <summary>Category for cross-tenant token-exchange events (AB#4338).</summary>
     public const string TokenExchange = "TokenExchange";
+
+    /// <summary>Category for delegation ("on-behalf-of") events (AB#5026).</summary>
+    public const string Delegation = "Delegation";
 }
 
 /// <summary>Stable event IDs for OctoMesh-defined IdentityServer events.</summary>
@@ -104,4 +107,10 @@ internal static class EventIds
 
     /// <summary>ID for <see cref="TokenExchangeFailureEvent" />.</summary>
     public const int TokenExchangeFailure = 43381;
+
+    /// <summary>ID for <see cref="DelegationSuccessEvent" /> (AB#5026 — work item number + digit).</summary>
+    public const int DelegationSuccess = 50260;
+
+    /// <summary>ID for <see cref="DelegationFailureEvent" /> (AB#5026 — work item number + digit).</summary>
+    public const int DelegationFailure = 50261;
 }

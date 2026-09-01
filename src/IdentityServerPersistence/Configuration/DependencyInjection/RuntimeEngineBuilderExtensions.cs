@@ -75,6 +75,8 @@ public static class RuntimeEngineBuilderExtensions
         builder.Services.AddScoped<ILoginGroupAssignmentService, LoginGroupAssignmentService>();
         builder.Services.AddScoped<ITenantDiscoveryService, TenantDiscoveryService>();
         builder.Services.AddScoped<IClientMirrorProvisioningService, ClientMirrorProvisioningService>();
+        // AB#5026 delegation ("on-behalf-of"): the Duende-free policy behind OnBehalfOfGrantValidator.
+        builder.Services.AddScoped<IDelegatedIdentityResolver, DelegatedIdentityResolver>();
 
         builder.Services.AddSingleton<AttributeStringValueListConverter>();
         builder.Services.AddAutoMapper(cfg =>
@@ -180,5 +182,14 @@ public static class RuntimeEngineBuilderExtensions
 
         builder.Services.AddScoped(
             typeof(IUserStore<>).MakeGenericType(builder.UserType), typeof(OctoUserStore));
+
+        // AB#5026: expose the user store's role facet as its own DI service. UserManager casts the
+        // IUserStore<TUser> internally and never resolves IUserRoleStore<TUser> from DI, so this is
+        // purely additive — it lets Duende-free services (IDelegatedIdentityResolver) read a user's
+        // effective roles through the very store that stamps a login token's role claims, without
+        // depending on the concrete OctoUserStore or on UserManager. The forwarding lambda keeps the
+        // single scoped instance, so both facets share one tenant repository/session.
+        builder.Services.AddScoped<IUserRoleStore<RtUser>>(
+            sp => (IUserRoleStore<RtUser>)sp.GetRequiredService<IUserStore<RtUser>>());
     }
 }

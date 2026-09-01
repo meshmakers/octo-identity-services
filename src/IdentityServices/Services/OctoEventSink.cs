@@ -75,6 +75,15 @@ internal class OctoEventSink(
             case InvalidClientConfigurationEvent clientConfigEvt:
                 parts.Add($"ClientId: {clientConfigEvt.ClientId}");
                 break;
+            // AB#5026: the message already names all three parties, but the structured fields make
+            // the actor and the subject greppable in the runtime event log the same way the other
+            // cases expose ClientId / Username.
+            case DelegationFailureEvent delegationEvt:
+                parts.Add($"ClientId: {delegationEvt.ActorClientId}");
+                parts.Add($"SubjectId: {delegationEvt.UserSubjectId}");
+                parts.Add($"TenantId: {delegationEvt.TenantId}");
+                parts.Add($"Reason: {delegationEvt.Reason}");
+                break;
         }
 
         return string.Join(" - ", parts);
