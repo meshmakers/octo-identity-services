@@ -1,3 +1,5 @@
+using AutoMapper;
+using Duende.IdentityServer;
 using Duende.IdentityServer.Events;
 using Duende.IdentityServer.Models;
 using Duende.IdentityServer.Services;
@@ -14,10 +16,12 @@ using Meshmakers.Octo.Runtime.Contracts.MongoDb;
 using Meshmakers.Octo.Runtime.Contracts.MongoDb.Repositories;
 using Meshmakers.Octo.Runtime.Contracts.Repositories.Query;
 using Meshmakers.Octo.Runtime.Contracts.RepositoryEntities;
+using Meshmakers.Octo.Services.Infrastructure;
 using Meshmakers.Octo.Services.Infrastructure.Services;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
 using Persistence.IdentityCkModel.Generated.System.Identity.v2;
+using Shared.TestUtilities.Fakes;
 using Xunit;
 
 namespace IdentityServices.IntegrationTests.Persistence;
@@ -391,6 +395,83 @@ public class ClientMirrorProvisioningIntegrationTests : IClassFixture<IdentitySe
     }
 
     // ---------- helpers ----------
+
+    // ---------- AB#5065: which secret matched? ----------
+
+    /// <summary>
+    ///     The link between AB#5061's writer and AB#5065's reader, proven end to end rather than
+    ///     assumed: a mirror provisioned into a real database, read back and mapped by the
+    ///     <b>production</b> <c>RtClient → Client</c> AutoMapper configuration, still carries the
+    ///     marker the telemetry classifies on — and the real
+    ///     <see cref="MirrorSecretUsageTelemetryValidator" /> then tells the parent's inherited
+    ///     credential apart from the tenant's own one.
+    /// </summary>
+    /// <remarks>
+    ///     🔴 This is the test that catches the dangerous failure. The unit tests hand the validator
+    ///     a secret list built by hand; if the mapping ever dropped
+    ///     <c>RtSecretRecord.Description</c>, the classification would silently never fire, the
+    ///     inherited-use count would read zero for the wrong reason, and step 4 — dropping the
+    ///     inherited secret — would be taken on a measurement that never measured anything.
+    /// </remarks>
+    [Fact]
+    public async Task MirrorSecretUsage_DistinguishesInheritedFromOwn_ThroughTheRealMappingPath()
+    {
+        await _fixture.InitializeAsync();
+        var systemContext = _fixture.GetSystemContext();
+        await EnsureSystemSetupAsync();
+        var service = CreateService(systemContext);
+
+        const string parentPlaintext = "the-parents-shared-secret";
+        var childTenantId = await CreateChildTenantAsync($"child-tel-{Guid.NewGuid():N}".Substring(0, 24));
+        var clientId = $"telsec-{Guid.NewGuid():N}".Substring(0, 24);
+        await CreateFlaggedClientAsync(systemContext, clientId,
+            secretHash: ClientMirrorSecrets.Sha256(parentPlaintext));
+        await service.ProvisionForChildTenantAsync(systemContext.TenantId, childTenantId);
+
+        // The only path that ever reveals a mirror's own secret in plaintext.
+        var issued = await service.RotateMirrorSecretAsync(systemContext.TenantId, clientId, childTenantId);
+        issued!.Secret.Should().NotBeNullOrWhiteSpace();
+
+        var childClient = await FindChildClientAsync(systemContext, childTenantId, clientId);
+        var duendeClient = _fixture.GetService<IMapper>().Map<Client>(childClient);
+        duendeClient.ClientSecrets.Should().HaveCount(2,
+            "the mirror holds the inherited copy and its own until step 4 removes the former");
+
+        var logger = new CapturingLogger<MirrorSecretUsageTelemetryValidator>();
+        var httpContextAccessor = new HttpContextAccessor { HttpContext = new DefaultHttpContext() };
+        httpContextAccessor.HttpContext!.Items[InfrastructureCommon.TenantIdName] = childTenantId;
+        var sut = new MirrorSecretUsageTelemetryValidator(
+            new SecretValidator(TimeProvider.System,
+                [new HashedSharedSecretValidator(NullLogger<HashedSharedSecretValidator>.Instance)],
+                NullLogger<ISecretsListValidator>.Instance),
+            httpContextAccessor, logger);
+
+        var inherited = await sut.ValidateAsync(duendeClient.ClientSecrets,
+            ParsedSharedSecret(clientId, parentPlaintext), TestContext.Current.CancellationToken);
+        var own = await sut.ValidateAsync(duendeClient.ClientSecrets,
+            ParsedSharedSecret(clientId, issued.Secret!), TestContext.Current.CancellationToken);
+
+        inherited.Success.Should().BeTrue();
+        own.Success.Should().BeTrue();
+
+        logger.AllText.Should()
+            .Contain($"secretKind={MirrorSecretUsageTelemetryValidator.InheritedSecretKind}")
+            .And.Contain($"secretKind={MirrorSecretUsageTelemetryValidator.OwnSecretKind}")
+            .And.Contain($"clientId={clientId}")
+            .And.Contain($"tenantId={childTenantId}");
+
+        // 🔴 Neither credential nor stored hash may reach a sink, asserted against the rendered text.
+        logger.AllText.Should().NotContain(parentPlaintext);
+        logger.AllText.Should().NotContain(issued.Secret!);
+        logger.AllText.Should().NotContain(ClientMirrorSecrets.Sha256(parentPlaintext));
+    }
+
+    private static ParsedSecret ParsedSharedSecret(string clientId, string plaintext) => new()
+    {
+        Id = clientId,
+        Credential = plaintext,
+        Type = IdentityServerConstants.ParsedSecretTypes.SharedSecret
+    };
 
     private IClientMirrorProvisioningService CreateService(ISystemContext systemContext)
         => new ClientMirrorProvisioningService(NullLogger<ClientMirrorProvisioningService>.Instance, systemContext);

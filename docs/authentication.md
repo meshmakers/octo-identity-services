@@ -986,6 +986,108 @@ curl -s https://connect.example.com/connect/token \
   -d acr_values=tenant:<tenantId>
 ```
 
+### Client Mirroring — What It Is For, and What a Mirrored Credential Proves
+
+Mirroring (`AutoProvisionInChildTenants`) is a **deliberate design property, not a defect**. A client
+is described **once**, in one tenant, and thereby made available to that tenant's children.
+Maintaining the same client per tenant instead would be a substantial configuration burden — every
+redirect URI, scope, grant type and lifetime, repeated and kept in step across every tenant on the
+instance, with a new tenant silently missing whatever was forgotten.
+
+**Today it is used for OAuth clients — the interactive ones — not for authentication.** Every
+client that carries the flag in the shipped `System.Identity.Bootstrap` seed
+(`octo-data-refinery-studio`, `octo-cli`, the three Swagger clients, `octo-mcpServices-device`) and
+every `octo-dcr-*` dynamic registration is a **public client with no secret at all**. What mirroring
+distributes for them is a *login surface* — where users may sign in and where they get redirected
+back to — not a credential. None of them can obtain a `client_credentials` token.
+
+**Roles are not mirrored.** `ClientMirrorProvisioningService` copies `RtClient` *attributes*; it
+touches no `AssignedRole` edge and no group membership. A mirrored client therefore arrives in the
+child tenant **authenticated but without any rights**, until somebody grants it roles *there*
+(`PUT {tenantId}/v1/clients/{clientId}/roles/{roleName}`, or `octo-cli AddClientToRole`). That is the
+real boundary downwards, and it is the one to reason about: the mirror can prove who it is, and can
+do nothing until the child tenant says what it may do.
+
+🔴 **What a mirrored credential does *not* prove, while the inherited secret is still accepted.**
+A confidential mirror carries both the copy of its parent's secret and (since AB#5061) one of its
+own. As long as the inherited copy is valid, holding a *child's* credentials is indistinguishable
+from holding the *parent's* — so **a `tenant_id` claim on a client-credentials token does not
+establish which tenant the caller came from.** It records which tenant the token was *issued for*,
+not which tenant the caller belongs to.
+
+Consequences for anyone writing authorization:
+
+- **Do not authorize on the tenant claim of a service token.** In particular, `tenant_id ==
+  systemTenant` is not proof of system-tenant provenance — that is why the system-route hardening
+  (**AB#5055**) is blocked on this and must not be built on the claim alone.
+- **Authorize service tokens on roles instead** — the roles assigned to that client **in the tenant
+  being addressed**. Those are per-tenant by construction (they are not mirrored, see above), so they
+  say what this caller may do *here*, which is the question authorization actually asks.
+- The claim remains correct and useful for *routing* and for the tenant gate's "is this token even
+  addressed at this tenant" check. It is provenance that it cannot carry.
+
+This is measured, not assumed: **AB#5065** records which of the two secrets each caller actually
+uses (below). Once the inherited copy is gone, the tenant claim on a client-credentials token becomes
+provenance and AB#5055 unblocks.
+
+### Which Mirror Secret Was Used? (AB#5065) — step 3 of the migration
+
+Step 4 — dropping the inherited secret from every mirror — is only defensible once it is *known* that
+nobody authenticates with it any more, and until AB#5061 split the secrets there was nothing to tell
+apart. `MirrorSecretUsageTelemetryValidator` (`IdentityServices/Services/`) is that measurement.
+
+It **decorates** Duende's `ISecretsListValidator` and delegates every validation decision to the
+built-in `SecretValidator`: nothing is accepted or rejected that would not have been before, and a
+failed authentication returns the inner result verbatim and silently. On a **successful** shared-secret
+authentication of a client whose secret list carries the `octo:mirror-own-secret` marker, the
+credential is re-checked against the own-secret subset alone; success means the caller holds the
+mirror's own secret, failure means it matched an inherited one.
+
+Cost on the authentication hot path is bounded by design — **no store lookup and no new allocation
+for anyone else**. The marker travels on the secret record itself (the `RtSecretRecord → Secret`
+AutoMapper map carries `Description`), so the decision is a string comparison over the ≤2 secrets
+Duende already passed in; only a client that actually has an own secret pays for the classification,
+and it pays one further SHA-256.
+
+Each use is recorded as:
+
+```
+MirrorSecretUsage secretKind=inherited clientId=ci-deploy tenantId=customer-a
+```
+
+with `MirrorSecretKind` / `ClientId` / `TenantId` as structured fields and event id `50650`.
+Inherited use is logged at **Warning**, own use at Information — the inherited count is the number
+that has to reach zero. Per environment:
+
+```logql
+{namespace="octo", container="identity"} |= "MirrorSecretUsage" |= "secretKind=inherited"
+```
+
+answers *“does anybody still authenticate with the inherited secret?”*; grouping the same query by
+`clientId` / `tenantId` names who and where, which is the migration list for step 2.
+
+🔴 **No secret material is ever written** — not the credential, not the stored hash, not a prefix of
+either. Only the client id, the tenant and the literal `own` / `inherited`.
+
+⚠️ **Blind spot, and it is a precondition rather than a false clean bill.** Mirror-ness is inferred
+from the *presence* of an own secret, because loading the `RtClient` would be a database round trip
+on every token request. A mirror that has no own secret yet — a public parent, or a confidential one
+whose provisioning loop has not run since AB#5061 shipped — produces no record. Step 4 must not be
+executed in that state anyway: every mirror holding its own secret is already the first row of the
+migration table in `docs/CONCEPT-PER-TENANT-MIRROR-SECRETS.md`. **A zero inherited-use count is only
+evidence once that precondition is verified per environment.**
+
+Tests: `tests/IdentityServices.UnitTests/Services/MirrorSecretUsageTelemetryTests.cs` (both
+classifications over the real Duende validator and real SHA-256 matching, no record and no second
+validation for an ordinary client or an API resource secret, unchanged failure path, non-shared-secret
+credentials not classified, unresolved tenant marked rather than guessed, a measurement failure not
+failing the authentication, no secret material in the *rendered* log, and the DI wiring actually
+winning over Duende's registration) and
+`tests/IdentityServices.IntegrationTests/Persistence/ClientMirrorProvisioningIntegrationTests.cs`
+(`MirrorSecretUsage_DistinguishesInheritedFromOwn_ThroughTheRealMappingPath` — a mirror provisioned
+into real MongoDB, read back through the production AutoMapper path, so a mapping that dropped
+`Description` cannot make the measurement silently read zero).
+
 ### Key Behaviors
 
 | Scenario | Behavior |

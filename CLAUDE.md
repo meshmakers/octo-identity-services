@@ -666,6 +666,82 @@ shape the token endpoint can never match), `ClientMirrorControllerTests` (endpoi
 `ClientMirrorProvisioningIntegrationTests` (the same over real MongoDB, plus rotation retiring the
 superseded value).
 
+### Client Mirroring Is Intentional — and What It Does Not Prove
+
+Worth stating plainly, because the AB#5032 / AB#5058 / AB#5061 sections above are all about the
+escalation and read as if mirroring were a defect. It is not.
+
+- **Mirroring is the point.** A client is described **once**, in one tenant, and made available to
+  that tenant's children. Maintaining the same client per tenant — every redirect URI, scope, grant
+  type and lifetime, kept in step across every tenant, with a new tenant silently missing whatever
+  was forgotten — would be a substantial configuration burden.
+- **Today it is used for OAuth clients — the interactive ones — not for authentication.** Every
+  flagged client in the shipped seed and every `octo-dcr-*` registration is a **public client with no
+  secret**. What is distributed there is a *login surface*, not a credential; none of them can get a
+  `client_credentials` token. The confidential mirrored clients (`ci-deploy`, `octo-ai-adapter`,
+  `claude-agent`) exist only as imperative setup and are the subject of the migration above.
+- **Roles are not mirrored.** `ClientMirrorProvisioningService` copies `RtClient` *attributes* only —
+  it touches no `AssignedRole` edge and no group membership. A mirror is therefore **authenticated but
+  rightless** in the child tenant until somebody grants it roles *there*
+  (`PUT {tenantId}/v1/clients/{clientId}/roles/{roleName}`). **That is the actual boundary
+  downwards**, and it is the one to reason about.
+- 🔴 **While the inherited secret is accepted, a `tenant_id` claim on a client-credentials token does
+  not prove which tenant the caller came from** — only which tenant the token was issued *for*.
+  Whoever holds a child's credentials holds the parent's. **Do not authorize on it** (this is exactly
+  what blocks **AB#5055**: `tenant_id == systemTenant` is not proof of provenance). Authorization for
+  service tokens belongs on **roles assigned to the client in the addressed tenant** — those are
+  per-tenant by construction, and they answer the question authorization actually asks. Whether the
+  inherited secret is still in use is now measured (**AB#5065**, below).
+
+### Which Mirror Secret Matched (AB#5065) — step 3 of the migration
+
+Step 4 (drop the inherited secret) cannot be justified without knowing that nobody uses it, and before
+AB#5061 split the secrets there was nothing to tell apart. `MirrorSecretUsageTelemetryValidator`
+(`IdentityServices/Services/`) supplies that number.
+
+- **Decorates `ISecretsListValidator`, replaces nothing.** Duende resolves one of these and calls it
+  from `ClientSecretValidator` (and `ApiSecretValidator`). The decorator delegates every decision to
+  the built-in `SecretValidator`, built explicitly in `AddMirrorSecretUsageTelemetry()` so decoration
+  cannot resolve to itself. A failed authentication returns the inner result verbatim and silently —
+  a wrong guess says nothing about which secret was meant and would poison the count. Registered
+  **after** `AddIdentityServer()`; the last `ISecretsListValidator` registration is the one Duende
+  resolves.
+- **Classification without a store lookup.** The `octo:mirror-own-secret` marker rides on the secret
+  record and the `RtSecretRecord → Secret` AutoMapper map carries `Description` across, so "is this a
+  mirror with its own secret" is a string comparison over the ≤2 secrets Duende already passed in
+  (indexed, so an ordinary client does not even allocate an enumerator). Only a client that *has* an
+  own secret pays the classification: one more call into the inner validator over the own-secret
+  subset, i.e. a single SHA-256. Non-shared-secret credentials (private key JWT, mTLS) return early —
+  without that guard they would be misreported as inherited use and block step 4 forever.
+- **Output** — event id `50650`, structured `MirrorSecretKind` / `ClientId` / `TenantId`, rendered as
+  `MirrorSecretUsage secretKind=inherited clientId=… tenantId=…`. Inherited use at **Warning**, own
+  use at Information. Loki:
+  `{namespace="octo", container="identity"} |= "MirrorSecretUsage" |= "secretKind=inherited"`.
+- 🔴 **No secret material is ever logged** — not the credential, not the stored hash, not a prefix.
+  Pinned against the **rendered** output via `CapturingLogger<T>`, not against format strings.
+- **Log-only on purpose.** AB#5058's refusal next door persists a
+  `ClientCredentialsTenantAmbiguityEvent` via `OctoEventSink`, but that fires on a *rejected*
+  request. This one fires on every
+  *successful* authentication of the affected clients, so a runtime-event-log write per token request
+  is precisely the hot-path cost being avoided — and "zero for a whole release" is a log-aggregation
+  question anyway.
+- **Telemetry never decides an authentication.** A throwing classification is caught and logged as an
+  error; the caller stays authenticated.
+- ⚠️ **Blind spot = a precondition, not a clean bill.** Mirror-ness is inferred from the *presence* of
+  an own secret (the alternative is a DB round trip per token request), so a mirror that has none yet
+  is invisible. A zero inherited-use count is only evidence once "every mirror holds its own secret"
+  is verified per environment — which is already row 1 of the migration table in
+  `docs/CONCEPT-PER-TENANT-MIRROR-SECRETS.md`.
+
+Tests: `MirrorSecretUsageTelemetryTests` (both classifications over the real Duende validator with
+real SHA-256 matching; no record **and no second validation** for an ordinary client or an API
+resource secret; unchanged failure path; non-shared-secret credential not classified; unresolved
+tenant marked rather than guessed; measurement failure not failing the authentication; nothing
+secret in the rendered log; and the DI wiring actually winning over Duende's registration) and
+`ClientMirrorProvisioningIntegrationTests.MirrorSecretUsage_DistinguishesInheritedFromOwn_ThroughTheRealMappingPath`
+(a real mirror in MongoDB read back through the **production** AutoMapper path — the test that catches
+a mapping which drops `Description` and would otherwise make the measurement silently read zero).
+
 ### Login Configuration (Self-Registration & Auto-Group Assignment)
 
 Identity providers support login-time configuration via two attributes on the abstract `IdentityProvider` base type:

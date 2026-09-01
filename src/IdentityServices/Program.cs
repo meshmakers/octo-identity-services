@@ -225,6 +225,14 @@ try
         .AddAppAuthRedirectUriValidator()
         .AddJwtBearerClientAuthentication();
 
+    // Mirror secret telemetry (AB#5065): record WHICH secret a mirrored client authenticated with —
+    // the copy inherited from its parent tenant, or the one that belongs to that mirror alone. The
+    // inherited copy cannot be removed (step 4 of docs/CONCEPT-PER-TENANT-MIRROR-SECRETS.md) before
+    // it is known that nobody uses it, and nothing else in the service can tell the two apart.
+    // Registered AFTER AddIdentityServer so the decorator wins over Duende's own
+    // ISecretsListValidator registration; every validation decision is still delegated to it.
+    builder.Services.AddMirrorSecretUsageTelemetry();
+
     // Persist IdentityServer error/failure events to OctoMesh runtime event log
     builder.Services.AddTransient<IEventSink, OctoEventSink>();
 

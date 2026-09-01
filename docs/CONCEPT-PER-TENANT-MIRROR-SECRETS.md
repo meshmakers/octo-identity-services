@@ -1,6 +1,7 @@
 # Per-Tenant Mirror Secrets (AB#5061)
 
-> **Status:** step 1 of 2 implemented. ⚠️ **The escalation is still open** — see
+> **Status:** step 1 (AB#5061) and the telemetry of step 3 (AB#5065) implemented.
+> ⚠️ **The escalation is still open** — see
 > [§6 When the gap actually closes](#6-when-the-gap-actually-closes).
 
 ## 1. The problem
@@ -134,7 +135,7 @@ The gap closes at the moment the inherited secret is removed from mirrors. Seque
 |---|---|---|---|
 | 1 | Ship step 1. Confirm per cluster which confidential clients are actually flagged — in particular whether `octo-ai-adapter` is (§2.2 note). | identity | inventory per cluster written down |
 | 2 | For each caller in §2.2, obtain a per-tenant secret via the rotation endpoint and store it per tenant: CI/CD in Vault (or rotate-and-use inside the pipeline run, which needs no Vault change), `octo-ai-adapter` per tenant, `claude-agent` locally. Needs an `octo-cli` command wrapping the endpoint and a change in `octo-mesh-deployment/pipelines/templates/deploy-workload.yml`. | deployment / AI / CLI | every caller authenticates with a mirror-own secret |
-| 3 | Verify no caller uses the inherited secret any more. **Requires telemetry that does not exist yet:** a custom secret validator that records *which* secret matched. Until the secrets are split (step 1) this cannot even be built, because there is only one secret. | identity | one full release with zero inherited-secret matches |
+| 3 | Verify no caller uses the inherited secret any more. **Telemetry shipped (AB#5065):** `MirrorSecretUsageTelemetryValidator` decorates Duende's `ISecretsListValidator` and records `secretKind=own` / `secretKind=inherited` with `clientId` and `tenantId` on every successful shared-secret authentication of a mirror. Query per environment: `{namespace="octo", container="identity"} \|= "MirrorSecretUsage" \|= "secretKind=inherited"`. ⚠️ It infers mirror-ness from the *presence* of an own secret, so **row 1's per-cluster inventory is a hard precondition** — a mirror without an own secret produces no record, and a zero count would then mean "not measured", not "not used". | identity | one full release with zero inherited-secret matches, **after** every confidential mirror is confirmed to hold an own secret |
 | 4 | **Drop the inherited secret from every mirror.** `InheritedParentSecret_IsStillCopied_SoTheGapIsDocumentedNotClosed` must be inverted — its failure is the signal the gap closed. | identity | mirrors carry only their own secret |
 | 5 | Unblock AB#5055. | identity | system-route authorization may trust the system-tenant claim |
 
@@ -154,3 +155,8 @@ B is the stronger end state; A is reachable sooner. This is the decision the wor
   half of this escalation.
 - `CLAUDE.md` § *Service-Account Clients over the Distribution Event Hub (AB#5027)* — the per-tenant
   secret provisioning that already works, and the "preserve the existing secret" trap that recurs here.
+- `docs/authentication.md` § *Which Mirror Secret Was Used? (AB#5065)* — the step-3 telemetry, its
+  Loki query and its blind spot.
+- `docs/authentication.md` § *Client Mirroring — What It Is For, and What a Mirrored Credential
+  Proves* — why mirroring is intentional, why roles are the real boundary downwards, and why the
+  tenant claim on a service token must not be authorized on until step 4 lands.
