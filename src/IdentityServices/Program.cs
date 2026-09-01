@@ -223,6 +223,8 @@ try
     // effective client roles, audience resolution). Consumed by the OpenIddict interaction
     // layer; registered up front so the migration commits can build on it.
     builder.Services.AddScoped<IOctoTokenClaimsService, OctoTokenClaimsService>();
+    builder.Services.AddScoped<TenantExchangeProcessor>();
+    builder.Services.AddScoped<IIdentityAuditService, IdentityAuditService>();
 
     // Scope auth cookies per tenant to prevent cross-tenant session leakage.
     // Identity.Application and idsrv cookies get a .{tenantId} suffix.

@@ -5,6 +5,7 @@ using Persistence.IdentityCkModel.Generated.System.Identity.v2;
 using Meshmakers.Common.Shared;
 using Meshmakers.Octo.Backend.IdentityServices.Services;
 using Meshmakers.Octo.Runtime.Contracts.MongoDb.Configuration;
+using OpenIddict.Server;
 
 namespace Meshmakers.Octo.Backend.IdentityServices.Configuration;
 
@@ -111,10 +112,31 @@ public static class OpenIddictConfiguration
                     serverOptions.AddEncryptionCertificate(certificate);
                 }
 
+                // Duende-compatible access token shape: array scope claim, no sub on
+                // client_credentials, no oi_* private claims, no per-token DB entry (AB#4992).
+                serverOptions.AddEventHandler(OctoAccessTokenShapeHandler.Descriptor);
+
+                // RFC 7591 DCR: advertise the hand-rolled /connect/register endpoint in the
+                // discovery document when DCR is enabled (AB#4993 — replaces Duende's
+                // Discovery.CustomEntries mechanism).
+                if (identityOptions.DynamicClientRegistration.Enabled)
+                {
+                    var registrationEndpoint =
+                        identityOptions.AuthorityUrl.EnsureEndsWith("/") + "connect/register";
+                    serverOptions.AddEventHandler<OpenIddictServerEvents.ApplyConfigurationResponseContext>(
+                        handlerBuilder => handlerBuilder.UseInlineHandler(context =>
+                        {
+                            context.Response["registration_endpoint"] = registrationEndpoint;
+                            return default;
+                        }));
+                }
+
                 var aspNetCoreBuilder = serverOptions.UseAspNetCore()
                     // The Angular login SPA drives interaction through our API controllers;
-                    // passthrough gives the Authorize/EndSession/Verification controllers
-                    // (AB#4995) control over login, consent and tenant-scoped redirects.
+                    // passthrough gives the Token/Authorize/EndSession/Verification controllers
+                    // (AB#4992/AB#4995) control over principals, login, consent and
+                    // tenant-scoped redirects.
+                    .EnableTokenEndpointPassthrough()
                     .EnableAuthorizationEndpointPassthrough()
                     .EnableEndSessionEndpointPassthrough()
                     .EnableEndUserVerificationEndpointPassthrough();
