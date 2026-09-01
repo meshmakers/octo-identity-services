@@ -183,7 +183,7 @@ public class ServerSideSessionStore(
             using (var adminSession = await systemContext.GetAdminSessionAsync())
             {
                 adminSession.StartTransaction();
-                var tenants = await systemContext.GetChildTenantsAsync(adminSession);
+                var tenants = await systemContext.GetAllTenantsAsync(adminSession);
                 tenantList = tenants.Items.ToList();
                 await adminSession.CommitTransactionAsync();
             }

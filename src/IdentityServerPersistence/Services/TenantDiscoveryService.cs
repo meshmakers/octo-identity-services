@@ -93,9 +93,9 @@ public class TenantDiscoveryService(
             // The system context itself is the system tenant
             tenantIds.Add(systemContext.TenantId);
 
-            // Get all child tenants from the system tenant
+            // Get every registered tenant from the system registry (regardless of logical parent)
             var adminSession = await systemContext.GetAdminSessionAsync();
-            var childTenants = await systemContext.GetChildTenantsAsync(adminSession);
+            var childTenants = await systemContext.GetAllTenantsAsync(adminSession);
 
             foreach (var child in childTenants.Items)
             {
