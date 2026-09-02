@@ -1,7 +1,7 @@
 "$schema": "https://schemas.meshmakers.cloud/construction-kit-elements.schema.json"
 types:
   - typeId: OAuthAuthorization
-    description: "OpenIddict authorization (AB#4989/AB#4991): the durable link between a subject, a client and the granted scopes - permanent authorizations represent remembered consent, ad-hoc authorizations tie the tokens of one flow together. Replaces the consent/authorization role of PersistedGrant after the Duende -> OpenIddict cutover."
+    description: "OpenIddict authorization (AB#4989/AB#4991): the durable link between a subject, a client and the granted scopes - permanent authorizations represent remembered consent, ad-hoc authorizations tie the tokens of one flow together. Replaces the consent/authorization role of PersistedGrant after the OpenIddict migration (AB#4989)."
     derivedFromCkTypeId: ${System}/Entity
     isFinal: true
     isAbstract: false

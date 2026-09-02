@@ -13,7 +13,7 @@ namespace Meshmakers.Octo.Backend.IdentityServices.Middleware;
 /// <para>
 /// Some interactive MCP clients (observed with Claude Code) send the authorize request without a
 /// <c>scope</c> parameter even though the protected-resource metadata advertises
-/// <c>scopes_supported</c>. Duende IdentityServer hard-rejects a scopeless authorize request
+/// <c>scopes_supported</c>. The server hard-rejects a scopeless authorize request
 /// ("scope is missing"), which surfaces as an opaque error page right after tenant selection.
 /// </para>
 /// <para>

@@ -6,23 +6,23 @@ using static OpenIddict.Server.OpenIddictServerEvents;
 namespace Meshmakers.Octo.Backend.IdentityServices.OpenIddict;
 
 /// <summary>
-///     Shapes OpenIddict-generated access tokens to the exact wire format Duende produced, so
-///     resource services and the golden baseline
-///     (<c>tests/IdentityServices.IntegrationTests/GoldenFiles</c>) cannot tell the difference
-///     (AB#4990/AB#4992):
+///     Shapes OpenIddict-generated access tokens to the exact pre-migration wire format pinned
+///     by the golden baseline (<c>tests/IdentityServices.IntegrationTests/GoldenFiles</c>), so
+///     resource services cannot tell the difference (AB#4990/AB#4992):
 ///     <list type="bullet">
-///         <item><c>scope</c>: Duende emits one claim per scope (JSON array for multiple values);
-///             OpenIddict emits a single space-delimited string per RFC 9068. The platform's
-///             authorization policies (<c>RequireClaim(scope, …)</c> in every service) compare
-///             full claim values, so the space-delimited form would break ALL scope checks.</item>
-///         <item><c>sub</c> on <c>client_credentials</c> tokens: Duende omits it, and the
-///             platform's <c>TenantAuthorizationMiddleware</c> uses the ABSENCE of <c>sub</c> to
+///         <item><c>scope</c>: platform contract is one claim per scope value (JSON array for
+///             multiple values); OpenIddict emits a single space-delimited string per RFC 9068.
+///             The platform's authorization policies (<c>RequireClaim(scope, …)</c> in every
+///             service) compare full claim values, so the space-delimited form would break ALL
+///             scope checks.</item>
+///         <item><c>sub</c> on <c>client_credentials</c> tokens must be absent: the platform's
+///             <c>TenantAuthorizationMiddleware</c> uses the ABSENCE of <c>sub</c> to
 ///             recognize service-to-service tokens (they bypass the allowed_tenants gate). An
 ///             OpenIddict-default <c>sub=client_id</c> would lock every adapter out.</item>
-///         <item>OpenIddict private claims (<c>oi_*</c>) are stripped — Duende tokens never
-///             carried them.</item>
+///         <item>OpenIddict private claims (<c>oi_*</c>) are stripped — pre-migration tokens
+///             never carried them and consumers must not start seeing new claims.</item>
 ///         <item>Access tokens get no server-side token entry: they are stateless signed JWTs
-///             (no reference tokens anywhere on the platform, Duende parity) — persisting an
+///             (no reference tokens anywhere on the platform) — persisting an
 ///             entry per issued token would add a MongoDB write to every token request.</item>
 ///     </list>
 ///     Refresh tokens, authorization codes and device/user codes are untouched (they need their
@@ -44,8 +44,9 @@ public class OctoAccessTokenShapeHandler : IOpenIddictServerHandler<GenerateToke
         // GenerateTokenContext reports the RFC 8693 token type identifier (URN form).
         if (context.TokenType is "urn:ietf:params:oauth:token-type:id_token" or "id_token")
         {
-            // Duende parity: id tokens carry no azp (aud == authorized party for our clients)
-            // and no OpenIddict-internal private claims.
+            // Pre-migration wire format (pinned by the golden baseline tests): id tokens carry
+            // no azp (aud == authorized party for our clients) and no OpenIddict-internal
+            // private claims.
             var idTokenDescriptor = context.SecurityTokenDescriptor;
             if (idTokenDescriptor?.Claims != null)
             {
@@ -67,7 +68,7 @@ public class OctoAccessTokenShapeHandler : IOpenIddictServerHandler<GenerateToke
                 }
             }
 
-            // Duende parity: id tokens carry an nbf claim as well.
+            // Pre-migration wire format: id tokens carry an nbf claim as well.
             if (idTokenDescriptor != null)
             {
                 idTokenDescriptor.NotBefore ??= DateTime.UtcNow;
@@ -81,7 +82,8 @@ public class OctoAccessTokenShapeHandler : IOpenIddictServerHandler<GenerateToke
             return default;
         }
 
-        // Stateless JWT access tokens — no per-token database entry (Duende parity).
+        // Stateless JWT access tokens — no per-token database entry (a MongoDB write per issued
+        // token would be pure overhead; nothing on the platform redeems access tokens by id).
         context.CreateTokenEntry = false;
         context.PersistTokenPayload = false;
 
@@ -89,7 +91,8 @@ public class OctoAccessTokenShapeHandler : IOpenIddictServerHandler<GenerateToke
 
         if (descriptor?.Claims != null)
         {
-            // Duende parity: one scope claim per value (JSON array), not a space-joined string.
+            // Platform contract: one scope claim per value (JSON array), not a space-joined
+            // string — RequireClaim(scope, …) policies across all services compare full values.
             if (descriptor.Claims.TryGetValue(Claims.Scope, out var scopeValue) &&
                 scopeValue is string scopeString && scopeString.Contains(' '))
             {
@@ -97,14 +100,14 @@ public class OctoAccessTokenShapeHandler : IOpenIddictServerHandler<GenerateToke
                     scopeString.Split(' ', StringSplitOptions.RemoveEmptyEntries).ToList();
             }
 
-            // Duende parity: client_credentials access tokens carry no sub claim — the platform's
+            // client_credentials access tokens must carry no sub claim — the platform's
             // TenantAuthorizationMiddleware identifies service-to-service tokens by its absence.
             if (context.Request?.IsClientCredentialsGrantType() == true)
             {
                 descriptor.Claims.Remove(Claims.Subject);
             }
 
-            // Strip OpenIddict-internal private claims — Duende tokens never carried them.
+            // Strip OpenIddict-internal private claims — pre-migration tokens never carried them.
             foreach (var key in descriptor.Claims.Keys
                          .Where(k => k.StartsWith("oi_", StringComparison.Ordinal)).ToList())
             {
@@ -126,7 +129,8 @@ public class OctoAccessTokenShapeHandler : IOpenIddictServerHandler<GenerateToke
             }
         }
 
-        // Duende parity: access tokens carry an nbf claim (OpenIddict omits it by default).
+        // Pre-migration wire format: access tokens carry an nbf claim (OpenIddict omits it by
+        // default).
         if (descriptor != null)
         {
             descriptor.NotBefore ??= DateTime.UtcNow;

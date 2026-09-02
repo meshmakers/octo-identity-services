@@ -5,7 +5,7 @@ using static OpenIddict.Abstractions.OpenIddictConstants;
 namespace IdentityServerPersistence.SystemStores.OpenIddict;
 
 /// <summary>
-///     Pure one-way transform from the Duende-shaped <see cref="RtClient" /> configuration
+///     Pure one-way transform from the legacy <see cref="RtClient" /> configuration shape
 ///     (<c>AllowedGrantTypes</c>, <c>AllowedScopes</c>, flags) to OpenIddict's permissions and
 ///     requirements model (AB#4991). The stored client data does NOT change — the transform runs
 ///     at read time inside <see cref="OpenIddictApplicationStore" />.
@@ -25,9 +25,10 @@ namespace IdentityServerPersistence.SystemStores.OpenIddict;
 ///             (<c>scp:&lt;name&gt;</c>).</item>
 ///         <item><c>RequirePkce</c> → PKCE requirement.</item>
 ///     </list>
-///     Revocation is permitted for every client (Duende exposed /connect/revocation to all
-///     clients). Introspection stays with API-resource secrets and is NOT granted to clients —
-///     matching Duende, where /connect/introspect authenticates API resources.
+///     Revocation is permitted for every client (/connect/revocation has always been open to all
+///     authenticated clients on this platform). Introspection stays with API-resource secrets and
+///     is NOT granted to clients — /connect/introspect authenticates API resources, as before the
+///     migration.
 /// </remarks>
 public static class ClientPermissionsMapper
 {
@@ -71,7 +72,8 @@ public static class ClientPermissionsMapper
             usesTokenEndpoint = true;
         }
 
-        // Duende models refresh tokens via AllowOfflineAccess, not as a grant type entry.
+        // The stored client configuration models refresh tokens via AllowOfflineAccess; a
+        // "refresh_token" entry in AllowedGrantTypes is a legacy variant that is also honored.
         if (client.AllowOfflineAccess || grantTypes.Contains(GrantTypes.RefreshToken))
         {
             permissions.Add(Permissions.GrantTypes.RefreshToken);
@@ -83,7 +85,8 @@ public static class ClientPermissionsMapper
             permissions.Add(Permissions.Endpoints.Token);
         }
 
-        // Duende exposed token revocation to every authenticated client.
+        // Token revocation is available to every authenticated client (pre-migration behavior
+        // consumers rely on).
         permissions.Add(Permissions.Endpoints.Revocation);
 
         foreach (var scope in client.AllowedScopes ?? Enumerable.Empty<string>())

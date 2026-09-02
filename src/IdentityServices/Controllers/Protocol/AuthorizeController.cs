@@ -20,8 +20,8 @@ namespace Meshmakers.Octo.Backend.IdentityServices.Controllers.Protocol;
 
 /// <summary>
 ///     OpenIddict authorization endpoint passthrough (AB#4990/AB#4995): drives login and consent
-///     through the Angular SPA pages and signs in the token principal. Replaces Duende's
-///     <c>UserInteraction</c> redirects (and most of <c>TenantLoginRedirectMiddleware</c>): the
+///     through the Angular SPA pages and signs in the token principal. Replaces the pre-migration
+///     interaction redirects (and most of <c>TenantLoginRedirectMiddleware</c>): the
 ///     login/consent redirects are issued tenant-scoped directly, using the tenant that
 ///     <c>OidcTenantResolutionMiddleware</c> wired into the request.
 /// </summary>
@@ -66,7 +66,8 @@ public class AuthorizeController(
             }
 
             // Redirect to the tenant's login page; strip prompt=login from the returnUrl so the
-            // flow does not loop after authentication (Duende behavior).
+            // flow does not loop after authentication (prompt=login would force a re-login on
+            // every round trip otherwise).
             var returnUrl = Request.PathBase + Request.Path + QueryString.Create(
                 Request.HasFormContentType
                     ? (await Request.ReadFormAsync()).Where(p => p.Key != Parameters.Prompt)
@@ -105,7 +106,8 @@ public class AuthorizeController(
         var requestedScopes = request.GetScopes();
         var grantedScopes = requestedScopes;
 
-        // Consent gate (Duende parity: RequireConsent is false for all first-party clients).
+        // Consent gate (RequireConsent is false for all first-party clients, so only
+        // third-party/DCR clients ever see the consent page).
         if (client.RequireConsent == true)
         {
             var consentOutcome = await EvaluateConsentAsync(client, subject!, requestedScopes);
@@ -213,7 +215,8 @@ public class AuthorizeController(
             target.AddClaim(new Claim("idp", "local"));
         }
 
-        // auth_time from the cookie issue time (Duende parity: time of the interactive login).
+        // auth_time from the cookie issue time — the time of the interactive login, not of this
+        // authorize round trip.
         // OpenIddict requires the numeric claim value type.
         var authTime = (cookieResult.Properties?.IssuedUtc ?? DateTimeOffset.UtcNow).ToUnixTimeSeconds();
         target.AddClaim(new Claim(Claims.AuthenticationTime, authTime.ToString(),

@@ -15,8 +15,9 @@ namespace Meshmakers.Octo.Backend.IdentityServices.Controllers.Protocol;
 /// <summary>
 ///     OpenIddict end-session endpoint passthrough (AB#4995): packages the validated end-session
 ///     request (client, post-logout redirect, state, session) into a self-contained data-protected
-///     <c>logoutId</c> and hands the flow to the tenant's Angular logout page — the exact flow
-///     Duende drove via its logout message store + <c>TenantLoginRedirectMiddleware</c>. The SPA
+///     <c>logoutId</c> and hands the flow to the tenant's Angular logout page — the same flow the
+///     pre-migration server drove via a server-side logout message store plus
+///     <c>TenantLoginRedirectMiddleware</c>, now multi-pod safe without server-side state. The SPA
 ///     completes the logout via <c>AuthApiController</c> (sign-out, session/token revocation) and
 ///     then navigates to the post-logout redirect URI.
 /// </summary>
@@ -78,12 +79,12 @@ public class EndSessionController(
     }
 
     /// <summary>
-    ///     Front-channel logout notification page (replaces Duende's
+    ///     Front-channel logout notification page (kept at the pre-migration path
     ///     <c>/connect/endsession/callback</c>): renders one hidden iframe per enabled client
     ///     that registered a <c>FrontChannelLogoutUri</c>, carrying <c>iss</c> + <c>sid</c>.
-    ///     The session's exact client list is not tracked (Duende did) — notifying every
-    ///     registered front-channel client is a safe superset: clients without a session
-    ///     treat the notification as a no-op.
+    ///     The session's exact client list is not tracked (the pre-migration server tracked it
+    ///     per session) — notifying every registered front-channel client is a safe superset:
+    ///     clients without a session treat the notification as a no-op.
     /// </summary>
     [HttpGet("~/connect/endsession/callback")]
     public async Task<IActionResult> FrontChannelLogoutCallback([FromQuery] string? sid)

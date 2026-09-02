@@ -8,9 +8,9 @@ namespace Meshmakers.Octo.Backend.IdentityServices.Services;
 /// <summary>
 ///     Loads the static PKCS#12 token-signing certificate configured via
 ///     <see cref="OctoIdentityServicesOptions.KeyFilePath" /> /
-///     <see cref="OctoIdentityServicesOptions.KeyFilePassword" />. Shared by the Duende
+///     <see cref="OctoIdentityServicesOptions.KeyFilePassword" />. Shared by
 ///     <see cref="SigningCredentialService" /> and the OpenIddict server configuration
-///     (AB#4989/AB#4990) so both stacks sign with the identical certificate — the JWKS stays
+///     (AB#4989/AB#4990) so both consumers sign with the identical certificate — the JWKS stays
 ///     unchanged across the migration and outstanding access tokens remain valid.
 /// </summary>
 internal static class SigningCertificateLoader

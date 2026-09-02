@@ -5,7 +5,7 @@ using Meshmakers.Octo.Services.Notifications.Services;
 namespace Meshmakers.Octo.Backend.IdentityServices.OpenIddict;
 
 /// <summary>
-///     Audit sink for the OpenIddict stack (AB#4992/AB#4995), replacing Duende's
+///     Audit sink for the OpenIddict stack (AB#4992/AB#4995), replacing the former
 ///     <c>IEventService</c>/<c>OctoEventSink</c> pair with direct calls at the interaction sites.
 ///     Matching the previous behavior, only error/failure events are persisted to the OctoMesh
 ///     runtime event log (tenant-scoped when a tenant is wired into the request); success events

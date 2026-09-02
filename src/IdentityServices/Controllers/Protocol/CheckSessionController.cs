@@ -3,7 +3,8 @@ using Microsoft.AspNetCore.Mvc;
 namespace Meshmakers.Octo.Backend.IdentityServices.Controllers.Protocol;
 
 /// <summary>
-///     OIDC Session Management check-session iframe (Duende parity: <c>/connect/checksession</c>).
+///     OIDC Session Management check-session iframe, served at the pre-migration path
+///     <c>/connect/checksession</c> that RPs already have cached from discovery.
 ///     RPs embed this page in a hidden iframe and post <c>"client_id session_state"</c> messages;
 ///     the script recomputes the session-state hash from the browser's
 ///     <c>idsrv.session[.tenant]</c> cookies and answers <c>unchanged</c> / <c>changed</c> /

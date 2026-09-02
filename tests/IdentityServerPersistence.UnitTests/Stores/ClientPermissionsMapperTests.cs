@@ -8,7 +8,8 @@ using static OpenIddict.Abstractions.OpenIddictConstants;
 namespace IdentityServerPersistence.UnitTests.Stores;
 
 /// <summary>
-///     Pins the Duende→OpenIddict client permissions transform (AB#4991) against every client
+///     Pins the legacy-client-configuration→OpenIddict permissions transform (AB#4991) against
+///     every client
 ///     shape seeded by the <c>System.Identity.Bootstrap</c> blueprint plus the shapes created at
 ///     runtime (DCR clients, client_credentials service accounts). The transform is the single
 ///     point deciding what a client may do on the OpenIddict server — a regression here silently
@@ -178,7 +179,7 @@ public class ClientPermissionsMapperTests
             .Which.Should().Be(Requirements.Features.ProofKeyForCodeExchange);
     }
 
-    /// <summary>Legacy Duende string "refresh_token" in AllowedGrantTypes is honored, without duplicates.</summary>
+    /// <summary>A legacy "refresh_token" entry in AllowedGrantTypes is honored, without duplicates.</summary>
     [Fact]
     public void RefreshTokenGrantAndOfflineAccess_ProduceNoDuplicates()
     {

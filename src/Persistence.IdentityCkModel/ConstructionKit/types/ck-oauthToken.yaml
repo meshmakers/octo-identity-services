@@ -1,7 +1,7 @@
 "$schema": "https://schemas.meshmakers.cloud/construction-kit-elements.schema.json"
 types:
   - typeId: OAuthToken
-    description: "OpenIddict token (AB#4989/AB#4991): server-side record of authorization codes, refresh tokens and device/user codes - status, lifetime and (for reference tokens) the protected payload looked up via the hashed ReferenceId. Replaces the token role of PersistedGrant after the Duende -> OpenIddict cutover. Stored per tenant like PersistedGrant (AB#1586)."
+    description: "OpenIddict token (AB#4989/AB#4991): server-side record of authorization codes, refresh tokens and device/user codes - status, lifetime and (for reference tokens) the protected payload looked up via the hashed ReferenceId. Replaces the token role of PersistedGrant after the OpenIddict migration (AB#4989). Stored per tenant like PersistedGrant (AB#1586)."
     derivedFromCkTypeId: ${System}/Entity
     isFinal: true
     isAbstract: false

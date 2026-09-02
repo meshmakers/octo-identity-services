@@ -17,11 +17,11 @@ namespace Meshmakers.Octo.Backend.IdentityServices.OpenIddict;
 
 /// <summary>
 ///     Server-side session store for the ASP.NET Identity application cookie (AB#4994), replacing
-///     Duende's <c>AddServerSideSessions</c>/<c>ServerSideSessionStore</c> pair: the browser cookie
+///     the pre-migration server-side session machinery: the browser cookie
 ///     carries only the short session key, the data-protected
 ///     <see cref="AuthenticationTicket" /> lives in the per-tenant
-///     <see cref="RtServerSideSession" /> CK entity (same type, new ticket serialization — old
-///     Duende tickets are unreadable, which is fine: all sessions end at the cutover, see
+///     <see cref="RtServerSideSession" /> CK entity (same type, new ticket serialization —
+///     pre-migration tickets are unreadable, which is fine: all sessions end at the cutover, see
 ///     docs/CONCEPT-OPENIDDICT-MIGRATION.md §2).
 /// </summary>
 /// <remarks>
@@ -35,7 +35,7 @@ namespace Meshmakers.Octo.Backend.IdentityServices.OpenIddict;
 ///     </para>
 ///     <para>
 ///         A <c>sid</c> claim is stamped onto the ticket principal when a session is created —
-///         it is the session identifier tokens carry (Duende parity) and what front-channel
+///         it is the session identifier issued tokens carry and what front-channel
 ///         logout uses to address the session.
 ///     </para>
 /// </remarks>
@@ -55,7 +55,8 @@ public class OctoTicketStore(
         var sessionId = GenerateSessionId();
 
         // Stamp the session id onto the principal BEFORE serializing: tokens issued from this
-        // session copy the sid claim (Duende parity), and logout revokes by it.
+        // session copy the sid claim (front-channel logout addresses the session by it), and
+        // logout revokes by it.
         var identity = ticket.Principal.Identities.First();
         if (!identity.HasClaim(c => c.Type == "sid"))
         {
@@ -158,8 +159,8 @@ public class OctoTicketStore(
         }
         catch (Exception ex)
         {
-            // Unreadable ticket (key-ring rotation edge case or a legacy Duende-format record):
-            // treat as signed out instead of failing every request of this browser.
+            // Unreadable ticket (key-ring rotation edge case or a legacy pre-migration ticket
+            // format): treat as signed out instead of failing every request of this browser.
             logger.LogWarning(ex, "Failed to deserialize server-side session ticket for key prefix '{KeyPrefix}…'",
                 key.Length > 8 ? key[..8] : key);
             return null;
@@ -177,7 +178,8 @@ public class OctoTicketStore(
         await session.CommitTransactionAsync();
 
         // Logout: dropping the cookie flips the check_session_iframe to 'changed', which is how
-        // other tabs/SPAs of this browser session learn about the logout (Duende parity).
+        // other tabs/SPAs of this browser session learn about the logout (OIDC Session
+        // Management contract).
         if (httpContextAccessor.HttpContext is { } httpContext)
         {
             SessionCheckCookie.Delete(httpContext);

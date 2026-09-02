@@ -191,9 +191,9 @@ try
     builder.Services.AddSingleton<IdentityCorsPolicyProvider>();
     builder.Services.AddSingleton<ICorsPolicyProvider>(sp => sp.GetRequiredService<IdentityCorsPolicyProvider>());
 
-    // OpenIddict OAuth2/OIDC server (AB#4989/AB#4990) — replaces Duende IdentityServer.
-    // Protocol configuration, custom CK/MongoDB stores and Duende-parity token shaping live in
-    // OpenIddictConfiguration; principals are built by the passthrough controllers under
+    // OpenIddict OAuth2/OIDC server (AB#4989/AB#4990). Protocol configuration, custom
+    // CK/MongoDB stores and the token shaping that preserves the pre-migration wire format live
+    // in OpenIddictConfiguration; principals are built by the passthrough controllers under
     // Controllers/Protocol.
     builder.AddOctoOpenIddict();
 

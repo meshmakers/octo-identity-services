@@ -24,7 +24,7 @@ public class TenantCookieManagerTests
     [InlineData(".AspNetCore.Identity.External")]
     [InlineData(".AspNetCore.Identity.TwoFactorUserId")]
     [InlineData(".AspNetCore.Identity.TwoFactorRememberMe")]
-    // Duende's idsrv cookies no longer exist since the OpenIddict swap (AB#4996)
+    // The pre-migration idsrv cookies no longer exist since the OpenIddict swap (AB#4996)
     [InlineData("idsrv")]
     [InlineData("idsrv.session")]
     [InlineData("some-other-cookie")]

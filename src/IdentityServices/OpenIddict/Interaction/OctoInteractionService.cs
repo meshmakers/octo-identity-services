@@ -11,7 +11,7 @@ using static OpenIddict.Abstractions.OpenIddictConstants;
 namespace Meshmakers.Octo.Backend.IdentityServices.OpenIddict.Interaction;
 
 /// <summary>
-///     The interaction façade the SPA API controllers consume (AB#4995), replacing Duende's
+///     The interaction façade the SPA API controllers consume (AB#4995), replacing the former
 ///     <c>IIdentityServerInteractionService</c>. All round-trip state (error, logout and one-time
 ///     consent contexts) is carried in self-contained data-protected payloads instead of a
 ///     server-side message store — multi-pod safe with the shared MongoDB DataProtection key ring.
@@ -255,7 +255,8 @@ internal class OctoInteractionService(
             };
         }
 
-        // Clients holding live refresh tokens for the user also constitute a grant (Duende parity).
+        // Clients holding live refresh tokens for the user also constitute a grant — the grants
+        // page must list them so the user can revoke silent long-lived access.
         // NB: the store persists the URN form (urn:ietf:params:oauth:token-type:refresh_token),
         // not the short TokenTypeHints form — same trap as GenerateTokenContext.TokenType.
         await foreach (var token in tokenStore.FindBySubjectAsync(subjectId, CancellationToken.None))

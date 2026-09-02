@@ -5,8 +5,8 @@ namespace IdentityServerPersistence.SystemStores;
 
 /// <summary>
 ///     CRUD + query store for OAuth resources (API resources, API scopes, identity resources)
-///     over the per-tenant CK entities. Duende-free since AB#4989/AB#4996 — protocol reads go
-///     through <see cref="OpenIddict.OpenIddictScopeStore" />.
+///     over the per-tenant CK entities. Management-plane only since AB#4989/AB#4996 — protocol
+///     reads go through <see cref="OpenIddict.OpenIddictScopeStore" />.
 /// </summary>
 public interface IOctoResourceStore
 {

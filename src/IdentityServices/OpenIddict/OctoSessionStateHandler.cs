@@ -8,7 +8,7 @@ using static OpenIddict.Server.OpenIddictServerEvents;
 namespace Meshmakers.Octo.Backend.IdentityServices.OpenIddict;
 
 /// <summary>
-///     OIDC Session Management (Duende parity): appends the <c>session_state</c> parameter to
+///     OIDC Session Management: appends the <c>session_state</c> parameter to
 ///     successful authorization responses. RP libraries (angular-oauth2-oidc with
 ///     <c>sessionChecksEnabled</c>) hand it to the <c>/connect/checksession</c> iframe, which
 ///     recomputes the hash from the browser's <see cref="SessionCheckCookie" /> — a logout drops

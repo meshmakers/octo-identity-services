@@ -32,8 +32,8 @@
         <PackageReference Include="AspNetCore.Identity.Mongo" Version="10.1.0" />
         <PackageReference Include="Microsoft.AspNetCore.Authentication.JwtBearer" Version="10.0.11" />
         <PackageReference Include="NLog.Web.AspNetCore" Version="6.2.0" />
-        <!-- AB#4989: OpenIddict replaces Duende IdentityServer (license expiry, see
-             docs/CONCEPT-OPENIDDICT-MIGRATION.md). -->
+        <!-- AB#4989: OpenIddict OAuth2/OIDC server (migration driven by the previous server's
+             license expiry, see docs/CONCEPT-OPENIDDICT-MIGRATION.md). -->
         <PackageReference Include="OpenIddict.AspNetCore" Version="7.6.0" />
         <PackageReference Include="Meshmakers.Octo.Communication.Contracts" Version="$(OctoCoreLibVersion)" />
         <PackageReference Include="Meshmakers.Octo.Services.Swagger" Version="$(OctoCoreLibVersion)" />

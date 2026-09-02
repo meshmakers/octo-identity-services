@@ -13,7 +13,7 @@ using static OpenIddict.Abstractions.OpenIddictConstants;
 namespace Meshmakers.Octo.Backend.IdentityServices.OpenIddict;
 
 /// <summary>
-///     RFC 8693 cross-tenant token exchange on OpenIddict (AB#4992), replacing the Duende
+///     RFC 8693 cross-tenant token exchange on OpenIddict (AB#4992), replacing the former
 ///     <c>TenantExchangeGrantValidator</c>: mints a <b>target-tenant (B)</b> access token for an
 ///     already-authenticated user, proven by their current home-tenant (A) access token
 ///     (<c>subject_token</c>), with the roles re-resolved in B.
@@ -177,8 +177,9 @@ public class TenantExchangeProcessor(
 
     /// <summary>
     ///     Picks the source identity to exchange from and runs the B-authorization gate on it —
-    ///     identical semantics to the Duende validator (incl. the AB#4966 shadow-user/ancestor
-    ///     dual-candidate rule). Returns <c>null</c> when no candidate may reach the target.
+    ///     identical semantics to the pre-migration validator (incl. the AB#4966
+    ///     shadow-user/ancestor dual-candidate rule). Returns <c>null</c> when no candidate may
+    ///     reach the target.
     /// </summary>
     internal async Task<CrossTenantAuthResult?> ResolveExchangeSourceAsync(
         string targetTenantId, string sourceTenantId, string sourceUserId)

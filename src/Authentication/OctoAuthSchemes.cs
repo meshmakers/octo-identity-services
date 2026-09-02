@@ -9,7 +9,7 @@ namespace Meshmakers.Octo.Backend.Authentication;
 /// </summary>
 /// <remarks>
 ///     AB#4989/AB#4996: since the swap to OpenIddict the values are ASP.NET Identity's own
-///     scheme names — the Duende-owned schemes (<c>idsrv</c>, <c>idsrv.session</c>,
+///     scheme names — the pre-migration server's schemes (<c>idsrv</c>, <c>idsrv.session</c>,
 ///     <c>idsrv.external</c>) no longer exist. Cookie names changed at the cutover (all
 ///     sessions ended by design, see docs/CONCEPT-OPENIDDICT-MIGRATION.md §2) and must stay
 ///     stable from here on.

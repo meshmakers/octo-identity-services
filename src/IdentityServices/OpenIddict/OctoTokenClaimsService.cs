@@ -10,19 +10,19 @@ namespace Meshmakers.Octo.Backend.IdentityServices.OpenIddict;
 
 /// <summary>
 ///     Builds the token claims for OpenIddict-issued principals with exact parity to the claims
-///     Duende produced via <c>UserProfileService</c> and <c>ClientCredentialsRoleTokenValidator</c>
-///     (AB#4990). The golden baseline in <c>tests/IdentityServices.IntegrationTests/GoldenFiles</c>
-///     pins the resulting token shapes:
+///     the pre-migration <c>UserProfileService</c> and <c>ClientCredentialsRoleTokenValidator</c>
+///     produced (AB#4990). The golden baseline in
+///     <c>tests/IdentityServices.IntegrationTests/GoldenFiles</c> pins the resulting token shapes:
 ///     <list type="bullet">
 ///         <item>User access tokens: <c>sub</c>, <c>tenant_id</c>, <c>allowed_tenants</c> (multi),
 ///             <c>home_tenant_id</c> (cross-tenant shadow users), effective <c>role</c> claims.</item>
 ///         <item><c>client_credentials</c> access tokens: unprefixed effective <c>role</c> claims
 ///             resolved from the client's AssignedRole associations + group memberships (AB#4183);
 ///             no tenant/session claims.</item>
-///         <item><c>aud</c>: the API resources whose scopes were granted — resolved exactly like
-///             Duende's resource validation did.</item>
+///         <item><c>aud</c>: the API resources whose scopes were granted — resource-service
+///             JwtBearer validation depends on these exact audience values.</item>
 ///         <item>Profile claims (name, email, family/given name) are NOT destined into tokens —
-///             matching Duende, they are served by the userinfo endpoint.</item>
+///             they are served by the userinfo endpoint.</item>
 ///     </list>
 /// </summary>
 public interface IOctoTokenClaimsService
@@ -57,7 +57,7 @@ internal class OctoTokenClaimsService(
     {
         identity.SetClaim(Claims.Subject, user.RtId.ToString());
 
-        // Profile claims (Duende ProfileService parity). Destinations decide per client whether
+        // Profile claims. Destinations decide per client whether
         // they reach the id_token (AlwaysIncludeUserClaimsInIdToken) — they never enter access
         // tokens (golden-pinned).
         if (!string.IsNullOrEmpty(user.UserName))

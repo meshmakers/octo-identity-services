@@ -3,8 +3,9 @@ using Meshmakers.Octo.Services.Infrastructure;
 namespace Meshmakers.Octo.Backend.IdentityServices.OpenIddict;
 
 /// <summary>
-///     Browser-visible OP session cookie backing OIDC Session Management (Duende parity: the
-///     <c>idsrv.session</c> cookie). It carries the server-side session id, is deliberately
+///     Browser-visible OP session cookie backing OIDC Session Management. Keeps the
+///     pre-migration cookie name <c>idsrv.session</c> so existing consumers and tools keep
+///     working. It carries the server-side session id, is deliberately
 ///     NOT HttpOnly (the <c>/connect/checksession</c> iframe reads it via <c>document.cookie</c>)
 ///     and is tenant-suffixed like the auth cookie (see <c>TenantCookieManager</c>) so concurrent
 ///     tenant sessions in one browser signal independently.
@@ -28,7 +29,7 @@ public static class SessionCheckCookie
         context.Response.Cookies.Append(ResolveName(context), sessionId, new CookieOptions
         {
             HttpOnly = false,
-            // SameAsRequest (Duende parity): all real deployments are HTTPS; the plain-HTTP
+            // Secure follows the request scheme: all real deployments are HTTPS; the plain-HTTP
             // integration-test host would otherwise never replay a Secure cookie.
             Secure = context.Request.IsHttps,
             SameSite = SameSiteMode.None,

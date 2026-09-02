@@ -4,8 +4,9 @@ namespace IdentityServerPersistence.SystemStores;
 
 /// <summary>
 ///     CRUD + query store for OAuth clients over the per-tenant <see cref="RtClient" /> CK
-///     entities, including the client-mirror upkeep hooks. Duende-free since AB#4989/AB#4996 —
-///     protocol reads go through <see cref="OpenIddict.OpenIddictApplicationStore" />.
+///     entities, including the client-mirror upkeep hooks. Management-plane only since
+///     AB#4989/AB#4996 — protocol reads go through
+///     <see cref="OpenIddict.OpenIddictApplicationStore" />.
 /// </summary>
 public interface IOctoClientStore
 {

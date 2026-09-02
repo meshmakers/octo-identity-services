@@ -6,18 +6,19 @@ namespace Meshmakers.Octo.Backend.IdentityServices.OpenIddict;
 /// <summary>
 ///     Claim destination policy for OpenIddict-issued tokens (AB#4990). OpenIddict emits only
 ///     <c>sub</c> by default — every other claim needs an explicit destination. This mapping
-///     reproduces the Duende token shapes pinned by the golden baseline
+///     reproduces the pre-migration token shapes pinned by the golden baseline
 ///     (<c>tests/IdentityServices.IntegrationTests/GoldenFiles</c>):
 ///     <list type="bullet">
 ///         <item>Authorization/session claims (<c>amr</c>, <c>idp</c>, <c>auth_time</c>,
 ///             <c>sid</c>) go into access AND identity tokens.</item>
 ///         <item>Octo claims (<c>tenant_id</c>, <c>allowed_tenants</c>, <c>home_tenant_id</c>)
 ///             and <c>role</c> go into access tokens — and ALSO into the identity token when the
-///             client sets <c>AlwaysIncludeUserClaimsInIdToken</c> (Duende parity: the Refinery
+///             client sets <c>AlwaysIncludeUserClaimsInIdToken</c> (the Refinery
 ///             Studio reads its identity, tenant and roles from the id_token).</item>
 ///         <item>Profile claims (name, preferred_username, email, family/given name) go into the
 ///             identity token only for <c>AlwaysIncludeUserClaimsInIdToken</c> clients; otherwise
-///             into NO token — the userinfo endpoint serves them, exactly like Duende did.</item>
+///             into NO token — the userinfo endpoint serves them (pre-migration wire format,
+///             pinned by the golden baseline tests).</item>
 ///     </list>
 /// </summary>
 public static class OctoClaimsDestinations
@@ -27,7 +28,7 @@ public static class OctoClaimsDestinations
 
     /// <summary>
     ///     Destination selector honoring the client's <c>AlwaysIncludeUserClaimsInIdToken</c>
-    ///     setting (Duende parity — AB#4996).
+    ///     setting (AB#4996) — the stored client flag must keep controlling id_token content.
     /// </summary>
     public static Func<Claim, IEnumerable<string>> ForClient(bool alwaysIncludeUserClaimsInIdToken)
         => claim => ResolveCore(claim, alwaysIncludeUserClaimsInIdToken);
@@ -72,7 +73,7 @@ public static class OctoClaimsDestinations
                 }
 
                 // Otherwise intentionally not destined into tokens; userinfo serves them
-                // (Duende parity).
+                // (pre-migration wire format — keeps tokens small).
                 break;
 
             // Everything else is intentionally not destined into tokens.

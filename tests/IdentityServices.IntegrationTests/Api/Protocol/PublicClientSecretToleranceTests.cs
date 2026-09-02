@@ -12,9 +12,9 @@ using Xunit;
 namespace IdentityServices.IntegrationTests.Api.Protocol;
 
 /// <summary>
-///     AB#4989 Duende parity: clients configured with <c>RequireClientSecret = false</c>
-///     (octo-cli, adapters) send a <c>client_secret</c> anyway; Duende ignored it while
-///     OpenIddict rejects public clients presenting a secret (error ID2053). Pins
+///     AB#4989: clients configured with <c>RequireClientSecret = false</c>
+///     (octo-cli, adapters) send a <c>client_secret</c> anyway; the pre-migration server ignored
+///     it while OpenIddict rejects public clients presenting a secret (error ID2053). Pins
 ///     <c>OctoPublicClientSecretHandler</c>: the secret is dropped for public clients, while
 ///     confidential clients still authenticate strictly.
 /// </summary>
@@ -45,7 +45,7 @@ public class PublicClientSecretToleranceTests : IntegrationTestBase
 
         var raw = await response.Content.ReadAsStringAsync(ct);
         response.StatusCode.Should().Be(HttpStatusCode.OK,
-            "a public client sending a client_secret must stay accepted (Duende parity): {0}", raw);
+            "a public client sending a client_secret must stay accepted (legacy-tolerant behavior): {0}", raw);
         JsonNode.Parse(raw)!.AsObject().ContainsKey("device_code").Should().BeTrue();
     }
 

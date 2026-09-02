@@ -11,7 +11,8 @@ namespace IdentityServerPersistence.SystemStores.OpenIddict;
 /// <summary>
 ///     OpenIddict application store projecting the existing per-tenant <see cref="RtClient" />
 ///     entities (AB#4991). Purely a read-time mapping layer: the stored client data is unchanged,
-///     the Duende-shaped configuration is transformed into OpenIddict's permissions model by
+///     the legacy client configuration shape (<c>AllowedGrantTypes</c>, <c>AllowedScopes</c>,
+///     flags) is transformed into OpenIddict's permissions model by
 ///     <see cref="ClientPermissionsMapper" />.
 /// </summary>
 /// <remarks>
@@ -60,7 +61,7 @@ public class OpenIddictApplicationStore(
         }
 
         // RFC 7591 DCR clients carry a TTL — an expired dynamic client no longer exists
-        // for protocol purposes (same gate ClientStore.FindClientByIdAsync applied for Duende).
+        // for protocol purposes (same gate the pre-migration protocol lookup applied).
         if (client.DynamicRegistration &&
             client.DynamicRegistrationExpiresAt is { } expiresAt &&
             expiresAt <= DateTime.UtcNow)
@@ -116,8 +117,9 @@ public class OpenIddictApplicationStore(
 
     public ValueTask<string?> GetClientSecretAsync(RtClient application, CancellationToken cancellationToken)
     {
-        // Returns the stored Duende-format hash (Base64 SHA-256/512 of the secret).
-        // OctoApplicationManager owns the comparison so existing secrets keep working.
+        // Returns the stored legacy-format hash (Base64 SHA-256/512 of the secret) written by
+        // the pre-migration IdentityServer. OctoApplicationManager owns the comparison so
+        // existing secrets keep validating without rotation.
         var secret = application.ClientSecrets?
             .Where(s => s.ExpirationDateTime == null || s.ExpirationDateTime > DateTime.UtcNow)
             .Select(s => s.Value)
@@ -167,7 +169,7 @@ public class OpenIddictApplicationStore(
     public ValueTask<ImmutableDictionary<string, string>> GetSettingsAsync(
         RtClient application, CancellationToken cancellationToken)
     {
-        // Per-client token lifetimes, mapped from the Duende second-based configuration.
+        // Per-client token lifetimes, mapped from the stored second-based configuration.
         var settings = ImmutableDictionary.CreateBuilder<string, string>(StringComparer.Ordinal);
         AddLifetime(settings, Settings.TokenLifetimes.AccessToken, application.AccessTokenLifetime);
         AddLifetime(settings, Settings.TokenLifetimes.IdentityToken, application.IdentityTokenLifetime);

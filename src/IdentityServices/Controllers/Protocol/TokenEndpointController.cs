@@ -25,7 +25,8 @@ namespace Meshmakers.Octo.Backend.IdentityServices.Controllers.Protocol;
 ///         <item><c>authorization_code</c> / <c>refresh_token</c> /
 ///             <c>urn:ietf:params:oauth:grant-type:device_code</c>: the stored principal is
 ///             refreshed — user existence/lockout re-checked, roles and tenant claims re-resolved
-///             (Duende parity: our clients set <c>UpdateAccessTokenClaimsOnRefresh</c>).</item>
+///             on every redemption (our clients set <c>UpdateAccessTokenClaimsOnRefresh</c>, so
+///             role/tenant changes must take effect without a re-login).</item>
 ///     </list>
 ///     OpenIddict has already authenticated the client (secret validation via
 ///     <c>OctoApplicationManager</c>) and validated grant/scope permissions before this action runs.
@@ -78,8 +79,9 @@ public class TokenEndpointController(
 
         var identity = CreateIdentity();
 
-        // OpenIddict requires a subject on the sign-in principal; Duende-parity access tokens
-        // must NOT carry it — OctoAccessTokenShapeHandler strips it at token generation.
+        // OpenIddict requires a subject on the sign-in principal; client_credentials access
+        // tokens must NOT carry sub (TenantAuthorizationMiddleware identifies service tokens by
+        // its absence) — OctoAccessTokenShapeHandler strips it at token generation.
         identity.SetClaim(Claims.Subject, request.ClientId);
 
         // Effective client roles (direct AssignedRole + group-inherited), unprefixed (AB#4183).
@@ -146,8 +148,9 @@ public class TokenEndpointController(
         }
 
         // Rebuild the user claims fresh (roles / allowed_tenants may have changed since issuance —
-        // Duende parity: our interactive clients set UpdateAccessTokenClaimsOnRefresh), while the
-        // session claims (amr/idp/auth_time/sid) survive from the original authentication.
+        // our interactive clients set UpdateAccessTokenClaimsOnRefresh, so redemption must
+        // re-resolve them), while the session claims (amr/idp/auth_time/sid) survive from the
+        // original authentication.
         var identity = CreateIdentity();
         await tokenClaimsService.PopulateUserClaimsAsync(identity, user, loginTenantId);
         CopySessionClaims(storedPrincipal, identity);

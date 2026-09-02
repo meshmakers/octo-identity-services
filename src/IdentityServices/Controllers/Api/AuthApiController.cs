@@ -718,8 +718,9 @@ public class AuthApiController(
         return new LogoutContextDto
         {
             LogoutId = logoutId ?? string.Empty,
-            // A logout initiated by a validated client request needs no prompt (Duende parity);
-            // a user-initiated logout (no logoutId context) asks for confirmation.
+            // A logout initiated by a validated client request needs no prompt — the client
+            // already expressed the user's intent; a user-initiated logout (no logoutId context)
+            // asks for confirmation.
             ShowLogoutPrompt = context == null,
             PostLogoutRedirectUri = context?.PostLogoutRedirectUri,
             ClientName = context?.ClientName
@@ -741,7 +742,8 @@ public class AuthApiController(
             var sessionId = User.FindFirstValue("sid") ?? context?.SessionId;
 
             // Revoke all OAuth tokens (refresh tokens, pending codes) for this user so clients
-            // cannot silently keep access after logout (Duende persisted-grant parity).
+            // cannot silently keep access after logout — logout must end the grant, not just the
+            // browser session.
             if (!string.IsNullOrEmpty(subjectId))
             {
                 await oauthTokenStore.RevokeBySubjectAsync(subjectId, HttpContext.RequestAborted);

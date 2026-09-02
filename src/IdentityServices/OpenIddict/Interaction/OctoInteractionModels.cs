@@ -4,7 +4,7 @@ namespace Meshmakers.Octo.Backend.IdentityServices.OpenIddict.Interaction;
 
 /// <summary>
 ///     The validated context of a pending authorize request, parsed from the <c>returnUrl</c>
-///     round-tripped through the login/consent SPA pages (AB#4995). Replaces Duende's
+///     round-tripped through the login/consent SPA pages (AB#4995). Replaces the former
 ///     <c>AuthorizationRequest</c> for the interaction layer.
 /// </summary>
 public sealed record OctoAuthorizationContext
@@ -23,8 +23,8 @@ public sealed record OctoAuthorizationContext
 
 /// <summary>
 ///     Error page context round-tripped through the self-contained, data-protected
-///     <c>errorId</c> query parameter (no server-side storage — multi-pod safe). Replaces
-///     Duende's error message store (AB#4950 semantics preserved).
+///     <c>errorId</c> query parameter (no server-side storage — multi-pod safe). Replaces the
+///     former server-side error message store (AB#4950 semantics preserved).
 /// </summary>
 public sealed record OctoErrorContext
 {
@@ -38,7 +38,7 @@ public sealed record OctoErrorContext
 /// <summary>
 ///     Logout page context round-tripped through the self-contained, data-protected
 ///     <c>logoutId</c> query parameter. Created by the end-session endpoint; consumed by the
-///     SPA logout flow. Replaces Duende's logout message store.
+///     SPA logout flow. Replaces the former server-side logout message store.
 /// </summary>
 public sealed record OctoLogoutContext
 {

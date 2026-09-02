@@ -10,10 +10,10 @@ using OpenIddict.Server;
 namespace Meshmakers.Octo.Backend.IdentityServices.Configuration;
 
 /// <summary>
-///     OpenIddict server configuration replacing Duende IdentityServer (AB#4989/AB#4990).
-///     Endpoint paths, flows, token format and signing certificate deliberately mirror the
-///     Duende setup so all consumers (SPAs, backend services, adapters, octo-cli, MCP clients)
-///     keep working unchanged — the golden baseline in
+///     OpenIddict server configuration (AB#4989/AB#4990).
+///     Endpoint paths, flows, token format and signing certificate deliberately keep the
+///     pre-migration wire contract so all consumers (SPAs, backend services, adapters, octo-cli,
+///     MCP clients) keep working unchanged — the golden baseline in
 ///     <c>tests/IdentityServices.IntegrationTests/GoldenFiles</c> is the regression gate.
 /// </summary>
 public static class OpenIddictConfiguration
@@ -49,7 +49,8 @@ public static class OpenIddictConfiguration
                 coreOptions.ReplaceAuthorizationStore<RtOAuthAuthorization, OpenIddictAuthorizationStore>();
                 coreOptions.ReplaceTokenStore<RtOAuthToken, OpenIddictTokenStore>();
 
-                // Duende-hash-compatible client secret validation (existing secrets keep working).
+                // Validates client secrets against the legacy stored hash format (Base64
+                // SHA-256/512) so existing secrets keep working without rotation.
                 coreOptions.ReplaceApplicationManager<RtClient, OctoApplicationManager>();
 
                 // CRITICAL: OpenIddict's application/scope cache is process-wide while our
@@ -59,8 +60,8 @@ public static class OpenIddictConfiguration
             })
             .AddServer(serverOptions =>
             {
-                // Endpoint paths pinned to the Duende layout — consumers cache the discovery
-                // document and octo-common-services derives the JWKS path from it.
+                // Endpoint paths pinned to the pre-migration layout — consumers cache the
+                // discovery document and octo-common-services derives the JWKS path from it.
                 serverOptions
                     .SetAuthorizationEndpointUris("connect/authorize")
                     .SetTokenEndpointUris("connect/token")
@@ -99,8 +100,9 @@ public static class OpenIddictConfiguration
                 }
                 else
                 {
-                    // Same static PKCS#12 certificate Duende signed with: the JWKS stays
-                    // identical, so access tokens issued before the cutover keep validating.
+                    // Same static PKCS#12 certificate the pre-migration server signed with: the
+                    // JWKS stays identical, so access tokens issued before the cutover keep
+                    // validating.
                     var certificate = SigningCertificateLoader.TryLoad(identityOptions)
                                       ?? throw new InvalidOperationException(
                                           $"Token signing certificate not found at '{identityOptions.KeyFilePath}' " +
@@ -115,15 +117,16 @@ public static class OpenIddictConfiguration
                     serverOptions.AddEncryptionCertificate(certificate);
                 }
 
-                // Duende-compatible access token shape: array scope claim, no sub on
+                // Pre-migration access token shape: array scope claim, no sub on
                 // client_credentials, no oi_* private claims, no per-token DB entry (AB#4992).
                 serverOptions.AddEventHandler(OctoAccessTokenShapeHandler.Descriptor);
 
                 // Device flow: render the verification result as the JSON DTO the SPA expects.
                 serverOptions.AddEventHandler(OctoDeviceVerificationResponseHandler.Descriptor);
 
-                // Duende parity: ignore a client_secret sent by public clients
-                // (RequireClientSecret = false) instead of rejecting with invalid_client.
+                // Existing public clients (RequireClientSecret = false), e.g. octo-cli and
+                // adapters, send a client_secret anyway — ignore it instead of rejecting with
+                // invalid_client, as the pre-migration server did.
                 serverOptions.AddEventHandler(OctoPublicClientSecretHandler.Descriptor);
 
                 // OIDC session management: session_state on authorize responses +
@@ -138,8 +141,9 @@ public static class OpenIddictConfiguration
                         return default;
                     }));
 
-                // Duende parity: the device authorization response always carried the polling
-                // interval (5s); OpenIddict omits it (RFC 8628 defaults to 5 when absent).
+                // Pre-migration wire format (pinned by the golden baseline tests): the device
+                // authorization response always carries the polling interval (5s); OpenIddict
+                // omits it (RFC 8628 defaults to 5 when absent).
                 serverOptions.AddEventHandler<OpenIddictServerEvents.ApplyDeviceAuthorizationResponseContext>(
                     handlerBuilder => handlerBuilder.UseInlineHandler(context =>
                     {
@@ -152,9 +156,10 @@ public static class OpenIddictConfiguration
                         return default;
                     }));
 
-                // Duende parity: the token response always echoes the granted scopes. OpenIddict
-                // omits the scope member when granted == requested (RFC 6749 makes it optional),
-                // so absence here means the requested scopes were granted verbatim.
+                // Pre-migration wire format (pinned by the golden baseline tests): the token
+                // response always echoes the granted scopes. OpenIddict omits the scope member
+                // when granted == requested (RFC 6749 makes it optional), so absence here means
+                // the requested scopes were granted verbatim.
                 serverOptions.AddEventHandler<OpenIddictServerEvents.ApplyTokenResponseContext>(
                     handlerBuilder => handlerBuilder.UseInlineHandler(context =>
                     {
@@ -170,8 +175,8 @@ public static class OpenIddictConfiguration
                     }));
 
                 // RFC 7591 DCR: advertise the hand-rolled /connect/register endpoint in the
-                // discovery document when DCR is enabled (AB#4993 — replaces Duende's
-                // Discovery.CustomEntries mechanism).
+                // discovery document when DCR is enabled (AB#4993 — OpenIddict has no built-in
+                // hook for custom discovery entries, hence the inline handler).
                 if (identityOptions.DynamicClientRegistration.Enabled)
                 {
                     var registrationEndpoint =

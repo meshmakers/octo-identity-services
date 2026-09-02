@@ -11,7 +11,8 @@ using Xunit;
 namespace IdentityServices.IntegrationTests.Api.Protocol;
 
 /// <summary>
-///     AB#4989 OIDC Session Management (Duende parity): pins the <c>idsrv.session</c> cookie
+///     AB#4989 OIDC Session Management (pre-migration behavior kept): pins the
+///     <c>idsrv.session</c> cookie
 ///     lifecycle, the <c>session_state</c> parameter on authorize responses and the
 ///     <c>/connect/checksession</c> iframe. This is the mechanism through which other tabs and
 ///     SPAs (angular-oauth2-oidc with <c>sessionChecksEnabled</c>) learn about a logout —

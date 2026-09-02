@@ -20,7 +20,7 @@ namespace Meshmakers.Octo.Backend.IdentityServices.Controllers.Protocol;
 
 /// <summary>
 ///     OpenIddict end-user verification endpoint for the device flow (AB#4993), replacing the
-///     Duende <c>IDeviceFlowInteractionService</c> path of <c>DeviceApiController</c>. The Angular
+///     pre-migration interaction-service path of <c>DeviceApiController</c>. The Angular
 ///     device page (<c>/{tenantId}/device</c>) collects the user code and drives this endpoint via
 ///     XHR:
 ///     <list type="bullet">
@@ -100,8 +100,9 @@ public class DeviceVerificationController(
         var form = await Request.ReadFormAsync(HttpContext.RequestAborted);
         if (string.Equals(form["deny"].FirstOrDefault(), "true", StringComparison.OrdinalIgnoreCase))
         {
-            // Duende parity: a denied user code permanently rejects the pending device code —
-            // the polling device receives access_denied instead of authorization_pending.
+            // A denied user code permanently rejects the pending device code — the polling
+            // device must receive access_denied instead of polling forever on
+            // authorization_pending.
             if (!string.IsNullOrEmpty(request.UserCode))
             {
                 var userCodeToken = await tokenManager.FindByReferenceIdAsync(

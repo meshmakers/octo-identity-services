@@ -9,8 +9,8 @@ namespace IdentityServerPersistence.SystemStores.OpenIddict;
 /// <summary>
 ///     OpenIddict scope store projecting the existing per-tenant <see cref="RtApiScope" />
 ///     entities (AB#4991). Scope→audience resolution (<see cref="GetResourcesAsync" />) walks the
-///     <see cref="RtApiResource" /> entities exactly like Duende's resource validation did, so
-///     issued access tokens carry the same <c>aud</c> values (golden-baseline pinned).
+///     <see cref="RtApiResource" /> entities so issued access tokens carry the same <c>aud</c>
+///     values as before the migration (golden-baseline pinned).
 /// </summary>
 /// <remarks>
 ///     The scope identifier exposed to OpenIddict is the scope NAME (unique per tenant).
@@ -48,8 +48,9 @@ public class OpenIddictScopeStore(IOctoResourceStore resourceStore) : IOpenIddic
         }
 
         // OIDC identity resources (openid, profile, email, role, allowed_tenants, …) are stored
-        // as RtIdentityResource but are requestable scopes on the wire (Duende parity). Project
-        // them into the scope entity so OpenIddict's scope validation accepts them.
+        // as RtIdentityResource but are requestable scopes on the wire — clients request them in
+        // the scope parameter. Project them into the scope entity so OpenIddict's scope
+        // validation accepts them.
         var identityResource = await resourceStore.GetIdentityResourceByNameAsync(name);
         if (identityResource is { Enabled: true })
         {
@@ -136,7 +137,8 @@ public class OpenIddictScopeStore(IOctoResourceStore resourceStore) : IOpenIddic
     public async ValueTask<ImmutableArray<string>> GetResourcesAsync(
         RtApiScope scope, CancellationToken cancellationToken)
     {
-        // Audience resolution: all enabled API resources carrying this scope (Duende parity).
+        // Audience resolution: all enabled API resources carrying this scope become aud values
+        // (pre-migration wire format, pinned by the golden baseline tests).
         var apiResources = await resourceStore.FindRtApiResourcesByScopeNameAsync([scope.Name]);
         return apiResources
             .Where(r => r.Enabled)

@@ -216,9 +216,9 @@ internal class TokenCleanupHostService : IHostedService
     }
 
     /// <summary>
-    ///     Physically removes expired server-side sessions (AB#4994). Replaces Duende's built-in
-    ///     10-minute session sweep: OctoTicketStore treats expired records as missing on read;
-    ///     this sweep erases them.
+    ///     Physically removes expired server-side sessions (AB#4994). Replaces the pre-migration
+    ///     built-in 10-minute session sweep: OctoTicketStore treats expired records as missing on
+    ///     read; this sweep erases them.
     /// </summary>
     private static async Task RemoveExpiredSessionsForTenantAsync(ITenantRepository tenantRepository)
     {

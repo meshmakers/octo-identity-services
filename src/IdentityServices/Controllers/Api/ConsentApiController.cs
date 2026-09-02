@@ -11,7 +11,8 @@ namespace Meshmakers.Octo.Backend.IdentityServices.Controllers.Api;
 ///     <see cref="IOctoInteractionService" /> (AB#4995): the consent decision is round-tripped to
 ///     the authorize endpoint via the data-protected <c>octo_consent</c> parameter on the
 ///     returned redirect URL; remembered consent is persisted as a permanent OAuth authorization.
-///     Routes and DTOs are unchanged from the Duende-backed implementation.
+///     Routes and DTOs are unchanged from the pre-migration implementation — the Angular SPA
+///     needs no changes.
 /// </summary>
 [ApiController]
 [Route("{tenantId}/api/consent")]
