@@ -2,7 +2,6 @@
 using IdentityServerPersistence.Configuration.Options;
 using IdentityServerPersistence.Services.DynamicClientRegistration;
 using IdentityServerPersistence.SystemStores;
-using Meshmakers.Octo.Backend.Authentication;
 using Meshmakers.Octo.Backend.Authentication.Consumers;
 using Meshmakers.Octo.Backend.Authentication.DynamicAuth;
 using Meshmakers.Octo.Backend.IdentityServices.Configuration;
@@ -46,8 +45,6 @@ using Microsoft.AspNetCore.DataProtection.Repositories;
 using System.Threading.RateLimiting;
 using NLog;
 using NLog.Web;
-using Persistence.IdentityCkModel.Generated.Blueprints.SystemIdentityBootstrap.v1;
-using Persistence.IdentityCkModel.Generated.System.Identity.v2;
 using LogLevel = Microsoft.Extensions.Logging.LogLevel;
 
 // NLog: Setup the logger first to catch all errors

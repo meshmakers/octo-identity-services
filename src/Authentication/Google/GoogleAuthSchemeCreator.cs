@@ -25,7 +25,7 @@ internal class GoogleAuthSchemeCreator : IAuthSchemeCreator<RtGoogleIdentityProv
         var options = _googleAuthOptionsBuilder.CreateOptions(schemeName);
         options.ClientId = identityProvider.ClientId;
         options.ClientSecret = identityProvider.ClientSecret;
-        // Sign in to IdentityServer's external cookie scheme so ExternalLoginCallback can read it
+        // Sign in to our external cookie scheme (OctoAuthSchemes.ExternalCookieScheme) so ExternalLoginCallback can read it
         options.SignInScheme = OctoAuthSchemes.ExternalCookieScheme;
 
         var displayName = identityProvider.DisplayName ?? identityProvider.Name;

@@ -552,7 +552,7 @@ attributes:
 
   - id: SessionKey
     valueType: String
-    description: Unique key of a Duende server-side session (the only value stored in the browser cookie).
+    description: Unique key of a server-side session (the only value stored in the browser cookie).
 
   - id: Scheme
     valueType: String

@@ -1,5 +1,7 @@
 # Cookie-Bloat Fix: Server-Side Sessions + MongoDB DataProtection Key Ring
 
+> **Historical plan — superseded by AB#4989.** The Duende-based implementation described below was replaced by OpenIddict + OctoTicketStore; code samples no longer compile.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Collapse the ~3 KB per-tenant `.AspNetCore.Identity.Application.<tenant>` cookies to small session keys via Duende server-side sessions stored as CK entities in MongoDB, and make DataProtection key-ring persistence always-on (MongoDB-backed, with zero-logout seed import from the legacy file path).

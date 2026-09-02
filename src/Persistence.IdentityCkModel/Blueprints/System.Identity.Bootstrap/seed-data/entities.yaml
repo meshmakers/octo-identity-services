@@ -363,7 +363,7 @@ entities:
         value: []
 
   # MCP resource indicator (RFC 8707). Interactive OAuth clients like Claude Code send
-  # resource=<mcp public url> on /connect/authorize; Duende matches the value exactly against an
+  # resource=<mcp public url> on /connect/authorize; the identity service (OpenIddict) matches the value exactly against an
   # ApiResource Name. Without this, the request fails with invalid_target. The MCP server itself does
   # not validate the audience (ValidateAudience=false), so this only satisfies the resource indicator
   # — it is an isolated protocol shim, NOT a per-service audience: it carries the same scopes as

@@ -14,7 +14,6 @@ namespace Meshmakers.Octo.Backend.IdentityServices.Cookies;
 /// <b>Scoped cookies</b> (tenant suffix added):
 /// <list type="bullet">
 ///   <item><c>Identity.Application</c> — main auth cookie</item>
-///   <item><c>idsrv</c> — IdentityServer session cookie</item>
 /// </list>
 /// </para>
 /// <para>

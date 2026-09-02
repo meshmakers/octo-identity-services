@@ -24,7 +24,7 @@ namespace Meshmakers.Octo.Backend.IdentityServices.Middleware;
 /// have requested. Non-DCR clients are never touched.
 /// </para>
 /// <para>
-/// Must run <b>before</b> <c>UseIdentityServer()</c>. Only the query string is rewritten; PAR/form
+/// Must run <b>before</b> <c>UseAuthentication()</c> and the OpenIddict server middleware. Only the query string is rewritten; PAR/form
 /// posts are left alone (backend OIDC clients always send an explicit scope).
 /// </para>
 /// </remarks>

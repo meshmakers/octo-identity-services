@@ -32,7 +32,7 @@ namespace Meshmakers.Octo.Backend.IdentityServices.Middleware;
 /// </para>
 /// <para>
 /// This middleware must run <b>after</b> routing (so route values are available) and <b>before</b>
-/// <c>UseIdentityServer()</c> (which triggers authentication).
+/// <c>UseAuthentication()</c> and the OpenIddict server middleware (which trigger authentication).
 /// </para>
 /// </remarks>
 internal class OidcTenantResolutionMiddleware(
@@ -53,14 +53,14 @@ internal class OidcTenantResolutionMiddleware(
 
     /// <summary>
     /// Lifetime of a PAR <c>request_uri</c> → tenant mapping. PAR request_uris are short-lived
-    /// (typically 60–90 seconds in Duende IdentityServer), so a 5-minute window safely covers the
+    /// (bounded by OpenIddict's authorization-code lifetime, minutes at most), so a 5-minute window safely covers the
     /// time between <c>/connect/par</c> and the follow-up <c>/connect/authorize?request_uri=...</c>.
     /// </summary>
     private static readonly TimeSpan ParRequestUriEntryLifetime = TimeSpan.FromMinutes(5);
 
     /// <summary>
     /// Matches the authorization code from an HTML form_post response body.
-    /// IdentityServer returns <c>&lt;input type='hidden' name='code' value='...' /&gt;</c>.
+    /// OpenIddict returns <c>&lt;input type='hidden' name='code' value='...' /&gt;</c>.
     /// </summary>
     private static readonly Regex FormPostCodePattern = new(
         @"name=[""']code[""']\s+value=[""']([^""']+)[""']",
@@ -289,9 +289,9 @@ internal class OidcTenantResolutionMiddleware(
 
     /// <summary>
     /// Captures the authorization code from the authorize response and maps it to the tenant ID.
-    /// Supports both redirects (<c>response_mode=query</c>, code in Location header — Duende 7 emits
-    /// 302 Found, Duende 8 emits 303 See Other) and 200 HTML responses (<c>response_mode=form_post</c>,
-    /// code in hidden form field).
+    /// Supports both redirects (<c>response_mode=query</c>, code in Location header — OpenIddict emits
+    /// 302 Found or 303 See Other depending on response mode/handler) and 200 HTML responses
+    /// (<c>response_mode=form_post</c>, code in hidden form field).
     /// </summary>
     private void CaptureAuthorizationCode(HttpContext context, MemoryStream responseBody, string tenantId)
     {
@@ -535,7 +535,7 @@ internal class OidcTenantResolutionMiddleware(
 
     /// <summary>
     /// Extracts the <c>code</c> value from an OAuth2 <c>response_mode=form_post</c> HTML response body.
-    /// IdentityServer returns an HTML page with a self-submitting form containing hidden fields
+    /// OpenIddict returns an HTML page with a self-submitting form containing hidden fields
     /// such as <c>&lt;input type='hidden' name='code' value='...' /&gt;</c>.
     /// </summary>
     internal static string? ExtractCodeFromFormPostBody(MemoryStream responseBody)
@@ -733,7 +733,7 @@ internal class OidcTenantResolutionMiddleware(
 
     /// <summary>
     /// Extracts the <c>tenant_id</c> claim from the JWT payload without signature verification.
-    /// The token has already been validated by IdentityServer when it was issued; we only need
+    /// The token has already been validated by OpenIddict when it was issued; we only need
     /// the tenant routing hint.
     /// </summary>
     internal static string? ExtractTenantFromJwtPayload(string jwt)

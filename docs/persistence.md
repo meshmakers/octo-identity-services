@@ -199,7 +199,7 @@ All generated entities:
 - `RtUser` - User identity
 - `RtRole` - Role definition
 - `RtGroup` - Role group with user/group members
-- `RtPersistedGrant` - OAuth tokens/grants (Duende; superseded by the OpenIddict types below at the AB#4989 cutover)
+- `RtPersistedGrant` - legacy grant type — email-confirmation & password-reset token store (OAuth grants moved to the OpenIddict types below at the AB#4989 cutover)
 - `RtOAuthAuthorization`, `RtOAuthToken` - OpenIddict authorization/token model (AB#4991, model `System.Identity-2.12.0`)
 - `RtApiResource`, `RtApiScope`, `RtIdentityResource`
 - `RtIdentityProvider` and subtypes
@@ -214,7 +214,7 @@ Located in `src/IdentityServerPersistence/SystemStores/`:
 |-------|-----------|---------|
 | `ClientStore` | `IOctoClientStore` | OAuth/OIDC clients |
 | `ResourceStore` | `IOctoResourceStore` | API resources, scopes, identity resources |
-| `PersistentGrantStore` | `IOctoPersistentGrantStore` | Tokens, grants, consent (Duende) |
+| `PersistentGrantStore` | `IOctoPersistentGrantStore` | Legacy grant store — email-confirmation & password-reset tokens |
 | `OpenIddict/OpenIddictApplicationStore` | `IOpenIddictApplicationStore<RtClient>` | OpenIddict view of clients (read-only projection incl. `ClientPermissionsMapper` grant-type→permissions transform, AB#4991) |
 | `OpenIddict/OpenIddictScopeStore` | `IOpenIddictScopeStore<RtApiScope>` | OpenIddict view of API scopes incl. scope→audience resolution |
 | `OpenIddict/OpenIddictAuthorizationStore` | `IOpenIddictAuthorizationStore<RtOAuthAuthorization>` | OpenIddict authorizations (consent / flow links), per tenant |
@@ -497,20 +497,6 @@ Migrations run automatically on application startup.
 
 ## AutoMapper Configuration
 
-Mapping between Duende models and CK runtime types:
-
-```csharp
-// Duende → CK Runtime
-CreateMap<Client, RtClient>()
-    .ForMember(dest => dest.ClientSecrets,
-        opt => opt.MapFrom(src => src.ClientSecrets));
-
-// CK Runtime → Duende
-CreateMap<RtClient, Client>()
-    .ForMember(dest => dest.ClientSecrets,
-        opt => opt.MapFrom(src => src.ClientSecrets));
-```
-
 **Custom Converters:**
 - `AttributeStringValueListConverter` - Maps `ICollection<string>` ↔ `IAttributeValueList<string>`
 
@@ -539,15 +525,15 @@ builder.Services.AddIdentity<RtUser, RtRole>()
 
 ### Storage Model
 
-Duende server-side sessions are stored per-tenant in MongoDB as `RtServerSideSession` entities (CK type, `System.Identity-2.7.0`). The `ServerSideSessionStore` (`src/IdentityServerPersistence/SystemStores/`) implements Duende's `IServerSideSessionStore` against the tenant's CK runtime repository.
+Server-side authentication sessions are stored per-tenant in MongoDB as `RtServerSideSession` entities (CK type). The store is `OctoTicketStore` (`src/IdentityServices/OpenIddict/`), an ASP.NET Core `ITicketStore` over `RtServerSideSession` in the tenant's CK runtime repository (it replaced the former Duende `ServerSideSessionStore` in the OpenIddict migration, AB#4989).
 
 | Attribute | Index | Description |
 |-----------|-------|-------------|
 | `SessionKey` | Unique | Short random key carried in the browser cookie |
 | `SubjectId` | Ascending | User subject ID for per-user session queries |
-| `SessionId` | Ascending | IdentityServer session correlation |
+| `SessionId` | Ascending | Session correlation (`sid` claim, stamped at session creation) |
 | `ExpirationDateTime` | Ascending | Used by the expiry sweep to find stale records |
-| `Ticket` | — | Encrypted ASP.NET auth ticket (the full payload) |
+| `Ticket` | — | Data-protected ASP.NET auth ticket (the full payload) |
 | `Created` / `Renewed` | — | Audit timestamps |
 | `DisplayName` | — | Optional display name for session management UI |
 
@@ -555,13 +541,13 @@ The per-tenant `.AspNetCore.Identity.Application.{tenantId}` cookie carries only
 
 ### Expiry and Cleanup Semantics
 
-- `GetSessionAsync` returns `null` for records whose `ExpirationDateTime` is in the past (expired-is-a-miss). The expired document remains in MongoDB until the background sweep runs.
-- `GetAndRemoveExpiredSessionsAsync` is called by Duende's built-in background sweep (default interval: 10 minutes). The sweep iterates the system tenant plus all child tenants, following the same `TokenCleanupHostService` pattern used for OIDC grants.
+- `OctoTicketStore.RetrieveAsync` treats records whose `ExpirationDateTime` is in the past as missing (expired-is-a-miss). The expired document remains in MongoDB until the background sweep runs.
+- Expired session records are removed by `TokenCleanupHostService`, which sweeps expired sessions, expired `RtOAuthToken`/`RtOAuthAuthorization` entries, and legacy grants for the system tenant plus all child tenants.
 - Session lifetime is controlled by `ConfigureApplicationCookie` `ExpireTimeSpan = 7 days` sliding. Both the cookie and the session record share this window; renewing the cookie (`SlidingExpiration = true`) also updates `RtServerSideSession.ExpirationDateTime`.
 
 ### Write-Conflict Retry
 
-Concurrent session renewals (e.g., two browser tabs calling protected endpoints simultaneously) can trigger a transient MongoDB write conflict (`MongoCommandException` with a 'Write conflict' message) on the same session document. `ServerSideSessionStore` uses the shared `MongoWriteRetry` helper (also used by `PersistentGrantStore`) to retry these transient conflicts transparently, without propagating errors to the user.
+Concurrent session renewals (e.g., two browser tabs calling protected endpoints simultaneously) can trigger a transient MongoDB write conflict (`MongoCommandException` with a 'Write conflict' message) on the same session document. `OctoTicketStore` uses the shared `MongoWriteRetry` helper (also used by `PersistentGrantStore`) to retry these transient conflicts transparently, without propagating errors to the user.
 
 ## Data Protection Key Ring
 

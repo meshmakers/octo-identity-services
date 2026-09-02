@@ -68,7 +68,7 @@ description: |
   1.1.3 (AB#4338): adds the interactive-MCP OAuth path for spec-compliant MCP
   clients (Claude Code). New `mcpApi` ApiResource whose Name is
   `${octo.mcp.publicUrl}/` — the RFC 8707 resource indicator such clients send;
-  Duende exact-matches it or rejects the token exchange with `invalid_target`.
+  the identity service (OpenIddict) exact-matches it or rejects the token exchange with `invalid_target`.
   It is an isolated protocol shim (same scopes as OctoApi, no resource server
   validates it — the MCP server runs `ValidateAudience=false`), NOT a return to
   per-service resources. New dedicated client `octo-mcpServices-interactive`
