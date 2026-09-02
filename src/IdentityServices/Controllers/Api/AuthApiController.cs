@@ -1270,7 +1270,7 @@ public class AuthApiController(
         [FromBody] CrossTenantTokenRequestDto request)
     {
         var currentTenantId = RouteData.Values["tenantId"]?.ToString() ?? "System";
-        var userId = User.FindFirst("sub")?.Value;
+        var userId = GetSubjectId();
 
         if (string.IsNullOrEmpty(userId))
         {
@@ -1441,7 +1441,7 @@ public class AuthApiController(
     public async Task<ActionResult<List<AccessibleTenantDto>>> GetAccessibleTenants()
     {
         var tenantId = RouteData.Values["tenantId"]?.ToString() ?? "System";
-        var userId = User.FindFirst("sub")?.Value;
+        var userId = GetSubjectId();
 
         if (string.IsNullOrEmpty(userId))
         {
@@ -1478,7 +1478,7 @@ public class AuthApiController(
         [FromBody] TenantSwitchRequestDto request)
     {
         var targetTenantId = RouteData.Values["tenantId"]?.ToString() ?? "System";
-        var currentUserId = User.FindFirst("sub")?.Value;
+        var currentUserId = GetSubjectId();
 
         if (string.IsNullOrEmpty(currentUserId))
         {
