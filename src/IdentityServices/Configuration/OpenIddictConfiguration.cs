@@ -132,6 +132,14 @@ public static class OpenIddictConfiguration
                 // OIDC session management: session_state on authorize responses +
                 // check_session_iframe discovery entry (served by CheckSessionController).
                 serverOptions.AddEventHandler(OctoSessionStateHandler.Descriptor);
+
+                // RFC 8693 cross-tenant exchange: swap the built-in authorized-party check for a
+                // variant that skips ONLY the token-exchange grant — platform access tokens carry
+                // no presenter claims and API-resource audiences, so the built-in would reject
+                // every exchange before TenantExchangeProcessor (the actual gatekeeper) runs.
+                serverOptions.RemoveEventHandler(
+                    OpenIddictServerHandlers.Exchange.ValidateAuthorizedParty.Descriptor);
+                serverOptions.AddEventHandler(OctoTokenExchangeAuthorizedPartyHandler.Descriptor);
                 var checkSessionEndpoint =
                     identityOptions.AuthorityUrl.EnsureEndsWith("/") + "connect/checksession";
                 serverOptions.AddEventHandler<OpenIddictServerEvents.ApplyConfigurationResponseContext>(
