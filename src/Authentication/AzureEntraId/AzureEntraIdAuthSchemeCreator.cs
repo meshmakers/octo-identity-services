@@ -31,6 +31,8 @@ internal class AzureEntraIdAuthSchemeCreator : IAuthSchemeCreator<RtAzureEntraId
         options.CallbackPath = "/auth/signin-callback";
         // Sign in to our external cookie scheme (OctoAuthSchemes.ExternalCookieScheme) so ExternalLoginCallback can read it
         options.SignInScheme = OctoAuthSchemes.ExternalCookieScheme;
+        // Route remote-login failures (wrong secret, user cancelled) to the SPA error page.
+        options.Events.OnRemoteFailure = ExternalAuthFailureHandler.HandleRemoteFailureAsync;
         // Request email scope to get user's email address
         options.Scope.Add("email");
         options.TokenValidationParameters.NameClaimType = "name";
