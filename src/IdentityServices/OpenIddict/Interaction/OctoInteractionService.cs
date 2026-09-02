@@ -256,9 +256,11 @@ internal class OctoInteractionService(
         }
 
         // Clients holding live refresh tokens for the user also constitute a grant (Duende parity).
+        // NB: the store persists the URN form (urn:ietf:params:oauth:token-type:refresh_token),
+        // not the short TokenTypeHints form — same trap as GenerateTokenContext.TokenType.
         await foreach (var token in tokenStore.FindBySubjectAsync(subjectId, CancellationToken.None))
         {
-            if (!string.Equals(token.TokenType, TokenTypeHints.RefreshToken, StringComparison.Ordinal) ||
+            if (token.TokenType is not (TokenTypeIdentifiers.RefreshToken or TokenTypeHints.RefreshToken) ||
                 !string.Equals(token.Status, Statuses.Valid, StringComparison.Ordinal) ||
                 string.IsNullOrEmpty(token.ClientId) ||
                 (token.ExpirationDateTime.HasValue && token.ExpirationDateTime.Value <= DateTime.UtcNow))
