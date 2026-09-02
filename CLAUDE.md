@@ -29,8 +29,21 @@ dotnet test Octo.Identity.sln -c Release
 **IMMER vor JEDEM `git commit` UND vor JEDEM `git push` lokal die volle Test-Suite ausführen:**
 
 ```bash
-dotnet test Octo.Identity.sln -c Release
+dotnet test Octo.Identity.sln -c DebugL
 ```
+
+🔴 **`-c Release` funktioniert lokal auf `test/0.2-dev` nicht — das ist kein kaputter Branch.**
+Die Paket-Lane kommt aus der Pipeline: `azure-pipelines.yml` reicht `octoCoreLibVersion` als
+`octoCoreLibVersionOverride` ans CI-Template, und nur dort steht die 0.2-Lane. Lokal greift der
+Fallback in `Directory.Build.props` — `0.1.*` mit privatem Feed, sonst `3.4.*`, also in beiden
+Fällen die **falsche** Lane —, und ohne konfigurierten `OctoNugetPrivateServer` sind `0.2.*`-Pakete
+ohnehin nicht erreichbar. Der Build bricht dann mit einer Wand aus `CS0246` auf Typen ab, die es nur
+in der 0.2-Lane gibt (z.B. `DataPermissionDto` aus `Communication.Contracts` im
+`DataPermissionsController`). Das sieht nach einem kaputten Merge aus, ist aber die Lane.
+
+`DebugL` löst gegen `999.0.0` aus `../nuget` auf und ist deshalb die einzige lokal funktionierende
+Konfiguration auf diesem Branch — so wie in allen anderen Repos auch. Die Release-Absicherung leistet
+die CI, die die Lane injiziert.
 
 - Gilt für **jeden** Commit und **jeden** Push — auch für vermeintlich triviale Änderungen, Doc-Updates, Renames oder "nur einen Index hinzufügen".
 - Gilt für Unit- **und** Integration-Tests. Wenn Testcontainers/Docker lokal nicht verfügbar sind, das **explizit** dem User melden und auf Freigabe warten — **nicht** stillschweigend nur Unit-Tests laufen lassen.
