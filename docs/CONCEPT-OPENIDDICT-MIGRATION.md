@@ -322,6 +322,11 @@ Phases 1–6 (AB#4990–AB#4996) are implemented on the feature branch; the oper
   + `GoldenFiles/`, recorded from Duende — all 5 green).
 - **Secret compatibility as planned**: `OctoApplicationManager` + `OctoSecretHasher` validate the
   stored Duende hash format (Base64 SHA-256/512) — no secret rotation needed.
+- **Public clients may still send a secret**: deployed consumers (octo-cli, adapters) send a
+  `client_secret` even for clients with `RequireClientSecret = false`; Duende ignored it, OpenIddict
+  rejects it (`invalid_client`, ID2053). `OctoPublicClientSecretHandler` drops the secret for
+  public clients before `ValidateClientType`; confidential clients still authenticate strictly
+  (pinned by `PublicClientSecretToleranceTests`).
 - **`AlwaysIncludeUserClaimsInIdToken` parity**: for clients with this flag (e.g. Refinery Studio)
   the user claims (`role`, `tenant_id`, `allowed_tenants`, `home_tenant_id`, `name`,
   `preferred_username`, `email`, `family_name`, `given_name`) are stamped with an id-token

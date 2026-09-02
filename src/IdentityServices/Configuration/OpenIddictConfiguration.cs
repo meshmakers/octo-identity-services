@@ -122,6 +122,10 @@ public static class OpenIddictConfiguration
                 // Device flow: render the verification result as the JSON DTO the SPA expects.
                 serverOptions.AddEventHandler(OctoDeviceVerificationResponseHandler.Descriptor);
 
+                // Duende parity: ignore a client_secret sent by public clients
+                // (RequireClientSecret = false) instead of rejecting with invalid_client.
+                serverOptions.AddEventHandler(OctoPublicClientSecretHandler.Descriptor);
+
                 // Duende parity: the device authorization response always carried the polling
                 // interval (5s); OpenIddict omits it (RFC 8628 defaults to 5 when absent).
                 serverOptions.AddEventHandler<OpenIddictServerEvents.ApplyDeviceAuthorizationResponseContext>(
