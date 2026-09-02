@@ -1,5 +1,3 @@
-using Duende.IdentityServer.Models;
-using Duende.IdentityServer.Stores;
 using IdentityServerPersistence.Configuration.Options;
 using IdentityServices.IntegrationTests.Configuration;
 using MassTransit;
@@ -275,7 +273,6 @@ public class CustomWebApplicationFactory : WebApplicationFactory<Program>, IAsyn
             // Configure identity options for testing
             services.Configure<OctoIdentityServicesOptions>(opts =>
             {
-                opts.IdentityServerLicenseKey = "test-license-key";
                 opts.AutoMapperLicenseKey = "test-automapper-key";
                 opts.KeyFilePath = "not-used-in-tests";
                 opts.KeyFilePassword = "not-used-in-tests";
@@ -316,11 +313,8 @@ public class CustomWebApplicationFactory : WebApplicationFactory<Program>, IAsyn
                     options.Cookie.SameSite = Microsoft.AspNetCore.Http.SameSiteMode.Lax;
                 });
 
-            // Replace signing credential stores with test implementations
-            services.RemoveAll<ISigningCredentialStore>();
-            services.RemoveAll<IValidationKeysStore>();
-            services.AddSingleton<ISigningCredentialStore, TestSigningCredentialStore>();
-            services.AddSingleton<IValidationKeysStore, TestSigningCredentialStore>();
+            // Signing/encryption: the host runs in the Development environment, where the
+            // OpenIddict configuration registers development certificates (AB#4989/AB#4996).
 
             // Remove MassTransit hosted services that try to connect to RabbitMQ
             // This is critical - MassTransit registers a hosted service that connects on startup
@@ -369,40 +363,6 @@ public class CustomWebApplicationFactory : WebApplicationFactory<Program>, IAsyn
 
         Console.Error.WriteLine("[WebFactory] ConfigureWebHost completed");
         Console.Error.Flush();
-    }
-}
-
-/// <summary>
-/// Test implementation of signing credential store using an in-memory RSA key.
-/// </summary>
-internal class TestSigningCredentialStore : ISigningCredentialStore, IValidationKeysStore
-{
-    private readonly SigningCredentials _signingCredentials;
-    private readonly IReadOnlyCollection<SecurityKeyInfo> _validationKeys;
-
-    public TestSigningCredentialStore()
-    {
-        // Create a test RSA key for signing
-        var rsaKey = new RsaSecurityKey(System.Security.Cryptography.RSA.Create(2048))
-        {
-            KeyId = "test-key-id"
-        };
-
-        _signingCredentials = new SigningCredentials(rsaKey, SecurityAlgorithms.RsaSha256);
-        _validationKeys = new[]
-        {
-            new SecurityKeyInfo { Key = rsaKey, SigningAlgorithm = SecurityAlgorithms.RsaSha256 }
-        };
-    }
-
-    public Task<SigningCredentials?> GetSigningCredentialsAsync(CancellationToken cancellationToken = default)
-    {
-        return Task.FromResult<SigningCredentials?>(_signingCredentials);
-    }
-
-    public Task<IReadOnlyCollection<SecurityKeyInfo>> GetValidationKeysAsync(CancellationToken cancellationToken = default)
-    {
-        return Task.FromResult(_validationKeys);
     }
 }
 

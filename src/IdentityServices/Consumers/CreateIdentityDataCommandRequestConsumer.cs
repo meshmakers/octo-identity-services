@@ -1,8 +1,5 @@
-// Duende.IdentityServer.Models carries the Sha256() string extension the whole service hashes
-// client secrets with (ClientsController / ApiSecretsController use the same one) — do not swap it
-// for a hand-rolled SHA-256, a drift here silently makes every provisioned client unauthenticatable.
-using Duende.IdentityServer.Models;
 using IdentityModel;
+using Meshmakers.Octo.Backend.IdentityServices.OpenIddict;
 using IdentityServerPersistence;
 using Meshmakers.Octo.Common.DistributionEventHub.Consumers;
 using Meshmakers.Octo.ConstructionKit.Contracts;
@@ -203,8 +200,9 @@ public class CreateIdentityDataCommandRequestConsumer(
         var existingClient = result.Items.FirstOrDefault();
 
         // AB#5027 — client secret. The producer sends the PLAINTEXT; only the SHA-256 hash
-        // (Duende's shared-secret convention, identical to ClientsController) is ever stored, and
-        // the plaintext is never logged, never echoed and never persisted here.
+        // (the legacy shared-secret convention OctoSecretHasher implements, identical to
+        // ClientsController — a drift here silently makes every provisioned client
+        // unauthenticatable) is ever stored; the plaintext is never logged, echoed or persisted.
         //
         // Order of preference is what makes a second provisioning run a no-op:
         //   * a plaintext arrived  -> (re-)issue: replace the secret list with its hash.
@@ -216,7 +214,7 @@ public class CreateIdentityDataCommandRequestConsumer(
         {
             rtClient.ClientSecrets = new AttributeRecordValueList<RtSecretRecord>
             {
-                new() { Value = distClientDto.ClientSecret.Sha256() }
+                new() { Value = OctoSecretHasher.HashSecret(distClientDto.ClientSecret) }
             };
         }
         else if (existingClient != null)

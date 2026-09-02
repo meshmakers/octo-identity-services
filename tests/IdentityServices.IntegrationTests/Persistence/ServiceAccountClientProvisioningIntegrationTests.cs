@@ -1,8 +1,8 @@
-using Duende.IdentityServer.Models;
 using FluentAssertions;
 using IdentityServerPersistence;
 using IdentityServices.IntegrationTests.Fixtures;
 using Meshmakers.Octo.Backend.IdentityServices.Consumers;
+using Meshmakers.Octo.Backend.IdentityServices.OpenIddict;
 using Meshmakers.Octo.Common.DistributionEventHub.Consumers;
 using Meshmakers.Octo.Communication.Contracts;
 using Meshmakers.Octo.ConstructionKit.Contracts;
@@ -61,7 +61,7 @@ public class ServiceAccountClientProvisioningIntegrationTests : IClassFixture<Id
         // Only the hash is stored — the plaintext lives exclusively in the tenant-side
         // ServiceAccountConfiguration the adapter reads.
         client.ClientSecrets.Should().ContainSingle();
-        client.ClientSecrets.Single().Value.Should().Be(secret.Sha256());
+        client.ClientSecrets.Single().Value.Should().Be(OctoSecretHasher.HashSecret(secret));
         client.ClientSecrets.Single().Value.Should().NotBe(secret);
         client.AllowedGrantTypes.Should().Contain("client_credentials");
         // Precondition for AB#5031 — Duende gates its extension-grant validators on this list.
@@ -117,7 +117,7 @@ public class ServiceAccountClientProvisioningIntegrationTests : IClassFixture<Id
 
         var client = await LoadClientAsync(clientId);
         client!.ClientSecrets.Should().ContainSingle();
-        client.ClientSecrets.Single().Value.Should().Be(secret.Sha256());
+        client.ClientSecrets.Single().Value.Should().Be(OctoSecretHasher.HashSecret(secret));
     }
 
     [Fact]

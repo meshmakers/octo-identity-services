@@ -38,6 +38,17 @@ export OCTO_Identity__SigningCertificatePassword="secret"
 }
 ```
 
+##### Token signing (OpenIddict)
+
+Since AB#4989/AB#4996 the OAuth2/OIDC server is **OpenIddict** (Duende IdentityServer removed).
+`Identity:IdentityServerLicenseKey` no longer exists. Token signing still comes from the static
+PKCS#12 certificate (`KeyFilePath` / `KeyFilePassword`), now registered via
+`AddSigningCertificate` in `OpenIddictConfiguration` — the JWKS is unchanged from the Duende
+setup, so access tokens issued before the migration keep validating. The same certificate is
+used as the encryption credential for OpenIddict-internal token payloads (authorization codes,
+refresh tokens, device codes — never access tokens, which stay plain signed RS256 JWTs). In the
+Development environment, development certificates are generated automatically.
+
 #### Blueprint Variables (`Blueprints` section)
 
 Inputs for the blueprint variable resolution (`IdentityBlueprintVariableProvider`), bound from the

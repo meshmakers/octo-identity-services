@@ -1,4 +1,3 @@
-using AutoMapper;
 using FluentAssertions;
 using IdentityServerPersistence.Services;
 using IdentityServerPersistence.SystemStores;
@@ -190,7 +189,7 @@ public class DelegatedIdentityIntegrationTests : IClassFixture<IdentityServicesF
         var repo = _fixture.GetSystemContext().GetSystemTenantRepositoryAsAdmin();
         var tenantResolver = new FixedTenantResolver(repo);
         var groupStore = new GroupStore(tenantResolver);
-        var clientStore = new ClientStore(tenantResolver, _fixture.GetService<IMapper>());
+        var clientStore = new ClientStore(tenantResolver);
 
         var resolver = new DelegatedIdentityResolver(
             clientStore,
@@ -244,7 +243,7 @@ public class DelegatedIdentityIntegrationTests : IClassFixture<IdentityServicesF
             ClientId = clientId,
             ProtocolType = "oidc",
             RequireClientSecret = true,
-            // The delegating client must opt into the grant explicitly — Duende rejects the request
+            // The delegating client must opt into the grant explicitly — the server rejects the request
             // before the validator runs otherwise.
             AllowedGrantTypes = new AttributeStringValueList
             {

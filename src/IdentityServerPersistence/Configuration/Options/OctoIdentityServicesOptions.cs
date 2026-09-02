@@ -23,11 +23,6 @@ public class OctoIdentityServicesOptions
     }
 
     /// <summary>
-    /// The license key for the IdentityServer.
-    /// </summary>
-    public required string IdentityServerLicenseKey { get; set; }
-
-    /// <summary>
     /// The license key for the AutoMapper.
     /// </summary>
     public required string AutoMapperLicenseKey { get; set; }

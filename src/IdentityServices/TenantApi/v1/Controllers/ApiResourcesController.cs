@@ -1,8 +1,6 @@
 using System.ComponentModel.DataAnnotations;
 using Asp.Versioning;
 using AutoMapper;
-using Duende.IdentityServer.Models;
-using IdentityModel;
 using IdentityServerPersistence;
 using IdentityServerPersistence.SystemStores;
 using Meshmakers.Octo.Common.DistributionEventHub.Services;
@@ -14,10 +12,11 @@ using Meshmakers.Octo.Services.Contracts.DistributionEventHub.Messages;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Persistence.IdentityCkModel.Generated.System.Identity.v2;
+using Meshmakers.Octo.Backend.Authentication;
 
 namespace Meshmakers.Octo.Backend.IdentityServices.TenantApi.v1.Controllers;
 
-[Authorize(AuthenticationSchemes = OidcConstants.AuthenticationSchemes.AuthorizationHeaderBearer)]
+[Authorize(AuthenticationSchemes = AuthenticationConstants.BearerAuthenticationScheme)]
 [Route(IdentityServiceConstants.ApiPathPrefix + "/[controller]")]
 [ApiController]
 [ApiVersion(IdentityServiceConstants.ApiVersion1)]
@@ -45,7 +44,7 @@ public class ApiResourcesController : ControllerBase
     {
         try
         {
-            var resources = await _octoResourceStore.GetAllResourcesAsync(HttpContext.RequestAborted);
+            var resources = await _octoResourceStore.GetAllRtResourcesAsync();
             return Ok(resources.ApiResources.Select(CreateApiResourceDto));
         }
         catch (Exception e)
@@ -66,7 +65,7 @@ public class ApiResourcesController : ControllerBase
         {
             var list = new List<ApiResourceDto>();
 
-            var apiResources = (await _octoResourceStore.GetAllResourcesAsync(HttpContext.RequestAborted)).ApiResources;
+            var apiResources = (await _octoResourceStore.GetAllRtResourcesAsync()).ApiResources;
 
             foreach (var apiResource in apiResources.Skip(pagingParams.Skip).Take(pagingParams.Take))
             {
@@ -107,9 +106,7 @@ public class ApiResourcesController : ControllerBase
                 return NotFound();
             }
 
-            var nativeApiResource = _mapper.Map<ApiResource>(apiResource);
-
-            return Ok(CreateApiResourceDto(nativeApiResource));
+            return Ok(CreateApiResourceDto(apiResource));
         }
         catch (Exception e)
         {
@@ -134,7 +131,7 @@ public class ApiResourcesController : ControllerBase
                 return BadRequest(ModelState);
             }
 
-            if ((await _octoResourceStore.FindApiResourcesByNameAsync([apiResourceDto.Name], HttpContext.RequestAborted)).Any())
+            if ((await _octoResourceStore.FindRtApiResourcesByNameAsync([apiResourceDto.Name])).Any())
             {
                 return Conflict($"API resource with name '{apiResourceDto.Name}' already exists.");
             }
@@ -221,7 +218,7 @@ public class ApiResourcesController : ControllerBase
             Guid.NewGuid(), DateTime.Now));
     }
 
-    private static ApiResourceDto CreateApiResourceDto(ApiResource apiResource)
+    private static ApiResourceDto CreateApiResourceDto(RtApiResource apiResource)
     {
         var apiResourceDto = new ApiResourceDto
         {
@@ -231,9 +228,9 @@ public class ApiResourcesController : ControllerBase
             Description = apiResource.Description,
             ShowInDiscoveryDocument = apiResource.ShowInDiscoveryDocument,
             RequireResourceIndicator = apiResource.RequireResourceIndicator,
-            UserClaims = apiResource.UserClaims,
-            Scopes = apiResource.Scopes,
-            AllowedAccessTokenSigningAlgorithms = apiResource.AllowedAccessTokenSigningAlgorithms
+            UserClaims = apiResource.Claims?.ToList() ?? [],
+            Scopes = apiResource.Scopes?.ToList() ?? [],
+            AllowedAccessTokenSigningAlgorithms = apiResource.AllowedAccessTokenSigningAlgorithms?.ToList() ?? []
         };
 
         return apiResourceDto;

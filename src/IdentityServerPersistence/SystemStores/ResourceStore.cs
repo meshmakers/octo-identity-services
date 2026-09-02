@@ -1,6 +1,4 @@
-﻿using AutoMapper;
-using Duende.IdentityServer.Models;
-using Meshmakers.Common.Shared;
+﻿using Meshmakers.Common.Shared;
 using Meshmakers.Octo.ConstructionKit.Contracts;
 using Meshmakers.Octo.Runtime.Contracts.MongoDb.Repositories;
 using Meshmakers.Octo.Runtime.Contracts.Repositories;
@@ -10,7 +8,7 @@ using Persistence.IdentityCkModel.Generated.System.Identity.v2;
 
 namespace IdentityServerPersistence.SystemStores;
 
-public class ResourceStore(IMultiTenancyResolverService multiTenancyResolverService, IMapper mapper)
+public class ResourceStore(IMultiTenancyResolverService multiTenancyResolverService)
     : IOctoResourceStore
 {
     private ITenantRepository TenantRepository => multiTenancyResolverService.GetTenantRepository();
@@ -45,47 +43,6 @@ public class ResourceStore(IMultiTenancyResolverService multiTenancyResolverServ
         await TenantRepository.InsertOneRtEntityAsync(session, apiScope);
 
         await session.CommitTransactionAsync();
-    }
-
-    public async Task<RtApiResource> GetOrCreateApiResourceAsync(RtApiResource apiResource)
-    {
-        var rtApiResource = await GetApiResourceByNameAsync(apiResource.Name);
-        if (rtApiResource == null)
-        {
-            rtApiResource = mapper.Map<RtApiResource>(apiResource);
-
-            await CreateApiResourceAsync(rtApiResource);
-        }
-
-        return rtApiResource;
-    }
-
-
-    public async Task<RtIdentityResource> GetOrCreateIdentityResourceAsync(IdentityResource identityResource)
-    {
-        var rtIdentityResource = await GetIdentityResourceByNameAsync(identityResource.Name);
-        if (rtIdentityResource == null)
-        {
-            rtIdentityResource = mapper.Map<RtIdentityResource>(identityResource);
-
-            await CreateIdentityResourceAsync(rtIdentityResource);
-        }
-
-        return rtIdentityResource;
-    }
-
-    public async Task<RtApiScope> TryCreateApiScopeAsync(ApiScope apiScope)
-    {
-        var res = (await FindRtApiScopesByNameAsync(new[] { apiScope.Name })).ToArray();
-        if (!res.Any())
-        {
-            var dbApiScope = mapper.Map<RtApiScope>(apiScope);
-            await CreateApiScopeAsync(dbApiScope);
-
-            return dbApiScope;
-        }
-
-        return res.First();
     }
 
 
@@ -196,30 +153,7 @@ public class ResourceStore(IMultiTenancyResolverService multiTenancyResolverServ
         await session.CommitTransactionAsync();
     }
 
-    public async Task<IReadOnlyCollection<IdentityResource>> FindIdentityResourcesByScopeNameAsync(
-        IEnumerable<string> scopeNames, CancellationToken cancellationToken = default)
-    {
-        using var session = await TenantRepository.GetSessionAsync();
-        session.StartTransaction();
-
-        var queryOptions = RtEntityQueryOptions.Create()
-            .FieldFilter(nameof(RtIdentityResource.Name), FieldFilterOperator.In, scopeNames);
-
-        var result = await TenantRepository.GetRtEntitiesByTypeAsync<RtIdentityResource>(session, queryOptions);
-
-        await session.CommitTransactionAsync();
-
-        return result.Items.Select(mapper.Map<IdentityResource>).ToList();
-    }
-
-    public async Task<IReadOnlyCollection<ApiScope>> FindApiScopesByNameAsync(IEnumerable<string> scopeNames, CancellationToken cancellationToken = default)
-    {
-        var result = await FindRtApiScopesByNameAsync(scopeNames);
-
-        return result.Select(mapper.Map<ApiScope>).ToList();
-    }
-
-    public async Task<IReadOnlyCollection<ApiResource>> FindApiResourcesByScopeNameAsync(IEnumerable<string> scopeNames, CancellationToken cancellationToken = default)
+    public async Task<IEnumerable<RtApiResource>> FindRtApiResourcesByScopeNameAsync(IEnumerable<string> scopeNames)
     {
         using var session = await TenantRepository.GetSessionAsync();
         session.StartTransaction();
@@ -231,17 +165,11 @@ public class ResourceStore(IMultiTenancyResolverService multiTenancyResolverServ
 
         await session.CommitTransactionAsync();
 
-        return result.Items.Select(mapper.Map<ApiResource>).ToList();
+        return result.Items;
     }
 
-    public async Task<IReadOnlyCollection<ApiResource>> FindApiResourcesByNameAsync(IEnumerable<string> apiResourceNames, CancellationToken cancellationToken = default)
-    {
-        var result = await FindRtApiResourcesByNameAsync(apiResourceNames);
-
-        return result.Select(mapper.Map<ApiResource>).ToList();
-    }
-
-    public async Task<Resources> GetAllResourcesAsync(CancellationToken cancellationToken = default)
+    public async Task<(IReadOnlyList<RtIdentityResource> IdentityResources, IReadOnlyList<RtApiResource> ApiResources,
+        IReadOnlyList<RtApiScope> ApiScopes)> GetAllRtResourcesAsync()
     {
         using var session = await TenantRepository.GetSessionAsync();
         session.StartTransaction();
@@ -252,9 +180,7 @@ public class ResourceStore(IMultiTenancyResolverService multiTenancyResolverServ
 
         await session.CommitTransactionAsync();
 
-        return new Resources(identityResources.Items.Select(mapper.Map<IdentityResource>),
-            apiResources.Items.Select(mapper.Map<ApiResource>),
-            apiScopes.Items.Select(mapper.Map<ApiScope>));
+        return (identityResources.Items.ToList(), apiResources.Items.ToList(), apiScopes.Items.ToList());
     }
 
     public async Task<IEnumerable<RtApiScope>> FindRtApiScopesByNameAsync(IEnumerable<string> scopeNames)

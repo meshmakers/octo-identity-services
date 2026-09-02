@@ -1,0 +1,15 @@
+{
+  "keys": [
+    "access_token",
+    "expires_in",
+    "id_token",
+    "refresh_token",
+    "scope",
+    "token_type"
+  ],
+  "stable": {
+    "expires_in": 3600,
+    "scope": "openid profile email offline_access golden-api",
+    "token_type": "Bearer"
+  }
+}

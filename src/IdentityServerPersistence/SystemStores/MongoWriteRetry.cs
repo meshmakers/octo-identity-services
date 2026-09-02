@@ -10,7 +10,7 @@ namespace IdentityServerPersistence.SystemStores;
 ///     can collide on the same document. MongoDB recommends retrying on transient write
 ///     conflicts.
 /// </remarks>
-internal static class MongoWriteRetry
+public static class MongoWriteRetry
 {
     private const int MaxRetryAttempts = 3;
 

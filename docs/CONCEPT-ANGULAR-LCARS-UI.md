@@ -581,7 +581,7 @@ export class ScopeListComponent {
 [Route("{tenantId}/api/auth")]
 public class AuthApiController : ControllerBase
 {
-    private readonly IIdentityServerInteractionService _interaction;
+    private readonly IOctoInteractionService _interaction; // (historical sample, pre-AB#4989 — originally IIdentityServerInteractionService)
     private readonly IAuthenticationSchemeProvider _schemeProvider;
 
     [HttpGet("login-context")]

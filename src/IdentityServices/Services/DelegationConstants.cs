@@ -2,9 +2,9 @@ namespace Meshmakers.Octo.Backend.IdentityServices.Services;
 
 /// <summary>
 ///     Protocol constants of the OctoMesh delegation ("on-behalf-of") grant (AB#5026), shared by
-///     <see cref="OnBehalfOfGrantValidator" /> (which mints the delegated
-///     <c>GrantValidationResult</c>), <c>UserProfileService</c> (which turns it into token claims)
-///     and <c>OidcTenantResolutionMiddleware</c> (which wires the request to the target tenant).
+///     <c>OnBehalfOfProcessor</c> (which validates the request and resolves the role intersection),
+///     <c>TokenEndpointController</c> (which issues the delegated principal) and
+///     <c>OidcTenantResolutionMiddleware</c> (which wires the request to the target tenant).
 /// </summary>
 public static class DelegationConstants
 {
@@ -15,11 +15,10 @@ public static class DelegationConstants
     ///     <para>
     ///         <b>Deliberately NOT the RFC 8693 token-exchange URN</b>
     ///         (<c>urn:ietf:params:oauth:grant-type:token-exchange</c>), even though the request
-    ///         shape is token-exchange-like. Duende IdentityServer accepts exactly <b>one</b>
-    ///         <c>IExtensionGrantValidator</c> per grant type, so sharing the URN would mean one
-    ///         validator serving both cross-tenant exchange and delegation — and, more importantly,
-    ///         one <b>opt-in surface</b>: every client already allowed to token-exchange would
-    ///         implicitly be allowed to delegate.
+    ///         shape is token-exchange-like. The grant type is the per-client <b>opt-in surface</b>
+    ///         (an <c>AllowedGrantTypes</c> entry becomes a grant permission): sharing the URN
+    ///         would mean every client already allowed to token-exchange would implicitly be
+    ///         allowed to delegate.
     ///     </para>
     ///     <para>
     ///         That surface is not hypothetical. The only client carrying the token-exchange grant
@@ -44,20 +43,6 @@ public static class DelegationConstants
     ///     and is therefore deferred.
     /// </remarks>
     public const string ActClaimType = "act";
-
-    /// <summary>
-    ///     Internal claim type used to smuggle the resolved role <b>intersection</b> from the grant
-    ///     validator to <c>UserProfileService</c> on the <c>GrantValidationResult</c> subject.
-    /// </summary>
-    /// <remarks>
-    ///     It never reaches an issued token: <c>UserProfileService</c> re-emits these as ordinary
-    ///     <c>role</c> claims and Duende only writes what the profile service puts into
-    ///     <c>IssuedClaims</c>. A dedicated type (rather than <c>role</c> directly) keeps the
-    ///     intersection unambiguously distinguishable from the role claims the base
-    ///     <c>ProfileService</c>/<c>UserManager</c> resolve for the same user — which is exactly
-    ///     what has to be discarded.
-    /// </remarks>
-    public const string DelegatedRoleClaimType = "octo_delegated_role";
 
     /// <summary>The authentication method recorded on the issued token for auditability.</summary>
     public const string AuthenticationMethod = "delegation";

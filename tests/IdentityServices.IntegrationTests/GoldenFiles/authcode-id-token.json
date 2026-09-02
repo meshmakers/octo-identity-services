@@ -1,0 +1,21 @@
+{
+  "claims": {
+    "amr": "pwd",
+    "at_hash": "\u003Cdynamic\u003E",
+    "aud": "golden-spa",
+    "auth_time": "\u003Cdynamic\u003E",
+    "exp": "\u003Cdynamic\u003E",
+    "iat": "\u003Cdynamic\u003E",
+    "idp": "local",
+    "iss": "https://localhost:5003/",
+    "nbf": "\u003Cdynamic\u003E",
+    "nonce": "\u003Cdynamic\u003E",
+    "sid": "\u003Cdynamic\u003E",
+    "sub": "\u003Cdynamic\u003E"
+  },
+  "header": {
+    "alg": "RS256",
+    "kid": "\u003Ckid\u003E",
+    "typ": "JWT"
+  }
+}

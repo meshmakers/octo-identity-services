@@ -629,8 +629,8 @@ public class ClientMirrorProvisioningService(
             return;
         }
 
-        // Multiple entries with the same OAuth ClientId are an inconsistent state — Duende's
-        // ClientStore.FindClientByIdAsync returns the first match and the other(s) become ghosts
+        // Multiple entries with the same OAuth ClientId are an inconsistent state — the
+        // protocol client lookup returns the first match and the other(s) become ghosts
         // that fight back at every login attempt. Begdemo's 2026-06-19 stale staging/prod-URI
         // copy alongside the freshly-applied blueprint client at 660…30 was the trigger to
         // harden this path. The blueprint-managed entity (stable rtId 660…xx) is the canonical

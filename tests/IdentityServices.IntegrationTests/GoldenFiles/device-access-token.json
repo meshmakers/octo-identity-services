@@ -1,0 +1,31 @@
+{
+  "claims": {
+    "allowed_tenants": "octosystem",
+    "amr": "pwd",
+    "aud": "golden-api-resource",
+    "auth_time": "\u003Cdynamic\u003E",
+    "client_id": "golden-device",
+    "email": "golden-device@example.com",
+    "exp": "\u003Cdynamic\u003E",
+    "iat": "\u003Cdynamic\u003E",
+    "idp": "local",
+    "iss": "https://localhost:5003/",
+    "jti": "\u003Cdynamic\u003E",
+    "name": "goldendeviceuser",
+    "nbf": "\u003Cdynamic\u003E",
+    "preferred_username": "goldendeviceuser",
+    "scope": [
+      "golden-api",
+      "openid",
+      "profile"
+    ],
+    "sid": "\u003Cdynamic\u003E",
+    "sub": "\u003Cdynamic\u003E",
+    "tenant_id": "octosystem"
+  },
+  "header": {
+    "alg": "RS256",
+    "kid": "\u003Ckid\u003E",
+    "typ": "at\u002Bjwt"
+  }
+}
