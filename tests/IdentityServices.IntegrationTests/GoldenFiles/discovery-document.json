@@ -1,6 +1,7 @@
 {
   "authorization_endpoint": "https://localhost/connect/authorize",
   "authorization_response_iss_parameter_supported": true,
+  "check_session_iframe": "https://localhost:5003/connect/checksession",
   "claims_parameter_supported": false,
   "claims_supported": [
     "aud",

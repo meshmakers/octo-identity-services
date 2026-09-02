@@ -126,6 +126,18 @@ public static class OpenIddictConfiguration
                 // (RequireClientSecret = false) instead of rejecting with invalid_client.
                 serverOptions.AddEventHandler(OctoPublicClientSecretHandler.Descriptor);
 
+                // OIDC session management: session_state on authorize responses +
+                // check_session_iframe discovery entry (served by CheckSessionController).
+                serverOptions.AddEventHandler(OctoSessionStateHandler.Descriptor);
+                var checkSessionEndpoint =
+                    identityOptions.AuthorityUrl.EnsureEndsWith("/") + "connect/checksession";
+                serverOptions.AddEventHandler<OpenIddictServerEvents.ApplyConfigurationResponseContext>(
+                    handlerBuilder => handlerBuilder.UseInlineHandler(context =>
+                    {
+                        context.Response["check_session_iframe"] = checkSessionEndpoint;
+                        return default;
+                    }));
+
                 // Duende parity: the device authorization response always carried the polling
                 // interval (5s); OpenIddict omits it (RFC 8628 defaults to 5 when absent).
                 serverOptions.AddEventHandler<OpenIddictServerEvents.ApplyDeviceAuthorizationResponseContext>(

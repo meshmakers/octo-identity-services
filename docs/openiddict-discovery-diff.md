@@ -15,14 +15,18 @@ Unchanged and load-bearing (pinned): `issuer`, `authorization_endpoint`, `token_
 `jwks_uri` (`/.well-known/openid-configuration/jwks`), `registration_endpoint`
 (`/connect/register`, custom DCR), `code_challenge_methods_supported` (S256),
 `grant_types_supported` for every flow the platform uses (authorization_code,
-client_credentials, refresh_token, device_code, token-exchange).
+client_credentials, refresh_token, device_code, token-exchange), and
+`check_session_iframe` (`/connect/checksession`, own OIDC Session Management
+implementation — `session_state` on authorize responses + `idsrv.session[.tenant]`
+browser cookie; angular-oauth2-oidc's `sessionChecksEnabled` depends on it to
+propagate a logout to other tabs/SPAs).
 
 ## Removed entries (features nobody on the platform used)
 
 | Entry | Why it is gone | Impact |
 |---|---|---|
 | `backchannel_authentication_*` (CIBA) | Duende advertised CIBA; never enabled/used | none |
-| `check_session_iframe`, `frontchannel_logout_supported`, `frontchannel_logout_session_supported`, `backchannel_logout_*` | OpenIddict does not advertise session-management/front-channel metadata. Front-channel logout itself STILL WORKS (own `/connect/endsession/callback` iframe page); it is just not advertised | none — no consumer reads these flags (the SPA drives logout through the API) |
+| `frontchannel_logout_supported`, `frontchannel_logout_session_supported`, `backchannel_logout_*` | OpenIddict does not advertise front-channel metadata. Front-channel logout itself STILL WORKS (own `/connect/endsession/callback` iframe page); it is just not advertised | none — no consumer reads these flags (the SPA drives logout through the API) |
 | `grant_types_supported`: `implicit`, `password`, CIBA | Deliberately not enabled on OpenIddict — no client had them in `AllowedGrantTypes` | none; hardening |
 | `response_types_supported`: everything except `code` | Only `authorization_code` + PKCE is used platform-wide; implicit/hybrid response types are gone | none; hardening |
 | `dpop_signing_alg_values_supported` | DPoP not enabled (was never used; `RequireDPoP` is false everywhere) | none |

@@ -327,6 +327,13 @@ Phases 1–6 (AB#4990–AB#4996) are implemented on the feature branch; the oper
   rejects it (`invalid_client`, ID2053). `OctoPublicClientSecretHandler` drops the secret for
   public clients before `ValidateClientType`; confidential clients still authenticate strictly
   (pinned by `PublicClientSecretToleranceTests`).
+- **OIDC Session Management reimplemented** (Duende parity, 2026-09-02): OpenIddict has no
+  check-session support, but angular-oauth2-oidc's `sessionChecksEnabled` (Refinery Studio) relies
+  on it to log other tabs out. Own implementation: `SessionCheckCookie` (`idsrv.session[.tenant]`,
+  NOT HttpOnly, issued/renewed/deleted by `OctoTicketStore`), `OctoSessionStateHandler`
+  (`session_state` on authorize responses) and `CheckSessionController`
+  (`/connect/checksession` iframe; hash formula must stay in sync with the handler),
+  advertised via `check_session_iframe`. Pinned by `SessionManagementTests`.
 - **`AlwaysIncludeUserClaimsInIdToken` parity**: for clients with this flag (e.g. Refinery Studio)
   the user claims (`role`, `tenant_id`, `allowed_tenants`, `home_tenant_id`, `name`,
   `preferred_username`, `email`, `family_name`, `given_name`) are stamped with an id-token

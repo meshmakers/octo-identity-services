@@ -87,6 +87,12 @@ public class OctoTicketStore(
             await session2.CommitTransactionAsync();
         });
 
+        // OIDC session management: surface the session id to the check_session_iframe.
+        if (httpContextAccessor.HttpContext is { } httpContext)
+        {
+            SessionCheckCookie.Issue(httpContext, sessionId, ticket.Properties.ExpiresUtc);
+        }
+
         return sessionKey;
     }
 
@@ -121,6 +127,13 @@ public class OctoTicketStore(
             }
 
             await session.CommitTransactionAsync();
+
+            // Sliding renewal: keep the session-check cookie's lifetime aligned with the ticket.
+            if (httpContextAccessor.HttpContext is { } httpContext &&
+                !string.IsNullOrEmpty(existing.SessionId))
+            {
+                SessionCheckCookie.Issue(httpContext, existing.SessionId, ticket.Properties.ExpiresUtc);
+            }
         });
     }
 
@@ -162,6 +175,13 @@ public class OctoTicketStore(
             .FieldEquals(nameof(RtServerSideSession.SessionKey), key);
         await repository.DeleteManyRtEntitiesAsync<RtServerSideSession>(session, filter, DeleteOptions.Erase);
         await session.CommitTransactionAsync();
+
+        // Logout: dropping the cookie flips the check_session_iframe to 'changed', which is how
+        // other tabs/SPAs of this browser session learn about the logout (Duende parity).
+        if (httpContextAccessor.HttpContext is { } httpContext)
+        {
+            SessionCheckCookie.Delete(httpContext);
+        }
     }
 
     private void UpdateRecord(RtServerSideSession record, AuthenticationTicket ticket)

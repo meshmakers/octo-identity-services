@@ -748,6 +748,17 @@ UseRouting()
 
 `OctoTokenClaimsService` (`src/IdentityServices/OpenIddict/`) adds a `tenant_id` claim to identity tokens. This claim is used by `OidcTenantResolutionMiddleware` to extract the tenant from `id_token_hint` during logout (`/connect/endsession`).
 
+### OIDC Session Management (check_session_iframe)
+
+Logout propagation to other tabs and SPAs works via OIDC Session Management (Duende parity —
+OpenIddict has no built-in support): the server-side session issues a browser-readable
+`idsrv.session[.tenant]` cookie (`SessionCheckCookie`, managed by `OctoTicketStore`), authorize
+responses carry a `session_state` hash (`OctoSessionStateHandler`), and RPs poll the
+`/connect/checksession` iframe (`CheckSessionController`), which recomputes the hash from the
+cookie. A logout deletes the cookie, the iframe answers `changed`, and polling clients
+(angular-oauth2-oidc with `sessionChecksEnabled: true`) end their session. The hash formula in
+handler and iframe script must stay in sync.
+
 ### Claim Destinations
 
 `OctoClaimsDestinations.ForClient(bool alwaysIncludeUserClaimsInIdToken)` decides which claims flow into the access token vs. the id token. For clients with `AlwaysIncludeUserClaimsInIdToken = true` (e.g. Refinery Studio), the user claims (`role`, `tenant_id`, `allowed_tenants`, `home_tenant_id`, `name`, `preferred_username`, `email`, `family_name`, `given_name`) are additionally emitted into the id token — SPAs based on angular-oauth2-oidc read the user identity from id-token claims and enter a login redirect loop if they are missing.
