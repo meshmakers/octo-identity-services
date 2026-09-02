@@ -1,6 +1,6 @@
 $schema: https://schemas.meshmakers.cloud/runtime-model.schema.json
 dependencies:
-  - System.Identity-2.12.0
+  - System.Identity-2.13.0
 entities:
 
   # ===========================================================================
