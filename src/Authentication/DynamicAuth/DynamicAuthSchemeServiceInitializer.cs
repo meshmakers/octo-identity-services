@@ -26,7 +26,7 @@ internal class DynamicAuthSchemeServiceInitializer(
             using (var session = await systemContext.GetAdminSessionAsync())
             {
                 session.StartTransaction();
-                var tenants = await systemContext.GetChildTenantsAsync(session);
+                var tenants = await systemContext.GetAllTenantsAsync(session);
                 tenantList = tenants.Items.ToList();
                 await session.CommitTransactionAsync();
             }

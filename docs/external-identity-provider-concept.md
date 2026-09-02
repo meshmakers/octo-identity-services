@@ -341,7 +341,7 @@ ldapLogin(request: LdapLoginRequest): Observable<LdapLoginResult> {
 2. **No Automatic Account Linking (Bug 3430)**: External logins **never** auto-link to existing local users by email. This prevents privilege escalation where an attacker could use an external identity to inherit the roles of an existing local user. Each external login creates a dedicated user account with a provider-prefixed username (e.g., `Google_user@example.com`).
 3. **Provider Key Matching**: Returning external users are identified exclusively via `FindByLoginAsync(provider, providerKey)`, matching the provider's unique user identifier.
 4. **LDAP Credentials**: Never logged or stored - only used for authentication
-5. **Return URL Validation**: All return URLs are validated via `IIdentityServerInteractionService.IsValidReturnUrl()` or `Url.IsLocalUrl()`
+5. **Return URL Validation**: All return URLs are validated via `IOctoInteractionService.IsValidReturnUrl()` or `Url.IsLocalUrl()`
 6. **Tenant Isolation**: All endpoints are tenant-scoped via route parameter
 
 ---
@@ -451,5 +451,5 @@ LDAP providers are configured via the Identity Provider management API or databa
 
 No new NuGet packages required. Uses existing:
 - ASP.NET Core Identity
-- Duende IdentityServer
+- OpenIddict
 - Novell.Directory.Ldap (for LDAP connections)

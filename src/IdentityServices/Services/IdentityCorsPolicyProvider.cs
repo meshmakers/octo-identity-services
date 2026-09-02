@@ -83,10 +83,10 @@ public class IdentityCorsPolicyProvider : ICorsPolicyProvider
         // Collect from system tenant
         await CollectOriginsFromTenantAsync(systemContext, systemContext.TenantId, origins);
 
-        // Collect from all child tenants (all tenants are direct children of the system tenant)
+        // Collect from every registered tenant (the registry spans all logical parents)
         using var session = await systemContext.GetAdminSessionAsync();
         session.StartTransaction();
-        var tenants = await systemContext.GetChildTenantsAsync(session);
+        var tenants = await systemContext.GetAllTenantsAsync(session);
         await session.CommitTransactionAsync();
 
         foreach (var tenant in tenants.Items)

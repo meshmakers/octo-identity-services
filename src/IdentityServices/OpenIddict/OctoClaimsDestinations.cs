@@ -1,0 +1,99 @@
+using System.Security.Claims;
+using static OpenIddict.Abstractions.OpenIddictConstants;
+
+namespace Meshmakers.Octo.Backend.IdentityServices.OpenIddict;
+
+/// <summary>
+///     Claim destination policy for OpenIddict-issued tokens (AB#4990). OpenIddict emits only
+///     <c>sub</c> by default — every other claim needs an explicit destination. This mapping
+///     reproduces the pre-migration token shapes pinned by the golden baseline
+///     (<c>tests/IdentityServices.IntegrationTests/GoldenFiles</c>):
+///     <list type="bullet">
+///         <item>Authorization/session claims (<c>amr</c>, <c>idp</c>, <c>auth_time</c>,
+///             <c>sid</c>) go into access AND identity tokens.</item>
+///         <item>Octo claims (<c>tenant_id</c>, <c>allowed_tenants</c>, <c>home_tenant_id</c>)
+///             and <c>role</c> go into access tokens — and ALSO into the identity token when the
+///             client sets <c>AlwaysIncludeUserClaimsInIdToken</c> (the Refinery
+///             Studio reads its identity, tenant and roles from the id_token).</item>
+///         <item>Profile claims (name, preferred_username, email, family/given name) go into the
+///             identity token only for <c>AlwaysIncludeUserClaimsInIdToken</c> clients; otherwise
+///             into NO token — the userinfo endpoint serves them (pre-migration wire format,
+///             pinned by the golden baseline tests).</item>
+///     </list>
+/// </summary>
+public static class OctoClaimsDestinations
+{
+    /// <summary>Destination selector for clients without AlwaysIncludeUserClaimsInIdToken.</summary>
+    public static IEnumerable<string> Resolve(Claim claim) => ResolveCore(claim, false);
+
+    /// <summary>
+    ///     Destination selector honoring the client's <c>AlwaysIncludeUserClaimsInIdToken</c>
+    ///     setting (AB#4996) — the stored client flag must keep controlling id_token content.
+    /// </summary>
+    public static Func<Claim, IEnumerable<string>> ForClient(bool alwaysIncludeUserClaimsInIdToken)
+        => claim => ResolveCore(claim, alwaysIncludeUserClaimsInIdToken);
+
+    private static IEnumerable<string> ResolveCore(Claim claim, bool userClaimsInIdToken)
+    {
+        switch (claim.Type)
+        {
+            case Claims.Subject:
+                yield return Destinations.AccessToken;
+                yield return Destinations.IdentityToken;
+                break;
+
+            case Claims.AuthenticationMethodReference:
+            case "idp":
+            case Claims.AuthenticationTime:
+            case "sid":
+                yield return Destinations.AccessToken;
+                yield return Destinations.IdentityToken;
+                break;
+
+            case Claims.Role:
+            case OctoClaimTypes.TenantId:
+            case OctoClaimTypes.AllowedTenants:
+            case OctoClaimTypes.HomeTenantId:
+                yield return Destinations.AccessToken;
+                if (userClaimsInIdToken)
+                {
+                    yield return Destinations.IdentityToken;
+                }
+
+                break;
+
+            case Claims.Name:
+            case Claims.PreferredUsername:
+            case Claims.Email:
+                // AB#5007: caller identity in access tokens — resource servers (e.g. the mesh
+                // adapter's FromHttpRequest principal) attribute actions to the user without a
+                // userinfo round-trip. Mirrors the octoAPI ApiResource user-claims seed.
+                yield return Destinations.AccessToken;
+                if (userClaimsInIdToken)
+                {
+                    yield return Destinations.IdentityToken;
+                }
+
+                break;
+
+            case Claims.FamilyName:
+            case Claims.GivenName:
+                if (userClaimsInIdToken)
+                {
+                    yield return Destinations.IdentityToken;
+                }
+
+                // Otherwise intentionally not destined into tokens; userinfo serves them
+                // (pre-migration wire format — keeps tokens small).
+                break;
+
+            case Services.DelegationConstants.ActClaimType:
+                // Delegation (AB#5026): downstream services and the audit trail tell a delegated
+                // token apart from one the user obtained themselves.
+                yield return Destinations.AccessToken;
+                break;
+
+            // Everything else is intentionally not destined into tokens.
+        }
+    }
+}

@@ -1,7 +1,7 @@
 "$schema": "https://schemas.meshmakers.cloud/construction-kit-elements.schema.json"
 types:
   - typeId: ServerSideSession
-    description: "Duende IdentityServer server-side session. Holds the data-protected authentication ticket server-side so the per-tenant browser cookie only carries a session key (fixes multi-KB cookie bloat)."
+    description: "Server-side authentication session (cookie ticket store). Holds the data-protected authentication ticket server-side so the per-tenant browser cookie only carries a session key (fixes multi-KB cookie bloat)."
     derivedFromCkTypeId: ${System}/Entity
     isFinal: true
     isAbstract: false

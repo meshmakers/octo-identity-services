@@ -157,6 +157,32 @@ attributes:
     valueType: DateTime
   - id: Data
     valueType: String
+
+  # AB#4989/AB#4991 - OpenIddict authorization/token model (replaces PersistedGrant at cutover)
+  - id: AuthorizationType
+    valueType: String
+    description: OpenIddict authorization type (permanent or ad-hoc).
+  - id: TokenType
+    valueType: String
+    description: OpenIddict token type (authorization_code, refresh_token, device_code, user_code, ...).
+  - id: Status
+    valueType: String
+    description: OpenIddict entry status (valid, inactive, redeemed, rejected, revoked).
+  - id: ReferenceId
+    valueType: String
+    description: Hashed reference identifier used to look up reference tokens (device/user codes).
+  - id: Payload
+    valueType: String
+    description: Protected token payload for reference tokens.
+  - id: Properties
+    valueType: String
+    description: Additional OpenIddict properties as a JSON object.
+  - id: AuthorizationRtId
+    valueType: String
+    description: RtId of the OAuthAuthorization this token belongs to.
+  - id: RedemptionDateTime
+    valueType: DateTime
+    description: Point in time a single-use token was redeemed.
   - id: PermissionId
     valueType: String
   - id: ResourceClaims
@@ -526,7 +552,7 @@ attributes:
 
   - id: SessionKey
     valueType: String
-    description: Unique key of a Duende server-side session (the only value stored in the browser cookie).
+    description: Unique key of a server-side session (the only value stored in the browser cookie).
 
   - id: Scheme
     valueType: String

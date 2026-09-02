@@ -79,7 +79,6 @@ public class VirginSystemDatabaseBootstrapIntegrationTests : IClassFixture<Virgi
         var keyStore = new DataProtectionKeyStore(_fixture.GetService<IServiceScopeFactory>(),
             Options.Create(new OctoIdentityServicesOptions
             {
-                IdentityServerLicenseKey = "test",
                 AutoMapperLicenseKey = "test"
             }));
         try

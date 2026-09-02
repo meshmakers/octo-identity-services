@@ -81,7 +81,6 @@ public class DataProtectionKeySeedIntegrationTests : IClassFixture<IdentityServi
                 _fixture.Provider!.GetRequiredService<IServiceScopeFactory>(),
                 Options.Create(new OctoIdentityServicesOptions
                 {
-                    IdentityServerLicenseKey = "test",
                     AutoMapperLicenseKey = "test",
                     DataProtectionKeysPath = tempDir
                 }));
@@ -108,7 +107,6 @@ public class DataProtectionKeySeedIntegrationTests : IClassFixture<IdentityServi
                 _fixture.Provider!.GetRequiredService<IServiceScopeFactory>(),
                 Options.Create(new OctoIdentityServicesOptions
                 {
-                    IdentityServerLicenseKey = "test",
                     AutoMapperLicenseKey = "test",
                     DataProtectionKeysPath = null
                 }));

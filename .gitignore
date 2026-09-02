@@ -355,3 +355,8 @@ MigrationBackup/
 
 # Angular SPA build output
 src/IdentityServices/wwwroot/spa/
+
+# Identity-provider credentials for local scripts (om_idprov_add_*.ps1) — never commit
+scripts/secrets.local.json
+scripts/secrets.*.json
+!scripts/secrets.local.json.template

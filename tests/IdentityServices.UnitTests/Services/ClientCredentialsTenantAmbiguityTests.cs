@@ -1,11 +1,6 @@
-using Duende.IdentityServer.Models;
-using Duende.IdentityServer.Services;
-using Duende.IdentityServer.Validation;
 using FluentAssertions;
-using IdentityModel;
 using IdentityServerPersistence.Services;
-using IdentityServerPersistence.SystemStores;
-using Meshmakers.Octo.Backend.IdentityServices.Services;
+using Meshmakers.Octo.Backend.IdentityServices.OpenIddict;
 using Meshmakers.Octo.ConstructionKit.Contracts;
 using Meshmakers.Octo.Runtime.Contracts.MongoDb;
 using Meshmakers.Octo.Services.Infrastructure;
@@ -15,6 +10,7 @@ using NSubstitute;
 using Persistence.IdentityCkModel.Generated.System.Identity.v2;
 using Shared.TestUtilities.Builders;
 using Xunit;
+using static OpenIddict.Abstractions.OpenIddictConstants;
 
 namespace IdentityServices.UnitTests.Services;
 
@@ -38,13 +34,10 @@ public class ClientCredentialsTenantAmbiguityTests
     private const string ChildTenantId = "meshtest";
     private const string SystemTenantId = "octosystem";
 
-    private readonly IOctoClientStore _clientStore = Substitute.For<IOctoClientStore>();
-    private readonly IClientRoleStore _clientRoleStore = Substitute.For<IClientRoleStore>();
-
     private readonly IClientMirrorProvisioningService _mirrorService =
         Substitute.For<IClientMirrorProvisioningService>();
 
-    private readonly IEventService _events = Substitute.For<IEventService>();
+    private readonly IIdentityAuditService _auditService = Substitute.For<IIdentityAuditService>();
     private readonly ISystemContext _systemContext = Substitute.For<ISystemContext>();
     private readonly HttpContextAccessor _httpContextAccessor = new();
 
@@ -53,20 +46,11 @@ public class ClientCredentialsTenantAmbiguityTests
         _systemContext.TenantId.Returns(SystemTenantId);
         _mirrorService.GetMirrorsAsync(Arg.Any<string>(), Arg.Any<string>())
             .Returns((IReadOnlyList<RtClientMirror>)Array.Empty<RtClientMirror>());
-        _clientRoleStore.GetEffectiveRoleNamesAsync(Arg.Any<OctoObjectId>())
-            .Returns((IReadOnlySet<string>)new HashSet<string>());
     }
 
-    private ClientCredentialsRoleTokenValidator CreateValidator() => new(
-        _clientStore, _clientRoleStore, _mirrorService, _events, _httpContextAccessor, _systemContext,
-        NullLogger<ClientCredentialsRoleTokenValidator>.Instance);
-
-    private static CustomTokenRequestValidationContext CreateContext()
-    {
-        var request = new ValidatedTokenRequest { GrantType = GrantType.ClientCredentials };
-        request.SetClient(new Client { ClientId = ClientId });
-        return new CustomTokenRequestValidationContext { Result = new TokenRequestValidationResult(request) };
-    }
+    private ClientCredentialsTenantProcessor CreateProcessor() => new(
+        _mirrorService, _httpContextAccessor, _systemContext, _auditService,
+        NullLogger<ClientCredentialsTenantProcessor>.Instance);
 
     /// <summary>Simulates what <c>OidcTenantResolutionMiddleware</c> writes for this request.</summary>
     private void ResolveRequestToTenant(string? tenantId)
@@ -80,9 +64,6 @@ public class ClientCredentialsTenantAmbiguityTests
         _httpContextAccessor.HttpContext = httpContext;
     }
 
-    private void RegisterClient(RtClient client)
-        => _clientStore.FindRtClientByIdAsync(ClientId).Returns(client);
-
     private static RtClientMirror Mirror(string childTenantId) => new()
     {
         RtId = OctoObjectId.GenerateNewId(),
@@ -93,16 +74,15 @@ public class ClientCredentialsTenantAmbiguityTests
         SecretHashVersion = 0
     };
 
-    private static void AssertRejected(CustomTokenRequestValidationContext context)
+    private static void AssertRefused(ClientCredentialsTenantProcessor.TenantBindingOutcome outcome)
     {
-        context.Result!.IsError.Should().BeTrue();
-        context.Result.Error.Should().Be(OidcConstants.TokenErrors.InvalidRequest);
-        context.Result.ErrorDescription.Should()
-            .Be(ClientCredentialsRoleTokenValidator.AmbiguousTenantErrorDescription);
+        outcome.Error.Should().Be(Errors.InvalidRequest);
+        outcome.ErrorDescription.Should()
+            .Be(ClientCredentialsTenantProcessor.AmbiguousTenantErrorDescription);
 
-        // The whole point: no tenant may be guessed onto a refused request.
-        context.Result.ValidatedRequest.ClientClaims.Should()
-            .NotContain(c => c.Type == ClientCredentialsRoleTokenValidator.TenantIdClaimType);
+        // The whole point: no tenant may be guessed onto a refused request. The controller aborts on
+        // Error, so a TenantId here would be a claim on a token that must never be issued.
+        outcome.TenantId.Should().BeNull();
     }
 
     [Fact]
@@ -110,19 +90,19 @@ public class ClientCredentialsTenantAmbiguityTests
     {
         // The exact hole: same client id + same secret live in every child tenant, so "found in the
         // system tenant" says nothing about where the caller belongs.
-        RegisterClient(new RtClientBuilder()
+        var client = new RtClientBuilder()
             .WithClientId(ClientId)
             .WithGrantTypes("client_credentials")
             .WithAutoProvisionInChildTenants()
-            .Build());
+            .Build();
         ResolveRequestToTenant(null);
-        var context = CreateContext();
 
-        await CreateValidator().ValidateAsync(context, TestContext.Current.CancellationToken);
+        var outcome = await CreateProcessor().ResolveAsync(ClientId, client);
 
-        AssertRejected(context);
-        await _events.Received(1).RaiseAsync(
-            Arg.Any<ClientCredentialsTenantAmbiguityEvent>(), Arg.Any<CancellationToken>());
+        AssertRefused(outcome);
+        await _auditService.Received(1).StoreFailureAsync(
+            ClientCredentialsTenantProcessor.AmbiguityAuditEventName,
+            Arg.Is<string>(m => m.Contains(ClientId, StringComparison.Ordinal)));
     }
 
     [Fact]
@@ -130,19 +110,16 @@ public class ClientCredentialsTenantAmbiguityTests
     {
         // Turning the flag off stops *further* mirroring; it does not retract the mirrors already
         // made — so the client id stays ambiguous and the tracking rows are the only witness.
-        RegisterClient(new RtClientBuilder()
+        var client = new RtClientBuilder()
             .WithClientId(ClientId)
             .WithGrantTypes("client_credentials")
             .WithAutoProvisionInChildTenants(false)
-            .Build());
+            .Build();
         _mirrorService.GetMirrorsAsync(SystemTenantId, ClientId)
             .Returns((IReadOnlyList<RtClientMirror>) [Mirror(ChildTenantId)]);
         ResolveRequestToTenant(null);
-        var context = CreateContext();
 
-        await CreateValidator().ValidateAsync(context, TestContext.Current.CancellationToken);
-
-        AssertRejected(context);
+        AssertRefused(await CreateProcessor().ResolveAsync(ClientId, client));
     }
 
     [Fact]
@@ -155,48 +132,24 @@ public class ClientCredentialsTenantAmbiguityTests
             .WithGrantTypes("client_credentials")
             .Build();
         mirrorCopy.ProvisionedByParentTenantId = SystemTenantId;
-        RegisterClient(mirrorCopy);
         ResolveRequestToTenant(null);
-        var context = CreateContext();
 
-        await CreateValidator().ValidateAsync(context, TestContext.Current.CancellationToken);
-
-        AssertRejected(context);
+        AssertRefused(await CreateProcessor().ResolveAsync(ClientId, mirrorCopy));
     }
 
     [Fact]
     public async Task MirrorLookupFailure_WithoutAcrValues_FailsClosed()
     {
         // Guessing "system tenant" on a failed lookup would reopen exactly the hole being closed.
-        RegisterClient(new RtClientBuilder()
+        var client = new RtClientBuilder()
             .WithClientId(ClientId)
             .WithGrantTypes("client_credentials")
-            .Build());
+            .Build();
         _mirrorService.GetMirrorsAsync(SystemTenantId, ClientId)
             .Returns<IReadOnlyList<RtClientMirror>>(_ => throw new InvalidOperationException("repo down"));
         ResolveRequestToTenant(null);
-        var context = CreateContext();
 
-        await CreateValidator().ValidateAsync(context, TestContext.Current.CancellationToken);
-
-        AssertRejected(context);
-    }
-
-    [Fact]
-    public async Task AmbiguousClient_WithoutAcrValues_NeverReachesTheRoleBranch()
-    {
-        RegisterClient(new RtClientBuilder()
-            .WithClientId(ClientId)
-            .WithGrantTypes("client_credentials")
-            .WithAutoProvisionInChildTenants()
-            .Build());
-        ResolveRequestToTenant(null);
-        var context = CreateContext();
-
-        await CreateValidator().ValidateAsync(context, TestContext.Current.CancellationToken);
-
-        await _clientRoleStore.DidNotReceive().GetEffectiveRoleNamesAsync(Arg.Any<OctoObjectId>());
-        context.Result!.ValidatedRequest.ClientClaims.Should().BeEmpty();
+        AssertRefused(await CreateProcessor().ResolveAsync(ClientId, client));
     }
 
     [Fact]
@@ -204,19 +157,16 @@ public class ClientCredentialsTenantAmbiguityTests
     {
         // Backwards compatibility for every caller found in the AB#5058 caller inventory that omits
         // acr_values today (octo-sdk sample, the documented curl recipe): unchanged behaviour.
-        RegisterClient(new RtClientBuilder()
+        var client = new RtClientBuilder()
             .WithClientId(ClientId)
             .WithGrantTypes("client_credentials")
-            .Build());
+            .Build();
         ResolveRequestToTenant(null);
-        var context = CreateContext();
 
-        await CreateValidator().ValidateAsync(context, TestContext.Current.CancellationToken);
+        var outcome = await CreateProcessor().ResolveAsync(ClientId, client);
 
-        context.Result!.IsError.Should().BeFalse();
-        context.Result.ValidatedRequest.ClientClaims.Should()
-            .ContainSingle(c => c.Type == ClientCredentialsRoleTokenValidator.TenantIdClaimType)
-            .Which.Value.Should().Be(SystemTenantId);
+        outcome.Error.Should().BeNull();
+        outcome.TenantId.Should().Be(SystemTenantId);
     }
 
     [Fact]
@@ -224,38 +174,36 @@ public class ClientCredentialsTenantAmbiguityTests
     {
         // A caller that names its tenant is unambiguous by construction — the mirroring feature keeps
         // working exactly as before, and the ambiguity probe is not even consulted.
-        RegisterClient(new RtClientBuilder()
+        var client = new RtClientBuilder()
             .WithClientId(ClientId)
             .WithGrantTypes("client_credentials")
             .WithAutoProvisionInChildTenants()
-            .Build());
+            .Build();
         ResolveRequestToTenant(ChildTenantId);
-        var context = CreateContext();
 
-        await CreateValidator().ValidateAsync(context, TestContext.Current.CancellationToken);
+        var outcome = await CreateProcessor().ResolveAsync(ClientId, client);
 
-        context.Result!.IsError.Should().BeFalse();
-        context.Result.ValidatedRequest.ClientClaims.Should()
-            .ContainSingle(c => c.Type == ClientCredentialsRoleTokenValidator.TenantIdClaimType)
-            .Which.Value.Should().Be(ChildTenantId);
+        outcome.Error.Should().BeNull();
+        outcome.TenantId.Should().Be(ChildTenantId);
         await _mirrorService.DidNotReceive().GetMirrorsAsync(Arg.Any<string>(), Arg.Any<string>());
     }
 
+    /// <summary>
+    ///     A refused request must not be audited as a success, and an accepted one must not be
+    ///     audited at all — the persisted entry is the operator's only durable trace of a caller
+    ///     still relying on the removed fall-back, so a false entry would send them hunting.
+    /// </summary>
     [Fact]
-    public async Task AB5032Semantics_TenantClaimIsStampedBeforeTheRoleBranchBailsOut()
+    public async Task AcceptedRequest_IsNotAudited()
     {
-        // The AB#5032 invariant this change must not regress: a role-less client still gets tenant_id.
-        RegisterClient(new RtClientBuilder()
+        var client = new RtClientBuilder()
             .WithClientId(ClientId)
             .WithGrantTypes("client_credentials")
-            .Build());
+            .Build();
         ResolveRequestToTenant(ChildTenantId);
-        var context = CreateContext();
 
-        await CreateValidator().ValidateAsync(context, TestContext.Current.CancellationToken);
+        await CreateProcessor().ResolveAsync(ClientId, client);
 
-        context.Result!.ValidatedRequest.ClientClaims.Should()
-            .ContainSingle(c => c.Type == ClientCredentialsRoleTokenValidator.TenantIdClaimType);
-        context.Result.ValidatedRequest.Client.ClientClaimsPrefix.Should().BeNull();
+        await _auditService.DidNotReceive().StoreFailureAsync(Arg.Any<string>(), Arg.Any<string>());
     }
 }

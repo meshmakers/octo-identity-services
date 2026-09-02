@@ -1,0 +1,15 @@
+{
+  "keys": [
+    "device_code",
+    "expires_in",
+    "interval",
+    "user_code",
+    "verification_uri",
+    "verification_uri_complete"
+  ],
+  "stable": {
+    "expires_in": 300,
+    "interval": 5,
+    "verification_uri": "https://localhost/octosystem/device"
+  }
+}

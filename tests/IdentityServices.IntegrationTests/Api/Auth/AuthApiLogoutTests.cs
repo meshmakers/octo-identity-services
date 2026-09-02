@@ -108,12 +108,12 @@ public class AuthApiLogoutTests : IntegrationTestBase
         var subjectId = user.RtId.ToString();
 
         // Create multiple refresh tokens for the user
-        await CreatePersistedGrantAsync(subjectId, "test-client");
-        await CreatePersistedGrantAsync(subjectId, "test-client");
-        await CreatePersistedGrantAsync(subjectId, "another-client");
+        await CreateOAuthTokenAsync(subjectId, "test-client");
+        await CreateOAuthTokenAsync(subjectId, "test-client");
+        await CreateOAuthTokenAsync(subjectId, "another-client");
 
         // Verify grants exist
-        var initialCount = await GetGrantCountForSubjectAsync(subjectId);
+        var initialCount = await GetValidOAuthTokenCountForSubjectAsync(subjectId);
         initialCount.Should().Be(3);
 
         // Login to get an authenticated session with cookies
@@ -132,7 +132,7 @@ public class AuthApiLogoutTests : IntegrationTestBase
         result!.Success.Should().BeTrue();
 
         // Verify all grants were revoked
-        var finalCount = await GetGrantCountForSubjectAsync(subjectId);
+        var finalCount = await GetValidOAuthTokenCountForSubjectAsync(subjectId);
         finalCount.Should().Be(0);
     }
 
@@ -144,7 +144,7 @@ public class AuthApiLogoutTests : IntegrationTestBase
         var ct = TestContext.Current.CancellationToken;
 
         // Verify no grants exist
-        var initialCount = await GetGrantCountForSubjectAsync(subjectId);
+        var initialCount = await GetValidOAuthTokenCountForSubjectAsync(subjectId);
         initialCount.Should().Be(0);
 
         var client = CreateAuthenticatedClient(userId: subjectId);
@@ -173,11 +173,11 @@ public class AuthApiLogoutTests : IntegrationTestBase
         var subjectId = user.RtId.ToString();
 
         // Create grants for multiple clients
-        await CreatePersistedGrantAsync(subjectId, "client-1");
-        await CreatePersistedGrantAsync(subjectId, "client-2");
-        await CreatePersistedGrantAsync(subjectId, "client-3");
+        await CreateOAuthTokenAsync(subjectId, "client-1");
+        await CreateOAuthTokenAsync(subjectId, "client-2");
+        await CreateOAuthTokenAsync(subjectId, "client-3");
 
-        var initialCount = await GetGrantCountForSubjectAsync(subjectId);
+        var initialCount = await GetValidOAuthTokenCountForSubjectAsync(subjectId);
         initialCount.Should().Be(3);
 
         // Login to get an authenticated session
@@ -195,7 +195,7 @@ public class AuthApiLogoutTests : IntegrationTestBase
         result!.Success.Should().BeTrue();
 
         // All grants from all clients should be revoked
-        var finalCount = await GetGrantCountForSubjectAsync(subjectId);
+        var finalCount = await GetValidOAuthTokenCountForSubjectAsync(subjectId);
         finalCount.Should().Be(0);
     }
 
@@ -215,8 +215,8 @@ public class AuthApiLogoutTests : IntegrationTestBase
         var subjectId2 = user2.RtId.ToString();
 
         // Create grants for two different users
-        await CreatePersistedGrantAsync(subjectId1, "test-client");
-        await CreatePersistedGrantAsync(subjectId2, "test-client");
+        await CreateOAuthTokenAsync(subjectId1, "test-client");
+        await CreateOAuthTokenAsync(subjectId2, "test-client");
 
         // Login as user1
         var client = await LoginAndGetAuthenticatedClientAsync(userName1, password, ct);
@@ -231,15 +231,15 @@ public class AuthApiLogoutTests : IntegrationTestBase
         response.StatusCode.Should().Be(HttpStatusCode.OK);
 
         // User1's grants should be revoked
-        var user1Count = await GetGrantCountForSubjectAsync(subjectId1);
+        var user1Count = await GetValidOAuthTokenCountForSubjectAsync(subjectId1);
         user1Count.Should().Be(0);
 
         // User2's grants should still exist
-        var user2Count = await GetGrantCountForSubjectAsync(subjectId2);
+        var user2Count = await GetValidOAuthTokenCountForSubjectAsync(subjectId2);
         user2Count.Should().Be(1);
 
         // Cleanup
-        await DeleteAllGrantsForSubjectAsync(subjectId2);
+        // revoked/valid token entries are swept by TokenCleanupHostService
     }
 
     #endregion

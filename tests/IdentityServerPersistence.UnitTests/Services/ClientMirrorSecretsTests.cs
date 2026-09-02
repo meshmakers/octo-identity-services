@@ -12,12 +12,13 @@ namespace IdentityServerPersistence.UnitTests.Services;
 public class ClientMirrorSecretsTests
 {
     /// <summary>
-    ///     🔴 Pins the hash convention. <see cref="ClientMirrorSecrets.Sha256" /> reimplements
-    ///     Duende's <c>string.Sha256()</c> so the persistence layer stays free of a protocol
-    ///     dependency (Epic 4989 / OpenIddict). If the two ever diverge, a rotated mirror secret
-    ///     would be stored in a shape the token endpoint cannot match, and the credential would
-    ///     silently never work. The expected values are the published SHA-256 digests, base64
-    ///     encoded — i.e. an external reference, not a copy of our own output.
+    ///     🔴 Pins the hash convention. <see cref="ClientMirrorSecrets.Sha256" /> restates the legacy
+    ///     hash format that <c>OctoApplicationManager</c> / <c>OctoSecretHasher</c> validate against,
+    ///     so the persistence layer stays free of a protocol dependency (Epic AB#4989 / OpenIddict).
+    ///     If the two ever diverge, a rotated mirror secret would be stored in a shape the token
+    ///     endpoint cannot match, and the credential would silently never work. The expected values
+    ///     are the published SHA-256 digests, base64 encoded — i.e. an external reference, not a copy
+    ///     of our own output.
     /// </summary>
     [Theory]
     [InlineData("", "47DEQpj8HBSa+/TImW+5JCeuQeRkm5NMpJWZG3hSuFU=")]

@@ -1,5 +1,6 @@
 using Meshmakers.Octo.Services.Infrastructure;
 using Microsoft.AspNetCore.Authentication.Cookies;
+using Meshmakers.Octo.Backend.Authentication;
 
 namespace Meshmakers.Octo.Backend.IdentityServices.Cookies;
 
@@ -13,7 +14,6 @@ namespace Meshmakers.Octo.Backend.IdentityServices.Cookies;
 /// <b>Scoped cookies</b> (tenant suffix added):
 /// <list type="bullet">
 ///   <item><c>Identity.Application</c> — main auth cookie</item>
-///   <item><c>idsrv</c> — IdentityServer session cookie</item>
 /// </list>
 /// </para>
 /// <para>
@@ -28,9 +28,7 @@ internal class TenantCookieManager : ICookieManager
 {
     private static readonly HashSet<string> ScopedCookieNames = new(StringComparer.OrdinalIgnoreCase)
     {
-        ".AspNetCore.Identity.Application",
-        "idsrv",
-        "idsrv.session"
+        ".AspNetCore." + OctoAuthSchemes.ApplicationCookieScheme
     };
 
     private readonly ChunkingCookieManager _inner = new();

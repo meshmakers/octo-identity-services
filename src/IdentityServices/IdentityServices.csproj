@@ -20,8 +20,8 @@
 
     <ItemGroup>
         <InternalsVisibleTo Include="IdentityServices.UnitTests" />
-        <!-- AB#5058: the tenant-ambiguity coverage runs the real ClientCredentialsRoleTokenValidator
-             against a real MongoDB, so it needs the claim-type / error-description constants. -->
+        <!-- AB#5065: the mirror-secret coverage runs the real MirrorSecretUsageTelemetry against a
+             real MongoDB, so it needs that internal type and its secretKind constants. -->
         <InternalsVisibleTo Include="IdentityServices.IntegrationTests" />
     </ItemGroup>
 
@@ -35,6 +35,9 @@
         <PackageReference Include="AspNetCore.Identity.Mongo" Version="10.1.0" />
         <PackageReference Include="Microsoft.AspNetCore.Authentication.JwtBearer" Version="10.0.11" />
         <PackageReference Include="NLog.Web.AspNetCore" Version="6.2.0" />
+        <!-- AB#4989: OpenIddict OAuth2/OIDC server (migration driven by the previous server's
+             license expiry, see docs/CONCEPT-OPENIDDICT-MIGRATION.md). -->
+        <PackageReference Include="OpenIddict.AspNetCore" Version="7.6.0" />
         <PackageReference Include="Meshmakers.Octo.Communication.Contracts" Version="$(OctoCoreLibVersion)" />
         <PackageReference Include="Meshmakers.Octo.Services.Swagger" Version="$(OctoCoreLibVersion)" />
         <PackageReference Include="Meshmakers.Octo.Services.Observability" Version="$(OctoCoreLibVersion)" />

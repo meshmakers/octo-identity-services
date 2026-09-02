@@ -1,13 +1,17 @@
-using Duende.IdentityServer;
-using Duende.IdentityServer.Models;
-using Duende.IdentityServer.Validation;
 using FluentAssertions;
 using IdentityServerPersistence.Services;
-using Meshmakers.Octo.Backend.IdentityServices.Services;
+using Meshmakers.Octo.Backend.IdentityServices.OpenIddict;
+using Meshmakers.Octo.Runtime.Contracts.RepositoryEntities;
 using Meshmakers.Octo.Services.Infrastructure;
 using Microsoft.AspNetCore.Http;
-using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Extensions.Options;
+using NSubstitute;
+using OpenIddict.Abstractions;
+using OpenIddict.Core;
+using Persistence.IdentityCkModel.Generated.System.Identity.v2;
+using Shared.TestUtilities.Builders;
 using Shared.TestUtilities.Fakes;
 using Xunit;
 
@@ -27,11 +31,12 @@ namespace IdentityServices.UnitTests.Services;
 ///         and vice versa) and it must not cost anything for the clients it does not concern.
 ///     </para>
 ///     <para>
-///         The tests drive the real Duende <see cref="SecretValidator" /> with the real
-///         <see cref="HashedSharedSecretValidator" />, i.e. genuine SHA-256 credential matching, so
-///         "which secret matched" is decided by the same code the token endpoint uses. The inner
-///         validator is wrapped in a counting spy: "no additional path for an ordinary client" is
-///         asserted as a call count, not by reading the implementation.
+///         <b>Seat change from the pre-migration version.</b> The measurement used to decorate
+///         Duende's <c>ISecretsListValidator</c>. OpenIddict has no such service — client
+///         authentication runs through <c>OpenIddictApplicationManager.ValidateClientSecretAsync</c>,
+///         so the tests drive the real <see cref="OctoApplicationManager" /> with genuine SHA-256
+///         matching against real <see cref="RtClient" /> records. "Which secret matched" is therefore
+///         decided by the very code the token endpoint uses.
 ///     </para>
 /// </remarks>
 public class MirrorSecretUsageTelemetryTests
@@ -41,23 +46,27 @@ public class MirrorSecretUsageTelemetryTests
     private const string InheritedPlaintext = "the-parents-secret";
     private const string OwnPlaintext = "the-mirrors-own-secret";
 
-    private readonly CapturingLogger<MirrorSecretUsageTelemetryValidator> _logger = new();
+    private readonly CapturingLogger<MirrorSecretUsageTelemetry> _logger = new();
     private readonly HttpContextAccessor _httpContextAccessor = new();
-    private readonly CountingSecretValidator _inner;
 
     public MirrorSecretUsageTelemetryTests()
     {
-        _inner = new CountingSecretValidator(new SecretValidator(
-            TimeProvider.System,
-            [new HashedSharedSecretValidator(NullLogger<HashedSharedSecretValidator>.Instance)],
-            NullLogger<ISecretsListValidator>.Instance));
-
         _httpContextAccessor.HttpContext = new DefaultHttpContext();
         _httpContextAccessor.HttpContext.Items[InfrastructureCommon.TenantIdName] = TenantId;
     }
 
-    private MirrorSecretUsageTelemetryValidator CreateSut() =>
-        new(_inner, _httpContextAccessor, _logger);
+    private OctoApplicationManager CreateManager(IMirrorSecretUsageTelemetry? telemetry = null)
+    {
+        var options = Substitute.For<IOptionsMonitor<OpenIddictCoreOptions>>();
+        options.CurrentValue.Returns(new OpenIddictCoreOptions());
+
+        return new OctoApplicationManager(
+            Substitute.For<IOpenIddictApplicationCache<RtClient>>(),
+            NullLogger<OpenIddictApplicationManager<RtClient>>.Instance,
+            options,
+            Substitute.For<IOpenIddictApplicationStore<RtClient>>(),
+            telemetry ?? new MirrorSecretUsageTelemetry(_httpContextAccessor, _logger));
+    }
 
     /// <summary>
     ///     The headline case: the caller presents the secret the mirror inherited from its parent —
@@ -67,14 +76,12 @@ public class MirrorSecretUsageTelemetryTests
     [Fact]
     public async Task InheritedSecret_IsRecordedAsInheritedUse()
     {
-        var sut = CreateSut();
+        var accepted = await CreateManager().ValidateClientSecretAsync(
+            MirrorClient(), InheritedPlaintext, TestContext.Current.CancellationToken);
 
-        var result = await sut.ValidateAsync(
-            MirrorSecrets(), SharedSecret(InheritedPlaintext), TestContext.Current.CancellationToken);
-
-        result.Success.Should().BeTrue("the inherited secret is still accepted until step 4 removes it");
+        accepted.Should().BeTrue("the inherited secret is still accepted until step 4 removes it");
         _logger.AllText.Should().Contain("MirrorSecretUsage");
-        _logger.AllText.Should().Contain($"secretKind={MirrorSecretUsageTelemetryValidator.InheritedSecretKind}");
+        _logger.AllText.Should().Contain($"secretKind={MirrorSecretUsageTelemetry.InheritedSecretKind}");
         _logger.AllText.Should().Contain($"clientId={ClientId}");
         _logger.AllText.Should().Contain($"tenantId={TenantId}");
         _logger.AllText.Should().Contain("[Warning]",
@@ -88,52 +95,78 @@ public class MirrorSecretUsageTelemetryTests
     [Fact]
     public async Task OwnSecret_IsRecordedAsOwnUse()
     {
-        var sut = CreateSut();
+        var accepted = await CreateManager().ValidateClientSecretAsync(
+            MirrorClient(), OwnPlaintext, TestContext.Current.CancellationToken);
 
-        var result = await sut.ValidateAsync(
-            MirrorSecrets(), SharedSecret(OwnPlaintext), TestContext.Current.CancellationToken);
-
-        result.Success.Should().BeTrue();
-        _logger.AllText.Should().Contain($"secretKind={MirrorSecretUsageTelemetryValidator.OwnSecretKind}");
+        accepted.Should().BeTrue();
+        _logger.AllText.Should().Contain($"secretKind={MirrorSecretUsageTelemetry.OwnSecretKind}");
         _logger.AllText.Should().Contain("[Information]");
-        _logger.AllText.Should().NotContain($"secretKind={MirrorSecretUsageTelemetryValidator.InheritedSecretKind}");
+        _logger.AllText.Should().NotContain($"secretKind={MirrorSecretUsageTelemetry.InheritedSecretKind}");
+    }
+
+    /// <summary>
+    ///     🔴 The regression the OpenIddict migration made possible and this port has to close:
+    ///     OpenIddict's application model carries exactly ONE client secret, and the store projection
+    ///     returns the FIRST record. Without the manager's own loop, whichever of a mirror's two
+    ///     secrets happened to be second would silently stop authenticating — which of the two is a
+    ///     matter of list order, so the failure would look random.
+    /// </summary>
+    [Fact]
+    public async Task SecondStoredSecret_StillAuthenticates()
+    {
+        var client = MirrorClient();
+        client.ClientSecrets!.Count.Should().Be(2, "otherwise this test would pass vacuously");
+
+        var bySecond = await CreateManager().ValidateClientSecretAsync(
+            client, OwnPlaintext, TestContext.Current.CancellationToken);
+        var byFirst = await CreateManager().ValidateClientSecretAsync(
+            client, InheritedPlaintext, TestContext.Current.CancellationToken);
+
+        bySecond.Should().BeTrue();
+        byFirst.Should().BeTrue();
+    }
+
+    /// <summary>An expired record must not authenticate, whichever position it holds.</summary>
+    [Fact]
+    public async Task ExpiredSecret_IsNotAccepted()
+    {
+        var client = ClientWithSecrets(
+            Secret(InheritedPlaintext, description: null, expiration: DateTime.UtcNow.AddMinutes(-1)));
+
+        var accepted = await CreateManager().ValidateClientSecretAsync(
+            client, InheritedPlaintext, TestContext.Current.CancellationToken);
+
+        accepted.Should().BeFalse();
     }
 
     /// <summary>
     ///     A client that is not a mirror has no two secrets to tell apart, and must not pay for the
-    ///     distinction: no record, and — asserted as a call count — no second trip through the
-    ///     validator.
+    ///     distinction — nor show up in the count.
     /// </summary>
     [Fact]
-    public async Task OrdinaryClient_ProducesNoRecordAndNoExtraValidation()
+    public async Task OrdinaryClient_ProducesNoRecord()
     {
-        var sut = CreateSut();
-
-        var result = await sut.ValidateAsync(
-            [HashedSecret(InheritedPlaintext, description: null)], SharedSecret(InheritedPlaintext),
+        var accepted = await CreateManager().ValidateClientSecretAsync(
+            ClientWithSecrets(Secret(InheritedPlaintext, description: null)), InheritedPlaintext,
             TestContext.Current.CancellationToken);
 
-        result.Success.Should().BeTrue();
+        accepted.Should().BeTrue();
         _logger.Messages.Should().BeEmpty();
-        _inner.CallCount.Should().Be(1, "an unmirrored client must not be validated twice");
     }
 
     /// <summary>
-    ///     Same for the entity on the introspection endpoint: <see cref="ISecretsListValidator" /> is
-    ///     shared with <c>ApiSecretValidator</c>, whose API-resource secrets never carry the marker.
+    ///     A description that is not the mirror marker is not the marker. Guards against a
+    ///     "has any description ⇒ own secret" shortcut, which would count ordinary rotations.
     /// </summary>
     [Fact]
-    public async Task ApiResourceSecret_ProducesNoRecord()
+    public async Task ClientWithADifferentSecretDescription_ProducesNoRecord()
     {
-        var sut = CreateSut();
+        var accepted = await CreateManager().ValidateClientSecretAsync(
+            ClientWithSecrets(Secret(InheritedPlaintext, "rotated by the ops runbook")),
+            InheritedPlaintext, TestContext.Current.CancellationToken);
 
-        var result = await sut.ValidateAsync(
-            [HashedSecret("api-secret", description: "the octoAPI resource secret")],
-            SharedSecret("api-secret", id: "octoAPI"), TestContext.Current.CancellationToken);
-
-        result.Success.Should().BeTrue();
+        accepted.Should().BeTrue();
         _logger.Messages.Should().BeEmpty();
-        _inner.CallCount.Should().Be(1);
     }
 
     /// <summary>
@@ -144,12 +177,11 @@ public class MirrorSecretUsageTelemetryTests
     [Fact]
     public async Task NeverWritesSecretMaterialToTheLog()
     {
-        var sut = CreateSut();
-
-        await sut.ValidateAsync(
-            MirrorSecrets(), SharedSecret(InheritedPlaintext), TestContext.Current.CancellationToken);
-        await sut.ValidateAsync(
-            MirrorSecrets(), SharedSecret(OwnPlaintext), TestContext.Current.CancellationToken);
+        var manager = CreateManager();
+        await manager.ValidateClientSecretAsync(MirrorClient(), InheritedPlaintext,
+            TestContext.Current.CancellationToken);
+        await manager.ValidateClientSecretAsync(MirrorClient(), OwnPlaintext,
+            TestContext.Current.CancellationToken);
 
         _logger.Messages.Should().NotBeEmpty("otherwise this test would pass vacuously");
 
@@ -165,51 +197,18 @@ public class MirrorSecretUsageTelemetryTests
     }
 
     /// <summary>
-    ///     A rejected credential behaves exactly as before — same result, no record, and no second
-    ///     validation. A wrong guess says nothing about which secret was meant, and counting it would
-    ///     poison the very number step 4 is decided on.
+    ///     A rejected credential behaves exactly as before — same result and no record. A wrong guess
+    ///     says nothing about which secret was meant, and counting it would poison the very number
+    ///     step 4 is decided on.
     /// </summary>
     [Fact]
     public async Task FailedAuthentication_IsUnchangedAndSilent()
     {
-        var sut = CreateSut();
+        var accepted = await CreateManager().ValidateClientSecretAsync(
+            MirrorClient(), "not-the-secret", TestContext.Current.CancellationToken);
 
-        var result = await sut.ValidateAsync(
-            MirrorSecrets(), SharedSecret("not-the-secret"), TestContext.Current.CancellationToken);
-
-        result.Success.Should().BeFalse();
+        accepted.Should().BeFalse();
         _logger.Messages.Should().BeEmpty();
-        _inner.CallCount.Should().Be(1);
-    }
-
-    /// <summary>
-    ///     A credential that is not a shared secret cannot be either of the two. Without this guard
-    ///     it would be reported as inherited use — a false positive that would keep step 4 blocked
-    ///     forever.
-    /// </summary>
-    [Fact]
-    public async Task NonSharedSecretCredential_IsNotClassified()
-    {
-        // The credential has to actually *succeed*, or the failure branch would short-circuit first
-        // and the type guard would never be reached — the test would pass without testing anything.
-        var inner = new CountingSecretValidator(new SecretValidator(
-            TimeProvider.System, [new AlwaysSucceedingSecretValidator()],
-            NullLogger<ISecretsListValidator>.Instance));
-        var sut = new MirrorSecretUsageTelemetryValidator(inner, _httpContextAccessor, _logger);
-
-        var parsed = new ParsedSecret
-        {
-            Id = ClientId,
-            Credential = new object(),
-            Type = IdentityServerConstants.ParsedSecretTypes.JwtBearer
-        };
-
-        var result = await sut.ValidateAsync(
-            MirrorSecrets(), parsed, TestContext.Current.CancellationToken);
-
-        result.Success.Should().BeTrue("otherwise the failure branch, not the type guard, is under test");
-        _logger.Messages.Should().BeEmpty();
-        inner.CallCount.Should().Be(1);
     }
 
     /// <summary>
@@ -221,109 +220,83 @@ public class MirrorSecretUsageTelemetryTests
     public async Task UnresolvedTenant_IsMarkedRatherThanGuessed()
     {
         _httpContextAccessor.HttpContext = new DefaultHttpContext();
-        var sut = CreateSut();
 
-        await sut.ValidateAsync(
-            MirrorSecrets(), SharedSecret(InheritedPlaintext), TestContext.Current.CancellationToken);
+        await CreateManager().ValidateClientSecretAsync(
+            MirrorClient(), InheritedPlaintext, TestContext.Current.CancellationToken);
 
-        _logger.AllText.Should()
-            .Contain($"tenantId={MirrorSecretUsageTelemetryValidator.UnresolvedTenantId}");
+        _logger.AllText.Should().Contain($"tenantId={MirrorSecretUsageTelemetry.UnresolvedTenantId}");
     }
 
     /// <summary>
-    ///     Telemetry must never decide an authentication. If the classification throws, the caller
-    ///     that authenticated correctly stays authenticated and the gap is reported as an error.
+    ///     Telemetry must never decide an authentication. If the measurement throws, the caller that
+    ///     authenticated correctly stays authenticated and the gap is reported as an error.
     /// </summary>
     [Fact]
     public async Task MeasurementFailure_DoesNotFailTheAuthentication()
     {
-        _inner.ThrowOnCall = 2;
-        var sut = CreateSut();
+        var telemetry = new MirrorSecretUsageTelemetry(
+            _httpContextAccessor, new ThrowingLogger<MirrorSecretUsageTelemetry>(_logger));
 
-        var result = await sut.ValidateAsync(
-            MirrorSecrets(), SharedSecret(InheritedPlaintext), TestContext.Current.CancellationToken);
+        var accepted = await CreateManager(telemetry).ValidateClientSecretAsync(
+            MirrorClient(), InheritedPlaintext, TestContext.Current.CancellationToken);
 
-        result.Success.Should().BeTrue();
+        accepted.Should().BeTrue();
         _logger.AllText.Should().Contain("[Error]");
         _logger.AllText.Should().Contain("measurement failed");
     }
 
-    /// <summary>
-    ///     The wiring, not the logic: the decorator has to be the <see cref="ISecretsListValidator" />
-    ///     Duende actually resolves, and its inner validator has to be constructible from the same
-    ///     container. Both would otherwise fail only at the token endpoint of a running service — and
-    ///     a telemetry decorator that is registered but never reached is exactly the silent-zero
-    ///     failure mode step 4 must not be decided on.
-    /// </summary>
-    [Fact]
-    public void Registration_DecoratesDuendesOwnSecretsListValidator()
-    {
-        var services = new ServiceCollection();
-        services.AddLogging();
-        services.AddSingleton<IHttpContextAccessor>(_httpContextAccessor);
-        services.AddIdentityServer();
-
-        services.AddMirrorSecretUsageTelemetry();
-
-        using var provider = services.BuildServiceProvider();
-        provider.GetRequiredService<ISecretsListValidator>().Should()
-            .BeOfType<MirrorSecretUsageTelemetryValidator>();
-    }
-
     /// <summary>The secret list of a mirror after AB#5061: the parent's copy plus its own.</summary>
-    private static List<Secret> MirrorSecrets() =>
-    [
-        HashedSecret(InheritedPlaintext, description: null),
-        HashedSecret(OwnPlaintext, ClientMirrorSecrets.OwnSecretDescription)
-    ];
+    private static RtClient MirrorClient() => ClientWithSecrets(
+        Secret(InheritedPlaintext, description: null),
+        Secret(OwnPlaintext, ClientMirrorSecrets.OwnSecretDescription));
 
-    private static Secret HashedSecret(string plaintext, string? description) => new()
+    private static RtClient ClientWithSecrets(params RtSecretRecord[] secrets)
     {
-        Type = IdentityServerConstants.SecretTypes.SharedSecret,
-        Value = ClientMirrorSecrets.Sha256(plaintext),
-        Description = description
-    };
+        var client = new RtClientBuilder()
+            .WithClientId(ClientId)
+            .WithGrantTypes("client_credentials")
+            .Build();
+        client.RequireClientSecret = true;
+        var list = new AttributeRecordValueList<RtSecretRecord>();
+        foreach (var secret in secrets)
+        {
+            list.Add(secret);
+        }
 
-    private static ParsedSecret SharedSecret(string plaintext, string id = ClientId) => new()
-    {
-        Id = id,
-        Credential = plaintext,
-        Type = IdentityServerConstants.ParsedSecretTypes.SharedSecret
-    };
-
-    /// <summary>
-    ///     Stands in for a validator of a non-shared-secret credential type (private key JWT, mTLS),
-    ///     which the default chain in these tests does not carry. Only used to make such a credential
-    ///     genuinely succeed, so the type guard is the thing under test.
-    /// </summary>
-    private sealed class AlwaysSucceedingSecretValidator : ISecretValidator
-    {
-        public Task<SecretValidationResult> ValidateAsync(IEnumerable<Secret> secrets,
-            ParsedSecret parsedSecret, CancellationToken cancellationToken = default) =>
-            Task.FromResult(new SecretValidationResult { Success = true });
+        client.ClientSecrets = list;
+        return client;
     }
 
-    /// <summary>
-    ///     Delegates to the real validator and counts the calls, so "the ordinary client is not
-    ///     validated a second time" is a behavioural assertion rather than a reading of the code.
-    /// </summary>
-    private sealed class CountingSecretValidator(ISecretsListValidator inner) : ISecretsListValidator
+    private static RtSecretRecord Secret(string plaintext, string? description,
+        DateTime? expiration = null) => new()
     {
-        public int CallCount { get; private set; }
+        Type = ClientMirrorSecrets.SharedSecretType,
+        Value = ClientMirrorSecrets.Sha256(plaintext),
+        Description = description,
+        ExpirationDateTime = expiration
+    };
 
-        /// <summary>1-based index of the call that should throw; 0 disables it.</summary>
-        public int ThrowOnCall { get; set; }
+    /// <summary>
+    ///     Fails the measurement from the inside: every non-error level throws, so the guard in
+    ///     <see cref="MirrorSecretUsageTelemetry" /> is what is under test, while the error it writes
+    ///     still reaches the capturing sink.
+    /// </summary>
+    private sealed class ThrowingLogger<T>(CapturingLogger<T> inner) : ILogger<T>
+    {
+        public IDisposable BeginScope<TState>(TState state) where TState : notnull =>
+            inner.BeginScope(state);
 
-        public Task<SecretValidationResult> ValidateAsync(IEnumerable<Secret> secrets,
-            ParsedSecret parsedSecret, CancellationToken cancellationToken = default)
+        public bool IsEnabled(LogLevel logLevel) => true;
+
+        public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception? exception,
+            Func<TState, Exception?, string> formatter)
         {
-            CallCount++;
-            if (ThrowOnCall == CallCount)
+            if (logLevel != LogLevel.Error)
             {
                 throw new InvalidOperationException("simulated measurement failure");
             }
 
-            return inner.ValidateAsync(secrets, parsedSecret, cancellationToken);
+            inner.Log(logLevel, eventId, state, exception, formatter);
         }
     }
 }

@@ -90,9 +90,10 @@ public sealed record DelegatedIdentityResult
 ///         an administrator gets the service account's narrow set.
 ///     </para>
 ///     <para>
-///         This service is intentionally <b>free of any Duende IdentityServer type</b>. The grant
-///         validator that drives it is a thin protocol adapter, so the delegation policy survives the
-///         planned move off Duende (Epic 4989) and is unit-testable without protocol mocks.
+///         This service is intentionally <b>free of any protocol-stack type</b>. The processor that
+///         drives it (<c>OnBehalfOfProcessor</c>) is a thin protocol adapter — which is what let the
+///         delegation policy survive the OpenIddict migration (Epic 4989) unchanged, and keeps it
+///         unit-testable without protocol mocks.
 ///     </para>
 ///     <para>
 ///         Every store it composes reads through the <b>request tenant</b> repository, so the caller

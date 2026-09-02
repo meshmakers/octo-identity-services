@@ -13,7 +13,7 @@ namespace Meshmakers.Octo.Backend.IdentityServices.Middleware;
 /// <para>
 /// Some interactive MCP clients (observed with Claude Code) send the authorize request without a
 /// <c>scope</c> parameter even though the protected-resource metadata advertises
-/// <c>scopes_supported</c>. Duende IdentityServer hard-rejects a scopeless authorize request
+/// <c>scopes_supported</c>. The server hard-rejects a scopeless authorize request
 /// ("scope is missing"), which surfaces as an opaque error page right after tenant selection.
 /// </para>
 /// <para>
@@ -24,7 +24,7 @@ namespace Meshmakers.Octo.Backend.IdentityServices.Middleware;
 /// have requested. Non-DCR clients are never touched.
 /// </para>
 /// <para>
-/// Must run <b>before</b> <c>UseIdentityServer()</c>. Only the query string is rewritten; PAR/form
+/// Must run <b>before</b> <c>UseAuthentication()</c> and the OpenIddict server middleware. Only the query string is rewritten; PAR/form
 /// posts are left alone (backend OIDC clients always send an explicit scope).
 /// </para>
 /// </remarks>

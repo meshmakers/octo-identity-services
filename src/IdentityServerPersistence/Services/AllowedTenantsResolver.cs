@@ -110,13 +110,33 @@ public class AllowedTenantsResolver(
     }
 
     /// <summary>
-    ///     BFS through descendant tenants. For each seed (tenantId, username), get child tenants
-    ///     and check for ExternalTenantUserMapping matching sourceUserName. When a match is found,
+    ///     BFS through descendant tenants. For each seed (tenantId, username), check every candidate
+    ///     tenant for an ExternalTenantUserMapping matching sourceUserName. When a match is found,
     ///     enqueue the child with the cross-tenant username pattern: xt_{parentTenantId}_{parentUsername}.
     /// </summary>
+    /// <remarks>
+    ///     Candidates are the full tenant registry, not per-parent child lists: the mapping check
+    ///     itself carries the source tenant, so it is the actual relation. Since
+    ///     GetChildTenantsAsync filters by ParentTenantId (AB#5025), a per-parent walk would drop
+    ///     mappings that predate the hierarchy — e.g. an xt_octosystem_* user in a tenant that was
+    ///     later re-parented under another tenant would lose that tenant from allowed_tenants.
+    /// </remarks>
     private async Task ResolveDescendantTenantsAsync(
         List<(string TenantId, string UserName)> seeds, HashSet<string> allowedTenants)
     {
+        IReadOnlyList<string> candidateTenantIds;
+        try
+        {
+            using var adminSession = await systemContext.GetAdminSessionAsync();
+            var allTenants = await systemContext.GetAllTenantsAsync(adminSession);
+            candidateTenantIds = allTenants.Items.Select(t => t.TenantId).ToList();
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex, "Failed to enumerate tenants for allowed-tenant resolution");
+            return;
+        }
+
         var queue = new Queue<(string TenantId, string UserName)>(seeds);
         // Track which parents we've already processed to avoid infinite loops
         var processedParents = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -136,46 +156,33 @@ public class AllowedTenantsResolver(
                 continue;
             }
 
-            try
+            foreach (var childTenantId in candidateTenantIds)
             {
-                var tenantContext = await systemContext.FindTenantContextAsync(currentTenantId);
-                var adminSession = await tenantContext.GetAdminSessionAsync();
-                var childTenants = await tenantContext.GetChildTenantsAsync(adminSession);
-
-                foreach (var childTenant in childTenants.Items)
+                // Skip children already in allowed tenants
+                if (allowedTenants.Contains(childTenantId))
                 {
-                    // Skip children already in allowed tenants
-                    if (allowedTenants.Contains(childTenant.TenantId))
-                    {
-                        continue;
-                    }
+                    continue;
+                }
 
-                    try
+                try
+                {
+                    var hasMapping = await HasExternalTenantUserMappingByNameAsync(
+                        childTenantId, currentTenantId, currentUserName);
+                    if (hasMapping)
                     {
-                        var hasMapping = await HasExternalTenantUserMappingByNameAsync(
-                            childTenant.TenantId, currentTenantId, currentUserName);
-                        if (hasMapping)
-                        {
-                            allowedTenants.Add(childTenant.TenantId);
+                        allowedTenants.Add(childTenantId);
 
-                            // The user in the child tenant will be: xt_{parentTenantId}_{parentUsername}
-                            var childUserName = $"xt_{currentTenantId}_{currentUserName}";
-                            queue.Enqueue((childTenant.TenantId, childUserName));
-                        }
-                    }
-                    catch (Exception ex)
-                    {
-                        logger.LogWarning(ex,
-                            "Failed to check external tenant user mapping in tenant '{ChildTenantId}' for user '{UserName}' from tenant '{SourceTenantId}'",
-                            childTenant.TenantId, currentUserName, currentTenantId);
+                        // The user in the child tenant will be: xt_{parentTenantId}_{parentUsername}
+                        var childUserName = $"xt_{currentTenantId}_{currentUserName}";
+                        queue.Enqueue((childTenantId, childUserName));
                     }
                 }
-            }
-            catch (Exception ex)
-            {
-                logger.LogWarning(ex,
-                    "Failed to resolve child tenants for tenant '{TenantId}'",
-                    currentTenantId);
+                catch (Exception ex)
+                {
+                    logger.LogWarning(ex,
+                        "Failed to check external tenant user mapping in tenant '{ChildTenantId}' for user '{UserName}' from tenant '{SourceTenantId}'",
+                        childTenantId, currentUserName, currentTenantId);
+                }
             }
         }
     }

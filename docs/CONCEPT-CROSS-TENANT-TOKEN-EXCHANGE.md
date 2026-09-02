@@ -1,5 +1,7 @@
 # Concept — Seamless MCP tenant switching via cross-tenant token exchange (AB#4338)
 
+> **Note (2026-09-02):** superseded in parts by AB#4989 — the implementation now lives in `TenantExchangeProcessor` (RFC 8693 token exchange as a first-class OpenIddict flow), not a Duende `IExtensionGrantValidator`.
+
 Follow-up to the DCR work. Lets the MCP server obtain a **target-tenant (B) bearer access token** for an
 already-authenticated user (proof = their current A access token) WITHOUT a browser/credential prompt,
 with roles **re-resolved in B** — no privilege leak. Solves the device-flow-on-switch friction.

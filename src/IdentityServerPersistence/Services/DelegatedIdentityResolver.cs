@@ -15,7 +15,7 @@ namespace IdentityServerPersistence.Services;
 ///         <c>AssignedRole</c> assignments and group-inherited roles (incl. nested groups) count
 ///         identically for a client and for a user:
 ///         <see cref="IClientRoleStore.GetEffectiveRoleNamesAsync" /> for the service account (the
-///         same call <c>ClientCredentialsRoleTokenValidator</c> makes when minting a plain
+///         same call <c>TokenEndpointController.HandleClientCredentialsAsync</c> makes when minting a plain
 ///         <c>client_credentials</c> token) and <see cref="IUserRoleStore{TUser}.GetRolesAsync" /> —
 ///         implemented by <c>OctoUserStore</c>, the store that produces a login token's <c>role</c>
 ///         claims.

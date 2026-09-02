@@ -28,9 +28,15 @@ internal class AzureEntraIdAuthSchemeCreator : IAuthSchemeCreator<RtAzureEntraId
         options.Authority = $"https://login.microsoftonline.com/{identityProvider.TenantId}";
         options.ClientId = identityProvider.ClientId;
         options.ClientSecret = identityProvider.ClientSecret;
+        // Authorization-code flow (+ PKCE, handler default when ResponseType is code). The
+        // handler's own default is the implicit id_token flow, which Entra rejects with
+        // AADSTS700054 unless "ID tokens" is explicitly enabled on the app registration.
+        options.ResponseType = OpenIdConnectResponseType.Code;
         options.CallbackPath = "/auth/signin-callback";
-        // Sign in to IdentityServer's external cookie scheme so ExternalLoginCallback can read it
-        options.SignInScheme = AuthenticationConstants.IdentityServerConstants.ExternalCookieAuthenticationScheme;
+        // Sign in to our external cookie scheme (OctoAuthSchemes.ExternalCookieScheme) so ExternalLoginCallback can read it
+        options.SignInScheme = OctoAuthSchemes.ExternalCookieScheme;
+        // Route remote-login failures (wrong secret, user cancelled) to the SPA error page.
+        options.Events.OnRemoteFailure = ExternalAuthFailureHandler.HandleRemoteFailureAsync;
         // Request email scope to get user's email address
         options.Scope.Add("email");
         options.TokenValidationParameters.NameClaimType = "name";

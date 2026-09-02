@@ -4,6 +4,8 @@
 
 Octo Identity Services implements a dynamic authentication framework that supports multiple identity provider types. Providers can be configured at runtime through the database, enabling flexible authentication without code deployment.
 
+The OAuth2/OIDC protocol stack is **OpenIddict 7.6** (migrated from Duende IdentityServer, Epic AB#4989). Endpoint paths, discovery, JWKS, and token/claims shapes are kept Duende-compatible; the remaining discovery-document differences are documented in [openiddict-discovery-diff.md](openiddict-discovery-diff.md). Cookie authentication uses the schemes defined in `OctoAuthSchemes` (`src/Authentication/`): `Identity.Application` (tenant-scoped) and `Identity.External`.
+
 ## Supported Identity Providers
 
 ### OAuth 2.0 Providers
@@ -151,7 +153,7 @@ GET /ExternalLogin/{provider}/Callback
         │       ├── Re-check email uniqueness before insert
         │       └── Handle unique index violation gracefully
         ├── Link external login to user
-        ├── SignInAsync() with IdentityServer
+        ├── SignInAsync() (writes the tenant-scoped Identity.Application cookie)
         └── SignOutAsync(ExternalScheme) ──► Cleanup
         │
         ▼
@@ -207,6 +209,9 @@ CLI initiates device authorization
         ▼
 POST /connect/deviceauthorization
         │
+        ├── OidcTenantResolutionMiddleware captures user_code → tenant and rewrites
+        │   verification_uri to the SPA page /{tenantId}/device (with ?userCode= for
+        │   verification_uri_complete)
         ├── Returns: device_code, user_code, verification_uri
         └── CLI displays user_code and verification URL
         │
@@ -221,15 +226,16 @@ GET /{tenantId}/device?userCode={userCode}
         └── Otherwise, user enters code manually
         │
         ▼
-GET /api/device/context?userCode={userCode}
-        │
-        ├── Validates device code
+GET /connect/deviceverification?user_code={userCode}
+        │   (OpenIddict end-user verification endpoint, DeviceVerificationController;
+        │    tenant resolved from the user_code → tenant mapping)
+        ├── Validates the user code
         ├── Returns: client info, scopes requested
         └── User reviews permissions
         │
         ▼
-POST /api/device/allow (or /deny)
-        │
+POST /connect/deviceverification (form-encoded allow/deny, driven by the SPA's
+        │   ConsentApiService device methods)
         ├── Grants or denies authorization
         └── Shows success/error message
         │
@@ -240,6 +246,10 @@ CLI polls: POST /connect/token (grant_type=device_code)
         ├── Denied: access_denied error
         └── Approved: Returns access_token (no refresh_token)
 ```
+
+The former `DeviceApiController` (`/api/device/*`) now only holds the DTOs — the flow runs through
+`/connect/deviceverification`. Code redemption re-validates the user and re-resolves roles in
+`TokenEndpointController`.
 
 **Important Notes**:
 
@@ -506,6 +516,7 @@ POST /{childTenantId}/api/auth/cross-tenant-login
 - Expired token (>60s): Returns error; user can click the button again
 - Target tenant mismatch: Returns error (token was issued for a different tenant)
 - No cross-tenant mapping: `FindOrCreateCrossTenantUserAsync` creates one with default roles
+- Self-registration gate (AB#5015): when the `OctoTenantIdentityProvider` has `AllowSelfRegistration=false` and no local `xt_` shadow user exists yet, the login is denied — **unless** an `ExternalTenantUserMapping` exists in the target tenant for the source user (matched by `SourceTenantId` + `SourceUserId`). A mapping created by an admin (e.g. via `provisionCurrentUser`) is explicit provisioning, not self-registration, so the first login is allowed to create the shadow user. The same rule applies to the cross-tenant **password** login path in `AuthApiController.Login`.
 - Role sync on every login: `SyncMappedRolesAsync` resolves role IDs to names via the tenant repository (not `RoleManager`) and calls `AddToRoleAsync` for any missing roles. This ensures existing users pick up role changes from updated mappings.
 
 ### Tenant Switch Flow
@@ -547,15 +558,17 @@ POST /connect/token
         ├── OidcTenantResolutionMiddleware reads acr_values=tenant:B and wires B's repo into
         │   HttpContext.Items (same branch as client_credentials)
         ▼
-  TenantExchangeGrantValidator (Duende IExtensionGrantValidator)
-        ├── (a) Validate subject_token via ITokenValidator → extract A sub, tenant_id=A, username
+  TokenEndpointController → TenantExchangeProcessor (src/IdentityServices/OpenIddict/;
+  RFC 8693 is a first-class OpenIddict flow — replaces the Duende TenantExchangeGrantValidator)
+        ├── (a) Validate subject_token → extract A sub, tenant_id=A, username
         ├── (b) Read target B from acr_values; assert HttpContext tenant == B (fail closed → invalid_target)
         ├── (c) ValidateCrossTenantAccessAsync(B, A, subA) → null ⇒ unauthorized_client
         ├── (d) FindOrCreateCrossTenantUserAsync(result, B) → B-shadow user (xt_A_user)
-        └── Return GrantValidationResult(subject = B-shadow user's RtId, authenticationMethod="token_exchange")
+        │       (AB#4966 dual-candidate source selection preserved)
+        └── Build the principal with subject = B-shadow user's RtId
         │
         ▼
-  Duende mints the token for the B-shadow sub → UserProfileService / OctoUserStore stamp
+  OpenIddict mints the token for the B-shadow sub → OctoTokenClaimsService / OctoUserStore stamp
   tenant_id=B + B's allowed_tenants + B-resolved roles automatically (same claim path as a login)
 ```
 
@@ -570,10 +583,10 @@ be a privilege escalation and is rejected by design. This is pinned by the
 still-valid A token on expiry, sidestepping cross-tenant refresh-token binding (A stays the single
 long-lived credential / root of trust).
 
-**Audit.** `TokenExchangeSuccessEvent` / `TokenExchangeFailureEvent` (in
-`IdentityServices/Services/`) carry `{sourceUserId, sourceTenantId, targetTenantId, shadowRtId/reason}`.
-Failure events are persisted to the runtime event log by `OctoEventSink`; success events are log-only
-(the sink persists only Error/Failure events).
+**Audit.** `TokenExchangeSuccessEvent` / `TokenExchangeFailureEvent` carry
+`{sourceUserId, sourceTenantId, targetTenantId, shadowRtId/reason}`.
+Failure events are persisted to the runtime event log by `IIdentityAuditService` (which replaced the
+Duende `IEventService`/`OctoEventSink`); success events are log-only — behavior unchanged.
 
 **Client enablement.** The `octo-mcpServices-device` client (rtId 660…034) carries the token-exchange
 grant in its `AllowedGrantTypes` via the `System.Identity.Bootstrap` blueprint. This is additive client
@@ -604,7 +617,7 @@ POST /connect/token
         ├── OidcTenantResolutionMiddleware reads acr_values=tenant:{tenantId} and wires that
         │   tenant's repository into HttpContext.Items (same branch shape as client_credentials)
         ▼
-  OnBehalfOfGrantValidator (Duende IExtensionGrantValidator)
+  TokenEndpointController → OnBehalfOfProcessor (OpenIddict custom flow, AllowCustomFlow)
         ├── (a) Reject offline_access → invalid_scope (a refreshed token could not re-evaluate
         │       the intersection; see "Refresh tokens are rejected" below)
         ├── (b) Validate subject_token out-of-context (signature + issuer + lifetime,
@@ -615,13 +628,14 @@ POST /connect/token
         │        ├── service-account roles: IClientRoleStore.GetEffectiveRoleNamesAsync
         │        ├── user roles:            OctoUserStore.GetRolesAsync (IUserRoleStore<RtUser>)
         │        └── effective = INTERSECTION (case-insensitive on role names)
-        └── GrantValidationResult(subject = the USER's sub, authenticationMethod = "delegation",
-                                  claims  = act + the intersection)
+        └── DelegationOutcome(userSubjectId, tenantId, effectiveRoleNames)
         │
         ▼
-  UserProfileService.GetProfileDataAsync → ApplyDelegationClaims:
-        strips the user's naturally resolved role claims, emits the intersection as `role`,
-        and emits `act` = the service account's client_id
+  TokenEndpointController.HandleOnBehalfOfAsync:
+        populates the USER's claims (IOctoTokenClaimsService.PopulateUserClaimsAsync), then
+        OnBehalfOfProcessor.ApplyDelegationClaims strips the naturally resolved role claims,
+        emits the intersection as `role` and `act` = the service account's client_id;
+        amr = "delegation", offline_access scope removed
 ```
 
 **The intersection is the whole point.** The delegated token carries
@@ -630,12 +644,11 @@ low-privilege user gets the user's narrow set; a narrow service account acting f
 gets the service account's narrow set. Both sides are resolved with the platform's normal effective-role
 machinery, so **group-inherited roles (including nested groups) count on both sides**.
 
-**Why `UserProfileService` has to intervene.** The token is issued for the *user's* `sub`, so Duende's
-`AddAspNetIdentity<RtUser>` + `ProfileService<RtUser>` pipeline resolves that user's **full** role set
-from `OctoUserStore` into `IssuedClaims`, exactly as for a login. Left in place, those claims would
-make the intersection a no-op and the grant a placebo that hands out the user's full authority.
-`UserProfileService.ApplyDelegationClaims` therefore detects the `act` claim on `context.Subject` and
-**replaces** every `role` claim with the intersection carried on the grant result. This is pinned by
+**Why the role replacement has to intervene.** The token is issued for the *user's* `sub`, and
+`PopulateUserClaimsAsync` resolves that user's **full** role set — exactly as for a login. Left in
+place, those claims would make the intersection a no-op and the grant a placebo that hands out the
+user's full authority. `OnBehalfOfProcessor.ApplyDelegationClaims` therefore **replaces** every
+`role` claim on the issued identity with the intersection. This is pinned by
 `tests/IdentityServices.UnitTests/Services/DelegationClaimCompositionTests.cs`.
 
 **Empty intersection ⇒ a token with no roles.** This is a successful grant, not an error: the token is
@@ -647,10 +660,12 @@ turning a role misconfiguration into an opaque token-endpoint error is not.
 nested object; the flat form is what the consuming pipelines need — widening it later is a breaking
 change for consumers). It is added unconditionally to `IssuedClaims`, the same mechanism that gets
 `tenant_id` / `allowed_tenants` into tokens although neither appears in the `octoAPI` ApiResource's
-user claims — so **no blueprint or resource-claim change is required** for it.
+user claims — its access-token destination comes from `OctoClaimsDestinations`, so **no blueprint
+or resource-claim change is required** for it.
 
-**Own grant-type URN — deliberately not the RFC 8693 token-exchange one.** Duende binds exactly one
-`IExtensionGrantValidator` per grant type, so a shared URN would also share the per-client opt-in.
+**Own grant-type URN — deliberately not the RFC 8693 token-exchange one.** The grant type is the
+per-client opt-in surface (`AllowedGrantTypes` → grant-type permission), so a shared URN would also
+share the opt-in — and the RFC 8693 URN already belongs to the cross-tenant exchange.
 The only client carrying `urn:ietf:params:oauth:grant-type:token-exchange` today is
 `octo-mcpServices-device`, a **public client with no secret** (`RequireClientSecret: false`, empty
 `Secrets`) — under a shared URN that secretless client could mint delegated tokens. Separate URNs keep
@@ -663,34 +678,31 @@ intersection is taken in and how the service account proves reach into the other
 user identity across tenants today, use the cross-tenant **token exchange** grant above.
 
 **Client enablement.** The calling client must list
-`urn:meshmakers:params:oauth:grant-type:on-behalf-of` in its `AllowedGrantTypes`; Duende rejects the
-request before the validator runs otherwise. Seeding the actual pipeline service account (client,
+`urn:meshmakers:params:oauth:grant-type:on-behalf-of` in its `AllowedGrantTypes` —
+`ClientPermissionsMapper` turns that into the custom-flow grant permission, and OpenIddict rejects
+the request before the token controller runs otherwise. Seeding the actual pipeline service account (client,
 secret and roles) is **AB#5027** — AB#5026 ships the grant only.
 
 **Refresh tokens are rejected, not merely discouraged.** A delegation request that carries
-`offline_access` among its scopes is refused with `invalid_scope`, and the rejection is audited as a
-`DelegationFailureEvent`. Delegated tokens are short-lived and re-minted from the still-valid user
+`offline_access` among its scopes is refused with `invalid_scope`, and the rejection is persisted
+to the runtime event log as a delegation-failure audit entry. Delegated tokens are short-lived and re-minted from the still-valid user
 token instead.
 
 *Why it has to be a hard refusal.* The role intersection is computed **at issuance**, inside
-`OnBehalfOfGrantValidator`. A later `grant_type=refresh_token` request rebuilds the access token from
-the **persisted grant** and, by design, never re-enters an extension grant validator — there is no
-`subject_token` to re-validate and no hook to recompute anything. The intersection would therefore be
-frozen at first issuance, and a role revoked on **either** side (service account or user) would keep
-working for the refresh token's whole lifetime — exactly the authority creep the intersection exists to
-prevent. A documented warning is not an invariant, so the grant enforces it by construction.
+`OnBehalfOfProcessor`. A later `grant_type=refresh_token` request rebuilds the access token from the
+**stored principal** and, by design, never re-enters this processor — there is no `subject_token` to
+re-validate and no hook to recompute anything. The intersection would therefore be frozen at first
+issuance, and a role revoked on **either** side (service account or user) would keep working for the
+refresh token's whole lifetime — exactly the authority creep the intersection exists to prevent. A
+documented warning is not an invariant, so the grant enforces it by construction.
 
-*Why the check lives in the validator.* Duende mints a refresh token iff
-`ValidatedResources.Resources.OfflineAccess` is set, and that flag is only ever derived from a
-requested `offline_access` scope. Duende's scope/resource validation runs **before** the extension
-grant validator, so refusing the request there is sufficient — nothing downstream can re-add
-`offline_access`. `GrantValidationResult` carries no "do not issue a refresh token" switch, so the
-result object cannot express the constraint, and silently clearing
-`ValidatedResources.Resources.OfflineAccess` would work mechanically but hand the integrator a token
-response missing the `refresh_token` they asked for with nothing explaining why. Relying instead on
-`AllowOfflineAccess=false` on every delegating client would be a seeding convention, not an invariant —
-any operator can flip it back on. The error description therefore spells out the reason. Pinned by
-`tests/IdentityServices.UnitTests/Services/OnBehalfOfGrantValidatorTests.cs`.
+*Two layers enforce it.* The processor refuses an explicit `offline_access` request with an
+explained `invalid_scope` (an unexplained missing `refresh_token` in the response would cost the
+integrator an afternoon of guessing), and `HandleOnBehalfOfAsync` additionally removes the
+`offline_access` scope from the issued principal, so OpenIddict never mints a refresh token even if a
+future change lets the scope slip through. Relying instead on `AllowOfflineAccess=false` on every
+delegating client would be a seeding convention, not an invariant — any operator can flip it back on.
+Pinned by `tests/IdentityServices.UnitTests/Services/OnBehalfOfProcessorTests.cs`.
 
 **Error mapping:**
 
@@ -705,24 +717,23 @@ any operator can flip it back on. The error description therefore spells out the
 | Subject does not resolve to a user in the tenant | `invalid_grant` |
 | Empty role intersection | *no error* — token issued without `role` claims |
 
-**Audit.** `DelegationSuccessEvent` / `DelegationFailureEvent`
-(`IdentityServices/Services/DelegationEvents.cs`, category `Delegation`, event IDs `50260` / `50261`)
-carry `{actorClientId, userSubjectId, tenantId, effectiveRoleCount | reason}`. Failure events are
-persisted to the runtime event log by `OctoEventSink` (which also expands their structured fields);
-success events are log-only, since the sink persists only Error/Failure events. A successful grant with
-**zero** effective roles is still audited as a success carrying `effectiveRoleCount = 0`.
+**Audit.** A delegation failure is persisted to the runtime event log by `IIdentityAuditService` as a
+"Delegation Failure" entry carrying `{actorClientId, userSubjectId, tenantId, reason}`; success is
+log-only, matching the audit behaviour of the other grants. (The Duende-era `DelegationSuccessEvent` /
+`DelegationFailureEvent` pair and the `OctoEventSink` that expanded their structured fields were
+removed with the OpenIddict migration.) A successful grant with **zero** effective roles is still
+logged as a success carrying `effectiveRoleCount = 0`.
 
 **Key files:**
 
 | File | Purpose |
 |---|---|
 | `src/IdentityServerPersistence/Services/IDelegatedIdentityResolver.cs` | Result / denial-reason contract |
-| `src/IdentityServerPersistence/Services/DelegatedIdentityResolver.cs` | The Duende-free intersection policy |
-| `src/IdentityServices/Services/DelegationConstants.cs` | Grant URN, `act` / internal claim types |
-| `src/IdentityServices/Services/OnBehalfOfGrantValidator.cs` | Protocol adapter (Duende extension grant) |
-| `src/IdentityServices/Services/UserProfileService.cs` | `ApplyDelegationClaims` — the role replacement |
+| `src/IdentityServerPersistence/Services/DelegatedIdentityResolver.cs` | The protocol-free intersection policy |
+| `src/IdentityServices/Services/DelegationConstants.cs` | Grant URN, `act` claim type |
+| `src/IdentityServices/OpenIddict/OnBehalfOfProcessor.cs` | Protocol adapter + `ApplyDelegationClaims` (role replacement) |
+| `src/IdentityServices/Controllers/Protocol/TokenEndpointController.cs` | `HandleOnBehalfOfAsync` — issues the delegated principal |
 | `src/IdentityServices/Middleware/OidcTenantResolutionMiddleware.cs` | `acr_values` → tenant for the new grant |
-| `src/IdentityServices/Services/DelegationEvents.cs` | Audit events |
 
 ### CK Model Types
 
@@ -747,20 +758,13 @@ Cross-tenant users receive a `home_tenant_id` claim in their tokens, indicating 
 
 ### Tenant-Aware Login Redirects
 
-When IdentityServer's `/connect/authorize` endpoint determines the user isn't authenticated, it redirects to the configured login URL. The login URL prefix uses the configured system tenant ID (`OctoSystemConfiguration.SystemTenantId`, default "OctoSystem"), e.g., `/{systemTenantId}/login`. The `TenantLoginRedirectMiddleware` intercepts these 302 redirects and rewrites the tenant prefix based on `acr_values` in the authorize request.
+When `/connect/authorize` determines the user isn't authenticated (or consent is required), the passthrough `AuthorizeController` (`Controllers/Protocol/`) issues the login/consent redirect **directly with the correct tenant prefix**, e.g. `/{tenantId}/login?ReturnUrl=...`. The tenant comes from `acr_values=tenant:{tenantId}` (resolved by `OidcTenantResolutionMiddleware`).
 
-**How it works:**
-
-1. OIDC client includes `acr_values=tenant:{tenantId}` in the authorize request
-2. IdentityServer redirects to `/{systemTenantId}/login?ReturnUrl=...` (with `acr_values` encoded in the ReturnUrl)
-3. The middleware parses `acr_values` from the ReturnUrl, extracts `tenant:{tenantId}`
-4. Rewrites the redirect to `/{tenantId}/login?ReturnUrl=...`
-
-**Affected paths:** `/login`, `/consent`, `/logout`, `/error`, `/device`
+The former `TenantLoginRedirectMiddleware` — which intercepted Duende IdentityServer's hard-coded 302 redirects to `/{systemTenantId}/login` and rewrote the tenant prefix — was **deleted** in the OpenIddict migration: since the redirects are now built by our own controller, there is nothing to rewrite.
 
 **Without `acr_values`:** The `OidcTenantResolutionMiddleware` redirects to `/tenant-discovery?returnUrl={authorizeUrl}` where the user can enter their email/username to discover their tenant. After tenant selection, the flow restarts with `acr_values` appended. A `octo_last_tenant` cookie shortcuts this on repeat visits.
 
-**Configuration:** Both `ConfigureIdentityServerOptions` and `TenantLoginRedirectMiddleware` read the system tenant ID from `IOptions<OctoSystemConfiguration>`. A server-side redirect in `Program.cs` also routes the root path `/` to `/{systemTenantId}/login`.
+**Configuration:** The system tenant ID comes from `IOptions<OctoSystemConfiguration>`. A server-side redirect in `Program.cs` routes the root path `/` to `/{systemTenantId}/login`.
 
 ### Auto-Creation of OctoTenantIdentityProvider
 
@@ -775,7 +779,7 @@ Both mechanisms are idempotent — they check for an existing provider before cr
 
 ### Problem
 
-IdentityServer resolves clients, API scopes, API resources, and identity resources from the **current tenant's database**. When a user accesses a child tenant (e.g., `meshtest`), the OAuth flow calls `/{tenantId}/connect/authorize` which looks up the client in that tenant's MongoDB. If the client doesn't exist there, the flow fails.
+The identity service resolves clients, API scopes, API resources, and identity resources from the **current tenant's database**. When a user accesses a child tenant (e.g., `meshtest`), the OAuth flow calls `/{tenantId}/connect/authorize` which looks up the client in that tenant's MongoDB. If the client doesn't exist there, the flow fails.
 
 ### Solution
 
@@ -829,10 +833,10 @@ Without cookie scoping, all tenants share a single `Identity.Application` auth c
 
 A custom `ICookieManager` (`src/IdentityServices/Cookies/TenantCookieManager.cs`) wraps `ChunkingCookieManager` and appends `.{tenantId}` (lowercased) to scoped cookie names based on `HttpContext.Items["tenantId"]`.
 
+Cookie schemes are defined in `OctoAuthSchemes` (`src/Authentication/`): `Identity.Application` (the tenant-scoped session cookie) and `Identity.External` (external-login handshake). The Duende-era `idsrv` / `idsrv.session` / `idsrv.external` cookies **no longer exist** since the OpenIddict migration.
+
 **Scoped cookies** (tenant suffix added):
 - `.AspNetCore.Identity.Application` → `.AspNetCore.Identity.Application.sbeg`
-- `idsrv` → `idsrv.sbeg`
-- `idsrv.session` → `idsrv.session.sbeg`
 
 **Global cookies** (unchanged):
 - `Identity.External` — written at `/signin-google` (no tenant in URL)
@@ -840,9 +844,11 @@ A custom `ICookieManager` (`src/IdentityServices/Cookies/TenantCookieManager.cs`
 
 ### Server-Side Session Tickets
 
-Auth cookies now carry only a short **server-side session key** (hundreds of bytes) rather than the full encrypted ticket (~3 KB per tenant). The ticket itself is stored server-side in MongoDB per tenant via the CK runtime (`RtServerSideSession`). This was introduced to fix cookie-bloat on OAuth loopback-callback servers (e.g., the CLI device-auth flow and backend OIDC clients) that rejected responses containing several large per-tenant cookies.
+Auth cookies carry only a short **server-side session key** (hundreds of bytes) rather than the full encrypted ticket (~3 KB per tenant). The ticket itself is stored server-side in MongoDB per tenant via the CK runtime (`RtServerSideSession`). This was introduced to fix cookie-bloat on OAuth loopback-callback servers (e.g., the CLI device-auth flow and backend OIDC clients) that rejected responses containing several large per-tenant cookies.
 
-`TenantCookieManager` naming convention (`.AspNetCore.Identity.Application.{tenantId}`, `idsrv.{tenantId}`, `idsrv.session.{tenantId}`) is **unchanged** — browsers and clients see the same cookie names as before.
+Since the OpenIddict migration, the store is `OctoTicketStore : ITicketStore` (`src/IdentityServices/OpenIddict/`) — standard ASP.NET Core machinery. It persists data-protected tickets in the same per-tenant `RtServerSideSession` CK type (new serialization; the Duende `ServerSideSessionStore` was deleted). The `sid` claim is stamped at session creation. Expired sessions are swept by `TokenCleanupHostService` (system tenant + all child tenants).
+
+`TenantCookieManager` naming convention (`.AspNetCore.Identity.Application.{tenantId}`) is **unchanged** — browsers and clients see the same cookie name as before.
 
 Session lifetime is controlled by `ExpireTimeSpan = 7 days` sliding on `ConfigureApplicationCookie`. Both the browser cookie and the server-side record share this window, so sliding expiry (activity extends the session) behaves identically to the old full-ticket approach from a user perspective. Logout and inactivity expiry semantics are unchanged: explicit logout removes the session record immediately; an expired record is treated as missing on the next request, causing re-authentication.
 
@@ -854,45 +860,58 @@ OIDC endpoints (`/connect/*`) don't include a `{tenantId}` route segment. The `O
 |----------|--------------|
 | `/connect/par` | `acr_values=tenant:{tenantId}` from form body (RFC 9126 Pushed Authorization Request); captures `request_uri` from JSON response → tenant mapping |
 | `/connect/authorize` | `request_uri` query parameter → tenant mapping (captured during PAR); fallback to `acr_values=tenant:{tenantId}` from query string; captures `code` → tenant mapping from both 302 redirects (`response_mode=query`) and 200 HTML responses (`response_mode=form_post`) |
-| `/connect/token` (authorization_code, device_code, refresh_token) | Authorization code / device code / refresh token → tenant mapping (captured earlier); sets tenant context for user/client lookups |
+| `/connect/token` (authorization_code, device_code, refresh_token) | Authorization code / device code / refresh token → tenant mapping (captured earlier); for refresh tokens, `acr_values=tenant:{tenantId}` from the form body is **preferred** when the client sends it; sets tenant context for user/client lookups |
 | `/connect/token` (client_credentials, token exchange) | `acr_values=tenant:{tenantId}` from form body — **required**; without it the client lookup falls back to the system tenant, so tenant-registered clients fail with `invalid_client`, and a **mirrored** client id is refused outright with `invalid_request` (AB#5058, see below) |
+| `/connect/deviceauthorization` | `acr_values` / client context; captures `user_code` → tenant mapping and rewrites `verification_uri` to the SPA page `/{tenantId}/device` (with `?userCode=`) |
+| `/connect/deviceverification` | `user_code` (query or form body) → tenant mapping captured during device authorization |
 | `/connect/endsession` | `id_token_hint` JWT payload → `tenant_id` claim; fallback to `acr_values` |
 
-**Pushed Authorization Request (PAR, RFC 9126):** When the client uses PAR, it POSTs the full set of authorization parameters (including `acr_values=tenant:{tenantId}`) to `/connect/par`. The server returns a `request_uri` (e.g., `urn:ietf:params:oauth:request_uri:...`); the subsequent `/connect/authorize` call carries only `request_uri` on the URL, no `acr_values`. The middleware extracts the tenant from the form body during `/connect/par`, captures the issued `request_uri` from the JSON response, and stores the mapping (5-minute lifetime). On `/connect/authorize?request_uri=...`, the middleware looks up the tenant from this mapping before falling back to query-string `acr_values`. PAR is enabled automatically by `Microsoft.AspNetCore.Authentication.OpenIdConnect` (.NET 9+) when the IdP advertises `pushed_authorization_request_endpoint` in its discovery document — which Duende IdentityServer does by default.
+**Pushed Authorization Request (PAR, RFC 9126):** When the client uses PAR, it POSTs the full set of authorization parameters (including `acr_values=tenant:{tenantId}`) to `/connect/par`. The server returns a `request_uri` (e.g., `urn:ietf:params:oauth:request_uri:...`); the subsequent `/connect/authorize` call carries only `request_uri` on the URL, no `acr_values`. The middleware extracts the tenant from the form body during `/connect/par`, captures the issued `request_uri` from the JSON response, and stores the mapping (5-minute lifetime). On `/connect/authorize?request_uri=...`, the middleware looks up the tenant from this mapping before falling back to query-string `acr_values`. PAR is enabled automatically by `Microsoft.AspNetCore.Authentication.OpenIdConnect` (.NET 9+) when the IdP advertises `pushed_authorization_request_endpoint` in its discovery document — which OpenIddict does (as Duende did before). This capture stage, like the authorization-code and refresh-token stages, is golden-verified against OpenIddict's response shapes.
 
 **Authorization code → tenant mapping:** During `/connect/authorize`, the middleware wraps the response body to capture the authorization code and maps it to the resolved tenant ID in an in-memory `ConcurrentDictionary`. This supports both `response_mode=query` (code extracted from the 302 redirect `Location` header) and `response_mode=form_post` (code extracted from the hidden `<input name='code'>` field in the 200 HTML response). The `form_post` mode is used by server-side OIDC clients such as the Asset Repository Services' GraphQL Playground. When `/connect/token` is called with `grant_type=authorization_code`, the middleware reads the `code` from the form body, looks up the tenant from the mapping, and sets the correct tenant context. This ensures `OctoUserStore`, `ClientStore`, and other per-tenant stores use the correct tenant database during the token exchange. The mapping entries expire after 10 minutes and are cleaned up opportunistically.
 
-**Refresh token → tenant mapping:** When `/connect/token` returns a successful response containing a `refresh_token`, the middleware captures the token and maps it to the current tenant ID in the in-memory cache (entries expire after 30 days). On subsequent refresh token exchanges, the middleware looks up the tenant from this mapping.
+**Refresh token → tenant mapping (in-memory only, preferring `acr_values`):** Clients that know their tenant (the SPAs) send `acr_values=tenant:{tenantId}` with every refresh-token request — the preferred, restart-safe path. As a fallback, when `/connect/token` returns a successful response containing a `refresh_token`, the middleware captures the token and maps it to the current tenant ID in the in-memory cache (entries expire after 30 days) and looks it up on the next refresh. There is **no persistent hash fallback anymore** — the former SHA-256 lookup against the system-tenant `RtPersistedGrant` store was retired together with centralized grant storage (grants now live per tenant in `RtOAuthAuthorization`/`RtOAuthToken` via the OpenIddict stores).
 
-**Persistent fallback for refresh tokens:** To survive service restarts, the tenant ID is also persisted in the `Description` field of the `RtPersistedGrant` entity in the system database. When the in-memory mapping is missing (e.g., after a restart or deployment), the middleware hashes the refresh token (SHA256) to obtain the grant key, queries the persistent grant store for the tenant, and re-populates the in-memory cache. This ensures token refresh operations continue to work seamlessly across deployments without requiring users to re-authenticate.
-
-**Note:** `PersistentGrantStore` always uses the system tenant database (regardless of the per-request tenant context) to ensure grants are accessible from both `/connect/authorize` and `/connect/token`, and by the `TokenCleanupHostService` which runs without HTTP context.
-
-The middleware runs after routing, before `UseIdentityServer()`:
+The middleware runs after routing, before the OpenIddict endpoints handle the request:
 
 ```
 UseRouting()
 → inline middleware (re-resolve tenant from route values)
 → UseOidcTenantResolution()
-→ UseTenantLoginRedirect()
-→ UseIdentityServer()
+→ authentication / OpenIddict server endpoints (passthrough protocol controllers)
 ```
 
 ### tenant_id Claim
 
-`UserProfileService.GetUserClaimsAsync()` adds a `tenant_id` claim to identity tokens. This claim is used by `OidcTenantResolutionMiddleware` to extract the tenant from `id_token_hint` during logout (`/connect/endsession`).
+`OctoTokenClaimsService` (`src/IdentityServices/OpenIddict/`) adds a `tenant_id` claim to identity tokens. This claim is used by `OidcTenantResolutionMiddleware` to extract the tenant from `id_token_hint` during logout (`/connect/endsession`).
 
-**Client-credentials tokens (AB#5032).** `IProfileService` is only invoked for tokens with a subject,
-so `client_credentials` tokens never passed through `UserProfileService` and carried no `tenant_id` at
-all — which is why the backend tenant gates skipped them entirely, letting any client-credentials
-client of this authority address any tenant. `ClientCredentialsRoleTokenValidator`
-(`ICustomTokenRequestValidator`) now stamps the issuing tenant onto that grant as an unprefixed
-`tenant_id` client claim: the tenant from `acr_values=tenant:{tenantId}` when present, otherwise the
-system tenant (the directory the client store actually resolved the client from). It is emitted
-before the role branch, so a client without roles gets it too, and an existing `tenant_id` claim on
-the client is not duplicated. Consumers narrow their exemption behind
-`TenantAuthorizationOptions.ServiceTokenEnforcement` in octo-common-services — default `LogOnly`,
-i.e. unchanged request behaviour plus an audit line per foreign-tenant access.
+### OIDC Session Management (check_session_iframe)
+
+Logout propagation to other tabs and SPAs works via OIDC Session Management (Duende parity —
+OpenIddict has no built-in support): the server-side session issues a browser-readable
+`idsrv.session[.tenant]` cookie (`SessionCheckCookie`, managed by `OctoTicketStore`), authorize
+responses carry a `session_state` hash (`OctoSessionStateHandler`), and RPs poll the
+`/connect/checksession` iframe (`CheckSessionController`), which recomputes the hash from the
+cookie. A logout deletes the cookie, the iframe answers `changed`, and polling clients
+(angular-oauth2-oidc with `sessionChecksEnabled: true`) end their session. The hash formula in
+handler and iframe script must stay in sync.
+
+### Claim Destinations
+
+`OctoClaimsDestinations.ForClient(bool alwaysIncludeUserClaimsInIdToken)` decides which claims flow into the access token vs. the id token. For clients with `AlwaysIncludeUserClaimsInIdToken = true` (e.g. Refinery Studio), the user claims (`role`, `tenant_id`, `allowed_tenants`, `home_tenant_id`, `name`, `preferred_username`, `email`, `family_name`, `given_name`) are additionally emitted into the id token — SPAs based on angular-oauth2-oidc read the user identity from id-token claims and enter a login redirect loop if they are missing.
+
+**Client-credentials tokens (AB#5032).** The `tenant_id` claim has a single producer, the user claims
+path, which a `client_credentials` token never reaches because it has no subject — so such a token
+carried no `tenant_id` at all, which is why the backend tenant gates skipped them entirely, letting
+any client-credentials client of this authority address any tenant.
+`ClientCredentialsTenantProcessor` (`IdentityServices/OpenIddict/`) now decides the issuing tenant and
+`TokenEndpointController.HandleClientCredentialsAsync` stamps it onto the issued identity: the tenant
+from `acr_values=tenant:{tenantId}` when present, otherwise the system tenant (the directory the
+client store actually resolved the client from). It is stamped before the roles, so a client without
+roles gets it too, and `OctoClaimsDestinations` routes it into the **access** token. Pinned on the
+wire by the golden baseline (`client-credentials-access-token.json`). Consumers narrow their exemption
+behind `TenantAuthorizationOptions.ServiceTokenEnforcement` in octo-common-services — default
+`LogOnly`, i.e. unchanged request behaviour plus an audit line per foreign-tenant access.
 
 **Ambiguous tenant binding is refused, not guessed (AB#5058).** The "otherwise the system tenant"
 half of the rule above rested on the idea that the directory which resolved the client is also the
@@ -902,8 +921,8 @@ the **same** `ClientId` with the **same** secret into every child tenant, so for
 tenant's credentials could omit `acr_values` and receive a system-tenant token, making every
 "is the caller in the system tenant" gate satisfiable with a service token.
 
-`ClientCredentialsRoleTokenValidator` therefore decides the binding **server-side** before stamping
-anything, from state the caller cannot influence:
+`ClientCredentialsTenantProcessor` therefore decides the binding **server-side** before any claim is
+composed, from state the caller cannot influence:
 
 | Signal | Source | Verdict |
 |---|---|---|
@@ -915,8 +934,8 @@ anything, from state the caller cannot influence:
 An ambiguous request is answered with `invalid_request` and the description
 *"acr_values=tenant:{tenantId} is required for this client: its client id exists in more than one
 tenant, so the issuing tenant cannot be determined from the request."*, and is audited as a
-`ClientCredentialsTenantAmbiguityEvent` (category `ClientCredentials`, ID `50580`) which
-`OctoEventSink` persists to the runtime event log. A failure of the mirror lookup itself **fails
+"Client Credentials Tenant Ambiguity" entry which `IIdentityAuditService` persists to the runtime
+event log (carrying the client id and the machine-readable reason). A failure of the mirror lookup itself **fails
 closed** — falling back to "system" there would reopen the hole. The probe runs only on the
 no-`acr_values` path, so callers that name their tenant (mesh adapter, AI services, octo-cli, the
 token-exchange and on-behalf-of grants) are untouched, as are unmirrored clients that omit it.
@@ -924,7 +943,7 @@ token-exchange and on-behalf-of grants) are untouched, as are unmirrored clients
 ⚠️ **Residual risk.** A mirror shares the parent's secret, so whoever holds a mirror's credentials
 also holds the parent's and can request the system tenant *explicitly*. No check at the token
 endpoint can tell those callers apart; the credential is instance-wide by construction of the
-mirroring feature. The validator logs a warning whenever a mirroring source obtains a system-tenant
+mirroring feature. The processor logs a warning whenever a mirroring source obtains a system-tenant
 token, and system-route authorization must not treat `tenant_id == systemTenant` on a
 client-credentials token as proof of provenance on its own. A real fix requires per-tenant mirror
 secrets — **started in AB#5061, see below; still open.**
@@ -1034,20 +1053,30 @@ provenance and AB#5055 unblocks.
 
 Step 4 — dropping the inherited secret from every mirror — is only defensible once it is *known* that
 nobody authenticates with it any more, and until AB#5061 split the secrets there was nothing to tell
-apart. `MirrorSecretUsageTelemetryValidator` (`IdentityServices/Services/`) is that measurement.
+apart. `MirrorSecretUsageTelemetry` (`IdentityServices/OpenIddict/`) is that measurement.
 
-It **decorates** Duende's `ISecretsListValidator` and delegates every validation decision to the
-built-in `SecretValidator`: nothing is accepted or rejected that would not have been before, and a
-failed authentication returns the inner result verbatim and silently. On a **successful** shared-secret
-authentication of a client whose secret list carries the `octo:mirror-own-secret` marker, the
-credential is re-checked against the own-secret subset alone; success means the caller holds the
-mirror's own secret, failure means it matched an inherited one.
+**Where it hangs.** Under Duende this decorated `ISecretsListValidator`, the one service that saw the
+presented credential and the client's whole secret list together. OpenIddict has no such service:
+client authentication runs through `OpenIddictApplicationManager.ValidateClientSecretAsync`, so
+`OctoApplicationManager` is now that place — it already owns the legacy-hash comparison and is the
+only code that knows *which* stored `RtSecretRecord` matched. It calls the telemetry after the match;
+nothing is accepted or rejected that would not have been before, and a failed authentication is
+silent. The classification is then the marker on the matched record: `octo:mirror-own-secret` means
+the caller holds the mirror's own secret, anything else means it matched an inherited one.
+
+🔴 **The move came with a fix that is load-bearing on its own.** OpenIddict's application model
+carries exactly **one** client secret, and `OpenIddictApplicationStore.GetClientSecretAsync` can only
+project the *first* stored record. Duende validated against the whole list.
+`OctoApplicationManager.ValidateClientSecretAsync(RtClient, secret, ct)` therefore iterates the stored
+records itself — without it, whichever of a mirror's two secrets happened to be second would silently
+stop authenticating, and which one that is depends on list order. The same applies to any client
+mid-rotation.
 
 Cost on the authentication hot path is bounded by design — **no store lookup and no new allocation
-for anyone else**. The marker travels on the secret record itself (the `RtSecretRecord → Secret`
-AutoMapper map carries `Description`), so the decision is a string comparison over the ≤2 secrets
-Duende already passed in; only a client that actually has an own secret pays for the classification,
-and it pays one further SHA-256.
+for anyone else**. The marker travels on the `RtSecretRecord` the manager already read, so the
+decision is a string comparison over ≤2 records. A credential that is not a shared secret (private key
+JWT, mTLS) never reaches this path at all — under Duende that had to be guarded explicitly, because
+misreporting one as inherited use would have blocked step 4 forever.
 
 Each use is recorded as:
 
@@ -1070,7 +1099,8 @@ answers *“does anybody still authenticate with the inherited secret?”*; grou
 either. Only the client id, the tenant and the literal `own` / `inherited`.
 
 ⚠️ **Blind spot, and it is a precondition rather than a false clean bill.** Mirror-ness is inferred
-from the *presence* of an own secret, because loading the `RtClient` would be a database round trip
+from the *presence* of an own secret, because reading `ProvisionedByParentTenantId` from a freshly
+loaded record would be a database round trip
 on every token request. A mirror that has no own secret yet — a public parent, or a confidential one
 whose provisioning loop has not run since AB#5061 shipped — produces no record. Step 4 must not be
 executed in that state anyway: every mirror holding its own secret is already the first row of the
@@ -1078,15 +1108,16 @@ migration table in `docs/CONCEPT-PER-TENANT-MIRROR-SECRETS.md`. **A zero inherit
 evidence once that precondition is verified per environment.**
 
 Tests: `tests/IdentityServices.UnitTests/Services/MirrorSecretUsageTelemetryTests.cs` (both
-classifications over the real Duende validator and real SHA-256 matching, no record and no second
-validation for an ordinary client or an API resource secret, unchanged failure path, non-shared-secret
-credentials not classified, unresolved tenant marked rather than guessed, a measurement failure not
-failing the authentication, no secret material in the *rendered* log, and the DI wiring actually
-winning over Duende's registration) and
+classifications over the real `OctoApplicationManager` and real SHA-256 matching against real
+`RtClient` records, the second-stored-secret regression, an expired record, no record for an ordinary
+client or for a non-marker description, unchanged failure path, unresolved tenant marked rather than
+guessed, a measurement failure not failing the authentication, no secret material in the *rendered*
+log) and
 `tests/IdentityServices.IntegrationTests/Persistence/ClientMirrorProvisioningIntegrationTests.cs`
-(`MirrorSecretUsage_DistinguishesInheritedFromOwn_ThroughTheRealMappingPath` — a mirror provisioned
-into real MongoDB, read back through the production AutoMapper path, so a mapping that dropped
-`Description` cannot make the measurement silently read zero).
+(`MirrorSecretUsage_DistinguishesInheritedFromOwn_ThroughTheRealStoredRecords` — a mirror provisioned
+into real MongoDB, read back through the repository and authenticated with **both** credentials
+through the production manager, so a provisioning change that dropped `Description` cannot make the
+measurement silently read zero).
 
 ### Key Behaviors
 
@@ -1105,7 +1136,9 @@ into real MongoDB, read back through the production AutoMapper path, so a mappin
 |------|---------|
 | `src/IdentityServices/Cookies/TenantCookieManager.cs` | Cookie name scoping by tenant |
 | `src/IdentityServices/Middleware/OidcTenantResolutionMiddleware.cs` | Tenant resolution for `/connect/*` endpoints |
-| `src/IdentityServices/Services/UserProfileService.cs` | Adds `tenant_id` claim to tokens |
+| `src/Authentication/OctoAuthSchemes.cs` | Cookie scheme definitions (`Identity.Application`, `Identity.External`) |
+| `src/IdentityServices/OpenIddict/OctoTokenClaimsService.cs` | Adds `tenant_id`, `allowed_tenants`, `home_tenant_id`, roles, `aud` to tokens |
+| `src/IdentityServices/OpenIddict/OctoTicketStore.cs` | Server-side session tickets (`RtServerSideSession`) |
 
 ## Group-Based Role Inheritance
 
@@ -1166,7 +1199,7 @@ Access tokens contain `allowed_tenants` claims that list all tenants a user is a
 Token Issuance (Login)
         │
         ▼
-UserProfileService.GetProfileDataAsync()
+OctoTokenClaimsService (src/IdentityServices/OpenIddict/)
         │
         ▼
 AllowedTenantsResolver.ResolveAsync()
@@ -1187,7 +1220,7 @@ Access token includes: allowed_tenants: ["tenant1", "tenant2", ...]
 |-----------|----------|---------|
 | `IAllowedTenantsResolver` | `IdentityServerPersistence/Services/` | Resolves allowed tenants for a user |
 | `AllowedTenantsResolver` | `IdentityServerPersistence/Services/` | Default implementation using cross-tenant mappings |
-| `UserProfileService` | `IdentityServices/Services/` | Overrides `GetProfileDataAsync` to add claims |
+| `OctoTokenClaimsService` | `IdentityServices/OpenIddict/` | Stamps `tenant_id`, `allowed_tenants`, `home_tenant_id`, roles, `aud` on issued tokens |
 | `TenantAuthorizationMiddleware` | `octo-common-services` | Validates route tenant against claims |
 
 ### AllowedTenantsResolver Algorithm
@@ -1268,8 +1301,9 @@ scopes are ignored). Per-IP rate limit + per-tenant cap + bounded TTL bound abus
   tenants afterwards is the usual token + per-call tenant selection, not a new login.
 
 **Lifecycle:** `DynamicRegistrationExpiresAt` (registration + `ClientTtlDays`, default 90d) bounds
-lifetime. `ClientStore.FindClientByIdAsync` returns null for an expired dynamic client (immediate
-enforcement → `unauthorized_client`), and `TokenCleanupHostService` erases expired dynamic clients +
+lifetime. An expired dynamic client is not resolved for protocol purposes — `OpenIddictApplicationStore`
+applies the same enabled + DCR-TTL gate that `ClientStore.FindClientByIdAsync` applied under Duende
+(immediate enforcement → `unauthorized_client`) — and `TokenCleanupHostService` erases expired dynamic clients +
 their mirrors each cleanup interval. `PreBlueprintCleanupMigration` never sweeps a
 `DynamicRegistration=true` client. Registrations with an identical redirect-URI set are **deduped**
 (the existing non-expired client is re-issued) to avoid per-launch accumulation.
@@ -1282,8 +1316,9 @@ DCR TTL lifecycle, bypassing the hard gate.
 
 **Scopeless authorize requests are defaulted:** some interactive MCP clients (observed with Claude
 Code) send `GET /connect/authorize` without a `scope` parameter even though the protected-resource
-metadata advertises `scopes_supported`; Duende hard-rejects that with "scope is missing".
-`DcrDefaultScopeMiddleware` (registered before `UseIdentityServer()`) injects the server-fixed DCR
+metadata advertises `scopes_supported`; without a default, such a request would yield no usable
+scopes (under Duende it was hard-rejected with "scope is missing").
+`DcrDefaultScopeMiddleware` (registered before the OpenIddict endpoints handle the request) injects the server-fixed DCR
 scope set (`DynamicClientRegistration.AllowedScopes`) into the query string when an `octo-dcr-*`
 client omits `scope` — permitted by RFC 6749 §3.3 (server-defined default scope) and grants nothing
 the client could not have requested, since DCR scopes are server-fixed at registration anyway.
@@ -1293,11 +1328,12 @@ See `docs/CONCEPT-MCP-DYNAMIC-CLIENT-REGISTRATION.md` for the full design and ph
 
 ## Authorize Error Page (AB#4950)
 
-When `/connect/authorize` fails validation, IdentityServer redirects the browser to
-`{tenantId}/error?errorId=<opaque>`. The `errorId` is a DataProtection-protected payload — it carries
-the error, not a database key — and is resolved through
-`IIdentityServerInteractionService.GetErrorContextAsync`, which is a non-destructive read, so the page
-survives a reload.
+When `/connect/authorize` fails validation, the browser is redirected to
+`{tenantId}/error?errorId=<opaque>`. The `errorId` is a self-contained DataProtection-protected
+payload — it carries the error, not a database key — and is resolved through
+`IOctoInteractionService.GetErrorContext` (`src/IdentityServices/OpenIddict/Interaction/`), which is a
+non-destructive read, so the page survives a reload and is multi-pod safe (no server-side message
+store).
 
 `GET {tenantId}/api/auth/error-context?errorId=…` (`AuthApiController.GetErrorContext`, anonymous)
 resolves it and classifies the failure into `ErrorContextDto.Kind`:
@@ -1307,16 +1343,16 @@ resolves it and classifies the failure into `ErrorContextDto.Kind`:
 | `unknown` | No id, or the id no longer resolves | Generic text; nothing is looked up |
 | `clientNotRegistered` | `ClientId` is set but no **enabled** client of that id exists in the route tenant | The application is not registered, or not enabled, for this workspace |
 | `invalidRedirectUri` | Client is known and the failure names `redirect_uri` | The application sent a return address not registered for it here |
-| `generic` | Anything else | IdentityServer's own wording |
+| `generic` | Anything else | The protocol error's own wording |
 
 Two rules this endpoint deliberately follows:
 
 - **The back-link comes only from the registered client's `ClientUri`, never from the failed request's
   `redirect_uri`.** The cases that land here are exactly "this client could not be validated" and "this
   redirect_uri is not registered", so rendering the caller-supplied address as a link would make the
-  identity domain an open redirect and a phishing surface. Duende does not persist `RedirectUri` into
-  the `ErrorMessage` by default — that default is load-bearing, do not override it. A disabled client is
-  not offered as a destination either.
+  identity domain an open redirect and a phishing surface. The error payload deliberately never
+  carries the caller-supplied `redirect_uri` — that omission is load-bearing, do not change it. A
+  disabled client is not offered as a destination either.
 - **Classification comes from the client lookup, not from matching the English description.**
   `unauthorized_client` is emitted for unrelated causes too. The lookup stays inside the route tenant;
   whether the same client exists in another tenant is never revealed, and the wording merges

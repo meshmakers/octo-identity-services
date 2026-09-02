@@ -1,7 +1,5 @@
 using System.ComponentModel.DataAnnotations;
 using Asp.Versioning;
-using Duende.IdentityServer.Models;
-using IdentityModel;
 using IdentityServerPersistence;
 using IdentityServerPersistence.SystemStores;
 using Meshmakers.Octo.Common.DistributionEventHub.Services;
@@ -13,10 +11,11 @@ using Meshmakers.Octo.Services.Contracts.DistributionEventHub.Messages;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Persistence.IdentityCkModel.Generated.System.Identity.v2;
+using Meshmakers.Octo.Backend.Authentication;
 
 namespace Meshmakers.Octo.Backend.IdentityServices.TenantApi.v1.Controllers;
 
-[Authorize(AuthenticationSchemes = OidcConstants.AuthenticationSchemes.AuthorizationHeaderBearer)]
+[Authorize(AuthenticationSchemes = AuthenticationConstants.BearerAuthenticationScheme)]
 [Route(IdentityServiceConstants.ApiPathPrefix + "/[controller]")]
 [ApiController]
 [ApiVersion(IdentityServiceConstants.ApiVersion1)]
@@ -38,7 +37,7 @@ public class ApiScopesController : ControllerBase
     [ProducesResponseType(typeof(IEnumerable<ApiScopeDto>), StatusCodes.Status200OK)]
     public async Task<IEnumerable<ApiScopeDto>> Get()
     {
-        var resources = await _octoResourceStore.GetAllResourcesAsync(HttpContext.RequestAborted);
+        var resources = await _octoResourceStore.GetAllRtResourcesAsync();
         return resources.ApiScopes.Select(CreateApiScopeDto);
     }
 
@@ -51,7 +50,7 @@ public class ApiScopesController : ControllerBase
     {
         var list = new List<ApiScopeDto>();
 
-        var scopes = (await _octoResourceStore.GetAllResourcesAsync(HttpContext.RequestAborted)).ApiScopes;
+        var scopes = (await _octoResourceStore.GetAllRtResourcesAsync()).ApiScopes;
 
         foreach (var apiResource in scopes.Skip(pagingParams.Skip).Take(pagingParams.Take))
         {
@@ -77,7 +76,7 @@ public class ApiScopesController : ControllerBase
     [ProducesResponseType(typeof(ApiScopeDto), StatusCodes.Status200OK)]
     public async Task<IActionResult> Get([Required] string name)
     {
-        var scopes = await _octoResourceStore.FindApiScopesByNameAsync(new[] { name }, HttpContext.RequestAborted);
+        var scopes = await _octoResourceStore.FindRtApiScopesByNameAsync(new[] { name });
         var scope = scopes.FirstOrDefault();
         if (scope == null)
         {
@@ -99,7 +98,7 @@ public class ApiScopesController : ControllerBase
             return BadRequest(ModelState);
         }
 
-        if ((await _octoResourceStore.FindApiScopesByNameAsync(new[] { scopeDto.Name }, HttpContext.RequestAborted)).Any())
+        if ((await _octoResourceStore.FindRtApiScopesByNameAsync(new[] { scopeDto.Name })).Any())
         {
             return Conflict($"Scope with name '{scopeDto.Name}' already exists.");
         }
@@ -189,7 +188,7 @@ public class ApiScopesController : ControllerBase
             Guid.NewGuid(), DateTime.Now));
     }
 
-    private static ApiScopeDto CreateApiScopeDto(ApiScope apiScope)
+    private static ApiScopeDto CreateApiScopeDto(RtApiScope apiScope)
     {
         var apiScopeDto = new ApiScopeDto
         {
@@ -198,9 +197,9 @@ public class ApiScopesController : ControllerBase
             DisplayName = apiScope.DisplayName,
             Description = apiScope.Description,
             ShowInDiscoveryDocument = apiScope.ShowInDiscoveryDocument,
-            UserClaims = apiScope.UserClaims,
-            IsRequired = apiScope.Required,
-            IsEmphasize = apiScope.Emphasize
+            UserClaims = apiScope.Claims?.ToList() ?? [],
+            IsRequired = apiScope.IsRequired,
+            IsEmphasize = apiScope.IsEmphasized
         };
 
         return apiScopeDto;

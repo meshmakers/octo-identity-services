@@ -63,8 +63,8 @@ public static class ClientMirrorSecrets
     /// <remarks>
     ///     Both signals count and either alone is enough. <c>RequireClientSecret</c> is the declared
     ///     intent and can be set before the first secret exists; a non-empty <c>ClientSecrets</c>
-    ///     list is the material itself, which Duende's secret validation honours even if the flag
-    ///     was switched off afterwards.
+    ///     list is the material itself, which the token endpoint's secret validation honours even if
+    ///     the flag was switched off afterwards.
     /// </remarks>
     public static bool IsConfidential(RtClient client)
     {
@@ -121,10 +121,13 @@ public static class ClientMirrorSecrets
     }
 
     /// <summary>
-    ///     SHA-256 over the UTF-8 bytes, base64-encoded — byte-for-byte identical to Duende's
-    ///     <c>string.Sha256()</c> extension the rest of the service hashes client secrets with.
-    ///     Reimplemented here only so this type stays free of a Duende dependency: it lives in the
-    ///     persistence layer, which the OpenIddict migration (Epic 4989) keeps protocol-agnostic.
+    ///     SHA-256 over the UTF-8 bytes, base64-encoded — the legacy hash format every stored
+    ///     <c>RtSecretRecord.Value</c> uses and <c>OctoApplicationManager</c> validates against
+    ///     (identical to <c>OctoSecretHasher.HashSecret</c>, and before the OpenIddict migration to
+    ///     Duende's <c>string.Sha256()</c> extension). Kept here rather than referenced so this type
+    ///     stays free of a protocol dependency: it lives in the persistence layer, which the
+    ///     OpenIddict migration (Epic AB#4989) keeps protocol-agnostic. 🔴 A divergence would store
+    ///     rotated secrets in a shape the token endpoint can never match.
     /// </summary>
     public static string Sha256(string input)
     {
