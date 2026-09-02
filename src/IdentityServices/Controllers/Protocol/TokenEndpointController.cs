@@ -155,7 +155,14 @@ public class TokenEndpointController(
         var scopes = storedPrincipal.GetScopes();
         identity.SetScopes(scopes);
         identity.SetResources(await tokenClaimsService.ResolveAudiencesAsync(scopes));
-        identity.SetDestinations(OctoClaimsDestinations.Resolve);
+
+        // Honor the client's AlwaysIncludeUserClaimsInIdToken on redemption/refresh too —
+        // the Studio reads its identity, tenant and roles from the (refreshed) id_token.
+        var redeemingClient = request.ClientId != null
+            ? await clientStore.FindRtClientByIdAsync(request.ClientId)
+            : null;
+        identity.SetDestinations(
+            OctoClaimsDestinations.ForClient(redeemingClient?.AlwaysIncludeUserClaimsInIdToken == true));
 
         return SignIn(new ClaimsPrincipal(identity), OpenIddictServerAspNetCoreDefaults.AuthenticationScheme);
     }

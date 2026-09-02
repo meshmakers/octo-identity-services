@@ -152,7 +152,13 @@ public class DeviceVerificationController(
 
         identity.SetScopes(grantedScopes);
         identity.SetResources(await tokenClaimsService.ResolveAudiencesAsync(grantedScopes));
-        identity.SetDestinations(OctoClaimsDestinations.Resolve);
+
+        var deviceClientId = result.Principal.GetClaim(Claims.ClientId) ?? request.ClientId;
+        var deviceClient = deviceClientId != null
+            ? await clientStore.FindRtClientByIdAsync(deviceClientId)
+            : null;
+        identity.SetDestinations(
+            OctoClaimsDestinations.ForClient(deviceClient?.AlwaysIncludeUserClaimsInIdToken == true));
 
         logger.LogInformation(
             "Device authorization approved by user '{UserName}' for client '{ClientId}' in tenant '{TenantId}'",

@@ -57,6 +57,30 @@ internal class OctoTokenClaimsService(
     {
         identity.SetClaim(Claims.Subject, user.RtId.ToString());
 
+        // Profile claims (Duende ProfileService parity). Destinations decide per client whether
+        // they reach the id_token (AlwaysIncludeUserClaimsInIdToken) — they never enter access
+        // tokens (golden-pinned).
+        if (!string.IsNullOrEmpty(user.UserName))
+        {
+            identity.SetClaim(Claims.Name, user.UserName);
+            identity.SetClaim(Claims.PreferredUsername, user.UserName);
+        }
+
+        if (!string.IsNullOrEmpty(user.Email))
+        {
+            identity.SetClaim(Claims.Email, user.Email);
+        }
+
+        if (!string.IsNullOrEmpty(user.LastName))
+        {
+            identity.SetClaim(Claims.FamilyName, user.LastName);
+        }
+
+        if (!string.IsNullOrEmpty(user.FirstName))
+        {
+            identity.SetClaim(Claims.GivenName, user.FirstName);
+        }
+
         foreach (var roleName in await userManager.GetRolesAsync(user))
         {
             identity.AddClaim(new Claim(Claims.Role, roleName));

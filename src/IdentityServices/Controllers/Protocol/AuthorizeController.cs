@@ -154,7 +154,8 @@ public class AuthorizeController(
 
         identity.SetScopes(grantedScopes);
         identity.SetResources(await tokenClaimsService.ResolveAudiencesAsync(grantedScopes));
-        identity.SetDestinations(OctoClaimsDestinations.Resolve);
+        identity.SetDestinations(
+            OctoClaimsDestinations.ForClient(client.AlwaysIncludeUserClaimsInIdToken == true));
 
         logger.LogDebug("Authorize request approved for client '{ClientId}', user '{Subject}', tenant '{TenantId}'",
             request.ClientId, subject, tenantId);

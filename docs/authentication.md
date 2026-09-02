@@ -748,6 +748,10 @@ UseRouting()
 
 `OctoTokenClaimsService` (`src/IdentityServices/OpenIddict/`) adds a `tenant_id` claim to identity tokens. This claim is used by `OidcTenantResolutionMiddleware` to extract the tenant from `id_token_hint` during logout (`/connect/endsession`).
 
+### Claim Destinations
+
+`OctoClaimsDestinations.ForClient(bool alwaysIncludeUserClaimsInIdToken)` decides which claims flow into the access token vs. the id token. For clients with `AlwaysIncludeUserClaimsInIdToken = true` (e.g. Refinery Studio), the user claims (`role`, `tenant_id`, `allowed_tenants`, `home_tenant_id`, `name`, `preferred_username`, `email`, `family_name`, `given_name`) are additionally emitted into the id token — SPAs based on angular-oauth2-oidc read the user identity from id-token claims and enter a login redirect loop if they are missing.
+
 ### Key Behaviors
 
 | Scenario | Behavior |

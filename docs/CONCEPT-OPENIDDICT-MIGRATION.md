@@ -322,6 +322,12 @@ Phases 1–6 (AB#4990–AB#4996) are implemented on the feature branch; the oper
   + `GoldenFiles/`, recorded from Duende — all 5 green).
 - **Secret compatibility as planned**: `OctoApplicationManager` + `OctoSecretHasher` validate the
   stored Duende hash format (Base64 SHA-256/512) — no secret rotation needed.
+- **`AlwaysIncludeUserClaimsInIdToken` parity**: for clients with this flag (e.g. Refinery Studio)
+  the user claims (`role`, `tenant_id`, `allowed_tenants`, `home_tenant_id`, `name`,
+  `preferred_username`, `email`, `family_name`, `given_name`) are stamped with an id-token
+  destination via `OctoClaimsDestinations.ForClient(bool)`; profile claims are populated in
+  `OctoTokenClaimsService.PopulateUserClaimsAsync`. Without this, SPAs that read user identity
+  from the id token (angular-oauth2-oidc) fall into a login redirect loop.
 - **Accepted behavioral differences**: `client_credentials` without a `scope` parameter now yields
   no scopes (Duende granted all allowed); token responses may report `expires_in` as remaining
   seconds; introspection now authenticates clients (ApiSecrets-based resource introspection not
