@@ -382,7 +382,23 @@ public class ClientMirrorProvisioningService(
         }
 
         using var adminSession = await parentContext.GetAdminSessionAsync();
-        var childTenants = await parentContext.GetChildTenantsAsync(adminSession);
+
+        // AB#5076: which set "every tenant this client should reach" is depends on the parent.
+        //
+        // Since AB#5025 GetChildTenantsAsync filters by ParentTenantId and returns DIRECT children
+        // only. For an ordinary parent tenant that is exactly right — mirroring is one level, and a
+        // grandchild is its own parent's business. For the SYSTEM tenant it is not: the caller that
+        // matters here (DynamicClientRegistrationService, and the operator's "Provision in existing
+        // tenants" button when run there) means every tenant on the instance, and nested tenants
+        // from level two down would silently never receive the mirror. That failure surfaces far
+        // from its cause — not here, but as an "unknown client" at login in the sub-tenant, and it
+        // self-heals only on the next identity restart, when SetupTenantAsync provisions each tenant
+        // against the system parent again.
+        var isSystemParent = string.Equals(parentTenantId, systemContext.TenantId,
+            StringComparison.OrdinalIgnoreCase);
+        var childTenants = isSystemParent
+            ? await systemContext.GetAllTenantsAsync(adminSession)
+            : await parentContext.GetChildTenantsAsync(adminSession);
 
         var considered = 0;
         var newly = 0;
