@@ -1,4 +1,4 @@
-FROM meshmakers/dotnet_aspnetcore-runtime-node:1.3.0.0 AS base
+FROM meshmakers/dotnet_aspnetcore-runtime-node:8.0-20240826.2 AS base
 WORKDIR /app
 EXPOSE 80
 EXPOSE 443
