@@ -13,3 +13,7 @@ updates:
     directory: "/src/IdentityServices"
     schedule:
       interval: "weekly"
+    ignore:
+      # The meshmakers/* platform images are bumped deliberately with the platform toolchain;
+      # Dependabot misreads their legacy tag scheme (8.0-<date> sorts above 1.3.0.0).
+      - dependency-name: "meshmakers/*"
