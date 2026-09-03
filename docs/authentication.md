@@ -911,7 +911,9 @@ client store actually resolved the client from). It is stamped before the roles,
 roles gets it too, and `OctoClaimsDestinations` routes it into the **access** token. Pinned on the
 wire by the golden baseline (`client-credentials-access-token.json`). Consumers narrow their exemption
 behind `TenantAuthorizationOptions.ServiceTokenEnforcement` in octo-common-services — default
-`LogOnly`, i.e. unchanged request behaviour plus an audit line per foreign-tenant access.
+`Enforce` since AB#5077, i.e. a service token addressing a foreign tenant is answered with 403.
+Setting `LogOnly` restores the migration behaviour: unchanged request outcomes plus an audit line
+per foreign-tenant access.
 
 **Ambiguous tenant binding is refused, not guessed (AB#5058).** The "otherwise the system tenant"
 half of the rule above rested on the idea that the directory which resolved the client is also the

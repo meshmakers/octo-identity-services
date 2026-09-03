@@ -88,7 +88,7 @@ behaviour, so leaving the section out changes nothing:
 
 | Option | Env variable | Description |
 |--------|-------------|-------------|
-| `ServiceTokenEnforcement` | `OCTO_TENANTAUTHORIZATION__SERVICETOKENENFORCEMENT` | `Disabled` \| `LogOnly` (default) \| `Enforce`. `LogOnly` lets every request through but logs each service token that addresses a tenant it was not issued for — the consumer inventory to evaluate before switching an environment to `Enforce`. `Enforce` answers those with 403, including service tokens carrying no `tenant_id` at all. |
+| `ServiceTokenEnforcement` | `OCTO_TENANTAUTHORIZATION__SERVICETOKENENFORCEMENT` | `Disabled` \| `LogOnly` \| `Enforce` (default since AB#5077). `LogOnly` lets every request through but logs each service token that addresses a tenant it was not issued for — the consumer inventory to evaluate before switching an environment to `Enforce`. `Enforce` answers those with 403, including service tokens carrying no `tenant_id` at all. |
 | `CrossTenantServiceClientIds` | `OCTO_TENANTAUTHORIZATION__CROSSTENANTSERVICECLIENTIDS__0`, `…__1`, … | Escape hatch for a service that genuinely fans out across tenants with one token. **Expected to stay empty** — the AI adapter worker and the mesh adapter both mint tenant-bound tokens (`acr_values=tenant:X`) and pass the `tenant_id` match on their own. Case-insensitive; a trailing `*` matches a prefix. Never list the per-tenant `octo-pipeline-sa-*` accounts, and never use this as a migration aid — that is what `LogOnly` is for. |
 
 ### Configuration Sources
