@@ -11,7 +11,6 @@ using Meshmakers.Octo.Backend.IdentityServices.Resources;
 using Meshmakers.Octo.Backend.IdentityServices.Middleware;
 using Meshmakers.Octo.Backend.IdentityServices.OpenIddict;
 using Meshmakers.Octo.Backend.IdentityServices.OpenIddict.Interaction;
-using Meshmakers.Octo.Backend.IdentityServices.Routing;
 using Meshmakers.Octo.Backend.IdentityServices.Services;
 using IQrCodeService = Meshmakers.Octo.Backend.IdentityServices.Services.IQrCodeService;
 using QrCodeService = Meshmakers.Octo.Backend.IdentityServices.Services.QrCodeService;
@@ -106,8 +105,7 @@ try
         .Configure<IXmlRepository>((options, repository) => options.XmlRepository = repository);
     builder.Services.AddDataProtection()
         .SetApplicationName("OctoIdentityServices");
-    builder.Services.Configure<RouteOptions>(options =>
-        options.ConstraintMap.Add("tenantId", typeof(TenantIdRouteConstraint)));
+    builder.Services.AddOctoTenantIdRouteConstraint();
 
     builder.Services.Configure<CookiePolicyOptions>(options =>
     {
