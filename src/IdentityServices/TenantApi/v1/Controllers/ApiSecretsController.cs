@@ -2,7 +2,7 @@ using System.ComponentModel;
 using System.ComponentModel.DataAnnotations;
 using Asp.Versioning;
 using Duende.IdentityServer.Models;
-using IdentityModel;
+using Duende.IdentityModel;
 using IdentityServerPersistence;
 using IdentityServerPersistence.SystemStores;
 using Meshmakers.Common.Shared;

@@ -1,7 +1,7 @@
 using System.Security.Claims;
 using Duende.IdentityServer.Models;
 using Duende.IdentityServer.Validation;
-using IdentityModel;
+using Duende.IdentityModel;
 using IdentityServerPersistence.SystemStores;
 
 namespace Meshmakers.Octo.Backend.IdentityServices.Services;

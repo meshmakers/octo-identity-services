@@ -2,7 +2,7 @@
 using System.ComponentModel.DataAnnotations;
 using Asp.Versioning;
 using AutoMapper;
-using IdentityModel;
+using Duende.IdentityModel;
 using IdentityServerPersistence;
 using IdentityServerPersistence.SystemStores;
 using Meshmakers.Octo.Backend.IdentityServices.Services;

@@ -3,7 +3,7 @@ using Duende.IdentityServer.Models;
 using Duende.IdentityServer.Services;
 using Duende.IdentityServer.Stores;
 using Duende.IdentityServer.Validation;
-using IdentityModel;
+using Duende.IdentityModel;
 using IdentityServerPersistence.Configuration.Options;
 using IdentityServerPersistence.SystemStores;
 using IdentityServerPersistence.Services;

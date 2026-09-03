@@ -1,7 +1,7 @@
 using System.ComponentModel;
 using System.ComponentModel.DataAnnotations;
 using Asp.Versioning;
-using IdentityModel;
+using Duende.IdentityModel;
 using IdentityServerPersistence;
 using IdentityServerPersistence.SystemStores;
 using Meshmakers.Octo.Communication.Contracts.DataTransferObjects;

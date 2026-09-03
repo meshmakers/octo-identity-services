@@ -1,5 +1,5 @@
 using System.Security.Claims;
-using IdentityModel;
+using Duende.IdentityModel;
 using IdentityServerPersistence.SystemStores;
 using Meshmakers.Octo.ConstructionKit.Contracts;
 using Microsoft.Extensions.Logging;

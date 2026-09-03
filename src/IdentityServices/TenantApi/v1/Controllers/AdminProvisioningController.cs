@@ -2,7 +2,7 @@ using System.ComponentModel;
 using System.ComponentModel.DataAnnotations;
 using System.Security.Claims;
 using Asp.Versioning;
-using IdentityModel;
+using Duende.IdentityModel;
 using IdentityServerPersistence;
 using Meshmakers.Octo.Backend.Authentication.DynamicAuth;
 using Meshmakers.Octo.Communication.Contracts;

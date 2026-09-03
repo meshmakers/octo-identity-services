@@ -2,7 +2,7 @@ using System.ComponentModel;
 using System.ComponentModel.DataAnnotations;
 using Asp.Versioning;
 using AutoMapper;
-using IdentityModel;
+using Duende.IdentityModel;
 using IdentityServerPersistence;
 using Meshmakers.Octo.Communication.Contracts.DataTransferObjects;
 using Meshmakers.Octo.Communication.Contracts.DataTransferObjects.ApiErrors;

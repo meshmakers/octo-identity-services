@@ -1,5 +1,5 @@
 using Asp.Versioning;
-using IdentityModel;
+using Duende.IdentityModel;
 using IdentityServerPersistence;
 using Meshmakers.Octo.Backend.IdentityServices.Resources;
 using Meshmakers.Octo.Backend.IdentityServices.Services;
