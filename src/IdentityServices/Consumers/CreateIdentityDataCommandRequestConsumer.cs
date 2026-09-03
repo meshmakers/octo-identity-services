@@ -238,6 +238,17 @@ public class CreateIdentityDataCommandRequestConsumer(
     }
 
     /// <summary>
+    ///     AB#5111: client-id prefix of the Communication Controller's pipeline service accounts
+    ///     (<c>PipelineServiceAccountProvisioningService.BuildClientId</c>). For clients under this
+    ///     prefix a non-null <c>AssignedRoleNames</c> is a <b>declaration</b> and the role edges are
+    ///     fully synced (add missing, remove superfluous); every other client keeps the additive
+    ///     AB#5027 semantics. The prefix is the only signal available: <c>DistClientDto</c> lives in
+    ///     octo-common-services and gaining a "sync mode" property there would force a contract
+    ///     release across every producer for a behaviour only these clients want.
+    /// </summary>
+    internal const string PipelineServiceAccountClientIdPrefix = "octo-pipeline-sa-";
+
+    /// <summary>
     ///     AB#5027: assigns the requested roles to the client through the <c>AssignedRole</c>
     ///     association — the same edge <c>ClientRoleStore</c> writes, so the roles land in the
     ///     <c>client_credentials</c> token via <c>TokenEndpointController.HandleClientCredentialsAsync</c>.
@@ -249,18 +260,36 @@ public class CreateIdentityDataCommandRequestConsumer(
     ///     repository this consumer already resolved from the message.
     ///     </para>
     ///     <para>
-    ///     Additive and idempotent: existing edges are left alone, roles the DTO does not mention are
-    ///     never removed (the client may legitimately have been granted more by an operator), and an
-    ///     unknown role name is logged and skipped rather than failing the whole identity-data setup —
-    ///     the roles seed (<c>System.Identity.Bootstrap</c>) runs on an independent trigger and may
-    ///     legitimately not have landed yet, which the caller already handles via
-    ///     <see cref="CreateIdentityDataResult.SuccessIdentityDataSeedPending" />.
+    ///     Additive and idempotent by default: existing edges are left alone, roles the DTO does not
+    ///     mention are never removed (the client may legitimately have been granted more by an
+    ///     operator), and an unknown role name is logged and skipped rather than failing the whole
+    ///     identity-data setup — the roles seed (<c>System.Identity.Bootstrap</c>) runs on an
+    ///     independent trigger and may legitimately not have landed yet, which the caller already
+    ///     handles via <see cref="CreateIdentityDataResult.SuccessIdentityDataSeedPending" />.
+    ///     </para>
+    ///     <para>
+    ///     AB#5111 exception — declarative sync for pipeline service accounts (client-id prefix
+    ///     <see cref="PipelineServiceAccountClientIdPrefix" />): a non-null role list on such a
+    ///     client is its complete declaration, so edges to roles outside the list are removed. Two
+    ///     safeties keep that from destroying anything by accident: a <c>null</c> list still means
+    ///     "leave the roles alone" (the controller sends null for legacy, undeclared accounts and
+    ///     for rotations), and removal is skipped entirely while any declared role name is
+    ///     unresolvable — half a declaration must not delete the surviving half.
     ///     </para>
     /// </summary>
     private async Task EnsureAssignedRolesAsync(IOctoSession session, ITenantRepository tenantRepository,
         OctoObjectId clientRtId, DistClientDto distClientDto)
     {
-        if (distClientDto.AssignedRoleNames == null || distClientDto.AssignedRoleNames.Length == 0)
+        if (distClientDto.AssignedRoleNames == null)
+        {
+            return;
+        }
+
+        // AB#5111: declared service accounts sync fully; everyone else stays additive — and for
+        // them an empty list means "nothing to add", exactly as before.
+        var isDeclarativeSync = distClientDto.ClientId.StartsWith(PipelineServiceAccountClientIdPrefix,
+            StringComparison.Ordinal);
+        if (!isDeclarativeSync && distClientDto.AssignedRoleNames.Length == 0)
         {
             return;
         }
@@ -277,6 +306,8 @@ public class CreateIdentityDataCommandRequestConsumer(
 
         var roleCkTypeId = RtEntityExtensions.GetRtCkTypeId<RtRole>();
         var updates = new List<AssociationUpdateInfo>();
+        var declaredRoleIds = new HashSet<string>();
+        var allDeclaredRolesResolved = true;
 
         foreach (var roleName in distClientDto.AssignedRoleNames.Distinct(StringComparer.OrdinalIgnoreCase))
         {
@@ -288,12 +319,15 @@ public class CreateIdentityDataCommandRequestConsumer(
             var role = roles.Items.FirstOrDefault();
             if (role == null)
             {
+                allDeclaredRolesResolved = false;
                 logger.LogWarning(
                     "Role '{RoleName}' requested for client '{ClientId}' in tenant '{TenantId}' does not exist; " +
                     "the client is created without it. Re-run the identity data setup once the tenant's role seed is in place.",
                     roleName, distClientDto.ClientId, tenantRepository.TenantId);
                 continue;
             }
+
+            declaredRoleIds.Add(role.RtId.ToString());
 
             if (currentRoleIds.Contains(role.RtId.ToString()))
             {
@@ -304,6 +338,23 @@ public class CreateIdentityDataCommandRequestConsumer(
                 clientEntityId,
                 new RtEntityId(roleCkTypeId, role.RtId),
                 IdentityAssociationConstants.AssignedRoleId));
+        }
+
+        var removedCount = 0;
+        if (isDeclarativeSync && allDeclaredRolesResolved)
+        {
+            // AB#5111: the declaration is complete and fully resolvable — edges outside it go. Skipped
+            // while any name is unresolvable (seed pending): removing the known-good edges because the
+            // seed has not landed would take a working service account down for a transient reason.
+            foreach (var association in currentAssociations.Items
+                         .Where(a => !declaredRoleIds.Contains(a.TargetRtId.ToString())))
+            {
+                removedCount++;
+                updates.Add(AssociationUpdateInfo.CreateDelete(
+                    clientEntityId,
+                    new RtEntityId(roleCkTypeId, association.TargetRtId),
+                    IdentityAssociationConstants.AssignedRoleId));
+            }
         }
 
         if (updates.Count == 0)
@@ -321,8 +372,8 @@ public class CreateIdentityDataCommandRequestConsumer(
         }
 
         logger.LogInformation(
-            "Assigned {RoleCount} role(s) to client '{ClientId}' in tenant '{TenantId}'",
-            updates.Count, distClientDto.ClientId, tenantRepository.TenantId);
+            "Synced roles of client '{ClientId}' in tenant '{TenantId}': {AddedCount} added, {RemovedCount} removed",
+            distClientDto.ClientId, tenantRepository.TenantId, updates.Count - removedCount, removedCount);
     }
 
     /// <summary>

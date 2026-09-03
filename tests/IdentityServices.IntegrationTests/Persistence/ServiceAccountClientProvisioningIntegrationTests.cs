@@ -168,6 +168,113 @@ public class ServiceAccountClientProvisioningIntegrationTests : IClassFixture<Id
         (await GetAssignedRoleNamesAsync(client!)).Should().BeEmpty();
     }
 
+    // ---------- AB#5111: declarative role sync for pipeline service accounts ----------
+
+    [Fact]
+    public async Task DeclaredServiceAccount_SuperfluousRoleEdges_AreRemoved()
+    {
+        await ArrangeAsync();
+        await EnsureRoleAsync("Ab5111ExtraRole");
+        var clientId = NewClientId();
+        var request = BuildServiceAccountRequest(clientId, "plaintext-secret-five");
+        request.Clients =
+        [
+            request.Clients!.Single() with
+            {
+                AssignedRoleNames = [CommonConstants.CommunicationManagementRole, "Ab5111ExtraRole"]
+            }
+        ];
+        await ConsumeAsync(request);
+
+        // The declaration shrank — the octo-pipeline-sa- prefix opts the client into full sync
+        // (AB#5111), so the edge outside the declared list must go, not linger.
+        var shrunk = BuildServiceAccountRequest(clientId, "plaintext-secret-five");
+        await ConsumeAsync(shrunk);
+
+        var client = await LoadClientAsync(clientId);
+        (await GetAssignedRoleNamesAsync(client!)).Should()
+            .BeEquivalentTo([CommonConstants.CommunicationManagementRole]);
+    }
+
+    [Fact]
+    public async Task DeclaredServiceAccount_EmptyDeclaration_RemovesEveryRoleEdge()
+    {
+        await ArrangeAsync();
+        var clientId = NewClientId();
+        await ConsumeAsync(BuildServiceAccountRequest(clientId, "plaintext-secret-six"));
+
+        var request = BuildServiceAccountRequest(clientId, "plaintext-secret-six");
+        request.Clients = [request.Clients!.Single() with { AssignedRoleNames = [] }];
+        await ConsumeAsync(request);
+
+        var client = await LoadClientAsync(clientId);
+        (await GetAssignedRoleNamesAsync(client!)).Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task DeclaredServiceAccount_NullRoleList_LeavesTheEdgesCompletelyAlone()
+    {
+        // The controller sends null for legacy (undeclared) accounts and for rotations — the
+        // upgrade-safety half of AB#5111: role edges granted by hand or by a blueprint survive.
+        await ArrangeAsync();
+        var clientId = NewClientId();
+        await ConsumeAsync(BuildServiceAccountRequest(clientId, "plaintext-secret-seven"));
+
+        var request = BuildServiceAccountRequest(clientId, "plaintext-secret-seven");
+        request.Clients = [request.Clients!.Single() with { AssignedRoleNames = null }];
+        await ConsumeAsync(request);
+
+        var client = await LoadClientAsync(clientId);
+        (await GetAssignedRoleNamesAsync(client!)).Should()
+            .BeEquivalentTo([CommonConstants.CommunicationManagementRole]);
+    }
+
+    [Fact]
+    public async Task DeclaredServiceAccount_UnresolvableDeclaredRole_SkipsTheRemovalHalf()
+    {
+        // Half a declaration must not delete the surviving half: while any declared name cannot be
+        // resolved (role seed pending), the sync only adds — the removal waits for a pass on which
+        // the declaration is fully resolvable.
+        await ArrangeAsync();
+        var clientId = NewClientId();
+        await ConsumeAsync(BuildServiceAccountRequest(clientId, "plaintext-secret-eight"));
+
+        var request = BuildServiceAccountRequest(clientId, "plaintext-secret-eight");
+        request.Clients = [request.Clients!.Single() with { AssignedRoleNames = ["NoSuchRoleYet"] }];
+        await ConsumeAsync(request);
+
+        var client = await LoadClientAsync(clientId);
+        (await GetAssignedRoleNamesAsync(client!)).Should()
+            .BeEquivalentTo([CommonConstants.CommunicationManagementRole]);
+    }
+
+    [Fact]
+    public async Task ClientOutsideTheServiceAccountPrefix_KeepsTheAdditiveSemantics()
+    {
+        await ArrangeAsync();
+        await EnsureRoleAsync("Ab5111ExtraRole");
+        var clientId = $"legacy-client-{Guid.NewGuid():N}";
+
+        var first = BuildServiceAccountRequest(clientId, "plaintext-secret-nine");
+        first.Clients =
+        [
+            first.Clients!.Single() with
+            {
+                AssignedRoleNames = [CommonConstants.CommunicationManagementRole, "Ab5111ExtraRole"]
+            }
+        ];
+        await ConsumeAsync(first);
+
+        // A shrunken list on a NON-prefixed client must not remove anything — the pre-AB#5111
+        // contract every other producer relies on.
+        var second = BuildServiceAccountRequest(clientId, "plaintext-secret-nine");
+        await ConsumeAsync(second);
+
+        var client = await LoadClientAsync(clientId);
+        (await GetAssignedRoleNamesAsync(client!)).Should()
+            .BeEquivalentTo([CommonConstants.CommunicationManagementRole, "Ab5111ExtraRole"]);
+    }
+
     // ---------- helpers ----------
 
     private string SystemTenantId => _fixture.GetSystemContext().TenantId;
