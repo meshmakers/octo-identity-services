@@ -6,7 +6,7 @@ EXPOSE 443
 # Build on the native build platform (IL is portable, the Angular bundle is
 # arch-neutral) so multi-arch builds don't emulate the SDK or Node; the runtime
 # arch is selected by the `base`/`final` stages.
-FROM --platform=$BUILDPLATFORM meshmakers/dotnet_sdk-node:1.3.0.0 AS build
+FROM --platform=$BUILDPLATFORM meshmakers/dotnet_sdk-node:8.0-20240826.2 AS build
 
 ARG OCTO_PRIVATE_NUGET_SERVICE
 ARG OCTO_PRIVATE_NUGET_CERTIFICATE
