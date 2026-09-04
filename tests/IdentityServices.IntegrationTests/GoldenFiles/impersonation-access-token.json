@@ -1,0 +1,24 @@
+{
+  "claims": {
+    "act": "impersonation-actor",
+    "amr": "impersonation",
+    "aud": "impersonation-api-resource",
+    "client_id": "impersonation-target",
+    "exp": "\u003Cdynamic\u003E",
+    "iat": "\u003Cdynamic\u003E",
+    "iss": "https://localhost:5003/",
+    "jti": "\u003Cdynamic\u003E",
+    "nbf": "\u003Cdynamic\u003E",
+    "role": [
+      "ImpersonationTargetRoleA",
+      "ImpersonationTargetRoleB"
+    ],
+    "scope": "impersonation-api",
+    "tenant_id": "octosystem"
+  },
+  "header": {
+    "alg": "RS256",
+    "kid": "\u003Ckid\u003E",
+    "typ": "at\u002Bjwt"
+  }
+}

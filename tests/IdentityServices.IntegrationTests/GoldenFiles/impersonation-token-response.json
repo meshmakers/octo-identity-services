@@ -1,0 +1,13 @@
+{
+  "keys": [
+    "access_token",
+    "expires_in",
+    "scope",
+    "token_type"
+  ],
+  "stable": {
+    "expires_in": 3600,
+    "scope": "impersonation-api",
+    "token_type": "Bearer"
+  }
+}
