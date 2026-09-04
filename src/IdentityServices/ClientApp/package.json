@@ -29,7 +29,7 @@
     "@fortawesome/free-solid-svg-icons": "^7.3.1",
     "@progress/kendo-angular-buttons": "^24.1.0",
     "@progress/kendo-angular-common": "^24.1.0",
-    "@progress/kendo-angular-icons": "^24.1.0",
+    "@progress/kendo-angular-icons": "^25.0.0",
     "@progress/kendo-angular-inputs": "^24.1.0",
     "@progress/kendo-angular-l10n": "^24.1.0",
     "@progress/kendo-angular-layout": "^24.1.0",
