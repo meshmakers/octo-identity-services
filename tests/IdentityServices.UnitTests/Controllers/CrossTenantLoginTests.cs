@@ -90,6 +90,7 @@ public class CrossTenantLoginTests
             _externalTenantUserMappingStore,
             _identityProviderStore,
             loginGroupAssignmentService,
+            Substitute.For<IEntraIdVerifiedIdentifierEnrollmentService>(),
             _dataProtectionProvider,
             _crossTenantUserProvisioningService,
             Options.Create(new OctoSystemConfiguration { SystemTenantId = "OctoSystem" }),

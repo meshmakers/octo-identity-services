@@ -73,6 +73,7 @@ public class AuthApiControllerErrorContextTests
             Substitute.For<IExternalTenantUserMappingStore>(),
             Substitute.For<IOctoIdentityProviderStore>(),
             Substitute.For<ILoginGroupAssignmentService>(),
+            Substitute.For<IEntraIdVerifiedIdentifierEnrollmentService>(),
             new EphemeralDataProtectionProvider(),
             Substitute.For<ICrossTenantUserProvisioningService>(),
             Options.Create(new OctoSystemConfiguration { SystemTenantId = "OctoSystem" }),
