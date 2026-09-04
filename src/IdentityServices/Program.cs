@@ -88,6 +88,12 @@ try
         builder.Configuration.GetSection("Identity").Bind(options));
     builder.Services.Configure<OctoSystemConfiguration>(options =>
         builder.Configuration.GetSection("System").Bind(options));
+    // AB#5134 signal-cli-rest-api bridge for the AB#5123 self-service phone OTP. When
+    // SignalBridge:ApiUrl is set the real SignalRestOtpDeliveryChannel is wired for the Signal
+    // modality (see AddOctoIdentityPersistence); when empty the LoggingOtpDeliveryChannel dev stub
+    // stays active. Configure via OCTO_SIGNALBRIDGE__APIURL / OCTO_SIGNALBRIDGE__NUMBER.
+    builder.Services.Configure<SignalBridgeOptions>(options =>
+        builder.Configuration.GetSection(SignalBridgeOptions.SectionName).Bind(options));
     // Blueprint variable inputs (${octo.scheme}/${octo.domain}/${octo.environment}/...).
     // AddRuntimeEngine only registers the options — it does NOT bind them; without this
     // binding OCTO_BLUEPRINTS__* env vars are silently ignored, ${octo.mcp.publicUrl}

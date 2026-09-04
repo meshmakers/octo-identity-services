@@ -1,5 +1,6 @@
 using IdentityServerPersistence.AutoMap;
 using IdentityServerPersistence.Configuration.DependencyInjection;
+using IdentityServerPersistence.Configuration.Options;
 using IdentityServerPersistence.Services;
 using IdentityServerPersistence.Services.Admin;
 using IdentityServerPersistence.Services.Login;
@@ -15,6 +16,8 @@ using Meshmakers.Octo.Runtime.Contracts.RepositoryEntities;
 using Meshmakers.Octo.Runtime.Engine.Configuration.DependencyInjection;
 using Meshmakers.Octo.Services.Infrastructure;
 using Meshmakers.Octo.Services.Infrastructure.Services;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 using Persistence.IdentityCkModel.Generated.System.Identity.v2;
 
 // ReSharper disable once CheckNamespace
@@ -104,12 +107,28 @@ public static class RuntimeEngineBuilderExtensions
         // identifiers (phone via OTP, client certificate) with no admin in the loop, writing into the
         // AB#5122 directory with Source = SelfService. The OTP challenge is persisted (hashed, with an
         // expiry + attempt budget) in the existing per-user token store; delivery is abstracted behind
-        // IOtpDeliveryChannel. NOTE: LoggingOtpDeliveryChannel is a clearly-marked STUB — no reachable
-        // Signal/SMS transport exists from identity-services (the Signal send path lives in the mesh
-        // adapter). Replace it with a real IOtpDeliveryChannel for the Signal/SMS modality.
+        // IOtpDeliveryChannel.
         builder.Services.TryAddSingleton(TimeProvider.System);
         builder.Services.AddScoped<IOtpChallengeStore, UserTokenOtpChallengeStore>();
-        builder.Services.AddSingleton<IOtpDeliveryChannel, LoggingOtpDeliveryChannel>();
+
+        // AB#5134 Signal OTP delivery: when the signal-cli-rest-api bridge is configured
+        // (SignalBridge:ApiUrl non-empty) the real SignalRestOtpDeliveryChannel delivers the phone OTP
+        // over the same bridge the mesh adapter's SignalSender node uses; otherwise the clearly-marked
+        // LoggingOtpDeliveryChannel stub (with its loud warning) stays the Signal channel so dev without
+        // a bridge keeps working. Exactly ONE IOtpDeliveryChannel of Kind=Signal is registered (the
+        // OTP service dispatches by Kind), decided from the bound SignalBridgeOptions at resolve time.
+        // SignalBridgeOptions is bound from the "SignalBridge" config section in Program.cs (this
+        // engine-builder extension has no IConfiguration; IOptions<> resolves to defaults — ApiUrl
+        // empty → stub — when the section is absent).
+        builder.Services.AddHttpClient(SignalRestOtpDeliveryChannel.HttpClientName);
+        builder.Services.AddSingleton<IOtpDeliveryChannel>(sp =>
+        {
+            var options = sp.GetRequiredService<IOptions<SignalBridgeOptions>>().Value;
+            return string.IsNullOrWhiteSpace(options.ApiUrl)
+                ? ActivatorUtilities.CreateInstance<LoggingOtpDeliveryChannel>(sp)
+                : ActivatorUtilities.CreateInstance<SignalRestOtpDeliveryChannel>(sp);
+        });
+
         builder.Services.AddScoped<ISelfServiceIdentifierService, SelfServiceIdentifierService>();
 
         builder.Services.AddSingleton<AttributeStringValueListConverter>();
