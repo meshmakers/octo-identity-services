@@ -27,12 +27,15 @@ public class ClientsControllerOverlayUrisTests
     private readonly IOctoClientStore _clientStore = Substitute.For<IOctoClientStore>();
     private readonly IDistributionEventHubService _eventHub = Substitute.For<IDistributionEventHubService>();
     private readonly IClientRoleStore _clientRoleStore = Substitute.For<IClientRoleStore>();
+
+    private readonly IClientImpersonationStore _clientImpersonationStore =
+        Substitute.For<IClientImpersonationStore>();
     private readonly ClientsController _sut;
 
     public ClientsControllerOverlayUrisTests()
     {
         _clientStore.TenantId.Returns(TenantId);
-        _sut = new ClientsController(_clientStore, _eventHub, _clientRoleStore);
+        _sut = new ClientsController(_clientStore, _eventHub, _clientRoleStore, _clientImpersonationStore);
     }
 
     [Fact]

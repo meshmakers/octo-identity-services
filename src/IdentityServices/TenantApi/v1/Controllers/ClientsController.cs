@@ -30,6 +30,7 @@ public class ClientsController : ControllerBase
     private readonly IDistributionEventHubService _distributionEventHubService;
     private readonly IOctoClientStore _octoClientStore;
     private readonly IClientRoleStore _clientRoleStore;
+    private readonly IClientImpersonationStore _clientImpersonationStore;
 
     /// <summary>
     ///     Constructor
@@ -37,13 +38,16 @@ public class ClientsController : ControllerBase
     /// <param name="octoClientStore">The storage service of clients</param>
     /// <param name="distributionEventHubService">Distributed cache with REDIS</param>
     /// <param name="clientRoleStore">The store managing client role assignments</param>
+    /// <param name="clientImpersonationStore">The store reading the MayActAs impersonation edges</param>
     public ClientsController(IOctoClientStore octoClientStore,
         IDistributionEventHubService distributionEventHubService,
-        IClientRoleStore clientRoleStore)
+        IClientRoleStore clientRoleStore,
+        IClientImpersonationStore clientImpersonationStore)
     {
         _octoClientStore = octoClientStore;
         _distributionEventHubService = distributionEventHubService;
         _clientRoleStore = clientRoleStore;
+        _clientImpersonationStore = clientImpersonationStore;
     }
 
     // GET: system/v1/clients
@@ -120,6 +124,36 @@ public class ClientsController : ControllerBase
 
         var roleIds = await _clientRoleStore.GetDirectRoleIdsAsync(client.RtId);
         return Ok(roleIds.ToList());
+    }
+
+    // ========================================
+    // Impersonation actors (MayActAs)
+    // ========================================
+
+    /// <summary>
+    ///     The <c>System.Identity/MayActAs</c> read surface (AB#5114): answers which clients hold
+    ///     a MayActAs edge INTO client <paramref name="id" /> — the actors identity's token
+    ///     endpoint accepts impersonation requests from. Direction-sensitive: only inbound edges
+    ///     are listed, so a client that is itself an actor for other clients does not appear as
+    ///     its own actor. This is the endpoint the communication controller's service-account
+    ///     health aggregate verifies the impersonation edge through.
+    /// </summary>
+    // GET system/v1/clients/{id}/actors
+    [HttpGet("{id}/actors")]
+    [Authorize(IdentityServiceConstants.IdentityApiReadOnlyPolicy)]
+    [EndpointSummary("Returns the client IDs that may act for (impersonate) a client via MayActAs.")]
+    [ProducesResponseType(typeof(List<string>), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> GetClientActors([Required][Description("ID of the client")] string id)
+    {
+        var client = await _octoClientStore.FindRtClientByIdAsync(id);
+        if (client == null)
+        {
+            return NotFound(new NotFoundErrorDto($"Client with id '{id}' not found."));
+        }
+
+        var actorClientIds = await _clientImpersonationStore.GetActorClientIdsAsync(client.RtId);
+        return Ok(actorClientIds.ToList());
     }
 
     // PUT system/v1/clients/{id}/roles

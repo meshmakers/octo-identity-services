@@ -19,4 +19,14 @@ public interface IClientImpersonationStore
     ///     <paramref name="targetClientRtId" /> exists in the current request tenant.
     /// </summary>
     Task<bool> HasMayActAsEdgeAsync(OctoObjectId actorClientRtId, OctoObjectId targetClientRtId);
+
+    /// <summary>
+    ///     The client ids (<c>Client.ClientId</c>, not rtIds) of the clients holding a
+    ///     <c>MayActAs</c> edge INTO the client <paramref name="targetClientRtId" /> — i.e. the
+    ///     actors that may impersonate it. Direction-sensitive by construction: only inbound edges
+    ///     count, so a client that is itself an actor for others never lists those targets here.
+    ///     Empty for a client without inbound edges (and for an unknown rtId — the REST surface
+    ///     answers 404 from the client lookup before consulting this).
+    /// </summary>
+    Task<IReadOnlyList<string>> GetActorClientIdsAsync(OctoObjectId targetClientRtId);
 }

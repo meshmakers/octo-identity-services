@@ -200,6 +200,63 @@ public class ImpersonatedIdentityIntegrationTests : IClassFixture<IdentityServic
             .Should().Be(ImpersonationDenialReason.None);
     }
 
+    // ---------- MayActAs read surface (GET Clients/{id}/actors, AB#5114) ----------
+
+    /// <summary>
+    ///     The store read behind <c>GET {tenantId}/v1/Clients/{id}/actors</c>: an inbound edge
+    ///     lists the actor's CLIENT id, and the read is direction-sensitive — the actor's own
+    ///     actor list stays empty, an outbound-only relationship never reports the target as the
+    ///     actor's actor.
+    /// </summary>
+    [Fact]
+    public async Task ActorRead_EdgePresent_ListsTheActorInboundOnly()
+    {
+        await _fixture.InitializeAsync();
+        await EnsureSystemSetupAsync();
+        var (_, _, repo) = CreateFixtureStores();
+        var store = new ClientImpersonationStore(new FixedTenantResolver(repo));
+
+        var actorClientId = NewId("adpL");
+        var targetClientId = NewId("saL");
+        var actorRtId = await CreateClientAsync(repo, actorClientId);
+        var targetRtId = await CreateClientAsync(repo, targetClientId);
+
+        await WriteMayActAsEdgeAsync(repo, actorRtId, targetRtId);
+
+        (await store.GetActorClientIdsAsync(targetRtId))
+            .Should().BeEquivalentTo([actorClientId],
+                "the target's actor list is exactly the origins of its inbound MayActAs edges");
+        (await store.GetActorClientIdsAsync(actorRtId))
+            .Should().BeEmpty(
+                "the edge is directional — being an actor FOR someone must not surface as having an actor");
+    }
+
+    [Fact]
+    public async Task ActorRead_NoEdges_ReturnsEmpty()
+    {
+        await _fixture.InitializeAsync();
+        await EnsureSystemSetupAsync();
+        var (_, _, repo) = CreateFixtureStores();
+        var store = new ClientImpersonationStore(new FixedTenantResolver(repo));
+
+        var lonelyRtId = await CreateClientAsync(repo, NewId("saE"));
+
+        (await store.GetActorClientIdsAsync(lonelyRtId)).Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task ActorRead_UnknownClient_ReturnsEmpty()
+    {
+        // Store level: unknown rtId answers empty; the REST endpoint 404s from the client lookup
+        // before ever consulting the store.
+        await _fixture.InitializeAsync();
+        await EnsureSystemSetupAsync();
+        var (_, _, repo) = CreateFixtureStores();
+        var store = new ClientImpersonationStore(new FixedTenantResolver(repo));
+
+        (await store.GetActorClientIdsAsync(OctoObjectId.GenerateNewId())).Should().BeEmpty();
+    }
+
     // ---------- helpers ----------
 
     private static string NewId(string prefix) => $"{prefix}-{Guid.NewGuid():N}"[..24];
