@@ -17,9 +17,31 @@ public class IdentityServicesFixture : DatabaseFixture
     /// </summary>
     public string TestTenantId { get; }
 
+    /// <summary>Maximum length of a tenant id, and therefore of a tenant database name.</summary>
+    private const int TenantIdMaxLength = 24;
+
+    /// <summary>
+    ///     Random characters guaranteed to survive the truncation to <see cref="TenantIdMaxLength" />.
+    ///     The configured prefix is cut to make room for them: a configured
+    ///     <c>integrationTest:tenantId</c> of 23 characters or more would otherwise leave no random
+    ///     part at all, and every fixture would be back to sharing one id.
+    /// </summary>
+    private const int RandomSuffixLength = 12;
+
     public IdentityServicesFixture()
     {
-        TestTenantId = $"{_options.TenantId}-{Guid.NewGuid():N}"[..24];
+        // -1 for the separator between prefix and random suffix.
+        const int maxPrefixLength = TenantIdMaxLength - RandomSuffixLength - 1;
+
+        var prefix = _options.TenantId;
+        if (prefix.Length > maxPrefixLength)
+        {
+            prefix = prefix[..maxPrefixLength];
+        }
+
+        // The guid contributes 32 characters, so the interpolated value is always longer than
+        // TenantIdMaxLength and the slice keeps exactly RandomSuffixLength random characters or more.
+        TestTenantId = $"{prefix}-{Guid.NewGuid():N}"[..TenantIdMaxLength];
     }
 
     protected override async Task InitializeServicesAsync()

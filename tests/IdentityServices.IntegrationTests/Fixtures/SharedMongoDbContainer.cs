@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using IdentityServices.IntegrationTests.Configuration;
 using Testcontainers.MongoDb;
 using Xunit;
@@ -54,8 +55,7 @@ internal static class SharedMongoDbContainer
                 return _host;
             }
 
-            await StartAsync(options);
-            return _host!;
+            return await StartAsync(options);
         }
         finally
         {
@@ -99,7 +99,7 @@ internal static class SharedMongoDbContainer
         }
     }
 
-    private static async Task StartAsync(IntegrationTestOptions options)
+    private static async Task<string> StartAsync(IntegrationTestOptions options)
     {
         Console.WriteLine($"[Testcontainers] Starting shared MongoDB container with image: {options.MongoDbImage}");
         Console.WriteLine(
@@ -134,12 +134,13 @@ internal static class SharedMongoDbContainer
                 await container.StartAsync(startCts.Token);
 
                 _container = container;
-                _host = $"localhost:{container.GetMappedPublicPort()}";
+                var host = $"localhost:{container.GetMappedPublicPort()}";
+                _host = host;
 
                 var elapsed = DateTime.UtcNow - startTime;
                 Console.WriteLine(
-                    $"[Testcontainers] Shared container started in {elapsed.TotalSeconds:F1}s, MongoDB available at: {_host}");
-                return;
+                    $"[Testcontainers] Shared container started in {elapsed.TotalSeconds:F1}s, MongoDB available at: {host}");
+                return host;
             }
             catch (Exception ex)
             {
@@ -164,6 +165,9 @@ internal static class SharedMongoDbContainer
                 await Task.Delay(TimeSpan.FromSeconds(2 * attempt));
             }
         }
+
+        throw new UnreachableException(
+            "The retry loop either returns a host or rethrows on the final attempt.");
     }
 }
 
