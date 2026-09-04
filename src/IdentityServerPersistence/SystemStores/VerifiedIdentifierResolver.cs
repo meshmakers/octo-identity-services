@@ -229,6 +229,46 @@ public class VerifiedIdentifierResolver(
         return summaries;
     }
 
+    public async Task<IReadOnlyList<VerifiedIdentifierWithUser>> GetByKindAsync(
+        RtIdentifierKindEnum identifierKind)
+    {
+        var session = await TenantRepository.GetSessionAsync();
+        session.StartTransaction();
+
+        // Every binding of the kind. IdentifierKind is a small enum, so filtering it in memory (as the
+        // per-kind lookups do) avoids depending on an enum field-filter coercion.
+        var result = await TenantRepository
+            .GetRtEntitiesByTypeAsync<RtVerifiedExternalIdentifier>(session, RtEntityQueryOptions.Create());
+
+        var bindings = result.Items.Where(e => e.IdentifierKind == identifierKind).ToList();
+
+        var list = new List<VerifiedIdentifierWithUser>(bindings.Count);
+        foreach (var binding in bindings)
+        {
+            var user = await GetBoundUserAsync(session, binding);
+
+            var summary = new VerifiedIdentifierSummary(
+                binding.RtId,
+                binding.IdentifierKind,
+                binding.IdentifierValue,
+                binding.EnrollmentTrust,
+                binding.Source,
+                binding.EnrolledAt,
+                binding.LastVerifiedAt,
+                binding.ValidUntil,
+                !IsExpired(binding));
+
+            list.Add(new VerifiedIdentifierWithUser(
+                summary,
+                user?.RtId ?? OctoObjectId.Empty,
+                user?.UserName,
+                user?.Email));
+        }
+
+        await session.CommitTransactionAsync();
+        return list;
+    }
+
     /// <summary>
     ///     A client-certificate binding whose stored <c>ValidUntil</c> not-after has passed is
     ///     invalid (AB#5123). Any binding without a <c>ValidUntil</c> (every non-certificate kind, and

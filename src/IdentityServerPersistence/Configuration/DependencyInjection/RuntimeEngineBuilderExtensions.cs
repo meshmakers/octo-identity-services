@@ -1,6 +1,7 @@
 using IdentityServerPersistence.AutoMap;
 using IdentityServerPersistence.Configuration.DependencyInjection;
 using IdentityServerPersistence.Services;
+using IdentityServerPersistence.Services.Admin;
 using IdentityServerPersistence.Services.Login;
 using IdentityServerPersistence.Services.SelfService;
 using IdentityServerPersistence.SystemStores;
@@ -91,6 +92,13 @@ public static class RuntimeEngineBuilderExtensions
         // (effective = min(enrollment, message)). The write side is the seam the sibling enrollment
         // WIs (AB#5123–5126) call.
         builder.Services.AddScoped<IVerifiedIdentifierResolver, VerifiedIdentifierResolver>();
+
+        // AB#5125 admin-managed e-mail verified whitelist: a tenant admin binds an e-mail address to a
+        // user (Source = Admin, EnrollmentTrust = Strong) through the AB#5122 directory. The
+        // per-message DKIM/DMARC trust is evaluated on the mesh-adapter ingest side and capped by
+        // min() at the verified-caller directory, so a whitelisted address never authorizes an
+        // elevated operation on a spoofable (no-DKIM) mail.
+        builder.Services.AddScoped<IAdminEmailBindingService, AdminEmailBindingService>();
 
         // AB#5123 self-service "My identities": the signed-in user manages their OWN strong channel
         // identifiers (phone via OTP, client certificate) with no admin in the loop, writing into the

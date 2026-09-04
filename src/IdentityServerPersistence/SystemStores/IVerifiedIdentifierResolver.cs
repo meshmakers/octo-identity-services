@@ -45,6 +45,19 @@ public sealed record VerifiedIdentifierSummary(
     bool IsValid);
 
 /// <summary>
+///     A single binding of a given kind together with the user it points at, for the admin
+///     "verified whitelist" listing (AB#5125): the admin manages the tenant's e-mail→user bindings
+///     and needs to see which user each address maps to, not just the address. The user projection is
+///     resolved from the <c>IdentifiesUser</c> edge; <see cref="UserRtId" /> is the empty id when the
+///     binding is dangling (its user was removed).
+/// </summary>
+public sealed record VerifiedIdentifierWithUser(
+    VerifiedIdentifierSummary Identifier,
+    OctoObjectId UserRtId,
+    string? UserName,
+    string? UserEmail);
+
+/// <summary>
 ///     The outcome of <see cref="IVerifiedIdentifierResolver.ResolveAsync" /> for a present binding:
 ///     the resolved user together with both trust dimensions and their effective minimum (AB#5122).
 /// </summary>
@@ -117,4 +130,12 @@ public interface IVerifiedIdentifierResolver
     ///     expiry in its <see cref="VerifiedIdentifierSummary.IsValid" /> flag.
     /// </summary>
     Task<IReadOnlyList<VerifiedIdentifierSummary>> GetByUserAsync(OctoObjectId userRtId);
+
+    /// <summary>
+    ///     Lists every binding of <paramref name="identifierKind" /> in the tenant, each with the user
+    ///     it points at — the read side of the admin "verified whitelist" area (AB#5125), which manages
+    ///     the tenant's e-mail→user bindings. Each summary already reflects certificate expiry in its
+    ///     <see cref="VerifiedIdentifierSummary.IsValid" /> flag.
+    /// </summary>
+    Task<IReadOnlyList<VerifiedIdentifierWithUser>> GetByKindAsync(RtIdentifierKindEnum identifierKind);
 }
