@@ -20,7 +20,6 @@ namespace IdentityServices.IntegrationTests.Persistence;
 /// <c>SetupTenantAsync</c> decided whether to bootstrap; the decision then refused, the datasource
 /// user was never created, and every service start failed on a MongoDB authentication error.
 /// </summary>
-[Collection("Sequential")]
 public class VirginSystemDatabaseBootstrapIntegrationTests : IClassFixture<VirginBootstrapFixture>
 {
     private readonly VirginBootstrapFixture _fixture;

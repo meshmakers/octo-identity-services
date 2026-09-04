@@ -8,7 +8,19 @@ namespace IdentityServices.IntegrationTests.Fixtures;
 /// </summary>
 public class IdentityServicesFixture : DatabaseFixture
 {
-    public string TestTenantId => _options.TenantId;
+    /// <summary>
+    /// Id — and therefore database name — of this fixture's test tenant. Unique per fixture instance
+    /// (AB#5117): a tenant database name is a server-wide namespace, so the former fixed
+    /// <c>test-tenant</c> collides as soon as a second fixture creates it on the shared
+    /// <see cref="SharedMongoDbContainer" />. Every test reaches the tenant through this property,
+    /// never through the literal.
+    /// </summary>
+    public string TestTenantId { get; }
+
+    public IdentityServicesFixture()
+    {
+        TestTenantId = $"{_options.TenantId}-{Guid.NewGuid():N}"[..24];
+    }
 
     protected override async Task InitializeServicesAsync()
     {

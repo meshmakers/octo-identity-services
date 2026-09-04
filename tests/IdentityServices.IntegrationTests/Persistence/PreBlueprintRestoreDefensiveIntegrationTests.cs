@@ -26,7 +26,6 @@ namespace IdentityServices.IntegrationTests.Persistence;
 ///     (that is a <c>Program.cs</c>-only registration), so we materialise both the
 ///     blueprint-range role and the pre-blueprint orphan ourselves.
 /// </summary>
-[Collection("Sequential")]
 public class PreBlueprintRestoreDefensiveIntegrationTests
     : IClassFixture<IdentityServicesFixture>
 {

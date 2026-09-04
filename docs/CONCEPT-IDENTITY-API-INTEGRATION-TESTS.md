@@ -22,11 +22,41 @@ The integration tests ensure that all Identity Server API endpoints work correct
 
 ### 2.1 Existing Infrastructure (Reuse)
 
-- **`CustomWebApplicationFactory`**: WebApplicationFactory with MongoDB TestContainer
+- **`SharedMongoDbContainer`**: the one MongoDB replica-set Testcontainer of the whole test process
+- **`CustomWebApplicationFactory`**: WebApplicationFactory bound to that shared container
 - **`IntegrationTestBase`**: Base class with HTTP client and helper methods
 - **`TestAuthHandler`**: Custom authentication handler for simulating authenticated users
 - **`TestSigningCredentialStore`**: In-memory RSA key for token signing
 - **Builders**: `RtUserBuilder`, `RtClientBuilder` for test data creation
+
+### 2.1.1 Fixture Isolation: One Server, One Database Per Fixture (AB#5117)
+
+Every fixture used to start a MongoDB replica-set Testcontainer of its own, because all of them
+shared the hardcoded system database name `identityintegrationtests` and therefore needed a private
+server to stay isolated. With ~22 fixture instances (12 `IClassFixture` persistence classes plus one
+`CustomWebApplicationFactory` per API test class) and `parallelizeTestCollections: false`, that meant
+~22 strictly sequential container lifecycles — 8-12 s each — and a 13+ minute CI step whose dominant
+cost was fixture bring-up, not test logic.
+
+The isolation boundary is now the **database**, not the server:
+
+- `ConfigurationFixture.SystemDatabaseName` is `identityintegrationtests{GUID:N}`, generated per
+  fixture instance. `CustomWebApplicationFactory` carries the same per-instance name (used both for
+  its system-tenant bootstrap and for the web host's `OctoSystemConfiguration`).
+- `SharedMongoDbContainer` starts **one** container lazily on first use, behind a `SemaphoreSlim`, and
+  hands its `localhost:{mappedPort}` to `DatabaseFixture` and `CustomWebApplicationFactory` alike.
+  The former per-fixture start-retry loop (3 attempts, fresh container each) moved here unchanged.
+- `SharedMongoDbContainerDisposer`, registered via `[assembly: AssemblyFixture<…>]`, stops the
+  container once after the last test in the assembly, so teardown does not depend on Ryuk being
+  enabled on the agent. No individual fixture stops it.
+- Consequently `xunit.runner.json` sets `parallelizeTestCollections: true`, and the persistence test
+  classes no longer carry `[Collection("Sequential")]` — each test class is its own collection again
+  and they run concurrently against their own databases.
+
+Class fixtures were deliberately **not** promoted to collection fixtures: several classes rely on a
+pristine database (`DataProtectionKeySeedIntegrationTests` needs an empty `RtDataProtectionKey`
+collection, `VirginSystemDatabaseBootstrapIntegrationTests` creates and destroys the system tenant),
+which per-class fixture instances give for free now that each one owns a database.
 
 ### 2.2 Required Extensions
 
