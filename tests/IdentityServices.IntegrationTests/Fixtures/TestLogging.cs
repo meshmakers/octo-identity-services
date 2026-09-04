@@ -29,7 +29,11 @@ internal static class TestLogging
     {
         var configured = Environment.GetEnvironmentVariable(LevelEnvironmentVariable);
 
-        return !string.IsNullOrWhiteSpace(configured) && Enum.TryParse<LogLevel>(configured, true, out var level)
+        // Enum.TryParse also accepts any numeric string, so "999" would parse into an undefined
+        // LogLevel and silence every provider. Enum.IsDefined rejects those and keeps the default.
+        return !string.IsNullOrWhiteSpace(configured)
+               && Enum.TryParse<LogLevel>(configured, true, out var level)
+               && Enum.IsDefined(level)
             ? level
             : LogLevel.Warning;
     }
