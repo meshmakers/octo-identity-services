@@ -40,6 +40,7 @@ public class AuthApiController(
     IExternalTenantUserMappingStore externalTenantUserMappingStore,
     IOctoIdentityProviderStore identityProviderStore,
     ILoginGroupAssignmentService loginGroupAssignmentService,
+    IEntraIdVerifiedIdentifierEnrollmentService entraIdVerifiedIdentifierEnrollmentService,
     IDataProtectionProvider dataProtectionProvider,
     ICrossTenantUserProvisioningService crossTenantUserProvisioningService,
     IOptions<OctoSystemConfiguration> systemConfiguration,
@@ -572,6 +573,10 @@ public class AuthApiController(
 
         // 7. Sync external identity group claims (e.g., AD groups) on every login
         await loginGroupAssignmentService.SyncExternalGroupClaimsAsync(user, claims);
+
+        // 7b. Enroll the EntraID object id as a verified identifier so the mesh adapter can resolve
+        // a Teams sender's aadObjectId to this user (AB#5124). No-op for non-EntraID providers.
+        await entraIdVerifiedIdentifierEnrollmentService.EnrollFromExternalLoginAsync(user, provider, claims);
 
         // 8. Sign in the user
         await signInManager.SignInAsync(user, isPersistent: false);

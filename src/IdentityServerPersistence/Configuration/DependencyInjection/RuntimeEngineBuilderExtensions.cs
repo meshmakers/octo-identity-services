@@ -72,6 +72,10 @@ public static class RuntimeEngineBuilderExtensions
         builder.Services.AddScoped<IAllowedTenantsResolver, AllowedTenantsResolver>();
         builder.Services.AddScoped<IEmailDomainGroupRuleStore, EmailDomainGroupRuleStore>();
         builder.Services.AddScoped<ILoginGroupAssignmentService, LoginGroupAssignmentService>();
+        // AB#5124: auto-provision the (EntraIdObjectId, oid) → user verified-identifier binding on
+        // EntraID login, so the mesh adapter can resolve a Teams sender's AAD object id to this user.
+        builder.Services
+            .AddScoped<IEntraIdVerifiedIdentifierEnrollmentService, EntraIdVerifiedIdentifierEnrollmentService>();
         builder.Services.AddScoped<ITenantDiscoveryService, TenantDiscoveryService>();
         builder.Services.AddScoped<IClientMirrorProvisioningService, ClientMirrorProvisioningService>();
         // AB#5026 delegation ("on-behalf-of"): the protocol-free policy behind OnBehalfOfProcessor.
