@@ -205,6 +205,7 @@ try
     builder.Services.AddScoped<IOctoTokenClaimsService, OctoTokenClaimsService>();
     builder.Services.AddScoped<TenantExchangeProcessor>();
     builder.Services.AddScoped<OnBehalfOfProcessor>();
+    builder.Services.AddScoped<ImpersonationProcessor>();
     builder.Services.AddScoped<ClientCredentialsTenantProcessor>();
     builder.Services.AddScoped<IIdentityAuditService, IdentityAuditService>();
 

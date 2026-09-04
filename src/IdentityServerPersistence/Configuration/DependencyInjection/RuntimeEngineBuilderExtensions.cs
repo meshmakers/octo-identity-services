@@ -76,6 +76,10 @@ public static class RuntimeEngineBuilderExtensions
         builder.Services.AddScoped<IClientMirrorProvisioningService, ClientMirrorProvisioningService>();
         // AB#5026 delegation ("on-behalf-of"): the protocol-free policy behind OnBehalfOfProcessor.
         builder.Services.AddScoped<IDelegatedIdentityResolver, DelegatedIdentityResolver>();
+        // AB#5114 impersonation: the MayActAs edge store and the protocol-free policy behind
+        // ImpersonationProcessor (and the on-behalf-of requested_client_id extension).
+        builder.Services.AddScoped<IClientImpersonationStore, ClientImpersonationStore>();
+        builder.Services.AddScoped<IImpersonatedIdentityResolver, ImpersonatedIdentityResolver>();
 
         builder.Services.AddSingleton<AttributeStringValueListConverter>();
         builder.Services.AddAutoMapper(cfg =>

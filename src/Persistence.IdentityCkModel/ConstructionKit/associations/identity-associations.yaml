@@ -18,6 +18,12 @@ associationRoles:
     inboundMultiplicity: N
     outboundName: ChildGroups
     outboundMultiplicity: N
+  - id: MayActAs
+    description: "the origin client may impersonate the target client via the impersonation grant (AB#5114); materialised by the communication reconcile for adapter→pipeline-service-account pairs"
+    inboundName: Impersonators
+    inboundMultiplicity: N
+    outboundName: MayActAs
+    outboundMultiplicity: N
   - id: GrantsPermission
     description: "Links a Role to a granted DataPermission."
     inboundName: GrantedToRoles

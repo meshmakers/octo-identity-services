@@ -38,6 +38,15 @@ public static class ClientPermissionsMapper
     /// <summary>The OctoMesh delegation ("on-behalf-of") grant type URN (AB#5026).</summary>
     public const string OnBehalfOfGrantType = "urn:meshmakers:params:oauth:grant-type:on-behalf-of";
 
+    /// <summary>
+    ///     The OctoMesh impersonation grant type URN (AB#5114). Own URN, own per-client opt-in:
+    ///     becoming another client outright is a strictly stronger capability than delegating or
+    ///     exchanging, so it must never ride along on another grant's permission. The
+    ///     communication reconcile grants it to adapter clients; anything else is an explicit
+    ///     operator decision.
+    /// </summary>
+    public const string ImpersonationGrantType = "urn:meshmakers:params:oauth:grant-type:impersonate";
+
     /// <summary>Computes the OpenIddict permission set for a client.</summary>
     public static ImmutableArray<string> MapPermissions(RtClient client)
     {
@@ -79,6 +88,13 @@ public static class ClientPermissionsMapper
         {
             // Custom flow (AB#5026): OpenIddict models non-built-in grants as prefixed permissions.
             permissions.Add(Permissions.Prefixes.GrantType + OnBehalfOfGrantType);
+            usesTokenEndpoint = true;
+        }
+
+        if (grantTypes.Contains(ImpersonationGrantType))
+        {
+            // Custom flow (AB#5114): same prefixed-permission model as on-behalf-of.
+            permissions.Add(Permissions.Prefixes.GrantType + ImpersonationGrantType);
             usesTokenEndpoint = true;
         }
 

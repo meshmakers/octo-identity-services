@@ -27,6 +27,7 @@
     "refresh_token",
     "urn:ietf:params:oauth:grant-type:device_code",
     "urn:ietf:params:oauth:grant-type:token-exchange",
+    "urn:meshmakers:params:oauth:grant-type:impersonate",
     "urn:meshmakers:params:oauth:grant-type:on-behalf-of"
   ],
   "id_token_signing_alg_values_supported": [

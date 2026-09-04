@@ -196,6 +196,50 @@ public class ClientPermissionsMapperTests
         permissions.Should().Contain(Permissions.GrantTypes.RefreshToken);
     }
 
+    /// <summary>
+    /// AB#5114: a pipeline service account carrying the impersonation URN in AllowedGrantTypes is
+    /// allowed the custom impersonation flow (prefixed-permission model, like on-behalf-of) —
+    /// this is how the communication reconcile will grant the flow to adapter clients.
+    /// </summary>
+    [Fact]
+    public void ClientWithImpersonationGrant_GetsThePrefixedCustomFlowPermission()
+    {
+        var client = new RtClientBuilder()
+            .WithClientId("adapter-chart-client")
+            .WithGrantTypes("client_credentials", ClientPermissionsMapper.ImpersonationGrantType)
+            .WithScopes("octo_api")
+            .Build();
+
+        var permissions = ClientPermissionsMapper.MapPermissions(client);
+
+        permissions.Should().Contain(
+        [
+            Permissions.GrantTypes.ClientCredentials,
+            Permissions.Prefixes.GrantType + ClientPermissionsMapper.ImpersonationGrantType,
+            Permissions.Endpoints.Token
+        ]);
+    }
+
+    /// <summary>
+    /// The opt-in is per URN: neither on-behalf-of nor token exchange may smuggle in the far
+    /// stronger impersonation capability (OpenIddict answers unauthorized_client without it).
+    /// </summary>
+    [Fact]
+    public void ClientWithoutImpersonationGrant_DoesNotGetTheImpersonationPermission()
+    {
+        var client = new RtClientBuilder()
+            .WithClientId("octo-pipeline-sa-plain")
+            .WithGrantTypes("client_credentials", ClientPermissionsMapper.OnBehalfOfGrantType,
+                ClientPermissionsMapper.TokenExchangeGrantType)
+            .WithScopes("octo_api")
+            .Build();
+
+        var permissions = ClientPermissionsMapper.MapPermissions(client);
+
+        permissions.Should().NotContain(
+            Permissions.Prefixes.GrantType + ClientPermissionsMapper.ImpersonationGrantType);
+    }
+
     /// <summary>A client with no grant types gets no endpoint permissions except revocation.</summary>
     [Fact]
     public void ClientWithoutGrantTypes_GetsNoEndpointPermissions()

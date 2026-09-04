@@ -42,6 +42,7 @@ public class TokenEndpointController(
     IOctoTokenClaimsService tokenClaimsService,
     TenantExchangeProcessor tenantExchangeProcessor,
     OnBehalfOfProcessor onBehalfOfProcessor,
+    ImpersonationProcessor impersonationProcessor,
     ClientCredentialsTenantProcessor clientCredentialsTenantProcessor,
     UserManager<RtUser> userManager,
     SignInManager<RtUser> signInManager,
@@ -67,6 +68,11 @@ public class TokenEndpointController(
         if (string.Equals(request.GrantType, DelegationConstants.OnBehalfOfGrantType, StringComparison.Ordinal))
         {
             return await HandleOnBehalfOfAsync(request);
+        }
+
+        if (string.Equals(request.GrantType, ImpersonationConstants.ImpersonationGrantType, StringComparison.Ordinal))
+        {
+            return await HandleImpersonationAsync(request);
         }
 
         if (request.IsAuthorizationCodeGrantType() || request.IsRefreshTokenGrantType() ||
@@ -159,6 +165,9 @@ public class TokenEndpointController(
     {
         var outcome = await onBehalfOfProcessor.ProcessAsync(
             request.ClientId,
+            // AB#5114: an authorized actor (MayActAs edge) may name the service account it
+            // delegates through instead of authenticating as the SA itself.
+            (string?)request[ImpersonationConstants.RequestedClientIdParameter],
             (string?)request[Parameters.SubjectToken],
             (string?)request[Parameters.SubjectTokenType],
             (string?)request["acr_values"],
@@ -189,11 +198,57 @@ public class TokenEndpointController(
 
         // act names the service account so consumers and the audit trail can tell a delegated
         // token apart from one the user obtained themselves (flat client_id string, v1 shape).
-        OnBehalfOfProcessor.ApplyDelegationClaims(identity, request.ClientId!, outcome.EffectiveRoleNames!);
+        // With the AB#5114 extension this is the SA the delegation ran THROUGH — never the actor
+        // that authenticated: downstream consumers keep seeing the identity that acted.
+        OnBehalfOfProcessor.ApplyDelegationClaims(identity, outcome.ServiceAccountClientId!,
+            outcome.EffectiveRoleNames!);
         identity.SetClaim(Claims.AuthenticationMethodReference, DelegationConstants.AuthenticationMethod);
 
         // Never a refresh token for delegated identities (the processor already rejected explicit
         // offline_access requests; this keeps implicit grants out too).
+        var scopes = request.GetScopes().Remove(Scopes.OfflineAccess);
+        identity.SetScopes(scopes);
+        identity.SetResources(await tokenClaimsService.ResolveAudiencesAsync(scopes));
+        identity.SetDestinations(OctoClaimsDestinations.Resolve);
+
+        return SignIn(new ClaimsPrincipal(identity), OpenIddictServerAspNetCoreDefaults.AuthenticationScheme);
+    }
+
+    private async Task<IActionResult> HandleImpersonationAsync(OpenIddictRequest request)
+    {
+        var outcome = await impersonationProcessor.ProcessAsync(
+            request.ClientId,
+            (string?)request[ImpersonationConstants.RequestedClientIdParameter],
+            (string?)request["acr_values"],
+            request.GetScopes(),
+            HttpContext.RequestAborted);
+
+        if (outcome.Error != null || outcome.TargetClientId == null)
+        {
+            return ForbidWithError(outcome.Error ?? Errors.InvalidGrant,
+                outcome.ErrorDescription ?? "impersonation failed");
+        }
+
+        // The issued token is client-credentials-shaped FOR THE TARGET: sub is set to the target's
+        // client id purely because OpenIddict requires a subject on the sign-in principal —
+        // OctoAccessTokenShapeHandler re-stamps client_id to this value and strips sub, exactly
+        // mirroring the client_credentials handling (a service token is recognized platform-wide
+        // by the ABSENCE of sub).
+        var identity = CreateIdentity();
+        identity.SetClaim(Claims.Subject, outcome.TargetClientId);
+
+        // The issuing tenant — stamped BEFORE the roles, like client_credentials, so a target
+        // without any role still carries the claim TenantAuthorizationMiddleware gates on.
+        identity.SetClaim(OctoClaimTypes.TenantId, outcome.TenantId);
+
+        // The TARGET's effective roles (direct + group-inherited) plus act = the ACTOR — the only
+        // trace of the caller on the issued token.
+        ImpersonationProcessor.ApplyImpersonationClaims(identity, request.ClientId!,
+            outcome.EffectiveRoleNames!);
+        identity.SetClaim(Claims.AuthenticationMethodReference, ImpersonationConstants.AuthenticationMethod);
+
+        // Never a refresh token for impersonated identities (the processor already rejected
+        // explicit offline_access requests; this keeps implicit grants out too).
         var scopes = request.GetScopes().Remove(Scopes.OfflineAccess);
         identity.SetScopes(scopes);
         identity.SetResources(await tokenClaimsService.ResolveAudiencesAsync(scopes));

@@ -1,3 +1,4 @@
+using Meshmakers.Octo.Backend.IdentityServices.Services;
 using OpenIddict.Abstractions;
 using OpenIddict.Server;
 using static OpenIddict.Abstractions.OpenIddictConstants;
@@ -89,6 +90,28 @@ public class OctoAccessTokenShapeHandler : IOpenIddictServerHandler<GenerateToke
 
         var descriptor = context.SecurityTokenDescriptor;
 
+        // Impersonation (AB#5114): the token must be client-credentials-shaped for the TARGET.
+        // OpenIddict stamps client_id from the AUTHENTICATED client — the actor — but the token's
+        // identity is the target, whose client id TokenEndpointController parked in sub (the only
+        // subject OpenIddict accepts on the sign-in principal). Re-stamp client_id to the target
+        // here, then let the sub-stripping below treat the grant exactly like client_credentials:
+        // a service token is recognized platform-wide by the ABSENCE of sub, and the actor stays
+        // visible solely through the act claim.
+        var isImpersonation = string.Equals(context.Request?.GrantType,
+            ImpersonationConstants.ImpersonationGrantType, StringComparison.Ordinal);
+        if (isImpersonation && descriptor != null)
+        {
+            var targetClientId =
+                descriptor.Subject?.FindFirst(Claims.Subject)?.Value ??
+                (descriptor.Claims != null &&
+                 descriptor.Claims.TryGetValue(Claims.Subject, out var subValue) ? subValue as string : null);
+            if (!string.IsNullOrEmpty(targetClientId))
+            {
+                descriptor.Claims ??= new Dictionary<string, object>();
+                descriptor.Claims[Claims.ClientId] = targetClientId;
+            }
+        }
+
         if (descriptor?.Claims != null)
         {
             // Platform contract: one scope claim per value (JSON array), not a space-joined
@@ -102,7 +125,8 @@ public class OctoAccessTokenShapeHandler : IOpenIddictServerHandler<GenerateToke
 
             // client_credentials access tokens must carry no sub claim — the platform's
             // TenantAuthorizationMiddleware identifies service-to-service tokens by its absence.
-            if (context.Request?.IsClientCredentialsGrantType() == true)
+            // Impersonated tokens (AB#5114) are service tokens for the target and follow suit.
+            if (context.Request?.IsClientCredentialsGrantType() == true || isImpersonation)
             {
                 descriptor.Claims.Remove(Claims.Subject);
             }
@@ -117,7 +141,7 @@ public class OctoAccessTokenShapeHandler : IOpenIddictServerHandler<GenerateToke
 
         if (descriptor?.Subject != null)
         {
-            if (context.Request?.IsClientCredentialsGrantType() == true)
+            if (context.Request?.IsClientCredentialsGrantType() == true || isImpersonation)
             {
                 descriptor.Subject.TryRemoveClaim(descriptor.Subject.FindFirst(Claims.Subject));
             }

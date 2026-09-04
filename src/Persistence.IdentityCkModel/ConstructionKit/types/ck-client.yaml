@@ -162,3 +162,5 @@ types:
     associations:
       - id: ${this}/AssignedRole
         targetCkTypeId: ${this}/Role
+      - id: ${this}/MayActAs
+        targetCkTypeId: ${this}/Client

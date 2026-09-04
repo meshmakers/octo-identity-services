@@ -90,7 +90,13 @@ public static class OpenIddictConfiguration
                     // role = SA roles ∩ user roles and act = the service account. Own URN,
                     // deliberately NOT the token-exchange one — a shared URN would also share the
                     // per-client opt-in (see DelegationConstants.OnBehalfOfGrantType).
-                    .AllowCustomFlow(Services.DelegationConstants.OnBehalfOfGrantType);
+                    .AllowCustomFlow(Services.DelegationConstants.OnBehalfOfGrantType)
+                    // Impersonation (AB#5114): an authenticated confidential client (an adapter)
+                    // becomes a pipeline service account it holds an explicit MayActAs edge to —
+                    // the issued token is client-credentials-shaped for the TARGET, so the SA's
+                    // secret no longer needs to exist anywhere. Own URN, own per-client opt-in
+                    // (see ImpersonationConstants.ImpersonationGrantType).
+                    .AllowCustomFlow(Services.ImpersonationConstants.ImpersonationGrantType);
 
                 // Our resource services validate plain signed JWTs (RS256) — OpenIddict
                 // encrypts access tokens (JWE) by default, which would break every consumer.

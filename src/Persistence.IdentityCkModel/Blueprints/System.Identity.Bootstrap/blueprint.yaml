@@ -110,6 +110,6 @@ description: |
   successful apply because of the per-service version-key gate.
 
 ckModelDependencies:
-  - System.Identity-[2.13.0,3.0)
+  - System.Identity-[2.14.0,3.0)
 
 seedDataPath: seed-data/entities.yaml

@@ -275,6 +275,94 @@ public class ServiceAccountClientProvisioningIntegrationTests : IClassFixture<Id
             .BeEquivalentTo([CommonConstants.CommunicationManagementRole, "Ab5111ExtraRole"]);
     }
 
+    // ---------- AB#5114: MayActAs edge materialisation ----------
+
+    [Fact]
+    public async Task MayActAsClientIds_MaterialisesTheEdgeFromActorToThisClient()
+    {
+        await ArrangeAsync();
+        var actorClientId = $"adapter-{Guid.NewGuid():N}";
+        var saClientId = NewClientId();
+
+        // One message, list order actor-first — exactly how the Communication Controller sends the
+        // adapter client (AB#5072) together with the SA it may act as.
+        var request = BuildServiceAccountRequest(saClientId, "plaintext-secret-ten");
+        request.Clients =
+        [
+            BuildActorClientDto(actorClientId),
+            request.Clients!.Single() with { MayActAsClientIds = [actorClientId] }
+        ];
+        await ConsumeAsync(request);
+
+        (await HasMayActAsEdgeAsync(actorClientId, saClientId)).Should().BeTrue(
+            "the declared actor must be able to impersonate the provisioned service account");
+    }
+
+    [Fact]
+    public async Task MayActAsClientIds_SecondRun_CreatesNoDuplicateEdge()
+    {
+        await ArrangeAsync();
+        var actorClientId = $"adapter-{Guid.NewGuid():N}";
+        var saClientId = NewClientId();
+
+        var request = BuildServiceAccountRequest(saClientId, "plaintext-secret-eleven");
+        request.Clients =
+        [
+            BuildActorClientDto(actorClientId),
+            request.Clients!.Single() with { MayActAsClientIds = [actorClientId] }
+        ];
+        await ConsumeAsync(request);
+        await ConsumeAsync(request);
+
+        (await CountMayActAsEdgesTowardsAsync(saClientId)).Should().Be(1,
+            "the materialisation must be idempotent — one declared actor, one edge");
+    }
+
+    [Fact]
+    public async Task MayActAsClientIds_OmittedOnALaterRun_LeavesTheEdgeAlone()
+    {
+        // Additive like the pre-AB#5111 role semantics: an edge is an authorization another
+        // producer or an operator may have granted — a message that does not mention it must not
+        // revoke it.
+        await ArrangeAsync();
+        var actorClientId = $"adapter-{Guid.NewGuid():N}";
+        var saClientId = NewClientId();
+
+        var first = BuildServiceAccountRequest(saClientId, "plaintext-secret-twelve");
+        first.Clients =
+        [
+            BuildActorClientDto(actorClientId),
+            first.Clients!.Single() with { MayActAsClientIds = [actorClientId] }
+        ];
+        await ConsumeAsync(first);
+
+        // The next pass sends null (every pre-AB#5114 producer shape).
+        await ConsumeAsync(BuildServiceAccountRequest(saClientId, "plaintext-secret-twelve"));
+
+        (await HasMayActAsEdgeAsync(actorClientId, saClientId)).Should().BeTrue(
+            "a null MayActAsClientIds must change nothing");
+    }
+
+    [Fact]
+    public async Task MayActAsClientIds_UnknownActor_IsSkippedWithoutFailingTheSetup()
+    {
+        // Seed ordering: the actor's client may simply arrive on a later provisioning pass —
+        // mirroring the unresolvable-role handling.
+        await ArrangeAsync();
+        var saClientId = NewClientId();
+
+        var request = BuildServiceAccountRequest(saClientId, "plaintext-secret-thirteen");
+        request.Clients =
+        [
+            request.Clients!.Single() with { MayActAsClientIds = ["no-such-actor-client"] }
+        ];
+        await ConsumeAsync(request);
+
+        var client = await LoadClientAsync(saClientId);
+        client.Should().NotBeNull("an unknown actor must not fail the whole identity-data setup");
+        (await CountMayActAsEdgesTowardsAsync(saClientId)).Should().Be(0);
+    }
+
     // ---------- helpers ----------
 
     private string SystemTenantId => _fixture.GetSystemContext().TenantId;
@@ -356,6 +444,52 @@ public class ServiceAccountClientProvisioningIntegrationTests : IClassFixture<Id
         var result = await repo.GetRtEntitiesByTypeAsync<RtClient>(session,
             RtEntityQueryOptions.Create().FieldFilter(nameof(RtClient.ClientId), FieldFilterOperator.Equals, clientId));
         return result.Items.FirstOrDefault();
+    }
+
+    /// <summary>The plainest actor shape: the adapter's own AB#5072 chart client.</summary>
+    private static DistClientDto BuildActorClientDto(string actorClientId)
+    {
+        return new DistClientDto(actorClientId, "Adapter client", "https://adapter.example.com")
+        {
+            AllowedGrantTypes = ["client_credentials"],
+            RedirectUris = [],
+            PostLogoutRedirectUris = [],
+            AllowedCorsOrigins = [],
+            AllowedScopes = [CommonConstants.OctoApiFullAccess],
+            RequireClientSecret = true,
+            ClientSecret = "actor-secret"
+        };
+    }
+
+    private async Task<bool> HasMayActAsEdgeAsync(string actorClientId, string targetClientId)
+    {
+        var actor = await LoadClientAsync(actorClientId);
+        var target = await LoadClientAsync(targetClientId);
+        actor.Should().NotBeNull();
+        target.Should().NotBeNull();
+
+        var repo = _fixture.GetSystemContext().GetSystemTenantRepositoryAsAdmin();
+        using var session = await repo.GetSessionAsync();
+        var clientCkTypeId = RtEntityExtensions.GetRtCkTypeId<RtClient>();
+        var association = await repo.GetRtAssociationOrDefaultAsync(session,
+            new RtEntityId(clientCkTypeId, actor!.RtId),
+            new RtEntityId(clientCkTypeId, target!.RtId),
+            IdentityAssociationConstants.MayActAsId);
+        return association != null;
+    }
+
+    private async Task<int> CountMayActAsEdgesTowardsAsync(string targetClientId)
+    {
+        var target = await LoadClientAsync(targetClientId);
+        target.Should().NotBeNull();
+
+        var repo = _fixture.GetSystemContext().GetSystemTenantRepositoryAsAdmin();
+        using var session = await repo.GetSessionAsync();
+        var associations = await repo.GetRtAssociationsAsync(session,
+            new RtEntityId(RtEntityExtensions.GetRtCkTypeId<RtClient>(), target!.RtId),
+            RtAssociationExtendedQueryOptions.Create(GraphDirections.Inbound,
+                roleId: IdentityAssociationConstants.MayActAsId));
+        return associations.Items.Count();
     }
 
     private async Task<IReadOnlyList<string>> GetAssignedRoleNamesAsync(RtClient client)

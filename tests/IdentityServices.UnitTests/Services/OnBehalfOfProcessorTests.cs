@@ -45,6 +45,8 @@ public class OnBehalfOfProcessorTests
 
     private readonly IIdentityAuditService _auditService = Substitute.For<IIdentityAuditService>();
     private readonly IHttpContextAccessor _httpContextAccessor = Substitute.For<IHttpContextAccessor>();
+    private readonly IImpersonatedIdentityResolver _impersonationResolver =
+        Substitute.For<IImpersonatedIdentityResolver>();
     private readonly IDelegatedIdentityResolver _resolver = Substitute.For<IDelegatedIdentityResolver>();
     private readonly RsaSecurityKey _signingKey = new(RSA.Create(2048)) { KeyId = "unit-test-key" };
     private readonly OnBehalfOfProcessor _sut;
@@ -73,6 +75,7 @@ public class OnBehalfOfProcessorTests
                 AutoMapperLicenseKey = string.Empty
             }),
             _resolver,
+            _impersonationResolver,
             _httpContextAccessor,
             _auditService,
             NullLogger<OnBehalfOfProcessor>.Instance);
@@ -176,7 +179,8 @@ public class OnBehalfOfProcessorTests
     [Fact]
     public async Task MissingAcrValues_IsRejectedAsInvalidRequest()
     {
-        var outcome = await _sut.ProcessAsync(ServiceAccountClientId, CreateSubjectToken(),
+        var outcome = await _sut.ProcessAsync(ServiceAccountClientId, requestedClientId: null,
+            CreateSubjectToken(),
             "urn:ietf:params:oauth:token-type:access_token", acrValues: null, ["openid"],
             TestContext.Current.CancellationToken);
 
@@ -184,12 +188,117 @@ public class OnBehalfOfProcessorTests
         outcome.ErrorDescription.Should().Contain("acr_values");
     }
 
+    // ---------- AB#5114: requested_client_id — delegation without the SA's secret ----------
+
+    /// <summary>
+    ///     The AB#5114 happy path: an actor client (the adapter's own client) that holds a
+    ///     MayActAs edge to the SA delegates THROUGH the SA. The intersection must be computed
+    ///     for the SA (never the actor) and the outcome must name the SA so the act claim does.
+    /// </summary>
+    [Fact]
+    public async Task RequestedClientIdWithMayActAsEdge_DelegatesThroughTheServiceAccount()
+    {
+        _impersonationResolver.AuthorizeActorAsync(ActorClientId, ServiceAccountClientId,
+                Arg.Any<CancellationToken>())
+            .Returns(ImpersonationDenialReason.None);
+
+        var outcome = await ProcessAsActor(requestedClientId: ServiceAccountClientId);
+
+        outcome.Error.Should().BeNull(outcome.ErrorDescription);
+        outcome.UserSubjectId.Should().Be(UserSubjectId);
+        outcome.EffectiveRoleNames.Should().BeEquivalentTo(["AssetReader"],
+            "the intersection is SA roles ∩ user roles — the actor's roles never participate");
+        outcome.ServiceAccountClientId.Should().Be(ServiceAccountClientId,
+            "act must name the SA the delegation ran through, not the actor that authenticated");
+
+        // The intersection was resolved for the SA — the actor's identity contributes nothing.
+        await _resolver.Received(1).ResolveAsync(ServiceAccountClientId, UserSubjectId,
+            Arg.Any<CancellationToken>());
+        await _resolver.DidNotReceive().ResolveAsync(ActorClientId, Arg.Any<string>(),
+            Arg.Any<CancellationToken>());
+    }
+
+    /// <summary>No MayActAs edge — the actor must not reach the delegation at all.</summary>
+    [Fact]
+    public async Task RequestedClientIdWithoutMayActAsEdge_FailsClosed()
+    {
+        _impersonationResolver.AuthorizeActorAsync(ActorClientId, ServiceAccountClientId,
+                Arg.Any<CancellationToken>())
+            .Returns(ImpersonationDenialReason.NotAuthorized);
+
+        var outcome = await ProcessAsActor(requestedClientId: ServiceAccountClientId);
+
+        outcome.Error.Should().Be(Errors.InvalidGrant);
+        outcome.ErrorDescription.Should().Contain("not authorized");
+        await _resolver.DidNotReceive().ResolveAsync(
+            Arg.Any<string>(), Arg.Any<string>(), Arg.Any<CancellationToken>());
+        await _auditService.Received(1).StoreFailureAsync("Delegation Failure",
+            Arg.Is<string>(m => m.Contains(ActorClientId) && m.Contains(ServiceAccountClientId)));
+    }
+
+    /// <summary>
+    ///     requested_client_id naming a client the edge does not allow (here: an SA that does not
+    ///     even exist in the tenant) is refused with the same wording as an unknown SA today.
+    /// </summary>
+    [Fact]
+    public async Task RequestedClientIdNamingAnUnknownServiceAccount_IsRejectedAsInvalidClient()
+    {
+        _impersonationResolver.AuthorizeActorAsync(ActorClientId, "octo-pipeline-sa-other",
+                Arg.Any<CancellationToken>())
+            .Returns(ImpersonationDenialReason.TargetNotFound);
+
+        var outcome = await ProcessAsActor(requestedClientId: "octo-pipeline-sa-other");
+
+        outcome.Error.Should().Be(Errors.InvalidClient);
+        outcome.ErrorDescription.Should().Contain("not provisioned");
+    }
+
+    /// <summary>
+    ///     The regression guard for plain on-behalf-of: without requested_client_id nothing may
+    ///     change — no edge check, intersection and act for the authenticated client itself.
+    /// </summary>
+    [Fact]
+    public async Task WithoutRequestedClientId_TheOriginalSemanticsAreUntouched()
+    {
+        var outcome = await Process(scopes: ["openid"]);
+
+        outcome.Error.Should().BeNull(outcome.ErrorDescription);
+        outcome.ServiceAccountClientId.Should().Be(ServiceAccountClientId);
+        await _impersonationResolver.DidNotReceive().AuthorizeActorAsync(
+            Arg.Any<string>(), Arg.Any<string>(), Arg.Any<CancellationToken>());
+    }
+
+    /// <summary>
+    ///     requested_client_id naming the authenticated client itself is the original grant — a
+    ///     redundant parameter must not suddenly demand a self-edge.
+    /// </summary>
+    [Fact]
+    public async Task RequestedClientIdNamingTheAuthenticatedClientItself_NeedsNoEdge()
+    {
+        var outcome = await _sut.ProcessAsync(ServiceAccountClientId, ServiceAccountClientId,
+            CreateSubjectToken(), "urn:ietf:params:oauth:token-type:access_token",
+            $"tenant:{TenantId}", ["openid"], TestContext.Current.CancellationToken);
+
+        outcome.Error.Should().BeNull(outcome.ErrorDescription);
+        outcome.ServiceAccountClientId.Should().Be(ServiceAccountClientId);
+        await _impersonationResolver.DidNotReceive().AuthorizeActorAsync(
+            Arg.Any<string>(), Arg.Any<string>(), Arg.Any<CancellationToken>());
+    }
+
     // ---------- helpers ----------
+
+    private const string ActorClientId = "adapter-chart-client";
 
     private Task<OnBehalfOfProcessor.DelegationOutcome> Process(
         IReadOnlyCollection<string> scopes, string? subjectToken = null) =>
-        _sut.ProcessAsync(ServiceAccountClientId, subjectToken ?? CreateSubjectToken(),
+        _sut.ProcessAsync(ServiceAccountClientId, requestedClientId: null,
+            subjectToken ?? CreateSubjectToken(),
             "urn:ietf:params:oauth:token-type:access_token", $"tenant:{TenantId}", scopes,
+            TestContext.Current.CancellationToken);
+
+    private Task<OnBehalfOfProcessor.DelegationOutcome> ProcessAsActor(string requestedClientId) =>
+        _sut.ProcessAsync(ActorClientId, requestedClientId, CreateSubjectToken(),
+            "urn:ietf:params:oauth:token-type:access_token", $"tenant:{TenantId}", ["openid"],
             TestContext.Current.CancellationToken);
 
     /// <summary>

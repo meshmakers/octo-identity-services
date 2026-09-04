@@ -456,6 +456,28 @@ internal class OidcTenantResolutionMiddleware(
                 logger.LogWarning(
                     "No acr_values on /connect/token for on-behalf-of — delegation will be rejected (no target tenant)");
             }
+            else if (string.Equals(grantType, ImpersonationConstants.ImpersonationGrantType,
+                         StringComparison.Ordinal))
+            {
+                // Impersonation (AB#5114): the tenant is specified via acr_values=tenant:{tenantId}
+                // in the form body, exactly like client_credentials and on-behalf-of. As with the
+                // delegation branch above, this is MANDATORY: without it the request falls through
+                // to `return null`, no tenant is wired into HttpContext.Items, and the client
+                // lookups plus the MayActAs edge check silently run against the SYSTEM tenant.
+                // ImpersonationProcessor additionally asserts the resolved tenant equals the
+                // requested one and fails closed.
+                var acrTenantId = ParseTenantFromAcrValues(form["acr_values"].ToString());
+                if (!string.IsNullOrEmpty(acrTenantId))
+                {
+                    logger.LogDebug(
+                        "Resolved tenant '{TenantId}' from acr_values for impersonation on /connect/token",
+                        acrTenantId);
+                    return acrTenantId;
+                }
+
+                logger.LogWarning(
+                    "No acr_values on /connect/token for impersonation — impersonation will be rejected (no target tenant)");
+            }
             else if (string.Equals(grantType, "refresh_token", StringComparison.Ordinal))
             {
                 var refreshToken = form["refresh_token"].FirstOrDefault();

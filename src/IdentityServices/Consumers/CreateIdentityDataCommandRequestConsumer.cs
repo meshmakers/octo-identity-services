@@ -235,6 +235,97 @@ public class CreateIdentityDataCommandRequestConsumer(
         }
 
         await EnsureAssignedRolesAsync(session, tenantRepository, clientRtId, distClientDto);
+        await EnsureMayActAsEdgesAsync(session, tenantRepository, clientRtId, distClientDto);
+    }
+
+    /// <summary>
+    ///     AB#5114: materialises the <c>System.Identity/MayActAs</c> edges declared by
+    ///     <see cref="DistClientDto.MayActAsClientIds" /> — for every named ACTOR client id that
+    ///     resolves in the tenant, ensures the edge actor→<b>this</b> client. The edge is what the
+    ///     impersonation grant and the on-behalf-of <c>requested_client_id</c> extension authorize
+    ///     against, so this is the bus-side half of secretless pipeline service accounts: the
+    ///     Communication Controller declares "this adapter may act as this SA" on the same message
+    ///     that provisions the SA.
+    ///     <para>
+    ///     Additive and idempotent, exactly like the pre-AB#5111 role semantics — deliberately NOT
+    ///     the declarative sync <see cref="EnsureAssignedRolesAsync" /> applies to prefixed
+    ///     clients: an edge is an authorization another producer or an operator may legitimately
+    ///     have granted, and v1 has no safe signal to distinguish "not mine" from "revoked".
+    ///     Existing edges are left alone, edges to actors not in the list are never removed, and
+    ///     an unknown actor client id is skipped with a warning rather than failing the whole
+    ///     identity-data setup — the actor's client may simply arrive on a later provisioning pass
+    ///     (seed ordering), mirroring the unresolvable-role handling. A <c>null</c> list (every
+    ///     pre-AB#5114 producer) changes nothing.
+    ///     </para>
+    /// </summary>
+    private async Task EnsureMayActAsEdgesAsync(IOctoSession session, ITenantRepository tenantRepository,
+        OctoObjectId clientRtId, DistClientDto distClientDto)
+    {
+        if (distClientDto.MayActAsClientIds == null || distClientDto.MayActAsClientIds.Count == 0)
+        {
+            return;
+        }
+
+        var clientCkTypeId = RtEntityExtensions.GetRtCkTypeId<RtClient>();
+        var targetEntityId = new RtEntityId(clientCkTypeId, clientRtId);
+        var updates = new List<AssociationUpdateInfo>();
+
+        foreach (var actorClientId in distClientDto.MayActAsClientIds
+                     .Where(id => !string.IsNullOrWhiteSpace(id))
+                     .Distinct(StringComparer.Ordinal))
+        {
+            if (string.Equals(actorClientId, distClientDto.ClientId, StringComparison.Ordinal))
+            {
+                // A self-edge would state "this client may become itself" — meaningless, and a
+                // likely producer bug worth surfacing.
+                logger.LogWarning(
+                    "MayActAs actor '{ActorClientId}' declared for client '{ClientId}' in tenant '{TenantId}' names the client itself; skipped.",
+                    actorClientId, distClientDto.ClientId, tenantRepository.TenantId);
+                continue;
+            }
+
+            var actorQuery = RtEntityQueryOptions.Create()
+                .FieldFilter(nameof(RtClient.ClientId), FieldFilterOperator.Equals, actorClientId);
+            var actors = await tenantRepository.GetRtEntitiesByTypeAsync<RtClient>(session, actorQuery, take: 1);
+            var actor = actors.Items.FirstOrDefault();
+            if (actor == null)
+            {
+                logger.LogWarning(
+                    "MayActAs actor client '{ActorClientId}' declared for client '{ClientId}' in tenant '{TenantId}' does not exist; " +
+                    "the edge is skipped. Re-run the identity data setup once the actor client is provisioned.",
+                    actorClientId, distClientDto.ClientId, tenantRepository.TenantId);
+                continue;
+            }
+
+            var actorEntityId = new RtEntityId(clientCkTypeId, actor.RtId);
+            var existing = await tenantRepository.GetRtAssociationOrDefaultAsync(
+                session, actorEntityId, targetEntityId, IdentityAssociationConstants.MayActAsId);
+            if (existing != null)
+            {
+                continue;
+            }
+
+            updates.Add(AssociationUpdateInfo.CreateInsert(
+                actorEntityId, targetEntityId, IdentityAssociationConstants.MayActAsId));
+        }
+
+        if (updates.Count == 0)
+        {
+            return;
+        }
+
+        var operationResult = new OperationResult();
+        await tenantRepository.ApplyChangesAsync(session, updates, operationResult);
+        if (operationResult.HasErrors || operationResult.HasFatalErrors)
+        {
+            throw new InvalidOperationException(
+                $"Failed to materialise MayActAs edges for client '{distClientDto.ClientId}' in tenant '{tenantRepository.TenantId}': " +
+                string.Join("; ", operationResult.GetMessages()));
+        }
+
+        logger.LogInformation(
+            "Materialised {EdgeCount} MayActAs edge(s) towards client '{ClientId}' in tenant '{TenantId}'",
+            updates.Count, distClientDto.ClientId, tenantRepository.TenantId);
     }
 
     /// <summary>
