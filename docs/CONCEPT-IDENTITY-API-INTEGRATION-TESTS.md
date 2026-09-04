@@ -58,6 +58,23 @@ pristine database (`DataProtectionKeySeedIntegrationTests` needs an empty `RtDat
 collection, `VirginSystemDatabaseBootstrapIntegrationTests` creates and destroys the system tenant),
 which per-class fixture instances give for free now that each one owns a database.
 
+### 2.1.2 Test Log Volume (AB#5117)
+
+The fixtures logged at `LogLevel.Trace`. The pipeline runs `dotnet test` with
+`--logger "console;verbosity=detailed"`, which writes xUnit's per-test output for passing tests too,
+so a single integration run produced **~308,000 lines** of build log — 144,000 of them `dbug:` from
+the CK model bootstrap, the Mongo repository clients and the inheritance resolver, plus thousands of
+repeated "index already exists, skipping creation" lines.
+
+That volume is nearly free locally and expensive on an Azure DevOps agent: the identical run writes
+308,190 lines in 46 s on a dev machine and took 6.5 min on the CI agent. Log ingestion, not test
+logic, was the remaining bottleneck once the container lifecycle was gone.
+
+`TestLogging.MinimumLevel` therefore defaults to `LogLevel.Warning` and is applied in
+`ServiceCollectionFixture` and in `CustomWebApplicationFactory`'s bootstrap provider. The same run now
+emits **835 lines** and keeps every `warn:` and `fail:` line. Set `OCTO_TEST_LOG_LEVEL=Debug` (or
+`Trace`) to restore the verbose output when diagnosing a specific failure.
+
 ### 2.2 Required Extensions
 
 #### 2.2.1 Extended IntegrationTestBase

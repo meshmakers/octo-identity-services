@@ -86,7 +86,11 @@ public class CustomWebApplicationFactory : WebApplicationFactory<Program>, IAsyn
         // Build a temporary service provider for system tenant initialization
         var services = new ServiceCollection();
 
-        services.AddLogging(builder => builder.AddConsole());
+        services.AddLogging(builder =>
+        {
+            builder.AddConsole();
+            builder.SetMinimumLevel(TestLogging.MinimumLevel);
+        });
 
         // System.Notification CK model + services. Production Program.cs registers this via
         // AddOctoNotification(); the factory has to mirror it because Phase 3 PR #4 made
