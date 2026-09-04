@@ -32,6 +32,11 @@ types:
       - id: ${this}/LastVerifiedAt
         name: LastVerifiedAt
         isOptional: true
+      # AB#5123: not-after of an enrolled client certificate (cert kind only). A binding whose
+      # ValidUntil has passed is treated as invalid by the resolver (expired cert -> invalid).
+      - id: ${this}/ValidUntil
+        name: ValidUntil
+        isOptional: true
     associations:
       # Each binding points to exactly one OctoMesh user (outbound multiplicity One); a user may own
       # many verified identifiers (inbound N). See identity-associations.yaml (IdentifiesUser).

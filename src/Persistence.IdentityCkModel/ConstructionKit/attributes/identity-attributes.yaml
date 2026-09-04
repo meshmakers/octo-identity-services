@@ -628,3 +628,12 @@ attributes:
   - id: LastVerifiedAt
     valueType: DateTime
     description: UTC timestamp of the most recent successful verification of the identifier.
+
+  # AB#5123 self-service certificate enrolment: the not-after of an enrolled client certificate.
+  # Optional and only set for ClientCertificateFingerprint bindings; the certificate is rejected at
+  # enrolment when already expired, and a binding whose ValidUntil is in the past is treated as
+  # INVALID (effective enrollment trust None) by the resolver so an expired certificate "drops to
+  # invalid" without an admin in the loop. Null for every non-certificate kind.
+  - id: ValidUntil
+    valueType: DateTime
+    description: UTC not-after of an enrolled client certificate (ClientCertificateFingerprint kind only); a binding whose ValidUntil is in the past is treated as invalid. Null for other kinds.

@@ -25,7 +25,24 @@ public sealed record VerifiedIdentifierBinding(
     RtIdentifierSourceEnum Source,
     bool RequiredMessageAuthentication = false,
     DateTime? EnrolledAt = null,
-    DateTime? LastVerifiedAt = null);
+    DateTime? LastVerifiedAt = null,
+    DateTime? ValidUntil = null);
+
+/// <summary>
+///     A read-only projection of a single <c>VerifiedExternalIdentifier</c> owned by a user, for the
+///     self-service "My identities" listing (AB#5123). <see cref="IsValid" /> already folds in
+///     certificate expiry (a <see cref="ValidUntil" /> in the past means the binding is invalid).
+/// </summary>
+public sealed record VerifiedIdentifierSummary(
+    OctoObjectId RtId,
+    RtIdentifierKindEnum IdentifierKind,
+    string IdentifierValue,
+    RtTrustLevelEnum EnrollmentTrust,
+    RtIdentifierSourceEnum Source,
+    DateTime? EnrolledAt,
+    DateTime? LastVerifiedAt,
+    DateTime? ValidUntil,
+    bool IsValid);
 
 /// <summary>
 ///     The outcome of <see cref="IVerifiedIdentifierResolver.ResolveAsync" /> for a present binding:
@@ -93,4 +110,11 @@ public interface IVerifiedIdentifierResolver
     ///     <c>true</c> when a binding was removed.
     /// </summary>
     Task<bool> RemoveBindingAsync(RtIdentifierKindEnum identifierKind, string identifierValue);
+
+    /// <summary>
+    ///     Lists every verified identifier bound to <paramref name="userRtId" /> — the read side of
+    ///     the self-service "My identities" area (AB#5123). Each summary already reflects certificate
+    ///     expiry in its <see cref="VerifiedIdentifierSummary.IsValid" /> flag.
+    /// </summary>
+    Task<IReadOnlyList<VerifiedIdentifierSummary>> GetByUserAsync(OctoObjectId userRtId);
 }

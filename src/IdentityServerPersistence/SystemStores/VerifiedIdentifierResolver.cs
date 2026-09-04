@@ -51,7 +51,10 @@ public class VerifiedIdentifierResolver(
             return null;
         }
 
-        var enrollmentTrust = binding.EnrollmentTrust;
+        // An enrolled client certificate whose not-after has passed "drops to invalid" (AB#5123):
+        // its stored enrollment trust is forced to None so the effective trust is None too, without
+        // an admin having to touch it. Every other kind keeps its stored enrollment trust.
+        var enrollmentTrust = IsExpired(binding) ? RtTrustLevelEnum.None : binding.EnrollmentTrust;
         var effectiveTrust = TrustLevels.Min(enrollmentTrust, messageTrust);
 
         return new VerifiedIdentifierResolution(
@@ -91,7 +94,8 @@ public class VerifiedIdentifierResolver(
                 RequiredMessageAuthentication = binding.RequiredMessageAuthentication,
                 Source = binding.Source,
                 EnrolledAt = binding.EnrolledAt ?? now,
-                LastVerifiedAt = binding.LastVerifiedAt ?? now
+                LastVerifiedAt = binding.LastVerifiedAt ?? now,
+                ValidUntil = binding.ValidUntil
             };
 
             var userCkTypeId = RtEntityExtensions.GetRtCkTypeId<RtUser>();
@@ -121,6 +125,7 @@ public class VerifiedIdentifierResolver(
         existing.Source = binding.Source;
         existing.EnrolledAt = existing.EnrolledAt ?? binding.EnrolledAt ?? now;
         existing.LastVerifiedAt = binding.LastVerifiedAt ?? now;
+        existing.ValidUntil = binding.ValidUntil;
         await TenantRepository.ReplaceOneRtEntityByIdAsync(session, existing.RtId, existing);
 
         var currentUserRtId = await GetBoundUserRtIdAsync(session, existing);
@@ -175,6 +180,62 @@ public class VerifiedIdentifierResolver(
             identifierKind, existing.RtId, TenantRepository.TenantId);
         return true;
     }
+
+    public async Task<IReadOnlyList<VerifiedIdentifierSummary>> GetByUserAsync(OctoObjectId userRtId)
+    {
+        var session = await TenantRepository.GetSessionAsync();
+        session.StartTransaction();
+
+        var user = await TenantRepository.GetRtEntityByRtIdAsync<RtUser>(session, userRtId);
+        if (user == null)
+        {
+            await session.CommitTransactionAsync();
+            return Array.Empty<VerifiedIdentifierSummary>();
+        }
+
+        // Every binding for the user is an inbound IdentifiesUser edge on the user (each binding
+        // points at exactly one user; a user owns N bindings — see identity-associations.yaml).
+        var associations = await TenantRepository.GetRtAssociationsAsync(
+            session,
+            user.ToRtEntityId(),
+            RtAssociationExtendedQueryOptions.Create(
+                GraphDirections.Inbound,
+                roleId: IdentityAssociationConstants.IdentifiesUserId));
+
+        var summaries = new List<VerifiedIdentifierSummary>();
+        foreach (var association in associations.Items)
+        {
+            // Inbound on the user: the binding is the association ORIGIN, the user the target.
+            var binding = await TenantRepository.GetRtEntityByRtIdAsync<RtVerifiedExternalIdentifier>(
+                session, association.OriginRtId);
+            if (binding == null)
+            {
+                continue;
+            }
+
+            summaries.Add(new VerifiedIdentifierSummary(
+                binding.RtId,
+                binding.IdentifierKind,
+                binding.IdentifierValue,
+                binding.EnrollmentTrust,
+                binding.Source,
+                binding.EnrolledAt,
+                binding.LastVerifiedAt,
+                binding.ValidUntil,
+                !IsExpired(binding)));
+        }
+
+        await session.CommitTransactionAsync();
+        return summaries;
+    }
+
+    /// <summary>
+    ///     A client-certificate binding whose stored <c>ValidUntil</c> not-after has passed is
+    ///     invalid (AB#5123). Any binding without a <c>ValidUntil</c> (every non-certificate kind, and
+    ///     certificates enrolled before the field existed) is never considered expired here.
+    /// </summary>
+    private static bool IsExpired(RtVerifiedExternalIdentifier binding)
+        => binding.ValidUntil is { } validUntil && validUntil < DateTime.UtcNow;
 
     /// <summary>
     ///     Finds the single binding for a (kind, value). Queries on the highly selective

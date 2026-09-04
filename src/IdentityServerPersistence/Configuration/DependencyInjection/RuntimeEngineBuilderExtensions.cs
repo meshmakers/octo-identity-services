@@ -2,8 +2,10 @@ using IdentityServerPersistence.AutoMap;
 using IdentityServerPersistence.Configuration.DependencyInjection;
 using IdentityServerPersistence.Services;
 using IdentityServerPersistence.Services.Login;
+using IdentityServerPersistence.Services.SelfService;
 using IdentityServerPersistence.SystemStores;
 using Microsoft.AspNetCore.Identity;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 using Meshmakers.Octo.Common.DistributionEventHub.Configuration;
 using Meshmakers.Octo.Communication.Contracts.DataTransferObjects;
 using Meshmakers.Octo.Runtime.Contracts.Blueprints;
@@ -89,6 +91,18 @@ public static class RuntimeEngineBuilderExtensions
         // (effective = min(enrollment, message)). The write side is the seam the sibling enrollment
         // WIs (AB#5123–5126) call.
         builder.Services.AddScoped<IVerifiedIdentifierResolver, VerifiedIdentifierResolver>();
+
+        // AB#5123 self-service "My identities": the signed-in user manages their OWN strong channel
+        // identifiers (phone via OTP, client certificate) with no admin in the loop, writing into the
+        // AB#5122 directory with Source = SelfService. The OTP challenge is persisted (hashed, with an
+        // expiry + attempt budget) in the existing per-user token store; delivery is abstracted behind
+        // IOtpDeliveryChannel. NOTE: LoggingOtpDeliveryChannel is a clearly-marked STUB — no reachable
+        // Signal/SMS transport exists from identity-services (the Signal send path lives in the mesh
+        // adapter). Replace it with a real IOtpDeliveryChannel for the Signal/SMS modality.
+        builder.Services.TryAddSingleton(TimeProvider.System);
+        builder.Services.AddScoped<IOtpChallengeStore, UserTokenOtpChallengeStore>();
+        builder.Services.AddSingleton<IOtpDeliveryChannel, LoggingOtpDeliveryChannel>();
+        builder.Services.AddScoped<ISelfServiceIdentifierService, SelfServiceIdentifierService>();
 
         builder.Services.AddSingleton<AttributeStringValueListConverter>();
         builder.Services.AddAutoMapper(cfg =>
