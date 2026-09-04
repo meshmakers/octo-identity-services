@@ -17,7 +17,6 @@ namespace IdentityServices.IntegrationTests.Persistence;
 /// Real-Mongo round-trip tests for <see cref="ServerSideSessionStore"/>.
 /// Exercises the full AutoMapper configuration wired by AddOctoIdentityPersistence.
 /// </summary>
-[Collection("Sequential")]
 public class ServerSideSessionStoreIntegrationTests : IClassFixture<IdentityServicesFixture>
 {
     private readonly IdentityServicesFixture _fixture;

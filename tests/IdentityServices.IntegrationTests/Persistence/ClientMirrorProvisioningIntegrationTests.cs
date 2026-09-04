@@ -21,7 +21,6 @@ namespace IdentityServices.IntegrationTests.Persistence;
 /// behaviour every consumer of this feature (CI/CD client roll-out, future Studio UI)
 /// depends on: mirrors materialize, secrets propagate, cleanup happens on delete.
 /// </summary>
-[Collection("Sequential")]
 public class ClientMirrorProvisioningIntegrationTests : IClassFixture<IdentityServicesFixture>
 {
     private readonly IdentityServicesFixture _fixture;

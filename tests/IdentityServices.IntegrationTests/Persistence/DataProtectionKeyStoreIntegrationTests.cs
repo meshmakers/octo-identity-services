@@ -14,7 +14,6 @@ namespace IdentityServices.IntegrationTests.Persistence;
 /// Real-Mongo tests for <see cref="DataProtectionKeyStore"/>: persistence, idempotency,
 /// and seed-once import from a legacy file-system path.
 /// </summary>
-[Collection("Sequential")]
 public class DataProtectionKeyStoreIntegrationTests : IClassFixture<IdentityServicesFixture>
 {
     private readonly IdentityServicesFixture _fixture;

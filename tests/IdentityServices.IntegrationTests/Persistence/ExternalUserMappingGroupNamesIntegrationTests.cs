@@ -20,7 +20,6 @@ namespace IdentityServices.IntegrationTests.Persistence;
 /// cross-tenant mapping belongs to (roles are inherited via the group, so this is the only signal
 /// that a group-based grant took effect).
 /// </summary>
-[Collection("Sequential")]
 public class ExternalUserMappingGroupNamesIntegrationTests : IClassFixture<IdentityServicesFixture>
 {
     private readonly IdentityServicesFixture _fixture;

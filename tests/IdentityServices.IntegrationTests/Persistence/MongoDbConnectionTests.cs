@@ -7,7 +7,6 @@ namespace IdentityServices.IntegrationTests.Persistence;
 /// <summary>
 /// Integration tests verifying MongoDB connection and system tenant setup.
 /// </summary>
-[Collection("Sequential")]
 public class MongoDbConnectionTests : IClassFixture<IdentityServicesFixture>
 {
     private readonly IdentityServicesFixture _fixture;

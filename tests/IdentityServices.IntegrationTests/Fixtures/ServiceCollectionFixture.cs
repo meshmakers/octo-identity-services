@@ -53,7 +53,7 @@ public abstract class ServiceCollectionFixture : ITestOutputHelperAccessor, IAsy
         Services.AddLogging(loggingBuilder =>
         {
             loggingBuilder.ClearProviders();
-            loggingBuilder.SetMinimumLevel(LogLevel.Trace);
+            loggingBuilder.SetMinimumLevel(TestLogging.MinimumLevel);
             loggingBuilder.AddXUnit(this);
         });
     }

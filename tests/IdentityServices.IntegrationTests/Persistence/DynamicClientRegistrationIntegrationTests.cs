@@ -19,7 +19,6 @@ namespace IdentityServices.IntegrationTests.Persistence;
 /// (Testcontainers) with the full Octo runtime engine. Pins the security gate, the system-tenant +
 /// mirror placement, dedupe, and the per-tenant cap that Claude-Code-class interactive clients depend on.
 /// </summary>
-[Collection("Sequential")]
 public class DynamicClientRegistrationIntegrationTests : IClassFixture<IdentityServicesFixture>
 {
     private readonly IdentityServicesFixture _fixture;

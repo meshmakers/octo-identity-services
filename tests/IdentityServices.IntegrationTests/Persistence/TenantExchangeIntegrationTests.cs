@@ -37,7 +37,6 @@ namespace IdentityServices.IntegrationTests.Persistence;
 ///     <see cref="Duende.IdentityServer.Validation.GrantValidationResult" /> construction (unit
 ///     behaviour) are out of scope here.
 /// </remarks>
-[Collection("Sequential")]
 public class TenantExchangeIntegrationTests : IClassFixture<IdentityServicesFixture>
 {
     private readonly IdentityServicesFixture _fixture;

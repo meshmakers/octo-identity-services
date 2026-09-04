@@ -17,10 +17,11 @@ namespace IdentityServices.IntegrationTests.Persistence;
 /// <para>
 /// Isolation rationale: xUnit creates one <see cref="IClassFixture{T}"/> instance per test
 /// CLASS, so this class gets its own <see cref="IdentityServicesFixture"/> with a fresh Mongo
-/// container and a guaranteed-empty DataProtectionKey collection — the seed fires exactly once.
+/// database and a guaranteed-empty DataProtectionKey collection — the seed fires exactly once.
+/// (The MongoDB server itself is shared process-wide since AB#5117; the isolation comes from the
+/// per-fixture database name.)
 /// </para>
 /// </summary>
-[Collection("Sequential")]
 public class DataProtectionKeySeedIntegrationTests : IClassFixture<IdentityServicesFixture>
 {
     private readonly IdentityServicesFixture _fixture;

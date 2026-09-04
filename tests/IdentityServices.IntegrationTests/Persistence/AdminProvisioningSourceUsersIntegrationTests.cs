@@ -23,7 +23,6 @@ namespace IdentityServices.IntegrationTests.Persistence;
 /// <c>xt_</c> shadow users are excluded, tenants without a parent yield nothing, and the target's roles
 /// are returned.
 /// </summary>
-[Collection("Sequential")]
 public class AdminProvisioningSourceUsersIntegrationTests : IClassFixture<IdentityServicesFixture>
 {
     private readonly IdentityServicesFixture _fixture;

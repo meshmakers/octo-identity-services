@@ -23,7 +23,6 @@ namespace IdentityServices.IntegrationTests.Persistence;
 /// the same machinery users use. Roles/clients/groups are created in-test so the assertions do
 /// not depend on which entities the blueprint seed provisions in the fixture.
 /// </summary>
-[Collection("Sequential")]
 public class ClientRoleAssignmentIntegrationTests : IClassFixture<IdentityServicesFixture>
 {
     private readonly IdentityServicesFixture _fixture;
