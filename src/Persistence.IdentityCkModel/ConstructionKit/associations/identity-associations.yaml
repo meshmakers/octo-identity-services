@@ -36,3 +36,9 @@ associationRoles:
     inboundMultiplicity: N
     outboundName: Permission
     outboundMultiplicity: One
+  - id: IdentifiesUser
+    description: "Links a VerifiedExternalIdentifier to the OctoMesh User it belongs to (AB#5122). One binding points to exactly one user; a user may own many verified identifiers."
+    inboundName: VerifiedExternalIdentifiers
+    inboundMultiplicity: N
+    outboundName: User
+    outboundMultiplicity: One

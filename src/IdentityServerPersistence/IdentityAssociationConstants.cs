@@ -17,4 +17,11 @@ public static class IdentityAssociationConstants
     public static readonly RtCkId<CkAssociationRoleId> ChildGroupId = new("System.Identity/ChildGroup");
     public static readonly RtCkId<CkAssociationRoleId> GrantsPermissionId = new("System.Identity/GrantsPermission");
     public static readonly RtCkId<CkAssociationRoleId> PolicyPermissionId = new("System.Identity/PolicyPermission");
+
+    /// <summary>
+    ///     VerifiedExternalIdentifier → User (AB#5122): the OctoMesh user a verified external
+    ///     identifier (phone / e-mail / EntraID oid / cert fingerprint) belongs to. Outbound
+    ///     multiplicity is One — each binding resolves to exactly one user.
+    /// </summary>
+    public static readonly RtCkId<CkAssociationRoleId> IdentifiesUserId = new("System.Identity/IdentifiesUser");
 }

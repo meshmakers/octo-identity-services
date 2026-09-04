@@ -588,3 +588,43 @@ attributes:
     defaultValues:
       - base
 
+
+  # --- AB#5122 Verified external identifier directory (two-dimension trust) ---
+  - id: IdentifierKind
+    valueType: Enum
+    valueCkEnumId: ${this}/IdentifierKind
+    defaultValues:
+      - 0
+    description: The kind of external identifier (PhoneNumber, EmailAddress, EntraIdObjectId, ClientCertificateFingerprint).
+
+  - id: IdentifierValue
+    valueType: String
+    description: The normalized external identifier value (E.164 phone number, normalized e-mail address, EntraID object id, or certificate fingerprint).
+
+  - id: EnrollmentTrust
+    valueType: Enum
+    valueCkEnumId: ${this}/TrustLevel
+    defaultValues:
+      - 0
+    description: The stored ENROLLMENT trust dimension (None/Weak/Strong) - does the identifier belong to the user? Raised to Strong by the sibling enrollment WIs on a proven OTP/cert/IdP enrollment. Defaults to None.
+
+  - id: RequiredMessageAuthentication
+    valueType: Boolean
+    defaultValues:
+      - false
+    description: Channel expectation for the per-message trust dimension - whether the channel behind this binding is expected to authenticate every message (Signal-verified / DKIM-valid). The per-message trust itself is not stored; the resolver combines it per call with EnrollmentTrust.
+
+  - id: IdentifierSource
+    valueType: Enum
+    valueCkEnumId: ${this}/IdentifierSource
+    defaultValues:
+      - 0
+    description: Provenance of the binding (SelfService, Admin, IdentityProvider). Defaults to SelfService.
+
+  - id: EnrolledAt
+    valueType: DateTime
+    description: UTC timestamp when the identifier was first enrolled for the user.
+
+  - id: LastVerifiedAt
+    valueType: DateTime
+    description: UTC timestamp of the most recent successful verification of the identifier.

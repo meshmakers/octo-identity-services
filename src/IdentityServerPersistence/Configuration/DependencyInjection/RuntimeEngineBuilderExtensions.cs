@@ -80,6 +80,11 @@ public static class RuntimeEngineBuilderExtensions
         // ImpersonationProcessor (and the on-behalf-of requested_client_id extension).
         builder.Services.AddScoped<IClientImpersonationStore, ClientImpersonationStore>();
         builder.Services.AddScoped<IImpersonatedIdentityResolver, ImpersonatedIdentityResolver>();
+        // AB#5122 verified external identifier directory: resolves a verified external identifier
+        // (phone / e-mail / EntraID oid / cert fingerprint) to a user with two-dimension trust
+        // (effective = min(enrollment, message)). The write side is the seam the sibling enrollment
+        // WIs (AB#5123–5126) call.
+        builder.Services.AddScoped<IVerifiedIdentifierResolver, VerifiedIdentifierResolver>();
 
         builder.Services.AddSingleton<AttributeStringValueListConverter>();
         builder.Services.AddAutoMapper(cfg =>

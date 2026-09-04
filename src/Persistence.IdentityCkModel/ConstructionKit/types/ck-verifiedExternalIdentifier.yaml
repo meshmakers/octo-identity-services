@@ -1,0 +1,46 @@
+"$schema": "https://schemas.meshmakers.cloud/construction-kit-elements.schema.json"
+types:
+  - typeId: VerifiedExternalIdentifier
+    description: "Maps a verified external identifier (phone number, e-mail address, EntraID object id or client certificate fingerprint) to an OctoMesh user, carrying the ENROLLMENT trust dimension of the two-dimension channel-identity trust model (AB#5122, Epic AB#4979). The second dimension (per-message trust) is NOT stored here: it depends on the incoming message (Signal protocol / DKIM validity) and is combined by the resolver at resolution time as effective = min(enrollmentTrust, messageTrust). Uniqueness: an (IdentifierKind, IdentifierValue) pair resolves to at most one user within a tenant, enforced by the Unique index below."
+    derivedFromCkTypeId: ${System}/Entity
+    isFinal: true
+    isAbstract: false
+    displayNameRule: "${IdentifierValue}"
+    attributes:
+      - id: ${this}/IdentifierKind
+        name: IdentifierKind
+      - id: ${this}/IdentifierValue
+        name: IdentifierValue
+      # ENROLLMENT trust dimension (stored): does the identifier really belong to the user?
+      # Set to Strong by the sibling enrollment WIs on a proven OTP / cert / IdP enrollment; this
+      # WI only models it (default None until an enrollment WI raises it).
+      - id: ${this}/EnrollmentTrust
+        name: EnrollmentTrust
+      # Channel expectation for the MESSAGE trust dimension: whether the channel behind this binding
+      # is expected to authenticate every message (Signal-verified / DKIM-valid) before the
+      # identifier may be used. It documents the binding's intent; the per-message trust itself is
+      # never stored — the resolver receives it per call and takes the minimum with EnrollmentTrust.
+      - id: ${this}/RequiredMessageAuthentication
+        name: RequiredMessageAuthentication
+      # Provenance (SelfService / Admin / IdentityProvider). Named "Source" on the entity; the
+      # attribute id is IdentifierSource to avoid clashing with the ClientUriEntry "Source" marker.
+      - id: ${this}/IdentifierSource
+        name: Source
+      - id: ${this}/EnrolledAt
+        name: EnrolledAt
+        isOptional: true
+      - id: ${this}/LastVerifiedAt
+        name: LastVerifiedAt
+        isOptional: true
+    associations:
+      # Each binding points to exactly one OctoMesh user (outbound multiplicity One); a user may own
+      # many verified identifiers (inbound N). See identity-associations.yaml (IdentifiesUser).
+      - id: ${this}/IdentifiesUser
+        targetCkTypeId: ${this}/User
+    indexes:
+      # Uniqueness invariant: at most one binding per (IdentifierKind, IdentifierValue) per tenant.
+      - indexType: Unique
+        fields:
+          - attributePaths:
+              - IdentifierKind
+              - IdentifierValue
