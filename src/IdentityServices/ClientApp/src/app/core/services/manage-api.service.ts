@@ -14,7 +14,19 @@ import {
   VerifyAuthenticatorResult,
   DisableTwoFactorRequest,
   DisableTwoFactorResult,
-  GenerateRecoveryCodesResult
+  GenerateRecoveryCodesResult,
+  VerifiedIdentifier,
+  StartPhoneEnrollmentRequest,
+  StartPhoneEnrollmentResult,
+  VerifyPhoneRequest,
+  StartEmailEnrollmentRequest,
+  StartEmailEnrollmentResult,
+  VerifyEmailRequest,
+  VerifyOtpResult,
+  EnrollCertificateRequest,
+  EnrollCertificateResult,
+  RemoveIdentifierRequest,
+  RemoveIdentifierResult
 } from '../models/manage.models';
 import { ExternalProvider } from '../models/login.models';
 
@@ -78,5 +90,41 @@ export class ManageApiService {
 
   generateRecoveryCodes(): Observable<GenerateRecoveryCodesResult> {
     return this.http.post<GenerateRecoveryCodesResult>('/api/manage/2fa/recovery-codes/generate', {});
+  }
+
+  // === Self-Service Verified Identifiers (AB#5135) ===
+  //
+  // These hit the cookie-authenticated, same-origin controller at
+  // '{tenantId}/api/manage/identifiers'. The tenant prefix is added by tenantInterceptor
+  // and the XSRF token is attached automatically by Angular's withXsrfConfiguration
+  // (XSRF-TOKEN cookie -> X-XSRF-TOKEN header on these POSTs) — exactly like every other
+  // ManageApiService call. No bearer flow here (that is only the cross-origin app's path).
+
+  getIdentifiers(): Observable<VerifiedIdentifier[]> {
+    return this.http.get<VerifiedIdentifier[]>('/api/manage/identifiers');
+  }
+
+  startPhoneEnrollment(request: StartPhoneEnrollmentRequest): Observable<StartPhoneEnrollmentResult> {
+    return this.http.post<StartPhoneEnrollmentResult>('/api/manage/identifiers/phone/start', request);
+  }
+
+  verifyPhone(request: VerifyPhoneRequest): Observable<VerifyOtpResult> {
+    return this.http.post<VerifyOtpResult>('/api/manage/identifiers/phone/verify', request);
+  }
+
+  startEmailEnrollment(request: StartEmailEnrollmentRequest): Observable<StartEmailEnrollmentResult> {
+    return this.http.post<StartEmailEnrollmentResult>('/api/manage/identifiers/email/start', request);
+  }
+
+  verifyEmail(request: VerifyEmailRequest): Observable<VerifyOtpResult> {
+    return this.http.post<VerifyOtpResult>('/api/manage/identifiers/email/verify', request);
+  }
+
+  enrollCertificate(request: EnrollCertificateRequest): Observable<EnrollCertificateResult> {
+    return this.http.post<EnrollCertificateResult>('/api/manage/identifiers/certificate', request);
+  }
+
+  removeIdentifier(request: RemoveIdentifierRequest): Observable<RemoveIdentifierResult> {
+    return this.http.post<RemoveIdentifierResult>('/api/manage/identifiers/remove', request);
   }
 }

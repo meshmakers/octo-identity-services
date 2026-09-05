@@ -17,7 +17,10 @@
 }
 
 html {
-  font-size: 16px;
+  // Density pass (AB#5135): drop the rem base 16->14 so ALL rem-based fonts shrink
+  // ~12.5% globally. This is the dominant 'everything feels big' lever (the spacing
+  // scale alone was too subtle). Tune here.
+  font-size: 14px;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 }

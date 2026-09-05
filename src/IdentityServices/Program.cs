@@ -354,7 +354,21 @@ try
     app.UseOctoCookieBasedAuthentication();
 
     app.UseHttpsRedirection();
-    app.UseStaticFiles();
+    // index.html must never be cached, so a fresh ClientApp deploy is picked up immediately
+    // instead of the browser serving a stale index that references old hashed bundles (AB#5135).
+    // The hashed assets (styles-*.css / *-*.js) keep their default caching.
+    var spaStaticFileOptions = new StaticFileOptions
+    {
+        OnPrepareResponse = ctx =>
+        {
+            if (string.Equals(ctx.File.Name, "index.html", StringComparison.OrdinalIgnoreCase))
+            {
+                ctx.Context.Response.Headers["Cache-Control"] = "no-store, no-cache, must-revalidate";
+                ctx.Context.Response.Headers["Pragma"] = "no-cache";
+            }
+        }
+    };
+    app.UseStaticFiles(spaStaticFileOptions);
     app.UseCookiePolicy();
 
     app.UseOctoApiVersioningAndDocumentation();
@@ -463,8 +477,8 @@ try
     app.MapGet("/", (IOptions<OctoSystemConfiguration> systemConfig) =>
         Results.Redirect($"/{systemConfig.Value.SystemTenantId}/login"));
 
-    // Serve pre-built Angular files from wwwroot for all environments
-    app.MapFallbackToFile("index.html");
+    // Serve pre-built Angular files from wwwroot for all environments (index.html no-store, see above)
+    app.MapFallbackToFile("index.html", spaStaticFileOptions);
 
     // Initialisierung abfangen
     app.Lifetime.ApplicationStarted.Register(() =>
