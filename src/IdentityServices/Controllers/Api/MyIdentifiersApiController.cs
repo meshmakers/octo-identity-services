@@ -3,6 +3,7 @@ using IdentityServerPersistence.SystemStores;
 using Meshmakers.Octo.Backend.Authentication;
 using Meshmakers.Octo.Runtime.Contracts.MongoDb;
 using Microsoft.AspNetCore.Authorization;
+using System.Security.Claims;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Mvc;
 using Persistence.IdentityCkModel.Generated.System.Identity.v2;
@@ -30,6 +31,21 @@ public class MyIdentifiersApiController(
     ISystemContext systemContext,
     ISelfServiceIdentifierService selfServiceIdentifierService) : ControllerBase
 {
+    /// <summary>
+    ///     Resolves the calling user from the bearer principal. The JWT pipeline runs with
+    ///     <c>MapInboundClaims = false</c>, so the subject stays under the raw <c>sub</c> claim and is
+    ///     never remapped to <see cref="ClaimTypes.NameIdentifier" /> — the only claim
+    ///     <see cref="UserManager{TUser}.GetUserAsync" /> looks at. (That is why the cookie-authenticated
+    ///     <see cref="ManageApiController" /> can use <c>GetUserAsync</c> but a bearer caller cannot.)
+    ///     Probe <c>sub</c> first, fall back to <c>NameIdentifier</c> for a cookie principal — the same
+    ///     "probe both claim spellings" rule the role check uses.
+    /// </summary>
+    private async Task<RtUser?> GetCurrentUserAsync()
+    {
+        var subjectId = User.FindFirstValue("sub") ?? User.FindFirstValue(ClaimTypes.NameIdentifier);
+        return subjectId is null ? null : await userManager.FindByIdAsync(subjectId);
+    }
+
     /// <summary>Lists the current user's own verified identifiers (certificate validity folded in).</summary>
     [HttpGet]
     public async Task<ActionResult<IEnumerable<VerifiedIdentifierDto>>> List(string tenantId)
@@ -39,7 +55,7 @@ public class MyIdentifiersApiController(
             return NotFound($"Tenant '{tenantId}' not found.");
         }
 
-        var user = await userManager.GetUserAsync(User);
+        var user = await GetCurrentUserAsync();
         if (user == null)
         {
             return NotFound();
@@ -54,7 +70,7 @@ public class MyIdentifiersApiController(
     public async Task<ActionResult<StartPhoneEnrollmentResponseDto>> StartPhoneEnrollment(string tenantId,
         [FromBody] StartPhoneEnrollmentRequestDto request, CancellationToken cancellationToken)
     {
-        var user = await userManager.GetUserAsync(User);
+        var user = await GetCurrentUserAsync();
         if (user == null)
         {
             return NotFound();
@@ -78,7 +94,7 @@ public class MyIdentifiersApiController(
     public async Task<ActionResult<VerifyPhoneResponseDto>> VerifyPhone(string tenantId,
         [FromBody] VerifyPhoneRequestDto request)
     {
-        var user = await userManager.GetUserAsync(User);
+        var user = await GetCurrentUserAsync();
         if (user == null)
         {
             return NotFound();
@@ -100,7 +116,7 @@ public class MyIdentifiersApiController(
     public async Task<ActionResult<EnrollCertificateResponseDto>> EnrollCertificate(string tenantId,
         [FromBody] EnrollCertificateRequestDto request)
     {
-        var user = await userManager.GetUserAsync(User);
+        var user = await GetCurrentUserAsync();
         if (user == null)
         {
             return NotFound();
@@ -136,7 +152,7 @@ public class MyIdentifiersApiController(
     public async Task<ActionResult<RemoveIdentifierResponseDto>> Remove(string tenantId,
         [FromBody] RemoveIdentifierRequestDto request)
     {
-        var user = await userManager.GetUserAsync(User);
+        var user = await GetCurrentUserAsync();
         if (user == null)
         {
             return NotFound();
