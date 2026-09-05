@@ -21,16 +21,26 @@ namespace Meshmakers.Octo.Backend.IdentityServices.Controllers.Api;
 /// </summary>
 [ApiController]
 [Route("{tenantId}/api/manage/identifiers")]
-// Self-service: called cross-origin by the app with a JWT bearer, so it must use the bearer scheme
-// (the sibling ManageApiController's bare [Authorize] resolves the identity ClientApp cookie, which
-// a bearer-only caller never carries → 401). No admin scope policy: any authenticated user manages
-// their OWN identifiers; the actions scope every read/write to userManager.GetUserAsync(User).
-[Authorize(AuthenticationSchemes = AuthenticationConstants.BearerAuthenticationScheme)]
+// Accepts BOTH auth schemes (AB#5135). The identity ClientApp calls this SAME-ORIGIN with the
+// session cookie (IdentityConstants.ApplicationScheme = "Identity.Application" — the default scheme
+// AddIdentity registers, which the sibling ManageApiController's bare [Authorize] relies on), while
+// the cross-origin meshmakers-app calls it with a JWT bearer. Listing both lets either principal
+// authenticate. No admin scope policy: any authenticated user manages their OWN identifiers; the
+// actions scope every read/write to the current user resolved by GetCurrentUserAsync (sub for the
+// bearer principal, NameIdentifier for the cookie principal).
+[Authorize(AuthenticationSchemes = CookieAndBearerSchemes)]
 public class MyIdentifiersApiController(
     UserManager<RtUser> userManager,
     ISystemContext systemContext,
     ISelfServiceIdentifierService selfServiceIdentifierService) : ControllerBase
 {
+    // The cookie scheme is IdentityConstants.ApplicationScheme ("Identity.Application"), the default
+    // scheme AddIdentity registers and the sibling ManageApiController's bare [Authorize] relies on.
+    // Its literal is inlined here because IdentityConstants.ApplicationScheme is a static readonly
+    // field (not a const) and so cannot be used in an attribute argument; the bearer half IS a const.
+    private const string CookieAndBearerSchemes =
+        "Identity.Application," + AuthenticationConstants.BearerAuthenticationScheme;
+
     /// <summary>
     ///     Resolves the calling user from the bearer principal. The JWT pipeline runs with
     ///     <c>MapInboundClaims = false</c>, so the subject stays under the raw <c>sub</c> claim and is
@@ -104,6 +114,52 @@ public class MyIdentifiersApiController(
             request.PhoneNumber ?? string.Empty, request.Code ?? string.Empty);
 
         return Ok(new VerifyPhoneResponseDto
+        {
+            Status = result.Status.ToString(),
+            Success = result.Status == OtpVerificationStatus.Verified,
+            AttemptsRemaining = result.AttemptsRemaining
+        });
+    }
+
+    /// <summary>Adds an e-mail address and sends a one-time code to it (nothing is enrolled yet).</summary>
+    [HttpPost("email/start")]
+    public async Task<ActionResult<StartEmailEnrollmentResponseDto>> StartEmailEnrollment(string tenantId,
+        [FromBody] StartEmailEnrollmentRequestDto request, CancellationToken cancellationToken)
+    {
+        var user = await GetCurrentUserAsync();
+        if (user == null)
+        {
+            return NotFound();
+        }
+
+        var result = await selfServiceIdentifierService.StartEmailEnrollmentAsync(tenantId, user,
+            request.Email ?? string.Empty, cancellationToken);
+
+        return Ok(new StartEmailEnrollmentResponseDto
+        {
+            Status = result.Status.ToString(),
+            Success = result.Status == StartEmailEnrollmentStatus.CodeSent,
+            NormalizedEmail = result.NormalizedEmail,
+            MaskedDestination = result.MaskedDestination,
+            ExpiresAtUtc = result.ExpiresAtUtc
+        });
+    }
+
+    /// <summary>Verifies the one-time code and, on success, enrolls the e-mail address as Strong.</summary>
+    [HttpPost("email/verify")]
+    public async Task<ActionResult<VerifyEmailResponseDto>> VerifyEmail(string tenantId,
+        [FromBody] VerifyEmailRequestDto request)
+    {
+        var user = await GetCurrentUserAsync();
+        if (user == null)
+        {
+            return NotFound();
+        }
+
+        var result = await selfServiceIdentifierService.VerifyEmailAsync(tenantId, user,
+            request.Email ?? string.Empty, request.Code ?? string.Empty);
+
+        return Ok(new VerifyEmailResponseDto
         {
             Status = result.Status.ToString(),
             Success = result.Status == OtpVerificationStatus.Verified,
@@ -217,6 +273,33 @@ public record VerifyPhoneRequestDto
 }
 
 public record VerifyPhoneResponseDto
+{
+    public string Status { get; init; } = string.Empty;
+    public bool Success { get; init; }
+    public int AttemptsRemaining { get; init; }
+}
+
+public record StartEmailEnrollmentRequestDto
+{
+    public string? Email { get; init; }
+}
+
+public record StartEmailEnrollmentResponseDto
+{
+    public string Status { get; init; } = string.Empty;
+    public bool Success { get; init; }
+    public string? NormalizedEmail { get; init; }
+    public string? MaskedDestination { get; init; }
+    public DateTime? ExpiresAtUtc { get; init; }
+}
+
+public record VerifyEmailRequestDto
+{
+    public string? Email { get; init; }
+    public string? Code { get; init; }
+}
+
+public record VerifyEmailResponseDto
 {
     public string Status { get; init; } = string.Empty;
     public bool Success { get; init; }

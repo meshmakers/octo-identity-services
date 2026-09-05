@@ -129,6 +129,12 @@ public static class RuntimeEngineBuilderExtensions
                 : ActivatorUtilities.CreateInstance<SignalRestOtpDeliveryChannel>(sp);
         });
 
+        // AB#5135 e-mail OTP delivery: the Email-kind channel reuses identity's existing e-mail
+        // transport (the distribution-event-hub seam the notification / password-reset e-mails publish
+        // onto) — no new SMTP client. Exactly ONE IOtpDeliveryChannel of Kind=Email is registered so
+        // the OTP service's Kind-dispatch resolves it unambiguously.
+        builder.Services.AddSingleton<IOtpDeliveryChannel, NotificationEmailOtpDeliveryChannel>();
+
         builder.Services.AddScoped<ISelfServiceIdentifierService, SelfServiceIdentifierService>();
 
         builder.Services.AddSingleton<AttributeStringValueListConverter>();

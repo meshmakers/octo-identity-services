@@ -17,6 +17,19 @@ public enum StartPhoneEnrollmentStatus
     AlreadyOwnedByAnotherUser = 2
 }
 
+/// <summary>The outcome of starting an e-mail enrollment (AB#5123 e-mail modality, AB#5135).</summary>
+public enum StartEmailEnrollmentStatus
+{
+    /// <summary>A code was generated, stored (hashed) and handed to the e-mail delivery channel.</summary>
+    CodeSent = 0,
+
+    /// <summary>The supplied address could not be normalized to a bare, valid e-mail address.</summary>
+    InvalidEmail = 1,
+
+    /// <summary>The address is already a verified identifier of ANOTHER user; self-service refuses it.</summary>
+    AlreadyOwnedByAnotherUser = 2
+}
+
 /// <summary>The outcome of verifying an OTP (AB#5123). Only <see cref="Verified" /> enrolls.</summary>
 public enum OtpVerificationStatus
 {
@@ -39,7 +52,10 @@ public enum OtpVerificationStatus
     AlreadyOwnedByAnotherUser = 5,
 
     /// <summary>The number could not be normalized; nothing enrolled.</summary>
-    InvalidNumber = 6
+    InvalidNumber = 6,
+
+    /// <summary>The e-mail address could not be normalized; nothing enrolled (AB#5135).</summary>
+    InvalidEmail = 7
 }
 
 /// <summary>Result of <see cref="ISelfServiceIdentifierService.StartPhoneEnrollmentAsync" />.</summary>
@@ -50,6 +66,17 @@ public enum OtpVerificationStatus
 public sealed record StartPhoneEnrollmentResult(
     StartPhoneEnrollmentStatus Status,
     string? NormalizedNumber = null,
+    string? MaskedDestination = null,
+    DateTime? ExpiresAtUtc = null);
+
+/// <summary>Result of <see cref="ISelfServiceIdentifierService.StartEmailEnrollmentAsync" /> (AB#5135).</summary>
+/// <param name="Status">What happened.</param>
+/// <param name="NormalizedEmail">The normalized (trimmed, lower-cased) address, when it normalized.</param>
+/// <param name="MaskedDestination">A privacy-masked form of the address for the UI, when sent.</param>
+/// <param name="ExpiresAtUtc">When the code stops being valid, when sent.</param>
+public sealed record StartEmailEnrollmentResult(
+    StartEmailEnrollmentStatus Status,
+    string? NormalizedEmail = null,
     string? MaskedDestination = null,
     DateTime? ExpiresAtUtc = null);
 
@@ -117,6 +144,24 @@ public interface ISelfServiceIdentifierService
     ///     <c>VerifiedExternalIdentifier(PhoneNumber, Strong, SelfService)</c> binding.
     /// </summary>
     Task<OtpVerificationResult> VerifyPhoneAsync(string tenantId, RtUser user, string rawPhoneNumber,
+        string code);
+
+    /// <summary>
+    ///     Starts an e-mail enrollment (AB#5135): normalizes the address, generates a one-time code,
+    ///     stores only its salted hash with an expiry and a fresh attempt budget, and hands the code to
+    ///     the e-mail delivery channel. No binding is written here — enrollment happens only on a
+    ///     correct <see cref="VerifyEmailAsync" />. Mirrors <see cref="StartPhoneEnrollmentAsync" />.
+    /// </summary>
+    Task<StartEmailEnrollmentResult> StartEmailEnrollmentAsync(string tenantId, RtUser user,
+        string rawEmail, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    ///     Verifies an OTP against the pending challenge for the (user, address). A wrong, expired, or
+    ///     over-budget code NEVER enrolls; only a correct, unexpired, in-budget code stores the
+    ///     <c>VerifiedExternalIdentifier(EmailAddress, Strong, SelfService)</c> binding. Mirrors
+    ///     <see cref="VerifyPhoneAsync" />.
+    /// </summary>
+    Task<OtpVerificationResult> VerifyEmailAsync(string tenantId, RtUser user, string rawEmail,
         string code);
 
     /// <summary>

@@ -1,3 +1,4 @@
+using System.Net.Mail;
 using System.Security.Cryptography;
 using System.Security.Cryptography.X509Certificates;
 using System.Text;
@@ -22,6 +23,9 @@ public sealed class SelfServiceIdentifierService(
     // A phone OTP is delivered over Signal for this WI (AB#5123). The modality is fixed here rather
     // than guessed so a mis-registered channel fails loudly instead of silently not delivering.
     private const OtpDeliveryChannelKind PhoneOtpChannel = OtpDeliveryChannelKind.Signal;
+
+    // An e-mail OTP is delivered over the e-mail channel (AB#5135), same fail-loud contract.
+    private const OtpDeliveryChannelKind EmailOtpChannel = OtpDeliveryChannelKind.Email;
 
     public async Task<IReadOnlyList<VerifiedIdentifierSummary>> ListAsync(RtUser user)
         => await verifiedIdentifierResolver.GetByUserAsync(user.RtId);
@@ -58,7 +62,8 @@ public sealed class SelfServiceIdentifierService(
         // Store the (hashed) challenge BEFORE delivery so a delivered code is always verifiable, and
         // deliver only after: if delivery throws, the user is told it failed rather than "code sent".
         await challengeStore.StoreAsync(user, challenge);
-        await DeliverAsync(new OtpDeliveryContext(tenantId, normalized, code, CodeTtl, user.UserName),
+        await DeliverAsync(PhoneOtpChannel,
+            new OtpDeliveryContext(tenantId, normalized, code, CodeTtl, user.UserName),
             cancellationToken);
 
         logger.LogInformation(
@@ -141,6 +146,125 @@ public sealed class SelfServiceIdentifierService(
         return new OtpVerificationResult(OtpVerificationStatus.Verified, 0, bindingRtId);
     }
 
+    public async Task<StartEmailEnrollmentResult> StartEmailEnrollmentAsync(string tenantId, RtUser user,
+        string rawEmail, CancellationToken cancellationToken = default)
+    {
+        if (!TryNormalizeEmail(rawEmail, out var normalized))
+        {
+            return new StartEmailEnrollmentResult(StartEmailEnrollmentStatus.InvalidEmail);
+        }
+
+        if (await IsOwnedByAnotherUserAsync(RtIdentifierKindEnum.EmailAddress, normalized, user))
+        {
+            logger.LogWarning(
+                "[{TenantId}] Self-service e-mail enrollment refused: address is already a verified identifier of another user",
+                tenantId);
+            return new StartEmailEnrollmentResult(StartEmailEnrollmentStatus.AlreadyOwnedByAnotherUser);
+        }
+
+        var code = GenerateNumericCode();
+        var salt = RandomNumberGenerator.GetBytes(16);
+        var now = timeProvider.GetUtcNow().UtcDateTime;
+        var expiresAt = now + CodeTtl;
+
+        var challenge = new OtpChallenge(
+            normalized,
+            Convert.ToBase64String(HashCode(salt, code)),
+            Convert.ToBase64String(salt),
+            expiresAt,
+            0,
+            MaxAttempts);
+
+        // Store the (hashed) challenge BEFORE delivery so a delivered code is always verifiable, and
+        // deliver only after: if delivery throws, the user is told it failed rather than "code sent".
+        await challengeStore.StoreAsync(user, challenge);
+        await DeliverAsync(EmailOtpChannel,
+            new OtpDeliveryContext(tenantId, normalized, code, CodeTtl, user.UserName),
+            cancellationToken);
+
+        logger.LogInformation(
+            "[{TenantId}] Self-service e-mail enrollment started for a user's address (masked {Masked}); code expires {ExpiresAt:o}",
+            tenantId, MaskEmail(normalized), expiresAt);
+
+        return new StartEmailEnrollmentResult(StartEmailEnrollmentStatus.CodeSent, normalized, MaskEmail(normalized),
+            expiresAt);
+    }
+
+    public async Task<OtpVerificationResult> VerifyEmailAsync(string tenantId, RtUser user,
+        string rawEmail, string code)
+    {
+        if (!TryNormalizeEmail(rawEmail, out var normalized))
+        {
+            return new OtpVerificationResult(OtpVerificationStatus.InvalidEmail);
+        }
+
+        var challenge = await challengeStore.GetAsync(user, normalized);
+        if (challenge == null)
+        {
+            return new OtpVerificationResult(OtpVerificationStatus.NoChallenge);
+        }
+
+        var now = timeProvider.GetUtcNow().UtcDateTime;
+        if (challenge.ExpiresAtUtc <= now)
+        {
+            // Expired: burn it so a later guess cannot use it, and never enroll.
+            await challengeStore.RemoveAsync(user, normalized);
+            return new OtpVerificationResult(OtpVerificationStatus.Expired);
+        }
+
+        if (challenge.Attempts >= challenge.MaxAttempts)
+        {
+            await challengeStore.RemoveAsync(user, normalized);
+            return new OtpVerificationResult(OtpVerificationStatus.AttemptLimitReached);
+        }
+
+        if (!CodeMatches(challenge, code))
+        {
+            // Consume one attempt. When the budget is now exhausted, burn the challenge so a further
+            // guess must restart the whole flow.
+            var consumed = challenge with { Attempts = challenge.Attempts + 1 };
+            var remaining = consumed.MaxAttempts - consumed.Attempts;
+            if (remaining <= 0)
+            {
+                await challengeStore.RemoveAsync(user, normalized);
+            }
+            else
+            {
+                await challengeStore.StoreAsync(user, consumed);
+            }
+
+            return new OtpVerificationResult(OtpVerificationStatus.CodeMismatch, Math.Max(remaining, 0));
+        }
+
+        // Correct code. Re-check ownership at the last moment (it may have been enrolled elsewhere
+        // since the code was sent) so a self-service identifier only ever maps to its own user.
+        if (await IsOwnedByAnotherUserAsync(RtIdentifierKindEnum.EmailAddress, normalized, user))
+        {
+            await challengeStore.RemoveAsync(user, normalized);
+            return new OtpVerificationResult(OtpVerificationStatus.AlreadyOwnedByAnotherUser);
+        }
+
+        var bindingRtId = await verifiedIdentifierResolver.StoreBindingAsync(new VerifiedIdentifierBinding(
+            RtIdentifierKindEnum.EmailAddress,
+            normalized,
+            user.RtId,
+            RtTrustLevelEnum.Strong,
+            RtIdentifierSourceEnum.SelfService,
+            // Mirrors the admin e-mail binding: the channel is expected to authenticate every message
+            // (valid DKIM/DMARC), capped by min() at the directory before the address is trusted for an
+            // elevated operation. Documents the binding's intent; not part of the enrollment min.
+            RequiredMessageAuthentication: true,
+            LastVerifiedAt: now));
+
+        await challengeStore.RemoveAsync(user, normalized);
+
+        logger.LogInformation(
+            "[{TenantId}] Self-service e-mail identifier verified and enrolled Strong (binding {BindingRtId})",
+            tenantId, bindingRtId);
+
+        return new OtpVerificationResult(OtpVerificationStatus.Verified, 0, bindingRtId);
+    }
+
     public async Task<CertificateEnrollmentResult> EnrollCertificateAsync(string tenantId, RtUser user,
         byte[] certificateBytes)
     {
@@ -213,13 +337,14 @@ public sealed class SelfServiceIdentifierService(
         return resolution != null && resolution.User.RtId != user.RtId;
     }
 
-    private async Task DeliverAsync(OtpDeliveryContext context, CancellationToken cancellationToken)
+    private async Task DeliverAsync(OtpDeliveryChannelKind kind, OtpDeliveryContext context,
+        CancellationToken cancellationToken)
     {
-        var channel = deliveryChannels.FirstOrDefault(c => c.Kind == PhoneOtpChannel);
+        var channel = deliveryChannels.FirstOrDefault(c => c.Kind == kind);
         if (channel == null)
         {
             throw new InvalidOperationException(
-                $"No OTP delivery channel is registered for modality '{PhoneOtpChannel}'.");
+                $"No OTP delivery channel is registered for modality '{kind}'.");
         }
 
         await channel.DeliverAsync(context, cancellationToken);
@@ -331,5 +456,50 @@ public sealed class SelfServiceIdentifierService(
 
         var visible = normalized[^2..];
         return string.Concat(new string('•', normalized.Length - 2), visible);
+    }
+
+    /// <summary>
+    ///     Trims and lower-cases the address and requires it to be a bare, valid e-mail — no display
+    ///     name, no angle brackets, no list of addresses. Kept identical to
+    ///     <c>AdminEmailBindingService</c> / the adapter's e-mail lookup normalization so the stored
+    ///     value and the inbound From match case-insensitively (AB#5135).
+    /// </summary>
+    private static bool TryNormalizeEmail(string? raw, out string normalized)
+    {
+        normalized = string.Empty;
+        if (string.IsNullOrWhiteSpace(raw))
+        {
+            return false;
+        }
+
+        var candidate = raw.Trim().ToLowerInvariant();
+
+        // MailAddress accepts "Name <a@b.com>"; require the parsed address to equal the input so only
+        // a bare address passes.
+        if (!MailAddress.TryCreate(candidate, out var address) ||
+            !string.Equals(address.Address, candidate, StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        normalized = candidate;
+        return true;
+    }
+
+    /// <summary>Masks the local part of an e-mail address (keeps first char + full domain) for logs.</summary>
+    private static string MaskEmail(string normalized)
+    {
+        var at = normalized.IndexOf('@');
+        if (at <= 0)
+        {
+            return normalized;
+        }
+
+        var local = normalized[..at];
+        var domain = normalized[at..];
+        var head = local[0];
+        return local.Length <= 1
+            ? $"{head}{domain}"
+            : $"{head}{new string('•', local.Length - 1)}{domain}";
     }
 }
