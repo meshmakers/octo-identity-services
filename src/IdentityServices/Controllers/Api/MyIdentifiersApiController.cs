@@ -1,5 +1,6 @@
 using IdentityServerPersistence.Services.SelfService;
 using IdentityServerPersistence.SystemStores;
+using Meshmakers.Octo.Backend.Authentication;
 using Meshmakers.Octo.Runtime.Contracts.MongoDb;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Identity;
@@ -19,7 +20,11 @@ namespace Meshmakers.Octo.Backend.IdentityServices.Controllers.Api;
 /// </summary>
 [ApiController]
 [Route("{tenantId}/api/manage/identifiers")]
-[Authorize]
+// Self-service: called cross-origin by the app with a JWT bearer, so it must use the bearer scheme
+// (the sibling ManageApiController's bare [Authorize] resolves the identity ClientApp cookie, which
+// a bearer-only caller never carries → 401). No admin scope policy: any authenticated user manages
+// their OWN identifiers; the actions scope every read/write to userManager.GetUserAsync(User).
+[Authorize(AuthenticationSchemes = AuthenticationConstants.BearerAuthenticationScheme)]
 public class MyIdentifiersApiController(
     UserManager<RtUser> userManager,
     ISystemContext systemContext,
