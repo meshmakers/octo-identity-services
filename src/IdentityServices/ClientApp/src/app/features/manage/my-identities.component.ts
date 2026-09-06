@@ -80,7 +80,7 @@ export class MyIdentitiesComponent implements OnInit {
       error: () => {
         this.identifiers = [];
         this.loading = false;
-        this.setError('Die Identitäten konnten nicht geladen werden.');
+        this.setError('The identities could not be loaded.');
       }
     });
   }
@@ -110,18 +110,18 @@ export class MyIdentitiesComponent implements OnInit {
             this.setSuccess('Ein Code wurde an die Telefonnummer gesendet.');
             break;
           case 'InvalidNumber':
-            this.setError('Die Telefonnummer ist ungültig.');
+            this.setError('The phone number is invalid.');
             break;
           case 'AlreadyOwnedByAnotherUser':
             this.setError('Diese Telefonnummer ist bereits einem anderen Benutzer zugeordnet.');
             break;
           default:
-            this.setError('Der Code konnte nicht gesendet werden.');
+            this.setError('The code could not be sent.');
         }
       },
       error: () => {
         this.phoneSending = false;
-        this.setError('Der Code konnte nicht gesendet werden.');
+        this.setError('The code could not be sent.');
       }
     });
   }
@@ -138,7 +138,7 @@ export class MyIdentitiesComponent implements OnInit {
         this.phoneVerifying = false;
         switch (result.status) {
           case 'Verified':
-            this.setSuccess('Die Telefonnummer wurde bestätigt.');
+            this.setSuccess('The phone number has been confirmed.');
             this.resetPhoneWizard();
             this.phoneNumber = '';
             this.reload();
@@ -148,15 +148,15 @@ export class MyIdentitiesComponent implements OnInit {
             this.setError(`Der Code ist falsch. Verbleibende Versuche: ${result.attemptsRemaining}.`);
             break;
           case 'Expired':
-            this.setError('Der Code ist abgelaufen. Bitte fordern Sie einen neuen an.');
+            this.setError('The code has expired. Please request a new one.');
             this.resetPhoneWizard();
             break;
           case 'AttemptLimitReached':
-            this.setError('Die maximale Anzahl an Versuchen wurde erreicht. Bitte fordern Sie einen neuen Code an.');
+            this.setError('The maximum number of attempts has been reached. Please request a new code.');
             this.resetPhoneWizard();
             break;
           case 'NoChallenge':
-            this.setError('Es liegt keine offene Anfrage vor. Bitte fordern Sie einen neuen Code an.');
+            this.setError('There is no pending request. Please request a new code.');
             this.resetPhoneWizard();
             break;
           case 'AlreadyOwnedByAnotherUser':
@@ -164,12 +164,12 @@ export class MyIdentitiesComponent implements OnInit {
             this.resetPhoneWizard();
             break;
           default:
-            this.setError('Die Bestätigung ist fehlgeschlagen.');
+            this.setError('Confirmation failed.');
         }
       },
       error: () => {
         this.phoneVerifying = false;
-        this.setError('Die Bestätigung ist fehlgeschlagen.');
+        this.setError('Confirmation failed.');
       }
     });
   }
@@ -201,18 +201,18 @@ export class MyIdentitiesComponent implements OnInit {
             this.setSuccess('Ein Code wurde an die E-Mail-Adresse gesendet.');
             break;
           case 'InvalidEmail':
-            this.setError('Die E-Mail-Adresse ist ungültig.');
+            this.setError('The e-mail address is invalid.');
             break;
           case 'AlreadyOwnedByAnotherUser':
             this.setError('Diese E-Mail-Adresse ist bereits einem anderen Benutzer zugeordnet.');
             break;
           default:
-            this.setError('Der Code konnte nicht gesendet werden.');
+            this.setError('The code could not be sent.');
         }
       },
       error: () => {
         this.emailSending = false;
-        this.setError('Der Code konnte nicht gesendet werden.');
+        this.setError('The code could not be sent.');
       }
     });
   }
@@ -229,7 +229,7 @@ export class MyIdentitiesComponent implements OnInit {
         this.emailVerifying = false;
         switch (result.status) {
           case 'Verified':
-            this.setSuccess('Die E-Mail-Adresse wurde bestätigt.');
+            this.setSuccess('The e-mail address has been confirmed.');
             this.resetEmailWizard();
             this.email = '';
             this.reload();
@@ -239,15 +239,15 @@ export class MyIdentitiesComponent implements OnInit {
             this.setError(`Der Code ist falsch. Verbleibende Versuche: ${result.attemptsRemaining}.`);
             break;
           case 'Expired':
-            this.setError('Der Code ist abgelaufen. Bitte fordern Sie einen neuen an.');
+            this.setError('The code has expired. Please request a new one.');
             this.resetEmailWizard();
             break;
           case 'AttemptLimitReached':
-            this.setError('Die maximale Anzahl an Versuchen wurde erreicht. Bitte fordern Sie einen neuen Code an.');
+            this.setError('The maximum number of attempts has been reached. Please request a new code.');
             this.resetEmailWizard();
             break;
           case 'NoChallenge':
-            this.setError('Es liegt keine offene Anfrage vor. Bitte fordern Sie einen neuen Code an.');
+            this.setError('There is no pending request. Please request a new code.');
             this.resetEmailWizard();
             break;
           case 'AlreadyOwnedByAnotherUser':
@@ -255,12 +255,12 @@ export class MyIdentitiesComponent implements OnInit {
             this.resetEmailWizard();
             break;
           default:
-            this.setError('Die Bestätigung ist fehlgeschlagen.');
+            this.setError('Confirmation failed.');
         }
       },
       error: () => {
         this.emailVerifying = false;
-        this.setError('Die Bestätigung ist fehlgeschlagen.');
+        this.setError('Confirmation failed.');
       }
     });
   }
@@ -299,27 +299,27 @@ export class MyIdentitiesComponent implements OnInit {
         this.enrollingCertificate = false;
         switch (result.status) {
           case 'Enrolled':
-            this.setSuccess('Das Zertifikat wurde hinzugefügt.');
+            this.setSuccess('The certificate has been added.');
             this.certificateBase64 = '';
             this.certificateFileName = '';
             this.reload();
             break;
           case 'Unreadable':
-            this.setError('Die Datei konnte nicht als Zertifikat gelesen werden.');
+            this.setError('The file could not be read as a certificate.');
             break;
           case 'NotValid':
-            this.setError('Das Zertifikat ist nicht gültig (abgelaufen oder noch nicht gültig).');
+            this.setError('The certificate is not valid (expired or not yet valid).');
             break;
           case 'AlreadyOwnedByAnotherUser':
             this.setError('Dieses Zertifikat ist bereits einem anderen Benutzer zugeordnet.');
             break;
           default:
-            this.setError('Das Zertifikat konnte nicht hinzugefügt werden.');
+            this.setError('The certificate could not be added.');
         }
       },
       error: () => {
         this.enrollingCertificate = false;
-        this.setError('Das Zertifikat konnte nicht hinzugefügt werden.');
+        this.setError('The certificate could not be added.');
       }
     });
   }
@@ -330,7 +330,7 @@ export class MyIdentitiesComponent implements OnInit {
     if (this.isReadOnly(item)) {
       return;
     }
-    const confirmed = window.confirm(`Identität "${item.identifierValue}" wirklich entfernen?`);
+    const confirmed = window.confirm(`Really remove identity "${item.identifierValue}"?`);
     if (!confirmed) {
       return;
     }
@@ -342,15 +342,15 @@ export class MyIdentitiesComponent implements OnInit {
         next: (result) => {
           this.removingRtId = null;
           if (result.success) {
-            this.setSuccess('Die Identität wurde entfernt.');
+            this.setSuccess('The identity has been removed.');
             this.reload();
           } else {
-            this.setError('Die Identität konnte nicht entfernt werden.');
+            this.setError('The identity could not be removed.');
           }
         },
         error: () => {
           this.removingRtId = null;
-          this.setError('Die Identität konnte nicht entfernt werden.');
+          this.setError('The identity could not be removed.');
         }
       });
   }
@@ -359,26 +359,26 @@ export class MyIdentitiesComponent implements OnInit {
 
   kindLabel(kind: VerifiedIdentifierKind): string {
     switch (kind) {
-      case 'PhoneNumber': return 'Telefonnummer';
-      case 'EmailAddress': return 'E-Mail-Adresse';
+      case 'PhoneNumber': return 'Phone number';
+      case 'EmailAddress': return 'E-mail address';
       case 'EntraIdObjectId': return 'EntraID / Teams';
-      case 'ClientCertificateFingerprint': return 'Zertifikat';
+      case 'ClientCertificateFingerprint': return 'Certificate';
       default: return kind;
     }
   }
 
   trustLabel(trust: EnrollmentTrust): string {
     switch (trust) {
-      case 'Strong': return 'Stark';
-      case 'Weak': return 'Schwach';
-      case 'None': return 'Keine';
+      case 'Strong': return 'Strong';
+      case 'Weak': return 'Weak';
+      case 'None': return 'None';
       default: return trust;
     }
   }
 
   sourceLabel(source: IdentifierSource): string {
     switch (source) {
-      case 'SelfService': return 'Selbst hinzugefügt';
+      case 'SelfService': return 'Self-enrolled';
       case 'Admin': return 'Administrator';
       case 'IdentityProvider': return 'Identity Provider';
       default: return source;

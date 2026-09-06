@@ -31,21 +31,21 @@ import { getTenantIdFromUrl } from '../../core/utils/tenant.utils';
             [routerLink]="['/', tenantId, 'manage']"
             routerLinkActive="lcars-tab--active"
             [routerLinkActiveOptions]="{ exact: true }">
-            Profil
+            Profile
           </a>
           <a
             class="lcars-tab"
             role="tab"
             [routerLink]="['/', tenantId, 'manage', 'security']"
             routerLinkActive="lcars-tab--active">
-            Sicherheit
+            Security
           </a>
           <a
             class="lcars-tab"
             role="tab"
             [routerLink]="['/', tenantId, 'manage', 'identities']"
             routerLinkActive="lcars-tab--active">
-            Meine Identitäten
+            My Identities
           </a>
         </nav>
 

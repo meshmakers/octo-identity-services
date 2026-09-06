@@ -1,6 +1,6 @@
 <p class="section-hint">
-  Verwalten Sie hier Ihre persönlichen, verifizierten Identitäten (Telefonnummer, E-Mail und
-  Zertifikate). Diese können zur starken Authentifizierung über Kanäle verwendet werden.
+  Manage your personal verified identities (phone number, e-mail and certificates) here.
+  They can be used for strong authentication across channels.
 </p>
 
 <div *ngIf="feedbackKind" class="feedback" [class.feedback--success]="feedbackKind === 'success'" [class.feedback--error]="feedbackKind === 'error'">
@@ -9,7 +9,7 @@
 
 <!-- Current identifiers -->
 <div class="profile-section">
-  <h3 class="section-title">Verifizierte Identitäten</h3>
+  <h3 class="section-title">Verified Identities</h3>
 
   <div *ngIf="loading" class="lcars-loading">
     <div class="lcars-loading__spinner"></div>
@@ -17,15 +17,15 @@
   </div>
 
   <p *ngIf="!loading && identifiers.length === 0" class="section-hint">
-    Es sind noch keine Identitäten hinterlegt.
+    No identities have been added yet.
   </p>
 
   <div *ngIf="!loading && identifiers.length" class="identifier-table" role="table">
     <div class="identifier-row identifier-head" role="row">
-      <span role="columnheader">Art</span>
-      <span role="columnheader">Wert</span>
-      <span role="columnheader">Vertrauen</span>
-      <span role="columnheader">Quelle</span>
+      <span role="columnheader">Type</span>
+      <span role="columnheader">Value</span>
+      <span role="columnheader">Trust</span>
+      <span role="columnheader">Source</span>
       <span role="columnheader">Status</span>
       <span role="columnheader" class="col-actions"></span>
     </div>
@@ -36,19 +36,19 @@
       role="row"
       [class.identifier-row--invalid]="!item.isValid">
       <span role="cell">{{ kindLabel(item.identifierKind) }}</span>
-      <span role="cell" class="identifier-value">{{ item.identifierValue }}</span>
+      <span role="cell" class="identifier-value" [title]="item.identifierValue">{{ item.identifierValue }}</span>
       <span role="cell">{{ trustLabel(item.enrollmentTrust) }}</span>
       <span role="cell">{{ sourceLabel(item.source) }}</span>
       <span role="cell">
         <span class="status-badge" [class.status-badge--success]="item.isValid" [class.status-badge--warning]="!item.isValid">
-          {{ item.isValid ? 'Gültig' : 'Ungültig' }}
+          {{ item.isValid ? 'Valid' : 'Invalid' }}
         </span>
-        <span *ngIf="item.validUntil" class="valid-until">bis {{ item.validUntil | date: 'short' }}</span>
+        <span *ngIf="item.validUntil" class="valid-until">until {{ item.validUntil | date: 'short' }}</span>
       </span>
       <span role="cell" class="col-actions">
         <ng-container *ngIf="isReadOnly(item); else removable">
-          <span class="managed-note" title="Automatisch nach einer EntraID-Anmeldung erstellt">
-            verwaltet über Identity Provider
+          <span class="managed-note" title="Created automatically after an EntraID sign-in">
+            managed via Identity Provider
           </span>
         </ng-container>
         <ng-template #removable>
@@ -57,7 +57,7 @@
             class="lcars-button-error"
             [disabled]="removingRtId === item.rtId"
             (click)="removeIdentifier(item)">
-            {{ removingRtId === item.rtId ? 'Entfernen…' : 'Entfernen' }}
+            {{ removingRtId === item.rtId ? 'Removing…' : 'Remove' }}
           </button>
         </ng-template>
       </span>
@@ -67,12 +67,12 @@
 
 <!-- Add a phone number -->
 <div class="profile-section">
-  <h3 class="section-title">Telefonnummer hinzufügen</h3>
-  <p class="section-hint">Die Nummer wird per Einmalcode (SMS) bestätigt.</p>
+  <h3 class="section-title">Add Phone Number</h3>
+  <p class="section-hint">The number is confirmed via a one-time code (SMS).</p>
 
   <ng-container *ngIf="!phoneCodeSent">
     <div class="lcars-form-group">
-      <label for="phone-number">Telefonnummer</label>
+      <label for="phone-number">Phone number</label>
       <input
         type="text"
         id="phone-number"
@@ -88,14 +88,14 @@
         class="lcars-button-primary"
         [disabled]="phoneSending || !phoneNumber.trim()"
         (click)="sendPhoneCode()">
-        {{ phoneSending ? 'Senden…' : 'Code senden' }}
+        {{ phoneSending ? 'Sending…' : 'Send Code' }}
       </button>
     </div>
   </ng-container>
 
   <ng-container *ngIf="phoneCodeSent">
     <div class="lcars-form-group">
-      <label for="phone-code">Bestätigungscode</label>
+      <label for="phone-code">Verification code</label>
       <input
         type="text"
         id="phone-code"
@@ -104,9 +104,9 @@
         placeholder="000000"
         autocomplete="one-time-code"
         [disabled]="phoneVerifying" />
-      <span class="field-hint">Code gesendet an {{ phoneMaskedDestination }}.</span>
+      <span class="field-hint">Code sent to {{ phoneMaskedDestination }}.</span>
       <span *ngIf="phoneAttemptsRemaining !== null" class="field-hint">
-        Verbleibende Versuche: {{ phoneAttemptsRemaining }}
+        Attempts remaining: {{ phoneAttemptsRemaining }}
       </span>
     </div>
     <div class="lcars-actions lcars-actions--row">
@@ -115,21 +115,21 @@
         class="lcars-button-primary"
         [disabled]="phoneVerifying || !phoneCode.trim()"
         (click)="verifyPhoneCode()">
-        {{ phoneVerifying ? 'Bestätigen…' : 'Bestätigen' }}
+        {{ phoneVerifying ? 'Confirming…' : 'Confirm' }}
       </button>
-      <button type="button" class="lcars-button-outline" (click)="cancelPhone()">Abbrechen</button>
+      <button type="button" class="lcars-button-outline" (click)="cancelPhone()">Cancel</button>
     </div>
   </ng-container>
 </div>
 
 <!-- Add an e-mail address -->
 <div class="profile-section">
-  <h3 class="section-title">E-Mail-Adresse hinzufügen</h3>
-  <p class="section-hint">Die Adresse wird per Einmalcode (E-Mail) bestätigt.</p>
+  <h3 class="section-title">Add E-Mail Address</h3>
+  <p class="section-hint">The address is confirmed via a one-time code (e-mail).</p>
 
   <ng-container *ngIf="!emailCodeSent">
     <div class="lcars-form-group">
-      <label for="email-address">E-Mail-Adresse</label>
+      <label for="email-address">E-mail address</label>
       <input
         type="email"
         id="email-address"
@@ -145,14 +145,14 @@
         class="lcars-button-primary"
         [disabled]="emailSending || !email.trim()"
         (click)="sendEmailCode()">
-        {{ emailSending ? 'Senden…' : 'Code senden' }}
+        {{ emailSending ? 'Sending…' : 'Send Code' }}
       </button>
     </div>
   </ng-container>
 
   <ng-container *ngIf="emailCodeSent">
     <div class="lcars-form-group">
-      <label for="email-code">Bestätigungscode</label>
+      <label for="email-code">Verification code</label>
       <input
         type="text"
         id="email-code"
@@ -161,9 +161,9 @@
         placeholder="000000"
         autocomplete="one-time-code"
         [disabled]="emailVerifying" />
-      <span class="field-hint">Code gesendet an {{ emailMaskedDestination }}.</span>
+      <span class="field-hint">Code sent to {{ emailMaskedDestination }}.</span>
       <span *ngIf="emailAttemptsRemaining !== null" class="field-hint">
-        Verbleibende Versuche: {{ emailAttemptsRemaining }}
+        Attempts remaining: {{ emailAttemptsRemaining }}
       </span>
     </div>
     <div class="lcars-actions lcars-actions--row">
@@ -172,20 +172,20 @@
         class="lcars-button-primary"
         [disabled]="emailVerifying || !emailCode.trim()"
         (click)="verifyEmailCode()">
-        {{ emailVerifying ? 'Bestätigen…' : 'Bestätigen' }}
+        {{ emailVerifying ? 'Confirming…' : 'Confirm' }}
       </button>
-      <button type="button" class="lcars-button-outline" (click)="cancelEmail()">Abbrechen</button>
+      <button type="button" class="lcars-button-outline" (click)="cancelEmail()">Cancel</button>
     </div>
   </ng-container>
 </div>
 
 <!-- Enrol a client certificate -->
 <div class="profile-section">
-  <h3 class="section-title">Zertifikat hinzufügen</h3>
-  <p class="section-hint">Wählen Sie eine Zertifikatsdatei (DER oder PEM: .cer, .crt, .pem, .der).</p>
+  <h3 class="section-title">Add Certificate</h3>
+  <p class="section-hint">Choose a certificate file (DER or PEM: .cer, .crt, .pem, .der).</p>
   <div class="lcars-actions lcars-actions--row cert-actions">
     <label class="lcars-button-outline cert-file-label">
-      Datei wählen
+      Choose File
       <input
         type="file"
         class="cert-file-input"
@@ -198,7 +198,7 @@
       class="lcars-button-primary"
       [disabled]="enrollingCertificate || !certificateFileName"
       (click)="enrollCertificate()">
-      {{ enrollingCertificate ? 'Hinzufügen…' : 'Zertifikat hinzufügen' }}
+      {{ enrollingCertificate ? 'Adding…' : 'Add Certificate' }}
     </button>
   </div>
 </div>
