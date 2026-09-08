@@ -50,16 +50,18 @@ attributes:
     defaultValues:
       - false
 
-  # AB#5149 per-user outbound channel preference: which channel the platform uses for
-  # system-initiated messages (to-dos, document status). Canonical uppercase channel names
-  # ("TEAMS", "SIGNAL"; extensible, e.g. "EMAIL"). Deliberately a String rather than a CK enum so
-  # adding a channel needs no model migration and the value propagates verbatim into the mesh
-  # adapter's verified-caller principal (WriteVerifiedCaller@1 "preferredChannel"). Self-service
-  # only accepts a channel the user holds a valid verified binding for (TEAMS -> EntraIdObjectId,
-  # SIGNAL -> PhoneNumber); null means "no preference".
-  - id: PreferredChannel
+  # AB#5149 per-user outbound channel preference, binding-specific (revised): the rtId of the
+  # System.Identity/VerifiedExternalIdentifier the user chose as the target for system-initiated
+  # messages (to-dos, document status). The channel KIND is derived from the referenced binding
+  # (PhoneNumber -> SIGNAL, EntraIdObjectId -> TEAMS) — never stored separately, so the preference
+  # can name a concrete phone number when the user holds several. A String (24-hex rtId) rather
+  # than an association so the mesh adapter can read it as a plain user attribute and resolve
+  # kind + target itself (cross-repo contract: attribute name PreferredChannelBindingId).
+  # Self-service only accepts a binding that belongs to the user and is valid; null means
+  # "no preference". Deleting the referenced binding clears the preference in the same operation.
+  - id: PreferredChannelBindingId
     valueType: String
-    description: The user's preferred outbound channel for system-initiated messages ("TEAMS", "SIGNAL"; null = no preference). Set via self-service, restricted to channels with a valid verified binding.
+    description: The rtId of the VerifiedExternalIdentifier chosen as preferred outbound channel target for system-initiated messages (null = no preference). The channel kind is derived from the referenced binding. Set via self-service, restricted to the user's own valid bindings.
 
   - id: LockoutEnd
     valueType: DateTimeOffset

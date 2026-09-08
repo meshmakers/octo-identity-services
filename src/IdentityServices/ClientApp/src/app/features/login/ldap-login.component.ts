@@ -2,6 +2,7 @@ import { Component, OnInit, inject, ChangeDetectionStrategy } from '@angular/cor
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { ActivatedRoute, Router } from '@angular/router';
+import { TranslatePipe, TranslateService } from '@ngx-translate/core';
 import { LcarsPanelComponent } from '../../shared/components/lcars-panel/lcars-panel.component';
 import { LcarsHeaderComponent } from '../../shared/components/lcars-header/lcars-header.component';
 import { AuthApiService } from '../../core/services/auth-api.service';
@@ -13,6 +14,7 @@ import { LdapLoginRequest } from '../../core/models/login.models';
   imports: [
     CommonModule,
     FormsModule,
+    TranslatePipe,
     LcarsPanelComponent,
     LcarsHeaderComponent
   ],
@@ -24,6 +26,7 @@ export class LdapLoginComponent implements OnInit {
   private route = inject(ActivatedRoute);
   private router = inject(Router);
   private authApi = inject(AuthApiService);
+  private translate = inject(TranslateService);
 
   // Route params
   scheme = '';
@@ -46,13 +49,13 @@ export class LdapLoginComponent implements OnInit {
     this.returnUrl = this.route.snapshot.queryParams['returnUrl'] || '';
 
     if (!this.scheme) {
-      this.errorMessage = 'Invalid authentication provider';
+      this.errorMessage = this.translate.instant('LDAP_LOGIN.ERROR_INVALID_PROVIDER');
     }
   }
 
   onSubmit(): void {
     if (!this.username || !this.password) {
-      this.errorMessage = 'Please enter username and password';
+      this.errorMessage = this.translate.instant('LOGIN.ERROR_ENTER_CREDENTIALS');
       return;
     }
 
@@ -72,12 +75,12 @@ export class LdapLoginComponent implements OnInit {
         if (result.success && result.redirectUrl) {
           window.location.href = result.redirectUrl;
         } else {
-          this.errorMessage = result.errorMessage || 'Authentication failed';
+          this.errorMessage = result.errorMessage || this.translate.instant('LDAP_LOGIN.ERROR_AUTH_FAILED');
         }
       },
       error: (error) => {
         this.submitting = false;
-        this.errorMessage = error.error?.message || 'An error occurred during authentication';
+        this.errorMessage = error.error?.message || this.translate.instant('LDAP_LOGIN.ERROR_AUTH_GENERIC');
       }
     });
   }

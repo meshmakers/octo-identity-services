@@ -225,8 +225,11 @@ public class MyIdentifiersApiController(
     }
 
     /// <summary>
-    ///     Reads the current user's preferred outbound channel (AB#5149) — the channel the platform
-    ///     uses for system-initiated messages. Null means "no preference".
+    ///     Reads the current user's preferred outbound channel selection (AB#5149, binding-specific):
+    ///     the chosen binding (with its derived channel kind and display value; all null while no
+    ///     usable preference is set) plus every binding the user may choose right now. The channel
+    ///     kind is DERIVED from the referenced binding (PhoneNumber ⇒ SIGNAL, EntraIdObjectId ⇒
+    ///     TEAMS), never stored separately.
     /// </summary>
     [HttpGet("preferredChannel")]
     public async Task<ActionResult<PreferredChannelResponseDto>> GetPreferredChannel(string tenantId)
@@ -237,20 +240,24 @@ public class MyIdentifiersApiController(
             return NotFound();
         }
 
+        var selection = await preferredChannelService.GetSelectionAsync(user);
+        var options = await preferredChannelService.GetOptionsAsync(user);
         return Ok(new PreferredChannelResponseDto
         {
-            PreferredChannel = user.PreferredChannel,
-            SupportedChannels = preferredChannelService.SupportedChannels
+            BindingId = selection.BindingId?.ToString(),
+            Channel = selection.Channel,
+            IdentifierValue = selection.IdentifierValue,
+            Options = options.Select(ToOptionDto).ToList()
         });
     }
 
     /// <summary>
-    ///     Sets (or clears, with a null <c>PreferredChannel</c>) the current user's preferred outbound
-    ///     channel (AB#5149). A channel is only accepted while the user holds a valid verified binding
-    ///     of the channel's identifier kind (TEAMS ⇒ EntraIdObjectId, SIGNAL ⇒ PhoneNumber); the
-    ///     refusal is reported with <c>Success = false</c> and <c>Status = ChannelNotBound</c>, same
-    ///     status/success shape as the enrollment endpoints. An unknown channel name is a caller
-    ///     mistake and answers 400, mirroring the unknown-kind handling of <see cref="Remove" />.
+    ///     Sets (or clears, with a null <c>BindingId</c>) the current user's preferred outbound
+    ///     channel binding (AB#5149). The binding must be one of the caller's own valid bindings of a
+    ///     channel-mapped kind; anything else — malformed id, foreign binding, expired binding,
+    ///     unmapped kind — is refused with <c>Success = false</c> and
+    ///     <c>Status = BindingNotEligible</c>, same status/success shape as the enrollment endpoints
+    ///     (and deliberately without distinguishing "not yours" from "does not exist").
     /// </summary>
     [HttpPut("preferredChannel")]
     public async Task<ActionResult<SetPreferredChannelResponseDto>> SetPreferredChannel(string tenantId,
@@ -262,21 +269,23 @@ public class MyIdentifiersApiController(
             return NotFound();
         }
 
-        var result = await preferredChannelService.SetPreferredChannelAsync(user, request.PreferredChannel);
-        if (result.Status == SetPreferredChannelStatus.UnknownChannel)
-        {
-            return BadRequest(
-                $"Unknown channel '{request.PreferredChannel}'. Supported channels: " +
-                $"{string.Join(", ", preferredChannelService.SupportedChannels)}.");
-        }
-
+        var result = await preferredChannelService.SetPreferredChannelAsync(user, request.BindingId);
         return Ok(new SetPreferredChannelResponseDto
         {
             Status = result.Status.ToString(),
             Success = result.Status is SetPreferredChannelStatus.Set or SetPreferredChannelStatus.Cleared,
-            PreferredChannel = result.PreferredChannel
+            BindingId = result.Selection.BindingId?.ToString(),
+            Channel = result.Selection.Channel,
+            IdentifierValue = result.Selection.IdentifierValue
         });
     }
+
+    private static PreferredChannelOptionDto ToOptionDto(PreferredChannelOption option) => new()
+    {
+        BindingId = option.BindingId.ToString(),
+        Channel = option.Channel,
+        IdentifierValue = option.IdentifierValue
+    };
 
     private static VerifiedIdentifierDto ToDto(VerifiedIdentifierSummary summary) => new()
     {
@@ -386,19 +395,38 @@ public record RemoveIdentifierResponseDto
     public bool Success { get; init; }
 }
 
+/// <summary>One selectable preferred-channel target: a valid binding with its derived channel kind.</summary>
+public record PreferredChannelOptionDto
+{
+    /// <summary>The rtId of the VerifiedExternalIdentifier.</summary>
+    public string BindingId { get; init; } = string.Empty;
+
+    /// <summary>The channel derived from the binding's kind ("TEAMS" | "SIGNAL").</summary>
+    public string Channel { get; init; } = string.Empty;
+
+    /// <summary>The binding's identifier value, for display.</summary>
+    public string IdentifierValue { get; init; } = string.Empty;
+}
+
 public record PreferredChannelResponseDto
 {
-    /// <summary>The stored preference ("TEAMS" | "SIGNAL") or null for "no preference".</summary>
-    public string? PreferredChannel { get; init; }
+    /// <summary>The rtId of the chosen binding, or null for "no preference" (incl. dangling references).</summary>
+    public string? BindingId { get; init; }
 
-    /// <summary>All channel names the platform supports (whether or not the user may pick them).</summary>
-    public IReadOnlyList<string> SupportedChannels { get; init; } = [];
+    /// <summary>The channel derived from the chosen binding's kind ("TEAMS" | "SIGNAL"), or null.</summary>
+    public string? Channel { get; init; }
+
+    /// <summary>The chosen binding's identifier value, for display, or null.</summary>
+    public string? IdentifierValue { get; init; }
+
+    /// <summary>Every binding the user may choose right now.</summary>
+    public IReadOnlyList<PreferredChannelOptionDto> Options { get; init; } = [];
 }
 
 public record SetPreferredChannelRequestDto
 {
-    /// <summary>The channel to prefer ("TEAMS" | "SIGNAL", case-insensitive) or null to clear.</summary>
-    public string? PreferredChannel { get; init; }
+    /// <summary>The rtId of one of the caller's own valid bindings, or null to clear the preference.</summary>
+    public string? BindingId { get; init; }
 }
 
 public record SetPreferredChannelResponseDto
@@ -406,8 +434,11 @@ public record SetPreferredChannelResponseDto
     public string Status { get; init; } = string.Empty;
     public bool Success { get; init; }
 
-    /// <summary>The stored preference after the call (canonical spelling), or null.</summary>
-    public string? PreferredChannel { get; init; }
+    /// <summary>The effective selection after the call (null members while unset).</summary>
+    public string? BindingId { get; init; }
+
+    public string? Channel { get; init; }
+    public string? IdentifierValue { get; init; }
 }
 
 #endregion

@@ -14,6 +14,7 @@ public sealed class SelfServiceIdentifierService(
     IOtpChallengeStore challengeStore,
     IEnumerable<IOtpDeliveryChannel> deliveryChannels,
     TimeProvider timeProvider,
+    IPreferredChannelService preferredChannelService,
     ILogger<SelfServiceIdentifierService> logger) : ISelfServiceIdentifierService
 {
     private const int CodeLength = 6;
@@ -322,13 +323,22 @@ public sealed class SelfServiceIdentifierService(
         // Only ever remove the user's OWN identifier: confirm it is in this user's set first, so a
         // caller cannot delete another user's binding by guessing its (kind, value).
         var owned = await verifiedIdentifierResolver.GetByUserAsync(user.RtId);
-        var isOwn = owned.Any(s => s.IdentifierKind == identifierKind && s.IdentifierValue == identifierValue);
-        if (!isOwn)
+        var summary = owned.FirstOrDefault(s =>
+            s.IdentifierKind == identifierKind && s.IdentifierValue == identifierValue);
+        if (summary == null)
         {
             return false;
         }
 
-        return await verifiedIdentifierResolver.RemoveBindingAsync(identifierKind, identifierValue);
+        var removed = await verifiedIdentifierResolver.RemoveBindingAsync(identifierKind, identifierValue);
+        if (removed)
+        {
+            // AB#5149: a preference pointing at a removed binding would route system-initiated
+            // messages into a dead channel — clear it in the same operation, not lazily on read.
+            await preferredChannelService.ClearIfReferencedAsync(user, summary.RtId);
+        }
+
+        return removed;
     }
 
     private async Task<bool> IsOwnedByAnotherUserAsync(RtIdentifierKindEnum kind, string value, RtUser user)

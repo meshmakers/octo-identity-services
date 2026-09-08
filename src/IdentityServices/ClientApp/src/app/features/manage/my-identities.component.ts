@@ -1,17 +1,18 @@
 import { Component, OnInit, inject, ChangeDetectionStrategy } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
+import { TranslatePipe, TranslateService } from '@ngx-translate/core';
 import { ManageApiService } from '../../core/services/manage-api.service';
 import {
   VerifiedIdentifier,
   VerifiedIdentifierKind,
   EnrollmentTrust,
   IdentifierSource,
-  PreferredChannel
+  PreferredChannelOption
 } from '../../core/models/manage.models';
 
 /**
- * "Meine Identitäten" tab (AB#5135 / AB#5123, "Strang B" of Epic AB#4979): the signed-in user
+ * "My Identities" tab (AB#5135 / AB#5123, "Strang B" of Epic AB#4979): the signed-in user
  * manages their OWN strong channel identifiers — phone numbers and e-mail addresses (added ->
  * OTP -> verified) and client certificates — with no admin in the loop. Rendered inside
  * {@link ManageShellComponent} (inner content only).
@@ -22,19 +23,25 @@ import {
  * page, but the cross-origin bearer used there is replaced by the ClientApp's cookie/XSRF path.
  *
  * Identifiers with source === 'IdentityProvider' (e.g. EntraID / Teams oid, created automatically
- * on an EntraID login) are shown READ-ONLY: no Remove button, a "verwaltet über Identity Provider"
+ * on an EntraID login) are shown READ-ONLY: no Remove button, a "managed via Identity Provider"
  * note instead.
+ *
+ * Preferred outbound channel (AB#5149, binding-specific): the user picks the CONCRETE verified
+ * binding the system messages ("Microsoft Teams", "Signal (+43 ...)" per bound number) — the
+ * channel kind is derived server-side from the referenced binding. The selectable options come
+ * from the server (GET .../preferredChannel), never derived locally.
  */
 @Component({
   selector: 'app-my-identities',
   standalone: true,
-  imports: [CommonModule, FormsModule],
+  imports: [CommonModule, FormsModule, TranslatePipe],
   templateUrl: './my-identities.component.html',
   changeDetection: ChangeDetectionStrategy.Eager,
   styleUrl: './my-identities.component.scss'
 })
 export class MyIdentitiesComponent implements OnInit {
   private manageApi = inject(ManageApiService);
+  private translate = inject(TranslateService);
 
   loading = true;
   identifiers: VerifiedIdentifier[] = [];
@@ -67,17 +74,15 @@ export class MyIdentitiesComponent implements OnInit {
 
   removingRtId: string | null = null;
 
-  // Preferred outbound channel (AB#5149): which channel the system uses for messages it
-  // initiates. Only channels the user holds a valid verified binding for are offered.
-  preferredChannel: PreferredChannel | null = null;
+  // Preferred outbound channel (AB#5149, binding-specific): which verified binding the system
+  // messages for system-initiated contact. Options and the current selection are server-provided.
+  preferredBindingId: string | null = null;
+  preferredChannelOptions: PreferredChannelOption[] = [];
+  preferredChannelLoaded = false;
   savingPreferredChannel = false;
 
   ngOnInit(): void {
     this.reload();
-    this.manageApi.getPreferredChannel().subscribe({
-      next: (result) => (this.preferredChannel = result.preferredChannel),
-      error: () => (this.preferredChannel = null)
-    });
   }
 
   reload(): void {
@@ -90,70 +95,73 @@ export class MyIdentitiesComponent implements OnInit {
       error: () => {
         this.identifiers = [];
         this.loading = false;
-        this.setError('The identities could not be loaded.');
+        this.setError(this.translate.instant('MY_IDENTITIES.ERROR_LOAD'));
+      }
+    });
+    this.reloadPreferredChannel();
+  }
+
+  // === Preferred outbound channel (AB#5149, binding-specific) ===
+
+  private reloadPreferredChannel(): void {
+    this.manageApi.getPreferredChannel().subscribe({
+      next: (result) => {
+        this.preferredBindingId = result.bindingId;
+        this.preferredChannelOptions = result.options ?? [];
+        this.preferredChannelLoaded = true;
+      },
+      error: () => {
+        this.preferredBindingId = null;
+        this.preferredChannelOptions = [];
+        this.preferredChannelLoaded = true;
       }
     });
   }
 
-  // === Preferred outbound channel (AB#5149) ===
-
-  /** Channels selectable right now, derived from the identifier list already on the page. */
-  get availableChannels(): PreferredChannel[] {
-    const channels: PreferredChannel[] = [];
-    if (this.hasValidIdentifier('EntraIdObjectId')) {
-      channels.push('TEAMS');
-    }
-    if (this.hasValidIdentifier('PhoneNumber')) {
-      channels.push('SIGNAL');
-    }
-    return channels;
+  /** Display label for one option: product names stay untranslated, the target value disambiguates. */
+  optionLabel(option: PreferredChannelOption): string {
+    return option.channel === 'TEAMS'
+      ? 'Microsoft Teams'
+      : `Signal (${option.identifierValue})`;
   }
 
-  channelLabel(channel: PreferredChannel): string {
-    switch (channel) {
-      case 'TEAMS': return 'Microsoft Teams';
-      case 'SIGNAL': return 'Signal';
-      default: return channel;
-    }
-  }
-
-  setPreferredChannel(channel: PreferredChannel | null): void {
-    if (this.savingPreferredChannel || channel === this.preferredChannel) {
+  setPreferredChannel(bindingId: string | null): void {
+    if (this.savingPreferredChannel || bindingId === this.preferredBindingId) {
       return;
     }
-    const previous = this.preferredChannel;
-    this.preferredChannel = channel;
+    const previous = this.preferredBindingId;
+    this.preferredBindingId = bindingId;
     this.savingPreferredChannel = true;
     this.clearFeedback();
-    this.manageApi.setPreferredChannel({ preferredChannel: channel }).subscribe({
+    this.manageApi.setPreferredChannel({ bindingId }).subscribe({
       next: (result) => {
         this.savingPreferredChannel = false;
         if (result.success) {
-          this.preferredChannel = result.preferredChannel;
+          this.preferredBindingId = result.bindingId;
+          const chosen = this.preferredChannelOptions.find((o) => o.bindingId === result.bindingId);
           this.setSuccess(
-            channel === null
-              ? 'The preferred channel has been cleared.'
-              : `The preferred channel has been set to ${this.channelLabel(channel)}.`
+            bindingId === null || !chosen
+              ? this.translate.instant('MY_IDENTITIES.PREFERRED_CHANNEL_CLEARED')
+              : this.translate.instant('MY_IDENTITIES.PREFERRED_CHANNEL_SET',
+                  { channel: this.optionLabel(chosen) })
           );
         } else {
-          this.preferredChannel = previous;
+          this.preferredBindingId = previous;
           this.setError(
-            result.status === 'ChannelNotBound'
-              ? 'This channel requires a valid verified identity first.'
-              : 'The preferred channel could not be saved.'
+            result.status === 'BindingNotEligible'
+              ? this.translate.instant('MY_IDENTITIES.PREFERRED_CHANNEL_ERROR_NOT_ELIGIBLE')
+              : this.translate.instant('MY_IDENTITIES.PREFERRED_CHANNEL_ERROR_SAVE')
           );
+          // The refused binding may have expired since the options were loaded — refresh them.
+          this.reloadPreferredChannel();
         }
       },
       error: () => {
         this.savingPreferredChannel = false;
-        this.preferredChannel = previous;
-        this.setError('The preferred channel could not be saved.');
+        this.preferredBindingId = previous;
+        this.setError(this.translate.instant('MY_IDENTITIES.PREFERRED_CHANNEL_ERROR_SAVE'));
       }
     });
-  }
-
-  private hasValidIdentifier(kind: VerifiedIdentifierKind): boolean {
-    return this.identifiers.some((i) => i.identifierKind === kind && i.isValid);
   }
 
   isReadOnly(item: VerifiedIdentifier): boolean {
@@ -178,21 +186,21 @@ export class MyIdentitiesComponent implements OnInit {
             this.phoneCodeSent = true;
             this.phoneMaskedDestination = result.maskedDestination ?? number;
             this.phoneCode = '';
-            this.setSuccess('Ein Code wurde an die Telefonnummer gesendet.');
+            this.setSuccess(this.translate.instant('MY_IDENTITIES.PHONE_MSG_CODE_SENT'));
             break;
           case 'InvalidNumber':
-            this.setError('The phone number is invalid.');
+            this.setError(this.translate.instant('MY_IDENTITIES.PHONE_ERROR_INVALID'));
             break;
           case 'AlreadyOwnedByAnotherUser':
-            this.setError('Diese Telefonnummer ist bereits einem anderen Benutzer zugeordnet.');
+            this.setError(this.translate.instant('MY_IDENTITIES.PHONE_ERROR_OWNED'));
             break;
           default:
-            this.setError('The code could not be sent.');
+            this.setError(this.translate.instant('MY_IDENTITIES.WIZARD_ERROR_SEND'));
         }
       },
       error: () => {
         this.phoneSending = false;
-        this.setError('The code could not be sent.');
+        this.setError(this.translate.instant('MY_IDENTITIES.WIZARD_ERROR_SEND'));
       }
     });
   }
@@ -209,38 +217,39 @@ export class MyIdentitiesComponent implements OnInit {
         this.phoneVerifying = false;
         switch (result.status) {
           case 'Verified':
-            this.setSuccess('The phone number has been confirmed.');
+            this.setSuccess(this.translate.instant('MY_IDENTITIES.PHONE_MSG_VERIFIED'));
             this.resetPhoneWizard();
             this.phoneNumber = '';
             this.reload();
             break;
           case 'CodeMismatch':
             this.phoneAttemptsRemaining = result.attemptsRemaining;
-            this.setError(`Der Code ist falsch. Verbleibende Versuche: ${result.attemptsRemaining}.`);
+            this.setError(this.translate.instant('MY_IDENTITIES.WIZARD_ERROR_CODE_MISMATCH',
+              { count: result.attemptsRemaining }));
             break;
           case 'Expired':
-            this.setError('The code has expired. Please request a new one.');
+            this.setError(this.translate.instant('MY_IDENTITIES.WIZARD_ERROR_EXPIRED'));
             this.resetPhoneWizard();
             break;
           case 'AttemptLimitReached':
-            this.setError('The maximum number of attempts has been reached. Please request a new code.');
+            this.setError(this.translate.instant('MY_IDENTITIES.WIZARD_ERROR_ATTEMPTS'));
             this.resetPhoneWizard();
             break;
           case 'NoChallenge':
-            this.setError('There is no pending request. Please request a new code.');
+            this.setError(this.translate.instant('MY_IDENTITIES.WIZARD_ERROR_NO_CHALLENGE'));
             this.resetPhoneWizard();
             break;
           case 'AlreadyOwnedByAnotherUser':
-            this.setError('Diese Telefonnummer ist bereits einem anderen Benutzer zugeordnet.');
+            this.setError(this.translate.instant('MY_IDENTITIES.PHONE_ERROR_OWNED'));
             this.resetPhoneWizard();
             break;
           default:
-            this.setError('Confirmation failed.');
+            this.setError(this.translate.instant('MY_IDENTITIES.WIZARD_ERROR_CONFIRM'));
         }
       },
       error: () => {
         this.phoneVerifying = false;
-        this.setError('Confirmation failed.');
+        this.setError(this.translate.instant('MY_IDENTITIES.WIZARD_ERROR_CONFIRM'));
       }
     });
   }
@@ -269,21 +278,21 @@ export class MyIdentitiesComponent implements OnInit {
             this.emailCodeSent = true;
             this.emailMaskedDestination = result.maskedDestination ?? address;
             this.emailCode = '';
-            this.setSuccess('Ein Code wurde an die E-Mail-Adresse gesendet.');
+            this.setSuccess(this.translate.instant('MY_IDENTITIES.EMAIL_MSG_CODE_SENT'));
             break;
           case 'InvalidEmail':
-            this.setError('The e-mail address is invalid.');
+            this.setError(this.translate.instant('MY_IDENTITIES.EMAIL_ERROR_INVALID'));
             break;
           case 'AlreadyOwnedByAnotherUser':
-            this.setError('Diese E-Mail-Adresse ist bereits einem anderen Benutzer zugeordnet.');
+            this.setError(this.translate.instant('MY_IDENTITIES.EMAIL_ERROR_OWNED'));
             break;
           default:
-            this.setError('The code could not be sent.');
+            this.setError(this.translate.instant('MY_IDENTITIES.WIZARD_ERROR_SEND'));
         }
       },
       error: () => {
         this.emailSending = false;
-        this.setError('The code could not be sent.');
+        this.setError(this.translate.instant('MY_IDENTITIES.WIZARD_ERROR_SEND'));
       }
     });
   }
@@ -300,38 +309,39 @@ export class MyIdentitiesComponent implements OnInit {
         this.emailVerifying = false;
         switch (result.status) {
           case 'Verified':
-            this.setSuccess('The e-mail address has been confirmed.');
+            this.setSuccess(this.translate.instant('MY_IDENTITIES.EMAIL_MSG_VERIFIED'));
             this.resetEmailWizard();
             this.email = '';
             this.reload();
             break;
           case 'CodeMismatch':
             this.emailAttemptsRemaining = result.attemptsRemaining;
-            this.setError(`Der Code ist falsch. Verbleibende Versuche: ${result.attemptsRemaining}.`);
+            this.setError(this.translate.instant('MY_IDENTITIES.WIZARD_ERROR_CODE_MISMATCH',
+              { count: result.attemptsRemaining }));
             break;
           case 'Expired':
-            this.setError('The code has expired. Please request a new one.');
+            this.setError(this.translate.instant('MY_IDENTITIES.WIZARD_ERROR_EXPIRED'));
             this.resetEmailWizard();
             break;
           case 'AttemptLimitReached':
-            this.setError('The maximum number of attempts has been reached. Please request a new code.');
+            this.setError(this.translate.instant('MY_IDENTITIES.WIZARD_ERROR_ATTEMPTS'));
             this.resetEmailWizard();
             break;
           case 'NoChallenge':
-            this.setError('There is no pending request. Please request a new code.');
+            this.setError(this.translate.instant('MY_IDENTITIES.WIZARD_ERROR_NO_CHALLENGE'));
             this.resetEmailWizard();
             break;
           case 'AlreadyOwnedByAnotherUser':
-            this.setError('Diese E-Mail-Adresse ist bereits einem anderen Benutzer zugeordnet.');
+            this.setError(this.translate.instant('MY_IDENTITIES.EMAIL_ERROR_OWNED'));
             this.resetEmailWizard();
             break;
           default:
-            this.setError('Confirmation failed.');
+            this.setError(this.translate.instant('MY_IDENTITIES.WIZARD_ERROR_CONFIRM'));
         }
       },
       error: () => {
         this.emailVerifying = false;
-        this.setError('Confirmation failed.');
+        this.setError(this.translate.instant('MY_IDENTITIES.WIZARD_ERROR_CONFIRM'));
       }
     });
   }
@@ -370,27 +380,27 @@ export class MyIdentitiesComponent implements OnInit {
         this.enrollingCertificate = false;
         switch (result.status) {
           case 'Enrolled':
-            this.setSuccess('The certificate has been added.');
+            this.setSuccess(this.translate.instant('MY_IDENTITIES.CERT_MSG_ADDED'));
             this.certificateBase64 = '';
             this.certificateFileName = '';
             this.reload();
             break;
           case 'Unreadable':
-            this.setError('The file could not be read as a certificate.');
+            this.setError(this.translate.instant('MY_IDENTITIES.CERT_ERROR_UNREADABLE'));
             break;
           case 'NotValid':
-            this.setError('The certificate is not valid (expired or not yet valid).');
+            this.setError(this.translate.instant('MY_IDENTITIES.CERT_ERROR_NOT_VALID'));
             break;
           case 'AlreadyOwnedByAnotherUser':
-            this.setError('Dieses Zertifikat ist bereits einem anderen Benutzer zugeordnet.');
+            this.setError(this.translate.instant('MY_IDENTITIES.CERT_ERROR_OWNED'));
             break;
           default:
-            this.setError('The certificate could not be added.');
+            this.setError(this.translate.instant('MY_IDENTITIES.CERT_ERROR_ADD'));
         }
       },
       error: () => {
         this.enrollingCertificate = false;
-        this.setError('The certificate could not be added.');
+        this.setError(this.translate.instant('MY_IDENTITIES.CERT_ERROR_ADD'));
       }
     });
   }
@@ -401,7 +411,8 @@ export class MyIdentitiesComponent implements OnInit {
     if (this.isReadOnly(item)) {
       return;
     }
-    const confirmed = window.confirm(`Really remove identity "${item.identifierValue}"?`);
+    const confirmed = window.confirm(
+      this.translate.instant('MY_IDENTITIES.CONFIRM_REMOVE', { value: item.identifierValue }));
     if (!confirmed) {
       return;
     }
@@ -413,15 +424,17 @@ export class MyIdentitiesComponent implements OnInit {
         next: (result) => {
           this.removingRtId = null;
           if (result.success) {
-            this.setSuccess('The identity has been removed.');
+            this.setSuccess(this.translate.instant('MY_IDENTITIES.REMOVED'));
+            // Also refreshes the preferred channel: removing the preferred binding clears the
+            // preference server-side in the same operation.
             this.reload();
           } else {
-            this.setError('The identity could not be removed.');
+            this.setError(this.translate.instant('MY_IDENTITIES.ERROR_REMOVE'));
           }
         },
         error: () => {
           this.removingRtId = null;
-          this.setError('The identity could not be removed.');
+          this.setError(this.translate.instant('MY_IDENTITIES.ERROR_REMOVE'));
         }
       });
   }
@@ -430,28 +443,28 @@ export class MyIdentitiesComponent implements OnInit {
 
   kindLabel(kind: VerifiedIdentifierKind): string {
     switch (kind) {
-      case 'PhoneNumber': return 'Phone number';
-      case 'EmailAddress': return 'E-mail address';
-      case 'EntraIdObjectId': return 'EntraID / Teams';
-      case 'ClientCertificateFingerprint': return 'Certificate';
+      case 'PhoneNumber': return this.translate.instant('MY_IDENTITIES.KIND_PHONE');
+      case 'EmailAddress': return this.translate.instant('MY_IDENTITIES.KIND_EMAIL');
+      case 'EntraIdObjectId': return this.translate.instant('MY_IDENTITIES.KIND_ENTRA');
+      case 'ClientCertificateFingerprint': return this.translate.instant('MY_IDENTITIES.KIND_CERTIFICATE');
       default: return kind;
     }
   }
 
   trustLabel(trust: EnrollmentTrust): string {
     switch (trust) {
-      case 'Strong': return 'Strong';
-      case 'Weak': return 'Weak';
-      case 'None': return 'None';
+      case 'Strong': return this.translate.instant('MY_IDENTITIES.TRUST_STRONG');
+      case 'Weak': return this.translate.instant('MY_IDENTITIES.TRUST_WEAK');
+      case 'None': return this.translate.instant('MY_IDENTITIES.TRUST_NONE');
       default: return trust;
     }
   }
 
   sourceLabel(source: IdentifierSource): string {
     switch (source) {
-      case 'SelfService': return 'Self-enrolled';
-      case 'Admin': return 'Administrator';
-      case 'IdentityProvider': return 'Identity Provider';
+      case 'SelfService': return this.translate.instant('MY_IDENTITIES.SOURCE_SELF');
+      case 'Admin': return this.translate.instant('MY_IDENTITIES.SOURCE_ADMIN');
+      case 'IdentityProvider': return this.translate.instant('MY_IDENTITIES.SOURCE_IDP');
       default: return source;
     }
   }

@@ -2,6 +2,7 @@ import { Component, OnInit, inject, ChangeDetectionStrategy } from '@angular/cor
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { Router, ActivatedRoute, RouterLink } from '@angular/router';
+import { TranslatePipe, TranslateService } from '@ngx-translate/core';
 import { LcarsPanelComponent } from '../../../shared/components/lcars-panel/lcars-panel.component';
 import { LcarsHeaderComponent } from '../../../shared/components/lcars-header/lcars-header.component';
 import { ManageApiService } from '../../../core/services/manage-api.service';
@@ -10,42 +11,42 @@ import { TwoFactorStatus } from '../../../core/models/manage.models';
 @Component({
   selector: 'app-two-factor-status',
   standalone: true,
-  imports: [CommonModule, FormsModule, RouterLink, LcarsPanelComponent, LcarsHeaderComponent],
+  imports: [CommonModule, FormsModule, RouterLink, TranslatePipe, LcarsPanelComponent, LcarsHeaderComponent],
   template: `
     <div class="lcars-auth-container">
       <app-lcars-panel>
-        <app-lcars-header subtitle="Two-Factor Authentication"></app-lcars-header>
+        <app-lcars-header [subtitle]="'TWO_FACTOR.SUBTITLE' | translate"></app-lcars-header>
 
         <div *ngIf="loading" class="lcars-loading">
           <div class="lcars-loading__spinner"></div>
-          <span class="lcars-loading__text">Loading</span>
+          <span class="lcars-loading__text">{{ 'COMMON.LOADING' | translate }}</span>
         </div>
 
         <ng-container *ngIf="!loading && status">
           <div class="status-section">
             <div class="status-item">
-              <span class="status-item__label">Status</span>
+              <span class="status-item__label">{{ 'TWO_FACTOR.STATUS' | translate }}</span>
               <span class="status-item__value">
                 <span class="status-badge" [class.status-badge--success]="status.enabled" [class.status-badge--warning]="!status.enabled">
-                  {{ status.enabled ? 'Enabled' : 'Disabled' }}
+                  {{ (status.enabled ? 'TWO_FACTOR.ENABLED' : 'TWO_FACTOR.DISABLED') | translate }}
                 </span>
               </span>
             </div>
 
             <div class="status-item" *ngIf="status.enabled">
-              <span class="status-item__label">Authenticator App</span>
+              <span class="status-item__label">{{ 'TWO_FACTOR.AUTHENTICATOR_APP' | translate }}</span>
               <span class="status-item__value">
                 <span class="status-badge" [class.status-badge--success]="status.hasAuthenticator">
-                  {{ status.hasAuthenticator ? 'Configured' : 'Not Configured' }}
+                  {{ (status.hasAuthenticator ? 'TWO_FACTOR.CONFIGURED' : 'TWO_FACTOR.NOT_CONFIGURED') | translate }}
                 </span>
               </span>
             </div>
 
             <div class="status-item" *ngIf="status.enabled">
-              <span class="status-item__label">Recovery Codes</span>
+              <span class="status-item__label">{{ 'TWO_FACTOR.RECOVERY_CODES' | translate }}</span>
               <span class="status-item__value">
                 <span class="status-badge" [class.status-badge--warning]="status.recoveryCodesLeft <= 3" [class.status-badge--success]="status.recoveryCodesLeft > 3">
-                  {{ status.recoveryCodesLeft }} remaining
+                  {{ 'TWO_FACTOR.REMAINING' | translate: { count: status.recoveryCodesLeft } }}
                 </span>
               </span>
             </div>
@@ -53,8 +54,7 @@ import { TwoFactorStatus } from '../../../core/models/manage.models';
 
           <div class="info-section" *ngIf="!status.enabled">
             <p class="info-text">
-              Two-factor authentication adds an extra layer of security to your account.
-              When enabled, you'll need to enter a code from your authenticator app in addition to your password.
+              {{ 'TWO_FACTOR.INFO' | translate }}
             </p>
           </div>
 
@@ -65,7 +65,7 @@ import { TwoFactorStatus } from '../../../core/models/manage.models';
             </div>
 
             <div class="lcars-form-group">
-              <label for="disableCode">Enter authenticator code to disable 2FA</label>
+              <label for="disableCode">{{ 'TWO_FACTOR.DISABLE_CODE_LABEL' | translate }}</label>
               <input
                 type="text"
                 id="disableCode"
@@ -83,10 +83,10 @@ import { TwoFactorStatus } from '../../../core/models/manage.models';
                 class="lcars-button-danger"
                 [disabled]="submitting || disableCode.length < 6"
                 (click)="onDisableTwoFactor()">
-                {{ submitting ? 'Disabling...' : 'Disable Two-Factor Auth' }}
+                {{ (submitting ? 'TWO_FACTOR.DISABLING' : 'TWO_FACTOR.DISABLE') | translate }}
               </button>
               <button type="button" class="lcars-button-outline" (click)="showDisableForm = false" [disabled]="submitting">
-                Cancel
+                {{ 'COMMON.CANCEL' | translate }}
               </button>
             </div>
           </div>
@@ -94,25 +94,25 @@ import { TwoFactorStatus } from '../../../core/models/manage.models';
           <!-- Actions when not showing disable form -->
           <div class="lcars-actions" *ngIf="!showDisableForm">
             <a *ngIf="!status.enabled" routerLink="setup" class="lcars-button-primary">
-              Enable Two-Factor Authentication
+              {{ 'TWO_FACTOR.ENABLE' | translate }}
             </a>
 
             <button *ngIf="status.enabled && status.recoveryCodesLeft <= 3" type="button" class="lcars-button-warning" (click)="onGenerateRecoveryCodes()">
-              Generate New Recovery Codes
+              {{ 'TWO_FACTOR.GENERATE_NEW_CODES' | translate }}
             </button>
 
             <button *ngIf="status.enabled" type="button" class="lcars-button-outline" (click)="showDisableForm = true">
-              Disable Two-Factor Auth
+              {{ 'TWO_FACTOR.DISABLE' | translate }}
             </button>
 
             <button type="button" class="lcars-button-outline" (click)="goBack()">
-              Back to Profile
+              {{ 'COMMON.BACK_TO_PROFILE' | translate }}
             </button>
           </div>
         </ng-container>
 
         <div *ngIf="!loading && !status" class="lcars-error-message">
-          Failed to load two-factor status. Please try again.
+          {{ 'TWO_FACTOR.ERROR_LOAD_STATUS' | translate }}
         </div>
       </app-lcars-panel>
     </div>
@@ -124,6 +124,7 @@ export class TwoFactorStatusComponent implements OnInit {
   private manageApi = inject(ManageApiService);
   private router = inject(Router);
   private route = inject(ActivatedRoute);
+  private translate = inject(TranslateService);
 
   loading = true;
   submitting = false;
@@ -161,12 +162,12 @@ export class TwoFactorStatusComponent implements OnInit {
           this.disableCode = '';
           this.loadStatus();
         } else {
-          this.errorMessage = result.errorMessage || 'Failed to disable two-factor authentication';
+          this.errorMessage = result.errorMessage || this.translate.instant('TWO_FACTOR.ERROR_DISABLE');
         }
       },
       error: (error) => {
         this.submitting = false;
-        this.errorMessage = error.error?.message || 'An error occurred';
+        this.errorMessage = error.error?.message || this.translate.instant('COMMON.ERROR_GENERIC');
       }
     });
   }

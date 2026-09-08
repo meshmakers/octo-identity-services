@@ -1,5 +1,6 @@
 import { Component, OnInit, inject, ChangeDetectionStrategy } from '@angular/core';
 import { CommonModule } from '@angular/common';
+import { TranslatePipe } from '@ngx-translate/core';
 import { ManageApiService } from '../../core/services/manage-api.service';
 import { UserProfile } from '../../core/models/manage.models';
 
@@ -12,81 +13,81 @@ import { UserProfile } from '../../core/models/manage.models';
 @Component({
   selector: 'app-profile',
   standalone: true,
-  imports: [CommonModule],
+  imports: [CommonModule, TranslatePipe],
   template: `
     <div *ngIf="loading" class="lcars-loading">
       <div class="lcars-loading__spinner"></div>
-      <span class="lcars-loading__text">Loading</span>
+      <span class="lcars-loading__text">{{ 'COMMON.LOADING' | translate }}</span>
     </div>
 
     <ng-container *ngIf="!loading && profile">
       <div class="profile-section">
-        <h3 class="section-title">Account Information</h3>
+        <h3 class="section-title">{{ 'PROFILE.ACCOUNT_INFORMATION' | translate }}</h3>
 
         <div class="profile-item">
-          <span class="profile-item__label">Tenant</span>
+          <span class="profile-item__label">{{ 'PROFILE.TENANT' | translate }}</span>
           <span class="profile-item__value">{{ profile.tenantId }}</span>
         </div>
 
         <div class="profile-item">
-          <span class="profile-item__label">Username</span>
+          <span class="profile-item__label">{{ 'PROFILE.USERNAME' | translate }}</span>
           <span class="profile-item__value">{{ profile.userName }}</span>
         </div>
 
         <div class="profile-item" *ngIf="profile.email">
-          <span class="profile-item__label">Email</span>
+          <span class="profile-item__label">{{ 'PROFILE.EMAIL' | translate }}</span>
           <span class="profile-item__value">
             {{ profile.email }}
             <span class="status-badge" [class.status-badge--success]="profile.emailConfirmed" [class.status-badge--warning]="!profile.emailConfirmed">
-              {{ profile.emailConfirmed ? 'Verified' : 'Not Verified' }}
+              {{ (profile.emailConfirmed ? 'PROFILE.VERIFIED' : 'PROFILE.NOT_VERIFIED') | translate }}
             </span>
           </span>
         </div>
 
         <div class="profile-item" *ngIf="profile.phoneNumber">
-          <span class="profile-item__label">Phone</span>
+          <span class="profile-item__label">{{ 'PROFILE.PHONE' | translate }}</span>
           <span class="profile-item__value">
             {{ profile.phoneNumber }}
             <span class="status-badge" [class.status-badge--success]="profile.phoneNumberConfirmed">
-              {{ profile.phoneNumberConfirmed ? 'Verified' : 'Not Verified' }}
+              {{ (profile.phoneNumberConfirmed ? 'PROFILE.VERIFIED' : 'PROFILE.NOT_VERIFIED') | translate }}
             </span>
           </span>
         </div>
       </div>
 
       <div class="profile-section">
-        <h3 class="section-title">Roles</h3>
+        <h3 class="section-title">{{ 'PROFILE.ROLES' | translate }}</h3>
         <div *ngIf="profile.roles.length" class="role-badges">
           <span *ngFor="let role of profile.roles" class="status-badge status-badge--info">{{ role }}</span>
         </div>
         <div *ngIf="!profile.roles.length" class="profile-item">
-          <span class="profile-item__value">No roles assigned</span>
+          <span class="profile-item__value">{{ 'PROFILE.NO_ROLES' | translate }}</span>
         </div>
       </div>
 
       <div class="profile-section">
-        <h3 class="section-title">Groups</h3>
+        <h3 class="section-title">{{ 'PROFILE.GROUPS' | translate }}</h3>
         <div *ngIf="profile.groups.length" class="role-badges">
           <span *ngFor="let group of profile.groups" class="status-badge status-badge--info">{{ group }}</span>
         </div>
         <div *ngIf="!profile.groups.length" class="profile-item">
-          <span class="profile-item__value">No group memberships</span>
+          <span class="profile-item__value">{{ 'PROFILE.NO_GROUPS' | translate }}</span>
         </div>
       </div>
 
       <div class="profile-section">
-        <h3 class="section-title">Allowed Tenants</h3>
+        <h3 class="section-title">{{ 'PROFILE.ALLOWED_TENANTS' | translate }}</h3>
         <div *ngIf="profile.allowedTenants.length" class="role-badges">
           <span *ngFor="let tenant of profile.allowedTenants" class="status-badge status-badge--info">{{ tenant }}</span>
         </div>
         <div *ngIf="!profile.allowedTenants.length" class="profile-item">
-          <span class="profile-item__value">No additional tenants</span>
+          <span class="profile-item__value">{{ 'PROFILE.NO_TENANTS' | translate }}</span>
         </div>
       </div>
     </ng-container>
 
     <div *ngIf="!loading && !profile" class="lcars-error-message">
-      Failed to load profile. Please try again.
+      {{ 'PROFILE.ERROR_LOAD' | translate }}
     </div>
   `,
   changeDetection: ChangeDetectionStrategy.Eager,

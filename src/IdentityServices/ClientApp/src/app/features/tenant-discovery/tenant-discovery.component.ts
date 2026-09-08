@@ -3,6 +3,7 @@ import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { ActivatedRoute } from '@angular/router';
 import { HttpClient } from '@angular/common/http';
+import { TranslatePipe, TranslateService } from '@ngx-translate/core';
 import { LcarsPanelComponent } from '../../shared/components/lcars-panel/lcars-panel.component';
 import { LcarsHeaderComponent } from '../../shared/components/lcars-header/lcars-header.component';
 
@@ -18,6 +19,7 @@ interface TenantDiscoveryResult {
   imports: [
     CommonModule,
     FormsModule,
+    TranslatePipe,
     LcarsPanelComponent,
     LcarsHeaderComponent
   ],
@@ -28,6 +30,7 @@ interface TenantDiscoveryResult {
 export class TenantDiscoveryComponent implements OnInit {
   private route = inject(ActivatedRoute);
   private http = inject(HttpClient);
+  private translate = inject(TranslateService);
 
   // State
   step: 'input' | 'select' | 'error' = 'input';
@@ -70,7 +73,7 @@ export class TenantDiscoveryComponent implements OnInit {
 
         if (!result.found || result.tenants.length === 0) {
           this.step = 'error';
-          this.errorMessage = result.message || 'Unable to determine your organization. Please contact your administrator.';
+          this.errorMessage = result.message || this.translate.instant('TENANT_DISCOVERY.ERROR_NOT_FOUND');
           return;
         }
 
@@ -89,10 +92,10 @@ export class TenantDiscoveryComponent implements OnInit {
         this.loading = false;
         if (err.status === 429) {
           this.step = 'error';
-          this.errorMessage = 'Too many attempts. Please wait a moment and try again.';
+          this.errorMessage = this.translate.instant('TENANT_DISCOVERY.ERROR_RATE_LIMIT');
         } else {
           this.step = 'error';
-          this.errorMessage = 'An error occurred. Please try again later.';
+          this.errorMessage = this.translate.instant('TENANT_DISCOVERY.ERROR_GENERIC');
         }
       }
     });

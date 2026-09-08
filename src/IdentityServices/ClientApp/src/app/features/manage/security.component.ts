@@ -1,6 +1,7 @@
 import { Component, OnInit, inject, ChangeDetectionStrategy } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { RouterLink, ActivatedRoute } from '@angular/router';
+import { TranslatePipe } from '@ngx-translate/core';
 import { ManageApiService } from '../../core/services/manage-api.service';
 import { UserProfile } from '../../core/models/manage.models';
 import { getTenantIdFromUrl } from '../../core/utils/tenant.utils';
@@ -15,58 +16,58 @@ import { getTenantIdFromUrl } from '../../core/utils/tenant.utils';
 @Component({
   selector: 'app-security',
   standalone: true,
-  imports: [CommonModule, RouterLink],
+  imports: [CommonModule, RouterLink, TranslatePipe],
   template: `
     <div *ngIf="loading" class="lcars-loading">
       <div class="lcars-loading__spinner"></div>
-      <span class="lcars-loading__text">Loading</span>
+      <span class="lcars-loading__text">{{ 'COMMON.LOADING' | translate }}</span>
     </div>
 
     <ng-container *ngIf="!loading && profile">
       <div class="profile-section">
-        <h3 class="section-title">Security</h3>
+        <h3 class="section-title">{{ 'SECURITY.TITLE' | translate }}</h3>
 
         <div class="profile-item">
-          <span class="profile-item__label">Password</span>
+          <span class="profile-item__label">{{ 'SECURITY.PASSWORD' | translate }}</span>
           <span class="profile-item__value">
             <span class="status-badge status-badge--info">
-              {{ profile.hasPassword ? 'Set' : 'Not Set' }}
+              {{ (profile.hasPassword ? 'SECURITY.SET' : 'SECURITY.NOT_SET') | translate }}
             </span>
             <a [routerLink]="passwordLink" class="action-link">
-              {{ profile.hasPassword ? 'Change' : 'Set Password' }}
+              {{ (profile.hasPassword ? 'SECURITY.CHANGE' : 'SECURITY.SET_PASSWORD') | translate }}
             </a>
           </span>
         </div>
 
         <div class="profile-item">
-          <span class="profile-item__label">Two-Factor Auth</span>
+          <span class="profile-item__label">{{ 'SECURITY.TWO_FACTOR' | translate }}</span>
           <span class="profile-item__value">
             <span class="status-badge" [class.status-badge--success]="profile.twoFactorEnabled" [class.status-badge--warning]="!profile.twoFactorEnabled">
-              {{ profile.twoFactorEnabled ? 'Enabled' : 'Disabled' }}
+              {{ (profile.twoFactorEnabled ? 'SECURITY.ENABLED' : 'SECURITY.DISABLED') | translate }}
             </span>
-            <a [routerLink]="['/', tenantId, 'manage', '2fa']" class="action-link">Manage</a>
+            <a [routerLink]="['/', tenantId, 'manage', '2fa']" class="action-link">{{ 'SECURITY.MANAGE' | translate }}</a>
           </span>
         </div>
 
         <div class="profile-item">
-          <span class="profile-item__label">External Logins</span>
+          <span class="profile-item__label">{{ 'SECURITY.EXTERNAL_LOGINS' | translate }}</span>
           <span class="profile-item__value">
-            {{ profile.externalLogins.length }} connected
-            <a [routerLink]="['/', tenantId, 'manage', 'logins']" class="action-link">Manage</a>
+            {{ 'SECURITY.CONNECTED' | translate: { count: profile.externalLogins.length } }}
+            <a [routerLink]="['/', tenantId, 'manage', 'logins']" class="action-link">{{ 'SECURITY.MANAGE' | translate }}</a>
           </span>
         </div>
 
         <div class="profile-item">
-          <span class="profile-item__label">App Permissions</span>
+          <span class="profile-item__label">{{ 'SECURITY.APP_PERMISSIONS' | translate }}</span>
           <span class="profile-item__value">
-            <a [routerLink]="['/', tenantId, 'grants']" class="action-link">View Granted Apps</a>
+            <a [routerLink]="['/', tenantId, 'grants']" class="action-link">{{ 'SECURITY.VIEW_GRANTED' | translate }}</a>
           </span>
         </div>
       </div>
     </ng-container>
 
     <div *ngIf="!loading && !profile" class="lcars-error-message">
-      Failed to load security settings. Please try again.
+      {{ 'SECURITY.ERROR_LOAD' | translate }}
     </div>
   `,
   changeDetection: ChangeDetectionStrategy.Eager,

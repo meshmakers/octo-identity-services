@@ -1,6 +1,5 @@
 <p class="section-hint">
-  Manage your personal verified identities (phone number, e-mail and certificates) here.
-  They can be used for strong authentication across channels.
+  {{ 'MY_IDENTITIES.HINT' | translate }}
 </p>
 
 <div *ngIf="feedbackKind" class="feedback" [class.feedback--success]="feedbackKind === 'success'" [class.feedback--error]="feedbackKind === 'error'">
@@ -9,24 +8,24 @@
 
 <!-- Current identifiers -->
 <div class="profile-section">
-  <h3 class="section-title">Verified Identities</h3>
+  <h3 class="section-title">{{ 'MY_IDENTITIES.VERIFIED_TITLE' | translate }}</h3>
 
   <div *ngIf="loading" class="lcars-loading">
     <div class="lcars-loading__spinner"></div>
-    <span class="lcars-loading__text">Loading</span>
+    <span class="lcars-loading__text">{{ 'COMMON.LOADING' | translate }}</span>
   </div>
 
   <p *ngIf="!loading && identifiers.length === 0" class="section-hint">
-    No identities have been added yet.
+    {{ 'MY_IDENTITIES.EMPTY' | translate }}
   </p>
 
   <div *ngIf="!loading && identifiers.length" class="identifier-table" role="table">
     <div class="identifier-row identifier-head" role="row">
-      <span role="columnheader">Type</span>
-      <span role="columnheader">Value</span>
-      <span role="columnheader">Trust</span>
-      <span role="columnheader">Source</span>
-      <span role="columnheader">Status</span>
+      <span role="columnheader">{{ 'MY_IDENTITIES.COL_TYPE' | translate }}</span>
+      <span role="columnheader">{{ 'MY_IDENTITIES.COL_VALUE' | translate }}</span>
+      <span role="columnheader">{{ 'MY_IDENTITIES.COL_TRUST' | translate }}</span>
+      <span role="columnheader">{{ 'MY_IDENTITIES.COL_SOURCE' | translate }}</span>
+      <span role="columnheader">{{ 'MY_IDENTITIES.COL_STATUS' | translate }}</span>
       <span role="columnheader" class="col-actions"></span>
     </div>
 
@@ -41,14 +40,14 @@
       <span role="cell">{{ sourceLabel(item.source) }}</span>
       <span role="cell">
         <span class="status-badge" [class.status-badge--success]="item.isValid" [class.status-badge--warning]="!item.isValid">
-          {{ item.isValid ? 'Valid' : 'Invalid' }}
+          {{ (item.isValid ? 'MY_IDENTITIES.VALID' : 'MY_IDENTITIES.INVALID') | translate }}
         </span>
-        <span *ngIf="item.validUntil" class="valid-until">until {{ item.validUntil | date: 'short' }}</span>
+        <span *ngIf="item.validUntil" class="valid-until">{{ 'MY_IDENTITIES.UNTIL' | translate }} {{ item.validUntil | date: 'short' }}</span>
       </span>
       <span role="cell" class="col-actions">
         <ng-container *ngIf="isReadOnly(item); else removable">
-          <span class="managed-note" title="Created automatically after an EntraID sign-in">
-            managed via Identity Provider
+          <span class="managed-note" [title]="'MY_IDENTITIES.MANAGED_VIA_IDP_TITLE' | translate">
+            {{ 'MY_IDENTITIES.MANAGED_VIA_IDP' | translate }}
           </span>
         </ng-container>
         <ng-template #removable>
@@ -57,7 +56,7 @@
             class="lcars-button-error"
             [disabled]="removingRtId === item.rtId"
             (click)="removeIdentifier(item)">
-            {{ removingRtId === item.rtId ? 'Removing…' : 'Remove' }}
+            {{ (removingRtId === item.rtId ? 'COMMON.REMOVING' : 'COMMON.REMOVE') | translate }}
           </button>
         </ng-template>
       </span>
@@ -65,50 +64,49 @@
   </div>
 </div>
 
-<!-- Preferred outbound channel (AB#5149) -->
-<div class="profile-section" *ngIf="!loading">
-  <h3 class="section-title">Preferred Channel</h3>
+<!-- Preferred outbound channel (AB#5149, binding-specific) -->
+<div class="profile-section" *ngIf="!loading && preferredChannelLoaded">
+  <h3 class="section-title">{{ 'MY_IDENTITIES.PREFERRED_CHANNEL_TITLE' | translate }}</h3>
   <p class="section-hint">
-    Used for messages the system sends to you; replies always use the channel you wrote on.
-    Only channels with a valid verified identity can be selected.
+    {{ 'MY_IDENTITIES.PREFERRED_CHANNEL_HINT' | translate }}
   </p>
 
-  <p *ngIf="availableChannels.length === 0" class="section-hint">
-    No channel available yet — add and verify a phone number (Signal) or sign in via EntraID (Teams) first.
+  <p *ngIf="preferredChannelOptions.length === 0" class="section-hint">
+    {{ 'MY_IDENTITIES.PREFERRED_CHANNEL_NONE_AVAILABLE' | translate }}
   </p>
 
-  <div *ngIf="availableChannels.length" class="preferred-channel-options" role="radiogroup" aria-label="Preferred channel">
-    <label *ngFor="let channel of availableChannels" class="preferred-channel-option">
+  <div *ngIf="preferredChannelOptions.length" class="preferred-channel-options" role="radiogroup" [attr.aria-label]="'MY_IDENTITIES.PREFERRED_CHANNEL_TITLE' | translate">
+    <label *ngFor="let option of preferredChannelOptions" class="preferred-channel-option">
       <input
         type="radio"
         name="preferred-channel"
-        [value]="channel"
-        [checked]="preferredChannel === channel"
+        [value]="option.bindingId"
+        [checked]="preferredBindingId === option.bindingId"
         [disabled]="savingPreferredChannel"
-        (change)="setPreferredChannel(channel)" />
-      <span>{{ channelLabel(channel) }}</span>
+        (change)="setPreferredChannel(option.bindingId)" />
+      <span>{{ optionLabel(option) }}</span>
     </label>
     <label class="preferred-channel-option">
       <input
         type="radio"
         name="preferred-channel"
         [value]="null"
-        [checked]="preferredChannel === null"
+        [checked]="preferredBindingId === null"
         [disabled]="savingPreferredChannel"
         (change)="setPreferredChannel(null)" />
-      <span>No preference</span>
+      <span>{{ 'MY_IDENTITIES.PREFERRED_CHANNEL_NO_PREFERENCE' | translate }}</span>
     </label>
   </div>
 </div>
 
 <!-- Add a phone number -->
 <div class="profile-section">
-  <h3 class="section-title">Add Phone Number</h3>
-  <p class="section-hint">The number is confirmed via a one-time code (SMS).</p>
+  <h3 class="section-title">{{ 'MY_IDENTITIES.PHONE_TITLE' | translate }}</h3>
+  <p class="section-hint">{{ 'MY_IDENTITIES.PHONE_HINT' | translate }}</p>
 
   <ng-container *ngIf="!phoneCodeSent">
     <div class="lcars-form-group">
-      <label for="phone-number">Phone number</label>
+      <label for="phone-number">{{ 'MY_IDENTITIES.PHONE_LABEL' | translate }}</label>
       <input
         type="text"
         id="phone-number"
@@ -124,14 +122,14 @@
         class="lcars-button-primary"
         [disabled]="phoneSending || !phoneNumber.trim()"
         (click)="sendPhoneCode()">
-        {{ phoneSending ? 'Sending…' : 'Send Code' }}
+        {{ (phoneSending ? 'COMMON.SENDING' : 'COMMON.SEND_CODE') | translate }}
       </button>
     </div>
   </ng-container>
 
   <ng-container *ngIf="phoneCodeSent">
     <div class="lcars-form-group">
-      <label for="phone-code">Verification code</label>
+      <label for="phone-code">{{ 'MY_IDENTITIES.PHONE_CODE_LABEL' | translate }}</label>
       <input
         type="text"
         id="phone-code"
@@ -140,9 +138,9 @@
         placeholder="000000"
         autocomplete="one-time-code"
         [disabled]="phoneVerifying" />
-      <span class="field-hint">Code sent to {{ phoneMaskedDestination }}.</span>
+      <span class="field-hint">{{ 'MY_IDENTITIES.WIZARD_CODE_SENT_TO' | translate: { destination: phoneMaskedDestination } }}</span>
       <span *ngIf="phoneAttemptsRemaining !== null" class="field-hint">
-        Attempts remaining: {{ phoneAttemptsRemaining }}
+        {{ 'MY_IDENTITIES.WIZARD_ATTEMPTS_REMAINING' | translate: { count: phoneAttemptsRemaining } }}
       </span>
     </div>
     <div class="lcars-actions lcars-actions--row">
@@ -151,21 +149,21 @@
         class="lcars-button-primary"
         [disabled]="phoneVerifying || !phoneCode.trim()"
         (click)="verifyPhoneCode()">
-        {{ phoneVerifying ? 'Confirming…' : 'Confirm' }}
+        {{ (phoneVerifying ? 'COMMON.CONFIRMING' : 'COMMON.CONFIRM') | translate }}
       </button>
-      <button type="button" class="lcars-button-outline" (click)="cancelPhone()">Cancel</button>
+      <button type="button" class="lcars-button-outline" (click)="cancelPhone()">{{ 'COMMON.CANCEL' | translate }}</button>
     </div>
   </ng-container>
 </div>
 
 <!-- Add an e-mail address -->
 <div class="profile-section">
-  <h3 class="section-title">Add E-Mail Address</h3>
-  <p class="section-hint">The address is confirmed via a one-time code (e-mail).</p>
+  <h3 class="section-title">{{ 'MY_IDENTITIES.EMAIL_TITLE' | translate }}</h3>
+  <p class="section-hint">{{ 'MY_IDENTITIES.EMAIL_HINT' | translate }}</p>
 
   <ng-container *ngIf="!emailCodeSent">
     <div class="lcars-form-group">
-      <label for="email-address">E-mail address</label>
+      <label for="email-address">{{ 'MY_IDENTITIES.EMAIL_LABEL' | translate }}</label>
       <input
         type="email"
         id="email-address"
@@ -181,14 +179,14 @@
         class="lcars-button-primary"
         [disabled]="emailSending || !email.trim()"
         (click)="sendEmailCode()">
-        {{ emailSending ? 'Sending…' : 'Send Code' }}
+        {{ (emailSending ? 'COMMON.SENDING' : 'COMMON.SEND_CODE') | translate }}
       </button>
     </div>
   </ng-container>
 
   <ng-container *ngIf="emailCodeSent">
     <div class="lcars-form-group">
-      <label for="email-code">Verification code</label>
+      <label for="email-code">{{ 'MY_IDENTITIES.EMAIL_CODE_LABEL' | translate }}</label>
       <input
         type="text"
         id="email-code"
@@ -197,9 +195,9 @@
         placeholder="000000"
         autocomplete="one-time-code"
         [disabled]="emailVerifying" />
-      <span class="field-hint">Code sent to {{ emailMaskedDestination }}.</span>
+      <span class="field-hint">{{ 'MY_IDENTITIES.WIZARD_CODE_SENT_TO' | translate: { destination: emailMaskedDestination } }}</span>
       <span *ngIf="emailAttemptsRemaining !== null" class="field-hint">
-        Attempts remaining: {{ emailAttemptsRemaining }}
+        {{ 'MY_IDENTITIES.WIZARD_ATTEMPTS_REMAINING' | translate: { count: emailAttemptsRemaining } }}
       </span>
     </div>
     <div class="lcars-actions lcars-actions--row">
@@ -208,20 +206,20 @@
         class="lcars-button-primary"
         [disabled]="emailVerifying || !emailCode.trim()"
         (click)="verifyEmailCode()">
-        {{ emailVerifying ? 'Confirming…' : 'Confirm' }}
+        {{ (emailVerifying ? 'COMMON.CONFIRMING' : 'COMMON.CONFIRM') | translate }}
       </button>
-      <button type="button" class="lcars-button-outline" (click)="cancelEmail()">Cancel</button>
+      <button type="button" class="lcars-button-outline" (click)="cancelEmail()">{{ 'COMMON.CANCEL' | translate }}</button>
     </div>
   </ng-container>
 </div>
 
 <!-- Enrol a client certificate -->
 <div class="profile-section">
-  <h3 class="section-title">Add Certificate</h3>
-  <p class="section-hint">Choose a certificate file (DER or PEM: .cer, .crt, .pem, .der).</p>
+  <h3 class="section-title">{{ 'MY_IDENTITIES.CERT_TITLE' | translate }}</h3>
+  <p class="section-hint">{{ 'MY_IDENTITIES.CERT_HINT' | translate }}</p>
   <div class="lcars-actions lcars-actions--row cert-actions">
     <label class="lcars-button-outline cert-file-label">
-      Choose File
+      {{ 'MY_IDENTITIES.CERT_CHOOSE_FILE' | translate }}
       <input
         type="file"
         class="cert-file-input"
@@ -234,7 +232,7 @@
       class="lcars-button-primary"
       [disabled]="enrollingCertificate || !certificateFileName"
       (click)="enrollCertificate()">
-      {{ enrollingCertificate ? 'Adding…' : 'Add Certificate' }}
+      {{ (enrollingCertificate ? 'MY_IDENTITIES.CERT_ADDING' : 'MY_IDENTITIES.CERT_ADD') | translate }}
     </button>
   </div>
 </div>

@@ -2,6 +2,7 @@ import { Component, OnInit, inject, ChangeDetectionStrategy } from '@angular/cor
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { Router, RouterLink, ActivatedRoute } from '@angular/router';
+import { TranslatePipe, TranslateService } from '@ngx-translate/core';
 import { LcarsPanelComponent } from '../../shared/components/lcars-panel/lcars-panel.component';
 import { LcarsHeaderComponent } from '../../shared/components/lcars-header/lcars-header.component';
 import { AuthApiService } from '../../core/services/auth-api.service';
@@ -13,6 +14,7 @@ import { AuthApiService } from '../../core/services/auth-api.service';
     CommonModule,
     FormsModule,
     RouterLink,
+    TranslatePipe,
     LcarsPanelComponent,
     LcarsHeaderComponent
   ],
@@ -20,14 +22,14 @@ import { AuthApiService } from '../../core/services/auth-api.service';
     <div class="lcars-auth-container">
       <app-lcars-panel>
         <app-lcars-header
-          subtitle="Set new password"
+          [subtitle]="'RESET_PASSWORD.SUBTITLE' | translate"
           [showUserMenu]="false">
         </app-lcars-header>
 
         <!-- Loading State -->
         <div *ngIf="loading" class="lcars-loading">
           <div class="lcars-loading__spinner"></div>
-          <span class="lcars-loading__text">Validating...</span>
+          <span class="lcars-loading__text">{{ 'RESET_PASSWORD.VALIDATING' | translate }}</span>
         </div>
 
         <!-- Invalid Token State -->
@@ -39,10 +41,10 @@ import { AuthApiService } from '../../core/services/auth-api.service';
               <line x1="9" y1="9" x2="15" y2="15"></line>
             </svg>
           </div>
-          <h3>Invalid or Expired Link</h3>
-          <p>This password reset link is invalid or has expired. Please request a new one.</p>
+          <h3>{{ 'RESET_PASSWORD.INVALID_LINK_TITLE' | translate }}</h3>
+          <p>{{ 'RESET_PASSWORD.INVALID_LINK_TEXT' | translate }}</p>
           <a [routerLink]="['/', tenantId, 'forgot-password']" class="lcars-button">
-            Request New Link
+            {{ 'RESET_PASSWORD.REQUEST_NEW_LINK' | translate }}
           </a>
         </div>
 
@@ -54,10 +56,10 @@ import { AuthApiService } from '../../core/services/auth-api.service';
               <polyline points="22 4 12 14.01 9 11.01"></polyline>
             </svg>
           </div>
-          <h3>Password Reset Complete</h3>
-          <p>Your password has been successfully changed. You can now sign in with your new password.</p>
+          <h3>{{ 'RESET_PASSWORD.SUCCESS_TITLE' | translate }}</h3>
+          <p>{{ 'RESET_PASSWORD.SUCCESS_TEXT' | translate }}</p>
           <a [routerLink]="['/', tenantId, 'login']" class="lcars-button">
-            Sign In
+            {{ 'COMMON.SIGN_IN' | translate }}
           </a>
         </div>
 
@@ -74,7 +76,7 @@ import { AuthApiService } from '../../core/services/auth-api.service';
           </div>
 
           <div class="lcars-form-group">
-            <label class="lcars-label" for="newPassword">New Password</label>
+            <label class="lcars-label" for="newPassword">{{ 'RESET_PASSWORD.NEW_PASSWORD' | translate }}</label>
             <input
               type="password"
               id="newPassword"
@@ -84,11 +86,11 @@ import { AuthApiService } from '../../core/services/auth-api.service';
               [disabled]="submitting"
               required
               autocomplete="new-password"
-              placeholder="Enter new password" />
+              [placeholder]="'RESET_PASSWORD.NEW_PASSWORD_PLACEHOLDER' | translate" />
           </div>
 
           <div class="lcars-form-group">
-            <label class="lcars-label" for="confirmPassword">Confirm Password</label>
+            <label class="lcars-label" for="confirmPassword">{{ 'RESET_PASSWORD.CONFIRM_PASSWORD' | translate }}</label>
             <input
               type="password"
               id="confirmPassword"
@@ -98,11 +100,11 @@ import { AuthApiService } from '../../core/services/auth-api.service';
               [disabled]="submitting"
               required
               autocomplete="new-password"
-              placeholder="Confirm new password" />
+              [placeholder]="'RESET_PASSWORD.CONFIRM_PASSWORD_PLACEHOLDER' | translate" />
           </div>
 
           <div *ngIf="passwordMismatch" class="field-error">
-            Passwords do not match
+            {{ 'COMMON.PASSWORDS_MISMATCH' | translate }}
           </div>
 
           <div class="lcars-form-actions">
@@ -110,7 +112,7 @@ import { AuthApiService } from '../../core/services/auth-api.service';
               type="submit"
               class="lcars-button lcars-button--primary"
               [disabled]="submitting || !newPassword || !confirmPassword">
-              {{ submitting ? 'Resetting...' : 'Reset Password' }}
+              {{ (submitting ? 'RESET_PASSWORD.SUBMITTING' : 'RESET_PASSWORD.SUBMIT') | translate }}
             </button>
           </div>
         </form>
@@ -181,6 +183,7 @@ export class ResetPasswordComponent implements OnInit {
   private router = inject(Router);
   private route = inject(ActivatedRoute);
   private authApi = inject(AuthApiService);
+  private translate = inject(TranslateService);
 
   email = '';
   token = '';
@@ -225,12 +228,12 @@ export class ResetPasswordComponent implements OnInit {
 
   onSubmit(): void {
     if (!this.newPassword || !this.confirmPassword) {
-      this.errorMessage = 'Please fill in all fields';
+      this.errorMessage = this.translate.instant('RESET_PASSWORD.ERROR_FILL_ALL');
       return;
     }
 
     if (this.newPassword !== this.confirmPassword) {
-      this.errorMessage = 'Passwords do not match';
+      this.errorMessage = this.translate.instant('COMMON.PASSWORDS_MISMATCH');
       return;
     }
 
@@ -255,7 +258,7 @@ export class ResetPasswordComponent implements OnInit {
       },
       error: (error) => {
         this.submitting = false;
-        this.errorMessage = error.error?.errorMessage || 'An error occurred. Please try again.';
+        this.errorMessage = error.error?.errorMessage || this.translate.instant('RESET_PASSWORD.ERROR_GENERIC');
         this.errors = error.error?.errors;
       }
     });

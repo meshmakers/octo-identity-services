@@ -2,6 +2,7 @@ import { Component, OnInit, inject, ChangeDetectionStrategy } from '@angular/cor
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { ActivatedRoute, Router, RouterLink } from '@angular/router';
+import { TranslatePipe, TranslateService } from '@ngx-translate/core';
 import { LcarsPanelComponent } from '../../shared/components/lcars-panel/lcars-panel.component';
 import { LcarsHeaderComponent } from '../../shared/components/lcars-header/lcars-header.component';
 import { ExternalProviderButtonComponent } from '../../shared/components/external-provider-button/external-provider-button.component';
@@ -15,6 +16,7 @@ import { LoginContext, LoginRequest, ExternalProvider } from '../../core/models/
     CommonModule,
     FormsModule,
     RouterLink,
+    TranslatePipe,
     LcarsPanelComponent,
     LcarsHeaderComponent,
     ExternalProviderButtonComponent
@@ -27,6 +29,7 @@ export class LoginComponent implements OnInit {
   private route = inject(ActivatedRoute);
   private router = inject(Router);
   private authApi = inject(AuthApiService);
+  private translate = inject(TranslateService);
 
   // State
   loading = true;
@@ -118,7 +121,7 @@ export class LoginComponent implements OnInit {
 
   onSubmit(): void {
     if (!this.username || !this.password) {
-      this.errorMessage = 'Please enter username and password';
+      this.errorMessage = this.translate.instant('LOGIN.ERROR_ENTER_CREDENTIALS');
       return;
     }
 
@@ -148,12 +151,12 @@ export class LoginComponent implements OnInit {
             }
           });
         } else {
-          this.errorMessage = result.errorMessage || 'Login failed';
+          this.errorMessage = result.errorMessage || this.translate.instant('LOGIN.ERROR_LOGIN_FAILED');
         }
       },
       error: (error) => {
         this.submitting = false;
-        this.errorMessage = error.error?.message || 'An error occurred during login';
+        this.errorMessage = error.error?.message || this.translate.instant('LOGIN.ERROR_LOGIN_GENERIC');
       }
     });
   }
@@ -256,7 +259,7 @@ export class LoginComponent implements OnInit {
         // complete the exchange. Only ever once: if we have already been bounced, fall back to
         // this tenant's own form rather than starting the round trip over.
         if (this.handoffAlreadyBounced) {
-          this.errorMessage = 'Cross-tenant login failed';
+          this.errorMessage = this.translate.instant('LOGIN.ERROR_CROSS_TENANT');
           return;
         }
 
@@ -280,10 +283,10 @@ export class LoginComponent implements OnInit {
           this.submitting = false;
           this.router.navigate(['/', this.tenantId, 'manage']);
         } else {
-          onFailure(loginResult.errorMessage || 'Cross-tenant login failed');
+          onFailure(loginResult.errorMessage || this.translate.instant('LOGIN.ERROR_CROSS_TENANT'));
         }
       },
-      error: () => onFailure('Cross-tenant login failed')
+      error: () => onFailure(this.translate.instant('LOGIN.ERROR_CROSS_TENANT'))
     });
   }
 

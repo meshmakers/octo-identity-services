@@ -2,6 +2,7 @@ import { Component, inject, ChangeDetectionStrategy } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { Router, RouterLink, ActivatedRoute } from '@angular/router';
+import { TranslatePipe, TranslateService } from '@ngx-translate/core';
 import { LcarsPanelComponent } from '../../shared/components/lcars-panel/lcars-panel.component';
 import { LcarsHeaderComponent } from '../../shared/components/lcars-header/lcars-header.component';
 import { AuthApiService } from '../../core/services/auth-api.service';
@@ -13,6 +14,7 @@ import { AuthApiService } from '../../core/services/auth-api.service';
     CommonModule,
     FormsModule,
     RouterLink,
+    TranslatePipe,
     LcarsPanelComponent,
     LcarsHeaderComponent
   ],
@@ -20,7 +22,7 @@ import { AuthApiService } from '../../core/services/auth-api.service';
     <div class="lcars-auth-container">
       <app-lcars-panel>
         <app-lcars-header
-          subtitle="Reset your password"
+          [subtitle]="'FORGOT_PASSWORD.SUBTITLE' | translate"
           [showUserMenu]="false">
         </app-lcars-header>
 
@@ -32,17 +34,17 @@ import { AuthApiService } from '../../core/services/auth-api.service';
               <polyline points="22 4 12 14.01 9 11.01"></polyline>
             </svg>
           </div>
-          <h3>Check your email</h3>
-          <p>If an account exists with {{ email }}, you will receive a password reset link shortly.</p>
+          <h3>{{ 'FORGOT_PASSWORD.CHECK_EMAIL_TITLE' | translate }}</h3>
+          <p>{{ 'FORGOT_PASSWORD.CHECK_EMAIL_TEXT' | translate: { email: email } }}</p>
           <a [routerLink]="['/', tenantId, 'login']" class="lcars-button">
-            Back to Login
+            {{ 'COMMON.BACK_TO_LOGIN' | translate }}
           </a>
         </div>
 
         <!-- Form State -->
         <form *ngIf="!submitted" (ngSubmit)="onSubmit()" class="lcars-form">
           <p class="form-description">
-            Enter your email address and we'll send you a link to reset your password.
+            {{ 'FORGOT_PASSWORD.DESCRIPTION' | translate }}
           </p>
 
           <div *ngIf="errorMessage" class="lcars-error-message">
@@ -50,7 +52,7 @@ import { AuthApiService } from '../../core/services/auth-api.service';
           </div>
 
           <div class="lcars-form-group">
-            <label class="lcars-label" for="email">Email Address</label>
+            <label class="lcars-label" for="email">{{ 'FORGOT_PASSWORD.EMAIL_LABEL' | translate }}</label>
             <input
               type="email"
               id="email"
@@ -60,7 +62,7 @@ import { AuthApiService } from '../../core/services/auth-api.service';
               [disabled]="submitting"
               required
               autocomplete="email"
-              placeholder="Enter your email" />
+              [placeholder]="'FORGOT_PASSWORD.EMAIL_PLACEHOLDER' | translate" />
           </div>
 
           <div class="lcars-form-actions">
@@ -68,13 +70,13 @@ import { AuthApiService } from '../../core/services/auth-api.service';
               type="submit"
               class="lcars-button lcars-button--primary"
               [disabled]="submitting || !email">
-              {{ submitting ? 'Sending...' : 'Send Reset Link' }}
+              {{ (submitting ? 'COMMON.SENDING' : 'FORGOT_PASSWORD.SEND_LINK') | translate }}
             </button>
           </div>
 
           <div class="form-footer">
             <a [routerLink]="['/', tenantId, 'login']" class="back-link">
-              Back to Login
+              {{ 'COMMON.BACK_TO_LOGIN' | translate }}
             </a>
           </div>
         </form>
@@ -132,6 +134,7 @@ export class ForgotPasswordComponent {
   private router = inject(Router);
   private route = inject(ActivatedRoute);
   private authApi = inject(AuthApiService);
+  private translate = inject(TranslateService);
 
   email = '';
   submitting = false;
@@ -145,7 +148,7 @@ export class ForgotPasswordComponent {
 
   onSubmit(): void {
     if (!this.email) {
-      this.errorMessage = 'Please enter your email address';
+      this.errorMessage = this.translate.instant('FORGOT_PASSWORD.ERROR_ENTER_EMAIL');
       return;
     }
 
@@ -159,7 +162,7 @@ export class ForgotPasswordComponent {
       },
       error: (error) => {
         this.submitting = false;
-        this.errorMessage = error.error?.errorMessage || 'An error occurred. Please try again.';
+        this.errorMessage = error.error?.errorMessage || this.translate.instant('FORGOT_PASSWORD.ERROR_GENERIC');
       }
     });
   }

@@ -1,25 +1,25 @@
 <div class="lcars-auth-container">
   <app-lcars-panel>
     <app-lcars-header
-      subtitle="Select your organization"
+      [subtitle]="'TENANT_DISCOVERY.SUBTITLE' | translate"
       [showUserMenu]="false">
     </app-lcars-header>
 
     <!-- Loading State -->
     <div *ngIf="loading" class="lcars-loading">
       <div class="lcars-loading__spinner"></div>
-      <span class="lcars-loading__text">Looking up your organization</span>
+      <span class="lcars-loading__text">{{ 'TENANT_DISCOVERY.LOOKING_UP' | translate }}</span>
     </div>
 
     <!-- Step 1: Email/Username Input -->
     <ng-container *ngIf="!loading && step === 'input'">
       <div class="lcars-discovery-intro">
-        Enter your email address or username to find your organization.
+        {{ 'TENANT_DISCOVERY.INTRO' | translate }}
       </div>
 
       <form (ngSubmit)="onLookup()" #discoveryForm="ngForm">
         <div class="lcars-form-group">
-          <label for="emailOrUsername">Email or Username</label>
+          <label for="emailOrUsername">{{ 'TENANT_DISCOVERY.EMAIL_OR_USERNAME' | translate }}</label>
           <input
             type="text"
             id="emailOrUsername"
@@ -27,7 +27,7 @@
             [(ngModel)]="emailOrUsername"
             required
             autocomplete="username"
-            placeholder="e.g. user&#64;example.com" />
+            [placeholder]="'TENANT_DISCOVERY.PLACEHOLDER' | translate" />
         </div>
 
         <div class="lcars-actions lcars-actions--stacked">
@@ -35,7 +35,7 @@
             type="submit"
             class="lcars-button-primary"
             [disabled]="!emailOrUsername.trim()">
-            Continue
+            {{ 'COMMON.CONTINUE' | translate }}
           </button>
         </div>
       </form>
@@ -45,9 +45,9 @@
     <ng-container *ngIf="!loading && step === 'select'">
       <div class="lcars-discovery-intro">
         @if (emailOrUsername) {
-          Multiple organizations found for <strong>{{ emailOrUsername }}</strong>.
+          {{ 'TENANT_DISCOVERY.MULTIPLE_FOUND' | translate }} <strong>{{ emailOrUsername }}</strong>.
         }
-        Please select your organization:
+        {{ 'TENANT_DISCOVERY.SELECT_PROMPT' | translate }}
       </div>
 
       <div class="lcars-tenant-list">
@@ -70,13 +70,13 @@
           class="lcars-button-primary"
           [disabled]="!selectedTenant"
           (click)="onSelectTenant()">
-          Continue
+          {{ 'COMMON.CONTINUE' | translate }}
         </button>
         <button
           type="button"
           class="lcars-button-secondary"
           (click)="onBack()">
-          Back
+          {{ 'COMMON.BACK' | translate }}
         </button>
       </div>
     </ng-container>
@@ -99,7 +99,7 @@
           type="button"
           class="lcars-button-secondary"
           (click)="onBack()">
-          Try again
+          {{ 'TENANT_DISCOVERY.TRY_AGAIN' | translate }}
         </button>
       </div>
     </ng-container>

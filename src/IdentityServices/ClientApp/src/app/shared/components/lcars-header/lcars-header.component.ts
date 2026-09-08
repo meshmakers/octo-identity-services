@@ -1,24 +1,38 @@
 import { Component, Input, inject, OnInit, ChangeDetectionStrategy } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { Router, ActivatedRoute } from '@angular/router';
+import { TranslatePipe } from '@ngx-translate/core';
 import { OemService } from '../../../core/services/oem.service';
 import { AuthStateService } from '../../../core/services/auth-state.service';
 import { AuthApiService } from '../../../core/services/auth-api.service';
+import { AppLanguage, LanguageService } from '../../../core/services/language.service';
 import { getTenantIdFromUrl } from '../../../core/utils/tenant.utils';
 
 @Component({
   selector: 'app-lcars-header',
   standalone: true,
-  imports: [CommonModule],
+  imports: [CommonModule, TranslatePipe],
   template: `
     <header class="lcars-header">
+      <!-- Language switcher in top right (AB#5137): persisted user override over browser default -->
+      <div class="lcars-header__lang" role="group" [attr.aria-label]="'HEADER.LANGUAGE' | translate">
+        <button
+          *ngFor="let lang of languages"
+          type="button"
+          class="lang-button"
+          [class.lang-button--active]="languageService.currentLanguage() === lang"
+          (click)="onSelectLanguage(lang)">
+          {{ lang.toUpperCase() }}
+        </button>
+      </div>
+
       <!-- User menu in top right -->
       <div class="lcars-header__user-menu" *ngIf="showUserMenu && (authState.authState$ | async) as state">
         <ng-container *ngIf="!state.loading">
           <div class="user-indicator" *ngIf="state.isAuthenticated && state.user">
             <span class="user-indicator__name">{{ state.user.userName }}</span>
             <button class="user-indicator__logout" (click)="onLogout()">
-              Logout
+              {{ 'HEADER.LOGOUT' | translate }}
             </button>
           </div>
         </ng-container>
@@ -48,9 +62,16 @@ export class LcarsHeaderComponent implements OnInit {
 
   protected oemService = inject(OemService);
   protected authState = inject(AuthStateService);
+  protected languageService = inject(LanguageService);
   private authApi = inject(AuthApiService);
   private router = inject(Router);
   private route = inject(ActivatedRoute);
+
+  protected readonly languages = LanguageService.supportedLanguages;
+
+  onSelectLanguage(language: AppLanguage): void {
+    void this.languageService.setLanguage(language);
+  }
 
   ngOnInit(): void {
     // Check auth status when component initializes

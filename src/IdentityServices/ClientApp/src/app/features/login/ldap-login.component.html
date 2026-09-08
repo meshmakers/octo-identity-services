@@ -1,7 +1,7 @@
 <div class="lcars-auth-container">
   <app-lcars-panel>
     <app-lcars-header
-      [subtitle]="'Sign in with ' + providerName"
+      [subtitle]="'LDAP_LOGIN.SUBTITLE' | translate: { provider: providerName }"
       [showUserMenu]="false">
     </app-lcars-header>
 
@@ -14,7 +14,7 @@
       </div>
       <div class="lcars-provider-info__name">{{ providerName }}</div>
       <div class="lcars-provider-info__description">
-        Enter your directory credentials to sign in
+        {{ 'LDAP_LOGIN.DESCRIPTION' | translate }}
       </div>
     </div>
 
@@ -26,7 +26,7 @@
     <!-- Login Form -->
     <form (ngSubmit)="onSubmit()" #ldapForm="ngForm">
       <div class="lcars-form-group">
-        <label for="username">Username</label>
+        <label for="username">{{ 'COMMON.USERNAME' | translate }}</label>
         <input
           type="text"
           id="username"
@@ -35,11 +35,11 @@
           required
           autocomplete="username"
           [disabled]="submitting"
-          placeholder="Enter your directory username" />
+          [placeholder]="'LDAP_LOGIN.USERNAME_PLACEHOLDER' | translate" />
       </div>
 
       <div class="lcars-form-group">
-        <label for="password">Password</label>
+        <label for="password">{{ 'COMMON.PASSWORD' | translate }}</label>
         <input
           type="password"
           id="password"
@@ -48,7 +48,7 @@
           required
           autocomplete="current-password"
           [disabled]="submitting"
-          placeholder="Enter your password" />
+          [placeholder]="'LOGIN.PASSWORD_PLACEHOLDER' | translate" />
       </div>
 
       <div class="lcars-actions lcars-actions--stacked">
@@ -56,15 +56,15 @@
           type="submit"
           class="lcars-button-primary"
           [disabled]="submitting || !username || !password">
-          <span *ngIf="!submitting">Sign In</span>
-          <span *ngIf="submitting">Signing in...</span>
+          <span *ngIf="!submitting">{{ 'COMMON.SIGN_IN' | translate }}</span>
+          <span *ngIf="submitting">{{ 'COMMON.SIGNING_IN' | translate }}</span>
         </button>
         <button
           type="button"
           class="lcars-button-secondary"
           (click)="onCancel()"
           [disabled]="submitting">
-          Back to Login
+          {{ 'COMMON.BACK_TO_LOGIN' | translate }}
         </button>
       </div>
     </form>

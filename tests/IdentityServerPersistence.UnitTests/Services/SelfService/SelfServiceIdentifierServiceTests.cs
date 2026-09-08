@@ -31,6 +31,7 @@ public class SelfServiceIdentifierServiceTests
     private readonly CapturingDeliveryChannel _delivery = new(OtpDeliveryChannelKind.Signal);
     private readonly CapturingDeliveryChannel _emailDelivery = new(OtpDeliveryChannelKind.Email);
     private readonly MutableTimeProvider _time = new(new DateTime(2026, 9, 4, 12, 0, 0, DateTimeKind.Utc));
+    private readonly IPreferredChannelService _preferredChannelService = Substitute.For<IPreferredChannelService>();
     private readonly SelfServiceIdentifierService _service;
     private readonly RtUser _user = new() { RtId = OctoObjectId.GenerateNewId(), UserName = "alice" };
 
@@ -41,7 +42,7 @@ public class SelfServiceIdentifierServiceTests
         _resolver.ResolveAsync(Arg.Any<RtIdentifierKindEnum>(), Arg.Any<string>(), Arg.Any<RtTrustLevelEnum>())
             .Returns((VerifiedIdentifierResolution?)null);
         _service = new SelfServiceIdentifierService(_resolver, _challengeStore, [_delivery, _emailDelivery], _time,
-            Substitute.For<ILogger<SelfServiceIdentifierService>>());
+            _preferredChannelService, Substitute.For<ILogger<SelfServiceIdentifierService>>());
     }
 
     private async Task<string> StartAndGetCodeAsync()
@@ -175,6 +176,26 @@ public class SelfServiceIdentifierServiceTests
 
         removed.Should().BeFalse();
         await _resolver.DidNotReceive().RemoveBindingAsync(Arg.Any<RtIdentifierKindEnum>(), Arg.Any<string>());
+        await _preferredChannelService.DidNotReceive()
+            .ClearIfReferencedAsync(Arg.Any<RtUser>(), Arg.Any<OctoObjectId>());
+    }
+
+    [Fact]
+    public async Task Remove_clears_the_preferred_channel_when_it_referenced_the_removed_binding()
+    {
+        // AB#5149: deleting the preferred binding must clear the preference in the same operation.
+        var bindingRtId = OctoObjectId.GenerateNewId();
+        _resolver.GetByUserAsync(_user.RtId).Returns([
+            new VerifiedIdentifierSummary(bindingRtId, RtIdentifierKindEnum.PhoneNumber, NormalizedNumber,
+                RtTrustLevelEnum.Strong, RtIdentifierSourceEnum.SelfService,
+                EnrolledAt: null, LastVerifiedAt: null, ValidUntil: null, IsValid: true)
+        ]);
+        _resolver.RemoveBindingAsync(RtIdentifierKindEnum.PhoneNumber, NormalizedNumber).Returns(true);
+
+        var removed = await _service.RemoveAsync(_user, RtIdentifierKindEnum.PhoneNumber, NormalizedNumber);
+
+        removed.Should().BeTrue();
+        await _preferredChannelService.Received(1).ClearIfReferencedAsync(_user, bindingRtId);
     }
 
     // ==== AB#5135 e-mail modality — mirrors the phone flow ==================================
@@ -299,7 +320,7 @@ public class SelfServiceIdentifierServiceTests
     {
         var service = new SelfServiceIdentifierService(_resolver, _challengeStore,
             [new ThrowingDeliveryChannel(OtpDeliveryChannelKind.Email)], _time,
-            Substitute.For<ILogger<SelfServiceIdentifierService>>());
+            _preferredChannelService, Substitute.For<ILogger<SelfServiceIdentifierService>>());
 
         var act = async () => await service.StartEmailEnrollmentAsync(TenantId, _user, RawEmail,
             TestContext.Current.CancellationToken);

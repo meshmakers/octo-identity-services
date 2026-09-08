@@ -1,6 +1,7 @@
 import { Component, inject, ChangeDetectionStrategy } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { RouterOutlet, RouterLink, RouterLinkActive, ActivatedRoute } from '@angular/router';
+import { TranslatePipe } from '@ngx-translate/core';
 import { LcarsPanelComponent } from '../../shared/components/lcars-panel/lcars-panel.component';
 import { LcarsHeaderComponent } from '../../shared/components/lcars-header/lcars-header.component';
 import { getTenantIdFromUrl } from '../../core/utils/tenant.utils';
@@ -18,11 +19,11 @@ import { getTenantIdFromUrl } from '../../core/utils/tenant.utils';
 @Component({
   selector: 'app-manage-shell',
   standalone: true,
-  imports: [CommonModule, RouterOutlet, RouterLink, RouterLinkActive, LcarsPanelComponent, LcarsHeaderComponent],
+  imports: [CommonModule, RouterOutlet, RouterLink, RouterLinkActive, TranslatePipe, LcarsPanelComponent, LcarsHeaderComponent],
   template: `
     <div class="lcars-auth-container">
       <app-lcars-panel>
-        <app-lcars-header subtitle="Account Management"></app-lcars-header>
+        <app-lcars-header [subtitle]="'MANAGE.SUBTITLE' | translate"></app-lcars-header>
 
         <nav class="lcars-tabs" role="tablist">
           <a
@@ -31,21 +32,21 @@ import { getTenantIdFromUrl } from '../../core/utils/tenant.utils';
             [routerLink]="['/', tenantId, 'manage']"
             routerLinkActive="lcars-tab--active"
             [routerLinkActiveOptions]="{ exact: true }">
-            Profile
+            {{ 'MANAGE.TAB_PROFILE' | translate }}
           </a>
           <a
             class="lcars-tab"
             role="tab"
             [routerLink]="['/', tenantId, 'manage', 'security']"
             routerLinkActive="lcars-tab--active">
-            Security
+            {{ 'MANAGE.TAB_SECURITY' | translate }}
           </a>
           <a
             class="lcars-tab"
             role="tab"
             [routerLink]="['/', tenantId, 'manage', 'identities']"
             routerLinkActive="lcars-tab--active">
-            My Identities
+            {{ 'MANAGE.TAB_IDENTITIES' | translate }}
           </a>
         </nav>
 

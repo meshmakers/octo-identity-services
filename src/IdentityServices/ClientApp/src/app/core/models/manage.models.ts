@@ -170,22 +170,34 @@ export interface RemoveIdentifierResult {
   success: boolean;
 }
 
-// === Preferred outbound channel (AB#5149) ===
+// === Preferred outbound channel (AB#5149, binding-specific) ===
 
-/** Canonical channel names — a cross-repo contract, spellings are load-bearing. */
+/** Canonical channel names derived from the binding's kind — a cross-repo contract. */
 export type PreferredChannel = 'TEAMS' | 'SIGNAL';
 
+/** One selectable target: a valid verified binding with its derived channel kind. */
+export interface PreferredChannelOption {
+  bindingId: string;
+  channel: PreferredChannel;
+  identifierValue: string;
+}
+
 export interface PreferredChannelResult {
-  preferredChannel: PreferredChannel | null;
-  supportedChannels: string[];
+  bindingId: string | null;
+  channel: PreferredChannel | null;
+  identifierValue: string | null;
+  options: PreferredChannelOption[];
 }
 
 export interface SetPreferredChannelRequest {
-  preferredChannel: PreferredChannel | null;
+  /** The rtId of one of the user's own valid bindings, or null to clear. */
+  bindingId: string | null;
 }
 
 export interface SetPreferredChannelResult {
   status: string;
   success: boolean;
-  preferredChannel: PreferredChannel | null;
+  bindingId: string | null;
+  channel: PreferredChannel | null;
+  identifierValue: string | null;
 }

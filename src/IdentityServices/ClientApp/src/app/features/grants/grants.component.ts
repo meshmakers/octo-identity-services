@@ -1,6 +1,7 @@
 import { Component, OnInit, inject, ChangeDetectionStrategy } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { Router, ActivatedRoute } from '@angular/router';
+import { TranslatePipe, TranslateService } from '@ngx-translate/core';
 import { LcarsPanelComponent } from '../../shared/components/lcars-panel/lcars-panel.component';
 import { LcarsHeaderComponent } from '../../shared/components/lcars-header/lcars-header.component';
 import { GrantsApiService } from '../../core/services/grants-api.service';
@@ -9,17 +10,17 @@ import { GrantInfo } from '../../core/models/grants.models';
 @Component({
   selector: 'app-grants',
   standalone: true,
-  imports: [CommonModule, LcarsPanelComponent, LcarsHeaderComponent],
+  imports: [CommonModule, TranslatePipe, LcarsPanelComponent, LcarsHeaderComponent],
   template: `
     <div class="lcars-auth-container">
       <app-lcars-panel>
         <app-lcars-header
-          subtitle="Application Permissions">
+          [subtitle]="'GRANTS.SUBTITLE' | translate">
         </app-lcars-header>
 
         <div *ngIf="loading" class="lcars-loading">
           <div class="lcars-loading__spinner"></div>
-          <span class="lcars-loading__text">Loading</span>
+          <span class="lcars-loading__text">{{ 'COMMON.LOADING' | translate }}</span>
         </div>
 
         <ng-container *ngIf="!loading">
@@ -32,7 +33,7 @@ import { GrantInfo } from '../../core/models/grants.models';
           </div>
 
           <p class="description" *ngIf="grants.length > 0">
-            These applications have been granted access to your account:
+            {{ 'GRANTS.DESCRIPTION' | translate }}
           </p>
 
           <div *ngIf="grants.length === 0" class="empty-state">
@@ -41,7 +42,7 @@ import { GrantInfo } from '../../core/models/grants.models';
                 <path d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"></path>
               </svg>
             </div>
-            <p>No applications have been granted access to your account.</p>
+            <p>{{ 'GRANTS.EMPTY' | translate }}</p>
           </div>
 
           <div class="grants-grid">
@@ -58,7 +59,7 @@ import { GrantInfo } from '../../core/models/grants.models';
 
             <div class="grant-card__scopes">
               <div class="scope-group" *ngIf="grant.identityGrantNames.length > 0">
-                <span class="scope-group__label">Personal Information</span>
+                <span class="scope-group__label">{{ 'GRANTS.PERSONAL_INFORMATION' | translate }}</span>
                 <div class="scope-group__items">
                   <span *ngFor="let scope of grant.identityGrantNames" class="scope-tag">
                     {{ scope }}
@@ -67,7 +68,7 @@ import { GrantInfo } from '../../core/models/grants.models';
               </div>
 
               <div class="scope-group" *ngIf="grant.apiGrantNames.length > 0">
-                <span class="scope-group__label">API Access</span>
+                <span class="scope-group__label">{{ 'GRANTS.API_ACCESS' | translate }}</span>
                 <div class="scope-group__items">
                   <span *ngFor="let scope of grant.apiGrantNames" class="scope-tag scope-tag--api">
                     {{ scope }}
@@ -77,8 +78,8 @@ import { GrantInfo } from '../../core/models/grants.models';
             </div>
 
             <div class="grant-card__meta">
-              <span>Granted: {{ grant.created | date:'medium' }}</span>
-              <span *ngIf="grant.expires">Expires: {{ grant.expires | date:'medium' }}</span>
+              <span>{{ 'GRANTS.GRANTED' | translate }} {{ grant.created | date:'medium' }}</span>
+              <span *ngIf="grant.expires">{{ 'GRANTS.EXPIRES' | translate }} {{ grant.expires | date:'medium' }}</span>
             </div>
 
             <div class="grant-card__actions">
@@ -87,7 +88,7 @@ import { GrantInfo } from '../../core/models/grants.models';
                 class="lcars-button-error"
                 (click)="revokeGrant(grant)"
                 [disabled]="revokingGrant === grant.clientId">
-                {{ revokingGrant === grant.clientId ? 'Revoking...' : 'Revoke Access' }}
+                {{ (revokingGrant === grant.clientId ? 'GRANTS.REVOKING' : 'GRANTS.REVOKE') | translate }}
               </button>
             </div>
           </div>
@@ -95,7 +96,7 @@ import { GrantInfo } from '../../core/models/grants.models';
 
           <div class="lcars-actions">
             <button type="button" class="lcars-button-outline" (click)="goBack()">
-              Back to Profile
+              {{ 'COMMON.BACK_TO_PROFILE' | translate }}
             </button>
           </div>
         </ng-container>
@@ -109,6 +110,7 @@ export class GrantsComponent implements OnInit {
   private grantsApi = inject(GrantsApiService);
   private router = inject(Router);
   private route = inject(ActivatedRoute);
+  private translate = inject(TranslateService);
 
   loading = true;
   grants: GrantInfo[] = [];
@@ -128,7 +130,7 @@ export class GrantsComponent implements OnInit {
       },
       error: () => {
         this.loading = false;
-        this.errorMessage = 'Failed to load application permissions';
+        this.errorMessage = this.translate.instant('GRANTS.ERROR_LOAD');
       }
     });
   }
@@ -142,15 +144,15 @@ export class GrantsComponent implements OnInit {
       next: (result) => {
         this.revokingGrant = undefined;
         if (result.success) {
-          this.successMessage = `Access revoked for ${grant.clientName || grant.clientId}`;
+          this.successMessage = this.translate.instant('GRANTS.REVOKED', { app: grant.clientName || grant.clientId });
           this.grants = this.grants.filter(g => g.clientId !== grant.clientId);
         } else {
-          this.errorMessage = result.errorMessage || 'Failed to revoke access';
+          this.errorMessage = result.errorMessage || this.translate.instant('GRANTS.ERROR_REVOKE');
         }
       },
       error: () => {
         this.revokingGrant = undefined;
-        this.errorMessage = 'An error occurred';
+        this.errorMessage = this.translate.instant('COMMON.ERROR_GENERIC');
       }
     });
   }

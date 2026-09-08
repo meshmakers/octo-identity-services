@@ -83,7 +83,7 @@ This service depends on Octo framework packages (versioned via `$(OctoVersion)` 
 
 ### Construction Kit (CK) Model
 
-The `Persistence.IdentityCkModel` project uses YAML-based model definitions that are transformed into C# code at build time. Model files are in `src/Persistence.IdentityCkModel/ConstructionKit/`. The model ID is `System.Identity-2.17.0` with dependency on `System-[2.0,3.0)`. Generated types live in namespace `Persistence.IdentityCkModel.Generated.System.Identity.v2`.
+The `Persistence.IdentityCkModel` project uses YAML-based model definitions that are transformed into C# code at build time. Model files are in `src/Persistence.IdentityCkModel/ConstructionKit/`. The model ID is `System.Identity-2.18.0` with dependency on `System-[2.0,3.0)`. Generated types live in namespace `Persistence.IdentityCkModel.Generated.System.Identity.v2`.
 
 ### OpenIddict Protocol Stack (Epic AB#4989)
 
@@ -567,24 +567,33 @@ Key components:
 - **`GroupsController`**: REST API at `{tenantId}/v1/groups` with full CRUD, role assignment, member management, and circular group prevention
 - **`TenantOwners`** group: Default group provisioned in every tenant with all 10 default roles. Created by `DefaultConfigurationCreatorService` and `IdentityAssociationMigration` (migration 9→10)
 
-Current identity schema (migration) version: `22` (migration 21→22 added the `RtOAuthAuthorization`/`RtOAuthToken` OpenIddict store types). Current CK model version: `System.Identity-2.17.0` — the 2.12.0→2.17.0 changes (verified-identifier directory AB#5122+, `RtUser.PreferredChannel` AB#5149) are additive schema needing no numeric migration.
+Current identity schema (migration) version: `22` (migration 21→22 added the `RtOAuthAuthorization`/`RtOAuthToken` OpenIddict store types). Current CK model version: `System.Identity-2.18.0` — the 2.12.0→2.17.0 changes (verified-identifier directory AB#5122+) are additive schema needing no numeric migration; 2.17.0→2.18.0 REPLACED `RtUser.PreferredChannel` with `RtUser.PreferredChannelBindingId` (AB#5149 revision, binding-specific preference). The feature shipped the day before the replacement with no external consumers, so the old attribute was dropped without a migration — any stored kind-level values are simply ignored (users re-select).
 
-### Per-User Outbound Channel Preference (AB#5149)
+### Per-User Outbound Channel Preference (AB#5149, binding-specific)
 
-`RtUser.PreferredChannel` (optional String, CK 2.17.0) stores which channel the platform uses for
-**system-initiated** messages — canonical uppercase names `"TEAMS"` | `"SIGNAL"` (extensible), a
-cross-repo contract propagated verbatim by the mesh adapter's verified-caller directory into
-`WriteVerifiedCaller@1`'s `preferredChannel` JSON field. Synchronous replies keep using the channel
-the message came in on. `IPreferredChannelService` / `PreferredChannelService`
-(`IdentityServerPersistence/Services/SelfService/`) gates a set on a **valid** verified binding of
-the channel's identifier kind (TEAMS ⇒ EntraIdObjectId, SIGNAL ⇒ PhoneNumber, via
-`IVerifiedIdentifierResolver.GetByUserAsync`); clearing (null) is always allowed; persistence goes
-through `UserManager.UpdateAsync` like every other user-profile scalar. Self-service API on
+`RtUser.PreferredChannelBindingId` (optional String, CK 2.18.0) stores the **rtId of the
+`VerifiedExternalIdentifier`** the user chose as the target for **system-initiated** messages. The
+channel KIND is never stored — it is DERIVED from the referenced binding (PhoneNumber ⇒ `"SIGNAL"`,
+EntraIdObjectId ⇒ `"TEAMS"`, extensible in `PreferredChannelService.KindToChannel`), so a user with
+several phone numbers picks the concrete number. The attribute name `PreferredChannelBindingId` is
+a cross-repo contract: the mesh adapter reads it from the user entity and derives kind + target
+itself. Synchronous replies keep using the channel the message came in on.
+`IPreferredChannelService` / `PreferredChannelService`
+(`IdentityServerPersistence/Services/SelfService/`): `GetOptionsAsync` lists every VALID own
+binding of a channel-mapped kind, `SetPreferredChannelAsync` only accepts one of those (anything
+else — malformed id, foreign/unknown binding, expired, unmapped kind ⇒
+`Status=BindingNotEligible`, deliberately not distinguishing "not yours" from "does not exist");
+clearing (null) is always allowed; `ClearIfReferencedAsync` is invoked by
+`SelfServiceIdentifierService.RemoveAsync` so deleting the preferred binding clears the preference
+in the same operation (a reference gone dangling via other paths reads as "no preference" without
+a write). Persistence via `UserManager.UpdateAsync`. Self-service API on
 `MyIdentifiersApiController`: `GET`/`PUT {tenantId}/api/manage/identifiers/preferredChannel`
-(cookie + bearer schemes, current user only; unknown channel ⇒ 400, unbound channel ⇒
-`Success=false`/`Status=ChannelNotBound`). UI: "Preferred channel" radio group on the ClientApp
-my-identities page, offering only channels backed by a valid identifier from the list already on the
-page. Tests: `tests/IdentityServerPersistence.UnitTests/Services/SelfService/PreferredChannelServiceTests.cs`.
+(cookie + bearer schemes, current user only) — GET returns `{bindingId, channel, identifierValue,
+options[]}`, PUT takes `{bindingId|null}` and answers `Success=false`/`Status=BindingNotEligible`
+on refusal (no 400 path anymore). UI: radio group of CONCRETE targets ("Microsoft Teams",
+"Signal (+43 …)" per bound number, "no preference") on the ClientApp my-identities page, options
+served by GET. Tests:
+`tests/IdentityServerPersistence.UnitTests/Services/SelfService/PreferredChannelServiceTests.cs`.
 
 ### Client Role & Group Assignment (AB#4183)
 
@@ -1114,6 +1123,27 @@ The CI/CD pipeline will fail if there are any lint errors. Common issues:
 - `src/app/shared/` - Reusable LCARS components (lcars-panel, lcars-header, etc.)
 - `src/app/features/` - Feature components (login, logout, consent, device, manage, grants, error, setup)
 - `src/styles/` - LCARS design system (variables, mixins, Kendo overrides)
+
+### i18n (AB#5137)
+
+The ClientApp is fully internationalized with **@ngx-translate/core 17** — the same library and
+pattern as the meshmakers-app (custom `TranslateLoader` over `HttpClient` in `app.config.ts`, no
+`@ngx-translate/http-loader` package). Resources live in `src/assets/i18n/en.json` and `de.json`
+(nested `GROUP.KEY` structure, one group per feature, keys **sorted alphabetically**; EN and DE key
+sets must stay identical). `LanguageService` (`core/services/language.service.ts`) picks the
+initial language: persisted override in `localStorage['identity-ui.language']` → browser language
+(prefix match en/de) → `en`; the EN/DE switcher sits in the `lcars-header` top-right corner and
+persists the choice. Translations are loaded in the app initializer **before** first render, so
+`translate.instant(...)` is safe in every TypeScript code path. Rules:
+
+- Every user-facing string goes through the `translate` pipe (templates) or
+  `TranslateService.instant` (TS error/success paths) — never hardcode UI text.
+- Backend-provided messages (`result.errorMessage`, `error.error?.message`, scope display
+  names/descriptions, provider/client display names, server validation `errors[]`) are rendered
+  as-is; client-side keys only serve as fallbacks when the backend sends nothing.
+- German is professional Sie-Form.
+- Never JSON-roundtrip the i18n files with tooling — edit them textually (preserves ordering and
+  diffs).
 
 ### SPA Version Display
 
