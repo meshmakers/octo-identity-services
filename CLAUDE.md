@@ -595,6 +595,40 @@ on refusal (no 400 path anymore). UI: radio group of CONCRETE targets ("Microsof
 served by GET. Tests:
 `tests/IdentityServerPersistence.UnitTests/Services/SelfService/PreferredChannelServiceTests.cs`.
 
+### Signal OTP Delivery — Per-Tenant Sender Resolution (AB#5134 / AB#5154)
+
+The self-service phone OTP (AB#5123) is delivered over the `signal-cli-rest-api` bridge by
+`SignalRestOtpDeliveryChannel` (`IdentityServerPersistence/Services/SelfService/`). Since AB#5154
+the **sender number is tenant state, not deployment state**: the channel resolves its sender PER
+TENANT at send time (the tenant id travels in `OtpDeliveryContext` — the channel is a singleton
+with no HTTP-scoped tenant), with this fallback chain:
+
+1. **The tenant's Studio-activated `System.Communication/SignalChannel`** (AB#5143/5145,
+   rtWellKnownName `signal-channel`) in the `Registered` state (2) → its `Number` + `ApiUrl` win.
+   Read by `TenantSignalChannelResolver` via `ISystemContext.TryFindTenantRepositoryAsync` — the
+   same explicit-tenant access `ClientMirrorProvisioningService` uses (`ISystemContext` is a
+   singleton, so the chain is singleton-safe). The entity belongs to the Communication Controller's
+   CK model, so the read is a **generic `RtEntity` query by CK type id** (no generated type here)
+   and strictly **read-only**. Guards mirror the controller's own projection
+   (`AddSignalChannelConfigurationAsync`): a read failure — e.g. a tenant whose
+   System.Communication model predates 3.34.0 — degrades to the next step with a warning, never
+   breaks OTP delivery; a hand-crafted multi-channel tie is broken by lowest rtId with a warning
+   (singleton is service-enforced in the controller).
+2. **The env-bound `SignalBridgeOptions`** (`OCTO_SIGNALBRIDGE__APIURL` / `__NUMBER`) — unchanged
+   semantics (including the THROW when `ApiUrl` is set but `Number` empty). This is the
+   **local-dev fallback** where no Studio activation exists; in cluster deployments the env vars
+   are now fully optional.
+3. **Neither** → the `LoggingOtpDeliveryChannel` dev stub path (its loud warning, code in the
+   log), exactly the previous unconfigured behavior. The stub is no longer registered as an
+   `IOtpDeliveryChannel` itself — `SignalRestOtpDeliveryChannel` is always the Signal channel and
+   delegates to the injected stub.
+
+The chosen source is logged at Debug ("tenant SignalChannel" vs "SignalBridgeOptions fallback").
+Tests: `SignalRestOtpDeliveryChannelTests` (chain behavior at the channel) and
+`TenantSignalChannelResolverTests` (entity read: Registered-only, lowest-rtId tie-break,
+read-failure degradation, read-only) in
+`tests/IdentityServerPersistence.UnitTests/Services/SelfService/`.
+
 ### Client Role & Group Assignment (AB#4183)
 
 A **Client** (machine-to-machine identity) can be assigned roles and group memberships with the same

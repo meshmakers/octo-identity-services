@@ -17,7 +17,6 @@ using Meshmakers.Octo.Runtime.Engine.Configuration.DependencyInjection;
 using Meshmakers.Octo.Services.Infrastructure;
 using Meshmakers.Octo.Services.Infrastructure.Services;
 using Microsoft.Extensions.Logging;
-using Microsoft.Extensions.Options;
 using Persistence.IdentityCkModel.Generated.System.Identity.v2;
 
 // ReSharper disable once CheckNamespace
@@ -111,23 +110,22 @@ public static class RuntimeEngineBuilderExtensions
         builder.Services.TryAddSingleton(TimeProvider.System);
         builder.Services.AddScoped<IOtpChallengeStore, UserTokenOtpChallengeStore>();
 
-        // AB#5134 Signal OTP delivery: when the signal-cli-rest-api bridge is configured
-        // (SignalBridge:ApiUrl non-empty) the real SignalRestOtpDeliveryChannel delivers the phone OTP
-        // over the same bridge the mesh adapter's SignalSender node uses; otherwise the clearly-marked
-        // LoggingOtpDeliveryChannel stub (with its loud warning) stays the Signal channel so dev without
-        // a bridge keeps working. Exactly ONE IOtpDeliveryChannel of Kind=Signal is registered (the
-        // OTP service dispatches by Kind), decided from the bound SignalBridgeOptions at resolve time.
-        // SignalBridgeOptions is bound from the "SignalBridge" config section in Program.cs (this
-        // engine-builder extension has no IConfiguration; IOptions<> resolves to defaults — ApiUrl
-        // empty → stub — when the section is absent).
+        // AB#5134/AB#5154 Signal OTP delivery: SignalRestOtpDeliveryChannel delivers the phone OTP
+        // over the same signal-cli-rest-api bridge the mesh adapter's SignalSender node uses, and
+        // resolves the SENDER per tenant at send time (the number is tenant state, AB#5143/5145):
+        // registered tenant SignalChannel entity → env-bound SignalBridgeOptions fallback →
+        // LoggingOtpDeliveryChannel dev stub (with its loud warning) so dev without any bridge keeps
+        // working. Exactly ONE IOtpDeliveryChannel of Kind=Signal is registered (the OTP service
+        // dispatches by Kind); the stub is no longer registered as an IOtpDeliveryChannel itself but
+        // injected as the channel's unconfigured path. SignalBridgeOptions is bound from the
+        // "SignalBridge" config section in Program.cs (this engine-builder extension has no
+        // IConfiguration; IOptions<> resolves to defaults — ApiUrl empty → tenant channel or stub —
+        // when the section is absent). ISystemContext behind the resolver is a singleton, so the
+        // whole chain is singleton-safe.
         builder.Services.AddHttpClient(SignalRestOtpDeliveryChannel.HttpClientName);
-        builder.Services.AddSingleton<IOtpDeliveryChannel>(sp =>
-        {
-            var options = sp.GetRequiredService<IOptions<SignalBridgeOptions>>().Value;
-            return string.IsNullOrWhiteSpace(options.ApiUrl)
-                ? ActivatorUtilities.CreateInstance<LoggingOtpDeliveryChannel>(sp)
-                : ActivatorUtilities.CreateInstance<SignalRestOtpDeliveryChannel>(sp);
-        });
+        builder.Services.AddSingleton<ITenantSignalChannelResolver, TenantSignalChannelResolver>();
+        builder.Services.AddSingleton<LoggingOtpDeliveryChannel>();
+        builder.Services.AddSingleton<IOtpDeliveryChannel, SignalRestOtpDeliveryChannel>();
 
         // AB#5135 e-mail OTP delivery: the Email-kind channel reuses identity's existing e-mail
         // transport (the distribution-event-hub seam the notification / password-reset e-mails publish

@@ -15,10 +15,19 @@ namespace IdentityServerPersistence.Services.SelfService;
 ///     <see cref="OtpDeliveryChannelKind.Sms" /> and drop this).
 /// </summary>
 /// <remarks>
-///     The proper wiring, when the transport exists, is to publish a Signal notification onto the
-///     distribution event hub (the same seam <c>NotificationService</c> uses for e-mail) so the
-///     tenant's Signal adapter delivers it — no secret ever leaves the identity service except the
-///     one-time code, exactly as here.
+///     <para>
+///         Since AB#5134/AB#5154 this stub is no longer registered as an
+///         <see cref="IOtpDeliveryChannel" /> itself: <see cref="SignalRestOtpDeliveryChannel" /> is
+///         always the Signal channel and delegates here only when NEITHER a Registered tenant
+///         <c>SignalChannel</c> NOR the env-bound <c>SignalBridgeOptions</c> fallback is available —
+///         the unconfigured local-dev case.
+///     </para>
+///     <para>
+///         The proper wiring, when the transport exists, is to publish a Signal notification onto the
+///         distribution event hub (the same seam <c>NotificationService</c> uses for e-mail) so the
+///         tenant's Signal adapter delivers it — no secret ever leaves the identity service except the
+///         one-time code, exactly as here.
+///     </para>
 /// </remarks>
 public sealed class LoggingOtpDeliveryChannel(ILogger<LoggingOtpDeliveryChannel> logger)
     : IOtpDeliveryChannel

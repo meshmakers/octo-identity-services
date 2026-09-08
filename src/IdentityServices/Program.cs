@@ -88,10 +88,13 @@ try
         builder.Configuration.GetSection("Identity").Bind(options));
     builder.Services.Configure<OctoSystemConfiguration>(options =>
         builder.Configuration.GetSection("System").Bind(options));
-    // AB#5134 signal-cli-rest-api bridge for the AB#5123 self-service phone OTP. When
-    // SignalBridge:ApiUrl is set the real SignalRestOtpDeliveryChannel is wired for the Signal
-    // modality (see AddOctoIdentityPersistence); when empty the LoggingOtpDeliveryChannel dev stub
-    // stays active. Configure via OCTO_SIGNALBRIDGE__APIURL / OCTO_SIGNALBRIDGE__NUMBER.
+    // AB#5134/AB#5154 signal-cli-rest-api bridge for the AB#5123 self-service phone OTP — the
+    // LOCAL-DEV FALLBACK. Production tenants send from their Studio-activated SignalChannel entity
+    // (resolved per tenant at send time, see AddOctoIdentityPersistence); these options are only
+    // consulted when the tenant has no Registered channel, and when they are empty too the
+    // LoggingOtpDeliveryChannel dev stub path handles the delivery. Configure local dev via
+    // OCTO_SIGNALBRIDGE__APIURL / OCTO_SIGNALBRIDGE__NUMBER; cluster deployments no longer need
+    // them.
     builder.Services.Configure<SignalBridgeOptions>(options =>
         builder.Configuration.GetSection(SignalBridgeOptions.SectionName).Bind(options));
     // Blueprint variable inputs (${octo.scheme}/${octo.domain}/${octo.environment}/...).
