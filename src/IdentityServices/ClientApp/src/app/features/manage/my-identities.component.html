@@ -65,6 +65,42 @@
   </div>
 </div>
 
+<!-- Preferred outbound channel (AB#5149) -->
+<div class="profile-section" *ngIf="!loading">
+  <h3 class="section-title">Preferred Channel</h3>
+  <p class="section-hint">
+    Used for messages the system sends to you; replies always use the channel you wrote on.
+    Only channels with a valid verified identity can be selected.
+  </p>
+
+  <p *ngIf="availableChannels.length === 0" class="section-hint">
+    No channel available yet — add and verify a phone number (Signal) or sign in via EntraID (Teams) first.
+  </p>
+
+  <div *ngIf="availableChannels.length" class="preferred-channel-options" role="radiogroup" aria-label="Preferred channel">
+    <label *ngFor="let channel of availableChannels" class="preferred-channel-option">
+      <input
+        type="radio"
+        name="preferred-channel"
+        [value]="channel"
+        [checked]="preferredChannel === channel"
+        [disabled]="savingPreferredChannel"
+        (change)="setPreferredChannel(channel)" />
+      <span>{{ channelLabel(channel) }}</span>
+    </label>
+    <label class="preferred-channel-option">
+      <input
+        type="radio"
+        name="preferred-channel"
+        [value]="null"
+        [checked]="preferredChannel === null"
+        [disabled]="savingPreferredChannel"
+        (change)="setPreferredChannel(null)" />
+      <span>No preference</span>
+    </label>
+  </div>
+</div>
+
 <!-- Add a phone number -->
 <div class="profile-section">
   <h3 class="section-title">Add Phone Number</h3>

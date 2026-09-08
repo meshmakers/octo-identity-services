@@ -54,6 +54,10 @@ types:
       - id: ${this}/TwoFactorEnabled
         name: TwoFactorEnabled
 
+      - id: ${this}/PreferredChannel
+        name: PreferredChannel
+        isOptional: true
+
       - id: ${this}/LockoutEnd
         name: LockoutEnd
         isOptional: true

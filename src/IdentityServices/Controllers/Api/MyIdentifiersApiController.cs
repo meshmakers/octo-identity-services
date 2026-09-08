@@ -32,7 +32,8 @@ namespace Meshmakers.Octo.Backend.IdentityServices.Controllers.Api;
 public class MyIdentifiersApiController(
     UserManager<RtUser> userManager,
     ISystemContext systemContext,
-    ISelfServiceIdentifierService selfServiceIdentifierService) : ControllerBase
+    ISelfServiceIdentifierService selfServiceIdentifierService,
+    IPreferredChannelService preferredChannelService) : ControllerBase
 {
     // The cookie scheme is IdentityConstants.ApplicationScheme ("Identity.Application"), the default
     // scheme AddIdentity registers and the sibling ManageApiController's bare [Authorize] relies on.
@@ -223,6 +224,60 @@ public class MyIdentifiersApiController(
         return Ok(new RemoveIdentifierResponseDto { Success = removed });
     }
 
+    /// <summary>
+    ///     Reads the current user's preferred outbound channel (AB#5149) — the channel the platform
+    ///     uses for system-initiated messages. Null means "no preference".
+    /// </summary>
+    [HttpGet("preferredChannel")]
+    public async Task<ActionResult<PreferredChannelResponseDto>> GetPreferredChannel(string tenantId)
+    {
+        var user = await GetCurrentUserAsync();
+        if (user == null)
+        {
+            return NotFound();
+        }
+
+        return Ok(new PreferredChannelResponseDto
+        {
+            PreferredChannel = user.PreferredChannel,
+            SupportedChannels = preferredChannelService.SupportedChannels
+        });
+    }
+
+    /// <summary>
+    ///     Sets (or clears, with a null <c>PreferredChannel</c>) the current user's preferred outbound
+    ///     channel (AB#5149). A channel is only accepted while the user holds a valid verified binding
+    ///     of the channel's identifier kind (TEAMS ⇒ EntraIdObjectId, SIGNAL ⇒ PhoneNumber); the
+    ///     refusal is reported with <c>Success = false</c> and <c>Status = ChannelNotBound</c>, same
+    ///     status/success shape as the enrollment endpoints. An unknown channel name is a caller
+    ///     mistake and answers 400, mirroring the unknown-kind handling of <see cref="Remove" />.
+    /// </summary>
+    [HttpPut("preferredChannel")]
+    public async Task<ActionResult<SetPreferredChannelResponseDto>> SetPreferredChannel(string tenantId,
+        [FromBody] SetPreferredChannelRequestDto request)
+    {
+        var user = await GetCurrentUserAsync();
+        if (user == null)
+        {
+            return NotFound();
+        }
+
+        var result = await preferredChannelService.SetPreferredChannelAsync(user, request.PreferredChannel);
+        if (result.Status == SetPreferredChannelStatus.UnknownChannel)
+        {
+            return BadRequest(
+                $"Unknown channel '{request.PreferredChannel}'. Supported channels: " +
+                $"{string.Join(", ", preferredChannelService.SupportedChannels)}.");
+        }
+
+        return Ok(new SetPreferredChannelResponseDto
+        {
+            Status = result.Status.ToString(),
+            Success = result.Status is SetPreferredChannelStatus.Set or SetPreferredChannelStatus.Cleared,
+            PreferredChannel = result.PreferredChannel
+        });
+    }
+
     private static VerifiedIdentifierDto ToDto(VerifiedIdentifierSummary summary) => new()
     {
         RtId = summary.RtId.ToString(),
@@ -329,6 +384,30 @@ public record RemoveIdentifierRequestDto
 public record RemoveIdentifierResponseDto
 {
     public bool Success { get; init; }
+}
+
+public record PreferredChannelResponseDto
+{
+    /// <summary>The stored preference ("TEAMS" | "SIGNAL") or null for "no preference".</summary>
+    public string? PreferredChannel { get; init; }
+
+    /// <summary>All channel names the platform supports (whether or not the user may pick them).</summary>
+    public IReadOnlyList<string> SupportedChannels { get; init; } = [];
+}
+
+public record SetPreferredChannelRequestDto
+{
+    /// <summary>The channel to prefer ("TEAMS" | "SIGNAL", case-insensitive) or null to clear.</summary>
+    public string? PreferredChannel { get; init; }
+}
+
+public record SetPreferredChannelResponseDto
+{
+    public string Status { get; init; } = string.Empty;
+    public bool Success { get; init; }
+
+    /// <summary>The stored preference after the call (canonical spelling), or null.</summary>
+    public string? PreferredChannel { get; init; }
 }
 
 #endregion

@@ -83,7 +83,7 @@ This service depends on Octo framework packages (versioned via `$(OctoVersion)` 
 
 ### Construction Kit (CK) Model
 
-The `Persistence.IdentityCkModel` project uses YAML-based model definitions that are transformed into C# code at build time. Model files are in `src/Persistence.IdentityCkModel/ConstructionKit/`. The model ID is `System.Identity-2.12.0` with dependency on `System-[2.0,3.0)`. Generated types live in namespace `Persistence.IdentityCkModel.Generated.System.Identity.v2`.
+The `Persistence.IdentityCkModel` project uses YAML-based model definitions that are transformed into C# code at build time. Model files are in `src/Persistence.IdentityCkModel/ConstructionKit/`. The model ID is `System.Identity-2.17.0` with dependency on `System-[2.0,3.0)`. Generated types live in namespace `Persistence.IdentityCkModel.Generated.System.Identity.v2`.
 
 ### OpenIddict Protocol Stack (Epic AB#4989)
 
@@ -567,7 +567,24 @@ Key components:
 - **`GroupsController`**: REST API at `{tenantId}/v1/groups` with full CRUD, role assignment, member management, and circular group prevention
 - **`TenantOwners`** group: Default group provisioned in every tenant with all 10 default roles. Created by `DefaultConfigurationCreatorService` and `IdentityAssociationMigration` (migration 9→10)
 
-Current identity schema (migration) version: `22` (System.Identity-2.12.0; migration 21→22 added the `RtOAuthAuthorization`/`RtOAuthToken` OpenIddict store types)
+Current identity schema (migration) version: `22` (migration 21→22 added the `RtOAuthAuthorization`/`RtOAuthToken` OpenIddict store types). Current CK model version: `System.Identity-2.17.0` — the 2.12.0→2.17.0 changes (verified-identifier directory AB#5122+, `RtUser.PreferredChannel` AB#5149) are additive schema needing no numeric migration.
+
+### Per-User Outbound Channel Preference (AB#5149)
+
+`RtUser.PreferredChannel` (optional String, CK 2.17.0) stores which channel the platform uses for
+**system-initiated** messages — canonical uppercase names `"TEAMS"` | `"SIGNAL"` (extensible), a
+cross-repo contract propagated verbatim by the mesh adapter's verified-caller directory into
+`WriteVerifiedCaller@1`'s `preferredChannel` JSON field. Synchronous replies keep using the channel
+the message came in on. `IPreferredChannelService` / `PreferredChannelService`
+(`IdentityServerPersistence/Services/SelfService/`) gates a set on a **valid** verified binding of
+the channel's identifier kind (TEAMS ⇒ EntraIdObjectId, SIGNAL ⇒ PhoneNumber, via
+`IVerifiedIdentifierResolver.GetByUserAsync`); clearing (null) is always allowed; persistence goes
+through `UserManager.UpdateAsync` like every other user-profile scalar. Self-service API on
+`MyIdentifiersApiController`: `GET`/`PUT {tenantId}/api/manage/identifiers/preferredChannel`
+(cookie + bearer schemes, current user only; unknown channel ⇒ 400, unbound channel ⇒
+`Success=false`/`Status=ChannelNotBound`). UI: "Preferred channel" radio group on the ClientApp
+my-identities page, offering only channels backed by a valid identifier from the list already on the
+page. Tests: `tests/IdentityServerPersistence.UnitTests/Services/SelfService/PreferredChannelServiceTests.cs`.
 
 ### Client Role & Group Assignment (AB#4183)
 
@@ -1124,6 +1141,7 @@ Located in `Controllers/Api/`:
 - `ConsentApiController` - OAuth consent flow; its device methods drive the OpenIddict end-user verification endpoint (`/connect/deviceverification`, form-encoded) via the SPA's `ConsentApiService`
 - `DeviceApiController` - Holds the device-flow DTOs only (the flow itself runs through `/connect/deviceverification`)
 - `ManageApiController` - User profile, password, external logins
+- `MyIdentifiersApiController` - Self-service verified identifiers (phone/e-mail OTP, certificate) at `{tenantId}/api/manage/identifiers`, plus the AB#5149 preferred outbound channel (`GET`/`PUT .../preferredChannel`); accepts cookie AND bearer schemes
 - `GrantsApiController` - OAuth grants management
 - `OemApiController` - OEM configuration
 - `SetupApiController` - Anonymous initial admin user setup (returns 404 after setup complete)

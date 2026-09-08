@@ -6,7 +6,8 @@ import {
   VerifiedIdentifier,
   VerifiedIdentifierKind,
   EnrollmentTrust,
-  IdentifierSource
+  IdentifierSource,
+  PreferredChannel
 } from '../../core/models/manage.models';
 
 /**
@@ -66,8 +67,17 @@ export class MyIdentitiesComponent implements OnInit {
 
   removingRtId: string | null = null;
 
+  // Preferred outbound channel (AB#5149): which channel the system uses for messages it
+  // initiates. Only channels the user holds a valid verified binding for are offered.
+  preferredChannel: PreferredChannel | null = null;
+  savingPreferredChannel = false;
+
   ngOnInit(): void {
     this.reload();
+    this.manageApi.getPreferredChannel().subscribe({
+      next: (result) => (this.preferredChannel = result.preferredChannel),
+      error: () => (this.preferredChannel = null)
+    });
   }
 
   reload(): void {
@@ -83,6 +93,67 @@ export class MyIdentitiesComponent implements OnInit {
         this.setError('The identities could not be loaded.');
       }
     });
+  }
+
+  // === Preferred outbound channel (AB#5149) ===
+
+  /** Channels selectable right now, derived from the identifier list already on the page. */
+  get availableChannels(): PreferredChannel[] {
+    const channels: PreferredChannel[] = [];
+    if (this.hasValidIdentifier('EntraIdObjectId')) {
+      channels.push('TEAMS');
+    }
+    if (this.hasValidIdentifier('PhoneNumber')) {
+      channels.push('SIGNAL');
+    }
+    return channels;
+  }
+
+  channelLabel(channel: PreferredChannel): string {
+    switch (channel) {
+      case 'TEAMS': return 'Microsoft Teams';
+      case 'SIGNAL': return 'Signal';
+      default: return channel;
+    }
+  }
+
+  setPreferredChannel(channel: PreferredChannel | null): void {
+    if (this.savingPreferredChannel || channel === this.preferredChannel) {
+      return;
+    }
+    const previous = this.preferredChannel;
+    this.preferredChannel = channel;
+    this.savingPreferredChannel = true;
+    this.clearFeedback();
+    this.manageApi.setPreferredChannel({ preferredChannel: channel }).subscribe({
+      next: (result) => {
+        this.savingPreferredChannel = false;
+        if (result.success) {
+          this.preferredChannel = result.preferredChannel;
+          this.setSuccess(
+            channel === null
+              ? 'The preferred channel has been cleared.'
+              : `The preferred channel has been set to ${this.channelLabel(channel)}.`
+          );
+        } else {
+          this.preferredChannel = previous;
+          this.setError(
+            result.status === 'ChannelNotBound'
+              ? 'This channel requires a valid verified identity first.'
+              : 'The preferred channel could not be saved.'
+          );
+        }
+      },
+      error: () => {
+        this.savingPreferredChannel = false;
+        this.preferredChannel = previous;
+        this.setError('The preferred channel could not be saved.');
+      }
+    });
+  }
+
+  private hasValidIdentifier(kind: VerifiedIdentifierKind): boolean {
+    return this.identifiers.some((i) => i.identifierKind === kind && i.isValid);
   }
 
   isReadOnly(item: VerifiedIdentifier): boolean {

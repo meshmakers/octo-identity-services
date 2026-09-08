@@ -26,7 +26,10 @@ import {
   EnrollCertificateRequest,
   EnrollCertificateResult,
   RemoveIdentifierRequest,
-  RemoveIdentifierResult
+  RemoveIdentifierResult,
+  PreferredChannelResult,
+  SetPreferredChannelRequest,
+  SetPreferredChannelResult
 } from '../models/manage.models';
 import { ExternalProvider } from '../models/login.models';
 
@@ -126,5 +129,15 @@ export class ManageApiService {
 
   removeIdentifier(request: RemoveIdentifierRequest): Observable<RemoveIdentifierResult> {
     return this.http.post<RemoveIdentifierResult>('/api/manage/identifiers/remove', request);
+  }
+
+  // === Preferred outbound channel (AB#5149) ===
+
+  getPreferredChannel(): Observable<PreferredChannelResult> {
+    return this.http.get<PreferredChannelResult>('/api/manage/identifiers/preferredChannel');
+  }
+
+  setPreferredChannel(request: SetPreferredChannelRequest): Observable<SetPreferredChannelResult> {
+    return this.http.put<SetPreferredChannelResult>('/api/manage/identifiers/preferredChannel', request);
   }
 }

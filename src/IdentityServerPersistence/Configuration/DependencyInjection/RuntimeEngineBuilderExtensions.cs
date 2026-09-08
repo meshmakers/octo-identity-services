@@ -137,6 +137,12 @@ public static class RuntimeEngineBuilderExtensions
 
         builder.Services.AddScoped<ISelfServiceIdentifierService, SelfServiceIdentifierService>();
 
+        // AB#5149 per-user outbound channel preference: self-service picks the channel the platform
+        // uses for system-initiated messages (TEAMS | SIGNAL), gated on a valid verified binding of
+        // the channel's identifier kind in the AB#5122 directory. Stored on RtUser.PreferredChannel
+        // and read by the mesh adapter's verified-caller lookups.
+        builder.Services.AddScoped<IPreferredChannelService, PreferredChannelService>();
+
         builder.Services.AddSingleton<AttributeStringValueListConverter>();
         builder.Services.AddAutoMapper(cfg =>
         {

@@ -169,3 +169,23 @@ export interface RemoveIdentifierRequest {
 export interface RemoveIdentifierResult {
   success: boolean;
 }
+
+// === Preferred outbound channel (AB#5149) ===
+
+/** Canonical channel names — a cross-repo contract, spellings are load-bearing. */
+export type PreferredChannel = 'TEAMS' | 'SIGNAL';
+
+export interface PreferredChannelResult {
+  preferredChannel: PreferredChannel | null;
+  supportedChannels: string[];
+}
+
+export interface SetPreferredChannelRequest {
+  preferredChannel: PreferredChannel | null;
+}
+
+export interface SetPreferredChannelResult {
+  status: string;
+  success: boolean;
+  preferredChannel: PreferredChannel | null;
+}

@@ -248,6 +248,35 @@
   to { transform: rotate(360deg); }
 }
 
+// === Preferred outbound channel (AB#5149) ===
+
+.preferred-channel-options {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--lcars-spacing-lg);
+}
+
+.preferred-channel-option {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--lcars-spacing-sm);
+  color: $ash-blue;
+  cursor: pointer;
+
+  input[type='radio'] {
+    accent-color: $octo-mint;
+    cursor: pointer;
+  }
+
+  input[type='radio']:checked + span {
+    color: $octo-mint;
+  }
+
+  input[type='radio']:disabled {
+    cursor: wait;
+  }
+}
+
 // === Responsive: collapse table on small screens ===
 
 @media (max-width: 640px) {

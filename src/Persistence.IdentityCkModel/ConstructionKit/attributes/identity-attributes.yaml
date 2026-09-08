@@ -50,6 +50,17 @@ attributes:
     defaultValues:
       - false
 
+  # AB#5149 per-user outbound channel preference: which channel the platform uses for
+  # system-initiated messages (to-dos, document status). Canonical uppercase channel names
+  # ("TEAMS", "SIGNAL"; extensible, e.g. "EMAIL"). Deliberately a String rather than a CK enum so
+  # adding a channel needs no model migration and the value propagates verbatim into the mesh
+  # adapter's verified-caller principal (WriteVerifiedCaller@1 "preferredChannel"). Self-service
+  # only accepts a channel the user holds a valid verified binding for (TEAMS -> EntraIdObjectId,
+  # SIGNAL -> PhoneNumber); null means "no preference".
+  - id: PreferredChannel
+    valueType: String
+    description: The user's preferred outbound channel for system-initiated messages ("TEAMS", "SIGNAL"; null = no preference). Set via self-service, restricted to channels with a valid verified binding.
+
   - id: LockoutEnd
     valueType: DateTimeOffset
     description: The date and time, in UTC, when any user lockout ends.
