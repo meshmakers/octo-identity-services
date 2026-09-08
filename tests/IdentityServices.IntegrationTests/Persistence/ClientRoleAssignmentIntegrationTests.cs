@@ -2,6 +2,7 @@ using FluentAssertions;
 using IdentityServerPersistence;
 using IdentityServerPersistence.Services;
 using IdentityServerPersistence.SystemStores;
+using IdentityServices.IntegrationTests.Collections;
 using IdentityServices.IntegrationTests.Fixtures;
 using Meshmakers.Octo.ConstructionKit.Contracts;
 using Meshmakers.Octo.Runtime.Contracts;
@@ -23,8 +24,8 @@ namespace IdentityServices.IntegrationTests.Persistence;
 /// the same machinery users use. Roles/clients/groups are created in-test so the assertions do
 /// not depend on which entities the blueprint seed provisions in the fixture.
 /// </summary>
-[Collection("Sequential")]
-public class ClientRoleAssignmentIntegrationTests : IClassFixture<IdentityServicesFixture>
+[Collection(IdentityPersistenceCollection.Name)]
+public class ClientRoleAssignmentIntegrationTests
 {
     private readonly IdentityServicesFixture _fixture;
 

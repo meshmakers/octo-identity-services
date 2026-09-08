@@ -2,6 +2,7 @@ using System.Net;
 using System.Net.Http.Json;
 using FluentAssertions;
 using IdentityServices.IntegrationTests.Helpers;
+using IdentityServices.IntegrationTests.Collections;
 using IdentityServices.IntegrationTests.Infrastructure;
 using Meshmakers.Octo.Backend.IdentityServices.Controllers.Api;
 using Xunit;
@@ -11,6 +12,7 @@ namespace IdentityServices.IntegrationTests.Api.Auth;
 /// <summary>
 /// Integration tests for the AuthApiController login endpoints.
 /// </summary>
+[Collection(WebFactoryCollection.Name)]
 public class AuthApiLoginTests : IntegrationTestBase
 {
     public AuthApiLoginTests(CustomWebApplicationFactory factory) : base(factory)

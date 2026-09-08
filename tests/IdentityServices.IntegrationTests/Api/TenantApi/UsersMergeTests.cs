@@ -1,6 +1,7 @@
 using System.Net;
 using System.Net.Http.Json;
 using FluentAssertions;
+using IdentityServices.IntegrationTests.Collections;
 using IdentityServices.IntegrationTests.Infrastructure;
 using Meshmakers.Octo.ConstructionKit.Contracts;
 using Microsoft.AspNetCore.Identity;
@@ -16,6 +17,7 @@ namespace IdentityServices.IntegrationTests.Api.TenantApi;
 /// Verifies that external logins can be transferred between users and that
 /// the source user is deleted after a successful merge.
 /// </summary>
+[Collection(WebFactoryCollection.Name)]
 public class UsersMergeTests : IntegrationTestBase
 {
     public UsersMergeTests(CustomWebApplicationFactory factory) : base(factory)

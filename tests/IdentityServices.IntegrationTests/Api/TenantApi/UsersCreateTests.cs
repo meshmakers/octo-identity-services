@@ -1,5 +1,6 @@
 using System.Net;
 using FluentAssertions;
+using IdentityServices.IntegrationTests.Collections;
 using IdentityServices.IntegrationTests.Infrastructure;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.Extensions.DependencyInjection;
@@ -12,6 +13,7 @@ namespace IdentityServices.IntegrationTests.Api.TenantApi;
 /// Integration tests for the POST {tenantId}/v1/users endpoint (user creation).
 /// AB#4503: an invalid password must NOT persist a user; a valid password still creates one.
 /// </summary>
+[Collection(WebFactoryCollection.Name)]
 public class UsersCreateTests : IntegrationTestBase
 {
     public UsersCreateTests(CustomWebApplicationFactory factory) : base(factory)

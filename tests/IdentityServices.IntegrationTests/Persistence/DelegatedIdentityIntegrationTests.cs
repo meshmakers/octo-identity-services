@@ -1,6 +1,7 @@
 using FluentAssertions;
 using IdentityServerPersistence.Services;
 using IdentityServerPersistence.SystemStores;
+using IdentityServices.IntegrationTests.Collections;
 using IdentityServices.IntegrationTests.Fixtures;
 using Meshmakers.Octo.ConstructionKit.Contracts;
 using Meshmakers.Octo.Runtime.Contracts;
@@ -31,8 +32,8 @@ namespace IdentityServices.IntegrationTests.Persistence;
 ///         what the blueprint seed provisions in the fixture.
 ///     </para>
 /// </remarks>
-[Collection("Sequential")]
-public class DelegatedIdentityIntegrationTests : IClassFixture<IdentityServicesFixture>
+[Collection(IdentityPersistenceCollection.Name)]
+public class DelegatedIdentityIntegrationTests
 {
     private readonly IdentityServicesFixture _fixture;
 

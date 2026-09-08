@@ -1,5 +1,6 @@
 using IdentityServerPersistence.Configuration.Options;
 using IdentityServices.IntegrationTests.Configuration;
+using IdentityServices.IntegrationTests.Helpers;
 using MassTransit;
 using Meshmakers.Octo.Common.DistributionEventHub;
 using Meshmakers.Octo.Common.DistributionEventHub.Services;
@@ -44,33 +45,79 @@ public class CustomWebApplicationFactory : WebApplicationFactory<Program>, IAsyn
         Console.Error.WriteLine($"[WebFactory] TESTCONTAINERS_HOST_OVERRIDE: {Environment.GetEnvironmentVariable("TESTCONTAINERS_HOST_OVERRIDE") ?? "(not set)"}");
         Console.Error.Flush();
 
-        _mongoContainer = new MongoDbBuilder(_options.MongoDbImage)
-            .WithReplicaSet()
-            .WithName($"mongodb-identity-webtest-{Guid.NewGuid():N}")
-            .WithUsername(_options.AdminUser)
-            .WithPassword(_options.AdminUserPassword)
-            .WithCleanUp(true) // Ensure cleanup even if Ryuk is disabled in CI
-            .Build();
-
-        Console.Error.WriteLine("[WebFactory] Container built, starting...");
-        Console.Error.Flush();
+        // AB#5160 / CI build 45418: the same retry-with-a-FRESH-container loop DatabaseFixture has
+        // carried since build 34386. Testcontainers' rs.initiate() handshake races with mongod's
+        // keyfile-init entrypoint restart on the DinD agent; when the container dies mid-handshake,
+        // StartAsync surfaces a Docker.DotNet.DockerApiException ("container ... is not running")
+        // from InitiateReplicaSetAsync — NOT an OperationCanceledException, so the timeout-only
+        // catch that used to stand here could never recover from it.
+        //
+        // This was survivable while every test class had its own factory: one class died. Since the
+        // collection fixture consolidation ONE such aborted bringup fails all 15 classes of the
+        // ZWebFactory collection at once (45418 attempt 1: 98 failures from a single container).
+        // Sharing the container raises the cost of a flaky bringup, so it has to buy the same
+        // robustness the store-level fixture already had.
+        const int maxAttempts = 3;
+        var perAttemptTimeout = TimeSpan.FromMinutes(2);
         var startTime = DateTime.UtcNow;
 
-        // Use explicit timeout for container startup (2 minutes)
-        using var cts = new CancellationTokenSource(TimeSpan.FromMinutes(2));
-        try
+        for (var attempt = 1; attempt <= maxAttempts; attempt++)
         {
-            await _mongoContainer.StartAsync(cts.Token);
-        }
-        catch (OperationCanceledException)
-        {
-            Console.Error.WriteLine("[WebFactory] ERROR: Container startup timed out after 2 minutes!");
+            Console.Error.WriteLine($"[WebFactory] StartAsync attempt {attempt}/{maxAttempts}");
             Console.Error.Flush();
-            throw new TimeoutException("MongoDB container startup timed out after 2 minutes");
+
+            _mongoContainer = new MongoDbBuilder(_options.MongoDbImage)
+                .WithReplicaSet()
+                .WithName($"mongodb-identity-webtest-{Guid.NewGuid():N}")
+                .WithUsername(_options.AdminUser)
+                .WithPassword(_options.AdminUserPassword)
+                .WithCleanUp(true) // Ensure cleanup even if Ryuk is disabled in CI
+                .Build();
+
+            using var startCts = new CancellationTokenSource(perAttemptTimeout);
+            try
+            {
+                await _mongoContainer.StartAsync(startCts.Token);
+                break;
+            }
+            catch (Exception ex)
+            {
+                Console.Error.WriteLine(
+                    $"[WebFactory] StartAsync attempt {attempt}/{maxAttempts} failed: {ex.GetType().Name}: {ex.Message}");
+                Console.Error.Flush();
+
+                try
+                {
+                    await _mongoContainer.DisposeAsync();
+                }
+                catch (Exception disposeEx)
+                {
+                    Console.Error.WriteLine(
+                        $"[WebFactory]   Disposal of failed container also threw: {disposeEx.Message}");
+                    Console.Error.Flush();
+                }
+
+                _mongoContainer = null;
+
+                if (attempt == maxAttempts)
+                {
+                    throw;
+                }
+
+                await Task.Delay(TimeSpan.FromSeconds(2 * attempt));
+            }
         }
 
         var elapsed = DateTime.UtcNow - startTime;
         Console.Error.WriteLine($"[WebFactory] Container started in {elapsed.TotalSeconds:F1}s");
+        Console.Error.Flush();
+
+        // AB#5160: the system-tenant creation below runs in one Mongo transaction and would hit the 60s
+        // default under load now that a whole collection shares this container.
+        await MongoTestContainerTuning.RaiseTransactionLifetimeLimitAsync(
+            $"localhost:{_mongoContainer!.GetMappedPublicPort()}", _options.AdminUser, _options.AdminUserPassword);
+        Console.Error.WriteLine(
+            $"[WebFactory] transactionLifetimeLimitSeconds = {MongoTestContainerTuning.TransactionLifetimeLimitSeconds}");
         Console.Error.Flush();
 
         // Initialize system tenant before web host starts
