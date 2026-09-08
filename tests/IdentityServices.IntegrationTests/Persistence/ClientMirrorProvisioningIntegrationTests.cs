@@ -1,6 +1,5 @@
 using FluentAssertions;
 using IdentityServerPersistence.Services;
-using IdentityServices.IntegrationTests.Collections;
 using IdentityServices.IntegrationTests.Fixtures;
 using Meshmakers.Octo.Backend.IdentityServices.OpenIddict;
 using Meshmakers.Octo.ConstructionKit.Contracts;
@@ -31,8 +30,8 @@ namespace IdentityServices.IntegrationTests.Persistence;
 /// behaviour every consumer of this feature (CI/CD client roll-out, future Studio UI)
 /// depends on: mirrors materialize, secrets propagate, cleanup happens on delete.
 /// </summary>
-[Collection(IdentityPersistenceCollection.Name)]
-public class ClientMirrorProvisioningIntegrationTests
+[Collection("Sequential")]
+public class ClientMirrorProvisioningIntegrationTests : IClassFixture<IdentityServicesFixture>
 {
     private readonly IdentityServicesFixture _fixture;
 

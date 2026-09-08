@@ -1,6 +1,5 @@
 using IdentityServerPersistence.Configuration.Options;
 using IdentityServices.IntegrationTests.Configuration;
-using IdentityServices.IntegrationTests.Helpers;
 using MassTransit;
 using Meshmakers.Octo.Common.DistributionEventHub;
 using Meshmakers.Octo.Common.DistributionEventHub.Services;
@@ -72,14 +71,6 @@ public class CustomWebApplicationFactory : WebApplicationFactory<Program>, IAsyn
 
         var elapsed = DateTime.UtcNow - startTime;
         Console.Error.WriteLine($"[WebFactory] Container started in {elapsed.TotalSeconds:F1}s");
-        Console.Error.Flush();
-
-        // AB#5160: the system-tenant creation below runs in one Mongo transaction and would hit the 60s
-        // default under load now that a whole collection shares this container.
-        await MongoTestContainerTuning.RaiseTransactionLifetimeLimitAsync(
-            $"localhost:{_mongoContainer.GetMappedPublicPort()}", _options.AdminUser, _options.AdminUserPassword);
-        Console.Error.WriteLine(
-            $"[WebFactory] transactionLifetimeLimitSeconds = {MongoTestContainerTuning.TransactionLifetimeLimitSeconds}");
         Console.Error.Flush();
 
         // Initialize system tenant before web host starts

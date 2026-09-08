@@ -1,6 +1,5 @@
 using FluentAssertions;
 using IdentityServerPersistence.Services;
-using IdentityServices.IntegrationTests.Collections;
 using IdentityServices.IntegrationTests.Fixtures;
 using Meshmakers.Octo.Backend.Authentication.DynamicAuth;
 using Meshmakers.Octo.Backend.IdentityServices.TenantApi.v1.Controllers;
@@ -24,8 +23,8 @@ namespace IdentityServices.IntegrationTests.Persistence;
 /// <c>xt_</c> shadow users are excluded, tenants without a parent yield nothing, and the target's roles
 /// are returned.
 /// </summary>
-[Collection(IdentityPersistenceCollection.Name)]
-public class AdminProvisioningSourceUsersIntegrationTests
+[Collection("Sequential")]
+public class AdminProvisioningSourceUsersIntegrationTests : IClassFixture<IdentityServicesFixture>
 {
     private readonly IdentityServicesFixture _fixture;
 

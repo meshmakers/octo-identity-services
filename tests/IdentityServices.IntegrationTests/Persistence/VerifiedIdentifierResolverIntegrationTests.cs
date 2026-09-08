@@ -1,7 +1,6 @@
 using FluentAssertions;
 using IdentityServerPersistence.Services;
 using IdentityServerPersistence.SystemStores;
-using IdentityServices.IntegrationTests.Collections;
 using IdentityServices.IntegrationTests.Fixtures;
 using Meshmakers.Octo.ConstructionKit.Contracts;
 using Meshmakers.Octo.Runtime.Contracts.MongoDb.Repositories;
@@ -29,8 +28,8 @@ namespace IdentityServices.IntegrationTests.Persistence;
 ///     </para>
 ///     <para>Users are created in-test so assertions do not depend on the blueprint seed.</para>
 /// </remarks>
-[Collection(IdentityPersistenceCollection.Name)]
-public class VerifiedIdentifierResolverIntegrationTests
+[Collection("Sequential")]
+public class VerifiedIdentifierResolverIntegrationTests : IClassFixture<IdentityServicesFixture>
 {
     private readonly IdentityServicesFixture _fixture;
 

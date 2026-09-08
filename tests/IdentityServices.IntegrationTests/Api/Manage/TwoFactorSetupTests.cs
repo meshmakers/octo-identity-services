@@ -2,7 +2,6 @@ using System.Net;
 using System.Net.Http.Json;
 using FluentAssertions;
 using IdentityServices.IntegrationTests.Helpers;
-using IdentityServices.IntegrationTests.Collections;
 using IdentityServices.IntegrationTests.Infrastructure;
 using Meshmakers.Octo.Backend.IdentityServices.Controllers.Api;
 using OtpNet;
@@ -13,7 +12,6 @@ namespace IdentityServices.IntegrationTests.Api.Manage;
 /// <summary>
 /// Integration tests for the two-factor authentication setup endpoints.
 /// </summary>
-[Collection(WebFactoryCollection.Name)]
 public class TwoFactorSetupTests : IntegrationTestBase
 {
     public TwoFactorSetupTests(CustomWebApplicationFactory factory) : base(factory)

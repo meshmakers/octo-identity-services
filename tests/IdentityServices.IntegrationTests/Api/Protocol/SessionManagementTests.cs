@@ -4,7 +4,6 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Web;
 using FluentAssertions;
-using IdentityServices.IntegrationTests.Collections;
 using IdentityServices.IntegrationTests.Infrastructure;
 using Microsoft.AspNetCore.WebUtilities;
 using Xunit;
@@ -19,7 +18,6 @@ namespace IdentityServices.IntegrationTests.Api.Protocol;
 ///     SPAs (angular-oauth2-oidc with <c>sessionChecksEnabled</c>) learn about a logout —
 ///     without it a logout in one tab leaves every other session running until token expiry.
 /// </summary>
-[Collection(WebFactoryCollection.Name)]
 public class SessionManagementTests : IntegrationTestBase
 {
     public SessionManagementTests(CustomWebApplicationFactory factory) : base(factory)

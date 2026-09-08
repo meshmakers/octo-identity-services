@@ -1,7 +1,6 @@
 using System.Net;
 using System.Net.Http.Json;
 using FluentAssertions;
-using IdentityServices.IntegrationTests.Collections;
 using IdentityServices.IntegrationTests.Infrastructure;
 using Meshmakers.Octo.Backend.IdentityServices.Controllers.Api;
 using Xunit;
@@ -11,7 +10,6 @@ namespace IdentityServices.IntegrationTests.Api.Auth;
 /// <summary>
 /// Integration tests for external identity provider login endpoints.
 /// </summary>
-[Collection(WebFactoryCollection.Name)]
 public class ExternalLoginTests : IntegrationTestBase
 {
     public ExternalLoginTests(CustomWebApplicationFactory factory) : base(factory)

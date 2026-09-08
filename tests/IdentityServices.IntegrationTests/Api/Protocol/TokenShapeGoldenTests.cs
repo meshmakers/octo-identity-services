@@ -6,7 +6,6 @@ using System.Text.Json.Nodes;
 using System.Web;
 using FluentAssertions;
 using IdentityServerPersistence.SystemStores;
-using IdentityServices.IntegrationTests.Collections;
 using IdentityServices.IntegrationTests.Infrastructure;
 using Meshmakers.Octo.Backend.IdentityServices.Controllers.Api;
 using Meshmakers.Octo.ConstructionKit.Contracts;
@@ -34,7 +33,6 @@ namespace IdentityServices.IntegrationTests.Api.Protocol;
 ///     claims parity is pinned separately by <c>TenantExchangeIntegrationTests</c> (role subset
 ///     resolution) and will get an HTTP-level golden once the OpenIddict handler exists (AB#4997).
 /// </remarks>
-[Collection(WebFactoryCollection.Name)]
 public class TokenShapeGoldenTests : IntegrationTestBase
 {
     private const string GoldenApiScope = "golden-api";

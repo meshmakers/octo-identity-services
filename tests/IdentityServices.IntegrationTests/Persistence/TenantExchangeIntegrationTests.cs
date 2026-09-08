@@ -1,7 +1,6 @@
 using FluentAssertions;
 using IdentityServerPersistence.Services;
 using IdentityServerPersistence.SystemStores;
-using IdentityServices.IntegrationTests.Collections;
 using IdentityServices.IntegrationTests.Fixtures;
 using Meshmakers.Octo.ConstructionKit.Contracts;
 using Meshmakers.Octo.Runtime.Contracts;
@@ -38,8 +37,8 @@ namespace IdentityServices.IntegrationTests.Persistence;
 ///     principal construction of <c>TenantExchangeProcessor</c> (unit
 ///     behaviour) are out of scope here.
 /// </remarks>
-[Collection(IdentityPersistenceCollection.Name)]
-public class TenantExchangeIntegrationTests
+[Collection("Sequential")]
+public class TenantExchangeIntegrationTests : IClassFixture<IdentityServicesFixture>
 {
     private readonly IdentityServicesFixture _fixture;
 

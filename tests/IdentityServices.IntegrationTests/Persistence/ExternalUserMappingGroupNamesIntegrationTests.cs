@@ -2,7 +2,6 @@ using FluentAssertions;
 using IdentityServerPersistence;
 using IdentityServerPersistence.Services;
 using IdentityServerPersistence.SystemStores;
-using IdentityServices.IntegrationTests.Collections;
 using IdentityServices.IntegrationTests.Fixtures;
 using Meshmakers.Octo.ConstructionKit.Contracts;
 using Meshmakers.Octo.Runtime.Contracts;
@@ -21,8 +20,8 @@ namespace IdentityServices.IntegrationTests.Persistence;
 /// cross-tenant mapping belongs to (roles are inherited via the group, so this is the only signal
 /// that a group-based grant took effect).
 /// </summary>
-[Collection(IdentityPersistenceCollection.Name)]
-public class ExternalUserMappingGroupNamesIntegrationTests
+[Collection("Sequential")]
+public class ExternalUserMappingGroupNamesIntegrationTests : IClassFixture<IdentityServicesFixture>
 {
     private readonly IdentityServicesFixture _fixture;
 

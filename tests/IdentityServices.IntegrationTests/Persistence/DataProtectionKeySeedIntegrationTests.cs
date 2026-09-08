@@ -2,7 +2,6 @@ using System.Xml.Linq;
 using FluentAssertions;
 using IdentityServerPersistence.Configuration.Options;
 using IdentityServerPersistence.SystemStores;
-using IdentityServices.IntegrationTests.Collections;
 using IdentityServices.IntegrationTests.Fixtures;
 using Meshmakers.Octo.Services.Infrastructure.Services;
 using Microsoft.Extensions.DependencyInjection;
@@ -16,17 +15,13 @@ namespace IdentityServices.IntegrationTests.Persistence;
 /// verifies the zero-logout migration path where an EMPTY Mongo store imports key-*.xml files
 /// from the legacy file-system path on the first <c>GetAllElements()</c> call.
 /// <para>
-/// Isolation rationale: this class sits in its own <see cref="DataProtectionKeySeedCollection"/>, so
-/// xUnit builds it a dedicated <see cref="IdentityServicesFixture"/> instance with a fresh Mongo
-/// container and a guaranteed-empty DataProtectionKey collection — the seed fires exactly once. It
-/// must NOT join <see cref="IdentityPersistenceCollection"/>: the sibling
-/// <see cref="DataProtectionKeyStoreIntegrationTests"/> calls <c>StoreElement</c> on the shared
-/// container, and a non-empty collection makes the seed a no-op and this test vacuously green
-/// (AB#5160).
+/// Isolation rationale: xUnit creates one <see cref="IClassFixture{T}"/> instance per test
+/// CLASS, so this class gets its own <see cref="IdentityServicesFixture"/> with a fresh Mongo
+/// container and a guaranteed-empty DataProtectionKey collection — the seed fires exactly once.
 /// </para>
 /// </summary>
-[Collection(DataProtectionKeySeedCollection.Name)]
-public class DataProtectionKeySeedIntegrationTests
+[Collection("Sequential")]
+public class DataProtectionKeySeedIntegrationTests : IClassFixture<IdentityServicesFixture>
 {
     private readonly IdentityServicesFixture _fixture;
 
