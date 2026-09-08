@@ -1,6 +1,7 @@
 using System.Xml.Linq;
 using IdentityServerPersistence.Configuration.Options;
 using IdentityServerPersistence.SystemStores;
+using IdentityServices.IntegrationTests.Collections;
 using IdentityServices.IntegrationTests.Fixtures;
 using Meshmakers.Octo.Runtime.Contracts.MongoDb.Configuration;
 using Meshmakers.Octo.Runtime.Contracts.MongoDb.TenantLifecycle;
@@ -20,8 +21,8 @@ namespace IdentityServices.IntegrationTests.Persistence;
 /// <c>SetupTenantAsync</c> decided whether to bootstrap; the decision then refused, the datasource
 /// user was never created, and every service start failed on a MongoDB authentication error.
 /// </summary>
-[Collection("Sequential")]
-public class VirginSystemDatabaseBootstrapIntegrationTests : IClassFixture<VirginBootstrapFixture>
+[Collection(VirginBootstrapCollection.Name)]
+public class VirginSystemDatabaseBootstrapIntegrationTests
 {
     private readonly VirginBootstrapFixture _fixture;
 

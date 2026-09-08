@@ -83,6 +83,12 @@ stages:
     jobs:
       - job: linux
         displayName: 'Build, test, and push Docker image'
+        # AB#5160: the definition default is 60 min and this job had no headroom against it — build 45396
+        # was killed at the 60-minute mark. Same fix and same value as octo-asset-repo-services under
+        # AB#4962. The container-per-test-class cost that made the suite that long is removed in this
+        # change (32 MongoDB containers -> 5); the 90 minutes are the safety margin for a saturated
+        # meshmakers-ci-agents pool and can go back to the default once the CI suite is measured again.
+        timeoutInMinutes: 90
         pool:
           name: meshmakers-ci-agents
         steps:
@@ -151,9 +157,18 @@ stages:
           - task: DotNetCoreCLI@2
             retryCountOnTaskFailure: 2
             displayName: 'Test'
+            # AB#5160:
+            #   --no-build --no-restore: the 'Build' task above already builds the WHOLE solution
+            #     (all four *Tests.csproj are solution members) in $(buildConfiguration), so the implicit
+            #     build here only rebuilt the same tree with a different property set. Reusing that output
+            #     also stops the test task from re-running the Angular BuildClientApp target.
+            #   no --logger "console;verbosity=detailed": with LogLevel.Trace in ServiceCollectionFixture
+            #     it turned every MongoDB command incl. BSON payload into build-log output (131 MB), in
+            #     which a real failure was unfindable. The DotNetCoreCLI test task still adds its TRX
+            #     logger and publishes the results, and failed tests still print their assertion message.
             inputs:
               command: 'test'
-              arguments: '--configuration $(buildConfiguration) -p:OctoNugetPrivateServer=$(nugetPrivateServer) /p:OctoPublishCkModel=false --logger "console;verbosity=detailed"'
+              arguments: '--configuration $(buildConfiguration) --no-build --no-restore -p:OctoNugetPrivateServer=$(nugetPrivateServer) /p:OctoPublishCkModel=false'
               projects: |
                 **/*Tests.csproj
                 !**/*SystemTests.csproj

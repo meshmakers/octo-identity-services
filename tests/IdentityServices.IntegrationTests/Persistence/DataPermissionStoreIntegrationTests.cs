@@ -2,6 +2,7 @@ using FluentAssertions;
 
 using IdentityServerPersistence.SystemStores;
 
+using IdentityServices.IntegrationTests.Collections;
 using IdentityServices.IntegrationTests.Fixtures;
 
 using Meshmakers.Octo.ConstructionKit.Contracts;
@@ -19,8 +20,8 @@ namespace IdentityServices.IntegrationTests.Persistence;
 /// CRUD, policy binding via PolicyPermission, role grants via GrantsPermission, the
 /// enforcement-mode flip (the AB#4974 operator action) and cascading permission removal.
 /// </summary>
-[Collection("Sequential")]
-public class DataPermissionStoreIntegrationTests : IClassFixture<IdentityServicesFixture>
+[Collection(IdentityPersistenceCollection.Name)]
+public class DataPermissionStoreIntegrationTests
 {
     private readonly IdentityServicesFixture _fixture;
 

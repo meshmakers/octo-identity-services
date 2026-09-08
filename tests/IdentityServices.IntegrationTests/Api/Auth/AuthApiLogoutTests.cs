@@ -1,6 +1,7 @@
 using System.Net;
 using System.Net.Http.Json;
 using FluentAssertions;
+using IdentityServices.IntegrationTests.Collections;
 using IdentityServices.IntegrationTests.Infrastructure;
 using Meshmakers.Octo.Backend.IdentityServices.Controllers.Api;
 using Xunit;
@@ -11,6 +12,7 @@ namespace IdentityServices.IntegrationTests.Api.Auth;
 /// Integration tests for the AuthApiController logout endpoints.
 /// Tests the Single Logout (SLO) functionality including token revocation.
 /// </summary>
+[Collection(WebFactoryCollection.Name)]
 public class AuthApiLogoutTests : IntegrationTestBase
 {
     public AuthApiLogoutTests(CustomWebApplicationFactory factory) : base(factory)

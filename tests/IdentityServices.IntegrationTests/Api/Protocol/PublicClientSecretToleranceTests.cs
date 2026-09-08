@@ -4,6 +4,7 @@ using System.Text;
 using System.Text.Json.Nodes;
 using FluentAssertions;
 using IdentityServerPersistence.SystemStores;
+using IdentityServices.IntegrationTests.Collections;
 using IdentityServices.IntegrationTests.Infrastructure;
 using Microsoft.Extensions.DependencyInjection;
 using Shared.TestUtilities.Builders;
@@ -18,6 +19,7 @@ namespace IdentityServices.IntegrationTests.Api.Protocol;
 ///     <c>OctoPublicClientSecretHandler</c>: the secret is dropped for public clients, while
 ///     confidential clients still authenticate strictly.
 /// </summary>
+[Collection(WebFactoryCollection.Name)]
 public class PublicClientSecretToleranceTests : IntegrationTestBase
 {
     public PublicClientSecretToleranceTests(CustomWebApplicationFactory factory) : base(factory)

@@ -49,11 +49,19 @@ public abstract class ServiceCollectionFixture : ITestOutputHelperAccessor, IAsy
         // ctor argument.
         Services.AddMigrations(typeof(IdentityServiceConstants).Assembly);
 
-        // Add logging with xUnit output
+        // Add logging with xUnit output.
+        //
+        // AB#5160: this used to be LogLevel.Trace, which routes every MongoDB command — including the full
+        // BSON payload — into the xUnit output of every test. Together with the CI test task's
+        // `--logger "console;verbosity=detailed"` that produced a 131 MB build log in which a genuine
+        // failure was unfindable. Warning keeps the diagnostics that matter: failed assertions carry their
+        // own message, the TRX logger still records every test, and the container/tenant progress markers
+        // in DatabaseFixture / CustomWebApplicationFactory are Console writes, not ILogger calls, so they
+        // survive. Raise this locally when a specific test needs the command stream.
         Services.AddLogging(loggingBuilder =>
         {
             loggingBuilder.ClearProviders();
-            loggingBuilder.SetMinimumLevel(LogLevel.Trace);
+            loggingBuilder.SetMinimumLevel(LogLevel.Warning);
             loggingBuilder.AddXUnit(this);
         });
     }

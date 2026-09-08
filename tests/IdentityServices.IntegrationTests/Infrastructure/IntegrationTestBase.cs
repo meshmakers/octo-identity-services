@@ -17,7 +17,14 @@ using Xunit;
 
 namespace IdentityServices.IntegrationTests.Infrastructure;
 
-public abstract class IntegrationTestBase : IClassFixture<CustomWebApplicationFactory>
+/// <summary>
+///     Base class for the HTTP integration tests. The <see cref="CustomWebApplicationFactory" /> is NOT an
+///     <c>IClassFixture</c> any more: it is supplied by a collection fixture, so one MongoDB container plus
+///     one ASP.NET test host serves every derived class instead of one per class (AB#5160). Derived classes
+///     therefore MUST carry <c>[Collection(WebFactoryCollection.Name)]</c> — or, if they manipulate the
+///     database as a whole, their own collection (see <c>SetupApiCollection</c>).
+/// </summary>
+public abstract class IntegrationTestBase
 {
     protected const string DefaultTenantId = "System";
     protected const string DefaultPassword = "Test123!";

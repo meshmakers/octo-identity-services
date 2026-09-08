@@ -1,5 +1,6 @@
 using FluentAssertions;
 using IdentityServerPersistence.Services;
+using IdentityServices.IntegrationTests.Collections;
 using IdentityServices.IntegrationTests.Fixtures;
 using Meshmakers.Octo.ConstructionKit.Contracts;
 using Meshmakers.Octo.Runtime.Contracts.MongoDb;
@@ -26,9 +27,8 @@ namespace IdentityServices.IntegrationTests.Persistence;
 ///     (that is a <c>Program.cs</c>-only registration), so we materialise both the
 ///     blueprint-range role and the pre-blueprint orphan ourselves.
 /// </summary>
-[Collection("Sequential")]
+[Collection(IdentityPersistenceCollection.Name)]
 public class PreBlueprintRestoreDefensiveIntegrationTests
-    : IClassFixture<IdentityServicesFixture>
 {
     private readonly IdentityServicesFixture _fixture;
 

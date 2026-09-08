@@ -2,6 +2,7 @@ using System.Xml.Linq;
 using FluentAssertions;
 using IdentityServerPersistence.Configuration.Options;
 using IdentityServerPersistence.SystemStores;
+using IdentityServices.IntegrationTests.Collections;
 using IdentityServices.IntegrationTests.Fixtures;
 using Meshmakers.Octo.Services.Infrastructure.Services;
 using Microsoft.Extensions.DependencyInjection;
@@ -14,8 +15,8 @@ namespace IdentityServices.IntegrationTests.Persistence;
 /// Real-Mongo tests for <see cref="DataProtectionKeyStore"/>: persistence, idempotency,
 /// and seed-once import from a legacy file-system path.
 /// </summary>
-[Collection("Sequential")]
-public class DataProtectionKeyStoreIntegrationTests : IClassFixture<IdentityServicesFixture>
+[Collection(IdentityPersistenceCollection.Name)]
+public class DataProtectionKeyStoreIntegrationTests
 {
     private readonly IdentityServicesFixture _fixture;
 
@@ -98,7 +99,7 @@ public class DataProtectionKeyStoreIntegrationTests : IClassFixture<IdentityServ
     /// <remarks>
     /// The seed-import (zero-logout migration) code path is covered in isolation by
     /// <see cref="DataProtectionKeySeedIntegrationTests.GetAllElements_EmptyStore_SeedsFromLegacyPath"/>,
-    /// which runs against a guaranteed-empty collection in its own class fixture.
+    /// which runs against a guaranteed-empty collection in its own collection fixture.
     /// </remarks>
     [Fact]
     public async Task StoredKeys_SurviveAcrossStoreInstances()

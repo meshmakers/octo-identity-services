@@ -4,6 +4,7 @@ using System.Text;
 using System.Text.Json.Nodes;
 using FluentAssertions;
 using IdentityServerPersistence.SystemStores;
+using IdentityServices.IntegrationTests.Collections;
 using IdentityServices.IntegrationTests.Infrastructure;
 using Meshmakers.Octo.ConstructionKit.Contracts;
 using Meshmakers.Octo.Runtime.Contracts.RepositoryEntities;
@@ -25,6 +26,7 @@ namespace IdentityServices.IntegrationTests.Api.Protocol;
 ///     reaches the processor (recognizable by ITS validation message) while a full cross-tenant
 ///     roundtrip still needs a child-tenant setup the HTTP factory does not provide.
 /// </summary>
+[Collection(WebFactoryCollection.Name)]
 public class TokenExchangeHttpTests : IntegrationTestBase
 {
     private const string ExchangeApiScope = "exchange-api";

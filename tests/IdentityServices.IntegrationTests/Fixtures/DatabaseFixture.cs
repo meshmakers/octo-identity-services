@@ -1,4 +1,5 @@
 using IdentityServices.IntegrationTests.Configuration;
+using IdentityServices.IntegrationTests.Helpers;
 using Meshmakers.Octo.Runtime.Contracts.MongoDb.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Testcontainers.MongoDb;
@@ -86,6 +87,13 @@ public class DatabaseFixture : ConfigurationFixture
         // Use localhost like the working project - this works in DinD with shared docker.sock
         var databaseHost = $"localhost:{mappedPort}";
         Console.WriteLine($"[Testcontainers] MongoDB available at: {databaseHost}");
+
+        // AB#5160: the tenant setup runs in one Mongo transaction and would hit the 60s default under
+        // load now that a whole collection shares this container. Raise the limit before anything writes.
+        await MongoTestContainerTuning.RaiseTransactionLifetimeLimitAsync(
+            databaseHost, _options.AdminUser, _options.AdminUserPassword);
+        Console.WriteLine(
+            $"[Testcontainers] transactionLifetimeLimitSeconds = {MongoTestContainerTuning.TransactionLifetimeLimitSeconds}");
 
         // Configure services with the test container connections
         Services.Configure<OctoSystemConfiguration>(t =>

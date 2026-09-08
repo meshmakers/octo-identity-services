@@ -1,5 +1,6 @@
 using FluentAssertions;
 using IdentityServerPersistence;
+using IdentityServices.IntegrationTests.Collections;
 using IdentityServices.IntegrationTests.Fixtures;
 using Meshmakers.Octo.Backend.IdentityServices.Consumers;
 using Meshmakers.Octo.Backend.IdentityServices.OpenIddict;
@@ -32,8 +33,8 @@ namespace IdentityServices.IntegrationTests.Persistence;
 /// <c>AssignedRole</c> edge are exercised for real.
 /// </para>
 /// </summary>
-[Collection("Sequential")]
-public class ServiceAccountClientProvisioningIntegrationTests : IClassFixture<IdentityServicesFixture>
+[Collection(IdentityPersistenceCollection.Name)]
+public class ServiceAccountClientProvisioningIntegrationTests
 {
     private readonly IdentityServicesFixture _fixture;
 

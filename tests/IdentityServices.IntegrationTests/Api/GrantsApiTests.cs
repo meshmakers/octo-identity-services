@@ -2,6 +2,7 @@ using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json.Nodes;
 using FluentAssertions;
+using IdentityServices.IntegrationTests.Collections;
 using IdentityServices.IntegrationTests.Infrastructure;
 using Xunit;
 
@@ -14,6 +15,7 @@ namespace IdentityServices.IntegrationTests.Api;
 ///     <c>TokenTypeHints</c> form — a short-form-only comparison silently yields an
 ///     empty grants page (same trap as <c>GenerateTokenContext.TokenType</c>).
 /// </summary>
+[Collection(WebFactoryCollection.Name)]
 public class GrantsApiTests : IntegrationTestBase
 {
     public GrantsApiTests(CustomWebApplicationFactory factory) : base(factory)
