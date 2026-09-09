@@ -1,6 +1,6 @@
 using IdentityServerPersistence.Configuration.Options;
 using IdentityServices.IntegrationTests.Configuration;
-using IdentityServices.IntegrationTests.Helpers;
+using IdentityServices.IntegrationTests.Fixtures;
 using MassTransit;
 using Meshmakers.Octo.Common.DistributionEventHub;
 using Meshmakers.Octo.Common.DistributionEventHub.Services;
@@ -17,7 +17,6 @@ using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.IdentityModel.Tokens;
-using Testcontainers.MongoDb;
 using Xunit;
 
 namespace IdentityServices.IntegrationTests.Infrastructure;
@@ -26,7 +25,22 @@ public class CustomWebApplicationFactory : WebApplicationFactory<Program>, IAsyn
 {
     private readonly IntegrationTestConfiguration _configuration = new();
     private readonly IntegrationTestOptions _options;
-    private MongoDbContainer? _mongoContainer;
+
+    /// <summary>
+    /// Unique per factory instance so every web-host fixture can share the one process-wide MongoDB
+    /// server (<see cref="SharedMongoDbContainer" />) without colliding on the same database (AB#5117).
+    /// </summary>
+    private readonly string _systemDatabaseName = $"identityintegrationtests{Guid.NewGuid():N}";
+
+    /// <summary>
+    /// Unique per factory instance as well (AB#5117): a tenant id keys process-wide state, notably the
+    /// static <c>DefaultConfigurationCreatorServiceBase.TenantsInHandling</c> guard that turns a
+    /// concurrent <c>SetupAsync</c> for the same id into a no-op. Tests address this tenant through
+    /// <c>IntegrationTestBase.NormalizedSystemTenantId</c>, never through a literal.
+    /// </summary>
+    private readonly string _systemTenantId = $"octosystem{Guid.NewGuid():N}"[..24];
+
+    private string? _databaseHost;
 
     public CustomWebApplicationFactory()
     {
@@ -34,91 +48,24 @@ public class CustomWebApplicationFactory : WebApplicationFactory<Program>, IAsyn
         _configuration.GetSection("integrationTest").Bind(_options);
     }
 
-    public string MongoConnectionString => _mongoContainer?.GetConnectionString()
-        ?? throw new InvalidOperationException("MongoDB container not initialized");
+    public string MongoConnectionString => SharedMongoDbContainer.ConnectionString;
 
     public async ValueTask InitializeAsync()
     {
         // Write to stderr for immediate output (stdout is buffered)
-        Console.Error.WriteLine($"[WebFactory] Starting MongoDB container with image: {_options.MongoDbImage}");
-        Console.Error.WriteLine($"[WebFactory] DOCKER_HOST: {Environment.GetEnvironmentVariable("DOCKER_HOST") ?? "(not set)"}");
-        Console.Error.WriteLine($"[WebFactory] TESTCONTAINERS_HOST_OVERRIDE: {Environment.GetEnvironmentVariable("TESTCONTAINERS_HOST_OVERRIDE") ?? "(not set)"}");
+        Console.Error.WriteLine("[WebFactory] Acquiring the shared MongoDB container...");
         Console.Error.Flush();
 
-        // AB#5160 / CI build 45418: the same retry-with-a-FRESH-container loop DatabaseFixture has
-        // carried since build 34386. Testcontainers' rs.initiate() handshake races with mongod's
-        // keyfile-init entrypoint restart on the DinD agent; when the container dies mid-handshake,
-        // StartAsync surfaces a Docker.DotNet.DockerApiException ("container ... is not running")
-        // from InitiateReplicaSetAsync — NOT an OperationCanceledException, so the timeout-only
-        // catch that used to stand here could never recover from it.
-        //
-        // This was survivable while every test class had its own factory: one class died. Since the
-        // collection fixture consolidation ONE such aborted bringup fails all 15 classes of the
-        // ZWebFactory collection at once (45418 attempt 1: 98 failures from a single container).
-        // Sharing the container raises the cost of a flaky bringup, so it has to buy the same
-        // robustness the store-level fixture already had.
-        const int maxAttempts = 3;
-        var perAttemptTimeout = TimeSpan.FromMinutes(2);
-        var startTime = DateTime.UtcNow;
+        // No container of its own (AB#5117): the shared one is started by whichever fixture needs a
+        // database first, and this factory isolates itself through _systemDatabaseName instead.
+        _databaseHost = await SharedMongoDbContainer.GetHostAsync(_options);
 
-        for (var attempt = 1; attempt <= maxAttempts; attempt++)
-        {
-            Console.Error.WriteLine($"[WebFactory] StartAsync attempt {attempt}/{maxAttempts}");
-            Console.Error.Flush();
-
-            _mongoContainer = new MongoDbBuilder(_options.MongoDbImage)
-                .WithReplicaSet()
-                .WithName($"mongodb-identity-webtest-{Guid.NewGuid():N}")
-                .WithUsername(_options.AdminUser)
-                .WithPassword(_options.AdminUserPassword)
-                .WithCleanUp(true) // Ensure cleanup even if Ryuk is disabled in CI
-                .Build();
-
-            using var startCts = new CancellationTokenSource(perAttemptTimeout);
-            try
-            {
-                await _mongoContainer.StartAsync(startCts.Token);
-                break;
-            }
-            catch (Exception ex)
-            {
-                Console.Error.WriteLine(
-                    $"[WebFactory] StartAsync attempt {attempt}/{maxAttempts} failed: {ex.GetType().Name}: {ex.Message}");
-                Console.Error.Flush();
-
-                try
-                {
-                    await _mongoContainer.DisposeAsync();
-                }
-                catch (Exception disposeEx)
-                {
-                    Console.Error.WriteLine(
-                        $"[WebFactory]   Disposal of failed container also threw: {disposeEx.Message}");
-                    Console.Error.Flush();
-                }
-
-                _mongoContainer = null;
-
-                if (attempt == maxAttempts)
-                {
-                    throw;
-                }
-
-                await Task.Delay(TimeSpan.FromSeconds(2 * attempt));
-            }
-        }
-
-        var elapsed = DateTime.UtcNow - startTime;
-        Console.Error.WriteLine($"[WebFactory] Container started in {elapsed.TotalSeconds:F1}s");
-        Console.Error.Flush();
-
-        // AB#5160: the system-tenant creation below runs in one Mongo transaction and would hit the 60s
-        // default under load now that a whole collection shares this container.
-        await MongoTestContainerTuning.RaiseTransactionLifetimeLimitAsync(
-            $"localhost:{_mongoContainer!.GetMappedPublicPort()}", _options.AdminUser, _options.AdminUserPassword);
         Console.Error.WriteLine(
-            $"[WebFactory] transactionLifetimeLimitSeconds = {MongoTestContainerTuning.TransactionLifetimeLimitSeconds}");
+            $"[WebFactory] MongoDB available at: {_databaseHost}, database '{_systemDatabaseName}'");
         Console.Error.Flush();
+
+        // AB#5160: transactionLifetimeLimitSeconds is raised once, by SharedMongoDbContainer, right
+        // after the shared server comes up — before any fixture writes to it.
 
         // Initialize system tenant before web host starts
         Console.Error.WriteLine("[WebFactory] Initializing system tenant...");
@@ -130,21 +77,21 @@ public class CustomWebApplicationFactory : WebApplicationFactory<Program>, IAsyn
 
     private async Task InitializeSystemTenantAsync()
     {
-        if (_mongoContainer == null)
+        if (_databaseHost == null)
         {
             throw new InvalidOperationException("MongoDB container not initialized");
         }
 
-        var mappedPort = _mongoContainer.GetMappedPublicPort();
-        // Use localhost like the working project - this works in DinD with shared docker.sock
-        var databaseHost = $"localhost:{mappedPort}";
-        Console.Error.WriteLine($"[WebFactory] MongoDB connection: {databaseHost}");
-        Console.Error.Flush();
+        var databaseHost = _databaseHost;
 
         // Build a temporary service provider for system tenant initialization
         var services = new ServiceCollection();
 
-        services.AddLogging(builder => builder.AddConsole());
+        services.AddLogging(builder =>
+        {
+            builder.AddConsole();
+            builder.SetMinimumLevel(TestLogging.MinimumLevel);
+        });
 
         // System.Notification CK model + services. Production Program.cs registers this via
         // AddOctoNotification(); the factory has to mirror it because Phase 3 PR #4 made
@@ -162,7 +109,8 @@ public class CustomWebApplicationFactory : WebApplicationFactory<Program>, IAsyn
 
         services.Configure<OctoSystemConfiguration>(t =>
         {
-            t.SystemDatabaseName = "identityintegrationtests";
+            t.SystemTenantId = _systemTenantId;
+            t.SystemDatabaseName = _systemDatabaseName;
             t.DatabaseHost = databaseHost;
             t.AdminUser = _options.AdminUser;
             t.AdminUserPassword = _options.AdminUserPassword;
@@ -230,12 +178,8 @@ public class CustomWebApplicationFactory : WebApplicationFactory<Program>, IAsyn
 
     public new async ValueTask DisposeAsync()
     {
-        if (_mongoContainer != null)
-        {
-            await _mongoContainer.StopAsync();
-            await _mongoContainer.DisposeAsync();
-        }
-
+        // The shared MongoDB container outlives every factory instance and is disposed once per test
+        // process by SharedMongoDbContainerDisposer; this factory's database goes with it.
         await base.DisposeAsync();
     }
 
@@ -299,16 +243,15 @@ public class CustomWebApplicationFactory : WebApplicationFactory<Program>, IAsyn
                     options.ForwardDefault = TestAuthHandler.SchemeName;
                 });
 
-            // Configure MongoDB connection using the test container
-            if (_mongoContainer != null)
+            // Configure MongoDB connection using the shared test container
+            if (_databaseHost != null)
             {
-                var mappedPort = _mongoContainer.GetMappedPublicPort();
-                // Use localhost like the working project - this works in DinD with shared docker.sock
-                var databaseHost = $"localhost:{mappedPort}";
+                var databaseHost = _databaseHost;
 
                 services.Configure<OctoSystemConfiguration>(t =>
                 {
-                    t.SystemDatabaseName = "identityintegrationtests";
+                    t.SystemTenantId = _systemTenantId;
+                    t.SystemDatabaseName = _systemDatabaseName;
                     t.DatabaseHost = databaseHost;
                     t.AdminUser = _options.AdminUser;
                     t.AdminUserPassword = _options.AdminUserPassword;

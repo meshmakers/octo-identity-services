@@ -1,5 +1,4 @@
 using FluentAssertions;
-using IdentityServices.IntegrationTests.Collections;
 using IdentityServices.IntegrationTests.Fixtures;
 using Xunit;
 
@@ -8,8 +7,7 @@ namespace IdentityServices.IntegrationTests.Persistence;
 /// <summary>
 /// Integration tests verifying MongoDB connection and system tenant setup.
 /// </summary>
-[Collection(IdentityPersistenceCollection.Name)]
-public class MongoDbConnectionTests
+public class MongoDbConnectionTests : IClassFixture<IdentityServicesFixture>
 {
     private readonly IdentityServicesFixture _fixture;
 

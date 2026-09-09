@@ -2,7 +2,6 @@ using System.Xml.Linq;
 using FluentAssertions;
 using IdentityServerPersistence.Configuration.Options;
 using IdentityServerPersistence.SystemStores;
-using IdentityServices.IntegrationTests.Collections;
 using IdentityServices.IntegrationTests.Fixtures;
 using Meshmakers.Octo.Services.Infrastructure.Services;
 using Microsoft.Extensions.DependencyInjection;
@@ -15,8 +14,7 @@ namespace IdentityServices.IntegrationTests.Persistence;
 /// Real-Mongo tests for <see cref="DataProtectionKeyStore"/>: persistence, idempotency,
 /// and seed-once import from a legacy file-system path.
 /// </summary>
-[Collection(IdentityPersistenceCollection.Name)]
-public class DataProtectionKeyStoreIntegrationTests
+public class DataProtectionKeyStoreIntegrationTests : IClassFixture<IdentityServicesFixture>
 {
     private readonly IdentityServicesFixture _fixture;
 

@@ -6,6 +6,7 @@
 src/IdentityServices/keys
 .DS_Store
 .config/
+scripts/secrets.local.json
 
 # User-specific files
 *.rsuser

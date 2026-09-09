@@ -2,7 +2,6 @@ using System.Net;
 using System.Net.Http.Json;
 using FluentAssertions;
 using IdentityServices.IntegrationTests.Helpers;
-using IdentityServices.IntegrationTests.Collections;
 using IdentityServices.IntegrationTests.Infrastructure;
 using Meshmakers.Octo.Backend.IdentityServices.Controllers.Api;
 using Microsoft.AspNetCore.Identity;
@@ -15,7 +14,6 @@ namespace IdentityServices.IntegrationTests.Api.Auth;
 /// <summary>
 /// Integration tests for the AuthApiController password reset endpoints.
 /// </summary>
-[Collection(WebFactoryCollection.Name)]
 public class AuthApiPasswordResetTests : IntegrationTestBase
 {
     public AuthApiPasswordResetTests(CustomWebApplicationFactory factory) : base(factory)

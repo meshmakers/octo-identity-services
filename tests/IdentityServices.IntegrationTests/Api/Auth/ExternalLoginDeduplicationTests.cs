@@ -1,5 +1,4 @@
 using FluentAssertions;
-using IdentityServices.IntegrationTests.Collections;
 using IdentityServices.IntegrationTests.Infrastructure;
 using Meshmakers.Octo.ConstructionKit.Contracts;
 using Microsoft.AspNetCore.Identity;
@@ -17,7 +16,6 @@ namespace IdentityServices.IntegrationTests.Api.Auth;
 /// Security invariant: External logins must NEVER auto-link to existing local users by email.
 /// Each external provider login creates a dedicated user account to prevent privilege escalation.
 /// </summary>
-[Collection(WebFactoryCollection.Name)]
 public class ExternalLoginDeduplicationTests : IntegrationTestBase
 {
     public ExternalLoginDeduplicationTests(CustomWebApplicationFactory factory) : base(factory)

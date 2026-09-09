@@ -5,7 +5,6 @@ using System.Text.Json.Nodes;
 using FluentAssertions;
 using IdentityServerPersistence;
 using IdentityServerPersistence.SystemStores;
-using IdentityServices.IntegrationTests.Collections;
 using IdentityServices.IntegrationTests.Infrastructure;
 using Meshmakers.Octo.Backend.IdentityServices.Services;
 using Meshmakers.Octo.ConstructionKit.Contracts;
@@ -46,7 +45,6 @@ namespace IdentityServices.IntegrationTests.Api.Protocol;
 ///         <c>DelegatedIdentityIntegrationTests</c> instead.
 ///     </para>
 /// </remarks>
-[Collection(WebFactoryCollection.Name)]
 public class ImpersonationHttpGoldenTests : IntegrationTestBase
 {
     private const string ImpersonationApiScope = "impersonation-api";
@@ -110,7 +108,7 @@ public class ImpersonationHttpGoldenTests : IntegrationTestBase
             "act is the only trace of the caller on the issued token");
         token.GetClaim("amr").Value.Should().Be(ImpersonationConstants.AuthenticationMethod);
 
-        await GoldenFile.MatchAllAsync(ct,
+        await GoldenFile.MatchAllAsync(ct, NormalizedSystemTenantId,
             ("impersonation-token-response",
                 GoldenFile.NormalizeResponseShape(body, "token_type", "expires_in", "scope")),
             ("impersonation-access-token",

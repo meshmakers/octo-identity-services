@@ -1,6 +1,6 @@
 using System.Security.Claims;
 using System.Text.RegularExpressions;
-using IdentityModel;
+using Duende.IdentityModel;
 using Meshmakers.Octo.Backend.Authentication.Connection;
 using Meshmakers.Octo.Backend.Authentication.Options;
 using Microsoft.AspNetCore.Identity;

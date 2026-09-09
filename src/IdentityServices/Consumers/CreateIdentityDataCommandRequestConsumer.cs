@@ -1,4 +1,4 @@
-using IdentityModel;
+using Duende.IdentityModel;
 using Meshmakers.Octo.Backend.IdentityServices.OpenIddict;
 using IdentityServerPersistence;
 using Meshmakers.Octo.Common.DistributionEventHub.Consumers;

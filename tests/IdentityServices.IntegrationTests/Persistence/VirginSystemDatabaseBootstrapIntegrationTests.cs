@@ -1,7 +1,6 @@
 using System.Xml.Linq;
 using IdentityServerPersistence.Configuration.Options;
 using IdentityServerPersistence.SystemStores;
-using IdentityServices.IntegrationTests.Collections;
 using IdentityServices.IntegrationTests.Fixtures;
 using Meshmakers.Octo.Runtime.Contracts.MongoDb.Configuration;
 using Meshmakers.Octo.Runtime.Contracts.MongoDb.TenantLifecycle;
@@ -21,8 +20,7 @@ namespace IdentityServices.IntegrationTests.Persistence;
 /// <c>SetupTenantAsync</c> decided whether to bootstrap; the decision then refused, the datasource
 /// user was never created, and every service start failed on a MongoDB authentication error.
 /// </summary>
-[Collection(VirginBootstrapCollection.Name)]
-public class VirginSystemDatabaseBootstrapIntegrationTests
+public class VirginSystemDatabaseBootstrapIntegrationTests : IClassFixture<VirginBootstrapFixture>
 {
     private readonly VirginBootstrapFixture _fixture;
 
@@ -137,7 +135,8 @@ public class VirginSystemDatabaseBootstrapIntegrationTests
         var config = Configuration;
         var urlBuilder = new MongoUrlBuilder
         {
-            Server = new MongoServerAddress(config.DatabaseHost),
+            // DatabaseHost carries "host:port"; the MongoServerAddress(string) constructor rejects that since MongoDB.Driver 3.11.1 (CSHARP-6171).
+            Server = MongoServerAddress.Parse(config.DatabaseHost),
             Username = config.AdminUser,
             Password = config.AdminUserPassword,
             AuthenticationSource = config.AuthenticationDatabaseName,

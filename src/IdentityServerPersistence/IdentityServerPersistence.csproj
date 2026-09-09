@@ -9,6 +9,8 @@
         <PackageReference Include="AutoMapper" Version="16.2.0" />
         <!-- AB#4989: OpenIddict store abstractions (the previous IdentityServer dependency was removed with AB#4996). -->
         <PackageReference Include="OpenIddict.Abstractions" Version="7.6.0" />
+        <!-- direct reference: the released SDK still ships the legacy IdentityModel until the next libs train -->
+        <PackageReference Include="Duende.IdentityModel" Version="8.1.0" />
         <FrameworkReference Include="Microsoft.AspNetCore.App" />
     </ItemGroup>
 

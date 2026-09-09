@@ -1,7 +1,6 @@
 using System.Net;
 using System.Net.Http.Json;
 using FluentAssertions;
-using IdentityServices.IntegrationTests.Collections;
 using IdentityServices.IntegrationTests.Infrastructure;
 using Meshmakers.Octo.Backend.IdentityServices.Controllers.Api;
 using Microsoft.AspNetCore.Identity;
@@ -14,7 +13,6 @@ namespace IdentityServices.IntegrationTests.Api.Setup;
 /// <summary>
 /// Integration tests for the SetupApiController endpoints.
 /// </summary>
-[Collection(SetupApiCollection.Name)]
 public class SetupApiTests : IntegrationTestBase
 {
     public SetupApiTests(CustomWebApplicationFactory factory) : base(factory)

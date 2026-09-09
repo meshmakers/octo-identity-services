@@ -22,6 +22,8 @@ namespace IdentityServices.IntegrationTests.Infrastructure;
 /// </remarks>
 public static class GoldenFile
 {
+    private const string StableSystemTenantId = "octosystem";
+
     private static readonly JsonSerializerOptions WriteOptions = new() { WriteIndented = true };
 
     /// <summary>
@@ -43,7 +45,16 @@ public static class GoldenFile
     ///     files are written — a per-file skip would abort the test before later captures of the
     ///     same flow get recorded). Only a run with all files present is a verified comparison.
     /// </summary>
-    public static async Task MatchAllAsync(CancellationToken ct, params (string Name, JsonNode Actual)[] pairs)
+    /// <param name="volatileSystemTenantId">
+    ///     The system tenant id of the calling fixture. AB#5117 gives every web-host fixture its own
+    ///     (<c>octosystem</c> plus a GUID) so they can share one MongoDB server, which puts that id
+    ///     into issuers, audiences, <c>allowed_tenants</c> and every tenant-scoped URL. It is
+    ///     replaced by the stable literal the baselines were recorded with, so the comparison stays
+    ///     about the token SHAPE. Passed in rather than held statically because the runner executes
+    ///     collections in parallel and each has a different id.
+    /// </param>
+    public static async Task MatchAllAsync(CancellationToken ct, string? volatileSystemTenantId,
+        params (string Name, JsonNode Actual)[] pairs)
     {
         var dir = GoldenDirectory();
         Directory.CreateDirectory(dir);
@@ -54,7 +65,7 @@ public static class GoldenFile
         foreach (var (name, actual) in pairs)
         {
             var path = Path.Combine(dir, name + ".json");
-            var normalized = Normalize(actual).ToJsonString(WriteOptions) + "\n";
+            var normalized = Normalize(actual, volatileSystemTenantId).ToJsonString(WriteOptions) + "\n";
             if (!File.Exists(path) || forceRecord)
             {
                 await File.WriteAllTextAsync(path, normalized, ct);
@@ -152,7 +163,7 @@ public static class GoldenFile
     }
 
     /// <summary>Sorts all object properties recursively so comparisons are order-insensitive.</summary>
-    private static JsonNode Normalize(JsonNode node)
+    private static JsonNode Normalize(JsonNode node, string? volatileSystemTenantId)
     {
         switch (node)
         {
@@ -160,7 +171,7 @@ public static class GoldenFile
                 var sorted = new JsonObject();
                 foreach (var kv in obj.OrderBy(kv => kv.Key, StringComparer.Ordinal))
                 {
-                    sorted[kv.Key] = kv.Value is null ? null : Normalize(kv.Value.DeepClone());
+                    sorted[kv.Key] = kv.Value is null ? null : Normalize(kv.Value.DeepClone(), volatileSystemTenantId);
                 }
 
                 return sorted;
@@ -169,7 +180,7 @@ public static class GoldenFile
                 // their enumeration order is storage-dependent, so sort them for stability.
                 if (arr.Count > 0 && arr.All(i => i is JsonValue v && v.GetValueKind() == JsonValueKind.String))
                 {
-                    var sortedValues = arr.Select(i => i!.GetValue<string>())
+                    var sortedValues = arr.Select(i => StableTenantId(i!.GetValue<string>(), volatileSystemTenantId))
                         .OrderBy(v => v, StringComparer.Ordinal);
                     return new JsonArray(sortedValues.Select(v => (JsonNode)JsonValue.Create(v)).ToArray());
                 }
@@ -177,12 +188,25 @@ public static class GoldenFile
                 var copy = new JsonArray();
                 foreach (var item in arr)
                 {
-                    copy.Add(item is null ? null : Normalize(item.DeepClone()));
+                    copy.Add(item is null ? null : Normalize(item.DeepClone(), volatileSystemTenantId));
                 }
 
                 return copy;
+            case JsonValue value when value.GetValueKind() == JsonValueKind.String:
+                return JsonValue.Create(StableTenantId(value.GetValue<string>(), volatileSystemTenantId))!;
             default:
                 return node.DeepClone();
         }
+    }
+
+    /// <summary>
+    ///     Replaces the caller's per-fixture system tenant id with the stable literal the golden
+    ///     baselines were recorded with (AB#5117, see <see cref="MatchAllAsync" />).
+    /// </summary>
+    private static string StableTenantId(string text, string? volatileSystemTenantId)
+    {
+        return string.IsNullOrEmpty(volatileSystemTenantId) || volatileSystemTenantId == StableSystemTenantId
+            ? text
+            : text.Replace(volatileSystemTenantId, StableSystemTenantId, StringComparison.OrdinalIgnoreCase);
     }
 }

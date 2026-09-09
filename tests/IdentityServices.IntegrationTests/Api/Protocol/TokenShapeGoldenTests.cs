@@ -6,7 +6,6 @@ using System.Text.Json.Nodes;
 using System.Web;
 using FluentAssertions;
 using IdentityServerPersistence.SystemStores;
-using IdentityServices.IntegrationTests.Collections;
 using IdentityServices.IntegrationTests.Infrastructure;
 using Meshmakers.Octo.Backend.IdentityServices.Controllers.Api;
 using Meshmakers.Octo.ConstructionKit.Contracts;
@@ -34,7 +33,6 @@ namespace IdentityServices.IntegrationTests.Api.Protocol;
 ///     claims parity is pinned separately by <c>TenantExchangeIntegrationTests</c> (role subset
 ///     resolution) and will get an HTTP-level golden once the OpenIddict handler exists (AB#4997).
 /// </remarks>
-[Collection(WebFactoryCollection.Name)]
 public class TokenShapeGoldenTests : IntegrationTestBase
 {
     private const string GoldenApiScope = "golden-api";
@@ -55,7 +53,7 @@ public class TokenShapeGoldenTests : IntegrationTestBase
 
         response.StatusCode.Should().Be(HttpStatusCode.OK);
         var body = JsonNode.Parse(await response.Content.ReadAsStringAsync(ct))!.AsObject();
-        await GoldenFile.MatchAllAsync(ct, ("discovery-document", body));
+        await GoldenFile.MatchAllAsync(ct, NormalizedSystemTenantId, ("discovery-document", body));
     }
 
     [Fact]
@@ -87,7 +85,7 @@ public class TokenShapeGoldenTests : IntegrationTestBase
             });
         }
 
-        await GoldenFile.MatchAllAsync(ct, ("jwks-structure", new JsonObject
+        await GoldenFile.MatchAllAsync(ct, NormalizedSystemTenantId, ("jwks-structure", new JsonObject
         {
             ["jwksPath"] = jwksUri.AbsolutePath,
             ["keys"] = keys
@@ -133,7 +131,7 @@ public class TokenShapeGoldenTests : IntegrationTestBase
         response.StatusCode.Should().Be(HttpStatusCode.OK, "token request failed: {0}", raw);
         var body = JsonNode.Parse(raw)!.AsObject();
 
-        await GoldenFile.MatchAllAsync(ct,
+        await GoldenFile.MatchAllAsync(ct, NormalizedSystemTenantId,
             ("client-credentials-token-response",
                 GoldenFile.NormalizeResponseShape(body, "token_type", "expires_in", "scope")),
             ("client-credentials-access-token",
@@ -212,7 +210,7 @@ public class TokenShapeGoldenTests : IntegrationTestBase
         refreshResponse.StatusCode.Should().Be(HttpStatusCode.OK, "refresh failed: {0}", refreshRaw);
         var refreshBody = JsonNode.Parse(refreshRaw)!.AsObject();
 
-        await GoldenFile.MatchAllAsync(ct,
+        await GoldenFile.MatchAllAsync(ct, NormalizedSystemTenantId,
             ("authcode-token-response",
                 GoldenFile.NormalizeResponseShape(body, "token_type", "expires_in", "scope")),
             ("authcode-access-token",
@@ -278,7 +276,7 @@ public class TokenShapeGoldenTests : IntegrationTestBase
         tokenResponse.StatusCode.Should().Be(HttpStatusCode.OK, "device code redemption failed: {0}", tokenRaw);
         var tokenBody = JsonNode.Parse(tokenRaw)!.AsObject();
 
-        await GoldenFile.MatchAllAsync(ct,
+        await GoldenFile.MatchAllAsync(ct, NormalizedSystemTenantId,
             ("device-authorization-response",
                 GoldenFile.NormalizeResponseShape(deviceBody, "expires_in", "interval", "verification_uri")),
             ("device-token-response",
