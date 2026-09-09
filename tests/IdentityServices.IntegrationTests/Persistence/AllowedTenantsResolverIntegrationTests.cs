@@ -200,7 +200,7 @@ public class AllowedTenantsResolverIntegrationTests : IClassFixture<IdentityServ
             NullLogger<UserManager<RtUser>>.Instance);
     }
 
-    private async Task<string> CreateChildTenantAsync(string parentTenantId, string tenantId)
+    private async Task<string> CreateChildTenantAsync(string tenantId)
     {
         var systemContext = _fixture.GetSystemContext();
         using (var session = await systemContext.GetAdminSessionAsync())
@@ -230,7 +230,7 @@ public class AllowedTenantsResolverIntegrationTests : IClassFixture<IdentityServ
     /// </summary>
     private async Task<string> CreateChildWithParentProviderAsync(string parentTenantId)
     {
-        var childTenantId = await CreateChildTenantAsync(parentTenantId, NewId("child"));
+        var childTenantId = await CreateChildTenantAsync(NewId("child"));
         var systemContext = _fixture.GetSystemContext();
         var childRepo = (await systemContext.TryFindTenantRepositoryAsync(childTenantId))!;
 
