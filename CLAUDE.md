@@ -1186,9 +1186,6 @@ npm run build
 
 # Linting (REQUIRED before every commit)
 npm run lint
-
-# Run tests
-npm test
 ```
 
 ### Linting (REQUIRED)
@@ -1204,6 +1201,27 @@ The CI/CD pipeline will fail if there are any lint errors. Common issues:
 - **Unused imports**: Run with `--fix` flag to auto-remove (`npx ng lint --fix`)
 - **Unused variables**: Prefix with `_` (e.g., `_unusedParam`)
 - **Empty functions**: Add a comment or remove the empty function
+
+### Toolchain (AB#5075)
+
+- Build, serve and extract-i18n run on `@angular/build` (esbuild/Vite); `@angular-devkit/build-angular`
+  is gone. The `application` builder writes a **flat `dist/`** (`outputPath.browser: ""`) because
+  `IdentityServices.csproj` copies `ClientApp/dist/**` to `wwwroot` and checks for `dist/index.html`.
+- There are no unit tests and no `test` target: the former Karma target pointed at a non-existent
+  `tsconfig.spec.json` and never ran. Add `@angular/build:unit-test` (Vitest) together with the first
+  spec, following Refinery Studio.
+- `allowScripts` in `package.json` lists the six packages npm >= 11.16 may run install scripts for
+  (`esbuild`, `lmdb`, `msgpackr-extract`, `@parcel/watcher`, `fsevents`, `@progress/kendo-licensing`).
+  A new dependency with an install script produces an `npm warn allow-scripts` line until it is
+  approved with `npm approve-scripts --no-allow-scripts-pin <pkg>`. `fsevents` is macOS-only and only
+  shows up as pending on a clean install.
+- No `.npmrc`: the lockfile resolves without `legacy-peer-deps`. If `npm install` reports `ERESOLVE`,
+  fix the peer conflict instead of restoring the flag.
+- The only deprecation `npm install` still prints is `@angular/animations`: peer-required and imported
+  at runtime by Kendo 24, it stays until Kendo drops it (same as every other Meshmakers Angular app).
+  `@angular/platform-browser-dynamic` was removed (unused since the standalone bootstrap in `main.ts`).
+- Expected result of a clean `npm ci` + `npm run build`: no allow-scripts advisory, no other
+  deprecation, 0 vulnerabilities, no build warnings.
 
 ### Angular Project Structure
 

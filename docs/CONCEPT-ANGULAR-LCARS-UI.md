@@ -4,6 +4,14 @@
 **Status:** Approved
 **Version:** 1.0
 
+> **Implementation status (2026-09, AB#5075):** this concept is a historical snapshot; the code has
+> moved on. The ClientApp runs on Angular 22 with the `@angular/build` toolchain and writes a **flat
+> `dist/`** (not `dist/identity-ui/browser`), which the MSBuild targets in `IdentityServices.csproj`
+> copy to `wwwroot`. There is no `test` script or Karma target, and `@angular/platform-browser-dynamic`
+> and `@angular-devkit/build-angular` are no longer dependencies. The authoritative build, install-script
+> and toolchain description is the "Angular ClientApp" section in `CLAUDE.md`; the snippets below
+> document the original design.
+
 ---
 
 ## 1. Overview
