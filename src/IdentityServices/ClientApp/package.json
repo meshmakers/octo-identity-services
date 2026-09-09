@@ -8,7 +8,6 @@
     "build": "ng build",
     "build:prod": "ng build --configuration production",
     "watch": "ng build --watch --configuration development",
-    "test": "ng test",
     "lint": "ng lint",
     "extract-i18n": "ng extract-i18n",
     "postinstall": "node -e \"var s=require('path').join(__dirname,'src/environments/version.ts');require('fs').existsSync(s)?require('child_process').execSync('node \\\"'+s+'\\\"',{stdio:'inherit'}):console.log('Version generation skipped')\""
@@ -21,7 +20,6 @@
     "@angular/core": "^22.1.5",
     "@angular/forms": "^22.1.5",
     "@angular/platform-browser": "^22.1.5",
-    "@angular/platform-browser-dynamic": "^22.1.5",
     "@angular/router": "^22.1.5",
     "@fortawesome/angular-fontawesome": "^5.1.0",
     "@fortawesome/fontawesome-svg-core": "^7.3.1",
@@ -41,12 +39,8 @@
     "tslib": "^2.8.1",
     "zone.js": "~0.16.3"
   },
-  "overrides": {
-    "undici": "^8.10.1",
-    "uuid": "^11.1.1"
-  },
   "devDependencies": {
-    "@angular-devkit/build-angular": "^22.1.7",
+    "@angular/build": "^22.1.7",
     "@angular/cli": "^22.1.7",
     "@angular/compiler-cli": "^22.1.5",
     "@eslint/js": "^10.0.1",
@@ -56,5 +50,13 @@
     "eslint-plugin-unused-imports": "^4.4.1",
     "typescript": "~6.0.3",
     "typescript-eslint": "8.69.0"
+  },
+  "allowScripts": {
+    "esbuild": true,
+    "lmdb": true,
+    "msgpackr-extract": true,
+    "@parcel/watcher": true,
+    "@progress/kendo-licensing": true,
+    "fsevents": true
   }
 }
