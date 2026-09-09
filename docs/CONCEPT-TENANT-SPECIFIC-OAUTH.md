@@ -66,7 +66,7 @@ OAuth Client                Identity Server              Tenant "{tenantId}"
 The issued access token contains tenant-specific claims:
 
 - `tenant_id`: The tenant the user authenticated against (matches the `acr_values` parameter)
-- `allowed_tenants`: All tenants the user is authorized to access (resolved via cross-tenant mappings)
+- `allowed_tenants`: All tenants the user is authorized to access — the login tenant, the home tenants a cross-tenant shadow user's `xt_{home}_{name}` chain unwinds to, and every descendant tenant that maps the user (`ExternalTenantUserMapping`). A parent the login tenant merely delegates authentication to (`OctoTenantIdentityProvider`) is not included unless the user actually exists there (AB#5170)
 - `role`: Roles assigned to the user in the login tenant (direct + group-inherited)
 - `sub`: The user's unique identifier within the tenant
 

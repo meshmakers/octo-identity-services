@@ -15,59 +15,44 @@ public interface IAllowedTenantsResolver
 }
 
 /// <summary>
-///     Default implementation that resolves allowed tenants by walking up the ancestor chain,
-///     then doing a BFS down through descendant tenants checking cross-tenant user mappings.
-///     The BFS tracks the user's username at each tier to follow the xt_ naming chain.
+///     Default implementation: the login tenant, the home tenants a cross-tenant shadow user's name
+///     unwinds to, and every descendant tenant reachable through cross-tenant user mappings — a BFS
+///     that follows the xt_ naming chain tier by tier.
 /// </summary>
+/// <remarks>
+///     Ancestors are deliberately NOT added by walking the identity-provider graph (AB#5170). An
+///     <c>OctoTenantIdentityProvider</c> says where a tenant delegates authentication to, not that
+///     every user of that tenant exists up there: a user created locally in an operating tenant has
+///     no account in the parent, and the switch gate
+///     (<c>CrossTenantAuthenticationService.ValidateCrossTenantAccessAsync</c>) refuses them anyway.
+///     Offering those tenants regardless — in <c>allowed_tenants</c>, the Studio switcher and the
+///     email-first tenant discovery — sent such users to a login they could never pass. The tenants
+///     a user really holds above the login tenant are exactly the home tenants of the
+///     <c>xt_{home}_{name}</c> chain, which <see cref="BuildUserNameChain" /> yields.
+/// </remarks>
 public class AllowedTenantsResolver(
     ISystemContext systemContext,
     ILogger<AllowedTenantsResolver> logger) : IAllowedTenantsResolver
 {
-    private const int MaxHierarchyDepth = 10;
-
     public async Task<IReadOnlyList<string>> ResolveAsync(string loginTenantId, RtUser user)
     {
         var allowedTenants = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { loginTenantId };
 
-        // Determine the source identity for cross-tenant lookups
-        string sourceTenantId;
-        string sourceUserName;
-
-        if (user.UserName != null && user.UserName.StartsWith("xt_"))
-        {
-            // Cross-tenant user: extract home tenant from xt_{homeTenant}_{username}
-            var parts = user.UserName.Split('_', 3);
-            if (parts.Length >= 3)
-            {
-                var homeTenantId = parts[1];
-                allowedTenants.Add(homeTenantId);
-                sourceTenantId = homeTenantId;
-                sourceUserName = parts[2]; // original username in home tenant
-            }
-            else
-            {
-                sourceTenantId = loginTenantId;
-                sourceUserName = user.UserName;
-            }
-        }
-        else
-        {
-            sourceTenantId = loginTenantId;
-            sourceUserName = user.UserName ?? string.Empty;
-        }
-
-        // Walk up the ancestor chain from the login tenant via OctoTenantIdentityProvider.ParentTenantId
-        await ResolveAncestorTenantsAsync(loginTenantId, allowedTenants);
-
-        // Build BFS seeds by unwinding the xt_ username chain through all tiers.
+        // Every tier of the xt_ chain is a tenant the user exists in: the login tenant itself, then
+        // the home tenant of each shadow user upwards. A local user's chain is the login tenant alone.
         // e.g. (subtenant1, "xt_meshtest_xt_octosystem_admin") → (meshtest, "xt_octosystem_admin") → (octosystem, "admin")
-        var bfsSeeds = BuildUserNameChain(loginTenantId, user.UserName ?? string.Empty);
+        var chain = BuildUserNameChain(loginTenantId, user.UserName ?? string.Empty);
+        foreach (var (tenantId, _) in chain)
+        {
+            allowedTenants.Add(tenantId);
+        }
 
-        await ResolveDescendantTenantsAsync(bfsSeeds, allowedTenants);
+        // Every tier is also a seed for the mapping walk downwards.
+        await ResolveDescendantTenantsAsync(chain, allowedTenants);
 
         logger.LogDebug(
-            "Resolved {Count} allowed tenants for user '{UserName}' (source: {SourceTenantId}): {Tenants}",
-            allowedTenants.Count, user.UserName, sourceTenantId,
+            "Resolved {Count} allowed tenants for user '{UserName}' (home: {HomeTenantId}): {Tenants}",
+            allowedTenants.Count, user.UserName, chain.Count > 0 ? chain[^1].TenantId : loginTenantId,
             string.Join(", ", allowedTenants));
 
         return allowedTenants.ToList();
@@ -184,97 +169,6 @@ public class AllowedTenantsResolver(
                         childTenantId, currentUserName, currentTenantId);
                 }
             }
-        }
-    }
-
-    /// <summary>
-    ///     Breadth-first walk up the identity-provider graph, adding every reachable ancestor.
-    /// </summary>
-    /// <remarks>
-    ///     Mirrors <c>CrossTenantAuthenticationService.IsAncestorTenantAsync</c> and must stay in step with
-    ///     it: this method decides which tenants are OFFERED via <c>allowed_tenants</c>, that one decides
-    ///     which may actually be ENTERED. Two corrections in AB#4960:
-    ///     <list type="bullet">
-    ///         <item>
-    ///             It followed only the first provider per level, so a tenant with several enabled
-    ///             providers resolved its ancestry by store enumeration order and silently lost the rest.
-    ///         </item>
-    ///         <item>
-    ///             It never checked <c>IsEnabled</c> despite claiming to, so a parent reachable only
-    ///             through a DISABLED provider was offered and then refused by the gate.
-    ///         </item>
-    ///     </list>
-    ///     Revisiting a tenant is normal in a graph (two providers converging on one ancestor) and simply
-    ///     skipped; only <c>MaxHierarchyDepth</c> bounds the walk.
-    /// </remarks>
-    private async Task ResolveAncestorTenantsAsync(string startTenantId, HashSet<string> allowedTenants)
-    {
-        var visited = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { startTenantId };
-        var currentLevel = new List<string> { startTenantId };
-
-        for (var depth = 0; depth < MaxHierarchyDepth && currentLevel.Count > 0; depth++)
-        {
-            var nextLevel = new List<string>();
-
-            foreach (var tenantId in currentLevel)
-            {
-                IEnumerable<RtOctoTenantIdentityProvider> providers;
-                try
-                {
-                    providers = await GetOctoTenantProvidersInTenantAsync(tenantId);
-                }
-                catch (Exception ex)
-                {
-                    // One unreadable tenant must not truncate the rest of the level.
-                    logger.LogWarning(ex,
-                        "Failed to resolve ancestor tenants from tenant '{TenantId}'",
-                        tenantId);
-                    continue;
-                }
-
-                foreach (var provider in providers)
-                {
-                    if (!provider.IsEnabled || string.IsNullOrEmpty(provider.ParentTenantId))
-                    {
-                        continue;
-                    }
-
-                    if (!visited.Add(provider.ParentTenantId))
-                    {
-                        continue;
-                    }
-
-                    allowedTenants.Add(provider.ParentTenantId);
-                    nextLevel.Add(provider.ParentTenantId);
-                }
-            }
-
-            currentLevel = nextLevel;
-        }
-    }
-
-    private async Task<IEnumerable<RtOctoTenantIdentityProvider>> GetOctoTenantProvidersInTenantAsync(
-        string tenantId)
-    {
-        try
-        {
-            var tenantRepository = await systemContext.FindTenantRepositoryAsync(tenantId);
-            var session = await tenantRepository.GetSessionAsync();
-            session.StartTransaction();
-
-            var queryOptions = RtEntityQueryOptions.Create();
-            var result = await tenantRepository
-                .GetRtEntitiesByTypeAsync<RtOctoTenantIdentityProvider>(session, queryOptions);
-            await session.CommitTransactionAsync();
-
-            return result.Items.Where(p => p.IsEnabled);
-        }
-        catch (Exception ex)
-        {
-            logger.LogWarning(ex,
-                "Failed to query OctoTenantIdentityProviders in tenant '{TenantId}'",
-                tenantId);
-            return [];
         }
     }
 

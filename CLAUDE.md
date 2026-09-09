@@ -517,7 +517,7 @@ See `docs/authentication.md` for detailed architecture and edge cases.
 Access tokens include `allowed_tenants` claims listing all tenants a user may access. Backend middleware validates the route tenant against these claims.
 
 Key components:
-- **`IAllowedTenantsResolver`** / **`AllowedTenantsResolver`** (`IdentityServerPersistence/Services/`): Resolves allowed tenants at token issuance time by checking cross-tenant user mappings across child tenants and walking up the ancestor chain
+- **`IAllowedTenantsResolver`** / **`AllowedTenantsResolver`** (`IdentityServerPersistence/Services/`): Resolves allowed tenants at token issuance time: the login tenant, the home tenants a shadow user's `xt_{home}_{name}` chain unwinds to, and every descendant reachable through cross-tenant user mappings (BFS that follows the xt_ chain tier by tier). It does **not** add ancestors by walking the `OctoTenantIdentityProvider` graph (AB#5170): a provider says where a tenant delegates authentication to, not that its users exist up there, and the blanket walk offered a locally created operating-tenant user the management tenant and the platform root — in `allowed_tenants`, the Studio switcher and the email-first tenant discovery — where no account of theirs exists and the switch gate refuses them. Pinned by `tests/IdentityServices.IntegrationTests/Persistence/AllowedTenantsResolverIntegrationTests.cs`
 - **`UserProfileService.GetProfileDataAsync`**: Overrides the base class to add `allowed_tenants` claims to all issued tokens
 - **`TenantAuthorizationMiddleware`** (`octo-common-services`): Validates route tenant against `allowed_tenants` claims; registered after `UseAuthorization()` in all backend services
 
