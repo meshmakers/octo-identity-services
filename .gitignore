@@ -361,3 +361,8 @@ src/IdentityServices/wwwroot/spa/
 scripts/secrets.local.json
 scripts/secrets.*.json
 !scripts/secrets.local.json.template
+
+# Angular build cache — machine-local. Three files under .angular/cache/ were
+# tracked (they came in with 406f117) and produced a diff on every build; the
+# studio and the app have ignored this directory all along.
+.angular/
