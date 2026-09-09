@@ -1,12 +1,13 @@
 import { Component, Input, Output, EventEmitter, ChangeDetectionStrategy } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
+import { TranslatePipe } from '@ngx-translate/core';
 import { ScopeItem } from '../../../core/models/consent.models';
 
 @Component({
   selector: 'app-scope-list',
   standalone: true,
-  imports: [CommonModule, FormsModule],
+  imports: [CommonModule, FormsModule, TranslatePipe],
   template: `
     <div class="lcars-scope-list">
       <div class="lcars-scope-list__header" *ngIf="title">
@@ -27,7 +28,7 @@ import { ScopeItem } from '../../../core/models/consent.models';
           <label [for]="'scope-' + scope.name" class="lcars-scope-item__content">
             <span class="lcars-scope-item__name">
               {{ scope.displayName }}
-              <span *ngIf="scope.required" class="lcars-scope-item__required">Required</span>
+              <span *ngIf="scope.required" class="lcars-scope-item__required">{{ 'SCOPES.REQUIRED' | translate }}</span>
             </span>
             <span *ngIf="scope.description" class="lcars-scope-item__description">
               {{ scope.description }}

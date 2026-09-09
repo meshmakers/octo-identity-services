@@ -1,0 +1,36 @@
+$schema: https://schemas.meshmakers.cloud/construction-kit-elements.schema.json
+enums:
+  # The kind of external identifier a VerifiedExternalIdentifier binds to an OctoMesh user
+  # (AB#5122). The value is the discriminator for how IdentifierValue is normalized and how a
+  # sibling enrollment WI (AB#5123-5126) proves ownership.
+  - enumId: IdentifierKind
+    values:
+      - key: 0
+        name: PhoneNumber
+      - key: 1
+        name: EmailAddress
+      - key: 2
+        name: EntraIdObjectId
+      - key: 3
+        name: ClientCertificateFingerprint
+  # The trust scale shared by BOTH trust dimensions (AB#5122): the stored enrollment trust of a
+  # binding and the per-message trust the resolver is handed at resolution time. Numeric order is
+  # load-bearing: None(0) < Weak(1) < Strong(2), so the effective trust is a plain minimum over the
+  # underlying enum values. Do NOT reorder or renumber.
+  - enumId: TrustLevel
+    values:
+      - key: 0
+        name: None
+      - key: 1
+        name: Weak
+      - key: 2
+        name: Strong
+  # Provenance of a binding (AB#5122): who created the (identifier -> user) link.
+  - enumId: IdentifierSource
+    values:
+      - key: 0
+        name: SelfService
+      - key: 1
+        name: Admin
+      - key: 2
+        name: IdentityProvider

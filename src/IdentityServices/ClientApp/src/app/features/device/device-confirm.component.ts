@@ -3,6 +3,7 @@ import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { ActivatedRoute, Router } from '@angular/router';
 import { HttpErrorResponse } from '@angular/common/http';
+import { TranslatePipe, TranslateService } from '@ngx-translate/core';
 import { LcarsPanelComponent } from '../../shared/components/lcars-panel/lcars-panel.component';
 import { LcarsHeaderComponent } from '../../shared/components/lcars-header/lcars-header.component';
 import { ScopeListComponent } from '../../shared/components/scope-list/scope-list.component';
@@ -15,6 +16,7 @@ import { DeviceAuthorizationContext } from '../../core/models/consent.models';
   imports: [
     CommonModule,
     FormsModule,
+    TranslatePipe,
     LcarsPanelComponent,
     LcarsHeaderComponent,
     ScopeListComponent
@@ -23,18 +25,18 @@ import { DeviceAuthorizationContext } from '../../core/models/consent.models';
     <div class="lcars-auth-container">
       <app-lcars-panel>
         <app-lcars-header
-          subtitle="Authorize Device">
+          [subtitle]="'DEVICE.CONFIRM_SUBTITLE' | translate">
         </app-lcars-header>
 
         <div *ngIf="loading" class="lcars-loading">
           <div class="lcars-loading__spinner"></div>
-          <span class="lcars-loading__text">Verifying Code</span>
+          <span class="lcars-loading__text">{{ 'DEVICE.VERIFYING_CODE' | translate }}</span>
         </div>
 
         <ng-container *ngIf="!loading && context">
           <!-- Device Code Display -->
           <div class="device-code-display">
-            <span class="device-code-label">Device Code</span>
+            <span class="device-code-label">{{ 'DEVICE.CODE_LABEL' | translate }}</span>
             <span class="device-code-value">{{ userCode }}</span>
           </div>
 
@@ -49,19 +51,19 @@ import { DeviceAuthorizationContext } from '../../core/models/consent.models';
           </div>
 
           <p class="consent-description">
-            This device is requesting access to your account:
+            {{ 'DEVICE.REQUESTING_ACCESS' | translate }}
           </p>
 
           <!-- Scopes -->
           <app-scope-list
             *ngIf="context.identityScopes.length > 0"
-            title="Personal Information"
+            [title]="'CONSENT.IDENTITY_SCOPES' | translate"
             [scopes]="context.identityScopes">
           </app-scope-list>
 
           <app-scope-list
             *ngIf="context.apiScopes.length > 0"
-            title="Application Access"
+            [title]="'CONSENT.API_SCOPES' | translate"
             [scopes]="context.apiScopes">
           </app-scope-list>
 
@@ -72,33 +74,33 @@ import { DeviceAuthorizationContext } from '../../core/models/consent.models';
               class="lcars-button-primary"
               (click)="onAllow()"
               [disabled]="submitting">
-              {{ submitting ? 'Processing...' : 'Allow' }}
+              {{ (submitting ? 'COMMON.PROCESSING' : 'COMMON.ALLOW') | translate }}
             </button>
             <button
               type="button"
               class="lcars-button-error"
               (click)="onDeny()"
               [disabled]="submitting">
-              Deny
+              {{ 'COMMON.DENY' | translate }}
             </button>
           </div>
         </ng-container>
 
         <div *ngIf="!loading && !context && !success" class="error-state">
           <div class="lcars-error-message">
-            {{ errorMessage || 'Invalid or expired device code.' }}
+            {{ errorMessage || ('DEVICE.INVALID_CODE' | translate) }}
           </div>
           <button
             type="button"
             class="lcars-button-outline"
             (click)="goBack()">
-            Try Again
+            {{ 'COMMON.TRY_AGAIN' | translate }}
           </button>
         </div>
 
         <div *ngIf="success" class="success-state">
           <div class="lcars-success-message">
-            Device authorized successfully! You can close this window.
+            {{ 'DEVICE.SUCCESS' | translate }}
           </div>
         </div>
       </app-lcars-panel>
@@ -111,6 +113,7 @@ export class DeviceConfirmComponent implements OnInit {
   private route = inject(ActivatedRoute);
   private router = inject(Router);
   private consentApi = inject(ConsentApiService);
+  private translate = inject(TranslateService);
 
   loading = true;
   submitting = false;
@@ -124,7 +127,7 @@ export class DeviceConfirmComponent implements OnInit {
 
     if (!this.userCode) {
       this.loading = false;
-      this.errorMessage = 'No device code provided.';
+      this.errorMessage = this.translate.instant('DEVICE.NO_CODE');
       return;
     }
 
@@ -149,7 +152,7 @@ export class DeviceConfirmComponent implements OnInit {
         }
 
         this.loading = false;
-        this.errorMessage = error.error?.message || 'Invalid or expired device code.';
+        this.errorMessage = error.error?.message || this.translate.instant('DEVICE.INVALID_CODE');
       }
     });
   }
@@ -175,12 +178,12 @@ export class DeviceConfirmComponent implements OnInit {
           this.success = true;
           this.context = undefined;
         } else {
-          this.errorMessage = result.errorMessage || 'Authorization failed';
+          this.errorMessage = result.errorMessage || this.translate.instant('DEVICE.ERROR_AUTH_FAILED');
         }
       },
       error: (error) => {
         this.submitting = false;
-        this.errorMessage = error.error?.message || 'An error occurred';
+        this.errorMessage = error.error?.message || this.translate.instant('COMMON.ERROR_GENERIC');
       }
     });
   }

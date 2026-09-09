@@ -1,6 +1,4 @@
-﻿using AutoMapper;
-using Duende.IdentityServer.Models;
-using IdentityServerPersistence.Services;
+﻿using IdentityServerPersistence.Services;
 using Meshmakers.Common.Shared;
 using Meshmakers.Octo.Runtime.Contracts;
 using Meshmakers.Octo.Runtime.Contracts.MongoDb.Repositories;
@@ -14,25 +12,21 @@ namespace IdentityServerPersistence.SystemStores;
 
 public class ClientStore : IOctoClientStore
 {
-    private readonly IMapper _mapper;
     private readonly IMultiTenancyResolverService _multiTenancyResolverService;
     private readonly IClientMirrorProvisioningService? _mirrorProvisioning;
     private readonly ILogger<ClientStore>? _logger;
 
-    public ClientStore(IMultiTenancyResolverService multiTenancyResolverService, IMapper mapper)
+    public ClientStore(IMultiTenancyResolverService multiTenancyResolverService)
     {
         _multiTenancyResolverService = multiTenancyResolverService;
-        _mapper = mapper;
     }
 
     public ClientStore(
         IMultiTenancyResolverService multiTenancyResolverService,
-        IMapper mapper,
         IClientMirrorProvisioningService mirrorProvisioning,
         ILogger<ClientStore> logger)
     {
         _multiTenancyResolverService = multiTenancyResolverService;
-        _mapper = mapper;
         _mirrorProvisioning = mirrorProvisioning;
         _logger = logger;
     }
@@ -110,41 +104,6 @@ public class ClientStore : IOctoClientStore
         }
 
         return client;
-    }
-
-    public async Task<Client?> FindClientByIdAsync(string clientId, CancellationToken ct = default)
-    {
-        var client = await FindRtClientByIdAsync(clientId);
-
-        // A dynamically-registered client (RFC 7591, AB#4338) past its TTL is treated as
-        // non-existent — Duende then rejects the request (unauthorized_client). This makes expiry
-        // effective immediately, independent of when the background sweep erases the record.
-        if (client is { DynamicRegistration: true, DynamicRegistrationExpiresAt: not null }
-            && client.DynamicRegistrationExpiresAt.Value <= DateTime.UtcNow)
-        {
-            return null;
-        }
-
-        ct.ThrowIfCancellationRequested();
-        return _mapper.Map<Client>(client);
-    }
-
-    public async IAsyncEnumerable<Client> GetAllClientsAsync(
-        [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken ct = default)
-    {
-        var session = await TenantRepository.GetSessionAsync();
-        session.StartTransaction();
-
-        var queryOptions = RtEntityQueryOptions.Create();
-        var result = await TenantRepository.GetRtEntitiesByTypeAsync<RtClient>(session, queryOptions);
-
-        await session.CommitTransactionAsync();
-
-        foreach (var rtClient in result.Items)
-        {
-            ct.ThrowIfCancellationRequested();
-            yield return _mapper.Map<Client>(rtClient);
-        }
     }
 
     public async Task<IEnumerable<RtClient>> GetClients()

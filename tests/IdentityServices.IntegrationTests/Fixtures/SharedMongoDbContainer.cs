@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using IdentityServices.IntegrationTests.Configuration;
+using IdentityServices.IntegrationTests.Helpers;
 using Testcontainers.MongoDb;
 using Xunit;
 
@@ -135,6 +136,17 @@ internal static class SharedMongoDbContainer
 
                 _container = container;
                 var host = $"localhost:{container.GetMappedPublicPort()}";
+
+                // AB#5160: mongod's default transactionLifetimeLimitSeconds is 60. Tenant setup runs
+                // inside a single Mongo transaction, and now that every fixture in the process shares
+                // this one server — with parallelizeTestCollections on top — that limit is reached
+                // sporadically and kills the run with "commitTransaction ... has been aborted".
+                // Raised once here, directly after the start and before any fixture writes.
+                await MongoTestContainerTuning.RaiseTransactionLifetimeLimitAsync(
+                    host, options.AdminUser, options.AdminUserPassword);
+                Console.WriteLine(
+                    $"[Testcontainers] transactionLifetimeLimitSeconds = {MongoTestContainerTuning.TransactionLifetimeLimitSeconds}");
+
                 _host = host;
 
                 var elapsed = DateTime.UtcNow - startTime;

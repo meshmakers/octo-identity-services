@@ -38,18 +38,16 @@ export OCTO_Identity__SigningCertificatePassword="secret"
 }
 ```
 
-##### Duende license and key management
+##### Token signing (OpenIddict)
 
-`Identity:IdentityServerLicenseKey` (`OCTO_IDENTITY__IdentityServerLicenseKey`) carries the Duende
-IdentityServer license JWT and is required — startup fails with an `InitializationException` when it
-is missing. Since the switch to the Duende **Community Edition (V2)** license (AB#4988), Duende's
-**Automatic Key Management is disabled** in `ConfigureIdentityServerOptions`
-(`options.KeyManagement.Enabled = false`): the feature is not included in the Community license and
-Duende 8.x throws at startup when the option is enabled without it being licensed. The service never
-used automatic key management — token signing always comes from the static PKCS#12 certificate
-(`KeyFilePath` / `KeyFilePassword`) registered as `ISigningCredentialStore` via
-`AddOctoSigningCredential` (`SigningCredentialService`), so disabling the option changes no token or
-JWKS behavior.
+Since AB#4989/AB#4996 the OAuth2/OIDC server is **OpenIddict** (Duende IdentityServer removed).
+`Identity:IdentityServerLicenseKey` no longer exists. Token signing still comes from the static
+PKCS#12 certificate (`KeyFilePath` / `KeyFilePassword`), now registered via
+`AddSigningCertificate` in `OpenIddictConfiguration` — the JWKS is unchanged from the Duende
+setup, so access tokens issued before the migration keep validating. The same certificate is
+used as the encryption credential for OpenIddict-internal token payloads (authorization codes,
+refresh tokens, device codes — never access tokens, which stay plain signed RS256 JWTs). In the
+Development environment, development certificates are generated automatically.
 
 #### Blueprint Variables (`Blueprints` section)
 
@@ -82,6 +80,16 @@ Key options in `OctoIdentityServicesOptions`:
 | `AuthorityUrl` | `OCTO_IDENTITY__AuthorityUrl` | Public URL of the Identity service (default: `https://localhost:5003`) |
 | `RefineryStudioUrl` | `OCTO_IDENTITY__RefineryStudioUrl` | Public URL of the Data Refinery Studio SPA. When set, the `octo-data-refinery-studio` OIDC client is auto-provisioned in all tenants. |
 | `DataProtectionKeysPath` | `OCTO_IDENTITY__DataProtectionKeysPath` | **Legacy / seed-only.** When set and the directory contains `key-*.xml` files, those keys are imported once into MongoDB at startup (zero-logout migration from the old PVC). Safe to leave unset in new deployments — DataProtection keys are always stored in MongoDB (`RtDataProtectionKey`, system tenant). |
+
+Tenant-authorization options (`TenantAuthorizationOptions`, octo-common-services, AB#5032) — how the
+shared `TenantAuthorizationMiddleware` treats client-credentials ("service") tokens. Bound by
+`AddOctoTenantAuthorization(builder.Configuration)`; the defaults reproduce the pre-AB#5032 request
+behaviour, so leaving the section out changes nothing:
+
+| Option | Env variable | Description |
+|--------|-------------|-------------|
+| `ServiceTokenEnforcement` | `OCTO_TENANTAUTHORIZATION__SERVICETOKENENFORCEMENT` | `Disabled` \| `LogOnly` \| `Enforce` (default since AB#5077). `LogOnly` lets every request through but logs each service token that addresses a tenant it was not issued for — the consumer inventory to evaluate before switching an environment to `Enforce`. `Enforce` answers those with 403, including service tokens carrying no `tenant_id` at all. |
+| `CrossTenantServiceClientIds` | `OCTO_TENANTAUTHORIZATION__CROSSTENANTSERVICECLIENTIDS__0`, `…__1`, … | Escape hatch for a service that genuinely fans out across tenants with one token. **Expected to stay empty** — the AI adapter worker and the mesh adapter both mint tenant-bound tokens (`acr_values=tenant:X`) and pass the `tenant_id` match on their own. Case-insensitive; a trailing `*` matches a prefix. Never list the per-tenant `octo-pipeline-sa-*` accounts, and never use this as a migration aid — that is what `LogOnly` is for. |
 
 ### Configuration Sources
 

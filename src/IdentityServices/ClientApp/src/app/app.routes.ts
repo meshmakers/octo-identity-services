@@ -77,11 +77,9 @@ export const routes: Routes = [
       {
         path: 'manage',
         children: [
-          {
-            path: '',
-            loadComponent: () => import('./features/manage/profile.component')
-              .then(m => m.ProfileComponent)
-          },
+          // Security ACTION pages keep their own full-panel routes (deep-linkable, with their
+          // own "Back to Profile" flows). Declared before the tab shell so their specific paths
+          // win over the shell's empty-path match.
           {
             path: 'password',
             loadComponent: () => import('./features/manage/change-password.component')
@@ -93,11 +91,6 @@ export const routes: Routes = [
               .then(m => m.ExternalLoginsComponent)
           },
           {
-            path: '2fa',
-            loadComponent: () => import('./features/manage/two-factor/two-factor-status.component')
-              .then(m => m.TwoFactorStatusComponent)
-          },
-          {
             path: '2fa/setup',
             loadComponent: () => import('./features/manage/two-factor/authenticator-setup.component')
               .then(m => m.AuthenticatorSetupComponent)
@@ -106,6 +99,34 @@ export const routes: Routes = [
             path: '2fa/recovery-codes',
             loadComponent: () => import('./features/manage/two-factor/recovery-codes.component')
               .then(m => m.RecoveryCodesComponent)
+          },
+          {
+            path: '2fa',
+            loadComponent: () => import('./features/manage/two-factor/two-factor-status.component')
+              .then(m => m.TwoFactorStatusComponent)
+          },
+          // Tab shell: Profil / Sicherheit / Meine Identitäten rendered as LCARS tabs (AB#5135).
+          {
+            path: '',
+            loadComponent: () => import('./features/manage/manage-shell.component')
+              .then(m => m.ManageShellComponent),
+            children: [
+              {
+                path: '',
+                loadComponent: () => import('./features/manage/profile.component')
+                  .then(m => m.ProfileComponent)
+              },
+              {
+                path: 'security',
+                loadComponent: () => import('./features/manage/security.component')
+                  .then(m => m.SecurityComponent)
+              },
+              {
+                path: 'identities',
+                loadComponent: () => import('./features/manage/my-identities.component')
+                  .then(m => m.MyIdentitiesComponent)
+              }
+            ]
           }
         ]
       },

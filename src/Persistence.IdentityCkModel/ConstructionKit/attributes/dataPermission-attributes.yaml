@@ -1,0 +1,25 @@
+"$schema": "https://schemas.meshmakers.cloud/construction-kit-elements.schema.json"
+attributes:
+  - id: TargetCkTypeIds
+    valueType: StringArray
+    defaultValues: [ ]
+    description: CK type ids or collection roots the policy protects; derived types inherit the policy.
+
+  - id: PolicyActions
+    valueType: StringArray
+    defaultValues: [ ]
+    description: "Granted actions: Read, Write, Delete."
+
+  - id: PolicyScope
+    valueType: Enum
+    valueCkEnumId: ${this}/DataPolicyScope
+    defaultValues:
+      - 0
+    description: All grants access to every entity of the target types; OwnedOnly restricts to entities created by the caller (RtCreatedBy).
+
+  - id: PolicyEnforcementMode
+    valueType: Enum
+    valueCkEnumId: ${this}/DataPolicyEnforcementMode
+    defaultValues:
+      - 0
+    description: Enforce applies the policy; AuditOnly only logs violations without filtering or rejecting (migration mode).

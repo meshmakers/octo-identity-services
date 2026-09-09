@@ -18,3 +18,27 @@ associationRoles:
     inboundMultiplicity: N
     outboundName: ChildGroups
     outboundMultiplicity: N
+  - id: MayActAs
+    description: "the origin client may impersonate the target client via the impersonation grant (AB#5114); materialised by the communication reconcile for adapter→pipeline-service-account pairs"
+    inboundName: Impersonators
+    inboundMultiplicity: N
+    outboundName: MayActAs
+    outboundMultiplicity: N
+  - id: GrantsPermission
+    description: "Links a Role to a granted DataPermission."
+    inboundName: GrantedToRoles
+    inboundMultiplicity: N
+    outboundName: GrantedPermissions
+    outboundMultiplicity: N
+  - id: PolicyPermission
+    description: "Links a DataPolicy to the DataPermission it belongs to."
+    inboundName: Policies
+    inboundMultiplicity: N
+    outboundName: Permission
+    outboundMultiplicity: One
+  - id: IdentifiesUser
+    description: "Links a VerifiedExternalIdentifier to the OctoMesh User it belongs to (AB#5122). One binding points to exactly one user; a user may own many verified identifiers."
+    inboundName: VerifiedExternalIdentifiers
+    inboundMultiplicity: N
+    outboundName: User
+    outboundMultiplicity: One

@@ -2,7 +2,7 @@
 
 ## System Architecture
 
-Octo Identity Services is an OAuth 2.0 / OpenID Connect identity provider built on Duende IdentityServer. It provides centralized authentication and authorization for the Octo platform with support for multiple identity providers.
+Octo Identity Services is an OAuth 2.0 / OpenID Connect identity provider built on **OpenIddict 7.6** (migrated from Duende IdentityServer 8.0.6, Epic AB#4989 — see [CONCEPT-OPENIDDICT-MIGRATION.md](CONCEPT-OPENIDDICT-MIGRATION.md)). It provides centralized authentication and authorization for the Octo platform with support for multiple identity providers. Endpoint paths, discovery, JWKS, and token/claims shapes are kept Duende-compatible so consumers work unchanged; the remaining discovery differences are documented in [openiddict-discovery-diff.md](openiddict-discovery-diff.md).
 
 ```
                                     ┌─────────────────────────────────────┐
@@ -59,16 +59,18 @@ Octo Identity Services is an OAuth 2.0 / OpenID Connect identity provider built 
 The main ASP.NET Core web application and system entry point.
 
 **Responsibilities:**
-- Host the IdentityServer middleware
-- Provide login/logout UI (MVC controllers and Razor views)
+- Host the OpenIddict server middleware
+- Build token principals via passthrough protocol controllers
+- Provide login/logout UI (Angular SPA + API controllers)
 - Expose the System API for administrative operations
 - Configure dependency injection and middleware pipeline
 
 **Key Components:**
 - `Program.cs` - Application startup and DI configuration
-- `Controllers/Account/` - Login, logout, password management
-- `Controllers/Consent/` - OAuth consent flow UI
-- `Controllers/Device/` - Device authorization flow
+- `Configuration/OpenIddictConfiguration.cs` - OpenIddict server setup (endpoint URIs pinned to the previous Duende paths, enabled flows, signing/encryption credentials, `DisableAccessTokenEncryption`, `DisableEntityCaching`)
+- `Controllers/Protocol/` - Passthrough protocol controllers: `TokenEndpointController` (client_credentials, token exchange, code/refresh/device redemption), `AuthorizeController` (cookie auth, tenant-scoped login/consent redirects), `EndSessionController` (logout + front-channel logout callback), `DeviceVerificationController` (`/connect/deviceverification`)
+- `OpenIddict/` - Integration layer: `OctoTokenClaimsService` (tenant/role/audience claims), `OctoClaimsDestinations`, `OctoAccessTokenShapeHandler` (Duende-compatible wire format), `OctoApplicationManager`/`OctoSecretHasher` (legacy secret-hash validation), `OctoTicketStore` (server-side sessions), `TenantExchangeProcessor` (RFC 8693), `IdentityAuditService`, `Interaction/` (`IOctoInteractionService` facade for the SPA API controllers)
+- `Controllers/Api/` - SPA API controllers (login, consent, device, manage, grants)
 - `TenantApi/v1/Controllers/` - REST API for identity management
 
 ### Authentication (`src/Authentication/`)
@@ -88,15 +90,17 @@ Razor class library providing dynamic authentication scheme management.
 
 ### IdentityServerPersistence (`src/IdentityServerPersistence/`)
 
-Data access layer implementing IdentityServer store interfaces.
+Data access layer with Octo-native stores and the custom OpenIddict store implementations.
 
 **Responsibilities:**
 - Persist clients, resources, grants, and identity providers
+- Implement the OpenIddict application/scope/authorization/token stores over the existing CK entities
 - Implement ASP.NET Core Identity stores (users, roles)
 - Handle data migrations
 
 **Key Components:**
-- `SystemStores/` - Store implementations (ClientStore, ResourceStore, etc.)
+- `SystemStores/` - Store implementations (ClientStore, ResourceStore, OctoUserStore, GroupStore, etc.)
+- `SystemStores/OpenIddict/` - `OpenIddictApplicationStore` (read-only `RtClient` projection), `ClientPermissionsMapper`, `OpenIddictScopeStore` (`RtApiScope`/`RtIdentityResource` projection with scope→audience via `RtApiResource`), `OpenIddictAuthorizationStore`/`OpenIddictTokenStore` (per-tenant `RtOAuthAuthorization`/`RtOAuthToken`)
 - `Services/Migrations/` - Database migration classes
 - `Configuration/` - DI extension methods
 
@@ -170,13 +174,15 @@ Entity models are defined in YAML and compiled to C# at build time. Benefits:
 - Compile-time type safety
 - Generated documentation
 
-### 3. Duende IdentityServer Integration
+### 3. OpenIddict Integration (Epic AB#4989)
 
-Custom stores replace IdentityServer's default in-memory or EF Core stores:
-- `ClientStore` - OAuth/OIDC client management
-- `ResourceStore` - API resources and scopes
-- `PersistentGrantStore` - Tokens and grants
-- `IdentityProviderStore` - External provider configuration
+Custom stores replace OpenIddict's default EF Core / MongoDB stores and project the existing CK entities — no data migration was needed:
+- `OpenIddictApplicationStore` - read-only projection of `RtClient` (application id = client_id; enabled + DCR-TTL gates), permissions derived by `ClientPermissionsMapper`
+- `OpenIddictScopeStore` - projects `RtApiScope` + `RtIdentityResource`; scope→audience via `RtApiResource`
+- `OpenIddictAuthorizationStore` / `OpenIddictTokenStore` - grants over the **per-tenant** CK types `RtOAuthAuthorization`/`RtOAuthToken`
+- `IdentityProviderStore` - External provider configuration (Octo-native, unchanged)
+
+OpenIddict's process-wide entity caching is disabled (`DisableEntityCaching`) — the stores are per-tenant, so cached entities would leak across tenants. Client secret validation (`OctoApplicationManager` + `OctoSecretHasher`) keeps the stored Duende hash format (Base64 SHA-256/512), so no secret rotation was needed. Token wire compatibility is pinned by golden baseline tests (`tests/IdentityServices.IntegrationTests/Api/Protocol/TokenShapeGoldenTests.cs`): token shapes recorded from Duende are verified byte-identical against OpenIddict.
 
 ### 4. Event-Driven Cache Invalidation
 

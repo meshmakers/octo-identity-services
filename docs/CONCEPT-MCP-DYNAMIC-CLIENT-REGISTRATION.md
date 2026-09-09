@@ -1,5 +1,7 @@
 # Concept — MCP Dynamic Client Registration (RFC 7591), AB#4338 Option A
 
+> **Note (2026-09-02):** superseded in parts by AB#4989 — the server now runs OpenIddict; discovery customization uses `ApplyConfigurationResponseContext` handlers instead of Duende `Discovery.CustomEntries`.
+
 Status: PROPOSED implementation plan. Enables spec-compliant interactive MCP clients (Claude Code
 2.1.x) to authenticate against the AB#4315-gated MCP transport, which requires RFC 7591 Dynamic
 Client Registration (DCR) — verified live: Claude Code fails with "Incompatible auth server: does not

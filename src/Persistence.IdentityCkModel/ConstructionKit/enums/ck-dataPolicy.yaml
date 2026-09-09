@@ -1,0 +1,14 @@
+$schema: https://schemas.meshmakers.cloud/construction-kit-elements.schema.json
+enums:
+  - enumId: DataPolicyScope
+    values:
+      - key: 0
+        name: All
+      - key: 1
+        name: OwnedOnly
+  - enumId: DataPolicyEnforcementMode
+    values:
+      - key: 0
+        name: Enforce
+      - key: 1
+        name: AuditOnly

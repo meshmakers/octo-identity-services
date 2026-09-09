@@ -1,6 +1,7 @@
 import { Component, OnInit, inject, ChangeDetectionStrategy } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { Router, ActivatedRoute } from '@angular/router';
+import { TranslatePipe, TranslateService } from '@ngx-translate/core';
 import { LcarsPanelComponent } from '../../../shared/components/lcars-panel/lcars-panel.component';
 import { LcarsHeaderComponent } from '../../../shared/components/lcars-header/lcars-header.component';
 import { ManageApiService } from '../../../core/services/manage-api.service';
@@ -8,15 +9,15 @@ import { ManageApiService } from '../../../core/services/manage-api.service';
 @Component({
   selector: 'app-recovery-codes',
   standalone: true,
-  imports: [CommonModule, LcarsPanelComponent, LcarsHeaderComponent],
+  imports: [CommonModule, TranslatePipe, LcarsPanelComponent, LcarsHeaderComponent],
   template: `
     <div class="lcars-auth-container">
       <app-lcars-panel>
-        <app-lcars-header subtitle="Recovery Codes"></app-lcars-header>
+        <app-lcars-header [subtitle]="'RECOVERY_CODES.SUBTITLE' | translate"></app-lcars-header>
 
         <div *ngIf="loading" class="lcars-loading">
           <div class="lcars-loading__spinner"></div>
-          <span class="lcars-loading__text">Generating</span>
+          <span class="lcars-loading__text">{{ 'RECOVERY_CODES.GENERATING' | translate }}</span>
         </div>
 
         <ng-container *ngIf="!loading && recoveryCodes.length > 0">
@@ -27,9 +28,8 @@ import { ManageApiService } from '../../../core/services/manage-api.service';
               </svg>
             </div>
             <p class="warning-text">
-              <strong>Save these codes in a secure location.</strong><br>
-              Each code can only be used once. If you lose access to your authenticator app,
-              you can use these codes to sign in.
+              <strong>{{ 'RECOVERY_CODES.WARNING_TITLE' | translate }}</strong><br>
+              {{ 'RECOVERY_CODES.WARNING_TEXT' | translate }}
             </p>
           </div>
 
@@ -39,23 +39,23 @@ import { ManageApiService } from '../../../core/services/manage-api.service';
 
           <div class="lcars-actions">
             <button type="button" class="lcars-button-primary" (click)="copyRecoveryCodes()">
-              {{ copied ? 'Copied!' : 'Copy All Codes' }}
+              {{ (copied ? 'RECOVERY_CODES.COPIED' : 'RECOVERY_CODES.COPY_ALL') | translate }}
             </button>
             <button type="button" class="lcars-button-outline" (click)="downloadCodes()">
-              Download as File
+              {{ 'RECOVERY_CODES.DOWNLOAD' | translate }}
             </button>
             <button type="button" class="lcars-button-outline" (click)="goBack()">
-              Back to 2FA Settings
+              {{ 'RECOVERY_CODES.BACK_TO_2FA' | translate }}
             </button>
           </div>
         </ng-container>
 
         <div *ngIf="!loading && recoveryCodes.length === 0 && !errorMessage" class="info-section">
           <p class="info-text">
-            No new recovery codes were generated. Go back to generate new codes.
+            {{ 'RECOVERY_CODES.EMPTY' | translate }}
           </p>
           <button type="button" class="lcars-button-outline" (click)="goBack()">
-            Back to 2FA Settings
+            {{ 'RECOVERY_CODES.BACK_TO_2FA' | translate }}
           </button>
         </div>
 
@@ -63,7 +63,7 @@ import { ManageApiService } from '../../../core/services/manage-api.service';
           {{ errorMessage }}
           <div class="lcars-actions">
             <button type="button" class="lcars-button-outline" (click)="goBack()">
-              Back to 2FA Settings
+              {{ 'RECOVERY_CODES.BACK_TO_2FA' | translate }}
             </button>
           </div>
         </div>
@@ -77,6 +77,7 @@ export class RecoveryCodesComponent implements OnInit {
   private manageApi = inject(ManageApiService);
   private router = inject(Router);
   private route = inject(ActivatedRoute);
+  private translate = inject(TranslateService);
 
   loading = false;
   recoveryCodes: string[] = [];
@@ -101,7 +102,7 @@ export class RecoveryCodesComponent implements OnInit {
       },
       error: (error) => {
         this.loading = false;
-        this.errorMessage = error.error?.message || 'Failed to generate recovery codes';
+        this.errorMessage = error.error?.message || this.translate.instant('RECOVERY_CODES.ERROR_GENERATE');
       }
     });
   }
@@ -116,15 +117,15 @@ export class RecoveryCodesComponent implements OnInit {
 
   downloadCodes(): void {
     const codesText = [
-      'OctoMesh Recovery Codes',
+      this.translate.instant('RECOVERY_CODES.FILE_TITLE'),
       '========================',
       '',
-      'Store these codes in a safe place.',
-      'Each code can only be used once.',
+      this.translate.instant('RECOVERY_CODES.FILE_STORE'),
+      this.translate.instant('RECOVERY_CODES.FILE_ONCE'),
       '',
       ...this.recoveryCodes,
       '',
-      'Generated: ' + new Date().toISOString()
+      this.translate.instant('RECOVERY_CODES.FILE_GENERATED') + ' ' + new Date().toISOString()
     ].join('\n');
 
     const blob = new Blob([codesText], { type: 'text/plain' });

@@ -1,6 +1,6 @@
 # Concept: Migrating from Duende IdentityServer to OpenIddict
 
-**Status:** Draft (2026-08-30) · **Epic:** AB#4989 · **Related:** AB#4988 (license renewal), work items AB#4990–AB#4998
+**Status:** Implemented on feature branch (2026-09-01) — phases 1–6 complete, cutover (AB#4998) pending · **Epic:** AB#4989 · **Related:** AB#4988 (license renewal), work items AB#4990–AB#4998
 
 ## 1. Motivation
 
@@ -288,3 +288,69 @@ that `TenantId` is first-class — proposal: keep centralized, revisit separatel
 OpenIddict's encryption certificate for id-token/`request_uri` protection — yes, new stable cert
 in the same secret chain; (c) timing relative to Data-Permissions Epic 4969 rollout — sequence to
 avoid overlapping identity-service trains.
+
+## Implementation notes (2026-09-01)
+
+> **test/0.2-dev merge note (2026-09-02):** the golden baseline was deliberately re-recorded for two
+> intentional wire-format changes that landed on this branch: AB#5007 (user access tokens now carry
+> `email`, `name`, `preferred_username` — caller identity for resource servers) and AB#5026
+> (`grant_types_supported` additionally advertises
+> `urn:meshmakers:params:oauth:grant-type:on-behalf-of`). Everything else remains byte-identical to
+> the pre-migration recording. The delegation grant itself was ported from the extension-grant
+> validator to `OnBehalfOfProcessor` + `TokenEndpointController` (see docs/authentication.md).
+
+Phases 1–6 (AB#4990–AB#4996) are implemented on the feature branch; the operational cutover
+(AB#4998) is pending. Deviations from / decisions beyond the concept above:
+
+- **Grant storage went per-tenant** (open question (a) resolved the other way): the OpenIddict
+  authorization/token stores persist in new per-tenant CK types `RtOAuthAuthorization`/`RtOAuthToken`
+  (System.Identity-2.12.0, migration 21→22), not in the system-tenant `RtPersistedGrant`. The
+  refresh-token→tenant resolution in `OidcTenantResolutionMiddleware` is in-memory only, preferring
+  `acr_values` sent by clients (no persistent SHA-256 hash fallback).
+- **No separate encryption certificate** (open question (b)): the static PKCS#12 signing certificate
+  doubles as the encryption credential for OpenIddict-internal token payloads;
+  `DisableAccessTokenEncryption` keeps access tokens as plain signed JWTs and the JWKS unchanged.
+- **`DisableEntityCaching` is mandatory**: the stores are per-tenant, so OpenIddict's process-wide
+  entity cache would leak entities across tenants. Never re-enable it.
+- **Principals are built in passthrough protocol controllers** (`Controllers/Protocol/`:
+  `TokenEndpointController`, `AuthorizeController`, `EndSessionController`,
+  `DeviceVerificationController` at `/connect/deviceverification`) rather than event handlers.
+  `TenantLoginRedirectMiddleware` and the Duende `ServerSideSessionStore` were deleted;
+  `DeviceApiController` now only holds the DTOs, and the SPA's `ConsentApiService` device methods
+  post form-encoded to `/connect/deviceverification` (only SPA contract change).
+- **Interaction state is fully self-contained**: `errorId`, `logoutId` and the one-time
+  `octo_consent` parameter are data-protected payloads (multi-pod safe, no message store),
+  exposed through the `IOctoInteractionService` facade. Remembered consent is a permanent
+  `RtOAuthAuthorization`; the grants page merges permanent authorizations with clients holding
+  live refresh tokens.
+- **Wire-format parity is enforced by code**: `OctoAccessTokenShapeHandler` keeps the Duende token
+  shape (one `scope` claim per value, no `sub` on `client_credentials`, no `oi_*` claims, `nbf`
+  present, no `azp` on id tokens, access tokens get no DB entry), verified byte-identical by the
+  golden baseline tests (`tests/IdentityServices.IntegrationTests/Api/Protocol/TokenShapeGoldenTests.cs`
+  + `GoldenFiles/`, recorded from Duende — all 5 green).
+- **Secret compatibility as planned**: `OctoApplicationManager` + `OctoSecretHasher` validate the
+  stored Duende hash format (Base64 SHA-256/512) — no secret rotation needed.
+- **Public clients may still send a secret**: deployed consumers (octo-cli, adapters) send a
+  `client_secret` even for clients with `RequireClientSecret = false`; Duende ignored it, OpenIddict
+  rejects it (`invalid_client`, ID2053). `OctoPublicClientSecretHandler` drops the secret for
+  public clients before `ValidateClientType`; confidential clients still authenticate strictly
+  (pinned by `PublicClientSecretToleranceTests`).
+- **OIDC Session Management reimplemented** (Duende parity, 2026-09-02): OpenIddict has no
+  check-session support, but angular-oauth2-oidc's `sessionChecksEnabled` (Refinery Studio) relies
+  on it to log other tabs out. Own implementation: `SessionCheckCookie` (`idsrv.session[.tenant]`,
+  NOT HttpOnly, issued/renewed/deleted by `OctoTicketStore`), `OctoSessionStateHandler`
+  (`session_state` on authorize responses) and `CheckSessionController`
+  (`/connect/checksession` iframe; hash formula must stay in sync with the handler),
+  advertised via `check_session_iframe`. Pinned by `SessionManagementTests`.
+- **`AlwaysIncludeUserClaimsInIdToken` parity**: for clients with this flag (e.g. Refinery Studio)
+  the user claims (`role`, `tenant_id`, `allowed_tenants`, `home_tenant_id`, `name`,
+  `preferred_username`, `email`, `family_name`, `given_name`) are stamped with an id-token
+  destination via `OctoClaimsDestinations.ForClient(bool)`; profile claims are populated in
+  `OctoTokenClaimsService.PopulateUserClaimsAsync`. Without this, SPAs that read user identity
+  from the id token (angular-oauth2-oidc) fall into a login redirect loop.
+- **Accepted behavioral differences**: `client_credentials` without a `scope` parameter now yields
+  no scopes (Duende granted all allowed); token responses may report `expires_in` as remaining
+  seconds; introspection now authenticates clients (ApiSecrets-based resource introspection not
+  wired — unused).
+- **Config**: `Identity:IdentityServerLicenseKey` removed; signing via `KeyFilePath`/`KeyFilePassword`
+  unchanged. Remaining discovery-document differences: `docs/openiddict-discovery-diff.md`.

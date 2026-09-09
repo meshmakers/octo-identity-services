@@ -1,5 +1,8 @@
 # Add Facebook Identity Provider
 #
+# Credentials come from scripts/secrets.local.json (gitignored) — copy
+# scripts/secrets.local.json.template and fill in the "facebook" section.
+#
 # Prerequisites:
 # 1. Register as Facebook Developer at https://developers.facebook.com/
 # 2. Create app at https://developers.facebook.com/apps/create/
@@ -13,6 +16,35 @@
 #
 # See docs/external-identity-provider-setup.md for detailed setup instructions
 #
-# Usage: Replace APP_ID and APP_SECRET with your values
+# Usage:
+#   ./om_idprov_add_facebook.ps1                       # active octo-cli context
+#   ./om_idprov_add_facebook.ps1 -context local_salzburgdev
 
-octo-cli -c AddOAuthIdentityProvider -n "Facebook" -e true --clientId "YOUR_APP_ID" --clientSecret "YOUR_APP_SECRET" -t facebook
+param (
+    [string]$secretsFile = (Join-Path $PSScriptRoot "secrets.local.json"),
+    [string]$name = "Facebook",
+    [string]$context
+)
+
+$ErrorActionPreference = "Stop"
+
+if (-not (Test-Path $secretsFile)) {
+    Write-Host "Secrets file '$secretsFile' not found." -ForegroundColor Red
+    Write-Host "Copy scripts/secrets.local.json.template to scripts/secrets.local.json and fill in the values." -ForegroundColor Yellow
+    exit 1
+}
+
+$secrets = Get-Content $secretsFile -Raw | ConvertFrom-Json
+if (-not $secrets.facebook -or
+    [string]::IsNullOrWhiteSpace($secrets.facebook.appId) -or
+    [string]::IsNullOrWhiteSpace($secrets.facebook.appSecret)) {
+    Write-Host "Missing 'facebook.appId' / 'facebook.appSecret' in $secretsFile" -ForegroundColor Red
+    exit 1
+}
+
+$contextArgs = @()
+if ($context) { $contextArgs = @("--context", $context) }
+
+octo-cli @contextArgs -c AddOAuthIdentityProvider -n $name -e true -t facebook `
+    --clientId $secrets.facebook.appId --clientSecret $secrets.facebook.appSecret
+exit $LASTEXITCODE

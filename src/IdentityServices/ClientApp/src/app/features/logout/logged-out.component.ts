@@ -1,18 +1,19 @@
 import { Component, inject, OnInit, ChangeDetectionStrategy } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { ActivatedRoute } from '@angular/router';
+import { TranslatePipe } from '@ngx-translate/core';
 import { LcarsPanelComponent } from '../../shared/components/lcars-panel/lcars-panel.component';
 import { LcarsHeaderComponent } from '../../shared/components/lcars-header/lcars-header.component';
 
 @Component({
   selector: 'app-logged-out',
   standalone: true,
-  imports: [CommonModule, LcarsPanelComponent, LcarsHeaderComponent],
+  imports: [CommonModule, TranslatePipe, LcarsPanelComponent, LcarsHeaderComponent],
   template: `
     <div class="lcars-auth-container">
       <app-lcars-panel variant="success">
         <app-lcars-header
-          subtitle="Signed out">
+          [subtitle]="'LOGGED_OUT.SUBTITLE' | translate">
         </app-lcars-header>
 
         <div class="logged-out-content">
@@ -24,17 +25,17 @@ import { LcarsHeaderComponent } from '../../shared/components/lcars-header/lcars
           </div>
 
           <p class="logged-out-message">
-            You have been successfully signed out.
+            {{ 'LOGGED_OUT.MESSAGE' | translate }}
           </p>
 
           <div class="lcars-actions">
             @if (returnUri) {
               <a [href]="returnUri" class="lcars-button-primary">
-                Return to Application
+                {{ 'LOGGED_OUT.RETURN_TO_APP' | translate }}
               </a>
             }
             <a [href]="'/' + tenantId + '/login'" class="lcars-button-outline">
-              Sign in again
+              {{ 'LOGGED_OUT.SIGN_IN_AGAIN' | translate }}
             </a>
           </div>
         </div>

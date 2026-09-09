@@ -1,6 +1,7 @@
 import { Component, OnInit, inject, ChangeDetectionStrategy } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { ActivatedRoute } from '@angular/router';
+import { TranslatePipe } from '@ngx-translate/core';
 import { LcarsPanelComponent } from '../../shared/components/lcars-panel/lcars-panel.component';
 import { LcarsHeaderComponent } from '../../shared/components/lcars-header/lcars-header.component';
 import { AuthApiService } from '../../core/services/auth-api.service';
@@ -9,27 +10,27 @@ import { LogoutContext } from '../../core/models/login.models';
 @Component({
   selector: 'app-logout',
   standalone: true,
-  imports: [CommonModule, LcarsPanelComponent, LcarsHeaderComponent],
+  imports: [CommonModule, TranslatePipe, LcarsPanelComponent, LcarsHeaderComponent],
   template: `
     <div class="lcars-auth-container">
       <app-lcars-panel>
         <app-lcars-header
-          subtitle="Sign out">
+          [subtitle]="'LOGOUT.SUBTITLE' | translate">
         </app-lcars-header>
 
         <div *ngIf="loading" class="lcars-loading">
           <div class="lcars-loading__spinner"></div>
-          <span class="lcars-loading__text">Loading</span>
+          <span class="lcars-loading__text">{{ 'COMMON.LOADING' | translate }}</span>
         </div>
 
         <ng-container *ngIf="!loading">
           <div class="logout-content">
             <p class="logout-message">
-              Would you like to sign out of your session?
+              {{ 'LOGOUT.PROMPT' | translate }}
             </p>
 
             <div *ngIf="context?.clientName" class="logout-client">
-              You will be signed out from <strong>{{ context!.clientName }}</strong>
+              {{ 'LOGOUT.CLIENT_INFO' | translate }} <strong>{{ context!.clientName }}</strong>
             </div>
 
             <div class="lcars-actions">
@@ -38,14 +39,14 @@ import { LogoutContext } from '../../core/models/login.models';
                 class="lcars-button-primary"
                 (click)="onLogout()"
                 [disabled]="submitting">
-                {{ submitting ? 'Signing out...' : 'Sign Out' }}
+                {{ (submitting ? 'LOGOUT.SIGNING_OUT' : 'LOGOUT.SIGN_OUT') | translate }}
               </button>
               <button
                 type="button"
                 class="lcars-button-outline"
                 (click)="onCancel()"
                 [disabled]="submitting">
-                Cancel
+                {{ 'COMMON.CANCEL' | translate }}
               </button>
             </div>
           </div>

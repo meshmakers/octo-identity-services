@@ -1,14 +1,14 @@
 <div class="lcars-auth-container">
   <app-lcars-panel>
     <app-lcars-header
-      [subtitle]="'Sign in to ' + tenantId"
+      [subtitle]="'LOGIN.SUBTITLE' | translate: { tenant: tenantId }"
       [showUserMenu]="false">
     </app-lcars-header>
 
     <!-- Loading State -->
     <div *ngIf="loading" class="lcars-loading">
       <div class="lcars-loading__spinner"></div>
-      <span class="lcars-loading__text">Loading</span>
+      <span class="lcars-loading__text">{{ 'COMMON.LOADING' | translate }}</span>
     </div>
 
     <!-- Tenant Unavailable -->
@@ -20,7 +20,7 @@
           </svg>
         </div>
         <div class="lcars-already-authenticated__message">
-          This tenant is not available. Please contact your administrator.
+          {{ 'LOGIN.TENANT_UNAVAILABLE' | translate }}
         </div>
       </div>
     </ng-container>
@@ -34,7 +34,7 @@
           </svg>
         </div>
         <div class="lcars-already-authenticated__message">
-          You are signed in as
+          {{ 'LOGIN.SIGNED_IN_AS' | translate }}
         </div>
         <div class="lcars-already-authenticated__username">
           {{ context?.username }}
@@ -45,13 +45,13 @@
             type="button"
             class="lcars-button-primary"
             (click)="continueAsUser()">
-            Continue to Profile
+            {{ 'LOGIN.CONTINUE_TO_PROFILE' | translate }}
           </button>
           <button
             type="button"
             class="lcars-button-secondary"
             (click)="signOutAndSignIn()">
-            Sign in as different user
+            {{ 'LOGIN.SIGN_IN_DIFFERENT_USER' | translate }}
           </button>
         </div>
       </div>
@@ -77,7 +77,7 @@
       <!-- Local Login Form -->
       <form *ngIf="showLocalLogin" (ngSubmit)="onSubmit()" #loginForm="ngForm">
         <div class="lcars-form-group">
-          <label for="username">Username</label>
+          <label for="username">{{ 'COMMON.USERNAME' | translate }}</label>
           <input
             type="text"
             id="username"
@@ -86,11 +86,11 @@
             required
             autocomplete="username"
             [disabled]="submitting"
-            placeholder="Enter your username" />
+            [placeholder]="'LOGIN.USERNAME_PLACEHOLDER' | translate" />
         </div>
 
         <div class="lcars-form-group">
-          <label for="password">Password</label>
+          <label for="password">{{ 'COMMON.PASSWORD' | translate }}</label>
           <input
             type="password"
             id="password"
@@ -99,7 +99,7 @@
             required
             autocomplete="current-password"
             [disabled]="submitting"
-            placeholder="Enter your password" />
+            [placeholder]="'LOGIN.PASSWORD_PLACEHOLDER' | translate" />
         </div>
 
         <div class="lcars-checkbox-group" *ngIf="context?.allowRememberLogin">
@@ -110,7 +110,7 @@
             [(ngModel)]="rememberLogin"
             class="lcars-checkbox"
             [disabled]="submitting" />
-          <label for="rememberLogin">Remember me</label>
+          <label for="rememberLogin">{{ 'LOGIN.REMEMBER_ME' | translate }}</label>
         </div>
 
         <div class="lcars-actions lcars-actions--stacked">
@@ -118,15 +118,15 @@
             type="submit"
             class="lcars-button-primary"
             [disabled]="submitting || !username || !password">
-            <span *ngIf="!submitting">Sign In</span>
-            <span *ngIf="submitting">Signing in...</span>
+            <span *ngIf="!submitting">{{ 'COMMON.SIGN_IN' | translate }}</span>
+            <span *ngIf="submitting">{{ 'COMMON.SIGNING_IN' | translate }}</span>
           </button>
         </div>
       </form>
 
       <!-- Divider -->
       <div *ngIf="showLocalLogin && hasExternalProviders" class="lcars-divider">
-        or continue with
+        {{ 'LOGIN.OR_CONTINUE_WITH' | translate }}
       </div>
 
       <!-- External Providers -->
@@ -142,9 +142,9 @@
       <!-- Footer Links -->
       <div class="lcars-footer-links">
         <a *ngIf="showLoginForm" href="javascript:void(0)" (click)="cancelSwitchUser()">
-          Cancel
+          {{ 'COMMON.CANCEL' | translate }}
         </a>
-        <a [routerLink]="['/', tenantId, 'forgot-password']">Forgot password?</a>
+        <a [routerLink]="['/', tenantId, 'forgot-password']">{{ 'LOGIN.FORGOT_PASSWORD_LINK' | translate }}</a>
       </div>
     </ng-container>
   </app-lcars-panel>

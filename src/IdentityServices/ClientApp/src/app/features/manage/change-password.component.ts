@@ -2,6 +2,7 @@ import { Component, inject, ChangeDetectionStrategy } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { Router, ActivatedRoute } from '@angular/router';
+import { TranslatePipe, TranslateService } from '@ngx-translate/core';
 import { LcarsPanelComponent } from '../../shared/components/lcars-panel/lcars-panel.component';
 import { LcarsHeaderComponent } from '../../shared/components/lcars-header/lcars-header.component';
 import { ManageApiService } from '../../core/services/manage-api.service';
@@ -10,12 +11,12 @@ import { ChangePasswordRequest } from '../../core/models/manage.models';
 @Component({
   selector: 'app-change-password',
   standalone: true,
-  imports: [CommonModule, FormsModule, LcarsPanelComponent, LcarsHeaderComponent],
+  imports: [CommonModule, FormsModule, TranslatePipe, LcarsPanelComponent, LcarsHeaderComponent],
   template: `
     <div class="lcars-auth-container">
       <app-lcars-panel [variant]="success ? 'success' : 'default'">
         <app-lcars-header
-          subtitle="Change Password">
+          [subtitle]="'CHANGE_PASSWORD.SUBTITLE' | translate">
         </app-lcars-header>
 
         <div *ngIf="success" class="success-content">
@@ -25,9 +26,9 @@ import { ChangePasswordRequest } from '../../core/models/manage.models';
               <polyline points="22 4 12 14.01 9 11.01"></polyline>
             </svg>
           </div>
-          <p class="success-message">Your password has been changed successfully.</p>
+          <p class="success-message">{{ 'CHANGE_PASSWORD.SUCCESS' | translate }}</p>
           <button type="button" class="lcars-button-outline" (click)="goBack()">
-            Back to Profile
+            {{ 'COMMON.BACK_TO_PROFILE' | translate }}
           </button>
         </div>
 
@@ -43,7 +44,7 @@ import { ChangePasswordRequest } from '../../core/models/manage.models';
           </div>
 
           <div class="lcars-form-group">
-            <label for="currentPassword">Current Password</label>
+            <label for="currentPassword">{{ 'CHANGE_PASSWORD.CURRENT' | translate }}</label>
             <input
               type="password"
               id="currentPassword"
@@ -55,7 +56,7 @@ import { ChangePasswordRequest } from '../../core/models/manage.models';
           </div>
 
           <div class="lcars-form-group">
-            <label for="newPassword">New Password</label>
+            <label for="newPassword">{{ 'CHANGE_PASSWORD.NEW' | translate }}</label>
             <input
               type="password"
               id="newPassword"
@@ -68,7 +69,7 @@ import { ChangePasswordRequest } from '../../core/models/manage.models';
           </div>
 
           <div class="lcars-form-group">
-            <label for="confirmPassword">Confirm Password</label>
+            <label for="confirmPassword">{{ 'CHANGE_PASSWORD.CONFIRM' | translate }}</label>
             <input
               type="password"
               id="confirmPassword"
@@ -81,7 +82,7 @@ import { ChangePasswordRequest } from '../../core/models/manage.models';
 
           <div *ngIf="model.newPassword && model.confirmPassword && model.newPassword !== model.confirmPassword"
                class="validation-error">
-            Passwords do not match
+            {{ 'COMMON.PASSWORDS_MISMATCH' | translate }}
           </div>
 
           <div class="lcars-actions">
@@ -89,10 +90,10 @@ import { ChangePasswordRequest } from '../../core/models/manage.models';
               type="submit"
               class="lcars-button-primary"
               [disabled]="submitting || !model.currentPassword || !model.newPassword || model.newPassword !== model.confirmPassword">
-              {{ submitting ? 'Changing...' : 'Change Password' }}
+              {{ (submitting ? 'CHANGE_PASSWORD.SUBMITTING' : 'CHANGE_PASSWORD.SUBMIT') | translate }}
             </button>
             <button type="button" class="lcars-button-outline" (click)="goBack()" [disabled]="submitting">
-              Cancel
+              {{ 'COMMON.CANCEL' | translate }}
             </button>
           </div>
         </form>
@@ -106,6 +107,7 @@ export class ChangePasswordComponent {
   private manageApi = inject(ManageApiService);
   private router = inject(Router);
   private route = inject(ActivatedRoute);
+  private translate = inject(TranslateService);
 
   submitting = false;
   success = false;
@@ -120,7 +122,7 @@ export class ChangePasswordComponent {
 
   onSubmit(): void {
     if (this.model.newPassword !== this.model.confirmPassword) {
-      this.errorMessage = 'Passwords do not match';
+      this.errorMessage = this.translate.instant('COMMON.PASSWORDS_MISMATCH');
       return;
     }
 
@@ -140,7 +142,7 @@ export class ChangePasswordComponent {
       },
       error: (error) => {
         this.submitting = false;
-        this.errorMessage = error.error?.message || 'An error occurred';
+        this.errorMessage = error.error?.message || this.translate.instant('COMMON.ERROR_GENERIC');
       }
     });
   }

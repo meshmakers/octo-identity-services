@@ -93,6 +93,56 @@ public interface IClientMirrorProvisioningService
     /// </summary>
     Task<bool> RemoveMirrorAsync(
         string parentTenantId, string parentClientId, string childTenantId);
+
+    /// <summary>
+    ///     Issues a fresh <b>own</b> secret for one mirror and returns it in plaintext — the only
+    ///     path on which a mirror secret is ever revealed (AB#5061).
+    /// </summary>
+    /// <remarks>
+    ///     <para>
+    ///         This is the <i>distribution</i> half of per-tenant mirror secrets. Stored secrets are
+    ///         SHA-256 hashes and unrecoverable, so the value cannot be read back later — the caller
+    ///         must capture it from this one response. Calling again issues a new secret and
+    ///         invalidates the previous one, which is also how rotation works.
+    ///     </para>
+    ///     <para>
+    ///         The caller authenticates against the <b>parent</b> tenant with management rights.
+    ///         Parent → child is legitimate delegation; the escalation being removed is the
+    ///         opposite direction, where a child credential reaches the parent.
+    ///     </para>
+    ///     <para>
+    ///         Returns <c>null</c> when no mirror is tracked for the pair, and
+    ///         <see cref="MirrorSecretRotationResult.NotApplicable" /> when the parent client is
+    ///         public — a public client has no secret to scope per tenant, and minting one would
+    ///         turn it confidential in the child tenant only.
+    ///     </para>
+    /// </remarks>
+    Task<MirrorSecretRotationResult?> RotateMirrorSecretAsync(
+        string parentTenantId, string parentClientId, string childTenantId);
+}
+
+/// <summary>
+///     Outcome of <see cref="IClientMirrorProvisioningService.RotateMirrorSecretAsync" />.
+/// </summary>
+/// <param name="Secret">
+///     The new secret in <b>plaintext</b>, or <c>null</c> when <paramref name="NotApplicable" /> is
+///     true. 🔴 Never log this value — it is returned once and is unrecoverable afterwards.
+/// </param>
+/// <param name="NotApplicable">
+///     True when the parent client is public, so there is no per-tenant secret to issue.
+/// </param>
+public sealed record MirrorSecretRotationResult(string? Secret, bool NotApplicable)
+{
+    /// <summary>Successful rotation carrying the one-time plaintext.</summary>
+    public static MirrorSecretRotationResult Issued(string secret) => new(secret, false);
+
+    /// <summary>The parent client is public — nothing to issue.</summary>
+    public static MirrorSecretRotationResult PublicClient() => new(null, true);
+
+    /// <summary>
+    ///     Keeps the plaintext out of any accidental interpolation, log line or exception message.
+    /// </summary>
+    public override string ToString() => $"{nameof(MirrorSecretRotationResult)} {{ NotApplicable = {NotApplicable} }}";
 }
 
 /// <summary>Summary of one provisioning run for telemetry / API responses.</summary>

@@ -37,7 +37,6 @@ public class DataProtectionKeyStoreIntegrationTests : IClassFixture<IdentityServ
             _fixture.Provider!.GetRequiredService<IServiceScopeFactory>(),
             Options.Create(new OctoIdentityServicesOptions
             {
-                IdentityServerLicenseKey = "test",
                 AutoMapperLicenseKey = "test",
                 DataProtectionKeysPath = keysPath
             }));
@@ -98,7 +97,7 @@ public class DataProtectionKeyStoreIntegrationTests : IClassFixture<IdentityServ
     /// <remarks>
     /// The seed-import (zero-logout migration) code path is covered in isolation by
     /// <see cref="DataProtectionKeySeedIntegrationTests.GetAllElements_EmptyStore_SeedsFromLegacyPath"/>,
-    /// which runs against a guaranteed-empty collection in its own class fixture.
+    /// which runs against a guaranteed-empty collection in its own collection fixture.
     /// </remarks>
     [Fact]
     public async Task StoredKeys_SurviveAcrossStoreInstances()

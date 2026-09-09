@@ -1,5 +1,6 @@
-import { Component, OnInit, ChangeDetectionStrategy } from '@angular/core';
+import { Component, OnInit, ChangeDetectionStrategy, inject } from '@angular/core';
 import { CommonModule } from '@angular/common';
+import { TranslateService } from '@ngx-translate/core';
 
 /**
  * Front-Channel Logout Callback Component
@@ -30,9 +31,12 @@ import { CommonModule } from '@angular/common';
   `]
 })
 export class LogoutCallbackComponent implements OnInit {
-  message = 'Processing logout...';
+  private translate = inject(TranslateService);
+
+  message = '';
 
   ngOnInit(): void {
+    this.message = this.translate.instant('LOGOUT_CALLBACK.PROCESSING');
     this.performLogout();
   }
 
@@ -44,13 +48,13 @@ export class LogoutCallbackComponent implements OnInit {
       // Clear cookies if accessible
       this.clearCookies();
 
-      this.message = 'Logged out successfully';
+      this.message = this.translate.instant('LOGOUT_CALLBACK.SUCCESS');
 
       // Notify parent window if we're in an iframe
       this.notifyParent();
     } catch (error) {
       console.error('Error during logout callback:', error);
-      this.message = 'Logout completed';
+      this.message = this.translate.instant('LOGOUT_CALLBACK.COMPLETED');
     }
   }
 

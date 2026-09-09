@@ -1,6 +1,6 @@
 # Octo Identity Services
 
-OAuth 2.0 / OpenID Connect identity provider for the Octo platform, built on [Duende IdentityServer](https://duendesoftware.com/products/identityserver).
+OAuth 2.0 / OpenID Connect identity provider for the Octo platform, built on [OpenIddict 7.6](https://openiddict.com).
 
 ## Features
 

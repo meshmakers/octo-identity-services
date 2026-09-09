@@ -24,8 +24,10 @@ internal class MicrosoftAuthSchemeCreator : IAuthSchemeCreator<RtMicrosoftIdenti
         var options = _micAuthOptions.CreateOptions(schemeName);
         options.ClientId = identityProvider.ClientId;
         options.ClientSecret = identityProvider.ClientSecret;
-        // Sign in to IdentityServer's external cookie scheme so ExternalLoginCallback can read it
-        options.SignInScheme = AuthenticationConstants.IdentityServerConstants.ExternalCookieAuthenticationScheme;
+        // Sign in to our external cookie scheme (OctoAuthSchemes.ExternalCookieScheme) so ExternalLoginCallback can read it
+        options.SignInScheme = OctoAuthSchemes.ExternalCookieScheme;
+        // Route remote-login failures (wrong secret, user cancelled) to the SPA error page.
+        options.Events.OnRemoteFailure = ExternalAuthFailureHandler.HandleRemoteFailureAsync;
 
         var displayName = identityProvider.DisplayName ?? identityProvider.Name;
         return new AuthenticationScheme(schemeName, displayName,

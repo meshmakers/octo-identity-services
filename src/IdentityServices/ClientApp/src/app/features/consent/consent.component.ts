@@ -2,6 +2,7 @@ import { Component, OnInit, inject, ChangeDetectionStrategy } from '@angular/cor
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { ActivatedRoute } from '@angular/router';
+import { TranslatePipe, TranslateService } from '@ngx-translate/core';
 import { LcarsPanelComponent } from '../../shared/components/lcars-panel/lcars-panel.component';
 import { LcarsHeaderComponent } from '../../shared/components/lcars-header/lcars-header.component';
 import { ScopeListComponent } from '../../shared/components/scope-list/scope-list.component';
@@ -14,6 +15,7 @@ import { ConsentContext, ScopeItem } from '../../core/models/consent.models';
   imports: [
     CommonModule,
     FormsModule,
+    TranslatePipe,
     LcarsPanelComponent,
     LcarsHeaderComponent,
     ScopeListComponent
@@ -22,12 +24,12 @@ import { ConsentContext, ScopeItem } from '../../core/models/consent.models';
     <div class="lcars-auth-container">
       <app-lcars-panel>
         <app-lcars-header
-          subtitle="Authorize Application">
+          [subtitle]="'CONSENT.SUBTITLE' | translate">
         </app-lcars-header>
 
         <div *ngIf="loading" class="lcars-loading">
           <div class="lcars-loading__spinner"></div>
-          <span class="lcars-loading__text">Loading</span>
+          <span class="lcars-loading__text">{{ 'COMMON.LOADING' | translate }}</span>
         </div>
 
         <ng-container *ngIf="!loading && context">
@@ -43,7 +45,7 @@ import { ConsentContext, ScopeItem } from '../../core/models/consent.models';
           </div>
 
           <p class="consent-description">
-            This application is requesting access to the following permissions:
+            {{ 'CONSENT.DESCRIPTION' | translate }}
           </p>
 
           <!-- Error Message -->
@@ -54,7 +56,7 @@ import { ConsentContext, ScopeItem } from '../../core/models/consent.models';
           <!-- Identity Scopes -->
           <app-scope-list
             *ngIf="context.identityScopes.length > 0"
-            title="Personal Information"
+            [title]="'CONSENT.IDENTITY_SCOPES' | translate"
             [scopes]="context.identityScopes"
             (scopesChange)="onScopesChange($event, 'identity')">
           </app-scope-list>
@@ -62,7 +64,7 @@ import { ConsentContext, ScopeItem } from '../../core/models/consent.models';
           <!-- API Scopes -->
           <app-scope-list
             *ngIf="context.apiScopes.length > 0"
-            title="Application Access"
+            [title]="'CONSENT.API_SCOPES' | translate"
             [scopes]="context.apiScopes"
             (scopesChange)="onScopesChange($event, 'api')">
           </app-scope-list>
@@ -75,7 +77,7 @@ import { ConsentContext, ScopeItem } from '../../core/models/consent.models';
               [(ngModel)]="rememberConsent"
               class="lcars-checkbox"
               [disabled]="submitting" />
-            <label for="rememberConsent">Remember my decision</label>
+            <label for="rememberConsent">{{ 'CONSENT.REMEMBER' | translate }}</label>
           </div>
 
           <!-- Actions -->
@@ -85,20 +87,20 @@ import { ConsentContext, ScopeItem } from '../../core/models/consent.models';
               class="lcars-button-primary"
               (click)="onAllow()"
               [disabled]="submitting">
-              {{ submitting ? 'Processing...' : 'Allow' }}
+              {{ (submitting ? 'COMMON.PROCESSING' : 'COMMON.ALLOW') | translate }}
             </button>
             <button
               type="button"
               class="lcars-button-error"
               (click)="onDeny()"
               [disabled]="submitting">
-              Deny
+              {{ 'COMMON.DENY' | translate }}
             </button>
           </div>
         </ng-container>
 
         <div *ngIf="!loading && !context" class="lcars-error-message">
-          Invalid consent request.
+          {{ 'CONSENT.INVALID_REQUEST' | translate }}
         </div>
       </app-lcars-panel>
     </div>
@@ -109,6 +111,7 @@ import { ConsentContext, ScopeItem } from '../../core/models/consent.models';
 export class ConsentComponent implements OnInit {
   private route = inject(ActivatedRoute);
   private consentApi = inject(ConsentApiService);
+  private translate = inject(TranslateService);
 
   loading = true;
   submitting = false;
@@ -118,8 +121,8 @@ export class ConsentComponent implements OnInit {
   returnUrl = '';
 
   ngOnInit(): void {
-    // Duende's ConsentPageResult sends the query param lowercase (`returnUrl`), unlike
-    // LoginPageResult which sends `ReturnUrl`. Accept both casings, otherwise the consent
+    // The consent redirect historically sends the query param lowercase (`returnUrl`), unlike
+    // the login redirect which sends `ReturnUrl`. Accept both casings, otherwise the consent
     // POST loses the return URL and the authorize flow dead-ends with "Invalid consent request".
     this.returnUrl = this.route.snapshot.queryParams['ReturnUrl']
                   || this.route.snapshot.queryParams['returnUrl']
@@ -175,12 +178,12 @@ export class ConsentComponent implements OnInit {
           window.location.href = result.redirectUrl;
         } else {
           this.submitting = false;
-          this.errorMessage = result.errorMessage || result.validationError || 'Failed to process consent';
+          this.errorMessage = result.errorMessage || result.validationError || this.translate.instant('CONSENT.ERROR_PROCESS');
         }
       },
       error: (error) => {
         this.submitting = false;
-        this.errorMessage = error.error?.message || 'An error occurred';
+        this.errorMessage = error.error?.message || this.translate.instant('COMMON.ERROR_GENERIC');
       }
     });
   }

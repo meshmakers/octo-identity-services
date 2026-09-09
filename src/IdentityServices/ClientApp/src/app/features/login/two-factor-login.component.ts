@@ -2,6 +2,7 @@ import { Component, OnInit, inject, ChangeDetectionStrategy } from '@angular/cor
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { ActivatedRoute, Router, RouterLink } from '@angular/router';
+import { TranslatePipe, TranslateService } from '@ngx-translate/core';
 import { LcarsPanelComponent } from '../../shared/components/lcars-panel/lcars-panel.component';
 import { LcarsHeaderComponent } from '../../shared/components/lcars-header/lcars-header.component';
 import { AuthApiService } from '../../core/services/auth-api.service';
@@ -11,11 +12,11 @@ type TwoFactorMethod = 'totp' | 'email' | 'recovery';
 @Component({
   selector: 'app-two-factor-login',
   standalone: true,
-  imports: [CommonModule, FormsModule, RouterLink, LcarsPanelComponent, LcarsHeaderComponent],
+  imports: [CommonModule, FormsModule, RouterLink, TranslatePipe, LcarsPanelComponent, LcarsHeaderComponent],
   template: `
     <div class="lcars-auth-container">
       <app-lcars-panel>
-        <app-lcars-header subtitle="Two-Factor Authentication"></app-lcars-header>
+        <app-lcars-header [subtitle]="'TWO_FACTOR_LOGIN.SUBTITLE' | translate"></app-lcars-header>
 
         <!-- Method Tabs -->
         <div class="method-tabs">
@@ -25,7 +26,7 @@ type TwoFactorMethod = 'totp' | 'email' | 'recovery';
             class="method-tab"
             [class.method-tab--active]="activeMethod === 'totp'"
             (click)="setMethod('totp')">
-            Authenticator
+            {{ 'TWO_FACTOR_LOGIN.TAB_AUTHENTICATOR' | translate }}
           </button>
           <button
             *ngIf="canUseEmail"
@@ -33,14 +34,14 @@ type TwoFactorMethod = 'totp' | 'email' | 'recovery';
             class="method-tab"
             [class.method-tab--active]="activeMethod === 'email'"
             (click)="setMethod('email')">
-            Email
+            {{ 'TWO_FACTOR_LOGIN.TAB_EMAIL' | translate }}
           </button>
           <button
             type="button"
             class="method-tab"
             [class.method-tab--active]="activeMethod === 'recovery'"
             (click)="setMethod('recovery')">
-            Recovery
+            {{ 'TWO_FACTOR_LOGIN.TAB_RECOVERY' | translate }}
           </button>
         </div>
 
@@ -51,11 +52,11 @@ type TwoFactorMethod = 'totp' | 'email' | 'recovery';
         <!-- TOTP Method -->
         <form *ngIf="activeMethod === 'totp'" (ngSubmit)="onSubmitTotp()">
           <p class="method-description">
-            Enter the 6-digit code from your authenticator app.
+            {{ 'TWO_FACTOR_LOGIN.TOTP_DESCRIPTION' | translate }}
           </p>
 
           <div class="lcars-form-group">
-            <label for="totpCode">Verification Code</label>
+            <label for="totpCode">{{ 'TWO_FACTOR_LOGIN.CODE_LABEL' | translate }}</label>
             <input
               type="text"
               id="totpCode"
@@ -74,7 +75,7 @@ type TwoFactorMethod = 'totp' | 'email' | 'recovery';
                 [(ngModel)]="rememberMachine"
                 name="rememberMachine"
                 [disabled]="submitting" />
-              <span class="lcars-checkbox__label">Remember this machine</span>
+              <span class="lcars-checkbox__label">{{ 'TWO_FACTOR_LOGIN.REMEMBER_MACHINE' | translate }}</span>
             </label>
           </div>
 
@@ -83,7 +84,7 @@ type TwoFactorMethod = 'totp' | 'email' | 'recovery';
               type="submit"
               class="lcars-button-primary"
               [disabled]="submitting || totpCode.length < 6">
-              {{ submitting ? 'Verifying...' : 'Verify' }}
+              {{ (submitting ? 'COMMON.VERIFYING' : 'COMMON.VERIFY') | translate }}
             </button>
           </div>
         </form>
@@ -91,7 +92,7 @@ type TwoFactorMethod = 'totp' | 'email' | 'recovery';
         <!-- Email Method -->
         <form *ngIf="activeMethod === 'email'" (ngSubmit)="onSubmitEmail()">
           <p class="method-description">
-            We'll send a verification code to your email address.
+            {{ 'TWO_FACTOR_LOGIN.EMAIL_DESCRIPTION' | translate }}
           </p>
 
           <div *ngIf="!emailSent" class="lcars-actions">
@@ -100,17 +101,17 @@ type TwoFactorMethod = 'totp' | 'email' | 'recovery';
               class="lcars-button-primary"
               [disabled]="sendingEmail"
               (click)="sendEmailCode()">
-              {{ sendingEmail ? 'Sending...' : 'Send Code' }}
+              {{ (sendingEmail ? 'COMMON.SENDING' : 'COMMON.SEND_CODE') | translate }}
             </button>
           </div>
 
           <ng-container *ngIf="emailSent">
             <div class="success-message">
-              Code sent! Check your email.
+              {{ 'TWO_FACTOR_LOGIN.EMAIL_SENT' | translate }}
             </div>
 
             <div class="lcars-form-group">
-              <label for="emailCode">Email Code</label>
+              <label for="emailCode">{{ 'TWO_FACTOR_LOGIN.EMAIL_CODE_LABEL' | translate }}</label>
               <input
                 type="text"
                 id="emailCode"
@@ -129,7 +130,7 @@ type TwoFactorMethod = 'totp' | 'email' | 'recovery';
                   [(ngModel)]="rememberMachine"
                   name="rememberMachineEmail"
                   [disabled]="submitting" />
-                <span class="lcars-checkbox__label">Remember this machine</span>
+                <span class="lcars-checkbox__label">{{ 'TWO_FACTOR_LOGIN.REMEMBER_MACHINE' | translate }}</span>
               </label>
             </div>
 
@@ -138,14 +139,14 @@ type TwoFactorMethod = 'totp' | 'email' | 'recovery';
                 type="submit"
                 class="lcars-button-primary"
                 [disabled]="submitting || emailCode.length < 6">
-                {{ submitting ? 'Verifying...' : 'Verify' }}
+                {{ (submitting ? 'COMMON.VERIFYING' : 'COMMON.VERIFY') | translate }}
               </button>
               <button
                 type="button"
                 class="lcars-button-outline"
                 [disabled]="sendingEmail"
                 (click)="sendEmailCode()">
-                Resend Code
+                {{ 'TWO_FACTOR_LOGIN.RESEND_CODE' | translate }}
               </button>
             </div>
           </ng-container>
@@ -157,11 +158,11 @@ type TwoFactorMethod = 'totp' | 'email' | 'recovery';
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
               <path d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/>
             </svg>
-            <p>Recovery codes are single-use. Once used, the code will be invalidated.</p>
+            <p>{{ 'TWO_FACTOR_LOGIN.RECOVERY_WARNING' | translate }}</p>
           </div>
 
           <div class="lcars-form-group">
-            <label for="recoveryCode">Recovery Code</label>
+            <label for="recoveryCode">{{ 'TWO_FACTOR_LOGIN.RECOVERY_CODE_LABEL' | translate }}</label>
             <input
               type="text"
               id="recoveryCode"
@@ -177,7 +178,7 @@ type TwoFactorMethod = 'totp' | 'email' | 'recovery';
               type="submit"
               class="lcars-button-primary"
               [disabled]="submitting || recoveryCode.length < 8">
-              {{ submitting ? 'Verifying...' : 'Use Recovery Code' }}
+              {{ (submitting ? 'COMMON.VERIFYING' : 'TWO_FACTOR_LOGIN.USE_RECOVERY_CODE') | translate }}
             </button>
           </div>
         </form>
@@ -185,7 +186,7 @@ type TwoFactorMethod = 'totp' | 'email' | 'recovery';
         <!-- Back to Login -->
         <div class="back-link">
           <a [routerLink]="['..', 'login']" [queryParams]="{ ReturnUrl: returnUrl }">
-            Back to Login
+            {{ 'COMMON.BACK_TO_LOGIN' | translate }}
           </a>
         </div>
       </app-lcars-panel>
@@ -198,6 +199,7 @@ export class TwoFactorLoginComponent implements OnInit {
   private route = inject(ActivatedRoute);
   private router = inject(Router);
   private authApi = inject(AuthApiService);
+  private translate = inject(TranslateService);
 
   // State
   submitting = false;
@@ -270,12 +272,12 @@ export class TwoFactorLoginComponent implements OnInit {
         if (result.success) {
           this.emailSent = true;
         } else {
-          this.errorMessage = result.errorMessage || 'Failed to send email';
+          this.errorMessage = result.errorMessage || this.translate.instant('TWO_FACTOR_LOGIN.ERROR_SEND_EMAIL');
         }
       },
       error: (error) => {
         this.sendingEmail = false;
-        this.errorMessage = error.error?.message || 'Failed to send email';
+        this.errorMessage = error.error?.message || this.translate.instant('TWO_FACTOR_LOGIN.ERROR_SEND_EMAIL');
       }
     });
   }
@@ -318,12 +320,12 @@ export class TwoFactorLoginComponent implements OnInit {
         this.router.navigate(['/', this.tenantId, 'manage']);
       }
     } else {
-      this.errorMessage = result.errorMessage || 'Verification failed';
+      this.errorMessage = result.errorMessage || this.translate.instant('TWO_FACTOR_LOGIN.ERROR_VERIFICATION_FAILED');
     }
   }
 
   private handleError(error: any): void {
     this.submitting = false;
-    this.errorMessage = error.error?.message || 'An error occurred';
+    this.errorMessage = error.error?.message || this.translate.instant('COMMON.ERROR_GENERIC');
   }
 }

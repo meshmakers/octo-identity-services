@@ -1,4 +1,5 @@
 using IdentityServices.IntegrationTests.Configuration;
+using IdentityServices.IntegrationTests.Helpers;
 using Meshmakers.Octo.Runtime.Contracts.MongoDb.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 
@@ -26,6 +27,9 @@ public class DatabaseFixture : ConfigurationFixture
         var databaseHost = await SharedMongoDbContainer.GetHostAsync(_options);
         Console.WriteLine(
             $"[Testcontainers] {GetType().Name} uses MongoDB at {databaseHost}, database '{SystemDatabaseName}'");
+
+        // AB#5160: transactionLifetimeLimitSeconds is raised once by SharedMongoDbContainer, right
+        // after the shared server starts and before any fixture writes to it.
 
         // Configure services with the test container connections
         Services.Configure<OctoSystemConfiguration>(t =>

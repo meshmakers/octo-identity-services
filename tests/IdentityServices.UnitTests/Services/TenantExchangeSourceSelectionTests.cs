@@ -1,14 +1,14 @@
-using Duende.IdentityServer.Stores;
 using FluentAssertions;
 using IdentityServerPersistence.Configuration.Options;
 using IdentityServerPersistence.Services;
 using IdentityServerPersistence.SystemStores;
-using Meshmakers.Octo.Backend.IdentityServices.Services;
+using Meshmakers.Octo.Backend.IdentityServices.OpenIddict;
 using Meshmakers.Octo.ConstructionKit.Contracts;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using NSubstitute;
+using OpenIddict.Server;
 using Persistence.IdentityCkModel.Generated.System.Identity.v2;
 using Xunit;
 
@@ -39,26 +39,25 @@ public class TenantExchangeSourceSelectionTests
     private readonly IExternalTenantUserMappingStore _mappingStore =
         Substitute.For<IExternalTenantUserMappingStore>();
 
-    private readonly TenantExchangeGrantValidator _sut;
+    private readonly TenantExchangeProcessor _sut;
 
     public TenantExchangeSourceSelectionTests()
     {
         var options = Options.Create(new OctoIdentityServicesOptions
         {
             AuthorityUrl = "https://identity.example.com/",
-            IdentityServerLicenseKey = string.Empty,
             AutoMapperLicenseKey = string.Empty
         });
 
-        _sut = new TenantExchangeGrantValidator(
-            Substitute.For<IValidationKeysStore>(),
+        _sut = new TenantExchangeProcessor(
+            Substitute.For<IOptionsMonitor<OpenIddictServerOptions>>(),
             options,
             _crossTenantAuth,
             Substitute.For<ICrossTenantUserProvisioningService>(),
             _mappingStore,
             Substitute.For<IHttpContextAccessor>(),
-            Substitute.For<Duende.IdentityServer.Services.IEventService>(),
-            Substitute.For<ILogger<TenantExchangeGrantValidator>>());
+            Substitute.For<IIdentityAuditService>(),
+            Substitute.For<ILogger<TenantExchangeProcessor>>());
     }
 
     private static CrossTenantAuthResult ResultFor(string tenantId, string userId) => new()

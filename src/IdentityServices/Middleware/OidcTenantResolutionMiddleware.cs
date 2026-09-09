@@ -2,6 +2,7 @@ using System.Collections.Concurrent;
 using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
+using Meshmakers.Octo.Backend.IdentityServices.Services;
 using Meshmakers.Octo.Runtime.Contracts.MongoDb;
 using Meshmakers.Octo.Runtime.Contracts.MongoDb.Configuration;
 using Meshmakers.Octo.Services.Infrastructure;
@@ -32,7 +33,7 @@ namespace Meshmakers.Octo.Backend.IdentityServices.Middleware;
 /// </para>
 /// <para>
 /// This middleware must run <b>after</b> routing (so route values are available) and <b>before</b>
-/// <c>UseIdentityServer()</c> (which triggers authentication).
+/// <c>UseAuthentication()</c> and the OpenIddict server middleware (which trigger authentication).
 /// </para>
 /// </remarks>
 internal class OidcTenantResolutionMiddleware(
@@ -53,14 +54,14 @@ internal class OidcTenantResolutionMiddleware(
 
     /// <summary>
     /// Lifetime of a PAR <c>request_uri</c> → tenant mapping. PAR request_uris are short-lived
-    /// (typically 60–90 seconds in Duende IdentityServer), so a 5-minute window safely covers the
+    /// (bounded by OpenIddict's authorization-code lifetime, minutes at most), so a 5-minute window safely covers the
     /// time between <c>/connect/par</c> and the follow-up <c>/connect/authorize?request_uri=...</c>.
     /// </summary>
     private static readonly TimeSpan ParRequestUriEntryLifetime = TimeSpan.FromMinutes(5);
 
     /// <summary>
     /// Matches the authorization code from an HTML form_post response body.
-    /// IdentityServer returns <c>&lt;input type='hidden' name='code' value='...' /&gt;</c>.
+    /// OpenIddict returns <c>&lt;input type='hidden' name='code' value='...' /&gt;</c>.
     /// </summary>
     private static readonly Regex FormPostCodePattern = new(
         @"name=[""']code[""']\s+value=[""']([^""']+)[""']",
@@ -244,6 +245,14 @@ internal class OidcTenantResolutionMiddleware(
         {
             tenantId = await ExtractTenantFromFormAcrValuesAsync(context);
         }
+        else if (path.StartsWith("/connect/deviceverification", StringComparison.OrdinalIgnoreCase))
+        {
+            // AB#4993: the device verification endpoint has no tenant route segment — resolve
+            // the tenant from the user_code → tenant mapping captured on the device
+            // authorization response, so the tenant-scoped session cookie and the per-tenant
+            // user/role stores are wired correctly.
+            tenantId = await ResolveTenantFromUserCodeAsync(context);
+        }
         else if (path.StartsWith("/connect/token", StringComparison.OrdinalIgnoreCase))
         {
             tenantId = await ResolveTenantFromTokenRequestAsync(context);
@@ -281,9 +290,9 @@ internal class OidcTenantResolutionMiddleware(
 
     /// <summary>
     /// Captures the authorization code from the authorize response and maps it to the tenant ID.
-    /// Supports both redirects (<c>response_mode=query</c>, code in Location header — Duende 7 emits
-    /// 302 Found, Duende 8 emits 303 See Other) and 200 HTML responses (<c>response_mode=form_post</c>,
-    /// code in hidden form field).
+    /// Supports both redirects (<c>response_mode=query</c>, code in Location header — OpenIddict emits
+    /// 302 Found or 303 See Other depending on response mode/handler) and 200 HTML responses
+    /// (<c>response_mode=form_post</c>, code in hidden form field).
     /// </summary>
     private void CaptureAuthorizationCode(HttpContext context, MemoryStream responseBody, string tenantId)
     {
@@ -316,7 +325,42 @@ internal class OidcTenantResolutionMiddleware(
     /// Resolves the tenant for a <c>/connect/token</c> request by reading the authorization code
     /// or refresh token from the form body and looking up the captured tenant mapping.
     /// </summary>
-    private async Task<string?> ResolveTenantFromTokenRequestAsync(HttpContext context)
+    /// <summary>
+    /// Resolves the tenant for <c>/connect/deviceverification</c> from the <c>user_code</c>
+    /// (query on GET, form body on POST) captured on the device authorization response (AB#4993).
+    /// </summary>
+    private async Task<string?> ResolveTenantFromUserCodeAsync(HttpContext context)
+    {
+        var userCode = context.Request.Query["user_code"].FirstOrDefault();
+
+        if (string.IsNullOrEmpty(userCode) && context.Request.HasFormContentType)
+        {
+            context.Request.EnableBuffering();
+            try
+            {
+                var form = await context.Request.ReadFormAsync();
+                userCode = form["user_code"].FirstOrDefault();
+            }
+            finally
+            {
+                context.Request.Body.Position = 0;
+            }
+        }
+
+        if (!string.IsNullOrEmpty(userCode) &&
+            TokenToTenantMap.TryGetValue($"usercode:{userCode}", out var entry))
+        {
+            logger.LogDebug("Resolved tenant '{TenantId}' from user code for /connect/deviceverification",
+                entry.TenantId);
+            return entry.TenantId;
+        }
+
+        logger.LogWarning(
+            "No tenant mapping found for user code on /connect/deviceverification — falling back to system tenant");
+        return null;
+    }
+
+    internal async Task<string?> ResolveTenantFromTokenRequestAsync(HttpContext context)
     {
         context.Request.EnableBuffering();
 
@@ -388,6 +432,51 @@ internal class OidcTenantResolutionMiddleware(
 
                 logger.LogWarning(
                     "No acr_values on /connect/token for token-exchange — token exchange will be rejected (no target tenant)");
+            }
+            else if (string.Equals(grantType, DelegationConstants.OnBehalfOfGrantType, StringComparison.Ordinal))
+            {
+                // Delegation / on-behalf-of (AB#5026): the tenant is specified via
+                // acr_values=tenant:{tenantId} in the form body, exactly like client_credentials and
+                // token-exchange. This branch is MANDATORY, not cosmetic: without it an unknown
+                // grant type falls through to `return null`, no tenant is wired into
+                // HttpContext.Items, and every per-tenant store — the client store resolving the
+                // service account, the user store resolving the subject, and both role stores —
+                // silently reads the SYSTEM tenant instead of the requested one, producing an
+                // intersection over the wrong catalogues entirely. OnBehalfOfGrantValidator
+                // additionally asserts the resolved tenant equals the requested one and fails closed.
+                var acrTenantId = ParseTenantFromAcrValues(form["acr_values"].ToString());
+                if (!string.IsNullOrEmpty(acrTenantId))
+                {
+                    logger.LogDebug(
+                        "Resolved tenant '{TenantId}' from acr_values for on-behalf-of on /connect/token",
+                        acrTenantId);
+                    return acrTenantId;
+                }
+
+                logger.LogWarning(
+                    "No acr_values on /connect/token for on-behalf-of — delegation will be rejected (no target tenant)");
+            }
+            else if (string.Equals(grantType, ImpersonationConstants.ImpersonationGrantType,
+                         StringComparison.Ordinal))
+            {
+                // Impersonation (AB#5114): the tenant is specified via acr_values=tenant:{tenantId}
+                // in the form body, exactly like client_credentials and on-behalf-of. As with the
+                // delegation branch above, this is MANDATORY: without it the request falls through
+                // to `return null`, no tenant is wired into HttpContext.Items, and the client
+                // lookups plus the MayActAs edge check silently run against the SYSTEM tenant.
+                // ImpersonationProcessor additionally asserts the resolved tenant equals the
+                // requested one and fails closed.
+                var acrTenantId = ParseTenantFromAcrValues(form["acr_values"].ToString());
+                if (!string.IsNullOrEmpty(acrTenantId))
+                {
+                    logger.LogDebug(
+                        "Resolved tenant '{TenantId}' from acr_values for impersonation on /connect/token",
+                        acrTenantId);
+                    return acrTenantId;
+                }
+
+                logger.LogWarning(
+                    "No acr_values on /connect/token for impersonation — impersonation will be rejected (no target tenant)");
             }
             else if (string.Equals(grantType, "refresh_token", StringComparison.Ordinal))
             {
@@ -492,7 +581,7 @@ internal class OidcTenantResolutionMiddleware(
 
     /// <summary>
     /// Extracts the <c>code</c> value from an OAuth2 <c>response_mode=form_post</c> HTML response body.
-    /// IdentityServer returns an HTML page with a self-submitting form containing hidden fields
+    /// OpenIddict returns an HTML page with a self-submitting form containing hidden fields
     /// such as <c>&lt;input type='hidden' name='code' value='...' /&gt;</c>.
     /// </summary>
     internal static string? ExtractCodeFromFormPostBody(MemoryStream responseBody)
@@ -690,7 +779,7 @@ internal class OidcTenantResolutionMiddleware(
 
     /// <summary>
     /// Extracts the <c>tenant_id</c> claim from the JWT payload without signature verification.
-    /// The token has already been validated by IdentityServer when it was issued; we only need
+    /// The token has already been validated by OpenIddict when it was issued; we only need
     /// the tenant routing hint.
     /// </summary>
     internal static string? ExtractTenantFromJwtPayload(string jwt)
@@ -751,6 +840,20 @@ internal class OidcTenantResolutionMiddleware(
                     CleanupExpiredEntries();
                 }
             }
+
+            // AB#4993: the user code is submitted to /connect/deviceverification, which has no
+            // tenant route segment — capture user_code → tenant so the verification request can
+            // resolve the tenant (cookie scoping + per-tenant user/role stores).
+            if (doc.RootElement.TryGetProperty("user_code", out var userCodeElement))
+            {
+                var userCode = userCodeElement.GetString();
+                if (!string.IsNullOrEmpty(userCode))
+                {
+                    TokenToTenantMap[$"usercode:{userCode}"] =
+                        (tenantId, DateTime.UtcNow.Add(AuthCodeEntryLifetime));
+                    logger.LogDebug("Captured user code → tenant '{TenantId}' mapping", tenantId);
+                }
+            }
         }
         catch (Exception ex)
         {
@@ -770,6 +873,21 @@ internal class OidcTenantResolutionMiddleware(
             var systemTenantId = octoSystemConfiguration.Value.SystemTenantId;
             var systemPath = $"/{systemTenantId}/device";
             var tenantPath = $"/{tenantId}/device";
+
+            // OpenIddict (AB#4993) advertises its fixed end-user verification endpoint; the human
+            // UI is the Angular device page, so point verification_uri(_complete) there and
+            // translate the query parameter to the SPA's userCode convention.
+            const string openIddictVerificationPath = "/connect/deviceverification";
+            if (json.Contains(openIddictVerificationPath, StringComparison.OrdinalIgnoreCase))
+            {
+                var rewrittenJson = json
+                    .Replace(openIddictVerificationPath, tenantPath, StringComparison.OrdinalIgnoreCase)
+                    .Replace("user_code=", "userCode=", StringComparison.Ordinal);
+                logger.LogDebug(
+                    "Rewrote device verification URLs from '{VerificationPath}' to '{TenantPath}'",
+                    openIddictVerificationPath, tenantPath);
+                return Encoding.UTF8.GetBytes(rewrittenJson);
+            }
 
             if (!json.Contains(systemPath, StringComparison.OrdinalIgnoreCase))
             {

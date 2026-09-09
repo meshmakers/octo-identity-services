@@ -10,8 +10,6 @@ public class TenantCookieManagerTests
 {
     [Theory]
     [InlineData(".AspNetCore.Identity.Application")]
-    [InlineData("idsrv")]
-    [InlineData("idsrv.session")]
     public void ResolveScopedKey_WithTenantAndScopedCookie_AppendsTenantSuffix(string cookieName)
     {
         var context = new DefaultHttpContext();
@@ -26,6 +24,9 @@ public class TenantCookieManagerTests
     [InlineData(".AspNetCore.Identity.External")]
     [InlineData(".AspNetCore.Identity.TwoFactorUserId")]
     [InlineData(".AspNetCore.Identity.TwoFactorRememberMe")]
+    // The pre-migration idsrv cookies no longer exist since the OpenIddict swap (AB#4996)
+    [InlineData("idsrv")]
+    [InlineData("idsrv.session")]
     [InlineData("some-other-cookie")]
     public void ResolveScopedKey_WithUnscopedCookie_ReturnsOriginalKey(string cookieName)
     {
@@ -77,9 +78,9 @@ public class TenantCookieManagerTests
         context.Items[InfrastructureCommon.TenantIdName] = "sbeg";
 
         // The HashSet uses OrdinalIgnoreCase
-        var result = TenantCookieManager.ResolveScopedKey(context, "IDSRV");
+        var result = TenantCookieManager.ResolveScopedKey(context, ".ASPNETCORE.IDENTITY.APPLICATION");
 
-        result.Should().Be("IDSRV.sbeg");
+        result.Should().Be(".ASPNETCORE.IDENTITY.APPLICATION.sbeg");
     }
 
     [Fact]

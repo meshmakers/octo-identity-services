@@ -2,6 +2,7 @@ import { Component, OnInit, inject, ChangeDetectionStrategy } from '@angular/cor
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { Router, ActivatedRoute } from '@angular/router';
+import { TranslatePipe, TranslateService } from '@ngx-translate/core';
 import { LcarsPanelComponent } from '../../../shared/components/lcars-panel/lcars-panel.component';
 import { LcarsHeaderComponent } from '../../../shared/components/lcars-header/lcars-header.component';
 import { ManageApiService } from '../../../core/services/manage-api.service';
@@ -10,15 +11,15 @@ import { AuthenticatorSetup } from '../../../core/models/manage.models';
 @Component({
   selector: 'app-authenticator-setup',
   standalone: true,
-  imports: [CommonModule, FormsModule, LcarsPanelComponent, LcarsHeaderComponent],
+  imports: [CommonModule, FormsModule, TranslatePipe, LcarsPanelComponent, LcarsHeaderComponent],
   template: `
     <div class="lcars-auth-container">
       <app-lcars-panel [variant]="setupComplete ? 'success' : 'default'">
-        <app-lcars-header subtitle="Setup Authenticator App"></app-lcars-header>
+        <app-lcars-header [subtitle]="'AUTHENTICATOR_SETUP.SUBTITLE' | translate"></app-lcars-header>
 
         <div *ngIf="loading" class="lcars-loading">
           <div class="lcars-loading__spinner"></div>
-          <span class="lcars-loading__text">Setting up</span>
+          <span class="lcars-loading__text">{{ 'AUTHENTICATOR_SETUP.SETTING_UP' | translate }}</span>
         </div>
 
         <!-- Setup Complete - Show Recovery Codes -->
@@ -29,13 +30,12 @@ import { AuthenticatorSetup } from '../../../core/models/manage.models';
               <polyline points="22 4 12 14.01 9 11.01"></polyline>
             </svg>
           </div>
-          <p class="success-message">Two-Factor Authentication is now enabled!</p>
+          <p class="success-message">{{ 'AUTHENTICATOR_SETUP.ENABLED_MESSAGE' | translate }}</p>
 
           <div class="recovery-codes-section">
-            <h3 class="section-title">Recovery Codes</h3>
+            <h3 class="section-title">{{ 'AUTHENTICATOR_SETUP.RECOVERY_TITLE' | translate }}</h3>
             <p class="warning-text">
-              Save these recovery codes in a secure location.
-              You will only see them once!
+              {{ 'AUTHENTICATOR_SETUP.RECOVERY_WARNING' | translate }}
             </p>
 
             <div class="recovery-codes">
@@ -43,12 +43,12 @@ import { AuthenticatorSetup } from '../../../core/models/manage.models';
             </div>
 
             <button type="button" class="lcars-button-outline copy-button" (click)="copyRecoveryCodes()">
-              {{ copied ? 'Copied!' : 'Copy Codes' }}
+              {{ (copied ? 'AUTHENTICATOR_SETUP.COPIED' : 'AUTHENTICATOR_SETUP.COPY_CODES') | translate }}
             </button>
           </div>
 
           <button type="button" class="lcars-button-primary" (click)="goToStatus()">
-            Done
+            {{ 'AUTHENTICATOR_SETUP.DONE' | translate }}
           </button>
         </div>
 
@@ -56,24 +56,24 @@ import { AuthenticatorSetup } from '../../../core/models/manage.models';
         <ng-container *ngIf="!loading && !setupComplete && setup">
           <div class="setup-instructions">
             <p class="instruction-text">
-              Scan this QR code with your authenticator app (like Google Authenticator, Authy, or Microsoft Authenticator).
+              {{ 'AUTHENTICATOR_SETUP.SCAN_INSTRUCTIONS' | translate }}
             </p>
           </div>
 
           <div class="qr-section">
             <div class="qr-code">
-              <img [src]="'data:image/png;base64,' + setup.qrCodeImage" alt="QR Code for Authenticator App" />
+              <img [src]="'data:image/png;base64,' + setup.qrCodeImage" [alt]="'AUTHENTICATOR_SETUP.QR_ALT' | translate" />
             </div>
           </div>
 
           <div class="manual-section">
             <p class="manual-text">
-              Can't scan the QR code? Enter this key manually:
+              {{ 'AUTHENTICATOR_SETUP.MANUAL_TEXT' | translate }}
             </p>
             <div class="shared-key">
               <code>{{ setup.sharedKey }}</code>
               <button type="button" class="copy-key-button" (click)="copySharedKey()">
-                {{ keyCopied ? 'Copied!' : 'Copy' }}
+                {{ (keyCopied ? 'AUTHENTICATOR_SETUP.COPIED' : 'AUTHENTICATOR_SETUP.COPY') | translate }}
               </button>
             </div>
           </div>
@@ -84,7 +84,7 @@ import { AuthenticatorSetup } from '../../../core/models/manage.models';
             </div>
 
             <div class="lcars-form-group">
-              <label for="verificationCode">Enter the 6-digit code from your app</label>
+              <label for="verificationCode">{{ 'AUTHENTICATOR_SETUP.CODE_LABEL' | translate }}</label>
               <input
                 type="text"
                 id="verificationCode"
@@ -101,17 +101,17 @@ import { AuthenticatorSetup } from '../../../core/models/manage.models';
                 type="submit"
                 class="lcars-button-primary"
                 [disabled]="submitting || verificationCode.length < 6">
-                {{ submitting ? 'Verifying...' : 'Verify and Enable' }}
+                {{ (submitting ? 'COMMON.VERIFYING' : 'AUTHENTICATOR_SETUP.VERIFY_ENABLE') | translate }}
               </button>
               <button type="button" class="lcars-button-outline" (click)="goToStatus()" [disabled]="submitting">
-                Cancel
+                {{ 'COMMON.CANCEL' | translate }}
               </button>
             </div>
           </form>
         </ng-container>
 
         <div *ngIf="!loading && !setup && !setupComplete" class="lcars-error-message">
-          Failed to setup authenticator. Please try again.
+          {{ 'AUTHENTICATOR_SETUP.ERROR_SETUP' | translate }}
         </div>
       </app-lcars-panel>
     </div>
@@ -123,6 +123,7 @@ export class AuthenticatorSetupComponent implements OnInit {
   private manageApi = inject(ManageApiService);
   private router = inject(Router);
   private route = inject(ActivatedRoute);
+  private translate = inject(TranslateService);
 
   loading = true;
   submitting = false;
@@ -162,12 +163,12 @@ export class AuthenticatorSetupComponent implements OnInit {
           this.recoveryCodes = result.recoveryCodes;
           this.setupComplete = true;
         } else {
-          this.errorMessage = result.errorMessage || 'Invalid verification code';
+          this.errorMessage = result.errorMessage || this.translate.instant('AUTHENTICATOR_SETUP.ERROR_INVALID_CODE');
         }
       },
       error: (error) => {
         this.submitting = false;
-        this.errorMessage = error.error?.message || 'An error occurred';
+        this.errorMessage = error.error?.message || this.translate.instant('COMMON.ERROR_GENERIC');
       }
     });
   }

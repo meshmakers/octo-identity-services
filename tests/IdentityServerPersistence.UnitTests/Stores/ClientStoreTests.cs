@@ -35,7 +35,7 @@ public class ClientStoreTests
 
         _multiTenancyResolver.GetTenantRepository().Returns(_tenantRepository);
 
-        _sut = new ClientStore(_multiTenancyResolver, _mapper);
+        _sut = new ClientStore(_multiTenancyResolver);
     }
 
     [Fact]
@@ -99,10 +99,9 @@ public class ClientStoreTests
     {
         // Arrange — set up resolver to return different repos on successive calls
         var resolver = Substitute.For<IMultiTenancyResolverService>();
-        var mapper = Substitute.For<IMapper>();
 
         // Constructor should NOT call GetTenantRepository
-        var store = new ClientStore(resolver, mapper);
+        var store = new ClientStore(resolver);
         resolver.DidNotReceive().GetTenantRepository();
 
         // Act — accessing TenantId triggers lazy resolution
@@ -122,7 +121,6 @@ public class ClientStoreTests
     {
         // Arrange — simulate tenant switching between constructor and method call
         var resolver = Substitute.For<IMultiTenancyResolverService>();
-        var mapper = Substitute.For<IMapper>();
 
         var tenantARepo = Substitute.For<ITenantRepository>();
         tenantARepo.TenantId.Returns("tenant-a");
@@ -132,7 +130,7 @@ public class ClientStoreTests
         // Resolver returns tenant-a at method call time
         resolver.GetTenantRepository().Returns(tenantARepo);
 
-        var store = new ClientStore(resolver, mapper);
+        var store = new ClientStore(resolver);
         var client = new RtClientBuilder().WithClientId("test").Build();
 
         // Act

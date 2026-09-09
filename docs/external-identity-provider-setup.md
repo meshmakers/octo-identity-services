@@ -77,12 +77,17 @@ octo-cli -c AddOAuthIdentityProvider \
   -t microsoft
 ```
 
-Or use the provided PowerShell script (after editing with your credentials):
+Or use the provided PowerShell script. Credentials are read from
+`scripts/secrets.local.json` (gitignored) — copy `scripts/secrets.local.json.template`
+and fill in the provider section, then run:
 
 ```powershell
-# scripts/om_idprov_add_microsoft.ps1
-octo-cli -c AddOAuthIdentityProvider -n "Microsoft" -e true --clientId "YOUR_CLIENT_ID" --clientSecret "YOUR_CLIENT_SECRET" -t microsoft
+./scripts/om_idprov_add_microsoft.ps1                          # active octo-cli context
+./scripts/om_idprov_add_microsoft.ps1 -context local_salzburgdev
 ```
+
+The same pattern applies to `om_idprov_add_google.ps1`, `om_idprov_add_entra.ps1`
+and `om_idprov_add_facebook.ps1`.
 
 ### Step 6: Configure Redirect URIs for Production
 
@@ -229,7 +234,7 @@ Azure Entra ID (formerly Azure Active Directory) provides enterprise authenticat
 |-------|-------|
 | **Name** | Choose a descriptive name |
 | **Supported account types** | Select based on your needs (single tenant or multi-tenant) |
-| **Redirect URI** | Platform: **Web**, URI: `https://localhost:5003/signin-oidc` |
+| **Redirect URI** | Platform: **Web**, URI: `https://localhost:5003/auth/signin-callback` (set by `AzureEntraIdAuthSchemeCreator`) |
 
 4. Click **"Register"**
 
@@ -325,7 +330,7 @@ AADSTS700016: Application with identifier 'xxx' was not found in the directory
 | Microsoft Account | `/signin-microsoft` |
 | Google | `/signin-google` |
 | Facebook | `/signin-facebook` |
-| Azure Entra ID | `/signin-oidc` |
+| Azure Entra ID | `/auth/signin-callback` |
 
 **Full URL Format:** `https://{your-domain}/{signin-path}`
 
@@ -349,6 +354,12 @@ Setup scripts are located in `/scripts/`:
 |--------|-------------|
 | `om_idprov_add_google.ps1` | Add Google identity provider |
 | `om_idprov_add_microsoft.ps1` | Add Microsoft Account identity provider |
+| `om_idprov_add_entra.ps1` | Add Azure Entra ID identity provider |
 | `om_idprov_add_facebook.ps1` | Add Facebook identity provider |
+| `om_idprov_add_ldap.ps1` | Add OpenLDAP identity provider (no credentials needed) |
+| `om_idprov_add_ad.ps1` | Add Microsoft AD identity provider (no credentials needed) |
 
-Edit these scripts with your credentials before running.
+The OAuth scripts read their credentials from `scripts/secrets.local.json`
+(gitignored). Copy `scripts/secrets.local.json.template`, fill in the sections
+you need, and run the script — optionally with `-context <name>` to target a
+specific octo-cli context. Never commit `secrets.local.json`.

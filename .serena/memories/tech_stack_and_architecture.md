@@ -3,7 +3,7 @@
 ## Tech Stack
 - **.NET Version**: 9.0
 - **Framework**: ASP.NET Core
-- **Identity Server**: Duende IdentityServer 7.3.2
+- **OAuth2/OIDC Server**: OpenIddict 7.6
 - **Database**: MongoDB
 - **Code Generation**: Construction Kit (CK) - YAML-based source generation
 - **Language**: C# (Latest major version)
@@ -22,7 +22,7 @@ src/
 ├── Authentication/                # Reusable authentication library (Razor SDK)
 │   ├── DynamicAuth/               # Pluggable auth provider framework
 │   └── Providers/                 # Google, Microsoft, Azure, LDAP, AD, Facebook
-├── IdentityServerPersistence/     # Duende IdentityServer store implementations
+├── IdentityServerPersistence/     # Identity persistence stores (OpenIddict + ASP.NET Identity over CK entities)
 │   └── SystemStores/              # MongoDB-backed stores for clients, resources, etc.
 ├── Persistence.IdentityCkModel/   # Construction Kit model definitions
 │   └── ConstructionKit/           # YAML model definitions (source generation)

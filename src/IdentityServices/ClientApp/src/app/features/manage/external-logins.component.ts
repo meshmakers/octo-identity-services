@@ -1,6 +1,7 @@
 import { Component, OnInit, inject, ChangeDetectionStrategy } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { Router, ActivatedRoute } from '@angular/router';
+import { TranslatePipe, TranslateService } from '@ngx-translate/core';
 import { LcarsPanelComponent } from '../../shared/components/lcars-panel/lcars-panel.component';
 import { LcarsHeaderComponent } from '../../shared/components/lcars-header/lcars-header.component';
 import { ExternalProviderButtonComponent } from '../../shared/components/external-provider-button/external-provider-button.component';
@@ -13,6 +14,7 @@ import { ExternalProvider } from '../../core/models/login.models';
   standalone: true,
   imports: [
     CommonModule,
+    TranslatePipe,
     LcarsPanelComponent,
     LcarsHeaderComponent,
     ExternalProviderButtonComponent
@@ -21,12 +23,12 @@ import { ExternalProvider } from '../../core/models/login.models';
     <div class="lcars-auth-container">
       <app-lcars-panel>
         <app-lcars-header
-          subtitle="External Logins">
+          [subtitle]="'EXTERNAL_LOGINS.SUBTITLE' | translate">
         </app-lcars-header>
 
         <div *ngIf="loading" class="lcars-loading">
           <div class="lcars-loading__spinner"></div>
-          <span class="lcars-loading__text">Loading</span>
+          <span class="lcars-loading__text">{{ 'COMMON.LOADING' | translate }}</span>
         </div>
 
         <ng-container *ngIf="!loading">
@@ -40,10 +42,10 @@ import { ExternalProvider } from '../../core/models/login.models';
 
           <!-- Connected Logins -->
           <div class="logins-section">
-            <h3 class="section-title">Connected Accounts</h3>
+            <h3 class="section-title">{{ 'EXTERNAL_LOGINS.CONNECTED_ACCOUNTS' | translate }}</h3>
 
             <div *ngIf="logins.length === 0" class="empty-state">
-              No external accounts connected.
+              {{ 'EXTERNAL_LOGINS.EMPTY' | translate }}
             </div>
 
             <div *ngFor="let login of logins" class="login-item">
@@ -56,14 +58,14 @@ import { ExternalProvider } from '../../core/models/login.models';
                 class="lcars-button-flat-error"
                 (click)="removeLogin(login)"
                 [disabled]="removingLogin === login.providerKey">
-                {{ removingLogin === login.providerKey ? 'Removing...' : 'Remove' }}
+                {{ (removingLogin === login.providerKey ? 'COMMON.REMOVING' : 'COMMON.REMOVE') | translate }}
               </button>
             </div>
           </div>
 
           <!-- Available Providers -->
           <div class="logins-section" *ngIf="availableProviders.length > 0">
-            <h3 class="section-title">Add External Login</h3>
+            <h3 class="section-title">{{ 'EXTERNAL_LOGINS.ADD' | translate }}</h3>
 
             <div class="providers-grid">
               <app-external-provider-button
@@ -76,7 +78,7 @@ import { ExternalProvider } from '../../core/models/login.models';
 
           <div class="lcars-actions">
             <button type="button" class="lcars-button-outline" (click)="goBack()">
-              Back to Profile
+              {{ 'COMMON.BACK_TO_PROFILE' | translate }}
             </button>
           </div>
         </ng-container>
@@ -90,6 +92,7 @@ export class ExternalLoginsComponent implements OnInit {
   private manageApi = inject(ManageApiService);
   private router = inject(Router);
   private route = inject(ActivatedRoute);
+  private translate = inject(TranslateService);
 
   loading = true;
   logins: ExternalLoginInfo[] = [];
@@ -113,7 +116,7 @@ export class ExternalLoginsComponent implements OnInit {
       },
       error: () => {
         this.loading = false;
-        this.errorMessage = 'Failed to load external logins';
+        this.errorMessage = this.translate.instant('EXTERNAL_LOGINS.ERROR_LOAD');
       }
     });
   }
@@ -150,16 +153,16 @@ export class ExternalLoginsComponent implements OnInit {
       next: (result) => {
         this.removingLogin = undefined;
         if (result.success) {
-          this.successMessage = `${login.providerDisplayName} account removed`;
+          this.successMessage = this.translate.instant('EXTERNAL_LOGINS.REMOVED', { provider: login.providerDisplayName });
           this.logins = this.logins.filter(l => l.providerKey !== login.providerKey);
           this.loadAvailableProviders();
         } else {
-          this.errorMessage = result.errorMessage || 'Failed to remove login';
+          this.errorMessage = result.errorMessage || this.translate.instant('EXTERNAL_LOGINS.ERROR_REMOVE');
         }
       },
       error: () => {
         this.removingLogin = undefined;
-        this.errorMessage = 'An error occurred';
+        this.errorMessage = this.translate.instant('COMMON.ERROR_GENERIC');
       }
     });
   }

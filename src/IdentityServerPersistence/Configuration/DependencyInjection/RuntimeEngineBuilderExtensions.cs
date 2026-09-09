@@ -1,10 +1,13 @@
-using Duende.IdentityServer.Models;
 using IdentityServerPersistence.AutoMap;
 using IdentityServerPersistence.Configuration.DependencyInjection;
+using IdentityServerPersistence.Configuration.Options;
 using IdentityServerPersistence.Services;
+using IdentityServerPersistence.Services.Admin;
 using IdentityServerPersistence.Services.Login;
+using IdentityServerPersistence.Services.SelfService;
 using IdentityServerPersistence.SystemStores;
 using Microsoft.AspNetCore.Identity;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 using Meshmakers.Octo.Common.DistributionEventHub.Configuration;
 using Meshmakers.Octo.Communication.Contracts.DataTransferObjects;
 using Meshmakers.Octo.Runtime.Contracts.Blueprints;
@@ -13,6 +16,7 @@ using Meshmakers.Octo.Runtime.Contracts.RepositoryEntities;
 using Meshmakers.Octo.Runtime.Engine.Configuration.DependencyInjection;
 using Meshmakers.Octo.Services.Infrastructure;
 using Meshmakers.Octo.Services.Infrastructure.Services;
+using Microsoft.Extensions.Logging;
 using Persistence.IdentityCkModel.Generated.System.Identity.v2;
 
 // ReSharper disable once CheckNamespace
@@ -65,6 +69,7 @@ public static class RuntimeEngineBuilderExtensions
         builder.Services.AddScoped<IOctoIdentityProviderStore, IdentityProviderStore>();
         builder.Services.AddScoped<IExternalTenantUserMappingStore, ExternalTenantUserMappingStore>();
         builder.Services.AddScoped<IGroupStore, GroupStore>();
+        builder.Services.AddScoped<IDataPermissionStore, DataPermissionStore>();
         builder.Services.AddScoped<IGroupRoleResolver, GroupRoleResolver>();
         builder.Services.AddScoped<IClientRoleStore, ClientRoleStore>();
         builder.Services.AddScoped<ICrossTenantAuthenticationService, CrossTenantAuthenticationService>();
@@ -72,63 +77,76 @@ public static class RuntimeEngineBuilderExtensions
         builder.Services.AddScoped<IAllowedTenantsResolver, AllowedTenantsResolver>();
         builder.Services.AddScoped<IEmailDomainGroupRuleStore, EmailDomainGroupRuleStore>();
         builder.Services.AddScoped<ILoginGroupAssignmentService, LoginGroupAssignmentService>();
+        // AB#5124: auto-provision the (EntraIdObjectId, oid) → user verified-identifier binding on
+        // EntraID login, so the mesh adapter can resolve a Teams sender's AAD object id to this user.
+        builder.Services
+            .AddScoped<IEntraIdVerifiedIdentifierEnrollmentService, EntraIdVerifiedIdentifierEnrollmentService>();
         builder.Services.AddScoped<ITenantDiscoveryService, TenantDiscoveryService>();
         builder.Services.AddScoped<IClientMirrorProvisioningService, ClientMirrorProvisioningService>();
+        // AB#5026 delegation ("on-behalf-of"): the protocol-free policy behind OnBehalfOfProcessor.
+        builder.Services.AddScoped<IDelegatedIdentityResolver, DelegatedIdentityResolver>();
+        // AB#5114 impersonation: the MayActAs edge store and the protocol-free policy behind
+        // ImpersonationProcessor (and the on-behalf-of requested_client_id extension).
+        builder.Services.AddScoped<IClientImpersonationStore, ClientImpersonationStore>();
+        builder.Services.AddScoped<IImpersonatedIdentityResolver, ImpersonatedIdentityResolver>();
+        // AB#5122 verified external identifier directory: resolves a verified external identifier
+        // (phone / e-mail / EntraID oid / cert fingerprint) to a user with two-dimension trust
+        // (effective = min(enrollment, message)). The write side is the seam the sibling enrollment
+        // WIs (AB#5123–5126) call.
+        builder.Services.AddScoped<IVerifiedIdentifierResolver, VerifiedIdentifierResolver>();
+
+        // AB#5125 admin-managed e-mail verified whitelist: a tenant admin binds an e-mail address to a
+        // user (Source = Admin, EnrollmentTrust = Strong) through the AB#5122 directory. The
+        // per-message DKIM/DMARC trust is evaluated on the mesh-adapter ingest side and capped by
+        // min() at the verified-caller directory, so a whitelisted address never authorizes an
+        // elevated operation on a spoofable (no-DKIM) mail.
+        builder.Services.AddScoped<IAdminEmailBindingService, AdminEmailBindingService>();
+
+        // AB#5123 self-service "My identities": the signed-in user manages their OWN strong channel
+        // identifiers (phone via OTP, client certificate) with no admin in the loop, writing into the
+        // AB#5122 directory with Source = SelfService. The OTP challenge is persisted (hashed, with an
+        // expiry + attempt budget) in the existing per-user token store; delivery is abstracted behind
+        // IOtpDeliveryChannel.
+        builder.Services.TryAddSingleton(TimeProvider.System);
+        builder.Services.AddScoped<IOtpChallengeStore, UserTokenOtpChallengeStore>();
+
+        // AB#5134/AB#5154 Signal OTP delivery: SignalRestOtpDeliveryChannel delivers the phone OTP
+        // over the same signal-cli-rest-api bridge the mesh adapter's SignalSender node uses, and
+        // resolves the SENDER per tenant at send time (the number is tenant state, AB#5143/5145):
+        // registered tenant SignalChannel entity → env-bound SignalBridgeOptions fallback →
+        // LoggingOtpDeliveryChannel dev stub (with its loud warning) so dev without any bridge keeps
+        // working. Exactly ONE IOtpDeliveryChannel of Kind=Signal is registered (the OTP service
+        // dispatches by Kind); the stub is no longer registered as an IOtpDeliveryChannel itself but
+        // injected as the channel's unconfigured path. SignalBridgeOptions is bound from the
+        // "SignalBridge" config section in Program.cs (this engine-builder extension has no
+        // IConfiguration; IOptions<> resolves to defaults — ApiUrl empty → tenant channel or stub —
+        // when the section is absent). ISystemContext behind the resolver is a singleton, so the
+        // whole chain is singleton-safe.
+        builder.Services.AddHttpClient(SignalRestOtpDeliveryChannel.HttpClientName);
+        builder.Services.AddSingleton<ITenantSignalChannelResolver, TenantSignalChannelResolver>();
+        builder.Services.AddSingleton<LoggingOtpDeliveryChannel>();
+        builder.Services.AddSingleton<IOtpDeliveryChannel, SignalRestOtpDeliveryChannel>();
+
+        // AB#5135 e-mail OTP delivery: the Email-kind channel reuses identity's existing e-mail
+        // transport (the distribution-event-hub seam the notification / password-reset e-mails publish
+        // onto) — no new SMTP client. Exactly ONE IOtpDeliveryChannel of Kind=Email is registered so
+        // the OTP service's Kind-dispatch resolves it unambiguously.
+        builder.Services.AddSingleton<IOtpDeliveryChannel, NotificationEmailOtpDeliveryChannel>();
+
+        builder.Services.AddScoped<ISelfServiceIdentifierService, SelfServiceIdentifierService>();
+
+        // AB#5149 per-user outbound channel preference (binding-specific): self-service picks the
+        // concrete verified binding the platform messages for system-initiated contact; the channel
+        // kind is derived from the binding (PhoneNumber -> SIGNAL, EntraIdObjectId -> TEAMS).
+        // Stored on RtUser.PreferredChannelBindingId and read by the mesh adapter's verified-caller
+        // lookups.
+        builder.Services.AddScoped<IPreferredChannelService, PreferredChannelService>();
 
         builder.Services.AddSingleton<AttributeStringValueListConverter>();
         builder.Services.AddAutoMapper(cfg =>
         {
             cfg.CreateMap<ICollection<string>, IAttributeValueList<string>>()
                 .ConvertUsing<AttributeStringValueListConverter>();
-
-            cfg.CreateMap<RtClient, Client>();
-            cfg.CreateMap<RtPersistedGrant, PersistedGrant>()
-                .ForMember(dest => dest.Type, opt => opt.MapFrom(src => src.GrantType))
-                .ForMember(dest => dest.Key, opt => opt.MapFrom(src => src.GrantKey))
-                .ForMember(dest => dest.CreationTime, opt => opt.MapFrom(src => src.CreationDateTime))
-                .ForMember(dest => dest.Expiration, opt => opt.MapFrom(src => src.ExpirationDateTime));
-            cfg.CreateMap<RtIdentityResource, IdentityResource>()
-                .ForMember(dest => dest.Emphasize, opt => opt.MapFrom(src => src.IsEmphasized))
-                .ForMember(dest => dest.Required, opt => opt.MapFrom(src => src.IsRequired))
-                .ForMember(dest => dest.UserClaims, opt => opt.MapFrom(src => src.Claims));
-            cfg.CreateMap<IdentityResource, RtIdentityResource>()
-                .ForMember(dest => dest.IsEmphasized, opt => opt.MapFrom(src => src.Emphasize))
-                .ForMember(dest => dest.IsRequired, opt => opt.MapFrom(src => src.Required))
-                .ForMember(dest => dest.Claims, opt => opt.MapFrom(src => src.UserClaims));
-
-            cfg.CreateMap<RtSecretRecord, Secret>();
-            cfg.CreateMap<PersistedGrant, RtPersistedGrant>()
-                .ForMember(dest => dest.GrantKey, opt => opt.MapFrom(src => src.Key))
-                .ForMember(dest => dest.GrantType, opt => opt.MapFrom(src => src.Type))
-                .ForMember(dest => dest.ConsumedDateTime, opt => opt.MapFrom(src => src.ConsumedTime))
-                .ForMember(dest => dest.CreationDateTime, opt => opt.MapFrom(src => src.CreationTime))
-                .ForMember(dest => dest.ExpirationDateTime, opt => opt.MapFrom(src => src.Expiration));
-
-            cfg.CreateMap<RtServerSideSession, Duende.IdentityServer.Models.ServerSideSession>()
-                .ForMember(dest => dest.Key, opt => opt.MapFrom(src => src.SessionKey))
-                .ForMember(dest => dest.Created, opt => opt.MapFrom(src => src.CreationDateTime))
-                .ForMember(dest => dest.Renewed, opt => opt.MapFrom(src => src.RenewalDateTime))
-                .ForMember(dest => dest.Expires, opt => opt.MapFrom(src => src.ExpirationDateTime));
-            cfg.CreateMap<Duende.IdentityServer.Models.ServerSideSession, RtServerSideSession>()
-                .ForMember(dest => dest.SessionKey, opt => opt.MapFrom(src => src.Key))
-                .ForMember(dest => dest.CreationDateTime, opt => opt.MapFrom(src => src.Created))
-                .ForMember(dest => dest.RenewalDateTime, opt => opt.MapFrom(src => src.Renewed))
-                .ForMember(dest => dest.ExpirationDateTime, opt => opt.MapFrom(src => src.Expires));
-
-            cfg.CreateMap<RtApiResource, ApiResource>()
-                .ForMember(dest => dest.UserClaims, opt => opt.MapFrom(src => src.Claims));
-
-            cfg.CreateMap<ApiResource, RtApiResource>()
-                .ForMember(dest => dest.Claims, opt => opt.MapFrom(src => src.UserClaims));
-
-            cfg.CreateMap<RtApiScope, ApiScope>()
-                .ForMember(dest => dest.Emphasize, opt => opt.MapFrom(src => src.IsEmphasized))
-                .ForMember(dest => dest.Required, opt => opt.MapFrom(src => src.IsRequired))
-                .ForMember(dest => dest.UserClaims, opt => opt.MapFrom(src => src.Claims));
-            cfg.CreateMap<ApiScope, RtApiScope>()
-                .ForMember(dest => dest.IsEmphasized, opt => opt.MapFrom(src => src.Emphasize))
-                .ForMember(dest => dest.IsRequired, opt => opt.MapFrom(src => src.Required))
-                .ForMember(dest => dest.Claims, opt => opt.MapFrom(src => src.UserClaims));
 
             cfg.CreateMap<RtRole, RoleDto>()
                 .ForMember(dest => dest.Id, opt => opt.MapFrom(src => src.RtId))
@@ -179,5 +197,14 @@ public static class RuntimeEngineBuilderExtensions
 
         builder.Services.AddScoped(
             typeof(IUserStore<>).MakeGenericType(builder.UserType), typeof(OctoUserStore));
+
+        // AB#5026: expose the user store's role facet as its own DI service. UserManager casts the
+        // IUserStore<TUser> internally and never resolves IUserRoleStore<TUser> from DI, so this is
+        // purely additive — it lets protocol-free services (IDelegatedIdentityResolver) read a user's
+        // effective roles through the very store that stamps a login token's role claims, without
+        // depending on the concrete OctoUserStore or on UserManager. The forwarding lambda keeps the
+        // single scoped instance, so both facets share one tenant repository/session.
+        builder.Services.AddScoped<IUserRoleStore<RtUser>>(
+            sp => (IUserRoleStore<RtUser>)sp.GetRequiredService<IUserStore<RtUser>>());
     }
 }

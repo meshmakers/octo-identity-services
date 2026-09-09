@@ -1,7 +1,7 @@
 # Octo Identity Services - Project Overview
 
 ## Purpose
-Octo Identity Services is an OpenID Connect/OAuth2 identity and access management service built on Duende IdentityServer. It serves as a core component of the Octo Data Mesh platform, providing:
+Octo Identity Services is an OpenID Connect/OAuth2 identity and access management service built on OpenIddict 7.6. It serves as a core component of the Octo Data Mesh platform, providing:
 
 - **Multi-tenant authentication**: Support for multiple tenants with isolated authentication contexts
 - **User management**: Complete user lifecycle management (creation, updates, roles, permissions)

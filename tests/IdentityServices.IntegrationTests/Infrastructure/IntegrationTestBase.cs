@@ -274,6 +274,51 @@ public abstract class IntegrationTestBase : IClassFixture<CustomWebApplicationFa
     }
 
     /// <summary>
+    /// Creates an OpenIddict OAuth token entry (e.g., a refresh token) in the database.
+    /// </summary>
+    protected async Task<RtOAuthToken> CreateOAuthTokenAsync(
+        string subjectId,
+        string clientId,
+        string tokenType = "refresh_token",
+        DateTime? expiration = null)
+    {
+        using var scope = CreateScope();
+        var tokenStore = scope.ServiceProvider
+            .GetRequiredService<global::OpenIddict.Abstractions.IOpenIddictTokenStore<RtOAuthToken>>();
+
+        var token = await tokenStore.InstantiateAsync(CancellationToken.None);
+        token.SubjectId = subjectId;
+        token.ClientId = clientId;
+        token.TokenType = tokenType;
+        token.Status = "valid";
+        token.CreationDateTime = DateTime.UtcNow;
+        token.ExpirationDateTime = expiration ?? DateTime.UtcNow.AddDays(30);
+        await tokenStore.CreateAsync(token, CancellationToken.None);
+        return token;
+    }
+
+    /// <summary>
+    /// Counts the still-valid OAuth token entries of a subject (revoked entries excluded).
+    /// </summary>
+    protected async Task<int> GetValidOAuthTokenCountForSubjectAsync(string subjectId)
+    {
+        using var scope = CreateScope();
+        var tokenStore = scope.ServiceProvider
+            .GetRequiredService<global::OpenIddict.Abstractions.IOpenIddictTokenStore<RtOAuthToken>>();
+
+        var count = 0;
+        await foreach (var token in tokenStore.FindBySubjectAsync(subjectId, CancellationToken.None))
+        {
+            if (string.Equals(token.Status, "valid", StringComparison.Ordinal))
+            {
+                count++;
+            }
+        }
+
+        return count;
+    }
+
+    /// <summary>
     /// Creates a persisted grant (e.g., refresh token) in the database.
     /// </summary>
     protected async Task<RtPersistedGrant> CreatePersistedGrantAsync(

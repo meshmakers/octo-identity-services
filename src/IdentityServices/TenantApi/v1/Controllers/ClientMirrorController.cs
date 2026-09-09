@@ -1,7 +1,6 @@
 using System.ComponentModel;
 using System.ComponentModel.DataAnnotations;
 using Asp.Versioning;
-using Duende.IdentityModel;
 using IdentityServerPersistence;
 using IdentityServerPersistence.Services;
 using IdentityServerPersistence.SystemStores;
@@ -9,6 +8,7 @@ using Meshmakers.Octo.Communication.Contracts.DataTransferObjects;
 using Meshmakers.Octo.Communication.Contracts.DataTransferObjects.ApiErrors;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Meshmakers.Octo.Backend.Authentication;
 
 namespace Meshmakers.Octo.Backend.IdentityServices.TenantApi.v1.Controllers;
 
@@ -17,7 +17,7 @@ namespace Meshmakers.Octo.Backend.IdentityServices.TenantApi.v1.Controllers;
 /// auto-provisioned from the calling (parent) tenant into one or more child tenants
 /// because of the <c>AutoProvisionInChildTenants</c> flag.
 /// </summary>
-[Authorize(AuthenticationSchemes = OidcConstants.AuthenticationSchemes.AuthorizationHeaderBearer)]
+[Authorize(AuthenticationSchemes = AuthenticationConstants.BearerAuthenticationScheme)]
 [Route(IdentityServiceConstants.ApiPathPrefix + "/clients/{clientId}/mirrors")]
 [ApiController]
 [ApiVersion(IdentityServiceConstants.ApiVersion1)]
@@ -130,6 +130,57 @@ public class ClientMirrorController : ControllerBase
             result.AlreadyPresent));
     }
 
+    // POST {tenantId}/v1/clients/{clientId}/mirrors/{childTenantId}/secret
+    /// <summary>
+    ///     Issues a fresh, tenant-specific secret for one mirror and returns it <b>once</b>
+    ///     (AB#5061).
+    /// </summary>
+    /// <remarks>
+    ///     <para>
+    ///         This is how the holder of a mirrored client learns its own, per-tenant credential.
+    ///         Mirroring copies the parent's secret into every child tenant, so that credential
+    ///         alone is valid instance-wide and proves nothing about which tenant the caller belongs
+    ///         to; a secret issued here proves exactly one tenant.
+    ///     </para>
+    ///     <para>
+    ///         🔴 The value is <b>not recoverable</b> — only its SHA-256 hash is stored. Capture it
+    ///         from this response; calling again issues a new secret and invalidates the previous
+    ///         one. It is never written to a log.
+    ///     </para>
+    ///     <para>
+    ///         ⚠️ The mirror also keeps accepting the inherited parent secret until the migration
+    ///         step that removes it; until then the instance-wide credential is still live.
+    ///     </para>
+    /// </remarks>
+    [HttpPost("{childTenantId}/secret")]
+    [Authorize(IdentityServiceConstants.IdentityApiReadWritePolicy)]
+    [EndpointSummary("Issues a fresh tenant-specific secret for this mirror and returns it once.")]
+    [ProducesResponseType(typeof(MirrorSecretResponseDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(NotFoundErrorDto), StatusCodes.Status404NotFound)]
+    [ProducesResponseType(typeof(OperationFailedErrorDto), StatusCodes.Status400BadRequest)]
+    public async Task<IActionResult> RotateSecret(
+        [Required][Description("Client ID")] string clientId,
+        [Required][Description("Sub-tenant whose mirror gets the new secret")] string childTenantId)
+    {
+        var result = await _mirrorService.RotateMirrorSecretAsync(
+            _clientStore.TenantId, clientId, childTenantId);
+
+        if (result == null)
+        {
+            return NotFound(new NotFoundErrorDto(
+                $"No mirror tracked for client '{clientId}' in child tenant '{childTenantId}'."));
+        }
+
+        if (result.NotApplicable)
+        {
+            return BadRequest(new OperationFailedErrorDto(
+                $"Client '{clientId}' is a public client — it has no secret, so there is no "
+                + "per-tenant secret to issue for its mirrors."));
+        }
+
+        return Ok(new MirrorSecretResponseDto(clientId, childTenantId, result.Secret!));
+    }
+
     // DELETE {tenantId}/v1/clients/{clientId}/mirrors/{childTenantId}
     [HttpDelete("{childTenantId}")]
     [Authorize(IdentityServiceConstants.IdentityApiReadWritePolicy)]
@@ -154,10 +205,29 @@ public class ClientMirrorController : ControllerBase
 }
 
 /// <summary>
+///     One-time response of the mirror-secret rotation endpoint (AB#5061).
+/// </summary>
+/// <param name="ClientId">The mirrored client id — unchanged by rotation.</param>
+/// <param name="ChildTenantId">The tenant this secret is valid for, and only this one.</param>
+/// <param name="Secret">
+///     The new secret in plaintext. 🔴 Returned once and unrecoverable afterwards, because only its
+///     SHA-256 hash is stored. Defined in this repository rather than in the shared contracts
+///     package on purpose: nothing but the issuing endpoint should ever be able to name this shape,
+///     and no client library should offer a "read the mirror secret" call, since no such read
+///     exists.
+/// </param>
+public sealed record MirrorSecretResponseDto(string ClientId, string ChildTenantId, string Secret)
+{
+    /// <summary>Keeps the secret out of accidental interpolation, log lines and exception text.</summary>
+    public override string ToString() =>
+        $"{nameof(MirrorSecretResponseDto)} {{ ClientId = {ClientId}, ChildTenantId = {ChildTenantId} }}";
+}
+
+/// <summary>
 /// Sub-resource on the existing clients route to flip <c>AutoProvisionInChildTenants</c>
 /// without requiring callers to PUT the full client object back.
 /// </summary>
-[Authorize(AuthenticationSchemes = OidcConstants.AuthenticationSchemes.AuthorizationHeaderBearer)]
+[Authorize(AuthenticationSchemes = AuthenticationConstants.BearerAuthenticationScheme)]
 [Route(IdentityServiceConstants.ApiPathPrefix + "/clients/{clientId}/autoProvisionInChildTenants")]
 [ApiController]
 [ApiVersion(IdentityServiceConstants.ApiVersion1)]

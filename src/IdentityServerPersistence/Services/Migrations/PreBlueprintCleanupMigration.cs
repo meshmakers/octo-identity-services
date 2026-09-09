@@ -29,9 +29,10 @@ namespace IdentityServerPersistence.Services.Migrations;
 ///     <para>
 ///         If both seeds run against the same tenant (a freshly-deployed PR #4 against a tenant
 ///         that was provisioned by the imperative seed) the result is duplicate entities with the
-///         same OIDC <c>Name</c> but different rtIds. Duende's <c>ValidateNameUniqueness</c>
-///         then crashes IdentityServer with <em>"Duplicate identity scopes found"</em>, taking
-///         every OIDC flow with it.
+///         same OIDC <c>Name</c> but different rtIds. The pre-migration IdentityServer's
+///         name-uniqueness validation then crashed the service with <em>"Duplicate identity
+///         scopes found"</em>, taking every OIDC flow with it — and duplicate names remain an
+///         inconsistent state the protocol stores must not see.
 ///     </para>
 ///     <para>
 ///         This migration runs once per tenant via the standard <see cref="MigrationService"/>
@@ -330,7 +331,8 @@ internal class PreBlueprintCleanupMigration(
             // MCP clients: swagger + device were imperatively seeded by the MCP server's old
             // CreateIdentityDataCommandRequest path (with random rtIds) before AB#4208 moved them into
             // this blueprint with stable rtIds — a leftover random-rtId copy on the system tenant
-            // shadows the blueprint client (Duende takes the first match), so it must be swept here.
+            // shadows the blueprint client (the protocol client lookup returns the first match),
+            // so it must be swept here.
             // (octo-mcpServices-interactive was listed defensively while it existed; the client was
             // removed from the blueprint in 1.1.5 — interactive MCP clients self-register via DCR.)
             "octo-mcpServices-swagger",

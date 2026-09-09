@@ -1,82 +1,41 @@
-using Duende.IdentityServer.Events;
-using Duende.IdentityServer.Extensions;
-using Duende.IdentityServer.Models;
-using Duende.IdentityServer.Services;
-using Duende.IdentityServer.Validation;
+using System.Security.Claims;
+using Meshmakers.Octo.Backend.IdentityServices.OpenIddict.Interaction;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using static OpenIddict.Abstractions.OpenIddictConstants;
 
 namespace Meshmakers.Octo.Backend.IdentityServices.Controllers.Api;
 
 /// <summary>
-/// API Controller for Angular SPA consent operations
+///     API Controller for Angular SPA consent operations. Backed by
+///     <see cref="IOctoInteractionService" /> (AB#4995): the consent decision is round-tripped to
+///     the authorize endpoint via the data-protected <c>octo_consent</c> parameter on the
+///     returned redirect URL; remembered consent is persisted as a permanent OAuth authorization.
+///     Routes and DTOs are unchanged from the pre-migration implementation — the Angular SPA
+///     needs no changes.
 /// </summary>
 [ApiController]
 [Route("{tenantId}/api/consent")]
 [Authorize]
-public class ConsentApiController : ControllerBase
+public class ConsentApiController(
+    IOctoInteractionService interactionService,
+    ILogger<ConsentApiController> logger) : ControllerBase
 {
-    private readonly IIdentityServerInteractionService _interaction;
-    private readonly IEventService _events;
-
-    public ConsentApiController(
-        IIdentityServerInteractionService interaction,
-        IEventService events)
-    {
-        _interaction = interaction;
-        _events = events;
-    }
-
     /// <summary>
     /// Get the consent context
     /// </summary>
     [HttpGet]
     public async Task<ActionResult<ConsentContextDto>> GetConsentContext([FromQuery] string? returnUrl)
     {
-        var request = await _interaction.GetAuthorizationContextAsync(returnUrl, HttpContext.RequestAborted);
-        if (request == null)
+        var context = await interactionService.GetAuthorizationContextAsync(returnUrl);
+        if (context == null)
         {
             return NotFound("Invalid consent request");
         }
 
-        var client = request.Client;
-
-        var identityScopes = request.ValidatedResources.Resources.IdentityResources
-            .Select(r => new ScopeItemDto
-            {
-                Name = r.Name,
-                DisplayName = r.DisplayName ?? r.Name,
-                Description = r.Description,
-                Emphasize = r.Emphasize,
-                Required = r.Required,
-                Checked = true
-            })
-            .ToList();
-
-        if (request.ValidatedResources.Resources.OfflineAccess)
-        {
-            identityScopes.Add(new ScopeItemDto
-            {
-                Name = Duende.IdentityServer.IdentityServerConstants.StandardScopes.OfflineAccess,
-                DisplayName = "Offline Access",
-                Description = "Access to your applications when you are offline",
-                Emphasize = true,
-                Required = false,
-                Checked = true
-            });
-        }
-
-        var apiScopes = request.ValidatedResources.Resources.ApiScopes
-            .Select(s => new ScopeItemDto
-            {
-                Name = s.Name,
-                DisplayName = s.DisplayName ?? s.Name,
-                Description = s.Description,
-                Emphasize = s.Emphasize,
-                Required = s.Required,
-                Checked = true
-            })
-            .ToList();
+        var client = context.Client;
+        var (identityScopes, apiScopes) = await interactionService.ResolveScopeItemsAsync(context.Scopes);
+        var offlineAccess = context.Scopes.Contains(Scopes.OfflineAccess);
 
         return new ConsentContextDto
         {
@@ -87,7 +46,7 @@ public class ConsentApiController : ControllerBase
             IdentityScopes = identityScopes,
             ApiScopes = apiScopes,
             AllowRememberConsent = client.AllowRememberConsent,
-            Description = request.ValidatedResources.Resources.OfflineAccess ? "This application requests offline access" : null
+            Description = offlineAccess ? "This application requests offline access" : null
         };
     }
 
@@ -97,7 +56,7 @@ public class ConsentApiController : ControllerBase
     [HttpPost("grant")]
     public async Task<ActionResult<ConsentResultDto>> GrantConsent([FromBody] ConsentRequestDto request)
     {
-        var context = await _interaction.GetAuthorizationContextAsync(request.ReturnUrl, HttpContext.RequestAborted);
+        var context = await interactionService.GetAuthorizationContextAsync(request.ReturnUrl);
         if (context == null)
         {
             return new ConsentResultDto
@@ -116,26 +75,17 @@ public class ConsentApiController : ControllerBase
             };
         }
 
-        var grantedConsent = new ConsentResponse
-        {
-            RememberConsent = request.RememberConsent,
-            ScopesValuesConsented = request.ScopesConsented,
-            Description = request.Description
-        };
+        var redirectUrl = await interactionService.GrantConsentAsync(
+            context, GetSubjectId(), request.ScopesConsented.ToList(), request.RememberConsent,
+            request.Description);
 
-        await _interaction.GrantConsentAsync(context, grantedConsent, HttpContext.RequestAborted);
-
-        await _events.RaiseAsync(new ConsentGrantedEvent(
-            User.GetSubjectId(),
-            context.Client.ClientId,
-            context.ValidatedResources.RawScopeValues,
-            request.ScopesConsented,
-            request.RememberConsent), HttpContext.RequestAborted);
+        logger.LogInformation("Consent granted by '{Subject}' for client '{ClientId}' (remember: {Remember})",
+            GetSubjectId(), context.Client.ClientId, request.RememberConsent);
 
         return new ConsentResultDto
         {
             Success = true,
-            RedirectUrl = request.ReturnUrl
+            RedirectUrl = redirectUrl
         };
     }
 
@@ -145,7 +95,7 @@ public class ConsentApiController : ControllerBase
     [HttpPost("deny")]
     public async Task<ActionResult<ConsentResultDto>> DenyConsent([FromBody] ConsentDenyRequestDto request)
     {
-        var context = await _interaction.GetAuthorizationContextAsync(request.ReturnUrl, HttpContext.RequestAborted);
+        var context = await interactionService.GetAuthorizationContextAsync(request.ReturnUrl);
         if (context == null)
         {
             return new ConsentResultDto
@@ -155,19 +105,21 @@ public class ConsentApiController : ControllerBase
             };
         }
 
-        await _interaction.DenyAuthorizationAsync(context, InteractionError.AccessDenied, HttpContext.RequestAborted);
+        var redirectUrl = interactionService.DenyConsent(context, GetSubjectId());
 
-        await _events.RaiseAsync(new ConsentDeniedEvent(
-            User.GetSubjectId(),
-            context.Client.ClientId,
-            context.ValidatedResources.RawScopeValues), HttpContext.RequestAborted);
+        logger.LogInformation("Consent denied by '{Subject}' for client '{ClientId}'",
+            GetSubjectId(), context.Client.ClientId);
 
         return new ConsentResultDto
         {
             Success = true,
-            RedirectUrl = request.ReturnUrl
+            RedirectUrl = redirectUrl
         };
     }
+
+    private string GetSubjectId() =>
+        User.FindFirstValue(Claims.Subject) ?? User.FindFirstValue(ClaimTypes.NameIdentifier) ??
+        throw new InvalidOperationException("The authenticated user has no subject claim.");
 }
 
 #region DTOs

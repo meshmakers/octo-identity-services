@@ -29,7 +29,6 @@ Create a `TenantCookieManager` that wraps `ChunkingCookieManager` and appends `.
 | Cookie | Scoped? | Reason |
 |--------|---------|--------|
 | `Identity.Application` | **Yes** | Main auth cookie — primary source of cross-tenant leak |
-| `idsrv` | **Yes** | IdentityServer session cookie |
 | `Identity.External` | No | Written at `/signin-google` (no tenant in URL); scoping would break external login |
 | `Identity.TwoFactorUserId` | No | Short-lived, single login flow |
 | `Identity.TwoFactorRememberMe` | No | Short-lived, single login flow |
@@ -75,7 +74,7 @@ Middleware as described in Section 4.
 
 ### Step 3: `Program.cs` (MODIFY)
 
-Register `TenantCookieManager` on `Identity.Application` and `idsrv` cookie schemes. Add `OidcTenantResolutionMiddleware` to the pipeline.
+Register `TenantCookieManager` on the `Identity.Application` cookie scheme. Add `OidcTenantResolutionMiddleware` to the pipeline.
 
 ### Step 4: `UserProfileService.cs` (MODIFY)
 

@@ -1,5 +1,4 @@
-﻿using Duende.IdentityServer.Services;
-using IdentityServerPersistence;
+﻿using IdentityServerPersistence;
 using IdentityServerPersistence.Configuration.Options;
 using IdentityServerPersistence.Services.DynamicClientRegistration;
 using IdentityServerPersistence.SystemStores;
@@ -10,7 +9,8 @@ using Meshmakers.Octo.Backend.IdentityServices.Consumers;
 using Meshmakers.Octo.Backend.IdentityServices.Cookies;
 using Meshmakers.Octo.Backend.IdentityServices.Resources;
 using Meshmakers.Octo.Backend.IdentityServices.Middleware;
-using Meshmakers.Octo.Backend.IdentityServices.Routing;
+using Meshmakers.Octo.Backend.IdentityServices.OpenIddict;
+using Meshmakers.Octo.Backend.IdentityServices.OpenIddict.Interaction;
 using Meshmakers.Octo.Backend.IdentityServices.Services;
 using IQrCodeService = Meshmakers.Octo.Backend.IdentityServices.Services.IQrCodeService;
 using QrCodeService = Meshmakers.Octo.Backend.IdentityServices.Services.QrCodeService;
@@ -33,6 +33,7 @@ using Meshmakers.Octo.Services.Observability;
 using Meshmakers.Octo.Services.Swagger.Configuration;
 using Microsoft.AspNetCore.Cors.Infrastructure;
 using Microsoft.AspNetCore.Authentication.Cookies;
+using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Options;
@@ -43,8 +44,6 @@ using Microsoft.AspNetCore.DataProtection.Repositories;
 using System.Threading.RateLimiting;
 using NLog;
 using NLog.Web;
-using Persistence.IdentityCkModel.Generated.Blueprints.SystemIdentityBootstrap.v1;
-using Persistence.IdentityCkModel.Generated.System.Identity.v2;
 using LogLevel = Microsoft.Extensions.Logging.LogLevel;
 
 // NLog: Setup the logger first to catch all errors
@@ -89,6 +88,15 @@ try
         builder.Configuration.GetSection("Identity").Bind(options));
     builder.Services.Configure<OctoSystemConfiguration>(options =>
         builder.Configuration.GetSection("System").Bind(options));
+    // AB#5134/AB#5154 signal-cli-rest-api bridge for the AB#5123 self-service phone OTP — the
+    // LOCAL-DEV FALLBACK. Production tenants send from their Studio-activated SignalChannel entity
+    // (resolved per tenant at send time, see AddOctoIdentityPersistence); these options are only
+    // consulted when the tenant has no Registered channel, and when they are empty too the
+    // LoggingOtpDeliveryChannel dev stub path handles the delivery. Configure local dev via
+    // OCTO_SIGNALBRIDGE__APIURL / OCTO_SIGNALBRIDGE__NUMBER; cluster deployments no longer need
+    // them.
+    builder.Services.Configure<SignalBridgeOptions>(options =>
+        builder.Configuration.GetSection(SignalBridgeOptions.SectionName).Bind(options));
     // Blueprint variable inputs (${octo.scheme}/${octo.domain}/${octo.environment}/...).
     // AddRuntimeEngine only registers the options — it does NOT bind them; without this
     // binding OCTO_BLUEPRINTS__* env vars are silently ignored, ${octo.mcp.publicUrl}
@@ -106,8 +114,7 @@ try
         .Configure<IXmlRepository>((options, repository) => options.XmlRepository = repository);
     builder.Services.AddDataProtection()
         .SetApplicationName("OctoIdentityServices");
-    builder.Services.Configure<RouteOptions>(options =>
-        options.ConstraintMap.Add("tenantId", typeof(TenantIdRouteConstraint)));
+    builder.Services.AddOctoTenantIdRouteConstraint();
 
     builder.Services.Configure<CookiePolicyOptions>(options =>
     {
@@ -153,7 +160,6 @@ try
         };
     });
 
-    builder.Services.AddScoped<ICorsPolicyService, CorsPolicyService>();
 
     // RFC 7591 Dynamic Client Registration for interactive MCP clients (AB#4338).
     builder.Services.AddScoped<IDynamicClientRegistrationService, DynamicClientRegistrationService>();
@@ -168,6 +174,11 @@ try
         .AddMicrosoftAdAuthentication();
 
     builder.Services.AddCors();
+
+    // AB#5032: lets an operator narrow the client-credentials exemption of
+    // UseOctoTenantAuthorization() per environment (OCTO_TENANTAUTHORIZATION__…). The defaults
+    // reproduce the previous behaviour and only add the audit log.
+    builder.Services.AddOctoTenantAuthorization(builder.Configuration);
 
     // Service-managed Identity tenant seed: the single source of truth for Roles, OIDC
     // Identity Resources, API Scopes / Resources, OAuth Clients and the TenantOwners group.
@@ -192,33 +203,35 @@ try
     builder.Services.AddSingleton<IdentityCorsPolicyProvider>();
     builder.Services.AddSingleton<ICorsPolicyProvider>(sp => sp.GetRequiredService<IdentityCorsPolicyProvider>());
 
-    // Add IdentityServer for authentication using OpenID
-    var identityServerBuilder = builder.Services.AddIdentityServer(serverOptions =>
-        {
-            serverOptions.Events.RaiseErrorEvents = true;
-            serverOptions.Events.RaiseInformationEvents = true;
-            serverOptions.Events.RaiseFailureEvents = true;
-            serverOptions.Events.RaiseSuccessEvents = true;
-        })
-        .AddClientStore<IOctoClientStore>()
-        .AddResourceStore<ResourceStore>()
-        .AddPersistedGrantStore<PersistentGrantStore>()
-        .AddAspNetIdentity<RtUser>()
-        .AddProfileService<UserProfileService>()
-        .AddCustomTokenRequestValidator<ClientCredentialsRoleTokenValidator>()
-        // RFC 8693 Token Exchange (AB#4338): mints a target-tenant (B) access token from the
-        // user's home-tenant (A) access token, with roles re-resolved in B on the B-shadow sub.
-        .AddExtensionGrantValidator<TenantExchangeGrantValidator>()
-        .AddServerSideSessions<ServerSideSessionStore>()
-        .AddCorsPolicyService<CorsPolicyService>()
-        .AddAppAuthRedirectUriValidator()
-        .AddJwtBearerClientAuthentication();
+    // OpenIddict OAuth2/OIDC server (AB#4989/AB#4990). Protocol configuration, custom
+    // CK/MongoDB stores and the token shaping that preserves the pre-migration wire format live
+    // in OpenIddictConfiguration; principals are built by the passthrough controllers under
+    // Controllers/Protocol.
+    builder.AddOctoOpenIddict();
 
-    // Persist IdentityServer error/failure events to OctoMesh runtime event log
-    builder.Services.AddTransient<IEventSink, OctoEventSink>();
+    // Claims parity layer for OpenIddict-issued tokens (tenant claims, effective client roles,
+    // audience resolution) + interaction facade for the SPA API controllers.
+    builder.Services.AddScoped<IOctoTokenClaimsService, OctoTokenClaimsService>();
+    builder.Services.AddScoped<TenantExchangeProcessor>();
+    builder.Services.AddScoped<OnBehalfOfProcessor>();
+    builder.Services.AddScoped<ImpersonationProcessor>();
+    builder.Services.AddScoped<ClientCredentialsTenantProcessor>();
+    builder.Services.AddScoped<IIdentityAuditService, IdentityAuditService>();
 
-    // Scope auth cookies per tenant to prevent cross-tenant session leakage.
-    // Identity.Application and idsrv cookies get a .{tenantId} suffix.
+    // Mirror secret telemetry (AB#5065): records WHICH secret a mirrored client authenticated with —
+    // the copy inherited from its parent tenant, or the one that belongs to that mirror alone. The
+    // inherited copy cannot be removed (step 4 of docs/CONCEPT-PER-TENANT-MIRROR-SECRETS.md) before
+    // it is known that nobody uses it. Consumed by OctoApplicationManager, which is the only place
+    // that knows which stored record a presented credential matched.
+    builder.Services.AddScoped<IMirrorSecretUsageTelemetry, MirrorSecretUsageTelemetry>();
+    builder.Services.AddScoped<IOctoInteractionService, OctoInteractionService>();
+
+    // Server-side sessions (AB#4994): the application cookie carries only a session key, the
+    // data-protected ticket lives per tenant in MongoDB (OctoTicketStore).
+    builder.Services.AddSingleton<OctoTicketStore>();
+
+    // Scope auth cookies per tenant to prevent cross-tenant session leakage:
+    // the Identity.Application cookie gets a .{tenantId} suffix.
     var tenantCookieManager = new TenantCookieManager();
     builder.Services.ConfigureApplicationCookie(o =>
     {
@@ -228,25 +241,15 @@ try
         // Explicit (was: 14-day framework default) — sliding, so active users stay signed in.
         o.ExpireTimeSpan = TimeSpan.FromDays(7);
     });
-    builder.Services.Configure<CookieAuthenticationOptions>("idsrv", o => o.CookieManager = tenantCookieManager);
-    builder.Services.Configure<CookieAuthenticationOptions>("idsrv.session", o => o.CookieManager = tenantCookieManager);
+    builder.Services.AddOptions<CookieAuthenticationOptions>(IdentityConstants.ApplicationScheme)
+        .Configure<OctoTicketStore>((options, ticketStore) => options.SessionStore = ticketStore);
 
-    // Service that periodically cleans up tokens in the grant database
+    // Service that periodically cleans up expired sessions, OAuth tokens and legacy grants
     builder.Services.AddSingleton<IHostedService, TokenCleanupHostService>();
 
     // Add the extra configuration;
-    builder.Services.ConfigureOptions<ConfigureIdentityServerOptions>();
     builder.Services.ConfigureOptions<ConfigureOctoOpenApiOptions>();
     builder.Services.ConfigureOptions<ConfigureMapperConfigurationExpression>();
-
-    if (builder.Environment.IsDevelopment())
-    {
-        identityServerBuilder.AddDeveloperSigningCredential();
-    }
-    else
-    {
-        identityServerBuilder.AddOctoSigningCredential();
-    }
 
     builder.Services.TryAddEnumerable(ServiceDescriptor
         .Singleton<IPostConfigureOptions<JwtBearerOptions>, JwtBearerPostConfigureOptions>());
@@ -354,7 +357,21 @@ try
     app.UseOctoCookieBasedAuthentication();
 
     app.UseHttpsRedirection();
-    app.UseStaticFiles();
+    // index.html must never be cached, so a fresh ClientApp deploy is picked up immediately
+    // instead of the browser serving a stale index that references old hashed bundles (AB#5135).
+    // The hashed assets (styles-*.css / *-*.js) keep their default caching.
+    var spaStaticFileOptions = new StaticFileOptions
+    {
+        OnPrepareResponse = ctx =>
+        {
+            if (string.Equals(ctx.File.Name, "index.html", StringComparison.OrdinalIgnoreCase))
+            {
+                ctx.Context.Response.Headers["Cache-Control"] = "no-store, no-cache, must-revalidate";
+                ctx.Context.Response.Headers["Pragma"] = "no-cache";
+            }
+        }
+    };
+    app.UseStaticFiles(spaStaticFileOptions);
     app.UseCookiePolicy();
 
     app.UseOctoApiVersioningAndDocumentation();
@@ -392,13 +409,9 @@ try
     app.UseRateLimiter();
 
     // The sequence of the add statements in the configure function is of importance.
-    // app.UseAuthentication()
-    // !!!UseIdentityServer calls already UseAuthentication; comes before app.UseMvc();
     app.UseDcrDefaultScope();
     app.UseOidcTenantResolution();
-    app.UseTenantLoginRedirect();
-    app.UseIdentityServer();
-
+    app.UseAuthentication();
     app.UseAuthorization();
     app.UseOctoTenantAuthorization();
 
@@ -467,8 +480,8 @@ try
     app.MapGet("/", (IOptions<OctoSystemConfiguration> systemConfig) =>
         Results.Redirect($"/{systemConfig.Value.SystemTenantId}/login"));
 
-    // Serve pre-built Angular files from wwwroot for all environments
-    app.MapFallbackToFile("index.html");
+    // Serve pre-built Angular files from wwwroot for all environments (index.html no-store, see above)
+    app.MapFallbackToFile("index.html", spaStaticFileOptions);
 
     // Initialisierung abfangen
     app.Lifetime.ApplicationStarted.Register(() =>

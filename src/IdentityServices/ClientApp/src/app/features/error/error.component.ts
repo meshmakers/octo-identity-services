@@ -1,6 +1,7 @@
 import { Component, OnInit, inject, ChangeDetectionStrategy, ChangeDetectorRef } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { ActivatedRoute } from '@angular/router';
+import { TranslatePipe, TranslateService } from '@ngx-translate/core';
 import { LcarsPanelComponent } from '../../shared/components/lcars-panel/lcars-panel.component';
 import { LcarsHeaderComponent } from '../../shared/components/lcars-header/lcars-header.component';
 import { ErrorContext } from '../../core/models/error.models';
@@ -9,12 +10,12 @@ import { AuthApiService } from '../../core/services/auth-api.service';
 @Component({
   selector: 'app-error',
   standalone: true,
-  imports: [CommonModule, LcarsPanelComponent, LcarsHeaderComponent],
+  imports: [CommonModule, TranslatePipe, LcarsPanelComponent, LcarsHeaderComponent],
   template: `
     <div class="lcars-auth-container">
       <app-lcars-panel variant="error">
         <app-lcars-header
-          subtitle="Error">
+          [subtitle]="'ERROR_PAGE.SUBTITLE' | translate">
         </app-lcars-header>
 
         <div class="error-content">
@@ -33,35 +34,35 @@ import { AuthApiService } from '../../core/services/auth-api.service';
           <p class="error-hint" *ngIf="hint">{{ hint }}</p>
 
           <details class="error-technical" *ngIf="hasTechnicalDetails">
-            <summary>Technical details</summary>
+            <summary>{{ 'ERROR_PAGE.TECHNICAL_DETAILS' | translate }}</summary>
             <div class="error-details" *ngIf="error.error">
-              <span class="error-details__label">Error</span>
+              <span class="error-details__label">{{ 'ERROR_PAGE.DETAIL_ERROR' | translate }}</span>
               <code class="error-details__value">{{ error.error }}</code>
             </div>
             <div class="error-details" *ngIf="error.errorDescription">
-              <span class="error-details__label">Description</span>
+              <span class="error-details__label">{{ 'ERROR_PAGE.DETAIL_DESCRIPTION' | translate }}</span>
               <code class="error-details__value">{{ error.errorDescription }}</code>
             </div>
             <div class="error-details" *ngIf="error.clientId">
-              <span class="error-details__label">Application</span>
+              <span class="error-details__label">{{ 'ERROR_PAGE.DETAIL_APPLICATION' | translate }}</span>
               <code class="error-details__value">{{ error.clientId }}</code>
             </div>
             <div class="error-details" *ngIf="error.requestId">
-              <span class="error-details__label">Request ID</span>
+              <span class="error-details__label">{{ 'ERROR_PAGE.DETAIL_REQUEST_ID' | translate }}</span>
               <code class="error-details__value">{{ error.requestId }}</code>
             </div>
             <div class="error-details" *ngIf="error.activityId">
-              <span class="error-details__label">Activity ID</span>
+              <span class="error-details__label">{{ 'ERROR_PAGE.DETAIL_ACTIVITY_ID' | translate }}</span>
               <code class="error-details__value">{{ error.activityId }}</code>
             </div>
           </details>
 
           <div class="lcars-actions">
             <a *ngIf="error.clientUrl" [href]="error.clientUrl" class="lcars-button-outline">
-              Back to {{ error.clientName || 'application' }}
+              {{ 'ERROR_PAGE.BACK_TO_APP' | translate: { app: error.clientName || appFallback } }}
             </a>
             <a [href]="'/' + tenantId + '/login'" class="lcars-button-outline">
-              Back to Sign In
+              {{ 'ERROR_PAGE.BACK_TO_SIGN_IN' | translate }}
             </a>
           </div>
         </div>
@@ -75,6 +76,7 @@ export class ErrorComponent implements OnInit {
   private route = inject(ActivatedRoute);
   private authApi = inject(AuthApiService);
   private cdr = inject(ChangeDetectorRef);
+  private translateService = inject(TranslateService);
 
   error: ErrorContext = {};
 
@@ -82,28 +84,33 @@ export class ErrorComponent implements OnInit {
     return this.route.snapshot.params['tenantId'] || 'System';
   }
 
+  get appFallback(): string {
+    return this.translateService.instant('ERROR_PAGE.APP_FALLBACK');
+  }
+
   get title(): string {
     switch (this.error.kind) {
       case 'clientNotRegistered':
-        return 'Application not available here';
+        return this.translateService.instant('ERROR_PAGE.TITLE_CLIENT_NOT_REGISTERED');
       case 'invalidRedirectUri':
-        return 'Application configuration problem';
+        return this.translateService.instant('ERROR_PAGE.TITLE_INVALID_REDIRECT');
       default:
-        return 'Something went wrong';
+        return this.translateService.instant('ERROR_PAGE.TITLE_GENERIC');
     }
   }
 
   get message(): string {
-    const app = this.error.clientName || this.error.clientId || 'The application';
+    const app = this.error.clientName || this.error.clientId || this.appFallback;
     switch (this.error.kind) {
       case 'clientNotRegistered':
         // Registered-but-disabled and never-registered are indistinguishable from
         // here, so the copy names both rather than guessing.
-        return `${app} is not registered, or not enabled, for the workspace "${this.tenantId}".`;
+        return this.translateService.instant('ERROR_PAGE.MSG_CLIENT_NOT_REGISTERED',
+          { app, tenant: this.tenantId });
       case 'invalidRedirectUri':
-        return `${app} sent a return address that is not registered for it in this workspace.`;
+        return this.translateService.instant('ERROR_PAGE.MSG_INVALID_REDIRECT', { app });
       default:
-        return this.error.errorMessage || 'An unexpected error occurred.';
+        return this.error.errorMessage || this.translateService.instant('ERROR_PAGE.MSG_GENERIC');
     }
   }
 
@@ -111,7 +118,7 @@ export class ErrorComponent implements OnInit {
     switch (this.error.kind) {
       case 'clientNotRegistered':
       case 'invalidRedirectUri':
-        return 'This is a configuration issue, not something you can fix by signing in again — please pass the details below to your administrator.';
+        return this.translateService.instant('ERROR_PAGE.HINT_CONFIG');
       default:
         return null;
     }
@@ -158,7 +165,7 @@ export class ErrorComponent implements OnInit {
 
   private applyMessageFallback(): void {
     if (!this.error.errorMessage) {
-      this.error.errorMessage = 'An unexpected error occurred.';
+      this.error.errorMessage = this.translateService.instant('ERROR_PAGE.MSG_GENERIC');
     }
   }
 }

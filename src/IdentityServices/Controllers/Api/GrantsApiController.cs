@@ -1,60 +1,44 @@
-using Duende.IdentityServer.Events;
-using Duende.IdentityServer.Extensions;
-using Duende.IdentityServer.Services;
-using Duende.IdentityServer.Stores;
+using System.Security.Claims;
+using IdentityServerPersistence.SystemStores;
+using Meshmakers.Octo.Backend.IdentityServices.OpenIddict.Interaction;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using static OpenIddict.Abstractions.OpenIddictConstants;
 
 namespace Meshmakers.Octo.Backend.IdentityServices.Controllers.Api;
 
 /// <summary>
-/// API Controller for Angular SPA grants management (viewing and revoking client permissions)
+///     API Controller for Angular SPA grants management (viewing and revoking client permissions).
+///     Backed by <see cref="IOctoInteractionService" /> over the OpenIddict authorization/token
+///     stores (AB#4995): a grant is a remembered consent (permanent authorization) or a client
+///     holding a live refresh token. Routes and DTOs are unchanged.
 /// </summary>
 [ApiController]
 [Route("{tenantId}/api/grants")]
 [Authorize]
-public class GrantsApiController : ControllerBase
+public class GrantsApiController(
+    IOctoInteractionService interactionService,
+    IOctoClientStore clientStore,
+    ILogger<GrantsApiController> logger) : ControllerBase
 {
-    private readonly IIdentityServerInteractionService _interaction;
-    private readonly IClientStore _clientStore;
-    private readonly IResourceStore _resourceStore;
-    private readonly IEventService _events;
-
-    public GrantsApiController(
-        IIdentityServerInteractionService interaction,
-        IClientStore clientStore,
-        IResourceStore resourceStore,
-        IEventService events)
-    {
-        _interaction = interaction;
-        _clientStore = clientStore;
-        _resourceStore = resourceStore;
-        _events = events;
-    }
-
     /// <summary>
     /// Get all grants (client permissions) for the current user
     /// </summary>
     [HttpGet]
     public async Task<ActionResult<IEnumerable<GrantInfoDto>>> GetGrants()
     {
-        var grants = await _interaction.GetAllUserGrantsAsync(HttpContext.RequestAborted);
+        var grants = await interactionService.GetAllUserGrantsAsync(GetSubjectId());
         var list = new List<GrantInfoDto>();
 
         foreach (var grant in grants)
         {
-            var client = await _clientStore.FindClientByIdAsync(grant.ClientId, HttpContext.RequestAborted);
-            if (client == null) continue;
+            var client = await clientStore.FindRtClientByIdAsync(grant.ClientId);
+            if (client == null)
+            {
+                continue;
+            }
 
-            var resources = await _resourceStore.FindResourcesByScopeAsync(grant.Scopes, HttpContext.RequestAborted);
-
-            var identityScopes = resources.IdentityResources
-                .Select(r => r.DisplayName ?? r.Name)
-                .ToList();
-
-            var apiScopes = resources.ApiScopes
-                .Select(s => s.DisplayName ?? s.Name)
-                .ToList();
+            var (identityScopes, apiScopes) = await interactionService.ResolveScopeItemsAsync(grant.Scopes);
 
             list.Add(new GrantInfoDto
             {
@@ -63,10 +47,10 @@ public class GrantsApiController : ControllerBase
                 ClientUrl = client.ClientUri,
                 ClientLogoUrl = client.LogoUri,
                 Description = client.Description,
-                Created = grant.CreationTime,
-                Expires = grant.Expiration,
-                IdentityGrantNames = identityScopes,
-                ApiGrantNames = apiScopes
+                Created = grant.Created,
+                Expires = grant.Expires,
+                IdentityGrantNames = identityScopes.Select(s => s.DisplayName).ToList(),
+                ApiGrantNames = apiScopes.Select(s => s.DisplayName).ToList()
             });
         }
 
@@ -88,14 +72,17 @@ public class GrantsApiController : ControllerBase
             };
         }
 
-        await _interaction.RevokeUserConsentAsync(request.ClientId, HttpContext.RequestAborted);
+        await interactionService.RevokeUserConsentAsync(GetSubjectId(), request.ClientId);
 
-        await _events.RaiseAsync(new GrantsRevokedEvent(
-            User.GetSubjectId(),
-            request.ClientId), HttpContext.RequestAborted);
+        logger.LogInformation("Grants revoked by '{Subject}' for client '{ClientId}'",
+            GetSubjectId(), request.ClientId);
 
         return new RevokeGrantResultDto { Success = true };
     }
+
+    private string GetSubjectId() =>
+        User.FindFirstValue(Claims.Subject) ?? User.FindFirstValue(ClaimTypes.NameIdentifier) ??
+        throw new InvalidOperationException("The authenticated user has no subject claim.");
 }
 
 #region DTOs

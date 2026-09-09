@@ -81,11 +81,15 @@ $info-color: $neo-cyan;
   --lcars-radius-pill: 50px;
 
   // Spacing
+  // Density pass (AB#5135): the panels/forms/cards read as too large — the cause is
+  // the whitespace, not the (already-compact) fonts. Tighten the larger spacing steps
+  // ~25% globally via the scale so every token-based padding/gap shrinks coherently.
+  // Tune here — nothing per-component was hard-coded.
   --lcars-spacing-xs: 4px;
   --lcars-spacing-sm: 8px;
-  --lcars-spacing-md: 16px;
-  --lcars-spacing-lg: 24px;
-  --lcars-spacing-xl: 32px;
+  --lcars-spacing-md: 12px;
+  --lcars-spacing-lg: 18px;
+  --lcars-spacing-xl: 24px;
   --lcars-spacing-2xl: 48px;
 
   // Panel Styling

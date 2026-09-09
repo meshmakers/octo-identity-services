@@ -2,29 +2,30 @@ import { Component, inject, OnInit, ChangeDetectionStrategy } from '@angular/cor
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { Router, ActivatedRoute } from '@angular/router';
+import { TranslatePipe } from '@ngx-translate/core';
 import { LcarsPanelComponent } from '../../shared/components/lcars-panel/lcars-panel.component';
 import { LcarsHeaderComponent } from '../../shared/components/lcars-header/lcars-header.component';
 
 @Component({
   selector: 'app-device-code',
   standalone: true,
-  imports: [CommonModule, FormsModule, LcarsPanelComponent, LcarsHeaderComponent],
+  imports: [CommonModule, FormsModule, TranslatePipe, LcarsPanelComponent, LcarsHeaderComponent],
   template: `
     <div class="lcars-auth-container">
       <app-lcars-panel>
         <app-lcars-header
-          subtitle="Device Authorization"
+          [subtitle]="'DEVICE.SUBTITLE' | translate"
           [showUserMenu]="false">
         </app-lcars-header>
 
         <div class="device-content">
           <p class="device-description">
-            Enter the code displayed on your device to authorize access.
+            {{ 'DEVICE.DESCRIPTION' | translate }}
           </p>
 
           <form (ngSubmit)="onSubmit()">
             <div class="lcars-form-group">
-              <label for="userCode">Device Code</label>
+              <label for="userCode">{{ 'DEVICE.CODE_LABEL' | translate }}</label>
               <input
                 type="text"
                 id="userCode"
@@ -46,7 +47,7 @@ import { LcarsHeaderComponent } from '../../shared/components/lcars-header/lcars
                 type="submit"
                 class="lcars-button-primary"
                 [disabled]="submitting || !userCode">
-                {{ submitting ? 'Verifying...' : 'Continue' }}
+                {{ (submitting ? 'COMMON.VERIFYING' : 'COMMON.CONTINUE') | translate }}
               </button>
             </div>
           </form>

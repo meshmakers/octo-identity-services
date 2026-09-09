@@ -50,6 +50,19 @@ attributes:
     defaultValues:
       - false
 
+  # AB#5149 per-user outbound channel preference, binding-specific (revised): the rtId of the
+  # System.Identity/VerifiedExternalIdentifier the user chose as the target for system-initiated
+  # messages (to-dos, document status). The channel KIND is derived from the referenced binding
+  # (PhoneNumber -> SIGNAL, EntraIdObjectId -> TEAMS) — never stored separately, so the preference
+  # can name a concrete phone number when the user holds several. A String (24-hex rtId) rather
+  # than an association so the mesh adapter can read it as a plain user attribute and resolve
+  # kind + target itself (cross-repo contract: attribute name PreferredChannelBindingId).
+  # Self-service only accepts a binding that belongs to the user and is valid; null means
+  # "no preference". Deleting the referenced binding clears the preference in the same operation.
+  - id: PreferredChannelBindingId
+    valueType: String
+    description: The rtId of the VerifiedExternalIdentifier chosen as preferred outbound channel target for system-initiated messages (null = no preference). The channel kind is derived from the referenced binding. Set via self-service, restricted to the user's own valid bindings.
+
   - id: LockoutEnd
     valueType: DateTimeOffset
     description: The date and time, in UTC, when any user lockout ends.
@@ -157,6 +170,32 @@ attributes:
     valueType: DateTime
   - id: Data
     valueType: String
+
+  # AB#4989/AB#4991 - OpenIddict authorization/token model (replaces PersistedGrant at cutover)
+  - id: AuthorizationType
+    valueType: String
+    description: OpenIddict authorization type (permanent or ad-hoc).
+  - id: TokenType
+    valueType: String
+    description: OpenIddict token type (authorization_code, refresh_token, device_code, user_code, ...).
+  - id: Status
+    valueType: String
+    description: OpenIddict entry status (valid, inactive, redeemed, rejected, revoked).
+  - id: ReferenceId
+    valueType: String
+    description: Hashed reference identifier used to look up reference tokens (device/user codes).
+  - id: Payload
+    valueType: String
+    description: Protected token payload for reference tokens.
+  - id: Properties
+    valueType: String
+    description: Additional OpenIddict properties as a JSON object.
+  - id: AuthorizationRtId
+    valueType: String
+    description: RtId of the OAuthAuthorization this token belongs to.
+  - id: RedemptionDateTime
+    valueType: DateTime
+    description: Point in time a single-use token was redeemed.
   - id: PermissionId
     valueType: String
   - id: ResourceClaims
@@ -526,7 +565,7 @@ attributes:
 
   - id: SessionKey
     valueType: String
-    description: Unique key of a Duende server-side session (the only value stored in the browser cookie).
+    description: Unique key of a server-side session (the only value stored in the browser cookie).
 
   - id: Scheme
     valueType: String
@@ -562,3 +601,52 @@ attributes:
     defaultValues:
       - base
 
+
+  # --- AB#5122 Verified external identifier directory (two-dimension trust) ---
+  - id: IdentifierKind
+    valueType: Enum
+    valueCkEnumId: ${this}/IdentifierKind
+    defaultValues:
+      - 0
+    description: The kind of external identifier (PhoneNumber, EmailAddress, EntraIdObjectId, ClientCertificateFingerprint).
+
+  - id: IdentifierValue
+    valueType: String
+    description: The normalized external identifier value (E.164 phone number, normalized e-mail address, EntraID object id, or certificate fingerprint).
+
+  - id: EnrollmentTrust
+    valueType: Enum
+    valueCkEnumId: ${this}/TrustLevel
+    defaultValues:
+      - 0
+    description: The stored ENROLLMENT trust dimension (None/Weak/Strong) - does the identifier belong to the user? Raised to Strong by the sibling enrollment WIs on a proven OTP/cert/IdP enrollment. Defaults to None.
+
+  - id: RequiredMessageAuthentication
+    valueType: Boolean
+    defaultValues:
+      - false
+    description: Channel expectation for the per-message trust dimension - whether the channel behind this binding is expected to authenticate every message (Signal-verified / DKIM-valid). The per-message trust itself is not stored; the resolver combines it per call with EnrollmentTrust.
+
+  - id: IdentifierSource
+    valueType: Enum
+    valueCkEnumId: ${this}/IdentifierSource
+    defaultValues:
+      - 0
+    description: Provenance of the binding (SelfService, Admin, IdentityProvider). Defaults to SelfService.
+
+  - id: EnrolledAt
+    valueType: DateTime
+    description: UTC timestamp when the identifier was first enrolled for the user.
+
+  - id: LastVerifiedAt
+    valueType: DateTime
+    description: UTC timestamp of the most recent successful verification of the identifier.
+
+  # AB#5123 self-service certificate enrolment: the not-after of an enrolled client certificate.
+  # Optional and only set for ClientCertificateFingerprint bindings; the certificate is rejected at
+  # enrolment when already expired, and a binding whose ValidUntil is in the past is treated as
+  # INVALID (effective enrollment trust None) by the resolver so an expired certificate "drops to
+  # invalid" without an admin in the loop. Null for every non-certificate kind.
+  - id: ValidUntil
+    valueType: DateTime
+    description: UTC not-after of an enrolled client certificate (ClientCertificateFingerprint kind only); a binding whose ValidUntil is in the past is treated as invalid. Null for other kinds.

@@ -23,17 +23,4 @@ public static class AuthenticationConstants
     }
 
 
-    /// <summary>
-    ///     Copied from IdentityServer4 Framework. Necessary to prevent necessity of having a reference to IdentityServer4
-    ///     nuget package.
-    /// </summary>
-    public class IdentityServerConstants
-    {
-        /// <summary>
-        ///     The Signout scheme used in IdentityServer
-        /// </summary>
-        public const string SignoutScheme = "idsrv";
-
-        public const string ExternalCookieAuthenticationScheme = "idsrv.external";
-    }
 }
