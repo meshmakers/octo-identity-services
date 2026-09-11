@@ -171,15 +171,24 @@ public class ResourceIdentifiersTests
     [InlineData("https://host/mcp", "https://host/mcp")]
     [InlineData("https://host/mcp/", "https://host/mcp")]
     [InlineData("https://host/mcp//", "https://host/mcp")]
-    public void Normalize_StripsTrailingSlashes(string value, string expected)
+    // Only the PATH slash is insignificant: one inside a query or fragment is part of the value,
+    // and a path slash sitting BEFORE a query still has to be stripped.
+    [InlineData("https://host/mcp?tenant=prod/", "https://host/mcp?tenant=prod/")]
+    [InlineData("https://host/mcp/?tenant=prod", "https://host/mcp?tenant=prod")]
+    [InlineData("https://host/mcp/#frag/", "https://host/mcp#frag/")]
+    public void Normalize_StripsTrailingPathSlashes_ButLeavesQueryAndFragmentAlone(
+        string value, string expected)
         => ResourceIdentifiers.Normalize(value).Should().Be(expected);
 
     [Fact]
     public void Comparer_IgnoresTrailingSlash_ButNothingElse()
     {
         ResourceIdentifiers.Comparer.Equals("https://host/mcp", "https://host/mcp/").Should().BeTrue();
+        ResourceIdentifiers.Comparer.Equals("https://host/mcp/?t=1", "https://host/mcp?t=1").Should().BeTrue();
         ResourceIdentifiers.Comparer.Equals("https://host/mcp", "https://host/MCP").Should().BeFalse();
         ResourceIdentifiers.Comparer.Equals("https://host/mcp", "https://host:443/mcp").Should().BeFalse();
+        ResourceIdentifiers.Comparer.Equals("https://host/mcp?t=prod/", "https://host/mcp?t=prod")
+            .Should().BeFalse("a slash inside the query distinguishes two resources");
     }
 
     [Fact]
@@ -190,5 +199,9 @@ public class ResourceIdentifiersTests
 
         ResourceIdentifiers.Variants("https://host/mcp//")
             .Should().BeEquivalentTo(new[] { "https://host/mcp", "https://host/mcp/", "https://host/mcp//" });
+
+        // The slash belongs at the end of the path, not of the string.
+        ResourceIdentifiers.Variants("https://host/mcp?t=1")
+            .Should().BeEquivalentTo(new[] { "https://host/mcp?t=1", "https://host/mcp/?t=1" });
     }
 }

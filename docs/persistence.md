@@ -217,6 +217,7 @@ Located in `src/IdentityServerPersistence/SystemStores/`:
 | `PersistentGrantStore` | `IOctoPersistentGrantStore` | Legacy grant store — email-confirmation & password-reset tokens |
 | `OpenIddict/OpenIddictApplicationStore` | `IOpenIddictApplicationStore<RtClient>` | OpenIddict view of clients (read-only projection incl. `ClientPermissionsMapper` grant-type→permissions transform, AB#4991) |
 | `OpenIddict/OpenIddictScopeStore` | `IOpenIddictScopeStore<RtApiScope>` | OpenIddict view of API scopes incl. scope→audience resolution |
+| `OpenIddict/OpenIddictResourceStore` | `IOpenIddictResourceStore<RtApiResource>` | Resource-indicator (RFC 8707) lookup over the tenant's API resources — enabled-only, trailing-slash tolerant (`ResourceIdentifiers`). Local interface mirroring the OpenIddict 8.x store; OpenIddict 7.x has no resource store to replace (AB#5193) |
 | `OpenIddict/OpenIddictAuthorizationStore` | `IOpenIddictAuthorizationStore<RtOAuthAuthorization>` | OpenIddict authorizations (consent / flow links), per tenant |
 | `OpenIddict/OpenIddictTokenStore` | `IOpenIddictTokenStore<RtOAuthToken>` | OpenIddict tokens (codes, refresh, device/user codes), per tenant |
 | `IdentityProviderStore` | `IOctoIdentityProviderStore` | External identity providers |
