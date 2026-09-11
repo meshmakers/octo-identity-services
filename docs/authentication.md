@@ -1365,6 +1365,43 @@ falls back to the pre-existing `?error=`/`?errorDescription=` query parameters �
 callback still produces — whenever it is absent or the call fails. Raw OAuth codes, the description and
 the request/activity ids live in a collapsed "Technical details" block rather than in the headline.
 
+## Resource Indicators (RFC 8707) — AB#5193
+
+Clients that discover this authority through RFC 9728 protected-resource metadata — today the
+interactive MCP clients (Claude Code) talking to `octo-mcp-service` — send a `resource` parameter
+naming the API they want the token for, on `/connect/authorize`, `/connect/par` and
+`/connect/token` (including the silent refresh).
+
+The parameter is validated against the **requesting tenant's API resources**, not against a static
+list. `OctoResourceValidationHandlers` (`IdentityServices/OpenIddict/`) replaces OpenIddict's three
+built-in `ValidateResources` handlers and resolves each indicator through
+`IOpenIddictResourceStore<RtApiResource>` → `OpenIddictResourceStore`
+(`IdentityServerPersistence/SystemStores/OpenIddict/`) → `IOctoResourceStore`. An indicator is
+accepted when it is statically registered (`RegisterResources(...)`, unused today), or names an
+**enabled** `RtApiResource` of that tenant that carries at least one of the **requested scopes**;
+a request without a `scope` parameter (refresh renewal) is judged on registration alone. Anything
+else is rejected with `invalid_target` / OpenIddict's ID2190 wording.
+
+A **trailing slash is insignificant** in that comparison — the blueprint seeds the MCP resource
+with one, the MCP metadata advertises it without — but nothing else is normalized.
+
+There is **no cache and no invalidation event**: entity caching is off process-wide, so a resource
+created or disabled through the TenantApi or a blueprint apply takes effect on the next request.
+
+OpenIddict's companion check `ValidateResourcePermissions` (ID2192) is removed along with them: it
+looks for a per-client `rsrc:{resource}` permission, and `RtClient` has no allowed-resources field
+that `ClientPermissionsMapper` could project one from, so it could only ever reject. The rule it
+would have enforced — a client reaches an API resource through its scopes — is the scope relation
+above.
+
+🔴 The indicator does **not** shape the issued token. Audiences come from the granted scopes
+(`OctoTokenClaimsService.ResolveAudiencesAsync`), the pre-migration format pinned by the golden
+baseline. If that ever changes, the per-client resource allow-list becomes load-bearing again.
+
+Full rationale, the OpenIddict 8.x upgrade path and the measured before/after baseline:
+`docs/CONCEPT-RESOURCE-INDICATORS.md`.
+
+
 ## Security Considerations
 
 ### Scheme Isolation

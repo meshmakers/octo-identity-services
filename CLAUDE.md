@@ -188,6 +188,25 @@ rotation was needed at cutover.
   endpoint; the Angular device page posts form-encoded to it (`DeviceApiController` now only holds
   the DTOs).
 
+**Resource indicators (RFC 8707, AB#5193):** the `resource` parameter is validated against the
+requesting tenant's API resources, not against OpenIddict's static `RegisterResources(...)`
+allow-list — that list has no per-tenant form and was never filled, so **every** indicator was
+rejected with `invalid_target` and no interactive MCP client could log in (Duende validated against
+the API resource store). `OctoResourceValidationHandlers` (`IdentityServices/OpenIddict/`) replaces
+all three built-in `ValidateResources` handlers (authorize, PAR, token/refresh) and resolves through
+`IOpenIddictResourceStore<RtApiResource>` → `OpenIddictResourceStore`
+(`IdentityServerPersistence/SystemStores/OpenIddict/`) — the same store shape OpenIddict 8.x
+introduces upstream, so the upgrade is a `ReplaceResourceStore<...>()` plus deleting the handlers.
+Accepted: statically registered, or an **enabled** `RtApiResource` of that tenant carrying at least
+one **requested** scope (a request without `scope` — the refresh renewal — is judged on registration
+alone). A trailing slash is insignificant (`ResourceIdentifiers`); nothing else is normalized.
+🔴 The companion `ValidateResourcePermissions` handlers (ID2192) are removed too — they look for a
+per-client `rsrc:{resource}` permission that `RtClient` cannot express, so they could only ever
+reject; removed one by one rather than via `IgnoreResourcePermissions()`. The indicator does **not**
+shape the token (audiences stay scope-derived); if that ever changes, the per-client allow-list
+becomes load-bearing again. No cache, no invalidation event — entity caching is off anyway. See
+`docs/CONCEPT-RESOURCE-INDICATORS.md`.
+
 **Claims parity layer** (`src/IdentityServices/OpenIddict/`):
 
 - `OctoTokenClaimsService`: stamps `tenant_id`, `allowed_tenants`, `home_tenant_id`, roles, and
