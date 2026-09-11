@@ -141,7 +141,7 @@ public static class OctoResourceValidationHandlers
     ///     The requested resource indicators the request may not use — unknown to this tenant,
     ///     disabled, or unrelated to the requested scopes. Empty means the request passes.
     /// </summary>
-    private static async ValueTask<IReadOnlyCollection<string>> FindUnknownResourcesAsync(
+    internal static async ValueTask<IReadOnlyCollection<string>> FindUnknownResourcesAsync(
         IOpenIddictResourceStore<RtApiResource> resourceStore,
         OpenIddictRequest request,
         OpenIddictServerOptions options,
@@ -150,7 +150,10 @@ public static class OctoResourceValidationHandlers
         // Statically registered resources short-circuit the database, exactly as the built-in
         // handlers do. The list is empty today; keeping the fast path means the built-in behavior
         // stays a strict subset of this one.
-        var resources = request.GetResources().ToHashSet(StringComparer.Ordinal);
+        // Slash-insensitive on both sides: Uri.AbsoluteUri always renders a root identifier with
+        // a trailing slash ("https://host:5017" becomes "https://host:5017/"), so an ordinal
+        // comparison here would never match a client that requests it without one.
+        var resources = request.GetResources().ToHashSet(ResourceIdentifiers.Comparer);
         resources.ExceptWith(options.Resources.Select(static resource => resource.AbsoluteUri));
 
         if (resources.Count == 0)
@@ -188,7 +191,13 @@ public static class OctoResourceValidationHandlers
     ///     decides there, and the scopes carried over from the original grant still determine the
     ///     audiences of the renewed token.
     /// </remarks>
+    /// <remarks>
+    ///     <c>Scopes</c> is the one <c>StringArray</c> on <c>ApiResource</c> declared without
+    ///     <c>defaultValues: [ ]</c>, and the TenantApi only assigns it when the DTO carries one —
+    ///     so a scopeless API resource has no attribute at all and the property is null. This is a
+    ///     plain name lookup, so such a resource does reach here.
+    /// </remarks>
     private static bool CoversRequestedScopes(RtApiResource resource, ImmutableArray<string> requestedScopes)
         => requestedScopes.Length == 0 ||
-           requestedScopes.Any(scope => resource.Scopes.Contains(scope, StringComparer.Ordinal));
+           requestedScopes.Any(scope => resource.Scopes?.Contains(scope, StringComparer.Ordinal) == true);
 }
