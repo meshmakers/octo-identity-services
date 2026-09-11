@@ -152,6 +152,45 @@ public static class OpenIddictConfiguration
                 serverOptions.RemoveEventHandler(
                     OpenIddictServerHandlers.Exchange.ValidateAuthorizedParty.Descriptor);
                 serverOptions.AddEventHandler(OctoTokenExchangeAuthorizedPartyHandler.Descriptor);
+
+                // RFC 8707 resource indicators (AB#5193): OpenIddict 7.x validates the resource
+                // parameter against the static RegisterResources(...) allow-list only, which
+                // cannot hold per-tenant API resources — an unfilled list rejects every indicator
+                // with invalid_target and takes all interactive MCP clients down with it. Swap all
+                // three checks (authorize, pushed authorize, token) for the store-backed variant
+                // the OpenIddict 8.x line introduces upstream; RegisterResources stays supported
+                // as the static fast path.
+                serverOptions.RemoveEventHandler(
+                    OpenIddictServerHandlers.Authentication.ValidateResources.Descriptor);
+                serverOptions.AddEventHandler(OctoResourceValidationHandlers.Authorization.Descriptor);
+                serverOptions.RemoveEventHandler(
+                    OpenIddictServerHandlers.Authentication.ValidatePushedResources.Descriptor);
+                serverOptions.AddEventHandler(OctoResourceValidationHandlers.PushedAuthorization.Descriptor);
+                serverOptions.RemoveEventHandler(
+                    OpenIddictServerHandlers.Exchange.ValidateResources.Descriptor);
+                serverOptions.AddEventHandler(OctoResourceValidationHandlers.Token.Descriptor);
+
+                // The per-client resource allow-list sitting behind it (ID2192) goes with them.
+                // It asks the application store for a "rsrc:{resource}" permission, and there is
+                // nothing in the CK model that could produce one: RtClient carries AllowedScopes,
+                // never allowed resources. The permission can therefore never exist and the check
+                // can only ever reject — it is what fails the request once the indicator itself is
+                // accepted. Pre-migration the rule was "a client reaches an API resource through
+                // its scopes", and that is what the replacement handlers above verify; scope
+                // permissions themselves stay enforced via "scp:".
+                // Removed one by one rather than through IgnoreResourcePermissions(): the option
+                // is a server-wide switch that would also silence a real allow-list should the
+                // model ever grow one, while these three lines sit next to the handlers that took
+                // the rule over. 🔴 If the resource indicator is ever made to shape the audience
+                // (today audiences come from the granted scopes — see OctoTokenClaimsService), a
+                // per-client allow-list becomes load-bearing and this has to be revisited.
+                serverOptions.RemoveEventHandler(
+                    OpenIddictServerHandlers.Authentication.ValidateResourcePermissions.Descriptor);
+                serverOptions.RemoveEventHandler(
+                    OpenIddictServerHandlers.Authentication.ValidatePushedResourcePermissions.Descriptor);
+                serverOptions.RemoveEventHandler(
+                    OpenIddictServerHandlers.Exchange.ValidateResourcePermissions.Descriptor);
+
                 var checkSessionEndpoint =
                     identityOptions.AuthorityUrl.EnsureEndsWith("/") + "connect/checksession";
                 serverOptions.AddEventHandler<OpenIddictServerEvents.ApplyConfigurationResponseContext>(

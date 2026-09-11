@@ -6,6 +6,7 @@ using IdentityServerPersistence.Services.Admin;
 using IdentityServerPersistence.Services.Login;
 using IdentityServerPersistence.Services.SelfService;
 using IdentityServerPersistence.SystemStores;
+using IdentityServerPersistence.SystemStores.OpenIddict;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Meshmakers.Octo.Common.DistributionEventHub.Configuration;
@@ -65,6 +66,10 @@ public static class RuntimeEngineBuilderExtensions
 
         builder.Services.AddScoped<IOctoClientStore, ClientStore>();
         builder.Services.AddScoped<IOctoResourceStore, ResourceStore>();
+        // AB#5193: resource-indicator (RFC 8707) lookup for the OpenIddict server handlers. The
+        // other four OpenIddict stores are registered by OpenIddict itself via Replace*Store();
+        // this one has no 7.x counterpart to replace, so it is wired here with its siblings.
+        builder.Services.AddScoped<IOpenIddictResourceStore<RtApiResource>, OpenIddictResourceStore>();
         builder.Services.AddScoped<IOctoPersistentGrantStore, PersistentGrantStore>();
         builder.Services.AddScoped<IOctoIdentityProviderStore, IdentityProviderStore>();
         builder.Services.AddScoped<IExternalTenantUserMappingStore, ExternalTenantUserMappingStore>();

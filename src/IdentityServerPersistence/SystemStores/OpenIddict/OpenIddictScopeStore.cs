@@ -93,7 +93,10 @@ public class OpenIddictScopeStore(IOctoResourceStore resourceStore) : IOpenIddic
         var apiResources = await resourceStore.FindRtApiResourcesByNameAsync([resource]);
         foreach (var apiResource in apiResources)
         {
-            foreach (var scopeName in apiResource.Scopes)
+            // Scopes is null on an API resource created without any (no defaultValues on the CK
+            // attribute), and this is a plain name lookup — unlike GetResourcesAsync below, whose
+            // query guarantees a non-empty list.
+            foreach (var scopeName in apiResource.Scopes ?? Enumerable.Empty<string>())
             {
                 cancellationToken.ThrowIfCancellationRequested();
                 var scope = await FindByNameAsync(scopeName, cancellationToken);
