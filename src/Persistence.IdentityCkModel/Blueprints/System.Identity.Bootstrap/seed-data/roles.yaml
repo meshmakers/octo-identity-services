@@ -1,0 +1,147 @@
+$schema: https://schemas.meshmakers.cloud/runtime-model.schema.json
+dependencies:
+  - System.Identity-2.14.0
+
+# The fourteen built-in roles (660…01 – 660…0E).
+# Part of the System.Identity.Bootstrap blueprint — see blueprint.yaml for the full file list.
+entities:
+
+  # ===========================================================================
+  # ROLES (660…01 – 660…0E) — fourteen built-in roles. Names match
+  # `Meshmakers.Octo.Communication.Contracts.CommonConstants.*Role`. The seed
+  # writes Name + NormalizedName only; SubjectIds / IdentityRoleIds / RoleClaims
+  # are populated at runtime by IdentityServer's RoleManager and must not be
+  # reset by a blueprint re-apply (force: true). They are marked
+  # isRuntimeState in CK model 2.7.0+ so the engine's
+  # PreserveRuntimeStateAttributesAsync keeps existing values on re-apply.
+  # ===========================================================================
+
+  - rtId: '660000000000000000000001'
+    ckTypeId: System.Identity/Role
+    rtWellKnownName: TenantManagement
+    attributes:
+      - id: System/Name
+        value: TenantManagement
+      - id: System.Identity/NormalizedName
+        value: TENANTMANAGEMENT
+
+  - rtId: '660000000000000000000002'
+    ckTypeId: System.Identity/Role
+    rtWellKnownName: UserManagement
+    attributes:
+      - id: System/Name
+        value: UserManagement
+      - id: System.Identity/NormalizedName
+        value: USERMANAGEMENT
+    associations:
+      - roleId: System.Identity/GrantsPermission
+        targetRtId: '660000000000000000000050'
+        targetCkTypeId: System.Identity/DataPermission
+
+  - rtId: '660000000000000000000003'
+    ckTypeId: System.Identity/Role
+    rtWellKnownName: CommunicationManagement
+    attributes:
+      - id: System/Name
+        value: CommunicationManagement
+      - id: System.Identity/NormalizedName
+        value: COMMUNICATIONMANAGEMENT
+
+  - rtId: '660000000000000000000004'
+    ckTypeId: System.Identity/Role
+    rtWellKnownName: Development
+    attributes:
+      - id: System/Name
+        value: Development
+      - id: System.Identity/NormalizedName
+        value: DEVELOPMENT
+
+  - rtId: '660000000000000000000005'
+    ckTypeId: System.Identity/Role
+    rtWellKnownName: AdminPanelManagement
+    attributes:
+      - id: System/Name
+        value: AdminPanelManagement
+      - id: System.Identity/NormalizedName
+        value: ADMINPANELMANAGEMENT
+
+  - rtId: '660000000000000000000006'
+    ckTypeId: System.Identity/Role
+    rtWellKnownName: BotManagement
+    attributes:
+      - id: System/Name
+        value: BotManagement
+      - id: System.Identity/NormalizedName
+        value: BOTMANAGEMENT
+
+  - rtId: '660000000000000000000007'
+    ckTypeId: System.Identity/Role
+    rtWellKnownName: DashboardManagement
+    attributes:
+      - id: System/Name
+        value: DashboardManagement
+      - id: System.Identity/NormalizedName
+        value: DASHBOARDMANAGEMENT
+
+  - rtId: '660000000000000000000008'
+    ckTypeId: System.Identity/Role
+    rtWellKnownName: DashboardViewer
+    attributes:
+      - id: System/Name
+        value: DashboardViewer
+      - id: System.Identity/NormalizedName
+        value: DASHBOARDVIEWER
+
+  - rtId: '660000000000000000000009'
+    ckTypeId: System.Identity/Role
+    rtWellKnownName: ReportingManagement
+    attributes:
+      - id: System/Name
+        value: ReportingManagement
+      - id: System.Identity/NormalizedName
+        value: REPORTINGMANAGEMENT
+
+  - rtId: '66000000000000000000000A'
+    ckTypeId: System.Identity/Role
+    rtWellKnownName: ReportingViewer
+    attributes:
+      - id: System/Name
+        value: ReportingViewer
+      - id: System.Identity/NormalizedName
+        value: REPORTINGVIEWER
+
+  - rtId: '66000000000000000000000B'
+    ckTypeId: System.Identity/Role
+    rtWellKnownName: DataModelManagement
+    attributes:
+      - id: System/Name
+        value: DataModelManagement
+      - id: System.Identity/NormalizedName
+        value: DATAMODELMANAGEMENT
+
+  - rtId: '66000000000000000000000C'
+    ckTypeId: System.Identity/Role
+    rtWellKnownName: StreamDataAdmin
+    attributes:
+      - id: System/Name
+        value: StreamDataAdmin
+      - id: System.Identity/NormalizedName
+        value: STREAMDATAADMIN
+
+  - rtId: '66000000000000000000000D'
+    ckTypeId: System.Identity/Role
+    rtWellKnownName: StreamDataWriter
+    attributes:
+      - id: System/Name
+        value: StreamDataWriter
+      - id: System.Identity/NormalizedName
+        value: STREAMDATAWRITER
+
+  - rtId: '66000000000000000000000E'
+    ckTypeId: System.Identity/Role
+    rtWellKnownName: StreamDataReader
+    attributes:
+      - id: System/Name
+        value: StreamDataReader
+      - id: System.Identity/NormalizedName
+        value: STREAMDATAREADER

@@ -1,0 +1,81 @@
+$schema: https://schemas.meshmakers.cloud/runtime-model.schema.json
+dependencies:
+  - System.Identity-2.14.0
+
+# CLIENTS — the full attribute set is large; every property the imperative seed set
+# explicitly is mirrored here. Attributes not configured by the seed (claims, custom
+# prefixes, CIBA settings) get the IdentityServer default the engine derives from the
+# CK model defaults.
+# 
+# Identity Services Swagger UI (660…32).
+# Part of the System.Identity.Bootstrap blueprint — see blueprint.yaml for the full file list.
+entities:
+
+  # --------------------------------------------------------------------------
+  # 660…32 — Identity Services Swagger UI (authorization code + PKCE; URLs
+  # derived from OctoIdentityServicesOptions.AuthorityUrl via
+  # ${octo.identity.authorityUrl})
+  # --------------------------------------------------------------------------
+  - rtId: '660000000000000000000032'
+    ckTypeId: System.Identity/Client
+    rtWellKnownName: IdentityServicesSwaggerClient
+    attributes:
+      - id: System/Enabled
+        value: true
+      - id: System.Identity/ClientId
+        value: octo-idenityServices-swagger
+      - id: System/Name
+        value: Identity Services Swagger UI
+      - id: System.Identity/ClientUri
+        value: '${octo.identity.authorityUrl}'
+      - id: System.Identity/ProtocolType
+        value: oidc
+      - id: System.Identity/RequireClientSecret
+        value: false
+      - id: System.Identity/Secrets
+        value: []
+      - id: System.Identity/AllowedGrantTypes
+        value:
+          - authorization_code
+      - id: System.Identity/RequirePkce
+        value: true
+      - id: System.Identity/AllowAccessTokensViaBrowser
+        value: true
+      - id: System.Identity/AlwaysIncludeUserClaimsInIdToken
+        value: true
+      - id: System.Identity/AccessTokenType
+        value: 0   # Jwt
+      - id: System.Identity/RedirectUris
+        value:
+          - ckRecordId: System.Identity/ClientUriEntry
+            attributes:
+              - id: System.Identity/Uri
+                value: '${octo.identity.authorityUrl}/swagger/oauth2-redirect.html'
+              - id: System.Identity/Source
+                value: base
+      - id: System.Identity/PostLogoutRedirectUris
+        value:
+          - ckRecordId: System.Identity/ClientUriEntry
+            attributes:
+              - id: System.Identity/Uri
+                value: '${octo.identity.authorityUrl}/'
+              - id: System.Identity/Source
+                value: base
+      - id: System.Identity/AllowedCorsOrigins
+        value:
+          - ckRecordId: System.Identity/ClientUriEntry
+            attributes:
+              - id: System.Identity/Uri
+                value: '${octo.identity.authorityUrl}'
+              - id: System.Identity/Source
+                value: base
+      - id: System.Identity/AllowedScopes
+        value:
+          - openid
+          - profile
+          - email
+          - role
+          - octo_api
+          - octo_api.read_only
+      - id: System.Identity/AutoProvisionInChildTenants
+        value: true

@@ -1,0 +1,56 @@
+$schema: https://schemas.meshmakers.cloud/runtime-model.schema.json
+dependencies:
+  - System.Identity-2.14.0
+
+# Built-in data-permission protection of the identity entities (660…50 / 660…51).
+# Part of the System.Identity.Bootstrap blueprint — see blueprint.yaml for the full file list.
+entities:
+
+  # --- Data permissions (AB#4974): built-in protection of the identity entities. Seeded in
+  # AuditOnly first — flip to Enforce per tenant after the audit events are reviewed (the
+  # cross-tenant provisioning UI and similar consumers need the UserManagement role first).
+  # Policies are blueprint-owned: tenant customization = additional policies, never edits here.
+  - rtId: '660000000000000000000050'
+    ckTypeId: System.Identity/DataPermission
+    rtWellKnownName: IdentityAdministrationPermission
+    attributes:
+      - id: System.Identity/PermissionId
+        value: identity.administration
+      - id: System/Description
+        value: Read/write/delete access to the identity entities of the tenant (users, roles, groups, clients, providers, grants and the data-permission model itself).
+
+  - rtId: '660000000000000000000051'
+    ckTypeId: System.Identity/DataPolicy
+    rtWellKnownName: IdentityAdministrationPolicy
+    attributes:
+      - id: System.Identity/TargetCkTypeIds
+        value:
+          - System.Identity/User
+          - System.Identity/Role
+          - System.Identity/Group
+          - System.Identity/Client
+          - System.Identity/ClientMirror
+          - System.Identity/ExternalTenantUserMapping
+          - System.Identity/IdentityProvider
+          - System.Identity/Resource
+          - System.Identity/PersistedGrant
+          - System.Identity/ServerSideSession
+          - System.Identity/DataProtectionKey
+          - System.Identity/EmailDomainGroupRule
+          - System.Identity/Permission
+          - System.Identity/PermissionRole
+          - System.Identity/DataPermission
+          - System.Identity/DataPolicy
+      - id: System.Identity/PolicyActions
+        value:
+          - Read
+          - Write
+          - Delete
+      - id: System.Identity/PolicyScope
+        value: 0
+      - id: System.Identity/PolicyEnforcementMode
+        value: 1
+    associations:
+      - roleId: System.Identity/PolicyPermission
+        targetRtId: '660000000000000000000050'
+        targetCkTypeId: System.Identity/DataPermission

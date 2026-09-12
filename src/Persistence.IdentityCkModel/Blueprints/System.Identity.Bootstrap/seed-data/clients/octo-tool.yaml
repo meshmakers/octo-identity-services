@@ -1,0 +1,52 @@
+$schema: https://schemas.meshmakers.cloud/runtime-model.schema.json
+dependencies:
+  - System.Identity-2.14.0
+
+# CLIENTS — the full attribute set is large; every property the imperative seed set
+# explicitly is mirrored here. Attributes not configured by the seed (claims, custom
+# prefixes, CIBA settings) get the IdentityServer default the engine derives from the
+# CK model defaults.
+# 
+# OctoTool / octo-cli (660…31).
+# Part of the System.Identity.Bootstrap blueprint — see blueprint.yaml for the full file list.
+entities:
+
+  # --------------------------------------------------------------------------
+  # 660…31 — OctoTool / octo-cli (device-code flow, no PKCE, no client secret)
+  # --------------------------------------------------------------------------
+  - rtId: '660000000000000000000031'
+    ckTypeId: System.Identity/Client
+    rtWellKnownName: OctoToolClient
+    attributes:
+      - id: System/Enabled
+        value: true
+      - id: System.Identity/ClientId
+        value: octo-cli
+      - id: System.Identity/ProtocolType
+        value: oidc
+      - id: System.Identity/RequireClientSecret
+        value: false
+      - id: System.Identity/Secrets
+        value: []
+      - id: System.Identity/AllowedGrantTypes
+        value:
+          - urn:ietf:params:oauth:grant-type:device_code
+      - id: System.Identity/RequirePkce
+        value: false
+      - id: System.Identity/AllowOfflineAccess
+        value: true
+      - id: System.Identity/AllowedScopes
+        value:
+          - openid
+          - profile
+          - email
+          - role
+          - octo_api
+      - id: System.Identity/RedirectUris
+        value: []
+      - id: System.Identity/PostLogoutRedirectUris
+        value: []
+      - id: System.Identity/AllowedCorsOrigins
+        value: []
+      - id: System.Identity/AutoProvisionInChildTenants
+        value: true

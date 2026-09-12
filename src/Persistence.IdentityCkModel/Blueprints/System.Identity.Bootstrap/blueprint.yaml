@@ -25,6 +25,22 @@ description: |
   Ships in AuditOnly; operators flip to Enforce per tenant after reviewing the
   audit events (AB#4973 migration path). Requires System.Identity 2.12.0.
 
+  The seed is split across one file per entity class (AB#4758 `seedDataPaths`) —
+  same 33 entities, no data change, so the blueprint version is deliberately NOT
+  bumped: a re-import would be a no-op, and an unchanged version means existing
+  tenants never re-import at all.
+
+  BUILD ORDER MATTERS. This blueprint is embedded in and applied by the Identity
+  service itself (`AddBlueprintSystemIdentityBootstrapV1` in Program.cs), so there
+  is no catalog-vs-runtime skew — but the engine it is compiled against must know
+  `seedDataPaths`. An older engine deserialises the manifest with
+  IgnoreUnmatchedProperties, drops the property, finds no `seedDataPath` and seeds
+  NOTHING while still reporting success. Existing tenants survive that (the version
+  did not change, so no re-import runs), but a tenant enabled by such a build gets
+  an identity tenant with no roles, no OIDC clients and therefore no login. Do not
+  ship an Identity build until the ConstructionKit engine packages carrying AB#4758
+  are on the feed it resolves.
+
   Following the OctoMesh "System.* = service-managed" convention this blueprint
   is auto-applied by the Identity service on tenant Enable / startup once Phase 3
   PR #3 enables the `RefreshTenantStateAsync` override. PR #4 replaces the
@@ -112,4 +128,19 @@ description: |
 ckModelDependencies:
   - System.Identity-[2.14.0,3.0)
 
-seedDataPath: seed-data/entities.yaml
+# All files below are merged into ONE runtime model before the import runs, so the order
+# is presentation only and associations may cross files (the UserManagement role in
+# roles.yaml grants the DataPermission in data-permissions.yaml; the TenantOwners group
+# in groups.yaml references all fourteen roles).
+seedDataPaths:
+  - seed-data/roles.yaml
+  - seed-data/identity-resources.yaml
+  - seed-data/api-scopes.yaml
+  - seed-data/api-resources.yaml
+  - seed-data/clients/refinery-studio.yaml
+  - seed-data/clients/octo-tool.yaml
+  - seed-data/clients/identity-swagger.yaml
+  - seed-data/clients/mcp.yaml
+  - seed-data/clients/platform-swagger.yaml
+  - seed-data/groups.yaml
+  - seed-data/data-permissions.yaml

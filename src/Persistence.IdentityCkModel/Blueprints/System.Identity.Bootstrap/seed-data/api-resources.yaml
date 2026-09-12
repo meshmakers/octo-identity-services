@@ -1,0 +1,86 @@
+$schema: https://schemas.meshmakers.cloud/runtime-model.schema.json
+dependencies:
+  - System.Identity-2.14.0
+
+# The API resources: octoAPI (660…20) and the MCP resource indicator (660…21).
+# Part of the System.Identity.Bootstrap blueprint — see blueprint.yaml for the full file list.
+entities:
+
+  # ===========================================================================
+  # API RESOURCES (660…20) — OctoApi advertises all three scopes plus the
+  # `role` user claim so role-based authorization works on every protected
+  # endpoint.
+  # ===========================================================================
+
+  - rtId: '660000000000000000000020'
+    ckTypeId: System.Identity/ApiResource
+    rtWellKnownName: octoAPI
+    attributes:
+      - id: System/Enabled
+        value: true
+      - id: System/Name
+        value: octoAPI
+      - id: System/DisplayName
+        value: Octo API
+      - id: System/Description
+        value: Unified access to all Octo platform APIs
+      - id: System.Identity/ResourceClaims
+        value:
+          - role
+          # Caller identity for resource servers that attribute actions to the
+          # user without a userinfo round-trip — e.g. the mesh adapter's
+          # FromHttpRequest@2 principal ($.principal.email/.name feeds
+          # SourceSender on uploads). Access tokens carried no identity claims
+          # before, so those fields were always null.
+          - email
+          - name
+          - preferred_username
+      - id: System.Identity/ShowInDiscoveryDocument
+        value: true
+      - id: System.Identity/RequireResourceIndicator
+        value: false
+      - id: System.Identity/Secrets
+        value: []
+      - id: System.Identity/Scopes
+        value:
+          - octo_api
+          - octo_api.read_only
+          - octo_api.data_model_management
+      - id: System.Identity/AllowedAccessTokenSigningAlgorithms
+        value: []
+
+  # MCP resource indicator (RFC 8707). Interactive OAuth clients like Claude Code send
+  # resource=<mcp public url> on /connect/authorize; the identity service (OpenIddict) matches the value exactly against an
+  # ApiResource Name. Without this, the request fails with invalid_target. The MCP server itself does
+  # not validate the audience (ValidateAudience=false), so this only satisfies the resource indicator
+  # — it is an isolated protocol shim, NOT a per-service audience: it carries the same scopes as
+  # octoAPI (660…020) and no resource server validates it. The trailing slash is required: the value
+  # must match byte-for-byte what the client transmits, and ${octo.mcp.publicUrl} resolves without one.
+  - rtId: '660000000000000000000021'
+    ckTypeId: System.Identity/ApiResource
+    rtWellKnownName: mcpApi
+    attributes:
+      - id: System/Enabled
+        value: true
+      - id: System/Name
+        value: '${octo.mcp.publicUrl}/'
+      - id: System/DisplayName
+        value: Octo MCP API
+      - id: System/Description
+        value: Resource indicator for the MCP server (interactive OAuth clients such as Claude Code)
+      - id: System.Identity/ResourceClaims
+        value:
+          - role
+      - id: System.Identity/ShowInDiscoveryDocument
+        value: true
+      - id: System.Identity/RequireResourceIndicator
+        value: false
+      - id: System.Identity/Secrets
+        value: []
+      - id: System.Identity/Scopes
+        value:
+          - octo_api
+          - octo_api.read_only
+          - octo_api.data_model_management
+      - id: System.Identity/AllowedAccessTokenSigningAlgorithms
+        value: []
