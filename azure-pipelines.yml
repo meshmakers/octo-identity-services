@@ -46,7 +46,11 @@ resources:
       type: github
       name: meshmakers/octo-pipeline-templates
       endpoint: meshmakers-access-token
-      ref: refs/tags/tpl-v0.5.0
+      # tpl-v0.5.3 derives the octo-ckc version from this build's own version line
+      # ($(MajorVersion).$(MinorVersion).*) instead of letting `dotnet tool install`
+      # resolve the globally-highest stable version, which on the 0.2 dev lane means
+      # the 3.4 release compiler (3.4.115 > 0.2.x) validating a 0.2 CK model.
+      ref: refs/tags/tpl-v0.5.3
 
 trigger:
   batch: true
