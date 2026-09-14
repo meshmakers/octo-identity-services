@@ -1,0 +1,118 @@
+$schema: https://schemas.meshmakers.cloud/runtime-model.schema.json
+dependencies:
+  - System.Identity-2.14.0
+
+# CLIENTS — the full attribute set is large; every property the imperative seed set
+# explicitly is mirrored here. Attributes not configured by the seed (claims, custom
+# prefixes, CIBA settings) get the IdentityServer default the engine derives from the
+# CK model defaults.
+# 
+# Refinery Studio SPA (660…30).
+# Part of the System.Identity.Bootstrap blueprint — see blueprint.yaml for the full file list.
+entities:
+
+  # --------------------------------------------------------------------------
+  # 660…30 — Refinery Studio (OIDC SPA, authorization code + PKCE). URLs use
+  # the ${octo.identity.refineryStudioUrl} variable resolved at apply time by
+  # IdentityBlueprintVariableProvider (PR #3). When the option is unset the
+  # placeholder resolves to the empty string and the OIDC flow fails on user
+  # login — the configuration error is then visible to the operator instead
+  # of silently swallowed.
+  # --------------------------------------------------------------------------
+  - rtId: '660000000000000000000030'
+    ckTypeId: System.Identity/Client
+    rtWellKnownName: RefineryStudioClient
+    attributes:
+      - id: System/Enabled
+        value: true
+      - id: System.Identity/ClientId
+        value: octo-data-refinery-studio
+      - id: System/Name
+        value: Data Refinery Studio
+      - id: System.Identity/ClientUri
+        value: '${octo.identity.refineryStudioUrl}'
+      - id: System.Identity/ProtocolType
+        value: oidc
+      - id: System.Identity/RequireClientSecret
+        value: false
+      - id: System.Identity/Secrets
+        value: []
+      - id: System.Identity/AllowedGrantTypes
+        value:
+          - authorization_code
+      - id: System.Identity/RequirePkce
+        value: true
+      - id: System.Identity/RequireConsent
+        value: false
+      - id: System.Identity/AllowAccessTokensViaBrowser
+        value: true
+      - id: System.Identity/AlwaysIncludeUserClaimsInIdToken
+        value: true
+      - id: System.Identity/UpdateAccessTokenClaimsOnRefresh
+        value: true
+      - id: System.Identity/AccessTokenType
+        value: 0   # Jwt
+      # AB#4209 Step 2b — {{family.local-dev}} placeholder expanded at Identity startup by
+      # BlueprintClientUriFamilyResolver from OctoIdentityServicesOptions.UriFamilies. Each
+      # member becomes one entry with Source = "family:local-dev". Unconfigured local-dev
+      # family (production clusters) drops the placeholder silently. Members are stored
+      # verbatim — set values that match the target list's format contract (trailing slash
+      # for redirect/post-logout, no slash for CORS origin) or configure separate families.
+      - id: System.Identity/RedirectUris
+        value:
+          - ckRecordId: System.Identity/ClientUriEntry
+            attributes:
+              - id: System.Identity/Uri
+                value: '${octo.identity.refineryStudioUrl}/'
+              - id: System.Identity/Source
+                value: base
+          - ckRecordId: System.Identity/ClientUriEntry
+            attributes:
+              - id: System.Identity/Uri
+                value: '{{family.local-dev}}'
+              - id: System.Identity/Source
+                value: base
+      - id: System.Identity/PostLogoutRedirectUris
+        value:
+          - ckRecordId: System.Identity/ClientUriEntry
+            attributes:
+              - id: System.Identity/Uri
+                value: '${octo.identity.refineryStudioUrl}/'
+              - id: System.Identity/Source
+                value: base
+          - ckRecordId: System.Identity/ClientUriEntry
+            attributes:
+              - id: System.Identity/Uri
+                value: '{{family.local-dev}}'
+              - id: System.Identity/Source
+                value: base
+      - id: System.Identity/AllowedCorsOrigins
+        value:
+          - ckRecordId: System.Identity/ClientUriEntry
+            attributes:
+              - id: System.Identity/Uri
+                value: '${octo.identity.refineryStudioUrl}'
+              - id: System.Identity/Source
+                value: base
+          - ckRecordId: System.Identity/ClientUriEntry
+            attributes:
+              - id: System.Identity/Uri
+                value: '{{family.local-dev}}'
+              - id: System.Identity/Source
+                value: base
+      - id: System.Identity/FrontChannelLogoutUri
+        value: '${octo.identity.refineryStudioUrl}/logout/callback'
+      - id: System.Identity/FrontChannelLogoutSessionRequired
+        value: true
+      - id: System.Identity/AllowOfflineAccess
+        value: true
+      - id: System.Identity/AllowedScopes
+        value:
+          - openid
+          - profile
+          - email
+          - role
+          - allowed_tenants
+          - octo_api
+      - id: System.Identity/AutoProvisionInChildTenants
+        value: true

@@ -1,0 +1,73 @@
+$schema: https://schemas.meshmakers.cloud/runtime-model.schema.json
+dependencies:
+  - System.Identity-2.14.0
+
+# The three API scopes (660…14 – 660…16).
+# Part of the System.Identity.Bootstrap blueprint — see blueprint.yaml for the full file list.
+entities:
+
+  # ===========================================================================
+  # API SCOPES (660…14 – 660…16) — names match
+  # CommonConstants.OctoApi{FullAccess,ReadOnly,DataModelManagement}.
+  # The child-tenant write-through path does NOT seed
+  # octo_api.data_model_management — that scope is system-tenant-only. Phase 3
+  # ships the full set in every tenant for parity; admins who restrict it for
+  # a child tenant disable it on the entity (Enabled=false) afterwards.
+  # ===========================================================================
+
+  - rtId: '660000000000000000000014'
+    ckTypeId: System.Identity/ApiScope
+    rtWellKnownName: octo_api
+    attributes:
+      - id: System/Enabled
+        value: true
+      - id: System/Name
+        value: octo_api
+      - id: System/DisplayName
+        value: Full access to all Octo platform APIs
+      - id: System.Identity/ResourceClaims
+        value: []
+      - id: System.Identity/ShowInDiscoveryDocument
+        value: true
+      - id: System.Identity/IsRequired
+        value: false
+      - id: System.Identity/IsEmphasized
+        value: false
+
+  - rtId: '660000000000000000000015'
+    ckTypeId: System.Identity/ApiScope
+    rtWellKnownName: octo_api.read_only
+    attributes:
+      - id: System/Enabled
+        value: true
+      - id: System/Name
+        value: octo_api.read_only
+      - id: System/DisplayName
+        value: Read-only access to all Octo platform APIs
+      - id: System.Identity/ResourceClaims
+        value: []
+      - id: System.Identity/ShowInDiscoveryDocument
+        value: true
+      - id: System.Identity/IsRequired
+        value: false
+      - id: System.Identity/IsEmphasized
+        value: false
+
+  - rtId: '660000000000000000000016'
+    ckTypeId: System.Identity/ApiScope
+    rtWellKnownName: octo_api.data_model_management
+    attributes:
+      - id: System/Enabled
+        value: true
+      - id: System/Name
+        value: octo_api.data_model_management
+      - id: System/DisplayName
+        value: Manage construction kit data models
+      - id: System.Identity/ResourceClaims
+        value: []
+      - id: System.Identity/ShowInDiscoveryDocument
+        value: true
+      - id: System.Identity/IsRequired
+        value: false
+      - id: System.Identity/IsEmphasized
+        value: false

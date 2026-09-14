@@ -1,0 +1,67 @@
+$schema: https://schemas.meshmakers.cloud/runtime-model.schema.json
+dependencies:
+  - System.Identity-2.14.0
+
+# The TenantOwners group (660…40) with every built-in role assigned.
+# Part of the System.Identity.Bootstrap blueprint — see blueprint.yaml for the full file list.
+entities:
+
+  # ===========================================================================
+  # GROUPS (660…40) — TenantOwners group with every built-in role assigned via
+  # the AssignedRole association. Replaces the runtime SetRoleIdsAsync
+  # reconciliation in CreateDefaultGroupsAsync.
+  # ===========================================================================
+
+  - rtId: '660000000000000000000040'
+    ckTypeId: System.Identity/Group
+    rtWellKnownName: TenantOwners
+    attributes:
+      - id: System.Identity/GroupName
+        value: TenantOwners
+      - id: System.Identity/NormalizedGroupName
+        value: TENANTOWNERS
+      - id: System.Identity/GroupDescription
+        value: Default group with all roles assigned. Members inherit all tenant permissions.
+    associations:
+      - roleId: System.Identity/AssignedRole
+        targetRtId: '660000000000000000000001'
+        targetCkTypeId: System.Identity/Role
+      - roleId: System.Identity/AssignedRole
+        targetRtId: '660000000000000000000002'
+        targetCkTypeId: System.Identity/Role
+      - roleId: System.Identity/AssignedRole
+        targetRtId: '660000000000000000000003'
+        targetCkTypeId: System.Identity/Role
+      - roleId: System.Identity/AssignedRole
+        targetRtId: '660000000000000000000004'
+        targetCkTypeId: System.Identity/Role
+      - roleId: System.Identity/AssignedRole
+        targetRtId: '660000000000000000000005'
+        targetCkTypeId: System.Identity/Role
+      - roleId: System.Identity/AssignedRole
+        targetRtId: '660000000000000000000006'
+        targetCkTypeId: System.Identity/Role
+      - roleId: System.Identity/AssignedRole
+        targetRtId: '660000000000000000000007'
+        targetCkTypeId: System.Identity/Role
+      - roleId: System.Identity/AssignedRole
+        targetRtId: '660000000000000000000008'
+        targetCkTypeId: System.Identity/Role
+      - roleId: System.Identity/AssignedRole
+        targetRtId: '660000000000000000000009'
+        targetCkTypeId: System.Identity/Role
+      - roleId: System.Identity/AssignedRole
+        targetRtId: '66000000000000000000000A'
+        targetCkTypeId: System.Identity/Role
+      - roleId: System.Identity/AssignedRole
+        targetRtId: '66000000000000000000000B'
+        targetCkTypeId: System.Identity/Role
+      - roleId: System.Identity/AssignedRole
+        targetRtId: '66000000000000000000000C'
+        targetCkTypeId: System.Identity/Role
+      - roleId: System.Identity/AssignedRole
+        targetRtId: '66000000000000000000000D'
+        targetCkTypeId: System.Identity/Role
+      - roleId: System.Identity/AssignedRole
+        targetRtId: '66000000000000000000000E'
+        targetCkTypeId: System.Identity/Role

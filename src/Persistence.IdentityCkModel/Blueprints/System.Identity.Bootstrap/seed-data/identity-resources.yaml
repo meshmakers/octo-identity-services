@@ -1,0 +1,129 @@
+$schema: https://schemas.meshmakers.cloud/runtime-model.schema.json
+dependencies:
+  - System.Identity-2.14.0
+
+# The five OIDC identity resources (660…0F – 660…13).
+# Part of the System.Identity.Bootstrap blueprint — see blueprint.yaml for the full file list.
+entities:
+
+  # ===========================================================================
+  # IDENTITY RESOURCES (660…0F – 660…13)
+  # ===========================================================================
+
+  - rtId: '66000000000000000000000F'
+    ckTypeId: System.Identity/IdentityResource
+    rtWellKnownName: openid
+    attributes:
+      - id: System/Enabled
+        value: true
+      - id: System/Name
+        value: openid
+      - id: System/DisplayName
+        value: Your user identifier
+      - id: System.Identity/ResourceClaims
+        value:
+          - sub
+      - id: System.Identity/ShowInDiscoveryDocument
+        value: true
+      - id: System.Identity/IsRequired
+        value: true
+      - id: System.Identity/IsEmphasized
+        value: false
+
+  - rtId: '660000000000000000000010'
+    ckTypeId: System.Identity/IdentityResource
+    rtWellKnownName: profile
+    attributes:
+      - id: System/Enabled
+        value: true
+      - id: System/Name
+        value: profile
+      - id: System/DisplayName
+        value: User profile
+      - id: System.Identity/ResourceClaims
+        value:
+          - name
+          - family_name
+          - given_name
+          - middle_name
+          - nickname
+          - preferred_username
+          - profile
+          - picture
+          - website
+          - gender
+          - birthdate
+          - zoneinfo
+          - locale
+          - updated_at
+      - id: System.Identity/ShowInDiscoveryDocument
+        value: true
+      - id: System.Identity/IsRequired
+        value: false
+      - id: System.Identity/IsEmphasized
+        value: false
+
+  - rtId: '660000000000000000000011'
+    ckTypeId: System.Identity/IdentityResource
+    rtWellKnownName: email
+    attributes:
+      - id: System/Enabled
+        value: true
+      - id: System/Name
+        value: email
+      - id: System/DisplayName
+        value: Your email address
+      - id: System.Identity/ResourceClaims
+        value:
+          - email
+          - email_verified
+      - id: System.Identity/ShowInDiscoveryDocument
+        value: true
+      - id: System.Identity/IsRequired
+        value: false
+      - id: System.Identity/IsEmphasized
+        value: false
+
+  - rtId: '660000000000000000000012'
+    ckTypeId: System.Identity/IdentityResource
+    rtWellKnownName: role
+    attributes:
+      - id: System/Enabled
+        value: true
+      - id: System/Name
+        value: role
+      - id: System/DisplayName
+        value: Roles
+      - id: System/Description
+        value: The roles the user is assigned to
+      - id: System.Identity/ResourceClaims
+        value:
+          - role
+      - id: System.Identity/ShowInDiscoveryDocument
+        value: true
+      - id: System.Identity/IsRequired
+        value: false
+      - id: System.Identity/IsEmphasized
+        value: false
+
+  - rtId: '660000000000000000000013'
+    ckTypeId: System.Identity/IdentityResource
+    rtWellKnownName: allowed_tenants
+    attributes:
+      - id: System/Enabled
+        value: true
+      - id: System/Name
+        value: allowed_tenants
+      - id: System/DisplayName
+        value: Allowed Tenants
+      - id: System/Description
+        value: Tenants the user is allowed to access
+      - id: System.Identity/ResourceClaims
+        value:
+          - allowed_tenants
+      - id: System.Identity/ShowInDiscoveryDocument
+        value: true
+      - id: System.Identity/IsRequired
+        value: false
+      - id: System.Identity/IsEmphasized
+        value: false
