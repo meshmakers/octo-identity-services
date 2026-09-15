@@ -1,4 +1,17 @@
 "$schema": "https://schemas.meshmakers.cloud/construction-kit-meta.schema.json"
-modelId: System.Identity-2.18.0
+# 2.19.0 marks the client URI attributes (ClientUri, RedirectUris,
+# PostLogoutRedirectUris, AllowedCorsOrigins) as isRuntimeState (AB#5210).
+#
+# Why: the productive redirect URI is the deployment's public hostname. That
+# hostname is already isRuntimeState (AB#4706) precisely because no seed can
+# derive it - ${octo.domain} is the PLATFORM domain while apps are served from
+# their own. Leaving the URIs seed-owned meant every blueprint re-apply reset
+# them to a host that does not resolve; on prod-1 that took sign-in down for six
+# accounting tenants on 2026-09-15 ("invalid redirect_uri", OpenIddict ID2043).
+# The two attributes describe one fact and must share one owner.
+#
+# CkSemVerClassifier rates an isRuntimeState change Minor (blueprint re-apply
+# behaviour changes), hence the minor bump.
+modelId: System.Identity-2.19.0
 dependencies:
   - System-[2.0,3.0)

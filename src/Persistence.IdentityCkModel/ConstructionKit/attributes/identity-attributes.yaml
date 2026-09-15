@@ -242,7 +242,10 @@ attributes:
       - true
   - id: ClientUri
     valueType: String
-    description: URI to further information about client (used on consent screen)
+    isRuntimeState: true
+    description: >-
+      URI to further information about client (used on consent screen).
+      Runtime-state for the same reason as RedirectUris (AB#5210).
   - id: LogoUri
     valueType: String
     description: URI to client logo (used on consent screen)
@@ -297,12 +300,27 @@ attributes:
   - id: RedirectUris
     valueType: RecordArray
     valueCkRecordId: ${this}/ClientUriEntry
-    description: Specifies allowed URIs to return tokens or authorization codes to. Each entry carries a Source marker so local-dev / operator overlay URIs can coexist with base (blueprint) URIs.
+    isRuntimeState: true
+    description: >-
+      Specifies allowed URIs to return tokens or authorization codes to. Each entry
+      carries a Source marker so local-dev / operator overlay URIs can coexist with
+      base (blueprint) URIs.
+      Runtime-state (AB#5210, same reasoning as Hostname in AB#4706): the productive
+      URI is the public hostname of the deployment, which is tenant-specific and
+      operator-managed and which no seed can derive - ${octo.domain} is the PLATFORM
+      domain while apps are served from their own. A blueprint re-apply therefore
+      preserves what the operator set instead of resetting it to the seeded default
+      and silently breaking sign-in with invalid_redirect_uri. Deliberate trade-off -
+      changing this URI in a seed no longer reaches tenants that already hold the
+      client; use ApplyClientOverlay or set it explicitly.
     defaultValues: [ ]
   - id: PostLogoutRedirectUris
     valueType: RecordArray
     valueCkRecordId: ${this}/ClientUriEntry
-    description: Specifies allowed URIs to redirect to after logout. Each entry carries a Source marker (see RedirectUris).
+    isRuntimeState: true
+    description: >-
+      Specifies allowed URIs to redirect to after logout. Each entry carries a Source
+      marker (see RedirectUris). Runtime-state for the same reason (AB#5210).
     defaultValues: [ ]
   - id: FrontChannelLogoutUri
     valueType: String
@@ -442,7 +460,10 @@ attributes:
   - id: AllowedCorsOrigins
     valueType: RecordArray
     valueCkRecordId: ${this}/ClientUriEntry
-    description: Gets or sets the allowed CORS origins for JavaScript clients. Each entry carries a Source marker (see RedirectUris).
+    isRuntimeState: true
+    description: >-
+      Gets or sets the allowed CORS origins for JavaScript clients. Each entry carries
+      a Source marker (see RedirectUris). Runtime-state for the same reason (AB#5210).
     defaultValues: [ ]
   - id: InitiateLoginUri
     valueType: String
