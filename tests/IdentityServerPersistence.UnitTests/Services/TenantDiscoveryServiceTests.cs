@@ -23,14 +23,15 @@ public class TenantDiscoveryServiceTests
 {
     private const string SystemTenant = "octosystem";
 
-    private static readonly OctoTenant[] Registry =
-    [
-        new("accounting", "db-accounting", SystemTenant),
-        new("energyiq", "db-energyiq", SystemTenant),
-        new("bernkopf", "db-bernkopf", "accounting"),
-        new("tecob", "db-tecob", "bernkopf"),
-        new("bierok", "db-bierok", "bernkopf")
-    ];
+    private static readonly Dictionary<string, string[]> Hierarchy = new(StringComparer.OrdinalIgnoreCase)
+    {
+        [SystemTenant] = ["accounting", "energyiq"],
+        ["accounting"] = ["bernkopf"],
+        ["bernkopf"] = ["tecob", "bierok"],
+        ["energyiq"] = [],
+        ["tecob"] = [],
+        ["bierok"] = []
+    };
 
     private readonly ISystemContext _systemContext = Substitute.For<ISystemContext>();
     private readonly IAllowedTenantsResolver _resolver = Substitute.For<IAllowedTenantsResolver>();
@@ -40,17 +41,27 @@ public class TenantDiscoveryServiceTests
     public TenantDiscoveryServiceTests()
     {
         _systemContext.TenantId.Returns(SystemTenant);
-        _systemContext.GetAdminSessionAsync().Returns(Substitute.For<IOctoAdminSession>());
+        // The user search enumerates the platform registry (parent ids irrelevant there); the scope
+        // walk goes through each tenant's own context.
         var registry = Substitute.For<IResultSet<OctoTenant>>();
-        registry.Items.Returns(Registry);
+        registry.Items.Returns(Hierarchy.Keys.Where(t => t != SystemTenant).Select(t => new OctoTenant(t, "db-" + t)).ToArray());
+        _systemContext.GetAdminSessionAsync().Returns(Substitute.For<IOctoAdminSession>());
         _systemContext.GetAllTenantsAsync(Arg.Any<IOctoAdminSession>(), Arg.Any<int?>(), Arg.Any<int?>())
             .Returns(registry);
-
-        SetupTenant(SystemTenant, null);
-        foreach (var tenant in Registry)
+        foreach (var (tenantId, children) in Hierarchy)
         {
-            SetupTenant(tenant.TenantId, tenant.TenantId == "bernkopf" ? _klaus : null);
+            var context = Substitute.For<ITenantContext>();
+            context.TenantId.Returns(tenantId);
+            context.GetAdminSessionAsync().Returns(Substitute.For<IOctoAdminSession>());
+            var childSet = Substitute.For<IResultSet<OctoTenant>>();
+            childSet.Items.Returns(children.Select(c => new OctoTenant(c, "db-" + c, tenantId)).ToArray());
+            context.GetChildTenantsAsync(Arg.Any<IOctoAdminSession>(), Arg.Any<int?>(), Arg.Any<int?>()).Returns(childSet);
+            _systemContext.TryFindTenantContextAsync(tenantId).Returns(context);
+            SetupTenant(tenantId, tenantId == "bernkopf" ? _klaus : null);
         }
+
+        _systemContext.TryFindTenantContextAsync(Arg.Is<string>(t => !Hierarchy.ContainsKey(t)))
+            .Returns((ITenantContext?)null);
 
         _resolver.ResolveAsync("bernkopf", _klaus)
             .Returns(new List<string> { "bernkopf", "tecob", "bierok", "energyiq", SystemTenant });

@@ -129,72 +129,61 @@ public class TenantDiscoveryService(
 
         try
         {
-            var adminSession = await systemContext.GetAdminSessionAsync();
-            var registry = await systemContext.GetAllTenantsAsync(adminSession);
-            return CollectDescendants(registry.Items, systemContext.TenantId, scopeTenantId);
+            // Walk the hierarchy through each tenant's own context, exactly as the client mirror
+            // does for a parent tenant: ITenantContext.GetChildTenantsAsync answers with the
+            // tenant's direct children — the parent-local rows of its own database (which never
+            // carry a parent id) plus the platform-registry rows stamped with it. This is
+            // deliberately NOT built on ISystemContext.GetAllTenantsAsync: that enumeration drops
+            // the parent id of every registry row, so from there every tenant looks like a direct
+            // child of the system tenant and a scope below it has no descendants at all (found on
+            // prod-1 with 3.4.126).
+            var scopeContext = await systemContext.TryFindTenantContextAsync(scopeTenantId);
+            if (scopeContext == null)
+            {
+                return null;
+            }
+
+            var descendants = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            var visited = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { scopeTenantId };
+            var queue = new Queue<(string TenantId, ITenantContext Context)>();
+            queue.Enqueue((scopeTenantId, scopeContext));
+
+            while (queue.Count > 0)
+            {
+                var (tenantId, context) = queue.Dequeue();
+                using var adminSession = await context.GetAdminSessionAsync();
+                var children = await context.GetChildTenantsAsync(adminSession);
+
+                foreach (var child in children.Items)
+                {
+                    // A cycle in a hand-edited registry must not loop forever.
+                    if (!visited.Add(child.TenantId))
+                    {
+                        continue;
+                    }
+
+                    descendants.Add(child.TenantId);
+                    var childContext = await systemContext.TryFindTenantContextAsync(child.TenantId);
+                    if (childContext != null)
+                    {
+                        queue.Enqueue((child.TenantId, childContext));
+                    }
+                    else
+                    {
+                        logger.LogDebug(
+                            "Tenant discovery: child '{ChildTenantId}' of '{TenantId}' has no tenant context — treated as a leaf",
+                            child.TenantId, tenantId);
+                    }
+                }
+            }
+
+            return descendants;
         }
         catch (Exception ex)
         {
             logger.LogWarning(ex, "Failed to resolve the discovery scope '{ScopeTenantId}'", scopeTenantId);
             return null;
         }
-    }
-
-    /// <summary>
-    ///     Walks the registry hierarchy below <paramref name="scopeTenantId" />. A registry record
-    ///     without a parent id is a direct child of the registry owner, i.e. the system tenant
-    ///     (see <see cref="OctoTenant.ParentTenantId" />). Ids compare case-insensitively; the
-    ///     returned ids carry the registry's spelling. <c>null</c> when the scope is neither the
-    ///     system tenant nor a registered tenant.
-    /// </summary>
-    internal static IReadOnlySet<string>? CollectDescendants(IEnumerable<OctoTenant> registry,
-        string systemTenantId, string scopeTenantId)
-    {
-        var childrenByParent = new Dictionary<string, List<string>>(StringComparer.OrdinalIgnoreCase);
-        var known = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { systemTenantId };
-
-        foreach (var tenant in registry)
-        {
-            known.Add(tenant.TenantId);
-            var parent = string.IsNullOrEmpty(tenant.ParentTenantId) ? systemTenantId : tenant.ParentTenantId;
-            if (!childrenByParent.TryGetValue(parent, out var children))
-            {
-                children = [];
-                childrenByParent[parent] = children;
-            }
-
-            children.Add(tenant.TenantId);
-        }
-
-        if (!known.Contains(scopeTenantId))
-        {
-            return null;
-        }
-
-        var descendants = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        var queue = new Queue<string>();
-        queue.Enqueue(scopeTenantId);
-
-        while (queue.Count > 0)
-        {
-            var current = queue.Dequeue();
-            if (!childrenByParent.TryGetValue(current, out var children))
-            {
-                continue;
-            }
-
-            foreach (var child in children)
-            {
-                // A cycle in a hand-edited registry must not loop forever.
-                if (descendants.Add(child) && !string.Equals(child, scopeTenantId, StringComparison.OrdinalIgnoreCase))
-                {
-                    queue.Enqueue(child);
-                }
-            }
-        }
-
-        descendants.Remove(scopeTenantId);
-        return descendants;
     }
 
     private async Task<IReadOnlyList<string>> GetAllTenantIdsAsync()
