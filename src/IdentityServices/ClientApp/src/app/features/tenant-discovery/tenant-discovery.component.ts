@@ -47,8 +47,14 @@ export class TenantDiscoveryComponent implements OnInit {
   // OAuth return URL (the original /connect/authorize URL)
   private returnUrl = '';
 
+  // AB#5311: the tenant subtree an app host serves. Set by the middleware from
+  // `acr_values=tenant_scope:{id}`; the lookup then returns only tenants below
+  // it. Absent for clients that serve every tenant.
+  private scopeTenantId = '';
+
   ngOnInit(): void {
     this.returnUrl = this.route.snapshot.queryParams['returnUrl'] || '';
+    this.scopeTenantId = this.route.snapshot.queryParams['scopeTenantId'] || '';
 
     // knownTenants from session cookies are unreliable — they reflect browser
     // sessions from any previous user, not the current user's memberships.
@@ -66,7 +72,8 @@ export class TenantDiscoveryComponent implements OnInit {
 
     // POST directly to /api/tenant-discovery/lookup (no tenant prefix)
     this.http.post<TenantDiscoveryResult>('/api/tenant-discovery/lookup', {
-      emailOrUsername: this.emailOrUsername.trim()
+      emailOrUsername: this.emailOrUsername.trim(),
+      scopeTenantId: this.scopeTenantId || undefined
     }).subscribe({
       next: (result) => {
         this.loading = false;

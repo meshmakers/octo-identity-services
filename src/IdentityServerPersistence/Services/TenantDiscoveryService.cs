@@ -17,8 +17,21 @@ public interface ITenantDiscoveryService
     ///     via cross-tenant mappings using <see cref="IAllowedTenantsResolver" />.
     /// </summary>
     /// <param name="emailOrUsername">The email address or username to search for</param>
+    /// <param name="scopeTenantId">
+    ///     Optional discovery scope (AB#5311): when set, only tenants strictly below this tenant in
+    ///     the registry hierarchy — direct and indirect descendants, never the scope itself — are
+    ///     returned. The scope only narrows the result; it never adds a tenant the user is not in.
+    ///     An unknown scope yields an empty result rather than the unscoped list.
+    /// </param>
     /// <returns>List of tenant IDs the user can access</returns>
-    Task<IReadOnlyList<string>> FindTenantsForUserAsync(string emailOrUsername);
+    Task<IReadOnlyList<string>> FindTenantsForUserAsync(string emailOrUsername, string? scopeTenantId = null);
+
+    /// <summary>
+    ///     Resolves the tenants strictly below <paramref name="scopeTenantId" /> in the registry
+    ///     hierarchy (direct and indirect descendants). <c>null</c> when the scope is not a
+    ///     registered tenant, so a caller can tell "unknown scope" from "scope without children".
+    /// </summary>
+    Task<IReadOnlySet<string>?> GetScopeDescendantsAsync(string scopeTenantId);
 }
 
 /// <summary>
@@ -31,11 +44,29 @@ public class TenantDiscoveryService(
     IAllowedTenantsResolver allowedTenantsResolver,
     ILogger<TenantDiscoveryService> logger) : ITenantDiscoveryService
 {
-    public async Task<IReadOnlyList<string>> FindTenantsForUserAsync(string emailOrUsername)
+    public async Task<IReadOnlyList<string>> FindTenantsForUserAsync(string emailOrUsername,
+        string? scopeTenantId = null)
     {
         if (string.IsNullOrWhiteSpace(emailOrUsername))
         {
             return [];
+        }
+
+        // Resolve the scope first: an unknown scope is an empty answer, no matter who asks. The
+        // user search below is deliberately NOT restricted to the subtree — the user's home may
+        // lie outside it (an administrator whose home is the system tenant reaches the subtree
+        // through cross-tenant mappings), so the filter applies to the resolved result.
+        IReadOnlySet<string>? scope = null;
+        if (!string.IsNullOrWhiteSpace(scopeTenantId))
+        {
+            scope = await GetScopeDescendantsAsync(scopeTenantId.Trim());
+            if (scope == null)
+            {
+                logger.LogWarning(
+                    "Tenant discovery: scope '{ScopeTenantId}' is not a registered tenant — returning no tenants",
+                    scopeTenantId);
+                return [];
+            }
         }
 
         var normalizedInput = emailOrUsername.Trim().ToUpperInvariant();
@@ -81,7 +112,78 @@ public class TenantDiscoveryService(
             }
         }
 
+        if (scope != null)
+        {
+            allAllowedTenants.IntersectWith(scope);
+        }
+
         return allAllowedTenants.ToList();
+    }
+
+    public async Task<IReadOnlySet<string>?> GetScopeDescendantsAsync(string scopeTenantId)
+    {
+        if (string.IsNullOrWhiteSpace(scopeTenantId))
+        {
+            return null;
+        }
+
+        try
+        {
+            // Walk the hierarchy through each tenant's own context, exactly as the client mirror
+            // does for a parent tenant: ITenantContext.GetChildTenantsAsync answers with the
+            // tenant's direct children — the parent-local rows of its own database (which never
+            // carry a parent id) plus the platform-registry rows stamped with it. This is
+            // deliberately NOT built on ISystemContext.GetAllTenantsAsync: that enumeration drops
+            // the parent id of every registry row, so from there every tenant looks like a direct
+            // child of the system tenant and a scope below it has no descendants at all (found on
+            // prod-1 with 3.4.126).
+            var scopeContext = await systemContext.TryFindTenantContextAsync(scopeTenantId);
+            if (scopeContext == null)
+            {
+                return null;
+            }
+
+            var descendants = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            var visited = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { scopeTenantId };
+            var queue = new Queue<(string TenantId, ITenantContext Context)>();
+            queue.Enqueue((scopeTenantId, scopeContext));
+
+            while (queue.Count > 0)
+            {
+                var (tenantId, context) = queue.Dequeue();
+                using var adminSession = await context.GetAdminSessionAsync();
+                var children = await context.GetChildTenantsAsync(adminSession);
+
+                foreach (var child in children.Items)
+                {
+                    // A cycle in a hand-edited registry must not loop forever.
+                    if (!visited.Add(child.TenantId))
+                    {
+                        continue;
+                    }
+
+                    descendants.Add(child.TenantId);
+                    var childContext = await systemContext.TryFindTenantContextAsync(child.TenantId);
+                    if (childContext != null)
+                    {
+                        queue.Enqueue((child.TenantId, childContext));
+                    }
+                    else
+                    {
+                        logger.LogDebug(
+                            "Tenant discovery: child '{ChildTenantId}' of '{TenantId}' has no tenant context — treated as a leaf",
+                            child.TenantId, tenantId);
+                    }
+                }
+            }
+
+            return descendants;
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex, "Failed to resolve the discovery scope '{ScopeTenantId}'", scopeTenantId);
+            return null;
+        }
     }
 
     private async Task<IReadOnlyList<string>> GetAllTenantIdsAsync()

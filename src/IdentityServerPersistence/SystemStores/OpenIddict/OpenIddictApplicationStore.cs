@@ -1,6 +1,8 @@
+using System.Collections.Concurrent;
 using System.Collections.Immutable;
 using System.Globalization;
 using System.Text.Json;
+using Microsoft.Extensions.Logging;
 using Microsoft.IdentityModel.Tokens;
 using OpenIddict.Abstractions;
 using Persistence.IdentityCkModel.Generated.System.Identity.v2;
@@ -34,10 +36,21 @@ namespace IdentityServerPersistence.SystemStores.OpenIddict;
 ///     </para>
 /// </remarks>
 public class OpenIddictApplicationStore(
-    IOctoClientStore clientStore) : IOpenIddictApplicationStore<RtClient>
+    IOctoClientStore clientStore,
+    ILogger<OpenIddictApplicationStore> logger) : IOpenIddictApplicationStore<RtClient>
 {
     private const string WritesUnsupportedMessage =
         "Client write operations go through IOctoClientStore (mirror upkeep hooks), not OpenIddict.";
+
+    /// <summary>
+    ///     Client ids already reported as misconfigured, so the diagnostics below cost one log
+    ///     line per client per process instead of one per authorize / token request. Keyed by
+    ///     tenant and client id because the same client id exists in every mirrored tenant and
+    ///     may be healthy in one and broken in another. Bounded by the number of distinct
+    ///     clients, and deliberately process-wide: a restart re-reports, which is what makes the
+    ///     warning findable again after a rollout.
+    /// </summary>
+    private static readonly ConcurrentDictionary<string, byte> ReportedClients = new(StringComparer.Ordinal);
 
     public ValueTask<long> CountAsync(CancellationToken cancellationToken)
         => throw new NotSupportedException("Counting applications through OpenIddict is not supported.");
@@ -148,7 +161,60 @@ public class OpenIddictApplicationStore(
 
     public ValueTask<ImmutableArray<string>> GetPermissionsAsync(
         RtClient application, CancellationToken cancellationToken)
-        => new(ClientPermissionsMapper.MapPermissions(application));
+    {
+        var permissions = ClientPermissionsMapper.MapPermissions(application);
+        ReportMisconfiguredClientOnce(application, permissions);
+        return new ValueTask<ImmutableArray<string>>(permissions);
+    }
+
+    /// <summary>
+    ///     AB#5266: surfaces a client whose stored grant types this server cannot act on. The
+    ///     transform is deliberately total — an unmappable grant type contributes no permission
+    ///     and the client silently loses the endpoints it needs, which reads at the protocol
+    ///     edge as <c>unsupported_response_type</c> / <c>unauthorized_client</c> with nothing in
+    ///     any service log to name the client. This is the one place that sees both the stored
+    ///     configuration and the projection, so it is where the mismatch gets a name.
+    /// </summary>
+    /// <remarks>
+    ///     Diagnostics only: never throws and never alters the projection. Refusing to serve a
+    ///     misconfigured client here would turn one broken client into a broken tenant.
+    /// </remarks>
+    private void ReportMisconfiguredClientOnce(RtClient application, ImmutableArray<string> permissions)
+    {
+        var unsupportedGrantTypes = ClientPermissionsMapper.GetUnsupportedGrantTypes(application);
+        var grantsNoFlow = ClientPermissionsMapper.GrantsNoFlow(permissions);
+        if (unsupportedGrantTypes.IsEmpty && !grantsNoFlow)
+        {
+            return;
+        }
+
+        var reportKey = string.Concat(clientStore.TenantId, "|", application.ClientId);
+        if (!ReportedClients.TryAdd(reportKey, 0))
+        {
+            return;
+        }
+
+        var storedGrantTypes = string.Join(", ", application.AllowedGrantTypes ?? Enumerable.Empty<string>());
+
+        if (grantsNoFlow)
+        {
+            logger.LogError(
+                "Client '{NoFlowClientId}' in tenant '{NoFlowTenantId}' authorizes no OAuth flow: its stored " +
+                "grant types ('{NoFlowStoredGrantTypes}') map to no grant permission, so every authorize, " +
+                "pushed-authorization and token request for it fails with a protocol error. Unsupported " +
+                "entries: '{NoFlowUnsupportedGrantTypes}'.",
+                application.ClientId, clientStore.TenantId, storedGrantTypes,
+                string.Join(", ", unsupportedGrantTypes));
+            return;
+        }
+
+        logger.LogWarning(
+            "Client '{PartialClientId}' in tenant '{PartialTenantId}' carries grant types this server does not " +
+            "support ('{PartialUnsupportedGrantTypes}'); they contribute no permissions. Stored grant types: " +
+            "'{PartialStoredGrantTypes}'.",
+            application.ClientId, clientStore.TenantId, string.Join(", ", unsupportedGrantTypes),
+            storedGrantTypes);
+    }
 
     public ValueTask<ImmutableArray<string>> GetPostLogoutRedirectUrisAsync(
         RtClient application, CancellationToken cancellationToken)

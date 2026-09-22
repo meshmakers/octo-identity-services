@@ -41,10 +41,10 @@ public class TenantDiscoveryApiController(
             });
         }
 
-        logger.LogDebug("Tenant discovery lookup for identifier '{Identifier}'",
-            request.EmailOrUsername);
+        logger.LogDebug("Tenant discovery lookup for identifier '{Identifier}' (scope '{ScopeTenantId}')",
+            request.EmailOrUsername, request.ScopeTenantId ?? "-");
 
-        var tenants = await discoveryService.FindTenantsForUserAsync(request.EmailOrUsername);
+        var tenants = await discoveryService.FindTenantsForUserAsync(request.EmailOrUsername, request.ScopeTenantId);
 
         await minDelay;
 
@@ -68,6 +68,14 @@ public class TenantDiscoveryApiController(
 public record TenantDiscoveryRequestDto
 {
     public string EmailOrUsername { get; init; } = string.Empty;
+
+    /// <summary>
+    ///     Optional discovery scope (AB#5311): the tenant an app host serves the subtree of. Only
+    ///     tenants strictly below it are returned. Carried from <c>acr_values=tenant_scope:{id}</c>
+    ///     on the authorize request via the <c>scopeTenantId</c> query parameter of
+    ///     <c>/tenant-discovery</c>.
+    /// </summary>
+    public string? ScopeTenantId { get; init; }
 }
 
 public record TenantDiscoveryResultDto
