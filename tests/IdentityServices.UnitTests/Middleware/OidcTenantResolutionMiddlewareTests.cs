@@ -1,3 +1,4 @@
+using System.Text;
 using FluentAssertions;
 using Meshmakers.Octo.Backend.IdentityServices.Middleware;
 using Meshmakers.Octo.Backend.IdentityServices.Services;
@@ -343,5 +344,72 @@ public class OidcTenantResolutionMiddlewareTests
         var url = OidcTenantResolutionMiddleware.BuildDiscoveryUrl("https://id/connect/authorize?client_id=x", "accounting");
         url.Should().StartWith("/tenant-discovery?returnUrl=");
         url.Should().EndWith("&scopeTenantId=accounting");
+    }
+
+    // AB#5311 (review finding): a scope-only PAR names no tenant, so the scope must travel with
+    // the issued request_uri or the follow-up authorize call runs an unscoped discovery.
+    [Fact]
+    public async Task ScopeOnlyPar_RestoresTheScopeOnTheDiscoveryRedirect()
+    {
+        var requestUri = "urn:ietf:params:oauth:request_uri:" + Guid.NewGuid().ToString("N");
+        RequestDelegate next = async ctx =>
+        {
+            ctx.Response.StatusCode = StatusCodes.Status201Created;
+            ctx.Response.ContentType = "application/json";
+            await ctx.Response.WriteAsync($"{{\"request_uri\":\"{requestUri}\",\"expires_in\":60}}");
+        };
+        var middleware = new OidcTenantResolutionMiddleware(
+            next,
+            NullLogger<OidcTenantResolutionMiddleware>.Instance,
+            Options.Create(new OctoSystemConfiguration()));
+
+        var par = new DefaultHttpContext();
+        par.Request.Method = "POST";
+        par.Request.Path = "/connect/par";
+        par.Request.ContentType = "application/x-www-form-urlencoded";
+        par.Request.Body = new MemoryStream(Encoding.UTF8.GetBytes("client_id=x&acr_values=tenant_scope%3Aaccounting"));
+        par.Response.Body = new MemoryStream();
+        await middleware.InvokeAsync(par);
+
+        var authorize = new DefaultHttpContext();
+        authorize.Request.Method = "GET";
+        authorize.Request.Scheme = "https";
+        authorize.Request.Host = new HostString("id.test");
+        authorize.Request.Path = "/connect/authorize";
+        authorize.Request.QueryString = new QueryString($"?client_id=x&request_uri={Uri.EscapeDataString(requestUri)}");
+        authorize.Response.Body = new MemoryStream();
+        await middleware.InvokeAsync(authorize);
+
+        authorize.Response.StatusCode.Should().Be(StatusCodes.Status302Found);
+        var location = authorize.Response.Headers.Location.ToString();
+        location.Should().StartWith("/tenant-discovery?returnUrl=");
+        location.Should().EndWith("&scopeTenantId=accounting");
+    }
+
+    [Fact]
+    public async Task AuthorizeWithUnknownRequestUri_RedirectsToUnscopedDiscovery()
+    {
+        var middleware = new OidcTenantResolutionMiddleware(
+            _ => Task.CompletedTask,
+            NullLogger<OidcTenantResolutionMiddleware>.Instance,
+            Options.Create(new OctoSystemConfiguration()));
+
+        var authorize = new DefaultHttpContext();
+        authorize.Request.Method = "GET";
+        authorize.Request.Scheme = "https";
+        authorize.Request.Host = new HostString("id.test");
+        authorize.Request.Path = "/connect/authorize";
+        authorize.Request.QueryString = new QueryString("?client_id=x&request_uri=urn%3Anever-pushed");
+        authorize.Response.Body = new MemoryStream();
+        await middleware.InvokeAsync(authorize);
+
+        authorize.Response.StatusCode.Should().Be(StatusCodes.Status302Found);
+        authorize.Response.Headers.Location.ToString().Should().NotContain("scopeTenantId=");
+    }
+
+    [Fact]
+    public void ScopeMapKey_IsDistinctFromTheTenantKey()
+    {
+        OidcTenantResolutionMiddleware.ScopeMapKey("urn:x").Should().Be("scope:urn:x");
     }
 }

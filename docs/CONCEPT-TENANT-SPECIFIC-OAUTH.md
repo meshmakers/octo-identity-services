@@ -187,7 +187,9 @@ siblings and ancestors never are. An unknown scope answers "not found". The scop
 the authorize request as a second `acr_values` entry, `acr_values=tenant_scope:accounting`, which
 the middleware forwards to `/tenant-discovery?returnUrl=…&scopeTenantId=accounting`; the same
 entry also gates the single-session shortcut, so a session for a tenant outside the subtree does
-not bypass the discovery. This is how one app host can serve a whole subtree — users who exist
+not bypass the discovery. With PAR (RFC 9126) the scope is read from the `/connect/par` form,
+captured together with the issued `request_uri` and restored on the follow-up
+`/connect/authorize?request_uri=…`, so a scope-only pushed request is scoped all the same. This is how one app host can serve a whole subtree — users who exist
 only in a grouping tenant below the root sign in on the same host, and see only the operating
 tenants that host renders.
 

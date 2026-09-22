@@ -106,8 +106,11 @@ internal class OidcTenantResolutionMiddleware(
         var isParEndpoint = path != null &&
             path.StartsWith("/connect/par", StringComparison.OrdinalIgnoreCase);
 
-        var needsResponseCapture = resolvedTenantId != null &&
-            (isTokenEndpoint || isDeviceAuthEndpoint || isAuthorizeEndpoint || isParEndpoint);
+        // A scope-only PAR resolves no tenant but still needs its request_uri captured (AB#5311).
+        var parScope = isParEndpoint ? context.Items[ParDiscoveryScopeItem] as string : null;
+        var needsResponseCapture = (resolvedTenantId != null &&
+                                    (isTokenEndpoint || isDeviceAuthEndpoint || isAuthorizeEndpoint || isParEndpoint))
+                                   || parScope != null;
 
         if (needsResponseCapture)
         {
@@ -128,7 +131,7 @@ internal class OidcTenantResolutionMiddleware(
                      (context.Response.StatusCode == StatusCodes.Status201Created ||
                       context.Response.StatusCode == StatusCodes.Status200OK))
             {
-                CaptureRequestUriFromParResponse(memoryStream, resolvedTenantId!);
+                CaptureRequestUriFromParResponse(memoryStream, resolvedTenantId, parScope);
                 memoryStream.Position = 0;
             }
             else if (context.Response.StatusCode == StatusCodes.Status200OK)
@@ -198,7 +201,7 @@ internal class OidcTenantResolutionMiddleware(
                 // acr_values entry, `tenant_scope:{rootTenantId}`. The scope narrows both
                 // shortcuts below — a session cookie for a tenant outside the subtree must not
                 // short-circuit the discovery — and the discovery page's lookup.
-                var scopeTenantId = ExtractScopeFromAcrValues(context);
+                var scopeTenantId = ExtractScopeFromAcrValues(context) ?? ExtractScopeFromRequestUri(context);
                 if (!string.IsNullOrEmpty(scopeTenantId) && sessionTenants.Count == 1)
                 {
                     var discovery = context.RequestServices.GetRequiredService<ITenantDiscoveryService>();
@@ -258,6 +261,19 @@ internal class OidcTenantResolutionMiddleware(
             // authorization parameters (including acr_values=tenant:X) to /connect/par and
             // receives a request_uri to use on the subsequent /connect/authorize call.
             tenantId = await ExtractTenantFromFormAcrValuesAsync(context);
+
+            // AB#5311: a scope-only PAR (the discovery case) names no tenant, so nothing
+            // would be captured and the follow-up authorize call would run an unscoped
+            // discovery. Remember the scope for the response capture below; it is stored
+            // next to the request_uri and restored on /connect/authorize?request_uri=...
+            if (string.IsNullOrEmpty(tenantId))
+            {
+                var parScope = await ExtractScopeFromFormAcrValuesAsync(context);
+                if (!string.IsNullOrEmpty(parScope))
+                {
+                    context.Items[ParDiscoveryScopeItem] = parScope;
+                }
+            }
         }
         else if (path.StartsWith("/connect/deviceauthorization", StringComparison.OrdinalIgnoreCase))
         {
@@ -726,7 +742,8 @@ internal class OidcTenantResolutionMiddleware(
     /// (RFC 9126) and maps it to the tenant ID. The follow-up <c>/connect/authorize?request_uri=...</c>
     /// uses this mapping to recover the tenant context.
     /// </summary>
-    private void CaptureRequestUriFromParResponse(MemoryStream responseBody, string tenantId)
+    private void CaptureRequestUriFromParResponse(MemoryStream responseBody, string? tenantId,
+        string? scopeTenantId)
     {
         try
         {
@@ -736,9 +753,22 @@ internal class OidcTenantResolutionMiddleware(
                 var requestUri = requestUriElement.GetString();
                 if (!string.IsNullOrEmpty(requestUri))
                 {
-                    TokenToTenantMap[requestUri] =
-                        (tenantId, DateTime.UtcNow.Add(ParRequestUriEntryLifetime));
-                    logger.LogDebug("Captured PAR request_uri → tenant '{TenantId}' mapping", tenantId);
+                    var expiry = DateTime.UtcNow.Add(ParRequestUriEntryLifetime);
+                    if (!string.IsNullOrEmpty(tenantId))
+                    {
+                        TokenToTenantMap[requestUri] = (tenantId, expiry);
+                        logger.LogDebug("Captured PAR request_uri → tenant '{TenantId}' mapping", tenantId);
+                    }
+
+                    // AB#5311: the discovery scope of a scope-only PAR, keyed apart from the
+                    // tenant entries so the two can never be confused.
+                    if (!string.IsNullOrEmpty(scopeTenantId))
+                    {
+                        TokenToTenantMap[ScopeMapKey(requestUri)] = (scopeTenantId, expiry);
+                        logger.LogDebug("Captured PAR request_uri → discovery scope '{ScopeTenantId}' mapping",
+                            scopeTenantId);
+                    }
+
                     CleanupExpiredEntries();
                 }
             }
@@ -786,6 +816,53 @@ internal class OidcTenantResolutionMiddleware(
         return context.Request.Query.TryGetValue("acr_values", out var acrValues)
             ? ParseScopeFromAcrValues(acrValues.ToString())
             : null;
+    }
+
+    private static async Task<string?> ExtractScopeFromFormAcrValuesAsync(HttpContext context)
+    {
+        if (!context.Request.HasFormContentType)
+        {
+            return null;
+        }
+
+        var form = await context.Request.ReadFormAsync();
+        return form.TryGetValue("acr_values", out var acrValues)
+            ? ParseScopeFromAcrValues(acrValues.ToString())
+            : null;
+    }
+
+    /// <summary>
+    ///     HttpContext.Items key under which a scope-only <c>/connect/par</c> hands its discovery
+    ///     scope to the response capture (AB#5311).
+    /// </summary>
+    private const string ParDiscoveryScopeItem = "octo.oidc.par.tenant_scope";
+
+    /// <summary>
+    ///     Map key of a PAR request_uri's discovery scope — distinct from the tenant entry keyed by
+    ///     the bare request_uri.
+    /// </summary>
+    internal static string ScopeMapKey(string requestUri) => $"scope:{requestUri}";
+
+    /// <summary>
+    ///     The discovery scope a scope-only PAR stored for this <c>request_uri</c>, if any (AB#5311).
+    /// </summary>
+    private string? ExtractScopeFromRequestUri(HttpContext context)
+    {
+        if (!context.Request.Query.TryGetValue("request_uri", out var requestUriValues))
+        {
+            return null;
+        }
+
+        var requestUri = requestUriValues.FirstOrDefault();
+        if (string.IsNullOrEmpty(requestUri) ||
+            !TokenToTenantMap.TryGetValue(ScopeMapKey(requestUri), out var entry))
+        {
+            return null;
+        }
+
+        logger.LogDebug("Restored discovery scope '{ScopeTenantId}' from PAR request_uri on /connect/authorize",
+            entry.TenantId);
+        return entry.TenantId;
     }
 
     /// <summary>
