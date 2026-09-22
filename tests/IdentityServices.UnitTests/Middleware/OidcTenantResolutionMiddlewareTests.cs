@@ -294,4 +294,54 @@ public class OidcTenantResolutionMiddlewareTests
             .Replace('/', '_')
             .TrimEnd('=');
     }
+
+    // AB#5311: the discovery scope travels as a second acr_values entry and must neither be
+    // mistaken for the tenant nor be lost when both are present.
+    [Fact]
+    public void ParseTenantFromAcrValues_IgnoresScopeEntry()
+    {
+        OidcTenantResolutionMiddleware.ParseTenantFromAcrValues("tenant_scope:accounting").Should().BeNull();
+    }
+
+    [Theory]
+    [InlineData("tenant_scope:accounting", "accounting")]
+    [InlineData("tenant_scope:accounting tenant:tecob", "accounting")]
+    [InlineData("tenant:tecob tenant_scope:accounting", "accounting")]
+    [InlineData("Tenant_Scope:accounting", "accounting")]
+    public void ParseScopeFromAcrValues_ReturnsScope(string acrValues, string expected)
+    {
+        OidcTenantResolutionMiddleware.ParseScopeFromAcrValues(acrValues).Should().Be(expected);
+    }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData("tenant:tecob")]
+    [InlineData("tenant_scope:")]
+    [InlineData("idp:local")]
+    public void ParseScopeFromAcrValues_WithoutScope_ReturnsNull(string acrValues)
+    {
+        OidcTenantResolutionMiddleware.ParseScopeFromAcrValues(acrValues).Should().BeNull();
+    }
+
+    [Fact]
+    public void ParseTenantFromAcrValues_WithScopeAndTenant_ReturnsTenant()
+    {
+        OidcTenantResolutionMiddleware.ParseTenantFromAcrValues("tenant_scope:accounting tenant:tecob")
+            .Should().Be("tecob");
+    }
+
+    [Fact]
+    public void BuildDiscoveryUrl_WithoutScope_CarriesOnlyReturnUrl()
+    {
+        var url = OidcTenantResolutionMiddleware.BuildDiscoveryUrl("https://id/connect/authorize?client_id=x", null);
+        url.Should().Be("/tenant-discovery?returnUrl=https%3A%2F%2Fid%2Fconnect%2Fauthorize%3Fclient_id%3Dx");
+    }
+
+    [Fact]
+    public void BuildDiscoveryUrl_WithScope_AppendsScopeParameter()
+    {
+        var url = OidcTenantResolutionMiddleware.BuildDiscoveryUrl("https://id/connect/authorize?client_id=x", "accounting");
+        url.Should().StartWith("/tenant-discovery?returnUrl=");
+        url.Should().EndWith("&scopeTenantId=accounting");
+    }
 }
