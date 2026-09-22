@@ -2,6 +2,7 @@ using System.Collections.Concurrent;
 using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
+using IdentityServerPersistence.Services;
 using Meshmakers.Octo.Backend.IdentityServices.Services;
 using Meshmakers.Octo.Runtime.Contracts.MongoDb;
 using Meshmakers.Octo.Runtime.Contracts.MongoDb.Configuration;
@@ -193,6 +194,24 @@ internal class OidcTenantResolutionMiddleware(
                 var authorizeUrl = context.Request.GetEncodedUrl();
                 var sessionTenants = FindTenantIdsFromSessionCookies(context);
 
+                // AB#5311: an app host that serves one tenant subtree names it as a second
+                // acr_values entry, `tenant_scope:{rootTenantId}`. The scope narrows both
+                // shortcuts below — a session cookie for a tenant outside the subtree must not
+                // short-circuit the discovery — and the discovery page's lookup.
+                var scopeTenantId = ExtractScopeFromAcrValues(context);
+                if (!string.IsNullOrEmpty(scopeTenantId) && sessionTenants.Count == 1)
+                {
+                    var discovery = context.RequestServices.GetRequiredService<ITenantDiscoveryService>();
+                    var scope = await discovery.GetScopeDescendantsAsync(scopeTenantId);
+                    if (scope == null || !scope.Contains(sessionTenants[0]))
+                    {
+                        logger.LogDebug(
+                            "Single session cookie for tenant '{TenantId}' is outside the discovery scope '{ScopeTenantId}' — not shortcutting",
+                            sessionTenants[0], scopeTenantId);
+                        sessionTenants.Clear();
+                    }
+                }
+
                 if (sessionTenants.Count == 1)
                 {
                     // Single active session — redirect directly with acr_values, skip discovery
@@ -217,8 +236,7 @@ internal class OidcTenantResolutionMiddleware(
                     // so passing them as knownTenants could show tenants the current user
                     // doesn't belong to. The discovery page requires email/username input
                     // to verify actual tenant membership.
-                    var discoveryUrl =
-                        $"/tenant-discovery?returnUrl={Uri.EscapeDataString(authorizeUrl)}";
+                    var discoveryUrl = BuildDiscoveryUrl(authorizeUrl, scopeTenantId);
                     context.Response.Redirect(discoveryUrl);
                     logger.LogDebug(
                         "Multiple session cookies found ({Count} tenants) — redirecting to tenant discovery",
@@ -227,10 +245,10 @@ internal class OidcTenantResolutionMiddleware(
                 }
 
                 // No active sessions — redirect to tenant discovery page (email input)
-                var fallbackDiscoveryUrl =
-                    $"/tenant-discovery?returnUrl={Uri.EscapeDataString(authorizeUrl)}";
+                var fallbackDiscoveryUrl = BuildDiscoveryUrl(authorizeUrl, scopeTenantId);
                 context.Response.Redirect(fallbackDiscoveryUrl);
-                logger.LogDebug("No acr_values on /connect/authorize — redirecting to tenant discovery");
+                logger.LogDebug("No acr_values on /connect/authorize — redirecting to tenant discovery (scope '{ScopeTenantId}')",
+                    scopeTenantId ?? "-");
                 return true;
             }
         }
@@ -733,12 +751,26 @@ internal class OidcTenantResolutionMiddleware(
 
     internal static string? ParseTenantFromAcrValues(string acrValues)
     {
+        return ParseAcrValue(acrValues, "tenant:");
+    }
+
+    /// <summary>
+    ///     AB#5311: the discovery scope an app host passes as <c>acr_values=tenant_scope:{id}</c>.
+    ///     A second, space-separated entry next to <c>tenant:</c>; <c>null</c> when absent.
+    /// </summary>
+    internal static string? ParseScopeFromAcrValues(string acrValues)
+    {
+        return ParseAcrValue(acrValues, "tenant_scope:");
+    }
+
+    private static string? ParseAcrValue(string acrValues, string prefix)
+    {
         var values = acrValues.Split(' ', StringSplitOptions.RemoveEmptyEntries);
         foreach (var value in values)
         {
-            if (value.StartsWith("tenant:", StringComparison.OrdinalIgnoreCase))
+            if (value.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
             {
-                var tenantId = value.Substring("tenant:".Length);
+                var tenantId = value.Substring(prefix.Length);
                 if (!string.IsNullOrEmpty(tenantId))
                 {
                     return tenantId;
@@ -747,6 +779,26 @@ internal class OidcTenantResolutionMiddleware(
         }
 
         return null;
+    }
+
+    private static string? ExtractScopeFromAcrValues(HttpContext context)
+    {
+        return context.Request.Query.TryGetValue("acr_values", out var acrValues)
+            ? ParseScopeFromAcrValues(acrValues.ToString())
+            : null;
+    }
+
+    /// <summary>
+    ///     The <c>/tenant-discovery</c> redirect. The scope travels as its own query parameter so
+    ///     the SPA does not have to parse it out of the returnUrl's <c>acr_values</c>; the returnUrl
+    ///     keeps the scope entry too, and the SPA appends <c>tenant:{id}</c> next to it.
+    /// </summary>
+    internal static string BuildDiscoveryUrl(string authorizeUrl, string? scopeTenantId)
+    {
+        var url = $"/tenant-discovery?returnUrl={Uri.EscapeDataString(authorizeUrl)}";
+        return string.IsNullOrEmpty(scopeTenantId)
+            ? url
+            : $"{url}&scopeTenantId={Uri.EscapeDataString(scopeTenantId)}";
     }
 
     private string? ExtractTenantFromIdTokenHint(HttpContext context)

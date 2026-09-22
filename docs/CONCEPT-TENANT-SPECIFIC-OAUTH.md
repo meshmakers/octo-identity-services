@@ -178,8 +178,18 @@ OAuth Client                Identity Server                  Tenant Discovery
 POST /api/tenant-discovery/lookup
 Content-Type: application/json
 
-{ "emailOrUsername": "user@example.com" }
+{ "emailOrUsername": "user@example.com", "scopeTenantId": "accounting" }
 ```
+
+`scopeTenantId` is optional (AB#5311). When present, only tenants strictly below it in the
+registry hierarchy — direct and indirect descendants — are returned; the scope itself, its
+siblings and ancestors never are. An unknown scope answers "not found". The scope originates from
+the authorize request as a second `acr_values` entry, `acr_values=tenant_scope:accounting`, which
+the middleware forwards to `/tenant-discovery?returnUrl=…&scopeTenantId=accounting`; the same
+entry also gates the single-session shortcut, so a session for a tenant outside the subtree does
+not bypass the discovery. This is how one app host can serve a whole subtree — users who exist
+only in a grouping tenant below the root sign in on the same host, and see only the operating
+tenants that host renders.
 
 Response (found):
 ```json

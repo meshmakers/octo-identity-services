@@ -17,8 +17,21 @@ public interface ITenantDiscoveryService
     ///     via cross-tenant mappings using <see cref="IAllowedTenantsResolver" />.
     /// </summary>
     /// <param name="emailOrUsername">The email address or username to search for</param>
+    /// <param name="scopeTenantId">
+    ///     Optional discovery scope (AB#5311): when set, only tenants strictly below this tenant in
+    ///     the registry hierarchy — direct and indirect descendants, never the scope itself — are
+    ///     returned. The scope only narrows the result; it never adds a tenant the user is not in.
+    ///     An unknown scope yields an empty result rather than the unscoped list.
+    /// </param>
     /// <returns>List of tenant IDs the user can access</returns>
-    Task<IReadOnlyList<string>> FindTenantsForUserAsync(string emailOrUsername);
+    Task<IReadOnlyList<string>> FindTenantsForUserAsync(string emailOrUsername, string? scopeTenantId = null);
+
+    /// <summary>
+    ///     Resolves the tenants strictly below <paramref name="scopeTenantId" /> in the registry
+    ///     hierarchy (direct and indirect descendants). <c>null</c> when the scope is not a
+    ///     registered tenant, so a caller can tell "unknown scope" from "scope without children".
+    /// </summary>
+    Task<IReadOnlySet<string>?> GetScopeDescendantsAsync(string scopeTenantId);
 }
 
 /// <summary>
@@ -31,11 +44,29 @@ public class TenantDiscoveryService(
     IAllowedTenantsResolver allowedTenantsResolver,
     ILogger<TenantDiscoveryService> logger) : ITenantDiscoveryService
 {
-    public async Task<IReadOnlyList<string>> FindTenantsForUserAsync(string emailOrUsername)
+    public async Task<IReadOnlyList<string>> FindTenantsForUserAsync(string emailOrUsername,
+        string? scopeTenantId = null)
     {
         if (string.IsNullOrWhiteSpace(emailOrUsername))
         {
             return [];
+        }
+
+        // Resolve the scope first: an unknown scope is an empty answer, no matter who asks. The
+        // user search below is deliberately NOT restricted to the subtree — the user's home may
+        // lie outside it (an administrator whose home is the system tenant reaches the subtree
+        // through cross-tenant mappings), so the filter applies to the resolved result.
+        IReadOnlySet<string>? scope = null;
+        if (!string.IsNullOrWhiteSpace(scopeTenantId))
+        {
+            scope = await GetScopeDescendantsAsync(scopeTenantId.Trim());
+            if (scope == null)
+            {
+                logger.LogWarning(
+                    "Tenant discovery: scope '{ScopeTenantId}' is not a registered tenant — returning no tenants",
+                    scopeTenantId);
+                return [];
+            }
         }
 
         var normalizedInput = emailOrUsername.Trim().ToUpperInvariant();
@@ -81,7 +112,89 @@ public class TenantDiscoveryService(
             }
         }
 
+        if (scope != null)
+        {
+            allAllowedTenants.IntersectWith(scope);
+        }
+
         return allAllowedTenants.ToList();
+    }
+
+    public async Task<IReadOnlySet<string>?> GetScopeDescendantsAsync(string scopeTenantId)
+    {
+        if (string.IsNullOrWhiteSpace(scopeTenantId))
+        {
+            return null;
+        }
+
+        try
+        {
+            var adminSession = await systemContext.GetAdminSessionAsync();
+            var registry = await systemContext.GetAllTenantsAsync(adminSession);
+            return CollectDescendants(registry.Items, systemContext.TenantId, scopeTenantId);
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex, "Failed to resolve the discovery scope '{ScopeTenantId}'", scopeTenantId);
+            return null;
+        }
+    }
+
+    /// <summary>
+    ///     Walks the registry hierarchy below <paramref name="scopeTenantId" />. A registry record
+    ///     without a parent id is a direct child of the registry owner, i.e. the system tenant
+    ///     (see <see cref="OctoTenant.ParentTenantId" />). Ids compare case-insensitively; the
+    ///     returned ids carry the registry's spelling. <c>null</c> when the scope is neither the
+    ///     system tenant nor a registered tenant.
+    /// </summary>
+    internal static IReadOnlySet<string>? CollectDescendants(IEnumerable<OctoTenant> registry,
+        string systemTenantId, string scopeTenantId)
+    {
+        var childrenByParent = new Dictionary<string, List<string>>(StringComparer.OrdinalIgnoreCase);
+        var known = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { systemTenantId };
+
+        foreach (var tenant in registry)
+        {
+            known.Add(tenant.TenantId);
+            var parent = string.IsNullOrEmpty(tenant.ParentTenantId) ? systemTenantId : tenant.ParentTenantId;
+            if (!childrenByParent.TryGetValue(parent, out var children))
+            {
+                children = [];
+                childrenByParent[parent] = children;
+            }
+
+            children.Add(tenant.TenantId);
+        }
+
+        if (!known.Contains(scopeTenantId))
+        {
+            return null;
+        }
+
+        var descendants = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var queue = new Queue<string>();
+        queue.Enqueue(scopeTenantId);
+
+        while (queue.Count > 0)
+        {
+            var current = queue.Dequeue();
+            if (!childrenByParent.TryGetValue(current, out var children))
+            {
+                continue;
+            }
+
+            foreach (var child in children)
+            {
+                // A cycle in a hand-edited registry must not loop forever.
+                if (descendants.Add(child) && !string.Equals(child, scopeTenantId, StringComparison.OrdinalIgnoreCase))
+                {
+                    queue.Enqueue(child);
+                }
+            }
+        }
+
+        descendants.Remove(scopeTenantId);
+        return descendants;
     }
 
     private async Task<IReadOnlyList<string>> GetAllTenantIdsAsync()
