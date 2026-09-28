@@ -24,7 +24,7 @@ public static class GoldenFile
 {
     private const string StableSystemTenantId = "octosystem";
 
-    private static readonly JsonSerializerOptions WriteOptions = new() { WriteIndented = true };
+    private static readonly JsonSerializerOptions WriteOptions = new() { WriteIndented = true, NewLine = "\n" };
 
     /// <summary>
     ///     JWT claims whose values change on every issuance (timestamps, token ids, hashes,
