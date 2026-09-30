@@ -104,8 +104,35 @@ Container mehr ist billiger als ein flakiger oder vakuum-grüner Test; niemals s
 aufweichen. Vorbild: `octo-asset-repo-services` (7 Collections) / `octo-communication-controller-services`
 (AB#4963).
 
-`xunit.runner.json` hält `parallelizeTestCollections: false` — Collections laufen nacheinander, es lebt
-also weiterhin nur **ein** Container gleichzeitig.
+### 🔴 Collections laufen PARALLEL — prozessweiter Zustand ist die Fehlerklasse (AB#5117, AB#5440)
+
+`xunit.runner.json` hält `parallelizeTestCollections: true` mit `maxParallelThreads: 4`. (Diese Doku
+behauptete bis AB#5440 `false`; das war seit AB#5117 falsch.) Nur **ein** MongoDB-Container lebt
+gleichzeitig — die Isolationsgrenze ist seit AB#5117 die **Datenbank**, nicht der Server —, aber bis zu
+vier Collections bauen gleichzeitig Hosts hoch und ab.
+
+Damit ist **jeder prozessweite Zustand ein Race**, und das ist die einzige Fehlerklasse, die diese
+Suite wirklich flakig macht. Bisher dreimal getreten:
+
+| Geteilter Zustand | Symptom | Behandlung |
+| --- | --- | --- |
+| Test-Tenant-ID `test-tenant` (⇒ DB-Name, serverweiter Namensraum) | Fixtures überschreiben sich | GUID-Suffix (AB#5117) |
+| System-Tenant-ID `octosystem` ⇒ statisches `DefaultConfigurationCreatorServiceBase.TenantsInHandling` | Fixtures überspringen still den CK-Import, dann `CkCacheException` | GUID-Suffix, Präfix gekürzt (AB#5117) |
+| **statisches `NLog.LogManager.Configuration`** | `ConfigurationException: LogManager configuration not found` aus `HostedInitializer.StartAsync`, wandernde Testmenge | Aufrufer tolerant (AB#5440) |
+
+Der NLog-Fall ist der einzige, den man **nicht** per-Fixture eindeutig machen kann: `Program.cs` lädt
+die globale Konfiguration am Entry-Point und räumt sie im `finally` mit `LogManager.Shutdown()` wieder
+ab (dort gegen den Segfault beim Prozessende auf Linux). Unter `WebApplicationFactory<Program>` läuft
+der Entry-Point pro Factory-Instanz und `app.Run()` wird kurzgeschlossen — das `finally` feuert also
+direkt nach dem Host-Build, während eine andere Factory die Konfiguration gerade liest. Deshalb fängt
+`DefaultConfigurationCreatorService.InitializeAsync` die `ConfigurationException` und warnt nur;
+`DiagnosticsService` selbst **wirft weiter**, weil sein anderer Aufrufer der operator-sichtbare
+`DiagnosticsController` ist, wo ein stiller No-op der schlimmere Fehler wäre.
+
+**Regel für neue Tests und neuen Startup-Code:** bevor du etwas in einen `static` legst oder aus einem
+`static` liest, das ein Host beim Start oder beim Dispose anfasst — annehmen, dass vier Hosts es
+gleichzeitig tun. Ein wandernder Satz fehlgeschlagener Tests über mehrere Retry-Versuche ist die
+Signatur dieser Klasse, nie ein Testdefekt.
 
 ## Build Configurations
 

@@ -101,8 +101,36 @@ internal class DefaultConfigurationCreatorService(
 
     public override async Task InitializeAsync()
     {
-        // Reconfigure the log level based on the configuration
-        await diagnosticsService.ReconfigureLogLevelAsync(octoIdentityOptions.Value.MinLogLevel);
+        // Reconfigure the log level based on the configuration.
+        //
+        // Best-effort on purpose (AB#5440). IDiagnosticsService reads the PROCESS-GLOBAL static
+        // NLog.LogManager.Configuration and throws when it is null — which is the right contract for
+        // its other caller, the operator-facing DiagnosticsController, where a silent no-op would
+        // leave an operator believing the log level changed. Here it is not: a missing logging
+        // configuration must never abort tenant provisioning, because this method runs inside
+        // HostedInitializer.StartAsync, where a throw fails the whole host start and takes the
+        // roles/groups seed with it.
+        //
+        // It is reachable. Program.cs loads that global configuration at the entry point and clears
+        // it again in its finally block (LogManager.Shutdown(), there to avoid a segfault at exit on
+        // Linux). Under WebApplicationFactory<Program> the entry point runs per factory instance and
+        // app.Run() is short-circuited, so the finally executes right after the host is built — while
+        // xunit.runner.json runs up to four collections concurrently (parallelizeTestCollections,
+        // AB#5117). One factory therefore nulls the global configuration while another is reading it.
+        // That is the same class of process-wide shared state AB#5117 already had to fix twice (the
+        // test tenant id and the system tenant id behind the static TenantsInHandling); this is the
+        // third instance of it, and the only one that is not ours to make per-fixture unique.
+        try
+        {
+            await diagnosticsService.ReconfigureLogLevelAsync(octoIdentityOptions.Value.MinLogLevel);
+        }
+        catch (ConfigurationException e)
+        {
+            logger.LogWarning(e,
+                "Could not apply the configured minimum log level {MinLogLevel}; the service keeps the log " +
+                "configuration it already has. This is not fatal to tenant provisioning",
+                octoIdentityOptions.Value.MinLogLevel);
+        }
 
         await base.InitializeAsync();
     }
