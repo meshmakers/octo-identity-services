@@ -25,6 +25,9 @@
 #     the bridge gateway IP for the test process to reach the spawned containers
 #   - constructionKitLibraryPaths: Persistence.IdentityCkModel publishes a CK
 #     library YAML next to its nupkg
+#   - Build and Test pass /p:OctoPublishCkModel=false: they compile the CK model
+#     and publish it nowhere. System.Identity is published by the shared CK step
+#     after the tests (main -> private catalog, r* -> private AND public).
 
 name: $(MajorVersion).$(MinorVersion).$(date:yyMM).$(DayOfMonth)$(rev:rrr)-$(Build.SourceBranchName)
 
@@ -58,7 +61,7 @@ resources:
       type: github
       name: meshmakers/octo-pipeline-templates
       endpoint: meshmakers-access-token
-      ref: refs/tags/tpl-v0.5.0
+      ref: refs/tags/tpl-v0.7.0
 
 trigger:
   batch: true
@@ -119,13 +122,6 @@ stages:
             clean: true
             submodules: recursive
           - template: templates/steps/set-version.yml@pipelineTemplates
-          # CK SemVer honesty gate (AB#4420): System.Identity is published
-          # DURING the dotnet build (/p:OctoPublishCatalog), so the gate must
-          # be able to fail first.
-          - template: templates/steps/validate-ck-versions.yml@pipelineTemplates
-            parameters:
-              constructionKitPaths:
-                - 'src/Persistence.IdentityCkModel/ConstructionKit'
           - template: templates/steps/download-ca.yml@pipelineTemplates
           - task: DotNetCoreCLI@2
             retryCountOnTaskFailure: 2
@@ -135,13 +131,21 @@ stages:
               projects: '$(solutionFile)'
               restoreArguments: '--force /p:OctoNugetPrivateServer=$(nugetPrivateServer)'
               noCache: true
+          # The build compiles System.Identity and publishes it nowhere: the CK
+          # step below owns publishing, and CkCompile would publish with isForced
+          # hardcoded. No other CK in this solution depends on it, so a local catalog
+          # would never be read; the model, its embedded Bootstrap blueprint and its
+          # documentation are all produced by compiling alone. The command line
+          # overrides the csproj's <OctoPublishCkModel>, which stays for local
+          # development. The GitHub API keys keep CkCompile's catalog refresh clear
+          # of GitHub's unauthenticated rate limit.
           - task: DotNetCoreCLI@2
             retryCountOnTaskFailure: 2
             displayName: 'Build'
             inputs:
               command: 'build'
               projects: '$(solutionFile)'
-              arguments: '--configuration $(buildConfiguration) /p:OctoNugetPrivateServer=$(nugetPrivateServer) /p:OctoPublishCatalog="$(effectivePublishCatalog)" /p:OctoPrivateGitHubApiKey=$(GitHubPAT) /p:OctoPublicGitHubApiKey=$(GitHubPAT)'
+              arguments: '--configuration $(buildConfiguration) /p:OctoNugetPrivateServer=$(nugetPrivateServer) /p:OctoPublishCkModel=false /p:OctoPrivateGitHubApiKey=$(GitHubPAT) /p:OctoPublicGitHubApiKey=$(GitHubPAT)'
               publishWebProjects: false
               zipAfterPublish: false
               modifyOutputPath: false
@@ -178,6 +182,17 @@ stages:
               DOCKER_HOST: unix:///var/run/docker.sock
               TESTCONTAINERS_RYUK_DISABLED: 'true'
               TESTCONTAINERS_HOST_OVERRIDE: '172.17.0.1'
+          # CK SemVer and schema gate (AB#4420), and since tpl-v0.7.0 also the
+          # publish of System.Identity (AB#5121): main -> private catalog, r* tags
+          # -> private AND public, never replacing a published version. It runs after
+          # Test so a run whose build or tests fail never leaves a version in a
+          # shared catalog — a published version cannot be withdrawn. The step
+          # compiles the model itself with the pinned octo-ckc, so it needs nothing
+          # from the build; it only has to come before the image.
+          - template: templates/steps/validate-ck-versions.yml@pipelineTemplates
+            parameters:
+              constructionKitPaths:
+                - 'src/Persistence.IdentityCkModel/ConstructionKit'
           # Multi-arch image (AB#4451): arm64 for Apple-Silicon kind clusters and
           # edge devices, amd64 for the managed clusters.
           - template: templates/steps/build-and-push-docker.yml@pipelineTemplates
