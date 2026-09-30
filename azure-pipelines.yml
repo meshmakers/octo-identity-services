@@ -1,17 +1,6 @@
 # Root-level CI pipeline using shared templates from octo-pipeline-templates.
 #
-# This pipeline coexists with devops-build/azure-pipelines.yml during the
-# Phase 1-services pilot of the YAML migration (octo-mesh-deployment's
-# docs/pipeline-architecture-concept.md §6.2). A NEW ADO build definition
-# pointing at THIS file runs in parallel with the legacy CI (def 91 still
-# reads devops-build/azure-pipelines.yml); once two green runs land on main
-# + a test branch, the existing def's yamlFilename can be flipped to this
-# file and devops-build/ deleted in a follow-up commit.
-#
-# Service-train (release-services-train.yml) keeps queueing def 91 by ID — no
-# train change needed regardless of which YAML def 91 ends up pointing at,
-# because the new file produces identical artifacts (build number, OctoVersion,
-# Docker image tag, CK library outputs).
+# Service-train (release-services-train.yml) queues def 91 by ID.
 #
 # Identity-specific quirks preserved from the legacy YAML:
 #   - InstallSSHKey + submodules:recursive — Octo.User.props etc. pulled from
