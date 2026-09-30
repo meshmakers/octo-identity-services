@@ -12,6 +12,6 @@
 #
 # CkSemVerClassifier rates an isRuntimeState change Minor (blueprint re-apply
 # behaviour changes), hence the minor bump.
-modelId: System.Identity-2.19.0
+modelId: System.Identity-2.20.0
 dependencies:
   - System-[2.0,3.0)
