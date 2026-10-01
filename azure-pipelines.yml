@@ -14,9 +14,10 @@
 #     the bridge gateway IP for the test process to reach the spawned containers
 #   - constructionKitLibraryPaths: Persistence.IdentityCkModel publishes a CK
 #     library YAML next to its nupkg
-#   - Build and Test pass /p:OctoPublishCkModel=false: they compile the CK model
-#     and publish it nowhere. System.Identity is published by the shared CK step
-#     after the tests (main -> private catalog, r* -> private AND public).
+#   - Build compiles the CK model and publishes it nowhere
+#     (/p:OctoPublishCkModel=false); Test runs --no-build on that output.
+#     System.Identity is published by the shared CK step after the tests
+#     (main -> private catalog, r* -> private AND public).
 
 name: $(MajorVersion).$(MinorVersion).$(date:yyMM).$(DayOfMonth)$(rev:rrr)-$(Build.SourceBranchName)
 
