@@ -50,7 +50,7 @@ resources:
       type: github
       name: meshmakers/octo-pipeline-templates
       endpoint: meshmakers-access-token
-      ref: refs/tags/tpl-v0.7.0
+      ref: refs/tags/tpl-v1.0.0
 
 trigger:
   batch: true
@@ -171,14 +171,14 @@ stages:
               DOCKER_HOST: unix:///var/run/docker.sock
               TESTCONTAINERS_RYUK_DISABLED: 'true'
               TESTCONTAINERS_HOST_OVERRIDE: '172.17.0.1'
-          # CK SemVer and schema gate (AB#4420), and since tpl-v0.7.0 also the
+          # CK SemVer and schema gate (AB#4420), and since tpl-v1.0.0 also the
           # publish of System.Identity (AB#5121): main -> private catalog, r* tags
           # -> private AND public, never replacing a published version. It runs after
           # Test so a run whose build or tests fail never leaves a version in a
           # shared catalog — a published version cannot be withdrawn. The step
           # compiles the model itself with the pinned octo-ckc, so it needs nothing
           # from the build; it only has to come before the image.
-          - template: templates/steps/validate-ck-versions.yml@pipelineTemplates
+          - template: templates/steps/validate-and-publish-ck-versions.yml@pipelineTemplates
             parameters:
               constructionKitPaths:
                 - 'src/Persistence.IdentityCkModel/ConstructionKit'
