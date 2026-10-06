@@ -8,6 +8,7 @@ using Meshmakers.Octo.Common.DistributionEventHub.Services;
 using Meshmakers.Octo.Communication.Contracts.DataTransferObjects;
 using Meshmakers.Octo.ConstructionKit.Contracts;
 using Meshmakers.Octo.Runtime.Contracts.MongoDb;
+using Meshmakers.Octo.Runtime.Contracts.Secrets;
 using Meshmakers.Octo.Services.Contracts.DistributionEventHub.Messages;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -78,6 +79,7 @@ public class IdentityProvidersController : ControllerBase
     [HttpPost]
     [ProducesResponseType(typeof(IdentityProviderDto), StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(UniquenessViolationErrorResponse), StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status503ServiceUnavailable)]
     [Authorize(IdentityServiceConstants.IdentityTenantAdministrationWritePolicy)]
     [EndpointSummary("Add a new identity provider.")]
     public async Task<ActionResult<IdentityProviderDto>> AddNewIdentityProviderAsync(
@@ -102,7 +104,11 @@ public class IdentityProvidersController : ControllerBase
 
         var identityProvider = _mapper.Map<RtIdentityProvider>(identityProviderDto);
 
-        await HandleWriteExceptionAsync(async () => await _identityProviderStore.StoreAsync(identityProvider));
+        if (!await TryStoreAsync(identityProvider))
+        {
+            return SecretEncryptionNotConfiguredProblem();
+        }
+
         await SendIdentityProviderUpdate();
         return _mapper.Map<IdentityProviderDto>(await ReloadStoredAsync(identityProvider));
     }
@@ -162,6 +168,7 @@ public class IdentityProvidersController : ControllerBase
     [HttpPut("{rtId}")]
     [ProducesResponseType(typeof(IdentityProviderDto), StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(UniquenessViolationErrorResponse), StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status503ServiceUnavailable)]
     [Authorize(IdentityServiceConstants.IdentityTenantAdministrationWritePolicy)]
     [EndpointSummary("Replace an existing identity provider.")]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
@@ -185,7 +192,11 @@ public class IdentityProvidersController : ControllerBase
         var identityProvider = _mapper.Map<RtIdentityProvider>(identityProviderDto);
         identityProvider.RtId = rtId;
 
-        await HandleWriteExceptionAsync(async () => await _identityProviderStore.StoreAsync(identityProvider));
+        if (!await TryStoreAsync(identityProvider))
+        {
+            return SecretEncryptionNotConfiguredProblem();
+        }
+
         await SendIdentityProviderUpdate();
         // AB#5540: never echo the request — it carries the write-only ClientSecret in clear text.
         // The response is mapped from the stored entity, whose Secret attribute is never projected.
@@ -199,6 +210,59 @@ public class IdentityProvidersController : ControllerBase
     /// </summary>
     private async Task<RtIdentityProvider> ReloadStoredAsync(RtIdentityProvider written)
         => await _identityProviderStore.GetByIdAsync(written.RtId) ?? written;
+
+    /// <summary>Problem-detail code when a client secret is saved on a host without key ring (AB#5540).</summary>
+    internal const string SecretEncryptionNotConfiguredCode = "SecretEncryptionNotConfigured";
+
+    internal const string SecretEncryptionNotConfiguredTitle = "Secret encryption is not configured on this server";
+
+    /// <summary>
+    ///     Stores the provider. Returns false when the engine cannot encrypt the new client secret because
+    ///     this host has no key ring (<see cref="SecretEncryptionNotConfiguredException" />) — a server
+    ///     configuration state, not a request error, answered with 503 instead of a 500.
+    /// </summary>
+    private async Task<bool> TryStoreAsync(RtIdentityProvider identityProvider)
+    {
+        try
+        {
+            await HandleWriteExceptionAsync(async () => await _identityProviderStore.StoreAsync(identityProvider));
+            return true;
+        }
+        catch (Exception ex) when (IsSecretEncryptionNotConfigured(ex))
+        {
+            return false;
+        }
+    }
+
+    private static bool IsSecretEncryptionNotConfigured(Exception? exception)
+    {
+        for (var current = exception; current != null; current = current.InnerException)
+        {
+            if (current is SecretEncryptionNotConfiguredException)
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private static ObjectResult SecretEncryptionNotConfiguredProblem()
+    {
+        var problem = new ProblemDetails
+        {
+            Status = StatusCodes.Status503ServiceUnavailable,
+            Title = SecretEncryptionNotConfiguredTitle,
+            Detail = "The client secret cannot be saved because no secret encryption key ring is configured " +
+                     "(configuration section SecretEncryption). Configure the key ring and retry.",
+            Extensions = { ["code"] = SecretEncryptionNotConfiguredCode }
+        };
+        return new ObjectResult(problem)
+        {
+            StatusCode = StatusCodes.Status503ServiceUnavailable,
+            ContentTypes = { "application/problem+json" }
+        };
+    }
 
     private static async Task HandleWriteExceptionAsync(Func<Task> action)
     {

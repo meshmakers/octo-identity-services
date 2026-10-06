@@ -373,4 +373,61 @@ public sealed class IdentityProvidersControllerSecretTests : IDisposable
         AssertNoClientSecretValue(Serialize(created.Value));
         Serialize(created.Value).Should().NotContain(value);
     }
+
+    [Fact]
+    public async Task Create_WithoutKeyRing_Returns503WithProblemCode()
+    {
+        _store.StoreAsync(Arg.Any<RtIdentityProvider>())
+            .Returns(Task.FromException(new SecretEncryptionNotConfiguredException("No secret encryption key ring.")));
+        var input = new GoogleIdentityProviderDto
+            { Name = "Google", IsEnabled = true, ClientId = "google-client", ClientSecret = "write-only-secret" };
+
+        var result = await _sut.AddNewIdentityProviderAsync(input);
+
+        AssertSecretEncryptionNotConfigured(result.Result);
+    }
+
+    [Fact]
+    public async Task Replace_WithNewSecretWithoutKeyRing_Returns503WithProblemCode()
+    {
+        // The engine may surface the exception wrapped (e.g. from a bulk write); the inner one counts.
+        _store.StoreAsync(Arg.Any<RtIdentityProvider>())
+            .Returns(Task.FromException(new InvalidOperationException("Write failed",
+                new SecretEncryptionNotConfiguredException("No secret encryption key ring."))));
+        var input = new AzureEntraIdProviderDto
+        {
+            Name = "Entra", IsEnabled = true, TenantId = "tid", ClientId = "entra-client",
+            ClientSecret = "rotated-secret"
+        };
+
+        var result = await _sut.ReplaceProviderAsync(OctoObjectId.GenerateNewId(), input);
+
+        AssertSecretEncryptionNotConfigured(result.Result);
+    }
+
+    [Fact]
+    public async Task Create_OtherStoreFailure_IsNotMappedTo503()
+    {
+        _store.StoreAsync(Arg.Any<RtIdentityProvider>())
+            .Returns(Task.FromException(new InvalidOperationException("database down")));
+        var input = new GoogleIdentityProviderDto
+            { Name = "Google", IsEnabled = true, ClientId = "google-client", ClientSecret = "write-only-secret" };
+
+        var act = () => _sut.AddNewIdentityProviderAsync(input);
+
+        await act.Should().ThrowAsync<InvalidOperationException>().WithMessage("database down");
+    }
+
+    private static void AssertSecretEncryptionNotConfigured(ActionResult? result)
+    {
+        var objectResult = result.Should().BeOfType<ObjectResult>().Subject;
+        objectResult.StatusCode.Should().Be(503);
+        objectResult.ContentTypes.Should().Contain("application/problem+json");
+        var problem = objectResult.Value.Should().BeOfType<ProblemDetails>().Subject;
+        problem.Status.Should().Be(503);
+        problem.Title.Should().Be("Secret encryption is not configured on this server");
+        problem.Extensions.Should().ContainKey("code").WhoseValue.Should().Be("SecretEncryptionNotConfigured");
+        var json = Serialize(problem);
+        json.Should().NotContain("write-only-secret").And.NotContain("rotated-secret");
+    }
 }
