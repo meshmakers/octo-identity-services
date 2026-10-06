@@ -1,6 +1,7 @@
 using IdentityServerPersistence;
 using IdentityServerPersistence.Configuration.Options;
 using IdentityServerPersistence.Services.Migrations;
+using IdentityServerPersistence.Services.SecretManagement;
 using IdentityServerPersistence.SystemStores;
 using Meshmakers.Octo.Backend.IdentityServices.Resources;
 using Meshmakers.Octo.ConstructionKit.Contracts;
@@ -277,6 +278,22 @@ internal class DefaultConfigurationCreatorService(
         // edges. The pending row is deleted on success — if Identity crashes mid-restore the
         // next startup retries with the same data.
         await RestorePendingRoleAssignmentsAsync(tenantContext);
+
+        // AB#5544: one-time grant of SecretManagement (blueprint 1.4.0, 660…60) to the tenant's existing
+        // administrators — groups/users holding both AdminPanelManagement and TenantManagement, plus
+        // TenantOwners. Must run after the blueprint apply above (the role has to exist); guarded by the
+        // SecretManagementAdminGrant tenant-configuration marker so it runs once per tenant. Additive only.
+        // A failure is logged, not fatal: the tenant keeps working and the next setup retries (no marker).
+        try
+        {
+            await SecretManagementAdminGrant.EnsureAsync(tenantContext, logger);
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex,
+                "One-time SecretManagement grant to existing administrators failed for tenant '{TenantId}'; " +
+                "retried on the next tenant setup", tenantId);
+        }
 
         // Child-tenant client mirror provisioning runs AFTER the blueprint apply has guaranteed
         // the parent tenant's RtClient entities exist. Idempotent — runs on every startup so

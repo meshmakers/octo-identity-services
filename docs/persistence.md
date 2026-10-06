@@ -453,6 +453,36 @@ Every tenant is provisioned with a `TenantOwners` group that has all 10 default 
 - Provisioned to child tenants via `EnsureGroupInChildTenantAsync()`
 - Migrated to existing tenants via `IdentityAssociationMigration` (migration 9→10)
 
+### SecretManagement Grant for Existing Administrators (AB#5544)
+
+`System.Identity.Bootstrap` 1.4.0 seeds the tenant role `SecretManagement` (rtId `660…60`; may trigger
+secret sweeps and delete a pre-sweep dump early) and assigns it to `TenantOwners`; a new tenant's initial
+administrator gets it from `UserManagementService.CreateAdminUserAsync`. Existing tenants receive it once,
+automatically, through `SecretManagementAdminGrant`
+(`src/IdentityServerPersistence/Services/SecretManagement/`):
+
+- **When:** in `DefaultConfigurationCreatorService.SetupTenantAsync`, right after the blueprint apply (the
+  role must exist, so this is deliberately not an `IMigration` — infrastructure migrations run before the
+  blueprint). `SetupTenantAsync` runs for every tenant on identity startup and on tenant create/update
+  (`PosCreateTenant`/`PosUpdateTenant`), so the first identity start with blueprint 1.4.0 grants it.
+- **Who** (`SecretManagementGrantPlanner`, pure and unit-tested):
+  - every group whose effective roles (own roles plus those of its child groups, `GroupRoleResolver`
+    semantics) contain **both** `AdminPanelManagement` **and** `TenantManagement` gets the role on the
+    group itself — the innermost such group when they are nested;
+  - every user who holds both roles (directly, via groups, or mixed) and does not already receive
+    `SecretManagement` through such a group gets a direct `AssignedRole` edge;
+  - the `TenantOwners` group (`660…40`) always;
+  - `AdminPanelManagement` alone is **not** enough — secret sweeps stay a separate privilege. Clients and
+    external tenant user mappings are not considered (cross-tenant shadow users are ordinary `RtUser`s).
+- **Additive and once:** only `AssignedRole` insert edges are written, nothing is removed. Afterwards the
+  tenant configuration row `SecretManagementAdminGrant` (`IdentityServiceConstants.SecretManagementAdminGrantKey`)
+  records the run with the granted group/user rtIds; while it exists the step does nothing, so an operator
+  who later removes the role from someone does not see it come back. If the role does not exist yet, nothing
+  is written and no marker is recorded (retried on the next setup). A failure is logged and does not fail
+  tenant setup.
+- **Everybody else** (e.g. a user with only `AdminPanelManagement`) gets the role by an explicit grant in
+  the user/group administration.
+
 ## Migration System
 
 ### Migration Pattern

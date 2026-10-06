@@ -15,8 +15,9 @@ description: |
   assigned; the version bump makes every existing tenant re-import the seed, which
   creates the role and the AssignedRole edge. The initial tenant administrator
   (`UserManagementService.CreateAdminUserAsync`) is granted it directly, like
-  AdminPanelManagement. Existing administrators receive it through TenantOwners
-  membership only.
+  AdminPanelManagement. Existing administrators (users/groups holding both
+  AdminPanelManagement and TenantManagement) get it once from the identity
+  service's SecretManagementAdminGrant step after this blueprint is applied.
 
   1.2.0 (AB#4388): adds the `octo-platformServices-swagger` client (660…36) for
   the Swagger UI now exposed by octo-platform-services (authorization code +
