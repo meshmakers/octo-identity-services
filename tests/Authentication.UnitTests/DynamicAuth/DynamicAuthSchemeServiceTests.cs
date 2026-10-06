@@ -8,6 +8,7 @@ using Meshmakers.Octo.Runtime.Contracts.MongoDb;
 using Meshmakers.Octo.Runtime.Contracts.MongoDb.Repositories;
 using Meshmakers.Octo.Runtime.Contracts.Repositories.Query;
 using Meshmakers.Octo.Runtime.Contracts.RepositoryEntities;
+using Meshmakers.Octo.Runtime.Contracts.Secrets;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.Google;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -177,5 +178,46 @@ public class DynamicAuthSchemeServiceTests
         _schemeProvider.Received(1).RemoveScheme("octosystem:meshmakers");
         _schemeProvider.DidNotReceive().RemoveScheme("othertenant:foo");
         await systemContext.Received(1).FindTenantRepositoryAsync("octosystem");
+    }
+
+    // AB#5540 / decision r2-2: a provider whose client secret cannot be revealed is skipped; the
+    // tenant's other providers are still registered (an unexpected exception type would abort the loop).
+    [Fact]
+    public async Task ConfigureAsync_UnrevealableClientSecret_SkipsOnlyThatProvider()
+    {
+        var systemContext = Substitute.For<ISystemContext>();
+        var factory = Substitute.For<IAuthSchemeCreatorFactory>();
+        _schemeProvider.GetAllSchemesAsync()
+            .Returns(Task.FromResult<IEnumerable<AuthenticationScheme>>(Array.Empty<AuthenticationScheme>()));
+
+        var broken = new RtGoogleIdentityProvider
+            { RtId = OctoObjectId.GenerateNewId(), Name = "Broken", IsEnabled = true, ClientId = "a" };
+        var working = new RtGoogleIdentityProvider
+            { RtId = OctoObjectId.GenerateNewId(), Name = "Working", IsEnabled = true, ClientId = "b" };
+
+        var tenantRepo = Substitute.For<ITenantRepository>();
+        var session = Substitute.For<IOctoSession>();
+        tenantRepo.GetSessionAsync().Returns(session);
+        var result = Substitute.For<IResultSet<RtIdentityProvider>>();
+        result.Items.Returns(new RtIdentityProvider[] { broken, working });
+        tenantRepo.GetRtEntitiesByTypeAsync<RtIdentityProvider>(session, Arg.Any<RtEntityQueryOptions>())
+            .Returns(result);
+        systemContext.FindTenantRepositoryAsync("acme").Returns(tenantRepo);
+
+        var creator = Substitute.For<IAuthSchemeCreator<RtGoogleIdentityProvider>>();
+        creator.Create(broken, Arg.Any<string?>(), Arg.Any<string?>())
+            .Returns(_ => throw new SecretEnvelopeNotAllowedException("acme", "System.Identity/GoogleIdentityProvider",
+                "ClientSecret"));
+        var workingScheme = new AuthenticationScheme("acme:Working", "Working", typeof(GoogleHandler));
+        creator.Create(working, Arg.Any<string?>(), Arg.Any<string?>()).Returns(workingScheme);
+        factory.GetCreator<RtGoogleIdentityProvider>().Returns(creator);
+
+        var sut = new DynamicAuthSchemeService(systemContext, _schemeProvider, factory,
+            Substitute.For<IIdentityProviderSecretReader>(), NullLogger<DynamicAuthSchemeService>.Instance);
+
+        await sut.ConfigureAsync("acme");
+
+        _schemeProvider.Received(1).AddScheme(workingScheme);
+        _schemeProvider.Received(1).AddScheme(Arg.Any<AuthenticationScheme>());
     }
 }
