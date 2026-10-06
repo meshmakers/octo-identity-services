@@ -104,7 +104,7 @@ public class IdentityProvidersController : ControllerBase
 
         await HandleWriteExceptionAsync(async () => await _identityProviderStore.StoreAsync(identityProvider));
         await SendIdentityProviderUpdate();
-        return _mapper.Map<IdentityProviderDto>(identityProvider);
+        return _mapper.Map<IdentityProviderDto>(await ReloadStoredAsync(identityProvider));
     }
 
     // The provider Name is embedded verbatim into the just-in-time provisioned external
@@ -188,9 +188,17 @@ public class IdentityProvidersController : ControllerBase
         await HandleWriteExceptionAsync(async () => await _identityProviderStore.StoreAsync(identityProvider));
         await SendIdentityProviderUpdate();
         // AB#5540: never echo the request — it carries the write-only ClientSecret in clear text.
-        // The response is mapped from the entity, whose Secret attribute is never projected.
-        return Ok(_mapper.Map<IdentityProviderDto>(identityProvider));
+        // The response is mapped from the stored entity, whose Secret attribute is never projected.
+        return Ok(_mapper.Map<IdentityProviderDto>(await ReloadStoredAsync(identityProvider)));
     }
+
+    /// <summary>
+    ///     Reloads the provider after a write so the response reflects the stored secret state —
+    ///     the encrypted value with its <c>SetAt</c> (contract §8), a carried-over secret on replace —
+    ///     instead of the pending input. Falls back to the written entity if it cannot be read back.
+    /// </summary>
+    private async Task<RtIdentityProvider> ReloadStoredAsync(RtIdentityProvider written)
+        => await _identityProviderStore.GetByIdAsync(written.RtId) ?? written;
 
     private static async Task HandleWriteExceptionAsync(Func<Task> action)
     {

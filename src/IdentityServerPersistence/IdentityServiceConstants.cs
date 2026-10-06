@@ -37,14 +37,6 @@ public static class IdentityServiceConstants
     public const string IdentityMigrationVersionKey = "IdentityServiceMigrations";
 
     /// <summary>
-    /// AB#5544: tenant role that may trigger secret sweeps and delete a pre-sweep dump early. Seeded by
-    /// <c>System.Identity.Bootstrap</c> (660…60) and granted to the initial tenant administrator.
-    /// TODO(AB#5544): replace with <c>CommonConstants.SecretManagementRole</c> once the octo-sdk build that
-    /// introduces it is in the NuGet feed.
-    /// </summary>
-    public const string SecretManagementRole = "SecretManagement";
-
-    /// <summary>
     /// Phase 3 PR #4: TenantConfiguration row used by <c>PreBlueprintCleanupMigration</c> to hand
     /// captured User → Role and ExternalTenantUserMapping → Role assignments (by role name) over
     /// to the post-blueprint restore step in

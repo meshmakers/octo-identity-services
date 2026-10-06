@@ -58,6 +58,16 @@ public interface IIdentityProviderSecretReader
     /// <param name="identityProvider">The identity provider entity</param>
     /// <returns>The stored state</returns>
     IdentityProviderSecretState GetClientSecretState(RtIdentityProvider identityProvider);
+
+    /// <summary>
+    ///     Describes the stored client secret of <paramref name="identityProvider" /> (state, storage
+    ///     form, key id, <c>SetAt</c>) through <see cref="ISecretAttributeProtector.DescribeSecret" /> —
+    ///     the value is never decrypted for it. A provider type without a client secret reads as not set.
+    /// </summary>
+    /// <param name="identityProvider">The identity provider entity</param>
+    /// <param name="tenantId">Tenant the provider belongs to (log context only)</param>
+    /// <returns>The read info of the stored client secret</returns>
+    SecretReadInfo DescribeClientSecret(RtIdentityProvider identityProvider, string? tenantId = null);
 }
 
 /// <inheritdoc />
@@ -74,9 +84,6 @@ internal sealed class IdentityProviderSecretReader(
     ///     Service tag of the decrypt counter.
     /// </summary>
     internal const string ServiceName = "identity";
-
-    private static readonly RtSecretValue EmptyPending = RtSecretValue.Pending(string.Empty);
-    private static readonly RtSecretValue EmptyLegacy = RtSecretValue.LegacyPlaintext(string.Empty);
 
     /// <inheritdoc />
     public string? GetClientSecret(RtIdentityProvider identityProvider, string? tenantId)
@@ -106,16 +113,26 @@ internal sealed class IdentityProviderSecretReader(
 
     /// <inheritdoc />
     public IdentityProviderSecretState GetClientSecretState(RtIdentityProvider identityProvider)
+        => DescribeClientSecret(identityProvider).State switch
+        {
+            SecretValueState.Set => IdentityProviderSecretState.Set,
+            SecretValueState.KeyMissing => IdentityProviderSecretState.KeyMissing,
+            _ => IdentityProviderSecretState.NotSet
+        };
+
+    /// <inheritdoc />
+    public SecretReadInfo DescribeClientSecret(RtIdentityProvider identityProvider, string? tenantId = null)
     {
         ArgumentNullException.ThrowIfNull(identityProvider);
 
         var value = GetStoredValue(identityProvider);
-        if (value == null || value == EmptyPending || value == EmptyLegacy)
+        if (value == null)
         {
-            return IdentityProviderSecretState.NotSet;
+            return new SecretReadInfo(SecretValueState.NotSet, SecretStorageForm.NotSet, null, null);
         }
 
-        return IsKeyMissing(value) ? IdentityProviderSecretState.KeyMissing : IdentityProviderSecretState.Set;
+        return protector.DescribeSecret(value, new SecretAccessContext(tenantId,
+            identityProvider.CkTypeId?.ToString(), ClientSecretAttributeName, ServiceName));
     }
 
     private static RtSecretValue? GetStoredValue(RtIdentityProvider identityProvider)

@@ -1,4 +1,3 @@
-using IdentityServerPersistence;
 using Meshmakers.Octo.Communication.Contracts;
 using YamlDotNet.RepresentationModel;
 using Xunit;
@@ -27,7 +26,7 @@ public class SecretManagementRoleSeedTests
         var role = Assert.Single(roles, e => Scalar(e, "rtWellKnownName") == "SecretManagement");
         Assert.Equal(SecretManagementRtId, Scalar(role, "rtId"));
         Assert.Equal("System.Identity/Role", Scalar(role, "ckTypeId"));
-        Assert.Equal(IdentityServiceConstants.SecretManagementRole, Attribute(role, "System/Name"));
+        Assert.Equal(CommonConstants.SecretManagementRole, Attribute(role, "System/Name"));
         Assert.Equal("SECRETMANAGEMENT", Attribute(role, "System.Identity/NormalizedName"));
 
         // Next to AdminPanelManagement, with a unique rtId.
@@ -73,10 +72,9 @@ public class SecretManagementRoleSeedTests
     }
 
     [Fact]
-    public void LocalRoleConstant_MatchesTheContractName()
+    public void RoleConstant_MatchesTheContractName()
     {
-        // TODO(AB#5544): compare with CommonConstants.SecretManagementRole once the SDK is in the feed.
-        Assert.Equal("SecretManagement", IdentityServiceConstants.SecretManagementRole);
+        Assert.Equal("SecretManagement", CommonConstants.SecretManagementRole);
     }
 
     private static List<YamlMappingNode> LoadEntities(string relativePath)

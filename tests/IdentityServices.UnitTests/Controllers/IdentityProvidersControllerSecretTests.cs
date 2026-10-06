@@ -40,12 +40,18 @@ public sealed class IdentityProvidersControllerSecretTests : IDisposable
     {
         // The key ring of this host knows only "k1"; the protector is never asked to decrypt.
         _protector.IsKnownKeyId(Arg.Any<string?>())
-            .Returns(ci => string.Equals(ci.Arg<string?>(), "k1", StringComparison.OrdinalIgnoreCase));
+            .Returns(ci => IsKnownKeyId(ci.Arg<string?>()));
+        // DescribeSecret is a default interface member: forward it to the same classification the
+        // real protector uses (stored form + key id only, no decrypt).
+        _protector.DescribeSecret(Arg.Any<RtSecretValue?>(), Arg.Any<SecretAccessContext?>())
+            .Returns(ci => SecretValueStates.Describe(ci.Arg<RtSecretValue?>(), IsKnownKeyId));
         var services = new ServiceCollection();
         services.AddLogging();
         services.AddSingleton(_protector);
         services.AddDynamicAuthentication();
         services.AddTransient<ClientSecretIsSetResolver>();
+        services.AddTransient<ClientSecretKeyMissingResolver>();
+        services.AddTransient<ClientSecretSetAtResolver>();
         _services = services.BuildServiceProvider();
 
         var mapper = new MapperConfiguration(cfg => cfg.AddProfile<MapperProfile>(), NullLoggerFactory.Instance)
@@ -55,6 +61,26 @@ public sealed class IdentityProvidersControllerSecretTests : IDisposable
     }
 
     public void Dispose() => _services.Dispose();
+
+    private static bool IsKnownKeyId(string? keyId) => string.Equals(keyId, "k1", StringComparison.OrdinalIgnoreCase);
+
+    private static bool? ClientSecretKeyMissing(IdentityProviderDto dto) => dto switch
+    {
+        GoogleIdentityProviderDto g => g.ClientSecretKeyMissing,
+        MicrosoftIdentityProviderDto m => m.ClientSecretKeyMissing,
+        FacebookIdentityProviderDto f => f.ClientSecretKeyMissing,
+        AzureEntraIdProviderDto a => a.ClientSecretKeyMissing,
+        _ => null
+    };
+
+    private static DateTime? ClientSecretSetAt(IdentityProviderDto dto) => dto switch
+    {
+        GoogleIdentityProviderDto g => g.ClientSecretSetAt,
+        MicrosoftIdentityProviderDto m => m.ClientSecretSetAt,
+        FacebookIdentityProviderDto f => f.ClientSecretSetAt,
+        AzureEntraIdProviderDto a => a.ClientSecretSetAt,
+        _ => null
+    };
 
     private static RtSecretValue NewStoredEnvelope(string keyId = "k1")
         => RtSecretValue.Protected($"enc:v2:{keyId}:" + Base64Url.EncodeToString(RandomNumberGenerator.GetBytes(48)));
@@ -223,7 +249,62 @@ public sealed class IdentityProvidersControllerSecretTests : IDisposable
 
         var result = await _sut.GetIdentityProvidersAsync();
 
-        Serialize(result.Value).Should().NotContain("clientSecretIsSet");
+        var json = Serialize(result.Value);
+        json.Should().NotContain("clientSecretIsSet").And.NotContain("clientSecretKeyMissing")
+            .And.NotContain("clientSecretSetAt");
+    }
+
+    [Fact]
+    public async Task GetById_ProtectedSecret_ReportsSetAtAndNoKeyMissing()
+    {
+        var setAt = new DateTime(2026, 10, 6, 7, 30, 0, DateTimeKind.Utc);
+        var stored = new RtMicrosoftIdentityProvider
+        {
+            RtId = OctoObjectId.GenerateNewId(), Name = "Microsoft", ClientId = "m",
+            ClientSecret = NewStoredEnvelope().WithSetAt(setAt)
+        };
+        _store.GetByIdAsync(stored.RtId).Returns(stored);
+
+        var result = await _sut.Get(stored.RtId);
+
+        var dto = result.Value!.IdentityProviders.Should().ContainSingle().Subject;
+        ClientSecretIsSet(dto).Should().BeTrue();
+        ClientSecretKeyMissing(dto).Should().BeFalse();
+        ClientSecretSetAt(dto).Should().Be(setAt);
+        Serialize(result.Value).Should().Contain("\"clientSecretSetAt\":\"2026-10-06T07:30:00Z\"");
+        _protector.DidNotReceiveWithAnyArgs().Unprotect(default(RtSecretValue)!, default);
+    }
+
+    [Fact]
+    public async Task GetAll_LegacySecret_HasNoSetAt()
+    {
+        var legacy = new RtFacebookIdentityProvider
+            { RtId = OctoObjectId.GenerateNewId(), Name = "Facebook", ClientId = "f" };
+        legacy.SetAttributeRawValue("ClientSecret", "legacy-clear-text-secret");
+        _store.GetAllAsync().Returns(new RtIdentityProvider[] { legacy });
+
+        var result = await _sut.GetIdentityProvidersAsync();
+
+        var dto = result.Value!.IdentityProviders.Should().ContainSingle().Subject;
+        ClientSecretIsSet(dto).Should().BeTrue();
+        ClientSecretKeyMissing(dto).Should().BeFalse();
+        ClientSecretSetAt(dto).Should().BeNull();
+    }
+
+    [Fact]
+    public async Task Replace_ResponseFromStoredEntity_CarriesKeyMissingAndSetAt()
+    {
+        var input = new GoogleIdentityProviderDto
+            { Name = "Google", IsEnabled = true, ClientId = "google-client" };
+
+        var result = await _sut.ReplaceProviderAsync(OctoObjectId.GenerateNewId(), input);
+
+        // Nothing sent and nothing stored in this unit test: not set, no key missing, no SetAt.
+        var response = result.Result.Should().BeOfType<OkObjectResult>().Subject.Value
+            .Should().BeOfType<GoogleIdentityProviderDto>().Subject;
+        response.ClientSecretIsSet.Should().BeFalse();
+        response.ClientSecretKeyMissing.Should().BeFalse();
+        response.ClientSecretSetAt.Should().BeNull();
     }
 
     [Theory]
@@ -260,9 +341,12 @@ public sealed class IdentityProvidersControllerSecretTests : IDisposable
 
         var result = await _sut.Get(stored.RtId);
 
-        ClientSecretIsSet(result.Value!.IdentityProviders.Should().ContainSingle().Subject).Should().BeFalse();
+        var dto = result.Value!.IdentityProviders.Should().ContainSingle().Subject;
+        ClientSecretIsSet(dto).Should().BeFalse();
+        ClientSecretKeyMissing(dto).Should().BeTrue();
         var json = Serialize(result.Value);
-        json.Should().Contain("\"clientSecretIsSet\":false").And.NotContain("enc:v2");
+        json.Should().Contain("\"clientSecretIsSet\":false").And.Contain("\"clientSecretKeyMissing\":true")
+            .And.NotContain("enc:v2");
         AssertNoClientSecretValue(json);
         _protector.DidNotReceiveWithAnyArgs().Unprotect(default(RtSecretValue)!, default);
     }

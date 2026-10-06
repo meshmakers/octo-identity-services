@@ -285,10 +285,33 @@ public sealed class ExternalProviderClientSecretTests : IDisposable
     }
 
     [Fact]
+    public void SecretReader_DescribeClientSecret_ReportsKeyMissingAndSetAt()
+    {
+        var reader = _serviceProvider.GetRequiredService<IIdentityProviderSecretReader>();
+        var before = DateTime.UtcNow.AddSeconds(-1);
+
+        var known = reader.DescribeClientSecret(Google("Known", Protector.Protect("s")), TenantId);
+        known.IsSet.Should().BeTrue();
+        known.KeyMissing.Should().BeFalse();
+        known.Form.Should().Be(SecretStorageForm.EncV2);
+        known.SetAt.Should().NotBeNull().And.BeOnOrAfter(before);
+
+        var foreign = reader.DescribeClientSecret(Google("Foreign", ForeignEnvelope()), TenantId);
+        foreign.IsSet.Should().BeFalse();
+        foreign.KeyMissing.Should().BeTrue();
+        foreign.KeyId.Should().Be("k9");
+
+        reader.DescribeClientSecret(new RtOpenLdapIdentityProvider { Name = "Ldap" }).Form.Should()
+            .Be(SecretStorageForm.NotSet);
+    }
+
+    [Fact]
     public async Task ConfigureAsync_UnknownKeyId_SkipsProviderWithoutDecrypting()
     {
         var protector = Substitute.For<ISecretAttributeProtector>();
         protector.IsKnownKeyId(Arg.Any<string?>()).Returns(false);
+        protector.DescribeSecret(Arg.Any<RtSecretValue?>(), Arg.Any<SecretAccessContext?>())
+            .Returns(ci => SecretValueStates.Describe(ci.Arg<RtSecretValue?>(), _ => false));
         using var withFakeProtector = BuildServiceProvider(new Dictionary<string, string?>(),
             services => services.Replace(ServiceDescriptor.Singleton(protector)));
         GivenStoredProviders(Google("Google", ForeignEnvelope()));

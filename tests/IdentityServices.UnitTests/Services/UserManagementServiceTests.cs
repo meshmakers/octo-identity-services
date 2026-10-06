@@ -1,4 +1,3 @@
-using IdentityServerPersistence;
 using FluentAssertions;
 using Meshmakers.Octo.Backend.IdentityServices.Services;
 using Meshmakers.Octo.Communication.Contracts;
@@ -258,7 +257,7 @@ public class UserManagementServiceTests
             CommonConstants.CommunicationManagementRole,
             CommonConstants.BotManagementRole,
             CommonConstants.AdminPanelManagementRole,
-            IdentityServiceConstants.SecretManagementRole,
+            CommonConstants.SecretManagementRole,
             CommonConstants.DashboardViewerRole,
             CommonConstants.DashboardManagementRole,
             CommonConstants.ReportingManagementRole,

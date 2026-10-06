@@ -10,7 +10,8 @@ public class MapperProfile : Profile
     public MapperProfile()
     {
         // AB#5540: ClientSecret of the external providers is a Secret attribute. It is never mapped
-        // to a response (write-only) — responses carry only ClientSecretIsSet — and an incoming
+        // to a response (write-only) — responses carry only ClientSecretIsSet, ClientSecretKeyMissing and
+        // ClientSecretSetAt (from the stored form, never decrypted) — and an incoming
         // value becomes a pending secret that the engine encrypts on write. null / "" = not sent =
         // keep the stored secret (concept §4.3).
         CreateMap<RtIdentityProvider, IdentityProviderDto>()
@@ -24,18 +25,26 @@ public class MapperProfile : Profile
 
         CreateMap<RtGoogleIdentityProvider, GoogleIdentityProviderDto>()
             .ForMember(d => d.ClientSecret, o => o.Ignore())
-            .ForMember(d => d.ClientSecretIsSet, o => o.MapFrom<ClientSecretIsSetResolver>());
+            .ForMember(d => d.ClientSecretIsSet, o => o.MapFrom<ClientSecretIsSetResolver>())
+            .ForMember(d => d.ClientSecretKeyMissing, o => o.MapFrom<ClientSecretKeyMissingResolver>())
+            .ForMember(d => d.ClientSecretSetAt, o => o.MapFrom<ClientSecretSetAtResolver>());
         CreateMap<RtMicrosoftIdentityProvider, MicrosoftIdentityProviderDto>()
             .ForMember(d => d.ClientSecret, o => o.Ignore())
-            .ForMember(d => d.ClientSecretIsSet, o => o.MapFrom<ClientSecretIsSetResolver>());
+            .ForMember(d => d.ClientSecretIsSet, o => o.MapFrom<ClientSecretIsSetResolver>())
+            .ForMember(d => d.ClientSecretKeyMissing, o => o.MapFrom<ClientSecretKeyMissingResolver>())
+            .ForMember(d => d.ClientSecretSetAt, o => o.MapFrom<ClientSecretSetAtResolver>());
         CreateMap<RtMicrosoftAdIdentityProvider, MicrosoftAdProviderDto>();
         CreateMap<RtOpenLdapIdentityProvider, OpenLdapProviderDto>();
         CreateMap<RtAzureEntraIdIdentityProvider, AzureEntraIdProviderDto>()
             .ForMember(d => d.ClientSecret, o => o.Ignore())
-            .ForMember(d => d.ClientSecretIsSet, o => o.MapFrom<ClientSecretIsSetResolver>());
+            .ForMember(d => d.ClientSecretIsSet, o => o.MapFrom<ClientSecretIsSetResolver>())
+            .ForMember(d => d.ClientSecretKeyMissing, o => o.MapFrom<ClientSecretKeyMissingResolver>())
+            .ForMember(d => d.ClientSecretSetAt, o => o.MapFrom<ClientSecretSetAtResolver>());
         CreateMap<RtFacebookIdentityProvider, FacebookIdentityProviderDto>()
             .ForMember(d => d.ClientSecret, o => o.Ignore())
-            .ForMember(d => d.ClientSecretIsSet, o => o.MapFrom<ClientSecretIsSetResolver>());
+            .ForMember(d => d.ClientSecretIsSet, o => o.MapFrom<ClientSecretIsSetResolver>())
+            .ForMember(d => d.ClientSecretKeyMissing, o => o.MapFrom<ClientSecretKeyMissingResolver>())
+            .ForMember(d => d.ClientSecretSetAt, o => o.MapFrom<ClientSecretSetAtResolver>());
         CreateMap<RtOctoTenantIdentityProvider, OctoTenantIdentityProviderDto>();
 
 

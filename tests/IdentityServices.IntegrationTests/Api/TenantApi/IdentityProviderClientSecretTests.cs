@@ -64,6 +64,10 @@ public class IdentityProviderClientSecretTests : IntegrationTestBase
         created.ClientSecretIsSet.Should().BeTrue();
         createBody.Should().Contain("\"clientSecretIsSet\":true");
         AssertNoClientSecretValue(createBody);
+        // Contract §8: the response reflects the stored (encrypted) secret with a readable key.
+        // ClientSecretSetAt mapping is covered by the unit tests; persisting SetAt (BSON "t") needs
+        // the MongoDB engine build b6e0901 (AB#5533).
+        created.ClientSecretKeyMissing.Should().BeFalse();
         var rtId = created.RtId!.Value;
 
         try
@@ -83,7 +87,7 @@ public class IdentityProviderClientSecretTests : IntegrationTestBase
             AssertNoClientSecretValue(listBody);
             var byIdBody = await Client.GetStringAsync(TenantApiUrl($"identityProviders/{rtId}"), ct);
             byIdBody.Should().NotContain(plaintext).And.NotContain("enc:v");
-            byIdBody.Should().Contain("\"clientSecretIsSet\":true");
+            byIdBody.Should().Contain("\"clientSecretIsSet\":true").And.Contain("\"clientSecretKeyMissing\":false");
             AssertNoClientSecretValue(byIdBody);
 
             // Replace without a secret keeps the stored one (same ciphertext, not re-entered)
@@ -123,13 +127,7 @@ public class IdentityProviderClientSecretTests : IntegrationTestBase
     public async Task ClientSecret_PlaceholderLikeValue_IsStoredEncryptedLikeAnyOtherValue()
     {
         // Decision r2-1 (AB#5528): there are no placeholder semantics on the API — "TODO_SET_*" or
-        // "<...>" is an ordinary secret. Engine builds before that decision still turn such a value
-        // into "not set" on write (they expose SecretAttributeConventions.IsPlaceholder, renamed to
-        // IsLegacyPlaceholder with the change), so the test skips itself until the engine is updated.
-        Assert.SkipWhen(
-            typeof(SecretAttributeConventions).GetMethod("IsPlaceholder") != null,
-            "The referenced engine still applies the pre-r2 write rule 'placeholder = not set'.");
-
+        // "<...>" is an ordinary secret, encrypted and stored like any other value.
         var ct = TestContext.Current.CancellationToken;
         var name = $"google-{Guid.NewGuid():N}";
         const string placeholderLike = "TODO_SET_GOOGLE_CLIENT_SECRET";
