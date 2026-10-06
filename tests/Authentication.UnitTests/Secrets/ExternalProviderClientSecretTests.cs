@@ -203,6 +203,34 @@ public sealed class ExternalProviderClientSecretTests : IDisposable
     }
 
     [Fact]
+    public async Task ConfigureAsync_StrictMode_LegacyPlaintextSkipped_OthersRegistered()
+    {
+        // Strict mode (concept decision 10) rejects legacy clear text. That must skip only the
+        // affected provider; an escaping exception would abort the tenant's scheme setup (and the
+        // startup initializer for every following tenant).
+        using var strict = BuildServiceProvider(new Dictionary<string, string?>
+        {
+            ["SecretEncryption:Keys:k1"] = Convert.ToBase64String(_key),
+            ["SecretEncryption:ActiveKeyId"] = "k1",
+            ["SecretEncryption:StrictMode"] = "true"
+        });
+        var strictProtector = strict.GetRequiredService<ISecretAttributeProtector>();
+        strictProtector.IsStrictMode.Should().BeTrue();
+
+        var legacy = Google("Legacy", null);
+        legacy.SetAttributeRawValue("ClientSecret", "legacy-clear-text");
+        GivenStoredProviders(legacy, Google("Encrypted", strictProtector.Protect("encrypted-secret")));
+
+        await ConfigureTenantAsync(strict);
+
+        var schemeProvider = strict.GetRequiredService<IAuthenticationSchemeProvider>();
+        (await schemeProvider.GetSchemeAsync($"{TenantId}:Legacy")).Should().BeNull();
+        (await schemeProvider.GetSchemeAsync($"{TenantId}:Encrypted")).Should().NotBeNull();
+        strict.GetRequiredService<IOptionsMonitor<GoogleOptions>>()
+            .Get($"{TenantId}:Encrypted").ClientSecret.Should().Be("encrypted-secret");
+    }
+
+    [Fact]
     public void SecretReader_ProviderWithoutSecret_ReturnsNull()
     {
         var reader = _serviceProvider.GetRequiredService<IIdentityProviderSecretReader>();

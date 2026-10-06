@@ -121,10 +121,12 @@ internal class DynamicAuthSchemeService : IDynamicAuthSchemeService
             }
             catch (Exception ex) when (ex is SecretEncryptionNotConfiguredException
                                            or UnknownSecretKeyIdException
+                                           or LegacyPlaintextSecretRejectedException
                                            or CryptographicException)
             {
                 // AB#5540: the provider's ClientSecret is stored encrypted and cannot be decrypted on
-                // this host (no key ring, a key id from another environment, or a damaged value).
+                // this host (no key ring, a key id from another environment, or a damaged value), or
+                // it is still clear text while strict mode rejects legacy plaintext reads.
                 // Skip only this provider so the tenant's other sign-in methods keep working; the
                 // secret has to be re-entered (or the key ring configured). The exception never
                 // carries the value, but log only its type to be safe.

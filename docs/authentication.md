@@ -283,7 +283,8 @@ out of `ExportRt`.
   work, but writing a new secret or reading an encrypted one throws
   `SecretEncryptionNotConfiguredException`.
 - **Undecryptable secret:** `DynamicAuthSchemeService` skips only that provider (no key ring, unknown
-  key id — e.g. after a cross-environment restore — or a damaged value) and logs the exception type;
+  key id — e.g. after a cross-environment restore — a damaged value, or legacy clear text while
+  `SecretEncryption:StrictMode` is on) and logs the exception type;
   the tenant's other sign-in methods keep working. The secret has to be re-entered.
 - **Writing:** `IdentityProvidersController` / `MapperProfile` map a non-empty input to
   `RtSecretValue.Pending`, which the engine encrypts on write; null/"" leave the attribute absent, and
