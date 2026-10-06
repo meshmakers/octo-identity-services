@@ -1,12 +1,22 @@
 $schema: https://schemas.meshmakers.cloud/blueprint-meta.schema.json
-blueprintId: System.Identity.Bootstrap-1.3.1
+blueprintId: System.Identity.Bootstrap-1.4.0
 description: |
   Service-managed Identity tenant seed — system + every child tenant. Provides
-  the default role set (14 roles), the five OIDC identity resources, three API
+  the default role set (15 roles), the five OIDC identity resources, three API
   scopes (full-access / read-only / data-model-management), the OctoApi resource,
   the MCP resource indicator, the OAuth client baseline (OctoTool / IdentityServices
   Swagger / Refinery Studio SPA / MCP Services Swagger + Device / Platform Services
   Swagger) and the TenantOwners group with full role assignment.
+
+  1.4.0 (AB#5544): adds the tenant role `SecretManagement` (660…60) — may trigger
+  secret sweeps and delete a pre-sweep dump early (bot services secrets admin API,
+  SECRET attribute value type AB#5528). The 660…01–0E role block is full, so
+  roles added later continue at 660…60. TenantOwners (660…40) gets the new role
+  assigned; the version bump makes every existing tenant re-import the seed, which
+  creates the role and the AssignedRole edge. The initial tenant administrator
+  (`UserManagementService.CreateAdminUserAsync`) is granted it directly, like
+  AdminPanelManagement. Existing administrators receive it through TenantOwners
+  membership only.
 
   1.2.0 (AB#4388): adds the `octo-platformServices-swagger` client (660…36) for
   the Swagger UI now exposed by octo-platform-services (authorization code +
@@ -131,7 +141,7 @@ ckModelDependencies:
 # All files below are merged into ONE runtime model before the import runs, so the order
 # is presentation only and associations may cross files (the UserManagement role in
 # roles.yaml grants the DataPermission in data-permissions.yaml; the TenantOwners group
-# in groups.yaml references all fourteen roles).
+# in groups.yaml references all fifteen roles).
 seedDataPaths:
   - seed-data/roles.yaml
   - seed-data/identity-resources.yaml

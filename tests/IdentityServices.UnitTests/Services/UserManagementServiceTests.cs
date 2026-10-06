@@ -1,3 +1,4 @@
+using IdentityServerPersistence;
 using FluentAssertions;
 using Meshmakers.Octo.Backend.IdentityServices.Services;
 using Meshmakers.Octo.Communication.Contracts;
@@ -167,7 +168,27 @@ public class UserManagementServiceTests
         await _sut.CreateAdminUserAsync(dto);
 
         // Assert
-        await _userManager.Received(10).AddToRoleAsync(Arg.Any<RtUser>(), Arg.Any<string>());
+        await _userManager.Received(11).AddToRoleAsync(Arg.Any<RtUser>(), Arg.Any<string>());
+    }
+
+    [Fact]
+    public async Task CreateAdminUserAsync_WhenValid_GrantsSecretManagementLikeAdminPanelManagement()
+    {
+        // AB#5544: the initial tenant administrator gets SecretManagement like AdminPanelManagement.
+        var dto = new AdminUserDto { EMail = "admin@test.com", Password = "SecurePass123!" };
+        _userManager.Users.Returns(Enumerable.Empty<RtUser>().AsQueryable());
+        _credentialGenerator.CheckPassword(dto.Password).Returns(true);
+        _userManager.FindByNameAsync(dto.EMail).Returns((RtUser?)null);
+        _userManager.CreateAsync(Arg.Any<RtUser>(), dto.Password)
+            .Returns(IdentityResult.Success);
+        SetupAllRequiredRoles();
+        _userManager.AddToRoleAsync(Arg.Any<RtUser>(), Arg.Any<string>())
+            .Returns(IdentityResult.Success);
+
+        await _sut.CreateAdminUserAsync(dto);
+
+        await _userManager.Received(1).AddToRoleAsync(Arg.Any<RtUser>(), "SecretManagement");
+        await _userManager.Received(1).AddToRoleAsync(Arg.Any<RtUser>(), CommonConstants.AdminPanelManagementRole);
     }
 
     [Fact]
@@ -237,6 +258,7 @@ public class UserManagementServiceTests
             CommonConstants.CommunicationManagementRole,
             CommonConstants.BotManagementRole,
             CommonConstants.AdminPanelManagementRole,
+            IdentityServiceConstants.SecretManagementRole,
             CommonConstants.DashboardViewerRole,
             CommonConstants.DashboardManagementRole,
             CommonConstants.ReportingManagementRole,
