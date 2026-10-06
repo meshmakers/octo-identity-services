@@ -302,9 +302,9 @@ Azure Entra ID providers carry a `clientSecret` (CK value type `Secret`, stored 
   keeps it unchanged. There is no clear operation (the secret is required on these provider types).
 - A placeholder (`<...>`, `TODO_SET_*`) is rejected with `400` (validation problem on
   `ClientSecret`) on `POST` and `PUT` — the engine would store it as "not set".
-- There is not yet an `isSet` flag on the DTO (it needs a field in `octo-sdk`
-  `Communication.Contracts`); until then a provider of these types always has a secret, because it is
-  required on create and cannot be cleared.
+- Every response of these provider types carries `clientSecretIsSet` (`true` when a secret is
+  stored — encrypted, or legacy clear text before the encrypt sweep; computed from the stored form,
+  never by decrypting). Other provider types omit the field. It is ignored on input.
 
 ### Email Domain Group Rules (`/{tenantId}/v1/emailDomainGroupRules`)
 

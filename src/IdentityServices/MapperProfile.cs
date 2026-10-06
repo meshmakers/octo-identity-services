@@ -10,8 +10,9 @@ public class MapperProfile : Profile
     public MapperProfile()
     {
         // AB#5540: ClientSecret of the external providers is a Secret attribute. It is never mapped
-        // to a response (write-only), and an incoming value becomes a pending secret that the
-        // engine encrypts on write. null / "" = not sent = keep the stored secret (concept §4.3).
+        // to a response (write-only) — responses carry only ClientSecretIsSet — and an incoming
+        // value becomes a pending secret that the engine encrypts on write. null / "" = not sent =
+        // keep the stored secret (concept §4.3).
         CreateMap<RtIdentityProvider, IdentityProviderDto>()
             .Include<RtGoogleIdentityProvider, GoogleIdentityProviderDto>()
             .Include<RtMicrosoftIdentityProvider, MicrosoftIdentityProviderDto>()
@@ -22,15 +23,19 @@ public class MapperProfile : Profile
             .Include<RtOctoTenantIdentityProvider, OctoTenantIdentityProviderDto>();
 
         CreateMap<RtGoogleIdentityProvider, GoogleIdentityProviderDto>()
-            .ForMember(d => d.ClientSecret, o => o.Ignore());
+            .ForMember(d => d.ClientSecret, o => o.Ignore())
+            .ForMember(d => d.ClientSecretIsSet, o => o.MapFrom(src => IsClientSecretSet(src)));
         CreateMap<RtMicrosoftIdentityProvider, MicrosoftIdentityProviderDto>()
-            .ForMember(d => d.ClientSecret, o => o.Ignore());
+            .ForMember(d => d.ClientSecret, o => o.Ignore())
+            .ForMember(d => d.ClientSecretIsSet, o => o.MapFrom(src => IsClientSecretSet(src)));
         CreateMap<RtMicrosoftAdIdentityProvider, MicrosoftAdProviderDto>();
         CreateMap<RtOpenLdapIdentityProvider, OpenLdapProviderDto>();
         CreateMap<RtAzureEntraIdIdentityProvider, AzureEntraIdProviderDto>()
-            .ForMember(d => d.ClientSecret, o => o.Ignore());
+            .ForMember(d => d.ClientSecret, o => o.Ignore())
+            .ForMember(d => d.ClientSecretIsSet, o => o.MapFrom(src => IsClientSecretSet(src)));
         CreateMap<RtFacebookIdentityProvider, FacebookIdentityProviderDto>()
-            .ForMember(d => d.ClientSecret, o => o.Ignore());
+            .ForMember(d => d.ClientSecret, o => o.Ignore())
+            .ForMember(d => d.ClientSecretIsSet, o => o.MapFrom(src => IsClientSecretSet(src)));
         CreateMap<RtOctoTenantIdentityProvider, OctoTenantIdentityProviderDto>();
 
 
@@ -73,6 +78,21 @@ public class MapperProfile : Profile
     {
         member.PreCondition(src => !string.IsNullOrEmpty(GetClientSecretInput(src)));
         member.MapFrom(src => RtSecretValue.Pending(GetClientSecretInput(src)!));
+    }
+
+    private const string ClientSecretAttributeName = "ClientSecret";
+    private static readonly RtSecretValue EmptyPending = RtSecretValue.Pending(string.Empty);
+    private static readonly RtSecretValue EmptyLegacy = RtSecretValue.LegacyPlaintext(string.Empty);
+
+    /// <summary>
+    ///     Tells whether the provider holds a client secret, from the stored form only — the value is
+    ///     never decrypted for it (AB#5540): a protected envelope, a non-empty legacy value (clear
+    ///     text / <c>enc:v1</c> before the encrypt sweep) or a non-empty pending value (just written).
+    /// </summary>
+    internal static bool IsClientSecretSet(RtIdentityProvider provider)
+    {
+        var value = provider.GetAttributeSecretValueOrDefault(ClientSecretAttributeName);
+        return value != null && value != EmptyPending && value != EmptyLegacy;
     }
 
     internal static string? GetClientSecretInput(IdentityProviderDto dto) => dto switch

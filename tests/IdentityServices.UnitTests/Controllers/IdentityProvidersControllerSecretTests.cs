@@ -46,6 +46,19 @@ public class IdentityProvidersControllerSecretTests
 
     private static string Serialize(object? value) => JsonSerializer.Serialize(value, WebJson);
 
+    private static bool? ClientSecretIsSet(IdentityProviderDto dto) => dto switch
+    {
+        GoogleIdentityProviderDto g => g.ClientSecretIsSet,
+        MicrosoftIdentityProviderDto m => m.ClientSecretIsSet,
+        FacebookIdentityProviderDto f => f.ClientSecretIsSet,
+        AzureEntraIdProviderDto a => a.ClientSecretIsSet,
+        _ => null
+    };
+
+    // The write-only field may be serialized as null, but never with a value.
+    private static void AssertNoClientSecretValue(string json)
+        => json.Should().NotMatchRegex("\"clientSecret\"\\s*:\\s*\"");
+
     public static TheoryData<RtIdentityProvider> StoredProvidersWithSecret()
     {
         var envelope = NewStoredEnvelope();
@@ -76,8 +89,11 @@ public class IdentityProvidersControllerSecretTests
 
         var dto = result.Value!.IdentityProviders.Should().ContainSingle().Subject;
         MapperProfile.GetClientSecretInput(dto).Should().BeNull();
+        ClientSecretIsSet(dto).Should().BeTrue();
         var json = Serialize(result.Value);
         json.Should().NotContain("enc:v2").And.NotContain("legacy-clear-text-secret");
+        json.Should().Contain("\"clientSecretIsSet\":true");
+        AssertNoClientSecretValue(json);
     }
 
     [Theory]
@@ -90,7 +106,11 @@ public class IdentityProvidersControllerSecretTests
 
         var dto = result.Value!.IdentityProviders.Should().ContainSingle().Subject;
         MapperProfile.GetClientSecretInput(dto).Should().BeNull();
-        Serialize(result.Value).Should().NotContain("enc:v2").And.NotContain("legacy-clear-text-secret");
+        ClientSecretIsSet(dto).Should().BeTrue();
+        var json = Serialize(result.Value);
+        json.Should().NotContain("enc:v2").And.NotContain("legacy-clear-text-secret");
+        json.Should().Contain("\"clientSecretIsSet\":true");
+        AssertNoClientSecretValue(json);
     }
 
     [Fact]
@@ -109,8 +129,11 @@ public class IdentityProvidersControllerSecretTests
             .Which.ClientSecret.Should().Be(RtSecretValue.Pending("write-only-secret"));
         var response = result.Value.Should().BeOfType<GoogleIdentityProviderDto>().Subject;
         response.ClientSecret.Should().BeNull();
+        response.ClientSecretIsSet.Should().BeTrue();
         response.ClientId.Should().Be("google-client");
-        Serialize(result.Value).Should().NotContain("write-only-secret");
+        var json = Serialize(result.Value);
+        json.Should().NotContain("write-only-secret").And.Contain("\"clientSecretIsSet\":true");
+        AssertNoClientSecretValue(json);
     }
 
     [Fact]
@@ -132,8 +155,60 @@ public class IdentityProvidersControllerSecretTests
         var ok = result.Result.Should().BeOfType<OkObjectResult>().Subject;
         var response = ok.Value.Should().BeOfType<AzureEntraIdProviderDto>().Subject;
         response.ClientSecret.Should().BeNull();
+        response.ClientSecretIsSet.Should().BeTrue();
         response.RtId.Should().Be(rtId);
-        Serialize(ok.Value).Should().NotContain("rotated-secret");
+        var json = Serialize(ok.Value);
+        json.Should().NotContain("rotated-secret").And.Contain("\"clientSecretIsSet\":true");
+        AssertNoClientSecretValue(json);
+    }
+
+    public static TheoryData<RtIdentityProvider> StoredProvidersWithoutSecret()
+    {
+        var emptyLegacy = new RtFacebookIdentityProvider
+            { RtId = OctoObjectId.GenerateNewId(), Name = "Facebook", ClientId = "f" };
+        emptyLegacy.SetAttributeRawValue("ClientSecret", "");
+        return new TheoryData<RtIdentityProvider>
+        {
+            new RtGoogleIdentityProvider { RtId = OctoObjectId.GenerateNewId(), Name = "Google", ClientId = "g" },
+            new RtMicrosoftIdentityProvider
+            {
+                RtId = OctoObjectId.GenerateNewId(), Name = "Microsoft", ClientId = "m",
+                ClientSecret = RtSecretValue.Pending(string.Empty)
+            },
+            new RtAzureEntraIdIdentityProvider
+            {
+                RtId = OctoObjectId.GenerateNewId(), Name = "Entra", TenantId = "tid", ClientId = "e",
+                ClientSecret = RtSecretValue.LegacyPlaintext(string.Empty)
+            },
+            emptyLegacy
+        };
+    }
+
+    [Theory]
+    [MemberData(nameof(StoredProvidersWithoutSecret))]
+    public async Task GetById_ReportsAMissingSecretAsNotSet(RtIdentityProvider stored)
+    {
+        _store.GetByIdAsync(stored.RtId).Returns(stored);
+
+        var result = await _sut.Get(stored.RtId);
+
+        var dto = result.Value!.IdentityProviders.Should().ContainSingle().Subject;
+        ClientSecretIsSet(dto).Should().BeFalse();
+        Serialize(result.Value).Should().Contain("\"clientSecretIsSet\":false");
+    }
+
+    [Fact]
+    public async Task GetAll_ProviderTypesWithoutClientSecret_HaveNoIsSetFlag()
+    {
+        _store.GetAllAsync().Returns(new RtIdentityProvider[]
+        {
+            new RtOctoTenantIdentityProvider
+                { RtId = OctoObjectId.GenerateNewId(), Name = "Parent", ParentTenantId = "parent" }
+        });
+
+        var result = await _sut.GetIdentityProvidersAsync();
+
+        Serialize(result.Value).Should().NotContain("clientSecretIsSet");
     }
 
     [Theory]

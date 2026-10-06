@@ -38,6 +38,10 @@ public class IdentityProviderClientSecretTests : IntegrationTestBase
         return entity;
     }
 
+    // The write-only field may appear as null (default serializer settings) but never with a value.
+    private static void AssertNoClientSecretValue(string body)
+        => body.Should().NotMatchRegex("\"clientSecret\"\\s*:\\s*\"");
+
     [Fact]
     public async Task ClientSecret_IsEncrypted_WriteOnly_Preserved_AndDecryptedForTheScheme()
     {
@@ -57,6 +61,9 @@ public class IdentityProviderClientSecretTests : IntegrationTestBase
         var created = (await createResponse.Content.ReadFromJsonAsync<IdentityProviderDto>(ct))
             .Should().BeOfType<GoogleIdentityProviderDto>().Subject;
         created.ClientSecret.Should().BeNull();
+        created.ClientSecretIsSet.Should().BeTrue();
+        createBody.Should().Contain("\"clientSecretIsSet\":true");
+        AssertNoClientSecretValue(createBody);
         var rtId = created.RtId!.Value;
 
         try
@@ -72,8 +79,12 @@ public class IdentityProviderClientSecretTests : IntegrationTestBase
             // Read endpoints never return it
             var listBody = await Client.GetStringAsync(TenantApiUrl("identityProviders"), ct);
             listBody.Should().Contain(name).And.NotContain(plaintext).And.NotContain("enc:v");
+            listBody.Should().Contain("\"clientSecretIsSet\":true");
+            AssertNoClientSecretValue(listBody);
             var byIdBody = await Client.GetStringAsync(TenantApiUrl($"identityProviders/{rtId}"), ct);
             byIdBody.Should().NotContain(plaintext).And.NotContain("enc:v");
+            byIdBody.Should().Contain("\"clientSecretIsSet\":true");
+            AssertNoClientSecretValue(byIdBody);
 
             // Replace without a secret keeps the stored one (same ciphertext, not re-entered)
             IdentityProviderDto replace = new GoogleIdentityProviderDto
@@ -85,6 +96,9 @@ public class IdentityProviderClientSecretTests : IntegrationTestBase
             var replaceBody = await replaceResponse.Content.ReadAsStringAsync(ct);
             replaceResponse.StatusCode.Should().Be(HttpStatusCode.OK, replaceBody);
             replaceBody.Should().NotContain("enc:v");
+            // The stored secret was carried over, so the response still reports it as set
+            replaceBody.Should().Contain("\"clientSecretIsSet\":true");
+            AssertNoClientSecretValue(replaceBody);
             var afterReplace = await LoadStoredAsync(rtId);
             afterReplace!.ClientId.Should().Be("google-client-id-2");
             afterReplace.ClientSecret!.Envelope.Should().Be(envelope);
