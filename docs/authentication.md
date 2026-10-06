@@ -267,7 +267,7 @@ All scheme creators accept an optional `schemeNameOverride` parameter. When prov
 
 ### Client Secrets of External Providers (AB#5540)
 
-Since `System.Identity-2.22.0` the `ClientSecret` of Google, Microsoft, Facebook and Azure Entra ID
+Since `System.Identity-2.23.0` the `ClientSecret` of Google, Microsoft, Facebook and Azure Entra ID
 providers is a CK `Secret` attribute (concept AB#5528 in `octo-construction-kit-engine/docs/`): stored
 as an `enc:v2:<kid>:…` envelope, never projected by an API, preserved on blueprint re-apply and left
 out of `ExportRt`.
