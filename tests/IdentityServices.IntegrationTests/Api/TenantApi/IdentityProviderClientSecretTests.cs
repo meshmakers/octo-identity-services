@@ -112,17 +112,65 @@ public class IdentityProviderClientSecretTests : IntegrationTestBase
 
             Factory.Services.GetRequiredService<IOptionsMonitor<GoogleOptions>>()
                 .Get($"{NormalizedSystemTenantId}:{name}").ClientSecret.Should().Be(plaintext);
+        }
+        finally
+        {
+            await Client.DeleteAsync(TenantApiUrl($"identityProviders/{rtId}"), ct);
+        }
+    }
 
-            // A placeholder is rejected and does not clear the stored secret
-            IdentityProviderDto placeholder = new GoogleIdentityProviderDto
+    [Fact]
+    public async Task ClientSecret_PlaceholderLikeValue_IsStoredEncryptedLikeAnyOtherValue()
+    {
+        // Decision r2-1 (AB#5528): there are no placeholder semantics on the API — "TODO_SET_*" or
+        // "<...>" is an ordinary secret. Engine builds before that decision still turn such a value
+        // into "not set" on write (they expose SecretAttributeConventions.IsPlaceholder, renamed to
+        // IsLegacyPlaceholder with the change), so the test skips itself until the engine is updated.
+        Assert.SkipWhen(
+            typeof(SecretAttributeConventions).GetMethod("IsPlaceholder") != null,
+            "The referenced engine still applies the pre-r2 write rule 'placeholder = not set'.");
+
+        var ct = TestContext.Current.CancellationToken;
+        var name = $"google-{Guid.NewGuid():N}";
+        const string placeholderLike = "TODO_SET_GOOGLE_CLIENT_SECRET";
+
+        IdentityProviderDto create = new GoogleIdentityProviderDto
+        {
+            Name = name, IsEnabled = true, ClientId = "google-client-id", ClientSecret = "<google-client-secret>"
+        };
+        var createResponse = await Client.PostAsJsonAsync(TenantApiUrl("identityProviders"), create, ct);
+        var createBody = await createResponse.Content.ReadAsStringAsync(ct);
+        createResponse.StatusCode.Should().Be(HttpStatusCode.OK, createBody);
+        createBody.Should().Contain("\"clientSecretIsSet\":true");
+        AssertNoClientSecretValue(createBody);
+        var rtId = (await createResponse.Content.ReadFromJsonAsync<IdentityProviderDto>(ct))!.RtId!.Value;
+
+        try
+        {
+            var envelope = (await LoadStoredAsync(rtId))!.ClientSecret!;
+            envelope.IsProtected.Should().BeTrue();
+
+            IdentityProviderDto replace = new GoogleIdentityProviderDto
             {
-                Name = name, IsEnabled = true, ClientId = "google-client-id-2",
-                ClientSecret = "TODO_SET_GOOGLE_CLIENT_SECRET"
+                Name = name, IsEnabled = true, ClientId = "google-client-id", ClientSecret = placeholderLike
             };
-            var placeholderResponse =
-                await Client.PutAsJsonAsync(TenantApiUrl($"identityProviders/{rtId}"), placeholder, ct);
-            placeholderResponse.StatusCode.Should().Be(HttpStatusCode.BadRequest);
-            (await LoadStoredAsync(rtId))!.ClientSecret!.Envelope.Should().Be(envelope);
+            var replaceResponse =
+                await Client.PutAsJsonAsync(TenantApiUrl($"identityProviders/{rtId}"), replace, ct);
+            var replaceBody = await replaceResponse.Content.ReadAsStringAsync(ct);
+            replaceResponse.StatusCode.Should().Be(HttpStatusCode.OK, replaceBody);
+            replaceBody.Should().NotContain(placeholderLike).And.Contain("\"clientSecretIsSet\":true");
+            var afterReplace = (await LoadStoredAsync(rtId))!.ClientSecret!;
+            afterReplace.IsProtected.Should().BeTrue();
+            afterReplace.Envelope.Should().NotBe(envelope.Envelope).And.NotContain(placeholderLike);
+
+            using (var scope = Factory.Services.CreateScope())
+            {
+                await scope.ServiceProvider.GetRequiredService<IDynamicAuthSchemeService>()
+                    .ConfigureAsync(NormalizedSystemTenantId);
+            }
+
+            Factory.Services.GetRequiredService<IOptionsMonitor<GoogleOptions>>()
+                .Get($"{NormalizedSystemTenantId}:{name}").ClientSecret.Should().Be(placeholderLike);
         }
         finally
         {

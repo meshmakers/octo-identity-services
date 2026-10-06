@@ -94,12 +94,6 @@ public class IdentityProvidersController : ControllerBase
             return ValidationProblem(ModelState);
         }
 
-        if (IsClientSecretPlaceholder(identityProviderDto))
-        {
-            ModelState.AddModelError(nameof(GoogleIdentityProviderDto.ClientSecret), ClientSecretPlaceholderMessage);
-            return ValidationProblem(ModelState);
-        }
-
         if (!IsProviderNameValid(identityProviderDto.Name))
         {
             ModelState.AddModelError(nameof(IdentityProviderDto.Name), ProviderNameValidationMessage);
@@ -148,18 +142,6 @@ public class IdentityProvidersController : ControllerBase
         };
     }
 
-    // AB#5540: the engine stores a placeholder ("<...>", "TODO_SET_*") in a Secret attribute as
-    // "not set" (seed convention). For the required provider secret that would end in an engine
-    // validation error (create) or clear the stored secret (replace) — reject it up front.
-    internal const string ClientSecretPlaceholderMessage =
-        "The ClientSecret must be the secret issued by the identity provider, not a placeholder.";
-
-    private static bool IsClientSecretPlaceholder(IdentityProviderDto dto)
-    {
-        var secret = MapperProfile.GetClientSecretInput(dto);
-        return !string.IsNullOrEmpty(secret) && SecretAttributeConventions.IsPlaceholder(secret);
-    }
-
     [HttpDelete("{rtId}")]
     [Authorize(IdentityServiceConstants.IdentityTenantAdministrationWritePolicy)]
     [EndpointSummary("Delete an existing identity provider.")]
@@ -197,12 +179,6 @@ public class IdentityProvidersController : ControllerBase
         if (!IsProviderNameValid(identityProviderDto.Name))
         {
             ModelState.AddModelError(nameof(IdentityProviderDto.Name), ProviderNameValidationMessage);
-            return ValidationProblem(ModelState);
-        }
-
-        if (IsClientSecretPlaceholder(identityProviderDto))
-        {
-            ModelState.AddModelError(nameof(GoogleIdentityProviderDto.ClientSecret), ClientSecretPlaceholderMessage);
             return ValidationProblem(ModelState);
         }
 

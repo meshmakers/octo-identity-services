@@ -18,6 +18,7 @@ using Microsoft.AspNetCore.Authentication.MicrosoftAccount;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using NSubstitute;
 using Persistence.IdentityCkModel.Generated.System.Identity.v2;
@@ -57,7 +58,8 @@ public sealed class ExternalProviderClientSecretTests : IDisposable
         _serviceProvider.Dispose();
     }
 
-    private ServiceProvider BuildServiceProvider(Dictionary<string, string?> configurationValues)
+    private ServiceProvider BuildServiceProvider(Dictionary<string, string?> configurationValues,
+        Action<IServiceCollection>? configure = null)
     {
         var configuration = new ConfigurationBuilder().AddInMemoryCollection(configurationValues).Build();
 
@@ -77,6 +79,7 @@ public sealed class ExternalProviderClientSecretTests : IDisposable
             .AddFacebook()
             .AddMicrosoft()
             .AddAzureEntraId();
+        configure?.Invoke(services);
         return services.BuildServiceProvider();
     }
 
@@ -237,6 +240,64 @@ public sealed class ExternalProviderClientSecretTests : IDisposable
 
         reader.GetClientSecret(Google("Google", null), TenantId).Should().BeNull();
         reader.GetClientSecret(new RtOpenLdapIdentityProvider { Name = "Ldap" }, TenantId).Should().BeNull();
+    }
+
+    private static RtSecretValue ForeignEnvelope(string keyId = "k9")
+        => RtSecretValue.Protected($"enc:v2:{keyId}:" +
+                                   System.Buffers.Text.Base64Url.EncodeToString(RandomNumberGenerator.GetBytes(48)));
+
+    [Fact]
+    public void SecretReader_UnknownKeyId_IsNotSet_LogsErrorWithoutValue()
+    {
+        // Decision r2-2: an unknown key id reads as "not set" (null) with an error log; the
+        // ciphertext stays stored and becomes readable once the key is added to the ring.
+        var logger = new CapturingLogger<IdentityProviderSecretReader>();
+        var reader = new IdentityProviderSecretReader(Protector, logger);
+        var envelope = ForeignEnvelope();
+
+        reader.GetClientSecret(Google("Google", envelope), TenantId).Should().BeNull();
+
+        logger.Messages.Should().ContainSingle().Which.Should().StartWith($"[{LogLevel.Error}]")
+            .And.Contain("k9").And.Contain("Google").And.NotContain(envelope.Envelope!);
+    }
+
+    [Fact]
+    public void SecretReader_GetClientSecretState_FromStoredFormOnly()
+    {
+        var reader = _serviceProvider.GetRequiredService<IIdentityProviderSecretReader>();
+        var legacy = Google("Legacy", null);
+        legacy.SetAttributeRawValue("ClientSecret", "legacy-clear-text");
+
+        reader.GetClientSecretState(Google("Known", Protector.Protect("s"))).Should()
+            .Be(IdentityProviderSecretState.Set);
+        reader.GetClientSecretState(Google("Upper", ForeignEnvelope("K1"))).Should()
+            .Be(IdentityProviderSecretState.Set, "key ids are case-insensitive");
+        reader.GetClientSecretState(legacy).Should().Be(IdentityProviderSecretState.Set);
+        reader.GetClientSecretState(Google("Pending", RtSecretValue.Pending("p"))).Should()
+            .Be(IdentityProviderSecretState.Set);
+        reader.GetClientSecretState(Google("Foreign", ForeignEnvelope())).Should()
+            .Be(IdentityProviderSecretState.KeyMissing);
+        reader.GetClientSecretState(Google("None", null)).Should().Be(IdentityProviderSecretState.NotSet);
+        reader.GetClientSecretState(Google("Empty", RtSecretValue.Pending(string.Empty))).Should()
+            .Be(IdentityProviderSecretState.NotSet);
+        reader.GetClientSecretState(new RtOpenLdapIdentityProvider { Name = "Ldap" }).Should()
+            .Be(IdentityProviderSecretState.NotSet);
+    }
+
+    [Fact]
+    public async Task ConfigureAsync_UnknownKeyId_SkipsProviderWithoutDecrypting()
+    {
+        var protector = Substitute.For<ISecretAttributeProtector>();
+        protector.IsKnownKeyId(Arg.Any<string?>()).Returns(false);
+        using var withFakeProtector = BuildServiceProvider(new Dictionary<string, string?>(),
+            services => services.Replace(ServiceDescriptor.Singleton(protector)));
+        GivenStoredProviders(Google("Google", ForeignEnvelope()));
+
+        await ConfigureTenantAsync(withFakeProtector);
+
+        (await withFakeProtector.GetRequiredService<IAuthenticationSchemeProvider>()
+            .GetSchemeAsync($"{TenantId}:Google")).Should().BeNull();
+        protector.DidNotReceiveWithAnyArgs().Unprotect(default(RtSecretValue)!, default);
     }
 
     [Fact]

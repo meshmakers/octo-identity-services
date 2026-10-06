@@ -10,9 +10,10 @@ using Meshmakers.Octo.Common.DistributionEventHub.Services;
 using Meshmakers.Octo.Communication.Contracts.DataTransferObjects;
 using Meshmakers.Octo.ConstructionKit.Contracts;
 using Meshmakers.Octo.Runtime.Contracts.RepositoryEntities;
-using Microsoft.AspNetCore.Http;
+using Meshmakers.Octo.Runtime.Contracts.Secrets;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Logging.Abstractions;
 using NSubstitute;
 using Persistence.IdentityCkModel.Generated.System.Identity.v2;
@@ -26,23 +27,37 @@ namespace IdentityServices.UnitTests.Controllers;
 ///     the plaintext nor the stored envelope — and create/replace accept it as a string where null or
 ///     "" means "keep the stored secret".
 /// </summary>
-public class IdentityProvidersControllerSecretTests
+public sealed class IdentityProvidersControllerSecretTests : IDisposable
 {
     private static readonly JsonSerializerOptions WebJson = new(JsonSerializerDefaults.Web);
 
     private readonly IOctoIdentityProviderStore _store = Substitute.For<IOctoIdentityProviderStore>();
+    private readonly ISecretAttributeProtector _protector = Substitute.For<ISecretAttributeProtector>();
+    private readonly ServiceProvider _services;
     private readonly IdentityProvidersController _sut;
 
     public IdentityProvidersControllerSecretTests()
     {
+        // The key ring of this host knows only "k1"; the protector is never asked to decrypt.
+        _protector.IsKnownKeyId(Arg.Any<string?>())
+            .Returns(ci => string.Equals(ci.Arg<string?>(), "k1", StringComparison.OrdinalIgnoreCase));
+        var services = new ServiceCollection();
+        services.AddLogging();
+        services.AddSingleton(_protector);
+        services.AddDynamicAuthentication();
+        services.AddTransient<ClientSecretIsSetResolver>();
+        _services = services.BuildServiceProvider();
+
         var mapper = new MapperConfiguration(cfg => cfg.AddProfile<MapperProfile>(), NullLoggerFactory.Instance)
-            .CreateMapper();
+            .CreateMapper(_services.GetService);
         _store.TenantId.Returns("test-tenant");
         _sut = new IdentityProvidersController(_store, mapper, Substitute.For<IDistributionEventHubService>());
     }
 
-    private static RtSecretValue NewStoredEnvelope()
-        => RtSecretValue.Protected("enc:v2:k1:" + Base64Url.EncodeToString(RandomNumberGenerator.GetBytes(48)));
+    public void Dispose() => _services.Dispose();
+
+    private static RtSecretValue NewStoredEnvelope(string keyId = "k1")
+        => RtSecretValue.Protected($"enc:v2:{keyId}:" + Base64Url.EncodeToString(RandomNumberGenerator.GetBytes(48)));
 
     private static string Serialize(object? value) => JsonSerializer.Serialize(value, WebJson);
 
@@ -231,29 +246,47 @@ public class IdentityProvidersControllerSecretTests
         stored!.Attributes.ContainsKey("ClientSecret").Should().BeFalse();
     }
 
+    [Fact]
+    public async Task GetById_SecretWithUnknownKeyId_IsReportedAsNotSet()
+    {
+        // Decision r2-2: an envelope encrypted with a key that is not in the ring (e.g. restored from
+        // another environment) stays stored but reads as not set — decided from the key id alone.
+        var stored = new RtGoogleIdentityProvider
+        {
+            RtId = OctoObjectId.GenerateNewId(), Name = "Google", ClientId = "g",
+            ClientSecret = NewStoredEnvelope("k9")
+        };
+        _store.GetByIdAsync(stored.RtId).Returns(stored);
+
+        var result = await _sut.Get(stored.RtId);
+
+        ClientSecretIsSet(result.Value!.IdentityProviders.Should().ContainSingle().Subject).Should().BeFalse();
+        var json = Serialize(result.Value);
+        json.Should().Contain("\"clientSecretIsSet\":false").And.NotContain("enc:v2");
+        AssertNoClientSecretValue(json);
+        _protector.DidNotReceiveWithAnyArgs().Unprotect(default(RtSecretValue)!, default);
+    }
+
     [Theory]
     [InlineData("<google-client-secret>")]
     [InlineData("TODO_SET_GOOGLE_CLIENT_SECRET")]
-    public async Task CreateAndReplace_RejectPlaceholderSecret(string placeholder)
+    public async Task CreateAndReplace_PlaceholderLikeSecret_IsAnOrdinaryValue(string value)
     {
-        var services = new ServiceCollection();
-        services.AddLogging();
-        services.AddMvcCore();
-        _sut.ControllerContext = new ControllerContext
-        {
-            HttpContext = new DefaultHttpContext { RequestServices = services.BuildServiceProvider() }
-        };
+        // Decision r2-1: there are no placeholder semantics on the API; such a string is stored as
+        // a pending secret (encrypted by the engine) like any other value.
+        var storedProviders = new List<RtIdentityProvider>();
+        await _store.StoreAsync(Arg.Do<RtIdentityProvider>(p => storedProviders.Add(p)));
         GoogleIdentityProviderDto Input() => new()
-            { Name = "Google", IsEnabled = true, ClientId = "google-client", ClientSecret = placeholder };
+            { Name = "Google", IsEnabled = true, ClientId = "google-client", ClientSecret = value };
 
         var created = await _sut.AddNewIdentityProviderAsync(Input());
-        _sut.ModelState.Clear();
         var replaced = await _sut.ReplaceProviderAsync(OctoObjectId.GenerateNewId(), Input());
 
-        created.Result.Should().BeAssignableTo<ObjectResult>()
-            .Which.Value.Should().BeOfType<ValidationProblemDetails>();
-        replaced.Result.Should().BeAssignableTo<ObjectResult>()
-            .Which.Value.Should().BeOfType<ValidationProblemDetails>();
-        await _store.DidNotReceive().StoreAsync(Arg.Any<RtIdentityProvider>());
+        created.Value.Should().BeOfType<GoogleIdentityProviderDto>().Which.ClientSecretIsSet.Should().BeTrue();
+        replaced.Result.Should().BeOfType<OkObjectResult>();
+        storedProviders.Should().HaveCount(2).And.AllSatisfy(p =>
+            p.Should().BeOfType<RtGoogleIdentityProvider>().Which.ClientSecret.Should().Be(RtSecretValue.Pending(value)));
+        AssertNoClientSecretValue(Serialize(created.Value));
+        Serialize(created.Value).Should().NotContain(value);
     }
 }

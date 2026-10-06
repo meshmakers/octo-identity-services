@@ -280,14 +280,21 @@ out of `ExportRt`.
   tenant id as a third `Create` argument for the counter. Nothing logs the value.
 - **Key ring:** `AddRuntimeEngine()` binds `SecretEncryption` (`OCTO_SECRETENCRYPTION__KEYS__k1`,
   `__ACTIVEKEYID`, `__LEGACYV1KEY`). Without keys the service starts; legacy clear-text secrets still
-  work, but writing a new secret or reading an encrypted one throws
-  `SecretEncryptionNotConfiguredException`.
-- **Undecryptable secret:** `DynamicAuthSchemeService` skips only that provider (no key ring, unknown
-  key id — e.g. after a cross-environment restore — a damaged value, or legacy clear text while
-  `SecretEncryption:StrictMode` is on) and logs the exception type;
+  work, writing a new secret throws `SecretEncryptionNotConfiguredException`, and an encrypted one
+  is treated like an unknown key id (see below).
+- **Unknown key id:** an envelope whose key id is not in the key ring (e.g. after a
+  cross-environment restore, or no key ring at all) is kept stored and treated as "not set":
+  `IIdentityProviderSecretReader.GetClientSecretState` reports `KeyMissing` from the key id alone
+  (`ISecretAttributeProtector.IsKnownKeyId`, no decrypt), `GetClientSecret` returns `null` with an
+  error log (key id and provider, never the value), `DynamicAuthSchemeService` skips that provider
+  with an error log, and the REST API reports `clientSecretIsSet: false`. It becomes readable again
+  once the key is added to the ring; otherwise the secret has to be re-entered.
+- **Undecryptable secret:** `DynamicAuthSchemeService` skips only that provider (a damaged value, or
+  legacy clear text while `SecretEncryption:StrictMode` is on) and logs the exception type;
   the tenant's other sign-in methods keep working. The secret has to be re-entered.
 - **Writing:** `IdentityProvidersController` / `MapperProfile` map a non-empty input to
-  `RtSecretValue.Pending`, which the engine encrypts on write; null/"" leave the attribute absent, and
+  `RtSecretValue.Pending`, which the engine encrypts on write (there are no placeholder semantics —
+  `<...>` / `TODO_SET_*` are ordinary values); null/"" leave the attribute absent, and
   `IdentityProviderStore` carries the stored envelope over on replace (the engine does the same).
 
 ### OAuth Provider Pattern

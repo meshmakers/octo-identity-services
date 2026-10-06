@@ -61,8 +61,10 @@ Key ring for CK attributes of value type `Secret` (AB#5528; here the identity-pr
 | `OCTO_SECRETENCRYPTION__LEGACYV1KEY` | Key for older `enc:v1:` values (same value as `k1`) |
 
 Without keys the service starts and legacy clear-text secrets keep working; saving a new provider
-secret or using an encrypted one fails (`SecretEncryptionNotConfiguredException`), and a provider
-whose secret cannot be decrypted is skipped at scheme registration.
+secret fails (`SecretEncryptionNotConfiguredException`). An encrypted secret whose key id is not in
+the ring (or with no ring at all) is kept stored but treated as not set (`clientSecretIsSet: false`,
+error log without the value), and a provider whose secret cannot be read is skipped at scheme
+registration.
 
 #### Blueprint Variables (`Blueprints` section)
 

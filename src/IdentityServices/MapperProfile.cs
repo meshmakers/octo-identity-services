@@ -24,18 +24,18 @@ public class MapperProfile : Profile
 
         CreateMap<RtGoogleIdentityProvider, GoogleIdentityProviderDto>()
             .ForMember(d => d.ClientSecret, o => o.Ignore())
-            .ForMember(d => d.ClientSecretIsSet, o => o.MapFrom(src => IsClientSecretSet(src)));
+            .ForMember(d => d.ClientSecretIsSet, o => o.MapFrom<ClientSecretIsSetResolver>());
         CreateMap<RtMicrosoftIdentityProvider, MicrosoftIdentityProviderDto>()
             .ForMember(d => d.ClientSecret, o => o.Ignore())
-            .ForMember(d => d.ClientSecretIsSet, o => o.MapFrom(src => IsClientSecretSet(src)));
+            .ForMember(d => d.ClientSecretIsSet, o => o.MapFrom<ClientSecretIsSetResolver>());
         CreateMap<RtMicrosoftAdIdentityProvider, MicrosoftAdProviderDto>();
         CreateMap<RtOpenLdapIdentityProvider, OpenLdapProviderDto>();
         CreateMap<RtAzureEntraIdIdentityProvider, AzureEntraIdProviderDto>()
             .ForMember(d => d.ClientSecret, o => o.Ignore())
-            .ForMember(d => d.ClientSecretIsSet, o => o.MapFrom(src => IsClientSecretSet(src)));
+            .ForMember(d => d.ClientSecretIsSet, o => o.MapFrom<ClientSecretIsSetResolver>());
         CreateMap<RtFacebookIdentityProvider, FacebookIdentityProviderDto>()
             .ForMember(d => d.ClientSecret, o => o.Ignore())
-            .ForMember(d => d.ClientSecretIsSet, o => o.MapFrom(src => IsClientSecretSet(src)));
+            .ForMember(d => d.ClientSecretIsSet, o => o.MapFrom<ClientSecretIsSetResolver>());
         CreateMap<RtOctoTenantIdentityProvider, OctoTenantIdentityProviderDto>();
 
 
@@ -78,21 +78,6 @@ public class MapperProfile : Profile
     {
         member.PreCondition(src => !string.IsNullOrEmpty(GetClientSecretInput(src)));
         member.MapFrom(src => RtSecretValue.Pending(GetClientSecretInput(src)!));
-    }
-
-    private const string ClientSecretAttributeName = "ClientSecret";
-    private static readonly RtSecretValue EmptyPending = RtSecretValue.Pending(string.Empty);
-    private static readonly RtSecretValue EmptyLegacy = RtSecretValue.LegacyPlaintext(string.Empty);
-
-    /// <summary>
-    ///     Tells whether the provider holds a client secret, from the stored form only — the value is
-    ///     never decrypted for it (AB#5540): a protected envelope, a non-empty legacy value (clear
-    ///     text / <c>enc:v1</c> before the encrypt sweep) or a non-empty pending value (just written).
-    /// </summary>
-    internal static bool IsClientSecretSet(RtIdentityProvider provider)
-    {
-        var value = provider.GetAttributeSecretValueOrDefault(ClientSecretAttributeName);
-        return value != null && value != EmptyPending && value != EmptyLegacy;
     }
 
     internal static string? GetClientSecretInput(IdentityProviderDto dto) => dto switch

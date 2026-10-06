@@ -2,6 +2,7 @@ using System.Security.Cryptography;
 using Meshmakers.Common.Shared;
 using Meshmakers.Octo.Runtime.Contracts.MongoDb;
 using Meshmakers.Octo.Runtime.Contracts.Repositories.Query;
+using Meshmakers.Octo.Backend.Authentication.Secrets;
 using Meshmakers.Octo.Runtime.Contracts.Secrets;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.Extensions.Logging;
@@ -20,6 +21,7 @@ internal class DynamicAuthSchemeService : IDynamicAuthSchemeService
     private readonly IAuthSchemeCreatorFactory _authSchemeCreatorFactory;
     private readonly IAuthenticationSchemeProvider _schemeProvider;
     private readonly ISystemContext _systemContext;
+    private readonly IIdentityProviderSecretReader _secretReader;
     private readonly ILogger<DynamicAuthSchemeService> _logger;
 
     /// <summary>
@@ -28,12 +30,15 @@ internal class DynamicAuthSchemeService : IDynamicAuthSchemeService
     /// <param name="systemContext">System context for accessing any tenant's repository directly</param>
     /// <param name="schemeProvider">Scheme provider</param>
     /// <param name="authSchemeCreatorFactory">Factory to resolve creators of auth providers.</param>
+    /// <param name="secretReader">Reads the stored state of the providers' client secrets</param>
     /// <param name="logger">Logger</param>
     public DynamicAuthSchemeService(ISystemContext systemContext,
         IAuthenticationSchemeProvider schemeProvider,
         IAuthSchemeCreatorFactory authSchemeCreatorFactory,
+        IIdentityProviderSecretReader secretReader,
         ILogger<DynamicAuthSchemeService> logger)
     {
+        _secretReader = secretReader;
         _systemContext = systemContext;
         _schemeProvider = schemeProvider;
         _authSchemeCreatorFactory = authSchemeCreatorFactory;
@@ -78,6 +83,17 @@ internal class DynamicAuthSchemeService : IDynamicAuthSchemeService
             }
 
             var schemeName = $"{prefix}{identityProvider.Name}";
+
+            if (_secretReader.GetClientSecretState(identityProvider) == IdentityProviderSecretState.KeyMissing)
+            {
+                // AB#5540 / decision r2-2: the client secret is encrypted with a key id this host does
+                // not know (restored from another environment, or no key ring). It is kept stored and
+                // reads as "not set", so the provider cannot sign in — skip only this provider.
+                _logger.LogError(
+                    "Skipped auth scheme '{SchemeName}' for tenant '{TenantId}': its client secret is encrypted with a key that is not in the key ring",
+                    schemeName, tenantId);
+                continue;
+            }
 
             AuthenticationScheme scheme;
             try

@@ -300,11 +300,14 @@ Azure Entra ID providers carry a `clientSecret` (CK value type `Secret`, stored 
 - `POST` requires a non-empty `clientSecret`.
 - `PUT`: a non-empty `clientSecret` replaces the stored secret; `null`, `""` or an omitted field
   keeps it unchanged. There is no clear operation (the secret is required on these provider types).
-- A placeholder (`<...>`, `TODO_SET_*`) is rejected with `400` (validation problem on
-  `ClientSecret`) on `POST` and `PUT` — the engine would store it as "not set".
-- Every response of these provider types carries `clientSecretIsSet` (`true` when a secret is
-  stored — encrypted, or legacy clear text before the encrypt sweep; computed from the stored form,
-  never by decrypting). Other provider types omit the field. It is ignored on input.
+- There are no placeholder semantics: a value such as `<...>` or `TODO_SET_*` is an ordinary
+  secret and is stored encrypted like any other.
+- Every response of these provider types carries `clientSecretIsSet` (`true` when a readable secret
+  is stored — encrypted with a key of this host's key ring, or legacy clear text before the encrypt
+  sweep; computed from the stored form, never by decrypting). A secret encrypted with a key id that
+  is not in the key ring (e.g. restored from another environment) is kept stored but reported as
+  `false` until the key is added to the ring or the secret is re-entered. Other provider types omit
+  the field. It is ignored on input.
 
 ### Email Domain Group Rules (`/{tenantId}/v1/emailDomainGroupRules`)
 
