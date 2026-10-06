@@ -3,6 +3,9 @@ using IdentityServerPersistence.SystemStores;
 using Meshmakers.Octo.ConstructionKit.Contracts;
 using Meshmakers.Octo.Runtime.Contracts;
 using Meshmakers.Octo.Runtime.Contracts.MongoDb.Repositories;
+using Meshmakers.Octo.Runtime.Contracts.RepositoryEntities;
+using System.Buffers.Text;
+using System.Security.Cryptography;
 using Meshmakers.Octo.Services.Infrastructure.Services;
 using NSubstitute;
 using Persistence.IdentityCkModel.Generated.System.Identity.v2;
@@ -15,6 +18,9 @@ namespace IdentityServerPersistence.UnitTests.Stores;
 // the Studio form omits ClientSecret when the user does not re-enter it ("Secret is stored
 // encrypted on the server. SET NEW SECRET") — without preservation StoreAsync would overwrite
 // the stored secret with null on every edit.
+//
+// AB#5540: ClientSecret is a Secret attribute (RtSecretValue). Stored values are protected
+// envelopes (or legacy text before the encrypt sweep); they are copied as is, never decrypted.
 public class IdentityProviderStoreTests
 {
     private readonly ITenantRepository _tenantRepository;
@@ -36,13 +42,18 @@ public class IdentityProviderStoreTests
         _sut = new IdentityProviderStore(multiTenancyResolver);
     }
 
+    // A structurally valid enc:v2 envelope with random payload — never decrypted by the store.
+    private static RtSecretValue NewStoredEnvelope()
+        => RtSecretValue.Protected("enc:v2:k1:" + Base64Url.EncodeToString(RandomNumberGenerator.GetBytes(48)));
+
     [Fact]
     public async Task StoreAsync_NewGoogleProvider_InsertsAsIs()
     {
         var rtId = OctoObjectId.GenerateNewId();
+        var pending = RtSecretValue.Pending("fresh-secret");
         var incoming = new RtGoogleIdentityProvider
         {
-            RtId = rtId, Name = "Google", ClientId = "cid", ClientSecret = "fresh-secret"
+            RtId = rtId, Name = "Google", ClientId = "cid", ClientSecret = pending
         };
         _tenantRepository.GetRtEntityByRtIdAsync<RtIdentityProvider>(_session, rtId)
             .Returns(Task.FromResult<RtIdentityProvider?>(null));
@@ -53,32 +64,57 @@ public class IdentityProviderStoreTests
         await _tenantRepository.DidNotReceive()
             .ReplaceOneRtEntityByIdAsync(Arg.Any<IOctoSession>(), Arg.Any<OctoObjectId>(),
                 Arg.Any<RtIdentityProvider>());
-        incoming.ClientSecret.Should().Be("fresh-secret");
+        incoming.ClientSecret.Should().Be(pending);
     }
 
+    public static TheoryData<string> OmittedInputs => new() { "absent", "null", "empty" };
+
     [Theory]
-    [InlineData(null)]
-    [InlineData("")]
-    public async Task StoreAsync_UpdateGoogleProvider_OmittedSecret_PreservesExisting(string? omitted)
+    [MemberData(nameof(OmittedInputs))]
+    public async Task StoreAsync_UpdateGoogleProvider_OmittedSecret_PreservesStoredEnvelope(string omitted)
     {
         var rtId = OctoObjectId.GenerateNewId();
+        var stored = NewStoredEnvelope();
         var existing = new RtGoogleIdentityProvider
         {
-            RtId = rtId, Name = "Google", ClientId = "cid", ClientSecret = "kept-secret"
+            RtId = rtId, Name = "Google", ClientId = "cid", ClientSecret = stored
         };
-        var incoming = new RtGoogleIdentityProvider
+        var incoming = new RtGoogleIdentityProvider { RtId = rtId, Name = "Google-renamed", ClientId = "cid" };
+        switch (omitted)
         {
-            RtId = rtId, Name = "Google (renamed)", ClientId = "cid", ClientSecret = omitted!
-        };
+            case "null":
+                incoming.ClientSecret = null;
+                break;
+            case "empty":
+                incoming.ClientSecret = RtSecretValue.Pending(string.Empty);
+                break;
+        }
+
         _tenantRepository.GetRtEntityByRtIdAsync<RtIdentityProvider>(_session, rtId)
             .Returns(Task.FromResult<RtIdentityProvider?>(existing));
 
         await _sut.StoreAsync(incoming);
 
-        incoming.ClientSecret.Should().Be("kept-secret",
-            "an omitted secret on PUT must inherit the value stored on the server");
+        incoming.ClientSecret.Should().Be(stored,
+            "an omitted secret on PUT must inherit the value stored on the server, as ciphertext");
         await _tenantRepository.Received(1)
             .ReplaceOneRtEntityByIdAsync(_session, rtId, incoming);
+    }
+
+    [Fact]
+    public async Task StoreAsync_UpdateGoogleProvider_OmittedSecret_PreservesLegacyPlaintext()
+    {
+        // Before the encrypt sweep the stored value is still legacy text; it is carried over as is.
+        var rtId = OctoObjectId.GenerateNewId();
+        var existing = new RtGoogleIdentityProvider { RtId = rtId, Name = "Google" };
+        existing.SetAttributeRawValue("ClientSecret", "legacy-kept");
+        var incoming = new RtGoogleIdentityProvider { RtId = rtId, Name = "Google" };
+        _tenantRepository.GetRtEntityByRtIdAsync<RtIdentityProvider>(_session, rtId)
+            .Returns(Task.FromResult<RtIdentityProvider?>(existing));
+
+        await _sut.StoreAsync(incoming);
+
+        incoming.ClientSecret.Should().Be(RtSecretValue.LegacyPlaintext("legacy-kept"));
     }
 
     [Fact]
@@ -87,18 +123,19 @@ public class IdentityProviderStoreTests
         var rtId = OctoObjectId.GenerateNewId();
         var existing = new RtGoogleIdentityProvider
         {
-            RtId = rtId, Name = "Google", ClientSecret = "old-secret"
+            RtId = rtId, Name = "Google", ClientSecret = NewStoredEnvelope()
         };
+        var pending = RtSecretValue.Pending("new-secret");
         var incoming = new RtGoogleIdentityProvider
         {
-            RtId = rtId, Name = "Google", ClientSecret = "new-secret"
+            RtId = rtId, Name = "Google", ClientSecret = pending
         };
         _tenantRepository.GetRtEntityByRtIdAsync<RtIdentityProvider>(_session, rtId)
             .Returns(Task.FromResult<RtIdentityProvider?>(existing));
 
         await _sut.StoreAsync(incoming);
 
-        incoming.ClientSecret.Should().Be("new-secret",
+        incoming.ClientSecret.Should().Be(pending,
             "an explicit new secret on PUT must overwrite the stored value");
     }
 
@@ -106,41 +143,58 @@ public class IdentityProviderStoreTests
     public async Task StoreAsync_UpdateMicrosoftProvider_OmittedSecret_PreservesExisting()
     {
         var rtId = OctoObjectId.GenerateNewId();
-        var existing = new RtMicrosoftIdentityProvider { RtId = rtId, ClientSecret = "ms-kept" };
-        var incoming = new RtMicrosoftIdentityProvider { RtId = rtId, ClientSecret = null! };
+        var stored = NewStoredEnvelope();
+        var existing = new RtMicrosoftIdentityProvider { RtId = rtId, ClientSecret = stored };
+        var incoming = new RtMicrosoftIdentityProvider { RtId = rtId };
         _tenantRepository.GetRtEntityByRtIdAsync<RtIdentityProvider>(_session, rtId)
             .Returns(Task.FromResult<RtIdentityProvider?>(existing));
 
         await _sut.StoreAsync(incoming);
 
-        incoming.ClientSecret.Should().Be("ms-kept");
+        incoming.ClientSecret.Should().Be(stored);
     }
 
     [Fact]
     public async Task StoreAsync_UpdateFacebookProvider_OmittedSecret_PreservesExisting()
     {
         var rtId = OctoObjectId.GenerateNewId();
-        var existing = new RtFacebookIdentityProvider { RtId = rtId, ClientSecret = "fb-kept" };
-        var incoming = new RtFacebookIdentityProvider { RtId = rtId, ClientSecret = null! };
+        var stored = NewStoredEnvelope();
+        var existing = new RtFacebookIdentityProvider { RtId = rtId, ClientSecret = stored };
+        var incoming = new RtFacebookIdentityProvider { RtId = rtId };
         _tenantRepository.GetRtEntityByRtIdAsync<RtIdentityProvider>(_session, rtId)
             .Returns(Task.FromResult<RtIdentityProvider?>(existing));
 
         await _sut.StoreAsync(incoming);
 
-        incoming.ClientSecret.Should().Be("fb-kept");
+        incoming.ClientSecret.Should().Be(stored);
     }
 
     [Fact]
     public async Task StoreAsync_UpdateAzureEntraIdProvider_OmittedSecret_PreservesExisting()
     {
         var rtId = OctoObjectId.GenerateNewId();
-        var existing = new RtAzureEntraIdIdentityProvider { RtId = rtId, ClientSecret = "azure-kept" };
-        var incoming = new RtAzureEntraIdIdentityProvider { RtId = rtId, ClientSecret = null! };
+        var stored = NewStoredEnvelope();
+        var existing = new RtAzureEntraIdIdentityProvider { RtId = rtId, ClientSecret = stored };
+        var incoming = new RtAzureEntraIdIdentityProvider { RtId = rtId };
         _tenantRepository.GetRtEntityByRtIdAsync<RtIdentityProvider>(_session, rtId)
             .Returns(Task.FromResult<RtIdentityProvider?>(existing));
 
         await _sut.StoreAsync(incoming);
 
-        incoming.ClientSecret.Should().Be("azure-kept");
+        incoming.ClientSecret.Should().Be(stored);
+    }
+
+    [Fact]
+    public async Task StoreAsync_ProviderTypeChanged_DoesNotCarrySecretAcrossTypes()
+    {
+        var rtId = OctoObjectId.GenerateNewId();
+        var existing = new RtGoogleIdentityProvider { RtId = rtId, ClientSecret = NewStoredEnvelope() };
+        var incoming = new RtMicrosoftIdentityProvider { RtId = rtId };
+        _tenantRepository.GetRtEntityByRtIdAsync<RtIdentityProvider>(_session, rtId)
+            .Returns(Task.FromResult<RtIdentityProvider?>(existing));
+
+        await _sut.StoreAsync(incoming);
+
+        incoming.ClientSecret.Should().BeNull();
     }
 }

@@ -1,6 +1,7 @@
 using FluentAssertions;
 using IdentityServerPersistence.Services;
 using Meshmakers.Octo.Backend.Authentication.DynamicAuth;
+using Meshmakers.Octo.Backend.Authentication.Secrets;
 using Meshmakers.Octo.ConstructionKit.Contracts;
 using Meshmakers.Octo.Runtime.Contracts;
 using Meshmakers.Octo.Runtime.Contracts.MongoDb;
@@ -118,7 +119,8 @@ public class DynamicAuthSchemeServiceInitializerTests
         _systemContext.FindTenantRepositoryAsync("meshtest").Returns(tenantRepo);
 
         var sut = new DynamicAuthSchemeService(_systemContext, schemeProvider,
-            Substitute.For<IAuthSchemeCreatorFactory>(), NullLogger<DynamicAuthSchemeService>.Instance);
+            Substitute.For<IAuthSchemeCreatorFactory>(), Substitute.For<IIdentityProviderSecretReader>(),
+            NullLogger<DynamicAuthSchemeService>.Instance);
 
         var act = () => sut.ConfigureAsync("meshtest");
 

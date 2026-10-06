@@ -23,6 +23,12 @@ namespace IdentityServices.IntegrationTests.Infrastructure;
 
 public class CustomWebApplicationFactory : WebApplicationFactory<Program>, IAsyncLifetime
 {
+    /// <summary>
+    ///     Generated AES-256 key (base64) for the SecretEncryption key ring of this host (AB#5540).
+    /// </summary>
+    public string TestSecretEncryptionKey { get; } =
+        Convert.ToBase64String(System.Security.Cryptography.RandomNumberGenerator.GetBytes(32));
+
     private readonly IntegrationTestConfiguration _configuration = new();
     private readonly IntegrationTestOptions _options;
 
@@ -208,6 +214,11 @@ public class CustomWebApplicationFactory : WebApplicationFactory<Program>, IAsyn
                 ["System:DistributionEventHub:HostName"] = "",
                 // Override BrokerHost to empty to prevent RabbitMQ connection attempts
                 ["Identity:BrokerHost"] = "",
+                // AB#5540: key ring for Secret attributes (identity-provider ClientSecret).
+                // Generated per factory instance — never a real key.
+                ["SecretEncryption:Keys:k1"] = TestSecretEncryptionKey,
+                ["SecretEncryption:ActiveKeyId"] = "k1",
+                ["SecretEncryption:LegacyV1Key"] = TestSecretEncryptionKey,
             });
         });
 

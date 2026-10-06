@@ -85,9 +85,18 @@ public class IdentityProvidersController : ControllerBase
     {
         // ClientSecret is no longer [Required] on the DTO because PUT must accept it being omitted
         // (the existing secret is preserved). Creation still needs a secret, so enforce it here.
+        // AB#5540: ClientSecret is write-only (Secret value type) — create/replace accept it as a
+        // string (null or "" on replace = keep the stored secret); no response ever contains it.
+        // There is no "clear" operation: the secret is required on the provider types.
         if (RequiresClientSecretOnCreate(identityProviderDto, out var missingFieldName))
         {
             ModelState.AddModelError(missingFieldName, $"The {missingFieldName} field is required.");
+            return ValidationProblem(ModelState);
+        }
+
+        if (IsClientSecretPlaceholder(identityProviderDto))
+        {
+            ModelState.AddModelError(nameof(GoogleIdentityProviderDto.ClientSecret), ClientSecretPlaceholderMessage);
             return ValidationProblem(ModelState);
         }
 
@@ -139,6 +148,18 @@ public class IdentityProvidersController : ControllerBase
         };
     }
 
+    // AB#5540: the engine stores a placeholder ("<...>", "TODO_SET_*") in a Secret attribute as
+    // "not set" (seed convention). For the required provider secret that would end in an engine
+    // validation error (create) or clear the stored secret (replace) — reject it up front.
+    internal const string ClientSecretPlaceholderMessage =
+        "The ClientSecret must be the secret issued by the identity provider, not a placeholder.";
+
+    private static bool IsClientSecretPlaceholder(IdentityProviderDto dto)
+    {
+        var secret = MapperProfile.GetClientSecretInput(dto);
+        return !string.IsNullOrEmpty(secret) && SecretAttributeConventions.IsPlaceholder(secret);
+    }
+
     [HttpDelete("{rtId}")]
     [Authorize(IdentityServiceConstants.IdentityTenantAdministrationWritePolicy)]
     [EndpointSummary("Delete an existing identity provider.")]
@@ -179,12 +200,20 @@ public class IdentityProvidersController : ControllerBase
             return ValidationProblem(ModelState);
         }
 
+        if (IsClientSecretPlaceholder(identityProviderDto))
+        {
+            ModelState.AddModelError(nameof(GoogleIdentityProviderDto.ClientSecret), ClientSecretPlaceholderMessage);
+            return ValidationProblem(ModelState);
+        }
+
         var identityProvider = _mapper.Map<RtIdentityProvider>(identityProviderDto);
         identityProvider.RtId = rtId;
 
         await HandleWriteExceptionAsync(async () => await _identityProviderStore.StoreAsync(identityProvider));
         await SendIdentityProviderUpdate();
-        return Ok(identityProviderDto);
+        // AB#5540: never echo the request — it carries the write-only ClientSecret in clear text.
+        // The response is mapped from the entity, whose Secret attribute is never projected.
+        return Ok(_mapper.Map<IdentityProviderDto>(identityProvider));
     }
 
     private static async Task HandleWriteExceptionAsync(Func<Task> action)

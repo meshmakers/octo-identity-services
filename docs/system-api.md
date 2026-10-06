@@ -291,6 +291,21 @@ Transfers all external logins (e.g., Google, Microsoft) from the source user to 
 }
 ```
 
+**Client secret of the external providers is write-only (AB#5540).** Google, Microsoft, Facebook and
+Azure Entra ID providers carry a `clientSecret` (CK value type `Secret`, stored encrypted):
+
+- `GET` responses (list and by id) and the `POST` / `PUT` responses **never** contain it —
+  `clientSecret` is always `null`. The `PUT` response is mapped from the stored entity, it no longer
+  echoes the request body.
+- `POST` requires a non-empty `clientSecret`.
+- `PUT`: a non-empty `clientSecret` replaces the stored secret; `null`, `""` or an omitted field
+  keeps it unchanged. There is no clear operation (the secret is required on these provider types).
+- A placeholder (`<...>`, `TODO_SET_*`) is rejected with `400` (validation problem on
+  `ClientSecret`) on `POST` and `PUT` — the engine would store it as "not set".
+- There is not yet an `isSet` flag on the DTO (it needs a field in `octo-sdk`
+  `Communication.Contracts`); until then a provider of these types always has a secret, because it is
+  required on create and cannot be cleared.
+
 ### Email Domain Group Rules (`/{tenantId}/v1/emailDomainGroupRules`)
 
 Manages email domain to group mapping rules. When a new user logs in, their email domain is matched against these rules, and they are automatically added to the target group.

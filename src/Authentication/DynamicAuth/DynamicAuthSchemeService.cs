@@ -1,6 +1,8 @@
+using System.Security.Cryptography;
 using Meshmakers.Common.Shared;
 using Meshmakers.Octo.Runtime.Contracts.MongoDb;
 using Meshmakers.Octo.Runtime.Contracts.Repositories.Query;
+using Meshmakers.Octo.Runtime.Contracts.Secrets;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.Extensions.Logging;
 using Persistence.IdentityCkModel.Generated.System.Identity.v2;
@@ -78,41 +80,58 @@ internal class DynamicAuthSchemeService : IDynamicAuthSchemeService
             var schemeName = $"{prefix}{identityProvider.Name}";
 
             AuthenticationScheme scheme;
-            switch (identityProvider)
+            try
             {
-                case RtGoogleIdentityProvider googleIdentityProvider:
-                    scheme = _authSchemeCreatorFactory.GetCreator<RtGoogleIdentityProvider>()
-                        .Create(googleIdentityProvider, schemeName);
-                    break;
-                case RtMicrosoftIdentityProvider microsoftIdentityProvider:
-                    scheme = _authSchemeCreatorFactory.GetCreator<RtMicrosoftIdentityProvider>()
-                        .Create(microsoftIdentityProvider, schemeName);
-                    break;
-                case RtAzureEntraIdIdentityProvider rtAzureEntraIdIdentityProvider:
-                    scheme = _authSchemeCreatorFactory.GetCreator<RtAzureEntraIdIdentityProvider>()
-                        .Create(rtAzureEntraIdIdentityProvider, schemeName);
-                    break;
+                switch (identityProvider)
+                {
+                    case RtGoogleIdentityProvider googleIdentityProvider:
+                        scheme = _authSchemeCreatorFactory.GetCreator<RtGoogleIdentityProvider>()
+                            .Create(googleIdentityProvider, schemeName, tenantId);
+                        break;
+                    case RtMicrosoftIdentityProvider microsoftIdentityProvider:
+                        scheme = _authSchemeCreatorFactory.GetCreator<RtMicrosoftIdentityProvider>()
+                            .Create(microsoftIdentityProvider, schemeName, tenantId);
+                        break;
+                    case RtAzureEntraIdIdentityProvider rtAzureEntraIdIdentityProvider:
+                        scheme = _authSchemeCreatorFactory.GetCreator<RtAzureEntraIdIdentityProvider>()
+                            .Create(rtAzureEntraIdIdentityProvider, schemeName, tenantId);
+                        break;
 
-                case RtOpenLdapIdentityProvider openLdapIdentityProvider:
-                    scheme = _authSchemeCreatorFactory.GetCreator<RtOpenLdapIdentityProvider>()
-                        .Create(openLdapIdentityProvider, schemeName);
-                    break;
+                    case RtOpenLdapIdentityProvider openLdapIdentityProvider:
+                        scheme = _authSchemeCreatorFactory.GetCreator<RtOpenLdapIdentityProvider>()
+                            .Create(openLdapIdentityProvider, schemeName, tenantId);
+                        break;
 
-                case RtMicrosoftAdIdentityProvider microsoftAdIdentityProvider:
-                    scheme = _authSchemeCreatorFactory.GetCreator<RtMicrosoftAdIdentityProvider>()
-                        .Create(microsoftAdIdentityProvider, schemeName);
-                    break;
-                case RtFacebookIdentityProvider facebookIdentityProvider:
-                    scheme = _authSchemeCreatorFactory.GetCreator<RtFacebookIdentityProvider>()
-                        .Create(facebookIdentityProvider, schemeName);
-                    break;
-                case RtOctoTenantIdentityProvider:
-                    // No ASP.NET auth scheme needed — cross-tenant auth is handled internally
-                    // by CrossTenantAuthenticationService, not via OIDC redirect.
-                    continue;
-                default:
-                    throw new InvalidOperationException(
-                        $"Identity provider '{identityProvider.CkTypeId}' is not supported.");
+                    case RtMicrosoftAdIdentityProvider microsoftAdIdentityProvider:
+                        scheme = _authSchemeCreatorFactory.GetCreator<RtMicrosoftAdIdentityProvider>()
+                            .Create(microsoftAdIdentityProvider, schemeName, tenantId);
+                        break;
+                    case RtFacebookIdentityProvider facebookIdentityProvider:
+                        scheme = _authSchemeCreatorFactory.GetCreator<RtFacebookIdentityProvider>()
+                            .Create(facebookIdentityProvider, schemeName, tenantId);
+                        break;
+                    case RtOctoTenantIdentityProvider:
+                        // No ASP.NET auth scheme needed — cross-tenant auth is handled internally
+                        // by CrossTenantAuthenticationService, not via OIDC redirect.
+                        continue;
+                    default:
+                        throw new InvalidOperationException(
+                            $"Identity provider '{identityProvider.CkTypeId}' is not supported.");
+                }
+            }
+            catch (Exception ex) when (ex is SecretEncryptionNotConfiguredException
+                                           or UnknownSecretKeyIdException
+                                           or CryptographicException)
+            {
+                // AB#5540: the provider's ClientSecret is stored encrypted and cannot be decrypted on
+                // this host (no key ring, a key id from another environment, or a damaged value).
+                // Skip only this provider so the tenant's other sign-in methods keep working; the
+                // secret has to be re-entered (or the key ring configured). The exception never
+                // carries the value, but log only its type to be safe.
+                _logger.LogError(
+                    "Skipped auth scheme '{SchemeName}' for tenant '{TenantId}': its client secret cannot be decrypted ({Reason})",
+                    schemeName, tenantId, ex.GetType().Name);
+                continue;
             }
 
             _schemeProvider.AddScheme(scheme);

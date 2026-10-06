@@ -1,4 +1,5 @@
 ﻿using Meshmakers.Octo.Backend.Authentication.DynamicAuth;
+using Meshmakers.Octo.Backend.Authentication.Secrets;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.OpenIdConnect;
 using Microsoft.IdentityModel.Protocols;
@@ -10,24 +11,30 @@ namespace Meshmakers.Octo.Backend.Authentication.AzureEntraId;
 internal class AzureEntraIdAuthSchemeCreator : IAuthSchemeCreator<RtAzureEntraIdIdentityProvider>
 {
     private readonly IDynamicAuthOptionsBuilder<OpenIdConnectOptions> _openIdConnectAuthOptions;
+    private readonly IIdentityProviderSecretReader _secretReader;
 
     /// <summary>
     ///     ctor
     /// </summary>
     /// <param name="openIdConnectAuthOptions">Authentication builder for OpenId provider</param>
-    public AzureEntraIdAuthSchemeCreator(IDynamicAuthOptionsBuilder<OpenIdConnectOptions> openIdConnectAuthOptions)
+    /// <param name="secretReader">Reads the counted plaintext of the provider's client secret (AB#5540)</param>
+    public AzureEntraIdAuthSchemeCreator(IDynamicAuthOptionsBuilder<OpenIdConnectOptions> openIdConnectAuthOptions,
+        IIdentityProviderSecretReader secretReader)
     {
+        _secretReader = secretReader;
         _openIdConnectAuthOptions = openIdConnectAuthOptions;
     }
 
-    public AuthenticationScheme Create(RtAzureEntraIdIdentityProvider identityProvider, string? schemeNameOverride = null)
+    public AuthenticationScheme Create(RtAzureEntraIdIdentityProvider identityProvider, string? schemeNameOverride = null,
+        string? tenantId = null)
     {
         var schemeName = schemeNameOverride ?? identityProvider.Name;
         var options = _openIdConnectAuthOptions.CreateOptions(schemeName);
 
         options.Authority = $"https://login.microsoftonline.com/{identityProvider.TenantId}";
         options.ClientId = identityProvider.ClientId;
-        options.ClientSecret = identityProvider.ClientSecret;
+        // Secret value type (AB#5540): decrypted on demand, counted, never logged.
+        options.ClientSecret = _secretReader.GetClientSecret(identityProvider, tenantId);
         // Authorization-code flow (+ PKCE, handler default when ResponseType is code). The
         // handler's own default is the implicit id_token flow, which Entra rejects with
         // AADSTS700054 unless "ID tokens" is explicitly enabled on the app registration.

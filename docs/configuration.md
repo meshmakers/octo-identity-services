@@ -49,6 +49,21 @@ used as the encryption credential for OpenIddict-internal token payloads (author
 refresh tokens, device codes — never access tokens, which stay plain signed RS256 JWTs). In the
 Development environment, development certificates are generated automatically.
 
+#### Secret Encryption (`SecretEncryption` section)
+
+Key ring for CK attributes of value type `Secret` (AB#5528; here the identity-provider
+`ClientSecret`, AB#5540), bound by `AddRuntimeEngine()` like in every engine host:
+
+| Variable | Meaning |
+|----------|---------|
+| `OCTO_SECRETENCRYPTION__KEYS__<kid>` | Base64, 32 bytes; `k1` = the cluster's existing `instance_secret_key` |
+| `OCTO_SECRETENCRYPTION__ACTIVEKEYID` | Key id used to encrypt new values (`k1`) |
+| `OCTO_SECRETENCRYPTION__LEGACYV1KEY` | Key for older `enc:v1:` values (same value as `k1`) |
+
+Without keys the service starts and legacy clear-text secrets keep working; saving a new provider
+secret or using an encrypted one fails (`SecretEncryptionNotConfiguredException`), and a provider
+whose secret cannot be decrypted is skipped at scheme registration.
+
 #### Blueprint Variables (`Blueprints` section)
 
 Inputs for the blueprint variable resolution (`IdentityBlueprintVariableProvider`), bound from the

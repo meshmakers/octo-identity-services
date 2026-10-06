@@ -1,4 +1,5 @@
 ﻿using IdentityServerPersistence.Services;
+using Meshmakers.Octo.Backend.Authentication.Secrets;
 using Meshmakers.Octo.Backend.Authentication.Services;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
@@ -29,6 +30,9 @@ public class DynamicAuthBuilder : IDynamicAuthBuilder
         Services.TryAddScoped<IDynamicAuthSchemeService, DynamicAuthSchemeService>();
         Services.TryAddScoped<IAuthSchemeCreatorFactory, AuthSchemeCreatorFactory>();
         Services.TryAddScoped<ILdapAuthenticationService, LdapAuthenticationService>();
+        // AB#5540: the external providers' ClientSecret is a Secret attribute; the reader decrypts
+        // it through ISecretAttributeProtector (registered by AddRuntimeEngine from SecretEncryption).
+        Services.TryAddSingleton<IIdentityProviderSecretReader, IdentityProviderSecretReader>();
         Services.AddInitializationService<DynamicAuthSchemeServiceInitializer>();
         // AB#5540: catch up the schemes of tenants the initializer had to skip, once their setup completes.
         Services.TryAddEnumerable(

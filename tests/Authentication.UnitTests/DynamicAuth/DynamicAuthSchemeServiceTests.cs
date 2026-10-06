@@ -6,6 +6,7 @@ using Meshmakers.Octo.Runtime.Contracts;
 using Meshmakers.Octo.Runtime.Contracts.MongoDb;
 using Meshmakers.Octo.Runtime.Contracts.MongoDb.Repositories;
 using Meshmakers.Octo.Runtime.Contracts.Repositories.Query;
+using Meshmakers.Octo.Runtime.Contracts.RepositoryEntities;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.Google;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -41,7 +42,7 @@ public class DynamicAuthSchemeServiceTests
             Name = "Google",
             IsEnabled = true,
             ClientId = "google-client-id",
-            ClientSecret = "google-secret"
+            ClientSecret = RtSecretValue.Pending("google-secret")
         };
 
         _identityProviderStore.GetAllAsync().Returns(new RtIdentityProvider[] { googleProvider });
@@ -64,7 +65,7 @@ public class DynamicAuthSchemeServiceTests
             Name = "Microsoft",
             IsEnabled = true,
             ClientId = "microsoft-client-id",
-            ClientSecret = "microsoft-secret"
+            ClientSecret = RtSecretValue.Pending("microsoft-secret")
         };
 
         _identityProviderStore.GetByNameAsync("Microsoft").Returns(microsoftProvider);

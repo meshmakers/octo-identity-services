@@ -14,7 +14,8 @@ public class OpenLdapSchemeCreator : IAuthSchemeCreator<RtOpenLdapIdentityProvid
         _optionsBuilder = optionsBuilder;
     }
 
-    public AuthenticationScheme Create(RtOpenLdapIdentityProvider identityProvider, string? schemeNameOverride = null)
+    public AuthenticationScheme Create(RtOpenLdapIdentityProvider identityProvider, string? schemeNameOverride = null,
+        string? tenantId = null)
     {
         var schemeName = schemeNameOverride ?? identityProvider.Name;
         var options = _optionsBuilder.CreateOptions(schemeName);
