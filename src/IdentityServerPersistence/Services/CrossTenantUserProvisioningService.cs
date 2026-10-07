@@ -13,6 +13,7 @@ public class CrossTenantUserProvisioningService(
     UserManager<RtUser> userManager,
     IExternalTenantUserMappingStore externalTenantUserMappingStore,
     IMultiTenancyResolverService multiTenancyResolverService,
+    ICrossTenantShadowUserChainResolver shadowUserChainResolver,
     ILogger<CrossTenantUserProvisioningService> logger)
     : ICrossTenantUserProvisioningService
 {
@@ -34,7 +35,7 @@ public class CrossTenantUserProvisioningService(
         // the login path (password login unwinds to the home tenant, a tenant switch or auto-login
         // starts at the parent's shadow user). Reuse the shadow user any of those paths created
         // instead of minting a second, role-less one.
-        var rootIdentity = CrossTenantShadowUserName.GetRootIdentity(
+        var rootIdentity = await shadowUserChainResolver.GetRootIdentityAsync(
             crossTenantResult.SourceTenantId, crossTenantResult.SourceUserName);
         var rootShadowUserName = CrossTenantShadowUserName.Build(rootIdentity.TenantId, rootIdentity.UserName);
 
@@ -49,14 +50,21 @@ public class CrossTenantUserProvisioningService(
         var candidatesResult = await tenantRepository.GetRtEntitiesByTypeAsync<RtUser>(session, candidateQuery);
         await session.CommitTransactionAsync();
 
-        var equivalentUser = candidatesResult.Items
-            // A shadow user never has a password; one that does is a local account wearing the name.
-            .Where(u => string.IsNullOrEmpty(u.PasswordHash))
-            .Select(u => (User: u, Chain: CrossTenantShadowUserName.GetSourceChain(u.UserName)))
-            .Where(c => c.Chain.Count > 0 && CrossTenantShadowUserName.IsSameIdentity(c.Chain[^1], rootIdentity))
+        // A shadow user never has a password; one that does is a local account wearing the name.
+        var candidates = new List<(RtUser User, int ChainLength)>();
+        foreach (var candidate in candidatesResult.Items.Where(u => string.IsNullOrEmpty(u.PasswordHash)))
+        {
+            var chain = await shadowUserChainResolver.GetSourceChainAsync(candidate.UserName);
+            if (chain.Count > 0 && CrossTenantShadowUserName.IsSameIdentity(chain[^1], rootIdentity))
+            {
+                candidates.Add((candidate, chain.Count));
+            }
+        }
+
+        var equivalentUser = candidates
             // Deterministic pick among legacy duplicates: the shortest chain (closest to the home
             // identity), then the name.
-            .OrderBy(c => c.Chain.Count)
+            .OrderBy(c => c.ChainLength)
             .ThenBy(c => c.User.UserName, StringComparer.OrdinalIgnoreCase)
             .Select(c => c.User)
             .FirstOrDefault();
@@ -86,7 +94,7 @@ public class CrossTenantUserProvisioningService(
         {
             (crossTenantResult.SourceTenantId, crossTenantResult.SourceUserName)
         };
-        identities.AddRange(CrossTenantShadowUserName.GetSourceChain(crossTenantResult.SourceUserName));
+        identities.AddRange(await shadowUserChainResolver.GetSourceChainAsync(crossTenantResult.SourceUserName));
 
         var mappings = await externalTenantUserMappingStore.FindBySourceUserNamesAsync(identities);
         return mappings.Count > 0;

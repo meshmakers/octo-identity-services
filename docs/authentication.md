@@ -540,6 +540,17 @@ Every tier is the same person — the rule already used by the token exchange (A
 `allowed_tenants` — so a mapping an admin created for the home identity also applies when the
 person arrives through the parent's shadow user.
 
+**Tenant ids may contain `_`** (`TenantContext.ValidateTenantIdFormat`), so the name alone is
+ambiguous: `xt_evil_xt_meshmakers_gerald` is also the shadow of the ordinary user
+`meshmakers_gerald` of tenant `evil_xt`. A split at the first `_` would hand that user gerald's
+mappings (and gerald's shadow user). The chain is therefore unwound by
+`ICrossTenantShadowUserChainResolver`, which splits each tier only after a prefix that is a
+**registered** tenant id (`ISystemContext.IsTenantRegisteredAsync`) and stops — fail closed — when
+no registered tenant fits (deleted tenant) or more than one does (`a` and `a_b` both exist). This
+also makes the mappings of users from underscore tenants resolve at all. The older consumers of the
+convention (`AllowedTenantsResolver`, `TenantExchangeProcessor`, the `home_tenant_id` claim) still
+split naively; see the AB#5708 review notes.
+
 Consequences:
 
 - A role a blueprint adds to `TenantOwners` (`IdentityAssociationMigration.EnsureTenantOwnersGroupAsync`)

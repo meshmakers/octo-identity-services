@@ -15,7 +15,17 @@ namespace IdentityServerPersistence.Services;
 ///     <para>
 ///         The prefix is reserved (AB#5708): users created through the user API must not carry it, otherwise
 ///         an administrator of an ancestor tenant could mint a local user that unwinds to somebody else's
-///         identity. Tenant ids never contain an underscore, so the first two separators are unambiguous.
+///         identity.
+///     </para>
+///     <para>
+///         🔴 <b>Tenant ids MAY contain underscores</b> (<c>TenantContext.ValidateTenantIdFormat</c> allows
+///         ASCII letters, digits, <c>-</c> and <c>_</c>), so the name alone is ambiguous:
+///         <c>xt_evil_xt_meshmakers_gerald</c> is the shadow of <c>meshmakers_gerald</c> in tenant
+///         <c>evil_xt</c> just as much as the shadow of <c>xt_meshmakers_gerald</c> in tenant <c>evil</c>.
+///         A naive split at the first separator would let an ordinary user of <c>evil_xt</c> unwind to
+///         <c>gerald@meshmakers</c> (AB#5708 review). <see cref="GetSourceChainAsync" /> therefore splits
+///         each tier only at a prefix that is a registered tenant id and stops — fail closed — when no
+///         registered tenant or more than one fits.
 ///     </para>
 /// </remarks>
 public static class CrossTenantShadowUserName
@@ -37,21 +47,48 @@ public static class CrossTenantShadowUserName
     ///     Unwinds a shadow user name into its source identities, nearest first:
     ///     <c>xt_a_xt_r_n</c> → <c>(a, xt_r_n)</c>, <c>(r, n)</c>. A name without the prefix yields nothing.
     /// </summary>
-    public static IReadOnlyList<(string TenantId, string UserName)> GetSourceChain(string? userName)
+    /// <remarks>
+    ///     Each tier is split only after a prefix that <paramref name="isTenantRegistered" /> confirms as a
+    ///     tenant id. When no candidate prefix is a registered tenant (deleted tenant, malformed name) or
+    ///     more than one is (<c>a</c> and <c>a_b</c> both exist), the chain ends at the previous tier: an
+    ///     ambiguous identity grants nothing.
+    /// </remarks>
+    /// <param name="userName">The (possibly nested) shadow user name.</param>
+    /// <param name="isTenantRegistered">Registry probe for a candidate tenant id (case-insensitive).</param>
+    public static async Task<IReadOnlyList<(string TenantId, string UserName)>> GetSourceChainAsync(
+        string? userName, Func<string, Task<bool>> isTenantRegistered)
     {
+        ArgumentNullException.ThrowIfNull(isTenantRegistered);
+
         var chain = new List<(string TenantId, string UserName)>();
         var current = userName;
 
         while (IsShadowUserName(current) && chain.Count < MaxDepth)
         {
-            var parts = current!.Split('_', 3);
-            if (parts.Length < 3 || string.IsNullOrEmpty(parts[1]) || string.IsNullOrEmpty(parts[2]))
+            var remainder = current![Prefix.Length..];
+            (string TenantId, string UserName)? tier = null;
+            var matches = 0;
+
+            // Every separator is a candidate end of the tenant id; the user part must stay non-empty.
+            for (var i = remainder.IndexOf('_'); i > 0 && i < remainder.Length - 1; i = remainder.IndexOf('_', i + 1))
+            {
+                var candidateTenantId = remainder[..i];
+                if (!await isTenantRegistered(candidateTenantId))
+                {
+                    continue;
+                }
+
+                matches++;
+                tier = (candidateTenantId, remainder[(i + 1)..]);
+            }
+
+            if (matches != 1)
             {
                 break;
             }
 
-            chain.Add((parts[1], parts[2]));
-            current = parts[2];
+            chain.Add(tier!.Value);
+            current = tier.Value.UserName;
         }
 
         return chain;
@@ -61,9 +98,10 @@ public static class CrossTenantShadowUserName
     ///     The identity a source identity unwinds to: the last tier of the chain of
     ///     <paramref name="userName" />, or the identity itself when it is not a shadow user.
     /// </summary>
-    public static (string TenantId, string UserName) GetRootIdentity(string tenantId, string userName)
+    public static async Task<(string TenantId, string UserName)> GetRootIdentityAsync(
+        string tenantId, string userName, Func<string, Task<bool>> isTenantRegistered)
     {
-        var chain = GetSourceChain(userName);
+        var chain = await GetSourceChainAsync(userName, isTenantRegistered);
         return chain.Count == 0 ? (tenantId, userName) : chain[^1];
     }
 

@@ -36,7 +36,8 @@ public interface IGroupRoleResolver
 
 internal class GroupRoleResolver(
     IGroupStore groupStore,
-    IExternalTenantUserMappingStore externalTenantUserMappingStore) : IGroupRoleResolver
+    IExternalTenantUserMappingStore externalTenantUserMappingStore,
+    ICrossTenantShadowUserChainResolver shadowUserChainResolver) : IGroupRoleResolver
 {
     private const int MaxDepth = 10;
 
@@ -48,7 +49,8 @@ internal class GroupRoleResolver(
         var subjectIds = new HashSet<string> { userRtId };
         var mappedRoleIds = new HashSet<string>();
 
-        var sourceChain = CrossTenantShadowUserName.GetSourceChain(userName);
+        // Registry-aware unwinding: a tenant id with an underscore must not be misread as a nested chain.
+        var sourceChain = await shadowUserChainResolver.GetSourceChainAsync(userName);
         if (sourceChain.Count > 0)
         {
             var mappings = await externalTenantUserMappingStore.FindBySourceUserNamesAsync(sourceChain);

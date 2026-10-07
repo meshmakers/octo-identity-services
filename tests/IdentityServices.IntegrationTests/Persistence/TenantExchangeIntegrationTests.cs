@@ -174,20 +174,21 @@ public class TenantExchangeIntegrationTests : IClassFixture<IdentityServicesFixt
             NullLogger<CrossTenantAuthenticationService>.Instance);
     }
 
-    private static CrossTenantUserProvisioningService CreateProvisioningService(ITenantRepository childRepo)
+    private CrossTenantUserProvisioningService CreateProvisioningService(ITenantRepository childRepo)
     {
         var resolver = new FixedTenantResolver(childRepo);
         var mappingStore = new ExternalTenantUserMappingStore(resolver);
         var userManager = BuildUserManager(resolver);
         return new CrossTenantUserProvisioningService(
-            userManager, mappingStore, resolver, NullLogger<CrossTenantUserProvisioningService>.Instance);
+            userManager, mappingStore, resolver, new CrossTenantShadowUserChainResolver(_fixture.GetSystemContext()),
+            NullLogger<CrossTenantUserProvisioningService>.Instance);
     }
 
-    private static async Task<IList<string>> ResolveRolesInTenantAsync(ITenantRepository repo, RtUser user)
+    private async Task<IList<string>> ResolveRolesInTenantAsync(ITenantRepository repo, RtUser user)
     {
         var resolver = new FixedTenantResolver(repo);
         var groupStore = new GroupStore(resolver);
-        var groupRoleResolver = new GroupRoleResolver(groupStore, new ExternalTenantUserMappingStore(resolver));
+        var groupRoleResolver = new GroupRoleResolver(groupStore, new ExternalTenantUserMappingStore(resolver), new CrossTenantShadowUserChainResolver(_fixture.GetSystemContext()));
         var userStore = new OctoUserStore(resolver, groupRoleResolver, null);
         return await userStore.GetRolesAsync(user, TestContext.Current.CancellationToken);
     }
@@ -206,10 +207,10 @@ public class TenantExchangeIntegrationTests : IClassFixture<IdentityServicesFixt
     ///     to the given tenant repository, so <c>CreateAsync</c> / <c>AddToRoleAsync</c> hit the right
     ///     database — mirroring how the provisioning service runs in production for tenant B.
     /// </summary>
-    private static UserManager<RtUser> BuildUserManager(FixedTenantResolver resolver)
+    private UserManager<RtUser> BuildUserManager(FixedTenantResolver resolver)
     {
         var groupStore = new GroupStore(resolver);
-        var groupRoleResolver = new GroupRoleResolver(groupStore, new ExternalTenantUserMappingStore(resolver));
+        var groupRoleResolver = new GroupRoleResolver(groupStore, new ExternalTenantUserMappingStore(resolver), new CrossTenantShadowUserChainResolver(_fixture.GetSystemContext()));
         var store = new OctoUserStore(resolver, groupRoleResolver, null);
 
         var options = Microsoft.Extensions.Options.Options.Create(new IdentityOptions());
@@ -326,7 +327,7 @@ public class TenantExchangeIntegrationTests : IClassFixture<IdentityServicesFixt
         return rtId;
     }
 
-    private static async Task AssignRoleToUserAsync(
+    private async Task AssignRoleToUserAsync(
         ISystemContext systemContext, string tenantId, OctoObjectId userRtId, OctoObjectId roleRtId)
     {
         var repo = tenantId == systemContext.TenantId
@@ -335,7 +336,7 @@ public class TenantExchangeIntegrationTests : IClassFixture<IdentityServicesFixt
 
         var resolver = new FixedTenantResolver(repo);
         var userStore = new OctoUserStore(
-            resolver, new GroupRoleResolver(new GroupStore(resolver), new ExternalTenantUserMappingStore(resolver)), null);
+            resolver, new GroupRoleResolver(new GroupStore(resolver), new ExternalTenantUserMappingStore(resolver), new CrossTenantShadowUserChainResolver(_fixture.GetSystemContext())), null);
 
         using var session = await repo.GetSessionAsync();
         session.StartTransaction();

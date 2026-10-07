@@ -111,15 +111,17 @@ public class CrossTenantShadowUserRolesIntegrationTests : IClassFixture<Identity
 
         // Tenant switch / auto-login from an intermediate parent: the source is the parent's shadow
         // user of the same person. The admin mapping exists only for the home identity.
+        // The intermediate tenant must be registered: the name chain is only unwound at real tenant ids.
+        var intermediateTenantId = await CreateChildTenantAsync(NewId("intermediate"));
         var parentShadowLogin = new CrossTenantAuthResult
         {
-            SourceTenantId = "intermediate",
+            SourceTenantId = intermediateTenantId,
             SourceUserId = OctoObjectId.GenerateNewId().ToString(),
             SourceUserName = CrossTenantShadowUserName.Build(ctx.HomeLogin.SourceTenantId, ctx.HomeLogin.SourceUserName)
         };
 
         var viaParent = (await ctx.Provisioning.FindOrCreateCrossTenantUserAsync(parentShadowLogin, ctx.ChildTenantId))!;
-        viaParent.UserName.Should().Be($"xt_intermediate_xt_{ctx.HomeLogin.SourceTenantId}_{ctx.HomeLogin.SourceUserName}");
+        viaParent.UserName.Should().Be($"xt_{intermediateTenantId}_xt_{ctx.HomeLogin.SourceTenantId}_{ctx.HomeLogin.SourceUserName}");
         (await GetRolesAsync(ctx.ChildRepo, viaParent)).Should().BeEquivalentTo(
             [ctx.OwnerRoleName],
             "the home identity's mapping applies to every tier of the shadow user's chain");
@@ -152,6 +154,63 @@ public class CrossTenantShadowUserRolesIntegrationTests : IClassFixture<Identity
         var shadow = (await ctx.Provisioning.FindOrCreateCrossTenantUserAsync(ctx.HomeLogin, ctx.ChildTenantId))!;
 
         (await GetRolesAsync(ctx.ChildRepo, shadow)).Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task UnderscoreTenantUser_NamedLikeANestedChain_DoesNotGetForeignMappingRoles()
+    {
+        // AB#5708 review: tenant ids may contain '_'. An ordinary user "{home}_{gerald}" of tenant
+        // "{evil}_xt" gets the shadow name xt_{evil}_xt_{home}_{gerald}, which a naive split unwinds to
+        // gerald@home — whose mapping sits in the owners group. It must grant nothing.
+        var ctx = await ArrangeChildWithOwnersGroupAsync();
+        var evilTenantId = await CreateChildTenantAsync($"{NewId("evil")}_xt");
+        var attackerLogin = new CrossTenantAuthResult
+        {
+            SourceTenantId = evilTenantId,
+            SourceUserId = OctoObjectId.GenerateNewId().ToString(),
+            SourceUserName = $"{ctx.HomeLogin.SourceTenantId}_{ctx.HomeLogin.SourceUserName}"
+        };
+
+        // Not explicitly provisioned (self-registration gate), before JIT creates the attacker's own mapping.
+        (await ctx.Provisioning.IsExplicitlyProvisionedAsync(attackerLogin)).Should().BeFalse();
+
+        var attackerShadow = (await ctx.Provisioning.FindOrCreateCrossTenantUserAsync(attackerLogin, ctx.ChildTenantId))!;
+
+        attackerShadow.UserName.Should().Be(
+            $"xt_{evilTenantId}_{ctx.HomeLogin.SourceTenantId}_{ctx.HomeLogin.SourceUserName}",
+            "the attacker's shadow name ends exactly like the victim's nested chain");
+        (await GetRolesAsync(ctx.ChildRepo, attackerShadow)).Should().BeEmpty();
+
+        // ...and the victim's first login neither lands on the attacker's shadow user.
+        var victimShadow = (await ctx.Provisioning.FindOrCreateCrossTenantUserAsync(ctx.HomeLogin, ctx.ChildTenantId))!;
+        victimShadow.RtId.Should().NotBe(attackerShadow.RtId);
+        (await GetRolesAsync(ctx.ChildRepo, victimShadow)).Should().BeEquivalentTo([ctx.OwnerRoleName]);
+    }
+
+    [Fact]
+    public async Task UnderscoreTenantUser_GetsOwnMappingRoles()
+    {
+        var ctx = await ArrangeChildWithOwnersGroupAsync(mappingInOwnersGroup: false);
+        var sourceTenantId = await CreateChildTenantAsync($"{NewId("src")}_tenant");
+        var login = new CrossTenantAuthResult
+        {
+            SourceTenantId = sourceTenantId,
+            SourceUserId = OctoObjectId.GenerateNewId().ToString(),
+            SourceUserName = NewId("user")
+        };
+        var mapping = new RtExternalTenantUserMapping
+        {
+            RtId = OctoObjectId.GenerateNewId(),
+            SourceTenantId = login.SourceTenantId,
+            SourceUserId = login.SourceUserId,
+            SourceUserName = login.SourceUserName
+        };
+        await new ExternalTenantUserMappingStore(new FixedTenantResolver(ctx.ChildRepo)).StoreAsync(mapping);
+        await ctx.GroupStore.AddMemberExternalUserAsync(ctx.OwnersGroupId, mapping.RtId.ToString());
+
+        var shadow = (await ctx.Provisioning.FindOrCreateCrossTenantUserAsync(login, ctx.ChildTenantId))!;
+
+        (await GetRolesAsync(ctx.ChildRepo, shadow)).Should().BeEquivalentTo([ctx.OwnerRoleName]);
     }
 
     // ---------- arrangement ----------
@@ -272,19 +331,19 @@ public class CrossTenantShadowUserRolesIntegrationTests : IClassFixture<Identity
         return result.Items.Count();
     }
 
-    private static OctoUserStore CreateUserStore(ITenantRepository repo)
+    private OctoUserStore CreateUserStore(ITenantRepository repo)
     {
         var resolver = new FixedTenantResolver(repo);
         return new OctoUserStore(
             resolver,
-            new GroupRoleResolver(new GroupStore(resolver), new ExternalTenantUserMappingStore(resolver)),
+            new GroupRoleResolver(new GroupStore(resolver), new ExternalTenantUserMappingStore(resolver), new CrossTenantShadowUserChainResolver(_fixture.GetSystemContext())),
             null);
     }
 
-    private static async Task<IList<string>> GetRolesAsync(ITenantRepository repo, RtUser user)
+    private async Task<IList<string>> GetRolesAsync(ITenantRepository repo, RtUser user)
         => await CreateUserStore(repo).GetRolesAsync(user, TestContext.Current.CancellationToken);
 
-    private static CrossTenantUserProvisioningService CreateProvisioningService(ITenantRepository childRepo)
+    private CrossTenantUserProvisioningService CreateProvisioningService(ITenantRepository childRepo)
     {
         var resolver = new FixedTenantResolver(childRepo);
         var userManager = new UserManager<RtUser>(
@@ -301,6 +360,7 @@ public class CrossTenantShadowUserRolesIntegrationTests : IClassFixture<Identity
             userManager,
             new ExternalTenantUserMappingStore(resolver),
             resolver,
+            new CrossTenantShadowUserChainResolver(_fixture.GetSystemContext()),
             NullLogger<CrossTenantUserProvisioningService>.Instance);
     }
 }

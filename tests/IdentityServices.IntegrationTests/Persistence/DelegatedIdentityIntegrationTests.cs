@@ -200,20 +200,20 @@ public class DelegatedIdentityIntegrationTests : IClassFixture<IdentityServicesF
         return (resolver, groupStore, repo);
     }
 
-    private static ClientRoleStore CreateClientRoleStore(ITenantRepository repo)
+    private ClientRoleStore CreateClientRoleStore(ITenantRepository repo)
     {
         var tenantResolver = new FixedTenantResolver(repo);
         return new ClientRoleStore(
             tenantResolver,
-            new GroupRoleResolver(new GroupStore(tenantResolver), new ExternalTenantUserMappingStore(tenantResolver)),
+            new GroupRoleResolver(new GroupStore(tenantResolver), new ExternalTenantUserMappingStore(tenantResolver), new CrossTenantShadowUserChainResolver(_fixture.GetSystemContext())),
             NullLogger<ClientRoleStore>.Instance);
     }
 
-    private static OctoUserStore CreateUserStore(ITenantRepository repo)
+    private OctoUserStore CreateUserStore(ITenantRepository repo)
     {
         var tenantResolver = new FixedTenantResolver(repo);
         return new OctoUserStore(
-            tenantResolver, new GroupRoleResolver(new GroupStore(tenantResolver), new ExternalTenantUserMappingStore(tenantResolver)), null);
+            tenantResolver, new GroupRoleResolver(new GroupStore(tenantResolver), new ExternalTenantUserMappingStore(tenantResolver), new CrossTenantShadowUserChainResolver(_fixture.GetSystemContext())), null);
     }
 
     private static async Task<OctoObjectId> CreateRoleAsync(ITenantRepository repo, string name)

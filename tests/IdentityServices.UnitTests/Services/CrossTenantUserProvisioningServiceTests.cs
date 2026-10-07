@@ -12,6 +12,7 @@ using Microsoft.AspNetCore.Identity;
 using Microsoft.Extensions.Logging;
 using NSubstitute;
 using Persistence.IdentityCkModel.Generated.System.Identity.v2;
+using Shared.TestUtilities.Fakes;
 using Xunit;
 
 namespace IdentityServices.UnitTests.Services;
@@ -45,8 +46,12 @@ public class CrossTenantUserProvisioningServiceTests
             _userManager,
             _mappingStore,
             _multiTenancyResolver,
+            _registry,
             logger);
     }
+
+    private readonly RegisteredTenantsShadowUserChainResolver _registry =
+        new("octosystem", "meshmakers", "karlplus", "other", "foo");
 
     #region FindOrCreateCrossTenantUserAsync - Existing User
 
@@ -241,6 +246,23 @@ public class CrossTenantUserProvisioningServiceTests
             sourceTenantId: "meshmakers", sourceUserName: "gerald");
         _userManager.FindByNameAsync(Arg.Any<string>()).Returns((RtUser?)null);
         SetupTenantRepository(CreateShadowUser("xt_foo_bar_xt_meshmakers_gerald"));
+
+        var result = await _sut.FindCrossTenantUserAsync(crossTenantResult);
+
+        result.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task FindCrossTenantUser_UnderscoreTenantShadowEndingLikeRoot_IsIgnored()
+    {
+        // AB#5708 review: an ordinary user "meshmakers_gerald" of tenant "evil_xt" has the shadow user
+        // xt_evil_xt_meshmakers_gerald, whose naive split unwinds to gerald@meshmakers. It must never be
+        // handed to gerald — nor gerald's shadow user to it.
+        _registry.Register("evil_xt");
+        var crossTenantResult = CreateCrossTenantResult(
+            sourceTenantId: "meshmakers", sourceUserName: "gerald");
+        _userManager.FindByNameAsync(Arg.Any<string>()).Returns((RtUser?)null);
+        SetupTenantRepository(CreateShadowUser("xt_evil_xt_meshmakers_gerald"));
 
         var result = await _sut.FindCrossTenantUserAsync(crossTenantResult);
 

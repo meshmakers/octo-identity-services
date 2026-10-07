@@ -162,7 +162,7 @@ public class AllowedTenantsResolverIntegrationTests : IClassFixture<IdentityServ
     ///     Creates the shadow user the way a cross-tenant login or switch does, so its name follows
     ///     the <c>xt_{source}_{name}</c> convention the resolver unwinds.
     /// </summary>
-    private static async Task<RtUser> ProvisionShadowAsync(
+    private async Task<RtUser> ProvisionShadowAsync(
         ISystemContext systemContext, string targetTenantId, string sourceTenantId, RtUser sourceUser)
     {
         var targetRepo = (await systemContext.TryFindTenantRepositoryAsync(targetTenantId))!;
@@ -171,6 +171,7 @@ public class AllowedTenantsResolverIntegrationTests : IClassFixture<IdentityServ
             BuildUserManager(resolver),
             new ExternalTenantUserMappingStore(resolver),
             resolver,
+            new CrossTenantShadowUserChainResolver(_fixture.GetSystemContext()),
             NullLogger<CrossTenantUserProvisioningService>.Instance);
 
         var shadow = await provisioning.FindOrCreateCrossTenantUserAsync(new CrossTenantAuthResult
@@ -184,10 +185,10 @@ public class AllowedTenantsResolverIntegrationTests : IClassFixture<IdentityServ
         return shadow!;
     }
 
-    private static UserManager<RtUser> BuildUserManager(FixedTenantResolver resolver)
+    private UserManager<RtUser> BuildUserManager(FixedTenantResolver resolver)
     {
         var groupStore = new GroupStore(resolver);
-        var store = new OctoUserStore(resolver, new GroupRoleResolver(groupStore, new ExternalTenantUserMappingStore(resolver)), null);
+        var store = new OctoUserStore(resolver, new GroupRoleResolver(groupStore, new ExternalTenantUserMappingStore(resolver), new CrossTenantShadowUserChainResolver(_fixture.GetSystemContext())), null);
         return new UserManager<RtUser>(
             store,
             Microsoft.Extensions.Options.Options.Create(new IdentityOptions()),

@@ -5,6 +5,7 @@ using Meshmakers.Octo.ConstructionKit.Contracts;
 using Meshmakers.Octo.Runtime.Contracts.RepositoryEntities;
 using NSubstitute;
 using Persistence.IdentityCkModel.Generated.System.Identity.v2;
+using Shared.TestUtilities.Fakes;
 using Xunit;
 
 namespace IdentityServerPersistence.UnitTests.Services.CrossTenant;
@@ -18,6 +19,7 @@ public class GroupRoleResolverUserTests
 {
     private readonly IGroupStore _groupStore = Substitute.For<IGroupStore>();
     private readonly IExternalTenantUserMappingStore _mappingStore = Substitute.For<IExternalTenantUserMappingStore>();
+    private readonly RegisteredTenantsShadowUserChainResolver _registry = new("meshmakers", "karlplus");
     private readonly GroupRoleResolver _sut;
 
     private readonly Dictionary<OctoObjectId, List<string>> _members = new();
@@ -35,7 +37,7 @@ public class GroupRoleResolverUserTests
         _mappingStore.FindBySourceUserNamesAsync(Arg.Any<IReadOnlyCollection<(string, string)>>())
             .Returns(Array.Empty<RtExternalTenantUserMapping>());
 
-        _sut = new GroupRoleResolver(_groupStore, _mappingStore);
+        _sut = new GroupRoleResolver(_groupStore, _mappingStore, _registry);
     }
 
     [Fact]
@@ -133,6 +135,78 @@ public class GroupRoleResolverUserTests
         var roles = await _sut.ResolveEffectiveUserRoleIdsAsync(NewId(), "xt_meshmakers_gerald");
 
         roles.Should().BeEmpty();
+    }
+
+    // --- AB#5708 review: tenant ids may contain '_' — the name chain must not be spoofable ---
+
+    [Fact]
+    public async Task UnderscoreTenant_OrdinaryUserCannotUnwindToForeignIdentity()
+    {
+        // Tenant "evil_xt" + ordinary user "meshmakers_gerald" → shadow "xt_evil_xt_meshmakers_gerald",
+        // which a naive split reads as (evil, xt_meshmakers_gerald) → (meshmakers, gerald).
+        _registry.Register("evil_xt");
+
+        await _sut.ResolveEffectiveUserRoleIdsAsync(NewId(), "xt_evil_xt_meshmakers_gerald");
+
+        await _mappingStore.Received(1).FindBySourceUserNamesAsync(
+            Arg.Is<IReadOnlyCollection<(string, string)>>(c =>
+                c.Count == 1 && HasIdentity(c, "evil_xt", "meshmakers_gerald")));
+    }
+
+    [Fact]
+    public async Task UnderscoreTenant_TenantIdWithXtSegment_CannotUnwindToForeignIdentity()
+    {
+        // Tenant "evil_xt_meshmakers" + ordinary user "gerald" → the same spoofable name shape.
+        _registry.Register("evil_xt_meshmakers");
+
+        await _sut.ResolveEffectiveUserRoleIdsAsync(NewId(), "xt_evil_xt_meshmakers_gerald");
+
+        await _mappingStore.Received(1).FindBySourceUserNamesAsync(
+            Arg.Is<IReadOnlyCollection<(string, string)>>(c =>
+                c.Count == 1 && HasIdentity(c, "evil_xt_meshmakers", "gerald")));
+    }
+
+    [Fact]
+    public async Task UnderscoreTenant_OwnMappingIsFound()
+    {
+        _registry.Register("tenant_a");
+        var mapping = Mapping("tenant_a", "gerald");
+        var role = NewId();
+        AddGroup(role, mapping.RtId.ToString());
+        ReturnMappings(mapping);
+
+        var roles = await _sut.ResolveEffectiveUserRoleIdsAsync(NewId(), "xt_tenant_a_gerald");
+
+        roles.Should().BeEquivalentTo([role]);
+        await _mappingStore.Received(1).FindBySourceUserNamesAsync(
+            Arg.Is<IReadOnlyCollection<(string, string)>>(c =>
+                c.Count == 1 && HasIdentity(c, "tenant_a", "gerald")));
+    }
+
+    [Fact]
+    public async Task AmbiguousTenantPrefix_FailsClosed()
+    {
+        // Both "evil" and "evil_xt" exist: the name cannot be attributed, so it grants nothing.
+        _registry.Register("evil", "evil_xt");
+        ReturnMappings(Mapping("meshmakers", "gerald", NewId()));
+
+        var roles = await _sut.ResolveEffectiveUserRoleIdsAsync(NewId(), "xt_evil_xt_meshmakers_gerald");
+
+        roles.Should().BeEmpty();
+        await _mappingStore.DidNotReceive()
+            .FindBySourceUserNamesAsync(Arg.Any<IReadOnlyCollection<(string, string)>>());
+    }
+
+    [Fact]
+    public async Task UnregisteredTenant_FailsClosed()
+    {
+        ReturnMappings(Mapping("deleted", "gerald", NewId()));
+
+        var roles = await _sut.ResolveEffectiveUserRoleIdsAsync(NewId(), "xt_deleted_gerald");
+
+        roles.Should().BeEmpty();
+        await _mappingStore.DidNotReceive()
+            .FindBySourceUserNamesAsync(Arg.Any<IReadOnlyCollection<(string, string)>>());
     }
 
     private static bool HasIdentity(IReadOnlyCollection<(string, string)> identities, string tenant, string user)
