@@ -58,7 +58,7 @@ resources:
       type: github
       name: meshmakers/octo-pipeline-templates
       endpoint: meshmakers-access-token
-      ref: refs/tags/tpl-v0.5.0
+      ref: refs/tags/tpl-v0.6.5
 
 trigger:
   batch: true
@@ -67,6 +67,15 @@ trigger:
       - dev/*
       - test/*
       - main
+  # Docs-only commits must not start CI (AB#5719). Excluded paths are
+  # never consumed by the build; a root README.md change reaches the
+  # packed NuGet readme with the next code commit.
+  paths:
+    exclude:
+      - '**/*.md'
+      - '*.md'
+      - '.claude/'
+      - 'docs/'
   tags:
     exclude:
       - '*'
@@ -127,14 +136,16 @@ stages:
               constructionKitPaths:
                 - 'src/Persistence.IdentityCkModel/ConstructionKit'
           - template: templates/steps/download-ca.yml@pipelineTemplates
+          # Fresh package list for the private feed only; nuget.org stays cached.
+          # Replaces restore --force and noCache (AB#5720).
+          - template: templates/steps/purge-private-nuget-http-cache.yml@pipelineTemplates
           - task: DotNetCoreCLI@2
             retryCountOnTaskFailure: 2
             displayName: 'Restore NuGet packages'
             inputs:
               command: 'restore'
               projects: '$(solutionFile)'
-              restoreArguments: '--force /p:OctoNugetPrivateServer=$(nugetPrivateServer)'
-              noCache: true
+              restoreArguments: '/p:OctoNugetPrivateServer=$(nugetPrivateServer)'
           - task: DotNetCoreCLI@2
             retryCountOnTaskFailure: 2
             displayName: 'Build'
