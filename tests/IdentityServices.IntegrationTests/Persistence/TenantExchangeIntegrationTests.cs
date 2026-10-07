@@ -187,7 +187,7 @@ public class TenantExchangeIntegrationTests : IClassFixture<IdentityServicesFixt
     {
         var resolver = new FixedTenantResolver(repo);
         var groupStore = new GroupStore(resolver);
-        var groupRoleResolver = new GroupRoleResolver(groupStore);
+        var groupRoleResolver = new GroupRoleResolver(groupStore, new ExternalTenantUserMappingStore(resolver));
         var userStore = new OctoUserStore(resolver, groupRoleResolver, null);
         return await userStore.GetRolesAsync(user, TestContext.Current.CancellationToken);
     }
@@ -209,7 +209,7 @@ public class TenantExchangeIntegrationTests : IClassFixture<IdentityServicesFixt
     private static UserManager<RtUser> BuildUserManager(FixedTenantResolver resolver)
     {
         var groupStore = new GroupStore(resolver);
-        var groupRoleResolver = new GroupRoleResolver(groupStore);
+        var groupRoleResolver = new GroupRoleResolver(groupStore, new ExternalTenantUserMappingStore(resolver));
         var store = new OctoUserStore(resolver, groupRoleResolver, null);
 
         var options = Microsoft.Extensions.Options.Options.Create(new IdentityOptions());
@@ -335,7 +335,7 @@ public class TenantExchangeIntegrationTests : IClassFixture<IdentityServicesFixt
 
         var resolver = new FixedTenantResolver(repo);
         var userStore = new OctoUserStore(
-            resolver, new GroupRoleResolver(new GroupStore(resolver)), null);
+            resolver, new GroupRoleResolver(new GroupStore(resolver), new ExternalTenantUserMappingStore(resolver)), null);
 
         using var session = await repo.GetSessionAsync();
         session.StartTransaction();

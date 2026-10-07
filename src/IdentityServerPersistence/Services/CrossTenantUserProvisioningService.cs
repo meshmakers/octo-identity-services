@@ -17,6 +17,82 @@ public class CrossTenantUserProvisioningService(
     : ICrossTenantUserProvisioningService
 {
     /// <inheritdoc />
+    public async Task<RtUser?> FindCrossTenantUserAsync(CrossTenantAuthResult crossTenantResult)
+    {
+        var crossTenantUserName = CrossTenantShadowUserName.Build(
+            crossTenantResult.SourceTenantId, crossTenantResult.SourceUserName);
+
+        // The exact name wins, so every shadow user that exists today keeps being used by the login
+        // path that created it — including both halves of a legacy duplicate.
+        var exactUser = await userManager.FindByNameAsync(crossTenantUserName);
+        if (exactUser != null)
+        {
+            return exactUser;
+        }
+
+        // AB#5708: the same person reaches this tenant under different source identities depending on
+        // the login path (password login unwinds to the home tenant, a tenant switch or auto-login
+        // starts at the parent's shadow user). Reuse the shadow user any of those paths created
+        // instead of minting a second, role-less one.
+        var rootIdentity = CrossTenantShadowUserName.GetRootIdentity(
+            crossTenantResult.SourceTenantId, crossTenantResult.SourceUserName);
+        var rootShadowUserName = CrossTenantShadowUserName.Build(rootIdentity.TenantId, rootIdentity.UserName);
+
+        var tenantRepository = multiTenancyResolverService.GetTenantRepository();
+        using var session = await tenantRepository.GetSessionAsync();
+        session.StartTransaction();
+
+        // Every shadow user of this person ends with the root shadow name (xt_{root}_{name}); the suffix
+        // match is only a pre-filter, the unwound root identity decides.
+        var candidateQuery = RtEntityQueryOptions.Create();
+        candidateQuery.FieldEndsWith(nameof(RtUser.NormalizedUserName), rootShadowUserName.ToUpperInvariant());
+        var candidatesResult = await tenantRepository.GetRtEntitiesByTypeAsync<RtUser>(session, candidateQuery);
+        await session.CommitTransactionAsync();
+
+        var equivalentUser = candidatesResult.Items
+            // A shadow user never has a password; one that does is a local account wearing the name.
+            .Where(u => string.IsNullOrEmpty(u.PasswordHash))
+            .Select(u => (User: u, Chain: CrossTenantShadowUserName.GetSourceChain(u.UserName)))
+            .Where(c => c.Chain.Count > 0 && CrossTenantShadowUserName.IsSameIdentity(c.Chain[^1], rootIdentity))
+            // Deterministic pick among legacy duplicates: the shortest chain (closest to the home
+            // identity), then the name.
+            .OrderBy(c => c.Chain.Count)
+            .ThenBy(c => c.User.UserName, StringComparer.OrdinalIgnoreCase)
+            .Select(c => c.User)
+            .FirstOrDefault();
+
+        if (equivalentUser != null)
+        {
+            logger.LogInformation(
+                "Cross-tenant login as '{RequestedUserName}' reuses existing shadow user '{UserName}' of the same identity '{RootTenant}/{RootUser}'",
+                crossTenantUserName, equivalentUser.UserName, rootIdentity.TenantId, rootIdentity.UserName);
+        }
+
+        return equivalentUser;
+    }
+
+    /// <inheritdoc />
+    public async Task<bool> IsExplicitlyProvisionedAsync(CrossTenantAuthResult crossTenantResult)
+    {
+        if (await externalTenantUserMappingStore.FindBySourceUserAsync(
+                crossTenantResult.SourceTenantId, crossTenantResult.SourceUserId) != null)
+        {
+            return true;
+        }
+
+        // A mapping created for any identity of the source's chain (e.g. the home user, while the
+        // login arrives through the parent's shadow user) is the same explicit grant.
+        var identities = new List<(string SourceTenantId, string SourceUserName)>
+        {
+            (crossTenantResult.SourceTenantId, crossTenantResult.SourceUserName)
+        };
+        identities.AddRange(CrossTenantShadowUserName.GetSourceChain(crossTenantResult.SourceUserName));
+
+        var mappings = await externalTenantUserMappingStore.FindBySourceUserNamesAsync(identities);
+        return mappings.Count > 0;
+    }
+
+    /// <inheritdoc />
     public async Task<RtUser?> FindOrCreateCrossTenantUserAsync(
         CrossTenantAuthResult crossTenantResult, string childTenantId)
     {
@@ -25,9 +101,10 @@ public class CrossTenantUserProvisioningService(
             crossTenantResult.SourceTenantId, crossTenantResult.SourceUserId);
 
         // Generate a unique username for the cross-tenant user
-        var crossTenantUserName = $"xt_{crossTenantResult.SourceTenantId}_{crossTenantResult.SourceUserName}";
+        var crossTenantUserName = CrossTenantShadowUserName.Build(
+            crossTenantResult.SourceTenantId, crossTenantResult.SourceUserName);
 
-        var existingUser = await userManager.FindByNameAsync(crossTenantUserName);
+        var existingUser = await FindCrossTenantUserAsync(crossTenantResult);
         if (existingUser != null)
         {
             // Sync profile fields from the source tenant on each login
@@ -61,17 +138,13 @@ public class CrossTenantUserProvisioningService(
                 {
                     logger.LogWarning(
                         "Failed to update cross-tenant user profile for '{UserName}': {Errors}",
-                        crossTenantUserName,
+                        existingUser.UserName,
                         string.Join(", ", updateResult.Errors.Select(e => e.Description)));
                 }
             }
 
-            // Sync roles from the mapping on each login
-            if (mapping != null)
-            {
-                await SyncMappedRolesAsync(existingUser, mapping);
-            }
-
+            // Roles are NOT synced onto the user: mapping and group roles are resolved at token time
+            // (IGroupRoleResolver.ResolveEffectiveUserRoleIdsAsync, AB#5708).
             return existingUser;
         }
 
@@ -102,18 +175,14 @@ public class CrossTenantUserProvisioningService(
         // Create the mapping if it doesn't exist
         if (mapping == null)
         {
-            mapping = new RtExternalTenantUserMapping
+            await externalTenantUserMappingStore.StoreAsync(new RtExternalTenantUserMapping
             {
                 RtId = OctoObjectId.GenerateNewId(),
                 SourceTenantId = crossTenantResult.SourceTenantId,
                 SourceUserId = crossTenantResult.SourceUserId,
                 SourceUserName = crossTenantResult.SourceUserName
-            };
-            await externalTenantUserMappingStore.StoreAsync(mapping);
+            });
         }
-
-        // Assign mapped roles to the user
-        await SyncMappedRolesAsync(user, mapping);
 
         logger.LogInformation(
             "Created cross-tenant user '{UserName}' in tenant '{TenantId}' for source user '{SourceUser}' from tenant '{SourceTenant}'",
@@ -121,54 +190,5 @@ public class CrossTenantUserProvisioningService(
             crossTenantResult.SourceTenantId);
 
         return user;
-    }
-
-    /// <summary>
-    /// Syncs roles from an ExternalTenantUserMapping to the local cross-tenant user.
-    /// Queries roles directly from the tenant repository to avoid RoleManager tenant scoping issues,
-    /// then uses AddToRoleAsync with the resolved role names.
-    /// </summary>
-    private async Task SyncMappedRolesAsync(RtUser user, RtExternalTenantUserMapping mapping)
-    {
-        if (mapping.MappedRoleIds == null || mapping.MappedRoleIds.Count == 0)
-        {
-            return;
-        }
-
-        // Query all roles from the tenant repository directly to build an ID → name lookup.
-        // This avoids RoleManager/OctoRoleStore tenant resolution issues during cross-tenant login.
-        var tenantRepository = multiTenancyResolverService.GetTenantRepository();
-        var session = await tenantRepository.GetSessionAsync();
-        session.StartTransaction();
-
-        var allRolesResult = await tenantRepository
-            .GetRtEntitiesByTypeAsync<RtRole>(session, RtEntityQueryOptions.Create());
-        await session.CommitTransactionAsync();
-
-        var roleNameById = allRolesResult.Items
-            .ToDictionary(r => r.RtId.ToString(), r => r.Name);
-
-        var currentRoles = await userManager.GetRolesAsync(user);
-
-        foreach (var roleId in mapping.MappedRoleIds)
-        {
-            if (!roleNameById.TryGetValue(roleId, out var roleName) || string.IsNullOrEmpty(roleName))
-            {
-                logger.LogWarning("Mapped role ID '{RoleId}' not found in tenant, skipping", roleId);
-                continue;
-            }
-
-            if (!currentRoles.Contains(roleName, StringComparer.OrdinalIgnoreCase))
-            {
-                var result = await userManager.AddToRoleAsync(user, roleName);
-                if (!result.Succeeded)
-                {
-                    logger.LogWarning(
-                        "Failed to assign role '{RoleName}' to user '{UserName}': {Errors}",
-                        roleName, user.UserName,
-                        string.Join(", ", result.Errors.Select(e => e.Description)));
-                }
-            }
-        }
     }
 }

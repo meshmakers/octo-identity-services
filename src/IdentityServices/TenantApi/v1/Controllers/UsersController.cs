@@ -3,6 +3,7 @@ using System.ComponentModel.DataAnnotations;
 using Asp.Versioning;
 using AutoMapper;
 using IdentityServerPersistence;
+using IdentityServerPersistence.Services;
 using IdentityServerPersistence.SystemStores;
 using Meshmakers.Octo.Backend.IdentityServices.Services;
 using Meshmakers.Octo.Communication.Contracts.DataTransferObjects;
@@ -28,6 +29,12 @@ namespace Meshmakers.Octo.Backend.IdentityServices.TenantApi.v1.Controllers;
 [ApiVersion(IdentityServiceConstants.ApiVersion1)]
 public class UsersController : ControllerBase
 {
+    // AB#5708: the xt_ prefix marks cross-tenant shadow users, whose name is trusted to unwind to the
+    // person's home identity (roles, allowed_tenants, token exchange). A local user carrying it could
+    // impersonate another tenant's user.
+    internal const string ReservedUserNameMessage =
+        "User names starting with 'xt_' are reserved for cross-tenant users.";
+
     private readonly ILogger<UsersController> _logger;
     private readonly RoleManager<RtRole> _roleManager;
     private readonly IMapper _mapper;
@@ -204,6 +211,11 @@ public class UsersController : ControllerBase
             return BadRequest(ModelState);
         }
 
+        if (CrossTenantShadowUserName.IsShadowUserName(userDto.Name))
+        {
+            return BadRequest(ReservedUserNameMessage);
+        }
+
         var rtUser = _mapper.Map<RtUser>(userDto);
 
         try
@@ -267,7 +279,15 @@ public class UsersController : ControllerBase
             return NotFound(new NotFoundErrorDto($"User name '{userName}' not found."));
         }
 
+        // Renaming INTO the reserved shadow namespace is refused; editing an existing shadow user
+        // (whose name already carries the prefix) stays possible.
+        var previousUserName = rtUser.UserName;
         _mapper.Map(userDto, rtUser);
+        if (CrossTenantShadowUserName.IsShadowUserName(rtUser.UserName) &&
+            !string.Equals(rtUser.UserName, previousUserName, StringComparison.OrdinalIgnoreCase))
+        {
+            return BadRequest(ReservedUserNameMessage);
+        }
 
         try
         {

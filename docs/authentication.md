@@ -515,9 +515,57 @@ POST /{childTenantId}/api/auth/cross-tenant-login
 - Loop prevention: `crossTenantAutoLogin` param is stripped from the URL immediately; on failure after redirect, an error message is shown without retrying
 - Expired token (>60s): Returns error; user can click the button again
 - Target tenant mismatch: Returns error (token was issued for a different tenant)
-- No cross-tenant mapping: `FindOrCreateCrossTenantUserAsync` creates one with default roles
-- Self-registration gate (AB#5015): when the `OctoTenantIdentityProvider` has `AllowSelfRegistration=false` and no local `xt_` shadow user exists yet, the login is denied — **unless** an `ExternalTenantUserMapping` exists in the target tenant for the source user (matched by `SourceTenantId` + `SourceUserId`). A mapping created by an admin (e.g. via `provisionCurrentUser`) is explicit provisioning, not self-registration, so the first login is allowed to create the shadow user. The same rule applies to the cross-tenant **password** login path in `AuthApiController.Login`.
-- Role sync on every login: `SyncMappedRolesAsync` resolves role IDs to names via the tenant repository (not `RoleManager`) and calls `AddToRoleAsync` for any missing roles. This ensures existing users pick up role changes from updated mappings.
+- No cross-tenant mapping: `FindOrCreateCrossTenantUserAsync` creates an empty one (no roles, no groups)
+- Self-registration gate (AB#5015): when the `OctoTenantIdentityProvider` has `AllowSelfRegistration=false` and the person has no local shadow user yet, the login is denied — **unless** an `ExternalTenantUserMapping` exists in the target tenant for the source user (matched by `SourceTenantId` + `SourceUserId`, or — AB#5708 — by `SourceTenantId` + `SourceUserName` for any identity of the source's `xt_` chain). A mapping created by an admin (e.g. via `provisionCurrentUser`) is explicit provisioning, not self-registration, so the first login is allowed to create the shadow user. The same rule applies to the cross-tenant **password** login path in `AuthApiController.Login`.
+
+### Cross-Tenant Shadow User Roles and Identity (AB#5708)
+
+**Effective roles are computed at token time, never copied onto the shadow user.** Every token
+issuance, refresh redemption and role check reads them through `OctoUserStore.GetRolesAsync` →
+`IGroupRoleResolver.ResolveEffectiveUserRoleIdsAsync`:
+
+```
+effective roles(shadow user U in tenant B) =
+      direct AssignedRole edges of U                       (manual assignments)
+    ∪ roles of groups U is a member of
+    ∪ for every ExternalTenantUserMapping M in B whose (SourceTenantId, SourceUserName)
+      is a tier of U's name chain:
+          M.MappedRoleIds
+        ∪ roles of groups M is a member of                  (e.g. TenantOwners)
+```
+
+The name chain unwinds the `xt_` prefixes (`CrossTenantShadowUserName.GetSourceChain`):
+`xt_karlplus_xt_meshmakers_gerald` → `(karlplus, xt_meshmakers_gerald)`, `(meshmakers, gerald)`.
+Every tier is the same person — the rule already used by the token exchange (AB#4966) and
+`allowed_tenants` — so a mapping an admin created for the home identity also applies when the
+person arrives through the parent's shadow user.
+
+Consequences:
+
+- A role a blueprint adds to `TenantOwners` (`IdentityAssociationMigration.EnsureTenantOwnersGroupAsync`)
+  or to any group the mapping is in reaches cross-tenant owners on their next token — no manual
+  group edit. Before AB#5708 only groups containing the **user** counted, and `MappedRoleIds` (a
+  snapshot of the roles that existed at tenant creation) was copied onto the user at login.
+- Removing a mapping from a group, a role from a group, or a role from `MappedRoleIds` takes the
+  role away on the next token. Manually assigned direct roles and direct group memberships of the
+  shadow user are untouched.
+- Roles copied onto shadow users by the former `SyncMappedRolesAsync` are ordinary direct
+  `AssignedRole` edges and stay until an admin removes them (they cannot be told apart from manual
+  assignments).
+
+**One shadow user per person.** The source identity depends on the login path: the password login
+unwinds to the home tenant (`xt_meshmakers_gerald`), a tenant switch or auto-login starts at the
+parent's shadow user (`xt_karlplus_xt_meshmakers_gerald`). `FindCrossTenantUserAsync` returns the
+exactly named shadow user if it exists; otherwise any shadow user whose chain unwinds to the same
+home identity (case-insensitive) and that has **no password** — shortest chain first. Only when
+none exists is a new one created. Legacy duplicates keep working unchanged: each login path still
+finds its own exactly named user, and both now receive the mapping roles.
+
+**Reserved prefix.** Because the name chain is trusted as identity, `xt_` is reserved:
+`UsersController` rejects creating a user with it and renaming a user into it, `IdentityProvidersController`
+rejects provider names `xt` / `xt_*` (JIT names are `{provider}_{email}`), and the JIT login moves a
+legacy provider with such a name out of the namespace (`External_xt…`). Only
+`CrossTenantUserProvisioningService` creates `xt_` users.
 
 ### Tenant Switch Flow
 

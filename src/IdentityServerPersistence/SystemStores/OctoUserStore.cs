@@ -909,18 +909,20 @@ public sealed class OctoUserStore(
             allRoleIds.Add(assoc.TargetRtId.ToString());
         }
 
-        // Merge group-inherited role IDs
-        var groupRoleIds = await groupRoleResolver.ResolveEffectiveRoleIdsAsync(
-            ConvertIdToString(dbUser.RtId));
-        allRoleIds.UnionWith(groupRoleIds);
+        // Merge role IDs inherited from groups and — for cross-tenant shadow users — from the
+        // external tenant user mappings of their identity, resolved now rather than snapshotted (AB#5708).
+        var inheritedRoleIds = await groupRoleResolver.ResolveEffectiveUserRoleIdsAsync(
+            ConvertIdToString(dbUser.RtId), dbUser.UserName);
+        allRoleIds.UnionWith(inheritedRoleIds);
 
-        // Resolve role IDs to role names
+        // Resolve role IDs to role names. A mapping's MappedRoleIds is a plain string list that can
+        // outlive a deleted role; such an id is skipped rather than failing token issuance.
         var roles = new List<string>();
         foreach (var roleRtIdString in allRoleIds)
         {
-            var role = await GetRoleByIdAsync(ConvertIdFromString(roleRtIdString), cancellationToken)
+            var role = await FindRoleByIdAsync(ConvertIdFromString(roleRtIdString), cancellationToken)
                 .ConfigureAwait(true);
-            if (!string.IsNullOrWhiteSpace(role.Name))
+            if (!string.IsNullOrWhiteSpace(role?.Name))
             {
                 roles.Add(role.Name);
             }
@@ -968,10 +970,10 @@ public sealed class OctoUserStore(
             return true;
         }
 
-        // Check group-inherited roles
-        var groupRoleIds = await groupRoleResolver.ResolveEffectiveRoleIdsAsync(
-            ConvertIdToString(dbUser.RtId));
-        return groupRoleIds.Contains(roleIdString);
+        // Check roles inherited from groups and cross-tenant user mappings (AB#5708)
+        var inheritedRoleIds = await groupRoleResolver.ResolveEffectiveUserRoleIdsAsync(
+            ConvertIdToString(dbUser.RtId), dbUser.UserName);
+        return inheritedRoleIds.Contains(roleIdString);
     }
 
     public Task<string?> GetSecurityStampAsync(RtUser user, CancellationToken cancellationToken = default)
@@ -1124,6 +1126,13 @@ public sealed class OctoUserStore(
     private async Task<RtRole> GetRoleByIdAsync(OctoObjectId rtId,
         CancellationToken cancellationToken = default)
     {
+        return await FindRoleByIdAsync(rtId, cancellationToken) ??
+               throw NotExistingException.RoleWithIdDoesNotExist(rtId);
+    }
+
+    private async Task<RtRole?> FindRoleByIdAsync(OctoObjectId rtId,
+        CancellationToken cancellationToken = default)
+    {
         using var session = await TenantRepository.GetSessionAsync();
         session.StartTransaction();
 
@@ -1133,6 +1142,6 @@ public sealed class OctoUserStore(
 
         await session.CommitTransactionAsync();
 
-        return result ?? throw NotExistingException.RoleWithIdDoesNotExist(rtId);
+        return result;
     }
 }

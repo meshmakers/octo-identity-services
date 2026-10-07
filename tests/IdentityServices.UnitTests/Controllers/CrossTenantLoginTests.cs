@@ -35,6 +35,7 @@ public class CrossTenantLoginTests
     private readonly IExternalTenantUserMappingStore _externalTenantUserMappingStore;
     private readonly IOctoIdentityProviderStore _identityProviderStore;
     private readonly ICrossTenantUserProvisioningService _crossTenantUserProvisioningService;
+    private readonly ILoginGroupAssignmentService _loginGroupAssignmentService;
     private readonly AuthApiController _sut;
 
     public CrossTenantLoginTests()
@@ -49,6 +50,7 @@ public class CrossTenantLoginTests
         _externalTenantUserMappingStore = Substitute.For<IExternalTenantUserMappingStore>();
         _identityProviderStore = Substitute.For<IOctoIdentityProviderStore>();
         var loginGroupAssignmentService = Substitute.For<ILoginGroupAssignmentService>();
+        _loginGroupAssignmentService = loginGroupAssignmentService;
         _dataProtectionProvider = new EphemeralDataProtectionProvider();
         var logger = Substitute.For<ILogger<AuthApiController>>();
 
@@ -361,8 +363,8 @@ public class CrossTenantLoginTests
         SetupControllerContext("meshtest");
         SetupSelfRegistrationDisabledProvider();
         _userManager.FindByNameAsync(Arg.Any<string>()).Returns((RtUser?)null);
-        _externalTenantUserMappingStore.FindBySourceUserAsync("OctoSystem", userId)
-            .Returns((RtExternalTenantUserMapping?)null);
+        _crossTenantUserProvisioningService.IsExplicitlyProvisionedAsync(Arg.Any<CrossTenantAuthResult>())
+            .Returns(false);
 
         // Act
         var result = await _sut.CrossTenantLogin(
@@ -386,8 +388,9 @@ public class CrossTenantLoginTests
         SetupControllerContext("meshtest");
         SetupSelfRegistrationDisabledProvider();
         _userManager.FindByNameAsync(Arg.Any<string>()).Returns((RtUser?)null);
-        _externalTenantUserMappingStore.FindBySourceUserAsync("OctoSystem", userId)
-            .Returns(new RtExternalTenantUserMapping());
+        _crossTenantUserProvisioningService.IsExplicitlyProvisionedAsync(
+                Arg.Is<CrossTenantAuthResult>(r => r.SourceTenantId == "OctoSystem" && r.SourceUserId == userId))
+            .Returns(true);
 
         var localUser = new RtUser
         {
@@ -407,6 +410,41 @@ public class CrossTenantLoginTests
         result.Value.Should().NotBeNull();
         result.Value!.Success.Should().BeTrue();
         await _signInManager.Received(1).SignInAsync(localUser, false);
+    }
+
+    [Fact]
+    public async Task CrossTenantLogin_ShadowUserFromOtherLoginPath_IsExistingUser_NoSelfRegistrationGate()
+    {
+        // AB#5708: the person already has a shadow user created by another login path (different
+        // xt_ name). That is an existing user — neither the self-registration gate nor the new-user
+        // group assignment applies.
+        var userId = Guid.NewGuid().ToString("N");
+        var token = await CreateValidTokenAsync(userId);
+
+        SetupControllerContext("meshtest");
+        SetupSelfRegistrationDisabledProvider();
+        _crossTenantUserProvisioningService.IsExplicitlyProvisionedAsync(Arg.Any<CrossTenantAuthResult>())
+            .Returns(false);
+
+        var existingShadow = new RtUser
+        {
+            RtId = OctoObjectId.GenerateNewId(),
+            UserName = "xt_parent_xt_OctoSystem_admin"
+        };
+        _crossTenantUserProvisioningService.FindCrossTenantUserAsync(Arg.Any<CrossTenantAuthResult>())
+            .Returns(existingShadow);
+        _crossTenantUserProvisioningService.FindOrCreateCrossTenantUserAsync(
+                Arg.Any<CrossTenantAuthResult>(), Arg.Any<string>())
+            .Returns(existingShadow);
+        _interaction.IsValidReturnUrl(Arg.Any<string>()).Returns(false);
+
+        var result = await _sut.CrossTenantLogin(
+            new CrossTenantLoginRequestDto { Token = token });
+
+        result.Value!.Success.Should().BeTrue();
+        await _signInManager.Received(1).SignInAsync(existingShadow, false);
+        await _loginGroupAssignmentService.DidNotReceive()
+            .AssignGroupsAsync(Arg.Any<RtUser>(), Arg.Any<RtIdentityProvider?>());
     }
 
     private async Task<string> CreateValidTokenAsync(string userId)

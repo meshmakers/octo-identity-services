@@ -43,7 +43,7 @@ login. No re-scope, no leak. Only the validator's authorize+resolve logic is new
    effective source for the gate. A direct user (no `xt_` prefix) keeps (A, subA). Unresolvable home
    identity → `UnauthorizedClient`.
 2. **B-authorization gate:** `CrossTenantAuthenticationService.ValidateCrossTenantAccessAsync(B, source, subSource)` (walks hierarchy: source must be ancestor of B; source user exists). null → `UnauthorizedClient`. (Defense-in-depth: assert B ∈ `AllowedTenantsResolver.ResolveAsync(source,userSource)`.)
-3. **Re-resolve roles in B:** assert `HttpContext.Items[TenantId] == B`; `FindOrCreateCrossTenantUserAsync(result, B)` → B-shadow user with B roles (`SyncMappedRolesAsync` via `RtExternalTenantUserMapping`). Return principal with the B-shadow `sub`.
+3. **Re-resolve roles in B:** assert `HttpContext.Items[TenantId] == B`; `FindOrCreateCrossTenantUserAsync(result, B)` → B-shadow user; its B roles are resolved at token time from its groups and the `RtExternalTenantUserMapping`s of its identity (AB#5708, formerly copied by `SyncMappedRolesAsync`). Return principal with the B-shadow `sub`.
 4. **Audit** via `OctoEventSink`: {subjectA, tenantA, tenantB, shadowRtId, grantedRoles}, success + failure.
 
 **Refresh tokens — v1 decision: NONE.** Issue short-lived B access tokens; re-exchange on expiry from the

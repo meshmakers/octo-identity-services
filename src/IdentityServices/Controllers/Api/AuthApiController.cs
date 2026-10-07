@@ -333,8 +333,9 @@ public class AuthApiController(
             var octoTenantProvider = octoTenantProviders.FirstOrDefault();
 
             // Check if this is a new user (no existing local account)
-            var crossTenantUserName = $"xt_{crossTenantResult.SourceTenantId}_{crossTenantResult.SourceUserName}";
-            var existingCrossTenantUser = await userManager.FindByNameAsync(crossTenantUserName);
+            // Any shadow user of this person counts, whichever login path created it (AB#5708).
+            var existingCrossTenantUser =
+                await crossTenantUserProvisioningService.FindCrossTenantUserAsync(crossTenantResult);
 
             if (existingCrossTenantUser == null && octoTenantProvider is { AllowSelfRegistration: false } &&
                 !await IsExplicitlyProvisionedAsync(crossTenantResult))
@@ -626,6 +627,14 @@ public class AuthApiController(
         if (string.IsNullOrEmpty(safeProviderName))
         {
             safeProviderName = "External";
+        }
+
+        // The xt_ prefix is reserved for cross-tenant shadow users, whose name is trusted to unwind
+        // to the person's home identity (AB#5708). A provider named "xt" or "xt_<tenant>" must not
+        // mint a local user that impersonates such a chain — move it out of the reserved namespace.
+        if (CrossTenantShadowUserName.IsShadowUserName($"{safeProviderName}_"))
+        {
+            safeProviderName = $"External_{safeProviderName}";
         }
 
         var userName = !string.IsNullOrEmpty(email)
@@ -1377,8 +1386,8 @@ public class AuthApiController(
 
         var tokenOctoTenantProvider = tokenOctoTenantProviders.FirstOrDefault();
 
-        var tokenCrossTenantUserName = $"xt_{crossTenantResult.SourceTenantId}_{crossTenantResult.SourceUserName}";
-        var existingTokenUser = await userManager.FindByNameAsync(tokenCrossTenantUserName);
+        var existingTokenUser =
+            await crossTenantUserProvisioningService.FindCrossTenantUserAsync(crossTenantResult);
 
         if (existingTokenUser == null && tokenOctoTenantProvider is { AllowSelfRegistration: false } &&
             !await IsExplicitlyProvisionedAsync(crossTenantResult))
@@ -1433,12 +1442,8 @@ public class AuthApiController(
     /// provisioning, not self-registration: the first login must be allowed to create the local
     /// shadow user even when the provider disallows self-registration (AB#5015).
     /// </summary>
-    private async Task<bool> IsExplicitlyProvisionedAsync(CrossTenantAuthResult crossTenantResult)
-    {
-        var mapping = await externalTenantUserMappingStore.FindBySourceUserAsync(
-            crossTenantResult.SourceTenantId, crossTenantResult.SourceUserId);
-        return mapping != null;
-    }
+    private Task<bool> IsExplicitlyProvisionedAsync(CrossTenantAuthResult crossTenantResult)
+        => crossTenantUserProvisioningService.IsExplicitlyProvisionedAsync(crossTenantResult);
 
     /// <summary>
     /// Returns child tenants where the current user has role mappings.

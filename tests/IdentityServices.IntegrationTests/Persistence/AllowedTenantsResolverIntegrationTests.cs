@@ -187,7 +187,7 @@ public class AllowedTenantsResolverIntegrationTests : IClassFixture<IdentityServ
     private static UserManager<RtUser> BuildUserManager(FixedTenantResolver resolver)
     {
         var groupStore = new GroupStore(resolver);
-        var store = new OctoUserStore(resolver, new GroupRoleResolver(groupStore), null);
+        var store = new OctoUserStore(resolver, new GroupRoleResolver(groupStore, new ExternalTenantUserMappingStore(resolver)), null);
         return new UserManager<RtUser>(
             store,
             Microsoft.Extensions.Options.Options.Create(new IdentityOptions()),

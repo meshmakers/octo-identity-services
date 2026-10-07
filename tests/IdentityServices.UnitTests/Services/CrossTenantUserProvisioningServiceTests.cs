@@ -115,9 +115,10 @@ public class CrossTenantUserProvisioningServiceTests
     }
 
     [Fact]
-    public async Task FindOrCreate_WithExistingUserAndMapping_SyncsRoles()
+    public async Task FindOrCreate_WithExistingUserAndMapping_DoesNotMaterialiseMappedRoles()
     {
-        // Arrange
+        // AB#5708: mapping roles are resolved at token time; copying them onto the user froze a
+        // snapshot that a later removal from the mapping could never take away again.
         var crossTenantResult = CreateCrossTenantResult();
         var existingUser = new RtUser
         {
@@ -128,13 +129,6 @@ public class CrossTenantUserProvisioningServiceTests
             Email = "admin@test.com"
         };
 
-        var roleRtId = OctoObjectId.GenerateNewId();
-        var role = new RtRole
-        {
-            RtId = roleRtId,
-            Name = "TenantAdmin"
-        };
-
         var mapping = new RtExternalTenantUserMapping
         {
             RtId = OctoObjectId.GenerateNewId(),
@@ -142,7 +136,7 @@ public class CrossTenantUserProvisioningServiceTests
             SourceUserId = "source-user-id",
             SourceUserName = "admin@test.com",
             MappedRoleIds = new Meshmakers.Octo.Runtime.Contracts.RepositoryEntities.AttributeStringValueList(
-                [roleRtId.ToString()])
+                [OctoObjectId.GenerateNewId().ToString()])
         };
 
         _userManager.FindByNameAsync("xt_octosystem_admin@test.com")
@@ -150,18 +144,138 @@ public class CrossTenantUserProvisioningServiceTests
         _mappingStore.FindBySourceUserAsync("octosystem", "source-user-id")
             .Returns(mapping);
 
-        SetupTenantRepository(role);
-
-        _userManager.GetRolesAsync(existingUser).Returns(new List<string>());
-        _userManager.AddToRoleAsync(existingUser, "TenantAdmin")
-            .Returns(IdentityResult.Success);
-
-        // Act
         var result = await _sut.FindOrCreateCrossTenantUserAsync(crossTenantResult, "meshtest");
 
-        // Assert
-        result.Should().NotBeNull();
-        await _userManager.Received(1).AddToRoleAsync(existingUser, "TenantAdmin");
+        result.Should().BeSameAs(existingUser);
+        await _userManager.DidNotReceive().AddToRoleAsync(Arg.Any<RtUser>(), Arg.Any<string>());
+        await _userManager.DidNotReceive().RemoveFromRoleAsync(Arg.Any<RtUser>(), Arg.Any<string>());
+    }
+
+    [Fact]
+    public async Task FindOrCreate_TenantSwitchFromParent_ReusesShadowUserOfPasswordLogin()
+    {
+        // Password login unwound to the home tenant and created xt_meshmakers_gerald; the tenant switch
+        // from karlplus arrives as karlplus' shadow user and must not mint xt_karlplus_xt_meshmakers_gerald.
+        var crossTenantResult = CreateCrossTenantResult(
+            sourceTenantId: "karlplus", sourceUserName: "xt_meshmakers_gerald");
+        var homeShadow = CreateShadowUser("xt_meshmakers_gerald");
+
+        _userManager.FindByNameAsync("xt_karlplus_xt_meshmakers_gerald").Returns((RtUser?)null);
+        SetupTenantRepository(homeShadow);
+        _userManager.UpdateAsync(Arg.Any<RtUser>()).Returns(IdentityResult.Success);
+
+        var result = await _sut.FindOrCreateCrossTenantUserAsync(crossTenantResult, "handelsdemo");
+
+        result.Should().BeSameAs(homeShadow);
+        await _userManager.DidNotReceive().CreateAsync(Arg.Any<RtUser>());
+    }
+
+    [Fact]
+    public async Task FindOrCreate_PasswordLogin_ReusesShadowUserOfTenantSwitch()
+    {
+        var crossTenantResult = CreateCrossTenantResult(
+            sourceTenantId: "meshmakers", sourceUserName: "gerald");
+        var switchShadow = CreateShadowUser("xt_karlplus_xt_meshmakers_gerald");
+
+        _userManager.FindByNameAsync("xt_meshmakers_gerald").Returns((RtUser?)null);
+        SetupTenantRepository(switchShadow);
+        _userManager.UpdateAsync(Arg.Any<RtUser>()).Returns(IdentityResult.Success);
+
+        var result = await _sut.FindOrCreateCrossTenantUserAsync(crossTenantResult, "handelsdemo");
+
+        result.Should().BeSameAs(switchShadow);
+        await _userManager.DidNotReceive().CreateAsync(Arg.Any<RtUser>());
+    }
+
+    [Fact]
+    public async Task FindCrossTenantUser_ExactNameExists_WinsOverEquivalentShadowUsers()
+    {
+        // Legacy duplicates stay stable: each login path keeps the shadow user it created.
+        var crossTenantResult = CreateCrossTenantResult(
+            sourceTenantId: "karlplus", sourceUserName: "xt_meshmakers_gerald");
+        var exact = CreateShadowUser("xt_karlplus_xt_meshmakers_gerald");
+        _userManager.FindByNameAsync("xt_karlplus_xt_meshmakers_gerald").Returns(exact);
+        SetupTenantRepository(CreateShadowUser("xt_meshmakers_gerald"));
+
+        var result = await _sut.FindCrossTenantUserAsync(crossTenantResult);
+
+        result.Should().BeSameAs(exact);
+    }
+
+    [Fact]
+    public async Task FindCrossTenantUser_SeveralEquivalentShadowUsers_PicksShortestChain()
+    {
+        var crossTenantResult = CreateCrossTenantResult(
+            sourceTenantId: "other", sourceUserName: "xt_meshmakers_gerald");
+        var nested = CreateShadowUser("xt_karlplus_xt_meshmakers_gerald");
+        var home = CreateShadowUser("xt_meshmakers_gerald");
+        _userManager.FindByNameAsync(Arg.Any<string>()).Returns((RtUser?)null);
+        SetupTenantRepository(nested, home);
+
+        var result = await _sut.FindCrossTenantUserAsync(crossTenantResult);
+
+        result.Should().BeSameAs(home);
+    }
+
+    [Fact]
+    public async Task FindCrossTenantUser_CandidateWithPassword_IsNotTreatedAsShadowUser()
+    {
+        // A local account wearing an xt_ name (it has a password) must never be handed to the person.
+        var crossTenantResult = CreateCrossTenantResult(
+            sourceTenantId: "meshmakers", sourceUserName: "gerald");
+        var impostor = CreateShadowUser("xt_karlplus_xt_meshmakers_gerald");
+        impostor.PasswordHash = "hash";
+        _userManager.FindByNameAsync(Arg.Any<string>()).Returns((RtUser?)null);
+        SetupTenantRepository(impostor);
+
+        var result = await _sut.FindCrossTenantUserAsync(crossTenantResult);
+
+        result.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task FindCrossTenantUser_SuffixMatchOfOtherIdentity_IsIgnored()
+    {
+        // xt_foo_bar_xt_meshmakers_gerald ends like the root shadow name but unwinds to (foo, bar_xt_…).
+        var crossTenantResult = CreateCrossTenantResult(
+            sourceTenantId: "meshmakers", sourceUserName: "gerald");
+        _userManager.FindByNameAsync(Arg.Any<string>()).Returns((RtUser?)null);
+        SetupTenantRepository(CreateShadowUser("xt_foo_bar_xt_meshmakers_gerald"));
+
+        var result = await _sut.FindCrossTenantUserAsync(crossTenantResult);
+
+        result.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task IsExplicitlyProvisioned_MappingForHomeIdentity_CountsForParentShadowSource()
+    {
+        var crossTenantResult = CreateCrossTenantResult(
+            sourceTenantId: "karlplus", sourceUserName: "xt_meshmakers_gerald");
+        _mappingStore.FindBySourceUserAsync("karlplus", "source-user-id")
+            .Returns((RtExternalTenantUserMapping?)null);
+        _mappingStore.FindBySourceUserNamesAsync(Arg.Is<IReadOnlyCollection<(string, string)>>(c =>
+                HasIdentity(c, "karlplus", "xt_meshmakers_gerald") && HasIdentity(c, "meshmakers", "gerald")))
+            .Returns([new RtExternalTenantUserMapping { SourceTenantId = "meshmakers", SourceUserName = "gerald" }]);
+
+        var result = await _sut.IsExplicitlyProvisionedAsync(crossTenantResult);
+
+        result.Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task IsExplicitlyProvisioned_NoMappingOnAnyTier_IsFalse()
+    {
+        var crossTenantResult = CreateCrossTenantResult(
+            sourceTenantId: "karlplus", sourceUserName: "xt_meshmakers_gerald");
+        _mappingStore.FindBySourceUserAsync(Arg.Any<string>(), Arg.Any<string>())
+            .Returns((RtExternalTenantUserMapping?)null);
+        _mappingStore.FindBySourceUserNamesAsync(Arg.Any<IReadOnlyCollection<(string, string)>>())
+            .Returns(Array.Empty<RtExternalTenantUserMapping>());
+
+        var result = await _sut.IsExplicitlyProvisionedAsync(crossTenantResult);
+
+        result.Should().BeFalse();
     }
 
     #endregion
@@ -185,8 +299,6 @@ public class CrossTenantUserProvisioningServiceTests
             .Returns((RtExternalTenantUserMapping?)null);
 
         SetupTenantRepository();
-
-        _userManager.GetRolesAsync(Arg.Any<RtUser>()).Returns(new List<string>());
 
         // Act
         var result = await _sut.FindOrCreateCrossTenantUserAsync(crossTenantResult, "meshtest");
@@ -216,8 +328,6 @@ public class CrossTenantUserProvisioningServiceTests
 
         SetupTenantRepository();
 
-        _userManager.GetRolesAsync(Arg.Any<RtUser>()).Returns(new List<string>());
-
         // Act
         await _sut.FindOrCreateCrossTenantUserAsync(crossTenantResult, "meshtest");
 
@@ -241,6 +351,7 @@ public class CrossTenantUserProvisioningServiceTests
             .Returns(IdentityResult.Failed(new IdentityError { Description = "Create failed" }));
         _mappingStore.FindBySourceUserAsync("octosystem", "source-user-id")
             .Returns((RtExternalTenantUserMapping?)null);
+        SetupTenantRepository();
 
         // Act
         var result = await _sut.FindOrCreateCrossTenantUserAsync(crossTenantResult, "meshtest");
@@ -270,8 +381,6 @@ public class CrossTenantUserProvisioningServiceTests
             .Returns(existingMapping);
 
         SetupTenantRepository();
-
-        _userManager.GetRolesAsync(Arg.Any<RtUser>()).Returns(new List<string>());
 
         // Act
         await _sut.FindOrCreateCrossTenantUserAsync(crossTenantResult, "meshtest");
@@ -304,14 +413,24 @@ public class CrossTenantUserProvisioningServiceTests
         };
     }
 
-    private void SetupTenantRepository(params RtRole[] roles)
+    private static bool HasIdentity(IReadOnlyCollection<(string, string)> identities, string tenant, string user)
+        => identities.Contains((tenant, user));
+
+    private static RtUser CreateShadowUser(string userName) => new()
+    {
+        RtId = OctoObjectId.GenerateNewId(),
+        UserName = userName,
+        NormalizedUserName = userName.ToUpperInvariant()
+    };
+
+    private void SetupTenantRepository(params RtUser[] users)
     {
         var tenantRepository = Substitute.For<ITenantRepository>();
         var session = Substitute.For<IOctoSession>();
 
         tenantRepository.GetSessionAsync().Returns(session);
-        tenantRepository.GetRtEntitiesByTypeAsync<RtRole>(session, Arg.Any<RtEntityQueryOptions>())
-            .Returns(Task.FromResult<IResultSet<RtRole>>(new ResultSet<RtRole>(roles, roles.Length, null, null)));
+        tenantRepository.GetRtEntitiesByTypeAsync<RtUser>(session, Arg.Any<RtEntityQueryOptions>())
+            .Returns(Task.FromResult<IResultSet<RtUser>>(new ResultSet<RtUser>(users, users.Length, null, null)));
 
         _multiTenancyResolver.GetTenantRepository().Returns(tenantRepository);
     }

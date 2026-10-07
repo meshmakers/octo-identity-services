@@ -65,4 +65,20 @@ public class UsersCreateTests : IntegrationTestBase
         var persisted = await userManager.FindByNameAsync(userName);
         persisted.Should().NotBeNull();
     }
+
+    [Fact]
+    public async Task CreateUser_WithReservedCrossTenantPrefix_IsRejected()
+    {
+        // AB#5708: xt_ names are trusted to unwind to another tenant's identity (roles, allowed
+        // tenants, token exchange) — only cross-tenant provisioning may create them.
+        var userName = $"xt_octosystem_{Guid.NewGuid():N}";
+        var body = new { name = userName, email = $"{Guid.NewGuid():N}@example.com", password = DefaultPassword };
+
+        var response = await PostAsync(TenantApiUrl("users"), body);
+
+        response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+        using var scope = CreateScope();
+        var userManager = scope.ServiceProvider.GetRequiredService<UserManager<RtUser>>();
+        (await userManager.FindByNameAsync(userName)).Should().BeNull();
+    }
 }

@@ -293,7 +293,7 @@ public class ImpersonatedIdentityIntegrationTests : IClassFixture<IdentityServic
         var tenantResolver = new FixedTenantResolver(repo);
         return new ClientRoleStore(
             tenantResolver,
-            new GroupRoleResolver(new GroupStore(tenantResolver)),
+            new GroupRoleResolver(new GroupStore(tenantResolver), new ExternalTenantUserMappingStore(tenantResolver)),
             NullLogger<ClientRoleStore>.Instance);
     }
 
