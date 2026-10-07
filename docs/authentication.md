@@ -547,9 +547,29 @@ mappings (and gerald's shadow user). The chain is therefore unwound by
 `ICrossTenantShadowUserChainResolver`, which splits each tier only after a prefix that is a
 **registered** tenant id (`ISystemContext.IsTenantRegisteredAsync`) and stops — fail closed — when
 no registered tenant fits (deleted tenant) or more than one does (`a` and `a_b` both exist). This
-also makes the mappings of users from underscore tenants resolve at all. The older consumers of the
-convention (`AllowedTenantsResolver`, `TenantExchangeProcessor`, the `home_tenant_id` claim) still
-split naively; see the AB#5708 review notes.
+also makes the mappings of users from underscore tenants resolve at all. **Every** consumer of the
+convention uses this resolver — `GroupRoleResolver`, `CrossTenantUserProvisioningService`,
+`AllowedTenantsResolver`, `TenantExchangeProcessor` and the `home_tenant_id` claim
+(`OctoTokenClaimsService`). On an ambiguous or unregistered prefix each fails closed:
+
+| Consumer | Fail-closed behaviour |
+| --- | --- |
+| Effective roles (`GroupRoleResolver`) | only mappings of the tiers proven so far count |
+| `FindCrossTenantUserAsync` | the candidate is not treated as the same person |
+| `allowed_tenants` | the chain ends there: login tenant + tiers proven so far (+ their mapped descendants) |
+| Token exchange | no home-tenant candidate; only the immediate source identity is judged |
+| `home_tenant_id` | the claim is omitted; consumers fall back to `tenant_id` (user treated as local) |
+
+Normal logins are never affected: the login tenant itself is always allowed, and a well-formed
+shadow name of a registered tenant unwinds exactly as before.
+
+**Why tenant ids are not restricted instead.** Forbidding `xt` / `xt_*` (or `_` altogether) in tenant
+ids would have to live in the engine (`TenantContext.ValidateTenantIdFormat`, octo-construction-kit-engine)
+and would still leave existing underscore tenants ambiguous. The registry-aware split makes it
+unnecessary: a tier is only accepted when **exactly one** registered tenant id fits, so a name cannot
+unwind into a tenant that does not exist, and a collision between two existing tenants (`a` and `a_b`)
+grants nothing instead of the wrong identity. Creating a tenant whose id makes an existing name
+ambiguous therefore only *removes* access derived from that name (fail closed) — it never adds any.
 
 Consequences:
 
@@ -577,6 +597,16 @@ finds its own exactly named user, and both now receive the mapping roles.
 rejects provider names `xt` / `xt_*` (JIT names are `{provider}_{email}`), and the JIT login moves a
 legacy provider with such a name out of the namespace (`External_xt…`). Only
 `CrossTenantUserProvisioningService` creates `xt_` users.
+
+**No passwords for shadow users.** A shadow user authenticates in its home tenant; a local password
+would add a second way into the tenant that bypasses the home tenant's login, MFA and account
+lifecycle (and `FindCrossTenantUserAsync` would stop treating the user as the person's shadow user).
+`ShadowUserPasswordValidator` is registered as an Identity password validator, so every
+`UserManager` path that stores a password fails for `xt_` users — create with password, the admin
+`POST users/ResetPassword` (answered up front with `400`), self-service `manage/change-password` and
+`manage/set-password` (answered up front with `Success=false`), and the e-mail
+`auth/reset-password`. The message is "Cross-tenant users (user names starting with 'xt_') sign in
+through their home tenant and cannot have a password."
 
 ### Tenant Switch Flow
 
@@ -1287,7 +1317,9 @@ Access token includes: allowed_tenants: ["tenant1", "tenant2", ...]
 ### AllowedTenantsResolver Algorithm
 
 1. **Always include the login tenant** (the tenant the user authenticated against)
-2. **Cross-tenant users** (`xt_{homeTenant}_{username}`): include the home tenant
+2. **Cross-tenant users** (`xt_{homeTenant}_{username}`): include the home tenant of every tier, split
+   against the tenant registry (`ICrossTenantShadowUserChainResolver`, AB#5708); an ambiguous or
+   unregistered prefix ends the chain (fail closed)
 3. **Walk up ancestor chain**: Starting from the login tenant, query `RtOctoTenantIdentityProvider.ParentTenantId`, add each ancestor (max depth: 10, with circular reference protection)
 4. **BFS down through descendants**: Starting from the source tenant (with original username) and login tenant (with login username), check child tenants for `ExternalTenantUserMapping` matching `SourceTenantId` + `SourceUserName`
 5. **Follow the xt_ username chain**: When a child match is found, the user's username in the child tenant follows the pattern `xt_{parentTenantId}_{parentUsername}`. This propagated username is used to check further descendants.

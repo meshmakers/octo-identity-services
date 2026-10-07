@@ -39,6 +39,7 @@ public class TenantExchangeProcessor(
     IOptions<OctoIdentityServicesOptions> octoIdentityOptions,
     ICrossTenantAuthenticationService crossTenantAuthService,
     ICrossTenantUserProvisioningService crossTenantUserProvisioningService,
+    ICrossTenantShadowUserChainResolver shadowUserChainResolver,
     IExternalTenantUserMappingStore externalTenantUserMappingStore,
     IHttpContextAccessor httpContextAccessor,
     IIdentityAuditService auditService,
@@ -189,12 +190,15 @@ public class TenantExchangeProcessor(
 
         var candidates = new List<(string TenantId, string UserId)> { (sourceTenantId, sourceUserId) };
 
-        if (sourceUserName != null && sourceUserName.StartsWith("xt_", StringComparison.OrdinalIgnoreCase))
+        if (CrossTenantShadowUserName.IsShadowUserName(sourceUserName))
         {
-            // Same parsing convention as the claims layer: xt_{homeTenantId}_{originalUserName}
-            var parts = sourceUserName.Split('_', 3);
-            var homeTenantId = parts.Length == 3 ? parts[1] : null;
-            var originalUserName = parts.Length == 3 ? parts[2] : null;
+            // xt_{homeTenantId}_{originalUserName}, split against the tenant registry (AB#5708): tenant
+            // ids may contain '_', so the first separator is not necessarily the end of the home tenant
+            // id. An ambiguous or unregistered prefix yields no home candidate — fail closed, only the
+            // immediate source identity is judged.
+            var chain = await shadowUserChainResolver.GetSourceChainAsync(sourceUserName);
+            var homeTenantId = chain.Count > 0 ? chain[0].TenantId : null;
+            var originalUserName = chain.Count > 0 ? chain[0].UserName : null;
 
             var homeUserId = string.IsNullOrEmpty(homeTenantId) || string.IsNullOrEmpty(originalUserName)
                 ? null

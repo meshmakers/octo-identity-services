@@ -145,6 +145,66 @@ public class AllowedTenantsResolverIntegrationTests : IClassFixture<IdentityServ
         tenants.Should().BeEquivalentTo([childTenantId]);
     }
 
+    /// <summary>
+    ///     AB#5708: tenant ids may contain '_'. The shadow user of a user from an underscore tenant is
+    ///     offered that tenant — the first-separator split used to offer a non-existent prefix of it.
+    /// </summary>
+    [Fact]
+    public async Task ShadowUserOfAnUnderscoreTenant_IsOfferedTheFullHomeTenant()
+    {
+        await _fixture.InitializeAsync();
+        await EnsureSystemSetupAsync();
+
+        var systemContext = _fixture.GetSystemContext();
+        var homeTenantId = await CreateChildTenantAsync($"{NewId("home")}_tenant");
+        var homeUser = await CreateUserAsync(systemContext, homeTenantId, "frank");
+        var childTenantId = await CreateChildWithParentProviderAsync(homeTenantId);
+        await CreateMappingAsync(systemContext, childTenantId, homeTenantId, homeUser.RtId, homeUser.UserName!);
+        var shadow = await ProvisionShadowAsync(systemContext, childTenantId, homeTenantId, homeUser);
+
+        var allowed = await CreateResolver(systemContext).ResolveAsync(childTenantId, shadow);
+
+        shadow.UserName.Should().Be($"xt_{homeTenantId}_{homeUser.UserName}");
+        allowed.Should().BeEquivalentTo([childTenantId, homeTenantId]);
+    }
+
+    /// <summary>
+    ///     AB#5708 spoofing case. The victim is user <c>corp_{x}</c> of tenant V, mapped into V's child D.
+    ///     The attacker owns tenant <c>{V}_corp</c>; its user <c>{x}</c> gets the shadow name
+    ///     <c>xt_{V}_corp_{x}</c> in tenant L — which the first-separator split unwound to the victim and
+    ///     offered V and D. Both V and <c>{V}_corp</c> are registered, so the name is ambiguous and the
+    ///     attacker is offered the login tenant alone.
+    /// </summary>
+    [Fact]
+    public async Task SpoofedShadowName_FromAnUnderscoreTenant_IsNotOfferedTheVictimsTenants()
+    {
+        await _fixture.InitializeAsync();
+        await EnsureSystemSetupAsync();
+
+        var systemContext = _fixture.GetSystemContext();
+        var victimTenantId = await CreateChildTenantAsync(NewId("victim"));
+        var victim = await CreateUserAsync(systemContext, victimTenantId, "corp_v");
+        var victimChildTenantId = await CreateChildWithParentProviderAsync(victimTenantId);
+        await CreateMappingAsync(systemContext, victimChildTenantId, victimTenantId, victim.RtId, victim.UserName!);
+
+        // The victim really is offered both tenants.
+        (await CreateResolver(systemContext).ResolveAsync(victimTenantId, victim))
+            .Should().Contain([victimTenantId, victimChildTenantId]);
+
+        var attackerTenantId = await CreateChildTenantAsync($"{victimTenantId}_corp");
+        var attackerUserName = victim.UserName!["corp_".Length..];
+        var attacker = await CreateUserAsync(systemContext, attackerTenantId, attackerUserName, exactUserName: true);
+        var loginTenantId = await CreateChildWithParentProviderAsync(attackerTenantId);
+        var attackerShadow = await ProvisionShadowAsync(systemContext, loginTenantId, attackerTenantId, attacker);
+        attackerShadow.UserName.Should().Be($"xt_{victimTenantId}_{victim.UserName}",
+            "the attacker's shadow name reads exactly like the victim's shadow name");
+
+        var allowed = await CreateResolver(systemContext).ResolveAsync(loginTenantId, attackerShadow);
+
+        allowed.Should().BeEquivalentTo([loginTenantId],
+            "an ambiguous shadow name ends the chain: neither the victim's tenant nor its descendants");
+    }
+
     // ---------- helpers ----------
 
     private static string NewId(string prefix) => $"{prefix}-{Guid.NewGuid():N}"[..20];
@@ -156,7 +216,8 @@ public class AllowedTenantsResolverIntegrationTests : IClassFixture<IdentityServ
     }
 
     private static AllowedTenantsResolver CreateResolver(ISystemContext systemContext) =>
-        new(systemContext, NullLogger<AllowedTenantsResolver>.Instance);
+        new(systemContext, new CrossTenantShadowUserChainResolver(systemContext),
+            NullLogger<AllowedTenantsResolver>.Instance);
 
     /// <summary>
     ///     Creates the shadow user the way a cross-tenant login or switch does, so its name follows
@@ -258,13 +319,14 @@ public class AllowedTenantsResolverIntegrationTests : IClassFixture<IdentityServ
         return childTenantId;
     }
 
-    private static async Task<RtUser> CreateUserAsync(ISystemContext systemContext, string tenantId, string userNamePrefix)
+    private static async Task<RtUser> CreateUserAsync(
+        ISystemContext systemContext, string tenantId, string userNamePrefix, bool exactUserName = false)
     {
         var repo = tenantId == systemContext.TenantId
             ? systemContext.GetSystemTenantRepositoryAsAdmin()
             : (await systemContext.TryFindTenantRepositoryAsync(tenantId))!;
 
-        var userName = NewId(userNamePrefix);
+        var userName = exactUserName ? userNamePrefix : NewId(userNamePrefix);
         var user = new RtUser
         {
             RtId = OctoObjectId.GenerateNewId(),

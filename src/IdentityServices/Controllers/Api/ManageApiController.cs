@@ -268,6 +268,17 @@ public class ManageApiController : ControllerBase
             };
         }
 
+        // AB#5708: cross-tenant shadow users sign in through their home tenant (see
+        // ShadowUserPasswordValidator, which enforces this for every UserManager password path).
+        if (CrossTenantShadowUserName.IsShadowUserName(user.UserName))
+        {
+            return new PasswordResultDto
+            {
+                Success = false,
+                ErrorMessage = ShadowUserPasswordValidator.ErrorMessage
+            };
+        }
+
         if (request.NewPassword != request.ConfirmPassword)
         {
             return new PasswordResultDto
@@ -305,6 +316,17 @@ public class ManageApiController : ControllerBase
             {
                 Success = false,
                 ErrorMessage = "User not found"
+            };
+        }
+
+        // AB#5708: cross-tenant shadow users sign in through their home tenant (see
+        // ShadowUserPasswordValidator, which enforces this for every UserManager password path).
+        if (CrossTenantShadowUserName.IsShadowUserName(user.UserName))
+        {
+            return new PasswordResultDto
+            {
+                Success = false,
+                ErrorMessage = ShadowUserPasswordValidator.ErrorMessage
             };
         }
 

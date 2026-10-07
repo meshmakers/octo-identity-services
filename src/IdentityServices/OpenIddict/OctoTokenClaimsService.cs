@@ -50,6 +50,7 @@ public interface IOctoTokenClaimsService
 internal class OctoTokenClaimsService(
     UserManager<RtUser> userManager,
     IAllowedTenantsResolver allowedTenantsResolver,
+    ICrossTenantShadowUserChainResolver shadowUserChainResolver,
     IClientRoleStore clientRoleStore,
     IOctoResourceStore resourceStore) : IOctoTokenClaimsService
 {
@@ -98,14 +99,17 @@ internal class OctoTokenClaimsService(
             }
         }
 
-        // Cross-tenant shadow users (xt_{homeTenant}_{userName}) carry their home tenant so
-        // consumers can resolve the originating identity.
-        if (user.UserName != null && user.UserName.StartsWith("xt_"))
+        // Cross-tenant shadow users (xt_{homeTenant}_{userName}) carry their home tenant (the nearest
+        // source tier) so consumers can resolve the originating identity. The name is split against the
+        // tenant registry (AB#5708) — tenant ids may contain '_'. When the prefix is ambiguous or names
+        // no registered tenant the claim is omitted (fail closed): consumers then fall back to tenant_id,
+        // i.e. treat the user as local to the login tenant, never as somebody else's identity.
+        if (CrossTenantShadowUserName.IsShadowUserName(user.UserName))
         {
-            var parts = user.UserName.Split('_', 3);
-            if (parts.Length >= 3)
+            var chain = await shadowUserChainResolver.GetSourceChainAsync(user.UserName);
+            if (chain.Count > 0)
             {
-                identity.SetClaim(OctoClaimTypes.HomeTenantId, parts[1]);
+                identity.SetClaim(OctoClaimTypes.HomeTenantId, chain[0].TenantId);
             }
         }
     }

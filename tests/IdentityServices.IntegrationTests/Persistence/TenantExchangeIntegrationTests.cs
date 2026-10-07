@@ -1,4 +1,5 @@
 using FluentAssertions;
+using IdentityServerPersistence.Configuration.Options;
 using IdentityServerPersistence.Services;
 using IdentityServerPersistence.SystemStores;
 using IdentityServices.IntegrationTests.Fixtures;
@@ -9,8 +10,14 @@ using Meshmakers.Octo.Runtime.Contracts.MongoDb.Repositories;
 using Meshmakers.Octo.Runtime.Contracts.Repositories.Query;
 using Meshmakers.Octo.Runtime.Contracts.RepositoryEntities;
 using Meshmakers.Octo.Services.Infrastructure.Services;
+using Meshmakers.Octo.Backend.IdentityServices.OpenIddict;
+using Meshmakers.Octo.Services.Infrastructure;
+using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Extensions.Options;
+using NSubstitute;
+using OpenIddict.Server;
 using Persistence.IdentityCkModel.Generated.System.Identity.v2;
 using Xunit;
 
@@ -151,6 +158,72 @@ public class TenantExchangeIntegrationTests : IClassFixture<IdentityServicesFixt
         authResult.Should().BeNull("the claimed A user does not exist → exchange denied");
     }
 
+    /// <summary>
+    ///     AB#5708: tenant ids may contain '_'. A sibling's shadow user of a user from an underscore
+    ///     tenant H exchanges into H's child as the real home identity — the first-separator split
+    ///     looked for the home user in a non-existent prefix of H and found nobody.
+    /// </summary>
+    [Fact]
+    public async Task Exchange_ShadowUserOfAnUnderscoreTenant_UsesTheRealHomeIdentity()
+    {
+        await _fixture.InitializeAsync();
+        await EnsureSystemSetupAsync();
+
+        var systemContext = _fixture.GetSystemContext();
+        var homeTenantId = await CreateChildTenantAsync($"{NewId("home")}_tenant");
+        var (homeUserId, homeUserName) = await CreateUserAsync(systemContext, homeTenantId, "gina");
+        var targetTenantId = await CreateChildWithParentProviderAsync(homeTenantId);
+        await CreateMappingAsync(systemContext, targetTenantId, homeTenantId, homeUserId, homeUserName, mappedRoleIds: []);
+
+        // The source is a sibling (no ancestor of the target) holding the home user's shadow.
+        var siblingTenantId = await CreateChildTenantAsync(NewId("sibling"));
+        var (shadowUserId, _) = await CreateUserAsync(systemContext, siblingTenantId,
+            CrossTenantShadowUserName.Build(homeTenantId, homeUserName), exactUserName: true);
+
+        var result = await (await CreateExchangeProcessorAsync(systemContext, targetTenantId))
+            .ResolveExchangeSourceAsync(targetTenantId, siblingTenantId, shadowUserId.ToString());
+
+        result.Should().NotBeNull("the home identity is an ancestor of the target and mapped there");
+        result!.SourceTenantId.Should().Be(homeTenantId);
+        result.SourceUserId.Should().Be(homeUserId.ToString());
+    }
+
+    /// <summary>
+    ///     AB#5708 spoofing case. The victim <c>corp_{x}</c> of tenant V is mapped into V's child T. The
+    ///     attacker owns tenant <c>{V}_corp</c>; the shadow of its user <c>{x}</c> in an unrelated tenant is
+    ///     named <c>xt_{V}_corp_{x}</c>, which the first-separator split resolved to the victim — and the
+    ///     victim may reach T, so the attacker exchanged into T as the victim. Both tenants are registered,
+    ///     so the name is ambiguous: no home candidate, and the immediate source is no ancestor of T.
+    /// </summary>
+    [Fact]
+    public async Task Exchange_SpoofedShadowNameFromAnUnderscoreTenant_IsDenied()
+    {
+        await _fixture.InitializeAsync();
+        await EnsureSystemSetupAsync();
+
+        var systemContext = _fixture.GetSystemContext();
+        var victimTenantId = await CreateChildTenantAsync(NewId("victim"));
+        var (victimUserId, victimUserName) = await CreateUserAsync(systemContext, victimTenantId, "corp_v");
+        var targetTenantId = await CreateChildWithParentProviderAsync(victimTenantId);
+        await CreateMappingAsync(systemContext, targetTenantId, victimTenantId, victimUserId, victimUserName, mappedRoleIds: []);
+
+        var processor = await CreateExchangeProcessorAsync(systemContext, targetTenantId);
+        (await processor.ResolveExchangeSourceAsync(targetTenantId, victimTenantId, victimUserId.ToString()))
+            .Should().NotBeNull("the victim itself may exchange into the target");
+
+        var attackerTenantId = await CreateChildTenantAsync($"{victimTenantId}_corp");
+        var attackerUserName = victimUserName["corp_".Length..];
+        var sourceTenantId = await CreateChildTenantAsync(NewId("src"));
+        var spoofedShadowName = CrossTenantShadowUserName.Build(attackerTenantId, attackerUserName);
+        spoofedShadowName.Should().Be(CrossTenantShadowUserName.Build(victimTenantId, victimUserName),
+            "the attacker's shadow name reads exactly like the victim's");
+        var (spoofedShadowId, _) = await CreateUserAsync(systemContext, sourceTenantId, spoofedShadowName, exactUserName: true);
+
+        var result = await processor.ResolveExchangeSourceAsync(targetTenantId, sourceTenantId, spoofedShadowId.ToString());
+
+        result.Should().BeNull("an ambiguous shadow name must never unwind to the victim's identity");
+    }
+
     // ---------- helpers ----------
 
     private static string NewId(string prefix) => $"{prefix}-{Guid.NewGuid():N}"[..20];
@@ -172,6 +245,27 @@ public class TenantExchangeIntegrationTests : IClassFixture<IdentityServicesFixt
             idpStore,
             new PasswordHasher<RtUser>(),
             NullLogger<CrossTenantAuthenticationService>.Instance);
+    }
+
+    private async Task<TenantExchangeProcessor> CreateExchangeProcessorAsync(
+        ISystemContext systemContext, string targetTenantId)
+    {
+        var targetRepo = (await systemContext.TryFindTenantRepositoryAsync(targetTenantId))!;
+        var targetResolver = new FixedTenantResolver(targetRepo);
+        return new TenantExchangeProcessor(
+            Substitute.For<IOptionsMonitor<OpenIddictServerOptions>>(),
+            Options.Create(new OctoIdentityServicesOptions
+            {
+                AuthorityUrl = "https://identity.example.com/",
+                AutoMapperLicenseKey = string.Empty
+            }),
+            CreateCrossTenantAuthService(systemContext),
+            CreateProvisioningService(targetRepo),
+            new CrossTenantShadowUserChainResolver(systemContext),
+            new ExternalTenantUserMappingStore(targetResolver),
+            Substitute.For<IHttpContextAccessor>(),
+            Substitute.For<IIdentityAuditService>(),
+            NullLogger<TenantExchangeProcessor>.Instance);
     }
 
     private CrossTenantUserProvisioningService CreateProvisioningService(ITenantRepository childRepo)
@@ -283,13 +377,13 @@ public class TenantExchangeIntegrationTests : IClassFixture<IdentityServicesFixt
     }
 
     private static async Task<(OctoObjectId userId, string userName)> CreateUserAsync(
-        ISystemContext systemContext, string tenantId, string userNamePrefix)
+        ISystemContext systemContext, string tenantId, string userNamePrefix, bool exactUserName = false)
     {
         var repo = tenantId == systemContext.TenantId
             ? systemContext.GetSystemTenantRepositoryAsAdmin()
             : (await systemContext.TryFindTenantRepositoryAsync(tenantId))!;
 
-        var userName = NewId(userNamePrefix);
+        var userName = exactUserName ? userNamePrefix : NewId(userNamePrefix);
         var rtId = OctoObjectId.GenerateNewId();
         using var session = await repo.GetSessionAsync();
         session.StartTransaction();

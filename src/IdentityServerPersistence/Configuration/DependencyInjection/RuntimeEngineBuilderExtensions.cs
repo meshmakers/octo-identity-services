@@ -193,7 +193,9 @@ public static class RuntimeEngineBuilderExtensions
             .AddUserManager<UserManager<RtUser>>()
             .AddRoleManager<RoleManager<RtRole>>()
             .AddDefaultTokenProviders()
-            .AddErrorDescriber<OctoErrorDescriber>();
+            .AddErrorDescriber<OctoErrorDescriber>()
+            // AB#5708: xt_ shadow users never get a local password, whichever endpoint tries to set one.
+            .AddPasswordValidator<ShadowUserPasswordValidator>();
 
         if (builder.RoleType != null)
         {

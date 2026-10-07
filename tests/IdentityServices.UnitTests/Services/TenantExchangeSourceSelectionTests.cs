@@ -10,6 +10,7 @@ using Microsoft.Extensions.Options;
 using NSubstitute;
 using OpenIddict.Server;
 using Persistence.IdentityCkModel.Generated.System.Identity.v2;
+using Shared.TestUtilities.Fakes;
 using Xunit;
 
 namespace IdentityServices.UnitTests.Services;
@@ -39,6 +40,9 @@ public class TenantExchangeSourceSelectionTests
     private readonly IExternalTenantUserMappingStore _mappingStore =
         Substitute.For<IExternalTenantUserMappingStore>();
 
+    // The tenant registry the shadow user names are unwound against (AB#5708).
+    private readonly RegisteredTenantsShadowUserChainResolver _registry = new(Target, Source, Home);
+
     private readonly TenantExchangeProcessor _sut;
 
     public TenantExchangeSourceSelectionTests()
@@ -54,6 +58,7 @@ public class TenantExchangeSourceSelectionTests
             options,
             _crossTenantAuth,
             Substitute.For<ICrossTenantUserProvisioningService>(),
+            _registry,
             _mappingStore,
             Substitute.For<IHttpContextAccessor>(),
             Substitute.For<IIdentityAuditService>(),
@@ -209,5 +214,70 @@ public class TenantExchangeSourceSelectionTests
         // Assert
         result.Should().NotBeNull();
         result!.SourceTenantId.Should().Be(Source);
+    }
+
+    // ---------- AB#5708: registry-aware home identity ----------
+
+    [Fact]
+    public async Task UnderscoreHomeTenant_FallsBackToTheRealHomeIdentity()
+    {
+        // Arrange: tenant ids may contain '_'. The shadow of "admin" from tenant "home_tenant" is
+        // xt_home_tenant_admin; the first-separator split read it as user "tenant_admin" of "home".
+        _registry.Register("home_tenant");
+        _crossTenantAuth.FindUserNameByIdInTenantAsync(Source, SourceUserId).Returns("xt_home_tenant_admin");
+        _crossTenantAuth.FindUserIdByNameInTenantAsync("home_tenant", "admin").Returns(HomeUserId);
+        GateDenies(Source, SourceUserId);
+        GateAllows("home_tenant", HomeUserId);
+        _mappingStore.FindBySourceUserAsync("home_tenant", HomeUserId).Returns(Mapping());
+
+        // Act
+        var result = await _sut.ResolveExchangeSourceAsync(Target, Source, SourceUserId);
+
+        // Assert
+        result.Should().NotBeNull();
+        result!.SourceTenantId.Should().Be("home_tenant");
+        result.SourceUserId.Should().Be(HomeUserId);
+        await _crossTenantAuth.DidNotReceive().FindUserIdByNameInTenantAsync("home", Arg.Any<string>());
+    }
+
+    [Fact]
+    public async Task SpoofedName_FromAnUnderscoreTenant_NeverExchangesAsTheVictim()
+    {
+        // Arrange: the victim is "corp_boss" of tenant "acme" (mapped in the target, acme an ancestor).
+        // The attacker owns tenant "acme_corp" whose user "boss" has the shadow xt_acme_corp_boss in the
+        // source — the first-separator split resolved it to the victim. Both tenants exist, so the name
+        // is ambiguous: no home candidate, only the immediate source is judged (and it is no ancestor).
+        _registry.Register("acme", "acme_corp");
+        const string victimUserId = "victim-1";
+        _crossTenantAuth.FindUserNameByIdInTenantAsync(Source, SourceUserId).Returns("xt_acme_corp_boss");
+        _crossTenantAuth.FindUserIdByNameInTenantAsync("acme", "corp_boss").Returns(victimUserId);
+        GateDenies(Source, SourceUserId);
+        GateAllows("acme", victimUserId);
+        _mappingStore.FindBySourceUserAsync("acme", victimUserId).Returns(Mapping());
+
+        // Act
+        var result = await _sut.ResolveExchangeSourceAsync(Target, Source, SourceUserId);
+
+        // Assert
+        result.Should().BeNull("an ambiguous shadow name must not unwind to anybody's identity");
+        await _crossTenantAuth.DidNotReceive().FindUserIdByNameInTenantAsync("acme", Arg.Any<string>());
+        await _crossTenantAuth.DidNotReceive().ValidateCrossTenantAccessAsync(Target, "acme", Arg.Any<string>());
+    }
+
+    [Fact]
+    public async Task UnregisteredHomeTenant_YieldsNoHomeCandidate()
+    {
+        // Arrange: the prefix names no registered tenant (deleted tenant / malformed name).
+        _crossTenantAuth.FindUserNameByIdInTenantAsync(Source, SourceUserId).Returns("xt_gone_admin");
+        GateAllows(Source, SourceUserId);
+        _mappingStore.FindBySourceUserAsync(Source, SourceUserId).Returns(Mapping());
+
+        // Act
+        var result = await _sut.ResolveExchangeSourceAsync(Target, Source, SourceUserId);
+
+        // Assert
+        result.Should().NotBeNull();
+        result!.SourceTenantId.Should().Be(Source);
+        await _crossTenantAuth.DidNotReceive().FindUserIdByNameInTenantAsync(Arg.Any<string>(), Arg.Any<string>());
     }
 }

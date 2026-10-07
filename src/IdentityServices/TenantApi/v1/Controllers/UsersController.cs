@@ -328,6 +328,13 @@ public class UsersController : ControllerBase
                 return NotFound(new NotFoundErrorDto($"User '{userName}' not found."));
             }
 
+            // AB#5708: shadow users authenticate in their home tenant; a local password would bypass it.
+            // ShadowUserPasswordValidator refuses it anyway — this answers before a token or mail goes out.
+            if (CrossTenantShadowUserName.IsShadowUserName(user.UserName))
+            {
+                return BadRequest(ShadowUserPasswordValidator.ErrorMessage);
+            }
+
             var token = await _userManager.GeneratePasswordResetTokenAsync(user);
 
             var result = await _userManager.ResetPasswordAsync(user, token, password);
