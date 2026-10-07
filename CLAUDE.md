@@ -1183,7 +1183,9 @@ every administration endpoint requires the `octo_api` scope (read: or `octo_api.
 tenant role — `UserManagement` for users/roles/groups/mappings/data permissions, `TenantManagement` or
 `UserManagement` for clients/mirrors/API resources/scopes/secrets/identity providers/e-mail domain rules/
 admin provisioning, the operational roles for directory reads (role names, a client's roles/actors), and
-`TenantManagement` in the system tenant for the log level. The role check probes the raw `role` claim and
+`TenantManagement` in the system tenant for the log level. Exception: `GET users/directory` (id + display
+name only, for assignee pickers) needs no role but `IdentityUserDirectoryReadPolicy` — the token's `tenant_id`
+must equal the route tenant, unconditionally (`IdentityApiOwnTenantRequirement`); the guard pins it. The role check probes the raw `role` claim and
 `ClaimTypes.Role` (RoleClaimType trap, AB#4969/AB#5539). `OCTO_IDENTITYAPIAUTHORIZATION__ROLEENFORCEMENT=Warn`
 logs instead of denying (transition); default `Enforce`. 🔴 A new controller action must use one of these
 policies — `IdentityApiAuthorizationPolicyTests.EveryTenantApiEndpoint_RequiresARole_UnlessExplicitlyAllowListed`

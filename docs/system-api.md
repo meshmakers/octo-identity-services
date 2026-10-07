@@ -30,6 +30,7 @@ tokens: the client's effective roles, AB#4183). The check probes the raw `role` 
 | `IdentityTenantAdministrationReadPolicy` / `…WritePolicy` | as above | `TenantManagement`, `UserManagement` | clients, client mirrors, API resources, API scopes, API secrets, identity providers, e-mail domain group rules, admin provisioning |
 | `IdentityDirectoryReadPolicy` | `octo_api` or `octo_api.read_only` | `UserManagement`, `TenantManagement`, `AdminPanelManagement`, `CommunicationManagement` | `GET roles`, `GET roles/GetPaged`, `GET roles/names/{roleName}`, `GET clients/{id}`, `GET clients/{id}/roles`, `GET clients/{id}/actors` (service-account panels, communication controller) |
 | `IdentityServiceAdministrationPolicy` | `octo_api` | `TenantManagement`, **system tenant route only** | `POST diagnostics/reconfigureLogLevel` (process-wide) |
+| `IdentityUserDirectoryReadPolicy` | `octo_api` or `octo_api.read_only` | — (**token must be issued for the route tenant**, no Warn mode, no exemptions) | `GET users/directory` (id + display name only, for pickers) |
 | `IdentityApiReadOnlyPolicy` | `octo_api` or `octo_api.read_only` | — | `GET tools/generatePassword` |
 
 Open to every authenticated caller: `GET diagnostics` (the caller's own claims). `POST setup` is unchanged
@@ -57,6 +58,7 @@ required role follows from the table above.
 |--------|----------|--------|-------------|
 | GET | `/users` | ReadOnly | Get all users |
 | GET | `/users/GetPaged` | ReadOnly | Get paginated users |
+| GET | `/users/directory?skip=&take=&search=` | ReadOnly (no role) | Slim user directory for pickers: `userId` + `displayName` ("First Last", else user name) of the tenant's users, sorted by display name; `search` matches the display name only (case-insensitive substring); `take` 1..500, default 100. No e-mail, roles, groups or logins. |
 | GET | `/users/{userName}` | ReadOnly | Get user by name, email, or ID |
 | GET | `/users/{userName}/roles` | ReadOnly | Get user's roles (direct + group-inherited) |
 | GET | `/users/{userName}/directRoles` | ReadOnly | Get user's directly assigned roles only |

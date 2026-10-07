@@ -42,6 +42,9 @@ public class TestAuthHandler : AuthenticationHandler<TestAuthHandlerOptions>
     // AB#5859: simulates a client-credentials token of the given client id (no "sub", "client_id" set).
     public const string ClientCredentialsHeader = "X-Test-ClientCredentials";
 
+    // AB#5859: overrides the tenant_id claim (default: the route tenant) to simulate a foreign-tenant token.
+    public const string TenantIdHeader = "X-Test-TenantId";
+
     public TestAuthHandler(
         IOptionsMonitor<TestAuthHandlerOptions> options,
         ILoggerFactory logger,
@@ -82,7 +85,12 @@ public class TestAuthHandler : AuthenticationHandler<TestAuthHandlerOptions>
         // Add tenant_id claim from the route tenant so TenantAuthorizationMiddleware passes.
         // Extract the tenant ID from the first path segment (e.g., "/octosystem/v1/users" → "octosystem").
         var pathSegments = Request.Path.Value?.Split('/', StringSplitOptions.RemoveEmptyEntries);
-        if (pathSegments is { Length: > 0 })
+        var tenantIdOverride = GetHeaderValue(TenantIdHeader, string.Empty);
+        if (!string.IsNullOrEmpty(tenantIdOverride))
+        {
+            claims.Add(new Claim("tenant_id", tenantIdOverride));
+        }
+        else if (pathSegments is { Length: > 0 })
         {
             claims.Add(new Claim("tenant_id", pathSegments[0]));
         }

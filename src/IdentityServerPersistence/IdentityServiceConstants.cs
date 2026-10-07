@@ -21,6 +21,10 @@ public static class IdentityServiceConstants
     // actors) → UserManagement, TenantManagement, AdminPanelManagement or CommunicationManagement.
     public const string IdentityDirectoryReadPolicy = "IdentityDirectoryReadPolicy";
 
+    // AB#5859: the slim user directory (id + display name only) → every signed-in caller whose token
+    // was issued for the route tenant (no role, but a strict own-tenant check).
+    public const string IdentityUserDirectoryReadPolicy = "IdentityUserDirectoryReadPolicy";
+
     // AB#5859: service-wide operations (log level) → TenantManagement in the system tenant only.
     public const string IdentityServiceAdministrationPolicy = "IdentityServiceAdministrationPolicy";
 

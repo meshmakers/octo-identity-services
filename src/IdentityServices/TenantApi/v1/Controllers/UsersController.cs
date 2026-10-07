@@ -117,6 +117,65 @@ public class UsersController : ControllerBase
         return pagedResult;
     }
 
+    // GET system/v1/users/directory
+    /// <summary>
+    ///     The slim user directory of the tenant: id and display name of every user, for pickers that every
+    ///     signed-in user of the tenant may use (AB#5859).
+    /// </summary>
+    /// <remarks>
+    ///     No role is required — unlike <c>getPaged</c>, which needs <c>UserManagement</c> and returns e-mail
+    ///     and logins. Instead the token must have been issued for this tenant
+    ///     (<see cref="Authorization.IdentityApiOwnTenantRequirement" />). The search matches the display
+    ///     name only (case-insensitive substring), so it cannot be used to probe e-mail addresses or user
+    ///     names hidden behind a first/last name. Sorted by display name, then id, for stable paging.
+    /// </remarks>
+    [HttpGet("directory")]
+    [Authorize(IdentityServiceConstants.IdentityUserDirectoryReadPolicy)]
+    [EndpointSummary("Returns id and display name of the tenant's users (no e-mail, roles or groups).")]
+    [ProducesResponseType(typeof(PagedResult<UserDirectoryEntryDto>), StatusCodes.Status200OK)]
+    public PagedResult<UserDirectoryEntryDto> GetDirectory(
+        [FromQuery] [Description("Number of entries to skip (default 0)")] int skip = 0,
+        [FromQuery] [Description("Number of entries to return, 1..500 (default 100)")] int take = 100,
+        [FromQuery] [Description("Optional case-insensitive substring of the display name")] string? search = null)
+    {
+        skip = Math.Max(0, skip);
+        take = Math.Clamp(take, 1, MaxDirectoryPageSize);
+        var term = search?.Trim();
+
+        var entries = _userManager.Users.ToList()
+            .Select(ToDirectoryEntry)
+            .Where(e => string.IsNullOrEmpty(term) ||
+                        e.DisplayName.Contains(term, StringComparison.OrdinalIgnoreCase))
+            .OrderBy(e => e.DisplayName, StringComparer.OrdinalIgnoreCase)
+            .ThenBy(e => e.UserId, StringComparer.Ordinal)
+            .ToList();
+
+        var pagedResult = new PagedResult<UserDirectoryEntryDto>(entries.Skip(skip).Take(take), skip, take,
+            entries.Count);
+
+        var header = pagedResult.GetHeader();
+        if (header != null)
+        {
+            Response.Headers.Append("X-Pagination", header.ToJson());
+        }
+
+        return pagedResult;
+    }
+
+    internal const int MaxDirectoryPageSize = 500;
+
+    internal static UserDirectoryEntryDto ToDirectoryEntry(RtUser user)
+    {
+        var fullName = string.Join(' ',
+            new[] { user.FirstName, user.LastName }.Where(n => !string.IsNullOrWhiteSpace(n))
+                .Select(n => n!.Trim()));
+        return new UserDirectoryEntryDto
+        {
+            UserId = user.RtId.ToString(),
+            DisplayName = fullName.Length > 0 ? fullName : user.UserName ?? string.Empty
+        };
+    }
+
     // GET system/v1/users/{userName}
     [HttpGet("{userName}")]
     [Authorize(IdentityServiceConstants.IdentityUserAdministrationReadPolicy)]

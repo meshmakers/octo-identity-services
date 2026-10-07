@@ -266,6 +266,7 @@ try
     builder.Services.Configure<IdentityApiAuthorizationOptions>(options =>
         builder.Configuration.GetSection(IdentityApiAuthorizationOptions.SectionName).Bind(options));
     builder.Services.AddSingleton<IAuthorizationHandler, IdentityApiRoleAuthorizationHandler>();
+    builder.Services.AddSingleton<IAuthorizationHandler, IdentityApiOwnTenantAuthorizationHandler>();
     builder.Services.AddAuthorization(options => options.AddIdentityApiPolicies());
 
     builder.Services.AddOctoApiVersioningAndDocumentation(options =>

@@ -36,6 +36,7 @@ public class IdentityApiAuthorizationPolicyTests
         monitor.CurrentValue.Returns(new IdentityApiAuthorizationOptions { RoleEnforcement = mode });
         services.AddSingleton(monitor);
         services.AddSingleton<IAuthorizationHandler, IdentityApiRoleAuthorizationHandler>();
+        services.AddSingleton<IAuthorizationHandler, IdentityApiOwnTenantAuthorizationHandler>();
         services.AddAuthorization(options => options.AddIdentityApiPolicies());
         return services.BuildServiceProvider().GetRequiredService<IAuthorizationService>();
     }
@@ -180,6 +181,81 @@ public class IdentityApiAuthorizationPolicyTests
             IdentityServiceConstants.IdentityServiceAdministrationPolicy, CustomerTenantId)).Should().BeFalse();
     }
 
+    // ------------------------------------------------------------------ user directory (no role, own tenant)
+
+    private static ClaimsPrincipal DirectoryCaller(string? tokenTenantId, string scope = "octo_api",
+        bool clientCredentials = false, params string[] roles)
+    {
+        var claims = new List<Claim> { new("scope", scope) };
+        claims.Add(clientCredentials ? new Claim("client_id", "svc-1") : new Claim("sub", "user-1"));
+        if (tokenTenantId != null)
+        {
+            claims.Add(new Claim("tenant_id", tokenTenantId));
+        }
+
+        claims.AddRange(roles.Select(r => new Claim("role", r)));
+        return new ClaimsPrincipal(new ClaimsIdentity(claims, "Bearer"));
+    }
+
+    [Theory]
+    [InlineData("octo_api")]
+    [InlineData("octo_api.read_only")]
+    public async Task UserDirectory_IsOpenToEveryUserOfTheTenant_WithoutRole(string scope)
+    {
+        var service = CreateAuthorizationService();
+
+        (await AuthorizeAsync(service, DirectoryCaller(CustomerTenantId, scope),
+            IdentityServiceConstants.IdentityUserDirectoryReadPolicy)).Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task UserDirectory_TenantMatch_IsCaseInsensitive()
+    {
+        var service = CreateAuthorizationService();
+
+        (await AuthorizeAsync(service, DirectoryCaller("Customer"),
+            IdentityServiceConstants.IdentityUserDirectoryReadPolicy)).Should().BeTrue();
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task UserDirectory_ForeignTenantToken_IsDenied_EvenWithAdminRolesAndInWarnMode(bool clientCredentials)
+    {
+        var service = CreateAuthorizationService(IdentityApiRoleEnforcementMode.Warn);
+
+        (await AuthorizeAsync(service,
+            DirectoryCaller("other-tenant", clientCredentials: clientCredentials, roles: "UserManagement"),
+            IdentityServiceConstants.IdentityUserDirectoryReadPolicy)).Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task UserDirectory_TokenWithoutTenant_IsDenied()
+    {
+        var service = CreateAuthorizationService();
+
+        (await AuthorizeAsync(service, DirectoryCaller(null, clientCredentials: true),
+            IdentityServiceConstants.IdentityUserDirectoryReadPolicy)).Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task UserDirectory_ClientCredentialsOfTheOwnTenant_IsGranted()
+    {
+        var service = CreateAuthorizationService();
+
+        (await AuthorizeAsync(service, DirectoryCaller(CustomerTenantId, clientCredentials: true),
+            IdentityServiceConstants.IdentityUserDirectoryReadPolicy)).Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task UserDirectory_WithoutApiScope_IsDenied()
+    {
+        var service = CreateAuthorizationService();
+
+        (await AuthorizeAsync(service, DirectoryCaller(CustomerTenantId, scope: "openid"),
+            IdentityServiceConstants.IdentityUserDirectoryReadPolicy)).Should().BeFalse();
+    }
+
     // ------------------------------------------------------------------ guard over every endpoint
 
     private static readonly string[] ScopeOnlyAllowList =
@@ -190,6 +266,14 @@ public class IdentityApiAuthorizationPolicyTests
         // Only works while the tenant has no user at all (bootstrap); unchanged.
         $"{nameof(SetupController)}.{nameof(SetupController.AddAdminUser)}"
     ];
+
+    // Endpoints without a role on purpose, each pinned to the one policy it must use. The user directory
+    // (id + display name) is open to every user of the tenant, gated by the strict own-tenant check.
+    private static readonly Dictionary<string, string> NoRoleOwnTenantAllowList = new()
+    {
+        [$"{nameof(UsersController)}.{nameof(UsersController.GetDirectory)}"] =
+            IdentityServiceConstants.IdentityUserDirectoryReadPolicy
+    };
 
     private static readonly string[] RoleBasedPolicies =
     [
@@ -206,6 +290,7 @@ public class IdentityApiAuthorizationPolicyTests
         IdentityServiceConstants.IdentityUserAdministrationReadPolicy,
         IdentityServiceConstants.IdentityTenantAdministrationReadPolicy,
         IdentityServiceConstants.IdentityDirectoryReadPolicy,
+        IdentityServiceConstants.IdentityUserDirectoryReadPolicy,
         IdentityServiceConstants.IdentityApiReadOnlyPolicy
     ];
 
@@ -252,6 +337,17 @@ public class IdentityApiAuthorizationPolicyTests
             {
                 continue;
             }
+
+            if (NoRoleOwnTenantAllowList.TryGetValue(action, out var pinnedPolicy))
+            {
+                policy.Should().Be(pinnedPolicy, $"{action} is allow-listed for exactly this policy");
+                method.GetCustomAttributes<HttpMethodAttribute>().SelectMany(a => a.HttpMethods)
+                    .Should().OnlyContain(m => m == "GET", $"{action} is a read-only directory");
+                continue;
+            }
+
+            policy.Should().NotBe(IdentityServiceConstants.IdentityUserDirectoryReadPolicy,
+                $"{action} is not allow-listed for the role-less directory policy");
 
             policy.Should().NotBeNull($"{action} must declare an authorization policy");
             RoleBasedPolicies.Should().Contain(policy!,

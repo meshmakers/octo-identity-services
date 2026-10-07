@@ -34,6 +34,10 @@ namespace Meshmakers.Octo.Backend.IdentityServices.Authorization;
 ///         <item>
 ///             Log level: <c>TenantManagement</c> in the system tenant only.
 ///         </item>
+///         <item>
+///             User directory (<c>users/directory</c>: id and display name only): no role, but the token
+///             must have been issued for the route tenant (<see cref="IdentityApiOwnTenantRequirement" />).
+///         </item>
 ///     </list>
 ///     <para>
 ///         The plain scope policies (<see cref="IdentityServiceConstants.IdentityApiReadOnlyPolicy" />,
@@ -111,6 +115,15 @@ internal static class IdentityApiAuthorizationPolicies
                     CommonConstants.OctoApiFullAccess,
                     CommonConstants.OctoApiReadOnly)
                 .AddRequirements(new IdentityApiRoleRequirement(DirectoryReadRoles)));
+
+        // The slim user directory (id + display name) has no role on purpose — every user of the tenant
+        // may pick a colleague (assignee pickers). The own-tenant requirement replaces the role as the
+        // gate that keeps foreign tokens out.
+        options.AddPolicy(IdentityServiceConstants.IdentityUserDirectoryReadPolicy, policyBuilder =>
+            policyBuilder.RequireClaim(InfrastructureCommon.ClaimScope,
+                    CommonConstants.OctoApiFullAccess,
+                    CommonConstants.OctoApiReadOnly)
+                .AddRequirements(new IdentityApiOwnTenantRequirement()));
 
         options.AddPolicy(IdentityServiceConstants.IdentityServiceAdministrationPolicy, policyBuilder =>
             policyBuilder.RequireClaim(InfrastructureCommon.ClaimScope,
