@@ -31,10 +31,42 @@ internal class DynamicAuthSchemeServiceInitializer(
                 await session.CommitTransactionAsync();
             }
 
+            // One tenant must not take the host down with it (AB#5540). This loop used to be unguarded:
+            // on test-2 a single tenant whose System.Identity CK import had failed (a Mongo write
+            // conflict on the index update lock; DefaultConfigurationInitializationService logged it and
+            // queued the tenant for the background setup retry) threw CkCacheException here and failed
+            // the whole host start (HostedServiceStartupFaulted) — for every tenant. A failing tenant is
+            // now logged and skipped. Its schemes are registered once its setup completes: the
+            // background retry and every later tenant event run SetupAsync with DeferTenantStart=false,
+            // which invokes the ITenantSetupCompletedHandler hook (DynamicAuthSchemeTenantSetupHandler).
+            // The system tenant above stays unguarded on purpose: without it nothing works at all.
+            var failedTenants = new List<string>();
             foreach (var tenant in tenantList)
             {
                 logger.LogInformation("Registering auth schemes for tenant '{TenantId}'", tenant.TenantId);
-                await dynamicAuthSchemeService.ConfigureAsync(tenant.TenantId);
+                try
+                {
+                    await dynamicAuthSchemeService.ConfigureAsync(tenant.TenantId);
+                }
+                catch (Exception ex)
+                {
+                    failedTenants.Add(tenant.TenantId);
+                    // Type and message are enough to see why (typically a CkCacheException for a tenant
+                    // whose CK model import has not completed yet); the setup failure itself was already
+                    // logged with its stack trace by DefaultConfigurationInitializationService.
+                    logger.LogError(
+                        "Registering auth schemes for tenant '{TenantId}' failed with {ExceptionType}: " +
+                        "{ExceptionMessage}. Continuing with the remaining tenants; the schemes are " +
+                        "registered once the tenant's setup completes",
+                        tenant.TenantId, ex.GetType().Name, ex.Message);
+                }
+            }
+
+            if (failedTenants.Count > 0)
+            {
+                logger.LogWarning(
+                    "Auth scheme registration failed for {Count} of {Total} tenant(s): {Tenants}",
+                    failedTenants.Count, tenantList.Count, string.Join(", ", failedTenants));
             }
         }
     }

@@ -48,20 +48,24 @@ internal class DynamicAuthSchemeService : IDynamicAuthSchemeService
         tenantId = tenantId.NormalizeString();
         var prefix = $"{tenantId}:";
 
+        // Load identity providers directly from the tenant's database,
+        // bypassing the scoped IOctoIdentityProviderStore which relies on HTTP context.
+        // Loaded BEFORE the old schemes are removed (AB#5540): if the load throws (e.g. CkCacheException
+        // while the tenant's CK model import is still pending its setup retry) the tenant keeps the
+        // schemes it had instead of losing all of them, and the remove/re-add window for concurrent
+        // logins no longer spans a database round trip.
+        var tenantRepo = await _systemContext.FindTenantRepositoryAsync(tenantId);
+        var session = await tenantRepo.GetSessionAsync();
+        session.StartTransaction();
+        var result = await tenantRepo.GetRtEntitiesByTypeAsync<RtIdentityProvider>(session, RtEntityQueryOptions.Create());
+        await session.CommitTransactionAsync();
+
         // Remove only THIS tenant's schemes (not all schemes)
         var allSchemes = await _schemeProvider.GetAllSchemesAsync();
         foreach (var scheme in allSchemes.Where(s => s.Name.StartsWith(prefix, StringComparison.Ordinal)))
         {
             _schemeProvider.RemoveScheme(scheme.Name);
         }
-
-        // Load identity providers directly from the tenant's database,
-        // bypassing the scoped IOctoIdentityProviderStore which relies on HTTP context.
-        var tenantRepo = await _systemContext.FindTenantRepositoryAsync(tenantId);
-        var session = await tenantRepo.GetSessionAsync();
-        session.StartTransaction();
-        var result = await tenantRepo.GetRtEntitiesByTypeAsync<RtIdentityProvider>(session, RtEntityQueryOptions.Create());
-        await session.CommitTransactionAsync();
 
         // Register schemes with tenant-prefixed names
         foreach (var identityProvider in result.Items)
