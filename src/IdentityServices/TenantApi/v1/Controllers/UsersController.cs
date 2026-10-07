@@ -77,7 +77,7 @@ public class UsersController : ControllerBase
     /// </summary>
     /// <returns></returns>
     [HttpGet]
-    [Authorize(IdentityServiceConstants.IdentityApiReadOnlyPolicy)]
+    [Authorize(IdentityServiceConstants.IdentityUserAdministrationReadPolicy)]
     [EndpointSummary("Returns all existing users.")]
     [ProducesResponseType(typeof(IEnumerable<UserDto>), StatusCodes.Status200OK)]
     public IEnumerable<UserDto> Get()
@@ -93,7 +93,7 @@ public class UsersController : ControllerBase
     /// </summary>
     /// <returns></returns>
     [HttpGet("GetPaged")]
-    [Authorize(IdentityServiceConstants.IdentityApiReadOnlyPolicy)]
+    [Authorize(IdentityServiceConstants.IdentityUserAdministrationReadPolicy)]
     [EndpointSummary("Returns all existing users.")]
     [ProducesResponseType(typeof(IEnumerable<UserDto>), StatusCodes.Status200OK)]
     public PagedResult<UserDto> Get([Required][FromQuery] PagingParams pagingParams)
@@ -119,7 +119,7 @@ public class UsersController : ControllerBase
 
     // GET system/v1/users/{userName}
     [HttpGet("{userName}")]
-    [Authorize(IdentityServiceConstants.IdentityApiReadOnlyPolicy)]
+    [Authorize(IdentityServiceConstants.IdentityUserAdministrationReadPolicy)]
     [EndpointSummary("Returns user information based on it's userName, email or id")]
     [ProducesResponseType(typeof(UserDto), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
@@ -139,7 +139,7 @@ public class UsersController : ControllerBase
 
     // GET system/v1/users/{userName}
     [HttpGet("{userName}/roles")]
-    [Authorize(IdentityServiceConstants.IdentityApiReadOnlyPolicy)]
+    [Authorize(IdentityServiceConstants.IdentityUserAdministrationReadPolicy)]
     [EndpointSummary("Returns user roles based on it's userName, email or id")]
     [ProducesResponseType(typeof(IEnumerable<RoleDto>), StatusCodes.Status200OK)]
     public async Task<IActionResult> GetUserRoles([Required][Description("Name of the user")] string userName)
@@ -170,7 +170,7 @@ public class UsersController : ControllerBase
 
     // GET system/v1/users/{userName}/directRoles
     [HttpGet("{userName}/directRoles")]
-    [Authorize(IdentityServiceConstants.IdentityApiReadOnlyPolicy)]
+    [Authorize(IdentityServiceConstants.IdentityUserAdministrationReadPolicy)]
     [EndpointSummary("Returns only directly assigned user roles (excluding group-inherited roles)")]
     [ProducesResponseType(typeof(IEnumerable<RoleDto>), StatusCodes.Status200OK)]
     public async Task<IActionResult> GetUserDirectRoles([Required][Description("Name of the user")] string userName)
@@ -199,7 +199,7 @@ public class UsersController : ControllerBase
 
     // POST system/v1/users
     [HttpPost]
-    [Authorize(IdentityServiceConstants.IdentityApiReadWritePolicy)]
+    [Authorize(IdentityServiceConstants.IdentityUserAdministrationWritePolicy)]
     [EndpointSummary("Creates a new user.")]
     [ProducesResponseType(StatusCodes.Status200OK)]
     public async Task<IActionResult> Post(
@@ -259,7 +259,7 @@ public class UsersController : ControllerBase
 
     // PUT system/v1/users/5
     [HttpPut("{userName}")]
-    [Authorize(IdentityServiceConstants.IdentityApiReadWritePolicy)]
+    [Authorize(IdentityServiceConstants.IdentityUserAdministrationWritePolicy)]
     [EndpointSummary("Updates a user.")]
     [ProducesResponseType(StatusCodes.Status200OK)]
     public async Task<IActionResult> Put(
@@ -308,7 +308,7 @@ public class UsersController : ControllerBase
     // POST: system/v1/users/resetPassword
     [HttpPost]
     [Route("ResetPassword")]
-    [Authorize(IdentityServiceConstants.IdentityApiReadWritePolicy)]
+    [Authorize(IdentityServiceConstants.IdentityUserAdministrationWritePolicy)]
     [EndpointSummary("Resets the password of an user.")]
     [ProducesResponseType(StatusCodes.Status200OK)]
     public async Task<IActionResult> ResetPassword([Required][Description("The username")] string userName,
@@ -355,7 +355,7 @@ public class UsersController : ControllerBase
 
     // DELETE system/v1/users/5
     [HttpDelete("{userName}")]
-    [Authorize(IdentityServiceConstants.IdentityApiReadWritePolicy)]
+    [Authorize(IdentityServiceConstants.IdentityUserAdministrationWritePolicy)]
     [EndpointSummary("Deletes an user.")]
     [ProducesResponseType(StatusCodes.Status200OK)]
     public async Task<IActionResult> Delete([Required][Description("The username")] string userName)
@@ -389,7 +389,7 @@ public class UsersController : ControllerBase
 
     // PUT system/v1/users/demo/roles/users
     [HttpPut("{userName}/roles")]
-    [Authorize(IdentityServiceConstants.IdentityApiReadWritePolicy)]
+    [Authorize(IdentityServiceConstants.IdentityUserAdministrationWritePolicy)]
     [EndpointSummary("Adds roles to an user.")]
     [ProducesResponseType(StatusCodes.Status200OK)]
     public async Task<IActionResult> UpdateUserRoles([Required][Description("The username")] string userName,
@@ -429,7 +429,7 @@ public class UsersController : ControllerBase
 
     // PUT system/v1/users/demo/roles/users
     [HttpPut("{userName}/roles/{roleName}")]
-    [Authorize(IdentityServiceConstants.IdentityApiReadWritePolicy)]
+    [Authorize(IdentityServiceConstants.IdentityUserAdministrationWritePolicy)]
     [EndpointSummary("Adds a role to a user.")]
     [ProducesResponseType(StatusCodes.Status200OK)]
     public async Task<IActionResult> AddUserToRole([Required][Description("The username")] string userName,
@@ -467,7 +467,7 @@ public class UsersController : ControllerBase
     ///     This is useful for consolidating duplicate accounts created by external identity providers.
     /// </summary>
     [HttpPost("{userName}/merge")]
-    [Authorize(IdentityServiceConstants.IdentityApiReadWritePolicy)]
+    [Authorize(IdentityServiceConstants.IdentityUserAdministrationWritePolicy)]
     [EndpointSummary("Merges external logins from source user into target user and deletes source user.")]
     [ProducesResponseType(StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
@@ -553,7 +553,7 @@ public class UsersController : ControllerBase
 
     // DELETE system/v1/users/demo/roles/Users
     [HttpDelete("{userName}/roles/{roleName}")]
-    [Authorize(IdentityServiceConstants.IdentityApiReadWritePolicy)]
+    [Authorize(IdentityServiceConstants.IdentityUserAdministrationWritePolicy)]
     [EndpointSummary("Removes a role from a user.")]
     [ProducesResponseType(StatusCodes.Status200OK)]
     public async Task<IActionResult> RemoveRoleFromUser([Required][Description("The username")] string userName,

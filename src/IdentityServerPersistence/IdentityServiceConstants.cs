@@ -8,6 +8,22 @@ public static class IdentityServiceConstants
     public const string IdentityApiReadOnlyPolicy = "IdentityApiReadOnlyPolicy";
     public const string IdentityApiReadWritePolicy = "IdentityApiReadWritePolicy";
 
+    // AB#5859: scope AND tenant role. Users, roles, groups, mappings, data permissions → UserManagement.
+    public const string IdentityUserAdministrationReadPolicy = "IdentityUserAdministrationReadPolicy";
+    public const string IdentityUserAdministrationWritePolicy = "IdentityUserAdministrationWritePolicy";
+
+    // AB#5859: clients, client mirrors, API resources/scopes/secrets, identity providers, e-mail domain
+    // group rules, cross-tenant admin provisioning → TenantManagement or UserManagement.
+    public const string IdentityTenantAdministrationReadPolicy = "IdentityTenantAdministrationReadPolicy";
+    public const string IdentityTenantAdministrationWritePolicy = "IdentityTenantAdministrationWritePolicy";
+
+    // AB#5859: read-only directory lookups that operational UIs need (role names, a client's roles and
+    // actors) → UserManagement, TenantManagement, AdminPanelManagement or CommunicationManagement.
+    public const string IdentityDirectoryReadPolicy = "IdentityDirectoryReadPolicy";
+
+    // AB#5859: service-wide operations (log level) → TenantManagement in the system tenant only.
+    public const string IdentityServiceAdministrationPolicy = "IdentityServiceAdministrationPolicy";
+
     public const string MailNotificationConfigurationName = "MailNotificationConfiguration";
 
     public const string WelcomeEmailTemplateName = "Welcome_Email_Template";

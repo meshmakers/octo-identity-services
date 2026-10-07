@@ -18,14 +18,18 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Persistence.IdentityCkModel.Generated.System.Identity.v2;
 using Meshmakers.Octo.Backend.Authentication;
+using Meshmakers.Octo.Backend.IdentityServices.Authorization;
 
 namespace Meshmakers.Octo.Backend.IdentityServices.TenantApi.v1.Controllers;
 
 /// <summary>
 /// REST Controller for pre-provisioning cross-tenant user mappings in a target tenant.
 /// Routed via the system tenant so that the calling user does not need allowed_tenants for the target tenant.
+/// AB#5859: requires TenantManagement or UserManagement, and the target must be the caller's own tenant or
+/// one of its descendants (<see cref="AdminProvisioningTargetScopeFilter"/>).
 /// </summary>
 [Authorize(AuthenticationSchemes = AuthenticationConstants.BearerAuthenticationScheme)]
+[TypeFilter(typeof(AdminProvisioningTargetScopeFilter))]
 [Route(IdentityServiceConstants.ApiPathPrefix + "/[controller]/{targetTenantId}")]
 [ApiController]
 [ApiVersion(IdentityServiceConstants.ApiVersion1)]
@@ -38,7 +42,7 @@ public class AdminProvisioningController(
     /// Returns all external tenant user mappings in the target tenant.
     /// </summary>
     [HttpGet]
-    [Authorize(IdentityServiceConstants.IdentityApiReadWritePolicy)]
+    [Authorize(IdentityServiceConstants.IdentityTenantAdministrationWritePolicy)]
     [EndpointSummary("Returns all external tenant user mappings in the target tenant.")]
     [ProducesResponseType(typeof(IEnumerable<ExternalTenantUserMappingDto>), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
@@ -97,7 +101,7 @@ public class AdminProvisioningController(
     /// Creates a new external tenant user mapping in the target tenant.
     /// </summary>
     [HttpPost]
-    [Authorize(IdentityServiceConstants.IdentityApiReadWritePolicy)]
+    [Authorize(IdentityServiceConstants.IdentityTenantAdministrationWritePolicy)]
     [EndpointSummary("Creates a new external tenant user mapping in the target tenant.")]
     [ProducesResponseType(typeof(ExternalTenantUserMappingDto), StatusCodes.Status201Created)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
@@ -143,7 +147,7 @@ public class AdminProvisioningController(
     /// Provisions the current user in the target tenant with all available roles.
     /// </summary>
     [HttpPost("provisionCurrentUser")]
-    [Authorize(IdentityServiceConstants.IdentityApiReadWritePolicy)]
+    [Authorize(IdentityServiceConstants.IdentityTenantAdministrationWritePolicy)]
     [EndpointSummary("Provisions the current user in the target tenant with all roles.")]
     [ProducesResponseType(typeof(ExternalTenantUserMappingDto), StatusCodes.Status201Created)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
@@ -354,7 +358,7 @@ public class AdminProvisioningController(
     /// Deletes an external tenant user mapping in the target tenant.
     /// </summary>
     [HttpDelete("{mappingRtId}")]
-    [Authorize(IdentityServiceConstants.IdentityApiReadWritePolicy)]
+    [Authorize(IdentityServiceConstants.IdentityTenantAdministrationWritePolicy)]
     [EndpointSummary("Deletes an external tenant user mapping in the target tenant.")]
     [ProducesResponseType(StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
@@ -394,7 +398,7 @@ public class AdminProvisioningController(
     /// shadow users (<c>xt_</c> prefix). An empty <paramref name="search"/> returns the first users.
     /// </summary>
     [HttpGet("sourceUsers")]
-    [Authorize(IdentityServiceConstants.IdentityApiReadWritePolicy)]
+    [Authorize(IdentityServiceConstants.IdentityTenantAdministrationWritePolicy)]
     [EndpointSummary("Searches provisionable users from the target tenant's ancestor tenants.")]
     [ProducesResponseType(typeof(IEnumerable<ProvisioningSourceUserDto>), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
@@ -436,7 +440,7 @@ public class AdminProvisioningController(
     /// the system context (the caller need not have <c>allowed_tenants</c> for the target).
     /// </summary>
     [HttpGet("roles")]
-    [Authorize(IdentityServiceConstants.IdentityApiReadWritePolicy)]
+    [Authorize(IdentityServiceConstants.IdentityTenantAdministrationWritePolicy)]
     [EndpointSummary("Returns the roles defined in the target tenant.")]
     [ProducesResponseType(typeof(IEnumerable<ProvisioningRoleDto>), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
@@ -465,7 +469,7 @@ public class AdminProvisioningController(
     /// the group's roles — the idiomatic, group-based grant.
     /// </summary>
     [HttpGet("groups")]
-    [Authorize(IdentityServiceConstants.IdentityApiReadWritePolicy)]
+    [Authorize(IdentityServiceConstants.IdentityTenantAdministrationWritePolicy)]
     [EndpointSummary("Returns the groups defined in the target tenant.")]
     [ProducesResponseType(typeof(IEnumerable<ProvisioningGroupDto>), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
@@ -498,7 +502,7 @@ public class AdminProvisioningController(
     /// and mirrors how <see cref="ProvisionCurrentUser"/> grants access via the TenantOwners group.
     /// </summary>
     [HttpPost("withGroups")]
-    [Authorize(IdentityServiceConstants.IdentityApiReadWritePolicy)]
+    [Authorize(IdentityServiceConstants.IdentityTenantAdministrationWritePolicy)]
     [EndpointSummary("Creates a cross-tenant user mapping as a member of the given target-tenant groups.")]
     [ProducesResponseType(typeof(ExternalTenantUserMappingDto), StatusCodes.Status201Created)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]

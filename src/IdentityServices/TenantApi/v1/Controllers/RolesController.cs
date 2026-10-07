@@ -44,7 +44,7 @@ public class RolesController : ControllerBase
 
     // GET system/v1/roles
     [HttpGet]
-    [Authorize(IdentityServiceConstants.IdentityApiReadOnlyPolicy)]
+    [Authorize(IdentityServiceConstants.IdentityDirectoryReadPolicy)]
     [EndpointSummary("Returns all existing roles.")]
     [ProducesResponseType(typeof(IEnumerable<RoleDto>), StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(InternalServerErrorDto), StatusCodes.Status500InternalServerError)]
@@ -63,7 +63,7 @@ public class RolesController : ControllerBase
 
     // GET system/v1/roles
     [HttpGet("GetPaged")]
-    [Authorize(IdentityServiceConstants.IdentityApiReadOnlyPolicy)]
+    [Authorize(IdentityServiceConstants.IdentityDirectoryReadPolicy)]
     [EndpointSummary("Returns all existing roles.")]
     [ProducesResponseType(typeof(PagedResult<RoleDto>), StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(InternalServerErrorDto), StatusCodes.Status500InternalServerError)]
@@ -105,7 +105,7 @@ public class RolesController : ControllerBase
 
     // GET system/v1/roles/names/{roleName}
     [HttpGet("names/{roleName}")]
-    [Authorize(IdentityServiceConstants.IdentityApiReadOnlyPolicy)]
+    [Authorize(IdentityServiceConstants.IdentityDirectoryReadPolicy)]
     [EndpointSummary("Returns role information based on it's name")]
     [ProducesResponseType(typeof(RoleDto), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
@@ -131,7 +131,7 @@ public class RolesController : ControllerBase
 
     // POST system/v1/roles
     [HttpPost]
-    [Authorize(IdentityServiceConstants.IdentityApiReadWritePolicy)]
+    [Authorize(IdentityServiceConstants.IdentityUserAdministrationWritePolicy)]
     [EndpointSummary("Creates a new role.")]
     [ProducesResponseType(StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
@@ -166,7 +166,7 @@ public class RolesController : ControllerBase
 
     // PUT system/v1/role/5
     [HttpPut("{roleName}")]
-    [Authorize(IdentityServiceConstants.IdentityApiReadWritePolicy)]
+    [Authorize(IdentityServiceConstants.IdentityUserAdministrationWritePolicy)]
     [EndpointSummary("Updates a role.")]
     [ProducesResponseType(StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
@@ -209,7 +209,7 @@ public class RolesController : ControllerBase
 
     // DELETE system/v1/role/5
     [HttpDelete("{roleName}")]
-    [Authorize(IdentityServiceConstants.IdentityApiReadWritePolicy)]
+    [Authorize(IdentityServiceConstants.IdentityUserAdministrationWritePolicy)]
     [EndpointSummary("Deletes a role.")]
     [ProducesResponseType(StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(NotFoundErrorDto), StatusCodes.Status404NotFound)]

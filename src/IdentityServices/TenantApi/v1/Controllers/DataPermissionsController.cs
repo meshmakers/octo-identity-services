@@ -29,7 +29,7 @@ public class DataPermissionsController(IDataPermissionStore dataPermissionStore)
     /// Returns all data permissions with their policies and role grants.
     /// </summary>
     [HttpGet]
-    [Authorize(IdentityServiceConstants.IdentityApiReadOnlyPolicy)]
+    [Authorize(IdentityServiceConstants.IdentityUserAdministrationReadPolicy)]
     [EndpointSummary("Returns all data permissions with their policies and role grants.")]
     [ProducesResponseType(typeof(IEnumerable<DataPermissionDto>), StatusCodes.Status200OK)]
     public async Task<ActionResult<IEnumerable<DataPermissionDto>>> GetAll()
@@ -48,7 +48,7 @@ public class DataPermissionsController(IDataPermissionStore dataPermissionStore)
     /// Creates a data permission.
     /// </summary>
     [HttpPost]
-    [Authorize(IdentityServiceConstants.IdentityApiReadWritePolicy)]
+    [Authorize(IdentityServiceConstants.IdentityUserAdministrationWritePolicy)]
     [EndpointSummary("Creates a data permission.")]
     [ProducesResponseType(StatusCodes.Status200OK)]
     public async Task<ActionResult> Create([FromBody] DataPermissionDto dto)
@@ -66,7 +66,7 @@ public class DataPermissionsController(IDataPermissionStore dataPermissionStore)
     /// Removes a data permission including its policies.
     /// </summary>
     [HttpDelete("{permissionId}")]
-    [Authorize(IdentityServiceConstants.IdentityApiReadWritePolicy)]
+    [Authorize(IdentityServiceConstants.IdentityUserAdministrationWritePolicy)]
     [EndpointSummary("Removes a data permission including its policies.")]
     [ProducesResponseType(StatusCodes.Status200OK)]
     public async Task<ActionResult> Delete([FromRoute] string permissionId)
@@ -79,7 +79,7 @@ public class DataPermissionsController(IDataPermissionStore dataPermissionStore)
     /// Creates a policy bound to a data permission.
     /// </summary>
     [HttpPost("{permissionId}/policies")]
-    [Authorize(IdentityServiceConstants.IdentityApiReadWritePolicy)]
+    [Authorize(IdentityServiceConstants.IdentityUserAdministrationWritePolicy)]
     [EndpointSummary("Creates a policy bound to a data permission.")]
     [ProducesResponseType(typeof(string), StatusCodes.Status200OK)]
     public async Task<ActionResult<string>> CreatePolicy([FromRoute] string permissionId,
@@ -105,7 +105,7 @@ public class DataPermissionsController(IDataPermissionStore dataPermissionStore)
     /// Removes a policy.
     /// </summary>
     [HttpDelete("policies/{policyRtId}")]
-    [Authorize(IdentityServiceConstants.IdentityApiReadWritePolicy)]
+    [Authorize(IdentityServiceConstants.IdentityUserAdministrationWritePolicy)]
     [EndpointSummary("Removes a policy.")]
     [ProducesResponseType(StatusCodes.Status200OK)]
     public async Task<ActionResult> DeletePolicy([FromRoute] string policyRtId)
@@ -118,7 +118,7 @@ public class DataPermissionsController(IDataPermissionStore dataPermissionStore)
     /// Switches a policy between Enforce and AuditOnly (the operator flip after the audit review).
     /// </summary>
     [HttpPut("policies/{policyRtId}/enforcementMode")]
-    [Authorize(IdentityServiceConstants.IdentityApiReadWritePolicy)]
+    [Authorize(IdentityServiceConstants.IdentityUserAdministrationWritePolicy)]
     [EndpointSummary("Switches a policy between Enforce and AuditOnly.")]
     [ProducesResponseType(StatusCodes.Status200OK)]
     public async Task<ActionResult> SetEnforcementMode([FromRoute] string policyRtId,
@@ -137,7 +137,7 @@ public class DataPermissionsController(IDataPermissionStore dataPermissionStore)
     /// Grants the permission to a role.
     /// </summary>
     [HttpPost("{permissionId}/roles/{roleName}")]
-    [Authorize(IdentityServiceConstants.IdentityApiReadWritePolicy)]
+    [Authorize(IdentityServiceConstants.IdentityUserAdministrationWritePolicy)]
     [EndpointSummary("Grants the permission to a role.")]
     [ProducesResponseType(StatusCodes.Status200OK)]
     public async Task<ActionResult> GrantToRole([FromRoute] string permissionId, [FromRoute] string roleName)
@@ -150,7 +150,7 @@ public class DataPermissionsController(IDataPermissionStore dataPermissionStore)
     /// Revokes the permission from a role.
     /// </summary>
     [HttpDelete("{permissionId}/roles/{roleName}")]
-    [Authorize(IdentityServiceConstants.IdentityApiReadWritePolicy)]
+    [Authorize(IdentityServiceConstants.IdentityUserAdministrationWritePolicy)]
     [EndpointSummary("Revokes the permission from a role.")]
     [ProducesResponseType(StatusCodes.Status200OK)]
     public async Task<ActionResult> RevokeFromRole([FromRoute] string permissionId, [FromRoute] string roleName)

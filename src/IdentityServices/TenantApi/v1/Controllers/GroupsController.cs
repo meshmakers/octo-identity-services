@@ -25,7 +25,7 @@ public class GroupsController(IGroupStore groupStore) : ControllerBase
     /// Returns all groups.
     /// </summary>
     [HttpGet]
-    [Authorize(IdentityServiceConstants.IdentityApiReadOnlyPolicy)]
+    [Authorize(IdentityServiceConstants.IdentityUserAdministrationReadPolicy)]
     [EndpointSummary("Returns all groups.")]
     [ProducesResponseType(typeof(IEnumerable<GroupDto>), StatusCodes.Status200OK)]
     public async Task<ActionResult<IEnumerable<GroupDto>>> GetAll()
@@ -44,7 +44,7 @@ public class GroupsController(IGroupStore groupStore) : ControllerBase
     /// Returns groups with pagination.
     /// </summary>
     [HttpGet("GetPaged")]
-    [Authorize(IdentityServiceConstants.IdentityApiReadOnlyPolicy)]
+    [Authorize(IdentityServiceConstants.IdentityUserAdministrationReadPolicy)]
     [EndpointSummary("Returns groups with pagination.")]
     [ProducesResponseType(typeof(IEnumerable<GroupDto>), StatusCodes.Status200OK)]
     public async Task<ActionResult<IEnumerable<GroupDto>>> GetPaged(
@@ -65,7 +65,7 @@ public class GroupsController(IGroupStore groupStore) : ControllerBase
     /// Returns a specific group by ID.
     /// </summary>
     [HttpGet("{rtId}")]
-    [Authorize(IdentityServiceConstants.IdentityApiReadOnlyPolicy)]
+    [Authorize(IdentityServiceConstants.IdentityUserAdministrationReadPolicy)]
     [EndpointSummary("Returns a group by its ID.")]
     [ProducesResponseType(typeof(GroupDto), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
@@ -84,7 +84,7 @@ public class GroupsController(IGroupStore groupStore) : ControllerBase
     /// Returns a group by its name.
     /// </summary>
     [HttpGet("names/{groupName}")]
-    [Authorize(IdentityServiceConstants.IdentityApiReadOnlyPolicy)]
+    [Authorize(IdentityServiceConstants.IdentityUserAdministrationReadPolicy)]
     [EndpointSummary("Returns a group by its name.")]
     [ProducesResponseType(typeof(GroupDto), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
@@ -103,7 +103,7 @@ public class GroupsController(IGroupStore groupStore) : ControllerBase
     /// Creates a new group.
     /// </summary>
     [HttpPost]
-    [Authorize(IdentityServiceConstants.IdentityApiReadWritePolicy)]
+    [Authorize(IdentityServiceConstants.IdentityUserAdministrationWritePolicy)]
     [EndpointSummary("Creates a new group.")]
     [ProducesResponseType(typeof(GroupDto), StatusCodes.Status201Created)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
@@ -145,7 +145,7 @@ public class GroupsController(IGroupStore groupStore) : ControllerBase
     /// Updates an existing group's name and description.
     /// </summary>
     [HttpPut("{rtId}")]
-    [Authorize(IdentityServiceConstants.IdentityApiReadWritePolicy)]
+    [Authorize(IdentityServiceConstants.IdentityUserAdministrationWritePolicy)]
     [EndpointSummary("Updates an existing group.")]
     [ProducesResponseType(typeof(GroupDto), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
@@ -184,7 +184,7 @@ public class GroupsController(IGroupStore groupStore) : ControllerBase
     /// Deletes a group.
     /// </summary>
     [HttpDelete("{rtId}")]
-    [Authorize(IdentityServiceConstants.IdentityApiReadWritePolicy)]
+    [Authorize(IdentityServiceConstants.IdentityUserAdministrationWritePolicy)]
     [EndpointSummary("Deletes a group.")]
     [ProducesResponseType(StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
@@ -208,7 +208,7 @@ public class GroupsController(IGroupStore groupStore) : ControllerBase
     /// Gets the role IDs assigned to a group.
     /// </summary>
     [HttpGet("{rtId}/roles")]
-    [Authorize(IdentityServiceConstants.IdentityApiReadOnlyPolicy)]
+    [Authorize(IdentityServiceConstants.IdentityUserAdministrationReadPolicy)]
     [EndpointSummary("Gets the role IDs assigned to a group.")]
     [ProducesResponseType(typeof(List<string>), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
@@ -228,7 +228,7 @@ public class GroupsController(IGroupStore groupStore) : ControllerBase
     /// Replaces the role assignments for a group.
     /// </summary>
     [HttpPut("{rtId}/roles")]
-    [Authorize(IdentityServiceConstants.IdentityApiReadWritePolicy)]
+    [Authorize(IdentityServiceConstants.IdentityUserAdministrationWritePolicy)]
     [EndpointSummary("Replaces the role assignments for a group.")]
     [ProducesResponseType(StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
@@ -254,7 +254,7 @@ public class GroupsController(IGroupStore groupStore) : ControllerBase
     /// Gets the user member IDs of a group.
     /// </summary>
     [HttpGet("{rtId}/members/users")]
-    [Authorize(IdentityServiceConstants.IdentityApiReadOnlyPolicy)]
+    [Authorize(IdentityServiceConstants.IdentityUserAdministrationReadPolicy)]
     [EndpointSummary("Gets the user member IDs of a group.")]
     [ProducesResponseType(typeof(List<string>), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
@@ -274,7 +274,7 @@ public class GroupsController(IGroupStore groupStore) : ControllerBase
     /// Adds a user to a group.
     /// </summary>
     [HttpPut("{rtId}/members/users/{userId}")]
-    [Authorize(IdentityServiceConstants.IdentityApiReadWritePolicy)]
+    [Authorize(IdentityServiceConstants.IdentityUserAdministrationWritePolicy)]
     [EndpointSummary("Adds a user to a group.")]
     [ProducesResponseType(StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
@@ -296,7 +296,7 @@ public class GroupsController(IGroupStore groupStore) : ControllerBase
     /// Removes a user from a group.
     /// </summary>
     [HttpDelete("{rtId}/members/users/{userId}")]
-    [Authorize(IdentityServiceConstants.IdentityApiReadWritePolicy)]
+    [Authorize(IdentityServiceConstants.IdentityUserAdministrationWritePolicy)]
     [EndpointSummary("Removes a user from a group.")]
     [ProducesResponseType(StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
@@ -322,7 +322,7 @@ public class GroupsController(IGroupStore groupStore) : ControllerBase
     /// Gets the client member IDs of a group.
     /// </summary>
     [HttpGet("{rtId}/members/clients")]
-    [Authorize(IdentityServiceConstants.IdentityApiReadOnlyPolicy)]
+    [Authorize(IdentityServiceConstants.IdentityUserAdministrationReadPolicy)]
     [EndpointSummary("Gets the client member IDs of a group.")]
     [ProducesResponseType(typeof(List<string>), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
@@ -342,7 +342,7 @@ public class GroupsController(IGroupStore groupStore) : ControllerBase
     /// Adds a client to a group.
     /// </summary>
     [HttpPut("{rtId}/members/clients/{clientId}")]
-    [Authorize(IdentityServiceConstants.IdentityApiReadWritePolicy)]
+    [Authorize(IdentityServiceConstants.IdentityUserAdministrationWritePolicy)]
     [EndpointSummary("Adds a client to a group.")]
     [ProducesResponseType(StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
@@ -364,7 +364,7 @@ public class GroupsController(IGroupStore groupStore) : ControllerBase
     /// Removes a client from a group.
     /// </summary>
     [HttpDelete("{rtId}/members/clients/{clientId}")]
-    [Authorize(IdentityServiceConstants.IdentityApiReadWritePolicy)]
+    [Authorize(IdentityServiceConstants.IdentityUserAdministrationWritePolicy)]
     [EndpointSummary("Removes a client from a group.")]
     [ProducesResponseType(StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
@@ -390,7 +390,7 @@ public class GroupsController(IGroupStore groupStore) : ControllerBase
     /// Gets the nested group member IDs of a group.
     /// </summary>
     [HttpGet("{rtId}/members/groups")]
-    [Authorize(IdentityServiceConstants.IdentityApiReadOnlyPolicy)]
+    [Authorize(IdentityServiceConstants.IdentityUserAdministrationReadPolicy)]
     [EndpointSummary("Gets the nested group member IDs of a group.")]
     [ProducesResponseType(typeof(List<string>), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
@@ -410,7 +410,7 @@ public class GroupsController(IGroupStore groupStore) : ControllerBase
     /// Adds a nested group to a group. Rejects if it would create a cycle.
     /// </summary>
     [HttpPut("{rtId}/members/groups/{childGroupId}")]
-    [Authorize(IdentityServiceConstants.IdentityApiReadWritePolicy)]
+    [Authorize(IdentityServiceConstants.IdentityUserAdministrationWritePolicy)]
     [EndpointSummary("Adds a nested group. Rejects if it would create a circular reference.")]
     [ProducesResponseType(StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
@@ -452,7 +452,7 @@ public class GroupsController(IGroupStore groupStore) : ControllerBase
     /// Removes a nested group from a group.
     /// </summary>
     [HttpDelete("{rtId}/members/groups/{childGroupId}")]
-    [Authorize(IdentityServiceConstants.IdentityApiReadWritePolicy)]
+    [Authorize(IdentityServiceConstants.IdentityUserAdministrationWritePolicy)]
     [EndpointSummary("Removes a nested group from a group.")]
     [ProducesResponseType(StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]

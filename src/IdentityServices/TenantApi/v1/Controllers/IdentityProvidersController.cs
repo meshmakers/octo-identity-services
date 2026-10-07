@@ -44,7 +44,7 @@ public class IdentityProvidersController : ControllerBase
     }
 
     [HttpGet]
-    [Authorize(IdentityServiceConstants.IdentityApiReadOnlyPolicy)]
+    [Authorize(IdentityServiceConstants.IdentityTenantAdministrationReadPolicy)]
     [EndpointSummary("Returns all available identity providers.")]
     [ProducesResponseType(typeof(IdentityProvidersResult), StatusCodes.Status200OK)]
     public async Task<ActionResult<IdentityProvidersResult>> GetIdentityProvidersAsync()
@@ -58,7 +58,7 @@ public class IdentityProvidersController : ControllerBase
 
     [HttpGet("{rtId}")]
     [ProducesResponseType(typeof(IdentityProvidersResult), StatusCodes.Status200OK)]
-    [Authorize(IdentityServiceConstants.IdentityApiReadOnlyPolicy)]
+    [Authorize(IdentityServiceConstants.IdentityTenantAdministrationReadPolicy)]
     [EndpointSummary("Returns an identity provider by its ID.")]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<ActionResult<IdentityProvidersResult>> Get([Required] OctoObjectId rtId)
@@ -78,7 +78,7 @@ public class IdentityProvidersController : ControllerBase
     [HttpPost]
     [ProducesResponseType(typeof(IdentityProviderDto), StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(UniquenessViolationErrorResponse), StatusCodes.Status400BadRequest)]
-    [Authorize(IdentityServiceConstants.IdentityApiReadWritePolicy)]
+    [Authorize(IdentityServiceConstants.IdentityTenantAdministrationWritePolicy)]
     [EndpointSummary("Add a new identity provider.")]
     public async Task<ActionResult<IdentityProviderDto>> AddNewIdentityProviderAsync(
         [FromBody][Description("The configuration for the new identity provider.")] IdentityProviderDto identityProviderDto)
@@ -140,7 +140,7 @@ public class IdentityProvidersController : ControllerBase
     }
 
     [HttpDelete("{rtId}")]
-    [Authorize(IdentityServiceConstants.IdentityApiReadWritePolicy)]
+    [Authorize(IdentityServiceConstants.IdentityTenantAdministrationWritePolicy)]
     [EndpointSummary("Delete an existing identity provider.")]
     [ProducesResponseType(StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
@@ -159,7 +159,7 @@ public class IdentityProvidersController : ControllerBase
     [HttpPut("{rtId}")]
     [ProducesResponseType(typeof(IdentityProviderDto), StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(UniquenessViolationErrorResponse), StatusCodes.Status400BadRequest)]
-    [Authorize(IdentityServiceConstants.IdentityApiReadWritePolicy)]
+    [Authorize(IdentityServiceConstants.IdentityTenantAdministrationWritePolicy)]
     [EndpointSummary("Replace an existing identity provider.")]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     [ProducesResponseType(StatusCodes.Status401Unauthorized)]

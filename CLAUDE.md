@@ -606,7 +606,7 @@ a retriable not-ready condition (AB#4690).
 
 ### Admin Provisioning (Cross-Tenant Pre-Provisioning)
 
-The `AdminProvisioningController` allows users with TenantManagement role to pre-provision cross-tenant user mappings in a **target tenant** without needing `allowed_tenants` for that tenant. It is routed via the system tenant: `{tenantId}/v1/adminProvisioning/{targetTenantId}`.
+The `AdminProvisioningController` allows users with the TenantManagement or UserManagement role to pre-provision cross-tenant user mappings in a **target tenant** without needing `allowed_tenants` for that tenant. Since AB#5859 the target must be the caller's own tenant or one of its registry descendants (system-tenant callers: any tenant) — `AdminProvisioningTargetScopeFilter`; before, the role was documented but not checked and any target was reachable. It is routed via the system tenant: `{tenantId}/v1/adminProvisioning/{targetTenantId}`.
 
 This solves the chicken-and-egg problem: after creating a child tenant, the user doesn't have `allowed_tenants` for it yet, so the per-tenant `ExternalTenantUserMappingsController` is inaccessible. The admin provisioning controller uses `ISystemContext.TryFindTenantRepositoryAsync()` to access the target tenant's database directly.
 
@@ -1178,9 +1178,16 @@ The service supports multi-tenancy via tenant ID in routes. The route pattern is
 
 All API endpoints use a single tenant-scoped route prefix: `{tenantId:tenantId}/v{version:apiVersion}` (e.g., `octosystem/v1` for the default system tenant, `MyTenant/v1` for a specific tenant). The system tenant ID defaults to `OctoSystem` (normalized to lowercase in URLs) and is configurable via `OctoSystemConfiguration.SystemTenantId`.
 
-Two authorization policies:
-- `IdentityApiReadOnlyPolicy`: Requires `IdentityApiFullAccess` or `IdentityApiReadOnly` scope
-- `IdentityApiReadWritePolicy`: Requires `IdentityApiFullAccess` scope
+Authorization policies (`src/IdentityServices/Authorization/IdentityApiAuthorizationPolicies.cs`, AB#5859):
+every administration endpoint requires the `octo_api` scope (read: or `octo_api.read_only`) **and** a
+tenant role — `UserManagement` for users/roles/groups/mappings/data permissions, `TenantManagement` or
+`UserManagement` for clients/mirrors/API resources/scopes/secrets/identity providers/e-mail domain rules/
+admin provisioning, the operational roles for directory reads (role names, a client's roles/actors), and
+`TenantManagement` in the system tenant for the log level. The role check probes the raw `role` claim and
+`ClaimTypes.Role` (RoleClaimType trap, AB#4969/AB#5539). `OCTO_IDENTITYAPIAUTHORIZATION__ROLEENFORCEMENT=Warn`
+logs instead of denying (transition); default `Enforce`. 🔴 A new controller action must use one of these
+policies — `IdentityApiAuthorizationPolicyTests.EveryTenantApiEndpoint_RequiresARole_UnlessExplicitlyAllowListed`
+fails otherwise. Full table: `docs/system-api.md` § Authorization Policies.
 
 ## Configuration
 

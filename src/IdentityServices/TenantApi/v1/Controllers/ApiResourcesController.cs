@@ -36,7 +36,7 @@ public class ApiResourcesController : ControllerBase
 
     // GET: system/v1/apiResources
     [HttpGet]
-    [Authorize(IdentityServiceConstants.IdentityApiReadOnlyPolicy)]
+    [Authorize(IdentityServiceConstants.IdentityTenantAdministrationReadPolicy)]
     [EndpointSummary("Returns all API resources definitions")]
     [ProducesResponseType(typeof(IEnumerable<ApiResourceDto>), StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(InternalServerErrorDto), StatusCodes.Status500InternalServerError)]
@@ -55,7 +55,7 @@ public class ApiResourcesController : ControllerBase
 
     // GET system/v1/apiResources/getPaged
     [HttpGet("GetPaged")]
-    [Authorize(IdentityServiceConstants.IdentityApiReadOnlyPolicy)]
+    [Authorize(IdentityServiceConstants.IdentityTenantAdministrationReadPolicy)]
     [EndpointSummary("Returns all API resources definitions using paging")]
     [ProducesResponseType(typeof(PagedResult<ApiResourceDto>), StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(InternalServerErrorDto), StatusCodes.Status500InternalServerError)]
@@ -91,7 +91,7 @@ public class ApiResourcesController : ControllerBase
 
     // GET api/apiResources/5
     [HttpGet("{name}")]
-    [Authorize(IdentityServiceConstants.IdentityApiReadOnlyPolicy)]
+    [Authorize(IdentityServiceConstants.IdentityTenantAdministrationReadPolicy)]
     [EndpointSummary("Returns API resource information based on it's name")]
     [ProducesResponseType(typeof(ApiResourceDto), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
@@ -116,7 +116,7 @@ public class ApiResourcesController : ControllerBase
 
     // POST api/apiResources
     [HttpPost]
-    [Authorize(IdentityServiceConstants.IdentityApiReadWritePolicy)]
+    [Authorize(IdentityServiceConstants.IdentityTenantAdministrationWritePolicy)]
     [EndpointSummary("Creates a new API resource")]
     [ProducesResponseType(StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
@@ -151,7 +151,7 @@ public class ApiResourcesController : ControllerBase
 
     // PUT api/apiResources/5
     [HttpPut("{name}")]
-    [Authorize(IdentityServiceConstants.IdentityApiReadWritePolicy)]
+    [Authorize(IdentityServiceConstants.IdentityTenantAdministrationWritePolicy)]
     [EndpointSummary("Updates an API resource")]
     [ProducesResponseType(StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
@@ -187,7 +187,7 @@ public class ApiResourcesController : ControllerBase
 
     // DELETE api/apiResources/5
     [HttpDelete("{name}")]
-    [Authorize(IdentityServiceConstants.IdentityApiReadWritePolicy)]
+    [Authorize(IdentityServiceConstants.IdentityTenantAdministrationWritePolicy)]
     [EndpointSummary("Deletes an API resource")]
     [ProducesResponseType(StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(NotFoundErrorDto), StatusCodes.Status404NotFound)]

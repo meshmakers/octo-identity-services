@@ -36,7 +36,7 @@ public class ApiSecretsController : ControllerBase
 
     // GET system/v1/apiSecrets/client/xyz
     [HttpGet("client/{clientId}")]
-    [Authorize(IdentityServiceConstants.IdentityApiReadOnlyPolicy)]
+    [Authorize(IdentityServiceConstants.IdentityTenantAdministrationReadPolicy)]
     [EndpointSummary("Returns all secrets of the given client")]
     [ProducesResponseType(typeof(IEnumerable<ApiSecretDto>), StatusCodes.Status200OK)]
     public async Task<IActionResult> GetClient([Required] string clientId)
@@ -57,7 +57,7 @@ public class ApiSecretsController : ControllerBase
 
     // GET system/v1/apiSecrets/client/xyz/secretValue
     [HttpGet("client/{clientId}/{secretValue}")]
-    [Authorize(IdentityServiceConstants.IdentityApiReadOnlyPolicy)]
+    [Authorize(IdentityServiceConstants.IdentityTenantAdministrationReadPolicy)]
     [EndpointSummary("Returns a secret of the given client")]
     [ProducesResponseType(typeof(ApiSecretDto), StatusCodes.Status200OK)]
     public async Task<IActionResult> GetClientSecret([Required] string clientId, [Required] string secretValue)
@@ -86,7 +86,7 @@ public class ApiSecretsController : ControllerBase
 
     // GET system/v1/apiSecrets/apiResource/xyz
     [HttpGet("apiResource/{apiResourceName}")]
-    [Authorize(IdentityServiceConstants.IdentityApiReadOnlyPolicy)]
+    [Authorize(IdentityServiceConstants.IdentityTenantAdministrationReadPolicy)]
     [EndpointSummary("Returns all secrets of the given API resource")]
     [ProducesResponseType(typeof(IEnumerable<ApiSecretDto>), StatusCodes.Status200OK)]
     public async Task<IActionResult> GetApiResource([Required] string apiResourceName)
@@ -108,7 +108,7 @@ public class ApiSecretsController : ControllerBase
 
     // GET system/v1/apiSecrets/apiResource/xyz/secretValue
     [HttpGet("apiResource/{apiResourceName}/{secretValue}")]
-    [Authorize(IdentityServiceConstants.IdentityApiReadOnlyPolicy)]
+    [Authorize(IdentityServiceConstants.IdentityTenantAdministrationReadPolicy)]
     [EndpointSummary("Returns a secret of the given API resource")]
     [ProducesResponseType(typeof(ApiSecretDto), StatusCodes.Status200OK)]
     public async Task<IActionResult> GetApiResourceSecret([Required] string apiResourceName,
@@ -139,7 +139,7 @@ public class ApiSecretsController : ControllerBase
 
     // POST system/v1/apiSecrets/client/xyz
     [HttpPost("client/{clientId}")]
-    [Authorize(IdentityServiceConstants.IdentityApiReadWritePolicy)]
+    [Authorize(IdentityServiceConstants.IdentityTenantAdministrationWritePolicy)]
     [EndpointSummary("Creates a new secret for a client")]
     [ProducesResponseType(typeof(ApiSecretDto), StatusCodes.Status200OK)]
     public async Task<IActionResult> PostClient(
@@ -180,7 +180,7 @@ public class ApiSecretsController : ControllerBase
 
     // POST system/v1/apiSecrets/apiResource/xyz
     [HttpPost("apiResource/{apiResourceName}")]
-    [Authorize(IdentityServiceConstants.IdentityApiReadWritePolicy)]
+    [Authorize(IdentityServiceConstants.IdentityTenantAdministrationWritePolicy)]
     [EndpointSummary("Creates a new secret for an API resource")]
     [ProducesResponseType(typeof(ApiSecretDto), StatusCodes.Status200OK)]
     public async Task<IActionResult> PostApiResource(
@@ -221,7 +221,7 @@ public class ApiSecretsController : ControllerBase
 
     // PUT system/v1/apiSecrets/apiResource/xyz
     [HttpPut("client/{clientId}")]
-    [Authorize(IdentityServiceConstants.IdentityApiReadWritePolicy)]
+    [Authorize(IdentityServiceConstants.IdentityTenantAdministrationWritePolicy)]
     [EndpointSummary("Updates a secret")]
     [ProducesResponseType(StatusCodes.Status200OK)]
     public async Task<IActionResult> PutClient(
@@ -265,7 +265,7 @@ public class ApiSecretsController : ControllerBase
 
     // PUT system/v1/apiSecrets/apiResource/xyz
     [HttpPut("apiResource/{apiResourceName}")]
-    [Authorize(IdentityServiceConstants.IdentityApiReadWritePolicy)]
+    [Authorize(IdentityServiceConstants.IdentityTenantAdministrationWritePolicy)]
     [EndpointSummary("Updates a secret")]
     [ProducesResponseType(StatusCodes.Status200OK)]
     public async Task<IActionResult> PutApiResource(
@@ -310,7 +310,7 @@ public class ApiSecretsController : ControllerBase
 
     // DELETE system/v1/apiSecrets/client/xyz/secretValue
     [HttpDelete("client/{clientId}/{secretValue}")]
-    [Authorize(IdentityServiceConstants.IdentityApiReadWritePolicy)]
+    [Authorize(IdentityServiceConstants.IdentityTenantAdministrationWritePolicy)]
     [EndpointSummary("Deletes a secret of a client")]
     [ProducesResponseType(StatusCodes.Status200OK)]
     public async Task<IActionResult> DeleteSecretOfClient(
@@ -358,7 +358,7 @@ public class ApiSecretsController : ControllerBase
 
     // DELETE system/v1/apiSecrets/apiResource/xyz/secretValue
     [HttpDelete("apiResource/{apiResourceName}/{secretValue}")]
-    [Authorize(IdentityServiceConstants.IdentityApiReadWritePolicy)]
+    [Authorize(IdentityServiceConstants.IdentityTenantAdministrationWritePolicy)]
     [EndpointSummary("Deletes a secret of an API resource")]
     [ProducesResponseType(StatusCodes.Status200OK)]
     public async Task<IActionResult> DeleteSecretOfApiResource(
