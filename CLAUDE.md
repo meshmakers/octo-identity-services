@@ -637,6 +637,31 @@ History comes from `ICkModelUpgradeService.GetInstalledVersionsAsync` (latest su
 the same source the upgrade service uses. Tests:
 `tests/IdentityServerPersistence.UnitTests/Services/DefaultConfigurationCreatorServiceSchemaVersionMergeTests.cs`.
 
+### Embedded CK Models: "Embedded or Newer, Same Major" (CK v2 Phase 1 G-H2, AB#5902)
+
+Since the engine's downgrade guard (engine-mongodb, AB#5900) a tenant may keep a **newer** System /
+System.Identity / System.Notification than this service embeds (rollback, an old replica during a
+rolling update). Never decide with `ITenantContext.IsCkModelExistingAsync(SystemIdentityCkIds.CkModelId)`:
+it matches the **exact** version `[x.y.z]`. Use `CkModelCompatibility`
+(`src/IdentityServerPersistence/Services/CkModelCompatibility.cs`), which looks the model up **by name**
+(highest `Available` version) and classifies it:
+
+| Installed vs. embedded | State | Identity behaviour |
+|---|---|---|
+| none / only `ResolveFailed` / `Importing` | `NotInstalled` | tenant setup imports the embedded model; `CreateIdentityData` answers `FailedTenantHasNoIdentityCk` |
+| older | `Older` | tenant setup imports (upgrade) |
+| same | `Same` | nothing to import |
+| newer, same major | `NewerSameMajor` | no import (INFO); identity data creation works |
+| newer major | `NewerMajor` | tenant setup throws `InitializationException` "service is too old for the tenant"; `CreateIdentityData` logs ERROR with the same text and answers `FailedTenantHasNoIdentityCk` (the contract enum in common-services has no dedicated value) |
+
+The post-import migration run (`RunCkModelMigrationsAsync`) passes `[embedded, nextMajor)` ranges
+(`EmbeddedOrNewerSameMajor`) instead of exact `[x.y.z]` ranges, so a newer same-major model is kept with
+an INFO instead of a "newer than the declared compatibility range" WARN on every setup.
+`SystemContext.IsSystemTenantExistingAsync` (System model in the system DB) is an engine-mongodb check
+and is fixed there. Tests: `CkModelCompatibilityTests` (unit) and
+`tests/IdentityServices.IntegrationTests/Persistence/CkModelCompatibilityIntegrationTests.cs`, which
+re-key the tenant's System.Identity `CkModel` row to a newer version.
+
 ### Admin Provisioning (Cross-Tenant Pre-Provisioning)
 
 The `AdminProvisioningController` allows users with the TenantManagement or UserManagement role to pre-provision cross-tenant user mappings in a **target tenant** without needing `allowed_tenants` for that tenant. Since AB#5859 the target must be the caller's own tenant or one of its registry descendants (system-tenant callers: any tenant) — `AdminProvisioningTargetScopeFilter`; before, the role was documented but not checked and any target was reachable. It is routed via the system tenant: `{tenantId}/v1/adminProvisioning/{targetTenantId}`.

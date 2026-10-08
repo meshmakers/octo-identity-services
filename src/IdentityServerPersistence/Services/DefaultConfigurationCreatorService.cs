@@ -202,8 +202,12 @@ internal class DefaultConfigurationCreatorService(
 
             // So upgrades are done now. If it still does not exist -> create it from scratch.
             //
-            // "Does not exist" here means the System CK model is missing or not at the exact expected
-            // version — which is also true for a fully populated system database whose model import was
+            // "Does not exist" here means the System CK model is missing or not at the expected version.
+            // CK v2 Phase 1 G-H2: with the engine's downgrade guard (AB#5900) the system database may keep a
+            // NEWER System than this service embeds; IsSystemTenantExistingAsync (engine-mongodb) must then
+            // accept "embedded or newer, same major" by name, otherwise an older identity (rollback, old replica
+            // during a rolling update) reaches the throw below. That fix lives in engine-mongodb.
+            // It is also true for a fully populated system database whose model import was
             // skipped (EnsureSystemCkModelAsync swallows a ModelValidationException, e.g. while a
             // dependency still lags during a version-bump rollout). Bootstrapping over such a database
             // used to drop it in the create path's rollback, wiping the whole platform at service
@@ -740,31 +744,46 @@ internal class DefaultConfigurationCreatorService(
 
     private async Task ImportCkModel(ITenantContext tenantContext)
     {
-        if (!await tenantContext.IsCkModelExistingAsync(SystemIdentityCkIds.CkModelId))
+        // Install the Identity CK model in all tenants (needed for cross-tenant authentication
+        // and role mapping). The model is required for ExternalTenantUserMapping and
+        // OctoTenantIdentityProvider entities.
+        await EnsureEmbeddedCkModelAsync(tenantContext, SystemIdentityCkIds.CkModelId);
+
+        // We ensure that at least the system tenant contains a valid ck model. Other tenants
+        // need to be enabled manually by an admin.
+        await EnsureEmbeddedCkModelAsync(tenantContext, SystemNotificationCkIds.CkModelId);
+    }
+
+    /// <summary>
+    ///     Imports an embedded CK model unless the tenant already has it — by NAME, "embedded version or newer
+    ///     within the same major" (CK v2 Phase 1 G-H2). With the engine's downgrade guard (AB#5900) a tenant may
+    ///     keep a newer version than this service embeds; the former exact-version check then re-ran a (skipped)
+    ///     import on every setup. A higher installed major means this service is too old for the tenant: the
+    ///     tenant setup fails with a clear message instead of running against an incompatible model.
+    /// </summary>
+    private async Task EnsureEmbeddedCkModelAsync(ITenantContext tenantContext, CkModelId embedded)
+    {
+        var compatibility = await CkModelCompatibility.GetAsync(tenantContext, embedded);
+        switch (compatibility.State)
         {
-            // Install the Identity CK model in all tenants (needed for cross-tenant authentication
-            // and role mapping). The model is required for ExternalTenantUserMapping and
-            // OctoTenantIdentityProvider entities.
-            OperationResult operationResult = new();
-            await tenantContext.ImportCkModelAsync(SystemIdentityCkIds.CkModelId, operationResult);
-            if (operationResult.HasErrors || operationResult.HasFatalErrors)
-            {
-                throw InitializationException.ImportCkModelFailed(tenantContext.TenantId,
-                    operationResult.GetMessages());
-            }
+            case CkModelCompatibilityState.Same:
+                return;
+            case CkModelCompatibilityState.NewerSameMajor:
+                logger.LogInformation(
+                    "Tenant '{TenantId}' has CK model '{InstalledModelId}', newer than the embedded '{EmbeddedModelId}'; " +
+                    "keeping it (no import)", tenantContext.TenantId, compatibility.Installed, embedded);
+                return;
+            case CkModelCompatibilityState.NewerMajor:
+                throw new InitializationException(
+                    CkModelCompatibility.TooOldMessage(tenantContext.TenantId, compatibility));
         }
 
-        if (!await tenantContext.IsCkModelExistingAsync(SystemNotificationCkIds.CkModelId))
+        OperationResult operationResult = new();
+        await tenantContext.ImportCkModelAsync(embedded, operationResult);
+        if (operationResult.HasErrors || operationResult.HasFatalErrors)
         {
-            // We ensure that at least the system tenant contains a valid ck model.Other tenants
-            // need to be enabled manually by an admin.
-            OperationResult operationResult = new();
-            await tenantContext.ImportCkModelAsync(SystemNotificationCkIds.CkModelId, operationResult);
-            if (operationResult.HasErrors || operationResult.HasFatalErrors)
-            {
-                throw InitializationException.ImportCkModelFailed(tenantContext.TenantId,
-                    operationResult.GetMessages());
-            }
+            throw InitializationException.ImportCkModelFailed(tenantContext.TenantId,
+                operationResult.GetMessages());
         }
     }
 
@@ -823,6 +842,10 @@ internal class DefaultConfigurationCreatorService(
         return merged;
     }
 
+    /// <summary>The range <c>[embedded, nextMajor)</c>; the upgrade service uses its floor as the target.</summary>
+    internal static CkModelIdVersionRange EmbeddedOrNewerSameMajor(CkModelId embedded) =>
+        new(embedded.Name, $"[{embedded.Version},{embedded.Version.Major + 1}.0)");
+
     private async Task RunCkModelMigrationsAsync(
         ITenantContext tenantContext,
         IReadOnlyDictionary<string, string>? previousSchemaVersions = null)
@@ -834,11 +857,14 @@ internal class DefaultConfigurationCreatorService(
 
         var ckModelIds = new List<CkModelIdVersionRange>
         {
-            // System CK model (base model, updated via EnsureSystemCkModelAsync)
-            SystemCkIds.CkModelId.ToVersionRange(),
+            // System CK model (base model, updated via EnsureSystemCkModelAsync).
+            // G-H2: "embedded or newer within the same major", not the exact version: with the engine's
+            // downgrade guard a tenant may keep a newer model, which the upgrade service then keeps (INFO)
+            // instead of warning on every setup that it is outside an exact [x.y.z] range.
+            EmbeddedOrNewerSameMajor(SystemCkIds.CkModelId),
             // Identity and Notification CK models
-            SystemIdentityCkIds.CkModelId.ToVersionRange(),
-            SystemNotificationCkIds.CkModelId.ToVersionRange()
+            EmbeddedOrNewerSameMajor(SystemIdentityCkIds.CkModelId),
+            EmbeddedOrNewerSameMajor(SystemNotificationCkIds.CkModelId)
         };
 
         logger.LogInformation(

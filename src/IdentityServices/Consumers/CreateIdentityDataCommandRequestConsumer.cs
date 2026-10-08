@@ -1,3 +1,4 @@
+using IdentityServerPersistence.Services;
 using Duende.IdentityModel;
 using Meshmakers.Octo.Backend.IdentityServices.OpenIddict;
 using IdentityServerPersistence;
@@ -33,12 +34,27 @@ public class CreateIdentityDataCommandRequestConsumer(
 
         var tenantRepository = tenantContext.GetTenantRepository();
 
-        // That means that the tenant is not configured to use an
-        // own identity management. We do nothing in this case and return information to the producer
-        if (!await tenantContext.IsCkModelExistingAsync(SystemIdentityCkIds.CkModelId))
+        // By name, "embedded version or newer within the same major" (CK v2 Phase 1 G-H2): with the engine's
+        // downgrade guard a tenant may keep a NEWER System.Identity than this service embeds, and the former
+        // exact-version check answered "no identity CK" for it.
+        var identityModel = await CkModelCompatibility.GetAsync(tenantContext, SystemIdentityCkIds.CkModelId);
+        if (identityModel.State == CkModelCompatibilityState.NewerMajor)
         {
+            // This service is too old for the tenant. CreateIdentityDataResult has no dedicated value (contract in
+            // octo-common-services), so the producer gets the "no identity CK" answer; the reason is logged here.
+            logger.LogError("Identity data for tenant '{TenantId}' not created: {Reason}", message.TenantId,
+                CkModelCompatibility.TooOldMessage(message.TenantId, identityModel));
             await context.RespondAsync(new EnumCommandResponse<CreateIdentityDataResult>
-            { Response = CreateIdentityDataResult.FailedTenantHasNoIdentityCk });
+                { Response = CreateIdentityDataResult.FailedTenantHasNoIdentityCk });
+            return;
+        }
+
+        if (!identityModel.IsSatisfied)
+        {
+            // That means that the tenant is not configured to use an
+            // own identity management. We do nothing in this case and return information to the producer
+            await context.RespondAsync(new EnumCommandResponse<CreateIdentityDataResult>
+                { Response = CreateIdentityDataResult.FailedTenantHasNoIdentityCk });
             return;
         }
 
