@@ -297,6 +297,9 @@ out of `ExportRt`.
   `<...>` / `TODO_SET_*` are ordinary values); null/"" leave the attribute absent, and
   `IdentityProviderStore` carries the stored envelope over on replace (the engine does the same).
 
+- **Rollout:** pilot runbook for test-2 (preconditions, verification, rollback):
+  `rollout-identity-secret-phase3-test2.md`.
+
 ### OAuth Provider Pattern
 
 ```csharp
