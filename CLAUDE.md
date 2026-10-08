@@ -1007,8 +1007,9 @@ AB#5061 split the secrets there was nothing to tell apart. `MirrorSecretUsageTel
   reaches the code at all.
 - **Output** — event id `50650`, structured `MirrorSecretKind` / `ClientId` / `TenantId`, rendered as
   `MirrorSecretUsage secretKind=inherited clientId=… tenantId=…`. Inherited use at **Warning**, own
-  use at Information. Loki:
-  `{namespace="octo", container="identity"} |= "MirrorSecretUsage" |= "secretKind=inherited"`.
+  use at Information. Dash0 (dataset = cluster): filters `k8s.container.name is identity`,
+  `otel.log.body contains MirrorSecretUsage`, `otel.log.body contains secretKind=inherited`
+  (`/octo-logs` skill).
 - 🔴 **No secret material is ever logged** — not the credential, not the stored hash, not a prefix.
   Pinned against the **rendered** output via `CapturingLogger<T>`, not against format strings.
 - **Log-only on purpose.** AB#5058's refusal next door persists an audit entry via

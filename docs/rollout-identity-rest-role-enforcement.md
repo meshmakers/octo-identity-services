@@ -79,7 +79,7 @@ clients/API resources/identity providers. Then re-run step 1 until no `FINDING` 
    `CommunicationManagement`); CI/provisioning (`ci-deploy`, `claude-agent`) runs one read
    command against the identity API.
 5. **Logs** for 30-60 min: no unexpected `Identity API call denied` lines
-   (Loki: `{namespace="octo", container="identity"} |= "AB#5859"`). Evaluate a log extract with the script:
+   (Dash0, dataset `<env>`: `k8s.container.name is identity` + `otel.log.body contains AB#5859`). Evaluate a log extract with the script:
 
 ```bash
 scripts/identity-rest-role-precheck.sh --warn-log identity-<env>.log --context <env>_octosystem

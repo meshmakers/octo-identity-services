@@ -1177,13 +1177,16 @@ MirrorSecretUsage secretKind=inherited clientId=ci-deploy tenantId=customer-a
 
 with `MirrorSecretKind` / `ClientId` / `TenantId` as structured fields and event id `50650`.
 Inherited use is logged at **Warning**, own use at Information — the inherited count is the number
-that has to reach zero. Per environment:
+that has to reach zero. Per environment (Dash0 dataset = cluster name, via the Dash0 UI or the
+`mcp__dash0__sql` tool):
 
-```logql
-{namespace="octo", container="identity"} |= "MirrorSecretUsage" |= "secretKind=inherited"
+```sql
+SELECT count() FROM logs
+WHERE resource_attributes['k8s.container.name'] = 'identity'
+  AND body LIKE '%MirrorSecretUsage%' AND body LIKE '%secretKind=inherited%'
 ```
 
-answers *“does anybody still authenticate with the inherited secret?”*; grouping the same query by
+answers *“does anybody still authenticate with the inherited secret?”*; grouping the same lines by
 `clientId` / `tenantId` names who and where, which is the migration list for step 2.
 
 🔴 **No secret material is ever written** — not the credential, not the stored hash, not a prefix of
