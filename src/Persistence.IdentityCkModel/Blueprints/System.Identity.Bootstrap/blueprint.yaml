@@ -1,12 +1,27 @@
 $schema: https://schemas.meshmakers.cloud/blueprint-meta.schema.json
-blueprintId: System.Identity.Bootstrap-1.3.1
+blueprintId: System.Identity.Bootstrap-1.5.0
 description: |
   Service-managed Identity tenant seed — system + every child tenant. Provides
-  the default role set (14 roles), the five OIDC identity resources, three API
+  the default role set (16 roles), the five OIDC identity resources, three API
   scopes (full-access / read-only / data-model-management), the OctoApi resource,
   the MCP resource indicator, the OAuth client baseline (OctoTool / IdentityServices
   Swagger / Refinery Studio SPA / MCP Services Swagger + Device / Platform Services
   Swagger) and the TenantOwners group with full role assignment.
+
+  1.5.0 (AB#6180, epic AB#6171): adds the tenant roles `FileManagement` (660…61)
+  and `FileViewer` (660…62) for the platform file system (System/FileSystemItem,
+  Studio "Files" page) — decoupled from ReportingManagement / ReportingViewer.
+  TenantOwners (660…40) gets both assigned; the version bump makes every existing
+  tenant re-import the seed. The initial tenant administrator
+  (`UserManagementService.CreateAdminUserAsync`) is granted both directly. Every
+  user, group, client and external tenant user mapping that holds
+  ReportingManagement / ReportingViewer directly receives FileManagement /
+  FileViewer once, after the apply (`FileRoleGrant`, run-once marker
+  `FileRoleGrant`), so nobody loses access when the Studio switches roles.
+  Version 1.4.0 and rtId 660…60 are skipped on purpose: both are taken by the
+  SecretManagement role of AB#5544 (branch feat/gerald/identity-secret-phase3),
+  which has not reached main yet — whichever lands second must re-bump above the
+  other.
 
   1.2.0 (AB#4388): adds the `octo-platformServices-swagger` client (660…36) for
   the Swagger UI now exposed by octo-platform-services (authorization code +
@@ -131,7 +146,7 @@ ckModelDependencies:
 # All files below are merged into ONE runtime model before the import runs, so the order
 # is presentation only and associations may cross files (the UserManagement role in
 # roles.yaml grants the DataPermission in data-permissions.yaml; the TenantOwners group
-# in groups.yaml references all fourteen roles).
+# in groups.yaml references all sixteen roles).
 seedDataPaths:
   - seed-data/roles.yaml
   - seed-data/identity-resources.yaml

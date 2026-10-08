@@ -453,6 +453,36 @@ Every tenant is provisioned with a `TenantOwners` group that has all 10 default 
 - Provisioned to child tenants via `EnsureGroupInChildTenantAsync()`
 - Migrated to existing tenants via `IdentityAssociationMigration` (migration 9→10)
 
+### File Roles and the One-Time Grant from the Reporting Roles (AB#6180)
+
+`System.Identity.Bootstrap` 1.5.0 seeds the tenant roles `FileManagement` (rtId `660…61`) and `FileViewer`
+(rtId `660…62`) for the platform file system (`System/FileSystemItem`, Studio "Files" page, epic AB#6171
+decision D5) and assigns both to `TenantOwners`; a new tenant's initial administrator gets both from
+`UserManagementService.CreateAdminUserAsync`. (`660…60` and blueprint 1.4.0 are taken by `SecretManagement`,
+AB#5544.) Existing tenants receive them once, automatically, through `FileRoleGrant`
+(`src/IdentityServerPersistence/Services/FileRoles/`), so nobody loses access when the Studio and the file
+APIs switch from the Reporting roles to the File roles:
+
+- **When:** in `DefaultConfigurationCreatorService.SetupTenantAsync`, right after the blueprint apply (the
+  roles must exist, so this is deliberately not an `IMigration` — infrastructure migrations run before the
+  blueprint). `SetupTenantAsync` runs for every tenant on identity startup and on tenant create/update, so the
+  first identity start with blueprint 1.5.0 grants them.
+- **Who** (`FileRoleGrantPlanner`, pure and unit-tested): `ReportingManagement` → `FileManagement`,
+  `ReportingViewer` → `FileViewer`, mirrored on every **direct** holder:
+  - users, groups and clients with an `AssignedRole` edge to the Reporting role get an `AssignedRole` edge to
+    the File role (a group is granted on the group itself, so its members — users, clients, external tenant
+    user mappings, nested groups — inherit the File role exactly as they inherited the Reporting role);
+  - external tenant user mappings whose `MappedRoleIds` contain the Reporting role's rtId get the File role's
+    rtId appended (existing entries stay);
+  - subjects that already hold the File role are skipped (e.g. `TenantOwners` after the 1.5.0 apply).
+  - External identity-provider group rules (`DefaultGroupRtId`, `EmailDomainGroupRule.TargetGroupRtId`) target
+    groups, not roles, and are covered by the group grant.
+- **Additive and once:** nothing is removed. Afterwards the tenant configuration row `FileRoleGrant`
+  (`IdentityServiceConstants.FileRoleGrantKey`) records the run with the granted assignments; while it exists the
+  step does nothing, so an operator who later removes a File role from someone does not see it come back. If a
+  File role does not exist yet, nothing is written and no marker is recorded (retried on the next setup). A
+  failure is logged and does not fail tenant setup.
+
 ## Migration System
 
 ### Migration Pattern

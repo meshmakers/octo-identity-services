@@ -1,5 +1,6 @@
 using IdentityServerPersistence;
 using IdentityServerPersistence.Configuration.Options;
+using IdentityServerPersistence.Services.FileRoles;
 using IdentityServerPersistence.Services.Migrations;
 using IdentityServerPersistence.SystemStores;
 using Meshmakers.Octo.Backend.IdentityServices.Resources;
@@ -277,6 +278,23 @@ internal class DefaultConfigurationCreatorService(
         // edges. The pending row is deleted on success — if Identity crashes mid-restore the
         // next startup retries with the same data.
         await RestorePendingRoleAssignmentsAsync(tenantContext);
+
+        // AB#6180 (epic AB#6171, D5): one-time grant of FileManagement / FileViewer (blueprint 1.5.0,
+        // 660…61/62) to every direct holder of ReportingManagement / ReportingViewer — users, groups, clients
+        // and external tenant user mappings — so nobody loses file-system access when the Studio and the file
+        // APIs switch roles. Must run after the blueprint apply above (the roles have to exist); guarded by the
+        // FileRoleGrant tenant-configuration marker so it runs once per tenant. Additive only. A failure is
+        // logged, not fatal: the tenant keeps working and the next setup retries (no marker).
+        try
+        {
+            await FileRoleGrant.EnsureAsync(tenantContext, logger);
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex,
+                "One-time File role grant to the Reporting role holders failed for tenant '{TenantId}'; " +
+                "retried on the next tenant setup", tenantId);
+        }
 
         // Child-tenant client mirror provisioning runs AFTER the blueprint apply has guaranteed
         // the parent tenant's RtClient entities exist. Idempotent — runs on every startup so
