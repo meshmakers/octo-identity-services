@@ -473,7 +473,11 @@ automatically, through `SecretManagementAdminGrant`
     `SecretManagement` through such a group gets a direct `AssignedRole` edge;
   - the `TenantOwners` group (`660…40`) always;
   - `AdminPanelManagement` alone is **not** enough — secret sweeps stay a separate privilege. Clients and
-    external tenant user mappings are not considered (cross-tenant shadow users are ordinary `RtUser`s).
+    external tenant user mappings are not considered as individual subjects (cross-tenant shadow users are
+    ordinary `RtUser`s). A role granted on a **group** is inherited by all of its members, including client
+    service accounts and external tenant user mappings in that group — the same rule as every other group
+    role. In particular every member of `TenantOwners` gets it, which includes parent-tenant administrators
+    provisioned into a child tenant through `provisionCurrentUser` (AB#5708 mapping in `TenantOwners`).
 - **Additive and once:** only `AssignedRole` insert edges are written, nothing is removed. Afterwards the
   tenant configuration row `SecretManagementAdminGrant` (`IdentityServiceConstants.SecretManagementAdminGrantKey`)
   records the run with the granted group/user rtIds; while it exists the step does nothing, so an operator

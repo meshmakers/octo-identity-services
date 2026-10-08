@@ -61,7 +61,7 @@ public class IdentityProviderStore(IMultiTenancyResolverService multiTenancyReso
 
     public async Task StoreAsync(RtIdentityProvider identityProvider)
     {
-        var session = await TenantRepository.GetSessionAsync();
+        using var session = await TenantRepository.GetSessionAsync();
         session.StartTransaction();
 
         var result = await TenantRepository.GetRtEntityByRtIdAsync<RtIdentityProvider>(session, identityProvider.RtId);

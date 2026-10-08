@@ -308,6 +308,17 @@ Azure Entra ID providers carry a `clientSecret` (CK value type `Secret`, stored 
   is not in the key ring (e.g. restored from another environment) is kept stored but reported as
   `false` until the key is added to the ring or the secret is re-entered. Other provider types omit
   the field. It is ignored on input.
+- They also carry `clientSecretKeyMissing` (`true` when the stored secret is encrypted with a key id
+  that is not in this host's key ring — the case above) and `clientSecretSetAt` (UTC time the current
+  encrypted secret was written; `null` for legacy clear text and when no secret is set). Both are
+  computed from the stored form and ignored on input.
+- With `SecretEncryption:StrictMode` on, a secret still stored as legacy clear text is reported as
+  `clientSecretIsSet: true` but cannot be read, so the provider is skipped at sign-in until the encrypt
+  sweep has run or the secret is re-entered (strict mode is enabled only after the sweep reports zero
+  clear-text values).
+- `POST` / `PUT` with a new `clientSecret` on a host without a key ring answer **503** with
+  `application/problem+json`, `code: "SecretEncryptionNotConfigured"` (nothing is stored). A `PUT`
+  without a new secret still works there and keeps the stored value.
 
 ### Email Domain Group Rules (`/{tenantId}/v1/emailDomainGroupRules`)
 
