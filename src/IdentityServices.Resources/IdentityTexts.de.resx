@@ -466,7 +466,7 @@
         <value>Benutzername '{0}' ist ungültig, darf nur Buchstaben oder Ziffern enthalten.</value>
     </data>
     <data name="Backend_Persistence_Identity_PasswordRequiresDigit" xml:space="preserve">
-        <value>wörter müssen mindestens eine Ziffer ('0'-'9') haben.</value>
+        <value>Passwörter müssen mindestens eine Ziffer ('0'-'9') enthalten.</value>
     </data>
     <data name="Backend_Persistence_Identity_PasswordRequiresUniqueChars" xml:space="preserve">
         <value>Passwörter müssen mindestens {0} verschiedene Zeichen enthalten.</value>

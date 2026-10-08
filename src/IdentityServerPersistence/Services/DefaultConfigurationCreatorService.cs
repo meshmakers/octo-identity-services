@@ -235,7 +235,29 @@ internal class DefaultConfigurationCreatorService(
         // Ensure that the identity ck model and notification ck model is imported
         await ImportCkModel(tenantContext);
 
-        // Run CK model data migrations (transforms existing runtime entities)
+        // Run CK model data migrations (transforms existing runtime entities).
+        //
+        // CK v2 D8 (AB#5902): the engine already runs the migration of every model it imports/updates in this
+        // setup (TenantContext.RunCkModelMigrationsForImportAsync) and records MigrationHistory at the new
+        // version. Handing the PRE-import schema versions to the upgrade service afterwards made it see
+        // "schema <old> older than MigrationHistory <new>", treat that as a manual downgrade and run the
+        // same migration a second time. A model whose schema version changed during this setup contributes
+        // its POST-import version, but only once MigrationHistory confirms that version (N2): if the
+        // engine's import-time migration failed (it only logs), the pre-import version stays so the
+        // migration is retried instead of being recorded as done. An import the engine skipped (e.g. its
+        // downgrade guard, tenant already has a newer version) leaves the schema version unchanged, so the
+        // model keeps its pre-import version.
+        if (previousSchemaVersions is { Count: > 0 } && runtimeRepositoryProvider != null &&
+            ckModelUpgradeService != null)
+        {
+            var postImportSchemaVersions = await runtimeRepositoryProvider
+                .GetSchemaVersionsAsync(tenantId, CancellationToken.None);
+            var migrationHistoryVersions = await ckModelUpgradeService
+                .GetInstalledVersionsAsync(tenantId, CancellationToken.None);
+            previousSchemaVersions = MergeSchemaVersionsAfterImport(previousSchemaVersions,
+                postImportSchemaVersions, migrationHistoryVersions);
+        }
+
         await RunCkModelMigrationsAsync(tenantContext, previousSchemaVersions);
 
         // we run the infrastructure migrations for each tenant context
@@ -767,6 +789,39 @@ internal class DefaultConfigurationCreatorService(
         return false;
     }
 
+
+    /// <summary>
+    ///     Builds the "installed schema versions" handed to the post-import data-migration run (CK v2 D8/N2, AB#5902).
+    /// </summary>
+    /// <remarks>
+    ///     A model's post-import version is used only when the import changed the schema version AND the
+    ///     latest successful MigrationHistory entry (<paramref name="migrationHistory" />, as returned by
+    ///     <see cref="ICkModelUpgradeService.GetInstalledVersionsAsync" />) is exactly that version, i.e. the
+    ///     engine's import-time migration demonstrably succeeded. The upgrade service then finds the model at
+    ///     its target and skips it (no second run, no false "downgrade" warning).
+    ///     In every other case the pre-import version is kept, so a failed import-time migration is retried —
+    ///     including when the model has no MigrationHistory row at all, where the post-import version would
+    ///     make the upgrade service record "already at target" and skip the data migration (N2).
+    ///     Models the import did not touch — including imports skipped by the engine's downgrade guard — keep
+    ///     their pre-import version.
+    /// </remarks>
+    internal static IReadOnlyDictionary<string, string> MergeSchemaVersionsAfterImport(
+        IReadOnlyDictionary<string, string> preImport,
+        IReadOnlyDictionary<string, string> postImport,
+        IReadOnlyDictionary<string, string> migrationHistory)
+    {
+        var merged = new Dictionary<string, string>(preImport.Count);
+        foreach (var (modelName, preVersion) in preImport)
+        {
+            var migratedByImport = postImport.TryGetValue(modelName, out var postVersion)
+                                   && postVersion != preVersion
+                                   && migrationHistory.TryGetValue(modelName, out var historyVersion)
+                                   && historyVersion == postVersion;
+            merged[modelName] = migratedByImport ? postVersion! : preVersion;
+        }
+
+        return merged;
+    }
 
     private async Task RunCkModelMigrationsAsync(
         ITenantContext tenantContext,

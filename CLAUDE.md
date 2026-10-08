@@ -614,6 +614,29 @@ a retriable not-ready condition (AB#4690).
 `PreUpdateTenant` + `PosUpdateTenant`, which makes every service — including this one — re-run
 `SetupAsync` for that tenant.
 
+### CK Model Data Migrations Run Once per Tenant Setup (CK v2 D8/N2, AB#5902)
+
+`DefaultConfigurationCreatorService.SetupTenantAsync` captures the tenant's schema versions **before** the
+CK model imports, imports System.Identity / System.Notification, and then runs its own data-migration pass
+(`RunCkModelMigrationsAsync` → `ICkModelUpgradeService.UpgradeModelsAsync`). The engine already migrates
+every model it imports or updates (`TenantContext.RunCkModelMigrationsForImportAsync`) and records
+`MigrationHistory` at the new version. Handing the stale pre-import versions to the second pass made the
+upgrade service read "schema older than MigrationHistory", assume a manual downgrade and run the same
+migration again (D8: every upgraded model was migrated twice per tenant, with a WARN each time). This was
+not concurrent setup: both runs are sequential inside one `SetupTenantAsync`.
+
+`MergeSchemaVersionsAfterImport(preImport, postImport, migrationHistory)` decides what the second pass sees:
+
+| Situation | Version handed over | Effect |
+|---|---|---|
+| Import changed the model **and** the latest successful `MigrationHistory` entry equals the post-import version | post-import | upgrade service finds the target → skip (no double run, no WARN) |
+| Import changed the model, but history is missing or behind (the engine's import-time migration failed; it only logs) | pre-import | migration is retried (N2: with the post-import version and no history row, the upgrade service would record "already at target" and silently skip it) |
+| Import did not change the model (already current, or skipped by the engine's downgrade guard because the tenant has a newer version) | pre-import | unchanged behaviour |
+
+History comes from `ICkModelUpgradeService.GetInstalledVersionsAsync` (latest successful row per model),
+the same source the upgrade service uses. Tests:
+`tests/IdentityServerPersistence.UnitTests/Services/DefaultConfigurationCreatorServiceSchemaVersionMergeTests.cs`.
+
 ### Admin Provisioning (Cross-Tenant Pre-Provisioning)
 
 The `AdminProvisioningController` allows users with the TenantManagement or UserManagement role to pre-provision cross-tenant user mappings in a **target tenant** without needing `allowed_tenants` for that tenant. Since AB#5859 the target must be the caller's own tenant or one of its registry descendants (system-tenant callers: any tenant) — `AdminProvisioningTargetScopeFilter`; before, the role was documented but not checked and any target was reachable. It is routed via the system tenant: `{tenantId}/v1/adminProvisioning/{targetTenantId}`.
@@ -1230,6 +1253,12 @@ copies are kept in sync by hand: **if you override `PasswordOptions` here (or bu
 `Require*` / `RequiredLength`), you MUST update that frontend validator and its inline message
 to match** (AB#4503 / Task 4524), otherwise the client-side hint silently diverges from what
 this service actually enforces.
+
+The policy error descriptions come from `IdentityTexts` (`src/IdentityServices.Resources`, English +
+German) in the **server culture**; clients must branch on `IdentityError.Code`, never on the
+description. `tests/IdentityServices.UnitTests/Resources/PasswordPolicyTextsTests.cs` pins that every
+German and English policy text is complete (CK v2 D7, AB#5902: the German `PasswordRequiresDigit` text
+was truncated to "wörter müssen …").
 
 User secrets ID: `173d8e91-b831-4e8a-a43f-672c57e6a4da`
 
