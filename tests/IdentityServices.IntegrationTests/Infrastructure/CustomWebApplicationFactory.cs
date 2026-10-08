@@ -17,6 +17,7 @@ using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.IdentityModel.Tokens;
+using OpenIddict.Server;
 using Xunit;
 
 namespace IdentityServices.IntegrationTests.Infrastructure;
@@ -305,6 +306,24 @@ public class CustomWebApplicationFactory : WebApplicationFactory<Program>, IAsyn
 
             // Signing/encryption: the host runs in the Development environment, where the
             // OpenIddict configuration registers development certificates (AB#4989/AB#4996).
+            // AddDevelopmentSigningCertificate() publishes EVERY matching certificate from the
+            // current user's X509 store (expired ones and concurrent-startup duplicates included),
+            // so the JWKS depended on the CI agent's persistent store (AB#5880). Replace both
+            // credential sets with one in-memory certificate. This Configure runs after the
+            // application's (factory services are applied after Program's registrations) and
+            // before OpenIddict's PostConfigure, which still derives key ids and validates.
+            services.Configure<OpenIddictServerOptions>(options =>
+            {
+                var certificate = TestSigningCertificate.Certificate;
+                options.SigningCredentials.Clear();
+                options.SigningCredentials.Add(
+                    new SigningCredentials(new X509SecurityKey(certificate), SecurityAlgorithms.RsaSha256));
+                options.EncryptionCredentials.Clear();
+                options.EncryptionCredentials.Add(new EncryptingCredentials(
+                    new X509SecurityKey(certificate),
+                    SecurityAlgorithms.RsaOAEP,
+                    SecurityAlgorithms.Aes256CbcHmacSha512));
+            });
 
             // Remove MassTransit hosted services that try to connect to RabbitMQ
             // This is critical - MassTransit registers a hosted service that connects on startup

@@ -120,6 +120,16 @@ Suite wirklich flakig macht. Bisher dreimal getreten:
 | System-Tenant-ID `octosystem` ⇒ statisches `DefaultConfigurationCreatorServiceBase.TenantsInHandling` | Fixtures überspringen still den CK-Import, dann `CkCacheException` | GUID-Suffix, Präfix gekürzt (AB#5117) |
 | **statisches `NLog.LogManager.Configuration`** | `ConfigurationException: LogManager configuration not found` aus `HostedInitializer.StartAsync`, wandernde Testmenge | Aufrufer tolerant (AB#5440) |
 
+**Machine-wide state counts too (AB#5880).** In the Development environment `OpenIddictConfiguration`
+calls `AddDevelopmentSigningCertificate()`, which publishes **every** certificate with subject
+`CN=OpenIddict Server Signing Certificate` from the current user's X509 store — expired ones and
+duplicates created by concurrently starting hosts included. On a long-lived CI agent that store
+persists across builds, so the JWKS depended on the agent (`TokenShapeGoldenTests.JwksDocument_*` saw
+two keys on `azure-devops-agents-ci-1` only). `CustomWebApplicationFactory` therefore replaces the
+signing and encryption credentials with one in-memory certificate (`Infrastructure/TestSigningCertificate.cs`),
+and the JWKS test asserts that this is the only published key. Never let a test host read key material
+from the user/machine store.
+
 Der NLog-Fall ist der einzige, den man **nicht** per-Fixture eindeutig machen kann: `Program.cs` lädt
 die globale Konfiguration am Entry-Point und räumt sie im `finally` mit `LogManager.Shutdown()` wieder
 ab (dort gegen den Segfault beim Prozessende auf Linux). Unter `WebApplicationFactory<Program>` läuft
