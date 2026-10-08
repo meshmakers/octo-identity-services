@@ -37,6 +37,31 @@ public static class IdentityServiceConstants
     public const string IdentityMigrationVersionKey = "IdentityServiceMigrations";
 
     /// <summary>
+    /// AB#6180: tenant role that may create, change and delete entries of the platform file system
+    /// (<c>System/FileSystemItem</c>). Seeded by <c>System.Identity.Bootstrap</c> 1.5.0 (660…61), granted to
+    /// the initial tenant administrator and, once, to every holder of <c>ReportingManagement</c>.
+    /// TODO(AB#6180): replace with <c>CommonConstants.FileManagementRole</c> once the octo-sdk build that
+    /// introduces it is in the NuGet feed.
+    /// </summary>
+    public const string FileManagementRole = "FileManagement";
+
+    /// <summary>
+    /// AB#6180: tenant role that may browse and download the platform file system (read-only). Seeded by
+    /// <c>System.Identity.Bootstrap</c> 1.5.0 (660…62), granted to the initial tenant administrator and, once,
+    /// to every holder of <c>ReportingViewer</c>.
+    /// TODO(AB#6180): replace with <c>CommonConstants.FileViewerRole</c> once the octo-sdk build that
+    /// introduces it is in the NuGet feed.
+    /// </summary>
+    public const string FileViewerRole = "FileViewer";
+
+    /// <summary>
+    /// AB#6180: TenantConfiguration row recording that the one-time grant of <see cref="FileManagementRole"/> /
+    /// <see cref="FileViewerRole"/> to the holders of the Reporting roles (<c>FileRoleGrant</c>) has run.
+    /// Present = never run again.
+    /// </summary>
+    public const string FileRoleGrantKey = "FileRoleGrant";
+
+    /// <summary>
     /// Phase 3 PR #4: TenantConfiguration row used by <c>PreBlueprintCleanupMigration</c> to hand
     /// captured User → Role and ExternalTenantUserMapping → Role assignments (by role name) over
     /// to the post-blueprint restore step in

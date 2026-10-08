@@ -1,3 +1,4 @@
+using IdentityServerPersistence;
 using Meshmakers.Octo.Communication.Contracts;
 using Meshmakers.Octo.Communication.Contracts.DataTransferObjects;
 using Meshmakers.Octo.Services.Infrastructure.CredentialGenerator;
@@ -58,6 +59,8 @@ public class UserManagementService(
             await TryAddRole(adminUser, CommonConstants.DashboardManagementRole);
             await TryAddRole(adminUser, CommonConstants.ReportingManagementRole);
             await TryAddRole(adminUser, CommonConstants.ReportingViewerRole);
+            await TryAddRole(adminUser, IdentityServiceConstants.FileManagementRole);
+            await TryAddRole(adminUser, IdentityServiceConstants.FileViewerRole);
         }
     }
 
