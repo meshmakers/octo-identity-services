@@ -52,7 +52,7 @@ public class ClientsController : ControllerBase
 
     // GET: system/v1/clients
     [HttpGet]
-    [Authorize(IdentityServiceConstants.IdentityApiReadOnlyPolicy)]
+    [Authorize(IdentityServiceConstants.IdentityTenantAdministrationReadPolicy)]
     [EndpointSummary("Returns all client definitions")]
     [ProducesResponseType(typeof(IEnumerable<ClientDto>), StatusCodes.Status200OK)]
     public async Task<IEnumerable<ClientDto>> Get()
@@ -63,7 +63,7 @@ public class ClientsController : ControllerBase
 
     // GET system/v1/clients/getPaged
     [HttpGet("GetPaged")]
-    [Authorize(IdentityServiceConstants.IdentityApiReadOnlyPolicy)]
+    [Authorize(IdentityServiceConstants.IdentityTenantAdministrationReadPolicy)]
     [EndpointSummary("Returns all client definitions using paging")]
     [ProducesResponseType(typeof(PagedResult<ClientDto>), StatusCodes.Status200OK)]
     public async Task<PagedResult<ClientDto>> Get([Required][FromQuery] PagingParams pagingParams)
@@ -90,7 +90,7 @@ public class ClientsController : ControllerBase
     }
 
     [HttpGet("{id}")]
-    [Authorize(IdentityServiceConstants.IdentityApiReadOnlyPolicy)]
+    [Authorize(IdentityServiceConstants.IdentityDirectoryReadPolicy)]
     [EndpointSummary("Returns client information based on it's client id")]
     [ProducesResponseType(typeof(ClientDto), StatusCodes.Status200OK)]
     public async Task<IActionResult> Get([Required][Description("ID of the client")] string id)
@@ -110,7 +110,7 @@ public class ClientsController : ControllerBase
 
     // GET system/v1/clients/{id}/roles
     [HttpGet("{id}/roles")]
-    [Authorize(IdentityServiceConstants.IdentityApiReadOnlyPolicy)]
+    [Authorize(IdentityServiceConstants.IdentityDirectoryReadPolicy)]
     [EndpointSummary("Returns the role IDs directly assigned to a client.")]
     [ProducesResponseType(typeof(List<string>), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
@@ -140,7 +140,7 @@ public class ClientsController : ControllerBase
     /// </summary>
     // GET system/v1/clients/{id}/actors
     [HttpGet("{id}/actors")]
-    [Authorize(IdentityServiceConstants.IdentityApiReadOnlyPolicy)]
+    [Authorize(IdentityServiceConstants.IdentityDirectoryReadPolicy)]
     [EndpointSummary("Returns the client IDs that may act for (impersonate) a client via MayActAs.")]
     [ProducesResponseType(typeof(List<string>), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
@@ -158,7 +158,7 @@ public class ClientsController : ControllerBase
 
     // PUT system/v1/clients/{id}/roles
     [HttpPut("{id}/roles")]
-    [Authorize(IdentityServiceConstants.IdentityApiReadWritePolicy)]
+    [Authorize(IdentityServiceConstants.IdentityTenantAdministrationWritePolicy)]
     [EndpointSummary("Replaces the directly-assigned roles of a client (replace-all).")]
     [ProducesResponseType(StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
@@ -178,7 +178,7 @@ public class ClientsController : ControllerBase
 
     // PUT system/v1/clients/{id}/roles/{roleName}
     [HttpPut("{id}/roles/{roleName}")]
-    [Authorize(IdentityServiceConstants.IdentityApiReadWritePolicy)]
+    [Authorize(IdentityServiceConstants.IdentityTenantAdministrationWritePolicy)]
     [EndpointSummary("Assigns a single role (by name) to a client.")]
     [ProducesResponseType(StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
@@ -206,7 +206,7 @@ public class ClientsController : ControllerBase
 
     // DELETE system/v1/clients/{id}/roles/{roleName}
     [HttpDelete("{id}/roles/{roleName}")]
-    [Authorize(IdentityServiceConstants.IdentityApiReadWritePolicy)]
+    [Authorize(IdentityServiceConstants.IdentityTenantAdministrationWritePolicy)]
     [EndpointSummary("Removes a single role (by name) from a client.")]
     [ProducesResponseType(StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
@@ -226,7 +226,7 @@ public class ClientsController : ControllerBase
 
     // POST api/Clients
     [HttpPost]
-    [Authorize(IdentityServiceConstants.IdentityApiReadWritePolicy)]
+    [Authorize(IdentityServiceConstants.IdentityTenantAdministrationWritePolicy)]
     [EndpointSummary("Creates a new client")]
     [ProducesResponseType(StatusCodes.Status200OK)]
     public async Task<IActionResult> Post(
@@ -268,7 +268,7 @@ public class ClientsController : ControllerBase
 
     // PUT api/Clients/5
     [HttpPut("{id}")]
-    [Authorize(IdentityServiceConstants.IdentityApiReadWritePolicy)]
+    [Authorize(IdentityServiceConstants.IdentityTenantAdministrationWritePolicy)]
     [EndpointSummary("Updates a client")]
     [ProducesResponseType(StatusCodes.Status200OK)]
     public async Task<IActionResult> Put(
@@ -309,7 +309,7 @@ public class ClientsController : ControllerBase
     // them across blueprint re-apply; the future DumpTenant --clean filter strips them from
     // sanitised exports. See concept doc §4.3 and §4.5.
     [HttpPost("{id}/overlayUris")]
-    [Authorize(IdentityServiceConstants.IdentityApiReadWritePolicy)]
+    [Authorize(IdentityServiceConstants.IdentityTenantAdministrationWritePolicy)]
     [EndpointSummary("Applies an overlay URI set to a client. Idempotent — duplicates are skipped.")]
     [ProducesResponseType(typeof(ApplyOverlayUrisResultDto), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
@@ -398,7 +398,7 @@ public class ClientsController : ControllerBase
     // central tenant-clean-export flow. The endpoint stays here because identity-services
     // is the owner of RtClient + ClientUriSources; the orchestration moves out.
     [HttpDelete("cleanOverlayEntries")]
-    [Authorize(IdentityServiceConstants.IdentityApiReadWritePolicy)]
+    [Authorize(IdentityServiceConstants.IdentityTenantAdministrationWritePolicy)]
     [EndpointSummary("Strips overlay URI entries from every client in the tenant. Idempotent — clients without matches are skipped (no DB write, no cache invalidation).")]
     [ProducesResponseType(typeof(CleanOverlayEntriesResultDto), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
@@ -569,7 +569,7 @@ public class ClientsController : ControllerBase
 
     // DELETE api/Clients/5
     [HttpDelete("{id}")]
-    [Authorize(IdentityServiceConstants.IdentityApiReadWritePolicy)]
+    [Authorize(IdentityServiceConstants.IdentityTenantAdministrationWritePolicy)]
     [EndpointSummary("Deletes a client")]
     [ProducesResponseType(StatusCodes.Status200OK)]
     public async Task<IActionResult> Delete([Required][Description("ID of the client")] string id)

@@ -27,8 +27,8 @@ namespace Meshmakers.Octo.Backend.IdentityServices.TenantApi.v1.Controllers;
 ///     operation — even from a whitelisted address.
 ///     <para>
 ///         Same shape and gating as <see cref="ExternalTenantUserMappingsController" />: bearer
-///         authentication, read on <see cref="IdentityServiceConstants.IdentityApiReadOnlyPolicy" />
-///         and write on <see cref="IdentityServiceConstants.IdentityApiReadWritePolicy" />.
+///         authentication, read on <see cref="IdentityServiceConstants.IdentityUserAdministrationReadPolicy" />
+///         and write on <see cref="IdentityServiceConstants.IdentityUserAdministrationWritePolicy" />.
 ///     </para>
 /// </remarks>
 [Authorize(AuthenticationSchemes = AuthenticationConstants.BearerAuthenticationScheme)]
@@ -40,7 +40,7 @@ public class EmailIdentifierBindingsController(
 {
     /// <summary>Lists every e-mail→user binding in the tenant.</summary>
     [HttpGet]
-    [Authorize(IdentityServiceConstants.IdentityApiReadOnlyPolicy)]
+    [Authorize(IdentityServiceConstants.IdentityUserAdministrationReadPolicy)]
     [EndpointSummary("Returns all e-mail→user verified-identifier bindings for the tenant.")]
     [ProducesResponseType(typeof(IEnumerable<EmailIdentifierBindingDto>), StatusCodes.Status200OK)]
     public async Task<ActionResult<IEnumerable<EmailIdentifierBindingDto>>> GetAll()
@@ -51,7 +51,7 @@ public class EmailIdentifierBindingsController(
 
     /// <summary>Binds (upserts) an e-mail address to a user as a Strong, admin-sourced identifier.</summary>
     [HttpPost]
-    [Authorize(IdentityServiceConstants.IdentityApiReadWritePolicy)]
+    [Authorize(IdentityServiceConstants.IdentityUserAdministrationWritePolicy)]
     [EndpointSummary("Binds an e-mail address to a user (admin verified whitelist, enrollment Strong).")]
     [ProducesResponseType(typeof(EmailIdentifierBindingResultDto), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
@@ -81,7 +81,7 @@ public class EmailIdentifierBindingsController(
 
     /// <summary>Removes the e-mail binding for the given address. Idempotent.</summary>
     [HttpDelete]
-    [Authorize(IdentityServiceConstants.IdentityApiReadWritePolicy)]
+    [Authorize(IdentityServiceConstants.IdentityUserAdministrationWritePolicy)]
     [EndpointSummary("Removes the e-mail→user binding for the given address.")]
     [ProducesResponseType(StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]

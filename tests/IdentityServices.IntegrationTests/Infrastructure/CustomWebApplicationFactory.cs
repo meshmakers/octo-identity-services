@@ -220,7 +220,7 @@ public class CustomWebApplicationFactory : WebApplicationFactory<Program>, IAsyn
             // Don't override the default schemes - IdentityServer needs its cookie auth.
             services.AddAuthentication()
                 .AddScheme<TestAuthHandlerOptions, TestAuthHandler>(
-                    TestAuthHandler.SchemeName, _ => { });
+                    TestAuthHandler.SchemeName, o => o.Roles = TestAuthDefaults.AdministratorRoles);
 
             // Configure the JWT Bearer scheme to forward all operations to the test
             // handler. This allows System API controllers (which require

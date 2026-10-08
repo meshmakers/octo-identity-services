@@ -91,7 +91,7 @@ Options for SEAMLESS switching (future, beyond AB#4338):
 1. **Silent cross-tenant token issuance with role re-resolution** (the only secure seamless path).
    Reuse the existing cross-tenant auto-login machinery (`/{parent}/api/auth/cross-tenant-token` →
    `/{child}/api/auth/cross-tenant-login`, which re-resolves roles in the target via
-   `SyncMappedRolesAsync` / `ExternalTenantUserMapping` — no credential prompt, no role leak) and
+   `ExternalTenantUserMapping` roles resolved at token time (AB#5708) — no credential prompt, no role leak) and
    extend it to mint a target-tenant **bearer access token** (today it yields a browser session).
    Real, security-sensitive feature; its own work item.
 2. **Authorize on `allowed_tenants`** instead of strict `tenant_id` — REJECTED: would leak roles across

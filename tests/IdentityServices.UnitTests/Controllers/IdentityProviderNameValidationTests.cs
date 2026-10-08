@@ -18,6 +18,8 @@ public class IdentityProviderNameValidationTests
     [InlineData("Entra-ID")]
     [InlineData("my.provider_1")]
     [InlineData("AAD")]
+    [InlineData("xtra")]                 // only the exact xt_ prefix is reserved
+    [InlineData("ParentTenant_xt")]
     public void IsProviderNameValid_AcceptsSafeNames(string name)
     {
         IdentityProvidersController.IsProviderNameValid(name).Should().BeTrue();
@@ -33,6 +35,9 @@ public class IdentityProviderNameValidationTests
     [InlineData("")]
     [InlineData("   ")]
     [InlineData(null)]
+    [InlineData("xt")]                   // AB#5708: JIT name would be xt_{email} — reserved shadow prefix
+    [InlineData("XT")]
+    [InlineData("xt_meshmakers")]        // would unwind to (meshmakers, {email})
     public void IsProviderNameValid_RejectsUnsafeNames(string? name)
     {
         IdentityProvidersController.IsProviderNameValid(name).Should().BeFalse();

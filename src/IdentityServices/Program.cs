@@ -4,6 +4,7 @@ using IdentityServerPersistence.Services.DynamicClientRegistration;
 using IdentityServerPersistence.SystemStores;
 using Meshmakers.Octo.Backend.Authentication.Consumers;
 using Meshmakers.Octo.Backend.Authentication.DynamicAuth;
+using Meshmakers.Octo.Backend.IdentityServices.Authorization;
 using Meshmakers.Octo.Backend.IdentityServices.Configuration;
 using Meshmakers.Octo.Backend.IdentityServices.Consumers;
 using Meshmakers.Octo.Backend.IdentityServices.Cookies;
@@ -31,6 +32,7 @@ using Meshmakers.Octo.Services.Notifications.Generated.System.Notification.v2;
 using Meshmakers.Octo.Services.Notifications.Services;
 using Meshmakers.Octo.Services.Observability;
 using Meshmakers.Octo.Services.Swagger.Configuration;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Cors.Infrastructure;
 using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.AspNetCore.Identity;
@@ -258,21 +260,14 @@ try
     builder.Services.AddAuthentication()
         .AddJwtBearer(jwt => { jwt.Audience = CommonConstants.OctoApi; });
 
-    builder.Services.AddAuthorization(options =>
-    {
-        options.AddPolicy(IdentityServiceConstants.IdentityApiReadOnlyPolicy, authorizationPolicyBuilder =>
-        {
-            authorizationPolicyBuilder.RequireClaim(InfrastructureCommon.ClaimScope,
-                CommonConstants.OctoApiFullAccess,
-                CommonConstants.OctoApiReadOnly);
-        });
-
-        options.AddPolicy(IdentityServiceConstants.IdentityApiReadWritePolicy, authorizationPolicyBuilder =>
-        {
-            authorizationPolicyBuilder.RequireClaim(InfrastructureCommon.ClaimScope,
-                CommonConstants.OctoApiFullAccess);
-        });
-    });
+    // AB#5859: the tenant REST API requires a tenant role on top of the scope for every
+    // administration endpoint (same rule as the GraphQL IdentityAdministrationPolicy).
+    // OCTO_IDENTITYAPIAUTHORIZATION__ROLEENFORCEMENT=Warn only logs missing roles (transition).
+    builder.Services.Configure<IdentityApiAuthorizationOptions>(options =>
+        builder.Configuration.GetSection(IdentityApiAuthorizationOptions.SectionName).Bind(options));
+    builder.Services.AddSingleton<IAuthorizationHandler, IdentityApiRoleAuthorizationHandler>();
+    builder.Services.AddSingleton<IAuthorizationHandler, IdentityApiOwnTenantAuthorizationHandler>();
+    builder.Services.AddAuthorization(options => options.AddIdentityApiPolicies());
 
     builder.Services.AddOctoApiVersioningAndDocumentation(options =>
     {
@@ -296,6 +291,30 @@ try
             },
             {
                 IdentityServiceConstants.IdentityApiReadWritePolicy,
+                [CommonConstants.OctoApiFullAccess]
+            },
+            {
+                IdentityServiceConstants.IdentityUserAdministrationReadPolicy,
+                [CommonConstants.OctoApiFullAccess, CommonConstants.OctoApiReadOnly]
+            },
+            {
+                IdentityServiceConstants.IdentityUserAdministrationWritePolicy,
+                [CommonConstants.OctoApiFullAccess]
+            },
+            {
+                IdentityServiceConstants.IdentityTenantAdministrationReadPolicy,
+                [CommonConstants.OctoApiFullAccess, CommonConstants.OctoApiReadOnly]
+            },
+            {
+                IdentityServiceConstants.IdentityTenantAdministrationWritePolicy,
+                [CommonConstants.OctoApiFullAccess]
+            },
+            {
+                IdentityServiceConstants.IdentityDirectoryReadPolicy,
+                [CommonConstants.OctoApiFullAccess, CommonConstants.OctoApiReadOnly]
+            },
+            {
+                IdentityServiceConstants.IdentityServiceAdministrationPolicy,
                 [CommonConstants.OctoApiFullAccess]
             }
         };

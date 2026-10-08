@@ -30,7 +30,7 @@ public class ExternalTenantUserMappingsController(
     /// Returns all external tenant user mappings.
     /// </summary>
     [HttpGet]
-    [Authorize(IdentityServiceConstants.IdentityApiReadOnlyPolicy)]
+    [Authorize(IdentityServiceConstants.IdentityUserAdministrationReadPolicy)]
     [EndpointSummary("Returns all external tenant user mappings.")]
     [ProducesResponseType(typeof(IEnumerable<ExternalTenantUserMappingDto>), StatusCodes.Status200OK)]
     public async Task<ActionResult<IEnumerable<ExternalTenantUserMappingDto>>> GetAll(
@@ -63,7 +63,7 @@ public class ExternalTenantUserMappingsController(
     /// Returns a specific external tenant user mapping by ID.
     /// </summary>
     [HttpGet("{rtId}")]
-    [Authorize(IdentityServiceConstants.IdentityApiReadOnlyPolicy)]
+    [Authorize(IdentityServiceConstants.IdentityUserAdministrationReadPolicy)]
     [EndpointSummary("Returns an external tenant user mapping by its ID.")]
     [ProducesResponseType(typeof(ExternalTenantUserMappingDto), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
@@ -84,7 +84,7 @@ public class ExternalTenantUserMappingsController(
     /// Creates a new external tenant user mapping.
     /// </summary>
     [HttpPost]
-    [Authorize(IdentityServiceConstants.IdentityApiReadWritePolicy)]
+    [Authorize(IdentityServiceConstants.IdentityUserAdministrationWritePolicy)]
     [EndpointSummary("Creates a new external tenant user mapping.")]
     [ProducesResponseType(typeof(ExternalTenantUserMappingDto), StatusCodes.Status201Created)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
@@ -122,7 +122,7 @@ public class ExternalTenantUserMappingsController(
     /// Updates an existing external tenant user mapping (changes roles).
     /// </summary>
     [HttpPut("{rtId}")]
-    [Authorize(IdentityServiceConstants.IdentityApiReadWritePolicy)]
+    [Authorize(IdentityServiceConstants.IdentityUserAdministrationWritePolicy)]
     [EndpointSummary("Updates an existing external tenant user mapping.")]
     [ProducesResponseType(typeof(ExternalTenantUserMappingDto), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
@@ -149,7 +149,7 @@ public class ExternalTenantUserMappingsController(
     /// Deletes an external tenant user mapping.
     /// </summary>
     [HttpDelete("{rtId}")]
-    [Authorize(IdentityServiceConstants.IdentityApiReadWritePolicy)]
+    [Authorize(IdentityServiceConstants.IdentityUserAdministrationWritePolicy)]
     [EndpointSummary("Deletes an external tenant user mapping.")]
     [ProducesResponseType(StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]

@@ -15,24 +15,83 @@ public interface IGroupRoleResolver
     /// </summary>
     Task<IReadOnlySet<string>> ResolveEffectiveRoleIdsAsync(string subjectRtId);
 
+    /// <summary>
+    /// Resolves all role IDs a user receives through groups and cross-tenant user mappings — every
+    /// role except the user's direct <c>AssignedRole</c> edges (AB#5708):
+    /// <list type="bullet">
+    ///     <item>groups the user is a member of;</item>
+    ///     <item>for a cross-tenant shadow user (<c>xt_…</c>): every <c>ExternalTenantUserMapping</c> of
+    ///         this tenant whose source identity is a tier of the user's name chain contributes its
+    ///         <c>MappedRoleIds</c> and the roles of the groups the mapping is a member of (e.g.
+    ///         <c>TenantOwners</c>).</item>
+    /// </list>
+    /// Evaluated on every call (token issuance, refresh, role checks) — never materialised on the
+    /// user — so a role a blueprint adds to a group later is effective on the next token, and a removed
+    /// membership or mapping takes its roles away with it.
+    /// </summary>
+    /// <param name="userRtId">The local user's RtId.</param>
+    /// <param name="userName">The local user's name; only shadow user names unwind to mappings.</param>
+    Task<IReadOnlySet<string>> ResolveEffectiveUserRoleIdsAsync(string userRtId, string? userName);
 }
 
-internal class GroupRoleResolver(IGroupStore groupStore) : IGroupRoleResolver
+internal class GroupRoleResolver(
+    IGroupStore groupStore,
+    IExternalTenantUserMappingStore externalTenantUserMappingStore,
+    ICrossTenantShadowUserChainResolver shadowUserChainResolver) : IGroupRoleResolver
 {
     private const int MaxDepth = 10;
 
-    public async Task<IReadOnlySet<string>> ResolveEffectiveRoleIdsAsync(string subjectRtId)
+    public Task<IReadOnlySet<string>> ResolveEffectiveRoleIdsAsync(string subjectRtId)
+        => ResolveGroupRoleIdsAsync(new HashSet<string> { subjectRtId });
+
+    public async Task<IReadOnlySet<string>> ResolveEffectiveUserRoleIdsAsync(string userRtId, string? userName)
     {
-        // Find all groups where this subject is a direct member (via GroupMember associations).
+        var subjectIds = new HashSet<string> { userRtId };
+        var mappedRoleIds = new HashSet<string>();
+
+        // Registry-aware unwinding: a tenant id with an underscore must not be misread as a nested chain.
+        var sourceChain = await shadowUserChainResolver.GetSourceChainAsync(userName);
+        if (sourceChain.Count > 0)
+        {
+            var mappings = await externalTenantUserMappingStore.FindBySourceUserNamesAsync(sourceChain);
+            foreach (var mapping in mappings)
+            {
+                subjectIds.Add(mapping.RtId.ToString());
+
+                if (mapping.MappedRoleIds == null)
+                {
+                    continue;
+                }
+
+                foreach (var roleId in mapping.MappedRoleIds)
+                {
+                    // MappedRoleIds is a free string list, not an association: skip anything that
+                    // cannot be a role rtId instead of failing token issuance on it.
+                    if (OctoObjectId.TryParse(roleId, out _))
+                    {
+                        mappedRoleIds.Add(roleId);
+                    }
+                }
+            }
+        }
+
+        var roleIds = new HashSet<string>(await ResolveGroupRoleIdsAsync(subjectIds));
+        roleIds.UnionWith(mappedRoleIds);
+        return roleIds;
+    }
+
+    private async Task<IReadOnlySet<string>> ResolveGroupRoleIdsAsync(IReadOnlySet<string> subjectRtIds)
+    {
+        // Find all groups where one of the subjects is a direct member (via GroupMember associations).
         // GetAllMemberSubjectIdsAsync returns members of any CK type (user, client, external
-        // mapping), so the same traversal serves both user and client subjects.
+        // mapping), so the same traversal serves user, client and mapping subjects.
         var allGroups = (await groupStore.GetAllAsync()).ToList();
 
         var directGroupIds = new List<OctoObjectId>();
         foreach (var group in allGroups)
         {
             var memberIds = await groupStore.GetAllMemberSubjectIdsAsync(group.RtId);
-            if (memberIds.Contains(subjectRtId))
+            if (memberIds.Any(subjectRtIds.Contains))
             {
                 directGroupIds.Add(group.RtId);
             }

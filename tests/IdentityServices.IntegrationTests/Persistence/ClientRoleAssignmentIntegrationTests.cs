@@ -112,7 +112,7 @@ public class ClientRoleAssignmentIntegrationTests : IClassFixture<IdentityServic
         var repo = _fixture.GetSystemContext().GetSystemTenantRepositoryAsAdmin();
         var resolver = new FixedTenantResolver(repo);
         var groupStore = new GroupStore(resolver);
-        var groupRoleResolver = new GroupRoleResolver(groupStore);
+        var groupRoleResolver = new GroupRoleResolver(groupStore, new ExternalTenantUserMappingStore(resolver), new CrossTenantShadowUserChainResolver(_fixture.GetSystemContext()));
         var clientRoleStore = new ClientRoleStore(
             resolver, groupRoleResolver, NullLogger<ClientRoleStore>.Instance);
         return (clientRoleStore, groupStore, repo);

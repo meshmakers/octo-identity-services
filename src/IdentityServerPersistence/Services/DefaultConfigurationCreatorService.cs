@@ -43,7 +43,10 @@ internal class DefaultConfigurationCreatorService(
     // AB#4829 — the base's Deleting gate: while a tenant delete's durable tombstone exists, setup is
     // skipped so a late PosUpdateTenant echo can neither re-seed a retry row nor resurrect the dropped
     // database via Identity's CK import.
-    ITenantLifecycleStore? tenantLifecycleStore = null)
+    ITenantLifecycleStore? tenantLifecycleStore = null,
+    // AB#5540 — post-setup hooks (e.g. auth scheme registration in the Authentication assembly) for
+    // tenants that become usable after cold start, most importantly via the background setup retry.
+    IEnumerable<ITenantSetupCompletedHandler>? tenantSetupCompletedHandlers = null)
     : DefaultConfigurationCreatorServiceBase(logger, blueprintService, embeddedBlueprintSources,
           tenantSetupRetryStore, tenantLifecycleStore),
       IConfigurationService
@@ -97,6 +100,42 @@ internal class DefaultConfigurationCreatorService(
 
         await ApplyServiceManagedBlueprintsWithUriPreservationAsync(
             tenantContext, tenantId, throwOnFailure: false).ConfigureAwait(false);
+
+        // AB#5540: the base only calls this hook after SetupTenantAsync succeeded and only outside the
+        // cold-start loop (DeferTenantStart=false) — i.e. on the background setup retry and on tenant
+        // lifecycle events. That is exactly where a tenant skipped by the startup initializers (because
+        // its setup had failed) becomes usable, so the post-setup handlers run here.
+        await NotifyTenantSetupCompletedAsync(tenantId).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    ///     Runs every registered <see cref="ITenantSetupCompletedHandler"/> for the tenant (AB#5540).
+    ///     Best-effort per handler: a failing handler is logged and neither fails the (already
+    ///     completed) setup nor stops the remaining handlers. The handlers are idempotent and run again
+    ///     on the next tenant event or service restart.
+    /// </summary>
+    internal async Task NotifyTenantSetupCompletedAsync(string tenantId)
+    {
+        if (tenantSetupCompletedHandlers is null)
+        {
+            return;
+        }
+
+        foreach (var handler in tenantSetupCompletedHandlers)
+        {
+            try
+            {
+                await handler.OnTenantSetupCompletedAsync(tenantId).ConfigureAwait(false);
+            }
+            catch (Exception ex)
+            {
+                logger.LogError(
+                    "Post-setup handler {Handler} failed for tenant '{TenantId}' with {ExceptionType}: " +
+                    "{ExceptionMessage}. The tenant setup itself completed; the handler runs again on the " +
+                    "next tenant event or service restart",
+                    handler.GetType().Name, tenantId, ex.GetType().Name, ex.Message);
+            }
+        }
     }
 
     public override async Task InitializeAsync()

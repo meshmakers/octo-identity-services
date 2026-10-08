@@ -43,7 +43,7 @@ public class DiagnosticsController : ControllerBase
     }
 
     [HttpPost("reconfigureLogLevel")]
-    [Authorize(IdentityServiceConstants.IdentityApiReadWritePolicy)]
+    [Authorize(IdentityServiceConstants.IdentityServiceAdministrationPolicy)]
     [EndpointSummary("Reconfigures the log level of the service")]
     [ProducesResponseType(StatusCodes.Status204NoContent)]
     public async Task<IActionResult> ReconfigureLogLevelAsync(

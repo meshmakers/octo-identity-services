@@ -60,6 +60,40 @@ public class ExternalTenantUserMappingStore(
         return result.Items;
     }
 
+    public async Task<IReadOnlyList<RtExternalTenantUserMapping>> FindBySourceUserNamesAsync(
+        IReadOnlyCollection<(string SourceTenantId, string SourceUserName)> sourceIdentities)
+    {
+        if (sourceIdentities.Count == 0)
+        {
+            return [];
+        }
+
+        var session = await GetRepository().GetSessionAsync();
+        session.StartTransaction();
+
+        // One query per distinct source tenant (an indexed field); the name filter runs in memory
+        // because user names compare case-insensitively and a tenant holds few mappings per source.
+        var matches = new List<RtExternalTenantUserMapping>();
+        foreach (var tenantGroup in sourceIdentities.GroupBy(
+                     s => s.SourceTenantId, StringComparer.OrdinalIgnoreCase))
+        {
+            var userNames = tenantGroup
+                .Select(s => s.SourceUserName)
+                .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+            var queryOptions = RtEntityQueryOptions.Create()
+                .FieldEquals(nameof(RtExternalTenantUserMapping.SourceTenantId), tenantGroup.Key);
+            var result = await GetRepository()
+                .GetRtEntitiesByTypeAsync<RtExternalTenantUserMapping>(session, queryOptions);
+
+            matches.AddRange(result.Items.Where(m =>
+                m.SourceUserName != null && userNames.Contains(m.SourceUserName)));
+        }
+
+        await session.CommitTransactionAsync();
+        return matches;
+    }
+
     public async Task StoreAsync(RtExternalTenantUserMapping mapping)
     {
         var session = await GetRepository().GetSessionAsync();

@@ -28,10 +28,11 @@ public interface IAllowedTenantsResolver
 ///     Offering those tenants regardless — in <c>allowed_tenants</c>, the Studio switcher and the
 ///     email-first tenant discovery — sent such users to a login they could never pass. The tenants
 ///     a user really holds above the login tenant are exactly the home tenants of the
-///     <c>xt_{home}_{name}</c> chain, which <see cref="BuildUserNameChain" /> yields.
+///     <c>xt_{home}_{name}</c> chain, which <see cref="BuildUserNameChainAsync" /> yields.
 /// </remarks>
 public class AllowedTenantsResolver(
     ISystemContext systemContext,
+    ICrossTenantShadowUserChainResolver shadowUserChainResolver,
     ILogger<AllowedTenantsResolver> logger) : IAllowedTenantsResolver
 {
     public async Task<IReadOnlyList<string>> ResolveAsync(string loginTenantId, RtUser user)
@@ -41,7 +42,7 @@ public class AllowedTenantsResolver(
         // Every tier of the xt_ chain is a tenant the user exists in: the login tenant itself, then
         // the home tenant of each shadow user upwards. A local user's chain is the login tenant alone.
         // e.g. (subtenant1, "xt_meshtest_xt_octosystem_admin") → (meshtest, "xt_octosystem_admin") → (octosystem, "admin")
-        var chain = BuildUserNameChain(loginTenantId, user.UserName ?? string.Empty);
+        var chain = await BuildUserNameChainAsync(loginTenantId, user.UserName ?? string.Empty);
         foreach (var (tenantId, _) in chain)
         {
             allowedTenants.Add(tenantId);
@@ -59,36 +60,36 @@ public class AllowedTenantsResolver(
     }
 
     /// <summary>
-    ///     Builds the full (tenantId, username) chain by unwinding xt_ prefixes.
+    ///     Builds the full (tenantId, username) chain: the login identity followed by the registry-aware
+    ///     unwinding of its xt_ prefixes (<see cref="ICrossTenantShadowUserChainResolver" />).
     ///     e.g. (subtenant1, "xt_meshtest_xt_octosystem_admin")
     ///        → (meshtest, "xt_octosystem_admin")
     ///        → (octosystem, "admin")
     /// </summary>
-    private static List<(string TenantId, string UserName)> BuildUserNameChain(
+    /// <remarks>
+    ///     Tenant ids may contain '_', so a tier is only split after a prefix that is a registered tenant
+    ///     id (AB#5708). An ambiguous or unregistered tier ends the chain — fail closed: the user keeps the
+    ///     login tenant (and the tiers already proven), never a tenant a spoofed name merely suggests.
+    /// </remarks>
+    private async Task<List<(string TenantId, string UserName)>> BuildUserNameChainAsync(
         string loginTenantId, string userName)
     {
         var chain = new List<(string TenantId, string UserName)>();
-        var currentTenantId = loginTenantId;
-        var currentUserName = userName;
-        var visited = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-
-        while (!string.IsNullOrEmpty(currentUserName) && visited.Add(currentTenantId))
+        if (string.IsNullOrEmpty(userName))
         {
-            chain.Add((currentTenantId, currentUserName));
+            return chain;
+        }
 
-            if (!currentUserName.StartsWith("xt_"))
+        chain.Add((loginTenantId, userName));
+        var visited = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { loginTenantId };
+        foreach (var tier in await shadowUserChainResolver.GetSourceChainAsync(userName))
+        {
+            if (!visited.Add(tier.TenantId))
             {
                 break;
             }
 
-            var parts = currentUserName.Split('_', 3);
-            if (parts.Length < 3)
-            {
-                break;
-            }
-
-            currentTenantId = parts[1]; // home tenant
-            currentUserName = parts[2]; // username in home tenant
+            chain.Add(tier);
         }
 
         return chain;
@@ -158,7 +159,7 @@ public class AllowedTenantsResolver(
                         allowedTenants.Add(childTenantId);
 
                         // The user in the child tenant will be: xt_{parentTenantId}_{parentUsername}
-                        var childUserName = $"xt_{currentTenantId}_{currentUserName}";
+                        var childUserName = CrossTenantShadowUserName.Build(currentTenantId, currentUserName);
                         queue.Enqueue((childTenantId, childUserName));
                     }
                 }

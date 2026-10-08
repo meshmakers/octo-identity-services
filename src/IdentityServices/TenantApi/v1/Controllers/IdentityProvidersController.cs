@@ -44,7 +44,7 @@ public class IdentityProvidersController : ControllerBase
     }
 
     [HttpGet]
-    [Authorize(IdentityServiceConstants.IdentityApiReadOnlyPolicy)]
+    [Authorize(IdentityServiceConstants.IdentityTenantAdministrationReadPolicy)]
     [EndpointSummary("Returns all available identity providers.")]
     [ProducesResponseType(typeof(IdentityProvidersResult), StatusCodes.Status200OK)]
     public async Task<ActionResult<IdentityProvidersResult>> GetIdentityProvidersAsync()
@@ -58,7 +58,7 @@ public class IdentityProvidersController : ControllerBase
 
     [HttpGet("{rtId}")]
     [ProducesResponseType(typeof(IdentityProvidersResult), StatusCodes.Status200OK)]
-    [Authorize(IdentityServiceConstants.IdentityApiReadOnlyPolicy)]
+    [Authorize(IdentityServiceConstants.IdentityTenantAdministrationReadPolicy)]
     [EndpointSummary("Returns an identity provider by its ID.")]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<ActionResult<IdentityProvidersResult>> Get([Required] OctoObjectId rtId)
@@ -78,7 +78,7 @@ public class IdentityProvidersController : ControllerBase
     [HttpPost]
     [ProducesResponseType(typeof(IdentityProviderDto), StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(UniquenessViolationErrorResponse), StatusCodes.Status400BadRequest)]
-    [Authorize(IdentityServiceConstants.IdentityApiReadWritePolicy)]
+    [Authorize(IdentityServiceConstants.IdentityTenantAdministrationWritePolicy)]
     [EndpointSummary("Add a new identity provider.")]
     public async Task<ActionResult<IdentityProviderDto>> AddNewIdentityProviderAsync(
         [FromBody][Description("The configuration for the new identity provider.")] IdentityProviderDto identityProviderDto)
@@ -112,13 +112,19 @@ public class IdentityProvidersController : ControllerBase
     // Reject such names here — the single write path shared by the Studio UI, octo-cli and the
     // MCP server — so the problem surfaces at configuration time instead of at login time.
     internal const string ProviderNameValidationMessage =
-        "The Name may only contain ASCII letters, digits and the separators '.', '_' and '-' (no spaces or other special characters), because it is used to build user names for externally provisioned accounts.";
+        "The Name may only contain ASCII letters, digits and the separators '.', '_' and '-' (no spaces or other special characters), and must not be 'xt' or start with 'xt_' (reserved for cross-tenant users), because it is used to build user names for externally provisioned accounts.";
 
     private static readonly System.Text.RegularExpressions.Regex ProviderNameRegex =
         new("^[A-Za-z0-9._-]+$", System.Text.RegularExpressions.RegexOptions.Compiled);
 
     internal static bool IsProviderNameValid(string? name)
-        => !string.IsNullOrWhiteSpace(name) && ProviderNameRegex.IsMatch(name);
+        => !string.IsNullOrWhiteSpace(name) && ProviderNameRegex.IsMatch(name)
+           && !IsProviderNameReserved(name);
+
+    // "{providerName}_{email}" must not start with the xt_ prefix reserved for cross-tenant shadow
+    // users (AB#5708): such a name would unwind to another tenant's identity.
+    internal static bool IsProviderNameReserved(string name)
+        => IdentityServerPersistence.Services.CrossTenantShadowUserName.IsShadowUserName($"{name}_");
 
     private static bool RequiresClientSecretOnCreate(IdentityProviderDto dto, out string missingFieldName)
     {
@@ -134,7 +140,7 @@ public class IdentityProvidersController : ControllerBase
     }
 
     [HttpDelete("{rtId}")]
-    [Authorize(IdentityServiceConstants.IdentityApiReadWritePolicy)]
+    [Authorize(IdentityServiceConstants.IdentityTenantAdministrationWritePolicy)]
     [EndpointSummary("Delete an existing identity provider.")]
     [ProducesResponseType(StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
@@ -153,7 +159,7 @@ public class IdentityProvidersController : ControllerBase
     [HttpPut("{rtId}")]
     [ProducesResponseType(typeof(IdentityProviderDto), StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(UniquenessViolationErrorResponse), StatusCodes.Status400BadRequest)]
-    [Authorize(IdentityServiceConstants.IdentityApiReadWritePolicy)]
+    [Authorize(IdentityServiceConstants.IdentityTenantAdministrationWritePolicy)]
     [EndpointSummary("Replace an existing identity provider.")]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     [ProducesResponseType(StatusCodes.Status401Unauthorized)]

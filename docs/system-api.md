@@ -14,15 +14,41 @@ All endpoints are tenant-scoped via the `{tenantId}` route parameter. The system
 
 ## Authorization Policies
 
-### IdentityApiReadOnlyPolicy
+Every administration endpoint requires **both** an `octo_api` scope and a **tenant role** (AB#5859).
+Before AB#5859 the API checked the scope only — which every interactive client requests — so every
+signed-in user of a tenant could administer its identity. The role rule matches the GraphQL side
+(built-in data policy `IdentityAdministrationPolicy` grants the identity entities to `UserManagement`).
 
-- **Scopes Required:** `IdentityApiFullAccess` OR `IdentityApiReadOnly`
-- **Applied To:** All GET endpoints
+Roles are read from the token's `role` claims (user tokens: the user's effective roles; client-credentials
+tokens: the client's effective roles, AB#4183). The check probes the raw `role` claim and
+`ClaimTypes.Role`, because the identity's `RoleClaimType` does not match the unmapped JWT claim
+(AB#4969 / AB#5539).
 
-### IdentityApiReadWritePolicy
+| Policy | Scope | Roles (any of) | Applied to |
+|--------|-------|----------------|------------|
+| `IdentityUserAdministrationReadPolicy` / `…WritePolicy` | read: `octo_api` or `octo_api.read_only`; write: `octo_api` | `UserManagement` | users, roles (writes), groups, external tenant user mappings, e-mail identifier bindings, data permissions |
+| `IdentityTenantAdministrationReadPolicy` / `…WritePolicy` | as above | `TenantManagement`, `UserManagement` | clients, client mirrors, API resources, API scopes, API secrets, identity providers, e-mail domain group rules, admin provisioning |
+| `IdentityDirectoryReadPolicy` | `octo_api` or `octo_api.read_only` | `UserManagement`, `TenantManagement`, `AdminPanelManagement`, `CommunicationManagement` | `GET roles`, `GET roles/GetPaged`, `GET roles/names/{roleName}`, `GET clients/{id}`, `GET clients/{id}/roles`, `GET clients/{id}/actors` (service-account panels, communication controller) |
+| `IdentityServiceAdministrationPolicy` | `octo_api` | `TenantManagement`, **system tenant route only** | `POST diagnostics/reconfigureLogLevel` (process-wide) |
+| `IdentityUserDirectoryReadPolicy` | `octo_api` or `octo_api.read_only` | — (**token must be issued for the route tenant**, no Warn mode, no exemptions) | `GET users/directory` (id + display name only, for pickers) |
+| `IdentityApiReadOnlyPolicy` | `octo_api` or `octo_api.read_only` | — | `GET tools/generatePassword` |
 
-- **Scopes Required:** `IdentityApiFullAccess` only
-- **Applied To:** All POST, PUT, DELETE endpoints (except Setup)
+Open to every authenticated caller: `GET diagnostics` (the caller's own claims). `POST setup` is unchanged
+(works only while the tenant has no user). Self-service lives outside this API
+(`{tenantId}/api/manage/...`, cookie or bearer, current user only).
+
+**Admin provisioning** (`{tenantId}/v1/adminProvisioning/{targetTenantId}`) reaches the target tenant
+through the system context. Since AB#5859 the target must be the caller's own tenant (`tenant_id` of the
+token) or one of its descendants in the tenant registry; a caller of the system tenant may address every
+tenant (`AdminProvisioningTargetScopeFilter`).
+
+**Transition switch:** `IdentityApiAuthorization:RoleEnforcement` (`OCTO_IDENTITYAPIAUTHORIZATION__ROLEENFORCEMENT`)
+= `Enforce` (default) or `Warn`. `Warn` lets a caller without the role (or an admin-provisioning target
+outside its subtree) through and logs `This would be denied with RoleEnforcement=Enforce (AB#5859)`. The
+scope requirement and the system-tenant-only rule are enforced in both modes.
+
+The `Policy` column in the endpoint tables below names the **scope level** (ReadOnly / ReadWrite); the
+required role follows from the table above.
 
 ## Endpoints
 
@@ -32,6 +58,7 @@ All endpoints are tenant-scoped via the `{tenantId}` route parameter. The system
 |--------|----------|--------|-------------|
 | GET | `/users` | ReadOnly | Get all users |
 | GET | `/users/GetPaged` | ReadOnly | Get paginated users |
+| GET | `/users/directory?skip=&take=&search=` | ReadOnly (no role) | Slim user directory for pickers: `userId` + `displayName` ("First Last", else user name) of the tenant's users, sorted by display name; `search` matches the display name only (case-insensitive substring); `take` 1..500, default 100. No e-mail, roles, groups or logins. |
 | GET | `/users/{userName}` | ReadOnly | Get user by name, email, or ID |
 | GET | `/users/{userName}/roles` | ReadOnly | Get user's roles (direct + group-inherited) |
 | GET | `/users/{userName}/directRoles` | ReadOnly | Get user's directly assigned roles only |

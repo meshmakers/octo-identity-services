@@ -75,6 +75,7 @@ public static class RuntimeEngineBuilderExtensions
         builder.Services.AddScoped<IExternalTenantUserMappingStore, ExternalTenantUserMappingStore>();
         builder.Services.AddScoped<IGroupStore, GroupStore>();
         builder.Services.AddScoped<IDataPermissionStore, DataPermissionStore>();
+        builder.Services.AddScoped<ICrossTenantShadowUserChainResolver, CrossTenantShadowUserChainResolver>();
         builder.Services.AddScoped<IGroupRoleResolver, GroupRoleResolver>();
         builder.Services.AddScoped<IClientRoleStore, ClientRoleStore>();
         builder.Services.AddScoped<ICrossTenantAuthenticationService, CrossTenantAuthenticationService>();
@@ -192,7 +193,9 @@ public static class RuntimeEngineBuilderExtensions
             .AddUserManager<UserManager<RtUser>>()
             .AddRoleManager<RoleManager<RtRole>>()
             .AddDefaultTokenProviders()
-            .AddErrorDescriber<OctoErrorDescriber>();
+            .AddErrorDescriber<OctoErrorDescriber>()
+            // AB#5708: xt_ shadow users never get a local password, whichever endpoint tries to set one.
+            .AddPasswordValidator<ShadowUserPasswordValidator>();
 
         if (builder.RoleType != null)
         {

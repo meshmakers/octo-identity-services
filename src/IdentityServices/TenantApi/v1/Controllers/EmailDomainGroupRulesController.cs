@@ -26,7 +26,7 @@ public class EmailDomainGroupRulesController(
     IMapper mapper) : ControllerBase
 {
     [HttpGet]
-    [Authorize(IdentityServiceConstants.IdentityApiReadOnlyPolicy)]
+    [Authorize(IdentityServiceConstants.IdentityTenantAdministrationReadPolicy)]
     [EndpointSummary("Returns all email domain group rules.")]
     [ProducesResponseType(typeof(EmailDomainGroupRulesResult), StatusCodes.Status200OK)]
     public async Task<ActionResult<EmailDomainGroupRulesResult>> GetAllAsync()
@@ -39,7 +39,7 @@ public class EmailDomainGroupRulesController(
     }
 
     [HttpGet("{rtId}")]
-    [Authorize(IdentityServiceConstants.IdentityApiReadOnlyPolicy)]
+    [Authorize(IdentityServiceConstants.IdentityTenantAdministrationReadPolicy)]
     [EndpointSummary("Returns an email domain group rule by its ID.")]
     [ProducesResponseType(typeof(EmailDomainGroupRuleDto), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
@@ -55,7 +55,7 @@ public class EmailDomainGroupRulesController(
     }
 
     [HttpPost]
-    [Authorize(IdentityServiceConstants.IdentityApiReadWritePolicy)]
+    [Authorize(IdentityServiceConstants.IdentityTenantAdministrationWritePolicy)]
     [EndpointSummary("Create a new email domain group rule.")]
     [ProducesResponseType(typeof(EmailDomainGroupRuleDto), StatusCodes.Status201Created)]
     [ProducesResponseType(typeof(UniquenessViolationErrorResponse), StatusCodes.Status400BadRequest)]
@@ -73,7 +73,7 @@ public class EmailDomainGroupRulesController(
     }
 
     [HttpPut("{rtId}")]
-    [Authorize(IdentityServiceConstants.IdentityApiReadWritePolicy)]
+    [Authorize(IdentityServiceConstants.IdentityTenantAdministrationWritePolicy)]
     [EndpointSummary("Replace an existing email domain group rule.")]
     [ProducesResponseType(typeof(EmailDomainGroupRuleDto), StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(UniquenessViolationErrorResponse), StatusCodes.Status400BadRequest)]
@@ -90,7 +90,7 @@ public class EmailDomainGroupRulesController(
     }
 
     [HttpDelete("{rtId}")]
-    [Authorize(IdentityServiceConstants.IdentityApiReadWritePolicy)]
+    [Authorize(IdentityServiceConstants.IdentityTenantAdministrationWritePolicy)]
     [EndpointSummary("Delete an email domain group rule.")]
     [ProducesResponseType(StatusCodes.Status200OK)]
     public async Task<IActionResult> DeleteAsync([Required] OctoObjectId rtId)

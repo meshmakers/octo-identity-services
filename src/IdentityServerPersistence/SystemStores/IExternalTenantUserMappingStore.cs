@@ -25,6 +25,15 @@ public interface IExternalTenantUserMappingStore
     Task<IEnumerable<RtExternalTenantUserMapping>> GetBySourceTenantAsync(string sourceTenantId);
 
     /// <summary>
+    /// Finds the mappings whose (SourceTenantId, SourceUserName) matches one of
+    /// <paramref name="sourceIdentities"/>. Both parts compare case-insensitively, like user names do.
+    /// Used to resolve the mappings that apply to a cross-tenant shadow user, whose name unwinds into
+    /// one source identity per tier (AB#5708).
+    /// </summary>
+    Task<IReadOnlyList<RtExternalTenantUserMapping>> FindBySourceUserNamesAsync(
+        IReadOnlyCollection<(string SourceTenantId, string SourceUserName)> sourceIdentities);
+
+    /// <summary>
     /// Stores (creates or updates) a mapping.
     /// </summary>
     Task StoreAsync(RtExternalTenantUserMapping mapping);

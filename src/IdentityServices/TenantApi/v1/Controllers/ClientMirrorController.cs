@@ -36,7 +36,7 @@ public class ClientMirrorController : ControllerBase
 
     // GET {tenantId}/v1/clients/{clientId}/mirrors
     [HttpGet]
-    [Authorize(IdentityServiceConstants.IdentityApiReadOnlyPolicy)]
+    [Authorize(IdentityServiceConstants.IdentityTenantAdministrationReadPolicy)]
     [EndpointSummary("Lists the sub-tenants this client has been auto-provisioned into")]
     [ProducesResponseType(typeof(IEnumerable<ClientMirrorDto>), StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(NotFoundErrorDto), StatusCodes.Status404NotFound)]
@@ -61,7 +61,7 @@ public class ClientMirrorController : ControllerBase
 
     // POST {tenantId}/v1/clients/{clientId}/mirrors/provisionInExistingTenants
     [HttpPost("provisionInExistingTenants")]
-    [Authorize(IdentityServiceConstants.IdentityApiReadWritePolicy)]
+    [Authorize(IdentityServiceConstants.IdentityTenantAdministrationWritePolicy)]
     [EndpointSummary("Backfill: provisions this client into every existing sub-tenant of the caller. Idempotent.")]
     [ProducesResponseType(typeof(ClientMirrorBackfillResponseDto), StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(NotFoundErrorDto), StatusCodes.Status404NotFound)]
@@ -100,7 +100,7 @@ public class ClientMirrorController : ControllerBase
 
     // POST {tenantId}/v1/clients/{clientId}/mirrors/provisionInTenant?childTenantId=…
     [HttpPost("provisionInTenant")]
-    [Authorize(IdentityServiceConstants.IdentityApiReadWritePolicy)]
+    [Authorize(IdentityServiceConstants.IdentityTenantAdministrationWritePolicy)]
     [EndpointSummary("Provisions this client into a single named sub-tenant. Idempotent.")]
     [ProducesResponseType(typeof(ClientMirrorProvisionResponseDto), StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(NotFoundErrorDto), StatusCodes.Status404NotFound)]
@@ -153,7 +153,7 @@ public class ClientMirrorController : ControllerBase
     ///     </para>
     /// </remarks>
     [HttpPost("{childTenantId}/secret")]
-    [Authorize(IdentityServiceConstants.IdentityApiReadWritePolicy)]
+    [Authorize(IdentityServiceConstants.IdentityTenantAdministrationWritePolicy)]
     [EndpointSummary("Issues a fresh tenant-specific secret for this mirror and returns it once.")]
     [ProducesResponseType(typeof(MirrorSecretResponseDto), StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(NotFoundErrorDto), StatusCodes.Status404NotFound)]
@@ -183,7 +183,7 @@ public class ClientMirrorController : ControllerBase
 
     // DELETE {tenantId}/v1/clients/{clientId}/mirrors/{childTenantId}
     [HttpDelete("{childTenantId}")]
-    [Authorize(IdentityServiceConstants.IdentityApiReadWritePolicy)]
+    [Authorize(IdentityServiceConstants.IdentityTenantAdministrationWritePolicy)]
     [EndpointSummary("Manually removes the mirror of this client in a single sub-tenant.")]
     [ProducesResponseType(StatusCodes.Status204NoContent)]
     [ProducesResponseType(typeof(NotFoundErrorDto), StatusCodes.Status404NotFound)]
@@ -242,7 +242,7 @@ public class ClientAutoProvisionFlagController : ControllerBase
 
     // PATCH {tenantId}/v1/clients/{clientId}/autoProvisionInChildTenants
     [HttpPatch]
-    [Authorize(IdentityServiceConstants.IdentityApiReadWritePolicy)]
+    [Authorize(IdentityServiceConstants.IdentityTenantAdministrationWritePolicy)]
     [EndpointSummary("Sets the AutoProvisionInChildTenants flag on a client without rewriting the full client.")]
     [ProducesResponseType(StatusCodes.Status204NoContent)]
     [ProducesResponseType(typeof(NotFoundErrorDto), StatusCodes.Status404NotFound)]

@@ -32,7 +32,7 @@ public class ApiScopesController : ControllerBase
 
     // GET: system/v1/apiScopes
     [HttpGet]
-    [Authorize(IdentityServiceConstants.IdentityApiReadOnlyPolicy)]
+    [Authorize(IdentityServiceConstants.IdentityTenantAdministrationReadPolicy)]
     [EndpointSummary("Returns all API scope definitions")]
     [ProducesResponseType(typeof(IEnumerable<ApiScopeDto>), StatusCodes.Status200OK)]
     public async Task<IEnumerable<ApiScopeDto>> Get()
@@ -43,7 +43,7 @@ public class ApiScopesController : ControllerBase
 
     // GET system/v1/apiScopes/getPaged
     [HttpGet("GetPaged")]
-    [Authorize(IdentityServiceConstants.IdentityApiReadOnlyPolicy)]
+    [Authorize(IdentityServiceConstants.IdentityTenantAdministrationReadPolicy)]
     [EndpointSummary("Returns all API scope definitions using paging")]
     [ProducesResponseType(typeof(PagedResult<ApiScopeDto>), StatusCodes.Status200OK)]
     public async Task<PagedResult<ApiScopeDto>> Get([Required][FromQuery] PagingParams pagingParams)
@@ -71,7 +71,7 @@ public class ApiScopesController : ControllerBase
 
     // GET api/apiScopes/5
     [HttpGet("{name}")]
-    [Authorize(IdentityServiceConstants.IdentityApiReadOnlyPolicy)]
+    [Authorize(IdentityServiceConstants.IdentityTenantAdministrationReadPolicy)]
     [EndpointSummary("Returns API scope information based on it's name")]
     [ProducesResponseType(typeof(ApiScopeDto), StatusCodes.Status200OK)]
     public async Task<IActionResult> Get([Required] string name)
@@ -88,7 +88,7 @@ public class ApiScopesController : ControllerBase
 
     // POST api/apiScopes
     [HttpPost]
-    [Authorize(IdentityServiceConstants.IdentityApiReadWritePolicy)]
+    [Authorize(IdentityServiceConstants.IdentityTenantAdministrationWritePolicy)]
     [EndpointSummary("Creates a new API scope")]
     [ProducesResponseType(StatusCodes.Status200OK)]
     public async Task<IActionResult> Post([Required][FromBody] ApiScopeDto scopeDto)
@@ -120,7 +120,7 @@ public class ApiScopesController : ControllerBase
 
     // PUT api/apiScopes/5
     [HttpPut("{name}")]
-    [Authorize(IdentityServiceConstants.IdentityApiReadWritePolicy)]
+    [Authorize(IdentityServiceConstants.IdentityTenantAdministrationWritePolicy)]
     [EndpointSummary("Updates an API scope")]
     [ProducesResponseType(StatusCodes.Status200OK)]
     public async Task<IActionResult> Put([Required] string name, [Required][FromBody] ApiScopeDto scopeDto)
@@ -153,7 +153,7 @@ public class ApiScopesController : ControllerBase
 
     // DELETE api/apiScopes/5
     [HttpDelete("{name}")]
-    [Authorize(IdentityServiceConstants.IdentityApiReadWritePolicy)]
+    [Authorize(IdentityServiceConstants.IdentityTenantAdministrationWritePolicy)]
     [EndpointSummary("Deletes an API scope")]
     [ProducesResponseType(StatusCodes.Status200OK)]
     public async Task<IActionResult> Delete([Required] string name)
