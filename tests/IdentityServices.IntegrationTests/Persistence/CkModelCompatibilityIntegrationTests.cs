@@ -18,8 +18,8 @@ namespace IdentityServices.IntegrationTests.Persistence;
 
 /// <summary>
 ///     CK v2 Phase 1 G-H2: with the engine's downgrade guard a tenant may keep a NEWER System.Identity than this
-///     service embeds. Identity's existence checks must accept "embedded or newer, same major" by name, and reject a
-///     higher major with a clear error.
+///     service embeds. Identity's existence checks must accept "embedded or newer" by name. A higher major means the
+///     service is too old for the tenant: platform rule R-L4 — skip the import, WARN, keep running.
 /// </summary>
 /// <remarks>
 ///     A newer installed version is simulated by re-keying the tenant's <c>CkModel</c> row of System.Identity to a
@@ -54,7 +54,7 @@ public class CkModelCompatibilityIntegrationTests : IClassFixture<IdentityServic
     }
 
     [Fact]
-    public async Task NewerMajorIdentityModel_IsRejectedWithAClearError()
+    public async Task NewerMajorIdentityModel_IdentityDataCreationProceeds_WithAWarning()
     {
         var tenantId = await CreateTenantAsync();
         var newerMajor = NewerVersion(SystemIdentityCkIds.CkModelId, majorBump: true);
@@ -62,9 +62,32 @@ public class CkModelCompatibilityIntegrationTests : IClassFixture<IdentityServic
 
         var (response, logger) = await ConsumeAsync(tenantId);
 
-        response.Response.Should().Be(CreateIdentityDataResult.FailedTenantHasNoIdentityCk);
-        logger.AllText.Should().Contain("too old").And.Contain(newerMajor.ToString())
-            .And.Contain(SystemIdentityCkIds.CkModelId.ToString());
+        response.Response.Should().BeOneOf(CreateIdentityDataResult.Success,
+            CreateIdentityDataResult.SuccessIdentityDataSeedPending);
+        logger.Messages.Should().Contain(m => m.StartsWith("[Warning]") && m.Contains("too old") &&
+                                              m.Contains(newerMajor.ToString()) &&
+                                              m.Contains(SystemIdentityCkIds.CkModelId.ToString()));
+    }
+
+    /// <summary>
+    ///     R-L4: a tenant with a higher major is neither downgraded nor a setup failure (for the system tenant that
+    ///     would be a host-startup failure).
+    /// </summary>
+    [Fact]
+    public async Task TenantSetup_WithNewerMajorIdentityModel_DoesNotFailAndKeepsTheNewerModel()
+    {
+        var tenantId = await CreateTenantAsync();
+        var newerMajor = NewerVersion(SystemIdentityCkIds.CkModelId, majorBump: true);
+        await AddFakeInstalledVersionAsync(tenantId, newerMajor);
+
+        var setup = _fixture.GetService<IDefaultConfigurationCreatorService>();
+        var act = () => setup.SetupAsync(tenantId);
+        await act.Should().NotThrowAsync();
+
+        var tenantContext = await _fixture.GetSystemContext().GetChildTenantContextAsync(tenantId);
+        var compatibility = await CkModelCompatibility.GetAsync(tenantContext, SystemIdentityCkIds.CkModelId);
+        compatibility.Installed.Should().Be(newerMajor, "the newer major must not be downgraded");
+        compatibility.State.Should().Be(CkModelCompatibilityState.NewerMajor);
     }
 
     /// <summary>

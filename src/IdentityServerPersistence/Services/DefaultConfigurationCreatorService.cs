@@ -204,9 +204,9 @@ internal class DefaultConfigurationCreatorService(
             //
             // "Does not exist" here means the System CK model is missing or not at the expected version.
             // CK v2 Phase 1 G-H2: with the engine's downgrade guard (AB#5900) the system database may keep a
-            // NEWER System than this service embeds; IsSystemTenantExistingAsync (engine-mongodb) must then
-            // accept "embedded or newer, same major" by name, otherwise an older identity (rollback, old replica
-            // during a rolling update) reaches the throw below. That fix lives in engine-mongodb.
+            // NEWER System than this service embeds; IsSystemTenantExistingAsync (engine-mongodb) therefore
+            // accepts "embedded or newer" by name (any major, IsCkModelSatisfiedAsync), so an older identity
+            // (rollback, old replica during a rolling update) does not reach the throw below.
             // It is also true for a fully populated system database whose model import was
             // skipped (EnsureSystemCkModelAsync swallows a ModelValidationException, e.g. while a
             // dependency still lags during a version-bump rollout). Bootstrapping over such a database
@@ -755,11 +755,12 @@ internal class DefaultConfigurationCreatorService(
     }
 
     /// <summary>
-    ///     Imports an embedded CK model unless the tenant already has it — by NAME, "embedded version or newer
-    ///     within the same major" (CK v2 Phase 1 G-H2). With the engine's downgrade guard (AB#5900) a tenant may
-    ///     keep a newer version than this service embeds; the former exact-version check then re-ran a (skipped)
-    ///     import on every setup. A higher installed major means this service is too old for the tenant: the
-    ///     tenant setup fails with a clear message instead of running against an incompatible model.
+    ///     Imports an embedded CK model unless the tenant already has it — by NAME, "embedded version or newer"
+    ///     (CK v2 Phase 1 G-H2). With the engine's downgrade guard (AB#5900) a tenant may keep a newer version than
+    ///     this service embeds; the former exact-version check then re-ran a (skipped) import on every setup.
+    ///     A higher installed major means this service is too old for the tenant. Platform rule R-L4: skip the
+    ///     import, log WARN and keep running — neither the tenant setup nor (for the system tenant) the host
+    ///     startup fails.
     /// </summary>
     private async Task EnsureEmbeddedCkModelAsync(ITenantContext tenantContext, CkModelId embedded)
     {
@@ -774,8 +775,9 @@ internal class DefaultConfigurationCreatorService(
                     "keeping it (no import)", tenantContext.TenantId, compatibility.Installed, embedded);
                 return;
             case CkModelCompatibilityState.NewerMajor:
-                throw new InitializationException(
+                logger.LogWarning("Embedded CK model import skipped: {Reason}",
                     CkModelCompatibility.TooOldMessage(tenantContext.TenantId, compatibility));
+                return;
         }
 
         OperationResult operationResult = new();
@@ -860,7 +862,9 @@ internal class DefaultConfigurationCreatorService(
             // System CK model (base model, updated via EnsureSystemCkModelAsync).
             // G-H2: "embedded or newer within the same major", not the exact version: with the engine's
             // downgrade guard a tenant may keep a newer model, which the upgrade service then keeps (INFO)
-            // instead of warning on every setup that it is outside an exact [x.y.z] range.
+            // instead of warning on every setup that it is outside an exact [x.y.z] range. A higher installed
+            // major stays outside the range on purpose: the upgrade service keeps it (never downgrades) and logs
+            // a WARN, which matches the R-L4 rule (service too old: WARN, keep running).
             EmbeddedOrNewerSameMajor(SystemCkIds.CkModelId),
             // Identity and Notification CK models
             EmbeddedOrNewerSameMajor(SystemIdentityCkIds.CkModelId),

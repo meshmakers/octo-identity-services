@@ -637,14 +637,20 @@ History comes from `ICkModelUpgradeService.GetInstalledVersionsAsync` (latest su
 the same source the upgrade service uses. Tests:
 `tests/IdentityServerPersistence.UnitTests/Services/DefaultConfigurationCreatorServiceSchemaVersionMergeTests.cs`.
 
-### Embedded CK Models: "Embedded or Newer, Same Major" (CK v2 Phase 1 G-H2, AB#5902)
+### Embedded CK Models: "Embedded or Newer" (CK v2 Phase 1 G-H2 / R-L4, AB#5902)
 
 Since the engine's downgrade guard (engine-mongodb, AB#5900) a tenant may keep a **newer** System /
 System.Identity / System.Notification than this service embeds (rollback, an old replica during a
 rolling update). Never decide with `ITenantContext.IsCkModelExistingAsync(SystemIdentityCkIds.CkModelId)`:
 it matches the **exact** version `[x.y.z]`. Use `CkModelCompatibility`
 (`src/IdentityServerPersistence/Services/CkModelCompatibility.cs`), which looks the model up **by name**
-(highest `Available` version) and classifies it:
+(highest `Available` version) and classifies it. `IsSatisfied` = embedded version or newer, **any
+major** — the same rule as the engine's `IsCkModelSatisfiedAsync`.
+
+**Platform rule R-L4 (one rule everywhere):** if a tenant has a **higher major** than this service
+embeds, the service is too old for the tenant: skip the import (never downgrade), log **WARN** "service is
+too old for the tenant", and keep running. No tenant-setup failure, and no host-startup failure for the
+system tenant. Identity has no meter of its own for this; the WARN is the signal.
 
 | Installed vs. embedded | State | Identity behaviour |
 |---|---|---|
@@ -652,13 +658,14 @@ it matches the **exact** version `[x.y.z]`. Use `CkModelCompatibility`
 | older | `Older` | tenant setup imports (upgrade) |
 | same | `Same` | nothing to import |
 | newer, same major | `NewerSameMajor` | no import (INFO); identity data creation works |
-| newer major | `NewerMajor` | tenant setup throws `InitializationException` "service is too old for the tenant"; `CreateIdentityData` logs ERROR with the same text and answers `FailedTenantHasNoIdentityCk` (the contract enum in common-services has no dedicated value) |
+| newer major | `NewerMajor` | no import, WARN "service is too old for the tenant"; setup continues; identity data creation proceeds with the same WARN |
 
 The post-import migration run (`RunCkModelMigrationsAsync`) passes `[embedded, nextMajor)` ranges
 (`EmbeddedOrNewerSameMajor`) instead of exact `[x.y.z]` ranges, so a newer same-major model is kept with
-an INFO instead of a "newer than the declared compatibility range" WARN on every setup.
-`SystemContext.IsSystemTenantExistingAsync` (System model in the system DB) is an engine-mongodb check
-and is fixed there. Tests: `CkModelCompatibilityTests` (unit) and
+an INFO instead of a "newer than the declared compatibility range" WARN on every setup. A higher major
+stays outside that range: the upgrade service keeps it (never downgrades) and WARNs, which is the R-L4
+rule. `SystemContext.IsSystemTenantExistingAsync` (System model in the system DB) is an engine-mongodb
+check (`IsCkModelSatisfiedAsync`, any major). Tests: `CkModelCompatibilityTests` (unit) and
 `tests/IdentityServices.IntegrationTests/Persistence/CkModelCompatibilityIntegrationTests.cs`, which
 re-key the tenant's System.Identity `CkModel` row to a newer version.
 

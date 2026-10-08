@@ -7,9 +7,9 @@ using Xunit;
 namespace IdentityServerPersistence.UnitTests.Services;
 
 /// <summary>
-///     CK v2 Phase 1 G-H2: by-name "embedded version or newer within the same major" checks that replace the
-///     exact-version <c>IsCkModelExistingAsync</c> calls once the engine's downgrade guard lets a tenant keep a
-///     newer model.
+///     CK v2 Phase 1 G-H2 / R-L4: by-name "embedded version or newer" checks that replace the exact-version
+///     <c>IsCkModelExistingAsync</c> calls once the engine's downgrade guard lets a tenant keep a newer model.
+///     A higher major is satisfied too (the service is too old: WARN, keep running).
 /// </summary>
 public class CkModelCompatibilityTests
 {
@@ -35,8 +35,8 @@ public class CkModelCompatibilityTests
     [InlineData(CkModelCompatibilityState.NewerSameMajor, true)]
     [InlineData(CkModelCompatibilityState.NotInstalled, false)]
     [InlineData(CkModelCompatibilityState.Older, false)]
-    [InlineData(CkModelCompatibilityState.NewerMajor, false)]
-    public void IsSatisfied_OnlyForSameOrNewerSameMajor(CkModelCompatibilityState state, bool satisfied)
+    [InlineData(CkModelCompatibilityState.NewerMajor, true)]
+    public void IsSatisfied_ForTheEmbeddedVersionOrAnyNewerOne(CkModelCompatibilityState state, bool satisfied)
     {
         new CkModelCompatibilityResult(Embedded, null, state).IsSatisfied.Should().Be(satisfied);
     }
@@ -92,5 +92,17 @@ public class CkModelCompatibilityTests
         range.ModelVersionRange.IsSatisfiedBy(new CkVersion("2.30.0")).Should().BeTrue();
         range.ModelVersionRange.IsSatisfiedBy(new CkVersion("3.0.0")).Should().BeFalse();
         range.ModelVersionRange.IsSatisfiedBy(new CkVersion("2.21.0")).Should().BeFalse();
+    }
+
+    [Theory]
+    [InlineData("3.0.0", true)]
+    [InlineData("2.30.0", false)]
+    [InlineData("2.22.0", false)]
+    public void IsNewerMajor_OnlyForAHigherInstalledMajor(string installedVersion, bool newerMajor)
+    {
+        var installed = new CkModelId("System.Identity", installedVersion);
+        var result = new CkModelCompatibilityResult(Embedded, installed, CkModelCompatibility.Classify(Embedded, installed));
+
+        result.IsNewerMajor.Should().Be(newerMajor);
     }
 }

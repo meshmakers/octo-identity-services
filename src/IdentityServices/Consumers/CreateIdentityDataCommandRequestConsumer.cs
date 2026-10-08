@@ -34,19 +34,15 @@ public class CreateIdentityDataCommandRequestConsumer(
 
         var tenantRepository = tenantContext.GetTenantRepository();
 
-        // By name, "embedded version or newer within the same major" (CK v2 Phase 1 G-H2): with the engine's
-        // downgrade guard a tenant may keep a NEWER System.Identity than this service embeds, and the former
-        // exact-version check answered "no identity CK" for it.
+        // By name, "embedded version or newer" (CK v2 Phase 1 G-H2): with the engine's downgrade guard a tenant
+        // may keep a NEWER System.Identity than this service embeds, and the former exact-version check answered
+        // "no identity CK" for it. A higher major (R-L4): this service is too old for the tenant — WARN and
+        // proceed against the installed model.
         var identityModel = await CkModelCompatibility.GetAsync(tenantContext, SystemIdentityCkIds.CkModelId);
-        if (identityModel.State == CkModelCompatibilityState.NewerMajor)
+        if (identityModel.IsNewerMajor)
         {
-            // This service is too old for the tenant. CreateIdentityDataResult has no dedicated value (contract in
-            // octo-common-services), so the producer gets the "no identity CK" answer; the reason is logged here.
-            logger.LogError("Identity data for tenant '{TenantId}' not created: {Reason}", message.TenantId,
+            logger.LogWarning("Creating identity data for tenant '{TenantId}' anyway: {Reason}", message.TenantId,
                 CkModelCompatibility.TooOldMessage(message.TenantId, identityModel));
-            await context.RespondAsync(new EnumCommandResponse<CreateIdentityDataResult>
-                { Response = CreateIdentityDataResult.FailedTenantHasNoIdentityCk });
-            return;
         }
 
         if (!identityModel.IsSatisfied)

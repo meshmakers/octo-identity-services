@@ -17,10 +17,13 @@ public enum CkModelCompatibilityState
     /// <summary>Exactly the embedded version is installed.</summary>
     Same,
 
-    /// <summary>A newer version of the same major is installed: compatible, the service runs against it.</summary>
+    /// <summary>A newer version of the same major is installed: the service runs against it (no import).</summary>
     NewerSameMajor,
 
-    /// <summary>A higher major is installed: this service is too old for the tenant.</summary>
+    /// <summary>
+    ///     A higher major is installed: this service is too old for the tenant. Platform rule R-L4: never import
+    ///     (no downgrade), log WARN, keep running against the installed model.
+    /// </summary>
     NewerMajor
 }
 
@@ -30,12 +33,20 @@ public enum CkModelCompatibilityState
 /// <param name="State">Classification of <paramref name="Installed" /> against <paramref name="Embedded" />.</param>
 public sealed record CkModelCompatibilityResult(CkModelId Embedded, CkModelId? Installed, CkModelCompatibilityState State)
 {
-    /// <summary>The installed model satisfies the embedded one: same version or newer within the same major.</summary>
-    public bool IsSatisfied => State is CkModelCompatibilityState.Same or CkModelCompatibilityState.NewerSameMajor;
+    /// <summary>
+    ///     The installed model is the embedded version or newer (any major) — the same rule as the engine's
+    ///     <c>IsCkModelSatisfiedAsync</c>. A higher major is satisfied too (R-L4); callers log a WARN for it
+    ///     (<see cref="IsNewerMajor" />).
+    /// </summary>
+    public bool IsSatisfied => State is CkModelCompatibilityState.Same or CkModelCompatibilityState.NewerSameMajor
+        or CkModelCompatibilityState.NewerMajor;
+
+    /// <summary>A higher major is installed: this service is too old for the tenant (WARN, keep running).</summary>
+    public bool IsNewerMajor => State == CkModelCompatibilityState.NewerMajor;
 }
 
 /// <summary>
-///     By-name CK model compatibility checks ("embedded version or newer, same major") — CK v2 Phase 1 G-H2.
+///     By-name CK model compatibility checks ("embedded version or newer") — CK v2 Phase 1 G-H2 / R-L4.
 /// </summary>
 /// <remarks>
 ///     <para>
@@ -112,5 +123,6 @@ public static class CkModelCompatibility
     public static string TooOldMessage(string tenantId, CkModelCompatibilityResult result) =>
         $"Tenant '{tenantId}' has CK model '{result.Installed}' (major {result.Installed?.Version.Major}), but this " +
         $"service embeds '{result.Embedded}' (major {result.Embedded.Version.Major}). The service is too old for the " +
-        "tenant; upgrade the service.";
+        "tenant; the embedded model is not imported (no downgrade) and the service keeps running against the " +
+        "installed model. Upgrade the service.";
 }
