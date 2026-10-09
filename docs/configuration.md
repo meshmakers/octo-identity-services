@@ -388,7 +388,7 @@ readinessProbe:
 
 ### Azure Pipelines
 
-The project includes Azure DevOps pipeline configuration in `devops-build/azure-pipelines.yml`:
+The project includes Azure DevOps pipeline configuration in `azure-pipelines.yml`:
 
 **Triggers:**
 - `dev/*` branches
@@ -397,11 +397,14 @@ The project includes Azure DevOps pipeline configuration in `devops-build/azure-
 
 **Build Steps:**
 1. Restore NuGet packages
-2. Build solution
+2. Build solution (compiles the `System.Identity` CK model without publishing it)
 3. Run tests
-4. Build Docker image
-5. Push to container registry
-6. Publish Construction Kit artifacts
+4. Validate and publish the `System.Identity` CK model — `main` to the private
+   catalog, `r*` tags to the private and the public one, never replacing a
+   published version; other branches validate only
+5. Build Docker image
+6. Push to container registry
+7. Publish Construction Kit artifacts
 
 ### Construction Kit Artifacts
 
