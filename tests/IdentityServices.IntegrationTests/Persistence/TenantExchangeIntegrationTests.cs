@@ -241,7 +241,8 @@ public class TenantExchangeIntegrationTests : IClassFixture<IdentityServicesFixt
         var idpStore = new IdentityProviderStore(
             new FixedTenantResolver(systemContext.GetSystemTenantRepositoryAsAdmin()));
         return new CrossTenantAuthenticationService(
-            systemContext,
+            new TenantRegistry(systemContext, new Microsoft.Extensions.Caching.Memory.MemoryCache(
+                new Microsoft.Extensions.Caching.Memory.MemoryCacheOptions())),
             idpStore,
             new PasswordHasher<RtUser>(),
             NullLogger<CrossTenantAuthenticationService>.Instance);

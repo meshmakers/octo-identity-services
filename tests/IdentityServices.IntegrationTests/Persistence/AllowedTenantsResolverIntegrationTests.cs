@@ -216,9 +216,12 @@ public class AllowedTenantsResolverIntegrationTests : IClassFixture<IdentityServ
         await setup.SetupAsync(_fixture.GetSystemContext().TenantId);
     }
 
-    private static AllowedTenantsResolver CreateResolver(ISystemContext systemContext) =>
-        new(systemContext, new CrossTenantShadowUserChainResolver(systemContext),
-            new MemoryCache(new MemoryCacheOptions()), NullLogger<AllowedTenantsResolver>.Instance);
+    private static AllowedTenantsResolver CreateResolver(ISystemContext systemContext)
+    {
+        var cache = new MemoryCache(new MemoryCacheOptions());
+        return new AllowedTenantsResolver(systemContext, new TenantRegistry(systemContext, cache),
+            new CrossTenantShadowUserChainResolver(systemContext), cache, NullLogger<AllowedTenantsResolver>.Instance);
+    }
 
     /// <summary>
     ///     Creates the shadow user the way a cross-tenant login or switch does, so its name follows
