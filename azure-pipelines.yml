@@ -58,7 +58,7 @@ resources:
       type: github
       name: meshmakers/octo-pipeline-templates
       endpoint: meshmakers-access-token
-      ref: refs/tags/tpl-v1.1.2
+      ref: refs/tags/tpl-v1.2.0
 
 trigger:
   batch: true
