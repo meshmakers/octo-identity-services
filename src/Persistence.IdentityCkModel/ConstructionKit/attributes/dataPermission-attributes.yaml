@@ -37,3 +37,17 @@ attributes:
     defaultValues:
       - 0
     description: Enforce applies the policy; AuditOnly only logs violations without filtering or rejecting (migration mode). Owned by the tenant - a blueprint update or re-apply keeps the stored value (a tenant that switched to Enforce stays on Enforce) and only initialises a new policy.
+
+  # AB#6384: opt-in switch of the engine's blueprint-lock restriction (DataPermissionWriteGuard).
+  # SEED-OWNED, the opposite of PolicyEnforcementMode above: the blueprint author decides which
+  # CK types are protected, and every blueprint update / forced re-apply puts the product's value
+  # back. A tenant administrator therefore cannot switch the protection off for good (and a
+  # blueprint can tighten or loosen it later). Default false and an absent value read as false, so
+  # existing policies and tenants are unaffected. The policy's own PolicyEnforcementMode (tenant-owned)
+  # still decides whether a violation is refused (Enforce) or only audited (AuditOnly).
+  - id: ProtectBlueprintLocked
+    valueType: Boolean
+    ownership: SeedOwned
+    defaultValues:
+      - false
+    description: Opt-in restriction (not a grant). When true, non-system callers cannot update or delete entities of the target types whose RtBlueprintLocked is true, nor set or change RtBlueprintLocked, RtBlueprintSource and RtBlueprintAppliedAt on them (refused with message 6384; AuditOnly policies only audit). Blueprint-owned - set by the blueprint seed, re-applied on every blueprint update. Default false.

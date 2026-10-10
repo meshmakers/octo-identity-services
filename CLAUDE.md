@@ -755,6 +755,31 @@ no longer change them on an existing one (not even tighten a policy or a client)
 `BlueprintOwnershipIntegrationTests` (real MongoDB; compiled ownership, shipped policy seed, Enforce over an AuditOnly seed, client,
 secrets, resources).
 
+### Blueprint-owned opt-in: `DataPolicy.ProtectBlueprintLocked` (AB#6384; System.Identity 2.24.0)
+
+`ProtectBlueprintLocked` (optional Boolean, default `false`) is the opt-in of the engine's blueprint-lock write guard
+(`DataPermissionWriteGuard` in `octo-construction-kit-engine`, message number 6384, `docs/blueprints.md` there). It is a
+**restriction, not a grant**: for the policy's target CK types (derived types inherit) a non-system caller can no longer update or delete an
+entity whose stored `RtBlueprintLocked` is `true`, nor set or change `RtBlueprintLocked`, `RtBlueprintSource` and `RtBlueprintAppliedAt`. The policy's own
+`PolicyEnforcementMode` decides between refusal (`Enforce`) and audit only (`AuditOnly`).
+
+- **Ownership: `SeedOwned`** (blueprint-owned) - the opposite of `PolicyEnforcementMode` / `PolicyScope`. The blueprint author decides which
+  types are protected; every blueprint update or forced re-apply puts the product's value back, so a user with write access to `DataPolicy`
+  cannot switch the protection off for good, and a later blueprint version can tighten or loosen it. A policy without the attribute reads as
+  `false`. A seed that merely *omits* it does not switch a stored `true` off (the import's blanking guard keeps the value, AB#6313): ship an explicit
+  `false` to take a protection back.
+- **Default `false`**; an engine or tenant on an older System.Identity reads the attribute as `false`: existing policies and tenants are
+  unaffected. The shipped `System.Identity.Bootstrap` policies do not opt in.
+- **Blueprint authors:** ship one `DataPolicy` per opted-in type in a policy group of its own (never on shared master-data policies), with
+  `ProtectBlueprintLocked: true`, the actions the roles need and a `PolicyPermission` granted to those roles - a policy with the flag still
+  counts as a normal policy for the grant logic (only the listed roles get access). Raise the blueprint's `ckModelDependencies` floor to
+  `System.Identity-[2.24.0,3.0)` (otherwise an older Identity silently drops the attribute). The policy table is cached per tenant for 60 s.
+- Regression tests: `BlueprintLockProtectionIntegrationTests` (real MongoDB: compiled ownership, fresh install, update re-applies, missing
+  attribute = false, bootstrap policies do not opt in, and an end-to-end check that a policy with the flag makes the engine guard refuse a user
+  write on a locked entity while an unlocked one and the system stay writable).
+- CK dependents: no CK model depends on `System.Identity`; blueprints pin it by open ranges (`[2.11,3.0)` up to `[2.14.0,3.0)`), which 2.24.0 satisfies, so
+  no dependent needs a rebuild. Only a blueprint that uses the flag needs the raised floor.
+
 ### Per-User Outbound Channel Preference (AB#5149, binding-specific)
 
 `RtUser.PreferredChannelBindingId` (optional String, CK 2.18.0) stores the **rtId of the
