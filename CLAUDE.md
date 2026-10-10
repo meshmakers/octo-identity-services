@@ -35,8 +35,9 @@ dotnet test Octo.Identity.sln -c DebugL
 🔴 **`-c Release` funktioniert lokal auf `test/0.2-dev` nicht — das ist kein kaputter Branch.**
 Die Paket-Lane kommt aus der Pipeline: `azure-pipelines.yml` reicht `octoCoreLibVersion` als
 `octoCoreLibVersionOverride` ans CI-Template, und nur dort steht die 0.2-Lane. Lokal greift der
-Fallback in `Directory.Build.props` — `0.1.*` mit privatem Feed, sonst `3.4.*`, also in beiden
-Fällen die **falsche** Lane —, und ohne konfigurierten `OctoNugetPrivateServer` sind `0.2.*`-Pakete
+Fallback in `Directory.Build.props` — `0.1.*` mit privatem Feed, sonst gar keiner (seit AB#6297
+gibt es keinen Release-Fallback mehr; ohne Version bricht der Build mit `OCTO0001` ab) —, also nie
+die 0.2-Lane, und ohne konfigurierten `OctoNugetPrivateServer` sind `0.2.*`-Pakete
 ohnehin nicht erreichbar. Der Build bricht dann mit einer Wand aus `CS0246` auf Typen ab, die es nur
 in der 0.2-Lane gibt (z.B. `DataPermissionDto` aus `Communication.Contracts` im
 `DataPermissionsController`). Das sieht nach einem kaputten Merge aus, ist aber die Lane.
