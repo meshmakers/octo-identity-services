@@ -17,6 +17,10 @@ types:
 
       - id: ${this}/PolicyEnforcementMode
         name: EnforcementMode
+
+      # AB#6384: seed-owned opt-in for the blueprint-lock write restriction (see the attribute).
+      - id: ${this}/ProtectBlueprintLocked
+        name: ProtectBlueprintLocked
     associations:
       - id: ${this}/PolicyPermission
         targetCkTypeId: ${this}/DataPermission
