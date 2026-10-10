@@ -735,6 +735,26 @@ Key components:
 
 Current identity schema (migration) version: `23` (migration 21→22 added the `RtOAuthAuthorization`/`RtOAuthToken` OpenIddict store types; 22→23 re-runs the full index update so abstract collection roots get their indexes, AB#5261). Current CK model version: `System.Identity-2.18.0` — the 2.12.0→2.17.0 changes (verified-identifier directory AB#5122+) are additive schema needing no numeric migration; 2.17.0→2.18.0 REPLACED `RtUser.PreferredChannel` with `RtUser.PreferredChannelBindingId` (AB#5149 revision, binding-specific preference). The feature shipped the day before the replacement with no external consumers, so the old attribute was dropped without a migration — any stored kind-level values are simply ignored (users re-select).
 
+### Tenant-owned attributes: a blueprint update never reverts an administrator's decision (AB#6324, AB#6329; System.Identity 2.23.0)
+
+A blueprint update imports its seed with `ImportStrategy.Upsert` (a full ReplaceOne); the engine keeps an attribute only when its
+ownership is not seed-owned. Audit AB#6317 (incident class AB#6310) found decisions an administrator takes in the product that were
+seed-owned, so an update silently undid them. System.Identity 2.23.0 (minor, `ownership` change per `ck-semver-rules`; attribute ids,
+types and defaults unchanged, no migration entry) marks them:
+
+| Entity | Attribute | Ownership | Why |
+|--------|-----------|-----------|-----|
+| `DataPolicy` | `PolicyEnforcementMode`, `PolicyScope` | `TenantOwned` | Seeds ship AuditOnly / All; the administrator flips to Enforce / narrows to OwnedOnly. Reverting would silently switch authorization enforcement off. Not a credential, part of the tenant's definition, so an `ExportRt` carries it |
+| `Client` (assignment overrides) | `System/Enabled`, `AllowedGrantTypes`, `AllowedScopes`, `AutoProvisionInChildTenants` | `TenantOwned` | An update must not re-enable a disabled client or widen narrowed access. `System/Enabled` is shared, hence an override, not a definition change |
+| `Client` (assignment override) | `Secrets` | `Secret` | Credential hashes: kept on a re-apply, left out of an `ExportRt` |
+| `Resource` (inherited by `ApiResource`, `ApiScope`, `IdentityResource`) | `System/Enabled` | `TenantOwned` | Same as the client switch |
+
+A fresh tenant still gets the seed values. **Consequence for blueprint authors:** a seed initialises these values on a new entity but can
+no longer change them on an existing one (not even tighten a policy or a client) — ship a CK migration step or a documented manual step.
+`ClientMirrorProvisioningService` writes mirrors with insert/replace, not `ImportRt`, so mirroring is unaffected. Regression tests:
+`BlueprintOwnershipIntegrationTests` (real MongoDB; compiled ownership, shipped policy seed, Enforce over an AuditOnly seed, client,
+secrets, resources).
+
 ### Per-User Outbound Channel Preference (AB#5149, binding-specific)
 
 `RtUser.PreferredChannelBindingId` (optional String, CK 2.18.0) stores the **rtId of the

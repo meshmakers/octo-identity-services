@@ -9,7 +9,10 @@ entities:
   # --- Data permissions (AB#4974): built-in protection of the identity entities. Seeded in
   # AuditOnly first — flip to Enforce per tenant after the audit events are reviewed (the
   # cross-tenant provisioning UI and similar consumers need the UserManagement role first).
-  # Policies are blueprint-owned: tenant customization = additional policies, never edits here.
+  # Additional policies are the tenant's way to extend the protection. PolicyEnforcementMode and
+  # PolicyScope are TENANT-OWNED since System.Identity 2.23.0 (AB#6324): this seed initialises them on a
+  # fresh tenant, a later blueprint update keeps what the administrator set (Enforce stays Enforce).
+  # A change of these two values here therefore no longer reaches existing policies.
   - rtId: '660000000000000000000050'
     ckTypeId: System.Identity/DataPermission
     rtWellKnownName: IdentityAdministrationPermission

@@ -10,16 +10,30 @@ attributes:
     defaultValues: [ ]
     description: "Granted actions: Read, Write, Delete."
 
+  # AB#6324 (audit finding F2): PolicyScope is tenant-owned for the same reason as
+  # PolicyEnforcementMode below. A tenant that narrowed a policy to OwnedOnly must not be widened
+  # back to All by a blueprint update: that is a silent access widening, i.e. a security regression.
+  # Same consequence: a blueprint can no longer CHANGE the scope of an existing policy.
   - id: PolicyScope
     valueType: Enum
     valueCkEnumId: ${this}/DataPolicyScope
+    ownership: TenantOwned
     defaultValues:
       - 0
-    description: All grants access to every entity of the target types; OwnedOnly restricts to entities created by the caller (RtCreatedBy).
+    description: All grants access to every entity of the target types; OwnedOnly restricts to entities created by the caller (RtCreatedBy). Owned by the tenant - a blueprint update or re-apply keeps the stored value and only initialises a new policy.
 
+  # AB#6324 (audit finding F2): the seeds of System.Identity.Bootstrap and MeshmakersAccounting ship
+  # every DataPolicy as AuditOnly ("flip to Enforce per tenant"). The tenant administrator makes that
+  # flip in the product. While the attribute was seed-owned, every blueprint update (an Upsert is a
+  # full ReplaceOne) put the seed's AuditOnly back: authorization silently stopped being enforced.
+  # TenantOwned, not Secret/RuntimeState: it is not a credential, and it is part of the tenant's
+  # portable definition, so an ExportRt carries it. A fresh tenant still gets the seed value
+  # (AuditOnly); a blueprint can no longer CHANGE the mode of an existing policy - a blueprint
+  # author who must tighten a policy needs a CK migration step or a documented manual step.
   - id: PolicyEnforcementMode
     valueType: Enum
     valueCkEnumId: ${this}/DataPolicyEnforcementMode
+    ownership: TenantOwned
     defaultValues:
       - 0
-    description: Enforce applies the policy; AuditOnly only logs violations without filtering or rejecting (migration mode).
+    description: Enforce applies the policy; AuditOnly only logs violations without filtering or rejecting (migration mode). Owned by the tenant - a blueprint update or re-apply keeps the stored value (a tenant that switched to Enforce stays on Enforce) and only initialises a new policy.

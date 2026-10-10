@@ -5,8 +5,17 @@ types:
     isFinal: true
     isAbstract: false
     attributes:
+      # AB#6329 (audit finding F5): what a tenant administrator decides about a seeded client -
+      # disabling it, narrowing its scopes and grant types, opting it out of child-tenant
+      # provisioning - is tenant-owned. As seed-owned, every System.Identity.Bootstrap update
+      # re-enabled the client and widened its access again. Assignment overrides (System/Enabled is
+      # shared by many types, so the System definition stays as it is). A fresh tenant still gets the
+      # seed values; a blueprint can no longer CHANGE these on an existing client - a blueprint
+      # author who must change a client's scopes or grants needs a CK migration step or a documented
+      # manual step. Same pattern as Pipeline.Enabled (AB#5309).
       - id: ${System}/Enabled
         name: Enabled
+        ownership: TenantOwned
 
       - id: ${this}/ClientId
         name: ClientId
@@ -14,8 +23,12 @@ types:
       - id: ${this}/ProtocolType
         name: ProtocolType
 
+      # AB#6329: a credential (secret hashes), so `Secret` rather than TenantOwned: kept on a
+      # re-apply like TenantOwned, but left out of ExportRt. The attribute is shared with ApiResource,
+      # hence an assignment override.
       - id: ${this}/Secrets
         name: ClientSecrets
+        ownership: Secret
 
       - id: ${this}/RequireClientSecret
         name: RequireClientSecret
@@ -45,6 +58,7 @@ types:
 
       - id: ${this}/AllowedGrantTypes
         name: AllowedGrantTypes
+        ownership: TenantOwned
 
       - id: ${this}/RequirePkce
         name: RequirePkce
@@ -85,6 +99,7 @@ types:
         name: AllowOfflineAccess
       - id: ${this}/AllowedScopes
         name: AllowedScopes
+        ownership: TenantOwned
       - id: ${this}/AlwaysIncludeUserClaimsInIdToken
         name: AlwaysIncludeUserClaimsInIdToken
       - id: ${this}/IdentityTokenLifetime
@@ -149,6 +164,7 @@ types:
 
       - id: ${this}/AutoProvisionInChildTenants
         name: AutoProvisionInChildTenants
+        ownership: TenantOwned
 
       - id: ${this}/ProvisionedByParentTenantId
         name: ProvisionedByParentTenantId
