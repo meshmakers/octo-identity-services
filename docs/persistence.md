@@ -160,7 +160,8 @@ Records are embedded within parent entities as arrays.
 
 Every attribute of a type has an `ownership` (`SeedOwned`, `TenantOwned`, `RuntimeState`, `Secret`) that decides what a blueprint
 update (an `Upsert` import, a full replace) does with a stored value. The System.Identity decisions, with the reason, are in
-`CLAUDE.md` ("Tenant-owned attributes ..."). Two of them are worth knowing for blueprint authors:
+`CLAUDE.md` ("Tenant-owned attributes ..."). Every attribute definition states its ownership explicitly; the build fails with `OCTO-CK001`
+when a new attribute has none (AB#6326). Two of the decisions are worth knowing for blueprint authors:
 
 | Attribute | Ownership | Effect |
 |-----------|-----------|--------|

@@ -2,11 +2,13 @@
 attributes:
   - id: TargetCkTypeIds
     valueType: StringArray
+    ownership: SeedOwned
     defaultValues: [ ]
     description: CK type ids or collection roots the policy protects; derived types inherit the policy.
 
   - id: PolicyActions
     valueType: StringArray
+    ownership: SeedOwned
     defaultValues: [ ]
     description: "Granted actions: Read, Write, Delete."
 
