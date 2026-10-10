@@ -33,17 +33,16 @@ public interface IAllowedTenantsResolver
 /// </remarks>
 public class AllowedTenantsResolver(
     ISystemContext systemContext,
+    ITenantRegistry tenantRegistry,
     ICrossTenantShadowUserChainResolver shadowUserChainResolver,
     IMemoryCache cache,
     ILogger<AllowedTenantsResolver> logger) : IAllowedTenantsResolver
 {
-    /// <summary>How long the tenant registry list and mapping lookups are reused (AB#6307).</summary>
-    public static readonly TimeSpan CacheTtl = TimeSpan.FromSeconds(45);
+    /// <summary>How long the mapping lookups are reused (AB#6307); the registry list uses the same TTL (<see cref="TenantRegistry.CacheTtl" />).</summary>
+    public static readonly TimeSpan CacheTtl = TenantRegistry.CacheTtl;
 
     /// <summary>Concurrent mapping probes per BFS tier, so token latency does not grow linearly with tenants (AB#6308).</summary>
     private const int MaxParallelProbes = 8;
-
-    private const string RegistryCacheKey = "AllowedTenantsResolver:registry";
 
     public async Task<IReadOnlyList<string>> ResolveAsync(string loginTenantId, RtUser user)
     {
@@ -188,20 +187,10 @@ public class AllowedTenantsResolver(
         }
     }
 
-    private async Task<IReadOnlyList<OctoTenant>> GetCandidateTenantsAsync()
-    {
-        if (cache.TryGetValue(RegistryCacheKey, out IReadOnlyList<OctoTenant>? cached) && cached != null)
-        {
-            return cached;
-        }
-
-        using var adminSession = await systemContext.GetAdminSessionAsync();
-        var allTenants = await systemContext.GetAllTenantsAsync(adminSession);
-        // The registry entries carry the database names the lightweight repository access needs (AB#6308).
-        IReadOnlyList<OctoTenant> tenants = allTenants.Items.ToList();
-        cache.Set(RegistryCacheKey, tenants, CacheTtl);
-        return tenants;
-    }
+    // The registry entries carry the database names the lightweight repository access needs (AB#6308);
+    // the list is cached and shared with the other identity services (AB#6393).
+    private Task<IReadOnlyList<OctoTenant>> GetCandidateTenantsAsync()
+        => tenantRegistry.GetRegisteredTenantsAsync();
 
     private async Task<bool> HasExternalTenantUserMappingByNameAsync(
         OctoTenant childTenant, string sourceTenantId, string sourceUserName)

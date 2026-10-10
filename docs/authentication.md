@@ -1345,6 +1345,22 @@ This ensures cascading tenant hierarchies work correctly. Example: `octosystem �
   order, so the traversal — which parent claims a child first and thereby decides the `xt_` shadow user name of its
   descendants — is deterministic.
 
+**Cross-tenant login, switch and exchange (AB#6393):** `CrossTenantAuthenticationService` only knows tenant ids
+(password login walks the parent providers, `ValidateCrossTenantAccessAsync` and the `tenant_exchange` lookups walk
+the provider graph and open the source tenant), so it used `FindTenantRepositoryAsync` per hop — the same 7–9
+round trips. It now opens every tenant through `ITenantRegistry.TryGetRepositoryAsync(tenantId)`
+(`TenantRegistry`): the registry list is read once per 45 s (`IMemoryCache`, shared with `AllowedTenantsResolver`)
+and `GetRegisteredTenantRepository` builds the repository from the entry without I/O. The system tenant is not a
+registry entry; its database name comes from the system context.
+- **Fail closed:** a tenant id that is not in the registry yields no repository, so user lookups return `null`, the
+  provider list is empty and the ancestor proof fails — nobody gains access through an unknown or unregistered
+  tenant. A failing registry read is handled like any failed lookup (logged, `null`/empty).
+- **Freshness:** a tenant created within the last 45 s is found because an unknown id triggers one registry re-read,
+  at most once per 5 s (`TenantRegistry.MissRefreshInterval`), so a flood of unknown ids cannot amplify into a flood of
+  registry reads. A tenant deleted within the TTL is still resolvable until the snapshot expires; its database is
+  gone, so the lookup finds nothing.
+- Sessions are now disposed after each lookup.
+
 ### TenantAuthorizationMiddleware
 
 Placed after `UseAuthentication()` + `UseAuthorization()` in each service's pipeline:

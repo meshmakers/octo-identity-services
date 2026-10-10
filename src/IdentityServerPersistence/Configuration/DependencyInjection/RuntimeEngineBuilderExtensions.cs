@@ -82,6 +82,9 @@ public static class RuntimeEngineBuilderExtensions
         builder.Services.AddScoped<ICrossTenantUserProvisioningService, CrossTenantUserProvisioningService>();
         // AB#6307: AllowedTenantsResolver caches the tenant registry and mapping lookups process-wide.
         builder.Services.AddMemoryCache();
+        // AB#6393: the cached tenant registry (id -> registry entry) is shared by AllowedTenantsResolver and
+        // CrossTenantAuthenticationService for lightweight repository access.
+        builder.Services.AddScoped<ITenantRegistry, TenantRegistry>();
         builder.Services.AddScoped<IAllowedTenantsResolver, AllowedTenantsResolver>();
         builder.Services.AddScoped<IEmailDomainGroupRuleStore, EmailDomainGroupRuleStore>();
         builder.Services.AddScoped<ILoginGroupAssignmentService, LoginGroupAssignmentService>();
