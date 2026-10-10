@@ -18,6 +18,8 @@ namespace IdentityServerPersistence.UnitTests.Services;
 ///     AB#6307: the token endpoint resolved a mapping check per tenant through uncached
 ///     <c>FindTenantRepositoryAsync</c> calls (7–9 MongoDB round trips each). The registry list and the
 ///     per-tenant mapping lookup are now cached for a short TTL; the resulting allowed tenants stay the same.
+///     AB#6308: even on a cache miss the lookup takes the database name from the registry entry and builds the
+///     repository without an existence probe or CK auto-import (<c>GetRegisteredTenantRepository</c>).
 /// </summary>
 public class AllowedTenantsResolverCacheTests
 {
@@ -41,7 +43,7 @@ public class AllowedTenantsResolverCacheTests
 
         SetupTenant("mapped", hasMapping: true);
         SetupTenant("unmapped", hasMapping: false);
-        _systemContext.FindTenantRepositoryAsync("broken").Returns<ITenantRepository>(_ => throw new InvalidOperationException("db down"));
+        _systemContext.GetRegisteredTenantRepository(Registered("broken")).Returns<ITenantRepository>(_ => throw new InvalidOperationException("db down"));
 
         _systemContext.ClearReceivedCalls(); // setup calls are not part of the behaviour under test
         _sut = new AllowedTenantsResolver(_systemContext, _chain, _cache, NullLogger<AllowedTenantsResolver>.Instance);
@@ -60,7 +62,7 @@ public class AllowedTenantsResolverCacheTests
     {
         await _sut.ResolveAsync("login", _user);
 
-        await _systemContext.DidNotReceive().FindTenantRepositoryAsync("login");
+        _systemContext.DidNotReceive().GetRegisteredTenantRepository(Registered("login"));
     }
 
     [Fact]
@@ -73,8 +75,8 @@ public class AllowedTenantsResolverCacheTests
 
         second.Should().BeEquivalentTo(first);
         await _systemContext.DidNotReceiveWithAnyArgs().GetAdminSessionAsync();
-        await _systemContext.DidNotReceive().FindTenantRepositoryAsync("mapped");
-        await _systemContext.DidNotReceive().FindTenantRepositoryAsync("unmapped");
+        _systemContext.DidNotReceive().GetRegisteredTenantRepository(Registered("mapped"));
+        _systemContext.DidNotReceive().GetRegisteredTenantRepository(Registered("unmapped"));
     }
 
     [Fact]
@@ -83,11 +85,11 @@ public class AllowedTenantsResolverCacheTests
         // First resolution: "unmapped" is probed from the login tenant and, after "mapped" matched,
         // once more from the mapped tenant's shadow user (two distinct lookups).
         await _sut.ResolveAsync("login", _user);
-        await _systemContext.Received(2).FindTenantRepositoryAsync("unmapped");
+        _systemContext.Received(2).GetRegisteredTenantRepository(Registered("unmapped"));
 
         await _sut.ResolveAsync("login", _user);
 
-        await _systemContext.Received(2).FindTenantRepositoryAsync("unmapped");
+        _systemContext.Received(2).GetRegisteredTenantRepository(Registered("unmapped"));
     }
 
     [Fact]
@@ -98,7 +100,7 @@ public class AllowedTenantsResolverCacheTests
 
         result.Should().BeEquivalentTo("login", "mapped");
         // Two BFS probes per resolution, none of them served from the cache.
-        await _systemContext.Received(4).FindTenantRepositoryAsync("broken");
+        _systemContext.Received(4).GetRegisteredTenantRepository(Registered("broken"));
     }
 
     [Fact]
@@ -107,7 +109,32 @@ public class AllowedTenantsResolverCacheTests
         await _sut.ResolveAsync("login", _user);
         await _sut.ResolveAsync("login", new RtUserBuilder().WithUserName("bob").Build());
 
-        await _systemContext.Received(2).FindTenantRepositoryAsync("mapped");
+        _systemContext.Received(2).GetRegisteredTenantRepository(Registered("mapped"));
+    }
+
+    private static OctoTenant Registered(string tenantId) =>
+        Arg.Is<OctoTenant>(t => t.TenantId == tenantId && t.DatabaseName == "db-" + tenantId);
+
+    [Fact]
+    public async Task ResolveAsync_CacheMiss_NeverResolvesTenantsThroughTheHeavyPath()
+    {
+        await _sut.ResolveAsync("login", _user);
+
+        // No existence probe and no CK auto-import per tenant: the cost of a miss is the single mapping query.
+        await _systemContext.DidNotReceiveWithAnyArgs().FindTenantRepositoryAsync(default!);
+        await _systemContext.DidNotReceiveWithAnyArgs().TryFindTenantRepositoryAsync(default!);
+        await _systemContext.DidNotReceiveWithAnyArgs().TryFindTenantContextAsync(default!);
+        await _systemContext.DidNotReceive().IsSystemTenantExistingAsync();
+    }
+
+    [Fact]
+    public async Task ResolveAsync_CacheMiss_RegistryIsReadOnceNoMatterHowManyTenantsExist()
+    {
+        await _sut.ResolveAsync("login", _user);
+
+        await _systemContext.Received(1).GetAllTenantsAsync(
+            Arg.Any<IOctoAdminSession>(), Arg.Any<int?>(), Arg.Any<int?>());
+        await _systemContext.Received(1).GetAdminSessionAsync();
     }
 
     private void SetupTenant(string tenantId, bool hasMapping)
@@ -122,6 +149,6 @@ public class AllowedTenantsResolverCacheTests
             : Array.Empty<RtExternalTenantUserMapping>());
         repository.GetRtEntitiesByTypeAsync<RtExternalTenantUserMapping>(session, Arg.Any<RtEntityQueryOptions>())
             .Returns(mappings);
-        _systemContext.FindTenantRepositoryAsync(tenantId).Returns(repository);
+        _systemContext.GetRegisteredTenantRepository(Registered(tenantId)).Returns(repository);
     }
 }
