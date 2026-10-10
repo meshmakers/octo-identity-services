@@ -1,4 +1,3 @@
-using System.Collections.Concurrent;
 using Meshmakers.Octo.Runtime.Contracts.MongoDb;
 using Meshmakers.Octo.Runtime.Contracts.Repositories.Query;
 using Microsoft.Extensions.Caching.Memory;
@@ -152,20 +151,21 @@ public class AllowedTenantsResolver(
             }
 
             var pending = candidateTenants.Where(t => !allowedTenants.Contains(t.TenantId)).ToList();
-            var matches = new ConcurrentBag<string>();
+            // One slot per pending tenant: the probes run in parallel, but the matches are consumed in
+            // registry order below, so the traversal (which parent claims a child first and thereby
+            // decides the shadow user name of its descendants) stays deterministic.
+            var matched = new bool[pending.Count];
 
             // The probes are independent single-collection reads against different tenant databases.
-            await Parallel.ForEachAsync(pending,
+            await Parallel.ForEachAsync(Enumerable.Range(0, pending.Count),
                 new ParallelOptions { MaxDegreeOfParallelism = MaxParallelProbes },
-                async (childTenant, _) =>
+                async (index, _) =>
                 {
+                    var childTenant = pending[index];
                     try
                     {
-                        if (await HasExternalTenantUserMappingByNameAsync(
-                                childTenant, currentTenantId, currentUserName))
-                        {
-                            matches.Add(childTenant.TenantId);
-                        }
+                        matched[index] = await HasExternalTenantUserMappingByNameAsync(
+                            childTenant, currentTenantId, currentUserName);
                     }
                     catch (Exception ex)
                     {
@@ -175,9 +175,10 @@ public class AllowedTenantsResolver(
                     }
                 });
 
-            foreach (var childTenantId in matches)
+            for (var index = 0; index < pending.Count; index++)
             {
-                if (allowedTenants.Add(childTenantId))
+                var childTenantId = pending[index].TenantId;
+                if (matched[index] && allowedTenants.Add(childTenantId))
                 {
                     // The user in the child tenant will be: xt_{parentTenantId}_{parentUsername}
                     var childUserName = CrossTenantShadowUserName.Build(currentTenantId, currentUserName);
