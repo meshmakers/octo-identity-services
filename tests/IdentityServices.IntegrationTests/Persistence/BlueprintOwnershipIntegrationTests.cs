@@ -72,6 +72,11 @@ public class BlueprintOwnershipIntegrationTests : IClassFixture<IdentityServices
         // Credential: kept on a re-apply, left out of an ExportRt.
         Ownership(client, nameof(RtClient.ClientSecrets)).Should().Be(AttributeOwnershipDto.Secret);
 
+        // AB#6443: the introspection secrets of an API resource are credentials too.
+        var apiResource = await repo.GetCkTypeGraphAsync(RtEntityExtensions.GetRtCkTypeId<RtApiResource>());
+        Ownership(apiResource, nameof(RtApiResource.ApiSecrets)).Should().Be(AttributeOwnershipDto.Secret);
+        Ownership(apiResource, nameof(RtApiResource.ApiSecrets)).IsExcludedFromExport().Should().BeTrue();
+
         foreach (var resourceType in new[]
                  {
                      RtEntityExtensions.GetRtCkTypeId<RtApiResource>(),
@@ -256,6 +261,44 @@ public class BlueprintOwnershipIntegrationTests : IClassFixture<IdentityServices
         updated.DisplayName.Should().Be("Seeded display name v2");
     }
 
+    /// <summary>
+    ///     AB#6443: the Identity.Bootstrap seed writes <c>Secrets</c> on the API resources (empty). The
+    ///     secret a tenant administrator set must survive an update, also one whose seed ships a non-empty
+    ///     placeholder; a fresh tenant still gets the seed value.
+    /// </summary>
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task ApiResourceUpsert_KeepsTheSecretTheAdministratorSet(bool seedShipsPlaceholder)
+    {
+        var repo = await GetRepositoryAsync();
+        var rtId = OctoObjectId.GenerateNewId();
+        var name = $"res-{Guid.NewGuid():N}";
+
+        await ImportAsync(repo, ResourceSeed("ApiResource", rtId, name, "Seeded display name"),
+            ImportStrategy.Upsert);
+        var fresh = await LoadAsync<RtApiResource>(repo, rtId);
+        fresh.ApiSecrets.Should().BeEmpty("a fresh tenant gets the seed value");
+
+        fresh.ApiSecrets.Add(new RtSecretRecord
+        {
+            Value = "test-not-a-real-secret-hash",
+            Type = "SharedSecret",
+            Description = "set by the administrator"
+        });
+        await ReplaceAsync(repo, fresh);
+
+        var seed = seedShipsPlaceholder
+            ? ResourceSeed("ApiResource", rtId, name, "Seeded display name v2", placeholderApiSecret: true)
+            : ResourceSeed("ApiResource", rtId, name, "Seeded display name v2");
+        await ImportAsync(repo, seed, ImportStrategy.Upsert);
+
+        var updated = await LoadAsync<RtApiResource>(repo, rtId);
+        updated.ApiSecrets.Should().ContainSingle().Which.Value.Should().Be("test-not-a-real-secret-hash");
+        // Control: the import really replaced the entity.
+        updated.DisplayName.Should().Be("Seeded display name v2");
+    }
+
     // ----------------------------------------------------------------------------------------------
     // Helpers
     // ----------------------------------------------------------------------------------------------
@@ -381,14 +424,26 @@ public class BlueprintOwnershipIntegrationTests : IClassFixture<IdentityServices
                  value: true
          """;
 
-    private static string ResourceSeed(string typeName, OctoObjectId rtId, string name, string displayName)
+    private static string ResourceSeed(string typeName, OctoObjectId rtId, string name, string displayName,
+        bool placeholderApiSecret = false)
     {
+        var secrets = placeholderApiSecret
+            ? """
+
+                          - ckRecordId: System.Identity/Secret
+                            attributes:
+                              - id: System.Identity/Value
+                                value: test-placeholder-from-seed
+                              - id: System.Identity/SecretType
+                                value: SharedSecret
+              """
+            : " []";
         var extra = typeName switch
         {
-            "ApiResource" => """
+            "ApiResource" => $"""
 
                       - id: System.Identity/Secrets
-                        value: []
+                        value:{secrets}
                       - id: System.Identity/Scopes
                         value:
                           - octo_api

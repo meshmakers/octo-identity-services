@@ -5,6 +5,11 @@
 # the opposite of PolicyEnforcementMode / PolicyScope. Additive (rule T1), no migration entry; an engine or
 # tenant without the attribute reads it as false.
 #
+# 2.24.0 also (AB#6443, audit AB#6317 re-scan): ApiResource.Secrets is `ownership: Secret` (assignment
+# override, like Client.Secrets in 2.23.0). The Identity.Bootstrap seed writes it (empty) on the seeded API
+# resources, so it was seed-owned in effect; now a tenant-set introspection secret is kept on a re-apply
+# and left out of an ExportRt. Rated Minor (ownership change); ids, types and defaults unchanged.
+#
 # 2.23.0 (AB#6324, AB#6329; audit AB#6317 findings F2 and F5) makes what a tenant administrator
 # decides in the product tenant-owned, so a blueprint update or re-apply no longer reverts it:
 #   * DataPolicy.PolicyEnforcementMode and PolicyScope: TenantOwned. The seeds ship AuditOnly and an
