@@ -156,6 +156,35 @@ attributes:
 
 Records are embedded within parent entities as arrays.
 
+## Attribute Ownership and the Blueprint-Lock Opt-In
+
+Every attribute of a type has an `ownership` (`SeedOwned`, `TenantOwned`, `RuntimeState`, `Secret`) that decides what a blueprint
+update (an `Upsert` import, a full replace) does with a stored value. The System.Identity decisions, with the reason, are in
+`CLAUDE.md` ("Tenant-owned attributes ..."). Two of them are worth knowing for blueprint authors:
+
+| Attribute | Ownership | Effect |
+|-----------|-----------|--------|
+| `DataPolicy.PolicyEnforcementMode`, `PolicyScope` | `TenantOwned` | A blueprint initialises them; a later update keeps what the administrator set (Enforce stays Enforce) |
+| `DataPolicy.ProtectBlueprintLocked` (since 2.24.0) | `SeedOwned` | The blueprint owns it: every update or forced re-apply puts the shipped value back |
+| `ApiResource.Secrets`, `Client.Secrets` | `Secret` | Kept on a re-apply, left out of an `ExportRt` |
+
+### `DataPolicy.ProtectBlueprintLocked` (AB#6384)
+
+Optional Boolean, default `false` (an absent value reads as `false`, so older tenants and policies are unaffected). When `true` on a
+data policy, the engine's write guard (`DataPermissionWriteGuard`, message number 6384; see `docs/blueprints.md` in
+`octo-construction-kit-engine`) treats the policy's target CK types (derived types inherit) as follows for non-system callers:
+
+- updating, replacing or deleting an entity whose stored `RtBlueprintLocked` is `true` is refused for the whole change set;
+- setting or changing `RtBlueprintLocked`, `RtBlueprintSource` and `RtBlueprintAppliedAt` is refused;
+- reads, entities with `RtBlueprintLocked` `false`/absent and system callers (blueprint install/update, migrations) are unaffected.
+
+It is a restriction, not a grant, and the policy's own `PolicyEnforcementMode` applies (`Enforce` refuses, `AuditOnly` only publishes an
+audit event). A policy with the flag still counts as a normal policy for the grant logic, so give it a `PolicyPermission` granted to the
+roles that need write access. Ship one policy per opted-in type in a policy group of its own, raise the blueprint's
+`ckModelDependencies` floor to `System.Identity-[2.24.0,3.0)`, and note that the policy table is cached per tenant for 60 seconds. The flag
+is seed-owned on purpose: users cannot switch the protection off for good, and a seed that merely omits the attribute keeps a stored
+`true` (ship an explicit `false` to take it back).
+
 ## Code Generation Pipeline
 
 ### Build Configuration
