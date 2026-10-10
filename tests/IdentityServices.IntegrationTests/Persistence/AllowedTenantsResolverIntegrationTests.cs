@@ -9,6 +9,7 @@ using Meshmakers.Octo.Runtime.Contracts.MongoDb.Repositories;
 using Meshmakers.Octo.Runtime.Contracts.RepositoryEntities;
 using Meshmakers.Octo.Services.Infrastructure.Services;
 using Microsoft.AspNetCore.Identity;
+using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.Logging.Abstractions;
 using Persistence.IdentityCkModel.Generated.System.Identity.v2;
 using Xunit;
@@ -217,7 +218,7 @@ public class AllowedTenantsResolverIntegrationTests : IClassFixture<IdentityServ
 
     private static AllowedTenantsResolver CreateResolver(ISystemContext systemContext) =>
         new(systemContext, new CrossTenantShadowUserChainResolver(systemContext),
-            NullLogger<AllowedTenantsResolver>.Instance);
+            new MemoryCache(new MemoryCacheOptions()), NullLogger<AllowedTenantsResolver>.Instance);
 
     /// <summary>
     ///     Creates the shadow user the way a cross-tenant login or switch does, so its name follows

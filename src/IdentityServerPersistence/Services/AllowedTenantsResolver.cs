@@ -1,5 +1,6 @@
 using Meshmakers.Octo.Runtime.Contracts.MongoDb;
 using Meshmakers.Octo.Runtime.Contracts.Repositories.Query;
+using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.Logging;
 using Persistence.IdentityCkModel.Generated.System.Identity.v2;
 
@@ -33,8 +34,14 @@ public interface IAllowedTenantsResolver
 public class AllowedTenantsResolver(
     ISystemContext systemContext,
     ICrossTenantShadowUserChainResolver shadowUserChainResolver,
+    IMemoryCache cache,
     ILogger<AllowedTenantsResolver> logger) : IAllowedTenantsResolver
 {
+    /// <summary>How long the tenant registry list and mapping lookups are reused (AB#6307).</summary>
+    public static readonly TimeSpan CacheTtl = TimeSpan.FromSeconds(45);
+
+    private const string RegistryCacheKey = "AllowedTenantsResolver:registry";
+
     public async Task<IReadOnlyList<string>> ResolveAsync(string loginTenantId, RtUser user)
     {
         var allowedTenants = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { loginTenantId };
@@ -113,9 +120,7 @@ public class AllowedTenantsResolver(
         IReadOnlyList<string> candidateTenantIds;
         try
         {
-            using var adminSession = await systemContext.GetAdminSessionAsync();
-            var allTenants = await systemContext.GetAllTenantsAsync(adminSession);
-            candidateTenantIds = allTenants.Items.Select(t => t.TenantId).ToList();
+            candidateTenantIds = await GetCandidateTenantIdsAsync();
         }
         catch (Exception ex)
         {
@@ -173,11 +178,41 @@ public class AllowedTenantsResolver(
         }
     }
 
+    private async Task<IReadOnlyList<string>> GetCandidateTenantIdsAsync()
+    {
+        if (cache.TryGetValue(RegistryCacheKey, out IReadOnlyList<string>? cached) && cached != null)
+        {
+            return cached;
+        }
+
+        using var adminSession = await systemContext.GetAdminSessionAsync();
+        var allTenants = await systemContext.GetAllTenantsAsync(adminSession);
+        IReadOnlyList<string> ids = allTenants.Items.Select(t => t.TenantId).ToList();
+        cache.Set(RegistryCacheKey, ids, CacheTtl);
+        return ids;
+    }
+
     private async Task<bool> HasExternalTenantUserMappingByNameAsync(
         string childTenantId, string sourceTenantId, string sourceUserName)
     {
+        // Tenant and user names are case-insensitive keys here, like the HashSet of allowed tenants.
+        var key = $"AllowedTenantsResolver:mapping:{childTenantId}\u001f{sourceTenantId}\u001f{sourceUserName}"
+            .ToLowerInvariant();
+        if (cache.TryGetValue(key, out bool cached))
+        {
+            return cached;
+        }
+
+        var hasMapping = await QueryExternalTenantUserMappingAsync(childTenantId, sourceTenantId, sourceUserName);
+        cache.Set(key, hasMapping, CacheTtl);
+        return hasMapping;
+    }
+
+    private async Task<bool> QueryExternalTenantUserMappingAsync(
+        string childTenantId, string sourceTenantId, string sourceUserName)
+    {
         var tenantRepository = await systemContext.FindTenantRepositoryAsync(childTenantId);
-        var session = await tenantRepository.GetSessionAsync();
+        using var session = await tenantRepository.GetSessionAsync();
         session.StartTransaction();
 
         var queryOptions = RtEntityQueryOptions.Create()
