@@ -2,50 +2,61 @@
 attributes:
   - id: UserName
     valueType: String
+    ownership: SeedOwned
     description: The user name.
 
   - id: NormalizedUserName
     valueType: String
+    ownership: SeedOwned
     description: The normalized user name.
 
   - id: NormalizedName
     valueType: String
+    ownership: SeedOwned
     description: The normalized name.
 
   - id: Email
     valueType: String
+    ownership: SeedOwned
     description: The email address of the user.
 
   - id: NormalizedEmail
     valueType: String
+    ownership: SeedOwned
     description: The normalized email address of the user.
 
   - id: EmailConfirmed
     valueType: Boolean
+    ownership: SeedOwned
     description: Indicates if the email address of the user has been confirmed.
     defaultValues:
       - false
 
   - id: PasswordHash
     valueType: String
+    ownership: SeedOwned
     description: The salted and hashed representation of the password for this user.
 
   - id: SecurityStamp
     valueType: String
+    ownership: SeedOwned
     description: A random value that should change whenever a users credentials have been compromised.
 
   - id: PhoneNumber
     valueType: String
+    ownership: SeedOwned
     description: The phone number of the user.
 
   - id: PhoneNumberConfirmed
     valueType: Boolean
+    ownership: SeedOwned
     description: Indicates if the phone number of the user has been confirmed.
     defaultValues:
       - false
 
   - id: TwoFactorEnabled
     valueType: Boolean
+    ownership: SeedOwned
     description: Indicates if two factor authentication is enabled for the user.
     defaultValues:
       - false
@@ -61,183 +72,234 @@ attributes:
   # "no preference". Deleting the referenced binding clears the preference in the same operation.
   - id: PreferredChannelBindingId
     valueType: String
+    ownership: SeedOwned
     description: The rtId of the VerifiedExternalIdentifier chosen as preferred outbound channel target for system-initiated messages (null = no preference). The channel kind is derived from the referenced binding. Set via self-service, restricted to the user's own valid bindings.
 
   - id: LockoutEnd
     valueType: DateTimeOffset
+    ownership: SeedOwned
     description: The date and time, in UTC, when any user lockout ends.
 
   - id: LockoutEnabled
     valueType: Boolean
+    ownership: SeedOwned
     description: Flag indicating if the user could be locked out.
     defaultValues:
       - false
 
   - id: AccessFailedCount
     valueType: Int
+    ownership: SeedOwned
     description: The number of failed login attempts for the current user.
     defaultValues:
       - 0
 
   - id: ResetPasswordOnLogin
     valueType: Boolean
+    ownership: SeedOwned
     description: Force the user to change the password after the next login.
     defaultValues:
       - true
 
   - id: FirstName
     valueType: String
+    ownership: SeedOwned
     description: The first name of the user.
 
   - id: LastName
     valueType: String
+    ownership: SeedOwned
     description: The last name of the user.
 
   - id: RoleIds
     valueType: StringArray
+    ownership: SeedOwned
     description: The id of roles the user is a member of.
 
   - id: ClaimType
     valueType: String
+    ownership: SeedOwned
     description: The type of the claim.
 
   - id: ClaimValue
     valueType: String
+    ownership: SeedOwned
     description: The value of the claim.
 
   - id: ClaimValueType
     valueType: String
+    ownership: SeedOwned
     description: The value type of the claim.
 
   - id: UserId
     valueType: String
+    ownership: SeedOwned
 
   - id: RoleId
     valueType: String
+    ownership: SeedOwned
 
   - id: LoginProvider
     valueType: String
+    ownership: SeedOwned
 
   - id: ProviderKey
     valueType: String
+    ownership: SeedOwned
 
   - id: ProviderDisplayName
     valueType: String
+    ownership: SeedOwned
 
   - id: UserClaims
     valueType: RecordArray
     valueCkRecordId: ${this}/UserClaim
+    ownership: SeedOwned
     description: The claims of the user.
 
   - id: RoleClaims
     valueType: RecordArray
     valueCkRecordId: ${this}/RoleClaim
+    ownership: SeedOwned
     description: The claims of a role.
 
   - id: UserLogins
     valueType: RecordArray
     valueCkRecordId: ${this}/UserLogin
+    ownership: SeedOwned
     description: The existing logins of the user.
 
   - id: UserTokens
     valueType: RecordArray
     valueCkRecordId: ${this}/UserToken
+    ownership: SeedOwned
     description: The tokens of the user.
 
   - id: SubjectIds
     valueType: StringArray
+    ownership: SeedOwned
     defaultValues: [ ]
 
   - id: IdentityRoleIds
     valueType: StringArray
+    ownership: SeedOwned
     defaultValues: [ ]
 
   - id: GrantKey
     valueType: String
+    ownership: SeedOwned
   - id: GrantType
     valueType: String
+    ownership: SeedOwned
   - id: SubjectId
     valueType: String
+    ownership: SeedOwned
   - id: SessionId
     valueType: String
+    ownership: SeedOwned
   - id: ClientId
     valueType: String
+    ownership: SeedOwned
   - id: CreationDateTime
     valueType: DateTime
+    ownership: SeedOwned
   - id: ExpirationDateTime
     valueType: DateTime
+    ownership: SeedOwned
   - id: ConsumedDateTime
     valueType: DateTime
+    ownership: SeedOwned
   - id: Data
     valueType: String
+    ownership: SeedOwned
 
   # AB#4989/AB#4991 - OpenIddict authorization/token model (replaces PersistedGrant at cutover)
   - id: AuthorizationType
     valueType: String
+    ownership: SeedOwned
     description: OpenIddict authorization type (permanent or ad-hoc).
   - id: TokenType
     valueType: String
+    ownership: SeedOwned
     description: OpenIddict token type (authorization_code, refresh_token, device_code, user_code, ...).
   - id: Status
     valueType: String
+    ownership: SeedOwned
     description: OpenIddict entry status (valid, inactive, redeemed, rejected, revoked).
   - id: ReferenceId
     valueType: String
+    ownership: SeedOwned
     description: Hashed reference identifier used to look up reference tokens (device/user codes).
   - id: Payload
     valueType: String
+    ownership: SeedOwned
     description: Protected token payload for reference tokens.
   - id: Properties
     valueType: String
+    ownership: SeedOwned
     description: Additional OpenIddict properties as a JSON object.
   - id: AuthorizationRtId
     valueType: String
+    ownership: SeedOwned
     description: RtId of the OAuthAuthorization this token belongs to.
   - id: RedemptionDateTime
     valueType: DateTime
+    ownership: SeedOwned
     description: Point in time a single-use token was redeemed.
   - id: PermissionId
     valueType: String
+    ownership: SeedOwned
   - id: ResourceClaims
     valueType: StringArray
+    ownership: SeedOwned
     defaultValues: [ ]
   - id: IsRequired
     valueType: Boolean
+    ownership: SeedOwned
     description: Specifies whether the user can de-select the scope on the consent screen (if the consent screen wants to implement such a feature). Defaults to false.
     defaultValues:
       - false
   - id: IsEmphasized
     valueType: Boolean
+    ownership: SeedOwned
     description: Specifies whether the consent screen will emphasize this scope (if the consent screen wants to implement such a feature). Defaults to false.
     defaultValues:
       - false
   - id: Value
     valueType: String
+    ownership: SeedOwned
   - id: SecretType
     valueType: String
+    ownership: SeedOwned
     defaultValues:
       - SharedSecret
   - id: RequireResourceIndicator
     valueType: Boolean
+    ownership: SeedOwned
     defaultValues:
       - false
   - id: Secrets
     valueType: RecordArray
     valueCkRecordId: ${this}/Secret
+    ownership: SeedOwned
     defaultValues: [ ]
   - id: Scopes
     valueType: StringArray
+    ownership: SeedOwned
     description: Models the scopes this API resource allows.
   - id: AllowedAccessTokenSigningAlgorithms
     valueType: StringArray
+    ownership: SeedOwned
     description: Signing algorithm for access token. If empty, will use the server default signing algorithm.
     defaultValues: [ ]
   - id: ProtocolType
     valueType: String
+    ownership: SeedOwned
     defaultValues:
       - "oidc"
   - id: RequireClientSecret
     valueType: Boolean
+    ownership: SeedOwned
     defaultValues:
       - true
   - id: ClientUri
@@ -248,52 +310,63 @@ attributes:
       Runtime-state for the same reason as RedirectUris (AB#5210).
   - id: LogoUri
     valueType: String
+    ownership: SeedOwned
     description: URI to client logo (used on consent screen)
   - id: RequireConsent
     valueType: Boolean
+    ownership: SeedOwned
     description: Specifies whether a consent screen is required. Defaults to false.
     defaultValues:
       - false
   - id: AllowRememberConsent
     valueType: Boolean
+    ownership: SeedOwned
     description: Specifies whether user can choose to store consent decisions (defaults to true)
     defaultValues:
       - true
   - id: AllowedGrantTypes
     valueType: StringArray
+    ownership: SeedOwned
     description: Specifies the allowed grant types (legal combinations of AuthorizationCode, Implicit, Hybrid, ResourceOwner, ClientCredentials). Defaults to Implicit.
   - id: RequirePkce
     valueType: Boolean
+    ownership: SeedOwned
     description: Specifies whether a proof key is required for authorization code based token requests (defaults to true).
     defaultValues:
       - true
   - id: AllowPlainTextPkce
     valueType: Boolean
+    ownership: SeedOwned
     description: Specifies whether a proof key can be sent using plain method (not recommended and defaults to false).
     defaultValues:
       - false
   - id: RequireRequestObject
     valueType: Boolean
+    ownership: SeedOwned
     description: Specifies whether the client must use a request object on authorize requests (defaults to false).
     defaultValues:
       - false
   - id: AllowAccessTokensViaBrowser
     valueType: Boolean
+    ownership: SeedOwned
     description: Controls whether access tokens are transmitted via the browser for this client
     defaultValues:
       - false
   - id: RequireDPoP
     valueType: Boolean
+    ownership: SeedOwned
     description: Specifies whether a DPoP (Demonstrating Proof-of-Possession) token is required to be used by this client (defaults to false)
     defaultValues:
       - false
   - id: DPoPValidationMode
     valueType: Int
+    ownership: SeedOwned
     description: Enum setting to control validation for the DPoP proof token expiration.
     defaultValues:
       - 1
   - id: DPoPClockSkew
     valueType: TimeSpan
+    ownership: SeedOwned
     description: Clock skew used in validating the client's DPoP proof token 'iat' claim value. Defaults to 5 minutes.
     defaultValues:
       - 00:05:00
@@ -324,138 +397,169 @@ attributes:
     defaultValues: [ ]
   - id: FrontChannelLogoutUri
     valueType: String
+    ownership: SeedOwned
     description: Specifies logout URI at client for HTTP front-channel based logout.
   - id: FrontChannelLogoutSessionRequired
     valueType: Boolean
+    ownership: SeedOwned
     defaultValues:
       - true
     description: Specifies if the user's session id should be sent to the FrontChannelLogoutUri. Defaults to true.
   - id: BackChannelLogoutUri
     valueType: String
+    ownership: SeedOwned
     description: Specifies logout URI at client for HTTP back-channel based logout.
   - id: BackChannelLogoutSessionRequired
     valueType: Boolean
+    ownership: SeedOwned
     defaultValues:
       - true
     description: Specifies if the user's session id should be sent to the BackChannelLogoutUri. Defaults to true.
   - id: AllowOfflineAccess
     valueType: Boolean
+    ownership: SeedOwned
     description: Specifies whether this client can request refresh tokens (defaults to false)
     defaultValues:
       - false
   - id: AllowedScopes
     valueType: StringArray
+    ownership: SeedOwned
     description: Specifies the api scopes that the client is allowed to request. If empty, the client can't access any scope
     defaultValues: [ ]
   - id: AlwaysIncludeUserClaimsInIdToken
     valueType: Boolean
+    ownership: SeedOwned
     description: When requesting both an id token and access token, should the user claims always be added to the id token instead of requiring the client to use the userinfo endpoint.
     defaultValues:
       - false
   - id: IdentityTokenLifetime
     valueType: Int
+    ownership: SeedOwned
     defaultValues:
       - 300
     description: Lifetime of identity token in seconds (defaults to 300 seconds / 5 minutes)
   - id: AllowedIdentityTokenSigningAlgorithms
     valueType: StringArray
+    ownership: SeedOwned
     description: Signing algorithm for identity token. If empty, will use the server default signing algorithm.
     defaultValues: [ ]
   - id: AccessTokenLifetime
     valueType: Int
+    ownership: SeedOwned
     defaultValues:
       - 3600
     description: Lifetime of access token in seconds (defaults to 3600 seconds / 1 hour)
   - id: AuthorizationCodeLifetime
     valueType: Int
+    ownership: SeedOwned
     defaultValues:
       - 300
     description: Lifetime of authorization code in seconds (defaults to 300 seconds / 5 minutes)
   - id: AbsoluteRefreshTokenLifetime
     valueType: Int
+    ownership: SeedOwned
     defaultValues:
       - 2592000
     description: Maximum lifetime of a refresh token in seconds. Defaults to 2592000 seconds / 30 days
   - id: SlidingRefreshTokenLifetime
     valueType: Int
+    ownership: SeedOwned
     defaultValues:
       - 1296000
     description: Sliding lifetime of a refresh token in seconds. Defaults to 1296000 seconds / 15 days
   - id: ConsentLifetime
     valueType: Int
+    ownership: SeedOwned
     description: Lifetime of a user consent in seconds. Defaults to null (no expiration)
   - id: RefreshTokenUsage
     valueType: Enum
     valueCkEnumId: ${this}/TokenUsage
+    ownership: SeedOwned
     description: Gets or sets a value indicating whether the refresh token should be updated on a refresh token request.
   - id: UpdateAccessTokenClaimsOnRefresh
     valueType: Boolean
+    ownership: SeedOwned
     description: Indicates whether the access token (and its claims) should be updated on a refresh token request.
     defaultValues:
       - false
   - id: RefreshTokenExpiration
     valueType: Enum
     valueCkEnumId: ${this}/TokenExpiration
+    ownership: SeedOwned
     defaultValues:
       - 1
     description: Gets or sets a value indicating whether the access token (and its claims) should be updated on a refresh token request.
   - id: AccessTokenType
     valueType: Enum
     valueCkEnumId: ${this}/TokenType
+    ownership: SeedOwned
     defaultValues:
       - 0
     description: Specifies whether the access token is a reference token or a self contained JWT token (defaults to Jwt).
   - id: EnableLocalLogin
     valueType: Boolean
+    ownership: SeedOwned
     defaultValues:
       - true
     description: Specifies if this client can use local accounts. Defaults to true.
   - id: IdentityProviderRestrictions
     valueType: StringArray
+    ownership: SeedOwned
     description: Specifies which external IdPs can be used with this client (if list is empty all IdPs are allowed). Defaults to empty.
     defaultValues: [ ]
   - id: IncludeJwtId
     valueType: Boolean
+    ownership: SeedOwned
     defaultValues:
       - true
     description: Value indicating whether JWT access tokens should include an identifier. Defaults to true.
   - id: ClientClaims
     valueType: RecordArray
     valueCkRecordId: ${this}/ClientClaim
+    ownership: SeedOwned
     description: Gets or sets the client claims to be sent to the user info endpoint.
     defaultValues: [ ]
   - id: AlwaysSendClientClaims
     valueType: Boolean
+    ownership: SeedOwned
     defaultValues:
       - false
     description: Gets or sets a value indicating whether client claims should be always included in the access tokens - or only for client credentials flow.
   - id: ClientClaimsPrefix
     valueType: String
+    ownership: SeedOwned
     defaultValues:
       - client_
     description: Gets or sets a value to prefix it on client claim types. Defaults to client_.
   - id: PairWiseSubjectSalt
     valueType: String
+    ownership: SeedOwned
     description: Gets or sets a salt value used in pair-wise subjectId generation for users of this client.
   - id: UserSsoLifetime
     valueType: Int
+    ownership: SeedOwned
     description: Lifetime of user's single sign-on session (in seconds). Defaults to null (no expiration).
   - id: UserCodeType
     valueType: String
+    ownership: SeedOwned
     description: Specifies the user code type for the device flow. Defaults to null.
   - id: DeviceCodeLifetime
     valueType: Int
+    ownership: SeedOwned
     defaultValues:
       - 300
     description: Specifies the lifetime (in seconds) of the device code. Defaults to 300 seconds / 5 minutes.
   - id: CibaLifetime
     valueType: Int
+    ownership: SeedOwned
     description: The backchannel authentication request lifetime in seconds.
   - id: PollingInterval
     valueType: Int
+    ownership: SeedOwned
     description: The backchannel authentication request polling interval in seconds.
   - id: CoordinateLifetimeWithUserSession
     valueType: Boolean
+    ownership: SeedOwned
     description: When enabled, the client's token lifetimes (e.g. refresh tokens) will be tied to the user's session lifetime.
   - id: AllowedCorsOrigins
     valueType: RecordArray
@@ -467,157 +571,194 @@ attributes:
     defaultValues: [ ]
   - id: InitiateLoginUri
     valueType: String
+    ownership: SeedOwned
     description: Gets of sets a URI that can be used to initiate login from the IdentityServer host or a third party.
   - id: Authority
     valueType: String
+    ownership: SeedOwned
     description: Gets or sets the URI of the provider, or discovery endpoint for OpenID Connect discovery.
   - id: ClientSecret
     valueType: String
+    ownership: SeedOwned
     description: Gets or sets the client secret of the application.
     defaultValues: [ ]
   - id: ShowInDiscoveryDocument
     valueType: Boolean
+    ownership: SeedOwned
     defaultValues:
       - true
     description: Gets or sets a value indicating whether the client will be shown in the discovery document. Defaults to true.
   - id: Host
     valueType: String
+    ownership: SeedOwned
     description: Gets or sets the host address of the identity provider.
   - id: UseTls
     valueType: Boolean
+    ownership: SeedOwned
     description: Gets or sets if the connection to the identity provider should use TLS. Defaults to true.
     defaultValues:
       - true
   - id: Port
     valueType: Int
+    ownership: SeedOwned
     description: Gets or sets the host port of the identity provider.
     defaultValues:
       - 636
   - id: UserBaseDn
     valueType: String
+    ownership: SeedOwned
     description: Gets or sets the base DN of the user.
   - id: UserNameAttribute
     valueType: String
+    ownership: SeedOwned
     description: Gets or sets the name of the user attribute.
 
   - id: ParentTenantId
     valueType: String
+    ownership: SeedOwned
     description: The tenant ID of the parent tenant that provides user authentication.
 
   - id: SourceTenantId
     valueType: String
+    ownership: SeedOwned
     description: The tenant ID where the user's account resides.
 
   - id: SourceUserId
     valueType: String
+    ownership: SeedOwned
     description: The RtId of the user in the source tenant.
 
   - id: SourceUserName
     valueType: String
+    ownership: SeedOwned
     description: The username for display purposes.
 
   - id: MappedRoleIds
     valueType: StringArray
+    ownership: SeedOwned
     description: The role IDs assigned to the mapped user in this tenant.
 
   - id: GroupName
     valueType: String
+    ownership: SeedOwned
     description: The display name of the group.
 
   - id: NormalizedGroupName
     valueType: String
+    ownership: SeedOwned
     description: The normalized (uppercase) group name for case-insensitive lookup.
 
   - id: GroupDescription
     valueType: String
+    ownership: SeedOwned
     description: An optional description of the group's purpose.
 
   - id: AllowSelfRegistration
     valueType: Boolean
+    ownership: SeedOwned
     description: Controls whether new users can self-register via this identity provider. When false, only existing users can authenticate.
     defaultValues:
       - true
 
   - id: DefaultGroupRtId
     valueType: String
+    ownership: SeedOwned
     description: Optional RtId of a group to which new users are automatically added on first login via this provider.
 
   - id: EmailDomainPattern
     valueType: String
+    ownership: SeedOwned
     description: Email domain pattern to match (e.g., "meshmakers.com"). Matched against the domain part of the user's email.
 
   - id: TargetGroupRtId
     valueType: String
+    ownership: SeedOwned
     description: RtId of the group to which matching users are added.
 
   - id: AutoProvisionInChildTenants
     valueType: Boolean
+    ownership: SeedOwned
     description: When true, the client is auto-provisioned (mirrored) into every new child tenant of the tenant it lives in. Enables a single client identity (e.g. CI/CD service) to reach many tenants without per-tenant manual setup.
     defaultValues:
       - false
 
   - id: ChildTenantId
     valueType: String
+    ownership: SeedOwned
     description: The tenant ID of the child tenant in a parent-child mirror relationship.
 
   - id: ProvisionedAt
     valueType: DateTime
+    ownership: SeedOwned
     description: UTC timestamp when the mirror was provisioned.
 
   - id: SecretHashVersion
     valueType: Int
+    ownership: SeedOwned
     description: Monotonic counter incremented on every secret rotation of the parent client. Used to detect mirrors that fell behind on a rotation.
     defaultValues:
       - 0
 
   - id: ProvisionedByParentTenantId
     valueType: String
+    ownership: SeedOwned
     description: When set on a Client living in a child tenant, marks this record as a mirror of a parent-tenant client identified by the given tenant id. Sub-tenant admins surface this as a read-only "Provisioned by parent tenant" indicator; the operator cannot edit the client locally — changes must go through the parent.
 
   - id: DynamicRegistration
     valueType: Boolean
+    ownership: SeedOwned
     description: When true, this Client was created at runtime via RFC 7591 Dynamic Client Registration (an interactive MCP client such as Claude Code self-registering), not seeded by a blueprint nor created via the System API. Distinguishes dynamic clients for lifecycle handling (TTL cleanup, per-tenant cap) and cleanup-gate protection. Default false = every pre-existing and operator-created client.
     defaultValues:
       - false
 
   - id: DynamicRegistrationExpiresAt
     valueType: DateTime
+    ownership: SeedOwned
     description: UTC expiry of a dynamically-registered Client (RFC 7591). The cleanup sweep erases dynamic clients past this instant. Unset for non-dynamic clients.
 
   - id: SessionKey
     valueType: String
+    ownership: SeedOwned
     description: Unique key of a server-side session (the only value stored in the browser cookie).
 
   - id: Scheme
     valueType: String
+    ownership: SeedOwned
     description: The ASP.NET authentication scheme that produced the session ticket.
 
   - id: DisplayName
     valueType: String
+    ownership: SeedOwned
     description: Optional display name of the user owning the session.
 
   - id: RenewalDateTime
     valueType: DateTime
+    ownership: SeedOwned
     description: UTC timestamp of the last sliding-expiration renewal of the session.
 
   - id: Ticket
     valueType: String
+    ownership: SeedOwned
     description: The serialized, data-protected ASP.NET authentication ticket of a server-side session.
 
   - id: FriendlyName
     valueType: String
+    ownership: SeedOwned
     description: Friendly name of an ASP.NET Data Protection key-ring element (format key-{guid}).
 
   - id: XmlData
     valueType: String
+    ownership: SeedOwned
     description: The raw XML payload of a Data Protection key-ring element.
 
   - id: Uri
     valueType: String
+    ownership: SeedOwned
     description: A single URI value carried by a ClientUriEntry record.
 
   - id: Source
     valueType: String
+    ownership: SeedOwned
     description: Provenance marker on a ClientUriEntry. "base" entries were authored by the blueprint seed (or by the cross-service identity-bootstrap consumer) and get rewritten on every blueprint re-apply. "api" entries were added by an operator through the public REST API and survive re-applies. "overlay:<name>" entries were added by a local-dev or operator overlay cmdlet and also survive re-applies; they are filtered out of `DumpTenant --clean` exports while base + api survive the export.
     defaultValues:
       - base
@@ -627,23 +768,27 @@ attributes:
   - id: IdentifierKind
     valueType: Enum
     valueCkEnumId: ${this}/IdentifierKind
+    ownership: SeedOwned
     defaultValues:
       - 0
     description: The kind of external identifier (PhoneNumber, EmailAddress, EntraIdObjectId, ClientCertificateFingerprint).
 
   - id: IdentifierValue
     valueType: String
+    ownership: SeedOwned
     description: The normalized external identifier value (E.164 phone number, normalized e-mail address, EntraID object id, or certificate fingerprint).
 
   - id: EnrollmentTrust
     valueType: Enum
     valueCkEnumId: ${this}/TrustLevel
+    ownership: SeedOwned
     defaultValues:
       - 0
     description: The stored ENROLLMENT trust dimension (None/Weak/Strong) - does the identifier belong to the user? Raised to Strong by the sibling enrollment WIs on a proven OTP/cert/IdP enrollment. Defaults to None.
 
   - id: RequiredMessageAuthentication
     valueType: Boolean
+    ownership: SeedOwned
     defaultValues:
       - false
     description: Channel expectation for the per-message trust dimension - whether the channel behind this binding is expected to authenticate every message (Signal-verified / DKIM-valid). The per-message trust itself is not stored; the resolver combines it per call with EnrollmentTrust.
@@ -651,16 +796,19 @@ attributes:
   - id: IdentifierSource
     valueType: Enum
     valueCkEnumId: ${this}/IdentifierSource
+    ownership: SeedOwned
     defaultValues:
       - 0
     description: Provenance of the binding (SelfService, Admin, IdentityProvider). Defaults to SelfService.
 
   - id: EnrolledAt
     valueType: DateTime
+    ownership: SeedOwned
     description: UTC timestamp when the identifier was first enrolled for the user.
 
   - id: LastVerifiedAt
     valueType: DateTime
+    ownership: SeedOwned
     description: UTC timestamp of the most recent successful verification of the identifier.
 
   # AB#5123 self-service certificate enrolment: the not-after of an enrolled client certificate.
@@ -670,4 +818,5 @@ attributes:
   # invalid" without an admin in the loop. Null for every non-certificate kind.
   - id: ValidUntil
     valueType: DateTime
+    ownership: SeedOwned
     description: UTC not-after of an enrolled client certificate (ClientCertificateFingerprint kind only); a binding whose ValidUntil is in the past is treated as invalid. Null for other kinds.
