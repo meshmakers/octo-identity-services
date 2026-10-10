@@ -1,3 +1,4 @@
+using IdentityServerPersistence;
 using Meshmakers.Octo.Communication.Contracts;
 using Meshmakers.Octo.Communication.Contracts.DataTransferObjects;
 using Meshmakers.Octo.Services.Infrastructure.CredentialGenerator;
@@ -58,14 +59,23 @@ public class UserManagementService(
             await TryAddRole(adminUser, CommonConstants.DashboardManagementRole);
             await TryAddRole(adminUser, CommonConstants.ReportingManagementRole);
             await TryAddRole(adminUser, CommonConstants.ReportingViewerRole);
+            // Optional: a tenant set up from an older bootstrap seed has no file roles yet; the one-time
+            // file role grant (AB#6180) gives them to the Reporting role holders on the next tenant setup.
+            await TryAddRole(adminUser, IdentityServiceConstants.FileManagementRole, required: false);
+            await TryAddRole(adminUser, IdentityServiceConstants.FileViewerRole, required: false);
         }
     }
 
-    private async Task TryAddRole(RtUser user, string roleName)
+    private async Task TryAddRole(RtUser user, string roleName, bool required = true)
     {
         var rtRole = await roleManager.FindByNameAsync(roleName);
         if (rtRole == null)
         {
+            if (!required)
+            {
+                return;
+            }
+
             throw UserManagementException.RoleNotFound(roleName);
         }
 

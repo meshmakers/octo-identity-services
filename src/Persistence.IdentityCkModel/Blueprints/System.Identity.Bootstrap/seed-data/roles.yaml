@@ -2,12 +2,12 @@ $schema: https://schemas.meshmakers.cloud/runtime-model.schema.json
 dependencies:
   - System.Identity-2.14.0
 
-# The fourteen built-in roles (660…01 – 660…0E).
+# The sixteen built-in roles (660…01 – 660…0E, 660…61 – 660…62).
 # Part of the System.Identity.Bootstrap blueprint — see blueprint.yaml for the full file list.
 entities:
 
   # ===========================================================================
-  # ROLES (660…01 – 660…0E) — fourteen built-in roles. Names match
+  # ROLES (660…01 – 660…0E, 660…61 – 660…62) — sixteen built-in roles. Names match
   # `Meshmakers.Octo.Communication.Contracts.CommonConstants.*Role`. The seed
   # writes Name + NormalizedName only; SubjectIds / IdentityRoleIds / RoleClaims
   # are populated at runtime by IdentityServer's RoleManager and must not be
@@ -145,3 +145,29 @@ entities:
         value: StreamDataReader
       - id: System.Identity/NormalizedName
         value: STREAMDATAREADER
+
+  # Roles added after the initial fourteen: the 660…01–0E block is full (660…0F
+  # onwards belongs to the identity resources), so later roles continue at 660…60.
+  # 660…60 is reserved for SecretManagement (AB#5544, blueprint 1.4.0, not yet on
+  # main) — do not reuse it.
+  # 1.5.0 (AB#6180, epic AB#6171 "File system is a platform capability"):
+  # FileManagement / FileViewer gate the platform file system (System/FileSystemItem,
+  # Studio "Files" page) independently of Reporting. Existing holders of
+  # ReportingManagement / ReportingViewer receive them once via FileRoleGrant.
+  - rtId: '660000000000000000000061'
+    ckTypeId: System.Identity/Role
+    rtWellKnownName: FileManagement
+    attributes:
+      - id: System/Name
+        value: FileManagement
+      - id: System.Identity/NormalizedName
+        value: FILEMANAGEMENT
+
+  - rtId: '660000000000000000000062'
+    ckTypeId: System.Identity/Role
+    rtWellKnownName: FileViewer
+    attributes:
+      - id: System/Name
+        value: FileViewer
+      - id: System.Identity/NormalizedName
+        value: FILEVIEWER

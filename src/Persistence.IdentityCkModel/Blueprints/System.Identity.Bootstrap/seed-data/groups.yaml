@@ -65,3 +65,9 @@ entities:
       - roleId: System.Identity/AssignedRole
         targetRtId: '66000000000000000000000E'
         targetCkTypeId: System.Identity/Role
+      - roleId: System.Identity/AssignedRole
+        targetRtId: '660000000000000000000061'
+        targetCkTypeId: System.Identity/Role
+      - roleId: System.Identity/AssignedRole
+        targetRtId: '660000000000000000000062'
+        targetCkTypeId: System.Identity/Role
