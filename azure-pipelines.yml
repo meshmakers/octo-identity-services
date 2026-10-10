@@ -58,7 +58,7 @@ resources:
       type: github
       name: meshmakers/octo-pipeline-templates
       endpoint: meshmakers-access-token
-      ref: refs/tags/tpl-v1.2.1
+      ref: refs/tags/tpl-v1.3.1
 
 trigger:
   batch: true
@@ -127,6 +127,14 @@ stages:
           - checkout: self
             clean: true
             submodules: recursive
+          # Redundant-run guard (AB#6344): tags the run with its input fingerprint and, per the pipeline
+          # variable CiGuardMode (default report = tags only, off = disabled, rollback), logs or ends a
+          # main run whose inputs an equal run already built or a newer run supersedes. Steps after it
+          # need ne(variables['CiGuardEnded'], 'true') before skip is switched on (report/off need nothing).
+          - template: templates/steps/guard-redundant-run.yml@pipelineTemplates
+            parameters:
+              parentPipelineId: $(resources.pipeline.octo-common-services.pipelineID)
+              parentRunId: $(resources.pipeline.octo-common-services.runID)
           - template: templates/steps/set-version.yml@pipelineTemplates
           - template: templates/steps/download-ca.yml@pipelineTemplates
           # Fresh package list for the private feed only; nuget.org stays cached.
