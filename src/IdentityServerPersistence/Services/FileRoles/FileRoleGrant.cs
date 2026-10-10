@@ -86,8 +86,8 @@ internal static class FileRoleGrant
         Dictionary<string, string> roleNamesById;
         using (var session = await tenantRepository.GetSessionAsync())
         {
-            session.StartTransaction();
-
+            // The read is not wrapped in a transaction: one association query per subject can outlast MongoDB's
+            // transaction lifetime on large tenants, and the planner skips roles a subject already holds anyway.
             var roles = await tenantRepository.GetRtEntitiesByTypeAsync<RtRole>(session, RtEntityQueryOptions.Create());
             var roleIndex = DefaultConfigurationCreatorService.BuildRoleNameIndex(
                 roles.Items, tenantContext.TenantId, logger);
@@ -95,7 +95,6 @@ internal static class FileRoleGrant
             if (!roleIndex.TryGetValue(IdentityServiceConstants.FileManagementRole, out var fileManagementRoleId)
                 || !roleIndex.TryGetValue(IdentityServiceConstants.FileViewerRole, out var fileViewerRoleId))
             {
-                await session.CommitTransactionAsync();
                 logger.LogWarning(
                     "File roles ({FileManagementRole}/{FileViewerRole}) not found in tenant '{TenantId}'; the one-time " +
                     "grant to the Reporting role holders is retried on the next tenant setup",
@@ -123,7 +122,6 @@ internal static class FileRoleGrant
             };
 
             var input = await ReadRoleHoldingsAsync(tenantRepository, session);
-            await session.CommitTransactionAsync();
 
             plan = FileRoleGrantPlanner.Plan(input, pairs);
 
@@ -153,7 +151,8 @@ internal static class FileRoleGrant
                     }
 
                     var mappedRoleIds = mapping.MappedRoleIds?.ToList() ?? [];
-                    mappedRoleIds.AddRange(additions);
+                    // A concurrent setup of the same tenant may have appended the role already: never twice.
+                    mappedRoleIds.AddRange(additions.Where(roleId => !mappedRoleIds.Contains(roleId, StringComparer.Ordinal)));
                     mapping.MappedRoleIds = new AttributeStringValueList(mappedRoleIds);
                     await tenantRepository.ApplyChangesAsync(
                         writeSession,

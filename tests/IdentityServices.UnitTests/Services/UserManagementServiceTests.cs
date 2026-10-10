@@ -193,6 +193,31 @@ public class UserManagementServiceTests
     }
 
     [Fact]
+    public async Task CreateAdminUserAsync_WhenFileRolesAreMissing_StillGrantsTheOtherRoles()
+    {
+        // AB#6180: a tenant seeded by an older bootstrap blueprint has no file roles yet; the admin must still
+        // get every other role (the one-time file role grant adds the file roles later).
+        var dto = new AdminUserDto { EMail = "admin@test.com", Password = "SecurePass123!" };
+        _userManager.Users.Returns(Enumerable.Empty<RtUser>().AsQueryable());
+        _credentialGenerator.CheckPassword(dto.Password).Returns(true);
+        _userManager.FindByNameAsync(dto.EMail).Returns((RtUser?)null);
+        _userManager.CreateAsync(Arg.Any<RtUser>(), dto.Password)
+            .Returns(IdentityResult.Success);
+        SetupAllRequiredRoles();
+        _roleManager.FindByNameAsync(IdentityServerPersistence.IdentityServiceConstants.FileManagementRole)
+            .Returns((RtRole?)null);
+        _roleManager.FindByNameAsync(IdentityServerPersistence.IdentityServiceConstants.FileViewerRole)
+            .Returns((RtRole?)null);
+        _userManager.AddToRoleAsync(Arg.Any<RtUser>(), Arg.Any<string>())
+            .Returns(IdentityResult.Success);
+
+        await _sut.CreateAdminUserAsync(dto);
+
+        await _userManager.Received(10).AddToRoleAsync(Arg.Any<RtUser>(), Arg.Any<string>());
+        await _userManager.DidNotReceive().AddToRoleAsync(Arg.Any<RtUser>(), "FileManagement");
+    }
+
+    [Fact]
     public async Task CreateAdminUserAsync_WhenRoleNotFound_ThrowsUserManagementException()
     {
         // Arrange
