@@ -747,6 +747,7 @@ types and defaults unchanged, no migration entry) marks them:
 | `DataPolicy` | `PolicyEnforcementMode`, `PolicyScope` | `TenantOwned` | Seeds ship AuditOnly / All; the administrator flips to Enforce / narrows to OwnedOnly. Reverting would silently switch authorization enforcement off. Not a credential, part of the tenant's definition, so an `ExportRt` carries it |
 | `Client` (assignment overrides) | `System/Enabled`, `AllowedGrantTypes`, `AllowedScopes`, `AutoProvisionInChildTenants` | `TenantOwned` | An update must not re-enable a disabled client or widen narrowed access. `System/Enabled` is shared, hence an override, not a definition change |
 | `Client` (assignment override) | `Secrets` | `Secret` | Credential hashes: kept on a re-apply, left out of an `ExportRt` |
+| `ApiResource` (assignment override) | `Secrets` (`ApiSecrets`) | `Secret` | Introspection secret hashes, same decision as `Client.Secrets`. The Identity.Bootstrap seed writes the attribute (empty) on both seeded API resources, so it was seed-owned in effect (AB#6443, System.Identity 2.24.0) |
 | `Resource` (inherited by `ApiResource`, `ApiScope`, `IdentityResource`) | `System/Enabled` | `TenantOwned` | Same as the client switch |
 
 A fresh tenant still gets the seed values. **Consequence for blueprint authors:** a seed initialises these values on a new entity but can
