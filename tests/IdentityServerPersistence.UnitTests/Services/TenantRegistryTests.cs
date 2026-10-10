@@ -114,6 +114,24 @@ public class TenantRegistryTests
     }
 
     [Fact]
+    public async Task TryGetRepositoryAsync_ConcurrentMisses_ReadTheRegistryOnce()
+    {
+        // AB#6393 review: scoped instances must not each pass the cache check and stampede the registry.
+        _systemContext.GetAdminSessionAsync().Returns(async _ =>
+        {
+            await Task.Delay(100);
+            return Substitute.For<IOctoAdminSession>();
+        });
+
+        var lookups = Enumerable.Range(0, 20)
+            .Select(i => new TenantRegistry(_systemContext, _cache, _time).TryGetRepositoryAsync(i % 2 == 0 ? "meshtest" : "ghost"))
+            .ToArray();
+        await Task.WhenAll(lookups);
+
+        await _systemContext.Received(1).GetAdminSessionAsync();
+    }
+
+    [Fact]
     public async Task TryGetRepositoryAsync_RegistryFailure_Throws_SoCallersFailClosed()
     {
         _systemContext.GetAllTenantsAsync(Arg.Any<IOctoAdminSession>(), Arg.Any<int?>(), Arg.Any<int?>())

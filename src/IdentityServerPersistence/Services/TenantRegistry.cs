@@ -1,5 +1,6 @@
 using Meshmakers.Octo.Runtime.Contracts.MongoDb;
 using Meshmakers.Octo.Runtime.Contracts.MongoDb.Repositories;
+using System.Runtime.CompilerServices;
 using Microsoft.Extensions.Caching.Memory;
 
 namespace IdentityServerPersistence.Services;
@@ -43,6 +44,10 @@ public sealed class TenantRegistry(
 
     private const string CacheKey = "TenantRegistry:snapshot";
 
+    // One gate per cache instance (= process-wide in production): the registry is scoped, so without it
+    // concurrent requests that all see an empty or stale snapshot would each read the registry.
+    private static readonly ConditionalWeakTable<IMemoryCache, SemaphoreSlim> Gates = new();
+
     private readonly TimeProvider _time = timeProvider ?? TimeProvider.System;
 
     public async Task<IReadOnlyList<OctoTenant>> GetRegisteredTenantsAsync()
@@ -79,18 +84,38 @@ public sealed class TenantRegistry(
 
     private async Task<Snapshot> GetSnapshotAsync(TimeSpan? forceIfOlderThan)
     {
-        if (cache.TryGetValue(CacheKey, out Snapshot? cached) && cached != null &&
-            (forceIfOlderThan == null || _time.GetUtcNow() - cached.FetchedAt < forceIfOlderThan))
+        if (TryGetUsable(forceIfOlderThan) is { } usable)
         {
-            return cached;
+            return usable;
         }
 
-        using var adminSession = await systemContext.GetAdminSessionAsync();
-        var allTenants = await systemContext.GetAllTenantsAsync(adminSession);
-        var snapshot = new Snapshot(allTenants.Items.ToList(), _time.GetUtcNow());
-        cache.Set(CacheKey, snapshot, CacheTtl);
-        return snapshot;
+        // Single flight: the first caller reads the registry, the others wait and then find its snapshot.
+        var gate = Gates.GetValue(cache, _ => new SemaphoreSlim(1, 1));
+        await gate.WaitAsync();
+        try
+        {
+            if (TryGetUsable(forceIfOlderThan) is { } refreshed)
+            {
+                return refreshed;
+            }
+
+            using var adminSession = await systemContext.GetAdminSessionAsync();
+            var allTenants = await systemContext.GetAllTenantsAsync(adminSession);
+            var snapshot = new Snapshot(allTenants.Items.ToList(), _time.GetUtcNow());
+            cache.Set(CacheKey, snapshot, CacheTtl);
+            return snapshot;
+        }
+        finally
+        {
+            gate.Release();
+        }
     }
+
+    private Snapshot? TryGetUsable(TimeSpan? forceIfOlderThan)
+        => cache.TryGetValue(CacheKey, out Snapshot? cached) && cached != null &&
+           (forceIfOlderThan == null || _time.GetUtcNow() - cached.FetchedAt < forceIfOlderThan)
+            ? cached
+            : null;
 
     private sealed class Snapshot
     {
