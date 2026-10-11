@@ -1529,3 +1529,20 @@ After making ANY code changes, you MUST update the relevant documentation:
 | `docs/system-api.md` | API endpoint changes |
 | `docs/configuration.md` | Config option changes |
 | `CLAUDE.md` | Project structure changes |
+
+## File roles, System.Files data policies and machine clients (AB#6180, AB#6467, AB#6457)
+
+Blueprint `System.Identity.Bootstrap` 1.6.0 seeds the roles `FileManagement` / `FileViewer`, the data permissions
+`files.read` / `files.manage` (660…52/53) and the enforcing policies 660…54/55 on `System.Files/FileSystemEntity`
+(FileViewer reads; FileManagement reads and writes; the asset repository carries the same rules as a built-in
+baseline). Details, the one-time `FileRoleGrant` (Reporting roles → File roles) and the recurring
+`PipelineServiceAccountFileRoleGrant` are in `docs/persistence.md`. Rules to remember:
+
+- Pipeline service accounts (`octo-pipeline-sa-*`) always hold `FileManagement`: granted by
+  `CreateIdentityDataCommandRequestConsumer` in the command that creates/touches them (kept by the declarative sync)
+  and caught up at every tenant setup (not run-once, not on the nightly `CacheOnly` update).
+- Customer client-credentials clients and octo-cli `LogInClientCredentials` carry no roles: 403 on the Files API
+  until the client is given a File role. Reporting uses in-process system sessions and needs nothing.
+- Tests: `FilesDataPermissionsSeedTests`, `PipelineServiceAccountFileRoleGrant*Tests`,
+  `PipelineServiceAccountFileManagementConsumerIntegrationTests` (own class: the other provisioning tests assert
+  exact role sets).

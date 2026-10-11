@@ -47,7 +47,10 @@ internal class DefaultConfigurationCreatorService(
     ITenantLifecycleStore? tenantLifecycleStore = null,
     // AB#5540 — post-setup hooks (e.g. auth scheme registration in the Authentication assembly) for
     // tenants that become usable after cold start, most importantly via the background setup retry.
-    IEnumerable<ITenantSetupCompletedHandler>? tenantSetupCompletedHandlers = null)
+    IEnumerable<ITenantSetupCompletedHandler>? tenantSetupCompletedHandlers = null,
+    // AB#6467 — the pipeline-service-account File role grant only runs for tenants that have System.Files in
+    // their CK model; unknown (null) is treated as "has it" so a service without the cache still grants.
+    Meshmakers.Octo.ConstructionKit.Contracts.Services.ICkCacheService? ckCacheService = null)
     : DefaultConfigurationCreatorServiceBase(logger, blueprintService, embeddedBlueprintSources,
           tenantSetupRetryStore, tenantLifecycleStore),
       IConfigurationService
@@ -320,6 +323,21 @@ internal class DefaultConfigurationCreatorService(
             logger.LogError(ex,
                 "One-time File role grant to the Reporting role holders failed for tenant '{TenantId}'; " +
                 "retried on the next tenant setup", tenantId);
+        }
+
+        // AB#6467 / AB#6457: the pipeline service accounts (octo-pipeline-sa-*) hold FileManagement, because their
+        // file nodes run in the adapter engine where the System.Files data policies (blueprint 1.6.0) apply.
+        // Unlike the grant above this is NOT run-once: it runs on every setup so accounts the Communication
+        // Controller created later are picked up (additive, idempotent). A failure is logged, not fatal.
+        try
+        {
+            await PipelineServiceAccountFileRoleGrant.EnsureAsync(tenantContext, () => TenantHasFilesModel(tenantId), logger);
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex,
+                "Granting {Role} to the pipeline service accounts failed for tenant '{TenantId}'; retried on the next tenant setup",
+                IdentityServiceConstants.FileManagementRole, tenantId);
         }
 
         // Child-tenant client mirror provisioning runs AFTER the blueprint apply has guaranteed
@@ -844,6 +862,12 @@ internal class DefaultConfigurationCreatorService(
     ///     Models the import did not touch — including imports skipped by the engine's downgrade guard — keep
     ///     their pre-import version.
     /// </remarks>
+    private bool TenantHasFilesModel(string tenantId) =>
+        ckCacheService == null ||
+        ckCacheService.TryGetRtCkType(tenantId,
+            new Meshmakers.Octo.ConstructionKit.Contracts.RtCkId<Meshmakers.Octo.ConstructionKit.Contracts.CkTypeId>(
+                "System.Files/FileSystemEntity"), out _);
+
     internal static IReadOnlyDictionary<string, string> MergeSchemaVersionsAfterImport(
         IReadOnlyDictionary<string, string> preImport,
         IReadOnlyDictionary<string, string> postImport,
