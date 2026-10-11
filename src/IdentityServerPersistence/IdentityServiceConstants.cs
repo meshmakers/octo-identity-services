@@ -46,6 +46,13 @@ public static class IdentityServiceConstants
     public const string FileManagementRole = "FileManagement";
 
     /// <summary>
+    /// AB#6457 / AB#6467: client-id prefix of the Communication Controller's pipeline service accounts
+    /// (<c>PipelineServiceAccountProvisioningService.BuildClientId</c> → <c>octo-pipeline-sa-{adapterRtId}</c>).
+    /// These accounts hold <see cref="FileManagementRole"/> (see <c>PipelineServiceAccountFileRoleGrant</c>).
+    /// </summary>
+    public const string PipelineServiceAccountClientIdPrefix = "octo-pipeline-sa-";
+
+    /// <summary>
     /// AB#6180: tenant role that may browse and download the platform file system (read-only). Seeded by
     /// <c>System.Identity.Bootstrap</c> 1.5.0 (660…62), granted to the initial tenant administrator and, once,
     /// to every holder of <c>ReportingViewer</c>.

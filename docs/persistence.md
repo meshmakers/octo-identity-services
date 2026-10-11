@@ -513,6 +513,70 @@ APIs switch from the Reporting roles to the File roles:
   File role does not exist yet, nothing is written and no marker is recorded (retried on the next setup). A
   failure is logged and does not fail tenant setup.
 
+### File Roles and Data Permissions on System.Files (AB#6467, blueprint 1.6.0)
+
+Roles alone do not protect anything on the server: the engine treats a CK type that no data policy targets as
+unrestricted, so before 1.6.0 every caller with the API scope could write through the Files API. Blueprint
+`System.Identity.Bootstrap` 1.6.0 (the Files line, AB#6457; the SECRET line follows as 1.7.0) seeds, in
+`seed-data/data-permissions.yaml` and `seed-data/roles.yaml`:
+
+| Seed | rtId | Content |
+|------|------|---------|
+| DataPermission `files.read` | `660…52` | granted to `FileViewer` and `FileManagement` |
+| DataPermission `files.manage` | `660…53` | granted to `FileManagement` |
+| DataPolicy `FilesReadPolicy` | `660…54` | target `System.Files/FileSystemEntity` (derived types inherit), actions `Read`, full scope, **Enforce** |
+| DataPolicy `FilesManagePolicy` | `660…55` | same target, actions `Write`, `Delete`, **Enforce** |
+
+Effect: FileViewer reads (list, download, stats, zip), FileManagement reads and writes, anyone else gets 403
+FORBIDDEN on the REST Files API and nothing on GraphQL reads. The policies are new entities, so existing tenants
+receive them **enforcing** on the re-import that the version bump triggers (`PolicyEnforcementMode` and
+`PolicyScope` are tenant-owned afterwards). A tenant can grant write access to a custom role by granting it the
+permission `files.manage`. The asset repository carries the same rules as a built-in baseline until a tenant has
+a policy for a `System.Files/*` type, so a rollout in which asset-repo is updated before the tenants are
+re-seeded is not open in between. ReportingManagement / ReportingViewer holders keep access through the
+one-time `FileRoleGrant` above. Machine clients (client credentials) carry no roles: give a client that must use
+the Files API the FileViewer / FileManagement role.
+
+### FileManagement for the pipeline service accounts (AB#6467 / AB#6457, decision Gerald 2026-10-11)
+
+The pipeline service accounts (client id `octo-pipeline-sa-{adapterRtId}`, one per adapter, created by the
+Communication Controller) hold `FileManagement`. Their file nodes (`CreateFileSystemUpdate`,
+`GetFileSystemContent`) run in the adapter's own engine, where the System.Files data policies above apply to the
+roles of the identity the node runs as; without the role a node running as `ServiceAccount` (or as `Caller` with no
+caller — cron and HTTP triggers) is refused, which looks like a pipeline that "does nothing". Done identity-side, not
+through the controller's default roles:
+
+- **At creation and on every identity-data command** (`CreateIdentityDataCommandRequestConsumer`): for a client with
+  the prefix `octo-pipeline-sa-` the consumer adds the `AssignedRole` edge to `FileManagement` when the role exists —
+  also for a `null` role list (rotation, legacy account) — and treats it as implicitly declared, so the declarative
+  role sync (AB#5111) never removes it. A new account is therefore covered in the same command that creates it. If the
+  role does not exist yet (seed pending) the consumer logs a warning.
+- **At every tenant setup** (`PipelineServiceAccountFileRoleGrant`, `SetupTenantAsync` after `FileRoleGrant`): every
+  existing `octo-pipeline-sa-*` client without the role receives it. This is **not** run-once: identity start, tenant
+  create, full tenant update (not the nightly `CacheOnly` update) and the failed-tenant retry all run it, additive and
+  idempotent (a repeated run finds every account covered and writes nothing). It only runs for tenants that have
+  System.Files in their CK cache. Consequence: an operator cannot remove `FileManagement` from a pipeline service
+  account for good; restrict a pipeline with `Identity: Caller` or change the policies instead.
+- **Covered when?** Exactly in the identity-data command that creates or touches the account (seconds after the
+  controller provisions it); accounts that existed before 1.6.0 at the first identity start with this version; the
+  worst case (role seed pending at creation) at the next identity start or full tenant update.
+- **The prefix is not reserved.** Nothing in the identity API rejects a client id starting with `octo-pipeline-sa-`
+  (`POST api/Clients`, tenant-administration write policy, accepts any free id): such a client is treated as a
+  pipeline service account and receives FileManagement at the next tenant setup or identity-data command. Only tenant
+  administrators can create clients, and they can assign FileManagement anyway, but do not use the prefix for other
+  clients. The prefix octo-pipeline-sa- is a convention, not a security boundary: whoever can create clients and assign roles (tenant administration) can already grant any role.
+- **Concurrency:** the setup pass and the consumer take a per-tenant in-process lock (`PipelineServiceAccountFileRoleLock`)
+  and re-read the edges before inserting, because the engine does not reject a second identical `AssignedRole` edge.
+  Two identity replicas starting at the same instant can still duplicate the edge; role reads treat the edges as a set
+  and the next run finds the account covered.
+- **Detection:** `PipelineServiceAccountFileRoleGrant.FindAccountsWithoutRoleAsync` names the accounts without the
+  role (read-only).
+
+Not covered on purpose: **customer client-credentials clients** and **octo-cli with `LogInClientCredentials`** carry
+no user roles and get 403 on the Files API (REST) and on System.Files in the engine until the client itself is given
+`FileViewer` or `FileManagement` (`octo-cli AddClientToRole`). The **Reporting service** needs nothing: it reads and
+writes files in-process with a session without security context (system), and its client ids are only OIDC audiences.
+
 ## Migration System
 
 ### Migration Pattern
