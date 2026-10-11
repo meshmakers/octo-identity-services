@@ -267,7 +267,7 @@ All scheme creators accept an optional `schemeNameOverride` parameter. When prov
 
 ### Client Secrets of External Providers (AB#5540)
 
-Since `System.Identity-2.23.0` the `ClientSecret` of Google, Microsoft, Facebook and Azure Entra ID
+Since `System.Identity-2.25.0` the `ClientSecret` of Google, Microsoft, Facebook and Azure Entra ID
 providers is a CK `Secret` attribute (concept AB#5528 in `octo-construction-kit-engine/docs/`): stored
 as an `enc:v2:<kid>:…` envelope, never projected by an API, preserved on blueprint re-apply and left
 out of `ExportRt`.
@@ -1215,13 +1215,16 @@ MirrorSecretUsage secretKind=inherited clientId=ci-deploy tenantId=customer-a
 
 with `MirrorSecretKind` / `ClientId` / `TenantId` as structured fields and event id `50650`.
 Inherited use is logged at **Warning**, own use at Information — the inherited count is the number
-that has to reach zero. Per environment:
+that has to reach zero. Per environment (Dash0 dataset = cluster name, via the Dash0 UI or the
+`mcp__dash0__sql` tool):
 
-```logql
-{namespace="octo", container="identity"} |= "MirrorSecretUsage" |= "secretKind=inherited"
+```sql
+SELECT count() FROM logs
+WHERE resource_attributes['k8s.container.name'] = 'identity'
+  AND body LIKE '%MirrorSecretUsage%' AND body LIKE '%secretKind=inherited%'
 ```
 
-answers *“does anybody still authenticate with the inherited secret?”*; grouping the same query by
+answers *“does anybody still authenticate with the inherited secret?”*; grouping the same lines by
 `clientId` / `tenantId` names who and where, which is the migration list for step 2.
 
 🔴 **No secret material is ever written** — not the credential, not the stored hash, not a prefix of
@@ -1368,6 +1371,33 @@ This ensures cascading tenant hierarchies work correctly. Example: `octosystem �
 - User "admin" logging into octosystem → BFS finds meshtest (sourceUserName=admin), then subtenant1 (sourceUserName=xt_octosystem_admin)
 - User "xt_octosystem_admin" logging into meshtest → BFS finds subtenant1 (sourceUserName=xt_octosystem_admin), ancestors add octosystem
 - User logging into subtenant1 → ancestors add meshtest and octosystem
+
+**Cost and caching (AB#6307, AB#6308):**
+- Results are cached in `IMemoryCache` for 45 s (`CacheTtl`): the tenant registry list and every mapping probe
+  (tenant, source tenant, source user → bool), negative results included, failures not.
+- A mapping probe opens the child tenant's repository with `ISystemContext.GetRegisteredTenantRepository(OctoTenant)`
+  from the cached registry entry. Unlike `FindTenantRepositoryAsync`, this does no I/O (no system-tenant existence
+  probe with `listDatabases`/`listCollections`, no admin session, no system CK auto-import); a cache miss costs one
+  query per child tenant.
+- The probes of one BFS tier run with a parallelism of 8 (`MaxParallelProbes`); the matches are consumed in registry
+  order, so the traversal — which parent claims a child first and thereby decides the `xt_` shadow user name of its
+  descendants — is deterministic.
+
+**Cross-tenant login, switch and exchange (AB#6393):** `CrossTenantAuthenticationService` only knows tenant ids
+(password login walks the parent providers, `ValidateCrossTenantAccessAsync` and the `tenant_exchange` lookups walk
+the provider graph and open the source tenant), so it used `FindTenantRepositoryAsync` per hop — the same 7–9
+round trips. It now opens every tenant through `ITenantRegistry.TryGetRepositoryAsync(tenantId)`
+(`TenantRegistry`): the registry list is read once per 45 s (`IMemoryCache`, shared with `AllowedTenantsResolver`)
+and `GetRegisteredTenantRepository` builds the repository from the entry without I/O. The system tenant is not a
+registry entry; its database name comes from the system context.
+- **Fail closed:** a tenant id that is not in the registry yields no repository, so user lookups return `null`, the
+  provider list is empty and the ancestor proof fails — nobody gains access through an unknown or unregistered
+  tenant. A failing registry read is handled like any failed lookup (logged, `null`/empty).
+- **Freshness:** a tenant created within the last 45 s is found because an unknown id triggers one registry re-read,
+  at most once per 5 s (`TenantRegistry.MissRefreshInterval`), so a flood of unknown ids cannot amplify into a flood of
+  registry reads. A tenant deleted within the TTL is still resolvable until the snapshot expires; its database is
+  gone, so the lookup finds nothing.
+- Sessions are now disposed after each lookup.
 
 ### TenantAuthorizationMiddleware
 

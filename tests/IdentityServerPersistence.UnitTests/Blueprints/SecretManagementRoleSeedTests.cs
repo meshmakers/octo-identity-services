@@ -68,7 +68,7 @@ public class SecretManagementRoleSeedTests
         var blueprintId = Scalar(manifest, "blueprintId");
         Assert.NotNull(blueprintId);
         var version = Version.Parse(blueprintId!["System.Identity.Bootstrap-".Length..]);
-        Assert.True(version >= new Version(1, 4, 0), $"blueprint version {version} must be at least 1.4.0");
+        Assert.True(version >= new Version(1, 7, 0), $"blueprint version {version} must be at least 1.7.0 (SECRET line)");
     }
 
     [Fact]

@@ -1,5 +1,6 @@
 using IdentityServerPersistence;
 using IdentityServerPersistence.Configuration.Options;
+using IdentityServerPersistence.Services.FileRoles;
 using IdentityServerPersistence.Services.Migrations;
 using IdentityServerPersistence.Services.SecretManagement;
 using IdentityServerPersistence.SystemStores;
@@ -47,7 +48,10 @@ internal class DefaultConfigurationCreatorService(
     ITenantLifecycleStore? tenantLifecycleStore = null,
     // AB#5540 — post-setup hooks (e.g. auth scheme registration in the Authentication assembly) for
     // tenants that become usable after cold start, most importantly via the background setup retry.
-    IEnumerable<ITenantSetupCompletedHandler>? tenantSetupCompletedHandlers = null)
+    IEnumerable<ITenantSetupCompletedHandler>? tenantSetupCompletedHandlers = null,
+    // AB#6467 — the pipeline-service-account File role grant only runs for tenants that have System.Files in
+    // their CK model; unknown (null) is treated as "has it" so a service without the probe still grants.
+    IFilesModelProbe? filesModelProbe = null)
     : DefaultConfigurationCreatorServiceBase(logger, blueprintService, embeddedBlueprintSources,
           tenantSetupRetryStore, tenantLifecycleStore),
       IConfigurationService
@@ -203,8 +207,12 @@ internal class DefaultConfigurationCreatorService(
 
             // So upgrades are done now. If it still does not exist -> create it from scratch.
             //
-            // "Does not exist" here means the System CK model is missing or not at the exact expected
-            // version — which is also true for a fully populated system database whose model import was
+            // "Does not exist" here means the System CK model is missing or not at the expected version.
+            // CK v2 Phase 1 G-H2: with the engine's downgrade guard (AB#5900) the system database may keep a
+            // NEWER System than this service embeds; IsSystemTenantExistingAsync (engine-mongodb) therefore
+            // accepts "embedded or newer" by name (any major, IsCkModelSatisfiedAsync), so an older identity
+            // (rollback, old replica during a rolling update) does not reach the throw below.
+            // It is also true for a fully populated system database whose model import was
             // skipped (EnsureSystemCkModelAsync swallows a ModelValidationException, e.g. while a
             // dependency still lags during a version-bump rollout). Bootstrapping over such a database
             // used to drop it in the create path's rollback, wiping the whole platform at service
@@ -236,7 +244,29 @@ internal class DefaultConfigurationCreatorService(
         // Ensure that the identity ck model and notification ck model is imported
         await ImportCkModel(tenantContext);
 
-        // Run CK model data migrations (transforms existing runtime entities)
+        // Run CK model data migrations (transforms existing runtime entities).
+        //
+        // CK v2 D8 (AB#5902): the engine already runs the migration of every model it imports/updates in this
+        // setup (TenantContext.RunCkModelMigrationsForImportAsync) and records MigrationHistory at the new
+        // version. Handing the PRE-import schema versions to the upgrade service afterwards made it see
+        // "schema <old> older than MigrationHistory <new>", treat that as a manual downgrade and run the
+        // same migration a second time. A model whose schema version changed during this setup contributes
+        // its POST-import version, but only once MigrationHistory confirms that version (N2): if the
+        // engine's import-time migration failed (it only logs), the pre-import version stays so the
+        // migration is retried instead of being recorded as done. An import the engine skipped (e.g. its
+        // downgrade guard, tenant already has a newer version) leaves the schema version unchanged, so the
+        // model keeps its pre-import version.
+        if (previousSchemaVersions is { Count: > 0 } && runtimeRepositoryProvider != null &&
+            ckModelUpgradeService != null)
+        {
+            var postImportSchemaVersions = await runtimeRepositoryProvider
+                .GetSchemaVersionsAsync(tenantId, CancellationToken.None);
+            var migrationHistoryVersions = await ckModelUpgradeService
+                .GetInstalledVersionsAsync(tenantId, CancellationToken.None);
+            previousSchemaVersions = MergeSchemaVersionsAfterImport(previousSchemaVersions,
+                postImportSchemaVersions, migrationHistoryVersions);
+        }
+
         await RunCkModelMigrationsAsync(tenantContext, previousSchemaVersions);
 
         // we run the infrastructure migrations for each tenant context
@@ -279,7 +309,39 @@ internal class DefaultConfigurationCreatorService(
         // next startup retries with the same data.
         await RestorePendingRoleAssignmentsAsync(tenantContext);
 
-        // AB#5544: one-time grant of SecretManagement (blueprint 1.4.0, 660…60) to the tenant's existing
+        // AB#6180 (epic AB#6171, D5): one-time grant of FileManagement / FileViewer (blueprint 1.5.0,
+        // 660…61/62) to every direct holder of ReportingManagement / ReportingViewer — users, groups, clients
+        // and external tenant user mappings — so nobody loses file-system access when the Studio and the file
+        // APIs switch roles. Must run after the blueprint apply above (the roles have to exist); guarded by the
+        // FileRoleGrant tenant-configuration marker so it runs once per tenant. Additive only. A failure is
+        // logged, not fatal: the tenant keeps working and the next setup retries (no marker).
+        try
+        {
+            await FileRoleGrant.EnsureAsync(tenantContext, logger);
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex,
+                "One-time File role grant to the Reporting role holders failed for tenant '{TenantId}'; " +
+                "retried on the next tenant setup", tenantId);
+        }
+
+        // AB#6467 / AB#6457: the pipeline service accounts (octo-pipeline-sa-*) hold FileManagement, because their
+        // file nodes run in the adapter engine where the System.Files data policies (blueprint 1.6.0) apply.
+        // Unlike the grant above this is NOT run-once: it runs on every setup so accounts the Communication
+        // Controller created later are picked up (additive, idempotent). A failure is logged, not fatal.
+        try
+        {
+            await PipelineServiceAccountFileRoleGrant.EnsureAsync(tenantContext, () => TenantHasFilesModel(tenantId), logger);
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex,
+                "Granting {Role} to the pipeline service accounts failed for tenant '{TenantId}'; retried on the next tenant setup",
+                IdentityServiceConstants.FileManagementRole, tenantId);
+        }
+
+        // AB#5544: one-time grant of SecretManagement (blueprint 1.7.0, 660…60) to the tenant's existing
         // administrators — groups/users holding both AdminPanelManagement and TenantManagement, plus
         // TenantOwners. Must run after the blueprint apply above (the role has to exist); guarded by the
         // SecretManagementAdminGrant tenant-configuration marker so it runs once per tenant. Additive only.
@@ -735,31 +797,48 @@ internal class DefaultConfigurationCreatorService(
 
     private async Task ImportCkModel(ITenantContext tenantContext)
     {
-        if (!await tenantContext.IsCkModelExistingAsync(SystemIdentityCkIds.CkModelId))
+        // Install the Identity CK model in all tenants (needed for cross-tenant authentication
+        // and role mapping). The model is required for ExternalTenantUserMapping and
+        // OctoTenantIdentityProvider entities.
+        await EnsureEmbeddedCkModelAsync(tenantContext, SystemIdentityCkIds.CkModelId);
+
+        // We ensure that at least the system tenant contains a valid ck model. Other tenants
+        // need to be enabled manually by an admin.
+        await EnsureEmbeddedCkModelAsync(tenantContext, SystemNotificationCkIds.CkModelId);
+    }
+
+    /// <summary>
+    ///     Imports an embedded CK model unless the tenant already has it — by NAME, "embedded version or newer"
+    ///     (CK v2 Phase 1 G-H2). With the engine's downgrade guard (AB#5900) a tenant may keep a newer version than
+    ///     this service embeds; the former exact-version check then re-ran a (skipped) import on every setup.
+    ///     A higher installed major means this service is too old for the tenant. Platform rule R-L4: skip the
+    ///     import, log WARN and keep running — neither the tenant setup nor (for the system tenant) the host
+    ///     startup fails.
+    /// </summary>
+    private async Task EnsureEmbeddedCkModelAsync(ITenantContext tenantContext, CkModelId embedded)
+    {
+        var compatibility = await CkModelCompatibility.GetAsync(tenantContext, embedded);
+        switch (compatibility.State)
         {
-            // Install the Identity CK model in all tenants (needed for cross-tenant authentication
-            // and role mapping). The model is required for ExternalTenantUserMapping and
-            // OctoTenantIdentityProvider entities.
-            OperationResult operationResult = new();
-            await tenantContext.ImportCkModelAsync(SystemIdentityCkIds.CkModelId, operationResult);
-            if (operationResult.HasErrors || operationResult.HasFatalErrors)
-            {
-                throw InitializationException.ImportCkModelFailed(tenantContext.TenantId,
-                    operationResult.GetMessages());
-            }
+            case CkModelCompatibilityState.Same:
+                return;
+            case CkModelCompatibilityState.NewerSameMajor:
+                logger.LogInformation(
+                    "Tenant '{TenantId}' has CK model '{InstalledModelId}', newer than the embedded '{EmbeddedModelId}'; " +
+                    "keeping it (no import)", tenantContext.TenantId, compatibility.Installed, embedded);
+                return;
+            case CkModelCompatibilityState.NewerMajor:
+                logger.LogWarning("Embedded CK model import skipped: {Reason}",
+                    CkModelCompatibility.TooOldMessage(tenantContext.TenantId, compatibility));
+                return;
         }
 
-        if (!await tenantContext.IsCkModelExistingAsync(SystemNotificationCkIds.CkModelId))
+        OperationResult operationResult = new();
+        await tenantContext.ImportCkModelAsync(embedded, operationResult);
+        if (operationResult.HasErrors || operationResult.HasFatalErrors)
         {
-            // We ensure that at least the system tenant contains a valid ck model.Other tenants
-            // need to be enabled manually by an admin.
-            OperationResult operationResult = new();
-            await tenantContext.ImportCkModelAsync(SystemNotificationCkIds.CkModelId, operationResult);
-            if (operationResult.HasErrors || operationResult.HasFatalErrors)
-            {
-                throw InitializationException.ImportCkModelFailed(tenantContext.TenantId,
-                    operationResult.GetMessages());
-            }
+            throw InitializationException.ImportCkModelFailed(tenantContext.TenantId,
+                operationResult.GetMessages());
         }
     }
 
@@ -785,6 +864,45 @@ internal class DefaultConfigurationCreatorService(
     }
 
 
+    private bool TenantHasFilesModel(string tenantId) => filesModelProbe == null || filesModelProbe.HasFilesModel(tenantId);
+
+    /// <summary>
+    ///     Builds the "installed schema versions" handed to the post-import data-migration run (CK v2 D8/N2, AB#5902).
+    /// </summary>
+    /// <remarks>
+    ///     A model's post-import version is used only when the import changed the schema version AND the
+    ///     latest successful MigrationHistory entry (<paramref name="migrationHistory" />, as returned by
+    ///     <see cref="ICkModelUpgradeService.GetInstalledVersionsAsync" />) is exactly that version, i.e. the
+    ///     engine's import-time migration demonstrably succeeded. The upgrade service then finds the model at
+    ///     its target and skips it (no second run, no false "downgrade" warning).
+    ///     In every other case the pre-import version is kept, so a failed import-time migration is retried —
+    ///     including when the model has no MigrationHistory row at all, where the post-import version would
+    ///     make the upgrade service record "already at target" and skip the data migration (N2).
+    ///     Models the import did not touch — including imports skipped by the engine's downgrade guard — keep
+    ///     their pre-import version.
+    /// </remarks>
+    internal static IReadOnlyDictionary<string, string> MergeSchemaVersionsAfterImport(
+        IReadOnlyDictionary<string, string> preImport,
+        IReadOnlyDictionary<string, string> postImport,
+        IReadOnlyDictionary<string, string> migrationHistory)
+    {
+        var merged = new Dictionary<string, string>(preImport.Count);
+        foreach (var (modelName, preVersion) in preImport)
+        {
+            var migratedByImport = postImport.TryGetValue(modelName, out var postVersion)
+                                   && postVersion != preVersion
+                                   && migrationHistory.TryGetValue(modelName, out var historyVersion)
+                                   && historyVersion == postVersion;
+            merged[modelName] = migratedByImport ? postVersion! : preVersion;
+        }
+
+        return merged;
+    }
+
+    /// <summary>The range <c>[embedded, nextMajor)</c>; the upgrade service uses its floor as the target.</summary>
+    internal static CkModelIdVersionRange EmbeddedOrNewerSameMajor(CkModelId embedded) =>
+        new(embedded.Name, $"[{embedded.Version},{embedded.Version.Major + 1}.0)");
+
     private async Task RunCkModelMigrationsAsync(
         ITenantContext tenantContext,
         IReadOnlyDictionary<string, string>? previousSchemaVersions = null)
@@ -796,11 +914,16 @@ internal class DefaultConfigurationCreatorService(
 
         var ckModelIds = new List<CkModelIdVersionRange>
         {
-            // System CK model (base model, updated via EnsureSystemCkModelAsync)
-            SystemCkIds.CkModelId.ToVersionRange(),
+            // System CK model (base model, updated via EnsureSystemCkModelAsync).
+            // G-H2: "embedded or newer within the same major", not the exact version: with the engine's
+            // downgrade guard a tenant may keep a newer model, which the upgrade service then keeps (INFO)
+            // instead of warning on every setup that it is outside an exact [x.y.z] range. A higher installed
+            // major stays outside the range on purpose: the upgrade service keeps it (never downgrades) and logs
+            // a WARN, which matches the R-L4 rule (service too old: WARN, keep running).
+            EmbeddedOrNewerSameMajor(SystemCkIds.CkModelId),
             // Identity and Notification CK models
-            SystemIdentityCkIds.CkModelId.ToVersionRange(),
-            SystemNotificationCkIds.CkModelId.ToVersionRange()
+            EmbeddedOrNewerSameMajor(SystemIdentityCkIds.CkModelId),
+            EmbeddedOrNewerSameMajor(SystemNotificationCkIds.CkModelId)
         };
 
         logger.LogInformation(

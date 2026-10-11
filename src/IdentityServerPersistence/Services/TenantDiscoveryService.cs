@@ -72,10 +72,10 @@ public class TenantDiscoveryService(
         var normalizedInput = emailOrUsername.Trim().ToUpperInvariant();
 
         // Collect all tenant IDs: system tenant + all child tenants
-        var tenantIds = await GetAllTenantIdsAsync();
+        var tenants = await GetAllTenantsAsync();
 
         // Search all tenants in parallel for the "real" user (not xt_ shadow users)
-        var tasks = tenantIds.Select(tenantId => FindUserInTenantAsync(tenantId, normalizedInput));
+        var tasks = tenants.Select(tenant => FindUserInTenantAsync(tenant, normalizedInput));
         var results = await Task.WhenAll(tasks);
 
         var homeResults = results
@@ -186,30 +186,27 @@ public class TenantDiscoveryService(
         }
     }
 
-    private async Task<IReadOnlyList<string>> GetAllTenantIdsAsync()
+    private async Task<IReadOnlyList<OctoTenant>> GetAllTenantsAsync()
     {
-        var tenantIds = new List<string>();
+        var tenants = new List<OctoTenant>();
 
         try
         {
             // The system context itself is the system tenant
-            tenantIds.Add(systemContext.TenantId);
+            tenants.Add(new OctoTenant(systemContext.TenantId, systemContext.DatabaseName));
 
-            // Get every registered tenant from the system registry (regardless of logical parent)
-            var adminSession = await systemContext.GetAdminSessionAsync();
+            // Get every registered tenant from the system registry (regardless of logical parent). The entries
+            // carry the database names the lightweight repository access needs (AB#6308).
+            using var adminSession = await systemContext.GetAdminSessionAsync();
             var childTenants = await systemContext.GetAllTenantsAsync(adminSession);
-
-            foreach (var child in childTenants.Items)
-            {
-                tenantIds.Add(child.TenantId);
-            }
+            tenants.AddRange(childTenants.Items);
         }
         catch (Exception ex)
         {
             logger.LogWarning(ex, "Failed to enumerate tenants for tenant discovery");
         }
 
-        return tenantIds;
+        return tenants;
     }
 
     /// <summary>
@@ -218,12 +215,14 @@ public class TenantDiscoveryService(
     ///     Cross-tenant shadow users (xt_ prefix) are excluded.
     /// </summary>
     private async Task<(string TenantId, RtUser User)?> FindUserInTenantAsync(
-        string tenantId, string normalizedInput)
+        OctoTenant tenant, string normalizedInput)
     {
+        var tenantId = tenant.TenantId;
         try
         {
-            var tenantRepository = await systemContext.FindTenantRepositoryAsync(tenantId);
-            var session = await tenantRepository.GetSessionAsync();
+            // No existence probe and no CK auto-import per tenant (AB#6308): the entry comes from the registry.
+            var tenantRepository = systemContext.GetRegisteredTenantRepository(tenant);
+            using var session = await tenantRepository.GetSessionAsync();
             session.StartTransaction();
 
             // Search by normalized username

@@ -1,5 +1,6 @@
 using Meshmakers.Octo.Runtime.Contracts.MongoDb;
 using Meshmakers.Octo.Runtime.Contracts.Repositories.Query;
+using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.Logging;
 using Persistence.IdentityCkModel.Generated.System.Identity.v2;
 
@@ -32,9 +33,17 @@ public interface IAllowedTenantsResolver
 /// </remarks>
 public class AllowedTenantsResolver(
     ISystemContext systemContext,
+    ITenantRegistry tenantRegistry,
     ICrossTenantShadowUserChainResolver shadowUserChainResolver,
+    IMemoryCache cache,
     ILogger<AllowedTenantsResolver> logger) : IAllowedTenantsResolver
 {
+    /// <summary>How long the mapping lookups are reused (AB#6307); the registry list uses the same TTL (<see cref="TenantRegistry.CacheTtl" />).</summary>
+    public static readonly TimeSpan CacheTtl = TenantRegistry.CacheTtl;
+
+    /// <summary>Concurrent mapping probes per BFS tier, so token latency does not grow linearly with tenants (AB#6308).</summary>
+    private const int MaxParallelProbes = 8;
+
     public async Task<IReadOnlyList<string>> ResolveAsync(string loginTenantId, RtUser user)
     {
         var allowedTenants = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { loginTenantId };
@@ -110,12 +119,10 @@ public class AllowedTenantsResolver(
     private async Task ResolveDescendantTenantsAsync(
         List<(string TenantId, string UserName)> seeds, HashSet<string> allowedTenants)
     {
-        IReadOnlyList<string> candidateTenantIds;
+        IReadOnlyList<OctoTenant> candidateTenants;
         try
         {
-            using var adminSession = await systemContext.GetAdminSessionAsync();
-            var allTenants = await systemContext.GetAllTenantsAsync(adminSession);
-            candidateTenantIds = allTenants.Items.Select(t => t.TenantId).ToList();
+            candidateTenants = await GetCandidateTenantsAsync();
         }
         catch (Exception ex)
         {
@@ -142,42 +149,72 @@ public class AllowedTenantsResolver(
                 continue;
             }
 
-            foreach (var childTenantId in candidateTenantIds)
-            {
-                // Skip children already in allowed tenants
-                if (allowedTenants.Contains(childTenantId))
-                {
-                    continue;
-                }
+            var pending = candidateTenants.Where(t => !allowedTenants.Contains(t.TenantId)).ToList();
+            // One slot per pending tenant: the probes run in parallel, but the matches are consumed in
+            // registry order below, so the traversal (which parent claims a child first and thereby
+            // decides the shadow user name of its descendants) stays deterministic.
+            var matched = new bool[pending.Count];
 
-                try
+            // The probes are independent single-collection reads against different tenant databases.
+            await Parallel.ForEachAsync(Enumerable.Range(0, pending.Count),
+                new ParallelOptions { MaxDegreeOfParallelism = MaxParallelProbes },
+                async (index, _) =>
                 {
-                    var hasMapping = await HasExternalTenantUserMappingByNameAsync(
-                        childTenantId, currentTenantId, currentUserName);
-                    if (hasMapping)
+                    var childTenant = pending[index];
+                    try
                     {
-                        allowedTenants.Add(childTenantId);
-
-                        // The user in the child tenant will be: xt_{parentTenantId}_{parentUsername}
-                        var childUserName = CrossTenantShadowUserName.Build(currentTenantId, currentUserName);
-                        queue.Enqueue((childTenantId, childUserName));
+                        matched[index] = await HasExternalTenantUserMappingByNameAsync(
+                            childTenant, currentTenantId, currentUserName);
                     }
-                }
-                catch (Exception ex)
+                    catch (Exception ex)
+                    {
+                        logger.LogWarning(ex,
+                            "Failed to check external tenant user mapping in tenant '{ChildTenantId}' for user '{UserName}' from tenant '{SourceTenantId}'",
+                            childTenant.TenantId, currentUserName, currentTenantId);
+                    }
+                });
+
+            for (var index = 0; index < pending.Count; index++)
+            {
+                var childTenantId = pending[index].TenantId;
+                if (matched[index] && allowedTenants.Add(childTenantId))
                 {
-                    logger.LogWarning(ex,
-                        "Failed to check external tenant user mapping in tenant '{ChildTenantId}' for user '{UserName}' from tenant '{SourceTenantId}'",
-                        childTenantId, currentUserName, currentTenantId);
+                    // The user in the child tenant will be: xt_{parentTenantId}_{parentUsername}
+                    var childUserName = CrossTenantShadowUserName.Build(currentTenantId, currentUserName);
+                    queue.Enqueue((childTenantId, childUserName));
                 }
             }
         }
     }
 
+    // The registry entries carry the database names the lightweight repository access needs (AB#6308);
+    // the list is cached and shared with the other identity services (AB#6393).
+    private Task<IReadOnlyList<OctoTenant>> GetCandidateTenantsAsync()
+        => tenantRegistry.GetRegisteredTenantsAsync();
+
     private async Task<bool> HasExternalTenantUserMappingByNameAsync(
-        string childTenantId, string sourceTenantId, string sourceUserName)
+        OctoTenant childTenant, string sourceTenantId, string sourceUserName)
     {
-        var tenantRepository = await systemContext.FindTenantRepositoryAsync(childTenantId);
-        var session = await tenantRepository.GetSessionAsync();
+        // Tenant and user names are case-insensitive keys here, like the HashSet of allowed tenants.
+        var key = $"AllowedTenantsResolver:mapping:{childTenant.TenantId}\u001f{sourceTenantId}\u001f{sourceUserName}"
+            .ToLowerInvariant();
+        if (cache.TryGetValue(key, out bool cached))
+        {
+            return cached;
+        }
+
+        var hasMapping = await QueryExternalTenantUserMappingAsync(childTenant, sourceTenantId, sourceUserName);
+        cache.Set(key, hasMapping, CacheTtl);
+        return hasMapping;
+    }
+
+    private async Task<bool> QueryExternalTenantUserMappingAsync(
+        OctoTenant childTenant, string sourceTenantId, string sourceUserName)
+    {
+        // Registry entry in, repository out, no I/O in between (AB#6308): FindTenantRepositoryAsync would
+        // re-probe the system tenant and re-run the CK imports for every tenant on every cache miss.
+        var tenantRepository = systemContext.GetRegisteredTenantRepository(childTenant);
+        using var session = await tenantRepository.GetSessionAsync();
         session.StartTransaction();
 
         var queryOptions = RtEntityQueryOptions.Create()

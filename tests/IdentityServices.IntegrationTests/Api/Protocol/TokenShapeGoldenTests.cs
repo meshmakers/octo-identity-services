@@ -70,6 +70,12 @@ public class TokenShapeGoldenTests : IntegrationTestBase
         response.StatusCode.Should().Be(HttpStatusCode.OK);
         var body = JsonNode.Parse(await response.Content.ReadAsStringAsync(ct))!.AsObject();
 
+        // The JWKS must publish exactly the one key the test host signs with — never whatever
+        // happens to sit in the agent's X509 store (AB#5880, see TestSigningCertificate).
+        body["keys"]!.AsArray().Select(k => k!["kid"]?.GetValue<string>()).Should()
+            .Equal([TestSigningCertificate.Certificate.Thumbprint],
+                "the JWKS must contain only the test host's configured signing key");
+
         // Key material (n/e) is generated per test run — pin only the structural fields.
         var keys = new JsonArray();
         foreach (var key in body["keys"]!.AsArray())

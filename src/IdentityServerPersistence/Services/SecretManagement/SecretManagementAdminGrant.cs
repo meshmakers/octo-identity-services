@@ -51,7 +51,7 @@ internal sealed record SecretManagementAdminGrantResult(
 /// <remarks>
 ///     <para>
 ///         Runs from <c>DefaultConfigurationCreatorService.SetupTenantAsync</c> right AFTER the
-///         <c>System.Identity.Bootstrap</c> blueprint apply, because the role (660…60, blueprint 1.4.0) has to
+///         <c>System.Identity.Bootstrap</c> blueprint apply, because the role (660…60, blueprint 1.7.0) has to
 ///         exist first. That is why this is not an <c>IMigration</c>: the infrastructure migrations run before
 ///         the blueprint apply.
 ///     </para>

@@ -1,3 +1,5 @@
+using IdentityServerPersistence.Services;
+using IdentityServerPersistence.Services.FileRoles;
 using Duende.IdentityModel;
 using Meshmakers.Octo.Backend.IdentityServices.OpenIddict;
 using IdentityServerPersistence;
@@ -33,12 +35,23 @@ public class CreateIdentityDataCommandRequestConsumer(
 
         var tenantRepository = tenantContext.GetTenantRepository();
 
-        // That means that the tenant is not configured to use an
-        // own identity management. We do nothing in this case and return information to the producer
-        if (!await tenantContext.IsCkModelExistingAsync(SystemIdentityCkIds.CkModelId))
+        // By name, "embedded version or newer" (CK v2 Phase 1 G-H2): with the engine's downgrade guard a tenant
+        // may keep a NEWER System.Identity than this service embeds, and the former exact-version check answered
+        // "no identity CK" for it. A higher major (R-L4): this service is too old for the tenant — WARN and
+        // proceed against the installed model.
+        var identityModel = await CkModelCompatibility.GetAsync(tenantContext, SystemIdentityCkIds.CkModelId);
+        if (identityModel.IsNewerMajor)
         {
+            logger.LogWarning("Creating identity data for tenant '{TenantId}' anyway: {Reason}", message.TenantId,
+                CkModelCompatibility.TooOldMessage(message.TenantId, identityModel));
+        }
+
+        if (!identityModel.IsSatisfied)
+        {
+            // That means that the tenant is not configured to use an
+            // own identity management. We do nothing in this case and return information to the producer
             await context.RespondAsync(new EnumCommandResponse<CreateIdentityDataResult>
-            { Response = CreateIdentityDataResult.FailedTenantHasNoIdentityCk });
+                { Response = CreateIdentityDataResult.FailedTenantHasNoIdentityCk });
             return;
         }
 
@@ -337,7 +350,7 @@ public class CreateIdentityDataCommandRequestConsumer(
     ///     octo-common-services and gaining a "sync mode" property there would force a contract
     ///     release across every producer for a behaviour only these clients want.
     /// </summary>
-    internal const string PipelineServiceAccountClientIdPrefix = "octo-pipeline-sa-";
+    internal const string PipelineServiceAccountClientIdPrefix = IdentityServiceConstants.PipelineServiceAccountClientIdPrefix;
 
     /// <summary>
     ///     AB#5027: assigns the requested roles to the client through the <c>AssignedRole</c>
@@ -371,8 +384,49 @@ public class CreateIdentityDataCommandRequestConsumer(
     private async Task EnsureAssignedRolesAsync(IOctoSession session, ITenantRepository tenantRepository,
         OctoObjectId clientRtId, DistClientDto distClientDto)
     {
+        if (!distClientDto.ClientId.StartsWith(PipelineServiceAccountClientIdPrefix, StringComparison.Ordinal))
+        {
+            await EnsureAssignedRolesCoreAsync(session, tenantRepository, clientRtId, distClientDto);
+            return;
+        }
+
+        // The tenant-setup grant writes the same FileManagement edge: serialise (a second identical edge is not rejected).
+        using var _ = await PipelineServiceAccountFileRoleLock.AcquireAsync(tenantRepository.TenantId);
+        await EnsureAssignedRolesCoreAsync(session, tenantRepository, clientRtId, distClientDto);
+    }
+
+    private async Task EnsureAssignedRolesCoreAsync(IOctoSession session, ITenantRepository tenantRepository,
+        OctoObjectId clientRtId, DistClientDto distClientDto)
+    {
+        var isPipelineServiceAccount = distClientDto.ClientId.StartsWith(PipelineServiceAccountClientIdPrefix,
+            StringComparison.Ordinal);
+        // AB#6467 / AB#6457: every pipeline service account holds FileManagement (the System.Files data policies of
+        // System.Identity.Bootstrap 1.6.0 apply to its in-process file nodes). Applied on EVERY command that touches
+        // such a client, declared role list or not, so a new account is covered the moment the controller creates it
+        // and a declarative sync never removes the role again. The tenant-setup pass (PipelineServiceAccountFileRoleGrant)
+        // covers accounts that exist already and the case that the role seed was pending here.
+        var fileManagementRoleId = isPipelineServiceAccount
+            ? await FindRoleIdAsync(session, tenantRepository, IdentityServiceConstants.FileManagementRole)
+            : null;
+
+        if (isPipelineServiceAccount && fileManagementRoleId == null)
+        {
+            // Warning on purpose (nlog.config defaults to Warn): until the role seed lands and the next tenant setup
+            // runs PipelineServiceAccountFileRoleGrant, a file node running as this account is refused.
+            logger.LogWarning(
+                "Pipeline service account '{ClientId}' in tenant '{TenantId}' has no {Role} yet: the role does not exist " +
+                "(seed pending); it is granted on the next tenant setup",
+                distClientDto.ClientId, tenantRepository.TenantId, IdentityServiceConstants.FileManagementRole);
+        }
+
         if (distClientDto.AssignedRoleNames == null)
         {
+            if (fileManagementRoleId != null)
+            {
+                await EnsureRoleEdgeAsync(session, tenantRepository, clientRtId, distClientDto.ClientId,
+                    fileManagementRoleId.Value);
+            }
+
             return;
         }
 
@@ -431,6 +485,19 @@ public class CreateIdentityDataCommandRequestConsumer(
                 IdentityAssociationConstants.AssignedRoleId));
         }
 
+        if (fileManagementRoleId != null)
+        {
+            // Implicitly declared: kept by the sync below, added when missing.
+            declaredRoleIds.Add(fileManagementRoleId.Value.ToString());
+            if (!currentRoleIds.Contains(fileManagementRoleId.Value.ToString()))
+            {
+                updates.Add(AssociationUpdateInfo.CreateInsert(
+                    clientEntityId,
+                    new RtEntityId(roleCkTypeId, fileManagementRoleId.Value),
+                    IdentityAssociationConstants.AssignedRoleId));
+            }
+        }
+
         var removedCount = 0;
         if (isDeclarativeSync && allDeclaredRolesResolved)
         {
@@ -465,6 +532,46 @@ public class CreateIdentityDataCommandRequestConsumer(
         logger.LogInformation(
             "Synced roles of client '{ClientId}' in tenant '{TenantId}': {AddedCount} added, {RemovedCount} removed",
             distClientDto.ClientId, tenantRepository.TenantId, updates.Count - removedCount, removedCount);
+    }
+
+    private async Task<OctoObjectId?> FindRoleIdAsync(IOctoSession session, ITenantRepository tenantRepository,
+        string roleName)
+    {
+        var roleQuery = RtEntityQueryOptions.Create()
+            .FieldFilter(nameof(RtRole.NormalizedName), FieldFilterOperator.Equals, roleName.ToUpperInvariant());
+        var roles = await tenantRepository.GetRtEntitiesByTypeAsync<RtRole>(session, roleQuery, take: 1);
+        return roles.Items.FirstOrDefault()?.RtId;
+    }
+
+    /// <summary>
+    ///     Inserts the <c>AssignedRole</c> edge from the client to the role unless it exists (additive, idempotent).
+    /// </summary>
+    private async Task EnsureRoleEdgeAsync(IOctoSession session, ITenantRepository tenantRepository,
+        OctoObjectId clientRtId, string clientId, OctoObjectId roleRtId)
+    {
+        var clientEntityId = new RtEntityId(RtEntityExtensions.GetRtCkTypeId<RtClient>(), clientRtId);
+        var current = await tenantRepository.GetRtAssociationsAsync(session, clientEntityId,
+            RtAssociationExtendedQueryOptions.Create(GraphDirections.Outbound,
+                roleId: IdentityAssociationConstants.AssignedRoleId));
+        if (current.Items.Any(a => a.TargetRtId == roleRtId))
+        {
+            return;
+        }
+
+        var operationResult = new OperationResult();
+        await tenantRepository.ApplyChangesAsync(session,
+            [AssociationUpdateInfo.CreateInsert(clientEntityId,
+                new RtEntityId(RtEntityExtensions.GetRtCkTypeId<RtRole>(), roleRtId),
+                IdentityAssociationConstants.AssignedRoleId)], operationResult);
+        if (operationResult.HasErrors || operationResult.HasFatalErrors)
+        {
+            throw new InvalidOperationException(
+                $"Failed to assign role to client '{clientId}' in tenant '{tenantRepository.TenantId}': " +
+                string.Join("; ", operationResult.GetMessages()));
+        }
+
+        logger.LogInformation("Granted role to pipeline service account '{ClientId}' in tenant '{TenantId}'",
+            clientId, tenantRepository.TenantId);
     }
 
     /// <summary>

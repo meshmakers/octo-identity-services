@@ -1,14 +1,14 @@
 $schema: https://schemas.meshmakers.cloud/blueprint-meta.schema.json
-blueprintId: System.Identity.Bootstrap-1.4.0
+blueprintId: System.Identity.Bootstrap-1.7.0
 description: |
   Service-managed Identity tenant seed — system + every child tenant. Provides
-  the default role set (15 roles), the five OIDC identity resources, three API
+  the default role set (17 roles), the five OIDC identity resources, three API
   scopes (full-access / read-only / data-model-management), the OctoApi resource,
   the MCP resource indicator, the OAuth client baseline (OctoTool / IdentityServices
   Swagger / Refinery Studio SPA / MCP Services Swagger + Device / Platform Services
   Swagger) and the TenantOwners group with full role assignment.
 
-  1.4.0 (AB#5544): adds the tenant role `SecretManagement` (660…60) — may trigger
+  1.7.0 (AB#5544): adds the tenant role `SecretManagement` (660…60) — may trigger
   secret sweeps and delete a pre-sweep dump early (bot services secrets admin API,
   SECRET attribute value type AB#5528). The 660…01–0E role block is full, so
   roles added later continue at 660…60. TenantOwners (660…40) gets the new role
@@ -18,6 +18,30 @@ description: |
   AdminPanelManagement. Existing administrators (users/groups holding both
   AdminPanelManagement and TenantManagement) get it once from the identity
   service's SecretManagementAdminGrant step after this blueprint is applied.
+  This is the SECRET line, rebased on the Files line (1.6.0, below); there is no 1.4.0. The
+  SecretManagement grant to existing administrators is independent of the Files grants.
+
+  1.6.0 (AB#6457, AB#6467): the file roles gate the Files API. Seeds the data permissions
+  `files.read` (660…52) and `files.manage` (660…53) and the ENFORCING data policies 660…54 (Read) and
+  660…55 (Write, Delete) that target System.Files/FileSystemEntity; FileViewer is granted files.read,
+  FileManagement files.read and files.manage. Before, no policy targeted System.Files, which the engine
+  treats as unrestricted, so any caller with the API scope could write. Policies are new entities, so
+  existing tenants receive them enforcing on the re-import this version bump triggers. This is the Files
+  line (1.5.0, on main, plus these seeds); the SECRET line (SecretManagement role 660…60, formerly planned
+  as 1.4.0, AB#5544) is 1.7.0 above. There is no 1.4.0.
+  The prefix octo-pipeline-sa- is a convention, not a security boundary: whoever can create clients and assign roles (tenant administration) can already grant any role.
+
+  1.5.0 (AB#6180, epic AB#6171): adds the tenant roles `FileManagement` (660…61)
+  and `FileViewer` (660…62) for the platform file system (System/FileSystemItem,
+  Studio "Files" page) — decoupled from ReportingManagement / ReportingViewer.
+  TenantOwners (660…40) gets both assigned; the version bump makes every existing
+  tenant re-import the seed. The initial tenant administrator
+  (`UserManagementService.CreateAdminUserAsync`) is granted both directly. Every
+  user, group, client and external tenant user mapping that holds
+  ReportingManagement / ReportingViewer directly receives FileManagement /
+  FileViewer once, after the apply (`FileRoleGrant`, run-once marker
+  `FileRoleGrant`), so nobody loses access when the Studio switches roles.
+  Version 1.4.0 and rtId 660…60 were skipped on purpose for the SecretManagement role of AB#5544 (1.7.0).
 
   1.2.0 (AB#4388): adds the `octo-platformServices-swagger` client (660…36) for
   the Swagger UI now exposed by octo-platform-services (authorization code +
@@ -142,7 +166,7 @@ ckModelDependencies:
 # All files below are merged into ONE runtime model before the import runs, so the order
 # is presentation only and associations may cross files (the UserManagement role in
 # roles.yaml grants the DataPermission in data-permissions.yaml; the TenantOwners group
-# in groups.yaml references all fifteen roles).
+# in groups.yaml references all seventeen roles).
 seedDataPaths:
   - seed-data/roles.yaml
   - seed-data/identity-resources.yaml

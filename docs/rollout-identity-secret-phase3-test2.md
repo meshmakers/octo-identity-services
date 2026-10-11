@@ -1,8 +1,8 @@
 # Pilot runbook: SECRET phase 3 for identity on test-2 (AB#5528 / AB#5540 / AB#5544)
 
 Identity is the phase-3 pilot (decision D3): the external identity providers' `ClientSecret` (Google,
-Microsoft, Facebook, Azure Entra ID) becomes a CK `Secret` attribute (`System.Identity-2.23.0`), and
-the tenant role `SecretManagement` is seeded (`System.Identity.Bootstrap-1.4.0`). Both ship inside
+Microsoft, Facebook, Azure Entra ID) becomes a CK `Secret` attribute (`System.Identity-2.25.0`), and
+the tenant role `SecretManagement` is seeded (`System.Identity.Bootstrap-1.7.0`). Both ship inside
 the identity image: the service imports its embedded CK model and applies the embedded blueprint
 per tenant at startup, so there is no catalog step. Behaviour details: `authentication.md`
 § Client Secrets of External Providers, `persistence.md` (SecretManagement grant).
@@ -13,8 +13,8 @@ Order: **test-2 only** for the pilot. Other environments follow the release plan
 
 | Step at identity startup, per tenant | Effect |
 |---|---|
-| CK import `System.Identity-2.23.0` | `ClientSecret` String → Secret (Minor, no data migration). Stored strings stay as they are and are read as **legacy clear text** (counted, warned once per type without the value). |
-| Blueprint `System.Identity.Bootstrap-1.4.0` | Creates role `SecretManagement` (rtId `660…60`) and assigns it to `TenantOwners`. |
+| CK import `System.Identity-2.25.0` | `ClientSecret` String → Secret (Minor, no data migration). Stored strings stay as they are and are read as **legacy clear text** (counted, warned once per type without the value). |
+| Blueprint `System.Identity.Bootstrap-1.7.0` | Creates role `SecretManagement` (rtId `660…60`) and assigns it to `TenantOwners`. |
 | `SecretManagementAdminGrant` (once, marker in tenant config) | Grants `SecretManagement` to groups/users holding **both** `AdminPanelManagement` and `TenantManagement`. Additive only; failures are logged and do not fail tenant setup. |
 | REST API identity providers | Responses never contain the secret (`clientSecretIsSet`, `clientSecretKeyMissing`, `clientSecretSetAt` instead). A new secret is encrypted on write (`enc:v2:k1:…`); saving a new secret without key ring answers **503** `SecretEncryptionNotConfigured`. |
 
@@ -44,7 +44,7 @@ then the value stays a plain string in MongoDB.
 1. Deploy the identity image built from main (containing this change) to test-2 via the usual
    pipeline. No catalog, blueprint or CK command is needed.
 2. Watch the identity startup log (Loki / Dash0, namespace `octo`, container identity):
-   - per tenant: CK import `System.Identity-2.23.0` and blueprint `System.Identity.Bootstrap-1.4.0`
+   - per tenant: CK import `System.Identity-2.25.0` and blueprint `System.Identity.Bootstrap-1.7.0`
      applied, no `ImportCkModelFailed`;
    - `SecretManagement granted to existing administrators of tenant ...` (once per tenant; a warning
      `SecretManagement role not found` means the blueprint did not apply — retried next setup);
@@ -60,7 +60,7 @@ then the value stays a plain string in MongoDB.
   for configured OAuth/OIDC providers, `clientSecretKeyMissing: false`.
 - `octo-cli -c GetRoles` shows `SecretManagement`; `GetGroup` of `TenantOwners` lists it; a tenant
   administrator (AdminPanelManagement + TenantManagement) has it after a re-login.
-- `octo-cli -c LibraryStatus --installed-only`: `System.Identity` 2.23.0 Available in every tenant.
+- `octo-cli -c LibraryStatus --installed-only`: `System.Identity` 2.25.0 Available in every tenant.
 - Optional, after the observation window (decide with the PO, it removes the cheap rollback): run the
   encrypt sweep for the pilot tenants (bot, needs `SecretManagement`), then `SecretStatus` shows
   `Plaintext: 0` and `EncV2ByKeyId: { k1: n }`; sign in again with the external providers.
@@ -78,7 +78,7 @@ the tenant's other providers keep working. Fix: restore the key into the ring, o
 - **Preferred: roll forward** (fix and redeploy) — the change is additive and login-safe.
 - Rolling back to the previous identity image is cheap **only while no provider secret has been
   encrypted** (no encrypt sweep, no provider edits since the rollout): the values are still plain
-  strings the old code reads. The tenants keep CK `System.Identity` 2.23.0 and blueprint 1.4.0
+  strings the old code reads. The tenants keep CK `System.Identity` 2.25.0 and blueprint 1.7.0
   installed; the old image embeds 2.22.0 / 1.3.1 — the downgrade behaviour of the startup import has
   **not been verified**; check `LibraryStatus` and sign-in right after a rollback.
 - Once secrets are encrypted, the old image cannot read them (sub-document instead of string): affected

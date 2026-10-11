@@ -156,7 +156,7 @@ B is the stronger end state; A is reachable sooner. This is the decision the wor
 - `CLAUDE.md` § *Service-Account Clients over the Distribution Event Hub (AB#5027)* — the per-tenant
   secret provisioning that already works, and the "preserve the existing secret" trap that recurs here.
 - `docs/authentication.md` § *Which Mirror Secret Was Used? (AB#5065)* — the step-3 telemetry, its
-  Loki query and its blind spot.
+  Dash0 log query and its blind spot.
 - `docs/authentication.md` § *Client Mirroring — What It Is For, and What a Mirrored Credential
   Proves* — why mirroring is intentional, why roles are the real boundary downwards, and why the
   tenant claim on a service token must not be authorized on until step 4 lands.

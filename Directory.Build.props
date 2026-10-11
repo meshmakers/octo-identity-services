@@ -20,18 +20,25 @@
         <PackageProjectUrl>https://www.meshmakers.io</PackageProjectUrl>
         <PackageTags>Octo data mesh iot</PackageTags>
         <TargetFramework>net10.0</TargetFramework>
+        <!-- OctoVersion is the version range of the upstream Octo packages. It comes ONLY from
+             the pipeline (AB#6291, AB#6297): update-build-number.yml sets 0.1.* on main, X.Y.* on
+             test/X.Y-* and the exact X.Y.Z on r-tags; the release trains and hotfix-service.yml
+             also pass octoCoreLibVersion / octoCommVersion. DebugL pins 999.0.0 (local chain from
+             ../nuget), and a build against the private feed defaults to the main line 0.1.*.
+             There is deliberately NO release-line fallback here: a build without any of these
+             fails fast in the OctoVerifyVersionIsSet target below, and the release trains fail if
+             a release version is pinned here again (verify-release-version-drift.ps1). -->
         <OctoVersion Condition="'$(Configuration)'=='DebugL'">999.0.0</OctoVersion>
         <OctoVersion Condition="'$(OctoNugetPrivateServer)'!='' And '$(OctoVersion)'==''">0.1.*</OctoVersion>
-        <OctoVersion Condition="'$(OctoNugetPrivateServer)'=='' And '$(OctoVersion)'==''">3.4.*</OctoVersion>
         <OctoCoreLibVersion Condition="'$(Configuration)'=='DebugL'">999.0.0</OctoCoreLibVersion>
         <!-- Upstream OctoMesh core libs (Sdk, distributedEventHub, common-services,
              construction-kit*). Version comes from the PIPELINE, never hardcoded here:
              the CI template (tpl-v0.4.11+) sets OctoCoreLibVersion on main/test/dev
              (branch version) and on r-tag builds from the train-injected override
              (both release-*-train AND hotfix-service pass octoCoreLibVersion). The
-             $(OctoVersion) fallback below only applies to local/standalone builds with
-             no pipeline override — it floats to the current major.minor line, so no
-             stale release version is ever pinned in-repo. -->
+             $(OctoVersion) fallback below applies when no pipeline override is set
+             (standalone builds); it follows OctoVersion, so no release version is ever
+             pinned in-repo. -->
         <OctoCoreLibVersion Condition="'$(OctoCoreLibVersion)'==''">$(OctoVersion)</OctoCoreLibVersion>
         <OctoCommVersion Condition="'$(Configuration)'=='DebugL'">999.0.0</OctoCommVersion>
         <!-- Upstream Communication SDK (Sdk.Common.Web, Sdk.MeshAdapter,
@@ -44,4 +51,16 @@
         <RestoreSources Condition="'$(OctoNugetPrivateServer)'!=''">$(OctoNugetPrivateServer)</RestoreSources>
         <RestoreSources Condition="'$(Configuration)'=='DebugL'">$(OctoRepoRootPath)../nuget;$(RestoreSources)</RestoreSources>
     </PropertyGroup>
+    <!-- Fail fast (AB#6291, AB#6297): without a pipeline version, DebugL or a private feed
+         OctoVersion stays empty, and every upstream Octo PackageReference would end in a cryptic
+         NU1015 / NU1102 restore error. Hooked into the restore graph walk
+         (_IsProjectRestoreSupported, CollectPackageReferences) and into the build
+         (_CheckForInvalidConfigurationAndPlatform), so both `dotnet restore` and `dotnet build`
+         stop before any package is resolved. -->
+    <Target Name="OctoVerifyVersionIsSet"
+            BeforeTargets="_IsProjectRestoreSupported;CollectPackageReferences;_CheckForInvalidConfigurationAndPlatform"
+            Condition="'$(OctoVersion)'==''">
+        <Error Code="OCTO0001"
+               Text="OctoVersion is not set for configuration '$(Configuration)'. Octo lib versions come only from the pipeline (AB#6291); there is no hard-coded release fallback in Directory.Build.props. For local work build with -c DebugL (999.0.0 from ../nuget). For a standalone build pass -p:OctoVersion=X.Y.Z (or X.Y.*), or -p:OctoNugetPrivateServer=&lt;feed&gt; for the main line 0.1.*." />
+    </Target>
 </Project>

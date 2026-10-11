@@ -37,7 +37,7 @@ public class ClientStore : IOctoClientStore
 
     public async Task CreateAsync(RtClient octoClient)
     {
-        var session = await TenantRepository.GetSessionAsync();
+        using var session = await TenantRepository.GetSessionAsync();
         session.StartTransaction();
 
         await TenantRepository.InsertOneRtEntityAsync(session, octoClient);
@@ -49,7 +49,7 @@ public class ClientStore : IOctoClientStore
     {
         ArgumentValidation.ValidateString(nameof(clientId), clientId);
 
-        var session = await TenantRepository.GetSessionAsync();
+        using var session = await TenantRepository.GetSessionAsync();
         session.StartTransaction();
 
         var client = await GetClientByClientId(session, clientId);
@@ -87,7 +87,7 @@ public class ClientStore : IOctoClientStore
     {
         ArgumentValidation.ValidateString(nameof(clientId), clientId);
 
-        var session = await TenantRepository.GetSessionAsync();
+        using var session = await TenantRepository.GetSessionAsync();
         session.StartTransaction();
 
         var queryOptions = RtEntityQueryOptions.Create()
@@ -108,7 +108,7 @@ public class ClientStore : IOctoClientStore
 
     public async Task<IEnumerable<RtClient>> GetClients()
     {
-        var session = await TenantRepository.GetSessionAsync();
+        using var session = await TenantRepository.GetSessionAsync();
         session.StartTransaction();
 
         var queryOptions = RtEntityQueryOptions.Create();
@@ -123,7 +123,7 @@ public class ClientStore : IOctoClientStore
     {
         ArgumentValidation.ValidateString(nameof(clientId), clientId);
 
-        var session = await TenantRepository.GetSessionAsync();
+        using var session = await TenantRepository.GetSessionAsync();
         session.StartTransaction();
 
         var dbClient = await GetClientByClientId(session, clientId);

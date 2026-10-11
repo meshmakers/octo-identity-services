@@ -7,6 +7,7 @@ using Meshmakers.Octo.Runtime.Contracts.MongoDb;
 using Meshmakers.Octo.Runtime.Contracts.MongoDb.Repositories;
 using Meshmakers.Octo.Runtime.Contracts.Repositories.Query;
 using Microsoft.AspNetCore.Identity;
+using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.Logging;
 using NSubstitute;
 using Persistence.IdentityCkModel.Generated.System.Identity.v2;
@@ -21,16 +22,27 @@ public class CrossTenantAuthenticationServiceTests
     private readonly IPasswordHasher<RtUser> _passwordHasher;
     private readonly ILogger<CrossTenantAuthenticationService> _logger;
     private readonly CrossTenantAuthenticationService _sut;
+    private readonly List<OctoTenant> _registeredTenants = [];
+    private readonly Dictionary<string, ITenantRepository> _repositories = new();
 
     public CrossTenantAuthenticationServiceTests()
     {
         _systemContext = Substitute.For<ISystemContext>();
+        _systemContext.TenantId.Returns("octosystem");
+        _systemContext.DatabaseName.Returns("db-octosystem");
+        // The tenant registry the service resolves repositories from (AB#6393): tenants are registered by
+        // the Setup* helpers; everything else is unknown to the registry and must fail closed.
+        var registry = Substitute.For<IResultSet<OctoTenant>>();
+        registry.Items.Returns(_ => _registeredTenants.ToArray());
+        _systemContext.GetAdminSessionAsync().Returns(Substitute.For<IOctoAdminSession>());
+        _systemContext.GetAllTenantsAsync(Arg.Any<IOctoAdminSession>(), Arg.Any<int?>(), Arg.Any<int?>())
+            .Returns(registry);
         _identityProviderStore = Substitute.For<IOctoIdentityProviderStore>();
         _passwordHasher = Substitute.For<IPasswordHasher<RtUser>>();
         _logger = Substitute.For<ILogger<CrossTenantAuthenticationService>>();
 
         _sut = new CrossTenantAuthenticationService(
-            _systemContext,
+            new TenantRegistry(_systemContext, new MemoryCache(new MemoryCacheOptions())),
             _identityProviderStore,
             _passwordHasher,
             _logger);
@@ -353,6 +365,130 @@ public class CrossTenantAuthenticationServiceTests
         result.Should().BeNull();
     }
 
+    // ---------- AB#6393: lightweight repository access, fail closed ----------
+
+    [Fact]
+    public async Task ValidateCrossTenantAccess_NeverUsesTheHeavyTenantResolution()
+    {
+        SetupTenantWithProviders("target-tenant",
+            [CreateTenantProvider("source-tenant", isEnabled: true)]);
+        var user = CreateUser("testuser");
+        SetupTenantWithUser("source-tenant", user);
+
+        var result = await _sut.ValidateCrossTenantAccessAsync(
+            "target-tenant", "source-tenant", user.RtId.ToString());
+
+        result.Should().NotBeNull();
+        // No existence probe, admin session or CK auto-import per lookup: only the cached registry entry.
+        await _systemContext.DidNotReceiveWithAnyArgs().FindTenantRepositoryAsync(default!);
+        await _systemContext.DidNotReceiveWithAnyArgs().TryFindTenantRepositoryAsync(default!);
+        await _systemContext.DidNotReceiveWithAnyArgs().TryFindTenantContextAsync(default!);
+        await _systemContext.DidNotReceive().IsSystemTenantExistingAsync();
+    }
+
+    [Fact]
+    public async Task ValidateCrossTenantAccess_ReadsTheRegistryOnceForTheWholeWalk()
+    {
+        SetupTenantWithProviders("target-tenant", [CreateTenantProvider("mid-tenant", isEnabled: true)]);
+        SetupTenantWithProviders("mid-tenant", [CreateTenantProvider("source-tenant", isEnabled: true)]);
+        var user = CreateUser("testuser");
+        SetupTenantWithUser("source-tenant", user);
+
+        await _sut.ValidateCrossTenantAccessAsync("target-tenant", "source-tenant", user.RtId.ToString());
+
+        await _systemContext.Received(1).GetAllTenantsAsync(
+            Arg.Any<IOctoAdminSession>(), Arg.Any<int?>(), Arg.Any<int?>());
+    }
+
+    [Fact]
+    public async Task ValidateCrossTenantAccess_WithAncestorMissingFromTheRegistry_Fails()
+    {
+        // The identity provider names "ghost-tenant" as parent, but the registry does not know it: there is
+        // no repository to open, so the ancestor proof and the user lookup both fail closed.
+        SetupTenantWithProviders("target-tenant",
+            [CreateTenantProvider("ghost-tenant", isEnabled: true)]);
+
+        var result = await _sut.ValidateCrossTenantAccessAsync(
+            "target-tenant", "ghost-tenant", Guid.NewGuid().ToString("N"));
+
+        result.Should().BeNull();
+        _systemContext.DidNotReceive().GetRegisteredTenantRepository(
+            Arg.Is<OctoTenant>(t => t.TenantId == "ghost-tenant"));
+    }
+
+    [Fact]
+    public async Task ValidateCrossTenantAccess_WithTargetMissingFromTheRegistry_Fails()
+    {
+        var user = CreateUser("testuser");
+        SetupTenantWithUser("source-tenant", user);
+
+        var result = await _sut.ValidateCrossTenantAccessAsync(
+            "ghost-tenant", "source-tenant", user.RtId.ToString());
+
+        result.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task Authenticate_WithParentMissingFromTheRegistry_ReturnsNull()
+    {
+        _identityProviderStore.GetAllAsync()
+            .Returns(new RtIdentityProvider[] { CreateTenantProvider("ghost-tenant", isEnabled: true) });
+
+        var result = await _sut.AuthenticateAsync("child-tenant", "user", "pass");
+
+        result.Should().BeNull();
+        _passwordHasher.DidNotReceiveWithAnyArgs().VerifyHashedPassword(default!, default!, default!);
+    }
+
+    [Fact]
+    public async Task UserLookups_InTenantMissingFromTheRegistry_ReturnNull()
+    {
+        (await _sut.FindUserIdByNameInTenantAsync("ghost-tenant", "user")).Should().BeNull();
+        (await _sut.FindUserNameByIdInTenantAsync("ghost-tenant", Guid.NewGuid().ToString("N"))).Should().BeNull();
+    }
+
+    [Fact]
+    public async Task UserLookups_InRegisteredTenant_ResolveTheUser()
+    {
+        var user = CreateUser("testuser");
+        SetupTenantWithUser("source-tenant", user);
+
+        (await _sut.FindUserIdByNameInTenantAsync("source-tenant", "testuser")).Should().Be(user.RtId.ToString());
+        (await _sut.FindUserNameByIdInTenantAsync("source-tenant", user.RtId.ToString())).Should().Be("testuser");
+    }
+
+    [Fact]
+    public async Task ValidateCrossTenantAccess_WithSystemTenantAsAncestor_Succeeds()
+    {
+        // The system tenant is not a registry entry; its database name comes from the system context.
+        SetupTenantWithProviders("target-tenant",
+            [CreateTenantProvider("octosystem", isEnabled: true)]);
+        var user = CreateUser("admin");
+        SetupTenantWithUser("octosystem", user);
+
+        var result = await _sut.ValidateCrossTenantAccessAsync(
+            "target-tenant", "octosystem", user.RtId.ToString());
+
+        result.Should().NotBeNull();
+        result!.SourceTenantId.Should().Be("octosystem");
+    }
+
+    [Fact]
+    public async Task ValidateCrossTenantAccess_WhenTheRegistryCannotBeRead_FailsClosed()
+    {
+        SetupTenantWithProviders("target-tenant",
+            [CreateTenantProvider("source-tenant", isEnabled: true)]);
+        var user = CreateUser("testuser");
+        SetupTenantWithUser("source-tenant", user);
+        _systemContext.GetAllTenantsAsync(Arg.Any<IOctoAdminSession>(), Arg.Any<int?>(), Arg.Any<int?>())
+            .Returns<IResultSet<OctoTenant>>(_ => throw new InvalidOperationException("db down"));
+
+        var result = await _sut.ValidateCrossTenantAccessAsync(
+            "target-tenant", "source-tenant", user.RtId.ToString());
+
+        result.Should().BeNull();
+    }
+
     #region Helper Methods
 
     private static RtOctoTenantIdentityProvider CreateTenantProvider(
@@ -395,7 +531,7 @@ public class CrossTenantAuthenticationServiceTests
         tenantRepo.GetRtEntityByRtIdAsync<RtUser>(session, user.RtId)
             .Returns(user);
 
-        _systemContext.FindTenantRepositoryAsync(tenantId).Returns(tenantRepo);
+        RegisterTenant(tenantId, tenantRepo);
     }
 
     private void SetupTenantWithNoUser(string tenantId)
@@ -410,7 +546,7 @@ public class CrossTenantAuthenticationServiceTests
         tenantRepo.GetRtEntitiesByTypeAsync<RtUser>(session, Arg.Any<RtEntityQueryOptions>())
             .Returns(queryResult);
 
-        _systemContext.FindTenantRepositoryAsync(tenantId).Returns(tenantRepo);
+        RegisterTenant(tenantId, tenantRepo);
     }
 
     private void SetupTenantWithProviders(string tenantId,
@@ -428,9 +564,7 @@ public class CrossTenantAuthenticationServiceTests
             .Returns(providerResult);
 
         // If user setup hasn't been done for this tenant, set up empty user results too
-        var existingRepo = _systemContext.FindTenantRepositoryAsync(tenantId)
-            .GetAwaiter().GetResult();
-        if (existingRepo != null)
+        if (_repositories.TryGetValue(tenantId, out var existingRepo))
         {
             // Tenant repo already set up (e.g., by SetupTenantWithUser) — add provider query to it
             existingRepo.GetRtEntitiesByTypeAsync<RtOctoTenantIdentityProvider>(
@@ -444,8 +578,25 @@ public class CrossTenantAuthenticationServiceTests
             tenantRepo.GetRtEntitiesByTypeAsync<RtUser>(session, Arg.Any<RtEntityQueryOptions>())
                 .Returns(userResult);
 
-            _systemContext.FindTenantRepositoryAsync(tenantId).Returns(tenantRepo);
+            RegisterTenant(tenantId, tenantRepo);
         }
+    }
+
+    /// <summary>Registers the tenant in the registry and makes its repository available without I/O.</summary>
+    private void RegisterTenant(string tenantId, ITenantRepository repository)
+    {
+        _repositories[tenantId] = repository;
+        var tenant = tenantId == "octosystem"
+            ? new OctoTenant("octosystem", "db-octosystem")
+            : new OctoTenant(tenantId, "db-" + tenantId);
+        if (tenantId != "octosystem" && _registeredTenants.All(t => t.TenantId != tenantId))
+        {
+            _registeredTenants.Add(tenant);
+        }
+
+        _systemContext.GetRegisteredTenantRepository(
+                Arg.Is<OctoTenant>(t => t.TenantId == tenantId && t.DatabaseName == "db-" + tenantId))
+            .Returns(repository);
     }
 
     private void SetupTenantWithNoProviders(string tenantId)

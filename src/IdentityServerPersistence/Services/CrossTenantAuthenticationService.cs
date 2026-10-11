@@ -1,5 +1,4 @@
 using IdentityServerPersistence.SystemStores;
-using Meshmakers.Octo.Runtime.Contracts.MongoDb;
 using Meshmakers.Octo.Runtime.Contracts.Repositories.Query;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.Extensions.Logging;
@@ -8,7 +7,7 @@ using Persistence.IdentityCkModel.Generated.System.Identity.v2;
 namespace IdentityServerPersistence.Services;
 
 public class CrossTenantAuthenticationService(
-    ISystemContext systemContext,
+    ITenantRegistry tenantRegistry,
     IOctoIdentityProviderStore identityProviderStore,
     IPasswordHasher<RtUser> passwordHasher,
     ILogger<CrossTenantAuthenticationService> logger) : ICrossTenantAuthenticationService
@@ -238,8 +237,14 @@ public class CrossTenantAuthenticationService(
     {
         try
         {
-            var tenantRepository = await systemContext.FindTenantRepositoryAsync(tenantId);
-            var session = await tenantRepository.GetSessionAsync();
+            var tenantRepository = await tenantRegistry.TryGetRepositoryAsync(tenantId);
+            if (tenantRepository == null)
+            {
+                LogUnregisteredTenant(tenantId);
+                return null;
+            }
+
+            using var session = await tenantRepository.GetSessionAsync();
             session.StartTransaction();
 
             var normalizedUserName = username.ToUpperInvariant();
@@ -264,8 +269,14 @@ public class CrossTenantAuthenticationService(
     {
         try
         {
-            var tenantRepository = await systemContext.FindTenantRepositoryAsync(tenantId);
-            var session = await tenantRepository.GetSessionAsync();
+            var tenantRepository = await tenantRegistry.TryGetRepositoryAsync(tenantId);
+            if (tenantRepository == null)
+            {
+                LogUnregisteredTenant(tenantId);
+                return null;
+            }
+
+            using var session = await tenantRepository.GetSessionAsync();
             session.StartTransaction();
 
             var rtId = new Meshmakers.Octo.ConstructionKit.Contracts.OctoObjectId(userId);
@@ -294,8 +305,14 @@ public class CrossTenantAuthenticationService(
     {
         try
         {
-            var tenantRepository = await systemContext.FindTenantRepositoryAsync(tenantId);
-            var session = await tenantRepository.GetSessionAsync();
+            var tenantRepository = await tenantRegistry.TryGetRepositoryAsync(tenantId);
+            if (tenantRepository == null)
+            {
+                LogUnregisteredTenant(tenantId);
+                return [];
+            }
+
+            using var session = await tenantRepository.GetSessionAsync();
             session.StartTransaction();
 
             var queryOptions = RtEntityQueryOptions.Create();
@@ -313,4 +330,11 @@ public class CrossTenantAuthenticationService(
             return [];
         }
     }
+
+    /// <summary>
+    ///     Fail closed: a tenant that is not in the registry has no users and no identity providers, so it
+    ///     can neither authenticate anybody nor serve as an ancestor for a tenant switch.
+    /// </summary>
+    private void LogUnregisteredTenant(string tenantId)
+        => logger.LogWarning("Cross-tenant lookup refused: tenant '{TenantId}' is not registered", tenantId);
 }

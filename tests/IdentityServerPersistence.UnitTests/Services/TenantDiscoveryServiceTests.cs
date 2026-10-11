@@ -41,6 +41,7 @@ public class TenantDiscoveryServiceTests
     public TenantDiscoveryServiceTests()
     {
         _systemContext.TenantId.Returns(SystemTenant);
+        _systemContext.DatabaseName.Returns("db-" + SystemTenant);
         // The user search enumerates the platform registry (parent ids irrelevant there); the scope
         // walk goes through each tenant's own context.
         var registry = Substitute.For<IResultSet<OctoTenant>>();
@@ -95,8 +96,25 @@ public class TenantDiscoveryServiceTests
         // restrict WHERE the user is looked for, only what is returned.
         await _sut.FindTenantsForUserAsync("kbernkopf@tecob.at", "bernkopf");
 
-        await _systemContext.Received().FindTenantRepositoryAsync("energyiq");
-        await _systemContext.Received().FindTenantRepositoryAsync("bernkopf");
+        _systemContext.Received().GetRegisteredTenantRepository(Registered("energyiq"));
+        _systemContext.Received().GetRegisteredTenantRepository(Registered("bernkopf"));
+    }
+
+    [Fact]
+    public async Task UserSearch_UsesTheRegistryEntryOfEveryTenantAndNeverTheHeavyResolvePath()
+    {
+        // AB#6308: one lightweight repository per registered tenant (plus the system tenant), database name
+        // taken from the registry — no existence probe, no CK auto-import, no tenant context per tenant.
+        await _sut.FindTenantsForUserAsync("kbernkopf@tecob.at");
+
+        foreach (var tenantId in Hierarchy.Keys)
+        {
+            _systemContext.Received(1).GetRegisteredTenantRepository(Registered(tenantId));
+        }
+
+        await _systemContext.DidNotReceiveWithAnyArgs().FindTenantRepositoryAsync(default!);
+        await _systemContext.DidNotReceiveWithAnyArgs().TryFindTenantRepositoryAsync(default!);
+        await _systemContext.DidNotReceive().IsSystemTenantExistingAsync();
     }
 
     [Fact]
@@ -108,6 +126,9 @@ public class TenantDiscoveryServiceTests
         await _resolver.DidNotReceiveWithAnyArgs().ResolveAsync(default!, default!);
     }
 
+    private static OctoTenant Registered(string tenantId) =>
+        Arg.Is<OctoTenant>(t => t.TenantId == tenantId && t.DatabaseName == "db-" + tenantId);
+
     private void SetupTenant(string tenantId, RtUser? user)
     {
         var repository = Substitute.For<ITenantRepository>();
@@ -117,6 +138,6 @@ public class TenantDiscoveryServiceTests
         var users = Substitute.For<IResultSet<RtUser>>();
         users.Items.Returns(user == null ? Array.Empty<RtUser>() : new[] { user });
         repository.GetRtEntitiesByTypeAsync<RtUser>(session, Arg.Any<RtEntityQueryOptions>()).Returns(users);
-        _systemContext.FindTenantRepositoryAsync(tenantId).Returns(repository);
+        _systemContext.GetRegisteredTenantRepository(Registered(tenantId)).Returns(repository);
     }
 }

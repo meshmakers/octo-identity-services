@@ -5,8 +5,12 @@ types:
     isFinal: false
     isAbstract: true
     attributes:
+      # AB#6329 (audit finding F5): an administrator who disabled an API resource, API scope or
+      # identity resource must not see a blueprint update enable it again. Declared once on the
+      # abstract base; ApiResource, ApiScope and IdentityResource inherit it. See ck-client.yaml.
       - id: ${System}/Enabled
         name: Enabled
+        ownership: TenantOwned
       - id: ${System}/Name
         name: Name
       - id: ${System}/DisplayName

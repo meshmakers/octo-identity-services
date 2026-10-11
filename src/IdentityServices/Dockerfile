@@ -39,6 +39,7 @@ ENV NUGET_XMLDOC_MODE=none
 WORKDIR "/src/src/IdentityServices"
 RUN dotnet build "IdentityServices.csproj" -c Release \
     -p:OctoNugetPrivateServer=${OCTO_PRIVATE_NUGET_SERVICE} \
+    -p:OctoPublishCkModel=false \
     ${OCTO_VERSION:+-p:OctoVersion=${OCTO_VERSION}} \
     ${OCTO_SERVICE_VERSION:+-p:OctoServiceVersion=${OCTO_SERVICE_VERSION}} \
     ${OCTO_CORE_LIB_VERSION:+-p:OctoCoreLibVersion=${OCTO_CORE_LIB_VERSION}} \
@@ -47,6 +48,7 @@ RUN dotnet build "IdentityServices.csproj" -c Release \
 FROM build AS publish
 RUN dotnet publish "IdentityServices.csproj" -c Release \
     -p:OctoNugetPrivateServer=${OCTO_PRIVATE_NUGET_SERVICE} \
+    -p:OctoPublishCkModel=false \
     ${OCTO_VERSION:+-p:OctoVersion=${OCTO_VERSION}} \
     ${OCTO_SERVICE_VERSION:+-p:OctoServiceVersion=${OCTO_SERVICE_VERSION}} \
     ${OCTO_CORE_LIB_VERSION:+-p:OctoCoreLibVersion=${OCTO_CORE_LIB_VERSION}} \

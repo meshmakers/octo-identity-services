@@ -156,6 +156,36 @@ attributes:
 
 Records are embedded within parent entities as arrays.
 
+## Attribute Ownership and the Blueprint-Lock Opt-In
+
+Every attribute of a type has an `ownership` (`SeedOwned`, `TenantOwned`, `RuntimeState`, `Secret`) that decides what a blueprint
+update (an `Upsert` import, a full replace) does with a stored value. The System.Identity decisions, with the reason, are in
+`CLAUDE.md` ("Tenant-owned attributes ..."). Every attribute definition states its ownership explicitly; the build fails with `OCTO-CK001`
+when a new attribute has none (AB#6326). Two of the decisions are worth knowing for blueprint authors:
+
+| Attribute | Ownership | Effect |
+|-----------|-----------|--------|
+| `DataPolicy.PolicyEnforcementMode`, `PolicyScope` | `TenantOwned` | A blueprint initialises them; a later update keeps what the administrator set (Enforce stays Enforce) |
+| `DataPolicy.ProtectBlueprintLocked` (since 2.24.0) | `SeedOwned` | The blueprint owns it: every update or forced re-apply puts the shipped value back |
+| `ApiResource.Secrets`, `Client.Secrets` | `Secret` | Kept on a re-apply, left out of an `ExportRt` |
+
+### `DataPolicy.ProtectBlueprintLocked` (AB#6384)
+
+Optional Boolean, default `false` (an absent value reads as `false`, so older tenants and policies are unaffected). When `true` on a
+data policy, the engine's write guard (`DataPermissionWriteGuard`, message number 6384; see `docs/blueprints.md` in
+`octo-construction-kit-engine`) treats the policy's target CK types (derived types inherit) as follows for non-system callers:
+
+- updating, replacing or deleting an entity whose stored `RtBlueprintLocked` is `true` is refused for the whole change set;
+- setting or changing `RtBlueprintLocked`, `RtBlueprintSource` and `RtBlueprintAppliedAt` is refused;
+- reads, entities with `RtBlueprintLocked` `false`/absent and system callers (blueprint install/update, migrations) are unaffected.
+
+It is a restriction, not a grant, and the policy's own `PolicyEnforcementMode` applies (`Enforce` refuses, `AuditOnly` only publishes an
+audit event). A policy with the flag still counts as a normal policy for the grant logic, so give it a `PolicyPermission` granted to the
+roles that need write access. Ship one policy per opted-in type in a policy group of its own, raise the blueprint's
+`ckModelDependencies` floor to `System.Identity-[2.24.0,3.0)`, and note that the policy table is cached per tenant for 60 seconds. The flag
+is seed-owned on purpose: users cannot switch the protection off for good, and a seed that merely omits the attribute keeps a stored
+`true` (ship an explicit `false` to take it back).
+
 ## Code Generation Pipeline
 
 ### Build Configuration
@@ -453,9 +483,102 @@ Every tenant is provisioned with a `TenantOwners` group that has all 10 default 
 - Provisioned to child tenants via `EnsureGroupInChildTenantAsync()`
 - Migrated to existing tenants via `IdentityAssociationMigration` (migration 9→10)
 
+### File Roles and the One-Time Grant from the Reporting Roles (AB#6180)
+
+`System.Identity.Bootstrap` 1.5.0 seeds the tenant roles `FileManagement` (rtId `660…61`) and `FileViewer`
+(rtId `660…62`) for the platform file system (`System/FileSystemItem`, Studio "Files" page, epic AB#6171
+decision D5) and assigns both to `TenantOwners`; a new tenant's initial administrator gets both from
+`UserManagementService.CreateAdminUserAsync`. (`660…60` is taken by `SecretManagement`, AB#5544, which ships as blueprint 1.7.0; there is no 1.4.0.) Existing tenants receive them once, automatically, through `FileRoleGrant`
+(`src/IdentityServerPersistence/Services/FileRoles/`), so nobody loses access when the Studio and the file
+APIs switch from the Reporting roles to the File roles:
+
+- **When:** in `DefaultConfigurationCreatorService.SetupTenantAsync`, right after the blueprint apply (the
+  roles must exist, so this is deliberately not an `IMigration` — infrastructure migrations run before the
+  blueprint). `SetupTenantAsync` runs for every tenant on identity startup and on tenant create/update, so the
+  first identity start with blueprint 1.5.0 grants them.
+- **Who** (`FileRoleGrantPlanner`, pure and unit-tested): `ReportingManagement` → `FileManagement`,
+  `ReportingViewer` → `FileViewer`, mirrored on every **direct** holder:
+  - users, groups and clients with an `AssignedRole` edge to the Reporting role get an `AssignedRole` edge to
+    the File role (a group is granted on the group itself, so its members — users, clients, external tenant
+    user mappings, nested groups — inherit the File role exactly as they inherited the Reporting role);
+  - external tenant user mappings whose `MappedRoleIds` contain the Reporting role's rtId get the File role's
+    rtId appended (existing entries stay);
+  - subjects that already hold the File role are skipped (e.g. `TenantOwners` after the 1.5.0 apply).
+  - External identity-provider group rules (`DefaultGroupRtId`, `EmailDomainGroupRule.TargetGroupRtId`) target
+    groups, not roles, and are covered by the group grant.
+- **Additive and once:** nothing is removed. Afterwards the tenant configuration row `FileRoleGrant`
+  (`IdentityServiceConstants.FileRoleGrantKey`) records the run with the granted assignments; while it exists the
+  step does nothing, so an operator who later removes a File role from someone does not see it come back. If a
+  File role does not exist yet, nothing is written and no marker is recorded (retried on the next setup). A
+  failure is logged and does not fail tenant setup.
+
+### File Roles and Data Permissions on System.Files (AB#6467, blueprint 1.6.0)
+
+Roles alone do not protect anything on the server: the engine treats a CK type that no data policy targets as
+unrestricted, so before 1.6.0 every caller with the API scope could write through the Files API. Blueprint
+`System.Identity.Bootstrap` 1.6.0 (the Files line, AB#6457; the SECRET line follows as 1.7.0) seeds, in
+`seed-data/data-permissions.yaml` and `seed-data/roles.yaml`:
+
+| Seed | rtId | Content |
+|------|------|---------|
+| DataPermission `files.read` | `660…52` | granted to `FileViewer` and `FileManagement` |
+| DataPermission `files.manage` | `660…53` | granted to `FileManagement` |
+| DataPolicy `FilesReadPolicy` | `660…54` | target `System.Files/FileSystemEntity` (derived types inherit), actions `Read`, full scope, **Enforce** |
+| DataPolicy `FilesManagePolicy` | `660…55` | same target, actions `Write`, `Delete`, **Enforce** |
+
+Effect: FileViewer reads (list, download, stats, zip), FileManagement reads and writes, anyone else gets 403
+FORBIDDEN on the REST Files API and nothing on GraphQL reads. The policies are new entities, so existing tenants
+receive them **enforcing** on the re-import that the version bump triggers (`PolicyEnforcementMode` and
+`PolicyScope` are tenant-owned afterwards). A tenant can grant write access to a custom role by granting it the
+permission `files.manage`. The asset repository carries the same rules as a built-in baseline until a tenant has
+a policy for a `System.Files/*` type, so a rollout in which asset-repo is updated before the tenants are
+re-seeded is not open in between. ReportingManagement / ReportingViewer holders keep access through the
+one-time `FileRoleGrant` above. Machine clients (client credentials) carry no roles: give a client that must use
+the Files API the FileViewer / FileManagement role.
+
+### FileManagement for the pipeline service accounts (AB#6467 / AB#6457, decision Gerald 2026-10-11)
+
+The pipeline service accounts (client id `octo-pipeline-sa-{adapterRtId}`, one per adapter, created by the
+Communication Controller) hold `FileManagement`. Their file nodes (`CreateFileSystemUpdate`,
+`GetFileSystemContent`) run in the adapter's own engine, where the System.Files data policies above apply to the
+roles of the identity the node runs as; without the role a node running as `ServiceAccount` (or as `Caller` with no
+caller — cron and HTTP triggers) is refused, which looks like a pipeline that "does nothing". Done identity-side, not
+through the controller's default roles:
+
+- **At creation and on every identity-data command** (`CreateIdentityDataCommandRequestConsumer`): for a client with
+  the prefix `octo-pipeline-sa-` the consumer adds the `AssignedRole` edge to `FileManagement` when the role exists —
+  also for a `null` role list (rotation, legacy account) — and treats it as implicitly declared, so the declarative
+  role sync (AB#5111) never removes it. A new account is therefore covered in the same command that creates it. If the
+  role does not exist yet (seed pending) the consumer logs a warning.
+- **At every tenant setup** (`PipelineServiceAccountFileRoleGrant`, `SetupTenantAsync` after `FileRoleGrant`): every
+  existing `octo-pipeline-sa-*` client without the role receives it. This is **not** run-once: identity start, tenant
+  create, full tenant update (not the nightly `CacheOnly` update) and the failed-tenant retry all run it, additive and
+  idempotent (a repeated run finds every account covered and writes nothing). It only runs for tenants that have
+  System.Files in their CK cache. Consequence: an operator cannot remove `FileManagement` from a pipeline service
+  account for good; restrict a pipeline with `Identity: Caller` or change the policies instead.
+- **Covered when?** Exactly in the identity-data command that creates or touches the account (seconds after the
+  controller provisions it); accounts that existed before 1.6.0 at the first identity start with this version; the
+  worst case (role seed pending at creation) at the next identity start or full tenant update.
+- **The prefix is not reserved.** Nothing in the identity API rejects a client id starting with `octo-pipeline-sa-`
+  (`POST api/Clients`, tenant-administration write policy, accepts any free id): such a client is treated as a
+  pipeline service account and receives FileManagement at the next tenant setup or identity-data command. Only tenant
+  administrators can create clients, and they can assign FileManagement anyway, but do not use the prefix for other
+  clients. The prefix octo-pipeline-sa- is a convention, not a security boundary: whoever can create clients and assign roles (tenant administration) can already grant any role.
+- **Concurrency:** the setup pass and the consumer take a per-tenant in-process lock (`PipelineServiceAccountFileRoleLock`)
+  and re-read the edges before inserting, because the engine does not reject a second identical `AssignedRole` edge.
+  Two identity replicas starting at the same instant can still duplicate the edge; role reads treat the edges as a set
+  and the next run finds the account covered.
+- **Detection:** `PipelineServiceAccountFileRoleGrant.FindAccountsWithoutRoleAsync` names the accounts without the
+  role (read-only).
+
+Not covered on purpose: **customer client-credentials clients** and **octo-cli with `LogInClientCredentials`** carry
+no user roles and get 403 on the Files API (REST) and on System.Files in the engine until the client itself is given
+`FileViewer` or `FileManagement` (`octo-cli AddClientToRole`). The **Reporting service** needs nothing: it reads and
+writes files in-process with a session without security context (system), and its client ids are only OIDC audiences.
+
 ### SecretManagement Grant for Existing Administrators (AB#5544)
 
-`System.Identity.Bootstrap` 1.4.0 seeds the tenant role `SecretManagement` (rtId `660…60`; may trigger
+`System.Identity.Bootstrap` 1.7.0 (the SECRET line, on top of the Files line 1.6.0) seeds the tenant role `SecretManagement` (rtId `660…60`; may trigger
 secret sweeps and delete a pre-sweep dump early) and assigns it to `TenantOwners`; a new tenant's initial
 administrator gets it from `UserManagementService.CreateAdminUserAsync`. Existing tenants receive it once,
 automatically, through `SecretManagementAdminGrant`
@@ -464,7 +587,7 @@ automatically, through `SecretManagementAdminGrant`
 - **When:** in `DefaultConfigurationCreatorService.SetupTenantAsync`, right after the blueprint apply (the
   role must exist, so this is deliberately not an `IMigration` — infrastructure migrations run before the
   blueprint). `SetupTenantAsync` runs for every tenant on identity startup and on tenant create/update
-  (`PosCreateTenant`/`PosUpdateTenant`), so the first identity start with blueprint 1.4.0 grants it.
+  (`PosCreateTenant`/`PosUpdateTenant`), so the first identity start with blueprint 1.7.0 grants it.
 - **Who** (`SecretManagementGrantPlanner`, pure and unit-tested):
   - every group whose effective roles (own roles plus those of its child groups, `GroupRoleResolver`
     semantics) contain **both** `AdminPanelManagement` **and** `TenantManagement` gets the role on the

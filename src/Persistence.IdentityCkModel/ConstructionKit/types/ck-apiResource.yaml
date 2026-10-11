@@ -7,8 +7,14 @@ types:
     attributes:
       - id: ${this}/RequireResourceIndicator
         name: RequireResourceIndicator
+      # AB#6443 (audit AB#6317 re-scan): credential hashes (introspection secrets), so `Secret`, like
+      # Client.Secrets (AB#6329): kept on a blueprint re-apply, left out of an ExportRt. The
+      # System.Identity.Bootstrap seed writes this attribute (empty) on both seeded API resources, so it
+      # was seed-owned in effect: only the generic blanking guard kept a stored secret, and a seed with a
+      # non-empty placeholder would have overwritten it. A fresh tenant still gets the seed value.
       - id: ${this}/Secrets
         name: ApiSecrets
+        ownership: Secret
       - id: ${this}/Scopes
         name: Scopes
       - id: ${this}/AllowedAccessTokenSigningAlgorithms

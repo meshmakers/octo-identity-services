@@ -35,8 +35,9 @@ dotnet test Octo.Identity.sln -c DebugL
 🔴 **`-c Release` funktioniert lokal auf `test/0.2-dev` nicht — das ist kein kaputter Branch.**
 Die Paket-Lane kommt aus der Pipeline: `azure-pipelines.yml` reicht `octoCoreLibVersion` als
 `octoCoreLibVersionOverride` ans CI-Template, und nur dort steht die 0.2-Lane. Lokal greift der
-Fallback in `Directory.Build.props` — `0.1.*` mit privatem Feed, sonst `3.4.*`, also in beiden
-Fällen die **falsche** Lane —, und ohne konfigurierten `OctoNugetPrivateServer` sind `0.2.*`-Pakete
+Fallback in `Directory.Build.props` — `0.1.*` mit privatem Feed, sonst gar keiner (seit AB#6297
+gibt es keinen Release-Fallback mehr; ohne Version bricht der Build mit `OCTO0001` ab) —, also nie
+die 0.2-Lane, und ohne konfigurierten `OctoNugetPrivateServer` sind `0.2.*`-Pakete
 ohnehin nicht erreichbar. Der Build bricht dann mit einer Wand aus `CS0246` auf Typen ab, die es nur
 in der 0.2-Lane gibt (z.B. `DataPermissionDto` aus `Communication.Contracts` im
 `DataPermissionsController`). Das sieht nach einem kaputten Merge aus, ist aber die Lane.
@@ -120,6 +121,16 @@ Suite wirklich flakig macht. Bisher dreimal getreten:
 | System-Tenant-ID `octosystem` ⇒ statisches `DefaultConfigurationCreatorServiceBase.TenantsInHandling` | Fixtures überspringen still den CK-Import, dann `CkCacheException` | GUID-Suffix, Präfix gekürzt (AB#5117) |
 | **statisches `NLog.LogManager.Configuration`** | `ConfigurationException: LogManager configuration not found` aus `HostedInitializer.StartAsync`, wandernde Testmenge | Aufrufer tolerant (AB#5440) |
 
+**Machine-wide state counts too (AB#5880).** In the Development environment `OpenIddictConfiguration`
+calls `AddDevelopmentSigningCertificate()`, which publishes **every** certificate with subject
+`CN=OpenIddict Server Signing Certificate` from the current user's X509 store — expired ones and
+duplicates created by concurrently starting hosts included. On a long-lived CI agent that store
+persists across builds, so the JWKS depended on the agent (`TokenShapeGoldenTests.JwksDocument_*` saw
+two keys on `azure-devops-agents-ci-1` only). `CustomWebApplicationFactory` therefore replaces the
+signing and encryption credentials with one in-memory certificate (`Infrastructure/TestSigningCertificate.cs`),
+and the JWKS test asserts that this is the only published key. Never let a test host read key material
+from the user/machine store.
+
 Der NLog-Fall ist der einzige, den man **nicht** per-Fixture eindeutig machen kann: `Program.cs` lädt
 die globale Konfiguration am Entry-Point und räumt sie im `finally` mit `LogManager.Shutdown()` wieder
 ab (dort gegen den Segfault beim Prozessende auf Linux). Unter `WebApplicationFactory<Program>` läuft
@@ -164,7 +175,7 @@ This service depends on Octo framework packages (versioned via `$(OctoVersion)` 
 
 ### Construction Kit (CK) Model
 
-The `Persistence.IdentityCkModel` project uses YAML-based model definitions that are transformed into C# code at build time. Model files are in `src/Persistence.IdentityCkModel/ConstructionKit/`. The model ID is `System.Identity-2.18.0` with dependency on `System-[2.0,3.0)`. Generated types live in namespace `Persistence.IdentityCkModel.Generated.System.Identity.v2`.
+The `Persistence.IdentityCkModel` project uses YAML-based model definitions that are transformed into C# code at build time. Model files are in `src/Persistence.IdentityCkModel/ConstructionKit/`. The model ID is `System.Identity-2.25.0` with dependency on `System-[2.5,3.0)`. Generated types live in namespace `Persistence.IdentityCkModel.Generated.System.Identity.v2`.
 
 ### OpenIddict Protocol Stack (Epic AB#4989)
 
@@ -604,6 +615,61 @@ a retriable not-ready condition (AB#4690).
 `PreUpdateTenant` + `PosUpdateTenant`, which makes every service — including this one — re-run
 `SetupAsync` for that tenant.
 
+### CK Model Data Migrations Run Once per Tenant Setup (CK v2 D8/N2, AB#5902)
+
+`DefaultConfigurationCreatorService.SetupTenantAsync` captures the tenant's schema versions **before** the
+CK model imports, imports System.Identity / System.Notification, and then runs its own data-migration pass
+(`RunCkModelMigrationsAsync` → `ICkModelUpgradeService.UpgradeModelsAsync`). The engine already migrates
+every model it imports or updates (`TenantContext.RunCkModelMigrationsForImportAsync`) and records
+`MigrationHistory` at the new version. Handing the stale pre-import versions to the second pass made the
+upgrade service read "schema older than MigrationHistory", assume a manual downgrade and run the same
+migration again (D8: every upgraded model was migrated twice per tenant, with a WARN each time). This was
+not concurrent setup: both runs are sequential inside one `SetupTenantAsync`.
+
+`MergeSchemaVersionsAfterImport(preImport, postImport, migrationHistory)` decides what the second pass sees:
+
+| Situation | Version handed over | Effect |
+|---|---|---|
+| Import changed the model **and** the latest successful `MigrationHistory` entry equals the post-import version | post-import | upgrade service finds the target → skip (no double run, no WARN) |
+| Import changed the model, but history is missing or behind (the engine's import-time migration failed; it only logs) | pre-import | migration is retried (N2: with the post-import version and no history row, the upgrade service would record "already at target" and silently skip it) |
+| Import did not change the model (already current, or skipped by the engine's downgrade guard because the tenant has a newer version) | pre-import | unchanged behaviour |
+
+History comes from `ICkModelUpgradeService.GetInstalledVersionsAsync` (latest successful row per model),
+the same source the upgrade service uses. Tests:
+`tests/IdentityServerPersistence.UnitTests/Services/DefaultConfigurationCreatorServiceSchemaVersionMergeTests.cs`.
+
+### Embedded CK Models: "Embedded or Newer" (CK v2 Phase 1 G-H2 / R-L4, AB#5902)
+
+Since the engine's downgrade guard (engine-mongodb, AB#5900) a tenant may keep a **newer** System /
+System.Identity / System.Notification than this service embeds (rollback, an old replica during a
+rolling update). Never decide with `ITenantContext.IsCkModelExistingAsync(SystemIdentityCkIds.CkModelId)`:
+it matches the **exact** version `[x.y.z]`. Use `CkModelCompatibility`
+(`src/IdentityServerPersistence/Services/CkModelCompatibility.cs`), which looks the model up **by name**
+(highest `Available` version) and classifies it. `IsSatisfied` = embedded version or newer, **any
+major** — the same rule as the engine's `IsCkModelSatisfiedAsync`.
+
+**Platform rule R-L4 (one rule everywhere):** if a tenant has a **higher major** than this service
+embeds, the service is too old for the tenant: skip the import (never downgrade), log **WARN** "service is
+too old for the tenant", and keep running. No tenant-setup failure, and no host-startup failure for the
+system tenant. Identity has no meter of its own for this; the WARN is the signal.
+
+| Installed vs. embedded | State | Identity behaviour |
+|---|---|---|
+| none / only `ResolveFailed` / `Importing` | `NotInstalled` | tenant setup imports the embedded model; `CreateIdentityData` answers `FailedTenantHasNoIdentityCk` |
+| older | `Older` | tenant setup imports (upgrade) |
+| same | `Same` | nothing to import |
+| newer, same major | `NewerSameMajor` | no import (INFO); identity data creation works |
+| newer major | `NewerMajor` | no import, WARN "service is too old for the tenant"; setup continues; identity data creation proceeds with the same WARN |
+
+The post-import migration run (`RunCkModelMigrationsAsync`) passes `[embedded, nextMajor)` ranges
+(`EmbeddedOrNewerSameMajor`) instead of exact `[x.y.z]` ranges, so a newer same-major model is kept with
+an INFO instead of a "newer than the declared compatibility range" WARN on every setup. A higher major
+stays outside that range: the upgrade service keeps it (never downgrades) and WARNs, which is the R-L4
+rule. `SystemContext.IsSystemTenantExistingAsync` (System model in the system DB) is an engine-mongodb
+check (`IsCkModelSatisfiedAsync`, any major). Tests: `CkModelCompatibilityTests` (unit) and
+`tests/IdentityServices.IntegrationTests/Persistence/CkModelCompatibilityIntegrationTests.cs`, which
+re-key the tenant's System.Identity `CkModel` row to a newer version.
+
 ### Admin Provisioning (Cross-Tenant Pre-Provisioning)
 
 The `AdminProvisioningController` allows users with the TenantManagement or UserManagement role to pre-provision cross-tenant user mappings in a **target tenant** without needing `allowed_tenants` for that tenant. Since AB#5859 the target must be the caller's own tenant or one of its registry descendants (system-tenant callers: any tenant) — `AdminProvisioningTargetScopeFilter`; before, the role was documented but not checked and any target was reachable. It is routed via the system tenant: `{tenantId}/v1/adminProvisioning/{targetTenantId}`.
@@ -667,7 +733,65 @@ Key components:
 - **`GroupsController`**: REST API at `{tenantId}/v1/groups` with full CRUD, role assignment, member management, and circular group prevention
 - **`TenantOwners`** group: Default group provisioned in every tenant with all 10 default roles. Created by `DefaultConfigurationCreatorService` and `IdentityAssociationMigration` (migration 9→10)
 
-Current identity schema (migration) version: `23` (migration 21→22 added the `RtOAuthAuthorization`/`RtOAuthToken` OpenIddict store types; 22→23 re-runs the full index update so abstract collection roots get their indexes, AB#5261). Current CK model version: `System.Identity-2.18.0` — the 2.12.0→2.17.0 changes (verified-identifier directory AB#5122+) are additive schema needing no numeric migration; 2.17.0→2.18.0 REPLACED `RtUser.PreferredChannel` with `RtUser.PreferredChannelBindingId` (AB#5149 revision, binding-specific preference). The feature shipped the day before the replacement with no external consumers, so the old attribute was dropped without a migration — any stored kind-level values are simply ignored (users re-select).
+Current identity schema (migration) version: `23` (migration 21→22 added the `RtOAuthAuthorization`/`RtOAuthToken` OpenIddict store types; 22→23 re-runs the full index update so abstract collection roots get their indexes, AB#5261). Current CK model version: `System.Identity-2.24.0` (2.19.0–2.23.0 were ownership/runtime-state classifications, 2.24.0 added `DataPolicy.ProtectBlueprintLocked`, see the sections below) — the 2.12.0→2.17.0 changes (verified-identifier directory AB#5122+) are additive schema needing no numeric migration; 2.17.0→2.18.0 REPLACED `RtUser.PreferredChannel` with `RtUser.PreferredChannelBindingId` (AB#5149 revision, binding-specific preference). The feature shipped the day before the replacement with no external consumers, so the old attribute was dropped without a migration — any stored kind-level values are simply ignored (users re-select).
+
+### Tenant-owned attributes: a blueprint update never reverts an administrator's decision (AB#6324, AB#6329; System.Identity 2.23.0)
+
+A blueprint update imports its seed with `ImportStrategy.Upsert` (a full ReplaceOne); the engine keeps an attribute only when its
+ownership is not seed-owned. Audit AB#6317 (incident class AB#6310) found decisions an administrator takes in the product that were
+seed-owned, so an update silently undid them. System.Identity 2.23.0 (minor, `ownership` change per `ck-semver-rules`; attribute ids,
+types and defaults unchanged, no migration entry) marks them:
+
+| Entity | Attribute | Ownership | Why |
+|--------|-----------|-----------|-----|
+| `DataPolicy` | `PolicyEnforcementMode`, `PolicyScope` | `TenantOwned` | Seeds ship AuditOnly / All; the administrator flips to Enforce / narrows to OwnedOnly. Reverting would silently switch authorization enforcement off. Not a credential, part of the tenant's definition, so an `ExportRt` carries it |
+| `Client` (assignment overrides) | `System/Enabled`, `AllowedGrantTypes`, `AllowedScopes`, `AutoProvisionInChildTenants` | `TenantOwned` | An update must not re-enable a disabled client or widen narrowed access. `System/Enabled` is shared, hence an override, not a definition change |
+| `Client` (assignment override) | `Secrets` | `Secret` | Credential hashes: kept on a re-apply, left out of an `ExportRt` |
+| `ApiResource` (assignment override) | `Secrets` (`ApiSecrets`) | `Secret` | Introspection secret hashes, same decision as `Client.Secrets`. The Identity.Bootstrap seed writes the attribute (empty) on both seeded API resources, so it was seed-owned in effect (AB#6443, System.Identity 2.24.0) |
+| `Resource` (inherited by `ApiResource`, `ApiScope`, `IdentityResource`) | `System/Enabled` | `TenantOwned` | Same as the client switch |
+
+A fresh tenant still gets the seed values. **Consequence for blueprint authors:** a seed initialises these values on a new entity but can
+no longer change them on an existing one (not even tighten a policy or a client) — ship a CK migration step or a documented manual step.
+`ClientMirrorProvisioningService` writes mirrors with insert/replace, not `ImportRt`, so mirroring is unaffected. Regression tests:
+`BlueprintOwnershipIntegrationTests` (real MongoDB; compiled ownership, shipped policy seed, Enforce over an AuditOnly seed, client,
+secrets, resources).
+
+### Blueprint-owned opt-in: `DataPolicy.ProtectBlueprintLocked` (AB#6384; System.Identity 2.24.0)
+
+`ProtectBlueprintLocked` (optional Boolean, default `false`) is the opt-in of the engine's blueprint-lock write guard
+(`DataPermissionWriteGuard` in `octo-construction-kit-engine`, message number 6384, `docs/blueprints.md` there). It is a
+**restriction, not a grant**: for the policy's target CK types (derived types inherit) a non-system caller can no longer update or delete an
+entity whose stored `RtBlueprintLocked` is `true`, nor set or change `RtBlueprintLocked`, `RtBlueprintSource` and `RtBlueprintAppliedAt`. The policy's own
+`PolicyEnforcementMode` decides between refusal (`Enforce`) and audit only (`AuditOnly`).
+
+- **Ownership: `SeedOwned`** (blueprint-owned) - the opposite of `PolicyEnforcementMode` / `PolicyScope`. The blueprint author decides which
+  types are protected; every blueprint update or forced re-apply puts the product's value back, so a user with write access to `DataPolicy`
+  cannot switch the protection off for good, and a later blueprint version can tighten or loosen it. A policy without the attribute reads as
+  `false`. A seed that merely *omits* it does not switch a stored `true` off (the import's blanking guard keeps the value, AB#6313): ship an explicit
+  `false` to take a protection back.
+- **Default `false`**; an engine or tenant on an older System.Identity reads the attribute as `false`: existing policies and tenants are
+  unaffected. The shipped `System.Identity.Bootstrap` policies do not opt in.
+- **Blueprint authors:** ship one `DataPolicy` per opted-in type in a policy group of its own (never on shared master-data policies), with
+  `ProtectBlueprintLocked: true`, the actions the roles need and a `PolicyPermission` granted to those roles - a policy with the flag still
+  counts as a normal policy for the grant logic (only the listed roles get access). Raise the blueprint's `ckModelDependencies` floor to
+  `System.Identity-[2.24.0,3.0)` (otherwise an older Identity silently drops the attribute). The policy table is cached per tenant for 60 s.
+- Regression tests: `BlueprintLockProtectionIntegrationTests` (real MongoDB: compiled ownership, fresh install, update re-applies, missing
+  attribute = false, bootstrap policies do not opt in, and an end-to-end check that a policy with the flag makes the engine guard refuse a user
+  write on a locked entity while an unlocked one and the system stay writable).
+- CK dependents: no CK model depends on `System.Identity`; blueprints pin it by open ranges (`[2.11,3.0)` up to `[2.14.0,3.0)`), which 2.24.0 satisfies, so
+  no dependent needs a rebuild. Only a blueprint that uses the flag needs the raised floor.
+
+### Every attribute declares its ownership; the build enforces it (AB#6326)
+
+`Persistence.IdentityCkModel.csproj` sets `OctoEnforceRuntimeStateMarkers=true`: the `CkLintRuntimeStateMarkers` task of
+`Meshmakers.Octo.ConstructionKit.MsBuildTasks` fails the build with `OCTO-CK001` when an attribute in
+`ConstructionKit/attributes/*.yaml` declares neither `ownership` nor the deprecated `isRuntimeState` (`OCTO-CK003` for both,
+`OCTO-CK004` for an unknown value). AB#6326 made the existing behaviour explicit: 151 attributes got `ownership: SeedOwned`
+(a restatement - the same resolved ownership, so `octo-ckc ValidateVersion` reports "no bump required" and System.Identity stays
+2.24.0); the `TenantOwned` / `Secret` decisions of the table above and the four `isRuntimeState: true` URI lists are unchanged.
+Assignment overrides on types (`Client`, `Resource`, `ApiResource`) are not linted; they still win over the definition.
+**Review question for every new attribute:** could an operator or user type this value in the product? Yes → `TenantOwned` (or
+`Secret` for a credential); a service writes it → `RuntimeState`; the product ships and corrects it → `SeedOwned`.
 
 ### Per-User Outbound Channel Preference (AB#5149, binding-specific)
 
@@ -997,8 +1121,9 @@ AB#5061 split the secrets there was nothing to tell apart. `MirrorSecretUsageTel
   reaches the code at all.
 - **Output** — event id `50650`, structured `MirrorSecretKind` / `ClientId` / `TenantId`, rendered as
   `MirrorSecretUsage secretKind=inherited clientId=… tenantId=…`. Inherited use at **Warning**, own
-  use at Information. Loki:
-  `{namespace="octo", container="identity"} |= "MirrorSecretUsage" |= "secretKind=inherited"`.
+  use at Information. Dash0 (dataset = cluster): filters `k8s.container.name is identity`,
+  `otel.log.body contains MirrorSecretUsage`, `otel.log.body contains secretKind=inherited`
+  (`/octo-logs` skill).
 - 🔴 **No secret material is ever logged** — not the credential, not the stored hash, not a prefix.
   Pinned against the **rendered** output via `CapturingLogger<T>`, not against format strings.
 - **Log-only on purpose.** AB#5058's refusal next door persists an audit entry via
@@ -1145,6 +1270,7 @@ Access tokens include `allowed_tenants` claims listing all tenants a user may ac
 
 Key components:
 - **`IAllowedTenantsResolver`** / **`AllowedTenantsResolver`** (`IdentityServerPersistence/Services/`): Resolves allowed tenants at token issuance time: the login tenant, the home tenants a shadow user's `xt_{home}_{name}` chain unwinds to, and every descendant reachable through cross-tenant user mappings (BFS that follows the xt_ chain tier by tier). It does **not** add ancestors by walking the `OctoTenantIdentityProvider` graph (AB#5170): a provider says where a tenant delegates authentication to, not that its users exist up there, and the blanket walk offered a locally created operating-tenant user the management tenant and the platform root — in `allowed_tenants`, the Studio switcher and the email-first tenant discovery — where no account of theirs exists and the switch gate refuses them. Pinned by `tests/IdentityServices.IntegrationTests/Persistence/AllowedTenantsResolverIntegrationTests.cs`
+- **`ITenantRegistry`** / **`TenantRegistry`** (`IdentityServerPersistence/Services/`, AB#6393): cached tenant registry (id → `OctoTenant`, 45 s `IMemoryCache`, one re-read at most every 5 s on an unknown id) that opens tenant repositories without I/O via `ISystemContext.GetRegisteredTenantRepository` — no existence probe, admin session or CK auto-import. Used by `AllowedTenantsResolver` and `CrossTenantAuthenticationService`. 🔴 An id that is not in the registry yields `null` (fail closed); never fall back to `FindTenantRepositoryAsync` for hot paths. The system tenant is not a registry entry and is handled separately.
 - **`OctoTokenClaimsService`** (`IdentityServices/OpenIddict/`): Adds `allowed_tenants` claims to all issued tokens (replaces the former `UserProfileService`)
 - **`TenantAuthorizationMiddleware`** (`octo-common-services`): Validates route tenant against `allowed_tenants` claims; registered after `UseAuthorization()` in all backend services
 
@@ -1191,6 +1317,20 @@ logs instead of denying (transition); default `Enforce`. 🔴 A new controller a
 policies — `IdentityApiAuthorizationPolicyTests.EveryTenantApiEndpoint_RequiresARole_UnlessExplicitlyAllowListed`
 fails otherwise. Full table: `docs/system-api.md` § Authorization Policies.
 
+### Bootstrap blueprint lines and version order (AB#5544, AB#6457)
+
+`System.Identity.Bootstrap` carries two independent lines that each bump exactly once, in a fixed order
+(decision Gerald 2026-10-11): the **Files line** is 1.5.0 (FileManagement/FileViewer roles 660…61/62) and 1.6.0
+(System.Files data permissions/policies 660…52–55, FileManagement for pipeline service accounts); the **SECRET
+line** is **1.7.0** (SecretManagement role 660…60 and its grants) on top of it. There is no 1.4.0. The CK model
+follows the same rule: 2.23.0/2.24.0 belong to the ownership markers (AB#6324/6443/6384), **2.25.0** turns the
+identity-provider `ClientSecret` into the Secret value type (AB#5540). Whoever bumps next re-bumps above the
+published maximum (`octo-ckc -c ValidateVersion` against the catalogs). The upgrade path is pinned by
+`BootstrapUpgradeToSecretLineIntegrationTests` (frozen 1.5.0 / 1.6.0 seed snapshots under
+`tests/IdentityServices.IntegrationTests/BootstrapSnapshots/`): nothing is lost, and from 1.6.0 the delta is exactly the
+SecretManagement role, its TenantOwners edge and the grants to existing administrators. A new bootstrap version
+that changes seeds should add its own snapshot.
+
 ## Configuration
 
 Environment variables are prefixed with `OCTO_`. Key configuration sections:
@@ -1219,6 +1359,12 @@ copies are kept in sync by hand: **if you override `PasswordOptions` here (or bu
 `Require*` / `RequiredLength`), you MUST update that frontend validator and its inline message
 to match** (AB#4503 / Task 4524), otherwise the client-side hint silently diverges from what
 this service actually enforces.
+
+The policy error descriptions come from `IdentityTexts` (`src/IdentityServices.Resources`, English +
+German) in the **server culture**; clients must branch on `IdentityError.Code`, never on the
+description. `tests/IdentityServices.UnitTests/Resources/PasswordPolicyTextsTests.cs` pins that every
+German and English policy text is complete (CK v2 D7, AB#5902: the German `PasswordRequiresDigit` text
+was truncated to "wörter müssen …").
 
 User secrets ID: `173d8e91-b831-4e8a-a43f-672c57e6a4da`
 
@@ -1397,3 +1543,21 @@ After making ANY code changes, you MUST update the relevant documentation:
 | `docs/system-api.md` | API endpoint changes |
 | `docs/configuration.md` | Config option changes |
 | `CLAUDE.md` | Project structure changes |
+
+## File roles, System.Files data policies and machine clients (AB#6180, AB#6467, AB#6457)
+
+Blueprint `System.Identity.Bootstrap` 1.6.0 seeds the roles `FileManagement` / `FileViewer`, the data permissions
+`files.read` / `files.manage` (660…52/53) and the enforcing policies 660…54/55 on `System.Files/FileSystemEntity`
+(FileViewer reads; FileManagement reads and writes; the asset repository carries the same rules as a built-in
+baseline). Details, the one-time `FileRoleGrant` (Reporting roles → File roles) and the recurring
+`PipelineServiceAccountFileRoleGrant` are in `docs/persistence.md`. Rules to remember:
+
+- Pipeline service accounts (`octo-pipeline-sa-*`) always hold `FileManagement`: granted by
+  `CreateIdentityDataCommandRequestConsumer` in the command that creates/touches them (kept by the declarative sync)
+  and caught up at every tenant setup (not run-once, not on the nightly `CacheOnly` update).
+- The prefix octo-pipeline-sa- is a convention, not a security boundary: whoever can create clients and assign roles (tenant administration) can already grant any role.
+- Customer client-credentials clients and octo-cli `LogInClientCredentials` carry no roles: 403 on the Files API
+  until the client is given a File role. Reporting uses in-process system sessions and needs nothing.
+- Tests: `FilesDataPermissionsSeedTests`, `PipelineServiceAccountFileRoleGrant*Tests`,
+  `PipelineServiceAccountFileManagementConsumerIntegrationTests` (own class: the other provisioning tests assert
+  exact role sets).

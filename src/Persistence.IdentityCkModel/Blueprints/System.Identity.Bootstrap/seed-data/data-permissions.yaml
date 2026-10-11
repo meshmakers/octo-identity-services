@@ -9,7 +9,10 @@ entities:
   # --- Data permissions (AB#4974): built-in protection of the identity entities. Seeded in
   # AuditOnly first — flip to Enforce per tenant after the audit events are reviewed (the
   # cross-tenant provisioning UI and similar consumers need the UserManagement role first).
-  # Policies are blueprint-owned: tenant customization = additional policies, never edits here.
+  # Additional policies are the tenant's way to extend the protection. PolicyEnforcementMode and
+  # PolicyScope are TENANT-OWNED since System.Identity 2.23.0 (AB#6324): this seed initialises them on a
+  # fresh tenant, a later blueprint update keeps what the administrator set (Enforce stays Enforce).
+  # A change of these two values here therefore no longer reaches existing policies.
   - rtId: '660000000000000000000050'
     ckTypeId: System.Identity/DataPermission
     rtWellKnownName: IdentityAdministrationPermission
@@ -53,4 +56,69 @@ entities:
     associations:
       - roleId: System.Identity/PolicyPermission
         targetRtId: '660000000000000000000050'
+        targetCkTypeId: System.Identity/DataPermission
+
+  # --- Platform file system (AB#6467, blueprint 1.6.0): the file roles gate System.Files. Read needs
+  # FileViewer or FileManagement (permission files.read, 660…52), write and delete need FileManagement
+  # (files.manage, 660…53). Seeded ENFORCING (PolicyEnforcementMode 0): a file API caller with the API scope
+  # but no file role is refused. The asset repository carries the same rules as a built-in baseline for
+  # tenants that do not have these policies yet; as soon as they exist (or a tenant adds its own policy for a
+  # System.Files type) only the policies decide, so a custom role can be granted files.manage instead of
+  # FileManagement. PolicyEnforcementMode and PolicyScope are tenant-owned (see above). 660…54 / 660…55
+  # are the policies, 660…56 – 660…5F stay free for further data permissions.
+  - rtId: '660000000000000000000052'
+    ckTypeId: System.Identity/DataPermission
+    rtWellKnownName: FilesReadPermission
+    attributes:
+      - id: System.Identity/PermissionId
+        value: files.read
+      - id: System/Description
+        value: Read access to the platform file system (folder roots, folders, files, their content and statistics).
+
+  - rtId: '660000000000000000000053'
+    ckTypeId: System.Identity/DataPermission
+    rtWellKnownName: FilesManagePermission
+    attributes:
+      - id: System.Identity/PermissionId
+        value: files.manage
+      - id: System/Description
+        value: Write and delete access to the platform file system (create folder roots and folders, upload, replace, rename, move, delete).
+
+  - rtId: '660000000000000000000054'
+    ckTypeId: System.Identity/DataPolicy
+    rtWellKnownName: FilesReadPolicy
+    attributes:
+      - id: System.Identity/TargetCkTypeIds
+        value:
+          - System.Files/FileSystemEntity
+      - id: System.Identity/PolicyActions
+        value:
+          - Read
+      - id: System.Identity/PolicyScope
+        value: 0
+      - id: System.Identity/PolicyEnforcementMode
+        value: 0
+    associations:
+      - roleId: System.Identity/PolicyPermission
+        targetRtId: '660000000000000000000052'
+        targetCkTypeId: System.Identity/DataPermission
+
+  - rtId: '660000000000000000000055'
+    ckTypeId: System.Identity/DataPolicy
+    rtWellKnownName: FilesManagePolicy
+    attributes:
+      - id: System.Identity/TargetCkTypeIds
+        value:
+          - System.Files/FileSystemEntity
+      - id: System.Identity/PolicyActions
+        value:
+          - Write
+          - Delete
+      - id: System.Identity/PolicyScope
+        value: 0
+      - id: System.Identity/PolicyEnforcementMode
+        value: 0
+    associations:
+      - roleId: System.Identity/PolicyPermission
+        targetRtId: '660000000000000000000053'
         targetCkTypeId: System.Identity/DataPermission

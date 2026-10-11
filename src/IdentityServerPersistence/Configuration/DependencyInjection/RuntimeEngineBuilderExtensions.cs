@@ -64,6 +64,9 @@ public static class RuntimeEngineBuilderExtensions
             .AddScopedMultipleInterfaces<DefaultConfigurationCreatorService, IDefaultConfigurationCreatorService,
                 IConfigurationService>();
 
+        builder.Services.TryAddSingleton<IdentityServerPersistence.Services.FileRoles.IFilesModelProbe,
+            IdentityServerPersistence.Services.FileRoles.CkCacheFilesModelProbe>();
+
         builder.Services.AddScoped<IOctoClientStore, ClientStore>();
         builder.Services.AddScoped<IOctoResourceStore, ResourceStore>();
         // AB#5193: resource-indicator (RFC 8707) lookup for the OpenIddict server handlers. The
@@ -80,6 +83,11 @@ public static class RuntimeEngineBuilderExtensions
         builder.Services.AddScoped<IClientRoleStore, ClientRoleStore>();
         builder.Services.AddScoped<ICrossTenantAuthenticationService, CrossTenantAuthenticationService>();
         builder.Services.AddScoped<ICrossTenantUserProvisioningService, CrossTenantUserProvisioningService>();
+        // AB#6307: AllowedTenantsResolver caches the tenant registry and mapping lookups process-wide.
+        builder.Services.AddMemoryCache();
+        // AB#6393: the cached tenant registry (id -> registry entry) is shared by AllowedTenantsResolver and
+        // CrossTenantAuthenticationService for lightweight repository access.
+        builder.Services.AddScoped<ITenantRegistry, TenantRegistry>();
         builder.Services.AddScoped<IAllowedTenantsResolver, AllowedTenantsResolver>();
         builder.Services.AddScoped<IEmailDomainGroupRuleStore, EmailDomainGroupRuleStore>();
         builder.Services.AddScoped<ILoginGroupAssignmentService, LoginGroupAssignmentService>();

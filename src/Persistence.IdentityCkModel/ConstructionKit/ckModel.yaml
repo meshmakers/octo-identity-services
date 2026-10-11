@@ -1,4 +1,26 @@
 "$schema": "https://schemas.meshmakers.cloud/construction-kit-meta.schema.json"
+# 2.24.0 (AB#6384) adds the optional Boolean DataPolicy.ProtectBlueprintLocked (default false): the opt-in
+# of the engine write guard that makes blueprint-locked entities read-only for non-system callers. It is
+# SEED-OWNED (the blueprint author decides which types are protected; every blueprint update re-applies it),
+# the opposite of PolicyEnforcementMode / PolicyScope. Additive (rule T1), no migration entry; an engine or
+# tenant without the attribute reads it as false.
+#
+# 2.24.0 also (AB#6443, audit AB#6317 re-scan): ApiResource.Secrets is `ownership: Secret` (assignment
+# override, like Client.Secrets in 2.23.0). The Identity.Bootstrap seed writes it (empty) on the seeded API
+# resources, so it was seed-owned in effect; now a tenant-set introspection secret is kept on a re-apply
+# and left out of an ExportRt. Rated Minor (ownership change); ids, types and defaults unchanged.
+#
+# 2.23.0 (AB#6324, AB#6329; audit AB#6317 findings F2 and F5) makes what a tenant administrator
+# decides in the product tenant-owned, so a blueprint update or re-apply no longer reverts it:
+#   * DataPolicy.PolicyEnforcementMode and PolicyScope: TenantOwned. The seeds ship AuditOnly and an
+#     update silently turned a tenant that had switched to Enforce back to AuditOnly.
+#   * Client: System/Enabled, AllowedGrantTypes, AllowedScopes, AutoProvisionInChildTenants are
+#     TenantOwned assignment overrides; Secrets is `ownership: Secret` (kept, not exported).
+#   * Resource (so ApiResource, ApiScope, IdentityResource): System/Enabled TenantOwned.
+# Attribute ids, types and defaults are unchanged; CkSemVerClassifier rates an ownership change Minor.
+# Consequence for blueprint authors: a seed initialises these values on a new entity but can no
+# longer change them on an existing one - use a CK migration step or a documented manual step.
+#
 # 2.19.0 marks the client URI attributes (ClientUri, RedirectUris,
 # PostLogoutRedirectUris, AllowedCorsOrigins) as isRuntimeState (AB#5210).
 #
@@ -13,11 +35,11 @@
 # CkSemVerClassifier rates an isRuntimeState change Minor (blueprint re-apply
 # behaviour changes), hence the minor bump.
 #
-# 2.23.0 turns the identity-provider ClientSecret (Google, Microsoft, Facebook,
+# 2.25.0 (AB#5540) turns the identity-provider ClientSecret (Google, Microsoft, Facebook,
 # Azure Entra ID) into the Secret value type with Secret ownership (AB#5540,
 # concept AB#5528 in octo-construction-kit-engine). String -> Secret is Minor
 # (CkSemVerClassifier): stored clear-text values stay readable as legacy values
 # until the encrypt sweep has run. Secret requires System >= 2.5 (decision 12).
-modelId: System.Identity-2.23.0
+modelId: System.Identity-2.25.0
 dependencies:
   - System-[2.5,3.0)
