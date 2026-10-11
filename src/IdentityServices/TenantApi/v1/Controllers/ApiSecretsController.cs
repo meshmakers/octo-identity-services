@@ -1,5 +1,7 @@
+using System.Buffers.Text;
 using System.ComponentModel;
 using System.ComponentModel.DataAnnotations;
+using System.Security.Cryptography;
 using Asp.Versioning;
 using IdentityServerPersistence;
 using IdentityServerPersistence.SystemStores;
@@ -145,8 +147,8 @@ public class ApiSecretsController : ControllerBase
     public async Task<IActionResult> PostClient(
         [Required] [Description("ID of client to add secret")]
         string clientId,
-        [Required] [FromBody] [Description("The secret data transfer object instance")]
-        ApiSecretDto secretDto)
+        [Required] [FromBody] [Description("Expiration date and description of the new secret")]
+        CreateApiSecretRequestDto request)
     {
         if (!ModelState.IsValid)
         {
@@ -159,8 +161,7 @@ public class ApiSecretsController : ControllerBase
             return NotFound();
         }
 
-        secretDto.ValueClearText = Guid.NewGuid().ToString();
-        secretDto.ValueEncrypted = OctoSecretHasher.HashSecret(secretDto.ValueClearText);
+        var secretDto = GenerateSecret(request);
 
         RtSecretRecord secret = new();
         ApplyToApiSecret(secret, secretDto);
@@ -186,8 +187,8 @@ public class ApiSecretsController : ControllerBase
     public async Task<IActionResult> PostApiResource(
         [Required] [Description("Name of API resource to add secret")]
         string apiResourceName,
-        [Required] [FromBody] [Description("The secret data transfer object instance")]
-        ApiSecretDto secretDto)
+        [Required] [FromBody] [Description("Expiration date and description of the new secret")]
+        CreateApiSecretRequestDto request)
     {
         if (!ModelState.IsValid)
         {
@@ -200,8 +201,7 @@ public class ApiSecretsController : ControllerBase
             return NotFound();
         }
 
-        secretDto.ValueClearText = Guid.NewGuid().ToString();
-        secretDto.ValueEncrypted = OctoSecretHasher.HashSecret(secretDto.ValueClearText);
+        var secretDto = GenerateSecret(request);
 
         RtSecretRecord secret = new();
         ApplyToApiSecret(secret, secretDto);
@@ -235,6 +235,12 @@ public class ApiSecretsController : ControllerBase
             return BadRequest(ModelState);
         }
 
+        if (string.IsNullOrWhiteSpace(apiSecretDto.ValueEncrypted))
+        {
+            ModelState.AddModelError(nameof(ApiSecretDto.ValueEncrypted), ValueEncryptedRequiredMessage);
+            return BadRequest(ModelState);
+        }
+
         var client = await _octoClientStore.FindRtClientByIdAsync(clientId);
         if (client == null)
         {
@@ -247,8 +253,7 @@ public class ApiSecretsController : ControllerBase
             return NotFound(new NotFoundErrorDto($"Secret with value '{apiSecretDto.ValueEncrypted}' does not exist."));
         }
 
-        var secret = secrets.First();
-        ApplyToApiSecret(secret, apiSecretDto);
+        ReplaceSecret(client.ClientSecrets, secrets.First(), apiSecretDto);
 
         try
         {
@@ -279,6 +284,12 @@ public class ApiSecretsController : ControllerBase
             return BadRequest(ModelState);
         }
 
+        if (string.IsNullOrWhiteSpace(apiSecretDto.ValueEncrypted))
+        {
+            ModelState.AddModelError(nameof(ApiSecretDto.ValueEncrypted), ValueEncryptedRequiredMessage);
+            return BadRequest(ModelState);
+        }
+
         var apiResource = await _octoResourceStore.GetApiResourceByNameAsync(apiResourceName);
         if (apiResource == null)
         {
@@ -291,8 +302,7 @@ public class ApiSecretsController : ControllerBase
             return NotFound(new NotFoundErrorDto($"Secret with value '{apiSecretDto.ValueEncrypted}' does not exist."));
         }
 
-        var secret = secrets.First();
-        ApplyToApiSecret(secret, apiSecretDto);
+        ReplaceSecret(apiResource.ApiSecrets, secrets.First(), apiSecretDto);
 
         try
         {
@@ -400,6 +410,41 @@ public class ApiSecretsController : ControllerBase
         catch (Exception e)
         {
             return BadRequest(new InternalServerErrorDto(e.Message));
+        }
+    }
+
+    private const string ValueEncryptedRequiredMessage =
+        "ValueEncrypted is required to identify the secret to update.";
+
+    /// <summary>
+    ///     Generates a new secret: 32 bytes (256 bit) from the CSPRNG, URL-safe Base64 without padding. The
+    ///     returned DTO carries the clear text (shown once) and the stored hash; nothing of it is logged.
+    /// </summary>
+    private static ApiSecretDto GenerateSecret(CreateApiSecretRequestDto request)
+    {
+        var clearText = Base64Url.EncodeToString(RandomNumberGenerator.GetBytes(32));
+        return new ApiSecretDto
+        {
+            ValueClearText = clearText,
+            ValueEncrypted = OctoSecretHasher.HashSecret(clearText),
+            ExpirationDate = request.ExpirationDate,
+            Description = request.Description
+        };
+    }
+
+    // The records handed out by the secret list are snapshots: changing one in place is not written back
+    // with the entity, so the updated record replaces the old one in the list.
+    private static void ReplaceSecret(IList<RtSecretRecord> secrets, RtSecretRecord existing, ApiSecretDto update)
+    {
+        RtSecretRecord replacement = new();
+        ApplyToApiSecret(replacement, update);
+        for (var i = 0; i < secrets.Count; i++)
+        {
+            if (secrets[i].Value == existing.Value)
+            {
+                secrets[i] = replacement;
+                return;
+            }
         }
     }
 
