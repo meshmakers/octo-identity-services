@@ -58,7 +58,7 @@ resources:
       type: github
       name: meshmakers/octo-pipeline-templates
       endpoint: meshmakers-access-token
-      ref: refs/tags/tpl-v1.3.2
+      ref: refs/tags/tpl-v1.4.0
 
 trigger:
   batch: true
@@ -127,20 +127,27 @@ stages:
           - checkout: self
             clean: true
             submodules: recursive
-          # Redundant-run guard (AB#6344): tags the run with its input fingerprint and, per the pipeline
-          # variable CiGuardMode (default report = tags only, off = disabled, rollback), logs or ends a
-          # main run whose inputs an equal run already built or a newer run supersedes. Steps after it
-          # need ne(variables['CiGuardEnded'], 'true') before skip is switched on (report/off need nothing).
+          # Redundant-run guard (AB#6344, AB#6440): tags the run with its input fingerprint and, per the pipeline
+          # variable CiGuardMode (report = tags only, skip = end cleanly, cancel = cancel the run, off = disabled), logs or
+          # ends a main run whose inputs an equal run already built or a newer run supersedes. In mode skip every step
+          # after it carries ne(variables['CiGuardEnded'], 'true'), the step templates through their condition parameter.
           - template: templates/steps/guard-redundant-run.yml@pipelineTemplates
             parameters:
               parentPipelineId: $(resources.pipeline.octo-common-services.pipelineID)
               parentRunId: $(resources.pipeline.octo-common-services.runID)
           - template: templates/steps/set-version.yml@pipelineTemplates
+            parameters:
+              condition: ne(variables['CiGuardEnded'], 'true')
           - template: templates/steps/download-ca.yml@pipelineTemplates
+            parameters:
+              condition: ne(variables['CiGuardEnded'], 'true')
           # Fresh package list for the private feed only; nuget.org stays cached.
           # Replaces restore --force and noCache (AB#5720).
           - template: templates/steps/purge-private-nuget-http-cache.yml@pipelineTemplates
+            parameters:
+              condition: ne(variables['CiGuardEnded'], 'true')
           - task: DotNetCoreCLI@2
+            condition: and(succeeded(), ne(variables['CiGuardEnded'], 'true'))
             retryCountOnTaskFailure: 2
             displayName: 'Restore NuGet packages'
             inputs:
@@ -148,6 +155,7 @@ stages:
               projects: '$(solutionFile)'
               restoreArguments: '/p:OctoNugetPrivateServer=$(nugetPrivateServer)'
           - task: DotNetCoreCLI@2
+            condition: and(succeeded(), ne(variables['CiGuardEnded'], 'true'))
             retryCountOnTaskFailure: 2
             displayName: 'Build'
             inputs:
@@ -168,7 +176,9 @@ stages:
             displayName: 'Docker diagnostics + Mongo pre-pull'
             env:
               DOCKER_HOST: unix:///var/run/docker.sock
+            condition: and(succeeded(), ne(variables['CiGuardEnded'], 'true'))
           - task: DotNetCoreCLI@2
+            condition: and(succeeded(), ne(variables['CiGuardEnded'], 'true'))
             retryCountOnTaskFailure: 2
             displayName: 'Test'
             # AB#5160:
@@ -194,6 +204,7 @@ stages:
             parameters:
               constructionKitPaths:
                 - 'src/Persistence.IdentityCkModel/ConstructionKit'
+              condition: ne(variables['CiGuardEnded'], 'true')
           # Multi-arch image (AB#4451): arm64 for Apple-Silicon kind clusters and
           # edge devices, amd64 for the managed clusters.
           - template: templates/steps/build-and-push-docker.yml@pipelineTemplates
@@ -215,7 +226,9 @@ stages:
               # stamped by set-version.yml.
               extraBuildArgs: >-
                 --build-arg OCTO_SERVICE_VERSION="$(Build.BuildNumber)"
+              condition: ne(variables['CiGuardEnded'], 'true')
           - template: templates/steps/handle-artifacts.yml@pipelineTemplates
             parameters:
               constructionKitLibraryPaths:
                 - 'src/Persistence.IdentityCkModel/bin/$(buildConfiguration)/$(artifactsFrameworkVersion)/octo-ck-libraries/Persistence.IdentityCkModel'
+              condition: ne(variables['CiGuardEnded'], 'true')
