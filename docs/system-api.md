@@ -249,19 +249,34 @@ Transfers all external logins (e.g., Google, Microsoft) from the source user to 
 | PUT | `/apiSecrets/apiResource/{name}` | ReadWrite | Update resource secret |
 | DELETE | `/apiSecrets/apiResource/{name}/{secretValue}` | ReadWrite | Delete secret |
 
-**Request/Response DTO:**
+**Create (POST)** — the server generates the secret; the request carries only the metadata (AB#6258):
 
 ```typescript
-// ApiSecretDto
+// request body (CreateApiSecretRequestDto)
 {
-  "valueEncrypted": "string",   // SHA256 hash
-  "valueClearText": "string",   // Only in creation response
+  "expirationDate": "2025-12-31T00:00:00Z",   // optional
+  "description": "string"                      // optional
+}
+```
+
+Any other field in the body (for example the `valueEncrypted` / `valueClearText` the shipped octo-cli
+serialises from `ApiSecretDto`) is ignored: it is never stored and never echoed.
+
+**Response / list / update (`ApiSecretDto`):**
+
+```typescript
+{
+  "valueEncrypted": "string",   // Base64(SHA-256) of the secret; identifies the secret for PUT/DELETE
+  "valueClearText": "string",   // Only in the creation response
   "expirationDate": "2025-12-31T00:00:00Z",
   "description": "string"
 }
 ```
 
-**Note:** Secret values are auto-generated GUIDs. The clear text is returned only once during creation.
+**Note:** Secrets are 256 bit from the CSPRNG (32 random bytes, URL-safe Base64 without padding, 43
+characters) and stored as Base64(SHA-256); stored SHA-256 and SHA-512 hashes keep validating. The clear text
+is returned only once, in the creation response; neither it nor a hash is logged. PUT requires
+`valueEncrypted` of an existing secret (400 when missing, 404 when no such secret exists).
 
 ### Identity Providers (`/{tenantId}/v1/identityProviders`)
 
