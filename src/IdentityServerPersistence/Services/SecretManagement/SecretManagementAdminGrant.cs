@@ -131,6 +131,14 @@ internal static class SecretManagementAdminGrant
             {
                 var opResult = new OperationResult();
                 await tenantRepository.ApplyChangesAsync(writeSession, updates, opResult);
+                if (opResult.HasErrors || opResult.HasFatalErrors)
+                {
+                    // Throw before the commit and before the run-once marker: the caller logs it and the
+                    // next tenant setup retries (the marker would otherwise claim a grant that failed).
+                    throw new InvalidOperationException(
+                        $"Failed to grant {CommonConstants.SecretManagementRole} to the existing administrators of " +
+                        $"tenant '{tenantContext.TenantId}': {string.Join("; ", opResult.GetMessages())}");
+                }
             }
 
             await writeSession.CommitTransactionAsync();

@@ -238,6 +238,28 @@ public class UserManagementServiceTests
     }
 
     [Fact]
+    public async Task CreateAdminUserAsync_WhenSecretManagementRoleIsMissing_StillGrantsTheOtherRoles()
+    {
+        // AB#5544: a tenant seeded by a bootstrap blueprint older than 1.7.0 has no SecretManagement role; the
+        // first administrator must still get every other role (the one-time grant adds it later).
+        var dto = new AdminUserDto { EMail = "admin@test.com", Password = "SecurePass123!" };
+        _userManager.Users.Returns(Enumerable.Empty<RtUser>().AsQueryable());
+        _credentialGenerator.CheckPassword(dto.Password).Returns(true);
+        _userManager.FindByNameAsync(dto.EMail).Returns((RtUser?)null);
+        _userManager.CreateAsync(Arg.Any<RtUser>(), dto.Password)
+            .Returns(IdentityResult.Success);
+        SetupAllRequiredRoles();
+        _roleManager.FindByNameAsync(CommonConstants.SecretManagementRole).Returns((RtRole?)null);
+        _userManager.AddToRoleAsync(Arg.Any<RtUser>(), Arg.Any<string>())
+            .Returns(IdentityResult.Success);
+
+        await _sut.CreateAdminUserAsync(dto);
+
+        await _userManager.Received(12).AddToRoleAsync(Arg.Any<RtUser>(), Arg.Any<string>());
+        await _userManager.DidNotReceive().AddToRoleAsync(Arg.Any<RtUser>(), CommonConstants.SecretManagementRole);
+    }
+
+    [Fact]
     public async Task CreateAdminUserAsync_WhenRoleNotFound_ThrowsUserManagementException()
     {
         // Arrange
