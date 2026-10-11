@@ -1541,6 +1541,7 @@ baseline). Details, the one-time `FileRoleGrant` (Reporting roles → File roles
 - Pipeline service accounts (`octo-pipeline-sa-*`) always hold `FileManagement`: granted by
   `CreateIdentityDataCommandRequestConsumer` in the command that creates/touches them (kept by the declarative sync)
   and caught up at every tenant setup (not run-once, not on the nightly `CacheOnly` update).
+- The prefix octo-pipeline-sa- is a convention, not a security boundary: whoever can create clients and assign roles (tenant administration) can already grant any role.
 - Customer client-credentials clients and octo-cli `LogInClientCredentials` carry no roles: 403 on the Files API
   until the client is given a File role. Reporting uses in-process system sessions and needs nothing.
 - Tests: `FilesDataPermissionsSeedTests`, `PipelineServiceAccountFileRoleGrant*Tests`,

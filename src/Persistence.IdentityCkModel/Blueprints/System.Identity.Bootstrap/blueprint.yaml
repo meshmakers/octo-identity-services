@@ -16,6 +16,7 @@ description: |
   existing tenants receive them enforcing on the re-import this version bump triggers. This is the Files
   line (1.5.0, on main, plus these seeds); the SECRET line (SecretManagement role 660…60, formerly planned
   as 1.4.0, AB#5544) follows as 1.7.0. There is no 1.4.0.
+  The prefix octo-pipeline-sa- is a convention, not a security boundary: whoever can create clients and assign roles (tenant administration) can already grant any role.
 
   1.5.0 (AB#6180, epic AB#6171): adds the tenant roles `FileManagement` (660…61)
   and `FileViewer` (660…62) for the platform file system (System/FileSystemItem,

@@ -564,7 +564,7 @@ through the controller's default roles:
   (`POST api/Clients`, tenant-administration write policy, accepts any free id): such a client is treated as a
   pipeline service account and receives FileManagement at the next tenant setup or identity-data command. Only tenant
   administrators can create clients, and they can assign FileManagement anyway, but do not use the prefix for other
-  clients.
+  clients. The prefix octo-pipeline-sa- is a convention, not a security boundary: whoever can create clients and assign roles (tenant administration) can already grant any role.
 - **Concurrency:** the setup pass and the consumer take a per-tenant in-process lock (`PipelineServiceAccountFileRoleLock`)
   and re-read the edges before inserting, because the engine does not reject a second identical `AssignedRole` edge.
   Two identity replicas starting at the same instant can still duplicate the edge; role reads treat the edges as a set
