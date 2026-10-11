@@ -517,7 +517,7 @@ APIs switch from the Reporting roles to the File roles:
 
 Roles alone do not protect anything on the server: the engine treats a CK type that no data policy targets as
 unrestricted, so before 1.6.0 every caller with the API scope could write through the Files API. Blueprint
-`System.Identity.Bootstrap` 1.6.0 (the joint bump with the SECRET line, AB#6457) seeds, in
+`System.Identity.Bootstrap` 1.6.0 (the Files line, AB#6457; the SECRET line follows as 1.7.0) seeds, in
 `seed-data/data-permissions.yaml` and `seed-data/roles.yaml`:
 
 | Seed | rtId | Content |
@@ -560,6 +560,15 @@ through the controller's default roles:
 - **Covered when?** Exactly in the identity-data command that creates or touches the account (seconds after the
   controller provisions it); accounts that existed before 1.6.0 at the first identity start with this version; the
   worst case (role seed pending at creation) at the next identity start or full tenant update.
+- **The prefix is not reserved.** Nothing in the identity API rejects a client id starting with `octo-pipeline-sa-`
+  (`POST api/Clients`, tenant-administration write policy, accepts any free id): such a client is treated as a
+  pipeline service account and receives FileManagement at the next tenant setup or identity-data command. Only tenant
+  administrators can create clients, and they can assign FileManagement anyway, but do not use the prefix for other
+  clients.
+- **Concurrency:** the setup pass and the consumer take a per-tenant in-process lock (`PipelineServiceAccountFileRoleLock`)
+  and re-read the edges before inserting, because the engine does not reject a second identical `AssignedRole` edge.
+  Two identity replicas starting at the same instant can still duplicate the edge; role reads treat the edges as a set
+  and the next run finds the account covered.
 - **Detection:** `PipelineServiceAccountFileRoleGrant.FindAccountsWithoutRoleAsync` names the accounts without the
   role (read-only).
 

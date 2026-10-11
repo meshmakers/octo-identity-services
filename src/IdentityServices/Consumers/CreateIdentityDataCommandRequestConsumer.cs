@@ -1,4 +1,5 @@
 using IdentityServerPersistence.Services;
+using IdentityServerPersistence.Services.FileRoles;
 using Duende.IdentityModel;
 using Meshmakers.Octo.Backend.IdentityServices.OpenIddict;
 using IdentityServerPersistence;
@@ -381,6 +382,20 @@ public class CreateIdentityDataCommandRequestConsumer(
     ///     </para>
     /// </summary>
     private async Task EnsureAssignedRolesAsync(IOctoSession session, ITenantRepository tenantRepository,
+        OctoObjectId clientRtId, DistClientDto distClientDto)
+    {
+        if (!distClientDto.ClientId.StartsWith(PipelineServiceAccountClientIdPrefix, StringComparison.Ordinal))
+        {
+            await EnsureAssignedRolesCoreAsync(session, tenantRepository, clientRtId, distClientDto);
+            return;
+        }
+
+        // The tenant-setup grant writes the same FileManagement edge: serialise (a second identical edge is not rejected).
+        using var _ = await PipelineServiceAccountFileRoleLock.AcquireAsync(tenantRepository.TenantId);
+        await EnsureAssignedRolesCoreAsync(session, tenantRepository, clientRtId, distClientDto);
+    }
+
+    private async Task EnsureAssignedRolesCoreAsync(IOctoSession session, ITenantRepository tenantRepository,
         OctoObjectId clientRtId, DistClientDto distClientDto)
     {
         var isPipelineServiceAccount = distClientDto.ClientId.StartsWith(PipelineServiceAccountClientIdPrefix,

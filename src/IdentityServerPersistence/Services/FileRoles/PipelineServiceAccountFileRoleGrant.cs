@@ -83,6 +83,7 @@ internal static class PipelineServiceAccountFileRoleGrant
             return new(PipelineServiceAccountFileRoleGrantStatus.SkippedNoFilesModel, [], []);
         }
 
+        using var _ = await PipelineServiceAccountFileRoleLock.AcquireAsync(tenantContext.TenantId);
         var tenantRepository = tenantContext.GetTenantRepositoryAsAdmin();
         using var session = await tenantRepository.GetSessionAsync();
 
@@ -96,6 +97,9 @@ internal static class PipelineServiceAccountFileRoleGrant
             return new(PipelineServiceAccountFileRoleGrantStatus.RoleMissing, [], []);
         }
 
+        // TODO(AB#6457): one association query per pipeline account at every tenant setup (N+1). Fine for the
+        // handful of accounts per tenant (one per adapter); batch it (GetRtAssociationsAsync takes many origins) if a
+        // tenant ever has hundreds.
         var roleCkTypeId = RtEntityExtensions.GetRtCkTypeId<RtRole>();
         var clients = new Dictionary<string, (string ClientId, IReadOnlySet<string> RoleIds)>(StringComparer.Ordinal);
         var allClients = await tenantRepository.GetRtEntitiesByTypeAsync<RtClient>(session, RtEntityQueryOptions.Create());

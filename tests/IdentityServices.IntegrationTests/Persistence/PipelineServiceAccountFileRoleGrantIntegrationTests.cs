@@ -116,6 +116,38 @@ public class PipelineServiceAccountFileRoleGrantIntegrationTests : IClassFixture
         (await HasRoleAsync(repo, account)).Should().BeFalse("no System.Files in this tenant's CK cache");
     }
 
+    [Fact]
+    public async Task ConcurrentGrants_NeverLeaveADuplicateEdge()
+    {
+        // The setup pass and the identity-data consumer can reach the same account at the same moment.
+        var (tenantContext, repo) = await CreateTenantAsync();
+        await InsertRoleAsync(repo);
+        var accounts = new List<OctoObjectId>();
+        for (var i = 0; i < 6; i++)
+        {
+            accounts.Add(await InsertClientAsync(repo, "octo-pipeline-sa-"));
+        }
+
+        var runs = Enumerable.Range(0, 6).Select(_ => Task.Run(async () =>
+        {
+            try
+            {
+                await PipelineServiceAccountFileRoleGrant.EnsureAsync(tenantContext, () => true, NullLogger.Instance);
+            }
+            catch (Exception)
+            {
+                // a lost race may surface as a write conflict; the next run must still converge
+            }
+        })).ToArray();
+        await Task.WhenAll(runs);
+        await PipelineServiceAccountFileRoleGrant.EnsureAsync(tenantContext, () => true, NullLogger.Instance);
+
+        foreach (var account in accounts)
+        {
+            (await CountRoleEdgesAsync(repo, account)).Should().Be(1, "exactly one edge per account after concurrent runs");
+        }
+    }
+
     // ---------- helpers ----------
 
     private async Task<(ITenantContext TenantContext, ITenantRepository Repo)> CreateTenantAsync()
