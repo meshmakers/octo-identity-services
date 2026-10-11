@@ -2,7 +2,9 @@ $schema: https://schemas.meshmakers.cloud/runtime-model.schema.json
 dependencies:
   - System.Identity-2.14.0
 
-# The TenantOwners group (660…40) with every built-in role assigned.
+# The TenantOwners group (660…40) with every built-in role assigned EXCEPT SecretManagement (660…60):
+# that role is for human administrators only (it is granted per user, see blueprint.yaml 1.7.0), and
+# TenantOwners also holds clients and provisioned parent-tenant administrators, who would inherit it.
 # Part of the System.Identity.Bootstrap blueprint — see blueprint.yaml for the full file list.
 entities:
 
@@ -64,9 +66,6 @@ entities:
         targetCkTypeId: System.Identity/Role
       - roleId: System.Identity/AssignedRole
         targetRtId: '66000000000000000000000E'
-        targetCkTypeId: System.Identity/Role
-      - roleId: System.Identity/AssignedRole
-        targetRtId: '660000000000000000000060'
         targetCkTypeId: System.Identity/Role
       - roleId: System.Identity/AssignedRole
         targetRtId: '660000000000000000000061'

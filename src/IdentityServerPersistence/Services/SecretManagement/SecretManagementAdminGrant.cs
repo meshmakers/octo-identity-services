@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using Meshmakers.Octo.Communication.Contracts;
 using Meshmakers.Octo.ConstructionKit.Contracts;
 using Meshmakers.Octo.Runtime.Contracts;
@@ -20,8 +21,6 @@ public sealed class SecretManagementAdminGrantMarker
 {
     public DateTime CompletedAtUtc { get; set; }
 
-    public List<string> GrantedGroupIds { get; set; } = [];
-
     public List<string> GrantedUserIds { get; set; } = [];
 }
 
@@ -40,13 +39,12 @@ internal enum SecretManagementAdminGrantStatus
 
 internal sealed record SecretManagementAdminGrantResult(
     SecretManagementAdminGrantStatus Status,
-    IReadOnlyList<string> GrantedGroupIds,
     IReadOnlyList<string> GrantedUserIds);
 
 /// <summary>
-///     AB#5544: one-time, additive grant of the <c>SecretManagement</c> role to the existing administrators of a
-///     tenant — every group and user that holds both <c>AdminPanelManagement</c> and <c>TenantManagement</c>,
-///     plus the <c>TenantOwners</c> group. See <see cref="SecretManagementGrantPlanner"/> for the rule.
+///     AB#5544: one-time, additive grant of the <c>SecretManagement</c> role to the existing HUMAN administrators
+///     of a tenant — every local user that holds both <c>AdminPanelManagement</c> and <c>TenantManagement</c>.
+///     No group, client or cross-tenant shadow user receives it. See <see cref="SecretManagementGrantPlanner"/>.
 /// </summary>
 /// <remarks>
 ///     <para>
@@ -65,10 +63,28 @@ internal sealed record SecretManagementAdminGrantResult(
 /// </remarks>
 internal static class SecretManagementAdminGrant
 {
-    /// <summary>Stable rtId of the blueprint-seeded TenantOwners group.</summary>
-    internal static readonly OctoObjectId TenantOwnersGroupRtId = new("660000000000000000000040");
+    private static readonly ConcurrentDictionary<string, SemaphoreSlim> Locks = new(StringComparer.Ordinal);
 
     public static async Task<SecretManagementAdminGrantResult> EnsureAsync(
+        ITenantContext tenantContext, ILogger logger)
+    {
+        // Serialises the runs inside this process (setup, tenant update and retry can reach the same tenant at
+        // the same moment). Several identity replicas starting at once can still race: the engine does not
+        // reject a second identical AssignedRole edge, so each write re-reads the user's edges first, and a
+        // duplicate that slips through is harmless (role reads treat the edges as a set).
+        var gate = Locks.GetOrAdd(tenantContext.TenantId, _ => new SemaphoreSlim(1, 1));
+        await gate.WaitAsync().ConfigureAwait(false);
+        try
+        {
+            return await EnsureCoreAsync(tenantContext, logger).ConfigureAwait(false);
+        }
+        finally
+        {
+            gate.Release();
+        }
+    }
+
+    private static async Task<SecretManagementAdminGrantResult> EnsureCoreAsync(
         ITenantContext tenantContext, ILogger logger)
     {
         using (var readSession = await tenantContext.GetAdminSessionAsync())
@@ -77,7 +93,7 @@ internal static class SecretManagementAdminGrant
                 readSession, IdentityServiceConstants.SecretManagementAdminGrantKey, defaultValue: null);
             if (marker != null)
             {
-                return new SecretManagementAdminGrantResult(SecretManagementAdminGrantStatus.AlreadyDone, [], []);
+                return new SecretManagementAdminGrantResult(SecretManagementAdminGrantStatus.AlreadyDone, []);
             }
         }
 
@@ -98,7 +114,7 @@ internal static class SecretManagementAdminGrant
                     "SecretManagement role not found in tenant '{TenantId}'; the one-time administrator grant " +
                     "is retried on the next tenant setup",
                     tenantContext.TenantId);
-                return new SecretManagementAdminGrantResult(SecretManagementAdminGrantStatus.RoleMissing, [], []);
+                return new SecretManagementAdminGrantResult(SecretManagementAdminGrantStatus.RoleMissing, []);
             }
 
             // A tenant without one of the admin roles can still have TenantOwners; an unknown role id simply
@@ -114,19 +130,28 @@ internal static class SecretManagementAdminGrant
             await session.CommitTransactionAsync();
 
             plan = SecretManagementGrantPlanner.Plan(
-                input, adminPanelRoleId, tenantManagementRoleId, secretManagementRoleId.ToString(),
-                TenantOwnersGroupRtId.ToString());
+                input, adminPanelRoleId, tenantManagementRoleId, secretManagementRoleId.ToString());
 
             using var writeSession = await tenantRepository.GetSessionAsync();
             writeSession.StartTransaction();
             var roleEntityId = new RtEntityId(RtEntityExtensions.GetRtCkTypeId<RtRole>(), secretManagementRoleId);
             var updates = new List<AssociationUpdateInfo>();
-            updates.AddRange(plan.GroupIds.Select(g => AssociationUpdateInfo.CreateInsert(
-                new RtEntityId(RtEntityExtensions.GetRtCkTypeId<RtGroup>(), new OctoObjectId(g)),
-                roleEntityId, IdentityAssociationConstants.AssignedRoleId)));
-            updates.AddRange(plan.UserIds.Select(u => AssociationUpdateInfo.CreateInsert(
-                new RtEntityId(RtEntityExtensions.GetRtCkTypeId<RtUser>(), new OctoObjectId(u)),
-                roleEntityId, IdentityAssociationConstants.AssignedRoleId)));
+            foreach (var userId in plan.UserIds)
+            {
+                var userEntityId = new RtEntityId(RtEntityExtensions.GetRtCkTypeId<RtUser>(), new OctoObjectId(userId));
+                // Re-read right before the insert: another replica may have written the edge since the plan.
+                var existing = await tenantRepository.GetRtAssociationsAsync(writeSession, userEntityId,
+                    RtAssociationExtendedQueryOptions.Create(GraphDirections.Outbound,
+                        roleId: IdentityAssociationConstants.AssignedRoleId));
+                if (existing.Items.Any(e => e.TargetRtId == secretManagementRoleId))
+                {
+                    continue;
+                }
+
+                updates.Add(AssociationUpdateInfo.CreateInsert(
+                    userEntityId, roleEntityId, IdentityAssociationConstants.AssignedRoleId));
+            }
+
             if (updates.Count > 0)
             {
                 var opResult = new OperationResult();
@@ -152,19 +177,17 @@ internal static class SecretManagementAdminGrant
                 new SecretManagementAdminGrantMarker
                 {
                     CompletedAtUtc = DateTime.UtcNow,
-                    GrantedGroupIds = plan.GroupIds.ToList(),
                     GrantedUserIds = plan.UserIds.ToList()
                 });
         }
 
         logger.LogInformation(
-            "SecretManagement granted to existing administrators of tenant '{TenantId}': {GroupCount} groups " +
-            "({GroupIds}), {UserCount} users ({UserIds}); recorded as done",
-            tenantContext.TenantId, plan.GroupIds.Count, string.Join(", ", plan.GroupIds),
-            plan.UserIds.Count, string.Join(", ", plan.UserIds));
+            "SecretManagement granted to existing human administrators of tenant '{TenantId}': {UserCount} users " +
+            "({UserIds}); recorded as done",
+            tenantContext.TenantId, plan.UserIds.Count, string.Join(", ", plan.UserIds));
 
         return new SecretManagementAdminGrantResult(
-            SecretManagementAdminGrantStatus.Completed, plan.GroupIds, plan.UserIds);
+            SecretManagementAdminGrantStatus.Completed, plan.UserIds);
     }
 
     private static async Task<SecretManagementGrantInput> ReadRoleGraphAsync(
@@ -175,9 +198,16 @@ internal static class SecretManagementAdminGrant
         var roleCkTypeId = RtEntityExtensions.GetRtCkTypeId<RtRole>();
 
         var userRoles = new Dictionary<string, IReadOnlySet<string>>(StringComparer.Ordinal);
+        var excludedUsers = new HashSet<string>(StringComparer.Ordinal);
         var users = await tenantRepository.GetRtEntitiesByTypeAsync<RtUser>(session, RtEntityQueryOptions.Create());
         foreach (var user in users.Items)
         {
+            if (CrossTenantShadowUserName.IsShadowUserName(user.UserName))
+            {
+                // Provisioned parent-tenant administrator (AB#5708): not a local human administrator.
+                excludedUsers.Add(user.RtId.ToString());
+            }
+
             userRoles[user.RtId.ToString()] =
                 await ReadTargetsAsync(user.ToRtEntityId(), IdentityAssociationConstants.AssignedRoleId, roleCkTypeId);
         }
@@ -195,7 +225,7 @@ internal static class SecretManagementAdminGrant
             groupMembers[id] = await ReadTargetsAsync(entityId, IdentityAssociationConstants.GroupMemberId, userCkTypeId);
         }
 
-        return new SecretManagementGrantInput(userRoles, groupRoles, groupChildren, groupMembers);
+        return new SecretManagementGrantInput(userRoles, groupRoles, groupChildren, groupMembers, excludedUsers);
 
         async Task<IReadOnlySet<string>> ReadTargetsAsync(
             RtEntityId origin, RtCkId<CkAssociationRoleId> associationRoleId, RtCkId<CkTypeId> targetCkTypeId)

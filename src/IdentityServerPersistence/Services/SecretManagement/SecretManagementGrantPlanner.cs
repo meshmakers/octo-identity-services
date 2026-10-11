@@ -8,33 +8,39 @@ namespace IdentityServerPersistence.Services.SecretManagement;
 /// <param name="GroupRoleIds">Group rtId → role rtIds assigned directly to the group.</param>
 /// <param name="GroupChildGroupIds">Group rtId → child group rtIds (outbound <c>ChildGroup</c>).</param>
 /// <param name="GroupMemberUserIds">Group rtId → user rtIds that are direct members (outbound <c>GroupMember</c> to a user).</param>
+/// <param name="ExcludedUserIds">
+///     User rtIds that are never granted: cross-tenant shadow users (<c>xt_…</c>, provisioned parent-tenant
+///     administrators, AB#5708). Optional; empty when omitted.
+/// </param>
 internal sealed record SecretManagementGrantInput(
     IReadOnlyDictionary<string, IReadOnlySet<string>> UserRoleIds,
     IReadOnlyDictionary<string, IReadOnlySet<string>> GroupRoleIds,
     IReadOnlyDictionary<string, IReadOnlySet<string>> GroupChildGroupIds,
-    IReadOnlyDictionary<string, IReadOnlySet<string>> GroupMemberUserIds);
+    IReadOnlyDictionary<string, IReadOnlySet<string>> GroupMemberUserIds,
+    IReadOnlySet<string>? ExcludedUserIds = null);
 
-/// <summary>Grants the planner decided on. Never contains a subject that already holds the role.</summary>
-internal sealed record SecretManagementGrantPlan(
-    IReadOnlyList<string> GroupIds,
-    IReadOnlyList<string> UserIds);
+/// <summary>Users the planner decided on. Never contains a user that already holds the role.</summary>
+internal sealed record SecretManagementGrantPlan(IReadOnlyList<string> UserIds);
 
 /// <summary>
-///     AB#5544: decides which existing groups and users receive the <c>SecretManagement</c> role. Pure
-///     function — no I/O — so the rule is unit-testable without a database.
+///     AB#5544: decides which existing users receive the <c>SecretManagement</c> role. Pure function — no
+///     I/O — so the rule is unit-testable without a database.
 /// </summary>
 /// <remarks>
 ///     <para>
-///         Rule (PO decision): a subject that holds BOTH <c>AdminPanelManagement</c> and
-///         <c>TenantManagement</c> gets <c>SecretManagement</c>, and so does the <c>TenantOwners</c>
-///         group. Holding only <c>AdminPanelManagement</c> is not enough — secret sweeps stay a separate
-///         privilege. Nothing is ever removed.
+///         Rule (decision Gerald 2026-10-11): SecretManagement goes to <b>human administrators only</b>. A
+///         local user that holds BOTH <c>AdminPanelManagement</c> and <c>TenantManagement</c> — direct, via
+///         groups (including <c>TenantOwners</c>) or mixed — gets a <b>direct</b> edge. Holding only
+///         <c>AdminPanelManagement</c> is not enough — secret sweeps stay a separate privilege. Nothing is
+///         ever removed.
 ///     </para>
 ///     <para>
-///         Where the grant lands: a group whose effective roles contain both roles gets the role itself, so
-///         its members receive it through the same group the admin roles come from. A user who holds both
-///         roles but does not end up with <c>SecretManagement</c> through such a group (both roles direct,
-///         or one direct and one from a group, or from two different groups) gets it directly.
+///         Why no group grant: a role on a group is inherited by every member of it, and group members are
+///         not only users — clients (service accounts, e.g. <c>octo-pipeline-sa-*</c>) and external tenant
+///         user mappings (provisioned parent-tenant administrators, AB#5708, who sit in <c>TenantOwners</c>)
+///         inherit the same way (<c>GroupRoleResolver</c>). Subjects of the plan are therefore only
+///         <c>RtUser</c> entities, and cross-tenant shadow users (<c>xt_</c> prefix, reserved) are
+///         excluded. Clients and mappings are never users, so they are never subjects.
 ///     </para>
 ///     <para>
 ///         Group semantics mirror <c>GroupRoleResolver</c>: the effective roles of a group are its own
@@ -51,8 +57,7 @@ internal static class SecretManagementGrantPlanner
         SecretManagementGrantInput input,
         string adminPanelManagementRoleId,
         string tenantManagementRoleId,
-        string secretManagementRoleId,
-        string? tenantOwnersGroupId)
+        string secretManagementRoleId)
     {
         var groupIds = input.GroupRoleIds.Keys
             .Concat(input.GroupChildGroupIds.Keys)
@@ -65,89 +70,31 @@ internal static class SecretManagementGrantPlanner
             g => EffectiveGroupRoles(input, g),
             StringComparer.Ordinal);
 
-        bool QualifiesForGrant(IReadOnlySet<string> roles) =>
-            roles.Contains(adminPanelManagementRoleId) && roles.Contains(tenantManagementRoleId);
-
-        // 1. Groups. TenantOwners always gets a direct edge (it mirrors the blueprint seed), unless it holds
-        //    the role directly already. Any other group qualifies when its effective roles hold both admin
-        //    roles; candidates are processed leaves first and a group is skipped when a descendant already
-        //    received the grant — the admin roles come from that descendant, so the grant belongs there.
-        var grantedGroups = new HashSet<string>(StringComparer.Ordinal);
-        if (tenantOwnersGroupId != null
-            && groupIds.Contains(tenantOwnersGroupId, StringComparer.Ordinal)
-            && !(input.GroupRoleIds.TryGetValue(tenantOwnersGroupId, out var ownersRoles)
-                 && ownersRoles.Contains(secretManagementRoleId)))
+        var grantedUsers = new List<string>();
+        foreach (var (userId, directRoles) in input.UserRoleIds.OrderBy(u => u.Key, StringComparer.Ordinal))
         {
-            grantedGroups.Add(tenantOwnersGroupId);
-        }
-
-        var candidates = groupIds
-            .Where(g => !string.Equals(g, tenantOwnersGroupId, StringComparison.Ordinal))
-            .Where(g => QualifiesForGrant(effectiveGroupRoles[g]))
-            .Where(g => !effectiveGroupRoles[g].Contains(secretManagementRoleId))
-            .OrderBy(g => Height(input, g, new HashSet<string>(StringComparer.Ordinal), 0))
-            .ThenBy(g => g, StringComparer.Ordinal);
-        foreach (var groupId in candidates)
-        {
-            if (DescendantGranted(input, groupId, grantedGroups))
+            if (input.ExcludedUserIds?.Contains(userId) == true)
             {
                 continue;
             }
 
-            grantedGroups.Add(groupId);
-        }
-
-        // 2. Users: effective roles AFTER the group grants above; grant directly only where still missing.
-        var grantedUsers = new List<string>();
-        foreach (var (userId, directRoles) in input.UserRoleIds.OrderBy(u => u.Key, StringComparer.Ordinal))
-        {
             var roles = new HashSet<string>(directRoles, StringComparer.Ordinal);
             foreach (var (groupId, members) in input.GroupMemberUserIds)
             {
-                if (!members.Contains(userId))
+                if (members.Contains(userId))
                 {
-                    continue;
-                }
-
-                roles.UnionWith(effectiveGroupRoles[groupId]);
-                if (GrantReaches(input, groupId, grantedGroups))
-                {
-                    roles.Add(secretManagementRoleId);
+                    roles.UnionWith(effectiveGroupRoles[groupId]);
                 }
             }
 
-            if (QualifiesForGrant(roles) && !roles.Contains(secretManagementRoleId))
+            if (roles.Contains(adminPanelManagementRoleId) && roles.Contains(tenantManagementRoleId)
+                && !roles.Contains(secretManagementRoleId))
             {
                 grantedUsers.Add(userId);
             }
         }
 
-        return new SecretManagementGrantPlan(
-            grantedGroups.OrderBy(g => g, StringComparer.Ordinal).ToList(),
-            grantedUsers);
-    }
-
-    private static int Height(SecretManagementGrantInput input, string groupId, HashSet<string> visited, int depth)
-    {
-        if (depth >= MaxDepth || !visited.Add(groupId)
-            || !input.GroupChildGroupIds.TryGetValue(groupId, out var children) || children.Count == 0)
-        {
-            return 0;
-        }
-
-        return 1 + children.Max(c => Height(input, c, new HashSet<string>(visited, StringComparer.Ordinal), depth + 1));
-    }
-
-    /// <summary>True when a (transitive) child group of <paramref name="groupId"/>, not the group itself, is granted.</summary>
-    private static bool DescendantGranted(SecretManagementGrantInput input, string groupId, HashSet<string> grantedGroups)
-    {
-        if (!input.GroupChildGroupIds.TryGetValue(groupId, out var children))
-        {
-            return false;
-        }
-
-        var visited = new HashSet<string>(StringComparer.Ordinal) { groupId };
-        return children.Any(c => Walk(input, c, visited, 1, grantedGroups.Contains));
+        return new SecretManagementGrantPlan(grantedUsers);
     }
 
     private static HashSet<string> EffectiveGroupRoles(SecretManagementGrantInput input, string groupId)
@@ -164,12 +111,6 @@ internal static class SecretManagementGrantPlanner
                 return false;
             });
         return roles;
-    }
-
-    /// <summary>True when <paramref name="groupId"/> or one of its (transitive) child groups is granted.</summary>
-    private static bool GrantReaches(SecretManagementGrantInput input, string groupId, HashSet<string> grantedGroups)
-    {
-        return Walk(input, groupId, new HashSet<string>(StringComparer.Ordinal), 0, grantedGroups.Contains);
     }
 
     /// <summary>Depth-first over ChildGroup edges; stops early when <paramref name="visit"/> returns true.</summary>

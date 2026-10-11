@@ -11,13 +11,15 @@ description: |
   1.7.0 (AB#5544): adds the tenant role `SecretManagement` (660…60) — may trigger
   secret sweeps and delete a pre-sweep dump early (bot services secrets admin API,
   SECRET attribute value type AB#5528). The 660…01–0E role block is full, so
-  roles added later continue at 660…60. TenantOwners (660…40) gets the new role
-  assigned; the version bump makes every existing tenant re-import the seed, which
-  creates the role and the AssignedRole edge. The initial tenant administrator
-  (`UserManagementService.CreateAdminUserAsync`) is granted it directly, like
-  AdminPanelManagement. Existing administrators (users/groups holding both
-  AdminPanelManagement and TenantManagement) get it once from the identity
-  service's SecretManagementAdminGrant step after this blueprint is applied.
+  roles added later continue at 660…60. The role is for HUMAN administrators only
+  (decision Gerald 2026-10-11): it is deliberately NOT assigned to TenantOwners, because that group
+  also holds client/service accounts and provisioned parent-tenant administrators (AB#5708) who would
+  inherit it. The version bump makes every existing tenant re-import the seed, which creates the role.
+  The initial tenant administrator (`UserManagementService.CreateAdminUserAsync`) is granted it
+  directly, like AdminPanelManagement. Existing local users holding both AdminPanelManagement and
+  TenantManagement (direct or via groups; no group, client or cross-tenant `xt_` shadow user) get it
+  once, as a direct edge, from the identity service's SecretManagementAdminGrant step after this
+  blueprint is applied.
   This is the SECRET line, rebased on the Files line (1.6.0, below); there is no 1.4.0. The
   SecretManagement grant to existing administrators is independent of the Files grants.
 
@@ -166,7 +168,7 @@ ckModelDependencies:
 # All files below are merged into ONE runtime model before the import runs, so the order
 # is presentation only and associations may cross files (the UserManagement role in
 # roles.yaml grants the DataPermission in data-permissions.yaml; the TenantOwners group
-# in groups.yaml references all seventeen roles).
+# in groups.yaml references sixteen of the seventeen roles, all but SecretManagement).
 seedDataPaths:
   - seed-data/roles.yaml
   - seed-data/identity-resources.yaml

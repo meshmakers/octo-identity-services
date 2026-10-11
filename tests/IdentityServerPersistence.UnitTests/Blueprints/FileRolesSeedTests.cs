@@ -68,9 +68,12 @@ public class FileRolesSeedTests
     }
 
     [Fact]
-    public void TenantOwnersGroup_IsAssignedEveryBuiltInRole()
+    public void TenantOwnersGroup_IsAssignedEveryBuiltInRole_ExceptSecretManagement()
     {
-        var roleIds = LoadEntities("seed-data/roles.yaml").Select(e => Scalar(e, "rtId")).ToHashSet();
+        // SecretManagement (660…60, AB#5544) is for human administrators only and granted per user (decision
+        // Gerald 2026-10-11): TenantOwners also holds clients and provisioned parent-tenant administrators.
+        var roleIds = LoadEntities("seed-data/roles.yaml").Select(e => Scalar(e, "rtId"))
+            .Where(id => id != "660000000000000000000060").ToHashSet();
         var group = Assert.Single(LoadEntities("seed-data/groups.yaml"), e => Scalar(e, "rtId") == TenantOwnersRtId);
         var targets = ((YamlSequenceNode)group.Children[new YamlScalarNode("associations")]).Children
             .OfType<YamlMappingNode>()

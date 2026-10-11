@@ -1328,7 +1328,7 @@ identity-provider `ClientSecret` into the Secret value type (AB#5540). Whoever b
 published maximum (`octo-ckc -c ValidateVersion` against the catalogs). The upgrade path is pinned by
 `BootstrapUpgradeToSecretLineIntegrationTests` (frozen 1.5.0 / 1.6.0 seed snapshots under
 `tests/IdentityServices.IntegrationTests/BootstrapSnapshots/`): nothing is lost, and from 1.6.0 the delta is exactly the
-SecretManagement role, its TenantOwners edge and the grants to existing administrators. A new bootstrap version
+SecretManagement role (no TenantOwners edge: human administrators only) and the direct grants to existing local administrators. A new bootstrap version
 that changes seeds should add its own snapshot.
 
 ## Configuration

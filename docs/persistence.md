@@ -579,7 +579,9 @@ writes files in-process with a session without security context (system), and it
 ### SecretManagement Grant for Existing Administrators (AB#5544)
 
 `System.Identity.Bootstrap` 1.7.0 (the SECRET line, on top of the Files line 1.6.0) seeds the tenant role `SecretManagement` (rtId `660…60`; may trigger
-secret sweeps and delete a pre-sweep dump early) and assigns it to `TenantOwners`; a new tenant's initial
+secret sweeps and delete a pre-sweep dump early). It is for **human administrators only** (decision Gerald
+2026-10-11) and therefore deliberately **not** assigned to `TenantOwners`: that group also holds client service
+accounts and provisioned parent-tenant administrators (AB#5708), who would inherit it. A new tenant's initial
 administrator gets it from `UserManagementService.CreateAdminUserAsync`. Existing tenants receive it once,
 automatically, through `SecretManagementAdminGrant`
 (`src/IdentityServerPersistence/Services/SecretManagement/`):
@@ -588,27 +590,29 @@ automatically, through `SecretManagementAdminGrant`
   role must exist, so this is deliberately not an `IMigration` — infrastructure migrations run before the
   blueprint). `SetupTenantAsync` runs for every tenant on identity startup and on tenant create/update
   (`PosCreateTenant`/`PosUpdateTenant`), so the first identity start with blueprint 1.7.0 grants it.
-- **Who** (`SecretManagementGrantPlanner`, pure and unit-tested):
-  - every group whose effective roles (own roles plus those of its child groups, `GroupRoleResolver`
-    semantics) contain **both** `AdminPanelManagement` **and** `TenantManagement` gets the role on the
-    group itself — the innermost such group when they are nested;
-  - every user who holds both roles (directly, via groups, or mixed) and does not already receive
-    `SecretManagement` through such a group gets a direct `AssignedRole` edge;
-  - the `TenantOwners` group (`660…40`) always;
-  - `AdminPanelManagement` alone is **not** enough — secret sweeps stay a separate privilege. Clients and
-    external tenant user mappings are not considered as individual subjects (cross-tenant shadow users are
-    ordinary `RtUser`s). A role granted on a **group** is inherited by all of its members, including client
-    service accounts and external tenant user mappings in that group — the same rule as every other group
-    role. In particular every member of `TenantOwners` gets it, which includes parent-tenant administrators
-    provisioned into a child tenant through `provisionCurrentUser` (AB#5708 mapping in `TenantOwners`).
+- **Who** (`SecretManagementGrantPlanner`, pure and unit-tested): every **local user** who holds both
+  `AdminPanelManagement` **and** `TenantManagement` (directly, via groups — `TenantOwners` included — or mixed) and
+  does not hold `SecretManagement` yet gets a **direct** `AssignedRole` edge. Never granted:
+  - **groups** — a role on a group is inherited by all members, including client service accounts
+    (`octo-pipeline-sa-*`, any client in the group) and external tenant user mappings (parent-tenant administrators
+    provisioned through `provisionCurrentUser`, AB#5708, sit in `TenantOwners`); so there is no group-level grant and
+    no `TenantOwners` edge;
+  - **clients and external tenant user mappings** — they are not `RtUser`s and never subjects;
+  - **cross-tenant shadow users** (user name prefix `xt_`, reserved by `CrossTenantShadowUserName`) — provisioned
+    parent-tenant administrators who exist as local users after their first login;
+  - `AdminPanelManagement` alone is **not** enough — secret sweeps stay a separate privilege.
 - **Additive and once:** only `AssignedRole` insert edges are written, nothing is removed. Afterwards the
   tenant configuration row `SecretManagementAdminGrant` (`IdentityServiceConstants.SecretManagementAdminGrantKey`)
-  records the run with the granted group/user rtIds; while it exists the step does nothing, so an operator
+  records the run with the granted user rtIds; while it exists the step does nothing, so an operator
   who later removes the role from someone does not see it come back. If the role does not exist yet, nothing
   is written and no marker is recorded (retried on the next setup). A failure is logged and does not fail
   tenant setup.
-- **Everybody else** (e.g. a user with only `AdminPanelManagement`) gets the role by an explicit grant in
-  the user/group administration.
+- **Concurrency:** the step takes a per-tenant in-process lock and re-reads each user's edges right before the
+  insert (the engine does not reject a second identical `AssignedRole` edge). Two identity replicas starting at the
+  same instant can still race; a duplicate edge is harmless (role reads treat the edges as a set) and the marker
+  stops further runs.
+- **Everybody else** (e.g. a user with only `AdminPanelManagement`, service accounts, provisioned administrators)
+  gets the role by an explicit grant in the user administration (`octo-cli AddUserToRole`).
 
 ## Migration System
 

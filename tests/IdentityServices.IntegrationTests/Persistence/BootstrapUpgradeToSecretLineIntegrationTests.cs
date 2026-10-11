@@ -40,7 +40,7 @@ public class BootstrapUpgradeToSecretLineIntegrationTests : IClassFixture<Identi
     private static readonly OctoObjectId AdminPanelManagementRtId = new("660000000000000000000005");
     private static readonly OctoObjectId SecretManagementRtId = new("660000000000000000000060");
     private static readonly OctoObjectId FileManagementRtId = new("660000000000000000000061");
-    private static readonly OctoObjectId TenantOwnersRtId = SecretManagementAdminGrant.TenantOwnersGroupRtId;
+    private static readonly OctoObjectId TenantOwnersRtId = new("660000000000000000000040");
 
     // Files line seeds that appear with 1.6.0 (AB#6467): permissions 52/53, policies 54/55.
     private static readonly string[] FilesLineSeedRtIds =
@@ -84,6 +84,12 @@ public class BootstrapUpgradeToSecretLineIntegrationTests : IClassFixture<Identi
         await LinkAsync(repo, Group(adminGroup), Role(AdminPanelManagementRtId), IdentityAssociationConstants.AssignedRoleId);
         await LinkAsync(repo, Group(adminGroup), User(groupMember), IdentityAssociationConstants.GroupMemberId);
         await LinkAsync(repo, Group(TenantOwnersRtId), User(ownerUser), IdentityAssociationConstants.GroupMemberId);
+        // Non-human members of TenantOwners: a provisioned parent-tenant administrator (xt_ shadow user, AB#5708)
+        // and a client service account. Neither may end up with SecretManagement.
+        var shadowUser = await InsertUserAsync(repo, "xt_parent_gerald");
+        var serviceAccount = await InsertClientAsync(repo, "octo-pipeline-sa-");
+        await LinkAsync(repo, Group(TenantOwnersRtId), User(shadowUser), IdentityAssociationConstants.GroupMemberId);
+        await LinkAsync(repo, Group(TenantOwnersRtId), Client(serviceAccount), IdentityAssociationConstants.GroupMemberId);
 
         OctoObjectId? pipelineAccount = null;
         if (fromVersion == "1.6.0")
@@ -117,15 +123,16 @@ public class BootstrapUpgradeToSecretLineIntegrationTests : IClassFixture<Identi
             var secretEntities = newEntities.Where(e => e.EndsWith(SecretManagementRtId.ToString())).ToList();
             secretEntities.Should().Equal($"{nameof(RtRole)}:{SecretManagementRtId}");
 
-            // ... its TenantOwners edge and the grants to the existing administrators, nothing else points at it.
+            // ... and direct grants to the existing HUMAN administrators only: no group (TenantOwners included),
+            // no client, no cross-tenant shadow user, nobody holding AdminPanelManagement alone.
             var secretEdges = after.Edges.Except(before.Edges)
                 .Where(e => e.EndsWith($"|{SecretManagementRtId}")).ToList();
             secretEdges.Should().BeEquivalentTo(new[]
             {
-                Edge(Group(TenantOwnersRtId), SecretManagementRtId),
                 Edge(User(adminUser), SecretManagementRtId),
-                Edge(Group(adminGroup), SecretManagementRtId)
-            }, "TenantOwners, the user and the group holding both AdminPanelManagement and TenantManagement");
+                Edge(User(groupMember), SecretManagementRtId),
+                Edge(User(ownerUser), SecretManagementRtId)
+            }, "local users holding both AdminPanelManagement and TenantManagement, directly or via a group / TenantOwners");
 
             // Everything else that is new is the Files line (only from 1.5.0), and nothing at all from 1.6.0.
             var otherNewEntities = newEntities.Except(secretEntities).ToList();
@@ -149,10 +156,17 @@ public class BootstrapUpgradeToSecretLineIntegrationTests : IClassFixture<Identi
             (await HasRoleAsync(repo, User(adminPanelOnlyUser), SecretManagementRtId)).Should().BeFalse(
                 "AdminPanelManagement alone does not grant secret sweeps");
             (await HasRoleAsync(repo, User(customRoleUser), SecretManagementRtId)).Should().BeFalse();
-            (await HasRoleAsync(repo, User(groupMember), SecretManagementRtId)).Should().BeFalse(
-                "the member inherits it through the group, not as a direct edge");
-            (await HasRoleAsync(repo, User(ownerUser), SecretManagementRtId)).Should().BeFalse(
-                "the TenantOwners member inherits it through the group");
+            (await HasRoleAsync(repo, User(groupMember), SecretManagementRtId)).Should().BeTrue(
+                "a human holding both roles through a group gets a direct edge");
+            (await HasRoleAsync(repo, User(ownerUser), SecretManagementRtId)).Should().BeTrue(
+                "a human member of TenantOwners gets a direct edge");
+            (await HasRoleAsync(repo, Group(TenantOwnersRtId), SecretManagementRtId)).Should().BeFalse(
+                "TenantOwners also holds clients and provisioned administrators, who would inherit it");
+            (await HasRoleAsync(repo, Group(adminGroup), SecretManagementRtId)).Should().BeFalse("no group grant");
+            (await HasRoleAsync(repo, User(shadowUser), SecretManagementRtId)).Should().BeFalse(
+                "a provisioned parent-tenant administrator (xt_ shadow user) is no local human administrator");
+            (await HasRoleAsync(repo, Client(serviceAccount), SecretManagementRtId)).Should().BeFalse(
+                "a client in TenantOwners does not inherit it");
             (await HasRoleAsync(repo, User(customRoleUser), customRole)).Should().BeTrue("custom assignments stay");
 
             if (pipelineAccount != null)
@@ -166,7 +180,8 @@ public class BootstrapUpgradeToSecretLineIntegrationTests : IClassFixture<Identi
             // The run-once marker is recorded.
             var marker = await ReadMarkerAsync(tenantContext);
             marker.Should().NotBeNull();
-            marker!.GrantedUserIds.Should().Equal(adminUser.ToString());
+            marker!.GrantedUserIds.Should().BeEquivalentTo(
+                new[] { adminUser.ToString(), groupMember.ToString(), ownerUser.ToString() });
         }
 
         // A second identity start / tenant update changes nothing (idempotent, run-once).

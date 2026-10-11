@@ -6,7 +6,7 @@ namespace IdentityServerPersistence.UnitTests.Blueprints;
 
 /// <summary>
 ///     AB#5544: the <c>System.Identity.Bootstrap</c> blueprint seeds the tenant role <c>SecretManagement</c>
-///     (stable rtId 660…60) next to AdminPanelManagement, assigns it to the TenantOwners group, and bumps
+///     (stable rtId 660…60) next to AdminPanelManagement, keeps it OFF the TenantOwners group (human administrators only), and bumps
 ///     the blueprint version so existing tenants re-import the seed. Pinned against the seed files
 ///     themselves, because the integration fixtures do not apply the blueprint.
 /// </summary>
@@ -47,8 +47,10 @@ public class SecretManagementRoleSeedTests
     }
 
     [Fact]
-    public void TenantOwnersGroup_IsAssignedSecretManagement()
+    public void TenantOwnersGroup_IsNotAssignedSecretManagement()
     {
+        // Decision Gerald 2026-10-11: TenantOwners also holds client service accounts and provisioned parent-tenant
+        // administrators (AB#5708), who would inherit the role; it is granted per human administrator instead.
         var group = Assert.Single(LoadEntities("seed-data/groups.yaml"), e => Scalar(e, "rtId") == TenantOwnersRtId);
 
         var targets = ((YamlSequenceNode)group.Children[new YamlScalarNode("associations")]).Children
@@ -57,7 +59,8 @@ public class SecretManagementRoleSeedTests
             .Select(a => Scalar(a, "targetRtId"))
             .ToList();
 
-        Assert.Contains(SecretManagementRtId, targets);
+        Assert.DoesNotContain(SecretManagementRtId, targets);
+        Assert.Equal(16, targets.Count);
     }
 
     [Fact]

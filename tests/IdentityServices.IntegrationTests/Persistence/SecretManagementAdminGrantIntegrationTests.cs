@@ -40,7 +40,7 @@ public class SecretManagementAdminGrantIntegrationTests : IClassFixture<Identity
     }
 
     [Fact]
-    public async Task ExistingAdministrators_AreGrantedOnce_AdditiveOnly()
+    public async Task ExistingHumanAdministrators_AreGrantedOnce_AdditiveOnly()
     {
         var (tenantContext, repo) = await CreateTenantAsync();
         await InsertRoleAsync(repo, TenantManagementRtId, CommonConstants.TenantManagementRole);
@@ -51,8 +51,11 @@ public class SecretManagementAdminGrantIntegrationTests : IClassFixture<Identity
         var adminPanelOnly = await InsertUserAsync(repo, "adminpanel-only");
         var groupMember = await InsertUserAsync(repo, "group-member");
         var owner = await InsertUserAsync(repo, "owner");
+        // AB#5708: a provisioned parent-tenant administrator exists as an xt_ shadow user, a member of TenantOwners.
+        var shadow = await InsertUserAsync(repo, "xt_parent_gerald");
+        var serviceAccount = await InsertClientAsync(repo);
         var adminsGroup = await InsertGroupAsync(repo, OctoObjectId.GenerateNewId(), "admins");
-        var owners = await InsertGroupAsync(repo, SecretManagementAdminGrant.TenantOwnersGroupRtId, "TenantOwners");
+        var owners = await InsertGroupAsync(repo, TenantOwnersRtId, "TenantOwners");
 
         await LinkAsync(repo, User(directAdmin), Role(TenantManagementRtId), IdentityAssociationConstants.AssignedRoleId);
         await LinkAsync(repo, User(directAdmin), Role(AdminPanelManagementRtId), IdentityAssociationConstants.AssignedRoleId);
@@ -60,24 +63,40 @@ public class SecretManagementAdminGrantIntegrationTests : IClassFixture<Identity
         await LinkAsync(repo, Group(adminsGroup), Role(TenantManagementRtId), IdentityAssociationConstants.AssignedRoleId);
         await LinkAsync(repo, Group(adminsGroup), Role(AdminPanelManagementRtId), IdentityAssociationConstants.AssignedRoleId);
         await LinkAsync(repo, Group(adminsGroup), User(groupMember), IdentityAssociationConstants.GroupMemberId);
+        await LinkAsync(repo, Group(adminsGroup), Client(serviceAccount), IdentityAssociationConstants.GroupMemberId);
+        // TenantOwners holds every role (blueprint): its human member qualifies, the shadow user and the client do not.
+        await LinkAsync(repo, Group(owners), Role(TenantManagementRtId), IdentityAssociationConstants.AssignedRoleId);
+        await LinkAsync(repo, Group(owners), Role(AdminPanelManagementRtId), IdentityAssociationConstants.AssignedRoleId);
         await LinkAsync(repo, Group(owners), User(owner), IdentityAssociationConstants.GroupMemberId);
+        await LinkAsync(repo, Group(owners), User(shadow), IdentityAssociationConstants.GroupMemberId);
+        await LinkAsync(repo, Group(owners), Client(serviceAccount), IdentityAssociationConstants.GroupMemberId);
 
         var result = await SecretManagementAdminGrant.EnsureAsync(tenantContext, NullLogger.Instance);
 
         result.Status.Should().Be(SecretManagementAdminGrantStatus.Completed);
+        result.GrantedUserIds.Should().BeEquivalentTo(
+            new[] { directAdmin.ToString(), groupMember.ToString(), owner.ToString() });
         using (new FluentAssertions.Execution.AssertionScope())
         {
             (await HasSecretManagementAsync(repo, User(directAdmin))).Should().BeTrue("both roles held directly");
+            (await HasSecretManagementAsync(repo, User(groupMember))).Should().BeTrue("a human holding both roles via a group");
+            (await HasSecretManagementAsync(repo, User(owner))).Should().BeTrue("a human member of TenantOwners");
             (await HasSecretManagementAsync(repo, User(adminPanelOnly))).Should().BeFalse(
                 "AdminPanelManagement alone does not grant secret sweeps");
-            (await HasSecretManagementAsync(repo, Group(adminsGroup))).Should().BeTrue("the roles come from the group");
-            (await HasSecretManagementAsync(repo, User(groupMember))).Should().BeFalse(
-                "the member receives it through the group, not as a direct edge");
-            (await HasSecretManagementAsync(repo, Group(owners))).Should().BeTrue("TenantOwners always gets it");
-            (await HasSecretManagementAsync(repo, User(owner))).Should().BeFalse();
+            (await HasSecretManagementAsync(repo, User(shadow))).Should().BeFalse(
+                "a provisioned parent-tenant administrator (xt_ shadow user) is not a local human administrator");
+            (await HasSecretManagementAsync(repo, Client(serviceAccount))).Should().BeFalse("a client is no human");
+            (await HasSecretManagementAsync(repo, Group(adminsGroup))).Should().BeFalse(
+                "no group grant: clients and mappings in it would inherit the role");
+            (await HasSecretManagementAsync(repo, Group(owners))).Should().BeFalse(
+                "no TenantOwners edge: clients and provisioned administrators sit in it");
             (await HasRoleAsync(repo, User(directAdmin), TenantManagementRtId)).Should().BeTrue("nothing is removed");
             (await HasRoleAsync(repo, Group(adminsGroup), AdminPanelManagementRtId)).Should().BeTrue("nothing is removed");
         }
+
+        // A second run with the marker present writes nothing; a concurrent duplicate cannot happen either.
+        var edgesBefore = await CountSecretManagementEdgesAsync(repo, User(directAdmin));
+        edgesBefore.Should().Be(1);
 
         // An operator removes the grant again — the next setup must not re-add it (run-once marker).
         await UnlinkAsync(repo, User(directAdmin), Role(SecretManagementRtId), IdentityAssociationConstants.AssignedRoleId);
@@ -85,6 +104,26 @@ public class SecretManagementAdminGrantIntegrationTests : IClassFixture<Identity
 
         second.Status.Should().Be(SecretManagementAdminGrantStatus.AlreadyDone);
         (await HasSecretManagementAsync(repo, User(directAdmin))).Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task ConcurrentRuns_WriteExactlyOneEdgePerAdministrator()
+    {
+        var (tenantContext, repo) = await CreateTenantAsync();
+        await InsertRoleAsync(repo, TenantManagementRtId, CommonConstants.TenantManagementRole);
+        await InsertRoleAsync(repo, AdminPanelManagementRtId, CommonConstants.AdminPanelManagementRole);
+        await InsertRoleAsync(repo, SecretManagementRtId, CommonConstants.SecretManagementRole);
+        var admin = await InsertUserAsync(repo, "admin");
+        await LinkAsync(repo, User(admin), Role(TenantManagementRtId), IdentityAssociationConstants.AssignedRoleId);
+        await LinkAsync(repo, User(admin), Role(AdminPanelManagementRtId), IdentityAssociationConstants.AssignedRoleId);
+
+        // Setup, tenant update and the failed-tenant retry can reach the same tenant at the same moment.
+        var results = await Task.WhenAll(Enumerable.Range(0, 6)
+            .Select(_ => Task.Run(() => SecretManagementAdminGrant.EnsureAsync(tenantContext, NullLogger.Instance))));
+
+        results.Count(r => r.Status == SecretManagementAdminGrantStatus.Completed).Should().Be(1);
+        results.Count(r => r.Status == SecretManagementAdminGrantStatus.AlreadyDone).Should().Be(5);
+        (await CountSecretManagementEdgesAsync(repo, User(admin))).Should().Be(1, "the engine would accept duplicates");
     }
 
     [Fact]
@@ -169,6 +208,9 @@ public class SecretManagementAdminGrantIntegrationTests : IClassFixture<Identity
     private static RtEntityId User(OctoObjectId id) => new(RtEntityExtensions.GetRtCkTypeId<RtUser>(), id);
     private static RtEntityId Group(OctoObjectId id) => new(RtEntityExtensions.GetRtCkTypeId<RtGroup>(), id);
     private static RtEntityId Role(OctoObjectId id) => new(RtEntityExtensions.GetRtCkTypeId<RtRole>(), id);
+    private static RtEntityId Client(OctoObjectId id) => new(RtEntityExtensions.GetRtCkTypeId<RtClient>(), id);
+
+    private static readonly OctoObjectId TenantOwnersRtId = new("660000000000000000000040");
 
     private static async Task InsertRoleAsync(ITenantRepository repo, OctoObjectId rtId, string name)
     {
@@ -226,6 +268,36 @@ public class SecretManagementAdminGrantIntegrationTests : IClassFixture<Identity
         session.StartTransaction();
         await repo.ApplyChangesAsync(session, new[] { update }, new OperationResult());
         await session.CommitTransactionAsync();
+    }
+
+    private static async Task<OctoObjectId> InsertClientAsync(ITenantRepository repo)
+    {
+        var rtId = OctoObjectId.GenerateNewId();
+        using var session = await repo.GetSessionAsync();
+        session.StartTransaction();
+        await repo.InsertOneRtEntityAsync(session, new RtClient
+        {
+            RtId = rtId,
+            Enabled = true,
+            ClientId = $"octo-pipeline-sa-{Guid.NewGuid():N}",
+            ProtocolType = "oidc",
+            RequireClientSecret = true,
+            AllowedGrantTypes = new AttributeStringValueList { "client_credentials" },
+            AllowedScopes = new AttributeStringValueList { "octo_api" }
+        });
+        await session.CommitTransactionAsync();
+        return rtId;
+    }
+
+    private static async Task<int> CountSecretManagementEdgesAsync(ITenantRepository repo, RtEntityId origin)
+    {
+        using var session = await repo.GetSessionAsync();
+        session.StartTransaction();
+        var edges = await repo.GetRtAssociationsAsync(session, origin,
+            RtAssociationExtendedQueryOptions.Create(GraphDirections.Outbound,
+                roleId: IdentityAssociationConstants.AssignedRoleId));
+        await session.CommitTransactionAsync();
+        return edges.Items.Count(e => e.TargetRtId == SecretManagementRtId);
     }
 
     private static Task<bool> HasSecretManagementAsync(ITenantRepository repo, RtEntityId origin) =>
