@@ -43,7 +43,7 @@ then the value stays a plain string in MongoDB.
 
 1. Deploy the identity image built from main (containing this change) to test-2 via the usual
    pipeline. No catalog, blueprint or CK command is needed.
-2. Watch the identity startup log (Loki / Dash0, namespace `octo`, container identity):
+2. Watch the identity startup log (Dash0, namespace `octo`, container identity):
    - per tenant: CK import `System.Identity-2.25.0` and blueprint `System.Identity.Bootstrap-1.7.0`
      applied, no `ImportCkModelFailed`;
    - `SecretManagement granted to existing administrators of tenant ...` (once per tenant; a warning
