@@ -162,6 +162,13 @@ entities:
         value: FileManagement
       - id: System.Identity/NormalizedName
         value: FILEMANAGEMENT
+    associations:
+      - roleId: System.Identity/GrantsPermission
+        targetRtId: '660000000000000000000052'
+        targetCkTypeId: System.Identity/DataPermission
+      - roleId: System.Identity/GrantsPermission
+        targetRtId: '660000000000000000000053'
+        targetCkTypeId: System.Identity/DataPermission
 
   - rtId: '660000000000000000000062'
     ckTypeId: System.Identity/Role
@@ -171,3 +178,7 @@ entities:
         value: FileViewer
       - id: System.Identity/NormalizedName
         value: FILEVIEWER
+    associations:
+      - roleId: System.Identity/GrantsPermission
+        targetRtId: '660000000000000000000052'
+        targetCkTypeId: System.Identity/DataPermission

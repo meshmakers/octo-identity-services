@@ -513,6 +513,30 @@ APIs switch from the Reporting roles to the File roles:
   File role does not exist yet, nothing is written and no marker is recorded (retried on the next setup). A
   failure is logged and does not fail tenant setup.
 
+### File Roles and Data Permissions on System.Files (AB#6467, blueprint 1.6.0)
+
+Roles alone do not protect anything on the server: the engine treats a CK type that no data policy targets as
+unrestricted, so before 1.6.0 every caller with the API scope could write through the Files API. Blueprint
+`System.Identity.Bootstrap` 1.6.0 (the joint bump with the SECRET line, AB#6457) seeds, in
+`seed-data/data-permissions.yaml` and `seed-data/roles.yaml`:
+
+| Seed | rtId | Content |
+|------|------|---------|
+| DataPermission `files.read` | `660…52` | granted to `FileViewer` and `FileManagement` |
+| DataPermission `files.manage` | `660…53` | granted to `FileManagement` |
+| DataPolicy `FilesReadPolicy` | `660…54` | target `System.Files/FileSystemEntity` (derived types inherit), actions `Read`, full scope, **Enforce** |
+| DataPolicy `FilesManagePolicy` | `660…55` | same target, actions `Write`, `Delete`, **Enforce** |
+
+Effect: FileViewer reads (list, download, stats, zip), FileManagement reads and writes, anyone else gets 403
+FORBIDDEN on the REST Files API and nothing on GraphQL reads. The policies are new entities, so existing tenants
+receive them **enforcing** on the re-import that the version bump triggers (`PolicyEnforcementMode` and
+`PolicyScope` are tenant-owned afterwards). A tenant can grant write access to a custom role by granting it the
+permission `files.manage`. The asset repository carries the same rules as a built-in baseline until a tenant has
+a policy for a `System.Files/*` type, so a rollout in which asset-repo is updated before the tenants are
+re-seeded is not open in between. ReportingManagement / ReportingViewer holders keep access through the
+one-time `FileRoleGrant` above. Machine clients (client credentials) carry no roles: give a client that must use
+the Files API the FileViewer / FileManagement role.
+
 ## Migration System
 
 ### Migration Pattern
