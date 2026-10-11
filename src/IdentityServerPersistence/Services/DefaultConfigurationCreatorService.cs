@@ -49,8 +49,8 @@ internal class DefaultConfigurationCreatorService(
     // tenants that become usable after cold start, most importantly via the background setup retry.
     IEnumerable<ITenantSetupCompletedHandler>? tenantSetupCompletedHandlers = null,
     // AB#6467 — the pipeline-service-account File role grant only runs for tenants that have System.Files in
-    // their CK model; unknown (null) is treated as "has it" so a service without the cache still grants.
-    Meshmakers.Octo.ConstructionKit.Contracts.Services.ICkCacheService? ckCacheService = null)
+    // their CK model; unknown (null) is treated as "has it" so a service without the probe still grants.
+    IFilesModelProbe? filesModelProbe = null)
     : DefaultConfigurationCreatorServiceBase(logger, blueprintService, embeddedBlueprintSources,
           tenantSetupRetryStore, tenantLifecycleStore),
       IConfigurationService
@@ -847,6 +847,8 @@ internal class DefaultConfigurationCreatorService(
     }
 
 
+    private bool TenantHasFilesModel(string tenantId) => filesModelProbe == null || filesModelProbe.HasFilesModel(tenantId);
+
     /// <summary>
     ///     Builds the "installed schema versions" handed to the post-import data-migration run (CK v2 D8/N2, AB#5902).
     /// </summary>
@@ -862,12 +864,6 @@ internal class DefaultConfigurationCreatorService(
     ///     Models the import did not touch — including imports skipped by the engine's downgrade guard — keep
     ///     their pre-import version.
     /// </remarks>
-    private bool TenantHasFilesModel(string tenantId) =>
-        ckCacheService == null ||
-        ckCacheService.TryGetRtCkType(tenantId,
-            new Meshmakers.Octo.ConstructionKit.Contracts.RtCkId<Meshmakers.Octo.ConstructionKit.Contracts.CkTypeId>(
-                "System.Files/FileSystemEntity"), out _);
-
     internal static IReadOnlyDictionary<string, string> MergeSchemaVersionsAfterImport(
         IReadOnlyDictionary<string, string> preImport,
         IReadOnlyDictionary<string, string> postImport,

@@ -64,6 +64,9 @@ public static class RuntimeEngineBuilderExtensions
             .AddScopedMultipleInterfaces<DefaultConfigurationCreatorService, IDefaultConfigurationCreatorService,
                 IConfigurationService>();
 
+        builder.Services.TryAddSingleton<IdentityServerPersistence.Services.FileRoles.IFilesModelProbe,
+            IdentityServerPersistence.Services.FileRoles.CkCacheFilesModelProbe>();
+
         builder.Services.AddScoped<IOctoClientStore, ClientStore>();
         builder.Services.AddScoped<IOctoResourceStore, ResourceStore>();
         // AB#5193: resource-indicator (RFC 8707) lookup for the OpenIddict server handlers. The
