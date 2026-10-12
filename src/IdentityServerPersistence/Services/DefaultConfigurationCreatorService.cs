@@ -326,6 +326,21 @@ internal class DefaultConfigurationCreatorService(
                 "retried on the next tenant setup", tenantId);
         }
 
+        // AB#6578: one-time grant of FileManagement to the human tenant administrators (users holding
+        // AdminPanelManagement AND TenantManagement). The Reporting-based grant above only reaches Reporting role
+        // holders, so administrators of tenants without Reporting saw an empty file system. Own marker, so tenants
+        // that already ran the grant above are still covered. Additive only; a failure is logged, not fatal.
+        try
+        {
+            await TenantAdministratorFileRoleGrant.EnsureAsync(tenantContext, logger);
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex,
+                "One-time File role grant to the tenant administrators failed for tenant '{TenantId}'; " +
+                "retried on the next tenant setup", tenantId);
+        }
+
         // AB#6467 / AB#6457: the pipeline service accounts (octo-pipeline-sa-*) hold FileManagement, because their
         // file nodes run in the adapter engine where the System.Files data policies (blueprint 1.6.0) apply.
         // Unlike the grant above this is NOT run-once: it runs on every setup so accounts the Communication
