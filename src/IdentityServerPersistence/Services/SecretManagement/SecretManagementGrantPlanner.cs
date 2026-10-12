@@ -1,5 +1,7 @@
 namespace IdentityServerPersistence.Services.SecretManagement;
 
+using IdentityServerPersistence.Services.RoleGrants;
+
 /// <summary>
 ///     Role graph of one tenant as the <see cref="SecretManagementGrantPlanner"/> sees it. All ids are
 ///     rtId hex strings; role ids are the rtIds of <c>RtRole</c> entities.
@@ -51,95 +53,12 @@ internal sealed record SecretManagementGrantPlan(IReadOnlyList<string> UserIds);
 /// </remarks>
 internal static class SecretManagementGrantPlanner
 {
-    private const int MaxDepth = 10;
-
     public static SecretManagementGrantPlan Plan(
         SecretManagementGrantInput input,
         string adminPanelManagementRoleId,
         string tenantManagementRoleId,
         string secretManagementRoleId)
-    {
-        var groupIds = input.GroupRoleIds.Keys
-            .Concat(input.GroupChildGroupIds.Keys)
-            .Concat(input.GroupMemberUserIds.Keys)
-            .Distinct(StringComparer.Ordinal)
-            .ToList();
-
-        var effectiveGroupRoles = groupIds.ToDictionary(
-            g => g,
-            g => EffectiveGroupRoles(input, g),
-            StringComparer.Ordinal);
-
-        var grantedUsers = new List<string>();
-        foreach (var (userId, directRoles) in input.UserRoleIds.OrderBy(u => u.Key, StringComparer.Ordinal))
-        {
-            if (input.ExcludedUserIds?.Contains(userId) == true)
-            {
-                continue;
-            }
-
-            var roles = new HashSet<string>(directRoles, StringComparer.Ordinal);
-            foreach (var (groupId, members) in input.GroupMemberUserIds)
-            {
-                if (members.Contains(userId))
-                {
-                    roles.UnionWith(effectiveGroupRoles[groupId]);
-                }
-            }
-
-            if (roles.Contains(adminPanelManagementRoleId) && roles.Contains(tenantManagementRoleId)
-                && !roles.Contains(secretManagementRoleId))
-            {
-                grantedUsers.Add(userId);
-            }
-        }
-
-        return new SecretManagementGrantPlan(grantedUsers);
-    }
-
-    private static HashSet<string> EffectiveGroupRoles(SecretManagementGrantInput input, string groupId)
-    {
-        var roles = new HashSet<string>(StringComparer.Ordinal);
-        Walk(input, groupId, new HashSet<string>(StringComparer.Ordinal), 0,
-            g =>
-            {
-                if (input.GroupRoleIds.TryGetValue(g, out var own))
-                {
-                    roles.UnionWith(own);
-                }
-
-                return false;
-            });
-        return roles;
-    }
-
-    /// <summary>Depth-first over ChildGroup edges; stops early when <paramref name="visit"/> returns true.</summary>
-    private static bool Walk(
-        SecretManagementGrantInput input, string groupId, HashSet<string> visited, int depth, Func<string, bool> visit)
-    {
-        if (depth >= MaxDepth || !visited.Add(groupId))
-        {
-            return false;
-        }
-
-        if (visit(groupId))
-        {
-            return true;
-        }
-
-        if (!input.GroupChildGroupIds.TryGetValue(groupId, out var children))
-        {
-            return false;
-        }
-
-        foreach (var child in children)
-        {
-            if (Walk(input, child, visited, depth + 1, visit))
-            {
-                return true;
-            }
-        }
-
-        return false;
-    }
+        => new(AdministratorRoleGrantPlanner.Plan(
+            input.UserRoleIds, input.GroupRoleIds, input.GroupChildGroupIds, input.GroupMemberUserIds,
+            input.ExcludedUserIds, adminPanelManagementRoleId, tenantManagementRoleId, secretManagementRoleId));
 }

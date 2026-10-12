@@ -1,5 +1,7 @@
 namespace IdentityServerPersistence.Services.FileRoles;
 
+using IdentityServerPersistence.Services.RoleGrants;
+
 /// <summary>
 ///     Role graph of one tenant as the <see cref="TenantAdministratorFileRoleGrantPlanner"/> sees it. All ids are
 ///     rtId hex strings; role ids are the rtIds of <c>RtRole</c> entities.
@@ -54,81 +56,12 @@ internal sealed record TenantAdministratorFileRoleGrantPlan(IReadOnlyList<string
 /// </remarks>
 internal static class TenantAdministratorFileRoleGrantPlanner
 {
-    private const int MaxDepth = 10;
-
     public static TenantAdministratorFileRoleGrantPlan Plan(
         TenantAdministratorFileRoleGrantInput input,
         string adminPanelManagementRoleId,
         string tenantManagementRoleId,
         string fileManagementRoleId)
-    {
-        var groupIds = input.GroupRoleIds.Keys
-            .Concat(input.GroupChildGroupIds.Keys)
-            .Concat(input.GroupMemberUserIds.Keys)
-            .Distinct(StringComparer.Ordinal)
-            .ToList();
-
-        var effectiveGroupRoles = groupIds.ToDictionary(
-            g => g,
-            g => EffectiveGroupRoles(input, g),
-            StringComparer.Ordinal);
-
-        var grantedUsers = new List<string>();
-        foreach (var (userId, directRoles) in input.UserRoleIds.OrderBy(u => u.Key, StringComparer.Ordinal))
-        {
-            if (input.ExcludedUserIds?.Contains(userId) == true)
-            {
-                continue;
-            }
-
-            var roles = new HashSet<string>(directRoles, StringComparer.Ordinal);
-            foreach (var (groupId, members) in input.GroupMemberUserIds)
-            {
-                if (members.Contains(userId))
-                {
-                    roles.UnionWith(effectiveGroupRoles[groupId]);
-                }
-            }
-
-            if (roles.Contains(adminPanelManagementRoleId) && roles.Contains(tenantManagementRoleId)
-                && !roles.Contains(fileManagementRoleId))
-            {
-                grantedUsers.Add(userId);
-            }
-        }
-
-        return new TenantAdministratorFileRoleGrantPlan(grantedUsers);
-    }
-
-    private static HashSet<string> EffectiveGroupRoles(TenantAdministratorFileRoleGrantInput input, string groupId)
-    {
-        var roles = new HashSet<string>(StringComparer.Ordinal);
-        Walk(input, groupId, new HashSet<string>(StringComparer.Ordinal), 0, roles);
-        return roles;
-    }
-
-    private static void Walk(
-        TenantAdministratorFileRoleGrantInput input, string groupId, HashSet<string> visited, int depth,
-        HashSet<string> roles)
-    {
-        if (depth >= MaxDepth || !visited.Add(groupId))
-        {
-            return;
-        }
-
-        if (input.GroupRoleIds.TryGetValue(groupId, out var own))
-        {
-            roles.UnionWith(own);
-        }
-
-        if (!input.GroupChildGroupIds.TryGetValue(groupId, out var children))
-        {
-            return;
-        }
-
-        foreach (var child in children)
-        {
-            Walk(input, child, visited, depth + 1, roles);
-        }
-    }
+        => new(AdministratorRoleGrantPlanner.Plan(
+            input.UserRoleIds, input.GroupRoleIds, input.GroupChildGroupIds, input.GroupMemberUserIds,
+            input.ExcludedUserIds, adminPanelManagementRoleId, tenantManagementRoleId, fileManagementRoleId));
 }
