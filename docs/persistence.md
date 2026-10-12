@@ -512,6 +512,19 @@ APIs switch from the Reporting roles to the File roles:
   step does nothing, so an operator who later removes a File role from someone does not see it come back. If a
   File role does not exist yet, nothing is written and no marker is recorded (retried on the next setup). A
   failure is logged and does not fail tenant setup.
+- **Tenant administrators (AB#6578, `TenantAdministratorFileRoleGrant`, rule v2):** the grant above only reaches
+  holders of the Reporting roles. A tenant without Reporting then had nobody with a File role, so its
+  administrators saw an empty file system (data permissions are fail-closed, read needs `FileViewer` or
+  `FileManagement`) while the platform-services admin session still found the default file root ("already
+  exists, 1 root" vs. 0 roots over REST/GraphQL). Every **human** tenant administrator therefore also receives
+  `FileManagement` once: a local user holding `AdminPanelManagement` AND `TenantManagement` (directly, via groups
+  or via `TenantOwners`), as a **direct** `AssignedRole` edge. Never granted: groups (members of any kind would
+  inherit it), clients and service accounts, external tenant user mappings, cross-tenant shadow users (`xt_`,
+  AB#5708), and users with only one of the two roles. Users that already hold `FileManagement` (directly or via a
+  group) are skipped. It has its **own** marker `FileRoleGrantTenantAdministrators`
+  (`IdentityServiceConstants.TenantAdministratorFileRoleGrantKey`, `Version` 2), so tenants that already carry the
+  Reporting-based `FileRoleGrant` marker get the administrator grant on the next identity start / tenant setup.
+  Same non-fatal, additive, run-once semantics; the pure rule is `TenantAdministratorFileRoleGrantPlanner`.
 
 ### File Roles and Data Permissions on System.Files (AB#6467, blueprint 1.6.0)
 

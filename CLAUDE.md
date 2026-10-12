@@ -1535,7 +1535,9 @@ After making ANY code changes, you MUST update the relevant documentation:
 Blueprint `System.Identity.Bootstrap` 1.6.0 seeds the roles `FileManagement` / `FileViewer`, the data permissions
 `files.read` / `files.manage` (660…52/53) and the enforcing policies 660…54/55 on `System.Files/FileSystemEntity`
 (FileViewer reads; FileManagement reads and writes; the asset repository carries the same rules as a built-in
-baseline). Details, the one-time `FileRoleGrant` (Reporting roles → File roles) and the recurring
+baseline). Details, the one-time `FileRoleGrant` (Reporting roles → File roles), the one-time
+`TenantAdministratorFileRoleGrant` (AB#6578: human tenant administrators → `FileManagement`, own marker so tenants with the
+Reporting marker still get it) and the recurring
 `PipelineServiceAccountFileRoleGrant` are in `docs/persistence.md`. Rules to remember:
 
 - Pipeline service accounts (`octo-pipeline-sa-*`) always hold `FileManagement`: granted by
@@ -1545,5 +1547,6 @@ baseline). Details, the one-time `FileRoleGrant` (Reporting roles → File roles
 - Customer client-credentials clients and octo-cli `LogInClientCredentials` carry no roles: 403 on the Files API
   until the client is given a File role. Reporting uses in-process system sessions and needs nothing.
 - Tests: `FilesDataPermissionsSeedTests`, `PipelineServiceAccountFileRoleGrant*Tests`,
+  `TenantAdministratorFileRoleGrant*Tests`,
   `PipelineServiceAccountFileManagementConsumerIntegrationTests` (own class: the other provisioning tests assert
   exact role sets).
