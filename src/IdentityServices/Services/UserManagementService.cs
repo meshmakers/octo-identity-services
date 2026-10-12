@@ -55,6 +55,9 @@ public class UserManagementService(
             await TryAddRole(adminUser, CommonConstants.CommunicationManagementRole);
             await TryAddRole(adminUser, CommonConstants.BotManagementRole);
             await TryAddRole(adminUser, CommonConstants.AdminPanelManagementRole);
+            // Optional like the file roles: a tenant set up from a bootstrap seed older than 1.7.0 has no
+            // SecretManagement role yet; the one-time grant (AB#5544) gives it to the administrators later.
+            await TryAddRole(adminUser, CommonConstants.SecretManagementRole, required: false);
             await TryAddRole(adminUser, CommonConstants.DashboardViewerRole);
             await TryAddRole(adminUser, CommonConstants.DashboardManagementRole);
             await TryAddRole(adminUser, CommonConstants.ReportingManagementRole);

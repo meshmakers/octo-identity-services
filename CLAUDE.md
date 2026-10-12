@@ -175,7 +175,7 @@ This service depends on Octo framework packages (versioned via `$(OctoVersion)` 
 
 ### Construction Kit (CK) Model
 
-The `Persistence.IdentityCkModel` project uses YAML-based model definitions that are transformed into C# code at build time. Model files are in `src/Persistence.IdentityCkModel/ConstructionKit/`. The model ID is `System.Identity-2.24.0` with dependency on `System-[2.5,3.0)`. Generated types live in namespace `Persistence.IdentityCkModel.Generated.System.Identity.v2`.
+The `Persistence.IdentityCkModel` project uses YAML-based model definitions that are transformed into C# code at build time. Model files are in `src/Persistence.IdentityCkModel/ConstructionKit/`. The model ID is `System.Identity-2.25.0` with dependency on `System-[2.5,3.0)`. Generated types live in namespace `Persistence.IdentityCkModel.Generated.System.Identity.v2`.
 
 ### OpenIddict Protocol Stack (Epic AB#4989)
 
@@ -1316,6 +1316,20 @@ must equal the route tenant, unconditionally (`IdentityApiOwnTenantRequirement`)
 logs instead of denying (transition); default `Enforce`. 🔴 A new controller action must use one of these
 policies — `IdentityApiAuthorizationPolicyTests.EveryTenantApiEndpoint_RequiresARole_UnlessExplicitlyAllowListed`
 fails otherwise. Full table: `docs/system-api.md` § Authorization Policies.
+
+### Bootstrap blueprint lines and version order (AB#5544, AB#6457)
+
+`System.Identity.Bootstrap` carries two independent lines that each bump exactly once, in a fixed order
+(decision Gerald 2026-10-11): the **Files line** is 1.5.0 (FileManagement/FileViewer roles 660…61/62) and 1.6.0
+(System.Files data permissions/policies 660…52–55, FileManagement for pipeline service accounts); the **SECRET
+line** is **1.7.0** (SecretManagement role 660…60 and its grants) on top of it. There is no 1.4.0. The CK model
+follows the same rule: 2.23.0/2.24.0 belong to the ownership markers (AB#6324/6443/6384), **2.25.0** turns the
+identity-provider `ClientSecret` into the Secret value type (AB#5540). Whoever bumps next re-bumps above the
+published maximum (`octo-ckc -c ValidateVersion` against the catalogs). The upgrade path is pinned by
+`BootstrapUpgradeToSecretLineIntegrationTests` (frozen 1.5.0 / 1.6.0 seed snapshots under
+`tests/IdentityServices.IntegrationTests/BootstrapSnapshots/`): nothing is lost, and from 1.6.0 the delta is exactly the
+SecretManagement role (no TenantOwners edge: human administrators only) and the direct grants to existing local administrators. A new bootstrap version
+that changes seeds should add its own snapshot.
 
 ## Configuration
 

@@ -59,7 +59,7 @@ public class FilesDataPermissionsSeedTests
     }
 
     [Fact]
-    public void NewRtIds_AreUnique_AndLeaveTheSecretManagementIdFree()
+    public void NewRtIds_AreUnique_AndTheSecretManagementIdIsUsedExactlyOnce()
     {
         var all = Directory.EnumerateFiles(Path.Combine(BlueprintDirectory, "seed-data"), "*.yaml",
                 SearchOption.AllDirectories)
@@ -73,8 +73,9 @@ public class FilesDataPermissionsSeedTests
         }
 
         Assert.Equal(all.Count, all.Distinct().Count());
-        // 660…60 belongs to the SecretManagement role of the SECRET line (AB#5544).
-        Assert.DoesNotContain("660000000000000000000060", all);
+        // 660…60 belongs to the SecretManagement role of the SECRET line (AB#5544, blueprint 1.7.0):
+        // present exactly once, and none of the Files ids above collides with it.
+        Assert.Single(all, x => x == "660000000000000000000060");
     }
 
     [Fact]

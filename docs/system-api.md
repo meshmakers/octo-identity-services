@@ -306,6 +306,35 @@ is returned only once, in the creation response; neither it nor a hash is logged
 }
 ```
 
+**Client secret of the external providers is write-only (AB#5540).** Google, Microsoft, Facebook and
+Azure Entra ID providers carry a `clientSecret` (CK value type `Secret`, stored encrypted):
+
+- `GET` responses (list and by id) and the `POST` / `PUT` responses **never** contain it —
+  `clientSecret` is always `null`. The `PUT` response is mapped from the stored entity, it no longer
+  echoes the request body.
+- `POST` requires a non-empty `clientSecret`.
+- `PUT`: a non-empty `clientSecret` replaces the stored secret; `null`, `""` or an omitted field
+  keeps it unchanged. There is no clear operation (the secret is required on these provider types).
+- There are no placeholder semantics: a value such as `<...>` or `TODO_SET_*` is an ordinary
+  secret and is stored encrypted like any other.
+- Every response of these provider types carries `clientSecretIsSet` (`true` when a readable secret
+  is stored — encrypted with a key of this host's key ring, or legacy clear text before the encrypt
+  sweep; computed from the stored form, never by decrypting). A secret encrypted with a key id that
+  is not in the key ring (e.g. restored from another environment) is kept stored but reported as
+  `false` until the key is added to the ring or the secret is re-entered. Other provider types omit
+  the field. It is ignored on input.
+- They also carry `clientSecretKeyMissing` (`true` when the stored secret is encrypted with a key id
+  that is not in this host's key ring — the case above) and `clientSecretSetAt` (UTC time the current
+  encrypted secret was written; `null` for legacy clear text and when no secret is set). Both are
+  computed from the stored form and ignored on input.
+- With `SecretEncryption:StrictMode` on, a secret still stored as legacy clear text is reported as
+  `clientSecretIsSet: true` but cannot be read, so the provider is skipped at sign-in until the encrypt
+  sweep has run or the secret is re-entered (strict mode is enabled only after the sweep reports zero
+  clear-text values).
+- `POST` / `PUT` with a new `clientSecret` on a host without a key ring answer **503** with
+  `application/problem+json`, `code: "SecretEncryptionNotConfigured"` (nothing is stored). A `PUT`
+  without a new secret still works there and keeps the stored value.
+
 ### Email Domain Group Rules (`/{tenantId}/v1/emailDomainGroupRules`)
 
 Manages email domain to group mapping rules. When a new user logs in, their email domain is matched against these rules, and they are automatically added to the target group.

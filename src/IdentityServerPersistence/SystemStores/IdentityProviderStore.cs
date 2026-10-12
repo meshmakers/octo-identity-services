@@ -1,8 +1,10 @@
 using Meshmakers.Common.Shared;
 using Meshmakers.Octo.ConstructionKit.Contracts;
+using Meshmakers.Octo.ConstructionKit.Contracts.DataTransferObjects;
 using Meshmakers.Octo.Runtime.Contracts.MongoDb.Repositories;
 using Meshmakers.Octo.Runtime.Contracts.Repositories;
 using Meshmakers.Octo.Runtime.Contracts.Repositories.Query;
+using Meshmakers.Octo.Runtime.Contracts.RepositoryEntities;
 using Meshmakers.Octo.Services.Infrastructure.Services;
 using Persistence.IdentityCkModel.Generated.System.Identity.v2;
 
@@ -59,7 +61,7 @@ public class IdentityProviderStore(IMultiTenancyResolverService multiTenancyReso
 
     public async Task StoreAsync(RtIdentityProvider identityProvider)
     {
-        var session = await TenantRepository.GetSessionAsync();
+        using var session = await TenantRepository.GetSessionAsync();
         session.StartTransaction();
 
         var result = await TenantRepository.GetRtEntityByRtIdAsync<RtIdentityProvider>(session, identityProvider.RtId);
@@ -80,39 +82,40 @@ public class IdentityProviderStore(IMultiTenancyResolverService multiTenancyReso
     // re-enter it ("Secret is stored encrypted on the server. SET NEW SECRET"). Without this
     // preserve step the stored secret would be overwritten with null on every edit. ADO #4199.
     //
-    // Note: the Rt strong-typed ClientSecret property throws InvalidAttributeValueException if
-    // the underlying attribute is null, so read via GetAttributeStringValueOrDefault and write
-    // back through the typed setter (which stores via the attribute dictionary).
+    // Since AB#5540 ClientSecret is a Secret attribute (RtSecretValue). The engine's write step
+    // already carries an omitted / "" secret over on replace (concept §3.6); this explicit copy of
+    // the STORED value (a protected envelope, or legacy text before the encrypt sweep) is kept as
+    // defense in depth and so the replace never depends on the repository implementation. The
+    // value is copied as is — it is never decrypted here.
     private const string ClientSecretAttributeName = "ClientSecret";
+    private static readonly RtSecretValue EmptyPending = RtSecretValue.Pending(string.Empty);
 
     private static void PreserveOAuthClientSecretIfOmitted(RtIdentityProvider incoming,
         RtIdentityProvider existing)
     {
-        switch (incoming)
+        if (!HasClientSecret(incoming) || incoming.GetType() != existing.GetType()
+                                       || !IsClientSecretOmitted(incoming))
         {
-            case RtGoogleIdentityProvider g when existing is RtGoogleIdentityProvider exG
-                                                 && IsClientSecretOmitted(g):
-                g.ClientSecret = exG.ClientSecret;
-                break;
-            case RtMicrosoftIdentityProvider m when existing is RtMicrosoftIdentityProvider exM
-                                                    && IsClientSecretOmitted(m):
-                m.ClientSecret = exM.ClientSecret;
-                break;
-            case RtFacebookIdentityProvider f when existing is RtFacebookIdentityProvider exF
-                                                   && IsClientSecretOmitted(f):
-                f.ClientSecret = exF.ClientSecret;
-                break;
-            case RtAzureEntraIdIdentityProvider a when existing is RtAzureEntraIdIdentityProvider exA
-                                                       && IsClientSecretOmitted(a):
-                a.ClientSecret = exA.ClientSecret;
-                break;
+            return;
+        }
+
+        var stored = existing.GetAttributeSecretValueOrDefault(ClientSecretAttributeName);
+        if (stored != null)
+        {
+            incoming.SetAttributeValue(ClientSecretAttributeName, AttributeValueTypesDto.Secret, stored);
         }
     }
 
+    private static bool HasClientSecret(RtIdentityProvider entity)
+        => entity is RtGoogleIdentityProvider or RtMicrosoftIdentityProvider or RtFacebookIdentityProvider
+            or RtAzureEntraIdIdentityProvider;
+
+    // Omitted = not set, or a pending (newly entered) value that is empty. A marker sent back by a
+    // client ({"isSet":true}) also deserialises to Pending("") and therefore means "unchanged".
     private static bool IsClientSecretOmitted(RtIdentityProvider entity)
     {
-        var value = entity.GetAttributeStringValueOrDefault(ClientSecretAttributeName);
-        return string.IsNullOrEmpty(value);
+        var value = entity.GetAttributeSecretValueOrDefault(ClientSecretAttributeName);
+        return value == null || value == EmptyPending;
     }
 
     public async Task RemoveAsync(OctoObjectId rtId)

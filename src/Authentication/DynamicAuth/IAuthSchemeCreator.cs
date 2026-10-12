@@ -17,6 +17,11 @@ public interface IAuthSchemeCreator<in TAuthProvider> where TAuthProvider : RtId
     ///     Optional override for the scheme name. When provided, the scheme is registered under this name
     ///     (e.g. a tenant-prefixed name) instead of the provider's <see cref="RtIdentityProvider.Name" />.
     /// </param>
+    /// <param name="tenantId">
+    ///     Tenant the provider belongs to. Used to tag the counted decrypt of the provider's client
+    ///     secret (AB#5540); never part of the scheme.
+    /// </param>
     /// <returns></returns>
-    public AuthenticationScheme Create(TAuthProvider identityProvider, string? schemeNameOverride = null);
+    public AuthenticationScheme Create(TAuthProvider identityProvider, string? schemeNameOverride = null,
+        string? tenantId = null);
 }

@@ -83,4 +83,10 @@ public static class IdentityServiceConstants
     /// restore completes, so its presence on tenant startup is the gate that runs the restore.
     /// </summary>
     public const string PendingPostBlueprintRoleAssignmentsKey = "PendingPostBlueprintRoleAssignments";
+
+    /// <summary>
+    /// AB#5544: TenantConfiguration row recording that the one-time grant of <c>SecretManagement</c> to the
+    /// existing tenant administrators (<c>SecretManagementAdminGrant</c>) has run. Present = never run again.
+    /// </summary>
+    public const string SecretManagementAdminGrantKey = "SecretManagementAdminGrant";
 }

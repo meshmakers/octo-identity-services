@@ -577,11 +577,15 @@ attributes:
     valueType: String
     ownership: SeedOwned
     description: Gets or sets the URI of the provider, or discovery endpoint for OpenID Connect discovery.
+  # AB#5540 (AB#5528): the client secret an external identity provider (Google, Microsoft,
+  # Facebook, Azure Entra ID) issued to this tenant. Secret value type: stored as an encrypted
+  # envelope, never projected by any API (only "is set"), preserved on blueprint re-apply and
+  # left out of ExportRt. Only these four provider types use this definition; OIDC client
+  # secrets are the separate, hashed ClientSecrets record array.
   - id: ClientSecret
-    valueType: String
-    ownership: SeedOwned
-    description: Gets or sets the client secret of the application.
-    defaultValues: [ ]
+    valueType: Secret
+    ownership: Secret
+    description: Gets or sets the client secret of the external identity provider application.
   - id: ShowInDiscoveryDocument
     valueType: Boolean
     ownership: SeedOwned

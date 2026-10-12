@@ -1,6 +1,9 @@
+using System.Security.Cryptography;
 using Meshmakers.Common.Shared;
 using Meshmakers.Octo.Runtime.Contracts.MongoDb;
 using Meshmakers.Octo.Runtime.Contracts.Repositories.Query;
+using Meshmakers.Octo.Backend.Authentication.Secrets;
+using Meshmakers.Octo.Runtime.Contracts.Secrets;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.Extensions.Logging;
 using Persistence.IdentityCkModel.Generated.System.Identity.v2;
@@ -18,6 +21,7 @@ internal class DynamicAuthSchemeService : IDynamicAuthSchemeService
     private readonly IAuthSchemeCreatorFactory _authSchemeCreatorFactory;
     private readonly IAuthenticationSchemeProvider _schemeProvider;
     private readonly ISystemContext _systemContext;
+    private readonly IIdentityProviderSecretReader _secretReader;
     private readonly ILogger<DynamicAuthSchemeService> _logger;
 
     /// <summary>
@@ -26,12 +30,15 @@ internal class DynamicAuthSchemeService : IDynamicAuthSchemeService
     /// <param name="systemContext">System context for accessing any tenant's repository directly</param>
     /// <param name="schemeProvider">Scheme provider</param>
     /// <param name="authSchemeCreatorFactory">Factory to resolve creators of auth providers.</param>
+    /// <param name="secretReader">Reads the stored state of the providers' client secrets</param>
     /// <param name="logger">Logger</param>
     public DynamicAuthSchemeService(ISystemContext systemContext,
         IAuthenticationSchemeProvider schemeProvider,
         IAuthSchemeCreatorFactory authSchemeCreatorFactory,
+        IIdentityProviderSecretReader secretReader,
         ILogger<DynamicAuthSchemeService> logger)
     {
+        _secretReader = secretReader;
         _systemContext = systemContext;
         _schemeProvider = schemeProvider;
         _authSchemeCreatorFactory = authSchemeCreatorFactory;
@@ -77,42 +84,74 @@ internal class DynamicAuthSchemeService : IDynamicAuthSchemeService
 
             var schemeName = $"{prefix}{identityProvider.Name}";
 
-            AuthenticationScheme scheme;
-            switch (identityProvider)
+            if (_secretReader.GetClientSecretState(identityProvider) == IdentityProviderSecretState.KeyMissing)
             {
-                case RtGoogleIdentityProvider googleIdentityProvider:
-                    scheme = _authSchemeCreatorFactory.GetCreator<RtGoogleIdentityProvider>()
-                        .Create(googleIdentityProvider, schemeName);
-                    break;
-                case RtMicrosoftIdentityProvider microsoftIdentityProvider:
-                    scheme = _authSchemeCreatorFactory.GetCreator<RtMicrosoftIdentityProvider>()
-                        .Create(microsoftIdentityProvider, schemeName);
-                    break;
-                case RtAzureEntraIdIdentityProvider rtAzureEntraIdIdentityProvider:
-                    scheme = _authSchemeCreatorFactory.GetCreator<RtAzureEntraIdIdentityProvider>()
-                        .Create(rtAzureEntraIdIdentityProvider, schemeName);
-                    break;
+                // AB#5540 / decision r2-2: the client secret is encrypted with a key id this host does
+                // not know (restored from another environment, or no key ring). It is kept stored and
+                // reads as "not set", so the provider cannot sign in — skip only this provider.
+                _logger.LogError(
+                    "Skipped auth scheme '{SchemeName}' for tenant '{TenantId}': its client secret is encrypted with a key that is not in the key ring",
+                    schemeName, tenantId);
+                continue;
+            }
 
-                case RtOpenLdapIdentityProvider openLdapIdentityProvider:
-                    scheme = _authSchemeCreatorFactory.GetCreator<RtOpenLdapIdentityProvider>()
-                        .Create(openLdapIdentityProvider, schemeName);
-                    break;
+            AuthenticationScheme scheme;
+            try
+            {
+                switch (identityProvider)
+                {
+                    case RtGoogleIdentityProvider googleIdentityProvider:
+                        scheme = _authSchemeCreatorFactory.GetCreator<RtGoogleIdentityProvider>()
+                            .Create(googleIdentityProvider, schemeName, tenantId);
+                        break;
+                    case RtMicrosoftIdentityProvider microsoftIdentityProvider:
+                        scheme = _authSchemeCreatorFactory.GetCreator<RtMicrosoftIdentityProvider>()
+                            .Create(microsoftIdentityProvider, schemeName, tenantId);
+                        break;
+                    case RtAzureEntraIdIdentityProvider rtAzureEntraIdIdentityProvider:
+                        scheme = _authSchemeCreatorFactory.GetCreator<RtAzureEntraIdIdentityProvider>()
+                            .Create(rtAzureEntraIdIdentityProvider, schemeName, tenantId);
+                        break;
 
-                case RtMicrosoftAdIdentityProvider microsoftAdIdentityProvider:
-                    scheme = _authSchemeCreatorFactory.GetCreator<RtMicrosoftAdIdentityProvider>()
-                        .Create(microsoftAdIdentityProvider, schemeName);
-                    break;
-                case RtFacebookIdentityProvider facebookIdentityProvider:
-                    scheme = _authSchemeCreatorFactory.GetCreator<RtFacebookIdentityProvider>()
-                        .Create(facebookIdentityProvider, schemeName);
-                    break;
-                case RtOctoTenantIdentityProvider:
-                    // No ASP.NET auth scheme needed — cross-tenant auth is handled internally
-                    // by CrossTenantAuthenticationService, not via OIDC redirect.
-                    continue;
-                default:
-                    throw new InvalidOperationException(
-                        $"Identity provider '{identityProvider.CkTypeId}' is not supported.");
+                    case RtOpenLdapIdentityProvider openLdapIdentityProvider:
+                        scheme = _authSchemeCreatorFactory.GetCreator<RtOpenLdapIdentityProvider>()
+                            .Create(openLdapIdentityProvider, schemeName, tenantId);
+                        break;
+
+                    case RtMicrosoftAdIdentityProvider microsoftAdIdentityProvider:
+                        scheme = _authSchemeCreatorFactory.GetCreator<RtMicrosoftAdIdentityProvider>()
+                            .Create(microsoftAdIdentityProvider, schemeName, tenantId);
+                        break;
+                    case RtFacebookIdentityProvider facebookIdentityProvider:
+                        scheme = _authSchemeCreatorFactory.GetCreator<RtFacebookIdentityProvider>()
+                            .Create(facebookIdentityProvider, schemeName, tenantId);
+                        break;
+                    case RtOctoTenantIdentityProvider:
+                        // No ASP.NET auth scheme needed — cross-tenant auth is handled internally
+                        // by CrossTenantAuthenticationService, not via OIDC redirect.
+                        continue;
+                    default:
+                        throw new InvalidOperationException(
+                            $"Identity provider '{identityProvider.CkTypeId}' is not supported.");
+                }
+            }
+            catch (Exception ex) when (ex is SecretEncryptionNotConfiguredException
+                                           or UnknownSecretKeyIdException
+                                           or LegacyPlaintextSecretRejectedException
+                                           or SecretEnvelopeNotAllowedException
+                                           or CryptographicException)
+            {
+                // AB#5540: the provider's ClientSecret is stored encrypted and cannot be decrypted on
+                // this host (no key ring, a key id from another environment, a damaged value, or an
+                // enc:v2 envelope copied into a legacy string slot), or
+                // it is still clear text while strict mode rejects legacy plaintext reads.
+                // Skip only this provider so the tenant's other sign-in methods keep working; the
+                // secret has to be re-entered (or the key ring configured). The exception never
+                // carries the value, but log only its type to be safe.
+                _logger.LogError(
+                    "Skipped auth scheme '{SchemeName}' for tenant '{TenantId}': its client secret cannot be decrypted ({Reason})",
+                    schemeName, tenantId, ex.GetType().Name);
+                continue;
             }
 
             _schemeProvider.AddScheme(scheme);

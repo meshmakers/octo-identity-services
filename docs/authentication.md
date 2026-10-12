@@ -265,17 +265,54 @@ The former `DeviceApiController` (`/api/device/*`) now only holds the DTOs — t
 
 All scheme creators accept an optional `schemeNameOverride` parameter. When provided (e.g., a tenant-prefixed name like `octosystem:Google`), the scheme is registered under that name instead of the provider's `Name` property. The display name remains unchanged.
 
+### Client Secrets of External Providers (AB#5540)
+
+Since `System.Identity-2.25.0` the `ClientSecret` of Google, Microsoft, Facebook and Azure Entra ID
+providers is a CK `Secret` attribute (concept AB#5528 in `octo-construction-kit-engine/docs/`): stored
+as an `enc:v2:<kid>:…` envelope, never projected by an API, preserved on blueprint re-apply and left
+out of `ExportRt`.
+
+- **Reading:** `IIdentityProviderSecretReader` (`Authentication/Secrets/`) is the only place that turns
+  it into plaintext, through `ISecretAttributeProtector.Unprotect` with a `SecretAccessContext`
+  (tenant, CK type, attribute, service `identity`) — every call counts `octo.secrets.decrypt`. It
+  accepts all stored forms: `enc:v2`, legacy clear text (before the encrypt sweep, counted as a
+  plaintext read and warned about without the value) and `enc:v1`. The scheme creators receive the
+  tenant id as a third `Create` argument for the counter. Nothing logs the value.
+- **Key ring:** `AddRuntimeEngine()` binds `SecretEncryption` (`OCTO_SECRETENCRYPTION__KEYS__k1`,
+  `__ACTIVEKEYID`, `__LEGACYV1KEY`). Without keys the service starts; legacy clear-text secrets still
+  work, writing a new secret throws `SecretEncryptionNotConfiguredException`, and an encrypted one
+  is treated like an unknown key id (see below).
+- **Unknown key id:** an envelope whose key id is not in the key ring (e.g. after a
+  cross-environment restore, or no key ring at all) is kept stored and treated as "not set":
+  `IIdentityProviderSecretReader.GetClientSecretState` reports `KeyMissing` from the key id alone
+  (`ISecretAttributeProtector.IsKnownKeyId`, no decrypt), `GetClientSecret` returns `null` with an
+  error log (key id and provider, never the value), `DynamicAuthSchemeService` skips that provider
+  with an error log, and the REST API reports `clientSecretIsSet: false`. It becomes readable again
+  once the key is added to the ring; otherwise the secret has to be re-entered.
+- **Undecryptable secret:** `DynamicAuthSchemeService` skips only that provider (a damaged value, or
+  legacy clear text while `SecretEncryption:StrictMode` is on) and logs the exception type;
+  the tenant's other sign-in methods keep working. The secret has to be re-entered.
+- **Writing:** `IdentityProvidersController` / `MapperProfile` map a non-empty input to
+  `RtSecretValue.Pending`, which the engine encrypts on write (there are no placeholder semantics —
+  `<...>` / `TODO_SET_*` are ordinary values); null/"" leave the attribute absent, and
+  `IdentityProviderStore` carries the stored envelope over on replace (the engine does the same).
+
+- **Rollout:** pilot runbook for test-2 (preconditions, verification, rollback):
+  `rollout-identity-secret-phase3-test2.md`.
+
 ### OAuth Provider Pattern
 
 ```csharp
 public class GoogleAuthSchemeCreator : IAuthSchemeCreator<RtGoogleIdentityProvider>
 {
-    public AuthenticationScheme Create(RtGoogleIdentityProvider provider, string? schemeNameOverride = null)
+    public AuthenticationScheme Create(RtGoogleIdentityProvider provider, string? schemeNameOverride = null,
+        string? tenantId = null)
     {
         var schemeName = schemeNameOverride ?? provider.Name;
         var options = _builder.CreateOptions(schemeName);
         options.ClientId = provider.ClientId;
-        options.ClientSecret = provider.ClientSecret;
+        // Secret value type (AB#5540): counted decrypt via ISecretAttributeProtector
+        options.ClientSecret = _secretReader.GetClientSecret(provider, tenantId) ?? string.Empty;
 
         return new AuthenticationScheme(
             schemeName,
@@ -291,13 +328,14 @@ public class GoogleAuthSchemeCreator : IAuthSchemeCreator<RtGoogleIdentityProvid
 ```csharp
 public class AzureEntraIdAuthSchemeCreator : IAuthSchemeCreator<RtAzureEntraIdIdentityProvider>
 {
-    public AuthenticationScheme Create(RtAzureEntraIdIdentityProvider provider, string? schemeNameOverride = null)
+    public AuthenticationScheme Create(RtAzureEntraIdIdentityProvider provider, string? schemeNameOverride = null,
+        string? tenantId = null)
     {
         var schemeName = schemeNameOverride ?? provider.Name;
         var options = _builder.CreateOptions(schemeName);
         options.Authority = $"https://login.microsoftonline.com/{provider.TenantId}";
         options.ClientId = provider.ClientId;
-        options.ClientSecret = provider.ClientSecret;
+        options.ClientSecret = _secretReader.GetClientSecret(provider, tenantId);
         options.CallbackPath = "/auth/signin-callback";
 
         // Configure metadata discovery

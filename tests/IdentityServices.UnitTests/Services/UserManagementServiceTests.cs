@@ -167,7 +167,7 @@ public class UserManagementServiceTests
         await _sut.CreateAdminUserAsync(dto);
 
         // Assert
-        await _userManager.Received(12).AddToRoleAsync(Arg.Any<RtUser>(), Arg.Any<string>());
+        await _userManager.Received(13).AddToRoleAsync(Arg.Any<RtUser>(), Arg.Any<string>());
     }
 
     [Fact]
@@ -213,8 +213,50 @@ public class UserManagementServiceTests
 
         await _sut.CreateAdminUserAsync(dto);
 
-        await _userManager.Received(10).AddToRoleAsync(Arg.Any<RtUser>(), Arg.Any<string>());
+        await _userManager.Received(11).AddToRoleAsync(Arg.Any<RtUser>(), Arg.Any<string>());
         await _userManager.DidNotReceive().AddToRoleAsync(Arg.Any<RtUser>(), "FileManagement");
+    }
+
+    [Fact]
+    public async Task CreateAdminUserAsync_WhenValid_GrantsSecretManagementLikeAdminPanelManagement()
+    {
+        // AB#5544: the initial tenant administrator gets SecretManagement like AdminPanelManagement.
+        var dto = new AdminUserDto { EMail = "admin@test.com", Password = "SecurePass123!" };
+        _userManager.Users.Returns(Enumerable.Empty<RtUser>().AsQueryable());
+        _credentialGenerator.CheckPassword(dto.Password).Returns(true);
+        _userManager.FindByNameAsync(dto.EMail).Returns((RtUser?)null);
+        _userManager.CreateAsync(Arg.Any<RtUser>(), dto.Password)
+            .Returns(IdentityResult.Success);
+        SetupAllRequiredRoles();
+        _userManager.AddToRoleAsync(Arg.Any<RtUser>(), Arg.Any<string>())
+            .Returns(IdentityResult.Success);
+
+        await _sut.CreateAdminUserAsync(dto);
+
+        await _userManager.Received(1).AddToRoleAsync(Arg.Any<RtUser>(), "SecretManagement");
+        await _userManager.Received(1).AddToRoleAsync(Arg.Any<RtUser>(), CommonConstants.AdminPanelManagementRole);
+    }
+
+    [Fact]
+    public async Task CreateAdminUserAsync_WhenSecretManagementRoleIsMissing_StillGrantsTheOtherRoles()
+    {
+        // AB#5544: a tenant seeded by a bootstrap blueprint older than 1.7.0 has no SecretManagement role; the
+        // first administrator must still get every other role (the one-time grant adds it later).
+        var dto = new AdminUserDto { EMail = "admin@test.com", Password = "SecurePass123!" };
+        _userManager.Users.Returns(Enumerable.Empty<RtUser>().AsQueryable());
+        _credentialGenerator.CheckPassword(dto.Password).Returns(true);
+        _userManager.FindByNameAsync(dto.EMail).Returns((RtUser?)null);
+        _userManager.CreateAsync(Arg.Any<RtUser>(), dto.Password)
+            .Returns(IdentityResult.Success);
+        SetupAllRequiredRoles();
+        _roleManager.FindByNameAsync(CommonConstants.SecretManagementRole).Returns((RtRole?)null);
+        _userManager.AddToRoleAsync(Arg.Any<RtUser>(), Arg.Any<string>())
+            .Returns(IdentityResult.Success);
+
+        await _sut.CreateAdminUserAsync(dto);
+
+        await _userManager.Received(12).AddToRoleAsync(Arg.Any<RtUser>(), Arg.Any<string>());
+        await _userManager.DidNotReceive().AddToRoleAsync(Arg.Any<RtUser>(), CommonConstants.SecretManagementRole);
     }
 
     [Fact]
@@ -284,6 +326,7 @@ public class UserManagementServiceTests
             CommonConstants.CommunicationManagementRole,
             CommonConstants.BotManagementRole,
             CommonConstants.AdminPanelManagementRole,
+            CommonConstants.SecretManagementRole,
             CommonConstants.DashboardViewerRole,
             CommonConstants.DashboardManagementRole,
             CommonConstants.ReportingManagementRole,

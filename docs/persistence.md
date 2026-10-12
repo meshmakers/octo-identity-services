@@ -488,8 +488,7 @@ Every tenant is provisioned with a `TenantOwners` group that has all 10 default 
 `System.Identity.Bootstrap` 1.5.0 seeds the tenant roles `FileManagement` (rtId `660…61`) and `FileViewer`
 (rtId `660…62`) for the platform file system (`System/FileSystemItem`, Studio "Files" page, epic AB#6171
 decision D5) and assigns both to `TenantOwners`; a new tenant's initial administrator gets both from
-`UserManagementService.CreateAdminUserAsync`. (`660…60` and blueprint 1.4.0 are taken by `SecretManagement`,
-AB#5544.) Existing tenants receive them once, automatically, through `FileRoleGrant`
+`UserManagementService.CreateAdminUserAsync`. (`660…60` is taken by `SecretManagement`, AB#5544, which ships as blueprint 1.7.0; there is no 1.4.0.) Existing tenants receive them once, automatically, through `FileRoleGrant`
 (`src/IdentityServerPersistence/Services/FileRoles/`), so nobody loses access when the Studio and the file
 APIs switch from the Reporting roles to the File roles:
 
@@ -589,6 +588,44 @@ Not covered on purpose: **customer client-credentials clients** and **octo-cli w
 no user roles and get 403 on the Files API (REST) and on System.Files in the engine until the client itself is given
 `FileViewer` or `FileManagement` (`octo-cli AddClientToRole`). The **Reporting service** needs nothing: it reads and
 writes files in-process with a session without security context (system), and its client ids are only OIDC audiences.
+
+### SecretManagement Grant for Existing Administrators (AB#5544)
+
+`System.Identity.Bootstrap` 1.7.0 (the SECRET line, on top of the Files line 1.6.0) seeds the tenant role `SecretManagement` (rtId `660…60`; may trigger
+secret sweeps and delete a pre-sweep dump early). It is for **human administrators only** (decision Gerald
+2026-10-11) and therefore deliberately **not** assigned to `TenantOwners`: that group also holds client service
+accounts and provisioned parent-tenant administrators (AB#5708), who would inherit it. A new tenant's initial
+administrator gets it from `UserManagementService.CreateAdminUserAsync`. Existing tenants receive it once,
+automatically, through `SecretManagementAdminGrant`
+(`src/IdentityServerPersistence/Services/SecretManagement/`):
+
+- **When:** in `DefaultConfigurationCreatorService.SetupTenantAsync`, right after the blueprint apply (the
+  role must exist, so this is deliberately not an `IMigration` — infrastructure migrations run before the
+  blueprint). `SetupTenantAsync` runs for every tenant on identity startup and on tenant create/update
+  (`PosCreateTenant`/`PosUpdateTenant`), so the first identity start with blueprint 1.7.0 grants it.
+- **Who** (`SecretManagementGrantPlanner`, pure and unit-tested): every **local user** who holds both
+  `AdminPanelManagement` **and** `TenantManagement` (directly, via groups — `TenantOwners` included — or mixed) and
+  does not hold `SecretManagement` yet gets a **direct** `AssignedRole` edge. Never granted:
+  - **groups** — a role on a group is inherited by all members, including client service accounts
+    (`octo-pipeline-sa-*`, any client in the group) and external tenant user mappings (parent-tenant administrators
+    provisioned through `provisionCurrentUser`, AB#5708, sit in `TenantOwners`); so there is no group-level grant and
+    no `TenantOwners` edge;
+  - **clients and external tenant user mappings** — they are not `RtUser`s and never subjects;
+  - **cross-tenant shadow users** (user name prefix `xt_`, reserved by `CrossTenantShadowUserName`) — provisioned
+    parent-tenant administrators who exist as local users after their first login;
+  - `AdminPanelManagement` alone is **not** enough — secret sweeps stay a separate privilege.
+- **Additive and once:** only `AssignedRole` insert edges are written, nothing is removed. Afterwards the
+  tenant configuration row `SecretManagementAdminGrant` (`IdentityServiceConstants.SecretManagementAdminGrantKey`)
+  records the run with the granted user rtIds; while it exists the step does nothing, so an operator
+  who later removes the role from someone does not see it come back. If the role does not exist yet, nothing
+  is written and no marker is recorded (retried on the next setup). A failure is logged and does not fail
+  tenant setup.
+- **Concurrency:** the step takes a per-tenant in-process lock and re-reads each user's edges right before the
+  insert (the engine does not reject a second identical `AssignedRole` edge). Two identity replicas starting at the
+  same instant can still race; a duplicate edge is harmless (role reads treat the edges as a set) and the marker
+  stops further runs.
+- **Everybody else** (e.g. a user with only `AdminPanelManagement`, service accounts, provisioned administrators)
+  gets the role by an explicit grant in the user administration (`octo-cli AddUserToRole`).
 
 ## Migration System
 

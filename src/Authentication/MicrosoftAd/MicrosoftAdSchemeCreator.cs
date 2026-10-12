@@ -14,7 +14,8 @@ public class MicrosoftAdSchemeCreator : IAuthSchemeCreator<RtMicrosoftAdIdentity
         _optionsBuilder = optionsBuilder;
     }
 
-    public AuthenticationScheme Create(RtMicrosoftAdIdentityProvider identityProvider, string? schemeNameOverride = null)
+    public AuthenticationScheme Create(RtMicrosoftAdIdentityProvider identityProvider, string? schemeNameOverride = null,
+        string? tenantId = null)
     {
         var schemeName = schemeNameOverride ?? identityProvider.Name;
         var options = _optionsBuilder.CreateOptions(schemeName);

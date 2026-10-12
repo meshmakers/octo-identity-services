@@ -17,10 +17,10 @@ public class DefaultConfigurationCreatorServiceSchemaVersionMergeTests
     {
         var merged = DefaultConfigurationCreatorService.MergeSchemaVersionsAfterImport(
             new Dictionary<string, string> { ["System.Identity"] = "2.22.0", ["System"] = "2.5.0" },
-            new Dictionary<string, string> { ["System.Identity"] = "2.23.0", ["System"] = "2.5.0" },
-            new Dictionary<string, string> { ["System.Identity"] = "2.23.0", ["System"] = "2.5.0" });
+            new Dictionary<string, string> { ["System.Identity"] = "2.25.0", ["System"] = "2.5.0" },
+            new Dictionary<string, string> { ["System.Identity"] = "2.25.0", ["System"] = "2.5.0" });
 
-        merged["System.Identity"].Should().Be("2.23.0");
+        merged["System.Identity"].Should().Be("2.25.0");
     }
 
     [Fact]
@@ -52,8 +52,8 @@ public class DefaultConfigurationCreatorServiceSchemaVersionMergeTests
     {
         var merged = DefaultConfigurationCreatorService.MergeSchemaVersionsAfterImport(
             new Dictionary<string, string> { ["System"] = "2.5.0" },
-            new Dictionary<string, string> { ["System"] = "2.5.0", ["System.Identity"] = "2.23.0" },
-            new Dictionary<string, string> { ["System.Identity"] = "2.23.0" });
+            new Dictionary<string, string> { ["System"] = "2.5.0", ["System.Identity"] = "2.25.0" },
+            new Dictionary<string, string> { ["System.Identity"] = "2.25.0" });
 
         merged.Should().ContainSingle().Which.Key.Should().Be("System");
     }
@@ -68,7 +68,7 @@ public class DefaultConfigurationCreatorServiceSchemaVersionMergeTests
     {
         var merged = DefaultConfigurationCreatorService.MergeSchemaVersionsAfterImport(
             new Dictionary<string, string> { ["System.Identity"] = "2.22.0" },
-            new Dictionary<string, string> { ["System.Identity"] = "2.23.0" },
+            new Dictionary<string, string> { ["System.Identity"] = "2.25.0" },
             new Dictionary<string, string>());
 
         merged["System.Identity"].Should().Be("2.22.0");
@@ -83,7 +83,7 @@ public class DefaultConfigurationCreatorServiceSchemaVersionMergeTests
     {
         var merged = DefaultConfigurationCreatorService.MergeSchemaVersionsAfterImport(
             new Dictionary<string, string> { ["System.Identity"] = "2.22.0" },
-            new Dictionary<string, string> { ["System.Identity"] = "2.23.0" },
+            new Dictionary<string, string> { ["System.Identity"] = "2.25.0" },
             new Dictionary<string, string> { ["System.Identity"] = "2.22.0" });
 
         merged["System.Identity"].Should().Be("2.22.0");
@@ -123,7 +123,7 @@ public class DefaultConfigurationCreatorServiceSchemaVersionMergeTests
         var merged = DefaultConfigurationCreatorService.MergeSchemaVersionsAfterImport(
             new Dictionary<string, string> { ["System.Identity"] = "2.22.0" },
             new Dictionary<string, string> { ["System.Identity"] = "2.22.0" },
-            new Dictionary<string, string> { ["System.Identity"] = "2.23.0" });
+            new Dictionary<string, string> { ["System.Identity"] = "2.25.0" });
 
         merged["System.Identity"].Should().Be("2.22.0");
     }
