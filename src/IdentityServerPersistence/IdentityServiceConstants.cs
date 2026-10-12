@@ -69,6 +69,13 @@ public static class IdentityServiceConstants
     public const string FileRoleGrantKey = "FileRoleGrant";
 
     /// <summary>
+    /// AB#6578: TenantConfiguration row recording that the one-time grant of <see cref="FileManagementRole"/> to the
+    /// human tenant administrators (<c>TenantAdministratorFileRoleGrant</c>, rule v2) has run. Separate from
+    /// <see cref="FileRoleGrantKey"/> on purpose: tenants that already ran the Reporting-based grant still get it.
+    /// </summary>
+    public const string TenantAdministratorFileRoleGrantKey = "FileRoleGrantTenantAdministrators";
+
+    /// <summary>
     /// Phase 3 PR #4: TenantConfiguration row used by <c>PreBlueprintCleanupMigration</c> to hand
     /// captured User → Role and ExternalTenantUserMapping → Role assignments (by role name) over
     /// to the post-blueprint restore step in
