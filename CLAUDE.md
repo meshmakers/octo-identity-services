@@ -1331,6 +1331,32 @@ published maximum (`octo-ckc -c ValidateVersion` against the catalogs). The upgr
 SecretManagement role (no TenantOwners edge: human administrators only) and the direct grants to existing local administrators. A new bootstrap version
 that changes seeds should add its own snapshot.
 
+## Logging: credentials never reach a log property (AB#5792)
+
+`nlog.config` renders JSON with `includeEventProperties="true"`, which serializes every message-template
+argument **by reflection over its public properties** — bypassing any redacting `ToString()`. Two leaks
+followed from that, both closed:
+
+- **OpenIddict messages (INFO).** `OpenIddictServerDispatcher` logs `{Response}` / `{Request}`; the message
+  text was redacted, but the JSON property carried `AccessToken`, `IdToken`, `RefreshToken`, `client_secret`
+  and `code` in clear text. `Program.cs` calls `RegisterSecretRedaction()` (`Logging/LogSecretRedaction.cs`)
+  **before** `LoadConfigurationFromFile`: an NLog object transformation renders `OpenIddictMessage`,
+  `OpenIddictRequest` and `OpenIddictResponse` through their own redacting `ToString()` in every layout.
+  Register new secret-bearing library types there, not in the layout.
+- **API DTOs (TRACE).** ASP.NET Core logs action arguments through `ToString()`; the compiler-generated
+  record `ToString()` printed `Password`, 2FA `Code`, `RecoveryCode`, `Token`, `SharedKey`. Every DTO in
+  `Controllers/Api` with such a string member overrides
+  `protected virtual bool PrintMembers(StringBuilder) => RedactingDtoPrinter.Print(this, builder)`, which
+  prints `[REDACTED]` for any member whose name matches `Password|Code|Secret|Token|SharedKey`.
+  🔴 **A new DTO with such a member needs that one line** — `SensitiveDtoToStringTests` scans the whole
+  namespace by reflection and fails for a DTO that renders the value.
+
+Tests: `tests/IdentityServices.UnitTests/Logging/LogSecretRedactionTests.cs` runs the **real**
+`nlog.config` (Console target swapped for a memory target) and includes a control that proves the leak
+without the registration; `tests/IdentityServices.UnitTests/Controllers/SensitiveDtoToStringTests.cs`.
+Never log a request/response/DTO that carries a credential with `{@Object}` or as a template argument
+unless its type is covered by one of the two mechanisms above.
+
 ## Configuration
 
 Environment variables are prefixed with `OCTO_`. Key configuration sections:

@@ -332,6 +332,8 @@ public record StartPhoneEnrollmentResponseDto
 
 public record VerifyPhoneRequestDto
 {
+    protected virtual bool PrintMembers(System.Text.StringBuilder builder) => RedactingDtoPrinter.Print(this, builder);
+
     public string? PhoneNumber { get; init; }
     public string? Code { get; init; }
 }
@@ -359,6 +361,8 @@ public record StartEmailEnrollmentResponseDto
 
 public record VerifyEmailRequestDto
 {
+    protected virtual bool PrintMembers(System.Text.StringBuilder builder) => RedactingDtoPrinter.Print(this, builder);
+
     public string? Email { get; init; }
     public string? Code { get; init; }
 }

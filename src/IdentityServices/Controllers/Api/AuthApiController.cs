@@ -1605,6 +1605,8 @@ public record LoginContextDto
 
 public record LoginRequestDto
 {
+    protected virtual bool PrintMembers(System.Text.StringBuilder builder) => RedactingDtoPrinter.Print(this, builder);
+
     public string Username { get; init; } = string.Empty;
     public string Password { get; init; } = string.Empty;
     public bool RememberLogin { get; init; }
@@ -1665,6 +1667,8 @@ public record ForgotPasswordResultDto
 
 public record ResetPasswordRequestDto
 {
+    protected virtual bool PrintMembers(System.Text.StringBuilder builder) => RedactingDtoPrinter.Print(this, builder);
+
     public string Email { get; init; } = string.Empty;
     public string Token { get; init; } = string.Empty;
     public string NewPassword { get; init; } = string.Empty;
@@ -1687,6 +1691,8 @@ public record ValidateResetTokenResultDto
 
 public record TwoFactorLoginRequestDto
 {
+    protected virtual bool PrintMembers(System.Text.StringBuilder builder) => RedactingDtoPrinter.Print(this, builder);
+
     public string Code { get; init; } = string.Empty;
     public bool RememberMachine { get; init; }
     public string? ReturnUrl { get; init; }
@@ -1694,6 +1700,8 @@ public record TwoFactorLoginRequestDto
 
 public record TwoFactorEmailLoginRequestDto
 {
+    protected virtual bool PrintMembers(System.Text.StringBuilder builder) => RedactingDtoPrinter.Print(this, builder);
+
     public string Code { get; init; } = string.Empty;
     public bool RememberMachine { get; init; }
     public string? ReturnUrl { get; init; }
@@ -1708,6 +1716,8 @@ public record TwoFactorLoginResultDto
 
 public record RecoveryCodeLoginRequestDto
 {
+    protected virtual bool PrintMembers(System.Text.StringBuilder builder) => RedactingDtoPrinter.Print(this, builder);
+
     public string RecoveryCode { get; init; } = string.Empty;
     public string? ReturnUrl { get; init; }
 }
@@ -1722,6 +1732,8 @@ public record SendTwoFactorEmailResultDto
 
 public record LdapLoginRequestDto
 {
+    protected virtual bool PrintMembers(System.Text.StringBuilder builder) => RedactingDtoPrinter.Print(this, builder);
+
     public string Scheme { get; init; } = string.Empty;
     public string Username { get; init; } = string.Empty;
     public string Password { get; init; } = string.Empty;
@@ -1749,11 +1761,15 @@ public record CrossTenantTokenRequestDto
 
 public record CrossTenantTokenResultDto
 {
+    protected virtual bool PrintMembers(System.Text.StringBuilder builder) => RedactingDtoPrinter.Print(this, builder);
+
     public string Token { get; init; } = string.Empty;
 }
 
 public record CrossTenantLoginRequestDto
 {
+    protected virtual bool PrintMembers(System.Text.StringBuilder builder) => RedactingDtoPrinter.Print(this, builder);
+
     public string Token { get; init; } = string.Empty;
     public string? ReturnUrl { get; init; }
 }

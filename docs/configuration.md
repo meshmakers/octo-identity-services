@@ -364,6 +364,15 @@ Logging is configured via `nlog.config`:
 </nlog>
 ```
 
+### Credentials in logs (AB#5792)
+
+The JSON layout serializes message-template arguments by reflection (`includeEventProperties="true"`).
+To keep credentials out of those properties, `Program.cs` registers an NLog object transformation for
+OpenIddict request/response messages (they render through OpenIddict's redacting `ToString()`), and API
+request DTOs in `Controllers/Api` redact password, code, secret and token members in `ToString()`.
+Lowering `OCTO_LOG_LEVEL_ROOT` to `Info` or even `Trace` therefore no longer writes access, ID or refresh
+tokens, client secrets, passwords or 2FA codes to the log.
+
 ### Runtime Log Level Changes
 
 Log levels can be changed at runtime via the API:

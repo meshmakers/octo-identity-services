@@ -44,12 +44,16 @@ using Microsoft.AspNetCore.DataProtection;
 using Microsoft.AspNetCore.DataProtection.KeyManagement;
 using Microsoft.AspNetCore.DataProtection.Repositories;
 using System.Threading.RateLimiting;
+using Meshmakers.Octo.Backend.IdentityServices.Logging;
 using NLog;
 using NLog.Web;
 using LogLevel = Microsoft.Extensions.Logging.LogLevel;
 
-// NLog: Setup the logger first to catch all errors
-var nLogFactory = LogManager.Setup().RegisterNLogWeb().LoadConfigurationFromFile("nlog.config").LogFactory;
+// NLog: Setup the logger first to catch all errors.
+// RegisterSecretRedaction must come before the configuration is loaded: the JSON layout serializes
+// message-template arguments by reflection (includeEventProperties), which would otherwise write the
+// tokens and client secrets of OpenIddict messages in clear text (AB#5792).
+var nLogFactory = LogManager.Setup().RegisterNLogWeb().RegisterSecretRedaction().LoadConfigurationFromFile("nlog.config").LogFactory;
 var logger = nLogFactory.GetCurrentClassLogger();
 
 try
