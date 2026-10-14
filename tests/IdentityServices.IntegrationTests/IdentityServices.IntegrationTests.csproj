@@ -27,7 +27,7 @@
         <PackageReference Include="Otp.NET" Version="1.4.1" />
 
         <!-- Integration Testing -->
-        <PackageReference Include="Microsoft.AspNetCore.Mvc.Testing" Version="10.0.11" />
+        <PackageReference Include="Microsoft.AspNetCore.Mvc.Testing" Version="10.0.13" />
 
         <!-- TestContainers for MongoDB -->
         <PackageReference Include="Testcontainers.MongoDb" Version="4.14.0" />
@@ -36,8 +36,8 @@
         <PackageReference Include="MartinCostello.Logging.XUnit.v3" Version="0.7.1" />
 
         <!-- Configuration -->
-        <PackageReference Include="Microsoft.Extensions.Configuration.Json" Version="10.0.11" />
-        <PackageReference Include="Microsoft.Extensions.Configuration.Binder" Version="10.0.11" />
+        <PackageReference Include="Microsoft.Extensions.Configuration.Json" Version="10.0.13" />
+        <PackageReference Include="Microsoft.Extensions.Configuration.Binder" Version="10.0.13" />
     </ItemGroup>
 
     <ItemGroup>
