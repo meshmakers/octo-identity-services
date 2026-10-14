@@ -1031,7 +1031,7 @@ internal sealed class FixedTenantResolver(ITenantRepository repository) : IMulti
   - `StoreAndGetAll_RoundTripsXml`: `StoreElement(XElement.Parse("<key id=\"k1\">payload</key>"), "key-test-1")` → `GetAllElements()` contains an element with same name+content.
   - `StoreElement_SameFriendlyName_Twice_IsIdempotent`: store twice → `GetAllElements()` has exactly one element with that name.
   - `GetAllElements_EmptyStore_SeedsFromLegacyPath`: write 2 fake `key-*.xml` files into a temp dir, set options `DataProtectionKeysPath = tempDir` → first `GetAllElements()` returns both, and a second store instance (fresh `_seedAttempted`) still sees them from Mongo after deleting the temp dir.
-  - Constructing the store needs an `IServiceScopeFactory` whose scope resolves `ISystemContext` — use `_fixture.Provider!.GetRequiredService<IServiceScopeFactory>()` (the fixture's root provider has `ISystemContext` registered). Options: `Options.Create(new OctoIdentityServicesOptions { DataProtectionKeysPath = tempDir })`.
+  - Constructing the store needs an `IServiceScopeFactory` whose scope resolves `ISystemContext` — use `_fixture.Provider!.GetRequiredService<IServiceScopeFactory>()` (the fixture's root provider has `ISystemContext` registered). Options: `Options.Create(new OctoIdentityServicesOptions { IdentityServerLicenseKey = "test", AutoMapperLicenseKey = "test", DataProtectionKeysPath = tempDir })`.
   - NOTE: tests must be tolerant of pre-existing `DataProtectionKey` docs in the shared fixture DB (system tenant is recreated per fixture, so a fresh class fixture = clean state; keep the seed test FIRST or assert on specific FriendlyNames rather than counts).
 
 - [ ] **Step 5.3: Run integration tests**
