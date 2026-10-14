@@ -6,6 +6,7 @@ using Meshmakers.Octo.Backend.Authentication.Consumers;
 using Meshmakers.Octo.Backend.Authentication.DynamicAuth;
 using Meshmakers.Octo.Backend.IdentityServices.Authorization;
 using Meshmakers.Octo.Backend.IdentityServices.Configuration;
+using Meshmakers.Octo.Backend.IdentityServices.Mapping;
 using Meshmakers.Octo.Backend.IdentityServices.Consumers;
 using Meshmakers.Octo.Backend.IdentityServices.Cookies;
 using Meshmakers.Octo.Backend.IdentityServices.Resources;
@@ -255,7 +256,6 @@ try
 
     // Add the extra configuration;
     builder.Services.ConfigureOptions<ConfigureOctoOpenApiOptions>();
-    builder.Services.ConfigureOptions<ConfigureMapperConfigurationExpression>();
 
     builder.Services.TryAddEnumerable(ServiceDescriptor
         .Singleton<IPostConfigureOptions<JwtBearerOptions>, JwtBearerPostConfigureOptions>());
@@ -340,9 +340,7 @@ try
     // API Controllers only (no MVC views)
     builder.Services.AddControllers();
 
-    builder.Services.AddAutoMapper(_ =>
-    {
-    }, typeof(Program));
+    builder.Services.AddSingleton<IdentityProviderDtoMapper>();
 
     // Migrations are in the IdentityServerPersistence assembly
     builder.Services.AddMigrations(typeof(IdentityServiceConstants).Assembly);

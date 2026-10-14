@@ -1,10 +1,10 @@
 using System.Buffers.Text;
 using System.Security.Cryptography;
 using System.Text.Json;
-using AutoMapper;
 using FluentAssertions;
 using IdentityServerPersistence.SystemStores;
-using Meshmakers.Octo.Backend.IdentityServices;
+using Meshmakers.Octo.Backend.Authentication.Secrets;
+using Meshmakers.Octo.Backend.IdentityServices.Mapping;
 using Meshmakers.Octo.Backend.IdentityServices.TenantApi.v1.Controllers;
 using Meshmakers.Octo.Common.DistributionEventHub.Services;
 using Meshmakers.Octo.Communication.Contracts.DataTransferObjects;
@@ -14,7 +14,6 @@ using Meshmakers.Octo.Runtime.Contracts.Secrets;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
-using Microsoft.Extensions.Logging.Abstractions;
 using NSubstitute;
 using Persistence.IdentityCkModel.Generated.System.Identity.v2;
 using Xunit;
@@ -49,15 +48,12 @@ public sealed class IdentityProvidersControllerSecretTests : IDisposable
         services.AddLogging();
         services.AddSingleton(_protector);
         services.AddDynamicAuthentication();
-        services.AddTransient<ClientSecretIsSetResolver>();
-        services.AddTransient<ClientSecretKeyMissingResolver>();
-        services.AddTransient<ClientSecretSetAtResolver>();
         _services = services.BuildServiceProvider();
 
-        var mapper = new MapperConfiguration(cfg => cfg.AddProfile<MapperProfile>(), NullLoggerFactory.Instance)
-            .CreateMapper(_services.GetService);
+        var identityProviderDtoMapper =
+            new IdentityProviderDtoMapper(_services.GetRequiredService<IIdentityProviderSecretReader>());
         _store.TenantId.Returns("test-tenant");
-        _sut = new IdentityProvidersController(_store, mapper, Substitute.For<IDistributionEventHubService>());
+        _sut = new IdentityProvidersController(_store, identityProviderDtoMapper, Substitute.For<IDistributionEventHubService>());
     }
 
     public void Dispose() => _services.Dispose();
@@ -129,7 +125,7 @@ public sealed class IdentityProvidersControllerSecretTests : IDisposable
         var result = await _sut.GetIdentityProvidersAsync();
 
         var dto = result.Value!.IdentityProviders.Should().ContainSingle().Subject;
-        MapperProfile.GetClientSecretInput(dto).Should().BeNull();
+        IdentityProviderEntityMapping.GetClientSecretInput(dto).Should().BeNull();
         ClientSecretIsSet(dto).Should().BeTrue();
         var json = Serialize(result.Value);
         json.Should().NotContain("enc:v2").And.NotContain("legacy-clear-text-secret");
@@ -146,7 +142,7 @@ public sealed class IdentityProvidersControllerSecretTests : IDisposable
         var result = await _sut.Get(stored.RtId);
 
         var dto = result.Value!.IdentityProviders.Should().ContainSingle().Subject;
-        MapperProfile.GetClientSecretInput(dto).Should().BeNull();
+        IdentityProviderEntityMapping.GetClientSecretInput(dto).Should().BeNull();
         ClientSecretIsSet(dto).Should().BeTrue();
         var json = Serialize(result.Value);
         json.Should().NotContain("enc:v2").And.NotContain("legacy-clear-text-secret");

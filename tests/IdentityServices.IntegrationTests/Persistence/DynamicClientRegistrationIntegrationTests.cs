@@ -201,7 +201,6 @@ public class DynamicClientRegistrationIntegrationTests : IClassFixture<IdentityS
             NullLogger<ClientMirrorProvisioningService>.Instance, systemContext);
         var options = Options.Create(new OctoIdentityServicesOptions
         {
-            AutoMapperLicenseKey = "test",
             DynamicClientRegistration = new DynamicClientRegistrationOptions
             {
                 Enabled = enabled,

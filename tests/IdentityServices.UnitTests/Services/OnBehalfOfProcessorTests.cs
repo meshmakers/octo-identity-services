@@ -71,8 +71,7 @@ public class OnBehalfOfProcessorTests
             serverOptions,
             Options.Create(new OctoIdentityServicesOptions
             {
-                AuthorityUrl = Authority,
-                AutoMapperLicenseKey = string.Empty
+                AuthorityUrl = Authority
             }),
             _resolver,
             _impersonationResolver,

@@ -1,7 +1,6 @@
 ﻿using System.ComponentModel;
 using System.ComponentModel.DataAnnotations;
 using Asp.Versioning;
-using AutoMapper;
 using IdentityServerPersistence;
 using IdentityServerPersistence.SystemStores;
 using Meshmakers.Octo.Common.DistributionEventHub.Services;
@@ -14,6 +13,7 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Persistence.IdentityCkModel.Generated.System.Identity.v2;
 using Meshmakers.Octo.Backend.Authentication;
+using Meshmakers.Octo.Backend.IdentityServices.Mapping;
 
 namespace Meshmakers.Octo.Backend.IdentityServices.TenantApi.v1.Controllers;
 
@@ -28,19 +28,20 @@ public class IdentityProvidersController : ControllerBase
 {
     private readonly IDistributionEventHubService _distributionEventHubService;
     private readonly IOctoIdentityProviderStore _identityProviderStore;
-    private readonly IMapper _mapper;
+    private readonly IdentityProviderDtoMapper _identityProviderDtoMapper;
 
     /// <summary>
     ///     Constructor
     /// </summary>
     /// <param name="identityProviderStore"></param>
-    /// <param name="mapper"></param>
+    /// <param name="identityProviderDtoMapper"></param>
     /// <param name="distributionEventHubService"></param>
-    public IdentityProvidersController(IOctoIdentityProviderStore identityProviderStore, IMapper mapper,
+    public IdentityProvidersController(IOctoIdentityProviderStore identityProviderStore,
+        IdentityProviderDtoMapper identityProviderDtoMapper,
         IDistributionEventHubService distributionEventHubService)
     {
         _identityProviderStore = identityProviderStore;
-        _mapper = mapper;
+        _identityProviderDtoMapper = identityProviderDtoMapper;
         _distributionEventHubService = distributionEventHubService;
     }
 
@@ -53,7 +54,7 @@ public class IdentityProvidersController : ControllerBase
         var identityProviders = await _identityProviderStore.GetAllAsync();
         return new IdentityProvidersResult
         {
-            IdentityProviders = identityProviders.Select(_mapper.Map<IdentityProviderDto>)
+            IdentityProviders = identityProviders.Select(_identityProviderDtoMapper.ToDto)
         };
     }
 
@@ -72,7 +73,7 @@ public class IdentityProvidersController : ControllerBase
 
         return new IdentityProvidersResult
         {
-            IdentityProviders = [_mapper.Map<IdentityProviderDto>(identityProvider)]
+            IdentityProviders = [_identityProviderDtoMapper.ToDto(identityProvider)]
         };
     }
 
@@ -102,7 +103,7 @@ public class IdentityProvidersController : ControllerBase
             return ValidationProblem(ModelState);
         }
 
-        var identityProvider = _mapper.Map<RtIdentityProvider>(identityProviderDto);
+        var identityProvider = identityProviderDto.ToEntity();
 
         if (!await TryStoreAsync(identityProvider))
         {
@@ -110,7 +111,7 @@ public class IdentityProvidersController : ControllerBase
         }
 
         await SendIdentityProviderUpdate();
-        return _mapper.Map<IdentityProviderDto>(await ReloadStoredAsync(identityProvider));
+        return _identityProviderDtoMapper.ToDto(await ReloadStoredAsync(identityProvider));
     }
 
     // The provider Name is embedded verbatim into the just-in-time provisioned external
@@ -189,7 +190,7 @@ public class IdentityProvidersController : ControllerBase
             return ValidationProblem(ModelState);
         }
 
-        var identityProvider = _mapper.Map<RtIdentityProvider>(identityProviderDto);
+        var identityProvider = identityProviderDto.ToEntity();
         identityProvider.RtId = rtId;
 
         if (!await TryStoreAsync(identityProvider))
@@ -200,7 +201,7 @@ public class IdentityProvidersController : ControllerBase
         await SendIdentityProviderUpdate();
         // AB#5540: never echo the request — it carries the write-only ClientSecret in clear text.
         // The response is mapped from the stored entity, whose Secret attribute is never projected.
-        return Ok(_mapper.Map<IdentityProviderDto>(await ReloadStoredAsync(identityProvider)));
+        return Ok(_identityProviderDtoMapper.ToDto(await ReloadStoredAsync(identityProvider)));
     }
 
     /// <summary>

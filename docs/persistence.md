@@ -279,40 +279,30 @@ public class ClientStore : IOctoClientStore
 
 ### PersistentGrantStore
 
-Handles OAuth tokens with expiration and cleanup. **Grants are always stored in the system tenant database**, regardless of which tenant the OIDC request targets. This avoids mismatches between the `/connect/authorize` endpoint (which resolves tenant from `acr_values`) and the `/connect/token` endpoint (which has no tenant context). The `TokenCleanupHostService` also runs without HTTP context, so centralizing grants ensures expired grants are always cleaned up.
+Legacy store for `RtPersistedGrant`. Since the OpenIddict cutover (AB#4989) it holds **no OAuth grants**:
+authorization codes, refresh tokens, device codes and remembered consents live in `RtOAuthToken` /
+`RtOAuthAuthorization` (`OpenIddictTokenStore` / `OpenIddictAuthorizationStore`). Its only writer is
+`UserEmailInteractionService`, which stores e-mail confirmation and password-reset tokens.
+
+Grants are stored **per tenant**: the store works on the repository of the current HTTP request, resolved by
+`IMultiTenancyResolverService`.
 
 ```csharp
-public class PersistentGrantStore(ISystemContext systemContext, IMapper mapper)
+public class PersistentGrantStore(
+    IMultiTenancyResolverService multiTenancyResolverService)
     : IOctoPersistentGrantStore
 {
-    // Always use system tenant — grants are transient, keyed by unique keys,
-    // and must be accessible across authorize and token endpoints.
-    private readonly ITenantRepository _tenantRepository = systemContext.GetSystemTenantRepository();
+    private ITenantRepository TenantRepository => multiTenancyResolverService.GetTenantRepository();
 
-    public async Task RemoveExpiredGrantsAsync()
-    {
-        var session = await _tenantRepository.GetSessionAsync();
-        session.StartTransaction();
+    public async Task StoreAsync(RtPersistedGrant grant) { /* insert or replace by GrantKey */ }
 
-        var queryOptions = RtEntityQueryOptions.Create()
-            .FieldFilter(nameof(RtPersistedGrant.ExpirationDate),
-                FieldFilterOperator.LessEqualThan,
-                DateTimeOffset.UtcNow);
-
-        // Batch deletion in chunks of 50
-        var expired = await _tenantRepository
-            .GetRtEntitiesByTypeAsync<RtPersistedGrant>(session, queryOptions, 0, 50);
-
-        foreach (var grant in expired)
-        {
-            await _tenantRepository.DeleteOneRtEntityByRtIdAsync<RtPersistedGrant>(
-                session, grant.RtId, DeleteOptions.Erase);
-        }
-
-        await session.CommitTransactionAsync();
-    }
+    public async Task RemoveExpiredGrantsAsync() { /* current tenant only */ }
 }
 ```
+
+`TokenCleanupHostService` runs without an HTTP context and therefore does not use this store: it deletes
+expired `RtPersistedGrant` entries (`ExpirationDateTime` in the past, batches of 50) directly in the repository
+of the system tenant and of every child tenant.
 
 ### OctoUserStore
 
@@ -369,7 +359,7 @@ var options = RtEntityQueryOptions.Create()
     // Array contains
     .FieldFilter(nameof(RtClient.AllowedScopes), FieldFilterOperator.AnyEq, scope)
     // Range query
-    .FieldFilter(nameof(RtPersistedGrant.ExpirationDate),
+    .FieldFilter(nameof(RtPersistedGrant.ExpirationDateTime),
         FieldFilterOperator.LessEqualThan, DateTimeOffset.UtcNow)
     // Nested record matching
     .MatchField(nameof(RtUser.Claims), nestedCriteria);
@@ -670,10 +660,23 @@ builder.Services.AddMigrations(typeof(IdentityServiceConstants).Assembly);
 
 Migrations run automatically on application startup.
 
-## AutoMapper Configuration
+## DTO Mapping
 
-**Custom Converters:**
-- `AttributeStringValueListConverter` - Maps `ICollection<string>` ↔ `IAttributeValueList<string>`
+Entities and REST DTOs are mapped by explicit code in `src/IdentityServices/Mapping/` (AB#6506; there
+is no mapping library and no license key):
+
+| Mapper | Direction | Notes |
+|--------|-----------|-------|
+| `IdentityProviderDtoMapper` (singleton, injected) | `RtIdentityProvider` → `IdentityProviderDto` | Picks the DTO subtype from the entity type. The client secret is never projected; `ClientSecretIsSet`, `ClientSecretKeyMissing` and `ClientSecretSetAt` come from `IIdentityProviderSecretReader` (stored form only, AB#5540) |
+| `IdentityProviderEntityMapping.ToEntity()` | `IdentityProviderDto` → `RtIdentityProvider` | A non-empty `ClientSecret` becomes `RtSecretValue.Pending`; `null` / `""` leaves the attribute **unassigned** — assigning `null` would write the attribute and clear the stored secret on replace |
+| `UserMapping` | `RtUser` ↔ `UserDto` | `ToDto`, `ToEntity`, `ApplyTo` (update in place). Id and logins are never taken from the request |
+| `RoleMapping` | `RtRole` ↔ `RoleDto` | `ApplyTo` changes only the name |
+| `EmailDomainGroupRuleMapping` | `RtEmailDomainGroupRule` ↔ `EmailDomainGroupRuleDto` | `ToEntity` leaves `RtId` to the controller |
+
+Rt entities are attribute dictionaries: every property a mapper assigns becomes a stored attribute,
+even when the value is `null`. A mapper must therefore assign exactly the properties the DTO carries.
+The mappers were verified against the former profile-based mapping on the stored attributes; the
+round-trip tests in `tests/IdentityServices.UnitTests/Mapping/` keep that behaviour.
 
 ## Dependency Injection Setup
 
@@ -681,7 +684,7 @@ Store registration in `RuntimeEngineBuilderExtensions.AddOctoIdentityPersistence
 
 ```csharp
 builder.AddMongoDbRuntimeRepository();
-builder.Services.AddCkModelSystemIdentityV1();  // Register generated CK models
+builder.Services.AddCkModelSystemIdentityV2();  // Register generated CK models
 
 builder.Services.AddScoped<IOctoClientStore, ClientStore>();
 builder.Services.AddScoped<IOctoResourceStore, ResourceStore>();

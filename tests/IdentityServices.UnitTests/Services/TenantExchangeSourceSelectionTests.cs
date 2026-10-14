@@ -49,8 +49,7 @@ public class TenantExchangeSourceSelectionTests
     {
         var options = Options.Create(new OctoIdentityServicesOptions
         {
-            AuthorityUrl = "https://identity.example.com/",
-            AutoMapperLicenseKey = string.Empty
+            AuthorityUrl = "https://identity.example.com/"
         });
 
         _sut = new TenantExchangeProcessor(
