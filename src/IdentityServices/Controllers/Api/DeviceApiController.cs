@@ -7,6 +7,8 @@ namespace Meshmakers.Octo.Backend.IdentityServices.Controllers.Api;
 
 public record DeviceAuthorizationContextDto
 {
+    protected virtual bool PrintMembers(System.Text.StringBuilder builder) => RedactingDtoPrinter.Print(this, builder);
+
     public string UserCode { get; init; } = string.Empty;
     public string? ClientName { get; init; }
     public string? ClientUrl { get; init; }
@@ -19,6 +21,8 @@ public record DeviceAuthorizationContextDto
 
 public record DeviceAuthorizationRequestDto
 {
+    protected virtual bool PrintMembers(System.Text.StringBuilder builder) => RedactingDtoPrinter.Print(this, builder);
+
     public string UserCode { get; init; } = string.Empty;
     public IEnumerable<string>? ScopesConsented { get; init; }
     public bool RememberConsent { get; init; }
@@ -27,6 +31,8 @@ public record DeviceAuthorizationRequestDto
 
 public record DeviceDenyRequestDto
 {
+    protected virtual bool PrintMembers(System.Text.StringBuilder builder) => RedactingDtoPrinter.Print(this, builder);
+
     public string UserCode { get; init; } = string.Empty;
 }
 

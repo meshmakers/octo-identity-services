@@ -135,6 +135,8 @@ public record SetupStatusDto
 
 public record SetupAdminRequestDto
 {
+    protected virtual bool PrintMembers(System.Text.StringBuilder builder) => RedactingDtoPrinter.Print(this, builder);
+
     [Required]
     [EmailAddress]
     public string Email { get; init; } = string.Empty;

@@ -627,6 +627,8 @@ public record RemoveLoginResultDto
 
 public record ChangePasswordRequestDto
 {
+    protected virtual bool PrintMembers(System.Text.StringBuilder builder) => RedactingDtoPrinter.Print(this, builder);
+
     public string CurrentPassword { get; init; } = string.Empty;
     public string NewPassword { get; init; } = string.Empty;
     public string ConfirmPassword { get; init; } = string.Empty;
@@ -634,6 +636,8 @@ public record ChangePasswordRequestDto
 
 public record SetPasswordRequestDto
 {
+    protected virtual bool PrintMembers(System.Text.StringBuilder builder) => RedactingDtoPrinter.Print(this, builder);
+
     public string NewPassword { get; init; } = string.Empty;
     public string ConfirmPassword { get; init; } = string.Empty;
 }
@@ -656,6 +660,8 @@ public record TwoFactorStatusDto
 
 public record AuthenticatorSetupDto
 {
+    protected virtual bool PrintMembers(System.Text.StringBuilder builder) => RedactingDtoPrinter.Print(this, builder);
+
     public string SharedKey { get; init; } = string.Empty;
     public string QrCodeUri { get; init; } = string.Empty;
     public string QrCodeImage { get; init; } = string.Empty;
@@ -663,11 +669,15 @@ public record AuthenticatorSetupDto
 
 public record VerifyAuthenticatorRequestDto
 {
+    protected virtual bool PrintMembers(System.Text.StringBuilder builder) => RedactingDtoPrinter.Print(this, builder);
+
     public string Code { get; init; } = string.Empty;
 }
 
 public record VerifyAuthenticatorResultDto
 {
+    protected virtual bool PrintMembers(System.Text.StringBuilder builder) => RedactingDtoPrinter.Print(this, builder);
+
     public bool Success { get; init; }
     public string? ErrorMessage { get; init; }
     public IEnumerable<string> RecoveryCodes { get; init; } = [];
@@ -675,6 +685,8 @@ public record VerifyAuthenticatorResultDto
 
 public record DisableTwoFactorRequestDto
 {
+    protected virtual bool PrintMembers(System.Text.StringBuilder builder) => RedactingDtoPrinter.Print(this, builder);
+
     public string Code { get; init; } = string.Empty;
 }
 
@@ -686,6 +698,8 @@ public record DisableTwoFactorResultDto
 
 public record GenerateRecoveryCodesResultDto
 {
+    protected virtual bool PrintMembers(System.Text.StringBuilder builder) => RedactingDtoPrinter.Print(this, builder);
+
     public IEnumerable<string> RecoveryCodes { get; init; } = [];
 }
 
