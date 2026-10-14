@@ -25,6 +25,8 @@ public class ClientMirrorProvisioningService(
     ///     first request stays blind to the SPA until the cache expires. A failing publish is logged and never
     ///     fails the provisioning: the policy cache has a TTL and heals anyway.
     /// </summary>
+    private static readonly TimeSpan PublishTimeout = TimeSpan.FromSeconds(5);
+
     private async Task PublishCorsClientsUpdateAsync(string tenantId)
     {
         if (distributionEventHubService == null)
@@ -34,12 +36,18 @@ public class ClientMirrorProvisioningService(
 
         try
         {
-            await distributionEventHubService.PublishAsync(
+            // The publish goes through the message broker, and a MassTransit send endpoint waits for the broker to be
+            // reachable without a bound of its own. A provisioning (a tenant setup, a test host without a broker) must
+            // never wait for that: the wait is bounded, and a late answer is only observed, never awaited.
+            var publish = distributionEventHubService.PublishAsync(
                 new CorsClientsUpdate(tenantId, Guid.NewGuid(), DateTime.Now));
+            _ = publish.ContinueWith(static t => _ = t.Exception, TaskContinuationOptions.OnlyOnFaulted);
+            await publish.WaitAsync(PublishTimeout).ConfigureAwait(false);
         }
         catch (Exception ex)
         {
-            logger.LogWarning(ex, "Failed to publish CorsClientsUpdate for tenant '{TenantId}'", tenantId);
+            logger.LogWarning(ex, "Failed to publish CorsClientsUpdate for tenant '{TenantId}'; the CORS policy cache heals on its TTL",
+                tenantId);
         }
     }
 
