@@ -282,16 +282,15 @@ public class ClientStore : IOctoClientStore
 Handles OAuth tokens with expiration and cleanup. **Grants are always stored in the system tenant database**, regardless of which tenant the OIDC request targets. This avoids mismatches between the `/connect/authorize` endpoint (which resolves tenant from `acr_values`) and the `/connect/token` endpoint (which has no tenant context). The `TokenCleanupHostService` also runs without HTTP context, so centralizing grants ensures expired grants are always cleaned up.
 
 ```csharp
-public class PersistentGrantStore(ISystemContext systemContext, IMapper mapper)
+public class PersistentGrantStore(
+    IMultiTenancyResolverService multiTenancyResolverService)
     : IOctoPersistentGrantStore
 {
-    // Always use system tenant — grants are transient, keyed by unique keys,
-    // and must be accessible across authorize and token endpoints.
-    private readonly ITenantRepository _tenantRepository = systemContext.GetSystemTenantRepository();
+    private ITenantRepository TenantRepository => multiTenancyResolverService.GetTenantRepository();
 
     public async Task RemoveExpiredGrantsAsync()
     {
-        var session = await _tenantRepository.GetSessionAsync();
+        var session = await TenantRepository.GetSessionAsync();
         session.StartTransaction();
 
         var queryOptions = RtEntityQueryOptions.Create()
@@ -300,12 +299,12 @@ public class PersistentGrantStore(ISystemContext systemContext, IMapper mapper)
                 DateTimeOffset.UtcNow);
 
         // Batch deletion in chunks of 50
-        var expired = await _tenantRepository
+        var expired = await TenantRepository
             .GetRtEntitiesByTypeAsync<RtPersistedGrant>(session, queryOptions, 0, 50);
 
         foreach (var grant in expired)
         {
-            await _tenantRepository.DeleteOneRtEntityByRtIdAsync<RtPersistedGrant>(
+            await TenantRepository.DeleteOneRtEntityByRtIdAsync<RtPersistedGrant>(
                 session, grant.RtId, DeleteOptions.Erase);
         }
 

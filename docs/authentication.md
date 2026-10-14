@@ -292,7 +292,7 @@ out of `ExportRt`.
 - **Undecryptable secret:** `DynamicAuthSchemeService` skips only that provider (a damaged value, or
   legacy clear text while `SecretEncryption:StrictMode` is on) and logs the exception type;
   the tenant's other sign-in methods keep working. The secret has to be re-entered.
-- **Writing:** `IdentityProvidersController` / `MapperProfile` map a non-empty input to
+- **Writing:** `IdentityProvidersController` / `IdentityProviderEntityMapping.ToEntity()` map a non-empty input to
   `RtSecretValue.Pending`, which the engine encrypts on write (there are no placeholder semantics —
   `<...>` / `TODO_SET_*` are ordinary values); null/"" leave the attribute absent, and
   `IdentityProviderStore` carries the stored envelope over on replace (the engine does the same).
