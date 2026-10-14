@@ -40,6 +40,6 @@
 # concept AB#5528 in octo-construction-kit-engine). String -> Secret is Minor
 # (CkSemVerClassifier): stored clear-text values stay readable as legacy values
 # until the encrypt sweep has run. Secret requires System >= 2.5 (decision 12).
-modelId: System.Identity-2.25.0
+modelId: System.Identity-2.26.0
 dependencies:
   - System-[2.5,3.0)
