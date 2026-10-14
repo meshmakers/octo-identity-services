@@ -706,6 +706,10 @@ of the selected groups — the same mechanism `provisionCurrentUser` uses with `
 > threw "No route matches the supplied values" while formatting the 201 Location header (the entity was
 > already stored) and surfaced as a 500. It now returns `Created(relativeSelfLink, dto)`. The
 > `AdminProvisioningController.Create` was never affected — it already used `Created(string.Empty, …)`.
+> `EmailDomainGroupRulesController.Create` had the same bug (`CreatedAtAction(nameof(GetByIdAsync), …)`: MVC
+> strips the `Async` suffix from action names, so no route matched) and was fixed the same way in AB#6648,
+> pinned by `EmailDomainGroupRulesCreateTests`. **Rule:** a create action returns
+> `Created($"{Request.Path}/{rtId}", dto)`, never `CreatedAtAction`.
 
 The `provisionCurrentUser` endpoint extracts `sub`, `preferred_username`, and `tenant_id` from the JWT, fetches all roles from the target tenant, and creates an `RtExternalTenantUserMapping` with all role IDs. It also adds the mapping as a member of the **TenantOwners** group (via `GroupMember` association), so the user inherits all roles through group membership. If a mapping already exists for the user, it returns the existing one.
 

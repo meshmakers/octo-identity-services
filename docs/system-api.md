@@ -343,7 +343,7 @@ Manages email domain to group mapping rules. When a new user logs in, their emai
 |--------|----------|--------|-------------|
 | GET | `/emailDomainGroupRules` | ReadOnly | Get all rules |
 | GET | `/emailDomainGroupRules/{rtId}` | ReadOnly | Get rule by ID |
-| POST | `/emailDomainGroupRules` | ReadWrite | Create new rule |
+| POST | `/emailDomainGroupRules` | ReadWrite | Create new rule (`201 Created`, `Location` = `/emailDomainGroupRules/{rtId}`) |
 | PUT | `/emailDomainGroupRules/{rtId}` | ReadWrite | Replace rule |
 | DELETE | `/emailDomainGroupRules/{rtId}` | ReadWrite | Delete rule |
 
