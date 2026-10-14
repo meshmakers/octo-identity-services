@@ -4,6 +4,7 @@ using IdentityServerPersistence.SystemStores;
 using Meshmakers.Octo.Backend.IdentityServices.TenantApi.v1.Controllers;
 using Meshmakers.Octo.Common.DistributionEventHub.Services;
 using Meshmakers.Octo.Communication.Contracts.DataTransferObjects;
+using Meshmakers.Octo.Services.Contracts.DistributionEventHub.Messages;
 using Microsoft.AspNetCore.Mvc;
 using NSubstitute;
 using Persistence.IdentityCkModel.Generated.System.Identity.v2;
@@ -172,6 +173,44 @@ public class ClientsControllerOverlayUrisTests
         // cache-bust publish) so the cmdlet's repeated Start-Octo / CI runs don't churn
         // rtChangedDateTime or invalidate the per-tenant CORS cache for nothing.
         await _clientStore.Received(1).UpdateAsync(ClientId, client);
+    }
+
+    [Fact]
+    public async Task ApplyOverlayUris_AddsUris_PublishesCorsClientsUpdate()
+    {
+        var client = new RtClientBuilder().WithClientId(ClientId).Build();
+        _clientStore.FindRtClientByIdAsync(ClientId).Returns(client);
+
+        await _sut.ApplyOverlayUris(ClientId, new ApplyOverlayUrisDto
+        {
+            OverlayName = OverlayName,
+            AllowedCorsOrigins = new List<string> { "https://localhost:5173" }
+        });
+
+        await _eventHub.Received(1).PublishAsync(
+            Arg.Is<CorsClientsUpdate>(m => m.TenantId == TenantId));
+    }
+
+    [Fact]
+    public async Task ApplyOverlayUris_NothingAdded_StillPublishesCorsClientsUpdate_WithoutPersisting()
+    {
+        // AB#5487: an idempotent re-apply is the obvious repair for a CORS policy that was cached before the
+        // client's origins existed, so "0 added" must still refresh the cache - but not touch the DB.
+        var client = new RtClientBuilder().WithClientId(ClientId).WithCorsOrigins("https://studio.example").Build();
+        _clientStore.FindRtClientByIdAsync(ClientId).Returns(client);
+
+        var result = await _sut.ApplyOverlayUris(ClientId, new ApplyOverlayUrisDto
+        {
+            OverlayName = OverlayName,
+            AllowedCorsOrigins = new List<string> { "https://studio.example" }
+        });
+
+        var dto = result.Should().BeOfType<OkObjectResult>().Subject.Value
+            .Should().BeOfType<ApplyOverlayUrisResultDto>().Subject;
+        dto.AllowedCorsOrigins.Added.Should().Be(0);
+        await _clientStore.DidNotReceiveWithAnyArgs().UpdateAsync(default!, default!);
+        await _eventHub.Received(1).PublishAsync(
+            Arg.Is<CorsClientsUpdate>(m => m.TenantId == TenantId));
     }
 
     [Fact]

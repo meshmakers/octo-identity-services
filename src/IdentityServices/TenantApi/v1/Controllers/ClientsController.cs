@@ -347,22 +347,27 @@ public class ClientsController : ControllerBase
         var postLogoutResult = AppendOverlayUris(appClient.PostLogoutRedirectUris, dto.PostLogoutRedirectUris, sourceTag);
         var corsResult = AppendOverlayUris(appClient.AllowedCorsOrigins, dto.AllowedCorsOrigins, sourceTag);
 
-        // No-op short-circuit: if every incoming URI hit the dedup branch, the client entity
-        // is byte-identical to what we loaded. Skipping the UpdateAsync + cache-bust holds
-        // the endpoint's "re-run is no DB churn / no cache invalidation" contract — important
-        // for the cmdlet caller that re-applies the overlay on every Start-Octo / CI run.
+        // No-op short-circuit for the DB: if every incoming URI hit the dedup branch, the client entity
+        // is byte-identical to what we loaded, so we skip the UpdateAsync and hold the endpoint's
+        // "re-run is no DB churn" contract — important for the cmdlet caller that re-applies the overlay
+        // on every Start-Octo / CI run.
+        //
+        // The CORS refresh event is published unconditionally (AB#5487): "0 added" still means the caller
+        // asked for a refresh, and an idempotent re-apply is the obvious repair for a policy that was cached
+        // before the client's origins existed. The event is cheap (a cache invalidation).
         var totalAdded = redirectResult.Added + postLogoutResult.Added + corsResult.Added;
-        if (totalAdded > 0)
+        try
         {
-            try
+            if (totalAdded > 0)
             {
                 await _octoClientStore.UpdateAsync(id, appClient);
-                await ClearCacheAsync();
             }
-            catch (Exception e)
-            {
-                return BadRequest(new InternalServerErrorDto(e.Message));
-            }
+
+            await ClearCacheAsync();
+        }
+        catch (Exception e)
+        {
+            return BadRequest(new InternalServerErrorDto(e.Message));
         }
 
         return Ok(new ApplyOverlayUrisResultDto

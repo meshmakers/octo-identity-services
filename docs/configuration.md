@@ -38,6 +38,24 @@ export OCTO_Identity__SigningCertificatePassword="secret"
 }
 ```
 
+##### CORS policy cache (AB#5487)
+
+The Identity service builds its CORS policy from the client origins (`allowedCorsOrigins`) of the system tenant
+and all registered tenants and caches it in process memory.
+
+| Setting | Default | Meaning |
+|---------|---------|---------|
+| `Identity:CorsPolicyCacheSeconds` (env `OCTO_IDENTITY__CORSPOLICYCACHESECONDS`) | `60` | Lifetime of the cached policy. After it expires the next request rebuilds the policy from the database, so a missed `CorsClientsUpdate` event (another pod, a client written without event) or a removed origin heals on its own. `0` or less disables the time-based expiry (event-driven invalidation only). |
+
+Behaviour that does not depend on the setting:
+
+- A policy with **no allowed origin** is never cached; every request rebuilds it until at least one origin exists. A tenant
+  that gets its app client mirrored in after the first request therefore works as soon as the client exists.
+- `CorsClientsUpdate` (cache invalidation on all pods) is published whenever clients change: by the clients API (create, update,
+  delete, secrets, overlay) and by client mirror provisioning (new mirror, sync, removal). The overlay endpoint
+  (`POST {tenant}/v1/clients/{id}/overlayUris`) publishes the event even when it added no URI, so an idempotent re-apply
+  refreshes the cache without touching the client.
+
 ##### Token signing (OpenIddict)
 
 Since AB#4989/AB#4996 the OAuth2/OIDC server is **OpenIddict** (Duende IdentityServer removed).
