@@ -279,7 +279,13 @@ public class ClientStore : IOctoClientStore
 
 ### PersistentGrantStore
 
-Handles OAuth tokens with expiration and cleanup. **Grants are always stored in the system tenant database**, regardless of which tenant the OIDC request targets. This avoids mismatches between the `/connect/authorize` endpoint (which resolves tenant from `acr_values`) and the `/connect/token` endpoint (which has no tenant context). The `TokenCleanupHostService` also runs without HTTP context, so centralizing grants ensures expired grants are always cleaned up.
+Legacy store for `RtPersistedGrant`. Since the OpenIddict cutover (AB#4989) it holds **no OAuth grants**:
+authorization codes, refresh tokens, device codes and remembered consents live in `RtOAuthToken` /
+`RtOAuthAuthorization` (`OpenIddictTokenStore` / `OpenIddictAuthorizationStore`). Its only writer is
+`UserEmailInteractionService`, which stores e-mail confirmation and password-reset tokens.
+
+Grants are stored **per tenant**: the store works on the repository of the current HTTP request, resolved by
+`IMultiTenancyResolverService`.
 
 ```csharp
 public class PersistentGrantStore(
@@ -288,30 +294,15 @@ public class PersistentGrantStore(
 {
     private ITenantRepository TenantRepository => multiTenancyResolverService.GetTenantRepository();
 
-    public async Task RemoveExpiredGrantsAsync()
-    {
-        var session = await TenantRepository.GetSessionAsync();
-        session.StartTransaction();
+    public async Task StoreAsync(RtPersistedGrant grant) { /* insert or replace by GrantKey */ }
 
-        var queryOptions = RtEntityQueryOptions.Create()
-            .FieldFilter(nameof(RtPersistedGrant.ExpirationDate),
-                FieldFilterOperator.LessEqualThan,
-                DateTimeOffset.UtcNow);
-
-        // Batch deletion in chunks of 50
-        var expired = await TenantRepository
-            .GetRtEntitiesByTypeAsync<RtPersistedGrant>(session, queryOptions, 0, 50);
-
-        foreach (var grant in expired)
-        {
-            await TenantRepository.DeleteOneRtEntityByRtIdAsync<RtPersistedGrant>(
-                session, grant.RtId, DeleteOptions.Erase);
-        }
-
-        await session.CommitTransactionAsync();
-    }
+    public async Task RemoveExpiredGrantsAsync() { /* current tenant only */ }
 }
 ```
+
+`TokenCleanupHostService` runs without an HTTP context and therefore does not use this store: it deletes
+expired `RtPersistedGrant` entries (`ExpirationDateTime` in the past, batches of 50) directly in the repository
+of the system tenant and of every child tenant.
 
 ### OctoUserStore
 
@@ -368,7 +359,7 @@ var options = RtEntityQueryOptions.Create()
     // Array contains
     .FieldFilter(nameof(RtClient.AllowedScopes), FieldFilterOperator.AnyEq, scope)
     // Range query
-    .FieldFilter(nameof(RtPersistedGrant.ExpirationDate),
+    .FieldFilter(nameof(RtPersistedGrant.ExpirationDateTime),
         FieldFilterOperator.LessEqualThan, DateTimeOffset.UtcNow)
     // Nested record matching
     .MatchField(nameof(RtUser.Claims), nestedCriteria);
@@ -693,7 +684,7 @@ Store registration in `RuntimeEngineBuilderExtensions.AddOctoIdentityPersistence
 
 ```csharp
 builder.AddMongoDbRuntimeRepository();
-builder.Services.AddCkModelSystemIdentityV1();  // Register generated CK models
+builder.Services.AddCkModelSystemIdentityV2();  // Register generated CK models
 
 builder.Services.AddScoped<IOctoClientStore, ClientStore>();
 builder.Services.AddScoped<IOctoResourceStore, ResourceStore>();
