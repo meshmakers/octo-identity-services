@@ -707,9 +707,14 @@ of the selected groups — the same mechanism `provisionCurrentUser` uses with `
 > already stored) and surfaced as a 500. It now returns `Created(relativeSelfLink, dto)`. The
 > `AdminProvisioningController.Create` was never affected — it already used `Created(string.Empty, …)`.
 > `EmailDomainGroupRulesController.Create` had the same bug (`CreatedAtAction(nameof(GetByIdAsync), …)`: MVC
-> strips the `Async` suffix from action names, so no route matched) and was fixed the same way in AB#6648,
-> pinned by `EmailDomainGroupRulesCreateTests`. **Rule:** a create action returns
-> `Created($"{Request.Path}/{rtId}", dto)`, never `CreatedAtAction`.
+> strips the `Async` suffix from action names, so no route matched). AB#6648 fixed it with a **named route**:
+> `[HttpGet("{rtId}", Name = …)]` plus `CreatedAtRoute(name, new { tenantId, version, rtId }, dto)`, pinned by
+> `EmailDomainGroupRulesCreateTests` (also with a trailing slash on the POST URL). **Rule for new create
+> actions:** use a named route, not `CreatedAtAction` (breaks on the `Async` suffix) and not a hand-built
+> `$"{Request.Path}/{id}"` (ignores `PathBase`, doubles a trailing slash). Pass `tenantId` and `version`
+> from `RouteData.Values` explicitly: with `Asp.Versioning` and the `{tenantId:tenantId}/v{version:apiVersion}`
+> prefix, link generation does not fill them in and answers "No route matches". The hand-built link in
+> `ExternalTenantUserMappingsController.Create` predates this rule and still has those two weaknesses.
 
 The `provisionCurrentUser` endpoint extracts `sub`, `preferred_username`, and `tenant_id` from the JWT, fetches all roles from the target tenant, and creates an `RtExternalTenantUserMapping` with all role IDs. It also adds the mapping as a member of the **TenantOwners** group (via `GroupMember` association), so the user inherits all roles through group membership. If a mapping already exists for the user, it returns the existing one.
 

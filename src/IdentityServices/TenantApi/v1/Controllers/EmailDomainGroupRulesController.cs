@@ -24,6 +24,8 @@ namespace Meshmakers.Octo.Backend.IdentityServices.TenantApi.v1.Controllers;
 public class EmailDomainGroupRulesController(
     IEmailDomainGroupRuleStore emailDomainGroupRuleStore) : ControllerBase
 {
+    private const string GetEmailDomainGroupRuleRouteName = "GetEmailDomainGroupRule";
+
     [HttpGet]
     [Authorize(IdentityServiceConstants.IdentityTenantAdministrationReadPolicy)]
     [EndpointSummary("Returns all email domain group rules.")]
@@ -37,7 +39,7 @@ public class EmailDomainGroupRulesController(
         };
     }
 
-    [HttpGet("{rtId}")]
+    [HttpGet("{rtId}", Name = GetEmailDomainGroupRuleRouteName)]
     [Authorize(IdentityServiceConstants.IdentityTenantAdministrationReadPolicy)]
     [EndpointSummary("Returns an email domain group rule by its ID.")]
     [ProducesResponseType(typeof(EmailDomainGroupRuleDto), StatusCodes.Status200OK)]
@@ -67,8 +69,13 @@ public class EmailDomainGroupRulesController(
         await HandleWriteExceptionAsync(async () => await emailDomainGroupRuleStore.StoreAsync(rule));
 
         var resultDto = rule.ToDto();
-        var locationOfCreatedRule = $"{Request.Path}/{rule.RtId}";
-        return Created(locationOfCreatedRule, resultDto);
+        var routeValuesOfCreatedRule = new
+        {
+            tenantId = RouteData.Values["tenantId"],
+            version = RouteData.Values["version"],
+            rtId = rule.RtId
+        };
+        return CreatedAtRoute(GetEmailDomainGroupRuleRouteName, routeValuesOfCreatedRule, resultDto);
     }
 
     [HttpPut("{rtId}")]

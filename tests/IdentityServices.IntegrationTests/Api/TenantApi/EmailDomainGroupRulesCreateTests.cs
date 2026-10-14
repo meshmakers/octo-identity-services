@@ -15,8 +15,10 @@ public class EmailDomainGroupRulesCreateTests : IntegrationTestBase
     {
     }
 
-    [Fact]
-    public async Task Create_Returns201_WithLocationOfTheStoredRule()
+    [Theory]
+    [InlineData("emailDomainGroupRules")]
+    [InlineData("emailDomainGroupRules/")]
+    public async Task Create_Returns201_WithLocationOfTheStoredRule(string collectionPath)
     {
         var cancellationToken = TestContext.Current.CancellationToken;
         var rule = new EmailDomainGroupRuleDto
@@ -26,7 +28,7 @@ public class EmailDomainGroupRulesCreateTests : IntegrationTestBase
             Description = "created by EmailDomainGroupRulesCreateTests"
         };
 
-        var createResponse = await Client.PostAsJsonAsync(TenantApiUrl("emailDomainGroupRules"), rule, cancellationToken);
+        var createResponse = await Client.PostAsJsonAsync(TenantApiUrl(collectionPath), rule, cancellationToken);
         var createBody = await createResponse.Content.ReadAsStringAsync(cancellationToken);
 
         createResponse.StatusCode.Should().Be(HttpStatusCode.Created, createBody);
@@ -36,7 +38,7 @@ public class EmailDomainGroupRulesCreateTests : IntegrationTestBase
 
         var location = createResponse.Headers.Location;
         location.Should().NotBeNull();
-        location!.ToString().Should().EndWith($"/emailDomainGroupRules/{created.RtId}");
+        location!.ToString().Should().EndWithEquivalentOf($"{TenantApiUrl("emailDomainGroupRules")}/{created.RtId}");
 
         var readBack = await Client.GetFromJsonAsync<EmailDomainGroupRuleDto>(location, cancellationToken);
         readBack!.RtId.Should().Be(created.RtId);
