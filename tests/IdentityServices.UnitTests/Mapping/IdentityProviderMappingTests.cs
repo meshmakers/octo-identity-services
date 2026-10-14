@@ -1,3 +1,4 @@
+using System.Text.Json;
 using FluentAssertions;
 using Meshmakers.Octo.Backend.IdentityServices.Mapping;
 using Meshmakers.Octo.Communication.Contracts.DataTransferObjects;
@@ -21,6 +22,8 @@ public sealed class IdentityProviderMappingTests : IDisposable
         nameof(RtMicrosoftAdIdentityProvider.UserBaseDn),
         nameof(RtMicrosoftAdIdentityProvider.UserNameAttribute)
     ];
+
+    private static readonly JsonSerializerOptions WebJson = new(JsonSerializerDefaults.Web);
 
     private readonly ServiceProvider _services = TestSecretReader.CreateServices();
     private readonly IdentityProviderDtoMapper _sut;
@@ -56,21 +59,24 @@ public sealed class IdentityProviderMappingTests : IDisposable
         roundTripped.Attributes.Should().BeEquivalentTo(expectedAttributes);
     }
 
-    [Fact]
-    public void ToDto_ProjectsSecretStateButNeverTheSecret()
+    public static TheoryData<string> ProviderTypesWithClientSecret() =>
+        new(nameof(RtGoogleIdentityProvider), nameof(RtMicrosoftIdentityProvider),
+            nameof(RtFacebookIdentityProvider), nameof(RtAzureEntraIdIdentityProvider));
+
+    [Theory]
+    [MemberData(nameof(ProviderTypesWithClientSecret))]
+    public void ToDto_ProjectsSecretStateButNeverTheSecret(string providerTypeName)
     {
-        var entity = new RtGoogleIdentityProvider
-        {
-            Name = "google",
-            ClientId = "client",
-            ClientSecret = RtSecretValue.Pending("do-not-leak")
-        };
+        const string storedPlaintext = "do-not-leak";
+        var entity = SampleWithStoredSecret(providerTypeName, storedPlaintext);
 
-        var dto = (GoogleIdentityProviderDto)_sut.ToDto(entity);
+        var dto = _sut.ToDto(entity);
+        var responseJson = JsonSerializer.Serialize(dto, dto.GetType(), WebJson);
 
-        dto.ClientSecret.Should().BeNull();
-        dto.ClientSecretIsSet.Should().BeTrue();
-        dto.ClientSecretKeyMissing.Should().BeFalse();
+        responseJson.Should().NotContain(storedPlaintext);
+        responseJson.Should().Contain("\"clientSecret\":null");
+        responseJson.Should().Contain("\"clientSecretIsSet\":true");
+        responseJson.Should().Contain("\"clientSecretKeyMissing\":false");
     }
 
     [Fact]
@@ -112,6 +118,29 @@ public sealed class IdentityProviderMappingTests : IDisposable
         var entity = (RtFacebookIdentityProvider)dto.ToEntity();
 
         entity.ClientSecret.Should().BeEquivalentTo(RtSecretValue.Pending("plain"));
+    }
+
+    private static RtIdentityProvider SampleWithStoredSecret(string providerTypeName, string storedPlaintext)
+    {
+        var storedSecret = RtSecretValue.Pending(storedPlaintext);
+        var entity = SampleOf(providerTypeName);
+        switch (entity)
+        {
+            case RtGoogleIdentityProvider google:
+                google.ClientSecret = storedSecret;
+                break;
+            case RtMicrosoftIdentityProvider microsoft:
+                microsoft.ClientSecret = storedSecret;
+                break;
+            case RtFacebookIdentityProvider facebook:
+                facebook.ClientSecret = storedSecret;
+                break;
+            case RtAzureEntraIdIdentityProvider azureEntraId:
+                azureEntraId.ClientSecret = storedSecret;
+                break;
+        }
+
+        return entity;
     }
 
     private static RtIdentityProvider SampleOf(string providerTypeName) =>
