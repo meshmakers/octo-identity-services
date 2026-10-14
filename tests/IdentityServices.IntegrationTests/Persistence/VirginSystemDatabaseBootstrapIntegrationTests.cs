@@ -76,10 +76,7 @@ public class VirginSystemDatabaseBootstrapIntegrationTests : IClassFixture<Virgi
         // the shell classification no longer accepts — that would re-arm the AB#4854 wedge from a
         // writer outside the InfrastructureCollections allowlist.
         var keyStore = new DataProtectionKeyStore(_fixture.GetService<IServiceScopeFactory>(),
-            Options.Create(new OctoIdentityServicesOptions
-            {
-                AutoMapperLicenseKey = "test"
-            }));
+            Options.Create(new OctoIdentityServicesOptions()));
         try
         {
             keyStore.StoreElement(new XElement("key", "virgin-probe"), "key-virgin-probe");

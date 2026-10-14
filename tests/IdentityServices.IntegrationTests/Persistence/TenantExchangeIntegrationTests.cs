@@ -257,8 +257,7 @@ public class TenantExchangeIntegrationTests : IClassFixture<IdentityServicesFixt
             Substitute.For<IOptionsMonitor<OpenIddictServerOptions>>(),
             Options.Create(new OctoIdentityServicesOptions
             {
-                AuthorityUrl = "https://identity.example.com/",
-                AutoMapperLicenseKey = string.Empty
+                AuthorityUrl = "https://identity.example.com/"
             }),
             CreateCrossTenantAuthService(systemContext),
             CreateProvisioningService(targetRepo),

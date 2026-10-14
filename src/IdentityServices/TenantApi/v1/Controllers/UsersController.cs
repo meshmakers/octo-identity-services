@@ -1,7 +1,6 @@
 ﻿using System.ComponentModel;
 using System.ComponentModel.DataAnnotations;
 using Asp.Versioning;
-using AutoMapper;
 using IdentityServerPersistence;
 using IdentityServerPersistence.Services;
 using IdentityServerPersistence.SystemStores;
@@ -17,6 +16,7 @@ using Microsoft.AspNetCore.Mvc;
 using MongoDB.Bson;
 using Persistence.IdentityCkModel.Generated.System.Identity.v2;
 using Meshmakers.Octo.Backend.Authentication;
+using Meshmakers.Octo.Backend.IdentityServices.Mapping;
 
 namespace Meshmakers.Octo.Backend.IdentityServices.TenantApi.v1.Controllers;
 
@@ -37,7 +37,6 @@ public class UsersController : ControllerBase
 
     private readonly ILogger<UsersController> _logger;
     private readonly RoleManager<RtRole> _roleManager;
-    private readonly IMapper _mapper;
     private readonly IMultiTenancyResolverService _multiTenancyResolverService;
     private readonly IUserEmailInteractionService _userEmailInteractionService;
     private readonly UserManager<RtUser> _userManager;
@@ -48,7 +47,6 @@ public class UsersController : ControllerBase
     /// </summary>
     /// <param name="userManager">The storage service of users</param>
     /// <param name="roleManager">The storage service of roles</param>
-    /// <param name="mapper"></param>
     /// <param name="multiTenancyResolverService">Multi-tenancy resolver service</param>
     /// <param name="userEmailInteractionService"></param>
     /// <param name="userStore">The user store for direct role queries</param>
@@ -56,7 +54,6 @@ public class UsersController : ControllerBase
     public UsersController(
         UserManager<RtUser> userManager,
         RoleManager<RtRole> roleManager,
-        IMapper mapper,
         IMultiTenancyResolverService multiTenancyResolverService,
         IUserEmailInteractionService userEmailInteractionService,
         IUserStore<RtUser> userStore,
@@ -64,7 +61,6 @@ public class UsersController : ControllerBase
     {
         _userManager = userManager;
         _roleManager = roleManager;
-        _mapper = mapper;
         _multiTenancyResolverService = multiTenancyResolverService;
         _userEmailInteractionService = userEmailInteractionService;
         _octoUserStore = (OctoUserStore)userStore;
@@ -82,7 +78,7 @@ public class UsersController : ControllerBase
     [ProducesResponseType(typeof(IEnumerable<UserDto>), StatusCodes.Status200OK)]
     public IEnumerable<UserDto> Get()
     {
-        var list = _mapper.Map<List<UserDto>>(_userManager.Users);
+        var list = _userManager.Users.AsEnumerable().Select(user => user.ToDto()).ToList();
 
         return list;
     }
@@ -101,7 +97,7 @@ public class UsersController : ControllerBase
         var list = new List<UserDto>();
         foreach (var rtUser in _userManager.Users.Skip(pagingParams.Skip).Take(pagingParams.Take))
         {
-            var userDto = _mapper.Map<UserDto>(rtUser);
+            var userDto = rtUser.ToDto();
             list.Add(userDto);
         }
 
@@ -192,7 +188,7 @@ public class UsersController : ControllerBase
             return NotFound();
         }
 
-        var userDto = _mapper.Map<UserDto>(rtUser);
+        var userDto = rtUser.ToDto();
         return Ok(userDto);
     }
 
@@ -220,7 +216,7 @@ public class UsersController : ControllerBase
             var role = await _roleManager.FindByNameAsync(roleName);
             if (role != null)
             {
-                roles.Add(_mapper.Map<RoleDto>(role));
+                roles.Add(role.ToDto());
             }
         }
 
@@ -249,7 +245,7 @@ public class UsersController : ControllerBase
             var role = await _roleManager.FindByNameAsync(roleName);
             if (role != null)
             {
-                roles.Add(_mapper.Map<RoleDto>(role));
+                roles.Add(role.ToDto());
             }
         }
 
@@ -275,7 +271,7 @@ public class UsersController : ControllerBase
             return BadRequest(ReservedUserNameMessage);
         }
 
-        var rtUser = _mapper.Map<RtUser>(userDto);
+        var rtUser = userDto.ToEntity();
 
         try
         {
@@ -341,7 +337,7 @@ public class UsersController : ControllerBase
         // Renaming INTO the reserved shadow namespace is refused; editing an existing shadow user
         // (whose name already carries the prefix) stays possible.
         var previousUserName = rtUser.UserName;
-        _mapper.Map(userDto, rtUser);
+        userDto.ApplyTo(rtUser);
         if (CrossTenantShadowUserName.IsShadowUserName(rtUser.UserName) &&
             !string.Equals(rtUser.UserName, previousUserName, StringComparison.OrdinalIgnoreCase))
         {

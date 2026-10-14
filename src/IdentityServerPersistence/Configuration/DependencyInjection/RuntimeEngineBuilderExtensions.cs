@@ -1,4 +1,3 @@
-using IdentityServerPersistence.AutoMap;
 using IdentityServerPersistence.Configuration.DependencyInjection;
 using IdentityServerPersistence.Configuration.Options;
 using IdentityServerPersistence.Services;
@@ -10,7 +9,6 @@ using IdentityServerPersistence.SystemStores.OpenIddict;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Meshmakers.Octo.Common.DistributionEventHub.Configuration;
-using Meshmakers.Octo.Communication.Contracts.DataTransferObjects;
 using Meshmakers.Octo.Runtime.Contracts.Blueprints;
 using Meshmakers.Octo.Runtime.Contracts.MongoDb.Configuration;
 using Meshmakers.Octo.Runtime.Contracts.RepositoryEntities;
@@ -155,37 +153,6 @@ public static class RuntimeEngineBuilderExtensions
         // Stored on RtUser.PreferredChannelBindingId and read by the mesh adapter's verified-caller
         // lookups.
         builder.Services.AddScoped<IPreferredChannelService, PreferredChannelService>();
-
-        builder.Services.AddSingleton<AttributeStringValueListConverter>();
-        builder.Services.AddAutoMapper(cfg =>
-        {
-            cfg.CreateMap<ICollection<string>, IAttributeValueList<string>>()
-                .ConvertUsing<AttributeStringValueListConverter>();
-
-            cfg.CreateMap<RtRole, RoleDto>()
-                .ForMember(dest => dest.Id, opt => opt.MapFrom(src => src.RtId))
-                .ForMember(dest => dest.Name, opt => opt.MapFrom(src => src.Name))
-                .ReverseMap()
-                .ForMember(dest => dest.RtId, x => x.Ignore())
-                .ForMember(dest => dest.CkTypeId, x => x.Ignore());
-
-            cfg.CreateMap<RtUser, UserDto>()
-                .ForMember(dest => dest.UserId, opt => opt.MapFrom(src => src.RtId))
-                .ForMember(dest => dest.Name, opt => opt.MapFrom(src => src.UserName))
-                .ForMember(dest => dest.ExternalLogins, opt => opt.MapFrom(src =>
-                    src.UserLogins != null
-                        ? src.UserLogins.Select(l => new ExternalLoginDto
-                        {
-                            LoginProvider = l.LoginProvider,
-                            ProviderDisplayName = l.ProviderDisplayName ?? l.LoginProvider,
-                            ProviderKey = l.ProviderKey
-                        }).ToList()
-                        : null))
-                .ReverseMap()
-                .ForMember(dest => dest.RtId, x => x.Ignore())
-                .ForMember(dest => dest.CkTypeId, x => x.Ignore())
-                .ForMember(dest => dest.UserLogins, x => x.Ignore());
-        });
 
         AddIdentity(builder.Services, setupAction);
 

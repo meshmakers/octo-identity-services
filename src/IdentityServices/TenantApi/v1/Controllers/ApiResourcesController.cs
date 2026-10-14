@@ -1,6 +1,5 @@
 using System.ComponentModel.DataAnnotations;
 using Asp.Versioning;
-using AutoMapper;
 using IdentityServerPersistence;
 using IdentityServerPersistence.SystemStores;
 using Meshmakers.Octo.Common.DistributionEventHub.Services;
@@ -23,14 +22,12 @@ namespace Meshmakers.Octo.Backend.IdentityServices.TenantApi.v1.Controllers;
 public class ApiResourcesController : ControllerBase
 {
     private readonly IDistributionEventHubService _distributionEventHubService;
-    private readonly IMapper _mapper;
     private readonly IOctoResourceStore _octoResourceStore;
 
-    public ApiResourcesController(IOctoResourceStore octoResourceStore, IMapper mapper,
+    public ApiResourcesController(IOctoResourceStore octoResourceStore,
         IDistributionEventHubService distributionEventHubService)
     {
         _octoResourceStore = octoResourceStore;
-        _mapper = mapper;
         _distributionEventHubService = distributionEventHubService;
     }
 

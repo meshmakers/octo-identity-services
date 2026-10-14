@@ -670,10 +670,23 @@ builder.Services.AddMigrations(typeof(IdentityServiceConstants).Assembly);
 
 Migrations run automatically on application startup.
 
-## AutoMapper Configuration
+## DTO Mapping
 
-**Custom Converters:**
-- `AttributeStringValueListConverter` - Maps `ICollection<string>` ↔ `IAttributeValueList<string>`
+Entities and REST DTOs are mapped by explicit code in `src/IdentityServices/Mapping/` (AB#6506; there
+is no mapping library and no license key):
+
+| Mapper | Direction | Notes |
+|--------|-----------|-------|
+| `IdentityProviderDtoMapper` (singleton, injected) | `RtIdentityProvider` → `IdentityProviderDto` | Picks the DTO subtype from the entity type. The client secret is never projected; `ClientSecretIsSet`, `ClientSecretKeyMissing` and `ClientSecretSetAt` come from `IIdentityProviderSecretReader` (stored form only, AB#5540) |
+| `IdentityProviderEntityMapping.ToEntity()` | `IdentityProviderDto` → `RtIdentityProvider` | A non-empty `ClientSecret` becomes `RtSecretValue.Pending`; `null` / `""` leaves the attribute **unassigned** — assigning `null` would write the attribute and clear the stored secret on replace |
+| `UserMapping` | `RtUser` ↔ `UserDto` | `ToDto`, `ToEntity`, `ApplyTo` (update in place). Id and logins are never taken from the request |
+| `RoleMapping` | `RtRole` ↔ `RoleDto` | `ApplyTo` changes only the name |
+| `EmailDomainGroupRuleMapping` | `RtEmailDomainGroupRule` ↔ `EmailDomainGroupRuleDto` | `ToEntity` leaves `RtId` to the controller |
+
+Rt entities are attribute dictionaries: every property a mapper assigns becomes a stored attribute,
+even when the value is `null`. A mapper must therefore assign exactly the properties the DTO carries.
+The mappers were verified against the former profile-based mapping on the stored attributes; the
+round-trip tests in `tests/IdentityServices.UnitTests/Mapping/` keep that behaviour.
 
 ## Dependency Injection Setup
 

@@ -25,10 +25,7 @@ public class IdentityBlueprintVariableProviderTests
         baseMonitor.CurrentValue.Returns(baseOptions ?? new OctoBlueprintVariablesOptions());
 
         var identityMonitor = Substitute.For<IOptionsMonitor<OctoIdentityServicesOptions>>();
-        identityMonitor.CurrentValue.Returns(identityOptions ?? new OctoIdentityServicesOptions
-        {
-            AutoMapperLicenseKey = "test-license",
-        });
+        identityMonitor.CurrentValue.Returns(identityOptions ?? new OctoIdentityServicesOptions());
 
         return new IdentityBlueprintVariableProvider(
             baseMonitor,
@@ -112,7 +109,6 @@ public class IdentityBlueprintVariableProviderTests
     {
         var sut = CreateSut(identityOptions: new OctoIdentityServicesOptions
         {
-            AutoMapperLicenseKey = "test",
             AuthorityUrl = "https://identity.test.octo-mesh.com/",
         });
 
@@ -126,7 +122,6 @@ public class IdentityBlueprintVariableProviderTests
     {
         var sut = CreateSut(identityOptions: new OctoIdentityServicesOptions
         {
-            AutoMapperLicenseKey = "test",
             RefineryStudioUrl = "https://studio.test.octo-mesh.com/",
         });
 
@@ -143,7 +138,6 @@ public class IdentityBlueprintVariableProviderTests
         // surfaces on first user login instead of being silently swallowed.
         var sut = CreateSut(identityOptions: new OctoIdentityServicesOptions
         {
-            AutoMapperLicenseKey = "test",
             RefineryStudioUrl = null,
         });
 
@@ -209,7 +203,6 @@ public class IdentityBlueprintVariableProviderTests
             },
             new OctoIdentityServicesOptions
             {
-                AutoMapperLicenseKey = "test",
                 ServicePublicUrlOverrides = new(StringComparer.OrdinalIgnoreCase)
                 {
                     ["mcp"] = "https://localhost:5017/",

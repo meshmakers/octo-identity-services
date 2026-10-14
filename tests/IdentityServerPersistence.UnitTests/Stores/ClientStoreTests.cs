@@ -1,4 +1,3 @@
-using AutoMapper;
 using FluentAssertions;
 using IdentityServerPersistence.SystemStores;
 using Meshmakers.Octo.ConstructionKit.Contracts;
@@ -17,7 +16,6 @@ namespace IdentityServerPersistence.UnitTests.Stores;
 public class ClientStoreTests
 {
     private readonly ITenantRepository _tenantRepository;
-    private readonly IMapper _mapper;
     private readonly IMultiTenancyResolverService _multiTenancyResolver;
     private readonly ClientStore _sut;
     private readonly FakeOctoSession _session;
@@ -25,7 +23,6 @@ public class ClientStoreTests
     public ClientStoreTests()
     {
         _multiTenancyResolver = Substitute.For<IMultiTenancyResolverService>();
-        _mapper = Substitute.For<IMapper>();
         _session = new FakeOctoSession();
 
         _tenantRepository = Substitute.For<ITenantRepository>();

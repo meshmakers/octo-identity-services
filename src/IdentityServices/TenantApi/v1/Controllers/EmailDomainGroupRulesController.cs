@@ -1,7 +1,6 @@
 using System.ComponentModel;
 using System.ComponentModel.DataAnnotations;
 using Asp.Versioning;
-using AutoMapper;
 using IdentityServerPersistence;
 using IdentityServerPersistence.SystemStores;
 using Meshmakers.Octo.Communication.Contracts.DataTransferObjects;
@@ -11,6 +10,7 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Persistence.IdentityCkModel.Generated.System.Identity.v2;
 using Meshmakers.Octo.Backend.Authentication;
+using Meshmakers.Octo.Backend.IdentityServices.Mapping;
 
 namespace Meshmakers.Octo.Backend.IdentityServices.TenantApi.v1.Controllers;
 
@@ -22,8 +22,7 @@ namespace Meshmakers.Octo.Backend.IdentityServices.TenantApi.v1.Controllers;
 [ApiController]
 [ApiVersion(IdentityServiceConstants.ApiVersion1)]
 public class EmailDomainGroupRulesController(
-    IEmailDomainGroupRuleStore emailDomainGroupRuleStore,
-    IMapper mapper) : ControllerBase
+    IEmailDomainGroupRuleStore emailDomainGroupRuleStore) : ControllerBase
 {
     [HttpGet]
     [Authorize(IdentityServiceConstants.IdentityTenantAdministrationReadPolicy)]
@@ -34,7 +33,7 @@ public class EmailDomainGroupRulesController(
         var rules = await emailDomainGroupRuleStore.GetAllAsync();
         return new EmailDomainGroupRulesResult
         {
-            EmailDomainGroupRules = rules.Select(mapper.Map<EmailDomainGroupRuleDto>)
+            EmailDomainGroupRules = rules.Select(rule => rule.ToDto())
         };
     }
 
@@ -51,7 +50,7 @@ public class EmailDomainGroupRulesController(
             return NotFound();
         }
 
-        return mapper.Map<EmailDomainGroupRuleDto>(rule);
+        return rule.ToDto();
     }
 
     [HttpPost]
@@ -62,12 +61,12 @@ public class EmailDomainGroupRulesController(
     public async Task<ActionResult<EmailDomainGroupRuleDto>> CreateAsync(
         [FromBody][Description("The email domain group rule to create.")] EmailDomainGroupRuleDto dto)
     {
-        var rule = mapper.Map<RtEmailDomainGroupRule>(dto);
+        var rule = dto.ToEntity();
         rule.RtId = OctoObjectId.GenerateNewId();
 
         await HandleWriteExceptionAsync(async () => await emailDomainGroupRuleStore.StoreAsync(rule));
 
-        var resultDto = mapper.Map<EmailDomainGroupRuleDto>(rule);
+        var resultDto = rule.ToDto();
         var tenantId = HttpContext.GetRouteValue("tenantId") as string;
         return CreatedAtAction(nameof(GetByIdAsync), new { tenantId, rtId = rule.RtId }, resultDto);
     }
@@ -82,11 +81,11 @@ public class EmailDomainGroupRulesController(
         [FromRoute][Required] OctoObjectId rtId,
         [FromBody][Required][Description("The updated email domain group rule.")] EmailDomainGroupRuleDto dto)
     {
-        var rule = mapper.Map<RtEmailDomainGroupRule>(dto);
+        var rule = dto.ToEntity();
         rule.RtId = rtId;
 
         await HandleWriteExceptionAsync(async () => await emailDomainGroupRuleStore.StoreAsync(rule));
-        return Ok(mapper.Map<EmailDomainGroupRuleDto>(rule));
+        return Ok(rule.ToDto());
     }
 
     [HttpDelete("{rtId}")]

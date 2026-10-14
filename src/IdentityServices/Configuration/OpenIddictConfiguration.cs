@@ -26,10 +26,7 @@ public static class OpenIddictConfiguration
     public static void AddOctoOpenIddict(this WebApplicationBuilder builder)
     {
         // Bound copies for composition-time decisions (issuer, certs, DCR discovery entry).
-        var identityOptions = new OctoIdentityServicesOptions
-        {
-            AutoMapperLicenseKey = string.Empty
-        };
+        var identityOptions = new OctoIdentityServicesOptions();
         builder.Configuration.GetSection("Identity").Bind(identityOptions);
         var systemConfiguration = new OctoSystemConfiguration();
         builder.Configuration.GetSection("System").Bind(systemConfiguration);

@@ -41,7 +41,8 @@ export OCTO_Identity__SigningCertificatePassword="secret"
 ##### Token signing (OpenIddict)
 
 Since AB#4989/AB#4996 the OAuth2/OIDC server is **OpenIddict** (Duende IdentityServer removed).
-`Identity:IdentityServerLicenseKey` no longer exists. Token signing still comes from the static
+`Identity:IdentityServerLicenseKey` no longer exists, and neither does `Identity:AutoMapperLicenseKey`
+(AutoMapper was removed in AB#6506; a leftover `OCTO_IDENTITY__AutoMapperLicenseKey` is ignored). Token signing still comes from the static
 PKCS#12 certificate (`KeyFilePath` / `KeyFilePassword`), now registered via
 `AddSigningCertificate` in `OpenIddictConfiguration` — the JWKS is unchanged from the Duende
 setup, so access tokens issued before the migration keep validating. The same certificate is

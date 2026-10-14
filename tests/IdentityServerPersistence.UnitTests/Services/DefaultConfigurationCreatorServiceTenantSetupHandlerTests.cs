@@ -89,7 +89,7 @@ public class DefaultConfigurationCreatorServiceTenantSetupHandlerTests
             NullLogger<DefaultConfigurationCreatorService>.Instance,
             systemContext,
             Substitute.For<IDiagnosticsService>(),
-            Options.Create(new OctoIdentityServicesOptions { AutoMapperLicenseKey = "not-a-real-key" }),
+            Options.Create(new OctoIdentityServicesOptions()),
             migrationService: null,
             tenantSetupCompletedHandlers: handlers)
     {

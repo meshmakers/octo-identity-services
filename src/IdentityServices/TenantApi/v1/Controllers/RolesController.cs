@@ -1,7 +1,6 @@
 using System.ComponentModel;
 using System.ComponentModel.DataAnnotations;
 using Asp.Versioning;
-using AutoMapper;
 using IdentityServerPersistence;
 using Meshmakers.Octo.Communication.Contracts.DataTransferObjects;
 using Meshmakers.Octo.Communication.Contracts.DataTransferObjects.ApiErrors;
@@ -13,6 +12,7 @@ using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Mvc;
 using Persistence.IdentityCkModel.Generated.System.Identity.v2;
 using Meshmakers.Octo.Backend.Authentication;
+using Meshmakers.Octo.Backend.IdentityServices.Mapping;
 
 namespace Meshmakers.Octo.Backend.IdentityServices.TenantApi.v1.Controllers;
 
@@ -26,7 +26,6 @@ namespace Meshmakers.Octo.Backend.IdentityServices.TenantApi.v1.Controllers;
 public class RolesController : ControllerBase
 {
     private readonly IMultiTenancyResolverService _multiTenancyResolverService;
-    private readonly IMapper _mapper;
     private readonly RoleManager<RtRole> _roleManager;
 
     /// <summary>
@@ -34,11 +33,9 @@ public class RolesController : ControllerBase
     /// </summary>
     /// <param name="roleManager">The storage service of roles</param>
     /// <param name="multiTenancyResolverService">Multi-tenancy resolver service</param>
-    /// <param name="mapper">Automapper</param>
-    public RolesController(RoleManager<RtRole> roleManager, IMultiTenancyResolverService multiTenancyResolverService, IMapper mapper)
+    public RolesController(RoleManager<RtRole> roleManager, IMultiTenancyResolverService multiTenancyResolverService)
     {
         _multiTenancyResolverService = multiTenancyResolverService;
-        _mapper = mapper;
         _roleManager = roleManager;
     }
 
@@ -52,7 +49,7 @@ public class RolesController : ControllerBase
     {
         try
         {
-            var list = _mapper.Map<List<RoleDto>>(_roleManager.Roles);
+            var list = _roleManager.Roles.AsEnumerable().Select(role => role.ToDto()).ToList();
             return Ok(list);
         }
         catch (Exception e)
@@ -85,7 +82,7 @@ public class RolesController : ControllerBase
             var resultSet =
                 await tenantRepository.GetRtEntitiesByTypeAsync<RtRole>(session, queryOptions, pagingParams.Skip,
                     pagingParams.Take);
-            var list = _mapper.Map<List<RoleDto>>(resultSet.Items);
+            var list = resultSet.Items.Select(role => role.ToDto()).ToList();
 
             var pagedResult = new PagedResult<RoleDto>(list, pagingParams.Skip, pagingParams.Take, resultSet.TotalCount);
 
@@ -120,7 +117,7 @@ public class RolesController : ControllerBase
                 return NotFound();
             }
 
-            var roleDto = _mapper.Map<RoleDto>(rtRole);
+            var roleDto = rtRole.ToDto();
             return Ok(roleDto);
         }
         catch (Exception e)
@@ -147,7 +144,7 @@ public class RolesController : ControllerBase
                 return BadRequest(ModelState);
             }
 
-            var rtRole = _mapper.Map<RtRole>(roleDto);
+            var rtRole = roleDto.ToEntity();
 
             var result = await _roleManager.CreateAsync(rtRole);
             if (result.Succeeded)
@@ -190,7 +187,7 @@ public class RolesController : ControllerBase
                 return NotFound(new NotFoundErrorDto($"Role '{roleName}' not found."));
             }
 
-            _mapper.Map(roleDto, rtRole);
+            roleDto.ApplyTo(rtRole);
 
             var result = await _roleManager.UpdateAsync(rtRole);
             if (result.Succeeded)

@@ -154,7 +154,7 @@ Signatur dieser Klasse, nie ein Testdefekt.
 
 ### Project Structure
 
-- **IdentityServices** (`src/IdentityServices/`): Main ASP.NET web application and entry point. Contains the OpenIddict protocol configuration (`Configuration/OpenIddictConfiguration.cs`), the passthrough protocol controllers (`Controllers/Protocol/`), the OpenIddict integration layer (`OpenIddict/`), plus controllers for account management, consent flows, device authorization, and the System API (v1).
+- **IdentityServices** (`src/IdentityServices/`): Main ASP.NET web application and entry point. Contains the OpenIddict protocol configuration (`Configuration/OpenIddictConfiguration.cs`), the passthrough protocol controllers (`Controllers/Protocol/`), the OpenIddict integration layer (`OpenIddict/`), plus controllers for account management, consent flows, device authorization, and the System API (v1). Entity ↔ DTO mapping is explicit code in `Mapping/` (no mapping library since AB#6506; see `docs/persistence.md` § DTO Mapping).
 
 - **Authentication** (`src/Authentication/`): Razor class library with authentication schemes and handlers. Implements dynamic authentication for multiple providers:
   - OAuth providers: Google, Facebook, Microsoft, Azure Entra ID
@@ -1112,7 +1112,7 @@ AB#5061 split the secrets there was nothing to tell apart. `MirrorSecretUsageTel
 - **Classification without a store lookup.** The `octo:mirror-own-secret` marker rides on the
   `RtSecretRecord` the manager already read, so "is this a mirror with its own secret" is a string
   comparison over ≤2 records (indexed, so an ordinary client does not even allocate an enumerator).
-  No AutoMapper hop is involved any more — the Duende-era `RtSecretRecord → Secret` map that had to
+  No mapping hop is involved any more — the Duende-era `RtSecretRecord → Secret` map that had to
   carry `Description` across is gone with the migration, and with it the risk that a mapping change
   would silently zero the measurement.
 - **One guard became structural.** The Duende decorator had to exclude non-shared-secret credentials
@@ -1294,7 +1294,7 @@ The `IdentityProvidersController` exposes CRUD endpoints for identity provider c
 | Facebook | `FacebookIdentityProviderDto` | 5 |
 | Octo Tenant | `OctoTenantIdentityProviderDto` | 6 |
 
-`OctoTenantIdentityProviderDto` has a `ParentTenantId` property identifying the parent tenant for cross-tenant authentication. AutoMapper maps between `RtOctoTenantIdentityProvider` and `OctoTenantIdentityProviderDto` in `MapperProfile`.
+`OctoTenantIdentityProviderDto` has a `ParentTenantId` property identifying the parent tenant for cross-tenant authentication. `IdentityProviderDtoMapper` / `IdentityProviderEntityMapping` (`src/IdentityServices/Mapping/`) map between `RtOctoTenantIdentityProvider` and `OctoTenantIdentityProviderDto`.
 
 ### Multi-Tenancy
 

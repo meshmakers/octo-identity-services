@@ -37,7 +37,6 @@ public class DataProtectionKeyStoreIntegrationTests : IClassFixture<IdentityServ
             _fixture.Provider!.GetRequiredService<IServiceScopeFactory>(),
             Options.Create(new OctoIdentityServicesOptions
             {
-                AutoMapperLicenseKey = "test",
                 DataProtectionKeysPath = keysPath
             }));
     }

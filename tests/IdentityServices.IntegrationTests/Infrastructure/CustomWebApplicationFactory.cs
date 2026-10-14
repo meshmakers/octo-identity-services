@@ -275,7 +275,6 @@ public class CustomWebApplicationFactory : WebApplicationFactory<Program>, IAsyn
             // Configure identity options for testing
             services.Configure<OctoIdentityServicesOptions>(opts =>
             {
-                opts.AutoMapperLicenseKey = "test-automapper-key";
                 opts.KeyFilePath = "not-used-in-tests";
                 opts.KeyFilePassword = "not-used-in-tests";
                 opts.AuthorityUrl = "https://localhost:5003";
