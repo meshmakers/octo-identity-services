@@ -59,11 +59,7 @@ public class IdentityCorsPolicyProviderTests
         return new IdentityCorsPolicyProvider(
             services,
             NullLogger<IdentityCorsPolicyProvider>.Instance,
-            Options.Create(new OctoIdentityServicesOptions
-            {
-                AutoMapperLicenseKey = "unused",
-                CorsPolicyCacheSeconds = cacheSeconds
-            }),
+            Options.Create(new OctoIdentityServicesOptions { CorsPolicyCacheSeconds = cacheSeconds }),
             _time);
     }
 
@@ -75,8 +71,7 @@ public class IdentityCorsPolicyProviderTests
     [Fact]
     public void DefaultCacheLifetime_IsSixtySeconds()
     {
-        new OctoIdentityServicesOptions { AutoMapperLicenseKey = "unused" }
-            .CorsPolicyCacheSeconds.Should().Be(60);
+        new OctoIdentityServicesOptions().CorsPolicyCacheSeconds.Should().Be(60);
     }
 
     [Fact]
