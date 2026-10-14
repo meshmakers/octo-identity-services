@@ -14,7 +14,6 @@ using Meshmakers.Octo.Runtime.Contracts.Secrets;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
-using Microsoft.Extensions.Logging.Abstractions;
 using NSubstitute;
 using Persistence.IdentityCkModel.Generated.System.Identity.v2;
 using Xunit;

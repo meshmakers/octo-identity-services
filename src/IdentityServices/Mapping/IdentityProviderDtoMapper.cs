@@ -1,5 +1,6 @@
 using Meshmakers.Octo.Backend.Authentication.Secrets;
 using Meshmakers.Octo.Communication.Contracts.DataTransferObjects;
+using Meshmakers.Octo.Runtime.Contracts.Secrets;
 using Persistence.IdentityCkModel.Generated.System.Identity.v2;
 
 namespace Meshmakers.Octo.Backend.IdentityServices.Mapping;
@@ -96,9 +97,9 @@ public sealed class IdentityProviderDtoMapper(IIdentityProviderSecretReader secr
 
     private ClientSecretState ReadSecretState(RtIdentityProvider identityProvider)
     {
-        var isSet = secretReader.GetClientSecretState(identityProvider) == IdentityProviderSecretState.Set;
-        var description = secretReader.DescribeClientSecret(identityProvider);
-        return new ClientSecretState(isSet, description.KeyMissing, description.SetAt);
+        var storedSecret = secretReader.DescribeClientSecret(identityProvider);
+        var isSet = storedSecret.State == SecretValueState.Set;
+        return new ClientSecretState(isSet, storedSecret.KeyMissing, storedSecret.SetAt);
     }
 
     private static void CopyCommonFields(RtIdentityProvider identityProvider, IdentityProviderDto dto)
