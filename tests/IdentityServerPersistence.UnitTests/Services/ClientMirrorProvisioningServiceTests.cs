@@ -1,10 +1,12 @@
 using FluentAssertions;
 using IdentityServerPersistence.Services;
+using Meshmakers.Octo.Common.DistributionEventHub.Services;
 using Meshmakers.Octo.Runtime.Contracts;
 using Meshmakers.Octo.Runtime.Contracts.MongoDb;
 using Meshmakers.Octo.Runtime.Contracts.MongoDb.Repositories;
 using Meshmakers.Octo.Runtime.Contracts.Repositories;
 using Meshmakers.Octo.Runtime.Contracts.Repositories.Query;
+using Meshmakers.Octo.Services.Contracts.DistributionEventHub.Messages;
 using Microsoft.Extensions.Logging;
 using NSubstitute;
 using Persistence.IdentityCkModel.Generated.System.Identity.v2;
@@ -27,6 +29,7 @@ public class ClientMirrorProvisioningServiceTests
     private readonly ITenantRepository _childRepo = Substitute.For<ITenantRepository>();
     private readonly IOctoSession _parentSession = Substitute.For<IOctoSession>();
     private readonly IOctoSession _childSession = Substitute.For<IOctoSession>();
+    private readonly IDistributionEventHubService _eventHub = Substitute.For<IDistributionEventHubService>();
     private readonly ClientMirrorProvisioningService _sut;
 
     public ClientMirrorProvisioningServiceTests()
@@ -38,7 +41,8 @@ public class ClientMirrorProvisioningServiceTests
 
         _sut = new ClientMirrorProvisioningService(
             Substitute.For<ILogger<ClientMirrorProvisioningService>>(),
-            _systemContext);
+            _systemContext,
+            _eventHub);
     }
 
     [Fact]
@@ -216,6 +220,72 @@ public class ClientMirrorProvisioningServiceTests
         _childRepo.GetRtEntitiesByTypeAsync<RtClient>(
                 _childSession, Arg.Any<RtEntityQueryOptions>())
             .Returns(queryResult);
+    }
+
+    // ----- CorsClientsUpdate (AB#5487) --------------------------------------
+
+    [Fact]
+    public async Task NewMirror_PublishesCorsClientsUpdateForTheChildTenant()
+    {
+        var client = new RtClientBuilder().WithClientId("ci-deploy").WithAutoProvisionInChildTenants().Build();
+        SetupParentFlaggedClients(client);
+        SetupParentMirrorLookup(client.ClientId, Array.Empty<RtClientMirror>());
+        SetupChildClientLookup(client.ClientId, Array.Empty<RtClient>());
+
+        await _sut.ProvisionForChildTenantAsync(ParentTenantId, ChildTenantId);
+
+        await _eventHub.Received(1).PublishAsync(Arg.Is<CorsClientsUpdate>(m => m.TenantId == ChildTenantId));
+    }
+
+    [Fact]
+    public async Task NothingProvisioned_PublishesNoCorsClientsUpdate()
+    {
+        SetupParentFlaggedClients(Array.Empty<RtClient>());
+
+        await _sut.ProvisionForChildTenantAsync(ParentTenantId, ChildTenantId);
+
+        await _eventHub.DidNotReceiveWithAnyArgs().PublishAsync(default(CorsClientsUpdate)!);
+    }
+
+    [Fact]
+    public async Task EventHubFailure_DoesNotFailProvisioning()
+    {
+        _eventHub.PublishAsync(Arg.Any<CorsClientsUpdate>()).Returns(_ => throw new InvalidOperationException("broker down"));
+        var client = new RtClientBuilder().WithClientId("ci-deploy").WithAutoProvisionInChildTenants().Build();
+        SetupParentFlaggedClients(client);
+        SetupParentMirrorLookup(client.ClientId, Array.Empty<RtClientMirror>());
+        SetupChildClientLookup(client.ClientId, Array.Empty<RtClient>());
+
+        var result = await _sut.ProvisionForChildTenantAsync(ParentTenantId, ChildTenantId);
+
+        result.NewlyProvisioned.Should().Be(1);
+    }
+
+    [Fact]
+    public async Task Sync_PublishesCorsClientsUpdateForEachSyncedChild()
+    {
+        var client = new RtClientBuilder().WithClientId("ci-deploy").WithAutoProvisionInChildTenants().Build();
+        var mirror = new RtClientMirrorBuilder()
+            .WithParentClientId("ci-deploy").WithParentTenantId(ParentTenantId).WithChildTenantId(ChildTenantId).Build();
+        SetupParentMirrorLookup(client.ClientId, new[] { mirror });
+        SetupChildClientLookup(client.ClientId, Array.Empty<RtClient>());
+
+        await _sut.SyncMirrorsForClientAsync(ParentTenantId, client);
+
+        await _eventHub.Received(1).PublishAsync(Arg.Is<CorsClientsUpdate>(m => m.TenantId == ChildTenantId));
+    }
+
+    [Fact]
+    public async Task RemoveForClient_PublishesCorsClientsUpdateForTheChildTenant()
+    {
+        var mirror = new RtClientMirrorBuilder()
+            .WithParentClientId("ci-deploy").WithChildTenantId(ChildTenantId).Build();
+        SetupParentMirrorLookup("ci-deploy", new[] { mirror });
+        SetupChildClientLookup("ci-deploy", new[] { new RtClientBuilder().WithClientId("ci-deploy").Build() });
+
+        await _sut.RemoveMirrorsForClientAsync(ParentTenantId, "ci-deploy");
+
+        await _eventHub.Received(1).PublishAsync(Arg.Is<CorsClientsUpdate>(m => m.TenantId == ChildTenantId));
     }
 
     // ----- SyncMirrorsForClientAsync ---------------------------------------

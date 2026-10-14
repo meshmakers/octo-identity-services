@@ -15,6 +15,7 @@ public class OctoIdentityServicesOptions
         EnableTokenCleanup = true;
         TokenCleanupInterval = 60 * 60; // default: once an hour
         AllowDisplayInIframe = false;
+        CorsPolicyCacheSeconds = 60;
 #if DEBUGL || DEBUG
         MinLogLevel = LogLevelDto.Trace;
 #else
@@ -72,6 +73,14 @@ public class OctoIdentityServicesOptions
     ///     Identity service in an iframe is allowed.
     /// </summary>
     public bool AllowDisplayInIframe { get; set; }
+
+    /// <summary>
+    ///     Lifetime in seconds of the cached Identity CORS policy (AB#5487). After this time the policy is rebuilt
+    ///     from the client origins of all tenants, so a missed <c>CorsClientsUpdate</c> event (another pod, a client
+    ///     written without event) or a removed origin heals on its own. A policy without any origin is never cached.
+    ///     Default 60; a value of 0 or less disables the time-based expiry (event-driven invalidation only).
+    /// </summary>
+    public int CorsPolicyCacheSeconds { get; set; }
 
     /// <summary>
     /// Gets or sets the minimal log level to be logged

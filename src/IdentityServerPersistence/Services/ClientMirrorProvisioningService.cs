@@ -1,3 +1,4 @@
+using Meshmakers.Octo.Common.DistributionEventHub.Services;
 using Meshmakers.Octo.ConstructionKit.Contracts;
 using Meshmakers.Octo.Runtime.Contracts;
 using Meshmakers.Octo.Runtime.Contracts.MongoDb;
@@ -5,6 +6,7 @@ using Meshmakers.Octo.Runtime.Contracts.MongoDb.Repositories;
 using Meshmakers.Octo.Runtime.Contracts.Repositories;
 using Meshmakers.Octo.Runtime.Contracts.Repositories.Query;
 using Meshmakers.Octo.Runtime.Contracts.RepositoryEntities;
+using Meshmakers.Octo.Services.Contracts.DistributionEventHub.Messages;
 using Microsoft.Extensions.Logging;
 using Persistence.IdentityCkModel.Generated.System.Identity.v2;
 
@@ -13,9 +15,34 @@ namespace IdentityServerPersistence.Services;
 /// <inheritdoc cref="IClientMirrorProvisioningService"/>
 public class ClientMirrorProvisioningService(
     ILogger<ClientMirrorProvisioningService> logger,
-    ISystemContext systemContext)
+    ISystemContext systemContext,
+    IDistributionEventHubService? distributionEventHubService = null)
     : IClientMirrorProvisioningService
 {
+    /// <summary>
+    ///     AB#5487: tells every Identity pod that the client (and with it the CORS origins) of a tenant changed, so
+    ///     the cached CORS policy is rebuilt. Without it a tenant that gets its app client mirrored in after the
+    ///     first request stays blind to the SPA until the cache expires. A failing publish is logged and never
+    ///     fails the provisioning: the policy cache has a TTL and heals anyway.
+    /// </summary>
+    private async Task PublishCorsClientsUpdateAsync(string tenantId)
+    {
+        if (distributionEventHubService == null)
+        {
+            return;
+        }
+
+        try
+        {
+            await distributionEventHubService.PublishAsync(
+                new CorsClientsUpdate(tenantId, Guid.NewGuid(), DateTime.Now));
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex, "Failed to publish CorsClientsUpdate for tenant '{TenantId}'", tenantId);
+        }
+    }
+
     public async Task<ClientMirrorProvisioningResult> ProvisionForChildTenantAsync(
         string parentTenantId, string childTenantId)
     {
@@ -141,6 +168,11 @@ public class ClientMirrorProvisioningService(
                 parentClient.ClientId, parentTenantId, childTenantId);
         }
 
+        if (newlyProvisioned > 0)
+        {
+            await PublishCorsClientsUpdateAsync(childTenantId);
+        }
+
         return new ClientMirrorProvisioningResult(
             FlaggedClientsConsidered: flaggedClients.Count,
             NewlyProvisioned: newlyProvisioned,
@@ -204,6 +236,7 @@ public class ClientMirrorProvisioningService(
                 await parentRepo.ReplaceOneRtEntityByIdAsync(parentSession, mirror.RtId, mirror);
 
                 synced++;
+                await PublishCorsClientsUpdateAsync(mirror.ChildTenantId);
                 logger.LogInformation(
                     "Synced client mirror: clientId='{ClientId}' parent='{ParentTenantId}' child='{ChildTenantId}' version={Version}",
                     parentClient.ClientId, parentTenantId, mirror.ChildTenantId, mirror.SecretHashVersion);
@@ -271,6 +304,7 @@ public class ClientMirrorProvisioningService(
                     parentSession, mirror.RtId, DeleteOptions.Erase);
 
                 removed++;
+                await PublishCorsClientsUpdateAsync(mirror.ChildTenantId);
                 logger.LogInformation(
                     "Removed client mirror: clientId='{ClientId}' parent='{ParentTenantId}' child='{ChildTenantId}'",
                     parentClientId, parentTenantId, mirror.ChildTenantId);
@@ -513,6 +547,8 @@ public class ClientMirrorProvisioningService(
 
         await parentRepo.DeleteOneRtEntityByRtIdAsync<RtClientMirror>(
             parentSession, mirror.RtId, DeleteOptions.Erase);
+
+        await PublishCorsClientsUpdateAsync(childTenantId);
 
         logger.LogInformation(
             "Removed client mirror manually: clientId='{ClientId}' parent='{ParentTenantId}' child='{ChildTenantId}'",
