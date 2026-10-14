@@ -1354,8 +1354,10 @@ followed from that, both closed:
 Tests: `tests/IdentityServices.UnitTests/Logging/LogSecretRedactionTests.cs` runs the **real**
 `nlog.config` (Console target swapped for a memory target) and includes a control that proves the leak
 without the registration; `tests/IdentityServices.UnitTests/Controllers/SensitiveDtoToStringTests.cs`.
-Never log a request/response/DTO that carries a credential with `{@Object}` or as a template argument
-unless its type is covered by one of the two mechanisms above.
+🔴 The DTO mechanism protects `ToString()` output only (the text ASP.NET Core logs), **not** NLog event
+properties: a credential-bearing DTO passed as a message-template argument (`{Dto}` / `{@Dto}`) is still
+reflected by the JSON layout. Never do that unless an NLog object transformation in
+`LogSecretRedaction` covers the type; log selected non-secret members instead.
 
 ## Configuration
 

@@ -371,7 +371,9 @@ To keep credentials out of those properties, `Program.cs` registers an NLog obje
 OpenIddict request/response messages (they render through OpenIddict's redacting `ToString()`), and API
 request DTOs in `Controllers/Api` redact password, code, secret and token members in `ToString()`.
 Lowering `OCTO_LOG_LEVEL_ROOT` to `Info` or even `Trace` therefore no longer writes access, ID or refresh
-tokens, client secrets, passwords or 2FA codes to the log.
+tokens, client secrets, passwords or 2FA codes to the log. The DTO redaction covers `ToString()` output only;
+a credential-bearing DTO passed as a message-template argument would still be reflected into the JSON
+event properties, so such DTOs must not be logged that way.
 
 ### Runtime Log Level Changes
 
