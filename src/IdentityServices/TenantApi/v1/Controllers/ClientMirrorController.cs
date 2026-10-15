@@ -9,13 +9,16 @@ using Meshmakers.Octo.Communication.Contracts.DataTransferObjects.ApiErrors;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Meshmakers.Octo.Backend.Authentication;
+using Meshmakers.Octo.Backend.IdentityServices.Authorization;
 
 namespace Meshmakers.Octo.Backend.IdentityServices.TenantApi.v1.Controllers;
 
 /// <summary>
 /// Manages <c>ClientCredentials</c> client mirrors — i.e. clients that have been
 /// auto-provisioned from the calling (parent) tenant into one or more child tenants
-/// because of the <c>AutoProvisionInChildTenants</c> flag.
+/// because of the <c>AutoProvisionInChildTenants</c> flag. AB#6758: the actions that name a child tenant
+/// (<c>provisionInTenant</c>, mirror secret rotation, mirror removal) only reach the caller's own tenant subtree
+/// (<see cref="AdminProvisioningTargetScopeFilter"/>, and again in the service).
 /// </summary>
 [Authorize(AuthenticationSchemes = AuthenticationConstants.BearerAuthenticationScheme)]
 [Route(IdentityServiceConstants.ApiPathPrefix + "/clients/{clientId}/mirrors")]
@@ -100,6 +103,7 @@ public class ClientMirrorController : ControllerBase
 
     // POST {tenantId}/v1/clients/{clientId}/mirrors/provisionInTenant?childTenantId=…
     [HttpPost("provisionInTenant")]
+    [TypeFilter(typeof(AdminProvisioningTargetScopeFilter))]
     [Authorize(IdentityServiceConstants.IdentityTenantAdministrationWritePolicy)]
     [EndpointSummary("Provisions this client into a single named sub-tenant. Idempotent.")]
     [ProducesResponseType(typeof(ClientMirrorProvisionResponseDto), StatusCodes.Status200OK)]
@@ -121,8 +125,15 @@ public class ClientMirrorController : ControllerBase
                 $"Client '{clientId}' is not flagged AutoProvisionInChildTenants. Set the flag first."));
         }
 
-        var result = await _mirrorService.ProvisionInTenantAsync(
-            _clientStore.TenantId, clientId, childTenantId);
+        ClientMirrorProvisioningResult result;
+        try
+        {
+            result = await _mirrorService.ProvisionInTenantAsync(_clientStore.TenantId, clientId, childTenantId);
+        }
+        catch (ClientMirrorScopeException)
+        {
+            return new ForbidResult();
+        }
 
         return Ok(new ClientMirrorProvisionResponseDto(
             result.FlaggedClientsConsidered,
@@ -153,6 +164,7 @@ public class ClientMirrorController : ControllerBase
     ///     </para>
     /// </remarks>
     [HttpPost("{childTenantId}/secret")]
+    [TypeFilter(typeof(AdminProvisioningTargetScopeFilter))]
     [Authorize(IdentityServiceConstants.IdentityTenantAdministrationWritePolicy)]
     [EndpointSummary("Issues a fresh tenant-specific secret for this mirror and returns it once.")]
     [ProducesResponseType(typeof(MirrorSecretResponseDto), StatusCodes.Status200OK)]
@@ -162,8 +174,15 @@ public class ClientMirrorController : ControllerBase
         [Required][Description("Client ID")] string clientId,
         [Required][Description("Sub-tenant whose mirror gets the new secret")] string childTenantId)
     {
-        var result = await _mirrorService.RotateMirrorSecretAsync(
-            _clientStore.TenantId, clientId, childTenantId);
+        MirrorSecretRotationResult? result;
+        try
+        {
+            result = await _mirrorService.RotateMirrorSecretAsync(_clientStore.TenantId, clientId, childTenantId);
+        }
+        catch (ClientMirrorScopeException)
+        {
+            return new ForbidResult();
+        }
 
         if (result == null)
         {
@@ -183,6 +202,7 @@ public class ClientMirrorController : ControllerBase
 
     // DELETE {tenantId}/v1/clients/{clientId}/mirrors/{childTenantId}
     [HttpDelete("{childTenantId}")]
+    [TypeFilter(typeof(AdminProvisioningTargetScopeFilter))]
     [Authorize(IdentityServiceConstants.IdentityTenantAdministrationWritePolicy)]
     [EndpointSummary("Manually removes the mirror of this client in a single sub-tenant.")]
     [ProducesResponseType(StatusCodes.Status204NoContent)]
@@ -191,8 +211,15 @@ public class ClientMirrorController : ControllerBase
         [Required][Description("Client ID")] string clientId,
         [Required][Description("Sub-tenant ID to remove the mirror from")] string childTenantId)
     {
-        var removed = await _mirrorService.RemoveMirrorAsync(
-            _clientStore.TenantId, clientId, childTenantId);
+        bool removed;
+        try
+        {
+            removed = await _mirrorService.RemoveMirrorAsync(_clientStore.TenantId, clientId, childTenantId);
+        }
+        catch (ClientMirrorScopeException)
+        {
+            return new ForbidResult();
+        }
 
         if (!removed)
         {

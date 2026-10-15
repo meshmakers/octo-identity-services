@@ -166,3 +166,17 @@ public sealed record ClientMirrorBackfillResult(
     int ChildTenantsConsidered,
     int NewlyProvisioned,
     int AlreadyPresent);
+
+/// <summary>
+///     The child tenant of a client mirror operation is not in the subtree of the parent tenant (AB#6758).
+/// </summary>
+public sealed class ClientMirrorScopeException(string parentTenantId, string childTenantId)
+    : UnauthorizedAccessException(
+        $"Child tenant '{childTenantId}' is outside the subtree of tenant '{parentTenantId}'.")
+{
+    /// <summary>The tenant that owns the mirrored client.</summary>
+    public string ParentTenantId { get; } = parentTenantId;
+
+    /// <summary>The requested child tenant.</summary>
+    public string ChildTenantId { get; } = childTenantId;
+}
