@@ -135,7 +135,7 @@ public class AdminProvisioningPipelineTests : IAsyncDisposable
         string target, string? roles = Roles)
     {
         var request = new HttpRequestMessage(HttpMethod.Post,
-            $"/{callerTenant}/v1/adminProvisioning/{target}/provisionCurrentUser");
+            $"/{SystemTenant}/v1/adminProvisioning/{target}/provisionCurrentUser");
         request.Headers.Add(HeaderAuthHandler.TenantHeader, callerTenant);
         if (roles != null)
         {
@@ -144,6 +144,7 @@ public class AdminProvisioningPipelineTests : IAsyncDisposable
 
         var response = await _client.SendAsync(request);
         var body = await response.Content.ReadAsStringAsync();
+        // The route tenant is the system tenant (documented routing); the caller's tenant is the token's tenant_id.
         // Location (the AccessDenied redirect echo of the requested path) is cosmetic and differs per path.
         var headers = string.Join("|", response.Headers.Concat(response.Content.Headers)
             .Where(h => !string.Equals(h.Key, "Location", StringComparison.OrdinalIgnoreCase))

@@ -30,22 +30,31 @@ public class AdminProvisioningRouteCoverageTests
 
         foreach (var controller in controllers)
         {
-            var classRoute = controller.GetCustomAttributes<RouteAttribute>(true).Select(a => a.Template)
-                .FirstOrDefault() ?? string.Empty;
+            // Every controller-level [Route] template combines with every action template.
+            var classRoutes = controller.GetCustomAttributes<RouteAttribute>(true).Select(a => a.Template).ToList();
+            if (classRoutes.Count == 0)
+            {
+                classRoutes.Add(string.Empty);
+            }
 
             foreach (var action in controller.GetMethods(BindingFlags.Public | BindingFlags.Instance)
                          .Where(m => m.DeclaringType != typeof(ControllerBase) && m.DeclaringType != typeof(object)))
             {
-                var httpAttributes = action.GetCustomAttributes<HttpMethodAttribute>(true).ToList();
-                if (httpAttributes.Count == 0)
+                // [HttpGet]/[HttpPost]/... and a plain [Route] on the action both declare a reachable route.
+                var actionTemplates = action.GetCustomAttributes(true).OfType<IRouteTemplateProvider>()
+                    .Select(a => a.Template).ToList();
+                if (actionTemplates.Count == 0)
                 {
                     continue; // not an action
                 }
 
                 var hasFilter = HasScopeFilter(controller) || HasScopeFilter(action);
-                foreach (var http in httpAttributes)
+                foreach (var classRoute in classRoutes)
                 {
-                    yield return new ActionRoute(action, Combine(classRoute, http.Template), hasFilter);
+                    foreach (var template in actionTemplates)
+                    {
+                        yield return new ActionRoute(action, Combine(classRoute, template), hasFilter);
+                    }
                 }
             }
         }
