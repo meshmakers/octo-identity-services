@@ -247,6 +247,26 @@ public class ClientMirrorProvisioningServiceTests
         await _eventHub.DidNotReceiveWithAnyArgs().PublishAsync(default(CorsClientsUpdate)!);
     }
 
+    /// <summary>
+    ///     AB#6722: a MassTransit send endpoint waits for the broker without a bound of its own; in CI (no broker on
+    ///     localhost) a publish that never completes froze the whole test host for 37 minutes. The wait is bounded.
+    /// </summary>
+    [Fact]
+    public async Task EventHubThatNeverAnswers_DoesNotBlockProvisioning()
+    {
+        _eventHub.PublishAsync(Arg.Any<CorsClientsUpdate>()).Returns(_ => new TaskCompletionSource().Task);
+        var client = new RtClientBuilder().WithClientId("ci-deploy").WithAutoProvisionInChildTenants().Build();
+        SetupParentFlaggedClients(client);
+        SetupParentMirrorLookup(client.ClientId, Array.Empty<RtClientMirror>());
+        SetupChildClientLookup(client.ClientId, Array.Empty<RtClient>());
+
+        var provisioning = _sut.ProvisionForChildTenantAsync(ParentTenantId, ChildTenantId);
+        var finished = await Task.WhenAny(provisioning, Task.Delay(TimeSpan.FromSeconds(30), TestContext.Current.CancellationToken));
+
+        finished.Should().BeSameAs(provisioning, "the publish wait is bounded (about 5 s)");
+        (await provisioning).NewlyProvisioned.Should().Be(1);
+    }
+
     [Fact]
     public async Task EventHubFailure_DoesNotFailProvisioning()
     {
