@@ -29,6 +29,9 @@
             <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
         </PackageReference>
 
+        <!-- Security pins: OpenIddict.*.DataProtection pulls System.Security.Cryptography.Xml/Pkcs 10.0.10 transitively (NU1902/NU1903) -->
+        <PackageReference Include="System.Security.Cryptography.Xml" Version="10.0.13" />
+        <PackageReference Include="System.Security.Cryptography.Pkcs" Version="10.0.13" />
     </ItemGroup>
 
     <ItemGroup>
