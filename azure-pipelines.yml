@@ -179,8 +179,8 @@ stages:
             condition: and(succeeded(), ne(variables['CiGuardEnded'], 'true'))
           - task: DotNetCoreCLI@2
             condition: and(succeeded(), ne(variables['CiGuardEnded'], 'true'))
-            retryCountOnTaskFailure: 2
             displayName: 'Test'
+            timeoutInMinutes: 30
             # AB#5160:
             #   --no-build --no-restore: the 'Build' task above already builds the WHOLE solution
             #     (all four *Tests.csproj are solution members) in $(buildConfiguration), so the implicit
@@ -196,6 +196,12 @@ stages:
             #     Without it, builds 54733/54746/54747 hung 17-37 min in IdentityServices.IntegrationTests until
             #     cancelled, blocking three CI agents and giving no test name. --blame-hang-dump-type none: no dump
             #     file, only the name of the test.
+            #   no retryCountOnTaskFailure here: a step retry reruns the whole test project, so one hung or red
+            #     test cost up to 3 passes (build 54749: 3 x 15 min) and a red test could turn green on the retry,
+            #     which hides it (engine-mongodb build 50546: 109 failed tests, green on the retry). Flaky tests
+            #     are handled per test. Restore and Build keep their retries (network / feed hiccups).
+            #   timeoutInMinutes 30 < job 90: one green pass takes 2-13 min depending on agent load; the limit
+            #     only catches a run that --blame-hang-timeout cannot end.
             inputs:
               command: 'test'
               arguments: '--configuration $(buildConfiguration) --no-build --no-restore -p:OctoNugetPrivateServer=$(nugetPrivateServer) /p:OctoPublishCkModel=false --blame-hang --blame-hang-timeout 15m --blame-hang-dump-type none'
