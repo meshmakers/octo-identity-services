@@ -41,6 +41,7 @@ Open to every authenticated caller: `GET diagnostics` (the caller's own claims).
 through the system context. Since AB#5859 the target must be the caller's own tenant (`tenant_id` of the
 token) or one of its descendants in the tenant registry; a caller of the system tenant may address every
 tenant (`AdminProvisioningTargetScopeFilter`).
+Every route with `{targetTenantId}` must carry that filter; `AdminProvisioningRouteCoverageTests` enforces it by reflection and `AdminProvisioningPipelineTests` pins the 201/403 matrix (AB#4824).
 
 **Transition switch:** `IdentityApiAuthorization:RoleEnforcement` (`OCTO_IDENTITYAPIAUTHORIZATION__ROLEENFORCEMENT`)
 = `Enforce` (default) or `Warn`. `Warn` lets a caller without the role (or an admin-provisioning target
