@@ -31,6 +31,7 @@ public class ClientMirrorProvisioningServiceTests
 
     public ClientMirrorProvisioningServiceTests()
     {
+        _systemContext.TenantId.Returns(ParentTenantId);
         _parentRepo.GetSessionAsync().Returns(_parentSession);
         _childRepo.GetSessionAsync().Returns(_childSession);
         _systemContext.TryFindTenantRepositoryAsync(ParentTenantId).Returns(_parentRepo);
@@ -38,7 +39,8 @@ public class ClientMirrorProvisioningServiceTests
 
         _sut = new ClientMirrorProvisioningService(
             Substitute.For<ILogger<ClientMirrorProvisioningService>>(),
-            _systemContext);
+            _systemContext,
+            Substitute.For<ITenantDiscoveryService>());
     }
 
     [Fact]

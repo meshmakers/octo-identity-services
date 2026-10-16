@@ -682,8 +682,14 @@ derives the route set by reflection over all controllers, so a new route without
 sibling, sibling descendant, unrelated, system and unknown target 403 with an identical response; system caller
 any registered tenant (unknown tenant: 404 from the action); create-then-provision; policy and filter together
 (roleless caller stopped by the policy, role holder by the filter); `RoleEnforcement=Warn` (the filter only
-logs, the call passes — the fix depends on `Enforce`). Known gap: `{childTenantId}` routes and the
-`provisionInTenant?childTenantId=` query of `ClientMirrorController` are not scoped yet (AB#6758).
+logs, the call passes — the fix depends on `Enforce`). Since AB#6758 the rule covers every action that names a target tenant — `{targetTenantId}`/`{childTenantId}` in
+the route **or** a `targetTenantId`/`childTenantId` parameter (e.g. the query of
+`clients/{id}/mirrors/provisionInTenant?childTenantId=`): `ClientMirrorController.ProvisionInTenant`, `RotateSecret` and
+`Delete` carry the filter (it reads route and query values; every named tenant must be in scope), and
+`ClientMirrorProvisioningService` checks the subtree again (`ClientMirrorScopeException` → 403) for
+`ProvisionForChildTenantAsync`/`ProvisionInTenantAsync`/`RotateMirrorSecretAsync`/`RemoveMirrorAsync`; the system tenant as
+parent reaches every tenant (tenant creation, dynamic client registration). Tests: `ClientMirrorScopePipelineTests`,
+`ClientMirrorScopeGuardTests`, the extended `AdminProvisioningRouteCoverageTests`.
 
 This solves the chicken-and-egg problem: after creating a child tenant, the user doesn't have `allowed_tenants` for it yet, so the per-tenant `ExternalTenantUserMappingsController` is inaccessible. The admin provisioning controller uses `ISystemContext.TryFindTenantRepositoryAsync()` to access the target tenant's database directly.
 

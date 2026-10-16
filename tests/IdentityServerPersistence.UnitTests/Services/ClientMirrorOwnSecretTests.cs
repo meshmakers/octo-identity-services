@@ -52,7 +52,9 @@ public class ClientMirrorOwnSecretTests
         _systemContext.TryFindTenantRepositoryAsync(ParentTenantId).Returns(_parentRepo);
         _systemContext.TryFindTenantRepositoryAsync(ChildTenantId).Returns(_childRepo);
 
-        _sut = new ClientMirrorProvisioningService(_logger, _systemContext);
+        _systemContext.TenantId.Returns(ParentTenantId);
+        _sut = new ClientMirrorProvisioningService(_logger, _systemContext,
+            Substitute.For<ITenantDiscoveryService>());
     }
 
     /// <summary>

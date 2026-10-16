@@ -13,10 +13,63 @@ namespace IdentityServerPersistence.Services;
 /// <inheritdoc cref="IClientMirrorProvisioningService"/>
 public class ClientMirrorProvisioningService(
     ILogger<ClientMirrorProvisioningService> logger,
-    ISystemContext systemContext)
+    ISystemContext systemContext,
+    ITenantDiscoveryService tenantDiscoveryService)
     : IClientMirrorProvisioningService
 {
+    /// <summary>
+    ///     AB#6758: a mirror is only ever created, rotated or removed in a tenant of the parent's own subtree; the
+    ///     system tenant as parent reaches every tenant. The controller filter checks the same rule at the door —
+    ///     this check keeps the service safe for every other caller as well.
+    /// </summary>
+    private async Task EnsureChildInParentSubtreeAsync(string parentTenantId, string childTenantId)
+    {
+        var parent = parentTenantId.Trim();
+        var child = childTenantId.Trim();
+
+        if (string.Equals(parent, systemContext.TenantId?.Trim(), StringComparison.OrdinalIgnoreCase))
+        {
+            return;
+        }
+
+        var descendants = await tenantDiscoveryService.GetScopeDescendantsAsync(parent);
+        if (descendants != null && descendants.Any(d => string.Equals(d, child, StringComparison.OrdinalIgnoreCase)))
+        {
+            return;
+        }
+
+        logger.LogWarning(
+            "Client mirror operation denied, child tenant {ChildTenantId} is outside the subtree of {ParentTenantId} (AB#6758)",
+            childTenantId, parentTenantId);
+        throw new ClientMirrorScopeException(parentTenantId, childTenantId);
+    }
+
     public async Task<ClientMirrorProvisioningResult> ProvisionForChildTenantAsync(
+        string parentTenantId, string childTenantId)
+    {
+        ValidateTenantIds(parentTenantId, childTenantId);
+        if (!string.Equals(parentTenantId, childTenantId, StringComparison.OrdinalIgnoreCase))
+        {
+            await EnsureChildInParentSubtreeAsync(parentTenantId, childTenantId);
+        }
+
+        return await ProvisionForChildTenantCoreAsync(parentTenantId, childTenantId);
+    }
+
+    private static void ValidateTenantIds(string parentTenantId, string childTenantId)
+    {
+        if (string.IsNullOrWhiteSpace(parentTenantId))
+        {
+            throw new ArgumentException("Parent tenant id is required.", nameof(parentTenantId));
+        }
+
+        if (string.IsNullOrWhiteSpace(childTenantId))
+        {
+            throw new ArgumentException("Child tenant id is required.", nameof(childTenantId));
+        }
+    }
+
+    private async Task<ClientMirrorProvisioningResult> ProvisionForChildTenantCoreAsync(
         string parentTenantId, string childTenantId)
     {
         if (string.IsNullOrWhiteSpace(parentTenantId))
@@ -414,7 +467,7 @@ public class ClientMirrorProvisioningService(
                 // expectation when clicking "Provision in existing tenants" is "make every
                 // flagged client present everywhere it should be", and this avoids
                 // duplicating the provisioning logic for the single-client case.
-                var perChildResult = await ProvisionForChildTenantAsync(parentTenantId, child.TenantId);
+                var perChildResult = await ProvisionForChildTenantCoreAsync(parentTenantId, child.TenantId);
                 newly += perChildResult.NewlyProvisioned;
                 present += perChildResult.AlreadyPresent;
             }
@@ -480,6 +533,8 @@ public class ClientMirrorProvisioningService(
             throw new ArgumentException("Child tenant id is required.", nameof(childTenantId));
         }
 
+        await EnsureChildInParentSubtreeAsync(parentTenantId, childTenantId);
+
         var parentRepo = await systemContext.TryFindTenantRepositoryAsync(parentTenantId);
         if (parentRepo == null)
         {
@@ -537,6 +592,8 @@ public class ClientMirrorProvisioningService(
         {
             throw new ArgumentException("Child tenant id is required.", nameof(childTenantId));
         }
+
+        await EnsureChildInParentSubtreeAsync(parentTenantId, childTenantId);
 
         var parentRepo = await systemContext.TryFindTenantRepositoryAsync(parentTenantId);
         if (parentRepo == null)

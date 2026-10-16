@@ -239,6 +239,37 @@ public class ClientMirrorControllerTests
 
         result.Should().BeOfType<NoContentResult>();
     }
+
+    // ----- AB#6758: the service refuses a child outside the subtree -> 403 ----------------------
+
+    [Fact]
+    public async Task ProvisionInTenant_ScopeViolation_Returns403()
+    {
+        _clientStore.FindRtClientByIdAsync(ClientId).Returns(new RtClientBuilder()
+            .WithClientId(ClientId).WithAutoProvisionInChildTenants().Build());
+        _mirrorService.ProvisionInTenantAsync(ParentTenantId, ClientId, ChildTenantId)
+            .Returns<ClientMirrorProvisioningResult>(_ => throw new ClientMirrorScopeException(ParentTenantId, ChildTenantId));
+
+        (await _sut.ProvisionInTenant(ClientId, ChildTenantId)).Should().BeOfType<ForbidResult>();
+    }
+
+    [Fact]
+    public async Task RotateSecret_ScopeViolation_Returns403()
+    {
+        _mirrorService.RotateMirrorSecretAsync(ParentTenantId, ClientId, ChildTenantId)
+            .Returns<MirrorSecretRotationResult?>(_ => throw new ClientMirrorScopeException(ParentTenantId, ChildTenantId));
+
+        (await _sut.RotateSecret(ClientId, ChildTenantId)).Should().BeOfType<ForbidResult>();
+    }
+
+    [Fact]
+    public async Task Delete_ScopeViolation_Returns403()
+    {
+        _mirrorService.RemoveMirrorAsync(ParentTenantId, ClientId, ChildTenantId)
+            .Returns<bool>(_ => throw new ClientMirrorScopeException(ParentTenantId, ChildTenantId));
+
+        (await _sut.Delete(ClientId, ChildTenantId)).Should().BeOfType<ForbidResult>();
+    }
 }
 
 /// <summary>
@@ -297,4 +328,5 @@ public class ClientAutoProvisionFlagControllerTests
             ClientId,
             Arg.Is<RtClient>(c => c.AutoProvisionInChildTenants == false));
     }
+
 }
