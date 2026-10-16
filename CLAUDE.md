@@ -674,6 +674,17 @@ re-key the tenant's System.Identity `CkModel` row to a newer version.
 
 The `AdminProvisioningController` allows users with the TenantManagement or UserManagement role to pre-provision cross-tenant user mappings in a **target tenant** without needing `allowed_tenants` for that tenant. Since AB#5859 the target must be the caller's own tenant or one of its registry descendants (system-tenant callers: any tenant) — `AdminProvisioningTargetScopeFilter`; before, the role was documented but not checked and any target was reachable. It is routed via the system tenant: `{tenantId}/v1/adminProvisioning/{targetTenantId}`.
 
+**Regression tests and the route rule (AB#4824):** every route whose path contains `{targetTenantId}` must carry
+`[TypeFilter(typeof(AdminProvisioningTargetScopeFilter))]` (class or action). `AdminProvisioningRouteCoverageTests`
+derives the route set by reflection over all controllers, so a new route without the filter fails the unit tests.
+`AdminProvisioningPipelineTests` runs the real routing, `AdminProvisioningController`,
+`IdentityTenantAdministrationWritePolicy` and filter against a fake tenant registry: own/descendant 201;
+sibling, sibling descendant, unrelated, system and unknown target 403 with an identical response; system caller
+any registered tenant (unknown tenant: 404 from the action); create-then-provision; policy and filter together
+(roleless caller stopped by the policy, role holder by the filter); `RoleEnforcement=Warn` (the filter only
+logs, the call passes — the fix depends on `Enforce`). Known gap: `{childTenantId}` routes and the
+`provisionInTenant?childTenantId=` query of `ClientMirrorController` are not scoped yet (AB#6758).
+
 This solves the chicken-and-egg problem: after creating a child tenant, the user doesn't have `allowed_tenants` for it yet, so the per-tenant `ExternalTenantUserMappingsController` is inaccessible. The admin provisioning controller uses `ISystemContext.TryFindTenantRepositoryAsync()` to access the target tenant's database directly.
 
 **Endpoints:**
