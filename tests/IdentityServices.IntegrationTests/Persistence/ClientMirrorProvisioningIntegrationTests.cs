@@ -478,7 +478,8 @@ public class ClientMirrorProvisioningIntegrationTests : IClassFixture<IdentitySe
     }
 
     private IClientMirrorProvisioningService CreateService(ISystemContext systemContext)
-        => new ClientMirrorProvisioningService(NullLogger<ClientMirrorProvisioningService>.Instance, systemContext);
+        => new ClientMirrorProvisioningService(NullLogger<ClientMirrorProvisioningService>.Instance, systemContext,
+            Substitute.For<IdentityServerPersistence.Services.ITenantDiscoveryService>());
 
     /// <summary>
     /// Brings the system tenant + the identity CK model online so we can persist
