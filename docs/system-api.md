@@ -42,6 +42,7 @@ through the system context. Since AB#5859 the target must be the caller's own te
 token) or one of its descendants in the tenant registry; a caller of the system tenant may address every
 tenant (`AdminProvisioningTargetScopeFilter`).
 Every route with `{targetTenantId}` must carry that filter; `AdminProvisioningRouteCoverageTests` enforces it by reflection and `AdminProvisioningPipelineTests` pins the 201/403 matrix (AB#4824).
+The client mirror actions that name a child tenant (`provisionInTenant?childTenantId=`, `mirrors/{childTenantId}/secret`, `DELETE mirrors/{childTenantId}`) follow the same rule since AB#6758: a child outside the caller's subtree answers `403` with the same response for sibling, unrelated, system and unknown tenants.
 
 **Transition switch:** `IdentityApiAuthorization:RoleEnforcement` (`OCTO_IDENTITYAPIAUTHORIZATION__ROLEENFORCEMENT`)
 = `Enforce` (default) or `Warn`. `Warn` lets a caller without the role (or an admin-provisioning target

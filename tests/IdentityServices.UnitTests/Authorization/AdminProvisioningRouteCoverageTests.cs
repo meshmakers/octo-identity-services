@@ -16,9 +16,9 @@ namespace IdentityServices.UnitTests.Authorization;
 /// </summary>
 public class AdminProvisioningRouteCoverageTests
 {
-    private const string TargetTenantToken = "{targetTenantId";
+    private static readonly string[] TargetTenantNames = AdminProvisioningTargetScopeFilter.TargetParameterNames;
 
-    private sealed record ActionRoute(MethodInfo Action, string Template, bool HasScopeFilter)
+    private sealed record ActionRoute(MethodInfo Action, string Template, bool HasScopeFilter, bool NamesTargetTenant)
     {
         public override string ToString() => $"{Action.DeclaringType!.Name}.{Action.Name} [{Template}]";
     }
@@ -49,11 +49,17 @@ public class AdminProvisioningRouteCoverageTests
                 }
 
                 var hasFilter = HasScopeFilter(controller) || HasScopeFilter(action);
+                // A target tenant named by an action parameter (route, query or body binding) counts like one in the
+                // route: provisionInTenant?childTenantId= has no placeholder in its template (AB#6758).
+                var namesParameter = action.GetParameters().Any(p =>
+                    TargetTenantNames.Contains(p.Name, StringComparer.OrdinalIgnoreCase));
                 foreach (var classRoute in classRoutes)
                 {
                     foreach (var template in actionTemplates)
                     {
-                        yield return new ActionRoute(action, Combine(classRoute, template), hasFilter);
+                        yield return new ActionRoute(action, Combine(classRoute, template), hasFilter,
+                            namesParameter || TargetTenantNames.Any(n => Combine(classRoute, template)
+                                .Contains("{" + n, StringComparison.OrdinalIgnoreCase)));
                     }
                 }
             }
@@ -80,30 +86,34 @@ public class AdminProvisioningRouteCoverageTests
             a is ServiceFilterAttribute { ServiceType: var s } && s == typeof(AdminProvisioningTargetScopeFilter));
     }
 
-    private static List<ActionRoute> TargetTenantRoutes() =>
-        AllActionRoutes().Where(r => r.Template.Contains(TargetTenantToken, StringComparison.OrdinalIgnoreCase))
-            .ToList();
+    private static List<ActionRoute> TargetTenantRoutes() => AllActionRoutes().Where(r => r.NamesTargetTenant).ToList();
 
     [Fact]
-    public void RouteDiscovery_FindsTheAdminProvisioningRoutes()
+    public void RouteDiscovery_FindsTheAdminProvisioningAndClientMirrorActions()
     {
         // Guards the guard: if discovery silently returned nothing, the coverage test below would pass vacuously.
         var routes = TargetTenantRoutes();
 
-        routes.Should().NotBeEmpty();
-        routes.Select(r => r.Action.DeclaringType).Should().Contain(typeof(AdminProvisioningController));
         routes.Count(r => r.Action.DeclaringType == typeof(AdminProvisioningController))
             .Should().Be(8, "list, create, provisionCurrentUser, withGroups, delete, sourceUsers, roles, groups");
         routes.Should().Contain(r => r.Template.EndsWith("provisionCurrentUser", StringComparison.Ordinal));
+
+        var mirror = routes.Where(r => r.Action.DeclaringType == typeof(ClientMirrorController))
+            .Select(r => r.Action.Name).ToList();
+        mirror.Should().BeEquivalentTo("ProvisionInTenant", "RotateSecret", "Delete");
+        routes.Single(r => r.Action.Name == "ProvisionInTenant").Template.Should()
+            .NotContain("childTenantId", "the query-bound parameter is found through the action signature");
     }
 
     [Fact]
-    public void EveryRouteWithATargetTenantParameter_CarriesTheTargetScopeFilter()
+    public void EveryActionNamingATargetTenant_CarriesTheTargetScopeFilter()
     {
         var unprotected = TargetTenantRoutes().Where(r => !r.HasScopeFilter).Select(r => r.ToString()).ToList();
 
         unprotected.Should().BeEmpty(
-            "a route addressing {targetTenantId} reaches that tenant through the system context; without " +
-            nameof(AdminProvisioningTargetScopeFilter) + " any signed-in user could address any tenant (AB#4824)");
+            "an action addressing a target tenant ({targetTenantId} / {childTenantId} in the route, or a " +
+            "targetTenantId / childTenantId parameter in the query) reaches that tenant through the system context; " +
+            "without " + nameof(AdminProvisioningTargetScopeFilter) +
+            " any signed-in user could address any tenant (AB#4824, AB#6758)");
     }
 }
