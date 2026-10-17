@@ -212,6 +212,69 @@ public class BlueprintOwnershipIntegrationTests : IClassFixture<IdentityServices
         updated.ClientName.Should().Be("Seeded name v2");
     }
 
+    /// <summary>
+    ///     AB#5253 / AB#5210 (fix 18e9086, System.Identity 2.19.0): the operator-set public hostname of an app
+    ///     survives <c>InstallBlueprint -f</c>. A blueprint seeds the client URIs from the platform domain;
+    ///     the app is served from a customer-facing host, so the operator changes them. The re-apply of the
+    ///     unchanged seed (ImportStrategy.Upsert, the path of <c>-f</c>) must not reset them.
+    /// </summary>
+    [Fact]
+    public async Task ClientUpsert_KeepsTheOperatorSetRedirectUrisCorsOriginsAndClientUri()
+    {
+        const string seededHost = "app.platform-domain.test";
+        const string customHost = "app.customer-domain.test";
+        var repo = await GetRepositoryAsync();
+        var rtId = OctoObjectId.GenerateNewId();
+        var clientId = $"test-{Guid.NewGuid():N}";
+
+        // Blueprint install: the seed derives every URI from the platform domain.
+        await ImportAsync(repo, ClientSeed(rtId, clientId, "Seeded name", seededHost), ImportStrategy.Upsert);
+        var fresh = await LoadAsync<RtClient>(repo, rtId);
+        fresh.RedirectUris.Select(e => e.Uri).Should().BeEquivalentTo(new[] { $"https://{seededHost}/signin-callback" });
+        fresh.PostLogoutRedirectUris.Select(e => e.Uri).Should().BeEquivalentTo(new[] { $"https://{seededHost}/" });
+        fresh.AllowedCorsOrigins.Select(e => e.Uri).Should().BeEquivalentTo(new[] { $"https://{seededHost}" });
+        fresh.ClientUri.Should().Be($"https://{seededHost}/");
+
+        // The operator moves the app to its customer-facing host.
+        fresh.RedirectUris.Clear();
+        fresh.RedirectUris.Add(new RtClientUriEntryRecord { Uri = $"https://{customHost}/signin-callback", Source = "api" });
+        fresh.PostLogoutRedirectUris.Clear();
+        fresh.PostLogoutRedirectUris.Add(new RtClientUriEntryRecord { Uri = $"https://{customHost}/", Source = "api" });
+        fresh.AllowedCorsOrigins.Clear();
+        fresh.AllowedCorsOrigins.Add(new RtClientUriEntryRecord { Uri = $"https://{customHost}", Source = "api" });
+        fresh.ClientUri = $"https://{customHost}/";
+        await ReplaceAsync(repo, fresh);
+
+        // Forced re-apply of the unchanged seed, plus a changed blueprint-owned value as control.
+        await ImportAsync(repo, ClientSeed(rtId, clientId, "Seeded name v2", seededHost), ImportStrategy.Upsert);
+
+        var updated = await LoadAsync<RtClient>(repo, rtId);
+        updated.RedirectUris.Select(e => e.Uri).Should().BeEquivalentTo(
+            new[] { $"https://{customHost}/signin-callback" }, "sign-in on the custom host must keep working");
+        updated.PostLogoutRedirectUris.Select(e => e.Uri).Should().BeEquivalentTo(new[] { $"https://{customHost}/" });
+        updated.AllowedCorsOrigins.Select(e => e.Uri).Should().BeEquivalentTo(new[] { $"https://{customHost}" });
+        updated.ClientUri.Should().Be($"https://{customHost}/");
+        // Control: the import really replaced the entity.
+        updated.ClientName.Should().Be("Seeded name v2");
+    }
+
+    [Fact]
+    public async Task CompiledModel_ClientUriAttributesAreRuntimeState()
+    {
+        var repo = await GetRepositoryAsync();
+        var client = await repo.GetCkTypeGraphAsync(RtEntityExtensions.GetRtCkTypeId<RtClient>());
+
+        foreach (var attribute in new[]
+                 {
+                     nameof(RtClient.RedirectUris), nameof(RtClient.PostLogoutRedirectUris),
+                     nameof(RtClient.AllowedCorsOrigins), nameof(RtClient.ClientUri)
+                 })
+        {
+            Ownership(client, attribute).Should().NotBe(AttributeOwnershipDto.SeedOwned,
+                $"{attribute} is operator state since System.Identity 2.19.0 (AB#5210)");
+        }
+    }
+
     [Fact]
     public async Task ClientUpsert_KeepsTheSecretsOfTheClient_WhenTheSeedShipsNone()
     {
@@ -384,8 +447,37 @@ public class BlueprintOwnershipIntegrationTests : IClassFixture<IdentityServices
             """;
     }
 
-    private static string ClientSeed(OctoObjectId rtId, string clientId, string clientName) =>
-        $"""
+    private static string ClientSeed(OctoObjectId rtId, string clientId, string clientName,
+        string? seededHost = null)
+    {
+        // seededHost == null: the three URI collections ship empty (the shape of the older tests).
+        // Otherwise the seed derives all URI attributes from one host, like a blueprint with a platform-domain placeholder.
+        static string Entry(string uri) =>
+            $"- ckRecordId: System.Identity/ClientUriEntry\n  attributes:\n    - id: System.Identity/Uri\n      value: {uri}\n    - id: System.Identity/Source\n      value: base";
+
+        static string Collection(string attributeId, string? entry) =>
+            entry == null
+                ? $"- id: System.Identity/{attributeId}\n  value: []"
+                : $"- id: System.Identity/{attributeId}\n  value:\n{Indent(entry, "    ")}";
+
+        static string Indent(string text, string pad) => pad + text.Replace("\n", "\n" + pad);
+
+        var uriAttributes = new List<string>();
+        if (seededHost != null)
+        {
+            uriAttributes.Add($"- id: System.Identity/ClientUri\n  value: https://{seededHost}/");
+        }
+
+        uriAttributes.Add(Collection("RedirectUris",
+            seededHost == null ? null : Entry($"https://{seededHost}/signin-callback")));
+        uriAttributes.Add(Collection("PostLogoutRedirectUris",
+            seededHost == null ? null : Entry($"https://{seededHost}/")));
+        uriAttributes.Add(Collection("AllowedCorsOrigins",
+            seededHost == null ? null : Entry($"https://{seededHost}")));
+        // The template places the first line at column 6 (after the raw-string indent is stripped); continuation lines need the same pad.
+        var uris = string.Join("\n", uriAttributes).Replace("\n", "\n" + new string(' ', 6));
+
+        return $"""
          $schema: https://schemas.meshmakers.cloud/runtime-model.schema.json
          dependencies:
            - System.Identity-2.23.0
@@ -414,15 +506,11 @@ public class BlueprintOwnershipIntegrationTests : IClassFixture<IdentityServices
                    - openid
                    - profile
                    - octo_api
-               - id: System.Identity/RedirectUris
-                 value: []
-               - id: System.Identity/PostLogoutRedirectUris
-                 value: []
-               - id: System.Identity/AllowedCorsOrigins
-                 value: []
+               {uris}
                - id: System.Identity/AutoProvisionInChildTenants
                  value: true
          """;
+    }
 
     private static string ResourceSeed(string typeName, OctoObjectId rtId, string name, string displayName,
         bool placeholderApiSecret = false)
