@@ -3,6 +3,7 @@ using IdentityServerPersistence.Services;
 using IdentityServerPersistence.SystemStores;
 using Meshmakers.Common.Shared;
 using Meshmakers.Octo.Services.Infrastructure;
+using Microsoft.AspNetCore.Identity;
 using Microsoft.Extensions.Options;
 using Microsoft.IdentityModel.JsonWebTokens;
 using Microsoft.IdentityModel.Tokens;
@@ -33,6 +34,16 @@ namespace Meshmakers.Octo.Backend.IdentityServices.OpenIddict;
 ///         relationship, failed shadow provisioning) with an OAuth error and a persisted failure
 ///         audit event. v1 semantics preserved: no refresh token is issued for exchanged tokens.
 ///     </para>
+///     <para>
+///         <b>Ancestry is not authority (AB#6839, decision Gerald 2026-10-17).</b> Being a user of an
+///         ancestor tenant only lets the exchange <i>reach</i> the target tenant; the roles of the issued
+///         token come exclusively from explicit provisioning in B (an <c>ExternalTenantUserMapping</c>
+///         with roles or groups, a group membership or a direct role of the shadow user). When the
+///         B-shadow user resolves to no role at all the exchange is refused with
+///         <see cref="Errors.AccessDenied" /> and a description starting with
+///         <see cref="NotProvisionedMarker" />, so clients (octo-cli) can show a clear denial instead of
+///         a later 403 on the first call. A token without roles could not pass role enforcement anyway.
+///     </para>
 /// </remarks>
 public class TenantExchangeProcessor(
     IOptionsMonitor<OpenIddictServerOptions> serverOptions,
@@ -41,6 +52,7 @@ public class TenantExchangeProcessor(
     ICrossTenantUserProvisioningService crossTenantUserProvisioningService,
     ICrossTenantShadowUserChainResolver shadowUserChainResolver,
     IExternalTenantUserMappingStore externalTenantUserMappingStore,
+    UserManager<RtUser> userManager,
     IHttpContextAccessor httpContextAccessor,
     IIdentityAuditService auditService,
     ILogger<TenantExchangeProcessor> logger)
@@ -50,6 +62,13 @@ public class TenantExchangeProcessor(
 
     /// <summary>The <c>amr</c> value recorded on exchanged tokens for auditability.</summary>
     public const string AuthenticationMethod = "token_exchange";
+
+    /// <summary>
+    ///     Stable, machine-readable prefix of the <c>error_description</c> of the denial that is returned
+    ///     (with <c>error=access_denied</c>) when the caller is a valid ancestor-tenant user but holds no
+    ///     role in the target tenant. Clients match on this prefix, never on the free text after it.
+    /// </summary>
+    public const string NotProvisionedMarker = "tenant_not_provisioned";
 
     /// <summary>Outcome of a token exchange attempt: either a B-shadow user or an OAuth error.</summary>
     public sealed record ExchangeOutcome
@@ -144,6 +163,18 @@ public class TenantExchangeProcessor(
                 "target tenant could not be resolved for this request");
         }
 
+        return await ExchangeAsync(sourceTenantId, sourceUserId, targetTenantId);
+    }
+
+    /// <summary>
+    ///     The authorization half of the exchange, after the subject token and the target tenant were
+    ///     validated: B-authorization gate, B-shadow user, and the refusal of a caller without any role
+    ///     in B (see class remarks). Separated from <see cref="ProcessAsync" /> so the real exchange path
+    ///     can be tested without minting and signing a subject token.
+    /// </summary>
+    internal async Task<ExchangeOutcome> ExchangeAsync(
+        string sourceTenantId, string sourceUserId, string targetTenantId)
+    {
         // (b2)+(c) Pick the source identity and run the B-authorization gate on it.
         var crossTenantResult = await ResolveExchangeSourceAsync(targetTenantId, sourceTenantId, sourceUserId);
         if (crossTenantResult == null)
@@ -167,6 +198,20 @@ public class TenantExchangeProcessor(
             await RaiseFailureAsync(sourceUserId, sourceTenantId, targetTenantId,
                 "shadow user provisioning failed");
             return ExchangeOutcome.Failed(Errors.InvalidGrant, "failed to provision the target-tenant user");
+        }
+
+        // (e) Ancestry gives no roles. The same store that stamps the token's role claims decides: a
+        //     shadow user without a single effective role in B is not provisioned there.
+        if ((await userManager.GetRolesAsync(shadowUser)).Count == 0)
+        {
+            logger.LogWarning(
+                "Token exchange denied: user '{SourceUserId}' from tenant '{SourceTenantId}' holds no role in target tenant '{TargetTenantId}' (not provisioned)",
+                sourceUserId, sourceTenantId, targetTenantId);
+            await RaiseFailureAsync(sourceUserId, sourceTenantId, targetTenantId,
+                "not provisioned in target tenant (no role)");
+            return ExchangeOutcome.Failed(Errors.AccessDenied,
+                $"{NotProvisionedMarker}: the user holds no role in tenant '{targetTenantId}'; " +
+                "an administrator of that tenant must provision the user there (ProvisionCurrentUser -ttid)");
         }
 
         logger.LogInformation(

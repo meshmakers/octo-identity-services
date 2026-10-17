@@ -5,6 +5,7 @@ using IdentityServerPersistence.SystemStores;
 using Meshmakers.Octo.Backend.IdentityServices.OpenIddict;
 using Meshmakers.Octo.ConstructionKit.Contracts;
 using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Identity;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using NSubstitute;
@@ -59,6 +60,16 @@ public class TenantExchangeSourceSelectionTests
             Substitute.For<ICrossTenantUserProvisioningService>(),
             _registry,
             _mappingStore,
+            Substitute.For<UserManager<RtUser>>(
+                Substitute.For<IUserStore<RtUser>>(),
+                Substitute.For<IOptions<IdentityOptions>>(),
+                Substitute.For<IPasswordHasher<RtUser>>(),
+                Array.Empty<IUserValidator<RtUser>>(),
+                Array.Empty<IPasswordValidator<RtUser>>(),
+                Substitute.For<ILookupNormalizer>(),
+                Substitute.For<IdentityErrorDescriber>(),
+                Substitute.For<IServiceProvider>(),
+                Substitute.For<ILogger<UserManager<RtUser>>>()),
             Substitute.For<IHttpContextAccessor>(),
             Substitute.For<IIdentityAuditService>(),
             Substitute.For<ILogger<TenantExchangeProcessor>>());
