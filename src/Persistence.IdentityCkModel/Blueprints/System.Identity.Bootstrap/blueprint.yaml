@@ -1,5 +1,5 @@
 $schema: https://schemas.meshmakers.cloud/blueprint-meta.schema.json
-blueprintId: System.Identity.Bootstrap-1.7.0
+blueprintId: System.Identity.Bootstrap-1.8.0
 description: |
   Service-managed Identity tenant seed — system + every child tenant. Provides
   the default role set (17 roles), the five OIDC identity resources, three API
@@ -7,6 +7,17 @@ description: |
   the MCP resource indicator, the OAuth client baseline (OctoTool / IdentityServices
   Swagger / Refinery Studio SPA / MCP Services Swagger + Device / Platform Services
   Swagger) and the TenantOwners group with full role assignment.
+
+  1.8.0 (AB#6839): adds the RFC 8693 token-exchange grant
+  (`urn:ietf:params:oauth:grant-type:token-exchange`) to the `octo-cli` client (OctoTool, 660…31)
+  next to device_code, so octo-cli can exchange an operator's home-tenant token for a child-tenant
+  token. Additive client config — no CK schema change, no new entity, no new dependency floor
+  (System.Identity-[2.14.0,3.0) stays). The device-code login and tokens already issued are
+  unchanged. The version bump makes every existing tenant re-import the seed (the embedded
+  blueprint is applied by the identity service itself on startup, no UpdateBlueprint call needed);
+  the AutoProvisionInChildTenants mirrors of the client converge on the next identity start.
+  Authority in the child tenant is NOT part of this change: the exchange issues a token whose
+  roles come only from explicit provisioning in the child (ProvisionCurrentUser -ttid <child>).
 
   1.7.0 (AB#5544): adds the tenant role `SecretManagement` (660…60) — may trigger
   secret sweeps and delete a pre-sweep dump early (bot services secrets admin API,

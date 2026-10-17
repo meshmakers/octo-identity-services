@@ -327,6 +327,39 @@ counterpart of the browser tenant-switch, for the MCP server:
   `octo-mcpServices-interactive` client (660…035) was removed again in blueprint
   **1.1.5** — interactive MCP clients self-register via DCR (`octo-dcr-*`)
   and nothing ever consumed the static client.
+- **octo-cli exchanges too (AB#6839, blueprint 1.8.0):** `octo-cli` (660…31, public, secretless)
+  carries the token-exchange grant next to device_code, so an operator's root-tenant token can be
+  exchanged for a child-tenant token (`acr_values=tenant:X`) instead of being sent to a foreign
+  tenant route. The client reaches the child tenant twice: the blueprint seeds `octo-cli` in every
+  tenant, and the `AutoProvisionInChildTenants` mirror copies the parent's `AllowedGrantTypes`
+  (`CreateMirrorClient`), converging on every identity start. Pinned by
+  `OctoCliClientTokenExchangeSeedTests`.
+- **Ancestry is not authority (decision Gerald 2026-10-17, AB#6839).** The exchange only checks that
+  the caller's tenant is an ancestor of B; the issued token carries exactly the roles the B-shadow
+  user resolves in B (explicit `ExternalTenantUserMapping` roles/groups, group membership, direct
+  role) — **no implicit admin role for ancestor users**. Provisioning in each child tenant is a
+  **required operator step, also for new tenants**: `octo-cli ProvisionCurrentUser -ttid <child>`.
+  A caller with an ancestor relationship but no role in B is refused **at the exchange**
+  (`TenantExchangeProcessor.ExchangeAsync`, step e): HTTP 403, `error=access_denied`,
+  `error_description` starting with the stable marker `tenant_not_provisioned`
+  (`TenantExchangeProcessor.NotProvisionedMarker`; clients match the marker, not the text) — plus a
+  `Token Exchange Failure` audit event. A role-less token could not pass role enforcement anyway,
+  so the only change for existing callers (octo-mcp-service `TenantTokenExchanger` treats any
+  non-success as "denied"; Studio `switchTenantByExchange` is unused) is an early, clear refusal
+  instead of a token that fails on the first call. A non-ancestor caller is still
+  `unauthorized_client`. Side effect kept from before: a refused exchange still leaves the shadow
+  user and an empty mapping in B; neither grants anything (`Exchange_RepeatedAfterEmptyMapping…`).
+  Exchanged tokens never carry a refresh token. Tests: `TenantExchangeIntegrationTests`
+  (`Exchange_AncestorUserWithoutProvisioning…`, `…ProvisionedOperator…`, `…DirectRoleGrant…`,
+  `…NonAncestor…`).
+- **Rollout (embedded blueprint, no `UpdateBlueprint`):** the identity service applies
+  `System.Identity.Bootstrap` itself on startup and per tenant; the version bump to 1.8.0 makes every
+  tenant re-import the seed, which adds the grant. Deploy the identity image, wait for the start-up
+  apply (log: blueprint `System.Identity.Bootstrap` 1.8.0 per tenant), then verify per tenant with
+  `octo-cli -c GetClient -id octo-cli` (grant types contain token-exchange). Mirrors in child
+  tenants converge during the same start (`ProvisionForChildTenantAsync` per tenant). No manual
+  database edit. Before the CLI relies on the exchange (AB#6836), operators must be provisioned in
+  each child tenant they operate (`ProvisionCurrentUser -ttid`).
 - **v1 issues no exchanged refresh token** (short-lived B tokens, re-exchanged from
   the still-valid A token). See `docs/CONCEPT-CROSS-TENANT-TOKEN-EXCHANGE.md` and
   `docs/authentication.md` § Cross-Tenant Token Exchange. Coverage:

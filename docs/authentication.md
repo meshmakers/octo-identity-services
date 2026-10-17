@@ -725,6 +725,30 @@ interactive MCP clients self-register via Dynamic Client Registration (`octo-dcr
 ever consumed the static client (its fixed `:8976` loopback redirects never matched Claude Code's
 random-port callbacks).
 
+**octo-cli (AB#6839, blueprint 1.8.0).** The `octo-cli` client (rtId 660…31, public, no secret) carries
+the token-exchange grant next to `device_code`, so an operator signed in to the root tenant can
+exchange that token for a child-tenant token (`acr_values=tenant:{child}`, `client_id=octo-cli`) instead
+of presenting the root token to a child route. Child tenants get the grant from their own seeded
+`octo-cli` and from the `AutoProvisionInChildTenants` mirror (which copies `AllowedGrantTypes`).
+
+**Ancestry is not authority — provisioning is a required operator step.** The exchange proves that the
+caller's tenant is an ancestor of the target; it grants no role. The roles of the issued token are those
+of the B-shadow user in B: an explicit `ExternalTenantUserMapping` (roles or groups), a group membership
+or a direct role. For an operator this means **`octo-cli ProvisionCurrentUser -ttid {child}` once per child
+tenant, also for newly created tenants**; there is no implicit admin role for ancestor users (decision
+2026-10-17). A caller that is an ancestor user but holds no role in the target is refused at the exchange:
+
+```
+HTTP 403
+{ "error": "access_denied",
+  "error_description": "tenant_not_provisioned: the user holds no role in tenant '{child}'; ..." }
+```
+
+Clients match on `error=access_denied` plus the `tenant_not_provisioned` prefix of the description (a stable
+marker; the text after it may change). A caller whose tenant is not an ancestor still gets
+`unauthorized_client`, an invalid subject token `invalid_grant`. Exchanged tokens never carry a refresh
+token — re-exchange from the root token. Every refusal is persisted as a `Token Exchange Failure` audit event.
+
 ### Delegation / On-Behalf-Of (AB#5026)
 
 A **service account** (a machine-to-machine `Client`) can obtain an access token that runs on a

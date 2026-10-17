@@ -12,7 +12,7 @@ dependencies:
 entities:
 
   # --------------------------------------------------------------------------
-  # 660…31 — OctoTool / octo-cli (device-code flow, no PKCE, no client secret)
+  # 660…31 — OctoTool / octo-cli (device-code flow + RFC 8693 token exchange, no PKCE, no client secret)
   # --------------------------------------------------------------------------
   - rtId: '660000000000000000000031'
     ckTypeId: System.Identity/Client
@@ -31,6 +31,13 @@ entities:
       - id: System.Identity/AllowedGrantTypes
         value:
           - urn:ietf:params:oauth:grant-type:device_code
+          # AB#6839: RFC 8693 Token Exchange — lets the CLI exchange the operator's
+          # home-tenant (root) token for a child-tenant token (acr_values=tenant:X) instead of
+          # sending the root token to a foreign tenant route. The exchange never grants
+          # authority: the issued token carries only the roles of an explicit mapping, group
+          # or direct role in the child tenant (ProvisionCurrentUser -ttid X); an operator
+          # without any is refused (access_denied, tenant_not_provisioned). No refresh token.
+          - urn:ietf:params:oauth:grant-type:token-exchange
       - id: System.Identity/RequirePkce
         value: false
       - id: System.Identity/AllowOfflineAccess
