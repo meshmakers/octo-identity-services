@@ -332,7 +332,8 @@ counterpart of the browser tenant-switch, for the MCP server:
   exchanged for a child-tenant token (`acr_values=tenant:X`) instead of being sent to a foreign
   tenant route. The client reaches the child tenant twice: the blueprint seeds `octo-cli` in every
   tenant, and the `AutoProvisionInChildTenants` mirror copies the parent's `AllowedGrantTypes`
-  (`CreateMirrorClient`), converging on every identity start. Pinned by
+  (`CreateMirrorClient`), converging on every identity start (for tenants that already had the client see
+  *Rollout* below: the seed cannot change a tenant-owned value). Pinned by
   `OctoCliClientTokenExchangeSeedTests`.
 - **Ancestry is not authority (decision Gerald 2026-10-17, AB#6839).** The exchange only checks that
   the caller's tenant is an ancestor of B; the issued token carries exactly the roles the B-shadow
@@ -352,14 +353,25 @@ counterpart of the browser tenant-switch, for the MCP server:
   Exchanged tokens never carry a refresh token. Tests: `TenantExchangeIntegrationTests`
   (`Exchange_AncestorUserWithoutProvisioning…`, `…ProvisionedOperator…`, `…DirectRoleGrant…`,
   `…NonAncestor…`).
-- **Rollout (embedded blueprint, no `UpdateBlueprint`):** the identity service applies
-  `System.Identity.Bootstrap` itself on startup and per tenant; the version bump to 1.8.0 makes every
-  tenant re-import the seed, which adds the grant. Deploy the identity image, wait for the start-up
-  apply (log: blueprint `System.Identity.Bootstrap` 1.8.0 per tenant), then verify per tenant with
-  `octo-cli -c GetClient -id octo-cli` (grant types contain token-exchange). Mirrors in child
-  tenants converge during the same start (`ProvisionForChildTenantAsync` per tenant). No manual
-  database edit. Before the CLI relies on the exchange (AB#6836), operators must be provisioned in
-  each child tenant they operate (`ProvisionCurrentUser -ttid`).
+- **Rollout (AB#6839, existing tenants):** the blueprint bump alone does NOT reach a tenant that already
+  has the client. `Client.AllowedGrantTypes` is `TenantOwned` (AB#6324), so the seed import (Upsert) keeps the
+  stored value; the apply logs `mode=Initial added=N updated=0` regardless (Upsert is counted as "added").
+  Verified on test-2 (octo-cli r3.5.27: exchange refused with `unauthorized_client`). Hence
+  `OctoCliTokenExchangeGrant` (`Services/ClientGrants`): a one-time, additive step in
+  `DefaultConfigurationCreatorService.SetupTenantAsync` (every identity start, tenant create/update) that
+  appends the token-exchange URN to `AllowedGrantTypes` of every client with `ClientId == "octo-cli"` and
+  touches nothing else. It runs AFTER the blueprint apply and AFTER the child-tenant mirror provisioning,
+  because that mirror copies the parent's grants over a mirrored `octo-cli` — in a child whose parent is not
+  fixed yet this step must have the last word. One log line per tenant: `AB#6839 octo-cli token-exchange
+  grant: tenant=… result=Added|AlreadyPresent|ClientMissing|AlreadyDone clientsUpdated=n` (no secrets).
+  Run-once marker (tenant configuration key `OctoCliTokenExchangeGrant`, written only when an `octo-cli`
+  client was found): a grant an administrator removes later is not re-added by this step (a mirror copy from
+  the parent still can). Tenants without the client are retried on each setup. No blueprint bump and no
+  manual database edit needed; after deploying the identity image, check the start-up log lines per tenant
+  (counts show which tenants were touched) and verify with `octo-cli -c GetClient -id octo-cli`.
+  Before the CLI relies on the exchange (AB#6836), operators must be provisioned in each child tenant they
+  operate (`ProvisionCurrentUser -ttid`). Tests: `OctoCliTokenExchangeGrantIntegrationTests` (real MongoDB),
+  `OctoCliClientTokenExchangeSeedTests`.
 - **v1 issues no exchanged refresh token** (short-lived B tokens, re-exchanged from
   the still-valid A token). See `docs/CONCEPT-CROSS-TENANT-TOKEN-EXCHANGE.md` and
   `docs/authentication.md` § Cross-Tenant Token Exchange. Coverage:
