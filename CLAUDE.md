@@ -283,7 +283,7 @@ The service supports hierarchical cross-tenant authentication where parent-tenan
 - **`RtOctoTenantIdentityProvider`**: CK type linking a child tenant to a parent tenant for auth delegation
 - **`RtExternalTenantUserMapping`**: CK type mapping a parent-tenant user to roles in the child tenant
 - **`CrossTenantAuthenticationService`**: Walks the tenant hierarchy to validate credentials against parent tenant databases
-- **`ExternalTenantUserMappingStore`**: Persistence for cross-tenant user role mappings
+- **`ExternalTenantUserMappingStore`**: Persistence for cross-tenant user role mappings. A mapping is unique per (`SourceTenantId`, `SourceUserId`) in a tenant, but the database does not enforce it (no unique index on runtime entities). `FindBySourceUserAsync` (login, `IsExplicitlyProvisionedAsync`, token exchange) therefore never throws on duplicates: it returns the oldest mapping (smallest `RtId`) and logs a WARN naming all ids (`ExternalTenantUserMappingLookup`, AB#6975). Both create paths (`POST adminProvisioning/{targetTenantId}`, `POST ExternalTenantUserMappings`) answer `409 application/problem+json` with `code: ExternalTenantUserMappingAlreadyExists` and `existingMappingId` when the pair exists; to change roles, update the existing mapping (`PUT ExternalTenantUserMappings/{id}`). `provisionCurrentUser` stays idempotent. Existing duplicates are not migrated; delete the extra rows (`DeleteAdminProvisioningMapping`).
 - **`ExternalTenantUserMappingsController`**: System API CRUD for managing mappings (per-tenant, requires `allowed_tenants`)
 - **`AdminProvisioningController`**: Cross-tenant provisioning via system tenant (see below)
 
