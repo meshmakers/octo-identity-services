@@ -76,6 +76,12 @@ public static class IdentityServiceConstants
     public const string TenantAdministratorFileRoleGrantKey = "FileRoleGrantTenantAdministrators";
 
     /// <summary>
+    /// AB#6839: TenantConfiguration row recording that <c>OctoCliTokenExchangeGrant</c> has added the RFC 8693
+    /// token-exchange grant to the <c>octo-cli</c> client of the tenant (or found it there). Present = never run again.
+    /// </summary>
+    public const string OctoCliTokenExchangeGrantKey = "OctoCliTokenExchangeGrant";
+
+    /// <summary>
     /// Phase 3 PR #4: TenantConfiguration row used by <c>PreBlueprintCleanupMigration</c> to hand
     /// captured User → Role and ExternalTenantUserMapping → Role assignments (by role name) over
     /// to the post-blueprint restore step in

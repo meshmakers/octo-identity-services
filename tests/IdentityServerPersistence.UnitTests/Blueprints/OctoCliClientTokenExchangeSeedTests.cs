@@ -60,6 +60,28 @@ public class OctoCliClientTokenExchangeSeedTests
                 OpenIddict.Abstractions.OpenIddictConstants.Permissions.GrantTypes.TokenExchange]);
     }
 
+    [Theory]
+    [InlineData(new string[0], true)]
+    [InlineData(new[] { DeviceCode }, true)]
+    [InlineData(new[] { DeviceCode, TokenExchange }, false)]
+    [InlineData(new[] { TokenExchange }, false)]
+    public void ExistingTenantStep_NeedsTheGrantOnlyWhenItIsMissing(string[] grants, bool expected)
+    {
+        IdentityServerPersistence.Services.ClientGrants.OctoCliTokenExchangeGrant.NeedsGrant(grants)
+            .Should().Be(expected);
+        IdentityServerPersistence.Services.ClientGrants.OctoCliTokenExchangeGrant.NeedsGrant(null)
+            .Should().BeTrue();
+    }
+
+    [Fact]
+    public void ExistingTenantStep_UsesTheSameGrantUrnAsTheSeed()
+    {
+        IdentityServerPersistence.Services.ClientGrants.OctoCliTokenExchangeGrant.TokenExchangeGrantType
+            .Should().Be(TokenExchange);
+        SeededGrantTypes().Should().Contain(IdentityServerPersistence.Services.ClientGrants.OctoCliTokenExchangeGrant
+            .TokenExchangeGrantType);
+    }
+
     [Fact]
     public void BlueprintVersion_IsBumpedSoExistingTenantsReimportTheSeed()
     {

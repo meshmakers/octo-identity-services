@@ -731,6 +731,19 @@ exchange that token for a child-tenant token (`acr_values=tenant:{child}`, `clie
 of presenting the root token to a child route. Child tenants get the grant from their own seeded
 `octo-cli` and from the `AutoProvisionInChildTenants` mirror (which copies `AllowedGrantTypes`).
 
+*Existing tenants (AB#6839).* The seed alone does not reach a tenant that already has the client:
+`Client.AllowedGrantTypes` is `TenantOwned` (AB#6324), so the blueprint import keeps the stored value and
+the 1.8.0 apply logs `updated=0` for it. Identity therefore runs a one-time, additive step per tenant at
+every start (`OctoCliTokenExchangeGrant`, called from `SetupTenantAsync` after the blueprint apply and the
+client-mirror provisioning): it appends the token-exchange URN to `AllowedGrantTypes` of the `octo-cli`
+client and changes nothing else (no other grant, attribute or client). It logs one line per tenant
+(`AB#6839 octo-cli token-exchange grant: tenant=… result=Added|AlreadyPresent|ClientMissing|AlreadyDone`)
+and records a run-once marker (tenant configuration `OctoCliTokenExchangeGrant`) once the client was handled,
+so a grant an administrator removes later stays removed. A tenant without an `octo-cli` client records no
+marker and is retried on the next setup. Root and child tenants both run the step; a child whose
+`octo-cli` is a mirror ends with the grant even when its parent is not fixed yet (the step runs after the
+mirror copy). Mirrors are re-synced from the root on every identity start and on every client update.
+
 **Ancestry is not authority — provisioning is a required operator step.** The exchange proves that the
 caller's tenant is an ancestor of the target; it grants no role. The roles of the issued token are those
 of the B-shadow user in B: an explicit `ExternalTenantUserMapping` (roles or groups), a group membership

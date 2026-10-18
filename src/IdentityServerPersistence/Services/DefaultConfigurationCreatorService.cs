@@ -1,6 +1,7 @@
 using IdentityServerPersistence;
 using IdentityServerPersistence.Configuration.Options;
 using IdentityServerPersistence.Services.FileRoles;
+using IdentityServerPersistence.Services.ClientGrants;
 using IdentityServerPersistence.Services.Migrations;
 using IdentityServerPersistence.Services.SecretManagement;
 using IdentityServerPersistence.SystemStores;
@@ -403,6 +404,22 @@ internal class DefaultConfigurationCreatorService(
                 logger.LogError(ex,
                     "Client mirror provisioning failed for child tenant '{TenantId}'", tenantId);
             }
+        }
+
+        // AB#6839: AllowedGrantTypes is tenant-owned, so the blueprint apply never changes it on an existing client.
+        // One-time, additive step that gives the octo-cli client of THIS tenant the RFC 8693 token-exchange grant.
+        // Deliberately after the mirror provisioning above: the mirror copies the parent's grants over a mirrored
+        // octo-cli, and this step must have the last word in a child tenant whose parent is not fixed yet. A failure
+        // is logged, not fatal: the next setup retries (no marker).
+        try
+        {
+            await OctoCliTokenExchangeGrant.EnsureAsync(tenantContext, logger);
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex,
+                "Adding the token-exchange grant to the octo-cli client failed for tenant '{TenantId}'; " +
+                "retried on the next tenant setup", tenantId);
         }
     }
 
