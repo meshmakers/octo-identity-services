@@ -518,7 +518,8 @@ public class AdminProvisioningController(
     [ProducesResponseType(typeof(ExternalTenantUserMappingDto), StatusCodes.Status201Created)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
-    public async Task<ActionResult<ExternalTenantUserMappingDto>> CreateWithGroups(
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status409Conflict)]
+public async Task<ActionResult<ExternalTenantUserMappingDto>> CreateWithGroups(
         [Required] string targetTenantId,
         [Required][FromBody][Description("The mapping data with target-tenant group ids")]
         CreateExternalTenantUserGroupMappingDto dto)
@@ -532,6 +533,14 @@ public class AdminProvisioningController(
         if (tenantRepository == null)
         {
             return NotFound($"Tenant '{targetTenantId}' not found.");
+        }
+
+        // A mapping is unique per (source tenant, source user): a second one would lock the user out (AB#6975).
+        var duplicate = await ExternalTenantUserMappingLookup.FindOldestAsync(
+            tenantRepository, dto.SourceTenantId, dto.SourceUserId, logger);
+        if (duplicate != null)
+        {
+            return ExternalTenantUserMappingProblems.AlreadyExists(duplicate, dto.SourceTenantId, dto.SourceUserId);
         }
 
         var mapping = new RtExternalTenantUserMapping

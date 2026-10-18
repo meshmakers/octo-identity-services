@@ -159,6 +159,26 @@ public class DuplicateExternalTenantUserMappingIntegrationTests : IClassFixture<
     }
 
     [Fact]
+    public async Task AdminProvisioningController_CreateWithGroupsForExistingPair_Returns409Problem_AndInsertsNothing()
+    {
+        var ctx = await ArrangeWithDuplicateAsync(duplicate: false);
+        var controller = new AdminProvisioningController(
+            _fixture.GetSystemContext(), new NoOpAuthSchemeService(),
+            NullLogger<AdminProvisioningController>.Instance);
+
+        var result = await controller.CreateWithGroups(ctx.ChildTenantId, new CreateExternalTenantUserGroupMappingDto
+        {
+            SourceTenantId = ctx.Login.SourceTenantId,
+            SourceUserId = ctx.Login.SourceUserId,
+            SourceUserName = ctx.Login.SourceUserName,
+            GroupIds = []
+        });
+
+        AssertConflict(result.Result, ctx.OldestId);
+        (await CountMappingsAsync(ctx)).Should().Be(1);
+    }
+
+    [Fact]
     public async Task AdminProvisioningController_CreateForNewPair_StillCreates()
     {
         var ctx = await ArrangeWithDuplicateAsync(duplicate: false);
