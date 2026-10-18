@@ -4,6 +4,7 @@ using System.Security.Claims;
 using Asp.Versioning;
 using Duende.IdentityModel;
 using IdentityServerPersistence;
+using IdentityServerPersistence.SystemStores;
 using Meshmakers.Octo.Backend.Authentication.DynamicAuth;
 using Meshmakers.Octo.Communication.Contracts;
 using Meshmakers.Octo.Communication.Contracts.DataTransferObjects;
@@ -106,6 +107,7 @@ public class AdminProvisioningController(
     [ProducesResponseType(typeof(ExternalTenantUserMappingDto), StatusCodes.Status201Created)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status409Conflict)]
     public async Task<ActionResult<ExternalTenantUserMappingDto>> Create(
         [Required] string targetTenantId,
         [Required][FromBody][Description("The mapping data")] CreateExternalTenantUserMappingDto dto)
@@ -119,6 +121,14 @@ public class AdminProvisioningController(
         if (tenantRepository == null)
         {
             return NotFound($"Tenant '{targetTenantId}' not found.");
+        }
+
+        // A mapping is unique per (source tenant, source user): a second one would lock the user out (AB#6975).
+        var duplicate = await ExternalTenantUserMappingLookup.FindOldestAsync(
+            tenantRepository, dto.SourceTenantId, dto.SourceUserId, logger);
+        if (duplicate != null)
+        {
+            return ExternalTenantUserMappingProblems.AlreadyExists(duplicate, dto.SourceTenantId, dto.SourceUserId);
         }
 
         var mapping = new RtExternalTenantUserMapping
@@ -275,9 +285,10 @@ public class AdminProvisioningController(
         var existingResult = await tenantRepository
             .GetRtEntitiesByTypeAsync<RtExternalTenantUserMapping>(session, existingQuery);
 
-        if (existingResult.Items.Any())
+        var existingMapping = ExternalTenantUserMappingLookup.PickOldest(
+            existingResult.Items.ToList(), tenantId, userId, logger);
+        if (existingMapping != null)
         {
-            var existingMapping = existingResult.Items.First();
 
             // Resolve group names for existing mapping
             var existingAssociations = await tenantRepository.GetRtAssociationsAsync(

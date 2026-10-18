@@ -88,12 +88,20 @@ public class ExternalTenantUserMappingsController(
     [EndpointSummary("Creates a new external tenant user mapping.")]
     [ProducesResponseType(typeof(ExternalTenantUserMappingDto), StatusCodes.Status201Created)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status409Conflict)]
     public async Task<ActionResult<ExternalTenantUserMappingDto>> Create(
         [Required][FromBody][Description("The mapping data")] CreateExternalTenantUserMappingDto dto)
     {
         if (!ModelState.IsValid)
         {
             return BadRequest(ModelState);
+        }
+
+        // A mapping is unique per (source tenant, source user): a second one would lock the user out (AB#6975).
+        var duplicate = await mappingStore.FindBySourceUserAsync(dto.SourceTenantId, dto.SourceUserId);
+        if (duplicate != null)
+        {
+            return ExternalTenantUserMappingProblems.AlreadyExists(duplicate, dto.SourceTenantId, dto.SourceUserId);
         }
 
         var mapping = new RtExternalTenantUserMapping

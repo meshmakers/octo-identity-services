@@ -454,8 +454,8 @@ Cross-tenant authentication enables users from a parent tenant to log in to chil
 | `RtOctoTenantIdentityProvider` | CK Model | Configures a parent-tenant auth link |
 | `RtExternalTenantUserMapping` | CK Model | Maps parent-tenant user to child-tenant roles |
 | `ICrossTenantAuthenticationService` | `IdentityServerPersistence/Services/` | Validates credentials across tenant hierarchy |
-| `IExternalTenantUserMappingStore` | `IdentityServerPersistence/SystemStores/` | CRUD for cross-tenant user mappings |
-| `ExternalTenantUserMappingsController` | `TenantApi/v1/Controllers/` | REST API for managing mappings |
+| `IExternalTenantUserMappingStore` | `IdentityServerPersistence/SystemStores/` | CRUD for cross-tenant user mappings; `FindBySourceUserAsync` tolerates duplicates (oldest `RtId` wins, WARN; AB#6975) |
+| `ExternalTenantUserMappingsController` | `TenantApi/v1/Controllers/` | REST API for managing mappings; a mapping is unique per (source tenant, source user): creating a second one (here and in `AdminProvisioningController`) answers `409 problem+json`, code `ExternalTenantUserMappingAlreadyExists`, update the existing mapping's roles instead (AB#6975) |
 
 ### Tenant Hierarchy
 
