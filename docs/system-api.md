@@ -479,7 +479,7 @@ Cross-tenant provisioning controller routed via the system tenant. Allows users 
 
 **`provisionCurrentUser` endpoint:**
 
-Extracts `sub`, `preferred_username`, and `tenant_id` from the JWT, fetches all roles from the target tenant, and creates an `RtExternalTenantUserMapping` with all role IDs. Returns 200 with the existing mapping if one already exists for this user.
+Extracts `sub`, `preferred_username`, and `tenant_id` from the JWT, fetches all roles from the target tenant, and creates an `RtExternalTenantUserMapping` with all role IDs. The response header `X-Provisioning-Outcome` says what the call did (AB#7088): `created` (201; a new mapping with all roles, member of `TenantOwners`), `repaired` (200; a mapping existed but granted no effective role — no existing role in `MappedRoleIds`, none through a group — or carried a wrong `SourceUserName`; it is filled with all roles, added to `TenantOwners` and/or given the right name, never duplicated) or `already-provisioned` (200; nothing changed — a mapping that already grants a role is never widened). The token exchange resolves roles by source tenant + user **name**, the lookup here by user **id**, hence the name check. Role grants through nested child groups are not looked at; the user can be repaired once more, which is what the command promises anyway.
 
 ### Diagnostics (`/{tenantId}/v1/diagnostics`)
 
