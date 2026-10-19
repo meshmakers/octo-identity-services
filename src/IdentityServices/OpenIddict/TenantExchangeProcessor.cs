@@ -188,8 +188,11 @@ public class TenantExchangeProcessor(
         }
 
         // (d) Find or create the B-shadow user (roles synced from RtExternalTenantUserMapping in B).
+        //     No mapping is stored here (AB#7088): the exchange only needs the shadow user to read its roles. A
+        //     role-less mapping stored for a refused user used to make ProvisionCurrentUser report "already
+        //     provisioned" while the user stayed denied.
         var shadowUser = await crossTenantUserProvisioningService.FindOrCreateCrossTenantUserAsync(
-            crossTenantResult, targetTenantId);
+            crossTenantResult, targetTenantId, storeMappingIfMissing: false);
         if (shadowUser == null)
         {
             logger.LogError(

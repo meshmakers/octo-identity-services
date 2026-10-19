@@ -18,9 +18,14 @@ public interface ICrossTenantUserProvisioningService
     /// </summary>
     /// <param name="crossTenantResult">The cross-tenant authentication result containing source user info.</param>
     /// <param name="childTenantId">The tenant ID where the shadow user should be created.</param>
+    /// <param name="storeMappingIfMissing">
+    /// When <c>true</c> (login paths) a user without an <c>ExternalTenantUserMapping</c> gets a bare one (no
+    /// roles, no group). The token exchange passes <c>false</c> (AB#7088): it only needs the shadow user to
+    /// read the roles and must not leave a mapping behind for a user that is refused.
+    /// </param>
     /// <returns>The local shadow user, or null if creation failed.</returns>
     Task<RtUser?> FindOrCreateCrossTenantUserAsync(
-        CrossTenantAuthResult crossTenantResult, string childTenantId);
+        CrossTenantAuthResult crossTenantResult, string childTenantId, bool storeMappingIfMissing = true);
 
     /// <summary>
     /// Finds the local shadow user of the person behind <paramref name="crossTenantResult"/> without

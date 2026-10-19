@@ -362,6 +362,28 @@ public class CrossTenantUserProvisioningServiceTests
     }
 
     [Fact]
+    public async Task FindOrCreate_WithNoExistingUser_AndStoreMappingIfMissingFalse_CreatesUserButNoMapping()
+    {
+        // AB#7088: the token exchange must not leave a role-less mapping behind for a refused user.
+        var crossTenantResult = CreateCrossTenantResult();
+
+        _userManager.FindByNameAsync("xt_octosystem_admin@test.com")
+            .Returns((RtUser?)null);
+        _userManager.CreateAsync(Arg.Any<RtUser>())
+            .Returns(IdentityResult.Success);
+        _mappingStore.FindBySourceUserAsync("octosystem", "source-user-id")
+            .Returns((RtExternalTenantUserMapping?)null);
+
+        SetupTenantRepository();
+
+        var result = await _sut.FindOrCreateCrossTenantUserAsync(crossTenantResult, "meshtest", storeMappingIfMissing: false);
+
+        result.Should().NotBeNull();
+        await _userManager.Received(1).CreateAsync(Arg.Any<RtUser>());
+        await _mappingStore.DidNotReceive().StoreAsync(Arg.Any<RtExternalTenantUserMapping>());
+    }
+
+    [Fact]
     public async Task FindOrCreate_WhenCreateFails_ReturnsNull()
     {
         // Arrange
