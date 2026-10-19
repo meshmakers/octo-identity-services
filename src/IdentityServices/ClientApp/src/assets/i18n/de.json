@@ -66,6 +66,7 @@
     "CONFIRM_SUBTITLE": "Gerät autorisieren",
     "DESCRIPTION": "Geben Sie den auf Ihrem Gerät angezeigten Code ein, um den Zugriff zu autorisieren.",
     "ERROR_AUTH_FAILED": "Die Autorisierung ist fehlgeschlagen",
+    "ERROR_SESSION_REJECTED": "Ihre Anmeldesitzung wurde für diese Geräteanfrage nicht akzeptiert. Melden Sie sich ab und wieder an und versuchen Sie es erneut, oder starten Sie in der Anwendung, die diesen Code angezeigt hat, eine neue Anmeldung.",
     "INVALID_CODE": "Ungültiger oder abgelaufener Gerätecode.",
     "NO_CODE": "Es wurde kein Gerätecode angegeben.",
     "REQUESTING_ACCESS": "Dieses Gerät fordert Zugriff auf Ihr Konto an:",

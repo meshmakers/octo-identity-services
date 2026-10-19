@@ -1509,9 +1509,10 @@ The CI/CD pipeline will fail if there are any lint errors. Common issues:
 - Build, serve and extract-i18n run on `@angular/build` (esbuild/Vite); `@angular-devkit/build-angular`
   is gone. The `application` builder writes a **flat `dist/`** (`outputPath.browser: ""`) because
   `IdentityServices.csproj` copies `ClientApp/dist/**` to `wwwroot` and checks for `dist/index.html`.
-- There are no unit tests and no `test` target: the former Karma target pointed at a non-existent
-  `tsconfig.spec.json` and never ran. Add `@angular/build:unit-test` (Vitest) together with the first
-  spec, following Refinery Studio.
+- Unit tests: Vitest on jsdom via `@angular/build:unit-test` (AB#6993, same setup as Refinery Studio).
+  Run `npm test` (= `ng test --watch=false`) in `ClientApp`; a single spec:
+  `npm test -- --include='**/device-confirm.component.spec.ts'`. Never call `npx vitest` directly.
+  Specs live next to the component (`*.spec.ts`), `tsconfig.spec.json` pulls in `vitest/globals`.
 - `allowScripts` in `package.json` lists the six packages npm >= 11.16 may run install scripts for
   (`esbuild`, `lmdb`, `msgpackr-extract`, `@parcel/watcher`, `fsevents`, `@progress/kendo-licensing`).
   A new dependency with an install script produces an `npm warn allow-scripts` line until it is
@@ -1524,6 +1525,16 @@ The CI/CD pipeline will fail if there are any lint errors. Common issues:
   `@angular/platform-browser-dynamic` was removed (unused since the standalone bootstrap in `main.ts`).
 - Expected result of a clean `npm ci` + `npm run build`: no allow-scripts advisory, no other
   deprecation, 0 vulnerabilities, no build warnings.
+
+### Device flow loop guard (AB#6993)
+
+`/{tenant}/device/confirm` loads `GET /connect/deviceverification` (tenant-free URL; the tenant comes
+from the in-memory `user_code` -> tenant map of `OidcTenantResolutionMiddleware`, fallback system
+tenant). On 401 it navigates **once** to `/{tenant}/login` with a `loginAttempted=1` marker inside the
+`returnUrl`; the login page's "already signed in" shortcut (AB#4961) sends an authenticated user straight
+back. If the endpoint still answers 401 with the marker present, the page stops and shows
+`DEVICE.ERROR_SESSION_REJECTED` (EN/DE) instead of bouncing forever. The consent page has no 401
+redirect and `AuthorizeController` strips `prompt=login` and signs out stale sessions, so neither loops.
 
 ### Angular Project Structure
 
