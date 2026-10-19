@@ -31,7 +31,7 @@
     "@progress/kendo-angular-common": "^24.1.0",
     "@progress/kendo-angular-icons": "^24.1.0",
     "@progress/kendo-angular-inputs": "^24.1.0",
-    "@progress/kendo-angular-l10n": "^24.1.0",
+    "@progress/kendo-angular-l10n": "^25.0.0",
     "@progress/kendo-angular-layout": "^24.1.0",
     "@progress/kendo-angular-popup": "^24.1.0",
     "@progress/kendo-licensing": "^1.11.0",
