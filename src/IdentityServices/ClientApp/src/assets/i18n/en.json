@@ -66,6 +66,7 @@
     "CONFIRM_SUBTITLE": "Authorize Device",
     "DESCRIPTION": "Enter the code displayed on your device to authorize access.",
     "ERROR_AUTH_FAILED": "Authorization failed",
+    "ERROR_SESSION_REJECTED": "Your sign-in session was not accepted for this device request. Sign out, sign in again and retry, or start a new login in the application that showed this code.",
     "INVALID_CODE": "Invalid or expired device code.",
     "NO_CODE": "No device code provided.",
     "REQUESTING_ACCESS": "This device is requesting access to your account:",

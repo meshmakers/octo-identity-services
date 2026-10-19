@@ -121,9 +121,15 @@ export class DeviceConfirmComponent implements OnInit {
   errorMessage?: string;
   context?: DeviceAuthorizationContext;
   userCode = '';
+  private loginAlreadyAttempted = false;
+
+  /** Query marker added to the returnUrl of the one login round trip. */
+  private static readonly loginAttemptedParam = 'loginAttempted';
 
   ngOnInit(): void {
     this.userCode = this.route.snapshot.queryParams['userCode'] || '';
+    this.loginAlreadyAttempted =
+      this.route.snapshot.queryParams[DeviceConfirmComponent.loginAttemptedParam] === '1';
 
     if (!this.userCode) {
       this.loading = false;
@@ -141,10 +147,19 @@ export class DeviceConfirmComponent implements OnInit {
         this.loading = false;
       },
       error: (error: HttpErrorResponse) => {
-        // If 401 Unauthorized, redirect to login with return URL back to this page
+        // 401: the verification endpoint rejected the session cookie. Send the user to the login
+        // page once, with a marker in the return URL. If we come back with the marker and the
+        // endpoint still answers 401, the login page's "already signed in" shortcut and this page
+        // would bounce between each other forever (AB#6993) — so stop and explain instead.
         if (error.status === 401) {
+          if (this.loginAlreadyAttempted) {
+            this.loading = false;
+            this.errorMessage = this.translate.instant('DEVICE.ERROR_SESSION_REJECTED');
+            return;
+          }
           const tenantId = this.route.snapshot.params['tenantId'] || 'System';
-          const returnUrl = `/${tenantId}/device/confirm?userCode=${encodeURIComponent(this.userCode)}`;
+          const returnUrl = `/${tenantId}/device/confirm?userCode=${encodeURIComponent(this.userCode)}`
+            + `&${DeviceConfirmComponent.loginAttemptedParam}=1`;
           this.router.navigate(['/', tenantId, 'login'], {
             queryParams: { returnUrl }
           });
