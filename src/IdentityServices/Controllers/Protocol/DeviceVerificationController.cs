@@ -63,8 +63,10 @@ public class DeviceVerificationController(
         }
 
         var result = await HttpContext.AuthenticateAsync(OpenIddictServerAspNetCoreDefaults.AuthenticationScheme);
-        if (result is not { Succeeded: true, Principal: not null })
+        if (result is not { Succeeded: true, Principal: not null } ||
+            !await IsUserCodePendingAsync(result.Principal))
         {
+            // Unknown, expired, already approved or denied: no consent dialog for it (AB#7090).
             return NotFound("Invalid or expired device code");
         }
 
@@ -92,9 +94,19 @@ public class DeviceVerificationController(
                       throw new InvalidOperationException("The OpenIddict request cannot be retrieved.");
 
         var result = await HttpContext.AuthenticateAsync(OpenIddictServerAspNetCoreDefaults.AuthenticationScheme);
-        if (result is not { Succeeded: true, Principal: not null })
+        if (result is not { Succeeded: true, Principal: not null } ||
+            !await IsUserCodePendingAsync(result.Principal))
         {
-            return ForbidWithError(Errors.InvalidToken, "Invalid or expired device code");
+            // A used or unknown code must answer invalid_token here, in the same JSON shape the
+            // response handler writes (OctoDeviceVerificationResponseHandler). Neither Forbid (the
+            // challenge handler needs an authenticated principal and throws for an unknown code) nor
+            // SignIn (OpenIddict throws for a device code that is already authorized) can be used.
+            return Ok(new
+            {
+                success = false,
+                errorMessage = "Invalid or expired device code",
+                error = Errors.InvalidToken
+            });
         }
 
         var form = await Request.ReadFormAsync(HttpContext.RequestAborted);
@@ -166,6 +178,25 @@ public class DeviceVerificationController(
             user.UserName, result.Principal.GetClaim(Claims.ClientId) ?? "unknown", tenantId);
 
         return SignIn(new ClaimsPrincipal(identity), OpenIddictServerAspNetCoreDefaults.AuthenticationScheme);
+    }
+
+    /// <summary>
+    ///     True while the user code token of the authenticated verification request is still
+    ///     <c>valid</c>; approved, denied, redeemed or expired codes are not pending any more.
+    ///     OpenIddict keeps authenticating such a code on the verification endpoint, so the
+    ///     controller has to check the token status itself.
+    /// </summary>
+    private async Task<bool> IsUserCodePendingAsync(ClaimsPrincipal principal)
+    {
+        var tokenId = principal.GetTokenId();
+        if (string.IsNullOrEmpty(tokenId))
+        {
+            return false;
+        }
+
+        var token = await tokenManager.FindByIdAsync(tokenId, HttpContext.RequestAborted);
+        return token != null &&
+               await tokenManager.HasStatusAsync(token, Statuses.Valid, HttpContext.RequestAborted);
     }
 
     /// <summary>

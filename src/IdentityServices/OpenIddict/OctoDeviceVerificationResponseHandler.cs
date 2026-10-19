@@ -8,8 +8,10 @@ namespace Meshmakers.Octo.Backend.IdentityServices.OpenIddict;
 
 /// <summary>
 ///     Renders the end-user verification response of the device flow as the JSON result DTO the
-///     Angular device page expects (<c>{ success, errorMessage }</c> — the former
-///     <c>DeviceAuthorizationResultDto</c> contract of <c>DeviceApiController</c>, AB#4993).
+///     Angular device page expects (<c>{ success, errorMessage, error }</c> — the former
+///     <c>DeviceAuthorizationResultDto</c> contract of <c>DeviceApiController</c>, AB#4993, plus the
+///     OAuth <c>error</c> code since AB#7090 so the page can tell a denied request from a used or
+///     expired code). The response is always HTTP 200; the outcome is in <c>success</c>.
 ///     Without this handler OpenIddict would render its default (browser-oriented) response,
 ///     which the SPA's XHR cannot consume.
 /// </summary>
@@ -39,7 +41,8 @@ public class OctoDeviceVerificationResponseHandler
             success,
             errorMessage = success
                 ? null
-                : context.Response.ErrorDescription ?? context.Response.Error
+                : context.Response.ErrorDescription ?? context.Response.Error,
+            error = success ? null : context.Response.Error
         });
 
         httpContext.Response.StatusCode = StatusCodes.Status200OK;

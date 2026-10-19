@@ -64,8 +64,11 @@
   "DEVICE": {
     "CODE_LABEL": "Gerätecode",
     "CONFIRM_SUBTITLE": "Gerät autorisieren",
+    "DENIED": "Die Geräteanfrage wurde abgelehnt. Sie können dieses Fenster schließen.",
     "DESCRIPTION": "Geben Sie den auf Ihrem Gerät angezeigten Code ein, um den Zugriff zu autorisieren.",
     "ERROR_AUTH_FAILED": "Die Autorisierung ist fehlgeschlagen",
+    "ERROR_CODE_USED": "Dieser Gerätecode wurde bereits verwendet, ist abgelaufen oder wurde abgelehnt. Starten Sie in der Anwendung, die diesen Code angezeigt hat, eine neue Anmeldung.",
+    "ERROR_NO_CONFIRMATION": "Die Anfrage wurde gesendet, es kam aber keine Bestätigung zurück. Prüfen Sie die Anwendung, die diesen Code angezeigt hat; ist sie nicht angemeldet, starten Sie eine neue Anmeldung.",
     "ERROR_SESSION_REJECTED": "Ihre Anmeldesitzung wurde für diese Geräteanfrage nicht akzeptiert. Melden Sie sich ab und wieder an und versuchen Sie es erneut, oder starten Sie in der Anwendung, die diesen Code angezeigt hat, eine neue Anmeldung.",
     "INVALID_CODE": "Ungültiger oder abgelaufener Gerätecode.",
     "NO_CODE": "Es wurde kein Gerätecode angegeben.",

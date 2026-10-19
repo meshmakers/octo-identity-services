@@ -1536,6 +1536,23 @@ back. If the endpoint still answers 401 with the marker present, the page stops 
 `DEVICE.ERROR_SESSION_REJECTED` (EN/DE) instead of bouncing forever. The consent page has no 401
 redirect and `AuthorizeController` strips `prompt=login` and signs out stale sessions, so neither loops.
 
+### Device confirm feedback (AB#7090)
+
+`POST /connect/deviceverification` always answers **HTTP 200** with `{ success, errorMessage, error }`
+(`OctoDeviceVerificationResponseHandler`; `error` is the OAuth code: `access_denied` = denied by the user
+or cross-tenant refused, `invalid_token` = code used/expired/unknown). `DeviceVerificationController` also
+returns that shape itself for a code that is not pending any more. `GET` answers 404 for such a code.
+"Pending" = the user code token (`principal.GetTokenId()`) still has status `valid`: OpenIddict keeps
+authenticating an approved/denied code on the verification endpoint, and a second `SignIn` for it throws
+(HTTP 500), so the controller checks the status itself (`IsUserCodePendingAsync`). Never use `Forbid` for
+the unknown-code case: the challenge handler needs an authenticated principal and throws.
+The page always ends in a visible state: success, denied (`DEVICE.DENIED`), or an error
+(`DEVICE.ERROR_CODE_USED`, `ERROR_SESSION_REJECTED`, `ERROR_NO_CONFIRMATION` for a 2xx/unparsable body of
+unknown outcome, server text for e.g. cross-tenant). Terminal errors hide the consent dialog; retryable
+ones (HTTP 5xx, cross-tenant refusal) show a banner above the buttons. Specs:
+`device-confirm.feedback.spec.ts`, `OctoDeviceVerificationResponseHandlerTests`,
+`DeviceVerificationFeedbackTests`.
+
 ### Angular Project Structure
 
 - `src/app/core/` - Services, interceptors, models

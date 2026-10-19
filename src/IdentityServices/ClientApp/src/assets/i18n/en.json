@@ -64,8 +64,11 @@
   "DEVICE": {
     "CODE_LABEL": "Device Code",
     "CONFIRM_SUBTITLE": "Authorize Device",
+    "DENIED": "The device request was denied. You can close this window.",
     "DESCRIPTION": "Enter the code displayed on your device to authorize access.",
     "ERROR_AUTH_FAILED": "Authorization failed",
+    "ERROR_CODE_USED": "This device code was already used, has expired or was rejected. Start a new login in the application that showed this code.",
+    "ERROR_NO_CONFIRMATION": "The request was sent but no confirmation was received. Check the application that showed this code; if it is not signed in, start a new login.",
     "ERROR_SESSION_REJECTED": "Your sign-in session was not accepted for this device request. Sign out, sign in again and retry, or start a new login in the application that showed this code.",
     "INVALID_CODE": "Invalid or expired device code.",
     "NO_CODE": "No device code provided.",
