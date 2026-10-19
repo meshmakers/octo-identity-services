@@ -8,7 +8,7 @@ import { LcarsPanelComponent } from '../../shared/components/lcars-panel/lcars-p
 import { LcarsHeaderComponent } from '../../shared/components/lcars-header/lcars-header.component';
 import { ScopeListComponent } from '../../shared/components/scope-list/scope-list.component';
 import { ConsentApiService } from '../../core/services/consent-api.service';
-import { DeviceAuthorizationContext } from '../../core/models/consent.models';
+import { DeviceAuthorizationContext, DeviceAuthorizationResult } from '../../core/models/consent.models';
 
 @Component({
   selector: 'app-device-confirm',
@@ -67,6 +67,11 @@ import { DeviceAuthorizationContext } from '../../core/models/consent.models';
             [scopes]="context.apiScopes">
           </app-scope-list>
 
+          <!-- Feedback of a failed Allow/Deny while the dialog is still usable (AB#7090) -->
+          <div *ngIf="errorMessage" class="error-state" role="alert">
+            <div class="lcars-error-message">{{ errorMessage }}</div>
+          </div>
+
           <!-- Actions -->
           <div class="lcars-actions">
             <button
@@ -86,7 +91,7 @@ import { DeviceAuthorizationContext } from '../../core/models/consent.models';
           </div>
         </ng-container>
 
-        <div *ngIf="!loading && !context && !success" class="error-state">
+        <div *ngIf="!loading && !context && !success && !denied" class="error-state" role="alert">
           <div class="lcars-error-message">
             {{ errorMessage || ('DEVICE.INVALID_CODE' | translate) }}
           </div>
@@ -98,9 +103,15 @@ import { DeviceAuthorizationContext } from '../../core/models/consent.models';
           </button>
         </div>
 
-        <div *ngIf="success" class="success-state">
+        <div *ngIf="success" class="success-state" role="status">
           <div class="lcars-success-message">
             {{ 'DEVICE.SUCCESS' | translate }}
+          </div>
+        </div>
+
+        <div *ngIf="denied" class="success-state" role="status">
+          <div class="lcars-success-message">
+            {{ 'DEVICE.DENIED' | translate }}
           </div>
         </div>
       </app-lcars-panel>
@@ -118,6 +129,7 @@ export class DeviceConfirmComponent implements OnInit {
   loading = true;
   submitting = false;
   success = false;
+  denied = false;
   errorMessage?: string;
   context?: DeviceAuthorizationContext;
   userCode = '';
@@ -173,9 +185,10 @@ export class DeviceConfirmComponent implements OnInit {
   }
 
   onAllow(): void {
-    if (!this.context) return;
+    if (!this.context || this.submitting) return;
 
     this.submitting = true;
+    this.errorMessage = undefined;
 
     const scopesConsented = [
       ...this.context.identityScopes.filter(s => s.checked).map(s => s.name),
@@ -189,31 +202,78 @@ export class DeviceConfirmComponent implements OnInit {
     }).subscribe({
       next: (result) => {
         this.submitting = false;
-        if (result.success) {
+        if (result?.success === true) {
           this.success = true;
           this.context = undefined;
+        } else if (result?.success === false) {
+          this.showFailure(this.messageForResult(result, 'DEVICE.ERROR_AUTH_FAILED'), result.error);
         } else {
-          this.errorMessage = result.errorMessage || this.translate.instant('DEVICE.ERROR_AUTH_FAILED');
+          // 2xx but not the documented { success, errorMessage, error } body: the outcome is
+          // unknown (the device may or may not be approved). Never stay silent and never offer
+          // a second click on a code that may already be redeemed.
+          this.endWithMessage(this.translate.instant('DEVICE.ERROR_NO_CONFIRMATION'));
         }
       },
-      error: (error) => {
-        this.submitting = false;
-        this.errorMessage = error.error?.message || this.translate.instant('COMMON.ERROR_GENERIC');
-      }
+      error: (error: HttpErrorResponse) => this.onSubmitError(error)
     });
   }
 
   onDeny(): void {
+    if (this.submitting) return;
+
     this.submitting = true;
+    this.errorMessage = undefined;
 
     this.consentApi.denyDeviceAuthorization(this.userCode).subscribe({
-      next: () => {
-        this.goBack();
-      },
-      error: () => {
+      next: (result) => {
         this.submitting = false;
-      }
+        // The server answers a deny with { success: false, error: 'access_denied' }; any other
+        // error code means the code was not pending (used, expired, rejected).
+        if (result?.success === false && result.error && result.error !== 'access_denied') {
+          this.showFailure(this.messageForResult(result, 'DEVICE.ERROR_AUTH_FAILED'), result.error);
+          return;
+        }
+        this.denied = true;
+        this.context = undefined;
+      },
+      error: (error: HttpErrorResponse) => this.onSubmitError(error)
     });
+  }
+
+  private onSubmitError(error: HttpErrorResponse): void {
+    this.submitting = false;
+    if (error.status === 401) {
+      this.endWithMessage(this.translate.instant('DEVICE.ERROR_SESSION_REJECTED'));
+    } else if (error.status === 200) {
+      // Body could not be parsed as JSON: same unknown outcome as a 2xx with a foreign body.
+      this.endWithMessage(this.translate.instant('DEVICE.ERROR_NO_CONFIRMATION'));
+    } else if (error.status === 404 || error.status === 410) {
+      this.endWithMessage(this.translate.instant('DEVICE.ERROR_CODE_USED'));
+    } else {
+      this.errorMessage = this.translate.instant('COMMON.ERROR_GENERIC');
+    }
+  }
+
+  private messageForResult(result: DeviceAuthorizationResult, fallbackKey: string): string {
+    if (result.error === 'invalid_token') {
+      return this.translate.instant('DEVICE.ERROR_CODE_USED');
+    }
+    return result.errorMessage || this.translate.instant(fallbackKey);
+  }
+
+  /** Failure the user can still act on: keep the dialog for a retry unless the code is gone. */
+  private showFailure(message: string, error?: string): void {
+    if (error === 'invalid_token') {
+      this.endWithMessage(message);
+    } else {
+      this.errorMessage = message;
+    }
+  }
+
+  /** Terminal failure: hide the consent dialog so the message cannot be missed. */
+  private endWithMessage(message: string): void {
+    this.context = undefined;
+    this.errorMessage = message;
   }
 
   goBack(): void {
