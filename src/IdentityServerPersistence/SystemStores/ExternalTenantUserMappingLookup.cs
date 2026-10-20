@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using Meshmakers.Octo.Runtime.Contracts.MongoDb.Repositories;
 using Meshmakers.Octo.Runtime.Contracts.Repositories.Query;
 using Microsoft.Extensions.Logging;
@@ -15,6 +16,19 @@ namespace IdentityServerPersistence.SystemStores;
 public static class ExternalTenantUserMappingLookup
 {
     /// <summary>
+    /// Remembers which duplicate sets were already reported, so that the several lookups of one request (a login or a
+    /// token exchange looks the mapping up in more than one place) log the WARN once. Keep one instance per
+    /// request scope; a later lookup of the same set logs at Debug level only.
+    /// </summary>
+    public sealed class DuplicateWarningGate
+    {
+        private readonly ConcurrentDictionary<string, byte> _reported = new(StringComparer.Ordinal);
+
+        /// <summary>True the first time <paramref name="key"/> is seen.</summary>
+        public bool ShouldWarn(string key) => _reported.TryAdd(key, 0);
+    }
+
+    /// <summary>
     /// Picks the oldest mapping of <paramref name="candidates"/> (smallest RtId); null for an empty list.
     /// Logs a WARN naming every id when there is more than one.
     /// </summary>
@@ -22,7 +36,8 @@ public static class ExternalTenantUserMappingLookup
         IReadOnlyCollection<RtExternalTenantUserMapping> candidates,
         string sourceTenantId,
         string sourceUserId,
-        ILogger? logger = null)
+        ILogger? logger = null,
+        DuplicateWarningGate? warningGate = null)
     {
         if (candidates.Count == 0)
         {
@@ -34,12 +49,15 @@ public static class ExternalTenantUserMappingLookup
             .OrderBy(m => m.RtId.ToString(), StringComparer.Ordinal)
             .ToList();
 
-        if (ordered.Count > 1)
+        if (ordered.Count > 1 && logger != null)
         {
-            logger?.LogWarning(
+            var ids = string.Join(", ", ordered.Select(m => m.RtId.ToString()));
+            var level = warningGate == null || warningGate.ShouldWarn($"{sourceTenantId}\u001f{sourceUserId}\u001f{ids}")
+                ? LogLevel.Warning
+                : LogLevel.Debug;
+            logger.Log(level,
                 "Found {Count} cross-tenant user mappings for source user '{SourceUserId}' of tenant '{SourceTenantId}' ({MappingIds}); using the oldest '{ChosenId}'. Delete the duplicates.",
-                ordered.Count, sourceUserId, sourceTenantId,
-                string.Join(", ", ordered.Select(m => m.RtId.ToString())), ordered[0].RtId.ToString());
+                ordered.Count, sourceUserId, sourceTenantId, ids, ordered[0].RtId.ToString());
         }
 
         return ordered[0];
@@ -53,7 +71,8 @@ public static class ExternalTenantUserMappingLookup
         ITenantRepository repository,
         string sourceTenantId,
         string sourceUserId,
-        ILogger? logger = null)
+        ILogger? logger = null,
+        DuplicateWarningGate? warningGate = null)
     {
         var session = await repository.GetSessionAsync();
         session.StartTransaction();
@@ -66,6 +85,6 @@ public static class ExternalTenantUserMappingLookup
             .GetRtEntitiesByTypeAsync<RtExternalTenantUserMapping>(session, queryOptions);
         await session.CommitTransactionAsync();
 
-        return PickOldest(result.Items.ToList(), sourceTenantId, sourceUserId, logger);
+        return PickOldest(result.Items.ToList(), sourceTenantId, sourceUserId, logger, warningGate);
     }
 }

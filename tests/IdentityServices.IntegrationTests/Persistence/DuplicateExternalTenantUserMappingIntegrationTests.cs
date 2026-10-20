@@ -60,6 +60,33 @@ public class DuplicateExternalTenantUserMappingIntegrationTests : IClassFixture<
     }
 
     [Fact]
+    public async Task Store_TwoLookupsOfTheSameDuplicateSetInOneScope_LogTheWarningOnce()
+    {
+        var ctx = await ArrangeWithDuplicateAsync();
+        var logger = new CapturingLogger<ExternalTenantUserMappingStore>();
+        // One store instance = one request scope (the store is registered scoped).
+        var store = new ExternalTenantUserMappingStore(new FixedTenantResolver(ctx.ChildRepo), logger);
+
+        // A login and a token exchange both look the mapping up twice.
+        await store.FindBySourceUserAsync(ctx.Login.SourceTenantId, ctx.Login.SourceUserId);
+        await store.FindBySourceUserAsync(ctx.Login.SourceTenantId, ctx.Login.SourceUserId);
+
+        logger.Levels.Count(l => l == LogLevel.Warning).Should().Be(1);
+        logger.Levels.Count(l => l == LogLevel.Debug).Should().Be(1);
+    }
+
+    [Fact]
+    public async Task Store_FindBySourceUserNames_ReturnsBothMappings_SoTheRolesCanBeUnited()
+    {
+        var ctx = await ArrangeWithDuplicateAsync();
+
+        var rows = await ctx.Store.FindBySourceUserNamesAsync(
+            [(ctx.Login.SourceTenantId, ctx.Login.SourceUserName)]);
+
+        rows.Should().HaveCount(2, "the oldest-wins pick only applies to the lookup that finds the user");
+    }
+
+    [Fact]
     public async Task IsExplicitlyProvisioned_WithTwoMappings_IsTrue()
     {
         var ctx = await ArrangeWithDuplicateAsync();
@@ -302,5 +329,19 @@ public class DuplicateExternalTenantUserMappingIntegrationTests : IClassFixture<
     private sealed class NoOpAuthSchemeService : IDynamicAuthSchemeService
     {
         public Task ConfigureAsync(string tenantId) => Task.CompletedTask;
+    }
+
+    private sealed class CapturingLogger<T> : ILogger<T>
+    {
+        private readonly List<LogLevel> _levels = [];
+
+        public IReadOnlyList<LogLevel> Levels => _levels;
+
+        public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
+
+        public bool IsEnabled(LogLevel logLevel) => true;
+
+        public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception? exception,
+            Func<TState, Exception?, string> formatter) => _levels.Add(logLevel);
     }
 }
