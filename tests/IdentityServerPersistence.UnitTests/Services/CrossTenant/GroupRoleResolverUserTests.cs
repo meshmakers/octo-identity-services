@@ -112,6 +112,45 @@ public class GroupRoleResolverUserTests
         roles.Should().BeEquivalentTo([userRole, mappingRole]);
     }
 
+    /// <summary>
+    ///     AB#6975: a source user can hold two mappings in one tenant (legacy data, races). The lookup that
+    ///     finds the user picks the oldest, but the effective roles are the union over ALL matching
+    ///     mappings: their mapped roles and the roles of the groups each mapping belongs to.
+    /// </summary>
+    [Fact]
+    public async Task TwoMappingsOfOneUser_RolesOfBothMappingsAndTheirGroupsAreUnited()
+    {
+        var oldRole = NewId();
+        var newRole = NewId();
+        var oldGroupRole = NewId();
+        var newGroupRole = NewId();
+        var oldest = Mapping("meshmakers", "gerald", oldRole);
+        var newer = Mapping("meshmakers", "gerald", newRole);
+        AddGroup(oldGroupRole, oldest.RtId.ToString());
+        AddGroup(newGroupRole, newer.RtId.ToString());
+        ReturnMappings(oldest, newer);
+
+        var roles = await _sut.ResolveEffectiveUserRoleIdsAsync(NewId(), "xt_meshmakers_gerald");
+
+        roles.Should().BeEquivalentTo([oldRole, newRole, oldGroupRole, newGroupRole],
+            "no access of either mapping may be lost while duplicates exist");
+    }
+
+    [Fact]
+    public async Task TwoMappingsOfOneUser_SharedRoleIsReturnedOnce()
+    {
+        var shared = NewId();
+        var onlyNewer = NewId();
+        ReturnMappings(
+            Mapping("meshmakers", "gerald", shared),
+            Mapping("meshmakers", "gerald", shared, onlyNewer));
+
+        var roles = await _sut.ResolveEffectiveUserRoleIdsAsync(NewId(), "xt_meshmakers_gerald");
+
+        roles.Should().BeEquivalentTo([shared, onlyNewer]);
+        roles.Should().OnlyHaveUniqueItems();
+    }
+
     [Fact]
     public async Task LocalUser_NeverQueriesMappings()
     {

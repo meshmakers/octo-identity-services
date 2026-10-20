@@ -41,4 +41,60 @@ public class ExternalTenantUserMappingLookupTests
 
         logger.ReceivedWithAnyArgs(1).Log(LogLevel.Warning, default, default(object), default, default!);
     }
+
+    [Fact]
+    public void PickOldest_WithGate_TwoLookupsOfTheSameDuplicateSet_WarnOnce()
+    {
+        var oldest = Mapping();
+        var newer = Mapping();
+        var logger = new CapturingLogger();
+        var gate = new ExternalTenantUserMappingLookup.DuplicateWarningGate();
+
+        // A login or a token exchange looks the mapping up twice per request.
+        ExternalTenantUserMappingLookup.PickOldest([newer, oldest], "t", "u", logger, gate).Should().BeSameAs(oldest);
+        ExternalTenantUserMappingLookup.PickOldest([oldest, newer], "t", "u", logger, gate).Should().BeSameAs(oldest);
+
+        logger.Levels.Count(l => l == LogLevel.Warning).Should().Be(1);
+        logger.Levels.Count(l => l == LogLevel.Debug).Should().Be(1, "the repeated lookup is still traceable at debug level");
+        logger.Messages.Single(m => m.level == LogLevel.Warning).text
+            .Should().Contain(oldest.RtId.ToString()).And.Contain(newer.RtId.ToString()).And.Contain("using the oldest");
+    }
+
+    [Fact]
+    public void PickOldest_WithGate_ADifferentSourceUser_WarnsAgain()
+    {
+        var logger = new CapturingLogger();
+        var gate = new ExternalTenantUserMappingLookup.DuplicateWarningGate();
+
+        ExternalTenantUserMappingLookup.PickOldest([Mapping(), Mapping()], "t", "u1", logger, gate);
+        ExternalTenantUserMappingLookup.PickOldest([Mapping(), Mapping()], "t", "u2", logger, gate);
+
+        logger.Levels.Count(l => l == LogLevel.Warning).Should().Be(2);
+    }
+
+    [Fact]
+    public void PickOldest_WithoutGate_StillWarnsOnEveryCall()
+    {
+        var logger = new CapturingLogger();
+        var rows = new[] { Mapping(), Mapping() };
+
+        ExternalTenantUserMappingLookup.PickOldest(rows, "t", "u", logger);
+        ExternalTenantUserMappingLookup.PickOldest(rows, "t", "u", logger);
+
+        logger.Levels.Count(l => l == LogLevel.Warning).Should().Be(2);
+    }
+
+    private sealed class CapturingLogger : ILogger
+    {
+        public List<(LogLevel level, string text)> Messages { get; } = [];
+
+        public IEnumerable<LogLevel> Levels => Messages.Select(m => m.level);
+
+        public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
+
+        public bool IsEnabled(LogLevel logLevel) => true;
+
+        public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception? exception,
+            Func<TState, Exception?, string> formatter) => Messages.Add((logLevel, formatter(state, exception)));
+    }
 }
