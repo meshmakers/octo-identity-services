@@ -1624,6 +1624,18 @@ Build image using `src/IdentityServices/Dockerfile`. Requires build args:
 - `OCTO_PRIVATE_NUGET_CERTIFICATE`: Path to CA certificate
 - `OCTO_VERSION`: Package version to use
 
+### .NET runtime of the image and the Shared Framework findings (AB#6724, AB#6717)
+
+- The runtime stage uses the own base image `meshmakers/dotnet_aspnetcore-runtime-node` (build stage: `dotnet_sdk-node`), currently `1.4.0.0`
+  (built from `mcr.microsoft.com/dotnet/aspnet:10.0-noble`, .NET runtime 10.0.13). Bump the tag when `dockerimages` publishes a rebuilt image.
+- `System.Security.Cryptography.Pkcs` and `System.Security.Cryptography.Xml` come from the **.NET Shared Framework** (via OpenIddict and
+  DataProtection), not from a package reference. A direct `PackageReference` pin in the web project fails with `NU1510` (package pruned by the
+  framework), so **no package pin is possible**. `dotnet list package --vulnerable` may keep reporting them at the version of the build SDK
+  while restore stays silent: that is a known, covered false positive.
+- The control is the **image runtime**: since `tpl-v1.7.0` the template step `verify-dotnet-runtime.yml` (inside `build-and-push-docker.yml`) fails
+  the image build when the final stage ships a .NET runtime below the minimum (10.0.13, one place: `minRuntimeVersion` in the template). Do not chase
+  these findings with pins; see AB#6717 for the package-level part and AB#6724 for the runtime check.
+
 ## Documentation Guidelines
 
 **CRITICAL REQUIREMENT:** Documentation MUST be updated after EVERY change. This is mandatory, not optional.
