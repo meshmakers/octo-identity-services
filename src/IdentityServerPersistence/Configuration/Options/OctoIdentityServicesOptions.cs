@@ -174,6 +174,27 @@ public class OctoIdentityServicesOptions
     ///     (loopback redirects, PKCE, no secret, fixed scopes, TTL, per-tenant cap, rate limit).
     /// </summary>
     public DynamicClientRegistrationOptions DynamicClientRegistration { get; set; } = new();
+
+    /// <summary>
+    ///     <c>GET /api/tenant-topology</c> (AB#7044): limits of the tenant-topology endpoint.
+    /// </summary>
+    public TenantTopologyOptions TenantTopology { get; set; } = new();
+}
+
+/// <summary>
+///     Configuration of the tenant-topology endpoint (AB#7044). Environment variables:
+///     <c>OCTO_IDENTITY__TENANTTOPOLOGY__RATELIMITPERMITSPERMINUTE</c>, <c>…__MAXNODES</c>.
+/// </summary>
+public class TenantTopologyOptions
+{
+    /// <summary>Per-subject sliding-window permit count per minute (default 60: an app asks once per session).</summary>
+    public int RateLimitPermitsPerMinute { get; set; } = 60;
+
+    /// <summary>
+    ///     Upper bound of tenants walked below one scope. Reaching it fails closed (503) instead of
+    ///     answering with a partial list.
+    /// </summary>
+    public int MaxNodes { get; set; } = 5000;
 }
 
 /// <summary>
