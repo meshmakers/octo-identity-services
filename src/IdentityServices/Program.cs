@@ -182,6 +182,9 @@ try
 
     builder.Services.AddCors();
 
+    // AB#7044: per-subject throttle of GET /api/tenant-topology (asked by the controller after authentication).
+    builder.Services.AddSingleton<ITenantTopologyRateLimiter, TenantTopologyRateLimiter>();
+
     // AB#5032: lets an operator narrow the client-credentials exemption of
     // UseOctoTenantAuthorization() per environment (OCTO_TENANTAUTHORIZATION__…). The defaults
     // reproduce the previous behaviour and only add the audit log.

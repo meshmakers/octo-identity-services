@@ -93,6 +93,8 @@ public static class RuntimeEngineBuilderExtensions
         builder.Services
             .AddScoped<IEntraIdVerifiedIdentifierEnrollmentService, EntraIdVerifiedIdentifierEnrollmentService>();
         builder.Services.AddScoped<ITenantDiscoveryService, TenantDiscoveryService>();
+        // AB#7044: tenant-topology endpoint; the per-scope snapshot lives in the shared IMemoryCache.
+        builder.Services.AddScoped<ITenantTopologyService, TenantTopologyService>();
         builder.Services.AddScoped<IClientMirrorProvisioningService, ClientMirrorProvisioningService>();
         // AB#5026 delegation ("on-behalf-of"): the protocol-free policy behind OnBehalfOfProcessor.
         builder.Services.AddScoped<IDelegatedIdentityResolver, DelegatedIdentityResolver>();
