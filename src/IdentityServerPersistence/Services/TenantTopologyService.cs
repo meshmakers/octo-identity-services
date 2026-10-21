@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Runtime.CompilerServices;
 using IdentityServerPersistence.Configuration.Options;
 using Meshmakers.Octo.Runtime.Contracts.MongoDb;
@@ -70,8 +71,11 @@ public sealed class TenantTopologyService(
 
     private const string CacheKeyPrefix = "TenantTopology:";
 
-    // One gate per cache instance (= process-wide in production): the service is scoped.
-    private static readonly ConditionalWeakTable<IMemoryCache, SemaphoreSlim> Gates = new();
+    // In-flight reads per cache key, one table per cache instance (= process-wide in production, the service is
+    // scoped). Entries live only while a read runs, so the table is bounded by concurrent reads — never by the
+    // number of distinct (possibly unknown) scope values — and a slow or hung scope blocks only its own key.
+    private static readonly ConditionalWeakTable<IMemoryCache, ConcurrentDictionary<string, Lazy<Task<TenantSubtree?>>>>
+        InFlight = new();
 
     public async Task<TenantTopologyResult> GetTopologyAsync(string scopeTenantId,
         IReadOnlyCollection<string> allowedTenants)
@@ -107,31 +111,39 @@ public sealed class TenantTopologyService(
             return cached;
         }
 
-        // Single flight: the first caller reads the hierarchy, the others wait and then find its snapshot.
-        var gate = Gates.GetValue(cache, _ => new SemaphoreSlim(1, 1));
-        await gate.WaitAsync();
+        // Single flight per key: the first caller starts the read, concurrent callers of the same scope share it.
+        // Other scopes (including unknown ones, which are never cached) are not held up by it.
+        var inFlight = InFlight.GetValue(cache, _ => new ConcurrentDictionary<string, Lazy<Task<TenantSubtree?>>>());
+        var read = inFlight.GetOrAdd(key,
+            k => new Lazy<Task<TenantSubtree?>>(() => ReadAsync(k, scope), LazyThreadSafetyMode.ExecutionAndPublication));
         try
         {
-            if (cache.TryGetValue(key, out cached) && cached != null)
-            {
-                return cached;
-            }
-
-            var snapshot = await TenantSubtreeWalker.WalkAsync(systemContext, scope, logger,
-                Math.Max(1, options.Value.TenantTopology.MaxNodes));
-            if (snapshot == null)
-            {
-                return null;
-            }
-
-            cache.Set(key, snapshot, CacheTtl);
-            logger.LogDebug("Tenant topology: scope '{Scope}' read, {Count} tenants below it", scope,
-                snapshot.Nodes.Count);
-            return snapshot;
+            return await read.Value;
         }
         finally
         {
-            gate.Release();
+            inFlight.TryRemove(new KeyValuePair<string, Lazy<Task<TenantSubtree?>>>(key, read));
         }
+    }
+
+    private async Task<TenantSubtree?> ReadAsync(string key, string scope)
+    {
+        // A read that finished between the caller's cache miss and this start has already stored its snapshot.
+        if (cache.TryGetValue(key, out TenantSubtree? cached) && cached != null)
+        {
+            return cached;
+        }
+
+        var snapshot = await TenantSubtreeWalker.WalkAsync(systemContext, scope, logger,
+            Math.Max(1, options.Value.TenantTopology.MaxNodes));
+        if (snapshot == null)
+        {
+            return null;
+        }
+
+        cache.Set(key, snapshot, CacheTtl);
+        logger.LogDebug("Tenant topology: scope '{Scope}' read, {Count} tenants below it", scope,
+            snapshot.Nodes.Count);
+        return snapshot;
     }
 }

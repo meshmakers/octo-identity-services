@@ -229,6 +229,32 @@ public class TenantTopologyServiceTests
     }
 
     [Fact]
+    public async Task ASlowScope_DoesNotBlockOtherScopes_NorUnknownOnes()
+    {
+        var gate = new TaskCompletionSource();
+        var slow = ContextWithChildren("slow", ["slow-child"]);
+        slow.GetAdminSessionAsync().Returns(async _ =>
+        {
+            await gate.Task;
+            return Substitute.For<IOctoAdminSession>();
+        });
+        _systemContext.TryFindTenantContextAsync("slow").Returns(slow);
+        var stuck = _sut.GetTopologyAsync("slow", ["slow-child"]);
+
+        // While "slow" hangs, a valid first request and unknown-scope spam complete.
+        var other = _sut.GetTopologyAsync("accounting", ["tecob"]);
+        var spam = Enumerable.Range(0, 20).Select(i => _sut.GetTopologyAsync($"unknown-{i}", ["tecob"])).ToList();
+        var done = Task.WhenAll(spam.Append(other));
+        (await Task.WhenAny(done, Task.Delay(TimeSpan.FromSeconds(5), TestContext.Current.CancellationToken))).Should().BeSameAs(done,
+            "one hanging scope must not serialize first requests of other scopes");
+        (await other).Tenants.Should().ContainSingle();
+        stuck.IsCompleted.Should().BeFalse();
+
+        gate.SetResult();
+        (await stuck).Tenants.Should().ContainSingle();
+    }
+
+    [Fact]
     public async Task UnknownScopes_AreNeverCached_SoTheKeySpaceStaysBounded()
     {
         for (var i = 0; i < 50; i++)
