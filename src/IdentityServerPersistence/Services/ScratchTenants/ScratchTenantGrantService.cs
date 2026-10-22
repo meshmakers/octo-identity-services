@@ -149,8 +149,25 @@ public class ScratchTenantGrantService(
 
         if (marker.GrantedAtUtc == null)
         {
-            marker.GrantedAtUtc = DateTime.UtcNow;
-            await SaveMarkerAsync(childTenantId, marker);
+            // The timestamp goes onto the freshest copy of the marker, never onto the one read at the start of the run:
+            // saving that one would write over a revoke recorded since.
+            await OnBeforeGrantTimestampSavedAsync(childTenantId);
+            var latest = await GetMarkerAsync(childTenantId);
+            if (latest?.RevokedAtUtc != null)
+            {
+                await RemoveMembershipAsync(repository, groupEntityId, clientEntityId);
+                logger.LogWarning(
+                    "Scratch tenant '{TenantId}': the creator grant was revoked while it was being applied; the " +
+                    "membership was removed again (AB#7192)", childTenantId);
+                return ScratchGrantStatus.Revoked;
+            }
+
+            if (latest != null)
+            {
+                latest.GrantedAtUtc ??= DateTime.UtcNow;
+                marker = latest;
+                await SaveMarkerAsync(childTenantId, latest);
+            }
         }
 
         await AuditAsync(childTenantId,
@@ -165,6 +182,9 @@ public class ScratchTenantGrantService(
     ///     replica recorded meanwhile. A seam for tests that have to interleave that revoke deterministically.
     /// </summary>
     protected virtual Task OnMembershipInsertedAsync(string childTenantId) => Task.CompletedTask;
+
+    /// <summary>Test seam like <see cref="OnMembershipInsertedAsync" />, just before the grant timestamp is written.</summary>
+    protected virtual Task OnBeforeGrantTimestampSavedAsync(string childTenantId) => Task.CompletedTask;
 
     private static async Task RemoveMembershipAsync(ITenantRepository repository, RtEntityId groupEntityId,
         RtEntityId clientEntityId)
