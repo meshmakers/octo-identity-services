@@ -1719,3 +1719,34 @@ Reporting marker still get it) and the recurring
   `TenantAdministratorFileRoleGrant*Tests`,
   `PipelineServiceAccountFileManagementConsumerIntegrationTests` (own class: the other provisioning tests assert
   exact role sets).
+
+## Scratch tenants: the creator becomes administrator (AB#7192)
+
+An agent that creates a scratch child tenant with its client-credentials client has to work in it and clean it up without a human
+login. `CreateTenant` takes an opt-in `scratch` flag (asset repository, octo-cli `--scratch`, MCP `create_tenant`); a `Restore` has none - restoring into an existing scratch tenant keeps its marker; the tenant then
+carries a `ScratchTenantMarker` (octo-sdk `Communication.Contracts`) in the **system tenant configuration**, key `ScratchTenant.<tenantId>`:
+parent tenant, creator client id, time, and later `RevokedAtUtc` / `RevokedBy` (`GrantedAtUtc` is not written: a grant must never rewrite the marker a concurrent revoke persists; the grant time is in the audit event). It lives outside the child's database on
+purpose: it has to exist before the child (identity sets a tenant up the moment it is created), a dump does not carry it, and it survives the
+drop and re-create of a restore. Removed with the tenant (`Delete` / `Detach`); an id that is gone loses a stale marker on the next
+create / attach / plain restore.
+
+- **Grant** = membership of the creator's **mirror** (the child's client record with `ProvisionedByParentTenantId` = the marker's parent, same
+  `ClientId`) in the child's `TenantOwners` group - one `GroupMember` edge, exactly that client, exactly that tenant. A client of the same id
+  that is no mirror (local, or from a restored dump) is never granted. The client has to be flagged `AutoProvisionInChildTenants` (e.g.
+  `AddClientCredentialsClient -apic`), or it has no mirror and nothing is granted (`ScratchGrantStatus.MirrorMissing`, WARN in the log).
+- `ScratchTenantGrantService.EnsureGrantAsync` re-applies the grant from the marker: at the end of `DefaultConfigurationCreatorService.SetupTenantAsync`
+  (after the blueprint apply - the group has to exist - and the mirror provisioning; a **non-system parent**'s mirror is provisioned there first,
+  automatic mirroring only covers the system tenant) and after every `ClientMirrorProvisioningService` pass over a child (a re-provisioned mirror is a
+  new record without the old edges). So it survives an identity restart, a restore and a re-provisioned mirror. The marker is honoured only while its
+  parent is the tenant's actual parent (`ParentMismatch` otherwise).
+- **Revoke** = removing the creator's mirror from `TenantOwners` through the groups API (`DELETE .../groups/{rtId}/members/clients/{clientId}`):
+  `GroupsController` hands every client-member removal to `RecordRevocationAsync`, which persists `RevokedAtUtc`/`RevokedBy` when it is exactly that
+  edge. A revoked marker is never granted again (`ScratchGrantStatus.Revoked`). The revoke is persisted **before** the membership is
+  removed, so a failure in between can never end in a re-grant. **Unprovisioning or deleting the mirror is not a revoke**
+  (`UnprovisionClientFromTenant`, `DeleteClient` in the child): the next mirror provisioning creates the mirror again and the grant with it.
+- **Audit:** grant and revoke are information events (source IdentityService) in the event log of the tenant **and** of the system tenant (which
+  outlives the tenant); no secret is in the text.
+- The child token of the agent is the ordinary one: `client_credentials`, `acr_values=tenant:<child>`, `scope=octo_api`, with the mirror's own
+  secret (`RotateMirrorSecret`) or - while AB#5061 keeps the inherited secret - the parent client's secret.
+- Tests: `ScratchTenantCreatorGrantIntegrationTests` (real MongoDB: grant only for the creator, none without a marker, repeated setup, re-provisioned
+  mirror, persisted revoke, foreign parent, non-mirror client, non-system parent, audit without secrets), `GroupsControllerScratchRevokeTests`.
