@@ -57,8 +57,8 @@ public class ScratchTenantCreatorGrantIntegrationTests : IClassFixture<IdentityS
         (await IsTenantOwnersMemberAsync(systemContext, childId, bystander)).Should().BeFalse(
             "another client flagged for mirroring gets nothing");
         var marker = await GetMarkerAsync(systemContext, childId);
-        marker!.GrantedAtUtc.Should().NotBeNull();
-        marker.RevokedAtUtc.Should().BeNull();
+        marker!.RevokedAtUtc.Should().BeNull();
+        marker.GrantedAtUtc.Should().BeNull("the grant never rewrites the shared marker; its time is in the audit event");
     }
 
     [Fact]
@@ -149,22 +149,14 @@ public class ScratchTenantCreatorGrantIntegrationTests : IClassFixture<IdentityS
     private sealed class RevokingDuringGrantService : ScratchTenantGrantService
     {
         private readonly ISystemContext _context;
-        private readonly bool _beforeTimestamp;
 
-        public RevokingDuringGrantService(ISystemContext context, bool beforeTimestamp = false)
+        public RevokingDuringGrantService(ISystemContext context)
             : base(NullLogger<ScratchTenantGrantService>.Instance, context)
         {
             _context = context;
-            _beforeTimestamp = beforeTimestamp;
         }
 
-        protected override Task OnMembershipInsertedAsync(string childTenantId) =>
-            _beforeTimestamp ? Task.CompletedTask : RecordRevokeAsync(childTenantId);
-
-        protected override Task OnBeforeGrantTimestampSavedAsync(string childTenantId) =>
-            _beforeTimestamp ? RecordRevokeAsync(childTenantId) : Task.CompletedTask;
-
-        private async Task RecordRevokeAsync(string childTenantId)
+        protected override async Task OnMembershipInsertedAsync(string childTenantId)
         {
             using var session = await _context.GetAdminSessionAsync();
             var key = ScratchTenantMarker.GetConfigurationKey(childTenantId);
@@ -173,29 +165,6 @@ public class ScratchTenantCreatorGrantIntegrationTests : IClassFixture<IdentityS
             marker.RevokedBy = "other-replica";
             await _context.SetConfigurationAsync(session, key, marker);
         }
-    }
-
-    [Fact]
-    public async Task RevokeRecordedBeforeTheGrantTimestampIsSaved_IsNotWrittenOver_AndASetupDoesNotGrantAgain()
-    {
-        var systemContext = await InitializeAsync();
-        var creator = NewClientId("racing-stamp");
-        await CreateFlaggedClientAsync(systemContext, creator);
-        var service = new RevokingDuringGrantService(systemContext, beforeTimestamp: true);
-
-        var childId = await CreateChildAsync(systemContext, new ScratchTenantMarker
-        {
-            ParentTenantId = systemContext.TenantId, CreatorClientId = creator, CreatedAtUtc = DateTime.UtcNow
-        }, runGrant: false);
-
-        (await service.EnsureGrantAsync(childId)).Should().Be(ScratchGrantStatus.Revoked);
-        var marker = await GetMarkerAsync(systemContext, childId);
-        marker!.RevokedAtUtc.Should().NotBeNull("the grant must not save a stale marker over the recorded revoke");
-        (await IsTenantOwnersMemberAsync(systemContext, childId, creator)).Should().BeFalse();
-
-        await _fixture.GetService<IDefaultConfigurationCreatorService>().SetupAsync(childId);
-        (await IsTenantOwnersMemberAsync(systemContext, childId, creator)).Should().BeFalse(
-            "a later setup must not hand the access back");
     }
 
     [Fact]
