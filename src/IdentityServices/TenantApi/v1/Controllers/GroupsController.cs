@@ -384,16 +384,18 @@ public class GroupsController(
             return NotFound();
         }
 
-        await groupStore.RemoveMemberClientAsync(rtId, clientId);
-
         // AB#7192: taking the creator's mirror out of TenantOwners of a scratch tenant is a revoke - persisted, so the
-        // tenant setup does not grant it again. A no-op for every other removal.
+        // tenant setup does not grant it again. The revoke is recorded BEFORE the membership is removed: a failure
+        // between the two steps then leaves a revoked marker with the membership still in place (harmless, the caller
+        // sees the error and repeats), never a removed membership that the next setup grants again. A no-op for every
+        // other removal.
         if (OctoObjectId.TryParse(clientId, out var clientRtId))
         {
             await scratchTenantGrantService.RecordRevocationAsync(multiTenancyResolverService.GetTenantId(), rtId,
                 clientRtId, GetCallerLabel());
         }
 
+        await groupStore.RemoveMemberClientAsync(rtId, clientId);
         return Ok();
     }
 

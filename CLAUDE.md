@@ -1741,7 +1741,9 @@ create / attach / plain restore.
   parent is the tenant's actual parent (`ParentMismatch` otherwise).
 - **Revoke** = removing the creator's mirror from `TenantOwners` through the groups API (`DELETE .../groups/{rtId}/members/clients/{clientId}`):
   `GroupsController` hands every client-member removal to `RecordRevocationAsync`, which persists `RevokedAtUtc`/`RevokedBy` when it is exactly that
-  edge. A revoked marker is never granted again (`ScratchGrantStatus.Revoked`).
+  edge. A revoked marker is never granted again (`ScratchGrantStatus.Revoked`). The revoke is persisted **before** the membership is
+  removed, so a failure in between can never end in a re-grant. **Unprovisioning or deleting the mirror is not a revoke**
+  (`UnprovisionClientFromTenant`, `DeleteClient` in the child): the next mirror provisioning creates the mirror again and the grant with it.
 - **Audit:** grant and revoke are information events (source IdentityService) in the event log of the tenant **and** of the system tenant (which
   outlives the tenant); no secret is in the text.
 - The child token of the agent is the ordinary one: `client_credentials`, `acr_values=tenant:<child>`, `scope=octo_api`, with the mirror's own

@@ -56,6 +56,33 @@ public class GroupsControllerScratchRevokeTests
     }
 
     [Fact]
+    public async Task RemoveClientMember_RecordsTheRevoke_BeforeTheMembershipIsRemoved()
+    {
+        SignInAs(new Claim("preferred_username", "tenant-admin"));
+
+        await _sut.RemoveClientMember(_groupId, _clientId.ToString());
+
+        Received.InOrder(() =>
+        {
+            _grantService.RecordRevocationAsync(TenantId, _groupId, _clientId, "tenant-admin");
+            _groupStore.RemoveMemberClientAsync(_groupId, _clientId.ToString());
+        });
+    }
+
+    [Fact]
+    public async Task RemoveClientMember_WhenTheRemovalFails_TheRevokeIsAlreadyPersisted()
+    {
+        SignInAs(new Claim("preferred_username", "tenant-admin"));
+        _groupStore.RemoveMemberClientAsync(_groupId, _clientId.ToString())
+            .Returns(Task.FromException(new InvalidOperationException("db down")));
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            _sut.RemoveClientMember(_groupId, _clientId.ToString()));
+
+        await _grantService.Received(1).RecordRevocationAsync(TenantId, _groupId, _clientId, "tenant-admin");
+    }
+
+    [Fact]
     public async Task RemoveClientMember_ByAServiceToken_NamesTheClientAsTheRevoker()
     {
         SignInAs(new Claim("client_id", "agent-client"));
