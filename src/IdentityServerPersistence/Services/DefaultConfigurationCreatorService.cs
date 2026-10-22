@@ -3,6 +3,7 @@ using IdentityServerPersistence.Configuration.Options;
 using IdentityServerPersistence.Services.FileRoles;
 using IdentityServerPersistence.Services.ClientGrants;
 using IdentityServerPersistence.Services.Migrations;
+using IdentityServerPersistence.Services.ScratchTenants;
 using IdentityServerPersistence.Services.SecretManagement;
 using IdentityServerPersistence.SystemStores;
 using Meshmakers.Octo.Backend.IdentityServices.Resources;
@@ -52,7 +53,9 @@ internal class DefaultConfigurationCreatorService(
     IEnumerable<ITenantSetupCompletedHandler>? tenantSetupCompletedHandlers = null,
     // AB#6467 — the pipeline-service-account File role grant only runs for tenants that have System.Files in
     // their CK model; unknown (null) is treated as "has it" so a service without the probe still grants.
-    IFilesModelProbe? filesModelProbe = null)
+    IFilesModelProbe? filesModelProbe = null,
+    // AB#7192 — the creator of a scratch tenant becomes administrator of it; re-applied on every setup.
+    IScratchTenantGrantService? scratchTenantGrantService = null)
     : DefaultConfigurationCreatorServiceBase(logger, blueprintService, embeddedBlueprintSources,
           tenantSetupRetryStore, tenantLifecycleStore),
       IConfigurationService
@@ -403,6 +406,38 @@ internal class DefaultConfigurationCreatorService(
                 // operator can re-trigger via the backfill endpoint (#4045).
                 logger.LogError(ex,
                     "Client mirror provisioning failed for child tenant '{TenantId}'", tenantId);
+            }
+        }
+
+        // AB#7192: a scratch tenant (created or restored with the scratch flag by a client-credentials client of its
+        // parent) gives that client's mirror the TenantOwners group, so an agent can work in the tenant and clean it up
+        // without a human login. Runs AFTER the blueprint apply (the group has to exist) and after the mirror
+        // provisioning above. The mirror is only provisioned automatically for the system tenant as parent; a scratch
+        // tenant of another parent gets it provisioned here first. The marker is read from the system tenant, so this is
+        // a cheap no-op for every other tenant. A failure is logged, not fatal: the next setup retries it.
+        if (tenantId != systemContext.TenantId && scratchTenantGrantService != null)
+        {
+            try
+            {
+                var scratchMarker = await scratchTenantGrantService.GetMarkerAsync(tenantId);
+                if (scratchMarker != null)
+                {
+                    if (clientMirrorProvisioningService != null &&
+                        !string.Equals(scratchMarker.ParentTenantId, systemContext.TenantId,
+                            StringComparison.OrdinalIgnoreCase))
+                    {
+                        await clientMirrorProvisioningService
+                            .ProvisionForChildTenantAsync(scratchMarker.ParentTenantId, tenantId);
+                    }
+
+                    await scratchTenantGrantService.EnsureGrantAsync(tenantId);
+                }
+            }
+            catch (Exception ex)
+            {
+                logger.LogError(ex,
+                    "Granting TenantOwners to the creator of scratch tenant '{TenantId}' failed; retried on the next " +
+                    "tenant setup", tenantId);
             }
         }
 

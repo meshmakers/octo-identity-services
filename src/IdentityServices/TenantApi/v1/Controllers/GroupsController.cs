@@ -1,12 +1,15 @@
 using System.ComponentModel;
 using System.ComponentModel.DataAnnotations;
 using Asp.Versioning;
+using System.Security.Claims;
 using IdentityServerPersistence;
+using IdentityServerPersistence.Services.ScratchTenants;
 using IdentityServerPersistence.SystemStores;
 using Meshmakers.Octo.Communication.Contracts.DataTransferObjects;
 using Meshmakers.Octo.ConstructionKit.Contracts;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Meshmakers.Octo.Services.Infrastructure.Services;
 using Persistence.IdentityCkModel.Generated.System.Identity.v2;
 using Meshmakers.Octo.Backend.Authentication;
 
@@ -19,7 +22,10 @@ namespace Meshmakers.Octo.Backend.IdentityServices.TenantApi.v1.Controllers;
 [Route(IdentityServiceConstants.ApiPathPrefix + "/[controller]")]
 [ApiController]
 [ApiVersion(IdentityServiceConstants.ApiVersion1)]
-public class GroupsController(IGroupStore groupStore) : ControllerBase
+public class GroupsController(
+    IGroupStore groupStore,
+    IScratchTenantGrantService scratchTenantGrantService,
+    IMultiTenancyResolverService multiTenancyResolverService) : ControllerBase
 {
     /// <summary>
     /// Returns all groups.
@@ -379,7 +385,28 @@ public class GroupsController(IGroupStore groupStore) : ControllerBase
         }
 
         await groupStore.RemoveMemberClientAsync(rtId, clientId);
+
+        // AB#7192: taking the creator's mirror out of TenantOwners of a scratch tenant is a revoke - persisted, so the
+        // tenant setup does not grant it again. A no-op for every other removal.
+        if (OctoObjectId.TryParse(clientId, out var clientRtId))
+        {
+            await scratchTenantGrantService.RecordRevocationAsync(multiTenancyResolverService.GetTenantId(), rtId,
+                clientRtId, GetCallerLabel());
+        }
+
         return Ok();
+    }
+
+    private string GetCallerLabel()
+    {
+        // A client-credentials token has no user: name the client. Both the unmapped and the mapped claim names are
+        // checked because the JWT handler may remap them.
+        return User.FindFirstValue("preferred_username")
+               ?? User.FindFirstValue(ClaimTypes.Name)
+               ?? User.FindFirstValue("client_id")
+               ?? User.FindFirstValue("sub")
+               ?? User.FindFirstValue(ClaimTypes.NameIdentifier)
+               ?? "unknown";
     }
 
     // ========================================

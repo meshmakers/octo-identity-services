@@ -8,6 +8,7 @@ using Meshmakers.Octo.Runtime.Contracts.Repositories.Query;
 using Meshmakers.Octo.Runtime.Contracts.RepositoryEntities;
 using Meshmakers.Octo.Services.Contracts.DistributionEventHub.Messages;
 using Microsoft.Extensions.Logging;
+using IdentityServerPersistence.Services.ScratchTenants;
 using Persistence.IdentityCkModel.Generated.System.Identity.v2;
 
 namespace IdentityServerPersistence.Services;
@@ -17,7 +18,8 @@ public class ClientMirrorProvisioningService(
     ILogger<ClientMirrorProvisioningService> logger,
     ISystemContext systemContext,
     ITenantDiscoveryService tenantDiscoveryService,
-    IDistributionEventHubService? distributionEventHubService = null)
+    IDistributionEventHubService? distributionEventHubService = null,
+    IScratchTenantGrantService? scratchTenantGrantService = null)
     : IClientMirrorProvisioningService
 {
     /// <summary>
@@ -105,6 +107,36 @@ public class ClientMirrorProvisioningService(
     }
 
     private async Task<ClientMirrorProvisioningResult> ProvisionForChildTenantCoreAsync(
+        string parentTenantId, string childTenantId)
+    {
+        var result = await ProvisionForChildTenantMirrorsAsync(parentTenantId, childTenantId);
+
+        // AB#7192: a mirror that was just (re)created has none of the edges the old record had, so the creator grant of
+        // a scratch tenant is re-applied after every provisioning pass. A no-op for every tenant without a marker.
+        await EnsureScratchCreatorGrantAsync(childTenantId);
+        return result;
+    }
+
+    private async Task EnsureScratchCreatorGrantAsync(string childTenantId)
+    {
+        if (scratchTenantGrantService == null)
+        {
+            return;
+        }
+
+        try
+        {
+            await scratchTenantGrantService.EnsureGrantAsync(childTenantId);
+        }
+        catch (Exception ex)
+        {
+            // A failing grant must not fail the provisioning of the mirrors; the next setup retries it.
+            logger.LogError(ex, "Re-applying the scratch creator grant failed for child tenant '{ChildTenantId}'",
+                childTenantId);
+        }
+    }
+
+    private async Task<ClientMirrorProvisioningResult> ProvisionForChildTenantMirrorsAsync(
         string parentTenantId, string childTenantId)
     {
         if (string.IsNullOrWhiteSpace(parentTenantId))

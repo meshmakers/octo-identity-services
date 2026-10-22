@@ -1,6 +1,7 @@
 using IdentityServerPersistence.Configuration.DependencyInjection;
 using IdentityServerPersistence.Configuration.Options;
 using IdentityServerPersistence.Services;
+using IdentityServerPersistence.Services.ScratchTenants;
 using IdentityServerPersistence.Services.Admin;
 using IdentityServerPersistence.Services.Login;
 using IdentityServerPersistence.Services.SelfService;
@@ -95,6 +96,9 @@ public static class RuntimeEngineBuilderExtensions
         builder.Services.AddScoped<ITenantDiscoveryService, TenantDiscoveryService>();
         // AB#7044: tenant-topology endpoint; the per-scope snapshot lives in the shared IMemoryCache.
         builder.Services.AddScoped<ITenantTopologyService, TenantTopologyService>();
+        // AB#7192: the creator grant of scratch tenants (TenantOwners for the creator's mirror), re-applied by the tenant
+        // setup and by every mirror provisioning, and revoked for good when the group membership is removed.
+        builder.Services.AddScoped<IScratchTenantGrantService, ScratchTenantGrantService>();
         builder.Services.AddScoped<IClientMirrorProvisioningService, ClientMirrorProvisioningService>();
         // AB#5026 delegation ("on-behalf-of"): the protocol-free policy behind OnBehalfOfProcessor.
         builder.Services.AddScoped<IDelegatedIdentityResolver, DelegatedIdentityResolver>();
