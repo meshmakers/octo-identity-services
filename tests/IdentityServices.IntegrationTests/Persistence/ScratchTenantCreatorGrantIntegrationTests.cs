@@ -127,6 +127,47 @@ public class ScratchTenantCreatorGrantIntegrationTests : IClassFixture<IdentityS
     }
 
     [Fact]
+    public async Task RevokeRecordedWhileTheGrantIsApplied_RemovesTheMembershipAgain()
+    {
+        var systemContext = await InitializeAsync();
+        var creator = NewClientId("racing");
+        await CreateFlaggedClientAsync(systemContext, creator);
+        var service = new RevokingDuringGrantService(systemContext);
+
+        var childId = await CreateChildAsync(systemContext, new ScratchTenantMarker
+        {
+            ParentTenantId = systemContext.TenantId, CreatorClientId = creator, CreatedAtUtc = DateTime.UtcNow
+        }, runGrant: false);
+
+        (await service.EnsureGrantAsync(childId)).Should().Be(ScratchGrantStatus.Revoked);
+        (await IsTenantOwnersMemberAsync(systemContext, childId, creator)).Should().BeFalse(
+            "a revoke that another replica recorded after the read of the marker must not leave the creator in the group");
+        (await GetMarkerAsync(systemContext, childId))!.GrantedAtUtc.Should().BeNull();
+    }
+
+    /// <summary>Records the revoke the way another replica would, between the insert of the membership and the re-check.</summary>
+    private sealed class RevokingDuringGrantService : ScratchTenantGrantService
+    {
+        private readonly ISystemContext _context;
+
+        public RevokingDuringGrantService(ISystemContext context)
+            : base(NullLogger<ScratchTenantGrantService>.Instance, context)
+        {
+            _context = context;
+        }
+
+        protected override async Task OnMembershipInsertedAsync(string childTenantId)
+        {
+            using var session = await _context.GetAdminSessionAsync();
+            var key = ScratchTenantMarker.GetConfigurationKey(childTenantId);
+            var marker = await _context.GetConfigurationAsync<ScratchTenantMarker>(session, key, defaultValue: null);
+            marker!.RevokedAtUtc = DateTime.UtcNow;
+            marker.RevokedBy = "other-replica";
+            await _context.SetConfigurationAsync(session, key, marker);
+        }
+    }
+
+    [Fact]
     public async Task Removal_OfAnotherClient_IsNoRevoke()
     {
         var systemContext = await InitializeAsync();

@@ -132,6 +132,21 @@ public class ScratchTenantGrantService(
 
         await session.CommitTransactionAsync();
 
+        await OnMembershipInsertedAsync(childTenantId);
+
+        // A revoke on another replica persists the marker first and then removes the membership; if that removal ran
+        // before the insert above, nothing was there to remove. Look at the marker once more after the insert and take
+        // the edge out again when the revoke has been recorded meanwhile, so the two orders end in the same state.
+        var current = await GetMarkerAsync(childTenantId);
+        if (current?.RevokedAtUtc != null)
+        {
+            await RemoveMembershipAsync(repository, groupEntityId, clientEntityId);
+            logger.LogWarning(
+                "Scratch tenant '{TenantId}': the creator grant was revoked while it was being applied; the membership " +
+                "was removed again (AB#7192)", childTenantId);
+            return ScratchGrantStatus.Revoked;
+        }
+
         if (marker.GrantedAtUtc == null)
         {
             marker.GrantedAtUtc = DateTime.UtcNow;
@@ -143,6 +158,32 @@ public class ScratchTenantGrantService(
             $"'{marker.ParentTenantId}', created {marker.CreatedAtUtc:O}) is a member of {CommonConstants.TenantOwnersGroup} " +
             $"in tenant '{childTenantId}'");
         return ScratchGrantStatus.Granted;
+    }
+
+    /// <summary>
+    ///     Called right after the membership was committed and before the marker is checked for a revoke that another
+    ///     replica recorded meanwhile. A seam for tests that have to interleave that revoke deterministically.
+    /// </summary>
+    protected virtual Task OnMembershipInsertedAsync(string childTenantId) => Task.CompletedTask;
+
+    private static async Task RemoveMembershipAsync(ITenantRepository repository, RtEntityId groupEntityId,
+        RtEntityId clientEntityId)
+    {
+        using var session = await repository.GetSessionAsync();
+        session.StartTransaction();
+        var opResult = new OperationResult();
+        await repository.ApplyChangesAsync(session,
+            [AssociationUpdateInfo.CreateDelete(groupEntityId, clientEntityId, IdentityAssociationConstants.GroupMemberId)],
+            opResult);
+        if (opResult.HasErrors || opResult.HasFatalErrors)
+        {
+            await session.AbortTransactionAsync();
+            throw new InvalidOperationException(
+                $"Failed to remove a revoked scratch creator from {CommonConstants.TenantOwnersGroup}: " +
+                string.Join("; ", opResult.GetMessages()));
+        }
+
+        await session.CommitTransactionAsync();
     }
 
     public async Task<bool> RecordRevocationAsync(string childTenantId, OctoObjectId groupRtId,
