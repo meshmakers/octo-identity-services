@@ -1723,7 +1723,7 @@ Reporting marker still get it) and the recurring
 ## Scratch tenants: the creator becomes administrator (AB#7192)
 
 An agent that creates a scratch child tenant with its client-credentials client has to work in it and clean it up without a human
-login. `CreateTenant` and `Restore` take an opt-in `scratch` flag (asset repository / bot service, octo-cli `--scratch`); the tenant then
+login. `CreateTenant` takes an opt-in `scratch` flag (asset repository, octo-cli `--scratch`, MCP `create_tenant`); a `Restore` has none - restoring into an existing scratch tenant keeps its marker; the tenant then
 carries a `ScratchTenantMarker` (octo-sdk `Communication.Contracts`) in the **system tenant configuration**, key `ScratchTenant.<tenantId>`:
 parent tenant, creator client id, time, and later `GrantedAtUtc` / `RevokedAtUtc` / `RevokedBy`. It lives outside the child's database on
 purpose: it has to exist before the child (identity sets a tenant up the moment it is created), a dump does not carry it, and it survives the

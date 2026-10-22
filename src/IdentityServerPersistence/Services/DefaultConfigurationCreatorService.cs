@@ -409,7 +409,7 @@ internal class DefaultConfigurationCreatorService(
             }
         }
 
-        // AB#7192: a scratch tenant (created or restored with the scratch flag by a client-credentials client of its
+        // AB#7192: a scratch tenant (created with the scratch flag by a client-credentials client of its
         // parent) gives that client's mirror the TenantOwners group, so an agent can work in the tenant and clean it up
         // without a human login. Runs AFTER the blueprint apply (the group has to exist) and after the mirror
         // provisioning above. The mirror is only provisioned automatically for the system tenant as parent; a scratch

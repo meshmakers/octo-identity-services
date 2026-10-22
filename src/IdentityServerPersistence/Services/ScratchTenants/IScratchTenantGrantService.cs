@@ -32,7 +32,7 @@ public enum ScratchGrantStatus
 }
 
 /// <summary>
-///     The creator grant of a scratch tenant (AB#7192): the client-credentials client that created (or restored) a tenant
+///     The creator grant of a scratch tenant (AB#7192): the client-credentials client that created a tenant
 ///     with the opt-in <c>scratch</c> flag becomes administrator of it, so an agent can work in the tenant and clean it
 ///     up without a human login.
 /// </summary>
