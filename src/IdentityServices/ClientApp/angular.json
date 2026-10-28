@@ -35,6 +35,18 @@
               }
             ],
             "styles": [
+              "node_modules/@fontsource/montserrat/latin-400.css",
+              "node_modules/@fontsource/montserrat/latin-ext-400.css",
+              "node_modules/@fontsource/montserrat/latin-500.css",
+              "node_modules/@fontsource/montserrat/latin-ext-500.css",
+              "node_modules/@fontsource/montserrat/latin-600.css",
+              "node_modules/@fontsource/montserrat/latin-ext-600.css",
+              "node_modules/@fontsource/montserrat/latin-700.css",
+              "node_modules/@fontsource/montserrat/latin-ext-700.css",
+              "node_modules/@fontsource/roboto-mono/latin-400.css",
+              "node_modules/@fontsource/roboto-mono/latin-ext-400.css",
+              "node_modules/@fontsource/roboto-mono/latin-500.css",
+              "node_modules/@fontsource/roboto-mono/latin-ext-500.css",
               "src/styles/styles.scss"
             ],
             "scripts": []
