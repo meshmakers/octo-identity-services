@@ -92,8 +92,8 @@ public class UserResetPasswordMethodTests : IntegrationTestBase
     [Fact]
     public void SwitchOff_TheHostRegistersNoHandler_SoTheGatewayAnswersHandlerNotAvailable()
     {
-        // the default configuration of every environment: nothing is hosted, nothing is announced
-        Factory.Services.GetService<ICkMethodHandlerInvoker>().Should().BeNull();
+        // the default configuration of every environment: the handler of a password method is not registered, so it is
+        // not announced and the gateway answers METHOD_HANDLER_NOT_AVAILABLE (the role methods are hosted regardless).
         using var scope = Factory.Services.CreateScope();
         scope.ServiceProvider.GetService<UserResetPasswordHandler>().Should().BeNull();
     }
