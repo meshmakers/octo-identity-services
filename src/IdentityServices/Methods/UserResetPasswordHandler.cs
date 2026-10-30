@@ -66,7 +66,7 @@ internal sealed class UserResetPasswordHandler(
             var audit = services.GetRequiredService<IIdentityMethodAuditWriter>();
             await audit.RecordAsync(context.TenantId, context.MethodId, context.InvocationId, context.TargetRtId,
                 context.CallerPrincipal?.Subject, outcomeCode,
-                [new KeyValuePair<string, string>(LockoutLiftedDetail, lockoutLifted ? "true" : "false")])
+                new Dictionary<string, string> { [LockoutLiftedDetail] = lockoutLifted ? "true" : "false" })
                 .ConfigureAwait(false);
         }
     }

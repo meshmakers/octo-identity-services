@@ -30,11 +30,10 @@ internal interface IIdentityMethodAuditWriter
     /// <param name="callerSubject">Subject (user id) or client id of the validated caller, if known.</param>
     /// <param name="outcome"><c>SUCCESS</c> or the error code of the answer.</param>
     /// <param name="extraDetails">
-    ///     Method-specific facts (identifiers and flags only, never a parameter value), for example
-    ///     <c>lockoutLifted</c> of <c>User.ResetPassword</c>.
+    ///     Further non-secret facts of the call (for the role methods: <c>rolesBefore</c>, <c>rolesAfter</c>), or <c>null</c>.
     /// </param>
     Task RecordAsync(string tenantId, string methodId, Guid invocationId, string? targetRtId, string? callerSubject,
-        string outcome, IReadOnlyList<KeyValuePair<string, string>>? extraDetails = null);
+        string outcome, IReadOnlyDictionary<string, string>? extraDetails = null);
 }
 
 internal sealed class IdentityMethodAuditWriter(
@@ -48,7 +47,7 @@ internal sealed class IdentityMethodAuditWriter(
     public const string SuccessOutcome = "SUCCESS";
 
     public async Task RecordAsync(string tenantId, string methodId, Guid invocationId, string? targetRtId,
-        string? callerSubject, string outcome, IReadOnlyList<KeyValuePair<string, string>>? extraDetails = null)
+        string? callerSubject, string outcome, IReadOnlyDictionary<string, string>? extraDetails = null)
     {
         var success = outcome == SuccessOutcome;
         var details = new List<KeyValuePair<string, string>>

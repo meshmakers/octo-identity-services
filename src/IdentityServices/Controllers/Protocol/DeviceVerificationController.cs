@@ -1,6 +1,5 @@
 using System.Collections.Immutable;
 using System.Security.Claims;
-using IdentityServerPersistence.Services;
 using IdentityServerPersistence.SystemStores;
 using Meshmakers.Octo.Backend.IdentityServices.Controllers.Api;
 using Meshmakers.Octo.Backend.IdentityServices.OpenIddict;
@@ -31,9 +30,10 @@ namespace Meshmakers.Octo.Backend.IdentityServices.Controllers.Protocol;
 ///             verification. The JSON result body is written by
 ///             <see cref="OctoDeviceVerificationResponseHandler" />.</item>
 ///     </list>
-///     Cross-tenant approval parity: when the cookie user does not exist in the request tenant
-///     (session from a parent tenant), the B-shadow user is provisioned and signed in before the
-///     device code is bound — otherwise redemption would fail with <c>invalid_grant</c>.
+///     The approving session's subject must exist in the tenant the device code was wired to; otherwise
+///     the approval is refused with <c>access_denied</c> (AB#7884). The former cross-tenant provisioning
+///     branch here was unreachable (the session cookie is scoped to that tenant) and was removed;
+///     cross-tenant device logins use a child-tenant session or the token exchange.
 /// </summary>
 [ApiController]
 [Authorize]
@@ -43,11 +43,7 @@ public class DeviceVerificationController(
     IOctoResourceStore resourceStore,
     IOctoTokenClaimsService tokenClaimsService,
     IOpenIddictTokenManager tokenManager,
-    ICrossTenantAuthenticationService crossTenantAuthService,
-    ICrossTenantUserProvisioningService crossTenantUserProvisioningService,
-    IOctoIdentityProviderStore identityProviderStore,
     UserManager<RtUser> userManager,
-    SignInManager<RtUser> signInManager,
     ILogger<DeviceVerificationController> logger) : ControllerBase
 {
     [HttpGet("~/connect/deviceverification")]
@@ -130,14 +126,13 @@ public class DeviceVerificationController(
             return ForbidWithError(Errors.AccessDenied, "The device authorization was denied.");
         }
 
-        // Cross-tenant approval: the cookie user must exist in the tenant this device code was
-        // wired to (HttpContext.Items via OidcTenantResolutionMiddleware) — provision the shadow
-        // user first when the session belongs to a parent tenant (ported from DeviceApiController).
+        // The approving user must exist in the tenant this device code was wired to (HttpContext.Items via
+        // OidcTenantResolutionMiddleware). AB#7884: no cross-tenant provisioning here any more.
         var tenantId = HttpContext.Items[InfrastructureCommon.TenantIdName] as string ?? "System";
-        var user = await ResolveOrProvisionUserAsync(tenantId);
+        var user = await FindSessionUserAsync(tenantId);
         if (user == null)
         {
-            return ForbidWithError(Errors.AccessDenied, "Cross-tenant access denied");
+            return ForbidWithError(Errors.AccessDenied, "The signed-in user does not exist in this tenant.");
         }
 
         var identity = new ClaimsIdentity(
@@ -204,84 +199,21 @@ public class DeviceVerificationController(
     }
 
     /// <summary>
-    ///     Returns the cookie user in the request tenant, provisioning the cross-tenant shadow
-    ///     user (and re-signing-in) when the session subject only exists in a parent tenant.
+    ///     The session user in the request tenant, or <c>null</c> (with a warning) when the session's subject does not
+    ///     exist there (AB#7884).
     /// </summary>
-    private async Task<RtUser?> ResolveOrProvisionUserAsync(string tenantId)
+    private async Task<RtUser?> FindSessionUserAsync(string tenantId)
     {
         var subjectId = User.FindFirstValue(Claims.Subject) ?? User.FindFirstValue(ClaimTypes.NameIdentifier);
-        if (subjectId == null)
-        {
-            return null;
-        }
-
-        var existingUser = await userManager.FindByIdAsync(subjectId);
-        if (existingUser != null)
-        {
-            return existingUser;
-        }
-
-        logger.LogInformation(
-            "Device authorization: user '{SubjectId}' not found in tenant '{TenantId}', attempting cross-tenant provisioning",
-            subjectId, tenantId);
-
-        var identityProviders = (await identityProviderStore.GetAllAsync())
-            .OfType<RtOctoTenantIdentityProvider>()
-            .Where(p => p.IsEnabled)
-            .ToList();
-
-        CrossTenantAuthResult? crossTenantResult = null;
-        foreach (var provider in identityProviders)
-        {
-            crossTenantResult = await crossTenantAuthService.ValidateCrossTenantAccessAsync(
-                tenantId, provider.ParentTenantId!, subjectId);
-            if (crossTenantResult != null)
-            {
-                break;
-            }
-        }
-
-        if (crossTenantResult == null)
+        var user = subjectId == null ? null : await userManager.FindByIdAsync(subjectId);
+        if (user == null)
         {
             logger.LogWarning(
-                "Cross-tenant access denied for device authorization: user '{SubjectId}' in tenant '{TenantId}'",
-                subjectId, tenantId);
-            return null;
+                "Device authorization refused: the session subject '{SubjectId}' does not exist in tenant '{TenantId}'",
+                subjectId ?? "(none)", tenantId);
         }
 
-        // AB#7804: approving a device code in a child tenant is a cross-tenant sign-in too — a source user with
-        // 2FA needs a session that proved the second factor.
-        var secondFactorVerified = SecondFactorEvidence.IsPresent(User.Claims);
-        if (crossTenantResult.SourceUserRequiresSecondFactor && !secondFactorVerified)
-        {
-            logger.LogWarning(
-                "Cross-tenant device authorization denied: user '{SubjectId}' has two-factor authentication enabled, but the session carries no second-factor evidence",
-                subjectId);
-            return null;
-        }
-
-        var localUser = await crossTenantUserProvisioningService.FindOrCreateCrossTenantUserAsync(
-            crossTenantResult, tenantId);
-        if (localUser == null)
-        {
-            return null;
-        }
-
-        // Re-sign-in as the local shadow user so follow-up requests run on a subject that
-        // exists in the target tenant's database; the second-factor evidence goes with it.
-        if (secondFactorVerified)
-        {
-            await signInManager.SignInWithClaimsAsync(localUser, isPersistent: false, [SecondFactorEvidence.CreateClaim()]);
-        }
-        else
-        {
-            await signInManager.SignInAsync(localUser, isPersistent: false);
-        }
-
-        logger.LogInformation(
-            "Cross-tenant device authorization: provisioned user '{UserName}' in tenant '{TenantId}'",
-            localUser.UserName, tenantId);
-        return localUser;
+        return user;
     }
 
     private async Task<(List<ScopeItemDto> IdentityScopes, List<ScopeItemDto> ApiScopes)>

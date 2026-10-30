@@ -308,11 +308,14 @@ public class CrossTenantAuthenticationService(
     ///     AB#7804: the source user needs a second factor when it has 2FA enabled itself, or — for a shadow user
     ///     (<c>xt_…</c>) — when any identity of its name chain has. A shadow user never has 2FA of its own (it signs in
     ///     through its home tenant), so judging only the immediate user would let every hop beyond the first skip the
-    ///     home user's second factor. A tier the resolver does not unwind (deleted tenant, ambiguous prefix) or whose
-    ///     user no longer exists adds no requirement; the cross-tenant sign-in that created the shadow user's session
-    ///     already enforced the second factor of the identity it came from. A proven tier whose tenant cannot be read
-    ///     (registry miss, query error) fails closed: the second factor is required.
+    ///     home user's second factor.
     /// </summary>
+    /// <remarks>
+    ///     AB#7861 (review finding 6): every gap in the chain fails closed — the second factor is then required. A gap is
+    ///     a tier whose tenant cannot be read, a tier whose user no longer exists (root user renamed or deleted), and a
+    ///     chain the resolver cannot unwind to a local user (deleted tenant, ambiguous tenant prefix): the identity whose
+    ///     second factor would decide is unknown, so the safe answer is "required". Before, such tiers added nothing.
+    /// </remarks>
     private async Task<bool> RequiresSecondFactorAsync(RtUser user)
     {
         if (user.TwoFactorEnabled)
@@ -320,19 +323,32 @@ public class CrossTenantAuthenticationService(
             return true;
         }
 
-        foreach (var (tenantId, userName) in await shadowUserChainResolver.GetSourceChainAsync(user.UserName))
+        if (!CrossTenantShadowUserName.IsShadowUserName(user.UserName))
+        {
+            return false;
+        }
+
+        var chain = await shadowUserChainResolver.GetSourceChainAsync(user.UserName);
+        if (chain.Count == 0 || CrossTenantShadowUserName.IsShadowUserName(chain[^1].UserName))
+        {
+            logger.LogWarning(
+                "Second-factor requirement of '{UserName}' assumed: its shadow-user chain cannot be unwound to a home user",
+                user.UserName);
+            return true;
+        }
+
+        foreach (var (tenantId, userName) in chain)
         {
             var (tierUser, failed) = await LookupUserByNameInTenantAsync(tenantId, userName);
-            if (failed)
+            if (failed || tierUser == null)
             {
-                // The resolver proved this tier, but its tenant cannot be read right now: fail closed.
                 logger.LogWarning(
-                    "Second-factor requirement of '{UserName}' assumed: chain tier '{TierUserName}' in tenant '{TenantId}' could not be read",
-                    user.UserName, userName, tenantId);
+                    "Second-factor requirement of '{UserName}' assumed: chain tier '{TierUserName}' in tenant '{TenantId}' {Reason}",
+                    user.UserName, userName, tenantId, failed ? "could not be read" : "does not exist");
                 return true;
             }
 
-            if (tierUser?.TwoFactorEnabled == true)
+            if (tierUser.TwoFactorEnabled)
             {
                 return true;
             }

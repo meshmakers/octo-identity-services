@@ -365,6 +365,33 @@ public class CrossTenantAuthenticationServiceTests
     }
 
     [Fact]
+    public async Task ValidateCrossTenantAccess_ShadowUserWhoseHomeUserNoLongerExists_NeedsASecondFactor()
+    {
+        // AB#7861 (finding 6): the root user was renamed or deleted - whose second factor decides is unknown.
+        SetupTenantWithProviders("target-tenant", [CreateTenantProvider("source-tenant", isEnabled: true)]);
+        var shadow = CreateUser("xt_home-tenant_ghost");
+        SetupTenantWithUser("source-tenant", shadow);
+        SetupTenantWithNoUser("home-tenant");
+
+        var result = await _sut.ValidateCrossTenantAccessAsync("target-tenant", "source-tenant", shadow.RtId.ToString());
+
+        result!.SourceUserRequiresSecondFactor.Should().BeTrue("a chain tier that does not exist fails closed");
+    }
+
+    [Fact]
+    public async Task ValidateCrossTenantAccess_ShadowUserWhoseChainCannotBeUnwound_NeedsASecondFactor()
+    {
+        // AB#7861 (finding 6): deleted tenant / ambiguous prefix - the resolver stops, the home user is unknown.
+        SetupTenantWithProviders("target-tenant", [CreateTenantProvider("source-tenant", isEnabled: true)]);
+        var shadow = CreateUser("xt_deleted-tenant_alice");
+        SetupTenantWithUser("source-tenant", shadow);
+
+        var result = await _sut.ValidateCrossTenantAccessAsync("target-tenant", "source-tenant", shadow.RtId.ToString());
+
+        result!.SourceUserRequiresSecondFactor.Should().BeTrue("an identity that cannot be unwound fails closed");
+    }
+
+    [Fact]
     public async Task ValidateCrossTenantAccess_ShadowUserWhoseHomeTenantCannotBeRead_FailsClosed()
     {
         // AB#7804 review: a proven chain tier whose tenant cannot be queried must not switch the requirement off.

@@ -36,6 +36,17 @@ public class IdentityMethodHostTests
     }
 
     [Fact]
+    public void SwitchOff_TheRoleMethodsAreStillSelected_TheyCarryNoSecret()
+    {
+        var selected = IdentityMethodHost.SelectHandlers(new IdentityMethodsOptions());
+
+        selected.Select(h => h.MethodId).Should().BeEquivalentTo(
+            SystemIdentityCkIds.UserSetRolesMethodId, SystemIdentityCkIds.UserAddRoleMethodId,
+            SystemIdentityCkIds.UserRemoveRoleMethodId);
+        selected.Should().OnlyContain(h => !h.CarriesSecret);
+    }
+
+    [Fact]
     public void SwitchOn_ChangePasswordIsSelected()
     {
         var selected = IdentityMethodHost.SelectHandlers(new IdentityMethodsOptions { EnablePasswordMethods = true });
@@ -101,6 +112,24 @@ public class IdentityMethodHostTests
     }
 
     [Fact]
+    public async Task Audit_ExtraDetails_AreWrittenAfterTheStandardOnes()
+    {
+        var events = Substitute.For<IEventRepository>();
+        IReadOnlyCollection<KeyValuePair<string, string>>? details = null;
+        await events.StoreEventAsync("t1", RtEventSourcesEnum.IdentityService, RtEventLevelsEnum.Information,
+            Arg.Any<string>(), "Identity.Method", Arg.Do<IReadOnlyCollection<KeyValuePair<string, string>>>(d => details = d));
+
+        await new IdentityMethodAuditWriter(events, NullLogger<IdentityMethodAuditWriter>.Instance)
+            .RecordAsync("t1", SystemIdentityCkIds.UserSetRolesMethodId, Guid.NewGuid(), "user-1", "admin-1",
+                IdentityMethodAuditWriter.SuccessOutcome,
+                new Dictionary<string, string> { ["rolesBefore"] = "A", ["rolesAfter"] = "A,B" });
+
+        details!.Should().Contain(new KeyValuePair<string, string>("rolesBefore", "A"))
+            .And.Contain(new KeyValuePair<string, string>("rolesAfter", "A,B"))
+            .And.Contain(new KeyValuePair<string, string>("callerSubject", "admin-1"));
+    }
+
+    [Fact]
     public async Task Audit_Success_IsAnInformationEvent()
     {
         var events = Substitute.For<IEventRepository>();
@@ -136,7 +165,7 @@ public class IdentityMethodHostTests
 
         await new IdentityMethodAuditWriter(events, NullLogger<IdentityMethodAuditWriter>.Instance)
             .RecordAsync("t1", SystemIdentityCkIds.UserResetPasswordMethodId, Guid.NewGuid(), "user-1", "admin-1",
-                IdentityMethodAuditWriter.SuccessOutcome, [new("lockoutLifted", "true")]);
+                IdentityMethodAuditWriter.SuccessOutcome, new Dictionary<string, string> { ["lockoutLifted"] = "true" });
 
         details!.Should().Contain(new KeyValuePair<string, string>("lockoutLifted", "true"));
         details.Select(d => d.Key).Should().Contain(["methodId", "outcome", "targetRtId", "callerSubject"]);

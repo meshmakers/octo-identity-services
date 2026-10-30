@@ -51,6 +51,7 @@ public class AuthApiController(
     IOptionsMonitor<CookieAuthenticationOptions> cookieOptions,
     IOptions<OctoSystemConfiguration> systemConfiguration,
     IUserCredentialChangeService userCredentialChangeService,
+    ICrossTenantChallengeReplayGuard crossTenantChallengeReplayGuard,
     ISignInRateLimiter signInRateLimiter,
     ILogger<AuthApiController> logger)
     : ControllerBase
@@ -360,6 +361,8 @@ public class AuthApiController(
 
         if (result.Succeeded)
         {
+            // AB#7861: a successful local sign-in voids a pending cross-tenant challenge of this browser.
+            DeleteCrossTenantTwoFactorChallenge();
             var user = candidateUser ?? await userManager.FindByNameAsync(request.Username);
             LogLoginSuccess(user?.UserName, user?.RtId.ToString(), user?.UserName, clientId: context?.Client.ClientId);
 
@@ -875,6 +878,9 @@ public class AuthApiController(
             // Front-channel logout: notify clients that registered a FrontChannelLogoutUri.
             signOutIframeUrl = $"/connect/endsession/callback?sid={Uri.EscapeDataString(sessionId ?? string.Empty)}";
         }
+
+        // AB#7861: a pending cross-tenant second-factor challenge ends with the logout, signed in or not.
+        DeleteCrossTenantTwoFactorChallenge();
 
         return new LogoutResultDto
         {
@@ -1679,7 +1685,9 @@ public class AuthApiController(
             SourceTenantId = crossTenantResult.SourceTenantId,
             SourceUserId = crossTenantResult.SourceUserId,
             TargetTenantId = targetTenantId,
-            RememberLogin = rememberLogin
+            RememberLogin = rememberLogin,
+            // AB#7861: single use — the nonce is marked used when the challenge completes or is cancelled.
+            Nonce = Guid.NewGuid().ToString("N")
         }), CrossTenantTwoFactorLifetime);
 
         // Same cookie policy (secure, http-only, same-site, path) as the framework's own two-factor user cookie.
@@ -1704,9 +1712,21 @@ public class AuthApiController(
             var protector = dataProtectionProvider.CreateProtector(CrossTenantTwoFactorPurpose).ToTimeLimitedDataProtector();
             var challenge = JsonSerializer.Deserialize<CrossTenantTwoFactorChallenge>(protector.Unprotect(value));
             var tenantId = RouteData.Values["tenantId"]?.ToString() ?? "System";
-            return challenge != null && string.Equals(challenge.TargetTenantId, tenantId, StringComparison.OrdinalIgnoreCase)
-                ? challenge
-                : null;
+            if (challenge == null ||
+                !string.Equals(challenge.TargetTenantId, tenantId, StringComparison.OrdinalIgnoreCase))
+            {
+                return null;
+            }
+
+            // AB#7861: a challenge without a nonce (issued before single use) or one already completed / cancelled is
+            // void, even if the browser — or a copy — still presents the cookie.
+            if (string.IsNullOrEmpty(challenge.Nonce) || crossTenantChallengeReplayGuard.IsUsed(challenge.Nonce))
+            {
+                logger.LogInformation("Cross-tenant two-factor challenge rejected: already used");
+                return null;
+            }
+
+            return challenge;
         }
         catch (Exception ex) when (ex is System.Security.Cryptography.CryptographicException or JsonException)
         {
@@ -1719,6 +1739,12 @@ public class AuthApiController(
     {
         if (Request.Cookies.ContainsKey(CrossTenantTwoFactorCookieName))
         {
+            // AB#7861: void the challenge itself, not only the browser's copy of it.
+            if (ReadCrossTenantTwoFactorChallenge() is { } challenge)
+            {
+                crossTenantChallengeReplayGuard.MarkUsed(challenge.Nonce, CrossTenantTwoFactorLifetime);
+            }
+
             Response.Cookies.Delete(CrossTenantTwoFactorCookieName,
                 cookieOptions.Get(IdentityConstants.TwoFactorUserIdScheme).Cookie.Build(HttpContext));
         }
@@ -2204,6 +2230,9 @@ internal record CrossTenantTwoFactorChallenge
     public string SourceUserId { get; init; } = string.Empty;
     public string TargetTenantId { get; init; } = string.Empty;
     public bool RememberLogin { get; init; }
+
+    /// <summary>AB#7861: identifies the challenge for the single-use check.</summary>
+    public string Nonce { get; init; } = string.Empty;
 }
 
 public record AccessibleTenantDto

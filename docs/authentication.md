@@ -168,6 +168,25 @@ Tests: `SignInAttemptConcurrencyTests` (real MongoDB: parallel failures all coun
 user out, reset of a stale copy, parallel recovery-code redemption succeeds once, parallel wrong TOTP codes over HTTP, lockout
 through a child tenant, 429 per account and per client), `SignInRateLimiterTests`, `CrossTenantAuthenticationServiceTests`.
 
+### Administrator Revokes All Sessions of a User (AB#7899)
+
+`POST {tenant}/v1/users/{userName}/revokeSessions` (policy `IdentityUserAdministrationWritePolicy`: `UserManagement` in that
+tenant) ends everything of the user **in that tenant**: the security stamp is rotated, all OAuth tokens (refresh tokens,
+codes) and authorizations of the subject are revoked, and the server-side browser sessions (`RtServerSideSession`,
+`OctoTicketStore`) are deleted. Answer: `{ userName, subject, securityStampRotated, revokedTokens, revokedAuthorizations,
+removedSessions }`.
+
+`POST {tenant}/v1/users/revokeSessions?scope=shadowUsers&dryRun=true` does the same for every cross-tenant shadow user
+(`xt_…`) of the tenant. **Dry run by default**: nothing changes, the answer carries the counts (`users`, `tokens`,
+`authorizations`, `sessions`) and the first 100 user names; `dryRun=false` applies and returns the applied counts. Only
+`scope=shadowUsers` exists (400 otherwise). Run it per tenant (octo-cli, child tenants via token exchange) — used at the
+rollout of AB#7804/AB#7815 to end sessions created before the second-factor rule.
+
+Every call writes one `Information` audit log line (tenant, subject or counts, acting user — never a token value). Limit:
+issued JWT access tokens are not stored and stay valid until they expire (resource servers do not introspect); refresh
+tokens, browser sessions and remembered consents stop working at once. Logic: `IUserSessionRevocationService`; tests:
+`UserSessionRevocationTests`.
+
 ### Password Change Ends Existing Sessions (AB#7765)
 
 Every REST password change (`change-password`, `set-password`, administrator `ResetPassword`, token
@@ -645,6 +664,23 @@ cookie skipped the second factor for, and external-provider sign-ins (Google, En
 user signed in that way is refused at the boundary (fail closed) and signs in once more with the second factor.
 "Remember this machine" is not offered for the source user's second factor on a child tenant.
 
+**Hardening (AB#7861).**
+- *Single-use challenge:* the cross-tenant challenge cookie carries a nonce; completing it (success, lockout, user gone),
+  a logout and a successful local sign-in mark the nonce used (`ICrossTenantChallengeReplayGuard`, in process memory for
+  the 5-minute cookie lifetime) and delete the cookie, so a copy of the cookie is void too. A challenge without a nonce
+  (issued before this change) is void. With several identity pods a copy could still be replayed once on another pod; it
+  would still need a valid second factor of the source user.
+- *Fail-closed chain:* a gap in a shadow user's `xt_` chain — a tier user that no longer exists (root user renamed or
+  deleted), a chain the resolver cannot unwind (deleted tenant, ambiguous prefix), an unreadable tier — now requires the
+  second factor instead of adding nothing.
+- *Server-only evidence:* `OctoUserStore.GetClaimsAsync` never returns a stored `amr` claim, so nothing that can write
+  `RtUser.Claims` (an import, another service) can mint `amr=mfa`; the evidence comes only from the sign-in itself.
+- *No cross-tenant provisioning on the device endpoint (AB#7884):* `DeviceVerificationController` used to provision a
+  shadow user when the approving session's subject did not exist in the device code's tenant. The branch was unreachable
+  (the session cookie is scoped to that tenant) and was removed; such an approval is now refused with `access_denied` and a
+  warning. Cross-tenant device logins use a session in the child tenant (cross-tenant login) or the token exchange. The
+  approval keeps passing the session's `amr` on, so a 2FA user's device token still carries `amr=mfa`.
+
 **The evidence survives session refresh (AB#7859).** The security-stamp validator rebuilds the cookie principal from the
 user every 30 minutes (`SecurityStampValidatorOptions.ValidationInterval`) and used to drop `amr`: after the first
 revalidation every new token said `amr=pwd` and a 2FA user was refused at the boundaries above. `SessionClaimPreservation`
@@ -655,7 +691,7 @@ principal carries it, `TokenEndpointController.CopySessionClaims`); that is now 
 `cross-tenant-token` after the revalidation; refresh grant), `SessionClaimPreservationTests`.
 
 **Locked-out or disabled source users cross no boundary (AB#7855).** `ValidateCrossTenantAccessAsync` — called on every
-crossing (cross-tenant-token, cross-tenant-login, tenant-switch, cross-tenant device approval, token exchange, completion of
+crossing (cross-tenant-token, cross-tenant-login, tenant-switch, token exchange, completion of
 the cross-tenant second factor) — refuses a source user that is locked out (`LockoutEnabled` and `LockoutEnd` in the future)
 or that the sign-in rules refuse (`IdentityOptions.SignIn`: confirmed e-mail / phone / account, the rules
 `SignInManager.CanSignInAsync` applies on the token endpoint; `RtUser` has no separate "disabled" flag). A shadow user is
