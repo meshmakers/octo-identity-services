@@ -38,7 +38,14 @@ internal static class IdentityMethodHost
     public static IReadOnlyList<IdentityMethodHandlerRegistration> Handlers { get; } =
     [
         new(SystemIdentityCkIds.UserChangePasswordMethodId, typeof(UserChangePasswordHandler), true,
-            b => b.Handle<UserChangePasswordHandler>(SystemIdentityCkIds.UserChangePasswordMethodId))
+            b => b.Handle<UserChangePasswordHandler>(SystemIdentityCkIds.UserChangePasswordMethodId)),
+        // Role methods carry no password or secret: registered whatever the switch says (AB#7776).
+        new(SystemIdentityCkIds.UserSetRolesMethodId, typeof(UserSetRolesHandler), false,
+            b => b.Handle<UserSetRolesHandler>(SystemIdentityCkIds.UserSetRolesMethodId)),
+        new(SystemIdentityCkIds.UserAddRoleMethodId, typeof(UserAddRoleHandler), false,
+            b => b.Handle<UserAddRoleHandler>(SystemIdentityCkIds.UserAddRoleMethodId)),
+        new(SystemIdentityCkIds.UserRemoveRoleMethodId, typeof(UserRemoveRoleHandler), false,
+            b => b.Handle<UserRemoveRoleHandler>(SystemIdentityCkIds.UserRemoveRoleMethodId))
     ];
 
     /// <summary>
