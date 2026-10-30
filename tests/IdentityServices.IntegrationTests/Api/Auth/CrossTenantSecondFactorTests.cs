@@ -411,6 +411,39 @@ public class CrossTenantSecondFactorTests : IntegrationTestBase
     }
 
     [Fact]
+    public async Task TokenExchange_IdTokenAsSubjectToken_IsRefused()
+    {
+        // AB#7860: an id_token of a client with AlwaysIncludeUserClaimsInIdToken carries sub, tenant_id and amr like an
+        // access token. Leaked (e.g. as id_token_hint in a logout URL) it must not buy an access token in another tenant.
+        var ct = TestContext.Current.CancellationToken;
+        var childTenantId = await CreateChildTenantAsync();
+        var userName = $"xt2fa_exch_idt_{Guid.NewGuid():N}";
+        var rtUser = await CreateTestUserAsync(userName, password: DefaultPassword);
+        await GrantChildRoleAsync(childTenantId, rtUser.RtId.ToString(), userName);
+        var session = (await LoginAndGetAuthenticatedClientAsync(userName, DefaultPassword, ct))!;
+
+        var (accessToken, idToken) = await GetTokensWithUserClaimsInIdTokenAsync(session, ct);
+        var idTokenClaims = new JsonWebToken(idToken);
+        idTokenClaims.Claims.Should().Contain(c => c.Type == "tenant_id",
+            "precondition: the id_token carries the user claims an exchange looks for");
+
+        // As an access token, declared as an id_token, and without a declared type: refused every time.
+        foreach (var declaredType in (string?[])
+                 ["urn:ietf:params:oauth:token-type:access_token", "urn:ietf:params:oauth:token-type:id_token", null])
+        {
+            var (idStatus, idBody) = await ExchangeAsync(idToken, childTenantId, ct, declaredType);
+            idStatus.Should().NotBe(HttpStatusCode.OK,
+                "only an access token is a valid subject_token (declared type {0}, error: {1})",
+                declaredType ?? "(none)", ErrorOf(idBody));
+            idBody.Should().NotContain("access_token\":", "no token may be issued for an id_token");
+        }
+
+        var (status, body) = await ExchangeAsync(accessToken, childTenantId, ct);
+        status.Should().Be(HttpStatusCode.OK, "the access token of the same sign-in is still exchanged (error: {0})",
+            ErrorOf(body));
+    }
+
+    [Fact]
     public async Task TokenExchange_SourceUserWithoutTwoFactor_IssuesToken()
     {
         var ct = TestContext.Current.CancellationToken;
@@ -792,18 +825,72 @@ public class CrossTenantSecondFactorTests : IntegrationTestBase
         return JsonNode.Parse(raw)!["access_token"]!.GetValue<string>();
     }
 
-    private async Task<(HttpStatusCode Status, string Body)> ExchangeAsync(string subjectToken, string childTenantId,
+    /// <summary>Authorization code + PKCE with a client that puts the user claims into the id_token (AB#7860).</summary>
+    private async Task<(string AccessToken, string IdToken)> GetTokensWithUserClaimsInIdTokenAsync(HttpClient browser,
         CancellationToken ct)
     {
-        var response = await CreateAnonymousClient().PostAsync("/connect/token", new FormUrlEncodedContent(
+        const string clientId = "xt2fa-idtoken-spa";
+        using (var scope = CreateScope())
+        {
+            var clientStore = scope.ServiceProvider.GetRequiredService<IOctoClientStore>();
+            if (await clientStore.FindRtClientByIdAsync(clientId) == null)
+            {
+                var client = new RtClientBuilder()
+                    .WithClientId(clientId)
+                    .WithClientName(clientId)
+                    .WithGrantTypes("authorization_code")
+                    .WithScopes("openid", "profile")
+                    .WithRedirectUris(AuthCodeRedirectUri)
+                    .RequirePkce()
+                    .Build();
+                client.AlwaysIncludeUserClaimsInIdToken = true;
+                await clientStore.CreateAsync(client);
+            }
+        }
+
+        var codeChallenge = Base64Url(SHA256.HashData(Encoding.ASCII.GetBytes(CodeVerifier)));
+        var authorize = await browser.GetAsync("/connect/authorize" +
+                                               $"?client_id={clientId}" +
+                                               $"&redirect_uri={Uri.EscapeDataString(AuthCodeRedirectUri)}" +
+                                               "&response_type=code" +
+                                               $"&scope={Uri.EscapeDataString("openid profile")}" +
+                                               "&state=xt2fa-state&nonce=xt2fa-nonce" +
+                                               $"&code_challenge={codeChallenge}&code_challenge_method=S256" +
+                                               $"&acr_values={Uri.EscapeDataString($"tenant:{SourceTenantId}")}", ct);
+        ((int)authorize.StatusCode).Should().BeInRange(302, 303);
+        var code = HttpUtility.ParseQueryString(authorize.Headers.Location!.Query)["code"];
+
+        var tokenResponse = await CreateAnonymousClient().PostAsync("/connect/token", new FormUrlEncodedContent(
             new Dictionary<string, string>
             {
-                ["grant_type"] = "urn:ietf:params:oauth:grant-type:token-exchange",
-                ["client_id"] = ExchangeClientId,
-                ["subject_token"] = subjectToken,
-                ["subject_token_type"] = "urn:ietf:params:oauth:token-type:access_token",
-                ["acr_values"] = $"tenant:{childTenantId}"
+                ["grant_type"] = "authorization_code",
+                ["client_id"] = clientId,
+                ["code"] = code!,
+                ["redirect_uri"] = AuthCodeRedirectUri,
+                ["code_verifier"] = CodeVerifier
             }), ct);
+        var raw = await tokenResponse.Content.ReadAsStringAsync(ct);
+        tokenResponse.StatusCode.Should().Be(HttpStatusCode.OK, "code redemption: {0}", ErrorOf(raw));
+        var node = JsonNode.Parse(raw)!;
+        return (node["access_token"]!.GetValue<string>(), node["id_token"]!.GetValue<string>());
+    }
+
+    private async Task<(HttpStatusCode Status, string Body)> ExchangeAsync(string subjectToken, string childTenantId,
+        CancellationToken ct, string? subjectTokenType = "urn:ietf:params:oauth:token-type:access_token")
+    {
+        var form = new Dictionary<string, string>
+        {
+            ["grant_type"] = "urn:ietf:params:oauth:grant-type:token-exchange",
+            ["client_id"] = ExchangeClientId,
+            ["subject_token"] = subjectToken,
+            ["acr_values"] = $"tenant:{childTenantId}"
+        };
+        if (subjectTokenType != null)
+        {
+            form["subject_token_type"] = subjectTokenType;
+        }
+
+        var response = await CreateAnonymousClient().PostAsync("/connect/token", new FormUrlEncodedContent(form), ct);
         return (response.StatusCode, await response.Content.ReadAsStringAsync(ct));
     }
 
