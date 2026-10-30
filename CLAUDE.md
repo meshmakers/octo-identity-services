@@ -946,7 +946,8 @@ The identity service hosts CK methods as a remote handler (bus transport, SDK `M
   `AddCkMethodHandlerDiscovery()` in the event hub configuration, and `AddCkMethodCallerTokenValidation()` with the authority of this service
   (`Identity:AuthorityUrl`, issuer with trailing slash; `Methods:Token` can override; Development accepts the self-signed local authority). The host
   validates the forwarded access token before the handler runs (a call without a valid token is `METHOD_FORBIDDEN`) and hands the validated caller
-  as `context.CallerPrincipal`. Without any selected handler nothing is hosted (no queue, no announcement, no token validation requirement).
+  as `context.CallerPrincipal`. Without any selected handler nothing is hosted (no queue, no announcement, no token validation requirement); since AB#7776 the role methods
+  carry no secret and are always selected, so the host runs in every configuration and only the password methods wait for the switch.
 - **Production gate `Methods:Identity:EnablePasswordMethods`** (default **false**, env `OCTO_Methods__Identity__EnablePasswordMethods`, Helm: the same key under
   the identity service configuration / environment): decided by Gerald 2026-10-23, no method carrying a password or secret on staging-1, prod-1,
   prod-2 before B0 (restricted broker user, Heimdall). Off: handlers whose registration has `CarriesSecret = true` are not registered, the service
@@ -982,6 +983,33 @@ The identity service hosts CK methods as a remote handler (bus transport, SDK `M
   because it has no broker): success with new/old sign-in and revocation, wrong current password, lockout, policy, other user / missing target / service token
   / administrator, shadow user, forged caller without a valid token, method without handler; `Methods/IdentityMethodHostTests` (switch default and
   selection, audit). A valid-token call through the real bus is verified on the local stack (see the PR of AB#5672).
+
+### User role methods `SetRoles`, `AddRole`, `RemoveRole` (AB#7776)
+
+`UserSetRolesHandler`, `UserAddRoleHandler`, `UserRemoveRoleHandler` (`src/IdentityServices/Methods/`, shared flow in `UserRoleMethodHandlerBase<T>`) replace
+or change the **direct** roles of a user (the `AssignedRole` association; roles inherited from groups are never read or written, as in REST). The rule is
+**REST parity, never more**; the guards of `UsersController` (`PUT users/{u}/roles`, `PUT/DELETE users/{u}/roles/{r}`) are, and the handlers implement exactly this list:
+
+| Guard of REST | In the method |
+|---------------|---------------|
+| write policy: scope `octo_api` (not `octo_api.read_only`) and tenant role `UserManagement` (`IdentityUserAdministrationWritePolicy`, `RoleEnforcement=Enforce`) | gateway checks the declared role; the handler checks scope + role again on the validated `CallerPrincipal` (forged bus message) -> `METHOD_FORBIDDEN`, `reason=role-required`. Warn mode of REST is not copied |
+| user must exist (404) | `METHOD_TARGET_NOT_FOUND` (also for a target that is no object id and for an unknown tenant) |
+| role must exist, by name, case-insensitive (404) | `ROLE_NOT_FOUND` with parameter `roleName` |
+| AddRole of an assigned role (400) | `ROLE_ALREADY_ASSIGNED` |
+| RemoveRole of a role that is not assigned (400) | `ROLE_NOT_ASSIGNED` |
+| client-credentials tokens are judged by their client roles | a service token with `UserManagement` is allowed |
+
+REST has **no** other rule: no limit on which roles an administrator grants, no refusal of a self grant, no last-administrator protection, no revocation of
+tokens (a role change shows in the next token). The methods add none either - do not add one to a method alone, change REST and the methods together (open decision, AB#7776).
+Difference: REST `SetRoles` removes all direct roles first and answers 404 for an unknown role id afterwards (the user is left without roles); the method
+resolves every name first, so one unknown role changes nothing, and writes only the difference. `SetRoles` takes role **names**, REST takes ids.
+
+Audit: the `Identity.Method` event of every call (success and every refusal, `IdentityMethodAuditWriter`) additionally carries `rolesBefore` and `rolesAfter`
+(direct role names, sorted, comma separated; absent when the caller was refused before the target was read). Role methods are not behind
+`Methods:Identity:EnablePasswordMethods` (`CarriesSecret = false`; the model-vs-registration test guards the flag). Tests: `Api/Methods/UserRoleMethodTests`
+(every guard, case/duplicates, empty list, audit, forged caller, hosting), `UserRoleMethodParityTests` (REST and method side by side per guard, the
+documented difference, self grant), `IdentityMethodHostTests`. The integration test factory removes the bus side of the method host
+(`CkMethodHandlerStartupService`, heartbeat) because the test host has no broker.
 
 ### Blueprint-owned opt-in: `DataPolicy.ProtectBlueprintLocked` (AB#6384; System.Identity 2.24.0)
 

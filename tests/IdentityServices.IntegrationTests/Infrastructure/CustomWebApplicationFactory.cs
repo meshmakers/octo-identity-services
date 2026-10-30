@@ -391,6 +391,16 @@ public class CustomWebApplicationFactory : WebApplicationFactory<Program>, IAsyn
             services.RemoveAll<ITenantNotifications>();
             services.AddSingleton<ITenantNotifications, DefaultTenantNotifications>();
 
+            // AB#7776: the method host is hosted with the default configuration (role methods carry no secret). The test host
+            // has no broker, so drop the bus side of the host (endpoints, announcement, heartbeat); registration, caller token
+            // validation, the invoker and the handlers stay and are called directly.
+            foreach (var descriptor in services
+                         .Where(d => d.ImplementationType?.Name is "CkMethodHandlerStartupService"
+                             or "CkMethodHandlerHeartbeatService").ToList())
+            {
+                services.Remove(descriptor);
+            }
+
             Console.Error.WriteLine("[WebFactory] ConfigureTestServices completed");
             Console.Error.Flush();
         });

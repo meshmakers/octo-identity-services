@@ -51,9 +51,11 @@ public class UserChangePasswordMethodTests : IntegrationTestBase
     [Fact]
     public async Task SwitchOff_TheHostRegistersNoHandlerAndNoMethodHost()
     {
-        // the default configuration of every environment
-        Factory.Services.GetService<ICkMethodHandlerInvoker>().Should().BeNull();
-        Factory.Services.GetService<UserChangePasswordHandler>().Should().BeNull();
+        // the default configuration of every environment: the host exists (the role methods of AB#7776 carry no secret and
+        // are hosted without the switch), but no handler of a secret-carrying method is registered
+        Factory.Services.GetService<ICkMethodHandlerInvoker>().Should().NotBeNull();
+        using var scope = Factory.Services.CreateScope();
+        scope.ServiceProvider.GetService<UserChangePasswordHandler>().Should().BeNull();
         await Task.CompletedTask;
     }
 
