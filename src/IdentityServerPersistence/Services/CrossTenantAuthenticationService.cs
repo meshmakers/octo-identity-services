@@ -175,9 +175,10 @@ public class CrossTenantAuthenticationService(
     ///     AB#7804: the source user needs a second factor when it has 2FA enabled itself, or — for a shadow user
     ///     (<c>xt_…</c>) — when any identity of its name chain has. A shadow user never has 2FA of its own (it signs in
     ///     through its home tenant), so judging only the immediate user would let every hop beyond the first skip the
-    ///     home user's second factor. A tier that cannot be resolved (deleted tenant or user, or an ambiguous tenant
-    ///     prefix the resolver refuses to unwind) adds no requirement here; the cross-tenant sign-in that created the
-    ///     shadow user's session already enforced the second factor of the identity it came from.
+    ///     home user's second factor. A tier the resolver does not unwind (deleted tenant, ambiguous prefix) or whose
+    ///     user no longer exists adds no requirement; the cross-tenant sign-in that created the shadow user's session
+    ///     already enforced the second factor of the identity it came from. A proven tier whose tenant cannot be read
+    ///     (registry miss, query error) fails closed: the second factor is required.
     /// </summary>
     private async Task<bool> RequiresSecondFactorAsync(RtUser user)
     {
@@ -188,7 +189,17 @@ public class CrossTenantAuthenticationService(
 
         foreach (var (tenantId, userName) in await shadowUserChainResolver.GetSourceChainAsync(user.UserName))
         {
-            if ((await FindUserByNameInTenantAsync(tenantId, userName))?.TwoFactorEnabled == true)
+            var (tierUser, failed) = await LookupUserByNameInTenantAsync(tenantId, userName);
+            if (failed)
+            {
+                // The resolver proved this tier, but its tenant cannot be read right now: fail closed.
+                logger.LogWarning(
+                    "Second-factor requirement of '{UserName}' assumed: chain tier '{TierUserName}' in tenant '{TenantId}' could not be read",
+                    user.UserName, userName, tenantId);
+                return true;
+            }
+
+            if (tierUser?.TwoFactorEnabled == true)
             {
                 return true;
             }
@@ -263,6 +274,14 @@ public class CrossTenantAuthenticationService(
     }
 
     private async Task<RtUser?> FindUserByNameInTenantAsync(string tenantId, string username)
+        => (await LookupUserByNameInTenantAsync(tenantId, username)).User;
+
+    /// <summary>
+    ///     User lookup that tells "not found" (<c>Failed=false, User=null</c>) apart from "could not be read"
+    ///     (<c>Failed=true</c>: tenant missing from the registry, query error). Callers that must fail closed on an
+    ///     unreadable tenant (the second-factor requirement, AB#7804) need the difference.
+    /// </summary>
+    private async Task<(RtUser? User, bool Failed)> LookupUserByNameInTenantAsync(string tenantId, string username)
     {
         try
         {
@@ -270,7 +289,7 @@ public class CrossTenantAuthenticationService(
             if (tenantRepository == null)
             {
                 LogUnregisteredTenant(tenantId);
-                return null;
+                return (null, true);
             }
 
             using var session = await tenantRepository.GetSessionAsync();
@@ -283,14 +302,14 @@ public class CrossTenantAuthenticationService(
             var result = await tenantRepository.GetRtEntitiesByTypeAsync<RtUser>(session, queryOptions);
             await session.CommitTransactionAsync();
 
-            return result.Items.SingleOrDefault();
+            return (result.Items.SingleOrDefault(), false);
         }
         catch (Exception ex)
         {
             logger.LogWarning(ex,
                 "Failed to query user '{UserName}' in tenant '{TenantId}'",
                 username, tenantId);
-            return null;
+            return (null, true);
         }
     }
 

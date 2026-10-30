@@ -348,6 +348,9 @@ public class AuthApiController(
                     crossTenantResult.SourceTenantId, crossTenantResult.SourceUserId);
                 if (options != null)
                 {
+                    // A pending local 2FA challenge (framework cookie) would otherwise win in login-2fa and check the
+                    // code against that local user.
+                    await HttpContext.SignOutAsync(IdentityConstants.TwoFactorUserIdScheme);
                     IssueCrossTenantTwoFactorChallenge(crossTenantResult, tenantIdForCrossTenant, request.RememberLogin);
                     return new LoginResultDto
                     {

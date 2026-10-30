@@ -152,6 +152,30 @@ public class CrossTenantSecondFactorTests : IntegrationTestBase
     }
 
     [Fact]
+    public async Task PasswordLogin_AfterAPendingLocalTwoFactorChallenge_VerifiesTheSourceUsersCode()
+    {
+        // Review finding: the framework's two-factor cookie of an earlier LOCAL challenge in B must not win over the
+        // cross-tenant challenge — the code would be checked (and counted) against the local user.
+        var ct = TestContext.Current.CancellationToken;
+        var childTenantId = await CreateChildTenantAsync();
+        var localUserName = await CreateLocalTwoFactorUserAsync(childTenantId);
+        var user = await CreateUserWithAuthenticatorAsync("xt2fa_after_local", ct);
+
+        var browser = CreateCookieClient();
+        (await PasswordLoginAsync(browser, childTenantId, localUserName, ct)).RequiresTwoFactor.Should().BeTrue(
+            "arrangement: a local 2FA challenge is pending in B");
+        (await PasswordLoginAsync(browser, childTenantId, user.UserName, ct)).RequiresTwoFactor.Should().BeTrue();
+
+        var response = await browser.PostAsJsonAsync(AuthApiUrl("login-2fa", childTenantId),
+            new TwoFactorLoginRequestDto { Code = user.Totp.ComputeTotp() }, ct);
+        var result = await response.Content.ReadFromJsonAsync<TwoFactorLoginResultDto>(ct);
+
+        result!.Success.Should().BeTrue("the code belongs to the source user of the latest challenge: {0}",
+            result.ErrorMessage);
+        (await GetProfileUserNameAsync(browser, childTenantId, ct)).Should().Be($"xt_{SourceTenantId}_{user.UserName}");
+    }
+
+    [Fact]
     public async Task PasswordLogin_SourceUserWithoutTwoFactor_SignsInDirectly()
     {
         var ct = TestContext.Current.CancellationToken;
@@ -458,6 +482,33 @@ public class CrossTenantSecondFactorTests : IntegrationTestBase
             new TwoFactorLoginRequestDto { Code = user.Totp.ComputeTotp() }, ct);
         (await response.Content.ReadFromJsonAsync<TwoFactorLoginResultDto>(ct))!.Success.Should().BeTrue();
         return browser;
+    }
+
+    /// <summary>A user that lives in the child tenant itself, with an authenticator and 2FA enabled.</summary>
+    private async Task<string> CreateLocalTwoFactorUserAsync(string childTenantId)
+    {
+        var systemContext = Factory.Services.GetRequiredService<ISystemContext>();
+        var childRepo = (await systemContext.TryFindTenantRepositoryAsync(childTenantId))!;
+        using var scope = CreateScope();
+        var sp = scope.ServiceProvider;
+        using var userManager = new UserManager<RtUser>(
+            new OctoUserStore(new FixedTenantResolver(childRepo), sp.GetRequiredService<IGroupRoleResolver>(), null),
+            sp.GetRequiredService<Microsoft.Extensions.Options.IOptions<IdentityOptions>>(),
+            sp.GetRequiredService<IPasswordHasher<RtUser>>(),
+            sp.GetServices<IUserValidator<RtUser>>(),
+            sp.GetServices<IPasswordValidator<RtUser>>(),
+            sp.GetRequiredService<ILookupNormalizer>(),
+            sp.GetRequiredService<IdentityErrorDescriber>(),
+            sp,
+            sp.GetRequiredService<Microsoft.Extensions.Logging.ILogger<UserManager<RtUser>>>());
+
+        var userName = $"xt2fa_local_{Guid.NewGuid():N}";
+        var user = new RtUserBuilder().WithUserName(userName).WithEmail($"{userName}@example.com")
+            .WithEmailConfirmed(true).Build();
+        (await userManager.CreateAsync(user, DefaultPassword)).Succeeded.Should().BeTrue();
+        (await userManager.ResetAuthenticatorKeyAsync(user)).Succeeded.Should().BeTrue();
+        (await userManager.SetTwoFactorEnabledAsync(user, true)).Succeeded.Should().BeTrue();
+        return userName;
     }
 
     private static string WrongCode(Totp totp)

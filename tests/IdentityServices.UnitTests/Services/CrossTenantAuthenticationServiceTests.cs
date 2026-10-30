@@ -290,6 +290,22 @@ public class CrossTenantAuthenticationServiceTests
     }
 
     [Fact]
+    public async Task ValidateCrossTenantAccess_ShadowUserWhoseHomeTenantCannotBeRead_FailsClosed()
+    {
+        // AB#7804 review: a proven chain tier whose tenant cannot be queried must not switch the requirement off.
+        SetupTenantWithProviders("target-tenant", [CreateTenantProvider("source-tenant", isEnabled: true)]);
+        var shadow = CreateUser("xt_home-tenant_alice");
+        SetupTenantWithUser("source-tenant", shadow);
+        var homeRepo = Substitute.For<ITenantRepository>();
+        homeRepo.GetSessionAsync().Returns<IOctoSession>(_ => throw new InvalidOperationException("database down"));
+        RegisterTenant("home-tenant", homeRepo);
+
+        var result = await _sut.ValidateCrossTenantAccessAsync("target-tenant", "source-tenant", shadow.RtId.ToString());
+
+        result!.SourceUserRequiresSecondFactor.Should().BeTrue();
+    }
+
+    [Fact]
     public async Task Authenticate_SourceUserWithTwoFactor_ReportsTheRequirement()
     {
         _identityProviderStore.GetAllAsync()
