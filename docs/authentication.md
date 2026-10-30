@@ -600,6 +600,15 @@ cookie skipped the second factor for, and external-provider sign-ins (Google, En
 user signed in that way is refused at the boundary (fail closed) and signs in once more with the second factor.
 "Remember this machine" is not offered for the source user's second factor on a child tenant.
 
+**Locked-out or disabled source users cross no boundary (AB#7855).** `ValidateCrossTenantAccessAsync` — called on every
+crossing (cross-tenant-token, cross-tenant-login, tenant-switch, cross-tenant device approval, token exchange, completion of
+the cross-tenant second factor) — refuses a source user that is locked out (`LockoutEnabled` and `LockoutEnd` in the future)
+or that the sign-in rules refuse (`IdentityOptions.SignIn`: confirmed e-mail / phone / account, the rules
+`SignInManager.CanSignInAsync` applies on the token endpoint; `RtUser` has no separate "disabled" flag). A shadow user is
+judged with every tier of its `xt_` chain: locking the home user stops its shadows from crossing further. An existing
+session, a cross-tenant token minted before the lock and an access token all stop working at the boundary. A chain tier whose
+tenant cannot be read blocks nothing here (it already requires the second factor).
+
 Tests: `tests/IdentityServices.IntegrationTests/Api/Auth/CrossTenantSecondFactorTests.cs` (real child tenant, real 2FA
 enrollment, real authorization-code tokens; every entry point above, with and without 2FA), plus unit tests in
 `CrossTenantAuthenticationServiceTests` and `CrossTenantLoginTests`.

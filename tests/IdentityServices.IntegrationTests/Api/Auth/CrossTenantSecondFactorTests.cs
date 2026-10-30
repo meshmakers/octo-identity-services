@@ -17,6 +17,7 @@ using Meshmakers.Octo.Runtime.Contracts.RepositoryEntities;
 using Meshmakers.Octo.Services.Infrastructure.Services;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Options;
 using Microsoft.IdentityModel.JsonWebTokens;
 using OtpNet;
 using Persistence.IdentityCkModel.Generated.System.Identity.v2;
@@ -422,6 +423,100 @@ public class CrossTenantSecondFactorTests : IntegrationTestBase
         var (status, body) = await ExchangeAsync(await GetAccessTokenAsync(session, ct), childTenantId, ct);
 
         status.Should().Be(HttpStatusCode.OK, "behaviour without 2FA is unchanged (error: {0})", ErrorOf(body));
+    }
+
+    #endregion
+
+    #region 6. Locked-out or disabled source user (AB#7855)
+
+    [Fact]
+    public async Task LockedOutSourceUser_WithAValidMfaSession_CrossesNoBoundary()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        var childTenantId = await CreateChildTenantAsync();
+        var user = await CreateUserWithAuthenticatorAsync("xt2fa_locked", ct);
+        await GrantChildRoleAsync(childTenantId, user);
+        var mfaSession = await LoginWithSecondFactorAsync(user, ct);
+        var subjectToken = await GetAccessTokenAsync(mfaSession, ct);
+        var tokenMintedBeforeTheLock = await MintCrossTenantTokenAsync(mfaSession, childTenantId, ct);
+
+        await SetSourceUserLockoutAsync(user.UserName, DateTimeOffset.UtcNow.AddHours(1));
+
+        var crossTenantToken = await mfaSession.PostAsJsonAsync(AuthApiUrl("cross-tenant-token", SourceTenantId),
+            new CrossTenantTokenRequestDto { TargetTenantId = childTenantId }, ct);
+        crossTenantToken.StatusCode.Should().Be(HttpStatusCode.Forbidden,
+            "a locked-out user gets no cross-tenant token, whatever session it still holds");
+
+        var browser = CreateCookieClient();
+        (await CrossTenantLoginAsync(browser, childTenantId, tokenMintedBeforeTheLock, ct)).Success.Should().BeFalse(
+            "a token minted before the lock is refused at redemption");
+        (await GetProfileStatusAsync(browser, childTenantId, ct)).Should().NotBe(HttpStatusCode.OK);
+
+        var (status, body) = await ExchangeAsync(subjectToken, childTenantId, ct);
+        status.Should().NotBe(HttpStatusCode.OK,
+            "an access token of a locked-out user is not exchanged into another tenant (error: {0})", ErrorOf(body));
+    }
+
+    [Fact]
+    public async Task LockedOutSourceUser_TenantSwitchFromAChildSession_IsRefused()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        var childTenantId = await CreateChildTenantAsync();
+        var userName = $"xt2fa_locked_switch_{Guid.NewGuid():N}";
+        await CreateTestUserAsync(userName, password: DefaultPassword);
+        var browser = CreateCookieClient();
+        (await PasswordLoginAsync(browser, childTenantId, userName, ct)).Success.Should().BeTrue();
+
+        await SetSourceUserLockoutAsync(userName, DateTimeOffset.UtcNow.AddHours(1));
+
+        var response = await browser.PostAsJsonAsync(AuthApiUrl("tenant-switch", childTenantId),
+            new TenantSwitchRequestDto { SourceTenantId = SourceTenantId }, ct);
+        var result = await response.Content.ReadFromJsonAsync<TenantSwitchResultDto>(ct);
+
+        result!.Success.Should().BeFalse("the source user is locked out");
+    }
+
+    [Fact]
+    public async Task DisabledSourceUser_WithAValidSession_CrossesNoBoundary()
+    {
+        // "Disabled" = the sign-in rules refuse the user (SignInManager.CanSignInAsync, as on the token endpoint);
+        // here an e-mail that is no longer confirmed while confirmed e-mails are required.
+        var ct = TestContext.Current.CancellationToken;
+        var childTenantId = await CreateChildTenantAsync();
+        var userName = $"xt2fa_disabled_{Guid.NewGuid():N}";
+        await CreateTestUserAsync(userName, password: DefaultPassword);
+        var session = (await LoginAndGetAuthenticatedClientAsync(userName, DefaultPassword, ct))!;
+
+        var signIn = Factory.Services.GetRequiredService<IOptions<IdentityOptions>>().Value.SignIn;
+        try
+        {
+            signIn.RequireConfirmedEmail = true;
+            using (var scope = CreateScope())
+            {
+                var userManager = scope.ServiceProvider.GetRequiredService<UserManager<RtUser>>();
+                var stored = (await userManager.FindByNameAsync(userName))!;
+                stored.EmailConfirmed = false;
+                (await userManager.UpdateAsync(stored)).Succeeded.Should().BeTrue();
+            }
+
+            var crossTenantToken = await session.PostAsJsonAsync(AuthApiUrl("cross-tenant-token", SourceTenantId),
+                new CrossTenantTokenRequestDto { TargetTenantId = childTenantId }, ct);
+            crossTenantToken.StatusCode.Should().Be(HttpStatusCode.Forbidden,
+                "a user the sign-in rules refuse gets no cross-tenant token");
+        }
+        finally
+        {
+            signIn.RequireConfirmedEmail = false;
+        }
+    }
+
+    private async Task SetSourceUserLockoutAsync(string userName, DateTimeOffset lockoutEnd)
+    {
+        using var scope = CreateScope();
+        var userManager = scope.ServiceProvider.GetRequiredService<UserManager<RtUser>>();
+        var stored = (await userManager.FindByNameAsync(userName))!;
+        (await userManager.SetLockoutEnabledAsync(stored, true)).Succeeded.Should().BeTrue();
+        (await userManager.SetLockoutEndDateAsync(stored, lockoutEnd)).Succeeded.Should().BeTrue();
     }
 
     #endregion

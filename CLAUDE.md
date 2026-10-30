@@ -303,7 +303,9 @@ source lockout counts). Sessions/tokens issued on evidence carry `amr=mfa` on (e
 device tokens now keep the session's `amr` instead of a forced `pwd`. `tenant-switch` derives the source identity from
 the caller's own chain (never the request body, AB#7815). Details: `docs/authentication.md` § Second Factor Across
 Tenant Boundaries; tests `CrossTenantSecondFactorTests` (HTTP, real child tenant). The repository has no CHANGELOG file;
-this paragraph and that section are the change record (Security).
+this paragraph and that section are the change record (Security). AB#7855: `ValidateCrossTenantAccessAsync` (every crossing) also refuses a
+locked-out source user and one the `IdentityOptions.SignIn` rules refuse ("disabled"; no separate flag on `RtUser`),
+including every tier of its `xt_` chain.
 
 **Cross-tenant token exchange (RFC 8693, AB#4338)** — the non-interactive
 counterpart of the browser tenant-switch, for the MCP server:

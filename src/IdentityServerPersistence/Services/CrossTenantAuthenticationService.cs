@@ -2,6 +2,7 @@ using IdentityServerPersistence.SystemStores;
 using Meshmakers.Octo.Runtime.Contracts.Repositories.Query;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 using Persistence.IdentityCkModel.Generated.System.Identity.v2;
 
 namespace IdentityServerPersistence.Services;
@@ -11,6 +12,7 @@ public class CrossTenantAuthenticationService(
     IOctoIdentityProviderStore identityProviderStore,
     IPasswordHasher<RtUser> passwordHasher,
     ICrossTenantShadowUserChainResolver shadowUserChainResolver,
+    IOptions<IdentityOptions> identityOptions,
     ILogger<CrossTenantAuthenticationService> logger) : ICrossTenantAuthenticationService
 {
     private const int MaxHierarchyDepth = 10;
@@ -82,6 +84,16 @@ public class CrossTenantAuthenticationService(
             return null;
         }
 
+        // AB#7855: a locked-out or not-allowed ("disabled") identity crosses no tenant boundary, whatever session or
+        // token it still holds — checked on every crossing, for the source user and each tier of its xt_ chain.
+        if (await FindSignInBlockAsync(user) is { } block)
+        {
+            logger.LogWarning(
+                "Tenant switch denied: user '{UserId}' of tenant '{TenantId}' may not sign in ({Reason})",
+                sourceUserId, sourceTenantId, block);
+            return null;
+        }
+
         return new CrossTenantAuthResult
         {
             SourceTenantId = sourceTenantId,
@@ -92,6 +104,63 @@ public class CrossTenantAuthenticationService(
             Email = user.Email,
             SourceUserRequiresSecondFactor = await RequiresSecondFactorAsync(user)
         };
+    }
+
+    /// <summary>
+    ///     AB#7855: why <paramref name="user" /> may not cross a tenant boundary, or <c>null</c> when it may. Blocked are a
+    ///     locked-out identity and one the sign-in rules refuse (<see cref="IdentityOptions.SignIn" />: confirmed e-mail /
+    ///     phone / account — the same rules <c>SignInManager.CanSignInAsync</c> applies on the token endpoint; RtUser has
+    ///     no separate "disabled" flag). A shadow user (<c>xt_…</c>) is judged with every tier of its name chain: locking
+    ///     the home user stops its shadows too. A tier the resolver does not unwind, whose user no longer exists or whose
+    ///     tenant cannot be read adds nothing (an unreadable tier already requires the second factor).
+    /// </summary>
+    private async Task<string?> FindSignInBlockAsync(RtUser user)
+    {
+        if (GetSignInBlock(user) is { } own)
+        {
+            return own;
+        }
+
+        foreach (var (tenantId, userName) in await shadowUserChainResolver.GetSourceChainAsync(user.UserName))
+        {
+            // A tier that cannot be read blocks nothing here: the second-factor rule already fails closed for it
+            // (RequiresSecondFactorAsync), and refusing every crossing on a transient read error would lock out users
+            // that are not locked.
+            var (tierUser, _) = await LookupUserByNameInTenantAsync(tenantId, userName);
+            if (tierUser != null && GetSignInBlock(tierUser) is { } tier)
+            {
+                return $"chain tier '{userName}' in tenant '{tenantId}': {tier}";
+            }
+        }
+
+        return null;
+    }
+
+    private string? GetSignInBlock(RtUser user)
+    {
+        if (user.LockoutEnabled && user.LockoutEnd.HasValue && user.LockoutEnd.Value > DateTimeOffset.UtcNow)
+        {
+            return "locked out";
+        }
+
+        var signIn = identityOptions.Value.SignIn;
+        if (signIn.RequireConfirmedEmail && !user.EmailConfirmed)
+        {
+            return "e-mail not confirmed";
+        }
+
+        if (signIn.RequireConfirmedPhoneNumber && !user.PhoneNumberConfirmed)
+        {
+            return "phone number not confirmed";
+        }
+
+        // DefaultUserConfirmation: an account is confirmed when its e-mail is.
+        if (signIn.RequireConfirmedAccount && !user.EmailConfirmed)
+        {
+            return "account not confirmed";
+        }
+
+        return null;
     }
 
     private async Task<CrossTenantAuthResult?> TryAuthenticateInHierarchyAsync(
