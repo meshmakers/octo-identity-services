@@ -10,6 +10,7 @@ public class CrossTenantAuthenticationService(
     ITenantRegistry tenantRegistry,
     IOctoIdentityProviderStore identityProviderStore,
     IPasswordHasher<RtUser> passwordHasher,
+    ICrossTenantShadowUserChainResolver shadowUserChainResolver,
     ILogger<CrossTenantAuthenticationService> logger) : ICrossTenantAuthenticationService
 {
     private const int MaxHierarchyDepth = 10;
@@ -88,7 +89,8 @@ public class CrossTenantAuthenticationService(
             SourceUserName = user.UserName ?? string.Empty,
             FirstName = user.FirstName,
             LastName = user.LastName,
-            Email = user.Email
+            Email = user.Email,
+            SourceUserRequiresSecondFactor = await RequiresSecondFactorAsync(user)
         };
     }
 
@@ -143,7 +145,8 @@ public class CrossTenantAuthenticationService(
                     SourceUserName = user.UserName ?? username,
                     FirstName = user.FirstName,
                     LastName = user.LastName,
-                    Email = user.Email
+                    Email = user.Email,
+                    SourceUserRequiresSecondFactor = await RequiresSecondFactorAsync(user)
                 };
             }
         }
@@ -166,6 +169,32 @@ public class CrossTenantAuthenticationService(
         }
 
         return null;
+    }
+
+    /// <summary>
+    ///     AB#7804: the source user needs a second factor when it has 2FA enabled itself, or — for a shadow user
+    ///     (<c>xt_…</c>) — when any identity of its name chain has. A shadow user never has 2FA of its own (it signs in
+    ///     through its home tenant), so judging only the immediate user would let every hop beyond the first skip the
+    ///     home user's second factor. A tier that cannot be resolved (deleted tenant or user, or an ambiguous tenant
+    ///     prefix the resolver refuses to unwind) adds no requirement here; the cross-tenant sign-in that created the
+    ///     shadow user's session already enforced the second factor of the identity it came from.
+    /// </summary>
+    private async Task<bool> RequiresSecondFactorAsync(RtUser user)
+    {
+        if (user.TwoFactorEnabled)
+        {
+            return true;
+        }
+
+        foreach (var (tenantId, userName) in await shadowUserChainResolver.GetSourceChainAsync(user.UserName))
+        {
+            if ((await FindUserByNameInTenantAsync(tenantId, userName))?.TwoFactorEnabled == true)
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /// <summary>

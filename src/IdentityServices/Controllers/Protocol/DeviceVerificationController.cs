@@ -145,8 +145,12 @@ public class DeviceVerificationController(
         await tokenClaimsService.PopulateUserClaimsAsync(identity, user, tenantId);
 
         // Session-style claims for parity with interactive logins; the session id comes from
-        // the cookie session (stamped by OctoTicketStore) so logout can address it.
-        identity.SetClaim(Claims.AuthenticationMethodReference, "pwd");
+        // the cookie session (stamped by OctoTicketStore) so logout can address it. The authentication
+        // methods are the session's (AB#7804): a sign-in with a second factor stamps amr=mfa, and a device
+        // token without it could never be exchanged into a child tenant by a 2FA user (octo-cli -ttid).
+        var sessionMethods = User.FindAll(Claims.AuthenticationMethodReference)
+            .Select(c => c.Value).Where(v => !string.IsNullOrEmpty(v)).Distinct(StringComparer.Ordinal).ToImmutableArray();
+        identity.SetClaims(Claims.AuthenticationMethodReference, sessionMethods.IsEmpty ? ["pwd"] : sessionMethods);
         identity.SetClaim("idp", "local");
         var sessionId = User.FindFirstValue("sid");
         if (!string.IsNullOrEmpty(sessionId))
@@ -245,6 +249,17 @@ public class DeviceVerificationController(
             return null;
         }
 
+        // AB#7804: approving a device code in a child tenant is a cross-tenant sign-in too — a source user with
+        // 2FA needs a session that proved the second factor.
+        var secondFactorVerified = SecondFactorEvidence.IsPresent(User.Claims);
+        if (crossTenantResult.SourceUserRequiresSecondFactor && !secondFactorVerified)
+        {
+            logger.LogWarning(
+                "Cross-tenant device authorization denied: user '{SubjectId}' has two-factor authentication enabled, but the session carries no second-factor evidence",
+                subjectId);
+            return null;
+        }
+
         var localUser = await crossTenantUserProvisioningService.FindOrCreateCrossTenantUserAsync(
             crossTenantResult, tenantId);
         if (localUser == null)
@@ -253,8 +268,15 @@ public class DeviceVerificationController(
         }
 
         // Re-sign-in as the local shadow user so follow-up requests run on a subject that
-        // exists in the target tenant's database.
-        await signInManager.SignInAsync(localUser, isPersistent: false);
+        // exists in the target tenant's database; the second-factor evidence goes with it.
+        if (secondFactorVerified)
+        {
+            await signInManager.SignInWithClaimsAsync(localUser, isPersistent: false, [SecondFactorEvidence.CreateClaim()]);
+        }
+        else
+        {
+            await signInManager.SignInAsync(localUser, isPersistent: false);
+        }
 
         logger.LogInformation(
             "Cross-tenant device authorization: provisioned user '{UserName}' in tenant '{TenantId}'",

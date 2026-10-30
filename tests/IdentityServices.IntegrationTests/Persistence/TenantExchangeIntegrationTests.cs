@@ -181,7 +181,7 @@ public class TenantExchangeIntegrationTests : IClassFixture<IdentityServicesFixt
         var childTenantId = await CreateChildWithParentProviderAsync(parentTenantId);
 
         var outcome = await (await CreateExchangeProcessorAsync(systemContext, childTenantId))
-            .ExchangeAsync(parentTenantId, operatorId.ToString(), childTenantId);
+            .ExchangeAsync(parentTenantId, operatorId.ToString(), childTenantId, subjectHasSecondFactor: false);
 
         outcome.ShadowUser.Should().BeNull("no token may be minted for an unprovisioned ancestor user");
         outcome.Error.Should().Be("access_denied");
@@ -205,8 +205,8 @@ public class TenantExchangeIntegrationTests : IClassFixture<IdentityServicesFixt
         var childTenantId = await CreateChildWithParentProviderAsync(parentTenantId);
         var processor = await CreateExchangeProcessorAsync(systemContext, childTenantId);
 
-        var first = await processor.ExchangeAsync(parentTenantId, operatorId.ToString(), childTenantId);
-        var second = await processor.ExchangeAsync(parentTenantId, operatorId.ToString(), childTenantId);
+        var first = await processor.ExchangeAsync(parentTenantId, operatorId.ToString(), childTenantId, subjectHasSecondFactor: false);
+        var second = await processor.ExchangeAsync(parentTenantId, operatorId.ToString(), childTenantId, subjectHasSecondFactor: false);
 
         first.Error.Should().Be("access_denied");
         second.Error.Should().Be("access_denied", "the left-over shadow user carries no role");
@@ -236,7 +236,7 @@ public class TenantExchangeIntegrationTests : IClassFixture<IdentityServicesFixt
         var childRepo = (await systemContext.TryFindTenantRepositoryAsync(childTenantId))!;
 
         var outcome = await (await CreateExchangeProcessorAsync(systemContext, childTenantId))
-            .ExchangeAsync(parentTenantId, operatorId.ToString(), childTenantId);
+            .ExchangeAsync(parentTenantId, operatorId.ToString(), childTenantId, subjectHasSecondFactor: false);
 
         outcome.Error.Should().BeNull();
         outcome.ShadowUser.Should().NotBeNull();
@@ -263,7 +263,7 @@ public class TenantExchangeIntegrationTests : IClassFixture<IdentityServicesFixt
         var directRole = await CreateRoleAsync(systemContext, childTenantId, NewId("direct"));
         var processor = await CreateExchangeProcessorAsync(systemContext, childTenantId);
 
-        (await processor.ExchangeAsync(parentTenantId, operatorId.ToString(), childTenantId))
+        (await processor.ExchangeAsync(parentTenantId, operatorId.ToString(), childTenantId, subjectHasSecondFactor: false))
             .Error.Should().Be("access_denied");
 
         var childRepo = (await systemContext.TryFindTenantRepositoryAsync(childTenantId))!;
@@ -273,7 +273,7 @@ public class TenantExchangeIntegrationTests : IClassFixture<IdentityServicesFixt
         shadow.Should().NotBeNull("the refused attempt left the shadow user behind");
         await AssignRoleToUserAsync(systemContext, childTenantId, shadow!.RtId, directRole);
 
-        var outcome = await processor.ExchangeAsync(parentTenantId, operatorId.ToString(), childTenantId);
+        var outcome = await processor.ExchangeAsync(parentTenantId, operatorId.ToString(), childTenantId, subjectHasSecondFactor: false);
 
         outcome.Error.Should().BeNull();
         outcome.ShadowUser!.RtId.Should().Be(shadow.RtId);
@@ -291,7 +291,7 @@ public class TenantExchangeIntegrationTests : IClassFixture<IdentityServicesFixt
         var unrelatedTenantId = await CreateChildTenantAsync(NewId("unrel2"));
 
         var outcome = await (await CreateExchangeProcessorAsync(systemContext, unrelatedTenantId))
-            .ExchangeAsync(systemContext.TenantId, userId.ToString(), unrelatedTenantId);
+            .ExchangeAsync(systemContext.TenantId, userId.ToString(), unrelatedTenantId, subjectHasSecondFactor: false);
 
         outcome.ShadowUser.Should().BeNull();
         outcome.Error.Should().Be("unauthorized_client");
@@ -376,7 +376,7 @@ public class TenantExchangeIntegrationTests : IClassFixture<IdentityServicesFixt
         var ctx = await ArrangeProvisioningAsync();
         await CreateMappingAsync(ctx.SystemContext, ctx.ChildTenantId, ctx.ParentTenantId, ctx.UserId, ctx.UserName,
             mappedRoleIds: []);
-        (await ctx.Processor.ExchangeAsync(ctx.ParentTenantId, ctx.UserId.ToString(), ctx.ChildTenantId))
+        (await ctx.Processor.ExchangeAsync(ctx.ParentTenantId, ctx.UserId.ToString(), ctx.ChildTenantId, subjectHasSecondFactor: false))
             .Error.Should().Be("access_denied", "the role-less mapping grants nothing");
 
         var outcome = await ProvisionCurrentUserAsync(ctx);
@@ -387,7 +387,7 @@ public class TenantExchangeIntegrationTests : IClassFixture<IdentityServicesFixt
         mappings[0].MappedRoleIds.Should().BeEquivalentTo(ctx.ChildRoleIds.Select(r => r.ToString()));
         (await IsMemberOfTenantOwnersAsync(ctx.ChildRepo, mappings[0])).Should().BeTrue();
 
-        var exchange = await ctx.Processor.ExchangeAsync(ctx.ParentTenantId, ctx.UserId.ToString(), ctx.ChildTenantId);
+        var exchange = await ctx.Processor.ExchangeAsync(ctx.ParentTenantId, ctx.UserId.ToString(), ctx.ChildTenantId, subjectHasSecondFactor: false);
         exchange.Error.Should().BeNull("the repaired mapping now grants roles");
         exchange.ShadowUser.Should().NotBeNull();
     }
@@ -408,7 +408,7 @@ public class TenantExchangeIntegrationTests : IClassFixture<IdentityServicesFixt
 
         (await ProvisionCurrentUserAsync(ctx)).Should().Be(AdminProvisioningController.OutcomeRepaired);
 
-        (await ctx.Processor.ExchangeAsync(ctx.ParentTenantId, ctx.UserId.ToString(), ctx.ChildTenantId))
+        (await ctx.Processor.ExchangeAsync(ctx.ParentTenantId, ctx.UserId.ToString(), ctx.ChildTenantId, subjectHasSecondFactor: false))
             .Error.Should().BeNull();
     }
 
@@ -423,7 +423,7 @@ public class TenantExchangeIntegrationTests : IClassFixture<IdentityServicesFixt
         var ctx = await ArrangeProvisioningAsync();
         await CreateMappingAsync(ctx.SystemContext, ctx.ChildTenantId, ctx.ParentTenantId, ctx.UserId,
             "stale-name", mappedRoleIds: [ctx.ChildRoleIds[0].ToString()]);
-        (await ctx.Processor.ExchangeAsync(ctx.ParentTenantId, ctx.UserId.ToString(), ctx.ChildTenantId))
+        (await ctx.Processor.ExchangeAsync(ctx.ParentTenantId, ctx.UserId.ToString(), ctx.ChildTenantId, subjectHasSecondFactor: false))
             .Error.Should().Be("access_denied", "the roles are looked up by the real user name");
 
         (await ProvisionCurrentUserAsync(ctx)).Should().Be(AdminProvisioningController.OutcomeRepaired);
@@ -431,7 +431,7 @@ public class TenantExchangeIntegrationTests : IClassFixture<IdentityServicesFixt
         var mapping = (await GetMappingsAsync(ctx.ChildRepo, ctx.ParentTenantId, ctx.UserId)).Single();
         mapping.SourceUserName.Should().Be(ctx.UserName);
         mapping.MappedRoleIds.Should().BeEquivalentTo([ctx.ChildRoleIds[0].ToString()], "a mapping that grants a role keeps its roles");
-        (await ctx.Processor.ExchangeAsync(ctx.ParentTenantId, ctx.UserId.ToString(), ctx.ChildTenantId))
+        (await ctx.Processor.ExchangeAsync(ctx.ParentTenantId, ctx.UserId.ToString(), ctx.ChildTenantId, subjectHasSecondFactor: false))
             .Error.Should().BeNull();
     }
 
@@ -445,7 +445,7 @@ public class TenantExchangeIntegrationTests : IClassFixture<IdentityServicesFixt
 
         (await ProvisionCurrentUserAsync(ctx)).Should().Be(AdminProvisioningController.OutcomeRepaired);
 
-        (await ctx.Processor.ExchangeAsync(ctx.ParentTenantId, ctx.UserId.ToString(), ctx.ChildTenantId))
+        (await ctx.Processor.ExchangeAsync(ctx.ParentTenantId, ctx.UserId.ToString(), ctx.ChildTenantId, subjectHasSecondFactor: false))
             .Error.Should().BeNull();
     }
 
@@ -460,7 +460,7 @@ public class TenantExchangeIntegrationTests : IClassFixture<IdentityServicesFixt
         var mapping = (await GetMappingsAsync(ctx.ChildRepo, ctx.ParentTenantId, ctx.UserId)).Single();
         mapping.MappedRoleIds.Should().BeEquivalentTo(ctx.ChildRoleIds.Select(r => r.ToString()));
         (await IsMemberOfTenantOwnersAsync(ctx.ChildRepo, mapping)).Should().BeTrue();
-        (await ctx.Processor.ExchangeAsync(ctx.ParentTenantId, ctx.UserId.ToString(), ctx.ChildTenantId))
+        (await ctx.Processor.ExchangeAsync(ctx.ParentTenantId, ctx.UserId.ToString(), ctx.ChildTenantId, subjectHasSecondFactor: false))
             .Error.Should().BeNull();
     }
 
@@ -503,7 +503,7 @@ public class TenantExchangeIntegrationTests : IClassFixture<IdentityServicesFixt
 
         (await GetMappingsAsync(ctx.ChildRepo, ctx.ParentTenantId, ctx.UserId)).Single()
             .MappedRoleIds.Should().BeNullOrEmpty("a mapping that is provisioned through its group is not widened");
-        (await ctx.Processor.ExchangeAsync(ctx.ParentTenantId, ctx.UserId.ToString(), ctx.ChildTenantId))
+        (await ctx.Processor.ExchangeAsync(ctx.ParentTenantId, ctx.UserId.ToString(), ctx.ChildTenantId, subjectHasSecondFactor: false))
             .Error.Should().BeNull();
     }
 
@@ -517,7 +517,7 @@ public class TenantExchangeIntegrationTests : IClassFixture<IdentityServicesFixt
     {
         var ctx = await ArrangeProvisioningAsync();
 
-        var denied = await ctx.Processor.ExchangeAsync(ctx.ParentTenantId, ctx.UserId.ToString(), ctx.ChildTenantId);
+        var denied = await ctx.Processor.ExchangeAsync(ctx.ParentTenantId, ctx.UserId.ToString(), ctx.ChildTenantId, subjectHasSecondFactor: false);
 
         denied.Error.Should().Be("access_denied");
         denied.ShadowUser.Should().BeNull();
@@ -525,7 +525,7 @@ public class TenantExchangeIntegrationTests : IClassFixture<IdentityServicesFixt
             "a refused exchange must not store a mapping");
 
         (await ProvisionCurrentUserAsync(ctx)).Should().Be(AdminProvisioningController.OutcomeCreated);
-        (await ctx.Processor.ExchangeAsync(ctx.ParentTenantId, ctx.UserId.ToString(), ctx.ChildTenantId))
+        (await ctx.Processor.ExchangeAsync(ctx.ParentTenantId, ctx.UserId.ToString(), ctx.ChildTenantId, subjectHasSecondFactor: false))
             .Error.Should().BeNull();
     }
 
@@ -644,6 +644,7 @@ public class TenantExchangeIntegrationTests : IClassFixture<IdentityServicesFixt
                 new Microsoft.Extensions.Caching.Memory.MemoryCacheOptions())),
             idpStore,
             new PasswordHasher<RtUser>(),
+            new CrossTenantShadowUserChainResolver(systemContext),
             NullLogger<CrossTenantAuthenticationService>.Instance);
     }
 

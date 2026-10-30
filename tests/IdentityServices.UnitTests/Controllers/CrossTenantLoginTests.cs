@@ -20,6 +20,7 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using NSubstitute;
 using Persistence.IdentityCkModel.Generated.System.Identity.v2;
+using Shared.TestUtilities.Fakes;
 using Xunit;
 
 namespace IdentityServices.UnitTests.Controllers;
@@ -95,6 +96,9 @@ public class CrossTenantLoginTests
             Substitute.For<IEntraIdVerifiedIdentifierEnrollmentService>(),
             _dataProtectionProvider,
             _crossTenantUserProvisioningService,
+            Substitute.For<ICrossTenantSecondFactorVerifier>(),
+            new RegisteredTenantsShadowUserChainResolver("OctoSystem"),
+            Substitute.For<IOptionsMonitor<Microsoft.AspNetCore.Authentication.Cookies.CookieAuthenticationOptions>>(),
             Options.Create(new OctoSystemConfiguration { SystemTenantId = "OctoSystem" }),
             Substitute.For<Meshmakers.Octo.Backend.IdentityServices.Services.IUserCredentialChangeService>(),
             logger);
@@ -183,6 +187,38 @@ public class CrossTenantLoginTests
 
         // Assert
         result.Result.Should().BeOfType<ForbidResult>();
+    }
+
+    [Theory]
+    [InlineData(false, false)]
+    [InlineData(true, true)]
+    public async Task GetCrossTenantToken_SourceUserWithTwoFactor_NeedsSecondFactorEvidence(bool sessionHasMfa,
+        bool expectToken)
+    {
+        // AB#7804: amr=mfa on the source session is the evidence.
+        var userId = Guid.NewGuid().ToString("N");
+        var claims = new List<Claim> { new("sub", userId), new(ClaimTypes.Name, "admin") };
+        claims.Add(new Claim("amr", sessionHasMfa ? "mfa" : "pwd"));
+        SetupControllerContext("OctoSystem", new ClaimsPrincipal(new ClaimsIdentity(claims, "TestAuth")));
+        _crossTenantAuthService.ValidateCrossTenantAccessAsync("meshtest", "OctoSystem", userId)
+            .Returns(new CrossTenantAuthResult
+            {
+                SourceTenantId = "OctoSystem",
+                SourceUserId = userId,
+                SourceUserName = "admin",
+                SourceUserRequiresSecondFactor = true
+            });
+
+        var result = await _sut.GetCrossTenantToken(new CrossTenantTokenRequestDto { TargetTenantId = "meshtest" });
+
+        if (expectToken)
+        {
+            result.Value!.Token.Should().NotBeNullOrEmpty();
+        }
+        else
+        {
+            result.Result.Should().BeOfType<ForbidResult>();
+        }
     }
 
     #endregion

@@ -78,11 +78,17 @@ public class TenantExchangeProcessor(
         public string? Error { get; init; }
         public string? ErrorDescription { get; init; }
 
+        /// <summary>
+        ///     The subject token carried second-factor evidence (<c>amr=mfa</c>); the issued token carries it on, so a
+        ///     chained exchange can rely on it (AB#7804).
+        /// </summary>
+        public bool SecondFactorVerified { get; init; }
+
         public static ExchangeOutcome Failed(string error, string description) =>
             new() { Error = error, ErrorDescription = description };
 
-        public static ExchangeOutcome Succeeded(RtUser shadowUser, string targetTenantId) =>
-            new() { ShadowUser = shadowUser, TargetTenantId = targetTenantId };
+        public static ExchangeOutcome Succeeded(RtUser shadowUser, string targetTenantId, bool secondFactorVerified) =>
+            new() { ShadowUser = shadowUser, TargetTenantId = targetTenantId, SecondFactorVerified = secondFactorVerified };
     }
 
     /// <summary>
@@ -163,7 +169,8 @@ public class TenantExchangeProcessor(
                 "target tenant could not be resolved for this request");
         }
 
-        return await ExchangeAsync(sourceTenantId, sourceUserId, targetTenantId);
+        return await ExchangeAsync(sourceTenantId, sourceUserId, targetTenantId,
+            subjectHasSecondFactor: SecondFactorEvidence.IsPresent(claims));
     }
 
     /// <summary>
@@ -172,8 +179,12 @@ public class TenantExchangeProcessor(
     ///     in B (see class remarks). Separated from <see cref="ProcessAsync" /> so the real exchange path
     ///     can be tested without minting and signing a subject token.
     /// </summary>
+    /// <param name="sourceTenantId">Tenant of the subject token.</param>
+    /// <param name="sourceUserId">Subject of the subject token.</param>
+    /// <param name="targetTenantId">The tenant the token is exchanged into.</param>
+    /// <param name="subjectHasSecondFactor">The subject token carries <c>amr=mfa</c> (AB#7804).</param>
     internal async Task<ExchangeOutcome> ExchangeAsync(
-        string sourceTenantId, string sourceUserId, string targetTenantId)
+        string sourceTenantId, string sourceUserId, string targetTenantId, bool subjectHasSecondFactor)
     {
         // (b2)+(c) Pick the source identity and run the B-authorization gate on it.
         var crossTenantResult = await ResolveExchangeSourceAsync(targetTenantId, sourceTenantId, sourceUserId);
@@ -185,6 +196,20 @@ public class TenantExchangeProcessor(
             await RaiseFailureAsync(sourceUserId, sourceTenantId, targetTenantId, "cross-tenant access denied");
             return ExchangeOutcome.Failed(Errors.UnauthorizedClient,
                 "cross-tenant access to the target tenant is denied");
+        }
+
+        // (c2) AB#7804: a source user with 2FA (itself or anywhere in its xt_ chain) needs second-factor evidence in
+        //      the subject token. Without it the exchange would turn a password-only token into a target-tenant token.
+        if (crossTenantResult.SourceUserRequiresSecondFactor && !subjectHasSecondFactor)
+        {
+            logger.LogWarning(
+                "Token exchange denied: user '{SourceUserId}' from tenant '{SourceTenantId}' has two-factor authentication enabled, but the subject token carries no second-factor evidence",
+                sourceUserId, sourceTenantId);
+            await RaiseFailureAsync(sourceUserId, sourceTenantId, targetTenantId,
+                "second factor required, subject token has no amr=mfa");
+            return ExchangeOutcome.Failed(Errors.AccessDenied,
+                $"{SecondFactorEvidence.RequiredMarker}: the user has two-factor authentication enabled; " +
+                "sign in again with the second factor and use that token");
         }
 
         // (d) Find or create the B-shadow user (roles synced from RtExternalTenantUserMapping in B).
@@ -221,7 +246,7 @@ public class TenantExchangeProcessor(
             "Token exchange succeeded: user '{SourceUserId}' from tenant '{SourceTenantId}' exchanged into tenant '{TargetTenantId}' as shadow user '{ShadowRtId}'",
             sourceUserId, sourceTenantId, targetTenantId, shadowUser.RtId);
 
-        return ExchangeOutcome.Succeeded(shadowUser, targetTenantId);
+        return ExchangeOutcome.Succeeded(shadowUser, targetTenantId, subjectHasSecondFactor);
     }
 
     /// <summary>
