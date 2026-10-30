@@ -18,6 +18,9 @@ public static class RoleChangeReasons
 
     /// <summary>The change would leave the tenant without a user that effectively holds <c>UserManagement</c>.</summary>
     public const string LastAdministrator = "last-administrator";
+
+    /// <summary>A built-in role (a role with an <c>rtWellKnownName</c>) cannot be renamed or deleted (AB#7927).</summary>
+    public const string BuiltInRole = "built-in-role";
 }
 
 /// <summary>
@@ -48,6 +51,48 @@ public sealed record RoleChangeRequest(
     IReadOnlyCollection<string> DirectRolesBefore,
     IReadOnlyCollection<string>? DirectRolesAfter);
 
+/// <summary>Kind of a member of a group (AB#7927).</summary>
+public enum GroupMemberKind
+{
+    /// <summary>A user.</summary>
+    User,
+
+    /// <summary>A client (machine identity).</summary>
+    Client,
+
+    /// <summary>A nested (child) group.</summary>
+    Group
+}
+
+/// <summary>
+///     A change of the group / mapping graph that can give roles to somebody or take the last administrator away (AB#7927).
+///     Ids are rtId strings.
+/// </summary>
+public abstract record RoleGraphChange
+{
+    /// <summary>The roles of a group are replaced.</summary>
+    public sealed record GroupRoles(string GroupId, IReadOnlyCollection<string> NewRoleIds) : RoleGraphChange;
+
+    /// <summary>A user, client or nested group becomes a member of a group.</summary>
+    public sealed record MemberAdded(string GroupId, GroupMemberKind Kind, string MemberId) : RoleGraphChange;
+
+    /// <summary>A user, client or nested group is removed from a group.</summary>
+    public sealed record MemberRemoved(string GroupId, GroupMemberKind Kind, string MemberId) : RoleGraphChange;
+
+    /// <summary>A group is deleted.</summary>
+    public sealed record GroupDeleted(string GroupId) : RoleGraphChange;
+
+    /// <summary>
+    ///     The mapped roles of an external tenant user mapping are set: <paramref name="MappingId" /> of an existing mapping, or
+    ///     for a new one the source identity (<paramref name="SourceTenantId" />, <paramref name="SourceUserName" />).
+    /// </summary>
+    public sealed record MappingRoles(string? MappingId, string? SourceTenantId, string? SourceUserName,
+        IReadOnlyCollection<string> NewRoleIds) : RoleGraphChange;
+
+    /// <summary>An external tenant user mapping is deleted.</summary>
+    public sealed record MappingDeleted(string MappingId) : RoleGraphChange;
+}
+
 /// <summary>Answer of the guard: allowed, or the reason (and the refused role names).</summary>
 public sealed record RoleChangeDecision(string? Reason, IReadOnlyList<string> RoleNames)
 {
@@ -65,6 +110,8 @@ public sealed record RoleChangeDecision(string? Reason, IReadOnlyList<string> Ro
             $"You cannot grant built-in roles you do not hold yourself: {string.Join(", ", RoleNames)}.",
         RoleChangeReasons.LastAdministrator =>
             "This change would leave the tenant without a user administrator (a user who holds UserManagement).",
+        RoleChangeReasons.BuiltInRole =>
+            $"Built-in roles cannot be renamed or deleted: {string.Join(", ", RoleNames)}.",
         _ => "The role change is allowed."
     };
 }
@@ -92,6 +139,20 @@ public interface IRoleChangeGuard
     /// </summary>
     Task<RoleChangeDecision> EvaluateGrantAsync(RoleChangeCaller caller, IEnumerable<string> addedRoleNames,
         CancellationToken cancellationToken = default);
+
+    /// <summary>
+    ///     Checks a change of a group or of an external tenant user mapping (AB#7927), in this order: self-grant (the change
+    ///     gives the caller a role), built-in roles the caller does not hold, last user administrator (nobody effectively holds
+    ///     <c>UserManagement</c> afterwards, judged over direct roles, groups, nested groups, mappings and shadow users).
+    /// </summary>
+    Task<RoleChangeDecision> EvaluateAsync(RoleChangeCaller caller, RoleGraphChange change,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
+    ///     Checks the change of a role definition (AB#7927): a built-in role (with an <c>rtWellKnownName</c>) can be neither
+    ///     renamed (<paramref name="newName" /> differs) nor deleted (<paramref name="newName" /> is <c>null</c>).
+    /// </summary>
+    RoleChangeDecision EvaluateRoleDefinition(RtRole role, string? newName);
 }
 
 internal sealed class RoleChangeGuard(
@@ -99,7 +160,9 @@ internal sealed class RoleChangeGuard(
     RoleManager<RtRole> roleManager,
     IGroupStore groupStore,
     IGroupRoleResolver groupRoleResolver,
-    IUserStore<RtUser> userStore) : IRoleChangeGuard
+    IUserStore<RtUser> userStore,
+    IExternalTenantUserMappingStore mappingStore,
+    ICrossTenantShadowUserChainResolver chainResolver) : IRoleChangeGuard
 {
     private const int MaxGroupDepth = 10;
 
@@ -161,6 +224,172 @@ internal sealed class RoleChangeGuard(
             ? RoleChangeDecision.Allowed
             : new RoleChangeDecision(RoleChangeReasons.RoleNotHeld, refused);
     }
+
+    public async Task<RoleChangeDecision> EvaluateAsync(RoleChangeCaller caller, RoleGraphChange change,
+        CancellationToken cancellationToken = default)
+    {
+        var graph = await RoleGraph.LoadAsync(userManager, roleManager, userStore, groupStore, mappingStore,
+            chainResolver).ConfigureAwait(false);
+
+        var granted = new HashSet<string>(StringComparer.Ordinal);
+        var self = false;
+        switch (change)
+        {
+            case RoleGraphChange.GroupRoles roles when graph.Groups.TryGetValue(roles.GroupId, out var group):
+                granted.UnionWith(roles.NewRoleIds.Where(r => !group.Roles.Contains(r)));
+                self = CallerIsServedByGroup(caller, graph, roles.GroupId);
+                break;
+            case RoleGraphChange.MemberAdded add when graph.Groups.TryGetValue(add.GroupId, out var target) &&
+                                                      !Members(target, add.Kind).Contains(add.MemberId):
+                if (add.Kind == GroupMemberKind.Group)
+                {
+                    granted.UnionWith(graph.EffectiveRoles(add.MemberId));
+                    self = CallerIsServedByGroup(caller, graph, add.GroupId);
+                }
+                else
+                {
+                    granted.UnionWith(graph.EffectiveRoles(add.GroupId));
+                    self = add.Kind == GroupMemberKind.User && caller.Subject != null &&
+                           string.Equals(add.MemberId, caller.Subject, StringComparison.Ordinal);
+                }
+
+                break;
+            case RoleGraphChange.MappingRoles mapping:
+                var old = mapping.MappingId != null && graph.Mappings.TryGetValue(mapping.MappingId, out var node)
+                    ? node.Roles
+                    : [];
+                granted.UnionWith(mapping.NewRoleIds.Where(r => !old.Contains(r)));
+                self = await CallerIsServedByMappingAsync(caller, graph, mapping).ConfigureAwait(false);
+                break;
+        }
+
+        if (granted.Count > 0)
+        {
+            var names = await RoleNamesAsync(granted).ConfigureAwait(false);
+            if (self)
+            {
+                return new RoleChangeDecision(RoleChangeReasons.SelfGrant, names);
+            }
+
+            var grant = await EvaluateGrantAsync(caller, names, cancellationToken).ConfigureAwait(false);
+            if (!grant.IsAllowed)
+            {
+                return grant;
+            }
+        }
+
+        var holdersBefore = graph.Holders();
+        if (holdersBefore.Count > 0)
+        {
+            var after = graph.Clone();
+            Apply(after, change);
+            if (after.Holders().Count == 0)
+            {
+                return new RoleChangeDecision(RoleChangeReasons.LastAdministrator, [CommonConstants.UserManagementRole]);
+            }
+        }
+
+        return RoleChangeDecision.Allowed;
+    }
+
+    public RoleChangeDecision EvaluateRoleDefinition(RtRole role, string? newName)
+    {
+        if (string.IsNullOrEmpty(role.RtWellKnownName))
+        {
+            return RoleChangeDecision.Allowed;
+        }
+
+        return newName == null || !string.Equals(newName, role.Name, StringComparison.Ordinal)
+            ? new RoleChangeDecision(RoleChangeReasons.BuiltInRole, [role.Name ?? role.RtWellKnownName])
+            : RoleChangeDecision.Allowed;
+    }
+
+    private async Task<IReadOnlyList<string>> RoleNamesAsync(IEnumerable<string> roleIds)
+    {
+        var names = new List<string>();
+        foreach (var id in roleIds)
+        {
+            var role = await roleManager.FindByIdAsync(id).ConfigureAwait(false);
+            if (role?.Name != null)
+            {
+                names.Add(role.Name);
+            }
+        }
+
+        names.Sort(StringComparer.OrdinalIgnoreCase);
+        return names;
+    }
+
+    /// <summary>Whether roles of the group reach the caller: the caller (or a mapping serving it) is in the group or a parent group.</summary>
+    private static bool CallerIsServedByGroup(RoleChangeCaller caller, RoleGraph graph, string groupId)
+    {
+        if (caller.Subject == null)
+        {
+            return false;
+        }
+
+        return graph.GroupsReachingSubject(caller.Subject, graph.MappingsServing(caller.Subject)).Contains(groupId);
+    }
+
+    private async Task<bool> CallerIsServedByMappingAsync(RoleChangeCaller caller, RoleGraph graph,
+        RoleGraphChange.MappingRoles mapping)
+    {
+        if (caller.Subject == null)
+        {
+            return false;
+        }
+
+        if (mapping.MappingId != null)
+        {
+            return graph.MappingsServing(caller.Subject).Contains(mapping.MappingId);
+        }
+
+        // a new mapping: does its source identity belong to the caller's xt_ chain?
+        var user = await userManager.FindByIdAsync(caller.Subject).ConfigureAwait(false);
+        if (user == null || mapping.SourceTenantId == null || mapping.SourceUserName == null)
+        {
+            return false;
+        }
+
+        var chain = await chainResolver.GetSourceChainAsync(user.UserName).ConfigureAwait(false);
+        return chain.Any(c => string.Equals(c.TenantId, mapping.SourceTenantId, StringComparison.OrdinalIgnoreCase) &&
+                              string.Equals(c.UserName, mapping.SourceUserName, StringComparison.OrdinalIgnoreCase));
+    }
+
+    private static void Apply(RoleGraph graph, RoleGraphChange change)
+    {
+        switch (change)
+        {
+            case RoleGraphChange.GroupRoles roles when graph.Groups.TryGetValue(roles.GroupId, out var group):
+                group.Roles.Clear();
+                group.Roles.UnionWith(roles.NewRoleIds);
+                break;
+            case RoleGraphChange.MemberAdded add when graph.Groups.TryGetValue(add.GroupId, out var addTarget):
+                Members(addTarget, add.Kind).Add(add.MemberId);
+                break;
+            case RoleGraphChange.MemberRemoved remove when graph.Groups.TryGetValue(remove.GroupId, out var from):
+                Members(from, remove.Kind).Remove(remove.MemberId);
+                break;
+            case RoleGraphChange.GroupDeleted deleted:
+                graph.RemoveGroup(deleted.GroupId);
+                break;
+            case RoleGraphChange.MappingRoles mapping when mapping.MappingId != null &&
+                                                          graph.Mappings.TryGetValue(mapping.MappingId, out var node):
+                node.Roles.Clear();
+                node.Roles.UnionWith(mapping.NewRoleIds);
+                break;
+            case RoleGraphChange.MappingDeleted removed:
+                graph.RemoveMapping(removed.MappingId);
+                break;
+        }
+    }
+
+    private static HashSet<string> Members(GroupNode group, GroupMemberKind kind) => kind switch
+    {
+        GroupMemberKind.User => group.Users,
+        GroupMemberKind.Client => group.Clients,
+        _ => group.Children
+    };
 
     /// <summary>
     ///     <c>true</c> when the target effectively holds <c>UserManagement</c> now, does not after the change and no other

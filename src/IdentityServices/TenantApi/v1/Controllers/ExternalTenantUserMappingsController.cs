@@ -11,6 +11,7 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Persistence.IdentityCkModel.Generated.System.Identity.v2;
 using Meshmakers.Octo.Backend.Authentication;
+using Meshmakers.Octo.Backend.IdentityServices.Authorization.RoleChange;
 
 namespace Meshmakers.Octo.Backend.IdentityServices.TenantApi.v1.Controllers;
 
@@ -24,8 +25,22 @@ namespace Meshmakers.Octo.Backend.IdentityServices.TenantApi.v1.Controllers;
 [ApiVersion(IdentityServiceConstants.ApiVersion1)]
 public class ExternalTenantUserMappingsController(
     IExternalTenantUserMappingStore mappingStore,
-    IGroupStore groupStore) : ControllerBase
+    IGroupStore groupStore,
+    IRoleChangeGuard roleChangeGuard,
+    IRoleChangeRefusals roleChangeRefusals) : ControllerBase
 {
+    /// <summary>
+    /// Runs the role change guard (AB#7927). Returns the 403/409 problem answer (audited), or <c>null</c> when allowed.
+    /// </summary>
+    private async Task<ObjectResult?> GuardAsync(RoleGraphChange change, string target)
+    {
+        var caller = RoleChangeCaller.FromPrincipal(User);
+        var decision = await roleChangeGuard.EvaluateAsync(caller, change, HttpContext.RequestAborted);
+        return decision.IsAllowed
+            ? null
+            : await roleChangeRefusals.RefuseAsync(HttpContext, caller, decision, target);
+    }
+
     /// <summary>
     /// Returns all external tenant user mappings.
     /// </summary>
@@ -104,6 +119,13 @@ public class ExternalTenantUserMappingsController(
             return ExternalTenantUserMappingProblems.AlreadyExists(duplicate, dto.SourceTenantId, dto.SourceUserId);
         }
 
+        var refusal = await GuardAsync(new RoleGraphChange.MappingRoles(null, dto.SourceTenantId, dto.SourceUserName,
+            dto.RoleIds ?? []), $"mapping {dto.SourceTenantId}/{dto.SourceUserName}");
+        if (refusal != null)
+        {
+            return refusal;
+        }
+
         var mapping = new RtExternalTenantUserMapping
         {
             RtId = OctoObjectId.GenerateNewId(),
@@ -144,6 +166,13 @@ public class ExternalTenantUserMappingsController(
             return NotFound();
         }
 
+        var refusal = await GuardAsync(new RoleGraphChange.MappingRoles(rtId.ToString(), null, null, dto.RoleIds ?? []),
+            $"mapping {rtId}");
+        if (refusal != null)
+        {
+            return refusal;
+        }
+
         existing.MappedRoleIds = dto.RoleIds != null
             ? new AttributeStringValueList(dto.RoleIds)
             : null;
@@ -167,6 +196,12 @@ public class ExternalTenantUserMappingsController(
         if (existing == null)
         {
             return NotFound();
+        }
+
+        var refusal = await GuardAsync(new RoleGraphChange.MappingDeleted(rtId.ToString()), $"mapping {rtId}");
+        if (refusal != null)
+        {
+            return refusal;
         }
 
         await mappingStore.RemoveAsync(rtId);

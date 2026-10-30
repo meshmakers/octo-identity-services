@@ -12,6 +12,7 @@ using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Mvc;
 using Persistence.IdentityCkModel.Generated.System.Identity.v2;
 using Meshmakers.Octo.Backend.Authentication;
+using Meshmakers.Octo.Backend.IdentityServices.Authorization.RoleChange;
 using Meshmakers.Octo.Backend.IdentityServices.Mapping;
 
 namespace Meshmakers.Octo.Backend.IdentityServices.TenantApi.v1.Controllers;
@@ -27,14 +28,21 @@ public class RolesController : ControllerBase
 {
     private readonly IMultiTenancyResolverService _multiTenancyResolverService;
     private readonly RoleManager<RtRole> _roleManager;
+    private readonly IRoleChangeGuard _roleChangeGuard;
+    private readonly IRoleChangeRefusals _roleChangeRefusals;
 
     /// <summary>
     ///     Constructor
     /// </summary>
     /// <param name="roleManager">The storage service of roles</param>
     /// <param name="multiTenancyResolverService">Multi-tenancy resolver service</param>
-    public RolesController(RoleManager<RtRole> roleManager, IMultiTenancyResolverService multiTenancyResolverService)
+    /// <param name="roleChangeGuard">Built-in roles cannot be renamed or deleted (AB#7927)</param>
+    /// <param name="roleChangeRefusals">Audit and answer of a refused change</param>
+    public RolesController(RoleManager<RtRole> roleManager, IMultiTenancyResolverService multiTenancyResolverService,
+        IRoleChangeGuard roleChangeGuard, IRoleChangeRefusals roleChangeRefusals)
     {
+        _roleChangeGuard = roleChangeGuard;
+        _roleChangeRefusals = roleChangeRefusals;
         _multiTenancyResolverService = multiTenancyResolverService;
         _roleManager = roleManager;
     }
@@ -169,6 +177,7 @@ public class RolesController : ControllerBase
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     [ProducesResponseType(typeof(NotFoundErrorDto), StatusCodes.Status404NotFound)]
     [ProducesResponseType(typeof(OperationFailedErrorDto), StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status409Conflict)]
     [ProducesResponseType(typeof(InternalServerErrorDto), StatusCodes.Status500InternalServerError)]
     public async Task<IActionResult> Put(
         [Required][Description("The role name")] string roleName,
@@ -185,6 +194,13 @@ public class RolesController : ControllerBase
             if (rtRole == null)
             {
                 return NotFound(new NotFoundErrorDto($"Role '{roleName}' not found."));
+            }
+
+            var refusal = _roleChangeGuard.EvaluateRoleDefinition(rtRole, roleDto.Name);
+            if (!refusal.IsAllowed)
+            {
+                return await _roleChangeRefusals.RefuseAsync(HttpContext, RoleChangeCaller.FromPrincipal(User), refusal,
+                    $"role {roleName}");
             }
 
             roleDto.ApplyTo(rtRole);
@@ -211,6 +227,7 @@ public class RolesController : ControllerBase
     [ProducesResponseType(StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(NotFoundErrorDto), StatusCodes.Status404NotFound)]
     [ProducesResponseType(typeof(OperationFailedErrorDto), StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status409Conflict)]
     [ProducesResponseType(typeof(InternalServerErrorDto), StatusCodes.Status500InternalServerError)]
     public async Task<IActionResult> Delete([Required][Description("The role name")] string roleName)
     {
@@ -220,6 +237,13 @@ public class RolesController : ControllerBase
             if (octoRole == null)
             {
                 return NotFound(new NotFoundErrorDto($"Role '{roleName}' not found."));
+            }
+
+            var refusal = _roleChangeGuard.EvaluateRoleDefinition(octoRole, null);
+            if (!refusal.IsAllowed)
+            {
+                return await _roleChangeRefusals.RefuseAsync(HttpContext, RoleChangeCaller.FromPrincipal(User), refusal,
+                    $"role {roleName}");
             }
 
             var result = await _roleManager.DeleteAsync(octoRole);

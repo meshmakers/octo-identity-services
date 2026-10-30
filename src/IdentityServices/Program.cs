@@ -92,6 +92,7 @@ try
     // AB#7899: administrator revokes all sessions and tokens of a user / of the shadow users of a tenant.
     builder.Services.AddScoped<IUserSessionRevocationService, UserSessionRevocationService>();
     builder.Services.AddScoped<IRoleChangeGuard, RoleChangeGuard>(); // AB#7914
+    builder.Services.AddScoped<IRoleChangeRefusals, RoleChangeRefusals>(); // AB#7927
     builder.Services.AddSingleton<IQrCodeService, QrCodeService>();
     builder.Services
         .AddSingletonMultipleInterfaces<IdentityConfigurationService, IIdentityConfigurationService,

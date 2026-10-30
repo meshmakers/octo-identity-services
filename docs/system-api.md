@@ -81,6 +81,11 @@ removal of the last user that effectively holds `UserManagement` (`409`, `code: 
 `application/problem+json` with the `code` extension and a readable `title`. `PUT /users/{userName}/roles` validates all role ids first (unknown id: `404`, nothing changed) and writes only the
 difference. Every refusal is audited as `Identity.RoleChangeRefused`. The same rules apply to the methods `User.SetRoles/AddRole/RemoveRole` (see CLAUDE.md).
 
+**Role change rules for groups, mappings and role definitions (AB#7927).** The same guard judges `PUT /groups/{id}/roles`, `PUT`/`DELETE /groups/{id}/members/users|groups/{id}`,
+`PUT /groups/{id}/members/clients/{id}`, `DELETE /groups/{id}` and create/update/delete of external tenant user mappings: `403 self-grant`, `403 role-not-held` (built-in roles the caller does not hold,
+also through nested groups), `409 last-administrator` (nobody effectively holds `UserManagement` afterwards). `PUT /roles/{roleName}` with another name and `DELETE /roles/{roleName}` of a built-in
+role (stored `rtWellKnownName`) answer `409` with `code: built-in-role`. Same problem+json shape and audit event as above; details in CLAUDE.md.
+
 **Request/Response DTOs:**
 
 ```typescript
