@@ -18,7 +18,10 @@ public enum PasswordChangePath
     TokenResetPassword,
 
     /// <summary>CK method <c>User.ChangePassword</c> (AB#5672), self only</summary>
-    MethodChangePassword
+    MethodChangePassword,
+
+    /// <summary>CK method <c>User.ResetPassword</c> (AB#7774), administrator</summary>
+    MethodResetPassword
 }
 
 /// <summary>

@@ -255,7 +255,7 @@ public class UserChangePasswordMethodTests : IntegrationTestBase
         var invoker = _enabled.Services.GetRequiredService<ICkMethodHandlerInvoker>();
         var request = Request("507f1f77bcf86cd799439011", "x") with
         {
-            MethodId = "System.Identity/User.ResetPassword-1"
+            MethodId = "System.Identity/DataPermission.GrantToRole-1"
         };
 
         var response = await invoker.InvokeAsync(request, ct);

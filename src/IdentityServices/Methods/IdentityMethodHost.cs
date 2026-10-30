@@ -38,7 +38,9 @@ internal static class IdentityMethodHost
     public static IReadOnlyList<IdentityMethodHandlerRegistration> Handlers { get; } =
     [
         new(SystemIdentityCkIds.UserChangePasswordMethodId, typeof(UserChangePasswordHandler), true,
-            b => b.Handle<UserChangePasswordHandler>(SystemIdentityCkIds.UserChangePasswordMethodId))
+            b => b.Handle<UserChangePasswordHandler>(SystemIdentityCkIds.UserChangePasswordMethodId)),
+        new(SystemIdentityCkIds.UserResetPasswordMethodId, typeof(UserResetPasswordHandler), true,
+            b => b.Handle<UserResetPasswordHandler>(SystemIdentityCkIds.UserResetPasswordMethodId))
     ];
 
     /// <summary>

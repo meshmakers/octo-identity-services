@@ -29,8 +29,12 @@ internal interface IIdentityMethodAuditWriter
     /// <param name="targetRtId">Entity the method was called on, if any.</param>
     /// <param name="callerSubject">Subject (user id) or client id of the validated caller, if known.</param>
     /// <param name="outcome"><c>SUCCESS</c> or the error code of the answer.</param>
+    /// <param name="extraDetails">
+    ///     Method-specific facts (identifiers and flags only, never a parameter value), for example
+    ///     <c>lockoutLifted</c> of <c>User.ResetPassword</c>.
+    /// </param>
     Task RecordAsync(string tenantId, string methodId, Guid invocationId, string? targetRtId, string? callerSubject,
-        string outcome);
+        string outcome, IReadOnlyList<KeyValuePair<string, string>>? extraDetails = null);
 }
 
 internal sealed class IdentityMethodAuditWriter(
@@ -44,7 +48,7 @@ internal sealed class IdentityMethodAuditWriter(
     public const string SuccessOutcome = "SUCCESS";
 
     public async Task RecordAsync(string tenantId, string methodId, Guid invocationId, string? targetRtId,
-        string? callerSubject, string outcome)
+        string? callerSubject, string outcome, IReadOnlyList<KeyValuePair<string, string>>? extraDetails = null)
     {
         var success = outcome == SuccessOutcome;
         var details = new List<KeyValuePair<string, string>>
@@ -61,6 +65,11 @@ internal sealed class IdentityMethodAuditWriter(
         if (!string.IsNullOrEmpty(callerSubject))
         {
             details.Add(new("callerSubject", callerSubject));
+        }
+
+        if (extraDetails != null)
+        {
+            details.AddRange(extraDetails);
         }
 
         try

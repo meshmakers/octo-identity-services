@@ -30,7 +30,9 @@ public class IdentityMethodHostTests
         var selected = IdentityMethodHost.SelectHandlers(new IdentityMethodsOptions());
 
         selected.Should().NotContain(h => h.CarriesSecret);
-        selected.Select(h => h.MethodId).Should().NotContain(SystemIdentityCkIds.UserChangePasswordMethodId);
+        selected.Select(h => h.MethodId).Should().NotContain(SystemIdentityCkIds.UserChangePasswordMethodId)
+            .And.NotContain(SystemIdentityCkIds.UserResetPasswordMethodId,
+                "no handler is hosted, so the gateway answers METHOD_HANDLER_NOT_AVAILABLE (AB#7774)");
     }
 
     [Fact]
@@ -38,7 +40,8 @@ public class IdentityMethodHostTests
     {
         var selected = IdentityMethodHost.SelectHandlers(new IdentityMethodsOptions { EnablePasswordMethods = true });
 
-        selected.Select(h => h.MethodId).Should().Contain(SystemIdentityCkIds.UserChangePasswordMethodId);
+        selected.Select(h => h.MethodId).Should().Contain(SystemIdentityCkIds.UserChangePasswordMethodId)
+            .And.Contain(SystemIdentityCkIds.UserResetPasswordMethodId);
     }
 
     [Fact]
@@ -121,5 +124,21 @@ public class IdentityMethodHostTests
             .RecordAsync("t1", "m", Guid.NewGuid(), "x", "y", "SUCCESS");
 
         await act.Should().NotThrowAsync();
+    }
+
+    [Fact]
+    public async Task Audit_WritesTheMethodSpecificDetails()
+    {
+        var events = Substitute.For<IEventRepository>();
+        IReadOnlyCollection<KeyValuePair<string, string>>? details = null;
+        await events.StoreEventAsync("t1", RtEventSourcesEnum.IdentityService, RtEventLevelsEnum.Information,
+            Arg.Any<string>(), "Identity.Method", Arg.Do<IReadOnlyCollection<KeyValuePair<string, string>>>(d => details = d));
+
+        await new IdentityMethodAuditWriter(events, NullLogger<IdentityMethodAuditWriter>.Instance)
+            .RecordAsync("t1", SystemIdentityCkIds.UserResetPasswordMethodId, Guid.NewGuid(), "user-1", "admin-1",
+                IdentityMethodAuditWriter.SuccessOutcome, [new("lockoutLifted", "true")]);
+
+        details!.Should().Contain(new KeyValuePair<string, string>("lockoutLifted", "true"));
+        details.Select(d => d.Key).Should().Contain(["methodId", "outcome", "targetRtId", "callerSubject"]);
     }
 }
