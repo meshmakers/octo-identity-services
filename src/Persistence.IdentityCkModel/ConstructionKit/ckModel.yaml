@@ -8,7 +8,7 @@
 #   * MethodOnly: UserName, Email - readable, changed only by a type method (identity writes them through
 #                 its own repository, which the access modifiers do not guard).
 # All seven attribute definitions are `securitySensitive: true`, so the tightening is Minor + acknowledge
-# (compatibility.acknowledge below; row T7a of docs/ck-semver-rules.md in octo-construction-kit-engine:
+# (it carried compatibility.acknowledge entries for the one release that published 2.28.0, removed afterwards because an acknowledgement is valid for one release only, OCTO-CK204; row T7a of docs/ck-semver-rules.md in octo-construction-kit-engine:
 # the one release that moves a classic model to ckLanguage 2, once per model). The next release follows
 # the normal rule (row T7) again.
 # Every existing type and record declares `derivable: Any` (the classic behaviour), because the ckLanguage 2
@@ -71,19 +71,3 @@ modelId: System.Identity-2.28.0
 ckLanguage: 2
 dependencies:
   - System-[2.5,3.0)
-compatibility:
-  acknowledge:
-    - change: "TypeAttribute:User-1/UserName#Modified:access"
-      reason: "Close accepted risk R13 (AB#7772): the user name is changed only by a type method, not through generic GraphQL"
-    - change: "TypeAttribute:User-1/Email#Modified:access"
-      reason: "Close accepted risk R13 (AB#7772): the email address (a sign-in and recovery identifier) is changed only by a type method, not through generic GraphQL"
-    - change: "TypeAttribute:User-1/PasswordHash#Modified:access"
-      reason: "Close accepted risk R13 (AB#7772): the password hash is no longer readable or writable through generic GraphQL"
-    - change: "TypeAttribute:User-1/SecurityStamp#Modified:access"
-      reason: "Close accepted risk R13 (AB#7772): the security stamp is no longer readable or writable through generic GraphQL"
-    - change: "TypeAttribute:User-1/LockoutEnd#Modified:access"
-      reason: "Close accepted risk R13 (AB#7772): the lockout end is readable but no longer writable through generic GraphQL (lockout is set by the identity service)"
-    - change: "TypeAttribute:User-1/AccessFailedCount#Modified:access"
-      reason: "Close accepted risk R13 (AB#7772): the failed-sign-in counter is readable but no longer writable through generic GraphQL (counted by the identity service)"
-    - change: "TypeAttribute:User-1/UserTokens#Modified:access"
-      reason: "Close accepted risk R13 (AB#7772): the authenticator key and recovery codes are no longer readable or writable through generic GraphQL"
