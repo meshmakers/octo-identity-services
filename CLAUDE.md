@@ -320,6 +320,10 @@ raises the limits (the suite signs in from one address); a test of the limit its
 `ConfigureTestServices`. Details: `docs/authentication.md` § Sign-In Attempts; tests `SignInAttemptConcurrencyTests`,
 `SignInRateLimiterTests`.
 
+**Locked-out or disabled source users (AB#7855):** `ValidateCrossTenantAccessAsync` (every crossing) also refuses a
+locked-out source user and one the `IdentityOptions.SignIn` rules refuse ("disabled"; no separate flag on `RtUser`),
+including every tier of its `xt_` chain.
+
 **Cross-tenant token exchange (RFC 8693, AB#4338)** — the non-interactive
 counterpart of the browser tenant-switch, for the MCP server:
 
@@ -398,6 +402,10 @@ counterpart of the browser tenant-switch, for the MCP server:
   Before the CLI relies on the exchange (AB#6836), operators must be provisioned in each child tenant they
   operate (`ProvisionCurrentUser -ttid`). Tests: `OctoCliTokenExchangeGrantIntegrationTests` (real MongoDB),
   `OctoCliClientTokenExchangeSeedTests`.
+- **Only access tokens are subject tokens (AB#7860):** `TenantExchangeProcessor` and `OnBehalfOfProcessor` validate the
+  `subject_token` with `SubjectTokenValidation.ForAccessToken` (`typ` must be `at+jwt`), so an id_token with user claims
+  is refused. OpenIddict already refuses it for the RFC 8693 grant; on-behalf-of (custom flow) relies on this check alone.
+  Test tokens minted with `JsonWebTokenHandler` need `TokenType = "at+jwt"`.
 - **v1 issues no exchanged refresh token** (short-lived B tokens, re-exchanged from
   the still-valid A token). See `docs/CONCEPT-CROSS-TENANT-TOKEN-EXCHANGE.md` and
   `docs/authentication.md` § Cross-Tenant Token Exchange. Coverage:
