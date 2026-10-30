@@ -66,6 +66,8 @@ required role follows from the table above.
 | GET | `/users/{userName}/directRoles` | ReadOnly | Get user's directly assigned roles only |
 | POST | `/users` | ReadWrite | Create new user |
 | POST | `/users/ResetPassword` | ReadWrite | Reset user password |
+| POST | `/users/{userName}/revokeSessions` | ReadWrite | Revoke all sessions and tokens of a user (AB#7899) |
+| POST | `/users/revokeSessions?scope=shadowUsers&dryRun=true` | ReadWrite | Same for all xt_* shadow users of the tenant; dry run by default (AB#7899) |
 | PUT | `/users/{userName}` | ReadWrite | Update user |
 | PUT | `/users/{userName}/roles` | ReadWrite | Replace user's direct role assignments |
 | PUT | `/users/{userName}/roles/{roleName}` | ReadWrite | Add role to user |

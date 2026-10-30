@@ -17,6 +17,7 @@ using MongoDB.Bson;
 using Persistence.IdentityCkModel.Generated.System.Identity.v2;
 using Meshmakers.Octo.Backend.Authentication;
 using Meshmakers.Octo.Backend.IdentityServices.Mapping;
+using Meshmakers.Octo.Backend.IdentityServices.TenantApi.v1.Dtos;
 
 namespace Meshmakers.Octo.Backend.IdentityServices.TenantApi.v1.Controllers;
 
@@ -42,6 +43,7 @@ public class UsersController : ControllerBase
     private readonly UserManager<RtUser> _userManager;
     private readonly OctoUserStore _octoUserStore;
     private readonly IUserCredentialChangeService _userCredentialChangeService;
+    private readonly IUserSessionRevocationService _userSessionRevocationService;
 
     /// <summary>
     ///     Constructor
@@ -52,6 +54,7 @@ public class UsersController : ControllerBase
     /// <param name="userEmailInteractionService"></param>
     /// <param name="userStore">The user store for direct role queries</param>
     /// <param name="userCredentialChangeService">Revokes sessions after a password change</param>
+    /// <param name="userSessionRevocationService">Revokes all sessions and tokens of a user (AB#7899)</param>
     /// <param name="logger">Logger</param>
     public UsersController(
         UserManager<RtUser> userManager,
@@ -60,6 +63,7 @@ public class UsersController : ControllerBase
         IUserEmailInteractionService userEmailInteractionService,
         IUserStore<RtUser> userStore,
         IUserCredentialChangeService userCredentialChangeService,
+        IUserSessionRevocationService userSessionRevocationService,
         ILogger<UsersController> logger)
     {
         _userManager = userManager;
@@ -68,6 +72,7 @@ public class UsersController : ControllerBase
         _userEmailInteractionService = userEmailInteractionService;
         _octoUserStore = (OctoUserStore)userStore;
         _userCredentialChangeService = userCredentialChangeService;
+        _userSessionRevocationService = userSessionRevocationService;
         _logger = logger;
     }
 
@@ -412,6 +417,51 @@ public class UsersController : ControllerBase
         {
             return StatusCode(StatusCodes.Status500InternalServerError, new InternalServerErrorDto(e.Message));
         }
+    }
+
+    // POST {tenant}/v1/users/{userName}/revokeSessions
+    /// <summary>
+    ///     AB#7899: ends every session and token of the user in this tenant — rotates the security stamp, revokes all OAuth
+    ///     tokens (refresh tokens, codes) and authorizations, removes the server-side browser sessions. Issued JWT access
+    ///     tokens stay valid until they expire.
+    /// </summary>
+    [HttpPost("{userName}/revokeSessions")]
+    [Authorize(IdentityServiceConstants.IdentityUserAdministrationWritePolicy)]
+    [EndpointSummary("Revokes all sessions and tokens of a user.")]
+    [ProducesResponseType<UserSessionRevocationResultDto>(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> RevokeSessions([Description("The username")] string userName)
+    {
+        var user = await _userManager.FindByNameAsync(userName);
+        if (user == null)
+        {
+            return NotFound(new NotFoundErrorDto($"User '{userName}' not found."));
+        }
+
+        return Ok(await _userSessionRevocationService.RevokeAsync(user, User.Identity?.Name, HttpContext.RequestAborted));
+    }
+
+    // POST {tenant}/v1/users/revokeSessions?scope=shadowUsers&dryRun=true
+    /// <summary>
+    ///     AB#7899: the same for every cross-tenant shadow user (xt_*) of this tenant. Dry run by default: only the counts
+    ///     and the first user names; <c>dryRun=false</c> applies.
+    /// </summary>
+    [HttpPost("revokeSessions")]
+    [Authorize(IdentityServiceConstants.IdentityUserAdministrationWritePolicy)]
+    [EndpointSummary("Revokes all sessions and tokens of the cross-tenant shadow users (dry run by default).")]
+    [ProducesResponseType<ShadowUserSessionRevocationResultDto>(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    public async Task<IActionResult> RevokeSessionsInBulk(
+        [Required] [Description("Which users: only 'shadowUsers' (xt_*) is supported")] string scope,
+        [Description("true (default): count only; false: revoke")] bool dryRun = true)
+    {
+        if (!string.Equals(scope, "shadowUsers", StringComparison.OrdinalIgnoreCase))
+        {
+            return BadRequest("Only scope=shadowUsers is supported.");
+        }
+
+        return Ok(await _userSessionRevocationService.RevokeShadowUsersAsync(dryRun, User.Identity?.Name,
+            HttpContext.RequestAborted));
     }
 
     // DELETE system/v1/users/5

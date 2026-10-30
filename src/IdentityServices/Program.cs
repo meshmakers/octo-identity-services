@@ -88,6 +88,8 @@ try
     builder.Services.AddScoped<IUserEmailInteractionService, UserEmailInteractionService>();
     builder.Services.AddScoped<IUserManagementService, UserManagementService>();
     builder.Services.AddScoped<IUserCredentialChangeService, UserCredentialChangeService>();
+    // AB#7899: administrator revokes all sessions and tokens of a user / of the shadow users of a tenant.
+    builder.Services.AddScoped<IUserSessionRevocationService, UserSessionRevocationService>();
     builder.Services.AddSingleton<IQrCodeService, QrCodeService>();
     builder.Services
         .AddSingletonMultipleInterfaces<IdentityConfigurationService, IIdentityConfigurationService,

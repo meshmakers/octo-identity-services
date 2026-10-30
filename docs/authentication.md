@@ -168,6 +168,25 @@ Tests: `SignInAttemptConcurrencyTests` (real MongoDB: parallel failures all coun
 user out, reset of a stale copy, parallel recovery-code redemption succeeds once, parallel wrong TOTP codes over HTTP, lockout
 through a child tenant, 429 per account and per client), `SignInRateLimiterTests`, `CrossTenantAuthenticationServiceTests`.
 
+### Administrator Revokes All Sessions of a User (AB#7899)
+
+`POST {tenant}/v1/users/{userName}/revokeSessions` (policy `IdentityUserAdministrationWritePolicy`: `UserManagement` in that
+tenant) ends everything of the user **in that tenant**: the security stamp is rotated, all OAuth tokens (refresh tokens,
+codes) and authorizations of the subject are revoked, and the server-side browser sessions (`RtServerSideSession`,
+`OctoTicketStore`) are deleted. Answer: `{ userName, subject, securityStampRotated, revokedTokens, revokedAuthorizations,
+removedSessions }`.
+
+`POST {tenant}/v1/users/revokeSessions?scope=shadowUsers&dryRun=true` does the same for every cross-tenant shadow user
+(`xt_…`) of the tenant. **Dry run by default**: nothing changes, the answer carries the counts (`users`, `tokens`,
+`authorizations`, `sessions`) and the first 100 user names; `dryRun=false` applies and returns the applied counts. Only
+`scope=shadowUsers` exists (400 otherwise). Run it per tenant (octo-cli, child tenants via token exchange) — used at the
+rollout of AB#7804/AB#7815 to end sessions created before the second-factor rule.
+
+Every call writes one `Information` audit log line (tenant, subject or counts, acting user — never a token value). Limit:
+issued JWT access tokens are not stored and stay valid until they expire (resource servers do not introspect); refresh
+tokens, browser sessions and remembered consents stop working at once. Logic: `IUserSessionRevocationService`; tests:
+`UserSessionRevocationTests`.
+
 ### Password Change Ends Existing Sessions (AB#7765)
 
 Every REST password change (`change-password`, `set-password`, administrator `ResetPassword`, token

@@ -1595,6 +1595,14 @@ properties: a credential-bearing DTO passed as a message-template argument (`{Dt
 reflected by the JSON layout. Never do that unless an NLog object transformation in
 `LogSecretRedaction` covers the type; log selected non-secret members instead.
 
+### Administrator revokes all sessions of a user (AB#7899)
+
+`POST {tenant}/v1/users/{userName}/revokeSessions` and the bulk `POST {tenant}/v1/users/revokeSessions?scope=shadowUsers`
+(dry run unless `dryRun=false`) rotate the security stamp, revoke OAuth tokens and authorizations and delete the
+`RtServerSideSession` records of the subject in the current tenant (`IUserSessionRevocationService`, policy
+`IdentityUserAdministrationWritePolicy`). Issued JWT access tokens stay valid until expiry. Details:
+`docs/authentication.md` § Administrator Revokes All Sessions of a User; tests `UserSessionRevocationTests`.
+
 ### Password change ends the user's sessions (AB#7765, review finding M3)
 
 Redeeming a refresh token checks only `CanSignInAsync`, never the security stamp, so a password change
