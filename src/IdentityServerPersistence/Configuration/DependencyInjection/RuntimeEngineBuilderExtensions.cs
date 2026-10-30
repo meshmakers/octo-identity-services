@@ -172,7 +172,8 @@ public static class RuntimeEngineBuilderExtensions
             .AddIdentity<RtUser, RtRole>(setupAction ?? null!)
             .AddRoleStore<OctoRoleStore>()
             .AddUserStore<OctoUserStore>()
-            .AddUserManager<UserManager<RtUser>>()
+            // AB#7854: atomic failure counting and reset (OctoUserManager overrides AccessFailedAsync).
+            .AddUserManager<OctoUserManager>()
             .AddRoleManager<RoleManager<RtRole>>()
             .AddDefaultTokenProviders()
             .AddErrorDescriber<OctoErrorDescriber>()

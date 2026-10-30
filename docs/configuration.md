@@ -56,6 +56,20 @@ Behaviour that does not depend on the setting:
   (`POST {tenant}/v1/clients/{id}/overlayUris`) publishes the event even when it added no URI, so an idempotent re-apply
   refreshes the cache without touching the client.
 
+##### Sign-in rate limits (AB#7854)
+
+In-memory limits per pod on the interactive sign-in endpoints (`login`, `ldap-login`, `login-2fa`, `login-2fa-email`,
+`send-2fa-email`, `login-recovery`); a refused attempt gets `429` with `Retry-After: 60`. Details:
+`authentication.md` § Sign-In Attempts.
+
+| Setting (env `OCTO_IDENTITY__SIGNINRATELIMIT__…`) | Default | Meaning |
+|---------|---------|---------|
+| `Identity:SignInRateLimit:Enabled` | `true` | Switches the limits on. Off only for diagnosis. |
+| `Identity:SignInRateLimit:PermitsPerAccountPerMinute` | `10` | Attempts per account (user name, or the user of a pending second factor) in a sliding minute. |
+| `Identity:SignInRateLimit:ConcurrentAttemptsPerAccount` | `1` | Attempts of one account that may run at the same time; more are refused. |
+| `Identity:SignInRateLimit:PermitsPerClientIpPerMinute` | `60` | Attempts per client address over all accounts and endpoints in a sliding minute. |
+| `Identity:SignInRateLimit:UseForwardedFor` | `true` | Client address = right-most `X-Forwarded-For` entry (set by the ingress). Turn off only when the service is reachable without such a proxy — a client could otherwise choose its own address. |
+
 ##### Token signing (OpenIddict)
 
 Since AB#4989/AB#4996 the OAuth2/OIDC server is **OpenIddict** (Duende IdentityServer removed).
