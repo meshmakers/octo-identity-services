@@ -38,6 +38,16 @@ export OCTO_Identity__SigningCertificatePassword="secret"
 }
 ```
 
+##### CK methods hosted by the Identity service (AB#5672)
+
+| Setting | Default | Meaning |
+|---------|---------|---------|
+| `Methods:Identity:EnablePasswordMethods` (env `OCTO_Methods__Identity__EnablePasswordMethods`) | `false` | Registers the handlers of CK methods with a sensitive (password / secret) parameter or result, currently `User.ChangePassword`. Off: the service announces no password method and the gateway answers `METHOD_HANDLER_NOT_AVAILABLE`. **Production gate (2026-10-23): keep it off on staging-1, prod-1 and prod-2 until the restricted broker user (B0) is rolled out.** Read at start; restart after a change. |
+| `Methods:Token:*` | authority = `Identity:AuthorityUrl` | Caller token validation of the method host (issuer, keys, scope, tenant); only needed to override the defaults. See the common-services method handler SDK. |
+
+Helm: set the first row as an environment variable of the identity service. Details and the handler pattern: `CLAUDE.md`, section
+"CK method host of the identity service".
+
 ##### CORS policy cache (AB#5487)
 
 The Identity service builds its CORS policy from the client origins (`allowedCorsOrigins`) of the system tenant

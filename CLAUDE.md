@@ -930,6 +930,53 @@ Rules behind the shape (do not change them without reading this):
 - Tests: `IdentityMethodDeclarationsIntegrationTests` (compiled model from the CK cache of a real tenant: method set, roles, sensitive
   parameters and result, write access, no replacesGenericCreate). Docs: octo-documentation `identityService/methods.md` (en + de).
 
+### CK method host of the identity service and `User.ChangePassword` (AB#5672)
+
+The identity service hosts CK methods as a remote handler (bus transport, SDK `Meshmakers.Octo.Services.Methods`). All of it lives in
+`src/IdentityServices/Methods/`; a later handler story (AB#7774, AB#7776-AB#7780) adds a handler class and **one row** to
+`IdentityMethodHost.Handlers` (method id constant of `SystemIdentityCkIds`, handler type, `CarriesSecret`, `b => b.Handle<T>(id)`) - nothing else.
+
+- **Host setup** (`IdentityMethodHost`, called once from `Program.cs` after `AddOctoIdentityPersistence`): `AddCkMethodHandlers("IdentityService", ...)`,
+  `AddCkMethodHandlerDiscovery()` in the event hub configuration, and `AddCkMethodCallerTokenValidation()` with the authority of this service
+  (`Identity:AuthorityUrl`, issuer with trailing slash; `Methods:Token` can override; Development accepts the self-signed local authority). The host
+  validates the forwarded access token before the handler runs (a call without a valid token is `METHOD_FORBIDDEN`) and hands the validated caller
+  as `context.CallerPrincipal`. Without any selected handler nothing is hosted (no queue, no announcement, no token validation requirement).
+- **Production gate `Methods:Identity:EnablePasswordMethods`** (default **false**, env `OCTO_Methods__Identity__EnablePasswordMethods`, Helm: the same key under
+  the identity service configuration / environment): decided by Gerald 2026-10-23, no method carrying a password or secret on staging-1, prod-1,
+  prod-2 before B0 (restricted broker user, Heimdall). Off: handlers whose registration has `CarriesSecret = true` are not registered, the service
+  announces no password method and the gateway answers `METHOD_HANDLER_NOT_AVAILABLE`. On (local, test-2 with test accounts): hosted.
+  `IdentityMethodDeclarationsIntegrationTests.EveryHandlerRegistration_FlagsASecretCarryingMethod_AsTheModelDeclaresIt` compares every
+  `CarriesSecret` with the compiled model (a sensitive parameter or result), so a new handler cannot pass the gate by a forgotten flag.
+  The switch is read while the service collection is built: restart the service after changing it.
+- **Startup validation tenant.** The SDK validates every registration against the CK cache of the system tenant, keyed by the lower case tenant id,
+  but its default is `SystemTenantId` as configured (`OctoSystem` in a default installation): the lookup misses and the service refuses to start
+  ("has no such method"). `IdentityMethodHost` therefore sets `Methods:ValidationTenantIds` to the normalized system tenant id when none is configured
+  (found on the local stack, `TheStartupValidation_NamesTheNormalizedSystemTenantId`). On a rolling upgrade the System.Identity model of the system tenant must already
+  be the embedded version when the validation runs; the identity setup imports it first.
+- **Tenant on the bus.** A handler has no HTTP request, but every store resolves its tenant through `IMultiTenancyResolverService`. The handler calls
+  `IMethodTenantAccessor.BindAsync(context.TenantId)` **before** it resolves `UserManager`, the stores or `IUserCredentialChangeService` from its scope
+  (it takes `IServiceProvider` for exactly that reason); `MethodTenantResolverService` answers with the bound tenant and falls back to the HTTP
+  resolution when none is bound (HTTP requests are unchanged). Never resolve a store in a handler constructor.
+- **`User.ChangePassword`** (`UserChangePasswordHandler`): self only. The declared authorization (`allowSelf`, no role) also admits an administrator for any
+  target (default-deny rule of the SDK), so the handler requires `CallerPrincipal.SubjectId == TargetRtId` itself and answers `METHOD_FORBIDDEN`
+  (`reason=not-self`) **before** any lookup: identical for an existing and a missing target, for another user, for an administrator and for a service
+  token (administrators use `ResetPassword`). Order: tenant, user, shadow user (`SHADOW_USER_PASSWORD_NOT_ALLOWED`), lockout (`USER_LOCKED_OUT`),
+  `UserManager.ChangePasswordAsync` (wrong current password = `CURRENT_PASSWORD_INVALID`, counted with the atomic lockout counter of AB#7854;
+  policy failure = `PASSWORD_POLICY_VIOLATION` with one detail per failed rule, code only e.g. `PasswordTooShort`, never a value), counter reset, then
+  `IUserCredentialChangeService.OnPasswordChangedAsync(..., PasswordChangePath.MethodChangePassword, ...)` (security stamp, revocation of all refresh
+  tokens and authorizations of the user in this tenant, log line; AB#7765). A failing revocation throws, the caller gets `METHOD_HANDLER_FAILED`.
+  REST parity: `ManageApiController.ChangePassword` (unchanged); the method additionally counts failures (REST does not).
+- **Audit.** `IdentityMethodAuditWriter` writes one event per call (success and failure) into the event log of the tenant (category `Identity.Method`,
+  details `methodId`, `invocationId`, `outcome` (`SUCCESS` or the error code), `targetRtId`, `callerSubject`; no parameter, no hash, no token). It is
+  not `IIdentityAuditService` (that one reads the tenant from the HTTP request and persists failures only). The gateway-side one-per-invocation record
+  `Method.Invocation` of AB#6919 (`ICkMethodAuditRecorder`) is written where a call is dispatched (the SDK's remote host does not run the pipeline); it is a different category.
+- **Secrets.** `currentPassword` / `newPassword` are only passed to `UserManager`; the generated parameter record prints `***`. Never log or audit the
+  parameters or `context.Parameters`.
+- **Tests:** `Api/Methods/UserChangePasswordMethodTests` (real MongoDB and identity host with the switch on; the bus side (endpoints, announcement) is removed in the test host
+  because it has no broker): success with new/old sign-in and revocation, wrong current password, lockout, policy, other user / missing target / service token
+  / administrator, shadow user, forged caller without a valid token, method without handler; `Methods/IdentityMethodHostTests` (switch default and
+  selection, audit). A valid-token call through the real bus is verified on the local stack (see the PR of AB#5672).
+
 ### Blueprint-owned opt-in: `DataPolicy.ProtectBlueprintLocked` (AB#6384; System.Identity 2.24.0)
 
 `ProtectBlueprintLocked` (optional Boolean, default `false`) is the opt-in of the engine's blueprint-lock write guard

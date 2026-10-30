@@ -15,7 +15,10 @@ public enum PasswordChangePath
     AdminResetPassword,
 
     /// <summary><c>POST {tenantId}/api/auth/reset-password</c> (anonymous, reset token)</summary>
-    TokenResetPassword
+    TokenResetPassword,
+
+    /// <summary>CK method <c>User.ChangePassword</c> (AB#5672), self only</summary>
+    MethodChangePassword
 }
 
 /// <summary>
