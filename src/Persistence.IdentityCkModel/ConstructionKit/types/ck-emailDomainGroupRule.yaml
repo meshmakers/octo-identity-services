@@ -1,6 +1,7 @@
 "$schema": "https://schemas.meshmakers.cloud/construction-kit-elements.schema.json"
 types:
   - typeId: EmailDomainGroupRule
+    derivable: Any
     description: "Maps an email domain pattern to a group for automatic group assignment on user login."
     derivedFromCkTypeId: ${System}/Entity
     isFinal: true

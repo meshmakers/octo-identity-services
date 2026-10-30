@@ -3,6 +3,7 @@ attributes:
   - id: UserName
     valueType: String
     ownership: SeedOwned
+    securitySensitive: true
     description: The user name.
 
   - id: NormalizedUserName
@@ -18,6 +19,7 @@ attributes:
   - id: Email
     valueType: String
     ownership: SeedOwned
+    securitySensitive: true
     description: The email address of the user.
 
   - id: NormalizedEmail
@@ -35,11 +37,13 @@ attributes:
   - id: PasswordHash
     valueType: String
     ownership: Secret
+    securitySensitive: true
     description: The salted and hashed representation of the password for this user. Secret (System.Identity 2.27.0) - never part of an ExportRt, kept on a blueprint re-apply.
 
   - id: SecurityStamp
     valueType: String
     ownership: Secret
+    securitySensitive: true
     description: A random value that should change whenever a users credentials have been compromised. Secret (System.Identity 2.27.0) - never part of an ExportRt, kept on a blueprint re-apply.
 
   - id: PhoneNumber
@@ -78,6 +82,7 @@ attributes:
   - id: LockoutEnd
     valueType: DateTimeOffset
     ownership: SeedOwned
+    securitySensitive: true
     description: The date and time, in UTC, when any user lockout ends.
 
   - id: LockoutEnabled
@@ -90,6 +95,7 @@ attributes:
   - id: AccessFailedCount
     valueType: Int
     ownership: SeedOwned
+    securitySensitive: true
     description: The number of failed login attempts for the current user.
     defaultValues:
       - 0
@@ -173,6 +179,7 @@ attributes:
     valueType: RecordArray
     valueCkRecordId: ${this}/UserToken
     ownership: Secret
+    securitySensitive: true
     description: The tokens of the user (authenticator key and recovery codes of two-factor authentication). Secret (System.Identity 2.27.0) - never part of an ExportRt, kept on a blueprint re-apply.
 
   - id: SubjectIds

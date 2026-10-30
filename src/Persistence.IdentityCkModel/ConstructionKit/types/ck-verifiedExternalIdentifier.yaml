@@ -1,6 +1,7 @@
 "$schema": "https://schemas.meshmakers.cloud/construction-kit-elements.schema.json"
 types:
   - typeId: VerifiedExternalIdentifier
+    derivable: Any
     description: "Maps a verified external identifier (phone number, e-mail address, EntraID object id or client certificate fingerprint) to an OctoMesh user, carrying the ENROLLMENT trust dimension of the two-dimension channel-identity trust model (AB#5122, Epic AB#4979). The second dimension (per-message trust) is NOT stored here: it depends on the incoming message (Signal protocol / DKIM validity) and is combined by the resolver at resolution time as effective = min(enrollmentTrust, messageTrust). Uniqueness: an (IdentifierKind, IdentifierValue) pair resolves to at most one user within a tenant, enforced by the Unique index below."
     derivedFromCkTypeId: ${System}/Entity
     isFinal: true

@@ -1,6 +1,7 @@
 "$schema": "https://schemas.meshmakers.cloud/construction-kit-elements.schema.json"
 types:
   - typeId: Group
+    derivable: Any
     description: "A group that can be assigned roles. Users and other groups can be members."
     derivedFromCkTypeId: ${System}/Entity
     isFinal: true
