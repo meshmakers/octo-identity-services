@@ -1520,6 +1520,33 @@ same state on top of AB#7804: when `ICrossTenantSecondFactorVerifier.GetOptionsA
 a challenge. Tests: `Api/Auth/TwoFactorUnusableLoginTests` (with and without confirmed e-mail, wrong password,
 recovery after 2FA off), `CrossTenantSecondFactorTests.PasswordLogin_SourceUserWithTwoFactorButNoAuthenticator_*`.
 
+### User store concurrency: every failed sign-in is counted (AB#7770, finding L9)
+
+`OctoUserStore` writes users with the expected `rtVersion` (engine guard, AB#7769). The rules:
+
+- **`UpdateAsync`** replaces the user with the `RtVersion` the instance was read with. A concurrent change of the same
+  user (profile, password, lockout) returns `IdentityResult.Failed(ConcurrencyFailure)` instead of last-writer-wins; the
+  caller (REST `PUT users/{name}`, self-service) shows the error and the user retries from a fresh read. The instance's
+  `RtVersion` is left unchanged on a conflict.
+- **Lockout fields are stored at once, not on `UpdateAsync`.** `IncrementAccessFailedCountAsync`,
+  `ResetAccessFailedCountAsync` and `SetLockoutEndDateAsync` do a guarded read-modify-write on the *stored* user
+  (`MutateStoredUserAsync`: read, change, replace with the read version, re-read and re-apply on `RtVersionConflictException`,
+  at most `MaxConcurrencyAttempts` = 40 times). Parallel failed sign-ins therefore each add one and the threshold lockout is
+  never overwritten by a stale copy. `IncrementAccessFailedCountAsync` returns the *stored* count, which
+  `UserManager.AccessFailedAsync` compares with `Lockout.MaxFailedAccessAttempts`. Without a stored user (creation in
+  progress) the methods change the in-memory object only.
+- **Version follow-up.** After such a write the caller's instance takes over the new `RtVersion` only if the stored user was
+  still the version the instance holds (nothing else changed): the `UpdateAsync` that `UserManager` calls right after stays
+  valid. If another writer was in between, the instance keeps its old version, so its `UpdateAsync` reports the conflict
+  and never overwrites the other writer's fields. A parallel `AccessFailedAsync` may therefore return `ConcurrencyFailure`
+  while the failure *is* counted; `SignInManager` ignores that result.
+- `SetTokenAsync` / `RemoveTokenAsync` (authenticator key, recovery codes) use the same guarded read-modify-write.
+- A write that must detect concurrent changes passes the expected version; never combine it with `AttributeNewerThanGuard`,
+  atomic RecordArray item updates or linked binaries in the same update (the engine rule throws).
+- The counter restarts at 0 when the lockout triggers (ASP.NET Core Identity behaviour). Tests:
+  `UserStoreConcurrencyIntegrationTests` (real MongoDB; 10 parallel failures x 20 rounds, threshold lockout, reset after a
+  successful sign-in, concurrent profile updates). They assert the final state, never the number of retries.
+
 ## Configuration
 
 Environment variables are prefixed with `OCTO_`. Key configuration sections:
