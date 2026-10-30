@@ -1,4 +1,5 @@
 using System.Security.Claims;
+using IdentityServerPersistence.Services;
 using IdentityServerPersistence.SystemStores;
 using Microsoft.AspNetCore;
 using Meshmakers.Octo.Backend.IdentityServices.OpenIddict;
@@ -149,7 +150,10 @@ public class TokenEndpointController(
         // The linchpin: claims are built for the B-shadow subject against the B tenant repository
         // (wired into the request by OidcTenantResolutionMiddleware) — B roles, tenant_id=B.
         await tokenClaimsService.PopulateUserClaimsAsync(identity, outcome.ShadowUser, outcome.TargetTenantId!);
-        identity.SetClaim(Claims.AuthenticationMethodReference, TenantExchangeProcessor.AuthenticationMethod);
+        // AB#7804: second-factor evidence of the subject token travels on (chained exchanges, grandchild tenants).
+        identity.SetClaims(Claims.AuthenticationMethodReference, outcome.SecondFactorVerified
+            ? [TenantExchangeProcessor.AuthenticationMethod, SecondFactorEvidence.MultiFactorMethod]
+            : [TenantExchangeProcessor.AuthenticationMethod]);
 
         // v1 semantics: exchanged tokens are short-lived and re-exchanged from the still-valid A
         // token — never grant offline_access, so no refresh token is issued.

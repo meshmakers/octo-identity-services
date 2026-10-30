@@ -11,6 +11,7 @@ using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.Logging;
 using NSubstitute;
 using Persistence.IdentityCkModel.Generated.System.Identity.v2;
+using Shared.TestUtilities.Fakes;
 using Xunit;
 
 namespace IdentityServices.UnitTests.Services;
@@ -24,6 +25,7 @@ public class CrossTenantAuthenticationServiceTests
     private readonly CrossTenantAuthenticationService _sut;
     private readonly List<OctoTenant> _registeredTenants = [];
     private readonly Dictionary<string, ITenantRepository> _repositories = new();
+    private readonly RegisteredTenantsShadowUserChainResolver _chainResolver = new("home-tenant");
 
     public CrossTenantAuthenticationServiceTests()
     {
@@ -45,6 +47,7 @@ public class CrossTenantAuthenticationServiceTests
             new TenantRegistry(_systemContext, new MemoryCache(new MemoryCacheOptions())),
             _identityProviderStore,
             _passwordHasher,
+            _chainResolver,
             _logger);
     }
 
@@ -251,6 +254,72 @@ public class CrossTenantAuthenticationServiceTests
         result.Should().NotBeNull();
         result!.SourceTenantId.Should().Be("source-tenant");
         result.SourceUserId.Should().Be(user.RtId.ToString());
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task ValidateCrossTenantAccess_ReportsWhetherTheSourceUserNeedsASecondFactor(bool twoFactorEnabled)
+    {
+        // AB#7804: every cross-tenant entry point decides on this flag.
+        SetupTenantWithProviders("target-tenant", [CreateTenantProvider("source-tenant", isEnabled: true)]);
+        var user = CreateUser("testuser");
+        user.TwoFactorEnabled = twoFactorEnabled;
+        SetupTenantWithUser("source-tenant", user);
+
+        var result = await _sut.ValidateCrossTenantAccessAsync("target-tenant", "source-tenant", user.RtId.ToString());
+
+        result!.SourceUserRequiresSecondFactor.Should().Be(twoFactorEnabled);
+    }
+
+    [Fact]
+    public async Task ValidateCrossTenantAccess_ShadowUserWhoseHomeUserHasTwoFactor_NeedsASecondFactor()
+    {
+        // AB#7804: a shadow user never has 2FA of its own; the home identity's second factor must still count,
+        // otherwise every hop beyond the first would skip it.
+        SetupTenantWithProviders("target-tenant", [CreateTenantProvider("source-tenant", isEnabled: true)]);
+        var shadow = CreateUser("xt_home-tenant_alice");
+        SetupTenantWithUser("source-tenant", shadow);
+        var home = CreateUser("alice");
+        home.TwoFactorEnabled = true;
+        SetupTenantWithUser("home-tenant", home);
+
+        var result = await _sut.ValidateCrossTenantAccessAsync("target-tenant", "source-tenant", shadow.RtId.ToString());
+
+        result!.SourceUserRequiresSecondFactor.Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task ValidateCrossTenantAccess_ShadowUserWhoseHomeTenantCannotBeRead_FailsClosed()
+    {
+        // AB#7804 review: a proven chain tier whose tenant cannot be queried must not switch the requirement off.
+        SetupTenantWithProviders("target-tenant", [CreateTenantProvider("source-tenant", isEnabled: true)]);
+        var shadow = CreateUser("xt_home-tenant_alice");
+        SetupTenantWithUser("source-tenant", shadow);
+        var homeRepo = Substitute.For<ITenantRepository>();
+        homeRepo.GetSessionAsync().Returns<IOctoSession>(_ => throw new InvalidOperationException("database down"));
+        RegisterTenant("home-tenant", homeRepo);
+
+        var result = await _sut.ValidateCrossTenantAccessAsync("target-tenant", "source-tenant", shadow.RtId.ToString());
+
+        result!.SourceUserRequiresSecondFactor.Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task Authenticate_SourceUserWithTwoFactor_ReportsTheRequirement()
+    {
+        _identityProviderStore.GetAllAsync()
+            .Returns(new RtIdentityProvider[] { CreateTenantProvider("parent-tenant", isEnabled: true) });
+        var user = CreateUser("testuser");
+        user.TwoFactorEnabled = true;
+        SetupTenantWithUser("parent-tenant", user);
+        _passwordHasher.VerifyHashedPassword(user, Arg.Any<string>(), "correctpass")
+            .Returns(PasswordVerificationResult.Success);
+
+        var result = await _sut.AuthenticateAsync("child-tenant", "testuser", "correctpass");
+
+        result!.SourceUserRequiresSecondFactor.Should().BeTrue(
+            "the password alone proves only the first factor of a 2FA user");
     }
 
     [Fact]

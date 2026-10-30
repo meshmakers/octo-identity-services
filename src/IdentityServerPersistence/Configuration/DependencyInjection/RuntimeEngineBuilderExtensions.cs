@@ -80,6 +80,8 @@ public static class RuntimeEngineBuilderExtensions
         builder.Services.AddScoped<IGroupRoleResolver, GroupRoleResolver>();
         builder.Services.AddScoped<IClientRoleStore, ClientRoleStore>();
         builder.Services.AddScoped<ICrossTenantAuthenticationService, CrossTenantAuthenticationService>();
+        // AB#7804: verifies the second factor of a cross-tenant user against the SOURCE tenant (lockout included).
+        builder.Services.AddScoped<ICrossTenantSecondFactorVerifier, CrossTenantSecondFactorVerifier>();
         builder.Services.AddScoped<ICrossTenantUserProvisioningService, CrossTenantUserProvisioningService>();
         // AB#6307: AllowedTenantsResolver caches the tenant registry and mapping lookups process-wide.
         builder.Services.AddMemoryCache();

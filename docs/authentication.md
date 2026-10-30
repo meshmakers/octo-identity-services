@@ -498,6 +498,10 @@ Try local authentication (existing SignInManager flow)
                 │
                 ├── Not found in any parent ──► Login failed
                 │
+                ├── Found, source user has 2FA (AB#7804) ──► requiresTwoFactor
+                │       (no session yet; login-2fa / login-2fa-email / login-recovery
+                │        verify the SOURCE user's code, then continue below)
+                │
                 └── Found ──► Find/create ExternalTenantUserMapping
                         │
                         ▼
@@ -564,6 +568,39 @@ POST /{childTenantId}/api/auth/cross-tenant-login
 - Target tenant mismatch: Returns error (token was issued for a different tenant)
 - No cross-tenant mapping: `FindOrCreateCrossTenantUserAsync` creates an empty one (no roles, no groups)
 - Self-registration gate (AB#5015): when the `OctoTenantIdentityProvider` has `AllowSelfRegistration=false` and the person has no local shadow user yet, the login is denied — **unless** an `ExternalTenantUserMapping` exists in the target tenant for the source user (matched by `SourceTenantId` + `SourceUserId`, or — AB#5708 — by `SourceTenantId` + `SourceUserName` for any identity of the source's `xt_` chain). A mapping created by an admin (e.g. via `provisionCurrentUser`) is explicit provisioning, not self-registration, so the first login is allowed to create the shadow user. The same rule applies to the cross-tenant **password** login path in `AuthApiController.Login`.
+
+### Second Factor Across Tenant Boundaries (AB#7804, AB#7815)
+
+**Rule:** a user who has two-factor authentication enabled in the source tenant — or whose `xt_` name chain unwinds
+to an identity that has it — gets no session and no token in another tenant without second-factor evidence. Before
+AB#7804 every cross-tenant path checked only the password (or the source session) and the opt-in second factor could
+be skipped through any child tenant.
+
+**Evidence** is the `amr` value `mfa` (`SecondFactorEvidence`, `IdentityServerPersistence/Services/`). ASP.NET Core
+Identity stamps it on the session when a sign-in completed a second factor (`amr=pwd` for a password-only sign-in),
+`AuthorizeController` copies the session's `amr` into access tokens, and `DeviceVerificationController` now does the
+same for device-flow tokens (it used to force `amr=pwd`). Sessions and tokens issued in the target tenant on verified
+evidence carry `amr=mfa` on, so a further hop (grandchild tenant, chained exchange) can rely on it. Whether the source
+user needs a second factor is decided by `CrossTenantAuthenticationService` (`CrossTenantAuthResult.SourceUserRequiresSecondFactor`:
+the user's own `TwoFactorEnabled`, or that of any tier of its `xt_` chain — a shadow user never has 2FA of its own).
+
+| Entry point | Without evidence | How the second factor is proven |
+| --- | --- | --- |
+| Password login `POST /{B}/api/auth/login` (cross-tenant fallback) | `requiresTwoFactor: true`, no session | The same SPA 2FA step: `login-2fa` (TOTP), `login-2fa-email`, `login-recovery` on `/{B}/…` verify the code of the **source** user in the **source** tenant (`ICrossTenantSecondFactorVerifier`: a `UserManager` over the source tenant's repository — same token providers, time window, recovery-code redemption). A wrong code counts against the source user's lockout; a valid one resets it. The pending state is a data-protected cookie `.AspNetCore.Octo.CrossTenantTwoFactor` (5 min, bound to tenant B, same cookie policy as the framework's two-factor cookie). The B session then carries `amr=mfa`. |
+| `POST /{A}/api/auth/cross-tenant-token` | `403` (the SPA sends the user to A's login, which asks for the second factor) | The A session must carry `amr=mfa`; the token payload records `SecondFactorVerified`. |
+| `POST /{B}/api/auth/cross-tenant-login` | `Success=false` | Re-checked at redemption: 2FA enabled after the token was minted is caught. |
+| `POST /{B}/api/auth/tenant-switch` | `Success=false` | The B session must carry `amr=mfa`. |
+| Cross-tenant device approval (`/connect/deviceverification`) | `access_denied` ("Cross-tenant access denied") | The approving session must carry `amr=mfa`. |
+| RFC 8693 token exchange | `403 access_denied`, `error_description` starts with `second_factor_required` | The subject token must carry `amr=mfa`; the exchanged token gets `amr=["token_exchange","mfa"]`. |
+
+Users without 2FA are unaffected. Not covered by the cross-tenant rule: a session that a "remember this machine"
+cookie skipped the second factor for, and external-provider sign-ins (Google, Entra ID, …), carry no `amr=mfa`; a 2FA
+user signed in that way is refused at the boundary (fail closed) and signs in once more with the second factor.
+"Remember this machine" is not offered for the source user's second factor on a child tenant.
+
+Tests: `tests/IdentityServices.IntegrationTests/Api/Auth/CrossTenantSecondFactorTests.cs` (real child tenant, real 2FA
+enrollment, real authorization-code tokens; every entry point above, with and without 2FA), plus unit tests in
+`CrossTenantAuthenticationServiceTests` and `CrossTenantLoginTests`.
 
 ### Cross-Tenant Shadow User Roles and Identity (AB#5708)
 
@@ -657,7 +694,14 @@ through their home tenant and cannot have a password."
 
 ### Tenant Switch Flow
 
-Users already authenticated in a parent tenant can switch to a child tenant without re-entering credentials:
+A user signed in to tenant B as a cross-tenant shadow user can re-establish the B session from one of their own
+source identities without re-entering credentials. **The source identity is always the caller's own** (AB#7815): it is
+the tier of the signed-in user's `xt_` name chain that lives in `SourceTenantId`; the request may name only that tenant
+and, optionally, repeat that tier's user id — any other `SourceUserId` is refused (`Success=false`, a
+`Tenant Switch Failure` audit entry). Before AB#7815 the source user was taken from the request body, so any user with
+a B session could sign in as the shadow of any user of an ancestor tenant. A local (non-shadow) B user has no source
+identity and cannot switch. The second-factor rule above applies. No client in the platform calls this endpoint today
+(the SPA uses cross-tenant-token / cross-tenant-login, non-interactive clients the token exchange).
 
 ```
 GET /{tenantId}/api/auth/accessible-tenants
@@ -667,8 +711,10 @@ GET /{tenantId}/api/auth/accessible-tenants
         ▼
 POST /{targetTenantId}/api/auth/tenant-switch
         │
+        ├── Source identity = the caller's own xt_ chain tier in SourceTenantId (never the body's user)
         ├── Validate source tenant is ancestor of target
         ├── Find user in source tenant
+        ├── Source user has 2FA ──► session must carry amr=mfa
         ├── Return mapped roles for target tenant
         │
         ├── Access denied ──► 200 { success: false }
@@ -699,6 +745,8 @@ POST /connect/token
         ├── (a) Validate subject_token → extract A sub, tenant_id=A, username
         ├── (b) Read target B from acr_values; assert HttpContext tenant == B (fail closed → invalid_target)
         ├── (c) ValidateCrossTenantAccessAsync(B, A, subA) → null ⇒ unauthorized_client
+        ├── (c2) source user has 2FA and subject token has no amr=mfa ⇒ access_denied
+        │       (error_description starts with second_factor_required, AB#7804)
         ├── (d) FindOrCreateCrossTenantUserAsync(result, B) → B-shadow user (xt_A_user)
         │       (AB#4966 dual-candidate source selection preserved)
         └── Build the principal with subject = B-shadow user's RtId
