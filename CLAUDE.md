@@ -175,7 +175,7 @@ This service depends on Octo framework packages (versioned via `$(OctoVersion)` 
 
 ### Construction Kit (CK) Model
 
-The `Persistence.IdentityCkModel` project uses YAML-based model definitions that are transformed into C# code at build time. Model files are in `src/Persistence.IdentityCkModel/ConstructionKit/`. The model ID is `System.Identity-2.25.0` with dependency on `System-[2.5,3.0)`. Generated types live in namespace `Persistence.IdentityCkModel.Generated.System.Identity.v2`.
+The `Persistence.IdentityCkModel` project uses YAML-based model definitions that are transformed into C# code at build time. Model files are in `src/Persistence.IdentityCkModel/ConstructionKit/`. The model ID is `System.Identity-2.29.0` (ckLanguage 2) with dependency on `System-[2.5,3.0)`. Generated types live in namespace `Persistence.IdentityCkModel.Generated.System.Identity.v2`.
 
 ### OpenIddict Protocol Stack (Epic AB#4989)
 
@@ -303,7 +303,24 @@ source lockout counts). Sessions/tokens issued on evidence carry `amr=mfa` on (e
 device tokens now keep the session's `amr` instead of a forced `pwd`. `tenant-switch` derives the source identity from
 the caller's own chain (never the request body, AB#7815). Details: `docs/authentication.md` § Second Factor Across
 Tenant Boundaries; tests `CrossTenantSecondFactorTests` (HTTP, real child tenant). The repository has no CHANGELOG file;
-this paragraph and that section are the change record (Security). AB#7861: the challenge cookie is single-use (nonce + `ICrossTenantChallengeReplayGuard`,
+this paragraph and that section are the change record (Security). AB#7859: the security-stamp revalidation (every 30 min) used to drop
+`amr=mfa` from the session; `SessionClaimPreservation` (`OnRefreshingPrincipal`) keeps `amr`/`idp`/`sid`. The refresh
+grant already kept `amr`. 🔴 Tests that need the revalidation advance `CustomWebApplicationFactory.SecurityStampClock`
+(reset it in `finally`); tests: `SecondFactorEvidenceRefreshTests`.
+
+**Sign-in attempts are counted atomically and rate-limited (AB#7854):** `OctoUserManager` (the registered
+`UserManager<RtUser>`) counts failures and resets the counter in one MongoDB transaction on the stored user
+(`IAtomicUserLockoutStore`, `OctoUserStore.Atomic.cs`, retried on write conflicts); recovery codes are redeemed in one
+transaction; cross-tenant password failures count against the parent-tenant user and a locked parent user is not verified.
+`ISignInRateLimiter` (per pod, in memory) answers 429 on `login`/`ldap-login`/`login-2fa*`/`send-2fa-email`/`login-recovery`
+above 10 attempts per account per minute, 1 concurrent attempt per account, 60 per client address (right-most
+`X-Forwarded-For`) — `Identity:SignInRateLimit`. 🔴 A record inside `RtUser.UserTokens` must be written back through the list
+indexer (`UserTokens[i] = token`); an in-place change of the record object is not persisted. 🔴 The integration-test factory
+raises the limits (the suite signs in from one address); a test of the limit itself uses `Factory.WithWebHostBuilder` +
+`ConfigureTestServices`. Details: `docs/authentication.md` § Sign-In Attempts; tests `SignInAttemptConcurrencyTests`,
+`SignInRateLimiterTests`.
+
+**Cross-tenant hardening (AB#7861):** the challenge cookie is single-use (nonce + `ICrossTenantChallengeReplayGuard`,
 voided on completion, logout and local sign-in), gaps in the `xt_` chain require the second factor, and stored `amr` user
 claims are never returned by `OctoUserStore.GetClaimsAsync`. AB#7884: the unreachable cross-tenant provisioning branch of
 `DeviceVerificationController` is gone — a session whose subject is not a user of the device code's tenant gets
@@ -819,7 +836,7 @@ Key components:
 - **`GroupsController`**: REST API at `{tenantId}/v1/groups` with full CRUD, role assignment, member management, and circular group prevention
 - **`TenantOwners`** group: Default group provisioned in every tenant with all 10 default roles. Created by `DefaultConfigurationCreatorService` and `IdentityAssociationMigration` (migration 9→10)
 
-Current identity schema (migration) version: `23` (migration 21→22 added the `RtOAuthAuthorization`/`RtOAuthToken` OpenIddict store types; 22→23 re-runs the full index update so abstract collection roots get their indexes, AB#5261). Current CK model version: `System.Identity-2.27.0` (2.19.0–2.23.0 were ownership/runtime-state classifications, 2.24.0 added `DataPolicy.ProtectBlueprintLocked`, 2.25.0 the `Secret` identity-provider `ClientSecret`, 2.27.0 the `Secret` credential material of a user, see the sections below) — the 2.12.0→2.17.0 changes (verified-identifier directory AB#5122+) are additive schema needing no numeric migration; 2.17.0→2.18.0 REPLACED `RtUser.PreferredChannel` with `RtUser.PreferredChannelBindingId` (AB#5149 revision, binding-specific preference). The feature shipped the day before the replacement with no external consumers, so the old attribute was dropped without a migration — any stored kind-level values are simply ignored (users re-select).
+Current identity schema (migration) version: `23` (migration 21→22 added the `RtOAuthAuthorization`/`RtOAuthToken` OpenIddict store types; 22→23 re-runs the full index update so abstract collection roots get their indexes, AB#5261). Current CK model version: `System.Identity-2.29.0` (2.29.0 = the identity method declarations, AB#7773, see below; 2.28.0 = first ckLanguage 2 release with access modifiers, AB#7772, see below; 2.19.0–2.23.0 were ownership/runtime-state classifications, 2.24.0 added `DataPolicy.ProtectBlueprintLocked`, 2.25.0 the `Secret` identity-provider `ClientSecret`, 2.27.0 the `Secret` credential material of a user, see the sections below) — the 2.12.0→2.17.0 changes (verified-identifier directory AB#5122+) are additive schema needing no numeric migration; 2.17.0→2.18.0 REPLACED `RtUser.PreferredChannel` with `RtUser.PreferredChannelBindingId` (AB#5149 revision, binding-specific preference). The feature shipped the day before the replacement with no external consumers, so the old attribute was dropped without a migration — any stored kind-level values are simply ignored (users re-select).
 
 ### Tenant-owned attributes: a blueprint update never reverts an administrator's decision (AB#6324, AB#6329; System.Identity 2.23.0)
 
@@ -849,11 +866,67 @@ recovery codes in `Value`) were `SeedOwned`, so an `ExportRt` (export as templat
 `ownership: Secret` (definition level, `User` is their only assignment) and so is the `UserToken.Value` record member
 (assignment override). The engine skips `Secret` in `RtEntityToTcDtoConverter` (shared by `ExportRtModelByQueryCommand` and
 `ExportRtModelByDeepGraphCommand`) and keeps it on an Upsert. SeedOwned -> Secret is an ownership change: `octo-ckc ValidateVersion`
-rates it **Minor**, ids, types and defaults are unchanged, no migration entry, still ckLanguage 1 (access modifiers: AB#7772).
+rates it **Minor**, ids, types and defaults are unchanged, no migration entry, still ckLanguage 1 (the access modifiers followed with 2.28.0, below).
 **Consequence:** a tenant cloned with ExportRt/ImportRt carries its users without password and 2FA material; they reset the password
 in the target tenant. No blueprint seeds `System.Identity/User` (`BootstrapBlueprintSeed_DoesNotSeedUsers` guards it). A repository
 dump is unaffected. Tests: `CredentialMaterialExportIntegrationTests` (real MongoDB; compiled ownership, converter output of a user
 with hash/stamp/tokens, Upsert of a seed-shaped user keeps all three).
+
+### Access modifiers on `RtUser`, first ckLanguage 2 release (AB#7772; System.Identity 2.28.0)
+
+Closes accepted risk R13 (password hashes and security fields readable through generic GraphQL). `ckModel.yaml` is `ckLanguage: 2`; the
+`User` assignments carry `access`:
+
+| Access | Attributes |
+|--------|------------|
+| `Hidden` | `PasswordHash`, `SecurityStamp`, `UserTokens` (never in GraphQL output or input, never in an ExportRt; an import refuses them) |
+| `MethodOnly` | `UserName`, `Email` (readable, changed only by a type method) |
+| `ReadOnly` | `AccessFailedCount`, `LockoutEnd` (readable; importable; written by the identity service) |
+
+`ConcurrencyStamp` does not exist in this model. All seven attribute definitions are `securitySensitive: true`, so the tightening is **Minor +
+acknowledge** (row T7a of `docs/ck-semver-rules.md` in `octo-construction-kit-engine`: the one release that moves a classic model to
+ckLanguage 2, once per model; entries in `compatibility.acknowledge`). The next release follows the normal rule (T7) again: loosening is Minor,
+tightening another attribute is Major. Every existing type and record declares `derivable: Any` (the ckLanguage 2 default is `Model`; the flip
+would be a Major of its own) - **declare it on every new type/record that should stay derivable elsewhere**.
+
+**Identity's own writes are unaffected**: the access modifiers guard the generic GraphQL path and the *import-like* paths (ImportRt, blueprint
+seed/update, migration Add/Update/Transform: `OCTO-CK139` for Hidden/MethodOnly). `OctoUserStore`, the cross-tenant provisioning and the
+password/2FA flows write through `ITenantRepository` (`InsertOneRtEntityAsync`, `ReplaceOneRtEntityByIdAsync`), which is not guarded. No
+identity seed, blueprint or migration writes these attributes (`BootstrapBlueprintSeed_DoesNotSeedUsers`). Code that must set one of them from
+an import (a test seed, a tool) creates the user through the repository instead. Tests: `CredentialMaterialExportIntegrationTests` (compiled
+access values, `OCTO-CK139` refusal per attribute, ReadOnly import still possible, repository writes of all seven attributes still work).
+
+### Identity method declarations (AB#7773; System.Identity 2.29.0)
+
+`User`, `Group`, `Client` and `DataPermission` declare their identity operations as CK methods (declarations only; the handlers and the
+method host follow with AB#5672, AB#7774, AB#7776-AB#7780, the typed GraphQL mutations with F3.7). Until a handler is registered the gateway
+answers `METHOD_HANDLER_NOT_AVAILABLE`; the REST API is unchanged. **Release the identity service with this model only when the handler
+stories are merged.**
+
+| Type | Methods (`-1`) | Roles |
+|------|----------------|-------|
+| `User` | `ChangePassword` (instance, `allowSelf`, no role), `ResetPassword`, `SetRoles`, `AddRole`, `RemoveRole`, `Merge`, static `CreateUser` | `UserManagement` |
+| `Group` | `AddMember`, `RemoveMember` (`memberKind` enum `GroupMemberKind` = `User`/`Client`, `memberId`), `SetRoles` | `UserManagement` |
+| `Client` | `AddSecret` (result `sensitive`: the generated secret, shown once), `RemoveSecret` (by `secretValue`, REST parity) | `TenantManagement`, `UserManagement` |
+| `DataPermission` | `GrantToRole`, `RevokeFromRole` | `UserManagement` |
+
+Rules behind the shape (do not change them without reading this):
+- **Roles = REST parity** (`IdentityApiAuthorizationPolicies`: `UserAdministrationRoles`, `TenantAdministrationRoles`). Every method declares
+  `authorization.dataAccess: Write` explicitly (AB#7036; the effective default, so no SemVer change; it raises the model's `minEngineVersion`).
+- **`sensitive` on every password or secret parameter** (`currentPassword`, `newPassword`, `password`, `secretValue`) and on the `AddSecret`
+  result; such a method can never have a pipeline handler (compiler messages 132/134). Pinned by `IdentityMethodDeclarationsIntegrationTests`.
+- **`Create` is a reserved method name** (compiler error 102: `Create`, `Update`, `Delete` belong to the generic mutations) - the static user
+  method is `CreateUser-1`.
+- **No `replacesGenericCreate` on any type.** Group, Client and DataPermission are seeded by `System.Identity.Bootstrap` (the flag would make
+  AB#7121 refuse every new tenant). On `User` the flag is a **MAJOR** change of the model (row M16 of `docs/ck-semver-rules.md` in
+  octo-construction-kit-engine: a new method with the flag on an existing type, decision 2026-10-19), and System.Identity 3.0.0 would leave every
+  blueprint range `[2.x,3.0)` unsatisfied - decision pending with the platform owner (AB#7773, AB#7777). The generic create of a user is already
+  narrowed by the 2.28.0 access modifiers (`UserName`, `Email` MethodOnly, `PasswordHash` Hidden).
+- **No `LAST_ADMIN_PROTECTED`** and no `DisableTwoFactor`: the REST API has no last-admin rule, and `User.DisableTwoFactor` belongs to AB#7879.
+- `compatibility.acknowledge` of 2.28.0 is gone (an acknowledgement is valid for one release, OCTO-CK204). `octo-ckc ValidateVersion`
+  against the published 2.28.0: **MINOR** (15 additions, no Major row).
+- Tests: `IdentityMethodDeclarationsIntegrationTests` (compiled model from the CK cache of a real tenant: method set, roles, sensitive
+  parameters and result, write access, no replacesGenericCreate). Docs: octo-documentation `identityService/methods.md` (en + de).
 
 ### Blueprint-owned opt-in: `DataPolicy.ProtectBlueprintLocked` (AB#6384; System.Identity 2.24.0)
 
@@ -1508,6 +1581,33 @@ same state on top of AB#7804: when `ICrossTenantSecondFactorVerifier.GetOptionsA
 `CanUseAuthenticator = false` for the source user, `Login` answers `secondFactorSetupRequired` instead of issuing
 a challenge. Tests: `Api/Auth/TwoFactorUnusableLoginTests` (with and without confirmed e-mail, wrong password,
 recovery after 2FA off), `CrossTenantSecondFactorTests.PasswordLogin_SourceUserWithTwoFactorButNoAuthenticator_*`.
+
+### User store concurrency: every failed sign-in is counted (AB#7770, finding L9)
+
+`OctoUserStore` writes users with the expected `rtVersion` (engine guard, AB#7769). The rules:
+
+- **`UpdateAsync`** replaces the user with the `RtVersion` the instance was read with. A concurrent change of the same
+  user (profile, password, lockout) returns `IdentityResult.Failed(ConcurrencyFailure)` instead of last-writer-wins; the
+  caller (REST `PUT users/{name}`, self-service) shows the error and the user retries from a fresh read. The instance's
+  `RtVersion` is left unchanged on a conflict.
+- **Lockout fields are stored at once, not on `UpdateAsync`.** `IncrementAccessFailedCountAsync`,
+  `ResetAccessFailedCountAsync` and `SetLockoutEndDateAsync` do a guarded read-modify-write on the *stored* user
+  (`MutateStoredUserAsync`: read, change, replace with the read version, re-read and re-apply on `RtVersionConflictException`,
+  at most `MaxConcurrencyAttempts` = 40 times). Parallel failed sign-ins therefore each add one and the threshold lockout is
+  never overwritten by a stale copy. `IncrementAccessFailedCountAsync` returns the *stored* count, which
+  `UserManager.AccessFailedAsync` compares with `Lockout.MaxFailedAccessAttempts`. Without a stored user (creation in
+  progress) the methods change the in-memory object only.
+- **Version follow-up.** After such a write the caller's instance takes over the new `RtVersion` only if the stored user was
+  still the version the instance holds (nothing else changed): the `UpdateAsync` that `UserManager` calls right after stays
+  valid. If another writer was in between, the instance keeps its old version, so its `UpdateAsync` reports the conflict
+  and never overwrites the other writer's fields. A parallel `AccessFailedAsync` may therefore return `ConcurrencyFailure`
+  while the failure *is* counted; `SignInManager` ignores that result.
+- `SetTokenAsync` / `RemoveTokenAsync` (authenticator key, recovery codes) use the same guarded read-modify-write.
+- A write that must detect concurrent changes passes the expected version; never combine it with `AttributeNewerThanGuard`,
+  atomic RecordArray item updates or linked binaries in the same update (the engine rule throws).
+- The counter restarts at 0 when the lockout triggers (ASP.NET Core Identity behaviour). Tests:
+  `UserStoreConcurrencyIntegrationTests` (real MongoDB; 10 parallel failures x 20 rounds, threshold lockout, reset after a
+  successful sign-in, concurrent profile updates). They assert the final state, never the number of retries.
 
 ## Configuration
 

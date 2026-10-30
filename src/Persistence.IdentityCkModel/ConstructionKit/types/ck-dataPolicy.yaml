@@ -1,6 +1,7 @@
 "$schema": "https://schemas.meshmakers.cloud/construction-kit-elements.schema.json"
 types:
   - typeId: DataPolicy
+    derivable: Any
     description: Binds a DataPermission to CK types with actions, scope and enforcement mode. A CK type is protected as soon as any policy targets it (AB#4972).
     derivedFromCkTypeId: ${System}/Entity
     isFinal: true

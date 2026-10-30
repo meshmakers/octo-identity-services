@@ -188,6 +188,9 @@ try
     // AB#7861: single use of the cross-tenant two-factor challenge cookie.
     builder.Services.AddSingleton<ICrossTenantChallengeReplayGuard, CrossTenantChallengeReplayGuard>();
 
+    // AB#7854: per-account / per-client limits of the sign-in endpoints (asked by AuthApiController, which knows the account).
+    builder.Services.AddSingleton<ISignInRateLimiter, SignInRateLimiter>();
+
     // AB#5032: lets an operator narrow the client-credentials exemption of
     // UseOctoTenantAuthorization() per environment (OCTO_TENANTAUTHORIZATION__…). The defaults
     // reproduce the previous behaviour and only add the audit log.

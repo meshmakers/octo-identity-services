@@ -1,0 +1,10 @@
+$schema: https://schemas.meshmakers.cloud/construction-kit-elements.schema.json
+enums:
+  # AB#7773: the kind of member that Group.AddMember / Group.RemoveMember take (the REST API has one route per kind).
+  - enumId: GroupMemberKind
+    description: "The kind of a group member that is added or removed through a Group method."
+    values:
+      - key: 0
+        name: User
+      - key: 1
+        name: Client

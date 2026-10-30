@@ -104,6 +104,9 @@ public class CrossTenantLoginTests
             new Meshmakers.Octo.Backend.IdentityServices.Services.CrossTenantChallengeReplayGuard(
                 new Microsoft.Extensions.Caching.Memory.MemoryCache(
                     new Microsoft.Extensions.Caching.Memory.MemoryCacheOptions())),
+
+            new Meshmakers.Octo.Backend.IdentityServices.Services.SignInRateLimiter(
+                Options.Create(new IdentityServerPersistence.Configuration.Options.OctoIdentityServicesOptions())),
             logger);
     }
 

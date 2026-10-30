@@ -645,6 +645,7 @@ public class TenantExchangeIntegrationTests : IClassFixture<IdentityServicesFixt
             idpStore,
             new PasswordHasher<RtUser>(),
             new CrossTenantShadowUserChainResolver(systemContext),
+            Options.Create(new IdentityOptions()),
             NullLogger<CrossTenantAuthenticationService>.Instance);
     }
 

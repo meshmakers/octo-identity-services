@@ -123,6 +123,48 @@ SignInManager.PasswordSignInAsync()
         └── Failure ──► Raise UserLoginFailureEvent ──► Show error
 ```
 
+### Sign-In Attempts: Atomic Counting and Rate Limits (AB#7854)
+
+Passwords, second-factor codes and recovery codes cannot be guessed faster than the lockout allows — neither with
+parallel requests nor through a child tenant.
+
+**Atomic failure counting.** `OctoUserManager` (registered as the `UserManager<RtUser>`) overrides
+`AccessFailedAsync` and `ResetAccessFailedCountAsync`: the counter and the lockout end are changed in **one MongoDB
+transaction** that reads the stored user and writes it back (`IAtomicUserLockoutStore` on `OctoUserStore`), retried on
+write conflicts (`MongoWriteRetry.ExecuteTransactionWithRetryAsync`). The framework version incremented the caller's
+in-memory copy and replaced the whole document, so N parallel wrong attempts counted about once. The arithmetic is the
+framework's: 5 failures (`Lockout.MaxFailedAccessAttempts`) set a 5-minute lockout (`DefaultLockoutTimeSpan`) and restart
+the count; a successful sign-in resets the stored counter, whatever the caller's copy says. The store copies the stored
+values back onto the caller's instance, because `SignInManager` checks `IsLockedOutAsync` on it right after.
+
+**Recovery codes are single-use under concurrency.** `OctoUserStore.RedeemCodeAsync` finds and removes the code in the
+same transaction; two parallel requests with the same code redeem it once.
+
+**Cross-tenant passwords count against the source user.** When the local password check of a child tenant fails and
+`CrossTenantAuthenticationService` tries the parent tenants, a wrong password counts against the parent-tenant user it was
+tried on (same arithmetic, in that tenant's database), a correct one resets the counter (only when that user has no
+second factor; otherwise the verified code resets it), and a locked-out parent user is not verified at all.
+Cross-tenant second-factor codes already counted against the source user (AB#7804); that counting is atomic now too.
+
+**Rate limits** (`ISignInRateLimiter` / `SignInRateLimiter`, asked by `AuthApiController`) on `login`, `ldap-login`,
+`login-2fa`, `login-2fa-email`, `send-2fa-email` and `login-recovery`:
+
+| Limit | Default | Key |
+|-------|---------|-----|
+| Attempts per client address | 60 per sliding minute | right-most `X-Forwarded-For` entry (the address the ingress saw), else the TCP peer |
+| Concurrent attempts per account | 1 (parallel attempts are refused) | `login`: the user name; `ldap-login`: scheme + user name; second factor / recovery: the user of the two-factor cookie, or the source user of a pending cross-tenant challenge |
+| Attempts per account | 10 per sliding minute | as above |
+
+A refused attempt is answered `429` with `Retry-After: 60` and a body `{ success: false, errorMessage, message }`
+("Too many sign-in attempts. Please wait a minute and try again."); the SPA shows `message`. The user-name key is the same
+for every tenant, so guessing a parent user's password through several child tenants shares one budget. The limits are in
+memory per pod: with N identity pods an account can be tried N times in parallel at most, which the atomic counter still
+counts. Settings: `Identity:SignInRateLimit` (see `configuration.md`).
+
+Tests: `SignInAttemptConcurrencyTests` (real MongoDB: parallel failures all counted, threshold reached in parallel locks the
+user out, reset of a stale copy, parallel recovery-code redemption succeeds once, parallel wrong TOTP codes over HTTP, lockout
+through a child tenant, 429 per account and per client), `SignInRateLimiterTests`, `CrossTenantAuthenticationServiceTests`.
+
 ### Password Change Ends Existing Sessions (AB#7765)
 
 Every REST password change (`change-password`, `set-password`, administrator `ResetPassword`, token
@@ -616,6 +658,15 @@ user signed in that way is refused at the boundary (fail closed) and signs in on
   (the session cookie is scoped to that tenant) and was removed; such an approval is now refused with `access_denied` and a
   warning. Cross-tenant device logins use a session in the child tenant (cross-tenant login) or the token exchange. The
   approval keeps passing the session's `amr` on, so a 2FA user's device token still carries `amr=mfa`.
+
+**The evidence survives session refresh (AB#7859).** The security-stamp validator rebuilds the cookie principal from the
+user every 30 minutes (`SecurityStampValidatorOptions.ValidationInterval`) and used to drop `amr`: after the first
+revalidation every new token said `amr=pwd` and a 2FA user was refused at the boundaries above. `SessionClaimPreservation`
+(registered as `OnRefreshingPrincipal`) copies the sign-in claims `amr`, `idp` and `sid` from the verified principal onto the
+rebuilt one; user claims (roles, tenant) are still re-resolved. The refresh-token grant already kept `amr` (the stored
+principal carries it, `TokenEndpointController.CopySessionClaims`); that is now pinned by a test. Tests:
+`SecondFactorEvidenceRefreshTests` (the factory's `SecurityStampClock` steps 31 minutes ahead; session, new token and
+`cross-tenant-token` after the revalidation; refresh grant), `SessionClaimPreservationTests`.
 
 Tests: `tests/IdentityServices.IntegrationTests/Api/Auth/CrossTenantSecondFactorTests.cs` (real child tenant, real 2FA
 enrollment, real authorization-code tokens; every entry point above, with and without 2FA), plus unit tests in

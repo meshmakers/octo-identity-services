@@ -1,4 +1,35 @@
 "$schema": "https://schemas.meshmakers.cloud/construction-kit-meta.schema.json"
+# 2.29.0 (AB#7773, Feature AB#5696) declares the identity methods of User, Group, Client and DataPermission - declarations only,
+# the handlers follow with AB#5672 (ChangePassword and the method host in identity), AB#7774, AB#7776-AB#7780:
+#   * User:           ChangePassword (allowSelf), ResetPassword, SetRoles, AddRole, RemoveRole, Merge, and the static CreateUser
+#                     (Create is a reserved method name, compiler error 102). CreateUser does NOT set `replacesGenericCreate`
+#                     yet: on the existing type User the flag is a MAJOR change (row M16), see the comment at the method.
+#   * Group:          AddMember, RemoveMember (user or client; new enum GroupMemberKind), SetRoles.
+#   * Client:         AddSecret (the result is `sensitive`: the generated secret is shown once), RemoveSecret.
+#   * DataPermission: GrantToRole, RevokeFromRole.
+# Password and secret parameters are `sensitive`; roles follow the REST parity (UserManagement, clients also TenantManagement);
+# every method declares authorization.dataAccess Write (AB#7036). Group, Client and DataPermission
+# do NOT replace the generic create either: the System.Identity.Bootstrap blueprint seeds them (AB#7121 would refuse every new tenant).
+# Adding methods and an enum is additive: Minor, nothing to acknowledge. A declared method without a handler answers
+# METHOD_HANDLER_NOT_AVAILABLE; release the identity service with this model only when the handler stories are merged.
+#
+# 2.28.0 (AB#7772, Feature AB#5696, closes accepted risk R13) is the FIRST ckLanguage 2 release of
+# System.Identity. It closes R13 - password hashes and security fields readable through the generic
+# GraphQL path - with the CK v2 access modifiers of the RtUser assignments:
+#   * Hidden:     PasswordHash, SecurityStamp, UserTokens (TOTP key and recovery codes) - never in GraphQL
+#                 output or input; ConcurrencyStamp does not exist in this model, so there is nothing to drop.
+#   * ReadOnly:   AccessFailedCount, LockoutEnd - readable, written only by the identity service.
+#   * MethodOnly: UserName, Email - readable, changed only by a type method (identity writes them through
+#                 its own repository, which the access modifiers do not guard).
+# All seven attribute definitions are `securitySensitive: true`, so the tightening is Minor + acknowledge
+# (it carried compatibility.acknowledge entries for the one release that published 2.28.0, removed afterwards because an acknowledgement is valid for one release only, OCTO-CK204; row T7a of docs/ck-semver-rules.md in octo-construction-kit-engine:
+# the one release that moves a classic model to ckLanguage 2, once per model). The next release follows
+# the normal rule (row T7) again.
+# Every existing type and record declares `derivable: Any` (the classic behaviour), because the ckLanguage 2
+# default is Model and the flip would be a Major of its own. Ids, types, defaults and ownership are unchanged;
+# System.Identity stays on 2.x. Behaviour change: ImportRt, blueprint seeds and migrations refuse a value for
+# a Hidden or MethodOnly attribute (OCTO-CK139), and an ExportRt never carries a Hidden value.
+#
 # 2.27.0 (AB#7766, audit finding H3) keeps the credential material of a user out of an ExportRt (export as
 # template, tenant clone): RtUser.PasswordHash, RtUser.SecurityStamp and RtUser.UserTokens (TOTP key and
 # recovery codes) are `ownership: Secret` (definition level; they are assigned by User only), and so is the
@@ -50,6 +81,7 @@
 # concept AB#5528 in octo-construction-kit-engine). String -> Secret is Minor
 # (CkSemVerClassifier): stored clear-text values stay readable as legacy values
 # until the encrypt sweep has run. Secret requires System >= 2.5 (decision 12).
-modelId: System.Identity-2.27.0
+modelId: System.Identity-2.29.0
+ckLanguage: 2
 dependencies:
   - System-[2.5,3.0)

@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Security.Claims;
 using System.Text.Json;
 using Meshmakers.Common.Shared;
@@ -51,11 +52,46 @@ public class AuthApiController(
     IOptions<OctoSystemConfiguration> systemConfiguration,
     IUserCredentialChangeService userCredentialChangeService,
     ICrossTenantChallengeReplayGuard crossTenantChallengeReplayGuard,
+    ISignInRateLimiter signInRateLimiter,
     ILogger<AuthApiController> logger)
     : ControllerBase
 {
     private string? GetSubjectId() =>
         User.FindFirstValue("sub") ?? User.FindFirstValue(ClaimTypes.NameIdentifier);
+
+    private const string TooManySignInAttemptsMessage = "Too many sign-in attempts. Please wait a minute and try again.";
+
+    /// <summary>
+    /// AB#7854: 429 for a sign-in attempt over the per-account or per-client limit. The body carries the text in
+    /// <c>message</c> (what the SPA shows for an HTTP error) and <c>errorMessage</c> (the result DTOs' field).
+    /// </summary>
+    private ObjectResult TooManySignInAttempts(string endpoint)
+    {
+        logger.LogWarning("Sign-in attempt refused by the rate limit ({Endpoint})", endpoint);
+        Response.Headers.RetryAfter = SignInAttemptLease.RetryAfterSeconds.ToString(CultureInfo.InvariantCulture);
+        return StatusCode(StatusCodes.Status429TooManyRequests, new
+        {
+            success = false,
+            errorMessage = TooManySignInAttemptsMessage,
+            message = TooManySignInAttemptsMessage
+        });
+    }
+
+    /// <summary>
+    /// AB#7854: the account a second-factor / recovery-code attempt is for — the user of the framework's two-factor
+    /// cookie, else the source user of a pending cross-tenant challenge, else none (client limit only).
+    /// </summary>
+    private async Task<string?> GetSecondFactorAccountKeyAsync()
+    {
+        var twoFactor = await HttpContext.AuthenticateAsync(IdentityConstants.TwoFactorUserIdScheme);
+        var userId = twoFactor.Principal?.FindFirstValue(ClaimTypes.Name);
+        if (!string.IsNullOrEmpty(userId))
+        {
+            return $"user:{userId}";
+        }
+
+        return ReadCrossTenantTwoFactorChallenge() is { } challenge ? $"user:{challenge.SourceUserId}" : null;
+    }
 
     /// <summary>Login success audit — log-only, matching the previous event-sink behavior.</summary>
     private void LogLoginSuccess(string? username, string? subjectId, string? displayName, string? clientId = null)
@@ -281,6 +317,13 @@ public class AuthApiController(
                 Success = false,
                 ErrorMessage = "Username and password are required"
             };
+        }
+
+        // AB#7854: one budget per user name — also for passwords of parent-tenant users tried through this tenant.
+        using var attempt = signInRateLimiter.TryAcquire($"name:{request.Username.Trim()}", HttpContext);
+        if (!attempt.IsAcquired)
+        {
+            return TooManySignInAttempts("login");
         }
 
         // AB#7830: a user whose second factor is switched on but who has no authenticator key (e.g. after a
@@ -993,6 +1036,12 @@ public class AuthApiController(
     [HttpPost("login-2fa")]
     public async Task<ActionResult<TwoFactorLoginResultDto>> LoginTwoFactor([FromBody] TwoFactorLoginRequestDto request)
     {
+        using var attempt = signInRateLimiter.TryAcquire(await GetSecondFactorAccountKeyAsync(), HttpContext);
+        if (!attempt.IsAcquired)
+        {
+            return TooManySignInAttempts("second factor");
+        }
+
         var user = await signInManager.GetTwoFactorAuthenticationUserAsync();
         if (user == null)
         {
@@ -1059,6 +1108,12 @@ public class AuthApiController(
     [HttpPost("login-2fa-email")]
     public async Task<ActionResult<TwoFactorLoginResultDto>> LoginTwoFactorEmail([FromBody] TwoFactorEmailLoginRequestDto request)
     {
+        using var attempt = signInRateLimiter.TryAcquire(await GetSecondFactorAccountKeyAsync(), HttpContext);
+        if (!attempt.IsAcquired)
+        {
+            return TooManySignInAttempts("second factor");
+        }
+
         var user = await signInManager.GetTwoFactorAuthenticationUserAsync();
         if (user == null)
         {
@@ -1126,6 +1181,12 @@ public class AuthApiController(
     [HttpPost("send-2fa-email")]
     public async Task<ActionResult<SendTwoFactorEmailResultDto>> SendTwoFactorEmail()
     {
+        using var attempt = signInRateLimiter.TryAcquire(await GetSecondFactorAccountKeyAsync(), HttpContext);
+        if (!attempt.IsAcquired)
+        {
+            return TooManySignInAttempts("second factor");
+        }
+
         var user = await signInManager.GetTwoFactorAuthenticationUserAsync();
         if (user == null)
         {
@@ -1172,6 +1233,12 @@ public class AuthApiController(
     [HttpPost("login-recovery")]
     public async Task<ActionResult<TwoFactorLoginResultDto>> LoginRecovery([FromBody] RecoveryCodeLoginRequestDto request)
     {
+        using var attempt = signInRateLimiter.TryAcquire(await GetSecondFactorAccountKeyAsync(), HttpContext);
+        if (!attempt.IsAcquired)
+        {
+            return TooManySignInAttempts("second factor");
+        }
+
         var user = await signInManager.GetTwoFactorAuthenticationUserAsync();
         if (user == null)
         {
@@ -1247,6 +1314,12 @@ public class AuthApiController(
                 Success = false,
                 ErrorMessage = "Invalid authentication scheme"
             };
+        }
+
+        using var attempt = signInRateLimiter.TryAcquire($"ldap:{request.Scheme}:{request.Username.Trim()}", HttpContext);
+        if (!attempt.IsAcquired)
+        {
+            return TooManySignInAttempts("ldap-login");
         }
 
         // 2. Authenticate against LDAP
