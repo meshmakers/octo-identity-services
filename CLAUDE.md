@@ -999,10 +999,8 @@ or change the **direct** roles of a user (the `AssignedRole` association; roles 
 | RemoveRole of a role that is not assigned (400) | `ROLE_NOT_ASSIGNED` |
 | client-credentials tokens are judged by their client roles | a service token with `UserManagement` is allowed |
 
-REST has **no** other rule: no limit on which roles an administrator grants, no refusal of a self grant, no last-administrator protection, no revocation of
-tokens (a role change shows in the next token). The methods add none either - do not add one to a method alone, change REST and the methods together (open decision, AB#7776).
-Difference: REST `SetRoles` removes all direct roles first and answers 404 for an unknown role id afterwards (the user is left without roles); the method
-resolves every name first, so one unknown role changes nothing, and writes only the difference. `SetRoles` takes role **names**, REST takes ids.
+Since AB#7914 REST and the methods share the escalation rules of `IRoleChangeGuard` (next section); before it REST had no other rule and the methods copied that.
+`SetRoles` takes role **names**, REST takes ids; both resolve every role first (one unknown role changes nothing) and write only the difference (AB#7914; REST used to remove all direct roles first).
 
 Audit: the `Identity.Method` event of every call (success and every refusal, `IdentityMethodAuditWriter`) additionally carries `rolesBefore` and `rolesAfter`
 (direct role names, sorted, comma separated; absent when the caller was refused before the target was read). Role methods are not behind
@@ -1010,6 +1008,35 @@ Audit: the `Identity.Method` event of every call (success and every refusal, `Id
 (every guard, case/duplicates, empty list, audit, forged caller, hosting), `UserRoleMethodParityTests` (REST and method side by side per guard, the
 documented difference, self grant), `IdentityMethodHostTests`. The integration test factory removes the bus side of the method host
 (`CkMethodHandlerStartupService`, heartbeat) because the test host has no broker.
+
+### Role change guard: no escalation, last administrator stays (AB#7914)
+
+`IRoleChangeGuard` (`src/IdentityServices/Authorization/RoleChange/RoleChangeGuard.cs`, scoped) is the one rule set for changes of the **direct** roles of a
+user. Callers: `UsersController` (`PUT users/{u}/roles`, `PUT`/`DELETE users/{u}/roles/{r}`, `DELETE users/{u}`, `POST users/{u}/merge` = source user) and the
+three role method handlers (`UserRoleMethodHandlerBase.GuardAsync`). It is **never** called from `OctoUserStore`/`UserManager`: first admin of a new tenant
+(`UserManagementService`), the Bootstrap blueprint seed, the one-time grants (`SecretManagementAdminGrant`, file role grants), the scratch-tenant creator grant, cross-tenant
+provisioning and the login group rules assign roles through the store and stay unrestricted (`TheGuard_IsNotCalledFromTheUserStoreOrTheUserManager…` pins the constructors).
+AB#7927 (groups, mappings, role definitions) and AB#7928 (client roles) reuse it: `EvaluateGrantAsync(caller, addedRoleNames)` is the "grant only what you hold" part alone.
+
+| Rule (checked in this order, on the **difference** before/after, never on the full list) | REST | Method (`METHOD_FORBIDDEN`, parameter `reason`) |
+|---|---|---|
+| `self-grant`: caller `sub` == target rtId and a direct role is **added** (removing own roles and an unchanged list are fine) | 403 problem+json, `code` | `self-grant` |
+| `role-not-held`: an added **built-in** role (stored `RtWellKnownName`) is not in the caller's role claims; custom roles are free; removing is never judged | 403, `code`, `roleNames` | `role-not-held` + `roleNames` (comma separated) |
+| `last-administrator`: the target effectively holds `UserManagement` now, not after the change, and **no other user** holds it (direct, through groups incl. nested, `xt_` shadow users through mappings via `IGroupRoleResolver`; **clients do not count**; a tenant with zero holders is not blocked) | 409, `code` | `last-administrator` |
+
+- **Caller** = `RoleChangeCaller` (`sub`, `client_id`, `role` claims of the validated token; for methods the validated `CkMethodPrincipal`, never the informational `Caller`).
+  A client-credentials caller has no `sub`: never self, judged with the client's roles. No exemption for services (none calls these endpoints).
+- **No CK change.** Error contract is `METHOD_FORBIDDEN` + `reason` (`CkMethodOutcome.Forbidden`); a new declared code would be a Major of System.Identity.
+  REST answers `application/problem+json` (`RoleChangeProblems`, `code` extension, readable `title` that Studio shows). Hard switch, no warn mode.
+- **Audit.** Methods: the existing `Identity.Method` event carries `reason` (+ `roleNames`). REST: one failure event `Identity.RoleChangeRefused` through
+  `IIdentityAuditService` (caller, target rtId, reason, role names, request path; never a token or password) plus a WARN log.
+- **REST SetRoles** validates every role id first (404 changes nothing; it used to strip the direct roles first) and writes only the difference.
+- **Residual race:** two administrators removing each other's `UserManagement` in parallel can both pass the check (no cross-request lock); documented.
+- The last-administrator search is only run when the target loses `UserManagement`: direct holders, members of groups whose subtree carries the role, then (rare path) every `xt_` user
+  through `IGroupRoleResolver`.
+- **Tests:** `Api/TenantApi/RoleChangeGuardTests` (every rule through REST and through the method handlers with the same assertions: self-grant, held/not held/custom, difference,
+  client caller, last administrator direct/group/nested group/mapping/client-not-counted/zero holders, delete + merge, audit records), `UserRoleMethod*Tests` (updated parity),
+  `RoleChangeCallerTests`. The tests that need "exactly one administrator" first remove every holder of the test database (`ClearAdministratorsAsync`).
 
 ### `User.ResetPassword` (AB#7774)
 

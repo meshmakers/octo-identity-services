@@ -242,15 +242,16 @@ public class UserRoleMethodTests : IntegrationTestBase
     }
 
     [Fact]
-    public async Task AnAdministrator_MayGrantAnyRole_ToAnyUser_IncludingHimself_AsRestDoes()
+    public async Task AnAdministrator_CannotGrantARoleToHimself_SinceAB7914()
     {
-        // Parity, not a feature: REST has no escalation rule beyond the UserManagement role (see the PR for the decision).
         var (admin, roles) = await NewUserWithRolesAsync(1, assign: []);
         var principal = new CkMethodPrincipal(admin.RtId.ToString(), [UserManagement], ["octo_api"]);
 
-        (await AddRoleAsync(admin, principal, roles[0])).IsSuccess.Should().BeTrue();
+        var outcome = await AddRoleAsync(admin, principal, roles[0]);
 
-        (await DirectRolesAsync(admin)).Should().BeEquivalentTo(roles[0]);
+        outcome.Failure!.Code.Should().Be("METHOD_FORBIDDEN");
+        outcome.Failure.Parameters.Should().BeEquivalentTo(new Dictionary<string, string> { ["reason"] = "self-grant" });
+        (await DirectRolesAsync(admin)).Should().BeEmpty();
     }
 
     [Fact]

@@ -75,6 +75,12 @@ required role follows from the table above.
 | DELETE | `/users/{userName}` | ReadWrite | Delete user |
 | DELETE | `/users/{userName}/roles/{roleName}` | ReadWrite | Remove role from user |
 
+**Role change rules (AB#7914).** The role endpoints above, `DELETE /users/{userName}` and `POST /users/{userName}/merge` (the source user is deleted) run `IRoleChangeGuard`: no
+self-grant (`403`, `code: self-grant`), no granting of a built-in role (stored `rtWellKnownName`) the caller does not hold (`403`, `code: role-not-held`, `roleNames`), and no
+removal of the last user that effectively holds `UserManagement` (`409`, `code: last-administrator`; direct, via groups, via mappings of `xt_` users; clients do not count). Answers are
+`application/problem+json` with the `code` extension and a readable `title`. `PUT /users/{userName}/roles` validates all role ids first (unknown id: `404`, nothing changed) and writes only the
+difference. Every refusal is audited as `Identity.RoleChangeRefused`. The same rules apply to the methods `User.SetRoles/AddRole/RemoveRole` (see CLAUDE.md).
+
 **Request/Response DTOs:**
 
 ```typescript
