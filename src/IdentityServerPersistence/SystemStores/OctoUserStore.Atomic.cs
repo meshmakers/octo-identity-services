@@ -1,5 +1,6 @@
 using Meshmakers.Common.Shared;
 using Meshmakers.Octo.ConstructionKit.Contracts;
+using Meshmakers.Octo.Runtime.Contracts;
 using Meshmakers.Octo.Runtime.Contracts.MongoDb.Repositories;
 using Meshmakers.Octo.Runtime.Contracts.RepositoryEntities;
 using Persistence.IdentityCkModel.Generated.System.Identity.v2;
@@ -34,8 +35,8 @@ public interface IAtomicUserLockoutStore
 public sealed partial class OctoUserStore
 {
     /// <summary>
-    ///     Attempts of one atomic update. Each failed attempt means another transaction changed the user in between, so
-    ///     the budget only runs out under extreme contention — the per-account sign-in limit keeps it far away.
+    ///     Attempts of one MongoDB transaction that met a write conflict (see <see cref="MongoWriteRetry" />). Attempts for
+    ///     a version conflict are <see cref="MaxConcurrencyAttempts" />.
     /// </summary>
     private const int MaxAtomicUpdateAttempts = 25;
 
@@ -46,12 +47,11 @@ public sealed partial class OctoUserStore
         ThrowIfDisposed();
         ArgumentValidation.Validate(nameof(user), user);
 
-        var (stored, lockedOut) = await RecordAccessFailureAsync(TenantRepository, user.RtId, maxFailedAccessAttempts,
-            lockoutTimeSpan, cancellationToken).ConfigureAwait(false);
-        if (stored != null)
+        var (outcome, lockedOut) = await RecordAccessFailureCoreAsync(TenantRepository, user.RtId,
+            maxFailedAccessAttempts, lockoutTimeSpan, cancellationToken).ConfigureAwait(false);
+        if (outcome != null)
         {
-            user.AccessFailedCount = stored.AccessFailedCount;
-            user.LockoutEnd = stored.LockoutEnd;
+            AdoptStoredLockoutState(user, outcome);
         }
 
         return lockedOut;
@@ -63,8 +63,13 @@ public sealed partial class OctoUserStore
         ThrowIfDisposed();
         ArgumentValidation.Validate(nameof(user), user);
 
-        await ResetAccessFailedCountAsync(TenantRepository, user.RtId, cancellationToken).ConfigureAwait(false);
+        var outcome = await ResetAccessFailedCountCoreAsync(TenantRepository, user.RtId, cancellationToken)
+            .ConfigureAwait(false);
         user.AccessFailedCount = 0;
+        if (outcome != null)
+        {
+            AdoptStoredLockoutState(user, outcome);
+        }
     }
 
     /// <summary>
@@ -76,8 +81,17 @@ public sealed partial class OctoUserStore
         OctoObjectId userId, int maxFailedAccessAttempts, TimeSpan lockoutTimeSpan,
         CancellationToken cancellationToken = default)
     {
+        var (outcome, lockedOut) = await RecordAccessFailureCoreAsync(repository, userId, maxFailedAccessAttempts,
+            lockoutTimeSpan, cancellationToken).ConfigureAwait(false);
+        return (outcome?.User, lockedOut);
+    }
+
+    private static async Task<(StoredUserMutation? Outcome, bool LockedOut)> RecordAccessFailureCoreAsync(
+        ITenantRepository repository, OctoObjectId userId, int maxFailedAccessAttempts, TimeSpan lockoutTimeSpan,
+        CancellationToken cancellationToken)
+    {
         var lockedOut = false;
-        var stored = await MutateUserAtomicallyAsync(repository, userId, current =>
+        var stored = await MutateUserGuardedAsync(repository, userId, current =>
         {
             // Framework arithmetic (UserManager.AccessFailedAsync): count; at the threshold set the lockout end and
             // restart the count.
@@ -91,15 +105,19 @@ public sealed partial class OctoUserStore
             }
 
             return true;
-        }, cancellationToken).ConfigureAwait(false);
+        }, MaxConcurrencyAttempts, cancellationToken).ConfigureAwait(false);
 
         return (stored, lockedOut);
     }
 
     /// <summary>Resets the stored failure count of a user of an explicit tenant repository.</summary>
-    public static Task<RtUser?> ResetAccessFailedCountAsync(ITenantRepository repository, OctoObjectId userId,
+    public static async Task<RtUser?> ResetAccessFailedCountAsync(ITenantRepository repository, OctoObjectId userId,
         CancellationToken cancellationToken = default)
-        => MutateUserAtomicallyAsync(repository, userId, current =>
+        => (await ResetAccessFailedCountCoreAsync(repository, userId, cancellationToken).ConfigureAwait(false))?.User;
+
+    private static Task<StoredUserMutation?> ResetAccessFailedCountCoreAsync(ITenantRepository repository,
+        OctoObjectId userId, CancellationToken cancellationToken)
+        => MutateUserGuardedAsync(repository, userId, current =>
         {
             if (current.AccessFailedCount == 0)
             {
@@ -108,12 +126,12 @@ public sealed partial class OctoUserStore
 
             current.AccessFailedCount = 0;
             return true;
-        }, cancellationToken);
+        }, MaxConcurrencyAttempts, cancellationToken);
 
     private async Task<bool> RedeemCodeAtomicallyAsync(RtUser user, string code, CancellationToken cancellationToken)
     {
         var redeemed = false;
-        var stored = await MutateUserAtomicallyAsync(TenantRepository, user.RtId, current =>
+        var stored = await MutateUserGuardedAsync(TenantRepository, user.RtId, current =>
         {
             redeemed = false;
             var token = current.UserTokens?.FirstOrDefault(x =>
@@ -142,52 +160,101 @@ public sealed partial class OctoUserStore
 
             redeemed = true;
             return true;
-        }, cancellationToken).ConfigureAwait(false);
+        }, MaxConcurrencyAttempts, cancellationToken).ConfigureAwait(false);
 
         if (stored != null)
         {
-            user.UserTokens = stored.UserTokens ?? new AttributeRecordValueList<RtUserTokenRecord>();
+            user.UserTokens = stored.User.UserTokens ?? new AttributeRecordValueList<RtUserTokenRecord>();
+            AdoptStoredVersion(user, stored);
         }
 
         return redeemed;
     }
 
     /// <summary>
-    ///     Reads the stored user and writes <paramref name="mutate" />'s change back inside ONE transaction; a write conflict
-    ///     (another transaction changed the user after this one read it) re-runs the whole step on the fresh state.
-    ///     <paramref name="mutate" /> returns <c>false</c> to write nothing; it must derive everything from its argument,
-    ///     because it can run more than once.
+    ///     The one read-modify-write of the stored user (AB#7770, AB#7908). It reads the user, applies
+    ///     <paramref name="mutate" /> and writes it back inside one transaction only if no other writer changed it since
+    ///     (expected <c>rtVersion</c>, AB#7769): every write advances <c>rtVersion</c>, so a stale
+    ///     <see cref="UpdateAsync" /> that read the user before this write is reported as a concurrency failure instead of
+    ///     overwriting it. A <see cref="RtVersionConflictException" /> re-reads and re-applies the change (bounded by
+    ///     <paramref name="maxAttempts" />); a MongoDB write conflict is retried inside the transaction by
+    ///     <see cref="MongoWriteRetry" />. <paramref name="mutate" /> returns <c>false</c> to write nothing and must derive
+    ///     everything from its argument, because it can run more than once.
     /// </summary>
-    /// <returns>The stored user after the step, or <c>null</c> when it does not exist.</returns>
-    private static Task<RtUser?> MutateUserAtomicallyAsync(ITenantRepository repository, OctoObjectId userId,
-        Func<RtUser, bool> mutate, CancellationToken cancellationToken)
-        => MongoWriteRetry.ExecuteTransactionWithRetryAsync(async () =>
+    /// <returns>
+    ///     The user as stored after the step (its <c>RtVersion</c> is the new version) with the version that was read, or
+    ///     <c>null</c> when the user does not exist.
+    /// </returns>
+    private static async Task<StoredUserMutation?> MutateUserGuardedAsync(ITenantRepository repository,
+        OctoObjectId userId, Func<RtUser, bool> mutate, int maxAttempts, CancellationToken cancellationToken)
+    {
+        for (var attempt = 1; ; attempt++)
         {
-            using var session = await repository.GetSessionAsync().ConfigureAwait(false);
-            session.StartTransaction();
+            cancellationToken.ThrowIfCancellationRequested();
             try
             {
-                var current = await repository.GetRtEntityByRtIdAsync<RtUser>(session, userId).ConfigureAwait(false);
-                if (current == null)
+                return await MongoWriteRetry.ExecuteTransactionWithRetryAsync(async () =>
                 {
-                    await session.AbortTransactionAsync().ConfigureAwait(false);
-                    return null;
-                }
+                    using var session = await repository.GetSessionAsync().ConfigureAwait(false);
+                    session.StartTransaction();
+                    try
+                    {
+                        var current = await repository.GetRtEntityByRtIdAsync<RtUser>(session, userId)
+                            .ConfigureAwait(false);
+                        if (current == null)
+                        {
+                            await session.AbortTransactionAsync().ConfigureAwait(false);
+                            return null;
+                        }
 
-                if (mutate(current))
-                {
-                    await repository.ReplaceOneRtEntityByIdAsync(session, current.RtId, current).ConfigureAwait(false);
-                }
+                        var readVersion = current.RtVersion;
+                        if (mutate(current))
+                        {
+                            await repository.ReplaceOneRtEntityByIdAsync(session, current.RtId, current, readVersion)
+                                .ConfigureAwait(false);
+                        }
 
-                await session.CommitTransactionAsync().ConfigureAwait(false);
-                return current;
+                        await session.CommitTransactionAsync().ConfigureAwait(false);
+                        return new StoredUserMutation(current, readVersion);
+                    }
+                    catch
+                    {
+                        await TryAbortAsync(session).ConfigureAwait(false);
+                        throw;
+                    }
+                }, MaxConcurrencyAttempts, cancellationToken).ConfigureAwait(false);
             }
-            catch
+            catch (RtVersionConflictException) when (attempt < maxAttempts)
             {
-                await TryAbortAsync(session).ConfigureAwait(false);
-                throw;
+                // Another writer was faster: read again and re-apply (the transaction was aborted, nothing was written).
             }
-        }, MaxAtomicUpdateAttempts, cancellationToken);
+
+            await Task.Delay(Random.Shared.Next(1, 4 * attempt + 1), cancellationToken).ConfigureAwait(false);
+        }
+    }
+
+    private sealed record StoredUserMutation(RtUser User, ulong ReadVersion);
+
+    /// <summary>
+    ///     Carries the stored lockout fields to the caller's in-memory user. The caller's <c>rtVersion</c> follows the write
+    ///     only if the stored user was still the version the caller holds: then nothing else changed and the caller's
+    ///     later <see cref="UpdateAsync" /> stays valid. Otherwise the user is stale and keeps its old version, so
+    ///     <see cref="UpdateAsync" /> reports a concurrency failure instead of overwriting the other writer's changes.
+    /// </summary>
+    private static void AdoptStoredLockoutState(RtUser user, StoredUserMutation outcome)
+    {
+        user.AccessFailedCount = outcome.User.AccessFailedCount;
+        user.LockoutEnd = outcome.User.LockoutEnd;
+        AdoptStoredVersion(user, outcome);
+    }
+
+    private static void AdoptStoredVersion(RtUser user, StoredUserMutation outcome)
+    {
+        if (outcome.ReadVersion == user.RtVersion)
+        {
+            user.RtVersion = outcome.User.RtVersion;
+        }
+    }
 
     private static async Task TryAbortAsync(Meshmakers.Octo.Runtime.Contracts.IOctoSession session)
     {

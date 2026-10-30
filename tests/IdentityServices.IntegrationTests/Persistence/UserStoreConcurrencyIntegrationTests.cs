@@ -186,6 +186,132 @@ public class UserStoreConcurrencyIntegrationTests : IClassFixture<IdentityServic
     }
 
     [Fact]
+    public async Task ProfileUpdate_OnAStaleUser_AfterAThresholdLockout_ReturnsConcurrencyFailure_AndKeepsTheLockout()
+    {
+        var repo = await CreateTenantRepositoryAsync();
+        var userName = await CreateUserAsync(repo, maxFailedAccessAttempts: 5);
+
+        var profileManager = CreateUserManager(repo, maxFailedAccessAttempts: 5);
+        var staleUser = (await profileManager.FindByNameAsync(userName))!;
+
+        await RunInParallelAsync(5, async () =>
+        {
+            var manager = CreateUserManager(repo, maxFailedAccessAttempts: 5);
+            await manager.AccessFailedAsync((await manager.FindByNameAsync(userName))!);
+        });
+        (await FindAsync(repo, userName)).LockoutEnd.Should().NotBeNull("five failures reach the threshold");
+
+        staleUser.PhoneNumber = "+43 1 444";
+        var result = await profileManager.UpdateAsync(staleUser);
+
+        result.Succeeded.Should().BeFalse("the lockout changed the user after it was read");
+        result.Errors.Should().ContainSingle(e => e.Code == new IdentityErrorDescriber().ConcurrencyFailure().Code);
+        var stored = await FindAsync(repo, userName);
+        stored.LockoutEnd.Should().NotBeNull("a stale profile write must not lift the lockout");
+        stored.LockoutEnd!.Value.Should().BeAfter(DateTimeOffset.UtcNow);
+        stored.PhoneNumber.Should().NotBe("+43 1 444");
+    }
+
+    [Fact]
+    public async Task ProfileUpdate_OnAStaleUser_AfterAResetWrite_ReturnsConcurrencyFailure()
+    {
+        var repo = await CreateTenantRepositoryAsync();
+        var userName = await CreateUserAsync(repo, maxFailedAccessAttempts: 5);
+        var failing = CreateUserManager(repo, maxFailedAccessAttempts: 5);
+        await failing.AccessFailedAsync((await failing.FindByNameAsync(userName))!);
+
+        var profileManager = CreateUserManager(repo, maxFailedAccessAttempts: 5);
+        var staleUser = (await profileManager.FindByNameAsync(userName))!;
+
+        var signIn = CreateUserManager(repo, maxFailedAccessAttempts: 5);
+        await signIn.AccessFailedAsync((await signIn.FindByNameAsync(userName))!);
+        (await FindAsync(repo, userName)).AccessFailedCount.Should().Be(2);
+
+        staleUser.PhoneNumber = "+43 1 555";
+        (await profileManager.UpdateAsync(staleUser)).Succeeded.Should().BeFalse();
+        (await FindAsync(repo, userName)).AccessFailedCount.Should().Be(2, "the counted failure survives the stale write");
+    }
+
+    [Fact]
+    public async Task SuccessfulSignInReset_IsNotLost_UnderAConcurrentProfileUpdate()
+    {
+        for (var round = 0; round < 20; round++)
+        {
+            var repo = await CreateTenantRepositoryAsync();
+            var userName = await CreateUserAsync(repo, maxFailedAccessAttempts: 5);
+            var failing = CreateUserManager(repo, maxFailedAccessAttempts: 5);
+            await failing.AccessFailedAsync((await failing.FindByNameAsync(userName))!);
+            await failing.AccessFailedAsync((await failing.FindByNameAsync(userName))!);
+
+            var profileManager = CreateUserManager(repo, maxFailedAccessAttempts: 5);
+            var profileUser = (await profileManager.FindByNameAsync(userName))!;
+
+            // The sign-in resets while the profile editor still holds the pre-reset copy.
+            var signIn = CreateUserManager(repo, maxFailedAccessAttempts: 5);
+            (await signIn.ResetAccessFailedCountAsync((await signIn.FindByNameAsync(userName))!)).Succeeded
+                .Should().BeTrue();
+
+            profileUser.PhoneNumber = "+43 1 666";
+            var result = await profileManager.UpdateAsync(profileUser);
+
+            result.Succeeded.Should().BeFalse($"round {round}: the stale copy must not win");
+            (await FindAsync(repo, userName)).AccessFailedCount.Should().Be(0, "the reset is not undone");
+        }
+    }
+
+    [Fact]
+    public async Task ParallelResetAndProfileUpdate_BothTakeEffect_RepeatedTwentyTimes()
+    {
+        var repo = await CreateTenantRepositoryAsync();
+
+        for (var round = 0; round < 20; round++)
+        {
+            var userName = await CreateUserAsync(repo, maxFailedAccessAttempts: 5);
+            var failing = CreateUserManager(repo, maxFailedAccessAttempts: 5);
+            await failing.AccessFailedAsync((await failing.FindByNameAsync(userName))!);
+            await failing.AccessFailedAsync((await failing.FindByNameAsync(userName))!);
+
+            var reset = Task.Run(async () =>
+            {
+                var manager = CreateUserManager(repo, maxFailedAccessAttempts: 5);
+                await manager.ResetAccessFailedCountAsync((await manager.FindByNameAsync(userName))!);
+            }, TestContext.Current.CancellationToken);
+            var profile = Task.Run(async () =>
+            {
+                // A well-behaved caller re-reads on a concurrency failure.
+                var manager = CreateUserManager(repo, maxFailedAccessAttempts: 5);
+                IdentityResult result;
+                do
+                {
+                    var user = (await manager.FindByNameAsync(userName))!;
+                    user.PhoneNumber = "+43 1 777";
+                    result = await manager.UpdateAsync(user);
+                } while (!result.Succeeded);
+            }, TestContext.Current.CancellationToken);
+            await Task.WhenAll(reset, profile);
+
+            var stored = await FindAsync(repo, userName);
+            stored.AccessFailedCount.Should().Be(0, $"round {round}: the reset is not undone by the profile write");
+            stored.PhoneNumber.Should().Be("+43 1 777");
+        }
+    }
+
+    [Fact]
+    public async Task PlainUserManager_ParallelFailedSignIns_AreAllCounted()
+    {
+        var repo = await CreateTenantRepositoryAsync();
+        var userName = await CreateUserAsync(repo, maxFailedAccessAttempts: 1000);
+
+        await RunInParallelAsync(10, async () =>
+        {
+            var manager = CreatePlainUserManager(repo, maxFailedAccessAttempts: 1000);
+            await manager.AccessFailedAsync((await manager.FindByNameAsync(userName))!);
+        });
+
+        (await FindAsync(repo, userName)).AccessFailedCount.Should().Be(10);
+    }
+
+    [Fact]
     public async Task Update_AfterAFailedSignInOnTheSameInstance_Succeeds()
     {
         var repo = await CreateTenantRepositoryAsync();
@@ -282,11 +408,33 @@ public class UserStoreConcurrencyIntegrationTests : IClassFixture<IdentityServic
             null);
     }
 
+    /// <summary>The manager production registers (AB#7854): failure counting and reset go through the atomic store.</summary>
     private UserManager<RtUser> CreateUserManager(ITenantRepository repo, int maxFailedAccessAttempts)
+        => CreateManager(repo, maxFailedAccessAttempts, atomic: true);
+
+    /// <summary>A plain framework manager over the same store (the lockout-store contract, not registered in production).</summary>
+    private UserManager<RtUser> CreatePlainUserManager(ITenantRepository repo, int maxFailedAccessAttempts)
+        => CreateManager(repo, maxFailedAccessAttempts, atomic: false);
+
+    private UserManager<RtUser> CreateManager(ITenantRepository repo, int maxFailedAccessAttempts, bool atomic)
     {
         var options = new IdentityOptions();
         options.Lockout.MaxFailedAccessAttempts = maxFailedAccessAttempts;
         options.Lockout.DefaultLockoutTimeSpan = TimeSpan.FromMinutes(15);
+        if (atomic)
+        {
+            return new OctoUserManager(
+                CreateUserStore(repo),
+                Microsoft.Extensions.Options.Options.Create(options),
+                new PasswordHasher<RtUser>(),
+                Array.Empty<IUserValidator<RtUser>>(),
+                Array.Empty<IPasswordValidator<RtUser>>(),
+                new UpperInvariantLookupNormalizer(),
+                new IdentityErrorDescriber(),
+                services: null!,
+                NullLogger<UserManager<RtUser>>.Instance);
+        }
+
         return new UserManager<RtUser>(
             CreateUserStore(repo),
             Microsoft.Extensions.Options.Options.Create(options),
