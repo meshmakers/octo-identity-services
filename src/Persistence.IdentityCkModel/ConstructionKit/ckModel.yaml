@@ -1,4 +1,14 @@
 "$schema": "https://schemas.meshmakers.cloud/construction-kit-meta.schema.json"
+# 2.27.0 (AB#7766, audit finding H3) keeps the credential material of a user out of an ExportRt (export as
+# template, tenant clone): RtUser.PasswordHash, RtUser.SecurityStamp and RtUser.UserTokens (TOTP key and
+# recovery codes) are `ownership: Secret` (definition level; they are assigned by User only), and so is the
+# UserToken.Value member (assignment override). The engine skips Secret attributes in the export and keeps
+# them on an Upsert, so a blueprint re-apply never touches an existing user's hash or stamp. SeedOwned ->
+# Secret is an ownership change: CkSemVerClassifier rates it Minor; ids, types and defaults are unchanged
+# (still ckLanguage 1; the access modifiers follow with AB#7772). Behaviour change: a tenant cloned with
+# ExportRt/ImportRt carries its users without password and 2FA material - they reset the password in the
+# target tenant. (2.26.0 is the preceding version of this model.)
+#
 # 2.24.0 (AB#6384) adds the optional Boolean DataPolicy.ProtectBlueprintLocked (default false): the opt-in
 # of the engine write guard that makes blueprint-locked entities read-only for non-system callers. It is
 # SEED-OWNED (the blueprint author decides which types are protected; every blueprint update re-applies it),
@@ -40,6 +50,6 @@
 # concept AB#5528 in octo-construction-kit-engine). String -> Secret is Minor
 # (CkSemVerClassifier): stored clear-text values stay readable as legacy values
 # until the encrypt sweep has run. Secret requires System >= 2.5 (decision 12).
-modelId: System.Identity-2.26.0
+modelId: System.Identity-2.27.0
 dependencies:
   - System-[2.5,3.0)

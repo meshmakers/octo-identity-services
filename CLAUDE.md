@@ -804,7 +804,7 @@ Key components:
 - **`GroupsController`**: REST API at `{tenantId}/v1/groups` with full CRUD, role assignment, member management, and circular group prevention
 - **`TenantOwners`** group: Default group provisioned in every tenant with all 10 default roles. Created by `DefaultConfigurationCreatorService` and `IdentityAssociationMigration` (migration 9→10)
 
-Current identity schema (migration) version: `23` (migration 21→22 added the `RtOAuthAuthorization`/`RtOAuthToken` OpenIddict store types; 22→23 re-runs the full index update so abstract collection roots get their indexes, AB#5261). Current CK model version: `System.Identity-2.24.0` (2.19.0–2.23.0 were ownership/runtime-state classifications, 2.24.0 added `DataPolicy.ProtectBlueprintLocked`, see the sections below) — the 2.12.0→2.17.0 changes (verified-identifier directory AB#5122+) are additive schema needing no numeric migration; 2.17.0→2.18.0 REPLACED `RtUser.PreferredChannel` with `RtUser.PreferredChannelBindingId` (AB#5149 revision, binding-specific preference). The feature shipped the day before the replacement with no external consumers, so the old attribute was dropped without a migration — any stored kind-level values are simply ignored (users re-select).
+Current identity schema (migration) version: `23` (migration 21→22 added the `RtOAuthAuthorization`/`RtOAuthToken` OpenIddict store types; 22→23 re-runs the full index update so abstract collection roots get their indexes, AB#5261). Current CK model version: `System.Identity-2.27.0` (2.19.0–2.23.0 were ownership/runtime-state classifications, 2.24.0 added `DataPolicy.ProtectBlueprintLocked`, 2.25.0 the `Secret` identity-provider `ClientSecret`, 2.27.0 the `Secret` credential material of a user, see the sections below) — the 2.12.0→2.17.0 changes (verified-identifier directory AB#5122+) are additive schema needing no numeric migration; 2.17.0→2.18.0 REPLACED `RtUser.PreferredChannel` with `RtUser.PreferredChannelBindingId` (AB#5149 revision, binding-specific preference). The feature shipped the day before the replacement with no external consumers, so the old attribute was dropped without a migration — any stored kind-level values are simply ignored (users re-select).
 
 ### Tenant-owned attributes: a blueprint update never reverts an administrator's decision (AB#6324, AB#6329; System.Identity 2.23.0)
 
@@ -826,6 +826,19 @@ no longer change them on an existing one (not even tighten a policy or a client)
 `ClientMirrorProvisioningService` writes mirrors with insert/replace, not `ImportRt`, so mirroring is unaffected. Regression tests:
 `BlueprintOwnershipIntegrationTests` (real MongoDB; compiled ownership, shipped policy seed, Enforce over an AuditOnly seed, client,
 secrets, resources).
+
+### Credential material of a user is `Secret`: never exported, kept on a re-apply (AB#7766; System.Identity 2.27.0)
+
+Audit finding H3: `User.PasswordHash`, `User.SecurityStamp` and `User.UserTokens` (the `UserToken` record holds the TOTP key and the
+recovery codes in `Value`) were `SeedOwned`, so an `ExportRt` (export as template, tenant clone) carried them. They are now
+`ownership: Secret` (definition level, `User` is their only assignment) and so is the `UserToken.Value` record member
+(assignment override). The engine skips `Secret` in `RtEntityToTcDtoConverter` (shared by `ExportRtModelByQueryCommand` and
+`ExportRtModelByDeepGraphCommand`) and keeps it on an Upsert. SeedOwned -> Secret is an ownership change: `octo-ckc ValidateVersion`
+rates it **Minor**, ids, types and defaults are unchanged, no migration entry, still ckLanguage 1 (access modifiers: AB#7772).
+**Consequence:** a tenant cloned with ExportRt/ImportRt carries its users without password and 2FA material; they reset the password
+in the target tenant. No blueprint seeds `System.Identity/User` (`BootstrapBlueprintSeed_DoesNotSeedUsers` guards it). A repository
+dump is unaffected. Tests: `CredentialMaterialExportIntegrationTests` (real MongoDB; compiled ownership, converter output of a user
+with hash/stamp/tokens, Upsert of a seed-shaped user keeps all three).
 
 ### Blueprint-owned opt-in: `DataPolicy.ProtectBlueprintLocked` (AB#6384; System.Identity 2.24.0)
 

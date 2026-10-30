@@ -34,13 +34,13 @@ attributes:
 
   - id: PasswordHash
     valueType: String
-    ownership: SeedOwned
-    description: The salted and hashed representation of the password for this user.
+    ownership: Secret
+    description: The salted and hashed representation of the password for this user. Secret (System.Identity 2.27.0) - never part of an ExportRt, kept on a blueprint re-apply.
 
   - id: SecurityStamp
     valueType: String
-    ownership: SeedOwned
-    description: A random value that should change whenever a users credentials have been compromised.
+    ownership: Secret
+    description: A random value that should change whenever a users credentials have been compromised. Secret (System.Identity 2.27.0) - never part of an ExportRt, kept on a blueprint re-apply.
 
   - id: PhoneNumber
     valueType: String
@@ -172,8 +172,8 @@ attributes:
   - id: UserTokens
     valueType: RecordArray
     valueCkRecordId: ${this}/UserToken
-    ownership: SeedOwned
-    description: The tokens of the user.
+    ownership: Secret
+    description: The tokens of the user (authenticator key and recovery codes of two-factor authentication). Secret (System.Identity 2.27.0) - never part of an ExportRt, kept on a blueprint re-apply.
 
   - id: SubjectIds
     valueType: StringArray
