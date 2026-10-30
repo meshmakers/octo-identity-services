@@ -102,3 +102,95 @@ types:
         fields:
           - attributePaths:
               - NormalizedUserName
+    # AB#7773 (Feature AB#5696, F4.2): the method declarations of the user. Declarations only - the handlers are hosted by the
+    # identity service (AB#5672 ChangePassword and the host, AB#7774 ResetPassword, AB#7776 roles, AB#7777 Create, AB#7778 Merge).
+    # Until a handler is registered the gateway answers METHOD_HANDLER_NOT_AVAILABLE, the REST API is unchanged.
+    # Roles follow the REST parity (UsersController: IdentityUserAdministrationWritePolicy = UserManagement). Every method changes
+    # its target, so authorization.dataAccess is Write (the effective default, declared explicitly - AB#7036). No password-carrying
+    # parameter may be handled by a pipeline: they are all `sensitive`, the compiler refuses a pipeline handler for them (message 132).
+    methods:
+      - methodId: ChangePassword-1
+        description: "The signed-in user changes their own password. Needs the current password; an administrator uses ResetPassword."
+        parameters:
+          - { name: currentPassword, valueType: String, sensitive: true, description: "The current password of the caller." }
+          - { name: newPassword, valueType: String, sensitive: true, description: "The new password; must satisfy the password policy of the tenant." }
+        errors:
+          - { code: PASSWORD_POLICY_VIOLATION, description: "The new password violates the password policy." }
+          - { code: CURRENT_PASSWORD_INVALID, description: "The current password is wrong." }
+          - { code: USER_LOCKED_OUT, description: "The user is locked out." }
+          - { code: SHADOW_USER_PASSWORD_NOT_ALLOWED, description: "A cross-tenant shadow user has no password." }
+        authorization:
+          allowSelf: true
+          dataAccess: Write
+      - methodId: ResetPassword-1
+        description: "An administrator sets a new password without the current one. Lifts a lockout; the user is notified."
+        parameters:
+          - { name: newPassword, valueType: String, sensitive: true, description: "The new password; must satisfy the password policy of the tenant." }
+        errors:
+          - { code: PASSWORD_POLICY_VIOLATION, description: "The new password violates the password policy." }
+          - { code: SHADOW_USER_PASSWORD_NOT_ALLOWED, description: "A cross-tenant shadow user has no password." }
+        authorization:
+          roles: [ UserManagement ]
+          dataAccess: Write
+      - methodId: SetRoles-1
+        description: "Replaces the direct roles of the user by the given role names."
+        parameters:
+          - { name: roleNames, valueType: StringArray, description: "The complete list of direct role names." }
+        errors:
+          - { code: ROLE_NOT_FOUND, description: "A role name does not exist." }
+        authorization:
+          roles: [ UserManagement ]
+          dataAccess: Write
+      - methodId: AddRole-1
+        description: "Adds one direct role to the user."
+        parameters:
+          - { name: roleName, valueType: String }
+        errors:
+          - { code: ROLE_NOT_FOUND, description: "The role does not exist." }
+          - { code: ROLE_ALREADY_ASSIGNED, description: "The user already has the role." }
+        authorization:
+          roles: [ UserManagement ]
+          dataAccess: Write
+      - methodId: RemoveRole-1
+        description: "Removes one direct role from the user."
+        parameters:
+          - { name: roleName, valueType: String }
+        errors:
+          - { code: ROLE_NOT_FOUND, description: "The role does not exist." }
+          - { code: ROLE_NOT_ASSIGNED, description: "The user does not have the role." }
+        authorization:
+          roles: [ UserManagement ]
+          dataAccess: Write
+      - methodId: Merge-1
+        description: "Moves the external logins of the source user to this user (the target) and deletes the source user."
+        parameters:
+          - { name: sourceUserName, valueType: String, description: "User name of the user that is merged into this one and deleted." }
+        errors:
+          - { code: SOURCE_USER_NOT_FOUND, description: "The source user does not exist." }
+          - { code: CANNOT_MERGE_INTO_ITSELF, description: "Source and target are the same user." }
+          - { code: MERGE_FAILED, description: "A login could not be moved or the source user could not be deleted." }
+        authorization:
+          roles: [ UserManagement ]
+          dataAccess: Write
+      # Named CreateUser, not Create: the compiler reserves Create, Update and Delete for the generic mutations (error 102).
+      - methodId: CreateUser-1
+        kind: Static
+        description: "Creates a user (REST user creation is unchanged)."
+        # NOT replacesGenericCreate (yet): a new method with the flag on the existing type User is MAJOR (row M16, decision 2026-10-19),
+        # System.Identity 3.0.0 would leave every blueprint range [2.x,3.0) unsatisfied. The generic create of a User is already
+        # narrowed by the access modifiers of 2.28.0 (UserName and Email are MethodOnly, PasswordHash Hidden). AB#7777 sets the flag
+        # together with the next Major of System.Identity; platform-owner decision pending (AB#7773).
+        parameters:
+          - { name: userName, valueType: String }
+          - { name: email, valueType: String, isOptional: true }
+          - { name: firstName, valueType: String, isOptional: true }
+          - { name: lastName, valueType: String, isOptional: true }
+          - { name: password, valueType: String, isOptional: true, sensitive: true, description: "Initial password; without it the user gets the welcome notification without a password." }
+        result:
+          valueType: String
+        errors:
+          - { code: USER_NAME_RESERVED, description: "The user name is reserved for cross-tenant shadow users." }
+          - { code: USER_ALREADY_EXISTS, description: "A user with this name or e-mail address exists." }
+          - { code: PASSWORD_POLICY_VIOLATION, description: "The initial password violates the password policy." }
+        authorization:
+          roles: [ UserManagement ]
