@@ -180,6 +180,11 @@ public static class RuntimeEngineBuilderExtensions
             // AB#5708: xt_ shadow users never get a local password, whichever endpoint tries to set one.
             .AddPasswordValidator<ShadowUserPasswordValidator>();
 
+        // AB#7859: the periodic security-stamp revalidation rebuilds the session principal from the user; keep the
+        // claims that describe the sign-in (amr=mfa, idp, sid), or 2FA users lose their evidence after 30 minutes.
+        builder.Services.Configure<SecurityStampValidatorOptions>(options =>
+            options.OnRefreshingPrincipal = SessionClaimPreservation.OnRefreshingPrincipalAsync);
+
         if (builder.RoleType != null)
         {
             builder.Services.AddScoped(
