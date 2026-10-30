@@ -30,3 +30,39 @@ types:
         fields:
           - attributePaths:
               - NormalizedGroupName
+    # AB#7773 (Feature AB#5696, F4.2): the method declarations of the group; the handlers follow with AB#7779.
+    # Declarations only: until a handler is registered the gateway answers METHOD_HANDLER_NOT_AVAILABLE.
+    # Roles follow the REST parity (GroupsController: IdentityUserAdministrationWritePolicy = UserManagement).
+    # No replacesGenericCreate: the System.Identity.Bootstrap blueprint seeds groups (AB#7121 would refuse the tenant setup).
+    methods:
+      - methodId: AddMember-1
+        description: "Adds a user or a client to the group."
+        parameters:
+          - { name: memberKind, valueType: Enum, valueCkEnumId: "${this}/GroupMemberKind" }
+          - { name: memberId, valueType: String, description: "The rtId of the user, or the client id of the client." }
+        errors:
+          - { code: MEMBER_NOT_FOUND, description: "The user or client does not exist." }
+          - { code: MEMBER_ALREADY_IN_GROUP, description: "The member already belongs to the group." }
+        authorization:
+          roles: [ UserManagement ]
+          dataAccess: Write
+      - methodId: RemoveMember-1
+        description: "Removes a user or a client from the group."
+        parameters:
+          - { name: memberKind, valueType: Enum, valueCkEnumId: "${this}/GroupMemberKind" }
+          - { name: memberId, valueType: String, description: "The rtId of the user, or the client id of the client." }
+        errors:
+          - { code: MEMBER_NOT_FOUND, description: "The user or client does not exist." }
+          - { code: MEMBER_NOT_IN_GROUP, description: "The member does not belong to the group." }
+        authorization:
+          roles: [ UserManagement ]
+          dataAccess: Write
+      - methodId: SetRoles-1
+        description: "Replaces the roles of the group by the given role names."
+        parameters:
+          - { name: roleNames, valueType: StringArray, description: "The complete list of role names." }
+        errors:
+          - { code: ROLE_NOT_FOUND, description: "A role name does not exist." }
+        authorization:
+          roles: [ UserManagement ]
+          dataAccess: Write

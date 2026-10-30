@@ -175,7 +175,7 @@ This service depends on Octo framework packages (versioned via `$(OctoVersion)` 
 
 ### Construction Kit (CK) Model
 
-The `Persistence.IdentityCkModel` project uses YAML-based model definitions that are transformed into C# code at build time. Model files are in `src/Persistence.IdentityCkModel/ConstructionKit/`. The model ID is `System.Identity-2.28.0` (ckLanguage 2) with dependency on `System-[2.5,3.0)`. Generated types live in namespace `Persistence.IdentityCkModel.Generated.System.Identity.v2`.
+The `Persistence.IdentityCkModel` project uses YAML-based model definitions that are transformed into C# code at build time. Model files are in `src/Persistence.IdentityCkModel/ConstructionKit/`. The model ID is `System.Identity-2.29.0` (ckLanguage 2) with dependency on `System-[2.5,3.0)`. Generated types live in namespace `Persistence.IdentityCkModel.Generated.System.Identity.v2`.
 
 ### OpenIddict Protocol Stack (Epic AB#4989)
 
@@ -834,7 +834,7 @@ Key components:
 - **`GroupsController`**: REST API at `{tenantId}/v1/groups` with full CRUD, role assignment, member management, and circular group prevention
 - **`TenantOwners`** group: Default group provisioned in every tenant with all 10 default roles. Created by `DefaultConfigurationCreatorService` and `IdentityAssociationMigration` (migration 9→10)
 
-Current identity schema (migration) version: `23` (migration 21→22 added the `RtOAuthAuthorization`/`RtOAuthToken` OpenIddict store types; 22→23 re-runs the full index update so abstract collection roots get their indexes, AB#5261). Current CK model version: `System.Identity-2.28.0` (2.28.0 = first ckLanguage 2 release with access modifiers, AB#7772, see below; 2.19.0–2.23.0 were ownership/runtime-state classifications, 2.24.0 added `DataPolicy.ProtectBlueprintLocked`, 2.25.0 the `Secret` identity-provider `ClientSecret`, 2.27.0 the `Secret` credential material of a user, see the sections below) — the 2.12.0→2.17.0 changes (verified-identifier directory AB#5122+) are additive schema needing no numeric migration; 2.17.0→2.18.0 REPLACED `RtUser.PreferredChannel` with `RtUser.PreferredChannelBindingId` (AB#5149 revision, binding-specific preference). The feature shipped the day before the replacement with no external consumers, so the old attribute was dropped without a migration — any stored kind-level values are simply ignored (users re-select).
+Current identity schema (migration) version: `23` (migration 21→22 added the `RtOAuthAuthorization`/`RtOAuthToken` OpenIddict store types; 22→23 re-runs the full index update so abstract collection roots get their indexes, AB#5261). Current CK model version: `System.Identity-2.29.0` (2.29.0 = the identity method declarations, AB#7773, see below; 2.28.0 = first ckLanguage 2 release with access modifiers, AB#7772, see below; 2.19.0–2.23.0 were ownership/runtime-state classifications, 2.24.0 added `DataPolicy.ProtectBlueprintLocked`, 2.25.0 the `Secret` identity-provider `ClientSecret`, 2.27.0 the `Secret` credential material of a user, see the sections below) — the 2.12.0→2.17.0 changes (verified-identifier directory AB#5122+) are additive schema needing no numeric migration; 2.17.0→2.18.0 REPLACED `RtUser.PreferredChannel` with `RtUser.PreferredChannelBindingId` (AB#5149 revision, binding-specific preference). The feature shipped the day before the replacement with no external consumers, so the old attribute was dropped without a migration — any stored kind-level values are simply ignored (users re-select).
 
 ### Tenant-owned attributes: a blueprint update never reverts an administrator's decision (AB#6324, AB#6329; System.Identity 2.23.0)
 
@@ -893,6 +893,38 @@ password/2FA flows write through `ITenantRepository` (`InsertOneRtEntityAsync`, 
 identity seed, blueprint or migration writes these attributes (`BootstrapBlueprintSeed_DoesNotSeedUsers`). Code that must set one of them from
 an import (a test seed, a tool) creates the user through the repository instead. Tests: `CredentialMaterialExportIntegrationTests` (compiled
 access values, `OCTO-CK139` refusal per attribute, ReadOnly import still possible, repository writes of all seven attributes still work).
+
+### Identity method declarations (AB#7773; System.Identity 2.29.0)
+
+`User`, `Group`, `Client` and `DataPermission` declare their identity operations as CK methods (declarations only; the handlers and the
+method host follow with AB#5672, AB#7774, AB#7776-AB#7780, the typed GraphQL mutations with F3.7). Until a handler is registered the gateway
+answers `METHOD_HANDLER_NOT_AVAILABLE`; the REST API is unchanged. **Release the identity service with this model only when the handler
+stories are merged.**
+
+| Type | Methods (`-1`) | Roles |
+|------|----------------|-------|
+| `User` | `ChangePassword` (instance, `allowSelf`, no role), `ResetPassword`, `SetRoles`, `AddRole`, `RemoveRole`, `Merge`, static `CreateUser` | `UserManagement` |
+| `Group` | `AddMember`, `RemoveMember` (`memberKind` enum `GroupMemberKind` = `User`/`Client`, `memberId`), `SetRoles` | `UserManagement` |
+| `Client` | `AddSecret` (result `sensitive`: the generated secret, shown once), `RemoveSecret` (by `secretValue`, REST parity) | `TenantManagement`, `UserManagement` |
+| `DataPermission` | `GrantToRole`, `RevokeFromRole` | `UserManagement` |
+
+Rules behind the shape (do not change them without reading this):
+- **Roles = REST parity** (`IdentityApiAuthorizationPolicies`: `UserAdministrationRoles`, `TenantAdministrationRoles`). Every method declares
+  `authorization.dataAccess: Write` explicitly (AB#7036; the effective default, so no SemVer change; it raises the model's `minEngineVersion`).
+- **`sensitive` on every password or secret parameter** (`currentPassword`, `newPassword`, `password`, `secretValue`) and on the `AddSecret`
+  result; such a method can never have a pipeline handler (compiler messages 132/134). Pinned by `IdentityMethodDeclarationsIntegrationTests`.
+- **`Create` is a reserved method name** (compiler error 102: `Create`, `Update`, `Delete` belong to the generic mutations) - the static user
+  method is `CreateUser-1`.
+- **No `replacesGenericCreate` on any type.** Group, Client and DataPermission are seeded by `System.Identity.Bootstrap` (the flag would make
+  AB#7121 refuse every new tenant). On `User` the flag is a **MAJOR** change of the model (row M16 of `docs/ck-semver-rules.md` in
+  octo-construction-kit-engine: a new method with the flag on an existing type, decision 2026-10-19), and System.Identity 3.0.0 would leave every
+  blueprint range `[2.x,3.0)` unsatisfied - decision pending with the platform owner (AB#7773, AB#7777). The generic create of a user is already
+  narrowed by the 2.28.0 access modifiers (`UserName`, `Email` MethodOnly, `PasswordHash` Hidden).
+- **No `LAST_ADMIN_PROTECTED`** and no `DisableTwoFactor`: the REST API has no last-admin rule, and `User.DisableTwoFactor` belongs to AB#7879.
+- `compatibility.acknowledge` of 2.28.0 is gone (an acknowledgement is valid for one release, OCTO-CK204). `octo-ckc ValidateVersion`
+  against the published 2.28.0: **MINOR** (15 additions, no Major row).
+- Tests: `IdentityMethodDeclarationsIntegrationTests` (compiled model from the CK cache of a real tenant: method set, roles, sensitive
+  parameters and result, write access, no replacesGenericCreate). Docs: octo-documentation `identityService/methods.md` (en + de).
 
 ### Blueprint-owned opt-in: `DataPolicy.ProtectBlueprintLocked` (AB#6384; System.Identity 2.24.0)
 
