@@ -14,3 +14,28 @@ types:
       - id: ${System}/Description
         name: Description
         isOptional: true
+    # AB#7773 (Feature AB#5696, F4.2): the method declarations of the data permission; the handlers follow with AB#7779.
+    # Declarations only: until a handler is registered the gateway answers METHOD_HANDLER_NOT_AVAILABLE.
+    # Roles follow the REST parity (DataPermissionsController: IdentityUserAdministrationWritePolicy = UserManagement).
+    # No replacesGenericCreate: the System.Identity.Bootstrap blueprint seeds data permissions (AB#7121 would refuse the tenant setup).
+    methods:
+      - methodId: GrantToRole-1
+        description: "Grants the permission to a role."
+        parameters:
+          - { name: roleName, valueType: String }
+        errors:
+          - { code: ROLE_NOT_FOUND, description: "The role does not exist." }
+          - { code: PERMISSION_ALREADY_GRANTED, description: "The role already holds the permission." }
+        authorization:
+          roles: [ UserManagement ]
+          dataAccess: Write
+      - methodId: RevokeFromRole-1
+        description: "Revokes the permission from a role."
+        parameters:
+          - { name: roleName, valueType: String }
+        errors:
+          - { code: ROLE_NOT_FOUND, description: "The role does not exist." }
+          - { code: PERMISSION_NOT_GRANTED, description: "The role does not hold the permission." }
+        authorization:
+          roles: [ UserManagement ]
+          dataAccess: Write
