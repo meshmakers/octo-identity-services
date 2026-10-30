@@ -1,4 +1,21 @@
 "$schema": "https://schemas.meshmakers.cloud/construction-kit-meta.schema.json"
+# 2.28.0 (AB#7772, Feature AB#5696, closes accepted risk R13) is the FIRST ckLanguage 2 release of
+# System.Identity. It closes R13 - password hashes and security fields readable through the generic
+# GraphQL path - with the CK v2 access modifiers of the RtUser assignments:
+#   * Hidden:     PasswordHash, SecurityStamp, UserTokens (TOTP key and recovery codes) - never in GraphQL
+#                 output or input; ConcurrencyStamp does not exist in this model, so there is nothing to drop.
+#   * ReadOnly:   AccessFailedCount, LockoutEnd - readable, written only by the identity service.
+#   * MethodOnly: UserName, Email - readable, changed only by a type method (identity writes them through
+#                 its own repository, which the access modifiers do not guard).
+# All seven attribute definitions are `securitySensitive: true`, so the tightening is Minor + acknowledge
+# (compatibility.acknowledge below; row T7a of docs/ck-semver-rules.md in octo-construction-kit-engine:
+# the one release that moves a classic model to ckLanguage 2, once per model). The next release follows
+# the normal rule (row T7) again.
+# Every existing type and record declares `derivable: Any` (the classic behaviour), because the ckLanguage 2
+# default is Model and the flip would be a Major of its own. Ids, types, defaults and ownership are unchanged;
+# System.Identity stays on 2.x. Behaviour change: ImportRt, blueprint seeds and migrations refuse a value for
+# a Hidden or MethodOnly attribute (OCTO-CK139), and an ExportRt never carries a Hidden value.
+#
 # 2.27.0 (AB#7766, audit finding H3) keeps the credential material of a user out of an ExportRt (export as
 # template, tenant clone): RtUser.PasswordHash, RtUser.SecurityStamp and RtUser.UserTokens (TOTP key and
 # recovery codes) are `ownership: Secret` (definition level; they are assigned by User only), and so is the
@@ -50,6 +67,23 @@
 # concept AB#5528 in octo-construction-kit-engine). String -> Secret is Minor
 # (CkSemVerClassifier): stored clear-text values stay readable as legacy values
 # until the encrypt sweep has run. Secret requires System >= 2.5 (decision 12).
-modelId: System.Identity-2.27.0
+modelId: System.Identity-2.28.0
+ckLanguage: 2
 dependencies:
   - System-[2.5,3.0)
+compatibility:
+  acknowledge:
+    - change: "TypeAttribute:User-1/UserName#Modified:access"
+      reason: "Close accepted risk R13 (AB#7772): the user name is changed only by a type method, not through generic GraphQL"
+    - change: "TypeAttribute:User-1/Email#Modified:access"
+      reason: "Close accepted risk R13 (AB#7772): the email address (a sign-in and recovery identifier) is changed only by a type method, not through generic GraphQL"
+    - change: "TypeAttribute:User-1/PasswordHash#Modified:access"
+      reason: "Close accepted risk R13 (AB#7772): the password hash is no longer readable or writable through generic GraphQL"
+    - change: "TypeAttribute:User-1/SecurityStamp#Modified:access"
+      reason: "Close accepted risk R13 (AB#7772): the security stamp is no longer readable or writable through generic GraphQL"
+    - change: "TypeAttribute:User-1/LockoutEnd#Modified:access"
+      reason: "Close accepted risk R13 (AB#7772): the lockout end is readable but no longer writable through generic GraphQL (lockout is set by the identity service)"
+    - change: "TypeAttribute:User-1/AccessFailedCount#Modified:access"
+      reason: "Close accepted risk R13 (AB#7772): the failed-sign-in counter is readable but no longer writable through generic GraphQL (counted by the identity service)"
+    - change: "TypeAttribute:User-1/UserTokens#Modified:access"
+      reason: "Close accepted risk R13 (AB#7772): the authenticator key and recovery codes are no longer readable or writable through generic GraphQL"

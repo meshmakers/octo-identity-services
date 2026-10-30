@@ -138,7 +138,7 @@ public class CrossTenantAuthenticationService(
 
     private string? GetSignInBlock(RtUser user)
     {
-        if (user.LockoutEnabled && user.LockoutEnd.HasValue && user.LockoutEnd.Value > DateTimeOffset.UtcNow)
+        if (IsLockedOut(user))
         {
             return "locked out";
         }
@@ -187,25 +187,28 @@ public class CrossTenantAuthenticationService(
         var user = await FindUserByNameInTenantAsync(tenantId, username);
         if (user != null)
         {
-            // Validate password
-            var verifyResult = passwordHasher.VerifyHashedPassword(
-                user, user.PasswordHash ?? string.Empty, password);
-
-            if (verifyResult != PasswordVerificationResult.Failed)
+            if (IsLockedOut(user))
             {
-                // Check if the user is locked out
-                if (user.LockoutEnabled && user.LockoutEnd.HasValue &&
-                    user.LockoutEnd.Value > DateTimeOffset.UtcNow)
-                {
-                    logger.LogInformation(
-                        "Cross-tenant auth: user '{UserName}' in tenant '{TenantId}' is locked out",
-                        username, tenantId);
-                    return null;
-                }
-
+                // AB#7854: a locked-out identity is not even verified — no guessing while locked, also not through
+                // a child tenant. The walk goes on to the parents, as for a wrong password.
+                logger.LogInformation(
+                    "Cross-tenant auth: user '{UserName}' in tenant '{TenantId}' is locked out",
+                    username, tenantId);
+            }
+            else if (passwordHasher.VerifyHashedPassword(user, user.PasswordHash ?? string.Empty, password)
+                     != PasswordVerificationResult.Failed)
+            {
                 logger.LogInformation(
                     "Cross-tenant auth succeeded: user '{UserName}' found in tenant '{TenantId}'",
                     username, tenantId);
+
+                var requiresSecondFactor = await RequiresSecondFactorAsync(user);
+                if (!user.TwoFactorEnabled)
+                {
+                    // Same rule as SignInManager: a correct password resets the counter only when no second factor
+                    // follows; otherwise the verified second factor resets it.
+                    await ResetAccessFailuresAsync(tenantId, user);
+                }
 
                 return new CrossTenantAuthResult
                 {
@@ -215,8 +218,14 @@ public class CrossTenantAuthenticationService(
                     FirstName = user.FirstName,
                     LastName = user.LastName,
                     Email = user.Email,
-                    SourceUserRequiresSecondFactor = await RequiresSecondFactorAsync(user)
+                    SourceUserRequiresSecondFactor = requiresSecondFactor
                 };
+            }
+            else
+            {
+                // AB#7854: a wrong password counts against the identity it was tried on — the parent-tenant user —
+                // exactly like a wrong password on that tenant's own login.
+                await RecordAccessFailureAsync(tenantId, user);
             }
         }
 
@@ -238,6 +247,61 @@ public class CrossTenantAuthenticationService(
         }
 
         return null;
+    }
+
+    private static bool IsLockedOut(RtUser user)
+        => user.LockoutEnabled && user.LockoutEnd.HasValue && user.LockoutEnd.Value > DateTimeOffset.UtcNow;
+
+    private async Task RecordAccessFailureAsync(string tenantId, RtUser user)
+    {
+        try
+        {
+            var repository = await tenantRegistry.TryGetRepositoryAsync(tenantId);
+            if (repository == null)
+            {
+                return;
+            }
+
+            var lockout = identityOptions.Value.Lockout;
+            var (_, lockedOut) = await OctoUserStore.RecordAccessFailureAsync(repository, user.RtId,
+                lockout.MaxFailedAccessAttempts, lockout.DefaultLockoutTimeSpan);
+            if (lockedOut)
+            {
+                logger.LogWarning(
+                    "Cross-tenant auth: user '{UserName}' in tenant '{TenantId}' is locked out after failed attempts",
+                    user.UserName, tenantId);
+            }
+        }
+        catch (Exception ex)
+        {
+            // The attempt is refused either way; a counting failure is logged, never turned into a success.
+            logger.LogWarning(ex,
+                "Cross-tenant auth: failed attempt of user '{UserName}' in tenant '{TenantId}' could not be counted",
+                user.UserName, tenantId);
+        }
+    }
+
+    private async Task ResetAccessFailuresAsync(string tenantId, RtUser user)
+    {
+        if (user.AccessFailedCount == 0)
+        {
+            return;
+        }
+
+        try
+        {
+            var repository = await tenantRegistry.TryGetRepositoryAsync(tenantId);
+            if (repository != null)
+            {
+                await OctoUserStore.ResetAccessFailedCountAsync(repository, user.RtId);
+            }
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex,
+                "Cross-tenant auth: failure count of user '{UserName}' in tenant '{TenantId}' could not be reset",
+                user.UserName, tenantId);
+        }
     }
 
     /// <summary>

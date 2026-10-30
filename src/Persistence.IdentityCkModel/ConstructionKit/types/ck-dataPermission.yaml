@@ -1,6 +1,7 @@
 "$schema": "https://schemas.meshmakers.cloud/construction-kit-elements.schema.json"
 types:
   - typeId: DataPermission
+    derivable: Any
     description: Named data permission (dot-namespaced), granted to roles via GrantsPermission; DataPolicies bind it to CK types (AB#4972).
     derivedFromCkTypeId: ${System}/Entity
     isFinal: true
