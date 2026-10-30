@@ -1,4 +1,18 @@
 "$schema": "https://schemas.meshmakers.cloud/construction-kit-meta.schema.json"
+# 2.29.0 (AB#7773, Feature AB#5696) declares the identity methods of User, Group, Client and DataPermission - declarations only,
+# the handlers follow with AB#5672 (ChangePassword and the method host in identity), AB#7774, AB#7776-AB#7780:
+#   * User:           ChangePassword (allowSelf), ResetPassword, SetRoles, AddRole, RemoveRole, Merge, and the static CreateUser
+#                     (Create is a reserved method name, compiler error 102). CreateUser does NOT set `replacesGenericCreate`
+#                     yet: on the existing type User the flag is a MAJOR change (row M16), see the comment at the method.
+#   * Group:          AddMember, RemoveMember (user or client; new enum GroupMemberKind), SetRoles.
+#   * Client:         AddSecret (the result is `sensitive`: the generated secret is shown once), RemoveSecret.
+#   * DataPermission: GrantToRole, RevokeFromRole.
+# Password and secret parameters are `sensitive`; roles follow the REST parity (UserManagement, clients also TenantManagement);
+# every method declares authorization.dataAccess Write (AB#7036). Group, Client and DataPermission
+# do NOT replace the generic create either: the System.Identity.Bootstrap blueprint seeds them (AB#7121 would refuse every new tenant).
+# Adding methods and an enum is additive: Minor, nothing to acknowledge. A declared method without a handler answers
+# METHOD_HANDLER_NOT_AVAILABLE; release the identity service with this model only when the handler stories are merged.
+#
 # 2.28.0 (AB#7772, Feature AB#5696, closes accepted risk R13) is the FIRST ckLanguage 2 release of
 # System.Identity. It closes R13 - password hashes and security fields readable through the generic
 # GraphQL path - with the CK v2 access modifiers of the RtUser assignments:
@@ -8,7 +22,7 @@
 #   * MethodOnly: UserName, Email - readable, changed only by a type method (identity writes them through
 #                 its own repository, which the access modifiers do not guard).
 # All seven attribute definitions are `securitySensitive: true`, so the tightening is Minor + acknowledge
-# (compatibility.acknowledge below; row T7a of docs/ck-semver-rules.md in octo-construction-kit-engine:
+# (it carried compatibility.acknowledge entries for the one release that published 2.28.0, removed afterwards because an acknowledgement is valid for one release only, OCTO-CK204; row T7a of docs/ck-semver-rules.md in octo-construction-kit-engine:
 # the one release that moves a classic model to ckLanguage 2, once per model). The next release follows
 # the normal rule (row T7) again.
 # Every existing type and record declares `derivable: Any` (the classic behaviour), because the ckLanguage 2
@@ -67,23 +81,7 @@
 # concept AB#5528 in octo-construction-kit-engine). String -> Secret is Minor
 # (CkSemVerClassifier): stored clear-text values stay readable as legacy values
 # until the encrypt sweep has run. Secret requires System >= 2.5 (decision 12).
-modelId: System.Identity-2.28.0
+modelId: System.Identity-2.29.0
 ckLanguage: 2
 dependencies:
   - System-[2.5,3.0)
-compatibility:
-  acknowledge:
-    - change: "TypeAttribute:User-1/UserName#Modified:access"
-      reason: "Close accepted risk R13 (AB#7772): the user name is changed only by a type method, not through generic GraphQL"
-    - change: "TypeAttribute:User-1/Email#Modified:access"
-      reason: "Close accepted risk R13 (AB#7772): the email address (a sign-in and recovery identifier) is changed only by a type method, not through generic GraphQL"
-    - change: "TypeAttribute:User-1/PasswordHash#Modified:access"
-      reason: "Close accepted risk R13 (AB#7772): the password hash is no longer readable or writable through generic GraphQL"
-    - change: "TypeAttribute:User-1/SecurityStamp#Modified:access"
-      reason: "Close accepted risk R13 (AB#7772): the security stamp is no longer readable or writable through generic GraphQL"
-    - change: "TypeAttribute:User-1/LockoutEnd#Modified:access"
-      reason: "Close accepted risk R13 (AB#7772): the lockout end is readable but no longer writable through generic GraphQL (lockout is set by the identity service)"
-    - change: "TypeAttribute:User-1/AccessFailedCount#Modified:access"
-      reason: "Close accepted risk R13 (AB#7772): the failed-sign-in counter is readable but no longer writable through generic GraphQL (counted by the identity service)"
-    - change: "TypeAttribute:User-1/UserTokens#Modified:access"
-      reason: "Close accepted risk R13 (AB#7772): the authenticator key and recovery codes are no longer readable or writable through generic GraphQL"
