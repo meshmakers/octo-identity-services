@@ -92,6 +92,13 @@ public class CrossTenantAuthenticationService(
         };
     }
 
+    private static bool HasAuthenticatorKey(RtUser user)
+    {
+        return user.UserTokens?.Any(t => t.LoginProvider == "[AspNetUserStore]"
+                                         && t.Name == "AuthenticatorKey"
+                                         && !string.IsNullOrEmpty(t.Value)) == true;
+    }
+
     private async Task<CrossTenantAuthResult?> TryAuthenticateInHierarchyAsync(
         string tenantId, string username, string password,
         HashSet<string> visited, int depth)
@@ -128,6 +135,16 @@ public class CrossTenantAuthenticationService(
                 {
                     logger.LogInformation(
                         "Cross-tenant auth: user '{UserName}' in tenant '{TenantId}' is locked out",
+                        username, tenantId);
+                    return null;
+                }
+
+                // AB#7830: a source user with two-factor enabled but no authenticator key (e.g. after a tenant
+                // clone) must not be accepted on the password alone. Fails closed.
+                if (user.TwoFactorEnabled && !HasAuthenticatorKey(user))
+                {
+                    logger.LogWarning(
+                        "Cross-tenant auth refused: user '{UserName}' in tenant '{TenantId}' has two-factor enabled but no authenticator key",
                         username, tenantId);
                     return null;
                 }

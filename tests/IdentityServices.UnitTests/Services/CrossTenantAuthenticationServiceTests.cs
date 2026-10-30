@@ -102,6 +102,43 @@ public class CrossTenantAuthenticationServiceTests
         result.SourceUserName.Should().Be("testuser");
     }
 
+    [Theory]
+    [InlineData(false, true)]
+    [InlineData(true, false)]
+    [InlineData(true, true)]
+    public async Task Authenticate_WithCorrectPassword_TwoFactorDecidesAcceptance(bool twoFactorEnabled, bool hasAuthenticator)
+    {
+        // AB#7830: two-factor enabled without an authenticator key is refused (fails closed).
+        var provider = CreateTenantProvider("parent-tenant", isEnabled: true);
+        _identityProviderStore.GetAllAsync().Returns(new RtIdentityProvider[] { provider });
+
+        var user = CreateUser("testuser");
+        user.TwoFactorEnabled = twoFactorEnabled;
+        if (hasAuthenticator)
+        {
+            user.UserTokens = new Meshmakers.Octo.Runtime.Contracts.RepositoryEntities.AttributeRecordValueList<RtUserTokenRecord>
+            {
+                new RtUserTokenRecord { LoginProvider = "[AspNetUserStore]", Name = "AuthenticatorKey", Value = "synthetic-key" }
+            };
+        }
+
+        SetupTenantWithUser("parent-tenant", user);
+        SetupTenantWithNoProviders("parent-tenant");
+        _passwordHasher.VerifyHashedPassword(user, Arg.Any<string>(), "correctpass")
+            .Returns(PasswordVerificationResult.Success);
+
+        var result = await _sut.AuthenticateAsync("child-tenant", "testuser", "correctpass");
+
+        if (twoFactorEnabled && !hasAuthenticator)
+        {
+            result.Should().BeNull();
+        }
+        else
+        {
+            result.Should().NotBeNull();
+        }
+    }
+
     [Fact]
     public async Task Authenticate_WithInvalidCredentials_ReturnsNull()
     {

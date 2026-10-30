@@ -153,6 +153,7 @@
     "ERROR_CROSS_TENANT": "Cross-tenant login failed",
     "ERROR_ENTER_CREDENTIALS": "Please enter username and password",
     "ERROR_LOGIN_FAILED": "Login failed",
+    "ERROR_SECOND_FACTOR_SETUP_REQUIRED": "Your second factor must be set up again. Please contact your administrator.",
     "ERROR_LOGIN_GENERIC": "An error occurred during login",
     "FORGOT_PASSWORD_LINK": "Forgot password?",
     "OR_CONTINUE_WITH": "or continue with",
