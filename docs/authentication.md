@@ -136,6 +136,9 @@ in-memory copy and replaced the whole document, so N parallel wrong attempts cou
 framework's: 5 failures (`Lockout.MaxFailedAccessAttempts`) set a 5-minute lockout (`DefaultLockoutTimeSpan`) and restart
 the count; a successful sign-in resets the stored counter, whatever the caller's copy says. The store copies the stored
 values back onto the caller's instance, because `SignInManager` checks `IsLockedOutAsync` on it right after.
+Every such write is a version-matched replace (expected `rtVersion`), so it advances the stored user's version: a profile or
+admin update that read the user *before* a failure, lockout or reset is refused with a concurrency failure and re-reads
+instead of restoring the old counter or lifting the lockout (AB#7908).
 
 **Recovery codes are single-use under concurrency.** `OctoUserStore.RedeemCodeAsync` finds and removes the code in the
 same transaction; two parallel requests with the same code redeem it once.

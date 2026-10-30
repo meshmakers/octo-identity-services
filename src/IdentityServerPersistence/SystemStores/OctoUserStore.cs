@@ -132,58 +132,11 @@ public sealed partial class OctoUserStore(
         }
     }
 
-    /// <summary>
-    ///     Reads the stored user, applies <paramref name="mutate" /> and writes it back only if no other writer changed it
-    ///     in between (expected <c>rtVersion</c>, AB#7770 / AB#7769). On a conflict the user is read again and the change is
-    ///     re-applied, at most <see cref="MaxConcurrencyAttempts" /> times, so two parallel writers lose nothing.
-    /// </summary>
-    /// <param name="rtId">The user's runtime id.</param>
-    /// <param name="mutate">Changes the freshly read user; returns <c>false</c> when nothing needs to be written.</param>
-    /// <param name="cancellationToken">Cancellation token.</param>
-    /// <returns>
-    ///     The user as stored after the change (its <see cref="RtEntity.RtVersion" /> is the new version) and the version
-    ///     that was read; <c>null</c> when the user does not exist.
-    /// </returns>
-    private async Task<StoredUserMutation?> MutateStoredUserAsync(
+    private Task<StoredUserMutation?> MutateStoredUserAsync(
         OctoObjectId rtId,
         Func<RtUser, bool> mutate,
         CancellationToken cancellationToken)
-    {
-        for (var attempt = 1; ; attempt++)
-        {
-            cancellationToken.ThrowIfCancellationRequested();
-
-            try
-            {
-                using var session = await TenantRepository.GetSessionAsync();
-                session.StartTransaction();
-
-                var dbUser = await TenantRepository.GetRtEntityByRtIdAsync<RtUser>(session, rtId);
-                if (dbUser == null)
-                {
-                    await session.AbortTransactionAsync();
-                    return null;
-                }
-
-                var readVersion = dbUser.RtVersion;
-                if (mutate(dbUser))
-                {
-                    await TenantRepository.ReplaceOneRtEntityByIdAsync(session, rtId, dbUser, readVersion);
-                }
-
-                await session.CommitTransactionAsync();
-                return new StoredUserMutation(dbUser, readVersion);
-            }
-            catch (RtVersionConflictException) when (attempt < MaxConcurrencyAttempts)
-            {
-                // Another writer was faster: read again and re-apply (the session is disposed, nothing was written).
-            }
-
-            await Task.Delay(Random.Shared.Next(1, 4 * attempt + 1), cancellationToken);
-        }
-    }
-
-    private sealed record StoredUserMutation(RtUser User, ulong ReadVersion);
+        => MutateUserGuardedAsync(TenantRepository, rtId, mutate, MaxConcurrencyAttempts, cancellationToken);
 
     public async Task<string?> GetTokenAsync(
         RtUser user,
@@ -663,27 +616,6 @@ public sealed partial class OctoUserStore(
         if (outcome != null)
         {
             AdoptStoredLockoutState(user, outcome);
-        }
-    }
-
-    /// <summary>
-    ///     Carries the stored lockout fields to the caller's in-memory user. The caller's <c>rtVersion</c> follows the write
-    ///     only if the stored user was still the version the caller holds: then nothing else changed and the caller's
-    ///     later <see cref="UpdateAsync" /> stays valid. Otherwise the user is stale and keeps its old version, so
-    ///     <see cref="UpdateAsync" /> reports a concurrency failure instead of overwriting the other writer's changes.
-    /// </summary>
-    private static void AdoptStoredLockoutState(RtUser user, StoredUserMutation outcome)
-    {
-        user.AccessFailedCount = outcome.User.AccessFailedCount;
-        user.LockoutEnd = outcome.User.LockoutEnd;
-        AdoptStoredVersion(user, outcome);
-    }
-
-    private static void AdoptStoredVersion(RtUser user, StoredUserMutation outcome)
-    {
-        if (outcome.ReadVersion == user.RtVersion)
-        {
-            user.RtVersion = outcome.User.RtVersion;
         }
     }
 
