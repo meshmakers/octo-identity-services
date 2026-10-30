@@ -130,7 +130,16 @@ public sealed class CrossTenantSecondFactorVerifier(
             return SecondFactorVerificationStatus.Verified;
         }
 
-        await manager.AccessFailedAsync(user);
+        // AB#7854: the failure is counted atomically on the stored source user (OctoUserManager). A failure to count
+        // must not look like an ordinary wrong code that leaves the counter untouched.
+        var counted = await manager.AccessFailedAsync(user);
+        if (!counted.Succeeded)
+        {
+            logger.LogWarning(
+                "Cross-tenant second factor: failed attempt of user '{UserId}' of tenant '{TenantId}' could not be counted",
+                sourceUserId, sourceTenantId);
+        }
+
         logger.LogInformation(
             "Cross-tenant second factor rejected for user '{UserId}' of tenant '{TenantId}' ({Kind})",
             sourceUserId, sourceTenantId, kind);
@@ -164,7 +173,8 @@ public sealed class CrossTenantSecondFactorVerifier(
 
         // Role resolution is never used by the 2FA calls; the resolver is only there to satisfy the store.
         var store = new OctoUserStore(new FixedTenantResolver(repository), groupRoleResolver, errorDescriber);
-        return new UserManager<RtUser>(store, identityOptions, passwordHasher, userValidators, passwordValidators,
+        // OctoUserManager: atomic failure counting and recovery-code redemption, like the request-scoped manager.
+        return new OctoUserManager(store, identityOptions, passwordHasher, userValidators, passwordValidators,
             keyNormalizer, errorDescriber, services, userManagerLogger);
     }
 

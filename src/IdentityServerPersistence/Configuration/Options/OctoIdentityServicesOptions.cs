@@ -179,6 +179,49 @@ public class OctoIdentityServicesOptions
     ///     <c>GET /api/tenant-topology</c> (AB#7044): limits of the tenant-topology endpoint.
     /// </summary>
     public TenantTopologyOptions TenantTopology { get; set; } = new();
+
+    /// <summary>
+    ///     AB#7854: limits of the sign-in endpoints (password, LDAP, second factor, recovery code).
+    /// </summary>
+    public SignInRateLimitOptions SignInRateLimit { get; set; } = new();
+}
+
+/// <summary>
+///     Rate limits of the interactive sign-in endpoints (AB#7854): <c>login</c>, <c>ldap-login</c>, <c>login-2fa</c>,
+///     <c>login-2fa-email</c>, <c>send-2fa-email</c>, <c>login-recovery</c>. Environment variables:
+///     <c>OCTO_IDENTITY__SIGNINRATELIMIT__ENABLED</c>, <c>…__PERMITSPERACCOUNTPERMINUTE</c>,
+///     <c>…__CONCURRENTATTEMPTSPERACCOUNT</c>, <c>…__PERMITSPERCLIENTIPPERMINUTE</c>, <c>…__USEFORWARDEDFOR</c>.
+/// </summary>
+/// <remarks>
+///     The limits are kept in memory per pod. They complement the lockout (5 failures, 5 minutes): the lockout is
+///     counted on the user document, the limits stop bursts before they reach it.
+/// </remarks>
+public class SignInRateLimitOptions
+{
+    /// <summary>Switches the limits on (default). Off only for diagnosis.</summary>
+    public bool Enabled { get; set; } = true;
+
+    /// <summary>
+    ///     Attempts per account (user name for password logins, the user for second-factor and recovery-code attempts)
+    ///     in a sliding minute. Default 10.
+    /// </summary>
+    public int PermitsPerAccountPerMinute { get; set; } = 10;
+
+    /// <summary>
+    ///     Attempts of one account that may run at the same time. Default 1: parallel attempts are refused, so they cannot
+    ///     all be evaluated before the lockout of the first ones is visible.
+    /// </summary>
+    public int ConcurrentAttemptsPerAccount { get; set; } = 1;
+
+    /// <summary>Attempts per client address in a sliding minute, over all accounts and endpoints. Default 60.</summary>
+    public int PermitsPerClientIpPerMinute { get; set; } = 60;
+
+    /// <summary>
+    ///     Take the client address from the right-most <c>X-Forwarded-For</c> entry (the one the ingress adds) instead of
+    ///     the TCP peer, which behind the ingress is the ingress pod. Default <c>true</c>. Turn off only when the service
+    ///     is reachable without a proxy that sets the header.
+    /// </summary>
+    public bool UseForwardedFor { get; set; } = true;
 }
 
 /// <summary>
