@@ -716,6 +716,14 @@ public class CrossTenantSecondFactorTests : IntegrationTestBase
         var body = JsonNode.Parse(await approve.Content.ReadAsStringAsync(ct))!;
         body["success"]!.GetValue<bool>().Should().BeFalse();
         body["error"]!.GetValue<string>().Should().Be("access_denied");
+        approve.Headers.TryGetValues("Set-Cookie", out var cookies);
+        (cookies ?? []).Should().NotContain(c => c.StartsWith(".AspNetCore.Identity.Application", StringComparison.Ordinal),
+            "a refused approval writes no new session");
+        using (var scope = CreateScope())
+        {
+            (await scope.ServiceProvider.GetRequiredService<UserManager<RtUser>>().FindByNameAsync(userName))
+                .Should().BeNull("no user is (re)created by the device endpoint");
+        }
     }
 
     private const string DeviceClientId = "xt2fa-device";
