@@ -168,14 +168,9 @@ public class OnBehalfOfProcessor(
             .Select(c => c.Key)
             .ToList();
         var handler = new JsonWebTokenHandler();
-        var validation = await handler.ValidateTokenAsync(subjectToken, new TokenValidationParameters
-        {
-            ValidateIssuer = true,
-            ValidIssuer = octoIdentityOptions.Value.AuthorityUrl.EnsureEndsWith("/"),
-            ValidateAudience = false,
-            ValidateLifetime = true,
-            IssuerSigningKeys = signingKeys
-        });
+        // AB#7860: only an access token (typ at+jwt) is a valid subject, never an id_token.
+        var validation = await handler.ValidateTokenAsync(subjectToken,
+            SubjectTokenValidation.ForAccessToken(octoIdentityOptions.Value.AuthorityUrl, signingKeys));
         if (!validation.IsValid)
         {
             logger.LogWarning("Delegation rejected: subject_token invalid ({Error})",

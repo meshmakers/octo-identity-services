@@ -668,6 +668,15 @@ principal carries it, `TokenEndpointController.CopySessionClaims`); that is now 
 `SecondFactorEvidenceRefreshTests` (the factory's `SecurityStampClock` steps 31 minutes ahead; session, new token and
 `cross-tenant-token` after the revalidation; refresh grant), `SessionClaimPreservationTests`.
 
+**Locked-out or disabled source users cross no boundary (AB#7855).** `ValidateCrossTenantAccessAsync` — called on every
+crossing (cross-tenant-token, cross-tenant-login, tenant-switch, token exchange, completion of
+the cross-tenant second factor) — refuses a source user that is locked out (`LockoutEnabled` and `LockoutEnd` in the future)
+or that the sign-in rules refuse (`IdentityOptions.SignIn`: confirmed e-mail / phone / account, the rules
+`SignInManager.CanSignInAsync` applies on the token endpoint; `RtUser` has no separate "disabled" flag). A shadow user is
+judged with every tier of its `xt_` chain: locking the home user stops its shadows from crossing further. An existing
+session, a cross-tenant token minted before the lock and an access token all stop working at the boundary. A chain tier whose
+tenant cannot be read blocks nothing here (it already requires the second factor).
+
 Tests: `tests/IdentityServices.IntegrationTests/Api/Auth/CrossTenantSecondFactorTests.cs` (real child tenant, real 2FA
 enrollment, real authorization-code tokens; every entry point above, with and without 2FA), plus unit tests in
 `CrossTenantAuthenticationServiceTests` and `CrossTenantLoginTests`.
@@ -888,6 +897,19 @@ Clients match on `error=access_denied` plus the `tenant_not_provisioned` prefix 
 marker; the text after it may change). A caller whose tenant is not an ancestor still gets
 `unauthorized_client`, an invalid subject token `invalid_grant`. Exchanged tokens never carry a refresh
 token — re-exchange from the root token. Every refusal is persisted as a `Token Exchange Failure` audit event.
+
+#### Only access tokens are subject tokens (AB#7860)
+
+Both `subject_token` consumers — the token exchange (`TenantExchangeProcessor`) and the on-behalf-of grant
+(`OnBehalfOfProcessor`) — validate with `SubjectTokenValidation.ForAccessToken`: signature, issuer, lifetime **and** the JWT
+header `typ` = `at+jwt` (RFC 9068; OpenIddict writes access tokens that way, id_tokens with `typ: JWT`). An id_token of a
+client with `AlwaysIncludeUserClaimsInIdToken` carries `sub`, `tenant_id` and `amr` like an access token and travels in
+places access tokens do not (e.g. `id_token_hint`). For the RFC 8693 exchange OpenIddict already refuses it before the
+processor runs ("The specified token is not an access token", verified over HTTP for a declared `access_token`, a declared
+`id_token` and no declared type); the processor check is defence in depth. The on-behalf-of grant is a custom flow
+OpenIddict does not validate, so there the processor check is the only one. The audience stays unchecked (platform
+convention). Tests: `CrossTenantSecondFactorTests.TokenExchange_IdTokenAsSubjectToken_IsRefused`,
+`TenantExchangeSubjectTokenTypeTests`, `OnBehalfOfProcessorTests.IdTokenAsSubjectToken_IsRejectedAsInvalidGrant`.
 
 ### Delegation / On-Behalf-Of (AB#5026)
 

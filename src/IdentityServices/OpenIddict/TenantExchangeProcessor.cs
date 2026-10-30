@@ -101,7 +101,7 @@ public class TenantExchangeProcessor(
         string? subjectToken, string? subjectTokenType, string? acrValues,
         CancellationToken cancellationToken = default)
     {
-        // (a) Validate the subject token (signature + issuer + lifetime, ValidateAudience=false —
+        // (a) Validate the subject token (signature + issuer + lifetime + typ at+jwt, ValidateAudience=false —
         //     platform-wide convention). Deliberately NOT bound to the request tenant: the request
         //     is wired to the TARGET tenant B while the subject belongs to the SOURCE tenant A.
         if (string.IsNullOrEmpty(subjectToken))
@@ -120,14 +120,9 @@ public class TenantExchangeProcessor(
             .Select(c => c.Key)
             .ToList();
         var handler = new JsonWebTokenHandler();
-        var validation = await handler.ValidateTokenAsync(subjectToken, new TokenValidationParameters
-        {
-            ValidateIssuer = true,
-            ValidIssuer = octoIdentityOptions.Value.AuthorityUrl.EnsureEndsWith("/"),
-            ValidateAudience = false,
-            ValidateLifetime = true,
-            IssuerSigningKeys = signingKeys
-        });
+        // AB#7860: only an access token (typ at+jwt) is a valid subject, never an id_token.
+        var validation = await handler.ValidateTokenAsync(subjectToken,
+            SubjectTokenValidation.ForAccessToken(octoIdentityOptions.Value.AuthorityUrl, signingKeys));
         if (!validation.IsValid)
         {
             logger.LogWarning("Token exchange rejected: subject_token invalid ({Error})",

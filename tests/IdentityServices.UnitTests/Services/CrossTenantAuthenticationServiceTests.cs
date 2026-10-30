@@ -23,6 +23,7 @@ public class CrossTenantAuthenticationServiceTests
     private readonly IPasswordHasher<RtUser> _passwordHasher;
     private readonly ILogger<CrossTenantAuthenticationService> _logger;
     private readonly CrossTenantAuthenticationService _sut;
+    private readonly IdentityOptions _identityOptions = new();
     private readonly List<OctoTenant> _registeredTenants = [];
     private readonly Dictionary<string, ITenantRepository> _repositories = new();
     private readonly RegisteredTenantsShadowUserChainResolver _chainResolver = new("home-tenant");
@@ -48,7 +49,7 @@ public class CrossTenantAuthenticationServiceTests
             _identityProviderStore,
             _passwordHasher,
             _chainResolver,
-            Microsoft.Extensions.Options.Options.Create(new IdentityOptions()),
+            Microsoft.Extensions.Options.Options.Create(_identityOptions),
             _logger);
     }
 
@@ -273,6 +274,77 @@ public class CrossTenantAuthenticationServiceTests
         var result = await _sut.ValidateCrossTenantAccessAsync("target-tenant", "source-tenant", user.RtId.ToString());
 
         result!.SourceUserRequiresSecondFactor.Should().Be(twoFactorEnabled);
+    }
+
+    [Fact]
+    public async Task ValidateCrossTenantAccess_LockedOutSourceUser_IsRefused()
+    {
+        // AB#7855: an existing session or token must not carry a locked-out user across a tenant boundary.
+        SetupTenantWithProviders("target-tenant", [CreateTenantProvider("source-tenant", isEnabled: true)]);
+        var user = CreateUser("testuser");
+        user.LockoutEnabled = true;
+        user.LockoutEnd = DateTimeOffset.UtcNow.AddMinutes(5);
+        SetupTenantWithUser("source-tenant", user);
+
+        var result = await _sut.ValidateCrossTenantAccessAsync("target-tenant", "source-tenant", user.RtId.ToString());
+
+        result.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task ValidateCrossTenantAccess_ExpiredLockout_IsAllowed()
+    {
+        SetupTenantWithProviders("target-tenant", [CreateTenantProvider("source-tenant", isEnabled: true)]);
+        var user = CreateUser("testuser");
+        user.LockoutEnabled = true;
+        user.LockoutEnd = DateTimeOffset.UtcNow.AddMinutes(-1);
+        SetupTenantWithUser("source-tenant", user);
+
+        var result = await _sut.ValidateCrossTenantAccessAsync("target-tenant", "source-tenant", user.RtId.ToString());
+
+        result.Should().NotBeNull("a lockout that has ended no longer blocks");
+    }
+
+    [Theory]
+    [InlineData("email")]
+    [InlineData("phone")]
+    [InlineData("account")]
+    public async Task ValidateCrossTenantAccess_SourceUserTheSignInRulesRefuse_IsRefused(string rule)
+    {
+        // AB#7855: "disabled" = a user SignInManager.CanSignInAsync would refuse (the token endpoint's check).
+        switch (rule)
+        {
+            case "email": _identityOptions.SignIn.RequireConfirmedEmail = true; break;
+            case "phone": _identityOptions.SignIn.RequireConfirmedPhoneNumber = true; break;
+            default: _identityOptions.SignIn.RequireConfirmedAccount = true; break;
+        }
+
+        SetupTenantWithProviders("target-tenant", [CreateTenantProvider("source-tenant", isEnabled: true)]);
+        var user = CreateUser("testuser");
+        user.EmailConfirmed = false;
+        user.PhoneNumberConfirmed = false;
+        SetupTenantWithUser("source-tenant", user);
+
+        var result = await _sut.ValidateCrossTenantAccessAsync("target-tenant", "source-tenant", user.RtId.ToString());
+
+        result.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task ValidateCrossTenantAccess_ShadowUserWhoseHomeUserIsLockedOut_IsRefused()
+    {
+        // AB#7855: locking the home identity stops its shadow users from crossing further.
+        SetupTenantWithProviders("target-tenant", [CreateTenantProvider("source-tenant", isEnabled: true)]);
+        var shadow = CreateUser("xt_home-tenant_alice");
+        SetupTenantWithUser("source-tenant", shadow);
+        var home = CreateUser("alice");
+        home.LockoutEnabled = true;
+        home.LockoutEnd = DateTimeOffset.UtcNow.AddMinutes(5);
+        SetupTenantWithUser("home-tenant", home);
+
+        var result = await _sut.ValidateCrossTenantAccessAsync("target-tenant", "source-tenant", shadow.RtId.ToString());
+
+        result.Should().BeNull();
     }
 
     [Fact]
