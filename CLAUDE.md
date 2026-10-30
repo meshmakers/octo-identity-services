@@ -303,7 +303,10 @@ source lockout counts). Sessions/tokens issued on evidence carry `amr=mfa` on (e
 device tokens now keep the session's `amr` instead of a forced `pwd`. `tenant-switch` derives the source identity from
 the caller's own chain (never the request body, AB#7815). Details: `docs/authentication.md` § Second Factor Across
 Tenant Boundaries; tests `CrossTenantSecondFactorTests` (HTTP, real child tenant). The repository has no CHANGELOG file;
-this paragraph and that section are the change record (Security).
+this paragraph and that section are the change record (Security). AB#7859: the security-stamp revalidation (every 30 min) used to drop
+`amr=mfa` from the session; `SessionClaimPreservation` (`OnRefreshingPrincipal`) keeps `amr`/`idp`/`sid`. The refresh
+grant already kept `amr`. 🔴 Tests that need the revalidation advance `CustomWebApplicationFactory.SecurityStampClock`
+(reset it in `finally`); tests: `SecondFactorEvidenceRefreshTests`.
 
 **Cross-tenant token exchange (RFC 8693, AB#4338)** — the non-interactive
 counterpart of the browser tenant-switch, for the MCP server:

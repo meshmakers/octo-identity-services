@@ -600,6 +600,15 @@ cookie skipped the second factor for, and external-provider sign-ins (Google, En
 user signed in that way is refused at the boundary (fail closed) and signs in once more with the second factor.
 "Remember this machine" is not offered for the source user's second factor on a child tenant.
 
+**The evidence survives session refresh (AB#7859).** The security-stamp validator rebuilds the cookie principal from the
+user every 30 minutes (`SecurityStampValidatorOptions.ValidationInterval`) and used to drop `amr`: after the first
+revalidation every new token said `amr=pwd` and a 2FA user was refused at the boundaries above. `SessionClaimPreservation`
+(registered as `OnRefreshingPrincipal`) copies the sign-in claims `amr`, `idp` and `sid` from the verified principal onto the
+rebuilt one; user claims (roles, tenant) are still re-resolved. The refresh-token grant already kept `amr` (the stored
+principal carries it, `TokenEndpointController.CopySessionClaims`); that is now pinned by a test. Tests:
+`SecondFactorEvidenceRefreshTests` (the factory's `SecurityStampClock` steps 31 minutes ahead; session, new token and
+`cross-tenant-token` after the revalidation; refresh grant), `SessionClaimPreservationTests`.
+
 Tests: `tests/IdentityServices.IntegrationTests/Api/Auth/CrossTenantSecondFactorTests.cs` (real child tenant, real 2FA
 enrollment, real authorization-code tokens; every entry point above, with and without 2FA), plus unit tests in
 `CrossTenantAuthenticationServiceTests` and `CrossTenantLoginTests`.

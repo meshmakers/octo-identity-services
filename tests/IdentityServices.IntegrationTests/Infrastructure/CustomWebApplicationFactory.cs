@@ -190,6 +190,12 @@ public class CustomWebApplicationFactory : WebApplicationFactory<Program>, IAsyn
         await base.DisposeAsync();
     }
 
+    /// <summary>
+    ///     Clock of the security-stamp validator (AB#7859). Tests advance it to force the revalidation of a cookie
+    ///     session; reset it afterwards (one factory per test class, tests of a class run one after another).
+    /// </summary>
+    public AdjustableTimeProvider SecurityStampClock { get; } = new();
+
     protected override void ConfigureWebHost(IWebHostBuilder builder)
     {
         Console.Error.WriteLine("[WebFactory] ConfigureWebHost called");
@@ -280,6 +286,10 @@ public class CustomWebApplicationFactory : WebApplicationFactory<Program>, IAsyn
                 opts.AuthorityUrl = "https://localhost:5003";
                 opts.EnableTokenCleanup = false;
             });
+
+            // AB#7859: the security-stamp validator's clock, so a test can step past its revalidation interval.
+            services.Configure<Microsoft.AspNetCore.Identity.SecurityStampValidatorOptions>(o =>
+                o.TimeProvider = SecurityStampClock);
 
             // Configure cookie settings for testing (allow non-secure cookies over HTTP)
             // Configure ALL Identity cookies - Application, External, TwoFactorUserId, TwoFactorRememberMe
