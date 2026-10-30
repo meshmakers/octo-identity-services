@@ -27,7 +27,7 @@ namespace IdentityServices.IntegrationTests.Api.TenantApi;
 ///     Real MongoDB, real identity host. The last-administrator tests first remove every effective <c>UserManagement</c>
 ///     holder of the test database, so exactly the holders a test creates exist.
 /// </summary>
-public class GroupRoleChangeGuardTests : IntegrationTestBase
+public class GroupRoleChangeGuardTests : IntegrationTestBase, IDisposable
 {
     private const string UserManagement = "UserManagement";
 
@@ -48,6 +48,12 @@ public class GroupRoleChangeGuardTests : IntegrationTestBase
             });
         _host = factory.WithWebHostBuilder(b => b.ConfigureTestServices(services => services.AddSingleton(events)));
     }
+
+    /// <summary>
+    ///     Every test instance builds its own derived host; an undisposed host keeps its configuration file watchers
+    ///     (inotify instances), and the CI agents allow only 128 of them.
+    /// </summary>
+    public void Dispose() => _host.Dispose();
 
     #region Self-grant
 

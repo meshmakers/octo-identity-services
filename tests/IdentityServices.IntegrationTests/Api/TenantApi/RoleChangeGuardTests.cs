@@ -34,7 +34,7 @@ namespace IdentityServices.IntegrationTests.Api.TenantApi;
 ///     tests first remove every effective <c>UserManagement</c> holder of the test database, so exactly the holders
 ///     a test creates exist.
 /// </summary>
-public class RoleChangeGuardTests : IntegrationTestBase
+public class RoleChangeGuardTests : IntegrationTestBase, IDisposable
 {
     private const string UserManagement = "UserManagement";
 
@@ -74,6 +74,12 @@ public class RoleChangeGuardTests : IntegrationTestBase
     }
 
     public static TheoryData<string> Transports => new() { "rest", "method" };
+
+    /// <summary>
+    ///     Every test instance builds its own derived host; an undisposed host keeps its configuration file watchers
+    ///     (inotify instances), and the CI agents allow only 128 of them.
+    /// </summary>
+    public void Dispose() => _host.Dispose();
 
     #region Self-grant
 
