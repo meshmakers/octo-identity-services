@@ -939,7 +939,7 @@ Rules behind the shape (do not change them without reading this):
 ### CK method host of the identity service and `User.ChangePassword` (AB#5672)
 
 The identity service hosts CK methods as a remote handler (bus transport, SDK `Meshmakers.Octo.Services.Methods`). All of it lives in
-`src/IdentityServices/Methods/`; a later handler story (AB#7774, AB#7776-AB#7780) adds a handler class and **one row** to
+`src/IdentityServices/Methods/`; a later handler story (AB#7776-AB#7780; `User.ResetPassword` AB#7774 is the second one, section below) adds a handler class and **one row** to
 `IdentityMethodHost.Handlers` (method id constant of `SystemIdentityCkIds`, handler type, `CarriesSecret`, `b => b.Handle<T>(id)`) - nothing else.
 
 - **Host setup** (`IdentityMethodHost`, called once from `Program.cs` after `AddOctoIdentityPersistence`): `AddCkMethodHandlers("IdentityService", ...)`,
@@ -1010,6 +1010,29 @@ Audit: the `Identity.Method` event of every call (success and every refusal, `Id
 (every guard, case/duplicates, empty list, audit, forged caller, hosting), `UserRoleMethodParityTests` (REST and method side by side per guard, the
 documented difference, self grant), `IdentityMethodHostTests`. The integration test factory removes the bus side of the method host
 (`CkMethodHandlerStartupService`, heartbeat) because the test host has no broker.
+
+### `User.ResetPassword` (AB#7774)
+
+`UserResetPasswordHandler` (`src/IdentityServices/Methods/`, one row in `IdentityMethodHost.Handlers`, `CarriesSecret = true`: gated by
+`Methods:Identity:EnablePasswordMethods`, off = `METHOD_HANDLER_NOT_AVAILABLE`). A user administrator (`UserManagement`) sets a new password
+without the current one.
+
+- **Caller.** The SDK evaluates the declared role before the handler; the handler checks `CallerPrincipal.Roles` for `UserManagement` again
+  (defense in depth, `METHOD_FORBIDDEN` / `missing-role`) **before** the tenant is bound or the target is looked up, so an unauthorized caller gets the same answer
+  for an existing and a missing target and `METHOD_TARGET_NOT_FOUND` is only seen by an authorized one. Service tokens with the role are allowed
+  (actor = client id). A user without the role cannot reset their own password with it (`ChangePassword` is for that).
+- **Order.** role, tenant, user, shadow user (`SHADOW_USER_PASSWORD_NOT_ALLOWED`), remember `IsLockedOutAsync`, `GeneratePasswordResetTokenAsync` +
+  `ResetPasswordAsync` (policy failure = `PASSWORD_POLICY_VIOLATION`, codes only, **nothing else changes, the lockout stays**), then
+  `SetLockoutEndDateAsync(user, null)` + `ResetAccessFailedCountAsync(user)` through `UserManager` (guarded, versioned store write of AB#7908; never write the user
+  entity directly), then `IUserCredentialChangeService.OnPasswordChangedAsync(..., PasswordChangePath.MethodResetPassword, <caller user name>)` (security
+  stamp, revocation of refresh tokens and authorizations; throws on failure = `METHOD_HANDLER_FAILED`).
+- **REST difference** (`UsersController.ResetPassword`, unchanged): REST does **not** lift the lockout and e-mails a second reset token; the method lifts
+  the lockout and sends **no** e-mail (AB#7775 adds the notification).
+- **Audit.** `IdentityMethodAuditWriter.RecordAsync(..., extraDetails)`: one `Identity.Method` event per call in a `finally` (success, every failure, and an
+  exception as `METHOD_HANDLER_FAILED`), details as `ChangePassword` plus `lockoutLifted` (`true` only when the user was locked out at call time and the call succeeded).
+- **Tests:** `Api/Methods/UserResetPasswordMethodTests` (real MongoDB; event repository and logger captured: locked-out user end to end, counter-only user,
+  service token, missing role for existing and missing target, unknown target, policy violation, shadow user, failing revocation, forged caller on the host;
+  password canary never in audit events or logs), `IdentityMethodHostTests` (switch, audit details).
 
 ### Blueprint-owned opt-in: `DataPolicy.ProtectBlueprintLocked` (AB#6384; System.Identity 2.24.0)
 

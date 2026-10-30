@@ -45,7 +45,9 @@ internal static class IdentityMethodHost
         new(SystemIdentityCkIds.UserAddRoleMethodId, typeof(UserAddRoleHandler), false,
             b => b.Handle<UserAddRoleHandler>(SystemIdentityCkIds.UserAddRoleMethodId)),
         new(SystemIdentityCkIds.UserRemoveRoleMethodId, typeof(UserRemoveRoleHandler), false,
-            b => b.Handle<UserRemoveRoleHandler>(SystemIdentityCkIds.UserRemoveRoleMethodId))
+            b => b.Handle<UserRemoveRoleHandler>(SystemIdentityCkIds.UserRemoveRoleMethodId)),
+        new(SystemIdentityCkIds.UserResetPasswordMethodId, typeof(UserResetPasswordHandler), true,
+            b => b.Handle<UserResetPasswordHandler>(SystemIdentityCkIds.UserResetPasswordMethodId))
     ];
 
     /// <summary>
