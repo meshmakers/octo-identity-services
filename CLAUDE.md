@@ -320,6 +320,10 @@ raises the limits (the suite signs in from one address); a test of the limit its
 `ConfigureTestServices`. Details: `docs/authentication.md` § Sign-In Attempts; tests `SignInAttemptConcurrencyTests`,
 `SignInRateLimiterTests`.
 
+**Locked-out or disabled source users (AB#7855):** `ValidateCrossTenantAccessAsync` (every crossing) also refuses a
+locked-out source user and one the `IdentityOptions.SignIn` rules refuse ("disabled"; no separate flag on `RtUser`),
+including every tier of its `xt_` chain.
+
 **Cross-tenant token exchange (RFC 8693, AB#4338)** — the non-interactive
 counterpart of the browser tenant-switch, for the MCP server:
 
