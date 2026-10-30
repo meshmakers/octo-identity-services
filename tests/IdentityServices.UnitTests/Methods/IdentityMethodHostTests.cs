@@ -65,9 +65,10 @@ public class IdentityMethodHostTests
     }
 
     [Fact]
-    public void TheStartupValidation_NamesTheNormalizedSystemTenantId()
+    public void TheStartupValidation_NeedsNoIdentityWorkaround_WithTheDefaultConfiguration()
     {
-        // The CK cache is keyed by the lower case tenant id; "OctoSystem" as configured would miss it and stop the service.
+        // The SDK normalizes the tenant id of the start-up validation itself (AB#7912): the host adds no tenant list, so a default
+        // installation ("OctoSystem") validates its methods against the CK cache of the lower case system tenant without configuration.
         var services = new ServiceCollection();
         services.AddLogging();
         services.AddSingleton<IConfiguration>(new ConfigurationBuilder().Build());
@@ -78,8 +79,7 @@ public class IdentityMethodHostTests
 
         using var provider = services.BuildServiceProvider();
 
-        provider.GetRequiredService<IOptions<CkMethodHandlerOptions>>().Value.ValidationTenantIds
-            .Should().Equal("octosystem");
+        provider.GetRequiredService<IOptions<CkMethodHandlerOptions>>().Value.ValidationTenantIds.Should().BeEmpty();
     }
 
     [Fact]
