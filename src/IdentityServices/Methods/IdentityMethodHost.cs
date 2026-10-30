@@ -1,4 +1,5 @@
 using IdentityServerPersistence.Configuration.Options;
+using Meshmakers.Octo.Runtime.Contracts.MongoDb.Configuration;
 using Meshmakers.Octo.Services.Infrastructure.Services;
 using Meshmakers.Octo.Services.Methods;
 using Meshmakers.Octo.Services.Methods.Authorization;
@@ -74,6 +75,18 @@ internal static class IdentityMethodHost
                 handler.Register(builder);
             }
         });
+
+        // The startup validation looks the method up in the CK cache of the system tenant. The cache is keyed by the
+        // normalized (lower case) tenant id, but the SDK default is the configured SystemTenantId as written ("OctoSystem"
+        // in a default installation): the lookup then misses and the service refuses to start. Name the normalized id.
+        services.AddOptions<CkMethodHandlerOptions>()
+            .Configure<IOptions<OctoSystemConfiguration>>((methods, system) =>
+            {
+                if (methods.ValidationTenantIds.Count == 0)
+                {
+                    methods.ValidationTenantIds = [system.Value.SystemTenantId.Trim().ToLowerInvariant()];
+                }
+            });
 
         // The bus is internal but not authenticated per message: the host validates the access token the caller forwarded
         // (issuer, signature, expiry, tenant, scope) with the same authority the HTTP API of this service uses.

@@ -2,7 +2,11 @@ using FluentAssertions;
 using Meshmakers.Octo.Backend.IdentityServices.Methods;
 using Meshmakers.Octo.Services.Notifications.Generated.System.Notification.v2;
 using Meshmakers.Octo.Services.Notifications.Services;
+using Meshmakers.Octo.Runtime.Contracts.MongoDb.Configuration;
+using Meshmakers.Octo.Services.Methods;
 using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Options;
 using Microsoft.Extensions.Logging.Abstractions;
 using NSubstitute;
 using Persistence.IdentityCkModel.Generated.System.Identity.v2;
@@ -44,6 +48,34 @@ public class IdentityMethodHostTests
             new Dictionary<string, string?> { ["Methods:Identity:EnablePasswordMethods"] = "true" }).Build();
 
         IdentityMethodHost.ReadOptions(configuration).EnablePasswordMethods.Should().BeTrue();
+    }
+
+    [Fact]
+    public void TheStartupValidation_NamesTheNormalizedSystemTenantId()
+    {
+        // The CK cache is keyed by the lower case tenant id; "OctoSystem" as configured would miss it and stop the service.
+        var services = new ServiceCollection();
+        services.AddLogging();
+        services.AddSingleton<IConfiguration>(new ConfigurationBuilder().Build());
+        services.Configure<OctoSystemConfiguration>(c => c.SystemTenantId = "OctoSystem");
+        IdentityMethodHost.AddIdentityCkMethodHost(services,
+            IdentityMethodHost.SelectHandlers(new IdentityMethodsOptions { EnablePasswordMethods = true }))
+            .Should().BeTrue();
+
+        using var provider = services.BuildServiceProvider();
+
+        provider.GetRequiredService<IOptions<CkMethodHandlerOptions>>().Value.ValidationTenantIds
+            .Should().Equal("octosystem");
+    }
+
+    [Fact]
+    public void WithoutASelectedHandler_NothingIsHosted()
+    {
+        var services = new ServiceCollection();
+
+        IdentityMethodHost.AddIdentityCkMethodHost(services, []).Should().BeFalse();
+
+        services.Any(d => d.ServiceType == typeof(IMethodTenantAccessor)).Should().BeFalse();
     }
 
     [Fact]

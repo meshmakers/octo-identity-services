@@ -940,6 +940,11 @@ The identity service hosts CK methods as a remote handler (bus transport, SDK `M
   `IdentityMethodDeclarationsIntegrationTests.EveryHandlerRegistration_FlagsASecretCarryingMethod_AsTheModelDeclaresIt` compares every
   `CarriesSecret` with the compiled model (a sensitive parameter or result), so a new handler cannot pass the gate by a forgotten flag.
   The switch is read while the service collection is built: restart the service after changing it.
+- **Startup validation tenant.** The SDK validates every registration against the CK cache of the system tenant, keyed by the lower case tenant id,
+  but its default is `SystemTenantId` as configured (`OctoSystem` in a default installation): the lookup misses and the service refuses to start
+  ("has no such method"). `IdentityMethodHost` therefore sets `Methods:ValidationTenantIds` to the normalized system tenant id when none is configured
+  (found on the local stack, `TheStartupValidation_NamesTheNormalizedSystemTenantId`). On a rolling upgrade the System.Identity model of the system tenant must already
+  be the embedded version when the validation runs; the identity setup imports it first.
 - **Tenant on the bus.** A handler has no HTTP request, but every store resolves its tenant through `IMultiTenancyResolverService`. The handler calls
   `IMethodTenantAccessor.BindAsync(context.TenantId)` **before** it resolves `UserManager`, the stores or `IUserCredentialChangeService` from its scope
   (it takes `IServiceProvider` for exactly that reason); `MethodTenantResolverService` answers with the bound tenant and falls back to the HTTP
