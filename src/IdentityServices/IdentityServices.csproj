@@ -41,6 +41,7 @@
              license expiry, see docs/CONCEPT-OPENIDDICT-MIGRATION.md). -->
         <PackageReference Include="OpenIddict.AspNetCore" Version="7.6.0" />
         <PackageReference Include="Meshmakers.Octo.Communication.Contracts" Version="$(OctoCoreLibVersion)" />
+        <PackageReference Include="Meshmakers.Octo.Services.Methods" Version="$(OctoCoreLibVersion)" />
         <PackageReference Include="Meshmakers.Octo.Services.Swagger" Version="$(OctoCoreLibVersion)" />
         <PackageReference Include="Meshmakers.Octo.Services.Observability" Version="$(OctoCoreLibVersion)" />
         <PackageReference Include="QRCoder" Version="1.8.0" />

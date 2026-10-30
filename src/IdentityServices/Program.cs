@@ -10,6 +10,7 @@ using Meshmakers.Octo.Backend.IdentityServices.Mapping;
 using Meshmakers.Octo.Backend.IdentityServices.Consumers;
 using Meshmakers.Octo.Backend.IdentityServices.Cookies;
 using Meshmakers.Octo.Backend.IdentityServices.Resources;
+using Meshmakers.Octo.Backend.IdentityServices.Methods;
 using Meshmakers.Octo.Backend.IdentityServices.Middleware;
 using Meshmakers.Octo.Backend.IdentityServices.OpenIddict;
 using Meshmakers.Octo.Backend.IdentityServices.OpenIddict.Interaction;
@@ -199,9 +200,21 @@ try
     // refresh — operators bump the embedded blueprint version to roll forward.
     builder.Services.AddBlueprintSystemIdentityBootstrapV1();
 
+    // CK methods hosted by the identity service (AB#5672). Handlers of methods with a password or secret are only
+    // registered with Methods:Identity:EnablePasswordMethods=true (default false, production gate of 2026-10-23).
+    var identityMethodOptions = IdentityMethodHost.ReadOptions(builder.Configuration);
+    var identityMethodHandlers = IdentityMethodHost.SelectHandlers(identityMethodOptions);
+    logger.Info("CK method handlers: {0} of {1} registered (EnablePasswordMethods={2})", identityMethodHandlers.Count,
+        IdentityMethodHost.Handlers.Count, identityMethodOptions.EnablePasswordMethods);
+
     builder.Services.AddRuntimeEngine()
         .AddOctoIdentityPersistence(configureDistributionEventHub: c =>
         {
+            if (identityMethodHandlers.Count > 0)
+            {
+                c.AddCkMethodHandlerDiscovery();
+            }
+
             c.AddBroadcastEventConsumer<IdentityProviderUpdateConsumer, IdentityProviderUpdate>();
             c.AddBroadcastEventConsumer<IdentityCorsClientsUpdateConsumer, CorsClientsUpdate>();
             c.AddBroadcastEventConsumer<IdentityTenantManagementConsumer, PreDeleteTenant>();
@@ -209,6 +222,9 @@ try
             c.AddCommandConsumer<CreateIdentityDataCommandRequestConsumer, CreateIdentityDataCommandRequest>(
                 QueueNames.CreateIdentityDataCommand);
         });
+
+    // After AddOctoIdentityPersistence: replaces the tenant resolver that AddOctoServiceInfrastructure registers.
+    builder.Services.AddIdentityCkMethodHost(identityMethodHandlers);
 
     // Register Identity-specific CORS policy provider AFTER AddOctoIdentityPersistence,
     // which internally calls AddOctoServiceInfrastructure and registers its own ICorsPolicyProvider.

@@ -2,6 +2,7 @@ using FluentAssertions;
 
 using IdentityServices.IntegrationTests.Fixtures;
 
+using Meshmakers.Octo.Backend.IdentityServices.Methods;
 using Meshmakers.Octo.ConstructionKit.Contracts;
 using Meshmakers.Octo.ConstructionKit.Contracts.DataTransferObjects;
 using Meshmakers.Octo.ConstructionKit.Contracts.DependencyGraph;
@@ -148,6 +149,27 @@ public class IdentityMethodDeclarationsIntegrationTests : IClassFixture<Identity
         {
             (await GetTypeAsync(type)).AllMethods.Values.Where(m => m.ReplacesGenericCreate)
                 .Should().BeEmpty(type);
+        }
+    }
+
+    /// <summary>
+    ///     AB#5672: the production gate registers the handlers of secret-carrying methods only with
+    ///     <c>Methods:Identity:EnablePasswordMethods</c>. The flag of a handler registration must say what the compiled model
+    ///     says (a sensitive parameter or result), so a later handler story cannot register a password method past the gate.
+    /// </summary>
+    [Fact]
+    public async Task EveryHandlerRegistration_FlagsASecretCarryingMethod_AsTheModelDeclaresIt()
+    {
+        IdentityMethodHost.Handlers.Should().NotBeEmpty();
+        foreach (var registration in IdentityMethodHost.Handlers)
+        {
+            var typeAndMethod = registration.MethodId.Split('/')[1];
+            var type = typeAndMethod.Split('.')[0];
+            var methodId = typeAndMethod.Split('.', 2)[1];
+            var method = (await GetTypeAsync(type)).AllMethods[methodId].Definition;
+            var carriesSecret = (method.Parameters ?? []).Any(p => p.Sensitive) || method.Result?.Sensitive == true;
+
+            registration.CarriesSecret.Should().Be(carriesSecret, registration.MethodId);
         }
     }
 
