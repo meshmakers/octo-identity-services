@@ -295,7 +295,7 @@ The service supports hierarchical cross-tenant authentication where parent-tenan
 **Cross-tenant role sync**: When a cross-tenant user logs in (via `FindOrCreateCrossTenantUserAsync`), `SyncMappedRolesAsync` resolves mapped role IDs to role names by querying the tenant repository directly (via `IMultiTenancyResolverService.GetTenantRepository()`), then calls `UserManager.AddToRoleAsync` with the role **name** (not ID). This runs on every login, ensuring existing users get role updates. Important: `RoleManager<RtRole>` must NOT be used for this — it may resolve to the wrong tenant context during cross-tenant login. The tenant repository approach reads from `HttpContext.Items["tenantRepository"]` which is correctly set by the inline middleware.
 
 **Second factor across tenant boundaries (AB#7804, AB#7815):** every cross-tenant entry point (password login
-fallback, cross-tenant-token/-login, tenant-switch, cross-tenant device approval, token exchange) refuses a source user
+fallback, cross-tenant-token/-login, tenant-switch, token exchange; the device approval no longer crosses tenants, AB#7884) refuses a source user
 with 2FA (own or anywhere in its `xt_` chain: `CrossTenantAuthResult.SourceUserRequiresSecondFactor`) unless the proof
 carries `amr=mfa` (`SecondFactorEvidence`). The password login answers `requiresTwoFactor` and completes through the
 normal `login-2fa`/`login-2fa-email`/`login-recovery` endpoints against the SOURCE user (`ICrossTenantSecondFactorVerifier`,
@@ -319,6 +319,12 @@ indexer (`UserTokens[i] = token`); an in-place change of the record object is no
 raises the limits (the suite signs in from one address); a test of the limit itself uses `Factory.WithWebHostBuilder` +
 `ConfigureTestServices`. Details: `docs/authentication.md` § Sign-In Attempts; tests `SignInAttemptConcurrencyTests`,
 `SignInRateLimiterTests`.
+
+**Cross-tenant hardening (AB#7861):** the challenge cookie is single-use (nonce + `ICrossTenantChallengeReplayGuard`,
+voided on completion, logout and local sign-in), gaps in the `xt_` chain require the second factor, and stored `amr` user
+claims are never returned by `OctoUserStore.GetClaimsAsync`. AB#7884: the unreachable cross-tenant provisioning branch of
+`DeviceVerificationController` is gone — a session whose subject is not a user of the device code's tenant gets
+`access_denied`; the session's `amr` is still passed on to the device token.
 
 **Locked-out or disabled source users (AB#7855):** `ValidateCrossTenantAccessAsync` (every crossing) also refuses a
 locked-out source user and one the `IdentityOptions.SignIn` rules refuse ("disabled"; no separate flag on `RtUser`),

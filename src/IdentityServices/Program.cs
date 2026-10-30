@@ -188,6 +188,9 @@ try
 
     // AB#7044: per-subject throttle of GET /api/tenant-topology (asked by the controller after authentication).
     builder.Services.AddSingleton<ITenantTopologyRateLimiter, TenantTopologyRateLimiter>();
+    // AB#7861: single use of the cross-tenant two-factor challenge cookie.
+    builder.Services.AddSingleton<ICrossTenantChallengeReplayGuard, CrossTenantChallengeReplayGuard>();
+
     // AB#7854: per-account / per-client limits of the sign-in endpoints (asked by AuthApiController, which knows the account).
     builder.Services.AddSingleton<ISignInRateLimiter, SignInRateLimiter>();
 

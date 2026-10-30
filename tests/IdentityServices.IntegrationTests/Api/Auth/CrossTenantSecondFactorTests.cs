@@ -4,6 +4,7 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json.Nodes;
 using System.Web;
+using Microsoft.AspNetCore.DataProtection;
 using FluentAssertions;
 using IdentityServerPersistence.Services;
 using IdentityServerPersistence.SystemStores;
@@ -554,6 +555,402 @@ public class CrossTenantSecondFactorTests : IntegrationTestBase
 
     #endregion
 
+    #region 7. Hardening (AB#7861)
+
+    private const string ChallengeCookieName = ".AspNetCore.Octo.CrossTenantTwoFactor";
+
+    [Fact]
+    public async Task Challenge_ReplayedAfterSuccess_IsVoid()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        var childTenantId = await CreateChildTenantAsync();
+        var user = await CreateUserWithAuthenticatorAsync("xt2fa_replay", ct);
+
+        var browser = CreateCookieClient();
+        var challenge = await PasswordLoginCapturingChallengeAsync(browser, childTenantId, user.UserName, ct);
+        (await LoginTwoFactorAsync(browser, childTenantId, user.Totp.ComputeTotp(), ct)).Success.Should().BeTrue();
+
+        var replay = await LoginTwoFactorWithChallengeAsync(childTenantId, challenge, user.Totp.ComputeTotp(), ct);
+        replay.Success.Should().BeFalse("a completed challenge is single-use, also as a copy");
+        replay.ErrorMessage.Should().Contain("session expired");
+    }
+
+    [Fact]
+    public async Task Challenge_AfterLogout_IsVoid()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        var childTenantId = await CreateChildTenantAsync();
+        var user = await CreateUserWithAuthenticatorAsync("xt2fa_logout", ct);
+
+        var browser = CreateCookieClient();
+        var challenge = await PasswordLoginCapturingChallengeAsync(browser, childTenantId, user.UserName, ct);
+        var logout = await browser.PostAsJsonAsync(AuthApiUrl("logout", childTenantId), new LogoutRequestDto(), ct);
+        logout.StatusCode.Should().Be(HttpStatusCode.OK);
+        logout.Headers.TryGetValues("Set-Cookie", out var cleared).Should().BeTrue();
+        cleared!.Should().Contain(c => c.StartsWith(ChallengeCookieName + "=;", StringComparison.Ordinal),
+            "the logout deletes the pending challenge in the browser");
+
+        var replay = await LoginTwoFactorWithChallengeAsync(childTenantId, challenge, user.Totp.ComputeTotp(), ct);
+        replay.Success.Should().BeFalse("the logout voided the challenge itself, not only the browser's copy");
+    }
+
+    [Fact]
+    public async Task Challenge_ForAnotherTenant_IsIgnored()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        var childTenantId = await CreateChildTenantAsync();
+        var otherChildTenantId = await CreateChildTenantAsync();
+        var user = await CreateUserWithAuthenticatorAsync("xt2fa_wrongtenant", ct);
+
+        var challenge = await PasswordLoginCapturingChallengeAsync(CreateCookieClient(), childTenantId, user.UserName, ct);
+
+        var result = await LoginTwoFactorWithChallengeAsync(otherChildTenantId, challenge, user.Totp.ComputeTotp(), ct);
+        result.Success.Should().BeFalse("the challenge was issued for another tenant");
+        result.ErrorMessage.Should().Contain("session expired");
+    }
+
+    [Fact]
+    public async Task Challenge_Tampered_IsIgnored()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        var childTenantId = await CreateChildTenantAsync();
+        var user = await CreateUserWithAuthenticatorAsync("xt2fa_tamper", ct);
+
+        var challenge = await PasswordLoginCapturingChallengeAsync(CreateCookieClient(), childTenantId, user.UserName, ct);
+        var tampered = challenge[..^4] + (challenge.EndsWith("AAAA", StringComparison.Ordinal) ? "BBBB" : "AAAA");
+
+        var result = await LoginTwoFactorWithChallengeAsync(childTenantId, tampered, user.Totp.ComputeTotp(), ct);
+        result.Success.Should().BeFalse("a challenge that fails data protection is ignored");
+    }
+
+    [Theory]
+    [InlineData(true, false)]
+    [InlineData(false, true)]
+    public async Task Challenge_ExpiredOrWithoutNonce_IsIgnored(bool expired, bool withoutNonce)
+    {
+        var ct = TestContext.Current.CancellationToken;
+        var childTenantId = await CreateChildTenantAsync();
+        var user = await CreateUserWithAuthenticatorAsync("xt2fa_forged", ct);
+
+        // A challenge protected with the service's own key ring (as the server would issue it), but expired or
+        // in the pre-AB#7861 shape without a nonce.
+        var protector = Factory.Services.GetRequiredService<Microsoft.AspNetCore.DataProtection.IDataProtectionProvider>()
+            .CreateProtector("CrossTenantTwoFactorChallenge").ToTimeLimitedDataProtector();
+        var payload = System.Text.Json.JsonSerializer.Serialize(new Dictionary<string, object>
+        {
+            ["SourceTenantId"] = SourceTenantId,
+            ["SourceUserId"] = user.Id,
+            ["TargetTenantId"] = childTenantId,
+            ["RememberLogin"] = false,
+            ["Nonce"] = withoutNonce ? string.Empty : Guid.NewGuid().ToString("N")
+        });
+        var challenge = protector.Protect(payload, expired ? TimeSpan.FromSeconds(-1) : TimeSpan.FromMinutes(5));
+
+        var result = await LoginTwoFactorWithChallengeAsync(childTenantId, challenge, user.Totp.ComputeTotp(), ct);
+        result.Success.Should().BeFalse(expired ? "the challenge has expired" : "a challenge without a nonce is void");
+    }
+
+    [Fact]
+    public async Task EmailCodePath_SendsAndVerifiesTheSourceUsersCode()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        var childTenantId = await CreateChildTenantAsync();
+        var user = await CreateUserWithAuthenticatorAsync("xt2fa_email", ct);
+
+        var browser = CreateCookieClient();
+        var login = await PasswordLoginAsync(browser, childTenantId, user.UserName, ct);
+        login.CanUseEmailCode.Should().BeTrue("the source user has a confirmed e-mail");
+
+        var send = await browser.PostAsync(AuthApiUrl("send-2fa-email", childTenantId), null, ct);
+        (await send.Content.ReadFromJsonAsync<SendTwoFactorEmailResultDto>(ct))!.Success.Should().BeTrue();
+
+        var failedBefore = (await FindSourceUserAsync(user.UserName)).AccessFailedCount;
+        var wrong = await browser.PostAsJsonAsync(AuthApiUrl("login-2fa-email", childTenantId),
+            new TwoFactorEmailLoginRequestDto { Code = "000000" }, ct);
+        (await wrong.Content.ReadFromJsonAsync<TwoFactorLoginResultDto>(ct))!.Success.Should().BeFalse();
+        (await FindSourceUserAsync(user.UserName)).AccessFailedCount.Should().Be(failedBefore + 1,
+            "a wrong e-mail code counts against the source user");
+
+        string code;
+        using (var scope = CreateScope())
+        {
+            var userManager = scope.ServiceProvider.GetRequiredService<UserManager<RtUser>>();
+            code = await userManager.GenerateTwoFactorTokenAsync((await userManager.FindByNameAsync(user.UserName))!,
+                TokenOptions.DefaultEmailProvider);
+        }
+
+        var valid = await browser.PostAsJsonAsync(AuthApiUrl("login-2fa-email", childTenantId),
+            new TwoFactorEmailLoginRequestDto { Code = code }, ct);
+        var result = (await valid.Content.ReadFromJsonAsync<TwoFactorLoginResultDto>(ct))!;
+        result.Success.Should().BeTrue("a valid e-mail code of the SOURCE user completes the sign-in: {0}",
+            result.ErrorMessage);
+        (await GetProfileStatusAsync(browser, childTenantId, ct)).Should().Be(HttpStatusCode.OK);
+    }
+
+    [Fact]
+    public async Task SelfRegistrationDenied_SourceUserWithTwoFactor_IsRefusedBeforeAnyChallenge()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        var childTenantId = await CreateChildTenantAsync(allowSelfRegistration: false);
+        var user = await CreateUserWithAuthenticatorAsync("xt2fa_noselfreg", ct);
+
+        var browser = CreateCookieClient();
+        var response = await browser.PostAsJsonAsync(AuthApiUrl("login", childTenantId),
+            new LoginRequestDto { Username = user.UserName, Password = DefaultPassword }, ct);
+        var login = (await response.Content.ReadFromJsonAsync<LoginResultDto>(ct))!;
+
+        login.Success.Should().BeFalse();
+        login.RequiresTwoFactor.Should().BeFalse("a user who may not enter this tenant is not asked for a code");
+        response.Headers.TryGetValues("Set-Cookie", out var cookies);
+        (cookies ?? []).Should().NotContain(c => c.StartsWith(ChallengeCookieName + "=", StringComparison.Ordinal) &&
+                                                  !c.StartsWith(ChallengeCookieName + "=;", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task TenantSwitch_LocalCallerWithoutSourceUserId_IsRefused()
+    {
+        // A user that lives in the child tenant itself has no identity in the parent; omitting SourceUserId must not
+        // make the server pick one.
+        var ct = TestContext.Current.CancellationToken;
+        var childTenantId = await CreateChildTenantAsync();
+        var localUserName = await CreateLocalUserAsync(childTenantId);
+        var browser = CreateCookieClient();
+        (await PasswordLoginAsync(browser, childTenantId, localUserName, ct)).Success.Should().BeTrue();
+
+        var response = await browser.PostAsJsonAsync(AuthApiUrl("tenant-switch", childTenantId),
+            new TenantSwitchRequestDto { SourceTenantId = SourceTenantId }, ct);
+        var result = await response.Content.ReadFromJsonAsync<TenantSwitchResultDto>(ct);
+
+        result!.Success.Should().BeFalse("a local user has no source identity in the parent tenant");
+    }
+
+    [Fact]
+    public async Task StoredAmrClaim_IsNoSecondFactorEvidence()
+    {
+        // Review finding 9: anything that can write RtUser.Claims must not be able to mint amr=mfa.
+        var ct = TestContext.Current.CancellationToken;
+        var childTenantId = await CreateChildTenantAsync();
+        var user = await CreateUserWithAuthenticatorAsync("xt2fa_storedamr", ct);
+        using (var scope = CreateScope())
+        {
+            var userManager = scope.ServiceProvider.GetRequiredService<UserManager<RtUser>>();
+            var stored = (await userManager.FindByNameAsync(user.UserName))!;
+            (await userManager.AddClaimAsync(stored, SecondFactorEvidence.CreateClaim())).Succeeded.Should().BeTrue();
+        }
+
+        // The password-only session (amr=pwd) is rebuilt from the store: change-password re-signs the user in
+        // (RefreshSignInAsync -> CreateUserPrincipalAsync -> store claims), as the 30-minute revalidation does.
+        var change = await user.PreTwoFactorSession.PostAsJsonAsync(ManageApiUrl("change-password"),
+            new ChangePasswordRequestDto
+            {
+                CurrentPassword = DefaultPassword, NewPassword = "Changed123!", ConfirmPassword = "Changed123!"
+            }, ct);
+        change.StatusCode.Should().Be(HttpStatusCode.OK, await change.Content.ReadAsStringAsync(ct));
+
+        var token = await GetAccessTokenAsync(user.PreTwoFactorSession, ct);
+        AmrOf(token).Should().NotContain("mfa", "a stored claim is not evidence of a second factor");
+        var crossTenantToken = await user.PreTwoFactorSession.PostAsJsonAsync(
+            AuthApiUrl("cross-tenant-token", SourceTenantId),
+            new CrossTenantTokenRequestDto { TargetTenantId = childTenantId }, ct);
+        crossTenantToken.StatusCode.Should().Be(HttpStatusCode.Forbidden);
+    }
+
+    [Fact]
+    public async Task GrandchildHop_ShadowSessionWhoseHomeUserHasTwoFactor_NeedsEvidence()
+    {
+        // B is a child of A, C a child of B. The A user signs into B without 2FA (no evidence), then enables 2FA.
+        // The B session (shadow xt_A_user) must not carry the user on into C without a second factor.
+        var ct = TestContext.Current.CancellationToken;
+        var childTenantId = await CreateChildTenantAsync();
+        var grandchildTenantId = await CreateChildTenantAsync(parentTenantId: childTenantId);
+        var userName = $"xt2fa_hop_{Guid.NewGuid():N}";
+        await CreateTestUserAsync(userName, password: DefaultPassword);
+
+        var childSession = CreateCookieClient();
+        (await PasswordLoginAsync(childSession, childTenantId, userName, ct)).Success.Should().BeTrue();
+        var homeSession = (await LoginAndGetAuthenticatedClientAsync(userName, DefaultPassword, ct))!;
+        await EnableAuthenticatorAsync(homeSession, ct);
+
+        var hop = await childSession.PostAsJsonAsync(AuthApiUrl("cross-tenant-token", childTenantId),
+            new CrossTenantTokenRequestDto { TargetTenantId = grandchildTenantId }, ct);
+        hop.StatusCode.Should().Be(HttpStatusCode.Forbidden,
+            "the home user's second factor counts for every hop of its shadow chain");
+    }
+
+    [Fact]
+    public async Task GrandchildHop_ShadowSessionWithEvidence_SignsIntoGrandchild()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        var childTenantId = await CreateChildTenantAsync();
+        var grandchildTenantId = await CreateChildTenantAsync(parentTenantId: childTenantId);
+        var user = await CreateUserWithAuthenticatorAsync("xt2fa_hopmfa", ct);
+
+        var childSession = CreateCookieClient();
+        (await PasswordLoginAsync(childSession, childTenantId, user.UserName, ct)).RequiresTwoFactor.Should().BeTrue();
+        (await LoginTwoFactorAsync(childSession, childTenantId, user.Totp.ComputeTotp(), ct)).Success.Should().BeTrue();
+
+        var token = await MintCrossTenantTokenAsync(childSession, childTenantId, grandchildTenantId, ct);
+        var browser = CreateCookieClient();
+        var login = await CrossTenantLoginAsync(browser, grandchildTenantId, token, ct);
+
+        login.Success.Should().BeTrue("the B session carries the evidence on to C: {0}", login.ErrorMessage);
+        (await GetProfileUserNameAsync(browser, grandchildTenantId, ct)).Should()
+            .Be($"xt_{childTenantId}_xt_{SourceTenantId}_{user.UserName}");
+    }
+
+    [Fact]
+    public async Task DeviceApproval_ShadowSessionWithEvidence_IssuesADeviceTokenThatKeepsAmrMfa()
+    {
+        // AB#7884: the device approval passes the session's amr on, so a 2FA user's device token can be exchanged further.
+        var ct = TestContext.Current.CancellationToken;
+        var childTenantId = await CreateChildTenantAsync();
+        var user = await CreateUserWithAuthenticatorAsync("xt2fa_device", ct);
+
+        var childSession = CreateCookieClient();
+        (await PasswordLoginAsync(childSession, childTenantId, user.UserName, ct)).RequiresTwoFactor.Should().BeTrue();
+        (await LoginTwoFactorAsync(childSession, childTenantId, user.Totp.ComputeTotp(), ct)).Success.Should().BeTrue();
+
+        var (userCode, deviceCode) = await StartDeviceFlowAsync(childTenantId, ct);
+        var approve = await childSession.PostAsync("/connect/deviceverification",
+            new FormUrlEncodedContent(new Dictionary<string, string> { ["user_code"] = userCode }), ct);
+        var approveBody = JsonNode.Parse(await approve.Content.ReadAsStringAsync(ct))!;
+        approveBody["success"]!.GetValue<bool>().Should().BeTrue("the shadow user exists in the child tenant: {0}",
+            approveBody["errorMessage"]?.GetValue<string>());
+
+        var accessToken = await RedeemDeviceCodeAsync(childTenantId, deviceCode, ct);
+        AmrOf(accessToken).Should().Contain("mfa", "the device token carries the session's second-factor evidence");
+    }
+
+    [Fact]
+    public async Task DeviceApproval_SessionWhoseSubjectNoLongerExists_IsDenied()
+    {
+        // AB#7884: no cross-tenant provisioning on the device endpoint; a session whose subject is not a user of the
+        // request tenant (here: deleted after sign-in) is refused with access_denied.
+        var ct = TestContext.Current.CancellationToken;
+        var userName = $"xt2fa_device_gone_{Guid.NewGuid():N}";
+        await CreateTestUserAsync(userName, password: DefaultPassword);
+        var session = (await LoginAndGetAuthenticatedClientAsync(userName, DefaultPassword, ct))!;
+        var (userCode, _) = await StartDeviceFlowAsync(SourceTenantId, ct);
+        using (var scope = CreateScope())
+        {
+            var userManager = scope.ServiceProvider.GetRequiredService<UserManager<RtUser>>();
+            (await userManager.DeleteAsync((await userManager.FindByNameAsync(userName))!)).Succeeded.Should().BeTrue();
+        }
+
+        var approve = await session.PostAsync("/connect/deviceverification",
+            new FormUrlEncodedContent(new Dictionary<string, string> { ["user_code"] = userCode }), ct);
+
+        approve.StatusCode.Should().Be(HttpStatusCode.OK);
+        var body = JsonNode.Parse(await approve.Content.ReadAsStringAsync(ct))!;
+        body["success"]!.GetValue<bool>().Should().BeFalse();
+        body["error"]!.GetValue<string>().Should().Be("access_denied");
+        approve.Headers.TryGetValues("Set-Cookie", out var cookies);
+        (cookies ?? []).Should().NotContain(c => c.StartsWith(".AspNetCore.Identity.Application", StringComparison.Ordinal),
+            "a refused approval writes no new session");
+        using (var scope = CreateScope())
+        {
+            (await scope.ServiceProvider.GetRequiredService<UserManager<RtUser>>().FindByNameAsync(userName))
+                .Should().BeNull("no user is (re)created by the device endpoint");
+        }
+    }
+
+    private const string DeviceClientId = "xt2fa-device";
+
+    private async Task<(string UserCode, string DeviceCode)> StartDeviceFlowAsync(string tenantId, CancellationToken ct)
+    {
+        var systemContext = Factory.Services.GetRequiredService<ISystemContext>();
+        var repo = string.Equals(tenantId, SourceTenantId, StringComparison.OrdinalIgnoreCase)
+            ? systemContext.GetSystemTenantRepositoryAsAdmin()
+            : (await systemContext.TryFindTenantRepositoryAsync(tenantId))!;
+        var clientStore = new ClientStore(new FixedTenantResolver(repo));
+        if (await clientStore.FindRtClientByIdAsync(DeviceClientId) == null)
+        {
+            await clientStore.CreateAsync(new RtClientBuilder()
+                .WithClientId(DeviceClientId)
+                .WithClientName(DeviceClientId)
+                .WithGrantTypes("urn:ietf:params:oauth:grant-type:device_code")
+                .WithScopes("openid")
+                .RequirePkce(false)
+                .Build());
+        }
+
+        var response = await CreateAnonymousClient().PostAsync("/connect/deviceauthorization",
+            new FormUrlEncodedContent(new Dictionary<string, string>
+            {
+                ["client_id"] = DeviceClientId,
+                ["scope"] = "openid",
+                ["acr_values"] = $"tenant:{tenantId}"
+            }), ct);
+        var raw = await response.Content.ReadAsStringAsync(ct);
+        response.StatusCode.Should().Be(HttpStatusCode.OK, raw);
+        var json = JsonNode.Parse(raw)!;
+        return (json["user_code"]!.GetValue<string>(), json["device_code"]!.GetValue<string>());
+    }
+
+    private async Task<string> RedeemDeviceCodeAsync(string tenantId, string deviceCode, CancellationToken ct)
+    {
+        var response = await CreateAnonymousClient().PostAsync("/connect/token", new FormUrlEncodedContent(
+            new Dictionary<string, string>
+            {
+                ["grant_type"] = "urn:ietf:params:oauth:grant-type:device_code",
+                ["client_id"] = DeviceClientId,
+                ["device_code"] = deviceCode,
+                ["acr_values"] = $"tenant:{tenantId}"
+            }), ct);
+        var raw = await response.Content.ReadAsStringAsync(ct);
+        response.StatusCode.Should().Be(HttpStatusCode.OK, "device code redemption: {0}", ErrorOf(raw));
+        return JsonNode.Parse(raw)!["access_token"]!.GetValue<string>();
+    }
+
+    private async Task<string> PasswordLoginCapturingChallengeAsync(HttpClient browser, string tenantId,
+        string userName, CancellationToken ct)
+    {
+        var response = await browser.PostAsJsonAsync(AuthApiUrl("login", tenantId),
+            new LoginRequestDto { Username = userName, Password = DefaultPassword }, ct);
+        (await response.Content.ReadFromJsonAsync<LoginResultDto>(ct))!.RequiresTwoFactor.Should().BeTrue();
+        response.Headers.TryGetValues("Set-Cookie", out var cookies).Should().BeTrue();
+        var header = cookies!.Single(c => c.StartsWith(ChallengeCookieName + "=", StringComparison.Ordinal));
+        return header[(ChallengeCookieName.Length + 1)..header.IndexOf(';')];
+    }
+
+    private static async Task<TwoFactorLoginResultDto> LoginTwoFactorAsync(HttpClient browser, string tenantId,
+        string code, CancellationToken ct)
+    {
+        var response = await browser.PostAsJsonAsync(AuthApiUrl("login-2fa", tenantId),
+            new TwoFactorLoginRequestDto { Code = code }, ct);
+        return (await response.Content.ReadFromJsonAsync<TwoFactorLoginResultDto>(ct))!;
+    }
+
+    /// <summary>A fresh client that presents only the given challenge cookie value (a copy of it).</summary>
+    private async Task<TwoFactorLoginResultDto> LoginTwoFactorWithChallengeAsync(string tenantId, string challenge,
+        string code, CancellationToken ct)
+    {
+        var client = Factory.CreateClient(new Microsoft.AspNetCore.Mvc.Testing.WebApplicationFactoryClientOptions
+        {
+            HandleCookies = false,
+            AllowAutoRedirect = false
+        });
+        var request = new HttpRequestMessage(HttpMethod.Post, AuthApiUrl("login-2fa", tenantId))
+        {
+            Content = JsonContent.Create(new TwoFactorLoginRequestDto { Code = code })
+        };
+        request.Headers.Add("Cookie", $"{ChallengeCookieName}={challenge}");
+        var response = await client.SendAsync(request, ct);
+        return (await response.Content.ReadFromJsonAsync<TwoFactorLoginResultDto>(ct))!;
+    }
+
+    private async Task<string> MintCrossTenantTokenAsync(HttpClient session, string fromTenantId, string toTenantId,
+        CancellationToken ct)
+    {
+        var response = await session.PostAsJsonAsync(AuthApiUrl("cross-tenant-token", fromTenantId),
+            new CrossTenantTokenRequestDto { TargetTenantId = toTenantId }, ct);
+        response.StatusCode.Should().Be(HttpStatusCode.OK, "cross-tenant token: {0}",
+            await response.Content.ReadAsStringAsync(ct));
+        return (await response.Content.ReadFromJsonAsync<CrossTenantTokenResultDto>(ct))!.Token;
+    }
+
+    #endregion
+
     #region Helpers
 
     private sealed record TwoFactorUser(string Id, string UserName, Totp Totp, HttpClient PreTwoFactorSession);
@@ -634,7 +1031,11 @@ public class CrossTenantSecondFactorTests : IntegrationTestBase
     }
 
     /// <summary>A user that lives in the child tenant itself, with an authenticator and 2FA enabled.</summary>
-    private async Task<string> CreateLocalTwoFactorUserAsync(string childTenantId)
+    private Task<string> CreateLocalTwoFactorUserAsync(string childTenantId)
+        => CreateLocalUserAsync(childTenantId, twoFactor: true);
+
+    /// <summary>A user that lives in the child tenant itself (optionally with an authenticator and 2FA).</summary>
+    private async Task<string> CreateLocalUserAsync(string childTenantId, bool twoFactor = false)
     {
         var systemContext = Factory.Services.GetRequiredService<ISystemContext>();
         var childRepo = (await systemContext.TryFindTenantRepositoryAsync(childTenantId))!;
@@ -655,8 +1056,12 @@ public class CrossTenantSecondFactorTests : IntegrationTestBase
         var user = new RtUserBuilder().WithUserName(userName).WithEmail($"{userName}@example.com")
             .WithEmailConfirmed(true).Build();
         (await userManager.CreateAsync(user, DefaultPassword)).Succeeded.Should().BeTrue();
-        (await userManager.ResetAuthenticatorKeyAsync(user)).Succeeded.Should().BeTrue();
-        (await userManager.SetTwoFactorEnabledAsync(user, true)).Succeeded.Should().BeTrue();
+        if (twoFactor)
+        {
+            (await userManager.ResetAuthenticatorKeyAsync(user)).Succeeded.Should().BeTrue();
+            (await userManager.SetTwoFactorEnabledAsync(user, true)).Succeeded.Should().BeTrue();
+        }
+
         return userName;
     }
 
@@ -673,8 +1078,9 @@ public class CrossTenantSecondFactorTests : IntegrationTestBase
         return (await userManager.FindByNameAsync(userName))!;
     }
 
-    private async Task<string> CreateChildTenantAsync()
+    private async Task<string> CreateChildTenantAsync(string? parentTenantId = null, bool allowSelfRegistration = true)
     {
+        parentTenantId ??= SourceTenantId;
         var childTenantId = $"xt2fa{Guid.NewGuid():N}"[..20];
         var systemContext = Factory.Services.GetRequiredService<ISystemContext>();
         using (var session = await systemContext.GetAdminSessionAsync())
@@ -697,11 +1103,11 @@ public class CrossTenantSecondFactorTests : IntegrationTestBase
             await childRepo.InsertOneRtEntityAsync(session, new RtOctoTenantIdentityProvider
             {
                 RtId = OctoObjectId.GenerateNewId(),
-                Name = $"ParentTenant_{SourceTenantId}",
-                DisplayName = $"Login via {SourceTenantId}",
+                Name = $"ParentTenant_{parentTenantId}",
+                DisplayName = $"Login via {parentTenantId}",
                 IsEnabled = true,
-                AllowSelfRegistration = true,
-                ParentTenantId = SourceTenantId
+                AllowSelfRegistration = allowSelfRegistration,
+                ParentTenantId = parentTenantId
             });
             await session.CommitTransactionAsync();
         }
