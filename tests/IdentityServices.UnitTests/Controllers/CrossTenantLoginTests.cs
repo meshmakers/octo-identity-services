@@ -96,6 +96,7 @@ public class CrossTenantLoginTests
             _dataProtectionProvider,
             _crossTenantUserProvisioningService,
             Options.Create(new OctoSystemConfiguration { SystemTenantId = "OctoSystem" }),
+            Substitute.For<Meshmakers.Octo.Backend.IdentityServices.Services.IUserCredentialChangeService>(),
             logger);
     }
 

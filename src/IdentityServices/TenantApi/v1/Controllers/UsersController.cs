@@ -41,6 +41,7 @@ public class UsersController : ControllerBase
     private readonly IUserEmailInteractionService _userEmailInteractionService;
     private readonly UserManager<RtUser> _userManager;
     private readonly OctoUserStore _octoUserStore;
+    private readonly IUserCredentialChangeService _userCredentialChangeService;
 
     /// <summary>
     ///     Constructor
@@ -50,6 +51,7 @@ public class UsersController : ControllerBase
     /// <param name="multiTenancyResolverService">Multi-tenancy resolver service</param>
     /// <param name="userEmailInteractionService"></param>
     /// <param name="userStore">The user store for direct role queries</param>
+    /// <param name="userCredentialChangeService">Revokes sessions after a password change</param>
     /// <param name="logger">Logger</param>
     public UsersController(
         UserManager<RtUser> userManager,
@@ -57,6 +59,7 @@ public class UsersController : ControllerBase
         IMultiTenancyResolverService multiTenancyResolverService,
         IUserEmailInteractionService userEmailInteractionService,
         IUserStore<RtUser> userStore,
+        IUserCredentialChangeService userCredentialChangeService,
         ILogger<UsersController> logger)
     {
         _userManager = userManager;
@@ -64,6 +67,7 @@ public class UsersController : ControllerBase
         _multiTenancyResolverService = multiTenancyResolverService;
         _userEmailInteractionService = userEmailInteractionService;
         _octoUserStore = (OctoUserStore)userStore;
+        _userCredentialChangeService = userCredentialChangeService;
         _logger = logger;
     }
 
@@ -395,6 +399,8 @@ public class UsersController : ControllerBase
             var result = await _userManager.ResetPasswordAsync(user, token, password);
             if (result.Succeeded)
             {
+                await _userCredentialChangeService.OnPasswordChangedAsync(user, PasswordChangePath.AdminResetPassword,
+                    User.Identity?.Name, HttpContext.RequestAborted);
                 await _userEmailInteractionService.SendPasswordResetNotificationAsync(_multiTenancyResolverService.GetTenantId(),
                     user);
                 return Ok();

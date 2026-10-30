@@ -77,6 +77,7 @@ public class AuthApiControllerErrorContextTests
             new EphemeralDataProtectionProvider(),
             Substitute.For<ICrossTenantUserProvisioningService>(),
             Options.Create(new OctoSystemConfiguration { SystemTenantId = "OctoSystem" }),
+            Substitute.For<Meshmakers.Octo.Backend.IdentityServices.Services.IUserCredentialChangeService>(),
             Substitute.For<ILogger<AuthApiController>>());
 
         _sut.ControllerContext = new ControllerContext

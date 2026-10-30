@@ -123,6 +123,15 @@ SignInManager.PasswordSignInAsync()
         └── Failure ──► Raise UserLoginFailureEvent ──► Show error
 ```
 
+### Password Change Ends Existing Sessions (AB#7765)
+
+Every REST password change (`change-password`, `set-password`, administrator `ResetPassword`, token
+`reset-password`) rotates the user's security stamp and revokes all refresh tokens and authorizations the
+user holds **in that tenant**. A client presenting an old refresh token gets `invalid_grant` and the user
+signs in again with the new password; other users and the same user in another tenant are not affected.
+One audit log line records tenant, subject, acting user and path (no password or token value). The logic
+lives in `IUserCredentialChangeService`, which any new password path must call.
+
 ### External Provider Flow (OAuth/OIDC)
 
 ```
