@@ -10,6 +10,9 @@ records:
         name: Name
       - id: ${this}/UserId
         name: UserId
+      # AB#7766: holds the authenticator key and the recovery codes in clear text. Secret as an assignment
+      # override (the Value attribute definition is shared), so a copy of this record never leaves the tenant.
       - id: ${this}/Value
         name: Value
         isOptional: true
+        ownership: Secret
