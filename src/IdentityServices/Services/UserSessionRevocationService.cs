@@ -1,5 +1,5 @@
 using IdentityServerPersistence.Services;
-using Meshmakers.Octo.Backend.IdentityServices.TenantApi.v1.Dtos;
+using Meshmakers.Octo.Communication.Contracts.DataTransferObjects;
 using Meshmakers.Octo.Runtime.Contracts;
 using Meshmakers.Octo.Runtime.Contracts.MongoDb;
 using Meshmakers.Octo.Runtime.Contracts.MongoDb.Repositories;
@@ -45,6 +45,9 @@ internal sealed class UserSessionRevocationService(
     ILogger<UserSessionRevocationService> logger) : IUserSessionRevocationService
 {
     private const string ValidStatus = "valid";
+
+    /// <summary>Upper bound of the user names listed in a bulk result.</summary>
+    internal const int MaxListedUserNames = 100;
 
     public async Task<UserSessionRevocationResultDto> RevokeAsync(RtUser user, string? actingUser,
         CancellationToken cancellationToken = default)
@@ -101,7 +104,7 @@ internal sealed class UserSessionRevocationService(
             Authorizations = authorizations,
             Sessions = sessions,
             UserNames = shadowUsers.Select(u => u.UserName ?? string.Empty)
-                .Take(ShadowUserSessionRevocationResultDto.MaxListedUserNames).ToList()
+                .Take(MaxListedUserNames).ToList()
         };
     }
 
