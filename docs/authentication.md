@@ -611,6 +611,11 @@ user signed in that way is refused at the boundary (fail closed) and signs in on
   second factor instead of adding nothing.
 - *Server-only evidence:* `OctoUserStore.GetClaimsAsync` never returns a stored `amr` claim, so nothing that can write
   `RtUser.Claims` (an import, another service) can mint `amr=mfa`; the evidence comes only from the sign-in itself.
+- *No cross-tenant provisioning on the device endpoint (AB#7884):* `DeviceVerificationController` used to provision a
+  shadow user when the approving session's subject did not exist in the device code's tenant. The branch was unreachable
+  (the session cookie is scoped to that tenant) and was removed; such an approval is now refused with `access_denied` and a
+  warning. Cross-tenant device logins use a session in the child tenant (cross-tenant login) or the token exchange. The
+  approval keeps passing the session's `amr` on, so a 2FA user's device token still carries `amr=mfa`.
 
 Tests: `tests/IdentityServices.IntegrationTests/Api/Auth/CrossTenantSecondFactorTests.cs` (real child tenant, real 2FA
 enrollment, real authorization-code tokens; every entry point above, with and without 2FA), plus unit tests in

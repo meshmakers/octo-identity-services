@@ -670,6 +670,102 @@ public class CrossTenantSecondFactorTests : IntegrationTestBase
             .Be($"xt_{childTenantId}_xt_{SourceTenantId}_{user.UserName}");
     }
 
+    [Fact]
+    public async Task DeviceApproval_ShadowSessionWithEvidence_IssuesADeviceTokenThatKeepsAmrMfa()
+    {
+        // AB#7884: the device approval passes the session's amr on, so a 2FA user's device token can be exchanged further.
+        var ct = TestContext.Current.CancellationToken;
+        var childTenantId = await CreateChildTenantAsync();
+        var user = await CreateUserWithAuthenticatorAsync("xt2fa_device", ct);
+
+        var childSession = CreateCookieClient();
+        (await PasswordLoginAsync(childSession, childTenantId, user.UserName, ct)).RequiresTwoFactor.Should().BeTrue();
+        (await LoginTwoFactorAsync(childSession, childTenantId, user.Totp.ComputeTotp(), ct)).Success.Should().BeTrue();
+
+        var (userCode, deviceCode) = await StartDeviceFlowAsync(childTenantId, ct);
+        var approve = await childSession.PostAsync("/connect/deviceverification",
+            new FormUrlEncodedContent(new Dictionary<string, string> { ["user_code"] = userCode }), ct);
+        var approveBody = JsonNode.Parse(await approve.Content.ReadAsStringAsync(ct))!;
+        approveBody["success"]!.GetValue<bool>().Should().BeTrue("the shadow user exists in the child tenant: {0}",
+            approveBody["errorMessage"]?.GetValue<string>());
+
+        var accessToken = await RedeemDeviceCodeAsync(childTenantId, deviceCode, ct);
+        AmrOf(accessToken).Should().Contain("mfa", "the device token carries the session's second-factor evidence");
+    }
+
+    [Fact]
+    public async Task DeviceApproval_SessionWhoseSubjectNoLongerExists_IsDenied()
+    {
+        // AB#7884: no cross-tenant provisioning on the device endpoint; a session whose subject is not a user of the
+        // request tenant (here: deleted after sign-in) is refused with access_denied.
+        var ct = TestContext.Current.CancellationToken;
+        var userName = $"xt2fa_device_gone_{Guid.NewGuid():N}";
+        await CreateTestUserAsync(userName, password: DefaultPassword);
+        var session = (await LoginAndGetAuthenticatedClientAsync(userName, DefaultPassword, ct))!;
+        var (userCode, _) = await StartDeviceFlowAsync(SourceTenantId, ct);
+        using (var scope = CreateScope())
+        {
+            var userManager = scope.ServiceProvider.GetRequiredService<UserManager<RtUser>>();
+            (await userManager.DeleteAsync((await userManager.FindByNameAsync(userName))!)).Succeeded.Should().BeTrue();
+        }
+
+        var approve = await session.PostAsync("/connect/deviceverification",
+            new FormUrlEncodedContent(new Dictionary<string, string> { ["user_code"] = userCode }), ct);
+
+        approve.StatusCode.Should().Be(HttpStatusCode.OK);
+        var body = JsonNode.Parse(await approve.Content.ReadAsStringAsync(ct))!;
+        body["success"]!.GetValue<bool>().Should().BeFalse();
+        body["error"]!.GetValue<string>().Should().Be("access_denied");
+    }
+
+    private const string DeviceClientId = "xt2fa-device";
+
+    private async Task<(string UserCode, string DeviceCode)> StartDeviceFlowAsync(string tenantId, CancellationToken ct)
+    {
+        var systemContext = Factory.Services.GetRequiredService<ISystemContext>();
+        var repo = string.Equals(tenantId, SourceTenantId, StringComparison.OrdinalIgnoreCase)
+            ? systemContext.GetSystemTenantRepositoryAsAdmin()
+            : (await systemContext.TryFindTenantRepositoryAsync(tenantId))!;
+        var clientStore = new ClientStore(new FixedTenantResolver(repo));
+        if (await clientStore.FindRtClientByIdAsync(DeviceClientId) == null)
+        {
+            await clientStore.CreateAsync(new RtClientBuilder()
+                .WithClientId(DeviceClientId)
+                .WithClientName(DeviceClientId)
+                .WithGrantTypes("urn:ietf:params:oauth:grant-type:device_code")
+                .WithScopes("openid")
+                .RequirePkce(false)
+                .Build());
+        }
+
+        var response = await CreateAnonymousClient().PostAsync("/connect/deviceauthorization",
+            new FormUrlEncodedContent(new Dictionary<string, string>
+            {
+                ["client_id"] = DeviceClientId,
+                ["scope"] = "openid",
+                ["acr_values"] = $"tenant:{tenantId}"
+            }), ct);
+        var raw = await response.Content.ReadAsStringAsync(ct);
+        response.StatusCode.Should().Be(HttpStatusCode.OK, raw);
+        var json = JsonNode.Parse(raw)!;
+        return (json["user_code"]!.GetValue<string>(), json["device_code"]!.GetValue<string>());
+    }
+
+    private async Task<string> RedeemDeviceCodeAsync(string tenantId, string deviceCode, CancellationToken ct)
+    {
+        var response = await CreateAnonymousClient().PostAsync("/connect/token", new FormUrlEncodedContent(
+            new Dictionary<string, string>
+            {
+                ["grant_type"] = "urn:ietf:params:oauth:grant-type:device_code",
+                ["client_id"] = DeviceClientId,
+                ["device_code"] = deviceCode,
+                ["acr_values"] = $"tenant:{tenantId}"
+            }), ct);
+        var raw = await response.Content.ReadAsStringAsync(ct);
+        response.StatusCode.Should().Be(HttpStatusCode.OK, "device code redemption: {0}", ErrorOf(raw));
+        return JsonNode.Parse(raw)!["access_token"]!.GetValue<string>();
+    }
+
     private async Task<string> PasswordLoginCapturingChallengeAsync(HttpClient browser, string tenantId,
         string userName, CancellationToken ct)
     {

@@ -305,7 +305,9 @@ the caller's own chain (never the request body, AB#7815). Details: `docs/authent
 Tenant Boundaries; tests `CrossTenantSecondFactorTests` (HTTP, real child tenant). The repository has no CHANGELOG file;
 this paragraph and that section are the change record (Security). AB#7861: the challenge cookie is single-use (nonce + `ICrossTenantChallengeReplayGuard`,
 voided on completion, logout and local sign-in), gaps in the `xt_` chain require the second factor, and stored `amr` user
-claims are never returned by `OctoUserStore.GetClaimsAsync`.
+claims are never returned by `OctoUserStore.GetClaimsAsync`. AB#7884: the unreachable cross-tenant provisioning branch of
+`DeviceVerificationController` is gone — a session whose subject is not a user of the device code's tenant gets
+`access_denied`; the session's `amr` is still passed on to the device token.
 
 **Cross-tenant token exchange (RFC 8693, AB#4338)** — the non-interactive
 counterpart of the browser tenant-switch, for the MCP server:
