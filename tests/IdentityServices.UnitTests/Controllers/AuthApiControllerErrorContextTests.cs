@@ -82,6 +82,9 @@ public class AuthApiControllerErrorContextTests
             Substitute.For<IOptionsMonitor<Microsoft.AspNetCore.Authentication.Cookies.CookieAuthenticationOptions>>(),
             Options.Create(new OctoSystemConfiguration { SystemTenantId = "OctoSystem" }),
             Substitute.For<Meshmakers.Octo.Backend.IdentityServices.Services.IUserCredentialChangeService>(),
+            new Meshmakers.Octo.Backend.IdentityServices.Services.CrossTenantChallengeReplayGuard(
+                new Microsoft.Extensions.Caching.Memory.MemoryCache(
+                    new Microsoft.Extensions.Caching.Memory.MemoryCacheOptions())),
             Substitute.For<ILogger<AuthApiController>>());
 
         _sut.ControllerContext = new ControllerContext

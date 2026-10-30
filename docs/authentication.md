@@ -600,6 +600,18 @@ cookie skipped the second factor for, and external-provider sign-ins (Google, En
 user signed in that way is refused at the boundary (fail closed) and signs in once more with the second factor.
 "Remember this machine" is not offered for the source user's second factor on a child tenant.
 
+**Hardening (AB#7861).**
+- *Single-use challenge:* the cross-tenant challenge cookie carries a nonce; completing it (success, lockout, user gone),
+  a logout and a successful local sign-in mark the nonce used (`ICrossTenantChallengeReplayGuard`, in process memory for
+  the 5-minute cookie lifetime) and delete the cookie, so a copy of the cookie is void too. A challenge without a nonce
+  (issued before this change) is void. With several identity pods a copy could still be replayed once on another pod; it
+  would still need a valid second factor of the source user.
+- *Fail-closed chain:* a gap in a shadow user's `xt_` chain — a tier user that no longer exists (root user renamed or
+  deleted), a chain the resolver cannot unwind (deleted tenant, ambiguous prefix), an unreadable tier — now requires the
+  second factor instead of adding nothing.
+- *Server-only evidence:* `OctoUserStore.GetClaimsAsync` never returns a stored `amr` claim, so nothing that can write
+  `RtUser.Claims` (an import, another service) can mint `amr=mfa`; the evidence comes only from the sign-in itself.
+
 Tests: `tests/IdentityServices.IntegrationTests/Api/Auth/CrossTenantSecondFactorTests.cs` (real child tenant, real 2FA
 enrollment, real authorization-code tokens; every entry point above, with and without 2FA), plus unit tests in
 `CrossTenantAuthenticationServiceTests` and `CrossTenantLoginTests`.

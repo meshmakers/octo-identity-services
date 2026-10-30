@@ -101,6 +101,9 @@ public class CrossTenantLoginTests
             Substitute.For<IOptionsMonitor<Microsoft.AspNetCore.Authentication.Cookies.CookieAuthenticationOptions>>(),
             Options.Create(new OctoSystemConfiguration { SystemTenantId = "OctoSystem" }),
             Substitute.For<Meshmakers.Octo.Backend.IdentityServices.Services.IUserCredentialChangeService>(),
+            new Meshmakers.Octo.Backend.IdentityServices.Services.CrossTenantChallengeReplayGuard(
+                new Microsoft.Extensions.Caching.Memory.MemoryCache(
+                    new Microsoft.Extensions.Caching.Memory.MemoryCacheOptions())),
             logger);
     }
 
@@ -224,6 +227,32 @@ public class CrossTenantLoginTests
     #endregion
 
     #region CrossTenantLogin Tests
+
+    [Fact]
+    public async Task PasswordLogin_SourceUserWithTwoFactor_WhoseOptionsCannotBeRead_GetsNoSession()
+    {
+        // AB#7861: the source user needs a second factor, but its options cannot be read (user gone, tenant
+        // unreadable). Neither a challenge nor a session: the login fails like a wrong password.
+        SetupControllerContext("meshtest");
+        _signInManager.PasswordSignInAsync("admin", "secret", false, true)
+            .Returns(Microsoft.AspNetCore.Identity.SignInResult.Failed);
+        _crossTenantAuthService.AuthenticateAsync("meshtest", "admin", "secret").Returns(new CrossTenantAuthResult
+        {
+            SourceTenantId = "OctoSystem",
+            SourceUserId = Guid.NewGuid().ToString("N"),
+            SourceUserName = "admin",
+            SourceUserRequiresSecondFactor = true
+        });
+        _identityProviderStore.GetAllAsync().Returns(Array.Empty<RtIdentityProvider>());
+        // ICrossTenantSecondFactorVerifier is a bare substitute: GetOptionsAsync answers null.
+
+        var result = await _sut.Login(new LoginRequestDto { Username = "admin", Password = "secret" });
+
+        result.Value!.Success.Should().BeFalse();
+        result.Value.RequiresTwoFactor.Should().BeFalse("no challenge without readable second-factor options");
+        await _signInManager.DidNotReceiveWithAnyArgs().SignInAsync(default!, default(bool), default);
+        await _signInManager.DidNotReceiveWithAnyArgs().SignInWithClaimsAsync(default!, default(bool), default!);
+    }
 
     [Fact]
     public async Task CrossTenantLogin_WithValidToken_Succeeds()

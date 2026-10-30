@@ -388,8 +388,13 @@ public sealed class OctoUserStore(
             throw NotExistingException.UserWithIdDoesNotExist(user.RtId);
         }
 
-        var source =
-            dbUser.Claims?.Select(x => new Claim(x.ClaimType, x.ClaimValue));
+        // AB#7861 (review finding 9): authentication-method evidence (amr, e.g. amr=mfa) describes a sign-in and is
+        // set only by the sign-in itself, never taken from stored user claims — anything able to write RtUser.Claims
+        // (an import, another service) would otherwise mint second-factor evidence for every session of the user.
+        var source = dbUser.Claims?
+            .Where(x => !string.Equals(x.ClaimType, SecondFactorEvidence.AuthenticationMethodClaimType,
+                StringComparison.OrdinalIgnoreCase))
+            .Select(x => new Claim(x.ClaimType, x.ClaimValue));
         var claimsAsync = source?.ToList();
 
         return claimsAsync ?? new List<Claim>();

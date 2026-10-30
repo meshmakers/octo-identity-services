@@ -185,6 +185,8 @@ try
 
     // AB#7044: per-subject throttle of GET /api/tenant-topology (asked by the controller after authentication).
     builder.Services.AddSingleton<ITenantTopologyRateLimiter, TenantTopologyRateLimiter>();
+    // AB#7861: single use of the cross-tenant two-factor challenge cookie.
+    builder.Services.AddSingleton<ICrossTenantChallengeReplayGuard, CrossTenantChallengeReplayGuard>();
 
     // AB#5032: lets an operator narrow the client-credentials exemption of
     // UseOctoTenantAuthorization() per environment (OCTO_TENANTAUTHORIZATION__…). The defaults
