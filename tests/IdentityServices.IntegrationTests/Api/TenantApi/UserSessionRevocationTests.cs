@@ -7,7 +7,7 @@ using System.Web;
 using FluentAssertions;
 using IdentityServerPersistence.SystemStores;
 using IdentityServices.IntegrationTests.Infrastructure;
-using Meshmakers.Octo.Backend.IdentityServices.TenantApi.v1.Dtos;
+using Meshmakers.Octo.Communication.Contracts.DataTransferObjects;
 using Meshmakers.Octo.ConstructionKit.Contracts;
 using Meshmakers.Octo.Runtime.Contracts;
 using Meshmakers.Octo.Runtime.Contracts.MongoDb;

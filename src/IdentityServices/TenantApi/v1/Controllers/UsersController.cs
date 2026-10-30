@@ -17,7 +17,6 @@ using MongoDB.Bson;
 using Persistence.IdentityCkModel.Generated.System.Identity.v2;
 using Meshmakers.Octo.Backend.Authentication;
 using Meshmakers.Octo.Backend.IdentityServices.Mapping;
-using Meshmakers.Octo.Backend.IdentityServices.TenantApi.v1.Dtos;
 
 namespace Meshmakers.Octo.Backend.IdentityServices.TenantApi.v1.Controllers;
 
