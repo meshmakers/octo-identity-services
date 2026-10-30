@@ -34,6 +34,7 @@ public class ManageApiController : ControllerBase
     private readonly IAllowedTenantsResolver _allowedTenantsResolver;
     private readonly ISystemContext _systemContext;
     private readonly IGroupStore _groupStore;
+    private readonly IUserCredentialChangeService _userCredentialChangeService;
 
     public ManageApiController(
         UserManager<RtUser> userManager,
@@ -44,7 +45,8 @@ public class ManageApiController : ControllerBase
         IUserStore<RtUser> userStore,
         IAllowedTenantsResolver allowedTenantsResolver,
         ISystemContext systemContext,
-        IGroupStore groupStore)
+        IGroupStore groupStore,
+        IUserCredentialChangeService userCredentialChangeService)
     {
         _userManager = userManager;
         _signInManager = signInManager;
@@ -55,6 +57,7 @@ public class ManageApiController : ControllerBase
         _allowedTenantsResolver = allowedTenantsResolver;
         _systemContext = systemContext;
         _groupStore = groupStore;
+        _userCredentialChangeService = userCredentialChangeService;
     }
 
     /// <summary>
@@ -299,6 +302,8 @@ public class ManageApiController : ControllerBase
             };
         }
 
+        await _userCredentialChangeService.OnPasswordChangedAsync(user, PasswordChangePath.ChangePassword,
+            user.UserName, HttpContext.RequestAborted);
         await _signInManager.RefreshSignInAsync(user);
         return new PasswordResultDto { Success = true };
     }
@@ -360,6 +365,8 @@ public class ManageApiController : ControllerBase
             };
         }
 
+        await _userCredentialChangeService.OnPasswordChangedAsync(user, PasswordChangePath.SetPassword,
+            user.UserName, HttpContext.RequestAborted);
         await _signInManager.RefreshSignInAsync(user);
         return new PasswordResultDto { Success = true };
     }

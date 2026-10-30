@@ -86,6 +86,7 @@ try
     builder.Services.AddOctoNotification();
     builder.Services.AddScoped<IUserEmailInteractionService, UserEmailInteractionService>();
     builder.Services.AddScoped<IUserManagementService, UserManagementService>();
+    builder.Services.AddScoped<IUserCredentialChangeService, UserCredentialChangeService>();
     builder.Services.AddSingleton<IQrCodeService, QrCodeService>();
     builder.Services
         .AddSingletonMultipleInterfaces<IdentityConfigurationService, IIdentityConfigurationService,

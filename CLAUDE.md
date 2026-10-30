@@ -1445,6 +1445,23 @@ properties: a credential-bearing DTO passed as a message-template argument (`{Dt
 reflected by the JSON layout. Never do that unless an NLog object transformation in
 `LogSecretRedaction` covers the type; log selected non-secret members instead.
 
+### Password change ends the user's sessions (AB#7765, review finding M3)
+
+Redeeming a refresh token checks only `CanSignInAsync`, never the security stamp, so a password change
+revokes explicitly. **Every** REST password path calls `IUserCredentialChangeService.OnPasswordChangedAsync`
+(`Services/UserCredentialChangeService.cs`, scoped) after the new password is persisted:
+`POST {tenant}/api/manage/change-password`, `.../set-password`, admin `POST system/v1/users/ResetPassword`
+and the anonymous `POST {tenant}/api/auth/reset-password`. The helper (1) rotates the security stamp,
+(2) revokes every token and authorization of the user's subject (`RtId`) through the OpenIddict stores of
+the **current tenant** (other users and the same user in another tenant are untouched; the old refresh
+token answers `invalid_grant`), (3) writes one `Information` audit log line naming tenant, subject, acting
+user (`(anonymous reset token)` for the token reset) and path - never a password, hash or token value.
+A failing revocation throws, so the endpoint never reports success while old refresh tokens still work;
+the caller keeps a new sign-in via `RefreshSignInAsync` (change/set-password). A new password path - REST or
+CK method handler (AB#5672, AB#7774) - must call the same helper. Tests:
+`UserCredentialChangeServiceTests`, `Api/Manage/PasswordChangeRevokesSessionsTests` (all four paths against the
+real token endpoint), `Persistence/PasswordChangeRevocationTenantIsolationIntegrationTests`.
+
 ## Configuration
 
 Environment variables are prefixed with `OCTO_`. Key configuration sections:

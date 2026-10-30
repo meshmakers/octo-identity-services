@@ -8,6 +8,7 @@ using Meshmakers.Octo.Backend.Authentication;
 using Meshmakers.Octo.Backend.Authentication.Services;
 using Meshmakers.Octo.Backend.IdentityServices.OpenIddict;
 using Meshmakers.Octo.Backend.IdentityServices.OpenIddict.Interaction;
+using Meshmakers.Octo.Backend.IdentityServices.Services;
 using Meshmakers.Octo.ConstructionKit.Contracts;
 using Meshmakers.Octo.Runtime.Contracts.MongoDb.Configuration;
 using Microsoft.AspNetCore.Authentication;
@@ -44,6 +45,7 @@ public class AuthApiController(
     IDataProtectionProvider dataProtectionProvider,
     ICrossTenantUserProvisioningService crossTenantUserProvisioningService,
     IOptions<OctoSystemConfiguration> systemConfiguration,
+    IUserCredentialChangeService userCredentialChangeService,
     ILogger<AuthApiController> logger)
     : ControllerBase
 {
@@ -874,6 +876,8 @@ public class AuthApiController(
 
         if (result.Succeeded)
         {
+            await userCredentialChangeService.OnPasswordChangedAsync(user, PasswordChangePath.TokenResetPassword,
+                null, HttpContext.RequestAborted);
             return new ResetPasswordResultDto { Success = true };
         }
 
