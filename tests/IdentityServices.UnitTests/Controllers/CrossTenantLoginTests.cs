@@ -101,6 +101,8 @@ public class CrossTenantLoginTests
             Substitute.For<IOptionsMonitor<Microsoft.AspNetCore.Authentication.Cookies.CookieAuthenticationOptions>>(),
             Options.Create(new OctoSystemConfiguration { SystemTenantId = "OctoSystem" }),
             Substitute.For<Meshmakers.Octo.Backend.IdentityServices.Services.IUserCredentialChangeService>(),
+            new Meshmakers.Octo.Backend.IdentityServices.Services.SignInRateLimiter(
+                Options.Create(new IdentityServerPersistence.Configuration.Options.OctoIdentityServicesOptions())),
             logger);
     }
 

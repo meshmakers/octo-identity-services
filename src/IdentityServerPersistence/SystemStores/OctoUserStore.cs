@@ -14,7 +14,7 @@ using Persistence.IdentityCkModel.Generated.System.Identity.v2;
 
 namespace IdentityServerPersistence.SystemStores;
 
-public sealed class OctoUserStore(
+public sealed partial class OctoUserStore(
     IMultiTenancyResolverService multiTenancyResolverService,
     IGroupRoleResolver groupRoleResolver,
     IdentityErrorDescriber? describer)
@@ -32,7 +32,8 @@ public sealed class OctoUserStore(
         IUserAuthenticationTokenStore<RtUser>,
         IUserTwoFactorRecoveryCodeStore<RtUser>,
         IQueryableUserStore<RtUser>,
-        IProtectedUserStore<RtUser>
+        IProtectedUserStore<RtUser>,
+        IAtomicUserLockoutStore
 {
     private const string InternalLoginProvider = "[AspNetUserStore]";
     private const string AuthenticatorKeyTokenName = "AuthenticatorKey";
@@ -1018,17 +1019,9 @@ public sealed class OctoUserStore(
         ArgumentValidation.Validate(nameof(user), user);
         ArgumentValidation.ValidateString(nameof(code), code);
 
-        var token = await GetTokenAsync(user, InternalLoginProvider, RecoveryCodeTokenName, cancellationToken);
-        var source = token?.Split(';');
-        if (source == null || !source.Contains(code))
-        {
-            return false;
-        }
-
-
-        var recoveryCodes = new List<string>(source.Where(s => s != code));
-        await ReplaceCodesAsync(user, recoveryCodes, cancellationToken);
-        return true;
+        // AB#7854: read, remove and write back in ONE transaction. Reading in one transaction and writing in the
+        // next let two parallel requests both find the code and both redeem it.
+        return await RedeemCodeAtomicallyAsync(user, code, cancellationToken).ConfigureAwait(false);
     }
 
     public async Task<int> CountCodesAsync(RtUser user, CancellationToken cancellationToken = default)

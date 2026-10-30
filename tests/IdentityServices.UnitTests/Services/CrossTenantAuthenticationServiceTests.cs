@@ -48,6 +48,7 @@ public class CrossTenantAuthenticationServiceTests
             _identityProviderStore,
             _passwordHasher,
             _chainResolver,
+            Microsoft.Extensions.Options.Options.Create(new IdentityOptions()),
             _logger);
     }
 
@@ -150,6 +151,8 @@ public class CrossTenantAuthenticationServiceTests
 
         // Assert
         result.Should().BeNull();
+        // AB#7854: a locked-out identity is not even verified, so a child-tenant login cannot keep guessing it.
+        _passwordHasher.DidNotReceiveWithAnyArgs().VerifyHashedPassword(default!, default!, default!);
     }
 
     [Fact]

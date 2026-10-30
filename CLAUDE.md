@@ -305,6 +305,18 @@ the caller's own chain (never the request body, AB#7815). Details: `docs/authent
 Tenant Boundaries; tests `CrossTenantSecondFactorTests` (HTTP, real child tenant). The repository has no CHANGELOG file;
 this paragraph and that section are the change record (Security).
 
+**Sign-in attempts are counted atomically and rate-limited (AB#7854):** `OctoUserManager` (the registered
+`UserManager<RtUser>`) counts failures and resets the counter in one MongoDB transaction on the stored user
+(`IAtomicUserLockoutStore`, `OctoUserStore.Atomic.cs`, retried on write conflicts); recovery codes are redeemed in one
+transaction; cross-tenant password failures count against the parent-tenant user and a locked parent user is not verified.
+`ISignInRateLimiter` (per pod, in memory) answers 429 on `login`/`ldap-login`/`login-2fa*`/`send-2fa-email`/`login-recovery`
+above 10 attempts per account per minute, 1 concurrent attempt per account, 60 per client address (right-most
+`X-Forwarded-For`) — `Identity:SignInRateLimit`. 🔴 A record inside `RtUser.UserTokens` must be written back through the list
+indexer (`UserTokens[i] = token`); an in-place change of the record object is not persisted. 🔴 The integration-test factory
+raises the limits (the suite signs in from one address); a test of the limit itself uses `Factory.WithWebHostBuilder` +
+`ConfigureTestServices`. Details: `docs/authentication.md` § Sign-In Attempts; tests `SignInAttemptConcurrencyTests`,
+`SignInRateLimiterTests`.
+
 **Cross-tenant token exchange (RFC 8693, AB#4338)** — the non-interactive
 counterpart of the browser tenant-switch, for the MCP server:
 
