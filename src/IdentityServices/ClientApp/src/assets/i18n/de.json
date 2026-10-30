@@ -153,6 +153,7 @@
     "ERROR_CROSS_TENANT": "Die tenant-übergreifende Anmeldung ist fehlgeschlagen",
     "ERROR_ENTER_CREDENTIALS": "Bitte geben Sie Benutzername und Passwort ein",
     "ERROR_LOGIN_FAILED": "Die Anmeldung ist fehlgeschlagen",
+    "ERROR_SECOND_FACTOR_SETUP_REQUIRED": "Ihr zweiter Faktor muss neu eingerichtet werden. Bitte wenden Sie sich an Ihre Administratorin oder Ihren Administrator.",
     "ERROR_LOGIN_GENERIC": "Bei der Anmeldung ist ein Fehler aufgetreten",
     "FORGOT_PASSWORD_LINK": "Passwort vergessen?",
     "OR_CONTINUE_WITH": "oder fortfahren mit",

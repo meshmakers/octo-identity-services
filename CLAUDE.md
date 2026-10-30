@@ -1486,6 +1486,25 @@ CK method handler (AB#5672, AB#7774) - must call the same helper. Tests:
 `UserCredentialChangeServiceTests`, `Api/Manage/PasswordChangeRevokesSessionsTests` (all four paths against the
 real token endpoint), `Persistence/PasswordChangeRevocationTenantIsolationIntegrationTests`.
 
+### Two-factor enabled without a usable second factor is refused (AB#7830)
+
+ASP.NET Core Identity challenges only when `TwoFactorEnabled` is set **and** a provider is valid, so a user with
+`TwoFactorEnabled = true` but no authenticator key would sign in with the password alone. That state arises after a
+tenant clone (ExportRt/ImportRt: `UserTokens` is `Secret` since AB#7766, `TwoFactorEnabled` is exported), after an
+ImportRt of edited data, or when an admin deletes `UserTokens`. Rule (decided by Gerald 2026-10-30, option a, fails closed):
+`POST {tenant}/api/auth/login` verifies the password with `CheckPasswordSignInAsync` (no cookie) for such a user and,
+if it is correct, answers `200 { success: false, secondFactorSetupRequired: true, errorMessage: "Your second factor must be
+set up again. Please contact your administrator." }`, writes a warning log + `User Login Failure` audit entry (user name
+only) and issues no cookie. A wrong password follows the normal failure path (lockout counted once; the answer does not
+confirm the password). The login UI shows the translated text (`LOGIN.ERROR_SECOND_FACTOR_SETUP_REQUIRED`).
+*Usable* means an authenticator key only: the confirmed-e-mail provider is valid for ASP.NET Identity but its code is
+not delivered (tracked as its own bug), recovery codes only work after a challenge. Recovery: an admin switches
+`TwoFactorEnabled` off for the user; the user signs in and enrols again. The cross-tenant password login refuses the
+same state on top of AB#7804: when `ICrossTenantSecondFactorVerifier.GetOptionsAsync` reports
+`CanUseAuthenticator = false` for the source user, `Login` answers `secondFactorSetupRequired` instead of issuing
+a challenge. Tests: `Api/Auth/TwoFactorUnusableLoginTests` (with and without confirmed e-mail, wrong password,
+recovery after 2FA off), `CrossTenantSecondFactorTests.PasswordLogin_SourceUserWithTwoFactorButNoAuthenticator_*`.
+
 ## Configuration
 
 Environment variables are prefixed with `OCTO_`. Key configuration sections:
