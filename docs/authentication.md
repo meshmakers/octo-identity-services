@@ -821,6 +821,19 @@ marker; the text after it may change). A caller whose tenant is not an ancestor 
 `unauthorized_client`, an invalid subject token `invalid_grant`. Exchanged tokens never carry a refresh
 token — re-exchange from the root token. Every refusal is persisted as a `Token Exchange Failure` audit event.
 
+#### Only access tokens are subject tokens (AB#7860)
+
+Both `subject_token` consumers — the token exchange (`TenantExchangeProcessor`) and the on-behalf-of grant
+(`OnBehalfOfProcessor`) — validate with `SubjectTokenValidation.ForAccessToken`: signature, issuer, lifetime **and** the JWT
+header `typ` = `at+jwt` (RFC 9068; OpenIddict writes access tokens that way, id_tokens with `typ: JWT`). An id_token of a
+client with `AlwaysIncludeUserClaimsInIdToken` carries `sub`, `tenant_id` and `amr` like an access token and travels in
+places access tokens do not (e.g. `id_token_hint`). For the RFC 8693 exchange OpenIddict already refuses it before the
+processor runs ("The specified token is not an access token", verified over HTTP for a declared `access_token`, a declared
+`id_token` and no declared type); the processor check is defence in depth. The on-behalf-of grant is a custom flow
+OpenIddict does not validate, so there the processor check is the only one. The audience stays unchecked (platform
+convention). Tests: `CrossTenantSecondFactorTests.TokenExchange_IdTokenAsSubjectToken_IsRefused`,
+`TenantExchangeSubjectTokenTypeTests`, `OnBehalfOfProcessorTests.IdTokenAsSubjectToken_IsRejectedAsInvalidGrant`.
+
 ### Delegation / On-Behalf-Of (AB#5026)
 
 A **service account** (a machine-to-machine `Client`) can obtain an access token that runs on a

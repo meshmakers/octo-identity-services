@@ -383,6 +383,10 @@ counterpart of the browser tenant-switch, for the MCP server:
   Before the CLI relies on the exchange (AB#6836), operators must be provisioned in each child tenant they
   operate (`ProvisionCurrentUser -ttid`). Tests: `OctoCliTokenExchangeGrantIntegrationTests` (real MongoDB),
   `OctoCliClientTokenExchangeSeedTests`.
+- **Only access tokens are subject tokens (AB#7860):** `TenantExchangeProcessor` and `OnBehalfOfProcessor` validate the
+  `subject_token` with `SubjectTokenValidation.ForAccessToken` (`typ` must be `at+jwt`), so an id_token with user claims
+  is refused. OpenIddict already refuses it for the RFC 8693 grant; on-behalf-of (custom flow) relies on this check alone.
+  Test tokens minted with `JsonWebTokenHandler` need `TokenType = "at+jwt"`.
 - **v1 issues no exchanged refresh token** (short-lived B tokens, re-exchanged from
   the still-valid A token). See `docs/CONCEPT-CROSS-TENANT-TOKEN-EXCHANGE.md` and
   `docs/authentication.md` § Cross-Tenant Token Exchange. Coverage:
