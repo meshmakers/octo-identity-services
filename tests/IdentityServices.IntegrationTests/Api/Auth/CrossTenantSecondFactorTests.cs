@@ -175,6 +175,27 @@ public class CrossTenantSecondFactorTests : IntegrationTestBase
         (await GetProfileUserNameAsync(browser, childTenantId, ct)).Should().Be($"xt_{SourceTenantId}_{user.UserName}");
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task PasswordLogin_SourceUserWithTwoFactorButNoAuthenticator_IsRefusedWithoutSession(bool emailConfirmed)
+    {
+        // AB#7830: 2FA enabled, authenticator key lost (tenant clone): never a session on the password alone.
+        var ct = TestContext.Current.CancellationToken;
+        var childTenantId = await CreateChildTenantAsync();
+        var userName = $"xt2fa_nokey_{Guid.NewGuid():N}";
+        await CreateTestUserAsync(userName, password: DefaultPassword, emailConfirmed: emailConfirmed,
+            twoFactorEnabled: true);
+
+        var browser = CreateCookieClient();
+        var login = await PasswordLoginAsync(browser, childTenantId, userName, ct);
+
+        login.Success.Should().BeFalse();
+        login.SecondFactorSetupRequired.Should().BeTrue();
+        login.RequiresTwoFactor.Should().BeFalse();
+        (await GetProfileStatusAsync(browser, childTenantId, ct)).Should().NotBe(HttpStatusCode.OK);
+    }
+
     [Fact]
     public async Task PasswordLogin_SourceUserWithoutTwoFactor_SignsInDirectly()
     {

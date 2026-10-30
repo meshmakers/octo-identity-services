@@ -250,6 +250,21 @@ public class AuthApiController(
         return ErrorContextKinds.Generic;
     }
 
+    private const string SecondFactorSetupRequiredMessage =
+        "Your second factor must be set up again. Please contact your administrator.";
+
+    /// <summary>
+    /// AB#7830: true when the user has two-factor authentication enabled but no usable second factor.
+    /// Only an authenticator key counts: the e-mail provider is valid for ASP.NET Identity once the address is
+    /// confirmed, but its code is not delivered yet, and recovery codes only work after a challenge.
+    /// The rule fails closed.
+    /// </summary>
+    private async Task<bool> IsSecondFactorUnusableAsync(RtUser user)
+    {
+        return await userManager.GetTwoFactorEnabledAsync(user)
+               && string.IsNullOrEmpty(await userManager.GetAuthenticatorKeyAsync(user));
+    }
+
     /// <summary>
     /// Process login credentials
     /// </summary>
@@ -267,15 +282,42 @@ public class AuthApiController(
             };
         }
 
-        var result = await signInManager.PasswordSignInAsync(
-            request.Username,
-            request.Password,
-            request.RememberLogin,
-            lockoutOnFailure: true);
+        // AB#7830: a user whose second factor is switched on but who has no authenticator key (e.g. after a
+        // tenant clone, which does not export UserTokens) must never get a session with the password alone.
+        // ASP.NET Identity challenges only when a provider is valid, so PasswordSignInAsync would sign such a
+        // user in without any second factor. The password is verified without issuing a cookie first; a correct
+        // password is refused, anything else follows the normal failure path (lockout counted exactly once).
+        var candidateUser = await userManager.FindByNameAsync(request.Username);
+        Microsoft.AspNetCore.Identity.SignInResult result;
+        if (candidateUser != null && await IsSecondFactorUnusableAsync(candidateUser))
+        {
+            result = await signInManager.CheckPasswordSignInAsync(candidateUser, request.Password, lockoutOnFailure: true);
+            if (result.Succeeded)
+            {
+                await LogLoginFailureAsync(request.Username,
+                    "Second factor is enabled but no authenticator is set up; sign-in refused",
+                    clientId: context?.Client.ClientId);
+
+                return new LoginResultDto
+                {
+                    Success = false,
+                    ErrorMessage = SecondFactorSetupRequiredMessage,
+                    SecondFactorSetupRequired = true
+                };
+            }
+        }
+        else
+        {
+            result = await signInManager.PasswordSignInAsync(
+                request.Username,
+                request.Password,
+                request.RememberLogin,
+                lockoutOnFailure: true);
+        }
 
         if (result.Succeeded)
         {
-            var user = await userManager.FindByNameAsync(request.Username);
+            var user = candidateUser ?? await userManager.FindByNameAsync(request.Username);
             LogLoginSuccess(user?.UserName, user?.RtId.ToString(), user?.UserName, clientId: context?.Client.ClientId);
 
             // Use return URL if valid, otherwise redirect to manage page
@@ -346,6 +388,22 @@ public class AuthApiController(
 
                 var options = await crossTenantSecondFactorVerifier.GetOptionsAsync(
                     crossTenantResult.SourceTenantId, crossTenantResult.SourceUserId);
+                if (options is { CanUseAuthenticator: false })
+                {
+                    // AB#7830: the source user has two-factor enabled but no authenticator key (e.g. after a tenant
+                    // clone). Only an authenticator counts as usable, so the password alone must not open a session
+                    // here either. Fails closed; recovery is an admin switching 2FA off in the source tenant.
+                    await LogLoginFailureAsync(request.Username,
+                        "Second factor is enabled but no authenticator is set up for the source user; sign-in refused",
+                        clientId: context?.Client.ClientId);
+                    return new LoginResultDto
+                    {
+                        Success = false,
+                        ErrorMessage = SecondFactorSetupRequiredMessage,
+                        SecondFactorSetupRequired = true
+                    };
+                }
+
                 if (options != null)
                 {
                     // A pending local 2FA challenge (framework cookie) would otherwise win in login-2fa and check the
@@ -1897,6 +1955,9 @@ public record LoginResultDto
     public bool RequiresTwoFactor { get; init; }
     public bool CanUseTotpAuthenticator { get; init; }
     public bool CanUseEmailCode { get; init; }
+
+    /// <summary>The password was correct, but the second factor is enabled without a usable authenticator (AB#7830).</summary>
+    public bool SecondFactorSetupRequired { get; init; }
 }
 
 public record ExternalProviderDto

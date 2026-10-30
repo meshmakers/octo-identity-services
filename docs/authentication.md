@@ -593,6 +593,8 @@ the user's own `TwoFactorEnabled`, or that of any tier of its `xt_` chain — a 
 | Cross-tenant device approval (`/connect/deviceverification`) | `access_denied` ("Cross-tenant access denied") | The approving session must carry `amr=mfa`. |
 | RFC 8693 token exchange | `403 access_denied`, `error_description` starts with `second_factor_required` | The subject token must carry `amr=mfa`; the exchanged token gets `amr=["token_exchange","mfa"]`. |
 
+**No usable second factor (AB#7830):** a source user with two-factor enabled but no authenticator key (e.g. after a tenant clone, `UserTokens` is not exported) gets `secondFactorSetupRequired: true` and no session, on this path and on the local `POST /{tenant}/api/auth/login`. Only an authenticator key counts as usable. Recovery: an admin switches `TwoFactorEnabled` off; the user then enrols again.
+
 Users without 2FA are unaffected. Not covered by the cross-tenant rule: a session that a "remember this machine"
 cookie skipped the second factor for, and external-provider sign-ins (Google, Entra ID, …), carry no `amr=mfa`; a 2FA
 user signed in that way is refused at the boundary (fail closed) and signs in once more with the second factor.
