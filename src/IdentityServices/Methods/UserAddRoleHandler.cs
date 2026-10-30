@@ -26,6 +26,13 @@ internal sealed class UserAddRoleHandler(IServiceProvider services)
             return CkMethodOutcome.Fail(UserRoleMethodErrors.RoleAlreadyAssigned);
         }
 
+        var guarded = await GuardAsync(scope, user, change, change.Before.Append(role.Name ?? role.NormalizedName).ToList())
+            .ConfigureAwait(false);
+        if (guarded != null)
+        {
+            return guarded;
+        }
+
         await scope.UserManager.AddToRoleAsync(user, role.NormalizedName).ConfigureAwait(false);
         return CkMethodOutcome.Ok();
     }

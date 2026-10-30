@@ -4,6 +4,8 @@ using Asp.Versioning;
 using IdentityServerPersistence;
 using IdentityServerPersistence.Services;
 using IdentityServerPersistence.SystemStores;
+using Meshmakers.Octo.Backend.IdentityServices.Authorization.RoleChange;
+using Meshmakers.Octo.Backend.IdentityServices.OpenIddict;
 using Meshmakers.Octo.Backend.IdentityServices.Services;
 using Meshmakers.Octo.Communication.Contracts.DataTransferObjects;
 using Meshmakers.Octo.Communication.Contracts.DataTransferObjects.ApiErrors;
@@ -44,6 +46,8 @@ public class UsersController : ControllerBase
     private readonly OctoUserStore _octoUserStore;
     private readonly IUserCredentialChangeService _userCredentialChangeService;
     private readonly IUserSessionRevocationService _userSessionRevocationService;
+    private readonly IRoleChangeGuard _roleChangeGuard;
+    private readonly IIdentityAuditService _identityAuditService;
 
     /// <summary>
     ///     Constructor
@@ -55,6 +59,8 @@ public class UsersController : ControllerBase
     /// <param name="userStore">The user store for direct role queries</param>
     /// <param name="userCredentialChangeService">Revokes sessions after a password change</param>
     /// <param name="userSessionRevocationService">Revokes all sessions and tokens of a user (AB#7899)</param>
+    /// <param name="roleChangeGuard">Self-grant, role-not-held and last-administrator rules (AB#7914)</param>
+    /// <param name="identityAuditService">Audit of refused role changes</param>
     /// <param name="logger">Logger</param>
     public UsersController(
         UserManager<RtUser> userManager,
@@ -64,6 +70,8 @@ public class UsersController : ControllerBase
         IUserStore<RtUser> userStore,
         IUserCredentialChangeService userCredentialChangeService,
         IUserSessionRevocationService userSessionRevocationService,
+        IRoleChangeGuard roleChangeGuard,
+        IIdentityAuditService identityAuditService,
         ILogger<UsersController> logger)
     {
         _userManager = userManager;
@@ -73,6 +81,8 @@ public class UsersController : ControllerBase
         _octoUserStore = (OctoUserStore)userStore;
         _userCredentialChangeService = userCredentialChangeService;
         _userSessionRevocationService = userSessionRevocationService;
+        _roleChangeGuard = roleChangeGuard;
+        _identityAuditService = identityAuditService;
         _logger = logger;
     }
 
@@ -482,6 +492,12 @@ public class UsersController : ControllerBase
             return NotFound(new NotFoundErrorDto($"User name '{userName}' not found."));
         }
 
+        var refusal = await CheckRoleChangeAsync(applicationUser, null);
+        if (refusal != null)
+        {
+            return refusal;
+        }
+
         try
         {
             var result = await _userManager.DeleteAsync(applicationUser);
@@ -513,14 +529,8 @@ public class UsersController : ControllerBase
             return NotFound(new NotFoundErrorDto($"User with name '{userName}' not found."));
         }
 
-        // Remove only directly assigned roles (not group-inherited ones)
-        var currentDirectRoles = await _octoUserStore.GetDirectRolesAsync(user);
-        foreach (var roleName in currentDirectRoles)
-        {
-            await _userManager.RemoveFromRoleAsync(user, roleName.ToUpperInvariant());
-        }
-
-        // Add the requested roles
+        // AB#7914: validate every role id first, so an unknown id changes nothing (it used to strip the roles first).
+        var wanted = new Dictionary<string, RtRole>(StringComparer.Ordinal); // normalized name -> role
         foreach (var roleId in roleIds)
         {
             var role = await _roleManager.FindByIdAsync(roleId.ToString());
@@ -531,8 +541,29 @@ public class UsersController : ControllerBase
 
             if (role.NormalizedName != null)
             {
-                await _userManager.AddToRoleAsync(user, role.NormalizedName);
+                wanted[role.NormalizedName] = role;
             }
+        }
+
+        // Only directly assigned roles are replaced (not group-inherited ones), and only the difference is written.
+        var currentDirectRoles = await _octoUserStore.GetDirectRolesAsync(user);
+        var current = currentDirectRoles.Select(r => r.ToUpperInvariant()).ToHashSet(StringComparer.Ordinal);
+
+        var refusal = await CheckRoleChangeAsync(user, wanted.Values.Select(r => r.Name ?? r.NormalizedName!).ToList(),
+            currentDirectRoles);
+        if (refusal != null)
+        {
+            return refusal;
+        }
+
+        foreach (var normalized in current.Where(c => !wanted.ContainsKey(c)))
+        {
+            await _userManager.RemoveFromRoleAsync(user, normalized);
+        }
+
+        foreach (var normalized in wanted.Keys.Where(w => !current.Contains(w)))
+        {
+            await _userManager.AddToRoleAsync(user, normalized);
         }
 
         return Ok();
@@ -562,6 +593,13 @@ public class UsersController : ControllerBase
         if (role.NormalizedName != null && await _userManager.IsInRoleAsync(user, role.NormalizedName))
         {
             return BadRequest(new OperationFailedErrorDto($"User '{user.UserName}' already has role '{role.Name}'"));
+        }
+
+        var directRoles = await _octoUserStore.GetDirectRolesAsync(user);
+        var refusal = await CheckRoleChangeAsync(user, directRoles.Append(role.Name ?? roleName).ToList(), directRoles);
+        if (refusal != null)
+        {
+            return refusal;
         }
 
         if (role.NormalizedName != null)
@@ -609,6 +647,13 @@ public class UsersController : ControllerBase
         if (targetUser.RtId == sourceUser.RtId)
         {
             return BadRequest(new OperationFailedErrorDto("Cannot merge a user into itself."));
+        }
+
+        // AB#7914: the source user is deleted at the end; that must not remove the last user administrator.
+        var mergeRefusal = await CheckRoleChangeAsync(sourceUser, null);
+        if (mergeRefusal != null)
+        {
+            return mergeRefusal;
         }
 
         try
@@ -688,12 +733,46 @@ public class UsersController : ControllerBase
             return BadRequest(new OperationFailedErrorDto($"User '{user.UserName}' doesn't have role '{role.Name}'"));
         }
 
+        var directRoles = await _octoUserStore.GetDirectRolesAsync(user);
+        var refusal = await CheckRoleChangeAsync(user,
+            directRoles.Where(r => !string.Equals(r, role.Name, StringComparison.OrdinalIgnoreCase)).ToList(),
+            directRoles);
+        if (refusal != null)
+        {
+            return refusal;
+        }
+
         if (role.NormalizedName != null)
         {
             await _userManager.RemoveFromRoleAsync(user, role.NormalizedName);
         }
 
         return Ok();
+    }
+
+    /// <summary>
+    ///     Runs <see cref="IRoleChangeGuard" /> for a change of the direct roles of <paramref name="user" /> (or its
+    ///     deletion when <paramref name="rolesAfter" /> is <c>null</c>). Returns the problem answer (403 / 409) and audits
+    ///     the refusal, or <c>null</c> when the change is allowed (AB#7914).
+    /// </summary>
+    private async Task<IActionResult?> CheckRoleChangeAsync(RtUser user, IEnumerable<string>? rolesAfter,
+        IEnumerable<string>? rolesBefore = null)
+    {
+        rolesBefore ??= await _octoUserStore.GetDirectRolesAsync(user);
+        var caller = RoleChangeCaller.FromPrincipal(User);
+        var decision = await _roleChangeGuard.EvaluateAsync(
+            new RoleChangeRequest(caller, user, rolesBefore.ToList(), rolesAfter?.ToList()), HttpContext.RequestAborted);
+        if (decision.IsAllowed)
+        {
+            return null;
+        }
+
+        var callerText = caller.Subject != null ? $"subject {caller.Subject}" : $"client {caller.ClientId}";
+        var message =
+            $"Role change refused ({decision.Reason}): caller {callerText}, target user {user.RtId}, roles [{string.Join(",", decision.RoleNames)}], {Request.Method} {Request.Path.Value}";
+        _logger.LogWarning("{Message}", message);
+        await _identityAuditService.StoreFailureAsync(RoleChangeProblems.AuditEventName, message);
+        return RoleChangeProblems.ToResult(decision);
     }
 
     private void LogIdentityError(string operation, IEnumerable<IdentityError> errors)

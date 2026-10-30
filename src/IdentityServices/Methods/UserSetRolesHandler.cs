@@ -31,6 +31,12 @@ internal sealed class UserSetRolesHandler(IServiceProvider services)
             wanted[role.NormalizedName] = role.NormalizedName;
         }
 
+        var guarded = await GuardAsync(scope, user, change, wanted.Values.ToList()).ConfigureAwait(false);
+        if (guarded != null)
+        {
+            return guarded;
+        }
+
         var current = change.Before.Select(UserRoleScope.Normalize).ToHashSet(StringComparer.Ordinal);
         foreach (var normalized in current.Where(c => !wanted.ContainsKey(c)))
         {

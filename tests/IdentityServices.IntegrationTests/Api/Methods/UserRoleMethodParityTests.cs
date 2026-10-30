@@ -98,9 +98,9 @@ public class UserRoleMethodParityTests : IntegrationTestBase
         (await RolesAsync(methodUser)).Should().BeEmpty();
     }
 
-    // the one documented difference: stricter than REST, never more
+    // AB#7914: REST validates every role id before it writes, like the method: an unknown role changes nothing
     [Fact]
-    public async Task Difference_SetRolesWithAnUnknownRole_RestHasRemovedTheRolesAlready_TheMethodChangesNothing()
+    public async Task Parity_SetRolesWithAnUnknownRole_ChangesNothing_InBothTransports()
     {
         var (restUser, a) = await NewUserAsync(assign: true);
         var (methodUser, _) = await NewUserAsync(a, assign: true);
@@ -110,7 +110,7 @@ public class UserRoleMethodParityTests : IntegrationTestBase
 
         rest.StatusCode.Should().Be(HttpStatusCode.NotFound);
         method.Failure!.Code.Should().Be("ROLE_NOT_FOUND");
-        (await RolesAsync(restUser)).Should().BeEmpty("REST removes the direct roles before it looks at the unknown one");
+        (await RolesAsync(restUser)).Should().Equal(a.ToUpperInvariant());
         (await RolesAsync(methodUser)).Should().Equal(a.ToUpperInvariant());
     }
 
@@ -150,20 +150,22 @@ public class UserRoleMethodParityTests : IntegrationTestBase
         (await RolesAsync(restUser)).Should().Equal(await RolesAsync(methodUser));
     }
 
-    // REST has no rule that limits which roles an administrator grants, or to whom: the methods have none either
+    // AB#7914: a self grant is refused alike by REST and by the methods (see RoleChangeGuardTests for the full table)
     [Fact]
-    public async Task NoEscalationRule_InRest_IsAddedOrDroppedByTheMethods_SelfGrantOfAnyRole()
+    public async Task Parity_SelfGrantOfABuiltInRole_IsRefusedAlike()
     {
         var (admin, _) = await NewUserAsync();
         var self = CreateAuthenticatedClient(userId: admin.RtId.ToString(), userName: admin.UserName!,
-            roles: [UserManagement]);
+            roles: [UserManagement, "TenantManagement"]);
 
         (await self.PutAsync(TenantApiUrl($"users/{admin.UserName}/roles/TenantManagement"), null,
-            TestContext.Current.CancellationToken)).StatusCode.Should().Be(HttpStatusCode.OK);
-        (await RemoveAsync(admin.RtId.ToString(), new CkMethodPrincipal(admin.RtId.ToString(), [UserManagement], ["octo_api"]),
-            "TenantManagement")).IsSuccess.Should().BeTrue("the same self grant, undone with the method");
-        (await AddAsync(admin.RtId.ToString(), new CkMethodPrincipal(admin.RtId.ToString(), [UserManagement], ["octo_api"]),
-            "TenantManagement")).IsSuccess.Should().BeTrue();
+            TestContext.Current.CancellationToken)).StatusCode.Should().Be(HttpStatusCode.Forbidden);
+        var method = await AddAsync(admin.RtId.ToString(),
+            new CkMethodPrincipal(admin.RtId.ToString(), [UserManagement, "TenantManagement"], ["octo_api"]),
+            "TenantManagement");
+        method.Failure!.Code.Should().Be("METHOD_FORBIDDEN");
+        method.Failure.Parameters.Should().Contain("reason", "self-grant");
+        (await RolesAsync(admin)).Should().BeEmpty();
     }
 
     #region Helpers

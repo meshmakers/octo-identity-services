@@ -26,6 +26,13 @@ internal sealed class UserRemoveRoleHandler(IServiceProvider services)
             return CkMethodOutcome.Fail(UserRoleMethodErrors.RoleNotAssigned);
         }
 
+        var guarded = await GuardAsync(scope, user, change,
+            change.Before.Where(r => UserRoleScope.Normalize(r) != role.NormalizedName).ToList()).ConfigureAwait(false);
+        if (guarded != null)
+        {
+            return guarded;
+        }
+
         await scope.UserManager.RemoveFromRoleAsync(user, role.NormalizedName).ConfigureAwait(false);
         return CkMethodOutcome.Ok();
     }
