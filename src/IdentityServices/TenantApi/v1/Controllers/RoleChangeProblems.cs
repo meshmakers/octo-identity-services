@@ -12,10 +12,10 @@ public static class RoleChangeProblems
     /// <summary>Event name of the audit record written for every refused role change.</summary>
     public const string AuditEventName = "Identity.RoleChangeRefused";
 
-    /// <summary>403 for <c>self-grant</c> and <c>role-not-held</c>, 409 for <c>last-administrator</c>.</summary>
+    /// <summary>403 for <c>self-grant</c> and <c>role-not-held</c>, 409 for <c>last-administrator</c> and <c>built-in-role</c>.</summary>
     public static ObjectResult ToResult(RoleChangeDecision decision)
     {
-        var status = decision.Reason == RoleChangeReasons.LastAdministrator
+        var status = decision.Reason is RoleChangeReasons.LastAdministrator or RoleChangeReasons.BuiltInRole
             ? StatusCodes.Status409Conflict
             : StatusCodes.Status403Forbidden;
         var problem = new ProblemDetails
@@ -24,7 +24,7 @@ public static class RoleChangeProblems
             Title = decision.Title,
             Extensions = { ["code"] = decision.Reason }
         };
-        if (decision.Reason == RoleChangeReasons.RoleNotHeld && decision.RoleNames.Count > 0)
+        if (decision.Reason is RoleChangeReasons.RoleNotHeld or RoleChangeReasons.BuiltInRole && decision.RoleNames.Count > 0)
         {
             problem.Extensions["roleNames"] = decision.RoleNames;
         }

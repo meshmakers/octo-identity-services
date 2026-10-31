@@ -6,6 +6,7 @@ using IdentityServerPersistence.SystemStores;
 using IdentityServices.IntegrationTests.Fixtures;
 using Meshmakers.Octo.Backend.Authentication.DynamicAuth;
 using Meshmakers.Octo.Backend.IdentityServices.OpenIddict;
+using Meshmakers.Octo.Backend.IdentityServices.Authorization.RoleChange;
 using Meshmakers.Octo.Backend.IdentityServices.TenantApi.v1.Controllers;
 using Meshmakers.Octo.Communication.Contracts.DataTransferObjects;
 using Meshmakers.Octo.ConstructionKit.Contracts;
@@ -151,7 +152,8 @@ public class DuplicateExternalTenantUserMappingIntegrationTests : IClassFixture<
     public async Task ExternalTenantUserMappingsController_CreateForExistingPair_Returns409Problem_AndInsertsNothing()
     {
         var ctx = await ArrangeWithDuplicateAsync(duplicate: false);
-        var controller = new ExternalTenantUserMappingsController(ctx.Store, Substitute.For<IGroupStore>());
+        var controller = new ExternalTenantUserMappingsController(ctx.Store, Substitute.For<IGroupStore>(),
+            Substitute.For<IRoleChangeGuard>(), Substitute.For<IRoleChangeRefusals>());
 
         var result = await controller.Create(new CreateExternalTenantUserMappingDto
         {

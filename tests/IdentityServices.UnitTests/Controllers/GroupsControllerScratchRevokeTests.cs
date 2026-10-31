@@ -2,6 +2,7 @@ using System.Security.Claims;
 using FluentAssertions;
 using IdentityServerPersistence.Services.ScratchTenants;
 using IdentityServerPersistence.SystemStores;
+using Meshmakers.Octo.Backend.IdentityServices.Authorization.RoleChange;
 using Meshmakers.Octo.Backend.IdentityServices.TenantApi.v1.Controllers;
 using Meshmakers.Octo.ConstructionKit.Contracts;
 using Meshmakers.Octo.Services.Infrastructure.Services;
@@ -34,7 +35,8 @@ public class GroupsControllerScratchRevokeTests
     {
         _tenantResolver.GetTenantId().Returns(TenantId);
         _groupStore.FindByIdAsync(_groupId).Returns(new RtGroup { RtId = _groupId });
-        _sut = new GroupsController(_groupStore, _grantService, _tenantResolver)
+        _sut = new GroupsController(_groupStore, _grantService, _tenantResolver, Substitute.For<IRoleChangeGuard>(),
+            Substitute.For<IRoleChangeRefusals>())
         {
             ControllerContext = new ControllerContext { HttpContext = new DefaultHttpContext() }
         };

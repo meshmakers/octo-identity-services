@@ -1016,7 +1016,7 @@ user. Callers: `UsersController` (`PUT users/{u}/roles`, `PUT`/`DELETE users/{u}
 three role method handlers (`UserRoleMethodHandlerBase.GuardAsync`). It is **never** called from `OctoUserStore`/`UserManager`: first admin of a new tenant
 (`UserManagementService`), the Bootstrap blueprint seed, the one-time grants (`SecretManagementAdminGrant`, file role grants), the scratch-tenant creator grant, cross-tenant
 provisioning and the login group rules assign roles through the store and stay unrestricted (`TheGuard_IsNotCalledFromTheUserStoreOrTheUserManager…` pins the constructors).
-AB#7927 (groups, mappings, role definitions) and AB#7928 (client roles) reuse it: `EvaluateGrantAsync(caller, addedRoleNames)` is the "grant only what you hold" part alone.
+AB#7927 (groups, mappings, role definitions, next section) and AB#7928 (client roles) reuse it: `EvaluateGrantAsync(caller, addedRoleNames)` is the "grant only what you hold" part alone.
 
 | Rule (checked in this order, on the **difference** before/after, never on the full list) | REST | Method (`METHOD_FORBIDDEN`, parameter `reason`) |
 |---|---|---|
@@ -1037,6 +1037,34 @@ AB#7927 (groups, mappings, role definitions) and AB#7928 (client roles) reuse it
 - **Tests:** `Api/TenantApi/RoleChangeGuardTests` (every rule through REST and through the method handlers with the same assertions: self-grant, held/not held/custom, difference,
   client caller, last administrator direct/group/nested group/mapping/client-not-counted/zero holders, delete + merge, audit records), `UserRoleMethod*Tests` (updated parity),
   `RoleChangeCallerTests`. The tests that need "exactly one administrator" first remove every holder of the test database (`ClearAdministratorsAsync`).
+
+### Role change guard on groups, mappings and role definitions (AB#7927)
+
+`IRoleChangeGuard` (above) also judges the group / mapping graph and role definitions, with the same reasons, status codes and audit
+(`Identity.RoleChangeRefused`, written by `IRoleChangeRefusals`, scoped, used by the three controllers):
+
+| Caller | Check |
+|---|---|
+| `GroupsController`: `PUT groups/{id}/roles`, `PUT members/users/{u}`, `PUT members/clients/{c}`, `PUT members/groups/{g}`, `DELETE members/users/{u}`, `DELETE members/groups/{g}`, `DELETE groups/{id}` | `EvaluateAsync(caller, RoleGraphChange)` (`GroupRoles`, `MemberAdded`, `MemberRemoved`, `GroupDeleted`). `DELETE members/clients/{c}` is not judged (nothing is granted, clients are no administrators); the scratch-tenant revoke marker stays |
+| `ExternalTenantUserMappingsController`: create, update, delete | `MappingRoles` (existing id, or the source identity of a new mapping), `MappingDeleted` |
+| `RolesController`: `PUT roles/{name}` with another name, `DELETE roles/{name}` | `EvaluateRoleDefinition(role, newName)`: a role with an `rtWellKnownName` answers 409 `built-in-role` (+ `roleNames`); custom roles and a same-name save are untouched |
+
+- **One graph, one rule.** `RoleGraph` (`Authorization/RoleChange/RoleGraph.cs`, internal) loads groups (roles, child groups, user / client / mapping
+  members), mappings (mapped role ids), all users, the mappings serving each `xt_` shadow user and the direct holders of `UserManagement`. A change is applied to a
+  clone and `Holders()` (direct + groups incl. nested (depth 10, cycle safe) + mapping roles + groups of a mapping; existing **users** only, clients excluded)
+  is compared before and after: refused (409) when holders existed and none is left. A tenant without holders is not blocked. Cost: one read of all groups,
+  mappings and users per change (the 7914 check read the same data).
+- **Granted roles** = for `GroupRoles` the added role ids, for `MemberAdded` the effective roles (own + nested) of the group (for a child group: of the child), for
+  `MappingRoles` the added mapped role ids; a member that is already there grants nothing. **Self** = the caller is the added user, or the group whose roles
+  grow (or the group a child is added to) is reached by the caller (member directly, via a mapping that serves it, or a parent group of it), or the mapping serves the
+  caller (for a new mapping its source identity is in the caller's `xt_` chain). Self wins over `role-not-held`; roles are resolved to names and judged with
+  `EvaluateGrantAsync` (built-in only). Group create with roles is not judged (it has no members); the roles take effect only through a judged member add.
+- **Not guarded on purpose:** `GroupStore`/`ExternalTenantUserMappingStore` and everything that uses them directly: Bootstrap seed, setup, scratch-tenant grant,
+  cross-tenant provisioning (`AdminProvisioningController`), `LoginGroupAssignmentService`. Group methods (AB#7779) call `EvaluateAsync(caller, RoleGraphChange)`
+  and answer `METHOD_FORBIDDEN` with the `reason`; client roles are AB#7928.
+- **Tests:** `Api/TenantApi/GroupRoleChangeGuardTests` (REST on real MongoDB: self-grant direct / via parent / via child / via mapping, role-not-held for roles, members,
+  clients, nested groups, mappings, idempotent re-add, last administrator for member removal, role removal, delete, child group, mapping update / delete, mapping-in-group,
+  clients not counting, built-in role rename / delete, audit record, unchanged flows) and `Authorization/RoleGraphTests` (holders, clone, cycle, references).
 
 ### `User.ResetPassword` (AB#7774)
 
