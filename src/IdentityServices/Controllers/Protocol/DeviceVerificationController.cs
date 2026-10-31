@@ -71,9 +71,16 @@ public class DeviceVerificationController(
 
         var (identityScopes, apiScopes) = await ResolveScopeItemsAsync(result.Principal.GetScopes());
 
+        // AB#7959 (RFC 8628 §5.4): name the target tenant and the signed-in account, so a request that is not the
+        // user's own — wrong tab, wrong tenant — is recognisable before Allow.
+        var (accountUserName, accountEmail) = await DescribeSessionAccountAsync();
+
         return Ok(new DeviceAuthorizationContextDto
         {
             UserCode = request.UserCode,
+            TenantId = HttpContext.Items[InfrastructureCommon.TenantIdName] as string,
+            AccountUserName = accountUserName,
+            AccountEmail = accountEmail,
             ClientName = client?.ClientName ?? clientId,
             ClientUrl = client?.ClientUri,
             ClientLogoUrl = client?.LogoUri,
@@ -214,6 +221,23 @@ public class DeviceVerificationController(
         }
 
         return user;
+    }
+
+    /// <summary>
+    ///     User name and e-mail of the signed-in session user in the request tenant (AB#7959); falls back to the session
+    ///     claims when the subject does not exist there (the approval is then refused anyway, AB#7884).
+    /// </summary>
+    private async Task<(string? UserName, string? Email)> DescribeSessionAccountAsync()
+    {
+        var subjectId = User.FindFirstValue(Claims.Subject) ?? User.FindFirstValue(ClaimTypes.NameIdentifier);
+        var user = subjectId == null ? null : await userManager.FindByIdAsync(subjectId);
+        if (user != null)
+        {
+            return (user.UserName, user.Email);
+        }
+
+        return (User.FindFirstValue(Claims.PreferredUsername) ?? User.FindFirstValue(Claims.Name) ?? User.Identity?.Name,
+            User.FindFirstValue(Claims.Email) ?? User.FindFirstValue(ClaimTypes.Email));
     }
 
     private async Task<(List<ScopeItemDto> IdentityScopes, List<ScopeItemDto> ApiScopes)>

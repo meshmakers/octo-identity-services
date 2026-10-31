@@ -309,8 +309,9 @@ GET /connect/deviceverification?user_code={userCode}
         │   (OpenIddict end-user verification endpoint, DeviceVerificationController;
         │    tenant resolved from the user_code → tenant mapping)
         ├── Validates the user code
-        ├── Returns: client info, scopes requested
-        └── User reviews permissions
+        ├── Returns: client info, scopes requested, target tenant (tenantId) and the
+        │   signed-in account (accountUserName, accountEmail) — AB#7959
+        └── User reviews permissions, tenant and account
         │
         ▼
 POST /connect/deviceverification (form-encoded allow/deny, driven by the SPA's
@@ -336,7 +337,19 @@ The former `DeviceApiController` (`/api/device/*`) now only holds the DTOs — t
 
 2. **URL Parameters**: The device authorization URL supports passing `userCode` as a query parameter (`?userCode=123456`). When present, the Angular SPA automatically navigates to the confirmation page.
 
-3. **CLI Integration**: The `octo-cli` tool's `AuthenticationService` handles both scenarios:
+3. **Tenant and account on the confirmation (AB#7959)**: RFC 8628 §5.4 asks the server to show what the user
+   authorizes, so a request that is not theirs is recognisable. With an existing parent session the cross-tenant
+   hand-off signs the user into a child tenant silently and lands directly on the Allow dialog; the dialog therefore
+   names the tenant the device code is bound to and the signed-in account next to client, user code and scopes.
+
+4. **CSRF protection of the verification POST (AB#7959)**: `DeviceVerificationController` carries
+   `[IgnoreAntiforgeryToken]` (the SPA posts a form via XHR). It relies on the tenant-scoped application cookie
+   (`.AspNetCore.Identity.Application.{tenant}`) not being sent on cross-site POSTs: `ConfigureApplicationCookie` sets
+   `Cookie.SameSite = Lax` **explicitly** (the `CookiePolicyOptions.MinimumSameSitePolicy = None` in `Program.cs` never
+   lowers it). Only the OIDC session-check cookie (`idsrv.session.{tenant}`, `SessionCheckCookie`) stays `SameSite=None`
+   for the check-session iframe / silent renew. Tests: `DeviceConfirmationContextTests`.
+
+5. **CLI Integration**: The `octo-cli` tool's `AuthenticationService` handles both scenarios:
    - With refresh token: Attempts token refresh before expiration
    - Without refresh token: Uses access token directly
 

@@ -62,6 +62,7 @@
     "SUBTITLE": "Authorize Application"
   },
   "DEVICE": {
+    "CHECK_TARGET": "Only allow this request if you started it yourself, for this tenant and with this account.",
     "CODE_LABEL": "Device Code",
     "CONFIRM_SUBTITLE": "Authorize Device",
     "DENIED": "The device request was denied. You can close this window.",
@@ -73,8 +74,10 @@
     "INVALID_CODE": "Invalid or expired device code.",
     "NO_CODE": "No device code provided.",
     "REQUESTING_ACCESS": "This device is requesting access to your account:",
+    "SIGNED_IN_AS": "Signed in as",
     "SUBTITLE": "Device Authorization",
     "SUCCESS": "Device authorized successfully! You can close this window.",
+    "TARGET_TENANT": "Tenant",
     "VERIFYING_CODE": "Verifying Code"
   },
   "ERROR_PAGE": {
