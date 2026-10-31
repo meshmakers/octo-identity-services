@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Net;
 using System.Net.Http.Json;
 using System.Security.Cryptography;
@@ -13,7 +14,10 @@ using Meshmakers.Octo.Runtime.Contracts;
 using Meshmakers.Octo.Runtime.Contracts.MongoDb;
 using Meshmakers.Octo.Runtime.Contracts.Repositories.Query;
 using Microsoft.AspNetCore.Identity;
+using Meshmakers.Octo.Backend.IdentityServices.Services;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 using Persistence.IdentityCkModel.Generated.System.Identity.v2;
 using Shared.TestUtilities.Builders;
 using Xunit;
@@ -131,7 +135,113 @@ public class UserSessionRevocationTests : IntegrationTestBase
         response.StatusCode.Should().Be(HttpStatusCode.BadRequest, "v1 supports only scope=shadowUsers");
     }
 
+    [Fact]
+    public async Task RevokeAudit_CliUserToken_RecordsSubjectUserNameClientAndTenant_NoOtherClaimValues()
+    {
+        // AB#7958: the octo-cli token maps nothing to Identity.Name; the audit line said "acting user '(unknown)'".
+        var ct = TestContext.Current.CancellationToken;
+        var target = $"revoke_audit_{Guid.NewGuid():N}";
+        await CreateTestUserAsync(target, password: Password);
+        var callerSubject = OctoObjectId.GenerateNewId().ToString();
+        var callerName = $"cli_admin_{Guid.NewGuid():N}";
+        var callerEmail = $"{callerName}@audit.example";
+        var callerTenant = new Uri(new Uri("http://x"), TenantApiUrl("users")).AbsolutePath
+            .Split('/', StringSplitOptions.RemoveEmptyEntries)[0];
+        using var capture = CaptureLogs();
+
+        (await PostAsCliUserAsync(TenantApiUrl($"users/{Uri.EscapeDataString(target)}/revokeSessions"), callerSubject,
+            callerName, callerEmail, ct)).StatusCode.Should().Be(HttpStatusCode.OK);
+        (await PostAsCliUserAsync(TenantApiUrl("users/revokeSessions?scope=shadowUsers"), callerSubject, callerName,
+            callerEmail, ct)).StatusCode.Should().Be(HttpStatusCode.OK);
+        (await PostAsCliUserAsync(TenantApiUrl("users/revokeSessions?scope=shadowUsers&dryRun=false"), callerSubject,
+            callerName, callerEmail, ct)).StatusCode.Should().Be(HttpStatusCode.OK);
+
+        var lines = capture.Lines(callerSubject);
+        lines.Should().HaveCount(3, "single user, shadow dry run and shadow apply each write one audit line");
+        lines.Should().ContainSingle(l => l.StartsWith("Sessions revoked:", StringComparison.Ordinal));
+        lines.Should().ContainSingle(l => l.Contains("counted (dry run)", StringComparison.Ordinal));
+        foreach (var line in lines)
+        {
+            line.Should().Contain($"acting user '{callerName}'")
+                .And.Contain($"subject '{callerSubject}'")
+                .And.Contain($"client '{TestAuthHandler.CliClientId}', tenant '{callerTenant}')")
+                .And.NotContain("(unknown)");
+            line.Should().NotContain(callerEmail, "only sub, user name, client id and tenant are recorded")
+                .And.NotContain("Bearer").And.NotContain("octo_api", "no scope values");
+        }
+    }
+
+    [Fact]
+    public async Task RevokeAudit_ClientCredentialsCaller_RecordsTheClientIdAsActor()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        var clientId = $"revoke-svc-{Guid.NewGuid():N}";
+        using var capture = CaptureLogs();
+        var request = new HttpRequestMessage(HttpMethod.Post, TenantApiUrl("users/revokeSessions?scope=shadowUsers"))
+        {
+            Content = JsonContent.Create(new { })
+        };
+        request.Headers.Add(TestAuthHandler.ClientCredentialsHeader, clientId);
+
+        (await Client.SendAsync(request, ct)).StatusCode.Should().Be(HttpStatusCode.OK);
+
+        capture.Lines(clientId).Should().ContainSingle().Which.Should()
+            .Contain($"acting user 'client {clientId}'").And.Contain($"client '{clientId}'")
+            .And.NotContain("(unknown)");
+    }
+
     #region Helpers
+
+    private async Task<HttpResponseMessage> PostAsCliUserAsync(string url, string subject, string userName, string email,
+        CancellationToken ct)
+    {
+        var request = new HttpRequestMessage(HttpMethod.Post, url) { Content = JsonContent.Create(new { }) };
+        request.Headers.Add(TestAuthHandler.CliUserTokenHeader, "true");
+        request.Headers.Add(TestAuthHandler.UserIdHeader, subject);
+        request.Headers.Add(TestAuthHandler.UserNameHeader, userName);
+        request.Headers.Add(TestAuthHandler.EmailHeader, email);
+        return await Client.SendAsync(request, ct);
+    }
+
+    private LogCapture CaptureLogs()
+    {
+        var capture = new LogCapture();
+        Factory.Services.GetRequiredService<ILoggerFactory>().AddProvider(capture);
+        return capture;
+    }
+
+    /// <summary>Keeps the rendered revocation audit lines (category <c>UserSessionRevocationService</c>).</summary>
+    private sealed class LogCapture : ILoggerProvider
+    {
+        private readonly ConcurrentQueue<string> _lines = new();
+        private volatile bool _disposed;
+
+        public ILogger CreateLogger(string categoryName)
+            => categoryName.EndsWith(nameof(UserSessionRevocationService), StringComparison.Ordinal)
+                ? new Logger(this)
+                : NullLogger.Instance;
+
+        public void Dispose() => _disposed = true;
+
+        /// <summary>The captured lines that contain <paramref name="marker" /> (isolates this test's calls).</summary>
+        public List<string> Lines(string marker) => _lines.Where(l => l.Contains(marker, StringComparison.Ordinal)).ToList();
+
+        private sealed class Logger(LogCapture owner) : ILogger
+        {
+            public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
+
+            public bool IsEnabled(LogLevel logLevel) => !owner._disposed;
+
+            public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception? exception,
+                Func<TState, Exception?, string> formatter)
+            {
+                if (!owner._disposed)
+                {
+                    owner._lines.Enqueue(formatter(state, exception));
+                }
+            }
+        }
+    }
 
     private async Task<RtUser> CreateShadowUserAsync()
     {

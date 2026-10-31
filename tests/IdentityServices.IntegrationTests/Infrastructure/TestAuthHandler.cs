@@ -42,6 +42,11 @@ public class TestAuthHandler : AuthenticationHandler<TestAuthHandlerOptions>
     // AB#5859: simulates a client-credentials token of the given client id (no "sub", "client_id" set).
     public const string ClientCredentialsHeader = "X-Test-ClientCredentials";
 
+    // AB#7958: "true" = the raw claim shape of an octo-cli (device code) user access token: "sub",
+    // "preferred_username", "email", "client_id" and a "jti" — nothing that maps to Identity.Name.
+    public const string CliUserTokenHeader = "X-Test-CliUserToken";
+    public const string CliClientId = "octo-cli";
+
     // AB#5859: overrides the tenant_id claim (default: the route tenant) to simulate a foreign-tenant token.
     public const string TenantIdHeader = "X-Test-TenantId";
 
@@ -75,7 +80,17 @@ public class TestAuthHandler : AuthenticationHandler<TestAuthHandlerOptions>
 
         var clientCredentialsClientId = GetHeaderValue(ClientCredentialsHeader, string.Empty);
         var claims = new List<Claim>();
-        if (string.IsNullOrEmpty(clientCredentialsClientId))
+        var cliUserToken = string.Equals(GetHeaderValue(CliUserTokenHeader, "false"), "true",
+            StringComparison.OrdinalIgnoreCase);
+        if (cliUserToken)
+        {
+            claims.Add(new Claim("sub", userId));
+            claims.Add(new Claim("preferred_username", userName));
+            claims.Add(new Claim("email", email));
+            claims.Add(new Claim("client_id", CliClientId));
+            claims.Add(new Claim("jti", Guid.NewGuid().ToString("N")));
+        }
+        else if (string.IsNullOrEmpty(clientCredentialsClientId))
         {
             claims.Add(new Claim(ClaimTypes.NameIdentifier, userId));
             claims.Add(new Claim(ClaimTypes.Name, userName));
