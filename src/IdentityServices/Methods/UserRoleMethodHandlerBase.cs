@@ -51,9 +51,6 @@ internal static class UserRoleMethodErrors
 internal abstract class UserRoleMethodHandlerBase<TParameters>(IServiceProvider services)
     : ICkMethodHandler<TParameters> where TParameters : class
 {
-    /// <summary>Scope that the REST write policy requires (<c>CommonConstants.OctoApiFullAccess</c>).</summary>
-    private const string RequiredScope = CommonConstants.OctoApiFullAccess;
-
     public async Task<CkMethodOutcome> HandleAsync(CkMethodContext<TParameters> context,
         CancellationToken cancellationToken)
     {
@@ -111,7 +108,7 @@ internal abstract class UserRoleMethodHandlerBase<TParameters>(IServiceProvider 
     private async Task<CkMethodOutcome> RunAsync(CkMethodContext<TParameters> context, UserRoleChange change,
         CancellationToken cancellationToken)
     {
-        if (!IsAdministrator(context.CallerPrincipal))
+        if (!IdentityMethodCallerRules.IsAdministrator(context.CallerPrincipal))
         {
             return CkMethodOutcome.Forbidden("role-required");
         }
@@ -151,15 +148,6 @@ internal abstract class UserRoleMethodHandlerBase<TParameters>(IServiceProvider 
 
         return outcome;
     }
-
-    /// <summary>
-    ///     The same rule as the REST write policy: scope <c>octo_api</c> and tenant role <c>UserManagement</c> on the principal
-    ///     the host validated (never the informational <c>Caller</c> of the request).
-    /// </summary>
-    private static bool IsAdministrator(CkMethodPrincipal? principal) =>
-        principal != null &&
-        principal.Scopes.Contains(RequiredScope, StringComparer.Ordinal) &&
-        principal.Roles.Contains(CommonConstants.UserManagementRole, StringComparer.OrdinalIgnoreCase);
 
     private async Task AuditAsync(CkMethodContext<TParameters> context, string outcome, UserRoleChange change)
     {
