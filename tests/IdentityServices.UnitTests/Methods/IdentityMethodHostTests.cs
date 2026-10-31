@@ -3,6 +3,7 @@ using Meshmakers.Octo.Backend.IdentityServices.Methods;
 using Meshmakers.Octo.Services.Notifications.Generated.System.Notification.v2;
 using Meshmakers.Octo.Services.Notifications.Services;
 using Meshmakers.Octo.Runtime.Contracts.MongoDb.Configuration;
+using Meshmakers.Octo.ConstructionKit.Contracts.Services;
 using Meshmakers.Octo.Services.Methods;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
@@ -65,9 +66,10 @@ public class IdentityMethodHostTests
     }
 
     [Fact]
-    public void TheStartupValidation_NamesTheNormalizedSystemTenantId()
+    public void TheStartupValidation_NeedsNoIdentityWorkaround_WithTheDefaultConfiguration()
     {
-        // The CK cache is keyed by the lower case tenant id; "OctoSystem" as configured would miss it and stop the service.
+        // The SDK normalizes the tenant id of the start-up validation itself (AB#7912): the host adds no tenant list, so a default
+        // installation ("OctoSystem") validates its methods against the CK cache of the lower case system tenant without configuration.
         var services = new ServiceCollection();
         services.AddLogging();
         services.AddSingleton<IConfiguration>(new ConfigurationBuilder().Build());
@@ -78,8 +80,31 @@ public class IdentityMethodHostTests
 
         using var provider = services.BuildServiceProvider();
 
-        provider.GetRequiredService<IOptions<CkMethodHandlerOptions>>().Value.ValidationTenantIds
-            .Should().Equal("octosystem");
+        provider.GetRequiredService<IOptions<CkMethodHandlerOptions>>().Value.ValidationTenantIds.Should().BeEmpty();
+    }
+
+    [Fact]
+    public void TheStartupValidation_LooksTheMethodUpInTheLowerCaseCacheOfTheDefaultSystemTenant()
+    {
+        // The real definition source of the resolved SDK package, built from the host registration with the default
+        // "OctoSystem": it must ask the CK cache for the lower case key (AB#7912), otherwise the service would not start.
+        var cache = Substitute.For<ICkCacheService>();
+        var services = new ServiceCollection();
+        services.AddLogging();
+        services.AddSingleton<IConfiguration>(new ConfigurationBuilder().Build());
+        services.AddSingleton(cache);
+        services.Configure<OctoSystemConfiguration>(c => c.SystemTenantId = "OctoSystem");
+        IdentityMethodHost.AddIdentityCkMethodHost(services,
+            IdentityMethodHost.SelectHandlers(new IdentityMethodsOptions { EnablePasswordMethods = true }));
+        var sourceType = typeof(CkMethodHandlerOptions).Assembly
+            .GetType("Meshmakers.Octo.Services.Methods.Handlers.ICkMethodDefinitionSource", throwOnError: true)!;
+        using var provider = services.BuildServiceProvider();
+        var source = provider.GetRequiredService(sourceType);
+
+        ((IReadOnlyList<string>)sourceType.GetProperty("TenantIds")!.GetValue(source)!).Should().Equal("octosystem");
+        sourceType.GetMethod("Find")!.Invoke(source, ["System.Identity/User.SetRoles"]);
+        cache.Received().IsTenantLoaded("octosystem");
+        cache.DidNotReceive().IsTenantLoaded("OctoSystem");
     }
 
     [Fact]
