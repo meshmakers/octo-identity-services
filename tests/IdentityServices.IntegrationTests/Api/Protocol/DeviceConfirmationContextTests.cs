@@ -10,6 +10,7 @@ using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
+using Persistence.IdentityCkModel.Generated.System.Identity.v2;
 using Shared.TestUtilities.Builders;
 using Xunit;
 
@@ -51,6 +52,34 @@ public class DeviceConfirmationContextTests : IntegrationTestBase
         context["accountEmail"]!.GetValue<string>().Should().Be(email);
         context["clientName"]!.GetValue<string>().Should().Be(ClientId, "client, user code and scopes stay");
         context["userCode"]!.GetValue<string>().Should().Be(userCode);
+    }
+
+    [Fact]
+    public async Task Context_SessionSubjectMissingInTheTenant_StillNamesTheSessionAccount_ApprovalRefused()
+    {
+        // Fallback to the session claims (AB#7884 case): the dialog still names who is signed in.
+        var ct = TestContext.Current.CancellationToken;
+        var userCode = await StartDeviceFlowAsync(ct);
+        var userName = $"confirm-gone-{Guid.NewGuid():N}";
+        await CreateTestUserAsync(userName, email: $"{userName}@confirm.example");
+        var browser = (await LoginAndGetAuthenticatedClientAsync(userName, DefaultPassword, ct))!;
+        using (var scope = CreateScope())
+        {
+            var userManager = scope.ServiceProvider.GetRequiredService<UserManager<RtUser>>();
+            (await userManager.DeleteAsync((await userManager.FindByNameAsync(userName))!)).Succeeded.Should().BeTrue();
+        }
+
+        var response = await browser.GetAsync($"/connect/deviceverification?user_code={userCode}", ct);
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK, await response.Content.ReadAsStringAsync(ct));
+        var context = JsonNode.Parse(await response.Content.ReadAsStringAsync(ct))!.AsObject();
+        context["accountUserName"]!.GetValue<string>().Should().Be(userName);
+        context["tenantId"]!.GetValue<string>().Should().BeEquivalentTo(NormalizedSystemTenantId);
+
+        var approve = await browser.PostAsync("/connect/deviceverification",
+            new FormUrlEncodedContent(new Dictionary<string, string> { ["user_code"] = userCode }), ct);
+        var body = JsonNode.Parse(await approve.Content.ReadAsStringAsync(ct))!.AsObject();
+        body["success"]!.GetValue<bool>().Should().BeFalse("the subject does not exist in this tenant");
     }
 
     [Fact]
