@@ -1066,6 +1066,19 @@ AB#7927 (groups, mappings, role definitions, next section) and AB#7928 (client r
   clients, nested groups, mappings, idempotent re-add, last administrator for member removal, role removal, delete, child group, mapping update / delete, mapping-in-group,
   clients not counting, built-in role rename / delete, audit record, unchanged flows) and `Authorization/RoleGraphTests` (holders, clone, cycle, references).
 
+### First administrator is a member of TenantOwners (AB#7946)
+
+`UserManagementService.CreateAdminUserAsync` (setup endpoints `setup/create-admin` and `v1/setup`) grants the first administrator the 13 direct roles and, since AB#7946,
+also adds that user to the `TenantOwners` group (`AddToTenantOwnersAsync`, via `IGroupStore`). `TenantOwners` carries every non-secret built-in role (incl. `DataModelManagement`,
+`StreamData*`), which the direct grants lack; without the membership the administrator holds fewer roles than the group and the guard above refuses adding anyone to it
+(`role-not-held`). `SecretManagement` stays a direct grant only (not in `TenantOwners`). The step is idempotent (an existing membership is not added again; a setup
+re-run is refused anyway while users exist) and optional like the file roles: a tenant without the group logs a warning and keeps the direct roles. The setup goes
+through the stores, not the guarded controllers, on purpose. The scratch-tenant creator (`ScratchTenantGrantService`) and cross-tenant admin provisioning
+(`AdminProvisioningController`) already put their subject into `TenantOwners`; nothing changed there.
+
+- **Tests:** `UserManagementServiceTests` (membership added / not twice / missing group) and `Api/Setup/SetupAdminTenantOwnersTests` (real MongoDB: setup via REST, the admin adds
+  another user to `TenantOwners`, control case without the membership = 403 `role-not-held`, re-run refused without a second edge, guard not injected into setup/group store).
+
 ### `User.ResetPassword` (AB#7774)
 
 `UserResetPasswordHandler` (`src/IdentityServices/Methods/`, one row in `IdentityMethodHost.Handlers`, `CarriesSecret = true`: gated by
