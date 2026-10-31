@@ -62,6 +62,7 @@
     "SUBTITLE": "Anwendung autorisieren"
   },
   "DEVICE": {
+    "CHECK_TARGET": "Erlauben Sie diese Anfrage nur, wenn Sie sie selbst gestartet haben – für diesen Tenant und mit diesem Konto.",
     "CODE_LABEL": "Gerätecode",
     "CONFIRM_SUBTITLE": "Gerät autorisieren",
     "DENIED": "Die Geräteanfrage wurde abgelehnt. Sie können dieses Fenster schließen.",
@@ -73,8 +74,10 @@
     "INVALID_CODE": "Ungültiger oder abgelaufener Gerätecode.",
     "NO_CODE": "Es wurde kein Gerätecode angegeben.",
     "REQUESTING_ACCESS": "Dieses Gerät fordert Zugriff auf Ihr Konto an:",
+    "SIGNED_IN_AS": "Angemeldet als",
     "SUBTITLE": "Geräteautorisierung",
     "SUCCESS": "Das Gerät wurde erfolgreich autorisiert! Sie können dieses Fenster schließen.",
+    "TARGET_TENANT": "Tenant",
     "VERIFYING_CODE": "Code wird überprüft"
   },
   "ERROR_PAGE": {

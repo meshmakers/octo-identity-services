@@ -42,6 +42,11 @@ export interface DeviceAuthorizationContext {
   apiScopes: ScopeItem[];
   confirmUserCode: boolean;
   description?: string;
+  /** Tenant the device code is bound to (AB#7959). */
+  tenantId?: string;
+  /** Signed-in account that would approve the request (AB#7959). */
+  accountUserName?: string;
+  accountEmail?: string;
 }
 
 export interface DeviceAuthorizationRequest {

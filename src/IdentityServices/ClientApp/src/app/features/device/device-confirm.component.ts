@@ -50,6 +50,27 @@ import { DeviceAuthorizationContext, DeviceAuthorizationResult } from '../../cor
             </div>
           </div>
 
+          <!-- Target tenant and signed-in account (AB#7959, RFC 8628 §5.4): a request that is not yours is recognisable -->
+          <dl class="device-target" *ngIf="context.tenantId || context.accountUserName || context.accountEmail">
+            <ng-container *ngIf="context.tenantId">
+              <dt class="device-target__label">{{ 'DEVICE.TARGET_TENANT' | translate }}</dt>
+              <dd class="device-target__value" data-test="device-target-tenant">{{ context.tenantId }}</dd>
+            </ng-container>
+            <ng-container *ngIf="context.accountUserName || context.accountEmail">
+              <dt class="device-target__label">{{ 'DEVICE.SIGNED_IN_AS' | translate }}</dt>
+              <dd class="device-target__value" data-test="device-target-account">
+                {{ context.accountUserName || context.accountEmail }}
+                <span class="device-target__secondary"
+                      *ngIf="context.accountEmail && context.accountUserName && context.accountEmail !== context.accountUserName">
+                  ({{ context.accountEmail }})
+                </span>
+              </dd>
+            </ng-container>
+          </dl>
+          <p class="device-target__hint" *ngIf="context.tenantId">
+            {{ 'DEVICE.CHECK_TARGET' | translate }}
+          </p>
+
           <p class="consent-description">
             {{ 'DEVICE.REQUESTING_ACCESS' | translate }}
           </p>

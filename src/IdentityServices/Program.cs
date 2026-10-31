@@ -273,6 +273,11 @@ try
     builder.Services.ConfigureApplicationCookie(o =>
     {
         o.CookieManager = tenantCookieManager;
+        // AB#7959: explicit, not the framework default. The device verification POST carries
+        // [IgnoreAntiforgeryToken] and relies on this cookie not being sent on cross-site POSTs; the
+        // CookiePolicy's MinimumSameSitePolicy = None would not lower it, but nothing may depend on that.
+        // Only the session-check cookie (SessionCheckCookie) stays SameSite=None for the OIDC iframe.
+        o.Cookie.SameSite = SameSiteMode.Lax;
         o.SlidingExpiration = true;
         // With server-side sessions this bounds BOTH the cookie and the session record.
         // Explicit (was: 14-day framework default) — sliding, so active users stay signed in.
