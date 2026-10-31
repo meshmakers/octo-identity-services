@@ -1089,6 +1089,38 @@ without the current one.
   service token, missing role for existing and missing target, unknown target, policy violation, shadow user, failing revocation, forged caller on the host;
   password canary never in audit events or logs), `IdentityMethodHostTests` (switch, audit details).
 
+### Group and data-permission methods (AB#7779)
+
+`Group.AddMember`, `Group.RemoveMember`, `Group.SetRoles`, `DataPermission.GrantToRole`, `DataPermission.RevokeFromRole` (declared in System.Identity 2.29.0,
+no model change). Five handlers in `src/IdentityServices/Methods/` (`GroupMemberMethodHandlerBase<T>` with `GroupAddMemberHandler` / `GroupRemoveMemberHandler`,
+`GroupSetRolesHandler`, `DataPermissionRoleMethodHandlerBase<T>` with `DataPermissionGrantToRoleHandler` / `DataPermissionRevokeFromRoleHandler`) and five rows in
+`IdentityMethodHost.Handlers`, all `CarriesSecret = false` (hosted whatever `EnablePasswordMethods` says). Shared flow in `IdentityAdminMethodHandlerBase<T>`
+(caller rule, target id, tenant binding, one `Identity.Method` event per call in a `finally`); `IdentityMethodCallerRules.IsAdministrator` is the same rule the
+user role handlers use (scope `octo_api` + role `UserManagement` on the **validated** principal, `METHOD_FORBIDDEN` / `role-required` otherwise).
+
+| Rule | REST (`GroupsController`, `DataPermissionsController`) | Method |
+|------|------|------|
+| Caller | `IdentityUserAdministrationWritePolicy` | the same, repeated on the validated principal; forged bus caller rejected by the host |
+| Target | 404 for an unknown group (data permission: unhandled exception) | `METHOD_TARGET_NOT_FOUND` |
+| Guard (AB#7927) | `IRoleChangeGuard.EvaluateAsync(caller, RoleGraphChange.MemberAdded / MemberRemoved / GroupRoles)`: `self-grant`, `role-not-held`, `last-administrator` (403 / 409 problem) | the same call with the same change records; refusal = `METHOD_FORBIDDEN` + parameter `reason` (+ `roleNames`), audited with `reason` |
+| Client removal | no guard (a client gives nothing to anybody); records the scratch tenant revocation (AB#7192) before the removal | the same, same `IScratchTenantGrantService.RecordRevocationAsync` |
+| Data permission grant / revoke | no guard (data access, not roles) | none either |
+| Unknown or duplicate member / role | engine error 500 / silent no-op | typed errors `MEMBER_NOT_FOUND`, `MEMBER_ALREADY_IN_GROUP`, `MEMBER_NOT_IN_GROUP`, `ROLE_NOT_FOUND`, `PERMISSION_ALREADY_GRANTED`, `PERMISSION_NOT_GRANTED` (stricter, never more) |
+
+- **Member ids.** `memberKind` User or Client; `memberId` is the rtId (as in the REST route); for a client the OAuth client id is accepted too. `Group.SetRoles`
+  takes role **names** (the model's parameter) and resolves them to the role ids the guard judges (`GroupRoles(groupId, roleIds)`); all names are checked first
+  (one unknown role changes nothing).
+- **Referenced entities (AB#7035).** The target is checked by the gateway (`dataAccess: Write`). Members and roles the method touches besides the target are checked
+  with `IRtDataPermissionEvaluator` (`IdentityMethodCall.EvaluateAsync`, the caller's `RtSecurityContext` from the validated principal): not visible = `MEMBER_NOT_FOUND` /
+  `ROLE_NOT_FOUND`; `DataPermission.GrantToRole` additionally needs `Write` on the role (the grant is stored on it), refusal = `METHOD_FORBIDDEN` / `reason` = `data-permission`.
+  Without enforcing policies on those types (the default) every check is open, as in REST.
+- **Audit.** `Identity.Method` event per call (success, every refusal, exception as `METHOD_HANDLER_FAILED`): group methods add `memberKind`, `memberId`, `rolesBefore` /
+  `rolesAfter` (role names, `SetRoles`) and `reason` / `roleNames` of a guard refusal; data permission methods add `permissionId` and `roleName`. Identifiers only.
+- **Nothing is revoked.** A group change shows in the next token (`OctoTokenClaimsService` reads the effective roles, groups included), as with REST.
+- **Tests:** `Api/Methods/GroupMethodTests` (all operations, every refusal, caller theory, forged caller, audit, evaluator), `GroupMethodParityTests` (REST and method side
+  by side per guard), `DataPermissionMethodTests` (operations, errors, caller theory, forged caller, REST parity, audit, evaluator), `Methods/IdentityMethodHostTests`
+  (selection). The last-administrator tests clear the administrators of the shared test database first, like `GroupRoleChangeGuardTests`.
+
 ### Blueprint-owned opt-in: `DataPolicy.ProtectBlueprintLocked` (AB#6384; System.Identity 2.24.0)
 
 `ProtectBlueprintLocked` (optional Boolean, default `false`) is the opt-in of the engine's blueprint-lock write guard

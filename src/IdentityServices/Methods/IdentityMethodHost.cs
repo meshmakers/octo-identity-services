@@ -47,7 +47,18 @@ internal static class IdentityMethodHost
         new(SystemIdentityCkIds.UserRemoveRoleMethodId, typeof(UserRemoveRoleHandler), false,
             b => b.Handle<UserRemoveRoleHandler>(SystemIdentityCkIds.UserRemoveRoleMethodId)),
         new(SystemIdentityCkIds.UserResetPasswordMethodId, typeof(UserResetPasswordHandler), true,
-            b => b.Handle<UserResetPasswordHandler>(SystemIdentityCkIds.UserResetPasswordMethodId))
+            b => b.Handle<UserResetPasswordHandler>(SystemIdentityCkIds.UserResetPasswordMethodId)),
+        // Group and data-permission methods carry no password or secret either (AB#7779).
+        new(SystemIdentityCkIds.GroupAddMemberMethodId, typeof(GroupAddMemberHandler), false,
+            b => b.Handle<GroupAddMemberHandler>(SystemIdentityCkIds.GroupAddMemberMethodId)),
+        new(SystemIdentityCkIds.GroupRemoveMemberMethodId, typeof(GroupRemoveMemberHandler), false,
+            b => b.Handle<GroupRemoveMemberHandler>(SystemIdentityCkIds.GroupRemoveMemberMethodId)),
+        new(SystemIdentityCkIds.GroupSetRolesMethodId, typeof(GroupSetRolesHandler), false,
+            b => b.Handle<GroupSetRolesHandler>(SystemIdentityCkIds.GroupSetRolesMethodId)),
+        new(SystemIdentityCkIds.DataPermissionGrantToRoleMethodId, typeof(DataPermissionGrantToRoleHandler), false,
+            b => b.Handle<DataPermissionGrantToRoleHandler>(SystemIdentityCkIds.DataPermissionGrantToRoleMethodId)),
+        new(SystemIdentityCkIds.DataPermissionRevokeFromRoleMethodId, typeof(DataPermissionRevokeFromRoleHandler), false,
+            b => b.Handle<DataPermissionRevokeFromRoleHandler>(SystemIdentityCkIds.DataPermissionRevokeFromRoleMethodId))
     ];
 
     /// <summary>

@@ -37,13 +37,15 @@ public class IdentityMethodHostTests
     }
 
     [Fact]
-    public void SwitchOff_TheRoleMethodsAreStillSelected_TheyCarryNoSecret()
+    public void SwitchOff_TheRoleGroupAndDataPermissionMethodsAreStillSelected_TheyCarryNoSecret()
     {
         var selected = IdentityMethodHost.SelectHandlers(new IdentityMethodsOptions());
 
         selected.Select(h => h.MethodId).Should().BeEquivalentTo(
             SystemIdentityCkIds.UserSetRolesMethodId, SystemIdentityCkIds.UserAddRoleMethodId,
-            SystemIdentityCkIds.UserRemoveRoleMethodId);
+            SystemIdentityCkIds.UserRemoveRoleMethodId, SystemIdentityCkIds.GroupAddMemberMethodId,
+            SystemIdentityCkIds.GroupRemoveMemberMethodId, SystemIdentityCkIds.GroupSetRolesMethodId,
+            SystemIdentityCkIds.DataPermissionGrantToRoleMethodId, SystemIdentityCkIds.DataPermissionRevokeFromRoleMethodId);
         selected.Should().OnlyContain(h => !h.CarriesSecret);
     }
 
