@@ -178,7 +178,10 @@ removedSessions }`.
 
 `POST {tenant}/v1/users/revokeSessions?scope=shadowUsers&dryRun=true` does the same for every cross-tenant shadow user
 (`xt_…`) of the tenant. **Dry run by default**: nothing changes, the answer carries the counts (`users`, `tokens`,
-`authorizations`, `sessions`) and the first 100 user names; `dryRun=false` applies and returns the applied counts. Only
+`authorizations`, `sessions`) and the first 100 user names; `dryRun=false` applies and returns the applied counts. Dry run
+and apply use **one** selection (AB#7957): every token and authorization of the subject that is not revoked yet (`valid`,
+`redeemed`, `inactive`, …) plus its browser sessions — so the dry run reports exactly what the apply revokes; entries that
+are already `revoked` are counted by neither (the single-user call uses the same selection). Only
 `scope=shadowUsers` exists (400 otherwise). Run it per tenant (octo-cli, child tenants via token exchange) — used at the
 rollout of AB#7804/AB#7815 to end sessions created before the second-factor rule.
 

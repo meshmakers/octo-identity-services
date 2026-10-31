@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.Collections.Immutable;
 using System.Net;
 using System.Net.Http.Json;
 using System.Security.Cryptography;
@@ -18,6 +19,7 @@ using Meshmakers.Octo.Backend.IdentityServices.Services;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
+using OpenIddict.Abstractions;
 using Persistence.IdentityCkModel.Generated.System.Identity.v2;
 using Shared.TestUtilities.Builders;
 using Xunit;
@@ -125,6 +127,69 @@ public class UserSessionRevocationTests : IntegrationTestBase
         (await CountSessionsAsync(shadow.RtId.ToString())).Should().Be(0);
         (await GetValidOAuthTokenCountForSubjectAsync(local.RtId.ToString())).Should().Be(1, "local users are untouched");
         (await CountSessionsAsync(local.RtId.ToString())).Should().Be(1);
+    }
+
+    [Fact]
+    public async Task RevokeShadowUsers_MixedTokenStates_DryRunReportsExactlyWhatTheApplyRevokes()
+    {
+        // AB#7957: on test-2 the dry run counted only "valid" tokens (318) while the apply revoked every entry (4,088).
+        var ct = TestContext.Current.CancellationToken;
+        (await PostAsync(TenantApiUrl("users/revokeSessions?scope=shadowUsers&dryRun=false"), new { }))
+            .StatusCode.Should().Be(HttpStatusCode.OK, "clears shadow-user leftovers of sibling tests");
+        var shadow = await CreateShadowUserAsync();
+        var subject = shadow.RtId.ToString();
+        foreach (var status in new[] { "valid", "redeemed", "inactive", "revoked" })
+        {
+            await CreateOAuthTokenWithStatusAsync(subject, status);
+        }
+
+        foreach (var status in new[] { "valid", "inactive", "revoked" })
+        {
+            await CreateOAuthAuthorizationAsync(subject, status);
+        }
+
+        await CreateSessionAsync(subject);
+        await CreateSessionAsync(subject);
+
+        var preview = await RevokeShadowUsersAsync(dryRun: true, ct);
+        var applied = await RevokeShadowUsersAsync(dryRun: false, ct);
+
+        preview.Tokens.Should().Be(3, "valid, redeemed and inactive are revocable; the revoked one is not counted");
+        preview.Authorizations.Should().Be(2);
+        preview.Sessions.Should().Be(2);
+        applied.Users.Should().Be(preview.Users);
+        applied.Tokens.Should().Be(preview.Tokens, "the dry run reports exactly what the apply revokes");
+        applied.Authorizations.Should().Be(preview.Authorizations);
+        applied.Sessions.Should().Be(preview.Sessions);
+        (await GetStatusesAsync(subject)).Should().OnlyContain(s => s == "revoked");
+        (await CountSessionsAsync(subject)).Should().Be(0);
+
+        var after = await RevokeShadowUsersAsync(dryRun: true, ct);
+        after.Tokens.Should().Be(0, "already revoked entries are counted by neither");
+        after.Authorizations.Should().Be(0);
+        after.Sessions.Should().Be(0);
+    }
+
+    [Fact]
+    public async Task RevokeUser_AlreadyRevokedTokens_AreNotCountedAgain()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        var userName = $"revoke_mixed_{Guid.NewGuid():N}";
+        var user = await CreateTestUserAsync(userName, password: Password);
+        var subject = user.RtId.ToString();
+        await CreateOAuthTokenWithStatusAsync(subject, "valid");
+        await CreateOAuthTokenWithStatusAsync(subject, "redeemed");
+        await CreateOAuthTokenWithStatusAsync(subject, "revoked");
+        await CreateOAuthAuthorizationAsync(subject, "revoked");
+
+        var response = await PostAsync(TenantApiUrl($"users/{Uri.EscapeDataString(userName)}/revokeSessions"), new { });
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK, await response.Content.ReadAsStringAsync(ct));
+        var result = (await response.Content.ReadFromJsonAsync<UserSessionRevocationResultDto>(ct))!;
+        result.RevokedTokens.Should().Be(2);
+        result.RevokedAuthorizations.Should().Be(0);
+        result.SecurityStampRotated.Should().BeTrue();
+        (await GetStatusesAsync(subject)).Should().OnlyContain(s => s == "revoked");
     }
 
     [Fact]
@@ -241,6 +306,65 @@ public class UserSessionRevocationTests : IntegrationTestBase
                 }
             }
         }
+    }
+
+    private async Task<ShadowUserSessionRevocationResultDto> RevokeShadowUsersAsync(bool dryRun, CancellationToken ct)
+    {
+        var response = await PostAsync(
+            TenantApiUrl($"users/revokeSessions?scope=shadowUsers&dryRun={(dryRun ? "true" : "false")}"), new { });
+        response.StatusCode.Should().Be(HttpStatusCode.OK, await response.Content.ReadAsStringAsync(ct));
+        var result = (await response.Content.ReadFromJsonAsync<ShadowUserSessionRevocationResultDto>(ct))!;
+        result.DryRun.Should().Be(dryRun);
+        return result;
+    }
+
+    private async Task CreateOAuthTokenWithStatusAsync(string subjectId, string status)
+    {
+        using var scope = CreateScope();
+        var tokenStore = scope.ServiceProvider.GetRequiredService<IOpenIddictTokenStore<RtOAuthToken>>();
+        var token = await tokenStore.InstantiateAsync(CancellationToken.None);
+        token.SubjectId = subjectId;
+        token.ClientId = ClientId;
+        token.TokenType = "refresh_token";
+        token.Status = status;
+        token.CreationDateTime = DateTime.UtcNow;
+        token.ExpirationDateTime = DateTime.UtcNow.AddDays(30);
+        await tokenStore.CreateAsync(token, CancellationToken.None);
+    }
+
+    private async Task CreateOAuthAuthorizationAsync(string subjectId, string status)
+    {
+        using var scope = CreateScope();
+        var store = scope.ServiceProvider.GetRequiredService<IOpenIddictAuthorizationStore<RtOAuthAuthorization>>();
+        var authorization = await store.InstantiateAsync(CancellationToken.None);
+        authorization.SubjectId = subjectId;
+        authorization.ClientId = ClientId;
+        authorization.Status = status;
+        authorization.CreationDateTime = DateTime.UtcNow;
+        await store.SetScopesAsync(authorization, ImmutableArray.Create("openid"), CancellationToken.None);
+        await store.CreateAsync(authorization, CancellationToken.None);
+    }
+
+    /// <summary>Statuses of all tokens and authorizations of the subject.</summary>
+    private async Task<List<string?>> GetStatusesAsync(string subjectId)
+    {
+        using var scope = CreateScope();
+        var statuses = new List<string?>();
+        await foreach (var token in scope.ServiceProvider.GetRequiredService<IOpenIddictTokenStore<RtOAuthToken>>()
+                           .FindBySubjectAsync(subjectId, CancellationToken.None))
+        {
+            statuses.Add(token.Status);
+        }
+
+        await foreach (var authorization in scope.ServiceProvider
+                           .GetRequiredService<IOpenIddictAuthorizationStore<RtOAuthAuthorization>>()
+                           .FindBySubjectAsync(subjectId, CancellationToken.None))
+        {
+            statuses.Add(authorization.Status);
+        }
+
+        statuses.Should().NotBeEmpty();
+        return statuses;
     }
 
     private async Task<RtUser> CreateShadowUserAsync()

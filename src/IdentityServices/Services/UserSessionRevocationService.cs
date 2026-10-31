@@ -33,7 +33,8 @@ public interface IUserSessionRevocationService
 
     /// <summary>
     ///     The same for every cross-tenant shadow user (<c>xt_…</c>) of the tenant; with <paramref name="dryRun" /> only
-    ///     the counts.
+    ///     the counts. Dry run and apply use the same selection — every token and authorization that is not revoked yet,
+    ///     and the browser sessions — so the dry run reports exactly what the apply revokes (AB#7957).
     /// </summary>
     Task<ShadowUserSessionRevocationResultDto> RevokeShadowUsersAsync(bool dryRun, AuditActor actor,
         CancellationToken cancellationToken = default);
@@ -47,8 +48,6 @@ internal sealed class UserSessionRevocationService(
     IMultiTenancyResolverService multiTenancyResolverService,
     ILogger<UserSessionRevocationService> logger) : IUserSessionRevocationService
 {
-    private const string ValidStatus = "valid";
-
     /// <summary>Upper bound of the user names listed in a bulk result.</summary>
     internal const int MaxListedUserNames = 100;
 
@@ -74,22 +73,16 @@ internal sealed class UserSessionRevocationService(
         foreach (var user in shadowUsers)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            if (dryRun)
+            // Dry run and apply share one selection (AB#7957): the dry run reports exactly what the apply revokes.
+            var selection = await SelectAsync(user, cancellationToken);
+            if (!dryRun)
             {
-                var subject = user.RtId.ToString();
-                tokens += await CountValidAsync(tokenStore.FindBySubjectAsync(subject, cancellationToken),
-                    t => t.Status);
-                authorizations += await CountValidAsync(
-                    authorizationStore.FindBySubjectAsync(subject, cancellationToken), a => a.Status);
-                sessions += await CountSessionsAsync(subject);
+                await RevokeSelectionAsync(user, selection, cancellationToken);
             }
-            else
-            {
-                var result = await RevokeCoreAsync(user, cancellationToken);
-                tokens += result.RevokedTokens;
-                authorizations += result.RevokedAuthorizations;
-                sessions += result.RemovedSessions;
-            }
+
+            tokens += selection.Tokens.Count;
+            authorizations += selection.Authorizations.Count;
+            sessions += selection.Sessions;
         }
 
         var tenantId = multiTenancyResolverService.GetTenantId();
@@ -116,26 +109,79 @@ internal sealed class UserSessionRevocationService(
 
     private async Task<UserSessionRevocationResultDto> RevokeCoreAsync(RtUser user, CancellationToken cancellationToken)
     {
-        var subject = user.RtId.ToString();
-        var stamp = await userManager.UpdateSecurityStampAsync(user);
-        if (!stamp.Succeeded)
-        {
-            throw new InvalidOperationException($"Security stamp of user '{subject}' could not be rotated.");
-        }
-
-        var tokens = await tokenStore.RevokeBySubjectAsync(subject, cancellationToken);
-        var authorizations = await authorizationStore.RevokeBySubjectAsync(subject, cancellationToken);
-        var sessions = await RemoveSessionsAsync(subject);
+        var selection = await SelectAsync(user, cancellationToken);
+        await RevokeSelectionAsync(user, selection, cancellationToken);
 
         return new UserSessionRevocationResultDto
         {
             UserName = user.UserName ?? string.Empty,
-            Subject = subject,
+            Subject = selection.Subject,
             SecurityStampRotated = true,
-            RevokedTokens = tokens,
-            RevokedAuthorizations = authorizations,
-            RemovedSessions = sessions
+            RevokedTokens = selection.Tokens.Count,
+            RevokedAuthorizations = selection.Authorizations.Count,
+            RemovedSessions = selection.Sessions
         };
+    }
+
+    /// <summary>
+    ///     The one selection both the dry run and the apply use (AB#7957): every token and authorization of the subject
+    ///     that is not revoked yet (valid, redeemed, inactive, …) and its server-side browser sessions.
+    /// </summary>
+    private async Task<RevocationSelection> SelectAsync(RtUser user, CancellationToken cancellationToken)
+    {
+        var subject = user.RtId.ToString();
+        var tokens = new List<RtOAuthToken>();
+        await foreach (var token in tokenStore.FindBySubjectAsync(subject, cancellationToken))
+        {
+            if (IsRevocable(token.Status))
+            {
+                tokens.Add(token);
+            }
+        }
+
+        var authorizations = new List<RtOAuthAuthorization>();
+        await foreach (var authorization in authorizationStore.FindBySubjectAsync(subject, cancellationToken))
+        {
+            if (IsRevocable(authorization.Status))
+            {
+                authorizations.Add(authorization);
+            }
+        }
+
+        return new RevocationSelection(subject, tokens, authorizations, await CountSessionsAsync(subject));
+    }
+
+    /// <summary>Not revoked yet — already revoked entries are neither counted nor revoked again.</summary>
+    private static bool IsRevocable(string? status)
+        => !string.Equals(status, OpenIddictAbstractions.OpenIddictConstants.Statuses.Revoked, StringComparison.Ordinal);
+
+    private async Task RevokeSelectionAsync(RtUser user, RevocationSelection selection,
+        CancellationToken cancellationToken)
+    {
+        var stamp = await userManager.UpdateSecurityStampAsync(user);
+        if (!stamp.Succeeded)
+        {
+            throw new InvalidOperationException($"Security stamp of user '{selection.Subject}' could not be rotated.");
+        }
+
+        foreach (var token in selection.Tokens)
+        {
+            await tokenStore.SetStatusAsync(token, OpenIddictAbstractions.OpenIddictConstants.Statuses.Revoked,
+                cancellationToken);
+            await tokenStore.UpdateAsync(token, cancellationToken);
+        }
+
+        foreach (var authorization in selection.Authorizations)
+        {
+            await authorizationStore.SetStatusAsync(authorization,
+                OpenIddictAbstractions.OpenIddictConstants.Statuses.Revoked, cancellationToken);
+            await authorizationStore.UpdateAsync(authorization, cancellationToken);
+        }
+
+        if (selection.Sessions > 0)
+        {
+            await RemoveSessionsAsync(selection.Subject);
+        }
     }
 
     private async Task<List<RtUser>> FindShadowUsersAsync()
@@ -159,14 +205,8 @@ internal sealed class UserSessionRevocationService(
         return result.Items.LongCount();
     }
 
-    private async Task<long> RemoveSessionsAsync(string subject)
+    private async Task RemoveSessionsAsync(string subject)
     {
-        var count = await CountSessionsAsync(subject);
-        if (count == 0)
-        {
-            return 0;
-        }
-
         var repository = multiTenancyResolverService.GetTenantRepository();
         using var session = await repository.GetSessionAsync();
         session.StartTransaction();
@@ -174,20 +214,12 @@ internal sealed class UserSessionRevocationService(
             FieldFilterCriteria.Create(LogicalOperators.And).FieldEquals(nameof(RtServerSideSession.SubjectId), subject),
             DeleteOptions.Erase);
         await session.CommitTransactionAsync();
-        return count;
-    }
-
-    private static async Task<long> CountValidAsync<T>(IAsyncEnumerable<T> items, Func<T, string?> status)
-    {
-        long count = 0;
-        await foreach (var item in items)
-        {
-            if (string.Equals(status(item), ValidStatus, StringComparison.Ordinal))
-            {
-                count++;
-            }
-        }
-
-        return count;
     }
 }
+
+/// <summary>What a revocation of one subject touches; shared by the dry run and the apply (AB#7957).</summary>
+internal sealed record RevocationSelection(
+    string Subject,
+    IReadOnlyList<RtOAuthToken> Tokens,
+    IReadOnlyList<RtOAuthAuthorization> Authorizations,
+    long Sessions);
