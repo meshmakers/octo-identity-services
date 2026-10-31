@@ -1,4 +1,5 @@
 using IdentityServerPersistence;
+using IdentityServerPersistence.SystemStores;
 using Meshmakers.Octo.Communication.Contracts;
 using Meshmakers.Octo.Communication.Contracts.DataTransferObjects;
 using Meshmakers.Octo.Services.Infrastructure.CredentialGenerator;
@@ -11,6 +12,7 @@ public class UserManagementService(
     ILogger<UserManagementService> logger,
     UserManager<RtUser> userManager,
     RoleManager<RtRole> roleManager,
+    IGroupStore groupStore,
     ICredentialGenerator credentialGenerator) : IUserManagementService
 {
     public async Task CreateAdminUserAsync(AdminUserDto adminUserDto)
@@ -66,7 +68,37 @@ public class UserManagementService(
             // file role grant (AB#6180) gives them to the Reporting role holders on the next tenant setup.
             await TryAddRole(adminUser, IdentityServiceConstants.FileManagementRole, required: false);
             await TryAddRole(adminUser, IdentityServiceConstants.FileViewerRole, required: false);
+
+            await AddToTenantOwnersAsync(adminUser);
         }
+    }
+
+    /// <summary>
+    ///     The first administrator also becomes a member of <c>TenantOwners</c>, which carries every non-secret built-in
+    ///     role. Without it the administrator holds only the direct roles above and, under the role change guard (grant
+    ///     only built-in roles you hold), could not add anyone to <c>TenantOwners</c>. The group is part of the
+    ///     bootstrap blueprint; a tenant without it keeps the direct roles only. Idempotent: an existing membership is
+    ///     left alone. This is the setup path and does not go through the guarded controllers by design.
+    /// </summary>
+    private async Task AddToTenantOwnersAsync(RtUser adminUser)
+    {
+        var group = await groupStore.FindByNameAsync(CommonConstants.TenantOwnersGroup.ToUpperInvariant());
+        if (group == null)
+        {
+            logger.LogWarning(
+                "The {Group} group does not exist; the first administrator keeps only the directly assigned roles",
+                CommonConstants.TenantOwnersGroup);
+            return;
+        }
+
+        var userId = adminUser.RtId.ToString();
+        var members = await groupStore.GetMemberUserIdsAsync(group.RtId);
+        if (members.Contains(userId, StringComparer.Ordinal))
+        {
+            return;
+        }
+
+        await groupStore.AddMemberUserAsync(group.RtId, userId);
     }
 
     private async Task TryAddRole(RtUser user, string roleName, bool required = true)
