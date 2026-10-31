@@ -24,8 +24,11 @@ namespace Meshmakers.Octo.Backend.IdentityServices.Services;
 /// </remarks>
 public interface IUserSessionRevocationService
 {
-    /// <summary>Revokes everything of <paramref name="user" />; one audit log line names the acting user.</summary>
-    Task<UserSessionRevocationResultDto> RevokeAsync(RtUser user, string? actingUser,
+    /// <summary>
+    ///     Revokes everything of <paramref name="user" />; one audit log line names the caller (subject, user name or
+    ///     client, tenant — AB#7958).
+    /// </summary>
+    Task<UserSessionRevocationResultDto> RevokeAsync(RtUser user, AuditActor actor,
         CancellationToken cancellationToken = default);
 
     /// <summary>
@@ -33,7 +36,7 @@ public interface IUserSessionRevocationService
     ///     the counts. Dry run and apply use the same selection — every token and authorization that is not revoked yet,
     ///     and the browser sessions — so the dry run reports exactly what the apply revokes (AB#7957).
     /// </summary>
-    Task<ShadowUserSessionRevocationResultDto> RevokeShadowUsersAsync(bool dryRun, string? actingUser,
+    Task<ShadowUserSessionRevocationResultDto> RevokeShadowUsersAsync(bool dryRun, AuditActor actor,
         CancellationToken cancellationToken = default);
 }
 
@@ -48,19 +51,21 @@ internal sealed class UserSessionRevocationService(
     /// <summary>Upper bound of the user names listed in a bulk result.</summary>
     internal const int MaxListedUserNames = 100;
 
-    public async Task<UserSessionRevocationResultDto> RevokeAsync(RtUser user, string? actingUser,
+    public async Task<UserSessionRevocationResultDto> RevokeAsync(RtUser user, AuditActor actor,
         CancellationToken cancellationToken = default)
     {
         var result = await RevokeCoreAsync(user, cancellationToken);
         logger.LogInformation(
-            "Sessions revoked: tenant '{TenantId}', subject '{Subject}', user '{UserName}', acting user '{ActingUser}'; " +
+            "Sessions revoked: tenant '{TenantId}', subject '{Subject}', user '{UserName}', acting user '{ActingUser}' " +
+            "(subject '{ActingSubject}', client '{ActingClient}', tenant '{ActingTenant}'); " +
             "revoked {RevokedTokens} token(s), {RevokedAuthorizations} authorization(s), removed {RemovedSessions} session(s)",
-            multiTenancyResolverService.GetTenantId(), result.Subject, result.UserName, actingUser ?? "(unknown)",
-            result.RevokedTokens, result.RevokedAuthorizations, result.RemovedSessions);
+            multiTenancyResolverService.GetTenantId(), result.Subject, result.UserName, actor.Actor, actor.SubjectOrNone,
+            actor.ClientIdOrNone, actor.TenantIdOrNone, result.RevokedTokens, result.RevokedAuthorizations,
+            result.RemovedSessions);
         return result;
     }
 
-    public async Task<ShadowUserSessionRevocationResultDto> RevokeShadowUsersAsync(bool dryRun, string? actingUser,
+    public async Task<ShadowUserSessionRevocationResultDto> RevokeShadowUsersAsync(bool dryRun, AuditActor actor,
         CancellationToken cancellationToken = default)
     {
         var shadowUsers = await FindShadowUsersAsync();
@@ -82,10 +87,11 @@ internal sealed class UserSessionRevocationService(
 
         var tenantId = multiTenancyResolverService.GetTenantId();
         logger.LogInformation(
-            "Shadow-user sessions {Mode}: tenant '{TenantId}', acting user '{ActingUser}'; {Users} user(s), " +
-            "{Tokens} token(s), {Authorizations} authorization(s), {Sessions} session(s)",
-            dryRun ? "counted (dry run)" : "revoked", tenantId, actingUser ?? "(unknown)", shadowUsers.Count, tokens,
-            authorizations, sessions);
+            "Shadow-user sessions {Mode}: tenant '{TenantId}', acting user '{ActingUser}' (subject '{ActingSubject}', " +
+            "client '{ActingClient}', tenant '{ActingTenant}'); {Users} user(s), {Tokens} token(s), " +
+            "{Authorizations} authorization(s), {Sessions} session(s)",
+            dryRun ? "counted (dry run)" : "revoked", tenantId, actor.Actor, actor.SubjectOrNone, actor.ClientIdOrNone,
+            actor.TenantIdOrNone, shadowUsers.Count, tokens, authorizations, sessions);
 
         return new ShadowUserSessionRevocationResultDto
         {

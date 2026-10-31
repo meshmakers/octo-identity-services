@@ -185,7 +185,10 @@ are already `revoked` are counted by neither (the single-user call uses the same
 `scope=shadowUsers` exists (400 otherwise). Run it per tenant (octo-cli, child tenants via token exchange) — used at the
 rollout of AB#7804/AB#7815 to end sessions created before the second-factor rule.
 
-Every call writes one `Information` audit log line (tenant, subject or counts, acting user — never a token value). Limit:
+Every call writes one `Information` audit log line (tenant, subject or counts, and the caller — never a token value). The
+caller is read from the access token claims by `AuditActor` (AB#7958): subject (`sub`), user name (`preferred_username`,
+else `name`, else the identity name), client id (`client_id`, else `azp`) and the caller's `tenant_id`; a
+client-credentials caller is recorded as `client <id>`. No other claim value is logged. Limit:
 issued JWT access tokens are not stored and stay valid until they expire (resource servers do not introspect); refresh
 tokens, browser sessions and remembered consents stop working at once. Logic: `IUserSessionRevocationService`; tests:
 `UserSessionRevocationTests`.

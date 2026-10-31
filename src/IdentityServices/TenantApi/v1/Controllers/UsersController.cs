@@ -447,7 +447,8 @@ public class UsersController : ControllerBase
             return NotFound(new NotFoundErrorDto($"User '{userName}' not found."));
         }
 
-        return Ok(await _userSessionRevocationService.RevokeAsync(user, User.Identity?.Name, HttpContext.RequestAborted));
+        return Ok(await _userSessionRevocationService.RevokeAsync(user, AuditActor.FromPrincipal(User),
+            HttpContext.RequestAborted));
     }
 
     // POST {tenant}/v1/users/revokeSessions?scope=shadowUsers&dryRun=true
@@ -469,7 +470,7 @@ public class UsersController : ControllerBase
             return BadRequest("Only scope=shadowUsers is supported.");
         }
 
-        return Ok(await _userSessionRevocationService.RevokeShadowUsersAsync(dryRun, User.Identity?.Name,
+        return Ok(await _userSessionRevocationService.RevokeShadowUsersAsync(dryRun, AuditActor.FromPrincipal(User),
             HttpContext.RequestAborted));
     }
 
