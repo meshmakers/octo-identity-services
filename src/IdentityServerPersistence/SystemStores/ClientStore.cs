@@ -156,6 +156,34 @@ public class ClientStore : IOctoClientStore
 
 
 
+    public async Task<RtClient?> MutateAsync(string clientId, Func<RtClient, bool> mutate)
+    {
+        ArgumentValidation.ValidateString(nameof(clientId), clientId);
+
+        var outcome = await GuardedEntityMutation.MutateAsync(TenantRepository,
+            session => GetClientByClientId(session, clientId), mutate);
+        if (outcome is not { } result)
+        {
+            return null;
+        }
+
+        if (result.Written && result.Entity.AutoProvisionInChildTenants && _mirrorProvisioning != null)
+        {
+            try
+            {
+                await _mirrorProvisioning.SyncMirrorsForClientAsync(TenantId, result.Entity);
+            }
+            catch (Exception ex)
+            {
+                _logger?.LogError(ex,
+                    "Mirror sync failed after updating client '{ClientId}' in tenant '{TenantId}'",
+                    clientId, TenantId);
+            }
+        }
+
+        return result.Entity;
+    }
+
     private async Task<RtClient?> GetClientByClientId(IOctoSession session, string clientId)
     {
         var queryOptions = RtEntityQueryOptions.Create()

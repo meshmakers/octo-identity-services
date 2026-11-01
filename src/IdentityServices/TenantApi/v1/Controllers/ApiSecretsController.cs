@@ -9,6 +9,7 @@ using Meshmakers.Common.Shared;
 using Meshmakers.Octo.Common.DistributionEventHub.Services;
 using Meshmakers.Octo.Communication.Contracts.DataTransferObjects;
 using Meshmakers.Octo.Communication.Contracts.DataTransferObjects.ApiErrors;
+using Meshmakers.Octo.Runtime.Contracts;
 using Meshmakers.Octo.Services.Contracts.DistributionEventHub.Messages;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -80,7 +81,7 @@ public class ApiSecretsController : ControllerBase
         var secret = client.ClientSecrets.FirstOrDefault(x => x.Value == decodedSecretValue);
         if (secret == null)
         {
-            return NotFound(new NotFoundErrorDto($"API secret '{decodedSecretValue}' not found"));
+            return NotFound(new NotFoundErrorDto(SecretNotFoundMessage));
         }
 
         return Ok(CreateApiSecret(secret));
@@ -133,7 +134,7 @@ public class ApiSecretsController : ControllerBase
         var secret = apiResource.ApiSecrets.FirstOrDefault(x => x.Value == decodedSecretValue);
         if (secret == null)
         {
-            return NotFound(new NotFoundErrorDto($"API secret '{decodedSecretValue}' not found"));
+            return NotFound(new NotFoundErrorDto(SecretNotFoundMessage));
         }
 
         return Ok(CreateApiSecret(secret));
@@ -155,23 +156,28 @@ public class ApiSecretsController : ControllerBase
             return BadRequest(ModelState);
         }
 
-        var client = await _octoClientStore.FindRtClientByIdAsync(clientId);
-        if (client == null)
-        {
-            return NotFound();
-        }
-
         var secretDto = GenerateSecret(request);
-
-        RtSecretRecord secret = new();
-        ApplyToApiSecret(secret, secretDto);
-        client.ClientSecrets.Add(secret);
 
         try
         {
-            await _octoClientStore.UpdateAsync(clientId, client);
+            var client = await _octoClientStore.MutateAsync(clientId, current =>
+            {
+                RtSecretRecord secret = new();
+                ApplyToApiSecret(secret, secretDto);
+                current.ClientSecrets.Add(secret);
+                return true;
+            });
+            if (client == null)
+            {
+                return NotFound();
+            }
+
             await ClearCacheAsync();
             return Ok(secretDto);
+        }
+        catch (RtVersionConflictException)
+        {
+            return Problem(detail: ConcurrentChangeMessage, statusCode: StatusCodes.Status409Conflict);
         }
         catch (Exception e)
         {
@@ -195,23 +201,28 @@ public class ApiSecretsController : ControllerBase
             return BadRequest(ModelState);
         }
 
-        var apiResource = await _octoResourceStore.GetApiResourceByNameAsync(apiResourceName);
-        if (apiResource == null)
-        {
-            return NotFound();
-        }
-
         var secretDto = GenerateSecret(request);
-
-        RtSecretRecord secret = new();
-        ApplyToApiSecret(secret, secretDto);
-        apiResource.ApiSecrets.Add(secret);
 
         try
         {
-            await _octoResourceStore.UpdateApiResourceAsync(apiResourceName, apiResource);
+            var apiResource = await _octoResourceStore.MutateApiResourceAsync(apiResourceName, current =>
+            {
+                RtSecretRecord secret = new();
+                ApplyToApiSecret(secret, secretDto);
+                current.ApiSecrets.Add(secret);
+                return true;
+            });
+            if (apiResource == null)
+            {
+                return NotFound();
+            }
+
             await ClearCacheAsync();
             return Ok(secretDto);
+        }
+        catch (RtVersionConflictException)
+        {
+            return Problem(detail: ConcurrentChangeMessage, statusCode: StatusCodes.Status409Conflict);
         }
         catch (Exception e)
         {
@@ -241,24 +252,26 @@ public class ApiSecretsController : ControllerBase
             return BadRequest(ModelState);
         }
 
-        var client = await _octoClientStore.FindRtClientByIdAsync(clientId);
-        if (client == null)
-        {
-            return NotFound();
-        }
-
-        var secrets = client.ClientSecrets.Where(x => x.Value == apiSecretDto.ValueEncrypted).ToArray();
-        if (!secrets.Any())
-        {
-            return NotFound(new NotFoundErrorDto($"Secret with value '{apiSecretDto.ValueEncrypted}' does not exist."));
-        }
-
-        ReplaceSecret(client.ClientSecrets, secrets.First(), apiSecretDto);
-
         try
         {
-            await _octoClientStore.UpdateAsync(clientId, client);
+            var replaced = false;
+            var client = await _octoClientStore.MutateAsync(clientId,
+                current => replaced = ReplaceSecret(current.ClientSecrets, apiSecretDto));
+            if (client == null)
+            {
+                return NotFound();
+            }
+
+            if (!replaced)
+            {
+                return NotFound(new NotFoundErrorDto(SecretNotFoundMessage));
+            }
+
             await ClearCacheAsync();
+        }
+        catch (RtVersionConflictException)
+        {
+            return Problem(detail: ConcurrentChangeMessage, statusCode: StatusCodes.Status409Conflict);
         }
         catch (Exception e)
         {
@@ -290,24 +303,26 @@ public class ApiSecretsController : ControllerBase
             return BadRequest(ModelState);
         }
 
-        var apiResource = await _octoResourceStore.GetApiResourceByNameAsync(apiResourceName);
-        if (apiResource == null)
-        {
-            return NotFound();
-        }
-
-        var secrets = apiResource.ApiSecrets.Where(x => x.Value == apiSecretDto.ValueEncrypted).ToArray();
-        if (!secrets.Any())
-        {
-            return NotFound(new NotFoundErrorDto($"Secret with value '{apiSecretDto.ValueEncrypted}' does not exist."));
-        }
-
-        ReplaceSecret(apiResource.ApiSecrets, secrets.First(), apiSecretDto);
-
         try
         {
-            await _octoResourceStore.UpdateApiResourceAsync(apiResourceName, apiResource);
+            var replaced = false;
+            var apiResource = await _octoResourceStore.MutateApiResourceAsync(apiResourceName,
+                current => replaced = ReplaceSecret(current.ApiSecrets, apiSecretDto));
+            if (apiResource == null)
+            {
+                return NotFound();
+            }
+
+            if (!replaced)
+            {
+                return NotFound(new NotFoundErrorDto(SecretNotFoundMessage));
+            }
+
             await ClearCacheAsync();
+        }
+        catch (RtVersionConflictException)
+        {
+            return Problem(detail: ConcurrentChangeMessage, statusCode: StatusCodes.Status409Conflict);
         }
         catch (Exception e)
         {
@@ -336,28 +351,30 @@ public class ApiSecretsController : ControllerBase
 
         var decodedSecretValue = secretValue.DecodeBase64();
 
-        var octoClient = await _octoClientStore.FindRtClientByIdAsync(clientId);
-        if (octoClient == null)
-        {
-            return NotFound(new NotFoundErrorDto($"Client with id '{clientId}' does not exist."));
-        }
-
-        var secrets = octoClient.ClientSecrets.Where(x => x.Value == decodedSecretValue).ToArray();
-        if (!secrets.Any())
-        {
-            return NotFound(new NotFoundErrorDto($"Secret with value '{decodedSecretValue}' does not exist."));
-        }
-
-        foreach (var secret in secrets)
-        {
-            octoClient.ClientSecrets.Remove(secret);
-        }
-
         try
         {
-            await _octoClientStore.UpdateAsync(clientId, octoClient);
+            // RemoveAll with a predicate (AB#7989): the list of an entity read from the database hands out new
+            // wrapper instances of the stored records, so Remove(wrapper) found nothing and the secret stayed.
+            // The write is version-checked, so a concurrent secret write cannot bring the removed secret back.
+            var removed = 0;
+            var octoClient = await _octoClientStore.MutateAsync(clientId,
+                current => (removed = current.ClientSecrets.RemoveAll(x => x.Value == decodedSecretValue)) > 0);
+            if (octoClient == null)
+            {
+                return NotFound(new NotFoundErrorDto($"Client with id '{clientId}' does not exist."));
+            }
+
+            if (removed == 0)
+            {
+                return NotFound(new NotFoundErrorDto(SecretNotFoundMessage));
+            }
+
             await ClearCacheAsync();
             return Ok();
+        }
+        catch (RtVersionConflictException)
+        {
+            return Problem(detail: ConcurrentChangeMessage, statusCode: StatusCodes.Status409Conflict);
         }
         catch (Exception e)
         {
@@ -384,34 +401,41 @@ public class ApiSecretsController : ControllerBase
 
         var decodedSecretValue = secretValue.DecodeBase64();
 
-        var apiResource = await _octoResourceStore.GetApiResourceByNameAsync(apiResourceName);
-        if (apiResource == null)
-        {
-            return NotFound();
-        }
-
-        var secrets = apiResource.ApiSecrets.Where(x => x.Value == decodedSecretValue).ToArray();
-        if (!secrets.Any())
-        {
-            return NotFound(new NotFoundErrorDto($"Secret with value '{decodedSecretValue}' does not exist."));
-        }
-
-        foreach (var secret in secrets)
-        {
-            apiResource.ApiSecrets.Remove(secret);
-        }
-
         try
         {
-            await _octoResourceStore.UpdateApiResourceAsync(apiResourceName, apiResource);
+            // RemoveAll with a predicate and a version-checked write (AB#7989), see DeleteSecretOfClient.
+            var removed = 0;
+            var apiResource = await _octoResourceStore.MutateApiResourceAsync(apiResourceName,
+                current => (removed = current.ApiSecrets.RemoveAll(x => x.Value == decodedSecretValue)) > 0);
+            if (apiResource == null)
+            {
+                return NotFound();
+            }
+
+            if (removed == 0)
+            {
+                return NotFound(new NotFoundErrorDto(SecretNotFoundMessage));
+            }
+
             await ClearCacheAsync();
             return Ok();
+        }
+        catch (RtVersionConflictException)
+        {
+            return Problem(detail: ConcurrentChangeMessage, statusCode: StatusCodes.Status409Conflict);
         }
         catch (Exception e)
         {
             return BadRequest(new InternalServerErrorDto(e.Message));
         }
     }
+
+    // The 404 answer never echoes the secret value (the stored hash) the caller sent (AB#7989).
+    private const string SecretNotFoundMessage = "The secret does not exist.";
+
+    // Every secret write is a version-checked read-modify-write (AB#7989); after repeated concurrent changes it gives up.
+    private const string ConcurrentChangeMessage =
+        "The secrets were changed concurrently by another request. Please retry.";
 
     private const string ValueEncryptedRequiredMessage =
         "ValueEncrypted is required to identify the secret to update.";
@@ -433,19 +457,22 @@ public class ApiSecretsController : ControllerBase
     }
 
     // The records handed out by the secret list are snapshots: changing one in place is not written back
-    // with the entity, so the updated record replaces the old one in the list.
-    private static void ReplaceSecret(IList<RtSecretRecord> secrets, RtSecretRecord existing, ApiSecretDto update)
+    // with the entity, so the updated record replaces the old one in the list. Returns false when no secret
+    // has the value of the update.
+    private static bool ReplaceSecret(IList<RtSecretRecord> secrets, ApiSecretDto update)
     {
-        RtSecretRecord replacement = new();
-        ApplyToApiSecret(replacement, update);
         for (var i = 0; i < secrets.Count; i++)
         {
-            if (secrets[i].Value == existing.Value)
+            if (secrets[i].Value == update.ValueEncrypted)
             {
+                RtSecretRecord replacement = new();
+                ApplyToApiSecret(replacement, update);
                 secrets[i] = replacement;
-                return;
+                return true;
             }
         }
+
+        return false;
     }
 
     private Task ClearCacheAsync()

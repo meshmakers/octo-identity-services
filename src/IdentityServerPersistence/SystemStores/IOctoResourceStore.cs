@@ -23,6 +23,13 @@ public interface IOctoResourceStore
     Task UpdateApiScopeAsync(string name, RtApiScope newApiScope);
     Task UpdateApiResourceAsync(string apiResourceName, RtApiResource newApiResource);
 
+    /// <summary>
+    ///     Changes the stored API resource as one version-checked read-modify-write (AB#7989), see
+    ///     <see cref="IOctoClientStore.MutateAsync" />.
+    /// </summary>
+    /// <returns>The API resource as stored; <c>null</c> when it does not exist.</returns>
+    Task<RtApiResource?> MutateApiResourceAsync(string apiResourceName, Func<RtApiResource, bool> mutate);
+
     Task<IEnumerable<RtApiScope>> FindRtApiScopesByNameAsync(IEnumerable<string> scopeNames);
     Task<IEnumerable<RtApiResource>> FindRtApiResourcesByNameAsync(IEnumerable<string> apiResourceNames);
 

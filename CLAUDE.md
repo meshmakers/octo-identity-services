@@ -1180,7 +1180,7 @@ like the password methods (production gate of 2026-10-23, B0); off = `METHOD_HAN
 | Generate | 32 bytes CSPRNG, URL-safe Base64, stored as Base64 SHA-256 | the same (`ClientMirrorSecrets.GenerateSecret`, `OctoSecretHasher.HashSecret`), record `Type = SharedSecret`; the clear text is the result, returned once |
 | Public client | accepted | `CLIENT_SECRET_NOT_REQUIRED` (it never authenticates with a secret) |
 | Expiration in the past | accepted | `METHOD_VALIDATION_FAILED` (`field=expirationDate`) |
-| Remove | by the stored value (Base64 in the route); echoes the value in a 404 | by the stored value **or** the clear text (hashed, fixed-time compare); every match removed with `RemoveAll` (AB#7989); no match = `SECRET_NOT_FOUND` without parameters |
+| Remove | by the stored value (Base64 in the route); 404 without the value (since AB#7989; before it, the delete removed nothing, see below) | by the stored value **or** the clear text (hashed, fixed-time compare); every match removed with `RemoveAll` (AB#7989); no match = `SECRET_NOT_FOUND` without parameters |
 | Write | `IOctoClientStore.UpdateAsync` (replace without expected version, mirror sync) + `CorsClientsUpdate` | version-checked read-modify-write of the client (`MutateClientAsync`: read, change, replace with the read `rtVersion`, re-read and re-apply on `RtVersionConflictException`, 20 attempts), so concurrent adds keep every secret and an add never brings a removed secret back; then mirror sync and `CorsClientsUpdate`, both best effort (5 s bound for the publish: a committed change is never reported as failed) |
 | Description | free text | `octo:mirror-own-secret` (the marker of a mirror's own secret, AB#5061) = `METHOD_VALIDATION_FAILED` (`field=description`) |
 
@@ -1196,6 +1196,26 @@ like the password methods (production gate of 2026-10-23, B0); off = `METHOD_HAN
   clear-text `secretValue` in no audit event and no log line at any level, the hash in none at Information or above; parallel adds + remove lose no
   update; reserved description; broker down still returns the committed secret), `Methods/IdentityMethodHostTests` (gate and caller rule),
   `Methods/ClientSecretHandlerFailureTests` (an exception is audited once as `METHOD_HANDLER_FAILED`).
+
+### REST secret delete removes by predicate (AB#7989, Security)
+
+`ApiSecretsController.DeleteSecretOfClient` / `DeleteSecretOfApiResource` (`DELETE {tenant}/v1/apiSecrets/client|apiResource/{id}/{base64(hash)}`)
+answered 200 but removed nothing for an entity read from MongoDB: the `AttributeRecordValueList` of such an entity holds plain `RtRecord`s and
+hands out **new** `RtSecretRecord` wrappers on every enumeration, so `Remove(wrapper)` found nothing and returned `false` silently; a revoked
+client secret kept authenticating. Both endpoints now call `RemoveAll(predicate)` (as the `Client.RemoveSecret` method of AB#7780 does) and
+answer 404 when nothing matched. **Every REST secret write** (POST, PUT, DELETE for clients and API resources) is now a version-checked
+read-modify-write (`IOctoClientStore.MutateAsync`, `IOctoResourceStore.MutateApiResourceAsync`, helper `GuardedEntityMutation`: read in a transaction,
+change, replace with the `rtVersion` that was read, re-read and re-apply on `RtVersionConflictException`, 20 attempts, then `409` problem). Before,
+`UpdateAsync` replaced the snapshot unversioned, so two overlapping secret writes could bring a deleted secret back or drop an added one
+(review finding on PR #225). The other callers of `ClientStore.UpdateAsync` / `UpdateApiResourceAsync` (full client or resource PUT) still replace
+unversioned; a full client update that read the client before a secret delete can still write the old secret list back. 🔴 **Rule for every record list of a stored entity:** never `Remove(item)` / `Contains(item)` / `IndexOf(item)` with
+an instance you enumerated; use `RemoveAll` / `FindIndex` with a predicate, and write a changed record back through the indexer (as
+`ReplaceSecret` in the PUT endpoints does; the PUT endpoints were not affected). No 404 of the controller echoes the secret value (the stored hash)
+any more. octo-cli (`DeleteApiSecretClient` / `DeleteApiSecretApiResource`, SDK `IdentityServicesClient`) is unchanged; Studio does not call
+these endpoints. API resource secrets authenticate nothing since the OpenIddict migration, so only the client case has a token-endpoint
+test. Tests: `ApiSecretsControllerTests` (`DeleteClientSecret_*` with the token endpoint, `DeleteApiResourceSecret_*`, unknown secret / owner,
+403, PUT of an API resource secret persisted, no hash in the logs at the deployed levels, `ConcurrentSecretWrites_*`: four deletes and six creates at
+once lose nothing and bring nothing back, red with the unversioned write).
 
 ### Blueprint-owned opt-in: `DataPolicy.ProtectBlueprintLocked` (AB#6384; System.Identity 2.24.0)
 
