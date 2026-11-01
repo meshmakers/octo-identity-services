@@ -185,8 +185,9 @@ types:
         description: "Creates a user (REST user creation is unchanged)."
         # NOT replacesGenericCreate (yet): a new method with the flag on the existing type User is MAJOR (row M16, decision 2026-10-19),
         # System.Identity 3.0.0 would leave every blueprint range [2.x,3.0) unsatisfied. The generic create of a User is already
-        # narrowed by the access modifiers of 2.28.0 (UserName and Email are MethodOnly, PasswordHash Hidden). AB#7777 sets the flag
-        # together with the next Major of System.Identity; platform-owner decision pending (AB#7773).
+        # narrowed by the access modifiers of 2.28.0 (UserName and Email are MethodOnly, PasswordHash Hidden). Since AB#7777 the identity
+        # service handles the method, and the engine treats it as the replacement of the generic create at runtime
+        # (GenericCreateReplacement), so every generic path refuses a new user. The flag itself follows with the next Major (AB#8053).
         parameters:
           - { name: userName, valueType: String }
           - { name: email, valueType: String, isOptional: true }
