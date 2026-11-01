@@ -15,13 +15,15 @@ namespace Meshmakers.Octo.Backend.IdentityServices.Methods;
 ///         REST parity: <c>POST system/v1/apiSecrets/client/{clientId}</c> (<c>ApiSecretsController.PostClient</c>), same
 ///         generator (32 bytes from the CSPRNG, URL-safe Base64, <see cref="ClientMirrorSecrets.GenerateSecret" />), same
 ///         stored format (<see cref="OctoSecretHasher.HashSecret" />: Base64 SHA-256, which <see cref="OctoApplicationManager" />
-///         validates against every unexpired record of the client), same store write (incl. mirror sync).
+///         validates against every unexpired record of the client), but a version-checked write of the client instead of the
+///         store's plain replace (mirror sync after it).
 ///     </para>
 ///     <para>
 ///         Stricter than REST, never more: a public client (<c>RequireClientSecret</c> false; it never authenticates with a
 ///         secret) is refused with <c>CLIENT_SECRET_NOT_REQUIRED</c>, and an <c>expirationDate</c> in the past (a secret that
 ///         could never be used) with <c>METHOD_VALIDATION_FAILED</c>. The record gets <c>Type = SharedSecret</c> (REST leaves
-///         it empty; the validation does not filter by type).
+///         it empty; the validation does not filter by type). The description <c>octo:mirror-own-secret</c> is reserved for the
+///         mirror machinery (AB#5061) and refused with <c>METHOD_VALIDATION_FAILED</c> (<c>field</c> = <c>description</c>).
 ///     </para>
 /// </remarks>
 internal sealed class ClientAddSecretHandler(IServiceProvider services)
@@ -34,7 +36,7 @@ internal sealed class ClientAddSecretHandler(IServiceProvider services)
         var outcomeCode = "METHOD_HANDLER_FAILED";
         try
         {
-            var outcome = await AddAsync(context, details).ConfigureAwait(false);
+            var outcome = await AddAsync(context, details, cancellationToken).ConfigureAwait(false);
             outcomeCode = outcome.Failure?.Code ?? IdentityMethodAuditWriter.SuccessOutcome;
             return outcome;
         }
@@ -46,7 +48,8 @@ internal sealed class ClientAddSecretHandler(IServiceProvider services)
     }
 
     private async Task<CkMethodOutcome<ClientAddSecretResult>> AddAsync(
-        CkMethodContext<ClientAddSecretParameters> context, Dictionary<string, string> details)
+        CkMethodContext<ClientAddSecretParameters> context, Dictionary<string, string> details,
+        CancellationToken cancellationToken)
     {
         var (failure, client) = await ResolveTargetAsync(context.CallerPrincipal, context.TenantId, context.TargetRtId,
             details).ConfigureAwait(false);
@@ -55,28 +58,44 @@ internal sealed class ClientAddSecretHandler(IServiceProvider services)
             return CkMethodOutcome<ClientAddSecretResult>.Fail(failure);
         }
 
-        if (!client!.RequireClientSecret)
-        {
-            return CkMethodOutcome<ClientAddSecretResult>.Fail(ClientSecretMethodErrors.ClientSecretNotRequired);
-        }
-
         DateTime? expiration = context.Parameters.ExpirationDate?.ToUniversalTime();
         if (expiration != null && expiration <= DateTime.UtcNow)
         {
             return CkMethodOutcome<ClientAddSecretResult>.ValidationFailed("expirationDate", "in-the-past");
         }
 
-        var clearText = ClientMirrorSecrets.GenerateSecret();
-        client.ClientSecrets ??= new AttributeRecordValueList<RtSecretRecord>();
-        client.ClientSecrets.Add(new RtSecretRecord
+        // The mirror machinery treats this description as the marker of a mirror's own secret (AB#5061); a user-supplied
+        // secret with it would be carried into the child tenants as if it were their own credential.
+        if (string.Equals(context.Parameters.Description, ClientMirrorSecrets.OwnSecretDescription, StringComparison.Ordinal))
         {
-            Type = ClientMirrorSecrets.SharedSecretType,
-            Value = OctoSecretHasher.HashSecret(clearText),
-            Description = context.Parameters.Description,
-            ExpirationDateTime = expiration
-        });
+            return CkMethodOutcome<ClientAddSecretResult>.ValidationFailed("description", "reserved");
+        }
 
-        await SaveAsync(client, details).ConfigureAwait(false);
+        // Generated once, outside the write: a retried write stores the same hash as the clear text returned.
+        var clearText = ClientMirrorSecrets.GenerateSecret();
+        var hash = OctoSecretHasher.HashSecret(clearText);
+        var refused = await MutateClientAsync(client!.RtId, current =>
+        {
+            if (!current.RequireClientSecret)
+            {
+                return new CkMethodFailure(ClientSecretMethodErrors.ClientSecretNotRequired);
+            }
+
+            current.ClientSecrets ??= new AttributeRecordValueList<RtSecretRecord>();
+            current.ClientSecrets.Add(new RtSecretRecord
+            {
+                Type = ClientMirrorSecrets.SharedSecretType,
+                Value = hash,
+                Description = context.Parameters.Description,
+                ExpirationDateTime = expiration
+            });
+            return null;
+        }, details, cancellationToken).ConfigureAwait(false);
+        if (refused != null)
+        {
+            return CkMethodOutcome<ClientAddSecretResult>.Fail(refused);
+        }
+
         return new ClientAddSecretResult { Value = clearText };
     }
 }
@@ -105,7 +124,7 @@ internal sealed class ClientRemoveSecretHandler(IServiceProvider services)
         var outcomeCode = "METHOD_HANDLER_FAILED";
         try
         {
-            var outcome = await RemoveAsync(context, details).ConfigureAwait(false);
+            var outcome = await RemoveAsync(context, details, cancellationToken).ConfigureAwait(false);
             outcomeCode = outcome.Failure?.Code ?? IdentityMethodAuditWriter.SuccessOutcome;
             return outcome;
         }
@@ -116,7 +135,7 @@ internal sealed class ClientRemoveSecretHandler(IServiceProvider services)
     }
 
     private async Task<CkMethodOutcome> RemoveAsync(CkMethodContext<ClientRemoveSecretParameters> context,
-        Dictionary<string, string> details)
+        Dictionary<string, string> details, CancellationToken cancellationToken)
     {
         var (failure, client) = await ResolveTargetAsync(context.CallerPrincipal, context.TenantId, context.TargetRtId,
             details).ConfigureAwait(false);
@@ -131,16 +150,20 @@ internal sealed class ClientRemoveSecretHandler(IServiceProvider services)
             return CkMethodOutcome.ValidationFailed("secretValue", "required");
         }
 
-        // RemoveAll with a predicate: the list hands out wrapper instances of the stored records, so a Remove by instance
-        // does not find a record that was read from the database.
-        var removed = client!.ClientSecrets?.RemoveAll(s => Matches(s, secretValue)) ?? 0;
-        details[RemovedCountDetail] = removed.ToString(System.Globalization.CultureInfo.InvariantCulture);
-        if (removed == 0)
+        var removed = 0;
+        var refused = await MutateClientAsync(client!.RtId, current =>
         {
-            return CkMethodOutcome.Fail(ClientSecretMethodErrors.SecretNotFound);
+            // RemoveAll with a predicate: the list hands out wrapper instances of the stored records, so a Remove by
+            // instance does not find a record that was read from the database (AB#7989).
+            removed = current.ClientSecrets?.RemoveAll(s => Matches(s, secretValue)) ?? 0;
+            return removed == 0 ? new CkMethodFailure(ClientSecretMethodErrors.SecretNotFound) : null;
+        }, details, cancellationToken).ConfigureAwait(false);
+        details[RemovedCountDetail] = removed.ToString(System.Globalization.CultureInfo.InvariantCulture);
+        if (refused != null)
+        {
+            return CkMethodOutcome.Fail(refused);
         }
 
-        await SaveAsync(client, details).ConfigureAwait(false);
         return CkMethodOutcome.Ok();
     }
 

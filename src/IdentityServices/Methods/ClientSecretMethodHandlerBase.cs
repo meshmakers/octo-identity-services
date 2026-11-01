@@ -1,3 +1,4 @@
+using IdentityServerPersistence.Services;
 using IdentityServerPersistence.SystemStores;
 using Meshmakers.Octo.Common.DistributionEventHub.Services;
 using Meshmakers.Octo.Communication.Contracts;
@@ -23,7 +24,7 @@ internal static class ClientSecretMethodErrors
 
 /// <summary>
 ///     Shared flow of <c>Client.AddSecret</c> and <c>Client.RemoveSecret</c> (AB#7780): caller rule, target, tenant binding,
-///     write through <see cref="IOctoClientStore" /> (the store of <c>ApiSecretsController</c>, incl. the mirror sync) and
+///     version-checked write of the client (mirror sync and cache event as <c>ApiSecretsController</c>) and
 ///     exactly one <c>Identity.Method</c> event per call.
 /// </summary>
 /// <remarks>
@@ -101,19 +102,129 @@ internal abstract class ClientSecretMethodHandlerBase(IServiceProvider services)
         return (null, client);
     }
 
+    /// <summary>Attempts of the version-checked read-modify-write before the call fails (<c>METHOD_HANDLER_FAILED</c>).</summary>
+    internal const int MaxConcurrencyAttempts = 20;
+
     /// <summary>
-    ///     Writes the changed secret list through the client store (replace of the client entity and mirror sync, as REST) and
-    ///     publishes the client cache update REST publishes.
+    ///     Applies <paramref name="mutate" /> to the stored client as one version-checked read-modify-write: read in a
+    ///     transaction, change, replace with the version that was read (the engine refuses the replace when another writer was
+    ///     in between), re-read and re-apply on a conflict. So a concurrent <c>AddSecret</c> can never bring back a secret that
+    ///     <c>RemoveSecret</c> removed, and two concurrent adds both keep their secret. <paramref name="mutate" /> returns a
+    ///     failure to answer without writing, or <c>null</c> to write. After the commit the mirrors of a flagged client are synced
+    ///     and the client cache update is published, both best effort (as <c>ClientStore.UpdateAsync</c> and REST do).
     /// </summary>
-    protected async Task SaveAsync(RtClient client, Dictionary<string, string> details)
+    protected async Task<CkMethodFailure?> MutateClientAsync(OctoObjectId clientRtId,
+        Func<RtClient, CkMethodFailure?> mutate, Dictionary<string, string> details, CancellationToken cancellationToken)
     {
-        var clientStore = Services.GetRequiredService<IOctoClientStore>();
-        await clientStore.UpdateAsync(client.ClientId, client).ConfigureAwait(false);
-        details[SecretCountDetail] = (client.ClientSecrets?.Count ?? 0).ToString(System.Globalization.CultureInfo.InvariantCulture);
-        await Services.GetRequiredService<IDistributionEventHubService>()
-            .PublishAsync(new CorsClientsUpdate(clientStore.TenantId, Guid.NewGuid(), DateTime.Now))
-            .ConfigureAwait(false);
+        var tenantResolver = Services.GetRequiredService<IMultiTenancyResolverService>();
+        var repository = tenantResolver.GetTenantRepository();
+        RtClient? saved = null;
+        for (var attempt = 1;; attempt++)
+        {
+            try
+            {
+                var (failure, client) = await MongoWriteRetry.ExecuteTransactionWithRetryAsync(async () =>
+                {
+                    using var session = await repository.GetSessionAsync().ConfigureAwait(false);
+                    session.StartTransaction();
+                    try
+                    {
+                        var current = await repository.GetRtEntityByRtIdAsync<RtClient>(session, clientRtId)
+                            .ConfigureAwait(false);
+                        if (current == null)
+                        {
+                            await session.AbortTransactionAsync().ConfigureAwait(false);
+                            return (CkMethodOutcome.TargetNotFound().Failure, (RtClient?)null);
+                        }
+
+                        var readVersion = current.RtVersion;
+                        var refused = mutate(current);
+                        if (refused != null)
+                        {
+                            await session.AbortTransactionAsync().ConfigureAwait(false);
+                            return (refused, null);
+                        }
+
+                        await repository.ReplaceOneRtEntityByIdAsync(session, current.RtId, current, readVersion)
+                            .ConfigureAwait(false);
+                        await session.CommitTransactionAsync().ConfigureAwait(false);
+                        return ((CkMethodFailure?)null, current);
+                    }
+                    catch
+                    {
+                        try
+                        {
+                            await session.AbortTransactionAsync().ConfigureAwait(false);
+                        }
+                        catch (Exception)
+                        {
+                            // The transaction is gone already; the original exception is what matters.
+                        }
+
+                        throw;
+                    }
+                }, MaxConcurrencyAttempts, cancellationToken).ConfigureAwait(false);
+
+                if (failure != null)
+                {
+                    return failure;
+                }
+
+                saved = client;
+                break;
+            }
+            catch (RtVersionConflictException) when (attempt < MaxConcurrencyAttempts)
+            {
+                // Another writer was faster: nothing was written, read again and re-apply.
+            }
+
+            await Task.Delay(Random.Shared.Next(1, 4 * attempt + 1), cancellationToken).ConfigureAwait(false);
+        }
+
+        details[SecretCountDetail] =
+            (saved!.ClientSecrets?.Count ?? 0).ToString(System.Globalization.CultureInfo.InvariantCulture);
+        await AfterCommitAsync(repository.TenantId, saved).ConfigureAwait(false);
+        return null;
     }
+
+    /// <summary>
+    ///     Mirror sync and the <c>CorsClientsUpdate</c> event after the write committed. Best effort and bounded: a failure or a
+    ///     broker that does not answer never turns a committed change into a failed call (AddSecret would otherwise store a
+    ///     secret it never hands out). Logs the tenant and the client id only.
+    /// </summary>
+    private async Task AfterCommitAsync(string tenantId, RtClient client)
+    {
+        var logger = Services.GetRequiredService<ILogger<ClientSecretMethodHandlerBase>>();
+        if (client.AutoProvisionInChildTenants)
+        {
+            try
+            {
+                await Services.GetRequiredService<IClientMirrorProvisioningService>()
+                    .SyncMirrorsForClientAsync(tenantId, client).ConfigureAwait(false);
+            }
+            catch (Exception ex)
+            {
+                logger.LogError(ex, "Mirror sync failed after a secret change of client '{ClientId}' in tenant '{TenantId}'",
+                    client.ClientId, tenantId);
+            }
+        }
+
+        try
+        {
+            var publish = Services.GetRequiredService<IDistributionEventHubService>()
+                .PublishAsync(new CorsClientsUpdate(tenantId, Guid.NewGuid(), DateTime.Now));
+            _ = publish.ContinueWith(static t => _ = t.Exception, TaskContinuationOptions.OnlyOnFaulted);
+            await publish.WaitAsync(PublishTimeout).ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex,
+                "Failed to publish CorsClientsUpdate for tenant '{TenantId}'; the CORS policy cache heals on its TTL", tenantId);
+        }
+    }
+
+    /// <summary>How long the handler waits for the <c>CorsClientsUpdate</c> publish.</summary>
+    internal static readonly TimeSpan PublishTimeout = TimeSpan.FromSeconds(5);
 
     /// <summary>Writes the one <c>Identity.Method</c> event of the call (also for refusals and exceptions).</summary>
     protected Task AuditAsync<TParameters>(CkMethodContext<TParameters> context, string outcome,

@@ -1148,8 +1148,9 @@ like the password methods (production gate of 2026-10-23, B0); off = `METHOD_HAN
 | Generate | 32 bytes CSPRNG, URL-safe Base64, stored as Base64 SHA-256 | the same (`ClientMirrorSecrets.GenerateSecret`, `OctoSecretHasher.HashSecret`), record `Type = SharedSecret`; the clear text is the result, returned once |
 | Public client | accepted | `CLIENT_SECRET_NOT_REQUIRED` (it never authenticates with a secret) |
 | Expiration in the past | accepted | `METHOD_VALIDATION_FAILED` (`field=expirationDate`) |
-| Remove | by the stored value (Base64 in the route); echoes the value in a 404 | by the stored value **or** the clear text (hashed, fixed-time compare); every match removed with `RemoveAll` (Bug AB#7989: REST `Remove(wrapper)` removes nothing for a client read from MongoDB); no match = `SECRET_NOT_FOUND` without parameters |
-| Write | `IOctoClientStore.UpdateAsync` (mirror sync) + `CorsClientsUpdate` | the same |
+| Remove | by the stored value (Base64 in the route); echoes the value in a 404 | by the stored value **or** the clear text (hashed, fixed-time compare); every match removed with `RemoveAll` (AB#7989); no match = `SECRET_NOT_FOUND` without parameters |
+| Write | `IOctoClientStore.UpdateAsync` (replace without expected version, mirror sync) + `CorsClientsUpdate` | version-checked read-modify-write of the client (`MutateClientAsync`: read, change, replace with the read `rtVersion`, re-read and re-apply on `RtVersionConflictException`, 20 attempts), so concurrent adds keep every secret and an add never brings a removed secret back; then mirror sync and `CorsClientsUpdate`, both best effort (5 s bound for the publish: a committed change is never reported as failed) |
+| Description | free text | `octo:mirror-own-secret` (the marker of a mirror's own secret, AB#5061) = `METHOD_VALIDATION_FAILED` (`field=description`) |
 
 - **Authentication** goes through `OctoApplicationManager` (every unexpired record of the client), so a new secret authenticates at once and a removed one
   fails at once (entity caching is off).
@@ -1160,8 +1161,9 @@ like the password methods (production gate of 2026-10-23, B0); off = `METHOD_HAN
 - **Tests:** `Api/Methods/ClientSecretMethodTests` (real MongoDB, real token endpoint: add -> stored value is the hash -> client credentials token OK ->
   remove -> token refused; remove by stored value; UserManagement and service token callers; caller theory without role/scope for existing and missing
   target; unknown target; public client; expiration; unknown value without echo; failing store audited; forged caller on the host; canary: the secret and a
-  clear-text `secretValue` in no audit event and no log line at any level, the hash in none at Information or above), `Methods/IdentityMethodHostTests`
-  (gate and caller rule).
+  clear-text `secretValue` in no audit event and no log line at any level, the hash in none at Information or above; parallel adds + remove lose no
+  update; reserved description; broker down still returns the committed secret), `Methods/IdentityMethodHostTests` (gate and caller rule),
+  `Methods/ClientSecretHandlerFailureTests` (an exception is audited once as `METHOD_HANDLER_FAILED`).
 
 ### Blueprint-owned opt-in: `DataPolicy.ProtectBlueprintLocked` (AB#6384; System.Identity 2.24.0)
 

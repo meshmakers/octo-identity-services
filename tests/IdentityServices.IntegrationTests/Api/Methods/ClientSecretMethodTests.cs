@@ -5,6 +5,8 @@ using System.Text;
 using System.Text.Json;
 using FluentAssertions;
 using IdentityServerPersistence.SystemStores;
+using Meshmakers.Octo.Common.DistributionEventHub.Services;
+using Meshmakers.Octo.Services.Contracts.DistributionEventHub.Messages;
 using IdentityServices.IntegrationTests.Infrastructure;
 using Meshmakers.Octo.Backend.IdentityServices.Methods;
 using Meshmakers.Octo.ConstructionKit.Contracts;
@@ -282,24 +284,57 @@ public class ClientSecretMethodTests : IntegrationTestBase
     }
 
     [Fact]
-    public async Task WhenTheStoreFails_TheCallThrows_AndTheAuditStillRecordsTheFailure()
+    public async Task ParallelAddsAndARemove_LoseNoUpdate_TheRemovedSecretDoesNotComeBack()
     {
         var ct = TestContext.Current.CancellationToken;
         var client = await CreateConfidentialClientAsync();
-        var failing = _enabled.WithWebHostBuilder(b => b.ConfigureTestServices(services =>
+        var first = (await AddAsync(Admin(), client.RtId.ToString(), null, null, ct)).Value!.Value!;
+
+        var adds = Enumerable.Range(0, 8).Select(_ => AddAsync(Admin(), client.RtId.ToString(), null, null, ct)).ToList();
+        var remove = RemoveAsync(Admin(), client.RtId.ToString(), first, ct);
+        await Task.WhenAll(adds.Cast<Task>().Append(remove));
+
+        (await remove).IsSuccess.Should().BeTrue();
+        var added = adds.Select(a => a.Result.Value!.Value!).ToList();
+        var stored = (await FindAsync(client.ClientId)).ClientSecrets.Select(s => s.Value).ToList();
+        stored.Should().BeEquivalentTo(added.Select(Sha256Base64), "every returned secret is stored, none is lost");
+        stored.Should().NotContain(Sha256Base64(first), "a concurrent add does not bring the removed secret back");
+        (await RequestTokenAsync(client.ClientId, added[^1], ct)).Should().Be(HttpStatusCode.OK);
+        (await RequestTokenAsync(client.ClientId, first, ct)).Should().Be(HttpStatusCode.Unauthorized);
+    }
+
+    [Fact]
+    public async Task TheReservedMirrorDescription_IsRefused()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        var client = await CreateConfidentialClientAsync();
+
+        var outcome = await AddAsync(Admin(), client.RtId.ToString(), "octo:mirror-own-secret", null, ct);
+
+        outcome.Failure!.Code.Should().Be("METHOD_VALIDATION_FAILED");
+        outcome.Failure.Parameters["field"].Should().Be("description");
+        (await FindAsync(client.ClientId)).ClientSecrets.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task WhenTheCacheEventCannotBePublished_TheCommittedSecretIsStillReturned()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        var client = await CreateConfidentialClientAsync();
+        var brokerDown = _enabled.WithWebHostBuilder(b => b.ConfigureTestServices(services =>
         {
-            var store = Substitute.For<IOctoClientStore>();
-            store.UpdateAsync(Arg.Any<string>(), Arg.Any<RtClient>())
-                .Returns(Task.FromException(new InvalidOperationException("store down")));
-            services.RemoveAll<IOctoClientStore>();
-            services.AddScoped(_ => store);
+            var hub = Substitute.For<IDistributionEventHubService>();
+            hub.PublishAsync(Arg.Any<CorsClientsUpdate>(), Arg.Any<CancellationToken?>())
+                .Returns(Task.FromException(new InvalidOperationException("broker down")));
+            services.RemoveAll<IDistributionEventHubService>();
+            services.AddSingleton(hub);
         }));
 
-        var act = () => AddAsync(Admin(), client.RtId.ToString(), null, null, ct, failing);
+        var outcome = await AddAsync(Admin(), client.RtId.ToString(), null, null, ct, brokerDown);
 
-        await act.Should().ThrowAsync<InvalidOperationException>();
-        Audits(client.RtId.ToString()).Single().Details["outcome"].Should().Be("METHOD_HANDLER_FAILED");
-        (await FindAsync(client.ClientId)).ClientSecrets.Should().BeEmpty();
+        outcome.IsSuccess.Should().BeTrue("the write committed; the event is best effort");
+        (await RequestTokenAsync(client.ClientId, outcome.Value!.Value!, ct)).Should().Be(HttpStatusCode.OK);
+        Audits(client.RtId.ToString()).Single().Details["outcome"].Should().Be("SUCCESS");
     }
 
     [Fact]
