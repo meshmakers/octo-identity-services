@@ -1003,7 +1003,7 @@ stories are merged.**
 
 | Type | Methods (`-1`) | Roles |
 |------|----------------|-------|
-| `User` | `ChangePassword` (instance, `allowSelf`, no role), `ResetPassword`, `SetRoles`, `AddRole`, `RemoveRole`, `Merge`, static `CreateUser` (handler AB#7777); `DisableTwoFactor` since 2.30.0 (AB#7879) | `UserManagement` |
+| `User` | `ChangePassword` (instance, `allowSelf`, no role), `ResetPassword`, `SetRoles`, `AddRole`, `RemoveRole`, `Merge` (handler AB#7778), static `CreateUser` (handler AB#7777); `DisableTwoFactor` since 2.30.0 (AB#7879) | `UserManagement` |
 | `Group` | `AddMember`, `RemoveMember` (`memberKind` enum `GroupMemberKind` = `User`/`Client`, `memberId`), `SetRoles` | `UserManagement` |
 | `Client` | `AddSecret` (result `sensitive`: the generated secret, shown once), `RemoveSecret` (by `secretValue`, REST parity) | `TenantManagement`, `UserManagement` |
 | `DataPermission` | `GrantToRole`, `RevokeFromRole` | `UserManagement` |
@@ -2017,6 +2017,36 @@ next System.Identity major (AB#8053). Nothing in this service is affected (repos
 invitation without password, duplicate name (also other casing) and e-mail, policy, reserved name, validation, caller theory, service
 token, forged caller, audit, welcome notification, no password in audit or logs), `Methods/IdentityMethodHostTests`,
 `IdentityMethodDeclarationsIntegrationTests` (declared role `UserManagement`, flag still off).
+
+### `User.Merge` and the one merge of a duplicate user (AB#7778)
+
+REST `POST {tenant}/v1/users/{userName}/merge` and the CK method `User.Merge-1` (`UserMergeHandler`, one row in
+`IdentityMethodHost.Handlers`, `CarriesSecret = false`: hosted whatever `EnablePasswordMethods` says) share `IUserMergeService`
+(`Services/UserMergeService.cs`, scoped). The model declares the method since 2.29.0; no CK change.
+
+Steps of the service, in this order: same user = `SameUser` (nothing written); role change guard on the **deletion** of the source user
+(`RoleChangeRequest(caller, source, directRoles, null)`, AB#7914: `last-administrator`); every external login removed from the source and
+added to the target (remove first: `AddLoginAsync` refuses a login another user still owns); `IUserSessionRevocationService.RevokeAsync(source)`
+(security stamp, refresh tokens, authorizations, server-side sessions of the source in this tenant; new for REST too); `DeleteAsync(source)`.
+**Nothing else moves**: roles, group memberships, claims and cross-tenant mappings of the source go away with it, so a merge never grants
+the target a role and the guard only has to judge the deletion.
+
+| Rule | REST | Method |
+|---|---|---|
+| Caller | `IdentityUserAdministrationWritePolicy` | `IdentityAdminMethodHandlerBase` (scope `octo_api` + `UserManagement` on the validated principal, `role-required` before the target is read); forged bus caller rejected by the host |
+| Target | by name, 404 | target rtId, `METHOD_TARGET_NOT_FOUND` |
+| Source | by name, 404 | `SOURCE_USER_NOT_FOUND`; missing `sourceUserName` = `METHOD_VALIDATION_FAILED` |
+| Source data permission (AB#7035) | none | `IRtDataPermissionEvaluator` on the source user: not readable = `SOURCE_USER_NOT_FOUND`, not writable = `METHOD_FORBIDDEN` / `data-permission` (stricter, never looser; open without enforcing policies) |
+| Same user | 400 | `CANNOT_MERGE_INTO_ITSELF` |
+| Guard | 409 problem `last-administrator` + `Identity.RoleChangeRefused` | `METHOD_FORBIDDEN` / `reason` |
+| Login or delete failure | 400 with the identity errors | `MERGE_FAILED`, parameters `step` (`removeLogin` / `addLogin` / `deleteSource`) and `loginProvider`, details = error codes |
+
+Audit: one `Identity.Method` event per call with `sourceUserName`, `sourceRtId`, `transferredLogins`, `revokedTokens` (and `reason` for
+a refusal); the revocation writes its own log line with the acting user. A failing revocation throws (REST 500, method
+`METHOD_HANDLER_FAILED`) before the source is deleted. Tests: `Api/Methods/UserMergeMethodTests` (REST and method on identical fixtures
+compared state by state, audit, every refusal, data permission, last administrator, forged caller, `MERGE_FAILED` mapping),
+`Api/TenantApi/UsersMergeTests` (REST), `RoleChangeGuardTests` (REST guard). Since this handler every declared System.Identity method has
+one; `UserChangePasswordMethodTests.AMethodWithoutHandler_…` uses an undeclared id.
 
 ### Identity-owned User fields are refused on the generic paths (AB#8042)
 

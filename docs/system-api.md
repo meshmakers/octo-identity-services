@@ -137,6 +137,11 @@ Transfers all external logins (e.g., Google, Microsoft) from the source user to 
 - `sourceUserName` in the body is the user whose logins are transferred and who is deleted
 - Returns 404 if either user does not exist
 - Returns 400 if attempting to merge a user into itself
+- Returns 409 (`last-administrator`) when the source user is the last user that holds `UserManagement` (AB#7914)
+- Before the source user is deleted, every refresh token, authorization and browser session of the source user in this tenant
+  is revoked (`IUserSessionRevocationService`, AB#7778)
+- Roles, group memberships, claims and cross-tenant mappings of the source user are **not** transferred
+- The CK method `User.Merge-1` runs the same code (`IUserMergeService`, see `CLAUDE.md` § `User.Merge`)
 
 ### Clients (`/{tenantId}/v1/clients`)
 
