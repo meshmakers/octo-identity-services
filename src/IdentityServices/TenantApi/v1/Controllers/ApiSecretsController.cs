@@ -80,7 +80,7 @@ public class ApiSecretsController : ControllerBase
         var secret = client.ClientSecrets.FirstOrDefault(x => x.Value == decodedSecretValue);
         if (secret == null)
         {
-            return NotFound(new NotFoundErrorDto($"API secret '{decodedSecretValue}' not found"));
+            return NotFound(new NotFoundErrorDto(SecretNotFoundMessage));
         }
 
         return Ok(CreateApiSecret(secret));
@@ -133,7 +133,7 @@ public class ApiSecretsController : ControllerBase
         var secret = apiResource.ApiSecrets.FirstOrDefault(x => x.Value == decodedSecretValue);
         if (secret == null)
         {
-            return NotFound(new NotFoundErrorDto($"API secret '{decodedSecretValue}' not found"));
+            return NotFound(new NotFoundErrorDto(SecretNotFoundMessage));
         }
 
         return Ok(CreateApiSecret(secret));
@@ -250,7 +250,7 @@ public class ApiSecretsController : ControllerBase
         var secrets = client.ClientSecrets.Where(x => x.Value == apiSecretDto.ValueEncrypted).ToArray();
         if (!secrets.Any())
         {
-            return NotFound(new NotFoundErrorDto($"Secret with value '{apiSecretDto.ValueEncrypted}' does not exist."));
+            return NotFound(new NotFoundErrorDto(SecretNotFoundMessage));
         }
 
         ReplaceSecret(client.ClientSecrets, secrets.First(), apiSecretDto);
@@ -299,7 +299,7 @@ public class ApiSecretsController : ControllerBase
         var secrets = apiResource.ApiSecrets.Where(x => x.Value == apiSecretDto.ValueEncrypted).ToArray();
         if (!secrets.Any())
         {
-            return NotFound(new NotFoundErrorDto($"Secret with value '{apiSecretDto.ValueEncrypted}' does not exist."));
+            return NotFound(new NotFoundErrorDto(SecretNotFoundMessage));
         }
 
         ReplaceSecret(apiResource.ApiSecrets, secrets.First(), apiSecretDto);
@@ -342,15 +342,11 @@ public class ApiSecretsController : ControllerBase
             return NotFound(new NotFoundErrorDto($"Client with id '{clientId}' does not exist."));
         }
 
-        var secrets = octoClient.ClientSecrets.Where(x => x.Value == decodedSecretValue).ToArray();
-        if (!secrets.Any())
+        // RemoveAll with a predicate (AB#7989): the list of an entity read from the database hands out new
+        // wrapper instances of the stored records, so Remove(wrapper) finds nothing and the secret stays.
+        if (octoClient.ClientSecrets.RemoveAll(x => x.Value == decodedSecretValue) == 0)
         {
-            return NotFound(new NotFoundErrorDto($"Secret with value '{decodedSecretValue}' does not exist."));
-        }
-
-        foreach (var secret in secrets)
-        {
-            octoClient.ClientSecrets.Remove(secret);
+            return NotFound(new NotFoundErrorDto(SecretNotFoundMessage));
         }
 
         try
@@ -390,15 +386,10 @@ public class ApiSecretsController : ControllerBase
             return NotFound();
         }
 
-        var secrets = apiResource.ApiSecrets.Where(x => x.Value == decodedSecretValue).ToArray();
-        if (!secrets.Any())
+        // RemoveAll with a predicate (AB#7989), see DeleteSecretOfClient.
+        if (apiResource.ApiSecrets.RemoveAll(x => x.Value == decodedSecretValue) == 0)
         {
-            return NotFound(new NotFoundErrorDto($"Secret with value '{decodedSecretValue}' does not exist."));
-        }
-
-        foreach (var secret in secrets)
-        {
-            apiResource.ApiSecrets.Remove(secret);
+            return NotFound(new NotFoundErrorDto(SecretNotFoundMessage));
         }
 
         try
@@ -412,6 +403,9 @@ public class ApiSecretsController : ControllerBase
             return BadRequest(new InternalServerErrorDto(e.Message));
         }
     }
+
+    // The 404 answer never echoes the secret value (the stored hash) the caller sent (AB#7989).
+    private const string SecretNotFoundMessage = "The secret does not exist.";
 
     private const string ValueEncryptedRequiredMessage =
         "ValueEncrypted is required to identify the secret to update.";

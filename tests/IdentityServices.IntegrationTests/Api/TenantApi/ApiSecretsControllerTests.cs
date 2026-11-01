@@ -9,6 +9,7 @@ using System.Text.Json.Nodes;
 using FluentAssertions;
 using IdentityServerPersistence.SystemStores;
 using IdentityServices.IntegrationTests.Infrastructure;
+using Meshmakers.Common.Shared;
 using Meshmakers.Octo.Backend.IdentityServices.OpenIddict;
 using Meshmakers.Octo.ConstructionKit.Contracts;
 using Meshmakers.Octo.Runtime.Contracts.RepositoryEntities;
@@ -246,6 +247,126 @@ public class ApiSecretsControllerTests : IntegrationTestBase
         (await Client.GetStringAsync(SecretsUrl("client", clientId), ct)).Should().Contain("renamed");
     }
 
+    [Fact]
+    public async Task PutApiResourceSecret_WithStoredHash_PersistsTheUpdate()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        var name = await CreateApiResourceAsync();
+        var (_, stored) = await CreateSecretAsync("apiResource", name);
+
+        var response = await Client.PutAsJsonAsync(SecretsUrl("apiResource", name),
+            new { valueEncrypted = stored, description = "renamed" }, ct);
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        var secret = (await GetStoredApiResourceSecretsAsync(name)).Single();
+        secret.Value.Should().Be(stored);
+        secret.Description.Should().Be("renamed");
+    }
+
+    // ---------------------------------------------------------------- delete (AB#7989)
+
+    [Fact]
+    public async Task DeleteClientSecret_RemovesOnlyThatSecret_AndItNoLongerAuthenticates()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        var clientId = await CreateMachineClientAsync();
+        var (revokedClearText, revokedHash) = await CreateSecretAsync("client", clientId);
+        var (keptClearText, keptHash) = await CreateSecretAsync("client", clientId);
+        (await RequestTokenAsync(clientId, revokedClearText)).StatusCode.Should().Be(HttpStatusCode.OK);
+
+        // The client is loaded from the database by the endpoint, as for octo-cli DeleteApiSecretClient,
+        // which sends the stored hash Base64-encoded in the path.
+        var response = await Client.DeleteAsync(DeleteUrl("client", clientId, revokedHash), ct);
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK, await response.Content.ReadAsStringAsync(ct));
+        (await GetStoredClientSecretsAsync(clientId)).Should().Equal(keptHash);
+        (await RequestTokenAsync(clientId, revokedClearText)).StatusCode.Should().Be(HttpStatusCode.Unauthorized);
+        (await RequestTokenAsync(clientId, keptClearText)).StatusCode.Should().Be(HttpStatusCode.OK);
+    }
+
+    [Fact]
+    public async Task DeleteClientSecret_OfSeededLegacySecret_RemovesIt_AndItNoLongerAuthenticates()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        var legacyHash = Sha(SHA512.HashData, "legacy-to-revoke");
+        var clientId = await CreateMachineClientAsync(builder => builder
+            .WithSecret("SharedSecret", legacyHash)
+            .WithSecret("SharedSecret", Sha(SHA256.HashData, "legacy-to-keep")));
+
+        var response = await Client.DeleteAsync(DeleteUrl("client", clientId, legacyHash), ct);
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        (await GetStoredClientSecretsAsync(clientId)).Should().Equal(Sha(SHA256.HashData, "legacy-to-keep"));
+        (await RequestTokenAsync(clientId, "legacy-to-revoke")).StatusCode.Should().Be(HttpStatusCode.Unauthorized);
+        (await RequestTokenAsync(clientId, "legacy-to-keep")).StatusCode.Should().Be(HttpStatusCode.OK);
+    }
+
+    [Fact]
+    public async Task DeleteApiResourceSecret_RemovesOnlyThatSecret()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        var name = await CreateApiResourceAsync();
+        var (_, revokedHash) = await CreateSecretAsync("apiResource", name);
+        var (_, keptHash) = await CreateSecretAsync("apiResource", name);
+
+        var response = await Client.DeleteAsync(DeleteUrl("apiResource", name, revokedHash), ct);
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK, await response.Content.ReadAsStringAsync(ct));
+        (await GetStoredApiResourceSecretsAsync(name)).Select(s => s.Value).Should().Equal(keptHash);
+        (await Client.GetStringAsync(SecretsUrl("apiResource", name), ct)).Should().NotContain(revokedHash);
+    }
+
+    [Theory]
+    [InlineData("client")]
+    [InlineData("apiResource")]
+    public async Task DeleteSecret_UnknownSecret_Is404_WithoutEchoingTheValue_AndKeepsTheOthers(string kind)
+    {
+        var ct = TestContext.Current.CancellationToken;
+        var target = kind == "client" ? await CreateMachineClientAsync() : await CreateApiResourceAsync();
+        var (_, keptHash) = await CreateSecretAsync(kind, target);
+        var unknownHash = Sha(SHA256.HashData, $"never-stored-{Guid.NewGuid():N}");
+
+        var response = await Client.DeleteAsync(DeleteUrl(kind, target, unknownHash), ct);
+        var body = await response.Content.ReadAsStringAsync(ct);
+
+        response.StatusCode.Should().Be(HttpStatusCode.NotFound);
+        body.Should().NotContain(unknownHash).And.NotContain(unknownHash.EncodeBase64());
+        (await GetStoredSecretValuesAsync(kind, target)).Should().Equal(keptHash);
+
+        // Deleting the same secret twice: the second call finds nothing.
+        (await Client.DeleteAsync(DeleteUrl(kind, target, keptHash), ct)).StatusCode.Should().Be(HttpStatusCode.OK);
+        (await Client.DeleteAsync(DeleteUrl(kind, target, keptHash), ct)).StatusCode.Should().Be(HttpStatusCode.NotFound);
+    }
+
+    [Theory]
+    [InlineData("client")]
+    [InlineData("apiResource")]
+    public async Task DeleteSecret_UnknownOwner_Is404(string kind)
+    {
+        var response = await Client.DeleteAsync(
+            DeleteUrl(kind, $"missing-{Guid.NewGuid():N}", Sha(SHA256.HashData, "x")),
+            TestContext.Current.CancellationToken);
+
+        response.StatusCode.Should().Be(HttpStatusCode.NotFound);
+    }
+
+    [Theory]
+    [InlineData("client")]
+    [InlineData("apiResource")]
+    public async Task DeleteSecret_WithoutWritePermission_Is403_AndKeepsTheSecret(string kind)
+    {
+        var ct = TestContext.Current.CancellationToken;
+        var target = kind == "client" ? await CreateMachineClientAsync() : await CreateApiResourceAsync();
+        var (_, hash) = await CreateSecretAsync(kind, target);
+
+        var response = await CreateAuthenticatedClient(userId: $"nobody-{Guid.NewGuid():N}",
+                roles: [NonAdministrativeRole])
+            .DeleteAsync(DeleteUrl(kind, target, hash), ct);
+
+        response.StatusCode.Should().Be(HttpStatusCode.Forbidden);
+        (await GetStoredSecretValuesAsync(kind, target)).Should().Equal(hash);
+    }
+
     // ---------------------------------------------------------------- no secret in the logs
 
     [Fact]
@@ -288,9 +409,69 @@ public class ApiSecretsControllerTests : IntegrationTestBase
         }
     }
 
+    [Fact]
+    public async Task DeletingAndUpdatingSecrets_WritesNeitherHashNorEncodedHashToTheLogs()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        var loggerFactory = Factory.Services.GetRequiredService<ILoggerFactory>();
+        var clientId = await CreateMachineClientAsync();
+        var resource = await CreateApiResourceAsync();
+        var (clientClear, clientHash) = await CreateSecretAsync("client", clientId);
+        var (resourceClear, resourceHash) = await CreateSecretAsync("apiResource", resource);
+        var unknownHash = Sha(SHA256.HashData, $"never-stored-{Guid.NewGuid():N}");
+
+        using var capture = new CapturingLoggerProvider();
+        loggerFactory.AddProvider(capture);
+        await Client.PutAsJsonAsync(SecretsUrl("client", clientId), new { valueEncrypted = clientHash }, ct);
+        await Client.PutAsJsonAsync(SecretsUrl("apiResource", resource), new { valueEncrypted = resourceHash }, ct);
+        await Client.DeleteAsync(DeleteUrl("client", clientId, unknownHash), ct);
+        (await Client.DeleteAsync(DeleteUrl("client", clientId, clientHash), ct)).StatusCode.Should().Be(HttpStatusCode.OK);
+        (await Client.DeleteAsync(DeleteUrl("apiResource", resource, resourceHash), ct)).StatusCode.Should().Be(HttpStatusCode.OK);
+
+        // Levels as deployed (nlog.config): own namespaces from Information, frameworks (Microsoft.*, the
+        // request log with the path) from Warning. The clear text must not show up at any level.
+        var deployed = string.Join('\n', capture.Messages
+            .Where(m => m.Level >= (m.Category.StartsWith("Microsoft.", StringComparison.Ordinal) || m.Category.StartsWith("System.", StringComparison.Ordinal)
+                ? LogLevel.Warning
+                : LogLevel.Information))
+            .Select(m => m.Text));
+        var everything = string.Join('\n', capture.Messages.Select(m => m.Text));
+        everything.Should().NotContain(clientClear).And.NotContain(resourceClear);
+        foreach (var hash in new[] { clientHash, resourceHash, unknownHash })
+        {
+            deployed.Should().NotContain(hash).And.NotContain(hash.EncodeBase64());
+        }
+    }
+
     // ---------------------------------------------------------------- helpers
 
     private string SecretsUrl(string kind, string id) => TenantApiUrl($"apiSecrets/{kind}/{id}");
+
+    // The path segment octo-cli (IdentityServicesClient) sends: the stored hash, Base64-encoded, URL-escaped.
+    private string DeleteUrl(string kind, string id, string storedHash)
+        => TenantApiUrl($"apiSecrets/{kind}/{id}/{Uri.EscapeDataString(storedHash.EncodeBase64())}");
+
+    private async Task<(string ClearText, string Hash)> CreateSecretAsync(string kind, string id)
+    {
+        var ct = TestContext.Current.CancellationToken;
+        var response = await Client.PostAsJsonAsync(SecretsUrl(kind, id), new { }, ct);
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        var dto = (await response.Content.ReadFromJsonAsync<JsonObject>(ct))!;
+        return (dto["valueClearText"]!.GetValue<string>(), dto["valueEncrypted"]!.GetValue<string>());
+    }
+
+    private async Task<List<RtSecretRecord>> GetStoredApiResourceSecretsAsync(string name)
+    {
+        using var scope = CreateScope();
+        var resource = await scope.ServiceProvider.GetRequiredService<IOctoResourceStore>()
+            .GetApiResourceByNameAsync(name);
+        return resource!.ApiSecrets?.ToList() ?? [];
+    }
+
+    private async Task<List<string>> GetStoredSecretValuesAsync(string kind, string id)
+        => kind == "client"
+            ? await GetStoredClientSecretsAsync(id)
+            : (await GetStoredApiResourceSecretsAsync(id)).Select(s => s.Value!).ToList();
 
     private async Task<string> CreateMachineClientAsync(Action<RtClientBuilder>? configure = null)
     {
@@ -359,15 +540,15 @@ public class ApiSecretsControllerTests : IntegrationTestBase
 
     private sealed class CapturingLoggerProvider : ILoggerProvider
     {
-        public ConcurrentQueue<(LogLevel Level, string Text)> Messages { get; } = new();
+        public ConcurrentQueue<(LogLevel Level, string Text, string Category)> Messages { get; } = new();
 
-        public ILogger CreateLogger(string categoryName) => new CapturingLogger(this);
+        public ILogger CreateLogger(string categoryName) => new CapturingLogger(this, categoryName);
 
         public void Dispose()
         {
         }
 
-        private sealed class CapturingLogger(CapturingLoggerProvider owner) : ILogger
+        private sealed class CapturingLogger(CapturingLoggerProvider owner, string category) : ILogger
         {
             public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
 
@@ -375,7 +556,7 @@ public class ApiSecretsControllerTests : IntegrationTestBase
 
             public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception? exception,
                 Func<TState, Exception?, string> formatter)
-                => owner.Messages.Enqueue((logLevel, formatter(state, exception) + exception));
+                => owner.Messages.Enqueue((logLevel, formatter(state, exception) + exception, category));
         }
     }
 }

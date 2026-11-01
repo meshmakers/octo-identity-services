@@ -1134,6 +1134,20 @@ user role handlers use (scope `octo_api` + role `UserManagement` on the **valida
   by side per guard), `DataPermissionMethodTests` (operations, errors, caller theory, forged caller, REST parity, audit, evaluator), `Methods/IdentityMethodHostTests`
   (selection). The last-administrator tests clear the administrators of the shared test database first, like `GroupRoleChangeGuardTests`.
 
+### REST secret delete removes by predicate (AB#7989, Security)
+
+`ApiSecretsController.DeleteSecretOfClient` / `DeleteSecretOfApiResource` (`DELETE {tenant}/v1/apiSecrets/client|apiResource/{id}/{base64(hash)}`)
+answered 200 but removed nothing for an entity read from MongoDB: the `AttributeRecordValueList` of such an entity holds plain `RtRecord`s and
+hands out **new** `RtSecretRecord` wrappers on every enumeration, so `Remove(wrapper)` found nothing and returned `false` silently; a revoked
+client secret kept authenticating. Both endpoints now call `RemoveAll(predicate)` (as the `Client.RemoveSecret` method of AB#7780 does) and
+answer 404 when nothing matched. 🔴 **Rule for every record list of a stored entity:** never `Remove(item)` / `Contains(item)` / `IndexOf(item)` with
+an instance you enumerated; use `RemoveAll` / `FindIndex` with a predicate, and write a changed record back through the indexer (as
+`ReplaceSecret` in the PUT endpoints does; the PUT endpoints were not affected). No 404 of the controller echoes the secret value (the stored hash)
+any more. octo-cli (`DeleteApiSecretClient` / `DeleteApiSecretApiResource`, SDK `IdentityServicesClient`) is unchanged; Studio does not call
+these endpoints. API resource secrets authenticate nothing since the OpenIddict migration, so only the client case has a token-endpoint
+test. Tests: `ApiSecretsControllerTests` (`DeleteClientSecret_*` with the token endpoint, `DeleteApiResourceSecret_*`, unknown secret / owner,
+403, PUT of an API resource secret persisted, no hash in the logs at the deployed levels).
+
 ### Blueprint-owned opt-in: `DataPolicy.ProtectBlueprintLocked` (AB#6384; System.Identity 2.24.0)
 
 `ProtectBlueprintLocked` (optional Boolean, default `false`) is the opt-in of the engine's blueprint-lock write guard
