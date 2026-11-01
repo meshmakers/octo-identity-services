@@ -161,7 +161,9 @@ public class ClientMirrorReconciliationTests : IntegrationTestBase
     public async Task MirrorInSync_IsNotWritten()
     {
         var ct = TestContext.Current.CancellationToken;
-        var client = await CreateFlaggedClientAsync();
+        var client = await CreateFlaggedClientAsync(b => b.WithRedirectUris("https://app.example/cb")
+            .WithPostLogoutRedirectUris("https://app.example/").WithCorsOrigins("https://app.example")
+            .WithAccessTokenLifetime(1234).WithAllowOfflineAccess().WithFrontChannelLogoutUri("https://app.example/fc"));
         await AddAsync(client, ct);
         var child = await CreateChildTenantAsync();
         await RunJobAsync(ct);
@@ -191,6 +193,10 @@ public class ClientMirrorReconciliationTests : IntegrationTestBase
             await parentRepo.DeleteOneRtEntityByRtIdAsync<RtClient>(session, client.RtId, DeleteOptions.Erase);
         }
 
+        (await RunJobAsync(ct)).MirrorsSkipped.Should().BeGreaterThanOrEqualTo(1, "a missing parent gets one grace pass");
+        (await RequestTokenAsync(child, client.ClientId, secret, ct)).Should().Be(HttpStatusCode.OK,
+            "the mirror survives the grace pass");
+
         var result = await RunJobAsync(ct);
 
         result.MirrorsRemoved.Should().BeGreaterThanOrEqualTo(1);
@@ -218,7 +224,134 @@ public class ClientMirrorReconciliationTests : IntegrationTestBase
         (await RequestTokenAsync(child, client.ClientId, secret, ct)).Should().Be(HttpStatusCode.Unauthorized);
     }
 
+    [Fact]
+    public async Task MirrorSecretRotation_BetweenTheJobsParentReadAndItsWrite_IsNotOverwritten()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        var client = await CreateFlaggedClientAsync();
+        await AddAsync(client, ct);
+        var child = await CreateChildTenantAsync();
+        var ownBefore = await RotateMirrorSecretAsync(client.ClientId, child);
+        (await RequestTokenAsync(child, client.ClientId, ownBefore, ct)).Should().Be(HttpStatusCode.OK);
+        // The job has something to repair: a parent secret whose copy failed.
+        var added = (await AddAsync(client, ct, _syncFails)).Value!.Value!;
+        string? ownAfter = null;
+
+        await RunJobWithHooksAsync(ct, beforeWrite: async clientId =>
+        {
+            if (clientId == client.ClientId && ownAfter == null)
+            {
+                ownAfter = await RotateMirrorSecretAsync(client.ClientId, child);
+            }
+        });
+
+        ownAfter.Should().NotBeNull("the rotation ran between the job's reads and its write");
+        (await RequestTokenAsync(child, client.ClientId, ownAfter!, ct)).Should().Be(HttpStatusCode.OK,
+            "the rotated own secret survives the job");
+        (await RequestTokenAsync(child, client.ClientId, ownBefore, ct)).Should().Be(HttpStatusCode.Unauthorized,
+            "the job never writes the previous own secret back");
+        (await RequestTokenAsync(child, client.ClientId, added, ct)).Should().Be(HttpStatusCode.OK,
+            "the job still converged the mirror on its retry");
+    }
+
+    [Fact]
+    public async Task ImmediateSync_BetweenTheJobsParentReadAndItsWrite_TheRemovedSecretDoesNotComeBack()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        var client = await CreateFlaggedClientAsync();
+        var removed = (await AddAsync(client, ct)).Value!.Value!;
+        var child = await CreateChildTenantAsync();
+        var added = (await AddAsync(client, ct, _syncFails)).Value!.Value!;
+        var fired = false;
+
+        await RunJobWithHooksAsync(ct, beforeWrite: async clientId =>
+        {
+            if (clientId == client.ClientId && !fired)
+            {
+                fired = true;
+                (await RemoveAsync(client, removed, ct, _enabled)).IsSuccess.Should().BeTrue();
+            }
+        });
+
+        fired.Should().BeTrue();
+        (await RequestTokenAsync(child, client.ClientId, removed, ct)).Should().Be(HttpStatusCode.Unauthorized,
+            "the job's stale write lost against the newer sync");
+        (await RequestTokenAsync(child, client.ClientId, added, ct)).Should().Be(HttpStatusCode.OK);
+    }
+
+    [Fact]
+    public async Task MissingMirror_WhoseRowIsRemovedBeforeTheInsert_LeavesNoUntrackedMirror()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        var client = await CreateFlaggedClientAsync();
+        var secret = (await AddAsync(client, ct)).Value!.Value!;
+        var child = await CreateChildTenantAsync();
+        await EraseChildClientsAsync(child, client.ClientId);
+        var fired = false;
+
+        await RunJobWithHooksAsync(ct, beforeInsert: async clientId =>
+        {
+            if (clientId == client.ClientId && !fired)
+            {
+                fired = true;
+                using var scope = _enabled.Services.CreateScope();
+                (await scope.ServiceProvider.GetRequiredService<IClientMirrorProvisioningService>()
+                    .RemoveMirrorAsync(NormalizedSystemTenantId, client.ClientId, child)).Should().BeTrue();
+            }
+        });
+
+        fired.Should().BeTrue();
+        (await ChildClientsAsync(child, client.ClientId)).Should().BeEmpty("the job withdrew its insert");
+        (await GetTrackingRowAsync(client.ClientId, child)).Should().BeNull();
+        (await RequestTokenAsync(child, client.ClientId, secret, ct)).Should().Be(HttpStatusCode.Unauthorized);
+    }
+
+    [Fact]
+    public async Task MissingMirror_TwoParallelPasses_RecreateExactlyOneMirror()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        var client = await CreateFlaggedClientAsync();
+        var secret = (await AddAsync(client, ct)).Value!.Value!;
+        var child = await CreateChildTenantAsync();
+        await EraseChildClientsAsync(child, client.ClientId);
+
+        await Task.WhenAll(RunJobAsync(ct), RunJobAsync(ct));
+
+        (await ChildClientsAsync(child, client.ClientId)).Should().ContainSingle();
+        (await GetTrackingRowAsync(client.ClientId, child)).Should().NotBeNull();
+        (await RequestTokenAsync(child, client.ClientId, secret, ct)).Should().Be(HttpStatusCode.OK);
+    }
+
     #region Helpers
+
+    /// <summary>One reconciliation pass of the system tenant with the test seams of the service set.</summary>
+    private async Task RunJobWithHooksAsync(CancellationToken ct, Func<string, Task>? beforeWrite = null,
+        Func<string, Task>? beforeInsert = null)
+    {
+        using var scope = _enabled.Services.CreateScope();
+        var service = ActivatorUtilities.CreateInstance<ClientMirrorProvisioningService>(scope.ServiceProvider);
+        service.BeforeMirrorWriteForTests = beforeWrite;
+        service.BeforeMirrorInsertForTests = beforeInsert;
+        await service.ReconcileMirrorsAsync(NormalizedSystemTenantId, ct);
+    }
+
+    private async Task<string> RotateMirrorSecretAsync(string clientId, string child)
+    {
+        using var scope = _enabled.Services.CreateScope();
+        var rotated = await scope.ServiceProvider.GetRequiredService<IClientMirrorProvisioningService>()
+            .RotateMirrorSecretAsync(NormalizedSystemTenantId, clientId, child);
+        return rotated!.Secret!;
+    }
+
+    private async Task EraseChildClientsAsync(string child, string clientId)
+    {
+        var repo = await RepositoryAsync(child);
+        using var session = await repo.GetSessionAsync();
+        foreach (var c in (await repo.GetRtEntitiesByTypeAsync<RtClient>(session, ByClientId(clientId))).Items)
+        {
+            await repo.DeleteOneRtEntityByRtIdAsync<RtClient>(session, c.RtId, DeleteOptions.Erase);
+        }
+    }
 
     private const string AdminSubject = "507f1f77bcf86cd799439012";
 
@@ -233,13 +366,15 @@ public class ClientMirrorReconciliationTests : IntegrationTestBase
         return await scope.ServiceProvider.GetRequiredService<IClientMirrorReconciliationJob>().RunOnceAsync(ct);
     }
 
-    private async Task<RtClient> CreateFlaggedClientAsync()
+    private async Task<RtClient> CreateFlaggedClientAsync(Action<RtClientBuilder>? configure = null)
     {
         using var scope = _enabled.Services.CreateScope();
         await EnsureApiScopeAsync(await RepositoryAsync(NormalizedSystemTenantId));
-        var client = new RtClientBuilder().WithClientId($"m8019-{Guid.NewGuid():N}")
+        var builder = new RtClientBuilder().WithClientId($"m8019-{Guid.NewGuid():N}")
             .WithGrantTypes("client_credentials").WithScopes(ApiScope).RequireClientSecret().RequirePkce(false)
-            .WithAutoProvisionInChildTenants().Build();
+            .WithAutoProvisionInChildTenants();
+        configure?.Invoke(builder);
+        var client = builder.Build();
         await scope.ServiceProvider.GetRequiredService<IOctoClientStore>().CreateAsync(client);
         return client;
     }

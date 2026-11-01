@@ -91,6 +91,38 @@ public class ClientMirrorReconciliationTests
         ClientMirrorProvisioningService.MirrorDiffers(disabled, baseline).Should().BeTrue();
     }
 
+    [Fact]
+    public void MirrorDiffers_TokenRelevantFieldsBeyondSecretsAndScopes_AreCompared()
+    {
+        var baseline = Client();
+        var pkce = Client();
+        pkce.RequirePkce = !baseline.RequirePkce;
+        var lifetime = Client();
+        lifetime.AccessTokenLifetime = baseline.AccessTokenLifetime + 60;
+        var offline = Client();
+        offline.AllowOfflineAccess = !baseline.AllowOfflineAccess;
+        var logout = Client();
+        logout.FrontChannelLogoutUri = "https://logout.example";
+
+        ClientMirrorProvisioningService.MirrorDiffers(pkce, baseline).Should().BeTrue();
+        ClientMirrorProvisioningService.MirrorDiffers(lifetime, baseline).Should().BeTrue();
+        ClientMirrorProvisioningService.MirrorDiffers(offline, baseline).Should().BeTrue();
+        ClientMirrorProvisioningService.MirrorDiffers(logout, baseline).Should().BeTrue();
+    }
+
+    [Fact]
+    public void MirrorDiffers_IgnoresIdVersionAndTheCaseOfTheMarker()
+    {
+        var a = Client(("SharedSecret", "h1", null));
+        a.ProvisionedByParentTenantId = "OctoSystem";
+        var b = Client(("SharedSecret", "h1", null));
+        b.ProvisionedByParentTenantId = "octosystem";
+        b.RtId = OctoObjectId.GenerateNewId();
+        b.RtVersion = 42;
+
+        ClientMirrorProvisioningService.MirrorDiffers(a, b).Should().BeFalse();
+    }
+
     // ----- ReconcileMirrorsAsync --------------------------------------------
 
     [Fact]
@@ -133,7 +165,7 @@ public class ClientMirrorReconciliationTests
         await _childRepo.DidNotReceiveWithAnyArgs()
             .ReplaceOneRtEntityByIdAsync<RtClient>(default!, default, default!, default(ulong));
         await _parentRepo.DidNotReceiveWithAnyArgs()
-            .ReplaceOneRtEntityByIdAsync<RtClientMirror>(default!, default, default!);
+            .ReplaceOneRtEntityByIdAsync<RtClientMirror>(default!, default, default!, default(ulong));
     }
 
     [Fact]
@@ -152,7 +184,7 @@ public class ClientMirrorReconciliationTests
         result.MirrorsSkipped.Should().Be(1);
         result.MirrorsFailed.Should().Be(0);
         await _parentRepo.DidNotReceiveWithAnyArgs()
-            .ReplaceOneRtEntityByIdAsync<RtClientMirror>(default!, default, default!);
+            .ReplaceOneRtEntityByIdAsync<RtClientMirror>(default!, default, default!, default(ulong));
     }
 
     [Fact]
@@ -166,6 +198,11 @@ public class ClientMirrorReconciliationTests
         SetupRows(row);
         SetupParentClients();
         SetupChildClients(mirror, foreign);
+
+        var first = await _sut.ReconcileMirrorsAsync(ParentTenantId, TestContext.Current.CancellationToken);
+
+        first.MirrorsSkipped.Should().Be(1, "a parent missing in one pass only gets a grace pass");
+        await _childRepo.DidNotReceiveWithAnyArgs().DeleteOneRtEntityByRtIdAsync<RtClient>(default!, default, default!);
 
         var result = await _sut.ReconcileMirrorsAsync(ParentTenantId, TestContext.Current.CancellationToken);
 
@@ -188,6 +225,46 @@ public class ClientMirrorReconciliationTests
         result.MirrorsSkipped.Should().Be(1);
         await _parentRepo.DidNotReceiveWithAnyArgs()
             .DeleteOneRtEntityByRtIdAsync<RtClientMirror>(default!, default, default!);
+    }
+
+    [Fact]
+    public async Task MissingMirror_WhenTheRowWriteLoses_DeletesTheInsertedClient_NoUntrackedMirrorStays()
+    {
+        var parent = Client(("SharedSecret", "h1", null));
+        var row = Row();
+        row.RtVersion = 3;
+        SetupRows(row);
+        SetupParentClients(parent);
+        SetupChildClients();
+        _parentRepo.ReplaceOneRtEntityByIdAsync(_parentSession, row.RtId, Arg.Any<RtClientMirror>(), 3UL)
+            .ThrowsAsync(new RtVersionConflictException(new RtEntityId($"System.Identity/ClientMirror@{row.RtId}"), 3));
+
+        var result = await _sut.ReconcileMirrorsAsync(ParentTenantId, TestContext.Current.CancellationToken);
+
+        result.MirrorsSkipped.Should().Be(1);
+        var inserted = _childRepo.ReceivedCalls()
+            .Where(c => c.GetMethodInfo().Name == "InsertOneRtEntityAsync")
+            .SelectMany(c => c.GetArguments().OfType<RtClient>()).Single();
+        await _childRepo.Received(1).DeleteOneRtEntityByRtIdAsync<RtClient>(_childSession, inserted.RtId, DeleteOptions.Erase);
+    }
+
+    [Fact]
+    public async Task MissingMirror_RowGoneOnTheReRead_InsertsNothing()
+    {
+        var parent = Client(("SharedSecret", "h1", null));
+        var listed = Row();
+        SetupParentClients(parent);
+        SetupChildClients();
+        // First call lists the row, the re-read right before the insert no longer finds it.
+        var listing = Substitute.For<IResultSet<RtClientMirror>>();
+        listing.Items.Returns(new[] { listed }, Array.Empty<RtClientMirror>());
+        _parentRepo.GetRtEntitiesByTypeAsync<RtClientMirror>(_parentSession, Arg.Any<RtEntityQueryOptions>())
+            .Returns(listing);
+
+        var result = await _sut.ReconcileMirrorsAsync(ParentTenantId, TestContext.Current.CancellationToken);
+
+        result.MirrorsSkipped.Should().Be(1);
+        await _childRepo.DidNotReceiveWithAnyArgs().InsertOneRtEntityAsync(default!, default(RtClient)!);
     }
 
     // ----- helpers -----------------------------------------------------------

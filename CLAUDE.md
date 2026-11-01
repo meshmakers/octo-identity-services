@@ -594,20 +594,32 @@ in the child tenants until a restart. A compensation job (decision OD-6: no outb
   of at most 10 % / 30 s). The job (`IdentityServerPersistence/Services/ClientMirrorReconciliationJob.cs`)
   calls `IClientMirrorProvisioningService.ReconcileMirrorsAsync(tenantId)` for the system tenant and every
   registered tenant (tracking rows live in the parent).
-- `ReconcileMirrorsAsync` walks the `RtClientMirror` rows of the parent. Per row: read the child mirror,
-  **then** the parent client; build the desired mirror with the same `CreateMirrorClient` +
-  `ReconcileOwnSecret` the provisioning uses; compare (`MirrorDiffers`: secrets incl. expiry and own secret,
-  `Enabled`, `RequireClientSecret`, grant types, scopes, redirect / post-logout / CORS URIs, mirror marker);
-  write only on a difference, with the **version-checked** replace (`rtVersion` read from the child), then
-  bump `SecretHashVersion` and publish `CorsClientsUpdate`. A missing or duplicated mirror goes through the
-  provisioning upsert. A row whose parent client is gone (delete cleanup failed) removes the child client
-  **carrying this parent's mirror marker** and the row. An unreachable child tenant is skipped (row kept).
-  The tracking row is the authority: a tracked mirror follows its parent even after the flag was switched off.
-- 🔴 **Read order and the version check are load-bearing (replica safety).** Every identity replica runs the
-  job; there is no lock. Every write of the mirror (immediate sync, another replica) increments `rtVersion`,
-  so a write after our child read makes our replace fail with `RtVersionConflictException` (counted as
-  skipped, next pass), and a write before it is visible to the comparison while the parent was read after
-  it. A slow pass can never put a removed secret back; two replicas converge on the same state.
+- `ReconcileMirrorsAsync` walks the `RtClientMirror` rows of the parent (child repositories cached per pass). Per row: read
+  the child mirror, **then** the parent client; derive the desired mirror with the same `CreateMirrorClient` +
+  `ReconcileOwnSecret` the provisioning uses; compare (`MirrorDiffers`: **every** attribute `RtClient` declares - secrets incl.
+  expiry and own secret, claims, PKCE/DPoP flags, lifetimes, all URIs, ... -, lists as multisets, records by attribute, the mirror
+  marker case-insensitively; not the entity id/version/timestamps); write only on a difference, then bump `SecretHashVersion`
+  (version-checked; a concurrent bump wins) and publish `CorsClientsUpdate`. The tracking row is the authority: a tracked mirror
+  follows its parent even after the flag was switched off. An unreachable child tenant is skipped (row kept).
+- **Missing mirror:** the row is re-read right before the insert (gone = skip), the client is inserted, then the row is written
+  **with its version**; when that fails (row removed by `RemoveMirrorAsync` / the client-delete cleanup, or another replica
+  re-created the mirror first) the inserted client is deleted again. No untracked orphan, no duplicate.
+- **Deleted parent client** (delete cleanup failed): the mirror is removed on the **second consecutive** pass that misses the
+  parent (`MissingParentPassesBeforeRemoval`, per process), and only a child client carrying this parent's marker.
+- 🔴 **Every mirror writer is version-checked (replica safety, review finding on #230).** A replace *without* an expected version
+  writes the entity as given and does **not** advance `rtVersion` (engine AB#7769), so the check only holds when every writer
+  takes part. All child-mirror writes go through `ConvergeChildMirrorAsync` (immediate sync, start-up provisioning, backfill,
+  reconciliation: read child, read parent, derive, replace with the read `rtVersion`, re-read and re-derive on
+  `RtVersionConflictException`, at most `MaxMirrorWriteAttempts` = 5) or the versioned `RotateMirrorSecretAsync`. The sync re-reads
+  the parent after the child (the passed snapshot is only the fallback), so a delayed sync cannot write an older parent state over
+  a newer one. Result: a write after our child read makes our replace fail, a write before it is visible to the comparison while
+  the parent was read after it; neither a removed secret nor a superseded own secret can come back. Writers outside the mirror
+  service that touch a mirror record unversioned (a full client `PUT` in the child tenant, the blueprint seed upsert of a client
+  with the same id, the `octo-cli` grant step) can still be overwritten by the next convergence, which is the intended direction
+  (the parent is the source of truth); they cannot make a stale reconciliation write succeed unless they leave `rtVersion`
+  exactly at the value the job read.
+- Logs: a failing mirror or tenant is a Warning (not an Error every pass); test seams `BeforeMirrorWriteForTests` /
+  `BeforeMirrorInsertForTests` (internal) let the integration tests interleave writers.
 - **Expiry is copied now.** `CopySecrets` dropped `ExpirationDateTime`, so a parent secret that expired kept
   authenticating in every child tenant; mirrors now carry the expiry (also the carried-over own secret).
 - **Metrics/logs:** meter `Meshmakers.Octo.Identity` (registered in `Program.cs` via
@@ -620,9 +632,13 @@ in the child tenants until a restart. A compensation job (decision OD-6: no outb
 - **Tests:** `tests/IdentityServices.IntegrationTests/Api/Methods/ClientMirrorReconciliationTests.cs` (real MongoDB,
   real child tenant and token endpoint; the immediate sync is fault-injected by a decorator: removed secret still
   valid in the child after the failed sync, gone after the job, child token refused; added secret; expired parent
-  secret; in-sync mirror not written; orphaned mirror removed; two parallel passes without a duplicate; metric and
-  log canary), `tests/IdentityServerPersistence.UnitTests/Services/ClientMirrorReconciliationTests.cs` (comparison,
-  read order + version, conflict, orphan with foreign client, unreachable child),
+  secret; in-sync mirror (rich client) not written; orphaned mirror removed after the grace pass; two parallel passes
+  without a duplicate; a mirror secret rotation and an immediate sync interleaved between the job's parent read and its
+  write (red with unversioned writers); a missing mirror whose row is removed before the insert; two parallel passes
+  re-creating a missing mirror; metric and log canary),
+  `tests/IdentityServerPersistence.UnitTests/Services/ClientMirrorReconciliationTests.cs` (comparison incl. token fields,
+  marker case, read order + version, conflict, orphan with grace pass and foreign client, unreachable child, withdrawn
+  insert, row gone on the re-read),
   `tests/IdentityServices.UnitTests/Services/ClientMirrorReconciliationHostServiceTests.cs` (interval).
 
 **Management REST endpoints (#4045 — done):** all under

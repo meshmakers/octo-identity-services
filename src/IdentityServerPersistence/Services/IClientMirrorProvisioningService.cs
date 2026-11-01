@@ -49,13 +49,14 @@ public interface IClientMirrorProvisioningService
     /// <summary>
     /// Compensation for a failed <see cref="SyncMirrorsForClientAsync" /> (AB#8019): compares every mirror tracked in
     /// <paramref name="parentTenantId"/> with its parent client and repairs the ones that differ (secrets incl. expiry,
-    /// enabled state, grant types, scopes, URIs). A tracked mirror whose parent client no longer exists is removed.
+    /// enabled state, grant types, scopes, URIs, every other client attribute). A tracked mirror whose parent client is
+    /// missing in two consecutive passes is removed; a missing mirror is re-created while its tracking row exists.
     /// Called periodically by the mirror reconciliation job.
     /// </summary>
     /// <remarks>
-    /// Idempotent and safe to run on several replicas at once: a mirror in sync is not written; a repair is a
-    /// version-checked replace after reading the mirror before the parent client, so a concurrent writer wins and a
-    /// stale pass never restores a removed secret (see the implementation remarks). Logs names only, never a secret
+    /// Idempotent and safe to run on several replicas at once: a mirror in sync is not written; every mirror writer
+    /// (sync, provisioning, rotation, this method) reads the mirror before the parent client and writes with the
+    /// version it read, so a concurrent writer wins and a stale pass never restores a removed secret (see the implementation remarks). Logs names only, never a secret
     /// or hash.
     /// </remarks>
     Task<ClientMirrorReconciliationResult> ReconcileMirrorsAsync(

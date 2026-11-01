@@ -26,9 +26,10 @@ public interface IClientMirrorReconciliationJob
 /// </summary>
 /// <remarks>
 ///     <b>Replicas.</b> Every identity replica runs the pass; there is no leader election or lock. That is safe because
-///     the work is idempotent and guarded: a mirror in sync is not written, and a repair is a version-checked replace
-///     (see <see cref="ClientMirrorProvisioningService" />). Two replicas repairing the same mirror at once write the same
-///     state; one wins, the other gets a version conflict and skips it. The cost is one read of the tracking rows per
+///     the work is idempotent and guarded: a mirror in sync is not written, and every writer of a mirror (sync,
+///     provisioning, rotation, this pass) writes with the version it read and retries on a conflict (see
+///     <see cref="ClientMirrorProvisioningService" />). Two replicas repairing the same mirror at once converge on the
+///     same state; a re-created mirror is claimed by a version-checked write of its tracking row. The cost is one read of the tracking rows per
 ///     tenant and two reads per tracked mirror per pass.
 /// </remarks>
 public class ClientMirrorReconciliationJob(
@@ -54,8 +55,9 @@ public class ClientMirrorReconciliationJob(
             }
             catch (Exception ex)
             {
+                // Warning, not Error: a half-provisioned tenant would otherwise raise an error on every pass.
                 failedTenants++;
-                logger.LogError(ex, "Client mirror reconciliation failed for parent tenant '{TenantId}'", tenantId);
+                logger.LogWarning(ex, "Client mirror reconciliation failed for parent tenant '{TenantId}'", tenantId);
             }
         }
 

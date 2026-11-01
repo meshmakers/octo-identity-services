@@ -123,7 +123,8 @@ public class ClientMirrorProvisioningServiceTests
         await _childRepo.Received(1).ReplaceOneRtEntityByIdAsync(
             _childSession,
             existingChildClient.RtId,
-            Arg.Is<RtClient>(c => c.ClientId == "ci-deploy"));
+            Arg.Is<RtClient>(c => c.ClientId == "ci-deploy"),
+            Arg.Any<ulong>());
     }
 
     [Fact]
@@ -152,7 +153,8 @@ public class ClientMirrorProvisioningServiceTests
         await _childRepo.Received(1).ReplaceOneRtEntityByIdAsync(
             _childSession,
             existingChildClient.RtId,
-            Arg.Is<RtClient>(c => c.ClientId == "ci-deploy"));
+            Arg.Is<RtClient>(c => c.ClientId == "ci-deploy"),
+            Arg.Any<ulong>());
         await _childRepo.DidNotReceiveWithAnyArgs().InsertOneRtEntityAsync(default!, default(RtClient)!);
     }
 
@@ -325,7 +327,7 @@ public class ClientMirrorProvisioningServiceTests
 
         result.Should().Be(new ClientMirrorSyncResult(0, 0));
         await _childRepo.DidNotReceiveWithAnyArgs()
-            .ReplaceOneRtEntityByIdAsync(default!, default!, default(RtClient)!);
+            .ReplaceOneRtEntityByIdAsync(default!, default!, default(RtClient)!, default(ulong));
     }
 
     [Fact]
@@ -357,7 +359,8 @@ public class ClientMirrorProvisioningServiceTests
         await _childRepo.Received(1).ReplaceOneRtEntityByIdAsync(
             _childSession,
             staleChildClient.RtId,
-            Arg.Is<RtClient>(c => c.ClientId == "ci-deploy"));
+            Arg.Is<RtClient>(c => c.ClientId == "ci-deploy"),
+            Arg.Any<ulong>());
         await _parentRepo.Received(1).ReplaceOneRtEntityByIdAsync(
             _parentSession,
             existingMirror.RtId,

@@ -1416,10 +1416,12 @@ AB#8019 only the next identity start repaired that.
 
 Every identity replica now runs a reconciliation every `Identity:ClientMirrorReconciliationInterval` seconds
 (default 300, `docs/configuration.md`): for every tracked mirror it reads the child mirror, then the parent client,
-and rewrites the mirror when the secrets (including their expiry and the mirror's own secret), the enabled state,
-`RequireClientSecret`, grant types, scopes or URIs differ. A mirror whose parent client no longer exists is
-removed. The write is version-checked against the mirror read before the parent, so a newer immediate sync or a
-second replica always wins and a slow pass never restores a removed secret. Mirrors also copy the expiry of a
+and rewrites the mirror when any client attribute differs (secrets including their expiry and the mirror's own
+secret, claims, flags, lifetimes, URIs). A mirror whose parent client is missing in two consecutive passes is
+removed; a missing mirror is re-created only while its tracking row exists. Every writer of a mirror (immediate
+sync, start-up provisioning, mirror secret rotation, the reconciliation on every replica) writes with the version it
+read and retries on a conflict, so a newer write always wins and a slow pass never restores a removed secret or a
+superseded mirror secret. Mirrors also copy the expiry of a
 parent secret now, so an expired parent secret is expired in the child tenants too.
 
 Bound: a parent secret that was removed, added, rotated or expired is accepted or refused in every reachable child
