@@ -67,7 +67,7 @@ and all registered tenants and caches it in process memory.
 
 | Setting | Default | Meaning |
 |---------|---------|---------|
-| `Identity:CorsPolicyCacheSeconds` (env `OCTO_IDENTITY__CORSPOLICYCACHESECONDS`) | `60` | Lifetime of the cached policy. After it expires the next request rebuilds the policy from the database, so a missed `CorsClientsUpdate` event (another pod, a client written without event) or a removed origin heals on its own. `0` or less disables the time-based expiry (event-driven invalidation only). |
+| `Identity:CorsPolicyCacheSeconds` (env `OCTO_IDENTITY__CORSPOLICYCACHESECONDS`) | `60` | Lifetime of the cached policy. After it expires the next request rebuilds the policy from the database, so a missed `CorsClientsUpdate` event (another pod, a client written without event) or a removed origin heals on its own. `0` or less disables the time-based expiry (event-driven invalidation only). The rebuild is single-flight per pod (AB#8035): requests that find the policy expired or invalidated share one load of the origins. The rebuild is logged at Debug; Information (`Identity CORS origins changed: …`, with added and removed origins) only when the origin set differs from the previous load. |
 
 Behaviour that does not depend on the setting:
 
