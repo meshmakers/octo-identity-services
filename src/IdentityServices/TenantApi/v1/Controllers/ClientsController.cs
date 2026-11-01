@@ -208,10 +208,14 @@ public class ClientsController : ControllerBase
             return NotFound(new NotFoundErrorDto($"Client with id '{id}' not found."));
         }
 
-        // AB#7928: every role id is resolved first (an unknown id changes nothing), then only the added roles are judged.
+        // AB#7928: every role id is resolved first (an unknown id changes nothing), then only the added roles are judged,
+        // and only the difference is written: a kept role is never written again, so a role that a concurrent request
+        // removed is not restored without the check.
         var current = (await _clientRoleStore.GetDirectRoleIdsAsync(client.RtId)).ToHashSet(StringComparer.Ordinal);
+        var wanted = new HashSet<string>(StringComparer.Ordinal);
+        var addedRoleIds = new List<string>();
         var addedRoleNames = new List<string>();
-        foreach (var roleId in roleIds.Distinct(StringComparer.Ordinal))
+        foreach (var roleId in roleIds)
         {
             var role = OctoObjectId.TryParse(roleId, out _) ? await _roleManager.FindByIdAsync(roleId) : null;
             if (role == null)
@@ -219,9 +223,11 @@ public class ClientsController : ControllerBase
                 return NotFound(new NotFoundErrorDto($"Role with id '{roleId}' not found."));
             }
 
-            if (!current.Contains(roleId) && role.Name != null)
+            var canonicalId = role.RtId.ToString();
+            if (wanted.Add(canonicalId) && !current.Contains(canonicalId))
             {
-                addedRoleNames.Add(role.Name);
+                addedRoleIds.Add(canonicalId);
+                addedRoleNames.Add(role.Name ?? canonicalId);
             }
         }
 
@@ -231,7 +237,8 @@ public class ClientsController : ControllerBase
             return refusal;
         }
 
-        await _clientRoleStore.SetRoleIdsAsync(client.RtId, roleIds);
+        await _clientRoleStore.ApplyRoleChangesAsync(client.RtId, addedRoleIds,
+            current.Where(id => !wanted.Contains(id)).ToList());
         return Ok();
     }
 
@@ -252,18 +259,21 @@ public class ClientsController : ControllerBase
             return NotFound(new NotFoundErrorDto($"Client with id '{id}' not found."));
         }
 
-        // AB#7928: a role the client already holds directly grants nothing; an unknown role is the store's 404 below.
+        // AB#7928: a role the client already holds directly grants nothing and is not written again (so a concurrent
+        // removal is not undone unchecked); an unknown role is the store's 404 below.
         var role = await _roleManager.FindByNameAsync(roleName);
         if (role != null)
         {
             var current = await _clientRoleStore.GetDirectRoleIdsAsync(client.RtId);
-            if (!current.Contains(role.RtId.ToString()))
+            if (current.Contains(role.RtId.ToString()))
             {
-                var refusal = await GuardClientRoleGrantAsync(client, [role.Name ?? roleName]);
-                if (refusal != null)
-                {
-                    return refusal;
-                }
+                return Ok();
+            }
+
+            var refusal = await GuardClientRoleGrantAsync(client, [role.Name ?? roleName]);
+            if (refusal != null)
+            {
+                return refusal;
             }
         }
 

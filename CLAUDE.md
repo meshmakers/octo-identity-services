@@ -1075,14 +1075,19 @@ hold (e.g. `UserManagement`) and then act as that client. `ClientsController` th
 
 | Endpoint | Judged | Refusal |
 |---|---|---|
-| `PUT clients/{id}/roles` (replace-all, role ids) | every role id is resolved first (unknown or malformed id = 404, nothing written; it used to write the edge blindly); the **added** roles (not in the client's direct roles) | 403 problem+json `code=role-not-held`, `roleNames` |
-| `PUT clients/{id}/roles/{roleName}` | the role, unless the client already holds it directly | same |
+| `PUT clients/{id}/roles` (replace-all, role ids) | every role id is resolved first (unknown or malformed id = 404, nothing written; it used to write the edge blindly); the **added** roles (not in the client's direct roles). Only the difference is written (`IClientRoleStore.ApplyRoleChangesAsync`), never the kept roles | 403 problem+json `code=role-not-held`, `roleNames` |
+| `PUT clients/{id}/roles/{roleName}` | the role; a role the client already holds directly is answered 200 without a write | same |
 | `DELETE clients/{id}/roles/{roleName}` | never (removing is no escalation) | - |
 
 - **Built-in roles only** (stored `RtWellKnownName`); custom roles are free. No self-grant or last-administrator rule for clients (clients are no
   administrators, AB#7914 decision 2). The caller is the token (`RoleChangeCaller.FromPrincipal`): user or client-credentials token, judged with its own
   role claims. Hard switch, no warn mode.
 - **Audit:** `IRoleChangeRefusals` writes the WARN line and the `Identity.RoleChangeRefused` event (caller, `client <clientId>`, reason, role names), as for groups.
+- 🔴 **Write only what was judged.** `SetRoleIdsAsync` (replace-all) re-reads the assignments in its own transaction and inserts every missing
+  wanted role. Used after the check, a role that a concurrent request removed between the check and the write would be restored by a caller who does
+  not hold it (review finding on #224). The controller therefore writes only the judged additions and the removals; kept roles are never written.
+  `SetRoleIdsAsync` stays for internal callers. Pinned by `ClientsControllerRoleGuardTests` (unit) and
+  `ClientRoleAssignmentIntegrationTests.ApplyRoleChanges_WritesOnlyTheGivenDifference_AndNeverRestoresAnUnlistedRole`.
 - **Not guarded on purpose:** the bus path (`CreateIdentityDataCommandRequestConsumer`, `DistClientDto.AssignedRoleNames`: service accounts and
   client mirroring between services, no caller) and `IClientRoleStore` itself; client mirrors get no roles anyway. Granting a client roles through
   a group (REST `PUT groups/{id}/members/clients/{c}`, method `Group.AddMember` with `memberKind=Client`) was already judged by AB#7927 / AB#7779.

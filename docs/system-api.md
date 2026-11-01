@@ -154,7 +154,7 @@ Transfers all external logins (e.g., Google, Microsoft) from the source user to 
 **Client role rules (AB#7928).** `PUT /clients/{id}/roles` and `PUT /clients/{id}/roles/{roleName}` refuse to give a client a built-in role
 (stored `rtWellKnownName`) the caller does not hold: `403`, `application/problem+json`, `code: role-not-held`, `roleNames`. Custom roles are
 free, only the added roles are judged (a role the client already holds and any removal pass), and `PUT /clients/{id}/roles` validates every
-role id first (unknown or malformed id: `404`, nothing written). Every refusal is audited as `Identity.RoleChangeRefused`. Service-internal
+role id first (unknown or malformed id: `404`, nothing written) and writes only the difference (kept roles are not written again). Every refusal is audited as `Identity.RoleChangeRefused`. Service-internal
 client provisioning over the bus (service accounts, client mirroring) is not affected.
 
 **Request/Response DTO:**
