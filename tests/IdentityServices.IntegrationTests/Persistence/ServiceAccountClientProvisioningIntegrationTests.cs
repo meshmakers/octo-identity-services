@@ -72,6 +72,31 @@ public class ServiceAccountClientProvisioningIntegrationTests : IClassFixture<Id
         (await GetAssignedRoleNamesAsync(client)).Should().Contain(CommonConstants.CommunicationManagementRole);
     }
 
+    /// <summary>
+    ///     AB#7928: the REST client role endpoints refuse built-in roles the caller does not hold; client mirroring and the
+    ///     service accounts over the bus are service-internal, have no caller and keep assigning built-in roles.
+    /// </summary>
+    [Fact]
+    public async Task BusPath_StillAssignsABuiltInRole_WithoutTheRoleChangeGuard()
+    {
+        await ArrangeAsync();
+        var builtIn = $"Ab7928BuiltIn{Guid.NewGuid():N}";
+        await EnsureRoleAsync(builtIn, wellKnownName: builtIn);
+        var clientId = NewClientId();
+        var request = BuildServiceAccountRequest(clientId, "plaintext-secret-7928");
+        request.Clients = [request.Clients!.Single() with
+        {
+            AssignedRoleNames = [CommonConstants.CommunicationManagementRole, builtIn]
+        }];
+
+        await ConsumeAsync(request);
+
+        var client = await LoadClientAsync(clientId);
+        client.Should().NotBeNull();
+        (await GetAssignedRoleNamesAsync(client!)).Should()
+            .Contain([CommonConstants.CommunicationManagementRole, builtIn]);
+    }
+
     [Fact]
     public async Task SecondRunWithTheSameSecret_DoesNotRotateAndCreatesNoDuplicates()
     {
@@ -380,7 +405,7 @@ public class ServiceAccountClientProvisioningIntegrationTests : IClassFixture<Id
         await EnsureRoleAsync(CommonConstants.CommunicationManagementRole);
     }
 
-    private async Task EnsureRoleAsync(string roleName)
+    private async Task EnsureRoleAsync(string roleName, string? wellKnownName = null)
     {
         var repo = _fixture.GetSystemContext().GetSystemTenantRepositoryAsAdmin();
         using var session = await repo.GetSessionAsync();
@@ -399,7 +424,8 @@ public class ServiceAccountClientProvisioningIntegrationTests : IClassFixture<Id
         {
             RtId = OctoObjectId.GenerateNewId(),
             Name = roleName,
-            NormalizedName = roleName.ToUpperInvariant()
+            NormalizedName = roleName.ToUpperInvariant(),
+            RtWellKnownName = wellKnownName
         });
         await session.CommitTransactionAsync();
     }

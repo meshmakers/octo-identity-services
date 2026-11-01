@@ -15,6 +15,9 @@ using Microsoft.AspNetCore.Mvc;
 using Persistence.IdentityCkModel.Generated.System.Identity.v2;
 using Meshmakers.Octo.Backend.IdentityServices.OpenIddict;
 using Meshmakers.Octo.Backend.Authentication;
+using Meshmakers.Octo.Backend.IdentityServices.Authorization.RoleChange;
+using Meshmakers.Octo.ConstructionKit.Contracts;
+using Microsoft.AspNetCore.Identity;
 
 namespace Meshmakers.Octo.Backend.IdentityServices.TenantApi.v1.Controllers;
 
@@ -31,6 +34,9 @@ public class ClientsController : ControllerBase
     private readonly IOctoClientStore _octoClientStore;
     private readonly IClientRoleStore _clientRoleStore;
     private readonly IClientImpersonationStore _clientImpersonationStore;
+    private readonly RoleManager<RtRole> _roleManager;
+    private readonly IRoleChangeGuard _roleChangeGuard;
+    private readonly IRoleChangeRefusals _roleChangeRefusals;
 
     /// <summary>
     ///     Constructor
@@ -39,15 +45,44 @@ public class ClientsController : ControllerBase
     /// <param name="distributionEventHubService">Distributed cache with REDIS</param>
     /// <param name="clientRoleStore">The store managing client role assignments</param>
     /// <param name="clientImpersonationStore">The store reading the MayActAs impersonation edges</param>
+    /// <param name="roleManager">Resolves the roles a client role change names</param>
+    /// <param name="roleChangeGuard">"Grant only built-in roles you hold" for client roles (AB#7928)</param>
+    /// <param name="roleChangeRefusals">Answers and audits a refused role change</param>
     public ClientsController(IOctoClientStore octoClientStore,
         IDistributionEventHubService distributionEventHubService,
         IClientRoleStore clientRoleStore,
-        IClientImpersonationStore clientImpersonationStore)
+        IClientImpersonationStore clientImpersonationStore,
+        RoleManager<RtRole> roleManager,
+        IRoleChangeGuard roleChangeGuard,
+        IRoleChangeRefusals roleChangeRefusals)
     {
         _octoClientStore = octoClientStore;
         _distributionEventHubService = distributionEventHubService;
         _clientRoleStore = clientRoleStore;
         _clientImpersonationStore = clientImpersonationStore;
+        _roleManager = roleManager;
+        _roleChangeGuard = roleChangeGuard;
+        _roleChangeRefusals = roleChangeRefusals;
+    }
+
+    /// <summary>
+    ///     AB#7928: a client may only be given built-in roles (roles with an <c>rtWellKnownName</c>) the caller holds itself;
+    ///     custom roles are free and removals are never judged. Otherwise a tenant administrator could hand a client e.g.
+    ///     <c>UserManagement</c> and act as that client. Returns the audited 403 <c>role-not-held</c> answer, or <c>null</c>.
+    ///     The bus path (<c>DistClientDto.AssignedRoleNames</c>, service-internal client provisioning) does not come here.
+    /// </summary>
+    private async Task<ObjectResult?> GuardClientRoleGrantAsync(RtClient client, IReadOnlyCollection<string> addedRoleNames)
+    {
+        if (addedRoleNames.Count == 0)
+        {
+            return null;
+        }
+
+        var caller = RoleChangeCaller.FromPrincipal(User);
+        var decision = await _roleChangeGuard.EvaluateGrantAsync(caller, addedRoleNames, HttpContext.RequestAborted);
+        return decision.IsAllowed
+            ? null
+            : await _roleChangeRefusals.RefuseAsync(HttpContext, caller, decision, $"client {client.ClientId}");
     }
 
     // GET: system/v1/clients
@@ -161,6 +196,7 @@ public class ClientsController : ControllerBase
     [Authorize(IdentityServiceConstants.IdentityTenantAdministrationWritePolicy)]
     [EndpointSummary("Replaces the directly-assigned roles of a client (replace-all).")]
     [ProducesResponseType(StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status403Forbidden, "application/problem+json")]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<IActionResult> UpdateClientRoles(
         [Required][Description("ID of the client")] string id,
@@ -172,6 +208,29 @@ public class ClientsController : ControllerBase
             return NotFound(new NotFoundErrorDto($"Client with id '{id}' not found."));
         }
 
+        // AB#7928: every role id is resolved first (an unknown id changes nothing), then only the added roles are judged.
+        var current = (await _clientRoleStore.GetDirectRoleIdsAsync(client.RtId)).ToHashSet(StringComparer.Ordinal);
+        var addedRoleNames = new List<string>();
+        foreach (var roleId in roleIds.Distinct(StringComparer.Ordinal))
+        {
+            var role = OctoObjectId.TryParse(roleId, out _) ? await _roleManager.FindByIdAsync(roleId) : null;
+            if (role == null)
+            {
+                return NotFound(new NotFoundErrorDto($"Role with id '{roleId}' not found."));
+            }
+
+            if (!current.Contains(roleId) && role.Name != null)
+            {
+                addedRoleNames.Add(role.Name);
+            }
+        }
+
+        var refusal = await GuardClientRoleGrantAsync(client, addedRoleNames);
+        if (refusal != null)
+        {
+            return refusal;
+        }
+
         await _clientRoleStore.SetRoleIdsAsync(client.RtId, roleIds);
         return Ok();
     }
@@ -181,6 +240,7 @@ public class ClientsController : ControllerBase
     [Authorize(IdentityServiceConstants.IdentityTenantAdministrationWritePolicy)]
     [EndpointSummary("Assigns a single role (by name) to a client.")]
     [ProducesResponseType(StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status403Forbidden, "application/problem+json")]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<IActionResult> AddClientToRole(
         [Required][Description("ID of the client")] string id,
@@ -190,6 +250,21 @@ public class ClientsController : ControllerBase
         if (client == null)
         {
             return NotFound(new NotFoundErrorDto($"Client with id '{id}' not found."));
+        }
+
+        // AB#7928: a role the client already holds directly grants nothing; an unknown role is the store's 404 below.
+        var role = await _roleManager.FindByNameAsync(roleName);
+        if (role != null)
+        {
+            var current = await _clientRoleStore.GetDirectRoleIdsAsync(client.RtId);
+            if (!current.Contains(role.RtId.ToString()))
+            {
+                var refusal = await GuardClientRoleGrantAsync(client, [role.Name ?? roleName]);
+                if (refusal != null)
+                {
+                    return refusal;
+                }
+            }
         }
 
         try

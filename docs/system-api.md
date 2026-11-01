@@ -146,6 +146,16 @@ Transfers all external logins (e.g., Google, Microsoft) from the source user to 
 | POST | `/clients` | ReadWrite | Create new client |
 | PUT | `/clients/{id}` | ReadWrite | Update client |
 | DELETE | `/clients/{id}` | ReadWrite | Delete client |
+| GET | `/clients/{id}/roles` | DirectoryRead | Role ids directly assigned to the client |
+| PUT | `/clients/{id}/roles` | ReadWrite | Replace the client's direct roles (body: role ids) |
+| PUT | `/clients/{id}/roles/{roleName}` | ReadWrite | Assign one role by name |
+| DELETE | `/clients/{id}/roles/{roleName}` | ReadWrite | Remove one role by name |
+
+**Client role rules (AB#7928).** `PUT /clients/{id}/roles` and `PUT /clients/{id}/roles/{roleName}` refuse to give a client a built-in role
+(stored `rtWellKnownName`) the caller does not hold: `403`, `application/problem+json`, `code: role-not-held`, `roleNames`. Custom roles are
+free, only the added roles are judged (a role the client already holds and any removal pass), and `PUT /clients/{id}/roles` validates every
+role id first (unknown or malformed id: `404`, nothing written). Every refusal is audited as `Identity.RoleChangeRefused`. Service-internal
+client provisioning over the bus (service accounts, client mirroring) is not affected.
 
 **Request/Response DTO:**
 

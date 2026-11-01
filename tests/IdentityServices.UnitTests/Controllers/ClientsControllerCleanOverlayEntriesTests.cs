@@ -1,3 +1,5 @@
+using Meshmakers.Octo.Backend.IdentityServices.Authorization.RoleChange;
+using Microsoft.AspNetCore.Identity;
 using FluentAssertions;
 using IdentityServerPersistence;
 using IdentityServerPersistence.SystemStores;
@@ -34,7 +36,9 @@ public class ClientsControllerCleanOverlayEntriesTests
     public ClientsControllerCleanOverlayEntriesTests()
     {
         _clientStore.TenantId.Returns(TenantId);
-        _sut = new ClientsController(_clientStore, _eventHub, _clientRoleStore, _clientImpersonationStore);
+        _sut = new ClientsController(_clientStore, _eventHub, _clientRoleStore, _clientImpersonationStore,
+            Substitute.For<RoleManager<RtRole>>(Substitute.For<IRoleStore<RtRole>>(), null, null, null, null),
+            Substitute.For<IRoleChangeGuard>(), Substitute.For<IRoleChangeRefusals>());
     }
 
     [Fact]
