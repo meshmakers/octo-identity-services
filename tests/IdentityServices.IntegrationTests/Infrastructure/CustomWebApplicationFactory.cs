@@ -49,6 +49,24 @@ public class CustomWebApplicationFactory : WebApplicationFactory<Program>, IAsyn
 
     private string? _databaseHost;
 
+    /// <summary>
+    ///     Name of the host setting that switches the file watchers of the configuration files off.
+    /// </summary>
+    internal const string ReloadConfigOnChangeVariable = "DOTNET_hostBuilder__reloadConfigOnChange";
+
+    /// <summary>
+    ///     Every in-process host of this suite (each factory and each <c>WithWebHostBuilder</c> derivative) loads
+    ///     <c>appsettings*.json</c> with reload-on-change, i.e. one file watcher per file and host. On a Linux CI agent the
+    ///     inotify instance limit (128) was reached across the suite (AB#8019, PR build of #230), failing unrelated tests
+    ///     at host start. Tests never change configuration files at run time, so the hosts read them once. Set before the
+    ///     first host is built; <c>WebApplication.CreateBuilder</c> reads <c>DOTNET_</c> host settings from the process
+    ///     environment.
+    /// </summary>
+    static CustomWebApplicationFactory()
+    {
+        Environment.SetEnvironmentVariable(ReloadConfigOnChangeVariable, "false");
+    }
+
     public CustomWebApplicationFactory()
     {
         _options = new IntegrationTestOptions();

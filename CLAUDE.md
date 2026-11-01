@@ -131,6 +131,15 @@ signing and encryption credentials with one in-memory certificate (`Infrastructu
 and the JWKS test asserts that this is the only published key. Never let a test host read key material
 from the user/machine store.
 
+**Linux agents: inotify instance limit (AB#8019).** Every in-process host (each `CustomWebApplicationFactory` and each
+`WithWebHostBuilder` derivative) used to load `appsettings*.json` with reload-on-change, i.e. one file watcher per file and host.
+On the Linux CI agents the inotify instance limit (128) was reached across the suite and unrelated tests failed at host start
+(`The configured user limit (128) on the number of inotify instances has been reached`). The static constructor of
+`CustomWebApplicationFactory` therefore sets `DOTNET_hostBuilder__reloadConfigOnChange=false` for the test process (tests never
+change configuration files at run time); `TestHostConfigurationTests` pins it. Dispose derived factories a test creates
+(`WithWebHostBuilder`) at the end of the test (`GroupMethodTestBase`, `ClientMirrorReconciliationTests`); otherwise they live
+until the class fixture ends.
+
 Der NLog-Fall ist der einzige, den man **nicht** per-Fixture eindeutig machen kann: `Program.cs` lädt
 die globale Konfiguration am Entry-Point und räumt sie im `finally` mit `LogManager.Shutdown()` wieder
 ab (dort gegen den Segfault beim Prozessende auf Linux). Unter `WebApplicationFactory<Program>` läuft
