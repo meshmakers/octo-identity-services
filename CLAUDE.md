@@ -1003,7 +1003,7 @@ stories are merged.**
 
 | Type | Methods (`-1`) | Roles |
 |------|----------------|-------|
-| `User` | `ChangePassword` (instance, `allowSelf`, no role), `ResetPassword`, `SetRoles`, `AddRole`, `RemoveRole`, `Merge`, static `CreateUser`; `DisableTwoFactor` since 2.30.0 (AB#7879) | `UserManagement` |
+| `User` | `ChangePassword` (instance, `allowSelf`, no role), `ResetPassword`, `SetRoles`, `AddRole`, `RemoveRole`, `Merge`, static `CreateUser` (handler AB#7777); `DisableTwoFactor` since 2.30.0 (AB#7879) | `UserManagement` |
 | `Group` | `AddMember`, `RemoveMember` (`memberKind` enum `GroupMemberKind` = `User`/`Client`, `memberId`), `SetRoles` | `UserManagement` |
 | `Client` | `AddSecret` (result `sensitive`: the generated secret, shown once), `RemoveSecret` (by `secretValue`, REST parity) | `TenantManagement`, `UserManagement` |
 | `DataPermission` | `GrantToRole`, `RevokeFromRole` | `UserManagement` |
@@ -1018,8 +1018,8 @@ Rules behind the shape (do not change them without reading this):
 - **No `replacesGenericCreate` on any type.** Group, Client and DataPermission are seeded by `System.Identity.Bootstrap` (the flag would make
   AB#7121 refuse every new tenant). On `User` the flag is a **MAJOR** change of the model (row M16 of `docs/ck-semver-rules.md` in
   octo-construction-kit-engine: a new method with the flag on an existing type, decision 2026-10-19), and System.Identity 3.0.0 would leave every
-  blueprint range `[2.x,3.0)` unsatisfied - decision pending with the platform owner (AB#7773, AB#7777). The generic create of a user is already
-  narrowed by the 2.28.0 access modifiers (`UserName`, `Email` MethodOnly, `PasswordHash` Hidden).
+  blueprint range `[2.x,3.0)` unsatisfied - planned for the next major (AB#8053). Until then the engine refuses a new user on every generic
+  path at runtime (AB#7777, section `User.CreateUser` above).
 - **No `LAST_ADMIN_PROTECTED`**: the REST API has no last-admin rule (AB#7914 refuses it with `METHOD_FORBIDDEN` / `last-administrator`). `User.DisableTwoFactor-1` followed in 2.30.0 (AB#7879, section below).
 - `compatibility.acknowledge` of 2.28.0 is gone (an acknowledgement is valid for one release, OCTO-CK204). `octo-ckc ValidateVersion`
   against the published 2.28.0: **MINOR** (15 additions, no Major row).
@@ -1983,6 +1983,40 @@ extra detail `twoFactorWasEnabled`. No key, code or token value is logged or aud
 had one either). Tests: `Api/Methods/UserDisableTwoFactorMethodTests` (method and REST on real MongoDB: end to end with sign-in by password
 and a new enrolment over HTTP, idempotent, service token, caller theory for existing and missing target, unknown target, failing revocation,
 forged caller, REST 404/403, no authenticator material in audit or logs).
+
+### `User.CreateUser` and the only ways to create a user (AB#7777)
+
+A user is created only by this service: REST `POST {tenant}/v1/users` or the static CK method `User.CreateUser-1`
+(`UserCreateUserHandler`, one row in `IdentityMethodHost.Handlers`, `CarriesSecret = true` because of the optional `sensitive`
+`password`: **hosted only with `Methods:Identity:EnablePasswordMethods`**, also for invitations without a password - the switch is
+per method; off = `METHOD_HANDLER_NOT_AVAILABLE`). Both share `IUserCreationService` (`Services/UserCreationService.cs`, scoped):
+`UserManager.CreateAsync` with or without the password (user validators, password policy before the user is stored, normalised name
+and e-mail, security stamp), then the welcome notification (with password: e-mail confirmation; without: the invitation to set a
+password). REST behaviour is unchanged.
+
+| Rule | REST | Method |
+|---|---|---|
+| Caller | `IdentityUserAdministrationWritePolicy` | `IdentityMethodCallerRules.IsAdministrator` on the validated principal (scope `octo_api` + `UserManagement`), `METHOD_FORBIDDEN` / `role-required`; the gateway refuses a caller without the declared role first; a forged bus caller is rejected by the host |
+| `xt_` user name | 400 | `USER_NAME_RESERVED` |
+| Duplicate user name | 400 (`DuplicateUserName`) | `USER_ALREADY_EXISTS`, parameter `field=userName` (case-insensitive) |
+| Duplicate e-mail | **allowed** (`RequireUniqueEmail` is off) | `USER_ALREADY_EXISTS`, `field=email` (the declared error covers it; the method is stricter, never looser) |
+| Password policy | 400 with the identity errors | `PASSWORD_POLICY_VIOLATION`, details = rule codes only |
+| Missing / invalid user name or e-mail | 400 | `METHOD_VALIDATION_FAILED` (`field`) |
+| Result | `200` (empty) | rtId of the new user (`UserCreateUserResult.Value`) |
+
+Audit: one `Identity.Method` event per call (success, every refusal, `METHOD_HANDLER_FAILED`), `targetRtId` = the new user (success
+only), details `userName`, `withPassword`. The password reaches only the user manager - never a log, audit record or error parameter.
+`ResetPasswordOnLogin` is `false` (REST default).
+
+**The generic paths refuse a new user** (engine `GenericCreateReplacement`, runtime rule of AB#7777, octo-construction-kit-engine):
+GraphQL generic/typed/query-row create, MCP create, mesh-adapter inserts, caller `ImportRt` and blueprint seeds answer
+`GENERIC_CREATE_REPLACED_BY_METHOD` naming `System.Identity/User.CreateUser-1`; an existing user (rtId stored) is updated as before.
+The model itself does **not** set `replacesGenericCreate` (a Major, row M16): that, and moving the AB#8042 list into `access`, is the
+next System.Identity major (AB#8053). Nothing in this service is affected (repository writes are not generic paths). Tests:
+`Api/Methods/UserCreateUserMethodTests` (real MongoDB, host with the switch on: password user signs in, normalised fields and stamp,
+invitation without password, duplicate name (also other casing) and e-mail, policy, reserved name, validation, caller theory, service
+token, forged caller, audit, welcome notification, no password in audit or logs), `Methods/IdentityMethodHostTests`,
+`IdentityMethodDeclarationsIntegrationTests` (declared role `UserManagement`, flag still off).
 
 ### Identity-owned User fields are refused on the generic paths (AB#8042)
 

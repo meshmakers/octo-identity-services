@@ -61,6 +61,18 @@ public class IdentityMethodHostTests
     }
 
     [Fact]
+    public void UserCreateUser_CarriesASecret_AndIsSelectedOnlyWithTheSwitch()
+    {
+        // AB#7777: the optional initial password is sensitive, so the whole method waits for the switch (also invitations).
+        IdentityMethodHost.Handlers.Should().ContainSingle(h => h.MethodId == SystemIdentityCkIds.UserCreateUserMethodId)
+            .Which.CarriesSecret.Should().BeTrue();
+        IdentityMethodHost.SelectHandlers(new IdentityMethodsOptions()).Select(h => h.MethodId).Should()
+            .NotContain(SystemIdentityCkIds.UserCreateUserMethodId);
+        IdentityMethodHost.SelectHandlers(new IdentityMethodsOptions { EnablePasswordMethods = true })
+            .Select(h => h.MethodId).Should().Contain(SystemIdentityCkIds.UserCreateUserMethodId);
+    }
+
+    [Fact]
     public void ClientSecretMethods_CarryASecret_AndAreSelectedOnlyWithTheSwitch()
     {
         string[] secretMethods = [SystemIdentityCkIds.ClientAddSecretMethodId, SystemIdentityCkIds.ClientRemoveSecretMethodId];

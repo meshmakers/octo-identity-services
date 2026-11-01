@@ -277,7 +277,8 @@ public class UsersController : ControllerBase
     [ProducesResponseType(StatusCodes.Status200OK)]
     public async Task<IActionResult> Post(
         [Required] [FromBody] [Description("The user data transfer object instance")]
-        RegisterUserDto userDto)
+        RegisterUserDto userDto,
+        [FromServices] IUserCreationService userCreationService)
     {
         if (!ModelState.IsValid)
         {
@@ -293,33 +294,14 @@ public class UsersController : ControllerBase
 
         try
         {
-            IdentityResult result;
-            if (!string.IsNullOrWhiteSpace(userDto.Password))
-            {
-                // Atomic: the password is validated BEFORE the user is persisted,
-                // so a policy failure never leaves an orphaned user (AB#4503).
-                result = await _userManager.CreateAsync(rtUser, userDto.Password);
-            }
-            else
-            {
-                result = await _userManager.CreateAsync(rtUser);
-            }
-
+            // AB#7777: the same creation as the CK method User.CreateUser-1 (user manager, then the welcome notification).
+            // With a password it is validated before the user is stored, so a policy failure never leaves a user (AB#4503).
+            var result = await userCreationService.CreateAsync(_multiTenancyResolverService.GetTenantId(), rtUser,
+                userDto.Password);
             if (!result.Succeeded)
             {
                 LogIdentityError("Create user", result.Errors);
                 return GetBadRequestResultWithErrorDescription("Creation of user failed", result.Errors);
-            }
-
-            if (!string.IsNullOrWhiteSpace(userDto.Password))
-            {
-                await _userEmailInteractionService.SendWelcomeNotificationAsync(
-                    _multiTenancyResolverService.GetTenantId(), rtUser);
-            }
-            else
-            {
-                await _userEmailInteractionService.SendWelcomeNotificationWithoutPasswordAsync(
-                    _multiTenancyResolverService.GetTenantId(), rtUser);
             }
 
             return Ok();

@@ -50,6 +50,9 @@ internal static class IdentityMethodHost
             b => b.Handle<UserResetPasswordHandler>(SystemIdentityCkIds.UserResetPasswordMethodId)),
         new(SystemIdentityCkIds.UserDisableTwoFactorMethodId, typeof(UserDisableTwoFactorHandler), false,
             b => b.Handle<UserDisableTwoFactorHandler>(SystemIdentityCkIds.UserDisableTwoFactorMethodId)),
+        // The static create carries the optional, sensitive initial password: gated like the password methods (AB#7777).
+        new(SystemIdentityCkIds.UserCreateUserMethodId, typeof(UserCreateUserHandler), true,
+            b => b.Handle<UserCreateUserHandler>(SystemIdentityCkIds.UserCreateUserMethodId)),
         // Group and data-permission methods carry no password or secret either (AB#7779).
         new(SystemIdentityCkIds.GroupAddMemberMethodId, typeof(GroupAddMemberHandler), false,
             b => b.Handle<GroupAddMemberHandler>(SystemIdentityCkIds.GroupAddMemberMethodId)),

@@ -98,6 +98,7 @@ try
     builder.Services.AddScoped<IUserManagementService, UserManagementService>();
     builder.Services.AddScoped<IUserCredentialChangeService, UserCredentialChangeService>();
     builder.Services.AddScoped<IUserTwoFactorAdministrationService, UserTwoFactorAdministrationService>();
+    builder.Services.AddScoped<IUserCreationService, UserCreationService>();
     // AB#7899: administrator revokes all sessions and tokens of a user / of the shadow users of a tenant.
     builder.Services.AddScoped<IUserSessionRevocationService, UserSessionRevocationService>();
     builder.Services.AddScoped<IRoleChangeGuard, RoleChangeGuard>(); // AB#7914
