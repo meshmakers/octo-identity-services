@@ -205,6 +205,20 @@ user of the administrator `ResetPassword` is the caller's user name, for a clien
 only the token `reset-password` path writes). The logic lives in `IUserCredentialChangeService`, which any new
 password path must call.
 
+**Revoked before and after the password write (AB#8018).** The password (user store) and the tokens (OpenIddict token
+and authorization stores) are separate writes in the tenant database without a shared transaction. A service that
+stopped between them used to leave the new password active and the old refresh tokens redeemable (redemption checks
+only `CanSignIn`, not the security stamp). `OctoUserManager` therefore revokes the user's tokens and authorizations in
+`ChangePasswordAsync`, `ResetPasswordAsync` and `AddPasswordAsync` **before** it stores the new password, once the
+request is known to be valid (current password or reset token verified, new password accepted by the policy); the
+helper above revokes once more after the write. A stop between the two writes leaves no token that existed before the
+change; the residual window is a sign-in with the old password in the milliseconds between the first revocation and
+the password write. A refused request (wrong current password, invalid or forged reset token, policy violation)
+revokes nothing, so nobody can end another user's sessions with a bogus reset token. If the first revocation fails,
+nothing is stored and the request fails. One transaction over both stores was not chosen: each store opens its own
+session, and sharing one would mean an ambient session through the user store and both OpenIddict stores (decision
+OD-6: ordering/compensation, no outbox).
+
 ### No Credential Values in Request URLs (AB#8008)
 
 A URL ends up in the ASP.NET Core request log (`Request starting/finished …`, written before any controller
