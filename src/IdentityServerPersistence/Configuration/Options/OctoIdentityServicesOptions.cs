@@ -14,6 +14,7 @@ public class OctoIdentityServicesOptions
         BrokerHost = "localhost";
         EnableTokenCleanup = true;
         TokenCleanupInterval = 60 * 60; // default: once an hour
+        ClientMirrorReconciliationInterval = 5 * 60; // AB#8019: default every 5 minutes
         AllowDisplayInIframe = false;
         CorsPolicyCacheSeconds = 60;
 #if DEBUGL || DEBUG
@@ -67,6 +68,15 @@ public class OctoIdentityServicesOptions
     ///     The interval in seconds, expired tokens in grant store are checked to be deleted.
     /// </summary>
     public int TokenCleanupInterval { get; set; }
+
+    /// <summary>
+    ///     Interval in seconds of the client mirror reconciliation (AB#8019): every identity replica compares the mirrors
+    ///     of <c>AutoProvisionInChildTenants</c> clients with their parent client and repairs differences, so a secret
+    ///     removed (or added, rotated, expired) in the parent reaches every child tenant within about this time even when
+    ///     the immediate sync after the change failed. Default 300; 0 or less switches the job off (only the
+    ///     immediate sync and the start-up provisioning remain).
+    /// </summary>
+    public int ClientMirrorReconciliationInterval { get; set; }
 
     /// <summary>
     ///     Configure the SecurityHeaders so that displaying

@@ -919,7 +919,8 @@ and records a run-once marker (tenant configuration `OctoCliTokenExchangeGrant`)
 so a grant an administrator removes later stays removed. A tenant without an `octo-cli` client records no
 marker and is retried on the next setup. Root and child tenants both run the step; a child whose
 `octo-cli` is a mirror ends with the grant even when its parent is not fixed yet (the step runs after the
-mirror copy). Mirrors are re-synced from the root on every identity start and on every client update.
+mirror copy). Mirrors are re-synced from the root on every identity start, on every client update and by the periodic
+mirror reconciliation (AB#8019, below).
 
 **Ancestry is not authority — provisioning is a required operator step.** The exchange proves that the
 caller's tenant is an ancestor of the target; it grants no role. The roles of the issued token are those
@@ -1405,6 +1406,25 @@ Consequences for anyone writing authorization:
 This is measured, not assumed: **AB#5065** records which of the two secrets each caller actually
 uses (below). Once the inherited copy is gone, the tenant claim on a client-credentials token becomes
 provenance and AB#5055 unblocks.
+
+### Mirror Reconciliation: a Removed Parent Secret Reaches Every Mirror (AB#8019)
+
+A mirror holds copies of the parent client's secrets. The copy after a parent change (REST secret endpoints,
+`Client.AddSecret` / `Client.RemoveSecret`, client update) runs after the parent write committed and is best effort:
+if it fails (child database unreachable, timeout, crash), the removed secret stays valid in the child tenants. Before
+AB#8019 only the next identity start repaired that.
+
+Every identity replica now runs a reconciliation every `Identity:ClientMirrorReconciliationInterval` seconds
+(default 300, `docs/configuration.md`): for every tracked mirror it reads the child mirror, then the parent client,
+and rewrites the mirror when the secrets (including their expiry and the mirror's own secret), the enabled state,
+`RequireClientSecret`, grant types, scopes or URIs differ. A mirror whose parent client no longer exists is
+removed. The write is version-checked against the mirror read before the parent, so a newer immediate sync or a
+second replica always wins and a slow pass never restores a removed secret. Mirrors also copy the expiry of a
+parent secret now, so an expired parent secret is expired in the child tenants too.
+
+Bound: a parent secret that was removed, added, rotated or expired is accepted or refused in every reachable child
+tenant like in the parent within about one interval. No secret value or hash is logged; the meter
+`Meshmakers.Octo.Identity` counts reconciled mirrors (`identity.client_mirror.reconciled`).
 
 ### Which Mirror Secret Was Used? (AB#5065) — step 3 of the migration
 

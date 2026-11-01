@@ -102,6 +102,8 @@ public static class RuntimeEngineBuilderExtensions
         // setup and by every mirror provisioning, and revoked for good when the group membership is removed.
         builder.Services.AddScoped<IScratchTenantGrantService, ScratchTenantGrantService>();
         builder.Services.AddScoped<IClientMirrorProvisioningService, ClientMirrorProvisioningService>();
+        // AB#8019: one pass of the periodic mirror reconciliation (compensation for a failed best-effort mirror sync).
+        builder.Services.AddScoped<IClientMirrorReconciliationJob, ClientMirrorReconciliationJob>();
         // AB#5026 delegation ("on-behalf-of"): the protocol-free policy behind OnBehalfOfProcessor.
         builder.Services.AddScoped<IDelegatedIdentityResolver, DelegatedIdentityResolver>();
         // AB#5114 impersonation: the MayActAs edge store and the protocol-free policy behind

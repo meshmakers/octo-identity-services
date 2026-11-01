@@ -285,6 +285,9 @@ public class CustomWebApplicationFactory : WebApplicationFactory<Program>, IAsyn
                 opts.KeyFilePassword = "not-used-in-tests";
                 opts.AuthorityUrl = "https://localhost:5003";
                 opts.EnableTokenCleanup = false;
+                // AB#8019: no background mirror reconciliation in the shared test host; tests run a pass explicitly
+                // (IClientMirrorReconciliationJob), so a timer can never repair a state a test is asserting.
+                opts.ClientMirrorReconciliationInterval = 0;
                 // AB#7854: the whole suite signs in from one test-server address and reuses accounts; keep the
                 // sign-in limits active (wiring, concurrency) but far above what the suite needs. The limit itself is
                 // tested with a factory that lowers them (SignInAttemptConcurrencyTests).

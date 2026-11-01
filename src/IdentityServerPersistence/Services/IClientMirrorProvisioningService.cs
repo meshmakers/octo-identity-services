@@ -17,6 +17,8 @@ namespace IdentityServerPersistence.Services;
 /// <item>The <c>PreDeleteTenant</c> consumer — drops tracking rows for a deleted tenant.</item>
 /// <item>The backfill REST endpoint (issue #4045) — a one-shot provisioning into
 /// every existing child of the parent.</item>
+/// <item>The periodic mirror reconciliation job (AB#8019) — repairs mirrors a failed
+/// best-effort sync left behind.</item>
 /// </list>
 /// All operations are idempotent.
 /// </remarks>
@@ -43,6 +45,21 @@ public interface IClientMirrorProvisioningService
     /// </remarks>
     Task<ClientMirrorSyncResult> SyncMirrorsForClientAsync(
         string parentTenantId, RtClient parentClient);
+
+    /// <summary>
+    /// Compensation for a failed <see cref="SyncMirrorsForClientAsync" /> (AB#8019): compares every mirror tracked in
+    /// <paramref name="parentTenantId"/> with its parent client and repairs the ones that differ (secrets incl. expiry,
+    /// enabled state, grant types, scopes, URIs). A tracked mirror whose parent client no longer exists is removed.
+    /// Called periodically by the mirror reconciliation job.
+    /// </summary>
+    /// <remarks>
+    /// Idempotent and safe to run on several replicas at once: a mirror in sync is not written; a repair is a
+    /// version-checked replace after reading the mirror before the parent client, so a concurrent writer wins and a
+    /// stale pass never restores a removed secret (see the implementation remarks). Logs names only, never a secret
+    /// or hash.
+    /// </remarks>
+    Task<ClientMirrorReconciliationResult> ReconcileMirrorsAsync(
+        string parentTenantId, CancellationToken cancellationToken = default);
 
     /// <summary>
     /// Removes every mirror (both the child-tenant client record and the parent's tracking
@@ -155,6 +172,31 @@ public sealed record ClientMirrorProvisioningResult(
 public sealed record ClientMirrorSyncResult(
     int MirrorsSynced,
     int MirrorsFailed);
+
+/// <summary>Summary of one reconciliation pass over the mirrors tracked in one parent tenant (AB#8019).</summary>
+/// <param name="MirrorsChecked">Tracking rows looked at.</param>
+/// <param name="MirrorsInSync">Mirrors that matched their parent client (nothing written).</param>
+/// <param name="MirrorsRepaired">Mirrors rewritten (or re-created) from their parent client.</param>
+/// <param name="MirrorsRemoved">Mirrors removed because their parent client no longer exists.</param>
+/// <param name="MirrorsSkipped">Child tenant not reachable, or the mirror changed concurrently; the next pass retries.</param>
+/// <param name="MirrorsFailed">Mirrors whose reconciliation threw; logged, the next pass retries.</param>
+public sealed record ClientMirrorReconciliationResult(
+    int MirrorsChecked,
+    int MirrorsInSync,
+    int MirrorsRepaired,
+    int MirrorsRemoved,
+    int MirrorsSkipped,
+    int MirrorsFailed)
+{
+    /// <summary>Nothing tracked.</summary>
+    public static ClientMirrorReconciliationResult Empty { get; } = new(0, 0, 0, 0, 0, 0);
+
+    /// <summary>Sum of two results.</summary>
+    public ClientMirrorReconciliationResult Add(ClientMirrorReconciliationResult other) => new(
+        MirrorsChecked + other.MirrorsChecked, MirrorsInSync + other.MirrorsInSync,
+        MirrorsRepaired + other.MirrorsRepaired, MirrorsRemoved + other.MirrorsRemoved,
+        MirrorsSkipped + other.MirrorsSkipped, MirrorsFailed + other.MirrorsFailed);
+}
 
 /// <summary>Summary of one cleanup run.</summary>
 public sealed record ClientMirrorCleanupResult(

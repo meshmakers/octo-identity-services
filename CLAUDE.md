@@ -581,8 +581,49 @@ nested customer sub-tenants are out of scope for v1, see
 
 All three paths are best-effort: failures are logged and **do not** bubble
 back to the primary operation (client update, client delete, tenant delete).
-The next startup-time provisioning loop re-converges the state for any
-mirror that fell behind because of a transient failure.
+The same holds for the secret writes of `Client.AddSecret` / `Client.RemoveSecret`
+and the REST secret endpoints (sync after commit, error logged).
+
+**Periodic mirror reconciliation (AB#8019, Security).** Before it, only the next identity start
+re-converged a mirror that a failed sync left behind, so a secret removed in the parent stayed valid
+in the child tenants until a restart. A compensation job (decision OD-6: no outbox) closes the window:
+
+- `ClientMirrorReconciliationHostService` (`IdentityServices/Services/`) runs
+  `IClientMirrorReconciliationJob.RunOnceAsync` every `Identity:ClientMirrorReconciliationInterval`
+  seconds (default `300`, `0` or less = off; first pass one interval after start, plus a random offset
+  of at most 10 % / 30 s). The job (`IdentityServerPersistence/Services/ClientMirrorReconciliationJob.cs`)
+  calls `IClientMirrorProvisioningService.ReconcileMirrorsAsync(tenantId)` for the system tenant and every
+  registered tenant (tracking rows live in the parent).
+- `ReconcileMirrorsAsync` walks the `RtClientMirror` rows of the parent. Per row: read the child mirror,
+  **then** the parent client; build the desired mirror with the same `CreateMirrorClient` +
+  `ReconcileOwnSecret` the provisioning uses; compare (`MirrorDiffers`: secrets incl. expiry and own secret,
+  `Enabled`, `RequireClientSecret`, grant types, scopes, redirect / post-logout / CORS URIs, mirror marker);
+  write only on a difference, with the **version-checked** replace (`rtVersion` read from the child), then
+  bump `SecretHashVersion` and publish `CorsClientsUpdate`. A missing or duplicated mirror goes through the
+  provisioning upsert. A row whose parent client is gone (delete cleanup failed) removes the child client
+  **carrying this parent's mirror marker** and the row. An unreachable child tenant is skipped (row kept).
+  The tracking row is the authority: a tracked mirror follows its parent even after the flag was switched off.
+- 🔴 **Read order and the version check are load-bearing (replica safety).** Every identity replica runs the
+  job; there is no lock. Every write of the mirror (immediate sync, another replica) increments `rtVersion`,
+  so a write after our child read makes our replace fail with `RtVersionConflictException` (counted as
+  skipped, next pass), and a write before it is visible to the comparison while the parent was read after
+  it. A slow pass can never put a removed secret back; two replicas converge on the same state.
+- **Expiry is copied now.** `CopySecrets` dropped `ExpirationDateTime`, so a parent secret that expired kept
+  authenticating in every child tenant; mirrors now carry the expiry (also the carried-over own secret).
+- **Metrics/logs:** meter `Meshmakers.Octo.Identity` (registered in `Program.cs` via
+  `ConfigureOpenTelemetryMeterProvider`): `identity.client_mirror.reconciled` (`outcome` = repaired / removed /
+  skipped / failed) and `identity.client_mirror.reconcile.runs` (`outcome` = ok / tenant_failed); labels never
+  carry tenant, client, secret or hash. One Information line per repaired mirror (client id, tenants, version)
+  and one summary per pass with counts when something changed; never a secret value or hash.
+- Bound: a removed / added / rotated / expired parent secret reaches every reachable mirror within about one
+  interval after the failed sync. The integration-test factory sets the interval to `0`; tests call the job.
+- **Tests:** `tests/IdentityServices.IntegrationTests/Api/Methods/ClientMirrorReconciliationTests.cs` (real MongoDB,
+  real child tenant and token endpoint; the immediate sync is fault-injected by a decorator: removed secret still
+  valid in the child after the failed sync, gone after the job, child token refused; added secret; expired parent
+  secret; in-sync mirror not written; orphaned mirror removed; two parallel passes without a duplicate; metric and
+  log canary), `tests/IdentityServerPersistence.UnitTests/Services/ClientMirrorReconciliationTests.cs` (comparison,
+  read order + version, conflict, orphan with foreign client, unreachable child),
+  `tests/IdentityServices.UnitTests/Services/ClientMirrorReconciliationHostServiceTests.cs` (interval).
 
 **Management REST endpoints (#4045 — done):** all under
 `{tenantId}/v1/clients/{clientId}/...`:
@@ -1927,6 +1968,7 @@ Key identity options (`OctoIdentityServicesOptions`):
 - Token signing: `KeyFilePath` / `KeyFilePassword` (static PKCS#12 certificate) — unchanged by the OpenIddict migration. The `Identity:IdentityServerLicenseKey` option was **removed** with the migration (no license required).
 - `RefineryStudioUrl`: Public URL of the Data Refinery Studio SPA. When set, the `octo-data-refinery-studio` OIDC client is auto-provisioned in all tenants with correct redirect URIs, CORS origins, and front-channel logout. Example: `OCTO_IDENTITY__RefineryStudioUrl=https://studio.example.com`
 - `CorsPolicyCacheSeconds` (env `OCTO_IDENTITY__CORSPOLICYCACHESECONDS`, default `60`, AB#5487): lifetime of the cached Identity CORS policy (`IdentityCorsPolicyProvider`). The policy is rebuilt from the client origins of all tenants after this time, so a missed `CorsClientsUpdate` (other pod, client written without event) or a removed origin heals on its own. A policy with an **empty origin list is never cached** (it is rebuilt on every request until origins exist), so a tenant provisioned after the first request is not blind to the SPA. `0` or less disables the time-based expiry (events only). Events stay the fast path: `CorsClientsUpdate` is published by `ClientsController` (every write, and the overlay endpoint **unconditionally**, also when 0 URIs were added) and by `ClientMirrorProvisioningService` (new mirror, sync, removal; one event per affected child tenant, publish failures are logged and never fail the provisioning). The common-services `CorsPolicyProvider` (other services) is a separate follow-up.
+- `ClientMirrorReconciliationInterval` (env `OCTO_IDENTITY__CLIENTMIRRORRECONCILIATIONINTERVAL`, default `300` seconds, AB#8019): interval of the periodic client mirror reconciliation; `0` or less switches it off. See "Periodic mirror reconciliation" above.
 - `DataProtectionKeysPath`: **Legacy / seed-only.** When set and the directory contains `key-*.xml` files, those keys are imported once into MongoDB at startup (zero-logout migration from old PVC). Safe to leave unset in new deployments; DataProtection keys are now always persisted in MongoDB.
 - `DynamicClientRegistration.Enabled` (env `OCTO_IDENTITY__DYNAMICCLIENTREGISTRATION__ENABLED`, default `true`): RFC 7591 Dynamic Client Registration (AB#4338) so interactive MCP clients (Claude Code) that require DCR can self-register a public authorization-code+PKCE client via `POST /connect/register`. Enabled by default (set `false` to disable per deployment). Hard-gated (loopback redirects, PKCE, no secret, server-fixed scopes, per-IP rate limit, per-tenant cap, TTL). Registers into the system tenant + mirrors to all tenants; tenant resolved at authorize by §9 email-first discovery. Also `AllowedScopes` / `ClientTtlDays` / `MaxClientsPerTenant` / `RateLimitPermitsPerMinute`. See `docs/authentication.md` § Dynamic Client Registration and `docs/CONCEPT-MCP-DYNAMIC-CLIENT-REGISTRATION.md`.
 
