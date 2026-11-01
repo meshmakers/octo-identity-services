@@ -378,20 +378,31 @@ public class UsersController : ControllerBase
         }
     }
 
-    // POST: system/v1/users/resetPassword
+    // POST: {tenant}/v1/users/ResetPassword
+    /// <summary>
+    ///     Sets a new password for a user (administrator reset). AB#8008: the user name and the new password travel only
+    ///     in the JSON body; the former query-parameter form (<c>?userName=…&amp;password=…</c>) is refused with 400, so a
+    ///     password never lands in a request URL (request logs, traces, proxy access logs).
+    /// </summary>
     [HttpPost]
     [Route("ResetPassword")]
     [Authorize(IdentityServiceConstants.IdentityUserAdministrationWritePolicy)]
+    [RefuseCredentialInQuery("password")]
     [EndpointSummary("Resets the password of an user.")]
     [ProducesResponseType(StatusCodes.Status200OK)]
-    public async Task<IActionResult> ResetPassword([Required][Description("The username")] string userName,
-        [Required] [Description("The new password")]
-        string password)
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> ResetPassword(
+        [Required] [FromBody] [Description("The user name and the new password")]
+        ResetUserPasswordRequestDto request)
     {
         if (!ModelState.IsValid)
         {
             return BadRequest(ModelState);
         }
+
+        var userName = request.UserName;
+        var password = request.Password;
 
         try
         {
@@ -413,8 +424,9 @@ public class UsersController : ControllerBase
             var result = await _userManager.ResetPasswordAsync(user, token, password);
             if (result.Succeeded)
             {
+                // AB#8008: the caller as the audit names it - the user name, for a client-credentials token the client.
                 await _userCredentialChangeService.OnPasswordChangedAsync(user, PasswordChangePath.AdminResetPassword,
-                    User.Identity?.Name, HttpContext.RequestAborted);
+                    AuditActor.FromPrincipal(User).Actor, HttpContext.RequestAborted);
                 await _userEmailInteractionService.SendPasswordResetNotificationAsync(_multiTenancyResolverService.GetTenantId(),
                     user);
                 return Ok();

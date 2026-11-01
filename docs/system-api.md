@@ -66,7 +66,7 @@ required role follows from the table above.
 | GET | `/users/{userName}/roles` | ReadOnly | Get user's roles (direct + group-inherited) |
 | GET | `/users/{userName}/directRoles` | ReadOnly | Get user's directly assigned roles only |
 | POST | `/users` | ReadWrite | Create new user |
-| POST | `/users/ResetPassword` | ReadWrite | Reset user password |
+| POST | `/users/ResetPassword` | ReadWrite | Reset user password; body `{ "userName": "…", "password": "…" }`. The former query form (`?userName=…&password=…`) is refused with `400` and an update hint (AB#8008): a password never travels in a URL |
 | POST | `/users/{userName}/revokeSessions` | ReadWrite | Revoke all sessions and tokens of a user (AB#7899) |
 | POST | `/users/revokeSessions?scope=shadowUsers&dryRun=true` | ReadWrite | Same for all xt_* shadow users of the tenant; dry run by default (AB#7899) |
 | PUT | `/users/{userName}` | ReadWrite | Update user |
@@ -260,10 +260,12 @@ client provisioning over the bus (service accounts, client mirroring) is not aff
 | Method | Endpoint | Policy | Description |
 |--------|----------|--------|-------------|
 | GET | `/apiSecrets/client/{clientId}` | ReadOnly | Get client's secrets |
-| GET | `/apiSecrets/client/{clientId}/{secretValue}` | ReadOnly | Get specific secret |
+| POST | `/apiSecrets/client/{clientId}/lookup` | ReadOnly | Get specific secret; body `{ "valueEncrypted": "<stored hash>" }` (AB#8008) |
 | POST | `/apiSecrets/client/{clientId}` | ReadWrite | Create client secret |
-| PUT | `/apiSecrets/client/{clientId}` | ReadWrite | Update client secret |
-| DELETE | `/apiSecrets/client/{clientId}/{secretValue}` | ReadWrite | Delete secret |
+| PUT | `/apiSecrets/client/{clientId}` | ReadWrite | Update client secret (stored hash in the body) |
+| POST | `/apiSecrets/client/{clientId}/delete` | ReadWrite | Delete secret; body `{ "valueEncrypted": "<stored hash>" }` (AB#8008) |
+| GET | `/apiSecrets/client/{clientId}/{secretValue}` | ReadOnly | **Deprecated** (stored hash in the path), kept for one release; use `…/lookup` |
+| DELETE | `/apiSecrets/client/{clientId}/{secretValue}` | ReadWrite | **Deprecated** (stored hash in the path), kept for one release; use `…/delete` |
 
 The same operations exist as CK methods on the client entity (AB#7780): `System.Identity/Client.AddSecret-1` (result = the generated
 secret, shown once, `sensitive`) and `Client.RemoveSecret-1` (`secretValue` = stored value or clear text). They are hosted only with
@@ -274,10 +276,12 @@ secret, shown once, `sensitive`) and `Client.RemoveSecret-1` (`secretValue` = st
 | Method | Endpoint | Policy | Description |
 |--------|----------|--------|-------------|
 | GET | `/apiSecrets/apiResource/{name}` | ReadOnly | Get resource's secrets |
-| GET | `/apiSecrets/apiResource/{name}/{secretValue}` | ReadOnly | Get specific secret |
+| POST | `/apiSecrets/apiResource/{name}/lookup` | ReadOnly | Get specific secret; body `{ "valueEncrypted": "<stored hash>" }` (AB#8008) |
 | POST | `/apiSecrets/apiResource/{name}` | ReadWrite | Create resource secret |
-| PUT | `/apiSecrets/apiResource/{name}` | ReadWrite | Update resource secret |
-| DELETE | `/apiSecrets/apiResource/{name}/{secretValue}` | ReadWrite | Delete secret |
+| PUT | `/apiSecrets/apiResource/{name}` | ReadWrite | Update resource secret (stored hash in the body) |
+| POST | `/apiSecrets/apiResource/{name}/delete` | ReadWrite | Delete secret; body `{ "valueEncrypted": "<stored hash>" }` (AB#8008) |
+| GET | `/apiSecrets/apiResource/{name}/{secretValue}` | ReadOnly | **Deprecated** (stored hash in the path), kept for one release; use `…/lookup` |
+| DELETE | `/apiSecrets/apiResource/{name}/{secretValue}` | ReadWrite | **Deprecated** (stored hash in the path), kept for one release; use `…/delete` |
 
 **Create (POST)** — the server generates the secret; the request carries only the metadata (AB#6258):
 
@@ -308,8 +312,16 @@ characters) and stored as Base64(SHA-256); stored SHA-256 and SHA-512 hashes kee
 is returned only once, in the creation response; neither it nor a hash is logged. PUT requires
 `valueEncrypted` of an existing secret (400 when missing, 404 when no such secret exists).
 
-**Delete (DELETE)** — `{secretValue}` is the stored hash (`valueEncrypted`), Base64-encoded again for the
-path (what octo-cli `DeleteApiSecretClient` / `DeleteApiSecretApiResource` send). The call removes every
+**Delete (`POST …/delete`)** — the body names the stored hash: `{ "valueEncrypted": "<stored hash>" }` (what
+octo-cli `DeleteApiSecretClient` / `DeleteApiSecretApiResource` send since AB#8008). A POST sub-resource and not a
+DELETE with a body, because a DELETE body has no defined semantics (RFC 9110) and proxies and HTTP client
+libraries may drop it; the API uses POST sub-resources for actions already (`users/{userName}/revokeSessions`).
+The stored hash is a credential-equivalent value: in a URL path it would reach request logs, traces (`url.path`)
+and proxy access logs. `POST …/lookup` reads one secret the same way. The deprecated path variants
+(`DELETE` / `GET …/{secretValue}`, `{secretValue}` = the stored hash, Base64-encoded again) still work for one
+release for older octo-cli/SDK versions; each call writes a WARN `Deprecated API secret request …` naming the
+operation and the client / API resource, never the value, and the value is masked (`***`) in the request log
+and in the trace attribute `url.path`. The call removes every
 stored secret with that hash and answers 200; a deleted client secret no longer authenticates at the token
 endpoint (the cache event `CorsClientsUpdate` is published as for every secret write). It answers 404 when
 the client / API resource or the secret does not exist. No 404 answer echoes the secret value. Every secret write (POST, PUT,

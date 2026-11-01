@@ -77,6 +77,9 @@ try
     builder.Logging.ClearProviders();
     builder.Logging.SetMinimumLevel(LogLevel.Trace);
     builder.Host.UseNLog();
+    // AB#8008: masks credentials that outdated clients still send in request URLs (reset password query parameter,
+    // stored secret value in the deprecated apiSecrets path) in every log line, including the ASP.NET request log.
+    builder.Services.AddCredentialLogRedaction();
 
     // additional providers here needed.
     // allow environment variables to override values from other providers.
