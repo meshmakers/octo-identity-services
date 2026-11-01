@@ -34,6 +34,10 @@ public class TenantTopologyServiceTests
     };
 
     private readonly ISystemContext _systemContext = Substitute.For<ISystemContext>();
+
+    // The system registry (AB#6759): every child row a context lists is registered under that parent unless a test
+    // says otherwise. Read lazily, so rows added inside a test count.
+    private readonly List<OctoTenant> _registry = [];
     private readonly Dictionary<string, ITenantContext> _contexts = new(StringComparer.OrdinalIgnoreCase);
     private readonly IMemoryCache _cache = new MemoryCache(new MemoryCacheOptions());
     private readonly TenantTopologyService _sut;
@@ -41,6 +45,13 @@ public class TenantTopologyServiceTests
     public TenantTopologyServiceTests()
     {
         _systemContext.TenantId.Returns("octosystem");
+        _systemContext.GetAllTenantsAsync(Arg.Any<IOctoAdminSession>(), Arg.Any<int?>(), Arg.Any<int?>())
+            .Returns(_ =>
+            {
+                var all = Substitute.For<IResultSet<OctoTenant>>();
+                all.Items.Returns(_registry.ToArray());
+                return all;
+            });
         foreach (var (tenantId, children) in Hierarchy)
         {
             _contexts[tenantId] = ContextWithChildren(tenantId, children);
@@ -285,6 +296,7 @@ public class TenantTopologyServiceTests
             : Task.FromResult(Substitute.For<IOctoAdminSession>()));
         var children = Substitute.For<IResultSet<OctoTenant>>();
         children.Items.Returns([new OctoTenant("flaky-child", "db", "flaky")]);
+        Register("flaky-child", "flaky", "db");
         flaky.GetChildTenantsAsync(Arg.Any<IOctoAdminSession>(), Arg.Any<int?>(), Arg.Any<int?>()).Returns(children);
         _systemContext.TryFindTenantContextAsync("flaky").Returns(flaky);
 
@@ -302,8 +314,16 @@ public class TenantTopologyServiceTests
         TenantTopologyService.CacheTtl.Should().Be(TenantRegistry.CacheTtl);
     }
 
-    private static ITenantContext ContextWithChildren(string tenantId, string[] children)
+    private ITenantContext ContextWithChildren(string tenantId, string[] children, bool register = true)
     {
+        if (register)
+        {
+            foreach (var child in children)
+            {
+                Register(child, tenantId);
+            }
+        }
+
         var context = Substitute.For<ITenantContext>();
         context.TenantId.Returns(tenantId);
         var session = Substitute.For<IOctoAdminSession>();
@@ -312,5 +332,11 @@ public class TenantTopologyServiceTests
         result.Items.Returns(children.Select(c => new OctoTenant(c, "db-" + c, tenantId)).ToArray());
         context.GetChildTenantsAsync(Arg.Any<IOctoAdminSession>(), Arg.Any<int?>(), Arg.Any<int?>()).Returns(result);
         return context;
+    }
+
+    private void Register(string tenantId, string? parentTenantId, string? databaseName = null)
+    {
+        _registry.RemoveAll(t => string.Equals(t.TenantId, tenantId, StringComparison.OrdinalIgnoreCase));
+        _registry.Add(new OctoTenant(tenantId, databaseName ?? "db-" + tenantId, parentTenantId));
     }
 }

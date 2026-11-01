@@ -41,6 +41,7 @@ Open to every authenticated caller: `GET diagnostics` (the caller's own claims).
 through the system context. Since AB#5859 the target must be the caller's own tenant (`tenant_id` of the
 token) or one of its descendants in the tenant registry; a caller of the system tenant may address every
 tenant (`AdminProvisioningTargetScopeFilter`).
+A descendant counts only when it is registered as such (AB#6759, `TenantSubtreeWalker`): a row in a parent's own registry is followed only when the system registry holds the same tenant id with the same database and names that parent (or no parent, for legacy rows). A stale row left by a delete — or one whose id was later reused by a tenant below another parent — grants nothing and is not walked into. A tenant that lost its system registry row (AB#6941) therefore drops out of its ancestors' scopes until `ReconcileTenantRegistry` restores the row (fail closed).
 Every route with `{targetTenantId}` must carry that filter; `AdminProvisioningRouteCoverageTests` enforces it by reflection and `AdminProvisioningPipelineTests` pins the 201/403 matrix (AB#4824).
 The client mirror actions that name a child tenant (`provisionInTenant?childTenantId=`, `mirrors/{childTenantId}/secret`, `DELETE mirrors/{childTenantId}`) follow the same rule since AB#6758: a child outside the caller's subtree answers `403` with the same response for sibling, unrelated, system and unknown tenants.
 

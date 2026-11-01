@@ -33,11 +33,22 @@ public class TenantDiscoveryScopeTests
     };
 
     private readonly ISystemContext _systemContext = Substitute.For<ISystemContext>();
+
+    // The system registry (AB#6759): every child row a context lists is registered under that parent unless a test
+    // says otherwise. Read lazily, so rows added inside a test count.
+    private readonly List<OctoTenant> _registry = [];
     private readonly TenantDiscoveryService _sut;
 
     public TenantDiscoveryScopeTests()
     {
         _systemContext.TenantId.Returns("octosystem");
+        _systemContext.GetAllTenantsAsync(Arg.Any<IOctoAdminSession>(), Arg.Any<int?>(), Arg.Any<int?>())
+            .Returns(_ =>
+            {
+                var all = Substitute.For<IResultSet<OctoTenant>>();
+                all.Items.Returns(_registry.ToArray());
+                return all;
+            });
         foreach (var (tenantId, children) in Hierarchy)
         {
             // Build the substitute first: NSubstitute (NS4000) forbids configuring a substitute
@@ -133,6 +144,73 @@ public class TenantDiscoveryScopeTests
     }
 
     [Fact]
+    public async Task AStaleChildRow_OfADeletedTenant_IsNotADescendant()
+    {
+        // AB#6759: 'ghost' was deleted from the system tenant; its row stayed in bernkopf's own registry.
+        var bernkopf = ContextWithChildren("bernkopf", ["tecob", "ghost"]);
+        _systemContext.TryFindTenantContextAsync("bernkopf").Returns(bernkopf);
+        _registry.RemoveAll(t => t.TenantId == "ghost");
+
+        var result = await _sut.GetScopeDescendantsAsync("accounting");
+
+        result.Should().NotContain("ghost", "a tenant that no longer exists is nobody's descendant");
+        result.Should().Contain("tecob");
+    }
+
+    [Fact]
+    public async Task AStaleChildRow_WhoseNameWasReusedUnderAnotherParent_GrantsNothing()
+    {
+        // AB#6759: 'reused' was deleted below bernkopf (row stayed) and re-created by somebody else below energyiq,
+        // with its own child. The scope 'accounting' must not reach the new tenant nor anything below it.
+        var bernkopf = ContextWithChildren("bernkopf", ["tecob", "reused"]);
+        _systemContext.TryFindTenantContextAsync("bernkopf").Returns(bernkopf);
+        var energyiq = ContextWithChildren("energyiq", ["reused"]);
+        _systemContext.TryFindTenantContextAsync("energyiq").Returns(energyiq);
+        var reused = ContextWithChildren("reused", ["reused-child"]);
+        _systemContext.TryFindTenantContextAsync("reused").Returns(reused);
+
+        var accounting = await _sut.GetScopeDescendantsAsync("accounting");
+        var owner = await _sut.GetScopeDescendantsAsync("energyiq");
+
+        accounting.Should().NotContain(["reused", "reused-child"],
+            "the registry names energyiq as the parent, the stale row below bernkopf grants nothing");
+        owner.Should().BeEquivalentTo("reused", "reused-child");
+    }
+
+    [Fact]
+    public async Task AChildRow_PointingToAnotherDatabase_IsNotADescendant()
+    {
+        // Same id and parent, but the registered tenant lives in a different database: the row is a leftover of an
+        // earlier tenant of that name, not the registered one.
+        Register("tecob", "bernkopf", "db-tecob-new");
+
+        var result = await _sut.GetScopeDescendantsAsync("bernkopf");
+
+        result.Should().BeEquivalentTo("gastroacker", "bierok", "pureescape");
+    }
+
+    [Fact]
+    public async Task ALegacyRegistryRowWithoutParent_StillCounts()
+    {
+        // Rows written before ParentTenantId existed carry no parent; the database still has to match.
+        Register("tecob", null);
+
+        var result = await _sut.GetScopeDescendantsAsync("bernkopf");
+
+        result.Should().Contain("tecob");
+    }
+
+    [Fact]
+    public async Task AnUnreadableRegistry_YieldsNull()
+    {
+        _systemContext.GetAllTenantsAsync(Arg.Any<IOctoAdminSession>(), Arg.Any<int?>(), Arg.Any<int?>())
+            .Returns(Task.FromException<IResultSet<OctoTenant>>(new InvalidOperationException("db down")));
+
+        (await _sut.GetScopeDescendantsAsync("accounting")).Should().BeNull(
+            "without the registry the walk cannot tell live children from stale rows");
+    }
+
+    [Fact]
     public async Task AFailingChildQuery_YieldsNull()
     {
         var broken = Substitute.For<ITenantContext>();
@@ -142,8 +220,16 @@ public class TenantDiscoveryScopeTests
         (await _sut.GetScopeDescendantsAsync("accounting")).Should().BeNull();
     }
 
-    private static ITenantContext ContextWithChildren(string tenantId, string[] children)
+    private ITenantContext ContextWithChildren(string tenantId, string[] children, bool register = true)
     {
+        if (register)
+        {
+            foreach (var child in children)
+            {
+                Register(child, tenantId);
+            }
+        }
+
         var context = Substitute.For<ITenantContext>();
         context.TenantId.Returns(tenantId);
         var session = Substitute.For<IOctoAdminSession>();
@@ -152,5 +238,11 @@ public class TenantDiscoveryScopeTests
         result.Items.Returns(children.Select(c => new OctoTenant(c, "db-" + c, tenantId)).ToArray());
         context.GetChildTenantsAsync(Arg.Any<IOctoAdminSession>(), Arg.Any<int?>(), Arg.Any<int?>()).Returns(result);
         return context;
+    }
+
+    private void Register(string tenantId, string? parentTenantId, string? databaseName = null)
+    {
+        _registry.RemoveAll(t => string.Equals(t.TenantId, tenantId, StringComparison.OrdinalIgnoreCase));
+        _registry.Add(new OctoTenant(tenantId, databaseName ?? "db-" + tenantId, parentTenantId));
     }
 }
