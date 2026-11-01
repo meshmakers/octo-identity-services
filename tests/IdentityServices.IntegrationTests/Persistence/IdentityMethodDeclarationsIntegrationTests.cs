@@ -38,7 +38,7 @@ public class IdentityMethodDeclarationsIntegrationTests : IClassFixture<Identity
 
     public static TheoryData<string, string[]> DeclaredMethods => new()
     {
-        { "User", ["ChangePassword-1", "ResetPassword-1", "SetRoles-1", "AddRole-1", "RemoveRole-1", "Merge-1", "CreateUser-1"] },
+        { "User", ["ChangePassword-1", "ResetPassword-1", "SetRoles-1", "AddRole-1", "RemoveRole-1", "Merge-1", "DisableTwoFactor-1", "CreateUser-1"] },
         { "Group", ["AddMember-1", "RemoveMember-1", "SetRoles-1"] },
         { "Client", ["AddSecret-1", "RemoveSecret-1"] },
         { "DataPermission", ["GrantToRole-1", "RevokeFromRole-1"] }
@@ -77,7 +77,7 @@ public class IdentityMethodDeclarationsIntegrationTests : IClassFixture<Identity
     public async Task Roles_FollowTheRestParity()
     {
         var user = await GetTypeAsync("User");
-        foreach (var id in new[] { "ResetPassword-1", "SetRoles-1", "AddRole-1", "RemoveRole-1", "Merge-1", "CreateUser-1" })
+        foreach (var id in new[] { "ResetPassword-1", "SetRoles-1", "AddRole-1", "RemoveRole-1", "Merge-1", "DisableTwoFactor-1", "CreateUser-1" })
         {
             user.AllMethods[id].Definition.Authorization!.Roles.Should().BeEquivalentTo([UserManagement], id);
         }

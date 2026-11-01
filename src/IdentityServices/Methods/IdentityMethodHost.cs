@@ -48,6 +48,8 @@ internal static class IdentityMethodHost
             b => b.Handle<UserRemoveRoleHandler>(SystemIdentityCkIds.UserRemoveRoleMethodId)),
         new(SystemIdentityCkIds.UserResetPasswordMethodId, typeof(UserResetPasswordHandler), true,
             b => b.Handle<UserResetPasswordHandler>(SystemIdentityCkIds.UserResetPasswordMethodId)),
+        new(SystemIdentityCkIds.UserDisableTwoFactorMethodId, typeof(UserDisableTwoFactorHandler), false,
+            b => b.Handle<UserDisableTwoFactorHandler>(SystemIdentityCkIds.UserDisableTwoFactorMethodId)),
         // Group and data-permission methods carry no password or secret either (AB#7779).
         new(SystemIdentityCkIds.GroupAddMemberMethodId, typeof(GroupAddMemberHandler), false,
             b => b.Handle<GroupAddMemberHandler>(SystemIdentityCkIds.GroupAddMemberMethodId)),

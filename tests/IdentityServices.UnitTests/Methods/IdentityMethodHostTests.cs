@@ -44,7 +44,8 @@ public class IdentityMethodHostTests
 
         selected.Select(h => h.MethodId).Should().BeEquivalentTo(
             SystemIdentityCkIds.UserSetRolesMethodId, SystemIdentityCkIds.UserAddRoleMethodId,
-            SystemIdentityCkIds.UserRemoveRoleMethodId, SystemIdentityCkIds.GroupAddMemberMethodId,
+            SystemIdentityCkIds.UserRemoveRoleMethodId, SystemIdentityCkIds.UserDisableTwoFactorMethodId,
+            SystemIdentityCkIds.GroupAddMemberMethodId,
             SystemIdentityCkIds.GroupRemoveMemberMethodId, SystemIdentityCkIds.GroupSetRolesMethodId,
             SystemIdentityCkIds.DataPermissionGrantToRoleMethodId, SystemIdentityCkIds.DataPermissionRevokeFromRoleMethodId);
         selected.Should().OnlyContain(h => !h.CarriesSecret);

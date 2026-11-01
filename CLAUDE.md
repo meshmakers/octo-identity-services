@@ -175,7 +175,7 @@ This service depends on Octo framework packages (versioned via `$(OctoVersion)` 
 
 ### Construction Kit (CK) Model
 
-The `Persistence.IdentityCkModel` project uses YAML-based model definitions that are transformed into C# code at build time. Model files are in `src/Persistence.IdentityCkModel/ConstructionKit/`. The model ID is `System.Identity-2.29.0` (ckLanguage 2) with dependency on `System-[2.5,3.0)`. Generated types live in namespace `Persistence.IdentityCkModel.Generated.System.Identity.v2`.
+The `Persistence.IdentityCkModel` project uses YAML-based model definitions that are transformed into C# code at build time. Model files are in `src/Persistence.IdentityCkModel/ConstructionKit/`. The model ID is `System.Identity-2.30.0` (ckLanguage 2) with dependency on `System-[2.5,3.0)`. Generated types live in namespace `Persistence.IdentityCkModel.Generated.System.Identity.v2`.
 
 ### OpenIddict Protocol Stack (Epic AB#4989)
 
@@ -865,7 +865,7 @@ Key components:
 - **`GroupsController`**: REST API at `{tenantId}/v1/groups` with full CRUD, role assignment, member management, and circular group prevention
 - **`TenantOwners`** group: Default group provisioned in every tenant with all 10 default roles. Created by `DefaultConfigurationCreatorService` and `IdentityAssociationMigration` (migration 9→10)
 
-Current identity schema (migration) version: `23` (migration 21→22 added the `RtOAuthAuthorization`/`RtOAuthToken` OpenIddict store types; 22→23 re-runs the full index update so abstract collection roots get their indexes, AB#5261). Current CK model version: `System.Identity-2.29.0` (2.29.0 = the identity method declarations, AB#7773, see below; 2.28.0 = first ckLanguage 2 release with access modifiers, AB#7772, see below; 2.19.0–2.23.0 were ownership/runtime-state classifications, 2.24.0 added `DataPolicy.ProtectBlueprintLocked`, 2.25.0 the `Secret` identity-provider `ClientSecret`, 2.27.0 the `Secret` credential material of a user, see the sections below) — the 2.12.0→2.17.0 changes (verified-identifier directory AB#5122+) are additive schema needing no numeric migration; 2.17.0→2.18.0 REPLACED `RtUser.PreferredChannel` with `RtUser.PreferredChannelBindingId` (AB#5149 revision, binding-specific preference). The feature shipped the day before the replacement with no external consumers, so the old attribute was dropped without a migration — any stored kind-level values are simply ignored (users re-select).
+Current identity schema (migration) version: `23` (migration 21→22 added the `RtOAuthAuthorization`/`RtOAuthToken` OpenIddict store types; 22→23 re-runs the full index update so abstract collection roots get their indexes, AB#5261). Current CK model version: `System.Identity-2.30.0` (2.30.0 = `User.DisableTwoFactor-1`, AB#7879, see below; 2.29.0 = the identity method declarations, AB#7773, see below; 2.28.0 = first ckLanguage 2 release with access modifiers, AB#7772, see below; 2.19.0–2.23.0 were ownership/runtime-state classifications, 2.24.0 added `DataPolicy.ProtectBlueprintLocked`, 2.25.0 the `Secret` identity-provider `ClientSecret`, 2.27.0 the `Secret` credential material of a user, see the sections below) — the 2.12.0→2.17.0 changes (verified-identifier directory AB#5122+) are additive schema needing no numeric migration; 2.17.0→2.18.0 REPLACED `RtUser.PreferredChannel` with `RtUser.PreferredChannelBindingId` (AB#5149 revision, binding-specific preference). The feature shipped the day before the replacement with no external consumers, so the old attribute was dropped without a migration — any stored kind-level values are simply ignored (users re-select).
 
 ### Tenant-owned attributes: a blueprint update never reverts an administrator's decision (AB#6324, AB#6329; System.Identity 2.23.0)
 
@@ -937,7 +937,7 @@ stories are merged.**
 
 | Type | Methods (`-1`) | Roles |
 |------|----------------|-------|
-| `User` | `ChangePassword` (instance, `allowSelf`, no role), `ResetPassword`, `SetRoles`, `AddRole`, `RemoveRole`, `Merge`, static `CreateUser` | `UserManagement` |
+| `User` | `ChangePassword` (instance, `allowSelf`, no role), `ResetPassword`, `SetRoles`, `AddRole`, `RemoveRole`, `Merge`, static `CreateUser`; `DisableTwoFactor` since 2.30.0 (AB#7879) | `UserManagement` |
 | `Group` | `AddMember`, `RemoveMember` (`memberKind` enum `GroupMemberKind` = `User`/`Client`, `memberId`), `SetRoles` | `UserManagement` |
 | `Client` | `AddSecret` (result `sensitive`: the generated secret, shown once), `RemoveSecret` (by `secretValue`, REST parity) | `TenantManagement`, `UserManagement` |
 | `DataPermission` | `GrantToRole`, `RevokeFromRole` | `UserManagement` |
@@ -954,7 +954,7 @@ Rules behind the shape (do not change them without reading this):
   octo-construction-kit-engine: a new method with the flag on an existing type, decision 2026-10-19), and System.Identity 3.0.0 would leave every
   blueprint range `[2.x,3.0)` unsatisfied - decision pending with the platform owner (AB#7773, AB#7777). The generic create of a user is already
   narrowed by the 2.28.0 access modifiers (`UserName`, `Email` MethodOnly, `PasswordHash` Hidden).
-- **No `LAST_ADMIN_PROTECTED`** and no `DisableTwoFactor`: the REST API has no last-admin rule, and `User.DisableTwoFactor` belongs to AB#7879.
+- **No `LAST_ADMIN_PROTECTED`**: the REST API has no last-admin rule (AB#7914 refuses it with `METHOD_FORBIDDEN` / `last-administrator`). `User.DisableTwoFactor-1` followed in 2.30.0 (AB#7879, section below).
 - `compatibility.acknowledge` of 2.28.0 is gone (an acknowledgement is valid for one release, OCTO-CK204). `octo-ckc ValidateVersion`
   against the published 2.28.0: **MINOR** (15 additions, no Major row).
 - Tests: `IdentityMethodDeclarationsIntegrationTests` (compiled model from the CK cache of a real tenant: method set, roles, sensitive
@@ -1896,6 +1896,40 @@ properties: a credential-bearing DTO passed as a message-template argument (`{Dt
 reflected by the JSON layout. Never do that unless an NLog object transformation in
 `LogSecretRedaction` covers the type; log selected non-secret members instead.
 
+### Administrator switches off a user's second factor (AB#7879; System.Identity 2.30.0)
+
+The recovery path of AB#7830 (option a). `IUserTwoFactorAdministrationService` (`Services/UserTwoFactorAdministrationService.cs`, scoped) is
+the one implementation; two transports call it:
+
+| Transport | Caller rule | Answer |
+|---|---|---|
+| CK method `User.DisableTwoFactor-1` (`UserDisableTwoFactorHandler`, one row in `IdentityMethodHost.Handlers`, `CarriesSecret = false`: hosted whatever `EnablePasswordMethods` says) | `IdentityAdminMethodHandlerBase`: scope `octo_api` + `UserManagement` on the validated principal, `METHOD_FORBIDDEN` / `role-required` before the target is read | success; `METHOD_TARGET_NOT_FOUND`; `METHOD_HANDLER_FAILED` when a write or the revocation fails |
+| REST `POST {tenant}/v1/users/{userName}/disableTwoFactor` | `IdentityUserAdministrationWritePolicy` | `200 { twoFactorWasEnabled }`, 404 unknown user |
+
+Effect, in this order, all through `UserManager` (guarded, versioned store writes of AB#7908, never the entity): remove the authenticator
+key and the recovery codes (`[AspNetUserStore]` tokens `AuthenticatorKey`, `RecoveryCodes`), `TwoFactorEnabled = false`, then
+`IUserCredentialChangeService.OnSecondFactorDisabledAsync` (the AB#7765 helper: security stamp, revocation of every refresh token and
+authorization of the user in this tenant, one `Information` audit line `Second factor switched off by an administrator: tenant, subject,
+acting user, path (AdminRest|MethodDisableTwoFactor), two-factor was enabled`). Idempotent (a user without 2FA gets the same treatment).
+Any failure throws: never a success while the key or old refresh tokens survive. The method writes the `Identity.Method` event with the
+extra detail `twoFactorWasEnabled`. No key, code or token value is logged or audited. The user's own `POST api/manage/2fa/disable`
+(with a verification code) is unchanged. No self rule: an administrator may switch off their own second factor (the REST endpoint never
+had one either). Tests: `Api/Methods/UserDisableTwoFactorMethodTests` (method and REST on real MongoDB: end to end with sign-in by password
+and a new enrolment over HTTP, idempotent, service token, caller theory for existing and missing target, unknown target, failing revocation,
+forged caller, REST 404/403, no authenticator material in audit or logs).
+
+### Identity-owned User fields are refused on the generic paths (AB#8042)
+
+Since AB#8042 the engine refuses generic writes of the identity-owned User fields and identity associations
+(`IdentityOwnedWrites` in octo-construction-kit-engine, enforced by asset-repo GraphQL create/update/query-row update and by the caller
+path of `ImportRt`): `NormalizedUserName`, `NormalizedEmail`, `EmailConfirmed`, `PhoneNumberConfirmed`, `TwoFactorEnabled`,
+`LockoutEnabled`, `ResetPasswordOnLogin`, `Claims` (`UserClaims`), `UserLogins`, `PreferredChannelBindingId` and the associations
+`AssignedRole`, `GroupMember`, `ChildGroup`, `MayActAs`, `GrantsPermission`. It is a runtime list, not CK `access`: tightening attributes
+that were never `securitySensitive` in 2.x is a Major (row T7, AB#6585), so the list moves into the model's `access` with the next
+System.Identity major, together with AB#7777. **Nothing in this service is affected**: every identity write (stores, REST, methods,
+provisioning, migrations, the bus consumer's `MayActAs`/`AssignedRole` edges, the preferred-channel self-service) goes through
+`ITenantRepository`, which the guard does not touch, and the Bootstrap seed (TenantOwners `AssignedRole` edges) is a system import.
+
 ### Administrator revokes all sessions of a user (AB#7899)
 
 `POST {tenant}/v1/users/{userName}/revokeSessions` and the bulk `POST {tenant}/v1/users/revokeSessions?scope=shadowUsers`
@@ -1936,7 +1970,8 @@ only) and issues no cookie. A wrong password follows the normal failure path (lo
 confirm the password). The login UI shows the translated text (`LOGIN.ERROR_SECOND_FACTOR_SETUP_REQUIRED`).
 *Usable* means an authenticator key only: the confirmed-e-mail provider is valid for ASP.NET Identity but its code is
 not delivered (tracked as its own bug), recovery codes only work after a challenge. Recovery: an admin switches
-`TwoFactorEnabled` off for the user; the user signs in and enrols again. The cross-tenant password login refuses the
+the second factor off with `User.DisableTwoFactor-1` or `POST {tenant}/v1/users/{userName}/disableTwoFactor` (AB#7879, section
+below; since AB#8042 a generic GraphQL/ImportRt write of `TwoFactorEnabled` is refused); the user signs in and enrols again. The cross-tenant password login refuses the
 same state on top of AB#7804: when `ICrossTenantSecondFactorVerifier.GetOptionsAsync` reports
 `CanUseAuthenticator = false` for the source user, `Login` answers `secondFactorSetupRequired` instead of issuing
 a challenge. Tests: `Api/Auth/TwoFactorUnusableLoginTests` (with and without confirmed e-mail, wrong password,

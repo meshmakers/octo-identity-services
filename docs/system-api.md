@@ -68,6 +68,7 @@ required role follows from the table above.
 | POST | `/users` | ReadWrite | Create new user |
 | POST | `/users/ResetPassword` | ReadWrite | Reset user password; body `{ "userName": "…", "password": "…" }`. The former query form (`?userName=…&password=…`) is refused with `400` and an update hint (AB#8008): a password never travels in a URL |
 | POST | `/users/{userName}/revokeSessions` | ReadWrite | Revoke all sessions and tokens of a user (AB#7899) |
+| POST | `/users/{userName}/disableTwoFactor` | ReadWrite | Switch off the user's second factor: authenticator key and recovery codes removed, security stamp rotated, refresh tokens revoked; `200 { twoFactorWasEnabled }` (AB#7879, same as the method `User.DisableTwoFactor-1`) |
 | POST | `/users/revokeSessions?scope=shadowUsers&dryRun=true` | ReadWrite | Same for all xt_* shadow users of the tenant; dry run by default (AB#7899) |
 | PUT | `/users/{userName}` | ReadWrite | Update user |
 | PUT | `/users/{userName}/roles` | ReadWrite | Replace user's direct role assignments |
