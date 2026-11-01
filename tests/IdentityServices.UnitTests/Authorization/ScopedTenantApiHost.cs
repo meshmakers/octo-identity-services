@@ -102,6 +102,9 @@ internal sealed class ScopedTenantApiHost : IAsyncDisposable
         services.AddSingleton<ILogger<IdentityApiRoleAuthorizationHandler>>(policyLog);
         services.AddSingleton(systemContext);
         services.AddSingleton(Substitute.For<IDynamicAuthSchemeService>());
+        // AB#8017: the controller resolves shadow-user callers to their home identity.
+        services.AddScoped<IdentityServerPersistence.Services.ICrossTenantShadowUserChainResolver>(_ =>
+            new IdentityServerPersistence.Services.CrossTenantShadowUserChainResolver(systemContext));
         services.AddSingleton(Substitute.For<IdentityServerPersistence.SystemStores.IOctoClientStore>());
         services.AddSingleton(Substitute.For<IClientMirrorProvisioningService>());
 

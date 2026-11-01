@@ -173,6 +173,7 @@ public class DuplicateExternalTenantUserMappingIntegrationTests : IClassFixture<
         var ctx = await ArrangeWithDuplicateAsync(duplicate: false);
         var controller = new AdminProvisioningController(
             _fixture.GetSystemContext(), new NoOpAuthSchemeService(),
+            new CrossTenantShadowUserChainResolver(_fixture.GetSystemContext()),
             NullLogger<AdminProvisioningController>.Instance);
 
         var result = await controller.Create(ctx.ChildTenantId, new CreateExternalTenantUserMappingDto
@@ -193,6 +194,7 @@ public class DuplicateExternalTenantUserMappingIntegrationTests : IClassFixture<
         var ctx = await ArrangeWithDuplicateAsync(duplicate: false);
         var controller = new AdminProvisioningController(
             _fixture.GetSystemContext(), new NoOpAuthSchemeService(),
+            new CrossTenantShadowUserChainResolver(_fixture.GetSystemContext()),
             NullLogger<AdminProvisioningController>.Instance);
 
         var result = await controller.CreateWithGroups(ctx.ChildTenantId, new CreateExternalTenantUserGroupMappingDto
@@ -213,6 +215,7 @@ public class DuplicateExternalTenantUserMappingIntegrationTests : IClassFixture<
         var ctx = await ArrangeWithDuplicateAsync(duplicate: false);
         var controller = new AdminProvisioningController(
             _fixture.GetSystemContext(), new NoOpAuthSchemeService(),
+            new CrossTenantShadowUserChainResolver(_fixture.GetSystemContext()),
             NullLogger<AdminProvisioningController>.Instance);
 
         var result = await controller.Create(ctx.ChildTenantId, new CreateExternalTenantUserMappingDto

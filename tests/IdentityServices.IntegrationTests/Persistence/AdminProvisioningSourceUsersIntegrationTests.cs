@@ -189,6 +189,7 @@ public class AdminProvisioningSourceUsersIntegrationTests : IClassFixture<Identi
 
     private AdminProvisioningController CreateController(ISystemContext systemContext)
         => new(systemContext, new NoOpAuthSchemeService(),
+            new CrossTenantShadowUserChainResolver(systemContext),
             NullLogger<AdminProvisioningController>.Instance);
 
     private static async Task<List<ProvisioningSourceUserDto>> OkValue(

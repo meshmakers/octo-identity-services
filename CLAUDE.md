@@ -792,6 +792,26 @@ This solves the chicken-and-egg problem: after creating a child tenant, the user
 | `POST` | `/{targetTenantId}/provisionCurrentUser` | Auto-provision current user with all roles |
 | `DELETE` | `/{targetTenantId}/{mappingRtId}` | Delete a mapping in target tenant |
 
+**`provisionCurrentUser` from a shadow user (AB#8017):** when the calling token's subject is a cross-tenant
+shadow user (`xt_…`, e.g. a session or octo-cli context scoped to an intermediate tenant A that provisions into
+grandchild B), the mapping is written for the caller's **home identity** — the root of its `xt_` chain
+(`ICrossTenantShadowUserChainResolver.GetSourceChainAsync`, last tier), looked up by name in the home tenant — not
+for the shadow user. Before, the mapping was keyed on (A, shadow); the exchange from the home token (what MCP and
+octo-cli do for every later call) never finds such a mapping (`ResolveExchangeSourceAsync` only tries the subject
+and its home, `GroupRoleResolver` only the B shadow's chain), so the call answered success and the user stayed
+`tenant_not_provisioned`. One home mapping serves both paths: from the home token directly, and from the A shadow
+(dual-candidate rule AB#4966). The exchange was deliberately **not** widened to ancestor shadow mappings. The
+caller's name is taken from the user stored in its tenant (the token claim only when the user cannot be read). A
+shadow whose chain is ambiguous or broken, whose home tenant is unregistered, whose home user does not exist or
+whose home tenant is the target itself is refused with **409** (`ProblemDetails`, names the caller and says to
+provision from the home tenant) and nothing is written — fail closed. The `OctoTenantIdentityProvider` is ensured
+for the mapping's source tenant (the home tenant), as for a call from the home tenant. Old shadow-keyed mappings
+stay (no migration); `provisionCurrentUser` from the home tenant adds the home mapping and repairs the exchange.
+The response body (`SourceTenantId`/`SourceUserId`/`SourceUserName`) names the identity the mapping was written
+for. Tests: `TenantExchangeIntegrationTests` (`ProvisionCurrentUser_AsShadowUserOfIntermediateTenant_…`,
+`…_FromHomeTenant_RepairsTheStateOfAShadowKeyedMapping`, `…_ShadowUserWithoutResolvableHome_…`,
+`…_ShadowUserOfAnUnregisteredTenant_IsRefused`), over the real `TenantExchangeProcessor.ExchangeAsync` for R → A → B.
+
 The `sourceUsers` endpoint resolves the target's ancestor chain by walking
 `RtOctoTenantIdentityProvider.ParentTenantId` (breadth-first, cycle-safe) and searches each ancestor's
 `RtUser` by username OR email (case-insensitive substring), excluding `xt_` shadow users. It exists
