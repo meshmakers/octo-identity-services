@@ -926,7 +926,10 @@ caller's tenant is an ancestor of the target; it grants no role. The roles of th
 of the B-shadow user in B: an explicit `ExternalTenantUserMapping` (roles or groups), a group membership
 or a direct role. For an operator this means **`octo-cli ProvisionCurrentUser -ttid {child}` once per child
 tenant, also for newly created tenants**; there is no implicit admin role for ancestor users (decision
-2026-10-17). A caller that is an ancestor user but holds no role in the target is refused at the exchange:
+2026-10-17). Nested tenants work the same way from any context of the operator: when `ProvisionCurrentUser`
+runs with a token of an intermediate tenant (subject = shadow `xt_…`), identity writes the mapping for the
+operator's home identity, so the exchange from the home token and from the intermediate tenant both succeed
+(AB#8017). A caller that is an ancestor user but holds no role in the target is refused at the exchange:
 
 ```
 HTTP 403

@@ -4,6 +4,7 @@ using System.Security.Claims;
 using Asp.Versioning;
 using Duende.IdentityModel;
 using IdentityServerPersistence;
+using IdentityServerPersistence.Services;
 using IdentityServerPersistence.SystemStores;
 using Meshmakers.Octo.Backend.Authentication.DynamicAuth;
 using Meshmakers.Octo.Communication.Contracts;
@@ -37,6 +38,7 @@ namespace Meshmakers.Octo.Backend.IdentityServices.TenantApi.v1.Controllers;
 public class AdminProvisioningController(
     ISystemContext systemContext,
     IDynamicAuthSchemeService dynamicAuthSchemeService,
+    ICrossTenantShadowUserChainResolver shadowUserChainResolver,
     ILogger<AdminProvisioningController> logger) : ControllerBase
 {
     /// <summary>
@@ -173,6 +175,15 @@ public class AdminProvisioningController(
     /// (AB#7088): 201 + <c>X-Provisioning-Outcome: created</c> for a new mapping; 200 + <c>repaired</c> when a
     /// mapping existed but granted no effective role or carried a wrong user name; 200 +
     /// <c>already-provisioned</c> when nothing needed to change.
+    /// <para>
+    /// AB#8017: when the caller is a cross-tenant shadow user (<c>xt_…</c>, e.g. a session scoped to an
+    /// intermediate tenant A that provisions into grandchild B), the mapping is written for the caller's
+    /// <b>home identity</b> — the root of its <c>xt_</c> chain — not for the shadow user. The token exchange
+    /// accepts a home mapping for every path of the same person (from the home tenant directly and from the
+    /// shadow in A), while a shadow-keyed mapping is never found by an exchange from the home token. A shadow
+    /// user whose home identity cannot be resolved is refused with 409 and nothing is written (fail closed).
+    /// The response body names the identity the mapping was written for.
+    /// </para>
     /// </summary>
     [HttpPost("provisionCurrentUser")]
     [Authorize(IdentityServiceConstants.IdentityTenantAdministrationWritePolicy)]
@@ -181,6 +192,7 @@ public class AdminProvisioningController(
     [ProducesResponseType(typeof(ExternalTenantUserMappingDto), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status409Conflict)]
     public async Task<ActionResult<ExternalTenantUserMappingDto>> ProvisionCurrentUser(
         [Required] string targetTenantId)
     {
@@ -208,25 +220,41 @@ public class AdminProvisioningController(
         }
 
         // Access tokens typically don't include profile claims (name, preferred_username).
-        // Try claims first, then fall back to looking up the user from the source tenant.
-        var userName = HttpContext.User.FindFirstValue(JwtClaimTypes.PreferredUserName)
-                       ?? HttpContext.User.FindFirstValue(JwtClaimTypes.Name)
-                       ?? HttpContext.User.FindFirstValue(ClaimTypes.Name);
+        // Try claims first, then fall back to the user stored in the source tenant.
+        var claimUserName = HttpContext.User.FindFirstValue(JwtClaimTypes.PreferredUserName)
+                            ?? HttpContext.User.FindFirstValue(JwtClaimTypes.Name)
+                            ?? HttpContext.User.FindFirstValue(ClaimTypes.Name);
+        var storedUserName = await FindUserNameByIdAsync(tenantId, userId);
+        var userName = !string.IsNullOrEmpty(claimUserName) ? claimUserName : storedUserName ?? userId;
 
-        if (string.IsNullOrEmpty(userName))
+        // AB#8017: a shadow user (session scoped to an intermediate tenant) is provisioned as its home identity.
+        // The stored name is authoritative; the claim only counts when the user cannot be read.
+        var callerName = storedUserName ?? claimUserName;
+        if (CrossTenantShadowUserName.IsShadowUserName(callerName))
         {
-            var sourceTenantRepository = await systemContext.TryFindTenantRepositoryAsync(tenantId);
-            if (sourceTenantRepository != null)
+            var home = await ResolveHomeIdentityAsync(callerName!);
+            if (home == null || string.Equals(home.Value.TenantId, targetTenantId, StringComparison.OrdinalIgnoreCase))
             {
-                var sourceSession = await sourceTenantRepository.GetSessionAsync();
-                var user = await sourceTenantRepository
-                    .GetRtEntityByRtIdAsync<RtUser>(sourceSession, new OctoObjectId(userId));
-                userName = user?.UserName ?? userId;
+                logger.LogWarning(
+                    "ProvisionCurrentUser refused: caller '{CallerUserName}' of tenant '{CallerTenantId}' is a cross-tenant shadow user whose home identity could not be resolved (target tenant '{TargetTenantId}')",
+                    callerName, tenantId, targetTenantId);
+                return Conflict(new ProblemDetails
+                {
+                    Status = StatusCodes.Status409Conflict,
+                    Title = "Home identity of the cross-tenant user could not be resolved",
+                    Detail = $"The caller '{callerName}' of tenant '{tenantId}' is a cross-tenant shadow user whose " +
+                             "home identity could not be resolved, so no mapping was written. Sign in to the home " +
+                             $"tenant of the user and run provisionCurrentUser for '{targetTenantId}' from there."
+                });
             }
-            else
-            {
-                userName = userId;
-            }
+
+            logger.LogInformation(
+                "ProvisionCurrentUser: caller '{CallerUserName}' of tenant '{CallerTenantId}' is a cross-tenant shadow user; provisioning its home identity '{HomeUserName}' ({HomeUserId}) of tenant '{HomeTenantId}' into tenant '{TargetTenantId}'",
+                callerName, tenantId, home.Value.UserName, home.Value.UserId, home.Value.TenantId, targetTenantId);
+
+            tenantId = home.Value.TenantId;
+            userId = home.Value.UserId;
+            userName = home.Value.UserName;
         }
 
         // The target tenant may still be initializing (CK model import + default-configuration
@@ -263,6 +291,67 @@ public class AdminProvisioningController(
         // a terminal return.
         return StatusCode(StatusCodes.Status503ServiceUnavailable,
             $"Tenant '{targetTenantId}' is still initializing. Please try again shortly.");
+    }
+
+    /// <summary>The user name stored for <paramref name="userId" /> in <paramref name="tenantId" />, or <c>null</c>.</summary>
+    private async Task<string?> FindUserNameByIdAsync(string tenantId, string userId)
+    {
+        if (!OctoObjectId.TryParse(userId, out var userRtId))
+        {
+            return null;
+        }
+
+        var repository = await systemContext.TryFindTenantRepositoryAsync(tenantId);
+        if (repository == null)
+        {
+            return null;
+        }
+
+        using var session = await repository.GetSessionAsync();
+        session.StartTransaction();
+        var user = await repository.GetRtEntityByRtIdAsync<RtUser>(session, userRtId);
+        await session.CommitTransactionAsync();
+        return user?.UserName;
+    }
+
+    /// <summary>
+    /// AB#8017: unwinds a shadow user name (<c>xt_{tenant}_{user}</c>, possibly nested) against the tenant
+    /// registry to the root identity and looks that user up in its tenant. Returns <c>null</c> — fail closed —
+    /// when the chain is ambiguous or broken (the last tier is still a shadow name), the home tenant is not
+    /// registered or the home user does not exist.
+    /// </summary>
+    private async Task<(string TenantId, string UserId, string UserName)?> ResolveHomeIdentityAsync(
+        string shadowUserName)
+    {
+        var chain = await shadowUserChainResolver.GetSourceChainAsync(shadowUserName);
+        if (chain.Count == 0)
+        {
+            return null;
+        }
+
+        var (homeTenantId, homeUserName) = chain[^1];
+        if (CrossTenantShadowUserName.IsShadowUserName(homeUserName))
+        {
+            return null;
+        }
+
+        var repository = await systemContext.TryFindTenantRepositoryAsync(homeTenantId);
+        if (repository == null)
+        {
+            return null;
+        }
+
+        using var session = await repository.GetSessionAsync();
+        session.StartTransaction();
+        var result = await repository.GetRtEntitiesByTypeAsync<RtUser>(session,
+            RtEntityQueryOptions.Create()
+                .FieldEquals(nameof(RtUser.NormalizedUserName), homeUserName.ToUpperInvariant()));
+        await session.CommitTransactionAsync();
+
+        var homeUser = result.Items.FirstOrDefault();
+        return homeUser == null
+            ? null
+            : (homeTenantId, homeUser.RtId.ToString(), homeUser.UserName ?? homeUserName);
     }
 
     /// <summary>
