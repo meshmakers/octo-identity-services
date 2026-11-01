@@ -139,6 +139,20 @@ public class OctoUserManagerPasswordWriteTests
     }
 
     [Fact]
+    public async Task FailingStoreWrite_AfterTheRevocation_KeepsTheSessionsEnded_AndReportsTheFailure()
+    {
+        // Accepted (review finding on #234): the revocation must come before the write for crash safety, so a write
+        // refused by the store (concurrent user write, user validator) ends the sessions without changing the password.
+        _store.UpdateAsync(_user, Arg.Any<CancellationToken>())
+            .Returns(IdentityResult.Failed(new IdentityErrorDescriber().ConcurrencyFailure()));
+
+        var result = await CreateManager(_revocation).ChangePasswordAsync(_user, OldPassword, NewPassword);
+
+        result.Errors.Select(e => e.Code).Should().Equal(nameof(IdentityErrorDescriber.ConcurrencyFailure));
+        await _revocation.Received(1).RevokeAllAsync(_user.RtId.ToString(), Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
     public async Task WithoutARevocation_AManagerForAnotherTenantStillWritesThePassword()
     {
         // The manager of CrossTenantSecondFactorVerifier is built without one (it never writes passwords).

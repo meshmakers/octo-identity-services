@@ -2062,7 +2062,9 @@ stop between the password write and the helper above left old refresh tokens red
 `ChangePasswordAsync`, `ResetPasswordAsync` and `AddPasswordAsync` (bodies follow the framework step by step) and calls
 `IUserTokenRevocation.RevokeAllAsync` (`IdentityServerPersistence/Services/UserTokenRevocation.cs`, registered in `Program.cs`,
 optional constructor parameter of the manager) between the in-memory hash update and `UpdateUserAsync`: only after the current
-password / reset token was verified and the policy passed, so a refused or forged request revokes nothing. A failing revocation
+password / reset token was verified and the policy passed, so a request refused before the write (or a forged one) revokes
+nothing; a store write that fails after the revocation (`ConcurrencyFailure`, a user validator) keeps the old password with the
+sessions ended (accepted, safe direction; review finding on #234). A failing revocation
 throws before the password is stored. `UserCredentialChangeService` uses the same `IUserTokenRevocation` for the second
 revocation. 🔴 A new password write must go through these `UserManager` methods (or call `IUserTokenRevocation` before its own
 write); the manager built by `CrossTenantSecondFactorVerifier` has no revocation and must never write a password. Tests:

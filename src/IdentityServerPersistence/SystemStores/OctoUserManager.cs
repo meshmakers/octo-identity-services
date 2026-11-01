@@ -28,8 +28,10 @@ namespace IdentityServerPersistence.SystemStores;
 ///         password accepted by the policy). The callers revoke once more after the write
 ///         (<c>IUserCredentialChangeService.OnPasswordChangedAsync</c>). The token store and the user store are separate
 ///         writes without a shared transaction, so a crash between the password write and the revocation after it used to
-///         leave old refresh tokens redeemable; now they are already revoked when the password changes. A failed request
-///         (wrong current password, invalid reset token, policy violation) revokes nothing. The bodies follow the framework
+///         leave old refresh tokens redeemable; now they are already revoked when the password changes. A request refused
+///         before the write (wrong current password, invalid reset token, policy violation) revokes nothing. A store write
+///         that fails after the revocation (<c>ConcurrencyFailure</c>, a user validator) leaves the password unchanged with the
+///         sessions ended; the user signs in again (the safe direction). The bodies follow the framework
 ///         implementation step by step, with the revocation between the in-memory hash update and the store write.
 ///     </para>
 /// </remarks>
@@ -131,7 +133,8 @@ public class OctoUserManager(
 
     /// <summary>
     ///     Validates and sets the new hash (and security stamp) on the instance, revokes the user's tokens, then stores the
-    ///     user. A revocation failure throws before anything is stored.
+    ///     user. A revocation failure throws before anything is stored; a failed store write after the revocation keeps
+    ///     the old password and leaves the sessions ended.
     /// </summary>
     private async Task<IdentityResult> WritePasswordAsync(RtUser user, string newPassword)
     {

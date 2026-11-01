@@ -213,8 +213,10 @@ only `CanSignIn`, not the security stamp). `OctoUserManager` therefore revokes t
 request is known to be valid (current password or reset token verified, new password accepted by the policy); the
 helper above revokes once more after the write. A stop between the two writes leaves no token that existed before the
 change; the residual window is a sign-in with the old password in the milliseconds between the first revocation and
-the password write. A refused request (wrong current password, invalid or forged reset token, policy violation)
-revokes nothing, so nobody can end another user's sessions with a bogus reset token. If the first revocation fails,
+the password write. A request refused before the write (wrong current password, invalid or forged reset token, policy
+violation) revokes nothing, so nobody can end another user's sessions with a bogus reset token. If the store write
+itself fails after the first revocation (`ConcurrencyFailure` of a concurrent user write, a user validator), the old
+password stays and the sessions stay ended; the user signs in again. If the first revocation fails,
 nothing is stored and the request fails. One transaction over both stores was not chosen: each store opens its own
 session, and sharing one would mean an ambient session through the user store and both OpenIddict stores (decision
 OD-6: ordering/compensation, no outbox).
