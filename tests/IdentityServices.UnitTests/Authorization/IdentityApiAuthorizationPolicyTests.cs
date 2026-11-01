@@ -275,6 +275,16 @@ public class IdentityApiAuthorizationPolicyTests
             IdentityServiceConstants.IdentityUserDirectoryReadPolicy
     };
 
+    // Read-only actions that are POST only because their key is a credential-equivalent value that must not travel in the
+    // URL (AB#8008: the stored secret hash in the body instead of the path), each pinned to its read policy.
+    private static readonly Dictionary<string, string> ReadOnlyPostAllowList = new()
+    {
+        [$"{nameof(ApiSecretsController)}.{nameof(ApiSecretsController.LookupClientSecret)}"] =
+            IdentityServiceConstants.IdentityTenantAdministrationReadPolicy,
+        [$"{nameof(ApiSecretsController)}.{nameof(ApiSecretsController.LookupApiResourceSecret)}"] =
+            IdentityServiceConstants.IdentityTenantAdministrationReadPolicy
+    };
+
     private static readonly string[] RoleBasedPolicies =
     [
         IdentityServiceConstants.IdentityUserAdministrationReadPolicy,
@@ -352,6 +362,14 @@ public class IdentityApiAuthorizationPolicyTests
             policy.Should().NotBeNull($"{action} must declare an authorization policy");
             RoleBasedPolicies.Should().Contain(policy!,
                 $"{action} must require a tenant role (AB#5859), not only a scope");
+
+            if (ReadOnlyPostAllowList.TryGetValue(action, out var readPolicy))
+            {
+                policy.Should().Be(readPolicy, $"{action} is allow-listed as a read-only POST for exactly this policy");
+                method.GetCustomAttributes<HttpMethodAttribute>().SelectMany(a => a.HttpMethods)
+                    .Should().OnlyContain(m => m == "POST", $"{action} is allow-listed as a read-only POST");
+                continue;
+            }
 
             var isRead = method.GetCustomAttributes<HttpMethodAttribute>()
                 .All(a => a.HttpMethods.All(m => m == "GET"));

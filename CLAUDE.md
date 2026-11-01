@@ -876,8 +876,11 @@ recovery codes in `Value`) were `SeedOwned`, so an `ExportRt` (export as templat
 (assignment override). The engine skips `Secret` in `RtEntityToTcDtoConverter` (shared by `ExportRtModelByQueryCommand` and
 `ExportRtModelByDeepGraphCommand`) and keeps it on an Upsert. SeedOwned -> Secret is an ownership change: `octo-ckc ValidateVersion`
 rates it **Minor**, ids, types and defaults are unchanged, no migration entry, still ckLanguage 1 (the access modifiers followed with 2.28.0, below).
-**Consequence:** a tenant cloned with ExportRt/ImportRt carries its users without password and 2FA material; they reset the password
-in the target tenant. No blueprint seeds `System.Identity/User` (`BootstrapBlueprintSeed_DoesNotSeedUsers` guards it). A repository
+**Consequence (only up to 2.27.0):** a tenant cloned with ExportRt/ImportRt under 2.27.0 carried its users without password and 2FA
+material; they reset the password in the target tenant. **Since 2.28.0 `ImportRt` refuses users altogether** — there is no user
+export/import any more; the supported ways are listed in octo-documentation `technologyGuide/identityService/users-and-roles.md`
+§ *Moving Users to Another Tenant* (`#moving-users-to-another-tenant`): repository dump/restore, creating the users again, a
+cross-tenant user mapping, external sign-in with self-registration. No blueprint seeds `System.Identity/User` (`BootstrapBlueprintSeed_DoesNotSeedUsers` guards it). A repository
 dump is unaffected. Tests: `CredentialMaterialExportIntegrationTests` (real MongoDB; compiled ownership, converter output of a user
 with hash/stamp/tokens, Upsert of a seed-shaped user keeps all three).
 
@@ -1126,7 +1129,7 @@ without the current one.
   `SetLockoutEndDateAsync(user, null)` + `ResetAccessFailedCountAsync(user)` through `UserManager` (guarded, versioned store write of AB#7908; never write the user
   entity directly), then `IUserCredentialChangeService.OnPasswordChangedAsync(..., PasswordChangePath.MethodResetPassword, <caller user name>)` (security
   stamp, revocation of refresh tokens and authorizations; throws on failure = `METHOD_HANDLER_FAILED`).
-- **REST difference** (`UsersController.ResetPassword`, unchanged): REST does **not** lift the lockout and e-mails a second reset token; the method lifts
+- **REST difference** (`UsersController.ResetPassword`; since AB#8008 body-only, see "No credential values in request URLs"): REST does **not** lift the lockout and e-mails a second reset token; the method lifts
   the lockout and sends **no** e-mail (AB#7775 adds the notification).
 - **Audit.** `IdentityMethodAuditWriter.RecordAsync(..., extraDetails)`: one `Identity.Method` event per call in a `finally` (success, every failure, and an
   exception as `METHOD_HANDLER_FAILED`), details as `ChangePassword` plus `lockoutLifted` (`true` only when the user was locked out at call time and the call succeeded).
@@ -1216,6 +1219,44 @@ these endpoints. API resource secrets authenticate nothing since the OpenIddict 
 test. Tests: `ApiSecretsControllerTests` (`DeleteClientSecret_*` with the token endpoint, `DeleteApiResourceSecret_*`, unknown secret / owner,
 403, PUT of an API resource secret persisted, no hash in the logs at the deployed levels, `ConcurrentSecretWrites_*`: four deletes and six creates at
 once lose nothing and bring nothing back, red with the unversioned write).
+
+### No credential values in request URLs (AB#8008, Security)
+
+Found in the AB#7765 verification: the admin reset took the new password as a query parameter, and the ASP.NET Core request
+log (INFO, `Microsoft.AspNetCore.Hosting.Diagnostics`) plus the TRACE argument log of `ControllerActionInvoker` wrote it into
+the log file; ingress access logs and traces would capture such URLs too. The REST secret delete/get carried the stored hash
+in the path. Decided by Gerald 2026-11-01:
+
+- **Admin reset** `POST {tenant}/v1/users/ResetPassword`: body `ResetUserPasswordRequestDto { userName, password }` only.
+  `[RefuseCredentialInQuery("password")]` (resource filter, `TenantApi/v1/Controllers/RefuseCredentialInQueryAttribute.cs`,
+  the single place of the refusal) answers `400` problem details with an update hint when the query carries `password` - after
+  authorization (an unauthorized caller still gets 401/403), before model binding, so the action and its TRACE argument log
+  never run. Hard refusal, no fallback: octo-cli, the SDK (`IdentityServicesClient.ResetPassword`) and Refinery Studio
+  (`@meshmakers/octo-services` `IdentityService.resetPassword`) send the body since AB#8008; release identity only together with
+  or after them.
+- **Audit actor:** `UsersController.ResetPassword` passes `AuditActor.FromPrincipal(User).Actor` (user name, else `client <id>`),
+  not `User.Identity?.Name` (always null under `MapInboundClaims = false`, hence the former `(anonymous reset token)`).
+- **Secrets:** `POST apiSecrets/{client|apiResource}/{id}/delete` and `.../lookup` with body `ApiSecretValueRequestDto { valueEncrypted }`
+  (POST sub-resource, not DELETE with a body: no defined DELETE body semantics, proxies/clients may drop it, the API already uses POST
+  action sub-resources). The path variants `DELETE`/`GET .../{secretValue}` stay **for one release** (removal is the follow-up of
+  AB#8008); they no longer bind the value as an action argument (read from `RouteData` in `TakeLegacySecretValue`, the single place
+  of the deprecated path), log one WARN `Deprecated API secret request: {Operation} for {OwnerKind} '{Owner}' ...` without the
+  value, and overwrite the trace tag `url.path` with the masked path. `PUT` already carried the hash in the body.
+- **Log redaction:** `Logging/CredentialLogRedaction.cs` - `AddCredentialLogRedaction()` (Program.cs, after `UseNLog()`) replaces the
+  `ILoggerFactory` with a decorator whose loggers mask, in the structured values (`string`, `PathString`, `QueryString`, `Uri`) of every
+  log line, the query parameters `password|newPassword|secret|secretValue|clientSecret` and the value segment of
+  `/apiSecrets/{client|apiResource}/{id}/{value}` (not the `delete`/`lookup` action segments) with `***`; `{OriginalFormat}` is kept, so
+  NLog renders the template with the masked values. A factory decorator, not a provider decorator: provider-specific filter rules keep
+  working and providers added later (test hosts, `AddProvider`) are covered. A line without a match passes unchanged (same state
+  instance). OpenTelemetry's ASP.NET Core instrumentation already redacts query values (`url.query`).
+- Request DTOs are classes with a `ToString()` that never prints the value (a record's generated `ToString()` would print the password into
+  the TRACE argument log).
+- **Tests:** `Api/TenantApi/CredentialsNotInUrlTests` (a host logging everything at TRACE into a capturing provider: body reset works and
+  the password is in no line; query reset 400 with hint, nothing changed, `password=***` in the request log; body + query refused; 403 before
+  the hint for a caller without the role; audit `acting user 'client <id>'` and user name; secret lookup/delete by body for client and API
+  resource with neither hash nor Base64 hash in any line and no deprecation WARN; body without value 400; reader 403; deprecated path variants
+  work, WARN twice without value, path masked), `Logging/CredentialLogRedactionTests` (patterns, decorator, later providers, the real
+  `nlog.config` JSON record), and the AB#7765/AB#5708 reset tests moved to the body form.
 
 ### Blueprint-owned opt-in: `DataPolicy.ProtectBlueprintLocked` (AB#6384; System.Identity 2.24.0)
 
@@ -1853,7 +1894,8 @@ and the anonymous `POST {tenant}/api/auth/reset-password`. The helper (1) rotate
 (2) revokes every token and authorization of the user's subject (`RtId`) through the OpenIddict stores of
 the **current tenant** (other users and the same user in another tenant are untouched; the old refresh
 token answers `invalid_grant`), (3) writes one `Information` audit log line naming tenant, subject, acting
-user (`(anonymous reset token)` for the token reset) and path - never a password, hash or token value.
+user (`(anonymous reset token)` for the token reset; the admin REST reset passes `AuditActor.FromPrincipal(User).Actor`
+since AB#8008, i.e. the user name or `client <id>` for a client-credentials caller) and path - never a password, hash or token value.
 A failing revocation throws, so the endpoint never reports success while old refresh tokens still work;
 the caller keeps a new sign-in via `RefreshSignInAsync` (change/set-password). A new password path - REST or
 CK method handler (AB#5672, AB#7774) - must call the same helper. Tests:
@@ -1863,9 +1905,10 @@ real token endpoint), `Persistence/PasswordChangeRevocationTenantIsolationIntegr
 ### Two-factor enabled without a usable second factor is refused (AB#7830)
 
 ASP.NET Core Identity challenges only when `TwoFactorEnabled` is set **and** a provider is valid, so a user with
-`TwoFactorEnabled = true` but no authenticator key would sign in with the password alone. That state arises after a
-tenant clone (ExportRt/ImportRt: `UserTokens` is `Secret` since AB#7766, `TwoFactorEnabled` is exported), after an
-ImportRt of edited data, or when an admin deletes `UserTokens`. Rule (decided by Gerald 2026-10-30, option a, fails closed):
+`TwoFactorEnabled = true` but no authenticator key would sign in with the password alone. That state arises in a
+tenant cloned with ExportRt/ImportRt under System.Identity 2.27.0 (`UserTokens` is `Secret` since AB#7766, `TwoFactorEnabled`
+was exported; since 2.28.0 `ImportRt` refuses users), after a restore from another environment (key ring), after an
+import of edited user data, or when an admin deletes `UserTokens`. Rule (decided by Gerald 2026-10-30, option a, fails closed):
 `POST {tenant}/api/auth/login` verifies the password with `CheckPasswordSignInAsync` (no cookie) for such a user and,
 if it is correct, answers `200 { success: false, secondFactorSetupRequired: true, errorMessage: "Your second factor must be
 set up again. Please contact your administrator." }`, writes a warning log + `User Login Failure` audit entry (user name

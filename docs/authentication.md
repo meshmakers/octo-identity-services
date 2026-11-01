@@ -199,8 +199,29 @@ Every REST password change (`change-password`, `set-password`, administrator `Re
 `reset-password`) rotates the user's security stamp and revokes all refresh tokens and authorizations the
 user holds **in that tenant**. A client presenting an old refresh token gets `invalid_grant` and the user
 signs in again with the new password; other users and the same user in another tenant are not affected.
-One audit log line records tenant, subject, acting user and path (no password or token value). The logic
-lives in `IUserCredentialChangeService`, which any new password path must call.
+One audit log line records tenant, subject, acting user and path (no password or token value). The acting
+user of the administrator `ResetPassword` is the caller's user name, for a client-credentials token
+`client <id>` (AB#8008; before, every non-cookie caller was recorded as `(anonymous reset token)`, which now
+only the token `reset-password` path writes). The logic lives in `IUserCredentialChangeService`, which any new
+password path must call.
+
+### No Credential Values in Request URLs (AB#8008)
+
+A URL ends up in the ASP.NET Core request log (`Request starting/finished …`, written before any controller
+code runs), in traces (`url.path`, `url.query`) and in ingress/proxy access logs. Therefore:
+
+- The administrator reset `POST {tenant}/v1/users/ResetPassword` takes `{ "userName", "password" }` only in the
+  JSON body. A request with a `password` query parameter is refused with `400` (problem details: *"Credentials
+  are no longer accepted as URL query parameters … update octo-cli, the OctoMesh SDK or Refinery Studio"*) before
+  model binding, so nothing is changed. The refusal lives in one resource filter, `RefuseCredentialInQueryAttribute`.
+- Client and API resource secrets are named by their stored hash in the body: `POST …/apiSecrets/{client|apiResource}/{id}/delete`
+  and `…/lookup` with `{ "valueEncrypted": "…" }`. The path variants (`DELETE` / `GET …/{base64(hash)}`) stay for one
+  release for older clients and log a WARN without the value.
+- `CredentialLogRedaction` decorates the `ILoggerFactory` (every provider) and masks, in the structured values of
+  every log line, the values of the query parameters `password`, `newPassword`, `secret`, `secretValue`,
+  `clientSecret` and the value segment of `…/apiSecrets/{client|apiResource}/{id}/{value}` with `***`, so a
+  request of an outdated client does not write the credential either. The request DTOs override `ToString()`, so
+  the ASP.NET Core TRACE log of the action arguments carries no password.
 
 ### External Provider Flow (OAuth/OIDC)
 
@@ -676,7 +697,7 @@ the user's own `TwoFactorEnabled`, or that of any tier of its `xt_` chain — a 
 | Cross-tenant device approval (`/connect/deviceverification`) | `access_denied` ("Cross-tenant access denied") | The approving session must carry `amr=mfa`. |
 | RFC 8693 token exchange | `403 access_denied`, `error_description` starts with `second_factor_required` | The subject token must carry `amr=mfa`; the exchanged token gets `amr=["token_exchange","mfa"]`. |
 
-**No usable second factor (AB#7830):** a source user with two-factor enabled but no authenticator key (e.g. after a tenant clone, `UserTokens` is not exported) gets `secondFactorSetupRequired: true` and no session, on this path and on the local `POST /{tenant}/api/auth/login`. Only an authenticator key counts as usable. Recovery: an admin switches `TwoFactorEnabled` off; the user then enrols again.
+**No usable second factor (AB#7830):** a source user with two-factor enabled but no authenticator key (e.g. in a tenant cloned with ExportRt/ImportRt under `System.Identity` 2.27.0 — since 2.28.0 `ImportRt` refuses users —, after a restore from another environment, or after an import of edited user data) gets `secondFactorSetupRequired: true` and no session, on this path and on the local `POST /{tenant}/api/auth/login`. Only an authenticator key counts as usable. Recovery: an admin switches `TwoFactorEnabled` off; the user then enrols again.
 
 Users without 2FA are unaffected. Not covered by the cross-tenant rule: a session that a "remember this machine"
 cookie skipped the second factor for, and external-provider sign-ins (Google, Entra ID, …), carry no `amr=mfa`; a 2FA

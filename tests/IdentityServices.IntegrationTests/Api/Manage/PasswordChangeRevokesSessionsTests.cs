@@ -115,9 +115,9 @@ public class PasswordChangeRevokesSessionsTests : IntegrationTestBase
         var stampBefore = await GetSecurityStampAsync(userName);
         var refreshToken = await IssueRefreshTokenAsync(userName, OldPassword, ct);
 
-        var response = await PostAsync(
-            TenantApiUrl($"users/ResetPassword?userName={Uri.EscapeDataString(userName)}&password={Uri.EscapeDataString(NewPassword)}"),
-            new { });
+        // AB#8008: user name and new password in the body, never in the URL.
+        var response = await PostAsync(TenantApiUrl("users/ResetPassword"),
+            new { userName = userName, password = NewPassword });
 
         response.StatusCode.Should().Be(HttpStatusCode.OK);
         await AssertRefreshTokenRejectedAsync(refreshToken, ct);
