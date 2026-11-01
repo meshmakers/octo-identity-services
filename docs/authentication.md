@@ -1379,7 +1379,8 @@ back to — not a credential. None of them can obtain a `client_credentials` tok
 **Roles are not mirrored.** `ClientMirrorProvisioningService` copies `RtClient` *attributes*; it
 touches no `AssignedRole` edge and no group membership. A mirrored client therefore arrives in the
 child tenant **authenticated but without any rights**, until somebody grants it roles *there*
-(`PUT {tenantId}/v1/clients/{clientId}/roles/{roleName}`, or `octo-cli AddClientToRole`). That is the
+(`PUT {tenantId}/v1/clients/{clientId}/roles/{roleName}`, or `octo-cli AddClientToRole`; since AB#7928 only with built-in
+roles the granting administrator holds). That is the
 real boundary downwards, and it is the one to reason about: the mirror can prove who it is, and can
 do nothing until the child tenant says what it may do.
 
