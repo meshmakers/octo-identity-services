@@ -504,7 +504,8 @@ success**, not an error: a token is issued, it simply has no `role` claim, and r
 fail closed. A service account lacking the tenant's fachliche roles (e.g. Accounting) therefore makes
 the feature go quiet with no error anywhere. When setting up delegation for a tenant, grant
 `octo-pipeline-sa-{adapterRtId}` those roles as well —
-`PUT {tenantId}/v1/clients/{clientId}/roles/{roleName}` or `octo-cli AddClientToRole`.
+`PUT {tenantId}/v1/clients/{clientId}/roles/{roleName}` or `octo-cli AddClientToRole`. Since AB#7928 the caller must hold
+a built-in role itself to grant it to a client (403 `role-not-held` otherwise); custom roles are free.
 
 **Deployment order:** identity first, then the Communication Controller. An identity that predates
 this change ignores the new fields and would create a secretless client.
@@ -1016,7 +1017,7 @@ user. Callers: `UsersController` (`PUT users/{u}/roles`, `PUT`/`DELETE users/{u}
 three role method handlers (`UserRoleMethodHandlerBase.GuardAsync`). It is **never** called from `OctoUserStore`/`UserManager`: first admin of a new tenant
 (`UserManagementService`), the Bootstrap blueprint seed, the one-time grants (`SecretManagementAdminGrant`, file role grants), the scratch-tenant creator grant, cross-tenant
 provisioning and the login group rules assign roles through the store and stay unrestricted (`TheGuard_IsNotCalledFromTheUserStoreOrTheUserManager…` pins the constructors).
-AB#7927 (groups, mappings, role definitions, next section) and AB#7928 (client roles) reuse it: `EvaluateGrantAsync(caller, addedRoleNames)` is the "grant only what you hold" part alone.
+AB#7927 (groups, mappings, role definitions, next section) and AB#7928 (client roles, section below) reuse it: `EvaluateGrantAsync(caller, addedRoleNames)` is the "grant only what you hold" part alone.
 
 | Rule (checked in this order, on the **difference** before/after, never on the full list) | REST | Method (`METHOD_FORBIDDEN`, parameter `reason`) |
 |---|---|---|
@@ -1061,10 +1062,41 @@ AB#7927 (groups, mappings, role definitions, next section) and AB#7928 (client r
   `EvaluateGrantAsync` (built-in only). Group create with roles is not judged (it has no members); the roles take effect only through a judged member add.
 - **Not guarded on purpose:** `GroupStore`/`ExternalTenantUserMappingStore` and everything that uses them directly: Bootstrap seed, setup, scratch-tenant grant,
   cross-tenant provisioning (`AdminProvisioningController`), `LoginGroupAssignmentService`. Group methods (AB#7779) call `EvaluateAsync(caller, RoleGraphChange)`
-  and answer `METHOD_FORBIDDEN` with the `reason`; client roles are AB#7928.
+  and answer `METHOD_FORBIDDEN` with the `reason`; direct client roles: AB#7928 (next section but one).
 - **Tests:** `Api/TenantApi/GroupRoleChangeGuardTests` (REST on real MongoDB: self-grant direct / via parent / via child / via mapping, role-not-held for roles, members,
   clients, nested groups, mappings, idempotent re-add, last administrator for member removal, role removal, delete, child group, mapping update / delete, mapping-in-group,
   clients not counting, built-in role rename / delete, audit record, unchanged flows) and `Authorization/RoleGraphTests` (holders, clone, cycle, references).
+
+### Role change guard on client roles (AB#7928)
+
+A tenant administrator (`TenantManagement` is enough for the client endpoints) could give a client a built-in role they do not
+hold (e.g. `UserManagement`) and then act as that client. `ClientsController` therefore runs the "grant only what you hold" part of
+`IRoleChangeGuard` (`EvaluateGrantAsync`) before it writes a client role:
+
+| Endpoint | Judged | Refusal |
+|---|---|---|
+| `PUT clients/{id}/roles` (replace-all, role ids) | every role id is resolved first (unknown or malformed id = 404, nothing written; it used to write the edge blindly); the **added** roles (not in the client's direct roles). Only the difference is written (`IClientRoleStore.ApplyRoleChangesAsync`), never the kept roles | 403 problem+json `code=role-not-held`, `roleNames` |
+| `PUT clients/{id}/roles/{roleName}` | the role; a role the client already holds directly is answered 200 without a write | same |
+| `DELETE clients/{id}/roles/{roleName}` | never (removing is no escalation) | - |
+
+- **Built-in roles only** (stored `RtWellKnownName`); custom roles are free. No self-grant or last-administrator rule for clients (clients are no
+  administrators, AB#7914 decision 2). The caller is the token (`RoleChangeCaller.FromPrincipal`): user or client-credentials token, judged with its own
+  role claims. Hard switch, no warn mode.
+- **Audit:** `IRoleChangeRefusals` writes the WARN line and the `Identity.RoleChangeRefused` event (caller, `client <clientId>`, reason, role names), as for groups.
+- 🔴 **Write only what was judged.** `SetRoleIdsAsync` (replace-all) re-reads the assignments in its own transaction and inserts every missing
+  wanted role. Used after the check, a role that a concurrent request removed between the check and the write would be restored by a caller who does
+  not hold it (review finding on #224). The controller therefore writes only the judged additions and the removals; kept roles are never written.
+  `SetRoleIdsAsync` stays for internal callers. Pinned by `ClientsControllerRoleGuardTests` (unit) and
+  `ClientRoleAssignmentIntegrationTests.ApplyRoleChanges_WritesOnlyTheGivenDifference_AndNeverRestoresAnUnlistedRole`.
+- **Not guarded on purpose:** the bus path (`CreateIdentityDataCommandRequestConsumer`, `DistClientDto.AssignedRoleNames`: service accounts and
+  client mirroring between services, no caller) and `IClientRoleStore` itself; client mirrors get no roles anyway. Granting a client roles through
+  a group (REST `PUT groups/{id}/members/clients/{c}`, method `Group.AddMember` with `memberKind=Client`) was already judged by AB#7927 / AB#7779.
+- **No client role method exists** in System.Identity 2.29.0 (`Client` declares only `AddSecret` / `RemoveSecret`, AB#7780); the method transport for
+  client roles is `Group.AddMember`. No CK change.
+- **Tests:** `Api/TenantApi/ClientRoleChangeGuardTests` (REST on real MongoDB: not held / held / custom for both endpoints, `TenantManagement` without
+  `UserManagement` cannot grant `UserManagement`, difference only, client-credentials caller, unknown / malformed id, audit record, guard not on the bus
+  or store path), `ServiceAccountClientProvisioningIntegrationTests.BusPath_StillAssignsABuiltInRole_WithoutTheRoleChangeGuard`,
+  `GroupMethodTests.AddMember_AClientIntoAGroupWithABuiltInRoleTheCallerLacks_IsRefused_RoleNotHeld` (method transport).
 
 ### First administrator is a member of TenantOwners (AB#7946)
 
@@ -1133,6 +1165,37 @@ user role handlers use (scope `octo_api` + role `UserManagement` on the **valida
 - **Tests:** `Api/Methods/GroupMethodTests` (all operations, every refusal, caller theory, forged caller, audit, evaluator), `GroupMethodParityTests` (REST and method side
   by side per guard), `DataPermissionMethodTests` (operations, errors, caller theory, forged caller, REST parity, audit, evaluator), `Methods/IdentityMethodHostTests`
   (selection). The last-administrator tests clear the administrators of the shared test database first, like `GroupRoleChangeGuardTests`.
+
+### Client secret methods `Client.AddSecret`, `Client.RemoveSecret` (AB#7780)
+
+`ClientAddSecretHandler` and `ClientRemoveSecretHandler` (`src/IdentityServices/Methods/ClientSecretHandlers.cs`, shared flow in
+`ClientSecretMethodHandlerBase`), declared in System.Identity 2.29.0 (no model change), two rows in `IdentityMethodHost.Handlers`, both
+`CarriesSecret = true` (AddSecret has a `sensitive` result, RemoveSecret a `sensitive` parameter): **gated by `Methods:Identity:EnablePasswordMethods`**
+like the password methods (production gate of 2026-10-23, B0); off = `METHOD_HANDLER_NOT_AVAILABLE`.
+
+| Rule | REST (`ApiSecretsController`, unchanged) | Method |
+|------|------|------|
+| Caller | `IdentityTenantAdministrationWritePolicy` (`octo_api` + `TenantManagement` or `UserManagement`) | the same, repeated on the validated principal (`IsClientAdministrator`) before the target is read: `METHOD_FORBIDDEN` / `role-required`, identical for an existing and a missing target; forged bus caller rejected by the host |
+| Target | client id in the route, 404 | target rtId of the client; unknown, not an object id or unknown tenant = `METHOD_TARGET_NOT_FOUND` |
+| Generate | 32 bytes CSPRNG, URL-safe Base64, stored as Base64 SHA-256 | the same (`ClientMirrorSecrets.GenerateSecret`, `OctoSecretHasher.HashSecret`), record `Type = SharedSecret`; the clear text is the result, returned once |
+| Public client | accepted | `CLIENT_SECRET_NOT_REQUIRED` (it never authenticates with a secret) |
+| Expiration in the past | accepted | `METHOD_VALIDATION_FAILED` (`field=expirationDate`) |
+| Remove | by the stored value (Base64 in the route); 404 without the value (since AB#7989; before it, the delete removed nothing, see below) | by the stored value **or** the clear text (hashed, fixed-time compare); every match removed with `RemoveAll` (AB#7989); no match = `SECRET_NOT_FOUND` without parameters |
+| Write | `IOctoClientStore.UpdateAsync` (replace without expected version, mirror sync) + `CorsClientsUpdate` | version-checked read-modify-write of the client (`MutateClientAsync`: read, change, replace with the read `rtVersion`, re-read and re-apply on `RtVersionConflictException`, 20 attempts), so concurrent adds keep every secret and an add never brings a removed secret back; then mirror sync and `CorsClientsUpdate`, both best effort (5 s bound for the publish: a committed change is never reported as failed) |
+| Description | free text | `octo:mirror-own-secret` (the marker of a mirror's own secret, AB#5061) = `METHOD_VALIDATION_FAILED` (`field=description`) |
+
+- **Authentication** goes through `OctoApplicationManager` (every unexpired record of the client), so a new secret authenticates at once and a removed one
+  fails at once (entity caching is off).
+- **Audit:** one `Identity.Method` event per call in a `finally` (success, every refusal, exception = `METHOD_HANDLER_FAILED`), details as the other methods plus
+  `clientId`, `secretCount` (records after the write) and, for RemoveSecret, `removedCount`. Never the secret, the hash, `secretValue` or the description.
+- **Secrets in logs:** the handlers log nothing. The engine's MongoDB command log at **Debug** (`MongoRepositoryClient`, off by default) renders the update
+  command and therefore the stored hash of every client secret write (REST included); the clear text never reaches a log.
+- **Tests:** `Api/Methods/ClientSecretMethodTests` (real MongoDB, real token endpoint: add -> stored value is the hash -> client credentials token OK ->
+  remove -> token refused; remove by stored value; UserManagement and service token callers; caller theory without role/scope for existing and missing
+  target; unknown target; public client; expiration; unknown value without echo; failing store audited; forged caller on the host; canary: the secret and a
+  clear-text `secretValue` in no audit event and no log line at any level, the hash in none at Information or above; parallel adds + remove lose no
+  update; reserved description; broker down still returns the committed secret), `Methods/IdentityMethodHostTests` (gate and caller rule),
+  `Methods/ClientSecretHandlerFailureTests` (an exception is audited once as `METHOD_HANDLER_FAILED`).
 
 ### REST secret delete removes by predicate (AB#7989, Security)
 
