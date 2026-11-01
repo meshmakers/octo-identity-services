@@ -37,7 +37,7 @@ namespace IdentityServices.IntegrationTests.Api.Methods;
 ///     injected by a decorator of <see cref="IClientMirrorProvisioningService" /> whose <c>SyncMirrorsForClientAsync</c>
 ///     throws (child database unreachable); everything else, including the reconciliation, is the production service.
 /// </summary>
-public class ClientMirrorReconciliationTests : IntegrationTestBase
+public class ClientMirrorReconciliationTests : IntegrationTestBase, IDisposable
 {
     private const string ApiScope = "client-mirror-reconcile-api";
     private static readonly string[] TenantAdminRoles = ["TenantManagement"];
@@ -70,6 +70,18 @@ public class ClientMirrorReconciliationTests : IntegrationTestBase
             services.AddScoped<IClientMirrorProvisioningService>(sp =>
                 new FailingSyncMirrorService(ActivatorUtilities.CreateInstance<ClientMirrorProvisioningService>(sp)));
         }));
+    }
+
+    /// <summary>
+    ///     Disposes the two derived hosts of this test. A derived factory lives until its parent (the class fixture) is
+    ///     disposed otherwise, and every host holds file watchers: on a Linux agent ten tests with two hosts each exhausted
+    ///     the inotify instance limit (128) for the whole suite.
+    /// </summary>
+    public void Dispose()
+    {
+        _syncFails.Dispose();
+        _enabled.Dispose();
+        GC.SuppressFinalize(this);
     }
 
     [Fact]
