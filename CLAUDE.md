@@ -1166,6 +1166,37 @@ user role handlers use (scope `octo_api` + role `UserManagement` on the **valida
   by side per guard), `DataPermissionMethodTests` (operations, errors, caller theory, forged caller, REST parity, audit, evaluator), `Methods/IdentityMethodHostTests`
   (selection). The last-administrator tests clear the administrators of the shared test database first, like `GroupRoleChangeGuardTests`.
 
+### Client secret methods `Client.AddSecret`, `Client.RemoveSecret` (AB#7780)
+
+`ClientAddSecretHandler` and `ClientRemoveSecretHandler` (`src/IdentityServices/Methods/ClientSecretHandlers.cs`, shared flow in
+`ClientSecretMethodHandlerBase`), declared in System.Identity 2.29.0 (no model change), two rows in `IdentityMethodHost.Handlers`, both
+`CarriesSecret = true` (AddSecret has a `sensitive` result, RemoveSecret a `sensitive` parameter): **gated by `Methods:Identity:EnablePasswordMethods`**
+like the password methods (production gate of 2026-10-23, B0); off = `METHOD_HANDLER_NOT_AVAILABLE`.
+
+| Rule | REST (`ApiSecretsController`, unchanged) | Method |
+|------|------|------|
+| Caller | `IdentityTenantAdministrationWritePolicy` (`octo_api` + `TenantManagement` or `UserManagement`) | the same, repeated on the validated principal (`IsClientAdministrator`) before the target is read: `METHOD_FORBIDDEN` / `role-required`, identical for an existing and a missing target; forged bus caller rejected by the host |
+| Target | client id in the route, 404 | target rtId of the client; unknown, not an object id or unknown tenant = `METHOD_TARGET_NOT_FOUND` |
+| Generate | 32 bytes CSPRNG, URL-safe Base64, stored as Base64 SHA-256 | the same (`ClientMirrorSecrets.GenerateSecret`, `OctoSecretHasher.HashSecret`), record `Type = SharedSecret`; the clear text is the result, returned once |
+| Public client | accepted | `CLIENT_SECRET_NOT_REQUIRED` (it never authenticates with a secret) |
+| Expiration in the past | accepted | `METHOD_VALIDATION_FAILED` (`field=expirationDate`) |
+| Remove | by the stored value (Base64 in the route); echoes the value in a 404 | by the stored value **or** the clear text (hashed, fixed-time compare); every match removed with `RemoveAll` (AB#7989); no match = `SECRET_NOT_FOUND` without parameters |
+| Write | `IOctoClientStore.UpdateAsync` (replace without expected version, mirror sync) + `CorsClientsUpdate` | version-checked read-modify-write of the client (`MutateClientAsync`: read, change, replace with the read `rtVersion`, re-read and re-apply on `RtVersionConflictException`, 20 attempts), so concurrent adds keep every secret and an add never brings a removed secret back; then mirror sync and `CorsClientsUpdate`, both best effort (5 s bound for the publish: a committed change is never reported as failed) |
+| Description | free text | `octo:mirror-own-secret` (the marker of a mirror's own secret, AB#5061) = `METHOD_VALIDATION_FAILED` (`field=description`) |
+
+- **Authentication** goes through `OctoApplicationManager` (every unexpired record of the client), so a new secret authenticates at once and a removed one
+  fails at once (entity caching is off).
+- **Audit:** one `Identity.Method` event per call in a `finally` (success, every refusal, exception = `METHOD_HANDLER_FAILED`), details as the other methods plus
+  `clientId`, `secretCount` (records after the write) and, for RemoveSecret, `removedCount`. Never the secret, the hash, `secretValue` or the description.
+- **Secrets in logs:** the handlers log nothing. The engine's MongoDB command log at **Debug** (`MongoRepositoryClient`, off by default) renders the update
+  command and therefore the stored hash of every client secret write (REST included); the clear text never reaches a log.
+- **Tests:** `Api/Methods/ClientSecretMethodTests` (real MongoDB, real token endpoint: add -> stored value is the hash -> client credentials token OK ->
+  remove -> token refused; remove by stored value; UserManagement and service token callers; caller theory without role/scope for existing and missing
+  target; unknown target; public client; expiration; unknown value without echo; failing store audited; forged caller on the host; canary: the secret and a
+  clear-text `secretValue` in no audit event and no log line at any level, the hash in none at Information or above; parallel adds + remove lose no
+  update; reserved description; broker down still returns the committed secret), `Methods/IdentityMethodHostTests` (gate and caller rule),
+  `Methods/ClientSecretHandlerFailureTests` (an exception is audited once as `METHOD_HANDLER_FAILED`).
+
 ### Blueprint-owned opt-in: `DataPolicy.ProtectBlueprintLocked` (AB#6384; System.Identity 2.24.0)
 
 `ProtectBlueprintLocked` (optional Boolean, default `false`) is the opt-in of the engine's blueprint-lock write guard
