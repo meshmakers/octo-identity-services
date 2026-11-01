@@ -231,8 +231,12 @@ public class ClientMirrorProvisioningService(
                 //     behind on this child (e.g. a transient repo failure during SyncMirrorsForClient
                 //     post-commit hook) get re-applied on the next service restart, matching the
                 //     intent that the parent is the single source of truth for mirror state.
-                await ConvergeChildMirrorAsync(childRepo, childSession, parentTenantId, parentClient.ClientId,
-                    () => Task.FromResult<RtClient?>(parentClient), skipWhenInSync: false);
+                // AB#8019: the parent is read again after the child (the list above may be older than an
+                // immediate sync that already wrote this mirror); the listed client is only the fallback.
+                var verifyClientId = parentClient.ClientId;
+                await ConvergeChildMirrorAsync(childRepo, childSession, parentTenantId, verifyClientId,
+                    async () => await FindParentClientAsync(parentRepo, parentSession, verifyClientId) ?? parentClient,
+                    skipWhenInSync: false);
                 alreadyPresent++;
                 continue;
             }
@@ -240,8 +244,10 @@ public class ClientMirrorProvisioningService(
             // 2a. Materialize the mirror client in the child tenant's DB. Same idempotent
             //     query-or-insert pattern used by DefaultConfigurationCreatorService for
             //     the built-in OctoTool/Studio/Swagger clients.
-            await ConvergeChildMirrorAsync(childRepo, childSession, parentTenantId, parentClient.ClientId,
-                () => Task.FromResult<RtClient?>(parentClient), skipWhenInSync: false);
+            var newClientId = parentClient.ClientId;
+            await ConvergeChildMirrorAsync(childRepo, childSession, parentTenantId, newClientId,
+                async () => await FindParentClientAsync(parentRepo, parentSession, newClientId) ?? parentClient,
+                skipWhenInSync: false);
 
             // 2b. Record the tracking row in the parent's DB.
             var mirrorRecord = new RtClientMirror
