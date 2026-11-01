@@ -16,6 +16,7 @@ using Meshmakers.Octo.Backend.IdentityServices.Middleware;
 using Meshmakers.Octo.Backend.IdentityServices.OpenIddict;
 using Meshmakers.Octo.Backend.IdentityServices.OpenIddict.Interaction;
 using Meshmakers.Octo.Backend.IdentityServices.Services;
+using OpenTelemetry.Metrics;
 using IQrCodeService = Meshmakers.Octo.Backend.IdentityServices.Services.IQrCodeService;
 using QrCodeService = Meshmakers.Octo.Backend.IdentityServices.Services.QrCodeService;
 using Meshmakers.Octo.Communication.Contracts;
@@ -72,6 +73,10 @@ try
 
     builder.AddObservability()
         .AddSystemContextHealthCheck();
+    // AB#8019: the identity service's own meter (client mirror reconciliation). An unregistered meter drops every
+    // measurement silently, so it is registered here, next to the platform-wide list of AddObservability.
+    builder.Services.ConfigureOpenTelemetryMeterProvider(metrics =>
+        metrics.AddMeter(IdentityServerPersistence.Services.ClientMirrorReconciliationMetrics.MeterName));
 
     // NLog: Setup NLog for Dependency injection
     builder.Logging.ClearProviders();
@@ -291,6 +296,9 @@ try
 
     // Service that periodically cleans up expired sessions, OAuth tokens and legacy grants
     builder.Services.AddSingleton<IHostedService, TokenCleanupHostService>();
+
+    // AB#8019: periodic reconciliation of client mirrors (compensation for a failed best-effort mirror sync).
+    builder.Services.AddHostedService<ClientMirrorReconciliationHostService>();
 
     // Add the extra configuration;
     builder.Services.ConfigureOptions<ConfigureOctoOpenApiOptions>();

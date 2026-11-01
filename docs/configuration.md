@@ -48,6 +48,18 @@ export OCTO_Identity__SigningCertificatePassword="secret"
 Helm: set the first row as an environment variable of the identity service. Details and the handler pattern: `CLAUDE.md`, section
 "CK method host of the identity service".
 
+##### Client mirror reconciliation (AB#8019)
+
+| Setting | Default | Meaning |
+|---------|---------|---------|
+| `Identity:ClientMirrorReconciliationInterval` (env `OCTO_IDENTITY__CLIENTMIRRORRECONCILIATIONINTERVAL`) | `300` | Seconds between two passes of the client mirror reconciliation. Every identity replica compares the mirrors of `AutoProvisionInChildTenants` clients in the child tenants with their parent client and repairs differences (any client attribute: secrets incl. expiry, claims, flags, lifetimes, URIs), and removes a mirror whose parent client is missing in two consecutive passes. A secret removed, added, rotated or expired in the parent therefore reaches every child tenant within about this interval even when the immediate sync after the change failed. `0` or less switches the job off (only the immediate sync and the start-up provisioning remain). Read at start. |
+
+Replicas need no coordination: a mirror in sync is not written, and every mirror writer (sync, provisioning, rotation,
+reconciliation) writes with the version it read and retries on a conflict, so a concurrent writer wins. Metrics: meter `Meshmakers.Octo.Identity`, counters
+`identity.client_mirror.reconciled` (label `outcome`: `repaired`, `removed`, `skipped`, `failed`) and
+`identity.client_mirror.reconcile.runs` (label `outcome`: `ok`, `tenant_failed`). Logs name client ids and tenants, never a
+secret or its hash.
+
 ##### CORS policy cache (AB#5487)
 
 The Identity service builds its CORS policy from the client origins (`allowedCorsOrigins`) of the system tenant

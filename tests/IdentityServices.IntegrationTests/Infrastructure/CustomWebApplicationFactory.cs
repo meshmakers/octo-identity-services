@@ -49,6 +49,24 @@ public class CustomWebApplicationFactory : WebApplicationFactory<Program>, IAsyn
 
     private string? _databaseHost;
 
+    /// <summary>
+    ///     Name of the host setting that switches the file watchers of the configuration files off.
+    /// </summary>
+    internal const string ReloadConfigOnChangeVariable = "DOTNET_hostBuilder__reloadConfigOnChange";
+
+    /// <summary>
+    ///     Every in-process host of this suite (each factory and each <c>WithWebHostBuilder</c> derivative) loads
+    ///     <c>appsettings*.json</c> with reload-on-change, i.e. one file watcher per file and host. On a Linux CI agent the
+    ///     inotify instance limit (128) was reached across the suite (AB#8019, PR build of #230), failing unrelated tests
+    ///     at host start. Tests never change configuration files at run time, so the hosts read them once. Set before the
+    ///     first host is built; <c>WebApplication.CreateBuilder</c> reads <c>DOTNET_</c> host settings from the process
+    ///     environment.
+    /// </summary>
+    static CustomWebApplicationFactory()
+    {
+        Environment.SetEnvironmentVariable(ReloadConfigOnChangeVariable, "false");
+    }
+
     public CustomWebApplicationFactory()
     {
         _options = new IntegrationTestOptions();
@@ -285,6 +303,9 @@ public class CustomWebApplicationFactory : WebApplicationFactory<Program>, IAsyn
                 opts.KeyFilePassword = "not-used-in-tests";
                 opts.AuthorityUrl = "https://localhost:5003";
                 opts.EnableTokenCleanup = false;
+                // AB#8019: no background mirror reconciliation in the shared test host; tests run a pass explicitly
+                // (IClientMirrorReconciliationJob), so a timer can never repair a state a test is asserting.
+                opts.ClientMirrorReconciliationInterval = 0;
                 // AB#7854: the whole suite signs in from one test-server address and reuses accounts; keep the
                 // sign-in limits active (wiring, concurrency) but far above what the suite needs. The limit itself is
                 // tested with a factory that lowers them (SignInAttemptConcurrencyTests).
