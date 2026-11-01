@@ -172,6 +172,13 @@ types:
         authorization:
           roles: [ UserManagement ]
           dataAccess: Write
+      # AB#7879 (2.30.0): the administrator recovery path of a user who lost the second factor (AB#7830 option a). The only
+      # write path for TwoFactorEnabled=false besides the user's own self-service, once the generic writes are refused (AB#8042).
+      - methodId: DisableTwoFactor-1
+        description: "An administrator switches off the second factor of the user: removes the authenticator key and the recovery codes, rotates the security stamp and revokes the user's refresh tokens. The user signs in with the password and enrols again."
+        authorization:
+          roles: [ UserManagement ]
+          dataAccess: Write
       # Named CreateUser, not Create: the compiler reserves Create, Update and Delete for the generic mutations (error 102).
       - methodId: CreateUser-1
         kind: Static

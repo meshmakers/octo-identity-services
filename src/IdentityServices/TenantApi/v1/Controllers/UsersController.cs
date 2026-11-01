@@ -463,6 +463,31 @@ public class UsersController : ControllerBase
             HttpContext.RequestAborted));
     }
 
+    // POST {tenant}/v1/users/{userName}/disableTwoFactor
+    /// <summary>
+    ///     AB#7879: a user administrator switches off the second factor of a user (recovery when the authenticator is lost):
+    ///     removes the authenticator key and the recovery codes, sets <c>TwoFactorEnabled = false</c>, rotates the security
+    ///     stamp and revokes the user's refresh tokens and authorizations in this tenant. The user then signs in with the
+    ///     password and can enrol a new authenticator. Same effect as the CK method <c>User.DisableTwoFactor-1</c>; idempotent.
+    /// </summary>
+    [HttpPost("{userName}/disableTwoFactor")]
+    [Authorize(IdentityServiceConstants.IdentityUserAdministrationWritePolicy)]
+    [EndpointSummary("Switches off the second factor of a user.")]
+    [ProducesResponseType<UserTwoFactorDisableResultDto>(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> DisableTwoFactor([Description("The username")] string userName,
+        [FromServices] IUserTwoFactorAdministrationService twoFactorAdministration)
+    {
+        var user = await _userManager.FindByNameAsync(userName);
+        if (user == null)
+        {
+            return NotFound(new NotFoundErrorDto($"User '{userName}' not found."));
+        }
+
+        return Ok(await twoFactorAdministration.DisableAsync(user, TwoFactorDisablePath.AdminRest,
+            AuditActor.FromPrincipal(User).Actor, HttpContext.RequestAborted));
+    }
+
     // POST {tenant}/v1/users/revokeSessions?scope=shadowUsers&dryRun=true
     /// <summary>
     ///     AB#7899: the same for every cross-tenant shadow user (xt_*) of this tenant. Dry run by default: only the counts

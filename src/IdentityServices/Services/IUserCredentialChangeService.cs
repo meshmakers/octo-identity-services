@@ -28,7 +28,7 @@ public enum PasswordChangePath
 ///     Single place that runs after every successful password change (AB#7765, review finding M3):
 ///     rotates the security stamp, revokes every refresh token and authorization of the user in the
 ///     current tenant and writes one audit log entry. The CK method handlers of Feature AB#5696
-///     (AB#5672, AB#7774) call the same helper.
+///     (AB#5672, AB#7774) call the same helper; so does switching the second factor off (AB#7879).
 /// </summary>
 public interface IUserCredentialChangeService
 {
@@ -42,4 +42,18 @@ public interface IUserCredentialChangeService
     /// <param name="cancellationToken">Cancellation token</param>
     Task OnPasswordChangedAsync(RtUser user, PasswordChangePath path, string? actingUser,
         CancellationToken cancellationToken = default);
+
+    /// <summary>
+    ///     AB#7879: the same revocation after an administrator switched the second factor of the user off (the flag and the
+    ///     authenticator material are already persisted): rotates the security stamp, revokes every refresh token and
+    ///     authorization of the user in the current tenant and writes one audit log line (tenant, subject, acting user, path,
+    ///     whether 2FA was on). Throws when the revocation fails.
+    /// </summary>
+    /// <param name="user">The user whose second factor was switched off.</param>
+    /// <param name="path">The administrative path.</param>
+    /// <param name="actingUser">The caller as the audit names it.</param>
+    /// <param name="twoFactorWasEnabled">Whether the user had the second factor on before the call.</param>
+    /// <param name="cancellationToken">Cancellation token</param>
+    Task OnSecondFactorDisabledAsync(RtUser user, TwoFactorDisablePath path, string? actingUser,
+        bool twoFactorWasEnabled, CancellationToken cancellationToken = default);
 }
