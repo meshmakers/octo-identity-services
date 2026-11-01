@@ -21,6 +21,13 @@ namespace Meshmakers.Octo.Backend.IdentityServices.Services;
 ///         other pods that missed a <c>CorsClientsUpdate</c> event and origins that were removed. The events
 ///         (<see cref="InvalidateCache" />) stay the fast path.
 ///     </para>
+///     <para>
+///         AB#8035: the rebuild is single-flight. Loading the origins reads the clients of every tenant, so the
+///         requests that find the entry expired (or invalidated) share one load instead of each running their own;
+///         a new load starts only after an invalidation (new generation) or once the shared one has finished. A
+///         failed load is handed to its waiters and the next request starts a new one. The rebuild is logged at
+///         Debug; Information only when the origin set differs from the previous load.
+///     </para>
 /// </remarks>
 public class IdentityCorsPolicyProvider : ICorsPolicyProvider
 {
@@ -30,6 +37,12 @@ public class IdentityCorsPolicyProvider : ICorsPolicyProvider
     private readonly TimeProvider _timeProvider;
     private volatile CacheEntry? _entry;
     private long _generation;
+
+    // AB#8035 single-flight state, guarded by _loadGate.
+    private readonly Lock _loadGate = new();
+    private Task<CacheEntry>? _inflight;
+    private long _inflightGeneration;
+    private HashSet<string>? _lastLoadedOrigins;
 
     public IdentityCorsPolicyProvider(
         IServiceProvider serviceProvider,
@@ -73,19 +86,80 @@ public class IdentityCorsPolicyProvider : ICorsPolicyProvider
         _entry = null;
     }
 
-    private async Task<CacheEntry> GetEntryAsync()
+    private Task<CacheEntry> GetEntryAsync()
     {
         var cached = _entry;
         if (cached != null && !cached.IsExpired(_timeProvider.GetUtcNow()))
         {
-            return cached;
+            return Task.FromResult(cached);
         }
 
-        var generation = Interlocked.Read(ref _generation);
+        TaskCompletionSource<CacheEntry> load;
+        long generation;
+        lock (_loadGate)
+        {
+            cached = _entry;
+            if (cached != null && !cached.IsExpired(_timeProvider.GetUtcNow()))
+            {
+                return Task.FromResult(cached);
+            }
+
+            generation = Interlocked.Read(ref _generation);
+            if (_inflight != null && _inflightGeneration == generation)
+            {
+                // AB#8035: another request is already loading for this generation; share its result.
+                return _inflight;
+            }
+
+            load = new TaskCompletionSource<CacheEntry>(TaskCreationOptions.RunContinuationsAsynchronously);
+            _inflight = load.Task;
+            _inflightGeneration = generation;
+        }
+
+        // Started outside the lock: the load awaits the database.
+        _ = RunLoadAsync(load, generation);
+        return load.Task;
+    }
+
+    private async Task RunLoadAsync(TaskCompletionSource<CacheEntry> load, long generation)
+    {
+        CacheEntry? entry = null;
+        Exception? failure = null;
+        try
+        {
+            entry = await BuildAndPublishEntryAsync(generation);
+        }
+        catch (Exception ex)
+        {
+            failure = ex;
+        }
+
+        // Clear the slot before completing, so a request that arrives after a failure starts a new load
+        // instead of receiving the failed one.
+        lock (_loadGate)
+        {
+            if (ReferenceEquals(_inflight, load.Task))
+            {
+                _inflight = null;
+            }
+        }
+
+        if (failure != null)
+        {
+            _logger.LogWarning(failure, "Loading the Identity CORS origins failed; the next request retries");
+            load.SetException(failure);
+        }
+        else
+        {
+            load.SetResult(entry!);
+        }
+    }
+
+    private async Task<CacheEntry> BuildAndPublishEntryAsync(long generation)
+    {
         var origins = await LoadAllOriginsAsync();
 
-        _logger.LogInformation("Creating CORS policy for Identity API from client origins across all tenants: {Origins}",
-            string.Join(", ", origins));
+        LogOrigins(origins);
 
         var policyBuilder = new CorsPolicyBuilder();
         if (origins.Count > 0)
@@ -111,6 +185,34 @@ public class IdentityCorsPolicyProvider : ICorsPolicyProvider
         }
 
         return entry;
+    }
+
+    /// <summary>
+    ///     AB#8035: every rebuild at Debug; Information only when the origin set differs from the previous load,
+    ///     so a TTL rebuild without a change does not repeat the whole list in the log every minute.
+    /// </summary>
+    private void LogOrigins(HashSet<string> origins)
+    {
+        _logger.LogDebug("Creating CORS policy for Identity API from client origins across all tenants: {Origins}",
+            string.Join(", ", origins));
+
+        HashSet<string>? previous;
+        lock (_loadGate)
+        {
+            previous = _lastLoadedOrigins;
+            _lastLoadedOrigins = origins;
+        }
+
+        if (previous != null && previous.SetEquals(origins))
+        {
+            return;
+        }
+
+        var added = previous == null ? origins.ToList() : origins.Where(o => !previous.Contains(o)).ToList();
+        var removed = previous == null ? [] : previous.Where(o => !origins.Contains(o)).ToList();
+        _logger.LogInformation(
+            "Identity CORS origins changed: {OriginCount} origins across all tenants (added: {AddedOrigins}; removed: {RemovedOrigins})",
+            origins.Count, string.Join(", ", added), string.Join(", ", removed));
     }
 
     private async Task<HashSet<string>> LoadAllOriginsAsync()
