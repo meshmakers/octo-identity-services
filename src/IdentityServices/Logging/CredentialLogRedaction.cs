@@ -20,7 +20,8 @@ namespace Meshmakers.Octo.Backend.IdentityServices.Logging;
 ///         Implemented as a decorator of <see cref="ILoggerFactory" />, not of a single provider: it covers every
 ///         provider (NLog, OpenTelemetry, test providers) and keeps provider-specific filter rules intact. Only
 ///         structured log values of URL types (<see cref="string" />, <see cref="PathString" />,
-///         <see cref="QueryString" />, <see cref="Uri" />) are inspected; a log line without a match passes unchanged.
+///         <see cref="QueryString" />, <see cref="Uri" />) are inspected, in log states and in scope states (the hosting
+///         scope carries <c>RequestPath</c>); a log line without a match passes unchanged.
 ///     </para>
 /// </remarks>
 public static partial class CredentialLogRedaction
@@ -84,7 +85,12 @@ public static partial class CredentialLogRedaction
     /// <summary>Masks credential values in the structured values of a log line before the providers see it.</summary>
     internal sealed class RedactingLogger(ILogger inner) : ILogger
     {
-        public IDisposable? BeginScope<TState>(TState state) where TState : notnull => inner.BeginScope(state);
+        // Scopes are redacted too: the ASP.NET Core hosting scope carries RequestPath, and nlog.config renders scope
+        // properties into every record of the request (includeScopeProperties).
+        public IDisposable? BeginScope<TState>(TState state) where TState : notnull
+            => state is IReadOnlyList<KeyValuePair<string, object?>> values && TryRedact(values, out var redacted)
+                ? inner.BeginScope(redacted)
+                : inner.BeginScope(state);
 
         public bool IsEnabled(LogLevel logLevel) => inner.IsEnabled(logLevel);
 

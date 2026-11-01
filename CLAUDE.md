@@ -1244,7 +1244,7 @@ in the path. Decided by Gerald 2026-11-01:
   value, and overwrite the trace tag `url.path` with the masked path. `PUT` already carried the hash in the body.
 - **Log redaction:** `Logging/CredentialLogRedaction.cs` - `AddCredentialLogRedaction()` (Program.cs, after `UseNLog()`) replaces the
   `ILoggerFactory` with a decorator whose loggers mask, in the structured values (`string`, `PathString`, `QueryString`, `Uri`) of every
-  log line, the query parameters `password|newPassword|secret|secretValue|clientSecret` and the value segment of
+  log line **and every scope** (the hosting scope carries `RequestPath`, and `nlog.config` renders scope properties into each record), the query parameters `password|newPassword|secret|secretValue|clientSecret` and the value segment of
   `/apiSecrets/{client|apiResource}/{id}/{value}` (not the `delete`/`lookup` action segments) with `***`; `{OriginalFormat}` is kept, so
   NLog renders the template with the masked values. A factory decorator, not a provider decorator: provider-specific filter rules keep
   working and providers added later (test hosts, `AddProvider`) are covered. A line without a match passes unchanged (same state

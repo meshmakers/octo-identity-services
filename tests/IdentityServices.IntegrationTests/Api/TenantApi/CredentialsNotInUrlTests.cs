@@ -250,6 +250,9 @@ public class CredentialsNotInUrlTests : IntegrationTestBase
         warnings.Should().HaveCount(2);
         warnings.Should().OnlyContain(w => w.Text.Contains(owner));
         _logs.AllText.Should().Contain($"apiSecrets/{kind}/{owner}/***");
+        _logs.Lines.Should().Contain(l => l.Text.StartsWith("scope: ") && l.Text.Contains($"RequestPath=/") &&
+                                          l.Text.Contains($"apiSecrets/{kind}/{owner}/***"),
+            "the hosting scope carries the masked request path");
         _logs.AllText.Should().NotContain(clear);
         _logs.AllText.Should().NotContain(hash).And.NotContain(hash.EncodeBase64()).And.NotContain(segment);
     }
@@ -336,7 +339,15 @@ public class CredentialsNotInUrlTests : IntegrationTestBase
 
         private sealed class CapturingLogger(CapturingLoggerProvider owner, string category) : ILogger
         {
-            public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
+            // Scopes are recorded as lines too: the hosting scope (RequestPath) is rendered into every record by nlog.config.
+            public IDisposable? BeginScope<TState>(TState state) where TState : notnull
+            {
+                var values = state is IEnumerable<KeyValuePair<string, object?>> list
+                    ? string.Join("; ", list.Select(v => $"{v.Key}={v.Value}"))
+                    : state.ToString();
+                owner._lines.Enqueue((LogLevel.None, "scope: " + values, category));
+                return null;
+            }
 
             public bool IsEnabled(LogLevel logLevel) => true;
 

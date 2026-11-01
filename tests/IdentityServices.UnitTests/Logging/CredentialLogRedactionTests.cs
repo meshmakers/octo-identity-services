@@ -70,6 +70,67 @@ public class CredentialLogRedactionTests
     }
 
     [Fact]
+    public void RequestScope_ThroughTheDecoratedFactory_IsMasked()
+    {
+        var capture = new CapturingProvider();
+        using var factory = BuildFactory(capture);
+
+        // The shape of ASP.NET Core's hosting scope: RequestId + RequestPath.
+        IReadOnlyList<KeyValuePair<string, object?>> scope =
+        [
+            new("RequestId", "0HN:1"),
+            new("RequestPath", "/t/v1/apiSecrets/client/c/" + FakeSecretSegment)
+        ];
+        using (factory.CreateLogger("x").BeginScope(scope))
+        {
+        }
+
+        var values = Assert.Single(capture.Scopes);
+        Assert.Contains(values, v => v.Key == "RequestPath" && (string?)v.Value == "/t/v1/apiSecrets/client/c/***");
+        Assert.Contains(values, v => v.Key == "RequestId" && (string?)v.Value == "0HN:1");
+    }
+
+    [Fact]
+    public void RequestScope_ThroughTheRealNLogConfig_IsMaskedInTheJsonRecord()
+    {
+        var xml = File.ReadAllText(FindNlogConfig())
+            .Replace("xsi:type=\"Console\"", "xsi:type=\"Memory\"", StringComparison.Ordinal)
+            .Replace("${environment:OCTO_LOG_LEVEL_ROOT:whenEmpty=Warn}", "Trace", StringComparison.Ordinal)
+            .Replace("${environment:OCTO_LOG_LEVEL:whenEmpty=Info}", "Trace", StringComparison.Ordinal);
+        var logFactory = new NLog.LogFactory().Setup().RegisterSecretRedaction().LoadConfigurationFromXml(xml).LogFactory;
+        try
+        {
+            var services = new ServiceCollection();
+            services.AddLogging(l =>
+            {
+                l.SetMinimumLevel(MelLogLevel.Trace);
+                l.AddProvider(new NLogLoggerProvider(new NLogProviderOptions(), logFactory));
+            });
+            services.AddCredentialLogRedaction();
+            using (var provider = services.BuildServiceProvider())
+            {
+                var logger = provider.GetRequiredService<ILoggerFactory>().CreateLogger("Meshmakers.Test");
+                IReadOnlyList<KeyValuePair<string, object?>> scope =
+                    [new("RequestPath", "/t/v1/apiSecrets/apiResource/r/" + FakeSecretSegment)];
+                using (logger.BeginScope(scope))
+                {
+                    logger.LogInformation("inside the request");
+                }
+            }
+
+            logFactory.Flush();
+            var output = string.Join('\n', logFactory.Configuration!.FindTargetByName<MemoryTarget>("console")!.Logs);
+            Assert.Contains("inside the request", output);
+            Assert.Contains("/t/v1/apiSecrets/apiResource/r/***", output);
+            Assert.DoesNotContain(FakeSecretSegment, output);
+        }
+        finally
+        {
+            logFactory.Shutdown();
+        }
+    }
+
+    [Fact]
     public void LogLine_WithoutCredential_PassesUnchanged()
     {
         var capture = new CapturingProvider();
@@ -171,6 +232,8 @@ public class CredentialLogRedactionTests
     {
         public List<CapturedLine> Lines { get; } = [];
 
+        public List<IReadOnlyList<KeyValuePair<string, object?>>> Scopes { get; } = [];
+
         public ILogger CreateLogger(string categoryName) => new CapturingLogger(this);
 
         public void Dispose()
@@ -179,7 +242,18 @@ public class CredentialLogRedactionTests
 
         private sealed class CapturingLogger(CapturingProvider owner) : ILogger
         {
-            public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
+            public IDisposable? BeginScope<TState>(TState state) where TState : notnull
+            {
+                if (state is IReadOnlyList<KeyValuePair<string, object?>> values)
+                {
+                    lock (owner.Lines)
+                    {
+                        owner.Scopes.Add(values.ToList());
+                    }
+                }
+
+                return null;
+            }
 
             public bool IsEnabled(MelLogLevel logLevel) => true;
 
