@@ -361,10 +361,12 @@ public class ClientMirrorProvisioningServiceTests
             staleChildClient.RtId,
             Arg.Is<RtClient>(c => c.ClientId == "ci-deploy"),
             Arg.Any<ulong>());
+        // AB#8054: the counter bump is version-checked (the row's version as read right before the write).
         await _parentRepo.Received(1).ReplaceOneRtEntityByIdAsync(
             _parentSession,
             existingMirror.RtId,
-            Arg.Is<RtClientMirror>(m => m.SecretHashVersion == 3));
+            Arg.Is<RtClientMirror>(m => m.SecretHashVersion == 3),
+            existingMirror.RtVersion);
     }
 
     [Fact]

@@ -6,6 +6,7 @@ using Meshmakers.Octo.Common.DistributionEventHub.Services;
 using Meshmakers.Octo.Communication.Contracts.DataTransferObjects;
 using Meshmakers.Octo.Communication.Contracts.DataTransferObjects.ApiErrors;
 using MongoDB.Bson;
+using Meshmakers.Octo.Runtime.Contracts;
 using Meshmakers.Octo.Runtime.Contracts.RepositoryEntities;
 using Meshmakers.Octo.Services.Contracts.DistributionEventHub.Messages;
 using Microsoft.AspNetCore.Authorization;
@@ -21,6 +22,9 @@ namespace Meshmakers.Octo.Backend.IdentityServices.TenantApi.v1.Controllers;
 [ApiVersion(IdentityServiceConstants.ApiVersion1)]
 public class ApiResourcesController : ControllerBase
 {
+    private const string ConcurrentChangeMessage =
+        "The API resource was changed concurrently by other requests. Please retry.";
+
     private readonly IDistributionEventHubService _distributionEventHubService;
     private readonly IOctoResourceStore _octoResourceStore;
 
@@ -163,17 +167,25 @@ public class ApiResourcesController : ControllerBase
                 return BadRequest(ModelState);
             }
 
-            var octoApiResource = await _octoResourceStore.GetApiResourceByNameAsync(apiResourceDto.Name);
+            // AB#8015: one version-checked read-modify-write. The update used to load the resource, apply the DTO and
+            // replace it without an expected version, so a PUT that read the resource before a concurrent secret delete
+            // wrote the old secret list back. The DTO carries no secrets; the stored ones are the ones read in this step.
+            var octoApiResource = await _octoResourceStore.MutateApiResourceAsync(name, current =>
+            {
+                ApplyToRtApiResource(current, apiResourceDto);
+                return true;
+            });
             if (octoApiResource == null)
             {
                 return NotFound(new NotFoundErrorDto($"API resource with name '{name}' does not exist."));
             }
 
-            ApplyToRtApiResource(octoApiResource, apiResourceDto);
-
-            await _octoResourceStore.UpdateApiResourceAsync(name, octoApiResource);
             await ClearCacheAsync();
             return Ok();
+        }
+        catch (RtVersionConflictException)
+        {
+            return Problem(detail: ConcurrentChangeMessage, statusCode: StatusCodes.Status409Conflict);
         }
         catch (Exception e)
         {

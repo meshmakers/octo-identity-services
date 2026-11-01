@@ -575,8 +575,8 @@ nested customer sub-tenants are out of scope for v1, see
 
 **Upkeep hooks (#4044 — done):**
 
-- `ClientStore.UpdateAsync` fires `SyncMirrorsForClientAsync` after commit
-  when the post-update client carries `AutoProvisionInChildTenants=true`.
+- `ClientStore.MutateAsync` (the only way to change a stored client since AB#8015) fires `SyncMirrorsForClientAsync`
+  after commit when the post-update client carries `AutoProvisionInChildTenants=true`.
   Propagates secret rotation / scope / lifetime changes onto every mirror
   and bumps each mirror's `SecretHashVersion`.
 - `ClientStore.DeleteAsync` fires `RemoveMirrorsForClientAsync` after commit
@@ -622,13 +622,32 @@ in the child tenants until a restart. A compensation job (decision OD-6: no outb
   `RtVersionConflictException`, at most `MaxMirrorWriteAttempts` = 5) or the versioned `RotateMirrorSecretAsync`. The sync re-reads
   the parent after the child (the passed snapshot is only the fallback), so a delayed sync cannot write an older parent state over
   a newer one. Result: a write after our child read makes our replace fail, a write before it is visible to the comparison while
-  the parent was read after it; neither a removed secret nor a superseded own secret can come back. Writers outside the mirror
-  service that touch a mirror record unversioned (a full client `PUT` in the child tenant, the blueprint seed upsert of a client
-  with the same id, the `octo-cli` grant step) can still be overwritten by the next convergence, which is the intended direction
-  (the parent is the source of truth); they cannot make a stale reconciliation write succeed unless they leave `rtVersion`
-  exactly at the value the job read.
-- Logs: a failing mirror or tenant is a Warning (not an Error every pass); test seams `BeforeMirrorWriteForTests` /
-  `BeforeMirrorInsertForTests` (internal) let the integration tests interleave writers.
+  the parent was read after it; neither a removed secret nor a superseded own secret can come back.
+- 🔴 **All other writers of a client record are versioned too (AB#8054).** Every writer that can touch a mirror writes with the
+  `rtVersion` it read, so its write advances `rtVersion` and a reconciliation pass that read the mirror before it fails its check
+  and re-reads (before, such a write left `rtVersion` unchanged and the stale pass overwrote it unnoticed):
+
+  | Writer | How |
+  |---|---|
+  | REST client `PUT`, overlay URIs, overlay clean-up, `PATCH autoProvisionInChildTenants` (any tenant, mirrors included) | `IOctoClientStore.MutateAsync` (AB#8015; `UpdateAsync` is gone), retry on conflict, `409` after 20 attempts |
+  | `octo-cli` token-exchange grant step (`OctoCliTokenExchangeGrant`) | replace with the version read in the same transaction |
+  | Post-blueprint URI restore / URI family pass (`DefaultConfigurationCreatorService`) | replace with the version read in the same transaction |
+  | Bus consumer `CreateIdentityDataCommandRequestConsumer` (existing client) | replace with the version read in the same transaction; a conflict fails the message, which is retried |
+  | Tracking row: immediate sync, start-up provisioning, mirror secret rotation | the row is re-read right before the write (sync) and written with its version; a concurrent bump wins (the counter is informational). When the sync or the provisioning had to **insert** the mirror, the versioned row write claims the insert, exactly as the reconciliation does: a row that changed or vanished meanwhile (another writer re-created the mirror, `RemoveMirrorAsync`, the delete cleanup) withdraws the inserted client, so no duplicate and no untracked mirror (a removed mirror the sync would otherwise have re-created) stays behind |
+  | **Blueprint seed upsert** (engine `ImportRt`, `ImportStrategy.Upsert`) | **not changed** (decision AB#8054, see below) |
+
+  **Blueprint seed upsert - why no engine change.** The import reads the stored entity (to keep its `Secret` / `TenantOwned`
+  attributes) and replaces it in **one MongoDB transaction**. A write that commits after that read makes the replace fail with a
+  write conflict (MongoDB snapshot isolation; the engine reports the same case as a version mismatch for versioned writes), so the
+  seed can never write back a secret the reconciliation or a secret delete removed in between - it is not a stale writer. What it
+  does not do is advance `rtVersion`, so a reconciliation pass that read the mirror before the seed write overwrites the seed's
+  values with the values derived from the parent: the intended direction (a mirror is derived data), and the start-up provisioning
+  that runs right after the apply in `SetupTenantAsync` converges every system-parent mirror again anyway. Making the bulk upsert
+  version-checked would change every `ImportRt` caller (blueprints, migrations, user imports) for no security gain.
+  `TransactionalReadModifyWrite_ThatReadTheMirrorBeforeTheJobsWrite_CannotWriteTheRemovedSecretBack` pins the guarantee.
+- Logs: a failing mirror or tenant is a Warning (not an Error every pass); test seams `BeforeMirrorWriteForTests` (client id,
+  child tenant id) / `BeforeMirrorInsertForTests` / `BeforeMissingMirrorWriteForTests` (AB#8054: between the child read of a missing
+  mirror and its insert) (internal) let the integration tests interleave writers.
 - **Expiry is copied now.** `CopySecrets` dropped `ExpirationDateTime`, so a parent secret that expired kept
   authenticating in every child tenant; mirrors now carry the expiry (also the carried-over own secret).
 - **Metrics/logs:** meter `Meshmakers.Octo.Identity` (registered in `Program.cs` via
@@ -643,7 +662,9 @@ in the child tenants until a restart. A compensation job (decision OD-6: no outb
   valid in the child after the failed sync, gone after the job, child token refused; added secret; expired parent
   secret; in-sync mirror (rich client) not written; orphaned mirror removed after the grace pass; two parallel passes
   without a duplicate; a mirror secret rotation and an immediate sync interleaved between the job's parent read and its
-  write (red with unversioned writers); a missing mirror whose row is removed before the insert; two parallel passes
+  write (red with unversioned writers); AB#8054: a client `PUT` in the child tenant, the `octo-cli` grant step and an immediate sync
+  that re-creates a missing mirror, each between the job's reads and its write (red with unversioned writers), and a transactional
+  stale write that cannot bring a removed secret back; a missing mirror whose row is removed before the insert; two parallel passes
   re-creating a missing mirror; metric and log canary),
   `tests/IdentityServerPersistence.UnitTests/Services/ClientMirrorReconciliationTests.cs` (comparison incl. token fields,
   marker case, read order + version, conflict, orphan with grace pass and foreign client, unreachable child, withdrawn
@@ -663,7 +684,7 @@ in the child tenants until a restart. A compensation job (decision OD-6: no outb
 
 Backed by `ClientMirrorController` + `ClientAutoProvisionFlagController` in
 `TenantApi/v1/Controllers/`. The `PATCH` flow piggybacks on
-`ClientStore.UpdateAsync` so the post-commit upkeep hook (#4044) fires
+`ClientStore.MutateAsync` (version-checked, AB#8015) so the post-commit upkeep hook (#4044) fires
 automatically — flipping the flag from `false` → `true` does **not**
 backfill existing sub-tenants; the operator must explicitly trigger
 `provisionInExistingTenants` for that (or wait for the next service
@@ -1270,7 +1291,7 @@ like the password methods (production gate of 2026-10-23, B0); off = `METHOD_HAN
 | Public client | accepted | `CLIENT_SECRET_NOT_REQUIRED` (it never authenticates with a secret) |
 | Expiration in the past | accepted | `METHOD_VALIDATION_FAILED` (`field=expirationDate`) |
 | Remove | by the stored value (Base64 in the route); 404 without the value (since AB#7989; before it, the delete removed nothing, see below) | by the stored value **or** the clear text (hashed, fixed-time compare); every match removed with `RemoveAll` (AB#7989); no match = `SECRET_NOT_FOUND` without parameters |
-| Write | `IOctoClientStore.UpdateAsync` (replace without expected version, mirror sync) + `CorsClientsUpdate` | version-checked read-modify-write of the client (`MutateClientAsync`: read, change, replace with the read `rtVersion`, re-read and re-apply on `RtVersionConflictException`, 20 attempts), so concurrent adds keep every secret and an add never brings a removed secret back; then mirror sync and `CorsClientsUpdate`, both best effort (5 s bound for the publish: a committed change is never reported as failed) |
+| Write | `IOctoClientStore.MutateAsync` (version-checked since AB#7989, mirror sync) + `CorsClientsUpdate` | version-checked read-modify-write of the client (`MutateClientAsync`: read, change, replace with the read `rtVersion`, re-read and re-apply on `RtVersionConflictException`, 20 attempts), so concurrent adds keep every secret and an add never brings a removed secret back; then mirror sync and `CorsClientsUpdate`, both best effort (5 s bound for the publish: a committed change is never reported as failed) |
 | Description | free text | `octo:mirror-own-secret` (the marker of a mirror's own secret, AB#5061) = `METHOD_VALIDATION_FAILED` (`field=description`) |
 
 - **Authentication** goes through `OctoApplicationManager` (every unexpired record of the client), so a new secret authenticates at once and a removed one
@@ -1296,8 +1317,12 @@ answer 404 when nothing matched. **Every REST secret write** (POST, PUT, DELETE 
 read-modify-write (`IOctoClientStore.MutateAsync`, `IOctoResourceStore.MutateApiResourceAsync`, helper `GuardedEntityMutation`: read in a transaction,
 change, replace with the `rtVersion` that was read, re-read and re-apply on `RtVersionConflictException`, 20 attempts, then `409` problem). Before,
 `UpdateAsync` replaced the snapshot unversioned, so two overlapping secret writes could bring a deleted secret back or drop an added one
-(review finding on PR #225). The other callers of `ClientStore.UpdateAsync` / `UpdateApiResourceAsync` (full client or resource PUT) still replace
-unversioned; a full client update that read the client before a secret delete can still write the old secret list back. 🔴 **Rule for every record list of a stored entity:** never `Remove(item)` / `Contains(item)` / `IndexOf(item)` with
+(review finding on PR #225). **The full updates followed (AB#8015):** the client `PUT` (and the overlay URI endpoints and the flag `PATCH`) and the API
+resource `PUT` applied their DTO to an entity read before and replaced it without an expected version, so a full update that overlapped a secret
+delete wrote the deleted secret back. They now run as `MutateAsync` / `MutateApiResourceAsync` too (the DTO is applied to the fresh read, again on a
+conflict; `409` problem after 20 attempts); `ClientStore.UpdateAsync` and `ResourceStore.UpdateApiResourceAsync` were removed, so no unversioned
+client or API resource replace is left (`FullUpdates_ConcurrentWithSecretDeletes_NeverBringADeletedSecretBack`: six deletes and six full updates
+at once, red on the old code: deleted secrets came back and the overlapping updates answered 400/500). 🔴 **Rule for every record list of a stored entity:** never `Remove(item)` / `Contains(item)` / `IndexOf(item)` with
 an instance you enumerated; use `RemoveAll` / `FindIndex` with a predicate, and write a changed record back through the indexer (as
 `ReplaceSecret` in the PUT endpoints does; the PUT endpoints were not affected). No 404 of the controller echoes the secret value (the stored hash)
 any more. octo-cli (`DeleteApiSecretClient` / `DeleteApiSecretApiResource`, SDK `IdentityServicesClient`) is unchanged; Studio does not call

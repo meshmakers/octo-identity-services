@@ -135,24 +135,6 @@ public class ResourceStore(IMultiTenancyResolverService multiTenancyResolverServ
         await session.CommitTransactionAsync();
     }
 
-    public async Task UpdateApiResourceAsync(string apiResourceName, RtApiResource newApiResource)
-    {
-        ArgumentValidation.ValidateString(nameof(apiResourceName), apiResourceName);
-
-        using var session = await TenantRepository.GetSessionAsync();
-        session.StartTransaction();
-
-        var apiResource = (await FindRtApiResourcesByNameAsync(new[] { apiResourceName })).FirstOrDefault();
-        if (apiResource == null)
-        {
-            throw new NotExistingException($"API resource with name '{apiResourceName}' does not exist.");
-        }
-
-        await TenantRepository.ReplaceOneRtEntityByIdAsync(session, apiResource.RtId, newApiResource);
-
-        await session.CommitTransactionAsync();
-    }
-
     public async Task<RtApiResource?> MutateApiResourceAsync(string apiResourceName, Func<RtApiResource, bool> mutate)
     {
         ArgumentValidation.ValidateString(nameof(apiResourceName), apiResourceName);

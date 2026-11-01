@@ -595,7 +595,10 @@ internal class DefaultConfigurationCreatorService(
                 continue;
             }
 
-            await tenantRepository.ReplaceOneRtEntityByIdAsync(session, clientRtId, postApplyClient);
+            // AB#8054: written with the version read in this transaction (the write advances rtVersion, see
+            // ClientMirrorProvisioningService.ReconcileMirrorAsync).
+            await tenantRepository.ReplaceOneRtEntityByIdAsync(session, clientRtId, postApplyClient,
+                postApplyClient.RtVersion);
             restoredClients++;
             restoredEntries += capture.RedirectUris.Count
                                + capture.PostLogoutRedirectUris.Count
@@ -673,7 +676,9 @@ internal class DefaultConfigurationCreatorService(
 
             BlueprintClientUriFamilyResolver.ApplyToClient(postApplyClient, expansion);
 
-            await tenantRepository.ReplaceOneRtEntityByIdAsync(session, clientRtId, postApplyClient);
+            // AB#8054: written with the version read in this transaction, as the restore pass above.
+            await tenantRepository.ReplaceOneRtEntityByIdAsync(session, clientRtId, postApplyClient,
+                postApplyClient.RtVersion);
             expandedClients++;
             expandedEntries += expansion.RedirectUris.Count
                                + expansion.PostLogoutRedirectUris.Count
