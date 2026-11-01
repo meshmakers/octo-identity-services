@@ -254,6 +254,10 @@ Transfers all external logins (e.g., Google, Microsoft) from the source user to 
 | PUT | `/apiSecrets/client/{clientId}` | ReadWrite | Update client secret |
 | DELETE | `/apiSecrets/client/{clientId}/{secretValue}` | ReadWrite | Delete secret |
 
+The same operations exist as CK methods on the client entity (AB#7780): `System.Identity/Client.AddSecret-1` (result = the generated
+secret, shown once, `sensitive`) and `Client.RemoveSecret-1` (`secretValue` = stored value or clear text). They are hosted only with
+`Methods:Identity:EnablePasswordMethods=true`; rules and differences to REST: `CLAUDE.md`, section "Client secret methods".
+
 #### API Resource Secrets
 
 | Method | Endpoint | Policy | Description |

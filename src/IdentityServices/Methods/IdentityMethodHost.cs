@@ -58,7 +58,12 @@ internal static class IdentityMethodHost
         new(SystemIdentityCkIds.DataPermissionGrantToRoleMethodId, typeof(DataPermissionGrantToRoleHandler), false,
             b => b.Handle<DataPermissionGrantToRoleHandler>(SystemIdentityCkIds.DataPermissionGrantToRoleMethodId)),
         new(SystemIdentityCkIds.DataPermissionRevokeFromRoleMethodId, typeof(DataPermissionRevokeFromRoleHandler), false,
-            b => b.Handle<DataPermissionRevokeFromRoleHandler>(SystemIdentityCkIds.DataPermissionRevokeFromRoleMethodId))
+            b => b.Handle<DataPermissionRevokeFromRoleHandler>(SystemIdentityCkIds.DataPermissionRevokeFromRoleMethodId)),
+        // Client secret methods carry a secret (sensitive result / parameter): gated like the password methods (AB#7780).
+        new(SystemIdentityCkIds.ClientAddSecretMethodId, typeof(ClientAddSecretHandler), true,
+            b => b.Handle<ClientAddSecretHandler>(SystemIdentityCkIds.ClientAddSecretMethodId)),
+        new(SystemIdentityCkIds.ClientRemoveSecretMethodId, typeof(ClientRemoveSecretHandler), true,
+            b => b.Handle<ClientRemoveSecretHandler>(SystemIdentityCkIds.ClientRemoveSecretMethodId))
     ];
 
     /// <summary>

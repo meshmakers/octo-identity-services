@@ -5,6 +5,7 @@ using Meshmakers.Octo.Services.Notifications.Services;
 using Meshmakers.Octo.Runtime.Contracts.MongoDb.Configuration;
 using Meshmakers.Octo.ConstructionKit.Contracts.Services;
 using Meshmakers.Octo.Services.Methods;
+using Meshmakers.Octo.Services.Methods.Authorization;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
@@ -56,6 +57,32 @@ public class IdentityMethodHostTests
 
         selected.Select(h => h.MethodId).Should().Contain(SystemIdentityCkIds.UserChangePasswordMethodId)
             .And.Contain(SystemIdentityCkIds.UserResetPasswordMethodId);
+    }
+
+    [Fact]
+    public void ClientSecretMethods_CarryASecret_AndAreSelectedOnlyWithTheSwitch()
+    {
+        string[] secretMethods = [SystemIdentityCkIds.ClientAddSecretMethodId, SystemIdentityCkIds.ClientRemoveSecretMethodId];
+
+        IdentityMethodHost.Handlers.Where(h => secretMethods.Contains(h.MethodId)).Should().HaveCount(2)
+            .And.OnlyContain(h => h.CarriesSecret, "AddSecret has a sensitive result, RemoveSecret a sensitive parameter (AB#7780)");
+        IdentityMethodHost.SelectHandlers(new IdentityMethodsOptions()).Select(h => h.MethodId).Should()
+            .NotContain(secretMethods);
+        IdentityMethodHost.SelectHandlers(new IdentityMethodsOptions { EnablePasswordMethods = true })
+            .Select(h => h.MethodId).Should().Contain(secretMethods);
+    }
+
+    [Theory]
+    [InlineData(new[] { "TenantManagement" }, new[] { "octo_api" }, true)]
+    [InlineData(new[] { "usermanagement" }, new[] { "octo_api" }, true)]
+    [InlineData(new[] { "TenantManagement" }, new[] { "octo_api.read_only" }, false)]
+    [InlineData(new[] { "AdminPanelManagement" }, new[] { "octo_api" }, false)]
+    [InlineData(new string[0], new[] { "octo_api" }, false)]
+    public void ClientSecretCaller_NeedsTheWriteScopeAndATenantAdministrationRole(string[] roles, string[] scopes,
+        bool allowed)
+    {
+        ClientSecretMethodHandlerBase.IsClientAdministrator(new CkMethodPrincipal("u", roles, scopes)).Should().Be(allowed);
+        ClientSecretMethodHandlerBase.IsClientAdministrator(null).Should().BeFalse();
     }
 
     [Fact]
