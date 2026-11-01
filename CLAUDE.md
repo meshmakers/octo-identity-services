@@ -1203,13 +1203,19 @@ like the password methods (production gate of 2026-10-23, B0); off = `METHOD_HAN
 answered 200 but removed nothing for an entity read from MongoDB: the `AttributeRecordValueList` of such an entity holds plain `RtRecord`s and
 hands out **new** `RtSecretRecord` wrappers on every enumeration, so `Remove(wrapper)` found nothing and returned `false` silently; a revoked
 client secret kept authenticating. Both endpoints now call `RemoveAll(predicate)` (as the `Client.RemoveSecret` method of AB#7780 does) and
-answer 404 when nothing matched. 🔴 **Rule for every record list of a stored entity:** never `Remove(item)` / `Contains(item)` / `IndexOf(item)` with
+answer 404 when nothing matched. **Every REST secret write** (POST, PUT, DELETE for clients and API resources) is now a version-checked
+read-modify-write (`IOctoClientStore.MutateAsync`, `IOctoResourceStore.MutateApiResourceAsync`, helper `GuardedEntityMutation`: read in a transaction,
+change, replace with the `rtVersion` that was read, re-read and re-apply on `RtVersionConflictException`, 20 attempts, then `409` problem). Before,
+`UpdateAsync` replaced the snapshot unversioned, so two overlapping secret writes could bring a deleted secret back or drop an added one
+(review finding on PR #225). The other callers of `ClientStore.UpdateAsync` / `UpdateApiResourceAsync` (full client or resource PUT) still replace
+unversioned; a full client update that read the client before a secret delete can still write the old secret list back. 🔴 **Rule for every record list of a stored entity:** never `Remove(item)` / `Contains(item)` / `IndexOf(item)` with
 an instance you enumerated; use `RemoveAll` / `FindIndex` with a predicate, and write a changed record back through the indexer (as
 `ReplaceSecret` in the PUT endpoints does; the PUT endpoints were not affected). No 404 of the controller echoes the secret value (the stored hash)
 any more. octo-cli (`DeleteApiSecretClient` / `DeleteApiSecretApiResource`, SDK `IdentityServicesClient`) is unchanged; Studio does not call
 these endpoints. API resource secrets authenticate nothing since the OpenIddict migration, so only the client case has a token-endpoint
 test. Tests: `ApiSecretsControllerTests` (`DeleteClientSecret_*` with the token endpoint, `DeleteApiResourceSecret_*`, unknown secret / owner,
-403, PUT of an API resource secret persisted, no hash in the logs at the deployed levels).
+403, PUT of an API resource secret persisted, no hash in the logs at the deployed levels, `ConcurrentSecretWrites_*`: four deletes and six creates at
+once lose nothing and bring nothing back, red with the unversioned write).
 
 ### Blueprint-owned opt-in: `DataPolicy.ProtectBlueprintLocked` (AB#6384; System.Identity 2.24.0)
 

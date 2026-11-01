@@ -367,6 +367,42 @@ public class ApiSecretsControllerTests : IntegrationTestBase
         (await GetStoredSecretValuesAsync(kind, target)).Should().Equal(hash);
     }
 
+    [Theory]
+    [InlineData("client")]
+    [InlineData("apiResource")]
+    public async Task ConcurrentSecretWrites_LoseNoUpdate_AndNeverBringADeletedSecretBack(string kind)
+    {
+        var ct = TestContext.Current.CancellationToken;
+        var target = kind == "client" ? await CreateMachineClientAsync() : await CreateApiResourceAsync();
+        var revoked = new List<(string ClearText, string Hash)>();
+        for (var i = 0; i < 4; i++)
+        {
+            revoked.Add(await CreateSecretAsync(kind, target));
+        }
+
+        // Four deletes and six creates for the same owner at once: every write reads the owner first, so an
+        // unversioned replace would write back secrets another request removed, or drop one another request added.
+        var deletes = revoked.Select(r => Client.DeleteAsync(DeleteUrl(kind, target, r.Hash), ct)).ToList();
+        var creates = Enumerable.Range(0, 6).Select(_ => Client.PostAsJsonAsync(SecretsUrl(kind, target), new { }, ct)).ToList();
+        var responses = await Task.WhenAll(deletes.Concat(creates));
+
+        responses.Select(r => r.StatusCode).Should().AllBeEquivalentTo(HttpStatusCode.OK);
+        var created = new List<string>();
+        foreach (var response in responses.Skip(deletes.Count))
+        {
+            created.Add((await response.Content.ReadFromJsonAsync<JsonObject>(ct))!["valueEncrypted"]!.GetValue<string>());
+        }
+
+        (await GetStoredSecretValuesAsync(kind, target)).Should().BeEquivalentTo(created);
+        if (kind == "client")
+        {
+            foreach (var (clearText, _) in revoked)
+            {
+                (await RequestTokenAsync(target, clearText)).StatusCode.Should().Be(HttpStatusCode.Unauthorized);
+            }
+        }
+    }
+
     // ---------------------------------------------------------------- no secret in the logs
 
     [Fact]

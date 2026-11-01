@@ -153,6 +153,20 @@ public class ResourceStore(IMultiTenancyResolverService multiTenancyResolverServ
         await session.CommitTransactionAsync();
     }
 
+    public async Task<RtApiResource?> MutateApiResourceAsync(string apiResourceName, Func<RtApiResource, bool> mutate)
+    {
+        ArgumentValidation.ValidateString(nameof(apiResourceName), apiResourceName);
+
+        var outcome = await GuardedEntityMutation.MutateAsync(TenantRepository, async session =>
+        {
+            var queryOptions = RtEntityQueryOptions.Create()
+                .FieldFilter(nameof(RtApiResource.Name), FieldFilterOperator.Equals, apiResourceName);
+            var result = await TenantRepository.GetRtEntitiesByTypeAsync<RtApiResource>(session, queryOptions);
+            return result.Items.FirstOrDefault();
+        }, mutate);
+        return outcome?.Entity;
+    }
+
     public async Task<IEnumerable<RtApiResource>> FindRtApiResourcesByScopeNameAsync(IEnumerable<string> scopeNames)
     {
         using var session = await TenantRepository.GetSessionAsync();

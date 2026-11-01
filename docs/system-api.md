@@ -311,7 +311,9 @@ is returned only once, in the creation response; neither it nor a hash is logged
 path (what octo-cli `DeleteApiSecretClient` / `DeleteApiSecretApiResource` send). The call removes every
 stored secret with that hash and answers 200; a deleted client secret no longer authenticates at the token
 endpoint (the cache event `CorsClientsUpdate` is published as for every secret write). It answers 404 when
-the client / API resource or the secret does not exist. No 404 answer echoes the secret value. Before
+the client / API resource or the secret does not exist. No 404 answer echoes the secret value. Every secret write (POST, PUT,
+DELETE) is version-checked against concurrent secret writes of the same client / API resource; after repeated concurrent changes
+it answers `409` (`application/problem+json`), retry the call. Before
 AB#7989 the endpoint answered 200 for a client or API resource read from the database but removed nothing.
 API resource secrets authenticate nothing since the OpenIddict migration (introspection authenticates
 clients); the endpoints only manage the stored data.
