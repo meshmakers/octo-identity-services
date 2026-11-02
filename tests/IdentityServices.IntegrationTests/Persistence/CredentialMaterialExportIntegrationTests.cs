@@ -177,6 +177,7 @@ public class CredentialMaterialExportIntegrationTests : IClassFixture<IdentitySe
     [InlineData("TwoFactorEnabled", "value: false")]
     [InlineData("LockoutEnd", "value: 2000-01-01T00:00:00Z")]
     [InlineData("EmailConfirmed", "value: true")]
+    [InlineData("AccessFailedCount", "value: 0")] // ReadOnly until 2.30.0 (importable); MethodOnly since 3.0.0
     public async Task ImportRt_OfAHiddenOrMethodOnlyUserAttribute_IsRefusedWithCk139_AndWritesNothing(
         string attribute, string value)
     {
@@ -194,20 +195,7 @@ public class CredentialMaterialExportIntegrationTests : IClassFixture<IdentitySe
     }
 
     [Fact]
-    public async Task ImportRt_OfAReadOnlyUserAttribute_StaysPossible()
-    {
-        var repo = await GetRepositoryAsync();
-        var rtId = OctoObjectId.GenerateNewId();
-
-        await ImportAsync(repo,
-            UserSeed(rtId, "Ada", "\n      - id: System.Identity/AccessFailedCount\n        value: 2"),
-            ImportStrategy.Upsert);
-
-        (await LoadUserAsync(repo, rtId)).AccessFailedCount.Should().Be(2);
-    }
-
-    [Fact]
-    public async Task IdentityRepositoryWrites_OfHiddenMethodOnlyAndReadOnlyAttributes_StillWork()
+    public async Task IdentityRepositoryWrites_OfHiddenAndMethodOnlyAttributes_StillWork()
     {
         // The identity service writes these through its own repository (sign-in counters, lockout, password
         // change, user provisioning); the access modifiers guard the generic paths, not this one.
@@ -328,7 +316,7 @@ public class CredentialMaterialExportIntegrationTests : IClassFixture<IdentitySe
         $"""
             $schema: https://schemas.meshmakers.cloud/runtime-model.schema.json
             dependencies:
-              - System.Identity-2.28.0
+              - System.Identity-3.0.0
             entities:
               - rtId: '{rtId}'
                 ckTypeId: System.Identity/User
@@ -336,12 +324,6 @@ public class CredentialMaterialExportIntegrationTests : IClassFixture<IdentitySe
                   - id: System.Identity/FirstName
                     value: {firstName}
                   - id: System.Identity/LastName
-                    value: Lovelace
-                  - id: System.Identity/EmailConfirmed
-                    value: true
-                  - id: System.Identity/PhoneNumberConfirmed
-                    value: false
-                  - id: System.Identity/TwoFactorEnabled
-                    value: true{extraAttributes}
+                    value: Lovelace{extraAttributes}
             """;
 }
