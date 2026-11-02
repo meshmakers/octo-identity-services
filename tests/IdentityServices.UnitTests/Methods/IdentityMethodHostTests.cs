@@ -1,4 +1,5 @@
 using FluentAssertions;
+using Meshmakers.Octo.Backend.IdentityServices.Authorization;
 using Meshmakers.Octo.Backend.IdentityServices.Methods;
 using Meshmakers.Octo.Services.Notifications.Generated.System.Notification.v2;
 using Meshmakers.Octo.Services.Notifications.Services;
@@ -86,17 +87,41 @@ public class IdentityMethodHostTests
             .Select(h => h.MethodId).Should().Contain(secretMethods);
     }
 
+    // AB#5861: SecretManagement (REST parity with IdentitySecretAdministrationPolicy); in the staged Warn mode the
+    // previous roles still pass (logged), in Enforce only SecretManagement. The write scope is always required.
     [Theory]
-    [InlineData(new[] { "TenantManagement" }, new[] { "octo_api" }, true)]
-    [InlineData(new[] { "usermanagement" }, new[] { "octo_api" }, true)]
-    [InlineData(new[] { "TenantManagement" }, new[] { "octo_api.read_only" }, false)]
-    [InlineData(new[] { "AdminPanelManagement" }, new[] { "octo_api" }, false)]
-    [InlineData(new string[0], new[] { "octo_api" }, false)]
-    public void ClientSecretCaller_NeedsTheWriteScopeAndATenantAdministrationRole(string[] roles, string[] scopes,
-        bool allowed)
+    [InlineData(new[] { "SecretManagement" }, new[] { "octo_api" }, IdentityApiRoleEnforcementMode.Enforce, IdentityApiRoleDecision.Allowed)]
+    [InlineData(new[] { "secretmanagement" }, new[] { "octo_api" }, IdentityApiRoleEnforcementMode.Warn, IdentityApiRoleDecision.Allowed)]
+    [InlineData(new[] { "TenantManagement" }, new[] { "octo_api" }, IdentityApiRoleEnforcementMode.Warn, IdentityApiRoleDecision.AllowedByStagedWarn)]
+    [InlineData(new[] { "usermanagement" }, new[] { "octo_api" }, IdentityApiRoleEnforcementMode.Warn, IdentityApiRoleDecision.AllowedByStagedWarn)]
+    [InlineData(new[] { "TenantManagement" }, new[] { "octo_api" }, IdentityApiRoleEnforcementMode.Enforce, IdentityApiRoleDecision.Denied)]
+    [InlineData(new[] { "UserManagement" }, new[] { "octo_api" }, IdentityApiRoleEnforcementMode.Enforce, IdentityApiRoleDecision.Denied)]
+    [InlineData(new[] { "SecretManagement" }, new[] { "octo_api.read_only" }, IdentityApiRoleEnforcementMode.Warn, IdentityApiRoleDecision.Denied)]
+    [InlineData(new[] { "AdminPanelManagement" }, new[] { "octo_api" }, IdentityApiRoleEnforcementMode.Warn, IdentityApiRoleDecision.Denied)]
+    [InlineData(new string[0], new[] { "octo_api" }, IdentityApiRoleEnforcementMode.Warn, IdentityApiRoleDecision.Denied)]
+    public void ClientSecretCaller_NeedsTheWriteScopeAndSecretManagement_StagedBySecretManagementRoleEnforcement(
+        string[] roles, string[] scopes, IdentityApiRoleEnforcementMode secretMode, IdentityApiRoleDecision expected)
     {
-        ClientSecretMethodHandlerBase.IsClientAdministrator(new CkMethodPrincipal("u", roles, scopes)).Should().Be(allowed);
-        ClientSecretMethodHandlerBase.IsClientAdministrator(null).Should().BeFalse();
+        var options = new IdentityApiAuthorizationOptions { SecretManagementRoleEnforcement = secretMode };
+
+        ClientSecretMethodHandlerBase.DecideClientSecretCaller(new CkMethodPrincipal("u", roles, scopes), options)
+            .Should().Be(expected);
+        ClientSecretMethodHandlerBase.DecideClientSecretCaller(null, options).Should().Be(IdentityApiRoleDecision.Denied);
+    }
+
+    [Fact]
+    public void ClientSecretCaller_TheClusterWideWarnSwitch_AlsoRelaxesToThePreviousRoles_ButNotFurther()
+    {
+        var options = new IdentityApiAuthorizationOptions
+        {
+            RoleEnforcement = IdentityApiRoleEnforcementMode.Warn,
+            SecretManagementRoleEnforcement = IdentityApiRoleEnforcementMode.Enforce
+        };
+
+        ClientSecretMethodHandlerBase.DecideClientSecretCaller(new CkMethodPrincipal("u", ["TenantManagement"], ["octo_api"]),
+            options).Should().Be(IdentityApiRoleDecision.AllowedByStagedWarn);
+        ClientSecretMethodHandlerBase.DecideClientSecretCaller(new CkMethodPrincipal("u", ["DashboardViewer"], ["octo_api"]),
+            options).Should().Be(IdentityApiRoleDecision.Denied);
     }
 
     [Fact]

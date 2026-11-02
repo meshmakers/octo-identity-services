@@ -25,6 +25,9 @@ namespace Meshmakers.Octo.Backend.IdentityServices.TenantApi.v1.Controllers;
 [Route(IdentityServiceConstants.ApiPathPrefix + "/[controller]")]
 [ApiController]
 [ApiVersion(IdentityServiceConstants.ApiVersion1)]
+// AB#5861: reads (list, lookup) keep IdentityTenantAdministrationReadPolicy — they return metadata and the stored
+// one-way hash, never a clear text. Every write (create, rotate, delete) needs IdentitySecretAdministrationPolicy
+// (role SecretManagement, staged by IdentityApiAuthorization:SecretManagementRoleEnforcement).
 public class ApiSecretsController : ControllerBase
 {
     private readonly IDistributionEventHubService _distributionEventHubService;
@@ -203,7 +206,7 @@ public class ApiSecretsController : ControllerBase
 
     // POST system/v1/apiSecrets/client/xyz
     [HttpPost("client/{clientId}")]
-    [Authorize(IdentityServiceConstants.IdentityTenantAdministrationWritePolicy)]
+    [Authorize(IdentityServiceConstants.IdentitySecretAdministrationPolicy)]
     [EndpointSummary("Creates a new secret for a client")]
     [ProducesResponseType(typeof(ApiSecretDto), StatusCodes.Status200OK)]
     public async Task<IActionResult> PostClient(
@@ -248,7 +251,7 @@ public class ApiSecretsController : ControllerBase
 
     // POST system/v1/apiSecrets/apiResource/xyz
     [HttpPost("apiResource/{apiResourceName}")]
-    [Authorize(IdentityServiceConstants.IdentityTenantAdministrationWritePolicy)]
+    [Authorize(IdentityServiceConstants.IdentitySecretAdministrationPolicy)]
     [EndpointSummary("Creates a new secret for an API resource")]
     [ProducesResponseType(typeof(ApiSecretDto), StatusCodes.Status200OK)]
     public async Task<IActionResult> PostApiResource(
@@ -293,7 +296,7 @@ public class ApiSecretsController : ControllerBase
 
     // PUT system/v1/apiSecrets/apiResource/xyz
     [HttpPut("client/{clientId}")]
-    [Authorize(IdentityServiceConstants.IdentityTenantAdministrationWritePolicy)]
+    [Authorize(IdentityServiceConstants.IdentitySecretAdministrationPolicy)]
     [EndpointSummary("Updates a secret")]
     [ProducesResponseType(StatusCodes.Status200OK)]
     public async Task<IActionResult> PutClient(
@@ -344,7 +347,7 @@ public class ApiSecretsController : ControllerBase
 
     // PUT system/v1/apiSecrets/apiResource/xyz
     [HttpPut("apiResource/{apiResourceName}")]
-    [Authorize(IdentityServiceConstants.IdentityTenantAdministrationWritePolicy)]
+    [Authorize(IdentityServiceConstants.IdentitySecretAdministrationPolicy)]
     [EndpointSummary("Updates a secret")]
     [ProducesResponseType(StatusCodes.Status200OK)]
     public async Task<IActionResult> PutApiResource(
@@ -401,7 +404,7 @@ public class ApiSecretsController : ControllerBase
     ///     it; the API already uses POST sub-resources for actions (<c>users/{userName}/revokeSessions</c>).
     /// </summary>
     [HttpPost("client/{clientId}/" + DeleteAction)]
-    [Authorize(IdentityServiceConstants.IdentityTenantAdministrationWritePolicy)]
+    [Authorize(IdentityServiceConstants.IdentitySecretAdministrationPolicy)]
     [EndpointSummary("Deletes a secret of a client (stored value in the body)")]
     [ProducesResponseType(StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
@@ -425,7 +428,7 @@ public class ApiSecretsController : ControllerBase
     ///     clients; use <c>POST apiSecrets/client/{clientId}/delete</c>.
     /// </summary>
     [HttpDelete("client/{clientId}/{" + LegacySecretRouteValue + "}")]
-    [Authorize(IdentityServiceConstants.IdentityTenantAdministrationWritePolicy)]
+    [Authorize(IdentityServiceConstants.IdentitySecretAdministrationPolicy)]
     [EndpointSummary("Deprecated: deletes a secret of a client (stored value in the path)")]
     [ProducesResponseType(StatusCodes.Status200OK)]
     public async Task<IActionResult> DeleteSecretOfClient(
@@ -481,7 +484,7 @@ public class ApiSecretsController : ControllerBase
     ///     <see cref="DeleteClientSecret" />.
     /// </summary>
     [HttpPost("apiResource/{apiResourceName}/" + DeleteAction)]
-    [Authorize(IdentityServiceConstants.IdentityTenantAdministrationWritePolicy)]
+    [Authorize(IdentityServiceConstants.IdentitySecretAdministrationPolicy)]
     [EndpointSummary("Deletes a secret of an API resource (stored value in the body)")]
     [ProducesResponseType(StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
@@ -505,7 +508,7 @@ public class ApiSecretsController : ControllerBase
     ///     clients; use <c>POST apiSecrets/apiResource/{apiResourceName}/delete</c>.
     /// </summary>
     [HttpDelete("apiResource/{apiResourceName}/{" + LegacySecretRouteValue + "}")]
-    [Authorize(IdentityServiceConstants.IdentityTenantAdministrationWritePolicy)]
+    [Authorize(IdentityServiceConstants.IdentitySecretAdministrationPolicy)]
     [EndpointSummary("Deprecated: deletes a secret of an API resource (stored value in the path)")]
     [ProducesResponseType(StatusCodes.Status200OK)]
     public async Task<IActionResult> DeleteSecretOfApiResource(

@@ -394,6 +394,31 @@ The former `DeviceApiController` (`/api/device/*`) now only holds the DTOs — t
 
 All scheme creators accept an optional `schemeNameOverride` parameter. When provided (e.g., a tenant-prefixed name like `octosystem:Google`), the scheme is registered under that name instead of the provider's `Name` property. The display name remains unchanged.
 
+### Who May Manage API Secrets (AB#5861)
+
+API secrets are the credentials of OAuth clients (client credentials grant) and API resources (introspection).
+Creating, rotating and deleting them needs the tenant role `SecretManagement` (role `660000000000000000000060`,
+System.Identity.Bootstrap 1.7.0) in the caller's token, on every path:
+
+| Path | Check |
+|------|-------|
+| REST `POST/PUT apiSecrets/{client\|apiResource}/…`, `POST …/delete`, deprecated `DELETE …/{secretValue}` | `IdentitySecretAdministrationPolicy` |
+| REST `POST clients`, `PUT clients/{id}` with a `clientSecret` in the body | the same policy, evaluated in the action |
+| CK methods `Client.AddSecret-1`, `Client.RemoveSecret-1` (behind `Methods:Identity:EnablePasswordMethods`) | the same requirement on the forwarded principal; the gateway still checks the declared roles `TenantManagement`/`UserManagement` (CK model unchanged) |
+| Internal: `CreateIdentityDataCommandRequest` (communication controller's pipeline service accounts, bus), client mirror sync | service-to-service, no user principal; unchanged |
+
+Reading the secret list (description, expiry, stored one-way hash, never a clear text) keeps
+`IdentityTenantAdministrationReadPolicy`.
+
+Who holds `SecretManagement`: the one-time grant `SecretManagementAdminGrant` (AB#5544) gave it, per tenant and once
+(marker `SecretManagementAdminGrant` in the tenant configuration), to every **local** user holding both
+`AdminPanelManagement` and `TenantManagement` at that moment; the first administrator of a new tenant gets it at setup.
+`TenantOwners` does not carry it (the group also holds clients and provisioned parent-tenant administrators), and
+cross-tenant shadow users, external tenant user mappings and clients never receive it automatically. Administrators
+added later need it assigned explicitly. Because of that gap the requirement is staged:
+`IdentityApiAuthorization:SecretManagementRoleEnforcement` defaults to `Warn` (previous roles still pass, logged) and
+goes to `Enforce` per cluster after the precheck (`docs/rollout-identity-rest-role-enforcement.md` § AB#5861).
+
 ### Client Secrets of External Providers (AB#5540)
 
 Since `System.Identity-2.25.0` the `ClientSecret` of Google, Microsoft, Facebook and Azure Entra ID

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# identity-rest-role-precheck.sh -- READ-ONLY precheck for AB#5859.
+# identity-rest-role-precheck.sh -- READ-ONLY precheck for AB#5859 (and the AB#5861 SecretManagement warn log).
 #
 # The identity tenant REST API ({tenant}/v1/...) requires tenant roles since AB#5859:
 #   UserManagement                    users, roles, groups, external tenant user mappings, data permissions, ...
@@ -54,6 +54,10 @@ Warn log
                            RoleEnforcement=Warn phase) for "would be denied with RoleEnforcement=Enforce
                            (AB#5859)" lines (and Enforce-mode "denied" lines) and aggregate them by
                            tenant/subject/client/method/path. The file is only read.
+                           AB#5861: also the API secret writes of callers without SecretManagement
+                           ("would be denied with SecretManagementRoleEnforcement=Enforce", event
+                           would-deny-secret) - every such subject needs SecretManagement before the
+                           switch goes to Enforce.
 
 Misc
   --dry-run                Only print the octo-cli commands that would run; run nothing.
@@ -369,9 +373,11 @@ parse_warn_log() {
     local file="$1"
     # 1) only lines of AB#5859; 2) drop message-template fields of structured (JSON) logs so the
     #    rendered message is matched, not "{Method} {Path}"; 3) extract fields ('|' separated).
-    grep -F 'AB#5859' "$file" \
+    grep -E 'AB#(5859|5861)' "$file" \
         | sed -E 's/"(MessageTemplate|messageTemplate|Template|template|@mt|@t)": *"[^"]*"//g' \
         | sed -nE \
+            -e 's/.*allowed by SecretManagementRoleEnforcement=Warn: ([^ ]+) ([^ ]+) in tenant ([^ ]*) by subject ([^ ]*) \/ client ([^ ,]*), required any of \[([^]]*)\].*/\3|would-deny-secret|\4|\5|\1|\2|\6/p' \
+            -e 's/.*secret method without required role allowed by SecretManagementRoleEnforcement=Warn in tenant ([^ ]*) by subject ([^ ]*) \/ client ([^ ,]*), required any of \[([^]]*)\].*/\1|would-deny-secret|\2|\3|METHOD|\/methods\/Client.AddSecret-or-RemoveSecret|\4/p' \
             -e 's/.*allowed by RoleEnforcement=Warn: ([^ ]+) ([^ ]+) in tenant ([^ ]*) by subject ([^ ]*) \/ client ([^ ,]*), required any of \[([^]]*)\].*/\3|would-deny|\4|\5|\1|\2|\6/p' \
             -e 's/.*Identity API call denied, required role missing: ([^ ]+) ([^ ]+) in tenant ([^ ]*) by subject ([^ ]*) \/ client ([^ ,]*), required any of \[([^]]*)\].*/\3|denied|\4|\5|\1|\2|\6/p' \
             -e "s/.*outside the caller's tenant subtree allowed by RoleEnforcement=Warn: caller tenant ([^ ,]*), target tenant ([^ ,]*), ([^ ]+) ([^ .]+).*/\\2|would-deny-provisioning|caller-tenant:\\1||\\3|\\4|subtree/p" \
@@ -487,7 +493,7 @@ fi
 
 if [ -n "$WARN_LOG" ]; then
     warn_log_report "$WARN_LOG"
-    WL="$(grep -cE '\|(would-deny|would-deny-provisioning)\|' "$WORK/warn.raw" || true)"
+    WL="$(grep -cE '\|(would-deny|would-deny-provisioning|would-deny-secret)\|' "$WORK/warn.raw" || true)"
     FINDINGS=$((FINDINGS + ${WL:-0}))
 fi
 

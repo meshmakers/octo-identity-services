@@ -16,6 +16,7 @@ using Microsoft.AspNetCore.Mvc;
 using Persistence.IdentityCkModel.Generated.System.Identity.v2;
 using Meshmakers.Octo.Backend.IdentityServices.OpenIddict;
 using Meshmakers.Octo.Backend.Authentication;
+using Meshmakers.Octo.Backend.IdentityServices.Authorization;
 using Meshmakers.Octo.Backend.IdentityServices.Authorization.RoleChange;
 using Meshmakers.Octo.ConstructionKit.Contracts;
 using Microsoft.AspNetCore.Identity;
@@ -326,6 +327,11 @@ public class ClientsController : ControllerBase
             return BadRequest(ModelState);
         }
 
+        if (await AuthorizeClientSecretWriteAsync(clientDto) is { } secretRefused)
+        {
+            return secretRefused;
+        }
+
         if (await _octoClientStore.FindRtClientByIdAsync(clientDto.ClientId) != null)
         {
             return Conflict($"Client with id '{clientDto.ClientId}' already exists.");
@@ -367,6 +373,11 @@ public class ClientsController : ControllerBase
         if (!ModelState.IsValid)
         {
             return BadRequest(ModelState);
+        }
+
+        if (await AuthorizeClientSecretWriteAsync(clientDto) is { } secretRefused)
+        {
+            return secretRefused;
         }
 
         try
@@ -762,6 +773,31 @@ public class ClientsController : ControllerBase
             DynamicRegistrationExpiresAt = applicationClient.DynamicRegistrationExpiresAt
         };
         return clientDto;
+    }
+
+    /// <summary>
+    ///     AB#5861: a <c>clientSecret</c> in the create/update body sets (replaces) the client's secret — the same power as
+    ///     <c>POST apiSecrets/client/{id}</c> — so it needs <see cref="IdentityServiceConstants.IdentitySecretAdministrationPolicy" />
+    ///     on top of the controller policy. Without a secret in the body nothing changes. Returns the 403 to answer
+    ///     (AB#5227 shape, naming the role), or <c>null</c>.
+    /// </summary>
+    private async Task<IActionResult?> AuthorizeClientSecretWriteAsync(ClientDto clientDto)
+    {
+        if (string.IsNullOrWhiteSpace(clientDto.ClientSecret))
+        {
+            return null;
+        }
+
+        var result = await HttpContext.RequestServices.GetRequiredService<IAuthorizationService>()
+            .AuthorizeAsync(User, HttpContext, IdentityServiceConstants.IdentitySecretAdministrationPolicy);
+        if (result.Succeeded)
+        {
+            return null;
+        }
+
+        var reason = result.Failure?.FailureReasons.FirstOrDefault()?.Message ??
+                     IdentityApiAuthorizationPolicies.SecretAdministrationRequirement.DeniedMessage();
+        return StatusCode(StatusCodes.Status403Forbidden, new { message = reason });
     }
 
     private void ApplyToClient(RtClient applicationClient, ClientDto clientDto)

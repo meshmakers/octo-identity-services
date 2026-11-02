@@ -1,3 +1,9 @@
+using System.Net.Http.Headers;
+using IdentityServerPersistence;
+using Meshmakers.Octo.Backend.IdentityServices.Authorization;
+using Meshmakers.Octo.Communication.Contracts;
+using Microsoft.AspNetCore.Identity;
+using Microsoft.Extensions.Options;
 using System.Buffers.Text;
 using System.Collections.Concurrent;
 using System.Net;
@@ -528,6 +534,246 @@ public class ApiSecretsControllerTests : IntegrationTestBase
         {
             deployed.Should().NotContain(hash).And.NotContain(hash.EncodeBase64());
         }
+    }
+
+    // ---------------------------------------------------------------- AB#5861 SecretManagement
+
+    private const string SecretManagement = "SecretManagement";
+    private const string TenantManagement = "TenantManagement";
+    private const string UserManagement = "UserManagement";
+
+    public static TheoryData<string, string, string, bool> SecretRoleMatrix()
+    {
+        // roles ("+"-separated, "" = no role) x operation x kind x Enforce?
+        string[] roleSets = ["", TenantManagement, UserManagement, SecretManagement, SecretManagement + "+" + TenantManagement];
+        string[] operations = ["GET", "POST", "PUT", "DELETE"];
+        var data = new TheoryData<string, string, string, bool>();
+        foreach (var roles in roleSets)
+        {
+            foreach (var operation in operations)
+            {
+                foreach (var kind in new[] { "client", "apiResource" })
+                {
+                    data.Add(roles, operation, kind, true);
+                    data.Add(roles, operation, kind, false);
+                }
+            }
+        }
+
+        return data;
+    }
+
+    [Theory]
+    [MemberData(nameof(SecretRoleMatrix))]
+    public async Task SecretRoleMatrix_ReadsNeedTenantAdministration_WritesNeedSecretManagement_StagedByTheSwitch(
+        string roleSet, string operation, string kind, bool enforce)
+    {
+        var ct = TestContext.Current.CancellationToken;
+        var roles = roleSet.Length == 0 ? [] : roleSet.Split('+');
+        var target = kind == "client" ? await CreateMachineClientAsync() : await CreateApiResourceAsync();
+        var (_, hash) = await CreateSecretAsync(kind, target); // seeded by the default administrator
+
+        using var mode = SecretManagementMode(enforce
+            ? IdentityApiRoleEnforcementMode.Enforce
+            : IdentityApiRoleEnforcementMode.Warn);
+        var caller = Caller(roles);
+        var response = operation switch
+        {
+            "GET" => await caller.GetAsync(SecretsUrl(kind, target), ct),
+            "POST" => await caller.PostAsJsonAsync(SecretsUrl(kind, target), new { description = "matrix" }, ct),
+            "PUT" => await caller.PutAsJsonAsync(SecretsUrl(kind, target),
+                new { valueEncrypted = hash, description = "rotated" }, ct),
+            _ => await caller.PostAsJsonAsync(SecretsUrl(kind, target) + "/delete", new { valueEncrypted = hash }, ct)
+        };
+
+        var tenantAdministrator = roles.Contains(TenantManagement) || roles.Contains(UserManagement);
+        var expected = operation == "GET"
+            ? tenantAdministrator
+            : roles.Contains(SecretManagement) || (!enforce && tenantAdministrator);
+        var body = await response.Content.ReadAsStringAsync(ct);
+        if (expected)
+        {
+            response.StatusCode.Should().Be(HttpStatusCode.OK, body);
+        }
+        else
+        {
+            response.StatusCode.Should().Be(HttpStatusCode.Forbidden, body);
+            // AB#5227 shape: the reason names the missing role.
+            var message = JsonNode.Parse(body)!["message"]!.GetValue<string>();
+            message.Should().Contain(operation == "GET" ? $"'{TenantManagement}'" : $"'{SecretManagement}'");
+        }
+
+        // A refused write changed nothing.
+        if (!expected && operation != "GET")
+        {
+            (await GetStoredSecretValuesAsync(kind, target)).Should().ContainSingle().Which.Should().Be(hash);
+        }
+    }
+
+    [Theory]
+    [InlineData("client")]
+    [InlineData("apiResource")]
+    public async Task SecretList_NeverContainsAClearText_ForAnyCaller(string kind)
+    {
+        var ct = TestContext.Current.CancellationToken;
+        var target = kind == "client" ? await CreateMachineClientAsync() : await CreateApiResourceAsync();
+        var (clearText, hash) = await CreateSecretAsync(kind, target);
+
+        using var mode = SecretManagementMode(IdentityApiRoleEnforcementMode.Enforce);
+        foreach (var roles in new[] { new[] { TenantManagement }, [SecretManagement, TenantManagement] })
+        {
+            var response = await Caller(roles).GetAsync(SecretsUrl(kind, target), ct);
+            var raw = await response.Content.ReadAsStringAsync(ct);
+            response.StatusCode.Should().Be(HttpStatusCode.OK);
+            raw.Should().Contain(hash).And.NotContain(clearText);
+            var entry = JsonNode.Parse(raw)!.AsArray().Should().ContainSingle().Subject!.AsObject();
+            (entry["valueClearText"]?.GetValue<string?>()).Should().BeNull("the clear text is shown once, at creation");
+        }
+    }
+
+    [Fact]
+    public async Task TenantOwnersMember_WithoutADirectSecretManagementEdge_IsDeniedUnderEnforce()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        var effectiveRoles = await EffectiveRolesOfNewTenantOwnersMemberAsync();
+        effectiveRoles.Should().Contain(TenantManagement, "the group's roles are inherited")
+            .And.NotContain(SecretManagement, "TenantOwners does not carry SecretManagement (AB#5544)");
+        var clientId = await CreateMachineClientAsync();
+
+        HttpResponseMessage enforced;
+        using (SecretManagementMode(IdentityApiRoleEnforcementMode.Enforce))
+        {
+            enforced = await Caller(effectiveRoles).PostAsJsonAsync(SecretsUrl("client", clientId), new { }, ct);
+        }
+
+        var staged = await Caller(effectiveRoles).PostAsJsonAsync(SecretsUrl("client", clientId), new { }, ct);
+
+        enforced.StatusCode.Should().Be(HttpStatusCode.Forbidden);
+        staged.StatusCode.Should().Be(HttpStatusCode.OK, "Warn still lets the previous rule through");
+    }
+
+    [Fact]
+    public async Task ClientCreateAndUpdate_WithASecret_NeedSecretManagement_WithoutASecret_DoNot()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        using var mode = SecretManagementMode(IdentityApiRoleEnforcementMode.Enforce);
+        var tenantManager = Caller([TenantManagement]);
+        var secretManager = Caller([TenantManagement, SecretManagement]);
+        var withSecret = $"cc-{Guid.NewGuid():N}";
+        var withoutSecret = $"cc-{Guid.NewGuid():N}";
+
+        var refusedCreate = await tenantManager.PostAsJsonAsync(TenantApiUrl("clients"),
+            ClientBody(withSecret, "s3cret-from-the-caller"), ct);
+        var plainCreate = await tenantManager.PostAsJsonAsync(TenantApiUrl("clients"), ClientBody(withoutSecret, null), ct);
+        var refusedUpdate = await tenantManager.PutAsJsonAsync(TenantApiUrl($"clients/{withoutSecret}"),
+            ClientBody(withoutSecret, "rotated-by-update"), ct);
+        var allowedCreate = await secretManager.PostAsJsonAsync(TenantApiUrl("clients"),
+            ClientBody(withSecret, "s3cret-from-the-caller"), ct);
+
+        refusedCreate.StatusCode.Should().Be(HttpStatusCode.Forbidden);
+        JsonNode.Parse(await refusedCreate.Content.ReadAsStringAsync(ct))!["message"]!.GetValue<string>()
+            .Should().Contain($"'{SecretManagement}'");
+        plainCreate.StatusCode.Should().Be(HttpStatusCode.OK, await plainCreate.Content.ReadAsStringAsync(ct));
+        refusedUpdate.StatusCode.Should().Be(HttpStatusCode.Forbidden);
+        (await GetStoredClientSecretsAsync(withoutSecret)).Should().BeEmpty("the refused update changed nothing");
+        allowedCreate.StatusCode.Should().Be(HttpStatusCode.OK, await allowedCreate.Content.ReadAsStringAsync(ct));
+        (await RequestTokenAsync(withSecret, "s3cret-from-the-caller")).StatusCode.Should().Be(HttpStatusCode.OK);
+    }
+
+    private static object ClientBody(string clientId, string? secret) => new
+    {
+        clientId,
+        clientName = clientId,
+        isEnabled = true,
+        allowedGrantTypes = new[] { "client_credentials" },
+        requireClientSecret = true,
+        clientSecret = secret
+    };
+
+    /// <summary>
+    ///     Switches <c>SecretManagementRoleEnforcement</c> of this class's host for the scope of a test and restores the
+    ///     configured value (the shipped default <c>Warn</c>) on dispose. The handler reads <c>IOptionsMonitor.CurrentValue</c>
+    ///     per request, so no second host is needed (a derived host per test made the matrix start ~80 hosts).
+    /// </summary>
+    private IDisposable SecretManagementMode(IdentityApiRoleEnforcementMode mode)
+    {
+        var cache = Factory.Services.GetRequiredService<IOptionsMonitorCache<IdentityApiAuthorizationOptions>>();
+        var configured = Factory.Services.GetRequiredService<IOptionsMonitor<IdentityApiAuthorizationOptions>>().CurrentValue;
+        cache.TryRemove(Options.DefaultName);
+        cache.TryAdd(Options.DefaultName, new IdentityApiAuthorizationOptions
+        {
+            RoleEnforcement = configured.RoleEnforcement,
+            SecretManagementRoleEnforcement = mode
+        });
+        return new Restore(() => cache.TryRemove(Options.DefaultName));
+    }
+
+    private sealed class Restore(Action restore) : IDisposable
+    {
+        public void Dispose() => restore();
+    }
+
+    private HttpClient Caller(IReadOnlyCollection<string> roles)
+    {
+        var client = Factory.CreateClient();
+        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", "test-token");
+        client.DefaultRequestHeaders.Add(TestAuthHandler.UserIdHeader, $"caller-{Guid.NewGuid():N}");
+        client.DefaultRequestHeaders.Add(TestAuthHandler.UserNameHeader, "secret-caller");
+        if (roles.Count == 0)
+        {
+            client.DefaultRequestHeaders.Add(TestAuthHandler.NoRolesHeader, "true");
+        }
+
+        foreach (var role in roles)
+        {
+            client.DefaultRequestHeaders.Add(TestAuthHandler.RoleHeader, role);
+        }
+
+        return client;
+    }
+
+    /// <summary>
+    ///     A new user whose only role source is membership in <c>TenantOwners</c> (seeded like the bootstrap blueprint:
+    ///     the built-in administration roles, never SecretManagement). Returns the effective roles the token is built from.
+    /// </summary>
+    private async Task<string[]> EffectiveRolesOfNewTenantOwnersMemberAsync()
+    {
+        using var scope = CreateScope();
+        var roleManager = scope.ServiceProvider.GetRequiredService<RoleManager<RtRole>>();
+        var roleIds = new List<string>();
+        foreach (var name in new[] { TenantManagement, UserManagement, "AdminPanelManagement" })
+        {
+            var role = await roleManager.FindByNameAsync(name);
+            if (role == null)
+            {
+                var created = new RtRoleBuilder().WithName(name).Build();
+                (await roleManager.CreateAsync(created)).Succeeded.Should().BeTrue();
+                role = (await roleManager.FindByNameAsync(name))!;
+            }
+
+            roleIds.Add(role.RtId.ToString());
+        }
+
+        var groups = scope.ServiceProvider.GetRequiredService<IGroupStore>();
+        var owners = await groups.FindByNameAsync(CommonConstants.TenantOwnersGroup.ToUpperInvariant());
+        if (owners == null)
+        {
+            owners = new RtGroup
+            {
+                RtId = OctoObjectId.GenerateNewId(),
+                GroupName = CommonConstants.TenantOwnersGroup,
+                NormalizedGroupName = CommonConstants.TenantOwnersGroup.ToUpperInvariant()
+            };
+            await groups.StoreAsync(owners);
+            await groups.SetRoleIdsAsync(owners.RtId, roleIds);
+        }
+
+        var user = await CreateTestUserAsync($"owner-{Guid.NewGuid():N}");
+        await groups.AddMemberUserAsync(owners.RtId, user.RtId.ToString());
+
+        using var readScope = CreateScope();
+        var userManager = readScope.ServiceProvider.GetRequiredService<UserManager<RtUser>>();
+        return (await userManager.GetRolesAsync((await userManager.FindByIdAsync(user.RtId.ToString()))!)).ToArray();
     }
 
     // ---------------------------------------------------------------- helpers

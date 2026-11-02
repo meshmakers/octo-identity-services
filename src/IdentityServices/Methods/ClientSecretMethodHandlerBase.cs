@@ -8,6 +8,8 @@ using Meshmakers.Octo.Services.Contracts.DistributionEventHub.Messages;
 using Meshmakers.Octo.Services.Infrastructure.Services;
 using Meshmakers.Octo.Services.Methods;
 using Meshmakers.Octo.Services.Methods.Authorization;
+using Meshmakers.Octo.Backend.IdentityServices.Authorization;
+using Microsoft.Extensions.Options;
 using Persistence.IdentityCkModel.Generated.System.Identity.v2;
 
 namespace Meshmakers.Octo.Backend.IdentityServices.Methods;
@@ -29,10 +31,13 @@ internal static class ClientSecretMethodErrors
 /// </summary>
 /// <remarks>
 ///     <para>
-///         <b>Caller.</b> REST parity: <c>IdentityTenantAdministrationWritePolicy</c> = scope <c>octo_api</c> and tenant role
-///         <c>TenantManagement</c> or <c>UserManagement</c>. The gateway checks the declared roles; the handler checks scope and
-///         role again on the principal the host validated from the forwarded token, before the target is looked up, so a forged
-///         bus message or an unauthorized caller gets <c>METHOD_FORBIDDEN</c> whether the target exists or not.
+///         <b>Caller.</b> REST parity (AB#5861): <c>IdentitySecretAdministrationPolicy</c> = scope <c>octo_api</c> and tenant
+///         role <c>SecretManagement</c>, staged by <c>SecretManagementRoleEnforcement</c> (in <c>Warn</c>, the default,
+///         <c>TenantManagement</c> or <c>UserManagement</c> still pass and are logged). The gateway checks the declared roles
+///         (still <c>TenantManagement</c>, <c>UserManagement</c> in the CK model — changing them is a CK model change and
+///         follows with the next System.Identity bump); the handler checks scope and role again on the principal the host
+///         validated from the forwarded token, before the target is looked up, so a forged bus message or an unauthorized
+///         caller gets <c>METHOD_FORBIDDEN</c> whether the target exists or not.
 ///     </para>
 ///     <para>
 ///         <b>Secrets.</b> The generated secret (result of <c>AddSecret</c>) and <c>secretValue</c> (parameter of
@@ -53,14 +58,37 @@ internal abstract class ClientSecretMethodHandlerBase(IServiceProvider services)
     protected IServiceProvider Services { get; } = services;
 
     /// <summary>
-    ///     <c>true</c> when the validated principal may administer client secrets: scope <c>octo_api</c> and role
-    ///     <c>TenantManagement</c> or <c>UserManagement</c> (<c>TenantAdministrationRoles</c> of the REST policies).
+    ///     Decides whether the validated principal may administer client secrets: scope <c>octo_api</c> and the shared
+    ///     requirement of the REST policy (<c>IdentityApiAuthorizationPolicies.SecretAdministrationRequirement</c>, AB#5861).
+    ///     A principal without the scope is always <see cref="IdentityApiRoleDecision.Denied" />.
     /// </summary>
-    internal static bool IsClientAdministrator(CkMethodPrincipal? principal) =>
-        principal != null &&
-        principal.Scopes.Contains(CommonConstants.OctoApiFullAccess, StringComparer.Ordinal) &&
-        (principal.Roles.Contains(CommonConstants.TenantManagementRole, StringComparer.OrdinalIgnoreCase) ||
-         principal.Roles.Contains(CommonConstants.UserManagementRole, StringComparer.OrdinalIgnoreCase));
+    internal static IdentityApiRoleDecision DecideClientSecretCaller(CkMethodPrincipal? principal,
+        IdentityApiAuthorizationOptions options)
+    {
+        if (principal == null || !principal.Scopes.Contains(CommonConstants.OctoApiFullAccess, StringComparer.Ordinal))
+        {
+            return IdentityApiRoleDecision.Denied;
+        }
+
+        return IdentityApiAuthorizationPolicies.SecretAdministrationRequirement.Decide(
+            role => principal.Roles.Contains(role, StringComparer.OrdinalIgnoreCase), options);
+    }
+
+    private bool IsClientAdministrator(CkMethodPrincipal? principal, string tenantId)
+    {
+        var decision = DecideClientSecretCaller(principal,
+            Services.GetRequiredService<IOptionsMonitor<IdentityApiAuthorizationOptions>>().CurrentValue);
+        if (decision == IdentityApiRoleDecision.AllowedByStagedWarn)
+        {
+            // The same inventory line as the REST handler, so the rollout precheck finds method callers too.
+            Services.GetRequiredService<ILogger<ClientSecretMethodHandlerBase>>().LogWarning(
+                "Identity client secret method without required role allowed by SecretManagementRoleEnforcement=Warn in tenant {TenantId} by subject {Subject} / client {ClientId}, required any of [{RequiredRoles}]. " +
+                "This would be denied with SecretManagementRoleEnforcement=Enforce (AB#5861)",
+                tenantId, principal?.SubjectId, principal?.ClientId, CommonConstants.SecretManagementRole);
+        }
+
+        return decision != IdentityApiRoleDecision.Denied;
+    }
 
     /// <summary>
     ///     Checks the caller, binds the tenant and loads the target client. Returns the failure to answer, or the client.
@@ -68,7 +96,7 @@ internal abstract class ClientSecretMethodHandlerBase(IServiceProvider services)
     protected async Task<(CkMethodFailure? Failure, RtClient? Client)> ResolveTargetAsync(
         CkMethodPrincipal? principal, string tenantId, string? targetRtId, Dictionary<string, string> details)
     {
-        if (!IsClientAdministrator(principal))
+        if (!IsClientAdministrator(principal, tenantId))
         {
             return (CkMethodOutcome.Forbidden("role-required").Failure, null);
         }
