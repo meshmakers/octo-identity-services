@@ -5,7 +5,7 @@ using IdentityServerPersistence.SystemStores.OpenIddict;
 using Meshmakers.Octo.Backend.IdentityServices.Controllers.Api;
 using Microsoft.AspNetCore.DataProtection;
 using Microsoft.AspNetCore.WebUtilities;
-using Persistence.IdentityCkModel.Generated.System.Identity.v2;
+using Persistence.IdentityCkModel.Generated.System.Identity.v3;
 using static OpenIddict.Abstractions.OpenIddictConstants;
 
 namespace Meshmakers.Octo.Backend.IdentityServices.OpenIddict.Interaction;

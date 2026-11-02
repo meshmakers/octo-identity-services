@@ -2,7 +2,7 @@ using System.Collections.Immutable;
 using IdentityServerPersistence.SystemStores.OpenIddict;
 using OpenIddict.Abstractions;
 using OpenIddict.Server;
-using Persistence.IdentityCkModel.Generated.System.Identity.v2;
+using Persistence.IdentityCkModel.Generated.System.Identity.v3;
 using static OpenIddict.Abstractions.OpenIddictConstants;
 using static OpenIddict.Server.OpenIddictServerEvents;
 

@@ -3,7 +3,7 @@ using Meshmakers.Octo.Backend.IdentityServices.Services;
 using Meshmakers.Octo.Services.Contracts.DistributionEventHub.Methods;
 using Meshmakers.Octo.Services.Methods;
 using Microsoft.AspNetCore.Identity;
-using Persistence.IdentityCkModel.Generated.System.Identity.v2;
+using Persistence.IdentityCkModel.Generated.System.Identity.v3;
 
 namespace Meshmakers.Octo.Backend.IdentityServices.Methods;
 
@@ -17,7 +17,7 @@ namespace Meshmakers.Octo.Backend.IdentityServices.Methods;
 ///         (user manager: user validators, password policy, normalised name and e-mail, security stamp; then the welcome
 ///         notification). The generic paths refuse a new user: GraphQL create, caller <c>ImportRt</c>, blueprint seeds and
 ///         pipeline inserts answer <c>GENERIC_CREATE_REPLACED_BY_METHOD</c> naming this method (engine
-///         <c>GenericCreateReplacement</c>, runtime rule until the next System.Identity major sets <c>replacesGenericCreate</c>).
+///         <c>GenericCreateReplacement</c>, driven by <c>replacesGenericCreate</c> of this method since System.Identity 3.0.0).
 ///     </para>
 ///     <para>
 ///         <b>Caller.</b> Same rule as the REST write policy: scope <c>octo_api</c> and tenant role <c>UserManagement</c> on the
