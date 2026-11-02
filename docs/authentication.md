@@ -430,6 +430,20 @@ lack the role, the requirement is staged:
 `IdentityApiAuthorization:SecretManagementRoleEnforcement` defaults to `Warn` (previous roles still pass, logged) and
 goes to `Enforce` per cluster after the precheck (`docs/rollout-identity-rest-role-enforcement.md` § AB#5861).
 
+#### Admin role migration (AB#8165)
+
+Existing tenant admins hold their roles directly. `IdentityApiAuthorization:AdminRoleMigration`
+(`OCTO_IDENTITYAPIAUTHORIZATION__ADMINROLEMIGRATION`, Helm `services.identity.adminRoleMigration`) moves them to
+`TenantOwners` membership: `Off` (default) does nothing, `DryRun` logs per tenant which subject ids would join the
+group and which direct roles would be removed (ids and role names only) and writes nothing, `Apply` does it. It runs
+in the tenant setup after the SecretManagement grants, has no run-once marker (the mode is the switch) and is
+idempotent. Users, `xt_` shadow users and external tenant user mappings that hold `TenantManagement` and
+`UserManagement` directly join the group; of their direct roles only those that `TenantOwners` carries are removed
+(for a mapping: the ids in `MappedRoleIds`), every other role stays. Clients and groups are never migrated. A tenant
+whose `TenantOwners` group is missing or does not carry `TenantManagement` and `UserManagement` is skipped, because
+the move would remove access. Changes role data: per cluster, `DryRun` first, `Apply` only with the go of the
+cluster owner.
+
 ### Client Secrets of External Providers (AB#5540)
 
 Since `System.Identity-2.25.0` the `ClientSecret` of Google, Microsoft, Facebook and Azure Entra ID
