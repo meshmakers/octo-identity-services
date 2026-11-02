@@ -13,7 +13,7 @@ using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.TestHost;
 using Microsoft.Extensions.DependencyInjection;
 using OtpNet;
-using Persistence.IdentityCkModel.Generated.System.Identity.v3;
+using Persistence.IdentityCkModel.Generated.System.Identity.v2;
 using Xunit;
 
 namespace IdentityServices.IntegrationTests.Api.Auth;

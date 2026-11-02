@@ -3,7 +3,7 @@ using System.Text;
 using Microsoft.Extensions.Options;
 using OpenIddict.Abstractions;
 using OpenIddict.Core;
-using Persistence.IdentityCkModel.Generated.System.Identity.v3;
+using Persistence.IdentityCkModel.Generated.System.Identity.v2;
 
 namespace Meshmakers.Octo.Backend.IdentityServices.OpenIddict;
 

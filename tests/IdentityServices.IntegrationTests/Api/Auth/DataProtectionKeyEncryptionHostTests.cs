@@ -11,7 +11,7 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Options;
-using Persistence.IdentityCkModel.Generated.System.Identity.v3;
+using Persistence.IdentityCkModel.Generated.System.Identity.v2;
 using Xunit;
 
 namespace IdentityServices.IntegrationTests.Api.Auth;

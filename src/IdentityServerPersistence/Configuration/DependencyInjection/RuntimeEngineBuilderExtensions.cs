@@ -16,7 +16,7 @@ using Meshmakers.Octo.Runtime.Engine.Configuration.DependencyInjection;
 using Meshmakers.Octo.Services.Infrastructure;
 using Meshmakers.Octo.Services.Infrastructure.Services;
 using Microsoft.Extensions.Logging;
-using Persistence.IdentityCkModel.Generated.System.Identity.v3;
+using Persistence.IdentityCkModel.Generated.System.Identity.v2;
 
 // ReSharper disable once CheckNamespace
 namespace Microsoft.Extensions.DependencyInjection;
@@ -47,7 +47,7 @@ public static class RuntimeEngineBuilderExtensions
         builder.AddMongoBlueprintSupport();
 
         // Add the construction kits as embedded repository
-        builder.Services.AddCkModelSystemIdentityV3();
+        builder.Services.AddCkModelSystemIdentityV2();
 
         // Phase 3 PR #3: Identity-specific blueprint variable provider. Replaces the engine's
         // default IBlueprintVariableProvider (which is TryAdded inside AddRuntimeEngine) with

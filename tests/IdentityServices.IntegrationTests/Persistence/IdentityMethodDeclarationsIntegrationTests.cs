@@ -140,19 +140,16 @@ public class IdentityMethodDeclarationsIntegrationTests : IClassFixture<Identity
     }
 
     [Fact]
-    public async Task OnlyTheUserCreateUser_ReplacesTheGenericCreate_NoSeededTypeDoes()
+    public async Task NoSeededType_ReplacesTheGenericCreate_AndNeitherDoesTheUserYet()
     {
         // Group, Client and DataPermission are seeded by the System.Identity.Bootstrap blueprint: a flag there makes
-        // every new tenant's bootstrap fail (AB#7121). The flag on User (Major, row M16) is set since System.Identity 3.0.0
-        // (AB#8053): a user is created only by User.CreateUser-1 or the REST API, never through the generic create.
-        foreach (var type in new[] { "Group", "Client", "DataPermission" })
+        // every new tenant's bootstrap fail (AB#7121). The flag on User is a MAJOR change of the model (row M16 of
+        // the SemVer rules) and waits for the platform-owner decision recorded on AB#7773.
+        foreach (var type in new[] { "User", "Group", "Client", "DataPermission" })
         {
             (await GetTypeAsync(type)).AllMethods.Values.Where(m => m.ReplacesGenericCreate)
                 .Should().BeEmpty(type);
         }
-
-        (await GetTypeAsync("User")).AllMethods.Values.Where(m => m.ReplacesGenericCreate)
-            .Select(m => m.QualifiedMethodId).Should().BeEquivalentTo(["System.Identity/User.CreateUser-1"]);
     }
 
     /// <summary>

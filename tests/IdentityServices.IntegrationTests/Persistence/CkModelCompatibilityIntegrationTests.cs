@@ -10,7 +10,7 @@ using Meshmakers.Octo.Services.Contracts.DistributionEventHub.Commands.Payloads;
 using Meshmakers.Octo.Services.Infrastructure.Services;
 using MongoDB.Bson;
 using MongoDB.Driver;
-using Persistence.IdentityCkModel.Generated.System.Identity.v3;
+using Persistence.IdentityCkModel.Generated.System.Identity.v2;
 using Shared.TestUtilities.Fakes;
 using Xunit;
 

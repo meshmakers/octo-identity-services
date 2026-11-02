@@ -1,5 +1,5 @@
 using System.Collections.Immutable;
-using Persistence.IdentityCkModel.Generated.System.Identity.v3;
+using Persistence.IdentityCkModel.Generated.System.Identity.v2;
 using static OpenIddict.Abstractions.OpenIddictConstants;
 
 namespace IdentityServerPersistence.SystemStores.OpenIddict;

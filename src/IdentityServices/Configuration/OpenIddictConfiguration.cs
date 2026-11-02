@@ -1,7 +1,7 @@
 using IdentityServerPersistence.Configuration.Options;
 using IdentityServerPersistence.SystemStores.OpenIddict;
 using Meshmakers.Octo.Backend.IdentityServices.OpenIddict;
-using Persistence.IdentityCkModel.Generated.System.Identity.v3;
+using Persistence.IdentityCkModel.Generated.System.Identity.v2;
 using Meshmakers.Common.Shared;
 using Meshmakers.Octo.Backend.IdentityServices.Services;
 using Meshmakers.Octo.Runtime.Contracts.MongoDb.Configuration;

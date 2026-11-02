@@ -185,7 +185,7 @@ This service depends on Octo framework packages (versioned via `$(OctoVersion)` 
 
 ### Construction Kit (CK) Model
 
-The `Persistence.IdentityCkModel` project uses YAML-based model definitions that are transformed into C# code at build time. Model files are in `src/Persistence.IdentityCkModel/ConstructionKit/`. The model ID is `System.Identity-3.0.0` (ckLanguage 2, first major of the 3.x line, AB#8053) with dependency on `System-[2.5,3.0)`. Generated types live in namespace `Persistence.IdentityCkModel.Generated.System.Identity.v3` (the suffix is the **major** of the model: 2.x was `.v2`, the registration is `AddCkModelSystemIdentityV3()`).
+The `Persistence.IdentityCkModel` project uses YAML-based model definitions that are transformed into C# code at build time. Model files are in `src/Persistence.IdentityCkModel/ConstructionKit/`. The model ID is `System.Identity-2.30.0` (ckLanguage 2) with dependency on `System-[2.5,3.0)`. Generated types live in namespace `Persistence.IdentityCkModel.Generated.System.Identity.v2`.
 
 ### OpenIddict Protocol Stack (Epic AB#4989)
 
@@ -1037,11 +1037,11 @@ Rules behind the shape (do not change them without reading this):
   result; such a method can never have a pipeline handler (compiler messages 132/134). Pinned by `IdentityMethodDeclarationsIntegrationTests`.
 - **`Create` is a reserved method name** (compiler error 102: `Create`, `Update`, `Delete` belong to the generic mutations) - the static user
   method is `CreateUser-1`.
-- **`replacesGenericCreate` only on `User.CreateUser-1` (3.0.0, AB#8053).** Group, Client and DataPermission are seeded by
-  `System.Identity.Bootstrap` (the flag would make AB#7121 refuse every new tenant), so they do not carry it. On `User` the flag is a
-  **MAJOR** change of the model (row M16 of `docs/ck-semver-rules.md` in octo-construction-kit-engine: a new method with the flag on an
-  existing type, decision 2026-10-19) and shipped with System.Identity 3.0.0; until 2.30.0 the engine stood in for it with a runtime rule
-  (AB#7777), which was removed. No blueprint seeds a User.
+- **No `replacesGenericCreate` on any type.** Group, Client and DataPermission are seeded by `System.Identity.Bootstrap` (the flag would make
+  AB#7121 refuse every new tenant). On `User` the flag is a **MAJOR** change of the model (row M16 of `docs/ck-semver-rules.md` in
+  octo-construction-kit-engine: a new method with the flag on an existing type, decision 2026-10-19), and System.Identity 3.0.0 would leave every
+  blueprint range `[2.x,3.0)` unsatisfied - planned for the next major (AB#8053). Until then the engine refuses a new user on every generic
+  path at runtime (AB#7777, section `User.CreateUser` above).
 - **No `LAST_ADMIN_PROTECTED`**: the REST API has no last-admin rule (AB#7914 refuses it with `METHOD_FORBIDDEN` / `last-administrator`). `User.DisableTwoFactor-1` followed in 2.30.0 (AB#7879, section below).
 - `compatibility.acknowledge` of 2.28.0 is gone (an acknowledgement is valid for one release, OCTO-CK204). `octo-ckc ValidateVersion`
   against the published 2.28.0: **MINOR** (15 additions, no Major row).
@@ -1405,9 +1405,8 @@ entity whose stored `RtBlueprintLocked` is `true`, nor set or change `RtBlueprin
 - Regression tests: `BlueprintLockProtectionIntegrationTests` (real MongoDB: compiled ownership, fresh install, update re-applies, missing
   attribute = false, bootstrap policies do not opt in, and an end-to-end check that a policy with the flag makes the engine guard refuse a user
   write on a locked entity while an unlocked one and the system stay writable).
-- CK dependents: no CK model depends on `System.Identity`; blueprints pin it by ranges (`[2.11,3.0)` up to `[2.14.0,3.0)`), which 2.24.0 satisfied, so
-  no dependent needed a rebuild. Only a blueprint that uses the flag needs the raised floor. **Since 3.0.0 (AB#8053) every `[2.x,3.0)` range is
-  unsatisfied** (a range stays inside one major): each dependent blueprint needs a new version with `System.Identity-[3.0.0,4.0)`.
+- CK dependents: no CK model depends on `System.Identity`; blueprints pin it by open ranges (`[2.11,3.0)` up to `[2.14.0,3.0)`), which 2.24.0 satisfies, so
+  no dependent needs a rebuild. Only a blueprint that uses the flag needs the raised floor.
 
 ### Every attribute declares its ownership; the build enforces it (AB#6326)
 
@@ -2093,10 +2092,11 @@ Audit: one `Identity.Method` event per call (success, every refusal, `METHOD_HAN
 only), details `userName`, `withPassword`. The password reaches only the user manager - never a log, audit record or error parameter.
 `ResetPasswordOnLogin` is `false` (REST default).
 
-**The generic paths refuse a new user** (engine `GenericCreateReplacement`, driven by `replacesGenericCreate` of `User.CreateUser-1` since System.Identity 3.0.0, AB#8053; AB#7777 used a runtime rule until 2.30.0):
+**The generic paths refuse a new user** (engine `GenericCreateReplacement`, runtime rule of AB#7777, octo-construction-kit-engine):
 GraphQL generic/typed/query-row create, MCP create, mesh-adapter inserts, caller `ImportRt` and blueprint seeds answer
 `GENERIC_CREATE_REPLACED_BY_METHOD` naming `System.Identity/User.CreateUser-1`; an existing user (rtId stored) is updated as before.
-Nothing in this service is affected (repository writes are not generic paths). Tests:
+The model itself does **not** set `replacesGenericCreate` (a Major, row M16): that, and moving the AB#8042 list into `access`, is the
+next System.Identity major (AB#8053). Nothing in this service is affected (repository writes are not generic paths). Tests:
 `Api/Methods/UserCreateUserMethodTests` (real MongoDB, host with the switch on: password user signs in, normalised fields and stamp,
 invitation without password, duplicate name (also other casing) and e-mail, policy, reserved name, validation, caller theory, service
 token, forged caller, audit, welcome notification, no password in audit or logs), `Methods/IdentityMethodHostTests`,
@@ -2132,19 +2132,17 @@ compared state by state, audit, every refusal, data permission, last administrat
 `Api/TenantApi/UsersMergeTests` (REST), `RoleChangeGuardTests` (REST guard). Since this handler every declared System.Identity method has
 one; `UserChangePasswordMethodTests.AMethodWithoutHandler_…` uses an undeclared id.
 
-### Identity-owned User fields are refused on the generic paths (AB#8042, AB#8053)
+### Identity-owned User fields are refused on the generic paths (AB#8042)
 
-Generic writes of the identity-owned User fields are refused by the model since System.Identity 3.0.0 (AB#8053): `NormalizedUserName`,
-`NormalizedEmail`, `EmailConfirmed`, `PhoneNumberConfirmed`, `TwoFactorEnabled`, `LockoutEnabled`, `LockoutEnd`, `AccessFailedCount`,
-`ResetPasswordOnLogin`, `Claims` (`UserClaims`), `UserLogins` and `PreferredChannelBindingId` are `access: MethodOnly` in `ck-user.yaml`
-(with `UserName` and `Email` from 2.28.0), and their definitions are `securitySensitive: true`. The generic access guards enforce it for
-every caller: asset-repo GraphQL (`ATTRIBUTE_NOT_WRITABLE`), `ImportRt` and blueprint seeds (OCTO-CK139), the mesh-adapter write nodes. The
-engine keeps only the **associations** in a list (`IdentityOwnedWrites.AssociationRoleIds`: `AssignedRole`, `GroupMember`, `ChildGroup`,
-`MayActAs`, `GrantsPermission`; asset-repo GraphQL, mesh-adapter write nodes, caller `ImportRt`, message 140) because the CK access model
-cannot restrict association writes. In 2.x (AB#8042) the attributes were a runtime list, because tightening attributes that were never
-`securitySensitive` is a Major (row T7, AB#6585). **Nothing in this service is affected**: every identity write (stores, REST, methods,
+Since AB#8042 the engine refuses generic writes of the identity-owned User fields and identity associations
+(`IdentityOwnedWrites` in octo-construction-kit-engine, enforced by asset-repo GraphQL create/update/query-row update and by the caller
+path of `ImportRt`): `NormalizedUserName`, `NormalizedEmail`, `EmailConfirmed`, `PhoneNumberConfirmed`, `TwoFactorEnabled`,
+`LockoutEnabled`, `ResetPasswordOnLogin`, `Claims` (`UserClaims`), `UserLogins`, `PreferredChannelBindingId` and the associations
+`AssignedRole`, `GroupMember`, `ChildGroup`, `MayActAs`, `GrantsPermission`. It is a runtime list, not CK `access`: tightening attributes
+that were never `securitySensitive` in 2.x is a Major (row T7, AB#6585), so the list moves into the model's `access` with the next
+System.Identity major, together with AB#7777. **Nothing in this service is affected**: every identity write (stores, REST, methods,
 provisioning, migrations, the bus consumer's `MayActAs`/`AssignedRole` edges, the preferred-channel self-service) goes through
-`ITenantRepository`, which the guards do not touch, and the Bootstrap seed (TenantOwners `AssignedRole` edges) is a system import.
+`ITenantRepository`, which the guard does not touch, and the Bootstrap seed (TenantOwners `AssignedRole` edges) is a system import.
 
 ### Administrator revokes all sessions of a user (AB#7899)
 

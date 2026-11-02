@@ -1,5 +1,5 @@
 using System.Security.Claims;
-using Persistence.IdentityCkModel.Generated.System.Identity.v3;
+using Persistence.IdentityCkModel.Generated.System.Identity.v2;
 
 namespace IdentityServerPersistence.Services.Login;
 

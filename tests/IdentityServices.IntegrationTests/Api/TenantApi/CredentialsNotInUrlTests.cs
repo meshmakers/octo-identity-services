@@ -307,7 +307,7 @@ public class CredentialsNotInUrlTests : IntegrationTestBase
         var name = $"cred8008-res-{Guid.NewGuid():N}";
         using var scope = CreateScope();
         await scope.ServiceProvider.GetRequiredService<IOctoResourceStore>().CreateApiResourceAsync(
-            new global::Persistence.IdentityCkModel.Generated.System.Identity.v3.RtApiResource
+            new global::Persistence.IdentityCkModel.Generated.System.Identity.v2.RtApiResource
             {
                 RtId = Meshmakers.Octo.ConstructionKit.Contracts.OctoObjectId.GenerateNewId(),
                 Name = name,

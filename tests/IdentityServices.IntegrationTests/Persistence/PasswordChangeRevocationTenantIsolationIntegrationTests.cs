@@ -9,7 +9,7 @@ using Meshmakers.Octo.ConstructionKit.Contracts;
 using Meshmakers.Octo.Services.Infrastructure.Services;
 using IdentityServerPersistence;
 using OpenIddict.Abstractions;
-using Persistence.IdentityCkModel.Generated.System.Identity.v3;
+using Persistence.IdentityCkModel.Generated.System.Identity.v2;
 using Xunit;
 
 namespace IdentityServices.IntegrationTests.Persistence;

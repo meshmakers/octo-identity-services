@@ -1,6 +1,6 @@
 using IdentityServerPersistence.SystemStores;
 using NSubstitute;
-using Persistence.IdentityCkModel.Generated.System.Identity.v3;
+using Persistence.IdentityCkModel.Generated.System.Identity.v2;
 
 namespace IdentityServices.UnitTests.Controllers;
 

@@ -6,7 +6,7 @@ using Meshmakers.Octo.Backend.Authentication.Secrets;
 using Meshmakers.Octo.Runtime.Contracts.Secrets;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.Extensions.Logging;
-using Persistence.IdentityCkModel.Generated.System.Identity.v3;
+using Persistence.IdentityCkModel.Generated.System.Identity.v2;
 
 namespace Meshmakers.Octo.Backend.Authentication.DynamicAuth;
 

@@ -19,7 +19,7 @@ using Microsoft.AspNetCore.Routing;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using NSubstitute;
-using Persistence.IdentityCkModel.Generated.System.Identity.v3;
+using Persistence.IdentityCkModel.Generated.System.Identity.v2;
 using Shared.TestUtilities.Fakes;
 using Xunit;
 
@@ -45,7 +45,7 @@ public class CrossTenantLoginTests
         var schemeProvider = Substitute.For<Microsoft.AspNetCore.Authentication.IAuthenticationSchemeProvider>();
         var clientStore = Substitute.For<IdentityServerPersistence.SystemStores.IOctoClientStore>();
         _events = Substitute.For<IIdentityAuditService>();
-        var persistedGrantStore = Substitute.For<IOpenIddictTokenStore<Persistence.IdentityCkModel.Generated.System.Identity.v3.RtOAuthToken>>();
+        var persistedGrantStore = Substitute.For<IOpenIddictTokenStore<Persistence.IdentityCkModel.Generated.System.Identity.v2.RtOAuthToken>>();
         var ldapAuthService = Substitute.For<ILdapAuthenticationService>();
         _crossTenantAuthService = Substitute.For<ICrossTenantAuthenticationService>();
         _externalTenantUserMappingStore = Substitute.For<IExternalTenantUserMappingStore>();
