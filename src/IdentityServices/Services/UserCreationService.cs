@@ -22,7 +22,8 @@ public interface IUserCreationService
     ///     AB#8064: an e-mail address another user of the tenant already has (compared normalised, so case-insensitive) is
     ///     refused before anything is stored, with the identity error <c>DuplicateEmail</c>. The REST endpoint answers it with
     ///     <c>409</c> and <c>code: USER_ALREADY_EXISTS</c>, the method with the declared error <c>USER_ALREADY_EXISTS</c>
-    ///     (<c>field=email</c>). Only creation checks it: <see cref="IdentityOptions.User" /> <c>RequireUniqueEmail</c> stays
+    ///     (<c>field=email</c>). The rule (<see cref="UserEmailUniqueness" />) also covers a change of the address through
+    ///     <c>PUT users/{userName}</c> (AB#8084), never an unchanged one: <see cref="IdentityOptions.User" /> <c>RequireUniqueEmail</c> stays
     ///     off, because the user validator runs on every update too and would lock out the updates of users in tenants that
     ///     already hold duplicate e-mail addresses. A taken user name wins (the user manager answers <c>DuplicateUserName</c>
     ///     as before), so creating the same user twice keeps its previous answer. A blank e-mail is not checked (users without an e-mail address stay
@@ -46,7 +47,7 @@ internal sealed class UserCreationService(
         // the name is free: creating the same user twice keeps its previous answer.
         if (!string.IsNullOrWhiteSpace(user.Email)
             && (string.IsNullOrWhiteSpace(user.UserName) || await userManager.FindByNameAsync(user.UserName) == null)
-            && await userManager.FindByEmailAsync(user.Email) != null)
+            && await UserEmailUniqueness.IsTakenByAnotherUserAsync(userManager, user, user.Email))
         {
             return IdentityResult.Failed(userManager.ErrorDescriber.DuplicateEmail(user.Email));
         }

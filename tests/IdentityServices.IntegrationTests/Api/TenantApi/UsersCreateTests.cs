@@ -13,7 +13,8 @@ namespace IdentityServices.IntegrationTests.Api.TenantApi;
 /// Integration tests for the POST {tenantId}/v1/users endpoint (user creation).
 /// AB#4503: an invalid password must NOT persist a user; a valid password still creates one.
 /// AB#8064: an e-mail address another user of the tenant already has is refused with 409 (code USER_ALREADY_EXISTS), like
-/// the CK method User.CreateUser-1; only creation checks it, so tenants that already hold duplicates keep working.
+/// the CK method User.CreateUser-1; tenants that already hold duplicates keep working. The update path (AB#8084) is covered by
+/// UsersUpdateEmailTests.
 /// </summary>
 public class UsersCreateTests : IntegrationTestBase
 {
@@ -170,21 +171,6 @@ public class UsersCreateTests : IntegrationTestBase
         (await FindByNameAsync(second.UserName!))!.FirstName.Should().Be("Renamed");
         (await LoginAndGetAuthenticatedClientAsync(first.UserName!, DefaultPassword, ct)).Should().NotBeNull();
         (await LoginAndGetAuthenticatedClientAsync(second.UserName!, DefaultPassword, ct)).Should().NotBeNull();
-    }
-
-    [Fact]
-    public async Task UpdateUser_ToAnEmailAnotherUserHas_IsNotChecked()
-    {
-        // Pins today's behaviour: the duplicate rule covers creation only. Changing an existing user's e-mail address to one
-        // another user has is accepted (PUT users/{userName}); there is no CK method that changes the e-mail address.
-        var taken = $"taken-{Guid.NewGuid():N}@example.com";
-        await CreateTestUserAsync($"owner-{Guid.NewGuid():N}", email: taken);
-        var user = await CreateTestUserAsync($"mover-{Guid.NewGuid():N}");
-
-        var update = new { name = user.UserName, email = taken };
-        (await PutAsync(TenantApiUrl($"users/{user.UserName}"), update)).StatusCode.Should().Be(HttpStatusCode.OK);
-
-        (await FindByNameAsync(user.UserName!))!.Email.Should().Be(taken);
     }
 
     private async Task<RtUser?> FindByNameAsync(string userName)
