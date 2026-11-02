@@ -2050,7 +2050,7 @@ password). Since AB#8064 the service also refuses an e-mail address another user
 |---|---|---|
 | Caller | `IdentityUserAdministrationWritePolicy` | `IdentityMethodCallerRules.IsAdministrator` on the validated principal (scope `octo_api` + `UserManagement`), `METHOD_FORBIDDEN` / `role-required`; the gateway refuses a caller without the declared role first; a forged bus caller is rejected by the host |
 | `xt_` user name | 400 | `USER_NAME_RESERVED` |
-| Duplicate user name | 400 (`DuplicateUserName`) | `USER_ALREADY_EXISTS`, parameter `field=userName` (case-insensitive) |
+| Duplicate user name (AB#8083, case-insensitive; also `PUT users/{userName}` when it renames) | `409 application/problem+json`, `code: USER_ALREADY_EXISTS`, `field: userName` (`UserCreationProblems.DuplicateUserName`; the name is not echoed or logged) | `USER_ALREADY_EXISTS`, parameter `field=userName` |
 | Duplicate e-mail (AB#8064, normalised = case-insensitive; blank e-mail not checked) | `409 application/problem+json`, `code: USER_ALREADY_EXISTS`, `field: email` (`UserCreationProblems`; the address is not echoed or logged) | `USER_ALREADY_EXISTS`, `field=email` |
 | Password policy | 400 with the identity errors | `PASSWORD_POLICY_VIOLATION`, details = rule codes only |
 | Missing / invalid user name or e-mail | 400 | `METHOD_VALIDATION_FAILED` (`field`) |
@@ -2058,7 +2058,7 @@ password). Since AB#8064 the service also refuses an e-mail address another user
 
 **Duplicate e-mail: only new conflicts are refused (AB#8064 create, AB#8084 change).** The rule lives in `UserEmailUniqueness`
 (`Services/UserEmailUniqueness.cs`); `UserCreationService` uses it (`IdentityResult.Failed(DuplicateEmail)`), so REST and method cannot drift. A taken user name wins (the check runs only when the name is
-free), so creating the same user twice still answers `400 DuplicateUserName` on REST. `IdentityOptions.User.RequireUniqueEmail` stays **off** on
+free), so creating the same user twice answers `409` with `field=userName` on REST (before AB#8083: `400 DuplicateUserName`). The controller maps the identity error `DuplicateUserName` (create and rename; the user validator raises it on update too). `IdentityOptions.User.RequireUniqueEmail` stays **off** on
 purpose: the user validator runs on every `UserManager.UpdateAsync` / `SetEmailAsync` / `SetUserNameAsync` too, and in a tenant that
 already holds two users with one address `FindByEmailAsync` returns one of them, so the other could no longer be updated (profile edit,
 role change, security-stamp write, password change). Existing duplicates are not migrated; updates and sign-in of those users are
