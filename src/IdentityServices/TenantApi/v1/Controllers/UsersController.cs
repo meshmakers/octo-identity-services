@@ -274,7 +274,11 @@ public class UsersController : ControllerBase
     [HttpPost]
     [Authorize(IdentityServiceConstants.IdentityUserAdministrationWritePolicy)]
     [EndpointSummary("Creates a new user.")]
+    [EndpointDescription("Refuses an e-mail address another user of the tenant already has (case-insensitive) with 409 " +
+                         "application/problem+json, code USER_ALREADY_EXISTS, field email - the same rule as the CK method " +
+                         "User.CreateUser-1. Updating a user does not check it.")]
     [ProducesResponseType(StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status409Conflict)]
     public async Task<IActionResult> Post(
         [Required] [FromBody] [Description("The user data transfer object instance")]
         RegisterUserDto userDto,
@@ -300,6 +304,14 @@ public class UsersController : ControllerBase
                 userDto.Password);
             if (!result.Succeeded)
             {
+                // AB#8064: a duplicate e-mail address is a conflict with the same code as the method (USER_ALREADY_EXISTS).
+                // Logged without the address; a duplicate user name keeps its 400 answer.
+                if (result.Errors.Any(e => e.Code == nameof(IdentityErrorDescriber.DuplicateEmail)))
+                {
+                    _logger.LogInformation("Create user refused: another user of the tenant has the same e-mail address");
+                    return UserCreationProblems.DuplicateEmail();
+                }
+
                 LogIdentityError("Create user", result.Errors);
                 return GetBadRequestResultWithErrorDescription("Creation of user failed", result.Errors);
             }

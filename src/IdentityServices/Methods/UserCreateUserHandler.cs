@@ -27,8 +27,9 @@ namespace Meshmakers.Octo.Backend.IdentityServices.Methods;
 ///     </para>
 ///     <para>
 ///         <b>Declared errors.</b> <c>USER_NAME_RESERVED</c> (prefix <c>xt_</c> of cross-tenant shadow users),
-///         <c>USER_ALREADY_EXISTS</c> (parameter <c>field</c> = <c>userName</c> or <c>email</c>; the method refuses a second user
-///         with the same e-mail address, which the REST endpoint does not check), <c>PASSWORD_POLICY_VIOLATION</c> (details: the
+///         <c>USER_ALREADY_EXISTS</c> (parameter <c>field</c> = <c>userName</c> or <c>email</c>; a second user with the same
+///         e-mail address is refused by <see cref="IUserCreationService" />, the REST endpoint answers it with 409 and the same
+///         code since AB#8064), <c>PASSWORD_POLICY_VIOLATION</c> (details: the
 ///         codes of the failed rules, never the value). A missing or malformed user name or e-mail is
 ///         <c>METHOD_VALIDATION_FAILED</c>. Any other failure of the user manager throws (<c>METHOD_HANDLER_FAILED</c>).
 ///     </para>
@@ -120,11 +121,9 @@ internal sealed class UserCreateUserHandler(
             return CkMethodOutcome<UserCreateUserResult>.Fail(UserAlreadyExists, ("field", "userName"));
         }
 
+        // A duplicate e-mail address is refused by the shared creation service (DuplicateEmail, mapped below), so REST and
+        // method apply the same rule (AB#8064).
         var email = string.IsNullOrWhiteSpace(parameters.Email) ? null : parameters.Email.Trim();
-        if (email != null && await userManager.FindByEmailAsync(email).ConfigureAwait(false) != null)
-        {
-            return CkMethodOutcome<UserCreateUserResult>.Fail(UserAlreadyExists, ("field", "email"));
-        }
 
         var user = new RtUser
         {

@@ -2030,17 +2030,30 @@ A user is created only by this service: REST `POST {tenant}/v1/users` or the sta
 per method; off = `METHOD_HANDLER_NOT_AVAILABLE`). Both share `IUserCreationService` (`Services/UserCreationService.cs`, scoped):
 `UserManager.CreateAsync` with or without the password (user validators, password policy before the user is stored, normalised name
 and e-mail, security stamp), then the welcome notification (with password: e-mail confirmation; without: the invitation to set a
-password). REST behaviour is unchanged.
+password). Since AB#8064 the service also refuses an e-mail address another user of the tenant already has (see the table).
 
 | Rule | REST | Method |
 |---|---|---|
 | Caller | `IdentityUserAdministrationWritePolicy` | `IdentityMethodCallerRules.IsAdministrator` on the validated principal (scope `octo_api` + `UserManagement`), `METHOD_FORBIDDEN` / `role-required`; the gateway refuses a caller without the declared role first; a forged bus caller is rejected by the host |
 | `xt_` user name | 400 | `USER_NAME_RESERVED` |
 | Duplicate user name | 400 (`DuplicateUserName`) | `USER_ALREADY_EXISTS`, parameter `field=userName` (case-insensitive) |
-| Duplicate e-mail | **allowed** (`RequireUniqueEmail` is off) | `USER_ALREADY_EXISTS`, `field=email` (the declared error covers it; the method is stricter, never looser) |
+| Duplicate e-mail (AB#8064, normalised = case-insensitive; blank e-mail not checked) | `409 application/problem+json`, `code: USER_ALREADY_EXISTS`, `field: email` (`UserCreationProblems`; the address is not echoed or logged) | `USER_ALREADY_EXISTS`, `field=email` |
 | Password policy | 400 with the identity errors | `PASSWORD_POLICY_VIOLATION`, details = rule codes only |
 | Missing / invalid user name or e-mail | 400 | `METHOD_VALIDATION_FAILED` (`field`) |
 | Result | `200` (empty) | rtId of the new user (`UserCreateUserResult.Value`) |
+
+**Duplicate e-mail: only creation is checked (AB#8064).** The check lives in `UserCreationService` (`FindByEmailAsync`, then
+`IdentityResult.Failed(DuplicateEmail)`), so REST and method cannot drift. A taken user name wins (the check runs only when the name is
+free), so creating the same user twice still answers `400 DuplicateUserName` on REST. `IdentityOptions.User.RequireUniqueEmail` stays **off** on
+purpose: the user validator runs on every `UserManager.UpdateAsync` / `SetEmailAsync` / `SetUserNameAsync` too, and in a tenant that
+already holds two users with one address `FindByEmailAsync` returns one of them, so the other could no longer be updated (profile edit,
+role change, security-stamp write, password change). Existing duplicates are not migrated; updates and sign-in of those users are
+unchanged (`FindByEmailAsync` returns the first match, as before). **Not checked**: `PUT users/{userName}` changing the e-mail to one
+another user has (accepted; no CK method changes the e-mail, and `Email` is `MethodOnly`, so the generic paths cannot write it), the
+external-login auto-provisioning (`AuthApiController`), cross-tenant shadow users (`CrossTenantUserProvisioningService`) and the tenant
+admin bootstrap (`UserManagementService`) - they do not use `IUserCreationService`. Check and insert are not atomic (no unique index on
+runtime entities). Tests: `Api/TenantApi/UsersCreateTests` (409 also in other casing, name keeps 400, no e-mail not checked, legacy
+duplicates update and sign in, update to a taken address accepted) and `Api/Methods/UserCreateUserMethodTests`.
 
 Audit: one `Identity.Method` event per call (success, every refusal, `METHOD_HANDLER_FAILED`), `targetRtId` = the new user (success
 only), details `userName`, `withPassword`. The password reaches only the user manager - never a log, audit record or error parameter.
