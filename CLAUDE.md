@@ -2054,7 +2054,7 @@ password). Since AB#8064 the service also refuses an e-mail address another user
 | Duplicate e-mail (AB#8064, normalised = case-insensitive; blank e-mail not checked) | `409 application/problem+json`, `code: USER_ALREADY_EXISTS`, `field: email` (`UserCreationProblems`; the address is not echoed or logged) | `USER_ALREADY_EXISTS`, `field=email` |
 | Password policy | 400 with the identity errors | `PASSWORD_POLICY_VIOLATION`, details = rule codes only |
 | Missing / invalid user name or e-mail | 400 | `METHOD_VALIDATION_FAILED` (`field`) |
-| Result | `200` (empty) | rtId of the new user (`UserCreateUserResult.Value`) |
+| Result | `200` (empty) | rtId of the new user (`UserCreateUserResult.Value`); on the wire `resultJson` is the bare JSON string `"<rtId>"` (AB#8079, host of octo-common-services), so the GraphQL `result` is the rtId itself |
 
 **Duplicate e-mail: only new conflicts are refused (AB#8064 create, AB#8084 change).** The rule lives in `UserEmailUniqueness`
 (`Services/UserEmailUniqueness.cs`); `UserCreationService` uses it (`IdentityResult.Failed(DuplicateEmail)`), so REST and method cannot drift. A taken user name wins (the check runs only when the name is
@@ -2100,7 +2100,7 @@ next System.Identity major (AB#8053). Nothing in this service is affected (repos
 `Api/Methods/UserCreateUserMethodTests` (real MongoDB, host with the switch on: password user signs in, normalised fields and stamp,
 invitation without password, duplicate name (also other casing) and e-mail, policy, reserved name, validation, caller theory, service
 token, forged caller, audit, welcome notification, no password in audit or logs), `Methods/IdentityMethodHostTests`,
-`IdentityMethodDeclarationsIntegrationTests` (declared role `UserManagement`, flag still off).
+`IdentityMethodDeclarationsIntegrationTests` (declared role `UserManagement`, flag still off), `Api/Methods/UserCreateUserWireFormTests` (AB#8079: the envelope through the real host core, in-process transport, carries the bare rtId string, not `{"value": ...}`).
 
 ### `User.Merge` and the one merge of a duplicate user (AB#7778)
 
