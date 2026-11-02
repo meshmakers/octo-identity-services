@@ -2132,6 +2132,17 @@ compared state by state, audit, every refusal, data permission, last administrat
 `Api/TenantApi/UsersMergeTests` (REST), `RoleChangeGuardTests` (REST guard). Since this handler every declared System.Identity method has
 one; `UserChangePasswordMethodTests.AMethodWithoutHandler_…` uses an undeclared id.
 
+### System.Identity 2.x -> 3.x needs migration entries (AB#8157)
+
+The CK engine refuses a schema-only bridge across a major (`CkMigrationMajorVersionGuard`, AB#4924 G3) as soon as the target model ships
+a `migration-meta.yaml`, which System.Identity does. System.Identity 3.0.0 shipped without an entry from 2.x: every tenant upgrade failed with
+"No migration path found from System.Identity-2.30.0 to System.Identity-3.0.0" and the identity service stopped (test-2 outage). 3.0.1 adds
+one entry per 2.x minor from 2.9.0 to 2.30.0, all pointing at the empty script `2.x-to-3.0.1.yaml` (`steps: []`; nothing is migrated - the
+3.0.0 change is access modifiers only); tenants below 2.9.0 take the 2.8.0 -> 2.9.0 data migration first. **Whoever publishes another 2.x
+on a release line must extend the list.** Test: `SystemIdentityMajorUpgradeIntegrationTests` (the real published 2.30.0 imported into a tenant
+and upgraded through `SetupAsync`; the path finder for every 2.x minor from 2.0.0). The earlier asset-repo `IdentityMajorUpgradeFlowTests`
+missed the outage because its embedded 3.0.0 snapshot carries no migration-meta (no-migrations bridge).
+
 ### Identity-owned User fields are refused on the generic paths (AB#8042, AB#8053)
 
 Generic writes of the identity-owned User fields are refused by the model since System.Identity 3.0.0 (AB#8053): `NormalizedUserName`,
