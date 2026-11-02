@@ -1,3 +1,4 @@
+using Shared.TestUtilities.Fakes;
 using FluentAssertions;
 using IdentityServerPersistence.Services;
 using Meshmakers.Octo.Runtime.Contracts;
@@ -67,7 +68,7 @@ public class TenantDiscoveryServiceTests
         _resolver.ResolveAsync("bernkopf", _klaus)
             .Returns(new List<string> { "bernkopf", "tecob", "bierok", "energyiq", SystemTenant });
 
-        _sut = new TenantDiscoveryService(_systemContext, _resolver, NullLogger<TenantDiscoveryService>.Instance);
+        _sut = new TenantDiscoveryService(_systemContext, _resolver, new PassThroughTenantProbeGuard(), NullLogger<TenantDiscoveryService>.Instance);
     }
 
     [Fact]

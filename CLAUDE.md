@@ -2570,3 +2570,20 @@ create / attach / plain restore.
   secret (`RotateMirrorSecret`) or - while AB#5061 keeps the inherited secret - the parent client's secret.
 - Tests: `ScratchTenantCreatorGrantIntegrationTests` (real MongoDB: grant only for the creator, none without a marker, repeated setup, re-provisioned
   mirror, persisted revoke, foreign parent, non-mirror client, non-system parent, audit without secrets), `GroupsControllerScratchRevokeTests`.
+
+## One broken tenant database must not slow every token request (AB#8177)
+
+Token issuance (`AllowedTenantsResolver`: cross-tenant mapping probe of **every** registered tenant database),
+tenant discovery (user search in every tenant) and the CORS policy rebuild (client origins of every tenant) read from
+tenant databases other than the one the request is for. With the MongoDB user of one tenant missing, each of those
+probes waited ~10 s for the failed SCRAM authentication, 2-3 times per request: `POST /connect/token` and
+`GET /connect/authorize` of unrelated tenants took 18-30 s.
+
+`ITenantProbeGuard` / `TenantProbeGuard` (singleton) wraps these probes: a per-tenant circuit breaker with a probe
+timeout (`TenantProbeGuard:ProbeTimeout`, default 3 s) and an open duration (`TenantProbeGuard:OpenDuration`, default
+60 s). A failed or timed-out probe opens the circuit; while open, that tenant answers "unavailable" at once without any
+I/O; then one request probes again (half-open). Callers fail closed and do **not** cache an "unavailable" answer.
+The opening is logged once at error level with tenant, database and the MongoDB user name (the signal that names the
+missing user). Every new per-request loop over other tenants' databases must go through the guard. Tests:
+`TenantProbeGuardTests`, `AllowedTenantsResolverBrokenTenantTests` (dropped user of tenant X: the token path of tenant Y
+stays fast and does not touch X). The creator service of the owning service re-creates the user, see octo-common-services.

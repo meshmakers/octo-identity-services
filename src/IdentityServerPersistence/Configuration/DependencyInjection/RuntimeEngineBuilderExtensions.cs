@@ -1,3 +1,4 @@
+using Microsoft.Extensions.Configuration;
 using IdentityServerPersistence.Configuration.DependencyInjection;
 using IdentityServerPersistence.Configuration.Options;
 using IdentityServerPersistence.Services;
@@ -88,6 +89,12 @@ public static class RuntimeEngineBuilderExtensions
         // AB#6393: the cached tenant registry (id -> registry entry) is shared by AllowedTenantsResolver and
         // CrossTenantAuthenticationService for lightweight repository access.
         builder.Services.AddScoped<ITenantRegistry, TenantRegistry>();
+        // AB#8177: one broken tenant database (e.g. its MongoDB user is missing) must not slow every token request:
+        // the per-request probes of other tenants' databases are bounded and circuit-broken per tenant, process-wide.
+        // Configuration is optional (hosts of the integration tests register none): defaults apply without it.
+        builder.Services.AddOptions<TenantProbeGuardOptions>().Configure<IServiceProvider>((options, sp) =>
+            sp.GetService<IConfiguration>()?.GetSection(TenantProbeGuardOptions.SectionName).Bind(options));
+        builder.Services.AddSingleton<ITenantProbeGuard, TenantProbeGuard>();
         builder.Services.AddScoped<IAllowedTenantsResolver, AllowedTenantsResolver>();
         builder.Services.AddScoped<IEmailDomainGroupRuleStore, EmailDomainGroupRuleStore>();
         builder.Services.AddScoped<ILoginGroupAssignmentService, LoginGroupAssignmentService>();

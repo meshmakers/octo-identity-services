@@ -1,3 +1,4 @@
+using Shared.TestUtilities.Fakes;
 using FluentAssertions;
 using IdentityServerPersistence.Services;
 using Meshmakers.Octo.Runtime.Contracts.MongoDb;
@@ -61,7 +62,7 @@ public class TenantDiscoveryScopeTests
             .Returns((ITenantContext?)null);
 
         _sut = new TenantDiscoveryService(_systemContext, Substitute.For<IAllowedTenantsResolver>(),
-            NullLogger<TenantDiscoveryService>.Instance);
+            new PassThroughTenantProbeGuard(), NullLogger<TenantDiscoveryService>.Instance);
     }
 
     [Fact]

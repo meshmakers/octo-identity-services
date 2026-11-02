@@ -1,3 +1,4 @@
+using Shared.TestUtilities.Fakes;
 using FluentAssertions;
 using IdentityServerPersistence.Services;
 using IdentityServerPersistence.SystemStores;
@@ -139,7 +140,8 @@ public class AllowedTenantsResolverIntegrationTests : IClassFixture<IdentityServ
         var localUser = await CreateUserAsync(systemContext, childTenantId, "erin");
 
         var discovery = new TenantDiscoveryService(
-            systemContext, CreateResolver(systemContext), NullLogger<TenantDiscoveryService>.Instance);
+            systemContext, CreateResolver(systemContext), new PassThroughTenantProbeGuard(),
+            NullLogger<TenantDiscoveryService>.Instance);
 
         var tenants = await discovery.FindTenantsForUserAsync(localUser.Email!);
 
@@ -220,7 +222,7 @@ public class AllowedTenantsResolverIntegrationTests : IClassFixture<IdentityServ
     {
         var cache = new MemoryCache(new MemoryCacheOptions());
         return new AllowedTenantsResolver(systemContext, new TenantRegistry(systemContext, cache),
-            new CrossTenantShadowUserChainResolver(systemContext), cache, NullLogger<AllowedTenantsResolver>.Instance);
+            new CrossTenantShadowUserChainResolver(systemContext), cache, new PassThroughTenantProbeGuard(), NullLogger<AllowedTenantsResolver>.Instance);
     }
 
     /// <summary>

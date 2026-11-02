@@ -36,6 +36,7 @@ public class AllowedTenantsResolver(
     ITenantRegistry tenantRegistry,
     ICrossTenantShadowUserChainResolver shadowUserChainResolver,
     IMemoryCache cache,
+    ITenantProbeGuard probeGuard,
     ILogger<AllowedTenantsResolver> logger) : IAllowedTenantsResolver
 {
     /// <summary>How long the mapping lookups are reused (AB#6307); the registry list uses the same TTL (<see cref="TenantRegistry.CacheTtl" />).</summary>
@@ -203,9 +204,18 @@ public class AllowedTenantsResolver(
             return cached;
         }
 
-        var hasMapping = await QueryExternalTenantUserMappingAsync(childTenant, sourceTenantId, sourceUserName);
-        cache.Set(key, hasMapping, CacheTtl);
-        return hasMapping;
+        // AB#8177: bounded and circuit-broken per tenant. A tenant whose database cannot be reached (e.g. its MongoDB
+        // user is missing) answers "no mapping" at once instead of costing every token request ~10 s, and that
+        // answer is not cached: the tenant is probed again as soon as its circuit closes.
+        var probe = await probeGuard.RunAsync(childTenant, "external tenant user mapping lookup",
+            () => QueryExternalTenantUserMappingAsync(childTenant, sourceTenantId, sourceUserName));
+        if (!probe.Succeeded)
+        {
+            return false;
+        }
+
+        cache.Set(key, probe.Value, CacheTtl);
+        return probe.Value;
     }
 
     private async Task<bool> QueryExternalTenantUserMappingAsync(

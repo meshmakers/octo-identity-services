@@ -1,5 +1,6 @@
 using FluentAssertions;
 using IdentityServerPersistence.Configuration.Options;
+using IdentityServerPersistence.Services;
 using Meshmakers.Octo.Backend.IdentityServices.Services;
 using Meshmakers.Octo.Runtime.Contracts;
 using Meshmakers.Octo.Runtime.Contracts.MongoDb;
@@ -62,7 +63,8 @@ public class IdentityCorsPolicyProviderTests
         _systemContext.GetAllTenantsAsync(Arg.Any<IOctoAdminSession>(), Arg.Any<int?>(), Arg.Any<int?>())
             .Returns(registry);
 
-        _systemContext.TryFindTenantRepositoryAsync(SystemTenantId).Returns(_systemRepo);
+        _systemContext.DatabaseName.Returns(SystemTenantId);
+        _systemContext.GetRegisteredTenantRepository(Arg.Any<OctoTenant>()).Returns(_systemRepo);
         _systemRepo.GetSessionAsync().Returns(Substitute.For<IOctoSession>());
         _systemRepo.GetRtEntitiesByTypeAsync<RtClient>(Arg.Any<IOctoSession>(), Arg.Any<RtEntityQueryOptions>())
             .Returns(async _ =>
@@ -84,7 +86,8 @@ public class IdentityCorsPolicyProviderTests
 
     private IdentityCorsPolicyProvider CreateSut(int cacheSeconds = 60, ILogger<IdentityCorsPolicyProvider>? logger = null)
     {
-        var services = new ServiceCollection().AddSingleton(_systemContext).BuildServiceProvider();
+        var services = new ServiceCollection().AddSingleton(_systemContext)
+            .AddSingleton<ITenantProbeGuard>(new PassThroughTenantProbeGuard()).BuildServiceProvider();
         return new IdentityCorsPolicyProvider(
             services,
             logger ?? NullLogger<IdentityCorsPolicyProvider>.Instance,
