@@ -2056,18 +2056,37 @@ password). Since AB#8064 the service also refuses an e-mail address another user
 | Missing / invalid user name or e-mail | 400 | `METHOD_VALIDATION_FAILED` (`field`) |
 | Result | `200` (empty) | rtId of the new user (`UserCreateUserResult.Value`) |
 
-**Duplicate e-mail: only creation is checked (AB#8064).** The check lives in `UserCreationService` (`FindByEmailAsync`, then
-`IdentityResult.Failed(DuplicateEmail)`), so REST and method cannot drift. A taken user name wins (the check runs only when the name is
+**Duplicate e-mail: only new conflicts are refused (AB#8064 create, AB#8084 change).** The rule lives in `UserEmailUniqueness`
+(`Services/UserEmailUniqueness.cs`); `UserCreationService` uses it (`IdentityResult.Failed(DuplicateEmail)`), so REST and method cannot drift. A taken user name wins (the check runs only when the name is
 free), so creating the same user twice still answers `400 DuplicateUserName` on REST. `IdentityOptions.User.RequireUniqueEmail` stays **off** on
 purpose: the user validator runs on every `UserManager.UpdateAsync` / `SetEmailAsync` / `SetUserNameAsync` too, and in a tenant that
 already holds two users with one address `FindByEmailAsync` returns one of them, so the other could no longer be updated (profile edit,
 role change, security-stamp write, password change). Existing duplicates are not migrated; updates and sign-in of those users are
-unchanged (`FindByEmailAsync` returns the first match, as before). **Not checked**: `PUT users/{userName}` changing the e-mail to one
-another user has (accepted; no CK method changes the e-mail, and `Email` is `MethodOnly`, so the generic paths cannot write it), the
-external-login auto-provisioning (`AuthApiController`), cross-tenant shadow users (`CrossTenantUserProvisioningService`) and the tenant
-admin bootstrap (`UserManagementService`) - they do not use `IUserCreationService`. Check and insert are not atomic (no unique index on
-runtime entities). Tests: `Api/TenantApi/UsersCreateTests` (409 also in other casing, name keeps 400, no e-mail not checked, legacy
-duplicates update and sign in, update to a taken address accepted) and `Api/Methods/UserCreateUserMethodTests`.
+unchanged (`FindByEmailAsync` returns the first match, as before).
+
+**E-mail change (AB#8084).** `PUT users/{userName}` refuses a **change** of the address to one another user has with the same
+`409` (`UserCreationProblems.DuplicateEmail`, logged without the address), before anything is written. `UserEmailUniqueness.ChangesAddress`
+decides what a change is: the new address is not blank and differs normalised from the stored `Email` (not from `NormalizedEmail`,
+which a stale write could leave behind); keeping the address, changing only its casing and clearing it are not checked, so users
+that already share an address stay editable. The owner found by `FindByEmailAsync` must be another `RtId`. Other e-mail write paths,
+checked for this story: no CK method changes the e-mail (System.Identity 2.30.0), `Email` is `MethodOnly` (generic GraphQL, `ImportRt`,
+blueprint seeds and pipelines cannot write it), `ManageApiController` has no e-mail change, the self-service e-mail enrolment
+(`SelfServiceIdentifierService`) writes a verified identifier, not `RtUser.Email`.
+
+**Deliberately not checked (existing decisions, product decision needed to change them):**
+
+| Path | Behaviour | Why |
+|---|---|---|
+| External-login and LDAP auto-provisioning (`AuthApiController.CreateUserFromExternalProvider`) | creates a separate `{Provider}_{email}` user even when a local user has the address | Bug 3430 (`docs/authentication.md` § External Login Security Model): never link by e-mail (privilege escalation); refusing would lock the external user out |
+| Cross-tenant shadow users (`CrossTenantUserProvisioningService`) | created with, and synced on every login to, the home user's address | a dedicated account of the home identity (excluded from tenant discovery); refusing locks the person out of the child tenant, linking would hand a local user's roles to the home identity |
+| Tenant admin bootstrap (`UserManagementService`) | not checked | runs only in a tenant without users |
+
+Pinned by `CrossTenantUserProvisioningServiceTests.FindOrCreate_LocalUserWithTheSameEmail_*` / `…_SyncsAnEmailAnotherUserHas` and
+`ExternalLoginDeduplicationTests`. Check and write are not atomic (no unique index on runtime entities). Tests:
+`Api/TenantApi/UsersCreateTests` (409 also in other casing, name keeps 400, no e-mail not checked, legacy duplicates update and sign in),
+`Api/TenantApi/UsersUpdateEmailTests` (change to a taken address 409 also in other casing and from no address, nothing written; free
+address, clearing, legacy duplicates keep / re-case their address, a sharing user cannot move to another taken address) and
+`Api/Methods/UserCreateUserMethodTests`.
 
 Audit: one `Identity.Method` event per call (success, every refusal, `METHOD_HANDLER_FAILED`), `targetRtId` = the new user (success
 only), details `userName`, `withPassword`. The password reaches only the user manager - never a log, audit record or error parameter.

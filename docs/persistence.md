@@ -112,7 +112,7 @@ Key properties:
 - `indexes` - MongoDB index definitions (supports `Ascending`, `UniqueNotDeleted`, etc.)
 
 **User Entity Indexes:**
-- `Ascending` on `NormalizedEmail` - Efficient email lookups. Note: Multiple users can share the same email (e.g., a local user and external provider users). External logins create dedicated user accounts with provider-prefixed usernames to prevent privilege escalation (Bug 3430).
+- `Ascending` on `NormalizedEmail` - Efficient email lookups. Note: Multiple users can share the same email (e.g., a local user and external provider users). External logins create dedicated user accounts with provider-prefixed usernames to prevent privilege escalation (Bug 3430). The user administration refuses only new duplicates (create AB#8064, e-mail change AB#8084); existing ones stay.
 - `Ascending` on `NormalizedUserName` - Efficient username lookups.
 
 **Group Entity (`ck-group.yaml`):**

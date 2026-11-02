@@ -328,7 +328,12 @@ public class UsersController : ControllerBase
     [HttpPut("{userName}")]
     [Authorize(IdentityServiceConstants.IdentityUserAdministrationWritePolicy)]
     [EndpointSummary("Updates a user.")]
+    [EndpointDescription("Refuses changing the e-mail address to one another user of the tenant already has (case-insensitive) " +
+                         "with 409 application/problem+json, code USER_ALREADY_EXISTS, field email - the same answer as the " +
+                         "create. Keeping the current address is never checked, so users that already share an address stay " +
+                         "editable.")]
     [ProducesResponseType(StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status409Conflict)]
     public async Task<IActionResult> Put(
         [Required] [Description("The username")]
         string userName,
@@ -349,11 +354,21 @@ public class UsersController : ControllerBase
         // Renaming INTO the reserved shadow namespace is refused; editing an existing shadow user
         // (whose name already carries the prefix) stays possible.
         var previousUserName = rtUser.UserName;
+        var previousEmail = rtUser.Email;
         userDto.ApplyTo(rtUser);
         if (CrossTenantShadowUserName.IsShadowUserName(rtUser.UserName) &&
             !string.Equals(rtUser.UserName, previousUserName, StringComparison.OrdinalIgnoreCase))
         {
             return BadRequest(ReservedUserNameMessage);
+        }
+
+        // AB#8084: changing the address to one another user already has is refused like a create (AB#8064). Only a change is
+        // checked, so users of tenants that already hold duplicates stay editable while they keep their address.
+        if (UserEmailUniqueness.ChangesAddress(_userManager, previousEmail, rtUser.Email) &&
+            await UserEmailUniqueness.IsTakenByAnotherUserAsync(_userManager, rtUser, rtUser.Email))
+        {
+            _logger.LogInformation("Update user refused: another user of the tenant has the requested e-mail address");
+            return UserCreationProblems.DuplicateEmail();
         }
 
         try

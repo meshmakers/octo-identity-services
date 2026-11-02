@@ -286,9 +286,11 @@ External login user creation follows a strict security model:
 
 3. **Provider key matching only**: Returning users are identified exclusively via `FindByLoginAsync(provider, providerKey)`, which matches the external provider's unique user identifier. This ensures that only the same person from the same provider can access the same account.
 
-4. **Separate database indexes**: The User CK model defines separate `Ascending` indexes on `NormalizedEmail` and `NormalizedUserName` for efficient lookups.
+4. **Duplicate e-mail rule does not apply (AB#8084)**: the user administration refuses a second user with an e-mail address another user already has (create AB#8064, change AB#8084). External-login and LDAP auto-provisioning deliberately keep creating the dedicated account even when a local user has the address — refusing it would lock the external user out, linking it is the escalation of point 1. Cross-tenant shadow users follow the same rule. Changing this needs a product decision.
 
-5. **Provider-name character safety**: The generated username embeds the provider's configured `Name` (`{Name}_{email}`). ASP.NET Identity's `UserValidator` only accepts a limited character set, so a provider named with spaces or other special characters (e.g. `Microsoft Entra ID`) would make `UserManager.CreateAsync` fail with `InvalidUserName`, surfacing to the end user as **"Failed to create user account"** *after* an otherwise successful external login. Two defenses:
+5. **Separate database indexes**: The User CK model defines separate `Ascending` indexes on `NormalizedEmail` and `NormalizedUserName` for efficient lookups.
+
+6. **Provider-name character safety**: The generated username embeds the provider's configured `Name` (`{Name}_{email}`). ASP.NET Identity's `UserValidator` only accepts a limited character set, so a provider named with spaces or other special characters (e.g. `Microsoft Entra ID`) would make `UserManager.CreateAsync` fail with `InvalidUserName`, surfacing to the end user as **"Failed to create user account"** *after* an otherwise successful external login. Two defenses:
    - **At configuration time**: `IdentityProvidersController` (the single write path used by the Studio UI, `octo-cli` and the MCP server) rejects a provider `Name` that is not `^[A-Za-z0-9._-]+$` with a `400 Bad Request`, so the problem is caught when the provider is created/updated.
    - **At login time**: `AuthApiController.CreateUserFromExternalProvider` additionally sanitizes the provider label (`SanitizeUserNameComponent`) down to letters/digits/`. _ -` as a safety net for providers that were configured before this validation existed.
 
