@@ -92,6 +92,7 @@ Lauf, davon ~50 % der CI-Testzeit reines Setup). Die Definitionen liegen in `tes
 | --- | --- | --- |
 | `IdentityPersistence` | `IdentityServicesFixture` | 14 Persistence-Klassen |
 | `DataProtectionKeySeed` | `IdentityServicesFixture` | nur `DataProtectionKeySeedIntegrationTests` |
+| `DataProtectionKeyEncryption` | `IdentityServicesFixture` | nur `DataProtectionKeyEncryptionIntegrationTests` (AB#5530, leert den Key-Store je Fact) |
 | `VirginBootstrap` | `VirginBootstrapFixture` | nur `VirginSystemDatabaseBootstrapIntegrationTests` |
 | `ZWebFactory` | `CustomWebApplicationFactory` | 15 HTTP-Klassen (Basis `IntegrationTestBase`) |
 | `ZSetupApi` | `CustomWebApplicationFactory` | nur `SetupApiTests` |
@@ -2412,6 +2413,12 @@ Located in `Controllers/Api/`:
 ASP.NET Data Protection keys are always persisted in MongoDB (system tenant, `RtDataProtectionKey` entities) via `DataProtectionKeyStore : IXmlRepository` (registered as a singleton). The application name remains `OctoIdentityServices` (set via `SetApplicationName()`), so key isolation is unchanged from the previous file-based implementation.
 
 The `DataProtectionKeysPath` option (`OCTO_IDENTITY__DataProtectionKeysPath`) is **legacy / seed-only**: when set and the directory contains `key-*.xml` files, those keys are imported once into MongoDB on startup (zero-logout migration from the old PVC). After the import succeeds the path can be left unset in all new deployments. The Helm chart's `services.identity.dataProtection` toggle and the associated PVC have been removed; ship order is identity image first, then the updated chart.
+
+**Encryption at rest (AB#5530).** Registration: `AddOctoDataProtectionKeyRing()` (`SystemStores/DataProtection/`). The secret part of every key (`masterKey`) is wrapped with the **platform key ring** `SecretEncryption` (`OCTO_SECRETENCRYPTION__KEYS__<id>` / `ACTIVEKEYID`, AES-256-GCM via the engine's `ISecretAttributeProtector`, envelope `enc:v2:<kid>:…`) — no certificate, no new secret. The stored XML is ASP.NET's own encrypted form (`<encryptedSecret decryptorType="…PlatformKeyRingXmlDecryptor, IdentityServerPersistence">`), written by `DataProtectionKeyStore` itself (not `KeyManagementOptions.XmlEncryptor`) so it can decide per write and so `decryptorType` carries no assembly version. Key id, dates and key material never change, so nobody is logged out.
+- `Identity:DataProtection:EncryptExistingKeys` (`OCTO_IDENTITY__DATAPROTECTION__ENCRYPTEXISTINGKEYS`, default `false`): `false` = stored keys stay as they are, new keys are written **plain while the store holds keys** (old pods of a rolling update keep reading them) — a store without any key (fresh install) gets encrypted keys. `true` = new keys encrypted, and the startup step rewrites every plain key encrypted in place (idempotent, every pod may run it).
+- `DataProtectionKeyRingStartupService` (hosted): refuses to start (`DataProtectionKeyRingException`) when the flag is on without a `SecretEncryption` key, or when a stored key is wrapped with a key id that is not configured; re-wraps keys with a non-active key id (platform key rotation — remove the old id only after the re-wrap); other failures (DB) are logged and retried next start.
+- **Never rename or move `PlatformKeyRingXmlDecryptor`** — stored keys reference its type name. **Rollback** to an image without the decryptor after keys are encrypted logs every user out (old image cannot read the keys, creates new ones). Rollout/rollback: `docs/rollout-identity-dataprotection-encryption.md`.
+- Tests: `PlatformKeyRingXmlEncryptionTests` (unit, real ASP.NET stack), `DataProtectionKeyEncryptionIntegrationTests` (Mongo: multi-replica, migration, rotation, raw DB dump has no key material).
 
 ## Docker
 

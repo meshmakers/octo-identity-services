@@ -194,6 +194,36 @@ public class OctoIdentityServicesOptions
     ///     AB#7854: limits of the sign-in endpoints (password, LDAP, second factor, recovery code).
     /// </summary>
     public SignInRateLimitOptions SignInRateLimit { get; set; } = new();
+
+    /// <summary>
+    ///     AB#5530: encryption at rest of the ASP.NET Data Protection key ring (configuration section
+    ///     <c>Identity:DataProtection</c>).
+    /// </summary>
+    public IdentityDataProtectionOptions DataProtection { get; set; } = new();
+}
+
+/// <summary>
+///     Encryption at rest of the ASP.NET Data Protection key ring (AB#5530). The keys are wrapped with the
+///     platform key ring <c>SecretEncryption</c> (<c>OCTO_SECRETENCRYPTION__KEYS__&lt;id&gt;</c>,
+///     <c>OCTO_SECRETENCRYPTION__ACTIVEKEYID</c>); see <c>docs/rollout-identity-dataprotection-encryption.md</c>.
+/// </summary>
+public class IdentityDataProtectionOptions
+{
+    /// <summary>
+    ///     <c>Identity:DataProtection:EncryptExistingKeys</c> (env
+    ///     <c>OCTO_IDENTITY__DATAPROTECTION__ENCRYPTEXISTINGKEYS</c>), default <c>false</c>.
+    ///     <list type="bullet">
+    ///         <item><c>false</c> (release 1): stored keys are read as they are; new keys are written unencrypted while
+    ///         the store already holds keys, so pods of the previous image keep reading them during a rolling update.
+    ///         A store without any key (fresh installation) gets its keys encrypted.</item>
+    ///         <item><c>true</c> (per cluster, once every pod runs an image with the decryptor): new keys are written
+    ///         encrypted and a one-time, idempotent startup step rewrites every stored plain key encrypted (same key
+    ///         id, same dates, same key material - nobody is logged out). Identity refuses to start when no
+    ///         <c>SecretEncryption</c> key is configured.</item>
+    ///     </list>
+    ///     Switching back to <c>false</c> does not decrypt stored keys.
+    /// </summary>
+    public bool EncryptExistingKeys { get; set; }
 }
 
 /// <summary>
