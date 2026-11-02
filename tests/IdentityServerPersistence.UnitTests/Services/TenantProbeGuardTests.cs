@@ -172,6 +172,28 @@ public class TenantProbeGuardTests
     }
 
     [Fact]
+    public async Task AStaleFailure_DoesNotReopenACircuitThatHealingJustClosed()
+    {
+        var systemContext = Substitute.For<ISystemContext>();
+        systemContext.EnsureTenantDatabaseUserAsync("meshmaker").Returns(TenantDatabaseUserEnsureResult.Created);
+        var sut = CreateHealingSut(systemContext);
+        var slowFailure = new TaskCompletionSource<int>();
+        var stale = sut.RunAsync(Broken, "test", () => slowFailure.Task); // started while the circuit was closed
+
+        await sut.RunAsync<int>(Broken, "test", () => throw AuthFailure()); // opens, heals, resets
+        await WaitUntilAsync(() => systemContext.ReceivedCalls().Any());
+        var closed = false;
+        await WaitUntilAsync(() => closed = sut.RunAsync(Broken, "test", () => Task.FromResult(1)).Result.Succeeded);
+        closed.Should().BeTrue();
+
+        slowFailure.SetException(AuthFailure()); // the earlier probe fails late
+        (await stale).Succeeded.Should().BeFalse();
+
+        (await sut.RunAsync(Broken, "test", () => Task.FromResult(2))).Succeeded.Should()
+            .BeTrue("a stale failure must not re-open the circuit the healing closed");
+    }
+
+    [Fact]
     public async Task ATimeout_AlsoAsksForTheUserToBeEnsured_AtMostOncePerMinute()
     {
         var systemContext = Substitute.For<ISystemContext>();

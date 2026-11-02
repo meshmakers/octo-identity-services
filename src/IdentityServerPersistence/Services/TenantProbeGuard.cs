@@ -103,14 +103,14 @@ public sealed class TenantProbeGuard(
             }
 
             var now = _time.GetUtcNow();
-            if (state.Open(now, now + settings.OpenDuration))
+            if (state.Open(generation, now, now + settings.OpenDuration))
             {
                 LogOpened(tenant, operation, settings, ex);
             }
 
             if (systemContext is not null && MayBeAMissingDatabaseUser(ex))
             {
-                HealInBackground(tenant, state);
+                HealInBackground(systemContext, tenant, state);
             }
 
             return new TenantProbeResult<T>(false, default);
@@ -128,13 +128,13 @@ public sealed class TenantProbeGuard(
     ///     Re-creates the tenant's MongoDB user off the request path (the admin connection can be as slow as the
     ///     failed probe) and closes the circuit once the user was missing and is back.
     /// </summary>
-    private void HealInBackground(OctoTenant tenant, State state)
+    private void HealInBackground(ISystemContext healingContext, OctoTenant tenant, State state)
     {
         _ = Task.Run(async () =>
         {
             try
             {
-                var result = await _healer.TryHealAsync(systemContext!, tenant.TenantId, logger).ConfigureAwait(false);
+                var result = await _healer.TryHealAsync(healingContext, tenant.TenantId, logger).ConfigureAwait(false);
                 if (result == TenantDatabaseUserEnsureResult.Created)
                 {
                     state.Reset();
@@ -248,11 +248,21 @@ public sealed class TenantProbeGuard(
             }
         }
 
-        /// <summary>Opens the circuit; true when it was closed or half-open (worth logging), false for a concurrent duplicate.</summary>
-        public bool Open(DateTimeOffset now, DateTimeOffset until)
+        /// <summary>
+        ///     Opens the circuit; true when it was closed or half-open (worth logging), false for a concurrent duplicate.
+        ///     A failure of a probe that started in an earlier circuit state (<paramref name="generation" /> differs) is
+        ///     stale - the circuit was opened or reset meanwhile - and leaves the current state alone, so a late failure
+        ///     cannot re-open a circuit the healing just closed.
+        /// </summary>
+        public bool Open(long generation, DateTimeOffset now, DateTimeOffset until)
         {
             lock (_gate)
             {
+                if (generation != _generation)
+                {
+                    return false;
+                }
+
                 var report = _openUntil is null || now >= _openUntil;
                 _generation++;
                 _openUntil = until;

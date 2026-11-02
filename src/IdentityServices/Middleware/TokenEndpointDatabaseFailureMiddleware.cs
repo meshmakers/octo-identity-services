@@ -15,8 +15,9 @@ namespace Meshmakers.Octo.Backend.IdentityServices.Middleware;
 /// </summary>
 /// <remarks>
 ///     Applies to <c>/connect/token</c> only and only to database failures (MongoDB exceptions, timeouts); every other
-///     exception still propagates to the global handler. Must run after <c>OidcTenantResolutionMiddleware</c> (which
-///     names the tenant in <c>HttpContext.Items</c>) and before authentication (the OpenIddict handlers).
+///     exception still propagates to the global handler. Runs <b>before</b> <c>OidcTenantResolutionMiddleware</c> so that
+///     its tenant lookup is covered too; the tenant it names in <c>HttpContext.Items</c> is read when the failure
+///     happens (a failure inside the lookup itself answers without a tenant name).
 /// </remarks>
 internal sealed class TokenEndpointDatabaseFailureMiddleware(
     RequestDelegate next,
@@ -40,15 +41,19 @@ internal sealed class TokenEndpointDatabaseFailureMiddleware(
         catch (Exception ex) when (IsDatabaseFailure(ex) && !context.RequestAborted.IsCancellationRequested &&
                                    !context.Response.HasStarted)
         {
-            var tenantId = context.Items[InfrastructureCommon.TenantIdName] as string ?? "(unknown)";
-            var cause = TenantDatabaseUserHealer.IsAuthenticationFailure(ex)
+            var tenantId = context.Items[InfrastructureCommon.TenantIdName] as string;
+            var tenantText = tenantId is null ? "this token request" : $"the token request for tenant '{tenantId}'";
+            var authFailure = TenantDatabaseUserHealer.IsAuthenticationFailure(ex);
+            var cause = authFailure
                 ? "MongoDB rejected the credentials of the tenant database user"
                 : "the tenant database did not answer";
             logger.LogError(ex,
-                "Token request for tenant '{TenantId}' failed: a tenant database is unavailable ({Cause}); answering " +
-                "503 {Error} instead of an unhandled error", tenantId, cause, ErrorCode);
+                "Token request (tenant '{TenantId}') failed: a tenant database is unavailable ({Cause}); answering " +
+                "503 {Error} instead of an unhandled error", tenantId ?? "(not resolved)", cause, ErrorCode);
 
-            if (TenantDatabaseUserHealer.IsAuthenticationFailure(ex) &&
+            // Same trigger policy as the probe guard: an authentication error or the timeout a SCRAM attempt against a
+            // missing user runs into. Without a resolved tenant there is nobody to heal.
+            if (tenantId is not null && (authFailure || HasTimeout(ex)) &&
                 context.RequestServices.GetService<ISystemContext>() is { } systemContext)
             {
                 var healLogger = logger;
@@ -64,11 +69,24 @@ internal sealed class TokenEndpointDatabaseFailureMiddleware(
             {
                 ["error"] = ErrorCode,
                 ["error_description"] =
-                    $"The database of a tenant needed for the token request for tenant '{tenantId}' is unavailable " +
+                    $"The database of a tenant needed for {tenantText} is unavailable " +
                     $"({cause}). Retry in a minute; if it persists an administrator must check the MongoDB user of " +
                     "the tenant database."
             }));
         }
+    }
+
+    private static bool HasTimeout(Exception ex)
+    {
+        for (var current = ex; current is not null; current = current.InnerException)
+        {
+            if (current is TimeoutException)
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private static bool IsDatabaseFailure(Exception ex)

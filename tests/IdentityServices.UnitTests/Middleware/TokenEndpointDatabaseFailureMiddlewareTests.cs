@@ -74,6 +74,23 @@ public class TokenEndpointDatabaseFailureMiddlewareTests
     }
 
     [Fact]
+    public async Task AFailureInsideTheTenantLookup_IsAlsoAClear503_WithoutATenantName()
+    {
+        // The middleware wraps the tenant resolution: the tenant is not known yet when its lookup throws.
+        var systemContext = Substitute.For<ISystemContext>();
+        var (context, body) = NewContext("/connect/token", systemContext);
+        context.Items.Remove(InfrastructureCommon.TenantIdName);
+
+        await Sut(_ => throw Unauthorized()).InvokeAsync(context);
+
+        context.Response.StatusCode.Should().Be(StatusCodes.Status503ServiceUnavailable);
+        body.Position = 0;
+        using var json = JsonDocument.Parse(body);
+        json.RootElement.GetProperty("error_description").GetString().Should().Contain("this token request");
+        await systemContext.DidNotReceive().EnsureTenantDatabaseUserAsync(Arg.Any<string>());
+    }
+
+    [Fact]
     public async Task OtherExceptionsStillPropagate()
     {
         var (context, _) = NewContext("/connect/token");

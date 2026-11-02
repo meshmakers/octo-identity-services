@@ -2593,7 +2593,7 @@ the pooled-connection case) or times out, the guard asks `TenantDatabaseUserHeal
 rate-limited to once a minute per tenant) to re-create the tenant's MongoDB user **in the background** and closes the
 circuit as soon as the user was missing and is back, so no restart is needed. The healer needs the admin MongoDB
 connection; a service without it just logs a warning. A token request that hits an unreachable tenant database is no
-longer an unhandled 500: `TokenEndpointDatabaseFailureMiddleware` (after `UseOidcTenantResolution`, `/connect/token`
+longer an unhandled 500: `TokenEndpointDatabaseFailureMiddleware` (before `UseOidcTenantResolution`, so the tenant lookup is covered; `/connect/token`
 only) answers `503 temporarily_unavailable` with `error_description` naming the tenant and the cause, and octo-sdk maps it
 to `TenantTokenDenialCause.TenantUnavailable`, so octo-cli shows the reason instead of "could not be reached". Tests:
 `TenantProbeGuardTests` (healing), `TokenEndpointDatabaseFailureMiddlewareTests`.
