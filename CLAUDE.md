@@ -2002,7 +2002,7 @@ password). REST behaviour is unchanged.
 | Duplicate e-mail | **allowed** (`RequireUniqueEmail` is off) | `USER_ALREADY_EXISTS`, `field=email` (the declared error covers it; the method is stricter, never looser) |
 | Password policy | 400 with the identity errors | `PASSWORD_POLICY_VIOLATION`, details = rule codes only |
 | Missing / invalid user name or e-mail | 400 | `METHOD_VALIDATION_FAILED` (`field`) |
-| Result | `200` (empty) | rtId of the new user (`UserCreateUserResult.Value`) |
+| Result | `200` (empty) | rtId of the new user (`UserCreateUserResult.Value`); on the wire `resultJson` is the bare JSON string `"<rtId>"` (AB#8079, host of octo-common-services), so the GraphQL `result` is the rtId itself |
 
 Audit: one `Identity.Method` event per call (success, every refusal, `METHOD_HANDLER_FAILED`), `targetRtId` = the new user (success
 only), details `userName`, `withPassword`. The password reaches only the user manager - never a log, audit record or error parameter.
@@ -2016,7 +2016,7 @@ next System.Identity major (AB#8053). Nothing in this service is affected (repos
 `Api/Methods/UserCreateUserMethodTests` (real MongoDB, host with the switch on: password user signs in, normalised fields and stamp,
 invitation without password, duplicate name (also other casing) and e-mail, policy, reserved name, validation, caller theory, service
 token, forged caller, audit, welcome notification, no password in audit or logs), `Methods/IdentityMethodHostTests`,
-`IdentityMethodDeclarationsIntegrationTests` (declared role `UserManagement`, flag still off).
+`IdentityMethodDeclarationsIntegrationTests` (declared role `UserManagement`, flag still off), `Api/Methods/UserCreateUserWireFormTests` (AB#8079: the envelope through the real host core, in-process transport, carries the bare rtId string, not `{"value": ...}`).
 
 ### Identity-owned User fields are refused on the generic paths (AB#8042)
 
