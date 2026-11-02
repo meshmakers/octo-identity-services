@@ -487,6 +487,8 @@ try
     // The sequence of the add statements in the configure function is of importance.
     app.UseDcrDefaultScope();
     app.UseOidcTenantResolution();
+    // AB#8177: an unreachable tenant database answers a clear 503 error instead of an unhandled 500.
+    app.UseTokenEndpointDatabaseFailureHandling();
     app.UseAuthentication();
     app.UseAuthorization();
     app.UseOctoTenantAuthorization();
