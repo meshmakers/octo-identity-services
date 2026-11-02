@@ -8,7 +8,7 @@ using Meshmakers.Octo.Runtime.Contracts.Repositories;
 using Meshmakers.Octo.Services.Infrastructure.Services;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.Extensions.Logging.Abstractions;
-using Persistence.IdentityCkModel.Generated.System.Identity.v2;
+using Persistence.IdentityCkModel.Generated.System.Identity.v3;
 using Xunit;
 
 namespace IdentityServices.IntegrationTests.Persistence;

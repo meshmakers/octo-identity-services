@@ -1,6 +1,6 @@
 using System.Collections.Immutable;
 using System.Runtime.CompilerServices;
-using Persistence.IdentityCkModel.Generated.System.Identity.v2;
+using Persistence.IdentityCkModel.Generated.System.Identity.v3;
 
 namespace IdentityServerPersistence.SystemStores.OpenIddict;
 

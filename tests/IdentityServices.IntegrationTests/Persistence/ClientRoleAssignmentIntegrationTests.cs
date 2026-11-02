@@ -10,7 +10,7 @@ using Meshmakers.Octo.Runtime.Contracts.Repositories.Query;
 using Meshmakers.Octo.Runtime.Contracts.RepositoryEntities;
 using Meshmakers.Octo.Services.Infrastructure.Services;
 using Microsoft.Extensions.Logging.Abstractions;
-using Persistence.IdentityCkModel.Generated.System.Identity.v2;
+using Persistence.IdentityCkModel.Generated.System.Identity.v3;
 using Xunit;
 
 namespace IdentityServices.IntegrationTests.Persistence;

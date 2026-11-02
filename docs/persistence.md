@@ -222,7 +222,7 @@ All generated entities:
 - Support nested records with `AttributeRecordValueList<T>`
 - Are fully serializable to/from MongoDB BSON
 
-**Namespace:** `Persistence.IdentityCkModel.Generated.System.Identity.v2`
+**Namespace:** `Persistence.IdentityCkModel.Generated.System.Identity.v3`
 
 **Examples:**
 - `RtClient` - OAuth/OIDC client
@@ -684,7 +684,7 @@ Store registration in `RuntimeEngineBuilderExtensions.AddOctoIdentityPersistence
 
 ```csharp
 builder.AddMongoDbRuntimeRepository();
-builder.Services.AddCkModelSystemIdentityV2();  // Register generated CK models
+builder.Services.AddCkModelSystemIdentityV3();  // Register generated CK models
 
 builder.Services.AddScoped<IOctoClientStore, ClientStore>();
 builder.Services.AddScoped<IOctoResourceStore, ResourceStore>();

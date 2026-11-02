@@ -8,7 +8,7 @@ using Meshmakers.Octo.Services.Infrastructure.CredentialGenerator;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.Extensions.Logging;
 using NSubstitute;
-using Persistence.IdentityCkModel.Generated.System.Identity.v2;
+using Persistence.IdentityCkModel.Generated.System.Identity.v3;
 using Xunit;
 
 namespace IdentityServices.UnitTests.Services;

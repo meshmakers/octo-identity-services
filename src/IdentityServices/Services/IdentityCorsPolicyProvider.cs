@@ -3,7 +3,7 @@ using Meshmakers.Octo.Runtime.Contracts.MongoDb;
 using Meshmakers.Octo.Runtime.Contracts.Repositories.Query;
 using Microsoft.AspNetCore.Cors.Infrastructure;
 using Microsoft.Extensions.Options;
-using Persistence.IdentityCkModel.Generated.System.Identity.v2;
+using Persistence.IdentityCkModel.Generated.System.Identity.v3;
 
 namespace Meshmakers.Octo.Backend.IdentityServices.Services;
 

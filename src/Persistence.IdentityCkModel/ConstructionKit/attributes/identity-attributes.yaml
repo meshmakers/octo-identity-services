@@ -9,6 +9,7 @@ attributes:
   - id: NormalizedUserName
     valueType: String
     ownership: SeedOwned
+    securitySensitive: true
     description: The normalized user name.
 
   - id: NormalizedName
@@ -25,11 +26,13 @@ attributes:
   - id: NormalizedEmail
     valueType: String
     ownership: SeedOwned
+    securitySensitive: true
     description: The normalized email address of the user.
 
   - id: EmailConfirmed
     valueType: Boolean
     ownership: SeedOwned
+    securitySensitive: true
     description: Indicates if the email address of the user has been confirmed.
     defaultValues:
       - false
@@ -54,6 +57,7 @@ attributes:
   - id: PhoneNumberConfirmed
     valueType: Boolean
     ownership: SeedOwned
+    securitySensitive: true
     description: Indicates if the phone number of the user has been confirmed.
     defaultValues:
       - false
@@ -61,6 +65,7 @@ attributes:
   - id: TwoFactorEnabled
     valueType: Boolean
     ownership: SeedOwned
+    securitySensitive: true
     description: Indicates if two factor authentication is enabled for the user.
     defaultValues:
       - false
@@ -77,6 +82,7 @@ attributes:
   - id: PreferredChannelBindingId
     valueType: String
     ownership: SeedOwned
+    securitySensitive: true
     description: The rtId of the VerifiedExternalIdentifier chosen as preferred outbound channel target for system-initiated messages (null = no preference). The channel kind is derived from the referenced binding. Set via self-service, restricted to the user's own valid bindings.
 
   - id: LockoutEnd
@@ -88,6 +94,7 @@ attributes:
   - id: LockoutEnabled
     valueType: Boolean
     ownership: SeedOwned
+    securitySensitive: true
     description: Flag indicating if the user could be locked out.
     defaultValues:
       - false
@@ -103,6 +110,7 @@ attributes:
   - id: ResetPasswordOnLogin
     valueType: Boolean
     ownership: SeedOwned
+    securitySensitive: true
     description: Force the user to change the password after the next login.
     defaultValues:
       - true
@@ -161,6 +169,7 @@ attributes:
     valueType: RecordArray
     valueCkRecordId: ${this}/UserClaim
     ownership: SeedOwned
+    securitySensitive: true
     description: The claims of the user.
 
   - id: RoleClaims
@@ -173,6 +182,7 @@ attributes:
     valueType: RecordArray
     valueCkRecordId: ${this}/UserLogin
     ownership: SeedOwned
+    securitySensitive: true
     description: The existing logins of the user.
 
   - id: UserTokens

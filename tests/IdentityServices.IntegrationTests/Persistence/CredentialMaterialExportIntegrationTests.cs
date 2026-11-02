@@ -14,7 +14,7 @@ using Meshmakers.Octo.Runtime.Contracts.TransportContainer;
 using Meshmakers.Octo.Runtime.Contracts.TransportContainer.DTOs;
 using Meshmakers.Octo.Services.Infrastructure.Services;
 
-using Persistence.IdentityCkModel.Generated.System.Identity.v2;
+using Persistence.IdentityCkModel.Generated.System.Identity.v3;
 
 using Xunit;
 
@@ -26,7 +26,9 @@ namespace IdentityServices.IntegrationTests.Persistence;
 ///     An <c>ExportRt</c> (export as template, tenant clone) never carries it, and a blueprint re-apply (Upsert)
 ///     keeps it on an existing user. AB#7772 (System.Identity 2.28.0, ckLanguage 2): the same attributes are
 ///     <c>access: Hidden</c> (UserName and Email <c>MethodOnly</c>, AccessFailedCount and LockoutEnd
-///     <c>ReadOnly</c>), so an <c>ImportRt</c> can no longer carry them (OCTO-CK139) - the identity service
+///     <c>ReadOnly</c>), so an <c>ImportRt</c> can no longer carry them (OCTO-CK139). AB#8053 (System.Identity 3.0.0): the identity-owned
+///     User attributes of the former AB#8042 runtime list are <c>MethodOnly</c> too (AccessFailedCount and LockoutEnd
+///     moved from <c>ReadOnly</c>). The identity service
 ///     writes them through its own repository, which these tests use to create the users. Real MongoDB and the real System.Identity model of this repository; the
 ///     converter is the one the export jobs of octo-bot-services use for both the by-query and the deep-graph
 ///     export. All values are synthetic.
@@ -134,14 +136,25 @@ public class CredentialMaterialExportIntegrationTests : IClassFixture<IdentitySe
             ["PasswordHash"] = CkAttributeAccessDto.Hidden,
             ["SecurityStamp"] = CkAttributeAccessDto.Hidden,
             ["UserTokens"] = CkAttributeAccessDto.Hidden,
-            ["AccessFailedCount"] = CkAttributeAccessDto.ReadOnly,
-            ["LockoutEnd"] = CkAttributeAccessDto.ReadOnly,
             ["UserName"] = CkAttributeAccessDto.MethodOnly,
             ["Email"] = CkAttributeAccessDto.MethodOnly,
+            // AB#8053 (System.Identity 3.0.0): the identity-owned attributes of the AB#8042 runtime list.
+            ["NormalizedUserName"] = CkAttributeAccessDto.MethodOnly,
+            ["NormalizedEmail"] = CkAttributeAccessDto.MethodOnly,
+            ["EmailConfirmed"] = CkAttributeAccessDto.MethodOnly,
+            ["PhoneNumberConfirmed"] = CkAttributeAccessDto.MethodOnly,
+            ["TwoFactorEnabled"] = CkAttributeAccessDto.MethodOnly,
+            ["LockoutEnabled"] = CkAttributeAccessDto.MethodOnly,
+            ["LockoutEnd"] = CkAttributeAccessDto.MethodOnly,
+            ["AccessFailedCount"] = CkAttributeAccessDto.MethodOnly,
+            ["ResetPasswordOnLogin"] = CkAttributeAccessDto.MethodOnly,
+            ["Claims"] = CkAttributeAccessDto.MethodOnly,
+            ["UserLogins"] = CkAttributeAccessDto.MethodOnly,
+            ["PreferredChannelBindingId"] = CkAttributeAccessDto.MethodOnly,
             // Untouched: still read and written like before.
             ["FirstName"] = CkAttributeAccessDto.ReadWrite,
-            ["TwoFactorEnabled"] = CkAttributeAccessDto.ReadWrite,
-            ["LockoutEnabled"] = CkAttributeAccessDto.ReadWrite
+            ["LastName"] = CkAttributeAccessDto.ReadWrite,
+            ["PhoneNumber"] = CkAttributeAccessDto.ReadWrite
         };
         foreach (var (name, access) in expected)
         {
@@ -161,6 +174,9 @@ public class CredentialMaterialExportIntegrationTests : IClassFixture<IdentitySe
     [InlineData("SecurityStamp", "value: TESTNOTAREALSECURITYSTAMP")]
     [InlineData("UserName", "value: someone")]
     [InlineData("Email", "value: someone@example.test")]
+    [InlineData("TwoFactorEnabled", "value: false")]
+    [InlineData("LockoutEnd", "value: 2000-01-01T00:00:00Z")]
+    [InlineData("EmailConfirmed", "value: true")]
     public async Task ImportRt_OfAHiddenOrMethodOnlyUserAttribute_IsRefusedWithCk139_AndWritesNothing(
         string attribute, string value)
     {

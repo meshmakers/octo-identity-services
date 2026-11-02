@@ -1,6 +1,6 @@
 using FluentAssertions;
 using IdentityServerPersistence.SystemStores;
-using Persistence.IdentityCkModel.Generated.System.Identity.v2;
+using Persistence.IdentityCkModel.Generated.System.Identity.v3;
 using Xunit;
 
 namespace IdentityServerPersistence.UnitTests.CkModel;

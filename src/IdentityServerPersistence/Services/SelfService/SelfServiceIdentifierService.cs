@@ -4,7 +4,7 @@ using System.Security.Cryptography.X509Certificates;
 using System.Text;
 using IdentityServerPersistence.SystemStores;
 using Microsoft.Extensions.Logging;
-using Persistence.IdentityCkModel.Generated.System.Identity.v2;
+using Persistence.IdentityCkModel.Generated.System.Identity.v3;
 
 namespace IdentityServerPersistence.Services.SelfService;
 

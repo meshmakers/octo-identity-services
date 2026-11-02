@@ -11,7 +11,7 @@ using Meshmakers.Octo.Runtime.Contracts.RepositoryEntities;
 using Meshmakers.Octo.Services.Infrastructure.Services;
 using NLog;
 using OpenIddict.Abstractions;
-using Persistence.IdentityCkModel.Generated.System.Identity.v2;
+using Persistence.IdentityCkModel.Generated.System.Identity.v3;
 using static OpenIddict.Abstractions.OpenIddictConstants;
 
 namespace IdentityServerPersistence.SystemStores.OpenIddict;

@@ -1,5 +1,5 @@
 $schema: https://schemas.meshmakers.cloud/blueprint-meta.schema.json
-blueprintId: System.Identity.Bootstrap-1.8.0
+blueprintId: System.Identity.Bootstrap-1.9.0
 description: |
   Service-managed Identity tenant seed — system + every child tenant. Provides
   the default role set (17 roles), the five OIDC identity resources, three API
@@ -7,6 +7,11 @@ description: |
   the MCP resource indicator, the OAuth client baseline (OctoTool / IdentityServices
   Swagger / Refinery Studio SPA / MCP Services Swagger + Device / Platform Services
   Swagger) and the TenantOwners group with full role assignment.
+
+  1.9.0 (AB#8053): follows System.Identity 3.0.0 - the CK dependency moves from `System.Identity-[2.14.0,3.0)` to
+  `System.Identity-[3.0.0,4.0)` (a range stays inside one major). The seed content is unchanged; the version bump makes every
+  existing tenant re-import the seed on the next identity start (the embedded blueprint is applied by the identity service
+  itself). Seed data never carries a value for a MethodOnly User attribute (it seeds no User), so rule 139 does not touch it.
 
   1.8.0 (AB#6839): adds the RFC 8693 token-exchange grant
   (`urn:ietf:params:oauth:grant-type:token-exchange`) to the `octo-cli` client (OctoTool, 660…31)
@@ -174,7 +179,7 @@ description: |
   successful apply because of the per-service version-key gate.
 
 ckModelDependencies:
-  - System.Identity-[2.14.0,3.0)
+  - System.Identity-[3.0.0,4.0)
 
 # All files below are merged into ONE runtime model before the import runs, so the order
 # is presentation only and associations may cross files (the UserManagement role in

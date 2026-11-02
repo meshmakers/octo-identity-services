@@ -1,11 +1,31 @@
 "$schema": "https://schemas.meshmakers.cloud/construction-kit-meta.schema.json"
+# 3.0.0 (AB#8053, Feature AB#5696, closes the interim of AB#8042 and AB#7777) is the first MAJOR of System.Identity 2.x -> 3.x:
+#   * The identity-owned attributes of User move from a runtime list (engine IdentityOwnedWrites, AB#8042) into the model:
+#     `access: MethodOnly` on NormalizedUserName, NormalizedEmail, EmailConfirmed, PhoneNumberConfirmed, TwoFactorEnabled,
+#     PreferredChannelBindingId, LockoutEnabled, ResetPasswordOnLogin, Claims (UserClaims) and UserLogins; LockoutEnd and
+#     AccessFailedCount go from ReadOnly to MethodOnly (ReadOnly is importable, MethodOnly is not: a user-started ImportRt must
+#     not reset a lockout, AB#8059). With UserName and Email (2.28.0) twelve attributes are MethodOnly, PasswordHash,
+#     SecurityStamp and UserTokens stay Hidden. All twelve definitions are `securitySensitive: true`, so a later tightening in
+#     the 3.x line is Minor + acknowledge (row T7) instead of another Major. Tightening attributes that were never
+#     securitySensitive in 2.x is a Major (row T7, AB#6585) - this is why it waited for a major.
+#   * CreateUser-1 carries `replacesGenericCreate: true` (row M16, Major on the existing type User): the generic create, ImportRt
+#     and blueprint seeds cannot create a user behind the identity service's back. The runtime stand-in of AB#7777
+#     (GenericCreateReplacement) is removed from the engine.
+#   * Not in the model: the writes of the identity ASSOCIATIONS (AssignedRole, GroupMember, ChildGroup, MayActAs, GrantsPermission).
+#     The CK access model has no association-level restriction (`access` exists only on attributes), so the engine keeps the
+#     reduced list IdentityOwnedWrites.AssociationRoleIds (asset-repo GraphQL, mesh-adapter write nodes, caller ImportRt).
+# Consequences: no ids, types or defaults change, so there is NO data migration; every blueprint range `System.Identity-[2.x,3.0)`
+# is unsatisfied by 3.0.0 and needs a new blueprint version with `[3.x,4.0)` (System.Identity.Bootstrap-1.9.0 and the dependents).
+# Behaviour change: blueprint seeds, ImportRt (every path) and migration Update/Transform steps refuse a value for the ten newly
+# MethodOnly attributes (OCTO-CK139) - no blueprint seeds a User, the identity service writes users through its own repository.
+#
 # 2.30.0 (AB#7879, Feature AB#5696) adds the method User.DisableTwoFactor-1: a user administrator (UserManagement) switches
 # off the second factor of a user - TwoFactorEnabled=false, authenticator key and recovery codes removed, security stamp
 # rotated, refresh tokens revoked, one audit record. It is the administrator recovery path once the generic GraphQL/ImportRt
 # writes of the identity-owned User fields are refused (AB#8042). A new method is additive: Minor, nothing to acknowledge.
 # No access modifier changes in this release: tightening the access of attributes that were never securitySensitive in 2.x
-# is a Major (row T7, AB#6585), so AB#8042 guards those writes at runtime (engine IdentityOwnedWrites) until the next
-# System.Identity major moves the list into `access` together with AB#7777.
+# is a Major (row T7, AB#6585), so AB#8042 guarded those writes at runtime (engine IdentityOwnedWrites) until 3.0.0 moved them
+# into `access` together with AB#7777.
 #
 # 2.29.0 (AB#7773, Feature AB#5696) declares the identity methods of User, Group, Client and DataPermission - declarations only,
 # the handlers follow with AB#5672 (ChangePassword and the method host in identity), AB#7774, AB#7776-AB#7780:
@@ -89,7 +109,7 @@
 # concept AB#5528 in octo-construction-kit-engine). String -> Secret is Minor
 # (CkSemVerClassifier): stored clear-text values stay readable as legacy values
 # until the encrypt sweep has run. Secret requires System >= 2.5 (decision 12).
-modelId: System.Identity-2.30.0
+modelId: System.Identity-3.0.0
 ckLanguage: 2
 dependencies:
   - System-[2.5,3.0)

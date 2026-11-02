@@ -4,7 +4,7 @@ using IdentityServerPersistence.SystemStores;
 using Meshmakers.Octo.ConstructionKit.Contracts;
 using Meshmakers.Octo.Runtime.Contracts.RepositoryEntities;
 using NSubstitute;
-using Persistence.IdentityCkModel.Generated.System.Identity.v2;
+using Persistence.IdentityCkModel.Generated.System.Identity.v3;
 using Shared.TestUtilities.Fakes;
 using Xunit;
 

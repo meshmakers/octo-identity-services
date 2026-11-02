@@ -13,7 +13,7 @@ using Microsoft.IdentityModel.JsonWebTokens;
 using Microsoft.IdentityModel.Tokens;
 using NSubstitute;
 using OpenIddict.Server;
-using Persistence.IdentityCkModel.Generated.System.Identity.v2;
+using Persistence.IdentityCkModel.Generated.System.Identity.v3;
 using Shared.TestUtilities.Fakes;
 using Xunit;
 using static OpenIddict.Abstractions.OpenIddictConstants;

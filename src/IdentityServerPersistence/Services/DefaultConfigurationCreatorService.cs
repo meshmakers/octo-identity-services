@@ -24,7 +24,7 @@ using Meshmakers.Octo.Runtime.Contracts.CkModelMigrations;
 using Meshmakers.Octo.Services.Notifications.Generated.System.Notification.v2;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
-using Persistence.IdentityCkModel.Generated.System.Identity.v2;
+using Persistence.IdentityCkModel.Generated.System.Identity.v3;
 
 namespace IdentityServerPersistence.Services;
 

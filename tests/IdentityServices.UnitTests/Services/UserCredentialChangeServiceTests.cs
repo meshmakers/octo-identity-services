@@ -6,7 +6,7 @@ using Meshmakers.Octo.Services.Infrastructure.Services;
 using Microsoft.AspNetCore.Identity;
 using NSubstitute;
 using OpenIddict.Abstractions;
-using Persistence.IdentityCkModel.Generated.System.Identity.v2;
+using Persistence.IdentityCkModel.Generated.System.Identity.v3;
 using Shared.TestUtilities.Builders;
 using Shared.TestUtilities.Fakes;
 using Xunit;
