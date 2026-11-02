@@ -4,6 +4,7 @@ using IdentityServerPersistence.Services.FileRoles;
 using IdentityServerPersistence.Services.ClientGrants;
 using IdentityServerPersistence.Services.Migrations;
 using IdentityServerPersistence.Services.ScratchTenants;
+using IdentityServerPersistence.Services.AdminRoleMigration;
 using IdentityServerPersistence.Services.SecretManagement;
 using IdentityServerPersistence.SystemStores;
 using Meshmakers.Octo.Backend.IdentityServices.Resources;
@@ -55,7 +56,10 @@ internal class DefaultConfigurationCreatorService(
     // their CK model; unknown (null) is treated as "has it" so a service without the probe still grants.
     IFilesModelProbe? filesModelProbe = null,
     // AB#7192 — the creator of a scratch tenant becomes administrator of it; re-applied on every setup.
-    IScratchTenantGrantService? scratchTenantGrantService = null)
+    IScratchTenantGrantService? scratchTenantGrantService = null,
+    // AB#8165 — migration of the existing admins to TenantOwners (IdentityApiAuthorization:AdminRoleMigration);
+    // unregistered means Off.
+    IOptions<AdminRoleMigrationOptions>? adminRoleMigrationOptions = null)
     : DefaultConfigurationCreatorServiceBase(logger, blueprintService, embeddedBlueprintSources,
           tenantSetupRetryStore, tenantLifecycleStore),
       IConfigurationService
@@ -388,6 +392,23 @@ internal class DefaultConfigurationCreatorService(
             logger.LogError(ex,
                 "SecretManagement grant to TenantOwners failed for tenant '{TenantId}'; retried on the next " +
                 "tenant setup", tenantId);
+        }
+
+        // AB#8165: move the existing admins from direct roles to TenantOwners (Off by default, DryRun logs only).
+        // Runs after the SecretManagement grants so the group already carries SecretManagement. Not fatal.
+        var adminRoleMigrationMode = adminRoleMigrationOptions?.Value.AdminRoleMigration ?? AdminRoleMigrationMode.Off;
+        if (adminRoleMigrationMode != AdminRoleMigrationMode.Off)
+        {
+            try
+            {
+                await TenantAdminRoleMigration.EnsureAsync(tenantContext, adminRoleMigrationMode, logger);
+            }
+            catch (Exception ex)
+            {
+                logger.LogError(ex,
+                    "Admin role migration ({Mode}) failed for tenant '{TenantId}'; retried on the next tenant setup",
+                    adminRoleMigrationMode, tenantId);
+            }
         }
 
         // Child-tenant client mirror provisioning runs AFTER the blueprint apply has guaranteed
