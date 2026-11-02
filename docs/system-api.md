@@ -159,6 +159,11 @@ free, only the added roles are judged (a role the client already holds and any r
 role id first (unknown or malformed id: `404`, nothing written) and writes only the difference (kept roles are not written again). Every refusal is audited as `Identity.RoleChangeRefused`. Service-internal
 client provisioning over the bus (service accounts, client mirroring) is not affected.
 
+**Concurrent updates (AB#8015).** `PUT /clients/{id}`, the overlay URI endpoints and `PATCH .../autoProvisionInChildTenants` change the
+client as one version-checked read-modify-write: the DTO is applied to the stored client and written with the version that was read; when
+another request changed the client in between, the change is applied again to a fresh read. An update therefore never writes back a secret
+that a concurrent secret delete removed. After repeated conflicts the endpoint answers `409` (`application/problem+json`); retry the request.
+
 **Request/Response DTO:**
 
 ```typescript
@@ -209,6 +214,9 @@ client provisioning over the bus (service accounts, client mirroring) is not aff
 | POST | `/apiResources` | ReadWrite | Create resource |
 | PUT | `/apiResources/{name}` | ReadWrite | Update resource |
 | DELETE | `/apiResources/{name}` | ReadWrite | Delete resource |
+
+`PUT /apiResources/{name}` is a version-checked read-modify-write like the client update (AB#8015): the stored secrets are never replaced by
+an older copy; `409` after repeated conflicts.
 
 **Request/Response DTO:**
 

@@ -16,13 +16,13 @@ public interface IOctoClientStore
 
     Task CreateAsync(RtClient client);
 
-    Task UpdateAsync(string clientId, RtClient client);
-
     /// <summary>
     ///     Changes the stored client as one version-checked read-modify-write (AB#7989): a concurrent write is never lost
     ///     and never brings back what this change removed. <paramref name="mutate" /> returns <c>false</c> to write nothing
     ///     and can run more than once (on a conflict it gets a fresh read). After a write the mirrors of a flagged client are
-    ///     synced (best effort, as <see cref="UpdateAsync" />).
+    ///     synced (best effort: a failure is logged, never thrown). This is the only way to change a stored client (AB#8015):
+    ///     there is no unversioned replace, so every write advances <c>rtVersion</c> and the version checks of the other
+    ///     writers (client mirror reconciliation, AB#8019/AB#8054) see it.
     /// </summary>
     /// <returns>The client as stored; <c>null</c> when it does not exist.</returns>
     Task<RtClient?> MutateAsync(string clientId, Func<RtClient, bool> mutate);

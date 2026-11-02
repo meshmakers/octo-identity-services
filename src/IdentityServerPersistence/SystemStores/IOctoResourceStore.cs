@@ -21,11 +21,11 @@ public interface IOctoResourceStore
     Task<RtIdentityResource?> GetIdentityResourceByNameAsync(string identityResourceName);
     Task<RtApiScope?> GetApiScopeByNameAsync(string apiScopeName);
     Task UpdateApiScopeAsync(string name, RtApiScope newApiScope);
-    Task UpdateApiResourceAsync(string apiResourceName, RtApiResource newApiResource);
 
     /// <summary>
     ///     Changes the stored API resource as one version-checked read-modify-write (AB#7989), see
-    ///     <see cref="IOctoClientStore.MutateAsync" />.
+    ///     <see cref="IOctoClientStore.MutateAsync" />. The only way to change a stored API resource (AB#8015): there is
+    ///     no unversioned replace that could write a secret list back that a concurrent request removed.
     /// </summary>
     /// <returns>The API resource as stored; <c>null</c> when it does not exist.</returns>
     Task<RtApiResource?> MutateApiResourceAsync(string apiResourceName, Func<RtApiResource, bool> mutate);

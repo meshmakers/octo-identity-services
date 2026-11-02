@@ -5,6 +5,7 @@ using System.Security.Cryptography;
 using System.Text;
 using FluentAssertions;
 using IdentityServerPersistence.Services;
+using IdentityServerPersistence.Services.ClientGrants;
 using IdentityServerPersistence.SystemStores;
 using IdentityServices.IntegrationTests.Infrastructure;
 using Meshmakers.Octo.Backend.IdentityServices.Methods;
@@ -249,7 +250,7 @@ public class ClientMirrorReconciliationTests : IntegrationTestBase, IDisposable
         var added = (await AddAsync(client, ct, _syncFails)).Value!.Value!;
         string? ownAfter = null;
 
-        await RunJobWithHooksAsync(ct, beforeWrite: async clientId =>
+        await RunJobWithHooksAsync(ct, beforeWrite: async (clientId, childTenantId) =>
         {
             if (clientId == client.ClientId && ownAfter == null)
             {
@@ -276,7 +277,7 @@ public class ClientMirrorReconciliationTests : IntegrationTestBase, IDisposable
         var added = (await AddAsync(client, ct, _syncFails)).Value!.Value!;
         var fired = false;
 
-        await RunJobWithHooksAsync(ct, beforeWrite: async clientId =>
+        await RunJobWithHooksAsync(ct, beforeWrite: async (clientId, childTenantId) =>
         {
             if (clientId == client.ClientId && !fired)
             {
@@ -334,16 +335,179 @@ public class ClientMirrorReconciliationTests : IntegrationTestBase, IDisposable
         (await RequestTokenAsync(child, client.ClientId, secret, ct)).Should().Be(HttpStatusCode.OK);
     }
 
+    // ------------------------------------------------------------------------------------------------------------------
+    // AB#8054: every writer of a mirror writes with the version it read, so a write between the job's reads and its own
+    // write makes the job's version check fail and the job re-reads (the hook runs once per parent read). With an
+    // unversioned writer the write did not advance rtVersion, the job's stale write passed and the hook ran once.
+    // ------------------------------------------------------------------------------------------------------------------
+
+    [Fact]
+    public async Task ClientPutInTheChild_BetweenTheJobsReadsAndItsWrite_IsSeenByTheJobsVersionCheck()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        var client = await CreateFlaggedClientAsync();
+        var child = await CreateChildTenantAsync();
+        var added = (await AddAsync(client, ct, _syncFails)).Value!.Value!;
+        var parentReads = 0;
+        HttpStatusCode? putStatus = null;
+
+        await RunJobWithHooksAsync(ct, beforeWrite: async (clientId, childTenantId) =>
+        {
+            // Only the row of this test's child: another host's start-up provisioning may have mirrored the client
+            // into other child tenants of the shared database.
+            if (clientId != client.ClientId || childTenantId != child)
+            {
+                return;
+            }
+
+            if (++parentReads == 1)
+            {
+                using var http = _enabled.CreateClient();
+                http.DefaultRequestHeaders.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue(
+                    "Bearer", "test-token");
+                var response = await http.PutAsync($"/{child}/v1/clients/{client.ClientId}",
+                    System.Net.Http.Json.JsonContent.Create(new { clientId = client.ClientId, clientName = "edited in the child" }),
+                    ct);
+                putStatus = response.StatusCode;
+            }
+        });
+
+        putStatus.Should().Be(HttpStatusCode.OK, "the full client PUT in the child tenant is a versioned write");
+        parentReads.Should().Be(2, "the PUT advanced rtVersion, so the job's write failed its version check and it re-read");
+        var mirror = await GetMirrorAsync(child, client.ClientId);
+        mirror.ClientName.Should().Be(client.ClientName, "the mirror follows its parent (derived data)");
+        (await RequestTokenAsync(child, client.ClientId, added, ct)).Should().Be(HttpStatusCode.OK,
+            "the job still converged the mirror on its retry");
+    }
+
+    [Fact]
+    public async Task OctoCliGrantStep_BetweenTheJobsReadsAndItsWrite_IsSeenByTheJobsVersionCheck()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        // The grant step only touches clients called octo-cli. The web factory seeds none, and this collection runs its
+        // classes one after the other, so the system-tenant client exists only during this test.
+        var client = await CreateFlaggedClientAsync(b => b.WithClientId(OctoCliTokenExchangeGrant.ClientId)
+            .WithGrantTypes("client_credentials", OctoCliTokenExchangeGrant.TokenExchangeGrantType));
+        try
+        {
+            var child = await CreateChildTenantAsync();
+            var childContext = (await Factory.Services.GetRequiredService<ISystemContext>()
+                .TryFindTenantContextAsync(child))!;
+            // The state of a tenant provisioned before the grant step: the mirror lacks the grant, no marker.
+            var childRepo = await RepositoryAsync(child);
+            using (var session = await childRepo.GetSessionAsync())
+            {
+                var mirror = await GetMirrorAsync(child, client.ClientId);
+                mirror.AllowedGrantTypes = new AttributeStringValueList(new List<string> { "client_credentials" });
+                await childRepo.ReplaceOneRtEntityByIdAsync(session, mirror.RtId, mirror, mirror.RtVersion);
+            }
+
+            using (var admin = await childContext.GetAdminSessionAsync())
+            {
+                await childContext.DeleteConfigurationAsync(admin, IdentityServerPersistence.IdentityServiceConstants
+                    .OctoCliTokenExchangeGrantKey);
+            }
+
+            var parentReads = 0;
+            OctoCliTokenExchangeGrantResult? grant = null;
+
+            await RunJobWithHooksAsync(ct, beforeWrite: async (clientId, childTenantId) =>
+            {
+                if (clientId == client.ClientId && childTenantId == child && ++parentReads == 1)
+                {
+                    grant = await OctoCliTokenExchangeGrant.EnsureAsync(childContext,
+                        Microsoft.Extensions.Logging.Abstractions.NullLogger.Instance);
+                }
+            });
+
+            grant!.Status.Should().Be(OctoCliTokenExchangeGrantStatus.Added);
+            parentReads.Should().Be(2, "the grant step advanced rtVersion, so the job re-read before writing");
+            (await GetMirrorAsync(child, client.ClientId)).AllowedGrantTypes.Should()
+                .Contain(OctoCliTokenExchangeGrant.TokenExchangeGrantType);
+        }
+        finally
+        {
+            using var scope = _enabled.Services.CreateScope();
+            await scope.ServiceProvider.GetRequiredService<IOctoClientStore>().DeleteAsync(client.ClientId);
+        }
+    }
+
+    [Fact]
+    public async Task ImmediateSync_InsertingAMissingMirror_BetweenTheJobsChildReadAndItsInsert_LeavesExactlyOneMirror()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        var client = await CreateFlaggedClientAsync();
+        var secret = (await AddAsync(client, ct)).Value!.Value!;
+        var child = await CreateChildTenantAsync();
+        await EraseChildClientsAsync(child, client.ClientId);
+        var fired = false;
+
+        await RunJobWithHooksAsync(ct, beforeMissingWrite: async (clientId, childTenantId) =>
+        {
+            if (clientId == client.ClientId && childTenantId == child && !fired)
+            {
+                fired = true;
+                using var scope = _enabled.Services.CreateScope();
+                var synced = await scope.ServiceProvider.GetRequiredService<IClientMirrorProvisioningService>()
+                    .SyncMirrorsForClientAsync(NormalizedSystemTenantId, client);
+                synced.MirrorsSynced.Should().Be(1, "the sync re-created the mirror and claimed it on the tracking row");
+            }
+        });
+
+        fired.Should().BeTrue();
+        (await ChildClientsAsync(child, client.ClientId)).Should().ContainSingle(
+            "the sync's versioned row write made the job's claim fail, so the job withdrew its duplicate insert");
+        (await RequestTokenAsync(child, client.ClientId, secret, ct)).Should().Be(HttpStatusCode.OK);
+    }
+
+    [Fact]
+    public async Task TransactionalReadModifyWrite_ThatReadTheMirrorBeforeTheJobsWrite_CannotWriteTheRemovedSecretBack()
+    {
+        // The guarantee the blueprint seed upsert (engine ImportRt, ImportStrategy.Upsert) relies on: it reads the stored
+        // client (to keep its Secret / TenantOwned attributes) and replaces it in ONE MongoDB transaction without an
+        // expected rtVersion. A write that committed after the transaction's read makes the replace fail with a write
+        // conflict, so such a writer can never put back a secret the reconciliation removed in between.
+        var ct = TestContext.Current.CancellationToken;
+        var client = await CreateFlaggedClientAsync();
+        var removed = (await AddAsync(client, ct)).Value!.Value!;
+        var child = await CreateChildTenantAsync();
+        (await RemoveAsync(client, removed, ct, _syncFails)).IsSuccess.Should().BeTrue();
+        var childRepo = await RepositoryAsync(child);
+
+        using var session = await childRepo.GetSessionAsync();
+        session.StartTransaction();
+        var stale = (await childRepo.GetRtEntitiesByTypeAsync<RtClient>(session, ByClientId(client.ClientId))).Items.Single();
+        stale.ClientSecrets.Should().Contain(s => s.Value == Sha256Base64(removed), "read before the repair");
+
+        (await RunJobAsync(ct)).MirrorsRepaired.Should().BeGreaterThanOrEqualTo(1);
+
+        var write = async () => await childRepo.ReplaceOneRtEntityByIdAsync(session, stale.RtId, stale);
+        await write.Should().ThrowAsync<Exception>("a write that committed after the transaction's read is a conflict");
+        try
+        {
+            await session.AbortTransactionAsync();
+        }
+        catch (Exception)
+        {
+            // Already aborted by the server.
+        }
+
+        (await GetMirrorAsync(child, client.ClientId)).ClientSecrets.Should()
+            .NotContain(s => s.Value == Sha256Base64(removed));
+        (await RequestTokenAsync(child, client.ClientId, removed, ct)).Should().Be(HttpStatusCode.Unauthorized);
+    }
+
     #region Helpers
 
     /// <summary>One reconciliation pass of the system tenant with the test seams of the service set.</summary>
-    private async Task RunJobWithHooksAsync(CancellationToken ct, Func<string, Task>? beforeWrite = null,
-        Func<string, Task>? beforeInsert = null)
+    private async Task RunJobWithHooksAsync(CancellationToken ct, Func<string, string, Task>? beforeWrite = null,
+        Func<string, Task>? beforeInsert = null, Func<string, string, Task>? beforeMissingWrite = null)
     {
         using var scope = _enabled.Services.CreateScope();
         var service = ActivatorUtilities.CreateInstance<ClientMirrorProvisioningService>(scope.ServiceProvider);
         service.BeforeMirrorWriteForTests = beforeWrite;
         service.BeforeMirrorInsertForTests = beforeInsert;
+        service.BeforeMissingMirrorWriteForTests = beforeMissingWrite;
         await service.ReconcileMirrorsAsync(NormalizedSystemTenantId, ct);
     }
 

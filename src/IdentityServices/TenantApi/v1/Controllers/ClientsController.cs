@@ -8,6 +8,7 @@ using Meshmakers.Octo.Communication.Contracts;
 using Meshmakers.Octo.Communication.Contracts.DataTransferObjects;
 using Meshmakers.Octo.Communication.Contracts.DataTransferObjects.ApiErrors;
 using MongoDB.Bson;
+using Meshmakers.Octo.Runtime.Contracts;
 using Meshmakers.Octo.Runtime.Contracts.RepositoryEntities;
 using Meshmakers.Octo.Services.Contracts.DistributionEventHub.Messages;
 using Microsoft.AspNetCore.Authorization;
@@ -30,6 +31,9 @@ namespace Meshmakers.Octo.Backend.IdentityServices.TenantApi.v1.Controllers;
 [ApiVersion(IdentityServiceConstants.ApiVersion1)]
 public class ClientsController : ControllerBase
 {
+    private const string ConcurrentChangeMessage =
+        "The client was changed concurrently by other requests. Please retry.";
+
     private readonly IDistributionEventHubService _distributionEventHubService;
     private readonly IOctoClientStore _octoClientStore;
     private readonly IClientRoleStore _clientRoleStore;
@@ -365,18 +369,27 @@ public class ClientsController : ControllerBase
             return BadRequest(ModelState);
         }
 
-        var appClient = await _octoClientStore.FindRtClientByIdAsync(id);
-        if (appClient == null)
-        {
-            return NotFound(new NotFoundErrorDto($"Client with id '{id}' does not exist."));
-        }
-
-        ApplyToClient(appClient, clientDto);
-
         try
         {
-            await _octoClientStore.UpdateAsync(id, appClient);
+            // AB#8015: one version-checked read-modify-write (read, apply the DTO, replace with the read rtVersion;
+            // re-read and re-apply on a conflict). The update used to apply the DTO to a client read before and replace
+            // it unversioned, so a PUT that overlapped a secret delete wrote the removed secret back (and the write did
+            // not advance rtVersion, which the client mirror reconciliation relies on, AB#8054).
+            var appClient = await _octoClientStore.MutateAsync(id, current =>
+            {
+                ApplyToClient(current, clientDto);
+                return true;
+            });
+            if (appClient == null)
+            {
+                return NotFound(new NotFoundErrorDto($"Client with id '{id}' does not exist."));
+            }
+
             await ClearCacheAsync();
+        }
+        catch (RtVersionConflictException)
+        {
+            return Problem(detail: ConcurrentChangeMessage, statusCode: StatusCodes.Status409Conflict);
         }
         catch (Exception e)
         {
@@ -421,34 +434,39 @@ public class ClientsController : ControllerBase
             return BadRequest(ModelState);
         }
 
-        var appClient = await _octoClientStore.FindRtClientByIdAsync(id);
-        if (appClient == null)
-        {
-            return NotFound(new NotFoundErrorDto($"Client with id '{id}' does not exist."));
-        }
-
         var sourceTag = ClientUriSources.OverlayPrefix + dto.OverlayName;
-        var redirectResult = AppendOverlayUris(appClient.RedirectUris, dto.RedirectUris, sourceTag);
-        var postLogoutResult = AppendOverlayUris(appClient.PostLogoutRedirectUris, dto.PostLogoutRedirectUris, sourceTag);
-        var corsResult = AppendOverlayUris(appClient.AllowedCorsOrigins, dto.AllowedCorsOrigins, sourceTag);
-
-        // No-op short-circuit for the DB: if every incoming URI hit the dedup branch, the client entity
-        // is byte-identical to what we loaded, so we skip the UpdateAsync and hold the endpoint's
-        // "re-run is no DB churn" contract — important for the cmdlet caller that re-applies the overlay
-        // on every Start-Octo / CI run.
-        //
-        // The CORS refresh event is published unconditionally (AB#5487): "0 added" still means the caller
-        // asked for a refresh, and an idempotent re-apply is the obvious repair for a policy that was cached
-        // before the client's origins existed. The event is cheap (a cache invalidation).
-        var totalAdded = redirectResult.Added + postLogoutResult.Added + corsResult.Added;
+        ApplyOverlayUrisListCountDto redirectResult = new(), postLogoutResult = new(), corsResult = new();
+        RtClient? appClient;
         try
         {
-            if (totalAdded > 0)
+            // AB#8015: version-checked read-modify-write; the merge runs again on a fresh read after a conflict, so the
+            // reported counts belong to the write that was stored.
+            //
+            // No-op short-circuit for the DB: if every incoming URI hit the dedup branch, the client entity
+            // is byte-identical to what we loaded, so nothing is written and the endpoint holds its
+            // "re-run is no DB churn" contract — important for the cmdlet caller that re-applies the overlay
+            // on every Start-Octo / CI run.
+            appClient = await _octoClientStore.MutateAsync(id, current =>
             {
-                await _octoClientStore.UpdateAsync(id, appClient);
+                redirectResult = AppendOverlayUris(current.RedirectUris, dto.RedirectUris, sourceTag);
+                postLogoutResult = AppendOverlayUris(current.PostLogoutRedirectUris, dto.PostLogoutRedirectUris,
+                    sourceTag);
+                corsResult = AppendOverlayUris(current.AllowedCorsOrigins, dto.AllowedCorsOrigins, sourceTag);
+                return redirectResult.Added + postLogoutResult.Added + corsResult.Added > 0;
+            });
+            if (appClient == null)
+            {
+                return NotFound(new NotFoundErrorDto($"Client with id '{id}' does not exist."));
             }
 
+            // The CORS refresh event is published unconditionally (AB#5487): "0 added" still means the caller
+            // asked for a refresh, and an idempotent re-apply is the obvious repair for a policy that was cached
+            // before the client's origins existed. The event is cheap (a cache invalidation).
             await ClearCacheAsync();
+        }
+        catch (RtVersionConflictException)
+        {
+            return Problem(detail: ConcurrentChangeMessage, statusCode: StatusCodes.Status409Conflict);
         }
         catch (Exception e)
         {
@@ -511,11 +529,41 @@ public class ClientsController : ControllerBase
         var perClientResults = new List<CleanOverlayEntriesClientResultDto>();
         var totalRemoved = 0;
 
-        foreach (var client in allClients)
+        foreach (var listed in allClients)
         {
-            var redirectRemoved = RemoveOverlayEntries(client.RedirectUris, targetSource);
-            var postLogoutRemoved = RemoveOverlayEntries(client.PostLogoutRedirectUris, targetSource);
-            var corsRemoved = RemoveOverlayEntries(client.AllowedCorsOrigins, targetSource);
+            // Cheap pre-check on the listed snapshot: clients without a matching entry are never written.
+            if (!HasOverlayEntries(listed.RedirectUris, targetSource) &&
+                !HasOverlayEntries(listed.PostLogoutRedirectUris, targetSource) &&
+                !HasOverlayEntries(listed.AllowedCorsOrigins, targetSource))
+            {
+                continue;
+            }
+
+            int redirectRemoved = 0, postLogoutRemoved = 0, corsRemoved = 0;
+            try
+            {
+                // AB#8015: version-checked read-modify-write per client; the removal runs on the fresh read.
+                var stored = await _octoClientStore.MutateAsync(listed.ClientId, current =>
+                {
+                    redirectRemoved = RemoveOverlayEntries(current.RedirectUris, targetSource);
+                    postLogoutRemoved = RemoveOverlayEntries(current.PostLogoutRedirectUris, targetSource);
+                    corsRemoved = RemoveOverlayEntries(current.AllowedCorsOrigins, targetSource);
+                    return redirectRemoved + postLogoutRemoved + corsRemoved > 0;
+                });
+                if (stored == null)
+                {
+                    continue;
+                }
+            }
+            catch (RtVersionConflictException)
+            {
+                return Problem(detail: ConcurrentChangeMessage, statusCode: StatusCodes.Status409Conflict);
+            }
+            catch (Exception e)
+            {
+                return BadRequest(new InternalServerErrorDto(
+                    $"Failed to update client '{listed.ClientId}' while removing overlay entries: {e.Message}"));
+            }
 
             var clientTotal = redirectRemoved + postLogoutRemoved + corsRemoved;
             if (clientTotal == 0)
@@ -523,19 +571,9 @@ public class ClientsController : ControllerBase
                 continue;
             }
 
-            try
-            {
-                await _octoClientStore.UpdateAsync(client.ClientId, client);
-            }
-            catch (Exception e)
-            {
-                return BadRequest(new InternalServerErrorDto(
-                    $"Failed to update client '{client.ClientId}' after removing {clientTotal} overlay entries: {e.Message}"));
-            }
-
             perClientResults.Add(new CleanOverlayEntriesClientResultDto
             {
-                ClientId = client.ClientId,
+                ClientId = listed.ClientId,
                 RedirectUrisRemoved = redirectRemoved,
                 PostLogoutRedirectUrisRemoved = postLogoutRemoved,
                 AllowedCorsOriginsRemoved = corsRemoved
@@ -589,6 +627,11 @@ public class ClientsController : ControllerBase
         }
         return removed;
     }
+
+    private static bool HasOverlayEntries(IAttributeValueList<RtClientUriEntryRecord>? list, string? targetSource) =>
+        list != null && list.Any(entry => targetSource != null
+            ? string.Equals(entry.Source, targetSource, StringComparison.Ordinal)
+            : entry.Source.StartsWith(ClientUriSources.OverlayPrefix, StringComparison.Ordinal));
 
     private static int CountNonWhitespace(List<string>? list)
     {

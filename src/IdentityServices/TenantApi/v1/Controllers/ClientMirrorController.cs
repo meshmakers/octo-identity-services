@@ -6,6 +6,8 @@ using IdentityServerPersistence.Services;
 using IdentityServerPersistence.SystemStores;
 using Meshmakers.Octo.Communication.Contracts.DataTransferObjects;
 using Meshmakers.Octo.Communication.Contracts.DataTransferObjects.ApiErrors;
+using Meshmakers.Octo.Runtime.Contracts;
+using Persistence.IdentityCkModel.Generated.System.Identity.v2;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Meshmakers.Octo.Backend.Authentication;
@@ -277,19 +279,30 @@ public class ClientAutoProvisionFlagController : ControllerBase
         [Required][Description("Client ID")] string clientId,
         [Required][FromBody] SetAutoProvisionInChildTenantsDto body)
     {
-        var client = await _clientStore.FindRtClientByIdAsync(clientId);
+        // MutateAsync is a version-checked read-modify-write (AB#8015) and its post-commit hook (#4044)
+        // propagates the new state to mirrors when applicable. Flipping the flag from true → false leaves
+        // existing mirrors in place; the operator removes them explicitly via DELETE mirrors/{childTenantId}
+        // or by deleting the parent client.
+        RtClient? client;
+        try
+        {
+            client = await _clientStore.MutateAsync(clientId, current =>
+            {
+                current.AutoProvisionInChildTenants = body.Enabled;
+                return true;
+            });
+        }
+        catch (RtVersionConflictException)
+        {
+            return Problem(detail: "The client was changed concurrently by other requests. Please retry.",
+                statusCode: StatusCodes.Status409Conflict);
+        }
+
         if (client == null)
         {
             return NotFound(new NotFoundErrorDto($"Client with id '{clientId}' does not exist."));
         }
 
-        client.AutoProvisionInChildTenants = body.Enabled;
-
-        // UpdateAsync's post-commit hook (#4044) propagates the new state to mirrors when
-        // applicable. Flipping the flag from true → false leaves existing mirrors in place;
-        // the operator removes them explicitly via DELETE mirrors/{childTenantId} or by
-        // deleting the parent client.
-        await _clientStore.UpdateAsync(clientId, client);
         return NoContent();
     }
 }
