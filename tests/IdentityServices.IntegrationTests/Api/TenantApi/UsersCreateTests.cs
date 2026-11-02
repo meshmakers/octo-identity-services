@@ -12,6 +12,7 @@ namespace IdentityServices.IntegrationTests.Api.TenantApi;
 /// <summary>
 /// Integration tests for the POST {tenantId}/v1/users endpoint (user creation).
 /// AB#4503: an invalid password must NOT persist a user; a valid password still creates one.
+/// AB#8083: a user name another user has is refused the same way (field userName).
 /// AB#8064: an e-mail address another user of the tenant already has is refused with 409 (code USER_ALREADY_EXISTS), like
 /// the CK method User.CreateUser-1; tenants that already hold duplicates keep working. The update path (AB#8084) is covered by
 /// UsersUpdateEmailTests.
@@ -85,6 +86,7 @@ public class UsersCreateTests : IntegrationTestBase
         var userManager = scope.ServiceProvider.GetRequiredService<UserManager<RtUser>>();
         (await userManager.FindByNameAsync(userName)).Should().BeNull();
     }
+
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
@@ -114,33 +116,48 @@ public class UsersCreateTests : IntegrationTestBase
         (await FindByNameAsync(userName)).Should().BeNull("nothing is stored");
     }
 
-    [Fact]
-    public async Task CreateUser_WithADuplicateUserName_KeepsThe400Answer()
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task CreateUser_WithAUserNameAnotherUserHas_Is409_WithTheMethodCode_AndCreatesNothing(bool otherCasing)
     {
+        // AB#8083: like the duplicate e-mail (AB#8064) and like the method's USER_ALREADY_EXISTS (field userName).
+        var ct = TestContext.Current.CancellationToken;
         var userName = $"dupname-{Guid.NewGuid():N}";
-        await CreateTestUserAsync(userName);
-        var body = new { name = userName, email = $"other-{Guid.NewGuid():N}@example.com", password = DefaultPassword };
+        var existing = await CreateTestUserAsync(userName);
+        var otherEmail = $"other-{Guid.NewGuid():N}@example.com";
+        var body = new
+        {
+            name = otherCasing ? userName.ToUpperInvariant() : userName,
+            email = otherEmail,
+            password = DefaultPassword
+        };
 
         var response = await PostAsync(TenantApiUrl("users"), body);
 
-        response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
-        (await response.Content.ReadAsStringAsync(TestContext.Current.CancellationToken)).Should()
-            .Contain("DuplicateUserName");
+        response.StatusCode.Should().Be(HttpStatusCode.Conflict);
+        response.Content.Headers.ContentType!.MediaType.Should().Be("application/problem+json");
+        using var problem = JsonDocument.Parse(await response.Content.ReadAsStringAsync(ct));
+        problem.RootElement.GetProperty("code").GetString().Should().Be("USER_ALREADY_EXISTS");
+        problem.RootElement.GetProperty("field").GetString().Should().Be("userName");
+        problem.RootElement.GetProperty("title").GetString().Should().NotBeNullOrWhiteSpace();
+        problem.RootElement.GetRawText().Should().NotContain(userName, "the answer names the field, not the name");
+        (await FindByNameAsync(userName))!.RtId.Should().Be(existing.RtId, "the existing user is untouched");
     }
 
     [Fact]
-    public async Task CreateUser_TheSameUserTwice_KeepsTheDuplicateUserName400()
+    public async Task CreateUser_TheSameUserTwice_Is409_ForTheUserName()
     {
-        // Name and e-mail both taken: the user name decides, as before the e-mail rule.
+        // Name and e-mail both taken: the user name decides (field userName), as in the method.
         var userName = $"twice-{Guid.NewGuid():N}";
         await CreateTestUserAsync(userName);
         var body = new { name = userName, email = $"{userName}@example.com", password = DefaultPassword };
 
         var response = await PostAsync(TenantApiUrl("users"), body);
 
-        response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
-        (await response.Content.ReadAsStringAsync(TestContext.Current.CancellationToken)).Should()
-            .Contain("DuplicateUserName");
+        response.StatusCode.Should().Be(HttpStatusCode.Conflict);
+        using var problem = JsonDocument.Parse(await response.Content.ReadAsStringAsync(TestContext.Current.CancellationToken));
+        problem.RootElement.GetProperty("field").GetString().Should().Be("userName");
     }
 
     [Fact]

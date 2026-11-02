@@ -274,9 +274,9 @@ public class UsersController : ControllerBase
     [HttpPost]
     [Authorize(IdentityServiceConstants.IdentityUserAdministrationWritePolicy)]
     [EndpointSummary("Creates a new user.")]
-    [EndpointDescription("Refuses an e-mail address another user of the tenant already has (case-insensitive) with 409 " +
-                         "application/problem+json, code USER_ALREADY_EXISTS, field email - the same rule as the CK method " +
-                         "User.CreateUser-1. Updating a user does not check it.")]
+    [EndpointDescription("Refuses a user name or an e-mail address another user of the tenant already has (case-insensitive) " +
+                         "with 409 application/problem+json, code USER_ALREADY_EXISTS, field userName or email - the same " +
+                         "rule as the CK method User.CreateUser-1. A taken user name wins over a taken e-mail address.")]
     [ProducesResponseType(StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status409Conflict)]
     public async Task<IActionResult> Post(
@@ -304,8 +304,14 @@ public class UsersController : ControllerBase
                 userDto.Password);
             if (!result.Succeeded)
             {
-                // AB#8064: a duplicate e-mail address is a conflict with the same code as the method (USER_ALREADY_EXISTS).
-                // Logged without the address; a duplicate user name keeps its 400 answer.
+                // AB#8083: a duplicate user name is a conflict with the same code as the method (USER_ALREADY_EXISTS,
+                // field userName), like the e-mail (AB#8064). Logged without the name or address.
+                if (result.Errors.Any(e => e.Code == nameof(IdentityErrorDescriber.DuplicateUserName)))
+                {
+                    _logger.LogInformation("Create user refused: another user of the tenant has the same user name");
+                    return UserCreationProblems.DuplicateUserName();
+                }
+
                 if (result.Errors.Any(e => e.Code == nameof(IdentityErrorDescriber.DuplicateEmail)))
                 {
                     _logger.LogInformation("Create user refused: another user of the tenant has the same e-mail address");
@@ -328,9 +334,9 @@ public class UsersController : ControllerBase
     [HttpPut("{userName}")]
     [Authorize(IdentityServiceConstants.IdentityUserAdministrationWritePolicy)]
     [EndpointSummary("Updates a user.")]
-    [EndpointDescription("Refuses changing the e-mail address to one another user of the tenant already has (case-insensitive) " +
-                         "with 409 application/problem+json, code USER_ALREADY_EXISTS, field email - the same answer as the " +
-                         "create. Keeping the current address is never checked, so users that already share an address stay " +
+    [EndpointDescription("Refuses renaming the user to a user name, or changing the e-mail address to one, another user of " +
+                         "the tenant already has (case-insensitive) with 409 application/problem+json, code " +
+                         "USER_ALREADY_EXISTS, field userName or email - the same answer as the create. Keeping the current address is never checked, so users that already share an address stay " +
                          "editable.")]
     [ProducesResponseType(StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status409Conflict)]
@@ -377,6 +383,13 @@ public class UsersController : ControllerBase
             if (result.Succeeded)
             {
                 return Ok();
+            }
+
+            // AB#8083: renaming onto the name of another user (the user validator answers DuplicateUserName) is a conflict.
+            if (result.Errors.Any(e => e.Code == nameof(IdentityErrorDescriber.DuplicateUserName)))
+            {
+                _logger.LogInformation("Update user refused: another user of the tenant has the requested user name");
+                return UserCreationProblems.DuplicateUserName();
             }
 
             return GetBadRequestResultWithErrorDescription("Update of user failed", result.Errors);
