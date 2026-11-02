@@ -172,6 +172,23 @@ public class TenantProbeGuardTests
     }
 
     [Fact]
+    public async Task AnAuthenticationFailure_WithTheUserAlreadyPresent_EvictsStalePooledClients_AndTheCircuitCloses()
+    {
+        // AB#8177 round 3: the user was re-created elsewhere; this process's pooled connections still fail.
+        var systemContext = Substitute.For<ISystemContext>();
+        systemContext.EnsureTenantDatabaseUserAsync("meshmaker").Returns(TenantDatabaseUserEnsureResult.AlreadyPresent);
+        var sut = CreateHealingSut(systemContext);
+
+        (await sut.RunAsync<int>(Broken, "test", () => throw AuthFailure())).Succeeded.Should().BeFalse();
+
+        var healed = false;
+        await WaitUntilAsync(() => healed = sut.RunAsync(Broken, "test", () => Task.FromResult(1)).Result.Succeeded);
+        healed.Should().BeTrue();
+        await systemContext.Received(1).InvalidateTenantRepositoryClientsAsync("meshmaker", Arg.Any<string?>(),
+            Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
     public async Task AStaleFailure_DoesNotReopenACircuitThatHealingJustClosed()
     {
         var systemContext = Substitute.For<ISystemContext>();

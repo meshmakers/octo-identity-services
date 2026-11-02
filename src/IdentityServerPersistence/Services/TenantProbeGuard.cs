@@ -110,7 +110,7 @@ public sealed class TenantProbeGuard(
 
             if (systemContext is not null && MayBeAMissingDatabaseUser(ex))
             {
-                HealInBackground(systemContext, tenant, state);
+                HealInBackground(systemContext, tenant, state, ex);
             }
 
             return new TenantProbeResult<T>(false, default);
@@ -128,14 +128,18 @@ public sealed class TenantProbeGuard(
     ///     Re-creates the tenant's MongoDB user off the request path (the admin connection can be as slow as the
     ///     failed probe) and closes the circuit once the user was missing and is back.
     /// </summary>
-    private void HealInBackground(ISystemContext healingContext, OctoTenant tenant, State state)
+    private void HealInBackground(ISystemContext healingContext, OctoTenant tenant, State state, Exception cause)
     {
         _ = Task.Run(async () =>
         {
             try
             {
-                var result = await _healer.TryHealAsync(healingContext, tenant.TenantId, logger).ConfigureAwait(false);
-                if (result == TenantDatabaseUserEnsureResult.Created)
+                var result = await _healer.TryHealAsync(healingContext, tenant.TenantId, logger, cause).ConfigureAwait(false);
+                // Created: the user was missing and is back. AlreadyPresent after an authentication failure: the user
+                // was re-created elsewhere and the healer evicted this process's stale pooled connections.
+                if (result == TenantDatabaseUserEnsureResult.Created ||
+                    (result == TenantDatabaseUserEnsureResult.AlreadyPresent &&
+                     TenantDatabaseUserHealer.IsAuthenticationFailure(cause)))
                 {
                     state.Reset();
                 }

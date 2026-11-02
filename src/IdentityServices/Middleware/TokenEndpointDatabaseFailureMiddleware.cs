@@ -57,7 +57,7 @@ internal sealed class TokenEndpointDatabaseFailureMiddleware(
                 context.RequestServices.GetService<ISystemContext>() is { } systemContext)
             {
                 var healLogger = logger;
-                _ = Task.Run(() => TenantDatabaseUserHealer.Default.TryHealAsync(systemContext, tenantId, healLogger));
+                _ = Task.Run(() => TenantDatabaseUserHealer.Default.TryHealAsync(systemContext, tenantId, healLogger, ex));
             }
 
             context.Response.Clear();
