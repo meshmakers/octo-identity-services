@@ -53,6 +53,10 @@
         <Content Include="appsettings.test.json">
             <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
         </Content>
+        <!-- AB#8157: the published System.Identity 2.30.0 (construction-kit-libraries-build) for the major upgrade test. -->
+        <Content Include="TestData\ck-system.identity-2.30.0.json">
+            <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+        </Content>
         <Content Include="xunit.runner.json">
             <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
         </Content>
