@@ -199,6 +199,39 @@ public class UserCreateUserMethodTests : IntegrationTestBase
     }
 
     [Fact]
+    public async Task ADuplicateEmail_WithSurroundingBlanks_IsRefusedByTheSharedCreationService()
+    {
+        // AB#8064: the rule lives in IUserCreationService, which REST POST users shares (409, same code); the handler trims
+        // the address and the service compares it normalised.
+        var ct = TestContext.Current.CancellationToken;
+        var existingName = NewUserName();
+        await CreateTestUserAsync(existingName, email: $"{existingName}@example.com", password: "Test123!");
+        var userName = NewUserName();
+
+        var outcome = await CreateAsync(Admin(),
+            Parameters(userName, $"  {existingName}@Example.COM ", null), ct);
+
+        outcome.Failure!.Code.Should().Be(UserCreateUserHandler.UserAlreadyExists);
+        outcome.Failure.Parameters.Should().Contain("field", "email");
+        (await FindAsync(userName)).Should().BeNull();
+        _events.Single().Details["outcome"].Should().Be(UserCreateUserHandler.UserAlreadyExists);
+        await _mail.DidNotReceiveWithAnyArgs().SendWelcomeNotificationWithoutPasswordAsync(default!, default!);
+    }
+
+    [Fact]
+    public async Task UsersWithoutAnEmail_AreNotCheckedForDuplicates()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        var first = NewUserName();
+        var second = NewUserName();
+
+        (await CreateAsync(Admin(), Parameters(first, null, InitialPassword), ct)).Failure.Should().BeNull();
+        (await CreateAsync(Admin(), Parameters(second, "  ", InitialPassword), ct)).Failure.Should().BeNull();
+
+        (await FindAsync(second))!.Email.Should().BeNull();
+    }
+
+    [Fact]
     public async Task APolicyViolation_NamesTheFailedRules_NeverTheValue_AndCreatesNoUser()
     {
         var ct = TestContext.Current.CancellationToken;
