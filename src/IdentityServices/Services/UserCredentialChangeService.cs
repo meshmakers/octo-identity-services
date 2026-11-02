@@ -1,15 +1,13 @@
-using Meshmakers.Octo.Runtime.Contracts.RepositoryEntities;
+using IdentityServerPersistence.Services;
 using Meshmakers.Octo.Services.Infrastructure.Services;
 using Microsoft.AspNetCore.Identity;
 using Persistence.IdentityCkModel.Generated.System.Identity.v2;
-using OpenIddictAbstractions = global::OpenIddict.Abstractions;
 
 namespace Meshmakers.Octo.Backend.IdentityServices.Services;
 
 internal sealed class UserCredentialChangeService(
     UserManager<RtUser> userManager,
-    OpenIddictAbstractions.IOpenIddictTokenStore<RtOAuthToken> tokenStore,
-    OpenIddictAbstractions.IOpenIddictAuthorizationStore<RtOAuthAuthorization> authorizationStore,
+    IUserTokenRevocation tokenRevocation,
     IMultiTenancyResolverService multiTenancyResolverService,
     ILogger<UserCredentialChangeService> logger) : IUserCredentialChangeService
 {
@@ -55,8 +53,9 @@ internal sealed class UserCredentialChangeService(
                 $"Security stamp of user '{subject}' could not be updated after {cause}.");
         }
 
-        var tokens = await tokenStore.RevokeBySubjectAsync(subject, cancellationToken);
-        var authorizations = await authorizationStore.RevokeBySubjectAsync(subject, cancellationToken);
+        // AB#8018: for a password change this is the second revocation; OctoUserManager revoked once before the
+        // password was stored, so a crash between the password write and this call leaves no old token valid.
+        var (tokens, authorizations) = await tokenRevocation.RevokeAllAsync(subject, cancellationToken);
         return (subject, tokens, authorizations);
     }
 }

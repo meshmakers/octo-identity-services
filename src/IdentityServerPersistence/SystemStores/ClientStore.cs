@@ -119,43 +119,6 @@ public class ClientStore : IOctoClientStore
         return result.Items;
     }
 
-    public async Task UpdateAsync(string clientId, RtClient client)
-    {
-        ArgumentValidation.ValidateString(nameof(clientId), clientId);
-
-        using var session = await TenantRepository.GetSessionAsync();
-        session.StartTransaction();
-
-        var dbClient = await GetClientByClientId(session, clientId);
-        if (dbClient == null)
-        {
-            throw new NotExistingException($"Client id '{clientId}' does not exist.");
-        }
-
-        await TenantRepository.ReplaceOneRtEntityByIdAsync(session, dbClient.RtId, client);
-
-        await session.CommitTransactionAsync();
-
-        // After the primary update commits, propagate to any mirrors. Best-effort:
-        // a failure here must not break the API call. We use the post-update `client` here
-        // (not `dbClient`) so secret rotation / scope updates / etc. take effect on mirrors.
-        if (client.AutoProvisionInChildTenants && _mirrorProvisioning != null)
-        {
-            try
-            {
-                await _mirrorProvisioning.SyncMirrorsForClientAsync(TenantId, client);
-            }
-            catch (Exception ex)
-            {
-                _logger?.LogError(ex,
-                    "Mirror sync failed after updating client '{ClientId}' in tenant '{TenantId}'",
-                    clientId, TenantId);
-            }
-        }
-    }
-
-
-
     public async Task<RtClient?> MutateAsync(string clientId, Func<RtClient, bool> mutate)
     {
         ArgumentValidation.ValidateString(nameof(clientId), clientId);
