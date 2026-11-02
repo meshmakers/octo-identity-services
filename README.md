@@ -49,6 +49,15 @@ For local development, use .NET User Secrets:
 dotnet user-secrets set "System:MongoDbConnectionString" "mongodb://localhost:27017"
 ```
 
+### Data Protection keys at rest
+
+The ASP.NET Data Protection key ring (cookies, antiforgery and cross-tenant tokens) lives in the system MongoDB
+database (`RtDataProtectionKey`). Its key material is encrypted with the platform key ring `SecretEncryption`
+(`OCTO_SECRETENCRYPTION__KEYS__<id>`, `OCTO_SECRETENCRYPTION__ACTIVEKEYID`), so a database dump yields no usable keys.
+Existing installations switch it on per cluster with `OCTO_IDENTITY__DATAPROTECTION__ENCRYPTEXISTINGKEYS=true` after the
+release is everywhere — see [rollout-identity-dataprotection-encryption.md](docs/rollout-identity-dataprotection-encryption.md)
+(order, platform key rotation, rollback).
+
 ## Project Structure
 
 ```
@@ -69,6 +78,7 @@ Detailed documentation is available in the [docs](docs/) folder:
 - [Persistence](docs/persistence.md) - Data layer and Construction Kit
 - [System API](docs/system-api.md) - REST API reference
 - [Configuration](docs/configuration.md) - Deployment and configuration
+- [Data Protection key encryption rollout](docs/rollout-identity-dataprotection-encryption.md) - Keys at rest, rotation, rollback
 
 ## Docker
 

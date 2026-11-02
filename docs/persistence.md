@@ -736,7 +736,7 @@ ASP.NET Data Protection keys are stored as `RtDataProtectionKey` entities in the
 | Attribute | Index | Description |
 |-----------|-------|-------------|
 | `FriendlyName` | Unique | Key identifier (e.g., `key-{guid}`) used by the DataProtection framework |
-| `XmlData` | — | Full XML key representation including the encryption envelope |
+| `XmlData` | — | Full XML key representation; the secret part is wrapped with the platform key ring (see Encryption at Rest) |
 
 ### Seed-Once Migration from Legacy File Path
 
@@ -754,7 +754,39 @@ its once-per-process latch) while `IsSystemTenantExistingAsync()` is false. The 
 failed persist as best-effort; the key is re-created and persisted on the first real Data Protection
 use after the bootstrap.
 
+### Encryption at Rest (AB#5530)
+
+The secret part of each key (`<masterKey requiresEncryption="true">`) is wrapped with the platform key ring
+`SecretEncryption` (the same AES-256 key ring as `Secret` attributes, delivered per cluster as
+`OCTO_SECRETENCRYPTION__KEYS__<id>` / `OCTO_SECRETENCRYPTION__ACTIVEKEYID`). `XmlData` then holds ASP.NET's encrypted form:
+
+```xml
+<key id="…" version="1">
+  <creationDate>…</creationDate><activationDate>…</activationDate><expirationDate>…</expirationDate>
+  <descriptor deserializerType="…">
+    <descriptor>
+      <encryption algorithm="AES_256_CBC" /><validation algorithm="HMACSHA256" />
+      <encryptedSecret decryptorType="IdentityServerPersistence.SystemStores.DataProtection.PlatformKeyRingXmlDecryptor, IdentityServerPersistence">
+        <platformKeyRingEncryptedKey xmlns="urn:meshmakers:octo:dataprotection:v1"><value>enc:v2:k1:…</value></platformKeyRingEncryptedKey>
+      </encryptedSecret>
+    </descriptor>
+  </descriptor>
+</key>
+```
+
+A database dump therefore contains no usable key material; the platform key id (`k1`) is readable in the envelope
+header. Key id, dates and key material are unchanged by the encryption, so protected payloads (cookies,
+antiforgery tokens, cross-tenant tokens) stay valid. Write rule (`DataProtectionKeyStore`): encrypted when
+`Identity:DataProtection:EncryptExistingKeys` is on or the store is empty; otherwise plain (rollout step 1, so pods of
+the previous image keep reading new keys). Legacy file imports are encrypted only with the flag on.
+
+Startup (`DataProtectionKeyRingStartupService`, every pod, idempotent): refuses to start when the flag is on without a
+key ring or when a stored key is wrapped with an unknown key id; re-wraps keys with a non-active key id; with the flag
+on rewrites plain keys encrypted. Each key is rewritten in place (same entity) in its own transaction and only if it is
+unchanged since it was read. Rollout, rotation and rollback: `rollout-identity-dataprotection-encryption.md`.
+
 ### Failure Modes
 
+- **Stored key wrapped with a missing platform key id** (key removed from `SecretEncryption`, database restored into another environment): identity refuses to start and names the keys and key ids. Add the key back; never remove a key id before all keys were re-wrapped.
 - **MongoDB unreachable at first unprotect**: The DataProtection framework calls `IXmlRepository.GetAllElements()` before any protected payload can be read. If MongoDB is unavailable at this point the service fails fast with a clear exception rather than silently falling back to in-memory keys, preventing a split-brain key situation.
 - **Corrupted key document**: A document whose `XmlData` cannot be parsed as a valid DataProtection XML element causes a loud failure by design. This matches the framework's default behaviour and surfaces data corruption early rather than allowing silent decryption failures.

@@ -6,6 +6,7 @@ using IdentityServices.IntegrationTests.Fixtures;
 using Meshmakers.Octo.Services.Infrastructure.Services;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
+using Shared.TestUtilities.Fakes;
 using Xunit;
 
 namespace IdentityServices.IntegrationTests.Persistence;
@@ -24,6 +25,8 @@ namespace IdentityServices.IntegrationTests.Persistence;
 /// </summary>
 public class DataProtectionKeySeedIntegrationTests : IClassFixture<IdentityServicesFixture>
 {
+    private static readonly PlatformKeyRing KeyRing = PlatformKeyRing.CreateK1();
+
     private readonly IdentityServicesFixture _fixture;
 
     public DataProtectionKeySeedIntegrationTests(IdentityServicesFixture fixture, ITestOutputHelper outputHelper)
@@ -83,7 +86,7 @@ public class DataProtectionKeySeedIntegrationTests : IClassFixture<IdentityServi
                 Options.Create(new OctoIdentityServicesOptions
                 {
                     DataProtectionKeysPath = tempDir
-                }));
+                }), KeyRing.Protector);
 
             var elements1 = store1.GetAllElements();
 
@@ -108,7 +111,7 @@ public class DataProtectionKeySeedIntegrationTests : IClassFixture<IdentityServi
                 Options.Create(new OctoIdentityServicesOptions
                 {
                     DataProtectionKeysPath = null
-                }));
+                }), KeyRing.Protector);
 
             var elements2 = store2.GetAllElements();
 

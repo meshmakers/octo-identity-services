@@ -9,6 +9,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
 using MongoDB.Bson;
 using MongoDB.Driver;
+using Shared.TestUtilities.Fakes;
 using Xunit;
 
 namespace IdentityServices.IntegrationTests.Persistence;
@@ -75,8 +76,9 @@ public class VirginSystemDatabaseBootstrapIntegrationTests : IClassFixture<Virgi
         // virgin server. Whatever that write does, it must not materialize the database into a state
         // the shell classification no longer accepts — that would re-arm the AB#4854 wedge from a
         // writer outside the InfrastructureCollections allowlist.
+        using var keyRing = PlatformKeyRing.CreateK1();
         var keyStore = new DataProtectionKeyStore(_fixture.GetService<IServiceScopeFactory>(),
-            Options.Create(new OctoIdentityServicesOptions()));
+            Options.Create(new OctoIdentityServicesOptions()), keyRing.Protector);
         try
         {
             keyStore.StoreElement(new XElement("key", "virgin-probe"), "key-virgin-probe");

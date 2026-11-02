@@ -2,7 +2,7 @@
 using IdentityServerPersistence.Configuration.Options;
 using IdentityServerPersistence.Services;
 using IdentityServerPersistence.Services.DynamicClientRegistration;
-using IdentityServerPersistence.SystemStores;
+using IdentityServerPersistence.SystemStores.DataProtection;
 using Meshmakers.Octo.Backend.Authentication.Consumers;
 using Meshmakers.Octo.Backend.Authentication.DynamicAuth;
 using Meshmakers.Octo.Backend.IdentityServices.Authorization;
@@ -45,9 +45,6 @@ using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Options;
 using Microsoft.IdentityModel.Logging;
-using Microsoft.AspNetCore.DataProtection;
-using Microsoft.AspNetCore.DataProtection.KeyManagement;
-using Microsoft.AspNetCore.DataProtection.Repositories;
 using System.Threading.RateLimiting;
 using Meshmakers.Octo.Backend.IdentityServices.Logging;
 using NLog;
@@ -138,11 +135,9 @@ try
     // shared by all pods. Identity:DataProtectionKeysPath is no longer a persistence target; if it
     // is set and contains legacy key-*.xml files (old chart still mounts the PVC), they are
     // imported ONCE by DataProtectionKeyStore so existing sessions survive the migration.
-    builder.Services.AddSingleton<IXmlRepository, DataProtectionKeyStore>();
-    builder.Services.AddOptions<KeyManagementOptions>()
-        .Configure<IXmlRepository>((options, repository) => options.XmlRepository = repository);
-    builder.Services.AddDataProtection()
-        .SetApplicationName("OctoIdentityServices");
+    // AB#5530: keys are encrypted at rest with the platform key ring (SecretEncryption), see
+    // Identity:DataProtection:EncryptExistingKeys and docs/rollout-identity-dataprotection-encryption.md.
+    builder.Services.AddOctoDataProtectionKeyRing();
     builder.Services.AddOctoTenantIdRouteConstraint();
 
     builder.Services.Configure<CookiePolicyOptions>(options =>
