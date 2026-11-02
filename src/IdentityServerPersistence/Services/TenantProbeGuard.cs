@@ -71,7 +71,7 @@ public sealed class TenantProbeGuard(
         var state = _states.GetOrAdd(tenant.TenantId, _ => new State());
         var settings = options.Value;
 
-        if (!state.TryEnter(_time.GetUtcNow()))
+        if (!state.TryEnter(_time.GetUtcNow(), out var generation))
         {
             return new TenantProbeResult<T>(false, default);
         }
@@ -81,7 +81,7 @@ public sealed class TenantProbeGuard(
         {
             task = probe();
             var value = await task.WaitAsync(settings.ProbeTimeout, _time).ConfigureAwait(false);
-            state.Close();
+            state.Close(generation);
             return new TenantProbeResult<T>(true, value);
         }
         catch (Exception ex)
@@ -150,12 +150,17 @@ public sealed class TenantProbeGuard(
         private readonly object _gate = new();
         private DateTimeOffset? _openUntil;
         private bool _probing;
+        private long _generation;
 
-        /// <summary>True when the caller may probe: the circuit is closed, or it is half-open and no probe runs.</summary>
-        public bool TryEnter(DateTimeOffset now)
+        /// <summary>
+        ///     True when the caller may probe: the circuit is closed, or it is half-open and no probe runs.
+        ///     <paramref name="generation" /> identifies the circuit state the probe started in.
+        /// </summary>
+        public bool TryEnter(DateTimeOffset now, out long generation)
         {
             lock (_gate)
             {
+                generation = _generation;
                 if (_openUntil is null)
                 {
                     return true;
@@ -171,10 +176,19 @@ public sealed class TenantProbeGuard(
             }
         }
 
-        public void Close()
+        /// <summary>
+        ///     Closes the circuit after a successful probe, unless another probe opened it meanwhile: concurrent probes
+        ///     overlap while the circuit is closed, and a late success must not clear an opening it did not see.
+        /// </summary>
+        public void Close(long generation)
         {
             lock (_gate)
             {
+                if (generation != _generation)
+                {
+                    return;
+                }
+
                 _openUntil = null;
                 _probing = false;
             }
@@ -186,6 +200,7 @@ public sealed class TenantProbeGuard(
             lock (_gate)
             {
                 var report = _openUntil is null || now >= _openUntil;
+                _generation++;
                 _openUntil = until;
                 _probing = false;
                 return report;

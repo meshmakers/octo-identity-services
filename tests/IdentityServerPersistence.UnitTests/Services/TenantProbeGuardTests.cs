@@ -21,6 +21,7 @@ public class TenantProbeGuardTests
 {
     private static readonly OctoTenant Broken = new("meshmaker", "meshmakers");
     private readonly CapturingLogger<TenantProbeGuard> _logger = new();
+    private readonly ManualTimeProvider _time = new();
 
     private TenantProbeGuard CreateSut(TimeSpan? timeout = null, TimeSpan? open = null) =>
         new(Options.Create(new TenantProbeGuardOptions
@@ -28,7 +29,7 @@ public class TenantProbeGuardTests
                 ProbeTimeout = timeout ?? TimeSpan.FromMilliseconds(200),
                 OpenDuration = open ?? TimeSpan.FromSeconds(60)
             }),
-            Options.Create(new OctoSystemConfiguration { DatabaseUser = "octo-system-ds-user-{0}" }), _logger);
+            Options.Create(new OctoSystemConfiguration { DatabaseUser = "octo-system-ds-user-{0}" }), _logger, _time);
 
     private static MongoAuthenticationException AuthFailure() =>
         new(new ConnectionId(new ServerId(new ClusterId(1), new DnsEndPoint("localhost", 27017))),
@@ -57,7 +58,7 @@ public class TenantProbeGuardTests
     [Fact]
     public async Task AfterAFailure_TheTenantIsNotTouchedAgain_UntilTheCircuitHasHalfOpened()
     {
-        var sut = CreateSut(open: TimeSpan.FromMilliseconds(300));
+        var sut = CreateSut(open: TimeSpan.FromSeconds(30));
         var calls = 0;
         Task<int> Failing()
         {
@@ -73,7 +74,7 @@ public class TenantProbeGuardTests
 
         calls.Should().Be(1, "while the circuit is open the broken tenant's database is not contacted");
 
-        await Task.Delay(400, TestContext.Current.CancellationToken);
+        _time.Advance(TimeSpan.FromSeconds(31));
 
         (await sut.RunAsync(Broken, "test", Failing)).Succeeded.Should().BeFalse();
         calls.Should().Be(2, "after the open duration exactly one request probes again");
@@ -82,9 +83,9 @@ public class TenantProbeGuardTests
     [Fact]
     public async Task ARecoveredTenant_ClosesTheCircuit()
     {
-        var sut = CreateSut(open: TimeSpan.FromMilliseconds(100));
+        var sut = CreateSut(open: TimeSpan.FromSeconds(30));
         await sut.RunAsync<int>(Broken, "test", () => throw AuthFailure());
-        await Task.Delay(200, TestContext.Current.CancellationToken);
+        _time.Advance(TimeSpan.FromSeconds(31));
 
         (await sut.RunAsync(Broken, "test", () => Task.FromResult(1))).Succeeded.Should().BeTrue();
         (await sut.RunAsync(Broken, "test", () => Task.FromResult(2))).Should().Be(new TenantProbeResult<int>(true, 2));
@@ -112,5 +113,34 @@ public class TenantProbeGuardTests
         var text = _logger.AllText;
         text.Should().Contain("meshmaker").And.Contain("'meshmakers'").And.Contain("octo-system-ds-user-meshmakers");
         _logger.Messages.Should().ContainSingle("the open circuit answers without logging again");
+    }
+
+    [Fact]
+    public async Task ASlowSuccess_DoesNotClearTheCircuitAnotherProbeOpenedMeanwhile()
+    {
+        var sut = CreateSut(timeout: TimeSpan.FromSeconds(10), open: TimeSpan.FromSeconds(30));
+        var slow = new TaskCompletionSource<int>();
+        var slowProbe = sut.RunAsync(Broken, "test", () => slow.Task); // started while the circuit was closed
+
+        await sut.RunAsync<int>(Broken, "test", () => throw AuthFailure()); // another probe opens the circuit
+        slow.SetResult(1);
+        (await slowProbe).Succeeded.Should().BeTrue();
+
+        var calls = 0;
+        (await sut.RunAsync(Broken, "test", () =>
+        {
+            calls++;
+            return Task.FromResult(2);
+        })).Succeeded.Should().BeFalse("the overlapping success must not have closed the circuit");
+        calls.Should().Be(0);
+    }
+
+    private sealed class ManualTimeProvider : TimeProvider
+    {
+        private DateTimeOffset _now = new(2026, 11, 2, 12, 0, 0, TimeSpan.Zero);
+
+        public override DateTimeOffset GetUtcNow() => _now;
+
+        public void Advance(TimeSpan by) => _now += by;
     }
 }
