@@ -2056,6 +2056,23 @@ CK method handler (AB#5672, AB#7774) - must call the same helper. Tests:
 `UserCredentialChangeServiceTests`, `Api/Manage/PasswordChangeRevokesSessionsTests` (all four paths against the
 real token endpoint), `Persistence/PasswordChangeRevocationTenantIsolationIntegrationTests`.
 
+**Revoke before and after the password write (AB#8018, Security; decision OD-6: ordering, no outbox).** The user store and
+the token/authorization stores are separate writes without a shared transaction (each store opens its own session), so a
+stop between the password write and the helper above left old refresh tokens redeemable. `OctoUserManager` overrides
+`ChangePasswordAsync`, `ResetPasswordAsync` and `AddPasswordAsync` (bodies follow the framework step by step) and calls
+`IUserTokenRevocation.RevokeAllAsync` (`IdentityServerPersistence/Services/UserTokenRevocation.cs`, registered in `Program.cs`,
+optional constructor parameter of the manager) between the in-memory hash update and `UpdateUserAsync`: only after the current
+password / reset token was verified and the policy passed, so a request refused before the write (or a forged one) revokes
+nothing; a store write that fails after the revocation (`ConcurrencyFailure`, a user validator) keeps the old password with the
+sessions ended (accepted, safe direction; review finding on #234). A failing revocation
+throws before the password is stored. `UserCredentialChangeService` uses the same `IUserTokenRevocation` for the second
+revocation. 🔴 A new password write must go through these `UserManager` methods (or call `IUserTokenRevocation` before its own
+write); the manager built by `CrossTenantSecondFactorVerifier` has no revocation and must never write a password. Tests:
+`IdentityServerPersistence.UnitTests/Stores/OctoUserManagerPasswordWriteTests` (order, refusals, failing revocation) and the
+`CrashAfterPasswordWrite_*` tests in `PasswordChangeRevokesSessionsTests` (six paths: REST change/set/admin reset/token reset,
+methods `User.ChangePassword`/`User.ResetPassword`; the post-write helper is replaced by a failing one, the new password works and
+the old refresh token answers `invalid_grant`; red without the pre-write revocation) plus `FailedPasswordChange_RevokesNothing`.
+
 ### Two-factor enabled without a usable second factor is refused (AB#7830)
 
 ASP.NET Core Identity challenges only when `TwoFactorEnabled` is set **and** a provider is valid, so a user with

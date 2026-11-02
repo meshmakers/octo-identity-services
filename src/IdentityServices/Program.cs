@@ -1,5 +1,6 @@
 ﻿using IdentityServerPersistence;
 using IdentityServerPersistence.Configuration.Options;
+using IdentityServerPersistence.Services;
 using IdentityServerPersistence.Services.DynamicClientRegistration;
 using IdentityServerPersistence.SystemStores;
 using Meshmakers.Octo.Backend.Authentication.Consumers;
@@ -97,6 +98,8 @@ try
     builder.Services.AddScoped<IUserEmailInteractionService, UserEmailInteractionService>();
     builder.Services.AddScoped<IUserManagementService, UserManagementService>();
     builder.Services.AddScoped<IUserCredentialChangeService, UserCredentialChangeService>();
+    // AB#8018: OctoUserManager revokes the user's tokens before every password write (and the helper above after it).
+    builder.Services.AddScoped<IUserTokenRevocation, UserTokenRevocation>();
     builder.Services.AddScoped<IUserTwoFactorAdministrationService, UserTwoFactorAdministrationService>();
     builder.Services.AddScoped<IUserCreationService, UserCreationService>();
     // AB#7899: administrator revokes all sessions and tokens of a user / of the shadow users of a tenant.

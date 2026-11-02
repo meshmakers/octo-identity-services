@@ -1,4 +1,5 @@
 using FluentAssertions;
+using IdentityServerPersistence.Services;
 using Meshmakers.Octo.Backend.IdentityServices.Services;
 using Meshmakers.Octo.Runtime.Contracts.RepositoryEntities;
 using Meshmakers.Octo.Services.Infrastructure.Services;
@@ -40,7 +41,8 @@ public class UserCredentialChangeServiceTests
         _tokenStore.RevokeBySubjectAsync(Arg.Any<string>(), Arg.Any<CancellationToken>()).Returns(new ValueTask<long>(2));
         _authorizationStore.RevokeBySubjectAsync(Arg.Any<string>(), Arg.Any<CancellationToken>())
             .Returns(new ValueTask<long>(1));
-        _sut = new UserCredentialChangeService(_userManager, _tokenStore, _authorizationStore, _tenantResolver, _logger);
+        _sut = new UserCredentialChangeService(_userManager, new UserTokenRevocation(_tokenStore, _authorizationStore),
+            _tenantResolver, _logger);
     }
 
     [Fact]
