@@ -377,6 +377,19 @@ internal class DefaultConfigurationCreatorService(
                 "retried on the next tenant setup", tenantId);
         }
 
+        // AB#8161: SecretManagement for the TenantOwners group and for octosystem admin mappings carrying
+        // TenantManagement, once per tenant (own marker). Additive only; a failure is logged and retried.
+        try
+        {
+            await TenantOwnersSecretManagementGrant.EnsureAsync(tenantContext, systemContext.TenantId, logger);
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex,
+                "SecretManagement grant to TenantOwners failed for tenant '{TenantId}'; retried on the next " +
+                "tenant setup", tenantId);
+        }
+
         // Child-tenant client mirror provisioning runs AFTER the blueprint apply has guaranteed
         // the parent tenant's RtClient entities exist. Idempotent — runs on every startup so
         // backfill happens naturally for tenants that pre-date the AutoProvisionInChildTenants

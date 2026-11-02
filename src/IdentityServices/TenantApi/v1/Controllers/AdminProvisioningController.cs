@@ -162,12 +162,26 @@ public class AdminProvisioningController(
         var session = await tenantRepository.GetSessionAsync();
         session.StartTransaction();
         await tenantRepository.InsertOneRtEntityAsync(session, mapping);
+
+        // AB#8161: a mapping that carries TenantManagement is an administrator mapping: it joins TenantOwners
+        // (which holds every role including SecretManagement) in addition to the roles it was created with.
+        var groupNames = new List<string>();
+        if (dto.RoleIds != null && await ContainsTenantManagementRoleAsync(tenantRepository, session, dto.RoleIds))
+        {
+            var tenantOwnersGroup = await FindTenantOwnersGroupAsync(tenantRepository, session);
+            if (tenantOwnersGroup != null)
+            {
+                await AddToTenantOwnersGroupAsync(tenantRepository, session, tenantOwnersGroup, mapping);
+                groupNames.Add(tenantOwnersGroup.GroupName);
+            }
+        }
+
         await session.CommitTransactionAsync();
 
         // Ensure OctoTenantIdentityProvider exists so cross-tenant login works
         await EnsureOctoTenantIdentityProviderAsync(tenantRepository, targetTenantId, dto.SourceTenantId);
 
-        return Created(string.Empty, MapToDto(mapping, []));
+        return Created(string.Empty, MapToDto(mapping, groupNames));
     }
 
     /// <summary>
@@ -415,13 +429,18 @@ public class AdminProvisioningController(
                 tenantRepository, session, existingMapping, roleIds, userId, userName, tenantId);
         }
 
+        // AB#8161: an administrator is a TenantOwners member, not the holder of direct roles; the group carries
+        // every role. A tenant without the group, or with a group that carries no role, keeps the role list.
+        var tenantOwnersGroup = await FindTenantOwnersGroupAsync(tenantRepository, session);
+        var groupCarriesRoles = tenantOwnersGroup != null
+                                && await GroupHasAllRolesAsync(tenantRepository, session, tenantOwnersGroup, roleIds);
         var mapping = new RtExternalTenantUserMapping
         {
             RtId = OctoObjectId.GenerateNewId(),
             SourceTenantId = tenantId,
             SourceUserId = userId,
             SourceUserName = userName,
-            MappedRoleIds = new AttributeStringValueList(roleIds)
+            MappedRoleIds = groupCarriesRoles ? null : new AttributeStringValueList(roleIds)
         };
 
         await tenantRepository.InsertOneRtEntityAsync(session, mapping);
@@ -431,10 +450,10 @@ public class AdminProvisioningController(
 
         // Add mapping as member of TenantOwners group
         var groupNames = new List<string>();
-        var tenantOwnersGroupName = await AddToTenantOwnersGroupAsync(tenantRepository, session, mapping);
-        if (tenantOwnersGroupName != null)
+        if (tenantOwnersGroup != null)
         {
-            groupNames.Add(tenantOwnersGroupName);
+            await AddToTenantOwnersGroupAsync(tenantRepository, session, tenantOwnersGroup, mapping);
+            groupNames.Add(tenantOwnersGroup.GroupName);
         }
 
         await session.CommitTransactionAsync();
@@ -504,7 +523,11 @@ public class AdminProvisioningController(
             return Ok(MapToDto(mapping, groupNames));
         }
 
-        if (!grantsRole)
+        // AB#8161: repair through the TenantOwners group when it carries roles; the role list is the
+        // fallback for a tenant without a usable group.
+        var repairGroup = !grantsRole ? await FindTenantOwnersGroupAsync(tenantRepository, session) : null;
+        var repairViaGroup = repairGroup != null && await GroupHasAllRolesAsync(tenantRepository, session, repairGroup, targetRoleIds);
+        if (!grantsRole && !repairViaGroup)
         {
             mapping.MappedRoleIds = new AttributeStringValueList(targetRoleIds.ToList());
         }
@@ -516,13 +539,11 @@ public class AdminProvisioningController(
 
         await tenantRepository.ReplaceOneRtEntityByIdAsync(session, mapping.RtId, mapping);
 
-        if (!grantsRole && !groupNames.Contains(CommonConstants.TenantOwnersGroup, StringComparer.OrdinalIgnoreCase))
+        if (repairGroup != null && !grantsRole
+            && !groupNames.Contains(CommonConstants.TenantOwnersGroup, StringComparer.OrdinalIgnoreCase))
         {
-            var tenantOwnersGroupName = await AddToTenantOwnersGroupAsync(tenantRepository, session, mapping);
-            if (tenantOwnersGroupName != null)
-            {
-                groupNames.Add(tenantOwnersGroupName);
-            }
+            await AddToTenantOwnersGroupAsync(tenantRepository, session, repairGroup, mapping);
+            groupNames.Add(repairGroup.GroupName);
         }
 
         // Ensure OctoTenantIdentityProvider exists so cross-tenant login works
@@ -538,24 +559,53 @@ public class AdminProvisioningController(
         return Ok(MapToDto(mapping, groupNames));
     }
 
+    /// <summary>True when one of <paramref name="roleIds"/> is the TenantManagement role of the target tenant.</summary>
+    private static async Task<bool> ContainsTenantManagementRoleAsync(
+        ITenantRepository tenantRepository, IOctoSession session, IEnumerable<string> roleIds)
+    {
+        var roles = await tenantRepository.GetRtEntitiesByTypeAsync<RtRole>(
+            session,
+            RtEntityQueryOptions.Create().FieldEquals(
+                nameof(RtRole.NormalizedName), CommonConstants.TenantManagementRole.ToUpperInvariant()));
+        var tenantManagement = roles.Items.FirstOrDefault();
+        return tenantManagement != null
+               && roleIds.Contains(tenantManagement.RtId.ToString(), StringComparer.OrdinalIgnoreCase);
+    }
+
     /// <summary>
-    /// Adds the mapping to the TenantOwners group of the target tenant. Returns the group's name, or
-    /// <c>null</c> when the tenant has no such group.
+    /// True when the group has an <c>AssignedRole</c> edge to every one of <paramref name="roleIds"/>: only then the
+    /// group alone replaces the direct role list of a mapping.
     /// </summary>
-    private static async Task<string?> AddToTenantOwnersGroupAsync(
-        ITenantRepository tenantRepository, IOctoSession session, RtExternalTenantUserMapping mapping)
+    private static async Task<bool> GroupHasAllRolesAsync(
+        ITenantRepository tenantRepository, IOctoSession session, RtGroup group, IEnumerable<string> roleIds)
+    {
+        var edges = await tenantRepository.GetRtAssociationsAsync(
+            session,
+            group.ToRtEntityId(),
+            RtAssociationExtendedQueryOptions.Create(
+                GraphDirections.Outbound,
+                roleId: IdentityAssociationConstants.AssignedRoleId));
+        var held = edges.Items.Select(e => e.TargetRtId.ToString()).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        return roleIds.All(held.Contains);
+    }
+
+    /// <summary>The TenantOwners group of the target tenant, or <c>null</c> when the tenant has none.</summary>
+    private static async Task<RtGroup?> FindTenantOwnersGroupAsync(
+        ITenantRepository tenantRepository, IOctoSession session)
     {
         var groupQuery = RtEntityQueryOptions.Create()
             .FieldEquals(nameof(RtGroup.NormalizedGroupName),
                 CommonConstants.TenantOwnersGroup.ToUpperInvariant());
         var groupResult = await tenantRepository
             .GetRtEntitiesByTypeAsync<RtGroup>(session, groupQuery);
-        var tenantOwnersGroup = groupResult.Items.FirstOrDefault();
-        if (tenantOwnersGroup == null)
-        {
-            return null;
-        }
+        return groupResult.Items.FirstOrDefault();
+    }
 
+    /// <summary>Adds the mapping to the given TenantOwners group as a member.</summary>
+    private static async Task AddToTenantOwnersGroupAsync(
+        ITenantRepository tenantRepository, IOctoSession session, RtGroup tenantOwnersGroup,
+        RtExternalTenantUserMapping mapping)
+    {
         var updates = new List<AssociationUpdateInfo>
         {
             AssociationUpdateInfo.CreateInsert(
@@ -565,7 +615,6 @@ public class AdminProvisioningController(
         };
         var opResult = new OperationResult();
         await tenantRepository.ApplyChangesAsync(session, updates, opResult);
-        return tenantOwnersGroup.GroupName;
     }
 
     /// <summary>

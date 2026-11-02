@@ -632,12 +632,12 @@ public class ApiSecretsControllerTests : IntegrationTestBase
     }
 
     [Fact]
-    public async Task TenantOwnersMember_WithoutADirectSecretManagementEdge_IsDeniedUnderEnforce()
+    public async Task TenantOwnersMember_WhenTheGroupLacksSecretManagement_IsDeniedUnderEnforce()
     {
         var ct = TestContext.Current.CancellationToken;
-        var effectiveRoles = await EffectiveRolesOfNewTenantOwnersMemberAsync();
+        var effectiveRoles = await EffectiveRolesOfNewTenantOwnersMemberAsync(groupHoldsSecretManagement: false);
         effectiveRoles.Should().Contain(TenantManagement, "the group's roles are inherited")
-            .And.NotContain(SecretManagement, "TenantOwners does not carry SecretManagement (AB#5544)");
+            .And.NotContain(SecretManagement, "this group was arranged without SecretManagement");
         var clientId = await CreateMachineClientAsync();
 
         HttpResponseMessage enforced;
@@ -650,6 +650,24 @@ public class ApiSecretsControllerTests : IntegrationTestBase
 
         enforced.StatusCode.Should().Be(HttpStatusCode.Forbidden);
         staged.StatusCode.Should().Be(HttpStatusCode.OK, "Warn still lets the previous rule through");
+    }
+
+    [Fact]
+    public async Task TenantOwnersMember_WhenTheGroupHoldsSecretManagement_IsAllowedUnderEnforce()
+    {
+        // AB#8161: TenantOwners carries SecretManagement, so its members keep their secret rights under Enforce.
+        var ct = TestContext.Current.CancellationToken;
+        var effectiveRoles = await EffectiveRolesOfNewTenantOwnersMemberAsync(groupHoldsSecretManagement: true);
+        effectiveRoles.Should().Contain(SecretManagement, "inherited from TenantOwners");
+        var clientId = await CreateMachineClientAsync();
+
+        HttpResponseMessage enforced;
+        using (SecretManagementMode(IdentityApiRoleEnforcementMode.Enforce))
+        {
+            enforced = await Caller(effectiveRoles).PostAsJsonAsync(SecretsUrl("client", clientId), new { }, ct);
+        }
+
+        enforced.StatusCode.Should().Be(HttpStatusCode.OK);
     }
 
     [Fact]
@@ -736,12 +754,18 @@ public class ApiSecretsControllerTests : IntegrationTestBase
     ///     A new user whose only role source is membership in <c>TenantOwners</c> (seeded like the bootstrap blueprint:
     ///     the built-in administration roles, never SecretManagement). Returns the effective roles the token is built from.
     /// </summary>
-    private async Task<string[]> EffectiveRolesOfNewTenantOwnersMemberAsync()
+    private async Task<string[]> EffectiveRolesOfNewTenantOwnersMemberAsync(bool groupHoldsSecretManagement)
     {
         using var scope = CreateScope();
         var roleManager = scope.ServiceProvider.GetRequiredService<RoleManager<RtRole>>();
         var roleIds = new List<string>();
-        foreach (var name in new[] { TenantManagement, UserManagement, "AdminPanelManagement" })
+        var roleNames = new List<string> { TenantManagement, UserManagement, "AdminPanelManagement" };
+        if (groupHoldsSecretManagement)
+        {
+            roleNames.Add(SecretManagement);
+        }
+
+        foreach (var name in roleNames)
         {
             var role = await roleManager.FindByNameAsync(name);
             if (role == null)
@@ -765,8 +789,10 @@ public class ApiSecretsControllerTests : IntegrationTestBase
                 NormalizedGroupName = CommonConstants.TenantOwnersGroup.ToUpperInvariant()
             };
             await groups.StoreAsync(owners);
-            await groups.SetRoleIdsAsync(owners.RtId, roleIds);
         }
+
+        // The shared group is re-arranged on every call: AB#8161 makes the tenant setup add SecretManagement to it.
+        await groups.SetRoleIdsAsync(owners.RtId, roleIds);
 
         var user = await CreateTestUserAsync($"owner-{Guid.NewGuid():N}");
         await groups.AddMemberUserAsync(owners.RtId, user.RtId.ToString());

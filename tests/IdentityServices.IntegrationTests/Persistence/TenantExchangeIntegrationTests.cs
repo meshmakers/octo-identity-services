@@ -393,6 +393,26 @@ public class TenantExchangeIntegrationTests : IClassFixture<IdentityServicesFixt
     }
 
     /// <summary>
+    ///     AB#8161: when TenantOwners carries the roles (production shape), a provisioned administrator is only a
+    ///     member of the group — the mapping holds no direct role list — and the exchange still succeeds.
+    /// </summary>
+    [Fact]
+    public async Task ProvisionCurrentUser_WhenTenantOwnersCarriesRoles_MappingIsOnlyAGroupMember()
+    {
+        var ctx = await ArrangeProvisioningAsync();
+        var groupStore = new GroupStore(new FixedTenantResolver(ctx.ChildRepo));
+        await groupStore.SetRoleIdsAsync(ctx.OwnersGroupId, ctx.ChildRoleIds.Select(r => r.ToString()).ToList());
+
+        (await ProvisionCurrentUserAsync(ctx)).Should().Be(AdminProvisioningController.OutcomeCreated);
+
+        var mapping = (await GetMappingsAsync(ctx.ChildRepo, ctx.ParentTenantId, ctx.UserId)).Single();
+        mapping.MappedRoleIds.Should().BeNullOrEmpty("the group carries the roles");
+        (await IsMemberOfTenantOwnersAsync(ctx.ChildRepo, mapping)).Should().BeTrue();
+        (await ctx.Processor.ExchangeAsync(ctx.ParentTenantId, ctx.UserId.ToString(), ctx.ChildTenantId, subjectHasSecondFactor: false))
+            .Error.Should().BeNull();
+    }
+
+    /// <summary>
     ///     The same symptom the bug was found with: the login path's find-or-create stores a bare mapping next to
     ///     the shadow user, and a later ProvisionCurrentUser used to answer "provisioned" without writing anything.
     /// </summary>

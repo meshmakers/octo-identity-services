@@ -99,4 +99,11 @@ public static class IdentityServiceConstants
     /// existing tenant administrators (<c>SecretManagementAdminGrant</c>) has run. Present = never run again.
     /// </summary>
     public const string SecretManagementAdminGrantKey = "SecretManagementAdminGrant";
+
+    /// <summary>
+    /// AB#8161: TenantConfiguration row recording that <c>SecretManagement</c> was granted to the
+    /// <c>TenantOwners</c> group and to the octosystem admin mappings (<c>TenantOwnersSecretManagementGrant</c>).
+    /// Present = never run again.
+    /// </summary>
+    public const string TenantOwnersSecretManagementGrantKey = "TenantOwnersSecretManagementGrant";
 }

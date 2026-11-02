@@ -51,54 +51,72 @@ public class UserManagementService(
                 throw UserManagementException.UserCreationFailed(result.Errors);
             }
 
-            await TryAddRole(adminUser, CommonConstants.TenantManagementRole);
-            await TryAddRole(adminUser, CommonConstants.UserManagementRole);
-            await TryAddRole(adminUser, CommonConstants.DevelopmentRole);
-            await TryAddRole(adminUser, CommonConstants.CommunicationManagementRole);
-            await TryAddRole(adminUser, CommonConstants.BotManagementRole);
-            await TryAddRole(adminUser, CommonConstants.AdminPanelManagementRole);
-            // Optional like the file roles: a tenant set up from a bootstrap seed older than 1.7.0 has no
-            // SecretManagement role yet; the one-time grant (AB#5544) gives it to the administrators later.
-            await TryAddRole(adminUser, CommonConstants.SecretManagementRole, required: false);
-            await TryAddRole(adminUser, CommonConstants.DashboardViewerRole);
-            await TryAddRole(adminUser, CommonConstants.DashboardManagementRole);
-            await TryAddRole(adminUser, CommonConstants.ReportingManagementRole);
-            await TryAddRole(adminUser, CommonConstants.ReportingViewerRole);
-            // Optional: a tenant set up from an older bootstrap seed has no file roles yet; the one-time
-            // file role grant (AB#6180) gives them to the Reporting role holders on the next tenant setup.
-            await TryAddRole(adminUser, IdentityServiceConstants.FileManagementRole, required: false);
-            await TryAddRole(adminUser, IdentityServiceConstants.FileViewerRole, required: false);
-
-            await AddToTenantOwnersAsync(adminUser);
+            // AB#8161: administrators are TenantOwners members, not holders of direct roles. The group carries
+            // every built-in role including SecretManagement. A tenant without the group (bootstrap blueprint
+            // not applied) keeps the direct roles so that the administrator is not locked out.
+            if (!await AddToTenantOwnersAsync(adminUser))
+            {
+                await AddDirectAdministratorRolesAsync(adminUser);
+            }
         }
     }
 
     /// <summary>
-    ///     The first administrator also becomes a member of <c>TenantOwners</c>, which carries every non-secret built-in
+    ///     The first administrator becomes a member of <c>TenantOwners</c>, which carries every non-secret built-in
     ///     role. Without it the administrator holds only the direct roles above and, under the role change guard (grant
     ///     only built-in roles you hold), could not add anyone to <c>TenantOwners</c>. The group is part of the
     ///     bootstrap blueprint; a tenant without it keeps the direct roles only. Idempotent: an existing membership is
     ///     left alone. This is the setup path and does not go through the guarded controllers by design.
     /// </summary>
-    private async Task AddToTenantOwnersAsync(RtUser adminUser)
+    private async Task<bool> AddToTenantOwnersAsync(RtUser adminUser)
     {
         var group = await groupStore.FindByNameAsync(CommonConstants.TenantOwnersGroup.ToUpperInvariant());
         if (group == null)
         {
             logger.LogWarning(
-                "The {Group} group does not exist; the first administrator keeps only the directly assigned roles",
+                "The {Group} group does not exist; the first administrator gets the roles assigned directly",
                 CommonConstants.TenantOwnersGroup);
-            return;
+            return false;
+        }
+
+        // A group that carries no role would leave the first administrator without any permission.
+        if ((await groupStore.GetRoleIdsAsync(group.RtId)).Count == 0)
+        {
+            logger.LogWarning(
+                "The {Group} group carries no role; the first administrator gets the roles assigned directly",
+                CommonConstants.TenantOwnersGroup);
+            return false;
         }
 
         var userId = adminUser.RtId.ToString();
         var members = await groupStore.GetMemberUserIdsAsync(group.RtId);
-        if (members.Contains(userId, StringComparer.Ordinal))
+        if (!members.Contains(userId, StringComparer.Ordinal))
         {
-            return;
+            await groupStore.AddMemberUserAsync(group.RtId, userId);
         }
 
-        await groupStore.AddMemberUserAsync(group.RtId, userId);
+        return true;
+    }
+
+    private async Task AddDirectAdministratorRolesAsync(RtUser adminUser)
+    {
+        await TryAddRole(adminUser, CommonConstants.TenantManagementRole);
+        await TryAddRole(adminUser, CommonConstants.UserManagementRole);
+        await TryAddRole(adminUser, CommonConstants.DevelopmentRole);
+        await TryAddRole(adminUser, CommonConstants.CommunicationManagementRole);
+        await TryAddRole(adminUser, CommonConstants.BotManagementRole);
+        await TryAddRole(adminUser, CommonConstants.AdminPanelManagementRole);
+        // Optional like the file roles: a tenant set up from a bootstrap seed older than 1.7.0 has no
+        // SecretManagement role yet; the one-time grant (AB#5544) gives it to the administrators later.
+        await TryAddRole(adminUser, CommonConstants.SecretManagementRole, required: false);
+        await TryAddRole(adminUser, CommonConstants.DashboardViewerRole);
+        await TryAddRole(adminUser, CommonConstants.DashboardManagementRole);
+        await TryAddRole(adminUser, CommonConstants.ReportingManagementRole);
+        await TryAddRole(adminUser, CommonConstants.ReportingViewerRole);
+        // Optional: a tenant set up from an older bootstrap seed has no file roles yet; the one-time
+        // file role grant (AB#6180) gives them to the Reporting role holders on the next tenant setup.
+        await TryAddRole(adminUser, IdentityServiceConstants.FileManagementRole, required: false);
+        await TryAddRole(adminUser, IdentityServiceConstants.FileViewerRole, required: false);
     }
 
     private async Task TryAddRole(RtUser user, string roleName, bool required = true)

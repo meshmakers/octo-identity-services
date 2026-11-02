@@ -416,9 +416,17 @@ Reading the secret list (description, expiry, stored one-way hash, never a clear
 Who holds `SecretManagement`: the one-time grant `SecretManagementAdminGrant` (AB#5544) gave it, per tenant and once
 (marker `SecretManagementAdminGrant` in the tenant configuration), to every **local** user holding both
 `AdminPanelManagement` and `TenantManagement` at that moment; the first administrator of a new tenant gets it at setup.
-`TenantOwners` does not carry it (the group also holds clients and provisioned parent-tenant administrators), and
-cross-tenant shadow users, external tenant user mappings and clients never receive it automatically. Administrators
-added later need it assigned explicitly. Because of that gap the requirement is staged:
+Since AB#8161 (decision Gerald 2026-11-02) `TenantOwners` carries it as well: the once-per-tenant step
+`TenantOwnersSecretManagementGrant` (marker `TenantOwnersSecretManagementGrant`, runs in every tenant setup, existing
+and new) adds the `AssignedRole` edge TenantOwners → SecretManagement and appends `SecretManagement` to the
+`MappedRoleIds` of every external tenant user mapping whose source tenant is the system tenant (octosystem) that
+carries `TenantManagement` and is not a TenantOwners member. Members inherit the role from the group, **including
+clients that are members of TenantOwners**. Mappings of other source tenants, users, clients and other groups are not
+changed. New administrators are TenantOwners members, not holders of direct roles: the first administrator of a tenant
+(setup) and mappings created by `ProvisionCurrentUser` or by `POST` admin provisioning with `TenantManagement`
+(fallback to the direct role list when the tenant has no usable TenantOwners group). Moving existing direct role
+assignments to the group is a separate, switchable migration (AB#8165). Because administrators added elsewhere can still
+lack the role, the requirement is staged:
 `IdentityApiAuthorization:SecretManagementRoleEnforcement` defaults to `Warn` (previous roles still pass, logged) and
 goes to `Enforce` per cluster after the precheck (`docs/rollout-identity-rest-role-enforcement.md` § AB#5861).
 

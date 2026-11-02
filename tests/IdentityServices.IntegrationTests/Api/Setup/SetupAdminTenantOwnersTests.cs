@@ -70,7 +70,7 @@ public class SetupAdminTenantOwnersTests : IntegrationTestBase
     }
 
     [Fact]
-    public async Task WithoutTheMembership_TheAdministratorCannotAddAnotherUser_TheGapOfTheDirectRolesOnly()
+    public async Task WithoutTheMembership_TheAdministratorHoldsNoRoleAndCannotAddAnotherUser()
     {
         var ct = TestContext.Current.CancellationToken;
         var owners = await ArrangeVirginTenantAsync();
@@ -87,9 +87,31 @@ public class SetupAdminTenantOwnersTests : IntegrationTestBase
         var response = await client.PutAsync(
             TenantApiUrl($"groups/{owners}/members/users/{newcomer.RtId}"), null, ct);
 
+        // AB#8161: the administrator holds no direct role, the group membership is the only source.
         response.StatusCode.Should().Be(HttpStatusCode.Forbidden);
-        var problem = await response.Content.ReadFromJsonAsync<JsonElement>(ct);
-        problem.GetProperty("code").GetString().Should().Be("role-not-held");
+    }
+
+    [Fact]
+    public async Task Setup_GivesTheFirstAdministratorNoDirectRoles_TheRolesComeFromTenantOwners()
+    {
+        var owners = await ArrangeVirginTenantAsync();
+
+        await RunSetupAsync();
+
+        var admin = await FindAdminAsync();
+        using var scope = CreateScope();
+        var roleManager = scope.ServiceProvider.GetRequiredService<RoleManager<RtRole>>();
+        var userManager = scope.ServiceProvider.GetRequiredService<UserManager<RtUser>>();
+        var effective = await scope.ServiceProvider.GetRequiredService<IGroupRoleResolver>()
+            .ResolveEffectiveUserRoleIdsAsync(admin.RtId.ToString(), admin.UserName);
+        var secretManagement = await roleManager.FindByNameAsync(CommonConstants.SecretManagementRole);
+        effective.Should().Contain(secretManagement!.RtId.ToString());
+        (await MembersAsync(owners)).Should().Contain(admin.RtId.ToString());
+
+        // AB#8161: without the membership nothing is left, so the administrator held no direct role.
+        await scope.ServiceProvider.GetRequiredService<IGroupStore>()
+            .RemoveMemberUserAsync(owners, admin.RtId.ToString());
+        (await userManager.GetRolesAsync(admin)).Should().BeEmpty("no direct role assignment");
     }
 
     [Fact]
@@ -192,10 +214,8 @@ public class SetupAdminTenantOwnersTests : IntegrationTestBase
                 role = (await roleManager.FindByNameAsync(name))!;
             }
 
-            if (name != CommonConstants.SecretManagementRole)
-            {
-                ownerRoleIds.Add(role.RtId.ToString());
-            }
+            // AB#8161: TenantOwners carries every role, SecretManagement included.
+            ownerRoleIds.Add(role.RtId.ToString());
         }
 
         var groups = scope.ServiceProvider.GetRequiredService<IGroupStore>();
