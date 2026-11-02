@@ -167,7 +167,8 @@ public class ClientMirrorController : ControllerBase
     /// </remarks>
     [HttpPost("{childTenantId}/secret")]
     [TypeFilter(typeof(AdminProvisioningTargetScopeFilter))]
-    [Authorize(IdentityServiceConstants.IdentityTenantAdministrationWritePolicy)]
+    // AB#5861: issuing (rotating) a mirror's secret is an API secret write -> SecretManagement (staged).
+    [Authorize(IdentityServiceConstants.IdentitySecretAdministrationPolicy)]
     [EndpointSummary("Issues a fresh tenant-specific secret for this mirror and returns it once.")]
     [ProducesResponseType(typeof(MirrorSecretResponseDto), StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(NotFoundErrorDto), StatusCodes.Status404NotFound)]

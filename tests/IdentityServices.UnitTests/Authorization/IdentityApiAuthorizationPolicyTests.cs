@@ -13,6 +13,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using NSubstitute;
+using Shared.TestUtilities.Fakes;
 using Xunit;
 
 namespace IdentityServices.UnitTests.Authorization;
@@ -27,14 +28,22 @@ public class IdentityApiAuthorizationPolicyTests
     private const string CustomerTenantId = "customer";
 
     private static IAuthorizationService CreateAuthorizationService(
-        IdentityApiRoleEnforcementMode mode = IdentityApiRoleEnforcementMode.Enforce)
+        IdentityApiRoleEnforcementMode mode = IdentityApiRoleEnforcementMode.Enforce,
+        IdentityApiRoleEnforcementMode secretMode = IdentityApiRoleEnforcementMode.Enforce,
+        ILogger<IdentityApiRoleAuthorizationHandler>? logger = null)
     {
         var services = new ServiceCollection();
         services.AddLogging();
         services.AddSingleton(Options.Create(new OctoSystemConfiguration { SystemTenantId = SystemTenantId }));
         var monitor = Substitute.For<IOptionsMonitor<IdentityApiAuthorizationOptions>>();
-        monitor.CurrentValue.Returns(new IdentityApiAuthorizationOptions { RoleEnforcement = mode });
+        monitor.CurrentValue.Returns(new IdentityApiAuthorizationOptions
+            { RoleEnforcement = mode, SecretManagementRoleEnforcement = secretMode });
         services.AddSingleton(monitor);
+        if (logger != null)
+        {
+            services.AddSingleton(logger);
+        }
+
         services.AddSingleton<IAuthorizationHandler, IdentityApiRoleAuthorizationHandler>();
         services.AddSingleton<IAuthorizationHandler, IdentityApiOwnTenantAuthorizationHandler>();
         services.AddAuthorization(options => options.AddIdentityApiPolicies());
@@ -256,6 +265,104 @@ public class IdentityApiAuthorizationPolicyTests
             IdentityServiceConstants.IdentityUserDirectoryReadPolicy)).Should().BeFalse();
     }
 
+    // ------------------------------------------------------------------ AB#5861 secret administration
+
+    [Theory]
+    // Enforce: only SecretManagement.
+    [InlineData(new[] { "SecretManagement" }, IdentityApiRoleEnforcementMode.Enforce, true)]
+    [InlineData(new[] { "SecretManagement", "TenantManagement" }, IdentityApiRoleEnforcementMode.Enforce, true)]
+    [InlineData(new[] { "TenantManagement" }, IdentityApiRoleEnforcementMode.Enforce, false)]
+    [InlineData(new[] { "UserManagement" }, IdentityApiRoleEnforcementMode.Enforce, false)]
+    [InlineData(new[] { "AdminPanelManagement" }, IdentityApiRoleEnforcementMode.Enforce, false)]
+    [InlineData(new string[0], IdentityApiRoleEnforcementMode.Enforce, false)]
+    // Warn (the shipped default): the previous rule still passes, nothing less than before.
+    [InlineData(new[] { "SecretManagement" }, IdentityApiRoleEnforcementMode.Warn, true)]
+    [InlineData(new[] { "TenantManagement" }, IdentityApiRoleEnforcementMode.Warn, true)]
+    [InlineData(new[] { "UserManagement" }, IdentityApiRoleEnforcementMode.Warn, true)]
+    [InlineData(new[] { "AdminPanelManagement" }, IdentityApiRoleEnforcementMode.Warn, false)]
+    [InlineData(new string[0], IdentityApiRoleEnforcementMode.Warn, false)]
+    public async Task SecretAdministration_RequiresSecretManagement_StagedBySecretManagementRoleEnforcement(
+        string[] roles, IdentityApiRoleEnforcementMode secretMode, bool expected)
+    {
+        var service = CreateAuthorizationService(secretMode: secretMode);
+
+        (await AuthorizeAsync(service, Principal(roles), IdentityServiceConstants.IdentitySecretAdministrationPolicy))
+            .Should().Be(expected);
+    }
+
+    [Theory]
+    [InlineData(IdentityApiRoleEnforcementMode.Enforce)]
+    [InlineData(IdentityApiRoleEnforcementMode.Warn)]
+    public async Task SecretAdministration_ReadOnlyScope_IsDenied_EvenWithSecretManagement(
+        IdentityApiRoleEnforcementMode secretMode)
+    {
+        var service = CreateAuthorizationService(secretMode: secretMode);
+
+        (await AuthorizeAsync(service, Principal(["SecretManagement"], scope: "octo_api.read_only"),
+            IdentityServiceConstants.IdentitySecretAdministrationPolicy)).Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task SecretAdministration_ClusterWideWarn_StaysTheEmergencyExit()
+    {
+        // RoleEnforcement=Warn lets every caller through on every role policy (AB#5859), this one included.
+        var service = CreateAuthorizationService(mode: IdentityApiRoleEnforcementMode.Warn,
+            secretMode: IdentityApiRoleEnforcementMode.Enforce);
+
+        (await AuthorizeAsync(service, Principal(["TenantManagement"]),
+            IdentityServiceConstants.IdentitySecretAdministrationPolicy)).Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task SecretAdministration_Denied_NamesTheMissingRoleInTheFailureReason()
+    {
+        var service = CreateAuthorizationService(secretMode: IdentityApiRoleEnforcementMode.Enforce);
+
+        var result = await service.AuthorizeAsync(Principal(["TenantManagement", "UserManagement"]),
+            RouteContext(CustomerTenantId), IdentityServiceConstants.IdentitySecretAdministrationPolicy);
+
+        result.Succeeded.Should().BeFalse();
+        result.Failure!.FailureReasons.Should().ContainSingle(r => r.Handler is IdentityApiRoleAuthorizationHandler)
+            .Which.Message.Should().Contain("'SecretManagement'").And.NotContain("TenantManagement");
+    }
+
+    [Fact]
+    public async Task SecretAdministration_StagedWarn_LogsTheCallerForThePrecheck()
+    {
+        var logger = new CapturingLogger<IdentityApiRoleAuthorizationHandler>();
+        var service = CreateAuthorizationService(secretMode: IdentityApiRoleEnforcementMode.Warn, logger: logger);
+
+        (await AuthorizeAsync(service, Principal(["TenantManagement"]),
+            IdentityServiceConstants.IdentitySecretAdministrationPolicy)).Should().BeTrue();
+
+        logger.Messages.Should().ContainSingle(m => m.Contains("SecretManagementRoleEnforcement=Warn") &&
+                                                    m.Contains("user-1") && m.Contains(CustomerTenantId));
+    }
+
+    [Fact]
+    public void ClientMirrorRotateSecret_UsesTheSecretPolicy()
+    {
+        EnumerateActions().Single(a => a.Name == $"{nameof(ClientMirrorController)}.{nameof(ClientMirrorController.RotateSecret)}")
+            .Policy.Should().Be(IdentityServiceConstants.IdentitySecretAdministrationPolicy);
+    }
+
+    [Fact]
+    public void ApiSecretsController_EveryWrite_UsesTheSecretPolicy_AndEveryReadTheTenantAdministrationReadPolicy()
+    {
+        var actions = EnumerateActions().Where(a => a.Name.StartsWith(nameof(ApiSecretsController) + ".")).ToList();
+        actions.Should().HaveCountGreaterThan(10);
+
+        foreach (var (name, method, policy) in actions)
+        {
+            var verbs = method.GetCustomAttributes<HttpMethodAttribute>().SelectMany(a => a.HttpMethods).ToList();
+            var isRead = verbs.All(v => v == "GET") || ReadOnlyPostAllowList.ContainsKey(name);
+            policy.Should().Be(isRead
+                    ? IdentityServiceConstants.IdentityTenantAdministrationReadPolicy
+                    : IdentityServiceConstants.IdentitySecretAdministrationPolicy,
+                $"{name} ({string.Join(",", verbs)})");
+        }
+    }
+
     // ------------------------------------------------------------------ guard over every endpoint
 
     private static readonly string[] ScopeOnlyAllowList =
@@ -292,7 +399,8 @@ public class IdentityApiAuthorizationPolicyTests
         IdentityServiceConstants.IdentityTenantAdministrationReadPolicy,
         IdentityServiceConstants.IdentityTenantAdministrationWritePolicy,
         IdentityServiceConstants.IdentityDirectoryReadPolicy,
-        IdentityServiceConstants.IdentityServiceAdministrationPolicy
+        IdentityServiceConstants.IdentityServiceAdministrationPolicy,
+        IdentityServiceConstants.IdentitySecretAdministrationPolicy
     ];
 
     private static readonly string[] ReadPolicies =

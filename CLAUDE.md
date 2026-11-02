@@ -1285,7 +1285,7 @@ like the password methods (production gate of 2026-10-23, B0); off = `METHOD_HAN
 
 | Rule | REST (`ApiSecretsController`, unchanged) | Method |
 |------|------|------|
-| Caller | `IdentityTenantAdministrationWritePolicy` (`octo_api` + `TenantManagement` or `UserManagement`) | the same, repeated on the validated principal (`IsClientAdministrator`) before the target is read: `METHOD_FORBIDDEN` / `role-required`, identical for an existing and a missing target; forged bus caller rejected by the host |
+| Caller | `IdentitySecretAdministrationPolicy` since AB#5861 (`octo_api` + `SecretManagement`, staged: in `Warn` also `TenantManagement`/`UserManagement`) | the same, repeated on the validated principal (`DecideClientSecretCaller`) before the target is read: `METHOD_FORBIDDEN` / `role-required`, identical for an existing and a missing target; forged bus caller rejected by the host |
 | Target | client id in the route, 404 | target rtId of the client; unknown, not an object id or unknown tenant = `METHOD_TARGET_NOT_FOUND` |
 | Generate | 32 bytes CSPRNG, URL-safe Base64, stored as Base64 SHA-256 | the same (`ClientMirrorSecrets.GenerateSecret`, `OctoSecretHasher.HashSecret`), record `Type = SharedSecret`; the clear text is the result, returned once |
 | Public client | accepted | `CLIENT_SECRET_NOT_REQUIRED` (it never authenticates with a secret) |
@@ -1957,6 +1957,19 @@ must equal the route tenant, unconditionally (`IdentityApiOwnTenantRequirement`)
 logs instead of denying (transition); default `Enforce`. 🔴 A new controller action must use one of these
 policies — `IdentityApiAuthorizationPolicyTests.EveryTenantApiEndpoint_RequiresARole_UnlessExplicitlyAllowListed`
 fails otherwise. Full table: `docs/system-api.md` § Authorization Policies.
+
+**API secret writes need `SecretManagement` (AB#5861).** `IdentitySecretAdministrationPolicy` (scope `octo_api` +
+`SecretManagement`, shared `IdentityApiAuthorizationPolicies.SecretAdministrationRequirement`) guards every create/rotate/
+delete in `ApiSecretsController`, the mirror secret rotation (`ClientMirrorController.RotateSecret`), a `clientSecret` in `POST/PUT clients` (checked in the action via
+`IAuthorizationService`) and the `Client.AddSecret`/`RemoveSecret` handlers (`DecideClientSecretCaller`; the CK model's
+declared roles stay `TenantManagement`/`UserManagement`). Reads keep `IdentityTenantAdministrationReadPolicy`. Staged by
+`OCTO_IDENTITYAPIAUTHORIZATION__SECRETMANAGEMENTROLEENFORCEMENT` = `Warn` (**default**: the previous roles still pass,
+logged `...SecretManagementRoleEnforcement=Enforce (AB#5861)`) | `Enforce` — because the role was granted only once to
+local human admins (AB#5544), not to `TenantOwners`, cross-tenant admins or clients. `Warn` never allows less than
+before; `RoleEnforcement=Warn` relaxes it too. A refused `IdentityApiRoleRequirement` answers 403
+`{"message": "...requires the role 'X'..."}` (`IdentityApiForbiddenReasonResultHandler`, AB#5227 shape). Tests:
+`ApiSecretsControllerTests` (role x verb x kind x mode matrix, TenantOwners member, client create/update),
+`IdentityApiAuthorizationPolicyTests`. Inventory: `scripts/identity-secret-management-role-check.sh`.
 
 ### Bootstrap blueprint lines and version order (AB#5544, AB#6457)
 

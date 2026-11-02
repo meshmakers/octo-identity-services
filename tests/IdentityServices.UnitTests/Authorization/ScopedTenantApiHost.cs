@@ -80,8 +80,13 @@ internal sealed class ScopedTenantApiHost : IAsyncDisposable
         return registry;
     }
 
-    public static async Task<ScopedTenantApiHost> StartAsync(IdentityApiRoleEnforcementMode mode,
+    public static Task<ScopedTenantApiHost> StartAsync(IdentityApiRoleEnforcementMode mode,
         params Type[] controllers)
+        => StartAsync(mode, IdentityApiRoleEnforcementMode.Warn, controllers);
+
+    /// <summary>AB#5861: also sets <c>SecretManagementRoleEnforcement</c> (default <c>Warn</c>, as shipped).</summary>
+    public static async Task<ScopedTenantApiHost> StartAsync(IdentityApiRoleEnforcementMode mode,
+        IdentityApiRoleEnforcementMode secretMode, params Type[] controllers)
     {
         var registry = CreateRegistry();
         var filterLog = new CapturingLogger<AdminProvisioningTargetScopeFilter>();
@@ -97,7 +102,11 @@ internal sealed class ScopedTenantApiHost : IAsyncDisposable
 
         services.AddSingleton<ITenantDiscoveryService>(registry);
         services.AddSingleton(Options.Create(new OctoSystemConfiguration { SystemTenantId = SystemTenant }));
-        services.Configure<IdentityApiAuthorizationOptions>(o => o.RoleEnforcement = mode);
+        services.Configure<IdentityApiAuthorizationOptions>(o =>
+        {
+            o.RoleEnforcement = mode;
+            o.SecretManagementRoleEnforcement = secretMode;
+        });
         services.AddSingleton<ILogger<AdminProvisioningTargetScopeFilter>>(filterLog);
         services.AddSingleton<ILogger<IdentityApiRoleAuthorizationHandler>>(policyLog);
         services.AddSingleton(systemContext);
@@ -111,6 +120,7 @@ internal sealed class ScopedTenantApiHost : IAsyncDisposable
         // The very registration of production: scope + tenant-role policies and their handler.
         services.AddSingleton<IAuthorizationHandler, IdentityApiRoleAuthorizationHandler>();
         services.AddAuthorization(options => options.AddIdentityApiPolicies());
+        services.AddSingleton<IAuthorizationMiddlewareResultHandler, IdentityApiForbiddenReasonResultHandler>();
         services.AddAuthentication("Bearer")
             .AddScheme<AuthenticationSchemeOptions, HeaderAuthHandler>("Bearer", _ => { });
 

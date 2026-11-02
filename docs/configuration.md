@@ -169,6 +169,7 @@ requirement of the tenant REST API (see `docs/system-api.md` § Authorization Po
 | Option | Env variable | Description |
 |--------|-------------|-------------|
 | `RoleEnforcement` | `OCTO_IDENTITYAPIAUTHORIZATION__ROLEENFORCEMENT` | `Enforce` (default) \| `Warn`. `Warn` lets callers without the required tenant role through and logs every such call as a warning ("would be denied") — the caller inventory to review before switching to `Enforce`. The scope requirement and the system-tenant-only rule of the log-level endpoint are always enforced. |
+| `SecretManagementRoleEnforcement` | `OCTO_IDENTITYAPIAUTHORIZATION__SECRETMANAGEMENTROLEENFORCEMENT` | `Warn` (default) \| `Enforce` (AB#5861). Stages the `SecretManagement` requirement of the API secret writes: `Warn` still lets `TenantManagement`/`UserManagement` through and logs "would be denied with SecretManagementRoleEnforcement=Enforce (AB#5861)"; `Enforce` accepts only `SecretManagement`. Switch per cluster after the precheck (`docs/rollout-identity-rest-role-enforcement.md`). `RoleEnforcement=Warn` also relaxes it. |
 
 ### Configuration Sources
 

@@ -28,6 +28,10 @@ public static class IdentityServiceConstants
     // AB#5859: service-wide operations (log level) → TenantManagement in the system tenant only.
     public const string IdentityServiceAdministrationPolicy = "IdentityServiceAdministrationPolicy";
 
+    // AB#5861: create, rotate and delete API secrets of clients and API resources → scope octo_api and the
+    // tenant role SecretManagement. Staged by IdentityApiAuthorization:SecretManagementRoleEnforcement.
+    public const string IdentitySecretAdministrationPolicy = "IdentitySecretAdministrationPolicy";
+
     public const string MailNotificationConfigurationName = "MailNotificationConfiguration";
 
     public const string WelcomeEmailTemplateName = "Welcome_Email_Template";

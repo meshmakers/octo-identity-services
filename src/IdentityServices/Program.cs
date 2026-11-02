@@ -323,6 +323,9 @@ try
     builder.Services.Configure<IdentityApiAuthorizationOptions>(options =>
         builder.Configuration.GetSection(IdentityApiAuthorizationOptions.SectionName).Bind(options));
     builder.Services.AddSingleton<IAuthorizationHandler, IdentityApiRoleAuthorizationHandler>();
+    // AB#5861: a missing role is answered 403 {"message": "...requires the role 'X'..."} (AB#5227 shape).
+    builder.Services.Replace(ServiceDescriptor
+        .Singleton<IAuthorizationMiddlewareResultHandler, IdentityApiForbiddenReasonResultHandler>());
     builder.Services.AddSingleton<IAuthorizationHandler, IdentityApiOwnTenantAuthorizationHandler>();
     builder.Services.AddAuthorization(options => options.AddIdentityApiPolicies());
 

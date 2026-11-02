@@ -27,7 +27,8 @@ tokens: the client's effective roles, AB#4183). The check probes the raw `role` 
 | Policy | Scope | Roles (any of) | Applied to |
 |--------|-------|----------------|------------|
 | `IdentityUserAdministrationReadPolicy` / `…WritePolicy` | read: `octo_api` or `octo_api.read_only`; write: `octo_api` | `UserManagement` | users, roles (writes), groups, external tenant user mappings, e-mail identifier bindings, data permissions |
-| `IdentityTenantAdministrationReadPolicy` / `…WritePolicy` | as above | `TenantManagement`, `UserManagement` | clients, client mirrors, API resources, API scopes, API secrets, identity providers, e-mail domain group rules, admin provisioning |
+| `IdentityTenantAdministrationReadPolicy` / `…WritePolicy` | as above | `TenantManagement`, `UserManagement` | clients, client mirrors, API resources, API scopes, reading API secret metadata (list, lookup), identity providers, e-mail domain group rules, admin provisioning |
+| `IdentitySecretAdministrationPolicy` (AB#5861) | `octo_api` | `SecretManagement` (staged, see below) | creating, rotating (`PUT`) and deleting API secrets of clients and API resources; a `clientSecret` in `POST clients` / `PUT clients/{id}` (checked in the action, only when the body carries a secret); issuing a mirror secret `POST clients/{clientId}/mirrors/{childTenantId}/secret` |
 | `IdentityDirectoryReadPolicy` | `octo_api` or `octo_api.read_only` | `UserManagement`, `TenantManagement`, `AdminPanelManagement`, `CommunicationManagement` | `GET roles`, `GET roles/GetPaged`, `GET roles/names/{roleName}`, `GET clients/{id}`, `GET clients/{id}/roles`, `GET clients/{id}/actors` (service-account panels, communication controller) |
 | `IdentityServiceAdministrationPolicy` | `octo_api` | `TenantManagement`, **system tenant route only** | `POST diagnostics/reconfigureLogLevel` (process-wide) |
 | `IdentityUserDirectoryReadPolicy` | `octo_api` or `octo_api.read_only` | — (**token must be issued for the route tenant**, no Warn mode, no exemptions) | `GET users/directory` (id + display name only, for pickers) |
@@ -49,6 +50,22 @@ The client mirror actions that name a child tenant (`provisionInTenant?childTena
 = `Enforce` (default) or `Warn`. `Warn` lets a caller without the role (or an admin-provisioning target
 outside its subtree) through and logs `This would be denied with RoleEnforcement=Enforce (AB#5859)`. The
 scope requirement and the system-tenant-only rule are enforced in both modes.
+
+**SecretManagement switch (AB#5861):** `IdentityApiAuthorization:SecretManagementRoleEnforcement`
+(`OCTO_IDENTITYAPIAUTHORIZATION__SECRETMANAGEMENTROLEENFORCEMENT`) = `Warn` (**default**) or `Enforce`. It stages
+`IdentitySecretAdministrationPolicy` and the same rule in the client secret methods (`Client.AddSecret-1`,
+`Client.RemoveSecret-1`). `Warn`: a caller without `SecretManagement` who holds `TenantManagement` or
+`UserManagement` (the rule before AB#5861) is let through and logged
+`This would be denied with SecretManagementRoleEnforcement=Enforce (AB#5861)`; a caller without any of these roles is
+denied — `Warn` never allows less than before. `Enforce`: only `SecretManagement`. `RoleEnforcement=Warn` stays the
+emergency exit and relaxes this policy too. The default is `Warn` because `SecretManagement` was granted only once,
+to the local human administrators (AB#5544): cross-tenant administrators, clients and later administrators do not
+hold it, and `TenantOwners` does not carry it. Rollout: `docs/rollout-identity-rest-role-enforcement.md` § AB#5861.
+
+**403 reason (AB#5861):** a refused role requirement answers `403` with the body
+`{"message": "Access is denied: this operation requires the role 'SecretManagement' in the tenant. ..."}` (AB#5227
+shape, `IdentityApiForbiddenReasonResultHandler`), so Studio and octo-cli show which role is missing. Refusals for a
+missing scope keep the empty `403`.
 
 The `Policy` column in the endpoint tables below names the **scope level** (ReadOnly / ReadWrite); the
 required role follows from the table above.
@@ -275,11 +292,11 @@ an older copy; `409` after repeated conflicts.
 |--------|----------|--------|-------------|
 | GET | `/apiSecrets/client/{clientId}` | ReadOnly | Get client's secrets |
 | POST | `/apiSecrets/client/{clientId}/lookup` | ReadOnly | Get specific secret; body `{ "valueEncrypted": "<stored hash>" }` (AB#8008) |
-| POST | `/apiSecrets/client/{clientId}` | ReadWrite | Create client secret |
-| PUT | `/apiSecrets/client/{clientId}` | ReadWrite | Update client secret (stored hash in the body) |
-| POST | `/apiSecrets/client/{clientId}/delete` | ReadWrite | Delete secret; body `{ "valueEncrypted": "<stored hash>" }` (AB#8008) |
+| POST | `/apiSecrets/client/{clientId}` | ReadWrite + `SecretManagement` | Create client secret |
+| PUT | `/apiSecrets/client/{clientId}` | ReadWrite + `SecretManagement` | Update client secret (stored hash in the body) |
+| POST | `/apiSecrets/client/{clientId}/delete` | ReadWrite + `SecretManagement` | Delete secret; body `{ "valueEncrypted": "<stored hash>" }` (AB#8008) |
 | GET | `/apiSecrets/client/{clientId}/{secretValue}` | ReadOnly | **Deprecated** (stored hash in the path), kept for one release; use `…/lookup` |
-| DELETE | `/apiSecrets/client/{clientId}/{secretValue}` | ReadWrite | **Deprecated** (stored hash in the path), kept for one release; use `…/delete` |
+| DELETE | `/apiSecrets/client/{clientId}/{secretValue}` | ReadWrite + `SecretManagement` | **Deprecated** (stored hash in the path), kept for one release; use `…/delete` |
 
 The same operations exist as CK methods on the client entity (AB#7780): `System.Identity/Client.AddSecret-1` (result = the generated
 secret, shown once, `sensitive`) and `Client.RemoveSecret-1` (`secretValue` = stored value or clear text). They are hosted only with
@@ -291,11 +308,11 @@ secret, shown once, `sensitive`) and `Client.RemoveSecret-1` (`secretValue` = st
 |--------|----------|--------|-------------|
 | GET | `/apiSecrets/apiResource/{name}` | ReadOnly | Get resource's secrets |
 | POST | `/apiSecrets/apiResource/{name}/lookup` | ReadOnly | Get specific secret; body `{ "valueEncrypted": "<stored hash>" }` (AB#8008) |
-| POST | `/apiSecrets/apiResource/{name}` | ReadWrite | Create resource secret |
-| PUT | `/apiSecrets/apiResource/{name}` | ReadWrite | Update resource secret (stored hash in the body) |
-| POST | `/apiSecrets/apiResource/{name}/delete` | ReadWrite | Delete secret; body `{ "valueEncrypted": "<stored hash>" }` (AB#8008) |
+| POST | `/apiSecrets/apiResource/{name}` | ReadWrite + `SecretManagement` | Create resource secret |
+| PUT | `/apiSecrets/apiResource/{name}` | ReadWrite + `SecretManagement` | Update resource secret (stored hash in the body) |
+| POST | `/apiSecrets/apiResource/{name}/delete` | ReadWrite + `SecretManagement` | Delete secret; body `{ "valueEncrypted": "<stored hash>" }` (AB#8008) |
 | GET | `/apiSecrets/apiResource/{name}/{secretValue}` | ReadOnly | **Deprecated** (stored hash in the path), kept for one release; use `…/lookup` |
-| DELETE | `/apiSecrets/apiResource/{name}/{secretValue}` | ReadWrite | **Deprecated** (stored hash in the path), kept for one release; use `…/delete` |
+| DELETE | `/apiSecrets/apiResource/{name}/{secretValue}` | ReadWrite + `SecretManagement` | **Deprecated** (stored hash in the path), kept for one release; use `…/delete` |
 
 **Create (POST)** — the server generates the secret; the request carries only the metadata (AB#6258):
 
