@@ -1369,6 +1369,19 @@ in the path. Decided by Gerald 2026-11-01:
   work, WARN twice without value, path masked), `Logging/CredentialLogRedactionTests` (patterns, decorator, later providers, the real
   `nlog.config` JSON record), and the AB#7765/AB#5708 reset tests moved to the body form.
 
+### Credential guard regression tests of the REST API (AB#7781)
+
+`tests/IdentityServices.IntegrationTests/Api/TenantApi/IdentityCredentialGuardRestTests` pins that the tenant API v1 never returns
+or accepts a credential: a user whose `PasswordHash`, `SecurityStamp`, authenticator key and recovery codes hold fixed dummy values
+(written through `UserManager` and the user store, as the service does) is read through `users`, `users/GetPaged`, `users/{name|email|rtId}`,
+`users/directory`, `users/{name}/roles|directRoles`, `groups` (all reads, the user as a member); `PUT users/{name}` and `POST users` with
+`passwordHash` / `securityStamp` / `userTokens` / `password` in the body change no credential; `GET clients` (all reads) carries neither
+the clear text nor the stored hash of a client secret, a secret record in a client body is not bound and `clientSecret` is stored hashed;
+`apiSecrets/client/{id}` and its `lookup` return the stored hash (the handle, by design) but never the clear text. A capturing log provider
+at Debug (the MongoDB command log of every store write included) must carry no dummy value, and must contain the rendered command of the
+seed write (non-vacuous). There is no export endpoint in this service. Path table of all repositories: octo-documentation
+`constructionKits/ckLanguage2/accessModifiers.md` § Regression tests.
+
 ### Blueprint-owned opt-in: `DataPolicy.ProtectBlueprintLocked` (AB#6384; System.Identity 2.24.0)
 
 `ProtectBlueprintLocked` (optional Boolean, default `false`) is the opt-in of the engine's blueprint-lock write guard
