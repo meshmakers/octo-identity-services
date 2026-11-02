@@ -50,6 +50,43 @@ public class ClientMirrorScopePipelineTests : IAsyncDisposable
     private static HttpStatusCode Allowed(string action) =>
         action == "delete" ? HttpStatusCode.NoContent : HttpStatusCode.Created;
 
+    // AB#5861: issuing a mirror secret is an API secret write and needs SecretManagement once the staged switch is
+    // Enforce; provisioning and delete keep the tenant administration roles.
+    [Theory]
+    [InlineData("secret", "TenantManagement", false)]
+    [InlineData("secret", "UserManagement", false)]
+    [InlineData("secret", "SecretManagement", true)]
+    [InlineData("secret", "TenantManagement,SecretManagement", true)]
+    [InlineData("provisionInTenant", "TenantManagement", true)]
+    [InlineData("delete", "TenantManagement", true)]
+    public async Task MirrorSecret_UnderSecretManagementEnforce_NeedsSecretManagement(string action, string roles,
+        bool allowed)
+    {
+        _host = await ScopedTenantApiHost.StartAsync(IdentityApiRoleEnforcementMode.Enforce,
+            IdentityApiRoleEnforcementMode.Enforce, typeof(ClientMirrorController));
+
+        var (status, body, _) = await CallAsync(action, "a", "a-child", roles);
+
+        if (allowed)
+        {
+            status.Should().Be(Allowed(action));
+        }
+        else
+        {
+            status.Should().Be(HttpStatusCode.Forbidden);
+            body.Should().Contain("'SecretManagement'", "the 403 names the missing role (AB#5227 shape)");
+            _host.Registry.ActionReachedFor.Should().BeEmpty();
+        }
+    }
+
+    [Fact]
+    public async Task MirrorSecret_UnderTheShippedWarnDefault_TenantManagementStillPasses()
+    {
+        await StartAsync();
+
+        (await CallAsync("secret", "a", "a-child", "TenantManagement")).Status.Should().Be(HttpStatusCode.Created);
+    }
+
     [Theory]
     [MemberData(nameof(Actions))]
     public async Task OwnTenantAndDescendants_AreAllowed(string action)

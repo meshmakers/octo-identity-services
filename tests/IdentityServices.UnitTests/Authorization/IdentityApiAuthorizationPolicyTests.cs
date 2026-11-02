@@ -340,6 +340,13 @@ public class IdentityApiAuthorizationPolicyTests
     }
 
     [Fact]
+    public void ClientMirrorRotateSecret_UsesTheSecretPolicy()
+    {
+        EnumerateActions().Single(a => a.Name == $"{nameof(ClientMirrorController)}.{nameof(ClientMirrorController.RotateSecret)}")
+            .Policy.Should().Be(IdentityServiceConstants.IdentitySecretAdministrationPolicy);
+    }
+
+    [Fact]
     public void ApiSecretsController_EveryWrite_UsesTheSecretPolicy_AndEveryReadTheTenantAdministrationReadPolicy()
     {
         var actions = EnumerateActions().Where(a => a.Name.StartsWith(nameof(ApiSecretsController) + ".")).ToList();

@@ -1960,7 +1960,7 @@ fails otherwise. Full table: `docs/system-api.md` § Authorization Policies.
 
 **API secret writes need `SecretManagement` (AB#5861).** `IdentitySecretAdministrationPolicy` (scope `octo_api` +
 `SecretManagement`, shared `IdentityApiAuthorizationPolicies.SecretAdministrationRequirement`) guards every create/rotate/
-delete in `ApiSecretsController`, a `clientSecret` in `POST/PUT clients` (checked in the action via
+delete in `ApiSecretsController`, the mirror secret rotation (`ClientMirrorController.RotateSecret`), a `clientSecret` in `POST/PUT clients` (checked in the action via
 `IAuthorizationService`) and the `Client.AddSecret`/`RemoveSecret` handlers (`DecideClientSecretCaller`; the CK model's
 declared roles stay `TenantManagement`/`UserManagement`). Reads keep `IdentityTenantAdministrationReadPolicy`. Staged by
 `OCTO_IDENTITYAPIAUTHORIZATION__SECRETMANAGEMENTROLEENFORCEMENT` = `Warn` (**default**: the previous roles still pass,

@@ -404,6 +404,7 @@ System.Identity.Bootstrap 1.7.0) in the caller's token, on every path:
 |------|-------|
 | REST `POST/PUT apiSecrets/{client\|apiResource}/…`, `POST …/delete`, deprecated `DELETE …/{secretValue}` | `IdentitySecretAdministrationPolicy` |
 | REST `POST clients`, `PUT clients/{id}` with a `clientSecret` in the body | the same policy, evaluated in the action |
+| REST `POST clients/{clientId}/mirrors/{childTenantId}/secret` (per-tenant mirror secret) | the same policy, plus the subtree filter |
 | CK methods `Client.AddSecret-1`, `Client.RemoveSecret-1` (behind `Methods:Identity:EnablePasswordMethods`) | the same requirement on the forwarded principal; the gateway still checks the declared roles `TenantManagement`/`UserManagement` (CK model unchanged) |
 | Internal: `CreateIdentityDataCommandRequest` (communication controller's pipeline service accounts, bus), client mirror sync | service-to-service, no user principal; unchanged |
 
