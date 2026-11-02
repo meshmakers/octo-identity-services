@@ -102,6 +102,8 @@ try
     builder.Services.AddScoped<IUserTokenRevocation, UserTokenRevocation>();
     builder.Services.AddScoped<IUserTwoFactorAdministrationService, UserTwoFactorAdministrationService>();
     builder.Services.AddScoped<IUserCreationService, UserCreationService>();
+    // AB#7778: the one merge of a duplicate user, shared by REST and User.Merge-1.
+    builder.Services.AddScoped<IUserMergeService, UserMergeService>();
     // AB#7899: administrator revokes all sessions and tokens of a user / of the shadow users of a tenant.
     builder.Services.AddScoped<IUserSessionRevocationService, UserSessionRevocationService>();
     builder.Services.AddScoped<IRoleChangeGuard, RoleChangeGuard>(); // AB#7914
