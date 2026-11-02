@@ -610,6 +610,12 @@ automatically, through `SecretManagementAdminGrant`
   who later removes the role from someone does not see it come back. If the role does not exist yet, nothing
   is written and no marker is recorded (retried on the next setup). A failure is logged and does not fail
   tenant setup.
+- **TenantOwners grant (AB#8161):** `TenantOwnersSecretManagementGrant` runs right after this step from
+  `SetupTenantAsync`, once per tenant (tenant configuration row `TenantOwnersSecretManagementGrant`,
+  `IdentityServiceConstants.TenantOwnersSecretManagementGrantKey`). It writes one `AssignedRole` edge
+  TenantOwners → SecretManagement and appends the role to octosystem mappings that carry `TenantManagement` and are
+  no TenantOwners members (pure rule: `TenantOwnersSecretManagementGrantPlanner`). Additive only; no marker while the
+  role or the group is missing, so it is retried on the next setup.
 - **Concurrency:** the step takes a per-tenant in-process lock and re-reads each user's edges right before the
   insert (the engine does not reject a second identical `AssignedRole` edge). Two identity replicas starting at the
   same instant can still race; a duplicate edge is harmless (role reads treat the edges as a set) and the marker

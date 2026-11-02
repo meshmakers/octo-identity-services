@@ -356,6 +356,22 @@ public class UserManagementServiceTests
     }
 
     [Fact]
+    public async Task CreateAdminUserAsync_WhenTenantOwnersExists_AssignsNoDirectRole()
+    {
+        // AB#8161: administrators are TenantOwners members; the group carries the roles.
+        var dto = new AdminUserDto { EMail = "admin@test.com", Password = "SecurePass123!" };
+        var group = new RtGroup { RtId = OctoObjectId.GenerateNewId(), GroupName = "TenantOwners" };
+        ArrangeValidSetup(dto);
+        _groupStore.FindByNameAsync("TENANTOWNERS").Returns(group);
+        _groupStore.GetMemberUserIdsAsync(group.RtId).Returns(new List<string>());
+
+        await _sut.CreateAdminUserAsync(dto);
+
+        await _userManager.DidNotReceive().AddToRoleAsync(Arg.Any<RtUser>(), Arg.Any<string>());
+        await _groupStore.Received(1).AddMemberUserAsync(group.RtId, Arg.Any<string>());
+    }
+
+    [Fact]
     public async Task CreateAdminUserAsync_WhenTenantOwnersGroupIsMissing_StillCreatesTheAdministratorWithDirectRoles()
     {
         var dto = new AdminUserDto { EMail = "admin@test.com", Password = "SecurePass123!" };
