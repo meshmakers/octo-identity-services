@@ -403,6 +403,57 @@ public class ApiSecretsControllerTests : IntegrationTestBase
         }
     }
 
+    [Theory]
+    [InlineData("client")]
+    [InlineData("apiResource")]
+    public async Task FullUpdates_ConcurrentWithSecretDeletes_NeverBringADeletedSecretBack(string kind)
+    {
+        // AB#8015: the full PUT of a client / API resource used to apply the DTO to an entity read before and replace it
+        // without an expected version, so a PUT that overlapped a secret delete wrote the deleted secret back.
+        var ct = TestContext.Current.CancellationToken;
+        var target = kind == "client" ? await CreateMachineClientAsync() : await CreateApiResourceAsync();
+        var kept = await CreateSecretAsync(kind, target);
+        var revoked = new List<(string ClearText, string Hash)>();
+        for (var i = 0; i < 6; i++)
+        {
+            revoked.Add(await CreateSecretAsync(kind, target));
+        }
+
+        var deletes = revoked.Select(r => Client.DeleteAsync(DeleteUrl(kind, target, r.Hash), ct)).ToList();
+        var updates = Enumerable.Range(0, 6).Select(i => kind == "client"
+            ? Client.PutAsJsonAsync(TenantApiUrl($"clients/{target}"),
+                new { clientId = target, clientName = $"renamed-{i}" }, ct)
+            : Client.PutAsJsonAsync(TenantApiUrl($"apiResources/{target}"),
+                new { name = target, displayName = $"renamed-{i}", isEnabled = true }, ct)).ToList();
+        var responses = await Task.WhenAll(deletes.Concat(updates));
+
+        (await GetStoredSecretValuesAsync(kind, target)).Should().BeEquivalentTo([kept.Hash],
+            "every deleted secret stays deleted and the untouched one stays");
+        responses.Select(r => r.StatusCode).Should().AllBeEquivalentTo(HttpStatusCode.OK,
+            "a concurrent change is retried on a fresh read, not reported as an error");
+        if (kind == "client")
+        {
+            foreach (var (clearText, _) in revoked)
+            {
+                (await RequestTokenAsync(target, clearText)).StatusCode.Should().Be(HttpStatusCode.Unauthorized);
+            }
+        }
+    }
+
+    [Theory]
+    [InlineData("client")]
+    [InlineData("apiResource")]
+    public async Task FullUpdate_OfAnUnknownOwner_Returns404(string kind)
+    {
+        var ct = TestContext.Current.CancellationToken;
+        var missing = $"missing-{Guid.NewGuid():N}";
+        var response = kind == "client"
+            ? await Client.PutAsJsonAsync(TenantApiUrl($"clients/{missing}"), new { clientId = missing }, ct)
+            : await Client.PutAsJsonAsync(TenantApiUrl($"apiResources/{missing}"), new { name = missing, isEnabled = true }, ct);
+
+        response.StatusCode.Should().Be(HttpStatusCode.NotFound);
+    }
+
     // ---------------------------------------------------------------- no secret in the logs
 
     [Fact]

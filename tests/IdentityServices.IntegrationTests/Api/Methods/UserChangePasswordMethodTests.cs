@@ -257,7 +257,8 @@ public class UserChangePasswordMethodTests : IntegrationTestBase
         var invoker = _enabled.Services.GetRequiredService<ICkMethodHandlerInvoker>();
         var request = Request("507f1f77bcf86cd799439011", "x") with
         {
-            MethodId = "System.Identity/User.Merge-1"
+            // Every declared System.Identity method has a handler since AB#7778; an undeclared id has none.
+            MethodId = "System.Identity/User.NoSuchMethod-1"
         };
 
         var response = await invoker.InvokeAsync(request, ct);

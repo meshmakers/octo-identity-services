@@ -267,6 +267,121 @@ public class ClientMirrorReconciliationTests
         await _childRepo.DidNotReceiveWithAnyArgs().InsertOneRtEntityAsync(default!, default(RtClient)!);
     }
 
+    // ----- immediate sync: tracking row (AB#8054) -------------------------------
+
+    [Fact]
+    public async Task Sync_BumpsTheTrackingRow_WithTheVersionItReadRightBeforeTheWrite()
+    {
+        var parent = Client(("SharedSecret", "h1", null));
+        var mirror = Client(("SharedSecret", "old", null));
+        var row = Row();
+        row.RtVersion = 4;
+        SetupRows(row);
+        SetupParentClients(parent);
+        SetupChildClients(mirror);
+
+        var result = await _sut.SyncMirrorsForClientAsync(ParentTenantId, parent);
+
+        result.MirrorsSynced.Should().Be(1);
+        await _parentRepo.Received(1).ReplaceOneRtEntityByIdAsync(_parentSession, row.RtId,
+            Arg.Is<RtClientMirror>(r => r.SecretHashVersion == 1), 4UL);
+        await _parentRepo.DidNotReceive().ReplaceOneRtEntityByIdAsync(_parentSession, row.RtId,
+            Arg.Any<RtClientMirror>());
+    }
+
+    [Fact]
+    public async Task Sync_AConcurrentBumpOfTheRow_Wins_ForAReplacedMirror()
+    {
+        var parent = Client(("SharedSecret", "h1", null));
+        var mirror = Client(("SharedSecret", "old", null));
+        var row = Row();
+        row.RtVersion = 4;
+        SetupRows(row);
+        SetupParentClients(parent);
+        SetupChildClients(mirror);
+        _parentRepo.ReplaceOneRtEntityByIdAsync(_parentSession, row.RtId, Arg.Any<RtClientMirror>(), 4UL)
+            .ThrowsAsync(new RtVersionConflictException(new RtEntityId($"System.Identity/ClientMirror@{row.RtId}"), 4));
+
+        var result = await _sut.SyncMirrorsForClientAsync(ParentTenantId, parent);
+
+        result.MirrorsSynced.Should().Be(1, "the counter is informational; the mirror write stands");
+        result.MirrorsFailed.Should().Be(0);
+        await _childRepo.DidNotReceiveWithAnyArgs().DeleteOneRtEntityByRtIdAsync<RtClient>(default!, default, default!);
+    }
+
+    [Fact]
+    public async Task Sync_ThatHadToInsertTheMirror_WithdrawsTheInsert_WhenTheRowChangedMeanwhile()
+    {
+        var parent = Client(("SharedSecret", "h1", null));
+        var row = Row();
+        row.RtVersion = 2;
+        SetupRows(row);
+        SetupParentClients(parent);
+        SetupChildClients();
+        _parentRepo.ReplaceOneRtEntityByIdAsync(_parentSession, row.RtId, Arg.Any<RtClientMirror>(), 2UL)
+            .ThrowsAsync(new RtVersionConflictException(new RtEntityId($"System.Identity/ClientMirror@{row.RtId}"), 2));
+
+        var result = await _sut.SyncMirrorsForClientAsync(ParentTenantId, parent);
+
+        result.MirrorsSynced.Should().Be(0);
+        var inserted = _childRepo.ReceivedCalls()
+            .Where(c => c.GetMethodInfo().Name == "InsertOneRtEntityAsync")
+            .SelectMany(c => c.GetArguments().OfType<RtClient>()).Single();
+        await _childRepo.Received(1).DeleteOneRtEntityByRtIdAsync<RtClient>(_childSession, inserted.RtId, DeleteOptions.Erase);
+    }
+
+    [Fact]
+    public async Task Sync_ThatHadToInsertTheMirror_WithdrawsTheInsert_WhenTheRowWasRemovedMeanwhile()
+    {
+        var parent = Client(("SharedSecret", "h1", null));
+        var row = Row();
+        SetupRows(row);
+        SetupParentClients(parent);
+        SetupChildClients();
+        _parentRepo.ReplaceOneRtEntityByIdAsync(_parentSession, row.RtId, Arg.Any<RtClientMirror>(), Arg.Any<ulong>())
+            .ThrowsAsync(EntityNotFoundException.NoDataMatched());
+
+        var result = await _sut.SyncMirrorsForClientAsync(ParentTenantId, parent);
+
+        result.MirrorsSynced.Should().Be(0);
+        await _childRepo.Received(1).DeleteOneRtEntityByRtIdAsync<RtClient>(_childSession, Arg.Any<OctoObjectId>(),
+            DeleteOptions.Erase);
+    }
+
+    [Fact]
+    public async Task Sync_RowGoneOnTheReRead_WritesNothing()
+    {
+        var parent = Client(("SharedSecret", "h1", null));
+        var listing = Substitute.For<IResultSet<RtClientMirror>>();
+        listing.Items.Returns(new[] { Row() }, Array.Empty<RtClientMirror>());
+        _parentRepo.GetRtEntitiesByTypeAsync<RtClientMirror>(_parentSession, Arg.Any<RtEntityQueryOptions>())
+            .Returns(listing);
+        SetupParentClients(parent);
+        SetupChildClients();
+
+        var result = await _sut.SyncMirrorsForClientAsync(ParentTenantId, parent);
+
+        result.Should().Be(new ClientMirrorSyncResult(0, 0));
+        await _childRepo.DidNotReceiveWithAnyArgs().InsertOneRtEntityAsync(default!, default(RtClient)!);
+    }
+
+    [Fact]
+    public async Task RotateMirrorSecret_BumpsTheTrackingRow_WithTheVersionItRead()
+    {
+        var mirror = Client(("SharedSecret", "h1", null));
+        mirror.RequireClientSecret = true;
+        var row = Row();
+        row.RtVersion = 9;
+        SetupRows(row);
+        SetupChildClients(mirror);
+
+        var result = await _sut.RotateMirrorSecretAsync(ParentTenantId, ClientId, ChildTenantId);
+
+        result.Should().NotBeNull();
+        await _parentRepo.Received(1).ReplaceOneRtEntityByIdAsync(_parentSession, row.RtId,
+            Arg.Is<RtClientMirror>(r => r.SecretHashVersion == 1), 9UL);
+    }
+
     // ----- helpers -----------------------------------------------------------
 
     private static RtClient Client(params (string Type, string Value, DateTime? Expiry)[] secrets)

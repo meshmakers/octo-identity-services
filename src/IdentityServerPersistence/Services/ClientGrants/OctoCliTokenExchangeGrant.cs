@@ -126,7 +126,9 @@ internal static class OctoCliTokenExchangeGrant
                 var grants = client.AllowedGrantTypes ?? new AttributeStringValueList();
                 grants.Add(TokenExchangeGrantType);
                 client.AllowedGrantTypes = grants;
-                await tenantRepository.ReplaceOneRtEntityByIdAsync(session, client.RtId, client);
+                // AB#8054: written with the version read in this transaction, so the write advances rtVersion and the
+                // client mirror reconciliation (which writes a mirrored octo-cli with the version it read) sees it.
+                await tenantRepository.ReplaceOneRtEntityByIdAsync(session, client.RtId, client, client.RtVersion);
                 updated++;
             }
 

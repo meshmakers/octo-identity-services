@@ -575,8 +575,8 @@ nested customer sub-tenants are out of scope for v1, see
 
 **Upkeep hooks (#4044 — done):**
 
-- `ClientStore.UpdateAsync` fires `SyncMirrorsForClientAsync` after commit
-  when the post-update client carries `AutoProvisionInChildTenants=true`.
+- `ClientStore.MutateAsync` (the only way to change a stored client since AB#8015) fires `SyncMirrorsForClientAsync`
+  after commit when the post-update client carries `AutoProvisionInChildTenants=true`.
   Propagates secret rotation / scope / lifetime changes onto every mirror
   and bumps each mirror's `SecretHashVersion`.
 - `ClientStore.DeleteAsync` fires `RemoveMirrorsForClientAsync` after commit
@@ -622,13 +622,32 @@ in the child tenants until a restart. A compensation job (decision OD-6: no outb
   `RtVersionConflictException`, at most `MaxMirrorWriteAttempts` = 5) or the versioned `RotateMirrorSecretAsync`. The sync re-reads
   the parent after the child (the passed snapshot is only the fallback), so a delayed sync cannot write an older parent state over
   a newer one. Result: a write after our child read makes our replace fail, a write before it is visible to the comparison while
-  the parent was read after it; neither a removed secret nor a superseded own secret can come back. Writers outside the mirror
-  service that touch a mirror record unversioned (a full client `PUT` in the child tenant, the blueprint seed upsert of a client
-  with the same id, the `octo-cli` grant step) can still be overwritten by the next convergence, which is the intended direction
-  (the parent is the source of truth); they cannot make a stale reconciliation write succeed unless they leave `rtVersion`
-  exactly at the value the job read.
-- Logs: a failing mirror or tenant is a Warning (not an Error every pass); test seams `BeforeMirrorWriteForTests` /
-  `BeforeMirrorInsertForTests` (internal) let the integration tests interleave writers.
+  the parent was read after it; neither a removed secret nor a superseded own secret can come back.
+- 🔴 **All other writers of a client record are versioned too (AB#8054).** Every writer that can touch a mirror writes with the
+  `rtVersion` it read, so its write advances `rtVersion` and a reconciliation pass that read the mirror before it fails its check
+  and re-reads (before, such a write left `rtVersion` unchanged and the stale pass overwrote it unnoticed):
+
+  | Writer | How |
+  |---|---|
+  | REST client `PUT`, overlay URIs, overlay clean-up, `PATCH autoProvisionInChildTenants` (any tenant, mirrors included) | `IOctoClientStore.MutateAsync` (AB#8015; `UpdateAsync` is gone), retry on conflict, `409` after 20 attempts |
+  | `octo-cli` token-exchange grant step (`OctoCliTokenExchangeGrant`) | replace with the version read in the same transaction |
+  | Post-blueprint URI restore / URI family pass (`DefaultConfigurationCreatorService`) | replace with the version read in the same transaction |
+  | Bus consumer `CreateIdentityDataCommandRequestConsumer` (existing client) | replace with the version read in the same transaction; a conflict fails the message, which is retried |
+  | Tracking row: immediate sync, start-up provisioning, mirror secret rotation | the row is re-read right before the write (sync) and written with its version; a concurrent bump wins (the counter is informational). When the sync or the provisioning had to **insert** the mirror, the versioned row write claims the insert, exactly as the reconciliation does: a row that changed or vanished meanwhile (another writer re-created the mirror, `RemoveMirrorAsync`, the delete cleanup) withdraws the inserted client, so no duplicate and no untracked mirror (a removed mirror the sync would otherwise have re-created) stays behind |
+  | **Blueprint seed upsert** (engine `ImportRt`, `ImportStrategy.Upsert`) | **not changed** (decision AB#8054, see below) |
+
+  **Blueprint seed upsert - why no engine change.** The import reads the stored entity (to keep its `Secret` / `TenantOwned`
+  attributes) and replaces it in **one MongoDB transaction**. A write that commits after that read makes the replace fail with a
+  write conflict (MongoDB snapshot isolation; the engine reports the same case as a version mismatch for versioned writes), so the
+  seed can never write back a secret the reconciliation or a secret delete removed in between - it is not a stale writer. What it
+  does not do is advance `rtVersion`, so a reconciliation pass that read the mirror before the seed write overwrites the seed's
+  values with the values derived from the parent: the intended direction (a mirror is derived data), and the start-up provisioning
+  that runs right after the apply in `SetupTenantAsync` converges every system-parent mirror again anyway. Making the bulk upsert
+  version-checked would change every `ImportRt` caller (blueprints, migrations, user imports) for no security gain.
+  `TransactionalReadModifyWrite_ThatReadTheMirrorBeforeTheJobsWrite_CannotWriteTheRemovedSecretBack` pins the guarantee.
+- Logs: a failing mirror or tenant is a Warning (not an Error every pass); test seams `BeforeMirrorWriteForTests` (client id,
+  child tenant id) / `BeforeMirrorInsertForTests` / `BeforeMissingMirrorWriteForTests` (AB#8054: between the child read of a missing
+  mirror and its insert) (internal) let the integration tests interleave writers.
 - **Expiry is copied now.** `CopySecrets` dropped `ExpirationDateTime`, so a parent secret that expired kept
   authenticating in every child tenant; mirrors now carry the expiry (also the carried-over own secret).
 - **Metrics/logs:** meter `Meshmakers.Octo.Identity` (registered in `Program.cs` via
@@ -643,7 +662,9 @@ in the child tenants until a restart. A compensation job (decision OD-6: no outb
   valid in the child after the failed sync, gone after the job, child token refused; added secret; expired parent
   secret; in-sync mirror (rich client) not written; orphaned mirror removed after the grace pass; two parallel passes
   without a duplicate; a mirror secret rotation and an immediate sync interleaved between the job's parent read and its
-  write (red with unversioned writers); a missing mirror whose row is removed before the insert; two parallel passes
+  write (red with unversioned writers); AB#8054: a client `PUT` in the child tenant, the `octo-cli` grant step and an immediate sync
+  that re-creates a missing mirror, each between the job's reads and its write (red with unversioned writers), and a transactional
+  stale write that cannot bring a removed secret back; a missing mirror whose row is removed before the insert; two parallel passes
   re-creating a missing mirror; metric and log canary),
   `tests/IdentityServerPersistence.UnitTests/Services/ClientMirrorReconciliationTests.cs` (comparison incl. token fields,
   marker case, read order + version, conflict, orphan with grace pass and foreign client, unreachable child, withdrawn
@@ -663,7 +684,7 @@ in the child tenants until a restart. A compensation job (decision OD-6: no outb
 
 Backed by `ClientMirrorController` + `ClientAutoProvisionFlagController` in
 `TenantApi/v1/Controllers/`. The `PATCH` flow piggybacks on
-`ClientStore.UpdateAsync` so the post-commit upkeep hook (#4044) fires
+`ClientStore.MutateAsync` (version-checked, AB#8015) so the post-commit upkeep hook (#4044) fires
 automatically — flipping the flag from `false` → `true` does **not**
 backfill existing sub-tenants; the operator must explicitly trigger
 `provisionInExistingTenants` for that (or wait for the next service
@@ -1003,7 +1024,7 @@ stories are merged.**
 
 | Type | Methods (`-1`) | Roles |
 |------|----------------|-------|
-| `User` | `ChangePassword` (instance, `allowSelf`, no role), `ResetPassword`, `SetRoles`, `AddRole`, `RemoveRole`, `Merge`, static `CreateUser` (handler AB#7777); `DisableTwoFactor` since 2.30.0 (AB#7879) | `UserManagement` |
+| `User` | `ChangePassword` (instance, `allowSelf`, no role), `ResetPassword`, `SetRoles`, `AddRole`, `RemoveRole`, `Merge` (handler AB#7778), static `CreateUser` (handler AB#7777); `DisableTwoFactor` since 2.30.0 (AB#7879) | `UserManagement` |
 | `Group` | `AddMember`, `RemoveMember` (`memberKind` enum `GroupMemberKind` = `User`/`Client`, `memberId`), `SetRoles` | `UserManagement` |
 | `Client` | `AddSecret` (result `sensitive`: the generated secret, shown once), `RemoveSecret` (by `secretValue`, REST parity) | `TenantManagement`, `UserManagement` |
 | `DataPermission` | `GrantToRole`, `RevokeFromRole` | `UserManagement` |
@@ -1270,7 +1291,7 @@ like the password methods (production gate of 2026-10-23, B0); off = `METHOD_HAN
 | Public client | accepted | `CLIENT_SECRET_NOT_REQUIRED` (it never authenticates with a secret) |
 | Expiration in the past | accepted | `METHOD_VALIDATION_FAILED` (`field=expirationDate`) |
 | Remove | by the stored value (Base64 in the route); 404 without the value (since AB#7989; before it, the delete removed nothing, see below) | by the stored value **or** the clear text (hashed, fixed-time compare); every match removed with `RemoveAll` (AB#7989); no match = `SECRET_NOT_FOUND` without parameters |
-| Write | `IOctoClientStore.UpdateAsync` (replace without expected version, mirror sync) + `CorsClientsUpdate` | version-checked read-modify-write of the client (`MutateClientAsync`: read, change, replace with the read `rtVersion`, re-read and re-apply on `RtVersionConflictException`, 20 attempts), so concurrent adds keep every secret and an add never brings a removed secret back; then mirror sync and `CorsClientsUpdate`, both best effort (5 s bound for the publish: a committed change is never reported as failed) |
+| Write | `IOctoClientStore.MutateAsync` (version-checked since AB#7989, mirror sync) + `CorsClientsUpdate` | version-checked read-modify-write of the client (`MutateClientAsync`: read, change, replace with the read `rtVersion`, re-read and re-apply on `RtVersionConflictException`, 20 attempts), so concurrent adds keep every secret and an add never brings a removed secret back; then mirror sync and `CorsClientsUpdate`, both best effort (5 s bound for the publish: a committed change is never reported as failed) |
 | Description | free text | `octo:mirror-own-secret` (the marker of a mirror's own secret, AB#5061) = `METHOD_VALIDATION_FAILED` (`field=description`) |
 
 - **Authentication** goes through `OctoApplicationManager` (every unexpired record of the client), so a new secret authenticates at once and a removed one
@@ -1296,8 +1317,12 @@ answer 404 when nothing matched. **Every REST secret write** (POST, PUT, DELETE 
 read-modify-write (`IOctoClientStore.MutateAsync`, `IOctoResourceStore.MutateApiResourceAsync`, helper `GuardedEntityMutation`: read in a transaction,
 change, replace with the `rtVersion` that was read, re-read and re-apply on `RtVersionConflictException`, 20 attempts, then `409` problem). Before,
 `UpdateAsync` replaced the snapshot unversioned, so two overlapping secret writes could bring a deleted secret back or drop an added one
-(review finding on PR #225). The other callers of `ClientStore.UpdateAsync` / `UpdateApiResourceAsync` (full client or resource PUT) still replace
-unversioned; a full client update that read the client before a secret delete can still write the old secret list back. 🔴 **Rule for every record list of a stored entity:** never `Remove(item)` / `Contains(item)` / `IndexOf(item)` with
+(review finding on PR #225). **The full updates followed (AB#8015):** the client `PUT` (and the overlay URI endpoints and the flag `PATCH`) and the API
+resource `PUT` applied their DTO to an entity read before and replaced it without an expected version, so a full update that overlapped a secret
+delete wrote the deleted secret back. They now run as `MutateAsync` / `MutateApiResourceAsync` too (the DTO is applied to the fresh read, again on a
+conflict; `409` problem after 20 attempts); `ClientStore.UpdateAsync` and `ResourceStore.UpdateApiResourceAsync` were removed, so no unversioned
+client or API resource replace is left (`FullUpdates_ConcurrentWithSecretDeletes_NeverBringADeletedSecretBack`: six deletes and six full updates
+at once, red on the old code: deleted secrets came back and the overlapping updates answered 400/500). 🔴 **Rule for every record list of a stored entity:** never `Remove(item)` / `Contains(item)` / `IndexOf(item)` with
 an instance you enumerated; use `RemoveAll` / `FindIndex` with a predicate, and write a changed record back through the indexer (as
 `ReplaceSecret` in the PUT endpoints does; the PUT endpoints were not affected). No 404 of the controller echoes the secret value (the stored hash)
 any more. octo-cli (`DeleteApiSecretClient` / `DeleteApiSecretApiResource`, SDK `IdentityServicesClient`) is unchanged; Studio does not call
@@ -1343,6 +1368,19 @@ in the path. Decided by Gerald 2026-11-01:
   resource with neither hash nor Base64 hash in any line and no deprecation WARN; body without value 400; reader 403; deprecated path variants
   work, WARN twice without value, path masked), `Logging/CredentialLogRedactionTests` (patterns, decorator, later providers, the real
   `nlog.config` JSON record), and the AB#7765/AB#5708 reset tests moved to the body form.
+
+### Credential guard regression tests of the REST API (AB#7781)
+
+`tests/IdentityServices.IntegrationTests/Api/TenantApi/IdentityCredentialGuardRestTests` pins that the tenant API v1 never returns
+or accepts a credential: a user whose `PasswordHash`, `SecurityStamp`, authenticator key and recovery codes hold fixed dummy values
+(written through `UserManager` and the user store, as the service does) is read through `users`, `users/GetPaged`, `users/{name|email|rtId}`,
+`users/directory`, `users/{name}/roles|directRoles`, `groups` (all reads, the user as a member); `PUT users/{name}` and `POST users` with
+`passwordHash` / `securityStamp` / `userTokens` / `password` in the body change no credential; `GET clients` (all reads) carries neither
+the clear text nor the stored hash of a client secret, a secret record in a client body is not bound and `clientSecret` is stored hashed;
+`apiSecrets/client/{id}` and its `lookup` return the stored hash (the handle, by design) but never the clear text. A capturing log provider
+at Debug (the MongoDB command log of every store write included) must carry no dummy value, and must contain the rendered command of the
+seed write (non-vacuous). There is no export endpoint in this service. Path table of all repositories: octo-documentation
+`constructionKits/ckLanguage2/accessModifiers.md` § Regression tests.
 
 ### Blueprint-owned opt-in: `DataPolicy.ProtectBlueprintLocked` (AB#6384; System.Identity 2.24.0)
 
@@ -1992,17 +2030,30 @@ A user is created only by this service: REST `POST {tenant}/v1/users` or the sta
 per method; off = `METHOD_HANDLER_NOT_AVAILABLE`). Both share `IUserCreationService` (`Services/UserCreationService.cs`, scoped):
 `UserManager.CreateAsync` with or without the password (user validators, password policy before the user is stored, normalised name
 and e-mail, security stamp), then the welcome notification (with password: e-mail confirmation; without: the invitation to set a
-password). REST behaviour is unchanged.
+password). Since AB#8064 the service also refuses an e-mail address another user of the tenant already has (see the table).
 
 | Rule | REST | Method |
 |---|---|---|
 | Caller | `IdentityUserAdministrationWritePolicy` | `IdentityMethodCallerRules.IsAdministrator` on the validated principal (scope `octo_api` + `UserManagement`), `METHOD_FORBIDDEN` / `role-required`; the gateway refuses a caller without the declared role first; a forged bus caller is rejected by the host |
 | `xt_` user name | 400 | `USER_NAME_RESERVED` |
 | Duplicate user name | 400 (`DuplicateUserName`) | `USER_ALREADY_EXISTS`, parameter `field=userName` (case-insensitive) |
-| Duplicate e-mail | **allowed** (`RequireUniqueEmail` is off) | `USER_ALREADY_EXISTS`, `field=email` (the declared error covers it; the method is stricter, never looser) |
+| Duplicate e-mail (AB#8064, normalised = case-insensitive; blank e-mail not checked) | `409 application/problem+json`, `code: USER_ALREADY_EXISTS`, `field: email` (`UserCreationProblems`; the address is not echoed or logged) | `USER_ALREADY_EXISTS`, `field=email` |
 | Password policy | 400 with the identity errors | `PASSWORD_POLICY_VIOLATION`, details = rule codes only |
 | Missing / invalid user name or e-mail | 400 | `METHOD_VALIDATION_FAILED` (`field`) |
 | Result | `200` (empty) | rtId of the new user (`UserCreateUserResult.Value`); on the wire `resultJson` is the bare JSON string `"<rtId>"` (AB#8079, host of octo-common-services), so the GraphQL `result` is the rtId itself |
+
+**Duplicate e-mail: only creation is checked (AB#8064).** The check lives in `UserCreationService` (`FindByEmailAsync`, then
+`IdentityResult.Failed(DuplicateEmail)`), so REST and method cannot drift. A taken user name wins (the check runs only when the name is
+free), so creating the same user twice still answers `400 DuplicateUserName` on REST. `IdentityOptions.User.RequireUniqueEmail` stays **off** on
+purpose: the user validator runs on every `UserManager.UpdateAsync` / `SetEmailAsync` / `SetUserNameAsync` too, and in a tenant that
+already holds two users with one address `FindByEmailAsync` returns one of them, so the other could no longer be updated (profile edit,
+role change, security-stamp write, password change). Existing duplicates are not migrated; updates and sign-in of those users are
+unchanged (`FindByEmailAsync` returns the first match, as before). **Not checked**: `PUT users/{userName}` changing the e-mail to one
+another user has (accepted; no CK method changes the e-mail, and `Email` is `MethodOnly`, so the generic paths cannot write it), the
+external-login auto-provisioning (`AuthApiController`), cross-tenant shadow users (`CrossTenantUserProvisioningService`) and the tenant
+admin bootstrap (`UserManagementService`) - they do not use `IUserCreationService`. Check and insert are not atomic (no unique index on
+runtime entities). Tests: `Api/TenantApi/UsersCreateTests` (409 also in other casing, name keeps 400, no e-mail not checked, legacy
+duplicates update and sign in, update to a taken address accepted) and `Api/Methods/UserCreateUserMethodTests`.
 
 Audit: one `Identity.Method` event per call (success, every refusal, `METHOD_HANDLER_FAILED`), `targetRtId` = the new user (success
 only), details `userName`, `withPassword`. The password reaches only the user manager - never a log, audit record or error parameter.
@@ -2017,6 +2068,36 @@ next System.Identity major (AB#8053). Nothing in this service is affected (repos
 invitation without password, duplicate name (also other casing) and e-mail, policy, reserved name, validation, caller theory, service
 token, forged caller, audit, welcome notification, no password in audit or logs), `Methods/IdentityMethodHostTests`,
 `IdentityMethodDeclarationsIntegrationTests` (declared role `UserManagement`, flag still off), `Api/Methods/UserCreateUserWireFormTests` (AB#8079: the envelope through the real host core, in-process transport, carries the bare rtId string, not `{"value": ...}`).
+
+### `User.Merge` and the one merge of a duplicate user (AB#7778)
+
+REST `POST {tenant}/v1/users/{userName}/merge` and the CK method `User.Merge-1` (`UserMergeHandler`, one row in
+`IdentityMethodHost.Handlers`, `CarriesSecret = false`: hosted whatever `EnablePasswordMethods` says) share `IUserMergeService`
+(`Services/UserMergeService.cs`, scoped). The model declares the method since 2.29.0; no CK change.
+
+Steps of the service, in this order: same user = `SameUser` (nothing written); role change guard on the **deletion** of the source user
+(`RoleChangeRequest(caller, source, directRoles, null)`, AB#7914: `last-administrator`); every external login removed from the source and
+added to the target (remove first: `AddLoginAsync` refuses a login another user still owns); `IUserSessionRevocationService.RevokeAsync(source)`
+(security stamp, refresh tokens, authorizations, server-side sessions of the source in this tenant; new for REST too); `DeleteAsync(source)`.
+**Nothing else moves**: roles, group memberships, claims and cross-tenant mappings of the source go away with it, so a merge never grants
+the target a role and the guard only has to judge the deletion.
+
+| Rule | REST | Method |
+|---|---|---|
+| Caller | `IdentityUserAdministrationWritePolicy` | `IdentityAdminMethodHandlerBase` (scope `octo_api` + `UserManagement` on the validated principal, `role-required` before the target is read); forged bus caller rejected by the host |
+| Target | by name, 404 | target rtId, `METHOD_TARGET_NOT_FOUND` |
+| Source | by name, 404 | `SOURCE_USER_NOT_FOUND`; missing `sourceUserName` = `METHOD_VALIDATION_FAILED` |
+| Source data permission (AB#7035) | none | `IRtDataPermissionEvaluator` on the source user: not readable = `SOURCE_USER_NOT_FOUND`, not writable = `METHOD_FORBIDDEN` / `data-permission` (stricter, never looser; open without enforcing policies) |
+| Same user | 400 | `CANNOT_MERGE_INTO_ITSELF` |
+| Guard | 409 problem `last-administrator` + `Identity.RoleChangeRefused` | `METHOD_FORBIDDEN` / `reason` |
+| Login or delete failure | 400 with the identity errors | `MERGE_FAILED`, parameters `step` (`removeLogin` / `addLogin` / `deleteSource`) and `loginProvider`, details = error codes |
+
+Audit: one `Identity.Method` event per call with `sourceUserName`, `sourceRtId`, `transferredLogins`, `revokedTokens` (and `reason` for
+a refusal); the revocation writes its own log line with the acting user. A failing revocation throws (REST 500, method
+`METHOD_HANDLER_FAILED`) before the source is deleted. Tests: `Api/Methods/UserMergeMethodTests` (REST and method on identical fixtures
+compared state by state, audit, every refusal, data permission, last administrator, forged caller, `MERGE_FAILED` mapping),
+`Api/TenantApi/UsersMergeTests` (REST), `RoleChangeGuardTests` (REST guard). Since this handler every declared System.Identity method has
+one; `UserChangePasswordMethodTests.AMethodWithoutHandler_…` uses an undeclared id.
 
 ### Identity-owned User fields are refused on the generic paths (AB#8042)
 
@@ -2055,6 +2136,23 @@ the caller keeps a new sign-in via `RefreshSignInAsync` (change/set-password). A
 CK method handler (AB#5672, AB#7774) - must call the same helper. Tests:
 `UserCredentialChangeServiceTests`, `Api/Manage/PasswordChangeRevokesSessionsTests` (all four paths against the
 real token endpoint), `Persistence/PasswordChangeRevocationTenantIsolationIntegrationTests`.
+
+**Revoke before and after the password write (AB#8018, Security; decision OD-6: ordering, no outbox).** The user store and
+the token/authorization stores are separate writes without a shared transaction (each store opens its own session), so a
+stop between the password write and the helper above left old refresh tokens redeemable. `OctoUserManager` overrides
+`ChangePasswordAsync`, `ResetPasswordAsync` and `AddPasswordAsync` (bodies follow the framework step by step) and calls
+`IUserTokenRevocation.RevokeAllAsync` (`IdentityServerPersistence/Services/UserTokenRevocation.cs`, registered in `Program.cs`,
+optional constructor parameter of the manager) between the in-memory hash update and `UpdateUserAsync`: only after the current
+password / reset token was verified and the policy passed, so a request refused before the write (or a forged one) revokes
+nothing; a store write that fails after the revocation (`ConcurrencyFailure`, a user validator) keeps the old password with the
+sessions ended (accepted, safe direction; review finding on #234). A failing revocation
+throws before the password is stored. `UserCredentialChangeService` uses the same `IUserTokenRevocation` for the second
+revocation. 🔴 A new password write must go through these `UserManager` methods (or call `IUserTokenRevocation` before its own
+write); the manager built by `CrossTenantSecondFactorVerifier` has no revocation and must never write a password. Tests:
+`IdentityServerPersistence.UnitTests/Stores/OctoUserManagerPasswordWriteTests` (order, refusals, failing revocation) and the
+`CrashAfterPasswordWrite_*` tests in `PasswordChangeRevokesSessionsTests` (six paths: REST change/set/admin reset/token reset,
+methods `User.ChangePassword`/`User.ResetPassword`; the post-write helper is replaced by a failing one, the new password works and
+the old refresh token answers `invalid_grant`; red without the pre-write revocation) plus `FailedPasswordChange_RevokesNothing`.
 
 ### Two-factor enabled without a usable second factor is refused (AB#7830)
 

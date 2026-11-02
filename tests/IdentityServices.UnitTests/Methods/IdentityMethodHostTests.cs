@@ -45,6 +45,7 @@ public class IdentityMethodHostTests
         selected.Select(h => h.MethodId).Should().BeEquivalentTo(
             SystemIdentityCkIds.UserSetRolesMethodId, SystemIdentityCkIds.UserAddRoleMethodId,
             SystemIdentityCkIds.UserRemoveRoleMethodId, SystemIdentityCkIds.UserDisableTwoFactorMethodId,
+            SystemIdentityCkIds.UserMergeMethodId,
             SystemIdentityCkIds.GroupAddMemberMethodId,
             SystemIdentityCkIds.GroupRemoveMemberMethodId, SystemIdentityCkIds.GroupSetRolesMethodId,
             SystemIdentityCkIds.DataPermissionGrantToRoleMethodId, SystemIdentityCkIds.DataPermissionRevokeFromRoleMethodId);

@@ -5,7 +5,10 @@ using Meshmakers.Octo.Backend.IdentityServices.TenantApi.v1.Controllers;
 using Meshmakers.Octo.Communication.Contracts.DataTransferObjects;
 using Meshmakers.Octo.Communication.Contracts.DataTransferObjects.ApiErrors;
 using Microsoft.AspNetCore.Mvc;
+using Meshmakers.Octo.ConstructionKit.Contracts;
+using Meshmakers.Octo.Runtime.Contracts;
 using NSubstitute;
+using NSubstitute.ExceptionExtensions;
 using Persistence.IdentityCkModel.Generated.System.Identity.v2;
 using Shared.TestUtilities.Builders;
 using Xunit;
@@ -281,9 +284,11 @@ public class ClientAutoProvisionFlagControllerTests
     private const string ClientId = "ci-deploy";
     private readonly IOctoClientStore _clientStore = Substitute.For<IOctoClientStore>();
     private readonly ClientAutoProvisionFlagController _sut;
+    private readonly List<string> _writes;
 
     public ClientAutoProvisionFlagControllerTests()
     {
+        _writes = ClientStoreMutations.Attach(_clientStore);
         _sut = new ClientAutoProvisionFlagController(_clientStore);
     }
 
@@ -295,11 +300,11 @@ public class ClientAutoProvisionFlagControllerTests
         var result = await _sut.Set(ClientId, new SetAutoProvisionInChildTenantsDto(true));
 
         result.Should().BeOfType<NotFoundObjectResult>();
-        await _clientStore.DidNotReceiveWithAnyArgs().UpdateAsync(default!, default!);
+        _writes.Should().BeEmpty();
     }
 
     [Fact]
-    public async Task Set_FlippingFlag_PersistsViaUpdateAsync()
+    public async Task Set_FlippingFlag_PersistsViaVersionCheckedMutation()
     {
         var client = new RtClientBuilder().WithClientId(ClientId).Build();
         _clientStore.FindRtClientByIdAsync(ClientId).Returns(client);
@@ -307,9 +312,8 @@ public class ClientAutoProvisionFlagControllerTests
         var result = await _sut.Set(ClientId, new SetAutoProvisionInChildTenantsDto(true));
 
         result.Should().BeOfType<NoContentResult>();
-        await _clientStore.Received(1).UpdateAsync(
-            ClientId,
-            Arg.Is<RtClient>(c => c.AutoProvisionInChildTenants == true));
+        _writes.Should().Equal(ClientId);
+        client.AutoProvisionInChildTenants.Should().BeTrue();
     }
 
     [Fact]
@@ -324,9 +328,19 @@ public class ClientAutoProvisionFlagControllerTests
         var result = await _sut.Set(ClientId, new SetAutoProvisionInChildTenantsDto(false));
 
         result.Should().BeOfType<NoContentResult>();
-        await _clientStore.Received(1).UpdateAsync(
-            ClientId,
-            Arg.Is<RtClient>(c => c.AutoProvisionInChildTenants == false));
+        _writes.Should().Equal(ClientId);
+        client.AutoProvisionInChildTenants.Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task Set_RepeatedConcurrentChanges_Returns409()
+    {
+        _clientStore.MutateAsync(ClientId, Arg.Any<Func<RtClient, bool>>())
+            .ThrowsAsync(new RtVersionConflictException(new RtEntityId($"System.Identity/Client@{OctoObjectId.GenerateNewId()}"), 1));
+
+        var result = await _sut.Set(ClientId, new SetAutoProvisionInChildTenantsDto(true));
+
+        result.Should().BeOfType<ObjectResult>().Which.StatusCode.Should().Be(409);
     }
 
 }

@@ -34,7 +34,9 @@ public interface IUserCredentialChangeService
 {
     /// <summary>
     ///     Must be called after the new password was persisted. Throws when the revocation fails, so the
-    ///     caller never reports success while old refresh tokens are still redeemable.
+    ///     caller never reports success while old refresh tokens are still redeemable. This is the second revocation of a
+    ///     password change: <c>OctoUserManager</c> already revoked before the password was stored (AB#8018), so a crash
+    ///     between the password write and this call leaves no old refresh token valid.
     /// </summary>
     /// <param name="user">The user whose password changed.</param>
     /// <param name="path">The path that changed the password.</param>

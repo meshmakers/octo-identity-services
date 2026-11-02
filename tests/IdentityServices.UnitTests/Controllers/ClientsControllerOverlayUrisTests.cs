@@ -34,10 +34,12 @@ public class ClientsControllerOverlayUrisTests
     private readonly IClientImpersonationStore _clientImpersonationStore =
         Substitute.For<IClientImpersonationStore>();
     private readonly ClientsController _sut;
+    private readonly List<string> _writes;
 
     public ClientsControllerOverlayUrisTests()
     {
         _clientStore.TenantId.Returns(TenantId);
+        _writes = ClientStoreMutations.Attach(_clientStore);
         _sut = new ClientsController(_clientStore, _eventHub, _clientRoleStore, _clientImpersonationStore,
             Substitute.For<RoleManager<RtRole>>(Substitute.For<IRoleStore<RtRole>>(), null, null, null, null),
             Substitute.For<IRoleChangeGuard>(), Substitute.For<IRoleChangeRefusals>());
@@ -55,7 +57,7 @@ public class ClientsControllerOverlayUrisTests
         });
 
         result.Should().BeOfType<NotFoundObjectResult>();
-        await _clientStore.DidNotReceiveWithAnyArgs().UpdateAsync(default!, default!);
+        _writes.Should().BeEmpty();
     }
 
     [Fact]
@@ -74,7 +76,7 @@ public class ClientsControllerOverlayUrisTests
         });
 
         result.Should().BeOfType<BadRequestObjectResult>();
-        await _clientStore.DidNotReceiveWithAnyArgs().UpdateAsync(default!, default!);
+        _writes.Should().BeEmpty();
     }
 
     [Fact]
@@ -109,7 +111,7 @@ public class ClientsControllerOverlayUrisTests
             "https://localhost:4200/",
             "https://localhost:5173/");
 
-        await _clientStore.Received(1).UpdateAsync(ClientId, client);
+        _writes.Should().Equal(ClientId);
     }
 
     [Fact]
@@ -173,10 +175,10 @@ public class ClientsControllerOverlayUrisTests
         client.RedirectUris.Should().HaveCount(2);
 
         // The load-bearing part of the idempotency contract: only the first call writes.
-        // The second call MUST short-circuit before UpdateAsync (and the matching CorsClient
+        // The second call MUST short-circuit before the write (and the matching CorsClient
         // cache-bust publish) so the cmdlet's repeated Start-Octo / CI runs don't churn
         // rtChangedDateTime or invalidate the per-tenant CORS cache for nothing.
-        await _clientStore.Received(1).UpdateAsync(ClientId, client);
+        _writes.Should().Equal(ClientId);
     }
 
     [Fact]
@@ -212,7 +214,7 @@ public class ClientsControllerOverlayUrisTests
         var dto = result.Should().BeOfType<OkObjectResult>().Subject.Value
             .Should().BeOfType<ApplyOverlayUrisResultDto>().Subject;
         dto.AllowedCorsOrigins.Added.Should().Be(0);
-        await _clientStore.DidNotReceiveWithAnyArgs().UpdateAsync(default!, default!);
+        _writes.Should().BeEmpty();
         await _eventHub.Received(1).PublishAsync(
             Arg.Is<CorsClientsUpdate>(m => m.TenantId == TenantId));
     }
@@ -233,7 +235,7 @@ public class ClientsControllerOverlayUrisTests
         });
 
         result.Should().BeOfType<BadRequestObjectResult>();
-        await _clientStore.DidNotReceiveWithAnyArgs().UpdateAsync(default!, default!);
+        _writes.Should().BeEmpty();
     }
 
     [Fact]

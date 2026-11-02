@@ -274,7 +274,11 @@ public class UsersController : ControllerBase
     [HttpPost]
     [Authorize(IdentityServiceConstants.IdentityUserAdministrationWritePolicy)]
     [EndpointSummary("Creates a new user.")]
+    [EndpointDescription("Refuses an e-mail address another user of the tenant already has (case-insensitive) with 409 " +
+                         "application/problem+json, code USER_ALREADY_EXISTS, field email - the same rule as the CK method " +
+                         "User.CreateUser-1. Updating a user does not check it.")]
     [ProducesResponseType(StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status409Conflict)]
     public async Task<IActionResult> Post(
         [Required] [FromBody] [Description("The user data transfer object instance")]
         RegisterUserDto userDto,
@@ -300,6 +304,14 @@ public class UsersController : ControllerBase
                 userDto.Password);
             if (!result.Succeeded)
             {
+                // AB#8064: a duplicate e-mail address is a conflict with the same code as the method (USER_ALREADY_EXISTS).
+                // Logged without the address; a duplicate user name keeps its 400 answer.
+                if (result.Errors.Any(e => e.Code == nameof(IdentityErrorDescriber.DuplicateEmail)))
+                {
+                    _logger.LogInformation("Create user refused: another user of the tenant has the same e-mail address");
+                    return UserCreationProblems.DuplicateEmail();
+                }
+
                 LogIdentityError("Create user", result.Errors);
                 return GetBadRequestResultWithErrorDescription("Creation of user failed", result.Errors);
             }
@@ -634,6 +646,11 @@ public class UsersController : ControllerBase
     ///     Merges external logins from a source user into the target user, then deletes the source user.
     ///     This is useful for consolidating duplicate accounts created by external identity providers.
     /// </summary>
+    /// <remarks>
+    ///     Runs <see cref="IUserMergeService" />, the same code as the CK method <c>User.Merge-1</c> (AB#7778): role change
+    ///     guard on the deletion of the source user, logins moved, sessions and refresh tokens of the source user revoked,
+    ///     source user deleted. Roles, groups and claims of the source user are not transferred.
+    /// </remarks>
     [HttpPost("{userName}/merge")]
     [Authorize(IdentityServiceConstants.IdentityUserAdministrationWritePolicy)]
     [EndpointSummary("Merges external logins from source user into target user and deletes source user.")]
@@ -644,7 +661,8 @@ public class UsersController : ControllerBase
         [Required] [Description("The target username (this user will be kept)")]
         string userName,
         [Required] [FromBody] [Description("The merge request containing the source username")]
-        MergeUsersRequestDto mergeRequest)
+        MergeUsersRequestDto mergeRequest,
+        [FromServices] IUserMergeService userMergeService)
     {
         if (!ModelState.IsValid)
         {
@@ -663,62 +681,23 @@ public class UsersController : ControllerBase
             return NotFound(new NotFoundErrorDto($"Source user '{mergeRequest.SourceUserName}' not found."));
         }
 
-        if (targetUser.RtId == sourceUser.RtId)
-        {
-            return BadRequest(new OperationFailedErrorDto("Cannot merge a user into itself."));
-        }
-
-        // AB#7914: the source user is deleted at the end; that must not remove the last user administrator.
-        var mergeRefusal = await CheckRoleChangeAsync(sourceUser, null);
-        if (mergeRefusal != null)
-        {
-            return mergeRefusal;
-        }
-
         try
         {
-            // Get source user's external logins
-            var sourceLogins = await _userManager.GetLoginsAsync(sourceUser);
-
-            // Transfer each login: first remove from source, then add to target.
-            // UserManager.AddLoginAsync internally calls FindByLoginAsync to check
-            // if the login is already associated with any user. If we don't remove
-            // the login from the source user first, AddLoginAsync will fail with
-            // LoginAlreadyAssociated because the source user still owns the login.
-            foreach (var login in sourceLogins)
+            var result = await userMergeService.MergeAsync(targetUser, sourceUser, RoleChangeCaller.FromPrincipal(User),
+                AuditActor.FromPrincipal(User), HttpContext.RequestAborted);
+            return result.Status switch
             {
-                var removeResult = await _userManager.RemoveLoginAsync(
-                    sourceUser, login.LoginProvider, login.ProviderKey);
-                if (!removeResult.Succeeded)
-                {
-                    LogIdentityError("Remove login from source during merge", removeResult.Errors);
-                    return GetBadRequestResultWithErrorDescription(
-                        $"Failed to remove login '{login.LoginProvider}' from source user", removeResult.Errors);
-                }
-
-                var addResult = await _userManager.AddLoginAsync(targetUser, login);
-                if (!addResult.Succeeded)
-                {
-                    LogIdentityError("Add login during merge", addResult.Errors);
-                    return GetBadRequestResultWithErrorDescription(
-                        $"Failed to transfer login '{login.LoginProvider}' to target user", addResult.Errors);
-                }
-            }
-
-            // Delete the source user
-            var deleteResult = await _userManager.DeleteAsync(sourceUser);
-            if (!deleteResult.Succeeded)
-            {
-                LogIdentityError("Delete source user during merge", deleteResult.Errors);
-                return GetBadRequestResultWithErrorDescription(
-                    "Failed to delete source user after merge", deleteResult.Errors);
-            }
-
-            _logger.LogInformation(
-                "Successfully merged user '{SourceUser}' into '{TargetUser}'. Transferred {LoginCount} external login(s)",
-                mergeRequest.SourceUserName, userName, sourceLogins.Count);
-
-            return Ok();
+                UserMergeStatus.Merged => Ok(),
+                UserMergeStatus.SameUser => BadRequest(new OperationFailedErrorDto("Cannot merge a user into itself.")),
+                // AB#7914: the source user is deleted at the end; that must not remove the last user administrator.
+                UserMergeStatus.RoleChangeRefused => await RefuseRoleChangeAsync(sourceUser, RoleChangeCaller.FromPrincipal(User),
+                    result.Refusal!),
+                UserMergeStatus.LoginRemoveFailed => GetBadRequestResultWithErrorDescription(
+                    $"Failed to remove login '{result.LoginProvider}' from source user", result.Errors),
+                UserMergeStatus.LoginAddFailed => GetBadRequestResultWithErrorDescription(
+                    $"Failed to transfer login '{result.LoginProvider}' to target user", result.Errors),
+                _ => GetBadRequestResultWithErrorDescription("Failed to delete source user after merge", result.Errors)
+            };
         }
         catch (Exception e)
         {
@@ -786,6 +765,13 @@ public class UsersController : ControllerBase
             return null;
         }
 
+        return await RefuseRoleChangeAsync(user, caller, decision);
+    }
+
+    /// <summary>Writes the WARN log and the audit event of a refused role change and returns the problem answer (AB#7914).</summary>
+    private async Task<IActionResult> RefuseRoleChangeAsync(RtUser user, RoleChangeCaller caller,
+        RoleChangeDecision decision)
+    {
         var callerText = caller.Subject != null ? $"subject {caller.Subject}" : $"client {caller.ClientId}";
         var message =
             $"Role change refused ({decision.Reason}): caller {callerText}, target user {user.RtId}, roles [{string.Join(",", decision.RoleNames)}], {Request.Method} {Request.Path.Value}";
