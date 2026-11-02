@@ -42,6 +42,7 @@ public interface ITenantDiscoveryService
 public class TenantDiscoveryService(
     ISystemContext systemContext,
     IAllowedTenantsResolver allowedTenantsResolver,
+    ITenantProbeGuard probeGuard,
     ILogger<TenantDiscoveryService> logger) : ITenantDiscoveryService
 {
     public async Task<IReadOnlyList<string>> FindTenantsForUserAsync(string emailOrUsername,
@@ -173,51 +174,50 @@ public class TenantDiscoveryService(
     private async Task<(string TenantId, RtUser User)?> FindUserInTenantAsync(
         OctoTenant tenant, string normalizedInput)
     {
+        // AB#8177: bounded and circuit-broken per tenant, like the mapping probes of AllowedTenantsResolver.
+        var probe = await probeGuard.RunAsync(tenant, "user search",
+            () => FindUserInTenantUnguardedAsync(tenant, normalizedInput));
+        return probe.Succeeded ? probe.Value : null;
+    }
+
+    private async Task<(string TenantId, RtUser User)?> FindUserInTenantUnguardedAsync(
+        OctoTenant tenant, string normalizedInput)
+    {
         var tenantId = tenant.TenantId;
-        try
+        // No existence probe and no CK auto-import per tenant (AB#6308): the entry comes from the registry.
+        var tenantRepository = systemContext.GetRegisteredTenantRepository(tenant);
+        using var session = await tenantRepository.GetSessionAsync();
+        session.StartTransaction();
+
+        // Search by normalized username
+        var byNameOptions = RtEntityQueryOptions.Create()
+            .FieldEquals(nameof(RtUser.NormalizedUserName), normalizedInput);
+        var byNameResult = await tenantRepository.GetRtEntitiesByTypeAsync<RtUser>(session, byNameOptions);
+
+        var user = byNameResult.Items.FirstOrDefault();
+
+        // If not found by username, search by normalized email
+        if (user == null)
         {
-            // No existence probe and no CK auto-import per tenant (AB#6308): the entry comes from the registry.
-            var tenantRepository = systemContext.GetRegisteredTenantRepository(tenant);
-            using var session = await tenantRepository.GetSessionAsync();
-            session.StartTransaction();
-
-            // Search by normalized username
-            var byNameOptions = RtEntityQueryOptions.Create()
-                .FieldEquals(nameof(RtUser.NormalizedUserName), normalizedInput);
-            var byNameResult = await tenantRepository.GetRtEntitiesByTypeAsync<RtUser>(session, byNameOptions);
-
-            var user = byNameResult.Items.FirstOrDefault();
-
-            // If not found by username, search by normalized email
-            if (user == null)
-            {
-                var byEmailOptions = RtEntityQueryOptions.Create()
-                    .FieldEquals(nameof(RtUser.NormalizedEmail), normalizedInput);
-                var byEmailResult = await tenantRepository.GetRtEntitiesByTypeAsync<RtUser>(session, byEmailOptions);
-                user = byEmailResult.Items.FirstOrDefault();
-            }
-
-            await session.CommitTransactionAsync();
-
-            if (user == null)
-            {
-                return null;
-            }
-
-            // Exclude cross-tenant shadow users (xt_ prefix)
-            if (user.UserName != null && user.UserName.StartsWith("xt_", StringComparison.OrdinalIgnoreCase))
-            {
-                return null;
-            }
-
-            return (tenantId, user);
+            var byEmailOptions = RtEntityQueryOptions.Create()
+                .FieldEquals(nameof(RtUser.NormalizedEmail), normalizedInput);
+            var byEmailResult = await tenantRepository.GetRtEntitiesByTypeAsync<RtUser>(session, byEmailOptions);
+            user = byEmailResult.Items.FirstOrDefault();
         }
-        catch (Exception ex)
+
+        await session.CommitTransactionAsync();
+
+        if (user == null)
         {
-            logger.LogWarning(ex,
-                "Failed to search for user in tenant '{TenantId}' during tenant discovery",
-                tenantId);
             return null;
         }
+
+        // Exclude cross-tenant shadow users (xt_ prefix)
+        if (user.UserName != null && user.UserName.StartsWith("xt_", StringComparison.OrdinalIgnoreCase))
+        {
+            return null;
+        }
+
+        return (tenantId, user);
     }
 }

@@ -1,4 +1,5 @@
 using IdentityServerPersistence.Configuration.Options;
+using IdentityServerPersistence.Services;
 using Meshmakers.Octo.Runtime.Contracts.MongoDb;
 using Meshmakers.Octo.Runtime.Contracts.Repositories.Query;
 using Microsoft.AspNetCore.Cors.Infrastructure;
@@ -220,6 +221,8 @@ public class IdentityCorsPolicyProvider : ICorsPolicyProvider
         using var scope = _serviceProvider.CreateScope();
         var systemContext = scope.ServiceProvider.GetRequiredService<ISystemContext>();
 
+        var probeGuard = scope.ServiceProvider.GetRequiredService<ITenantProbeGuard>();
+
         var origins = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
         if (!await systemContext.IsSystemTenantExistingAsync())
@@ -228,7 +231,8 @@ public class IdentityCorsPolicyProvider : ICorsPolicyProvider
         }
 
         // Collect from system tenant
-        await CollectOriginsFromTenantAsync(systemContext, systemContext.TenantId, origins);
+        await CollectOriginsFromTenantAsync(systemContext, probeGuard,
+            new OctoTenant(systemContext.TenantId, systemContext.DatabaseName), origins);
 
         // Collect from every registered tenant (the registry spans all logical parents)
         using var session = await systemContext.GetAdminSessionAsync();
@@ -238,41 +242,39 @@ public class IdentityCorsPolicyProvider : ICorsPolicyProvider
 
         foreach (var tenant in tenants.Items)
         {
-            await CollectOriginsFromTenantAsync(systemContext, tenant.TenantId, origins);
+            await CollectOriginsFromTenantAsync(systemContext, probeGuard, tenant, origins);
         }
 
         return origins;
     }
 
-    private async Task CollectOriginsFromTenantAsync(ISystemContext systemContext, string tenantId, HashSet<string> origins)
+    private async Task CollectOriginsFromTenantAsync(ISystemContext systemContext, ITenantProbeGuard probeGuard,
+        OctoTenant tenant, HashSet<string> origins)
     {
-        try
+        // AB#8177: the rebuild reads the clients of every tenant while the requests wait for it; a tenant whose
+        // database cannot be reached must not stretch it to 10+ s per rebuild (bounded and circuit-broken per tenant).
+        // The registry entry carries the database name, so no per-tenant existence probe is needed here either.
+        var probe = await probeGuard.RunAsync(tenant, "CORS origin collection", async () =>
         {
-            var tenantRepo = await systemContext.TryFindTenantRepositoryAsync(tenantId);
-            if (tenantRepo == null)
-            {
-                return;
-            }
-
-            var session = await tenantRepo.GetSessionAsync();
+            var tenantRepo = systemContext.GetRegisteredTenantRepository(tenant);
+            using var session = await tenantRepo.GetSessionAsync();
             session.StartTransaction();
 
-            var queryOptions = RtEntityQueryOptions.Create();
-            var result = await tenantRepo.GetRtEntitiesByTypeAsync<RtClient>(session, queryOptions);
-
-            foreach (var client in result.Items)
-            {
-                foreach (var entry in client.AllowedCorsOrigins)
-                {
-                    origins.Add(entry.Uri);
-                }
-            }
-
+            var result = await tenantRepo.GetRtEntitiesByTypeAsync<RtClient>(session, RtEntityQueryOptions.Create());
             await session.CommitTransactionAsync();
-        }
-        catch (Exception ex)
+            return result.Items.SelectMany(c => c.AllowedCorsOrigins).Select(e => e.Uri).ToList();
+        });
+
+        if (!probe.Succeeded)
         {
-            _logger.LogWarning(ex, "Failed to collect CORS origins from tenant '{TenantId}'", tenantId);
+            _logger.LogWarning("Skipped the CORS origins of tenant '{TenantId}': its database is unavailable",
+                tenant.TenantId);
+            return;
+        }
+
+        foreach (var uri in probe.Value!)
+        {
+            origins.Add(uri);
         }
     }
 
