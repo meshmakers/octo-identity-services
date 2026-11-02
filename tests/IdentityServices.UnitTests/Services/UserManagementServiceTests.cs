@@ -329,6 +329,7 @@ public class UserManagementServiceTests
         var group = new RtGroup { RtId = OctoObjectId.GenerateNewId(), GroupName = "TenantOwners" };
         ArrangeValidSetup(dto);
         _groupStore.FindByNameAsync("TENANTOWNERS").Returns(group);
+        _groupStore.GetRoleIdsAsync(group.RtId).Returns(new List<string> { "r1" });
         _groupStore.GetMemberUserIdsAsync(group.RtId).Returns(new List<string>());
         RtUser? created = null;
         _userManager.CreateAsync(Arg.Do<RtUser>(u => { u.RtId = OctoObjectId.GenerateNewId(); created = u; }), dto.Password)
@@ -348,6 +349,7 @@ public class UserManagementServiceTests
         var userId = OctoObjectId.GenerateNewId();
         _userManager.CreateAsync(Arg.Do<RtUser>(u => u.RtId = userId), dto.Password).Returns(IdentityResult.Success);
         _groupStore.FindByNameAsync("TENANTOWNERS").Returns(group);
+        _groupStore.GetRoleIdsAsync(group.RtId).Returns(new List<string> { "r1" });
         _groupStore.GetMemberUserIdsAsync(group.RtId).Returns(new List<string> { userId.ToString() });
 
         await _sut.CreateAdminUserAsync(dto);
@@ -364,11 +366,27 @@ public class UserManagementServiceTests
         ArrangeValidSetup(dto);
         _groupStore.FindByNameAsync("TENANTOWNERS").Returns(group);
         _groupStore.GetMemberUserIdsAsync(group.RtId).Returns(new List<string>());
+        _groupStore.GetRoleIdsAsync(group.RtId).Returns(new List<string> { "r1" });
 
         await _sut.CreateAdminUserAsync(dto);
 
         await _userManager.DidNotReceive().AddToRoleAsync(Arg.Any<RtUser>(), Arg.Any<string>());
         await _groupStore.Received(1).AddMemberUserAsync(group.RtId, Arg.Any<string>());
+    }
+
+    [Fact]
+    public async Task CreateAdminUserAsync_WhenTenantOwnersCarriesNoRole_FallsBackToDirectRoles()
+    {
+        var dto = new AdminUserDto { EMail = "admin@test.com", Password = "SecurePass123!" };
+        var group = new RtGroup { RtId = OctoObjectId.GenerateNewId(), GroupName = "TenantOwners" };
+        ArrangeValidSetup(dto);
+        _groupStore.FindByNameAsync("TENANTOWNERS").Returns(group);
+        _groupStore.GetRoleIdsAsync(group.RtId).Returns(new List<string>());
+
+        await _sut.CreateAdminUserAsync(dto);
+
+        await _userManager.Received(13).AddToRoleAsync(Arg.Any<RtUser>(), Arg.Any<string>());
+        await _groupStore.DidNotReceive().AddMemberUserAsync(Arg.Any<OctoObjectId>(), Arg.Any<string>());
     }
 
     [Fact]

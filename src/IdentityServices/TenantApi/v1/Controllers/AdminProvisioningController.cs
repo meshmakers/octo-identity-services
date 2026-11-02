@@ -433,7 +433,7 @@ public class AdminProvisioningController(
         // every role. A tenant without the group, or with a group that carries no role, keeps the role list.
         var tenantOwnersGroup = await FindTenantOwnersGroupAsync(tenantRepository, session);
         var groupCarriesRoles = tenantOwnersGroup != null
-                                && await GroupHasRolesAsync(tenantRepository, session, tenantOwnersGroup);
+                                && await GroupHasAllRolesAsync(tenantRepository, session, tenantOwnersGroup, roleIds);
         var mapping = new RtExternalTenantUserMapping
         {
             RtId = OctoObjectId.GenerateNewId(),
@@ -526,7 +526,7 @@ public class AdminProvisioningController(
         // AB#8161: repair through the TenantOwners group when it carries roles; the role list is the
         // fallback for a tenant without a usable group.
         var repairGroup = !grantsRole ? await FindTenantOwnersGroupAsync(tenantRepository, session) : null;
-        var repairViaGroup = repairGroup != null && await GroupHasRolesAsync(tenantRepository, session, repairGroup);
+        var repairViaGroup = repairGroup != null && await GroupHasAllRolesAsync(tenantRepository, session, repairGroup, targetRoleIds);
         if (!grantsRole && !repairViaGroup)
         {
             mapping.MappedRoleIds = new AttributeStringValueList(targetRoleIds.ToList());
@@ -572,9 +572,12 @@ public class AdminProvisioningController(
                && roleIds.Contains(tenantManagement.RtId.ToString(), StringComparer.OrdinalIgnoreCase);
     }
 
-    /// <summary>True when the group has at least one <c>AssignedRole</c> edge (otherwise it grants nothing).</summary>
-    private static async Task<bool> GroupHasRolesAsync(
-        ITenantRepository tenantRepository, IOctoSession session, RtGroup group)
+    /// <summary>
+    /// True when the group has an <c>AssignedRole</c> edge to every one of <paramref name="roleIds"/>: only then the
+    /// group alone replaces the direct role list of a mapping.
+    /// </summary>
+    private static async Task<bool> GroupHasAllRolesAsync(
+        ITenantRepository tenantRepository, IOctoSession session, RtGroup group, IEnumerable<string> roleIds)
     {
         var edges = await tenantRepository.GetRtAssociationsAsync(
             session,
@@ -582,7 +585,8 @@ public class AdminProvisioningController(
             RtAssociationExtendedQueryOptions.Create(
                 GraphDirections.Outbound,
                 roleId: IdentityAssociationConstants.AssignedRoleId));
-        return edges.Items.Any();
+        var held = edges.Items.Select(e => e.TargetRtId.ToString()).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        return roleIds.All(held.Contains);
     }
 
     /// <summary>The TenantOwners group of the target tenant, or <c>null</c> when the tenant has none.</summary>

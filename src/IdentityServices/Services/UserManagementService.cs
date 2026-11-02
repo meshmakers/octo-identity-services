@@ -79,6 +79,15 @@ public class UserManagementService(
             return false;
         }
 
+        // A group that carries no role would leave the first administrator without any permission.
+        if ((await groupStore.GetRoleIdsAsync(group.RtId)).Count == 0)
+        {
+            logger.LogWarning(
+                "The {Group} group carries no role; the first administrator gets the roles assigned directly",
+                CommonConstants.TenantOwnersGroup);
+            return false;
+        }
+
         var userId = adminUser.RtId.ToString();
         var members = await groupStore.GetMemberUserIdsAsync(group.RtId);
         if (!members.Contains(userId, StringComparer.Ordinal))
