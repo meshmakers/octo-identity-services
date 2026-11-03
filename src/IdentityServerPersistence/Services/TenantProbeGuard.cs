@@ -1,6 +1,7 @@
 using System.Collections.Concurrent;
 using Meshmakers.Octo.Runtime.Contracts.MongoDb;
 using Meshmakers.Octo.Runtime.Contracts.MongoDb.Configuration;
+using Meshmakers.Octo.Services.Infrastructure.Services;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using MongoDB.Driver;
@@ -44,7 +45,10 @@ public readonly record struct TenantProbeResult<T>(bool Succeeded, T? Value);
 ///     which probes of that tenant answer "unavailable" immediately and without I/O. After that exactly one request
 ///     probes again (half-open); a success closes the circuit. The failure is logged once per opening at error level
 ///     with the tenant, its database and the name of the MongoDB user, which is the clear signal the bug asked for.
-///     Callers treat "unavailable" like the failure they already handled: fail closed, do not cache it.
+///     A failure that looks like a missing or rejected database user (authentication error, or the timeout a SCRAM
+///     attempt against a missing user runs into) also asks <see cref="TenantDatabaseUserHealer" /> to re-create the
+///     user in the background, rate-limited per tenant: a running tenant heals without a restart (AB#8177) and the
+///     circuit closes as soon as the user is back. Callers treat "unavailable" like the failure they already handled: fail closed, do not cache it.
 /// </remarks>
 public interface ITenantProbeGuard
 {
@@ -60,8 +64,12 @@ public sealed class TenantProbeGuard(
     IOptions<TenantProbeGuardOptions> options,
     IOptions<OctoSystemConfiguration> systemConfiguration,
     ILogger<TenantProbeGuard> logger,
-    TimeProvider? timeProvider = null) : ITenantProbeGuard
+    TimeProvider? timeProvider = null,
+    ISystemContext? systemContext = null,
+    TenantDatabaseUserHealer? healer = null) : ITenantProbeGuard
 {
+    private readonly TenantDatabaseUserHealer _healer = healer ?? TenantDatabaseUserHealer.Default;
+
     private readonly TimeProvider _time = timeProvider ?? TimeProvider.System;
     private readonly ConcurrentDictionary<string, State> _states = new(StringComparer.OrdinalIgnoreCase);
 
@@ -95,13 +103,52 @@ public sealed class TenantProbeGuard(
             }
 
             var now = _time.GetUtcNow();
-            if (state.Open(now, now + settings.OpenDuration))
+            if (state.Open(generation, now, now + settings.OpenDuration))
             {
                 LogOpened(tenant, operation, settings, ex);
             }
 
+            if (systemContext is not null && MayBeAMissingDatabaseUser(ex))
+            {
+                HealInBackground(systemContext, tenant, state, ex);
+            }
+
             return new TenantProbeResult<T>(false, default);
         }
+    }
+
+    /// <summary>
+    ///     A missing user surfaces as an authentication error (pooled connection: MongoDB error 13) or, on a fresh
+    ///     connection, as the SCRAM attempt that exceeds the probe timeout.
+    /// </summary>
+    private static bool MayBeAMissingDatabaseUser(Exception ex) =>
+        TenantDatabaseUserHealer.IsAuthenticationFailure(ex) || ex is TimeoutException;
+
+    /// <summary>
+    ///     Re-creates the tenant's MongoDB user off the request path (the admin connection can be as slow as the
+    ///     failed probe) and closes the circuit once the user was missing and is back.
+    /// </summary>
+    private void HealInBackground(ISystemContext healingContext, OctoTenant tenant, State state, Exception cause)
+    {
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                var result = await _healer.TryHealAsync(healingContext, tenant.TenantId, logger, cause).ConfigureAwait(false);
+                // Created: the user was missing and is back. AlreadyPresent after an authentication failure: the user
+                // was re-created elsewhere and the healer evicted this process's stale pooled connections.
+                if (result == TenantDatabaseUserEnsureResult.Created ||
+                    (result == TenantDatabaseUserEnsureResult.AlreadyPresent &&
+                     TenantDatabaseUserHealer.IsAuthenticationFailure(cause)))
+                {
+                    state.Reset();
+                }
+            }
+            catch (Exception ex)
+            {
+                logger.LogWarning(ex, "Healing the MongoDB user of tenant '{TenantId}' failed", tenant.TenantId);
+            }
+        });
     }
 
     private void LogOpened(OctoTenant tenant, string operation, TenantProbeGuardOptions settings, Exception ex)
@@ -112,7 +159,7 @@ public sealed class TenantProbeGuard(
             logger.LogError(ex,
                 "Tenant '{TenantId}' is skipped for {OpenSeconds:F0} s: the {Operation} could not authenticate against its " +
                 "database '{DatabaseName}'. The MongoDB user '{DatabaseUser}' does not exist or rejects the configured " +
-                "credentials; the tenant setup retry re-creates the user, or create it with readWrite on '{DatabaseName}'.",
+                "credentials; it is re-created automatically within about a minute (AB#8177), or create it with readWrite on '{DatabaseName}'.",
                 tenant.TenantId, settings.OpenDuration.TotalSeconds, operation, tenant.DatabaseName, user,
                 tenant.DatabaseName);
         }
@@ -194,11 +241,32 @@ public sealed class TenantProbeGuard(
             }
         }
 
-        /// <summary>Opens the circuit; true when it was closed or half-open (worth logging), false for a concurrent duplicate.</summary>
-        public bool Open(DateTimeOffset now, DateTimeOffset until)
+        /// <summary>Closes the circuit unconditionally (the cause was fixed): the next probe runs at once.</summary>
+        public void Reset()
         {
             lock (_gate)
             {
+                _generation++;
+                _openUntil = null;
+                _probing = false;
+            }
+        }
+
+        /// <summary>
+        ///     Opens the circuit; true when it was closed or half-open (worth logging), false for a concurrent duplicate.
+        ///     A failure of a probe that started in an earlier circuit state (<paramref name="generation" /> differs) is
+        ///     stale - the circuit was opened or reset meanwhile - and leaves the current state alone, so a late failure
+        ///     cannot re-open a circuit the healing just closed.
+        /// </summary>
+        public bool Open(long generation, DateTimeOffset now, DateTimeOffset until)
+        {
+            lock (_gate)
+            {
+                if (generation != _generation)
+                {
+                    return false;
+                }
+
                 var report = _openUntil is null || now >= _openUntil;
                 _generation++;
                 _openUntil = until;
