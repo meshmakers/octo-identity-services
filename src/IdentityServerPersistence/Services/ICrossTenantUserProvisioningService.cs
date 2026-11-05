@@ -36,6 +36,17 @@ public interface ICrossTenantUserProvisioningService
     Task<RtUser?> FindCrossTenantUserAsync(CrossTenantAuthResult crossTenantResult);
 
     /// <summary>
+    /// Resolves, without writing anything, the role names a NEW shadow user of <paramref name="crossTenantResult"/>
+    /// would hold in the current tenant: the roles its <c>ExternalTenantUserMapping</c>s grant directly and through
+    /// their groups — the resolution <see cref="IGroupRoleResolver.ResolveEffectiveUserRoleIdsAsync"/> applies at
+    /// token time. Ids of deleted roles are skipped. The token exchange creates a shadow user only when this is not
+    /// empty (AB#8304), so a refused exchange leaves no <c>xt_</c> user behind. Callers check
+    /// <see cref="FindCrossTenantUserAsync"/> first: an existing shadow user may hold direct roles and group
+    /// memberships this method does not see.
+    /// </summary>
+    Task<IReadOnlyList<string>> ResolveRolesOfNewCrossTenantUserAsync(CrossTenantAuthResult crossTenantResult);
+
+    /// <summary>
     /// True when an admin created an ExternalTenantUserMapping in the current tenant for the source
     /// user or for any identity its xt_ chain unwinds to (explicit provisioning, AB#5015/AB#5708).
     /// </summary>

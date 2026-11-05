@@ -23,7 +23,8 @@ namespace Meshmakers.Octo.Backend.IdentityServices.OpenIddict;
 ///     <para>
 ///         <b>The security linchpin is unchanged:</b> the result carries the <b>B-shadow user</b>
 ///         (<c>xt_{A}_{user}</c>, found/created via
-///         <see cref="ICrossTenantUserProvisioningService.FindOrCreateCrossTenantUserAsync" />),
+///         <see cref="ICrossTenantUserProvisioningService.FindOrCreateCrossTenantUserAsync" />; a new one is
+///         created only when B's mappings grant it a role, AB#8304),
 ///         never the A user with a swapped <c>tenant_id</c>. The claims for the issued token are
 ///         built for THIS subject against the B tenant repository, so <c>tenant_id=B</c> and
 ///         B-resolved roles are stamped automatically — A's roles never leak into B.
@@ -207,10 +208,20 @@ public class TenantExchangeProcessor(
                 "sign in again with the second factor and use that token");
         }
 
-        // (d) Find or create the B-shadow user (roles synced from RtExternalTenantUserMapping in B).
-        //     No mapping is stored here (AB#7088): the exchange only needs the shadow user to read its roles. A
-        //     role-less mapping stored for a refused user used to make ProvisionCurrentUser report "already
-        //     provisioned" while the user stayed denied.
+        // (d) Decide before creating (AB#8304). An existing B-shadow user is used as it is. For a caller without one,
+        //     the roles its ExternalTenantUserMappings in B would grant are resolved first, without writing; no role
+        //     means the exchange is refused and B is left untouched — no xt_ user, no mapping, no association. A
+        //     refused tenant switch used to leave a role-less xt_ user behind in every tenant it reached.
+        var existingShadowUser = await crossTenantUserProvisioningService.FindCrossTenantUserAsync(crossTenantResult);
+        if (existingShadowUser == null &&
+            (await crossTenantUserProvisioningService.ResolveRolesOfNewCrossTenantUserAsync(crossTenantResult)).Count == 0)
+        {
+            return await RefuseNotProvisionedAsync(sourceUserId, sourceTenantId, targetTenantId);
+        }
+
+        // (d2) Find or create the B-shadow user; an existing one gets its profile synced as before. No mapping is
+        //      stored here (AB#7088): a role-less mapping stored for a refused user used to make
+        //      ProvisionCurrentUser report "already provisioned" while the user stayed denied.
         var shadowUser = await crossTenantUserProvisioningService.FindOrCreateCrossTenantUserAsync(
             crossTenantResult, targetTenantId, storeMappingIfMissing: false);
         if (shadowUser == null)
@@ -224,17 +235,11 @@ public class TenantExchangeProcessor(
         }
 
         // (e) Ancestry gives no roles. The same store that stamps the token's role claims decides: a
-        //     shadow user without a single effective role in B is not provisioned there.
+        //     shadow user without a single effective role in B is not provisioned there (an existing,
+        //     role-less shadow user from before AB#8304 is refused here and left as it is).
         if ((await userManager.GetRolesAsync(shadowUser)).Count == 0)
         {
-            logger.LogWarning(
-                "Token exchange denied: user '{SourceUserId}' from tenant '{SourceTenantId}' holds no role in target tenant '{TargetTenantId}' (not provisioned)",
-                sourceUserId, sourceTenantId, targetTenantId);
-            await RaiseFailureAsync(sourceUserId, sourceTenantId, targetTenantId,
-                "not provisioned in target tenant (no role)");
-            return ExchangeOutcome.Failed(Errors.AccessDenied,
-                $"{NotProvisionedMarker}: the user holds no role in tenant '{targetTenantId}'; " +
-                "an administrator of that tenant must provision the user there (ProvisionCurrentUser -ttid)");
+            return await RefuseNotProvisionedAsync(sourceUserId, sourceTenantId, targetTenantId);
         }
 
         logger.LogInformation(
@@ -307,6 +312,19 @@ public class TenantExchangeProcessor(
         }
 
         return authorizedWithoutMapping;
+    }
+
+    private async Task<ExchangeOutcome> RefuseNotProvisionedAsync(
+        string sourceUserId, string sourceTenantId, string targetTenantId)
+    {
+        logger.LogWarning(
+            "Token exchange denied: user '{SourceUserId}' from tenant '{SourceTenantId}' holds no role in target tenant '{TargetTenantId}' (not provisioned)",
+            sourceUserId, sourceTenantId, targetTenantId);
+        await RaiseFailureAsync(sourceUserId, sourceTenantId, targetTenantId,
+            "not provisioned in target tenant (no role)");
+        return ExchangeOutcome.Failed(Errors.AccessDenied,
+            $"{NotProvisionedMarker}: the user holds no role in tenant '{targetTenantId}'; " +
+            "an administrator of that tenant must provision the user there (ProvisionCurrentUser -ttid)");
     }
 
     private Task RaiseFailureAsync(string sourceUserId, string sourceTenantId, string targetTenantId,

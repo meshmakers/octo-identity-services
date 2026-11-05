@@ -17,6 +17,12 @@ public class CrossTenantUserProvisioningService(
     ILogger<CrossTenantUserProvisioningService> logger)
     : ICrossTenantUserProvisioningService
 {
+    // The same resolution OctoUserStore.GetRolesAsync applies at token time (mapping roles and the roles of
+    // the mappings' groups), bound to this service's tenant. Built here rather than injected so the service
+    // keeps its constructor; the resolver itself only reads.
+    private readonly GroupRoleResolver _groupRoleResolver = new(
+        new GroupStore(multiTenancyResolverService), externalTenantUserMappingStore, shadowUserChainResolver);
+
     /// <inheritdoc />
     public async Task<RtUser?> FindCrossTenantUserAsync(CrossTenantAuthResult crossTenantResult)
     {
@@ -77,6 +83,45 @@ public class CrossTenantUserProvisioningService(
         }
 
         return equivalentUser;
+    }
+
+    /// <inheritdoc />
+    public async Task<IReadOnlyList<string>> ResolveRolesOfNewCrossTenantUserAsync(CrossTenantAuthResult crossTenantResult)
+    {
+        var crossTenantUserName = CrossTenantShadowUserName.Build(
+            crossTenantResult.SourceTenantId, crossTenantResult.SourceUserName);
+
+        // A user that does not exist yet has no direct role and is no group member, so only the mappings of its
+        // name chain (their MappedRoleIds and the roles of the groups they belong to) can grant anything. The
+        // fresh id matches no group member; nothing is written.
+        var roleIds = await _groupRoleResolver.ResolveEffectiveUserRoleIdsAsync(
+            OctoObjectId.GenerateNewId().ToString(), crossTenantUserName);
+        if (roleIds.Count == 0)
+        {
+            return [];
+        }
+
+        // Like GetRolesAsync: an id of a deleted role (MappedRoleIds is a free string list) grants nothing.
+        var tenantRepository = multiTenancyResolverService.GetTenantRepository();
+        using var session = await tenantRepository.GetSessionAsync();
+        session.StartTransaction();
+        var roleNames = new List<string>();
+        foreach (var roleId in roleIds)
+        {
+            if (!OctoObjectId.TryParse(roleId, out var roleRtId))
+            {
+                continue;
+            }
+
+            var role = await tenantRepository.GetRtEntityByRtIdAsync<RtRole>(session, roleRtId);
+            if (!string.IsNullOrWhiteSpace(role?.Name))
+            {
+                roleNames.Add(role.Name);
+            }
+        }
+
+        await session.CommitTransactionAsync();
+        return roleNames;
     }
 
     /// <inheritdoc />
