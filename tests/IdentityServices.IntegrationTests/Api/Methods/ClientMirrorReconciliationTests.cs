@@ -25,6 +25,9 @@ using Microsoft.AspNetCore.TestHost;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
+using MongoDB.Bson;
+using Meshmakers.Octo.Runtime.Contracts.MongoDb.Configuration;
 using Persistence.IdentityCkModel.Generated.System.Identity.v3;
 using Shared.TestUtilities.Builders;
 using Xunit;
@@ -319,6 +322,50 @@ public class ClientMirrorReconciliationTests : IntegrationTestBase, IDisposable
         (await RequestTokenAsync(child, client.ClientId, secret, ct)).Should().Be(HttpStatusCode.Unauthorized);
     }
 
+    /// <summary>
+    ///     AB#8281 — a token request with a wrong secret must be answered 401, never 500, also while the MongoDB user of
+    ///     the child tenant's database is missing and being re-created (AB#8177 healing). While the database cannot be
+    ///     read the defined answer is 503 temporarily_unavailable (the secret cannot be checked); once the healer has
+    ///     re-created the user and dropped the stale clients, the same request is 401 and the right secret works again.
+    /// </summary>
+    [Fact]
+    public async Task WrongSecret_WhileTheChildDatabaseUserIsHealed_IsNever500_AndEndsAs401()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        var client = await CreateFlaggedClientAsync();
+        var secret = (await AddAsync(client, ct)).Value!.Value!;
+        var child = await CreateChildTenantAsync();
+        (await RequestTokenAsync(child, client.ClientId, secret, ct)).Should().Be(HttpStatusCode.OK);
+
+        // The user vanishes under the running tenant; connections already open stay authenticated, so drop the
+        // token host's cached clients as a restart would: the next request has to authenticate again.
+        await DropTenantDatabaseUserAsync(child, ct);
+        await _enabled.Services.GetRequiredService<ISystemContext>()
+            .InvalidateTenantRepositoryClientsAsync(child, child, ct);
+
+        var answers = new List<HttpStatusCode>();
+        var deadline = DateTimeOffset.UtcNow + TimeSpan.FromMinutes(2);
+        while (DateTimeOffset.UtcNow < deadline)
+        {
+            var status = await RequestTokenAsync(child, client.ClientId, "not-the-secret", ct);
+            answers.Add(status);
+            if (status == HttpStatusCode.Unauthorized)
+            {
+                break;
+            }
+
+            await Task.Delay(TimeSpan.FromMilliseconds(500), ct);
+        }
+
+        answers.Should().OnlyContain(s => s == HttpStatusCode.Unauthorized || s == HttpStatusCode.ServiceUnavailable,
+            "a wrong secret is 401, a tenant database that cannot be read yet is 503 - never an unhandled 500");
+        answers.Should().Contain(HttpStatusCode.ServiceUnavailable,
+            "the first request after the user vanished runs into the authentication failure that starts the healing");
+        answers[^1].Should().Be(HttpStatusCode.Unauthorized, "the healer re-created the user");
+        (await RequestTokenAsync(child, client.ClientId, secret, ct)).Should().Be(HttpStatusCode.OK,
+            "the right secret works again after the healing");
+    }
+
     [Fact]
     public async Task MissingMirror_TwoParallelPasses_RecreateExactlyOneMirror()
     {
@@ -542,6 +589,16 @@ public class ClientMirrorReconciliationTests : IntegrationTestBase, IDisposable
         return await scope.ServiceProvider.GetRequiredService<IClientMirrorReconciliationJob>().RunOnceAsync(ct);
     }
 
+    /// <summary>Drops the MongoDB user of a tenant database directly on the server (AB#8177 failure mode).</summary>
+    private async Task DropTenantDatabaseUserAsync(string databaseName, CancellationToken ct)
+    {
+        var configuration = _enabled.Services.GetRequiredService<IOptions<OctoSystemConfiguration>>().Value;
+        var user = string.Format(configuration.DatabaseUser, databaseName.ToLowerInvariant());
+        using var admin = new MongoDB.Driver.MongoClient(Factory.MongoConnectionString);
+        await admin.GetDatabase(configuration.AuthenticationDatabaseName)
+            .RunCommandAsync<BsonDocument>(new BsonDocument("dropUser", user), cancellationToken: ct);
+    }
+
     private async Task<RtClient> CreateFlaggedClientAsync(Action<RtClientBuilder>? configure = null)
     {
         using var scope = _enabled.Services.CreateScope();
@@ -657,6 +714,17 @@ public class ClientMirrorReconciliationTests : IntegrationTestBase, IDisposable
                 ["scope"] = ApiScope,
                 ["acr_values"] = $"tenant:{tenantId}"
             }), ct);
+        if ((int)response.StatusCode >= 500)
+        {
+            // AB#8281: a 5xx here is never the answer under test; keep the server's reason in the test output.
+            var body = await response.Content.ReadAsStringAsync(ct);
+            Console.Error.WriteLine(
+                $"[ClientMirrorReconciliationTests] /connect/token for tenant '{tenantId}' answered " +
+                $"{(int)response.StatusCode}: {body[..Math.Min(body.Length, 4000)]}");
+            TestContext.Current.TestOutputHelper?.WriteLine(
+                $"/connect/token for tenant '{tenantId}' answered {(int)response.StatusCode}: {body[..Math.Min(body.Length, 4000)]}");
+        }
+
         return response.StatusCode;
     }
 
