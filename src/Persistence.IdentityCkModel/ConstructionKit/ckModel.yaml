@@ -1,4 +1,16 @@
 "$schema": "https://schemas.meshmakers.cloud/construction-kit-meta.schema.json"
+# 3.1.0 (AB#8095, Feature AB#5981) adds the role SecretManagement to the authorization of Client.AddSecret-1 and
+# Client.RemoveSecret-1 (now [ TenantManagement, UserManagement, SecretManagement ]). Before, a caller holding only
+# SecretManagement was refused by the method gateway (roles are any-of) although the REST path admits it (AB#5861,
+# IdentitySecretAdministrationPolicy). A role added is a method authorization widening: row M12 of docs/ck-semver-rules.md in
+# octo-construction-kit-engine, Minor + compatibility.acknowledge (AB#6585). The effective rule does not loosen: under
+# SecretManagementRoleEnforcement=Enforce the identity handlers still refuse TenantManagement/UserManagement-only callers.
+# NEXT MAJOR: remove TenantManagement and UserManagement from both role lists (a role removal is a Major by row M12) with the
+# next System.Identity major that happens for another reason - no own major for it (Odin, 2026-11-05).
+# The acknowledgements below are valid for the one release that publishes 3.1.0 (OCTO-CK204 afterwards); remove them in the
+# next release of this model. No type, attribute, record, id or default changes; no data migration; ranges [3.0.0,4.0) stay
+# satisfied. Service-managed: ships with the identity release, no catalog import, no FixAll (AB#7998).
+#
 # 3.0.1 (AB#8157) adds the migration entries from every 2.x minor (2.9.0 - 2.30.0) to 3.0.1: 3.0.0 shipped without them and the engine
 # refused every tenant upgrade across the major ("No migration path found", CkMigrationMajorVersionGuard). The model itself is unchanged
 # (patch: migration metadata only). The migrations are empty - no data changes.
@@ -113,7 +125,13 @@
 # concept AB#5528 in octo-construction-kit-engine). String -> Secret is Minor
 # (CkSemVerClassifier): stored clear-text values stay readable as legacy values
 # until the encrypt sweep has run. Secret requires System >= 2.5 (decision 12).
-modelId: System.Identity-3.0.1
+modelId: System.Identity-3.1.0
 ckLanguage: 2
 dependencies:
   - System-[2.5,3.0)
+compatibility:
+  acknowledge:
+    - change: "TypeMethod:Client-1/AddSecret-1#Modified:roles"
+      reason: "AB#8095: SecretManagement-only holders may now call AddSecret-1 (REST parity, AB#5861); under Enforce the handler still refuses TenantManagement/UserManagement-only callers"
+    - change: "TypeMethod:Client-1/RemoveSecret-1#Modified:roles"
+      reason: "AB#8095: SecretManagement-only holders may now call RemoveSecret-1 (REST parity, AB#5861); under Enforce the handler still refuses TenantManagement/UserManagement-only callers"

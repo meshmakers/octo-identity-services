@@ -34,8 +34,8 @@ internal static class ClientSecretMethodErrors
 ///         <b>Caller.</b> REST parity (AB#5861): <c>IdentitySecretAdministrationPolicy</c> = scope <c>octo_api</c> and tenant
 ///         role <c>SecretManagement</c>, staged by <c>SecretManagementRoleEnforcement</c> (in <c>Warn</c>, the default,
 ///         <c>TenantManagement</c> or <c>UserManagement</c> still pass and are logged). The gateway checks the declared roles
-///         (still <c>TenantManagement</c>, <c>UserManagement</c> in the CK model — changing them is a CK model change and
-///         follows with the next System.Identity bump); the handler checks scope and role again on the principal the host
+///         (System.Identity 3.1.0, AB#8095: <c>TenantManagement</c>, <c>UserManagement</c>, <c>SecretManagement</c>; the first
+///         two leave the declaration with the next major); the handler checks scope and role again on the principal the host
 ///         validated from the forwarded token, before the target is looked up, so a forged bus message or an unauthorized
 ///         caller gets <c>METHOD_FORBIDDEN</c> whether the target exists or not.
 ///     </para>
@@ -90,6 +90,24 @@ internal abstract class ClientSecretMethodHandlerBase(IServiceProvider services)
         return decision != IdentityApiRoleDecision.Denied;
     }
 
+    /// <summary>Parameter of a caller refusal: the tenant role to ask for (AB#8095).</summary>
+    internal const string RequiredRoleParameter = "requiredRole";
+
+    /// <summary>
+    ///     <c>METHOD_FORBIDDEN</c> for a refused caller (<c>reason</c> = <c>role-required</c>). It names the role the caller
+    ///     must ask for, <c>SecretManagement</c> (AB#8095, like the REST 403 message of AB#5861), and nothing about the target,
+    ///     so an existing and a missing target are refused identically.
+    /// </summary>
+    internal static CkMethodFailure CallerForbidden()
+    {
+        var forbidden = CkMethodOutcome.Forbidden("role-required").Failure!;
+        var parameters = new Dictionary<string, string>(forbidden.Parameters, StringComparer.Ordinal)
+        {
+            [RequiredRoleParameter] = CommonConstants.SecretManagementRole
+        };
+        return new CkMethodFailure(forbidden.Code, parameters, forbidden.Details);
+    }
+
     /// <summary>
     ///     Checks the caller, binds the tenant and loads the target client. Returns the failure to answer, or the client.
     /// </summary>
@@ -98,7 +116,7 @@ internal abstract class ClientSecretMethodHandlerBase(IServiceProvider services)
     {
         if (!IsClientAdministrator(principal, tenantId))
         {
-            return (CkMethodOutcome.Forbidden("role-required").Failure, null);
+            return (CallerForbidden(), null);
         }
 
         // A target that is not an object id cannot exist (the repository would throw on it).
