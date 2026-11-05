@@ -178,7 +178,7 @@ test("snapshot counts users, xt_ users and mappings and the newest change per te
     const snap = JSON.parse(lines[0].slice(5));
     assert.deepEqual(Object.keys(snap), ["missing", "octosystem", "tenanta", "tenantb"]);
     assert.equal(snap.missing, "no-database");
-    assert.deepEqual(snap.tenanta, { users: 5, xtUsers: 1, mappings: 2, newestUser: "2026-11-04", newestMapping: "2026-11-02" });
+    assert.deepEqual(snap.tenanta, { users: 5, xtUsers: 1, mappings: 2, newestUser: "2026-11-04T00:00:00.000Z", newestMapping: "2026-11-02T00:00:00.000Z" });
     assert.deepEqual(snap.tenantb, { users: 1, xtUsers: 0, mappings: 0, newestUser: "", newestMapping: "" });
 });
 

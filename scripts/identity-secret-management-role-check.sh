@@ -157,9 +157,21 @@ TENANTS_JSON="$(jq -cn '$ARGS.positional' --args ${TENANTS[@]+"${TENANTS[@]}"})"
 PARAMS_JS="const PARAMS = $(jq -cn --argjson tenants "$TENANTS_JSON" --argjson withEmail "$WITH_EMAIL" --argjson idsOnly "$IDS_ONLY" \
     '{tenants: $tenants, withEmail: $withEmail, idsOnly: $idsOnly}');"
 # Opens the connection with the password from stdin (first line). Not part of the guarded files: it reads stdin only.
-PRELUDE_JS="const conn = connect(\"mongodb://\" + encodeURIComponent($(jq -cn --arg u "$MONGO_USER" '$u')) + \":\" +
-    encodeURIComponent(require(\"fs\").readFileSync(0, \"utf8\").split(\"\\n\")[0]) +
-    \"@localhost:27017/admin?authSource=admin&readPreference=secondaryPreferred\");"
+# The pod's own mongod is only the seed: hello() names the replica set and its members, and the inventory connects to
+# the replica set, so readPreference=secondaryPreferred is honoured (a direct connection would read whatever member the
+# pod runs) and a member lagging more than maxStalenessSeconds is never read. A standalone server is used directly.
+read -r -d '' PRELUDE_JS <<'JS' || true
+const mongoAuth = "mongodb://" + encodeURIComponent(__MONGO_USER__) + ":" +
+    encodeURIComponent(require("fs").readFileSync(0, "utf8").split("\n")[0]) + "@";
+const seedConn = connect(mongoAuth + "localhost:27017/admin?authSource=admin&directConnection=true&readPreference=secondaryPreferred");
+const seedHello = seedConn.hello();
+const conn = seedHello.setName
+    ? connect(mongoAuth + seedHello.hosts.join(",") + "/admin?authSource=admin&replicaSet=" + encodeURIComponent(seedHello.setName) +
+        "&readPreference=secondaryPreferred&maxStalenessSeconds=90")
+    : seedConn;
+print("CONN " + (seedHello.setName ? "replicaSet=" + seedHello.setName + " members=" + seedHello.hosts.length : "standalone"));
+JS
+PRELUDE_JS="${PRELUDE_JS//__MONGO_USER__/$(jq -cn --arg u "$MONGO_USER" '$u')}"
 
 # run_js <name> <js-file>: runs prelude + params + file in mongosh inside the pod; stdout -> $WORK/<name>.out.
 run_js() {
@@ -176,6 +188,7 @@ $(cat "$file")" >"$WORK/$name.out" 2>"$WORK/$name.err"; then
 
 info "Reading MongoDB in $CONTEXT ($NAMESPACE/$POD), read-only ..."
 run_js snap_before "$SNAPSHOT_JS" || die "snapshot before the inventory failed"
+info "# connection: $(sed -n 's/^CONN //p' "$WORK/snap_before.out" | head -1), readPreference=secondaryPreferred"
 run_js inventory "$INVENTORY_JS" || die "inventory failed"
 run_js snap_after "$SNAPSHOT_JS" || die "snapshot after the inventory failed"
 MONGO_PW=""

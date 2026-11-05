@@ -18,7 +18,7 @@ const snapDbNames = ["octosystem"].concat(
 const snapExisting = new Set(conn.getMongo().getDBNames());
 const snapNewest = coll => {
     const newest = coll.find({}, { rtChangedDateTime: 1 }).sort({ rtChangedDateTime: -1 }).limit(1).toArray();
-    return newest.length && newest[0].rtChangedDateTime != null ? String(newest[0].rtChangedDateTime) : "";
+    return newest.length && newest[0].rtChangedDateTime != null ? new Date(newest[0].rtChangedDateTime).toISOString() : "";
 };
 const snapshot = {};
 for (const name of snapDbNames) {

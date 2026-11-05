@@ -141,9 +141,9 @@ case "$ERR" in *"dbs=2 users=8 xt_users=1 mappings=2"*) ok "clean run prints sna
 if [ "$(grep -c ' exec ' <<<"$LOG")" -eq 3 ] && grep -q 'exec -i octo-mongodb-0 -c mongod' <<<"$LOG"; then
     ok "three mongosh runs (snapshot, inventory, snapshot) in pod octo-mongodb-0"
 else fail "unexpected kubectl calls: $LOG"; fi
-if grep -q 'readPreference=secondaryPreferred' <<<"$LOG" && ! grep -q 'PASSWORD-IN-ARGV' <<<"$LOG" \
+if grep -q 'readPreference=secondaryPreferred&maxStalenessSeconds=90' <<<"$LOG" && grep -q 'replicaSet=' <<<"$LOG" && ! grep -q 'PASSWORD-IN-ARGV' <<<"$LOG" \
     && ! grep -q 'fake-pw-0815' "$TMP/out" "$TMP/err"; then
-    ok "password only on stdin (not in argv or output); secondaryPreferred"
+    ok "password only on stdin (not in argv or output); replica-set connection with secondaryPreferred"
 else fail "password handling: $LOG"; fi
 
 run_fake findings
