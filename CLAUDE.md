@@ -2597,3 +2597,12 @@ longer an unhandled 500: `TokenEndpointDatabaseFailureMiddleware` (before `UseOi
 only) answers `503 temporarily_unavailable` with `error_description` naming the tenant and the cause, and octo-sdk maps it
 to `TenantTokenDenialCause.TenantUnavailable`, so octo-cli shows the reason instead of "could not be reached". Tests:
 `TenantProbeGuardTests` (healing), `TokenEndpointDatabaseFailureMiddlewareTests`.
+
+**A wrong secret during the healing is 401 or 503, never 500 (AB#8281).**
+`ClientMirrorReconciliationTests.WrongSecret_WhileTheChildDatabaseUserIsHealed_IsNever500_AndEndsAs401` drops the user of a
+child tenant's database, drops the token host's cached clients and asks for a token with a wrong secret until it is 401:
+`503 temporarily_unavailable` while the database cannot be read, then 401, then the right secret works again. The 500s of
+identity build 65204 (r3.5.61) were not this path: the integration test process ran out of memory because no MongoDB
+repository client was ever released (every test host left its clusters, monitor threads and sockets behind; fixed in
+octo-construction-kit-engine-mongodb, see its CLAUDE.md "Repository clients are released, not only dropped"). A 5xx answer
+in that class prints the response body to the test output.
