@@ -238,6 +238,10 @@ code runs), in traces (`url.path`, `url.query`) and in ingress/proxy access logs
   `clientSecret` and the value segment of `…/apiSecrets/{client|apiResource}/{id}/{value}` with `***`, so a
   request of an outdated client does not write the credential either. The request DTOs override `ToString()`, so
   the ASP.NET Core TRACE log of the action arguments carries no password.
+- Since AB#8324 the same decorator masks token values at every level: JWT- and Data-Protection-shaped values in any
+  string value or formatted message, and arguments named like a token (`Token`, `ReferenceId`, `AccessToken`, …;
+  `Payload` in OpenIddict categories). OpenIddict's Trace event 6013 ("A new … JSON Web Token was successfully
+  created") stays in the log with `***` instead of the token. Details: `docs/configuration.md` § Token values in logs.
 
 ### External Provider Flow (OAuth/OIDC)
 

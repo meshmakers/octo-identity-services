@@ -2015,6 +2015,20 @@ properties: a credential-bearing DTO passed as a message-template argument (`{Dt
 reflected by the JSON layout. Never do that unless an NLog object transformation in
 `LogSecretRedaction` covers the type; log selected non-secret members instead.
 
+**Token values (AB#8324, Security).** OpenIddict logs issued tokens as plain string arguments at Trace/Debug
+(EventId 6013 `A new '{Type}' JSON Web Token was successfully created: {Payload}.` = the complete signed access
+token; also `{Token}`, `{ReferenceId}`), which the object transformation above never sees. `CredentialLogRedaction`
+(the `ILoggerFactory` decorator of AB#8008) therefore also masks, for every provider and level: JWT-shaped values
+(JWS/JWE, `eyJ…`) and Data Protection payloads (`CfDJ8…`) in every string value and in the formatted message of any
+state; every value whose argument name is in `CredentialLogRedaction.TokenValueNames` (opaque reference tokens;
+not `Code`, the dev OTP stub logs its code on purpose); `Payload` in `OpenIddict.*` categories only. The line stays
+with `***`. Not covered: exception texts (IdentityModel hides token content unless `ShowPII`, Development only).
+🔴 A new log line that carries a token must use one of those argument names or rely on the shape rule; never log a
+token under another name in a non-JWT shape. Tests: `Logging/TokenLogRedactionTests` (shapes, names, OpenIddict
+templates, non-list state, real `nlog.config` JSON record at Trace) and
+`Api/Protocol/TokenValuesNotInLogTests` (real token endpoint at Trace: the issued access token, its signature and
+the client secret are in no line; the 6013 line is present and masked).
+
 ### Administrator switches off a user's second factor (AB#7879; System.Identity 2.30.0)
 
 The recovery path of AB#7830 (option a). `IUserTwoFactorAdministrationService` (`Services/UserTwoFactorAdministrationService.cs`, scoped) is
