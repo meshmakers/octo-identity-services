@@ -180,7 +180,7 @@ stages:
           - task: DotNetCoreCLI@2
             condition: and(succeeded(), ne(variables['CiGuardEnded'], 'true'))
             displayName: 'Test'
-            timeoutInMinutes: 30
+            timeoutInMinutes: 45
             # AB#5160:
             #   --no-build --no-restore: the 'Build' task above already builds the WHOLE solution
             #     (all four *Tests.csproj are solution members) in $(buildConfiguration), so the implicit
@@ -201,8 +201,10 @@ stages:
             #     test cost up to 3 passes (build 54749: 3 x 15 min) and a red test could turn green on the retry,
             #     which hides it (engine-mongodb build 50546: 109 failed tests, green on the retry). Flaky tests
             #     are handled per test. Restore and Build keep their retries (network / feed hiccups).
-            #   timeoutInMinutes 30 < job 90: one green pass takes 2-13 min depending on agent load; the limit
-            #     only catches a run that --blame-hang-timeout cannot end.
+            #   timeoutInMinutes 45 < job 90: one green pass takes 2-13 min depending on agent load, and
+            #     --blame-hang-timeout 15m counts from a test's start or last activity, so the task limit must
+            #     cover a long green pass plus the 15 min hang window (13 + 15 + margin) or it would kill the
+            #     test host before the hang dump is written. It only catches a run that blame-hang cannot end.
             inputs:
               command: 'test'
               arguments: '--configuration $(buildConfiguration) --no-build --no-restore -p:OctoNugetPrivateServer=$(nugetPrivateServer) /p:OctoPublishCkModel=false --blame-hang --blame-hang-timeout 15m --blame-hang-dump-type mini'
