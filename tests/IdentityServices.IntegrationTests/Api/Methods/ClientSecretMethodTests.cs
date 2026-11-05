@@ -8,8 +8,12 @@ using IdentityServerPersistence.SystemStores;
 using Meshmakers.Octo.Common.DistributionEventHub.Services;
 using Meshmakers.Octo.Services.Contracts.DistributionEventHub.Messages;
 using IdentityServices.IntegrationTests.Infrastructure;
+using IdentityServerPersistence.Services;
+using Meshmakers.Octo.Backend.IdentityServices.Authorization;
 using Meshmakers.Octo.Backend.IdentityServices.Methods;
 using Meshmakers.Octo.ConstructionKit.Contracts;
+using Meshmakers.Octo.ConstructionKit.Contracts.DataTransferObjects;
+using Meshmakers.Octo.ConstructionKit.Contracts.Services;
 using Meshmakers.Octo.Runtime.Contracts.RepositoryEntities;
 using Meshmakers.Octo.Services.Contracts.DistributionEventHub.Methods;
 using Meshmakers.Octo.Services.Methods;
@@ -17,11 +21,13 @@ using Meshmakers.Octo.Services.Methods.Authorization;
 using Meshmakers.Octo.Services.Methods.Handlers;
 using Meshmakers.Octo.Services.Notifications.Generated.System.Notification.v2;
 using Meshmakers.Octo.Services.Notifications.Services;
+using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.AspNetCore.TestHost;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 using NSubstitute;
 using Persistence.IdentityCkModel.Generated.System.Identity.v3;
 using Shared.TestUtilities.Builders;
@@ -34,7 +40,10 @@ namespace IdentityServices.IntegrationTests.Api.Methods;
 ///     identity host with <c>Methods:Identity:EnablePasswordMethods=true</c>, the real token endpoint for the client credentials
 ///     grant. The handlers run in a fresh DI scope without an HTTP request, as on the bus, with the principal the host
 ///     validated. The event repository and the logger are captured: the generated secret (and a clear text passed to
-///     RemoveSecret) must appear in no audit event and no log line.
+///     RemoveSecret) must appear in no audit event and no log line. AB#8095 (System.Identity 3.1.0): the CK declares
+///     SecretManagement on both methods; under <c>SecretManagementRoleEnforcement=Enforce</c> a SecretManagement-only caller
+///     (direct, group, external tenant user mapping) succeeds and a TenantManagement/UserManagement-only caller is refused
+///     with <c>METHOD_FORBIDDEN</c> naming SecretManagement; under <c>Warn</c> those still pass, logged.
 /// </summary>
 public class ClientSecretMethodTests : IntegrationTestBase
 {
@@ -154,16 +163,93 @@ public class ClientSecretMethodTests : IntegrationTestBase
         (await RequestTokenAsync(client.ClientId, second, ct)).Should().Be(HttpStatusCode.OK);
     }
 
+    // AB#8095: the CK declaration the method gateway checks (any-of) admits SecretManagement next to the REST-parity roles.
     [Fact]
-    public async Task UserManagement_MayAddSecretsToo_AsTheRestPolicyAllows()
+    public void TheCkModel_DeclaresSecretManagement_NextToTenantAndUserManagement_OnBothMethods()
+    {
+        var cache = _enabled.Services.GetRequiredService<ICkCacheService>();
+        var clientType = cache.GetRtCkType(NormalizedSystemTenantId, new RtCkId<CkTypeId>("System.Identity/Client"));
+
+        foreach (var methodId in new[] { "AddSecret-1", "RemoveSecret-1" })
+        {
+            var authorization = clientType.AllMethods[methodId].Definition.Authorization!;
+            authorization.Roles.Should().BeEquivalentTo([TenantManagement, UserManagement, SecretManagement],
+                "System.Identity 3.1.0 adds SecretManagement; the other two leave with the next major (row M12)");
+            (authorization.DataAccess ?? CkMethodDataAccessDto.Write).Should().Be(CkMethodDataAccessDto.Write);
+        }
+    }
+
+    public static TheoryData<string> SecretManagementSources => new() { "direct", "group", "external-tenant-user-mapping" };
+
+    [Theory]
+    [MemberData(nameof(SecretManagementSources))]
+    public async Task Enforce_ACallerHoldingOnlySecretManagement_AddsAndRemovesASecret(string source)
+    {
+        var ct = TestContext.Current.CancellationToken;
+        var roles = await EffectiveRolesHoldingOnlySecretManagementAsync(source);
+        roles.Should().Equal([SecretManagement], $"the caller holds SecretManagement only, {source}");
+        var client = await CreateConfidentialClientAsync();
+        using var mode = SecretManagementMode(IdentityApiRoleEnforcementMode.Enforce);
+        var caller = new CkMethodPrincipal(AdminSubject, roles, ["octo_api"]);
+
+        var added = await AddAsync(caller, client.RtId.ToString(), null, null, ct);
+        added.IsSuccess.Should().BeTrue(added.Failure?.Code);
+        var secret = added.Value!.Value!;
+        (await RequestTokenAsync(client.ClientId, secret, ct)).Should().Be(HttpStatusCode.OK);
+        var removed = await RemoveAsync(caller, client.RtId.ToString(), secret, ct);
+
+        removed.IsSuccess.Should().BeTrue(removed.Failure?.Code);
+        (await FindAsync(client.ClientId)).ClientSecrets.Should().BeEmpty();
+        Audits(client.RtId.ToString()).Should().HaveCount(2).And.OnlyContain(a => a.Details["outcome"] == "SUCCESS");
+        WarnLines().Should().BeEmpty("SecretManagement is the required role, not a staged fallback");
+    }
+
+    [Theory]
+    [InlineData(TenantManagement)]
+    [InlineData(UserManagement)]
+    public async Task Enforce_ACallerHoldingOnlyTenantOrUserManagement_IsForbidden_NamingSecretManagement_AndChangesNothing(
+        string role)
     {
         var ct = TestContext.Current.CancellationToken;
         var client = await CreateConfidentialClientAsync();
+        var kept = (await AddAsync(Admin(), client.RtId.ToString(), null, null, ct)).Value!.Value!;
+        using var mode = SecretManagementMode(IdentityApiRoleEnforcementMode.Enforce);
+        var caller = new CkMethodPrincipal(AdminSubject, [role], ["octo_api"]);
 
-        var outcome = await AddAsync(new CkMethodPrincipal(AdminSubject, ["UserManagement"], ["octo_api"]),
-            client.RtId.ToString(), null, null, ct);
+        var added = await AddAsync(caller, client.RtId.ToString(), null, null, ct);
+        var removed = await RemoveAsync(caller, client.RtId.ToString(), kept, ct);
 
-        outcome.IsSuccess.Should().BeTrue();
+        foreach (var failure in new[] { added.Failure!, removed.Failure! })
+        {
+            failure.Code.Should().Be("METHOD_FORBIDDEN");
+            failure.Parameters.Should().Contain(ClientSecretMethodHandlerBase.RequiredRoleParameter, SecretManagement);
+        }
+
+        (await FindAsync(client.ClientId)).ClientSecrets.Select(s => s.Value).Should()
+            .Equal([Sha256Base64(kept)], "a refused call changes nothing");
+        (await RequestTokenAsync(client.ClientId, kept, ct)).Should().Be(HttpStatusCode.OK);
+        Audits(client.RtId.ToString()).Where(a => a.Details["outcome"] == "METHOD_FORBIDDEN").Should()
+            .HaveCount(2, "one audit record per call");
+        NoSecretAnywhere(kept);
+    }
+
+    [Theory]
+    [InlineData(TenantManagement)]
+    [InlineData(UserManagement)]
+    public async Task Warn_ACallerHoldingOnlyTenantOrUserManagement_StillAddsAndRemoves_AndIsLogged(string role)
+    {
+        var ct = TestContext.Current.CancellationToken;
+        var client = await CreateConfidentialClientAsync();
+        using var mode = SecretManagementMode(IdentityApiRoleEnforcementMode.Warn);
+        var caller = new CkMethodPrincipal(AdminSubject, [role], ["octo_api"]);
+
+        var added = await AddAsync(caller, client.RtId.ToString(), null, null, ct);
+        added.IsSuccess.Should().BeTrue("Warn keeps the previous rule (AB#5861)");
+        var removed = await RemoveAsync(caller, client.RtId.ToString(), added.Value!.Value!, ct);
+
+        removed.IsSuccess.Should().BeTrue();
+        (await FindAsync(client.ClientId)).ClientSecrets.Should().BeEmpty();
+        WarnLines().Should().HaveCount(2, "every call of the staged fallback is logged for the rollout precheck");
     }
 
     [Fact]
@@ -382,6 +468,103 @@ public class ClientSecretMethodTests : IntegrationTestBase
     #region Helpers
 
     private const string AdminSubject = "507f1f77bcf86cd799439012";
+    private const string TenantManagement = "TenantManagement";
+    private const string UserManagement = "UserManagement";
+    private const string SecretManagement = "SecretManagement";
+
+    /// <summary>
+    ///     Switches <c>SecretManagementRoleEnforcement</c> of this test's host and restores the configured value (the shipped
+    ///     default <c>Warn</c>) on dispose. The handlers read <c>IOptionsMonitor.CurrentValue</c> per call.
+    /// </summary>
+    private IDisposable SecretManagementMode(IdentityApiRoleEnforcementMode mode)
+    {
+        var cache = _enabled.Services.GetRequiredService<IOptionsMonitorCache<IdentityApiAuthorizationOptions>>();
+        var configured = _enabled.Services.GetRequiredService<IOptionsMonitor<IdentityApiAuthorizationOptions>>()
+            .CurrentValue;
+        cache.TryRemove(Options.DefaultName);
+        cache.TryAdd(Options.DefaultName, new IdentityApiAuthorizationOptions
+        {
+            RoleEnforcement = configured.RoleEnforcement,
+            SecretManagementRoleEnforcement = mode
+        });
+        return new Restore(() => cache.TryRemove(Options.DefaultName));
+    }
+
+    private sealed class Restore(Action restore) : IDisposable
+    {
+        public void Dispose() => restore();
+    }
+
+    private List<string> WarnLines() => _logs.Messages
+        .Where(m => m.Level == LogLevel.Warning && m.Text.Contains("SecretManagementRoleEnforcement=Warn"))
+        .Select(m => m.Text).ToList();
+
+    /// <summary>
+    ///     The effective roles (what the token's <c>role</c> claims are built from, <c>UserManager.GetRolesAsync</c>) of a new
+    ///     user whose only role is SecretManagement, held directly, through a group, or as a cross-tenant shadow user through
+    ///     the <c>MappedRoleIds</c> of an <c>ExternalTenantUserMapping</c>.
+    /// </summary>
+    private async Task<string[]> EffectiveRolesHoldingOnlySecretManagementAsync(string source)
+    {
+        using var scope = _enabled.Services.CreateScope();
+        var roleManager = scope.ServiceProvider.GetRequiredService<RoleManager<RtRole>>();
+        var role = await roleManager.FindByNameAsync(SecretManagement);
+        if (role == null)
+        {
+            (await roleManager.CreateAsync(new RtRoleBuilder().WithName(SecretManagement).Build())).Succeeded.Should()
+                .BeTrue();
+            role = (await roleManager.FindByNameAsync(SecretManagement))!;
+        }
+
+        var userManager = scope.ServiceProvider.GetRequiredService<UserManager<RtUser>>();
+        var sourceUserName = $"m8095-{Guid.NewGuid():N}";
+        var userName = source == "external-tenant-user-mapping"
+            ? CrossTenantShadowUserName.Build(NormalizedSystemTenantId, sourceUserName)
+            : sourceUserName;
+        var user = new RtUserBuilder().WithUserName(userName).WithEmail($"{sourceUserName}@example.com")
+            .WithEmailConfirmed(true).Build();
+        // A cross-tenant shadow user signs in through its home tenant and has no password.
+        var created = source == "external-tenant-user-mapping"
+            ? await userManager.CreateAsync(user)
+            : await userManager.CreateAsync(user, DefaultPassword);
+        created.Succeeded.Should().BeTrue(string.Join(", ", created.Errors.Select(e => e.Description)));
+
+        switch (source)
+        {
+            case "direct":
+                (await userManager.AddToRoleAsync(user, SecretManagement)).Succeeded.Should().BeTrue();
+                break;
+            case "group":
+            {
+                var groups = scope.ServiceProvider.GetRequiredService<IGroupStore>();
+                var group = new RtGroup
+                {
+                    RtId = OctoObjectId.GenerateNewId(),
+                    GroupName = $"secret-admins-{Guid.NewGuid():N}",
+                    NormalizedGroupName = $"SECRET-ADMINS-{Guid.NewGuid():N}".ToUpperInvariant()
+                };
+                await groups.StoreAsync(group);
+                await groups.SetRoleIdsAsync(group.RtId, [role.RtId.ToString()]);
+                await groups.AddMemberUserAsync(group.RtId, user.RtId.ToString());
+                break;
+            }
+            default:
+                await scope.ServiceProvider.GetRequiredService<IExternalTenantUserMappingStore>().StoreAsync(
+                    new RtExternalTenantUserMapping
+                    {
+                        RtId = OctoObjectId.GenerateNewId(),
+                        SourceTenantId = NormalizedSystemTenantId,
+                        SourceUserId = OctoObjectId.GenerateNewId().ToString(),
+                        SourceUserName = sourceUserName,
+                        MappedRoleIds = new AttributeStringValueList([role.RtId.ToString()])
+                    });
+                break;
+        }
+
+        using var readScope = _enabled.Services.CreateScope();
+        var reader = readScope.ServiceProvider.GetRequiredService<UserManager<RtUser>>();
+        return (await reader.GetRolesAsync((await reader.FindByIdAsync(user.RtId.ToString()))!)).ToArray();
+    }
 
     private static CkMethodPrincipal Admin() => new(AdminSubject, TenantAdminRoles, ["octo_api"]);
 

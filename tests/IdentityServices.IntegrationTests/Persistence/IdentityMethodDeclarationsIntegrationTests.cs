@@ -94,10 +94,12 @@ public class IdentityMethodDeclarationsIntegrationTests : IClassFixture<Identity
             }
         }
 
+        // AB#8095 (System.Identity 3.1.0): SecretManagement joins the REST-parity roles of the client secret methods; the
+        // handler still requires SecretManagement under Enforce. TenantManagement/UserManagement leave with the next major.
         foreach (var method in (await GetTypeAsync("Client")).AllMethods.Values)
         {
             method.Definition.Authorization!.Roles.Should()
-                .BeEquivalentTo([TenantManagement, UserManagement], method.QualifiedMethodId);
+                .BeEquivalentTo([TenantManagement, UserManagement, "SecretManagement"], method.QualifiedMethodId);
         }
     }
 

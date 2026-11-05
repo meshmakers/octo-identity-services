@@ -171,3 +171,30 @@ Order per cluster: **test-2 → prod-2 → prod-1**.
    `{"message": "Access is denied: this operation requires the role 'SecretManagement' in the tenant. ..."}`.
 6. **Emergency exit**: back to `Warn` (remove the cluster value and run the CD) — or the cluster-wide `apiRoleEnforcement: Warn`, which
    relaxes every role policy including this one.
+
+### AB#8095: the method path admits `SecretManagement` (System.Identity 3.1.0)
+
+Up to System.Identity 3.0.1 the CK declared `authorization.roles: [ TenantManagement, UserManagement ]` on
+`Client.AddSecret-1` and `Client.RemoveSecret-1`. The method gateway checks the declared roles (any-of), so a caller
+holding **only** `SecretManagement` was refused on the method path although REST admits it, and a `TenantManagement`-only
+caller passed the gateway and was refused by the identity handler under `Enforce`.
+
+System.Identity **3.1.0** declares `[ TenantManagement, UserManagement, SecretManagement ]` on both methods:
+
+| Caller holds only | `Warn` | `Enforce` |
+|-------------------|--------|-----------|
+| `SecretManagement` (direct, via group, via external tenant user mapping) | allowed | allowed |
+| `TenantManagement` or `UserManagement` | allowed, logged (`AB#5861`) | `METHOD_FORBIDDEN` from the handler (`reason` = `role-required`), nothing changes, one audit record |
+
+- **Minor**, not Major: a role added is a method authorization widening (row M12 of `docs/ck-semver-rules.md` in
+  `octo-construction-kit-engine`), acknowledged in `ckModel.yaml` (`compatibility.acknowledge`, valid for the release that
+  publishes 3.1.0 only - remove the entries in the next release of the model, `OCTO-CK204`). The effective rule does not
+  loosen: the handler still enforces `SecretManagement` under `Enforce`. Removing `TenantManagement`/`UserManagement` from
+  the declaration is a role removal (Major) and waits for the next System.Identity major.
+- **Rollout:** System.Identity is service-managed - it ships inside the identity service with the regular identity release
+  train and is applied on identity startup in every tenant (with `System.Identity.Bootstrap`). No catalog import, no
+  per-tenant step. **No FixAll** (AB#7998: FixAll upgrades libraries beyond the ranges of installed dependents, e.g.
+  Basic.Energy 2.0.0 over EnergyIQ's `[1.9,2.0)`); a Minor inside `[3.0.0,4.0)` needs none. A tenant that shows
+  `ResolveFailed` afterwards is repaired with a targeted `ImportFromCatalog` of the affected model.
+- **Check after the release reaches a cluster:** `octo-cli --context <env>_<tenant> -c LibraryStatus` shows
+  System.Identity 3.1.0 and no `ResolveFailed`, in a sample of tenants including `energyiq`.

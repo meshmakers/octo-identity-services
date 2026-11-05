@@ -184,6 +184,10 @@ types:
     # AB#7773 (Feature AB#5696, F4.2): the method declarations of the client; the handlers follow with AB#7780.
     # Declarations only: until a handler is registered the gateway answers METHOD_HANDLER_NOT_AVAILABLE.
     # Roles follow the REST parity (ApiSecretsController: IdentityTenantAdministrationWritePolicy = TenantManagement or UserManagement).
+    # AB#8095 (System.Identity 3.1.0): SecretManagement added to both role lists, so a SecretManagement-only caller passes the method
+    # gateway as it passes the REST path (AB#5861, IdentitySecretAdministrationPolicy). The handlers keep refusing TenantManagement/
+    # UserManagement-only callers under SecretManagementRoleEnforcement=Enforce. Removing those two roles here is a role removal
+    # (row M12: Major) and waits for the next System.Identity major.
     # No replacesGenericCreate: the System.Identity.Bootstrap blueprint seeds clients (AB#7121 would refuse the tenant setup).
     methods:
       - methodId: AddSecret-1
@@ -197,7 +201,7 @@ types:
         errors:
           - { code: CLIENT_SECRET_NOT_REQUIRED, description: "The client does not use a secret (RequireClientSecret is false)." }
         authorization:
-          roles: [ TenantManagement, UserManagement ]
+          roles: [ TenantManagement, UserManagement, SecretManagement ]
           dataAccess: Write
       - methodId: RemoveSecret-1
         description: "Removes a secret of the client, identified by its value (the REST parity: DELETE apiSecrets/client/{clientId}/{secretValue})."
@@ -206,5 +210,5 @@ types:
         errors:
           - { code: SECRET_NOT_FOUND, description: "The client has no secret with this value." }
         authorization:
-          roles: [ TenantManagement, UserManagement ]
+          roles: [ TenantManagement, UserManagement, SecretManagement ]
           dataAccess: Write
