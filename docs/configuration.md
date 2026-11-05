@@ -432,6 +432,25 @@ tokens, client secrets, passwords or 2FA codes to the log. The DTO redaction cov
 a credential-bearing DTO passed as a message-template argument would still be reflected into the JSON
 event properties, so such DTOs must not be logged that way.
 
+### Token values in logs (AB#8324)
+
+OpenIddict writes issued tokens at **Trace/Debug** as plain message arguments, not as message objects: EventId 6013
+(`A new '{Type}' JSON Web Token was successfully created: {Payload}.`) carried the complete signed access token,
+other events carry `{Token}` or `{ReferenceId}`. The AB#5792 object transformation does not see strings, so
+`CredentialLogRedaction` (the `ILoggerFactory` decorator, every provider, see `docs/authentication.md`) also masks:
+
+- **JWT-shaped values** (JWS `eyJ….….…`, JWE with five segments) and **ASP.NET Core Data Protection payloads**
+  (`CfDJ8…`) in every structured string value and in the formatted message of any log state;
+- the value of every argument named `Token`, `AccessToken`, `RefreshToken`, `IdToken`, `IdentityToken`,
+  `ReferenceId`, `AuthorizationCode`, `DeviceCode`, `UserCode`, `SubjectToken`, `ActorToken`, `ClientAssertion`
+  or `ClientSecret` (case-insensitive), whatever its shape (opaque reference tokens);
+- `{Payload}` in `OpenIddict.*` categories.
+
+The log line stays, with `***` in place of the value, so `OCTO_LOG_LEVEL_ROOT=Trace` (or `ReconfigureLogLevel`) is
+safe for token issuance. Not covered: exception texts (`exception.message` / `exception.stacktrace`); IdentityModel
+keeps token content out of them unless `IdentityModelEventSource.ShowPII` is on, which this service sets in the
+Development environment only.
+
 ### Runtime Log Level Changes
 
 Log levels can be changed at runtime via the API:
