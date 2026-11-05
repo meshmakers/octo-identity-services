@@ -194,8 +194,9 @@ stages:
             #   --blame-hang --blame-hang-timeout 15m: a single test that runs longer than 15 min ends the
             #     test host as a failure that names the hanging test (as in octo-construction-kit-engine-mongodb).
             #     Without it, builds 54733/54746/54747 hung 17-37 min in IdentityServices.IntegrationTests until
-            #     cancelled, blocking three CI agents and giving no test name. --blame-hang-dump-type none: no dump
-            #     file, only the name of the test.
+            #     cancelled, blocking three CI agents and giving no test name. --blame-hang-dump-type mini: a
+            #     minidump of the hung test host is written next to the Sequence_*.xml (names the hanging test);
+            #     the 'Publish hang diagnostics' step below uploads both as a build artifact when the Test step fails.
             #   no retryCountOnTaskFailure here: a step retry reruns the whole test project, so one hung or red
             #     test cost up to 3 passes (build 54749: 3 x 15 min) and a red test could turn green on the retry,
             #     which hides it (engine-mongodb build 50546: 109 failed tests, green on the retry). Flaky tests
@@ -204,7 +205,7 @@ stages:
             #     only catches a run that --blame-hang-timeout cannot end.
             inputs:
               command: 'test'
-              arguments: '--configuration $(buildConfiguration) --no-build --no-restore -p:OctoNugetPrivateServer=$(nugetPrivateServer) /p:OctoPublishCkModel=false --blame-hang --blame-hang-timeout 15m --blame-hang-dump-type none'
+              arguments: '--configuration $(buildConfiguration) --no-build --no-restore -p:OctoNugetPrivateServer=$(nugetPrivateServer) /p:OctoPublishCkModel=false --blame-hang --blame-hang-timeout 15m --blame-hang-dump-type mini'
               projects: |
                 **/*Tests.csproj
                 !**/*SystemTests.csproj
@@ -212,6 +213,26 @@ stages:
               DOCKER_HOST: unix:///var/run/docker.sock
               TESTCONTAINERS_RYUK_DISABLED: 'true'
               TESTCONTAINERS_HOST_OVERRIDE: '172.17.0.1'
+          - bash: |
+              set -u
+              dest="$(Build.ArtifactStagingDirectory)/test-hang"
+              mkdir -p "$dest"
+              # --blame-hang writes Sequence_*.xml and *_hangdump*.dmp into the test results directory
+              # (DotNetCoreCLI@2 points it at Agent.TempDirectory); TestResults folders are covered as well.
+              find "$(Agent.TempDirectory)" "$(Build.SourcesDirectory)/tests" \
+                \( -name 'Sequence_*.xml' -o -name '*.dmp' \) -type f \
+                -exec cp -n {} "$dest"/ \; 2>/dev/null || true
+              ls -la "$dest"
+            displayName: 'Collect hang diagnostics (AB#6723)'
+            condition: and(failed(), ne(variables['CiGuardEnded'], 'true'))
+            continueOnError: true
+          - task: PublishBuildArtifacts@1
+            displayName: 'Publish hang diagnostics (AB#6723)'
+            condition: and(failed(), ne(variables['CiGuardEnded'], 'true'))
+            continueOnError: true
+            inputs:
+              PathtoPublish: '$(Build.ArtifactStagingDirectory)/test-hang'
+              ArtifactName: 'test-hang-diagnostics'
           - template: templates/steps/validate-and-publish-ck-versions.yml@pipelineTemplates
             parameters:
               constructionKitPaths:
