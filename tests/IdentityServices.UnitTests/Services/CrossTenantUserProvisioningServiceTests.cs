@@ -11,7 +11,7 @@ using Meshmakers.Octo.Services.Infrastructure.Services;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.Extensions.Logging;
 using NSubstitute;
-using Persistence.IdentityCkModel.Generated.System.Identity.v2;
+using Persistence.IdentityCkModel.Generated.System.Identity.v3;
 using Shared.TestUtilities.Fakes;
 using Xunit;
 
@@ -336,6 +336,59 @@ public class CrossTenantUserProvisioningServiceTests
     }
 
     [Fact]
+    public async Task FindOrCreate_LocalUserWithTheSameEmail_StillGetsItsShadowUser_AndIsNotLinked()
+    {
+        // AB#8084 pins the existing decision: a cross-tenant shadow user is a dedicated account of the home identity. It is
+        // created even when a local user of the tenant has the same e-mail address (refusing it would lock the person out of
+        // the child tenant, linking it would hand the local user's roles to the home identity). The duplicate-e-mail rule
+        // of the user administration does not apply here; a change needs a product decision.
+        var crossTenantResult = CreateCrossTenantResult(email: "admin@test.com");
+        var localUser = new RtUser { RtId = OctoObjectId.GenerateNewId(), UserName = "local-admin", Email = "admin@test.com" };
+
+        _userManager.FindByNameAsync("xt_octosystem_admin@test.com").Returns((RtUser?)null);
+        _userManager.FindByEmailAsync("admin@test.com").Returns(localUser);
+        _userManager.CreateAsync(Arg.Any<RtUser>()).Returns(IdentityResult.Success);
+        _mappingStore.FindBySourceUserAsync("octosystem", "source-user-id").Returns((RtExternalTenantUserMapping?)null);
+        SetupTenantRepository();
+
+        var result = await _sut.FindOrCreateCrossTenantUserAsync(crossTenantResult, "meshtest");
+
+        result.Should().NotBeNull();
+        result!.RtId.Should().NotBe(localUser.RtId);
+        result.UserName.Should().Be("xt_octosystem_admin@test.com");
+        result.Email.Should().Be("admin@test.com");
+        await _userManager.Received(1).CreateAsync(Arg.Is<RtUser>(u => u.UserName == "xt_octosystem_admin@test.com"));
+        await _userManager.DidNotReceive().FindByEmailAsync(Arg.Any<string>());
+    }
+
+    [Fact]
+    public async Task FindOrCreate_ExistingShadowUser_SyncsAnEmailAnotherUserHas()
+    {
+        // AB#8084 pins the existing decision: the profile sync keeps the shadow user's address equal to the home identity's
+        // address on every login, without the duplicate-e-mail rule.
+        var crossTenantResult = CreateCrossTenantResult(email: "taken@test.com");
+        var existingUser = new RtUser
+        {
+            RtId = OctoObjectId.GenerateNewId(),
+            UserName = "xt_octosystem_admin@test.com",
+            FirstName = "Test",
+            LastName = "User",
+            Email = "old@test.com"
+        };
+        var localUser = new RtUser { RtId = OctoObjectId.GenerateNewId(), UserName = "local", Email = "taken@test.com" };
+
+        _userManager.FindByNameAsync("xt_octosystem_admin@test.com").Returns(existingUser);
+        _userManager.FindByEmailAsync("taken@test.com").Returns(localUser);
+        _userManager.UpdateAsync(Arg.Any<RtUser>()).Returns(IdentityResult.Success);
+        _mappingStore.FindBySourceUserAsync("octosystem", "source-user-id").Returns((RtExternalTenantUserMapping?)null);
+
+        var result = await _sut.FindOrCreateCrossTenantUserAsync(crossTenantResult, "meshtest");
+
+        result!.Email.Should().Be("taken@test.com");
+        await _userManager.Received(1).UpdateAsync(existingUser);
+    }
+
+    [Fact]
     public async Task FindOrCreate_WithNoExistingUser_CreatesMapping()
     {
         // Arrange
@@ -359,6 +412,28 @@ public class CrossTenantUserProvisioningServiceTests
                 m.SourceTenantId == "octosystem" &&
                 m.SourceUserId == "source-user-id" &&
                 m.SourceUserName == "admin@test.com"));
+    }
+
+    [Fact]
+    public async Task FindOrCreate_WithNoExistingUser_AndStoreMappingIfMissingFalse_CreatesUserButNoMapping()
+    {
+        // AB#7088: the token exchange must not leave a role-less mapping behind for a refused user.
+        var crossTenantResult = CreateCrossTenantResult();
+
+        _userManager.FindByNameAsync("xt_octosystem_admin@test.com")
+            .Returns((RtUser?)null);
+        _userManager.CreateAsync(Arg.Any<RtUser>())
+            .Returns(IdentityResult.Success);
+        _mappingStore.FindBySourceUserAsync("octosystem", "source-user-id")
+            .Returns((RtExternalTenantUserMapping?)null);
+
+        SetupTenantRepository();
+
+        var result = await _sut.FindOrCreateCrossTenantUserAsync(crossTenantResult, "meshtest", storeMappingIfMissing: false);
+
+        result.Should().NotBeNull();
+        await _userManager.Received(1).CreateAsync(Arg.Any<RtUser>());
+        await _mappingStore.DidNotReceive().StoreAsync(Arg.Any<RtExternalTenantUserMapping>());
     }
 
     [Fact]

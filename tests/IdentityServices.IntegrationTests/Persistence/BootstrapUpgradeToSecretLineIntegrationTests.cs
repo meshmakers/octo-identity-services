@@ -12,7 +12,7 @@ using Meshmakers.Octo.Runtime.Contracts.Repositories;
 using Meshmakers.Octo.Runtime.Contracts.Repositories.Query;
 using Meshmakers.Octo.Runtime.Contracts.RepositoryEntities;
 using Meshmakers.Octo.Services.Infrastructure.Services;
-using Persistence.IdentityCkModel.Generated.System.Identity.v2;
+using Persistence.IdentityCkModel.Generated.System.Identity.v3;
 using Xunit;
 
 namespace IdentityServices.IntegrationTests.Persistence;
@@ -131,8 +131,11 @@ public class BootstrapUpgradeToSecretLineIntegrationTests : IClassFixture<Identi
             {
                 Edge(User(adminUser), SecretManagementRtId),
                 Edge(User(groupMember), SecretManagementRtId),
-                Edge(User(ownerUser), SecretManagementRtId)
-            }, "local users holding both AdminPanelManagement and TenantManagement, directly or via a group / TenantOwners");
+                Edge(User(ownerUser), SecretManagementRtId),
+                // AB#8161 (decision Gerald 2026-11-02): TenantOwners itself holds the role, via the second grant.
+                Edge(Group(TenantOwnersRtId), SecretManagementRtId)
+            }, "local users holding both AdminPanelManagement and TenantManagement, directly or via a group / TenantOwners, " +
+               "plus the TenantOwners group (AB#8161)");
 
             // Everything else that is new is the Files line (only from 1.5.0), and nothing at all from 1.6.0.
             var otherNewEntities = newEntities.Except(secretEntities).ToList();
@@ -160,13 +163,13 @@ public class BootstrapUpgradeToSecretLineIntegrationTests : IClassFixture<Identi
                 "a human holding both roles through a group gets a direct edge");
             (await HasRoleAsync(repo, User(ownerUser), SecretManagementRtId)).Should().BeTrue(
                 "a human member of TenantOwners gets a direct edge");
-            (await HasRoleAsync(repo, Group(TenantOwnersRtId), SecretManagementRtId)).Should().BeFalse(
-                "TenantOwners also holds clients and provisioned administrators, who would inherit it");
+            (await HasRoleAsync(repo, Group(TenantOwnersRtId), SecretManagementRtId)).Should().BeTrue(
+                "AB#8161: TenantOwners holds SecretManagement");
             (await HasRoleAsync(repo, Group(adminGroup), SecretManagementRtId)).Should().BeFalse("no group grant");
             (await HasRoleAsync(repo, User(shadowUser), SecretManagementRtId)).Should().BeFalse(
                 "a provisioned parent-tenant administrator (xt_ shadow user) is no local human administrator");
             (await HasRoleAsync(repo, Client(serviceAccount), SecretManagementRtId)).Should().BeFalse(
-                "a client in TenantOwners does not inherit it");
+                "a client in TenantOwners inherits it through the group (AB#8161), it gets no direct edge");
             (await HasRoleAsync(repo, User(customRoleUser), customRole)).Should().BeTrue("custom assignments stay");
 
             if (pipelineAccount != null)

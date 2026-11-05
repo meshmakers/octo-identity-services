@@ -6,7 +6,7 @@ using Meshmakers.Octo.Runtime.Contracts.Repositories;
 using Meshmakers.Octo.Runtime.Contracts.Repositories.Query;
 using Meshmakers.Octo.Services.Infrastructure.Services;
 using Microsoft.Extensions.Logging;
-using Persistence.IdentityCkModel.Generated.System.Identity.v2;
+using Persistence.IdentityCkModel.Generated.System.Identity.v3;
 
 namespace IdentityServerPersistence.SystemStores;
 
@@ -119,31 +119,22 @@ public class ClientStore : IOctoClientStore
         return result.Items;
     }
 
-    public async Task UpdateAsync(string clientId, RtClient client)
+    public async Task<RtClient?> MutateAsync(string clientId, Func<RtClient, bool> mutate)
     {
         ArgumentValidation.ValidateString(nameof(clientId), clientId);
 
-        using var session = await TenantRepository.GetSessionAsync();
-        session.StartTransaction();
-
-        var dbClient = await GetClientByClientId(session, clientId);
-        if (dbClient == null)
+        var outcome = await GuardedEntityMutation.MutateAsync(TenantRepository,
+            session => GetClientByClientId(session, clientId), mutate);
+        if (outcome is not { } result)
         {
-            throw new NotExistingException($"Client id '{clientId}' does not exist.");
+            return null;
         }
 
-        await TenantRepository.ReplaceOneRtEntityByIdAsync(session, dbClient.RtId, client);
-
-        await session.CommitTransactionAsync();
-
-        // After the primary update commits, propagate to any mirrors. Best-effort:
-        // a failure here must not break the API call. We use the post-update `client` here
-        // (not `dbClient`) so secret rotation / scope updates / etc. take effect on mirrors.
-        if (client.AutoProvisionInChildTenants && _mirrorProvisioning != null)
+        if (result.Written && result.Entity.AutoProvisionInChildTenants && _mirrorProvisioning != null)
         {
             try
             {
-                await _mirrorProvisioning.SyncMirrorsForClientAsync(TenantId, client);
+                await _mirrorProvisioning.SyncMirrorsForClientAsync(TenantId, result.Entity);
             }
             catch (Exception ex)
             {
@@ -152,9 +143,9 @@ public class ClientStore : IOctoClientStore
                     clientId, TenantId);
             }
         }
+
+        return result.Entity;
     }
-
-
 
     private async Task<RtClient?> GetClientByClientId(IOctoSession session, string clientId)
     {

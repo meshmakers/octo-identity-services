@@ -1,7 +1,7 @@
 using IdentityServerPersistence.SystemStores;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.Extensions.Logging;
-using Persistence.IdentityCkModel.Generated.System.Identity.v2;
+using Persistence.IdentityCkModel.Generated.System.Identity.v3;
 
 namespace IdentityServerPersistence.Services;
 

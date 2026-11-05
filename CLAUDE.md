@@ -92,6 +92,7 @@ Lauf, davon ~50 % der CI-Testzeit reines Setup). Die Definitionen liegen in `tes
 | --- | --- | --- |
 | `IdentityPersistence` | `IdentityServicesFixture` | 14 Persistence-Klassen |
 | `DataProtectionKeySeed` | `IdentityServicesFixture` | nur `DataProtectionKeySeedIntegrationTests` |
+| `DataProtectionKeyEncryption` | `IdentityServicesFixture` | nur `DataProtectionKeyEncryptionIntegrationTests` (AB#5530, leert den Key-Store je Fact) |
 | `VirginBootstrap` | `VirginBootstrapFixture` | nur `VirginSystemDatabaseBootstrapIntegrationTests` |
 | `ZWebFactory` | `CustomWebApplicationFactory` | 15 HTTP-Klassen (Basis `IntegrationTestBase`) |
 | `ZSetupApi` | `CustomWebApplicationFactory` | nur `SetupApiTests` |
@@ -130,6 +131,15 @@ two keys on `azure-devops-agents-ci-1` only). `CustomWebApplicationFactory` ther
 signing and encryption credentials with one in-memory certificate (`Infrastructure/TestSigningCertificate.cs`),
 and the JWKS test asserts that this is the only published key. Never let a test host read key material
 from the user/machine store.
+
+**Linux agents: inotify instance limit (AB#8019).** Every in-process host (each `CustomWebApplicationFactory` and each
+`WithWebHostBuilder` derivative) used to load `appsettings*.json` with reload-on-change, i.e. one file watcher per file and host.
+On the Linux CI agents the inotify instance limit (128) was reached across the suite and unrelated tests failed at host start
+(`The configured user limit (128) on the number of inotify instances has been reached`). The static constructor of
+`CustomWebApplicationFactory` therefore sets `DOTNET_hostBuilder__reloadConfigOnChange=false` for the test process (tests never
+change configuration files at run time); `TestHostConfigurationTests` pins it. Dispose derived factories a test creates
+(`WithWebHostBuilder`) at the end of the test (`GroupMethodTestBase`, `ClientMirrorReconciliationTests`); otherwise they live
+until the class fixture ends.
 
 Der NLog-Fall ist der einzige, den man **nicht** per-Fixture eindeutig machen kann: `Program.cs` lädt
 die globale Konfiguration am Entry-Point und räumt sie im `finally` mit `LogManager.Shutdown()` wieder
@@ -175,7 +185,7 @@ This service depends on Octo framework packages (versioned via `$(OctoVersion)` 
 
 ### Construction Kit (CK) Model
 
-The `Persistence.IdentityCkModel` project uses YAML-based model definitions that are transformed into C# code at build time. Model files are in `src/Persistence.IdentityCkModel/ConstructionKit/`. The model ID is `System.Identity-2.25.0` with dependency on `System-[2.5,3.0)`. Generated types live in namespace `Persistence.IdentityCkModel.Generated.System.Identity.v2`.
+The `Persistence.IdentityCkModel` project uses YAML-based model definitions that are transformed into C# code at build time. Model files are in `src/Persistence.IdentityCkModel/ConstructionKit/`. The model ID is `System.Identity-3.0.0` (ckLanguage 2, first major of the 3.x line, AB#8053) with dependency on `System-[2.5,3.0)`. Generated types live in namespace `Persistence.IdentityCkModel.Generated.System.Identity.v3` (the suffix is the **major** of the model: 2.x was `.v2`, the registration is `AddCkModelSystemIdentityV3()`).
 
 ### OpenIddict Protocol Stack (Epic AB#4989)
 
@@ -283,7 +293,7 @@ The service supports hierarchical cross-tenant authentication where parent-tenan
 - **`RtOctoTenantIdentityProvider`**: CK type linking a child tenant to a parent tenant for auth delegation
 - **`RtExternalTenantUserMapping`**: CK type mapping a parent-tenant user to roles in the child tenant
 - **`CrossTenantAuthenticationService`**: Walks the tenant hierarchy to validate credentials against parent tenant databases
-- **`ExternalTenantUserMappingStore`**: Persistence for cross-tenant user role mappings
+- **`ExternalTenantUserMappingStore`**: Persistence for cross-tenant user role mappings. A mapping is unique per (`SourceTenantId`, `SourceUserId`) in a tenant, but the database does not enforce it (no unique index on runtime entities). `FindBySourceUserAsync` (login, `IsExplicitlyProvisionedAsync`, token exchange) therefore never throws on duplicates: it returns the oldest mapping (smallest `RtId`) and logs a WARN naming all ids (`ExternalTenantUserMappingLookup`, AB#6975). The store is scoped and holds a `DuplicateWarningGate`: the several lookups of one login or exchange log the WARN once per duplicate set (repeats at Debug). The effective roles (`GroupRoleResolver`, via `FindBySourceUserNamesAsync`) are the union over all matching mappings, not only the oldest. Both create paths (`POST adminProvisioning/{targetTenantId}`, `POST ExternalTenantUserMappings`) answer `409 application/problem+json` with `code: ExternalTenantUserMappingAlreadyExists` and `existingMappingId` when the pair exists; to change roles, update the existing mapping (`PUT ExternalTenantUserMappings/{id}`). `provisionCurrentUser` stays idempotent. Existing duplicates are not migrated; delete the extra rows (`DeleteAdminProvisioningMapping`).
 - **`ExternalTenantUserMappingsController`**: System API CRUD for managing mappings (per-tenant, requires `allowed_tenants`)
 - **`AdminProvisioningController`**: Cross-tenant provisioning via system tenant (see below)
 
@@ -293,6 +303,42 @@ The service supports hierarchical cross-tenant authentication where parent-tenan
 - The Angular login component automatically attempts token-based auto-login when clicking "LOGIN VIA {parent}". If no parent session exists, it redirects to the parent tenant's login page (where all auth methods are available); after authentication there, it redirects back with a `crossTenantAutoLogin` query param to auto-complete the token exchange
 
 **Cross-tenant role sync**: When a cross-tenant user logs in (via `FindOrCreateCrossTenantUserAsync`), `SyncMappedRolesAsync` resolves mapped role IDs to role names by querying the tenant repository directly (via `IMultiTenancyResolverService.GetTenantRepository()`), then calls `UserManager.AddToRoleAsync` with the role **name** (not ID). This runs on every login, ensuring existing users get role updates. Important: `RoleManager<RtRole>` must NOT be used for this — it may resolve to the wrong tenant context during cross-tenant login. The tenant repository approach reads from `HttpContext.Items["tenantRepository"]` which is correctly set by the inline middleware.
+
+**Second factor across tenant boundaries (AB#7804, AB#7815):** every cross-tenant entry point (password login
+fallback, cross-tenant-token/-login, tenant-switch, token exchange; the device approval no longer crosses tenants, AB#7884) refuses a source user
+with 2FA (own or anywhere in its `xt_` chain: `CrossTenantAuthResult.SourceUserRequiresSecondFactor`) unless the proof
+carries `amr=mfa` (`SecondFactorEvidence`). The password login answers `requiresTwoFactor` and completes through the
+normal `login-2fa`/`login-2fa-email`/`login-recovery` endpoints against the SOURCE user (`ICrossTenantSecondFactorVerifier`,
+source lockout counts). Sessions/tokens issued on evidence carry `amr=mfa` on (exchange: `["token_exchange","mfa"]`);
+device tokens now keep the session's `amr` instead of a forced `pwd`. `tenant-switch` derives the source identity from
+the caller's own chain (never the request body, AB#7815). Details: `docs/authentication.md` § Second Factor Across
+Tenant Boundaries; tests `CrossTenantSecondFactorTests` (HTTP, real child tenant). The repository has no CHANGELOG file;
+this paragraph and that section are the change record (Security). AB#7859: the security-stamp revalidation (every 30 min) used to drop
+`amr=mfa` from the session; `SessionClaimPreservation` (`OnRefreshingPrincipal`) keeps `amr`/`idp`/`sid`. The refresh
+grant already kept `amr`. 🔴 Tests that need the revalidation advance `CustomWebApplicationFactory.SecurityStampClock`
+(reset it in `finally`); tests: `SecondFactorEvidenceRefreshTests`.
+
+**Sign-in attempts are counted atomically and rate-limited (AB#7854):** `OctoUserManager` (the registered
+`UserManager<RtUser>`) counts failures and resets the counter in one MongoDB transaction on the stored user
+(`IAtomicUserLockoutStore`, `OctoUserStore.Atomic.cs`, retried on write conflicts); recovery codes are redeemed in one
+transaction; cross-tenant password failures count against the parent-tenant user and a locked parent user is not verified.
+`ISignInRateLimiter` (per pod, in memory) answers 429 on `login`/`ldap-login`/`login-2fa*`/`send-2fa-email`/`login-recovery`
+above 10 attempts per account per minute, 1 concurrent attempt per account, 60 per client address (right-most
+`X-Forwarded-For`) — `Identity:SignInRateLimit`. 🔴 A record inside `RtUser.UserTokens` must be written back through the list
+indexer (`UserTokens[i] = token`); an in-place change of the record object is not persisted. 🔴 The integration-test factory
+raises the limits (the suite signs in from one address); a test of the limit itself uses `Factory.WithWebHostBuilder` +
+`ConfigureTestServices`. Details: `docs/authentication.md` § Sign-In Attempts; tests `SignInAttemptConcurrencyTests`,
+`SignInRateLimiterTests`.
+
+**Cross-tenant hardening (AB#7861):** the challenge cookie is single-use (nonce + `ICrossTenantChallengeReplayGuard`,
+voided on completion, logout and local sign-in), gaps in the `xt_` chain require the second factor, and stored `amr` user
+claims are never returned by `OctoUserStore.GetClaimsAsync`. AB#7884: the unreachable cross-tenant provisioning branch of
+`DeviceVerificationController` is gone — a session whose subject is not a user of the device code's tenant gets
+`access_denied`; the session's `amr` is still passed on to the device token.
+
+**Locked-out or disabled source users (AB#7855):** `ValidateCrossTenantAccessAsync` (every crossing) also refuses a
+locked-out source user and one the `IdentityOptions.SignIn` rules refuse ("disabled"; no separate flag on `RtUser`),
+including every tier of its `xt_` chain.
 
 **Cross-tenant token exchange (RFC 8693, AB#4338)** — the non-interactive
 counterpart of the browser tenant-switch, for the MCP server:
@@ -327,6 +373,55 @@ counterpart of the browser tenant-switch, for the MCP server:
   `octo-mcpServices-interactive` client (660…035) was removed again in blueprint
   **1.1.5** — interactive MCP clients self-register via DCR (`octo-dcr-*`)
   and nothing ever consumed the static client.
+- **octo-cli exchanges too (AB#6839, blueprint 1.8.0):** `octo-cli` (660…31, public, secretless)
+  carries the token-exchange grant next to device_code, so an operator's root-tenant token can be
+  exchanged for a child-tenant token (`acr_values=tenant:X`) instead of being sent to a foreign
+  tenant route. The client reaches the child tenant twice: the blueprint seeds `octo-cli` in every
+  tenant, and the `AutoProvisionInChildTenants` mirror copies the parent's `AllowedGrantTypes`
+  (`CreateMirrorClient`), converging on every identity start (for tenants that already had the client see
+  *Rollout* below: the seed cannot change a tenant-owned value). Pinned by
+  `OctoCliClientTokenExchangeSeedTests`.
+- **Ancestry is not authority (decision Gerald 2026-10-17, AB#6839).** The exchange only checks that
+  the caller's tenant is an ancestor of B; the issued token carries exactly the roles the B-shadow
+  user resolves in B (explicit `ExternalTenantUserMapping` roles/groups, group membership, direct
+  role) — **no implicit admin role for ancestor users**. Provisioning in each child tenant is a
+  **required operator step, also for new tenants**: `octo-cli ProvisionCurrentUser -ttid <child>`.
+  A caller with an ancestor relationship but no role in B is refused **at the exchange**
+  (`TenantExchangeProcessor.ExchangeAsync`, step e): HTTP 403, `error=access_denied`,
+  `error_description` starting with the stable marker `tenant_not_provisioned`
+  (`TenantExchangeProcessor.NotProvisionedMarker`; clients match the marker, not the text) — plus a
+  `Token Exchange Failure` audit event. A role-less token could not pass role enforcement anyway,
+  so the only change for existing callers (octo-mcp-service `TenantTokenExchanger` treats any
+  non-success as "denied"; Studio `switchTenantByExchange` is unused) is an early, clear refusal
+  instead of a token that fails on the first call. A non-ancestor caller is still
+  `unauthorized_client`. Side effect kept from before: a refused exchange still leaves the shadow
+  user and an empty mapping in B; neither grants anything (`Exchange_RepeatedAfterEmptyMapping…`).
+  Exchanged tokens never carry a refresh token. Tests: `TenantExchangeIntegrationTests`
+  (`Exchange_AncestorUserWithoutProvisioning…`, `…ProvisionedOperator…`, `…DirectRoleGrant…`,
+  `…NonAncestor…`).
+- **Rollout (AB#6839, existing tenants):** the blueprint bump alone does NOT reach a tenant that already
+  has the client. `Client.AllowedGrantTypes` is `TenantOwned` (AB#6324), so the seed import (Upsert) keeps the
+  stored value; the apply logs `mode=Initial added=N updated=0` regardless (Upsert is counted as "added").
+  Verified on test-2 (octo-cli r3.5.27: exchange refused with `unauthorized_client`). Hence
+  `OctoCliTokenExchangeGrant` (`Services/ClientGrants`): a one-time, additive step in
+  `DefaultConfigurationCreatorService.SetupTenantAsync` (every identity start, tenant create/update) that
+  appends the token-exchange URN to `AllowedGrantTypes` of every client with `ClientId == "octo-cli"` and
+  touches nothing else. It runs AFTER the blueprint apply and AFTER the child-tenant mirror provisioning,
+  because that mirror copies the parent's grants over a mirrored `octo-cli` — in a child whose parent is not
+  fixed yet this step must have the last word. One log line per tenant: `AB#6839 octo-cli token-exchange
+  grant: tenant=… result=Added|AlreadyPresent|ClientMissing|AlreadyDone clientsUpdated=n` (no secrets).
+  Run-once marker (tenant configuration key `OctoCliTokenExchangeGrant`, written only when an `octo-cli`
+  client was found): a grant an administrator removes later is not re-added by this step (a mirror copy from
+  the parent still can). Tenants without the client are retried on each setup. No blueprint bump and no
+  manual database edit needed; after deploying the identity image, check the start-up log lines per tenant
+  (counts show which tenants were touched) and verify with `octo-cli -c GetClient -id octo-cli`.
+  Before the CLI relies on the exchange (AB#6836), operators must be provisioned in each child tenant they
+  operate (`ProvisionCurrentUser -ttid`). Tests: `OctoCliTokenExchangeGrantIntegrationTests` (real MongoDB),
+  `OctoCliClientTokenExchangeSeedTests`.
+- **Only access tokens are subject tokens (AB#7860):** `TenantExchangeProcessor` and `OnBehalfOfProcessor` validate the
+  `subject_token` with `SubjectTokenValidation.ForAccessToken` (`typ` must be `at+jwt`), so an id_token with user claims
+  is refused. OpenIddict already refuses it for the RFC 8693 grant; on-behalf-of (custom flow) relies on this check alone.
+  Test tokens minted with `JsonWebTokenHandler` need `TokenType = "at+jwt"`.
 - **v1 issues no exchanged refresh token** (short-lived B tokens, re-exchanged from
   the still-valid A token). See `docs/CONCEPT-CROSS-TENANT-TOKEN-EXCHANGE.md` and
   `docs/authentication.md` § Cross-Tenant Token Exchange. Coverage:
@@ -419,7 +514,8 @@ success**, not an error: a token is issued, it simply has no `role` claim, and r
 fail closed. A service account lacking the tenant's fachliche roles (e.g. Accounting) therefore makes
 the feature go quiet with no error anywhere. When setting up delegation for a tenant, grant
 `octo-pipeline-sa-{adapterRtId}` those roles as well —
-`PUT {tenantId}/v1/clients/{clientId}/roles/{roleName}` or `octo-cli AddClientToRole`.
+`PUT {tenantId}/v1/clients/{clientId}/roles/{roleName}` or `octo-cli AddClientToRole`. Since AB#7928 the caller must hold
+a built-in role itself to grant it to a client (403 `role-not-held` otherwise); custom roles are free.
 
 **Deployment order:** identity first, then the Communication Controller. An identity that predates
 this change ignores the new fields and would create a secretless client.
@@ -480,8 +576,8 @@ nested customer sub-tenants are out of scope for v1, see
 
 **Upkeep hooks (#4044 — done):**
 
-- `ClientStore.UpdateAsync` fires `SyncMirrorsForClientAsync` after commit
-  when the post-update client carries `AutoProvisionInChildTenants=true`.
+- `ClientStore.MutateAsync` (the only way to change a stored client since AB#8015) fires `SyncMirrorsForClientAsync`
+  after commit when the post-update client carries `AutoProvisionInChildTenants=true`.
   Propagates secret rotation / scope / lifetime changes onto every mirror
   and bumps each mirror's `SecretHashVersion`.
 - `ClientStore.DeleteAsync` fires `RemoveMirrorsForClientAsync` after commit
@@ -495,8 +591,86 @@ nested customer sub-tenants are out of scope for v1, see
 
 All three paths are best-effort: failures are logged and **do not** bubble
 back to the primary operation (client update, client delete, tenant delete).
-The next startup-time provisioning loop re-converges the state for any
-mirror that fell behind because of a transient failure.
+The same holds for the secret writes of `Client.AddSecret` / `Client.RemoveSecret`
+and the REST secret endpoints (sync after commit, error logged).
+
+**Periodic mirror reconciliation (AB#8019, Security).** Before it, only the next identity start
+re-converged a mirror that a failed sync left behind, so a secret removed in the parent stayed valid
+in the child tenants until a restart. A compensation job (decision OD-6: no outbox) closes the window:
+
+- `ClientMirrorReconciliationHostService` (`IdentityServices/Services/`) runs
+  `IClientMirrorReconciliationJob.RunOnceAsync` every `Identity:ClientMirrorReconciliationInterval`
+  seconds (default `300`, `0` or less = off; first pass one interval after start, plus a random offset
+  of at most 10 % / 30 s). The job (`IdentityServerPersistence/Services/ClientMirrorReconciliationJob.cs`)
+  calls `IClientMirrorProvisioningService.ReconcileMirrorsAsync(tenantId)` for the system tenant and every
+  registered tenant (tracking rows live in the parent).
+- `ReconcileMirrorsAsync` walks the `RtClientMirror` rows of the parent (child repositories cached per pass). Per row: read
+  the child mirror, **then** the parent client; derive the desired mirror with the same `CreateMirrorClient` +
+  `ReconcileOwnSecret` the provisioning uses; compare (`MirrorDiffers`: **every** attribute `RtClient` declares - secrets incl.
+  expiry and own secret, claims, PKCE/DPoP flags, lifetimes, all URIs, ... -, lists as multisets, records by attribute, the mirror
+  marker case-insensitively; not the entity id/version/timestamps); write only on a difference, then bump `SecretHashVersion`
+  (version-checked; a concurrent bump wins) and publish `CorsClientsUpdate`. The tracking row is the authority: a tracked mirror
+  follows its parent even after the flag was switched off. An unreachable child tenant is skipped (row kept).
+- **Missing mirror:** the row is re-read right before the insert (gone = skip), the client is inserted, then the row is written
+  **with its version**; when that fails (row removed by `RemoveMirrorAsync` / the client-delete cleanup, or another replica
+  re-created the mirror first) the inserted client is deleted again. No untracked orphan, no duplicate.
+- **Deleted parent client** (delete cleanup failed): the mirror is removed on the **second consecutive** pass that misses the
+  parent (`MissingParentPassesBeforeRemoval`, per process), and only a child client carrying this parent's marker.
+- 🔴 **Every mirror writer is version-checked (replica safety, review finding on #230).** A replace *without* an expected version
+  writes the entity as given and does **not** advance `rtVersion` (engine AB#7769), so the check only holds when every writer
+  takes part. All child-mirror writes go through `ConvergeChildMirrorAsync` (immediate sync, start-up provisioning, backfill,
+  reconciliation: read child, read parent, derive, replace with the read `rtVersion`, re-read and re-derive on
+  `RtVersionConflictException`, at most `MaxMirrorWriteAttempts` = 5) or the versioned `RotateMirrorSecretAsync`. The sync re-reads
+  the parent after the child (the passed snapshot is only the fallback), so a delayed sync cannot write an older parent state over
+  a newer one. Result: a write after our child read makes our replace fail, a write before it is visible to the comparison while
+  the parent was read after it; neither a removed secret nor a superseded own secret can come back.
+- 🔴 **All other writers of a client record are versioned too (AB#8054).** Every writer that can touch a mirror writes with the
+  `rtVersion` it read, so its write advances `rtVersion` and a reconciliation pass that read the mirror before it fails its check
+  and re-reads (before, such a write left `rtVersion` unchanged and the stale pass overwrote it unnoticed):
+
+  | Writer | How |
+  |---|---|
+  | REST client `PUT`, overlay URIs, overlay clean-up, `PATCH autoProvisionInChildTenants` (any tenant, mirrors included) | `IOctoClientStore.MutateAsync` (AB#8015; `UpdateAsync` is gone), retry on conflict, `409` after 20 attempts |
+  | `octo-cli` token-exchange grant step (`OctoCliTokenExchangeGrant`) | replace with the version read in the same transaction |
+  | Post-blueprint URI restore / URI family pass (`DefaultConfigurationCreatorService`) | replace with the version read in the same transaction |
+  | Bus consumer `CreateIdentityDataCommandRequestConsumer` (existing client) | replace with the version read in the same transaction; a conflict fails the message, which is retried |
+  | Tracking row: immediate sync, start-up provisioning, mirror secret rotation | the row is re-read right before the write (sync) and written with its version; a concurrent bump wins (the counter is informational). When the sync or the provisioning had to **insert** the mirror, the versioned row write claims the insert, exactly as the reconciliation does: a row that changed or vanished meanwhile (another writer re-created the mirror, `RemoveMirrorAsync`, the delete cleanup) withdraws the inserted client, so no duplicate and no untracked mirror (a removed mirror the sync would otherwise have re-created) stays behind |
+  | **Blueprint seed upsert** (engine `ImportRt`, `ImportStrategy.Upsert`) | **not changed** (decision AB#8054, see below) |
+
+  **Blueprint seed upsert - why no engine change.** The import reads the stored entity (to keep its `Secret` / `TenantOwned`
+  attributes) and replaces it in **one MongoDB transaction**. A write that commits after that read makes the replace fail with a
+  write conflict (MongoDB snapshot isolation; the engine reports the same case as a version mismatch for versioned writes), so the
+  seed can never write back a secret the reconciliation or a secret delete removed in between - it is not a stale writer. What it
+  does not do is advance `rtVersion`, so a reconciliation pass that read the mirror before the seed write overwrites the seed's
+  values with the values derived from the parent: the intended direction (a mirror is derived data), and the start-up provisioning
+  that runs right after the apply in `SetupTenantAsync` converges every system-parent mirror again anyway. Making the bulk upsert
+  version-checked would change every `ImportRt` caller (blueprints, migrations, user imports) for no security gain.
+  `TransactionalReadModifyWrite_ThatReadTheMirrorBeforeTheJobsWrite_CannotWriteTheRemovedSecretBack` pins the guarantee.
+- Logs: a failing mirror or tenant is a Warning (not an Error every pass); test seams `BeforeMirrorWriteForTests` (client id,
+  child tenant id) / `BeforeMirrorInsertForTests` / `BeforeMissingMirrorWriteForTests` (AB#8054: between the child read of a missing
+  mirror and its insert) (internal) let the integration tests interleave writers.
+- **Expiry is copied now.** `CopySecrets` dropped `ExpirationDateTime`, so a parent secret that expired kept
+  authenticating in every child tenant; mirrors now carry the expiry (also the carried-over own secret).
+- **Metrics/logs:** meter `Meshmakers.Octo.Identity` (registered in `Program.cs` via
+  `ConfigureOpenTelemetryMeterProvider`): `identity.client_mirror.reconciled` (`outcome` = repaired / removed /
+  skipped / failed) and `identity.client_mirror.reconcile.runs` (`outcome` = ok / tenant_failed); labels never
+  carry tenant, client, secret or hash. One Information line per repaired mirror (client id, tenants, version)
+  and one summary per pass with counts when something changed; never a secret value or hash.
+- Bound: a removed / added / rotated / expired parent secret reaches every reachable mirror within about one
+  interval after the failed sync. The integration-test factory sets the interval to `0`; tests call the job.
+- **Tests:** `tests/IdentityServices.IntegrationTests/Api/Methods/ClientMirrorReconciliationTests.cs` (real MongoDB,
+  real child tenant and token endpoint; the immediate sync is fault-injected by a decorator: removed secret still
+  valid in the child after the failed sync, gone after the job, child token refused; added secret; expired parent
+  secret; in-sync mirror (rich client) not written; orphaned mirror removed after the grace pass; two parallel passes
+  without a duplicate; a mirror secret rotation and an immediate sync interleaved between the job's parent read and its
+  write (red with unversioned writers); AB#8054: a client `PUT` in the child tenant, the `octo-cli` grant step and an immediate sync
+  that re-creates a missing mirror, each between the job's reads and its write (red with unversioned writers), and a transactional
+  stale write that cannot bring a removed secret back; a missing mirror whose row is removed before the insert; two parallel passes
+  re-creating a missing mirror; metric and log canary),
+  `tests/IdentityServerPersistence.UnitTests/Services/ClientMirrorReconciliationTests.cs` (comparison incl. token fields,
+  marker case, read order + version, conflict, orphan with grace pass and foreign client, unreachable child, withdrawn
+  insert, row gone on the re-read),
+  `tests/IdentityServices.UnitTests/Services/ClientMirrorReconciliationHostServiceTests.cs` (interval).
 
 **Management REST endpoints (#4045 — done):** all under
 `{tenantId}/v1/clients/{clientId}/...`:
@@ -511,7 +685,7 @@ mirror that fell behind because of a transient failure.
 
 Backed by `ClientMirrorController` + `ClientAutoProvisionFlagController` in
 `TenantApi/v1/Controllers/`. The `PATCH` flow piggybacks on
-`ClientStore.UpdateAsync` so the post-commit upkeep hook (#4044) fires
+`ClientStore.MutateAsync` (version-checked, AB#8015) so the post-commit upkeep hook (#4044) fires
 automatically — flipping the flag from `false` → `true` does **not**
 backfill existing sub-tenants; the operator must explicitly trigger
 `provisionInExistingTenants` for that (or wait for the next service
@@ -674,6 +848,23 @@ re-key the tenant's System.Identity `CkModel` row to a newer version.
 
 The `AdminProvisioningController` allows users with the TenantManagement or UserManagement role to pre-provision cross-tenant user mappings in a **target tenant** without needing `allowed_tenants` for that tenant. Since AB#5859 the target must be the caller's own tenant or one of its registry descendants (system-tenant callers: any tenant) — `AdminProvisioningTargetScopeFilter`; before, the role was documented but not checked and any target was reachable. It is routed via the system tenant: `{tenantId}/v1/adminProvisioning/{targetTenantId}`.
 
+**Regression tests and the route rule (AB#4824):** every route whose path contains `{targetTenantId}` must carry
+`[TypeFilter(typeof(AdminProvisioningTargetScopeFilter))]` (class or action). `AdminProvisioningRouteCoverageTests`
+derives the route set by reflection over all controllers, so a new route without the filter fails the unit tests.
+`AdminProvisioningPipelineTests` runs the real routing, `AdminProvisioningController`,
+`IdentityTenantAdministrationWritePolicy` and filter against a fake tenant registry: own/descendant 201;
+sibling, sibling descendant, unrelated, system and unknown target 403 with an identical response; system caller
+any registered tenant (unknown tenant: 404 from the action); create-then-provision; policy and filter together
+(roleless caller stopped by the policy, role holder by the filter); `RoleEnforcement=Warn` (the filter only
+logs, the call passes — the fix depends on `Enforce`). Since AB#6758 the rule covers every action that names a target tenant — `{targetTenantId}`/`{childTenantId}` in
+the route **or** a `targetTenantId`/`childTenantId` parameter (e.g. the query of
+`clients/{id}/mirrors/provisionInTenant?childTenantId=`): `ClientMirrorController.ProvisionInTenant`, `RotateSecret` and
+`Delete` carry the filter (it reads route and query values; every named tenant must be in scope), and
+`ClientMirrorProvisioningService` checks the subtree again (`ClientMirrorScopeException` → 403) for
+`ProvisionForChildTenantAsync`/`ProvisionInTenantAsync`/`RotateMirrorSecretAsync`/`RemoveMirrorAsync`; the system tenant as
+parent reaches every tenant (tenant creation, dynamic client registration). Tests: `ClientMirrorScopePipelineTests`,
+`ClientMirrorScopeGuardTests`, the extended `AdminProvisioningRouteCoverageTests`.
+
 This solves the chicken-and-egg problem: after creating a child tenant, the user doesn't have `allowed_tenants` for it yet, so the per-tenant `ExternalTenantUserMappingsController` is inaccessible. The admin provisioning controller uses `ISystemContext.TryFindTenantRepositoryAsync()` to access the target tenant's database directly.
 
 **Endpoints:**
@@ -688,6 +879,26 @@ This solves the chicken-and-egg problem: after creating a child tenant, the user
 | `POST` | `/{targetTenantId}/withGroups` | Create a mapping and make it a member of the given target-tenant groups (group-based role inheritance) |
 | `POST` | `/{targetTenantId}/provisionCurrentUser` | Auto-provision current user with all roles |
 | `DELETE` | `/{targetTenantId}/{mappingRtId}` | Delete a mapping in target tenant |
+
+**`provisionCurrentUser` from a shadow user (AB#8017):** when the calling token's subject is a cross-tenant
+shadow user (`xt_…`, e.g. a session or octo-cli context scoped to an intermediate tenant A that provisions into
+grandchild B), the mapping is written for the caller's **home identity** — the root of its `xt_` chain
+(`ICrossTenantShadowUserChainResolver.GetSourceChainAsync`, last tier), looked up by name in the home tenant — not
+for the shadow user. Before, the mapping was keyed on (A, shadow); the exchange from the home token (what MCP and
+octo-cli do for every later call) never finds such a mapping (`ResolveExchangeSourceAsync` only tries the subject
+and its home, `GroupRoleResolver` only the B shadow's chain), so the call answered success and the user stayed
+`tenant_not_provisioned`. One home mapping serves both paths: from the home token directly, and from the A shadow
+(dual-candidate rule AB#4966). The exchange was deliberately **not** widened to ancestor shadow mappings. The
+caller's name is taken from the user stored in its tenant (the token claim only when the user cannot be read). A
+shadow whose chain is ambiguous or broken, whose home tenant is unregistered, whose home user does not exist or
+whose home tenant is the target itself is refused with **409** (`ProblemDetails`, names the caller and says to
+provision from the home tenant) and nothing is written — fail closed. The `OctoTenantIdentityProvider` is ensured
+for the mapping's source tenant (the home tenant), as for a call from the home tenant. Old shadow-keyed mappings
+stay (no migration); `provisionCurrentUser` from the home tenant adds the home mapping and repairs the exchange.
+The response body (`SourceTenantId`/`SourceUserId`/`SourceUserName`) names the identity the mapping was written
+for. Tests: `TenantExchangeIntegrationTests` (`ProvisionCurrentUser_AsShadowUserOfIntermediateTenant_…`,
+`…_FromHomeTenant_RepairsTheStateOfAShadowKeyedMapping`, `…_ShadowUserWithoutResolvableHome_…`,
+`…_ShadowUserOfAnUnregisteredTenant_IsRefused`), over the real `TenantExchangeProcessor.ExchangeAsync` for R → A → B.
 
 The `sourceUsers` endpoint resolves the target's ancestor chain by walking
 `RtOctoTenantIdentityProvider.ParentTenantId` (breadth-first, cycle-safe) and searches each ancestor's
@@ -716,7 +927,7 @@ of the selected groups — the same mechanism `provisionCurrentUser` uses with `
 > prefix, link generation does not fill them in and answers "No route matches". The hand-built link in
 > `ExternalTenantUserMappingsController.Create` predates this rule and still has those two weaknesses.
 
-The `provisionCurrentUser` endpoint extracts `sub`, `preferred_username`, and `tenant_id` from the JWT, fetches all roles from the target tenant, and creates an `RtExternalTenantUserMapping` with all role IDs. It also adds the mapping as a member of the **TenantOwners** group (via `GroupMember` association), so the user inherits all roles through group membership. If a mapping already exists for the user, it returns the existing one.
+The `provisionCurrentUser` endpoint extracts `sub`, `preferred_username`, and `tenant_id` from the JWT, fetches all roles from the target tenant, and creates an `RtExternalTenantUserMapping` with all role IDs. It also adds the mapping as a member of the **TenantOwners** group (via `GroupMember` association), so the user inherits all roles through group membership. If a mapping already exists it is judged, not just returned (AB#7088): one that grants no effective role (no existing role in `MappedRoleIds`, none via a group) or carries a wrong `SourceUserName` (role lookup keys on the NAME, this lookup on the user id) is repaired in place; one that already grants a role is left alone. The `X-Provisioning-Outcome` response header reports `created` / `repaired` / `already-provisioned`. The token exchange stores no mapping any more (`FindOrCreateCrossTenantUserAsync(..., storeMappingIfMissing: false)`); the login paths still store a bare one for a first-time shadow user.
 
 The `GET` endpoint returns `ExternalTenantUserMappingDto` with a `GroupNames` field populated by querying inbound `GroupMember` associations for each mapping entity.
 
@@ -742,7 +953,7 @@ Key components:
 - **`GroupsController`**: REST API at `{tenantId}/v1/groups` with full CRUD, role assignment, member management, and circular group prevention
 - **`TenantOwners`** group: Default group provisioned in every tenant with all 10 default roles. Created by `DefaultConfigurationCreatorService` and `IdentityAssociationMigration` (migration 9→10)
 
-Current identity schema (migration) version: `23` (migration 21→22 added the `RtOAuthAuthorization`/`RtOAuthToken` OpenIddict store types; 22→23 re-runs the full index update so abstract collection roots get their indexes, AB#5261). Current CK model version: `System.Identity-2.24.0` (2.19.0–2.23.0 were ownership/runtime-state classifications, 2.24.0 added `DataPolicy.ProtectBlueprintLocked`, see the sections below) — the 2.12.0→2.17.0 changes (verified-identifier directory AB#5122+) are additive schema needing no numeric migration; 2.17.0→2.18.0 REPLACED `RtUser.PreferredChannel` with `RtUser.PreferredChannelBindingId` (AB#5149 revision, binding-specific preference). The feature shipped the day before the replacement with no external consumers, so the old attribute was dropped without a migration — any stored kind-level values are simply ignored (users re-select).
+Current identity schema (migration) version: `23` (migration 21→22 added the `RtOAuthAuthorization`/`RtOAuthToken` OpenIddict store types; 22→23 re-runs the full index update so abstract collection roots get their indexes, AB#5261). Current CK model version: `System.Identity-2.30.0` (2.30.0 = `User.DisableTwoFactor-1`, AB#7879, see below; 2.29.0 = the identity method declarations, AB#7773, see below; 2.28.0 = first ckLanguage 2 release with access modifiers, AB#7772, see below; 2.19.0–2.23.0 were ownership/runtime-state classifications, 2.24.0 added `DataPolicy.ProtectBlueprintLocked`, 2.25.0 the `Secret` identity-provider `ClientSecret`, 2.27.0 the `Secret` credential material of a user, see the sections below) — the 2.12.0→2.17.0 changes (verified-identifier directory AB#5122+) are additive schema needing no numeric migration; 2.17.0→2.18.0 REPLACED `RtUser.PreferredChannel` with `RtUser.PreferredChannelBindingId` (AB#5149 revision, binding-specific preference). The feature shipped the day before the replacement with no external consumers, so the old attribute was dropped without a migration — any stored kind-level values are simply ignored (users re-select).
 
 ### Tenant-owned attributes: a blueprint update never reverts an administrator's decision (AB#6324, AB#6329; System.Identity 2.23.0)
 
@@ -764,6 +975,413 @@ no longer change them on an existing one (not even tighten a policy or a client)
 `ClientMirrorProvisioningService` writes mirrors with insert/replace, not `ImportRt`, so mirroring is unaffected. Regression tests:
 `BlueprintOwnershipIntegrationTests` (real MongoDB; compiled ownership, shipped policy seed, Enforce over an AuditOnly seed, client,
 secrets, resources).
+
+### Credential material of a user is `Secret`: never exported, kept on a re-apply (AB#7766; System.Identity 2.27.0)
+
+Audit finding H3: `User.PasswordHash`, `User.SecurityStamp` and `User.UserTokens` (the `UserToken` record holds the TOTP key and the
+recovery codes in `Value`) were `SeedOwned`, so an `ExportRt` (export as template, tenant clone) carried them. They are now
+`ownership: Secret` (definition level, `User` is their only assignment) and so is the `UserToken.Value` record member
+(assignment override). The engine skips `Secret` in `RtEntityToTcDtoConverter` (shared by `ExportRtModelByQueryCommand` and
+`ExportRtModelByDeepGraphCommand`) and keeps it on an Upsert. SeedOwned -> Secret is an ownership change: `octo-ckc ValidateVersion`
+rates it **Minor**, ids, types and defaults are unchanged, no migration entry, still ckLanguage 1 (the access modifiers followed with 2.28.0, below).
+**Consequence (only up to 2.27.0):** a tenant cloned with ExportRt/ImportRt under 2.27.0 carried its users without password and 2FA
+material; they reset the password in the target tenant. **Since 2.28.0 `ImportRt` refuses users altogether** — there is no user
+export/import any more; the supported ways are listed in octo-documentation `technologyGuide/identityService/users-and-roles.md`
+§ *Moving Users to Another Tenant* (`#moving-users-to-another-tenant`): repository dump/restore, creating the users again, a
+cross-tenant user mapping, external sign-in with self-registration. No blueprint seeds `System.Identity/User` (`BootstrapBlueprintSeed_DoesNotSeedUsers` guards it). A repository
+dump is unaffected. Tests: `CredentialMaterialExportIntegrationTests` (real MongoDB; compiled ownership, converter output of a user
+with hash/stamp/tokens, Upsert of a seed-shaped user keeps all three).
+
+### Access modifiers on `RtUser`, first ckLanguage 2 release (AB#7772; System.Identity 2.28.0)
+
+Closes accepted risk R13 (password hashes and security fields readable through generic GraphQL). `ckModel.yaml` is `ckLanguage: 2`; the
+`User` assignments carry `access`:
+
+| Access | Attributes |
+|--------|------------|
+| `Hidden` | `PasswordHash`, `SecurityStamp`, `UserTokens` (never in GraphQL output or input, never in an ExportRt; an import refuses them) |
+| `MethodOnly` | `UserName`, `Email` (readable, changed only by a type method) |
+| `ReadOnly` | `AccessFailedCount`, `LockoutEnd` (readable; importable; written by the identity service) |
+
+`ConcurrencyStamp` does not exist in this model. All seven attribute definitions are `securitySensitive: true`, so the tightening is **Minor +
+acknowledge** (row T7a of `docs/ck-semver-rules.md` in `octo-construction-kit-engine`: the one release that moves a classic model to
+ckLanguage 2, once per model; entries in `compatibility.acknowledge`). The next release follows the normal rule (T7) again: loosening is Minor,
+tightening another attribute is Major. Every existing type and record declares `derivable: Any` (the ckLanguage 2 default is `Model`; the flip
+would be a Major of its own) - **declare it on every new type/record that should stay derivable elsewhere**.
+
+**Identity's own writes are unaffected**: the access modifiers guard the generic GraphQL path and the *import-like* paths (ImportRt, blueprint
+seed/update, migration Add/Update/Transform: `OCTO-CK139` for Hidden/MethodOnly). `OctoUserStore`, the cross-tenant provisioning and the
+password/2FA flows write through `ITenantRepository` (`InsertOneRtEntityAsync`, `ReplaceOneRtEntityByIdAsync`), which is not guarded. No
+identity seed, blueprint or migration writes these attributes (`BootstrapBlueprintSeed_DoesNotSeedUsers`). Code that must set one of them from
+an import (a test seed, a tool) creates the user through the repository instead. Tests: `CredentialMaterialExportIntegrationTests` (compiled
+access values, `OCTO-CK139` refusal per attribute, ReadOnly import still possible, repository writes of all seven attributes still work).
+
+### Identity method declarations (AB#7773; System.Identity 2.29.0)
+
+`User`, `Group`, `Client` and `DataPermission` declare their identity operations as CK methods (declarations only; the handlers and the
+method host follow with AB#5672, AB#7774, AB#7776-AB#7780, the typed GraphQL mutations with F3.7). Until a handler is registered the gateway
+answers `METHOD_HANDLER_NOT_AVAILABLE`; the REST API is unchanged. **Release the identity service with this model only when the handler
+stories are merged.**
+
+| Type | Methods (`-1`) | Roles |
+|------|----------------|-------|
+| `User` | `ChangePassword` (instance, `allowSelf`, no role), `ResetPassword`, `SetRoles`, `AddRole`, `RemoveRole`, `Merge` (handler AB#7778), static `CreateUser` (handler AB#7777); `DisableTwoFactor` since 2.30.0 (AB#7879) | `UserManagement` |
+| `Group` | `AddMember`, `RemoveMember` (`memberKind` enum `GroupMemberKind` = `User`/`Client`, `memberId`), `SetRoles` | `UserManagement` |
+| `Client` | `AddSecret` (result `sensitive`: the generated secret, shown once), `RemoveSecret` (by `secretValue`, REST parity) | `TenantManagement`, `UserManagement` |
+| `DataPermission` | `GrantToRole`, `RevokeFromRole` | `UserManagement` |
+
+Rules behind the shape (do not change them without reading this):
+- **Roles = REST parity** (`IdentityApiAuthorizationPolicies`: `UserAdministrationRoles`, `TenantAdministrationRoles`). Every method declares
+  `authorization.dataAccess: Write` explicitly (AB#7036; the effective default, so no SemVer change; it raises the model's `minEngineVersion`).
+- **`sensitive` on every password or secret parameter** (`currentPassword`, `newPassword`, `password`, `secretValue`) and on the `AddSecret`
+  result; such a method can never have a pipeline handler (compiler messages 132/134). Pinned by `IdentityMethodDeclarationsIntegrationTests`.
+- **`Create` is a reserved method name** (compiler error 102: `Create`, `Update`, `Delete` belong to the generic mutations) - the static user
+  method is `CreateUser-1`.
+- **`replacesGenericCreate` only on `User.CreateUser-1` (3.0.0, AB#8053).** Group, Client and DataPermission are seeded by
+  `System.Identity.Bootstrap` (the flag would make AB#7121 refuse every new tenant), so they do not carry it. On `User` the flag is a
+  **MAJOR** change of the model (row M16 of `docs/ck-semver-rules.md` in octo-construction-kit-engine: a new method with the flag on an
+  existing type, decision 2026-10-19) and shipped with System.Identity 3.0.0; until 2.30.0 the engine stood in for it with a runtime rule
+  (AB#7777), which was removed. No blueprint seeds a User.
+- **No `LAST_ADMIN_PROTECTED`**: the REST API has no last-admin rule (AB#7914 refuses it with `METHOD_FORBIDDEN` / `last-administrator`). `User.DisableTwoFactor-1` followed in 2.30.0 (AB#7879, section below).
+- `compatibility.acknowledge` of 2.28.0 is gone (an acknowledgement is valid for one release, OCTO-CK204). `octo-ckc ValidateVersion`
+  against the published 2.28.0: **MINOR** (15 additions, no Major row).
+- Tests: `IdentityMethodDeclarationsIntegrationTests` (compiled model from the CK cache of a real tenant: method set, roles, sensitive
+  parameters and result, write access, no replacesGenericCreate). Docs: octo-documentation `identityService/methods.md` (en + de).
+
+### CK method host of the identity service and `User.ChangePassword` (AB#5672)
+
+The identity service hosts CK methods as a remote handler (bus transport, SDK `Meshmakers.Octo.Services.Methods`). All of it lives in
+`src/IdentityServices/Methods/`; a later handler story (AB#7776-AB#7780; `User.ResetPassword` AB#7774 is the second one, section below) adds a handler class and **one row** to
+`IdentityMethodHost.Handlers` (method id constant of `SystemIdentityCkIds`, handler type, `CarriesSecret`, `b => b.Handle<T>(id)`) - nothing else.
+
+- **Host setup** (`IdentityMethodHost`, called once from `Program.cs` after `AddOctoIdentityPersistence`): `AddCkMethodHandlers("IdentityService", ...)`,
+  `AddCkMethodHandlerDiscovery()` in the event hub configuration, and `AddCkMethodCallerTokenValidation()` with the authority of this service
+  (`Identity:AuthorityUrl`, issuer with trailing slash; `Methods:Token` can override; Development accepts the self-signed local authority). The host
+  validates the forwarded access token before the handler runs (a call without a valid token is `METHOD_FORBIDDEN`) and hands the validated caller
+  as `context.CallerPrincipal`. Without any selected handler nothing is hosted (no queue, no announcement, no token validation requirement); since AB#7776 the role methods
+  carry no secret and are always selected, so the host runs in every configuration and only the password methods wait for the switch.
+- **Production gate `Methods:Identity:EnablePasswordMethods`** (default **false**, env `OCTO_Methods__Identity__EnablePasswordMethods`, Helm: the same key under
+  the identity service configuration / environment): decided by Gerald 2026-10-23, no method carrying a password or secret on staging-1, prod-1,
+  prod-2 before B0 (restricted broker user, Heimdall). Off: handlers whose registration has `CarriesSecret = true` are not registered, the service
+  announces no password method and the gateway answers `METHOD_HANDLER_NOT_AVAILABLE`. On (local, test-2 with test accounts): hosted.
+  `IdentityMethodDeclarationsIntegrationTests.EveryHandlerRegistration_FlagsASecretCarryingMethod_AsTheModelDeclaresIt` compares every
+  `CarriesSecret` with the compiled model (a sensitive parameter or result), so a new handler cannot pass the gate by a forgotten flag.
+  The switch is read while the service collection is built: restart the service after changing it.
+- **Startup validation tenant.** The SDK (octo-common-services, AB#7912) normalizes the tenant id of the start-up validation to the lower case CK
+  cache key, so a default installation (`SystemTenantId` = `OctoSystem`) validates its methods without configuration; `IdentityMethodHost` sets no
+  `Methods:ValidationTenantIds` any more (the AB#5672 workaround was removed). Needs the common-services package of AB#7912 or newer.
+  `TheStartupValidation_NeedsNoIdentityWorkaround_WithTheDefaultConfiguration` pins that the host adds nothing. On a rolling upgrade the System.Identity model of
+  the system tenant must already be the embedded version when the validation runs; the identity setup imports it first.
+- **Tenant on the bus.** A handler has no HTTP request, but every store resolves its tenant through `IMultiTenancyResolverService`. The handler calls
+  `IMethodTenantAccessor.BindAsync(context.TenantId)` **before** it resolves `UserManager`, the stores or `IUserCredentialChangeService` from its scope
+  (it takes `IServiceProvider` for exactly that reason); `MethodTenantResolverService` answers with the bound tenant and falls back to the HTTP
+  resolution when none is bound (HTTP requests are unchanged). Never resolve a store in a handler constructor.
+- **`User.ChangePassword`** (`UserChangePasswordHandler`): self only. The declared authorization (`allowSelf`, no role) also admits an administrator for any
+  target (default-deny rule of the SDK), so the handler requires `CallerPrincipal.SubjectId == TargetRtId` itself and answers `METHOD_FORBIDDEN`
+  (`reason=not-self`) **before** any lookup: identical for an existing and a missing target, for another user, for an administrator and for a service
+  token (administrators use `ResetPassword`). Order: tenant, user, shadow user (`SHADOW_USER_PASSWORD_NOT_ALLOWED`), lockout (`USER_LOCKED_OUT`),
+  `UserManager.ChangePasswordAsync` (wrong current password = `CURRENT_PASSWORD_INVALID`, counted with the atomic lockout counter of AB#7854;
+  policy failure = `PASSWORD_POLICY_VIOLATION` with one detail per failed rule, code only e.g. `PasswordTooShort`, never a value), counter reset, then
+  `IUserCredentialChangeService.OnPasswordChangedAsync(..., PasswordChangePath.MethodChangePassword, ...)` (security stamp, revocation of all refresh
+  tokens and authorizations of the user in this tenant, log line; AB#7765). A failing revocation throws, the caller gets `METHOD_HANDLER_FAILED`.
+  REST parity: `ManageApiController.ChangePassword` (unchanged); the method additionally counts failures (REST does not).
+- **Audit.** `IdentityMethodAuditWriter` writes one event per call (success and failure) into the event log of the tenant (category `Identity.Method`,
+  details `methodId`, `invocationId`, `outcome` (`SUCCESS` or the error code), `targetRtId`, `callerSubject`; no parameter, no hash, no token). It is
+  not `IIdentityAuditService` (that one reads the tenant from the HTTP request and persists failures only). The gateway-side one-per-invocation record
+  `Method.Invocation` of AB#6919 (`ICkMethodAuditRecorder`) is written where a call is dispatched (the SDK's remote host does not run the pipeline); it is a different category.
+- **Secrets.** `currentPassword` / `newPassword` are only passed to `UserManager`; the generated parameter record prints `***`. Never log or audit the
+  parameters or `context.Parameters`.
+- **Tests:** `Api/Methods/UserChangePasswordMethodTests` (real MongoDB and identity host with the switch on; the bus side (endpoints, announcement) is removed in the test host
+  because it has no broker): success with new/old sign-in and revocation, wrong current password, lockout, policy, other user / missing target / service token
+  / administrator, shadow user, forged caller without a valid token, method without handler; `Methods/IdentityMethodHostTests` (switch default and
+  selection, audit). A valid-token call through the real bus is verified on the local stack (see the PR of AB#5672).
+
+### User role methods `SetRoles`, `AddRole`, `RemoveRole` (AB#7776)
+
+`UserSetRolesHandler`, `UserAddRoleHandler`, `UserRemoveRoleHandler` (`src/IdentityServices/Methods/`, shared flow in `UserRoleMethodHandlerBase<T>`) replace
+or change the **direct** roles of a user (the `AssignedRole` association; roles inherited from groups are never read or written, as in REST). The rule is
+**REST parity, never more**; the guards of `UsersController` (`PUT users/{u}/roles`, `PUT/DELETE users/{u}/roles/{r}`) are, and the handlers implement exactly this list:
+
+| Guard of REST | In the method |
+|---------------|---------------|
+| write policy: scope `octo_api` (not `octo_api.read_only`) and tenant role `UserManagement` (`IdentityUserAdministrationWritePolicy`, `RoleEnforcement=Enforce`) | gateway checks the declared role; the handler checks scope + role again on the validated `CallerPrincipal` (forged bus message) -> `METHOD_FORBIDDEN`, `reason=role-required`. Warn mode of REST is not copied |
+| user must exist (404) | `METHOD_TARGET_NOT_FOUND` (also for a target that is no object id and for an unknown tenant) |
+| role must exist, by name, case-insensitive (404) | `ROLE_NOT_FOUND` with parameter `roleName` |
+| AddRole of an assigned role (400) | `ROLE_ALREADY_ASSIGNED` |
+| RemoveRole of a role that is not assigned (400) | `ROLE_NOT_ASSIGNED` |
+| client-credentials tokens are judged by their client roles | a service token with `UserManagement` is allowed |
+
+Since AB#7914 REST and the methods share the escalation rules of `IRoleChangeGuard` (next section); before it REST had no other rule and the methods copied that.
+`SetRoles` takes role **names**, REST takes ids; both resolve every role first (one unknown role changes nothing) and write only the difference (AB#7914; REST used to remove all direct roles first).
+
+Audit: the `Identity.Method` event of every call (success and every refusal, `IdentityMethodAuditWriter`) additionally carries `rolesBefore` and `rolesAfter`
+(direct role names, sorted, comma separated; absent when the caller was refused before the target was read). Role methods are not behind
+`Methods:Identity:EnablePasswordMethods` (`CarriesSecret = false`; the model-vs-registration test guards the flag). Tests: `Api/Methods/UserRoleMethodTests`
+(every guard, case/duplicates, empty list, audit, forged caller, hosting), `UserRoleMethodParityTests` (REST and method side by side per guard, the
+documented difference, self grant), `IdentityMethodHostTests`. The integration test factory removes the bus side of the method host
+(`CkMethodHandlerStartupService`, heartbeat) because the test host has no broker.
+
+### Role change guard: no escalation, last administrator stays (AB#7914)
+
+`IRoleChangeGuard` (`src/IdentityServices/Authorization/RoleChange/RoleChangeGuard.cs`, scoped) is the one rule set for changes of the **direct** roles of a
+user. Callers: `UsersController` (`PUT users/{u}/roles`, `PUT`/`DELETE users/{u}/roles/{r}`, `DELETE users/{u}`, `POST users/{u}/merge` = source user) and the
+three role method handlers (`UserRoleMethodHandlerBase.GuardAsync`). It is **never** called from `OctoUserStore`/`UserManager`: first admin of a new tenant
+(`UserManagementService`), the Bootstrap blueprint seed, the one-time grants (`SecretManagementAdminGrant`, file role grants), the scratch-tenant creator grant, cross-tenant
+provisioning and the login group rules assign roles through the store and stay unrestricted (`TheGuard_IsNotCalledFromTheUserStoreOrTheUserManager…` pins the constructors).
+AB#7927 (groups, mappings, role definitions, next section) and AB#7928 (client roles, section below) reuse it: `EvaluateGrantAsync(caller, addedRoleNames)` is the "grant only what you hold" part alone.
+
+| Rule (checked in this order, on the **difference** before/after, never on the full list) | REST | Method (`METHOD_FORBIDDEN`, parameter `reason`) |
+|---|---|---|
+| `self-grant`: caller `sub` == target rtId and a direct role is **added** (removing own roles and an unchanged list are fine) | 403 problem+json, `code` | `self-grant` |
+| `role-not-held`: an added **built-in** role (stored `RtWellKnownName`) is not in the caller's role claims; custom roles are free; removing is never judged | 403, `code`, `roleNames` | `role-not-held` + `roleNames` (comma separated) |
+| `last-administrator`: the target effectively holds `UserManagement` now, not after the change, and **no other user** holds it (direct, through groups incl. nested, `xt_` shadow users through mappings via `IGroupRoleResolver`; **clients do not count**; a tenant with zero holders is not blocked) | 409, `code` | `last-administrator` |
+
+- **Caller** = `RoleChangeCaller` (`sub`, `client_id`, `role` claims of the validated token; for methods the validated `CkMethodPrincipal`, never the informational `Caller`).
+  A client-credentials caller has no `sub`: never self, judged with the client's roles. No exemption for services (none calls these endpoints).
+- **No CK change.** Error contract is `METHOD_FORBIDDEN` + `reason` (`CkMethodOutcome.Forbidden`); a new declared code would be a Major of System.Identity.
+  REST answers `application/problem+json` (`RoleChangeProblems`, `code` extension, readable `title` that Studio shows). Hard switch, no warn mode.
+- **Audit.** Methods: the existing `Identity.Method` event carries `reason` (+ `roleNames`). REST: one failure event `Identity.RoleChangeRefused` through
+  `IIdentityAuditService` (caller, target rtId, reason, role names, request path; never a token or password) plus a WARN log.
+- **REST SetRoles** validates every role id first (404 changes nothing; it used to strip the direct roles first) and writes only the difference.
+- **Residual race:** two administrators removing each other's `UserManagement` in parallel can both pass the check (no cross-request lock); documented.
+- The last-administrator search is only run when the target loses `UserManagement`: direct holders, members of groups whose subtree carries the role, then (rare path) every `xt_` user
+  through `IGroupRoleResolver`.
+- **Tests:** `Api/TenantApi/RoleChangeGuardTests` (every rule through REST and through the method handlers with the same assertions: self-grant, held/not held/custom, difference,
+  client caller, last administrator direct/group/nested group/mapping/client-not-counted/zero holders, delete + merge, audit records), `UserRoleMethod*Tests` (updated parity),
+  `RoleChangeCallerTests`. The tests that need "exactly one administrator" first remove every holder of the test database (`ClearAdministratorsAsync`).
+
+### Role change guard on groups, mappings and role definitions (AB#7927)
+
+`IRoleChangeGuard` (above) also judges the group / mapping graph and role definitions, with the same reasons, status codes and audit
+(`Identity.RoleChangeRefused`, written by `IRoleChangeRefusals`, scoped, used by the three controllers):
+
+| Caller | Check |
+|---|---|
+| `GroupsController`: `PUT groups/{id}/roles`, `PUT members/users/{u}`, `PUT members/clients/{c}`, `PUT members/groups/{g}`, `DELETE members/users/{u}`, `DELETE members/groups/{g}`, `DELETE groups/{id}` | `EvaluateAsync(caller, RoleGraphChange)` (`GroupRoles`, `MemberAdded`, `MemberRemoved`, `GroupDeleted`). `DELETE members/clients/{c}` is not judged (nothing is granted, clients are no administrators); the scratch-tenant revoke marker stays |
+| `ExternalTenantUserMappingsController`: create, update, delete | `MappingRoles` (existing id, or the source identity of a new mapping), `MappingDeleted` |
+| `RolesController`: `PUT roles/{name}` with another name, `DELETE roles/{name}` | `EvaluateRoleDefinition(role, newName)`: a role with an `rtWellKnownName` answers 409 `built-in-role` (+ `roleNames`); custom roles and a same-name save are untouched |
+
+- **One graph, one rule.** `RoleGraph` (`Authorization/RoleChange/RoleGraph.cs`, internal) loads groups (roles, child groups, user / client / mapping
+  members), mappings (mapped role ids), all users, the mappings serving each `xt_` shadow user and the direct holders of `UserManagement`. A change is applied to a
+  clone and `Holders()` (direct + groups incl. nested (depth 10, cycle safe) + mapping roles + groups of a mapping; existing **users** only, clients excluded)
+  is compared before and after: refused (409) when holders existed and none is left. A tenant without holders is not blocked. Cost: one read of all groups,
+  mappings and users per change (the 7914 check read the same data).
+- **Granted roles** = for `GroupRoles` the added role ids, for `MemberAdded` the effective roles (own + nested) of the group (for a child group: of the child), for
+  `MappingRoles` the added mapped role ids; a member that is already there grants nothing. **Self** = the caller is the added user, or the group whose roles
+  grow (or the group a child is added to) is reached by the caller (member directly, via a mapping that serves it, or a parent group of it), or the mapping serves the
+  caller (for a new mapping its source identity is in the caller's `xt_` chain). Self wins over `role-not-held`; roles are resolved to names and judged with
+  `EvaluateGrantAsync` (built-in only). Group create with roles is not judged (it has no members); the roles take effect only through a judged member add.
+- **Not guarded on purpose:** `GroupStore`/`ExternalTenantUserMappingStore` and everything that uses them directly: Bootstrap seed, setup, scratch-tenant grant,
+  cross-tenant provisioning (`AdminProvisioningController`), `LoginGroupAssignmentService`. Group methods (AB#7779) call `EvaluateAsync(caller, RoleGraphChange)`
+  and answer `METHOD_FORBIDDEN` with the `reason`; direct client roles: AB#7928 (next section but one).
+- **Tests:** `Api/TenantApi/GroupRoleChangeGuardTests` (REST on real MongoDB: self-grant direct / via parent / via child / via mapping, role-not-held for roles, members,
+  clients, nested groups, mappings, idempotent re-add, last administrator for member removal, role removal, delete, child group, mapping update / delete, mapping-in-group,
+  clients not counting, built-in role rename / delete, audit record, unchanged flows) and `Authorization/RoleGraphTests` (holders, clone, cycle, references).
+
+### Role change guard on client roles (AB#7928)
+
+A tenant administrator (`TenantManagement` is enough for the client endpoints) could give a client a built-in role they do not
+hold (e.g. `UserManagement`) and then act as that client. `ClientsController` therefore runs the "grant only what you hold" part of
+`IRoleChangeGuard` (`EvaluateGrantAsync`) before it writes a client role:
+
+| Endpoint | Judged | Refusal |
+|---|---|---|
+| `PUT clients/{id}/roles` (replace-all, role ids) | every role id is resolved first (unknown or malformed id = 404, nothing written; it used to write the edge blindly); the **added** roles (not in the client's direct roles). Only the difference is written (`IClientRoleStore.ApplyRoleChangesAsync`), never the kept roles | 403 problem+json `code=role-not-held`, `roleNames` |
+| `PUT clients/{id}/roles/{roleName}` | the role; a role the client already holds directly is answered 200 without a write | same |
+| `DELETE clients/{id}/roles/{roleName}` | never (removing is no escalation) | - |
+
+- **Built-in roles only** (stored `RtWellKnownName`); custom roles are free. No self-grant or last-administrator rule for clients (clients are no
+  administrators, AB#7914 decision 2). The caller is the token (`RoleChangeCaller.FromPrincipal`): user or client-credentials token, judged with its own
+  role claims. Hard switch, no warn mode.
+- **Audit:** `IRoleChangeRefusals` writes the WARN line and the `Identity.RoleChangeRefused` event (caller, `client <clientId>`, reason, role names), as for groups.
+- 🔴 **Write only what was judged.** `SetRoleIdsAsync` (replace-all) re-reads the assignments in its own transaction and inserts every missing
+  wanted role. Used after the check, a role that a concurrent request removed between the check and the write would be restored by a caller who does
+  not hold it (review finding on #224). The controller therefore writes only the judged additions and the removals; kept roles are never written.
+  `SetRoleIdsAsync` stays for internal callers. Pinned by `ClientsControllerRoleGuardTests` (unit) and
+  `ClientRoleAssignmentIntegrationTests.ApplyRoleChanges_WritesOnlyTheGivenDifference_AndNeverRestoresAnUnlistedRole`.
+- **Not guarded on purpose:** the bus path (`CreateIdentityDataCommandRequestConsumer`, `DistClientDto.AssignedRoleNames`: service accounts and
+  client mirroring between services, no caller) and `IClientRoleStore` itself; client mirrors get no roles anyway. Granting a client roles through
+  a group (REST `PUT groups/{id}/members/clients/{c}`, method `Group.AddMember` with `memberKind=Client`) was already judged by AB#7927 / AB#7779.
+- **No client role method exists** in System.Identity 2.29.0 (`Client` declares only `AddSecret` / `RemoveSecret`, AB#7780); the method transport for
+  client roles is `Group.AddMember`. No CK change.
+- **Tests:** `Api/TenantApi/ClientRoleChangeGuardTests` (REST on real MongoDB: not held / held / custom for both endpoints, `TenantManagement` without
+  `UserManagement` cannot grant `UserManagement`, difference only, client-credentials caller, unknown / malformed id, audit record, guard not on the bus
+  or store path), `ServiceAccountClientProvisioningIntegrationTests.BusPath_StillAssignsABuiltInRole_WithoutTheRoleChangeGuard`,
+  `GroupMethodTests.AddMember_AClientIntoAGroupWithABuiltInRoleTheCallerLacks_IsRefused_RoleNotHeld` (method transport).
+
+### First administrator is a member of TenantOwners (AB#7946)
+
+`UserManagementService.CreateAdminUserAsync` (setup endpoints `setup/create-admin` and `v1/setup`) grants the first administrator the 13 direct roles and, since AB#7946,
+also adds that user to the `TenantOwners` group (`AddToTenantOwnersAsync`, via `IGroupStore`). `TenantOwners` carries every non-secret built-in role (incl. `DataModelManagement`,
+`StreamData*`), which the direct grants lack; without the membership the administrator holds fewer roles than the group and the guard above refuses adding anyone to it
+(`role-not-held`). `SecretManagement` stays a direct grant only (not in `TenantOwners`). The step is idempotent (an existing membership is not added again; a setup
+re-run is refused anyway while users exist) and optional like the file roles: a tenant without the group logs a warning and keeps the direct roles. The setup goes
+through the stores, not the guarded controllers, on purpose. The scratch-tenant creator (`ScratchTenantGrantService`) and cross-tenant admin provisioning
+(`AdminProvisioningController`) already put their subject into `TenantOwners`; nothing changed there.
+
+- **Tests:** `UserManagementServiceTests` (membership added / not twice / missing group) and `Api/Setup/SetupAdminTenantOwnersTests` (real MongoDB: setup via REST, the admin adds
+  another user to `TenantOwners`, control case without the membership = 403 `role-not-held`, re-run refused without a second edge, guard not injected into setup/group store).
+
+### `User.ResetPassword` (AB#7774)
+
+`UserResetPasswordHandler` (`src/IdentityServices/Methods/`, one row in `IdentityMethodHost.Handlers`, `CarriesSecret = true`: gated by
+`Methods:Identity:EnablePasswordMethods`, off = `METHOD_HANDLER_NOT_AVAILABLE`). A user administrator (`UserManagement`) sets a new password
+without the current one.
+
+- **Caller.** The SDK evaluates the declared role before the handler; the handler checks `CallerPrincipal.Roles` for `UserManagement` again
+  (defense in depth, `METHOD_FORBIDDEN` / `missing-role`) **before** the tenant is bound or the target is looked up, so an unauthorized caller gets the same answer
+  for an existing and a missing target and `METHOD_TARGET_NOT_FOUND` is only seen by an authorized one. Service tokens with the role are allowed
+  (actor = client id). A user without the role cannot reset their own password with it (`ChangePassword` is for that).
+- **Order.** role, tenant, user, shadow user (`SHADOW_USER_PASSWORD_NOT_ALLOWED`), remember `IsLockedOutAsync`, `GeneratePasswordResetTokenAsync` +
+  `ResetPasswordAsync` (policy failure = `PASSWORD_POLICY_VIOLATION`, codes only, **nothing else changes, the lockout stays**), then
+  `SetLockoutEndDateAsync(user, null)` + `ResetAccessFailedCountAsync(user)` through `UserManager` (guarded, versioned store write of AB#7908; never write the user
+  entity directly), then `IUserCredentialChangeService.OnPasswordChangedAsync(..., PasswordChangePath.MethodResetPassword, <caller user name>)` (security
+  stamp, revocation of refresh tokens and authorizations; throws on failure = `METHOD_HANDLER_FAILED`).
+- **REST difference** (`UsersController.ResetPassword`; since AB#8008 body-only, see "No credential values in request URLs"): REST does **not** lift the lockout and e-mails a second reset token; the method lifts
+  the lockout and sends **no** e-mail (AB#7775 adds the notification).
+- **Audit.** `IdentityMethodAuditWriter.RecordAsync(..., extraDetails)`: one `Identity.Method` event per call in a `finally` (success, every failure, and an
+  exception as `METHOD_HANDLER_FAILED`), details as `ChangePassword` plus `lockoutLifted` (`true` only when the user was locked out at call time and the call succeeded).
+- **Tests:** `Api/Methods/UserResetPasswordMethodTests` (real MongoDB; event repository and logger captured: locked-out user end to end, counter-only user,
+  service token, missing role for existing and missing target, unknown target, policy violation, shadow user, failing revocation, forged caller on the host;
+  password canary never in audit events or logs), `IdentityMethodHostTests` (switch, audit details).
+
+### Group and data-permission methods (AB#7779)
+
+`Group.AddMember`, `Group.RemoveMember`, `Group.SetRoles`, `DataPermission.GrantToRole`, `DataPermission.RevokeFromRole` (declared in System.Identity 2.29.0,
+no model change). Five handlers in `src/IdentityServices/Methods/` (`GroupMemberMethodHandlerBase<T>` with `GroupAddMemberHandler` / `GroupRemoveMemberHandler`,
+`GroupSetRolesHandler`, `DataPermissionRoleMethodHandlerBase<T>` with `DataPermissionGrantToRoleHandler` / `DataPermissionRevokeFromRoleHandler`) and five rows in
+`IdentityMethodHost.Handlers`, all `CarriesSecret = false` (hosted whatever `EnablePasswordMethods` says). Shared flow in `IdentityAdminMethodHandlerBase<T>`
+(caller rule, target id, tenant binding, one `Identity.Method` event per call in a `finally`); `IdentityMethodCallerRules.IsAdministrator` is the same rule the
+user role handlers use (scope `octo_api` + role `UserManagement` on the **validated** principal, `METHOD_FORBIDDEN` / `role-required` otherwise).
+
+| Rule | REST (`GroupsController`, `DataPermissionsController`) | Method |
+|------|------|------|
+| Caller | `IdentityUserAdministrationWritePolicy` | the same, repeated on the validated principal; forged bus caller rejected by the host |
+| Target | 404 for an unknown group (data permission: unhandled exception) | `METHOD_TARGET_NOT_FOUND` |
+| Guard (AB#7927) | `IRoleChangeGuard.EvaluateAsync(caller, RoleGraphChange.MemberAdded / MemberRemoved / GroupRoles)`: `self-grant`, `role-not-held`, `last-administrator` (403 / 409 problem) | the same call with the same change records; refusal = `METHOD_FORBIDDEN` + parameter `reason` (+ `roleNames`), audited with `reason` |
+| Client removal | no guard (a client gives nothing to anybody); records the scratch tenant revocation (AB#7192) before the removal | the same, same `IScratchTenantGrantService.RecordRevocationAsync` |
+| Data permission grant / revoke | no guard (data access, not roles) | none either |
+| Unknown or duplicate member / role | engine error 500 / silent no-op | typed errors `MEMBER_NOT_FOUND`, `MEMBER_ALREADY_IN_GROUP`, `MEMBER_NOT_IN_GROUP`, `ROLE_NOT_FOUND`, `PERMISSION_ALREADY_GRANTED`, `PERMISSION_NOT_GRANTED` (stricter, never more) |
+
+- **Member ids.** `memberKind` User or Client; `memberId` is the rtId (as in the REST route); for a client the OAuth client id is accepted too. `Group.SetRoles`
+  takes role **names** (the model's parameter) and resolves them to the role ids the guard judges (`GroupRoles(groupId, roleIds)`); all names are checked first
+  (one unknown role changes nothing).
+- **Referenced entities (AB#7035).** The target is checked by the gateway (`dataAccess: Write`). Members and roles the method touches besides the target are checked
+  with `IRtDataPermissionEvaluator` (`IdentityMethodCall.EvaluateAsync`, the caller's `RtSecurityContext` from the validated principal): not visible = `MEMBER_NOT_FOUND` /
+  `ROLE_NOT_FOUND`; `DataPermission.GrantToRole` additionally needs `Write` on the role (the grant is stored on it), refusal = `METHOD_FORBIDDEN` / `reason` = `data-permission`.
+  Without enforcing policies on those types (the default) every check is open, as in REST.
+- **Audit.** `Identity.Method` event per call (success, every refusal, exception as `METHOD_HANDLER_FAILED`): group methods add `memberKind`, `memberId`, `rolesBefore` /
+  `rolesAfter` (role names, `SetRoles`) and `reason` / `roleNames` of a guard refusal; data permission methods add `permissionId` and `roleName`. Identifiers only.
+- **Nothing is revoked.** A group change shows in the next token (`OctoTokenClaimsService` reads the effective roles, groups included), as with REST.
+- **Tests:** `Api/Methods/GroupMethodTests` (all operations, every refusal, caller theory, forged caller, audit, evaluator), `GroupMethodParityTests` (REST and method side
+  by side per guard), `DataPermissionMethodTests` (operations, errors, caller theory, forged caller, REST parity, audit, evaluator), `Methods/IdentityMethodHostTests`
+  (selection). The last-administrator tests clear the administrators of the shared test database first, like `GroupRoleChangeGuardTests`.
+
+### Client secret methods `Client.AddSecret`, `Client.RemoveSecret` (AB#7780)
+
+`ClientAddSecretHandler` and `ClientRemoveSecretHandler` (`src/IdentityServices/Methods/ClientSecretHandlers.cs`, shared flow in
+`ClientSecretMethodHandlerBase`), declared in System.Identity 2.29.0 (no model change), two rows in `IdentityMethodHost.Handlers`, both
+`CarriesSecret = true` (AddSecret has a `sensitive` result, RemoveSecret a `sensitive` parameter): **gated by `Methods:Identity:EnablePasswordMethods`**
+like the password methods (production gate of 2026-10-23, B0); off = `METHOD_HANDLER_NOT_AVAILABLE`.
+
+| Rule | REST (`ApiSecretsController`, unchanged) | Method |
+|------|------|------|
+| Caller | `IdentitySecretAdministrationPolicy` since AB#5861 (`octo_api` + `SecretManagement`, staged: in `Warn` also `TenantManagement`/`UserManagement`) | the same, repeated on the validated principal (`DecideClientSecretCaller`) before the target is read: `METHOD_FORBIDDEN` / `role-required`, identical for an existing and a missing target; forged bus caller rejected by the host |
+| Target | client id in the route, 404 | target rtId of the client; unknown, not an object id or unknown tenant = `METHOD_TARGET_NOT_FOUND` |
+| Generate | 32 bytes CSPRNG, URL-safe Base64, stored as Base64 SHA-256 | the same (`ClientMirrorSecrets.GenerateSecret`, `OctoSecretHasher.HashSecret`), record `Type = SharedSecret`; the clear text is the result, returned once |
+| Public client | accepted | `CLIENT_SECRET_NOT_REQUIRED` (it never authenticates with a secret) |
+| Expiration in the past | accepted | `METHOD_VALIDATION_FAILED` (`field=expirationDate`) |
+| Remove | by the stored value (Base64 in the route); 404 without the value (since AB#7989; before it, the delete removed nothing, see below) | by the stored value **or** the clear text (hashed, fixed-time compare); every match removed with `RemoveAll` (AB#7989); no match = `SECRET_NOT_FOUND` without parameters |
+| Write | `IOctoClientStore.MutateAsync` (version-checked since AB#7989, mirror sync) + `CorsClientsUpdate` | version-checked read-modify-write of the client (`MutateClientAsync`: read, change, replace with the read `rtVersion`, re-read and re-apply on `RtVersionConflictException`, 20 attempts), so concurrent adds keep every secret and an add never brings a removed secret back; then mirror sync and `CorsClientsUpdate`, both best effort (5 s bound for the publish: a committed change is never reported as failed) |
+| Description | free text | `octo:mirror-own-secret` (the marker of a mirror's own secret, AB#5061) = `METHOD_VALIDATION_FAILED` (`field=description`) |
+
+- **Authentication** goes through `OctoApplicationManager` (every unexpired record of the client), so a new secret authenticates at once and a removed one
+  fails at once (entity caching is off).
+- **Audit:** one `Identity.Method` event per call in a `finally` (success, every refusal, exception = `METHOD_HANDLER_FAILED`), details as the other methods plus
+  `clientId`, `secretCount` (records after the write) and, for RemoveSecret, `removedCount`. Never the secret, the hash, `secretValue` or the description.
+- **Secrets in logs:** the handlers log nothing. The engine's MongoDB command log at **Debug** (`MongoRepositoryClient`, off by default) renders the update
+  command and therefore the stored hash of every client secret write (REST included); the clear text never reaches a log.
+- **Tests:** `Api/Methods/ClientSecretMethodTests` (real MongoDB, real token endpoint: add -> stored value is the hash -> client credentials token OK ->
+  remove -> token refused; remove by stored value; UserManagement and service token callers; caller theory without role/scope for existing and missing
+  target; unknown target; public client; expiration; unknown value without echo; failing store audited; forged caller on the host; canary: the secret and a
+  clear-text `secretValue` in no audit event and no log line at any level, the hash in none at Information or above; parallel adds + remove lose no
+  update; reserved description; broker down still returns the committed secret), `Methods/IdentityMethodHostTests` (gate and caller rule),
+  `Methods/ClientSecretHandlerFailureTests` (an exception is audited once as `METHOD_HANDLER_FAILED`).
+
+### REST secret delete removes by predicate (AB#7989, Security)
+
+`ApiSecretsController.DeleteSecretOfClient` / `DeleteSecretOfApiResource` (`DELETE {tenant}/v1/apiSecrets/client|apiResource/{id}/{base64(hash)}`)
+answered 200 but removed nothing for an entity read from MongoDB: the `AttributeRecordValueList` of such an entity holds plain `RtRecord`s and
+hands out **new** `RtSecretRecord` wrappers on every enumeration, so `Remove(wrapper)` found nothing and returned `false` silently; a revoked
+client secret kept authenticating. Both endpoints now call `RemoveAll(predicate)` (as the `Client.RemoveSecret` method of AB#7780 does) and
+answer 404 when nothing matched. **Every REST secret write** (POST, PUT, DELETE for clients and API resources) is now a version-checked
+read-modify-write (`IOctoClientStore.MutateAsync`, `IOctoResourceStore.MutateApiResourceAsync`, helper `GuardedEntityMutation`: read in a transaction,
+change, replace with the `rtVersion` that was read, re-read and re-apply on `RtVersionConflictException`, 20 attempts, then `409` problem). Before,
+`UpdateAsync` replaced the snapshot unversioned, so two overlapping secret writes could bring a deleted secret back or drop an added one
+(review finding on PR #225). **The full updates followed (AB#8015):** the client `PUT` (and the overlay URI endpoints and the flag `PATCH`) and the API
+resource `PUT` applied their DTO to an entity read before and replaced it without an expected version, so a full update that overlapped a secret
+delete wrote the deleted secret back. They now run as `MutateAsync` / `MutateApiResourceAsync` too (the DTO is applied to the fresh read, again on a
+conflict; `409` problem after 20 attempts); `ClientStore.UpdateAsync` and `ResourceStore.UpdateApiResourceAsync` were removed, so no unversioned
+client or API resource replace is left (`FullUpdates_ConcurrentWithSecretDeletes_NeverBringADeletedSecretBack`: six deletes and six full updates
+at once, red on the old code: deleted secrets came back and the overlapping updates answered 400/500). 🔴 **Rule for every record list of a stored entity:** never `Remove(item)` / `Contains(item)` / `IndexOf(item)` with
+an instance you enumerated; use `RemoveAll` / `FindIndex` with a predicate, and write a changed record back through the indexer (as
+`ReplaceSecret` in the PUT endpoints does; the PUT endpoints were not affected). No 404 of the controller echoes the secret value (the stored hash)
+any more. octo-cli (`DeleteApiSecretClient` / `DeleteApiSecretApiResource`, SDK `IdentityServicesClient`) is unchanged; Studio does not call
+these endpoints. API resource secrets authenticate nothing since the OpenIddict migration, so only the client case has a token-endpoint
+test. Tests: `ApiSecretsControllerTests` (`DeleteClientSecret_*` with the token endpoint, `DeleteApiResourceSecret_*`, unknown secret / owner,
+403, PUT of an API resource secret persisted, no hash in the logs at the deployed levels, `ConcurrentSecretWrites_*`: four deletes and six creates at
+once lose nothing and bring nothing back, red with the unversioned write).
+
+### No credential values in request URLs (AB#8008, Security)
+
+Found in the AB#7765 verification: the admin reset took the new password as a query parameter, and the ASP.NET Core request
+log (INFO, `Microsoft.AspNetCore.Hosting.Diagnostics`) plus the TRACE argument log of `ControllerActionInvoker` wrote it into
+the log file; ingress access logs and traces would capture such URLs too. The REST secret delete/get carried the stored hash
+in the path. Decided by Gerald 2026-11-01:
+
+- **Admin reset** `POST {tenant}/v1/users/ResetPassword`: body `ResetUserPasswordRequestDto { userName, password }` only.
+  `[RefuseCredentialInQuery("password")]` (resource filter, `TenantApi/v1/Controllers/RefuseCredentialInQueryAttribute.cs`,
+  the single place of the refusal) answers `400` problem details with an update hint when the query carries `password` - after
+  authorization (an unauthorized caller still gets 401/403), before model binding, so the action and its TRACE argument log
+  never run. Hard refusal, no fallback: octo-cli, the SDK (`IdentityServicesClient.ResetPassword`) and Refinery Studio
+  (`@meshmakers/octo-services` `IdentityService.resetPassword`) send the body since AB#8008; release identity only together with
+  or after them.
+- **Audit actor:** `UsersController.ResetPassword` passes `AuditActor.FromPrincipal(User).Actor` (user name, else `client <id>`),
+  not `User.Identity?.Name` (always null under `MapInboundClaims = false`, hence the former `(anonymous reset token)`).
+- **Secrets:** `POST apiSecrets/{client|apiResource}/{id}/delete` and `.../lookup` with body `ApiSecretValueRequestDto { valueEncrypted }`
+  (POST sub-resource, not DELETE with a body: no defined DELETE body semantics, proxies/clients may drop it, the API already uses POST
+  action sub-resources). The path variants `DELETE`/`GET .../{secretValue}` stay **for one release** (removal is the follow-up of
+  AB#8008); they no longer bind the value as an action argument (read from `RouteData` in `TakeLegacySecretValue`, the single place
+  of the deprecated path), log one WARN `Deprecated API secret request: {Operation} for {OwnerKind} '{Owner}' ...` without the
+  value, and overwrite the trace tag `url.path` with the masked path. `PUT` already carried the hash in the body.
+- **Log redaction:** `Logging/CredentialLogRedaction.cs` - `AddCredentialLogRedaction()` (Program.cs, after `UseNLog()`) replaces the
+  `ILoggerFactory` with a decorator whose loggers mask, in the structured values (`string`, `PathString`, `QueryString`, `Uri`) of every
+  log line **and every scope** (the hosting scope carries `RequestPath`, and `nlog.config` renders scope properties into each record), the query parameters `password|newPassword|secret|secretValue|clientSecret` and the value segment of
+  `/apiSecrets/{client|apiResource}/{id}/{value}` (not the `delete`/`lookup` action segments) with `***`; `{OriginalFormat}` is kept, so
+  NLog renders the template with the masked values. A factory decorator, not a provider decorator: provider-specific filter rules keep
+  working and providers added later (test hosts, `AddProvider`) are covered. A line without a match passes unchanged (same state
+  instance). OpenTelemetry's ASP.NET Core instrumentation already redacts query values (`url.query`).
+- Request DTOs are classes with a `ToString()` that never prints the value (a record's generated `ToString()` would print the password into
+  the TRACE argument log).
+- **Tests:** `Api/TenantApi/CredentialsNotInUrlTests` (a host logging everything at TRACE into a capturing provider: body reset works and
+  the password is in no line; query reset 400 with hint, nothing changed, `password=***` in the request log; body + query refused; 403 before
+  the hint for a caller without the role; audit `acting user 'client <id>'` and user name; secret lookup/delete by body for client and API
+  resource with neither hash nor Base64 hash in any line and no deprecation WARN; body without value 400; reader 403; deprecated path variants
+  work, WARN twice without value, path masked), `Logging/CredentialLogRedactionTests` (patterns, decorator, later providers, the real
+  `nlog.config` JSON record), and the AB#7765/AB#5708 reset tests moved to the body form.
+
+### Credential guard regression tests of the REST API (AB#7781)
+
+`tests/IdentityServices.IntegrationTests/Api/TenantApi/IdentityCredentialGuardRestTests` pins that the tenant API v1 never returns
+or accepts a credential: a user whose `PasswordHash`, `SecurityStamp`, authenticator key and recovery codes hold fixed dummy values
+(written through `UserManager` and the user store, as the service does) is read through `users`, `users/GetPaged`, `users/{name|email|rtId}`,
+`users/directory`, `users/{name}/roles|directRoles`, `groups` (all reads, the user as a member); `PUT users/{name}` and `POST users` with
+`passwordHash` / `securityStamp` / `userTokens` / `password` in the body change no credential; `GET clients` (all reads) carries neither
+the clear text nor the stored hash of a client secret, a secret record in a client body is not bound and `clientSecret` is stored hashed;
+`apiSecrets/client/{id}` and its `lookup` return the stored hash (the handle, by design) but never the clear text. A capturing log provider
+at Debug (the MongoDB command log of every store write included) must carry no dummy value, and must contain the rendered command of the
+seed write (non-vacuous). There is no export endpoint in this service. Path table of all repositories: octo-documentation
+`constructionKits/ckLanguage2/accessModifiers.md` § Regression tests.
 
 ### Blueprint-owned opt-in: `DataPolicy.ProtectBlueprintLocked` (AB#6384; System.Identity 2.24.0)
 
@@ -787,8 +1405,9 @@ entity whose stored `RtBlueprintLocked` is `true`, nor set or change `RtBlueprin
 - Regression tests: `BlueprintLockProtectionIntegrationTests` (real MongoDB: compiled ownership, fresh install, update re-applies, missing
   attribute = false, bootstrap policies do not opt in, and an end-to-end check that a policy with the flag makes the engine guard refuse a user
   write on a locked entity while an unlocked one and the system stay writable).
-- CK dependents: no CK model depends on `System.Identity`; blueprints pin it by open ranges (`[2.11,3.0)` up to `[2.14.0,3.0)`), which 2.24.0 satisfies, so
-  no dependent needs a rebuild. Only a blueprint that uses the flag needs the raised floor.
+- CK dependents: no CK model depends on `System.Identity`; blueprints pin it by ranges (`[2.11,3.0)` up to `[2.14.0,3.0)`), which 2.24.0 satisfied, so
+  no dependent needed a rebuild. Only a blueprint that uses the flag needs the raised floor. **Since 3.0.0 (AB#8053) every `[2.x,3.0)` range is
+  unsatisfied** (a range stays inside one major): each dependent blueprint needs a new version with `System.Identity-[3.0.0,4.0)`.
 
 ### Every attribute declares its ownership; the build enforces it (AB#6326)
 
@@ -1214,6 +1833,21 @@ Key components:
 
 See `docs/CONCEPT-TENANT-SPECIFIC-OAUTH.md` § 9 for the full flow diagram and API specification.
 
+### Tenant topology endpoint `GET /api/tenant-topology?scope={rootTenantId}` (AB#7044)
+
+Tells an app acting for a signed-in user which of the user's allowed tenants lie below the app's root tenant and whether each has children — **without** any call to a tenant other than the token's tenant, which the user-token tenant gate (`TenantAuthorizationMiddleware`, AB#6728) rejects under `Enforce`.
+
+- **Contract** (Freya's `@meshmakers/shared-auth` client depends on exactly this): `200 { "scope", "scopeHasChildren", "tenants": [ { "tenantId", "depth", "hasChildren" } ] }`; `depth` 1 = direct child of the scope, `hasChildren` = the tenant itself has children (never listed, not even their ids). Nothing else is ever returned: no scope entry, no tenant outside the claim or the subtree, no parent ids, no tenant data (pinned by `ResponseCarriesNoOtherFieldThanTheContract`).
+- **Entitlement:** `tenants` = (the `allowed_tenants` claim of the validated user token) ∩ (strict descendants of `scope`). The claim is a *selection hint*, not an API authorization; here it only limits which topology facts are revealed (a boolean and a depth about tenants the user can already log into). `scopeHasChildren` is truthful only when the scope is in the claim or `tenants` is non-empty, otherwise `false` (no oracle for unrelated scopes). An unknown scope, a malformed scope (not a well-formed tenant id), a scope without entitled descendants and a foreign scope all answer the **same** `200` with an empty list and `scopeHasChildren=false`.
+- **Status codes:** 401 no/invalid token; 403 client-credentials token (no `sub`) or a user token without the `octo_api` read scope (`IdentityApiReadOnlyPolicy`, no role needed); 400 missing `scope`; 429 rate limit (`Retry-After: 60`); **503** with a problem body when the hierarchy cannot be read completely (failing registry read, more than `TenantTopology:MaxNodes` tenants) — fail closed, never a partial list. A cycle in a hand-edited registry terminates (visited guard). Older identity builds answer 200 `text/html` (SPA fallback) for unknown /api paths; clients must treat a non-JSON 2xx like 404 (topology unknown).
+- **No new exemption:** the route has **no** `{tenantId}` segment, and `TenantAuthorizationMiddleware` skips routes without a tenant segment — so nothing changes in octo-common-services and `IAllowParentTenantAdministration` is not used. `TenantGateInEnforceMode_AllowsTheTenantLessRoute_AndStillRefusesAForeignTenantRoute` (real pipeline, `X-Test-RealBearerPrincipal` so the gate actually sees a "Bearer" principal) and `Route_HasNoTenantSegment_…` fail if someone adds a tenant segment or an exemption marker.
+- **Code:** `TenantTopologyApiController` (`Controllers/Api/`), `ITenantTopologyService`/`TenantTopologyService` (`IdentityServerPersistence/Services/`), `TenantSubtreeWalker` (the BFS walk, **extracted unchanged in behaviour** from `TenantDiscoveryService.GetScopeDescendantsAsync`, which now delegates to it and keeps its "unreadable ⇒ null" contract; the walk still goes through each tenant's own `ITenantContext.GetChildTenantsAsync`, see the discovery section for why not `GetAllTenantsAsync`), `TenantTopologyRateLimiter` (`Services/`).
+- **Caching:** the subtree snapshot (tenantId, depth, hasChildren of the whole subtree) is cached per scope in the shared `IMemoryCache` for 45 s (`TenantRegistry.CacheTtl`) with single flight **per scope key** (in-flight table, entries live only while a read runs; a slow scope or unknown-scope spam never blocks the first request of another scope, `ASlowScope_DoesNotBlockOtherScopes_NorUnknownOnes`); the per-request cost is the intersection with the claim, no database access on a hit (`HundredRequests_ReadTheRegistryOnce`, `ConcurrentFirstRequests_ShareOneRead`). Only **registered** scopes are cached — an arbitrary `scope` value never grows memory — and a failed read is never cached.
+- **Rate limit:** per **subject** (`sub`), sliding window of `TenantTopology:RateLimitPermitsPerMinute` (default 60; env `OCTO_IDENTITY__TENANTTOPOLOGY__RATELIMITPERMITSPERMINUTE`). The ASP.NET rate-limiter middleware runs *before* authentication in this host and cannot see the subject, so the controller asks `ITenantTopologyRateLimiter` after the token was validated; an invalid token is answered 401 first and never allocates a partition.
+- **CORS:** the identity CORS policy is global and built from the `AllowedCorsOrigins` of every client of every tenant (`IdentityCorsPolicyProvider`, any header, any method), so a browser app whose client lists its origin (meshmakers-app `${scheme}://${tenantId}-accounting.${domain}`, energy-community `${scheme}://energy-community.${domain}`) can preflight and call this route with its bearer header; pinned by `AppOriginOfASeedClient_CanPreflightAndCallTheRouteFromTheBrowser`. No change was needed.
+- **Logs:** counts and the scope id only — never claims or token content.
+- **Tests:** `TenantTopologyServiceTests` (intersection, depth, hasChildren, legacy case, every fail-closed branch, cache), `TenantTopologyApiControllerTests`, `TenantTopologyRateLimiterTests`, `TenantTopologyEndpointTests` (real Mongo hierarchy, wiring, CORS). Documentation for app developers is a separate story (octo-documentation). The repository has no CHANGELOG file; this section is the change record.
+
 ### `allowed_tenants` Identity Resource
 
 The `allowed_tenants` claim is registered as an `IdentityResource` in `DefaultConfigurationCreatorService.CreateIdentityResources()`. This makes it available in **ID tokens** (not just access tokens) when the `allowed_tenants` scope is requested. Used by Grafana's `org_attribute_path` for automatic organization mapping.
@@ -1326,6 +1960,19 @@ logs instead of denying (transition); default `Enforce`. 🔴 A new controller a
 policies — `IdentityApiAuthorizationPolicyTests.EveryTenantApiEndpoint_RequiresARole_UnlessExplicitlyAllowListed`
 fails otherwise. Full table: `docs/system-api.md` § Authorization Policies.
 
+**API secret writes need `SecretManagement` (AB#5861).** `IdentitySecretAdministrationPolicy` (scope `octo_api` +
+`SecretManagement`, shared `IdentityApiAuthorizationPolicies.SecretAdministrationRequirement`) guards every create/rotate/
+delete in `ApiSecretsController`, the mirror secret rotation (`ClientMirrorController.RotateSecret`), a `clientSecret` in `POST/PUT clients` (checked in the action via
+`IAuthorizationService`) and the `Client.AddSecret`/`RemoveSecret` handlers (`DecideClientSecretCaller`; the CK model's
+declared roles stay `TenantManagement`/`UserManagement`). Reads keep `IdentityTenantAdministrationReadPolicy`. Staged by
+`OCTO_IDENTITYAPIAUTHORIZATION__SECRETMANAGEMENTROLEENFORCEMENT` = `Warn` (**default**: the previous roles still pass,
+logged `...SecretManagementRoleEnforcement=Enforce (AB#5861)`) | `Enforce` — because the role was granted only once to
+local human admins (AB#5544), not to `TenantOwners`, cross-tenant admins or clients. `Warn` never allows less than
+before; `RoleEnforcement=Warn` relaxes it too. A refused `IdentityApiRoleRequirement` answers 403
+`{"message": "...requires the role 'X'..."}` (`IdentityApiForbiddenReasonResultHandler`, AB#5227 shape). Tests:
+`ApiSecretsControllerTests` (role x verb x kind x mode matrix, TenantOwners member, client create/update),
+`IdentityApiAuthorizationPolicyTests`. Inventory: `scripts/identity-secret-management-role-check.sh`.
+
 ### Bootstrap blueprint lines and version order (AB#5544, AB#6457)
 
 `System.Identity.Bootstrap` carries two independent lines that each bump exactly once, in a fixed order
@@ -1368,6 +2015,249 @@ properties: a credential-bearing DTO passed as a message-template argument (`{Dt
 reflected by the JSON layout. Never do that unless an NLog object transformation in
 `LogSecretRedaction` covers the type; log selected non-secret members instead.
 
+### Administrator switches off a user's second factor (AB#7879; System.Identity 2.30.0)
+
+The recovery path of AB#7830 (option a). `IUserTwoFactorAdministrationService` (`Services/UserTwoFactorAdministrationService.cs`, scoped) is
+the one implementation; two transports call it:
+
+| Transport | Caller rule | Answer |
+|---|---|---|
+| CK method `User.DisableTwoFactor-1` (`UserDisableTwoFactorHandler`, one row in `IdentityMethodHost.Handlers`, `CarriesSecret = false`: hosted whatever `EnablePasswordMethods` says) | `IdentityAdminMethodHandlerBase`: scope `octo_api` + `UserManagement` on the validated principal, `METHOD_FORBIDDEN` / `role-required` before the target is read | success; `METHOD_TARGET_NOT_FOUND`; `METHOD_HANDLER_FAILED` when a write or the revocation fails |
+| REST `POST {tenant}/v1/users/{userName}/disableTwoFactor` | `IdentityUserAdministrationWritePolicy` | `200 { twoFactorWasEnabled }`, 404 unknown user |
+
+Effect, in this order, all through `UserManager` (guarded, versioned store writes of AB#7908, never the entity): remove the authenticator
+key and the recovery codes (`[AspNetUserStore]` tokens `AuthenticatorKey`, `RecoveryCodes`), `TwoFactorEnabled = false`, then
+`IUserCredentialChangeService.OnSecondFactorDisabledAsync` (the AB#7765 helper: security stamp, revocation of every refresh token and
+authorization of the user in this tenant, one `Information` audit line `Second factor switched off by an administrator: tenant, subject,
+acting user, path (AdminRest|MethodDisableTwoFactor), two-factor was enabled`). Idempotent (a user without 2FA gets the same treatment).
+Any failure throws: never a success while the key or old refresh tokens survive. The method writes the `Identity.Method` event with the
+extra detail `twoFactorWasEnabled`. No key, code or token value is logged or audited. The user's own `POST api/manage/2fa/disable`
+(with a verification code) is unchanged. No self rule: an administrator may switch off their own second factor (the REST endpoint never
+had one either). Tests: `Api/Methods/UserDisableTwoFactorMethodTests` (method and REST on real MongoDB: end to end with sign-in by password
+and a new enrolment over HTTP, idempotent, service token, caller theory for existing and missing target, unknown target, failing revocation,
+forged caller, REST 404/403, no authenticator material in audit or logs).
+
+### `User.CreateUser` and the only ways to create a user (AB#7777)
+
+A user is created only by this service: REST `POST {tenant}/v1/users` or the static CK method `User.CreateUser-1`
+(`UserCreateUserHandler`, one row in `IdentityMethodHost.Handlers`, `CarriesSecret = true` because of the optional `sensitive`
+`password`: **hosted only with `Methods:Identity:EnablePasswordMethods`**, also for invitations without a password - the switch is
+per method; off = `METHOD_HANDLER_NOT_AVAILABLE`). Both share `IUserCreationService` (`Services/UserCreationService.cs`, scoped):
+`UserManager.CreateAsync` with or without the password (user validators, password policy before the user is stored, normalised name
+and e-mail, security stamp), then the welcome notification (with password: e-mail confirmation; without: the invitation to set a
+password). Since AB#8064 the service also refuses an e-mail address another user of the tenant already has (see the table).
+
+| Rule | REST | Method |
+|---|---|---|
+| Caller | `IdentityUserAdministrationWritePolicy` | `IdentityMethodCallerRules.IsAdministrator` on the validated principal (scope `octo_api` + `UserManagement`), `METHOD_FORBIDDEN` / `role-required`; the gateway refuses a caller without the declared role first; a forged bus caller is rejected by the host |
+| `xt_` user name | 400 | `USER_NAME_RESERVED` |
+| Duplicate user name (AB#8083, case-insensitive; also `PUT users/{userName}` when it renames) | `409 application/problem+json`, `code: USER_ALREADY_EXISTS`, `field: userName` (`UserCreationProblems.DuplicateUserName`; the name is not echoed or logged) | `USER_ALREADY_EXISTS`, parameter `field=userName` |
+| Duplicate e-mail (AB#8064, normalised = case-insensitive; blank e-mail not checked) | `409 application/problem+json`, `code: USER_ALREADY_EXISTS`, `field: email` (`UserCreationProblems`; the address is not echoed or logged) | `USER_ALREADY_EXISTS`, `field=email` |
+| Password policy | 400 with the identity errors | `PASSWORD_POLICY_VIOLATION`, details = rule codes only |
+| Missing / invalid user name or e-mail | 400 | `METHOD_VALIDATION_FAILED` (`field`) |
+| Result | `200` (empty) | rtId of the new user (`UserCreateUserResult.Value`); on the wire `resultJson` is the bare JSON string `"<rtId>"` (AB#8079, host of octo-common-services), so the GraphQL `result` is the rtId itself |
+
+**Duplicate e-mail: only new conflicts are refused (AB#8064 create, AB#8084 change).** The rule lives in `UserEmailUniqueness`
+(`Services/UserEmailUniqueness.cs`); `UserCreationService` uses it (`IdentityResult.Failed(DuplicateEmail)`), so REST and method cannot drift. A taken user name wins (the check runs only when the name is
+free), so creating the same user twice answers `409` with `field=userName` on REST (before AB#8083: `400 DuplicateUserName`). The controller maps the identity error `DuplicateUserName` (create and rename; the user validator raises it on update too). `IdentityOptions.User.RequireUniqueEmail` stays **off** on
+purpose: the user validator runs on every `UserManager.UpdateAsync` / `SetEmailAsync` / `SetUserNameAsync` too, and in a tenant that
+already holds two users with one address `FindByEmailAsync` returns one of them, so the other could no longer be updated (profile edit,
+role change, security-stamp write, password change). Existing duplicates are not migrated; updates and sign-in of those users are
+unchanged (`FindByEmailAsync` returns the first match, as before).
+
+**E-mail change (AB#8084).** `PUT users/{userName}` refuses a **change** of the address to one another user has with the same
+`409` (`UserCreationProblems.DuplicateEmail`, logged without the address), before anything is written. `UserEmailUniqueness.ChangesAddress`
+decides what a change is: the new address is not blank and differs normalised from the stored `Email` (not from `NormalizedEmail`,
+which a stale write could leave behind); keeping the address, changing only its casing and clearing it are not checked, so users
+that already share an address stay editable. The owner found by `FindByEmailAsync` must be another `RtId`. Other e-mail write paths,
+checked for this story: no CK method changes the e-mail (System.Identity 2.30.0), `Email` is `MethodOnly` (generic GraphQL, `ImportRt`,
+blueprint seeds and pipelines cannot write it), `ManageApiController` has no e-mail change, the self-service e-mail enrolment
+(`SelfServiceIdentifierService`) writes a verified identifier, not `RtUser.Email`.
+
+**Deliberately not checked (existing decisions, product decision needed to change them):**
+
+| Path | Behaviour | Why |
+|---|---|---|
+| External-login and LDAP auto-provisioning (`AuthApiController.CreateUserFromExternalProvider`) | creates a separate `{Provider}_{email}` user even when a local user has the address | Bug 3430 (`docs/authentication.md` § External Login Security Model): never link by e-mail (privilege escalation); refusing would lock the external user out |
+| Cross-tenant shadow users (`CrossTenantUserProvisioningService`) | created with, and synced on every login to, the home user's address | a dedicated account of the home identity (excluded from tenant discovery); refusing locks the person out of the child tenant, linking would hand a local user's roles to the home identity |
+| Tenant admin bootstrap (`UserManagementService`) | not checked | runs only in a tenant without users |
+
+Pinned by `CrossTenantUserProvisioningServiceTests.FindOrCreate_LocalUserWithTheSameEmail_*` / `…_SyncsAnEmailAnotherUserHas` and
+`ExternalLoginDeduplicationTests`. Check and write are not atomic (no unique index on runtime entities). Tests:
+`Api/TenantApi/UsersCreateTests` (409 also in other casing, name keeps 400, no e-mail not checked, legacy duplicates update and sign in),
+`Api/TenantApi/UsersUpdateEmailTests` (change to a taken address 409 also in other casing and from no address, nothing written; free
+address, clearing, legacy duplicates keep / re-case their address, a sharing user cannot move to another taken address) and
+`Api/Methods/UserCreateUserMethodTests`.
+
+Audit: one `Identity.Method` event per call (success, every refusal, `METHOD_HANDLER_FAILED`), `targetRtId` = the new user (success
+only), details `userName`, `withPassword`. The password reaches only the user manager - never a log, audit record or error parameter.
+`ResetPasswordOnLogin` is `false` (REST default).
+
+**The generic paths refuse a new user** (engine `GenericCreateReplacement`, driven by `replacesGenericCreate` of `User.CreateUser-1` since System.Identity 3.0.0, AB#8053; AB#7777 used a runtime rule until 2.30.0):
+GraphQL generic/typed/query-row create, MCP create, mesh-adapter inserts, caller `ImportRt` and blueprint seeds answer
+`GENERIC_CREATE_REPLACED_BY_METHOD` naming `System.Identity/User.CreateUser-1`; an existing user (rtId stored) is updated as before.
+Nothing in this service is affected (repository writes are not generic paths). Tests:
+`Api/Methods/UserCreateUserMethodTests` (real MongoDB, host with the switch on: password user signs in, normalised fields and stamp,
+invitation without password, duplicate name (also other casing) and e-mail, policy, reserved name, validation, caller theory, service
+token, forged caller, audit, welcome notification, no password in audit or logs), `Methods/IdentityMethodHostTests`,
+`IdentityMethodDeclarationsIntegrationTests` (declared role `UserManagement`, flag still off), `Api/Methods/UserCreateUserWireFormTests` (AB#8079: the envelope through the real host core, in-process transport, carries the bare rtId string, not `{"value": ...}`).
+
+### `User.Merge` and the one merge of a duplicate user (AB#7778)
+
+REST `POST {tenant}/v1/users/{userName}/merge` and the CK method `User.Merge-1` (`UserMergeHandler`, one row in
+`IdentityMethodHost.Handlers`, `CarriesSecret = false`: hosted whatever `EnablePasswordMethods` says) share `IUserMergeService`
+(`Services/UserMergeService.cs`, scoped). The model declares the method since 2.29.0; no CK change.
+
+Steps of the service, in this order: same user = `SameUser` (nothing written); role change guard on the **deletion** of the source user
+(`RoleChangeRequest(caller, source, directRoles, null)`, AB#7914: `last-administrator`); every external login removed from the source and
+added to the target (remove first: `AddLoginAsync` refuses a login another user still owns); `IUserSessionRevocationService.RevokeAsync(source)`
+(security stamp, refresh tokens, authorizations, server-side sessions of the source in this tenant; new for REST too); `DeleteAsync(source)`.
+**Nothing else moves**: roles, group memberships, claims and cross-tenant mappings of the source go away with it, so a merge never grants
+the target a role and the guard only has to judge the deletion.
+
+| Rule | REST | Method |
+|---|---|---|
+| Caller | `IdentityUserAdministrationWritePolicy` | `IdentityAdminMethodHandlerBase` (scope `octo_api` + `UserManagement` on the validated principal, `role-required` before the target is read); forged bus caller rejected by the host |
+| Target | by name, 404 | target rtId, `METHOD_TARGET_NOT_FOUND` |
+| Source | by name, 404 | `SOURCE_USER_NOT_FOUND`; missing `sourceUserName` = `METHOD_VALIDATION_FAILED` |
+| Source data permission (AB#7035) | none | `IRtDataPermissionEvaluator` on the source user: not readable = `SOURCE_USER_NOT_FOUND`, not writable = `METHOD_FORBIDDEN` / `data-permission` (stricter, never looser; open without enforcing policies) |
+| Same user | 400 | `CANNOT_MERGE_INTO_ITSELF` |
+| Guard | 409 problem `last-administrator` + `Identity.RoleChangeRefused` | `METHOD_FORBIDDEN` / `reason` |
+| Login or delete failure | 400 with the identity errors | `MERGE_FAILED`, parameters `step` (`removeLogin` / `addLogin` / `deleteSource`) and `loginProvider`, details = error codes |
+
+Audit: one `Identity.Method` event per call with `sourceUserName`, `sourceRtId`, `transferredLogins`, `revokedTokens` (and `reason` for
+a refusal); the revocation writes its own log line with the acting user. A failing revocation throws (REST 500, method
+`METHOD_HANDLER_FAILED`) before the source is deleted. Tests: `Api/Methods/UserMergeMethodTests` (REST and method on identical fixtures
+compared state by state, audit, every refusal, data permission, last administrator, forged caller, `MERGE_FAILED` mapping),
+`Api/TenantApi/UsersMergeTests` (REST), `RoleChangeGuardTests` (REST guard). Since this handler every declared System.Identity method has
+one; `UserChangePasswordMethodTests.AMethodWithoutHandler_…` uses an undeclared id.
+
+### System.Identity 2.x -> 3.x needs migration entries (AB#8157)
+
+The CK engine refuses a schema-only bridge across a major (`CkMigrationMajorVersionGuard`, AB#4924 G3) as soon as the target model ships
+a `migration-meta.yaml`, which System.Identity does. System.Identity 3.0.0 shipped without an entry from 2.x: every tenant upgrade failed with
+"No migration path found from System.Identity-2.30.0 to System.Identity-3.0.0" and the identity service stopped (test-2 outage). 3.0.1 adds
+one entry per 2.x minor from 2.9.0 to 2.30.0, all pointing at the empty script `2.x-to-3.0.1.yaml` (`steps: []`; nothing is migrated - the
+3.0.0 change is access modifiers only); tenants below 2.9.0 take the 2.8.0 -> 2.9.0 data migration first. **Whoever publishes another 2.x
+on a release line must extend the list.** Test: `SystemIdentityMajorUpgradeIntegrationTests` (the real published 2.30.0 imported into a tenant
+and upgraded through `SetupAsync`; the path finder for every 2.x minor from 2.0.0). The earlier asset-repo `IdentityMajorUpgradeFlowTests`
+missed the outage because its embedded 3.0.0 snapshot carries no migration-meta (no-migrations bridge).
+
+### Identity-owned User fields are refused on the generic paths (AB#8042, AB#8053)
+
+Generic writes of the identity-owned User fields are refused by the model since System.Identity 3.0.0 (AB#8053): `NormalizedUserName`,
+`NormalizedEmail`, `EmailConfirmed`, `PhoneNumberConfirmed`, `TwoFactorEnabled`, `LockoutEnabled`, `LockoutEnd`, `AccessFailedCount`,
+`ResetPasswordOnLogin`, `Claims` (`UserClaims`), `UserLogins` and `PreferredChannelBindingId` are `access: MethodOnly` in `ck-user.yaml`
+(with `UserName` and `Email` from 2.28.0), and their definitions are `securitySensitive: true`. The generic access guards enforce it for
+every caller: asset-repo GraphQL (`ATTRIBUTE_NOT_WRITABLE`), `ImportRt` and blueprint seeds (OCTO-CK139), the mesh-adapter write nodes. The
+engine keeps only the **associations** in a list (`IdentityOwnedWrites.AssociationRoleIds`: `AssignedRole`, `GroupMember`, `ChildGroup`,
+`MayActAs`, `GrantsPermission`; asset-repo GraphQL, mesh-adapter write nodes, caller `ImportRt`, message 140) because the CK access model
+cannot restrict association writes. In 2.x (AB#8042) the attributes were a runtime list, because tightening attributes that were never
+`securitySensitive` is a Major (row T7, AB#6585). **Nothing in this service is affected**: every identity write (stores, REST, methods,
+provisioning, migrations, the bus consumer's `MayActAs`/`AssignedRole` edges, the preferred-channel self-service) goes through
+`ITenantRepository`, which the guards do not touch, and the Bootstrap seed (TenantOwners `AssignedRole` edges) is a system import.
+
+### Administrator revokes all sessions of a user (AB#7899)
+
+`POST {tenant}/v1/users/{userName}/revokeSessions` and the bulk `POST {tenant}/v1/users/revokeSessions?scope=shadowUsers`
+(dry run unless `dryRun=false`) rotate the security stamp, revoke OAuth tokens and authorizations and delete the
+`RtServerSideSession` records of the subject in the current tenant (`IUserSessionRevocationService`, policy
+`IdentityUserAdministrationWritePolicy`). Issued JWT access tokens stay valid until expiry. Details:
+`docs/authentication.md` § Administrator Revokes All Sessions of a User; tests `UserSessionRevocationTests`.
+
+### Password change ends the user's sessions (AB#7765, review finding M3)
+
+Redeeming a refresh token checks only `CanSignInAsync`, never the security stamp, so a password change
+revokes explicitly. **Every** REST password path calls `IUserCredentialChangeService.OnPasswordChangedAsync`
+(`Services/UserCredentialChangeService.cs`, scoped) after the new password is persisted:
+`POST {tenant}/api/manage/change-password`, `.../set-password`, admin `POST system/v1/users/ResetPassword`
+and the anonymous `POST {tenant}/api/auth/reset-password`. The helper (1) rotates the security stamp,
+(2) revokes every token and authorization of the user's subject (`RtId`) through the OpenIddict stores of
+the **current tenant** (other users and the same user in another tenant are untouched; the old refresh
+token answers `invalid_grant`), (3) writes one `Information` audit log line naming tenant, subject, acting
+user (`(anonymous reset token)` for the token reset; the admin REST reset passes `AuditActor.FromPrincipal(User).Actor`
+since AB#8008, i.e. the user name or `client <id>` for a client-credentials caller) and path - never a password, hash or token value.
+A failing revocation throws, so the endpoint never reports success while old refresh tokens still work;
+the caller keeps a new sign-in via `RefreshSignInAsync` (change/set-password). A new password path - REST or
+CK method handler (AB#5672, AB#7774) - must call the same helper. Tests:
+`UserCredentialChangeServiceTests`, `Api/Manage/PasswordChangeRevokesSessionsTests` (all four paths against the
+real token endpoint), `Persistence/PasswordChangeRevocationTenantIsolationIntegrationTests`.
+
+**Revoke before and after the password write (AB#8018, Security; decision OD-6: ordering, no outbox).** The user store and
+the token/authorization stores are separate writes without a shared transaction (each store opens its own session), so a
+stop between the password write and the helper above left old refresh tokens redeemable. `OctoUserManager` overrides
+`ChangePasswordAsync`, `ResetPasswordAsync` and `AddPasswordAsync` (bodies follow the framework step by step) and calls
+`IUserTokenRevocation.RevokeAllAsync` (`IdentityServerPersistence/Services/UserTokenRevocation.cs`, registered in `Program.cs`,
+optional constructor parameter of the manager) between the in-memory hash update and `UpdateUserAsync`: only after the current
+password / reset token was verified and the policy passed, so a request refused before the write (or a forged one) revokes
+nothing; a store write that fails after the revocation (`ConcurrencyFailure`, a user validator) keeps the old password with the
+sessions ended (accepted, safe direction; review finding on #234). A failing revocation
+throws before the password is stored. `UserCredentialChangeService` uses the same `IUserTokenRevocation` for the second
+revocation. 🔴 A new password write must go through these `UserManager` methods (or call `IUserTokenRevocation` before its own
+write); the manager built by `CrossTenantSecondFactorVerifier` has no revocation and must never write a password. Tests:
+`IdentityServerPersistence.UnitTests/Stores/OctoUserManagerPasswordWriteTests` (order, refusals, failing revocation) and the
+`CrashAfterPasswordWrite_*` tests in `PasswordChangeRevokesSessionsTests` (six paths: REST change/set/admin reset/token reset,
+methods `User.ChangePassword`/`User.ResetPassword`; the post-write helper is replaced by a failing one, the new password works and
+the old refresh token answers `invalid_grant`; red without the pre-write revocation) plus `FailedPasswordChange_RevokesNothing`.
+
+### Two-factor enabled without a usable second factor is refused (AB#7830)
+
+ASP.NET Core Identity challenges only when `TwoFactorEnabled` is set **and** a provider is valid, so a user with
+`TwoFactorEnabled = true` but no authenticator key would sign in with the password alone. That state arises in a
+tenant cloned with ExportRt/ImportRt under System.Identity 2.27.0 (`UserTokens` is `Secret` since AB#7766, `TwoFactorEnabled`
+was exported; since 2.28.0 `ImportRt` refuses users), after a restore from another environment (key ring), after an
+import of edited user data, or when an admin deletes `UserTokens`. Rule (decided by Gerald 2026-10-30, option a, fails closed):
+`POST {tenant}/api/auth/login` verifies the password with `CheckPasswordSignInAsync` (no cookie) for such a user and,
+if it is correct, answers `200 { success: false, secondFactorSetupRequired: true, errorMessage: "Your second factor must be
+set up again. Please contact your administrator." }`, writes a warning log + `User Login Failure` audit entry (user name
+only) and issues no cookie. A wrong password follows the normal failure path (lockout counted once; the answer does not
+confirm the password). The login UI shows the translated text (`LOGIN.ERROR_SECOND_FACTOR_SETUP_REQUIRED`).
+*Usable* means an authenticator key only: the confirmed-e-mail provider is valid for ASP.NET Identity but its code is
+not delivered (tracked as its own bug), recovery codes only work after a challenge. Recovery: an admin switches
+the second factor off with `User.DisableTwoFactor-1` or `POST {tenant}/v1/users/{userName}/disableTwoFactor` (AB#7879, section
+below; since AB#8042 a generic GraphQL/ImportRt write of `TwoFactorEnabled` is refused); the user signs in and enrols again. The cross-tenant password login refuses the
+same state on top of AB#7804: when `ICrossTenantSecondFactorVerifier.GetOptionsAsync` reports
+`CanUseAuthenticator = false` for the source user, `Login` answers `secondFactorSetupRequired` instead of issuing
+a challenge. Tests: `Api/Auth/TwoFactorUnusableLoginTests` (with and without confirmed e-mail, wrong password,
+recovery after 2FA off), `CrossTenantSecondFactorTests.PasswordLogin_SourceUserWithTwoFactorButNoAuthenticator_*`.
+
+### User store concurrency: every user write advances `rtVersion` (AB#7770, AB#7908)
+
+`OctoUserStore` writes users with the expected `rtVersion` (engine guard, AB#7769). The rules:
+
+- **`UpdateAsync`** replaces the user with the `RtVersion` the instance was read with. A concurrent change of the same
+  user (profile, password, lockout, counter, token) returns `IdentityResult.Failed(ConcurrencyFailure)` instead of
+  last-writer-wins; the caller (REST `PUT users/{name}`, self-service) shows the error and the user retries from a fresh
+  read. The instance's `RtVersion` is left unchanged on a conflict.
+- **One read-modify-write, `MutateUserGuardedAsync` (`OctoUserStore.Atomic.cs`).** Every other write of a stored user goes
+  through it: read the user in a transaction, change it, replace it with the read version (so `rtVersion` advances), re-read
+  and re-apply on `RtVersionConflictException` (at most `MaxConcurrencyAttempts` = 40), MongoDB write conflicts are retried
+  inside by `MongoWriteRetry`. Callers: `RecordAccessFailureAsync` / `ResetAccessFailedCountAtomicallyAsync` (the
+  `IAtomicUserLockoutStore` that **production** uses through `OctoUserManager`, AB#7854), the static cross-tenant variants
+  (`RecordAccessFailureAsync(ITenantRepository, …)`, `ResetAccessFailedCountAsync(ITenantRepository, …)`), recovery-code
+  redemption, `SetTokenAsync` / `RemoveTokenAsync` and the `IUserLockoutStore` members below.
+  🔴 AB#7908: the atomic lockout store used to replace *without* an expected version and kept the old `rtVersion`, so a stale
+  `UpdateAsync` (profile edit, admin edit, password rehash) that read the user before a failure/lockout/reset succeeded and
+  wrote the pre-lockout counter and lockout end back. Never write a stored user without the version it was read with.
+- **`IUserLockoutStore` members** `IncrementAccessFailedCountAsync`, `ResetAccessFailedCountAsync`,
+  `SetLockoutEndDateAsync` are kept (the interface requires them) as guarded read-modify-writes through the same helper. They
+  are **not** reached in production, because `OctoUserManager` bypasses them for failure counting and reset; they stay
+  covered by `PlainUserManager_ParallelFailedSignIns_AreAllCounted` and `ParallelFailedSignIns_ReturnDistinctCounts` so a plain
+  `UserManager<RtUser>` over the store (tests, tools) is also correct.
+- **Version follow-up.** After such a write the caller's instance takes over the new `RtVersion` only if the stored user was
+  still the version the instance holds (nothing else changed): the `UpdateAsync` that `UserManager` calls right after stays
+  valid. If another writer was in between (including a failed sign-in or reset by another request), the instance keeps its old
+  version, so its `UpdateAsync` reports the conflict and never overwrites the other writer's fields.
+  `OctoUserManager.AccessFailedAsync` itself always returns `Succeeded`: the failure is counted regardless of the caller's
+  copy.
+- A write that must detect concurrent changes passes the expected version; never combine it with `AttributeNewerThanGuard`,
+  atomic RecordArray item updates or linked binaries in the same update (the engine rule throws).
+- The counter restarts at 0 when the lockout triggers (ASP.NET Core Identity behaviour). Tests:
+  `UserStoreConcurrencyIntegrationTests` (real MongoDB, **`OctoUserManager` as in production**; 10 parallel failures x 20
+  rounds, threshold lockout, reset after a successful sign-in, parallel reset + profile update, concurrent profile updates,
+  a stale `UpdateAsync` after a counted failure / threshold lockout / reset returns `ConcurrencyFailure` and keeps the
+  lockout). They assert the final state, never the number of retries.
+
 ## Configuration
 
 Environment variables are prefixed with `OCTO_`. Key configuration sections:
@@ -1378,7 +2268,8 @@ Key identity options (`OctoIdentityServicesOptions`):
 - `AuthorityUrl`: Public URL of the Identity service (default: `https://localhost:5003`)
 - Token signing: `KeyFilePath` / `KeyFilePassword` (static PKCS#12 certificate) — unchanged by the OpenIddict migration. The `Identity:IdentityServerLicenseKey` option was **removed** with the migration (no license required).
 - `RefineryStudioUrl`: Public URL of the Data Refinery Studio SPA. When set, the `octo-data-refinery-studio` OIDC client is auto-provisioned in all tenants with correct redirect URIs, CORS origins, and front-channel logout. Example: `OCTO_IDENTITY__RefineryStudioUrl=https://studio.example.com`
-- `CorsPolicyCacheSeconds` (env `OCTO_IDENTITY__CORSPOLICYCACHESECONDS`, default `60`, AB#5487): lifetime of the cached Identity CORS policy (`IdentityCorsPolicyProvider`). The policy is rebuilt from the client origins of all tenants after this time, so a missed `CorsClientsUpdate` (other pod, client written without event) or a removed origin heals on its own. A policy with an **empty origin list is never cached** (it is rebuilt on every request until origins exist), so a tenant provisioned after the first request is not blind to the SPA. `0` or less disables the time-based expiry (events only). Events stay the fast path: `CorsClientsUpdate` is published by `ClientsController` (every write, and the overlay endpoint **unconditionally**, also when 0 URIs were added) and by `ClientMirrorProvisioningService` (new mirror, sync, removal; one event per affected child tenant, publish failures are logged and never fail the provisioning). The common-services `CorsPolicyProvider` (other services) is a separate follow-up.
+- `CorsPolicyCacheSeconds` (env `OCTO_IDENTITY__CORSPOLICYCACHESECONDS`, default `60`, AB#5487): lifetime of the cached Identity CORS policy (`IdentityCorsPolicyProvider`). The policy is rebuilt from the client origins of all tenants after this time, so a missed `CorsClientsUpdate` (other pod, client written without event) or a removed origin heals on its own. A policy with an **empty origin list is never cached** (it is rebuilt on every request until origins exist), so a tenant provisioned after the first request is not blind to the SPA. `0` or less disables the time-based expiry (events only). Events stay the fast path: `CorsClientsUpdate` is published by `ClientsController` (every write, and the overlay endpoint **unconditionally**, also when 0 URIs were added) and by `ClientMirrorProvisioningService` (new mirror, sync, removal; one event per affected child tenant, publish failures are logged and never fail the provisioning). **Single-flight (AB#8035):** the requests that find the entry expired or invalidated share one load (`IdentityCorsPolicyProvider.GetEntryAsync`, `_inflight` per generation under a lock); before, every concurrent request at expiry read the clients of every tenant itself (prod-1: paired rebuilds 2-30 ms apart every minute). A new load starts only after an invalidation (new generation; the old load still never publishes) or when the shared one has finished; the slot is cleared before the task completes, so a failed load reaches its waiters and the next request retries. An empty policy is still not cached, but concurrent requests share one load meanwhile. Logging: the rebuild line at Debug, `Identity CORS origins changed: n origins (added: …; removed: …)` at Information only when the origin set differs from the previous load. Tests: `IdentityCorsPolicyProviderTests` (parallel requests at expiry, invalidation during a load, empty list, failure with waiters, log levels). The common-services `CorsPolicyProvider` (other services) is a separate follow-up.
+- `ClientMirrorReconciliationInterval` (env `OCTO_IDENTITY__CLIENTMIRRORRECONCILIATIONINTERVAL`, default `300` seconds, AB#8019): interval of the periodic client mirror reconciliation; `0` or less switches it off. See "Periodic mirror reconciliation" above.
 - `DataProtectionKeysPath`: **Legacy / seed-only.** When set and the directory contains `key-*.xml` files, those keys are imported once into MongoDB at startup (zero-logout migration from old PVC). Safe to leave unset in new deployments; DataProtection keys are now always persisted in MongoDB.
 - `DynamicClientRegistration.Enabled` (env `OCTO_IDENTITY__DYNAMICCLIENTREGISTRATION__ENABLED`, default `true`): RFC 7591 Dynamic Client Registration (AB#4338) so interactive MCP clients (Claude Code) that require DCR can self-register a public authorization-code+PKCE client via `POST /connect/register`. Enabled by default (set `false` to disable per deployment). Hard-gated (loopback redirects, PKCE, no secret, server-fixed scopes, per-IP rate limit, per-tenant cap, TTL). Registers into the system tenant + mirrors to all tenants; tenant resolved at authorize by §9 email-first discovery. Also `AllowedScopes` / `ClientTtlDays` / `MaxClientsPerTenant` / `RateLimitPermitsPerMinute`. See `docs/authentication.md` § Dynamic Client Registration and `docs/CONCEPT-MCP-DYNAMIC-CLIENT-REGISTRATION.md`.
 
@@ -1447,9 +2338,10 @@ The CI/CD pipeline will fail if there are any lint errors. Common issues:
 - Build, serve and extract-i18n run on `@angular/build` (esbuild/Vite); `@angular-devkit/build-angular`
   is gone. The `application` builder writes a **flat `dist/`** (`outputPath.browser: ""`) because
   `IdentityServices.csproj` copies `ClientApp/dist/**` to `wwwroot` and checks for `dist/index.html`.
-- There are no unit tests and no `test` target: the former Karma target pointed at a non-existent
-  `tsconfig.spec.json` and never ran. Add `@angular/build:unit-test` (Vitest) together with the first
-  spec, following Refinery Studio.
+- Unit tests: Vitest on jsdom via `@angular/build:unit-test` (AB#6993, same setup as Refinery Studio).
+  Run `npm test` (= `ng test --watch=false`) in `ClientApp`; a single spec:
+  `npm test -- --include='**/device-confirm.component.spec.ts'`. Never call `npx vitest` directly.
+  Specs live next to the component (`*.spec.ts`), `tsconfig.spec.json` pulls in `vitest/globals`.
 - `allowScripts` in `package.json` lists the six packages npm >= 11.16 may run install scripts for
   (`esbuild`, `lmdb`, `msgpackr-extract`, `@parcel/watcher`, `fsevents`, `@progress/kendo-licensing`).
   A new dependency with an install script produces an `npm warn allow-scripts` line until it is
@@ -1462,6 +2354,33 @@ The CI/CD pipeline will fail if there are any lint errors. Common issues:
   `@angular/platform-browser-dynamic` was removed (unused since the standalone bootstrap in `main.ts`).
 - Expected result of a clean `npm ci` + `npm run build`: no allow-scripts advisory, no other
   deprecation, 0 vulnerabilities, no build warnings.
+
+### Device flow loop guard (AB#6993)
+
+`/{tenant}/device/confirm` loads `GET /connect/deviceverification` (tenant-free URL; the tenant comes
+from the in-memory `user_code` -> tenant map of `OidcTenantResolutionMiddleware`, fallback system
+tenant). On 401 it navigates **once** to `/{tenant}/login` with a `loginAttempted=1` marker inside the
+`returnUrl`; the login page's "already signed in" shortcut (AB#4961) sends an authenticated user straight
+back. If the endpoint still answers 401 with the marker present, the page stops and shows
+`DEVICE.ERROR_SESSION_REJECTED` (EN/DE) instead of bouncing forever. The consent page has no 401
+redirect and `AuthorizeController` strips `prompt=login` and signs out stale sessions, so neither loops.
+
+### Device confirm feedback (AB#7090)
+
+`POST /connect/deviceverification` always answers **HTTP 200** with `{ success, errorMessage, error }`
+(`OctoDeviceVerificationResponseHandler`; `error` is the OAuth code: `access_denied` = denied by the user
+or cross-tenant refused, `invalid_token` = code used/expired/unknown). `DeviceVerificationController` also
+returns that shape itself for a code that is not pending any more. `GET` answers 404 for such a code.
+"Pending" = the user code token (`principal.GetTokenId()`) still has status `valid`: OpenIddict keeps
+authenticating an approved/denied code on the verification endpoint, and a second `SignIn` for it throws
+(HTTP 500), so the controller checks the status itself (`IsUserCodePendingAsync`). Never use `Forbid` for
+the unknown-code case: the challenge handler needs an authenticated principal and throws.
+The page always ends in a visible state: success, denied (`DEVICE.DENIED`), or an error
+(`DEVICE.ERROR_CODE_USED`, `ERROR_SESSION_REJECTED`, `ERROR_NO_CONFIRMATION` for a 2xx/unparsable body of
+unknown outcome, server text for e.g. cross-tenant). Terminal errors hide the consent dialog; retryable
+ones (HTTP 5xx, cross-tenant refusal) show a banner above the buttons. Specs:
+`device-confirm.feedback.spec.ts`, `OctoDeviceVerificationResponseHandlerTests`,
+`DeviceVerificationFeedbackTests`.
 
 ### Angular Project Structure
 
@@ -1527,12 +2446,30 @@ ASP.NET Data Protection keys are always persisted in MongoDB (system tenant, `Rt
 
 The `DataProtectionKeysPath` option (`OCTO_IDENTITY__DataProtectionKeysPath`) is **legacy / seed-only**: when set and the directory contains `key-*.xml` files, those keys are imported once into MongoDB on startup (zero-logout migration from the old PVC). After the import succeeds the path can be left unset in all new deployments. The Helm chart's `services.identity.dataProtection` toggle and the associated PVC have been removed; ship order is identity image first, then the updated chart.
 
+**Encryption at rest (AB#5530).** Registration: `AddOctoDataProtectionKeyRing()` (`SystemStores/DataProtection/`). The secret part of every key (`masterKey`) is wrapped with the **platform key ring** `SecretEncryption` (`OCTO_SECRETENCRYPTION__KEYS__<id>` / `ACTIVEKEYID`, AES-256-GCM via the engine's `ISecretAttributeProtector`, envelope `enc:v2:<kid>:…`) — no certificate, no new secret. The stored XML is ASP.NET's own encrypted form (`<encryptedSecret decryptorType="…PlatformKeyRingXmlDecryptor, IdentityServerPersistence">`), written by `DataProtectionKeyStore` itself (not `KeyManagementOptions.XmlEncryptor`) so it can decide per write and so `decryptorType` carries no assembly version. Key id, dates and key material never change, so nobody is logged out.
+- `Identity:DataProtection:EncryptExistingKeys` (`OCTO_IDENTITY__DATAPROTECTION__ENCRYPTEXISTINGKEYS`, default `false`): `false` = stored keys stay as they are, new keys are written **plain while the store holds keys** (old pods of a rolling update keep reading them) — a store without any key (fresh install) gets encrypted keys. `true` = new keys encrypted, and the startup step rewrites every plain key encrypted in place (idempotent, every pod may run it).
+- `DataProtectionKeyRingStartupService` (hosted): refuses to start (`DataProtectionKeyRingException`) when the flag is on without a `SecretEncryption` key, or when a stored key is wrapped with a key id that is not configured; re-wraps keys with a non-active key id (platform key rotation — remove the old id only after the re-wrap); other failures (DB) are logged and retried next start.
+- **Never rename or move `PlatformKeyRingXmlDecryptor`** — stored keys reference its type name. **Rollback** to an image without the decryptor after keys are encrypted logs every user out (old image cannot read the keys, creates new ones). Rollout/rollback: `docs/rollout-identity-dataprotection-encryption.md`.
+- Tests: `PlatformKeyRingXmlEncryptionTests` (unit, real ASP.NET stack), `DataProtectionKeyEncryptionIntegrationTests` (Mongo: multi-replica, migration, rotation, raw DB dump has no key material).
+
 ## Docker
 
 Build image using `src/IdentityServices/Dockerfile`. Requires build args:
 - `OCTO_PRIVATE_NUGET_SERVICE`: Private NuGet feed URL
 - `OCTO_PRIVATE_NUGET_CERTIFICATE`: Path to CA certificate
 - `OCTO_VERSION`: Package version to use
+
+### .NET runtime of the image and the Shared Framework findings (AB#6724, AB#6717)
+
+- The runtime stage uses the own base image `meshmakers/dotnet_aspnetcore-runtime-node` (build stage: `dotnet_sdk-node`), currently `1.4.0.0`
+  (built from `mcr.microsoft.com/dotnet/aspnet:10.0-noble`, .NET runtime 10.0.13). Bump the tag when `dockerimages` publishes a rebuilt image.
+- `System.Security.Cryptography.Pkcs` and `System.Security.Cryptography.Xml` come from the **.NET Shared Framework** (via OpenIddict and
+  DataProtection), not from a package reference. A direct `PackageReference` pin in the web project fails with `NU1510` (package pruned by the
+  framework), so **no package pin is possible**. `dotnet list package --vulnerable` may keep reporting them at the version of the build SDK
+  while restore stays silent: that is a known, covered false positive.
+- The control is the **image runtime**: since `tpl-v1.7.0` the template step `verify-dotnet-runtime.yml` (inside `build-and-push-docker.yml`) fails
+  the image build when the final stage ships a .NET runtime below the minimum (10.0.13, one place: `minRuntimeVersion` in the template). Do not chase
+  these findings with pins; see AB#6717 for the package-level part and AB#6724 for the runtime check.
 
 ## Documentation Guidelines
 
@@ -1602,3 +2539,61 @@ Reporting marker still get it) and the recurring
   `TenantAdministratorFileRoleGrant*Tests`,
   `PipelineServiceAccountFileManagementConsumerIntegrationTests` (own class: the other provisioning tests assert
   exact role sets).
+
+## Scratch tenants: the creator becomes administrator (AB#7192)
+
+An agent that creates a scratch child tenant with its client-credentials client has to work in it and clean it up without a human
+login. `CreateTenant` takes an opt-in `scratch` flag (asset repository, octo-cli `--scratch`, MCP `create_tenant`); a `Restore` has none - restoring into an existing scratch tenant keeps its marker; the tenant then
+carries a `ScratchTenantMarker` (octo-sdk `Communication.Contracts`) in the **system tenant configuration**, key `ScratchTenant.<tenantId>`:
+parent tenant, creator client id, time, and later `RevokedAtUtc` / `RevokedBy` (`GrantedAtUtc` is not written: a grant must never rewrite the marker a concurrent revoke persists; the grant time is in the audit event). It lives outside the child's database on
+purpose: it has to exist before the child (identity sets a tenant up the moment it is created), a dump does not carry it, and it survives the
+drop and re-create of a restore. Removed with the tenant (`Delete` / `Detach`); an id that is gone loses a stale marker on the next
+create / attach / plain restore.
+
+- **Grant** = membership of the creator's **mirror** (the child's client record with `ProvisionedByParentTenantId` = the marker's parent, same
+  `ClientId`) in the child's `TenantOwners` group - one `GroupMember` edge, exactly that client, exactly that tenant. A client of the same id
+  that is no mirror (local, or from a restored dump) is never granted. The client has to be flagged `AutoProvisionInChildTenants` (e.g.
+  `AddClientCredentialsClient -apic`), or it has no mirror and nothing is granted (`ScratchGrantStatus.MirrorMissing`, WARN in the log).
+- `ScratchTenantGrantService.EnsureGrantAsync` re-applies the grant from the marker: at the end of `DefaultConfigurationCreatorService.SetupTenantAsync`
+  (after the blueprint apply - the group has to exist - and the mirror provisioning; a **non-system parent**'s mirror is provisioned there first,
+  automatic mirroring only covers the system tenant) and after every `ClientMirrorProvisioningService` pass over a child (a re-provisioned mirror is a
+  new record without the old edges). So it survives an identity restart, a restore and a re-provisioned mirror. The marker is honoured only while its
+  parent is the tenant's actual parent (`ParentMismatch` otherwise).
+- **Revoke** = removing the creator's mirror from `TenantOwners` through the groups API (`DELETE .../groups/{rtId}/members/clients/{clientId}`):
+  `GroupsController` hands every client-member removal to `RecordRevocationAsync`, which persists `RevokedAtUtc`/`RevokedBy` when it is exactly that
+  edge. A revoked marker is never granted again (`ScratchGrantStatus.Revoked`). The revoke is persisted **before** the membership is
+  removed, so a failure in between can never end in a re-grant. **Unprovisioning or deleting the mirror is not a revoke**
+  (`UnprovisionClientFromTenant`, `DeleteClient` in the child): the next mirror provisioning creates the mirror again and the grant with it.
+- **Audit:** grant and revoke are information events (source IdentityService) in the event log of the tenant **and** of the system tenant (which
+  outlives the tenant); no secret is in the text.
+- The child token of the agent is the ordinary one: `client_credentials`, `acr_values=tenant:<child>`, `scope=octo_api`, with the mirror's own
+  secret (`RotateMirrorSecret`) or - while AB#5061 keeps the inherited secret - the parent client's secret.
+- Tests: `ScratchTenantCreatorGrantIntegrationTests` (real MongoDB: grant only for the creator, none without a marker, repeated setup, re-provisioned
+  mirror, persisted revoke, foreign parent, non-mirror client, non-system parent, audit without secrets), `GroupsControllerScratchRevokeTests`.
+
+## One broken tenant database must not slow every token request (AB#8177)
+
+Token issuance (`AllowedTenantsResolver`: cross-tenant mapping probe of **every** registered tenant database),
+tenant discovery (user search in every tenant) and the CORS policy rebuild (client origins of every tenant) read from
+tenant databases other than the one the request is for. With the MongoDB user of one tenant missing, each of those
+probes waited ~10 s for the failed SCRAM authentication, 2-3 times per request: `POST /connect/token` and
+`GET /connect/authorize` of unrelated tenants took 18-30 s.
+
+`ITenantProbeGuard` / `TenantProbeGuard` (singleton) wraps these probes: a per-tenant circuit breaker with a probe
+timeout (`TenantProbeGuard:ProbeTimeout`, default 3 s) and an open duration (`TenantProbeGuard:OpenDuration`, default
+60 s). A failed or timed-out probe opens the circuit; while open, that tenant answers "unavailable" at once without any
+I/O; then one request probes again (half-open). Callers fail closed and do **not** cache an "unavailable" answer.
+The opening is logged once at error level with tenant, database and the MongoDB user name (the signal that names the
+missing user). Every new per-request loop over other tenants' databases must go through the guard. Tests:
+`TenantProbeGuardTests`, `AllowedTenantsResolverBrokenTenantTests` (dropped user of tenant X: the token path of tenant Y
+stays fast and does not touch X). The creator service of the owning service re-creates the user, see octo-common-services.
+
+**A RUNNING tenant heals itself (AB#8177, round 2).** When a probe fails with an authentication error (MongoDB 18/13, also
+the pooled-connection case) or times out, the guard asks `TenantDatabaseUserHealer` (octo-common-services,
+rate-limited to once a minute per tenant) to re-create the tenant's MongoDB user **in the background** and closes the
+circuit as soon as the user was missing and is back, so no restart is needed. The healer needs the admin MongoDB
+connection; a service without it just logs a warning. A token request that hits an unreachable tenant database is no
+longer an unhandled 500: `TokenEndpointDatabaseFailureMiddleware` (before `UseOidcTenantResolution`, so the tenant lookup is covered; `/connect/token`
+only) answers `503 temporarily_unavailable` with `error_description` naming the tenant and the cause, and octo-sdk maps it
+to `TenantTokenDenialCause.TenantUnavailable`, so octo-cli shows the reason instead of "could not be reached". Tests:
+`TenantProbeGuardTests` (healing), `TokenEndpointDatabaseFailureMiddlewareTests`.

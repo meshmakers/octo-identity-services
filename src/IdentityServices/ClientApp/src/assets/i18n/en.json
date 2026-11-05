@@ -62,15 +62,22 @@
     "SUBTITLE": "Authorize Application"
   },
   "DEVICE": {
+    "CHECK_TARGET": "Only allow this request if you started it yourself, for this tenant and with this account.",
     "CODE_LABEL": "Device Code",
     "CONFIRM_SUBTITLE": "Authorize Device",
+    "DENIED": "The device request was denied. You can close this window.",
     "DESCRIPTION": "Enter the code displayed on your device to authorize access.",
     "ERROR_AUTH_FAILED": "Authorization failed",
+    "ERROR_CODE_USED": "This device code was already used, has expired or was rejected. Start a new login in the application that showed this code.",
+    "ERROR_NO_CONFIRMATION": "The request was sent but no confirmation was received. Check the application that showed this code; if it is not signed in, start a new login.",
+    "ERROR_SESSION_REJECTED": "Your sign-in session was not accepted for this device request. Sign out, sign in again and retry, or start a new login in the application that showed this code.",
     "INVALID_CODE": "Invalid or expired device code.",
     "NO_CODE": "No device code provided.",
     "REQUESTING_ACCESS": "This device is requesting access to your account:",
+    "SIGNED_IN_AS": "Signed in as",
     "SUBTITLE": "Device Authorization",
     "SUCCESS": "Device authorized successfully! You can close this window.",
+    "TARGET_TENANT": "Tenant",
     "VERIFYING_CODE": "Verifying Code"
   },
   "ERROR_PAGE": {
@@ -149,6 +156,7 @@
     "ERROR_CROSS_TENANT": "Cross-tenant login failed",
     "ERROR_ENTER_CREDENTIALS": "Please enter username and password",
     "ERROR_LOGIN_FAILED": "Login failed",
+    "ERROR_SECOND_FACTOR_SETUP_REQUIRED": "Your second factor must be set up again. Please contact your administrator.",
     "ERROR_LOGIN_GENERIC": "An error occurred during login",
     "FORGOT_PASSWORD_LINK": "Forgot password?",
     "OR_CONTINUE_WITH": "or continue with",

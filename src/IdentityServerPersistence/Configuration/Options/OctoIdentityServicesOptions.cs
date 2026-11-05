@@ -14,6 +14,7 @@ public class OctoIdentityServicesOptions
         BrokerHost = "localhost";
         EnableTokenCleanup = true;
         TokenCleanupInterval = 60 * 60; // default: once an hour
+        ClientMirrorReconciliationInterval = 5 * 60; // AB#8019: default every 5 minutes
         AllowDisplayInIframe = false;
         CorsPolicyCacheSeconds = 60;
 #if DEBUGL || DEBUG
@@ -67,6 +68,15 @@ public class OctoIdentityServicesOptions
     ///     The interval in seconds, expired tokens in grant store are checked to be deleted.
     /// </summary>
     public int TokenCleanupInterval { get; set; }
+
+    /// <summary>
+    ///     Interval in seconds of the client mirror reconciliation (AB#8019): every identity replica compares the mirrors
+    ///     of <c>AutoProvisionInChildTenants</c> clients with their parent client and repairs differences, so a secret
+    ///     removed (or added, rotated, expired) in the parent reaches every child tenant within about this time even when
+    ///     the immediate sync after the change failed. Default 300; 0 or less switches the job off (only the
+    ///     immediate sync and the start-up provisioning remain).
+    /// </summary>
+    public int ClientMirrorReconciliationInterval { get; set; }
 
     /// <summary>
     ///     Configure the SecurityHeaders so that displaying
@@ -174,6 +184,100 @@ public class OctoIdentityServicesOptions
     ///     (loopback redirects, PKCE, no secret, fixed scopes, TTL, per-tenant cap, rate limit).
     /// </summary>
     public DynamicClientRegistrationOptions DynamicClientRegistration { get; set; } = new();
+
+    /// <summary>
+    ///     <c>GET /api/tenant-topology</c> (AB#7044): limits of the tenant-topology endpoint.
+    /// </summary>
+    public TenantTopologyOptions TenantTopology { get; set; } = new();
+
+    /// <summary>
+    ///     AB#7854: limits of the sign-in endpoints (password, LDAP, second factor, recovery code).
+    /// </summary>
+    public SignInRateLimitOptions SignInRateLimit { get; set; } = new();
+
+    /// <summary>
+    ///     AB#5530: encryption at rest of the ASP.NET Data Protection key ring (configuration section
+    ///     <c>Identity:DataProtection</c>).
+    /// </summary>
+    public IdentityDataProtectionOptions DataProtection { get; set; } = new();
+}
+
+/// <summary>
+///     Encryption at rest of the ASP.NET Data Protection key ring (AB#5530). The keys are wrapped with the
+///     platform key ring <c>SecretEncryption</c> (<c>OCTO_SECRETENCRYPTION__KEYS__&lt;id&gt;</c>,
+///     <c>OCTO_SECRETENCRYPTION__ACTIVEKEYID</c>); see <c>docs/rollout-identity-dataprotection-encryption.md</c>.
+/// </summary>
+public class IdentityDataProtectionOptions
+{
+    /// <summary>
+    ///     <c>Identity:DataProtection:EncryptExistingKeys</c> (env
+    ///     <c>OCTO_IDENTITY__DATAPROTECTION__ENCRYPTEXISTINGKEYS</c>), default <c>false</c>.
+    ///     <list type="bullet">
+    ///         <item><c>false</c> (release 1): stored keys are read as they are; new keys are written unencrypted while
+    ///         the store already holds keys, so pods of the previous image keep reading them during a rolling update.
+    ///         A store without any key (fresh installation) gets its keys encrypted.</item>
+    ///         <item><c>true</c> (per cluster, once every pod runs an image with the decryptor): new keys are written
+    ///         encrypted and a one-time, idempotent startup step rewrites every stored plain key encrypted (same key
+    ///         id, same dates, same key material - nobody is logged out). Identity refuses to start when no
+    ///         <c>SecretEncryption</c> key is configured.</item>
+    ///     </list>
+    ///     Switching back to <c>false</c> does not decrypt stored keys.
+    /// </summary>
+    public bool EncryptExistingKeys { get; set; }
+}
+
+/// <summary>
+///     Rate limits of the interactive sign-in endpoints (AB#7854): <c>login</c>, <c>ldap-login</c>, <c>login-2fa</c>,
+///     <c>login-2fa-email</c>, <c>send-2fa-email</c>, <c>login-recovery</c>. Environment variables:
+///     <c>OCTO_IDENTITY__SIGNINRATELIMIT__ENABLED</c>, <c>…__PERMITSPERACCOUNTPERMINUTE</c>,
+///     <c>…__CONCURRENTATTEMPTSPERACCOUNT</c>, <c>…__PERMITSPERCLIENTIPPERMINUTE</c>, <c>…__USEFORWARDEDFOR</c>.
+/// </summary>
+/// <remarks>
+///     The limits are kept in memory per pod. They complement the lockout (5 failures, 5 minutes): the lockout is
+///     counted on the user document, the limits stop bursts before they reach it.
+/// </remarks>
+public class SignInRateLimitOptions
+{
+    /// <summary>Switches the limits on (default). Off only for diagnosis.</summary>
+    public bool Enabled { get; set; } = true;
+
+    /// <summary>
+    ///     Attempts per account (user name for password logins, the user for second-factor and recovery-code attempts)
+    ///     in a sliding minute. Default 10.
+    /// </summary>
+    public int PermitsPerAccountPerMinute { get; set; } = 10;
+
+    /// <summary>
+    ///     Attempts of one account that may run at the same time. Default 1: parallel attempts are refused, so they cannot
+    ///     all be evaluated before the lockout of the first ones is visible.
+    /// </summary>
+    public int ConcurrentAttemptsPerAccount { get; set; } = 1;
+
+    /// <summary>Attempts per client address in a sliding minute, over all accounts and endpoints. Default 60.</summary>
+    public int PermitsPerClientIpPerMinute { get; set; } = 60;
+
+    /// <summary>
+    ///     Take the client address from the right-most <c>X-Forwarded-For</c> entry (the one the ingress adds) instead of
+    ///     the TCP peer, which behind the ingress is the ingress pod. Default <c>true</c>. Turn off only when the service
+    ///     is reachable without a proxy that sets the header.
+    /// </summary>
+    public bool UseForwardedFor { get; set; } = true;
+}
+
+/// <summary>
+///     Configuration of the tenant-topology endpoint (AB#7044). Environment variables:
+///     <c>OCTO_IDENTITY__TENANTTOPOLOGY__RATELIMITPERMITSPERMINUTE</c>, <c>…__MAXNODES</c>.
+/// </summary>
+public class TenantTopologyOptions
+{
+    /// <summary>Per-subject sliding-window permit count per minute (default 60: an app asks once per session).</summary>
+    public int RateLimitPermitsPerMinute { get; set; } = 60;
+
+    /// <summary>
+    ///     Upper bound of tenants walked below one scope. Reaching it fails closed (503) instead of
+    ///     answering with a partial list.
+    /// </summary>
+    public int MaxNodes { get; set; } = 5000;
 }
 
 /// <summary>

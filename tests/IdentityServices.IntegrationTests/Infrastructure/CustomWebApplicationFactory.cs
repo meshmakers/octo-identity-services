@@ -49,6 +49,24 @@ public class CustomWebApplicationFactory : WebApplicationFactory<Program>, IAsyn
 
     private string? _databaseHost;
 
+    /// <summary>
+    ///     Name of the host setting that switches the file watchers of the configuration files off.
+    /// </summary>
+    internal const string ReloadConfigOnChangeVariable = "DOTNET_hostBuilder__reloadConfigOnChange";
+
+    /// <summary>
+    ///     Every in-process host of this suite (each factory and each <c>WithWebHostBuilder</c> derivative) loads
+    ///     <c>appsettings*.json</c> with reload-on-change, i.e. one file watcher per file and host. On a Linux CI agent the
+    ///     inotify instance limit (128) was reached across the suite (AB#8019, PR build of #230), failing unrelated tests
+    ///     at host start. Tests never change configuration files at run time, so the hosts read them once. Set before the
+    ///     first host is built; <c>WebApplication.CreateBuilder</c> reads <c>DOTNET_</c> host settings from the process
+    ///     environment.
+    /// </summary>
+    static CustomWebApplicationFactory()
+    {
+        Environment.SetEnvironmentVariable(ReloadConfigOnChangeVariable, "false");
+    }
+
     public CustomWebApplicationFactory()
     {
         _options = new IntegrationTestOptions();
@@ -190,6 +208,12 @@ public class CustomWebApplicationFactory : WebApplicationFactory<Program>, IAsyn
         await base.DisposeAsync();
     }
 
+    /// <summary>
+    ///     Clock of the security-stamp validator (AB#7859). Tests advance it to force the revalidation of a cookie
+    ///     session; reset it afterwards (one factory per test class, tests of a class run one after another).
+    /// </summary>
+    public AdjustableTimeProvider SecurityStampClock { get; } = new();
+
     protected override void ConfigureWebHost(IWebHostBuilder builder)
     {
         Console.Error.WriteLine("[WebFactory] ConfigureWebHost called");
@@ -279,7 +303,19 @@ public class CustomWebApplicationFactory : WebApplicationFactory<Program>, IAsyn
                 opts.KeyFilePassword = "not-used-in-tests";
                 opts.AuthorityUrl = "https://localhost:5003";
                 opts.EnableTokenCleanup = false;
+                // AB#8019: no background mirror reconciliation in the shared test host; tests run a pass explicitly
+                // (IClientMirrorReconciliationJob), so a timer can never repair a state a test is asserting.
+                opts.ClientMirrorReconciliationInterval = 0;
+                // AB#7854: the whole suite signs in from one test-server address and reuses accounts; keep the
+                // sign-in limits active (wiring, concurrency) but far above what the suite needs. The limit itself is
+                // tested with a factory that lowers them (SignInAttemptConcurrencyTests).
+                opts.SignInRateLimit.PermitsPerClientIpPerMinute = 100_000;
+                opts.SignInRateLimit.PermitsPerAccountPerMinute = 10_000;
             });
+
+            // AB#7859: the security-stamp validator's clock, so a test can step past its revalidation interval.
+            services.Configure<Microsoft.AspNetCore.Identity.SecurityStampValidatorOptions>(o =>
+                o.TimeProvider = SecurityStampClock);
 
             // Configure cookie settings for testing (allow non-secure cookies over HTTP)
             // Configure ALL Identity cookies - Application, External, TwoFactorUserId, TwoFactorRememberMe
@@ -375,6 +411,16 @@ public class CustomWebApplicationFactory : WebApplicationFactory<Program>, IAsyn
             // Replace ITenantNotifications with default (non-RabbitMQ) implementation
             services.RemoveAll<ITenantNotifications>();
             services.AddSingleton<ITenantNotifications, DefaultTenantNotifications>();
+
+            // AB#7776: the method host is hosted with the default configuration (role methods carry no secret). The test host
+            // has no broker, so drop the bus side of the host (endpoints, announcement, heartbeat); registration, caller token
+            // validation, the invoker and the handlers stay and are called directly.
+            foreach (var descriptor in services
+                         .Where(d => d.ImplementationType?.Name is "CkMethodHandlerStartupService"
+                             or "CkMethodHandlerHeartbeatService").ToList())
+            {
+                services.Remove(descriptor);
+            }
 
             Console.Error.WriteLine("[WebFactory] ConfigureTestServices completed");
             Console.Error.Flush();

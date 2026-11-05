@@ -108,3 +108,66 @@ subject IDs to user names.
    `would-deny-provisioning` = admin provisioning outside the caller's tenant subtree (stays forbidden; fix the caller).
 3. Once the warn log has no new `would-deny` lines: remove the value again (default `Enforce`),
    deploy, and repeat step 4.
+
+## AB#5861: `SecretManagement` for API secret writes
+
+Since AB#5861 creating, rotating and deleting API secrets (REST `apiSecrets/*` writes, a `clientSecret` in client
+create/update, the `Client.AddSecret`/`RemoveSecret` methods) needs the tenant role `SecretManagement`. It ships
+**staged**: `IdentityApiAuthorization:SecretManagementRoleEnforcement` defaults to `Warn` — `TenantManagement` or
+`UserManagement` still pass and every such call is logged
+`This would be denied with SecretManagementRoleEnforcement=Enforce (AB#5861)`. Releasing the identity image changes
+nothing for callers; only the switch to `Enforce` does.
+
+**Why staged (lockout analysis):** `SecretManagementAdminGrant` (AB#5544, runs once per tenant from
+`SetupTenantAsync` on identity start, existing tenants included) granted the role only to local users holding both
+`AdminPanelManagement` and `TenantManagement` at that moment. Not covered, so denied under `Enforce` unless assigned:
+cross-tenant administrators (shadow users `xt_*`, external tenant user mappings — e.g. platform admins administering
+customer tenants from the system tenant), clients with `TenantManagement`, users with only `TenantManagement` or
+`UserManagement`, administrators added after the grant ran (except the first admin of a new tenant), and anybody who
+holds the admin roles only through `TenantOwners` membership created after the grant.
+
+Who must hold `SecretManagement`: the human administrators who manage client/API secrets. Client credentials accounts
+only where a documented automation creates secrets through the identity REST API (none known: the communication
+controller provisions and rotates pipeline service account secrets over the bus, not REST). Never assign it to
+`TenantOwners`.
+
+Order per cluster: **test-2 → prod-2 → prod-1**.
+
+1. **Inventory (read-only)** — who holds the role, who would lose secret writes:
+   ```bash
+   scripts/identity-secret-management-role-check.sh --context <env>_octosystem              # all tenants
+   scripts/identity-secret-management-role-check.sh --context <env>_octosystem meshtest     # selected tenants
+   scripts/identity-secret-management-role-check.sh --context <env>_octosystem --ids-only   # rtIds only (for work items)
+   ```
+   One context is enough (`octo-cli GraphQl -tid` exchanges the token per tenant); tenants the account cannot reach
+   are `ERROR` rows (exit 1).
+   `LOSES` rows hold `TenantManagement`/`UserManagement` but not `SecretManagement`; `NO-ROLE` = tenant without the
+   role (bootstrap < 1.7.0, identity not restarted since); `ERROR` = tenant not readable with the context.
+2. **Deploy the identity release** (default `Warn`, nothing changes) and let it run for a while.
+3. **Warn log**: every API secret write by a caller without the role is logged:
+   ```bash
+   scripts/identity-rest-role-precheck.sh --warn-log identity-<env>.log --context <env>_octosystem
+   ```
+   (Dash0, dataset `<env>`: `k8s.container.name is identity` + `otel.log.body contains AB#5861`.) Every
+   `would-deny-secret` row is a subject that needs `SecretManagement`.
+4. **Assign the role** to the people (and the documented automations) from steps 1 and 3 (Gerald):
+   ```bash
+   octo-cli --context <env>_<tenant> -c AddUserToRole -un "<userName>" -r "SecretManagement"
+   # cross-tenant administrator: -rids REPLACES the role list - include the existing roles
+   octo-cli --context <env>_<tenant> -c UpdateExternalTenantUserMapping -id "<mapping-rtid>" -rids "<existing>,SecretManagement"
+   ```
+5. **Switch to `Enforce` per cluster through values** (the AB#7581 pattern: chart value with the same default as the
+   code, overridden per cluster in `octo-mesh-deployment`, `clusters/<env>/values-octo-mesh.yaml`):
+   ```yaml
+   services:
+     identity:
+       secretManagementRoleEnforcement: Enforce   # rendered as OCTO_IDENTITYAPIAUTHORIZATION__SECRETMANAGEMENTROLEENFORCEMENT
+   ```
+   then run the cluster's CD. The `octo-mesh` chart value (`Warn` | `Enforce`, default `Warn`, any other value fails the
+   render, like `apiRoleEnforcement`) is a follow-up in octo-helm-core and must be released before this step; the
+   identity release itself needs no value. Only switch once steps 1 and 3 show no row that should keep access.
+   Smoke test: an administrator with the role creates and deletes a test secret in Studio; a user with only
+   `TenantManagement` gets `403` with
+   `{"message": "Access is denied: this operation requires the role 'SecretManagement' in the tenant. ..."}`.
+6. **Emergency exit**: back to `Warn` (remove the cluster value and run the CD) — or the cluster-wide `apiRoleEnforcement: Warn`, which
+   relaxes every role policy including this one.

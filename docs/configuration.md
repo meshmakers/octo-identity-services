@@ -38,6 +38,28 @@ export OCTO_Identity__SigningCertificatePassword="secret"
 }
 ```
 
+##### CK methods hosted by the Identity service (AB#5672)
+
+| Setting | Default | Meaning |
+|---------|---------|---------|
+| `Methods:Identity:EnablePasswordMethods` (env `OCTO_Methods__Identity__EnablePasswordMethods`) | `false` | Registers the handlers of CK methods with a sensitive (password / secret) parameter or result: `User.ChangePassword`, `User.ResetPassword`, `Client.AddSecret`, `Client.RemoveSecret` (AB#7780). Off: the service announces no password method and the gateway answers `METHOD_HANDLER_NOT_AVAILABLE`. **Production gate (2026-10-23): keep it off on staging-1, prod-1 and prod-2 until the restricted broker user (B0) is rolled out.** Read at start; restart after a change. |
+| `Methods:Token:*` | authority = `Identity:AuthorityUrl` | Caller token validation of the method host (issuer, keys, scope, tenant); only needed to override the defaults. See the common-services method handler SDK. |
+
+Helm: set the first row as an environment variable of the identity service. Details and the handler pattern: `CLAUDE.md`, section
+"CK method host of the identity service".
+
+##### Client mirror reconciliation (AB#8019)
+
+| Setting | Default | Meaning |
+|---------|---------|---------|
+| `Identity:ClientMirrorReconciliationInterval` (env `OCTO_IDENTITY__CLIENTMIRRORRECONCILIATIONINTERVAL`) | `300` | Seconds between two passes of the client mirror reconciliation. Every identity replica compares the mirrors of `AutoProvisionInChildTenants` clients in the child tenants with their parent client and repairs differences (any client attribute: secrets incl. expiry, claims, flags, lifetimes, URIs), and removes a mirror whose parent client is missing in two consecutive passes. A secret removed, added, rotated or expired in the parent therefore reaches every child tenant within about this interval even when the immediate sync after the change failed. `0` or less switches the job off (only the immediate sync and the start-up provisioning remain). Read at start. |
+
+Replicas need no coordination: a mirror in sync is not written, and every mirror writer (sync, provisioning, rotation,
+reconciliation) writes with the version it read and retries on a conflict, so a concurrent writer wins. Metrics: meter `Meshmakers.Octo.Identity`, counters
+`identity.client_mirror.reconciled` (label `outcome`: `repaired`, `removed`, `skipped`, `failed`) and
+`identity.client_mirror.reconcile.runs` (label `outcome`: `ok`, `tenant_failed`). Logs name client ids and tenants, never a
+secret or its hash.
+
 ##### CORS policy cache (AB#5487)
 
 The Identity service builds its CORS policy from the client origins (`allowedCorsOrigins`) of the system tenant
@@ -45,7 +67,7 @@ and all registered tenants and caches it in process memory.
 
 | Setting | Default | Meaning |
 |---------|---------|---------|
-| `Identity:CorsPolicyCacheSeconds` (env `OCTO_IDENTITY__CORSPOLICYCACHESECONDS`) | `60` | Lifetime of the cached policy. After it expires the next request rebuilds the policy from the database, so a missed `CorsClientsUpdate` event (another pod, a client written without event) or a removed origin heals on its own. `0` or less disables the time-based expiry (event-driven invalidation only). |
+| `Identity:CorsPolicyCacheSeconds` (env `OCTO_IDENTITY__CORSPOLICYCACHESECONDS`) | `60` | Lifetime of the cached policy. After it expires the next request rebuilds the policy from the database, so a missed `CorsClientsUpdate` event (another pod, a client written without event) or a removed origin heals on its own. `0` or less disables the time-based expiry (event-driven invalidation only). The rebuild is single-flight per pod (AB#8035): requests that find the policy expired or invalidated share one load of the origins. The rebuild is logged at Debug; Information (`Identity CORS origins changed: …`, with added and removed origins) only when the origin set differs from the previous load. |
 
 Behaviour that does not depend on the setting:
 
@@ -55,6 +77,20 @@ Behaviour that does not depend on the setting:
   delete, secrets, overlay) and by client mirror provisioning (new mirror, sync, removal). The overlay endpoint
   (`POST {tenant}/v1/clients/{id}/overlayUris`) publishes the event even when it added no URI, so an idempotent re-apply
   refreshes the cache without touching the client.
+
+##### Sign-in rate limits (AB#7854)
+
+In-memory limits per pod on the interactive sign-in endpoints (`login`, `ldap-login`, `login-2fa`, `login-2fa-email`,
+`send-2fa-email`, `login-recovery`); a refused attempt gets `429` with `Retry-After: 60`. Details:
+`authentication.md` § Sign-In Attempts.
+
+| Setting (env `OCTO_IDENTITY__SIGNINRATELIMIT__…`) | Default | Meaning |
+|---------|---------|---------|
+| `Identity:SignInRateLimit:Enabled` | `true` | Switches the limits on. Off only for diagnosis. |
+| `Identity:SignInRateLimit:PermitsPerAccountPerMinute` | `10` | Attempts per account (user name, or the user of a pending second factor) in a sliding minute. |
+| `Identity:SignInRateLimit:ConcurrentAttemptsPerAccount` | `1` | Attempts of one account that may run at the same time; more are refused. |
+| `Identity:SignInRateLimit:PermitsPerClientIpPerMinute` | `60` | Attempts per client address over all accounts and endpoints in a sliding minute. |
+| `Identity:SignInRateLimit:UseForwardedFor` | `true` | Client address = right-most `X-Forwarded-For` entry (set by the ingress). Turn off only when the service is reachable without such a proxy — a client could otherwise choose its own address. |
 
 ##### Token signing (OpenIddict)
 
@@ -115,6 +151,7 @@ Key options in `OctoIdentityServicesOptions`:
 |--------|-------------|-------------|
 | `AuthorityUrl` | `OCTO_IDENTITY__AuthorityUrl` | Public URL of the Identity service (default: `https://localhost:5003`) |
 | `RefineryStudioUrl` | `OCTO_IDENTITY__RefineryStudioUrl` | Public URL of the Data Refinery Studio SPA. When set, the `octo-data-refinery-studio` OIDC client is auto-provisioned in all tenants. |
+| `DataProtection:EncryptExistingKeys` | `OCTO_IDENTITY__DATAPROTECTION__ENCRYPTEXISTINGKEYS` | AB#5530, default `false`. Encryption at rest of the Data Protection key ring with the platform key ring (`SecretEncryption`). `false`: stored keys are read as they are, new keys are written unencrypted while the store holds keys (an empty store gets encrypted keys). `true`: new keys encrypted and every stored plain key rewritten encrypted at startup; identity refuses to start without a `SecretEncryption` key. Switch on per cluster only after every pod runs an image with the decryptor — see `rollout-identity-dataprotection-encryption.md`. Setting it back to `false` does not decrypt stored keys. |
 | `DataProtectionKeysPath` | `OCTO_IDENTITY__DataProtectionKeysPath` | **Legacy / seed-only.** When set and the directory contains `key-*.xml` files, those keys are imported once into MongoDB at startup (zero-logout migration from the old PVC). Safe to leave unset in new deployments — DataProtection keys are always stored in MongoDB (`RtDataProtectionKey`, system tenant). |
 
 Tenant-authorization options (`TenantAuthorizationOptions`, octo-common-services, AB#5032) — how the
@@ -133,6 +170,7 @@ requirement of the tenant REST API (see `docs/system-api.md` § Authorization Po
 | Option | Env variable | Description |
 |--------|-------------|-------------|
 | `RoleEnforcement` | `OCTO_IDENTITYAPIAUTHORIZATION__ROLEENFORCEMENT` | `Enforce` (default) \| `Warn`. `Warn` lets callers without the required tenant role through and logs every such call as a warning ("would be denied") — the caller inventory to review before switching to `Enforce`. The scope requirement and the system-tenant-only rule of the log-level endpoint are always enforced. |
+| `SecretManagementRoleEnforcement` | `OCTO_IDENTITYAPIAUTHORIZATION__SECRETMANAGEMENTROLEENFORCEMENT` | `Warn` (default) \| `Enforce` (AB#5861). Stages the `SecretManagement` requirement of the API secret writes: `Warn` still lets `TenantManagement`/`UserManagement` through and logs "would be denied with SecretManagementRoleEnforcement=Enforce (AB#5861)"; `Enforce` accepts only `SecretManagement`. Switch per cluster after the precheck (`docs/rollout-identity-rest-role-enforcement.md`). `RoleEnforcement=Warn` also relaxes it. |
 
 ### Configuration Sources
 

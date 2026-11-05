@@ -1,4 +1,6 @@
 using FluentAssertions;
+using IdentityServerPersistence.SystemStores;
+using Meshmakers.Octo.ConstructionKit.Contracts;
 using Meshmakers.Octo.Backend.IdentityServices.Services;
 using Meshmakers.Octo.Communication.Contracts;
 using Meshmakers.Octo.Communication.Contracts.DataTransferObjects;
@@ -6,7 +8,7 @@ using Meshmakers.Octo.Services.Infrastructure.CredentialGenerator;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.Extensions.Logging;
 using NSubstitute;
-using Persistence.IdentityCkModel.Generated.System.Identity.v2;
+using Persistence.IdentityCkModel.Generated.System.Identity.v3;
 using Xunit;
 
 namespace IdentityServices.UnitTests.Services;
@@ -15,6 +17,7 @@ public class UserManagementServiceTests
 {
     private readonly UserManager<RtUser> _userManager;
     private readonly RoleManager<RtRole> _roleManager;
+    private readonly IGroupStore _groupStore;
     private readonly ICredentialGenerator _credentialGenerator;
     private readonly ILogger<UserManagementService> _logger;
     private readonly UserManagementService _sut;
@@ -29,11 +32,12 @@ public class UserManagementServiceTests
         _roleManager = Substitute.For<RoleManager<RtRole>>(
             roleStore, null, null, null, null);
 
+        _groupStore = Substitute.For<IGroupStore>();
         _credentialGenerator = Substitute.For<ICredentialGenerator>();
         _logger = Substitute.For<ILogger<UserManagementService>>();
 
         _sut = new UserManagementService(
-            _logger, _userManager, _roleManager, _credentialGenerator);
+            _logger, _userManager, _roleManager, _groupStore, _credentialGenerator);
     }
 
     [Fact]
@@ -314,6 +318,98 @@ public class UserManagementServiceTests
 
         // Assert
         await act.Should().ThrowAsync<UserManagementException>();
+    }
+
+    [Fact]
+    public async Task CreateAdminUserAsync_WhenValid_AddsTheAdministratorToTenantOwners()
+    {
+        // AB#7946: TenantOwners carries the roles the direct grants lack (DataModelManagement, StreamData*); without
+        // the membership the first administrator cannot add anyone to TenantOwners under the role change guard.
+        var dto = new AdminUserDto { EMail = "admin@test.com", Password = "SecurePass123!" };
+        var group = new RtGroup { RtId = OctoObjectId.GenerateNewId(), GroupName = "TenantOwners" };
+        ArrangeValidSetup(dto);
+        _groupStore.FindByNameAsync("TENANTOWNERS").Returns(group);
+        _groupStore.GetRoleIdsAsync(group.RtId).Returns(new List<string> { "r1" });
+        _groupStore.GetMemberUserIdsAsync(group.RtId).Returns(new List<string>());
+        RtUser? created = null;
+        _userManager.CreateAsync(Arg.Do<RtUser>(u => { u.RtId = OctoObjectId.GenerateNewId(); created = u; }), dto.Password)
+            .Returns(IdentityResult.Success);
+
+        await _sut.CreateAdminUserAsync(dto);
+
+        await _groupStore.Received(1).AddMemberUserAsync(group.RtId, created!.RtId.ToString());
+    }
+
+    [Fact]
+    public async Task CreateAdminUserAsync_WhenAlreadyMemberOfTenantOwners_DoesNotAddTheMembershipAgain()
+    {
+        var dto = new AdminUserDto { EMail = "admin@test.com", Password = "SecurePass123!" };
+        var group = new RtGroup { RtId = OctoObjectId.GenerateNewId(), GroupName = "TenantOwners" };
+        ArrangeValidSetup(dto);
+        var userId = OctoObjectId.GenerateNewId();
+        _userManager.CreateAsync(Arg.Do<RtUser>(u => u.RtId = userId), dto.Password).Returns(IdentityResult.Success);
+        _groupStore.FindByNameAsync("TENANTOWNERS").Returns(group);
+        _groupStore.GetRoleIdsAsync(group.RtId).Returns(new List<string> { "r1" });
+        _groupStore.GetMemberUserIdsAsync(group.RtId).Returns(new List<string> { userId.ToString() });
+
+        await _sut.CreateAdminUserAsync(dto);
+
+        await _groupStore.DidNotReceive().AddMemberUserAsync(Arg.Any<OctoObjectId>(), Arg.Any<string>());
+    }
+
+    [Fact]
+    public async Task CreateAdminUserAsync_WhenTenantOwnersExists_AssignsNoDirectRole()
+    {
+        // AB#8161: administrators are TenantOwners members; the group carries the roles.
+        var dto = new AdminUserDto { EMail = "admin@test.com", Password = "SecurePass123!" };
+        var group = new RtGroup { RtId = OctoObjectId.GenerateNewId(), GroupName = "TenantOwners" };
+        ArrangeValidSetup(dto);
+        _groupStore.FindByNameAsync("TENANTOWNERS").Returns(group);
+        _groupStore.GetMemberUserIdsAsync(group.RtId).Returns(new List<string>());
+        _groupStore.GetRoleIdsAsync(group.RtId).Returns(new List<string> { "r1" });
+
+        await _sut.CreateAdminUserAsync(dto);
+
+        await _userManager.DidNotReceive().AddToRoleAsync(Arg.Any<RtUser>(), Arg.Any<string>());
+        await _groupStore.Received(1).AddMemberUserAsync(group.RtId, Arg.Any<string>());
+    }
+
+    [Fact]
+    public async Task CreateAdminUserAsync_WhenTenantOwnersCarriesNoRole_FallsBackToDirectRoles()
+    {
+        var dto = new AdminUserDto { EMail = "admin@test.com", Password = "SecurePass123!" };
+        var group = new RtGroup { RtId = OctoObjectId.GenerateNewId(), GroupName = "TenantOwners" };
+        ArrangeValidSetup(dto);
+        _groupStore.FindByNameAsync("TENANTOWNERS").Returns(group);
+        _groupStore.GetRoleIdsAsync(group.RtId).Returns(new List<string>());
+
+        await _sut.CreateAdminUserAsync(dto);
+
+        await _userManager.Received(13).AddToRoleAsync(Arg.Any<RtUser>(), Arg.Any<string>());
+        await _groupStore.DidNotReceive().AddMemberUserAsync(Arg.Any<OctoObjectId>(), Arg.Any<string>());
+    }
+
+    [Fact]
+    public async Task CreateAdminUserAsync_WhenTenantOwnersGroupIsMissing_StillCreatesTheAdministratorWithDirectRoles()
+    {
+        var dto = new AdminUserDto { EMail = "admin@test.com", Password = "SecurePass123!" };
+        ArrangeValidSetup(dto);
+        _groupStore.FindByNameAsync("TENANTOWNERS").Returns((RtGroup?)null);
+
+        await _sut.CreateAdminUserAsync(dto);
+
+        await _userManager.Received(13).AddToRoleAsync(Arg.Any<RtUser>(), Arg.Any<string>());
+        await _groupStore.DidNotReceive().AddMemberUserAsync(Arg.Any<OctoObjectId>(), Arg.Any<string>());
+    }
+
+    private void ArrangeValidSetup(AdminUserDto dto)
+    {
+        _userManager.Users.Returns(Enumerable.Empty<RtUser>().AsQueryable());
+        _credentialGenerator.CheckPassword(dto.Password!).Returns(true);
+        _userManager.FindByNameAsync(dto.EMail!).Returns((RtUser?)null);
+        _userManager.CreateAsync(Arg.Any<RtUser>(), dto.Password!).Returns(IdentityResult.Success);
+        SetupAllRequiredRoles();
+        _userManager.AddToRoleAsync(Arg.Any<RtUser>(), Arg.Any<string>()).Returns(IdentityResult.Success);
     }
 
     private void SetupAllRequiredRoles()

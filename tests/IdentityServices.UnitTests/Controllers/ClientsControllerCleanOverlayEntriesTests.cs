@@ -1,3 +1,5 @@
+using Meshmakers.Octo.Backend.IdentityServices.Authorization.RoleChange;
+using Microsoft.AspNetCore.Identity;
 using FluentAssertions;
 using IdentityServerPersistence;
 using IdentityServerPersistence.SystemStores;
@@ -6,7 +8,7 @@ using Meshmakers.Octo.Common.DistributionEventHub.Services;
 using Meshmakers.Octo.Communication.Contracts.DataTransferObjects;
 using Microsoft.AspNetCore.Mvc;
 using NSubstitute;
-using Persistence.IdentityCkModel.Generated.System.Identity.v2;
+using Persistence.IdentityCkModel.Generated.System.Identity.v3;
 using Shared.TestUtilities.Builders;
 using Xunit;
 
@@ -30,11 +32,15 @@ public class ClientsControllerCleanOverlayEntriesTests
     private readonly IClientImpersonationStore _clientImpersonationStore =
         Substitute.For<IClientImpersonationStore>();
     private readonly ClientsController _sut;
+    private readonly List<string> _writes;
 
     public ClientsControllerCleanOverlayEntriesTests()
     {
         _clientStore.TenantId.Returns(TenantId);
-        _sut = new ClientsController(_clientStore, _eventHub, _clientRoleStore, _clientImpersonationStore);
+        _writes = ClientStoreMutations.Attach(_clientStore);
+        _sut = new ClientsController(_clientStore, _eventHub, _clientRoleStore, _clientImpersonationStore,
+            Substitute.For<RoleManager<RtRole>>(Substitute.For<IRoleStore<RtRole>>(), null, null, null, null),
+            Substitute.For<IRoleChangeGuard>(), Substitute.For<IRoleChangeRefusals>());
     }
 
     [Fact]
@@ -51,14 +57,14 @@ public class ClientsControllerCleanOverlayEntriesTests
         dto.TotalEntriesRemoved.Should().Be(0);
         dto.ClientResults.Should().BeEmpty();
 
-        await _clientStore.DidNotReceiveWithAnyArgs().UpdateAsync(default!, default!);
+        _writes.Should().BeEmpty();
     }
 
     [Fact]
     public async Task CleanOverlayEntries_NoOverlayEntries_SkipsUpdateAndCacheBust()
     {
         // Single client carrying only base entries — nothing to strip, the endpoint must
-        // skip UpdateAsync entirely. Mirrors the ApplyOverlayUris no-op contract.
+        // skip the write entirely. Mirrors the ApplyOverlayUris no-op contract.
         var client = new RtClientBuilder()
             .WithClientId("octo-data-refinery-studio")
             .WithRedirectUris("https://studio.example/")
@@ -72,7 +78,7 @@ public class ClientsControllerCleanOverlayEntriesTests
         dto.ClientsAffected.Should().Be(0);
         dto.TotalEntriesRemoved.Should().Be(0);
 
-        await _clientStore.DidNotReceiveWithAnyArgs().UpdateAsync(default!, default!);
+        _writes.Should().BeEmpty();
     }
 
     [Fact]
@@ -120,7 +126,7 @@ public class ClientsControllerCleanOverlayEntriesTests
         client.RedirectUris.Select(e => e.Source).Should().BeEquivalentTo(
             ClientUriSources.Base, ClientUriSources.Api);
 
-        await _clientStore.Received(1).UpdateAsync("octo-data-refinery-studio", client);
+        _writes.Should().Equal("octo-data-refinery-studio");
     }
 
     [Fact]
@@ -239,9 +245,9 @@ public class ClientsControllerCleanOverlayEntriesTests
         dto.ClientResults.Should().ContainSingle();
         dto.ClientResults[0].ClientId.Should().Be("octo-data-refinery-studio");
 
-        // Only the affected client triggers UpdateAsync.
-        await _clientStore.Received(1).UpdateAsync("octo-data-refinery-studio", withOverlay);
-        await _clientStore.DidNotReceive().UpdateAsync("octo-cli", Arg.Any<RtClient>());
+        // Only the affected client is written.
+        _writes.Should().Equal("octo-data-refinery-studio");
+        _writes.Should().NotContain("octo-cli");
     }
 
     [Fact]

@@ -15,6 +15,7 @@
 
     <ItemGroup>
         <ProjectReference Include="..\IdentityServices.Resources\IdentityServices.Resources.csproj" />
+        <PackageReference Include="Meshmakers.Octo.Communication.Contracts" Version="$(OctoCoreLibVersion)" />
         <PackageReference Include="Meshmakers.Octo.Runtime.Engine.MongoDb" Version="$(OctoCoreLibVersion)" />
         <PackageReference Include="Meshmakers.Octo.Services.Infrastructure" Version="$(OctoCoreLibVersion)" />
         <PackageReference Include="Meshmakers.Octo.Services.Notifications" Version="$(OctoCoreLibVersion)" />

@@ -23,6 +23,10 @@ namespace Meshmakers.Octo.Backend.IdentityServices.Authorization;
 ///         (<see cref="ITenantDiscoveryService.GetScopeDescendantsAsync" />).
 ///     </para>
 ///     <para>
+///         Also guards the client mirror actions that name a child tenant (<c>childTenantId</c> in the route
+///         or the query, AB#6758).
+///     </para>
+///     <para>
 ///         Follows <see cref="IdentityApiAuthorizationOptions.RoleEnforcement" />: <c>Warn</c> logs and
 ///         lets the call through, <c>Enforce</c> answers <c>403</c>.
 ///     </para>
@@ -35,12 +39,16 @@ internal sealed class AdminProvisioningTargetScopeFilter(
 {
     internal const string TenantIdClaim = "tenant_id";
 
+    /// <summary>Route and query parameter names that address a target tenant.</summary>
+    internal static readonly string[] TargetParameterNames = ["targetTenantId", "childTenantId"];
+
     public async Task OnActionExecutionAsync(ActionExecutingContext context, ActionExecutionDelegate next)
     {
-        var targetTenantId = context.RouteData.Values["targetTenantId"] as string;
+        var targets = CollectTargets(context);
+        var targetTenantId = string.Join(",", targets);
         var callerTenantId = context.HttpContext.User.FindFirst(TenantIdClaim)?.Value;
 
-        if (await IsInCallerScopeAsync(callerTenantId, targetTenantId))
+        if (await AreAllInCallerScopeAsync(callerTenantId, targets))
         {
             await next();
             return;
@@ -62,6 +70,50 @@ internal sealed class AdminProvisioningTargetScopeFilter(
             callerTenantId, targetTenantId, context.HttpContext.Request.Method,
             context.HttpContext.Request.Path.Value);
         context.Result = new ForbidResult();
+    }
+
+    /// <summary>
+    ///     Every target tenant the request names: the route values and — AB#6758 — the query values
+    ///     (<c>provisionInTenant?childTenantId=</c>); a request that names none is out of scope.
+    /// </summary>
+    private static List<string> CollectTargets(ActionExecutingContext context)
+    {
+        var targets = new List<string>();
+        foreach (var name in TargetParameterNames)
+        {
+            if (context.RouteData.Values.TryGetValue(name, out var routeValue) && routeValue is string routeTarget)
+            {
+                targets.Add(routeTarget);
+            }
+
+            foreach (var queryValue in context.HttpContext.Request.Query[name])
+            {
+                if (queryValue != null)
+                {
+                    targets.Add(queryValue);
+                }
+            }
+        }
+
+        return targets;
+    }
+
+    private async Task<bool> AreAllInCallerScopeAsync(string? callerTenantId, IReadOnlyList<string> targets)
+    {
+        if (targets.Count == 0)
+        {
+            return false;
+        }
+
+        foreach (var target in targets)
+        {
+            if (!await IsInCallerScopeAsync(callerTenantId, target))
+            {
+                return false;
+            }
+        }
+
+        return true;
     }
 
     private async Task<bool> IsInCallerScopeAsync(string? callerTenantId, string? targetTenantId)

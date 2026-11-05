@@ -1,3 +1,4 @@
+using Shared.TestUtilities.Fakes;
 using FluentAssertions;
 using IdentityServerPersistence.Services;
 using Meshmakers.Octo.Runtime.Contracts;
@@ -8,7 +9,7 @@ using Meshmakers.Octo.Runtime.Contracts.Repositories.Query;
 using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.Logging.Abstractions;
 using NSubstitute;
-using Persistence.IdentityCkModel.Generated.System.Identity.v2;
+using Persistence.IdentityCkModel.Generated.System.Identity.v3;
 using Shared.TestUtilities.Builders;
 using Xunit;
 
@@ -46,7 +47,7 @@ public class AllowedTenantsResolverCacheTests
         _systemContext.GetRegisteredTenantRepository(Registered("broken")).Returns<ITenantRepository>(_ => throw new InvalidOperationException("db down"));
 
         _systemContext.ClearReceivedCalls(); // setup calls are not part of the behaviour under test
-        _sut = new AllowedTenantsResolver(_systemContext, new TenantRegistry(_systemContext, _cache), _chain, _cache, NullLogger<AllowedTenantsResolver>.Instance);
+        _sut = new AllowedTenantsResolver(_systemContext, new TenantRegistry(_systemContext, _cache), _chain, _cache, new PassThroughTenantProbeGuard(), NullLogger<AllowedTenantsResolver>.Instance);
     }
 
     [Fact]

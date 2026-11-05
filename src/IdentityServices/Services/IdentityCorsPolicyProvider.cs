@@ -1,9 +1,10 @@
 using IdentityServerPersistence.Configuration.Options;
+using IdentityServerPersistence.Services;
 using Meshmakers.Octo.Runtime.Contracts.MongoDb;
 using Meshmakers.Octo.Runtime.Contracts.Repositories.Query;
 using Microsoft.AspNetCore.Cors.Infrastructure;
 using Microsoft.Extensions.Options;
-using Persistence.IdentityCkModel.Generated.System.Identity.v2;
+using Persistence.IdentityCkModel.Generated.System.Identity.v3;
 
 namespace Meshmakers.Octo.Backend.IdentityServices.Services;
 
@@ -21,6 +22,13 @@ namespace Meshmakers.Octo.Backend.IdentityServices.Services;
 ///         other pods that missed a <c>CorsClientsUpdate</c> event and origins that were removed. The events
 ///         (<see cref="InvalidateCache" />) stay the fast path.
 ///     </para>
+///     <para>
+///         AB#8035: the rebuild is single-flight. Loading the origins reads the clients of every tenant, so the
+///         requests that find the entry expired (or invalidated) share one load instead of each running their own;
+///         a new load starts only after an invalidation (new generation) or once the shared one has finished. A
+///         failed load is handed to its waiters and the next request starts a new one. The rebuild is logged at
+///         Debug; Information only when the origin set differs from the previous load.
+///     </para>
 /// </remarks>
 public class IdentityCorsPolicyProvider : ICorsPolicyProvider
 {
@@ -30,6 +38,12 @@ public class IdentityCorsPolicyProvider : ICorsPolicyProvider
     private readonly TimeProvider _timeProvider;
     private volatile CacheEntry? _entry;
     private long _generation;
+
+    // AB#8035 single-flight state, guarded by _loadGate.
+    private readonly Lock _loadGate = new();
+    private Task<CacheEntry>? _inflight;
+    private long _inflightGeneration;
+    private HashSet<string>? _lastLoadedOrigins;
 
     public IdentityCorsPolicyProvider(
         IServiceProvider serviceProvider,
@@ -73,19 +87,80 @@ public class IdentityCorsPolicyProvider : ICorsPolicyProvider
         _entry = null;
     }
 
-    private async Task<CacheEntry> GetEntryAsync()
+    private Task<CacheEntry> GetEntryAsync()
     {
         var cached = _entry;
         if (cached != null && !cached.IsExpired(_timeProvider.GetUtcNow()))
         {
-            return cached;
+            return Task.FromResult(cached);
         }
 
-        var generation = Interlocked.Read(ref _generation);
+        TaskCompletionSource<CacheEntry> load;
+        long generation;
+        lock (_loadGate)
+        {
+            cached = _entry;
+            if (cached != null && !cached.IsExpired(_timeProvider.GetUtcNow()))
+            {
+                return Task.FromResult(cached);
+            }
+
+            generation = Interlocked.Read(ref _generation);
+            if (_inflight != null && _inflightGeneration == generation)
+            {
+                // AB#8035: another request is already loading for this generation; share its result.
+                return _inflight;
+            }
+
+            load = new TaskCompletionSource<CacheEntry>(TaskCreationOptions.RunContinuationsAsynchronously);
+            _inflight = load.Task;
+            _inflightGeneration = generation;
+        }
+
+        // Started outside the lock: the load awaits the database.
+        _ = RunLoadAsync(load, generation);
+        return load.Task;
+    }
+
+    private async Task RunLoadAsync(TaskCompletionSource<CacheEntry> load, long generation)
+    {
+        CacheEntry? entry = null;
+        Exception? failure = null;
+        try
+        {
+            entry = await BuildAndPublishEntryAsync(generation);
+        }
+        catch (Exception ex)
+        {
+            failure = ex;
+        }
+
+        // Clear the slot before completing, so a request that arrives after a failure starts a new load
+        // instead of receiving the failed one.
+        lock (_loadGate)
+        {
+            if (ReferenceEquals(_inflight, load.Task))
+            {
+                _inflight = null;
+            }
+        }
+
+        if (failure != null)
+        {
+            _logger.LogWarning(failure, "Loading the Identity CORS origins failed; the next request retries");
+            load.SetException(failure);
+        }
+        else
+        {
+            load.SetResult(entry!);
+        }
+    }
+
+    private async Task<CacheEntry> BuildAndPublishEntryAsync(long generation)
+    {
         var origins = await LoadAllOriginsAsync();
 
-        _logger.LogInformation("Creating CORS policy for Identity API from client origins across all tenants: {Origins}",
-            string.Join(", ", origins));
+        LogOrigins(origins);
 
         var policyBuilder = new CorsPolicyBuilder();
         if (origins.Count > 0)
@@ -113,10 +188,40 @@ public class IdentityCorsPolicyProvider : ICorsPolicyProvider
         return entry;
     }
 
+    /// <summary>
+    ///     AB#8035: every rebuild at Debug; Information only when the origin set differs from the previous load,
+    ///     so a TTL rebuild without a change does not repeat the whole list in the log every minute.
+    /// </summary>
+    private void LogOrigins(HashSet<string> origins)
+    {
+        _logger.LogDebug("Creating CORS policy for Identity API from client origins across all tenants: {Origins}",
+            string.Join(", ", origins));
+
+        HashSet<string>? previous;
+        lock (_loadGate)
+        {
+            previous = _lastLoadedOrigins;
+            _lastLoadedOrigins = origins;
+        }
+
+        if (previous != null && previous.SetEquals(origins))
+        {
+            return;
+        }
+
+        var added = previous == null ? origins.ToList() : origins.Where(o => !previous.Contains(o)).ToList();
+        var removed = previous == null ? [] : previous.Where(o => !origins.Contains(o)).ToList();
+        _logger.LogInformation(
+            "Identity CORS origins changed: {OriginCount} origins across all tenants (added: {AddedOrigins}; removed: {RemovedOrigins})",
+            origins.Count, string.Join(", ", added), string.Join(", ", removed));
+    }
+
     private async Task<HashSet<string>> LoadAllOriginsAsync()
     {
         using var scope = _serviceProvider.CreateScope();
         var systemContext = scope.ServiceProvider.GetRequiredService<ISystemContext>();
+
+        var probeGuard = scope.ServiceProvider.GetRequiredService<ITenantProbeGuard>();
 
         var origins = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
@@ -126,7 +231,8 @@ public class IdentityCorsPolicyProvider : ICorsPolicyProvider
         }
 
         // Collect from system tenant
-        await CollectOriginsFromTenantAsync(systemContext, systemContext.TenantId, origins);
+        await CollectOriginsFromTenantAsync(systemContext, probeGuard,
+            new OctoTenant(systemContext.TenantId, systemContext.DatabaseName), origins);
 
         // Collect from every registered tenant (the registry spans all logical parents)
         using var session = await systemContext.GetAdminSessionAsync();
@@ -136,41 +242,39 @@ public class IdentityCorsPolicyProvider : ICorsPolicyProvider
 
         foreach (var tenant in tenants.Items)
         {
-            await CollectOriginsFromTenantAsync(systemContext, tenant.TenantId, origins);
+            await CollectOriginsFromTenantAsync(systemContext, probeGuard, tenant, origins);
         }
 
         return origins;
     }
 
-    private async Task CollectOriginsFromTenantAsync(ISystemContext systemContext, string tenantId, HashSet<string> origins)
+    private async Task CollectOriginsFromTenantAsync(ISystemContext systemContext, ITenantProbeGuard probeGuard,
+        OctoTenant tenant, HashSet<string> origins)
     {
-        try
+        // AB#8177: the rebuild reads the clients of every tenant while the requests wait for it; a tenant whose
+        // database cannot be reached must not stretch it to 10+ s per rebuild (bounded and circuit-broken per tenant).
+        // The registry entry carries the database name, so no per-tenant existence probe is needed here either.
+        var probe = await probeGuard.RunAsync(tenant, "CORS origin collection", async () =>
         {
-            var tenantRepo = await systemContext.TryFindTenantRepositoryAsync(tenantId);
-            if (tenantRepo == null)
-            {
-                return;
-            }
-
-            var session = await tenantRepo.GetSessionAsync();
+            var tenantRepo = systemContext.GetRegisteredTenantRepository(tenant);
+            using var session = await tenantRepo.GetSessionAsync();
             session.StartTransaction();
 
-            var queryOptions = RtEntityQueryOptions.Create();
-            var result = await tenantRepo.GetRtEntitiesByTypeAsync<RtClient>(session, queryOptions);
-
-            foreach (var client in result.Items)
-            {
-                foreach (var entry in client.AllowedCorsOrigins)
-                {
-                    origins.Add(entry.Uri);
-                }
-            }
-
+            var result = await tenantRepo.GetRtEntitiesByTypeAsync<RtClient>(session, RtEntityQueryOptions.Create());
             await session.CommitTransactionAsync();
-        }
-        catch (Exception ex)
+            return result.Items.SelectMany(c => c.AllowedCorsOrigins).Select(e => e.Uri).ToList();
+        });
+
+        if (!probe.Succeeded)
         {
-            _logger.LogWarning(ex, "Failed to collect CORS origins from tenant '{TenantId}'", tenantId);
+            _logger.LogWarning("Skipped the CORS origins of tenant '{TenantId}': its database is unavailable",
+                tenant.TenantId);
+            return;
+        }
+
+        foreach (var uri in probe.Value!)
+        {
+            origins.Add(uri);
         }
     }
 

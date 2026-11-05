@@ -17,6 +17,15 @@ public record DeviceAuthorizationContextDto
     public IEnumerable<ScopeItemDto> ApiScopes { get; init; } = [];
     public bool ConfirmUserCode { get; init; }
     public string? Description { get; init; }
+
+    /// <summary>The tenant the device code is bound to and the approval will sign in to (AB#7959).</summary>
+    public string? TenantId { get; init; }
+
+    /// <summary>User name of the signed-in account that would approve the request (AB#7959).</summary>
+    public string? AccountUserName { get; init; }
+
+    /// <summary>E-mail of the signed-in account that would approve the request (AB#7959).</summary>
+    public string? AccountEmail { get; init; }
 }
 
 public record DeviceAuthorizationRequestDto

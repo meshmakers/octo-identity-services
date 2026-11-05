@@ -8,13 +8,18 @@ using Meshmakers.Octo.Communication.Contracts;
 using Meshmakers.Octo.Communication.Contracts.DataTransferObjects;
 using Meshmakers.Octo.Communication.Contracts.DataTransferObjects.ApiErrors;
 using MongoDB.Bson;
+using Meshmakers.Octo.Runtime.Contracts;
 using Meshmakers.Octo.Runtime.Contracts.RepositoryEntities;
 using Meshmakers.Octo.Services.Contracts.DistributionEventHub.Messages;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
-using Persistence.IdentityCkModel.Generated.System.Identity.v2;
+using Persistence.IdentityCkModel.Generated.System.Identity.v3;
 using Meshmakers.Octo.Backend.IdentityServices.OpenIddict;
 using Meshmakers.Octo.Backend.Authentication;
+using Meshmakers.Octo.Backend.IdentityServices.Authorization;
+using Meshmakers.Octo.Backend.IdentityServices.Authorization.RoleChange;
+using Meshmakers.Octo.ConstructionKit.Contracts;
+using Microsoft.AspNetCore.Identity;
 
 namespace Meshmakers.Octo.Backend.IdentityServices.TenantApi.v1.Controllers;
 
@@ -27,10 +32,16 @@ namespace Meshmakers.Octo.Backend.IdentityServices.TenantApi.v1.Controllers;
 [ApiVersion(IdentityServiceConstants.ApiVersion1)]
 public class ClientsController : ControllerBase
 {
+    private const string ConcurrentChangeMessage =
+        "The client was changed concurrently by other requests. Please retry.";
+
     private readonly IDistributionEventHubService _distributionEventHubService;
     private readonly IOctoClientStore _octoClientStore;
     private readonly IClientRoleStore _clientRoleStore;
     private readonly IClientImpersonationStore _clientImpersonationStore;
+    private readonly RoleManager<RtRole> _roleManager;
+    private readonly IRoleChangeGuard _roleChangeGuard;
+    private readonly IRoleChangeRefusals _roleChangeRefusals;
 
     /// <summary>
     ///     Constructor
@@ -39,15 +50,44 @@ public class ClientsController : ControllerBase
     /// <param name="distributionEventHubService">Distributed cache with REDIS</param>
     /// <param name="clientRoleStore">The store managing client role assignments</param>
     /// <param name="clientImpersonationStore">The store reading the MayActAs impersonation edges</param>
+    /// <param name="roleManager">Resolves the roles a client role change names</param>
+    /// <param name="roleChangeGuard">"Grant only built-in roles you hold" for client roles (AB#7928)</param>
+    /// <param name="roleChangeRefusals">Answers and audits a refused role change</param>
     public ClientsController(IOctoClientStore octoClientStore,
         IDistributionEventHubService distributionEventHubService,
         IClientRoleStore clientRoleStore,
-        IClientImpersonationStore clientImpersonationStore)
+        IClientImpersonationStore clientImpersonationStore,
+        RoleManager<RtRole> roleManager,
+        IRoleChangeGuard roleChangeGuard,
+        IRoleChangeRefusals roleChangeRefusals)
     {
         _octoClientStore = octoClientStore;
         _distributionEventHubService = distributionEventHubService;
         _clientRoleStore = clientRoleStore;
         _clientImpersonationStore = clientImpersonationStore;
+        _roleManager = roleManager;
+        _roleChangeGuard = roleChangeGuard;
+        _roleChangeRefusals = roleChangeRefusals;
+    }
+
+    /// <summary>
+    ///     AB#7928: a client may only be given built-in roles (roles with an <c>rtWellKnownName</c>) the caller holds itself;
+    ///     custom roles are free and removals are never judged. Otherwise a tenant administrator could hand a client e.g.
+    ///     <c>UserManagement</c> and act as that client. Returns the audited 403 <c>role-not-held</c> answer, or <c>null</c>.
+    ///     The bus path (<c>DistClientDto.AssignedRoleNames</c>, service-internal client provisioning) does not come here.
+    /// </summary>
+    private async Task<ObjectResult?> GuardClientRoleGrantAsync(RtClient client, IReadOnlyCollection<string> addedRoleNames)
+    {
+        if (addedRoleNames.Count == 0)
+        {
+            return null;
+        }
+
+        var caller = RoleChangeCaller.FromPrincipal(User);
+        var decision = await _roleChangeGuard.EvaluateGrantAsync(caller, addedRoleNames, HttpContext.RequestAborted);
+        return decision.IsAllowed
+            ? null
+            : await _roleChangeRefusals.RefuseAsync(HttpContext, caller, decision, $"client {client.ClientId}");
     }
 
     // GET: system/v1/clients
@@ -161,6 +201,7 @@ public class ClientsController : ControllerBase
     [Authorize(IdentityServiceConstants.IdentityTenantAdministrationWritePolicy)]
     [EndpointSummary("Replaces the directly-assigned roles of a client (replace-all).")]
     [ProducesResponseType(StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status403Forbidden, "application/problem+json")]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<IActionResult> UpdateClientRoles(
         [Required][Description("ID of the client")] string id,
@@ -172,7 +213,37 @@ public class ClientsController : ControllerBase
             return NotFound(new NotFoundErrorDto($"Client with id '{id}' not found."));
         }
 
-        await _clientRoleStore.SetRoleIdsAsync(client.RtId, roleIds);
+        // AB#7928: every role id is resolved first (an unknown id changes nothing), then only the added roles are judged,
+        // and only the difference is written: a kept role is never written again, so a role that a concurrent request
+        // removed is not restored without the check.
+        var current = (await _clientRoleStore.GetDirectRoleIdsAsync(client.RtId)).ToHashSet(StringComparer.Ordinal);
+        var wanted = new HashSet<string>(StringComparer.Ordinal);
+        var addedRoleIds = new List<string>();
+        var addedRoleNames = new List<string>();
+        foreach (var roleId in roleIds)
+        {
+            var role = OctoObjectId.TryParse(roleId, out _) ? await _roleManager.FindByIdAsync(roleId) : null;
+            if (role == null)
+            {
+                return NotFound(new NotFoundErrorDto($"Role with id '{roleId}' not found."));
+            }
+
+            var canonicalId = role.RtId.ToString();
+            if (wanted.Add(canonicalId) && !current.Contains(canonicalId))
+            {
+                addedRoleIds.Add(canonicalId);
+                addedRoleNames.Add(role.Name ?? canonicalId);
+            }
+        }
+
+        var refusal = await GuardClientRoleGrantAsync(client, addedRoleNames);
+        if (refusal != null)
+        {
+            return refusal;
+        }
+
+        await _clientRoleStore.ApplyRoleChangesAsync(client.RtId, addedRoleIds,
+            current.Where(id => !wanted.Contains(id)).ToList());
         return Ok();
     }
 
@@ -181,6 +252,7 @@ public class ClientsController : ControllerBase
     [Authorize(IdentityServiceConstants.IdentityTenantAdministrationWritePolicy)]
     [EndpointSummary("Assigns a single role (by name) to a client.")]
     [ProducesResponseType(StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status403Forbidden, "application/problem+json")]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<IActionResult> AddClientToRole(
         [Required][Description("ID of the client")] string id,
@@ -190,6 +262,24 @@ public class ClientsController : ControllerBase
         if (client == null)
         {
             return NotFound(new NotFoundErrorDto($"Client with id '{id}' not found."));
+        }
+
+        // AB#7928: a role the client already holds directly grants nothing and is not written again (so a concurrent
+        // removal is not undone unchecked); an unknown role is the store's 404 below.
+        var role = await _roleManager.FindByNameAsync(roleName);
+        if (role != null)
+        {
+            var current = await _clientRoleStore.GetDirectRoleIdsAsync(client.RtId);
+            if (current.Contains(role.RtId.ToString()))
+            {
+                return Ok();
+            }
+
+            var refusal = await GuardClientRoleGrantAsync(client, [role.Name ?? roleName]);
+            if (refusal != null)
+            {
+                return refusal;
+            }
         }
 
         try
@@ -237,6 +327,11 @@ public class ClientsController : ControllerBase
             return BadRequest(ModelState);
         }
 
+        if (await AuthorizeClientSecretWriteAsync(clientDto) is { } secretRefused)
+        {
+            return secretRefused;
+        }
+
         if (await _octoClientStore.FindRtClientByIdAsync(clientDto.ClientId) != null)
         {
             return Conflict($"Client with id '{clientDto.ClientId}' already exists.");
@@ -280,18 +375,32 @@ public class ClientsController : ControllerBase
             return BadRequest(ModelState);
         }
 
-        var appClient = await _octoClientStore.FindRtClientByIdAsync(id);
-        if (appClient == null)
+        if (await AuthorizeClientSecretWriteAsync(clientDto) is { } secretRefused)
         {
-            return NotFound(new NotFoundErrorDto($"Client with id '{id}' does not exist."));
+            return secretRefused;
         }
-
-        ApplyToClient(appClient, clientDto);
 
         try
         {
-            await _octoClientStore.UpdateAsync(id, appClient);
+            // AB#8015: one version-checked read-modify-write (read, apply the DTO, replace with the read rtVersion;
+            // re-read and re-apply on a conflict). The update used to apply the DTO to a client read before and replace
+            // it unversioned, so a PUT that overlapped a secret delete wrote the removed secret back (and the write did
+            // not advance rtVersion, which the client mirror reconciliation relies on, AB#8054).
+            var appClient = await _octoClientStore.MutateAsync(id, current =>
+            {
+                ApplyToClient(current, clientDto);
+                return true;
+            });
+            if (appClient == null)
+            {
+                return NotFound(new NotFoundErrorDto($"Client with id '{id}' does not exist."));
+            }
+
             await ClearCacheAsync();
+        }
+        catch (RtVersionConflictException)
+        {
+            return Problem(detail: ConcurrentChangeMessage, statusCode: StatusCodes.Status409Conflict);
         }
         catch (Exception e)
         {
@@ -336,34 +445,39 @@ public class ClientsController : ControllerBase
             return BadRequest(ModelState);
         }
 
-        var appClient = await _octoClientStore.FindRtClientByIdAsync(id);
-        if (appClient == null)
-        {
-            return NotFound(new NotFoundErrorDto($"Client with id '{id}' does not exist."));
-        }
-
         var sourceTag = ClientUriSources.OverlayPrefix + dto.OverlayName;
-        var redirectResult = AppendOverlayUris(appClient.RedirectUris, dto.RedirectUris, sourceTag);
-        var postLogoutResult = AppendOverlayUris(appClient.PostLogoutRedirectUris, dto.PostLogoutRedirectUris, sourceTag);
-        var corsResult = AppendOverlayUris(appClient.AllowedCorsOrigins, dto.AllowedCorsOrigins, sourceTag);
-
-        // No-op short-circuit for the DB: if every incoming URI hit the dedup branch, the client entity
-        // is byte-identical to what we loaded, so we skip the UpdateAsync and hold the endpoint's
-        // "re-run is no DB churn" contract — important for the cmdlet caller that re-applies the overlay
-        // on every Start-Octo / CI run.
-        //
-        // The CORS refresh event is published unconditionally (AB#5487): "0 added" still means the caller
-        // asked for a refresh, and an idempotent re-apply is the obvious repair for a policy that was cached
-        // before the client's origins existed. The event is cheap (a cache invalidation).
-        var totalAdded = redirectResult.Added + postLogoutResult.Added + corsResult.Added;
+        ApplyOverlayUrisListCountDto redirectResult = new(), postLogoutResult = new(), corsResult = new();
+        RtClient? appClient;
         try
         {
-            if (totalAdded > 0)
+            // AB#8015: version-checked read-modify-write; the merge runs again on a fresh read after a conflict, so the
+            // reported counts belong to the write that was stored.
+            //
+            // No-op short-circuit for the DB: if every incoming URI hit the dedup branch, the client entity
+            // is byte-identical to what we loaded, so nothing is written and the endpoint holds its
+            // "re-run is no DB churn" contract — important for the cmdlet caller that re-applies the overlay
+            // on every Start-Octo / CI run.
+            appClient = await _octoClientStore.MutateAsync(id, current =>
             {
-                await _octoClientStore.UpdateAsync(id, appClient);
+                redirectResult = AppendOverlayUris(current.RedirectUris, dto.RedirectUris, sourceTag);
+                postLogoutResult = AppendOverlayUris(current.PostLogoutRedirectUris, dto.PostLogoutRedirectUris,
+                    sourceTag);
+                corsResult = AppendOverlayUris(current.AllowedCorsOrigins, dto.AllowedCorsOrigins, sourceTag);
+                return redirectResult.Added + postLogoutResult.Added + corsResult.Added > 0;
+            });
+            if (appClient == null)
+            {
+                return NotFound(new NotFoundErrorDto($"Client with id '{id}' does not exist."));
             }
 
+            // The CORS refresh event is published unconditionally (AB#5487): "0 added" still means the caller
+            // asked for a refresh, and an idempotent re-apply is the obvious repair for a policy that was cached
+            // before the client's origins existed. The event is cheap (a cache invalidation).
             await ClearCacheAsync();
+        }
+        catch (RtVersionConflictException)
+        {
+            return Problem(detail: ConcurrentChangeMessage, statusCode: StatusCodes.Status409Conflict);
         }
         catch (Exception e)
         {
@@ -426,11 +540,41 @@ public class ClientsController : ControllerBase
         var perClientResults = new List<CleanOverlayEntriesClientResultDto>();
         var totalRemoved = 0;
 
-        foreach (var client in allClients)
+        foreach (var listed in allClients)
         {
-            var redirectRemoved = RemoveOverlayEntries(client.RedirectUris, targetSource);
-            var postLogoutRemoved = RemoveOverlayEntries(client.PostLogoutRedirectUris, targetSource);
-            var corsRemoved = RemoveOverlayEntries(client.AllowedCorsOrigins, targetSource);
+            // Cheap pre-check on the listed snapshot: clients without a matching entry are never written.
+            if (!HasOverlayEntries(listed.RedirectUris, targetSource) &&
+                !HasOverlayEntries(listed.PostLogoutRedirectUris, targetSource) &&
+                !HasOverlayEntries(listed.AllowedCorsOrigins, targetSource))
+            {
+                continue;
+            }
+
+            int redirectRemoved = 0, postLogoutRemoved = 0, corsRemoved = 0;
+            try
+            {
+                // AB#8015: version-checked read-modify-write per client; the removal runs on the fresh read.
+                var stored = await _octoClientStore.MutateAsync(listed.ClientId, current =>
+                {
+                    redirectRemoved = RemoveOverlayEntries(current.RedirectUris, targetSource);
+                    postLogoutRemoved = RemoveOverlayEntries(current.PostLogoutRedirectUris, targetSource);
+                    corsRemoved = RemoveOverlayEntries(current.AllowedCorsOrigins, targetSource);
+                    return redirectRemoved + postLogoutRemoved + corsRemoved > 0;
+                });
+                if (stored == null)
+                {
+                    continue;
+                }
+            }
+            catch (RtVersionConflictException)
+            {
+                return Problem(detail: ConcurrentChangeMessage, statusCode: StatusCodes.Status409Conflict);
+            }
+            catch (Exception e)
+            {
+                return BadRequest(new InternalServerErrorDto(
+                    $"Failed to update client '{listed.ClientId}' while removing overlay entries: {e.Message}"));
+            }
 
             var clientTotal = redirectRemoved + postLogoutRemoved + corsRemoved;
             if (clientTotal == 0)
@@ -438,19 +582,9 @@ public class ClientsController : ControllerBase
                 continue;
             }
 
-            try
-            {
-                await _octoClientStore.UpdateAsync(client.ClientId, client);
-            }
-            catch (Exception e)
-            {
-                return BadRequest(new InternalServerErrorDto(
-                    $"Failed to update client '{client.ClientId}' after removing {clientTotal} overlay entries: {e.Message}"));
-            }
-
             perClientResults.Add(new CleanOverlayEntriesClientResultDto
             {
-                ClientId = client.ClientId,
+                ClientId = listed.ClientId,
                 RedirectUrisRemoved = redirectRemoved,
                 PostLogoutRedirectUrisRemoved = postLogoutRemoved,
                 AllowedCorsOriginsRemoved = corsRemoved
@@ -504,6 +638,11 @@ public class ClientsController : ControllerBase
         }
         return removed;
     }
+
+    private static bool HasOverlayEntries(IAttributeValueList<RtClientUriEntryRecord>? list, string? targetSource) =>
+        list != null && list.Any(entry => targetSource != null
+            ? string.Equals(entry.Source, targetSource, StringComparison.Ordinal)
+            : entry.Source.StartsWith(ClientUriSources.OverlayPrefix, StringComparison.Ordinal));
 
     private static int CountNonWhitespace(List<string>? list)
     {
@@ -634,6 +773,31 @@ public class ClientsController : ControllerBase
             DynamicRegistrationExpiresAt = applicationClient.DynamicRegistrationExpiresAt
         };
         return clientDto;
+    }
+
+    /// <summary>
+    ///     AB#5861: a <c>clientSecret</c> in the create/update body sets (replaces) the client's secret — the same power as
+    ///     <c>POST apiSecrets/client/{id}</c> — so it needs <see cref="IdentityServiceConstants.IdentitySecretAdministrationPolicy" />
+    ///     on top of the controller policy. Without a secret in the body nothing changes. Returns the 403 to answer
+    ///     (AB#5227 shape, naming the role), or <c>null</c>.
+    /// </summary>
+    private async Task<IActionResult?> AuthorizeClientSecretWriteAsync(ClientDto clientDto)
+    {
+        if (string.IsNullOrWhiteSpace(clientDto.ClientSecret))
+        {
+            return null;
+        }
+
+        var result = await HttpContext.RequestServices.GetRequiredService<IAuthorizationService>()
+            .AuthorizeAsync(User, HttpContext, IdentityServiceConstants.IdentitySecretAdministrationPolicy);
+        if (result.Succeeded)
+        {
+            return null;
+        }
+
+        var reason = result.Failure?.FailureReasons.FirstOrDefault()?.Message ??
+                     IdentityApiAuthorizationPolicies.SecretAdministrationRequirement.DeniedMessage();
+        return StatusCode(StatusCodes.Status403Forbidden, new { message = reason });
     }
 
     private void ApplyToClient(RtClient applicationClient, ClientDto clientDto)

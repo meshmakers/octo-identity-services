@@ -7,6 +7,7 @@ using Meshmakers.Octo.Runtime.Engine.MongoDb.Services.Defaults;
 using Meshmakers.Octo.Services.Infrastructure.Migrations;
 using Meshmakers.Octo.Services.Notifications.Services;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Logging;
 using Xunit;
 
@@ -38,6 +39,13 @@ public abstract class ServiceCollectionFixture : ITestOutputHelperAccessor, IAsy
             .AddOctoIdentityPersistence(
                 _ => new OctoSystemConfiguration(),
                 configureDistributionEventHub: null);
+
+        // AB#6722: AddOctoServiceInfrastructure registers the real distribution event hub even with a null configuration, and
+        // a provisioning publishes CorsClientsUpdate (AB#5487) through it. On a host without a broker on localhost:5672 (every CI
+        // agent) that publish blocked the test host forever. Tests have no broker: no-op hub, like CustomWebApplicationFactory.
+        Services.RemoveAll<Meshmakers.Octo.Common.DistributionEventHub.Services.IDistributionEventHubService>();
+        Services.AddSingleton<Meshmakers.Octo.Common.DistributionEventHub.Services.IDistributionEventHubService,
+            IdentityServices.IntegrationTests.Infrastructure.TestDistributionEventHubService>();
 
         // Replace tenant notifications with default implementation (no RabbitMQ in tests)
         Services.AddSingleton<ITenantNotifications, DefaultTenantNotifications>();

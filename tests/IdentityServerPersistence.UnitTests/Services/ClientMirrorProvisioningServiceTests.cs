@@ -9,7 +9,7 @@ using Meshmakers.Octo.Runtime.Contracts.Repositories.Query;
 using Meshmakers.Octo.Services.Contracts.DistributionEventHub.Messages;
 using Microsoft.Extensions.Logging;
 using NSubstitute;
-using Persistence.IdentityCkModel.Generated.System.Identity.v2;
+using Persistence.IdentityCkModel.Generated.System.Identity.v3;
 using Shared.TestUtilities.Builders;
 using Xunit;
 
@@ -34,6 +34,7 @@ public class ClientMirrorProvisioningServiceTests
 
     public ClientMirrorProvisioningServiceTests()
     {
+        _systemContext.TenantId.Returns(ParentTenantId);
         _parentRepo.GetSessionAsync().Returns(_parentSession);
         _childRepo.GetSessionAsync().Returns(_childSession);
         _systemContext.TryFindTenantRepositoryAsync(ParentTenantId).Returns(_parentRepo);
@@ -42,6 +43,7 @@ public class ClientMirrorProvisioningServiceTests
         _sut = new ClientMirrorProvisioningService(
             Substitute.For<ILogger<ClientMirrorProvisioningService>>(),
             _systemContext,
+            Substitute.For<ITenantDiscoveryService>(),
             _eventHub);
     }
 
@@ -121,7 +123,8 @@ public class ClientMirrorProvisioningServiceTests
         await _childRepo.Received(1).ReplaceOneRtEntityByIdAsync(
             _childSession,
             existingChildClient.RtId,
-            Arg.Is<RtClient>(c => c.ClientId == "ci-deploy"));
+            Arg.Is<RtClient>(c => c.ClientId == "ci-deploy"),
+            Arg.Any<ulong>());
     }
 
     [Fact]
@@ -150,7 +153,8 @@ public class ClientMirrorProvisioningServiceTests
         await _childRepo.Received(1).ReplaceOneRtEntityByIdAsync(
             _childSession,
             existingChildClient.RtId,
-            Arg.Is<RtClient>(c => c.ClientId == "ci-deploy"));
+            Arg.Is<RtClient>(c => c.ClientId == "ci-deploy"),
+            Arg.Any<ulong>());
         await _childRepo.DidNotReceiveWithAnyArgs().InsertOneRtEntityAsync(default!, default(RtClient)!);
     }
 
@@ -247,6 +251,26 @@ public class ClientMirrorProvisioningServiceTests
         await _eventHub.DidNotReceiveWithAnyArgs().PublishAsync(default(CorsClientsUpdate)!);
     }
 
+    /// <summary>
+    ///     AB#6722: a MassTransit send endpoint waits for the broker without a bound of its own; in CI (no broker on
+    ///     localhost) a publish that never completes froze the whole test host for 37 minutes. The wait is bounded.
+    /// </summary>
+    [Fact]
+    public async Task EventHubThatNeverAnswers_DoesNotBlockProvisioning()
+    {
+        _eventHub.PublishAsync(Arg.Any<CorsClientsUpdate>()).Returns(_ => new TaskCompletionSource().Task);
+        var client = new RtClientBuilder().WithClientId("ci-deploy").WithAutoProvisionInChildTenants().Build();
+        SetupParentFlaggedClients(client);
+        SetupParentMirrorLookup(client.ClientId, Array.Empty<RtClientMirror>());
+        SetupChildClientLookup(client.ClientId, Array.Empty<RtClient>());
+
+        var provisioning = _sut.ProvisionForChildTenantAsync(ParentTenantId, ChildTenantId);
+        var finished = await Task.WhenAny(provisioning, Task.Delay(TimeSpan.FromSeconds(30), TestContext.Current.CancellationToken));
+
+        finished.Should().BeSameAs(provisioning, "the publish wait is bounded (about 5 s)");
+        (await provisioning).NewlyProvisioned.Should().Be(1);
+    }
+
     [Fact]
     public async Task EventHubFailure_DoesNotFailProvisioning()
     {
@@ -303,7 +327,7 @@ public class ClientMirrorProvisioningServiceTests
 
         result.Should().Be(new ClientMirrorSyncResult(0, 0));
         await _childRepo.DidNotReceiveWithAnyArgs()
-            .ReplaceOneRtEntityByIdAsync(default!, default!, default(RtClient)!);
+            .ReplaceOneRtEntityByIdAsync(default!, default!, default(RtClient)!, default(ulong));
     }
 
     [Fact]
@@ -335,11 +359,14 @@ public class ClientMirrorProvisioningServiceTests
         await _childRepo.Received(1).ReplaceOneRtEntityByIdAsync(
             _childSession,
             staleChildClient.RtId,
-            Arg.Is<RtClient>(c => c.ClientId == "ci-deploy"));
+            Arg.Is<RtClient>(c => c.ClientId == "ci-deploy"),
+            Arg.Any<ulong>());
+        // AB#8054: the counter bump is version-checked (the row's version as read right before the write).
         await _parentRepo.Received(1).ReplaceOneRtEntityByIdAsync(
             _parentSession,
             existingMirror.RtId,
-            Arg.Is<RtClientMirror>(m => m.SecretHashVersion == 3));
+            Arg.Is<RtClientMirror>(m => m.SecretHashVersion == 3),
+            existingMirror.RtVersion);
     }
 
     [Fact]

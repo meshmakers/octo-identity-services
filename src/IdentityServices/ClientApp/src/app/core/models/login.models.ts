@@ -33,6 +33,7 @@ export interface LoginResult {
   requiresTwoFactor?: boolean;
   canUseTotpAuthenticator?: boolean;
   canUseEmailCode?: boolean;
+  secondFactorSetupRequired?: boolean;
 }
 
 export interface LogoutContext {

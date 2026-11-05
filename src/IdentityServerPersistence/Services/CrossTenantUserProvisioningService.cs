@@ -4,7 +4,7 @@ using Meshmakers.Octo.Runtime.Contracts.Repositories.Query;
 using Meshmakers.Octo.Services.Infrastructure.Services;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.Extensions.Logging;
-using Persistence.IdentityCkModel.Generated.System.Identity.v2;
+using Persistence.IdentityCkModel.Generated.System.Identity.v3;
 
 namespace IdentityServerPersistence.Services;
 
@@ -102,7 +102,7 @@ public class CrossTenantUserProvisioningService(
 
     /// <inheritdoc />
     public async Task<RtUser?> FindOrCreateCrossTenantUserAsync(
-        CrossTenantAuthResult crossTenantResult, string childTenantId)
+        CrossTenantAuthResult crossTenantResult, string childTenantId, bool storeMappingIfMissing = true)
     {
         // Check if a mapping already exists
         var mapping = await externalTenantUserMappingStore.FindBySourceUserAsync(
@@ -181,7 +181,7 @@ public class CrossTenantUserProvisioningService(
         }
 
         // Create the mapping if it doesn't exist
-        if (mapping == null)
+        if (mapping == null && storeMappingIfMissing)
         {
             await externalTenantUserMappingStore.StoreAsync(new RtExternalTenantUserMapping
             {

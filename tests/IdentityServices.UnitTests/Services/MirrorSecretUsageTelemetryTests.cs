@@ -10,7 +10,7 @@ using Microsoft.Extensions.Options;
 using NSubstitute;
 using OpenIddict.Abstractions;
 using OpenIddict.Core;
-using Persistence.IdentityCkModel.Generated.System.Identity.v2;
+using Persistence.IdentityCkModel.Generated.System.Identity.v3;
 using Shared.TestUtilities.Builders;
 using Shared.TestUtilities.Fakes;
 using Xunit;

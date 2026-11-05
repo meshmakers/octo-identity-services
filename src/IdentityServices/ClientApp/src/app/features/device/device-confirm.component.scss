@@ -70,6 +70,41 @@
   }
 }
 
+// AB#7959: target tenant and signed-in account of the device request
+.device-target {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: var(--lcars-spacing-xs) var(--lcars-spacing-md);
+  margin: 0 0 var(--lcars-spacing-sm);
+  padding: var(--lcars-spacing-md);
+  background: rgba($iron-navy, 0.5);
+  border-radius: var(--lcars-radius-sm);
+  border: 1px solid rgba($octo-mint, 0.2);
+
+  &__label {
+    @include lcars-uppercase-label;
+    color: $ash-blue;
+  }
+
+  &__value {
+    margin: 0;
+    color: #ffffff;
+    font-weight: 600;
+    overflow-wrap: anywhere;
+  }
+
+  &__secondary {
+    color: $ash-blue;
+    font-weight: 400;
+  }
+
+  &__hint {
+    color: $ash-blue;
+    font-size: var(--lcars-font-size-sm);
+    margin-bottom: var(--lcars-spacing-lg);
+  }
+}
+
 .consent-description {
   color: $ash-blue;
   font-size: var(--lcars-font-size-base);

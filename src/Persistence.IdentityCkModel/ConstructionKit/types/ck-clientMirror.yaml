@@ -1,6 +1,7 @@
 "$schema": "https://schemas.meshmakers.cloud/construction-kit-elements.schema.json"
 types:
   - typeId: ClientMirror
+    derivable: Any
     description: "Tracks a ClientCredentials client that the parent tenant has auto-provisioned into a child tenant. Lives in the parent tenant's database. One row per (parentClientId × childTenantId) pair."
     derivedFromCkTypeId: ${System}/Entity
     isFinal: true

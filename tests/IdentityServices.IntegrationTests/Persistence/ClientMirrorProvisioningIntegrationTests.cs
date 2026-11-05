@@ -17,7 +17,7 @@ using Microsoft.Extensions.Options;
 using NSubstitute;
 using OpenIddict.Abstractions;
 using OpenIddict.Core;
-using Persistence.IdentityCkModel.Generated.System.Identity.v2;
+using Persistence.IdentityCkModel.Generated.System.Identity.v3;
 using Shared.TestUtilities.Fakes;
 using Xunit;
 using static OpenIddict.Abstractions.OpenIddictConstants;
@@ -478,7 +478,8 @@ public class ClientMirrorProvisioningIntegrationTests : IClassFixture<IdentitySe
     }
 
     private IClientMirrorProvisioningService CreateService(ISystemContext systemContext)
-        => new ClientMirrorProvisioningService(NullLogger<ClientMirrorProvisioningService>.Instance, systemContext);
+        => new ClientMirrorProvisioningService(NullLogger<ClientMirrorProvisioningService>.Instance, systemContext,
+            Substitute.For<IdentityServerPersistence.Services.ITenantDiscoveryService>());
 
     /// <summary>
     /// Brings the system tenant + the identity CK model online so we can persist

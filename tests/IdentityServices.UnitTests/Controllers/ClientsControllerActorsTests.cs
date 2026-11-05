@@ -1,10 +1,12 @@
+using Meshmakers.Octo.Backend.IdentityServices.Authorization.RoleChange;
+using Microsoft.AspNetCore.Identity;
 using FluentAssertions;
 using IdentityServerPersistence.SystemStores;
 using Meshmakers.Octo.Backend.IdentityServices.TenantApi.v1.Controllers;
 using Meshmakers.Octo.Common.DistributionEventHub.Services;
 using Microsoft.AspNetCore.Mvc;
 using NSubstitute;
-using Persistence.IdentityCkModel.Generated.System.Identity.v2;
+using Persistence.IdentityCkModel.Generated.System.Identity.v3;
 using Shared.TestUtilities.Builders;
 using Xunit;
 
@@ -33,7 +35,9 @@ public class ClientsControllerActorsTests
 
     public ClientsControllerActorsTests()
     {
-        _sut = new ClientsController(_clientStore, _eventHub, _clientRoleStore, _clientImpersonationStore);
+        _sut = new ClientsController(_clientStore, _eventHub, _clientRoleStore, _clientImpersonationStore,
+            Substitute.For<RoleManager<RtRole>>(Substitute.For<IRoleStore<RtRole>>(), null, null, null, null),
+            Substitute.For<IRoleChangeGuard>(), Substitute.For<IRoleChangeRefusals>());
     }
 
     [Fact]

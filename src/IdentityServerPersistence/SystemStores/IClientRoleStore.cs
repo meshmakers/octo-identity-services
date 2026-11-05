@@ -23,6 +23,15 @@ public interface IClientRoleStore
     Task SetRoleIdsAsync(OctoObjectId clientRtId, IReadOnlyList<string> roleIds);
 
     /// <summary>
+    /// Adds and removes exactly the given direct role RtIds in one transaction and leaves every other
+    /// <c>AssignedRole</c> edge untouched (AB#7928). Unlike <see cref="SetRoleIdsAsync" /> it never re-inserts a role
+    /// the caller did not ask to add, so a role that a concurrent request removed is not restored unchecked.
+    /// Adding a present role and removing a missing one are no-ops.
+    /// </summary>
+    Task ApplyRoleChangesAsync(OctoObjectId clientRtId, IReadOnlyCollection<string> addRoleIds,
+        IReadOnlyCollection<string> removeRoleIds);
+
+    /// <summary>
     /// Adds a single role (by role name) to the client. No-op if already assigned.
     /// </summary>
     Task AddRoleAsync(OctoObjectId clientRtId, string roleName);

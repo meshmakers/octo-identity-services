@@ -1,0 +1,16 @@
+$schema: https://schemas.meshmakers.cloud/ck-migration.schema.json
+sourceVersion: "2.30.0"
+targetVersion: "3.0.1"
+description: |
+  Migration from System.Identity 2.x to 3.0.1 (AB#8157, AB#8053). Intentionally empty.
+
+  3.0.0 is a major because the identity-owned User attributes (NormalizedUserName, NormalizedEmail, EmailConfirmed,
+  PhoneNumberConfirmed, TwoFactorEnabled, PreferredChannelBindingId, LockoutEnabled, LockoutEnd, AccessFailedCount,
+  ResetPasswordOnLogin, Claims, UserLogins) become access MethodOnly and User.CreateUser-1 carries replacesGenericCreate.
+  No attribute id, type, default or stored value changes; the identity service writes through its own repository.
+
+  Why the script exists at all (AB#4924 / G3): the CK engine refuses the post-chain schema-only bridge across a major version
+  (CkMigrationMajorVersionGuard). This empty step is the explicit statement that 2.x -> 3.x needs no data transform of its own.
+  3.0.0 was published without it and refused every tenant upgrade (AB#8157); 3.0.1 carries the entries.
+
+steps: []

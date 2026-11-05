@@ -1,7 +1,7 @@
 using Meshmakers.Octo.Runtime.Contracts.MongoDb;
 using Meshmakers.Octo.Runtime.Contracts.Repositories.Query;
 using Microsoft.Extensions.Logging;
-using Persistence.IdentityCkModel.Generated.System.Identity.v2;
+using Persistence.IdentityCkModel.Generated.System.Identity.v3;
 
 namespace IdentityServerPersistence.Services;
 
@@ -42,6 +42,7 @@ public interface ITenantDiscoveryService
 public class TenantDiscoveryService(
     ISystemContext systemContext,
     IAllowedTenantsResolver allowedTenantsResolver,
+    ITenantProbeGuard probeGuard,
     ILogger<TenantDiscoveryService> logger) : ITenantDiscoveryService
 {
     public async Task<IReadOnlyList<string>> FindTenantsForUserAsync(string emailOrUsername,
@@ -129,55 +130,11 @@ public class TenantDiscoveryService(
 
         try
         {
-            // Walk the hierarchy through each tenant's own context, exactly as the client mirror
-            // does for a parent tenant: ITenantContext.GetChildTenantsAsync answers with the
-            // tenant's direct children — the parent-local rows of its own database (which never
-            // carry a parent id) plus the platform-registry rows stamped with it. This is
-            // deliberately NOT built on ISystemContext.GetAllTenantsAsync: that enumeration drops
-            // the parent id of every registry row, so from there every tenant looks like a direct
-            // child of the system tenant and a scope below it has no descendants at all (found on
-            // prod-1 with 3.4.126).
-            var scopeContext = await systemContext.TryFindTenantContextAsync(scopeTenantId);
-            if (scopeContext == null)
-            {
-                return null;
-            }
-
-            var descendants = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-            var visited = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { scopeTenantId };
-            var queue = new Queue<(string TenantId, ITenantContext Context)>();
-            queue.Enqueue((scopeTenantId, scopeContext));
-
-            while (queue.Count > 0)
-            {
-                var (tenantId, context) = queue.Dequeue();
-                using var adminSession = await context.GetAdminSessionAsync();
-                var children = await context.GetChildTenantsAsync(adminSession);
-
-                foreach (var child in children.Items)
-                {
-                    // A cycle in a hand-edited registry must not loop forever.
-                    if (!visited.Add(child.TenantId))
-                    {
-                        continue;
-                    }
-
-                    descendants.Add(child.TenantId);
-                    var childContext = await systemContext.TryFindTenantContextAsync(child.TenantId);
-                    if (childContext != null)
-                    {
-                        queue.Enqueue((child.TenantId, childContext));
-                    }
-                    else
-                    {
-                        logger.LogDebug(
-                            "Tenant discovery: child '{ChildTenantId}' of '{TenantId}' has no tenant context — treated as a leaf",
-                            child.TenantId, tenantId);
-                    }
-                }
-            }
-
-            return descendants;
+            // The walk lives in TenantSubtreeWalker (AB#7044) and is shared with the tenant-topology endpoint:
+            // each tenant's own context answers with its direct children (see the walker for why this is
+            // deliberately NOT built on ISystemContext.GetAllTenantsAsync).
+            var subtree = await TenantSubtreeWalker.WalkAsync(systemContext, scopeTenantId, logger);
+            return subtree?.Nodes.Select(n => n.TenantId).ToHashSet(StringComparer.OrdinalIgnoreCase);
         }
         catch (Exception ex)
         {
@@ -217,51 +174,50 @@ public class TenantDiscoveryService(
     private async Task<(string TenantId, RtUser User)?> FindUserInTenantAsync(
         OctoTenant tenant, string normalizedInput)
     {
+        // AB#8177: bounded and circuit-broken per tenant, like the mapping probes of AllowedTenantsResolver.
+        var probe = await probeGuard.RunAsync(tenant, "user search",
+            () => FindUserInTenantUnguardedAsync(tenant, normalizedInput));
+        return probe.Succeeded ? probe.Value : null;
+    }
+
+    private async Task<(string TenantId, RtUser User)?> FindUserInTenantUnguardedAsync(
+        OctoTenant tenant, string normalizedInput)
+    {
         var tenantId = tenant.TenantId;
-        try
+        // No existence probe and no CK auto-import per tenant (AB#6308): the entry comes from the registry.
+        var tenantRepository = systemContext.GetRegisteredTenantRepository(tenant);
+        using var session = await tenantRepository.GetSessionAsync();
+        session.StartTransaction();
+
+        // Search by normalized username
+        var byNameOptions = RtEntityQueryOptions.Create()
+            .FieldEquals(nameof(RtUser.NormalizedUserName), normalizedInput);
+        var byNameResult = await tenantRepository.GetRtEntitiesByTypeAsync<RtUser>(session, byNameOptions);
+
+        var user = byNameResult.Items.FirstOrDefault();
+
+        // If not found by username, search by normalized email
+        if (user == null)
         {
-            // No existence probe and no CK auto-import per tenant (AB#6308): the entry comes from the registry.
-            var tenantRepository = systemContext.GetRegisteredTenantRepository(tenant);
-            using var session = await tenantRepository.GetSessionAsync();
-            session.StartTransaction();
-
-            // Search by normalized username
-            var byNameOptions = RtEntityQueryOptions.Create()
-                .FieldEquals(nameof(RtUser.NormalizedUserName), normalizedInput);
-            var byNameResult = await tenantRepository.GetRtEntitiesByTypeAsync<RtUser>(session, byNameOptions);
-
-            var user = byNameResult.Items.FirstOrDefault();
-
-            // If not found by username, search by normalized email
-            if (user == null)
-            {
-                var byEmailOptions = RtEntityQueryOptions.Create()
-                    .FieldEquals(nameof(RtUser.NormalizedEmail), normalizedInput);
-                var byEmailResult = await tenantRepository.GetRtEntitiesByTypeAsync<RtUser>(session, byEmailOptions);
-                user = byEmailResult.Items.FirstOrDefault();
-            }
-
-            await session.CommitTransactionAsync();
-
-            if (user == null)
-            {
-                return null;
-            }
-
-            // Exclude cross-tenant shadow users (xt_ prefix)
-            if (user.UserName != null && user.UserName.StartsWith("xt_", StringComparison.OrdinalIgnoreCase))
-            {
-                return null;
-            }
-
-            return (tenantId, user);
+            var byEmailOptions = RtEntityQueryOptions.Create()
+                .FieldEquals(nameof(RtUser.NormalizedEmail), normalizedInput);
+            var byEmailResult = await tenantRepository.GetRtEntitiesByTypeAsync<RtUser>(session, byEmailOptions);
+            user = byEmailResult.Items.FirstOrDefault();
         }
-        catch (Exception ex)
+
+        await session.CommitTransactionAsync();
+
+        if (user == null)
         {
-            logger.LogWarning(ex,
-                "Failed to search for user in tenant '{TenantId}' during tenant discovery",
-                tenantId);
             return null;
         }
+
+        // Exclude cross-tenant shadow users (xt_ prefix)
+        if (user.UserName != null && user.UserName.StartsWith("xt_", StringComparison.OrdinalIgnoreCase))
+        {
+            return null;
+        }
+
+        return (tenantId, user);
     }
 }

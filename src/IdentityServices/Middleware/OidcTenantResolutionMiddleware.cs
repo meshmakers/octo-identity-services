@@ -118,46 +118,54 @@ internal class OidcTenantResolutionMiddleware(
             using var memoryStream = new MemoryStream();
             context.Response.Body = memoryStream;
 
-            await next(context);
+            try
+            {
+                await next(context);
 
-            memoryStream.Position = 0;
-
-            if (isAuthorizeEndpoint)
-            {
-                CaptureAuthorizationCode(context, memoryStream, resolvedTenantId!);
                 memoryStream.Position = 0;
-            }
-            else if (isParEndpoint &&
-                     (context.Response.StatusCode == StatusCodes.Status201Created ||
-                      context.Response.StatusCode == StatusCodes.Status200OK))
-            {
-                CaptureRequestUriFromParResponse(memoryStream, resolvedTenantId, parScope);
-                memoryStream.Position = 0;
-            }
-            else if (context.Response.StatusCode == StatusCodes.Status200OK)
-            {
-                if (isTokenEndpoint)
+                if (isAuthorizeEndpoint)
                 {
-                    CaptureRefreshTokenFromResponse(memoryStream, resolvedTenantId!);
-                }
-                else if (isDeviceAuthEndpoint)
-                {
-                    CaptureDeviceCodeFromResponse(memoryStream, resolvedTenantId!);
+                    CaptureAuthorizationCode(context, memoryStream, resolvedTenantId!);
                     memoryStream.Position = 0;
-                    var rewritten = RewriteDeviceVerificationUrls(memoryStream, resolvedTenantId!);
-                    if (rewritten != null)
+                }
+                else if (isParEndpoint &&
+                         (context.Response.StatusCode == StatusCodes.Status201Created ||
+                          context.Response.StatusCode == StatusCodes.Status200OK))
+                {
+                    CaptureRequestUriFromParResponse(memoryStream, resolvedTenantId, parScope);
+                    memoryStream.Position = 0;
+                }
+                else if (context.Response.StatusCode == StatusCodes.Status200OK)
+                {
+                    if (isTokenEndpoint)
                     {
-                        context.Response.ContentLength = rewritten.Length;
-                        memoryStream.SetLength(0);
-                        memoryStream.Write(rewritten);
+                        CaptureRefreshTokenFromResponse(memoryStream, resolvedTenantId!);
                     }
+                    else if (isDeviceAuthEndpoint)
+                    {
+                        CaptureDeviceCodeFromResponse(memoryStream, resolvedTenantId!);
+                        memoryStream.Position = 0;
+                        var rewritten = RewriteDeviceVerificationUrls(memoryStream, resolvedTenantId!);
+                        if (rewritten != null)
+                        {
+                            context.Response.ContentLength = rewritten.Length;
+                            memoryStream.SetLength(0);
+                            memoryStream.Write(rewritten);
+                        }
+                    }
+
+                    memoryStream.Position = 0;
                 }
 
-                memoryStream.Position = 0;
+                await memoryStream.CopyToAsync(originalBody);
             }
-
-            await memoryStream.CopyToAsync(originalBody);
-            context.Response.Body = originalBody;
+            finally
+            {
+                // AB#8177: always hand the original body back. When the inner pipeline throws, the buffer is
+                // disposed here; an outer middleware (TokenEndpointDatabaseFailureMiddleware) must still be able
+                // to write its error response. The buffered content is dropped on failure (never copied).
+                context.Response.Body = originalBody;
+            }
         }
         else
         {

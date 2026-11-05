@@ -1,7 +1,10 @@
 using IdentityServerPersistence;
 using IdentityServerPersistence.Configuration.Options;
 using IdentityServerPersistence.Services.FileRoles;
+using IdentityServerPersistence.Services.ClientGrants;
 using IdentityServerPersistence.Services.Migrations;
+using IdentityServerPersistence.Services.ScratchTenants;
+using IdentityServerPersistence.Services.AdminRoleMigration;
 using IdentityServerPersistence.Services.SecretManagement;
 using IdentityServerPersistence.SystemStores;
 using Meshmakers.Octo.Backend.IdentityServices.Resources;
@@ -22,7 +25,7 @@ using Meshmakers.Octo.Runtime.Contracts.CkModelMigrations;
 using Meshmakers.Octo.Services.Notifications.Generated.System.Notification.v2;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
-using Persistence.IdentityCkModel.Generated.System.Identity.v2;
+using Persistence.IdentityCkModel.Generated.System.Identity.v3;
 
 namespace IdentityServerPersistence.Services;
 
@@ -51,7 +54,12 @@ internal class DefaultConfigurationCreatorService(
     IEnumerable<ITenantSetupCompletedHandler>? tenantSetupCompletedHandlers = null,
     // AB#6467 — the pipeline-service-account File role grant only runs for tenants that have System.Files in
     // their CK model; unknown (null) is treated as "has it" so a service without the probe still grants.
-    IFilesModelProbe? filesModelProbe = null)
+    IFilesModelProbe? filesModelProbe = null,
+    // AB#7192 — the creator of a scratch tenant becomes administrator of it; re-applied on every setup.
+    IScratchTenantGrantService? scratchTenantGrantService = null,
+    // AB#8165 — migration of the existing admins to TenantOwners (IdentityApiAuthorization:AdminRoleMigration);
+    // unregistered means Off.
+    IOptions<AdminRoleMigrationOptions>? adminRoleMigrationOptions = null)
     : DefaultConfigurationCreatorServiceBase(logger, blueprintService, embeddedBlueprintSources,
           tenantSetupRetryStore, tenantLifecycleStore),
       IConfigurationService
@@ -373,6 +381,36 @@ internal class DefaultConfigurationCreatorService(
                 "retried on the next tenant setup", tenantId);
         }
 
+        // AB#8161: SecretManagement for the TenantOwners group and for octosystem admin mappings carrying
+        // TenantManagement, once per tenant (own marker). Additive only; a failure is logged and retried.
+        try
+        {
+            await TenantOwnersSecretManagementGrant.EnsureAsync(tenantContext, systemContext.TenantId, logger);
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex,
+                "SecretManagement grant to TenantOwners failed for tenant '{TenantId}'; retried on the next " +
+                "tenant setup", tenantId);
+        }
+
+        // AB#8165: move the existing admins from direct roles to TenantOwners (Off by default, DryRun logs only).
+        // Runs after the SecretManagement grants so the group already carries SecretManagement. Not fatal.
+        var adminRoleMigrationMode = adminRoleMigrationOptions?.Value.AdminRoleMigration ?? AdminRoleMigrationMode.Off;
+        if (adminRoleMigrationMode != AdminRoleMigrationMode.Off)
+        {
+            try
+            {
+                await TenantAdminRoleMigration.EnsureAsync(tenantContext, adminRoleMigrationMode, logger);
+            }
+            catch (Exception ex)
+            {
+                logger.LogError(ex,
+                    "Admin role migration ({Mode}) failed for tenant '{TenantId}'; retried on the next tenant setup",
+                    adminRoleMigrationMode, tenantId);
+            }
+        }
+
         // Child-tenant client mirror provisioning runs AFTER the blueprint apply has guaranteed
         // the parent tenant's RtClient entities exist. Idempotent — runs on every startup so
         // backfill happens naturally for tenants that pre-date the AutoProvisionInChildTenants
@@ -403,6 +441,54 @@ internal class DefaultConfigurationCreatorService(
                 logger.LogError(ex,
                     "Client mirror provisioning failed for child tenant '{TenantId}'", tenantId);
             }
+        }
+
+        // AB#7192: a scratch tenant (created with the scratch flag by a client-credentials client of its
+        // parent) gives that client's mirror the TenantOwners group, so an agent can work in the tenant and clean it up
+        // without a human login. Runs AFTER the blueprint apply (the group has to exist) and after the mirror
+        // provisioning above. The mirror is only provisioned automatically for the system tenant as parent; a scratch
+        // tenant of another parent gets it provisioned here first. The marker is read from the system tenant, so this is
+        // a cheap no-op for every other tenant. A failure is logged, not fatal: the next setup retries it.
+        if (tenantId != systemContext.TenantId && scratchTenantGrantService != null)
+        {
+            try
+            {
+                var scratchMarker = await scratchTenantGrantService.GetMarkerAsync(tenantId);
+                if (scratchMarker != null)
+                {
+                    if (clientMirrorProvisioningService != null &&
+                        !string.Equals(scratchMarker.ParentTenantId, systemContext.TenantId,
+                            StringComparison.OrdinalIgnoreCase))
+                    {
+                        await clientMirrorProvisioningService
+                            .ProvisionForChildTenantAsync(scratchMarker.ParentTenantId, tenantId);
+                    }
+
+                    await scratchTenantGrantService.EnsureGrantAsync(tenantId);
+                }
+            }
+            catch (Exception ex)
+            {
+                logger.LogError(ex,
+                    "Granting TenantOwners to the creator of scratch tenant '{TenantId}' failed; retried on the next " +
+                    "tenant setup", tenantId);
+            }
+        }
+
+        // AB#6839: AllowedGrantTypes is tenant-owned, so the blueprint apply never changes it on an existing client.
+        // One-time, additive step that gives the octo-cli client of THIS tenant the RFC 8693 token-exchange grant.
+        // Deliberately after the mirror provisioning above: the mirror copies the parent's grants over a mirrored
+        // octo-cli, and this step must have the last word in a child tenant whose parent is not fixed yet. A failure
+        // is logged, not fatal: the next setup retries (no marker).
+        try
+        {
+            await OctoCliTokenExchangeGrant.EnsureAsync(tenantContext, logger);
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex,
+                "Adding the token-exchange grant to the octo-cli client failed for tenant '{TenantId}'; " +
+                "retried on the next tenant setup", tenantId);
         }
     }
 
@@ -543,7 +629,10 @@ internal class DefaultConfigurationCreatorService(
                 continue;
             }
 
-            await tenantRepository.ReplaceOneRtEntityByIdAsync(session, clientRtId, postApplyClient);
+            // AB#8054: written with the version read in this transaction (the write advances rtVersion, see
+            // ClientMirrorProvisioningService.ReconcileMirrorAsync).
+            await tenantRepository.ReplaceOneRtEntityByIdAsync(session, clientRtId, postApplyClient,
+                postApplyClient.RtVersion);
             restoredClients++;
             restoredEntries += capture.RedirectUris.Count
                                + capture.PostLogoutRedirectUris.Count
@@ -621,7 +710,9 @@ internal class DefaultConfigurationCreatorService(
 
             BlueprintClientUriFamilyResolver.ApplyToClient(postApplyClient, expansion);
 
-            await tenantRepository.ReplaceOneRtEntityByIdAsync(session, clientRtId, postApplyClient);
+            // AB#8054: written with the version read in this transaction, as the restore pass above.
+            await tenantRepository.ReplaceOneRtEntityByIdAsync(session, clientRtId, postApplyClient,
+                postApplyClient.RtVersion);
             expandedClients++;
             expandedEntries += expansion.RedirectUris.Count
                                + expansion.PostLogoutRedirectUris.Count

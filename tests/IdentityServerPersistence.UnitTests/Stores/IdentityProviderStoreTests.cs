@@ -8,7 +8,7 @@ using System.Buffers.Text;
 using System.Security.Cryptography;
 using Meshmakers.Octo.Services.Infrastructure.Services;
 using NSubstitute;
-using Persistence.IdentityCkModel.Generated.System.Identity.v2;
+using Persistence.IdentityCkModel.Generated.System.Identity.v3;
 using Shared.TestUtilities.Fakes;
 using Xunit;
 

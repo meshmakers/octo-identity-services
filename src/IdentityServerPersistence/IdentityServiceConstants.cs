@@ -28,6 +28,10 @@ public static class IdentityServiceConstants
     // AB#5859: service-wide operations (log level) → TenantManagement in the system tenant only.
     public const string IdentityServiceAdministrationPolicy = "IdentityServiceAdministrationPolicy";
 
+    // AB#5861: create, rotate and delete API secrets of clients and API resources → scope octo_api and the
+    // tenant role SecretManagement. Staged by IdentityApiAuthorization:SecretManagementRoleEnforcement.
+    public const string IdentitySecretAdministrationPolicy = "IdentitySecretAdministrationPolicy";
+
     public const string MailNotificationConfigurationName = "MailNotificationConfiguration";
 
     public const string WelcomeEmailTemplateName = "Welcome_Email_Template";
@@ -76,6 +80,12 @@ public static class IdentityServiceConstants
     public const string TenantAdministratorFileRoleGrantKey = "FileRoleGrantTenantAdministrators";
 
     /// <summary>
+    /// AB#6839: TenantConfiguration row recording that <c>OctoCliTokenExchangeGrant</c> has added the RFC 8693
+    /// token-exchange grant to the <c>octo-cli</c> client of the tenant (or found it there). Present = never run again.
+    /// </summary>
+    public const string OctoCliTokenExchangeGrantKey = "OctoCliTokenExchangeGrant";
+
+    /// <summary>
     /// Phase 3 PR #4: TenantConfiguration row used by <c>PreBlueprintCleanupMigration</c> to hand
     /// captured User → Role and ExternalTenantUserMapping → Role assignments (by role name) over
     /// to the post-blueprint restore step in
@@ -89,4 +99,11 @@ public static class IdentityServiceConstants
     /// existing tenant administrators (<c>SecretManagementAdminGrant</c>) has run. Present = never run again.
     /// </summary>
     public const string SecretManagementAdminGrantKey = "SecretManagementAdminGrant";
+
+    /// <summary>
+    /// AB#8161: TenantConfiguration row recording that <c>SecretManagement</c> was granted to the
+    /// <c>TenantOwners</c> group and to the octosystem admin mappings (<c>TenantOwnersSecretManagementGrant</c>).
+    /// Present = never run again.
+    /// </summary>
+    public const string TenantOwnersSecretManagementGrantKey = "TenantOwnersSecretManagementGrant";
 }

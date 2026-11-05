@@ -13,8 +13,67 @@ namespace Meshmakers.Octo.Backend.IdentityServices.Authorization;
 /// <param name="SystemTenantOnly">
 ///     The route tenant must also be the system tenant (service-wide operations such as the log level).
 /// </param>
-public sealed record IdentityApiRoleRequirement(IReadOnlyList<string> Roles, bool SystemTenantOnly = false)
-    : IAuthorizationRequirement;
+/// <param name="WarnFallbackRoles">
+///     AB#5861: roles that still pass while <see cref="IdentityApiAuthorizationOptions.SecretManagementRoleEnforcement" />
+///     (or the cluster-wide <see cref="IdentityApiAuthorizationOptions.RoleEnforcement" />) is <c>Warn</c> — the rule
+///     before the requirement was tightened. Every such call is logged. <c>null</c> = the requirement is not staged.
+/// </param>
+public sealed record IdentityApiRoleRequirement(
+    IReadOnlyList<string> Roles,
+    bool SystemTenantOnly = false,
+    IReadOnlyList<string>? WarnFallbackRoles = null)
+    : IAuthorizationRequirement
+{
+    /// <summary>
+    ///     Decides a staged requirement for a caller (shared by the REST handler, the client controller and the client
+    ///     secret methods, so the three paths cannot drift). The cluster-wide <c>Warn</c> that lets every caller through is
+    ///     not part of it; the REST handler applies it on top.
+    /// </summary>
+    internal IdentityApiRoleDecision Decide(Func<string, bool> hasRole, IdentityApiAuthorizationOptions options)
+    {
+        if (Roles.Any(hasRole))
+        {
+            return IdentityApiRoleDecision.Allowed;
+        }
+
+        var staged = options.SecretManagementRoleEnforcement == IdentityApiRoleEnforcementMode.Warn ||
+                     options.RoleEnforcement == IdentityApiRoleEnforcementMode.Warn;
+        return WarnFallbackRoles != null && staged && WarnFallbackRoles.Any(hasRole)
+            ? IdentityApiRoleDecision.AllowedByStagedWarn
+            : IdentityApiRoleDecision.Denied;
+    }
+
+    /// <summary>
+    ///     The reason of a refusal, in the AB#5227 shape (the 403 body <c>{"message": "..."}</c> the frontends show): names
+    ///     the missing role so the caller knows what to ask for.
+    /// </summary>
+    internal string DeniedMessage()
+    {
+        if (SystemTenantOnly)
+        {
+            return "Access is denied: this operation is only available in the system tenant.";
+        }
+
+        var roles = Roles.Count == 1
+            ? $"the role '{Roles[0]}'"
+            : "one of the roles " + string.Join(", ", Roles.Select(r => $"'{r}'"));
+        return $"Access is denied: this operation requires {roles} in the tenant. " +
+               "The token carries no such role; ask a tenant administrator to grant it.";
+    }
+}
+
+/// <summary>Outcome of <see cref="IdentityApiRoleRequirement.Decide" />.</summary>
+public enum IdentityApiRoleDecision
+{
+    /// <summary>The caller holds one of the required roles.</summary>
+    Allowed,
+
+    /// <summary>The caller holds only a fallback role and the staged switch is <c>Warn</c>: let through, logged.</summary>
+    AllowedByStagedWarn,
+
+    /// <summary>Refused (unless the cluster-wide <c>Warn</c> applies, REST only).</summary>
+    Denied
+}
 
 /// <summary>
 ///     Evaluates <see cref="IdentityApiRoleRequirement" /> against the role claims of the token.
@@ -63,10 +122,13 @@ internal sealed class IdentityApiRoleAuthorizationHandler(
             logger.LogWarning(
                 "Identity API call denied, system-tenant-only operation called in tenant {TenantId}: {Method} {Path} (AB#5859)",
                 tenantId, httpContext?.Request.Method, httpContext?.Request.Path.Value);
+            context.Fail(new AuthorizationFailureReason(this, requirement.DeniedMessage()));
             return Task.CompletedTask;
         }
 
-        if (requirement.Roles.Any(role => HasTenantRole(context.User, role)))
+        var currentOptions = options.CurrentValue;
+        var decision = requirement.Decide(role => HasTenantRole(context.User, role), currentOptions);
+        if (decision == IdentityApiRoleDecision.Allowed)
         {
             context.Succeed(requirement);
             return Task.CompletedTask;
@@ -76,7 +138,19 @@ internal sealed class IdentityApiRoleAuthorizationHandler(
         var clientId = context.User.FindFirst(JwtClaimTypes.ClientId)?.Value;
         var requiredRoles = string.Join(",", requirement.Roles);
 
-        if (options.CurrentValue.RoleEnforcement == IdentityApiRoleEnforcementMode.Warn)
+        if (decision == IdentityApiRoleDecision.AllowedByStagedWarn)
+        {
+            // AB#5861: the caller holds the previous roles only. This line is the inventory the rollout precheck reads.
+            logger.LogWarning(
+                "Identity API call without required role allowed by SecretManagementRoleEnforcement=Warn: {Method} {Path} in tenant {TenantId} by subject {Subject} / client {ClientId}, required any of [{RequiredRoles}]. " +
+                "This would be denied with SecretManagementRoleEnforcement=Enforce (AB#5861)",
+                httpContext?.Request.Method, httpContext?.Request.Path.Value, tenantId, subject, clientId,
+                requiredRoles);
+            context.Succeed(requirement);
+            return Task.CompletedTask;
+        }
+
+        if (currentOptions.RoleEnforcement == IdentityApiRoleEnforcementMode.Warn)
         {
             logger.LogWarning(
                 "Identity API call without required role allowed by RoleEnforcement=Warn: {Method} {Path} in tenant {TenantId} by subject {Subject} / client {ClientId}, required any of [{RequiredRoles}]. " +
@@ -91,6 +165,8 @@ internal sealed class IdentityApiRoleAuthorizationHandler(
             "Identity API call denied, required role missing: {Method} {Path} in tenant {TenantId} by subject {Subject} / client {ClientId}, required any of [{RequiredRoles}] (AB#5859)",
             httpContext?.Request.Method, httpContext?.Request.Path.Value, tenantId, subject, clientId,
             requiredRoles);
+        // AB#5861: the reason goes into the 403 body (IdentityApiForbiddenReasonResultHandler, AB#5227 shape).
+        context.Fail(new AuthorizationFailureReason(this, requirement.DeniedMessage()));
         return Task.CompletedTask;
     }
 

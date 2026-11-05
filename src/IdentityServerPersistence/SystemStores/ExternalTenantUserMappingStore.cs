@@ -3,32 +3,25 @@ using Meshmakers.Octo.Runtime.Contracts.MongoDb.Repositories;
 using Meshmakers.Octo.Runtime.Contracts.Repositories;
 using Meshmakers.Octo.Runtime.Contracts.Repositories.Query;
 using Meshmakers.Octo.Services.Infrastructure.Services;
-using Persistence.IdentityCkModel.Generated.System.Identity.v2;
+using Microsoft.Extensions.Logging;
+using Persistence.IdentityCkModel.Generated.System.Identity.v3;
 
 namespace IdentityServerPersistence.SystemStores;
 
 public class ExternalTenantUserMappingStore(
-    IMultiTenancyResolverService multiTenancyResolverService) : IExternalTenantUserMappingStore
+    IMultiTenancyResolverService multiTenancyResolverService,
+    ILogger<ExternalTenantUserMappingStore>? logger = null) : IExternalTenantUserMappingStore
 {
+    // The store is scoped (one per request): the WARN for a duplicate set is logged once per request (AB#6975).
+    private readonly ExternalTenantUserMappingLookup.DuplicateWarningGate _warningGate = new();
+
     // Resolve lazily to ensure correct tenant context (see GroupStore for explanation)
     private ITenantRepository GetRepository() => multiTenancyResolverService.GetTenantRepository();
 
-    public async Task<RtExternalTenantUserMapping?> FindBySourceUserAsync(
-        string sourceTenantId, string sourceUserId)
-    {
-        var session = await GetRepository().GetSessionAsync();
-        session.StartTransaction();
-
-        var queryOptions = RtEntityQueryOptions.Create()
-            .FieldEquals(nameof(RtExternalTenantUserMapping.SourceTenantId), sourceTenantId)
-            .FieldEquals(nameof(RtExternalTenantUserMapping.SourceUserId), sourceUserId);
-
-        var result = await GetRepository()
-            .GetRtEntitiesByTypeAsync<RtExternalTenantUserMapping>(session, queryOptions);
-        await session.CommitTransactionAsync();
-
-        return result.Items.SingleOrDefault();
-    }
+    public Task<RtExternalTenantUserMapping?> FindBySourceUserAsync(
+        string sourceTenantId, string sourceUserId) =>
+        // Tolerates duplicates (oldest mapping wins, WARN) instead of throwing (AB#6975).
+        ExternalTenantUserMappingLookup.FindOldestAsync(GetRepository(), sourceTenantId, sourceUserId, logger, _warningGate);
 
     public async Task<IEnumerable<RtExternalTenantUserMapping>> GetAllAsync(
         int? skip = null, int? take = null)

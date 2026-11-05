@@ -3,11 +3,12 @@ using IdentityServerPersistence.Services;
 using IdentityServerPersistence.SystemStores;
 using Meshmakers.Common.Shared;
 using Meshmakers.Octo.Services.Infrastructure;
+using Microsoft.AspNetCore.Identity;
 using Microsoft.Extensions.Options;
 using Microsoft.IdentityModel.JsonWebTokens;
 using Microsoft.IdentityModel.Tokens;
 using OpenIddict.Server;
-using Persistence.IdentityCkModel.Generated.System.Identity.v2;
+using Persistence.IdentityCkModel.Generated.System.Identity.v3;
 using static OpenIddict.Abstractions.OpenIddictConstants;
 
 namespace Meshmakers.Octo.Backend.IdentityServices.OpenIddict;
@@ -33,6 +34,16 @@ namespace Meshmakers.Octo.Backend.IdentityServices.OpenIddict;
 ///         relationship, failed shadow provisioning) with an OAuth error and a persisted failure
 ///         audit event. v1 semantics preserved: no refresh token is issued for exchanged tokens.
 ///     </para>
+///     <para>
+///         <b>Ancestry is not authority (AB#6839, decision Gerald 2026-10-17).</b> Being a user of an
+///         ancestor tenant only lets the exchange <i>reach</i> the target tenant; the roles of the issued
+///         token come exclusively from explicit provisioning in B (an <c>ExternalTenantUserMapping</c>
+///         with roles or groups, a group membership or a direct role of the shadow user). When the
+///         B-shadow user resolves to no role at all the exchange is refused with
+///         <see cref="Errors.AccessDenied" /> and a description starting with
+///         <see cref="NotProvisionedMarker" />, so clients (octo-cli) can show a clear denial instead of
+///         a later 403 on the first call. A token without roles could not pass role enforcement anyway.
+///     </para>
 /// </remarks>
 public class TenantExchangeProcessor(
     IOptionsMonitor<OpenIddictServerOptions> serverOptions,
@@ -41,6 +52,7 @@ public class TenantExchangeProcessor(
     ICrossTenantUserProvisioningService crossTenantUserProvisioningService,
     ICrossTenantShadowUserChainResolver shadowUserChainResolver,
     IExternalTenantUserMappingStore externalTenantUserMappingStore,
+    UserManager<RtUser> userManager,
     IHttpContextAccessor httpContextAccessor,
     IIdentityAuditService auditService,
     ILogger<TenantExchangeProcessor> logger)
@@ -51,6 +63,13 @@ public class TenantExchangeProcessor(
     /// <summary>The <c>amr</c> value recorded on exchanged tokens for auditability.</summary>
     public const string AuthenticationMethod = "token_exchange";
 
+    /// <summary>
+    ///     Stable, machine-readable prefix of the <c>error_description</c> of the denial that is returned
+    ///     (with <c>error=access_denied</c>) when the caller is a valid ancestor-tenant user but holds no
+    ///     role in the target tenant. Clients match on this prefix, never on the free text after it.
+    /// </summary>
+    public const string NotProvisionedMarker = "tenant_not_provisioned";
+
     /// <summary>Outcome of a token exchange attempt: either a B-shadow user or an OAuth error.</summary>
     public sealed record ExchangeOutcome
     {
@@ -59,11 +78,17 @@ public class TenantExchangeProcessor(
         public string? Error { get; init; }
         public string? ErrorDescription { get; init; }
 
+        /// <summary>
+        ///     The subject token carried second-factor evidence (<c>amr=mfa</c>); the issued token carries it on, so a
+        ///     chained exchange can rely on it (AB#7804).
+        /// </summary>
+        public bool SecondFactorVerified { get; init; }
+
         public static ExchangeOutcome Failed(string error, string description) =>
             new() { Error = error, ErrorDescription = description };
 
-        public static ExchangeOutcome Succeeded(RtUser shadowUser, string targetTenantId) =>
-            new() { ShadowUser = shadowUser, TargetTenantId = targetTenantId };
+        public static ExchangeOutcome Succeeded(RtUser shadowUser, string targetTenantId, bool secondFactorVerified) =>
+            new() { ShadowUser = shadowUser, TargetTenantId = targetTenantId, SecondFactorVerified = secondFactorVerified };
     }
 
     /// <summary>
@@ -76,7 +101,7 @@ public class TenantExchangeProcessor(
         string? subjectToken, string? subjectTokenType, string? acrValues,
         CancellationToken cancellationToken = default)
     {
-        // (a) Validate the subject token (signature + issuer + lifetime, ValidateAudience=false —
+        // (a) Validate the subject token (signature + issuer + lifetime + typ at+jwt, ValidateAudience=false —
         //     platform-wide convention). Deliberately NOT bound to the request tenant: the request
         //     is wired to the TARGET tenant B while the subject belongs to the SOURCE tenant A.
         if (string.IsNullOrEmpty(subjectToken))
@@ -95,14 +120,9 @@ public class TenantExchangeProcessor(
             .Select(c => c.Key)
             .ToList();
         var handler = new JsonWebTokenHandler();
-        var validation = await handler.ValidateTokenAsync(subjectToken, new TokenValidationParameters
-        {
-            ValidateIssuer = true,
-            ValidIssuer = octoIdentityOptions.Value.AuthorityUrl.EnsureEndsWith("/"),
-            ValidateAudience = false,
-            ValidateLifetime = true,
-            IssuerSigningKeys = signingKeys
-        });
+        // AB#7860: only an access token (typ at+jwt) is a valid subject, never an id_token.
+        var validation = await handler.ValidateTokenAsync(subjectToken,
+            SubjectTokenValidation.ForAccessToken(octoIdentityOptions.Value.AuthorityUrl, signingKeys));
         if (!validation.IsValid)
         {
             logger.LogWarning("Token exchange rejected: subject_token invalid ({Error})",
@@ -144,6 +164,23 @@ public class TenantExchangeProcessor(
                 "target tenant could not be resolved for this request");
         }
 
+        return await ExchangeAsync(sourceTenantId, sourceUserId, targetTenantId,
+            subjectHasSecondFactor: SecondFactorEvidence.IsPresent(claims));
+    }
+
+    /// <summary>
+    ///     The authorization half of the exchange, after the subject token and the target tenant were
+    ///     validated: B-authorization gate, B-shadow user, and the refusal of a caller without any role
+    ///     in B (see class remarks). Separated from <see cref="ProcessAsync" /> so the real exchange path
+    ///     can be tested without minting and signing a subject token.
+    /// </summary>
+    /// <param name="sourceTenantId">Tenant of the subject token.</param>
+    /// <param name="sourceUserId">Subject of the subject token.</param>
+    /// <param name="targetTenantId">The tenant the token is exchanged into.</param>
+    /// <param name="subjectHasSecondFactor">The subject token carries <c>amr=mfa</c> (AB#7804).</param>
+    internal async Task<ExchangeOutcome> ExchangeAsync(
+        string sourceTenantId, string sourceUserId, string targetTenantId, bool subjectHasSecondFactor)
+    {
         // (b2)+(c) Pick the source identity and run the B-authorization gate on it.
         var crossTenantResult = await ResolveExchangeSourceAsync(targetTenantId, sourceTenantId, sourceUserId);
         if (crossTenantResult == null)
@@ -156,9 +193,26 @@ public class TenantExchangeProcessor(
                 "cross-tenant access to the target tenant is denied");
         }
 
+        // (c2) AB#7804: a source user with 2FA (itself or anywhere in its xt_ chain) needs second-factor evidence in
+        //      the subject token. Without it the exchange would turn a password-only token into a target-tenant token.
+        if (crossTenantResult.SourceUserRequiresSecondFactor && !subjectHasSecondFactor)
+        {
+            logger.LogWarning(
+                "Token exchange denied: user '{SourceUserId}' from tenant '{SourceTenantId}' has two-factor authentication enabled, but the subject token carries no second-factor evidence",
+                sourceUserId, sourceTenantId);
+            await RaiseFailureAsync(sourceUserId, sourceTenantId, targetTenantId,
+                "second factor required, subject token has no amr=mfa");
+            return ExchangeOutcome.Failed(Errors.AccessDenied,
+                $"{SecondFactorEvidence.RequiredMarker}: the user has two-factor authentication enabled; " +
+                "sign in again with the second factor and use that token");
+        }
+
         // (d) Find or create the B-shadow user (roles synced from RtExternalTenantUserMapping in B).
+        //     No mapping is stored here (AB#7088): the exchange only needs the shadow user to read its roles. A
+        //     role-less mapping stored for a refused user used to make ProvisionCurrentUser report "already
+        //     provisioned" while the user stayed denied.
         var shadowUser = await crossTenantUserProvisioningService.FindOrCreateCrossTenantUserAsync(
-            crossTenantResult, targetTenantId);
+            crossTenantResult, targetTenantId, storeMappingIfMissing: false);
         if (shadowUser == null)
         {
             logger.LogError(
@@ -169,11 +223,25 @@ public class TenantExchangeProcessor(
             return ExchangeOutcome.Failed(Errors.InvalidGrant, "failed to provision the target-tenant user");
         }
 
+        // (e) Ancestry gives no roles. The same store that stamps the token's role claims decides: a
+        //     shadow user without a single effective role in B is not provisioned there.
+        if ((await userManager.GetRolesAsync(shadowUser)).Count == 0)
+        {
+            logger.LogWarning(
+                "Token exchange denied: user '{SourceUserId}' from tenant '{SourceTenantId}' holds no role in target tenant '{TargetTenantId}' (not provisioned)",
+                sourceUserId, sourceTenantId, targetTenantId);
+            await RaiseFailureAsync(sourceUserId, sourceTenantId, targetTenantId,
+                "not provisioned in target tenant (no role)");
+            return ExchangeOutcome.Failed(Errors.AccessDenied,
+                $"{NotProvisionedMarker}: the user holds no role in tenant '{targetTenantId}'; " +
+                "an administrator of that tenant must provision the user there (ProvisionCurrentUser -ttid)");
+        }
+
         logger.LogInformation(
             "Token exchange succeeded: user '{SourceUserId}' from tenant '{SourceTenantId}' exchanged into tenant '{TargetTenantId}' as shadow user '{ShadowRtId}'",
             sourceUserId, sourceTenantId, targetTenantId, shadowUser.RtId);
 
-        return ExchangeOutcome.Succeeded(shadowUser, targetTenantId);
+        return ExchangeOutcome.Succeeded(shadowUser, targetTenantId, subjectHasSecondFactor);
     }
 
     /// <summary>

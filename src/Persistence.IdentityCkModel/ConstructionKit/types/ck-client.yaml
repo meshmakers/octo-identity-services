@@ -1,6 +1,7 @@
 "$schema": "https://schemas.meshmakers.cloud/construction-kit-elements.schema.json"
 types:
   - typeId: Client
+    derivable: Any
     derivedFromCkTypeId: ${System}/Entity
     isFinal: true
     isAbstract: false
@@ -180,3 +181,30 @@ types:
         targetCkTypeId: ${this}/Role
       - id: ${this}/MayActAs
         targetCkTypeId: ${this}/Client
+    # AB#7773 (Feature AB#5696, F4.2): the method declarations of the client; the handlers follow with AB#7780.
+    # Declarations only: until a handler is registered the gateway answers METHOD_HANDLER_NOT_AVAILABLE.
+    # Roles follow the REST parity (ApiSecretsController: IdentityTenantAdministrationWritePolicy = TenantManagement or UserManagement).
+    # No replacesGenericCreate: the System.Identity.Bootstrap blueprint seeds clients (AB#7121 would refuse the tenant setup).
+    methods:
+      - methodId: AddSecret-1
+        description: "Generates a new secret for the client. The generated value is the result and is shown exactly once; only its hash is stored."
+        parameters:
+          - { name: description, valueType: String, isOptional: true, description: "Free text shown in the list of secrets." }
+          - { name: expirationDate, valueType: DateTime, isOptional: true, description: "Expiration of the secret; without it the secret does not expire." }
+        result:
+          valueType: String
+          sensitive: true
+        errors:
+          - { code: CLIENT_SECRET_NOT_REQUIRED, description: "The client does not use a secret (RequireClientSecret is false)." }
+        authorization:
+          roles: [ TenantManagement, UserManagement ]
+          dataAccess: Write
+      - methodId: RemoveSecret-1
+        description: "Removes a secret of the client, identified by its value (the REST parity: DELETE apiSecrets/client/{clientId}/{secretValue})."
+        parameters:
+          - { name: secretValue, valueType: String, sensitive: true, description: "The secret value that is removed." }
+        errors:
+          - { code: SECRET_NOT_FOUND, description: "The client has no secret with this value." }
+        authorization:
+          roles: [ TenantManagement, UserManagement ]
+          dataAccess: Write

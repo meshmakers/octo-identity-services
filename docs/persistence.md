@@ -112,7 +112,7 @@ Key properties:
 - `indexes` - MongoDB index definitions (supports `Ascending`, `UniqueNotDeleted`, etc.)
 
 **User Entity Indexes:**
-- `Ascending` on `NormalizedEmail` - Efficient email lookups. Note: Multiple users can share the same email (e.g., a local user and external provider users). External logins create dedicated user accounts with provider-prefixed usernames to prevent privilege escalation (Bug 3430).
+- `Ascending` on `NormalizedEmail` - Efficient email lookups. Note: Multiple users can share the same email (e.g., a local user and external provider users). External logins create dedicated user accounts with provider-prefixed usernames to prevent privilege escalation (Bug 3430). The user administration refuses only new duplicates (create AB#8064, e-mail change AB#8084); existing ones stay.
 - `Ascending` on `NormalizedUserName` - Efficient username lookups.
 
 **Group Entity (`ck-group.yaml`):**
@@ -222,7 +222,7 @@ All generated entities:
 - Support nested records with `AttributeRecordValueList<T>`
 - Are fully serializable to/from MongoDB BSON
 
-**Namespace:** `Persistence.IdentityCkModel.Generated.System.Identity.v2`
+**Namespace:** `Persistence.IdentityCkModel.Generated.System.Identity.v3`
 
 **Examples:**
 - `RtClient` - OAuth/OIDC client
@@ -610,6 +610,12 @@ automatically, through `SecretManagementAdminGrant`
   who later removes the role from someone does not see it come back. If the role does not exist yet, nothing
   is written and no marker is recorded (retried on the next setup). A failure is logged and does not fail
   tenant setup.
+- **TenantOwners grant (AB#8161):** `TenantOwnersSecretManagementGrant` runs right after this step from
+  `SetupTenantAsync`, once per tenant (tenant configuration row `TenantOwnersSecretManagementGrant`,
+  `IdentityServiceConstants.TenantOwnersSecretManagementGrantKey`). It writes one `AssignedRole` edge
+  TenantOwners → SecretManagement and appends the role to octosystem mappings that carry `TenantManagement` and are
+  no TenantOwners members (pure rule: `TenantOwnersSecretManagementGrantPlanner`). Additive only; no marker while the
+  role or the group is missing, so it is retried on the next setup.
 - **Concurrency:** the step takes a per-tenant in-process lock and re-reads each user's edges right before the
   insert (the engine does not reject a second identical `AssignedRole` edge). Two identity replicas starting at the
   same instant can still race; a duplicate edge is harmless (role reads treat the edges as a set) and the marker
@@ -684,7 +690,7 @@ Store registration in `RuntimeEngineBuilderExtensions.AddOctoIdentityPersistence
 
 ```csharp
 builder.AddMongoDbRuntimeRepository();
-builder.Services.AddCkModelSystemIdentityV2();  // Register generated CK models
+builder.Services.AddCkModelSystemIdentityV3();  // Register generated CK models
 
 builder.Services.AddScoped<IOctoClientStore, ClientStore>();
 builder.Services.AddScoped<IOctoResourceStore, ResourceStore>();
@@ -736,7 +742,7 @@ ASP.NET Data Protection keys are stored as `RtDataProtectionKey` entities in the
 | Attribute | Index | Description |
 |-----------|-------|-------------|
 | `FriendlyName` | Unique | Key identifier (e.g., `key-{guid}`) used by the DataProtection framework |
-| `XmlData` | — | Full XML key representation including the encryption envelope |
+| `XmlData` | — | Full XML key representation; the secret part is wrapped with the platform key ring (see Encryption at Rest) |
 
 ### Seed-Once Migration from Legacy File Path
 
@@ -754,7 +760,39 @@ its once-per-process latch) while `IsSystemTenantExistingAsync()` is false. The 
 failed persist as best-effort; the key is re-created and persisted on the first real Data Protection
 use after the bootstrap.
 
+### Encryption at Rest (AB#5530)
+
+The secret part of each key (`<masterKey requiresEncryption="true">`) is wrapped with the platform key ring
+`SecretEncryption` (the same AES-256 key ring as `Secret` attributes, delivered per cluster as
+`OCTO_SECRETENCRYPTION__KEYS__<id>` / `OCTO_SECRETENCRYPTION__ACTIVEKEYID`). `XmlData` then holds ASP.NET's encrypted form:
+
+```xml
+<key id="…" version="1">
+  <creationDate>…</creationDate><activationDate>…</activationDate><expirationDate>…</expirationDate>
+  <descriptor deserializerType="…">
+    <descriptor>
+      <encryption algorithm="AES_256_CBC" /><validation algorithm="HMACSHA256" />
+      <encryptedSecret decryptorType="IdentityServerPersistence.SystemStores.DataProtection.PlatformKeyRingXmlDecryptor, IdentityServerPersistence">
+        <platformKeyRingEncryptedKey xmlns="urn:meshmakers:octo:dataprotection:v1"><value>enc:v2:k1:…</value></platformKeyRingEncryptedKey>
+      </encryptedSecret>
+    </descriptor>
+  </descriptor>
+</key>
+```
+
+A database dump therefore contains no usable key material; the platform key id (`k1`) is readable in the envelope
+header. Key id, dates and key material are unchanged by the encryption, so protected payloads (cookies,
+antiforgery tokens, cross-tenant tokens) stay valid. Write rule (`DataProtectionKeyStore`): encrypted when
+`Identity:DataProtection:EncryptExistingKeys` is on or the store is empty; otherwise plain (rollout step 1, so pods of
+the previous image keep reading new keys). Legacy file imports are encrypted only with the flag on.
+
+Startup (`DataProtectionKeyRingStartupService`, every pod, idempotent): refuses to start when the flag is on without a
+key ring or when a stored key is wrapped with an unknown key id; re-wraps keys with a non-active key id; with the flag
+on rewrites plain keys encrypted. Each key is rewritten in place (same entity) in its own transaction and only if it is
+unchanged since it was read. Rollout, rotation and rollback: `rollout-identity-dataprotection-encryption.md`.
+
 ### Failure Modes
 
+- **Stored key wrapped with a missing platform key id** (key removed from `SecretEncryption`, database restored into another environment): identity refuses to start and names the keys and key ids. Add the key back; never remove a key id before all keys were re-wrapped.
 - **MongoDB unreachable at first unprotect**: The DataProtection framework calls `IXmlRepository.GetAllElements()` before any protected payload can be read. If MongoDB is unavailable at this point the service fails fast with a clear exception rather than silently falling back to in-memory keys, preventing a split-brain key situation.
 - **Corrupted key document**: A document whose `XmlData` cannot be parsed as a valid DataProtection XML element causes a loud failure by design. This matches the framework's default behaviour and surfaces data corruption early rather than allowing silent decryption failures.

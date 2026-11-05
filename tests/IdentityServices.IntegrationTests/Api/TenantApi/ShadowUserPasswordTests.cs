@@ -6,7 +6,7 @@ using IdentityServices.IntegrationTests.Infrastructure;
 using Meshmakers.Octo.Backend.IdentityServices.Controllers.Api;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.Extensions.DependencyInjection;
-using Persistence.IdentityCkModel.Generated.System.Identity.v2;
+using Persistence.IdentityCkModel.Generated.System.Identity.v3;
 using Shared.TestUtilities.Builders;
 using Xunit;
 
@@ -31,9 +31,9 @@ public class ShadowUserPasswordTests : IntegrationTestBase
     {
         var shadowUserName = await CreateShadowUserAsync();
 
-        var response = await PostAsync(
-            TenantApiUrl($"users/ResetPassword?userName={Uri.EscapeDataString(shadowUserName)}&password={Uri.EscapeDataString(NewPassword)}"),
-            new { });
+        // AB#8008: user name and new password in the body, never in the URL.
+        var response = await PostAsync(TenantApiUrl("users/ResetPassword"),
+            new { userName = shadowUserName, password = NewPassword });
 
         response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
         (await response.Content.ReadAsStringAsync(TestContext.Current.CancellationToken))

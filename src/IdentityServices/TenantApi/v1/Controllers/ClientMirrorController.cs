@@ -6,16 +6,21 @@ using IdentityServerPersistence.Services;
 using IdentityServerPersistence.SystemStores;
 using Meshmakers.Octo.Communication.Contracts.DataTransferObjects;
 using Meshmakers.Octo.Communication.Contracts.DataTransferObjects.ApiErrors;
+using Meshmakers.Octo.Runtime.Contracts;
+using Persistence.IdentityCkModel.Generated.System.Identity.v3;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Meshmakers.Octo.Backend.Authentication;
+using Meshmakers.Octo.Backend.IdentityServices.Authorization;
 
 namespace Meshmakers.Octo.Backend.IdentityServices.TenantApi.v1.Controllers;
 
 /// <summary>
 /// Manages <c>ClientCredentials</c> client mirrors — i.e. clients that have been
 /// auto-provisioned from the calling (parent) tenant into one or more child tenants
-/// because of the <c>AutoProvisionInChildTenants</c> flag.
+/// because of the <c>AutoProvisionInChildTenants</c> flag. AB#6758: the actions that name a child tenant
+/// (<c>provisionInTenant</c>, mirror secret rotation, mirror removal) only reach the caller's own tenant subtree
+/// (<see cref="AdminProvisioningTargetScopeFilter"/>, and again in the service).
 /// </summary>
 [Authorize(AuthenticationSchemes = AuthenticationConstants.BearerAuthenticationScheme)]
 [Route(IdentityServiceConstants.ApiPathPrefix + "/clients/{clientId}/mirrors")]
@@ -100,6 +105,7 @@ public class ClientMirrorController : ControllerBase
 
     // POST {tenantId}/v1/clients/{clientId}/mirrors/provisionInTenant?childTenantId=…
     [HttpPost("provisionInTenant")]
+    [TypeFilter(typeof(AdminProvisioningTargetScopeFilter))]
     [Authorize(IdentityServiceConstants.IdentityTenantAdministrationWritePolicy)]
     [EndpointSummary("Provisions this client into a single named sub-tenant. Idempotent.")]
     [ProducesResponseType(typeof(ClientMirrorProvisionResponseDto), StatusCodes.Status200OK)]
@@ -121,8 +127,15 @@ public class ClientMirrorController : ControllerBase
                 $"Client '{clientId}' is not flagged AutoProvisionInChildTenants. Set the flag first."));
         }
 
-        var result = await _mirrorService.ProvisionInTenantAsync(
-            _clientStore.TenantId, clientId, childTenantId);
+        ClientMirrorProvisioningResult result;
+        try
+        {
+            result = await _mirrorService.ProvisionInTenantAsync(_clientStore.TenantId, clientId, childTenantId);
+        }
+        catch (ClientMirrorScopeException)
+        {
+            return new ForbidResult();
+        }
 
         return Ok(new ClientMirrorProvisionResponseDto(
             result.FlaggedClientsConsidered,
@@ -153,7 +166,9 @@ public class ClientMirrorController : ControllerBase
     ///     </para>
     /// </remarks>
     [HttpPost("{childTenantId}/secret")]
-    [Authorize(IdentityServiceConstants.IdentityTenantAdministrationWritePolicy)]
+    [TypeFilter(typeof(AdminProvisioningTargetScopeFilter))]
+    // AB#5861: issuing (rotating) a mirror's secret is an API secret write -> SecretManagement (staged).
+    [Authorize(IdentityServiceConstants.IdentitySecretAdministrationPolicy)]
     [EndpointSummary("Issues a fresh tenant-specific secret for this mirror and returns it once.")]
     [ProducesResponseType(typeof(MirrorSecretResponseDto), StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(NotFoundErrorDto), StatusCodes.Status404NotFound)]
@@ -162,8 +177,15 @@ public class ClientMirrorController : ControllerBase
         [Required][Description("Client ID")] string clientId,
         [Required][Description("Sub-tenant whose mirror gets the new secret")] string childTenantId)
     {
-        var result = await _mirrorService.RotateMirrorSecretAsync(
-            _clientStore.TenantId, clientId, childTenantId);
+        MirrorSecretRotationResult? result;
+        try
+        {
+            result = await _mirrorService.RotateMirrorSecretAsync(_clientStore.TenantId, clientId, childTenantId);
+        }
+        catch (ClientMirrorScopeException)
+        {
+            return new ForbidResult();
+        }
 
         if (result == null)
         {
@@ -183,6 +205,7 @@ public class ClientMirrorController : ControllerBase
 
     // DELETE {tenantId}/v1/clients/{clientId}/mirrors/{childTenantId}
     [HttpDelete("{childTenantId}")]
+    [TypeFilter(typeof(AdminProvisioningTargetScopeFilter))]
     [Authorize(IdentityServiceConstants.IdentityTenantAdministrationWritePolicy)]
     [EndpointSummary("Manually removes the mirror of this client in a single sub-tenant.")]
     [ProducesResponseType(StatusCodes.Status204NoContent)]
@@ -191,8 +214,15 @@ public class ClientMirrorController : ControllerBase
         [Required][Description("Client ID")] string clientId,
         [Required][Description("Sub-tenant ID to remove the mirror from")] string childTenantId)
     {
-        var removed = await _mirrorService.RemoveMirrorAsync(
-            _clientStore.TenantId, clientId, childTenantId);
+        bool removed;
+        try
+        {
+            removed = await _mirrorService.RemoveMirrorAsync(_clientStore.TenantId, clientId, childTenantId);
+        }
+        catch (ClientMirrorScopeException)
+        {
+            return new ForbidResult();
+        }
 
         if (!removed)
         {
@@ -250,19 +280,30 @@ public class ClientAutoProvisionFlagController : ControllerBase
         [Required][Description("Client ID")] string clientId,
         [Required][FromBody] SetAutoProvisionInChildTenantsDto body)
     {
-        var client = await _clientStore.FindRtClientByIdAsync(clientId);
+        // MutateAsync is a version-checked read-modify-write (AB#8015) and its post-commit hook (#4044)
+        // propagates the new state to mirrors when applicable. Flipping the flag from true → false leaves
+        // existing mirrors in place; the operator removes them explicitly via DELETE mirrors/{childTenantId}
+        // or by deleting the parent client.
+        RtClient? client;
+        try
+        {
+            client = await _clientStore.MutateAsync(clientId, current =>
+            {
+                current.AutoProvisionInChildTenants = body.Enabled;
+                return true;
+            });
+        }
+        catch (RtVersionConflictException)
+        {
+            return Problem(detail: "The client was changed concurrently by other requests. Please retry.",
+                statusCode: StatusCodes.Status409Conflict);
+        }
+
         if (client == null)
         {
             return NotFound(new NotFoundErrorDto($"Client with id '{clientId}' does not exist."));
         }
 
-        client.AutoProvisionInChildTenants = body.Enabled;
-
-        // UpdateAsync's post-commit hook (#4044) propagates the new state to mirrors when
-        // applicable. Flipping the flag from true → false leaves existing mirrors in place;
-        // the operator removes them explicitly via DELETE mirrors/{childTenantId} or by
-        // deleting the parent client.
-        await _clientStore.UpdateAsync(clientId, client);
         return NoContent();
     }
 }

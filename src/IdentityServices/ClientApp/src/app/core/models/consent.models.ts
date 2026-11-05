@@ -42,6 +42,11 @@ export interface DeviceAuthorizationContext {
   apiScopes: ScopeItem[];
   confirmUserCode: boolean;
   description?: string;
+  /** Tenant the device code is bound to (AB#7959). */
+  tenantId?: string;
+  /** Signed-in account that would approve the request (AB#7959). */
+  accountUserName?: string;
+  accountEmail?: string;
 }
 
 export interface DeviceAuthorizationRequest {
@@ -51,7 +56,14 @@ export interface DeviceAuthorizationRequest {
   description?: string;
 }
 
+/**
+ * Body of POST /connect/deviceverification (written by OctoDeviceVerificationResponseHandler,
+ * always HTTP 200): `success` true when the user code was approved/denied by OpenIddict, otherwise
+ * `error` carries the OAuth error code (invalid_token = used/expired/rejected code,
+ * access_denied = denied by the user or cross-tenant access refused) and `errorMessage` the text.
+ */
 export interface DeviceAuthorizationResult {
   success: boolean;
   errorMessage?: string;
+  error?: string;
 }

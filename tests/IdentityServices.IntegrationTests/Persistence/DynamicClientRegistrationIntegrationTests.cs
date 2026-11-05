@@ -9,7 +9,7 @@ using Meshmakers.Octo.Runtime.Contracts.Repositories.Query;
 using Meshmakers.Octo.Services.Infrastructure.Services;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
-using Persistence.IdentityCkModel.Generated.System.Identity.v2;
+using Persistence.IdentityCkModel.Generated.System.Identity.v3;
 using Xunit;
 
 namespace IdentityServices.IntegrationTests.Persistence;
@@ -198,7 +198,8 @@ public class DynamicClientRegistrationIntegrationTests : IClassFixture<IdentityS
         ISystemContext systemContext, bool enabled = true, int maxClientsPerTenant = 100, int ttlDays = 90)
     {
         var mirror = new ClientMirrorProvisioningService(
-            NullLogger<ClientMirrorProvisioningService>.Instance, systemContext);
+            NullLogger<ClientMirrorProvisioningService>.Instance, systemContext,
+            NSubstitute.Substitute.For<IdentityServerPersistence.Services.ITenantDiscoveryService>());
         var options = Options.Create(new OctoIdentityServicesOptions
         {
             DynamicClientRegistration = new DynamicClientRegistrationOptions

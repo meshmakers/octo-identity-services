@@ -17,7 +17,8 @@ using Microsoft.AspNetCore.Routing;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using NSubstitute;
-using Persistence.IdentityCkModel.Generated.System.Identity.v2;
+using Persistence.IdentityCkModel.Generated.System.Identity.v3;
+using Shared.TestUtilities.Fakes;
 using Xunit;
 
 namespace IdentityServices.UnitTests.Controllers;
@@ -76,7 +77,17 @@ public class AuthApiControllerErrorContextTests
             Substitute.For<IEntraIdVerifiedIdentifierEnrollmentService>(),
             new EphemeralDataProtectionProvider(),
             Substitute.For<ICrossTenantUserProvisioningService>(),
+            Substitute.For<ICrossTenantSecondFactorVerifier>(),
+            new RegisteredTenantsShadowUserChainResolver("OctoSystem"),
+            Substitute.For<IOptionsMonitor<Microsoft.AspNetCore.Authentication.Cookies.CookieAuthenticationOptions>>(),
             Options.Create(new OctoSystemConfiguration { SystemTenantId = "OctoSystem" }),
+            Substitute.For<Meshmakers.Octo.Backend.IdentityServices.Services.IUserCredentialChangeService>(),
+            new Meshmakers.Octo.Backend.IdentityServices.Services.CrossTenantChallengeReplayGuard(
+                new Microsoft.Extensions.Caching.Memory.MemoryCache(
+                    new Microsoft.Extensions.Caching.Memory.MemoryCacheOptions())),
+
+            new Meshmakers.Octo.Backend.IdentityServices.Services.SignInRateLimiter(
+                Options.Create(new IdentityServerPersistence.Configuration.Options.OctoIdentityServicesOptions())),
             Substitute.For<ILogger<AuthApiController>>());
 
         _sut.ControllerContext = new ControllerContext

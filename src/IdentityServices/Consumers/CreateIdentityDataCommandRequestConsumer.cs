@@ -13,7 +13,7 @@ using Meshmakers.Octo.Runtime.Contracts.Repositories.Query;
 using Meshmakers.Octo.Runtime.Contracts.RepositoryEntities;
 using Meshmakers.Octo.Services.Contracts.DistributionEventHub.Commands;
 using Meshmakers.Octo.Services.Contracts.DistributionEventHub.Commands.Payloads;
-using Persistence.IdentityCkModel.Generated.System.Identity.v2;
+using Persistence.IdentityCkModel.Generated.System.Identity.v3;
 
 namespace Meshmakers.Octo.Backend.IdentityServices.Consumers;
 
@@ -244,7 +244,10 @@ public class CreateIdentityDataCommandRequestConsumer(
         else
         {
             clientRtId = existingClient.RtId;
-            await tenantRepository.ReplaceOneRtEntityByIdAsync(session, clientRtId, rtClient);
+            // AB#8054: written with the version read in this transaction, so the replace advances rtVersion (a plain
+            // replace does not) and the version checks of the other client writers - the client mirror reconciliation
+            // among them - see it. A concurrent writer surfaces as RtVersionConflictException; the message is retried.
+            await tenantRepository.ReplaceOneRtEntityByIdAsync(session, clientRtId, rtClient, existingClient.RtVersion);
         }
 
         await EnsureAssignedRolesAsync(session, tenantRepository, clientRtId, distClientDto);

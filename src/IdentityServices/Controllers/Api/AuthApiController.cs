@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Security.Claims;
 using System.Text.Json;
 using Meshmakers.Common.Shared;
@@ -8,15 +9,17 @@ using Meshmakers.Octo.Backend.Authentication;
 using Meshmakers.Octo.Backend.Authentication.Services;
 using Meshmakers.Octo.Backend.IdentityServices.OpenIddict;
 using Meshmakers.Octo.Backend.IdentityServices.OpenIddict.Interaction;
+using Meshmakers.Octo.Backend.IdentityServices.Services;
 using Meshmakers.Octo.ConstructionKit.Contracts;
 using Meshmakers.Octo.Runtime.Contracts.MongoDb.Configuration;
 using Microsoft.AspNetCore.Authentication;
+using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.DataProtection;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Options;
-using Persistence.IdentityCkModel.Generated.System.Identity.v2;
+using Persistence.IdentityCkModel.Generated.System.Identity.v3;
 
 namespace Meshmakers.Octo.Backend.IdentityServices.Controllers.Api;
 
@@ -43,12 +46,52 @@ public class AuthApiController(
     IEntraIdVerifiedIdentifierEnrollmentService entraIdVerifiedIdentifierEnrollmentService,
     IDataProtectionProvider dataProtectionProvider,
     ICrossTenantUserProvisioningService crossTenantUserProvisioningService,
+    ICrossTenantSecondFactorVerifier crossTenantSecondFactorVerifier,
+    ICrossTenantShadowUserChainResolver shadowUserChainResolver,
+    IOptionsMonitor<CookieAuthenticationOptions> cookieOptions,
     IOptions<OctoSystemConfiguration> systemConfiguration,
+    IUserCredentialChangeService userCredentialChangeService,
+    ICrossTenantChallengeReplayGuard crossTenantChallengeReplayGuard,
+    ISignInRateLimiter signInRateLimiter,
     ILogger<AuthApiController> logger)
     : ControllerBase
 {
     private string? GetSubjectId() =>
         User.FindFirstValue("sub") ?? User.FindFirstValue(ClaimTypes.NameIdentifier);
+
+    private const string TooManySignInAttemptsMessage = "Too many sign-in attempts. Please wait a minute and try again.";
+
+    /// <summary>
+    /// AB#7854: 429 for a sign-in attempt over the per-account or per-client limit. The body carries the text in
+    /// <c>message</c> (what the SPA shows for an HTTP error) and <c>errorMessage</c> (the result DTOs' field).
+    /// </summary>
+    private ObjectResult TooManySignInAttempts(string endpoint)
+    {
+        logger.LogWarning("Sign-in attempt refused by the rate limit ({Endpoint})", endpoint);
+        Response.Headers.RetryAfter = SignInAttemptLease.RetryAfterSeconds.ToString(CultureInfo.InvariantCulture);
+        return StatusCode(StatusCodes.Status429TooManyRequests, new
+        {
+            success = false,
+            errorMessage = TooManySignInAttemptsMessage,
+            message = TooManySignInAttemptsMessage
+        });
+    }
+
+    /// <summary>
+    /// AB#7854: the account a second-factor / recovery-code attempt is for — the user of the framework's two-factor
+    /// cookie, else the source user of a pending cross-tenant challenge, else none (client limit only).
+    /// </summary>
+    private async Task<string?> GetSecondFactorAccountKeyAsync()
+    {
+        var twoFactor = await HttpContext.AuthenticateAsync(IdentityConstants.TwoFactorUserIdScheme);
+        var userId = twoFactor.Principal?.FindFirstValue(ClaimTypes.Name);
+        if (!string.IsNullOrEmpty(userId))
+        {
+            return $"user:{userId}";
+        }
+
+        return ReadCrossTenantTwoFactorChallenge() is { } challenge ? $"user:{challenge.SourceUserId}" : null;
+    }
 
     /// <summary>Login success audit — log-only, matching the previous event-sink behavior.</summary>
     private void LogLoginSuccess(string? username, string? subjectId, string? displayName, string? clientId = null)
@@ -244,6 +287,21 @@ public class AuthApiController(
         return ErrorContextKinds.Generic;
     }
 
+    private const string SecondFactorSetupRequiredMessage =
+        "Your second factor must be set up again. Please contact your administrator.";
+
+    /// <summary>
+    /// AB#7830: true when the user has two-factor authentication enabled but no usable second factor.
+    /// Only an authenticator key counts: the e-mail provider is valid for ASP.NET Identity once the address is
+    /// confirmed, but its code is not delivered yet, and recovery codes only work after a challenge.
+    /// The rule fails closed.
+    /// </summary>
+    private async Task<bool> IsSecondFactorUnusableAsync(RtUser user)
+    {
+        return await userManager.GetTwoFactorEnabledAsync(user)
+               && string.IsNullOrEmpty(await userManager.GetAuthenticatorKeyAsync(user));
+    }
+
     /// <summary>
     /// Process login credentials
     /// </summary>
@@ -261,15 +319,51 @@ public class AuthApiController(
             };
         }
 
-        var result = await signInManager.PasswordSignInAsync(
-            request.Username,
-            request.Password,
-            request.RememberLogin,
-            lockoutOnFailure: true);
+        // AB#7854: one budget per user name — also for passwords of parent-tenant users tried through this tenant.
+        using var attempt = signInRateLimiter.TryAcquire($"name:{request.Username.Trim()}", HttpContext);
+        if (!attempt.IsAcquired)
+        {
+            return TooManySignInAttempts("login");
+        }
+
+        // AB#7830: a user whose second factor is switched on but who has no authenticator key (e.g. after a
+        // tenant clone, which does not export UserTokens) must never get a session with the password alone.
+        // ASP.NET Identity challenges only when a provider is valid, so PasswordSignInAsync would sign such a
+        // user in without any second factor. The password is verified without issuing a cookie first; a correct
+        // password is refused, anything else follows the normal failure path (lockout counted exactly once).
+        var candidateUser = await userManager.FindByNameAsync(request.Username);
+        Microsoft.AspNetCore.Identity.SignInResult result;
+        if (candidateUser != null && await IsSecondFactorUnusableAsync(candidateUser))
+        {
+            result = await signInManager.CheckPasswordSignInAsync(candidateUser, request.Password, lockoutOnFailure: true);
+            if (result.Succeeded)
+            {
+                await LogLoginFailureAsync(request.Username,
+                    "Second factor is enabled but no authenticator is set up; sign-in refused",
+                    clientId: context?.Client.ClientId);
+
+                return new LoginResultDto
+                {
+                    Success = false,
+                    ErrorMessage = SecondFactorSetupRequiredMessage,
+                    SecondFactorSetupRequired = true
+                };
+            }
+        }
+        else
+        {
+            result = await signInManager.PasswordSignInAsync(
+                request.Username,
+                request.Password,
+                request.RememberLogin,
+                lockoutOnFailure: true);
+        }
 
         if (result.Succeeded)
         {
-            var user = await userManager.FindByNameAsync(request.Username);
+            // AB#7861: a successful local sign-in voids a pending cross-tenant challenge of this browser.
+            DeleteCrossTenantTwoFactorChallenge();
+            var user = candidateUser ?? await userManager.FindByNameAsync(request.Username);
             LogLoginSuccess(user?.UserName, user?.RtId.ToString(), user?.UserName, clientId: context?.Client.ClientId);
 
             // Use return URL if valid, otherwise redirect to manage page
@@ -300,6 +394,9 @@ public class AuthApiController(
 
         if (result.RequiresTwoFactor)
         {
+            // A local 2FA challenge replaces any pending cross-tenant one (AB#7804).
+            DeleteCrossTenantTwoFactorChallenge();
+
             // Check what 2FA methods are available
             var twoFactorUser = await signInManager.GetTwoFactorAuthenticationUserAsync();
             var canUseTotp = twoFactorUser != null &&
@@ -324,57 +421,68 @@ public class AuthApiController(
 
         if (crossTenantResult != null)
         {
-            // Check self-registration gate for cross-tenant providers
-            var octoTenantProviders = (await identityProviderStore.GetAllAsync())
-                .OfType<RtOctoTenantIdentityProvider>()
-                .Where(p => p.IsEnabled && string.Equals(p.ParentTenantId, crossTenantResult.SourceTenantId, StringComparison.OrdinalIgnoreCase))
-                .ToList();
-
-            var octoTenantProvider = octoTenantProviders.FirstOrDefault();
-
-            // Check if this is a new user (no existing local account)
-            // Any shadow user of this person counts, whichever login path created it (AB#5708).
-            var existingCrossTenantUser =
-                await crossTenantUserProvisioningService.FindCrossTenantUserAsync(crossTenantResult);
-
-            if (existingCrossTenantUser == null && octoTenantProvider is { AllowSelfRegistration: false } &&
-                !await IsExplicitlyProvisionedAsync(crossTenantResult))
+            if (crossTenantResult.SourceUserRequiresSecondFactor)
             {
-                logger.LogWarning("Self-registration denied for cross-tenant user '{UserName}' from tenant '{SourceTenant}'",
-                    crossTenantResult.SourceUserName, crossTenantResult.SourceTenantId);
-
-                return new LoginResultDto
+                // AB#7804: the password proves only the first factor of the SOURCE user. No session in this
+                // tenant before that user's second factor is verified (login-2fa / login-2fa-email /
+                // login-recovery, against the source tenant). The self-registration gate is judged first, so a
+                // user who may not enter this tenant anyway is not asked for a code.
+                if (await CheckCrossTenantSelfRegistrationAsync(crossTenantResult) is { } denied)
                 {
-                    Success = false,
-                    ErrorMessage = "Self-registration is not allowed for this provider"
-                };
-            }
-
-            // Cross-tenant auth succeeded — create or find a local user for the session
-            var isNewUser = existingCrossTenantUser == null;
-            var localUser = await crossTenantUserProvisioningService.FindOrCreateCrossTenantUserAsync(crossTenantResult, tenantIdForCrossTenant);
-            if (localUser != null)
-            {
-                // Assign groups for newly created users
-                if (isNewUser)
-                {
-                    await loginGroupAssignmentService.AssignGroupsAsync(localUser, octoTenantProvider);
+                    return new LoginResultDto { Success = false, ErrorMessage = denied };
                 }
 
-                await signInManager.SignInAsync(localUser, request.RememberLogin);
-
-                LogLoginSuccess(localUser.UserName, localUser.RtId.ToString(), localUser.UserName, clientId: context?.Client.ClientId);
-
-                var redirectUrl = !string.IsNullOrEmpty(request.ReturnUrl) &&
-                                  (interaction.IsValidReturnUrl(request.ReturnUrl) || Url.IsLocalUrl(request.ReturnUrl))
-                    ? request.ReturnUrl
-                    : $"/{tenantIdForCrossTenant}/manage";
-
-                return new LoginResultDto
+                var options = await crossTenantSecondFactorVerifier.GetOptionsAsync(
+                    crossTenantResult.SourceTenantId, crossTenantResult.SourceUserId);
+                if (options is { CanUseAuthenticator: false })
                 {
-                    Success = true,
-                    RedirectUrl = redirectUrl
-                };
+                    // AB#7830: the source user has two-factor enabled but no authenticator key (e.g. after a tenant
+                    // clone). Only an authenticator counts as usable, so the password alone must not open a session
+                    // here either. Fails closed; recovery is an admin switching 2FA off in the source tenant.
+                    await LogLoginFailureAsync(request.Username,
+                        "Second factor is enabled but no authenticator is set up for the source user; sign-in refused",
+                        clientId: context?.Client.ClientId);
+                    return new LoginResultDto
+                    {
+                        Success = false,
+                        ErrorMessage = SecondFactorSetupRequiredMessage,
+                        SecondFactorSetupRequired = true
+                    };
+                }
+
+                if (options != null)
+                {
+                    // A pending local 2FA challenge (framework cookie) would otherwise win in login-2fa and check the
+                    // code against that local user.
+                    await HttpContext.SignOutAsync(IdentityConstants.TwoFactorUserIdScheme);
+                    IssueCrossTenantTwoFactorChallenge(crossTenantResult, tenantIdForCrossTenant, request.RememberLogin);
+                    return new LoginResultDto
+                    {
+                        Success = false,
+                        ErrorMessage = "Two-factor authentication required",
+                        RequiresTwoFactor = true,
+                        CanUseTotpAuthenticator = options.CanUseAuthenticator,
+                        CanUseEmailCode = options.CanUseEmail
+                    };
+                }
+            }
+            else
+            {
+                var signIn = await SignInCrossTenantUserAsync(crossTenantResult, tenantIdForCrossTenant,
+                    request.RememberLogin, secondFactorVerified: false, clientId: context?.Client.ClientId);
+                if (signIn.Error != null)
+                {
+                    return new LoginResultDto { Success = false, ErrorMessage = signIn.Error };
+                }
+
+                if (signIn.User != null)
+                {
+                    return new LoginResultDto
+                    {
+                        Success = true,
+                        RedirectUrl = ResolveRedirectUrl(request.ReturnUrl, tenantIdForCrossTenant)
+                    };
+                }
             }
         }
 
@@ -771,6 +879,9 @@ public class AuthApiController(
             signOutIframeUrl = $"/connect/endsession/callback?sid={Uri.EscapeDataString(sessionId ?? string.Empty)}";
         }
 
+        // AB#7861: a pending cross-tenant second-factor challenge ends with the logout, signed in or not.
+        DeleteCrossTenantTwoFactorChallenge();
+
         return new LogoutResultDto
         {
             Success = true,
@@ -874,6 +985,8 @@ public class AuthApiController(
 
         if (result.Succeeded)
         {
+            await userCredentialChangeService.OnPasswordChangedAsync(user, PasswordChangePath.TokenResetPassword,
+                null, HttpContext.RequestAborted);
             return new ResetPasswordResultDto { Success = true };
         }
 
@@ -923,9 +1036,22 @@ public class AuthApiController(
     [HttpPost("login-2fa")]
     public async Task<ActionResult<TwoFactorLoginResultDto>> LoginTwoFactor([FromBody] TwoFactorLoginRequestDto request)
     {
+        using var attempt = signInRateLimiter.TryAcquire(await GetSecondFactorAccountKeyAsync(), HttpContext);
+        if (!attempt.IsAcquired)
+        {
+            return TooManySignInAttempts("second factor");
+        }
+
         var user = await signInManager.GetTwoFactorAuthenticationUserAsync();
         if (user == null)
         {
+            if (await TryCompleteCrossTenantTwoFactorAsync(SecondFactorCodeKind.Authenticator,
+                    request.Code.Replace(" ", string.Empty).Replace("-", string.Empty), request.ReturnUrl,
+                    "Invalid authenticator code") is { } crossTenant)
+            {
+                return crossTenant;
+            }
+
             return new TwoFactorLoginResultDto
             {
                 Success = false,
@@ -982,9 +1108,22 @@ public class AuthApiController(
     [HttpPost("login-2fa-email")]
     public async Task<ActionResult<TwoFactorLoginResultDto>> LoginTwoFactorEmail([FromBody] TwoFactorEmailLoginRequestDto request)
     {
+        using var attempt = signInRateLimiter.TryAcquire(await GetSecondFactorAccountKeyAsync(), HttpContext);
+        if (!attempt.IsAcquired)
+        {
+            return TooManySignInAttempts("second factor");
+        }
+
         var user = await signInManager.GetTwoFactorAuthenticationUserAsync();
         if (user == null)
         {
+            if (await TryCompleteCrossTenantTwoFactorAsync(SecondFactorCodeKind.Email,
+                    request.Code.Replace(" ", string.Empty).Replace("-", string.Empty), request.ReturnUrl,
+                    "Invalid email verification code") is { } crossTenant)
+            {
+                return crossTenant;
+            }
+
             return new TwoFactorLoginResultDto
             {
                 Success = false,
@@ -1042,9 +1181,27 @@ public class AuthApiController(
     [HttpPost("send-2fa-email")]
     public async Task<ActionResult<SendTwoFactorEmailResultDto>> SendTwoFactorEmail()
     {
+        using var attempt = signInRateLimiter.TryAcquire(await GetSecondFactorAccountKeyAsync(), HttpContext);
+        if (!attempt.IsAcquired)
+        {
+            return TooManySignInAttempts("second factor");
+        }
+
         var user = await signInManager.GetTwoFactorAuthenticationUserAsync();
         if (user == null)
         {
+            if (ReadCrossTenantTwoFactorChallenge() is { } challenge)
+            {
+                return await crossTenantSecondFactorVerifier.GenerateEmailCodeAsync(
+                    challenge.SourceTenantId, challenge.SourceUserId)
+                    ? new SendTwoFactorEmailResultDto { Success = true }
+                    : new SendTwoFactorEmailResultDto
+                    {
+                        Success = false,
+                        ErrorMessage = "No email address associated with this account"
+                    };
+            }
+
             return new SendTwoFactorEmailResultDto
             {
                 Success = false,
@@ -1076,9 +1233,22 @@ public class AuthApiController(
     [HttpPost("login-recovery")]
     public async Task<ActionResult<TwoFactorLoginResultDto>> LoginRecovery([FromBody] RecoveryCodeLoginRequestDto request)
     {
+        using var attempt = signInRateLimiter.TryAcquire(await GetSecondFactorAccountKeyAsync(), HttpContext);
+        if (!attempt.IsAcquired)
+        {
+            return TooManySignInAttempts("second factor");
+        }
+
         var user = await signInManager.GetTwoFactorAuthenticationUserAsync();
         if (user == null)
         {
+            if (await TryCompleteCrossTenantTwoFactorAsync(SecondFactorCodeKind.RecoveryCode,
+                    request.RecoveryCode.Replace(" ", string.Empty).Replace("-", string.Empty), request.ReturnUrl,
+                    "Invalid recovery code") is { } crossTenant)
+            {
+                return crossTenant;
+            }
+
             return new TwoFactorLoginResultDto
             {
                 Success = false,
@@ -1144,6 +1314,12 @@ public class AuthApiController(
                 Success = false,
                 ErrorMessage = "Invalid authentication scheme"
             };
+        }
+
+        using var attempt = signInRateLimiter.TryAcquire($"ldap:{request.Scheme}:{request.Username.Trim()}", HttpContext);
+        if (!attempt.IsAcquired)
+        {
+            return TooManySignInAttempts("ldap-login");
         }
 
         // 2. Authenticate against LDAP
@@ -1302,6 +1478,17 @@ public class AuthApiController(
             return Forbid();
         }
 
+        // AB#7804: a user with 2FA crosses the tenant boundary only with a session that proved the second factor.
+        // 403 makes the SPA send the user to this tenant's login, where the second factor is asked.
+        var secondFactorVerified = SecondFactorEvidence.IsPresent(User.Claims);
+        if (crossTenantResult.SourceUserRequiresSecondFactor && !secondFactorVerified)
+        {
+            logger.LogWarning(
+                "Cross-tenant token refused: user '{UserId}' of tenant '{TenantId}' has two-factor authentication enabled, but the session carries no second-factor evidence",
+                userId, currentTenantId);
+            return Forbid();
+        }
+
         // Create a DataProtection-encrypted token
         var protector = dataProtectionProvider.CreateProtector(CrossTenantLoginPurpose);
         var payload = JsonSerializer.Serialize(new CrossTenantTokenPayload
@@ -1309,7 +1496,8 @@ public class AuthApiController(
             SourceTenantId = currentTenantId,
             SourceUserId = userId,
             TargetTenantId = request.TargetTenantId,
-            Timestamp = DateTimeOffset.UtcNow.ToUnixTimeSeconds()
+            Timestamp = DateTimeOffset.UtcNow.ToUnixTimeSeconds(),
+            SecondFactorVerified = secondFactorVerified
         });
         var token = protector.Protect(payload);
 
@@ -1378,64 +1566,277 @@ public class AuthApiController(
             };
         }
 
-        // Check self-registration gate for cross-tenant token login
-        var tokenOctoTenantProviders = (await identityProviderStore.GetAllAsync())
-            .OfType<RtOctoTenantIdentityProvider>()
-            .Where(p => p.IsEnabled && string.Equals(p.ParentTenantId, payload.SourceTenantId, StringComparison.OrdinalIgnoreCase))
-            .ToList();
+        // AB#7804: re-checked at redemption — 2FA may have been enabled after the token was minted, and the token
+        // only carries the evidence the source session had.
+        if (crossTenantResult.SourceUserRequiresSecondFactor && !payload.SecondFactorVerified)
+        {
+            logger.LogWarning(
+                "Cross-tenant login refused: user '{UserId}' of tenant '{TenantId}' has two-factor authentication enabled, but the token carries no second-factor evidence",
+                payload.SourceUserId, payload.SourceTenantId);
+            return new LoginResultDto
+            {
+                Success = false,
+                ErrorMessage = "Two-factor authentication is required; sign in to the parent tenant with your second factor"
+            };
+        }
 
-        var tokenOctoTenantProvider = tokenOctoTenantProviders.FirstOrDefault();
-
-        var existingTokenUser =
-            await crossTenantUserProvisioningService.FindCrossTenantUserAsync(crossTenantResult);
-
-        if (existingTokenUser == null && tokenOctoTenantProvider is { AllowSelfRegistration: false } &&
-            !await IsExplicitlyProvisionedAsync(crossTenantResult))
+        var signIn = await SignInCrossTenantUserAsync(crossTenantResult, currentTenantId, isPersistent: false,
+            secondFactorVerified: payload.SecondFactorVerified, clientId: null);
+        if (signIn.Error != null || signIn.User == null)
         {
             return new LoginResultDto
             {
                 Success = false,
-                ErrorMessage = "Self-registration is not allowed for this provider"
+                ErrorMessage = signIn.Error ?? "Failed to create local user in target tenant"
             };
-        }
-
-        // Find or create the local shadow user
-        var isNewTokenUser = existingTokenUser == null;
-        var localUser = await crossTenantUserProvisioningService.FindOrCreateCrossTenantUserAsync(crossTenantResult, currentTenantId);
-        if (localUser == null)
-        {
-            return new LoginResultDto
-            {
-                Success = false,
-                ErrorMessage = "Failed to create local user in target tenant"
-            };
-        }
-
-        // Assign groups for newly created users
-        if (isNewTokenUser)
-        {
-            await loginGroupAssignmentService.AssignGroupsAsync(localUser, tokenOctoTenantProvider);
-        }
-
-        // Sign in
-        await signInManager.SignInAsync(localUser, isPersistent: false);
-
-        LogLoginSuccess(localUser.UserName, localUser.RtId.ToString(), localUser.UserName, clientId: null);
-
-        // Compute redirect URL
-        var redirectUrl = request.ReturnUrl;
-        if (string.IsNullOrEmpty(redirectUrl) ||
-            !(interaction.IsValidReturnUrl(redirectUrl) || Url.IsLocalUrl(redirectUrl)))
-        {
-            redirectUrl = $"/{currentTenantId}/manage";
         }
 
         return new LoginResultDto
         {
             Success = true,
-            RedirectUrl = redirectUrl
+            RedirectUrl = ResolveRedirectUrl(request.ReturnUrl, currentTenantId)
         };
     }
+
+    #region Cross-tenant sign-in helpers (AB#7804, AB#7815)
+
+    private const string CrossTenantTwoFactorPurpose = "CrossTenantTwoFactorChallenge";
+    private const string CrossTenantTwoFactorCookieName = ".AspNetCore.Octo.CrossTenantTwoFactor";
+
+    /// <summary>Same lifetime as the framework's two-factor user cookie.</summary>
+    private static readonly TimeSpan CrossTenantTwoFactorLifetime = TimeSpan.FromMinutes(5);
+
+    private string ResolveRedirectUrl(string? returnUrl, string tenantId)
+        => !string.IsNullOrEmpty(returnUrl) && (interaction.IsValidReturnUrl(returnUrl) || Url.IsLocalUrl(returnUrl))
+            ? returnUrl
+            : $"/{tenantId}/manage";
+
+    /// <summary>
+    /// Self-registration gate of the cross-tenant providers (AB#5015): <c>null</c> when the person may enter, else
+    /// the denial message. Any shadow user of this person counts, whichever login path created it (AB#5708).
+    /// </summary>
+    private async Task<string?> CheckCrossTenantSelfRegistrationAsync(CrossTenantAuthResult crossTenantResult)
+    {
+        var provider = await FindOctoTenantProviderAsync(crossTenantResult.SourceTenantId);
+        var existing = await crossTenantUserProvisioningService.FindCrossTenantUserAsync(crossTenantResult);
+        if (existing == null && provider is { AllowSelfRegistration: false } &&
+            !await IsExplicitlyProvisionedAsync(crossTenantResult))
+        {
+            logger.LogWarning("Self-registration denied for cross-tenant user '{UserName}' from tenant '{SourceTenant}'",
+                crossTenantResult.SourceUserName, crossTenantResult.SourceTenantId);
+            return "Self-registration is not allowed for this provider";
+        }
+
+        return null;
+    }
+
+    private async Task<RtOctoTenantIdentityProvider?> FindOctoTenantProviderAsync(string sourceTenantId)
+        => (await identityProviderStore.GetAllAsync())
+            .OfType<RtOctoTenantIdentityProvider>()
+            .FirstOrDefault(p => p.IsEnabled &&
+                                 string.Equals(p.ParentTenantId, sourceTenantId, StringComparison.OrdinalIgnoreCase));
+
+    /// <summary>
+    /// Creates the session in this tenant for a cross-tenant user whose credentials (and, where required, second
+    /// factor) were verified: self-registration gate, shadow user, first-login groups, sign-in.
+    /// </summary>
+    private async Task<(RtUser? User, string? Error)> SignInCrossTenantUserAsync(
+        CrossTenantAuthResult crossTenantResult, string tenantId, bool isPersistent, bool secondFactorVerified,
+        string? clientId)
+    {
+        if (await CheckCrossTenantSelfRegistrationAsync(crossTenantResult) is { } denied)
+        {
+            return (null, denied);
+        }
+
+        var isNewUser = await crossTenantUserProvisioningService.FindCrossTenantUserAsync(crossTenantResult) == null;
+        var localUser = await crossTenantUserProvisioningService.FindOrCreateCrossTenantUserAsync(crossTenantResult, tenantId);
+        if (localUser == null)
+        {
+            return (null, null);
+        }
+
+        if (isNewUser)
+        {
+            await loginGroupAssignmentService.AssignGroupsAsync(localUser,
+                await FindOctoTenantProviderAsync(crossTenantResult.SourceTenantId));
+        }
+
+        await SignInWithEvidenceAsync(localUser, isPersistent, secondFactorVerified);
+        LogLoginSuccess(localUser.UserName, localUser.RtId.ToString(), localUser.UserName, clientId);
+        return (localUser, null);
+    }
+
+    /// <summary>
+    /// Signs the user in; with verified second-factor evidence the session carries <c>amr=mfa</c>, which
+    /// <c>AuthorizeController</c> copies into tokens — so the next hop (grandchild tenant, token exchange) sees it.
+    /// </summary>
+    private Task SignInWithEvidenceAsync(RtUser user, bool isPersistent, bool secondFactorVerified)
+        => secondFactorVerified
+            ? signInManager.SignInWithClaimsAsync(user, isPersistent, [SecondFactorEvidence.CreateClaim()])
+            : signInManager.SignInAsync(user, isPersistent);
+
+    private void IssueCrossTenantTwoFactorChallenge(CrossTenantAuthResult crossTenantResult, string targetTenantId,
+        bool rememberLogin)
+    {
+        var protector = dataProtectionProvider.CreateProtector(CrossTenantTwoFactorPurpose).ToTimeLimitedDataProtector();
+        var value = protector.Protect(JsonSerializer.Serialize(new CrossTenantTwoFactorChallenge
+        {
+            SourceTenantId = crossTenantResult.SourceTenantId,
+            SourceUserId = crossTenantResult.SourceUserId,
+            TargetTenantId = targetTenantId,
+            RememberLogin = rememberLogin,
+            // AB#7861: single use — the nonce is marked used when the challenge completes or is cancelled.
+            Nonce = Guid.NewGuid().ToString("N")
+        }), CrossTenantTwoFactorLifetime);
+
+        // Same cookie policy (secure, http-only, same-site, path) as the framework's own two-factor user cookie.
+        var options = cookieOptions.Get(IdentityConstants.TwoFactorUserIdScheme).Cookie.Build(HttpContext);
+        options.MaxAge = CrossTenantTwoFactorLifetime;
+        options.Expires = null;
+        options.IsEssential = true;
+        Response.Cookies.Append(CrossTenantTwoFactorCookieName, value, options);
+    }
+
+    /// <summary>The pending challenge for THIS tenant, or <c>null</c> (none, expired, tampered, other tenant).</summary>
+    private CrossTenantTwoFactorChallenge? ReadCrossTenantTwoFactorChallenge()
+    {
+        var value = Request.Cookies[CrossTenantTwoFactorCookieName];
+        if (string.IsNullOrEmpty(value))
+        {
+            return null;
+        }
+
+        try
+        {
+            var protector = dataProtectionProvider.CreateProtector(CrossTenantTwoFactorPurpose).ToTimeLimitedDataProtector();
+            var challenge = JsonSerializer.Deserialize<CrossTenantTwoFactorChallenge>(protector.Unprotect(value));
+            var tenantId = RouteData.Values["tenantId"]?.ToString() ?? "System";
+            if (challenge == null ||
+                !string.Equals(challenge.TargetTenantId, tenantId, StringComparison.OrdinalIgnoreCase))
+            {
+                return null;
+            }
+
+            // AB#7861: a challenge without a nonce (issued before single use) or one already completed / cancelled is
+            // void, even if the browser — or a copy — still presents the cookie.
+            if (string.IsNullOrEmpty(challenge.Nonce) || crossTenantChallengeReplayGuard.IsUsed(challenge.Nonce))
+            {
+                logger.LogInformation("Cross-tenant two-factor challenge rejected: already used");
+                return null;
+            }
+
+            return challenge;
+        }
+        catch (Exception ex) when (ex is System.Security.Cryptography.CryptographicException or JsonException)
+        {
+            logger.LogInformation("Cross-tenant two-factor challenge rejected: {Reason}", ex.GetType().Name);
+            return null;
+        }
+    }
+
+    private void DeleteCrossTenantTwoFactorChallenge()
+    {
+        if (Request.Cookies.ContainsKey(CrossTenantTwoFactorCookieName))
+        {
+            // AB#7861: void the challenge itself, not only the browser's copy of it.
+            if (ReadCrossTenantTwoFactorChallenge() is { } challenge)
+            {
+                crossTenantChallengeReplayGuard.MarkUsed(challenge.Nonce, CrossTenantTwoFactorLifetime);
+            }
+
+            Response.Cookies.Delete(CrossTenantTwoFactorCookieName,
+                cookieOptions.Get(IdentityConstants.TwoFactorUserIdScheme).Cookie.Build(HttpContext));
+        }
+    }
+
+    /// <summary>
+    /// Completes a pending cross-tenant sign-in with the SOURCE user's second factor. <c>null</c> when no challenge
+    /// is pending for this tenant (the caller answers "session expired" as before).
+    /// </summary>
+    private async Task<TwoFactorLoginResultDto?> TryCompleteCrossTenantTwoFactorAsync(
+        SecondFactorCodeKind kind, string code, string? returnUrl, string invalidCodeMessage)
+    {
+        var challenge = ReadCrossTenantTwoFactorChallenge();
+        if (challenge == null)
+        {
+            return null;
+        }
+
+        var status = await crossTenantSecondFactorVerifier.VerifyAsync(
+            challenge.SourceTenantId, challenge.SourceUserId, kind, code);
+        switch (status)
+        {
+            case SecondFactorVerificationStatus.Invalid:
+                await LogLoginFailureAsync(challenge.SourceUserId, $"Invalid cross-tenant two-factor code ({kind})");
+                return new TwoFactorLoginResultDto { Success = false, ErrorMessage = invalidCodeMessage };
+
+            case SecondFactorVerificationStatus.LockedOut:
+                DeleteCrossTenantTwoFactorChallenge();
+                await LogLoginFailureAsync(challenge.SourceUserId, "Account locked out (cross-tenant second factor)");
+                return new TwoFactorLoginResultDto { Success = false, ErrorMessage = "Account is locked out" };
+
+            case SecondFactorVerificationStatus.Unavailable:
+                DeleteCrossTenantTwoFactorChallenge();
+                return new TwoFactorLoginResultDto
+                {
+                    Success = false,
+                    ErrorMessage = "Two-factor authentication session expired. Please login again."
+                };
+        }
+
+        // Verified. Re-validate ancestry and the source user before the session is created.
+        DeleteCrossTenantTwoFactorChallenge();
+        var crossTenantResult = await crossTenantAuthService.ValidateCrossTenantAccessAsync(
+            challenge.TargetTenantId, challenge.SourceTenantId, challenge.SourceUserId);
+        var signIn = crossTenantResult == null
+            ? (User: null, Error: "Cross-tenant access denied")
+            : await SignInCrossTenantUserAsync(crossTenantResult, challenge.TargetTenantId, challenge.RememberLogin,
+                secondFactorVerified: true, clientId: null);
+        if (signIn.User == null)
+        {
+            return new TwoFactorLoginResultDto
+            {
+                Success = false,
+                ErrorMessage = signIn.Error ?? "Failed to create local user in target tenant"
+            };
+        }
+
+        return new TwoFactorLoginResultDto
+        {
+            Success = true,
+            RedirectUrl = ResolveRedirectUrl(returnUrl, challenge.TargetTenantId)
+        };
+    }
+
+    /// <summary>
+    /// AB#7815: the caller's own identity in <paramref name="sourceTenantId" /> — the tier of the signed-in user's
+    /// <c>xt_</c> name chain that lives there, resolved to its user id. <c>null</c> when the caller has no identity
+    /// there (a local user, or a chain that does not pass through that tenant).
+    /// </summary>
+    private async Task<(string TenantId, string UserId)?> ResolveCallerSourceIdentityAsync(RtUser caller,
+        string sourceTenantId)
+    {
+        if (string.IsNullOrEmpty(sourceTenantId))
+        {
+            return null;
+        }
+
+        foreach (var (tenantId, userName) in await shadowUserChainResolver.GetSourceChainAsync(caller.UserName))
+        {
+            if (!string.Equals(tenantId, sourceTenantId, StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            var userId = await crossTenantAuthService.FindUserIdByNameInTenantAsync(tenantId, userName);
+            return userId == null ? null : (tenantId, userId);
+        }
+
+        return null;
+    }
+
+    #endregion
 
     /// <summary>
     /// An ExternalTenantUserMapping created by an admin (e.g. via provisionCurrentUser) is explicit
@@ -1497,11 +1898,31 @@ public class AuthApiController(
             return Unauthorized();
         }
 
-        var sourceTenantId = request.SourceTenantId;
-        var sourceUserId = request.SourceUserId ?? currentUserId;
+        // AB#7815: the source identity is the caller's OWN, proven by the session — a tier of the signed-in user's
+        // xt_ name chain — never the request body's. The body may only name the tier (tenant) and, optionally,
+        // repeat the user id of that tier; any other user id is refused.
+        var caller = await userManager.FindByIdAsync(currentUserId);
+        var source = caller == null
+            ? null
+            : await ResolveCallerSourceIdentityAsync(caller, request.SourceTenantId);
+        if (source == null ||
+            (!string.IsNullOrEmpty(request.SourceUserId) &&
+             !string.Equals(request.SourceUserId, source.Value.UserId, StringComparison.Ordinal)))
+        {
+            logger.LogWarning(
+                "Tenant switch denied: caller '{CallerId}' in tenant '{TargetTenantId}' named source '{SourceUserId}' of tenant '{SourceTenantId}', which is not the caller's own identity",
+                currentUserId, targetTenantId, request.SourceUserId ?? "(none)", request.SourceTenantId);
+            await auditService.StoreFailureAsync("Tenant Switch Failure",
+                $"Caller '{currentUserId}' (tenant '{targetTenantId}') named source user '{request.SourceUserId ?? "(none)"}' of tenant '{request.SourceTenantId}': not the caller's own identity");
+            return new TenantSwitchResultDto
+            {
+                Success = false,
+                ErrorMessage = "Access to target tenant denied"
+            };
+        }
 
         var crossTenantResult = await crossTenantAuthService.ValidateCrossTenantAccessAsync(
-            targetTenantId, sourceTenantId, sourceUserId);
+            targetTenantId, source.Value.TenantId, source.Value.UserId);
 
         if (crossTenantResult == null)
         {
@@ -1509,6 +1930,17 @@ public class AuthApiController(
             {
                 Success = false,
                 ErrorMessage = "Access to target tenant denied"
+            };
+        }
+
+        // AB#7804: the session must carry the second-factor evidence when the source user has 2FA.
+        var secondFactorVerified = SecondFactorEvidence.IsPresent(User.Claims);
+        if (crossTenantResult.SourceUserRequiresSecondFactor && !secondFactorVerified)
+        {
+            return new TenantSwitchResultDto
+            {
+                Success = false,
+                ErrorMessage = "Two-factor authentication required"
             };
         }
 
@@ -1523,8 +1955,8 @@ public class AuthApiController(
             };
         }
 
-        // Sign in as the local user
-        await signInManager.SignInAsync(localUser, isPersistent: false);
+        // Sign in as the local user; the second-factor evidence goes with it
+        await SignInWithEvidenceAsync(localUser, isPersistent: false, secondFactorVerified);
 
         // Get the roles for the response
         var roles = await userManager.GetRolesAsync(localUser);
@@ -1622,6 +2054,9 @@ public record LoginResultDto
     public bool RequiresTwoFactor { get; init; }
     public bool CanUseTotpAuthenticator { get; init; }
     public bool CanUseEmailCode { get; init; }
+
+    /// <summary>The password was correct, but the second factor is enabled without a usable authenticator (AB#7830).</summary>
+    public bool SecondFactorSetupRequired { get; init; }
 }
 
 public record ExternalProviderDto
@@ -1780,6 +2215,24 @@ internal record CrossTenantTokenPayload
     public string SourceUserId { get; init; } = string.Empty;
     public string TargetTenantId { get; init; } = string.Empty;
     public long Timestamp { get; init; }
+
+    /// <summary>The source session carried <c>amr=mfa</c> when the token was minted (AB#7804).</summary>
+    public bool SecondFactorVerified { get; init; }
+}
+
+/// <summary>
+/// Pending cross-tenant second-factor challenge (AB#7804): the source user passed the password check, the session in
+/// the target tenant is created only after the second factor. Data-protected, short-lived, bound to the target tenant.
+/// </summary>
+internal record CrossTenantTwoFactorChallenge
+{
+    public string SourceTenantId { get; init; } = string.Empty;
+    public string SourceUserId { get; init; } = string.Empty;
+    public string TargetTenantId { get; init; } = string.Empty;
+    public bool RememberLogin { get; init; }
+
+    /// <summary>AB#7861: identifies the challenge for the single-use check.</summary>
+    public string Nonce { get; init; } = string.Empty;
 }
 
 public record AccessibleTenantDto

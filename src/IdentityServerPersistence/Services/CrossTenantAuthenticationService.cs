@@ -2,7 +2,8 @@ using IdentityServerPersistence.SystemStores;
 using Meshmakers.Octo.Runtime.Contracts.Repositories.Query;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.Extensions.Logging;
-using Persistence.IdentityCkModel.Generated.System.Identity.v2;
+using Microsoft.Extensions.Options;
+using Persistence.IdentityCkModel.Generated.System.Identity.v3;
 
 namespace IdentityServerPersistence.Services;
 
@@ -10,6 +11,8 @@ public class CrossTenantAuthenticationService(
     ITenantRegistry tenantRegistry,
     IOctoIdentityProviderStore identityProviderStore,
     IPasswordHasher<RtUser> passwordHasher,
+    ICrossTenantShadowUserChainResolver shadowUserChainResolver,
+    IOptions<IdentityOptions> identityOptions,
     ILogger<CrossTenantAuthenticationService> logger) : ICrossTenantAuthenticationService
 {
     private const int MaxHierarchyDepth = 10;
@@ -81,6 +84,16 @@ public class CrossTenantAuthenticationService(
             return null;
         }
 
+        // AB#7855: a locked-out or not-allowed ("disabled") identity crosses no tenant boundary, whatever session or
+        // token it still holds — checked on every crossing, for the source user and each tier of its xt_ chain.
+        if (await FindSignInBlockAsync(user) is { } block)
+        {
+            logger.LogWarning(
+                "Tenant switch denied: user '{UserId}' of tenant '{TenantId}' may not sign in ({Reason})",
+                sourceUserId, sourceTenantId, block);
+            return null;
+        }
+
         return new CrossTenantAuthResult
         {
             SourceTenantId = sourceTenantId,
@@ -88,8 +101,66 @@ public class CrossTenantAuthenticationService(
             SourceUserName = user.UserName ?? string.Empty,
             FirstName = user.FirstName,
             LastName = user.LastName,
-            Email = user.Email
+            Email = user.Email,
+            SourceUserRequiresSecondFactor = await RequiresSecondFactorAsync(user)
         };
+    }
+
+    /// <summary>
+    ///     AB#7855: why <paramref name="user" /> may not cross a tenant boundary, or <c>null</c> when it may. Blocked are a
+    ///     locked-out identity and one the sign-in rules refuse (<see cref="IdentityOptions.SignIn" />: confirmed e-mail /
+    ///     phone / account — the same rules <c>SignInManager.CanSignInAsync</c> applies on the token endpoint; RtUser has
+    ///     no separate "disabled" flag). A shadow user (<c>xt_…</c>) is judged with every tier of its name chain: locking
+    ///     the home user stops its shadows too. A tier the resolver does not unwind, whose user no longer exists or whose
+    ///     tenant cannot be read adds nothing (an unreadable tier already requires the second factor).
+    /// </summary>
+    private async Task<string?> FindSignInBlockAsync(RtUser user)
+    {
+        if (GetSignInBlock(user) is { } own)
+        {
+            return own;
+        }
+
+        foreach (var (tenantId, userName) in await shadowUserChainResolver.GetSourceChainAsync(user.UserName))
+        {
+            // A tier that cannot be read blocks nothing here: the second-factor rule already fails closed for it
+            // (RequiresSecondFactorAsync), and refusing every crossing on a transient read error would lock out users
+            // that are not locked.
+            var (tierUser, _) = await LookupUserByNameInTenantAsync(tenantId, userName);
+            if (tierUser != null && GetSignInBlock(tierUser) is { } tier)
+            {
+                return $"chain tier '{userName}' in tenant '{tenantId}': {tier}";
+            }
+        }
+
+        return null;
+    }
+
+    private string? GetSignInBlock(RtUser user)
+    {
+        if (IsLockedOut(user))
+        {
+            return "locked out";
+        }
+
+        var signIn = identityOptions.Value.SignIn;
+        if (signIn.RequireConfirmedEmail && !user.EmailConfirmed)
+        {
+            return "e-mail not confirmed";
+        }
+
+        if (signIn.RequireConfirmedPhoneNumber && !user.PhoneNumberConfirmed)
+        {
+            return "phone number not confirmed";
+        }
+
+        // DefaultUserConfirmation: an account is confirmed when its e-mail is.
+        if (signIn.RequireConfirmedAccount && !user.EmailConfirmed)
+        {
+            return "account not confirmed";
+        }
+
+        return null;
     }
 
     private async Task<CrossTenantAuthResult?> TryAuthenticateInHierarchyAsync(
@@ -116,25 +187,28 @@ public class CrossTenantAuthenticationService(
         var user = await FindUserByNameInTenantAsync(tenantId, username);
         if (user != null)
         {
-            // Validate password
-            var verifyResult = passwordHasher.VerifyHashedPassword(
-                user, user.PasswordHash ?? string.Empty, password);
-
-            if (verifyResult != PasswordVerificationResult.Failed)
+            if (IsLockedOut(user))
             {
-                // Check if the user is locked out
-                if (user.LockoutEnabled && user.LockoutEnd.HasValue &&
-                    user.LockoutEnd.Value > DateTimeOffset.UtcNow)
-                {
-                    logger.LogInformation(
-                        "Cross-tenant auth: user '{UserName}' in tenant '{TenantId}' is locked out",
-                        username, tenantId);
-                    return null;
-                }
-
+                // AB#7854: a locked-out identity is not even verified — no guessing while locked, also not through
+                // a child tenant. The walk goes on to the parents, as for a wrong password.
+                logger.LogInformation(
+                    "Cross-tenant auth: user '{UserName}' in tenant '{TenantId}' is locked out",
+                    username, tenantId);
+            }
+            else if (passwordHasher.VerifyHashedPassword(user, user.PasswordHash ?? string.Empty, password)
+                     != PasswordVerificationResult.Failed)
+            {
                 logger.LogInformation(
                     "Cross-tenant auth succeeded: user '{UserName}' found in tenant '{TenantId}'",
                     username, tenantId);
+
+                var requiresSecondFactor = await RequiresSecondFactorAsync(user);
+                if (!user.TwoFactorEnabled)
+                {
+                    // Same rule as SignInManager: a correct password resets the counter only when no second factor
+                    // follows; otherwise the verified second factor resets it.
+                    await ResetAccessFailuresAsync(tenantId, user);
+                }
 
                 return new CrossTenantAuthResult
                 {
@@ -143,8 +217,15 @@ public class CrossTenantAuthenticationService(
                     SourceUserName = user.UserName ?? username,
                     FirstName = user.FirstName,
                     LastName = user.LastName,
-                    Email = user.Email
+                    Email = user.Email,
+                    SourceUserRequiresSecondFactor = requiresSecondFactor
                 };
+            }
+            else
+            {
+                // AB#7854: a wrong password counts against the identity it was tried on — the parent-tenant user —
+                // exactly like a wrong password on that tenant's own login.
+                await RecordAccessFailureAsync(tenantId, user);
             }
         }
 
@@ -166,6 +247,114 @@ public class CrossTenantAuthenticationService(
         }
 
         return null;
+    }
+
+    private static bool IsLockedOut(RtUser user)
+        => user.LockoutEnabled && user.LockoutEnd.HasValue && user.LockoutEnd.Value > DateTimeOffset.UtcNow;
+
+    private async Task RecordAccessFailureAsync(string tenantId, RtUser user)
+    {
+        try
+        {
+            var repository = await tenantRegistry.TryGetRepositoryAsync(tenantId);
+            if (repository == null)
+            {
+                return;
+            }
+
+            var lockout = identityOptions.Value.Lockout;
+            var (_, lockedOut) = await OctoUserStore.RecordAccessFailureAsync(repository, user.RtId,
+                lockout.MaxFailedAccessAttempts, lockout.DefaultLockoutTimeSpan);
+            if (lockedOut)
+            {
+                logger.LogWarning(
+                    "Cross-tenant auth: user '{UserName}' in tenant '{TenantId}' is locked out after failed attempts",
+                    user.UserName, tenantId);
+            }
+        }
+        catch (Exception ex)
+        {
+            // The attempt is refused either way; a counting failure is logged, never turned into a success.
+            logger.LogWarning(ex,
+                "Cross-tenant auth: failed attempt of user '{UserName}' in tenant '{TenantId}' could not be counted",
+                user.UserName, tenantId);
+        }
+    }
+
+    private async Task ResetAccessFailuresAsync(string tenantId, RtUser user)
+    {
+        if (user.AccessFailedCount == 0)
+        {
+            return;
+        }
+
+        try
+        {
+            var repository = await tenantRegistry.TryGetRepositoryAsync(tenantId);
+            if (repository != null)
+            {
+                await OctoUserStore.ResetAccessFailedCountAsync(repository, user.RtId);
+            }
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex,
+                "Cross-tenant auth: failure count of user '{UserName}' in tenant '{TenantId}' could not be reset",
+                user.UserName, tenantId);
+        }
+    }
+
+    /// <summary>
+    ///     AB#7804: the source user needs a second factor when it has 2FA enabled itself, or — for a shadow user
+    ///     (<c>xt_…</c>) — when any identity of its name chain has. A shadow user never has 2FA of its own (it signs in
+    ///     through its home tenant), so judging only the immediate user would let every hop beyond the first skip the
+    ///     home user's second factor.
+    /// </summary>
+    /// <remarks>
+    ///     AB#7861 (review finding 6): every gap in the chain fails closed — the second factor is then required. A gap is
+    ///     a tier whose tenant cannot be read, a tier whose user no longer exists (root user renamed or deleted), and a
+    ///     chain the resolver cannot unwind to a local user (deleted tenant, ambiguous tenant prefix): the identity whose
+    ///     second factor would decide is unknown, so the safe answer is "required". Before, such tiers added nothing.
+    /// </remarks>
+    private async Task<bool> RequiresSecondFactorAsync(RtUser user)
+    {
+        if (user.TwoFactorEnabled)
+        {
+            return true;
+        }
+
+        if (!CrossTenantShadowUserName.IsShadowUserName(user.UserName))
+        {
+            return false;
+        }
+
+        var chain = await shadowUserChainResolver.GetSourceChainAsync(user.UserName);
+        if (chain.Count == 0 || CrossTenantShadowUserName.IsShadowUserName(chain[^1].UserName))
+        {
+            logger.LogWarning(
+                "Second-factor requirement of '{UserName}' assumed: its shadow-user chain cannot be unwound to a home user",
+                user.UserName);
+            return true;
+        }
+
+        foreach (var (tenantId, userName) in chain)
+        {
+            var (tierUser, failed) = await LookupUserByNameInTenantAsync(tenantId, userName);
+            if (failed || tierUser == null)
+            {
+                logger.LogWarning(
+                    "Second-factor requirement of '{UserName}' assumed: chain tier '{TierUserName}' in tenant '{TenantId}' {Reason}",
+                    user.UserName, userName, tenantId, failed ? "could not be read" : "does not exist");
+                return true;
+            }
+
+            if (tierUser.TwoFactorEnabled)
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /// <summary>
@@ -234,6 +423,14 @@ public class CrossTenantAuthenticationService(
     }
 
     private async Task<RtUser?> FindUserByNameInTenantAsync(string tenantId, string username)
+        => (await LookupUserByNameInTenantAsync(tenantId, username)).User;
+
+    /// <summary>
+    ///     User lookup that tells "not found" (<c>Failed=false, User=null</c>) apart from "could not be read"
+    ///     (<c>Failed=true</c>: tenant missing from the registry, query error). Callers that must fail closed on an
+    ///     unreadable tenant (the second-factor requirement, AB#7804) need the difference.
+    /// </summary>
+    private async Task<(RtUser? User, bool Failed)> LookupUserByNameInTenantAsync(string tenantId, string username)
     {
         try
         {
@@ -241,7 +438,7 @@ public class CrossTenantAuthenticationService(
             if (tenantRepository == null)
             {
                 LogUnregisteredTenant(tenantId);
-                return null;
+                return (null, true);
             }
 
             using var session = await tenantRepository.GetSessionAsync();
@@ -254,14 +451,14 @@ public class CrossTenantAuthenticationService(
             var result = await tenantRepository.GetRtEntitiesByTypeAsync<RtUser>(session, queryOptions);
             await session.CommitTransactionAsync();
 
-            return result.Items.SingleOrDefault();
+            return (result.Items.SingleOrDefault(), false);
         }
         catch (Exception ex)
         {
             logger.LogWarning(ex,
                 "Failed to query user '{UserName}' in tenant '{TenantId}'",
                 username, tenantId);
-            return null;
+            return (null, true);
         }
     }
 

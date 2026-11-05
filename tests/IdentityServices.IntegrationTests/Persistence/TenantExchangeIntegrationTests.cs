@@ -1,8 +1,10 @@
 using FluentAssertions;
+using IdentityServerPersistence;
 using IdentityServerPersistence.Configuration.Options;
 using IdentityServerPersistence.Services;
 using IdentityServerPersistence.SystemStores;
 using IdentityServices.IntegrationTests.Fixtures;
+using Meshmakers.Octo.Communication.Contracts;
 using Meshmakers.Octo.ConstructionKit.Contracts;
 using Meshmakers.Octo.Runtime.Contracts;
 using Meshmakers.Octo.Runtime.Contracts.MongoDb;
@@ -11,6 +13,7 @@ using Meshmakers.Octo.Runtime.Contracts.Repositories.Query;
 using Meshmakers.Octo.Runtime.Contracts.RepositoryEntities;
 using Meshmakers.Octo.Services.Infrastructure.Services;
 using Meshmakers.Octo.Backend.IdentityServices.OpenIddict;
+using Meshmakers.Octo.Backend.IdentityServices.TenantApi.v1.Controllers;
 using Meshmakers.Octo.Services.Infrastructure;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Identity;
@@ -18,7 +21,7 @@ using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using NSubstitute;
 using OpenIddict.Server;
-using Persistence.IdentityCkModel.Generated.System.Identity.v2;
+using Persistence.IdentityCkModel.Generated.System.Identity.v3;
 using Xunit;
 
 namespace IdentityServices.IntegrationTests.Persistence;
@@ -159,6 +162,142 @@ public class TenantExchangeIntegrationTests : IClassFixture<IdentityServicesFixt
     }
 
     /// <summary>
+    ///     AB#6839 (decision Gerald 2026-10-17): ancestry is not authority. A root-tenant user who holds roles
+    ///     in A but has no mapping, group or direct role in child B is refused at the exchange with
+    ///     <c>access_denied</c> and the stable <see cref="TenantExchangeProcessor.NotProvisionedMarker" />;
+    ///     no token (and so no implicit admin role) comes out of it.
+    /// </summary>
+    [Fact]
+    public async Task Exchange_AncestorUserWithoutProvisioning_IsRefusedWithAStableSignal()
+    {
+        await _fixture.InitializeAsync();
+        await EnsureSystemSetupAsync();
+
+        var systemContext = _fixture.GetSystemContext();
+        var parentTenantId = systemContext.TenantId;
+        var (operatorId, _) = await CreateUserAsync(systemContext, parentTenantId, "op-unprov");
+        var rootRole = await CreateRoleAsync(systemContext, parentTenantId, NewId("rootAdmin"));
+        await AssignRoleToUserAsync(systemContext, parentTenantId, operatorId, rootRole);
+        var childTenantId = await CreateChildWithParentProviderAsync(parentTenantId);
+
+        var outcome = await (await CreateExchangeProcessorAsync(systemContext, childTenantId))
+            .ExchangeAsync(parentTenantId, operatorId.ToString(), childTenantId, subjectHasSecondFactor: false);
+
+        outcome.ShadowUser.Should().BeNull("no token may be minted for an unprovisioned ancestor user");
+        outcome.Error.Should().Be("access_denied");
+        outcome.ErrorDescription.Should().StartWith(TenantExchangeProcessor.NotProvisionedMarker);
+        outcome.ErrorDescription.Should().Contain(childTenantId);
+    }
+
+    /// <summary>
+    ///     The first exchange of an unprovisioned user leaves a shadow user behind (and, since AB#7088, no mapping).
+    ///     Neither is a grant: the next exchange is refused the same way.
+    /// </summary>
+    [Fact]
+    public async Task Exchange_RepeatedAfterEmptyMappingWasAutoCreated_StaysRefused()
+    {
+        await _fixture.InitializeAsync();
+        await EnsureSystemSetupAsync();
+
+        var systemContext = _fixture.GetSystemContext();
+        var parentTenantId = systemContext.TenantId;
+        var (operatorId, _) = await CreateUserAsync(systemContext, parentTenantId, "op-repeat");
+        var childTenantId = await CreateChildWithParentProviderAsync(parentTenantId);
+        var processor = await CreateExchangeProcessorAsync(systemContext, childTenantId);
+
+        var first = await processor.ExchangeAsync(parentTenantId, operatorId.ToString(), childTenantId, subjectHasSecondFactor: false);
+        var second = await processor.ExchangeAsync(parentTenantId, operatorId.ToString(), childTenantId, subjectHasSecondFactor: false);
+
+        first.Error.Should().Be("access_denied");
+        second.Error.Should().Be("access_denied", "the left-over shadow user carries no role");
+        second.ErrorDescription.Should().StartWith(TenantExchangeProcessor.NotProvisionedMarker);
+    }
+
+    /// <summary>
+    ///     The explicit-provisioning positive case (what <c>ProvisionCurrentUser -ttid</c> creates: a mapping
+    ///     with roles): the exchange succeeds on the B-shadow user and its roles are exactly the mapped ones.
+    /// </summary>
+    [Fact]
+    public async Task Exchange_ProvisionedOperator_GetsExactlyTheMappedRoles()
+    {
+        await _fixture.InitializeAsync();
+        await EnsureSystemSetupAsync();
+
+        var systemContext = _fixture.GetSystemContext();
+        var parentTenantId = systemContext.TenantId;
+        var (operatorId, operatorName) = await CreateUserAsync(systemContext, parentTenantId, "op-prov");
+        var rootRole = await CreateRoleAsync(systemContext, parentTenantId, NewId("rootAdmin"));
+        await AssignRoleToUserAsync(systemContext, parentTenantId, operatorId, rootRole);
+        var childTenantId = await CreateChildWithParentProviderAsync(parentTenantId);
+        var mapped = await CreateRoleAsync(systemContext, childTenantId, NewId("mapped"));
+        await CreateRoleAsync(systemContext, childTenantId, NewId("unmapped"));
+        await CreateMappingAsync(systemContext, childTenantId, parentTenantId, operatorId, operatorName,
+            mappedRoleIds: [mapped.ToString()]);
+        var childRepo = (await systemContext.TryFindTenantRepositoryAsync(childTenantId))!;
+
+        var outcome = await (await CreateExchangeProcessorAsync(systemContext, childTenantId))
+            .ExchangeAsync(parentTenantId, operatorId.ToString(), childTenantId, subjectHasSecondFactor: false);
+
+        outcome.Error.Should().BeNull();
+        outcome.ShadowUser.Should().NotBeNull();
+        outcome.TargetTenantId.Should().Be(childTenantId);
+        var roles = await ResolveRolesInTenantAsync(childRepo, outcome.ShadowUser!);
+        roles.Should().BeEquivalentTo([await NameOfRoleInTenantAsync(mapped, childRepo)],
+            "only the explicit mapping grants authority, never the root role");
+    }
+
+    /// <summary>
+    ///     Explicit provisioning is not limited to a mapping: once an administrator of B grants the shadow
+    ///     user a role directly, the same exchange that was refused before succeeds.
+    /// </summary>
+    [Fact]
+    public async Task Exchange_AfterDirectRoleGrantToTheShadowUser_Succeeds()
+    {
+        await _fixture.InitializeAsync();
+        await EnsureSystemSetupAsync();
+
+        var systemContext = _fixture.GetSystemContext();
+        var parentTenantId = systemContext.TenantId;
+        var (operatorId, _) = await CreateUserAsync(systemContext, parentTenantId, "op-direct");
+        var childTenantId = await CreateChildWithParentProviderAsync(parentTenantId);
+        var directRole = await CreateRoleAsync(systemContext, childTenantId, NewId("direct"));
+        var processor = await CreateExchangeProcessorAsync(systemContext, childTenantId);
+
+        (await processor.ExchangeAsync(parentTenantId, operatorId.ToString(), childTenantId, subjectHasSecondFactor: false))
+            .Error.Should().Be("access_denied");
+
+        var childRepo = (await systemContext.TryFindTenantRepositoryAsync(childTenantId))!;
+        var authResult = await CreateCrossTenantAuthService(systemContext)
+            .ValidateCrossTenantAccessAsync(childTenantId, parentTenantId, operatorId.ToString());
+        var shadow = await CreateProvisioningService(childRepo).FindCrossTenantUserAsync(authResult!);
+        shadow.Should().NotBeNull("the refused attempt left the shadow user behind");
+        await AssignRoleToUserAsync(systemContext, childTenantId, shadow!.RtId, directRole);
+
+        var outcome = await processor.ExchangeAsync(parentTenantId, operatorId.ToString(), childTenantId, subjectHasSecondFactor: false);
+
+        outcome.Error.Should().BeNull();
+        outcome.ShadowUser!.RtId.Should().Be(shadow.RtId);
+    }
+
+    /// <summary>The ancestor gate is unchanged: a user of a tenant that is not an ancestor of B is refused.</summary>
+    [Fact]
+    public async Task Exchange_NonAncestorUser_IsStillUnauthorizedClient()
+    {
+        await _fixture.InitializeAsync();
+        await EnsureSystemSetupAsync();
+
+        var systemContext = _fixture.GetSystemContext();
+        var (userId, _) = await CreateUserAsync(systemContext, systemContext.TenantId, "op-foreign");
+        var unrelatedTenantId = await CreateChildTenantAsync(NewId("unrel2"));
+
+        var outcome = await (await CreateExchangeProcessorAsync(systemContext, unrelatedTenantId))
+            .ExchangeAsync(systemContext.TenantId, userId.ToString(), unrelatedTenantId, subjectHasSecondFactor: false);
+
+        outcome.ShadowUser.Should().BeNull();
+        outcome.Error.Should().Be("unauthorized_client");
+    }
+
+    /// <summary>
     ///     AB#5708: tenant ids may contain '_'. A sibling's shadow user of a user from an underscore
     ///     tenant H exchanges into H's child as the real home identity — the first-separator split
     ///     looked for the home user in a non-existent prefix of H and found nobody.
@@ -224,6 +363,479 @@ public class TenantExchangeIntegrationTests : IClassFixture<IdentityServicesFixt
         result.Should().BeNull("an ambiguous shadow name must never unwind to the victim's identity");
     }
 
+    // ---------- AB#7088: ProvisionCurrentUser repairs a mapping that grants no role ----------
+
+    /// <summary>
+    ///     AB#7088 acceptance criterion 1: a mapping with empty <c>MappedRoleIds</c> exists (what the login path
+    ///     still stores for a first-time shadow user), ProvisionCurrentUser is called, the exchange afterwards
+    ///     succeeds — and the result says the mapping was repaired, not that nothing happened.
+    /// </summary>
+    [Fact]
+    public async Task ProvisionCurrentUser_RoleLessMappingExists_RepairsItAndTheExchangeSucceeds()
+    {
+        var ctx = await ArrangeProvisioningAsync();
+        await CreateMappingAsync(ctx.SystemContext, ctx.ChildTenantId, ctx.ParentTenantId, ctx.UserId, ctx.UserName,
+            mappedRoleIds: []);
+        (await ctx.Processor.ExchangeAsync(ctx.ParentTenantId, ctx.UserId.ToString(), ctx.ChildTenantId, subjectHasSecondFactor: false))
+            .Error.Should().Be("access_denied", "the role-less mapping grants nothing");
+
+        var outcome = await ProvisionCurrentUserAsync(ctx);
+
+        outcome.Should().Be(AdminProvisioningController.OutcomeRepaired);
+        var mappings = await GetMappingsAsync(ctx.ChildRepo, ctx.ParentTenantId, ctx.UserId);
+        mappings.Should().ContainSingle("the existing mapping is repaired in place, never duplicated");
+        mappings[0].MappedRoleIds.Should().BeEquivalentTo(ctx.ChildRoleIds.Select(r => r.ToString()));
+        (await IsMemberOfTenantOwnersAsync(ctx.ChildRepo, mappings[0])).Should().BeTrue();
+
+        var exchange = await ctx.Processor.ExchangeAsync(ctx.ParentTenantId, ctx.UserId.ToString(), ctx.ChildTenantId, subjectHasSecondFactor: false);
+        exchange.Error.Should().BeNull("the repaired mapping now grants roles");
+        exchange.ShadowUser.Should().NotBeNull();
+    }
+
+    /// <summary>
+    ///     AB#8161: when TenantOwners carries the roles (production shape), a provisioned administrator is only a
+    ///     member of the group — the mapping holds no direct role list — and the exchange still succeeds.
+    /// </summary>
+    [Fact]
+    public async Task ProvisionCurrentUser_WhenTenantOwnersCarriesRoles_MappingIsOnlyAGroupMember()
+    {
+        var ctx = await ArrangeProvisioningAsync();
+        var groupStore = new GroupStore(new FixedTenantResolver(ctx.ChildRepo));
+        await groupStore.SetRoleIdsAsync(ctx.OwnersGroupId, ctx.ChildRoleIds.Select(r => r.ToString()).ToList());
+
+        (await ProvisionCurrentUserAsync(ctx)).Should().Be(AdminProvisioningController.OutcomeCreated);
+
+        var mapping = (await GetMappingsAsync(ctx.ChildRepo, ctx.ParentTenantId, ctx.UserId)).Single();
+        mapping.MappedRoleIds.Should().BeNullOrEmpty("the group carries the roles");
+        (await IsMemberOfTenantOwnersAsync(ctx.ChildRepo, mapping)).Should().BeTrue();
+        (await ctx.Processor.ExchangeAsync(ctx.ParentTenantId, ctx.UserId.ToString(), ctx.ChildTenantId, subjectHasSecondFactor: false))
+            .Error.Should().BeNull();
+    }
+
+    /// <summary>
+    ///     The same symptom the bug was found with: the login path's find-or-create stores a bare mapping next to
+    ///     the shadow user, and a later ProvisionCurrentUser used to answer "provisioned" without writing anything.
+    /// </summary>
+    [Fact]
+    public async Task ProvisionCurrentUser_AfterBareMappingOfTheLoginPath_RepairsIt()
+    {
+        var ctx = await ArrangeProvisioningAsync();
+        var authResult = await CreateCrossTenantAuthService(ctx.SystemContext)
+            .ValidateCrossTenantAccessAsync(ctx.ChildTenantId, ctx.ParentTenantId, ctx.UserId.ToString());
+        await CreateProvisioningService(ctx.ChildRepo).FindOrCreateCrossTenantUserAsync(authResult!, ctx.ChildTenantId);
+        (await GetMappingsAsync(ctx.ChildRepo, ctx.ParentTenantId, ctx.UserId)).Should().ContainSingle()
+            .Which.MappedRoleIds.Should().BeNullOrEmpty();
+
+        (await ProvisionCurrentUserAsync(ctx)).Should().Be(AdminProvisioningController.OutcomeRepaired);
+
+        (await ctx.Processor.ExchangeAsync(ctx.ParentTenantId, ctx.UserId.ToString(), ctx.ChildTenantId, subjectHasSecondFactor: false))
+            .Error.Should().BeNull();
+    }
+
+    /// <summary>
+    ///     Role lookup keys on the source user NAME, the lookup for an existing mapping on the user id. A mapping
+    ///     with the right id and roles but a wrong name grants nothing at the exchange — it is repaired too, and
+    ///     only the name is touched (the roles it has are kept).
+    /// </summary>
+    [Fact]
+    public async Task ProvisionCurrentUser_MappingWithWrongSourceUserName_CorrectsTheName()
+    {
+        var ctx = await ArrangeProvisioningAsync();
+        await CreateMappingAsync(ctx.SystemContext, ctx.ChildTenantId, ctx.ParentTenantId, ctx.UserId,
+            "stale-name", mappedRoleIds: [ctx.ChildRoleIds[0].ToString()]);
+        (await ctx.Processor.ExchangeAsync(ctx.ParentTenantId, ctx.UserId.ToString(), ctx.ChildTenantId, subjectHasSecondFactor: false))
+            .Error.Should().Be("access_denied", "the roles are looked up by the real user name");
+
+        (await ProvisionCurrentUserAsync(ctx)).Should().Be(AdminProvisioningController.OutcomeRepaired);
+
+        var mapping = (await GetMappingsAsync(ctx.ChildRepo, ctx.ParentTenantId, ctx.UserId)).Single();
+        mapping.SourceUserName.Should().Be(ctx.UserName);
+        mapping.MappedRoleIds.Should().BeEquivalentTo([ctx.ChildRoleIds[0].ToString()], "a mapping that grants a role keeps its roles");
+        (await ctx.Processor.ExchangeAsync(ctx.ParentTenantId, ctx.UserId.ToString(), ctx.ChildTenantId, subjectHasSecondFactor: false))
+            .Error.Should().BeNull();
+    }
+
+    /// <summary>A mapping that lists only role ids which no longer exist grants nothing and is repaired.</summary>
+    [Fact]
+    public async Task ProvisionCurrentUser_MappingWithOnlyStaleRoleIds_IsRepaired()
+    {
+        var ctx = await ArrangeProvisioningAsync();
+        await CreateMappingAsync(ctx.SystemContext, ctx.ChildTenantId, ctx.ParentTenantId, ctx.UserId, ctx.UserName,
+            mappedRoleIds: [OctoObjectId.GenerateNewId().ToString()]);
+
+        (await ProvisionCurrentUserAsync(ctx)).Should().Be(AdminProvisioningController.OutcomeRepaired);
+
+        (await ctx.Processor.ExchangeAsync(ctx.ParentTenantId, ctx.UserId.ToString(), ctx.ChildTenantId, subjectHasSecondFactor: false))
+            .Error.Should().BeNull();
+    }
+
+    /// <summary>Acceptance criterion 2: a fresh provisioning reports <c>created</c> (and still works end to end).</summary>
+    [Fact]
+    public async Task ProvisionCurrentUser_NoMapping_ReportsCreated_AndTheExchangeSucceeds()
+    {
+        var ctx = await ArrangeProvisioningAsync();
+
+        (await ProvisionCurrentUserAsync(ctx)).Should().Be(AdminProvisioningController.OutcomeCreated);
+
+        var mapping = (await GetMappingsAsync(ctx.ChildRepo, ctx.ParentTenantId, ctx.UserId)).Single();
+        mapping.MappedRoleIds.Should().BeEquivalentTo(ctx.ChildRoleIds.Select(r => r.ToString()));
+        (await IsMemberOfTenantOwnersAsync(ctx.ChildRepo, mapping)).Should().BeTrue();
+        (await ctx.Processor.ExchangeAsync(ctx.ParentTenantId, ctx.UserId.ToString(), ctx.ChildTenantId, subjectHasSecondFactor: false))
+            .Error.Should().BeNull();
+    }
+
+    /// <summary>
+    ///     Acceptance criterion 2: a mapping that already grants a role is left exactly as it is and reported as
+    ///     <c>already provisioned</c> — a repair must not widen a deliberately narrow grant.
+    /// </summary>
+    [Fact]
+    public async Task ProvisionCurrentUser_MappingAlreadyGrantsARole_ReportsAlreadyProvisioned_AndChangesNothing()
+    {
+        var ctx = await ArrangeProvisioningAsync();
+        var narrow = new[] { ctx.ChildRoleIds[0].ToString() };
+        await CreateMappingAsync(ctx.SystemContext, ctx.ChildTenantId, ctx.ParentTenantId, ctx.UserId, ctx.UserName,
+            mappedRoleIds: narrow);
+
+        (await ProvisionCurrentUserAsync(ctx)).Should().Be(AdminProvisioningController.OutcomeAlreadyProvisioned);
+        (await ProvisionCurrentUserAsync(ctx)).Should().Be(AdminProvisioningController.OutcomeAlreadyProvisioned);
+
+        var mapping = (await GetMappingsAsync(ctx.ChildRepo, ctx.ParentTenantId, ctx.UserId)).Single();
+        mapping.MappedRoleIds.Should().BeEquivalentTo(narrow);
+        (await IsMemberOfTenantOwnersAsync(ctx.ChildRepo, mapping)).Should().BeFalse();
+    }
+
+    /// <summary>
+    ///     A mapping without own roles that sits in a group which carries a role is provisioned through the group
+    ///     (what the login path's group assignment and blueprints produce): nothing to repair.
+    /// </summary>
+    [Fact]
+    public async Task ProvisionCurrentUser_MappingGrantedThroughGroupRole_ReportsAlreadyProvisioned()
+    {
+        var ctx = await ArrangeProvisioningAsync();
+        var groupStore = new GroupStore(new FixedTenantResolver(ctx.ChildRepo));
+        await groupStore.SetRoleIdsAsync(ctx.OwnersGroupId, [ctx.ChildRoleIds[0].ToString()]);
+        await CreateMappingAsync(ctx.SystemContext, ctx.ChildTenantId, ctx.ParentTenantId, ctx.UserId, ctx.UserName,
+            mappedRoleIds: []);
+        var mapping = (await GetMappingsAsync(ctx.ChildRepo, ctx.ParentTenantId, ctx.UserId)).Single();
+        await groupStore.AddMemberExternalUserAsync(ctx.OwnersGroupId, mapping.RtId.ToString());
+
+        (await ProvisionCurrentUserAsync(ctx)).Should().Be(AdminProvisioningController.OutcomeAlreadyProvisioned);
+
+        (await GetMappingsAsync(ctx.ChildRepo, ctx.ParentTenantId, ctx.UserId)).Single()
+            .MappedRoleIds.Should().BeNullOrEmpty("a mapping that is provisioned through its group is not widened");
+        (await ctx.Processor.ExchangeAsync(ctx.ParentTenantId, ctx.UserId.ToString(), ctx.ChildTenantId, subjectHasSecondFactor: false))
+            .Error.Should().BeNull();
+    }
+
+    /// <summary>
+    ///     Acceptance criterion 3 (negative test, security property kept): an exchange for a tenant the user is
+    ///     not provisioned in is refused and leaves NO mapping behind — the exchange grants nothing and prepares
+    ///     nothing that could later be mistaken for provisioning. A later ProvisionCurrentUser is a plain create.
+    /// </summary>
+    [Fact]
+    public async Task Exchange_ForNotProvisionedTenant_LeavesNoMapping_AndLaterProvisioningIsACreate()
+    {
+        var ctx = await ArrangeProvisioningAsync();
+
+        var denied = await ctx.Processor.ExchangeAsync(ctx.ParentTenantId, ctx.UserId.ToString(), ctx.ChildTenantId, subjectHasSecondFactor: false);
+
+        denied.Error.Should().Be("access_denied");
+        denied.ShadowUser.Should().BeNull();
+        (await GetMappingsAsync(ctx.ChildRepo, ctx.ParentTenantId, ctx.UserId)).Should().BeEmpty(
+            "a refused exchange must not store a mapping");
+
+        (await ProvisionCurrentUserAsync(ctx)).Should().Be(AdminProvisioningController.OutcomeCreated);
+        (await ctx.Processor.ExchangeAsync(ctx.ParentTenantId, ctx.UserId.ToString(), ctx.ChildTenantId, subjectHasSecondFactor: false))
+            .Error.Should().BeNull();
+    }
+
+    // ---------- AB#8017: ProvisionCurrentUser with the token of a shadow user of an intermediate tenant ----------
+
+    /// <summary>
+    ///     AB#8017 acceptance criteria 1 and 2: user U of root R is provisioned in child A; a session scoped to A
+    ///     (subject = shadow <c>xt_R_U</c>) provisions U into grandchild B. The mapping is written for U's home
+    ///     identity, the call names it, and both exchange paths into B — from U's R token and from the A shadow —
+    ///     succeed with the admin roles over the real exchange path (depth 2: R → A → B).
+    /// </summary>
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task ProvisionCurrentUser_AsShadowUserOfIntermediateTenant_WritesTheHomeMapping_AndBothExchangePathsSucceed(
+        bool tokenCarriesUserName)
+    {
+        var nested = await ArrangeNestedAsync();
+
+        var (result, outcome) = await CallProvisionCurrentUserAsync(
+            nested.SystemContext, nested.GrandchildTenantId, nested.IntermediateTenantId, nested.ShadowUserId.ToString(),
+            tokenCarriesUserName ? nested.ShadowUserName : null);
+
+        outcome.Should().Be(AdminProvisioningController.OutcomeCreated);
+        var dto = result.Result.Should().BeAssignableTo<Microsoft.AspNetCore.Mvc.ObjectResult>().Which.Value
+            .Should().BeOfType<Meshmakers.Octo.Communication.Contracts.DataTransferObjects.ExternalTenantUserMappingDto>().Which;
+        dto.SourceTenantId.Should().Be(nested.RootTenantId, "the mapping is written for the home identity");
+        dto.SourceUserId.Should().Be(nested.UserId.ToString());
+        dto.SourceUserName.Should().Be(nested.UserName);
+        (await GetMappingsAsync(nested.GrandchildRepo, nested.IntermediateTenantId, nested.ShadowUserId))
+            .Should().BeEmpty("no mapping is keyed on the shadow user any more");
+
+        var processor = await CreateExchangeProcessorAsync(nested.SystemContext, nested.GrandchildTenantId);
+        var fromHome = await processor.ExchangeAsync(
+            nested.RootTenantId, nested.UserId.ToString(), nested.GrandchildTenantId, subjectHasSecondFactor: false);
+        var fromShadow = await processor.ExchangeAsync(
+            nested.IntermediateTenantId, nested.ShadowUserId.ToString(), nested.GrandchildTenantId, subjectHasSecondFactor: false);
+
+        fromHome.Error.Should().BeNull("the home token of the same person reaches B");
+        fromShadow.Error.Should().BeNull("the A-scoped token reaches B through the home mapping");
+        var expectedRoles = new List<string>();
+        foreach (var roleId in nested.GrandchildRoleIds)
+        {
+            expectedRoles.Add(await NameOfRoleInTenantAsync(roleId, nested.GrandchildRepo));
+        }
+
+        (await ResolveRolesInTenantAsync(nested.GrandchildRepo, fromHome.ShadowUser!))
+            .Should().BeEquivalentTo(expectedRoles, "provisionCurrentUser grants all roles of B");
+        (await ResolveRolesInTenantAsync(nested.GrandchildRepo, fromShadow.ShadowUser!))
+            .Should().BeEquivalentTo(expectedRoles);
+    }
+
+    /// <summary>
+    ///     AB#8017 acceptance criterion 3: the state left on 2026-10-31 — a mapping keyed on the A shadow user — makes
+    ///     the exchange from the home token fail. provisionCurrentUser from the home tenant R adds the home mapping
+    ///     and the exchange from R succeeds; a second call from the A shadow finds it and changes nothing.
+    /// </summary>
+    [Fact]
+    public async Task ProvisionCurrentUser_FromHomeTenant_RepairsTheStateOfAShadowKeyedMapping()
+    {
+        var nested = await ArrangeNestedAsync();
+        await CreateMappingAsync(nested.SystemContext, nested.GrandchildTenantId, nested.IntermediateTenantId,
+            nested.ShadowUserId, nested.ShadowUserName, nested.GrandchildRoleIds.Select(r => r.ToString()).ToList());
+        var processor = await CreateExchangeProcessorAsync(nested.SystemContext, nested.GrandchildTenantId);
+
+        (await processor.ExchangeAsync(nested.RootTenantId, nested.UserId.ToString(), nested.GrandchildTenantId, subjectHasSecondFactor: false))
+            .ErrorDescription.Should().StartWith(TenantExchangeProcessor.NotProvisionedMarker,
+                "a shadow-keyed mapping is never found by an exchange from the home token (the bug)");
+
+        var (_, outcome) = await CallProvisionCurrentUserAsync(
+            nested.SystemContext, nested.GrandchildTenantId, nested.RootTenantId, nested.UserId.ToString(), nested.UserName);
+
+        outcome.Should().Be(AdminProvisioningController.OutcomeCreated);
+        (await processor.ExchangeAsync(nested.RootTenantId, nested.UserId.ToString(), nested.GrandchildTenantId, subjectHasSecondFactor: false))
+            .Error.Should().BeNull("the home mapping repairs the exchange from the home token");
+
+        var (_, again) = await CallProvisionCurrentUserAsync(
+            nested.SystemContext, nested.GrandchildTenantId, nested.IntermediateTenantId, nested.ShadowUserId.ToString(), null);
+        again.Should().Be(AdminProvisioningController.OutcomeAlreadyProvisioned,
+            "the shadow caller resolves to the same home mapping");
+    }
+
+    /// <summary>
+    ///     AB#8017 acceptance criterion 4 (fail closed): a shadow user whose home identity cannot be resolved — here
+    ///     the home user does not exist — is refused with 409 and nothing is written into the target tenant.
+    /// </summary>
+    [Fact]
+    public async Task ProvisionCurrentUser_ShadowUserWithoutResolvableHome_IsRefusedAndWritesNothing()
+    {
+        var nested = await ArrangeNestedAsync();
+        var orphanName = CrossTenantShadowUserName.Build(nested.RootTenantId, NewId("ghost"));
+        var (orphanId, _) = await CreateUserAsync(
+            nested.SystemContext, nested.IntermediateTenantId, orphanName, exactUserName: true);
+
+        var (result, outcome) = await CallProvisionCurrentUserAsync(
+            nested.SystemContext, nested.GrandchildTenantId, nested.IntermediateTenantId, orphanId.ToString(), orphanName);
+
+        outcome.Should().BeNull();
+        var conflict = result.Result.Should().BeOfType<Microsoft.AspNetCore.Mvc.ConflictObjectResult>().Which;
+        conflict.Value.Should().BeOfType<Microsoft.AspNetCore.Mvc.ProblemDetails>()
+            .Which.Detail.Should().Contain(orphanName).And.Contain("home tenant");
+        await AssertNoMappingsAsync(nested.GrandchildRepo);
+    }
+
+    /// <summary>
+    ///     AB#8017 fail closed for an ambiguous chain: the shadow's tenant prefix is not a registered tenant, so the
+    ///     name does not unwind; the call is refused and writes nothing.
+    /// </summary>
+    [Fact]
+    public async Task ProvisionCurrentUser_ShadowUserOfAnUnregisteredTenant_IsRefused()
+    {
+        var nested = await ArrangeNestedAsync();
+        var foreignName = CrossTenantShadowUserName.Build(NewId("gone"), "someone");
+        var (foreignId, _) = await CreateUserAsync(
+            nested.SystemContext, nested.IntermediateTenantId, foreignName, exactUserName: true);
+
+        var (result, _) = await CallProvisionCurrentUserAsync(
+            nested.SystemContext, nested.GrandchildTenantId, nested.IntermediateTenantId, foreignId.ToString(), null);
+
+        result.Result.Should().BeOfType<Microsoft.AspNetCore.Mvc.ConflictObjectResult>();
+        await AssertNoMappingsAsync(nested.GrandchildRepo);
+    }
+
+    private sealed record NestedArrangement(
+        ISystemContext SystemContext, string RootTenantId, string IntermediateTenantId, string GrandchildTenantId,
+        ITenantRepository GrandchildRepo, OctoObjectId UserId, string UserName, OctoObjectId ShadowUserId,
+        string ShadowUserName, IReadOnlyList<OctoObjectId> GrandchildRoleIds);
+
+    /// <summary>
+    ///     R (system tenant) → A → B. U of R is provisioned into A through the real controller and exchanges into A
+    ///     once, which creates the shadow <c>xt_R_U</c> in A — the subject of an A-scoped session.
+    /// </summary>
+    private async Task<NestedArrangement> ArrangeNestedAsync()
+    {
+        await _fixture.InitializeAsync();
+        await EnsureSystemSetupAsync();
+
+        var systemContext = _fixture.GetSystemContext();
+        var rootTenantId = systemContext.TenantId;
+        var (userId, userName) = await CreateUserAsync(systemContext, rootTenantId, "op-nested");
+
+        var intermediateTenantId = await CreateChildWithParentProviderAsync(rootTenantId);
+        await CreateRoleAsync(systemContext, intermediateTenantId, NewId("aAdmin"));
+        var (_, toA) = await CallProvisionCurrentUserAsync(
+            systemContext, intermediateTenantId, rootTenantId, userId.ToString(), userName);
+        toA.Should().Be(AdminProvisioningController.OutcomeCreated);
+        var intoA = await (await CreateExchangeProcessorAsync(systemContext, intermediateTenantId))
+            .ExchangeAsync(rootTenantId, userId.ToString(), intermediateTenantId, subjectHasSecondFactor: false);
+        intoA.Error.Should().BeNull();
+        var shadow = intoA.ShadowUser!;
+        shadow.UserName.Should().Be(CrossTenantShadowUserName.Build(rootTenantId, userName));
+
+        var grandchildTenantId = await CreateChildWithParentProviderAsync(intermediateTenantId);
+        var grandchildRoles = new[]
+        {
+            await CreateRoleAsync(systemContext, grandchildTenantId, NewId("bRoleA")),
+            await CreateRoleAsync(systemContext, grandchildTenantId, NewId("bRoleB"))
+        };
+        var grandchildRepo = (await systemContext.TryFindTenantRepositoryAsync(grandchildTenantId))!;
+
+        return new NestedArrangement(systemContext, rootTenantId, intermediateTenantId, grandchildTenantId,
+            grandchildRepo, userId, userName, shadow.RtId, shadow.UserName!, grandchildRoles);
+    }
+
+    private static async Task AssertNoMappingsAsync(ITenantRepository repo)
+    {
+        using var session = await repo.GetSessionAsync();
+        session.StartTransaction();
+        var all = await repo.GetRtEntitiesByTypeAsync<RtExternalTenantUserMapping>(session, RtEntityQueryOptions.Create());
+        await session.CommitTransactionAsync();
+        all.Items.Should().BeEmpty("a refused provisioning writes nothing");
+    }
+
+    private sealed record ProvisioningArrangement(
+        ISystemContext SystemContext, string ParentTenantId, string ChildTenantId, ITenantRepository ChildRepo,
+        OctoObjectId UserId, string UserName, IReadOnlyList<OctoObjectId> ChildRoleIds,
+        TenantExchangeProcessor Processor, OctoObjectId OwnersGroupId);
+
+    private async Task<ProvisioningArrangement> ArrangeProvisioningAsync()
+    {
+        await _fixture.InitializeAsync();
+        await EnsureSystemSetupAsync();
+
+        var systemContext = _fixture.GetSystemContext();
+        var parentTenantId = systemContext.TenantId;
+        var (userId, userName) = await CreateUserAsync(systemContext, parentTenantId, "op-prov7088");
+        var childTenantId = await CreateChildWithParentProviderAsync(parentTenantId);
+        var childRoles = new[]
+        {
+            await CreateRoleAsync(systemContext, childTenantId, NewId("roleA")),
+            await CreateRoleAsync(systemContext, childTenantId, NewId("roleB"))
+        };
+        var childRepo = (await systemContext.TryFindTenantRepositoryAsync(childTenantId))!;
+        // The TenantOwners group comes from the Bootstrap blueprint in production; here it starts without roles.
+        var ownersGroup = new RtGroup
+        {
+            RtId = OctoObjectId.GenerateNewId(),
+            GroupName = CommonConstants.TenantOwnersGroup,
+            NormalizedGroupName = CommonConstants.TenantOwnersGroup.ToUpperInvariant()
+        };
+        await new GroupStore(new FixedTenantResolver(childRepo)).StoreAsync(ownersGroup);
+        var processor = await CreateExchangeProcessorAsync(systemContext, childTenantId);
+        return new ProvisioningArrangement(
+            systemContext, parentTenantId, childTenantId, childRepo, userId, userName, childRoles, processor,
+            ownersGroup.RtId);
+    }
+
+    /// <summary>Calls the real controller action as the given source user and returns the reported outcome.</summary>
+    private async Task<string?> ProvisionCurrentUserAsync(ProvisioningArrangement ctx)
+    {
+        var (result, outcome) = await CallProvisionCurrentUserAsync(
+            ctx.SystemContext, ctx.ChildTenantId, ctx.ParentTenantId, ctx.UserId.ToString(), ctx.UserName);
+
+        result.Result.Should().BeAssignableTo<Microsoft.AspNetCore.Mvc.ObjectResult>()
+            .Which.StatusCode.Should().BeOneOf(StatusCodes.Status200OK, StatusCodes.Status201Created);
+        return outcome;
+    }
+
+    /// <summary>
+    ///     Calls the real controller action with a token of <paramref name="callerUserId" /> in
+    ///     <paramref name="callerTenantId" />. <paramref name="callerUserName" /> <c>null</c> = an access token without
+    ///     profile claims.
+    /// </summary>
+    private static async Task<(Microsoft.AspNetCore.Mvc.ActionResult<Meshmakers.Octo.Communication.Contracts.DataTransferObjects.ExternalTenantUserMappingDto> Result, string? Outcome)>
+        CallProvisionCurrentUserAsync(
+            ISystemContext systemContext, string targetTenantId, string callerTenantId, string callerUserId,
+            string? callerUserName)
+    {
+        var claims = new List<System.Security.Claims.Claim>
+        {
+            new("sub", callerUserId),
+            new("tenant_id", callerTenantId)
+        };
+        if (callerUserName != null)
+        {
+            claims.Add(new System.Security.Claims.Claim("preferred_username", callerUserName));
+        }
+
+        var httpContext = new DefaultHttpContext
+        {
+            User = new System.Security.Claims.ClaimsPrincipal(new System.Security.Claims.ClaimsIdentity(claims, "test"))
+        };
+        var controller = new AdminProvisioningController(
+            systemContext, Substitute.For<Meshmakers.Octo.Backend.Authentication.DynamicAuth.IDynamicAuthSchemeService>(),
+            new CrossTenantShadowUserChainResolver(systemContext),
+            NullLogger<AdminProvisioningController>.Instance)
+        {
+            ControllerContext = new Microsoft.AspNetCore.Mvc.ControllerContext { HttpContext = httpContext }
+        };
+
+        var result = await controller.ProvisionCurrentUser(targetTenantId);
+
+        var outcome = httpContext.Response.Headers.TryGetValue(AdminProvisioningController.ProvisioningOutcomeHeader, out var value)
+            ? value.ToString()
+            : null;
+        return (result, outcome);
+    }
+
+    private static async Task<List<RtExternalTenantUserMapping>> GetMappingsAsync(
+        ITenantRepository repo, string sourceTenantId, OctoObjectId sourceUserId)
+    {
+        using var session = await repo.GetSessionAsync();
+        session.StartTransaction();
+        var result = await repo.GetRtEntitiesByTypeAsync<RtExternalTenantUserMapping>(
+            session, RtEntityQueryOptions.Create()
+                .FieldEquals(nameof(RtExternalTenantUserMapping.SourceTenantId), sourceTenantId)
+                .FieldEquals(nameof(RtExternalTenantUserMapping.SourceUserId), sourceUserId.ToString()));
+        await session.CommitTransactionAsync();
+        return result.Items.ToList();
+    }
+
+    private static async Task<bool> IsMemberOfTenantOwnersAsync(ITenantRepository repo, RtExternalTenantUserMapping mapping)
+    {
+        using var session = await repo.GetSessionAsync();
+        session.StartTransaction();
+        var associations = await repo.GetRtAssociationsAsync(
+            session, mapping.ToRtEntityId(),
+            RtAssociationExtendedQueryOptions.Create(GraphDirections.Inbound,
+                roleId: IdentityAssociationConstants.GroupMemberId));
+        var owners = false;
+        foreach (var association in associations.Items.Where(a => a.OriginCkTypeId == RtEntityExtensions.GetRtCkTypeId<RtGroup>()))
+        {
+            var group = await repo.GetRtEntityByRtIdAsync<RtGroup>(session, association.OriginRtId);
+            owners |= string.Equals(group?.GroupName, CommonConstants.TenantOwnersGroup, StringComparison.OrdinalIgnoreCase);
+        }
+
+        await session.CommitTransactionAsync();
+        return owners;
+    }
+
     // ---------- helpers ----------
 
     private static string NewId(string prefix) => $"{prefix}-{Guid.NewGuid():N}"[..20];
@@ -245,6 +857,8 @@ public class TenantExchangeIntegrationTests : IClassFixture<IdentityServicesFixt
                 new Microsoft.Extensions.Caching.Memory.MemoryCacheOptions())),
             idpStore,
             new PasswordHasher<RtUser>(),
+            new CrossTenantShadowUserChainResolver(systemContext),
+            Options.Create(new IdentityOptions()),
             NullLogger<CrossTenantAuthenticationService>.Instance);
     }
 
@@ -263,6 +877,7 @@ public class TenantExchangeIntegrationTests : IClassFixture<IdentityServicesFixt
             CreateProvisioningService(targetRepo),
             new CrossTenantShadowUserChainResolver(systemContext),
             new ExternalTenantUserMappingStore(targetResolver),
+            BuildUserManager(targetResolver),
             Substitute.For<IHttpContextAccessor>(),
             Substitute.For<IIdentityAuditService>(),
             NullLogger<TenantExchangeProcessor>.Instance);

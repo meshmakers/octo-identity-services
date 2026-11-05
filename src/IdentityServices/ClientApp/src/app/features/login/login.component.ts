@@ -150,6 +150,8 @@ export class LoginComponent implements OnInit {
               email: result.canUseEmailCode ? 'true' : 'false'
             }
           });
+        } else if (result.secondFactorSetupRequired) {
+          this.errorMessage = this.translate.instant('LOGIN.ERROR_SECOND_FACTOR_SETUP_REQUIRED');
         } else {
           this.errorMessage = result.errorMessage || this.translate.instant('LOGIN.ERROR_LOGIN_FAILED');
         }

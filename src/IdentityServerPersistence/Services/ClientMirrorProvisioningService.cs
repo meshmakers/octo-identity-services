@@ -8,7 +8,8 @@ using Meshmakers.Octo.Runtime.Contracts.Repositories.Query;
 using Meshmakers.Octo.Runtime.Contracts.RepositoryEntities;
 using Meshmakers.Octo.Services.Contracts.DistributionEventHub.Messages;
 using Microsoft.Extensions.Logging;
-using Persistence.IdentityCkModel.Generated.System.Identity.v2;
+using IdentityServerPersistence.Services.ScratchTenants;
+using Persistence.IdentityCkModel.Generated.System.Identity.v3;
 
 namespace IdentityServerPersistence.Services;
 
@@ -16,7 +17,9 @@ namespace IdentityServerPersistence.Services;
 public class ClientMirrorProvisioningService(
     ILogger<ClientMirrorProvisioningService> logger,
     ISystemContext systemContext,
-    IDistributionEventHubService? distributionEventHubService = null)
+    ITenantDiscoveryService tenantDiscoveryService,
+    IDistributionEventHubService? distributionEventHubService = null,
+    IScratchTenantGrantService? scratchTenantGrantService = null)
     : IClientMirrorProvisioningService
 {
     /// <summary>
@@ -25,6 +28,8 @@ public class ClientMirrorProvisioningService(
     ///     first request stays blind to the SPA until the cache expires. A failing publish is logged and never
     ///     fails the provisioning: the policy cache has a TTL and heals anyway.
     /// </summary>
+    private static readonly TimeSpan PublishTimeout = TimeSpan.FromSeconds(5);
+
     private async Task PublishCorsClientsUpdateAsync(string tenantId)
     {
         if (distributionEventHubService == null)
@@ -34,16 +39,104 @@ public class ClientMirrorProvisioningService(
 
         try
         {
-            await distributionEventHubService.PublishAsync(
+            // The publish goes through the message broker, and a MassTransit send endpoint waits for the broker to be
+            // reachable without a bound of its own. A provisioning (a tenant setup, a test host without a broker) must
+            // never wait for that: the wait is bounded, and a late answer is only observed, never awaited.
+            var publish = distributionEventHubService.PublishAsync(
                 new CorsClientsUpdate(tenantId, Guid.NewGuid(), DateTime.Now));
+            _ = publish.ContinueWith(static t => _ = t.Exception, TaskContinuationOptions.OnlyOnFaulted);
+            await publish.WaitAsync(PublishTimeout).ConfigureAwait(false);
         }
         catch (Exception ex)
         {
-            logger.LogWarning(ex, "Failed to publish CorsClientsUpdate for tenant '{TenantId}'", tenantId);
+            logger.LogWarning(ex, "Failed to publish CorsClientsUpdate for tenant '{TenantId}'; the CORS policy cache heals on its TTL",
+                tenantId);
         }
     }
 
+    /// <summary>
+    ///     AB#6758: a mirror is only ever created, rotated or removed in a tenant of the parent's own subtree; the
+    ///     system tenant as parent reaches every tenant. The controller filter checks the same rule at the door —
+    ///     this check keeps the service safe for every other caller as well.
+    /// </summary>
+    private async Task EnsureChildInParentSubtreeAsync(string parentTenantId, string childTenantId)
+    {
+        var parent = parentTenantId.Trim();
+        var child = childTenantId.Trim();
+
+        if (string.Equals(parent, systemContext.TenantId?.Trim(), StringComparison.OrdinalIgnoreCase))
+        {
+            return;
+        }
+
+        var descendants = await tenantDiscoveryService.GetScopeDescendantsAsync(parent);
+        if (descendants != null && descendants.Any(d => string.Equals(d, child, StringComparison.OrdinalIgnoreCase)))
+        {
+            return;
+        }
+
+        logger.LogWarning(
+            "Client mirror operation denied, child tenant {ChildTenantId} is outside the subtree of {ParentTenantId} (AB#6758)",
+            childTenantId, parentTenantId);
+        throw new ClientMirrorScopeException(parentTenantId, childTenantId);
+    }
+
     public async Task<ClientMirrorProvisioningResult> ProvisionForChildTenantAsync(
+        string parentTenantId, string childTenantId)
+    {
+        ValidateTenantIds(parentTenantId, childTenantId);
+        if (!string.Equals(parentTenantId, childTenantId, StringComparison.OrdinalIgnoreCase))
+        {
+            await EnsureChildInParentSubtreeAsync(parentTenantId, childTenantId);
+        }
+
+        return await ProvisionForChildTenantCoreAsync(parentTenantId, childTenantId);
+    }
+
+    private static void ValidateTenantIds(string parentTenantId, string childTenantId)
+    {
+        if (string.IsNullOrWhiteSpace(parentTenantId))
+        {
+            throw new ArgumentException("Parent tenant id is required.", nameof(parentTenantId));
+        }
+
+        if (string.IsNullOrWhiteSpace(childTenantId))
+        {
+            throw new ArgumentException("Child tenant id is required.", nameof(childTenantId));
+        }
+    }
+
+    private async Task<ClientMirrorProvisioningResult> ProvisionForChildTenantCoreAsync(
+        string parentTenantId, string childTenantId)
+    {
+        var result = await ProvisionForChildTenantMirrorsAsync(parentTenantId, childTenantId);
+
+        // AB#7192: a mirror that was just (re)created has none of the edges the old record had, so the creator grant of
+        // a scratch tenant is re-applied after every provisioning pass. A no-op for every tenant without a marker.
+        await EnsureScratchCreatorGrantAsync(childTenantId);
+        return result;
+    }
+
+    private async Task EnsureScratchCreatorGrantAsync(string childTenantId)
+    {
+        if (scratchTenantGrantService == null)
+        {
+            return;
+        }
+
+        try
+        {
+            await scratchTenantGrantService.EnsureGrantAsync(childTenantId);
+        }
+        catch (Exception ex)
+        {
+            // A failing grant must not fail the provisioning of the mirrors; the next setup retries it.
+            logger.LogError(ex, "Re-applying the scratch creator grant failed for child tenant '{ChildTenantId}'",
+                childTenantId);
+        }
+    }
+
+    private async Task<ClientMirrorProvisioningResult> ProvisionForChildTenantMirrorsAsync(
         string parentTenantId, string childTenantId)
     {
         if (string.IsNullOrWhiteSpace(parentTenantId))
@@ -131,15 +224,24 @@ public class ClientMirrorProvisioningService(
                 //
                 //   * Duplicate-clientId healing: when a child tenant was restored from an older
                 //     backup or had a manually-edited copy of the same OAuth ClientId, the
-                //     dedup branch inside UpsertClientInChildAsync erases the stale row. Without
+                //     dedup branch inside ConvergeChildMirrorAsync erases the stale row. Without
                 //     this re-call the tracker would forever say "already present" and the
                 //     duplicate would survive every restart (begdemo 2026-06-19 incident).
                 //   * Drift repair: secret rotation / scope changes on the parent that fell
                 //     behind on this child (e.g. a transient repo failure during SyncMirrorsForClient
                 //     post-commit hook) get re-applied on the next service restart, matching the
                 //     intent that the parent is the single source of truth for mirror state.
-                var mirrorForVerify = CreateMirrorClient(parentTenantId, parentClient);
-                await UpsertClientInChildAsync(childRepo, childSession, mirrorForVerify);
+                // AB#8019: the parent is read again after the child (the list above may be older than an
+                // immediate sync that already wrote this mirror); the listed client is only the fallback.
+                var verifyClientId = parentClient.ClientId;
+                var trackedWrite = await ConvergeChildMirrorAsync(childRepo, childSession, parentTenantId,
+                    verifyClientId,
+                    async () => await FindParentClientAsync(parentRepo, parentSession, verifyClientId) ?? parentClient,
+                    skipWhenInSync: false);
+                // AB#8054: a mirror this pass had to insert again is claimed by a versioned write of its tracking row,
+                // like the reconciliation does; a row that changed or vanished meanwhile withdraws the insert.
+                await ClaimTrackingRowAsync(parentRepo, parentSession, existingMirrorResult.Items.First(), trackedWrite,
+                    childRepo, childSession);
                 alreadyPresent++;
                 continue;
             }
@@ -147,8 +249,10 @@ public class ClientMirrorProvisioningService(
             // 2a. Materialize the mirror client in the child tenant's DB. Same idempotent
             //     query-or-insert pattern used by DefaultConfigurationCreatorService for
             //     the built-in OctoTool/Studio/Swagger clients.
-            var mirror = CreateMirrorClient(parentTenantId, parentClient);
-            await UpsertClientInChildAsync(childRepo, childSession, mirror);
+            var newClientId = parentClient.ClientId;
+            await ConvergeChildMirrorAsync(childRepo, childSession, parentTenantId, newClientId,
+                async () => await FindParentClientAsync(parentRepo, parentSession, newClientId) ?? parentClient,
+                skipWhenInSync: false);
 
             // 2b. Record the tracking row in the parent's DB.
             var mirrorRecord = new RtClientMirror
@@ -229,17 +333,38 @@ public class ClientMirrorProvisioningService(
                 }
 
                 using var childSession = await childRepo.GetSessionAsync();
-                var updatedMirror = CreateMirrorClient(parentTenantId, parentClient);
-                await UpsertClientInChildAsync(childRepo, childSession, updatedMirror);
+                var clientId = parentClient.ClientId;
 
-                mirror.SecretHashVersion += 1;
-                await parentRepo.ReplaceOneRtEntityByIdAsync(parentSession, mirror.RtId, mirror);
+                // AB#8054: the row is read again right before the write (the list above may be older than a removal or
+                // another writer); a row that is gone means "not mirrored there any more".
+                var row = await FindTrackingRowAsync(parentRepo, parentSession, clientId, mirror.ChildTenantId);
+                if (row == null || !row.RtId.Equals(mirror.RtId))
+                {
+                    logger.LogDebug(
+                        "Mirror sync skipped clientId='{ClientId}' child='{ChildTenantId}': tracking row removed concurrently",
+                        clientId, mirror.ChildTenantId);
+                    continue;
+                }
+
+                // AB#8019: version-checked like every mirror writer, and the parent is read again after the child, so a
+                // delayed sync never writes an older parent state over a newer one (the passed snapshot is the fallback
+                // when the read finds nothing).
+                var write = await ConvergeChildMirrorAsync(childRepo, childSession, parentTenantId, clientId,
+                    async () => await FindParentClientAsync(parentRepo, parentSession, clientId) ?? parentClient,
+                    skipWhenInSync: false);
+
+                // AB#8054: the counter bump is version-checked (a plain replace would neither advance rtVersion nor notice
+                // a concurrent writer), and an insert is claimed by it.
+                if (!await ClaimTrackingRowAsync(parentRepo, parentSession, row, write, childRepo, childSession))
+                {
+                    continue;
+                }
 
                 synced++;
                 await PublishCorsClientsUpdateAsync(mirror.ChildTenantId);
                 logger.LogInformation(
                     "Synced client mirror: clientId='{ClientId}' parent='{ParentTenantId}' child='{ChildTenantId}' version={Version}",
-                    parentClient.ClientId, parentTenantId, mirror.ChildTenantId, mirror.SecretHashVersion);
+                    parentClient.ClientId, parentTenantId, mirror.ChildTenantId, row.SecretHashVersion);
             }
             catch (Exception ex)
             {
@@ -251,6 +376,449 @@ public class ClientMirrorProvisioningService(
         }
 
         return new ClientMirrorSyncResult(synced, failed);
+    }
+
+    public async Task<ClientMirrorReconciliationResult> ReconcileMirrorsAsync(string parentTenantId,
+        CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(parentTenantId))
+        {
+            throw new ArgumentException("Parent tenant id is required.", nameof(parentTenantId));
+        }
+
+        var parentRepo = await systemContext.TryFindTenantRepositoryAsync(parentTenantId);
+        if (parentRepo == null)
+        {
+            return ClientMirrorReconciliationResult.Empty;
+        }
+
+        using var parentSession = await parentRepo.GetSessionAsync();
+        var rows = (await parentRepo.GetRtEntitiesByTypeAsync<RtClientMirror>(parentSession,
+            RtEntityQueryOptions.Create())).Items.ToList();
+        if (rows.Count == 0)
+        {
+            return ClientMirrorReconciliationResult.Empty;
+        }
+
+        // One repository lookup per child tenant and pass, not per row.
+        var childRepos = new Dictionary<string, ITenantRepository?>(StringComparer.OrdinalIgnoreCase);
+        int inSync = 0, repaired = 0, removed = 0, skipped = 0, failed = 0;
+        foreach (var row in rows)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            try
+            {
+                switch (await ReconcileMirrorAsync(parentRepo, parentSession, parentTenantId, row, childRepos))
+                {
+                    case MirrorReconcileOutcome.InSync:
+                        inSync++;
+                        break;
+                    case MirrorReconcileOutcome.Repaired:
+                        repaired++;
+                        break;
+                    case MirrorReconcileOutcome.Removed:
+                        removed++;
+                        break;
+                    default:
+                        skipped++;
+                        break;
+                }
+            }
+            catch (RtVersionConflictException)
+            {
+                // Other writers kept changing the mirror during every attempt; nothing stale was written. Next pass.
+                skipped++;
+                logger.LogDebug(
+                    "Mirror reconciliation skipped clientId='{ClientId}' child='{ChildTenantId}': changed concurrently",
+                    row.ParentClientId, row.ChildTenantId);
+            }
+            catch (EntityNotFoundException)
+            {
+                // The mirror or its row was removed while we worked on it (RemoveMirrorAsync, client delete cleanup).
+                skipped++;
+                logger.LogDebug(
+                    "Mirror reconciliation skipped clientId='{ClientId}' child='{ChildTenantId}': removed concurrently",
+                    row.ParentClientId, row.ChildTenantId);
+            }
+            catch (Exception ex)
+            {
+                // Warning, not Error: a half-provisioned or unreachable tenant would otherwise raise an error every pass.
+                failed++;
+                logger.LogWarning(ex,
+                    "Mirror reconciliation failed for clientId='{ClientId}' parent='{ParentTenantId}' child='{ChildTenantId}'",
+                    row.ParentClientId, parentTenantId, row.ChildTenantId);
+            }
+        }
+
+        return new ClientMirrorReconciliationResult(rows.Count, inSync, repaired, removed, skipped, failed);
+    }
+
+    private enum MirrorReconcileOutcome
+    {
+        InSync,
+        Repaired,
+        Removed,
+        Skipped
+    }
+
+    /// <summary>
+    ///     Tracked mirrors whose parent client was not found, with the number of consecutive passes that saw it missing
+    ///     (per process). A mirror is removed only on the second consecutive miss, so a parent client that is briefly
+    ///     absent (erase and re-create) does not lose its mirrors.
+    /// </summary>
+    private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, int> MissingParentPasses =
+        new(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>Consecutive passes a parent client must be missing before its tracked mirror is removed.</summary>
+    internal const int MissingParentPassesBeforeRemoval = 2;
+
+    /// <summary>
+    ///     Test seam (AB#8019): runs after the parent client was read and before the mirror is written (arguments: client
+    ///     id, child tenant id).
+    /// </summary>
+    internal Func<string, string, Task>? BeforeMirrorWriteForTests { get; set; }
+
+    /// <summary>Test seam (AB#8019): runs in the missing-mirror path after the row was re-read and before the insert.</summary>
+    internal Func<string, Task>? BeforeMirrorInsertForTests { get; set; }
+
+    /// <summary>
+    ///     Test seam (AB#8054): runs in the missing-mirror path after the child was read (found empty) and before the
+    ///     insert, i.e. where another writer can insert the same mirror concurrently.
+    /// </summary>
+    internal Func<string, string, Task>? BeforeMissingMirrorWriteForTests { get; set; }
+
+    /// <summary>
+    ///     Brings one tracked mirror to the state the parent client dictates (AB#8019). Writes only on a difference.
+    /// </summary>
+    /// <remarks>
+    ///     <para>
+    ///         🔴 <b>Every writer of a mirror takes part in the version check.</b> A plain replace writes the entity as
+    ///         given and does not advance <c>rtVersion</c>, so a check is only worth something when every other writer
+    ///         (immediate sync, start-up provisioning, mirror secret rotation, this job on another replica) also writes
+    ///         with the version it read. All of them go through <see cref="ConvergeChildMirrorAsync" /> or the versioned
+    ///         rotation. The child mirror is read <i>before</i> the parent client; a write after our child read makes our
+    ///         replace fail (we re-read both and try again), a write before it is visible to the comparison while the
+    ///         parent was read after it. A slow pass can never put a removed secret or an old own secret back.
+    ///     </para>
+    ///     <para>
+    ///         <b>Missing mirror.</b> The tracking row is read again right before the insert and written with its version
+    ///         afterwards; when that fails (row removed by <c>RemoveMirrorAsync</c> / the client delete cleanup, or another
+    ///         replica inserted first), the inserted client is deleted again, so no untracked mirror and no duplicate
+    ///         stays behind.
+    ///     </para>
+    ///     <para>
+    ///         The tracking row is the authority on "this client is mirrored there": a tracked mirror follows its parent
+    ///         client even when the parent's <c>AutoProvisionInChildTenants</c> flag was switched off later. A tracked
+    ///         mirror whose parent client is missing in two consecutive passes is removed, but only a child client that
+    ///         carries this parent's mirror marker.
+    ///     </para>
+    /// </remarks>
+    private async Task<MirrorReconcileOutcome> ReconcileMirrorAsync(ITenantRepository parentRepo,
+        IOctoSession parentSession, string parentTenantId, RtClientMirror row,
+        Dictionary<string, ITenantRepository?> childRepos)
+    {
+        if (string.IsNullOrWhiteSpace(row.ParentClientId) || string.IsNullOrWhiteSpace(row.ChildTenantId))
+        {
+            return MirrorReconcileOutcome.Skipped;
+        }
+
+        if (!childRepos.TryGetValue(row.ChildTenantId, out var childRepo))
+        {
+            childRepo = await systemContext.TryFindTenantRepositoryAsync(row.ChildTenantId);
+            childRepos[row.ChildTenantId] = childRepo;
+        }
+
+        if (childRepo == null)
+        {
+            // The PreDeleteTenant consumer drops rows of deleted tenants; a tenant that is only unreachable right now
+            // must not lose its tracking row.
+            logger.LogDebug("Mirror reconciliation: child tenant '{ChildTenantId}' not found, skipped",
+                row.ChildTenantId);
+            return MirrorReconcileOutcome.Skipped;
+        }
+
+        using var childSession = await childRepo.GetSessionAsync();
+        var missingKey = $"{parentTenantId}|{row.ParentClientId}|{row.ChildTenantId}";
+
+        // The missing-mirror path inserts; everything else is a version-checked replace.
+        var childClients = await GetChildClientsAsync(childRepo, childSession, row.ParentClientId);
+        if (childClients.Count == 0)
+        {
+            return await ReconcileMissingMirrorAsync(parentRepo, parentSession, parentTenantId, row, childRepo,
+                childSession, missingKey);
+        }
+
+        var write = await ConvergeChildMirrorAsync(childRepo, childSession, parentTenantId, row.ParentClientId,
+            async () =>
+            {
+                var parent = await FindParentClientAsync(parentRepo, parentSession, row.ParentClientId);
+                if (parent != null && BeforeMirrorWriteForTests != null)
+                {
+                    await BeforeMirrorWriteForTests(row.ParentClientId, row.ChildTenantId);
+                }
+
+                return parent;
+            },
+            skipWhenInSync: true, childClientsJustRead: childClients);
+
+        if (write == MirrorWriteResult.ParentMissing)
+        {
+            return await RemoveOrphanedMirrorAsync(parentRepo, parentSession, parentTenantId, row, childRepo,
+                childSession, missingKey);
+        }
+
+        MissingParentPasses.TryRemove(missingKey, out _);
+        if (write == MirrorWriteResult.InSync)
+        {
+            return MirrorReconcileOutcome.InSync;
+        }
+
+        await BumpTrackingRowAsync(parentRepo, parentSession, row);
+        await PublishCorsClientsUpdateAsync(row.ChildTenantId);
+
+        // Names only: never a secret value or hash.
+        logger.LogInformation(
+            "Reconciled client mirror: clientId='{ClientId}' parent='{ParentTenantId}' child='{ChildTenantId}' version={Version}",
+            row.ParentClientId, parentTenantId, row.ChildTenantId, row.SecretHashVersion);
+        return MirrorReconcileOutcome.Repaired;
+    }
+
+    private async Task<MirrorReconcileOutcome> ReconcileMissingMirrorAsync(ITenantRepository parentRepo,
+        IOctoSession parentSession, string parentTenantId, RtClientMirror row, ITenantRepository childRepo,
+        IOctoSession childSession, string missingKey)
+    {
+        var parent = await FindParentClientAsync(parentRepo, parentSession, row.ParentClientId);
+        if (parent == null)
+        {
+            return await RemoveOrphanedMirrorAsync(parentRepo, parentSession, parentTenantId, row, childRepo,
+                childSession, missingKey);
+        }
+
+        MissingParentPasses.TryRemove(missingKey, out _);
+
+        // Re-read the row right before the insert: a row removed in the meantime means "not mirrored any more".
+        var currentRow = await FindTrackingRowAsync(parentRepo, parentSession, row.ParentClientId, row.ChildTenantId);
+        if (currentRow == null || !currentRow.RtId.Equals(row.RtId))
+        {
+            return MirrorReconcileOutcome.Skipped;
+        }
+
+        if (BeforeMirrorInsertForTests != null)
+        {
+            await BeforeMirrorInsertForTests(row.ParentClientId);
+        }
+
+        var write = await ConvergeChildMirrorAsync(childRepo, childSession, parentTenantId, row.ParentClientId,
+            async () =>
+            {
+                if (BeforeMissingMirrorWriteForTests != null)
+                {
+                    await BeforeMissingMirrorWriteForTests(row.ParentClientId, row.ChildTenantId);
+                }
+
+                return parent;
+            }, skipWhenInSync: true);
+        if (write == MirrorWriteResult.InSync)
+        {
+            return MirrorReconcileOutcome.InSync;
+        }
+
+        try
+        {
+            // The versioned row write claims the insert: it fails when the row was removed or another replica
+            // repaired the same mirror first.
+            currentRow.SecretHashVersion += 1;
+            await parentRepo.ReplaceOneRtEntityByIdAsync(parentSession, currentRow.RtId, currentRow,
+                currentRow.RtVersion);
+        }
+        catch (Exception ex) when (ex is RtVersionConflictException or EntityNotFoundException &&
+                                   write.InsertedRtId != null)
+        {
+            await childRepo.DeleteOneRtEntityByRtIdAsync<RtClient>(childSession, write.InsertedRtId.Value,
+                DeleteOptions.Erase);
+            logger.LogDebug(
+                "Mirror reconciliation withdrew its insert of clientId='{ClientId}' in child '{ChildTenantId}': the tracking row changed",
+                row.ParentClientId, row.ChildTenantId);
+            return MirrorReconcileOutcome.Skipped;
+        }
+
+        await PublishCorsClientsUpdateAsync(row.ChildTenantId);
+        logger.LogInformation(
+            "Reconciled client mirror (re-created): clientId='{ClientId}' parent='{ParentTenantId}' child='{ChildTenantId}' version={Version}",
+            row.ParentClientId, parentTenantId, row.ChildTenantId, currentRow.SecretHashVersion);
+        return MirrorReconcileOutcome.Repaired;
+    }
+
+    private async Task<MirrorReconcileOutcome> RemoveOrphanedMirrorAsync(ITenantRepository parentRepo,
+        IOctoSession parentSession, string parentTenantId, RtClientMirror row, ITenantRepository childRepo,
+        IOctoSession childSession, string missingKey)
+    {
+        var passes = MissingParentPasses.AddOrUpdate(missingKey, 1, (_, n) => n + 1);
+        if (passes < MissingParentPassesBeforeRemoval)
+        {
+            logger.LogInformation(
+                "Mirror reconciliation: parent client '{ClientId}' of the mirror in '{ChildTenantId}' not found; removing it if still missing on the next pass",
+                row.ParentClientId, row.ChildTenantId);
+            return MirrorReconcileOutcome.Skipped;
+        }
+
+        foreach (var orphan in (await GetChildClientsAsync(childRepo, childSession, row.ParentClientId)).Where(c =>
+                     string.Equals(c.ProvisionedByParentTenantId, parentTenantId, StringComparison.OrdinalIgnoreCase)))
+        {
+            await childRepo.DeleteOneRtEntityByRtIdAsync<RtClient>(childSession, orphan.RtId, DeleteOptions.Erase);
+        }
+
+        await parentRepo.DeleteOneRtEntityByRtIdAsync<RtClientMirror>(parentSession, row.RtId, DeleteOptions.Erase);
+        MissingParentPasses.TryRemove(missingKey, out _);
+        await PublishCorsClientsUpdateAsync(row.ChildTenantId);
+        logger.LogWarning(
+            "Mirror reconciliation removed the mirror of deleted client '{ClientId}' (parent '{ParentTenantId}', child '{ChildTenantId}')",
+            row.ParentClientId, parentTenantId, row.ChildTenantId);
+        return MirrorReconcileOutcome.Removed;
+    }
+
+    /// <summary>The counter is informational; a concurrent bump wins and is not retried.</summary>
+    private async Task BumpTrackingRowAsync(ITenantRepository parentRepo, IOctoSession parentSession, RtClientMirror row)
+    {
+        try
+        {
+            row.SecretHashVersion += 1;
+            await parentRepo.ReplaceOneRtEntityByIdAsync(parentSession, row.RtId, row, row.RtVersion);
+        }
+        catch (RtVersionConflictException)
+        {
+            logger.LogDebug("Tracking row of clientId='{ClientId}' child='{ChildTenantId}' changed concurrently",
+                row.ParentClientId, row.ChildTenantId);
+        }
+    }
+
+    /// <summary>
+    ///     Records a mirror write of the immediate sync or the start-up provisioning on its tracking row (AB#8054). The row
+    ///     is written with the version it was read with, so the write advances <c>rtVersion</c> and the reconciliation's
+    ///     claim of a re-created mirror sees it. When this writer had to <b>insert</b> the mirror, the row write claims the
+    ///     insert: a row that changed (another writer re-created the same mirror) or vanished (<c>RemoveMirrorAsync</c>, the
+    ///     client delete cleanup) withdraws the inserted client again, so no duplicate and no untracked mirror stays behind.
+    ///     For a replaced or unchanged mirror a concurrent bump wins (the counter is informational).
+    /// </summary>
+    /// <returns><c>false</c> when the insert was withdrawn.</returns>
+    private async Task<bool> ClaimTrackingRowAsync(ITenantRepository parentRepo, IOctoSession parentSession,
+        RtClientMirror row, MirrorWriteResult write, ITenantRepository childRepo, IOctoSession childSession)
+    {
+        if (write.InsertedRtId == null)
+        {
+            if (write == MirrorWriteResult.Replaced)
+            {
+                await BumpTrackingRowAsync(parentRepo, parentSession, row);
+            }
+
+            return true;
+        }
+
+        try
+        {
+            row.SecretHashVersion += 1;
+            await parentRepo.ReplaceOneRtEntityByIdAsync(parentSession, row.RtId, row, row.RtVersion);
+            return true;
+        }
+        catch (Exception ex) when (ex is RtVersionConflictException or EntityNotFoundException)
+        {
+            await childRepo.DeleteOneRtEntityByRtIdAsync<RtClient>(childSession, write.InsertedRtId.Value,
+                DeleteOptions.Erase);
+            logger.LogDebug(
+                "Withdrew the insert of the mirror of clientId='{ClientId}' in child '{ChildTenantId}': the tracking row changed",
+                row.ParentClientId, row.ChildTenantId);
+            return false;
+        }
+    }
+
+    private static async Task<RtClient?> FindParentClientAsync(ITenantRepository parentRepo,
+        IOctoSession parentSession, string clientId) =>
+        (await parentRepo.GetRtEntitiesByTypeAsync<RtClient>(parentSession, ByClientId(clientId)))
+        .Items.FirstOrDefault(c => string.Equals(c.ClientId, clientId, StringComparison.Ordinal));
+
+    private static async Task<RtClientMirror?> FindTrackingRowAsync(ITenantRepository parentRepo,
+        IOctoSession parentSession, string parentClientId, string childTenantId) =>
+        (await parentRepo.GetRtEntitiesByTypeAsync<RtClientMirror>(parentSession, RtEntityQueryOptions.Create()
+            .FieldFilter(nameof(RtClientMirror.ParentClientId), FieldFilterOperator.Equals, parentClientId)
+            .FieldFilter(nameof(RtClientMirror.ChildTenantId), FieldFilterOperator.Equals, childTenantId)))
+        .Items.FirstOrDefault(r => string.Equals(r.ParentClientId, parentClientId, StringComparison.Ordinal) &&
+                                   string.Equals(r.ChildTenantId, childTenantId, StringComparison.OrdinalIgnoreCase));
+
+    private static async Task<List<RtClient>> GetChildClientsAsync(ITenantRepository childRepo,
+        IOctoSession childSession, string clientId) =>
+        (await childRepo.GetRtEntitiesByTypeAsync<RtClient>(childSession, ByClientId(clientId)))
+        .Items.Where(c => string.Equals(c.ClientId, clientId, StringComparison.Ordinal)).ToList();
+
+    private static RtEntityQueryOptions ByClientId(string clientId) => RtEntityQueryOptions.Create()
+        .FieldFilter(nameof(RtClient.ClientId), FieldFilterOperator.Equals, clientId);
+
+    /// <summary>
+    ///     <c>true</c> when the stored mirror differs from the desired one in any attribute of the client (secrets incl.
+    ///     expiry and own secret, claims, flags, lifetimes, URIs, …). Compared: every property <see cref="RtClient" />
+    ///     declares, i.e. every CK attribute; not compared: the entity's id, version, timestamps and other base fields.
+    ///     The mirror marker is compared case-insensitively (tenant ids are case-insensitive), lists as multisets,
+    ///     records by their attributes, an absent list like an empty one.
+    /// </summary>
+    internal static bool MirrorDiffers(RtClient desired, RtClient current)
+    {
+        foreach (var property in ComparedClientProperties)
+        {
+            var left = property.GetValue(desired);
+            var right = property.GetValue(current);
+            if (property.Name == nameof(RtClient.ProvisionedByParentTenantId))
+            {
+                if (!string.Equals(left as string, right as string, StringComparison.OrdinalIgnoreCase))
+                {
+                    return true;
+                }
+
+                continue;
+            }
+
+            if (!string.Equals(Normalize(left), Normalize(right), StringComparison.Ordinal))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private static readonly System.Reflection.PropertyInfo[] ComparedClientProperties = typeof(RtClient)
+        .GetProperties(System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.Public |
+                       System.Reflection.BindingFlags.DeclaredOnly)
+        .Where(p => p.CanRead && p.GetIndexParameters().Length == 0)
+        .ToArray();
+
+    /// <summary>Canonical text of an attribute value: lists sorted, records by their declared attributes, dates in UTC.</summary>
+    internal static string Normalize(object? value)
+    {
+        switch (value)
+        {
+            case null:
+                return string.Empty;
+            case string s:
+                return "s:" + s;
+            case DateTime dt:
+                return "d:" + dt.ToUniversalTime().Ticks.ToString(System.Globalization.CultureInfo.InvariantCulture);
+            case DateTimeOffset dto:
+                return "o:" + dto.UtcTicks.ToString(System.Globalization.CultureInfo.InvariantCulture);
+            case IFormattable f when value.GetType().IsPrimitive || value is decimal or TimeSpan || value.GetType().IsEnum:
+                return value.GetType().Name + ":" + f.ToString(null, System.Globalization.CultureInfo.InvariantCulture);
+            case bool b:
+                return b ? "b:1" : "b:0";
+            case System.Collections.IEnumerable items:
+                var parts = items.Cast<object?>().Select(Normalize).Order(StringComparer.Ordinal).ToList();
+                return parts.Count == 0 ? string.Empty : "[" + string.Join("\u001e", parts) + "]";
+            default:
+                var props = value.GetType()
+                    .GetProperties(System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.Public |
+                                   System.Reflection.BindingFlags.DeclaredOnly)
+                    .Where(p => p.CanRead && p.GetIndexParameters().Length == 0)
+                    .OrderBy(p => p.Name, StringComparer.Ordinal)
+                    .Select(p => p.Name + "=" + Normalize(p.GetValue(value)));
+                return "{" + string.Join("\u001f", props) + "}";
+        }
     }
 
     public async Task<ClientMirrorCleanupResult> RemoveMirrorsForClientAsync(
@@ -448,7 +1016,7 @@ public class ClientMirrorProvisioningService(
                 // expectation when clicking "Provision in existing tenants" is "make every
                 // flagged client present everywhere it should be", and this avoids
                 // duplicating the provisioning logic for the single-client case.
-                var perChildResult = await ProvisionForChildTenantAsync(parentTenantId, child.TenantId);
+                var perChildResult = await ProvisionForChildTenantCoreAsync(parentTenantId, child.TenantId);
                 newly += perChildResult.NewlyProvisioned;
                 present += perChildResult.AlreadyPresent;
             }
@@ -514,6 +1082,8 @@ public class ClientMirrorProvisioningService(
             throw new ArgumentException("Child tenant id is required.", nameof(childTenantId));
         }
 
+        await EnsureChildInParentSubtreeAsync(parentTenantId, childTenantId);
+
         var parentRepo = await systemContext.TryFindTenantRepositoryAsync(parentTenantId);
         if (parentRepo == null)
         {
@@ -574,6 +1144,8 @@ public class ClientMirrorProvisioningService(
             throw new ArgumentException("Child tenant id is required.", nameof(childTenantId));
         }
 
+        await EnsureChildInParentSubtreeAsync(parentTenantId, childTenantId);
+
         var parentRepo = await systemContext.TryFindTenantRepositoryAsync(parentTenantId);
         if (parentRepo == null)
         {
@@ -611,45 +1183,54 @@ public class ClientMirrorProvisioningService(
         }
 
         using var childSession = await childRepo.GetSessionAsync();
-        var existing = await childRepo.GetRtEntitiesByTypeAsync<RtClient>(
-            childSession,
-            RtEntityQueryOptions.Create()
-                .FieldFilter(nameof(RtClient.ClientId), FieldFilterOperator.Equals, parentClientId));
-        var childClient = existing.Items.FirstOrDefault();
-        if (childClient == null)
-        {
-            logger.LogWarning(
-                "Mirror secret rotation: client '{ClientId}' not present in child tenant '{ChildTenantId}' "
-                + "although a tracking row exists", parentClientId, childTenantId);
-            return null;
-        }
-
-        if (!ClientMirrorSecrets.IsConfidential(childClient))
-        {
-            return MirrorSecretRotationResult.PublicClient();
-        }
-
         var plaintext = ClientMirrorSecrets.GenerateSecret();
-        var replacement = ClientMirrorSecrets.CreateOwnSecretRecord(plaintext);
-
-        var secrets = childClient.ClientSecrets ?? new AttributeRecordValueList<RtSecretRecord>();
-        var retained = secrets.Where(s => !ClientMirrorSecrets.IsOwnSecret(s)).ToList();
-        var rebuilt = new AttributeRecordValueList<RtSecretRecord>();
-        foreach (var secret in retained)
+        for (var attempt = 1;; attempt++)
         {
-            rebuilt.Add(secret);
+            var childClient = (await GetChildClientsAsync(childRepo, childSession, parentClientId)).FirstOrDefault();
+            if (childClient == null)
+            {
+                logger.LogWarning(
+                    "Mirror secret rotation: client '{ClientId}' not present in child tenant '{ChildTenantId}' "
+                    + "although a tracking row exists", parentClientId, childTenantId);
+                return null;
+            }
+
+            if (!ClientMirrorSecrets.IsConfidential(childClient))
+            {
+                return MirrorSecretRotationResult.PublicClient();
+            }
+
+            var replacement = ClientMirrorSecrets.CreateOwnSecretRecord(plaintext);
+            var secrets = childClient.ClientSecrets ?? new AttributeRecordValueList<RtSecretRecord>();
+            var retained = secrets.Where(s => !ClientMirrorSecrets.IsOwnSecret(s)).ToList();
+            var rebuilt = new AttributeRecordValueList<RtSecretRecord>();
+            foreach (var secret in retained)
+            {
+                rebuilt.Add(secret);
+            }
+
+            rebuilt.Add(replacement);
+            childClient.ClientSecrets = rebuilt;
+            childClient.RequireClientSecret = true;
+
+            try
+            {
+                // AB#8019: version-checked, so the mirror reconciliation (which reads the mirror before it writes)
+                // can never write the previous own secret back over this one.
+                await childRepo.ReplaceOneRtEntityByIdAsync(childSession, childClient.RtId, childClient,
+                    childClient.RtVersion);
+                break;
+            }
+            catch (RtVersionConflictException) when (attempt < MaxMirrorWriteAttempts)
+            {
+                // Another writer changed the mirror: read it again and apply the new own secret on top.
+            }
         }
-
-        rebuilt.Add(replacement);
-        childClient.ClientSecrets = rebuilt;
-        childClient.RequireClientSecret = true;
-
-        await childRepo.ReplaceOneRtEntityByIdAsync(childSession, childClient.RtId, childClient);
 
         // Bump the same counter the parent-side rotation uses, so an operator reading the mirror
         // list can see that this pair moved.
-        mirrorRow.SecretHashVersion += 1;
-        await parentRepo.ReplaceOneRtEntityByIdAsync(parentSession, mirrorRow.RtId, mirrorRow);
+        // AB#8054: version-checked like every tracking-row write; a concurrent bump wins (the counter is informational).
+        await BumpTrackingRowAsync(parentRepo, parentSession, mirrorRow);
 
         // 🔴 The plaintext is deliberately absent from this line and from every other log statement.
         logger.LogInformation(
@@ -696,7 +1277,7 @@ public class ClientMirrorProvisioningService(
     /// </summary>
     /// <remarks>
     ///     The mirror's <b>own</b> secret (AB#5061) is not decided here — it depends on what the
-    ///     child tenant already holds, which only <see cref="UpsertClientInChildAsync" /> knows.
+    ///     child tenant already holds, which only <see cref="ConvergeChildMirrorAsync" /> knows.
     ///     This method produces the inherited state; that one reconciles the own secret on top.
     /// </remarks>
     private static RtClient CreateMirrorClient(string parentTenantId, RtClient parentClient)
@@ -781,55 +1362,88 @@ public class ClientMirrorProvisioningService(
     private static readonly OctoObjectId StableRtIdRangeEndExclusive =
         new("670000000000000000000000");
 
-    private async Task UpsertClientInChildAsync(
-        ITenantRepository childRepo, IOctoSession childSession, RtClient mirror)
+    /// <summary>Attempts of a version-checked mirror write before the conflict is reported to the caller.</summary>
+    internal const int MaxMirrorWriteAttempts = 5;
+
+    /// <summary>Outcome of <see cref="ConvergeChildMirrorAsync" />.</summary>
+    private sealed record MirrorWriteResult(string Kind, OctoObjectId? InsertedRtId = null)
     {
-        var queryOptions = RtEntityQueryOptions.Create()
-            .FieldFilter(nameof(RtClient.ClientId), FieldFilterOperator.Equals, mirror.ClientId);
-        var existing = await childRepo.GetRtEntitiesByTypeAsync<RtClient>(childSession, queryOptions);
-        var existingItems = existing.Items.ToList();
+        public static readonly MirrorWriteResult InSync = new("InSync");
+        public static readonly MirrorWriteResult ParentMissing = new("ParentMissing");
+        public static readonly MirrorWriteResult Replaced = new("Replaced");
+        public static MirrorWriteResult Inserted(OctoObjectId rtId) => new("Inserted", rtId);
+    }
 
-        if (existingItems.Count == 0)
+    /// <summary>
+    ///     The one write path of a child-tenant mirror (sync, start-up provisioning, reconciliation; AB#8019): read the
+    ///     child's clients of that id, then the parent client (<paramref name="readParent" />), derive the mirror
+    ///     (<see cref="CreateMirrorClient" /> + <see cref="ReconcileOwnSecret" />) and write it. No client yet: insert.
+    ///     Otherwise the canonical record (blueprint rtId range, else the first) is kept, duplicates are erased and the
+    ///     canonical one is replaced <b>with the version that was read</b>; a concurrent writer makes the replace fail,
+    ///     and the read-derive-write runs again (at most <see cref="MaxMirrorWriteAttempts" /> times, then the
+    ///     <see cref="RtVersionConflictException" /> reaches the caller). Every writer must use this path or another
+    ///     version-checked write: a plain replace does not advance <c>rtVersion</c> and would defeat the check.
+    /// </summary>
+    private async Task<MirrorWriteResult> ConvergeChildMirrorAsync(ITenantRepository childRepo,
+        IOctoSession childSession, string parentTenantId, string clientId, Func<Task<RtClient?>> readParent,
+        bool skipWhenInSync, List<RtClient>? childClientsJustRead = null)
+    {
+        for (var attempt = 1;; attempt++)
         {
-            ReconcileOwnSecret(mirror, existingChild: null, childRepo.TenantId);
-            await childRepo.InsertOneRtEntityAsync(childSession, mirror);
-            return;
-        }
-
-        // Multiple entries with the same OAuth ClientId are an inconsistent state — the
-        // protocol client lookup returns the first match and the other(s) become ghosts
-        // that fight back at every login attempt. Begdemo's 2026-06-19 stale staging/prod-URI
-        // copy alongside the freshly-applied blueprint client at 660…30 was the trigger to
-        // harden this path. The blueprint-managed entity (stable rtId 660…xx) is the canonical
-        // one — keep it and erase the rest. When no stable-rtId entry is found, fall back to
-        // the first match (preserves the original upsert semantics).
-        var canonical = existingItems.FirstOrDefault(IsBlueprintRtId)
-                        ?? existingItems[0];
-
-        if (existingItems.Count > 1)
-        {
-            foreach (var duplicate in existingItems)
+            // The caller may hand over the child read it just made (first attempt only; a retry always reads again).
+            var existingItems = attempt == 1 && childClientsJustRead != null
+                ? childClientsJustRead
+                : await GetChildClientsAsync(childRepo, childSession, clientId);
+            var parentClient = await readParent();
+            if (parentClient == null)
             {
-                if (duplicate.RtId.Equals(canonical.RtId))
-                {
-                    continue;
-                }
+                return MirrorWriteResult.ParentMissing;
+            }
 
+            var mirror = CreateMirrorClient(parentTenantId, parentClient);
+            if (existingItems.Count == 0)
+            {
+                ReconcileOwnSecret(mirror, existingChild: null, childRepo.TenantId);
+                await childRepo.InsertOneRtEntityAsync(childSession, mirror);
+                return MirrorWriteResult.Inserted(mirror.RtId);
+            }
+
+            // Multiple entries with the same OAuth ClientId are an inconsistent state — the
+            // protocol client lookup returns the first match and the other(s) become ghosts
+            // that fight back at every login attempt. Begdemo's 2026-06-19 stale staging/prod-URI
+            // copy alongside the freshly-applied blueprint client at 660…30 was the trigger to
+            // harden this path. The blueprint-managed entity (stable rtId 660…xx) is the canonical
+            // one — keep it and erase the rest. When no stable-rtId entry is found, fall back to
+            // the first match (preserves the original upsert semantics).
+            var canonical = existingItems.FirstOrDefault(IsBlueprintRtId) ?? existingItems[0];
+            foreach (var duplicate in existingItems.Where(d => !d.RtId.Equals(canonical.RtId)))
+            {
                 logger.LogWarning(
                     "Removing duplicate RtClient with clientId='{ClientId}' rtId='{RtId}' from tenant '{TenantId}': "
                     + "keeping canonical rtId='{CanonicalRtId}' (blueprint-stable={IsBlueprintStable}).",
-                    mirror.ClientId, duplicate.RtId, childRepo.TenantId, canonical.RtId,
-                    IsBlueprintRtId(canonical));
+                    mirror.ClientId, duplicate.RtId, childRepo.TenantId, canonical.RtId, IsBlueprintRtId(canonical));
+                await childRepo.DeleteOneRtEntityByRtIdAsync<RtClient>(childSession, duplicate.RtId,
+                    DeleteOptions.Erase);
+            }
 
-                await childRepo.DeleteOneRtEntityByRtIdAsync<RtClient>(
-                    childSession, duplicate.RtId, DeleteOptions.Erase);
+            // Reuse the canonical RtId on the child side; secret/scope changes still propagate.
+            mirror.RtId = canonical.RtId;
+            ReconcileOwnSecret(mirror, canonical, childRepo.TenantId);
+            if (skipWhenInSync && existingItems.Count == 1 && !MirrorDiffers(mirror, canonical))
+            {
+                return MirrorWriteResult.InSync;
+            }
+
+            try
+            {
+                await childRepo.ReplaceOneRtEntityByIdAsync(childSession, canonical.RtId, mirror, canonical.RtVersion);
+                return MirrorWriteResult.Replaced;
+            }
+            catch (RtVersionConflictException) when (attempt < MaxMirrorWriteAttempts)
+            {
+                // Another writer changed the mirror after our read: read child and parent again and re-derive.
             }
         }
-
-        // Reuse the canonical RtId on the child side; secret/scope changes still propagate.
-        mirror.RtId = canonical.RtId;
-        ReconcileOwnSecret(mirror, canonical, childRepo.TenantId);
-        await childRepo.ReplaceOneRtEntityByIdAsync(childSession, mirror.RtId, mirror);
     }
 
     /// <summary>
@@ -870,7 +1484,8 @@ public class ClientMirrorProvisioningService(
             {
                 Type = carriedOver.Type,
                 Value = carriedOver.Value,
-                Description = carriedOver.Description
+                Description = carriedOver.Description,
+                ExpirationDateTime = carriedOver.ExpirationDateTime
             });
             return;
         }
@@ -902,11 +1517,14 @@ public class ClientMirrorProvisioningService(
 
         foreach (var secret in source)
         {
+            // The expiry travels too (AB#8019): without it a parent secret that expired kept authenticating in every
+            // child tenant, because the token endpoint skips expired records only.
             copy.Add(new RtSecretRecord
             {
                 Type = secret.Type,
                 Value = secret.Value,
-                Description = secret.Description
+                Description = secret.Description,
+                ExpirationDateTime = secret.ExpirationDateTime
             });
         }
 

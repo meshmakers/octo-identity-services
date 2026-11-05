@@ -1,6 +1,8 @@
+using Microsoft.Extensions.Configuration;
 using IdentityServerPersistence.Configuration.DependencyInjection;
 using IdentityServerPersistence.Configuration.Options;
 using IdentityServerPersistence.Services;
+using IdentityServerPersistence.Services.ScratchTenants;
 using IdentityServerPersistence.Services.Admin;
 using IdentityServerPersistence.Services.Login;
 using IdentityServerPersistence.Services.SelfService;
@@ -15,7 +17,7 @@ using Meshmakers.Octo.Runtime.Engine.Configuration.DependencyInjection;
 using Meshmakers.Octo.Services.Infrastructure;
 using Meshmakers.Octo.Services.Infrastructure.Services;
 using Microsoft.Extensions.Logging;
-using Persistence.IdentityCkModel.Generated.System.Identity.v2;
+using Persistence.IdentityCkModel.Generated.System.Identity.v3;
 
 // ReSharper disable once CheckNamespace
 namespace Microsoft.Extensions.DependencyInjection;
@@ -46,7 +48,7 @@ public static class RuntimeEngineBuilderExtensions
         builder.AddMongoBlueprintSupport();
 
         // Add the construction kits as embedded repository
-        builder.Services.AddCkModelSystemIdentityV2();
+        builder.Services.AddCkModelSystemIdentityV3();
 
         // Phase 3 PR #3: Identity-specific blueprint variable provider. Replaces the engine's
         // default IBlueprintVariableProvider (which is TryAdded inside AddRuntimeEngine) with
@@ -79,12 +81,20 @@ public static class RuntimeEngineBuilderExtensions
         builder.Services.AddScoped<IGroupRoleResolver, GroupRoleResolver>();
         builder.Services.AddScoped<IClientRoleStore, ClientRoleStore>();
         builder.Services.AddScoped<ICrossTenantAuthenticationService, CrossTenantAuthenticationService>();
+        // AB#7804: verifies the second factor of a cross-tenant user against the SOURCE tenant (lockout included).
+        builder.Services.AddScoped<ICrossTenantSecondFactorVerifier, CrossTenantSecondFactorVerifier>();
         builder.Services.AddScoped<ICrossTenantUserProvisioningService, CrossTenantUserProvisioningService>();
         // AB#6307: AllowedTenantsResolver caches the tenant registry and mapping lookups process-wide.
         builder.Services.AddMemoryCache();
         // AB#6393: the cached tenant registry (id -> registry entry) is shared by AllowedTenantsResolver and
         // CrossTenantAuthenticationService for lightweight repository access.
         builder.Services.AddScoped<ITenantRegistry, TenantRegistry>();
+        // AB#8177: one broken tenant database (e.g. its MongoDB user is missing) must not slow every token request:
+        // the per-request probes of other tenants' databases are bounded and circuit-broken per tenant, process-wide.
+        // Configuration is optional (hosts of the integration tests register none): defaults apply without it.
+        builder.Services.AddOptions<TenantProbeGuardOptions>().Configure<IServiceProvider>((options, sp) =>
+            sp.GetService<IConfiguration>()?.GetSection(TenantProbeGuardOptions.SectionName).Bind(options));
+        builder.Services.AddSingleton<ITenantProbeGuard, TenantProbeGuard>();
         builder.Services.AddScoped<IAllowedTenantsResolver, AllowedTenantsResolver>();
         builder.Services.AddScoped<IEmailDomainGroupRuleStore, EmailDomainGroupRuleStore>();
         builder.Services.AddScoped<ILoginGroupAssignmentService, LoginGroupAssignmentService>();
@@ -93,7 +103,14 @@ public static class RuntimeEngineBuilderExtensions
         builder.Services
             .AddScoped<IEntraIdVerifiedIdentifierEnrollmentService, EntraIdVerifiedIdentifierEnrollmentService>();
         builder.Services.AddScoped<ITenantDiscoveryService, TenantDiscoveryService>();
+        // AB#7044: tenant-topology endpoint; the per-scope snapshot lives in the shared IMemoryCache.
+        builder.Services.AddScoped<ITenantTopologyService, TenantTopologyService>();
+        // AB#7192: the creator grant of scratch tenants (TenantOwners for the creator's mirror), re-applied by the tenant
+        // setup and by every mirror provisioning, and revoked for good when the group membership is removed.
+        builder.Services.AddScoped<IScratchTenantGrantService, ScratchTenantGrantService>();
         builder.Services.AddScoped<IClientMirrorProvisioningService, ClientMirrorProvisioningService>();
+        // AB#8019: one pass of the periodic mirror reconciliation (compensation for a failed best-effort mirror sync).
+        builder.Services.AddScoped<IClientMirrorReconciliationJob, ClientMirrorReconciliationJob>();
         // AB#5026 delegation ("on-behalf-of"): the protocol-free policy behind OnBehalfOfProcessor.
         builder.Services.AddScoped<IDelegatedIdentityResolver, DelegatedIdentityResolver>();
         // AB#5114 impersonation: the MayActAs edge store and the protocol-free policy behind
@@ -164,12 +181,18 @@ public static class RuntimeEngineBuilderExtensions
             .AddIdentity<RtUser, RtRole>(setupAction ?? null!)
             .AddRoleStore<OctoRoleStore>()
             .AddUserStore<OctoUserStore>()
-            .AddUserManager<UserManager<RtUser>>()
+            // AB#7854: atomic failure counting and reset (OctoUserManager overrides AccessFailedAsync).
+            .AddUserManager<OctoUserManager>()
             .AddRoleManager<RoleManager<RtRole>>()
             .AddDefaultTokenProviders()
             .AddErrorDescriber<OctoErrorDescriber>()
             // AB#5708: xt_ shadow users never get a local password, whichever endpoint tries to set one.
             .AddPasswordValidator<ShadowUserPasswordValidator>();
+
+        // AB#7859: the periodic security-stamp revalidation rebuilds the session principal from the user; keep the
+        // claims that describe the sign-in (amr=mfa, idp, sid), or 2FA users lose their evidence after 30 minutes.
+        builder.Services.Configure<SecurityStampValidatorOptions>(options =>
+            options.OnRefreshingPrincipal = SessionClaimPreservation.OnRefreshingPrincipalAsync);
 
         if (builder.RoleType != null)
         {

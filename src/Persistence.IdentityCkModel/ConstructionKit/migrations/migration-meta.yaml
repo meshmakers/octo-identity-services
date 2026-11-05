@@ -1,8 +1,123 @@
 $schema: https://schemas.meshmakers.cloud/ck-migration-meta.schema.json
-ckModelId: System.Identity-2.19.0
+# AB#8157 - 2.x -> 3.0.1 is a model-only major (AB#8053: identity-owned User attributes become access MethodOnly, CreateUser-1 gets
+# replacesGenericCreate; no ids, types, defaults or stored values change). The CK engine refuses a schema-only bridge across a major
+# (CkMigrationMajorVersionGuard, AB#4924 G3), so 3.0.0 - which shipped without an entry - stopped every tenant upgrade. One entry per
+# 2.x minor from 2.9.0 on points at the same empty script (steps: []). Tenants below 2.9.0 take the 2.8.0 -> 2.9.0 data migration first
+# (the chain 2.8.0 -> 2.9.0 -> 3.0.1). Whoever publishes another System.Identity 2.x on a release line must extend this list.
+ckModelId: System.Identity-3.0.1
 migrations:
   - fromVersion: "2.8.0"
     toVersion: "2.9.0"
     scriptPath: 2.8.0-to-2.9.0.yaml
     description: "Lift Client URI list attributes from StringArray to RecordArray<ClientUriEntry> (AB#4209 Step 1)"
     breaking: false
+  - fromVersion: "2.9.0"
+    toVersion: "3.0.1"
+    scriptPath: 2.x-to-3.0.1.yaml
+    description: "System.Identity 3.x: identity-owned User attributes access MethodOnly, CreateUser-1 replacesGenericCreate; no data migration - entry point for 2.9.0"
+    breaking: true
+  - fromVersion: "2.10.0"
+    toVersion: "3.0.1"
+    scriptPath: 2.x-to-3.0.1.yaml
+    description: "System.Identity 3.x: identity-owned User attributes access MethodOnly, CreateUser-1 replacesGenericCreate; no data migration - entry point for 2.10.0"
+    breaking: true
+  - fromVersion: "2.11.0"
+    toVersion: "3.0.1"
+    scriptPath: 2.x-to-3.0.1.yaml
+    description: "System.Identity 3.x: identity-owned User attributes access MethodOnly, CreateUser-1 replacesGenericCreate; no data migration - entry point for 2.11.0"
+    breaking: true
+  - fromVersion: "2.12.0"
+    toVersion: "3.0.1"
+    scriptPath: 2.x-to-3.0.1.yaml
+    description: "System.Identity 3.x: identity-owned User attributes access MethodOnly, CreateUser-1 replacesGenericCreate; no data migration - entry point for 2.12.0"
+    breaking: true
+  - fromVersion: "2.13.0"
+    toVersion: "3.0.1"
+    scriptPath: 2.x-to-3.0.1.yaml
+    description: "System.Identity 3.x: identity-owned User attributes access MethodOnly, CreateUser-1 replacesGenericCreate; no data migration - entry point for 2.13.0"
+    breaking: true
+  - fromVersion: "2.14.0"
+    toVersion: "3.0.1"
+    scriptPath: 2.x-to-3.0.1.yaml
+    description: "System.Identity 3.x: identity-owned User attributes access MethodOnly, CreateUser-1 replacesGenericCreate; no data migration - entry point for 2.14.0"
+    breaking: true
+  - fromVersion: "2.15.0"
+    toVersion: "3.0.1"
+    scriptPath: 2.x-to-3.0.1.yaml
+    description: "System.Identity 3.x: identity-owned User attributes access MethodOnly, CreateUser-1 replacesGenericCreate; no data migration - entry point for 2.15.0"
+    breaking: true
+  - fromVersion: "2.16.0"
+    toVersion: "3.0.1"
+    scriptPath: 2.x-to-3.0.1.yaml
+    description: "System.Identity 3.x: identity-owned User attributes access MethodOnly, CreateUser-1 replacesGenericCreate; no data migration - entry point for 2.16.0"
+    breaking: true
+  - fromVersion: "2.17.0"
+    toVersion: "3.0.1"
+    scriptPath: 2.x-to-3.0.1.yaml
+    description: "System.Identity 3.x: identity-owned User attributes access MethodOnly, CreateUser-1 replacesGenericCreate; no data migration - entry point for 2.17.0"
+    breaking: true
+  - fromVersion: "2.18.0"
+    toVersion: "3.0.1"
+    scriptPath: 2.x-to-3.0.1.yaml
+    description: "System.Identity 3.x: identity-owned User attributes access MethodOnly, CreateUser-1 replacesGenericCreate; no data migration - entry point for 2.18.0"
+    breaking: true
+  - fromVersion: "2.19.0"
+    toVersion: "3.0.1"
+    scriptPath: 2.x-to-3.0.1.yaml
+    description: "System.Identity 3.x: identity-owned User attributes access MethodOnly, CreateUser-1 replacesGenericCreate; no data migration - entry point for 2.19.0"
+    breaking: true
+  - fromVersion: "2.20.0"
+    toVersion: "3.0.1"
+    scriptPath: 2.x-to-3.0.1.yaml
+    description: "System.Identity 3.x: identity-owned User attributes access MethodOnly, CreateUser-1 replacesGenericCreate; no data migration - entry point for 2.20.0"
+    breaking: true
+  - fromVersion: "2.21.0"
+    toVersion: "3.0.1"
+    scriptPath: 2.x-to-3.0.1.yaml
+    description: "System.Identity 3.x: identity-owned User attributes access MethodOnly, CreateUser-1 replacesGenericCreate; no data migration - entry point for 2.21.0"
+    breaking: true
+  - fromVersion: "2.22.0"
+    toVersion: "3.0.1"
+    scriptPath: 2.x-to-3.0.1.yaml
+    description: "System.Identity 3.x: identity-owned User attributes access MethodOnly, CreateUser-1 replacesGenericCreate; no data migration - entry point for 2.22.0"
+    breaking: true
+  - fromVersion: "2.23.0"
+    toVersion: "3.0.1"
+    scriptPath: 2.x-to-3.0.1.yaml
+    description: "System.Identity 3.x: identity-owned User attributes access MethodOnly, CreateUser-1 replacesGenericCreate; no data migration - entry point for 2.23.0"
+    breaking: true
+  - fromVersion: "2.24.0"
+    toVersion: "3.0.1"
+    scriptPath: 2.x-to-3.0.1.yaml
+    description: "System.Identity 3.x: identity-owned User attributes access MethodOnly, CreateUser-1 replacesGenericCreate; no data migration - entry point for 2.24.0"
+    breaking: true
+  - fromVersion: "2.25.0"
+    toVersion: "3.0.1"
+    scriptPath: 2.x-to-3.0.1.yaml
+    description: "System.Identity 3.x: identity-owned User attributes access MethodOnly, CreateUser-1 replacesGenericCreate; no data migration - entry point for 2.25.0"
+    breaking: true
+  - fromVersion: "2.26.0"
+    toVersion: "3.0.1"
+    scriptPath: 2.x-to-3.0.1.yaml
+    description: "System.Identity 3.x: identity-owned User attributes access MethodOnly, CreateUser-1 replacesGenericCreate; no data migration - entry point for 2.26.0"
+    breaking: true
+  - fromVersion: "2.27.0"
+    toVersion: "3.0.1"
+    scriptPath: 2.x-to-3.0.1.yaml
+    description: "System.Identity 3.x: identity-owned User attributes access MethodOnly, CreateUser-1 replacesGenericCreate; no data migration - entry point for 2.27.0"
+    breaking: true
+  - fromVersion: "2.28.0"
+    toVersion: "3.0.1"
+    scriptPath: 2.x-to-3.0.1.yaml
+    description: "System.Identity 3.x: identity-owned User attributes access MethodOnly, CreateUser-1 replacesGenericCreate; no data migration - entry point for 2.28.0"
+    breaking: true
+  - fromVersion: "2.29.0"
+    toVersion: "3.0.1"
+    scriptPath: 2.x-to-3.0.1.yaml
+    description: "System.Identity 3.x: identity-owned User attributes access MethodOnly, CreateUser-1 replacesGenericCreate; no data migration - entry point for 2.29.0"
+    breaking: true
+  - fromVersion: "2.30.0"
+    toVersion: "3.0.1"
+    scriptPath: 2.x-to-3.0.1.yaml
+    description: "System.Identity 3.x: identity-owned User attributes access MethodOnly, CreateUser-1 replacesGenericCreate; no data migration - entry point for 2.30.0"
+    breaking: true

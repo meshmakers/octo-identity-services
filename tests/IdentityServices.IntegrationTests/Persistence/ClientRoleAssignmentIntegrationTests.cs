@@ -10,7 +10,7 @@ using Meshmakers.Octo.Runtime.Contracts.Repositories.Query;
 using Meshmakers.Octo.Runtime.Contracts.RepositoryEntities;
 using Meshmakers.Octo.Services.Infrastructure.Services;
 using Microsoft.Extensions.Logging.Abstractions;
-using Persistence.IdentityCkModel.Generated.System.Identity.v2;
+using Persistence.IdentityCkModel.Generated.System.Identity.v3;
 using Xunit;
 
 namespace IdentityServices.IntegrationTests.Persistence;
@@ -51,6 +51,33 @@ public class ClientRoleAssignmentIntegrationTests : IClassFixture<IdentityServic
 
         direct.Should().Contain(roleRtId.ToString());
         effective.Should().Contain(roleName);
+    }
+
+    /// <summary>
+    ///     AB#7928: <c>ApplyRoleChangesAsync</c> writes only the given additions and removals. A role it was not asked to
+    ///     add is never inserted, so a role removed by a concurrent request is not restored behind the guard's back.
+    /// </summary>
+    [Fact]
+    public async Task ApplyRoleChanges_WritesOnlyTheGivenDifference_AndNeverRestoresAnUnlistedRole()
+    {
+        await _fixture.InitializeAsync();
+        await EnsureSystemSetupAsync();
+        var (clientRoleStore, _, repo) = CreateStores();
+
+        var kept = await CreateRoleAsync(repo, NewId("rKeep"));
+        var removed = await CreateRoleAsync(repo, NewId("rRemove"));
+        var added = await CreateRoleAsync(repo, NewId("rAdd"));
+        var vanished = await CreateRoleAsync(repo, NewId("rVanished"));
+        var clientRtId = await CreateClientAsync(repo, NewId("apply"));
+        await clientRoleStore.SetRoleIdsAsync(clientRtId, [kept.ToString(), removed.ToString()]);
+
+        // "vanished" is neither held nor listed as an addition: it must not appear; removing a role the client does not
+        // hold and adding one it already holds are no-ops
+        await clientRoleStore.ApplyRoleChangesAsync(clientRtId, [added.ToString(), kept.ToString()],
+            [removed.ToString(), vanished.ToString()]);
+
+        (await clientRoleStore.GetDirectRoleIdsAsync(clientRtId)).Should()
+            .BeEquivalentTo(kept.ToString(), added.ToString());
     }
 
     [Fact]

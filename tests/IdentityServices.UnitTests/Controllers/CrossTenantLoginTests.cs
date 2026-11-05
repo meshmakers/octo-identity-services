@@ -19,7 +19,8 @@ using Microsoft.AspNetCore.Routing;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using NSubstitute;
-using Persistence.IdentityCkModel.Generated.System.Identity.v2;
+using Persistence.IdentityCkModel.Generated.System.Identity.v3;
+using Shared.TestUtilities.Fakes;
 using Xunit;
 
 namespace IdentityServices.UnitTests.Controllers;
@@ -44,7 +45,7 @@ public class CrossTenantLoginTests
         var schemeProvider = Substitute.For<Microsoft.AspNetCore.Authentication.IAuthenticationSchemeProvider>();
         var clientStore = Substitute.For<IdentityServerPersistence.SystemStores.IOctoClientStore>();
         _events = Substitute.For<IIdentityAuditService>();
-        var persistedGrantStore = Substitute.For<IOpenIddictTokenStore<Persistence.IdentityCkModel.Generated.System.Identity.v2.RtOAuthToken>>();
+        var persistedGrantStore = Substitute.For<IOpenIddictTokenStore<Persistence.IdentityCkModel.Generated.System.Identity.v3.RtOAuthToken>>();
         var ldapAuthService = Substitute.For<ILdapAuthenticationService>();
         _crossTenantAuthService = Substitute.For<ICrossTenantAuthenticationService>();
         _externalTenantUserMappingStore = Substitute.For<IExternalTenantUserMappingStore>();
@@ -95,7 +96,17 @@ public class CrossTenantLoginTests
             Substitute.For<IEntraIdVerifiedIdentifierEnrollmentService>(),
             _dataProtectionProvider,
             _crossTenantUserProvisioningService,
+            Substitute.For<ICrossTenantSecondFactorVerifier>(),
+            new RegisteredTenantsShadowUserChainResolver("OctoSystem"),
+            Substitute.For<IOptionsMonitor<Microsoft.AspNetCore.Authentication.Cookies.CookieAuthenticationOptions>>(),
             Options.Create(new OctoSystemConfiguration { SystemTenantId = "OctoSystem" }),
+            Substitute.For<Meshmakers.Octo.Backend.IdentityServices.Services.IUserCredentialChangeService>(),
+            new Meshmakers.Octo.Backend.IdentityServices.Services.CrossTenantChallengeReplayGuard(
+                new Microsoft.Extensions.Caching.Memory.MemoryCache(
+                    new Microsoft.Extensions.Caching.Memory.MemoryCacheOptions())),
+
+            new Meshmakers.Octo.Backend.IdentityServices.Services.SignInRateLimiter(
+                Options.Create(new IdentityServerPersistence.Configuration.Options.OctoIdentityServicesOptions())),
             logger);
     }
 
@@ -184,9 +195,67 @@ public class CrossTenantLoginTests
         result.Result.Should().BeOfType<ForbidResult>();
     }
 
+    [Theory]
+    [InlineData(false, false)]
+    [InlineData(true, true)]
+    public async Task GetCrossTenantToken_SourceUserWithTwoFactor_NeedsSecondFactorEvidence(bool sessionHasMfa,
+        bool expectToken)
+    {
+        // AB#7804: amr=mfa on the source session is the evidence.
+        var userId = Guid.NewGuid().ToString("N");
+        var claims = new List<Claim> { new("sub", userId), new(ClaimTypes.Name, "admin") };
+        claims.Add(new Claim("amr", sessionHasMfa ? "mfa" : "pwd"));
+        SetupControllerContext("OctoSystem", new ClaimsPrincipal(new ClaimsIdentity(claims, "TestAuth")));
+        _crossTenantAuthService.ValidateCrossTenantAccessAsync("meshtest", "OctoSystem", userId)
+            .Returns(new CrossTenantAuthResult
+            {
+                SourceTenantId = "OctoSystem",
+                SourceUserId = userId,
+                SourceUserName = "admin",
+                SourceUserRequiresSecondFactor = true
+            });
+
+        var result = await _sut.GetCrossTenantToken(new CrossTenantTokenRequestDto { TargetTenantId = "meshtest" });
+
+        if (expectToken)
+        {
+            result.Value!.Token.Should().NotBeNullOrEmpty();
+        }
+        else
+        {
+            result.Result.Should().BeOfType<ForbidResult>();
+        }
+    }
+
     #endregion
 
     #region CrossTenantLogin Tests
+
+    [Fact]
+    public async Task PasswordLogin_SourceUserWithTwoFactor_WhoseOptionsCannotBeRead_GetsNoSession()
+    {
+        // AB#7861: the source user needs a second factor, but its options cannot be read (user gone, tenant
+        // unreadable). Neither a challenge nor a session: the login fails like a wrong password.
+        SetupControllerContext("meshtest");
+        _signInManager.PasswordSignInAsync("admin", "secret", false, true)
+            .Returns(Microsoft.AspNetCore.Identity.SignInResult.Failed);
+        _crossTenantAuthService.AuthenticateAsync("meshtest", "admin", "secret").Returns(new CrossTenantAuthResult
+        {
+            SourceTenantId = "OctoSystem",
+            SourceUserId = Guid.NewGuid().ToString("N"),
+            SourceUserName = "admin",
+            SourceUserRequiresSecondFactor = true
+        });
+        _identityProviderStore.GetAllAsync().Returns(Array.Empty<RtIdentityProvider>());
+        // ICrossTenantSecondFactorVerifier is a bare substitute: GetOptionsAsync answers null.
+
+        var result = await _sut.Login(new LoginRequestDto { Username = "admin", Password = "secret" });
+
+        result.Value!.Success.Should().BeFalse();
+        result.Value.RequiresTwoFactor.Should().BeFalse("no challenge without readable second-factor options");
+        await _signInManager.DidNotReceiveWithAnyArgs().SignInAsync(default!, default(bool), default);
+        await _signInManager.DidNotReceiveWithAnyArgs().SignInWithClaimsAsync(default!, default(bool), default!);
+    }
 
     [Fact]
     public async Task CrossTenantLogin_WithValidToken_Succeeds()

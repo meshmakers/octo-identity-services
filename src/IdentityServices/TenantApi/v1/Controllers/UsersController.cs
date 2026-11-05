@@ -4,6 +4,8 @@ using Asp.Versioning;
 using IdentityServerPersistence;
 using IdentityServerPersistence.Services;
 using IdentityServerPersistence.SystemStores;
+using Meshmakers.Octo.Backend.IdentityServices.Authorization.RoleChange;
+using Meshmakers.Octo.Backend.IdentityServices.OpenIddict;
 using Meshmakers.Octo.Backend.IdentityServices.Services;
 using Meshmakers.Octo.Communication.Contracts.DataTransferObjects;
 using Meshmakers.Octo.Communication.Contracts.DataTransferObjects.ApiErrors;
@@ -14,7 +16,7 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Mvc;
 using MongoDB.Bson;
-using Persistence.IdentityCkModel.Generated.System.Identity.v2;
+using Persistence.IdentityCkModel.Generated.System.Identity.v3;
 using Meshmakers.Octo.Backend.Authentication;
 using Meshmakers.Octo.Backend.IdentityServices.Mapping;
 
@@ -41,6 +43,10 @@ public class UsersController : ControllerBase
     private readonly IUserEmailInteractionService _userEmailInteractionService;
     private readonly UserManager<RtUser> _userManager;
     private readonly OctoUserStore _octoUserStore;
+    private readonly IUserCredentialChangeService _userCredentialChangeService;
+    private readonly IUserSessionRevocationService _userSessionRevocationService;
+    private readonly IRoleChangeGuard _roleChangeGuard;
+    private readonly IIdentityAuditService _identityAuditService;
 
     /// <summary>
     ///     Constructor
@@ -50,6 +56,10 @@ public class UsersController : ControllerBase
     /// <param name="multiTenancyResolverService">Multi-tenancy resolver service</param>
     /// <param name="userEmailInteractionService"></param>
     /// <param name="userStore">The user store for direct role queries</param>
+    /// <param name="userCredentialChangeService">Revokes sessions after a password change</param>
+    /// <param name="userSessionRevocationService">Revokes all sessions and tokens of a user (AB#7899)</param>
+    /// <param name="roleChangeGuard">Self-grant, role-not-held and last-administrator rules (AB#7914)</param>
+    /// <param name="identityAuditService">Audit of refused role changes</param>
     /// <param name="logger">Logger</param>
     public UsersController(
         UserManager<RtUser> userManager,
@@ -57,6 +67,10 @@ public class UsersController : ControllerBase
         IMultiTenancyResolverService multiTenancyResolverService,
         IUserEmailInteractionService userEmailInteractionService,
         IUserStore<RtUser> userStore,
+        IUserCredentialChangeService userCredentialChangeService,
+        IUserSessionRevocationService userSessionRevocationService,
+        IRoleChangeGuard roleChangeGuard,
+        IIdentityAuditService identityAuditService,
         ILogger<UsersController> logger)
     {
         _userManager = userManager;
@@ -64,6 +78,10 @@ public class UsersController : ControllerBase
         _multiTenancyResolverService = multiTenancyResolverService;
         _userEmailInteractionService = userEmailInteractionService;
         _octoUserStore = (OctoUserStore)userStore;
+        _userCredentialChangeService = userCredentialChangeService;
+        _userSessionRevocationService = userSessionRevocationService;
+        _roleChangeGuard = roleChangeGuard;
+        _identityAuditService = identityAuditService;
         _logger = logger;
     }
 
@@ -256,10 +274,15 @@ public class UsersController : ControllerBase
     [HttpPost]
     [Authorize(IdentityServiceConstants.IdentityUserAdministrationWritePolicy)]
     [EndpointSummary("Creates a new user.")]
+    [EndpointDescription("Refuses a user name or an e-mail address another user of the tenant already has (case-insensitive) " +
+                         "with 409 application/problem+json, code USER_ALREADY_EXISTS, field userName or email - the same " +
+                         "rule as the CK method User.CreateUser-1. A taken user name wins over a taken e-mail address.")]
     [ProducesResponseType(StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status409Conflict)]
     public async Task<IActionResult> Post(
         [Required] [FromBody] [Description("The user data transfer object instance")]
-        RegisterUserDto userDto)
+        RegisterUserDto userDto,
+        [FromServices] IUserCreationService userCreationService)
     {
         if (!ModelState.IsValid)
         {
@@ -275,33 +298,28 @@ public class UsersController : ControllerBase
 
         try
         {
-            IdentityResult result;
-            if (!string.IsNullOrWhiteSpace(userDto.Password))
-            {
-                // Atomic: the password is validated BEFORE the user is persisted,
-                // so a policy failure never leaves an orphaned user (AB#4503).
-                result = await _userManager.CreateAsync(rtUser, userDto.Password);
-            }
-            else
-            {
-                result = await _userManager.CreateAsync(rtUser);
-            }
-
+            // AB#7777: the same creation as the CK method User.CreateUser-1 (user manager, then the welcome notification).
+            // With a password it is validated before the user is stored, so a policy failure never leaves a user (AB#4503).
+            var result = await userCreationService.CreateAsync(_multiTenancyResolverService.GetTenantId(), rtUser,
+                userDto.Password);
             if (!result.Succeeded)
             {
+                // AB#8083: a duplicate user name is a conflict with the same code as the method (USER_ALREADY_EXISTS,
+                // field userName), like the e-mail (AB#8064). Logged without the name or address.
+                if (result.Errors.Any(e => e.Code == nameof(IdentityErrorDescriber.DuplicateUserName)))
+                {
+                    _logger.LogInformation("Create user refused: another user of the tenant has the same user name");
+                    return UserCreationProblems.DuplicateUserName();
+                }
+
+                if (result.Errors.Any(e => e.Code == nameof(IdentityErrorDescriber.DuplicateEmail)))
+                {
+                    _logger.LogInformation("Create user refused: another user of the tenant has the same e-mail address");
+                    return UserCreationProblems.DuplicateEmail();
+                }
+
                 LogIdentityError("Create user", result.Errors);
                 return GetBadRequestResultWithErrorDescription("Creation of user failed", result.Errors);
-            }
-
-            if (!string.IsNullOrWhiteSpace(userDto.Password))
-            {
-                await _userEmailInteractionService.SendWelcomeNotificationAsync(
-                    _multiTenancyResolverService.GetTenantId(), rtUser);
-            }
-            else
-            {
-                await _userEmailInteractionService.SendWelcomeNotificationWithoutPasswordAsync(
-                    _multiTenancyResolverService.GetTenantId(), rtUser);
             }
 
             return Ok();
@@ -316,7 +334,12 @@ public class UsersController : ControllerBase
     [HttpPut("{userName}")]
     [Authorize(IdentityServiceConstants.IdentityUserAdministrationWritePolicy)]
     [EndpointSummary("Updates a user.")]
+    [EndpointDescription("Refuses renaming the user to a user name, or changing the e-mail address to one, another user of " +
+                         "the tenant already has (case-insensitive) with 409 application/problem+json, code " +
+                         "USER_ALREADY_EXISTS, field userName or email - the same answer as the create. Keeping the current address is never checked, so users that already share an address stay " +
+                         "editable.")]
     [ProducesResponseType(StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status409Conflict)]
     public async Task<IActionResult> Put(
         [Required] [Description("The username")]
         string userName,
@@ -337,11 +360,21 @@ public class UsersController : ControllerBase
         // Renaming INTO the reserved shadow namespace is refused; editing an existing shadow user
         // (whose name already carries the prefix) stays possible.
         var previousUserName = rtUser.UserName;
+        var previousEmail = rtUser.Email;
         userDto.ApplyTo(rtUser);
         if (CrossTenantShadowUserName.IsShadowUserName(rtUser.UserName) &&
             !string.Equals(rtUser.UserName, previousUserName, StringComparison.OrdinalIgnoreCase))
         {
             return BadRequest(ReservedUserNameMessage);
+        }
+
+        // AB#8084: changing the address to one another user already has is refused like a create (AB#8064). Only a change is
+        // checked, so users of tenants that already hold duplicates stay editable while they keep their address.
+        if (UserEmailUniqueness.ChangesAddress(_userManager, previousEmail, rtUser.Email) &&
+            await UserEmailUniqueness.IsTakenByAnotherUserAsync(_userManager, rtUser, rtUser.Email))
+        {
+            _logger.LogInformation("Update user refused: another user of the tenant has the requested e-mail address");
+            return UserCreationProblems.DuplicateEmail();
         }
 
         try
@@ -352,6 +385,13 @@ public class UsersController : ControllerBase
                 return Ok();
             }
 
+            // AB#8083: renaming onto the name of another user (the user validator answers DuplicateUserName) is a conflict.
+            if (result.Errors.Any(e => e.Code == nameof(IdentityErrorDescriber.DuplicateUserName)))
+            {
+                _logger.LogInformation("Update user refused: another user of the tenant has the requested user name");
+                return UserCreationProblems.DuplicateUserName();
+            }
+
             return GetBadRequestResultWithErrorDescription("Update of user failed", result.Errors);
         }
         catch (Exception e)
@@ -360,20 +400,31 @@ public class UsersController : ControllerBase
         }
     }
 
-    // POST: system/v1/users/resetPassword
+    // POST: {tenant}/v1/users/ResetPassword
+    /// <summary>
+    ///     Sets a new password for a user (administrator reset). AB#8008: the user name and the new password travel only
+    ///     in the JSON body; the former query-parameter form (<c>?userName=…&amp;password=…</c>) is refused with 400, so a
+    ///     password never lands in a request URL (request logs, traces, proxy access logs).
+    /// </summary>
     [HttpPost]
     [Route("ResetPassword")]
     [Authorize(IdentityServiceConstants.IdentityUserAdministrationWritePolicy)]
+    [RefuseCredentialInQuery("password")]
     [EndpointSummary("Resets the password of an user.")]
     [ProducesResponseType(StatusCodes.Status200OK)]
-    public async Task<IActionResult> ResetPassword([Required][Description("The username")] string userName,
-        [Required] [Description("The new password")]
-        string password)
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> ResetPassword(
+        [Required] [FromBody] [Description("The user name and the new password")]
+        ResetUserPasswordRequestDto request)
     {
         if (!ModelState.IsValid)
         {
             return BadRequest(ModelState);
         }
+
+        var userName = request.UserName;
+        var password = request.Password;
 
         try
         {
@@ -395,6 +446,9 @@ public class UsersController : ControllerBase
             var result = await _userManager.ResetPasswordAsync(user, token, password);
             if (result.Succeeded)
             {
+                // AB#8008: the caller as the audit names it - the user name, for a client-credentials token the client.
+                await _userCredentialChangeService.OnPasswordChangedAsync(user, PasswordChangePath.AdminResetPassword,
+                    AuditActor.FromPrincipal(User).Actor, HttpContext.RequestAborted);
                 await _userEmailInteractionService.SendPasswordResetNotificationAsync(_multiTenancyResolverService.GetTenantId(),
                     user);
                 return Ok();
@@ -406,6 +460,77 @@ public class UsersController : ControllerBase
         {
             return StatusCode(StatusCodes.Status500InternalServerError, new InternalServerErrorDto(e.Message));
         }
+    }
+
+    // POST {tenant}/v1/users/{userName}/revokeSessions
+    /// <summary>
+    ///     AB#7899: ends every session and token of the user in this tenant — rotates the security stamp, revokes all OAuth
+    ///     tokens (refresh tokens, codes) and authorizations, removes the server-side browser sessions. Issued JWT access
+    ///     tokens stay valid until they expire.
+    /// </summary>
+    [HttpPost("{userName}/revokeSessions")]
+    [Authorize(IdentityServiceConstants.IdentityUserAdministrationWritePolicy)]
+    [EndpointSummary("Revokes all sessions and tokens of a user.")]
+    [ProducesResponseType<UserSessionRevocationResultDto>(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> RevokeSessions([Description("The username")] string userName)
+    {
+        var user = await _userManager.FindByNameAsync(userName);
+        if (user == null)
+        {
+            return NotFound(new NotFoundErrorDto($"User '{userName}' not found."));
+        }
+
+        return Ok(await _userSessionRevocationService.RevokeAsync(user, AuditActor.FromPrincipal(User),
+            HttpContext.RequestAborted));
+    }
+
+    // POST {tenant}/v1/users/{userName}/disableTwoFactor
+    /// <summary>
+    ///     AB#7879: a user administrator switches off the second factor of a user (recovery when the authenticator is lost):
+    ///     removes the authenticator key and the recovery codes, sets <c>TwoFactorEnabled = false</c>, rotates the security
+    ///     stamp and revokes the user's refresh tokens and authorizations in this tenant. The user then signs in with the
+    ///     password and can enrol a new authenticator. Same effect as the CK method <c>User.DisableTwoFactor-1</c>; idempotent.
+    /// </summary>
+    [HttpPost("{userName}/disableTwoFactor")]
+    [Authorize(IdentityServiceConstants.IdentityUserAdministrationWritePolicy)]
+    [EndpointSummary("Switches off the second factor of a user.")]
+    [ProducesResponseType<UserTwoFactorDisableResultDto>(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> DisableTwoFactor([Description("The username")] string userName,
+        [FromServices] IUserTwoFactorAdministrationService twoFactorAdministration)
+    {
+        var user = await _userManager.FindByNameAsync(userName);
+        if (user == null)
+        {
+            return NotFound(new NotFoundErrorDto($"User '{userName}' not found."));
+        }
+
+        return Ok(await twoFactorAdministration.DisableAsync(user, TwoFactorDisablePath.AdminRest,
+            AuditActor.FromPrincipal(User).Actor, HttpContext.RequestAborted));
+    }
+
+    // POST {tenant}/v1/users/revokeSessions?scope=shadowUsers&dryRun=true
+    /// <summary>
+    ///     AB#7899: the same for every cross-tenant shadow user (xt_*) of this tenant. Dry run by default: only the counts
+    ///     and the first user names; <c>dryRun=false</c> applies.
+    /// </summary>
+    [HttpPost("revokeSessions")]
+    [Authorize(IdentityServiceConstants.IdentityUserAdministrationWritePolicy)]
+    [EndpointSummary("Revokes all sessions and tokens of the cross-tenant shadow users (dry run by default).")]
+    [ProducesResponseType<ShadowUserSessionRevocationResultDto>(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    public async Task<IActionResult> RevokeSessionsInBulk(
+        [Required] [Description("Which users: only 'shadowUsers' (xt_*) is supported")] string scope,
+        [Description("true (default): count only; false: revoke")] bool dryRun = true)
+    {
+        if (!string.Equals(scope, "shadowUsers", StringComparison.OrdinalIgnoreCase))
+        {
+            return BadRequest("Only scope=shadowUsers is supported.");
+        }
+
+        return Ok(await _userSessionRevocationService.RevokeShadowUsersAsync(dryRun, AuditActor.FromPrincipal(User),
+            HttpContext.RequestAborted));
     }
 
     // DELETE system/v1/users/5
@@ -424,6 +549,12 @@ public class UsersController : ControllerBase
         if (applicationUser == null)
         {
             return NotFound(new NotFoundErrorDto($"User name '{userName}' not found."));
+        }
+
+        var refusal = await CheckRoleChangeAsync(applicationUser, null);
+        if (refusal != null)
+        {
+            return refusal;
         }
 
         try
@@ -457,14 +588,8 @@ public class UsersController : ControllerBase
             return NotFound(new NotFoundErrorDto($"User with name '{userName}' not found."));
         }
 
-        // Remove only directly assigned roles (not group-inherited ones)
-        var currentDirectRoles = await _octoUserStore.GetDirectRolesAsync(user);
-        foreach (var roleName in currentDirectRoles)
-        {
-            await _userManager.RemoveFromRoleAsync(user, roleName.ToUpperInvariant());
-        }
-
-        // Add the requested roles
+        // AB#7914: validate every role id first, so an unknown id changes nothing (it used to strip the roles first).
+        var wanted = new Dictionary<string, RtRole>(StringComparer.Ordinal); // normalized name -> role
         foreach (var roleId in roleIds)
         {
             var role = await _roleManager.FindByIdAsync(roleId.ToString());
@@ -475,8 +600,29 @@ public class UsersController : ControllerBase
 
             if (role.NormalizedName != null)
             {
-                await _userManager.AddToRoleAsync(user, role.NormalizedName);
+                wanted[role.NormalizedName] = role;
             }
+        }
+
+        // Only directly assigned roles are replaced (not group-inherited ones), and only the difference is written.
+        var currentDirectRoles = await _octoUserStore.GetDirectRolesAsync(user);
+        var current = currentDirectRoles.Select(r => r.ToUpperInvariant()).ToHashSet(StringComparer.Ordinal);
+
+        var refusal = await CheckRoleChangeAsync(user, wanted.Values.Select(r => r.Name ?? r.NormalizedName!).ToList(),
+            currentDirectRoles);
+        if (refusal != null)
+        {
+            return refusal;
+        }
+
+        foreach (var normalized in current.Where(c => !wanted.ContainsKey(c)))
+        {
+            await _userManager.RemoveFromRoleAsync(user, normalized);
+        }
+
+        foreach (var normalized in wanted.Keys.Where(w => !current.Contains(w)))
+        {
+            await _userManager.AddToRoleAsync(user, normalized);
         }
 
         return Ok();
@@ -508,6 +654,13 @@ public class UsersController : ControllerBase
             return BadRequest(new OperationFailedErrorDto($"User '{user.UserName}' already has role '{role.Name}'"));
         }
 
+        var directRoles = await _octoUserStore.GetDirectRolesAsync(user);
+        var refusal = await CheckRoleChangeAsync(user, directRoles.Append(role.Name ?? roleName).ToList(), directRoles);
+        if (refusal != null)
+        {
+            return refusal;
+        }
+
         if (role.NormalizedName != null)
         {
             await _userManager.AddToRoleAsync(user, role.NormalizedName);
@@ -521,6 +674,11 @@ public class UsersController : ControllerBase
     ///     Merges external logins from a source user into the target user, then deletes the source user.
     ///     This is useful for consolidating duplicate accounts created by external identity providers.
     /// </summary>
+    /// <remarks>
+    ///     Runs <see cref="IUserMergeService" />, the same code as the CK method <c>User.Merge-1</c> (AB#7778): role change
+    ///     guard on the deletion of the source user, logins moved, sessions and refresh tokens of the source user revoked,
+    ///     source user deleted. Roles, groups and claims of the source user are not transferred.
+    /// </remarks>
     [HttpPost("{userName}/merge")]
     [Authorize(IdentityServiceConstants.IdentityUserAdministrationWritePolicy)]
     [EndpointSummary("Merges external logins from source user into target user and deletes source user.")]
@@ -531,7 +689,8 @@ public class UsersController : ControllerBase
         [Required] [Description("The target username (this user will be kept)")]
         string userName,
         [Required] [FromBody] [Description("The merge request containing the source username")]
-        MergeUsersRequestDto mergeRequest)
+        MergeUsersRequestDto mergeRequest,
+        [FromServices] IUserMergeService userMergeService)
     {
         if (!ModelState.IsValid)
         {
@@ -550,55 +709,23 @@ public class UsersController : ControllerBase
             return NotFound(new NotFoundErrorDto($"Source user '{mergeRequest.SourceUserName}' not found."));
         }
 
-        if (targetUser.RtId == sourceUser.RtId)
-        {
-            return BadRequest(new OperationFailedErrorDto("Cannot merge a user into itself."));
-        }
-
         try
         {
-            // Get source user's external logins
-            var sourceLogins = await _userManager.GetLoginsAsync(sourceUser);
-
-            // Transfer each login: first remove from source, then add to target.
-            // UserManager.AddLoginAsync internally calls FindByLoginAsync to check
-            // if the login is already associated with any user. If we don't remove
-            // the login from the source user first, AddLoginAsync will fail with
-            // LoginAlreadyAssociated because the source user still owns the login.
-            foreach (var login in sourceLogins)
+            var result = await userMergeService.MergeAsync(targetUser, sourceUser, RoleChangeCaller.FromPrincipal(User),
+                AuditActor.FromPrincipal(User), HttpContext.RequestAborted);
+            return result.Status switch
             {
-                var removeResult = await _userManager.RemoveLoginAsync(
-                    sourceUser, login.LoginProvider, login.ProviderKey);
-                if (!removeResult.Succeeded)
-                {
-                    LogIdentityError("Remove login from source during merge", removeResult.Errors);
-                    return GetBadRequestResultWithErrorDescription(
-                        $"Failed to remove login '{login.LoginProvider}' from source user", removeResult.Errors);
-                }
-
-                var addResult = await _userManager.AddLoginAsync(targetUser, login);
-                if (!addResult.Succeeded)
-                {
-                    LogIdentityError("Add login during merge", addResult.Errors);
-                    return GetBadRequestResultWithErrorDescription(
-                        $"Failed to transfer login '{login.LoginProvider}' to target user", addResult.Errors);
-                }
-            }
-
-            // Delete the source user
-            var deleteResult = await _userManager.DeleteAsync(sourceUser);
-            if (!deleteResult.Succeeded)
-            {
-                LogIdentityError("Delete source user during merge", deleteResult.Errors);
-                return GetBadRequestResultWithErrorDescription(
-                    "Failed to delete source user after merge", deleteResult.Errors);
-            }
-
-            _logger.LogInformation(
-                "Successfully merged user '{SourceUser}' into '{TargetUser}'. Transferred {LoginCount} external login(s)",
-                mergeRequest.SourceUserName, userName, sourceLogins.Count);
-
-            return Ok();
+                UserMergeStatus.Merged => Ok(),
+                UserMergeStatus.SameUser => BadRequest(new OperationFailedErrorDto("Cannot merge a user into itself.")),
+                // AB#7914: the source user is deleted at the end; that must not remove the last user administrator.
+                UserMergeStatus.RoleChangeRefused => await RefuseRoleChangeAsync(sourceUser, RoleChangeCaller.FromPrincipal(User),
+                    result.Refusal!),
+                UserMergeStatus.LoginRemoveFailed => GetBadRequestResultWithErrorDescription(
+                    $"Failed to remove login '{result.LoginProvider}' from source user", result.Errors),
+                UserMergeStatus.LoginAddFailed => GetBadRequestResultWithErrorDescription(
+                    $"Failed to transfer login '{result.LoginProvider}' to target user", result.Errors),
+                _ => GetBadRequestResultWithErrorDescription("Failed to delete source user after merge", result.Errors)
+            };
         }
         catch (Exception e)
         {
@@ -632,12 +759,53 @@ public class UsersController : ControllerBase
             return BadRequest(new OperationFailedErrorDto($"User '{user.UserName}' doesn't have role '{role.Name}'"));
         }
 
+        var directRoles = await _octoUserStore.GetDirectRolesAsync(user);
+        var refusal = await CheckRoleChangeAsync(user,
+            directRoles.Where(r => !string.Equals(r, role.Name, StringComparison.OrdinalIgnoreCase)).ToList(),
+            directRoles);
+        if (refusal != null)
+        {
+            return refusal;
+        }
+
         if (role.NormalizedName != null)
         {
             await _userManager.RemoveFromRoleAsync(user, role.NormalizedName);
         }
 
         return Ok();
+    }
+
+    /// <summary>
+    ///     Runs <see cref="IRoleChangeGuard" /> for a change of the direct roles of <paramref name="user" /> (or its
+    ///     deletion when <paramref name="rolesAfter" /> is <c>null</c>). Returns the problem answer (403 / 409) and audits
+    ///     the refusal, or <c>null</c> when the change is allowed (AB#7914).
+    /// </summary>
+    private async Task<IActionResult?> CheckRoleChangeAsync(RtUser user, IEnumerable<string>? rolesAfter,
+        IEnumerable<string>? rolesBefore = null)
+    {
+        rolesBefore ??= await _octoUserStore.GetDirectRolesAsync(user);
+        var caller = RoleChangeCaller.FromPrincipal(User);
+        var decision = await _roleChangeGuard.EvaluateAsync(
+            new RoleChangeRequest(caller, user, rolesBefore.ToList(), rolesAfter?.ToList()), HttpContext.RequestAborted);
+        if (decision.IsAllowed)
+        {
+            return null;
+        }
+
+        return await RefuseRoleChangeAsync(user, caller, decision);
+    }
+
+    /// <summary>Writes the WARN log and the audit event of a refused role change and returns the problem answer (AB#7914).</summary>
+    private async Task<IActionResult> RefuseRoleChangeAsync(RtUser user, RoleChangeCaller caller,
+        RoleChangeDecision decision)
+    {
+        var callerText = caller.Subject != null ? $"subject {caller.Subject}" : $"client {caller.ClientId}";
+        var message =
+            $"Role change refused ({decision.Reason}): caller {callerText}, target user {user.RtId}, roles [{string.Join(",", decision.RoleNames)}], {Request.Method} {Request.Path.Value}";
+        _logger.LogWarning("{Message}", message);
+        await _identityAuditService.StoreFailureAsync(RoleChangeProblems.AuditEventName, message);
+        return RoleChangeProblems.ToResult(decision);
     }
 
     private void LogIdentityError(string operation, IEnumerable<IdentityError> errors)

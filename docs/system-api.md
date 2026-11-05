@@ -27,7 +27,8 @@ tokens: the client's effective roles, AB#4183). The check probes the raw `role` 
 | Policy | Scope | Roles (any of) | Applied to |
 |--------|-------|----------------|------------|
 | `IdentityUserAdministrationReadPolicy` / `…WritePolicy` | read: `octo_api` or `octo_api.read_only`; write: `octo_api` | `UserManagement` | users, roles (writes), groups, external tenant user mappings, e-mail identifier bindings, data permissions |
-| `IdentityTenantAdministrationReadPolicy` / `…WritePolicy` | as above | `TenantManagement`, `UserManagement` | clients, client mirrors, API resources, API scopes, API secrets, identity providers, e-mail domain group rules, admin provisioning |
+| `IdentityTenantAdministrationReadPolicy` / `…WritePolicy` | as above | `TenantManagement`, `UserManagement` | clients, client mirrors, API resources, API scopes, reading API secret metadata (list, lookup), identity providers, e-mail domain group rules, admin provisioning |
+| `IdentitySecretAdministrationPolicy` (AB#5861) | `octo_api` | `SecretManagement` (staged, see below) | creating, rotating (`PUT`) and deleting API secrets of clients and API resources; a `clientSecret` in `POST clients` / `PUT clients/{id}` (checked in the action, only when the body carries a secret); issuing a mirror secret `POST clients/{clientId}/mirrors/{childTenantId}/secret` |
 | `IdentityDirectoryReadPolicy` | `octo_api` or `octo_api.read_only` | `UserManagement`, `TenantManagement`, `AdminPanelManagement`, `CommunicationManagement` | `GET roles`, `GET roles/GetPaged`, `GET roles/names/{roleName}`, `GET clients/{id}`, `GET clients/{id}/roles`, `GET clients/{id}/actors` (service-account panels, communication controller) |
 | `IdentityServiceAdministrationPolicy` | `octo_api` | `TenantManagement`, **system tenant route only** | `POST diagnostics/reconfigureLogLevel` (process-wide) |
 | `IdentityUserDirectoryReadPolicy` | `octo_api` or `octo_api.read_only` | — (**token must be issued for the route tenant**, no Warn mode, no exemptions) | `GET users/directory` (id + display name only, for pickers) |
@@ -41,11 +42,30 @@ Open to every authenticated caller: `GET diagnostics` (the caller's own claims).
 through the system context. Since AB#5859 the target must be the caller's own tenant (`tenant_id` of the
 token) or one of its descendants in the tenant registry; a caller of the system tenant may address every
 tenant (`AdminProvisioningTargetScopeFilter`).
+A descendant counts only when it is registered as such (AB#6759, `TenantSubtreeWalker`): a row in a parent's own registry is followed only when the system registry holds the same tenant id with the same database and names that parent (or no parent, for legacy rows). A stale row left by a delete — or one whose id was later reused by a tenant below another parent — grants nothing and is not walked into. A tenant that lost its system registry row (AB#6941) therefore drops out of its ancestors' scopes until `ReconcileTenantRegistry` restores the row (fail closed).
+Every route with `{targetTenantId}` must carry that filter; `AdminProvisioningRouteCoverageTests` enforces it by reflection and `AdminProvisioningPipelineTests` pins the 201/403 matrix (AB#4824).
+The client mirror actions that name a child tenant (`provisionInTenant?childTenantId=`, `mirrors/{childTenantId}/secret`, `DELETE mirrors/{childTenantId}`) follow the same rule since AB#6758: a child outside the caller's subtree answers `403` with the same response for sibling, unrelated, system and unknown tenants.
 
 **Transition switch:** `IdentityApiAuthorization:RoleEnforcement` (`OCTO_IDENTITYAPIAUTHORIZATION__ROLEENFORCEMENT`)
 = `Enforce` (default) or `Warn`. `Warn` lets a caller without the role (or an admin-provisioning target
 outside its subtree) through and logs `This would be denied with RoleEnforcement=Enforce (AB#5859)`. The
 scope requirement and the system-tenant-only rule are enforced in both modes.
+
+**SecretManagement switch (AB#5861):** `IdentityApiAuthorization:SecretManagementRoleEnforcement`
+(`OCTO_IDENTITYAPIAUTHORIZATION__SECRETMANAGEMENTROLEENFORCEMENT`) = `Warn` (**default**) or `Enforce`. It stages
+`IdentitySecretAdministrationPolicy` and the same rule in the client secret methods (`Client.AddSecret-1`,
+`Client.RemoveSecret-1`). `Warn`: a caller without `SecretManagement` who holds `TenantManagement` or
+`UserManagement` (the rule before AB#5861) is let through and logged
+`This would be denied with SecretManagementRoleEnforcement=Enforce (AB#5861)`; a caller without any of these roles is
+denied — `Warn` never allows less than before. `Enforce`: only `SecretManagement`. `RoleEnforcement=Warn` stays the
+emergency exit and relaxes this policy too. The default is `Warn` because `SecretManagement` was granted only once,
+to the local human administrators (AB#5544): cross-tenant administrators, clients and later administrators do not
+hold it, and `TenantOwners` does not carry it. Rollout: `docs/rollout-identity-rest-role-enforcement.md` § AB#5861.
+
+**403 reason (AB#5861):** a refused role requirement answers `403` with the body
+`{"message": "Access is denied: this operation requires the role 'SecretManagement' in the tenant. ..."}` (AB#5227
+shape, `IdentityApiForbiddenReasonResultHandler`), so Studio and octo-cli show which role is missing. Refusals for a
+missing scope keep the empty `403`.
 
 The `Policy` column in the endpoint tables below names the **scope level** (ReadOnly / ReadWrite); the
 required role follows from the table above.
@@ -62,14 +82,28 @@ required role follows from the table above.
 | GET | `/users/{userName}` | ReadOnly | Get user by name, email, or ID |
 | GET | `/users/{userName}/roles` | ReadOnly | Get user's roles (direct + group-inherited) |
 | GET | `/users/{userName}/directRoles` | ReadOnly | Get user's directly assigned roles only |
-| POST | `/users` | ReadWrite | Create new user |
-| POST | `/users/ResetPassword` | ReadWrite | Reset user password |
-| PUT | `/users/{userName}` | ReadWrite | Update user |
+| POST | `/users` | ReadWrite | Create new user (with `password`: e-mail confirmation mail; without: invitation to set a password). Same creation as the CK method `User.CreateUser-1` (AB#7777, shared `IUserCreationService`). Users are created only here or through that method: GraphQL create, `ImportRt` and blueprint seeds refuse a new user (`GENERIC_CREATE_REPLACED_BY_METHOD`). An e-mail address another user of the tenant already has (case-insensitive) is refused with `409`, `application/problem+json`, `code: USER_ALREADY_EXISTS`, `field: email` (AB#8064; `PUT /users/{userName}` applies the same rule to a change of the address, AB#8084). A user name another user already has (case-insensitive) is refused the same way with `field: userName` (AB#8083; before: `400`); `PUT /users/{userName}` answers it for a rename |
+| POST | `/users/ResetPassword` | ReadWrite | Reset user password; body `{ "userName": "…", "password": "…" }`. The former query form (`?userName=…&password=…`) is refused with `400` and an update hint (AB#8008): a password never travels in a URL |
+| POST | `/users/{userName}/revokeSessions` | ReadWrite | Revoke all sessions and tokens of a user (AB#7899) |
+| POST | `/users/{userName}/disableTwoFactor` | ReadWrite | Switch off the user's second factor: authenticator key and recovery codes removed, security stamp rotated, refresh tokens revoked; `200 { twoFactorWasEnabled }` (AB#7879, same as the method `User.DisableTwoFactor-1`) |
+| POST | `/users/revokeSessions?scope=shadowUsers&dryRun=true` | ReadWrite | Same for all xt_* shadow users of the tenant; dry run by default (AB#7899) |
+| PUT | `/users/{userName}` | ReadWrite | Update user. Changing the e-mail address to one another user of the tenant already has (case-insensitive) is refused with `409`, `application/problem+json`, `code: USER_ALREADY_EXISTS`, `field: email` (AB#8084); keeping the current address (also in another casing) or clearing it is not checked |
 | PUT | `/users/{userName}/roles` | ReadWrite | Replace user's direct role assignments |
 | PUT | `/users/{userName}/roles/{roleName}` | ReadWrite | Add role to user |
 | POST | `/users/{userName}/merge` | ReadWrite | Merge source user into target user |
 | DELETE | `/users/{userName}` | ReadWrite | Delete user |
 | DELETE | `/users/{userName}/roles/{roleName}` | ReadWrite | Remove role from user |
+
+**Role change rules (AB#7914).** The role endpoints above, `DELETE /users/{userName}` and `POST /users/{userName}/merge` (the source user is deleted) run `IRoleChangeGuard`: no
+self-grant (`403`, `code: self-grant`), no granting of a built-in role (stored `rtWellKnownName`) the caller does not hold (`403`, `code: role-not-held`, `roleNames`), and no
+removal of the last user that effectively holds `UserManagement` (`409`, `code: last-administrator`; direct, via groups, via mappings of `xt_` users; clients do not count). Answers are
+`application/problem+json` with the `code` extension and a readable `title`. `PUT /users/{userName}/roles` validates all role ids first (unknown id: `404`, nothing changed) and writes only the
+difference. Every refusal is audited as `Identity.RoleChangeRefused`. The same rules apply to the methods `User.SetRoles/AddRole/RemoveRole` (see CLAUDE.md).
+
+**Role change rules for groups, mappings and role definitions (AB#7927).** The same guard judges `PUT /groups/{id}/roles`, `PUT`/`DELETE /groups/{id}/members/users|groups/{id}`,
+`PUT /groups/{id}/members/clients/{id}`, `DELETE /groups/{id}` and create/update/delete of external tenant user mappings: `403 self-grant`, `403 role-not-held` (built-in roles the caller does not hold,
+also through nested groups), `409 last-administrator` (nobody effectively holds `UserManagement` afterwards). `PUT /roles/{roleName}` with another name and `DELETE /roles/{roleName}` of a built-in
+role (stored `rtWellKnownName`) answer `409` with `code: built-in-role`. Same problem+json shape and audit event as above; details in CLAUDE.md.
 
 **Request/Response DTOs:**
 
@@ -120,6 +154,11 @@ Transfers all external logins (e.g., Google, Microsoft) from the source user to 
 - `sourceUserName` in the body is the user whose logins are transferred and who is deleted
 - Returns 404 if either user does not exist
 - Returns 400 if attempting to merge a user into itself
+- Returns 409 (`last-administrator`) when the source user is the last user that holds `UserManagement` (AB#7914)
+- Before the source user is deleted, every refresh token, authorization and browser session of the source user in this tenant
+  is revoked (`IUserSessionRevocationService`, AB#7778)
+- Roles, group memberships, claims and cross-tenant mappings of the source user are **not** transferred
+- The CK method `User.Merge-1` runs the same code (`IUserMergeService`, see `CLAUDE.md` § `User.Merge`)
 
 ### Clients (`/{tenantId}/v1/clients`)
 
@@ -131,6 +170,21 @@ Transfers all external logins (e.g., Google, Microsoft) from the source user to 
 | POST | `/clients` | ReadWrite | Create new client |
 | PUT | `/clients/{id}` | ReadWrite | Update client |
 | DELETE | `/clients/{id}` | ReadWrite | Delete client |
+| GET | `/clients/{id}/roles` | DirectoryRead | Role ids directly assigned to the client |
+| PUT | `/clients/{id}/roles` | ReadWrite | Replace the client's direct roles (body: role ids) |
+| PUT | `/clients/{id}/roles/{roleName}` | ReadWrite | Assign one role by name |
+| DELETE | `/clients/{id}/roles/{roleName}` | ReadWrite | Remove one role by name |
+
+**Client role rules (AB#7928).** `PUT /clients/{id}/roles` and `PUT /clients/{id}/roles/{roleName}` refuse to give a client a built-in role
+(stored `rtWellKnownName`) the caller does not hold: `403`, `application/problem+json`, `code: role-not-held`, `roleNames`. Custom roles are
+free, only the added roles are judged (a role the client already holds and any removal pass), and `PUT /clients/{id}/roles` validates every
+role id first (unknown or malformed id: `404`, nothing written) and writes only the difference (kept roles are not written again). Every refusal is audited as `Identity.RoleChangeRefused`. Service-internal
+client provisioning over the bus (service accounts, client mirroring) is not affected.
+
+**Concurrent updates (AB#8015).** `PUT /clients/{id}`, the overlay URI endpoints and `PATCH .../autoProvisionInChildTenants` change the
+client as one version-checked read-modify-write: the DTO is applied to the stored client and written with the version that was read; when
+another request changed the client in between, the change is applied again to a fresh read. An update therefore never writes back a secret
+that a concurrent secret delete removed. After repeated conflicts the endpoint answers `409` (`application/problem+json`); retry the request.
 
 **Request/Response DTO:**
 
@@ -183,6 +237,9 @@ Transfers all external logins (e.g., Google, Microsoft) from the source user to 
 | PUT | `/apiResources/{name}` | ReadWrite | Update resource |
 | DELETE | `/apiResources/{name}` | ReadWrite | Delete resource |
 
+`PUT /apiResources/{name}` is a version-checked read-modify-write like the client update (AB#8015): the stored secrets are never replaced by
+an older copy; `409` after repeated conflicts.
+
 **Request/Response DTO:**
 
 ```typescript
@@ -234,20 +291,28 @@ Transfers all external logins (e.g., Google, Microsoft) from the source user to 
 | Method | Endpoint | Policy | Description |
 |--------|----------|--------|-------------|
 | GET | `/apiSecrets/client/{clientId}` | ReadOnly | Get client's secrets |
-| GET | `/apiSecrets/client/{clientId}/{secretValue}` | ReadOnly | Get specific secret |
-| POST | `/apiSecrets/client/{clientId}` | ReadWrite | Create client secret |
-| PUT | `/apiSecrets/client/{clientId}` | ReadWrite | Update client secret |
-| DELETE | `/apiSecrets/client/{clientId}/{secretValue}` | ReadWrite | Delete secret |
+| POST | `/apiSecrets/client/{clientId}/lookup` | ReadOnly | Get specific secret; body `{ "valueEncrypted": "<stored hash>" }` (AB#8008) |
+| POST | `/apiSecrets/client/{clientId}` | ReadWrite + `SecretManagement` | Create client secret |
+| PUT | `/apiSecrets/client/{clientId}` | ReadWrite + `SecretManagement` | Update client secret (stored hash in the body) |
+| POST | `/apiSecrets/client/{clientId}/delete` | ReadWrite + `SecretManagement` | Delete secret; body `{ "valueEncrypted": "<stored hash>" }` (AB#8008) |
+| GET | `/apiSecrets/client/{clientId}/{secretValue}` | ReadOnly | **Deprecated** (stored hash in the path), kept for one release; use `…/lookup` |
+| DELETE | `/apiSecrets/client/{clientId}/{secretValue}` | ReadWrite + `SecretManagement` | **Deprecated** (stored hash in the path), kept for one release; use `…/delete` |
+
+The same operations exist as CK methods on the client entity (AB#7780): `System.Identity/Client.AddSecret-1` (result = the generated
+secret, shown once, `sensitive`) and `Client.RemoveSecret-1` (`secretValue` = stored value or clear text). They are hosted only with
+`Methods:Identity:EnablePasswordMethods=true`; rules and differences to REST: `CLAUDE.md`, section "Client secret methods".
 
 #### API Resource Secrets
 
 | Method | Endpoint | Policy | Description |
 |--------|----------|--------|-------------|
 | GET | `/apiSecrets/apiResource/{name}` | ReadOnly | Get resource's secrets |
-| GET | `/apiSecrets/apiResource/{name}/{secretValue}` | ReadOnly | Get specific secret |
-| POST | `/apiSecrets/apiResource/{name}` | ReadWrite | Create resource secret |
-| PUT | `/apiSecrets/apiResource/{name}` | ReadWrite | Update resource secret |
-| DELETE | `/apiSecrets/apiResource/{name}/{secretValue}` | ReadWrite | Delete secret |
+| POST | `/apiSecrets/apiResource/{name}/lookup` | ReadOnly | Get specific secret; body `{ "valueEncrypted": "<stored hash>" }` (AB#8008) |
+| POST | `/apiSecrets/apiResource/{name}` | ReadWrite + `SecretManagement` | Create resource secret |
+| PUT | `/apiSecrets/apiResource/{name}` | ReadWrite + `SecretManagement` | Update resource secret (stored hash in the body) |
+| POST | `/apiSecrets/apiResource/{name}/delete` | ReadWrite + `SecretManagement` | Delete secret; body `{ "valueEncrypted": "<stored hash>" }` (AB#8008) |
+| GET | `/apiSecrets/apiResource/{name}/{secretValue}` | ReadOnly | **Deprecated** (stored hash in the path), kept for one release; use `…/lookup` |
+| DELETE | `/apiSecrets/apiResource/{name}/{secretValue}` | ReadWrite + `SecretManagement` | **Deprecated** (stored hash in the path), kept for one release; use `…/delete` |
 
 **Create (POST)** — the server generates the secret; the request carries only the metadata (AB#6258):
 
@@ -277,6 +342,25 @@ serialises from `ApiSecretDto`) is ignored: it is never stored and never echoed.
 characters) and stored as Base64(SHA-256); stored SHA-256 and SHA-512 hashes keep validating. The clear text
 is returned only once, in the creation response; neither it nor a hash is logged. PUT requires
 `valueEncrypted` of an existing secret (400 when missing, 404 when no such secret exists).
+
+**Delete (`POST …/delete`)** — the body names the stored hash: `{ "valueEncrypted": "<stored hash>" }` (what
+octo-cli `DeleteApiSecretClient` / `DeleteApiSecretApiResource` send since AB#8008). A POST sub-resource and not a
+DELETE with a body, because a DELETE body has no defined semantics (RFC 9110) and proxies and HTTP client
+libraries may drop it; the API uses POST sub-resources for actions already (`users/{userName}/revokeSessions`).
+The stored hash is a credential-equivalent value: in a URL path it would reach request logs, traces (`url.path`)
+and proxy access logs. `POST …/lookup` reads one secret the same way. The deprecated path variants
+(`DELETE` / `GET …/{secretValue}`, `{secretValue}` = the stored hash, Base64-encoded again) still work for one
+release for older octo-cli/SDK versions; each call writes a WARN `Deprecated API secret request …` naming the
+operation and the client / API resource, never the value, and the value is masked (`***`) in the request log
+and in the trace attribute `url.path`. The call removes every
+stored secret with that hash and answers 200; a deleted client secret no longer authenticates at the token
+endpoint (the cache event `CorsClientsUpdate` is published as for every secret write). It answers 404 when
+the client / API resource or the secret does not exist. No 404 answer echoes the secret value. Every secret write (POST, PUT,
+DELETE) is version-checked against concurrent secret writes of the same client / API resource; after repeated concurrent changes
+it answers `409` (`application/problem+json`), retry the call. Before
+AB#7989 the endpoint answered 200 for a client or API resource read from the database but removed nothing.
+API resource secrets authenticate nothing since the OpenIddict migration (introspection authenticates
+clients); the endpoints only manage the stored data.
 
 ### Identity Providers (`/{tenantId}/v1/identityProviders`)
 
@@ -477,7 +561,9 @@ Cross-tenant provisioning controller routed via the system tenant. Allows users 
 
 **`provisionCurrentUser` endpoint:**
 
-Extracts `sub`, `preferred_username`, and `tenant_id` from the JWT, fetches all roles from the target tenant, and creates an `RtExternalTenantUserMapping` with all role IDs. Returns 200 with the existing mapping if one already exists for this user.
+Extracts `sub`, `preferred_username`, and `tenant_id` from the JWT, fetches all roles from the target tenant, and creates an `RtExternalTenantUserMapping` with all role IDs. The response header `X-Provisioning-Outcome` says what the call did (AB#7088): `created` (201; a new mapping with all roles, member of `TenantOwners`), `repaired` (200; a mapping existed but granted no effective role — no existing role in `MappedRoleIds`, none through a group — or carried a wrong `SourceUserName`; it is filled with all roles, added to `TenantOwners` and/or given the right name, never duplicated) or `already-provisioned` (200; nothing changed — a mapping that already grants a role is never widened). The token exchange resolves roles by source tenant + user **name**, the lookup here by user **id**, hence the name check. Role grants through nested child groups are not looked at; the user can be repaired once more, which is what the command promises anyway.
+
+When the caller is a cross-tenant shadow user (`xt_…`; e.g. a session scoped to an intermediate tenant that provisions into a grandchild), the mapping is written for the caller's **home identity** — the root of its `xt_` chain — not for the shadow user (AB#8017). The response body (`sourceTenantId`, `sourceUserId`, `sourceUserName`) names that identity. Every exchange path of the person into the target then works: from the home tenant directly and from the intermediate tenant. A shadow user whose home identity cannot be resolved (ambiguous or broken chain, unregistered home tenant, missing home user) gets **409** (`application/problem+json`, names the caller and says to provision from the home tenant) and nothing is written. A mapping left keyed on a shadow user by an older version stays; calling `provisionCurrentUser` once from the home tenant adds the home mapping.
 
 ### Diagnostics (`/{tenantId}/v1/diagnostics`)
 

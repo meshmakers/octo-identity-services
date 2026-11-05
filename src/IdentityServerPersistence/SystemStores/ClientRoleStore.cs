@@ -8,7 +8,7 @@ using Meshmakers.Octo.Runtime.Contracts.Repositories.Query;
 using Meshmakers.Octo.Runtime.Contracts.RepositoryEntities;
 using Meshmakers.Octo.Services.Infrastructure.Services;
 using Microsoft.Extensions.Logging;
-using Persistence.IdentityCkModel.Generated.System.Identity.v2;
+using Persistence.IdentityCkModel.Generated.System.Identity.v3;
 
 namespace IdentityServerPersistence.SystemStores;
 
@@ -113,6 +113,60 @@ public class ClientRoleStore(
         logger.LogInformation(
             "Set {RoleCount} role(s) on client '{ClientRtId}' in tenant '{TenantId}' (added/removed {ChangeCount} association(s))",
             desiredRoleIds.Count, clientRtId, TenantRepository.TenantId, updates.Count);
+    }
+
+    public async Task ApplyRoleChangesAsync(OctoObjectId clientRtId, IReadOnlyCollection<string> addRoleIds,
+        IReadOnlyCollection<string> removeRoleIds)
+    {
+        var session = await TenantRepository.GetSessionAsync();
+        session.StartTransaction();
+
+        var client = await TenantRepository.GetRtEntityByRtIdAsync<RtClient>(session, clientRtId);
+        if (client == null)
+        {
+            await session.CommitTransactionAsync();
+            return;
+        }
+
+        var clientEntityId = client.ToRtEntityId();
+        var currentAssociations = await TenantRepository.GetRtAssociationsAsync(
+            session,
+            clientEntityId,
+            RtAssociationExtendedQueryOptions.Create(
+                GraphDirections.Outbound,
+                roleId: IdentityAssociationConstants.AssignedRoleId));
+        var currentRoleIds = currentAssociations.Items.Select(a => a.TargetRtId.ToString()).ToHashSet();
+        var remove = removeRoleIds.ToHashSet();
+
+        var updates = new List<AssociationUpdateInfo>();
+        foreach (var assoc in currentAssociations.Items.Where(a => remove.Contains(a.TargetRtId.ToString())))
+        {
+            updates.Add(AssociationUpdateInfo.CreateDelete(
+                clientEntityId,
+                new RtEntityId(assoc.TargetCkTypeId, assoc.TargetRtId),
+                IdentityAssociationConstants.AssignedRoleId));
+        }
+
+        var roleCkTypeId = RtEntityExtensions.GetRtCkTypeId<RtRole>();
+        foreach (var roleId in addRoleIds.Distinct().Where(r => !currentRoleIds.Contains(r) && !remove.Contains(r)))
+        {
+            updates.Add(AssociationUpdateInfo.CreateInsert(
+                clientEntityId,
+                new RtEntityId(roleCkTypeId, new OctoObjectId(roleId)),
+                IdentityAssociationConstants.AssignedRoleId));
+        }
+
+        if (updates.Count > 0)
+        {
+            var opResult = new OperationResult();
+            await TenantRepository.ApplyChangesAsync(session, updates, opResult);
+        }
+
+        await session.CommitTransactionAsync();
+
+        logger.LogInformation(
+            "Changed the roles of client '{ClientRtId}' in tenant '{TenantId}' ({ChangeCount} association(s) added/removed)",
+            clientRtId, TenantRepository.TenantId, updates.Count);
     }
 
     public async Task AddRoleAsync(OctoObjectId clientRtId, string roleName)

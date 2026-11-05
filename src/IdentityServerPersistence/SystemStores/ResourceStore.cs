@@ -4,7 +4,7 @@ using Meshmakers.Octo.Runtime.Contracts.MongoDb.Repositories;
 using Meshmakers.Octo.Runtime.Contracts.Repositories;
 using Meshmakers.Octo.Runtime.Contracts.Repositories.Query;
 using Meshmakers.Octo.Services.Infrastructure.Services;
-using Persistence.IdentityCkModel.Generated.System.Identity.v2;
+using Persistence.IdentityCkModel.Generated.System.Identity.v3;
 
 namespace IdentityServerPersistence.SystemStores;
 
@@ -135,22 +135,18 @@ public class ResourceStore(IMultiTenancyResolverService multiTenancyResolverServ
         await session.CommitTransactionAsync();
     }
 
-    public async Task UpdateApiResourceAsync(string apiResourceName, RtApiResource newApiResource)
+    public async Task<RtApiResource?> MutateApiResourceAsync(string apiResourceName, Func<RtApiResource, bool> mutate)
     {
         ArgumentValidation.ValidateString(nameof(apiResourceName), apiResourceName);
 
-        using var session = await TenantRepository.GetSessionAsync();
-        session.StartTransaction();
-
-        var apiResource = (await FindRtApiResourcesByNameAsync(new[] { apiResourceName })).FirstOrDefault();
-        if (apiResource == null)
+        var outcome = await GuardedEntityMutation.MutateAsync(TenantRepository, async session =>
         {
-            throw new NotExistingException($"API resource with name '{apiResourceName}' does not exist.");
-        }
-
-        await TenantRepository.ReplaceOneRtEntityByIdAsync(session, apiResource.RtId, newApiResource);
-
-        await session.CommitTransactionAsync();
+            var queryOptions = RtEntityQueryOptions.Create()
+                .FieldFilter(nameof(RtApiResource.Name), FieldFilterOperator.Equals, apiResourceName);
+            var result = await TenantRepository.GetRtEntitiesByTypeAsync<RtApiResource>(session, queryOptions);
+            return result.Items.FirstOrDefault();
+        }, mutate);
+        return outcome?.Entity;
     }
 
     public async Task<IEnumerable<RtApiResource>> FindRtApiResourcesByScopeNameAsync(IEnumerable<string> scopeNames)

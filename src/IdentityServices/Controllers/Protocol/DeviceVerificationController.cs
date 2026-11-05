@@ -1,6 +1,5 @@
 using System.Collections.Immutable;
 using System.Security.Claims;
-using IdentityServerPersistence.Services;
 using IdentityServerPersistence.SystemStores;
 using Meshmakers.Octo.Backend.IdentityServices.Controllers.Api;
 using Meshmakers.Octo.Backend.IdentityServices.OpenIddict;
@@ -13,7 +12,7 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.IdentityModel.Tokens;
 using OpenIddict.Abstractions;
 using OpenIddict.Server.AspNetCore;
-using Persistence.IdentityCkModel.Generated.System.Identity.v2;
+using Persistence.IdentityCkModel.Generated.System.Identity.v3;
 using static OpenIddict.Abstractions.OpenIddictConstants;
 
 namespace Meshmakers.Octo.Backend.IdentityServices.Controllers.Protocol;
@@ -31,9 +30,10 @@ namespace Meshmakers.Octo.Backend.IdentityServices.Controllers.Protocol;
 ///             verification. The JSON result body is written by
 ///             <see cref="OctoDeviceVerificationResponseHandler" />.</item>
 ///     </list>
-///     Cross-tenant approval parity: when the cookie user does not exist in the request tenant
-///     (session from a parent tenant), the B-shadow user is provisioned and signed in before the
-///     device code is bound — otherwise redemption would fail with <c>invalid_grant</c>.
+///     The approving session's subject must exist in the tenant the device code was wired to; otherwise
+///     the approval is refused with <c>access_denied</c> (AB#7884). The former cross-tenant provisioning
+///     branch here was unreachable (the session cookie is scoped to that tenant) and was removed;
+///     cross-tenant device logins use a child-tenant session or the token exchange.
 /// </summary>
 [ApiController]
 [Authorize]
@@ -43,11 +43,7 @@ public class DeviceVerificationController(
     IOctoResourceStore resourceStore,
     IOctoTokenClaimsService tokenClaimsService,
     IOpenIddictTokenManager tokenManager,
-    ICrossTenantAuthenticationService crossTenantAuthService,
-    ICrossTenantUserProvisioningService crossTenantUserProvisioningService,
-    IOctoIdentityProviderStore identityProviderStore,
     UserManager<RtUser> userManager,
-    SignInManager<RtUser> signInManager,
     ILogger<DeviceVerificationController> logger) : ControllerBase
 {
     [HttpGet("~/connect/deviceverification")]
@@ -63,8 +59,10 @@ public class DeviceVerificationController(
         }
 
         var result = await HttpContext.AuthenticateAsync(OpenIddictServerAspNetCoreDefaults.AuthenticationScheme);
-        if (result is not { Succeeded: true, Principal: not null })
+        if (result is not { Succeeded: true, Principal: not null } ||
+            !await IsUserCodePendingAsync(result.Principal))
         {
+            // Unknown, expired, already approved or denied: no consent dialog for it (AB#7090).
             return NotFound("Invalid or expired device code");
         }
 
@@ -73,9 +71,16 @@ public class DeviceVerificationController(
 
         var (identityScopes, apiScopes) = await ResolveScopeItemsAsync(result.Principal.GetScopes());
 
+        // AB#7959 (RFC 8628 §5.4): name the target tenant and the signed-in account, so a request that is not the
+        // user's own — wrong tab, wrong tenant — is recognisable before Allow.
+        var (accountUserName, accountEmail) = await DescribeSessionAccountAsync();
+
         return Ok(new DeviceAuthorizationContextDto
         {
             UserCode = request.UserCode,
+            TenantId = HttpContext.Items[InfrastructureCommon.TenantIdName] as string,
+            AccountUserName = accountUserName,
+            AccountEmail = accountEmail,
             ClientName = client?.ClientName ?? clientId,
             ClientUrl = client?.ClientUri,
             ClientLogoUrl = client?.LogoUri,
@@ -92,9 +97,19 @@ public class DeviceVerificationController(
                       throw new InvalidOperationException("The OpenIddict request cannot be retrieved.");
 
         var result = await HttpContext.AuthenticateAsync(OpenIddictServerAspNetCoreDefaults.AuthenticationScheme);
-        if (result is not { Succeeded: true, Principal: not null })
+        if (result is not { Succeeded: true, Principal: not null } ||
+            !await IsUserCodePendingAsync(result.Principal))
         {
-            return ForbidWithError(Errors.InvalidToken, "Invalid or expired device code");
+            // A used or unknown code must answer invalid_token here, in the same JSON shape the
+            // response handler writes (OctoDeviceVerificationResponseHandler). Neither Forbid (the
+            // challenge handler needs an authenticated principal and throws for an unknown code) nor
+            // SignIn (OpenIddict throws for a device code that is already authorized) can be used.
+            return Ok(new
+            {
+                success = false,
+                errorMessage = "Invalid or expired device code",
+                error = Errors.InvalidToken
+            });
         }
 
         var form = await Request.ReadFormAsync(HttpContext.RequestAborted);
@@ -118,14 +133,13 @@ public class DeviceVerificationController(
             return ForbidWithError(Errors.AccessDenied, "The device authorization was denied.");
         }
 
-        // Cross-tenant approval: the cookie user must exist in the tenant this device code was
-        // wired to (HttpContext.Items via OidcTenantResolutionMiddleware) — provision the shadow
-        // user first when the session belongs to a parent tenant (ported from DeviceApiController).
+        // The approving user must exist in the tenant this device code was wired to (HttpContext.Items via
+        // OidcTenantResolutionMiddleware). AB#7884: no cross-tenant provisioning here any more.
         var tenantId = HttpContext.Items[InfrastructureCommon.TenantIdName] as string ?? "System";
-        var user = await ResolveOrProvisionUserAsync(tenantId);
+        var user = await FindSessionUserAsync(tenantId);
         if (user == null)
         {
-            return ForbidWithError(Errors.AccessDenied, "Cross-tenant access denied");
+            return ForbidWithError(Errors.AccessDenied, "The signed-in user does not exist in this tenant.");
         }
 
         var identity = new ClaimsIdentity(
@@ -133,8 +147,12 @@ public class DeviceVerificationController(
         await tokenClaimsService.PopulateUserClaimsAsync(identity, user, tenantId);
 
         // Session-style claims for parity with interactive logins; the session id comes from
-        // the cookie session (stamped by OctoTicketStore) so logout can address it.
-        identity.SetClaim(Claims.AuthenticationMethodReference, "pwd");
+        // the cookie session (stamped by OctoTicketStore) so logout can address it. The authentication
+        // methods are the session's (AB#7804): a sign-in with a second factor stamps amr=mfa, and a device
+        // token without it could never be exchanged into a child tenant by a 2FA user (octo-cli -ttid).
+        var sessionMethods = User.FindAll(Claims.AuthenticationMethodReference)
+            .Select(c => c.Value).Where(v => !string.IsNullOrEmpty(v)).Distinct(StringComparer.Ordinal).ToImmutableArray();
+        identity.SetClaims(Claims.AuthenticationMethodReference, sessionMethods.IsEmpty ? ["pwd"] : sessionMethods);
         identity.SetClaim("idp", "local");
         var sessionId = User.FindFirstValue("sid");
         if (!string.IsNullOrEmpty(sessionId))
@@ -169,66 +187,57 @@ public class DeviceVerificationController(
     }
 
     /// <summary>
-    ///     Returns the cookie user in the request tenant, provisioning the cross-tenant shadow
-    ///     user (and re-signing-in) when the session subject only exists in a parent tenant.
+    ///     True while the user code token of the authenticated verification request is still
+    ///     <c>valid</c>; approved, denied, redeemed or expired codes are not pending any more.
+    ///     OpenIddict keeps authenticating such a code on the verification endpoint, so the
+    ///     controller has to check the token status itself.
     /// </summary>
-    private async Task<RtUser?> ResolveOrProvisionUserAsync(string tenantId)
+    private async Task<bool> IsUserCodePendingAsync(ClaimsPrincipal principal)
+    {
+        var tokenId = principal.GetTokenId();
+        if (string.IsNullOrEmpty(tokenId))
+        {
+            return false;
+        }
+
+        var token = await tokenManager.FindByIdAsync(tokenId, HttpContext.RequestAborted);
+        return token != null &&
+               await tokenManager.HasStatusAsync(token, Statuses.Valid, HttpContext.RequestAborted);
+    }
+
+    /// <summary>
+    ///     The session user in the request tenant, or <c>null</c> (with a warning) when the session's subject does not
+    ///     exist there (AB#7884).
+    /// </summary>
+    private async Task<RtUser?> FindSessionUserAsync(string tenantId)
     {
         var subjectId = User.FindFirstValue(Claims.Subject) ?? User.FindFirstValue(ClaimTypes.NameIdentifier);
-        if (subjectId == null)
-        {
-            return null;
-        }
-
-        var existingUser = await userManager.FindByIdAsync(subjectId);
-        if (existingUser != null)
-        {
-            return existingUser;
-        }
-
-        logger.LogInformation(
-            "Device authorization: user '{SubjectId}' not found in tenant '{TenantId}', attempting cross-tenant provisioning",
-            subjectId, tenantId);
-
-        var identityProviders = (await identityProviderStore.GetAllAsync())
-            .OfType<RtOctoTenantIdentityProvider>()
-            .Where(p => p.IsEnabled)
-            .ToList();
-
-        CrossTenantAuthResult? crossTenantResult = null;
-        foreach (var provider in identityProviders)
-        {
-            crossTenantResult = await crossTenantAuthService.ValidateCrossTenantAccessAsync(
-                tenantId, provider.ParentTenantId!, subjectId);
-            if (crossTenantResult != null)
-            {
-                break;
-            }
-        }
-
-        if (crossTenantResult == null)
+        var user = subjectId == null ? null : await userManager.FindByIdAsync(subjectId);
+        if (user == null)
         {
             logger.LogWarning(
-                "Cross-tenant access denied for device authorization: user '{SubjectId}' in tenant '{TenantId}'",
-                subjectId, tenantId);
-            return null;
+                "Device authorization refused: the session subject '{SubjectId}' does not exist in tenant '{TenantId}'",
+                subjectId ?? "(none)", tenantId);
         }
 
-        var localUser = await crossTenantUserProvisioningService.FindOrCreateCrossTenantUserAsync(
-            crossTenantResult, tenantId);
-        if (localUser == null)
+        return user;
+    }
+
+    /// <summary>
+    ///     User name and e-mail of the signed-in session user in the request tenant (AB#7959); falls back to the session
+    ///     claims when the subject does not exist there (the approval is then refused anyway, AB#7884).
+    /// </summary>
+    private async Task<(string? UserName, string? Email)> DescribeSessionAccountAsync()
+    {
+        var subjectId = User.FindFirstValue(Claims.Subject) ?? User.FindFirstValue(ClaimTypes.NameIdentifier);
+        var user = subjectId == null ? null : await userManager.FindByIdAsync(subjectId);
+        if (user != null)
         {
-            return null;
+            return (user.UserName, user.Email);
         }
 
-        // Re-sign-in as the local shadow user so follow-up requests run on a subject that
-        // exists in the target tenant's database.
-        await signInManager.SignInAsync(localUser, isPersistent: false);
-
-        logger.LogInformation(
-            "Cross-tenant device authorization: provisioned user '{UserName}' in tenant '{TenantId}'",
-            localUser.UserName, tenantId);
-        return localUser;
+        return (User.FindFirstValue(Claims.PreferredUsername) ?? User.FindFirstValue(Claims.Name) ?? User.Identity?.Name,
+            User.FindFirstValue(Claims.Email) ?? User.FindFirstValue(ClaimTypes.Email));
     }
 
     private async Task<(List<ScopeItemDto> IdentityScopes, List<ScopeItemDto> ApiScopes)>

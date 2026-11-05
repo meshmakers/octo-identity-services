@@ -166,6 +166,17 @@ public class OnBehalfOfProcessorTests
     }
 
     [Fact]
+    public async Task IdTokenAsSubjectToken_IsRejectedAsInvalidGrant()
+    {
+        // AB#7860: on-behalf-of is a custom flow OpenIddict does not validate - the processor's typ check is the only
+        // thing that keeps a leaked id_token (same sub and tenant_id) from being used as the user's proof.
+        var outcome = await Process(["openid"], CreateSubjectToken(tokenType: "JWT"));
+
+        outcome.Error.Should().Be(Errors.InvalidGrant);
+        await _resolver.DidNotReceiveWithAnyArgs().ResolveAsync(default!, default!, TestContext.Current.CancellationToken);
+    }
+
+    [Fact]
     public async Task SubjectTokenFromAnotherTenant_IsRejectedAsInvalidTarget()
     {
         var outcome = await Process(scopes: ["openid"],
@@ -304,9 +315,11 @@ public class OnBehalfOfProcessorTests
     ///     A genuinely signed user access token: same issuer and signing key the processor resolves
     ///     from the OpenIddict server options, carrying <c>sub</c> and <c>tenant_id</c>.
     /// </summary>
-    private string CreateSubjectToken(string? tenantId = null) =>
+    private string CreateSubjectToken(string? tenantId = null, string tokenType = "at+jwt") =>
         new JsonWebTokenHandler().CreateToken(new SecurityTokenDescriptor
         {
+            // OpenIddict writes access tokens with typ at+jwt (RFC 9068); an id_token has typ JWT (AB#7860).
+            TokenType = tokenType,
             Issuer = Authority.EnsureEndsWith("/"),
             Expires = DateTime.UtcNow.AddMinutes(5),
             SigningCredentials = new SigningCredentials(_signingKey, SecurityAlgorithms.RsaSha256),

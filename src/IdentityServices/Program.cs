@@ -1,19 +1,23 @@
 ﻿using IdentityServerPersistence;
 using IdentityServerPersistence.Configuration.Options;
+using IdentityServerPersistence.Services;
 using IdentityServerPersistence.Services.DynamicClientRegistration;
-using IdentityServerPersistence.SystemStores;
+using IdentityServerPersistence.SystemStores.DataProtection;
 using Meshmakers.Octo.Backend.Authentication.Consumers;
 using Meshmakers.Octo.Backend.Authentication.DynamicAuth;
 using Meshmakers.Octo.Backend.IdentityServices.Authorization;
+using Meshmakers.Octo.Backend.IdentityServices.Authorization.RoleChange;
 using Meshmakers.Octo.Backend.IdentityServices.Configuration;
 using Meshmakers.Octo.Backend.IdentityServices.Mapping;
 using Meshmakers.Octo.Backend.IdentityServices.Consumers;
 using Meshmakers.Octo.Backend.IdentityServices.Cookies;
 using Meshmakers.Octo.Backend.IdentityServices.Resources;
+using Meshmakers.Octo.Backend.IdentityServices.Methods;
 using Meshmakers.Octo.Backend.IdentityServices.Middleware;
 using Meshmakers.Octo.Backend.IdentityServices.OpenIddict;
 using Meshmakers.Octo.Backend.IdentityServices.OpenIddict.Interaction;
 using Meshmakers.Octo.Backend.IdentityServices.Services;
+using OpenTelemetry.Metrics;
 using IQrCodeService = Meshmakers.Octo.Backend.IdentityServices.Services.IQrCodeService;
 using QrCodeService = Meshmakers.Octo.Backend.IdentityServices.Services.QrCodeService;
 using Meshmakers.Octo.Communication.Contracts;
@@ -41,9 +45,6 @@ using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Options;
 using Microsoft.IdentityModel.Logging;
-using Microsoft.AspNetCore.DataProtection;
-using Microsoft.AspNetCore.DataProtection.KeyManagement;
-using Microsoft.AspNetCore.DataProtection.Repositories;
 using System.Threading.RateLimiting;
 using Meshmakers.Octo.Backend.IdentityServices.Logging;
 using NLog;
@@ -70,11 +71,18 @@ try
 
     builder.AddObservability()
         .AddSystemContextHealthCheck();
+    // AB#8019: the identity service's own meter (client mirror reconciliation). An unregistered meter drops every
+    // measurement silently, so it is registered here, next to the platform-wide list of AddObservability.
+    builder.Services.ConfigureOpenTelemetryMeterProvider(metrics =>
+        metrics.AddMeter(IdentityServerPersistence.Services.ClientMirrorReconciliationMetrics.MeterName));
 
     // NLog: Setup NLog for Dependency injection
     builder.Logging.ClearProviders();
     builder.Logging.SetMinimumLevel(LogLevel.Trace);
     builder.Host.UseNLog();
+    // AB#8008: masks credentials that outdated clients still send in request URLs (reset password query parameter,
+    // stored secret value in the deprecated apiSecrets path) in every log line, including the ASP.NET request log.
+    builder.Services.AddCredentialLogRedaction();
 
     // additional providers here needed.
     // allow environment variables to override values from other providers.
@@ -86,6 +94,17 @@ try
     builder.Services.AddOctoNotification();
     builder.Services.AddScoped<IUserEmailInteractionService, UserEmailInteractionService>();
     builder.Services.AddScoped<IUserManagementService, UserManagementService>();
+    builder.Services.AddScoped<IUserCredentialChangeService, UserCredentialChangeService>();
+    // AB#8018: OctoUserManager revokes the user's tokens before every password write (and the helper above after it).
+    builder.Services.AddScoped<IUserTokenRevocation, UserTokenRevocation>();
+    builder.Services.AddScoped<IUserTwoFactorAdministrationService, UserTwoFactorAdministrationService>();
+    builder.Services.AddScoped<IUserCreationService, UserCreationService>();
+    // AB#7778: the one merge of a duplicate user, shared by REST and User.Merge-1.
+    builder.Services.AddScoped<IUserMergeService, UserMergeService>();
+    // AB#7899: administrator revokes all sessions and tokens of a user / of the shadow users of a tenant.
+    builder.Services.AddScoped<IUserSessionRevocationService, UserSessionRevocationService>();
+    builder.Services.AddScoped<IRoleChangeGuard, RoleChangeGuard>(); // AB#7914
+    builder.Services.AddScoped<IRoleChangeRefusals, RoleChangeRefusals>(); // AB#7927
     builder.Services.AddSingleton<IQrCodeService, QrCodeService>();
     builder.Services
         .AddSingletonMultipleInterfaces<IdentityConfigurationService, IIdentityConfigurationService,
@@ -116,11 +135,9 @@ try
     // shared by all pods. Identity:DataProtectionKeysPath is no longer a persistence target; if it
     // is set and contains legacy key-*.xml files (old chart still mounts the PVC), they are
     // imported ONCE by DataProtectionKeyStore so existing sessions survive the migration.
-    builder.Services.AddSingleton<IXmlRepository, DataProtectionKeyStore>();
-    builder.Services.AddOptions<KeyManagementOptions>()
-        .Configure<IXmlRepository>((options, repository) => options.XmlRepository = repository);
-    builder.Services.AddDataProtection()
-        .SetApplicationName("OctoIdentityServices");
+    // AB#5530: keys are encrypted at rest with the platform key ring (SecretEncryption), see
+    // Identity:DataProtection:EncryptExistingKeys and docs/rollout-identity-dataprotection-encryption.md.
+    builder.Services.AddOctoDataProtectionKeyRing();
     builder.Services.AddOctoTenantIdRouteConstraint();
 
     builder.Services.Configure<CookiePolicyOptions>(options =>
@@ -182,6 +199,14 @@ try
 
     builder.Services.AddCors();
 
+    // AB#7044: per-subject throttle of GET /api/tenant-topology (asked by the controller after authentication).
+    builder.Services.AddSingleton<ITenantTopologyRateLimiter, TenantTopologyRateLimiter>();
+    // AB#7861: single use of the cross-tenant two-factor challenge cookie.
+    builder.Services.AddSingleton<ICrossTenantChallengeReplayGuard, CrossTenantChallengeReplayGuard>();
+
+    // AB#7854: per-account / per-client limits of the sign-in endpoints (asked by AuthApiController, which knows the account).
+    builder.Services.AddSingleton<ISignInRateLimiter, SignInRateLimiter>();
+
     // AB#5032: lets an operator narrow the client-credentials exemption of
     // UseOctoTenantAuthorization() per environment (OCTO_TENANTAUTHORIZATION__…). The defaults
     // reproduce the previous behaviour and only add the audit log.
@@ -193,9 +218,21 @@ try
     // refresh — operators bump the embedded blueprint version to roll forward.
     builder.Services.AddBlueprintSystemIdentityBootstrapV1();
 
+    // CK methods hosted by the identity service (AB#5672). Handlers of methods with a password or secret are only
+    // registered with Methods:Identity:EnablePasswordMethods=true (default false, production gate of 2026-10-23).
+    var identityMethodOptions = IdentityMethodHost.ReadOptions(builder.Configuration);
+    var identityMethodHandlers = IdentityMethodHost.SelectHandlers(identityMethodOptions);
+    logger.Info("CK method handlers: {0} of {1} registered (EnablePasswordMethods={2})", identityMethodHandlers.Count,
+        IdentityMethodHost.Handlers.Count, identityMethodOptions.EnablePasswordMethods);
+
     builder.Services.AddRuntimeEngine()
         .AddOctoIdentityPersistence(configureDistributionEventHub: c =>
         {
+            if (identityMethodHandlers.Count > 0)
+            {
+                c.AddCkMethodHandlerDiscovery();
+            }
+
             c.AddBroadcastEventConsumer<IdentityProviderUpdateConsumer, IdentityProviderUpdate>();
             c.AddBroadcastEventConsumer<IdentityCorsClientsUpdateConsumer, CorsClientsUpdate>();
             c.AddBroadcastEventConsumer<IdentityTenantManagementConsumer, PreDeleteTenant>();
@@ -203,6 +240,9 @@ try
             c.AddCommandConsumer<CreateIdentityDataCommandRequestConsumer, CreateIdentityDataCommandRequest>(
                 QueueNames.CreateIdentityDataCommand);
         });
+
+    // After AddOctoIdentityPersistence: replaces the tenant resolver that AddOctoServiceInfrastructure registers.
+    builder.Services.AddIdentityCkMethodHost(identityMethodHandlers);
 
     // Register Identity-specific CORS policy provider AFTER AddOctoIdentityPersistence,
     // which internally calls AddOctoServiceInfrastructure and registers its own ICorsPolicyProvider.
@@ -243,6 +283,11 @@ try
     builder.Services.ConfigureApplicationCookie(o =>
     {
         o.CookieManager = tenantCookieManager;
+        // AB#7959: explicit, not the framework default. The device verification POST carries
+        // [IgnoreAntiforgeryToken] and relies on this cookie not being sent on cross-site POSTs; the
+        // CookiePolicy's MinimumSameSitePolicy = None would not lower it, but nothing may depend on that.
+        // Only the session-check cookie (SessionCheckCookie) stays SameSite=None for the OIDC iframe.
+        o.Cookie.SameSite = SameSiteMode.Lax;
         o.SlidingExpiration = true;
         // With server-side sessions this bounds BOTH the cookie and the session record.
         // Explicit (was: 14-day framework default) — sliding, so active users stay signed in.
@@ -253,6 +298,9 @@ try
 
     // Service that periodically cleans up expired sessions, OAuth tokens and legacy grants
     builder.Services.AddSingleton<IHostedService, TokenCleanupHostService>();
+
+    // AB#8019: periodic reconciliation of client mirrors (compensation for a failed best-effort mirror sync).
+    builder.Services.AddHostedService<ClientMirrorReconciliationHostService>();
 
     // Add the extra configuration;
     builder.Services.ConfigureOptions<ConfigureOctoOpenApiOptions>();
@@ -269,7 +317,14 @@ try
     // OCTO_IDENTITYAPIAUTHORIZATION__ROLEENFORCEMENT=Warn only logs missing roles (transition).
     builder.Services.Configure<IdentityApiAuthorizationOptions>(options =>
         builder.Configuration.GetSection(IdentityApiAuthorizationOptions.SectionName).Bind(options));
+    // AB#8165: the admin role migration mode lives in the same section (Off / DryRun / Apply).
+    builder.Services.Configure<IdentityServerPersistence.Services.AdminRoleMigration.AdminRoleMigrationOptions>(options =>
+        builder.Configuration.GetSection(
+            IdentityServerPersistence.Services.AdminRoleMigration.AdminRoleMigrationOptions.SectionName).Bind(options));
     builder.Services.AddSingleton<IAuthorizationHandler, IdentityApiRoleAuthorizationHandler>();
+    // AB#5861: a missing role is answered 403 {"message": "...requires the role 'X'..."} (AB#5227 shape).
+    builder.Services.Replace(ServiceDescriptor
+        .Singleton<IAuthorizationMiddlewareResultHandler, IdentityApiForbiddenReasonResultHandler>());
     builder.Services.AddSingleton<IAuthorizationHandler, IdentityApiOwnTenantAuthorizationHandler>();
     builder.Services.AddAuthorization(options => options.AddIdentityApiPolicies());
 
@@ -431,6 +486,9 @@ try
 
     // The sequence of the add statements in the configure function is of importance.
     app.UseDcrDefaultScope();
+    // AB#8177: an unreachable tenant database answers a clear 503 error instead of an unhandled 500. Outside the
+    // tenant resolution on purpose: its tenant lookup reads from the database too.
+    app.UseTokenEndpointDatabaseFailureHandling();
     app.UseOidcTenantResolution();
     app.UseAuthentication();
     app.UseAuthorization();

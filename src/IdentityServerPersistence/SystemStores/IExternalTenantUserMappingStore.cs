@@ -1,5 +1,5 @@
 using Meshmakers.Octo.ConstructionKit.Contracts;
-using Persistence.IdentityCkModel.Generated.System.Identity.v2;
+using Persistence.IdentityCkModel.Generated.System.Identity.v3;
 
 namespace IdentityServerPersistence.SystemStores;
 
@@ -10,7 +10,8 @@ namespace IdentityServerPersistence.SystemStores;
 public interface IExternalTenantUserMappingStore
 {
     /// <summary>
-    /// Finds a mapping by the source tenant ID and source user ID.
+    /// Finds a mapping by the source tenant ID and source user ID. Mappings are meant to be unique per pair; if
+    /// duplicates exist, the oldest one (smallest RtId) is returned and a warning is logged (AB#6975).
     /// </summary>
     Task<RtExternalTenantUserMapping?> FindBySourceUserAsync(string sourceTenantId, string sourceUserId);
 

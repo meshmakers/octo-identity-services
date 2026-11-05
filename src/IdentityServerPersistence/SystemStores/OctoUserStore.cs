@@ -10,11 +10,11 @@ using Meshmakers.Octo.Runtime.Contracts.Repositories.Query;
 using Meshmakers.Octo.Runtime.Contracts.RepositoryEntities;
 using Meshmakers.Octo.Services.Infrastructure.Services;
 using Microsoft.AspNetCore.Identity;
-using Persistence.IdentityCkModel.Generated.System.Identity.v2;
+using Persistence.IdentityCkModel.Generated.System.Identity.v3;
 
 namespace IdentityServerPersistence.SystemStores;
 
-public sealed class OctoUserStore(
+public sealed partial class OctoUserStore(
     IMultiTenancyResolverService multiTenancyResolverService,
     IGroupRoleResolver groupRoleResolver,
     IdentityErrorDescriber? describer)
@@ -32,11 +32,15 @@ public sealed class OctoUserStore(
         IUserAuthenticationTokenStore<RtUser>,
         IUserTwoFactorRecoveryCodeStore<RtUser>,
         IQueryableUserStore<RtUser>,
-        IProtectedUserStore<RtUser>
+        IProtectedUserStore<RtUser>,
+        IAtomicUserLockoutStore
 {
     private const string InternalLoginProvider = "[AspNetUserStore]";
     private const string AuthenticatorKeyTokenName = "AuthenticatorKey";
     private const string RecoveryCodeTokenName = "RecoveryCodes";
+
+    /// <summary>Bounded retries of a guarded user write that met a concurrent change (AB#7770).</summary>
+    private const int MaxConcurrencyAttempts = 40;
 
     private ITenantRepository TenantRepository => multiTenancyResolverService.GetTenantRepository();
     private bool _disposed;
@@ -56,52 +60,46 @@ public sealed class OctoUserStore(
         ThrowIfDisposed();
         ArgumentValidation.Validate(nameof(user), user);
 
-        using var session = await TenantRepository.GetSessionAsync();
-        session.StartTransaction();
-
-        // Get the user from the database to modify its tokens
-        var dbUser = await TenantRepository.GetRtEntityByRtIdAsync<RtUser>(session, user.RtId);
-        if (dbUser == null)
+        // Guarded read-modify-write on the stored user (AB#7770): a parallel failed sign-in must not be lost.
+        var outcome = await MutateStoredUserAsync(user.RtId, dbUser =>
         {
-            await session.AbortTransactionAsync();
-            return;
-        }
+            var token = dbUser.UserTokens?.FirstOrDefault(x => x.LoginProvider == loginProvider && x.Name == name);
 
-        var token = dbUser.UserTokens?.FirstOrDefault(x => x.LoginProvider == loginProvider && x.Name == name);
-
-        // If value is null or empty, remove the token entirely
-        if (string.IsNullOrEmpty(value))
-        {
-            if (token != null && dbUser.UserTokens != null)
+            // If value is null or empty, remove the token entirely
+            if (string.IsNullOrEmpty(value))
             {
-                dbUser.UserTokens.RemoveAll(x => x.LoginProvider == loginProvider && x.Name == name);
+                if (token != null && dbUser.UserTokens != null)
+                {
+                    dbUser.UserTokens.RemoveAll(x => x.LoginProvider == loginProvider && x.Name == name);
+                }
             }
-        }
-        else if (token == null)
-        {
-            dbUser.UserTokens ??= new AttributeRecordValueList<RtUserTokenRecord>();
-            dbUser.UserTokens.Add(new RtUserTokenRecord
+            else if (token == null)
             {
-                UserId = dbUser.RtId.ToString(),
-                LoginProvider = loginProvider,
-                Name = name,
-                Value = value
-            });
-        }
-        else
-        {
-            token.Value = value;
-            var tokenIndex = dbUser.UserTokens!.FindIndex(x => x.LoginProvider == loginProvider && x.Name == name);
-            dbUser.UserTokens[tokenIndex] = token;
-        }
+                dbUser.UserTokens ??= new AttributeRecordValueList<RtUserTokenRecord>();
+                dbUser.UserTokens.Add(new RtUserTokenRecord
+                {
+                    UserId = dbUser.RtId.ToString(),
+                    LoginProvider = loginProvider,
+                    Name = name,
+                    Value = value
+                });
+            }
+            else
+            {
+                token.Value = value;
+                var tokenIndex = dbUser.UserTokens!.FindIndex(x => x.LoginProvider == loginProvider && x.Name == name);
+                dbUser.UserTokens[tokenIndex] = token;
+            }
 
-        // Persist the updated user back to the database
-        await TenantRepository.ReplaceOneRtEntityByIdAsync(session, dbUser.RtId, dbUser);
+            return true;
+        }, cancellationToken);
 
         // Also update the in-memory user object
-        user.UserTokens = dbUser.UserTokens;
-
-        await session.CommitTransactionAsync();
+        if (outcome != null)
+        {
+            user.UserTokens = outcome.User.UserTokens;
+            AdoptStoredVersion(user, outcome);
+        }
     }
 
     public async Task RemoveTokenAsync(
@@ -114,31 +112,31 @@ public sealed class OctoUserStore(
         ThrowIfDisposed();
         ArgumentValidation.Validate(nameof(user), user);
 
-        using var session = await TenantRepository.GetSessionAsync();
-        session.StartTransaction();
-
-        // Get the user from the database to modify its tokens
-        var dbUser = await TenantRepository.GetRtEntityByRtIdAsync<RtUser>(session, user.RtId);
-        if (dbUser == null)
+        var outcome = await MutateStoredUserAsync(user.RtId, dbUser =>
         {
-            await session.AbortTransactionAsync();
-            return;
-        }
+            var entry = dbUser.UserTokens?.FirstOrDefault(x => x.LoginProvider == loginProvider && x.Name == name);
+            if (entry == null || dbUser.UserTokens == null)
+            {
+                return false;
+            }
 
-        var entry = dbUser.UserTokens?.FirstOrDefault(x => x.LoginProvider == loginProvider && x.Name == name);
-        if (entry != null && dbUser.UserTokens != null)
-        {
             dbUser.UserTokens.RemoveAll(x => x.LoginProvider == entry.LoginProvider && x.Name == entry.Name);
+            return true;
+        }, cancellationToken);
 
-            // Persist the updated user back to the database
-            await TenantRepository.ReplaceOneRtEntityByIdAsync(session, dbUser.RtId, dbUser);
-
-            // Also update the in-memory user object
-            user.UserTokens = dbUser.UserTokens;
+        // Also update the in-memory user object
+        if (outcome != null)
+        {
+            user.UserTokens = outcome.User.UserTokens;
+            AdoptStoredVersion(user, outcome);
         }
-
-        await session.CommitTransactionAsync();
     }
+
+    private Task<StoredUserMutation?> MutateStoredUserAsync(
+        OctoObjectId rtId,
+        Func<RtUser, bool> mutate,
+        CancellationToken cancellationToken)
+        => MutateUserGuardedAsync(TenantRepository, rtId, mutate, MaxConcurrencyAttempts, cancellationToken);
 
     public async Task<string?> GetTokenAsync(
         RtUser user,
@@ -239,22 +237,32 @@ public sealed class OctoUserStore(
         return result.Items.FirstOrDefault();
     }
 
+    /// <summary>
+    ///     Writes the user only if it still has the <c>rtVersion</c> it was read with (AB#7770). A concurrent change of the
+    ///     same user is reported as <see cref="IdentityErrorDescriber.ConcurrencyFailure" /> instead of being overwritten
+    ///     (last-writer-wins). Callers that must not lose a change retry from a fresh read.
+    /// </summary>
     public async Task<IdentityResult> UpdateAsync(RtUser user, CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
         ThrowIfDisposed();
+        ArgumentValidation.Validate(nameof(user), user);
 
         using var session = await TenantRepository.GetSessionAsync().ConfigureAwait(false);
         session.StartTransaction();
 
+        var expectedRtVersion = user.RtVersion;
         try
         {
-            await TenantRepository.ReplaceOneRtEntityByIdAsync(session, user.RtId, user).ConfigureAwait(false);
+            await TenantRepository.ReplaceOneRtEntityByIdAsync(session, user.RtId, user, expectedRtVersion)
+                .ConfigureAwait(false);
             await session.CommitTransactionAsync();
             return IdentityResult.Success;
         }
         catch (PersistenceException)
         {
+            // Keep the version the caller read: the write did not happen.
+            user.RtVersion = expectedRtVersion;
             return IdentityResult.Failed(ErrorDescriber.ConcurrencyFailure());
         }
     }
@@ -388,8 +396,13 @@ public sealed class OctoUserStore(
             throw NotExistingException.UserWithIdDoesNotExist(user.RtId);
         }
 
-        var source =
-            dbUser.Claims?.Select(x => new Claim(x.ClaimType, x.ClaimValue));
+        // AB#7861 (review finding 9): authentication-method evidence (amr, e.g. amr=mfa) describes a sign-in and is
+        // set only by the sign-in itself, never taken from stored user claims — anything able to write RtUser.Claims
+        // (an import, another service) would otherwise mint second-factor evidence for every session of the user.
+        var source = dbUser.Claims?
+            .Where(x => !string.Equals(x.ClaimType, SecondFactorEvidence.AuthenticationMethodClaimType,
+                StringComparison.OrdinalIgnoreCase))
+            .Select(x => new Claim(x.ClaimType, x.ClaimValue));
         var claimsAsync = source?.ToList();
 
         return claimsAsync ?? new List<Claim>();
@@ -513,7 +526,12 @@ public sealed class OctoUserStore(
         return user != null ? Task.FromResult(user.LockoutEnabled) : throw new ArgumentNullException(nameof(user));
     }
 
-    public Task<int> IncrementAccessFailedCountAsync(
+    /// <summary>
+    ///     Counts one failed sign-in and stores it at once (AB#7770, finding L9): the increment is a guarded
+    ///     read-modify-write on the stored user, so failed sign-ins that run in parallel are all counted. Returns the stored
+    ///     count, which <c>UserManager.AccessFailedAsync</c> compares with the lockout threshold.
+    /// </summary>
+    public async Task<int> IncrementAccessFailedCountAsync(
         RtUser user,
         CancellationToken cancellationToken = default)
     {
@@ -521,18 +539,49 @@ public sealed class OctoUserStore(
         ThrowIfDisposed();
         ArgumentValidation.Validate(nameof(user), user);
 
-        ++user.AccessFailedCount;
-        return Task.FromResult(user.AccessFailedCount);
+        var outcome = await MutateStoredUserAsync(user.RtId, dbUser =>
+        {
+            ++dbUser.AccessFailedCount;
+            return true;
+        }, cancellationToken);
+
+        if (outcome == null)
+        {
+            // Not stored yet (user is being created): only the in-memory object can carry the count.
+            ++user.AccessFailedCount;
+            return user.AccessFailedCount;
+        }
+
+        AdoptStoredLockoutState(user, outcome);
+        return outcome.User.AccessFailedCount;
     }
 
-    public Task ResetAccessFailedCountAsync(RtUser user, CancellationToken cancellationToken = default)
+    /// <summary>
+    ///     Resets the failed-sign-in counter and stores it at once with the same guard as
+    ///     <see cref="IncrementAccessFailedCountAsync" />.
+    /// </summary>
+    public async Task ResetAccessFailedCountAsync(RtUser user, CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
         ThrowIfDisposed();
         ArgumentValidation.Validate(nameof(user), user);
 
+        var outcome = await MutateStoredUserAsync(user.RtId, dbUser =>
+        {
+            if (dbUser.AccessFailedCount == 0)
+            {
+                return false;
+            }
+
+            dbUser.AccessFailedCount = 0;
+            return true;
+        }, cancellationToken);
+
         user.AccessFailedCount = 0;
-        return Task.CompletedTask;
+        if (outcome != null)
+        {
+            AdoptStoredLockoutState(user, outcome);
+        }
     }
 
     public Task<DateTimeOffset?> GetLockoutEndDateAsync(
@@ -544,7 +593,11 @@ public sealed class OctoUserStore(
         return Task.FromResult(user.LockoutEnd);
     }
 
-    public Task SetLockoutEndDateAsync(
+    /// <summary>
+    ///     Sets the lockout end and stores it at once with the same guard as <see cref="IncrementAccessFailedCountAsync" />,
+    ///     so the lockout that a parallel failed sign-in triggers is never overwritten by another writer's copy of the user.
+    /// </summary>
+    public async Task SetLockoutEndDateAsync(
         RtUser user,
         DateTimeOffset? lockoutEnd,
         CancellationToken cancellationToken = default)
@@ -553,8 +606,22 @@ public sealed class OctoUserStore(
         ThrowIfDisposed();
         ArgumentValidation.Validate(nameof(user), user);
 
+        var outcome = await MutateStoredUserAsync(user.RtId, dbUser =>
+        {
+            if (dbUser.LockoutEnd == lockoutEnd)
+            {
+                return false;
+            }
+
+            dbUser.LockoutEnd = lockoutEnd;
+            return true;
+        }, cancellationToken);
+
         user.LockoutEnd = lockoutEnd;
-        return Task.CompletedTask;
+        if (outcome != null)
+        {
+            AdoptStoredLockoutState(user, outcome);
+        }
     }
 
     public Task SetLockoutEnabledAsync(
@@ -1018,17 +1085,9 @@ public sealed class OctoUserStore(
         ArgumentValidation.Validate(nameof(user), user);
         ArgumentValidation.ValidateString(nameof(code), code);
 
-        var token = await GetTokenAsync(user, InternalLoginProvider, RecoveryCodeTokenName, cancellationToken);
-        var source = token?.Split(';');
-        if (source == null || !source.Contains(code))
-        {
-            return false;
-        }
-
-
-        var recoveryCodes = new List<string>(source.Where(s => s != code));
-        await ReplaceCodesAsync(user, recoveryCodes, cancellationToken);
-        return true;
+        // AB#7854: read, remove and write back in ONE transaction. Reading in one transaction and writing in the
+        // next let two parallel requests both find the code and both redeem it.
+        return await RedeemCodeAtomicallyAsync(user, code, cancellationToken).ConfigureAwait(false);
     }
 
     public async Task<int> CountCodesAsync(RtUser user, CancellationToken cancellationToken = default)

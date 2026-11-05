@@ -35,4 +35,11 @@ public class CrossTenantAuthResult
     /// The user's email address.
     /// </summary>
     public string? Email { get; init; }
+
+    /// <summary>
+    /// <c>true</c> when the source user — or any identity its <c>xt_</c> chain unwinds to — has two-factor
+    /// authentication enabled (AB#7804). A cross-tenant sign-in for such a user must not create a session or a
+    /// token in the target tenant without second-factor evidence (see <see cref="SecondFactorEvidence" />).
+    /// </summary>
+    public bool SourceUserRequiresSecondFactor { get; init; }
 }

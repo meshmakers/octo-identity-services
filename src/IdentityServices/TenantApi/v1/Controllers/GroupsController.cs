@@ -1,14 +1,18 @@
 using System.ComponentModel;
 using System.ComponentModel.DataAnnotations;
 using Asp.Versioning;
+using System.Security.Claims;
 using IdentityServerPersistence;
+using IdentityServerPersistence.Services.ScratchTenants;
 using IdentityServerPersistence.SystemStores;
 using Meshmakers.Octo.Communication.Contracts.DataTransferObjects;
 using Meshmakers.Octo.ConstructionKit.Contracts;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
-using Persistence.IdentityCkModel.Generated.System.Identity.v2;
+using Meshmakers.Octo.Services.Infrastructure.Services;
+using Persistence.IdentityCkModel.Generated.System.Identity.v3;
 using Meshmakers.Octo.Backend.Authentication;
+using Meshmakers.Octo.Backend.IdentityServices.Authorization.RoleChange;
 
 namespace Meshmakers.Octo.Backend.IdentityServices.TenantApi.v1.Controllers;
 
@@ -19,8 +23,26 @@ namespace Meshmakers.Octo.Backend.IdentityServices.TenantApi.v1.Controllers;
 [Route(IdentityServiceConstants.ApiPathPrefix + "/[controller]")]
 [ApiController]
 [ApiVersion(IdentityServiceConstants.ApiVersion1)]
-public class GroupsController(IGroupStore groupStore) : ControllerBase
+public class GroupsController(
+    IGroupStore groupStore,
+    IScratchTenantGrantService scratchTenantGrantService,
+    IMultiTenancyResolverService multiTenancyResolverService,
+    IRoleChangeGuard roleChangeGuard,
+    IRoleChangeRefusals roleChangeRefusals) : ControllerBase
 {
+    /// <summary>
+    /// Runs the role change guard (AB#7927): self-grant, built-in roles the caller does not hold, last user administrator.
+    /// Returns the 403/409 problem answer (audited), or <c>null</c> when the change is allowed.
+    /// </summary>
+    private async Task<ObjectResult?> GuardAsync(RoleGraphChange change, string groupId)
+    {
+        var caller = RoleChangeCaller.FromPrincipal(User);
+        var decision = await roleChangeGuard.EvaluateAsync(caller, change, HttpContext.RequestAborted);
+        return decision.IsAllowed
+            ? null
+            : await roleChangeRefusals.RefuseAsync(HttpContext, caller, decision, $"group {groupId}");
+    }
+
     /// <summary>
     /// Returns all groups.
     /// </summary>
@@ -196,6 +218,12 @@ public class GroupsController(IGroupStore groupStore) : ControllerBase
             return NotFound();
         }
 
+        var refusal = await GuardAsync(new RoleGraphChange.GroupDeleted(rtId.ToString()), rtId.ToString());
+        if (refusal != null)
+        {
+            return refusal;
+        }
+
         await groupStore.RemoveAsync(rtId);
         return Ok();
     }
@@ -240,6 +268,12 @@ public class GroupsController(IGroupStore groupStore) : ControllerBase
         if (group == null)
         {
             return NotFound();
+        }
+
+        var refusal = await GuardAsync(new RoleGraphChange.GroupRoles(rtId.ToString(), roleIds), rtId.ToString());
+        if (refusal != null)
+        {
+            return refusal;
         }
 
         await groupStore.SetRoleIdsAsync(rtId, roleIds);
@@ -288,6 +322,13 @@ public class GroupsController(IGroupStore groupStore) : ControllerBase
             return NotFound();
         }
 
+        var refusal = await GuardAsync(new RoleGraphChange.MemberAdded(rtId.ToString(), GroupMemberKind.User, userId),
+            rtId.ToString());
+        if (refusal != null)
+        {
+            return refusal;
+        }
+
         await groupStore.AddMemberUserAsync(rtId, userId);
         return Ok();
     }
@@ -308,6 +349,13 @@ public class GroupsController(IGroupStore groupStore) : ControllerBase
         if (group == null)
         {
             return NotFound();
+        }
+
+        var refusal = await GuardAsync(new RoleGraphChange.MemberRemoved(rtId.ToString(), GroupMemberKind.User, userId),
+            rtId.ToString());
+        if (refusal != null)
+        {
+            return refusal;
         }
 
         await groupStore.RemoveMemberUserAsync(rtId, userId);
@@ -356,6 +404,13 @@ public class GroupsController(IGroupStore groupStore) : ControllerBase
             return NotFound();
         }
 
+        var refusal = await GuardAsync(new RoleGraphChange.MemberAdded(rtId.ToString(), GroupMemberKind.Client, clientId),
+            rtId.ToString());
+        if (refusal != null)
+        {
+            return refusal;
+        }
+
         await groupStore.AddMemberClientAsync(rtId, clientId);
         return Ok();
     }
@@ -378,8 +433,32 @@ public class GroupsController(IGroupStore groupStore) : ControllerBase
             return NotFound();
         }
 
+        // No guard call: removing a client gives nothing to anybody and clients do not count as administrators (AB#7927).
+        // AB#7192: taking the creator's mirror out of TenantOwners of a scratch tenant is a revoke - persisted, so the
+        // tenant setup does not grant it again. The revoke is recorded BEFORE the membership is removed: a failure
+        // between the two steps then leaves a revoked marker with the membership still in place (harmless, the caller
+        // sees the error and repeats), never a removed membership that the next setup grants again. A no-op for every
+        // other removal.
+        if (OctoObjectId.TryParse(clientId, out var clientRtId))
+        {
+            await scratchTenantGrantService.RecordRevocationAsync(multiTenancyResolverService.GetTenantId(), rtId,
+                clientRtId, GetCallerLabel());
+        }
+
         await groupStore.RemoveMemberClientAsync(rtId, clientId);
         return Ok();
+    }
+
+    private string GetCallerLabel()
+    {
+        // A client-credentials token has no user: name the client. Both the unmapped and the mapped claim names are
+        // checked because the JWT handler may remap them.
+        return User.FindFirstValue("preferred_username")
+               ?? User.FindFirstValue(ClaimTypes.Name)
+               ?? User.FindFirstValue("client_id")
+               ?? User.FindFirstValue("sub")
+               ?? User.FindFirstValue(ClaimTypes.NameIdentifier)
+               ?? "unknown";
     }
 
     // ========================================
@@ -444,6 +523,13 @@ public class GroupsController(IGroupStore groupStore) : ControllerBase
             return BadRequest("Adding this group would create a circular reference.");
         }
 
+        var refusal = await GuardAsync(new RoleGraphChange.MemberAdded(rtId.ToString(), GroupMemberKind.Group,
+            childGroup.RtId.ToString()), rtId.ToString());
+        if (refusal != null)
+        {
+            return refusal;
+        }
+
         await groupStore.AddMemberGroupAsync(rtId, childGroupId);
         return Ok();
     }
@@ -464,6 +550,13 @@ public class GroupsController(IGroupStore groupStore) : ControllerBase
         if (group == null)
         {
             return NotFound();
+        }
+
+        var refusal = await GuardAsync(new RoleGraphChange.MemberRemoved(rtId.ToString(), GroupMemberKind.Group,
+            childGroupId), rtId.ToString());
+        if (refusal != null)
+        {
+            return refusal;
         }
 
         await groupStore.RemoveMemberGroupAsync(rtId, childGroupId);
