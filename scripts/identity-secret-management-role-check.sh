@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# identity-secret-management-role-check.sh -- READ-ONLY role inventory for AB#5861.
+# identity-secret-management-role-check.sh -- READ-ONLY role inventory for AB#5861 (read-only since AB#8155).
 #
 # Since AB#5861 the API secret writes of the identity service (create/rotate/delete secrets of clients and
 # API resources, a clientSecret in client create/update, the Client.AddSecret/RemoveSecret methods) need the
@@ -12,169 +12,216 @@
 #   * every subject that may write API secrets today (TenantManagement or UserManagement, direct or via a
 #     group) but does NOT hold SecretManagement -- these lose the secret writes once the switch is Enforce.
 #
-# It only runs octo-cli READ commands (AuthStatus, GetTenants, GraphQl queries). One context is enough:
-# octo-cli GraphQl -tid exchanges the token per tenant. It never writes, never reads secret values
-# (clientSecrets is not queried) and masks e-mail addresses unless --with-email.
+# Data source: the cluster's MongoDB, read directly (system DB tenant list; per tenant DB the identity roles, groups,
+# users, clients, external tenant user mappings and the AssignedRole/GroupMember/ChildGroup associations) with
+# mongosh inside the MongoDB pod, readPreference=secondaryPreferred. It uses NO octo-cli and NO token exchange: the
+# earlier octo-cli version ran "GraphQl -tid" per tenant, and that exchange created an xt_ shadow user for the caller in
+# every tenant it did not have one yet (AB#8155).
 #
-# Requirements: bash >= 3.2, octo-cli, jq.
-# Exit codes: 0 = every tenant has the role and nobody loses access, 2 = findings, 1 = error / incomplete.
+# It writes nothing:
+#   * the JavaScript it runs (identity-secret-management-role-check.{snapshot,inventory}.js next to this script) uses
+#     read operations only; a guard refuses to run when either file contains a write-capable call (--self-check runs
+#     the guard alone; scripts/tests/identity-secret-management-role-check.test.sh proves it trips);
+#   * an identity snapshot (per tenant DB: users, xt_ users, external tenant user mappings, newest change of users and
+#     mappings) is taken before and after the inventory; if they differ the script says so and exits 1.
+# It never loads secret material (every query projects the attributes it needs; password hashes, security stamps,
+# client secrets and tokens are not read) and masks e-mail addresses unless --with-email. The MongoDB password is read
+# from the cluster secret into a shell variable and passed to mongosh on stdin -- never in argv, the environment or
+# the output.
+#
+# Access: kubectl access to the namespace of the MongoDB pods (get secret, list pods, exec) -- on shared clusters via
+# breakglass or Semaphore (agent-operating-rules), never through extra RBAC rights.
+# Requirements: bash >= 3.2, kubectl, jq.
+# Exit codes: 0 = every tenant has the role and nobody loses access, 2 = findings, 1 = error / incomplete /
+# snapshot changed.
 
 set -euo pipefail
 
-OCTO_CLI="${OCTO_CLI:-octo-cli}"
 SCRIPT_NAME="$(basename "$0")"
-SECRET_ROLE_ID="660000000000000000000060"
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+SNAPSHOT_JS="$SCRIPT_DIR/identity-secret-management-role-check.snapshot.js"
+INVENTORY_JS="$SCRIPT_DIR/identity-secret-management-role-check.inventory.js"
 
 usage() {
     cat <<EOF
-Usage: $SCRIPT_NAME --context <ctx> [--discover children|recursive|all] [--with-email|--ids-only] [tenant ...]
+Usage: $SCRIPT_NAME --context <kube-context> [options] [tenant ...]
+       $SCRIPT_NAME --self-check
 
-Read-only SecretManagement inventory for the AB#5861 rollout.
+Read-only SecretManagement inventory for the AB#5861 rollout, read straight from the cluster's MongoDB.
+No octo-cli, no token exchange; writes nothing (guarded, verified by a before/after identity snapshot).
 
-  --context <ctx>     octo-cli context of the installation (e.g. test-2_octosystem). Its tenant is checked too.
-  tenant ...          Tenants to check (space or comma separated). Default: discovered with GetTenants.
-  --discover <mode>   children | recursive | all (default: all; 'all' needs the system tenant context).
-  --with-email        Show user names that are e-mail addresses unmasked.
-  --ids-only          Print rtIds only, no names (for work items and reports).
-  -h, --help          This help.
+  --context <ctx>       kube context of the cluster (e.g. the breakglass context of test-2). Required.
+  --kubeconfig <file>   kubeconfig to use (default: kubectl's default / \$KUBECONFIG).
+  tenant ...            Tenants to check (space or comma separated). Default: octosystem + every tenant in
+                        octosystem.RtEntity_SystemTenant.
+  --namespace <ns>      Namespace of MongoDB (default: mongodb).
+  --pod <name>          MongoDB pod to exec into (default: first pod octo-mongodb-<n>).
+  --secret <name>       Secret holding the admin password (default: octo-mongodb-admin-octo-system-admin, key password).
+  --mongo-user <user>   MongoDB admin user (default: octo-system-admin).
+  --with-email          Show user names that are e-mail addresses unmasked.
+  --ids-only            Print rtIds only, no names (for work items and reports).
+  --self-check          Only run the write guard over the JavaScript files and exit (0 = clean, 1 = refused).
+  -h, --help            This help.
+
+Access: kubectl get secret / list pods / exec in the MongoDB namespace -- via breakglass or Semaphore on shared clusters.
 
 Output: TSV on stdout (tenant, kind, id, name, secret_management, today, class), summary on stderr.
   class HOLDS  = holds SecretManagement (direct or via group)
   class LOSES  = holds TenantManagement/UserManagement but not SecretManagement -> denied under Enforce
-  tenant rows with class NO-ROLE / ERROR = role missing (bootstrap < 1.7.0) / tenant not readable
+  tenant rows with class NO-ROLE / ERROR = role missing (bootstrap < 1.7.0) / tenant database not found
 
-Exit codes: 0 = clean, 2 = findings (LOSES or NO-ROLE rows), 1 = error / incomplete.
+Exit codes: 0 = clean, 2 = findings (LOSES or NO-ROLE rows), 1 = error / incomplete / snapshot before != after.
 EOF
 }
 
 die() { echo "ERROR: $*" >&2; exit 1; }
 info() { echo "$*" >&2; }
 
+# Write guard: the JavaScript may only read. Refuses write-capable collection/database calls, server commands,
+# $out/$merge stages, dynamic code (eval/Function/require/load) and member access by string literal (obj["insertOne"]),
+# which would hide a call from the other patterns. Comments are scanned too -- keep them free of such calls.
+WRITE_PATTERNS=(
+    '\.[[:space:]]*(insert|update|replace|delete|remove|save|drop|create|rename|bulkWrite|initializeOrderedBulkOp|initializeUnorderedBulkOp|findAndModify|findOneAnd|aggregate|mapReduce|watch|runCommand|adminCommand|grant|revoke|setProfilingLevel|fsync|shutdown|killOp|compact|reIndex|hideIndex|unhideIndex|convertToCapped|getCollectionWriteable)[A-Za-z]*[[:space:]]*\('
+    '\$(out|merge)'
+    '(^|[^A-Za-z0-9_$.])(eval|Function|require|load|runCommand|adminCommand)[[:space:]]*\('
+    '[]A-Za-z0-9_$)][[:space:]]*\[[[:space:]]*["'"'"'`]'
+)
+write_guard() {
+    local f p refused=0
+    for f in "$SNAPSHOT_JS" "$INVENTORY_JS"; do
+        [ -f "$f" ] || { echo "refusing: $f is missing" >&2; refused=1; continue; }
+        for p in "${WRITE_PATTERNS[@]}"; do
+            if grep -n -E -e "$p" "$f" >&2; then
+                echo "refusing: $(basename "$f") contains a write-capable call (pattern: $p)" >&2
+                refused=1
+            fi
+        done
+    done
+    return "$refused"
+}
+
 CONTEXT=""
-DISCOVER="all"
+KUBECONFIG_FILE=""
+NAMESPACE="mongodb"
+POD=""
+SECRET="octo-mongodb-admin-octo-system-admin"
+MONGO_USER="octo-system-admin"
 WITH_EMAIL=false
 IDS_ONLY=false
+SELF_CHECK=false
 TENANTS=()
 while [ $# -gt 0 ]; do
     case "$1" in
         --context) [ $# -ge 2 ] || die "--context needs a value"; CONTEXT="$2"; shift 2 ;;
-        --discover) [ $# -ge 2 ] || die "--discover needs a value"; DISCOVER="$2"; shift 2 ;;
+        --kubeconfig) [ $# -ge 2 ] || die "--kubeconfig needs a value"; KUBECONFIG_FILE="$2"; shift 2 ;;
+        --namespace) [ $# -ge 2 ] || die "--namespace needs a value"; NAMESPACE="$2"; shift 2 ;;
+        --pod) [ $# -ge 2 ] || die "--pod needs a value"; POD="$2"; shift 2 ;;
+        --secret) [ $# -ge 2 ] || die "--secret needs a value"; SECRET="$2"; shift 2 ;;
+        --mongo-user) [ $# -ge 2 ] || die "--mongo-user needs a value"; MONGO_USER="$2"; shift 2 ;;
         --with-email) WITH_EMAIL=true; shift ;;
         --ids-only) IDS_ONLY=true; shift ;;
+        --self-check) SELF_CHECK=true; shift ;;
+        --discover) die "--discover was removed with AB#8155: the script reads every tenant from MongoDB; pass tenants to narrow it" ;;
         -h|--help) usage; exit 0 ;;
         -*) die "unknown option $1" ;;
         *) IFS=',' read -r -a _parts <<<"$1"; for p in "${_parts[@]}"; do [ -n "$p" ] && TENANTS+=("$p"); done; shift ;;
     esac
 done
+
+if [ "$SELF_CHECK" = true ]; then
+    write_guard || die "write guard refused the JavaScript"
+    info "write guard: clean"
+    exit 0
+fi
 [ -n "$CONTEXT" ] || { usage >&2; die "--context is required"; }
-case "$DISCOVER" in children|recursive|all) ;; *) die "--discover must be children, recursive or all" ;; esac
+command -v kubectl >/dev/null || die "kubectl is required"
 command -v jq >/dev/null || die "jq is required"
-command -v "$OCTO_CLI" >/dev/null || die "octo-cli not found (set OCTO_CLI)"
+write_guard || die "write guard refused the JavaScript -- not running anything"
+
+KUBECTL=(kubectl --context "$CONTEXT" -n "$NAMESPACE")
+[ -n "$KUBECONFIG_FILE" ] && KUBECTL=(kubectl --kubeconfig "$KUBECONFIG_FILE" --context "$CONTEXT" -n "$NAMESPACE")
 
 WORK="$(mktemp -d "${TMPDIR:-/tmp}/secret-role-check.XXXXXX")"
-trap 'rm -rf "$WORK"' EXIT
+MONGO_PW=""
+trap 'MONGO_PW=""; rm -rf "$WORK"' EXIT
 
-# octo-cli prints a banner before the JSON; keep only the JSON document (starts with '{' or '[').
-json_only() { sed -n '/^[[:space:]]*[[{]/,$p'; }
-
-"$OCTO_CLI" --context "$CONTEXT" -c AuthStatus >/dev/null 2>&1 || die "context '$CONTEXT' is not logged in (octo-cli --context $CONTEXT -c LogIn -i)"
-
-if [ ${#TENANTS[@]} -eq 0 ]; then
-    case "$DISCOVER" in
-        children) disc=(-c GetTenants) ;;
-        recursive) disc=(-c GetTenants -r) ;;
-        all) disc=(-c GetTenants -a) ;;
-    esac
-    "$OCTO_CLI" --context "$CONTEXT" "${disc[@]}" 2>/dev/null | json_only >"$WORK/tenants.json" \
-        || die "tenant discovery failed (try --discover children or pass tenants)"
-    while IFS= read -r t; do [ -n "$t" ] && TENANTS+=("$t"); done \
-        < <(jq -r '.[] | (.tenantId // .tenantid // .TenantId // empty)' "$WORK/tenants.json" | sort -u)
-    ANCHOR="$("$OCTO_CLI" --context "$CONTEXT" -c GetUsers 2>/dev/null | sed -n 's/^Using tenant: \([^ ]*\).*/\1/p' | head -1 || true)"
-    [ -n "$ANCHOR" ] && TENANTS=("$ANCHOR" "${TENANTS[@]}")
+if [ -z "$POD" ]; then
+    POD="$("${KUBECTL[@]}" get pods -o name 2>"$WORK/kubectl.err" | sed -n 's#^pod/\(octo-mongodb-[0-9][0-9]*\)$#\1#p' | head -1 || true)"
+    [ -n "$POD" ] || { sed -n '1,3p' "$WORK/kubectl.err" >&2; die "no octo-mongodb-<n> pod in namespace $NAMESPACE (context $CONTEXT)"; }
 fi
-[ ${#TENANTS[@]} -gt 0 ] || die "no tenants to check"
+# The password stays in this variable; it is only ever written to kubectl's stdin.
+MONGO_PW="$("${KUBECTL[@]}" get secret "$SECRET" -o jsonpath='{.data.password}' 2>"$WORK/kubectl.err" | base64 -d 2>/dev/null || true)"
+[ -n "$MONGO_PW" ] || { sed -n '1,3p' "$WORK/kubectl.err" >&2; die "cannot read the password from secret $NAMESPACE/$SECRET"; }
 
-# Never selects clientSecrets or any other secret attribute. Role edges are read from the role side (generic inbound
-# AssignedRole associations) and group membership from the group side: one query per tenant, no per-entity lookups.
-A='associations(roleId: "System.Identity/AssignedRole", direction: INBOUND, first: 5000'
-M='associations(roleId: "System.Identity/GroupMember", direction: OUTBOUND, first: 5000'
-read -r -d '' QUERY <<GQL || true
-{
-  runtime {
-    roles: systemIdentityRole(first: 1000) { items { rtId name
-      users: $A, ckId: "System.Identity/User") { items { rtId } }
-      groups: $A, ckId: "System.Identity/Group") { items { rtId } }
-      clients: $A, ckId: "System.Identity/Client") { items { rtId } } } }
-    groups: systemIdentityGroup(first: 1000) { items { rtId groupName
-      users: $M, ckId: "System.Identity/User") { items { rtId } }
-      clients: $M, ckId: "System.Identity/Client") { items { rtId } }
-      mappings: $M, ckId: "System.Identity/ExternalTenantUserMapping") { items { rtId } }
-      children: associations(roleId: "System.Identity/ChildGroup", direction: OUTBOUND, first: 1000, ckId: "System.Identity/Group") { items { rtId } } } }
-    users: systemIdentityUser(first: 5000) { items { rtId userName } }
-    clients: systemIdentityClient(first: 2000) { items { rtId clientId } }
-    mappings: systemIdentityExternalTenantUserMapping(first: 2000) { items { rtId sourceTenantId sourceUserName mappedRoleIds } }
-  }
-}
-GQL
+TENANTS_JSON="$(jq -cn '$ARGS.positional' --args ${TENANTS[@]+"${TENANTS[@]}"})"
+PARAMS_JS="const PARAMS = $(jq -cn --argjson tenants "$TENANTS_JSON" --argjson withEmail "$WITH_EMAIL" --argjson idsOnly "$IDS_ONLY" \
+    '{tenants: $tenants, withEmail: $withEmail, idsOnly: $idsOnly}');"
+# Opens the connection with the password from stdin (first line). Not part of the guarded files: it reads stdin only.
+# The pod's own mongod is only the seed: hello() names the replica set and its members, and the inventory connects to
+# the replica set, so readPreference=secondaryPreferred is honoured (a direct connection would read whatever member the
+# pod runs) and a member lagging more than maxStalenessSeconds is never read. A standalone server is used directly.
+read -r -d '' PRELUDE_JS <<'JS' || true
+const mongoAuth = "mongodb://" + encodeURIComponent(__MONGO_USER__) + ":" +
+    encodeURIComponent(require("fs").readFileSync(0, "utf8").split("\n")[0]) + "@";
+const seedConn = connect(mongoAuth + "localhost:27017/admin?authSource=admin&directConnection=true&readPreference=secondaryPreferred");
+const seedHello = seedConn.hello();
+const conn = seedHello.setName
+    ? connect(mongoAuth + seedHello.hosts.join(",") + "/admin?authSource=admin&replicaSet=" + encodeURIComponent(seedHello.setName) +
+        "&readPreference=secondaryPreferred&maxStalenessSeconds=90")
+    : seedConn;
+print("CONN " + (seedHello.setName ? "replicaSet=" + seedHello.setName + " members=" + seedHello.hosts.length : "standalone"));
+JS
+PRELUDE_JS="${PRELUDE_JS//__MONGO_USER__/$(jq -cn --arg u "$MONGO_USER" '$u')}"
 
-# Effective roles: direct roles + roles of every group the subject is a direct member of; a group's roles include those
-# of its child groups (GroupRoleResolver / SecretManagementGrantPlanner semantics, depth-limited, cycle-safe).
-read -r -d '' EVAL_JQ <<'JQ' || true
-.data.runtime as $r
-| ($r.roles.items | map({key: .rtId, value: .name}) | from_entries) as $roleName
-| ($r.groups.items | map({key: .rtId, value: .}) | from_entries) as $groups
-| def direct($kind): reduce ($r.roles.items[] | . as $role | ($role[$kind].items // [])[] | {s: .rtId, n: $role.name})
-      as $e ({}; .[$e.s] += [$e.n]);
-  (direct("users")) as $userRoles | (direct("clients")) as $clientRoles | (direct("groups")) as $groupOwn
-| def groupRoles($id; $depth):
-    if $depth > 10 or ($groups[$id] == null) then []
-    else ($groupOwn[$id] // []) + ($groups[$id].children.items | map(groupRoles(.rtId; $depth + 1)) | add // [])
-    end;
-  def viaGroups($kind; $id):
-    [ $r.groups.items[] | select(any(.[$kind].items[]?; .rtId == $id)) | groupRoles(.rtId; 0) ] | add // [];
-  def mask: if $withEmail or (test("@") | not) then . else (.[0:3] + "***@" + (split("@") | last)) end;
-  [ ($r.users.items[] | . as $u | {kind: "user", id: .rtId, name: ((.userName // .rtId) | mask),
-        roles: (($userRoles[$u.rtId] // []) + viaGroups("users"; $u.rtId) | unique)}),
-    ($r.clients.items[] | . as $c | {kind: "client", id: .rtId, name: .clientId,
-        roles: (($clientRoles[$c.rtId] // []) + viaGroups("clients"; $c.rtId) | unique)}),
-    ($r.mappings.items[] | . as $m | {kind: "mapping", id: .rtId,
-        name: ((.sourceTenantId // "?") + "/" + ((.sourceUserName // "?") | mask)),
-        roles: (((.mappedRoleIds // []) | map($roleName[.] // .)) + viaGroups("mappings"; $m.rtId) | unique)}) ] as $subjects
-| (($r.roles.items | map(.rtId) | index($secretRoleId)) != null) as $roleExists
-| if ($roleExists | not) then [$tenant, "tenant", "-", "-", "-", "-", "NO-ROLE"]
-  else
-    ($subjects[] | (.roles | index("SecretManagement") != null) as $sm
-         | ((.roles | index("TenantManagement") != null) or (.roles | index("UserManagement") != null)) as $today
-         | select($sm or $today)
-         | [$tenant, .kind, .id, (if $ids then "-" else .name end), (if $sm then "yes" else "no" end), (if $today then "yes" else "no" end),
-            (if $sm then "HOLDS" else "LOSES" end)])
-  end
-| @tsv
-JQ
-
-ERRORS=0
-printf 'tenant\tkind\tid\tname\tsecret_management\ttoday_tm_or_um\tclass\n'
-for t in "${TENANTS[@]}"; do
-    info "Checking tenant '$t' ..."
-    if ! "$OCTO_CLI" --context "$CONTEXT" -c GraphQl -tid "$t" -q "$QUERY" 2>/dev/null | json_only >"$WORK/$t.json" \
-        || ! jq -e '.data.runtime.roles' "$WORK/$t.json" >/dev/null 2>&1; then
-        printf '%s\ttenant\t-\t-\t-\t-\tERROR\n' "$t"
-        ERRORS=$((ERRORS + 1))
-        continue
+# run_js <name> <js-file>: runs prelude + params + file in mongosh inside the pod; stdout -> $WORK/<name>.out.
+run_js() {
+    local name="$1" file="$2"
+    if ! printf '%s\n' "$MONGO_PW" | "${KUBECTL[@]}" exec -i "$POD" -c mongod -- \
+        mongosh --quiet --nodb --eval "$PRELUDE_JS
+$PARAMS_JS
+$(cat "$file")" >"$WORK/$name.out" 2>"$WORK/$name.err"; then
+        # mongosh errors do not contain the password; strip any credentials from URIs anyway.
+        sed -E 's#//[^/@[:space:]]*@#//***@#g' "$WORK/$name.err" | grep -v -E 'EACCES|history' | tail -3 >&2 || true
+        return 1
     fi
-    jq -r --arg tenant "$t" --arg secretRoleId "$SECRET_ROLE_ID" --argjson withEmail "$WITH_EMAIL" --argjson ids "$IDS_ONLY" "$EVAL_JQ" \
-        "$WORK/$t.json" | tee -a "$WORK/rows.tsv"
-done
+}
 
-touch "$WORK/rows.tsv"
+info "Reading MongoDB in $CONTEXT ($NAMESPACE/$POD), read-only ..."
+run_js snap_before "$SNAPSHOT_JS" || die "snapshot before the inventory failed"
+info "# connection: $(sed -n 's/^CONN //p' "$WORK/snap_before.out" | head -1), readPreference=secondaryPreferred"
+run_js inventory "$INVENTORY_JS" || die "inventory failed"
+run_js snap_after "$SNAPSHOT_JS" || die "snapshot after the inventory failed"
+MONGO_PW=""
+
+SNAP_BEFORE="$(sed -n 's/^SNAP //p' "$WORK/snap_before.out")"
+SNAP_AFTER="$(sed -n 's/^SNAP //p' "$WORK/snap_after.out")"
+[ -n "$SNAP_BEFORE" ] && [ -n "$SNAP_AFTER" ] || die "snapshot output missing"
+grep -q '^END$' "$WORK/inventory.out" || die "inventory output incomplete (no END marker)"
+sed -n 's/^ROW	//p' "$WORK/inventory.out" >"$WORK/rows.tsv"
+
+printf 'tenant\tkind\tid\tname\tsecret_management\ttoday_tm_or_um\tclass\n'
+cat "$WORK/rows.tsv"
+
 {
     echo
     echo "# summary per tenant: holders of SecretManagement / subjects that lose API secret writes under Enforce"
     awk -F'\t' '{ t[$1] = 1; c[$1 SUBSEP $7]++ }
-        END { for (k in t) printf "# %-28s holds=%d loses=%d%s\n", k, c[k SUBSEP "HOLDS"], c[k SUBSEP "LOSES"],
-                (c[k SUBSEP "NO-ROLE"] ? " ROLE-MISSING" : "") }' "$WORK/rows.tsv" | sort
+        END { for (k in t) printf "# %-28s holds=%d loses=%d%s%s\n", k, c[k SUBSEP "HOLDS"], c[k SUBSEP "LOSES"],
+                (c[k SUBSEP "NO-ROLE"] ? " ROLE-MISSING" : ""), (c[k SUBSEP "ERROR"] ? " NO-DATABASE" : "") }' "$WORK/rows.tsv" | sort
+    echo "# identity snapshot (all tenant DBs): $(jq -r '[.[] | objects] | "dbs=\(length) users=\(map(.users) | add // 0) xt_users=\(map(.xtUsers) | add // 0) mappings=\(map(.mappings) | add // 0)"' <<<"$SNAP_BEFORE")"
 } >&2
 
+if [ "$SNAP_BEFORE" != "$SNAP_AFTER" ]; then
+    info "# snapshot before != after -- identities changed while the inventory ran. Changed databases (counts only):"
+    jq -rn --argjson a "$SNAP_BEFORE" --argjson b "$SNAP_AFTER" \
+        '($a | keys) + ($b | keys) | unique[] | select($a[.] != $b[.]) | . as $db
+         | "#   \($db): before \($a[$db] | if type == "object" then {users, xtUsers, mappings} else . end | tojson) after \($b[$db] | if type == "object" then {users, xtUsers, mappings} else . end | tojson)"' >&2
+    info "Result: snapshot changed (exit 1) -- re-run; if it persists, find who writes identities"
+    exit 1
+fi
+info "# snapshot before == after: equal"
+
+ERRORS="$(awk -F'\t' '$7 == "ERROR"' "$WORK/rows.tsv" | wc -l | tr -d ' ')"
 FINDINGS="$(awk -F'\t' '$7 == "LOSES" || $7 == "NO-ROLE"' "$WORK/rows.tsv" | wc -l | tr -d ' ')"
 if [ "$ERRORS" -gt 0 ]; then info "Result: $ERRORS tenant(s) not readable -- incomplete (exit 1)"; exit 1; fi
 if [ "$FINDINGS" -gt 0 ]; then info "Result: $FINDINGS finding(s) (exit 2)"; exit 2; fi

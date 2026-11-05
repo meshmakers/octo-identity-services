@@ -135,14 +135,27 @@ Order per cluster: **test-2 → prod-2 → prod-1**.
 
 1. **Inventory (read-only)** — who holds the role, who would lose secret writes:
    ```bash
-   scripts/identity-secret-management-role-check.sh --context <env>_octosystem              # all tenants
-   scripts/identity-secret-management-role-check.sh --context <env>_octosystem meshtest     # selected tenants
-   scripts/identity-secret-management-role-check.sh --context <env>_octosystem --ids-only   # rtIds only (for work items)
+   # kube context with access to the mongodb namespace (breakglass or Semaphore, never extra RBAC rights)
+   scripts/identity-secret-management-role-check.sh --kubeconfig <file> --context <kube-ctx>               # all tenants
+   scripts/identity-secret-management-role-check.sh --kubeconfig <file> --context <kube-ctx> meshtest      # selected tenants
+   scripts/identity-secret-management-role-check.sh --kubeconfig <file> --context <kube-ctx> --ids-only    # rtIds only (for work items)
+   scripts/identity-secret-management-role-check.sh --self-check                                           # write guard only
    ```
-   One context is enough (`octo-cli GraphQl -tid` exchanges the token per tenant); tenants the account cannot reach
-   are `ERROR` rows (exit 1).
+   The script reads the cluster's MongoDB directly (`mongosh` in the `octo-mongodb-<n>` pod,
+   `readPreference=secondaryPreferred`): the tenant list from `octosystem`, per tenant DB the identity roles, groups,
+   users, clients, external tenant user mappings and the `AssignedRole`/`GroupMember`/`ChildGroup` associations. It
+   uses no octo-cli and no token exchange and writes nothing: its JavaScript
+   (`scripts/identity-secret-management-role-check.{snapshot,inventory}.js`) uses read operations only, a guard refuses
+   to run on any write-capable call (tested by `scripts/tests/identity-secret-management-role-check.test.sh`), and an
+   identity snapshot (users, `xt_` users, mappings, newest change per tenant DB) taken before and after must be equal —
+   otherwise exit 1. Queries project only the attributes they need (no password hashes, security stamps or client
+   secrets); the MongoDB password goes from the cluster secret to `mongosh` on stdin only.
    `LOSES` rows hold `TenantManagement`/`UserManagement` but not `SecretManagement`; `NO-ROLE` = tenant without the
-   role (bootstrap < 1.7.0, identity not restarted since); `ERROR` = tenant not readable with the context.
+   role (bootstrap < 1.7.0, identity not restarted since); `ERROR` = tenant database not found (exit 1).
+
+   > The earlier version (until AB#8155) ran `octo-cli GraphQl -tid <tenant>` per tenant. That token exchange created
+   > an `xt_` shadow user for the caller in every tenant that had none yet — the inventory was not read-only. Shadow
+   > users created by earlier runs are not removed by the new script.
 2. **Deploy the identity release** (default `Warn`, nothing changes) and let it run for a while.
 3. **Warn log**: every API secret write by a caller without the role is logged:
    ```bash
