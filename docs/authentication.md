@@ -1034,6 +1034,26 @@ marker; the text after it may change). A caller whose tenant is not an ancestor 
 `unauthorized_client`, an invalid subject token `invalid_grant`. Exchanged tokens never carry a refresh
 token — re-exchange from the root token. Every refusal is persisted as a `Token Exchange Failure` audit event.
 
+**A refused exchange writes nothing into the target tenant (AB#8304).** The exchange decides before it
+creates: when the caller has no B-shadow user yet, the roles its mappings in B would grant (directly or
+through the mapping's groups) are resolved first, without writing. No role → the refusal above, and B keeps
+no `xt_` user, no mapping and no association. At least one role → the shadow user is created on this first
+accepted exchange. An existing shadow user is used as before (a role-less one is refused and left as it is).
+Before AB#8304 the shadow user was created first and kept on refusal — every tenant switch into a tenant
+without rights (`octo-cli -tid`, Studio tenant switch) left a role-less `xt_` user behind.
+
+*Behaviour change for administrators:* waiting for a refused user's `xt_` user to appear and granting it a
+role directly is no longer the way to let a new cross-tenant user in. Grant through the mapping instead:
+Refinery Studio, *General → Child tenants → {tenant} → Provisioning → Add Cross-Tenant User* (AB#4652, an
+`ExternalTenantUserMapping` that is a member of the chosen groups), `CreateExternalTenantUserMapping`, or
+`ProvisionCurrentUser -ttid` for the operator. The user's first exchange afterwards creates the `xt_` user
+with exactly the granted roles. A direct role on an existing shadow user keeps working. Tests:
+`TenantExchangeIntegrationTests.Exchange_RepeatedAfterEmptyMappingWasAutoCreated_StaysRefused`,
+`Exchange_ForNotProvisionedTenant_LeavesNoMapping_AndLaterProvisioningIsACreate`,
+`Exchange_MappingWithOnlyStaleRoleIds_IsRefused_AndCreatesNoShadowUser`,
+`Exchange_UserAddedAsCrossTenantUserWithGroups_GetsExactlyTheGroupsRolesOnTheFirstExchange`,
+`Exchange_AfterDirectRoleGrantToTheShadowUser_Succeeds`.
+
 #### Only access tokens are subject tokens (AB#7860)
 
 Both `subject_token` consumers — the token exchange (`TenantExchangeProcessor`) and the on-behalf-of grant

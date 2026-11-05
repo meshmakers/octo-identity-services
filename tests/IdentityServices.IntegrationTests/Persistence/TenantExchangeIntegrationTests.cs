@@ -190,8 +190,9 @@ public class TenantExchangeIntegrationTests : IClassFixture<IdentityServicesFixt
     }
 
     /// <summary>
-    ///     The first exchange of an unprovisioned user leaves a shadow user behind (and, since AB#7088, no mapping).
-    ///     Neither is a grant: the next exchange is refused the same way.
+    ///     AB#8304: an unprovisioned caller is refused before anything is written — no shadow user, no mapping
+    ///     (AB#7088), no association is left in B, so a repeated exchange is refused the same way and B stays
+    ///     exactly as it was (count before == after).
     /// </summary>
     [Fact]
     public async Task Exchange_RepeatedAfterEmptyMappingWasAutoCreated_StaysRefused()
@@ -203,14 +204,47 @@ public class TenantExchangeIntegrationTests : IClassFixture<IdentityServicesFixt
         var parentTenantId = systemContext.TenantId;
         var (operatorId, _) = await CreateUserAsync(systemContext, parentTenantId, "op-repeat");
         var childTenantId = await CreateChildWithParentProviderAsync(parentTenantId);
+        var childRepo = (await systemContext.TryFindTenantRepositoryAsync(childTenantId))!;
         var processor = await CreateExchangeProcessorAsync(systemContext, childTenantId);
+        var before = await SnapshotIdentityStateAsync(childRepo);
 
         var first = await processor.ExchangeAsync(parentTenantId, operatorId.ToString(), childTenantId, subjectHasSecondFactor: false);
         var second = await processor.ExchangeAsync(parentTenantId, operatorId.ToString(), childTenantId, subjectHasSecondFactor: false);
 
         first.Error.Should().Be("access_denied");
-        second.Error.Should().Be("access_denied", "the left-over shadow user carries no role");
+        first.ErrorDescription.Should().StartWith(TenantExchangeProcessor.NotProvisionedMarker);
+        second.Error.Should().Be("access_denied", "the refused first attempt prepared nothing that could grant");
         second.ErrorDescription.Should().StartWith(TenantExchangeProcessor.NotProvisionedMarker);
+        (await SnapshotIdentityStateAsync(childRepo)).Should().Be(before,
+            "a refused exchange leaves no xt_ user, mapping or association behind");
+        before.ShadowUsers.Should().Be(0);
+    }
+
+    /// <summary>
+    ///     AB#8304 with the mapping-side refusal: a mapping that lists only the id of a deleted role grants nothing at
+    ///     token time, so the exchange is refused before a shadow user is created.
+    /// </summary>
+    [Fact]
+    public async Task Exchange_MappingWithOnlyStaleRoleIds_IsRefused_AndCreatesNoShadowUser()
+    {
+        await _fixture.InitializeAsync();
+        await EnsureSystemSetupAsync();
+
+        var systemContext = _fixture.GetSystemContext();
+        var parentTenantId = systemContext.TenantId;
+        var (operatorId, operatorName) = await CreateUserAsync(systemContext, parentTenantId, "op-stale");
+        var childTenantId = await CreateChildWithParentProviderAsync(parentTenantId);
+        await CreateMappingAsync(systemContext, childTenantId, parentTenantId, operatorId, operatorName,
+            mappedRoleIds: [OctoObjectId.GenerateNewId().ToString()]);
+        var childRepo = (await systemContext.TryFindTenantRepositoryAsync(childTenantId))!;
+        var before = await SnapshotIdentityStateAsync(childRepo);
+
+        var outcome = await (await CreateExchangeProcessorAsync(systemContext, childTenantId))
+            .ExchangeAsync(parentTenantId, operatorId.ToString(), childTenantId, subjectHasSecondFactor: false);
+
+        outcome.Error.Should().Be("access_denied");
+        outcome.ErrorDescription.Should().StartWith(TenantExchangeProcessor.NotProvisionedMarker);
+        (await SnapshotIdentityStateAsync(childRepo)).Should().Be(before);
     }
 
     /// <summary>
@@ -247,8 +281,10 @@ public class TenantExchangeIntegrationTests : IClassFixture<IdentityServicesFixt
     }
 
     /// <summary>
-    ///     Explicit provisioning is not limited to a mapping: once an administrator of B grants the shadow
-    ///     user a role directly, the same exchange that was refused before succeeds.
+    ///     An existing shadow user behaves as before AB#8304: a role-less one (left behind by an exchange before the
+    ///     fix) is refused and kept as it is; once an administrator of B grants it a role directly, the same exchange
+    ///     succeeds on that very user. A NEW cross-tenant user is granted through a mapping instead (see
+    ///     <see cref="Exchange_UserAddedAsCrossTenantUserWithGroups_GetsExactlyTheGroupsRolesOnTheFirstExchange" />).
     /// </summary>
     [Fact]
     public async Task Exchange_AfterDirectRoleGrantToTheShadowUser_Succeeds()
@@ -262,21 +298,80 @@ public class TenantExchangeIntegrationTests : IClassFixture<IdentityServicesFixt
         var childTenantId = await CreateChildWithParentProviderAsync(parentTenantId);
         var directRole = await CreateRoleAsync(systemContext, childTenantId, NewId("direct"));
         var processor = await CreateExchangeProcessorAsync(systemContext, childTenantId);
-
-        (await processor.ExchangeAsync(parentTenantId, operatorId.ToString(), childTenantId, subjectHasSecondFactor: false))
-            .Error.Should().Be("access_denied");
-
         var childRepo = (await systemContext.TryFindTenantRepositoryAsync(childTenantId))!;
         var authResult = await CreateCrossTenantAuthService(systemContext)
             .ValidateCrossTenantAccessAsync(childTenantId, parentTenantId, operatorId.ToString());
-        var shadow = await CreateProvisioningService(childRepo).FindCrossTenantUserAsync(authResult!);
-        shadow.Should().NotBeNull("the refused attempt left the shadow user behind");
-        await AssignRoleToUserAsync(systemContext, childTenantId, shadow!.RtId, directRole);
+        // The role-less shadow user an exchange used to leave behind before AB#8304.
+        var shadow = await CreateProvisioningService(childRepo)
+            .FindOrCreateCrossTenantUserAsync(authResult!, childTenantId, storeMappingIfMissing: false);
+        shadow.Should().NotBeNull();
+
+        (await processor.ExchangeAsync(parentTenantId, operatorId.ToString(), childTenantId, subjectHasSecondFactor: false))
+            .ErrorDescription.Should().StartWith(TenantExchangeProcessor.NotProvisionedMarker);
+        (await CreateProvisioningService(childRepo).FindCrossTenantUserAsync(authResult!))!
+            .RtId.Should().Be(shadow!.RtId, "the exchange neither deletes nor replaces an existing shadow user");
+        await AssignRoleToUserAsync(systemContext, childTenantId, shadow.RtId, directRole);
 
         var outcome = await processor.ExchangeAsync(parentTenantId, operatorId.ToString(), childTenantId, subjectHasSecondFactor: false);
 
         outcome.Error.Should().BeNull();
         outcome.ShadowUser!.RtId.Should().Be(shadow.RtId);
+    }
+
+    /// <summary>
+    ///     AB#8304, the path behind Refinery Studio's "Add Cross-Tenant User" (AB#4652): an administrator of B creates
+    ///     an <c>ExternalTenantUserMapping</c> without own roles and makes it a member of groups. Before the first
+    ///     exchange there is no shadow user; the first exchange creates exactly one, whose roles are exactly the
+    ///     roles of those groups (incl. a nested group) — never a role of a group the mapping is not in.
+    /// </summary>
+    [Fact]
+    public async Task Exchange_UserAddedAsCrossTenantUserWithGroups_GetsExactlyTheGroupsRolesOnTheFirstExchange()
+    {
+        await _fixture.InitializeAsync();
+        await EnsureSystemSetupAsync();
+
+        var systemContext = _fixture.GetSystemContext();
+        var parentTenantId = systemContext.TenantId;
+        var (userId, userName) = await CreateUserAsync(systemContext, parentTenantId, "xt-groups");
+        var rootRole = await CreateRoleAsync(systemContext, parentTenantId, NewId("rootAdmin"));
+        await AssignRoleToUserAsync(systemContext, parentTenantId, userId, rootRole);
+        var childTenantId = await CreateChildWithParentProviderAsync(parentTenantId);
+        var childRepo = (await systemContext.TryFindTenantRepositoryAsync(childTenantId))!;
+        var readerRole = await CreateRoleAsync(systemContext, childTenantId, NewId("reader"));
+        var writerRole = await CreateRoleAsync(systemContext, childTenantId, NewId("writer"));
+        var nestedRole = await CreateRoleAsync(systemContext, childTenantId, NewId("nested"));
+        var otherRole = await CreateRoleAsync(systemContext, childTenantId, NewId("other"));
+        var groupStore = new GroupStore(new FixedTenantResolver(childRepo));
+        var readers = await CreateGroupAsync(groupStore, NewId("readers"), readerRole);
+        var writers = await CreateGroupAsync(groupStore, NewId("writers"), writerRole);
+        var nested = await CreateGroupAsync(groupStore, NewId("nestedGrp"), nestedRole);
+        await groupStore.AddMemberGroupAsync(writers, nested.ToString());
+        await CreateGroupAsync(groupStore, NewId("others"), otherRole);
+        // What "Add Cross-Tenant User" writes: a mapping without own roles, member of the chosen groups.
+        await CreateMappingAsync(systemContext, childTenantId, parentTenantId, userId, userName, mappedRoleIds: []);
+        var mapping = (await GetMappingsAsync(childRepo, parentTenantId, userId)).Single();
+        await groupStore.AddMemberExternalUserAsync(readers, mapping.RtId.ToString());
+        await groupStore.AddMemberExternalUserAsync(writers, mapping.RtId.ToString());
+        var before = await SnapshotIdentityStateAsync(childRepo);
+        before.ShadowUsers.Should().Be(0, "the shadow user is created by the first accepted exchange, not by the grant");
+        var processor = await CreateExchangeProcessorAsync(systemContext, childTenantId);
+
+        var first = await processor.ExchangeAsync(parentTenantId, userId.ToString(), childTenantId, subjectHasSecondFactor: false);
+        var second = await processor.ExchangeAsync(parentTenantId, userId.ToString(), childTenantId, subjectHasSecondFactor: false);
+
+        first.Error.Should().BeNull();
+        first.ShadowUser!.UserName.Should().Be(CrossTenantShadowUserName.Build(parentTenantId, userName));
+        second.Error.Should().BeNull();
+        second.ShadowUser!.RtId.Should().Be(first.ShadowUser.RtId, "the shadow user is created exactly once");
+        (await SnapshotIdentityStateAsync(childRepo)).ShadowUsers.Should().Be(1);
+        (await GetMappingsAsync(childRepo, parentTenantId, userId)).Should().ContainSingle("the exchange stores no mapping");
+        (await ResolveRolesInTenantAsync(childRepo, first.ShadowUser)).Should().BeEquivalentTo(
+            [
+                await NameOfRoleInTenantAsync(readerRole, childRepo),
+                await NameOfRoleInTenantAsync(writerRole, childRepo),
+                await NameOfRoleInTenantAsync(nestedRole, childRepo)
+            ],
+            "exactly the roles of the granted groups — not the root role, not the role of another group");
     }
 
     /// <summary>The ancestor gate is unchanged: a user of a tenant that is not an ancestor of B is refused.</summary>
@@ -529,13 +624,14 @@ public class TenantExchangeIntegrationTests : IClassFixture<IdentityServicesFixt
 
     /// <summary>
     ///     Acceptance criterion 3 (negative test, security property kept): an exchange for a tenant the user is
-    ///     not provisioned in is refused and leaves NO mapping behind — the exchange grants nothing and prepares
+    ///     not provisioned in is refused and leaves NO mapping and, since AB#8304, NO shadow user behind — the exchange grants nothing and prepares
     ///     nothing that could later be mistaken for provisioning. A later ProvisionCurrentUser is a plain create.
     /// </summary>
     [Fact]
     public async Task Exchange_ForNotProvisionedTenant_LeavesNoMapping_AndLaterProvisioningIsACreate()
     {
         var ctx = await ArrangeProvisioningAsync();
+        var before = await SnapshotIdentityStateAsync(ctx.ChildRepo);
 
         var denied = await ctx.Processor.ExchangeAsync(ctx.ParentTenantId, ctx.UserId.ToString(), ctx.ChildTenantId, subjectHasSecondFactor: false);
 
@@ -543,6 +639,9 @@ public class TenantExchangeIntegrationTests : IClassFixture<IdentityServicesFixt
         denied.ShadowUser.Should().BeNull();
         (await GetMappingsAsync(ctx.ChildRepo, ctx.ParentTenantId, ctx.UserId)).Should().BeEmpty(
             "a refused exchange must not store a mapping");
+        (await SnapshotIdentityStateAsync(ctx.ChildRepo)).Should().Be(before,
+            "a refused exchange must not leave a shadow user (AB#8304) or an association behind");
+        before.ShadowUsers.Should().Be(0);
 
         (await ProvisionCurrentUserAsync(ctx)).Should().Be(AdminProvisioningController.OutcomeCreated);
         (await ctx.Processor.ExchangeAsync(ctx.ParentTenantId, ctx.UserId.ToString(), ctx.ChildTenantId, subjectHasSecondFactor: false))
@@ -837,6 +936,47 @@ public class TenantExchangeIntegrationTests : IClassFixture<IdentityServicesFixt
     }
 
     // ---------- helpers ----------
+
+    /// <summary>What a refused exchange must not change in B: users, xt_ users, mappings and their associations.</summary>
+    private sealed record IdentityState(int Users, int ShadowUsers, int Mappings, int Associations);
+
+    private static async Task<IdentityState> SnapshotIdentityStateAsync(ITenantRepository repo)
+    {
+        using var session = await repo.GetSessionAsync();
+        session.StartTransaction();
+        var users = (await repo.GetRtEntitiesByTypeAsync<RtUser>(session, RtEntityQueryOptions.Create())).Items.ToList();
+        var mappings = (await repo.GetRtEntitiesByTypeAsync<RtExternalTenantUserMapping>(session, RtEntityQueryOptions.Create()))
+            .Items.ToList();
+        var groups = (await repo.GetRtEntitiesByTypeAsync<RtGroup>(session, RtEntityQueryOptions.Create())).Items.ToList();
+        var entityIds = users.Select(u => u.ToRtEntityId())
+            .Concat(mappings.Select(m => m.ToRtEntityId()))
+            .Concat(groups.Select(g => g.ToRtEntityId()));
+        var associations = 0;
+        foreach (var entityId in entityIds)
+        {
+            // Every edge of the identity graph (AssignedRole, GroupMember, ChildGroup) starts at a user, mapping or
+            // group, so the outbound edges of all of them count every association once.
+            associations += (await repo.GetRtAssociationsAsync(
+                session, entityId, RtAssociationExtendedQueryOptions.Create(GraphDirections.Outbound))).Items.Count();
+        }
+
+        await session.CommitTransactionAsync();
+        return new IdentityState(users.Count,
+            users.Count(u => CrossTenantShadowUserName.IsShadowUserName(u.UserName)), mappings.Count, associations);
+    }
+
+    private static async Task<OctoObjectId> CreateGroupAsync(GroupStore groupStore, string name, OctoObjectId roleId)
+    {
+        var group = new RtGroup
+        {
+            RtId = OctoObjectId.GenerateNewId(),
+            GroupName = name,
+            NormalizedGroupName = name.ToUpperInvariant()
+        };
+        await groupStore.StoreAsync(group);
+        await groupStore.SetRoleIdsAsync(group.RtId, [roleId.ToString()]);
+        return group.RtId;
+    }
 
     private static string NewId(string prefix) => $"{prefix}-{Guid.NewGuid():N}"[..20];
 
