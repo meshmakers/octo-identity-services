@@ -311,6 +311,17 @@ The service supports hierarchical cross-tenant authentication where parent-tenan
 - **`CrossTenantAuthenticationService`**: Walks the tenant hierarchy to validate credentials against parent tenant databases
 - **`ExternalTenantUserMappingStore`**: Persistence for cross-tenant user role mappings. A mapping is unique per (`SourceTenantId`, `SourceUserId`) in a tenant, but the database does not enforce it (no unique index on runtime entities). `FindBySourceUserAsync` (login, `IsExplicitlyProvisionedAsync`, token exchange) therefore never throws on duplicates: it returns the oldest mapping (smallest `RtId`) and logs a WARN naming all ids (`ExternalTenantUserMappingLookup`, AB#6975). The store is scoped and holds a `DuplicateWarningGate`: the several lookups of one login or exchange log the WARN once per duplicate set (repeats at Debug). The effective roles (`GroupRoleResolver`, via `FindBySourceUserNamesAsync`) are the union over all matching mappings, not only the oldest. Both create paths (`POST adminProvisioning/{targetTenantId}`, `POST ExternalTenantUserMappings`) answer `409 application/problem+json` with `code: ExternalTenantUserMappingAlreadyExists` and `existingMappingId` when the pair exists; to change roles, update the existing mapping (`PUT ExternalTenantUserMappings/{id}`). `provisionCurrentUser` stays idempotent. Existing duplicates are not migrated; delete the extra rows (`DeleteAdminProvisioningMapping`).
 - **`ExternalTenantUserMappingsController`**: System API CRUD for managing mappings (per-tenant, requires `allowed_tenants`)
+- **Source user lookup (AB#8341)**: `POST ExternalTenantUserMappings/sourceUserLookup` finds one user of another tenant by
+  exact user name / e-mail for a grant (`docs/CONCEPT-SIBLING-TENANT-GRANTS.md`). Code in
+  `IdentityServerPersistence/Services/SourceTenantGrants/`: `SourceUserLookupService` (registry ancestry via
+  `ICrossTenantAncestryGuard`, never `SearchUsersInTenantAsync`), `ISourceTenantGrantPolicy` (default
+  `DenyNonAncestorsSourceTenantGrantPolicy` until AB#8345), `ISourceUserLookupAuditSink` (no-op until AB#8342),
+  `SourceUserLookupRateLimiter` (`Identity:SourceUserLookupRateLimit`). 🔴 Every negative case returns the one constant
+  `404 SourceUserNotFound` and runs the same queries (no early return, decoy query in T when S is unknown); never add a
+  reason to the answer and never log the identifier. The HTTP test host replaces the policy with
+  `Helpers/TestSourceTenantGrantPolicy` (permits only the pairs a test arranges, default otherwise); tests
+  `SourceUserLookupTests`, `SourceUserLookupServiceIntegrationTests`. The sign-in block rule of AB#7855 lives in
+  `SourceUserSignInBlock` and is shared with `CrossTenantAuthenticationService`.
 - **`AdminProvisioningController`**: Cross-tenant provisioning via system tenant (see below)
 
 **Cross-tenant auto-login** (token-based, no credential re-entry):

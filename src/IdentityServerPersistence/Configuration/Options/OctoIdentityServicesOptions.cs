@@ -196,6 +196,11 @@ public class OctoIdentityServicesOptions
     public SignInRateLimitOptions SignInRateLimit { get; set; } = new();
 
     /// <summary>
+    ///     AB#8341: limit of <c>POST ExternalTenantUserMappings/sourceUserLookup</c> per caller and target tenant.
+    /// </summary>
+    public SourceUserLookupRateLimitOptions SourceUserLookupRateLimit { get; set; } = new();
+
+    /// <summary>
     ///     AB#5530: encryption at rest of the ASP.NET Data Protection key ring (configuration section
     ///     <c>Identity:DataProtection</c>).
     /// </summary>
@@ -262,6 +267,24 @@ public class SignInRateLimitOptions
     ///     is reachable without a proxy that sets the header.
     /// </summary>
     public bool UseForwardedFor { get; set; } = true;
+}
+
+/// <summary>
+///     Limit of the source user lookup (<c>POST ExternalTenantUserMappings/sourceUserLookup</c>, AB#8341) per caller
+///     (subject, or client id of a service token) and target tenant: a sliding window, kept in memory per pod. Hits and
+///     misses count alike. Environment variables: <c>OCTO_IDENTITY__SOURCEUSERLOOKUPRATELIMIT__ENABLED</c>,
+///     <c>…__PERMITLIMIT</c>, <c>…__WINDOW</c>.
+/// </summary>
+public class SourceUserLookupRateLimitOptions
+{
+    /// <summary>Switches the limit on (default). Off only for diagnosis.</summary>
+    public bool Enabled { get; set; } = true;
+
+    /// <summary>Lookups per caller and target tenant within <see cref="Window" />. Default 20.</summary>
+    public int PermitLimit { get; set; } = 20;
+
+    /// <summary>Length of the sliding window. Default 10 minutes (<c>00:10:00</c>).</summary>
+    public TimeSpan Window { get; set; } = TimeSpan.FromMinutes(10);
 }
 
 /// <summary>

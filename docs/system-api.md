@@ -457,6 +457,7 @@ Manages cross-tenant user role mappings. Each mapping links a user from a parent
 | GET | `/externalTenantUserMappings` | ReadOnly | Get all mappings (supports `skip`, `take`, `sourceTenantId` filter) |
 | GET | `/externalTenantUserMappings/{rtId}` | ReadOnly | Get mapping by ID |
 | POST | `/externalTenantUserMappings` | ReadWrite | Create new mapping |
+| POST | `/externalTenantUserMappings/sourceUserLookup` | ReadWrite | Find one user of a source tenant by exact user name or e-mail (AB#8341); every negative case `404 SourceUserNotFound`, limited per caller → `429` with `retryAfterSeconds`. Contract: `CONCEPT-SIBLING-TENANT-GRANTS.md` |
 | PUT | `/externalTenantUserMappings/{rtId}` | ReadWrite | Update mapping (change roles) |
 | DELETE | `/externalTenantUserMappings/{rtId}` | ReadWrite | Delete mapping |
 
@@ -483,6 +484,20 @@ Manages cross-tenant user role mappings. Each mapping links a user from a parent
 // UpdateExternalTenantUserMappingDto (PUT)
 {
   "roleIds": ["string"]  // New role assignments
+}
+
+// SourceUserLookupRequestDto (POST sourceUserLookup)
+{
+  "sourceTenantId": "string",  // registry ancestor, or a tenant that permits this one (AB#8345)
+  "identifier": "string"       // exact user name or exact e-mail, case-insensitive
+}
+
+// SourceUserLookupResultDto (200; no e-mail, no phone)
+{
+  "sourceTenantId": "string",
+  "userId": "string",
+  "userName": "string",
+  "displayName": "string | null"
 }
 ```
 

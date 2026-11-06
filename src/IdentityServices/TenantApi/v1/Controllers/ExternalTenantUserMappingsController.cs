@@ -9,6 +9,9 @@ using Meshmakers.Octo.ConstructionKit.Contracts;
 using Meshmakers.Octo.Runtime.Contracts.RepositoryEntities;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.Mvc.ModelBinding.Validation;
+using IdentityServerPersistence.Services.SourceTenantGrants;
+using Meshmakers.Octo.Services.Infrastructure.Services;
 using Persistence.IdentityCkModel.Generated.System.Identity.v3;
 using Meshmakers.Octo.Backend.Authentication;
 using Meshmakers.Octo.Backend.IdentityServices.Authorization.RoleChange;
@@ -146,6 +149,57 @@ public class ExternalTenantUserMappingsController(
         // 500 to octo-cli (the mapping was created regardless). A relative self-link avoids the
         // link-generation step entirely.
         return Created($"{Request.Path}/{mapping.RtId}", MapToDto(mapping));
+    }
+
+    /// <summary>
+    /// Finds exactly one user of a source tenant by exact user name or exact e-mail, so an administrator of this (target)
+    /// tenant can grant that user access without seeing the source tenant's user directory (AB#8341).
+    /// </summary>
+    /// <remarks>
+    /// Every negative case answers the same <c>404</c> (<c>SourceUserNotFound</c>): source tenant absent, source tenant
+    /// neither a registry ancestor nor permitting this tenant, empty identifier, no or more than one matching user, a
+    /// shadow (<c>xt_</c>) user, a locked-out or sign-in-blocked user. Limited per caller and tenant
+    /// (<c>Identity:SourceUserLookupRateLimit</c>, default 20 per 10 minutes) → <c>429</c> with <c>Retry-After</c> and
+    /// <c>retryAfterSeconds</c>. Contract: <c>docs/CONCEPT-SIBLING-TENANT-GRANTS.md</c>.
+    /// </remarks>
+    [HttpPost("sourceUserLookup")]
+    [Authorize(IdentityServiceConstants.IdentityUserAdministrationWritePolicy)]
+    [EndpointSummary("Finds one user of a source tenant by exact user name or e-mail.")]
+    [ProducesResponseType(typeof(SourceUserLookupResultDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status404NotFound, "application/problem+json")]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status429TooManyRequests, "application/problem+json")]
+    public async Task<ActionResult<SourceUserLookupResultDto>> LookupSourceUser(
+        // ValidateNever: an empty or missing sourceTenantId / identifier is a negative case (uniform 404), not a 400 of
+        // the implicit [Required] on the DTO's non-nullable strings.
+        [FromBody][ValidateNever][Description("Source tenant id and exact user name or e-mail")]
+        SourceUserLookupRequestDto request,
+        [FromServices] ISourceUserLookupService lookupService,
+        [FromServices] ISourceUserLookupRateLimiter rateLimiter,
+        [FromServices] IMultiTenancyResolverService multiTenancyResolverService)
+    {
+        var targetTenantId = multiTenancyResolverService.GetTenantId();
+        var callerKey = User.FindFirst("sub")?.Value ?? $"client:{User.FindFirst("client_id")?.Value}";
+        if (rateLimiter.TryAcquire(callerKey, targetTenantId) is { } retryAfterSeconds)
+        {
+            return SourceUserLookupProblems.RateLimited(Response, retryAfterSeconds);
+        }
+
+        var callerName = User.Identity?.Name ?? User.FindFirst("preferred_username")?.Value ??
+            User.FindFirst("client_id")?.Value ?? callerKey;
+        var match = await lookupService.LookupAsync(targetTenantId, request.SourceTenantId, request.Identifier,
+            callerName, HttpContext.RequestAborted);
+        if (match == null)
+        {
+            return SourceUserLookupProblems.NotFound();
+        }
+
+        return Ok(new SourceUserLookupResultDto
+        {
+            SourceTenantId = match.SourceTenantId,
+            UserId = match.UserId,
+            UserName = match.UserName,
+            DisplayName = match.DisplayName
+        });
     }
 
     /// <summary>
