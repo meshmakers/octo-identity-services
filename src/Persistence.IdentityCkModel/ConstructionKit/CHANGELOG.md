@@ -1,5 +1,18 @@
 # Changelog
 
+## 3.1.1 - 2026-11-06
+
+_Required bump level: patch (no structural change)._
+
+AB#8095: System.Identity 3.1.1 drops the two `compatibility.acknowledge` entries of 3.1.0 (`Client-1/AddSecret-1` and
+`Client-1/RemoveSecret-1`, roles widened by `SecretManagement`). An acknowledgement is valid for the one release that
+introduces the change; against the published 3.1.0 it is stale (`OCTO-CK204`). The compiled model carries the
+acknowledgements, so the model without them can no longer be published as 3.1.0 (`OCTO-CK205`, published versions are
+immutable) - hence the patch. Types, attributes, records, methods, ids and defaults are identical to 3.1.0; no migration.
+
+Rollout: service-managed - ships inside the identity service with the regular identity release train. No catalog import,
+no per-tenant step, **no FixAll** (AB#7998). Ranges `System.Identity-[3.0.0,4.0)` stay satisfied.
+
 ## 3.1.0 - 2026-11-05
 
 _Required bump level: minor._
