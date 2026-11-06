@@ -132,8 +132,10 @@ The lookup answers **one** `404 SourceUserNotFound` with an identical body for e
 - more than one user with that e-mail (never a list);
 - the user is an `xt_` shadow user;
 - the user is locked out or blocked by the sign-in rules (same check as AB#7855);
-- the identifier is empty, whitespace, a fragment (`ali`), a wildcard (`alice*`), a regular expression (`.*`) or a
-  Mongo operator string — none of these has search semantics, they simply match nothing.
+- the identifier is empty or whitespace;
+- the identifier is not the complete user name or e-mail of a user: there is no prefix, substring, wildcard, regular
+  expression or Mongo operator semantics. `ali` finds a user whose user name (or e-mail) is exactly `ali`, never
+  `alice`; `alice*`, `.*` or `{"$ne": null}` are compared as plain text and match only a user with exactly that name.
 
 Body (`application/problem+json`):
 
@@ -218,8 +220,10 @@ administrator reads them once AB#8342 is merged.
   token on exchanged tokens" are unchanged.
 - First exchange: the `xt_` shadow user gets exactly the roles of the mapping's groups plus its direct roles — nothing
   from S, nothing else in T.
-- **Revocation**: deleting the mapping, removing its last group, emptying the group's roles, or S withdrawing T from
-  its allow-list refuses the next exchange into T with `access_denied`. A token already issued stays valid until its
+- **Revocation**: the next exchange into T is refused with `access_denied` when the mapping is deleted, when S
+  withdraws T from its allow-list, or when the mapping has **no effective role left** — its direct `roleIds` and the
+  roles of all its groups taken together (removing one group or emptying one group's roles revokes only if nothing else
+  still grants a role). A token already issued stays valid until its
   `exp` (exchanged tokens are short-lived and carry no refresh token; AB#8344 documents the lifetime in
   `docs/authentication.md`). No GroupMember / AssignedRole edge of a deleted mapping stays behind; re-granting the same
   user works without `409` and yields the new groups' roles only. The role-less `xt_` user left behind is removed by the
