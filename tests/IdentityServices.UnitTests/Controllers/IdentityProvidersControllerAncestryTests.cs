@@ -75,6 +75,39 @@ public sealed class IdentityProvidersControllerAncestryTests : IDisposable
     }
 
     [Fact]
+    public async Task Replace_DisablingAStoredProviderWithTheSameParent_IsAllowed_WithoutAskingTheGuard()
+    {
+        var rtId = OctoObjectId.GenerateNewId();
+        _store.GetByIdAsync(rtId).Returns(new RtOctoTenantIdentityProvider
+            { RtId = rtId, Name = "ParentTenant_stranger", IsEnabled = true, ParentTenantId = "Stranger" });
+        var disable = OctoTenantProvider("stranger");
+        disable.IsEnabled = false;
+
+        var result = await _sut.ReplaceProviderAsync(rtId, disable);
+
+        result.Result.Should().BeOfType<OkObjectResult>();
+        await _store.Received(1).StoreAsync(Arg.Any<RtIdentityProvider>());
+        await _guard.DidNotReceiveWithAnyArgs().IsTrustedAncestorAsync(default!, default!, default!);
+    }
+
+    [Theory]
+    [InlineData("other-stranger", false)]
+    [InlineData("stranger", true)]
+    public async Task Replace_ChangedParentOrReEnabling_IsStillChecked(string parentTenantId, bool isEnabled)
+    {
+        var rtId = OctoObjectId.GenerateNewId();
+        _store.GetByIdAsync(rtId).Returns(new RtOctoTenantIdentityProvider { RtId = rtId, ParentTenantId = "stranger" });
+        _guard.IsTrustedAncestorAsync(TenantId, parentTenantId, Arg.Any<string>()).Returns(false);
+        var dto = OctoTenantProvider(parentTenantId);
+        dto.IsEnabled = isEnabled;
+
+        var result = await _sut.ReplaceProviderAsync(rtId, dto);
+
+        AssertNotAncestorProblem(result.Result, parentTenantId);
+        await _store.DidNotReceiveWithAnyArgs().StoreAsync(default!);
+    }
+
+    [Fact]
     public async Task Create_ParentTheGuardAccepts_IsStored()
     {
         _guard.IsTrustedAncestorAsync(TenantId, "parent", Arg.Any<string>()).Returns(true);

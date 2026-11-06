@@ -200,7 +200,7 @@ public class IdentityProvidersController : ControllerBase
             return ValidationProblem(ModelState);
         }
 
-        if (await CheckOctoTenantParentAsync(identityProviderDto) is { } notAncestor)
+        if (await CheckOctoTenantParentAsync(identityProviderDto, rtId) is { } notAncestor)
         {
             return notAncestor;
         }
@@ -225,9 +225,22 @@ public class IdentityProvidersController : ControllerBase
     ///     its user directory and its users' way in. <c>null</c> when the write may go on (also under
     ///     <c>CrossTenantAncestry=Warn</c>, which only logs), else the 400 problem.
     /// </summary>
-    private async Task<ObjectResult?> CheckOctoTenantParentAsync(IdentityProviderDto dto)
+    /// <remarks>
+    ///     Disabling an existing provider without changing its parent (<paramref name="existingRtId" /> on replace) is
+    ///     always allowed, so an administrator can switch off a provider that names a non-ancestor; a changed parent and
+    ///     re-enabling are checked.
+    /// </remarks>
+    private async Task<ObjectResult?> CheckOctoTenantParentAsync(IdentityProviderDto dto,
+        OctoObjectId? existingRtId = null)
     {
         if (dto is not OctoTenantIdentityProviderDto { ParentTenantId: { Length: > 0 } parentTenantId })
+        {
+            return null;
+        }
+
+        if (!dto.IsEnabled && existingRtId is { } rtId &&
+            await _identityProviderStore.GetByIdAsync(rtId) is RtOctoTenantIdentityProvider stored &&
+            string.Equals(stored.ParentTenantId, parentTenantId, StringComparison.OrdinalIgnoreCase))
         {
             return null;
         }

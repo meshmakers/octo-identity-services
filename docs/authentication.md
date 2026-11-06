@@ -669,7 +669,7 @@ new tenants):
 | Tenant switch: token exchange (RFC 8693), `POST auth/cross-tenant-token`, and the other `ValidateCrossTenantAccessAsync` callers | the source must be reachable through the target's providers **and** a registry ancestor; the `xt_` sibling-shadow step (concept step 1a) is unchanged — the shadow's home tenant is judged, and it is a registry ancestor |
 | Cross-tenant password login | a tenant the provider walk reaches is asked for the password only when it is a registry ancestor of the login tenant; otherwise it is skipped (no password check, no lockout counting of a stranger's users) and not walked beyond |
 | `POST adminProvisioning/{target}` and `…/withGroups` | a `SourceTenantId` that is no registry ancestor of the target → `403 problem+json`, code `CrossTenantSourceNotAncestor`, nothing written |
-| `POST`/`PUT identityProviders` with an OctoTenant provider | a `ParentTenantId` that is no registry ancestor of the tenant → `400 problem+json`, code `OctoTenantParentNotAncestor`, nothing written |
+| `POST`/`PUT identityProviders` with an OctoTenant provider | a `ParentTenantId` that is no registry ancestor of the tenant → `400 problem+json`, code `OctoTenantParentNotAncestor`, nothing written. A `PUT` that only disables a stored provider (same parent, `isEnabled: false`) is always allowed, so such a provider can be switched off; `DELETE` is unchecked |
 
 The registry confirms; it does not widen: a registry ancestor the target has no provider for is still no source.
 
