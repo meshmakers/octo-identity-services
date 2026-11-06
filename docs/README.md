@@ -12,6 +12,7 @@ This documentation provides a comprehensive architectural deep-dive into the Oct
 | [Persistence](persistence.md) | Data layer, Construction Kit model, and MongoDB integration |
 | [System API](system-api.md) | REST API reference, endpoints, and authorization |
 | [Configuration](configuration.md) | Environment variables, build configurations, and deployment |
+| [Sibling-Tenant Grants (concept)](CONCEPT-SIBLING-TENANT-GRANTS.md) | API contract for looking up and granting users of a non-ancestor tenant (AB#8313/AB#8340) |
 
 ## Quick Reference
 
