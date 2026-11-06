@@ -88,6 +88,8 @@ public class AuthApiControllerErrorContextTests
 
             new Meshmakers.Octo.Backend.IdentityServices.Services.SignInRateLimiter(
                 Options.Create(new IdentityServerPersistence.Configuration.Options.OctoIdentityServicesOptions())),
+            Substitute.For<IdentityServerPersistence.Services.IOctoTenantLoginProviders>(),
+            Substitute.For<IdentityServerPersistence.Services.ICrossTenantAncestryGuard>(),
             Substitute.For<ILogger<AuthApiController>>());
 
         _sut.ControllerContext = new ControllerContext

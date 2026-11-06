@@ -174,6 +174,34 @@ public class CrossTenantAncestryIntegrationTests : IClassFixture<IdentityService
                                            w.Contains("admin provisioning mapping") && w.Contains(h.Stranger));
     }
 
+    /// <summary>AB#8367: the login page does not offer a parent the tenant switch is always refused for.</summary>
+    [Fact]
+    public async Task Enforce_LoginPage_OffersOnlyTheRegistryParent()
+    {
+        var h = await ArrangeAsync();
+
+        var offered = await (await CreateLoginProvidersAsync(CrossTenantAncestryMode.Enforce, h.Target)).GetOfferedAsync();
+
+        offered.Select(p => p.ParentTenantId).Should().BeEquivalentTo([h.Parent],
+            "the stranger named by the target's administrator is no registry ancestor");
+    }
+
+    /// <summary>AB#8367: under Warn the login page keeps every enabled parent, and the guard logs the stranger.</summary>
+    [Fact]
+    public async Task Warn_LoginPage_OffersEveryParent_AndLogsTheStranger()
+    {
+        var h = await ArrangeAsync();
+        var log = new CapturingLogger<CrossTenantAncestryGuard>();
+
+        var offered = await (await CreateLoginProvidersAsync(CrossTenantAncestryMode.Warn, h.Target, log))
+            .GetOfferedAsync();
+
+        offered.Select(p => p.ParentTenantId).Should().BeEquivalentTo([h.Parent, h.Stranger]);
+        log.Warnings.Should().ContainSingle(w => w.Contains("CrossTenantAncestry=Warn") &&
+                                                 w.Contains(OctoTenantLoginProviders.Operation) &&
+                                                 w.Contains(h.Stranger) && w.Contains(h.Target));
+    }
+
     // ---------- arrangement ----------
 
     private sealed record TestUser(OctoObjectId Id, string Name);
@@ -331,6 +359,15 @@ public class CrossTenantAncestryIntegrationTests : IClassFixture<IdentityService
             TestAncestryGuards.Create(systemContext, mode, log),
             Options.Create(new IdentityOptions()),
             NullLogger<CrossTenantAuthenticationService>.Instance);
+    }
+
+    private async Task<OctoTenantLoginProviders> CreateLoginProvidersAsync(CrossTenantAncestryMode mode,
+        string tenantId, ILogger<CrossTenantAncestryGuard>? log = null)
+    {
+        var systemContext = _fixture.GetSystemContext();
+        var repo = (await systemContext.TryFindTenantRepositoryAsync(tenantId))!;
+        return new OctoTenantLoginProviders(new IdentityProviderStore(new FixedTenantResolver(repo)),
+            TestAncestryGuards.Create(systemContext, mode, log));
     }
 
     private async Task<TenantExchangeProcessor> CreateExchangeProcessorAsync(

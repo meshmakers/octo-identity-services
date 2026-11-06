@@ -154,6 +154,7 @@
   "LOGIN": {
     "CONTINUE_TO_PROFILE": "Continue to Profile",
     "ERROR_CROSS_TENANT": "Cross-tenant login failed",
+    "ERROR_CROSS_TENANT_NOT_ALLOWED": "This tenant does not accept sign-in from {{tenant}}. Please sign in another way or ask your administrator.",
     "ERROR_ENTER_CREDENTIALS": "Please enter username and password",
     "ERROR_LOGIN_FAILED": "Login failed",
     "ERROR_SECOND_FACTOR_SETUP_REQUIRED": "Your second factor must be set up again. Please contact your administrator.",
