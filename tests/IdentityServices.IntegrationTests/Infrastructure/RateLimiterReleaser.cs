@@ -43,7 +43,7 @@ internal sealed class RateLimiterReleaser(IServer server) : IHostedService
     /// <summary>Upper bound for the walk; the identity pipeline has a few dozen nodes.</summary>
     private const int MaxVisitedObjects = 10_000;
 
-    private readonly ConcurrentDictionary<object, byte> _disposed = new(ReferenceEqualityComparer.Instance);
+    private readonly ConcurrentDictionary<object, Lazy<Task>> _disposed = new(ReferenceEqualityComparer.Instance);
 
     /// <summary>Number of distinct rate limiters this releaser disposed when its host stopped. Test seam.</summary>
     internal int DisposedLimiterCount => _disposed.Count;
@@ -59,10 +59,11 @@ internal sealed class RateLimiterReleaser(IServer server) : IHostedService
         {
             foreach (var limiter in FindRateLimitingMiddlewareLimiters(server))
             {
-                if (_disposed.TryAdd(limiter, 0))
-                {
-                    await limiter.DisposeAsync();
-                }
+                // One disposal per limiter, awaited by every caller: a concurrent second StopAsync must not return
+                // before the first caller has finished disposing.
+                var disposal = _disposed.GetOrAdd(limiter,
+                    _ => new Lazy<Task>(() => limiter.DisposeAsync().AsTask()));
+                await disposal.Value;
             }
         }
         catch (Exception ex)
