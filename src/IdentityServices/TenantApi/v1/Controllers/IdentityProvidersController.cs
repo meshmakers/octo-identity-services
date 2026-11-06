@@ -2,6 +2,7 @@
 using System.ComponentModel.DataAnnotations;
 using Asp.Versioning;
 using IdentityServerPersistence;
+using IdentityServerPersistence.Services;
 using IdentityServerPersistence.SystemStores;
 using Meshmakers.Octo.Common.DistributionEventHub.Services;
 using Meshmakers.Octo.Communication.Contracts.DataTransferObjects;
@@ -26,6 +27,7 @@ namespace Meshmakers.Octo.Backend.IdentityServices.TenantApi.v1.Controllers;
 [ApiVersion(IdentityServiceConstants.ApiVersion1)]
 public class IdentityProvidersController : ControllerBase
 {
+    private readonly ICrossTenantAncestryGuard _ancestryGuard;
     private readonly IDistributionEventHubService _distributionEventHubService;
     private readonly IOctoIdentityProviderStore _identityProviderStore;
     private readonly IdentityProviderDtoMapper _identityProviderDtoMapper;
@@ -36,10 +38,13 @@ public class IdentityProvidersController : ControllerBase
     /// <param name="identityProviderStore"></param>
     /// <param name="identityProviderDtoMapper"></param>
     /// <param name="distributionEventHubService"></param>
+    /// <param name="ancestryGuard">AB#8339: checks an OctoTenant provider's parent against the tenant registry.</param>
     public IdentityProvidersController(IOctoIdentityProviderStore identityProviderStore,
         IdentityProviderDtoMapper identityProviderDtoMapper,
-        IDistributionEventHubService distributionEventHubService)
+        IDistributionEventHubService distributionEventHubService,
+        ICrossTenantAncestryGuard ancestryGuard)
     {
+        _ancestryGuard = ancestryGuard;
         _identityProviderStore = identityProviderStore;
         _identityProviderDtoMapper = identityProviderDtoMapper;
         _distributionEventHubService = distributionEventHubService;
@@ -101,6 +106,11 @@ public class IdentityProvidersController : ControllerBase
         {
             ModelState.AddModelError(nameof(IdentityProviderDto.Name), ProviderNameValidationMessage);
             return ValidationProblem(ModelState);
+        }
+
+        if (await CheckOctoTenantParentAsync(identityProviderDto) is { } notAncestor)
+        {
+            return notAncestor;
         }
 
         var identityProvider = identityProviderDto.ToEntity();
@@ -190,6 +200,11 @@ public class IdentityProvidersController : ControllerBase
             return ValidationProblem(ModelState);
         }
 
+        if (await CheckOctoTenantParentAsync(identityProviderDto, rtId) is { } notAncestor)
+        {
+            return notAncestor;
+        }
+
         var identityProvider = identityProviderDto.ToEntity();
         identityProvider.RtId = rtId;
 
@@ -202,6 +217,38 @@ public class IdentityProvidersController : ControllerBase
         // AB#5540: never echo the request — it carries the write-only ClientSecret in clear text.
         // The response is mapped from the stored entity, whose Secret attribute is never projected.
         return Ok(_identityProviderDtoMapper.ToDto(await ReloadStoredAsync(identityProvider)));
+    }
+
+    /// <summary>
+    ///     AB#8339: an OctoTenant provider makes its <c>ParentTenantId</c> the login parent of this tenant. Only a registry
+    ///     ancestor may be named — otherwise this tenant's administrator could name any tenant of the cluster and so open
+    ///     its user directory and its users' way in. <c>null</c> when the write may go on (also under
+    ///     <c>CrossTenantAncestry=Warn</c>, which only logs), else the 400 problem.
+    /// </summary>
+    /// <remarks>
+    ///     Disabling an existing provider without changing its parent (<paramref name="existingRtId" /> on replace) is
+    ///     always allowed, so an administrator can switch off a provider that names a non-ancestor; a changed parent and
+    ///     re-enabling are checked.
+    /// </remarks>
+    private async Task<ObjectResult?> CheckOctoTenantParentAsync(IdentityProviderDto dto,
+        OctoObjectId? existingRtId = null)
+    {
+        if (dto is not OctoTenantIdentityProviderDto { ParentTenantId: { Length: > 0 } parentTenantId })
+        {
+            return null;
+        }
+
+        if (!dto.IsEnabled && existingRtId is { } rtId &&
+            await _identityProviderStore.GetByIdAsync(rtId) is RtOctoTenantIdentityProvider stored &&
+            string.Equals(stored.ParentTenantId, parentTenantId, StringComparison.OrdinalIgnoreCase))
+        {
+            return null;
+        }
+
+        var tenantId = _identityProviderStore.TenantId;
+        return await _ancestryGuard.IsTrustedAncestorAsync(tenantId, parentTenantId, "OctoTenant identity provider write")
+            ? null
+            : CrossTenantAncestryProblems.ParentTenantNotAncestor(tenantId, parentTenantId);
     }
 
     /// <summary>

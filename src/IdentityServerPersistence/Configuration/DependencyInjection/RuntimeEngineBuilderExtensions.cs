@@ -80,6 +80,12 @@ public static class RuntimeEngineBuilderExtensions
         builder.Services.AddScoped<ICrossTenantShadowUserChainResolver, CrossTenantShadowUserChainResolver>();
         builder.Services.AddScoped<IGroupRoleResolver, GroupRoleResolver>();
         builder.Services.AddScoped<IClientRoleStore, ClientRoleStore>();
+        // AB#8339: the tenant registry, not a tenant's own OctoTenant identity providers, decides cross-tenant ancestry.
+        // Staged by IdentityApiAuthorization:CrossTenantAncestry (Warn default / Enforce); hosts without configuration
+        // (integration tests) get the default.
+        builder.Services.AddOptions<CrossTenantAncestryOptions>().Configure<IServiceProvider>((options, sp) =>
+            sp.GetService<IConfiguration>()?.GetSection(CrossTenantAncestryOptions.SectionName).Bind(options));
+        builder.Services.AddScoped<ICrossTenantAncestryGuard, CrossTenantAncestryGuard>();
         builder.Services.AddScoped<ICrossTenantAuthenticationService, CrossTenantAuthenticationService>();
         // AB#7804: verifies the second factor of a cross-tenant user against the SOURCE tenant (lockout included).
         builder.Services.AddScoped<ICrossTenantSecondFactorVerifier, CrossTenantSecondFactorVerifier>();

@@ -27,6 +27,9 @@ public class CrossTenantAuthenticationServiceTests
     private readonly List<OctoTenant> _registeredTenants = [];
     private readonly Dictionary<string, ITenantRepository> _repositories = new();
     private readonly RegisteredTenantsShadowUserChainResolver _chainResolver = new("home-tenant");
+    // AB#8339: the shipped default (Warn) keeps every provider-only arrangement below working; tests flip it.
+    private readonly CrossTenantAncestryOptions _ancestryOptions = new();
+    private readonly TenantRegistry _tenantRegistry;
 
     public CrossTenantAuthenticationServiceTests()
     {
@@ -44,13 +47,24 @@ public class CrossTenantAuthenticationServiceTests
         _passwordHasher = Substitute.For<IPasswordHasher<RtUser>>();
         _logger = Substitute.For<ILogger<CrossTenantAuthenticationService>>();
 
+        // One registry for the service and its ancestry guard, as in production (scoped, shared cache).
+        _tenantRegistry = new TenantRegistry(_systemContext, new MemoryCache(new MemoryCacheOptions()));
         _sut = new CrossTenantAuthenticationService(
-            new TenantRegistry(_systemContext, new MemoryCache(new MemoryCacheOptions())),
+            _tenantRegistry,
             _identityProviderStore,
             _passwordHasher,
             _chainResolver,
+            CreateAncestryGuard(),
             Microsoft.Extensions.Options.Options.Create(_identityOptions),
             _logger);
+    }
+
+    private CrossTenantAncestryGuard CreateAncestryGuard()
+    {
+        var monitor = Substitute.For<Microsoft.Extensions.Options.IOptionsMonitor<CrossTenantAncestryOptions>>();
+        monitor.CurrentValue.Returns(_ => _ancestryOptions);
+        return new CrossTenantAncestryGuard(_tenantRegistry, _systemContext, monitor,
+            Substitute.For<ILogger<CrossTenantAncestryGuard>>());
     }
 
     [Fact]
@@ -258,6 +272,107 @@ public class CrossTenantAuthenticationServiceTests
         result.Should().NotBeNull();
         result!.SourceTenantId.Should().Be("source-tenant");
         result.SourceUserId.Should().Be(user.RtId.ToString());
+    }
+
+    // ---------- AB#8339: the tenant registry, not the target's own providers, decides ancestry ----------
+
+    [Fact]
+    public async Task ValidateCrossTenantAccess_Enforce_ProviderToARegistryStranger_IsRefused()
+    {
+        _ancestryOptions.CrossTenantAncestry = CrossTenantAncestryMode.Enforce;
+        SetupTenantWithProviders("target-tenant", [CreateTenantProvider("stranger-tenant", isEnabled: true)]);
+        var user = CreateUser("victim");
+        SetupTenantWithUser("stranger-tenant", user);
+        SetRegistryParent("target-tenant", "real-parent");
+
+        var result = await _sut.ValidateCrossTenantAccessAsync("target-tenant", "stranger-tenant", user.RtId.ToString());
+
+        result.Should().BeNull("a provider the target's admin points at any tenant does not make it an ancestor");
+    }
+
+    [Fact]
+    public async Task ValidateCrossTenantAccess_Warn_ProviderToARegistryStranger_PassesAsBefore()
+    {
+        SetupTenantWithProviders("target-tenant", [CreateTenantProvider("stranger-tenant", isEnabled: true)]);
+        var user = CreateUser("victim");
+        SetupTenantWithUser("stranger-tenant", user);
+        SetRegistryParent("target-tenant", "real-parent");
+
+        var result = await _sut.ValidateCrossTenantAccessAsync("target-tenant", "stranger-tenant", user.RtId.ToString());
+
+        result.Should().NotBeNull("Warn (the default) keeps the behaviour before AB#8339 and only logs");
+    }
+
+    [Fact]
+    public async Task ValidateCrossTenantAccess_Enforce_RegistryGrandparentReachedThroughProviders_Succeeds()
+    {
+        _ancestryOptions.CrossTenantAncestry = CrossTenantAncestryMode.Enforce;
+        SetupTenantWithProviders("target-tenant", [CreateTenantProvider("parent-tenant", isEnabled: true)]);
+        SetupTenantWithProviders("parent-tenant", [CreateTenantProvider("grand-tenant", isEnabled: true)]);
+        var user = CreateUser("operator");
+        SetupTenantWithUser("grand-tenant", user);
+        SetRegistryParent("target-tenant", "parent-tenant");
+        SetRegistryParent("parent-tenant", "grand-tenant");
+
+        var result = await _sut.ValidateCrossTenantAccessAsync("target-tenant", "grand-tenant", user.RtId.ToString());
+
+        result.Should().NotBeNull();
+        result!.SourceTenantId.Should().Be("grand-tenant");
+    }
+
+    [Fact]
+    public async Task ValidateCrossTenantAccess_Enforce_RegistryParentWithoutProvider_StaysRefused()
+    {
+        // The provider stays the target's opt-in: the registry confirms ancestry, it does not widen it.
+        _ancestryOptions.CrossTenantAncestry = CrossTenantAncestryMode.Enforce;
+        SetupTenantWithNoProviders("target-tenant");
+        var user = CreateUser("operator");
+        SetupTenantWithUser("parent-tenant", user);
+        SetRegistryParent("target-tenant", "parent-tenant");
+
+        var result = await _sut.ValidateCrossTenantAccessAsync("target-tenant", "parent-tenant", user.RtId.ToString());
+
+        result.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task Authenticate_Enforce_ProviderToARegistryStranger_NeverChecksThePassword()
+    {
+        _ancestryOptions.CrossTenantAncestry = CrossTenantAncestryMode.Enforce;
+        _identityProviderStore.GetAllAsync()
+            .Returns(new RtIdentityProvider[] { CreateTenantProvider("stranger-tenant", isEnabled: true) });
+        var user = CreateUser("victim");
+        SetupTenantWithUser("stranger-tenant", user);
+        SetupTenantWithNoProviders("stranger-tenant");
+        SetupTenantWithNoProviders("child-tenant");
+        SetRegistryParent("child-tenant", "real-parent");
+        _passwordHasher.VerifyHashedPassword(user, Arg.Any<string>(), Arg.Any<string>())
+            .Returns(PasswordVerificationResult.Success);
+
+        var result = await _sut.AuthenticateAsync("child-tenant", "victim", "guess");
+
+        result.Should().BeNull();
+        _passwordHasher.DidNotReceiveWithAnyArgs().VerifyHashedPassword(default!, default!, default!);
+    }
+
+    [Fact]
+    public async Task Authenticate_Enforce_ProviderToTheRegistryParent_Succeeds()
+    {
+        _ancestryOptions.CrossTenantAncestry = CrossTenantAncestryMode.Enforce;
+        _identityProviderStore.GetAllAsync()
+            .Returns(new RtIdentityProvider[] { CreateTenantProvider("parent-tenant", isEnabled: true) });
+        var user = CreateUser("testuser");
+        SetupTenantWithUser("parent-tenant", user);
+        SetupTenantWithNoProviders("parent-tenant");
+        SetupTenantWithNoProviders("child-tenant");
+        SetRegistryParent("child-tenant", "parent-tenant");
+        _passwordHasher.VerifyHashedPassword(user, Arg.Any<string>(), "correctpass")
+            .Returns(PasswordVerificationResult.Success);
+
+        var result = await _sut.AuthenticateAsync("child-tenant", "testuser", "correctpass");
+
+        result.Should().NotBeNull();
+        result!.SourceTenantId.Should().Be("parent-tenant");
     }
 
     [Theory]
@@ -768,6 +883,13 @@ public class CrossTenantAuthenticationServiceTests
         _systemContext.GetRegisteredTenantRepository(
                 Arg.Is<OctoTenant>(t => t.TenantId == tenantId && t.DatabaseName == "db-" + tenantId))
             .Returns(repository);
+    }
+
+    /// <summary>Stamps <paramref name="tenantId" />'s registry row with its logical parent (AB#8339).</summary>
+    private void SetRegistryParent(string tenantId, string parentTenantId)
+    {
+        _registeredTenants.RemoveAll(t => t.TenantId == tenantId);
+        _registeredTenants.Add(new OctoTenant(tenantId, "db-" + tenantId, parentTenantId));
     }
 
     private void SetupTenantWithNoProviders(string tenantId)

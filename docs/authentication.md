@@ -642,11 +642,50 @@ Cross-tenant authentication enables users from a parent tenant to log in to chil
 
 ### Tenant Hierarchy
 
-Tenants form a hierarchy via `RtOctoTenantIdentityProvider` entries:
+The **tenant registry** decides who is an ancestor of whom (AB#8339): the registry rows of the system database
+(`RtEntity_SystemTenant`), each stamped with its logical parent (`parentTenantId`; a row without one is a direct child
+of the system tenant). `RtOctoTenantIdentityProvider` entries are a tenant's **opt-in**, not the trust source:
 - Each child tenant can have one or more `OctoTenantIdentityProvider` pointing to parent tenants
-- Authentication walks **up** the hierarchy (child → parent → grandparent)
+- Authentication walks **up** the hierarchy (child → parent → grandparent) along these providers
+- Every tenant the walk reaches must also be a **registry ancestor** of the child; a provider pointing anywhere else
+  widens nothing (see *Registry Decides Cross-Tenant Ancestry* below)
 - A user in "octosystem" (root) can access all descendant tenants
 - Lateral access (sibling-to-sibling) is not permitted
+
+### Registry Decides Cross-Tenant Ancestry (AB#8339)
+
+Before AB#8339 the providers alone decided ancestry — and a tenant's own administrator writes them. Pointing an
+OctoTenant provider (or an admin-provisioning mapping, which creates one) at **any** tenant of the cluster made that
+tenant an "ancestor": its user directory became searchable through `adminProvisioning/{target}/sourceUsers`, its users
+could switch into the target (token exchange, cross-tenant token) and log in there with their password.
+
+Now every cross-tenant path asks `ICrossTenantAncestryGuard` (`IdentityServerPersistence/Services/CrossTenantAncestryGuard.cs`),
+which walks the registry through the shared `ITenantRegistry` snapshot (one registry read per request, miss refresh for
+new tenants):
+
+| Path | Rule |
+|------|------|
+| `GET adminProvisioning/{target}/sourceUsers` | only tenants that the target's providers reach **and** the registry confirms as ancestors |
+| Tenant switch: token exchange (RFC 8693), `POST auth/cross-tenant-token`, and the other `ValidateCrossTenantAccessAsync` callers | the source must be reachable through the target's providers **and** a registry ancestor; the `xt_` sibling-shadow step (concept step 1a) is unchanged — the shadow's home tenant is judged, and it is a registry ancestor |
+| Cross-tenant password login | a tenant the provider walk reaches is asked for the password only when it is a registry ancestor of the login tenant; otherwise it is skipped (no password check, no lockout counting of a stranger's users) and not walked beyond |
+| `POST adminProvisioning/{target}` and `…/withGroups` | a `SourceTenantId` that is no registry ancestor of the target → `403 problem+json`, code `CrossTenantSourceNotAncestor`, nothing written |
+| `POST`/`PUT identityProviders` with an OctoTenant provider | a `ParentTenantId` that is no registry ancestor of the tenant → `400 problem+json`, code `OctoTenantParentNotAncestor`, nothing written. A `PUT` that only disables a stored provider (same parent, `isEnabled: false`) is always allowed, so such a provider can be switched off; `DELETE` is unchecked |
+
+The registry confirms; it does not widen: a registry ancestor the target has no provider for is still no source.
+
+**Staged by `IdentityApiAuthorization:CrossTenantAncestry`** (env `OCTO_IDENTITYAPIAUTHORIZATION__CROSSTENANTANCESTRY`,
+Helm `services.identity.crossTenantAncestry`):
+
+- `Warn` (default): every path behaves as before AB#8339; each use of a provider-only ancestor is logged as a warning
+  with both tenant ids and the path — `Cross-tenant ancestry not confirmed by the tenant registry, allowed by
+  CrossTenantAncestry=Warn: {ClaimedAncestorTenantId} is not an ancestor of {TenantId} ({Operation}). This would be
+  denied with CrossTenantAncestry=Enforce (AB#8339)`.
+- `Enforce`: the rules of the table apply. Switch per cluster after the inventory of non-ancestor providers and mappings
+  (AB#8339 comments) is reviewed and the Warn log stays empty; that switch is a security decision of the maintainers.
+
+A registry row written before the parent field existed (no `parentTenantId`) makes its tenant a direct child of the
+system tenant; under `Enforce` its real parent is then no ancestor. Such tenants show up in the Warn log and the
+inventory; give their registry rows the parent before enforcing. Admitting users of a tenant **outside** the ancestor chain needs that tenant's permission (AB#8313).
 
 ### Cross-Tenant Login Flow
 

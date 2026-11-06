@@ -39,6 +39,7 @@ public class AdminProvisioningController(
     ISystemContext systemContext,
     IDynamicAuthSchemeService dynamicAuthSchemeService,
     ICrossTenantShadowUserChainResolver shadowUserChainResolver,
+    ICrossTenantAncestryGuard ancestryGuard,
     ILogger<AdminProvisioningController> logger) : ControllerBase
 {
     /// <summary>
@@ -124,6 +125,7 @@ public class AdminProvisioningController(
     [ProducesResponseType(typeof(ExternalTenantUserMappingDto), StatusCodes.Status201Created)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status403Forbidden)]
     [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status409Conflict)]
     public async Task<ActionResult<ExternalTenantUserMappingDto>> Create(
         [Required] string targetTenantId,
@@ -138,6 +140,14 @@ public class AdminProvisioningController(
         if (tenantRepository == null)
         {
             return NotFound($"Tenant '{targetTenantId}' not found.");
+        }
+
+        // AB#8339: only a registry ancestor of the target is an implicit source; the mapping would also register the
+        // source as the target's login parent (EnsureOctoTenantIdentityProviderAsync).
+        if (!await ancestryGuard.IsTrustedAncestorAsync(targetTenantId, dto.SourceTenantId,
+                "admin provisioning mapping"))
+        {
+            return CrossTenantAncestryProblems.SourceTenantNotAncestor(targetTenantId, dto.SourceTenantId);
         }
 
         // A mapping is unique per (source tenant, source user): a second one would lock the user out (AB#6975).
@@ -770,8 +780,9 @@ public class AdminProvisioningController(
     [ProducesResponseType(typeof(ExternalTenantUserMappingDto), StatusCodes.Status201Created)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status403Forbidden)]
     [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status409Conflict)]
-public async Task<ActionResult<ExternalTenantUserMappingDto>> CreateWithGroups(
+    public async Task<ActionResult<ExternalTenantUserMappingDto>> CreateWithGroups(
         [Required] string targetTenantId,
         [Required][FromBody][Description("The mapping data with target-tenant group ids")]
         CreateExternalTenantUserGroupMappingDto dto)
@@ -785,6 +796,14 @@ public async Task<ActionResult<ExternalTenantUserMappingDto>> CreateWithGroups(
         if (tenantRepository == null)
         {
             return NotFound($"Tenant '{targetTenantId}' not found.");
+        }
+
+        // AB#8339: only a registry ancestor of the target is an implicit source; the mapping would also register the
+        // source as the target's login parent (EnsureOctoTenantIdentityProviderAsync).
+        if (!await ancestryGuard.IsTrustedAncestorAsync(targetTenantId, dto.SourceTenantId,
+                "admin provisioning mapping"))
+        {
+            return CrossTenantAncestryProblems.SourceTenantNotAncestor(targetTenantId, dto.SourceTenantId);
         }
 
         // A mapping is unique per (source tenant, source user): a second one would lock the user out (AB#6975).
@@ -843,15 +862,18 @@ public async Task<ActionResult<ExternalTenantUserMappingDto>> CreateWithGroups(
     }
 
     /// <summary>
-    /// Walks the target tenant's ancestor chain via <see cref="RtOctoTenantIdentityProvider.ParentTenantId"/>
-    /// (breadth-first, cycle-safe, depth-capped) and returns every ancestor tenant id. These are the only
-    /// tenants a cross-tenant mapping's SourceTenantId may legitimately reference.
+    /// The tenants whose users may be offered as cross-tenant sources of the target: the tenants the target's
+    /// <see cref="RtOctoTenantIdentityProvider.ParentTenantId"/> chain reaches (breadth-first, cycle-safe,
+    /// depth-capped) — the target's opt-in — and that the tenant registry confirms as ancestors of the target
+    /// (AB#8339). Before AB#8339 the providers alone decided, so a provider the target's administrator pointed at
+    /// any tenant opened that tenant's user directory. Under <c>CrossTenantAncestry=Warn</c> such a tenant is still
+    /// returned and logged.
     /// </summary>
     private async Task<List<string>> ResolveAncestorTenantIdsAsync(string targetTenantId)
     {
         const int maxDepth = 10;
         var visited = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { targetTenantId };
-        var ancestors = new List<string>();
+        var reachable = new List<string>();
         var frontier = new Queue<string>();
         frontier.Enqueue(targetTenantId);
 
@@ -877,14 +899,23 @@ public async Task<ActionResult<ExternalTenantUserMappingDto>> CreateWithGroups(
                 {
                     if (!string.IsNullOrEmpty(provider.ParentTenantId) && visited.Add(provider.ParentTenantId))
                     {
-                        ancestors.Add(provider.ParentTenantId);
+                        reachable.Add(provider.ParentTenantId);
                         frontier.Enqueue(provider.ParentTenantId);
                     }
                 }
             }
         }
 
-        return ancestors;
+        if (reachable.Count == 0)
+        {
+            return reachable;
+        }
+
+        var registryAncestors = await ancestryGuard.GetRegistryAncestorsAsync(targetTenantId);
+        return reachable
+            .Where(tenantId => ancestryGuard.IsTrustedAncestor(targetTenantId, registryAncestors, tenantId,
+                "provisioning source users"))
+            .ToList();
     }
 
     /// <summary>

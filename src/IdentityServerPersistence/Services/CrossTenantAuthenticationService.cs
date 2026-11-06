@@ -12,6 +12,7 @@ public class CrossTenantAuthenticationService(
     IOctoIdentityProviderStore identityProviderStore,
     IPasswordHasher<RtUser> passwordHasher,
     ICrossTenantShadowUserChainResolver shadowUserChainResolver,
+    ICrossTenantAncestryGuard ancestryGuard,
     IOptions<IdentityOptions> identityOptions,
     ILogger<CrossTenantAuthenticationService> logger) : ICrossTenantAuthenticationService
 {
@@ -30,7 +31,9 @@ public class CrossTenantAuthenticationService(
             return null;
         }
 
-        // Walk up the tenant hierarchy
+        // Walk up the tenant hierarchy. AB#8339: every tenant the walk reaches must be a registry ancestor of the
+        // child; the providers are only the child's opt-in, they do not decide who its ancestors are.
+        var registryAncestors = await ancestryGuard.GetRegistryAncestorsAsync(childTenantId);
         var visited = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { childTenantId };
 
         foreach (var provider in providers)
@@ -50,7 +53,7 @@ public class CrossTenantAuthenticationService(
             }
 
             var result = await TryAuthenticateInHierarchyAsync(
-                parentTenantId, username, password, visited, 0);
+                childTenantId, registryAncestors, parentTenantId, username, password, visited, 0);
             if (result != null)
             {
                 return result;
@@ -164,8 +167,8 @@ public class CrossTenantAuthenticationService(
     }
 
     private async Task<CrossTenantAuthResult?> TryAuthenticateInHierarchyAsync(
-        string tenantId, string username, string password,
-        HashSet<string> visited, int depth)
+        string childTenantId, IReadOnlyList<string> registryAncestors, string tenantId, string username,
+        string password, HashSet<string> visited, int depth)
     {
         if (depth >= MaxHierarchyDepth)
         {
@@ -180,6 +183,13 @@ public class CrossTenantAuthenticationService(
             logger.LogWarning(
                 "Circular reference detected in tenant hierarchy at '{TenantId}'",
                 tenantId);
+            return null;
+        }
+
+        // AB#8339: a tenant that is no registry ancestor of the child is neither asked for the password (no guessing and
+        // no lockout counting of a stranger's users) nor walked beyond under Enforce.
+        if (!ancestryGuard.IsTrustedAncestor(childTenantId, registryAncestors, tenantId, "cross-tenant login"))
+        {
             return null;
         }
 
@@ -239,7 +249,7 @@ public class CrossTenantAuthenticationService(
             }
 
             var result = await TryAuthenticateInHierarchyAsync(
-                provider.ParentTenantId, username, password, visited, depth + 1);
+                childTenantId, registryAncestors, provider.ParentTenantId, username, password, visited, depth + 1);
             if (result != null)
             {
                 return result;
@@ -358,6 +368,25 @@ public class CrossTenantAuthenticationService(
     }
 
     /// <summary>
+    ///     Whether <paramref name="ancestorTenantId" /> may act as an ancestor of <paramref name="childTenantId" /> for a
+    ///     tenant switch (token exchange, AB#4338). Two conditions: the child opted in — its enabled
+    ///     <c>OctoTenantIdentityProvider</c>s reach the ancestor (<see cref="IsReachableThroughProvidersAsync" />) — and the
+    ///     tenant registry confirms the ancestry (AB#8339, <see cref="ICrossTenantAncestryGuard" />). Before AB#8339 the
+    ///     providers alone decided, and they are written by the child's own administrator: a provider pointing at any
+    ///     tenant made that tenant an "ancestor". Under <see cref="CrossTenantAncestryMode.Warn" /> a provider-only
+    ///     ancestor still passes and is logged.
+    /// </summary>
+    private async Task<bool> IsAncestorTenantAsync(string childTenantId, string ancestorTenantId)
+    {
+        if (!await IsReachableThroughProvidersAsync(childTenantId, ancestorTenantId))
+        {
+            return false;
+        }
+
+        return await ancestryGuard.IsTrustedAncestorAsync(childTenantId, ancestorTenantId, "tenant switch");
+    }
+
+    /// <summary>
     ///     Breadth-first search over the identity-provider graph for <paramref name="ancestorTenantId" />.
     /// </summary>
     /// <remarks>
@@ -369,7 +398,7 @@ public class CrossTenantAuthenticationService(
     ///     <see cref="MaxHierarchyDepth" /> bounds the number of LEVELS walked, and <c>visited</c> keeps a
     ///     cycle from looping.
     /// </remarks>
-    private async Task<bool> IsAncestorTenantAsync(string childTenantId, string ancestorTenantId)
+    private async Task<bool> IsReachableThroughProvidersAsync(string childTenantId, string ancestorTenantId)
     {
         var visited = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { childTenantId };
         var currentLevel = new List<string> { childTenantId };

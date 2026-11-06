@@ -53,7 +53,8 @@ public sealed class IdentityProvidersControllerSecretTests : IDisposable
         var identityProviderDtoMapper =
             new IdentityProviderDtoMapper(_services.GetRequiredService<IIdentityProviderSecretReader>());
         _store.TenantId.Returns("test-tenant");
-        _sut = new IdentityProvidersController(_store, identityProviderDtoMapper, Substitute.For<IDistributionEventHubService>());
+        _sut = new IdentityProvidersController(_store, identityProviderDtoMapper, Substitute.For<IDistributionEventHubService>(),
+            Substitute.For<IdentityServerPersistence.Services.ICrossTenantAncestryGuard>());
     }
 
     public void Dispose() => _services.Dispose();

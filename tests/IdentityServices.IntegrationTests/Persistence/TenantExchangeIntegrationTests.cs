@@ -890,6 +890,7 @@ public class TenantExchangeIntegrationTests : IClassFixture<IdentityServicesFixt
         var controller = new AdminProvisioningController(
             systemContext, Substitute.For<Meshmakers.Octo.Backend.Authentication.DynamicAuth.IDynamicAuthSchemeService>(),
             new CrossTenantShadowUserChainResolver(systemContext),
+            TestAncestryGuards.Create(systemContext),
             NullLogger<AdminProvisioningController>.Instance)
         {
             ControllerContext = new Microsoft.AspNetCore.Mvc.ControllerContext { HttpContext = httpContext }
@@ -998,6 +999,7 @@ public class TenantExchangeIntegrationTests : IClassFixture<IdentityServicesFixt
             idpStore,
             new PasswordHasher<RtUser>(),
             new CrossTenantShadowUserChainResolver(systemContext),
+            TestAncestryGuards.Create(systemContext),
             Options.Create(new IdentityOptions()),
             NullLogger<CrossTenantAuthenticationService>.Instance);
     }
