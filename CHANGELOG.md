@@ -5,6 +5,13 @@ Notable changes of the OctoMesh identity services. The CK model `System.Identity
 
 ## Unreleased
 
+### Documentation
+
+- **Contract for sibling-tenant user lookup and grants (AB#8340).** `docs/CONCEPT-SIBLING-TENANT-GRANTS.md` fixes the
+  routes, DTOs, problem codes, the uniform-404 rule, the lookup rate limit, the audit events and the revocation
+  semantics for granting a user of a non-ancestor tenant access to a target tenant (Feature AB#8313). No behaviour
+  change yet; the routes are implemented by AB#8341–AB#8345.
+
 ### Fixed
 
 - **The login page no longer offers parent tenants the tenant registry does not back, and names a refused tenant switch
