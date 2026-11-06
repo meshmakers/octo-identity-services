@@ -68,7 +68,7 @@ Answers:
 |--------|------|------|
 | `200` | `SourceUserLookupResultDto` | exactly one active user of S matches |
 | `404` | problem, code `SourceUserNotFound` | **every** negative case (uniform-404 rule, §3) |
-| `429` | problem, code `SourceUserLookupRateLimited`, header `Retry-After` | lookup limit exceeded (§4) |
+| `429` | problem, code `SourceUserLookupRateLimited`, body field `retryAfterSeconds`, header `Retry-After` | lookup limit exceeded (§4) |
 | `400` | validation problem | body missing or not JSON. An empty, whitespace or missing `sourceTenantId`/`identifier` is a negative case and answers `404` (the DTO has no `[Required]` on purpose) |
 | `401` / `403` | — | no token / caller lacks `IdentityUserAdministrationWritePolicy` in T |
 
@@ -156,8 +156,18 @@ Create (`403 SourceTenantNotPermitted`) follows the same idea: one answer for "S
 
 Lookups are limited **per caller and target tenant** (key: the caller's subject + T), default **20 lookups per 10
 minutes**, sliding window, configurable (AB#8341 defines the option, e.g. `Identity:SourceUserLookupRateLimit` with
-`PermitLimit` and `Window`, documented in `configuration.md`). Over the limit: `429`, `Retry-After` in seconds, problem
-code `SourceUserLookupRateLimited`. Hits and misses count alike. The limit is kept in memory per pod, like the sign-in
+`PermitLimit` and `Window`, documented in `configuration.md`). Over the limit: `429` with problem code
+`SourceUserLookupRateLimited`, the wait time in seconds both as the `Retry-After` header and as the integer body field
+`retryAfterSeconds` (same value). The body field exists because Studio calls the identity API cross-origin and the CORS
+policy exposes no response headers, so a browser cannot read `Retry-After`; clients read `retryAfterSeconds`.
+
+```json
+{ "status": 429, "title": "Too many lookups",
+  "detail": "Too many source user lookups. Try again later.",
+  "code": "SourceUserLookupRateLimited", "retryAfterSeconds": 240 }
+```
+
+Hits and misses count alike. The limit is kept in memory per pod, like the sign-in
 limits.
 
 ## 5. Problem codes
@@ -167,14 +177,14 @@ and stable; title and detail are English text for humans. The codes are PascalCa
 (`ExternalTenantUserMappingAlreadyExists`, `CrossTenantSourceNotAncestor`); the SDK carries them as constants in
 `Meshmakers.Octo.Communication.Contracts.DataTransferObjects.ApiErrors.CrossTenantGrantProblemCodes`.
 
-| Code | Status | Route |
-|------|--------|-------|
-| `SourceUserNotFound` | 404 | lookup |
-| `SourceUserLookupRateLimited` | 429 | lookup |
-| `SourceTenantNotPermitted` | 403 | create |
-| `UnknownGroup` | 400 | create |
-| `ExternalTenantUserMappingAlreadyExists` | 409 | create (existing, AB#6975) |
-| `CrossTenantSourceNotAncestor` | 403 | `adminProvisioning` writes only (existing, AB#8339) |
+| Code | Status | Route | Extensions |
+|------|--------|-------|------------|
+| `SourceUserNotFound` | 404 | lookup | — |
+| `SourceUserLookupRateLimited` | 429 | lookup | `retryAfterSeconds` (integer, same value as the `Retry-After` header) |
+| `SourceTenantNotPermitted` | 403 | create | — |
+| `UnknownGroup` | 400 | create | `unknownGroupIds` |
+| `ExternalTenantUserMappingAlreadyExists` | 409 | create (existing, AB#6975) | `existingMappingId` |
+| `CrossTenantSourceNotAncestor` | 403 | `adminProvisioning` writes only (existing, AB#8339) | — |
 
 ## 6. Source-tenant permission (AB#8345)
 
@@ -234,7 +244,7 @@ administrator reads them once AB#8342 is merged.
 1. The administrator, signed in to T, enters the source tenant id and the exact user name or e-mail.
 2. `POST ExternalTenantUserMappings/sourceUserLookup` → `200` shows `userName` / `displayName`; `404` shows one neutral
    message ("No user found that can be granted access"), never a reason; `429` shows "Too many lookups, try again
-   later".
+   in N minutes" from `retryAfterSeconds`.
 3. The administrator chooses T groups → `POST ExternalTenantUserMappings` with `groupIds`.
 4. The list of granted users is `GET ExternalTenantUserMappings` (source tenant, user, groups); removal is `DELETE`.
 
