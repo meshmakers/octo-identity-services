@@ -1,4 +1,12 @@
 "$schema": "https://schemas.meshmakers.cloud/construction-kit-meta.schema.json"
+# 3.1.1 (AB#8095) republishes 3.1.0 unchanged under a new version. 3.1.0 is published to PrivateGitHubCatalog (main build
+# 65653) WITH the two compatibility.acknowledge entries; after they were removed (OCTO-CK204 at compile, baseline = published
+# 3.1.0) the publish gate refused 3.1.0 again: OCTO-CK205 (a published version is immutable, the compiled file differs) and
+# OCTO-CK203 x2 (the publish baseline of 3.1.0 is the version below it, 3.0.1, where the role widening needs the acknowledge
+# again). No content of 3.1.0 can pass both gates, so the version moves on. Against the published 3.1.0 nothing changes: patch,
+# no acknowledge entries, no migration entry (in-major bridge), no data migration; ranges [3.0.0,4.0) stay satisfied.
+# Service-managed like 3.1.0: ships with the identity release, no catalog import, no FixAll (AB#7998).
+#
 # 3.1.0 (AB#8095, Feature AB#5981) adds the role SecretManagement to the authorization of Client.AddSecret-1 and
 # Client.RemoveSecret-1 (now [ TenantManagement, UserManagement, SecretManagement ]). Before, a caller holding only
 # SecretManagement was refused by the method gateway (roles are any-of) although the REST path admits it (AB#5861,
@@ -9,7 +17,7 @@
 # next System.Identity major that happens for another reason - no own major for it (Odin, 2026-11-05).
 # The two compatibility.acknowledge entries were valid for the one release that published 3.1.0 and were removed right
 # after it (AB#8095: against the published 3.1.0 baseline they match no change, OCTO-CK204). Removing them changes no
-# structure, so the model stays 3.1.0. No type, attribute, record, id or default changes; no data migration; ranges
+# structure, but 3.1.0 could not be published again without them (see 3.1.1). No type, attribute, record, id or default changes; no data migration; ranges
 # [3.0.0,4.0) stay satisfied. Service-managed: ships with the identity release, no catalog import, no FixAll (AB#7998).
 #
 # 3.0.1 (AB#8157) adds the migration entries from every 2.x minor (2.9.0 - 2.30.0) to 3.0.1: 3.0.0 shipped without them and the engine
@@ -126,7 +134,7 @@
 # concept AB#5528 in octo-construction-kit-engine). String -> Secret is Minor
 # (CkSemVerClassifier): stored clear-text values stay readable as legacy values
 # until the encrypt sweep has run. Secret requires System >= 2.5 (decision 12).
-modelId: System.Identity-3.1.0
+modelId: System.Identity-3.1.1
 ckLanguage: 2
 dependencies:
   - System-[2.5,3.0)

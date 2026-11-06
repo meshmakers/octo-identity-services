@@ -1,5 +1,20 @@
 # Changelog
 
+## 3.1.1 - 2026-11-06
+
+_Required bump level: none (no structural change against the published 3.1.0)._
+
+AB#8095: 3.1.1 is the content of 3.1.0 without the two `compatibility.acknowledge` entries, published under a new version.
+3.1.0 is in `PrivateGitHubCatalog` with the acknowledgements; after they were removed (`OCTO-CK204` at compile, baseline =
+published 3.1.0) the publish gate refused 3.1.0 again with `OCTO-CK205` (published versions are immutable) and `OCTO-CK203`
+(the publish baseline of 3.1.0 is its predecessor 3.0.1, which needs the acknowledgements). No content of 3.1.0 passes both
+gates, so the version moves on. Compile and publish baseline of 3.1.1 are both 3.1.0: no change, nothing to acknowledge.
+
+Rollout: unchanged from 3.1.0 - service-managed, applied on identity startup in every tenant; no catalog import, **no
+FixAll** (AB#7998), no migration entry (in-major), no data migration. Ranges `System.Identity-[3.0.0,4.0)` stay satisfied.
+The r* tag build publishes 3.1.0 to the public catalog before 3.1.1 (intermediate-version sync, AB#7974); on `main` that
+step only reports a warning for the missing 3.1.0.
+
 ## 3.1.0 - 2026-11-05
 
 _Required bump level: minor._

@@ -95,7 +95,7 @@ public class SystemIdentityMajorUpgradeIntegrationTests : IClassFixture<Identity
 
         path.Should().NotBeNull($"System.Identity-{startVersion} -> {embedded} must not be refused as a schema-only bridge across a major");
         path!.Steps.Should().NotBeEmpty();
-        // The migration chain crosses the major (2.x -> 3.0.1, AB#8157); a later 3.x minor (3.1.0, AB#8095) is reached by
+        // The migration chain crosses the major (2.x -> 3.0.1, AB#8157); a later 3.x version (3.1.1, AB#8095) is reached by
         // the schema-only bridge inside the major, so the chain ends in the embedded major at or below the embedded version.
         // That a 2.x tenant really ends on the embedded version is proven by the upgrade test above.
         var end = Version.Parse(path.Steps[^1].ToVersion);

@@ -185,7 +185,7 @@ Order per cluster: **test-2 → prod-2 → prod-1**.
 6. **Emergency exit**: back to `Warn` (remove the cluster value and run the CD) — or the cluster-wide `apiRoleEnforcement: Warn`, which
    relaxes every role policy including this one.
 
-### AB#8095: the method path admits `SecretManagement` (System.Identity 3.1.0)
+### AB#8095: the method path admits `SecretManagement` (System.Identity 3.1.0, shipped as 3.1.1)
 
 Up to System.Identity 3.0.1 the CK declared `authorization.roles: [ TenantManagement, UserManagement ]` on
 `Client.AddSecret-1` and `Client.RemoveSecret-1`. The method gateway checks the declared roles (any-of), so a caller
@@ -202,6 +202,8 @@ System.Identity **3.1.0** declares `[ TenantManagement, UserManagement, SecretMa
 - **Minor**, not Major: a role added is a method authorization widening (row M12 of `docs/ck-semver-rules.md` in
   `octo-construction-kit-engine`), acknowledged in `ckModel.yaml` (`compatibility.acknowledge`, valid for the release that
   published 3.1.0 only; removed right after it, because a build against the published 3.1.0 fails with `OCTO-CK204`).
+  Without them 3.1.0 could not be published again (`OCTO-CK205` immutable version, `OCTO-CK203` against the publish
+  baseline 3.0.1), so the identity service ships the same model as **3.1.1** (patch, no structural change against 3.1.0).
   The effective rule does not loosen: the handler still enforces `SecretManagement` under `Enforce`. Removing `TenantManagement`/`UserManagement` from
   the declaration is a role removal (Major) and waits for the next System.Identity major.
 - **Rollout:** System.Identity is service-managed - it ships inside the identity service with the regular identity release
@@ -210,4 +212,4 @@ System.Identity **3.1.0** declares `[ TenantManagement, UserManagement, SecretMa
   Basic.Energy 2.0.0 over EnergyIQ's `[1.9,2.0)`); a Minor inside `[3.0.0,4.0)` needs none. A tenant that shows
   `ResolveFailed` afterwards is repaired with a targeted `ImportFromCatalog` of the affected model.
 - **Check after the release reaches a cluster:** `octo-cli --context <env>_<tenant> -c LibraryStatus` shows
-  System.Identity 3.1.0 and no `ResolveFailed`, in a sample of tenants including `energyiq`.
+  System.Identity 3.1.1 and no `ResolveFailed`, in a sample of tenants including `energyiq`.
