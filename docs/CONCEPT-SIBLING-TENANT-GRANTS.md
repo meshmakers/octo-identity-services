@@ -149,14 +149,33 @@ Implementation rules (AB#8341): no early return before the user query (the polic
 path, so timing does not tell the cases apart); tests assert the identical body for each case; the existing
 `SearchUsersInTenantAsync` (substring, empty search = first users) is **not** used for non-ancestors.
 
+As built (AB#8341, `src/IdentityServerPersistence/Services/SourceTenantGrants/`):
+
+- `SourceUserLookupService` reads the registry ancestors of T (`ICrossTenantAncestryGuard.GetRegistryAncestorsAsync` —
+  the registry alone; the `Warn` mode of AB#8339 does **not** widen this route), asks `ISourceTenantGrantPolicy`, then
+  always runs the same two equality queries (`NormalizedUserName == X`, `NormalizedEmail == X`, X = trimmed,
+  upper-cased identifier, passed as a value, never as an operator). When S is unknown or empty the queries run against
+  T's database and the result is discarded, so "tenant absent" costs the same database round trips as "user absent".
+  Only then is the decision taken. Remaining, small differences: an unknown S may trigger the registry's throttled miss
+  refresh (at most every 5 s per pod), and a found user costs the in-memory sign-in check.
+- The default policy `DenyNonAncestorsSourceTenantGrantPolicy` answers `false` for every pair; registry ancestors are
+  admitted before the policy is asked. AB#8345 replaces the registration (`TryAddScoped`).
+- A policy that throws counts as "not permitted"; a read error of S counts as "no user"; both answer the uniform `404`.
+- Logs carry caller, T, S, the internal outcome and a 12-character SHA-256 prefix of the normalized identifier — never
+  the identifier itself. The outcome is never part of the answer.
+- Audit hook for AB#8342: `ISourceUserLookupAuditSink.RecordAsync(SourceUserLookupAuditEvent)` is called once per
+  lookup (T, S, caller, hit/miss, whether S exists, user id and name of a hit; no identifier). Registered as
+  `NoOpSourceUserLookupAuditSink` until AB#8342 replaces it; a failing sink is logged and never breaks the request.
+
 Create (`403 SourceTenantNotPermitted`) follows the same idea: one answer for "S unknown", "S does not permit T" and
 "user absent or blocked in S".
 
 ## 4. Rate limit
 
-Lookups are limited **per caller and target tenant** (key: the caller's subject + T), default **20 lookups per 10
-minutes**, sliding window, configurable (AB#8341 defines the option, e.g. `Identity:SourceUserLookupRateLimit` with
-`PermitLimit` and `Window`, documented in `configuration.md`). Over the limit: `429` with problem code
+Lookups are limited **per caller and target tenant** (key: the caller's subject, or the client id of a service token,
++ T), default **20 lookups per 10 minutes**, sliding window, configurable: `Identity:SourceUserLookupRateLimit` with
+`Enabled`, `PermitLimit` and `Window` (documented in `configuration.md`). The limit is checked after authorization and
+before the lookup; `retryAfterSeconds` is the exact time until the oldest counted lookup leaves the window (at least 1). Over the limit: `429` with problem code
 `SourceUserLookupRateLimited`, the wait time in seconds both as the `Retry-After` header and as the integer body field
 `retryAfterSeconds` (same value). The body field exists because Studio calls the identity API cross-origin and the CORS
 policy exposes no response headers, so a browser cannot read `Retry-After`; clients read `retryAfterSeconds`.

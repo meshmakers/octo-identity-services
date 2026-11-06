@@ -2,6 +2,7 @@ using Microsoft.Extensions.Configuration;
 using IdentityServerPersistence.Configuration.DependencyInjection;
 using IdentityServerPersistence.Configuration.Options;
 using IdentityServerPersistence.Services;
+using IdentityServerPersistence.Services.SourceTenantGrants;
 using IdentityServerPersistence.Services.ScratchTenants;
 using IdentityServerPersistence.Services.Admin;
 using IdentityServerPersistence.Services.Login;
@@ -89,6 +90,13 @@ public static class RuntimeEngineBuilderExtensions
         // AB#8367: the login page offers only the OctoTenant providers the ancestry check lets through.
         builder.Services.AddScoped<IOctoTenantLoginProviders, OctoTenantLoginProviders>();
         builder.Services.AddScoped<ICrossTenantAuthenticationService, CrossTenantAuthenticationService>();
+        // AB#8341: exact source user lookup for sibling-tenant grants. The policy defaults to "deny every non-ancestor"
+        // until the allow-list of AB#8345 replaces it; the audit sink is a no-op until AB#8342. TryAdd so hosts (tests,
+        // the later stories) can register their own implementation first.
+        builder.Services.TryAddScoped<ISourceTenantGrantPolicy, DenyNonAncestorsSourceTenantGrantPolicy>();
+        builder.Services.TryAddSingleton<ISourceUserLookupAuditSink, NoOpSourceUserLookupAuditSink>();
+        builder.Services.TryAddSingleton<ISourceUserLookupRateLimiter, SourceUserLookupRateLimiter>();
+        builder.Services.AddScoped<ISourceUserLookupService, SourceUserLookupService>();
         // AB#7804: verifies the second factor of a cross-tenant user against the SOURCE tenant (lockout included).
         builder.Services.AddScoped<ICrossTenantSecondFactorVerifier, CrossTenantSecondFactorVerifier>();
         builder.Services.AddScoped<ICrossTenantUserProvisioningService, CrossTenantUserProvisioningService>();

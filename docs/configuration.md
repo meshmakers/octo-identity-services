@@ -92,6 +92,19 @@ In-memory limits per pod on the interactive sign-in endpoints (`login`, `ldap-lo
 | `Identity:SignInRateLimit:PermitsPerClientIpPerMinute` | `60` | Attempts per client address over all accounts and endpoints in a sliding minute. |
 | `Identity:SignInRateLimit:UseForwardedFor` | `true` | Client address = right-most `X-Forwarded-For` entry (set by the ingress). Turn off only when the service is reachable without such a proxy — a client could otherwise choose its own address. |
 
+##### Source user lookup rate limit (AB#8341)
+
+In-memory limit per pod on `POST ExternalTenantUserMappings/sourceUserLookup` (exact lookup of a user of another tenant
+for a grant, `CONCEPT-SIBLING-TENANT-GRANTS.md`), per caller (subject, or client id of a service token) and target
+tenant, sliding window. Hits and misses count alike. Over the limit: `429` problem `SourceUserLookupRateLimited` with the
+wait time in the `Retry-After` header and the body field `retryAfterSeconds`.
+
+| Setting (env `OCTO_IDENTITY__SOURCEUSERLOOKUPRATELIMIT__…`) | Default | Meaning |
+|---------|---------|---------|
+| `Identity:SourceUserLookupRateLimit:Enabled` | `true` | Switches the limit on. Off only for diagnosis. |
+| `Identity:SourceUserLookupRateLimit:PermitLimit` | `20` | Lookups per caller and target tenant within the window. |
+| `Identity:SourceUserLookupRateLimit:Window` | `00:10:00` | Length of the sliding window. |
+
 ##### Token signing (OpenIddict)
 
 Since AB#4989/AB#4996 the OAuth2/OIDC server is **OpenIddict** (Duende IdentityServer removed).

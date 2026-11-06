@@ -140,31 +140,7 @@ public class CrossTenantAuthenticationService(
     }
 
     private string? GetSignInBlock(RtUser user)
-    {
-        if (IsLockedOut(user))
-        {
-            return "locked out";
-        }
-
-        var signIn = identityOptions.Value.SignIn;
-        if (signIn.RequireConfirmedEmail && !user.EmailConfirmed)
-        {
-            return "e-mail not confirmed";
-        }
-
-        if (signIn.RequireConfirmedPhoneNumber && !user.PhoneNumberConfirmed)
-        {
-            return "phone number not confirmed";
-        }
-
-        // DefaultUserConfirmation: an account is confirmed when its e-mail is.
-        if (signIn.RequireConfirmedAccount && !user.EmailConfirmed)
-        {
-            return "account not confirmed";
-        }
-
-        return null;
-    }
+        => SourceUserSignInBlock.Get(user, identityOptions.Value.SignIn, DateTimeOffset.UtcNow);
 
     private async Task<CrossTenantAuthResult?> TryAuthenticateInHierarchyAsync(
         string childTenantId, IReadOnlyList<string> registryAncestors, string tenantId, string username,
@@ -260,7 +236,7 @@ public class CrossTenantAuthenticationService(
     }
 
     private static bool IsLockedOut(RtUser user)
-        => user.LockoutEnabled && user.LockoutEnd.HasValue && user.LockoutEnd.Value > DateTimeOffset.UtcNow;
+        => SourceUserSignInBlock.IsLockedOut(user, DateTimeOffset.UtcNow);
 
     private async Task RecordAccessFailureAsync(string tenantId, RtUser user)
     {

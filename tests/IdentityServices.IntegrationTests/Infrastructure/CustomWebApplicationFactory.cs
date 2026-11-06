@@ -214,6 +214,9 @@ public class CustomWebApplicationFactory : WebApplicationFactory<Program>, IAsyn
     /// </summary>
     public AdjustableTimeProvider SecurityStampClock { get; } = new();
 
+    /// <summary>AB#8341: the source tenant grant policy of this host; tests permit the pairs they arrange.</summary>
+    public Helpers.TestSourceTenantGrantPolicy SourceTenantGrantPolicy { get; } = new();
+
     protected override void ConfigureWebHost(IWebHostBuilder builder)
     {
         Console.Error.WriteLine("[WebFactory] ConfigureWebHost called");
@@ -421,6 +424,12 @@ public class CustomWebApplicationFactory : WebApplicationFactory<Program>, IAsyn
             {
                 services.Remove(descriptor);
             }
+
+            // AB#8341: tests permit the sibling pairs they arrange; every other pair keeps the shipped default (deny).
+            services.RemoveAll<IdentityServerPersistence.Services.SourceTenantGrants.ISourceTenantGrantPolicy>();
+            services.AddSingleton(SourceTenantGrantPolicy);
+            services.AddSingleton<IdentityServerPersistence.Services.SourceTenantGrants.ISourceTenantGrantPolicy>(
+                SourceTenantGrantPolicy);
 
             // AB#8337: ASP.NET Core's RateLimitingMiddleware never disposes its limiter, whose heartbeat timer then roots
             // this host (and the fixtures of the test that started it) for the rest of the process. Registered last, so it
