@@ -31,6 +31,8 @@
 
         <!-- TestContainers for MongoDB -->
         <PackageReference Include="Testcontainers.MongoDb" Version="4.14.0" />
+        <!-- AB#6910: two replicas of the real CreateIdentityData consumer registration on a private RabbitMQ. -->
+        <PackageReference Include="Testcontainers.RabbitMq" Version="4.14.0" />
 
         <!-- Logging for xUnit -->
         <PackageReference Include="MartinCostello.Logging.XUnit.v3" Version="0.7.1" />
