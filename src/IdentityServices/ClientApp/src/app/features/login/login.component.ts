@@ -9,6 +9,12 @@ import { ExternalProviderButtonComponent } from '../../shared/components/externa
 import { AuthApiService } from '../../core/services/auth-api.service';
 import { LoginContext, LoginRequest, ExternalProvider } from '../../core/models/login.models';
 
+/**
+ * Problem code of the 403 the source tenant's cross-tenant-token endpoint answers when the tenant registry does not
+ * confirm it as an ancestor of this tenant (AB#8339 Enforce, AB#8367). Signing in there again cannot change that.
+ */
+export const CROSS_TENANT_SOURCE_NOT_ANCESTOR = 'CrossTenantSourceNotAncestor';
+
 @Component({
   selector: 'app-login',
   standalone: true,
@@ -227,8 +233,11 @@ export class LoginComponent implements OnInit {
       next: (tokenResult) => this.redeemCrossTenantToken(tokenResult.token, () => {
         this.loading = false;
       }),
-      error: () => {
+      error: (error) => {
         this.loading = false;
+        if (this.isRefusedByTenantRegistry(error)) {
+          this.errorMessage = this.notAllowedMessage(parentTenantId);
+        }
       }
     });
   }
@@ -254,8 +263,15 @@ export class LoginComponent implements OnInit {
           this.errorMessage = message;
         });
       },
-      error: () => {
+      error: (error) => {
         this.submitting = false;
+
+        // AB#8367: the parent is no ancestor of this tenant in the tenant registry. That is final — show the reason
+        // now instead of sending the user through the parent's login first.
+        if (this.isRefusedByTenantRegistry(error)) {
+          this.errorMessage = this.notAllowedMessage(parentTenantId);
+          return;
+        }
 
         // No usable session in the parent tenant → authenticate there once, then come back and
         // complete the exchange. Only ever once: if we have already been bounced, fall back to
@@ -273,6 +289,19 @@ export class LoginComponent implements OnInit {
           + `?returnUrl=${encodeURIComponent(childReturnUrl)}`;
       }
     });
+  }
+
+  /**
+   * AB#8367: a 403 with the registry problem code. Any other refusal (401 no session, the plain 403 of a missing second
+   * factor) still sends the user to the parent's login, where it can be resolved.
+   */
+  private isRefusedByTenantRegistry(error: unknown): boolean {
+    const response = error as { status?: number; error?: { code?: unknown } } | null;
+    return response?.status === 403 && response.error?.code === CROSS_TENANT_SOURCE_NOT_ANCESTOR;
+  }
+
+  private notAllowedMessage(parentTenantId: string): string {
+    return this.translate.instant('LOGIN.ERROR_CROSS_TENANT_NOT_ALLOWED', { tenant: parentTenantId });
   }
 
   /** Step 2 of the hand-off: redeem the parent's token for a session in this tenant. */

@@ -673,6 +673,16 @@ new tenants):
 
 The registry confirms; it does not widen: a registry ancestor the target has no provider for is still no source.
 
+**Login page (AB#8367).** Under `Enforce`, `GET {tenant}/api/auth/login-context` offers only the OctoTenant providers
+whose parent is a registry ancestor (`IOctoTenantLoginProviders`, same guard, one registry read per page); a "Login via
+<sibling>" button would only lead into a refused switch. Under `Warn` every enabled provider is offered and the guard
+logs the non-ancestor ones (operation `login page provider list`). When `POST {source}/api/auth/cross-tenant-token`
+refuses because the registry does not confirm the source, it answers `403 problem+json` with code
+`CrossTenantSourceNotAncestor`; the login page shows the reason at once ("This tenant does not accept sign-in from
+<source>", `LOGIN.ERROR_CROSS_TENANT_NOT_ALLOWED`) instead of sending the user through the source tenant's login. Every
+other refusal keeps the plain `403` (e.g. a missing second factor, AB#7804), and `401` (no session in the source) still
+sends the user to the source tenant's login once.
+
 **Staged by `IdentityApiAuthorization:CrossTenantAncestry`** (env `OCTO_IDENTITYAPIAUTHORIZATION__CROSSTENANTANCESTRY`,
 Helm `services.identity.crossTenantAncestry`):
 

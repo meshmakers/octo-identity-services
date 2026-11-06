@@ -86,6 +86,8 @@ public static class RuntimeEngineBuilderExtensions
         builder.Services.AddOptions<CrossTenantAncestryOptions>().Configure<IServiceProvider>((options, sp) =>
             sp.GetService<IConfiguration>()?.GetSection(CrossTenantAncestryOptions.SectionName).Bind(options));
         builder.Services.AddScoped<ICrossTenantAncestryGuard, CrossTenantAncestryGuard>();
+        // AB#8367: the login page offers only the OctoTenant providers the ancestry check lets through.
+        builder.Services.AddScoped<IOctoTenantLoginProviders, OctoTenantLoginProviders>();
         builder.Services.AddScoped<ICrossTenantAuthenticationService, CrossTenantAuthenticationService>();
         // AB#7804: verifies the second factor of a cross-tenant user against the SOURCE tenant (lockout included).
         builder.Services.AddScoped<ICrossTenantSecondFactorVerifier, CrossTenantSecondFactorVerifier>();

@@ -7,6 +7,12 @@ Notable changes of the OctoMesh identity services. The CK model `System.Identity
 
 ### Fixed
 
+- **The login page no longer offers parent tenants the tenant registry does not back, and names a refused tenant switch
+  (AB#8367).** Under `IdentityApiAuthorization:CrossTenantAncestry=Enforce` the login page lists only OctoTenant
+  identity providers whose parent is a registry ancestor (under `Warn` all, with the AB#8339 warning).
+  `POST auth/cross-tenant-token` answers a registry refusal with `403 problem+json`, code
+  `CrossTenantSourceNotAncestor`, and the login page shows "This tenant does not accept sign-in from <source>" at once
+  instead of a generic error after a detour through the source tenant's login. See `docs/authentication.md`.
 - **The tenant registry, not a tenant's own identity providers, decides cross-tenant ancestry (AB#8339, security).**
   A tenant administrator could point an OctoTenant identity provider — or an admin-provisioning mapping, which creates
   one — at any tenant of the cluster and so read that tenant's user directory (`adminProvisioning/{target}/sourceUsers`)

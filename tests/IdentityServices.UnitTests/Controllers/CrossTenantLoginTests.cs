@@ -37,6 +37,7 @@ public class CrossTenantLoginTests
     private readonly IOctoIdentityProviderStore _identityProviderStore;
     private readonly ICrossTenantUserProvisioningService _crossTenantUserProvisioningService;
     private readonly ILoginGroupAssignmentService _loginGroupAssignmentService;
+    private readonly ICrossTenantAncestryGuard _ancestryGuard = Substitute.For<ICrossTenantAncestryGuard>();
     private readonly AuthApiController _sut;
 
     public CrossTenantLoginTests()
@@ -107,6 +108,8 @@ public class CrossTenantLoginTests
 
             new Meshmakers.Octo.Backend.IdentityServices.Services.SignInRateLimiter(
                 Options.Create(new IdentityServerPersistence.Configuration.Options.OctoIdentityServicesOptions())),
+            Substitute.For<IOctoTenantLoginProviders>(),
+            _ancestryGuard,
             logger);
     }
 
@@ -192,6 +195,51 @@ public class CrossTenantLoginTests
             new CrossTenantTokenRequestDto { TargetTenantId = "meshtest" });
 
         // Assert
+        result.Result.Should().BeOfType<ForbidResult>();
+    }
+
+    /// <summary>
+    ///     AB#8367: under CrossTenantAncestry=Enforce a source the tenant registry does not confirm as ancestor gets a 403
+    ///     problem with a stable code, so the SPA shows the reason instead of sending the user to the source's login.
+    /// </summary>
+    [Fact]
+    public async Task GetCrossTenantToken_Enforce_SourceNotRegistryAncestor_Returns403ProblemWithCode()
+    {
+        var userId = Guid.NewGuid().ToString("N");
+        SetupControllerContext("ec-apphost", CreateAuthenticatedUser(userId, "admin"));
+        _crossTenantAuthService.ValidateCrossTenantAccessAsync("mrotest", "ec-apphost", userId)
+            .Returns((CrossTenantAuthResult?)null);
+        _ancestryGuard.Mode.Returns(CrossTenantAncestryMode.Enforce);
+        _ancestryGuard.GetRegistryAncestorsAsync("mrotest").Returns(new[] { "octosystem" });
+
+        var result = await _sut.GetCrossTenantToken(new CrossTenantTokenRequestDto { TargetTenantId = "mrotest" });
+
+        var problem = result.Result.Should().BeOfType<ObjectResult>().Subject;
+        problem.StatusCode.Should().Be(StatusCodes.Status403Forbidden);
+        problem.Value.Should().BeOfType<ProblemDetails>().Which.Extensions["code"].Should()
+            .Be(Meshmakers.Octo.Backend.IdentityServices.TenantApi.v1.Controllers.CrossTenantAncestryProblems
+                .SourceTenantNotAncestorCode);
+    }
+
+    /// <summary>
+    ///     AB#8367: a refusal for any other reason (unknown or locked user, provider missing) under Enforce stays the plain
+    ///     403, and so does every refusal under Warn — the registry did not refuse.
+    /// </summary>
+    [Theory]
+    [InlineData(CrossTenantAncestryMode.Enforce, "OctoSystem")]
+    [InlineData(CrossTenantAncestryMode.Warn, "somewhere-else")]
+    public async Task GetCrossTenantToken_RefusedButNotByTheRegistry_ReturnsPlainForbid(CrossTenantAncestryMode mode,
+        string registryParent)
+    {
+        var userId = Guid.NewGuid().ToString("N");
+        SetupControllerContext("OctoSystem", CreateAuthenticatedUser(userId, "admin"));
+        _crossTenantAuthService.ValidateCrossTenantAccessAsync("meshtest", "OctoSystem", userId)
+            .Returns((CrossTenantAuthResult?)null);
+        _ancestryGuard.Mode.Returns(mode);
+        _ancestryGuard.GetRegistryAncestorsAsync("meshtest").Returns(new[] { registryParent });
+
+        var result = await _sut.GetCrossTenantToken(new CrossTenantTokenRequestDto { TargetTenantId = "meshtest" });
+
         result.Result.Should().BeOfType<ForbidResult>();
     }
 

@@ -10,6 +10,7 @@ using Meshmakers.Octo.Backend.Authentication.Services;
 using Meshmakers.Octo.Backend.IdentityServices.OpenIddict;
 using Meshmakers.Octo.Backend.IdentityServices.OpenIddict.Interaction;
 using Meshmakers.Octo.Backend.IdentityServices.Services;
+using Meshmakers.Octo.Backend.IdentityServices.TenantApi.v1.Controllers;
 using Meshmakers.Octo.ConstructionKit.Contracts;
 using Meshmakers.Octo.Runtime.Contracts.MongoDb.Configuration;
 using Microsoft.AspNetCore.Authentication;
@@ -53,6 +54,8 @@ public class AuthApiController(
     IUserCredentialChangeService userCredentialChangeService,
     ICrossTenantChallengeReplayGuard crossTenantChallengeReplayGuard,
     ISignInRateLimiter signInRateLimiter,
+    IOctoTenantLoginProviders octoTenantLoginProviders,
+    ICrossTenantAncestryGuard ancestryGuard,
     ILogger<AuthApiController> logger)
     : ControllerBase
 {
@@ -143,20 +146,18 @@ public class AuthApiController(
             });
         }
 
-        // Add parent tenant identity providers (OctoTenantIdentityProvider)
-        var allIdentityProviders = await identityProviderStore.GetAllAsync();
-        foreach (var idp in allIdentityProviders.OfType<RtOctoTenantIdentityProvider>())
+        // Add parent tenant identity providers (OctoTenantIdentityProvider). AB#8367: under
+        // CrossTenantAncestry=Enforce only those whose parent is a registry ancestor — the switch through any other one
+        // is always refused, so offering it only leads the user into an error.
+        foreach (var idp in await octoTenantLoginProviders.GetOfferedAsync())
         {
-            if (idp.IsEnabled && !string.IsNullOrEmpty(idp.ParentTenantId))
+            providers.Add(new ExternalProviderDto
             {
-                providers.Add(new ExternalProviderDto
-                {
-                    Scheme = $"octo-tenant-{idp.ParentTenantId}",
-                    DisplayName = idp.DisplayName ?? $"Login via {idp.ParentTenantId}",
-                    IsLdap = false,
-                    IsParentTenant = true
-                });
-            }
+                Scheme = $"octo-tenant-{idp.ParentTenantId}",
+                DisplayName = idp.DisplayName ?? $"Login via {idp.ParentTenantId}",
+                IsLdap = false,
+                IsParentTenant = true
+            });
         }
 
         var allowLocal = true;
@@ -1475,6 +1476,13 @@ public class AuthApiController(
 
         if (crossTenantResult == null)
         {
+            // AB#8367: a refusal by the tenant registry is final — signing in to this tenant again cannot change it. The
+            // problem code tells the SPA to show the reason at once instead of sending the user to this tenant's login.
+            if (await IsRefusedByTenantRegistryAsync(request.TargetTenantId, currentTenantId))
+            {
+                return CrossTenantAncestryProblems.SourceTenantNotAncestor(request.TargetTenantId, currentTenantId);
+            }
+
             return Forbid();
         }
 
@@ -1503,6 +1511,16 @@ public class AuthApiController(
 
         return new CrossTenantTokenResultDto { Token = token };
     }
+
+    /// <summary>
+    /// AB#8367: whether the tenant switch from <paramref name="sourceTenantId" /> into <paramref name="targetTenantId" /> is
+    /// refused because the tenant registry does not confirm the source as an ancestor of the target (only under
+    /// <c>CrossTenantAncestry=Enforce</c>, AB#8339). The denial itself is already logged by the ancestry check.
+    /// </summary>
+    private async Task<bool> IsRefusedByTenantRegistryAsync(string targetTenantId, string sourceTenantId)
+        => ancestryGuard.Mode == CrossTenantAncestryMode.Enforce &&
+           !(await ancestryGuard.GetRegistryAncestorsAsync(targetTenantId))
+               .Contains(sourceTenantId, StringComparer.OrdinalIgnoreCase);
 
     /// <summary>
     /// Exchanges a cross-tenant token for a session in the current (child) tenant.
