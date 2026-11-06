@@ -7,10 +7,15 @@
 # SecretManagementRoleEnforcement=Enforce the identity handlers still refuse TenantManagement/UserManagement-only callers.
 # NEXT MAJOR: remove TenantManagement and UserManagement from both role lists (a role removal is a Major by row M12) with the
 # next System.Identity major that happens for another reason - no own major for it (Odin, 2026-11-05).
-# The two compatibility.acknowledge entries were valid for the one release that published 3.1.0 and were removed right
-# after it (AB#8095: against the published 3.1.0 baseline they match no change, OCTO-CK204). Removing them changes no
-# structure, so the model stays 3.1.0. No type, attribute, record, id or default changes; no data migration; ranges
-# [3.0.0,4.0) stay satisfied. Service-managed: ships with the identity release, no catalog import, no FixAll (AB#7998).
+# The two compatibility.acknowledge entries were valid for the one release that published 3.1.0 (OCTO-CK204 afterwards).
+# No type, attribute, record, id or default changes; no data migration; ranges [3.0.0,4.0) stay satisfied.
+# Service-managed: ships with the identity release, no catalog import, no FixAll (AB#7998).
+#
+# 3.1.1 (AB#8095) is a pure patch: it only drops those two acknowledgements. The compiled model carries
+# `compatibility`, so the content differs from the published 3.1.0 and the publish gate refuses to publish it again as
+# 3.1.0 (OCTO-CK205, published versions are immutable). The structure is identical to 3.1.0 (empty diff, a bump without
+# structural change), so 3.1.1 needs and carries no acknowledgement: both the compile gate and the publish gate judge it
+# against the published 3.1.0, where an entry would be stale (OCTO-CK204).
 #
 # 3.0.1 (AB#8157) adds the migration entries from every 2.x minor (2.9.0 - 2.30.0) to 3.0.1: 3.0.0 shipped without them and the engine
 # refused every tenant upgrade across the major ("No migration path found", CkMigrationMajorVersionGuard). The model itself is unchanged
@@ -126,7 +131,7 @@
 # concept AB#5528 in octo-construction-kit-engine). String -> Secret is Minor
 # (CkSemVerClassifier): stored clear-text values stay readable as legacy values
 # until the encrypt sweep has run. Secret requires System >= 2.5 (decision 12).
-modelId: System.Identity-3.1.0
+modelId: System.Identity-3.1.1
 ckLanguage: 2
 dependencies:
   - System-[2.5,3.0)
