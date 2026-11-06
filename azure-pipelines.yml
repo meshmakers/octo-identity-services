@@ -180,6 +180,10 @@ stages:
           - task: DotNetCoreCLI@2
             condition: and(succeeded(), ne(variables['CiGuardEnded'], 'true'))
             retryCountOnTaskFailure: 2
+            # AB#8334: normal runtime of the identity suite is ~6 min. A test host that hangs (heap cap
+            # reached in the 12 Gi agent pod, GC thrash) must not hold the agent for the 90 minutes of
+            # the job timeout; the always() cleanup step below then reaps the leaked Mongo container.
+            timeoutInMinutes: 25
             displayName: 'Test'
             # AB#5160:
             #   --no-build --no-restore: the 'Build' task above already builds the WHOLE solution
@@ -200,6 +204,28 @@ stages:
               DOCKER_HOST: unix:///var/run/docker.sock
               TESTCONTAINERS_RYUK_DISABLED: 'true'
               TESTCONTAINERS_HOST_OVERRIDE: '172.17.0.1'
+          # AB#8334: Ryuk is disabled above, so nothing reaps the shared Mongo Testcontainer when the
+          # test host dies before the assembly fixture disposes it (blame-hang kill, step timeout,
+          # cancel, and every retry of the Test step above starts a fresh one). The DinD sidecar's
+          # nested dockerd puts those containers in the node's root cgroup, outside the pod limits,
+          # and an unlimited mongod grew to ~11 GiB each: nine leftovers held ~100 GiB of the 125 GiB
+          # node srv-infra-01 and starved the other builds ("Free memory is lower than 5%", random
+          # integration test timeouts). One agent runs one job, so every Testcontainers container in
+          # this daemon belongs to this job; -v also removes the anonymous data volumes.
+          - script: |
+              IDS=$(docker ps -aq --filter "label=org.testcontainers=true")
+              if [ -n "$IDS" ]; then
+                echo "Removing Testcontainers left behind by the test step:"
+                docker ps -a --filter "label=org.testcontainers=true" --format '{{.Names}} ({{.Status}})'
+                docker rm -fv $IDS || true
+              else
+                echo "No Testcontainers left behind."
+              fi
+            displayName: 'Remove Testcontainers left behind by the test step'
+            condition: always()
+            continueOnError: true
+            env:
+              DOCKER_HOST: unix:///var/run/docker.sock
           - template: templates/steps/validate-and-publish-ck-versions.yml@pipelineTemplates
             parameters:
               constructionKitPaths:
