@@ -237,8 +237,9 @@ try
             c.AddBroadcastEventConsumer<IdentityCorsClientsUpdateConsumer, CorsClientsUpdate>();
             c.AddBroadcastEventConsumer<IdentityTenantManagementConsumer, PreDeleteTenant>();
 
-            c.AddCommandConsumer<CreateIdentityDataCommandRequestConsumer, CreateIdentityDataCommandRequest>(
-                QueueNames.CreateIdentityDataCommand);
+            // AB#6910: shared over all replicas (each command processed once); see IdentityCommandConsumers for
+            // why the consumer is safe under competing consumers and why MigratesLegacyCommand is set.
+            c.AddIdentityCommandConsumers();
         });
 
     // After AddOctoIdentityPersistence: replaces the tenant resolver that AddOctoServiceInfrastructure registers.

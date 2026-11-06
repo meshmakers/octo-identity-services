@@ -496,6 +496,34 @@ access token as `subject_token`; the issued token runs on the **user's** `sub` b
   is created by the Communication Controller over the bus; see "Service-Account Clients over the
   Distribution Event Hub" below (AB#5027).
 
+### Command consumers run on every replica (AB#6910)
+
+`CreateIdentityData` (`CreateIdentityDataCommandRequestConsumer`, queue `octo::identity::create-identity-data`) is
+registered **shared** (competing consumers) in `Consumers/IdentityCommandConsumers.cs`, called from `Program.cs`:
+with two or more replicas every replica consumes it and each command is processed **exactly once** by one of them.
+Before AB#6910 it was the classic exclusive consumer: only one replica consumed, the others waited, and a hung owner
+(prod-1 2026-10-18/19, NotReady node) blocked identity provisioning.
+
+- `CommandConsumerOptions { MigratesLegacyCommand = true }` is **required**: all senders (asset repository, bot,
+  communication controller, AI, MCP, report service; `AddCommandClient`) still send to the classic address. The
+  consumer uses the queue `…::shared` and serves the classic address only while no old exclusive replica is alive, so a
+  rolling update (old and new build side by side) starts without errors and loses or duplicates nothing. Plain shared
+  options without the flag would receive nothing from these senders. Rollback: stop the new replicas first, then start
+  the old build (event hub `docs/DEVELOPER.md`, "Migrating exclusive command queues").
+- Safe under competing consumers: no state between messages, one MongoDB transaction per message, existing clients
+  replaced with the version read in the transaction (AB#8054, a conflict is retried). The exclusive endpoint had no
+  concurrency limit, so one replica already ran these commands concurrently.
+- The AB#6909 deprecation warning ("classic EXCLUSIVE topology") is no longer logged at start; a new command consumer is
+  added to `IdentityCommandConsumers` with the shared options and a comment why it is safe.
+- The CK method handlers (`IdentityMethodHost`) are unaffected: they already use the shared per-method queues of
+  octo-common-services.
+- Tests: `IdentityServices.IntegrationTests/Consumers/IdentityCommandConsumerReplicaTests` (Docker: MongoDB + RabbitMQ
+  Testcontainers): two replicas with the production registration, 16 commands from a classic sender, each processed
+  once, both replicas consume, each client exists once; no deprecation warning at start; rolling update old exclusive
+  + new shared replica (old keeps the traffic, after it stops the new replicas take over, nothing lost or duplicated).
+- Operations: queues `*::shared` and exchanges `*::send` are new names; broker policies or monitoring matching command
+  queue names must include them.
+
 ### Service-Account Clients over the Distribution Event Hub (AB#5027)
 
 The Communication Controller provisions one `client_credentials` service account per mesh adapter, so
