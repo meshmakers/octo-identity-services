@@ -180,6 +180,10 @@ stages:
           - task: DotNetCoreCLI@2
             condition: and(succeeded(), ne(variables['CiGuardEnded'], 'true'))
             retryCountOnTaskFailure: 2
+            # AB#8334: normal runtime of the identity suite is ~6 min. A test host that hangs (heap cap
+            # reached in the 12 Gi agent pod, GC thrash) must not hold the agent for the 90 minutes of
+            # the job timeout; the always() cleanup step below then reaps the leaked Mongo container.
+            timeoutInMinutes: 25
             displayName: 'Test'
             # AB#5160:
             #   --no-build --no-restore: the 'Build' task above already builds the WHOLE solution
