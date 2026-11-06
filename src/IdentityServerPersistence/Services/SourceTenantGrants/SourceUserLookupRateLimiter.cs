@@ -55,7 +55,7 @@ public sealed class SourceUserLookupRateLimiter(IOptions<OctoIdentityServicesOpt
 
             if (!_log.TryGetValue(key, out var stamps))
             {
-                stamps = new Queue<DateTimeOffset>(limit);
+                stamps = new Queue<DateTimeOffset>();
                 _log[key] = stamps;
             }
 
