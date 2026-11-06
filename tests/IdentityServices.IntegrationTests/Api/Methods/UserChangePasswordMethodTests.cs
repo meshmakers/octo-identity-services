@@ -20,7 +20,7 @@ namespace IdentityServices.IntegrationTests.Api.Methods;
 ///     identity host with <c>Methods:Identity:EnablePasswordMethods=true</c>; the handler runs in a fresh DI scope without an
 ///     HTTP request, as on the bus.
 /// </summary>
-public class UserChangePasswordMethodTests : IntegrationTestBase
+public class UserChangePasswordMethodTests : IntegrationTestBase, IAsyncDisposable
 {
     private const string OldPassword = "Test123!";
     private const string NewPassword = "Str0ng!Passw0rd";
@@ -46,6 +46,16 @@ public class UserChangePasswordMethodTests : IntegrationTestBase
                 }
             });
         });
+    }
+
+    /// <summary>
+    ///     Disposes the derived host of this test (AB#8337): otherwise every test of the class leaves a running host behind
+    ///     until the class fixture ends.
+    /// </summary>
+    public async ValueTask DisposeAsync()
+    {
+        await _enabled.DisposeAsync();
+        GC.SuppressFinalize(this);
     }
 
     [Fact]

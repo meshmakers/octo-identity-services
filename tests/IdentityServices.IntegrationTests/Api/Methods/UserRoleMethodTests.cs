@@ -27,7 +27,7 @@ namespace IdentityServices.IntegrationTests.Api.Methods;
 ///     handlers run in a fresh DI scope without an HTTP request, as on the bus. Each refusal of the REST endpoints
 ///     (<c>UsersController</c>, see <c>UserRoleMethodParityTests</c> for the side by side table) has a test here.
 /// </summary>
-public class UserRoleMethodTests : IntegrationTestBase
+public class UserRoleMethodTests : IntegrationTestBase, IAsyncDisposable
 {
     private const string UserManagement = "UserManagement";
 
@@ -54,6 +54,16 @@ public class UserRoleMethodTests : IntegrationTestBase
         {
             services.AddSingleton(events);
         }));
+    }
+
+    /// <summary>
+    ///     Disposes the derived host of this test (AB#8337): otherwise every test of the class leaves a running host behind
+    ///     until the class fixture ends.
+    /// </summary>
+    public async ValueTask DisposeAsync()
+    {
+        await _host.DisposeAsync();
+        GC.SuppressFinalize(this);
     }
 
     #region Hosting
