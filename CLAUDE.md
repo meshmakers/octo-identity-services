@@ -138,8 +138,24 @@ On the Linux CI agents the inotify instance limit (128) was reached across the s
 (`The configured user limit (128) on the number of inotify instances has been reached`). The static constructor of
 `CustomWebApplicationFactory` therefore sets `DOTNET_hostBuilder__reloadConfigOnChange=false` for the test process (tests never
 change configuration files at run time); `TestHostConfigurationTests` pins it. Dispose derived factories a test creates
-(`WithWebHostBuilder`) at the end of the test (`GroupMethodTestBase`, `ClientMirrorReconciliationTests`); otherwise they live
-until the class fixture ends.
+(`WithWebHostBuilder`) at the end of the test (`GroupMethodTestBase`, `ClientMirrorReconciliationTests`, `UserRoleMethodTests`,
+`UserChangePasswordMethodTests`); otherwise they live until the class fixture ends.
+
+**Test host memory: every in-process host must be collectable (AB#8337).** ASP.NET Core's `RateLimitingMiddleware`
+(`app.UseRateLimiter()`, policies `tenant-discovery` and `dcr`) never disposes its `DefaultPartitionedRateLimiter`, whose 100 ms
+heartbeat timer is a GC root for the whole request pipeline and the host's services, and whose captured `ExecutionContext` holds
+xUnit's `TestContext` and with it the class fixtures. In production that is one pipeline per process; the suite builds ~300 hosts
+and none was ever collected: the live heap after a full GC grew monotonically to **8.6 GB** (dump: 295 live meter providers,
+3.6 GB OpenTelemetry `MetricPoint[]` alone), which hit the 9 GiB GC heap hard limit of a 12 Gi CI agent (OutOfMemoryException in
+random tests, builds 65745, 65817). `CustomWebApplicationFactory` therefore registers `Infrastructure/RateLimiterReleaser` (hosted
+service, last registration, inherited by every `WithWebHostBuilder` derivative): when the host stops it finds the middleware's
+limiters by reflection over the built pipeline and disposes them. Measured locally (Mac mini, `GC.GetTotalMemory(true)` every 15 s,
+engine-mongodb main incl. AB#8281): live heap peak **8.6 GB → 3.3-3.5 GB**, suite duration unchanged (~9:40-10:00 min).
+`RateLimiterReleaserTests` fails when a framework update changes the internal shape the walk relies on — fix the walk then, never
+delete the test. Rules: a `StopAsync` of a test-only hosted service must never throw (it aborts the factory's dispose and leaks the
+host); a new background timer or long-running loop in startup code needs a dispose path, or every test host keeps it.
+The shared MongoDB container still grows to ~10 GiB per run (outside the test process; a `--wiredTigerCacheSizeGB 1` cap did not
+change that and a 4 GiB container limit got mongod OOM-killed), which is tracked with the CI agent memory work (AB#8336).
 
 Der NLog-Fall ist der einzige, den man **nicht** per-Fixture eindeutig machen kann: `Program.cs` lädt
 die globale Konfiguration am Entry-Point und räumt sie im `finally` mit `LogManager.Shutdown()` wieder

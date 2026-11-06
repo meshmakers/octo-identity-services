@@ -422,6 +422,11 @@ public class CustomWebApplicationFactory : WebApplicationFactory<Program>, IAsyn
                 services.Remove(descriptor);
             }
 
+            // AB#8337: ASP.NET Core's RateLimitingMiddleware never disposes its limiter, whose heartbeat timer then roots
+            // this host (and the fixtures of the test that started it) for the rest of the process. Registered last, so it
+            // stops before the server; derived factories (WithWebHostBuilder) inherit it.
+            services.AddHostedService<RateLimiterReleaser>();
+
             Console.Error.WriteLine("[WebFactory] ConfigureTestServices completed");
             Console.Error.Flush();
         });
