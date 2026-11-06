@@ -22,6 +22,13 @@ public interface ITenantRegistry
     ///     lookup too.
     /// </summary>
     Task<ITenantRepository?> TryGetRepositoryAsync(string tenantId);
+
+    /// <summary>
+    ///     The registry entry of a tenant — or the system tenant itself, without parent — with the same miss refresh as
+    ///     <see cref="TryGetRepositoryAsync" />; <c>null</c> for a tenant id that is not in the registry. Used to walk a
+    ///     tenant's registry ancestors (AB#8339).
+    /// </summary>
+    Task<OctoTenant?> TryGetTenantAsync(string tenantId);
 }
 
 /// <inheritdoc />
@@ -63,6 +70,10 @@ public sealed class TenantRegistry(
         var tenant = await FindAsync(tenantId);
         return tenant == null ? null : systemContext.GetRegisteredTenantRepository(tenant);
     }
+
+    /// <inheritdoc />
+    public Task<OctoTenant?> TryGetTenantAsync(string tenantId)
+        => string.IsNullOrEmpty(tenantId) ? Task.FromResult<OctoTenant?>(null) : FindAsync(tenantId);
 
     private async Task<OctoTenant?> FindAsync(string tenantId)
     {

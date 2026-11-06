@@ -114,6 +114,10 @@ internal sealed class ScopedTenantApiHost : IAsyncDisposable
         // AB#8017: the controller resolves shadow-user callers to their home identity.
         services.AddScoped<IdentityServerPersistence.Services.ICrossTenantShadowUserChainResolver>(_ =>
             new IdentityServerPersistence.Services.CrossTenantShadowUserChainResolver(systemContext));
+        // AB#8339: the provisioning writes ask the ancestry guard; these tests pin the scope filter, not ancestry.
+        var ancestryGuard = Substitute.For<IdentityServerPersistence.Services.ICrossTenantAncestryGuard>();
+        ancestryGuard.IsTrustedAncestorAsync(Arg.Any<string>(), Arg.Any<string>(), Arg.Any<string>()).Returns(true);
+        services.AddSingleton(ancestryGuard);
         services.AddSingleton(Substitute.For<IdentityServerPersistence.SystemStores.IOctoClientStore>());
         services.AddSingleton(Substitute.For<IClientMirrorProvisioningService>());
 
