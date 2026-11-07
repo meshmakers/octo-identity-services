@@ -627,6 +627,27 @@ public class AdminProvisioningController(
         return roleIds.All(held.Contains);
     }
 
+    /// <summary>
+    /// The mapping's target-tenant group names for an audit event, read in a session of their own (outside the caller's
+    /// transaction). A read error yields none and never fails the request (AB#8437, like
+    /// <c>ExternalTenantUserMappingsController.GroupNamesForAuditAsync</c>).
+    /// </summary>
+    private async Task<IReadOnlyList<string>> GroupNamesForAuditAsync(ITenantRepository tenantRepository,
+        RtExternalTenantUserMapping mapping)
+    {
+        try
+        {
+            using var auditSession = await tenantRepository.GetSessionAsync();
+            return await GroupNamesOfMappingAsync(tenantRepository, auditSession, mapping);
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex, "Group names of mapping {MappingId} could not be read for the audit event (AB#8437)",
+                mapping.RtId);
+            return [];
+        }
+    }
+
     /// <summary>Names of the target-tenant groups the mapping is a member of (for audit events).</summary>
     private static async Task<IReadOnlyList<string>> GroupNamesOfMappingAsync(
         ITenantRepository tenantRepository, IOctoSession session, RtExternalTenantUserMapping mapping)
@@ -708,8 +729,9 @@ public class AdminProvisioningController(
             return NotFound($"Mapping '{mappingRtId}' not found in tenant '{targetTenantId}'.");
         }
 
-        // Group names before the removal: the mapping's GroupMember edges go with it (AB#8342 audit).
-        var groupNames = await GroupNamesOfMappingAsync(tenantRepository, session, existing);
+        // Group names before the removal: the mapping's GroupMember edges go with it (AB#8342 audit). Read in a session
+        // of their own and guarded: a failing read never breaks or aborts the deletion (AB#8437).
+        var groupNames = await GroupNamesForAuditAsync(tenantRepository, existing);
         await tenantRepository
             .DeleteOneRtEntityByRtIdAsync<RtExternalTenantUserMapping>(session, mappingRtId, DeleteOptions.Erase);
         await session.CommitTransactionAsync();
