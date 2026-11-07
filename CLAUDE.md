@@ -2267,7 +2267,8 @@ rtId is `null` for the static create). Creation, policy, lockout, session revoca
 - **Notification.** The method does not send the password-reset notification yet (AB#7775); the facade sends it after a success. When
   AB#7775 lands, remove that call: `UserPasswordRestMethodFacadeTests` counts exactly one notification per REST reset.
 - **REST-only field.** `RegisterUserDto.ResetPasswordOnLogin` has no method parameter; when true the facade sets it on the new user after the
-  method returned (the rtId is the bare result string).
+  method returned (the rtId is the bare result string). If the user is not found or that update fails, the endpoint answers `500`
+  (`ResetPasswordOnLoginNotSetMessage`), never `200` — the user then exists without the flag (`RestCreate_ResetPasswordOnLoginWriteFails_Is500_NotASilentSuccess`).
 - **Error bodies.** The envelope carries only rule codes; the facade rebuilds the REST `details` (code + description) of a policy violation or an
   invalid user name / e-mail from `UserManager.ErrorDescriber` and the password options, so `OperationFailedErrorDto` keeps its shape.
 
