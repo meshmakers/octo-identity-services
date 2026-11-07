@@ -434,8 +434,8 @@ counterpart of the browser tenant-switch, for the MCP server:
   so the only change for existing callers (octo-mcp-service `TenantTokenExchanger` treats any
   non-success as "denied"; Studio `switchTenantByExchange` is unused) is an early, clear refusal
   instead of a token that fails on the first call. A non-ancestor caller is still
-  `unauthorized_client`. Side effect kept from before: a refused exchange still leaves the shadow
-  user and an empty mapping in B; neither grants anything (`Exchange_RepeatedAfterEmptyMapping…`).
+  `unauthorized_client`. A refused exchange leaves nothing in B: no mapping since AB#7088, no shadow
+  user since AB#8304; an empty mapping that already exists grants nothing (`Exchange_RepeatedAfterEmptyMapping…`).
   Exchanged tokens never carry a refresh token. Tests: `TenantExchangeIntegrationTests`
   (`Exchange_AncestorUserWithoutProvisioning…`, `…ProvisionedOperator…`, `…DirectRoleGrant…`,
   `…NonAncestor…`).

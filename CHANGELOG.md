@@ -5,24 +5,6 @@ Notable changes of the OctoMesh identity services. The CK model `System.Identity
 
 ## Unreleased
 
-### Fixed
-
-- **An interactive cross-tenant login or a tenant switch no longer writes an `ExternalTenantUserMapping` (AB#8439).**
-  `AuthApiController.SignInCrossTenantUserAsync` (password login on the child tenant, `cross-tenant-login`, completion of
-  the cross-tenant 2FA challenge) and `tenant-switch` created a bare mapping (no roles, no group) together with a new
-  `xt_` shadow user, as the token exchange did until AB#7088. That mapping counted as explicit provisioning
-  (`IsExplicitlyProvisionedAsync`), so `AllowSelfRegistration=false` let the person in on every later login once the
-  shadow user was gone, and it kept the shadow user out of the AB#8305 cleanup. Now only an admin action (mapping API,
-  `ProvisionCurrentUser`, Add Cross-Tenant User) creates a mapping. The tenant switch also applies the self-registration
-  gate of the login before it creates a shadow user (it had none). Behaviour changes:
-  - admin-created mappings and existing shadow users work as before (roles, groups, explicit provisioning);
-  - a person who enters a child tenant only by self-registration (`AllowSelfRegistration=true`) gets the shadow user and
-    the first-login groups, but no mapping; the child tenant therefore no longer appears in that person's
-    `allowed_tenants` of the parent tenant (tenant picker, e-mail-first discovery) — a selection hint only, not an
-    authorization; signing in to the child tenant directly is unchanged;
-  - existing bare mappings stay until they are cleaned up (AB#8305).
-  Tests: `CrossTenantLoginMappingTests` (integration), `CrossTenantLoginTests` (unit).
-
 ### Changed
 
 - **REST role and merge endpoints run the `User` methods (AB#8412).** `PUT users/{userName}/roles`,
@@ -134,6 +116,22 @@ Notable changes of the OctoMesh identity services. The CK model `System.Identity
   change yet; the routes are implemented by AB#8341–AB#8345.
 
 ### Fixed
+
+- **An interactive cross-tenant login or a tenant switch no longer writes an `ExternalTenantUserMapping` (AB#8439).**
+  `AuthApiController.SignInCrossTenantUserAsync` (password login on the child tenant, `cross-tenant-login`, completion of
+  the cross-tenant 2FA challenge) and `tenant-switch` created a bare mapping (no roles, no group) together with a new
+  `xt_` shadow user, as the token exchange did until AB#7088. That mapping counted as explicit provisioning
+  (`IsExplicitlyProvisionedAsync`), so `AllowSelfRegistration=false` let the person in on every later login once the
+  shadow user was gone, and it kept the shadow user out of the AB#8305 cleanup. Now only an admin action (mapping API,
+  `ProvisionCurrentUser`, Add Cross-Tenant User) creates a mapping. The tenant switch also applies the self-registration
+  gate of the login before it creates a shadow user (it had none). Behaviour changes:
+  - admin-created mappings and existing shadow users work as before (roles, groups, explicit provisioning);
+  - a person who enters a child tenant only by self-registration (`AllowSelfRegistration=true`) gets the shadow user and
+    the first-login groups, but no mapping; the child tenant therefore no longer appears in that person's
+    `allowed_tenants` of the parent tenant (tenant picker, e-mail-first discovery) — a selection hint only, not an
+    authorization; signing in to the child tenant directly is unchanged;
+  - existing bare mappings stay until they are cleaned up (AB#8305).
+  Tests: `CrossTenantLoginMappingTests` (integration), `CrossTenantLoginTests` (unit).
 
 - **Grant audit events no longer reach a tenant that does not admit the target (AB#8436, security).** A mapping names its
   source tenant and user name as T's administrator sends them, so since AB#8342 an administrator of any tenant could write
