@@ -174,7 +174,7 @@ export class DeviceConfirmComponent implements OnInit {
   }
 
   private loadContext(): void {
-    this.consentApi.getDeviceAuthorizationContext(this.userCode).subscribe({
+    this.consentApi.getDeviceAuthorizationContext(this.userCode, this.tenantId).subscribe({
       next: (context) => {
         this.context = context;
         this.loading = false;
@@ -190,7 +190,7 @@ export class DeviceConfirmComponent implements OnInit {
             this.errorMessage = this.translate.instant('DEVICE.ERROR_SESSION_REJECTED');
             return;
           }
-          const tenantId = this.route.snapshot.params['tenantId'] || 'System';
+          const tenantId = this.tenantId;
           const returnUrl = `/${tenantId}/device/confirm?userCode=${encodeURIComponent(this.userCode)}`
             + `&${DeviceConfirmComponent.loginAttemptedParam}=1`;
           this.router.navigate(['/', tenantId, 'login'], {
@@ -220,7 +220,7 @@ export class DeviceConfirmComponent implements OnInit {
       userCode: this.userCode,
       scopesConsented,
       rememberConsent: false
-    }).subscribe({
+    }, this.tenantId).subscribe({
       next: (result) => {
         this.submitting = false;
         if (result?.success === true) {
@@ -245,7 +245,7 @@ export class DeviceConfirmComponent implements OnInit {
     this.submitting = true;
     this.errorMessage = undefined;
 
-    this.consentApi.denyDeviceAuthorization(this.userCode).subscribe({
+    this.consentApi.denyDeviceAuthorization(this.userCode, this.tenantId).subscribe({
       next: (result) => {
         this.submitting = false;
         // The server answers a deny with { success: false, error: 'access_denied' }; any other
@@ -298,7 +298,14 @@ export class DeviceConfirmComponent implements OnInit {
   }
 
   goBack(): void {
-    const tenantId = this.route.snapshot.params['tenantId'] || 'System';
-    this.router.navigate(['/', tenantId, 'device']);
+    this.router.navigate(['/', this.tenantId, 'device']);
+  }
+
+  /**
+   * The tenant of this page (/{tenantId}/device/confirm). It is sent to the verification endpoint as
+   * the tenant hint (AB#7891), so the code is checked in this tenant on whichever identity replica answers.
+   */
+  private get tenantId(): string {
+    return this.route.snapshot.params['tenantId'] || 'System';
   }
 }

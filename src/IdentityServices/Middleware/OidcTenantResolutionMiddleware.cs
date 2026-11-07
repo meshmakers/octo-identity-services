@@ -1,6 +1,7 @@
 using System.Collections.Concurrent;
 using System.Text;
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using System.Text.RegularExpressions;
 using IdentityServerPersistence.Services;
 using Meshmakers.Octo.Backend.IdentityServices.Services;
@@ -8,8 +9,10 @@ using Meshmakers.Octo.Runtime.Contracts.MongoDb;
 using Meshmakers.Octo.Runtime.Contracts.MongoDb.Configuration;
 using Meshmakers.Octo.Services.Infrastructure;
 using Microsoft.AspNetCore.Http.Extensions;
+using Microsoft.AspNetCore.Http.Features;
 using Microsoft.AspNetCore.WebUtilities;
 using Microsoft.Extensions.Options;
+using Microsoft.Extensions.Primitives;
 
 namespace Meshmakers.Octo.Backend.IdentityServices.Middleware;
 
@@ -26,8 +29,14 @@ namespace Meshmakers.Octo.Backend.IdentityServices.Middleware;
 ///   <item><c>/connect/authorize</c>: parses <c>acr_values=tenant:{tenantId}</c> from query string
 ///     and captures the authorization code from the 302 response for later tenant resolution</item>
 ///   <item><c>/connect/token</c>: reads the authorization code or refresh token from the form body
-///     and resolves the tenant from the token-to-tenant mapping; also captures new refresh tokens
+///     and resolves the tenant from the token-to-tenant mapping, or the tenant marker of a device code
+///     (stateless, AB#7891); also captures new refresh tokens
 ///     from the response for future exchanges</item>
+///   <item><c>/connect/deviceauthorization</c>: reads <c>acr_values=tenant:{tenantId}</c> from the form,
+///     marks the issued <c>device_code</c> with the tenant and points the verification URIs to the
+///     tenant's device page (AB#7891)</item>
+///   <item><c>/connect/deviceverification</c>: reads the tenant hint <c>acr_values=tenant:{tenantId}</c>
+///     the device page sends (AB#7891)</item>
 ///   <item><c>/connect/endsession</c>: decodes <c>id_token_hint</c> JWT payload to read <c>tenant_id</c>
 ///     claim; falls back to <c>acr_values</c></item>
 /// </list>
@@ -47,8 +56,14 @@ internal class OidcTenantResolutionMiddleware(
     /// from <c>/connect/authorize</c> responses (both 302 redirects and form_post HTML bodies);
     /// refresh tokens are captured from <c>/connect/token</c> JSON responses. Used by
     /// <c>/connect/token</c> to set the correct tenant context for user/client/resource lookups.
+    /// Device-flow codes are deliberately <b>not</b> held here (AB#7891): the device_code carries its
+    /// tenant (<see cref="DeviceCodeTenantMarker" />) and the verification page names its tenant, so the
+    /// device flow works on any replica and across restarts.
     /// </summary>
     private static readonly ConcurrentDictionary<string, (string TenantId, DateTime Expiry)> TokenToTenantMap = new();
+
+    /// <summary>Keys currently held in the in-process tenant map — for tests (AB#7891: no device entries).</summary>
+    internal static IReadOnlyCollection<string> MappedKeysSnapshot() => TokenToTenantMap.Keys.ToArray();
 
     private static readonly TimeSpan AuthCodeEntryLifetime = TimeSpan.FromMinutes(10);
     private static readonly TimeSpan RefreshTokenEntryLifetime = TimeSpan.FromDays(30);
@@ -89,7 +104,8 @@ internal class OidcTenantResolutionMiddleware(
             path.StartsWith("/connect/token", StringComparison.OrdinalIgnoreCase);
 
         // For /connect/deviceauthorization with a resolved tenant, wrap the response body
-        // to rewrite verification_uri and verification_uri_complete to the tenant-specific path.
+        // to rewrite verification_uri and verification_uri_complete to the tenant-specific path
+        // and to mark the device_code with the tenant (AB#7891, DeviceCodeTenantMarker).
         var isDeviceAuthEndpoint = path != null &&
             path.StartsWith("/connect/deviceauthorization", StringComparison.OrdinalIgnoreCase);
 
@@ -143,9 +159,7 @@ internal class OidcTenantResolutionMiddleware(
                     }
                     else if (isDeviceAuthEndpoint)
                     {
-                        CaptureDeviceCodeFromResponse(memoryStream, resolvedTenantId!);
-                        memoryStream.Position = 0;
-                        var rewritten = RewriteDeviceVerificationUrls(memoryStream, resolvedTenantId!);
+                        var rewritten = RewriteDeviceAuthorizationResponse(memoryStream, resolvedTenantId!);
                         if (rewritten != null)
                         {
                             context.Response.ContentLength = rewritten.Length;
@@ -289,11 +303,12 @@ internal class OidcTenantResolutionMiddleware(
         }
         else if (path.StartsWith("/connect/deviceverification", StringComparison.OrdinalIgnoreCase))
         {
-            // AB#4993: the device verification endpoint has no tenant route segment — resolve
-            // the tenant from the user_code → tenant mapping captured on the device
-            // authorization response, so the tenant-scoped session cookie and the per-tenant
-            // user/role stores are wired correctly.
-            tenantId = await ResolveTenantFromUserCodeAsync(context);
+            // AB#4993/AB#7891: the device verification endpoint has no tenant route segment. The
+            // Angular device page runs under /{tenantId}/device and names that tenant as
+            // acr_values=tenant:{tenantId} (query on GET, form on POST). OpenIddict then validates
+            // the user_code against that tenant's token store only — a code of another tenant is an
+            // unknown code there. No server-side state, so any replica can serve the request.
+            tenantId = await ResolveTenantForDeviceVerificationAsync(context);
         }
         else if (path.StartsWith("/connect/token", StringComparison.OrdinalIgnoreCase))
         {
@@ -364,24 +379,20 @@ internal class OidcTenantResolutionMiddleware(
     }
 
     /// <summary>
-    /// Resolves the tenant for a <c>/connect/token</c> request by reading the authorization code
-    /// or refresh token from the form body and looking up the captured tenant mapping.
+    /// Resolves the tenant for <c>/connect/deviceverification</c> from the tenant hint the device page
+    /// sends (<c>acr_values=tenant:{tenantId}</c>, query on GET, form body on POST; AB#7891). Without a
+    /// hint the request stays on the system tenant, which is right for system-tenant device logins.
     /// </summary>
-    /// <summary>
-    /// Resolves the tenant for <c>/connect/deviceverification</c> from the <c>user_code</c>
-    /// (query on GET, form body on POST) captured on the device authorization response (AB#4993).
-    /// </summary>
-    private async Task<string?> ResolveTenantFromUserCodeAsync(HttpContext context)
+    internal async Task<string?> ResolveTenantForDeviceVerificationAsync(HttpContext context)
     {
-        var userCode = context.Request.Query["user_code"].FirstOrDefault();
+        var tenantId = ExtractTenantFromAcrValues(context);
 
-        if (string.IsNullOrEmpty(userCode) && context.Request.HasFormContentType)
+        if (string.IsNullOrEmpty(tenantId) && context.Request.HasFormContentType)
         {
             context.Request.EnableBuffering();
             try
             {
-                var form = await context.Request.ReadFormAsync();
-                userCode = form["user_code"].FirstOrDefault();
+                tenantId = await ExtractTenantFromFormAcrValuesAsync(context);
             }
             finally
             {
@@ -389,19 +400,21 @@ internal class OidcTenantResolutionMiddleware(
             }
         }
 
-        if (!string.IsNullOrEmpty(userCode) &&
-            TokenToTenantMap.TryGetValue($"usercode:{userCode}", out var entry))
+        if (!string.IsNullOrEmpty(tenantId))
         {
-            logger.LogDebug("Resolved tenant '{TenantId}' from user code for /connect/deviceverification",
-                entry.TenantId);
-            return entry.TenantId;
+            logger.LogDebug("Resolved tenant '{TenantId}' from the tenant hint for /connect/deviceverification",
+                tenantId);
+            return tenantId;
         }
 
-        logger.LogWarning(
-            "No tenant mapping found for user code on /connect/deviceverification — falling back to system tenant");
+        logger.LogDebug("No tenant hint on /connect/deviceverification — using the system tenant");
         return null;
     }
 
+    /// <summary>
+    /// Resolves the tenant for a <c>/connect/token</c> request by reading the authorization code,
+    /// device code or refresh token from the form body.
+    /// </summary>
     internal async Task<string?> ResolveTenantFromTokenRequestAsync(HttpContext context)
     {
         context.Request.EnableBuffering();
@@ -427,16 +440,29 @@ internal class OidcTenantResolutionMiddleware(
             }
             else if (string.Equals(grantType, "urn:ietf:params:oauth:grant-type:device_code", StringComparison.Ordinal))
             {
-                var deviceCode = form["device_code"].FirstOrDefault();
-                if (deviceCode != null && TokenToTenantMap.TryGetValue($"device:{deviceCode}", out var entry))
+                // AB#7891: the tenant travels inside the device_code (DeviceCodeTenantMarker), so any
+                // replica — also one started after the device authorization — resolves it. The marker
+                // is removed before OpenIddict reads the form.
+                var markedDeviceCode = form["device_code"].FirstOrDefault();
+                if (DeviceCodeTenantMarker.TryDecode(markedDeviceCode, out var deviceTenantId, out var deviceCode))
                 {
+                    ReplaceFormValue(context, form, "device_code", deviceCode);
                     logger.LogDebug("Resolved tenant '{TenantId}' from device code for /connect/token",
-                        entry.TenantId);
-                    return entry.TenantId;
+                        deviceTenantId);
+                    return deviceTenantId;
                 }
 
-                logger.LogWarning(
-                    "No tenant mapping found for device code on /connect/token — user/client lookups will use system tenant");
+                // A client that names its tenant itself (acr_values) keeps working with an unmarked code.
+                var acrDeviceTenantId = ParseTenantFromAcrValues(form["acr_values"].ToString());
+                if (!string.IsNullOrEmpty(acrDeviceTenantId))
+                {
+                    logger.LogDebug("Resolved tenant '{TenantId}' from acr_values for device code on /connect/token",
+                        acrDeviceTenantId);
+                    return acrDeviceTenantId;
+                }
+
+                logger.LogDebug(
+                    "Device code on /connect/token carries no tenant marker — user/client lookups use the system tenant");
             }
             else if (string.Equals(grantType, "client_credentials", StringComparison.Ordinal))
             {
@@ -690,6 +716,30 @@ internal class OidcTenantResolutionMiddleware(
                 TokenToTenantMap.TryRemove(kvp.Key, out _);
             }
         }
+    }
+
+    /// <summary>
+    /// Replaces one form field of the current request for everything downstream (OpenIddict reads the
+    /// form through <see cref="IFormFeature" />). The raw body is re-encoded as well, so a reader of the
+    /// body sees the same values. Used to strip the tenant marker from the device code (AB#7891).
+    /// </summary>
+    internal static void ReplaceFormValue(HttpContext context, IFormCollection form, string key, string value)
+    {
+        var fields = new Dictionary<string, StringValues>(StringComparer.Ordinal);
+        foreach (var (fieldKey, fieldValue) in form)
+        {
+            fields[fieldKey] = fieldValue;
+        }
+
+        fields[key] = value;
+
+        var encoded = string.Join('&', fields.SelectMany(field => field.Value.Select(v =>
+            $"{Uri.EscapeDataString(field.Key)}={Uri.EscapeDataString(v ?? string.Empty)}")));
+        var bytes = Encoding.UTF8.GetBytes(encoded);
+
+        context.Request.Body = new MemoryStream(bytes);
+        context.Request.ContentLength = bytes.Length;
+        context.Features.Set<IFormFeature>(new FormFeature(new FormCollection(fields)));
     }
 
     private static async Task<string?> ExtractTenantFromFormAcrValuesAsync(HttpContext context)
@@ -958,55 +1008,55 @@ internal class OidcTenantResolutionMiddleware(
     }
 
     /// <summary>
-    /// Captures the device code from the device authorization JSON response and maps it to the tenant ID.
-    /// The device code is later used to resolve the tenant during the token exchange.
+    /// Writes the rewritten device authorization response without escaping URL characters
+    /// (<c>&amp;</c>, <c>+</c>) as <c>\uXXXX</c>, so the body stays byte-for-byte like OpenIddict's apart
+    /// from the changed values.
     /// </summary>
-    private void CaptureDeviceCodeFromResponse(MemoryStream responseBody, string tenantId)
+    private static readonly JsonSerializerOptions DeviceResponseJsonOptions = new()
     {
+        Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping
+    };
+
+    /// <summary>
+    /// Rewrites the device authorization JSON response for the resolved tenant: marks the
+    /// <c>device_code</c> with the tenant (AB#7891) and points <c>verification_uri</c> /
+    /// <c>verification_uri_complete</c> to the tenant's device page.
+    /// </summary>
+    internal byte[]? RewriteDeviceAuthorizationResponse(MemoryStream responseBody, string tenantId)
+    {
+        var json = Encoding.UTF8.GetString(responseBody.ToArray());
+        var rewrittenUrls = RewriteDeviceVerificationUrls(json, tenantId);
+        var withUrls = rewrittenUrls ?? json;
+
         try
         {
-            using var doc = JsonDocument.Parse(responseBody);
-            if (doc.RootElement.TryGetProperty("device_code", out var deviceCodeElement))
+            if (JsonNode.Parse(withUrls) is JsonObject body &&
+                body["device_code"] is JsonValue deviceCodeValue &&
+                deviceCodeValue.TryGetValue<string>(out var deviceCode) &&
+                !string.IsNullOrEmpty(deviceCode))
             {
-                var deviceCode = deviceCodeElement.GetString();
-                if (!string.IsNullOrEmpty(deviceCode))
-                {
-                    TokenToTenantMap[$"device:{deviceCode}"] =
-                        (tenantId, DateTime.UtcNow.Add(AuthCodeEntryLifetime));
-                    logger.LogDebug("Captured device code → tenant '{TenantId}' mapping", tenantId);
-                    CleanupExpiredEntries();
-                }
-            }
-
-            // AB#4993: the user code is submitted to /connect/deviceverification, which has no
-            // tenant route segment — capture user_code → tenant so the verification request can
-            // resolve the tenant (cookie scoping + per-tenant user/role stores).
-            if (doc.RootElement.TryGetProperty("user_code", out var userCodeElement))
-            {
-                var userCode = userCodeElement.GetString();
-                if (!string.IsNullOrEmpty(userCode))
-                {
-                    TokenToTenantMap[$"usercode:{userCode}"] =
-                        (tenantId, DateTime.UtcNow.Add(AuthCodeEntryLifetime));
-                    logger.LogDebug("Captured user code → tenant '{TenantId}' mapping", tenantId);
-                }
+                body["device_code"] = DeviceCodeTenantMarker.Encode(tenantId, deviceCode);
+                logger.LogDebug("Marked device code with tenant '{TenantId}'", tenantId);
+                return Encoding.UTF8.GetBytes(body.ToJsonString(DeviceResponseJsonOptions));
             }
         }
-        catch (Exception ex)
+        catch (JsonException ex)
         {
-            logger.LogWarning(ex, "Failed to capture device code from response");
+            logger.LogWarning(ex, "Failed to mark the device code with the tenant");
         }
+
+        return rewrittenUrls == null ? null : Encoding.UTF8.GetBytes(rewrittenUrls);
     }
 
     /// <summary>
     /// Rewrites <c>verification_uri</c> and <c>verification_uri_complete</c> in the device authorization
     /// JSON response to use the resolved tenant ID instead of the system tenant prefix.
+    /// Returns <c>null</c> when nothing had to change.
     /// </summary>
-    private byte[]? RewriteDeviceVerificationUrls(MemoryStream responseBody, string tenantId)
+    private string? RewriteDeviceVerificationUrls(string json, string tenantId)
     {
         try
         {
-            var json = Encoding.UTF8.GetString(responseBody.ToArray());
             var systemTenantId = octoSystemConfiguration.Value.SystemTenantId;
             var systemPath = $"/{systemTenantId}/device";
             var tenantPath = $"/{tenantId}/device";
@@ -1023,7 +1073,7 @@ internal class OidcTenantResolutionMiddleware(
                 logger.LogDebug(
                     "Rewrote device verification URLs from '{VerificationPath}' to '{TenantPath}'",
                     openIddictVerificationPath, tenantPath);
-                return Encoding.UTF8.GetBytes(rewrittenJson);
+                return rewrittenJson;
             }
 
             if (!json.Contains(systemPath, StringComparison.OrdinalIgnoreCase))
@@ -1035,7 +1085,7 @@ internal class OidcTenantResolutionMiddleware(
             logger.LogDebug(
                 "Rewrote device verification URLs from '{SystemPath}' to '{TenantPath}'",
                 systemPath, tenantPath);
-            return Encoding.UTF8.GetBytes(rewritten);
+            return rewritten;
         }
         catch (Exception ex)
         {

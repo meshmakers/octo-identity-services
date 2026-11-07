@@ -94,6 +94,7 @@ describe('DeviceConfirmComponent feedback after Allow / Deny (AB#7090)', () => {
       click(fixture, '.lcars-button-primary');
 
       expect(submit).toHaveBeenCalledTimes(1);
+      expect(submit.mock.calls[0][1]).toBe('meshtest'); // AB#7891: tenant hint of the page route
       expect(text(fixture)).toContain('authorized');
       expect(hasDialog(fixture)).toBe(false);
     });
@@ -182,6 +183,7 @@ describe('DeviceConfirmComponent feedback after Allow / Deny (AB#7090)', () => {
 
       click(fixture, '.lcars-button-error');
 
+      expect(deny).toHaveBeenCalledWith('ABCD-1234', 'meshtest'); // AB#7891: tenant hint of the page route
       expect(text(fixture)).toContain('denied by you');
       expect(hasDialog(fixture)).toBe(false);
     });

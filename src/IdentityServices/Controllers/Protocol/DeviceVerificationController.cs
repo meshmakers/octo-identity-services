@@ -23,14 +23,16 @@ namespace Meshmakers.Octo.Backend.IdentityServices.Controllers.Protocol;
 ///     device page (<c>/{tenantId}/device</c>) collects the user code and drives this endpoint via
 ///     XHR:
 ///     <list type="bullet">
-///         <item><c>GET ?user_code=…</c> — validates the code and returns the consent context
+///         <item><c>GET ?user_code=…&amp;acr_values=tenant:…</c> — validates the code and returns the consent context
 ///             (client, scopes) as JSON (same DTO the SPA consumed before).</item>
-///         <item><c>POST</c> (form: <c>user_code</c>, optional <c>deny</c>,
+///         <item><c>POST</c> (form: <c>user_code</c>, <c>acr_values</c>, optional <c>deny</c>,
 ///             <c>scopes_consented</c>, <c>remember_consent</c>) — completes or denies the
 ///             verification. The JSON result body is written by
 ///             <see cref="OctoDeviceVerificationResponseHandler" />.</item>
 ///     </list>
-///     The approving session's subject must exist in the tenant the device code was wired to; otherwise
+///     Every call names the page's tenant as <c>acr_values=tenant:{tenantId}</c>; OidcTenantResolutionMiddleware wires
+///     that tenant, so the user code is validated in its token store only and any identity replica can answer
+///     (AB#7891). The approving session's subject must exist in the tenant the device code was wired to; otherwise
 ///     the approval is refused with <c>access_denied</c> (AB#7884). The former cross-tenant provisioning
 ///     branch here was unreachable (the session cookie is scoped to that tenant) and was removed;
 ///     cross-tenant device logins use a child-tenant session or the token exchange.
