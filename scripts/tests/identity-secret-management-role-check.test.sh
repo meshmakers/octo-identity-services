@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Tests for scripts/identity-secret-management-role-check.sh (AB#8155). No cluster needed.
+# Tests for scripts/identity-secret-management-role-check.sh (AB#8155, AB#8431). No cluster needed.
 #   1. the write guard passes the shipped JavaScript and refuses each planted write-capable call -- and then never
 #      reaches kubectl;
 #   2. with a fake kubectl: output contract (TSV, exit codes 0/2/1), before/after snapshot comparison, and the MongoDB
@@ -26,8 +26,12 @@ copy_scripts() {
     cp "$SRC/$NAME.sh" "$SRC/$NAME.inventory.js" "$SRC/$NAME.snapshot.js" "$1/"
 }
 
-# Fake kubectl: get pods / get secret / exec. exec checks that the password arrives on stdin and in no argument, then
-# prints canned mongosh output chosen by FAKE_MODE (clean | findings | error | changed | incomplete).
+# Fake kubectl: get pods / get secret / exec. exec runs the command after "--" (the script's real in-pod runner) locally,
+# with stdin passed through, so the runner itself is under test (AB#8431). Its argv is logged; the password must be in
+# no argument.
+# Fake mongosh: expects "--quiet --nodb <file>.js", checks that the password arrives on its stdin, logs the script it
+# was given (FAKE_LOG.js) and its path (FAKE_LOG.files), then prints canned output chosen by FAKE_MODE
+# (clean | findings | error | changed | incomplete).
 FAKEBIN="$TMP/bin"
 mkdir -p "$FAKEBIN"
 cat >"$FAKEBIN/kubectl" <<'FAKE'
@@ -39,38 +43,49 @@ case " $* " in
     *" get pods "*) printf 'pod/octo-mongodb-arb-0\npod/octo-mongodb-0\npod/octo-mongodb-1\n' ;;
     *" get secret "*) printf '%s' "$PW" | base64 ;;
     *" exec "*)
-        IFS= read -r line
-        [ "$line" = "$PW" ] || { echo "password not on stdin" >&2; exit 8; }
-        eval_arg="${*: -1}"
-        case "$eval_arg" in
-            *'print("SNAP '*)
-                n=$(( $(cat "$FAKE_LOG.snaps" 2>/dev/null || echo 0) + 1 )); echo "$n" >"$FAKE_LOG.snaps"
-                xt=1; [ "$FAKE_MODE" = changed ] && [ "$n" -eq 2 ] && xt=2
-                echo "SNAP {\"octosystem\":{\"users\":3,\"xtUsers\":0,\"mappings\":0,\"newestUser\":\"a\",\"newestMapping\":\"\"},\"tenanta\":{\"users\":5,\"xtUsers\":$xt,\"mappings\":2,\"newestUser\":\"b\",\"newestMapping\":\"c\"}}" ;;
-            *)
-                printf 'ROW\toctosystem\tuser\tu0\troot\tyes\tno\tHOLDS\n'
-                printf 'ROW\ttenanta\tuser\tu1\tadm***@example.com\tyes\tno\tHOLDS\n'
-                case "$FAKE_MODE" in
-                    findings) printf 'ROW\ttenanta\tuser\tu3\tbob\tno\tyes\tLOSES\nROW\ttenantb\ttenant\t-\t-\t-\t-\tNO-ROLE\n' ;;
-                    error) printf 'ROW\tnope\ttenant\t-\t-\t-\t-\tERROR\n' ;;
-                esac
-                [ "$FAKE_MODE" = incomplete ] || echo "END" ;;
-        esac ;;
+        while [ "$#" -gt 0 ] && [ "$1" != "--" ]; do shift; done
+        shift
+        exec "$@" ;;
     *) echo "unexpected kubectl call" >&2; exit 7 ;;
 esac
 FAKE
 chmod +x "$FAKEBIN/kubectl"
+cat >"$FAKEBIN/mongosh" <<'FAKE'
+#!/usr/bin/env bash
+PW="fake-pw-0815"
+[ "$#" -eq 3 ] && [ "$1" = "--quiet" ] && [ "$2" = "--nodb" ] && [[ "$3" == *.js ]] || { echo "unexpected mongosh args: $*" >&2; exit 6; }
+IFS= read -r line
+[ "$line" = "$PW" ] || { echo "password not on stdin" >&2; exit 8; }
+echo "$3" >>"$FAKE_LOG.files"
+body="$(cat "$3")"
+printf '%s\n' "$body" >>"$FAKE_LOG.js"
+case "$body" in
+    *'print("SNAP '*)
+        n=$(( $(cat "$FAKE_LOG.snaps" 2>/dev/null || echo 0) + 1 )); echo "$n" >"$FAKE_LOG.snaps"
+        xt=1; [ "$FAKE_MODE" = changed ] && [ "$n" -eq 2 ] && xt=2
+        echo "SNAP {\"octosystem\":{\"users\":3,\"xtUsers\":0,\"mappings\":0,\"newestUser\":\"a\",\"newestMapping\":\"\"},\"tenanta\":{\"users\":5,\"xtUsers\":$xt,\"mappings\":2,\"newestUser\":\"b\",\"newestMapping\":\"c\"}}" ;;
+    *)
+        printf 'ROW\toctosystem\tuser\tu0\troot\tyes\tno\tHOLDS\n'
+        printf 'ROW\ttenanta\tuser\tu1\tadm***@example.com\tyes\tno\tHOLDS\n'
+        case "$FAKE_MODE" in
+            findings) printf 'ROW\ttenanta\tuser\tu3\tbob\tno\tyes\tLOSES\nROW\ttenantb\ttenant\t-\t-\t-\t-\tNO-ROLE\n' ;;
+            error) printf 'ROW\tnope\ttenant\t-\t-\t-\t-\tERROR\n' ;;
+        esac
+        [ "$FAKE_MODE" = incomplete ] || echo "END" ;;
+esac
+FAKE
+chmod +x "$FAKEBIN/mongosh"
 
 # run_fake <mode> <args...>: runs the real script against the fake kubectl; sets RC, OUT, ERR, LOG.
 run_fake() {
     local mode="$1"; shift
     export FAKE_MODE="$mode" FAKE_LOG="$TMP/kubectl-$mode.log"
-    rm -f "$FAKE_LOG" "$FAKE_LOG.snaps"; touch "$FAKE_LOG"
+    rm -f "$FAKE_LOG" "$FAKE_LOG.snaps" "$FAKE_LOG.js" "$FAKE_LOG.files"; touch "$FAKE_LOG" "$FAKE_LOG.js" "$FAKE_LOG.files"
     set +e
     PATH="$FAKEBIN:$PATH" bash "$SRC/$NAME.sh" --context fake-ctx "$@" >"$TMP/out" 2>"$TMP/err"
     RC=$?
     set -e
-    OUT="$(cat "$TMP/out")"; ERR="$(cat "$TMP/err")"; LOG="$(cat "$FAKE_LOG")"
+    OUT="$(cat "$TMP/out")"; ERR="$(cat "$TMP/err")"; LOG="$(cat "$FAKE_LOG")"; JS="$(cat "$FAKE_LOG.js")"
 }
 
 # --- 1. write guard ------------------------------------------------------------------------------------------------
@@ -141,10 +156,23 @@ case "$ERR" in *"dbs=2 users=8 xt_users=1 mappings=2"*) ok "clean run prints sna
 if [ "$(grep -c ' exec ' <<<"$LOG")" -eq 3 ] && grep -q 'exec -i octo-mongodb-0 -c mongod' <<<"$LOG"; then
     ok "three mongosh runs (snapshot, inventory, snapshot) in pod octo-mongodb-0"
 else fail "unexpected kubectl calls: $LOG"; fi
-if grep -q 'readPreference=secondaryPreferred&maxStalenessSeconds=90' <<<"$LOG" && grep -q 'replicaSet=' <<<"$LOG" && ! grep -q 'PASSWORD-IN-ARGV' <<<"$LOG" \
-    && ! grep -q 'fake-pw-0815' "$TMP/out" "$TMP/err"; then
+if grep -q 'readPreference=secondaryPreferred&maxStalenessSeconds=90' <<<"$JS" && grep -q 'replicaSet=' <<<"$JS" && ! grep -q 'PASSWORD-IN-ARGV' <<<"$LOG" \
+    && ! grep -q 'fake-pw-0815' "$TMP/out" "$TMP/err" && ! grep -q 'fake-pw-0815' <<<"$JS"; then
     ok "password only on stdin (not in argv or output); replica-set connection with secondaryPreferred"
 else fail "password handling: $LOG"; fi
+
+# AB#8431: the JavaScript goes over stdin; the exec request stays short (Rancher proxy), the temp file is removed.
+maxlen="$(grep ' exec ' <<<"$LOG" | awk '{ if (length($0) > m) m = length($0) } END { print m + 0 }')"
+if [ "$maxlen" -lt 1024 ] && ! grep -q -- '--eval' <<<"$LOG" && ! grep -q 'getCollection\|print("SNAP' <<<"$LOG"; then
+    ok "exec command carries no JavaScript (longest exec line $maxlen chars, no --eval)"
+else fail "exec command too long or carries JavaScript (longest $maxlen chars): $LOG"; fi
+if [ "$(grep -c 'print("SNAP ' <<<"$JS")" -eq 2 ] && grep -q '^const PARAMS = ' <<<"$JS"; then
+    ok "snapshot and inventory JavaScript (with prelude and params) reach mongosh as a file"
+else fail "JavaScript did not reach mongosh: $(head -c 300 <<<"$JS")"; fi
+leftover=0; while IFS= read -r f; do [ -n "$f" ] && [ -e "$f" ] && leftover=$((leftover + 1)); done <"$FAKE_LOG.files"
+if [ "$(wc -l <"$FAKE_LOG.files" | tr -d ' ')" -eq 3 ] && [ "$leftover" -eq 0 ]; then
+    ok "the in-pod runner removes its temporary script file after each of the three runs"
+else fail "temporary script files left behind: $leftover of $(wc -l <"$FAKE_LOG.files")"; fi
 
 run_fake findings
 if [ "$RC" -eq 2 ] && grep -q $'\tLOSES$' <<<"$OUT" && grep -q 'ROLE-MISSING' <<<"$ERR"; then ok "findings: exit 2"; else fail "findings: rc=$RC err=$ERR"; fi
@@ -161,7 +189,7 @@ run_fake incomplete
 if [ "$RC" -eq 1 ] && grep -q 'incomplete' <<<"$ERR"; then ok "missing END marker: exit 1"; else fail "incomplete: rc=$RC err=$ERR"; fi
 
 run_fake clean tenanta,octosystem --ids-only
-if grep -q '"tenants":\["tenanta","octosystem"\]' <<<"$LOG" && grep -q '"idsOnly":true' <<<"$LOG"; then
+if grep -q '"tenants":\["tenanta","octosystem"\]' <<<"$JS" && grep -q '"idsOnly":true' <<<"$JS"; then
     ok "tenant filter and --ids-only reach the JavaScript"
 else fail "params: $LOG"; fi
 

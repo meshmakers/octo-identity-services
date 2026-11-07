@@ -68,6 +68,11 @@ Notable changes of the OctoMesh identity services. The CK model `System.Identity
 
 ### Fixed
 
+- **The read-only role-check script works through the Rancher proxy (AB#8431).**
+  `scripts/identity-secret-management-role-check.sh` passed its JavaScript with `mongosh --eval` inside the `kubectl exec`
+  request; through Rancher the 5.5 KB inventory step returned an nginx error page. The JavaScript now travels on stdin
+  (after the password line) to a short in-pod runner that runs it from a private temporary file and removes it. Still
+  read-only (`secondaryPreferred`, no token exchange); output and exit codes unchanged.
 - **`User.ResetPassword` with a caller whose subject is not an object id (AB#8413).** The handler looked the acting user up by
   the `sub` claim and failed with `METHOD_HANDLER_FAILED`; it now skips the lookup, like `User.Merge`.
 - **`User.Merge` with a caller whose subject is not an object id (AB#8412).** The handler looked the acting user up by the
