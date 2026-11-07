@@ -811,8 +811,13 @@ public class CrossTenantSecondFactorTests : IntegrationTestBase
         (await LoginTwoFactorAsync(childSession, childTenantId, user.Totp.ComputeTotp(), ct)).Success.Should().BeTrue();
 
         var (userCode, deviceCode) = await StartDeviceFlowAsync(childTenantId, ct);
+        // AB#7891: the device page names its tenant; there is no server-side user_code → tenant state.
         var approve = await childSession.PostAsync("/connect/deviceverification",
-            new FormUrlEncodedContent(new Dictionary<string, string> { ["user_code"] = userCode }), ct);
+            new FormUrlEncodedContent(new Dictionary<string, string>
+            {
+                ["user_code"] = userCode,
+                ["acr_values"] = $"tenant:{childTenantId}"
+            }), ct);
         var approveBody = JsonNode.Parse(await approve.Content.ReadAsStringAsync(ct))!;
         approveBody["success"]!.GetValue<bool>().Should().BeTrue("the shadow user exists in the child tenant: {0}",
             approveBody["errorMessage"]?.GetValue<string>());

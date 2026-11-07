@@ -264,6 +264,143 @@ public class OidcTenantResolutionMiddlewareTests
         result.Should().BeNull();
     }
 
+    // AB#7891: the device flow resolves its tenant without the in-process map.
+
+    private const string DeviceCodeGrant = "urn:ietf:params:oauth:grant-type:device_code";
+
+    [Fact]
+    public async Task ResolveTenantFromTokenRequest_DeviceCodeWithTenantMarker_ResolvesTenantAndStripsMarker()
+    {
+        var context = FormRequest("/connect/token",
+            ("grant_type", DeviceCodeGrant), ("client_id", "octo-cli"), ("device_code", "child-a:opaque.device.code"));
+
+        var result = await CreateMiddleware().ResolveTenantFromTokenRequestAsync(context);
+
+        result.Should().Be("child-a");
+        var form = await context.Request.ReadFormAsync(TestContext.Current.CancellationToken);
+        form["device_code"].ToString().Should().Be("opaque.device.code", "OpenIddict must only see its own value");
+        form["client_id"].ToString().Should().Be("octo-cli", "the other fields stay");
+        context.Request.Body.Position = 0;
+        var raw = await new StreamReader(context.Request.Body).ReadToEndAsync(TestContext.Current.CancellationToken);
+        raw.Should().Contain("device_code=opaque.device.code").And.NotContain("child-a");
+        context.Request.ContentLength.Should().Be(System.Text.Encoding.UTF8.GetByteCount(raw));
+    }
+
+    [Fact]
+    public async Task ResolveTenantFromTokenRequest_DeviceCodeWithoutMarker_FallsBackToAcrValues()
+    {
+        var context = FormRequest("/connect/token",
+            ("grant_type", DeviceCodeGrant), ("device_code", "unmarked"), ("acr_values", "tenant:child-b"));
+
+        var result = await CreateMiddleware().ResolveTenantFromTokenRequestAsync(context);
+
+        result.Should().Be("child-b");
+        (await context.Request.ReadFormAsync(TestContext.Current.CancellationToken))["device_code"].ToString().Should().Be("unmarked");
+    }
+
+    [Fact]
+    public async Task ResolveTenantFromTokenRequest_DeviceCodeWithoutMarkerOrAcrValues_ReturnsNull()
+    {
+        // A code issued before AB#7891 (or for the system tenant without acr_values) runs in the system tenant.
+        var context = FormRequest("/connect/token", ("grant_type", DeviceCodeGrant), ("device_code", "unmarked"));
+
+        var result = await CreateMiddleware().ResolveTenantFromTokenRequestAsync(context);
+
+        result.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task ResolveTenantForDeviceVerification_HintInQuery_ReturnsTenant()
+    {
+        var context = new DefaultHttpContext();
+        context.Request.Method = "GET";
+        context.Request.Path = "/connect/deviceverification";
+        context.Request.QueryString = new QueryString("?user_code=ABCD-1234&acr_values=tenant%3Achild-a");
+
+        var result = await CreateMiddleware().ResolveTenantForDeviceVerificationAsync(context);
+
+        result.Should().Be("child-a");
+    }
+
+    [Fact]
+    public async Task ResolveTenantForDeviceVerification_HintInForm_ReturnsTenantAndKeepsBodyReadable()
+    {
+        var context = FormRequest("/connect/deviceverification",
+            ("user_code", "ABCD-1234"), ("acr_values", "tenant:child-a"));
+
+        var result = await CreateMiddleware().ResolveTenantForDeviceVerificationAsync(context);
+
+        result.Should().Be("child-a");
+        context.Request.Body.Position.Should().Be(0, "OpenIddict and the controller read the form afterwards");
+        (await context.Request.ReadFormAsync(TestContext.Current.CancellationToken))["user_code"].ToString().Should().Be("ABCD-1234");
+    }
+
+    [Fact]
+    public async Task ResolveTenantForDeviceVerification_NoHint_ReturnsNull_EvenForAKnownUserCode()
+    {
+        // No server-side user_code → tenant state any more: without a hint the system tenant applies.
+        var context = FormRequest("/connect/deviceverification", ("user_code", "ABCD-1234"));
+
+        var result = await CreateMiddleware().ResolveTenantForDeviceVerificationAsync(context);
+
+        result.Should().BeNull();
+    }
+
+    [Fact]
+    public void RewriteDeviceAuthorizationResponse_MarksDeviceCodeAndPointsToTheTenantDevicePage()
+    {
+        const string response =
+            """{"device_code":"opaque-device","user_code":"ABCD-1234","verification_uri":"https://id.example/connect/deviceverification","verification_uri_complete":"https://id.example/connect/deviceverification?user_code=ABCD-1234","expires_in":300,"interval":5}""";
+        using var body = new MemoryStream(System.Text.Encoding.UTF8.GetBytes(response));
+
+        var rewritten = CreateMiddleware().RewriteDeviceAuthorizationResponse(body, "child-a");
+
+        rewritten.Should().NotBeNull();
+        var json = System.Text.Json.Nodes.JsonNode.Parse(rewritten!)!.AsObject();
+        json["device_code"]!.GetValue<string>().Should().Be("child-a:opaque-device");
+        json["user_code"]!.GetValue<string>().Should().Be("ABCD-1234", "the user code stays human-typable");
+        json["verification_uri"]!.GetValue<string>().Should().Be("https://id.example/child-a/device");
+        json["verification_uri_complete"]!.GetValue<string>()
+            .Should().Be("https://id.example/child-a/device?userCode=ABCD-1234");
+        json["expires_in"]!.GetValue<int>().Should().Be(300);
+        json["interval"]!.GetValue<int>().Should().Be(5);
+    }
+
+    [Fact]
+    public void RewriteDeviceAuthorizationResponse_KeepsNothingInTheInProcessMap()
+    {
+        var deviceCode = $"device-{Guid.NewGuid():N}";
+        var userCode = $"USER-{Guid.NewGuid():N}";
+        using var body = new MemoryStream(System.Text.Encoding.UTF8.GetBytes(
+            $$"""{"device_code":"{{deviceCode}}","user_code":"{{userCode}}","verification_uri":"https://id.example/connect/deviceverification"}"""));
+
+        CreateMiddleware().RewriteDeviceAuthorizationResponse(body, "child-a");
+
+        OidcTenantResolutionMiddleware.MappedKeysSnapshot()
+            .Should().NotContain(k => k.Contains(deviceCode) || k.Contains(userCode));
+    }
+
+    [Fact]
+    public void RewriteDeviceAuthorizationResponse_ErrorBodyWithoutDeviceCode_IsLeftAlone()
+    {
+        using var body = new MemoryStream("""{"error":"invalid_client"}"""u8.ToArray());
+
+        CreateMiddleware().RewriteDeviceAuthorizationResponse(body, "child-a").Should().BeNull();
+    }
+
+    private static DefaultHttpContext FormRequest(string path, params (string Key, string Value)[] fields)
+    {
+        var form = string.Join('&', fields.Select(f => $"{Uri.EscapeDataString(f.Key)}={Uri.EscapeDataString(f.Value)}"));
+        var bytes = System.Text.Encoding.UTF8.GetBytes(form);
+        var context = new DefaultHttpContext();
+        context.Request.Method = "POST";
+        context.Request.Path = path;
+        context.Request.ContentType = "application/x-www-form-urlencoded";
+        context.Request.ContentLength = bytes.Length;
+        context.Request.Body = new MemoryStream(bytes);
+        return context;
+    }
+
     private static OidcTenantResolutionMiddleware CreateMiddleware() =>
         new(_ => Task.CompletedTask,
             NullLogger<OidcTenantResolutionMiddleware>.Instance,

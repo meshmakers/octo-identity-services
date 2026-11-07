@@ -24,6 +24,15 @@ Notable changes of the OctoMesh identity services. The CK model `System.Identity
   `failedDetails` of a `PASSWORD_POLICY_VIOLATION` with `PasswordPolicyErrorDescriber`, as the account page does; codes and
   descriptions are unchanged.
 
+- **Device-code sign-in works across identity replicas and restarts (AB#7891).** The device flow no longer keeps a
+  `device_code`/`user_code` → tenant mapping in process memory (the static `TokenToTenantMap` of
+  `OidcTenantResolutionMiddleware`). The device page sends its tenant as `acr_values=tenant:{tenantId}` to
+  `/connect/deviceverification`, and the issued `device_code` carries its tenant (`{tenantId}:{code}`), which the
+  middleware strips again on `/connect/token`. Before, every second redeem on test-2 (two identity replicas) failed with
+  `invalid_grant` and the Allow page could land in the system tenant. No change for octo-cli/octo-sdk (the device code
+  is opaque to clients); device codes issued by an older identity before the rollout fail once and need a new
+  `login -i`. Documented in `docs/authentication.md` (Device Authorization Flow, note 5).
+
 - **REST role and merge endpoints run the `User` methods (AB#8412).** `PUT users/{userName}/roles`,
   `PUT`/`DELETE users/{userName}/roles/{roleName}` and `POST users/{userName}/merge` are facades of `User.SetRoles-1`,
   `User.AddRole-1`, `User.RemoveRole-1` and `User.Merge-1`: the controller resolves the user (and the role ids / names) and

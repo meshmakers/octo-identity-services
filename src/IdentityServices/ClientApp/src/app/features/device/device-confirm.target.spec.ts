@@ -68,6 +68,12 @@ describe('DeviceConfirmComponent (AB#7959 target tenant and account)', () => {
     expect(root.textContent).toContain('ABCD-1234');
   });
 
+  it('asks the verification endpoint in the tenant of the page route (AB#7891)', () => {
+    create({ ...baseContext, tenantId: 'child-a' });
+
+    expect(getContext).toHaveBeenCalledWith('ABCD-1234', 'child-a');
+  });
+
   it('shows the e-mail alone when the user name is missing, and no duplicate when both are equal', () => {
     let root: HTMLElement = create({ ...baseContext, tenantId: 'child-a', accountEmail: 'g@example.com' })
       .nativeElement;

@@ -33,20 +33,29 @@ export class ConsentApiService {
   // === Device Authorization ===
   //
   // AB#4993 (OpenIddict migration): the device flow is driven through the OpenIddict end-user
-  // verification endpoint (/connect/deviceverification, tenant-free — the backend resolves the
-  // tenant from the user code). The endpoint expects application/x-www-form-urlencoded input;
-  // the response DTOs are unchanged.
+  // verification endpoint (/connect/deviceverification). The endpoint has no tenant route segment;
+  // the page names its tenant (the /{tenantId}/device route) as acr_values=tenant:{tenantId} on
+  // every call (AB#7891), so the backend validates the user code against that tenant only and any
+  // identity replica can serve the request. The endpoint expects application/x-www-form-urlencoded
+  // input on POST; the response DTOs are unchanged.
 
   private static readonly deviceVerificationUrl = '/connect/deviceverification';
 
-  getDeviceAuthorizationContext(userCode: string): Observable<DeviceAuthorizationContext> {
+  /** The tenant hint of the device verification endpoint (AB#7891). */
+  static tenantHint(tenantId: string): string {
+    return `tenant:${tenantId}`;
+  }
+
+  getDeviceAuthorizationContext(userCode: string, tenantId: string): Observable<DeviceAuthorizationContext> {
     return this.http.get<DeviceAuthorizationContext>(ConsentApiService.deviceVerificationUrl, {
-      params: { user_code: userCode }
+      params: { user_code: userCode, acr_values: ConsentApiService.tenantHint(tenantId) }
     });
   }
 
-  submitDeviceAuthorization(request: DeviceAuthorizationRequest): Observable<DeviceAuthorizationResult> {
-    let body = new HttpParams().set('user_code', request.userCode);
+  submitDeviceAuthorization(request: DeviceAuthorizationRequest, tenantId: string): Observable<DeviceAuthorizationResult> {
+    let body = new HttpParams()
+      .set('user_code', request.userCode)
+      .set('acr_values', ConsentApiService.tenantHint(tenantId));
     if (request.rememberConsent !== undefined) {
       body = body.set('remember_consent', String(request.rememberConsent));
     }
@@ -56,8 +65,11 @@ export class ConsentApiService {
     return this.http.post<DeviceAuthorizationResult>(ConsentApiService.deviceVerificationUrl, body);
   }
 
-  denyDeviceAuthorization(userCode: string): Observable<DeviceAuthorizationResult> {
-    const body = new HttpParams().set('user_code', userCode).set('deny', 'true');
+  denyDeviceAuthorization(userCode: string, tenantId: string): Observable<DeviceAuthorizationResult> {
+    const body = new HttpParams()
+      .set('user_code', userCode)
+      .set('deny', 'true')
+      .set('acr_values', ConsentApiService.tenantHint(tenantId));
     return this.http.post<DeviceAuthorizationResult>(ConsentApiService.deviceVerificationUrl, body);
   }
 }
