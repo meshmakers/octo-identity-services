@@ -1668,7 +1668,12 @@ public class AuthApiController(
         }
 
         var isNewUser = await crossTenantUserProvisioningService.FindCrossTenantUserAsync(crossTenantResult) == null;
-        var localUser = await crossTenantUserProvisioningService.FindOrCreateCrossTenantUserAsync(crossTenantResult, tenantId);
+        // AB#8439: a login never writes an ExternalTenantUserMapping. A mapping is an admin's grant (mapping API,
+        // ProvisionCurrentUser, Add Cross-Tenant User); a bare one written here counted as explicit provisioning and
+        // bypassed AllowSelfRegistration=false on every later login. Roles come from the admin's mapping or the
+        // first-login groups below, never from a mapping the login creates for itself.
+        var localUser = await crossTenantUserProvisioningService.FindOrCreateCrossTenantUserAsync(crossTenantResult,
+            tenantId, storeMappingIfMissing: false);
         if (localUser == null)
         {
             return (null, null);
@@ -1962,8 +1967,19 @@ public class AuthApiController(
             };
         }
 
-        // Find or create a local user in the target tenant
-        var localUser = await crossTenantUserProvisioningService.FindOrCreateCrossTenantUserAsync(crossTenantResult, targetTenantId);
+        // AB#8439: the switch creates a shadow user only under the same self-registration gate as the login, and
+        // never writes an ExternalTenantUserMapping (see SignInCrossTenantUserAsync).
+        if (await CheckCrossTenantSelfRegistrationAsync(crossTenantResult) is { } denied)
+        {
+            return new TenantSwitchResultDto
+            {
+                Success = false,
+                ErrorMessage = denied
+            };
+        }
+
+        var localUser = await crossTenantUserProvisioningService.FindOrCreateCrossTenantUserAsync(crossTenantResult,
+            targetTenantId, storeMappingIfMissing: false);
         if (localUser == null)
         {
             return new TenantSwitchResultDto

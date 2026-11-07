@@ -434,8 +434,8 @@ counterpart of the browser tenant-switch, for the MCP server:
   so the only change for existing callers (octo-mcp-service `TenantTokenExchanger` treats any
   non-success as "denied"; Studio `switchTenantByExchange` is unused) is an early, clear refusal
   instead of a token that fails on the first call. A non-ancestor caller is still
-  `unauthorized_client`. Side effect kept from before: a refused exchange still leaves the shadow
-  user and an empty mapping in B; neither grants anything (`Exchange_RepeatedAfterEmptyMapping…`).
+  `unauthorized_client`. A refused exchange leaves nothing in B: no mapping since AB#7088, no shadow
+  user since AB#8304; an empty mapping that already exists grants nothing (`Exchange_RepeatedAfterEmptyMapping…`).
   Exchanged tokens never carry a refresh token. Tests: `TenantExchangeIntegrationTests`
   (`Exchange_AncestorUserWithoutProvisioning…`, `…ProvisionedOperator…`, `…DirectRoleGrant…`,
   `…NonAncestor…`).
@@ -995,7 +995,7 @@ of the selected groups — the same mechanism `provisionCurrentUser` uses with `
 > prefix, link generation does not fill them in and answers "No route matches". The hand-built link in
 > `ExternalTenantUserMappingsController.Create` predates this rule and still has those two weaknesses.
 
-The `provisionCurrentUser` endpoint extracts `sub`, `preferred_username`, and `tenant_id` from the JWT, fetches all roles from the target tenant, and creates an `RtExternalTenantUserMapping` with all role IDs. It also adds the mapping as a member of the **TenantOwners** group (via `GroupMember` association), so the user inherits all roles through group membership. If a mapping already exists it is judged, not just returned (AB#7088): one that grants no effective role (no existing role in `MappedRoleIds`, none via a group) or carries a wrong `SourceUserName` (role lookup keys on the NAME, this lookup on the user id) is repaired in place; one that already grants a role is left alone. The `X-Provisioning-Outcome` response header reports `created` / `repaired` / `already-provisioned`. The token exchange stores no mapping any more (`FindOrCreateCrossTenantUserAsync(..., storeMappingIfMissing: false)`); the login paths still store a bare one for a first-time shadow user.
+The `provisionCurrentUser` endpoint extracts `sub`, `preferred_username`, and `tenant_id` from the JWT, fetches all roles from the target tenant, and creates an `RtExternalTenantUserMapping` with all role IDs. It also adds the mapping as a member of the **TenantOwners** group (via `GroupMember` association), so the user inherits all roles through group membership. If a mapping already exists it is judged, not just returned (AB#7088): one that grants no effective role (no existing role in `MappedRoleIds`, none via a group) or carries a wrong `SourceUserName` (role lookup keys on the NAME, this lookup on the user id) is repaired in place; one that already grants a role is left alone. The `X-Provisioning-Outcome` response header reports `created` / `repaired` / `already-provisioned`. No login path stores a mapping any more (`FindOrCreateCrossTenantUserAsync(..., storeMappingIfMissing: false)`): the token exchange since AB#7088, the interactive cross-tenant login (`SignInCrossTenantUserAsync`) and the tenant switch since AB#8439 — a bare mapping counted as explicit provisioning and bypassed `AllowSelfRegistration=false`. Only an admin action creates a mapping.
 
 The `GET` endpoint returns `ExternalTenantUserMappingDto` with a `GroupNames` field populated by querying inbound `GroupMember` associations for each mapping entity.
 

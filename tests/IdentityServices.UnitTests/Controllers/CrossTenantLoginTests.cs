@@ -335,7 +335,7 @@ public class CrossTenantLoginTests
             UserName = "xt_OctoSystem_admin"
         };
         _crossTenantUserProvisioningService.FindOrCreateCrossTenantUserAsync(
-                Arg.Any<CrossTenantAuthResult>(), Arg.Any<string>())
+                Arg.Any<CrossTenantAuthResult>(), Arg.Any<string>(), Arg.Is(false))
             .Returns(localUser);
 
         _interaction.IsValidReturnUrl(Arg.Any<string>()).Returns(false);
@@ -454,7 +454,7 @@ public class CrossTenantLoginTests
             UserName = "xt_OctoSystem_admin"
         };
         _crossTenantUserProvisioningService.FindOrCreateCrossTenantUserAsync(
-                Arg.Any<CrossTenantAuthResult>(), Arg.Any<string>())
+                Arg.Any<CrossTenantAuthResult>(), Arg.Any<string>(), Arg.Is(false))
             .Returns(localUser);
 
         var returnUrl = "/meshtest/connect/authorize?client_id=test";
@@ -515,7 +515,7 @@ public class CrossTenantLoginTests
             UserName = "xt_OctoSystem_admin"
         };
         _crossTenantUserProvisioningService.FindOrCreateCrossTenantUserAsync(
-                Arg.Any<CrossTenantAuthResult>(), Arg.Any<string>())
+                Arg.Any<CrossTenantAuthResult>(), Arg.Any<string>(), Arg.Is(false))
             .Returns(localUser);
         _interaction.IsValidReturnUrl(Arg.Any<string>()).Returns(false);
 
@@ -551,7 +551,7 @@ public class CrossTenantLoginTests
         _crossTenantUserProvisioningService.FindCrossTenantUserAsync(Arg.Any<CrossTenantAuthResult>())
             .Returns(existingShadow);
         _crossTenantUserProvisioningService.FindOrCreateCrossTenantUserAsync(
-                Arg.Any<CrossTenantAuthResult>(), Arg.Any<string>())
+                Arg.Any<CrossTenantAuthResult>(), Arg.Any<string>(), Arg.Is(false))
             .Returns(existingShadow);
         _interaction.IsValidReturnUrl(Arg.Any<string>()).Returns(false);
 
@@ -630,6 +630,93 @@ public class CrossTenantLoginTests
         result.Value.Should().NotBeNull();
         result.Value!.Success.Should().BeFalse();
         result.Value.ErrorMessage.Should().Contain("denied");
+    }
+
+    #endregion
+
+    #region Tenant switch (AB#8439)
+
+    /// <summary>
+    ///     Arranges a tenant switch in <c>meshtest</c> by the caller <c>xt_OctoSystem_admin</c>, whose source identity
+    ///     in <c>OctoSystem</c> is <paramref name="sourceUserId" />.
+    /// </summary>
+    private void SetupTenantSwitch(string sourceUserId, RtUser caller)
+    {
+        SetupControllerContext("meshtest", CreateAuthenticatedUser(caller.RtId.ToString(), caller.UserName!));
+        _userManager.FindByIdAsync(caller.RtId.ToString()).Returns(caller);
+        _userManager.GetRolesAsync(Arg.Any<RtUser>()).Returns(new List<string>());
+        _crossTenantAuthService.FindUserIdByNameInTenantAsync("OctoSystem", "admin").Returns(sourceUserId);
+        _crossTenantAuthService.ValidateCrossTenantAccessAsync("meshtest", "OctoSystem", sourceUserId)
+            .Returns(new CrossTenantAuthResult
+            {
+                SourceTenantId = "OctoSystem",
+                SourceUserId = sourceUserId,
+                SourceUserName = "admin"
+            });
+    }
+
+    [Fact]
+    public async Task TenantSwitch_ExistingShadowUser_SignsInWithoutStoringAMapping()
+    {
+        var sourceUserId = Guid.NewGuid().ToString("N");
+        var caller = new RtUser { RtId = OctoObjectId.GenerateNewId(), UserName = "xt_OctoSystem_admin" };
+        SetupTenantSwitch(sourceUserId, caller);
+        _crossTenantUserProvisioningService.FindCrossTenantUserAsync(Arg.Any<CrossTenantAuthResult>()).Returns(caller);
+        _crossTenantUserProvisioningService.FindOrCreateCrossTenantUserAsync(
+                Arg.Any<CrossTenantAuthResult>(), Arg.Any<string>(), Arg.Any<bool>())
+            .Returns(caller);
+
+        var result = await _sut.SwitchTenant(new TenantSwitchRequestDto { SourceTenantId = "OctoSystem" });
+
+        result.Value!.Success.Should().BeTrue(result.Value.ErrorMessage);
+        await _crossTenantUserProvisioningService.Received(1).FindOrCreateCrossTenantUserAsync(
+            Arg.Any<CrossTenantAuthResult>(), Arg.Is("meshtest"), Arg.Is(false));
+        await _crossTenantUserProvisioningService.DidNotReceive().FindOrCreateCrossTenantUserAsync(
+            Arg.Any<CrossTenantAuthResult>(), Arg.Any<string>(), Arg.Is(true));
+    }
+
+    [Fact]
+    public async Task TenantSwitch_NewShadowUser_SelfRegistrationDisabled_WithoutMapping_IsRefused()
+    {
+        // AB#8439: the switch used to create the shadow user (and a bare mapping) without the self-registration gate.
+        var sourceUserId = Guid.NewGuid().ToString("N");
+        var caller = new RtUser { RtId = OctoObjectId.GenerateNewId(), UserName = "xt_OctoSystem_admin" };
+        SetupTenantSwitch(sourceUserId, caller);
+        SetupSelfRegistrationDisabledProvider();
+        _crossTenantUserProvisioningService.FindCrossTenantUserAsync(Arg.Any<CrossTenantAuthResult>())
+            .Returns((RtUser?)null);
+        _crossTenantUserProvisioningService.IsExplicitlyProvisionedAsync(Arg.Any<CrossTenantAuthResult>())
+            .Returns(false);
+
+        var result = await _sut.SwitchTenant(new TenantSwitchRequestDto { SourceTenantId = "OctoSystem" });
+
+        result.Value!.Success.Should().BeFalse();
+        result.Value.ErrorMessage.Should().Contain("Self-registration");
+        await _crossTenantUserProvisioningService.DidNotReceiveWithAnyArgs()
+            .FindOrCreateCrossTenantUserAsync(default!, default!, default);
+        await _signInManager.DidNotReceive().SignInAsync(Arg.Any<RtUser>(), Arg.Any<bool>());
+    }
+
+    [Fact]
+    public async Task TenantSwitch_NewShadowUser_SelfRegistrationDisabled_WithAdminMapping_SignsIn()
+    {
+        var sourceUserId = Guid.NewGuid().ToString("N");
+        var caller = new RtUser { RtId = OctoObjectId.GenerateNewId(), UserName = "xt_OctoSystem_admin" };
+        SetupTenantSwitch(sourceUserId, caller);
+        SetupSelfRegistrationDisabledProvider();
+        _crossTenantUserProvisioningService.FindCrossTenantUserAsync(Arg.Any<CrossTenantAuthResult>())
+            .Returns((RtUser?)null);
+        _crossTenantUserProvisioningService.IsExplicitlyProvisionedAsync(Arg.Any<CrossTenantAuthResult>())
+            .Returns(true);
+        var shadow = new RtUser { RtId = OctoObjectId.GenerateNewId(), UserName = "xt_OctoSystem_admin" };
+        _crossTenantUserProvisioningService.FindOrCreateCrossTenantUserAsync(
+                Arg.Any<CrossTenantAuthResult>(), Arg.Is("meshtest"), Arg.Is(false))
+            .Returns(shadow);
+
+        var result = await _sut.SwitchTenant(new TenantSwitchRequestDto { SourceTenantId = "OctoSystem" });
+
+        result.Value!.Success.Should().BeTrue(result.Value.ErrorMessage);
+        await _signInManager.Received(1).SignInAsync(shadow, false);
     }
 
     #endregion
