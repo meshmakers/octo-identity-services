@@ -1,7 +1,10 @@
+using IdentityServerPersistence.SystemStores;
 using Meshmakers.Common.Shared;
 using Meshmakers.Octo.ConstructionKit.Contracts;
 using Meshmakers.Octo.ConstructionKit.Models.System.Generated.System.v2;
+using Meshmakers.Octo.Runtime.Contracts.MongoDb;
 using Meshmakers.Octo.Runtime.Contracts.MongoDb.Repositories;
+using Meshmakers.Octo.Runtime.Contracts.Repositories;
 using Meshmakers.Octo.Runtime.Contracts.Repositories.Query;
 
 namespace IdentityServerPersistence.Services.SourceTenantGrants;
@@ -32,8 +35,49 @@ public interface ICrossTenantGrantPermissionStore
     /// </summary>
     Task<CrossTenantGrantPermissions> GetAsync(ITenantRepository repository);
 
-    /// <summary>Replaces the allow-list stored in <paramref name="repository" />.</summary>
-    Task SetAsync(ITenantRepository repository, CrossTenantGrantPermissions permissions);
+    /// <summary>
+    ///     Replaces the allow-list stored in <paramref name="repository" /> with <paramref name="targetTenantIds" />
+    ///     (already normalized) as one compare-and-set (AB#8432): the stored list is read, compared against
+    ///     <paramref name="ifMatch" /> and written in one transaction, so a concurrent change can never be overwritten
+    ///     unnoticed.
+    /// </summary>
+    /// <param name="repository">Repository of the source tenant.</param>
+    /// <param name="targetTenantIds">The new list, normalized (<see cref="CrossTenantGrantPermissionList.Normalize" />).</param>
+    /// <param name="ifMatch">
+    ///     <c>null</c>: no precondition (last writer wins). Otherwise a predicate over the current entity tag
+    ///     (<see cref="CrossTenantGrantPermissionList.ETagOf" />); <c>false</c> refuses the change with
+    ///     <see cref="CrossTenantGrantPermissionsReplaceOutcome.PreconditionFailed" /> and writes nothing.
+    /// </param>
+    /// <param name="changedBy">User name or client id of the caller; written only when the list changes.</param>
+    /// <param name="changedAtUtc">Time of the change; written only when the list changes.</param>
+    Task<CrossTenantGrantPermissionsReplaceResult> ReplaceAsync(ITenantRepository repository,
+        IReadOnlyList<string> targetTenantIds, Func<string, bool>? ifMatch, string changedBy, DateTime changedAtUtc);
+}
+
+/// <summary>Outcome of <see cref="ICrossTenantGrantPermissionStore.ReplaceAsync" /> (AB#8432).</summary>
+public enum CrossTenantGrantPermissionsReplaceOutcome
+{
+    /// <summary>The list was written.</summary>
+    Replaced,
+
+    /// <summary>The new list equals the stored one; nothing was written, not even <c>ChangedBy</c>/<c>ChangedAtUtc</c>.</summary>
+    Unchanged,
+
+    /// <summary>The precondition did not match the current list; nothing was written.</summary>
+    PreconditionFailed
+}
+
+/// <summary>Result of <see cref="ICrossTenantGrantPermissionStore.ReplaceAsync" /> (AB#8432).</summary>
+/// <param name="Outcome">What happened.</param>
+/// <param name="Before">The effective list before the call (empty for a missing or unreadable row).</param>
+/// <param name="Current">The effective list after the call (the stored one when nothing was written).</param>
+public sealed record CrossTenantGrantPermissionsReplaceResult(
+    CrossTenantGrantPermissionsReplaceOutcome Outcome,
+    IReadOnlyList<string> Before,
+    IReadOnlyList<string> Current)
+{
+    /// <summary>Entity tag of <see cref="Current" />.</summary>
+    public string ETag => CrossTenantGrantPermissionList.ETagOf(Current);
 }
 
 /// <inheritdoc />
@@ -69,19 +113,96 @@ public sealed class CrossTenantGrantPermissionStore : ICrossTenantGrantPermissio
         return stored;
     }
 
+    /// <summary>Attempts of one replace when the transaction collides with a concurrent one.</summary>
+    private const int MaxAttempts = 5;
+
+    /// <summary>
+    ///     Runtime id of a row this store inserts (AB#8432): the same in every tenant database, so two first writes of a
+    ///     tenant collide on the unique <c>_id</c> instead of creating two rows. Timestamp part zero, so it also sorts
+    ///     first (<see cref="FindRowAsync" /> reads the oldest row).
+    /// </summary>
+    internal static readonly OctoObjectId RowRtId = new("00000000" + Convert.ToHexString(
+        System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(ConfigurationKey)), 0, 8)
+        .ToLowerInvariant());
+
     /// <inheritdoc />
-    public async Task SetAsync(ITenantRepository repository, CrossTenantGrantPermissions permissions)
+    /// <remarks>
+    ///     Concurrency (AB#8432): the read, the precondition and the write run in one MongoDB transaction. A concurrent
+    ///     transaction that changed the row after our snapshot makes MongoDB refuse our write (write conflict); two first
+    ///     inserts collide on <see cref="RowRtId" /> (write conflict or duplicate key). The whole transaction then runs
+    ///     again on the new state, so the precondition is evaluated against what is really stored and a stale entity tag
+    ///     ends in <see cref="CrossTenantGrantPermissionsReplaceOutcome.PreconditionFailed" />.
+    /// </remarks>
+    public async Task<CrossTenantGrantPermissionsReplaceResult> ReplaceAsync(ITenantRepository repository,
+        IReadOnlyList<string> targetTenantIds, Func<string, bool>? ifMatch, string changedBy, DateTime changedAtUtc)
+    {
+        for (var attempt = 1;; attempt++)
+        {
+            try
+            {
+                return await ReplaceOnceAsync(repository, targetTenantIds, ifMatch, changedBy, changedAtUtc);
+            }
+            catch (Exception ex) when (attempt < MaxAttempts && IsCollision(ex))
+            {
+                await Task.Delay(Random.Shared.Next(5, 10 + 15 * attempt));
+            }
+        }
+    }
+
+    private static bool IsCollision(Exception exception)
+    {
+        if (MongoWriteRetry.IsWriteConflict(exception))
+        {
+            return true;
+        }
+
+        for (var ex = exception; ex != null; ex = ex.InnerException)
+        {
+            switch (ex)
+            {
+                case DuplicateKeyException:
+                case MongoDB.Driver.MongoWriteException { WriteError.Category: MongoDB.Driver.ServerErrorCategory.DuplicateKey }:
+                case MongoDB.Driver.MongoCommandException { Code: 11000 }:
+                    return true;
+            }
+        }
+
+        return false;
+    }
+
+    private static async Task<CrossTenantGrantPermissionsReplaceResult> ReplaceOnceAsync(ITenantRepository repository, IReadOnlyList<string> targetTenantIds,
+            Func<string, bool>? ifMatch, string changedBy, DateTime changedAtUtc)
     {
         using var session = await repository.GetSessionAsync();
         session.StartTransaction();
         var row = await FindRowAsync(repository, session);
-        var value = permissions.Serialize();
+        var (before, readable) = Parse(row);
+
+        if (ifMatch != null && !ifMatch(CrossTenantGrantPermissionList.ETagOf(before)))
+        {
+            await session.AbortTransactionAsync();
+            return new CrossTenantGrantPermissionsReplaceResult(
+                CrossTenantGrantPermissionsReplaceOutcome.PreconditionFailed, before, before);
+        }
+
+        // An unreadable row reads as empty but is always rewritten, so a PUT repairs it.
+        if (readable && before.SequenceEqual(targetTenantIds, StringComparer.Ordinal))
+        {
+            await session.AbortTransactionAsync();
+            return new CrossTenantGrantPermissionsReplaceResult(
+                CrossTenantGrantPermissionsReplaceOutcome.Unchanged, before, before);
+        }
+
+        var value = new CrossTenantGrantPermissions
+        {
+            TargetTenantIds = targetTenantIds.ToList(), ChangedAtUtc = changedAtUtc, ChangedBy = changedBy
+        }.Serialize();
         if (row == null)
         {
             await repository.InsertOneRtEntityAsync(session,
                 new RtTenantConfiguration
                 {
-                    RtId = OctoObjectId.GenerateNewId(), RtWellKnownName = ConfigurationKey, ConfigurationValue = value
+                    RtId = RowRtId, RtWellKnownName = ConfigurationKey, ConfigurationValue = value
                 });
         }
         else
@@ -91,6 +212,26 @@ public sealed class CrossTenantGrantPermissionStore : ICrossTenantGrantPermissio
         }
 
         await session.CommitTransactionAsync();
+        return new CrossTenantGrantPermissionsReplaceResult(
+            CrossTenantGrantPermissionsReplaceOutcome.Replaced, before, targetTenantIds.ToList());
+    }
+
+    private static (List<string> List, bool Readable) Parse(RtTenantConfiguration? row)
+    {
+        if (string.IsNullOrEmpty(row?.ConfigurationValue))
+        {
+            return ([], true);
+        }
+
+        try
+        {
+            var stored = row.ConfigurationValue.Deserialize<CrossTenantGrantPermissions?>();
+            return (CrossTenantGrantPermissionList.Normalize(stored?.TargetTenantIds ?? []), stored != null);
+        }
+        catch (System.Text.Json.JsonException)
+        {
+            return ([], false);
+        }
     }
 
     private static async Task<RtTenantConfiguration?> FindRowAsync(ITenantRepository repository,
@@ -111,6 +252,19 @@ public static class CrossTenantGrantPermissionList
 
     /// <summary>Longest tenant id the engine accepts (<c>TenantContext.ValidateTenantIdFormat</c>).</summary>
     public const int MaxTenantIdLength = 64;
+
+    /// <summary>
+    ///     Strong entity tag of an allow-list (AB#8432), quoted as HTTP sends it, e.g. <c>"q3b0…"</c>: derived from
+    ///     the normalized list only, so the same list always has the same tag (also a tenant that never set it and one
+    ///     that set <c>[]</c>), and a PUT that changes nothing keeps it. <c>ChangedBy</c>/<c>ChangedAtUtc</c> are not
+    ///     part of it.
+    /// </summary>
+    public static string ETagOf(IReadOnlyList<string> normalizedTargetTenantIds)
+    {
+        var hash = System.Security.Cryptography.SHA256.HashData(
+            System.Text.Encoding.UTF8.GetBytes(string.Join("\n", normalizedTargetTenantIds)));
+        return $"\"{Convert.ToBase64String(hash, 0, 16).TrimEnd('=').Replace('+', '-').Replace('/', '_')}\"";
+    }
 
     /// <summary>Trimmed, lower-case, distinct, ordinal-sorted; empty entries dropped.</summary>
     public static List<string> Normalize(IEnumerable<string?> tenantIds)

@@ -512,8 +512,8 @@ reveals which tenants permit a target tenant. Contract: `CONCEPT-SIBLING-TENANT-
 
 | Method | Endpoint | Policy | Description |
 |--------|----------|--------|-------------|
-| GET | `/crossTenantGrantPermissions` | ReadWrite + both roles | The permitted target tenant ids |
-| PUT | `/crossTenantGrantPermissions` | ReadWrite + both roles | Replace the list (`[]` = nobody). Entries are trimmed, lower-cased, de-duplicated; each at most 64 ASCII letters, digits, `-` or `_`; at most 200; not the tenant itself → otherwise `400` validation problem, nothing changed. Entries are not checked for existence |
+| GET | `/crossTenantGrantPermissions` | ReadWrite + both roles | The permitted target tenant ids; `ETag` header = tag of the list (AB#8432) |
+| PUT | `/crossTenantGrantPermissions` | ReadWrite + both roles | Replace the list (`[]` = nobody). Entries are trimmed, lower-cased, de-duplicated; each at most 64 ASCII letters, digits, `-` or `_`; at most 200; not the tenant itself → otherwise `400` validation problem, nothing changed. Entries are not checked for existence. Send `If-Match: <ETag>` (AB#8432): stale → `412` `CrossTenantGrantPermissionsChanged` (current tag in `ETag`), nothing changed; missing → `428` `IfMatchRequired` when `Identity:CrossTenantGrantPermissions:RequireIfMatch` is on, otherwise replaced unconditionally. A `PUT` that leaves the list as it is writes nothing (not even `changedBy`/`changedAtUtc`) and records no event. Answers the new `ETag` |
 
 ```typescript
 // CrossTenantGrantPermissionsDto (GET response, PUT request and response)
@@ -521,6 +521,11 @@ reveals which tenants permit a target tenant. Contract: `CONCEPT-SIBLING-TENANT-
   "targetTenantIds": ["string"]  // required on PUT
 }
 ```
+
+Concurrent edits (AB#8432): the tag is derived from the normalized list only, so an unchanged list keeps its tag. Read
+the list, keep its `ETag`, send it back as `If-Match`; on `412` read again and apply the change to the current list.
+The identity CORS policy exposes `ETag` to browser clients. Details and the client rollout:
+`CONCEPT-SIBLING-TENANT-GRANTS.md` §6.1.
 
 ### Groups (`/{tenantId}/v1/groups`)
 

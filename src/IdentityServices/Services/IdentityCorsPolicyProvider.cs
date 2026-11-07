@@ -4,6 +4,7 @@ using Meshmakers.Octo.Runtime.Contracts.MongoDb;
 using Meshmakers.Octo.Runtime.Contracts.Repositories.Query;
 using Microsoft.AspNetCore.Cors.Infrastructure;
 using Microsoft.Extensions.Options;
+using Microsoft.Net.Http.Headers;
 using Persistence.IdentityCkModel.Generated.System.Identity.v3;
 
 namespace Meshmakers.Octo.Backend.IdentityServices.Services;
@@ -168,8 +169,11 @@ public class IdentityCorsPolicyProvider : ICorsPolicyProvider
             policyBuilder.WithOrigins(origins.ToArray());
         }
 
+        // AB#8432: browsers hide response headers of cross-origin calls unless exposed; the SPA reads the ETag of
+        // GET/PUT CrossTenantGrantPermissions to send it back as If-Match.
         policyBuilder.AllowAnyHeader()
-            .AllowAnyMethod();
+            .AllowAnyMethod()
+            .WithExposedHeaders(HeaderNames.ETag);
 
         var entry = new CacheEntry(origins, policyBuilder.Build(),
             _cacheLifetime.HasValue ? _timeProvider.GetUtcNow() + _cacheLifetime.Value : null);

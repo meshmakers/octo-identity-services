@@ -151,6 +151,18 @@ public class IdentityCorsPolicyProviderTests
     }
 
     [Fact]
+    public async Task Policy_ExposesTheETagHeader_SoTheSpaCanSendItBackAsIfMatch()
+    {
+        // AB#8432: without it a browser hides the ETag of GET/PUT CrossTenantGrantPermissions from Refinery Studio.
+        SetOrigins("https://app.example");
+        var sut = CreateSut();
+
+        var policy = await sut.GetPolicyAsync(null!, null);
+
+        policy!.ExposedHeaders.Should().Contain("ETag");
+    }
+
+    [Fact]
     public async Task TtlOfZero_DisablesTimeBasedExpiry()
     {
         SetOrigins("https://app.example");

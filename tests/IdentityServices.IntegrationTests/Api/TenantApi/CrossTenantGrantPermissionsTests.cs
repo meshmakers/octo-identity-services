@@ -12,6 +12,8 @@ using Meshmakers.Octo.Communication.Contracts.DataTransferObjects;
 using Meshmakers.Octo.ConstructionKit.Contracts;
 using Meshmakers.Octo.Runtime.Contracts.MongoDb;
 using Meshmakers.Octo.Services.Infrastructure.Services;
+using Microsoft.AspNetCore.Http;
+using IdentityServerPersistence.Configuration.Options;
 using Microsoft.AspNetCore.TestHost;
 using Microsoft.Extensions.DependencyInjection;
 using NSubstitute;
@@ -249,18 +251,7 @@ public class CrossTenantGrantPermissionsTests : IntegrationTestBase
         var audit = Substitute.For<IIdentityAuditService>();
         using var host = Factory.WithWebHostBuilder(b =>
             b.ConfigureTestServices(services => services.AddSingleton(audit)));
-        HttpClient Admin()
-        {
-            var client = host.CreateClient();
-            client.DefaultRequestHeaders.Authorization =
-                new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", "test-token");
-            client.DefaultRequestHeaders.Add(TestAuthHandler.UserIdHeader, $"sadmin-{Guid.NewGuid():N}");
-            client.DefaultRequestHeaders.Add(TestAuthHandler.UserNameHeader, "source-admin");
-            client.DefaultRequestHeaders.Add(TestAuthHandler.EmailHeader, "source-admin@example.com");
-            client.DefaultRequestHeaders.Add(TestAuthHandler.RoleHeader, UserManagement);
-            client.DefaultRequestHeaders.Add(TestAuthHandler.RoleHeader, TenantManagement);
-            return client;
-        }
+        HttpClient Admin() => HostAdmin(host);
 
         (await PutAsync(Admin(), source, ["cgt-one", "cgt-two"])).StatusCode.Should().Be(HttpStatusCode.OK);
         (await PutAsync(Admin(), source, ["cgt-two", "cgt-one"])).StatusCode.Should().Be(HttpStatusCode.OK);
@@ -282,6 +273,152 @@ public class CrossTenantGrantPermissionsTests : IntegrationTestBase
         await audit.DidNotReceiveWithAnyArgs().StoreWarningAsync(default!, default!, default!, default);
     }
 
+    // ---------------------------------------------------------------- concurrency (AB#8432)
+
+    [Fact]
+    public async Task Get_And_Put_ReturnTheETagOfTheList()
+    {
+        var source = await CreateTenantAsync("cge");
+        var admin = SourceAdmin(source);
+
+        var initial = await admin.GetAsync(Url(source), TestContext.Current.CancellationToken);
+        var initialTag = ETagOf(initial);
+        initialTag.IsWeak.Should().BeFalse();
+
+        var put = await PutAsync(admin, source, ["cge-one"], initialTag.Tag);
+        put.StatusCode.Should().Be(HttpStatusCode.OK);
+        var putTag = ETagOf(put);
+        putTag.Tag.Should().NotBe(initialTag.Tag, "the list changed");
+
+        var get = await admin.GetAsync(Url(source), TestContext.Current.CancellationToken);
+        ETagOf(get).Tag.Should().Be(putTag.Tag, "the PUT answers the tag a following GET returns");
+    }
+
+    [Fact]
+    public async Task Put_WithStaleIfMatch_Is412_AndLeavesTheListUnchanged()
+    {
+        var source = await CreateTenantAsync("cgp");
+        var first = SourceAdmin(source);
+        var second = SourceAdmin(source);
+        // Both administrators open the list.
+        var readTag = ETagOf(await first.GetAsync(Url(source), TestContext.Current.CancellationToken)).Tag;
+        ETagOf(await second.GetAsync(Url(source), TestContext.Current.CancellationToken)).Tag.Should().Be(readTag);
+
+        var firstPut = await PutAsync(first, source, ["cgp-first"], readTag);
+        firstPut.StatusCode.Should().Be(HttpStatusCode.OK);
+
+        var secondPut = await PutAsync(second, source, ["cgp-second"], readTag);
+
+        secondPut.StatusCode.Should().Be(HttpStatusCode.PreconditionFailed);
+        (await ProblemCodeAsync(secondPut)).Should().Be(CrossTenantGrantPermissionsController.ListChangedCode);
+        ETagOf(secondPut).Tag.Should().Be(ETagOf(firstPut).Tag, "the 412 names the current tag");
+        var get = await first.GetAsync(Url(source), TestContext.Current.CancellationToken);
+        (await ReadListAsync(get)).Should().Equal(["cgp-first"], "the first change is not overwritten");
+    }
+
+    [Theory]
+    [InlineData("weak")]
+    [InlineData("garbage")]
+    [InlineData("other")]
+    public async Task Put_WithNonMatchingIfMatch_Is412(string kind)
+    {
+        var source = await CreateTenantAsync("cgw");
+        var admin = SourceAdmin(source);
+        var tag = ETagOf(await admin.GetAsync(Url(source), TestContext.Current.CancellationToken)).Tag;
+        var ifMatch = kind switch
+        {
+            "weak" => "W/" + tag, // If-Match compares strongly (RFC 9110 §13.1.1)
+            "garbage" => "not-a-tag",
+            _ => "\"someone-else\""
+        };
+
+        var put = await PutAsync(admin, source, ["cgw-one"], ifMatch);
+
+        put.StatusCode.Should().Be(HttpStatusCode.PreconditionFailed, kind);
+        (await HasConfigurationRowAsync(source)).Should().BeFalse("nothing is written");
+    }
+
+    [Fact]
+    public async Task Put_WithOneOfSeveralTagsOrStar_Matches()
+    {
+        var source = await CreateTenantAsync("cgm");
+        var admin = SourceAdmin(source);
+        var tag = ETagOf(await admin.GetAsync(Url(source), TestContext.Current.CancellationToken)).Tag;
+
+        (await PutAsync(admin, source, ["cgm-one"], $"\"old\", {tag}")).StatusCode.Should().Be(HttpStatusCode.OK);
+        (await PutAsync(admin, source, ["cgm-two"], "*")).StatusCode.Should().Be(HttpStatusCode.OK);
+
+        (await ReadListAsync(await admin.GetAsync(Url(source), TestContext.Current.CancellationToken)))
+            .Should().Equal(["cgm-two"]);
+    }
+
+    [Fact]
+    public async Task ParallelPuts_WithTheSameIfMatch_ExactlyOneWins()
+    {
+        // A fresh tenant without the row: the parallel first writes also race on the insert.
+        var source = await CreateTenantAsync("cgr");
+        var tag = ETagOf(await SourceAdmin(source).GetAsync(Url(source), TestContext.Current.CancellationToken)).Tag;
+
+        var responses = await Task.WhenAll(Enumerable.Range(0, 6)
+            .Select(i => PutAsync(SourceAdmin(source), source, [$"cgr-{i}"], tag)));
+
+        responses.Select(r => r.StatusCode).Should().ContainSingle(c => c == HttpStatusCode.OK);
+        responses.Where(r => r.StatusCode != HttpStatusCode.OK).Select(r => r.StatusCode)
+            .Should().AllBeEquivalentTo(HttpStatusCode.PreconditionFailed);
+        var winner = await ReadListAsync(responses.Single(r => r.StatusCode == HttpStatusCode.OK));
+        (await ReadListAsync(await SourceAdmin(source).GetAsync(Url(source), TestContext.Current.CancellationToken)))
+            .Should().Equal(winner, "the stored list is the winner's");
+    }
+
+    [Fact]
+    public async Task Put_WithoutIfMatch_ByDefault_StillReplaces_ForClientsThatDoNotSendItYet()
+    {
+        var source = await CreateTenantAsync("cgl");
+
+        (await PutAsync(SourceAdmin(source), source, ["cgl-one"])).StatusCode.Should().Be(HttpStatusCode.OK);
+
+        (await ReadListAsync(await SourceAdmin(source).GetAsync(Url(source), TestContext.Current.CancellationToken)))
+            .Should().Equal(["cgl-one"]);
+    }
+
+    [Fact]
+    public async Task Put_WithoutIfMatch_WhenRequired_Is428_AndChangesNothing()
+    {
+        var source = await CreateTenantAsync("cgq");
+        using var host = Factory.WithWebHostBuilder(b => b.ConfigureTestServices(services =>
+            services.PostConfigure<OctoIdentityServicesOptions>(o => o.CrossTenantGrantPermissions.RequireIfMatch = true)));
+        var admin = HostAdmin(host);
+
+        var withoutIfMatch = await PutAsync(admin, source, ["cgq-one"]);
+
+        withoutIfMatch.StatusCode.Should().Be((HttpStatusCode)StatusCodes.Status428PreconditionRequired);
+        (await ProblemCodeAsync(withoutIfMatch)).Should().Be(CrossTenantGrantPermissionsController.IfMatchRequiredCode);
+        (await HasConfigurationRowAsync(source)).Should().BeFalse("nothing is written");
+
+        var tag = ETagOf(await admin.GetAsync(Url(source), TestContext.Current.CancellationToken)).Tag;
+        (await PutAsync(admin, source, ["cgq-one"], tag)).StatusCode.Should().Be(HttpStatusCode.OK,
+            "with If-Match the same PUT goes through");
+    }
+
+    [Fact]
+    public async Task UnchangedPut_WritesNothing_NotEvenChangedByOrChangedAtUtc()
+    {
+        var source = await CreateTenantAsync("cgn");
+        var first = await PutAsync(SourceAdmin(source), source, ["cgn-a", "cgn-b"]);
+        first.StatusCode.Should().Be(HttpStatusCode.OK);
+        var stored = await ReadConfigurationThroughTheEngineAsync(source);
+
+        var otherAdmin = CreateAuthenticatedClient(userId: $"sadmin-{Guid.NewGuid():N}", userName: "another-admin",
+            roles: [UserManagement, TenantManagement]);
+        var unchanged = await PutAsync(otherAdmin, source, ["CGN-B", " cgn-a "], ETagOf(first).Tag);
+
+        unchanged.StatusCode.Should().Be(HttpStatusCode.OK);
+        ETagOf(unchanged).Tag.Should().Be(ETagOf(first).Tag, "the list and so its tag are unchanged");
+        var after = await ReadConfigurationThroughTheEngineAsync(source);
+        after!.ChangedBy.Should().Be(stored!.ChangedBy, "an unchanged PUT does not record its caller");
+        after.ChangedAtUtc.Should().Be(stored.ChangedAtUtc);
+    }
+
     // ---------------------------------------------------------------- helpers
 
     private HttpClient SourceAdmin(string tenantId)
@@ -292,9 +429,41 @@ public class CrossTenantGrantPermissionsTests : IntegrationTestBase
 
     private static string Url(string tenantId) => $"/{tenantId}/v1/CrossTenantGrantPermissions";
 
-    private static Task<HttpResponseMessage> PutAsync(HttpClient client, string tenantId, List<string> targets)
-        => client.PutAsJsonAsync(Url(tenantId), new CrossTenantGrantPermissionsDto { TargetTenantIds = targets },
-            TestContext.Current.CancellationToken);
+    private static async Task<HttpResponseMessage> PutAsync(HttpClient client, string tenantId, List<string> targets,
+        string? ifMatch = null)
+    {
+        using var request = new HttpRequestMessage(HttpMethod.Put, Url(tenantId));
+        request.Content = JsonContent.Create(new CrossTenantGrantPermissionsDto { TargetTenantIds = targets });
+        if (ifMatch != null)
+        {
+            request.Headers.TryAddWithoutValidation("If-Match", ifMatch);
+        }
+
+        return await client.SendAsync(request, TestContext.Current.CancellationToken);
+    }
+
+    private static System.Net.Http.Headers.EntityTagHeaderValue ETagOf(HttpResponseMessage response)
+    {
+        response.Headers.ETag.Should().NotBeNull("every answer with the list carries its ETag (AB#8432)");
+        return response.Headers.ETag!;
+    }
+
+    private static async Task<string?> ProblemCodeAsync(HttpResponseMessage response)
+        => JsonNode.Parse(await response.Content.ReadAsStringAsync(TestContext.Current.CancellationToken))?["code"]
+            ?.GetValue<string>();
+
+    private static HttpClient HostAdmin(Microsoft.AspNetCore.Mvc.Testing.WebApplicationFactory<Program> host)
+    {
+        var client = host.CreateClient();
+        client.DefaultRequestHeaders.Authorization =
+            new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", "test-token");
+        client.DefaultRequestHeaders.Add(TestAuthHandler.UserIdHeader, $"sadmin-{Guid.NewGuid():N}");
+        client.DefaultRequestHeaders.Add(TestAuthHandler.UserNameHeader, "source-admin");
+        client.DefaultRequestHeaders.Add(TestAuthHandler.EmailHeader, "source-admin@example.com");
+        client.DefaultRequestHeaders.Add(TestAuthHandler.RoleHeader, UserManagement);
+        client.DefaultRequestHeaders.Add(TestAuthHandler.RoleHeader, TenantManagement);
+        return client;
+    }
 
     private static async Task<List<string>> ReadListAsync(HttpResponseMessage response)
     {

@@ -201,10 +201,33 @@ public class OctoIdentityServicesOptions
     public SourceUserLookupRateLimitOptions SourceUserLookupRateLimit { get; set; } = new();
 
     /// <summary>
+    ///     AB#8432: optimistic concurrency of <c>PUT CrossTenantGrantPermissions</c>.
+    /// </summary>
+    public CrossTenantGrantPermissionsOptions CrossTenantGrantPermissions { get; set; } = new();
+
+    /// <summary>
     ///     AB#5530: encryption at rest of the ASP.NET Data Protection key ring (configuration section
     ///     <c>Identity:DataProtection</c>).
     /// </summary>
     public IdentityDataProtectionOptions DataProtection { get; set; } = new();
+}
+
+/// <summary>
+///     Optimistic concurrency of the cross-tenant grant allow-list (<c>GET/PUT {tenant}/v1/CrossTenantGrantPermissions</c>,
+///     AB#8432). <c>GET</c> and <c>PUT</c> always answer an <c>ETag</c>, and a <c>PUT</c> with <c>If-Match</c> is always
+///     checked (stale: <c>412</c>, list unchanged).
+/// </summary>
+public class CrossTenantGrantPermissionsOptions
+{
+    /// <summary>
+    ///     <c>Identity:CrossTenantGrantPermissions:RequireIfMatch</c> (env
+    ///     <c>OCTO_IDENTITY__CROSSTENANTGRANTPERMISSIONS__REQUIREIFMATCH</c>). <c>true</c>: a <c>PUT</c> without
+    ///     <c>If-Match</c> answers <c>428 Precondition Required</c>. <c>false</c> (default during the client rollout): a
+    ///     <c>PUT</c> without <c>If-Match</c> replaces the list unconditionally, as before AB#8432, so clients that do
+    ///     not send it yet (Refinery Studio AB#8430, octo-sdk before AB#8432) keep working. Switch it on once every client
+    ///     sends <c>If-Match</c>; see <c>docs/CONCEPT-SIBLING-TENANT-GRANTS.md</c> §6.
+    /// </summary>
+    public bool RequireIfMatch { get; set; }
 }
 
 /// <summary>

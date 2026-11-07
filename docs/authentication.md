@@ -719,6 +719,9 @@ PUT {S}/v1/CrossTenantGrantPermissions  { "targetTenantIds": ["customer-a", "cus
 - **Audit:** every change is written into S's event log, category `Identity.CrossTenantGrantPermissionsChanged`
   (details `actorTenantId`, `actorName`, `sourceTenantId`, `permittedTargetTenantIds`, `addedTargetTenantIds`,
   `removedTargetTenantIds`); a `PUT` that leaves the list unchanged writes no event. See *Cross-Tenant Grant Audit Events*.
+- **Concurrent edits (AB#8432):** `GET` and `PUT` answer an `ETag`; a `PUT` with a stale `If-Match` gets `412` and
+  changes nothing. Without `If-Match` the answer is `428` once `Identity:CrossTenantGrantPermissions:RequireIfMatch` is
+  on (default off during the client rollout). An unchanged `PUT` writes nothing.
 - **Storage:** tenant configuration row `CrossTenantGrantPermissions` in S's database — no CK model change. Details:
   `docs/CONCEPT-SIBLING-TENANT-GRANTS.md` §6.
 

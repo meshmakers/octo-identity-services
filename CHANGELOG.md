@@ -117,6 +117,18 @@ Notable changes of the OctoMesh identity services. The CK model `System.Identity
   so `xt_accountingmanagement_xt_octosystem_<n>` in test-2 `gastrodemo`/`handelsdemo` was a candidate with
   `emptyMappings=none` (the kept `xt_karlplus_xt_accountingmanagement_…` matched the same mapping) and Apply would have
   left its empty mapping behind.
+- **Concurrent edits of the cross-tenant allow-list cannot overwrite each other (AB#8432, security).**
+  `GET`/`PUT CrossTenantGrantPermissions` answer an `ETag` (strong, derived from the normalized list only). A `PUT` with
+  a stale `If-Match` answers `412` (problem code `CrossTenantGrantPermissionsChanged`, current tag in `ETag`) and writes
+  nothing; read, compare and write run in one MongoDB transaction, so parallel `PUT`s with the same tag have exactly one
+  winner. A `PUT` without `If-Match` answers `428` (`IfMatchRequired`) when the new option
+  `Identity:CrossTenantGrantPermissions:RequireIfMatch` (env `OCTO_IDENTITY__CROSSTENANTGRANTPERMISSIONS__REQUIREIFMATCH`)
+  is on; it is **off by default** during the client rollout, so Refinery Studio (AB#8430), octo-frontend-libraries and
+  octo-sdk callers without `If-Match` keep working (last writer wins, as before). A `PUT` that leaves the list unchanged
+  now writes nothing at all — not even `changedBy`/`changedAtUtc` (Ariadne's review of #275) — and records no event.
+  The identity CORS policy exposes the `ETag` header to browser clients. Contract and rollout order:
+  `docs/CONCEPT-SIBLING-TENANT-GRANTS.md` §6.1.
+
 - **Source tenant decides which tenants may look up and grant its users (AB#8345, security).** `GET/PUT
   {S}/v1/CrossTenantGrantPermissions` (`{ "targetTenantIds": [...] }`) keeps the allow-list of a source tenant S;
   only S's administrators (`UserManagement` and `TenantManagement`, token issued for S —

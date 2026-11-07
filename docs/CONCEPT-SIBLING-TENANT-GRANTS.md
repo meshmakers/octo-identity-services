@@ -226,6 +226,11 @@ and stable; title and detail are English text for humans. The codes are PascalCa
 | `UnknownGroup` | 400 | create | `unknownGroupIds` |
 | `ExternalTenantUserMappingAlreadyExists` | 409 | create (existing, AB#6975) | `existingMappingId` |
 | `CrossTenantSourceNotAncestor` | 403 | `adminProvisioning` writes only (existing, AB#8339) | — |
+| `CrossTenantGrantPermissionsChanged` | 412 | `PUT CrossTenantGrantPermissions` (AB#8432) | — (current tag in the `ETag` header) |
+| `IfMatchRequired` | 428 | `PUT CrossTenantGrantPermissions` (AB#8432, only with `RequireIfMatch` on) | — |
+
+The two AB#8432 codes are constants of the identity service (`CrossTenantGrantPermissionsController.ListChangedCode`,
+`.IfMatchRequiredCode`), not yet of `CrossTenantGrantProblemCodes` in the SDK; clients branch on the status.
 
 ## 6. Source-tenant permission (AB#8345)
 
@@ -263,8 +268,45 @@ As built (AB#8345, `src/IdentityServerPersistence/Services/SourceTenantGrants/`)
   validation (`400`, nothing written): list required, no empty entry, valid tenant id format (≤ 64 ASCII letters,
   digits, `-`, `_`), at most 200 entries, not S itself. Entries are **not** checked for existence, so the route is no
   tenant directory. Each change is logged (`added`, `removed`, caller); every change (added or removed entries) is also written into S's event log as `Identity.CrossTenantGrantPermissionsChanged` (§7); a `PUT` that leaves the list unchanged writes no event.
+- Concurrency (AB#8432, see §6.1).
 - The lookup route (AB#8341) uses the policy now; mapping create (`403 SourceTenantNotPermitted`, AB#8343) and the
   exchange gate and revocation (AB#8343, AB#8344) ask the same `ISourceTenantGrantPolicy`.
+
+### 6.1 Concurrent edits: `ETag` / `If-Match` (AB#8432)
+
+`PUT` replaces the whole list, so two administrators editing at once could lose each other's entry. Optimistic
+concurrency prevents it (decided by Odin, wireframe AB#8426 open point O2):
+
+- `GET` and every successful `PUT` answer an `ETag`: a strong tag derived **from the normalized list only**
+  (SHA-256, quoted). The same list always has the same tag — a tenant that never set the list and one that set `[]`
+  alike — and `changedBy`/`changedAtUtc` are not part of it. The identity CORS policy exposes `ETag`, so a browser
+  client of another origin can read it.
+- `PUT` with `If-Match: <tag of the GET>`: when the list changed in between, the answer is **`412`**
+  (`CrossTenantGrantPermissionsChanged`, the current tag in `ETag`) and **nothing is written**. The client reads the
+  list again and applies its change to the current list. Comparison is strong (RFC 9110 §13.1.1): a weak tag
+  (`W/"…"`) or an unparsable header never matches; a list of tags matches when one does; `*` matches any list.
+- `PUT` without `If-Match`: **`428`** (`IfMatchRequired`, nothing written) when
+  `Identity:CrossTenantGrantPermissions:RequireIfMatch` is on (env `OCTO_IDENTITY__CROSSTENANTGRANTPERMISSIONS__REQUIREIFMATCH=true`).
+  While it is off — the default during the client rollout — the list is replaced unconditionally, as before AB#8432.
+- A `PUT` that leaves the list as it is writes **nothing** — not even `changedBy`/`changedAtUtc` — records no event and
+  answers `200` with the unchanged tag. An unreadable row (written by hand) reads as empty and is always rewritten, so
+  a `PUT` repairs it.
+- Atomic: the read, the comparison and the write run in one MongoDB transaction. A concurrent change after our
+  snapshot makes MongoDB refuse the write; the transaction runs again on the new state (up to 5 attempts), so a stale
+  tag ends in `412`, never in a silent overwrite. The row this store inserts has a fixed runtime id (timestamp part
+  zero), so two first writes of a tenant collide instead of creating two rows. Parallel `PUT`s with the same tag:
+  exactly one wins, the others get `412`.
+
+Client rollout (switch order):
+
+1. Identity with AB#8432 (`RequireIfMatch` off): `ETag` everywhere, `If-Match` checked when sent. Clients without it
+   (Refinery Studio AB#8430, octo-frontend-libraries `setCrossTenantGrantPermissions(ids)`, octo-sdk
+   `UpdateCrossTenantGrantPermissions(dto)` without `ifMatch`) keep working unchanged, with last-writer-wins.
+2. Clients read the `ETag` and send it as `If-Match` (octo-frontend-libraries: read the header and pass it back;
+   Studio: keep the tag of the loaded list; octo-sdk: a get method that returns the tag). `412` is already handled
+   (`CrossTenantGrantPermissionsError` `Conflict`, Studio reloads).
+3. `RequireIfMatch=true` per cluster once every client of that cluster sends `If-Match`; later the default becomes
+   `true`.
 
 ## 7. Audit events (AB#8342)
 
@@ -358,4 +400,5 @@ lookup only against identity services that contain AB#8341/AB#8343.
 | AB#8343 | create with `groupIds`, exchange gate for sibling sources |
 | AB#8344 | revocation at the next exchange |
 | AB#8345 | allow-list in S, production `ISourceTenantGrantPolicy`, permission routes |
+| AB#8432 | `ETag` / `If-Match` on the allow-list, unchanged `PUT` writes nothing |
 | AB#8314 | Studio dialog (Feature of Studio & UX) |
