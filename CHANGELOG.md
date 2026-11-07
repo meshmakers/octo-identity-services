@@ -66,6 +66,20 @@ Notable changes of the OctoMesh identity services. The CK model `System.Identity
 
 ### Added
 
+- **Sibling-tenant users granted with chosen groups (AB#8343).** `POST {T}/v1/ExternalTenantUserMappings` takes optional
+  `groupIds` (groups of T; an unknown id answers `400` problem `UnknownGroup` with `unknownGroupIds`, nothing stored) and
+  checks the source: a registry ancestor of T, or a tenant whose allow-list permits T (AB#8345), and a user with that id
+  must exist there (for a sibling also: no `xt_` user, may sign in). Every refusal answers one `403` problem
+  `SourceTenantNotPermitted`. The stored user name — and the one in the grant audit events — is taken from the source
+  tenant's user record, never from the request's `sourceUserName`. The groups' roles go through the role-change guard
+  (AB#7927) like direct roles. No OctoTenant login provider is created. The tenant-switch gate
+  (`ValidateCrossTenantAccessAsync`, token exchange and the other switch paths) admits a non-ancestor source only when T
+  holds a mapping for the user and the source permits T at that moment; the first exchange creates the `xt_` user with
+  exactly the mapping's group and direct roles. A withdrawn permission answers the exchange with `access_denied` /
+  `grant_not_permitted`. **Behaviour change:** the route used to store any source tenant and user id unchecked; a mapping
+  for an unrelated tenant or an unknown user is now refused (`403`), also under `CrossTenantAncestry=Warn`. Contract:
+  `docs/CONCEPT-SIBLING-TENANT-GRANTS.md` §2.2, §8; `docs/authentication.md`, *Granting a Sibling-Tenant User With Groups*.
+
 - **Cleanup of rights-less `xt_` shadow users (AB#8305).** `IdentityApiAuthorization:ShadowUserCleanup`
   (`OCTO_IDENTITYAPIAUTHORIZATION__SHADOWUSERCLEANUP`, Helm `services.identity.shadowUserCleanup`) = `Off` (default) /
   `DryRun` / `Apply`. Two minutes after the start, identity checks every `xt_` user of the system tenant and of every

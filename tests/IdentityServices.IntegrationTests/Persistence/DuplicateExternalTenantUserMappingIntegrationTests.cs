@@ -157,6 +157,7 @@ public class DuplicateExternalTenantUserMappingIntegrationTests : IClassFixture<
             Substitute.For<IRoleChangeGuard>(), Substitute.For<IRoleChangeRefusals>(),
             Substitute.For<Meshmakers.Octo.Backend.IdentityServices.CrossTenantAudit.ICrossTenantGrantAuditRecorder>(),
             Substitute.For<IMultiTenancyResolverService>(),
+            AdmitsLogin(ctx),
             NullLogger<ExternalTenantUserMappingsController>.Instance);
 
         var result = await controller.Create(new CreateExternalTenantUserMappingDto
@@ -358,5 +359,16 @@ public class DuplicateExternalTenantUserMappingIntegrationTests : IClassFixture<
 
         public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception? exception,
             Func<TState, Exception?, string> formatter) => _levels.Add(logLevel);
+    }
+
+    /// <summary>The AB#8343 source gate admits the login's source user (this test is about the 409, not the gate).</summary>
+    private static IdentityServerPersistence.Services.SourceTenantGrants.ISourceTenantGrantAdmission AdmitsLogin(
+        Context ctx)
+    {
+        var admission = Substitute.For<IdentityServerPersistence.Services.SourceTenantGrants.ISourceTenantGrantAdmission>();
+        admission.AdmitAsync(default!, default, default, default).ReturnsForAnyArgs(
+            new IdentityServerPersistence.Services.SourceTenantGrants.SourceTenantGrantSource(
+                ctx.Login.SourceTenantId, ctx.Login.SourceUserId, ctx.Login.SourceUserName, true));
+        return admission;
     }
 }

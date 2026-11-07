@@ -214,10 +214,12 @@ public class GroupRoleChangeGuardTests : IntegrationTestBase, IDisposable
         var secret = await NewRoleAsync(builtIn: true);
         var custom = await NewRoleAsync();
 
-        var create = await PostJsonAsync(Caller(caller, held), "externalTenantUserMappings", NewMappingBody(await RoleIdAsync(secret)));
+        var create = await PostJsonAsync(Caller(caller, held), "externalTenantUserMappings",
+            await NewMappingBodyAsync(await RoleIdAsync(secret)));
         var ok = await PostJsonAsync(Caller(caller, held), "externalTenantUserMappings",
-            NewMappingBody(await RoleIdAsync(held), await RoleIdAsync(custom)));
-        ok.StatusCode.Should().Be(HttpStatusCode.Created);
+            await NewMappingBodyAsync(await RoleIdAsync(held), await RoleIdAsync(custom)));
+        ok.StatusCode.Should().Be(HttpStatusCode.Created,
+            await ok.Content.ReadAsStringAsync(TestContext.Current.CancellationToken));
         var mappingId = (await ok.Content.ReadFromJsonAsync<JsonElement>(TestContext.Current.CancellationToken)).GetProperty("id").GetString();
         var update = await PutJsonAsync(Caller(caller, held), $"externalTenantUserMappings/{mappingId}",
             new { roleIds = new[] { await RoleIdAsync(held), await RoleIdAsync(secret) } });
@@ -510,13 +512,65 @@ public class GroupRoleChangeGuardTests : IntegrationTestBase, IDisposable
 
     private static string NewName(string prefix) => $"{prefix}_{Guid.NewGuid():N}";
 
-    private static object NewMappingBody(params string[] roleIds) => new
+    /// <summary>
+    ///     A mapping body for a real user of a tenant that permits this one: the create gate of AB#8343 refuses an unknown
+    ///     source before the role-change guard runs.
+    /// </summary>
+    private async Task<object> NewMappingBodyAsync(params string[] roleIds)
     {
-        sourceTenantId = "parent_" + Guid.NewGuid().ToString("N")[..8],
-        sourceUserId = OctoObjectId.GenerateNewId().ToString(),
-        sourceUserName = NewName("home"),
-        roleIds
-    };
+        var sourceTenantId = ("src" + Guid.NewGuid().ToString("N"))[..20];
+        var systemContext = Factory.Services.GetRequiredService<Meshmakers.Octo.Runtime.Contracts.MongoDb.ISystemContext>();
+        using (var session = await systemContext.GetAdminSessionAsync())
+        {
+            session.StartTransaction();
+            await systemContext.CreateChildTenantAsync(session, sourceTenantId, sourceTenantId);
+            await session.CommitTransactionAsync();
+        }
+
+        using (var scope = CreateScope())
+        {
+            await scope.ServiceProvider
+                .GetRequiredService<Meshmakers.Octo.Services.Infrastructure.Services.IDefaultConfigurationCreatorService>()
+                .SetupAsync(sourceTenantId);
+        }
+
+        Factory.SourceTenantGrantPolicy.Permit(sourceTenantId, NormalizedSystemTenantId);
+        var repository = (await systemContext.TryFindTenantRepositoryAsync(sourceTenantId))!;
+        var userName = NewName("home");
+        var user = new RtUser
+        {
+            RtId = OctoObjectId.GenerateNewId(), UserName = userName, NormalizedUserName = userName.ToUpperInvariant(),
+            EmailConfirmed = true, SecurityStamp = Guid.NewGuid().ToString()
+        };
+        using (var session = await repository.GetSessionAsync())
+        {
+            session.StartTransaction();
+            await repository.InsertOneRtEntityAsync(session, user);
+            await session.CommitTransactionAsync();
+        }
+
+        // The services read tenants through the cached registry of the host the requests go to (miss refresh throttled);
+        // wait until it knows the new tenant.
+        var deadline = DateTimeOffset.UtcNow + TenantRegistry.MissRefreshInterval + TimeSpan.FromSeconds(10);
+        var known = false;
+        while (!known && DateTimeOffset.UtcNow < deadline)
+        {
+            using var scope = _host.Services.CreateScope();
+            known = await scope.ServiceProvider.GetRequiredService<ITenantRegistry>()
+                .TryGetRepositoryAsync(sourceTenantId) != null;
+            if (!known)
+            {
+                await Task.Delay(TimeSpan.FromMilliseconds(500), TestContext.Current.CancellationToken);
+            }
+        }
+
+        if (!known)
+        {
+            throw new InvalidOperationException($"Tenant '{sourceTenantId}' did not appear in the tenant registry");
+        }
+
+        return new { sourceTenantId, sourceUserId = user.RtId.ToString(), sourceUserName = userName, roleIds };
+    }
 
     /// <summary>A role; a built-in one carries an rtWellKnownName like the roles of the Bootstrap blueprint.</summary>
     private async Task<string> NewRoleAsync(bool builtIn = false)

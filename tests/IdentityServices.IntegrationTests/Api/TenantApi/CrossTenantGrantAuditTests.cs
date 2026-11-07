@@ -199,38 +199,35 @@ public class CrossTenantGrantAuditTests : IntegrationTestBase, IDisposable
     }
 
     [Fact]
-    public async Task GrantNamingANonPermittedSourceTenant_IsRecordedOnlyInTarget_AndWritesNothingIntoThatTenant()
+    public async Task GrantNamingANonPermittedSourceTenant_IsRefused_AndALegacyMappingWritesNothingIntoThatTenant()
     {
-        // AB#8436: the source tenant and user name of a mapping are free input of T's admin. A tenant U that is no
-        // registry ancestor of T and does not permit T must not receive grant events (no foreign or flooded log).
+        // AB#8343: the create gate refuses a tenant U that is no registry ancestor of T and does not permit T — nothing is
+        // stored, no event is written. AB#8436: a mapping naming U that exists from before the gate (inserted directly)
+        // still records its change and removal in T only.
         var a = await ArrangeAsync();
         var foreign = await ForeignTenantAsync();
         var caller = NewCallerName();
         var client = AdminClient(caller);
         var fabricated = $"fake{Guid.NewGuid():N}"[..20];
+        var user = await InsertUserAsync(foreign, "nope");
 
         var create = await client.PostAsJsonAsync($"/{a.Target}/v1/ExternalTenantUserMappings",
             new CreateExternalTenantUserMappingDto
             {
-                SourceTenantId = foreign, SourceUserId = OctoObjectId.GenerateNewId().ToString(),
-                SourceUserName = fabricated, RoleIds = []
+                SourceTenantId = foreign, SourceUserId = user.Id.ToString(), SourceUserName = fabricated, RoleIds = []
             }, TestContext.Current.CancellationToken);
-        // The create gate is AB#8343; this bug only changes where the audit event goes.
-        create.StatusCode.Should().Be(HttpStatusCode.Created,
-            await create.Content.ReadAsStringAsync(TestContext.Current.CancellationToken));
-        var mappingId = (await create.Content.ReadFromJsonAsync<ExternalTenantUserMappingDto>(
-            TestContext.Current.CancellationToken))!.Id.ToString()!;
+        create.StatusCode.Should().Be(HttpStatusCode.Forbidden);
+        Snapshot().Should().NotContain(e => e.Category == CrossTenantGrantAuditEvents.GrantCreated &&
+                                            e.Text.Contains(fabricated));
+
+        var mappingId = await InsertLegacyMappingAsync(a.Target, foreign, fabricated);
         (await client.PutAsJsonAsync($"/{a.Target}/v1/ExternalTenantUserMappings/{mappingId}",
                 new UpdateExternalTenantUserMappingDto { RoleIds = [] }, TestContext.Current.CancellationToken))
             .StatusCode.Should().Be(HttpStatusCode.OK);
         (await client.DeleteAsync($"/{a.Target}/v1/ExternalTenantUserMappings/{mappingId}",
             TestContext.Current.CancellationToken)).StatusCode.Should().Be(HttpStatusCode.OK);
 
-        foreach (var name in new[]
-                 {
-                     CrossTenantGrantAuditEvents.GrantCreated, CrossTenantGrantAuditEvents.GrantChanged,
-                     CrossTenantGrantAuditEvents.GrantRemoved
-                 })
+        foreach (var name in new[] { CrossTenantGrantAuditEvents.GrantChanged, CrossTenantGrantAuditEvents.GrantRemoved })
         {
             EventsOf(name, "mappingId", mappingId).Should().ContainSingle("{0} is recorded in T only", name)
                 .Which.TenantId.Should().Be(a.Target);
@@ -244,31 +241,24 @@ public class CrossTenantGrantAuditTests : IntegrationTestBase, IDisposable
     [Fact]
     public async Task GrantNamingASourceTenant_ThatListsTheTargetOnItsAllowList_IsRecordedInTargetAndSource()
     {
-        // AB#8436 together with AB#8345: the gate asks the production allow-list (not an arranged test pair). Before U
-        // lists T, a grant naming U stays in T; after U's administrator puts T on U's allow-list, it reaches U as well.
+        // AB#8436 together with AB#8345 and AB#8343: the gate asks the production allow-list (not an arranged test pair).
+        // Before U lists T, a grant naming U is refused; after U's administrator puts T on U's allow-list, it is stored
+        // and reaches U as well.
         var a = await ArrangeAsync();
         var foreign = await ForeignTenantAsync();
         var caller = NewCallerName();
         var client = AdminClient(caller);
         var user = await InsertUserAsync(foreign, "allow");
 
-        async Task<string> CreateMappingAsync()
-        {
-            var create = await client.PostAsJsonAsync($"/{a.Target}/v1/ExternalTenantUserMappings",
+        Task<HttpResponseMessage> CreateMappingAsync()
+            => client.PostAsJsonAsync($"/{a.Target}/v1/ExternalTenantUserMappings",
                 new CreateExternalTenantUserMappingDto
                 {
-                    SourceTenantId = foreign, SourceUserId = OctoObjectId.GenerateNewId().ToString(),
-                    SourceUserName = user.UserName, RoleIds = []
+                    SourceTenantId = foreign, SourceUserId = user.Id.ToString(), SourceUserName = user.UserName,
+                    RoleIds = []
                 }, TestContext.Current.CancellationToken);
-            create.StatusCode.Should().Be(HttpStatusCode.Created,
-                await create.Content.ReadAsStringAsync(TestContext.Current.CancellationToken));
-            return (await create.Content.ReadFromJsonAsync<ExternalTenantUserMappingDto>(
-                TestContext.Current.CancellationToken))!.Id.ToString()!;
-        }
 
-        var before = await CreateMappingAsync();
-        EventsOf(CrossTenantGrantAuditEvents.GrantCreated, "mappingId", before).Should()
-            .ContainSingle("U does not list T yet").Which.TenantId.Should().Be(a.Target);
+        (await CreateMappingAsync()).StatusCode.Should().Be(HttpStatusCode.Forbidden, "U does not list T yet");
 
         var sourceAdmin = AdminClient(NewCallerName());
         sourceAdmin.DefaultRequestHeaders.Add(TestAuthHandler.RoleHeader, "TenantManagement");
@@ -277,9 +267,53 @@ public class CrossTenantGrantAuditTests : IntegrationTestBase, IDisposable
                 TestContext.Current.CancellationToken))
             .StatusCode.Should().Be(HttpStatusCode.OK);
 
-        var after = await CreateMappingAsync();
+        var create = await CreateMappingAsync();
+        create.StatusCode.Should().Be(HttpStatusCode.Created,
+            await create.Content.ReadAsStringAsync(TestContext.Current.CancellationToken));
+        var after = (await create.Content.ReadFromJsonAsync<ExternalTenantUserMappingDto>(
+            TestContext.Current.CancellationToken))!.Id.ToString()!;
         AssertOnceInTargetAndSource(EventsOf(CrossTenantGrantAuditEvents.GrantCreated, "mappingId", after), a.Target,
             foreign);
+    }
+
+    [Fact]
+    public async Task GrantNamingAnAncestor_IncludingTheSystemTenant_RecordsTheUserNameOfTheSourceRecord_NeverTheRequestsName()
+    {
+        // AB#8343 (Ariadne's review of #277): the user name of a mapping and of its events comes from S's user record. A
+        // free-text name for an ancestor S — here the system tenant — never reaches S's event log; a user id S does not
+        // have is refused and writes nothing.
+        var a = await ArrangeAsync();
+        var caller = NewCallerName();
+        var client = AdminClient(caller);
+        var real = await InsertUserAsync(NormalizedSystemTenantId, "anc");
+        var fabricated = $"fabricated{Guid.NewGuid():N}"[..24];
+
+        var create = await client.PostAsJsonAsync($"/{a.Target}/v1/ExternalTenantUserMappings",
+            new CreateExternalTenantUserMappingDto
+            {
+                SourceTenantId = NormalizedSystemTenantId, SourceUserId = real.Id.ToString(),
+                SourceUserName = fabricated, RoleIds = []
+            }, TestContext.Current.CancellationToken);
+        create.StatusCode.Should().Be(HttpStatusCode.Created,
+            await create.Content.ReadAsStringAsync(TestContext.Current.CancellationToken));
+        var dto = (await create.Content.ReadFromJsonAsync<ExternalTenantUserMappingDto>(
+            TestContext.Current.CancellationToken))!;
+        dto.SourceUserName.Should().Be(real.UserName, "the stored name is the one of the source tenant's record");
+
+        var created = EventsOf(CrossTenantGrantAuditEvents.GrantCreated, "mappingId", dto.Id.ToString()!);
+        AssertOnceInTargetAndSource(created, a.Target, NormalizedSystemTenantId);
+        created.Should().AllSatisfy(e => e.Details.Should().Contain("sourceUserName", real.UserName));
+
+        var ghost = await client.PostAsJsonAsync($"/{a.Target}/v1/ExternalTenantUserMappings",
+            new CreateExternalTenantUserMappingDto
+            {
+                SourceTenantId = NormalizedSystemTenantId, SourceUserId = OctoObjectId.GenerateNewId().ToString(),
+                SourceUserName = fabricated, RoleIds = []
+            }, TestContext.Current.CancellationToken);
+        ghost.StatusCode.Should().Be(HttpStatusCode.Forbidden, "the system tenant has no user with that id");
+
+        Snapshot().Should().NotContain(e => e.Text.Contains(fabricated),
+            "a name the administrator of T typed is written into no event log, not even T's");
     }
 
     [Fact]
@@ -348,7 +382,7 @@ public class CrossTenantGrantAuditTests : IntegrationTestBase, IDisposable
 
         var outcome = await ExchangeAsync(a.Target, a.Source, user.Id.ToString());
 
-        outcome.Error.Should().NotBeNull("a sibling source is no ancestor; AB#8343 has not opened the gate yet");
+        outcome.Error.Should().NotBeNull("a sibling source without a grant in T is refused (AB#8343)");
         var events = EventsOf(CrossTenantGrantAuditEvents.ExchangeRefused, "sourceUserId", user.Id.ToString());
         AssertOnceInTargetAndSource(events, a.Target, a.Source);
         events.Should().AllSatisfy(e =>
@@ -681,5 +715,23 @@ public class CrossTenantGrantAuditTests : IntegrationTestBase, IDisposable
 
         await new GroupStore(new FixedTenantResolver(repo)).AddMemberExternalUserAsync(groupId, mappingId);
         return groupName;
+    }
+
+    /// <summary>A mapping inserted directly into T, as one created before the AB#8343 gate could exist.</summary>
+    private async Task<string> InsertLegacyMappingAsync(string target, string sourceTenantId, string sourceUserName)
+    {
+        var repo = await RepositoryOfAsync(target);
+        var mappingId = OctoObjectId.GenerateNewId();
+        using var session = await repo.GetSessionAsync();
+        session.StartTransaction();
+        await repo.InsertOneRtEntityAsync(session, new RtExternalTenantUserMapping
+        {
+            RtId = mappingId,
+            SourceTenantId = sourceTenantId,
+            SourceUserId = OctoObjectId.GenerateNewId().ToString(),
+            SourceUserName = sourceUserName
+        });
+        await session.CommitTransactionAsync();
+        return mappingId.ToString();
     }
 }

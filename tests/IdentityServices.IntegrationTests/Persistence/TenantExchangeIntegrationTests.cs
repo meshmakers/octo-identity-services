@@ -1001,6 +1001,7 @@ public class TenantExchangeIntegrationTests : IClassFixture<IdentityServicesFixt
             new PasswordHasher<RtUser>(),
             new CrossTenantShadowUserChainResolver(systemContext),
             TestAncestryGuards.Create(systemContext),
+            new IdentityServerPersistence.Services.SourceTenantGrants.DenyNonAncestorsSourceTenantGrantPolicy(),
             Options.Create(new IdentityOptions()),
             NullLogger<CrossTenantAuthenticationService>.Instance);
     }

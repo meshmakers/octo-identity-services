@@ -99,6 +99,8 @@ public static class RuntimeEngineBuilderExtensions
         builder.Services.TryAddSingleton<ISourceUserLookupAuditSink, NoOpSourceUserLookupAuditSink>();
         builder.Services.TryAddSingleton<ISourceUserLookupRateLimiter, SourceUserLookupRateLimiter>();
         builder.Services.AddScoped<ISourceUserLookupService, SourceUserLookupService>();
+        // AB#8343: the gate of mapping create — registry ancestor or permitted by S, and the user exists in S.
+        builder.Services.AddScoped<ISourceTenantGrantAdmission, SourceTenantGrantAdmission>();
         // AB#7804: verifies the second factor of a cross-tenant user against the SOURCE tenant (lockout included).
         builder.Services.AddScoped<ICrossTenantSecondFactorVerifier, CrossTenantSecondFactorVerifier>();
         builder.Services.AddScoped<ICrossTenantUserProvisioningService, CrossTenantUserProvisioningService>();

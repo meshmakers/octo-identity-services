@@ -119,6 +119,28 @@ Answers:
 
 For a registry-ancestor source the create behaves as today; `groupIds` works for ancestors too.
 
+As built (AB#8343):
+
+- Order of the checks: source gate (`403 SourceTenantNotPermitted`) → duplicate (`409`) → groups (`400 UnknownGroup`) →
+  role-change guard (`403`) → write. The gate is `ISourceTenantGrantAdmission`
+  (`src/IdentityServerPersistence/Services/SourceTenantGrants/SourceTenantGrantAdmission.cs`): **registry** ancestry
+  (`CrossTenantAncestry=Warn` does not widen it, as for the lookup) or `ISourceTenantGrantPolicy`; then the user is read
+  by `sourceUserId` from S — for every source, also an ancestor and the system tenant. For a non-ancestor S the user must
+  also be no `xt_` shadow user and may sign in. When S is not registered, the read runs against T's database and is
+  discarded (same idea as the lookup's timing rule).
+- The stored `sourceUserName` (and the name in the grant events of §7) is the user name of S's user record, the stored
+  `sourceTenantId` the registry's spelling of S. The request's `sourceUserName` is not used (Ariadne's review of AB#8436:
+  a free-text name for an ancestor S, the system tenant included, must not reach S's event log).
+- `groupIds`: duplicates count once; a malformed id or the id of another tenant's group is unknown. The mapping and its
+  `GroupMember` edges are written in one transaction (`IExternalTenantUserMappingStore.InsertWithGroupsAsync`). The `201`
+  body carries `groupNames`.
+- Role-change guard: the effective roles of the groups (nested groups included) count as granted, like `roleIds`
+  (`RoleGraphChange.MappingRoles.GroupIds`).
+- Behaviour change for existing callers: before AB#8343 this route stored any `sourceTenantId` / `sourceUserId`
+  unchecked (the exchange refused unrelated sources later). Now a mapping for a source that is neither a registry ancestor
+  nor permitting T, or for a user id S does not have, is refused with `403` — also under `CrossTenantAncestry=Warn` for a
+  tenant that is an "ancestor" only through T's own providers.
+
 `GET`, `PUT` and `DELETE` keep their shape. `ExternalTenantUserMappingDto` already returns `sourceTenantId`,
 `sourceUserName` and `groupNames`, which is what the granted-users list of AB#8314 shows.
 
@@ -260,7 +282,9 @@ tenant, mapping id, group names. Never the looked-up identifier of a miss in cle
 | `Identity.CrossTenantExchangeRefused` (exchange refused for a sibling source) | T and S |
 | `Identity.CrossTenantGrantPermissionsChanged` (permission list changed, AB#8345) | S |
 
-Grant events name S and the source user exactly as the administrator of T sent them. So that no tenant can place (or
+Grant events name S and the source user as stored in the mapping: since AB#8343 the create takes the user name from
+S's user record and refuses a user S does not have, so a newly created mapping carries no free-text name. Mappings
+stored before AB#8343 keep the name the administrator of T sent. So that no tenant can place (or
 flood) events in a foreign tenant's log, `RecordGrantAsync` writes into S only when S is a registry ancestor of T or
 `ISourceTenantGrantPolicy` says S permits T; otherwise the event is recorded in T only (a failed decision counts as "not
 permitted", AB#8436).
@@ -288,6 +312,12 @@ The first exchange is recorded for every source tenant.
   token on exchanged tokens" are unchanged.
 - First exchange: the `xt_` shadow user gets exactly the roles of the mapping's groups plus its direct roles — nothing
   from S, nothing else in T.
+- As built (AB#8343): the gate reads the mapping from T's database (`ExternalTenantUserMappingLookup`) and asks the
+  policy on every call. With a mapping in place but S no longer permitting T, the token exchange answers
+  `access_denied` with the description prefix `grant_not_permitted`
+  (`TenantExchangeProcessor.GrantNotPermittedMarker`); without a mapping it answers `unauthorized_client` as before. The
+  gate is the shared `ValidateCrossTenantAccessAsync`, so the other tenant-switch callers (`POST auth/cross-tenant-token`,
+  `auth/tenant-switch`) admit a granted, permitted sibling user too. A registry ancestor never takes this path.
 - **Revocation**: the next exchange into T is refused with `access_denied` when the mapping is deleted, when S
   withdraws T from its allow-list, or when the mapping has **no effective role left** — its direct `roleIds` and the
   roles of all its groups taken together (removing one group or emptying one group's roles revokes only if nothing else

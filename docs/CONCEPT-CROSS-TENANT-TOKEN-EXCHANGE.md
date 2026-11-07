@@ -51,6 +51,12 @@ login. No re-scope, no leak. Only the validator's authorize+resolve logic is new
    is a registry ancestor of B; the sibling A holding the shadow never needs to be one. Staged by
    `IdentityApiAuthorization:CrossTenantAncestry` = `Warn` (default: provider-only ancestors pass and are logged) /
    `Enforce` (refused); see `docs/authentication.md`, *Registry Decides Cross-Tenant Ancestry*.
+   **Sibling grants (AB#8343).** A source that is **no** registry ancestor of B passes only when B holds an
+   `RtExternalTenantUserMapping` for (source, user) **and** the source tenant permits B at that moment
+   (`ISourceTenantGrantPolicy`, the allow-list kept in the source, AB#8345). The mapping is read from B's database, the
+   policy on every exchange, so a withdrawn permission stops the next exchange: with a mapping in place the exchange
+   answers `access_denied` / `grant_not_permitted`, without one `UnauthorizedClient` as before; B is left unchanged.
+   Such a grant never creates an OctoTenant provider in B. Contract: `docs/CONCEPT-SIBLING-TENANT-GRANTS.md` §8.
 3. **Re-resolve roles in B — decide, then create (AB#8304):** assert `HttpContext.Items[TenantId] == B`. If the caller already has a B-shadow user (`FindCrossTenantUserAsync`), it is used as it is. Otherwise the roles a new shadow user would get — the `MappedRoleIds` of the `RtExternalTenantUserMapping`s of its identity and the roles of the groups those mappings are members of, the same resolution `GetRolesAsync` applies at token time, ids of deleted roles skipped — are resolved first **without writing anything** (`ResolveRolesOfNewCrossTenantUserAsync`). No role → refused with `access_denied` / `tenant_not_provisioned`; B is left unchanged (no `xt_` user, no mapping, no association). At least one role → `FindOrCreateCrossTenantUserAsync(result, B, storeMappingIfMissing: false)` creates the B-shadow user; its B roles are resolved at token time from its groups and the `RtExternalTenantUserMapping`s of its identity (AB#5708, formerly copied by `SyncMappedRolesAsync`). A shadow user without any effective role is refused the same way. Return principal with the B-shadow `sub`. Before AB#8304 the shadow user was created first and kept when the exchange was refused, so every refused tenant switch left a role-less `xt_` user in the target tenant.
 4. **Audit** via `OctoEventSink`: {subjectA, tenantA, tenantB, shadowRtId, grantedRoles}, success + failure.
 

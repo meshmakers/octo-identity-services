@@ -85,9 +85,11 @@ public abstract record RoleGraphChange
     /// <summary>
     ///     The mapped roles of an external tenant user mapping are set: <paramref name="MappingId" /> of an existing mapping, or
     ///     for a new one the source identity (<paramref name="SourceTenantId" />, <paramref name="SourceUserName" />).
+    ///     <paramref name="GroupIds" /> are the groups a new mapping joins (AB#8343): their effective roles count as granted
+    ///     like the direct roles.
     /// </summary>
     public sealed record MappingRoles(string? MappingId, string? SourceTenantId, string? SourceUserName,
-        IReadOnlyCollection<string> NewRoleIds) : RoleGraphChange;
+        IReadOnlyCollection<string> NewRoleIds, IReadOnlyCollection<string>? GroupIds = null) : RoleGraphChange;
 
     /// <summary>An external tenant user mapping is deleted.</summary>
     public sealed record MappingDeleted(string MappingId) : RoleGraphChange;
@@ -259,6 +261,11 @@ internal sealed class RoleChangeGuard(
                     ? node.Roles
                     : [];
                 granted.UnionWith(mapping.NewRoleIds.Where(r => !old.Contains(r)));
+                foreach (var groupId in mapping.GroupIds ?? [])
+                {
+                    granted.UnionWith(graph.EffectiveRoles(groupId));
+                }
+
                 self = await CallerIsServedByMappingAsync(caller, graph, mapping).ConfigureAwait(false);
                 break;
         }

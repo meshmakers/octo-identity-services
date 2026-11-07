@@ -1,3 +1,4 @@
+using Meshmakers.Octo.Communication.Contracts.DataTransferObjects.ApiErrors;
 using Microsoft.AspNetCore.Mvc;
 using Persistence.IdentityCkModel.Generated.System.Identity.v3;
 
@@ -32,6 +33,43 @@ public static class ExternalTenantUserMappingProblems
         return new ObjectResult(problem)
         {
             StatusCode = StatusCodes.Status409Conflict,
+            ContentTypes = { "application/problem+json" }
+        };
+    }
+
+    /// <summary>
+    /// The one <c>403</c> of every refused source (AB#8343): source tenant unknown, neither a registry ancestor of the
+    /// target nor permitting it, or the user absent or blocked there. Constant body, so it never tells the cases apart.
+    /// </summary>
+    public static ObjectResult SourceTenantNotPermitted()
+        => Problem(StatusCodes.Status403Forbidden, CrossTenantGrantProblemCodes.SourceTenantNotPermitted,
+            "Source tenant not permitted",
+            "No user of the source tenant can be granted access to this tenant with this request.");
+
+    /// <summary>
+    /// The <c>400</c> when <c>groupIds</c> names groups this tenant does not have (AB#8343); nothing was stored.
+    /// </summary>
+    public static ObjectResult UnknownGroup(IReadOnlyList<string> unknownGroupIds)
+    {
+        var result = Problem(StatusCodes.Status400BadRequest, CrossTenantGrantProblemCodes.UnknownGroup,
+            "Unknown group",
+            "One or more group ids are no group of this tenant. Nothing was stored.");
+        ((ProblemDetails)result.Value!).Extensions["unknownGroupIds"] = unknownGroupIds;
+        return result;
+    }
+
+    private static ObjectResult Problem(int status, string code, string title, string detail)
+    {
+        var problem = new ProblemDetails
+        {
+            Status = status,
+            Title = title,
+            Detail = detail,
+            Extensions = { ["code"] = code }
+        };
+        return new ObjectResult(problem)
+        {
+            StatusCode = status,
             ContentTypes = { "application/problem+json" }
         };
     }

@@ -73,6 +73,13 @@ public class TenantExchangeProcessor(
     /// </summary>
     public const string NotProvisionedMarker = "tenant_not_provisioned";
 
+    /// <summary>
+    ///     Stable prefix of the <c>error_description</c> (with <c>error=access_denied</c>) when the target tenant holds a
+    ///     grant for a user of a non-ancestor source tenant, but the source tenant does not permit the target (any more,
+    ///     AB#8343). Clients match on this prefix.
+    /// </summary>
+    public const string GrantNotPermittedMarker = "grant_not_permitted";
+
     /// <summary>Outcome of a token exchange attempt: either a B-shadow user or an OAuth error.</summary>
     public sealed record ExchangeOutcome
     {
@@ -191,6 +198,17 @@ public class TenantExchangeProcessor(
             logger.LogWarning(
                 "Token exchange denied: user '{SourceUserId}' from tenant '{SourceTenantId}' may not access target tenant '{TargetTenantId}'",
                 sourceUserId, sourceTenantId, targetTenantId);
+            // AB#8343: a grant T holds for a sibling user whose source tenant no longer permits T is a denial of that
+            // grant (access_denied), not the refusal of an unrelated tenant. Nothing is created in T either way (AB#8304).
+            //         Every candidate the gate judged counts: for an xt_ source the grant may be held by its home identity.
+            if (await HasWithdrawnSiblingGrantAsync(targetTenantId, sourceTenantId, sourceUserId))
+            {
+                await RaiseExchangeFailureAsync(sourceUserId, sourceTenantId, targetTenantId,
+                    "source tenant does not permit the target tenant");
+                return ExchangeOutcome.Failed(Errors.AccessDenied,
+                    $"{GrantNotPermittedMarker}: the source tenant does not permit access to tenant '{targetTenantId}'");
+            }
+
             await RaiseExchangeFailureAsync(sourceUserId, sourceTenantId, targetTenantId, "cross-tenant access denied");
             return ExchangeOutcome.Failed(Errors.UnauthorizedClient,
                 "cross-tenant access to the target tenant is denied");
@@ -267,6 +285,57 @@ public class TenantExchangeProcessor(
     internal async Task<CrossTenantAuthResult?> ResolveExchangeSourceAsync(
         string targetTenantId, string sourceTenantId, string sourceUserId)
     {
+        CrossTenantAuthResult? authorizedWithoutMapping = null;
+
+        foreach (var (candidateTenantId, candidateUserId) in await GetSourceCandidatesAsync(sourceTenantId, sourceUserId))
+        {
+            var candidateResult = await crossTenantAuthService.ValidateCrossTenantAccessAsync(
+                targetTenantId, candidateTenantId, candidateUserId);
+            if (candidateResult == null)
+            {
+                continue;
+            }
+
+            authorizedWithoutMapping ??= candidateResult;
+
+            var mapping = await externalTenantUserMappingStore.FindBySourceUserAsync(
+                candidateTenantId, candidateUserId);
+            if (mapping != null)
+            {
+                return candidateResult;
+            }
+        }
+
+        return authorizedWithoutMapping;
+    }
+
+    /// <summary>
+    ///     AB#8343: whether any source candidate of the exchange (the immediate source and, for an <c>xt_</c> source, its
+    ///     home identity — the same candidates <see cref="ResolveExchangeSourceAsync" /> judges) holds a grant in the
+    ///     target whose non-ancestor source tenant does not permit the target.
+    /// </summary>
+    private async Task<bool> HasWithdrawnSiblingGrantAsync(string targetTenantId, string sourceTenantId,
+        string sourceUserId)
+    {
+        foreach (var (candidateTenantId, candidateUserId) in await GetSourceCandidatesAsync(sourceTenantId, sourceUserId))
+        {
+            if (await crossTenantAuthService.IsWithdrawnSiblingGrantAsync(targetTenantId, candidateTenantId,
+                    candidateUserId))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    ///     The source identities an exchange is judged for: the immediate source, plus — for an <c>xt_</c> shadow user —
+    ///     its home identity when that can be resolved (AB#4966).
+    /// </summary>
+    private async Task<IReadOnlyList<(string TenantId, string UserId)>> GetSourceCandidatesAsync(
+        string sourceTenantId, string sourceUserId)
+    {
         var sourceUserName = await crossTenantAuthService.FindUserNameByIdInTenantAsync(
             sourceTenantId, sourceUserId);
 
@@ -299,28 +368,7 @@ public class TenantExchangeProcessor(
             }
         }
 
-        CrossTenantAuthResult? authorizedWithoutMapping = null;
-
-        foreach (var (candidateTenantId, candidateUserId) in candidates)
-        {
-            var candidateResult = await crossTenantAuthService.ValidateCrossTenantAccessAsync(
-                targetTenantId, candidateTenantId, candidateUserId);
-            if (candidateResult == null)
-            {
-                continue;
-            }
-
-            authorizedWithoutMapping ??= candidateResult;
-
-            var mapping = await externalTenantUserMappingStore.FindBySourceUserAsync(
-                candidateTenantId, candidateUserId);
-            if (mapping != null)
-            {
-                return candidateResult;
-            }
-        }
-
-        return authorizedWithoutMapping;
+        return candidates;
     }
 
     private async Task<ExchangeOutcome> RefuseNotProvisionedAsync(
