@@ -179,6 +179,7 @@ public class DuplicateExternalTenantUserMappingIntegrationTests : IClassFixture<
             _fixture.GetSystemContext(), new NoOpAuthSchemeService(),
             new CrossTenantShadowUserChainResolver(_fixture.GetSystemContext()),
             TestAncestryGuards.Create(_fixture.GetSystemContext()),
+            Substitute.For<Meshmakers.Octo.Backend.IdentityServices.CrossTenantAudit.ICrossTenantGrantAuditRecorder>(),
             NullLogger<AdminProvisioningController>.Instance);
 
         var result = await controller.Create(ctx.ChildTenantId, new CreateExternalTenantUserMappingDto
@@ -201,6 +202,7 @@ public class DuplicateExternalTenantUserMappingIntegrationTests : IClassFixture<
             _fixture.GetSystemContext(), new NoOpAuthSchemeService(),
             new CrossTenantShadowUserChainResolver(_fixture.GetSystemContext()),
             TestAncestryGuards.Create(_fixture.GetSystemContext()),
+            Substitute.For<Meshmakers.Octo.Backend.IdentityServices.CrossTenantAudit.ICrossTenantGrantAuditRecorder>(),
             NullLogger<AdminProvisioningController>.Instance);
 
         var result = await controller.CreateWithGroups(ctx.ChildTenantId, new CreateExternalTenantUserGroupMappingDto
@@ -223,6 +225,7 @@ public class DuplicateExternalTenantUserMappingIntegrationTests : IClassFixture<
             _fixture.GetSystemContext(), new NoOpAuthSchemeService(),
             new CrossTenantShadowUserChainResolver(_fixture.GetSystemContext()),
             TestAncestryGuards.Create(_fixture.GetSystemContext()),
+            Substitute.For<Meshmakers.Octo.Backend.IdentityServices.CrossTenantAudit.ICrossTenantGrantAuditRecorder>(),
             NullLogger<AdminProvisioningController>.Instance);
 
         var result = await controller.Create(ctx.ChildTenantId, new CreateExternalTenantUserMappingDto

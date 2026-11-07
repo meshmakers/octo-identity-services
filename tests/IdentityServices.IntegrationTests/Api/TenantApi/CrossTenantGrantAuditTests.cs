@@ -197,6 +197,39 @@ public class CrossTenantGrantAuditTests : IntegrationTestBase, IDisposable
             "change and removal add no further creation event");
     }
 
+    [Fact]
+    public async Task AdminProvisioningCreateAndDelete_AreEachRecordedOnceInTargetAndOnceInSource()
+    {
+        // The provisioning route (via the system tenant) only takes registry ancestors as source: S = system tenant.
+        var a = await ArrangeAsync();
+        var caller = NewCallerName();
+        var client = AdminClient(caller);
+        var sourceUserName = $"prov{Guid.NewGuid():N}"[..20];
+
+        var create = await client.PostAsJsonAsync($"/{NormalizedSystemTenantId}/v1/AdminProvisioning/{a.Target}",
+            new CreateExternalTenantUserMappingDto
+            {
+                SourceTenantId = NormalizedSystemTenantId, SourceUserId = OctoObjectId.GenerateNewId().ToString(),
+                SourceUserName = sourceUserName, RoleIds = []
+            }, TestContext.Current.CancellationToken);
+        create.StatusCode.Should().Be(HttpStatusCode.Created,
+            await create.Content.ReadAsStringAsync(TestContext.Current.CancellationToken));
+        var mappingId = (await create.Content.ReadFromJsonAsync<ExternalTenantUserMappingDto>(
+            TestContext.Current.CancellationToken))!.Id.ToString()!;
+
+        var created = EventsOf(CrossTenantGrantAuditEvents.GrantCreated, "mappingId", mappingId);
+        AssertOnceInTargetAndSource(created, a.Target, NormalizedSystemTenantId);
+        created.Should().AllSatisfy(e => e.Details.Should().Contain("actorName", caller)
+            .And.Contain("targetTenantId", a.Target).And.Contain("sourceUserName", sourceUserName));
+
+        var delete = await client.DeleteAsync($"/{NormalizedSystemTenantId}/v1/AdminProvisioning/{a.Target}/{mappingId}",
+            TestContext.Current.CancellationToken);
+        delete.StatusCode.Should().Be(HttpStatusCode.OK);
+
+        var removed = EventsOf(CrossTenantGrantAuditEvents.GrantRemoved, "mappingId", mappingId);
+        AssertOnceInTargetAndSource(removed, a.Target, NormalizedSystemTenantId);
+    }
+
     // ------------------------------------------------------------------ exchange
 
     [Fact]

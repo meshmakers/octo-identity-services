@@ -1126,9 +1126,9 @@ the user lives). So the administrator of each tenant sees it in their own event 
 | Category | When | Written to | Level |
 |----------|------|-----------|-------|
 | `Identity.CrossTenantLookup` | `POST ExternalTenantUserMappings/sourceUserLookup`, detail `outcome` = `hit` / `miss` | T and S; a lookup naming a tenant that does not exist only in T | Information |
-| `Identity.CrossTenantGrantCreated` | `POST ExternalTenantUserMappings` succeeded | T and S | Information |
+| `Identity.CrossTenantGrantCreated` | `POST ExternalTenantUserMappings` succeeded (and the `AdminProvisioning` creates, see below) | T and S | Information |
 | `Identity.CrossTenantGrantChanged` | `PUT ExternalTenantUserMappings/{rtId}` succeeded (roles; groups at the time) | T and S | Information |
-| `Identity.CrossTenantGrantRemoved` | `DELETE ExternalTenantUserMappings/{rtId}` succeeded (groups before the removal) | T and S | Information |
+| `Identity.CrossTenantGrantRemoved` | `DELETE ExternalTenantUserMappings/{rtId}` or `DELETE AdminProvisioning/{targetTenantId}/{mappingRtId}` succeeded (groups before the removal) | T and S | Information |
 | `Identity.CrossTenantFirstExchange` | a token exchange created the `xt_` shadow user in T with roles (any source tenant) | T and S | Information |
 | `Identity.CrossTenantExchangeRefused` | a token exchange from a **sibling** source (S no registry ancestor of T) was refused | T and S | Warning |
 | `Identity.CrossTenantGrantPermissionsChanged` | S changed the list of target tenants it permits (AB#8345) | S | Information |
@@ -1141,8 +1141,10 @@ name or client id; for exchanges the source user), `sourceTenantId`, `targetTena
 Never written: the identifier typed for a lookup miss (not even hashed — the log line of the lookup carries a hash
 prefix), e-mail addresses, tokens, passwords or secrets. A refused exchange from an ancestor source keeps only the
 existing `Token Exchange Failure` error event in T; that failure event is also still written for a sibling source, next to
-`Identity.CrossTenantExchangeRefused`. Mapping writes of the ancestor flows (`AdminProvisioning/{targetTenantId}`) are not
-part of these events.
+`Identity.CrossTenantExchangeRefused`. The ancestor flows of `AdminProvisioning/{targetTenantId}` (routed via the caller's
+tenant) write the same grant events into T and the ancestor source S: `POST` and `POST withGroups` → `GrantCreated`,
+`DELETE {mappingRtId}` → `GrantRemoved`, `provisionCurrentUser` → `GrantCreated` (outcome `created`) or `GrantChanged`
+(outcome `repaired`; `already-provisioned` writes nothing).
 
 Writing an event never breaks the request: `IIdentityAuditService.StoreInfoAsync` / `StoreWarningAsync` (explicit
 tenant, event name = category, optional details) log a failed write and return. Implementation:
