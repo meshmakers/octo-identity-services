@@ -1119,9 +1119,10 @@ The identity service hosts CK methods as a remote handler (bus transport, SDK `M
   the identity service configuration / environment): decided by Gerald 2026-10-23, no method carrying a password or secret on staging-1, prod-1,
   prod-2 before B0 (restricted broker user, Heimdall). **The switch controls the bus only** (AB#8413). Off: handlers whose registration has
   `CarriesSecret = true` are not offered on the bus, the service announces no password method and the gateway (GraphQL) answers
-  `METHOD_HANDLER_NOT_AVAILABLE`; the rows with `ServesRestFacade = true` (`User.CreateUser`, `User.ResetPassword`) are registered **local only**
-  (`HandleLocalOnly`, `IdentityMethodHost.SelectLocalOnlyHandlers`: no announcement, no queue) so their REST facades `POST users` and
-  `POST users/ResetPassword` keep working in-process; `ChangePassword` and the client secret methods stay unregistered. On (local, test-2 with
+  `METHOD_HANDLER_NOT_AVAILABLE`; the rows with `ServesRestFacade = true` (`User.CreateUser`, `User.ResetPassword`, since AB#8414 also
+  `User.ChangePassword`, `User.SetPassword`) are registered **local only** (`HandleLocalOnly`, `IdentityMethodHost.SelectLocalOnlyHandlers`: no
+  announcement, no queue) so their REST facades `POST users`, `POST users/ResetPassword`, `api/manage/change-password` and `set-password` keep
+  working in-process; the client secret methods stay unregistered. On (local, test-2 with
   test accounts): all offered on the bus (and called in-process by the facades).
   `IdentityMethodDeclarationsIntegrationTests.EveryHandlerRegistration_FlagsASecretCarryingMethod_AsTheModelDeclaresIt` compares every
   `CarriesSecret` with the compiled model (a sensitive parameter or result), so a new handler cannot pass the gate by a forgotten flag.
@@ -1143,7 +1144,7 @@ The identity service hosts CK methods as a remote handler (bus transport, SDK `M
   policy failure = `PASSWORD_POLICY_VIOLATION` with one detail per failed rule, code only e.g. `PasswordTooShort`, never a value), counter reset, then
   `IUserCredentialChangeService.OnPasswordChangedAsync(..., PasswordChangePath.MethodChangePassword, ...)` (security stamp, revocation of all refresh
   tokens and authorizations of the user in this tenant, log line; AB#7765). A failing revocation throws, the caller gets `METHOD_HANDLER_FAILED`.
-  REST parity: `ManageApiController.ChangePassword` (unchanged); the method additionally counts failures (REST does not).
+  REST: `ManageApiController.ChangePassword` is its facade since AB#8414 (section "Account pages run the password methods").
 - **Audit.** `IdentityMethodAuditWriter` writes one event per call (success and failure) into the event log of the tenant (category `Identity.Method`,
   details `methodId`, `invocationId`, `outcome` (`SUCCESS` or the error code), `targetRtId`, `callerSubject`; no parameter, no hash, no token). It is
   not `IIdentityAuditService` (that one reads the tenant from the HTTP request and persists failures only). The gateway-side one-per-invocation record
@@ -2301,6 +2302,61 @@ with password, invitation, duplicate name and e-mail, policy violation, unknown 
 (local-only selection, registration forms, never both), plus the unchanged REST suites (`UsersCreateTests`, `ShadowUserPasswordTests`,
 `CredentialsNotInUrlTests`, `PasswordChangeRevokesSessionsTests`, `TenantApiRoleAuthorizationTests`).
 
+### Account pages run the password methods (AB#8414; System.Identity 3.2.0)
+
+`ManageApiController.ChangePassword` (`POST {tenant}/api/manage/change-password`) and `ManageApiController.SetPassword`
+(`POST {tenant}/api/manage/set-password`) - the backend of the identity account SPA, session cookie, same origin - are **facades** of
+`User.ChangePassword-1` and of the new `User.SetPassword-1` (`UserSetPasswordHandler`). They stay facades **without deprecation**
+(Odin, 2026-11-07: same-origin account pages, not a public API). Password rules, lockout, session revocation and audit exist only in
+the handlers.
+
+- **`User.SetPassword-1`** (`ck-user.yaml`, System.Identity 3.2.0, additive Minor): `allowSelf`, `newPassword` sensitive, errors
+  `PASSWORD_POLICY_VIOLATION`, `PASSWORD_ALREADY_SET`, `SHADOW_USER_PASSWORD_NOT_ALLOWED`. Self only like `ChangePassword` (the handler
+  answers `METHOD_FORBIDDEN`/`not-self` before any lookup, also for an administrator). Order: tenant, user, shadow user, existing password
+  (`PASSWORD_ALREADY_SET`: without a current password this method never replaces one), `AddPasswordAsync`, then
+  `IUserCredentialChangeService.OnPasswordChangedAsync(..., PasswordChangePath.MethodSetPassword, ...)`. One audit event per call.
+- **Caller of the cookie path.** A session cookie carries no OAuth scope, and the evaluator requires `octo_api` for every call.
+  `IIdentityMethodFacade.InvokeForAccountOwnerAsync` therefore builds the caller itself: subject = the cookie's user id, **no role**,
+  scope `octo_api` only, target = that user. With no role the declaration can admit it only through `allowSelf` on its own user - never
+  an administrator path, never another user. The facade refuses (`METHOD_FORBIDDEN`, no call) a principal that is not an authenticated
+  `Identity.Application` identity or whose user id is not the target. No evaluator change; the token path is unchanged: a bearer token
+  never reaches the account endpoints (their default scheme is the cookie), and through GraphQL a token without `octo_api` gets
+  `METHOD_FORBIDDEN` (`AccountPasswordMethodFacadeTests.ATokenWithoutTheApiScope_*`).
+- **Switch.** Both rows of `IdentityMethodHost.Handlers` carry `ServesRestFacade = true`: with `EnablePasswordMethods=false` they are
+  registered local only (in-process, no queue, not announced), so the account pages work and no password reaches the broker.
+- **Session.** The method rotates the security stamp; the controller re-reads the user and calls `RefreshSignInAsync` with it, so the
+  page's own cookie carries the new stamp and stays valid while every other session ends at its next stamp validation.
+- **Answers.** The pre-checks of the controller (user, shadow user, confirmation mismatch; set-password: existing password, read-only,
+  to keep the answer order) are unchanged. Envelope mapping: `CURRENT_PASSWORD_INVALID` -> `Errors = ["Incorrect password."]`
+  (describer), `USER_LOCKED_OUT` -> `"The account is locked out. Try again later."`, `PASSWORD_POLICY_VIOLATION` -> descriptions rebuilt
+  from the rule codes (`Methods/PasswordPolicyErrorDescriber`), `PASSWORD_ALREADY_SET` -> the earlier message, anything unexpected ->
+  `500` with `Success=false` and the generic message.
+
+Parity table (account page before -> facade):
+
+| Point | Before | Now |
+|---|---|---|
+| Routes, bodies, status codes | - | unchanged (`200` + `PasswordResultDto`) |
+| `EnablePasswordMethods=false` | own code, worked | works: handlers local only, in-process, nothing on the broker |
+| Wrong current password | `Errors = ["Incorrect password."]`, not counted | same answer, **counted as a failed sign-in** (lockout) |
+| Locked-out user changes the password | allowed | **refused** (`USER_LOCKED_OUT`) |
+| Policy violation | descriptions of the failed rules | unchanged (rebuilt from the codes) |
+| Set-password with an existing password / shadow user | refused | unchanged (pre-check; the method refuses as well) |
+| Sessions | other refresh tokens revoked, own cookie refreshed | unchanged; the cookie is refreshed from the stored user (new stamp) |
+| "Password changed" log line | path `ChangePassword` / `SetPassword` | `MethodChangePassword` / `MethodSetPassword` |
+| Audit | none | one `Identity.Method` event per call |
+| Unexpected failure | unhandled exception | `500`, `Success=false`, generic message |
+
+Tests: `Api/Manage/AccountPasswordMethodFacadeTests` (both switch values: change - new works, old fails, refresh tokens revoked, this
+session stays and another session ends with the stamp validated per request, one audit event, nothing on the event hub, canary absent
+from logs, audit and activity tags; set the same; wrong current password counted; lockout; policy descriptions; set-password method:
+`PASSWORD_ALREADY_SET`, shadow user, another user and an administrator `METHOD_FORBIDDEN`; tokens without `octo_api` refused; a bearer
+token does not reach the endpoints; the facade guard), `Api/Methods/UserChangePasswordMethodTests` (switch off: local only),
+`Methods/IdentityMethodHostTests`, `IdentityMethodDeclarationsIntegrationTests` (declaration, sensitive parameter, `CarriesSecret` vs.
+model), plus the unchanged `PasswordChangeRevokesSessionsTests` and `ShadowUserPasswordTests`. Follow-up: `UsersController` keeps its own
+copy of the description rebuild (`DescribeIdentityErrors`); it can move onto `PasswordPolicyErrorDescriber` once the AB#8413 follow-up
+on that file is merged.
+
 ### System.Identity 2.x -> 3.x needs migration entries (AB#8157)
 
 The CK engine refuses a schema-only bridge across a major (`CkMigrationMajorVersionGuard`, AB#4924 G3) as soon as the target model ships
@@ -2339,7 +2395,8 @@ provisioning, migrations, the bus consumer's `MayActAs`/`AssignedRole` edges, th
 Redeeming a refresh token checks only `CanSignInAsync`, never the security stamp, so a password change
 revokes explicitly. **Every** REST password path calls `IUserCredentialChangeService.OnPasswordChangedAsync`
 (`Services/UserCredentialChangeService.cs`, scoped) after the new password is persisted:
-`POST {tenant}/api/manage/change-password`, `.../set-password`, admin `POST system/v1/users/ResetPassword`
+`POST {tenant}/api/manage/change-password`, `.../set-password` (through `User.ChangePassword` / `User.SetPassword` since
+AB#8414), admin `POST system/v1/users/ResetPassword` (through `User.ResetPassword` since AB#8413)
 and the anonymous `POST {tenant}/api/auth/reset-password`. The helper (1) rotates the security stamp,
 (2) revokes every token and authorization of the user's subject (`RtId`) through the OpenIddict stores of
 the **current tenant** (other users and the same user in another tenant are untouched; the old refresh

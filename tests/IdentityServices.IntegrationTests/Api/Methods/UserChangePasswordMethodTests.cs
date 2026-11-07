@@ -59,13 +59,16 @@ public class UserChangePasswordMethodTests : IntegrationTestBase, IAsyncDisposab
     }
 
     [Fact]
-    public async Task SwitchOff_TheHostRegistersNoHandlerAndNoMethodHost()
+    public async Task SwitchOff_TheHandlerIsLocalOnly_ForTheAccountPage_AndNotOfferedOnTheBus()
     {
         // the default configuration of every environment: the host exists (the role methods of AB#7776 carry no secret and
-        // are hosted without the switch), but no handler of a secret-carrying method is registered
+        // are hosted without the switch). Since AB#8414 the account page's change-password calls this method in-process, so
+        // its handler is registered local only (not announced, no queue): the gateway still gets METHOD_HANDLER_NOT_AVAILABLE.
         Factory.Services.GetService<ICkMethodHandlerInvoker>().Should().NotBeNull();
-        using var scope = Factory.Services.CreateScope();
-        scope.ServiceProvider.GetService<UserChangePasswordHandler>().Should().BeNull();
+        Factory.Services.GetRequiredService<ICkInProcessMethodTransport>()
+            .CanHandle(SystemIdentityCkIds.UserChangePasswordMethodId).Should().BeTrue();
+        IdentityMethodHost.SelectHandlers(new IdentityMethodsOptions()).Select(h => h.MethodId).Should()
+            .NotContain(SystemIdentityCkIds.UserChangePasswordMethodId);
         await Task.CompletedTask;
     }
 

@@ -1,4 +1,10 @@
 "$schema": "https://schemas.meshmakers.cloud/construction-kit-meta.schema.json"
+# 3.2.0 (AB#8414, Feature AB#5699) adds the method User.SetPassword-1: the signed-in user who has only external logins sets a
+# first local password (allowSelf, `newPassword` sensitive, errors PASSWORD_POLICY_VIOLATION, PASSWORD_ALREADY_SET,
+# SHADOW_USER_PASSWORD_NOT_ALLOWED). The account page's POST {tenant}/api/manage/set-password is its facade (in-process). A new
+# method is additive: Minor, nothing to acknowledge. No type, attribute, record, id or default changes; no data migration;
+# ranges [3.0.0,4.0) stay satisfied. Service-managed: ships with the identity release, no catalog import, no FixAll (AB#7998).
+#
 # 3.1.0 (AB#8095, Feature AB#5981) adds the role SecretManagement to the authorization of Client.AddSecret-1 and
 # Client.RemoveSecret-1 (now [ TenantManagement, UserManagement, SecretManagement ]). Before, a caller holding only
 # SecretManagement was refused by the method gateway (roles are any-of) although the REST path admits it (AB#5861,
@@ -131,7 +137,7 @@
 # concept AB#5528 in octo-construction-kit-engine). String -> Secret is Minor
 # (CkSemVerClassifier): stored clear-text values stay readable as legacy values
 # until the encrypt sweep has run. Secret requires System >= 2.5 (decision 12).
-modelId: System.Identity-3.1.1
+modelId: System.Identity-3.2.0
 ckLanguage: 2
 dependencies:
   - System-[2.5,3.0)

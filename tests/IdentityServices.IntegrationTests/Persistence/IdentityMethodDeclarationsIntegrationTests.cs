@@ -38,7 +38,7 @@ public class IdentityMethodDeclarationsIntegrationTests : IClassFixture<Identity
 
     public static TheoryData<string, string[]> DeclaredMethods => new()
     {
-        { "User", ["ChangePassword-1", "ResetPassword-1", "SetRoles-1", "AddRole-1", "RemoveRole-1", "Merge-1", "DisableTwoFactor-1", "CreateUser-1"] },
+        { "User", ["ChangePassword-1", "SetPassword-1", "ResetPassword-1", "SetRoles-1", "AddRole-1", "RemoveRole-1", "Merge-1", "DisableTwoFactor-1", "CreateUser-1"] },
         { "Group", ["AddMember-1", "RemoveMember-1", "SetRoles-1"] },
         { "Client", ["AddSecret-1", "RemoveSecret-1"] },
         { "DataPermission", ["GrantToRole-1", "RevokeFromRole-1"] }
@@ -86,6 +86,11 @@ public class IdentityMethodDeclarationsIntegrationTests : IClassFixture<Identity
         changePassword.AllowSelf.Should().BeTrue("a user changes their own password with the current one");
         changePassword.Roles.Should().BeNullOrEmpty("an administrator uses ResetPassword");
 
+        // AB#8414 (System.Identity 3.2.0): the account page's first password, self only like ChangePassword.
+        var setPassword = user.AllMethods["SetPassword-1"].Definition.Authorization!;
+        setPassword.AllowSelf.Should().BeTrue("a user with external logins only sets their own first password");
+        setPassword.Roles.Should().BeNullOrEmpty("an administrator uses ResetPassword");
+
         foreach (var type in new[] { "Group", "DataPermission" })
         {
             foreach (var method in (await GetTypeAsync(type)).AllMethods.Values)
@@ -120,6 +125,7 @@ public class IdentityMethodDeclarationsIntegrationTests : IClassFixture<Identity
         [
             "System.Identity/User.ChangePassword-1(currentPassword)",
             "System.Identity/User.ChangePassword-1(newPassword)",
+            "System.Identity/User.SetPassword-1(newPassword)",
             "System.Identity/User.ResetPassword-1(newPassword)",
             "System.Identity/User.CreateUser-1(password)",
             "System.Identity/Client.RemoveSecret-1(secretValue)"

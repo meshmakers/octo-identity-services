@@ -5,10 +5,16 @@ namespace Meshmakers.Octo.Backend.IdentityServices.Services;
 /// <summary>The REST path through which a password was changed (audit label, AB#7765).</summary>
 public enum PasswordChangePath
 {
-    /// <summary><c>POST {tenantId}/api/manage/change-password</c></summary>
+    /// <summary>
+    ///     <c>POST {tenantId}/api/manage/change-password</c> before AB#8414; the endpoint now runs <c>User.ChangePassword</c>
+    ///     and logs <see cref="MethodChangePassword" />.
+    /// </summary>
     ChangePassword,
 
-    /// <summary><c>POST {tenantId}/api/manage/set-password</c></summary>
+    /// <summary>
+    ///     <c>POST {tenantId}/api/manage/set-password</c> before AB#8414; the endpoint now runs <c>User.SetPassword</c> and logs
+    ///     <see cref="MethodSetPassword" />.
+    /// </summary>
     SetPassword,
 
     /// <summary><c>POST system/v1/users/ResetPassword</c> (administrator)</summary>
@@ -17,11 +23,14 @@ public enum PasswordChangePath
     /// <summary><c>POST {tenantId}/api/auth/reset-password</c> (anonymous, reset token)</summary>
     TokenResetPassword,
 
-    /// <summary>CK method <c>User.ChangePassword</c> (AB#5672), self only</summary>
+    /// <summary>CK method <c>User.ChangePassword</c> (AB#5672), self only; also the account page (AB#8414)</summary>
     MethodChangePassword,
 
     /// <summary>CK method <c>User.ResetPassword</c> (AB#7774), administrator</summary>
-    MethodResetPassword
+    MethodResetPassword,
+
+    /// <summary>CK method <c>User.SetPassword</c> (AB#8414), self only; first local password of a user with external logins</summary>
+    MethodSetPassword
 }
 
 /// <summary>
