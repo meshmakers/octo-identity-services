@@ -45,6 +45,25 @@ Notable changes of the OctoMesh identity services. The CK model `System.Identity
   The password-reset notification is still sent once per reset (by the facade until AB#7775 moves it into the method). See
   `CLAUDE.md`, section "REST facades of create user and password reset (AB#8413)", for the parity table.
 
+- **Account pages change and set passwords through `User` methods; new `User.SetPassword-1` (AB#8414, System.Identity
+  3.2.0).** `POST {tenant}/api/manage/change-password` and `POST {tenant}/api/manage/set-password` (the identity account SPA,
+  session cookie, same origin) are facades of `User.ChangePassword-1` and the new `User.SetPassword-1` (self only, first local
+  password of a user with external logins only; `PASSWORD_ALREADY_SET` when the user has one). They call the method in-process
+  through `IIdentityMethodFacade.InvokeForAccountOwnerAsync`: the caller is the cookie's user with no role and the base scope
+  `octo_api` only, so the declaration admits it through `allowSelf` on its own user and nothing else; a bearer token still never
+  reaches these endpoints. With `Methods:Identity:EnablePasswordMethods=false` both handlers are registered local only (no queue,
+  not announced): the account pages keep working, GraphQL answers `METHOD_HANDLER_NOT_AVAILABLE`, no password reaches the broker.
+  The endpoints are facades without deprecation (Odin, 2026-11-07). Routes, request and response shapes and status codes are
+  unchanged (`200` with `PasswordResultDto`; policy errors keep their descriptions). Behaviour changes for the account page:
+  - change-password: a **wrong current password counts as a failed sign-in** (lockout counter, AB#7854) and a **locked-out user
+    is refused** ("The account is locked out. Try again later."); before, neither was checked;
+  - every call writes one `Identity.Method` audit event; the "Password changed" log line names the path `MethodChangePassword` /
+    `MethodSetPassword` (was `ChangePassword` / `SetPassword`);
+  - an unexpected failure (handler failed, timeout) answers `500` with `Success=false` and the generic message instead of an
+    unhandled exception;
+  - after a success the session cookie is re-issued from the stored user, i.e. with the new security stamp.
+  See `CLAUDE.md`, section "Account pages run the password methods (AB#8414)".
+
 ### Added
 
 - **Exact source user lookup for sibling-tenant grants (AB#8341, security).** `POST

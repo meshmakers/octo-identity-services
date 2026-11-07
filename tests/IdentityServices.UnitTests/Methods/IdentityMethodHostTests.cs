@@ -34,6 +34,7 @@ public class IdentityMethodHostTests
 
         selected.Should().NotContain(h => h.CarriesSecret);
         selected.Select(h => h.MethodId).Should().NotContain(SystemIdentityCkIds.UserChangePasswordMethodId)
+            .And.NotContain(SystemIdentityCkIds.UserSetPasswordMethodId)
             .And.NotContain(SystemIdentityCkIds.UserResetPasswordMethodId,
                 "no handler is hosted, so the gateway answers METHOD_HANDLER_NOT_AVAILABLE (AB#7774)");
     }
@@ -59,6 +60,7 @@ public class IdentityMethodHostTests
         var selected = IdentityMethodHost.SelectHandlers(new IdentityMethodsOptions { EnablePasswordMethods = true });
 
         selected.Select(h => h.MethodId).Should().Contain(SystemIdentityCkIds.UserChangePasswordMethodId)
+            .And.Contain(SystemIdentityCkIds.UserSetPasswordMethodId)
             .And.Contain(SystemIdentityCkIds.UserResetPasswordMethodId);
     }
 
@@ -75,27 +77,28 @@ public class IdentityMethodHostTests
     }
 
     [Fact]
-    public void SwitchOff_CreateUserAndResetPassword_AreRegisteredLocalOnly_ForTheirRestFacades()
+    public void SwitchOff_ThePasswordMethodsWithARestFacade_AreRegisteredLocalOnly()
     {
-        // AB#8413: POST users and POST users/ResetPassword call these methods in-process; with the switch off they are
-        // registered local only (not announced, no queue), so the gateway still answers METHOD_HANDLER_NOT_AVAILABLE.
+        // AB#8413: POST users and POST users/ResetPassword call these methods in-process; AB#8414: so do the account pages'
+        // api/manage/change-password and set-password. With the switch off they are registered local only (not announced,
+        // no queue), so the gateway still answers METHOD_HANDLER_NOT_AVAILABLE.
         IdentityMethodHost.SelectLocalOnlyHandlers(new IdentityMethodsOptions()).Select(h => h.MethodId).Should()
-            .BeEquivalentTo(SystemIdentityCkIds.UserCreateUserMethodId, SystemIdentityCkIds.UserResetPasswordMethodId);
+            .BeEquivalentTo(SystemIdentityCkIds.UserCreateUserMethodId, SystemIdentityCkIds.UserResetPasswordMethodId,
+                SystemIdentityCkIds.UserChangePasswordMethodId, SystemIdentityCkIds.UserSetPasswordMethodId);
         IdentityMethodHost.SelectLocalOnlyHandlers(new IdentityMethodsOptions { EnablePasswordMethods = true }).Should()
             .BeEmpty("with the switch on they are offered on the bus (SelectHandlers) and called in-process from there");
     }
 
     [Fact]
-    public void SwitchOff_ChangePasswordAndTheClientSecretMethods_StayUnregistered()
+    public void SwitchOff_TheClientSecretMethods_StayUnregistered()
     {
-        // No REST facade calls them yet (ChangePassword: AB#8414): neither on the bus nor local only.
+        // No REST facade calls them yet: neither on the bus nor local only.
         var off = new IdentityMethodsOptions();
         var registered = IdentityMethodHost.SelectHandlers(off).Concat(IdentityMethodHost.SelectLocalOnlyHandlers(off))
             .Select(h => h.MethodId).ToList();
 
         registered.Should().NotContain([
-            SystemIdentityCkIds.UserChangePasswordMethodId, SystemIdentityCkIds.ClientAddSecretMethodId,
-            SystemIdentityCkIds.ClientRemoveSecretMethodId
+            SystemIdentityCkIds.ClientAddSecretMethodId, SystemIdentityCkIds.ClientRemoveSecretMethodId
         ]);
     }
 

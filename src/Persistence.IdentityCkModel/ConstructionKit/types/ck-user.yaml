@@ -132,6 +132,19 @@ types:
         authorization:
           allowSelf: true
           dataAccess: Write
+      # AB#8414 (3.2.0): the account page's set-password (a user who only has external logins sets a first local password).
+      # Self only like ChangePassword; no current password exists, so it is refused once the user has one.
+      - methodId: SetPassword-1
+        description: "The signed-in user who has no local password yet (external logins only) sets one. Refused when the user already has a password; that user uses ChangePassword."
+        parameters:
+          - { name: newPassword, valueType: String, sensitive: true, description: "The new password; must satisfy the password policy of the tenant." }
+        errors:
+          - { code: PASSWORD_POLICY_VIOLATION, description: "The new password violates the password policy." }
+          - { code: PASSWORD_ALREADY_SET, description: "The user already has a password; use ChangePassword." }
+          - { code: SHADOW_USER_PASSWORD_NOT_ALLOWED, description: "A cross-tenant shadow user has no password." }
+        authorization:
+          allowSelf: true
+          dataAccess: Write
       - methodId: ResetPassword-1
         description: "An administrator sets a new password without the current one. Lifts a lockout; the user is notified."
         parameters:

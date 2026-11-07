@@ -54,7 +54,10 @@ internal static class IdentityMethodHost
     /// <summary>All handlers of the identity service; the switch decides which of them are registered.</summary>
     public static IReadOnlyList<IdentityMethodHandlerRegistration> Handlers { get; } =
     [
-        For<UserChangePasswordHandler>(SystemIdentityCkIds.UserChangePasswordMethodId, true),
+        // The account pages' POST api/manage/change-password and set-password are their facades (AB#8414): local only while
+        // the switch is off.
+        For<UserChangePasswordHandler>(SystemIdentityCkIds.UserChangePasswordMethodId, true, servesRestFacade: true),
+        For<UserSetPasswordHandler>(SystemIdentityCkIds.UserSetPasswordMethodId, true, servesRestFacade: true),
         // Role methods carry no password or secret: registered whatever the switch says (AB#7776).
         For<UserSetRolesHandler>(SystemIdentityCkIds.UserSetRolesMethodId, false),
         For<UserAddRoleHandler>(SystemIdentityCkIds.UserAddRoleMethodId, false),

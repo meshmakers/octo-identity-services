@@ -2,7 +2,9 @@ using System.Text;
 using System.Text.Encodings.Web;
 using IdentityServerPersistence.Services;
 using IdentityServerPersistence.SystemStores;
+using Meshmakers.Octo.Backend.IdentityServices.Methods;
 using Meshmakers.Octo.Backend.IdentityServices.Services;
+using Meshmakers.Octo.Services.Contracts.DistributionEventHub.Methods;
 using Meshmakers.Octo.Runtime.Contracts.MongoDb;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authorization;
@@ -34,7 +36,7 @@ public class ManageApiController : ControllerBase
     private readonly IAllowedTenantsResolver _allowedTenantsResolver;
     private readonly ISystemContext _systemContext;
     private readonly IGroupStore _groupStore;
-    private readonly IUserCredentialChangeService _userCredentialChangeService;
+    private readonly IIdentityMethodFacade _methodFacade;
 
     public ManageApiController(
         UserManager<RtUser> userManager,
@@ -46,7 +48,7 @@ public class ManageApiController : ControllerBase
         IAllowedTenantsResolver allowedTenantsResolver,
         ISystemContext systemContext,
         IGroupStore groupStore,
-        IUserCredentialChangeService userCredentialChangeService)
+        IIdentityMethodFacade methodFacade)
     {
         _userManager = userManager;
         _signInManager = signInManager;
@@ -57,7 +59,7 @@ public class ManageApiController : ControllerBase
         _allowedTenantsResolver = allowedTenantsResolver;
         _systemContext = systemContext;
         _groupStore = groupStore;
-        _userCredentialChangeService = userCredentialChangeService;
+        _methodFacade = methodFacade;
     }
 
     /// <summary>
@@ -256,11 +258,20 @@ public class ManageApiController : ControllerBase
     }
 
     /// <summary>
-    /// Change the current user's password
+    /// Change the current user's password. Facade of the CK method <c>User.ChangePassword-1</c> (AB#8414).
     /// </summary>
+    /// <remarks>
+    ///     The account page keeps its route, body and answer shape. The password rules live in the method only: lockout
+    ///     (<c>USER_LOCKED_OUT</c>), a wrong current password counts as a failed sign-in, password policy, security stamp and
+    ///     revocation of the user's refresh tokens, one <c>Identity.Method</c> audit event. The call runs in this process
+    ///     (<see cref="IIdentityMethodFacade.InvokeForAccountOwnerAsync{TParameters}" />), never over the broker, also while
+    ///     <c>Methods:Identity:EnablePasswordMethods</c> keeps the method off the bus. After a success the cookie session is
+    ///     re-issued with the new security stamp.
+    /// </remarks>
     [HttpPost("change-password")]
     public async Task<ActionResult<PasswordResultDto>> ChangePassword([FromBody] ChangePasswordRequestDto request)
     {
+        const string failed = "Failed to change password";
         var user = await _userManager.GetUserAsync(User);
         if (user == null)
         {
@@ -272,14 +283,11 @@ public class ManageApiController : ControllerBase
         }
 
         // AB#5708: cross-tenant shadow users sign in through their home tenant (see
-        // ShadowUserPasswordValidator, which enforces this for every UserManager password path).
+        // ShadowUserPasswordValidator, which enforces this for every UserManager password path). Answered before the call,
+        // as before; the method refuses it as well (SHADOW_USER_PASSWORD_NOT_ALLOWED, mapped to the same answer).
         if (CrossTenantShadowUserName.IsShadowUserName(user.UserName))
         {
-            return new PasswordResultDto
-            {
-                Success = false,
-                ErrorMessage = ShadowUserPasswordValidator.ErrorMessage
-            };
+            return ShadowUserRefused();
         }
 
         if (request.NewPassword != request.ConfirmPassword)
@@ -291,29 +299,39 @@ public class ManageApiController : ControllerBase
             };
         }
 
-        var result = await _userManager.ChangePasswordAsync(user, request.CurrentPassword, request.NewPassword);
-        if (!result.Succeeded)
-        {
-            return new PasswordResultDto
+        var response = await _methodFacade.InvokeForAccountOwnerAsync(SystemIdentityCkIds.UserChangePasswordMethodId,
+            user.RtId.ToString(),
+            new UserChangePasswordParameters
             {
-                Success = false,
-                ErrorMessage = "Failed to change password",
-                Errors = result.Errors.Select(e => e.Description).ToList()
+                CurrentPassword = request.CurrentPassword, NewPassword = request.NewPassword
+            }, User, HttpContext.RequestAborted);
+        if (!response.Success)
+        {
+            return response.Error?.Code switch
+            {
+                "CURRENT_PASSWORD_INVALID" => Refused(failed, [_userManager.ErrorDescriber.PasswordMismatch()]),
+                "USER_LOCKED_OUT" => Refused(failed, [new IdentityError { Code = "UserLockedOut", Description = UserLockedOutMessage }]),
+                _ => MethodFailure(response, failed)
             };
         }
 
-        await _userCredentialChangeService.OnPasswordChangedAsync(user, PasswordChangePath.ChangePassword,
-            user.UserName, HttpContext.RequestAborted);
-        await _signInManager.RefreshSignInAsync(user);
+        await RefreshSignInAfterPasswordChangeAsync(user);
         return new PasswordResultDto { Success = true };
     }
 
     /// <summary>
-    /// Set a password for a user who only has external logins
+    /// Set a password for a user who only has external logins. Facade of the CK method <c>User.SetPassword-1</c> (AB#8414).
     /// </summary>
+    /// <remarks>
+    ///     Route, body and answer shape are unchanged. The method sets the password (policy, refused when the user already has
+    ///     one), rotates the security stamp, revokes the user's refresh tokens and writes one <c>Identity.Method</c> audit
+    ///     event; in this process only (<see cref="IIdentityMethodFacade.InvokeForAccountOwnerAsync{TParameters}" />), also
+    ///     while <c>Methods:Identity:EnablePasswordMethods</c> is off. After a success the cookie session is re-issued.
+    /// </remarks>
     [HttpPost("set-password")]
     public async Task<ActionResult<PasswordResultDto>> SetPassword([FromBody] SetPasswordRequestDto request)
     {
+        const string failed = "Failed to set password";
         var user = await _userManager.GetUserAsync(User);
         if (user == null)
         {
@@ -325,24 +343,18 @@ public class ManageApiController : ControllerBase
         }
 
         // AB#5708: cross-tenant shadow users sign in through their home tenant (see
-        // ShadowUserPasswordValidator, which enforces this for every UserManager password path).
+        // ShadowUserPasswordValidator, which enforces this for every UserManager password path). Answered before the call,
+        // as before; the method refuses it as well (SHADOW_USER_PASSWORD_NOT_ALLOWED, mapped to the same answer).
         if (CrossTenantShadowUserName.IsShadowUserName(user.UserName))
         {
-            return new PasswordResultDto
-            {
-                Success = false,
-                ErrorMessage = ShadowUserPasswordValidator.ErrorMessage
-            };
+            return ShadowUserRefused();
         }
 
-        var hasPassword = await _userManager.HasPasswordAsync(user);
-        if (hasPassword)
+        // Read-only pre-check, kept so that the answer order of the account page stays as before (an existing password is
+        // reported before a confirmation mismatch); the method refuses it as well (PASSWORD_ALREADY_SET, same answer).
+        if (await _userManager.HasPasswordAsync(user))
         {
-            return new PasswordResultDto
-            {
-                Success = false,
-                ErrorMessage = "User already has a password. Use change-password instead."
-            };
+            return PasswordAlreadySet();
         }
 
         if (request.NewPassword != request.ConfirmPassword)
@@ -354,21 +366,70 @@ public class ManageApiController : ControllerBase
             };
         }
 
-        var result = await _userManager.AddPasswordAsync(user, request.NewPassword);
-        if (!result.Succeeded)
+        var response = await _methodFacade.InvokeForAccountOwnerAsync(SystemIdentityCkIds.UserSetPasswordMethodId,
+            user.RtId.ToString(), new UserSetPasswordParameters { NewPassword = request.NewPassword }, User,
+            HttpContext.RequestAborted);
+        if (!response.Success)
         {
-            return new PasswordResultDto
+            return response.Error?.Code switch
             {
-                Success = false,
-                ErrorMessage = "Failed to set password",
-                Errors = result.Errors.Select(e => e.Description).ToList()
+                UserSetPasswordHandler.PasswordAlreadySet => PasswordAlreadySet(),
+                _ => MethodFailure(response, failed)
             };
         }
 
-        await _userCredentialChangeService.OnPasswordChangedAsync(user, PasswordChangePath.SetPassword,
-            user.UserName, HttpContext.RequestAborted);
-        await _signInManager.RefreshSignInAsync(user);
+        await RefreshSignInAfterPasswordChangeAsync(user);
         return new PasswordResultDto { Success = true };
+    }
+
+    /// <summary>The answer of the account page when the user is locked out (<c>USER_LOCKED_OUT</c> of <c>ChangePassword</c>).</summary>
+    internal const string UserLockedOutMessage = "The account is locked out. Try again later.";
+
+    /// <summary>
+    /// The method rotated the security stamp. The cookie is re-issued from the stored user, so the session carries the new
+    /// stamp and stays valid; the user instance read before the call still holds the old one.
+    /// </summary>
+    private async Task RefreshSignInAfterPasswordChangeAsync(RtUser user)
+    {
+        var stored = await _userManager.FindByIdAsync(user.RtId.ToString()) ?? user;
+        await _signInManager.RefreshSignInAsync(stored);
+    }
+
+    private static PasswordResultDto ShadowUserRefused() => new()
+    {
+        Success = false,
+        ErrorMessage = ShadowUserPasswordValidator.ErrorMessage
+    };
+
+    private static PasswordResultDto PasswordAlreadySet() => new()
+    {
+        Success = false,
+        ErrorMessage = "User already has a password. Use change-password instead."
+    };
+
+    private static PasswordResultDto Refused(string message, IEnumerable<IdentityError> errors) => new()
+    {
+        Success = false,
+        ErrorMessage = message,
+        Errors = errors.Select(e => e.Description).ToList()
+    };
+
+    /// <summary>
+    /// The answer for every other failed envelope: a policy violation keeps the descriptions of the failed rules (rebuilt
+    /// from the codes), a shadow user or a missing user the earlier messages; an unexpected failure (handler failed, timeout,
+    /// not available) is a 500 with the generic message - no exception text leaves the service.
+    /// </summary>
+    private ActionResult<PasswordResultDto> MethodFailure(CkMethodResponse response, string message)
+    {
+        var error = response.Error;
+        return error?.Code switch
+        {
+            "PASSWORD_POLICY_VIOLATION" => Refused(message, PasswordPolicyErrorDescriber.Describe(_userManager, error)),
+            "SHADOW_USER_PASSWORD_NOT_ALLOWED" => ShadowUserRefused(),
+            CkMethodErrorCodes.MethodTargetNotFound => new PasswordResultDto { Success = false, ErrorMessage = "User not found" },
+            _ => StatusCode(StatusCodes.Status500InternalServerError,
+                new PasswordResultDto { Success = false, ErrorMessage = message })
+        };
     }
 
     #region Two-Factor Authentication

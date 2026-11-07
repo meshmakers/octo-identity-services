@@ -1,5 +1,21 @@
 # Changelog
 
+## 3.2.0 - 2026-11-07
+
+_Required bump level: minor._
+
+AB#8414: System.Identity 3.2.0 adds `User.SetPassword-1`: the signed-in user who has only external logins sets a first
+local password (`allowSelf`, `newPassword` sensitive; errors `PASSWORD_POLICY_VIOLATION`, `PASSWORD_ALREADY_SET`,
+`SHADOW_USER_PASSWORD_NOT_ALLOWED`). The identity account page `POST {tenant}/api/manage/set-password` is its facade. Like
+every password method it is offered on the bus only with `Methods:Identity:EnablePasswordMethods=true`.
+
+Rollout: service-managed - ships inside the identity service with the regular identity release train. No catalog import,
+no per-tenant step, **no FixAll** (AB#7998). No data migration; ranges `System.Identity-[3.0.0,4.0)` stay satisfied.
+
+### Added
+
+- Method 'User-1/SetPassword-1' added _(minor — purely additive method)_
+
 ## 3.1.1 - 2026-11-06
 
 _Required bump level: patch (no structural change)._
