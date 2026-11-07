@@ -31,7 +31,7 @@ copy_scripts() {
 # no argument.
 # Fake mongosh: expects "--quiet --nodb <file>.js", checks that the password arrives on its stdin, logs the script it
 # was given (FAKE_LOG.js) and its path (FAKE_LOG.files), then prints canned output chosen by FAKE_MODE
-# (clean | findings | error | changed | incomplete).
+# (clean | findings | error | changed | incomplete | mongofail: valid output, then exit 3).
 FAKEBIN="$TMP/bin"
 mkdir -p "$FAKEBIN"
 cat >"$FAKEBIN/kubectl" <<'FAKE'
@@ -73,6 +73,8 @@ case "$body" in
         esac
         [ "$FAKE_MODE" = incomplete ] || echo "END" ;;
 esac
+[ "$FAKE_MODE" = mongofail ] && exit 3
+exit 0
 FAKE
 chmod +x "$FAKEBIN/mongosh"
 
@@ -169,10 +171,18 @@ else fail "exec command too long or carries JavaScript (longest $maxlen chars): 
 if [ "$(grep -c 'print("SNAP ' <<<"$JS")" -eq 2 ] && grep -q '^const PARAMS = ' <<<"$JS"; then
     ok "snapshot and inventory JavaScript (with prelude and params) reach mongosh as a file"
 else fail "JavaScript did not reach mongosh: $(head -c 300 <<<"$JS")"; fi
-leftover=0; while IFS= read -r f; do [ -n "$f" ] && [ -e "$f" ] && leftover=$((leftover + 1)); done <"$FAKE_LOG.files"
-if [ "$(wc -l <"$FAKE_LOG.files" | tr -d ' ')" -eq 3 ] && [ "$leftover" -eq 0 ]; then
-    ok "the in-pod runner removes its temporary script file after each of the three runs"
-else fail "temporary script files left behind: $leftover of $(wc -l <"$FAKE_LOG.files")"; fi
+# leftovers <files-log>: number of recorded script files whose private directory still exists.
+leftovers() { local n=0 f; while IFS= read -r f; do [ -n "$f" ] && [ -e "$(dirname "$f")" ] && n=$((n + 1)); done <"$1"; echo "$n"; }
+if [ "$(wc -l <"$FAKE_LOG.files" | tr -d ' ')" -eq 3 ] && [ "$(leftovers "$FAKE_LOG.files")" -eq 0 ]; then
+    ok "the in-pod runner removes its temporary script directory after each of the three runs"
+else fail "temporary script directories left behind: $(leftovers "$FAKE_LOG.files") of $(wc -l <"$FAKE_LOG.files")"; fi
+
+# A mongosh failure after valid output must fail the run (the runner keeps mongosh's status) and still clean up.
+run_fake mongofail
+if [ "$RC" -eq 1 ] && grep -q 'snapshot before the inventory failed' <<<"$ERR" && [ "$(wc -l <"$FAKE_LOG.files" | tr -d ' ')" -eq 1 ] \
+    && [ "$(leftovers "$FAKE_LOG.files")" -eq 0 ]; then
+    ok "mongosh exiting nonzero fails the run (exit 1) and the runner still removes its directory"
+else fail "mongosh failure: rc=$RC err=$ERR leftovers=$(leftovers "$FAKE_LOG.files")"; fi
 
 run_fake findings
 if [ "$RC" -eq 2 ] && grep -q $'\tLOSES$' <<<"$OUT" && grep -q 'ROLE-MISSING' <<<"$ERR"; then ok "findings: exit 2"; else fail "findings: rc=$RC err=$ERR"; fi
