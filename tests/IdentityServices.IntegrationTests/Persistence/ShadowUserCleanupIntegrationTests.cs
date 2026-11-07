@@ -135,6 +135,32 @@ public class ShadowUserCleanupIntegrationTests : IClassFixture<IdentityServicesF
     }
 
     [Fact]
+    public async Task Apply_KeepsShadowUsersThatHoldAnOAuthTokenOrAnOAuthAuthorization()
+    {
+        var (tenantId, repo) = await CreateTenantAsync();
+        var withToken = await InsertUserAsync(repo, $"xt_octosystem_{Suffix()}");
+        await InsertAsync(repo, new RtOAuthToken
+        {
+            RtId = OctoObjectId.GenerateNewId(), SubjectId = withToken.ToString(), TokenType = "refresh_token",
+            Status = "valid"
+        });
+        var withAuthorization = await InsertUserAsync(repo, $"xt_octosystem_{Suffix()}");
+        await InsertAsync(repo, new RtOAuthAuthorization
+        {
+            RtId = OctoObjectId.GenerateNewId(), SubjectId = withAuthorization.ToString(), ClientId = "test-client",
+            Scopes = new AttributeStringValueList { "openid" }, Status = "valid"
+        });
+
+        var result = (await RunAsync(ShadowUserCleanupMode.Apply, [], (tenantId, repo))).Single();
+
+        Reasons(result, withToken).Should().Equal("direct-use:oauth-token");
+        Reasons(result, withAuthorization).Should().Equal("direct-use:oauth-authorization");
+        result.Deleted.Should().BeEmpty();
+        (await UserExistsAsync(repo, withToken)).Should().BeTrue();
+        (await UserExistsAsync(repo, withAuthorization)).Should().BeTrue();
+    }
+
+    [Fact]
     public async Task Off_ReadsNothing()
     {
         var repository = Substitute.For<ITenantRepository>();
