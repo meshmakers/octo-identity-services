@@ -174,4 +174,29 @@ public class CrossTenantGrantPermissionListTests
         CrossTenantGrantPermissionList.Validate("s", entries.Take(CrossTenantGrantPermissionList.MaxEntries).ToList())
             .Should().BeEmpty();
     }
+
+    // ---------------------------------------------------------------- entity tag (AB#8432)
+
+    [Fact]
+    public void ETagOf_IsAQuotedStrongTag_DerivedFromTheListOnly()
+    {
+        var tag = CrossTenantGrantPermissionList.ETagOf(["a", "b"]);
+
+        tag.Should().StartWith("\"").And.EndWith("\"").And.NotStartWith("W/");
+        Microsoft.Net.Http.Headers.EntityTagHeaderValue.Parse(tag).IsWeak.Should().BeFalse();
+        CrossTenantGrantPermissionList.ETagOf(["a", "b"]).Should().Be(tag, "the same list has the same tag");
+    }
+
+    [Fact]
+    public void ETagOf_DiffersForEveryChangeOfTheList()
+    {
+        string[][] lists = [[], ["a"], ["b"], ["a", "b"], ["ab"], ["a", "c"]];
+
+        lists.Select(l => CrossTenantGrantPermissionList.ETagOf(l)).Should().OnlyHaveUniqueItems();
+    }
+
+    [Fact]
+    public void ETagOf_IsTheSameForANeverSetAndAnEmptiedList()
+        => CrossTenantGrantPermissionList.ETagOf(new CrossTenantGrantPermissions().TargetTenantIds)
+            .Should().Be(CrossTenantGrantPermissionList.ETagOf([]));
 }
