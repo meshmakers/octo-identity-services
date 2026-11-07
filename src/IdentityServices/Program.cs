@@ -333,6 +333,13 @@ try
     builder.Services.Configure<IdentityServerPersistence.Services.AdminRoleMigration.AdminRoleMigrationOptions>(options =>
         builder.Configuration.GetSection(
             IdentityServerPersistence.Services.AdminRoleMigration.AdminRoleMigrationOptions.SectionName).Bind(options));
+    // AB#8305: cleanup of rights-less xt_ shadow users, same section (Off / DryRun / Apply), runs once per start.
+    builder.Services.Configure<IdentityServerPersistence.Services.ShadowUserCleanup.ShadowUserCleanupOptions>(options =>
+        builder.Configuration.GetSection(
+            IdentityServerPersistence.Services.ShadowUserCleanup.ShadowUserCleanupOptions.SectionName).Bind(options));
+    builder.Services.AddScoped<IdentityServerPersistence.Services.ShadowUserCleanup.IShadowUserCleanupJob,
+        IdentityServerPersistence.Services.ShadowUserCleanup.ShadowUserCleanupJob>();
+    builder.Services.AddHostedService<ShadowUserCleanupHostService>();
     builder.Services.AddSingleton<IAuthorizationHandler, IdentityApiRoleAuthorizationHandler>();
     // AB#5861: a missing role is answered 403 {"message": "...requires the role 'X'..."} (AB#5227 shape).
     builder.Services.Replace(ServiceDescriptor
