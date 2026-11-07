@@ -399,6 +399,28 @@ public class CrossTenantGrantAuditTests : IntegrationTestBase, IDisposable
     }
 
     [Fact]
+    public async Task ExchangeAfterTheGrantWasDeleted_IsRecordedAsRefusedInTargetAndSource_AfterTheGrantRemoval()
+    {
+        // AB#8344: removal and the refused next exchange are both visible to the administrators of T and S.
+        var a = await ArrangeAsync();
+        var user = await InsertUserAsync(a.Source, "revoked");
+        var (mappingId, _, _) = await GrantWithRoleAsync(a.Target, a.Source, user);
+        (await ExchangeAsync(a.Target, a.Source, user.Id.ToString())).ShadowUser.Should().NotBeNull();
+
+        (await AdminClient(NewCallerName()).DeleteAsync($"/{a.Target}/v1/ExternalTenantUserMappings/{mappingId}",
+            TestContext.Current.CancellationToken)).StatusCode.Should().Be(HttpStatusCode.OK);
+        var refused = await ExchangeAsync(a.Target, a.Source, user.Id.ToString());
+
+        refused.Error.Should().Be("access_denied");
+        AssertOnceInTargetAndSource(EventsOf(CrossTenantGrantAuditEvents.GrantRemoved, "mappingId", mappingId),
+            a.Target, a.Source);
+        var events = EventsOf(CrossTenantGrantAuditEvents.ExchangeRefused, "sourceUserId", user.Id.ToString());
+        AssertOnceInTargetAndSource(events, a.Target, a.Source);
+        events.Should().AllSatisfy(e =>
+            e.Details.Should().Contain("reason", "grant was removed from target tenant"));
+    }
+
+    [Fact]
     public async Task RefusedExchange_FromAnAncestorSource_KeepsOnlyTheFailureEvent()
     {
         var a = await ArrangeAsync();

@@ -1,5 +1,7 @@
 using IdentityServerPersistence.Services.SourceTenantGrants;
 using IdentityServerPersistence.SystemStores;
+using Meshmakers.Octo.ConstructionKit.Contracts;
+using Meshmakers.Octo.Runtime.Contracts.MongoDb.Repositories;
 using Meshmakers.Octo.Runtime.Contracts.Repositories.Query;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.Extensions.Logging;
@@ -366,11 +368,17 @@ public class CrossTenantAuthenticationService(
     }
 
     /// <inheritdoc />
-    public async Task<bool> IsWithdrawnSiblingGrantAsync(string targetTenantId, string sourceTenantId,
+    public async Task<SiblingGrantRefusal> GetSiblingGrantRefusalAsync(string targetTenantId, string sourceTenantId,
         string sourceUserId)
-        => await EvaluateSiblingGrantAsync(targetTenantId, sourceTenantId, sourceUserId) == SiblingGrant.NotPermitted;
+        => await EvaluateSiblingGrantAsync(targetTenantId, sourceTenantId, sourceUserId, classifyRefusal: true) switch
+        {
+            SiblingGrant.NotPermitted => SiblingGrantRefusal.NotPermitted,
+            SiblingGrant.NoEffectiveRole => SiblingGrantRefusal.NoEffectiveRole,
+            SiblingGrant.Removed => SiblingGrantRefusal.Removed,
+            _ => SiblingGrantRefusal.None
+        };
 
-    /// <summary>State of a grant for a source tenant that is no registry ancestor of the target (AB#8343).</summary>
+    /// <summary>State of a grant for a source tenant that is no registry ancestor of the target (AB#8343, AB#8344).</summary>
     private enum SiblingGrant
     {
         /// <summary>No grant applies: S is a registry ancestor, T holds no mapping, or the state cannot be read.</summary>
@@ -379,19 +387,31 @@ public class CrossTenantAuthenticationService(
         /// <summary>T holds a mapping for the user, but S does not permit T.</summary>
         NotPermitted,
 
-        /// <summary>T holds a mapping for the user and S permits T.</summary>
+        /// <summary>T holds a mapping for the user and S permits T, but the mapping grants no role that exists in T.</summary>
+        NoEffectiveRole,
+
+        /// <summary>T holds no mapping for the user, but the user's <c>xt_</c> shadow user exists in T.</summary>
+        Removed,
+
+        /// <summary>T holds a mapping with at least one effective role for the user and S permits T.</summary>
         Admitted
     }
 
     /// <summary>
     ///     AB#8343: a source tenant S that is no registry ancestor of T reaches T only through an explicit grant — a mapping
     ///     for (S, user) stored in <b>T</b> — and only while S permits T (<see cref="ISourceTenantGrantPolicy" />, asked at
-    ///     every exchange, so withdrawing T from S's allow-list stops the next exchange). A registry ancestor never takes
-    ///     this path: its rules (provider opt-in, AB#8339) stay as they are. Fails closed: an unreadable registry, T or
-    ///     policy admits nothing.
+    ///     every exchange, so withdrawing T from S's allow-list stops the next exchange). AB#8344: and only while that
+    ///     mapping itself grants a role — its direct <c>MappedRoleIds</c> or the roles of the groups it is a member of. Roles
+    ///     or groups attached directly to the <c>xt_</c> shadow user do not keep a sibling user in T once the mapping grants
+    ///     nothing: the mapping is the grant. A registry ancestor never takes this path: its rules (provider opt-in,
+    ///     AB#8339) stay as they are. Fails closed: an unreadable registry, T or policy admits nothing.
     /// </summary>
+    /// <param name="classifyRefusal">
+    ///     Also tell a removed grant (no mapping, but the user's <c>xt_</c> shadow user exists in T) from a user T never
+    ///     granted. Only the refusal answer needs it; the gate itself refuses both alike.
+    /// </param>
     private async Task<SiblingGrant> EvaluateSiblingGrantAsync(string targetTenantId, string sourceTenantId,
-        string sourceUserId)
+        string sourceUserId, bool classifyRefusal = false)
     {
         try
         {
@@ -412,7 +432,10 @@ public class CrossTenantAuthenticationService(
                 sourceUserId, logger);
             if (mapping == null)
             {
-                return SiblingGrant.None;
+                return classifyRefusal &&
+                       await HasShadowUserInTargetAsync(targetRepository, sourceTenantId, sourceUserId)
+                    ? SiblingGrant.Removed
+                    : SiblingGrant.None;
             }
 
             if (!await grantPolicy.IsPermittedAsync(sourceTenantId, targetTenantId))
@@ -421,6 +444,14 @@ public class CrossTenantAuthenticationService(
                     "Tenant switch denied: '{SourceTenantId}' does not permit '{TargetTenantId}'; grant {MappingId} is not honoured (AB#8343)",
                     sourceTenantId, targetTenantId, mapping.RtId);
                 return SiblingGrant.NotPermitted;
+            }
+
+            if (!await GrantsAnyRoleAsync(targetRepository, mapping))
+            {
+                logger.LogWarning(
+                    "Tenant switch denied: grant {MappingId} of '{SourceTenantId}' in '{TargetTenantId}' has no effective role left (AB#8344)",
+                    mapping.RtId, sourceTenantId, targetTenantId);
+                return SiblingGrant.NoEffectiveRole;
             }
 
             return SiblingGrant.Admitted;
@@ -432,6 +463,63 @@ public class CrossTenantAuthenticationService(
                 sourceTenantId, targetTenantId);
             return SiblingGrant.None;
         }
+    }
+
+    /// <summary>
+    ///     AB#8344: whether <paramref name="mapping" /> grants at least one role that exists in T — a direct
+    ///     <c>MappedRoleIds</c> entry or a role of a group the mapping is a member of (nested groups included, the same
+    ///     traversal as token issuance, <see cref="GroupRoleResolver" />). A role id of a deleted role grants nothing, as in
+    ///     <c>OctoUserStore.GetRolesAsync</c>.
+    /// </summary>
+    private async Task<bool> GrantsAnyRoleAsync(ITenantRepository targetRepository, RtExternalTenantUserMapping mapping)
+    {
+        var resolver = new FixedTenantRepositoryResolver(targetRepository);
+        var groupRoleResolver = new GroupRoleResolver(new GroupStore(resolver),
+            new ExternalTenantUserMappingStore(resolver), shadowUserChainResolver);
+
+        var roleIds = new HashSet<string>(await groupRoleResolver.ResolveEffectiveRoleIdsAsync(mapping.RtId.ToString()));
+        if (mapping.MappedRoleIds != null)
+        {
+            roleIds.UnionWith(mapping.MappedRoleIds);
+        }
+
+        using var session = await targetRepository.GetSessionAsync();
+        session.StartTransaction();
+        var found = false;
+        foreach (var roleId in roleIds)
+        {
+            if (OctoObjectId.TryParse(roleId, out var roleRtId) &&
+                await targetRepository.GetRtEntityByRtIdAsync<RtRole>(session, roleRtId) != null)
+            {
+                found = true;
+                break;
+            }
+        }
+
+        await session.CommitTransactionAsync();
+        return found;
+    }
+
+    /// <summary>
+    ///     AB#8344: whether T holds the <c>xt_{S}_{user}</c> shadow user of the source user — the trace of an earlier
+    ///     admitted exchange. Only used to word the refusal; never admits anything.
+    /// </summary>
+    private async Task<bool> HasShadowUserInTargetAsync(ITenantRepository targetRepository, string sourceTenantId,
+        string sourceUserId)
+    {
+        var sourceUser = await FindUserByIdInTenantAsync(sourceTenantId, sourceUserId);
+        if (string.IsNullOrEmpty(sourceUser?.UserName))
+        {
+            return false;
+        }
+
+        var shadowUserName = CrossTenantShadowUserName.Build(sourceTenantId, sourceUser.UserName);
+        using var session = await targetRepository.GetSessionAsync();
+        session.StartTransaction();
+        var result = await targetRepository.GetRtEntitiesByTypeAsync<RtUser>(session, RtEntityQueryOptions.Create()
+            .FieldEquals(nameof(RtUser.NormalizedUserName), shadowUserName.ToUpperInvariant()));
+        await session.CommitTransactionAsync();
+        return result.Items.Any();
     }
 
     /// <summary>

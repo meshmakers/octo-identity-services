@@ -198,15 +198,24 @@ public class TenantExchangeProcessor(
             logger.LogWarning(
                 "Token exchange denied: user '{SourceUserId}' from tenant '{SourceTenantId}' may not access target tenant '{TargetTenantId}'",
                 sourceUserId, sourceTenantId, targetTenantId);
-            // AB#8343: a grant T holds for a sibling user whose source tenant no longer permits T is a denial of that
-            // grant (access_denied), not the refusal of an unrelated tenant. Nothing is created in T either way (AB#8304).
-            //         Every candidate the gate judged counts: for an xt_ source the grant may be held by its home identity.
-            if (await HasWithdrawnSiblingGrantAsync(targetTenantId, sourceTenantId, sourceUserId))
+            // AB#8343/AB#8344: a grant T holds (or held) for a sibling user is denied with access_denied, not refused
+            // like an unrelated tenant: the source no longer permits T (grant_not_permitted), the grant has no effective
+            // role left, or it was removed after the user switched in (tenant_not_provisioned). Nothing is created in T
+            // either way (AB#8304). Every candidate the gate judged counts: for an xt_ source the grant may be held by
+            // its home identity.
+            switch (await FindSiblingGrantRefusalAsync(targetTenantId, sourceTenantId, sourceUserId))
             {
-                await RaiseExchangeFailureAsync(sourceUserId, sourceTenantId, targetTenantId,
-                    "source tenant does not permit the target tenant");
-                return ExchangeOutcome.Failed(Errors.AccessDenied,
-                    $"{GrantNotPermittedMarker}: the source tenant does not permit access to tenant '{targetTenantId}'");
+                case SiblingGrantRefusal.NotPermitted:
+                    await RaiseExchangeFailureAsync(sourceUserId, sourceTenantId, targetTenantId,
+                        "source tenant does not permit the target tenant");
+                    return ExchangeOutcome.Failed(Errors.AccessDenied,
+                        $"{GrantNotPermittedMarker}: the source tenant does not permit access to tenant '{targetTenantId}'");
+                case SiblingGrantRefusal.NoEffectiveRole:
+                    return await RefuseNotProvisionedAsync(sourceUserId, sourceTenantId, targetTenantId,
+                        "grant has no effective role in target tenant");
+                case SiblingGrantRefusal.Removed:
+                    return await RefuseNotProvisionedAsync(sourceUserId, sourceTenantId, targetTenantId,
+                        "grant was removed from target tenant");
             }
 
             await RaiseExchangeFailureAsync(sourceUserId, sourceTenantId, targetTenantId, "cross-tenant access denied");
@@ -310,23 +319,24 @@ public class TenantExchangeProcessor(
     }
 
     /// <summary>
-    ///     AB#8343: whether any source candidate of the exchange (the immediate source and, for an <c>xt_</c> source, its
-    ///     home identity — the same candidates <see cref="ResolveExchangeSourceAsync" /> judges) holds a grant in the
-    ///     target whose non-ancestor source tenant does not permit the target.
+    ///     AB#8343, AB#8344: the first sibling-grant refusal of any source candidate of the exchange (the immediate source
+    ///     and, for an <c>xt_</c> source, its home identity — the same candidates <see cref="ResolveExchangeSourceAsync" />
+    ///     judges), or <see cref="SiblingGrantRefusal.None" />.
     /// </summary>
-    private async Task<bool> HasWithdrawnSiblingGrantAsync(string targetTenantId, string sourceTenantId,
+    private async Task<SiblingGrantRefusal> FindSiblingGrantRefusalAsync(string targetTenantId, string sourceTenantId,
         string sourceUserId)
     {
         foreach (var (candidateTenantId, candidateUserId) in await GetSourceCandidatesAsync(sourceTenantId, sourceUserId))
         {
-            if (await crossTenantAuthService.IsWithdrawnSiblingGrantAsync(targetTenantId, candidateTenantId,
-                    candidateUserId))
+            var refusal = await crossTenantAuthService.GetSiblingGrantRefusalAsync(targetTenantId, candidateTenantId,
+                candidateUserId);
+            if (refusal != SiblingGrantRefusal.None)
             {
-                return true;
+                return refusal;
             }
         }
 
-        return false;
+        return SiblingGrantRefusal.None;
     }
 
     /// <summary>
@@ -372,13 +382,13 @@ public class TenantExchangeProcessor(
     }
 
     private async Task<ExchangeOutcome> RefuseNotProvisionedAsync(
-        string sourceUserId, string sourceTenantId, string targetTenantId)
+        string sourceUserId, string sourceTenantId, string targetTenantId,
+        string reason = "not provisioned in target tenant (no role)")
     {
         logger.LogWarning(
-            "Token exchange denied: user '{SourceUserId}' from tenant '{SourceTenantId}' holds no role in target tenant '{TargetTenantId}' (not provisioned)",
-            sourceUserId, sourceTenantId, targetTenantId);
-        await RaiseExchangeFailureAsync(sourceUserId, sourceTenantId, targetTenantId,
-            "not provisioned in target tenant (no role)");
+            "Token exchange denied: user '{SourceUserId}' from tenant '{SourceTenantId}' holds no role in target tenant '{TargetTenantId}' ({Reason})",
+            sourceUserId, sourceTenantId, targetTenantId, reason);
+        await RaiseExchangeFailureAsync(sourceUserId, sourceTenantId, targetTenantId, reason);
         return ExchangeOutcome.Failed(Errors.AccessDenied,
             $"{NotProvisionedMarker}: the user holds no role in tenant '{targetTenantId}'; " +
             "an administrator of that tenant must provision the user there (ProvisionCurrentUser -ttid)");

@@ -172,16 +172,9 @@ public sealed class CrossTenantSecondFactorVerifier(
         }
 
         // Role resolution is never used by the 2FA calls; the resolver is only there to satisfy the store.
-        var store = new OctoUserStore(new FixedTenantResolver(repository), groupRoleResolver, errorDescriber);
+        var store = new OctoUserStore(new FixedTenantRepositoryResolver(repository), groupRoleResolver, errorDescriber);
         // OctoUserManager: atomic failure counting and recovery-code redemption, like the request-scoped manager.
         return new OctoUserManager(store, identityOptions, passwordHasher, userValidators, passwordValidators,
             keyNormalizer, errorDescriber, services, userManagerLogger);
-    }
-
-    /// <summary>Binds a store to one tenant repository, independent of the request's tenant.</summary>
-    private sealed class FixedTenantResolver(ITenantRepository repository) : IMultiTenancyResolverService
-    {
-        public ITenantRepository GetTenantRepository() => repository;
-        public string GetTenantId() => repository.TenantId;
     }
 }

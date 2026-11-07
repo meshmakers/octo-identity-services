@@ -33,6 +33,16 @@ Notable changes of the OctoMesh identity services. The CK model `System.Identity
   is opaque to clients); device codes issued by an older identity before the rollout fail once and need a new
   `login -i`. Documented in `docs/authentication.md` (Device Authorization Flow, note 5).
 
+- **Removing a sibling-tenant grant cuts the user's access at the next token exchange (AB#8344).** For a source tenant
+  that is no registry ancestor of T, the exchange gate now also requires that the mapping itself grants a role in T (its
+  direct roles or its groups' roles); a role attached directly to the `xt_` shadow user no longer keeps a sibling user in T
+  once the mapping is deleted or grants nothing. The next exchange after a deleted grant, a removed last group or emptied
+  group roles answers `access_denied` with the prefix `tenant_not_provisioned` (before: `unauthorized_client` after a
+  deletion, or admitted through a direct role of the shadow user); a withdrawn permission keeps `grant_not_permitted`. Each
+  refusal is audited in T and S (`Identity.CrossTenantExchangeRefused`, `reason`). Already issued exchanged tokens stay
+  valid until `exp` (no refresh token; the client's `AccessTokenLifetime`, default 1 h). Ancestor sources are unchanged.
+  See `docs/authentication.md`, "Removing a Sibling-Tenant Grant".
+
 - **REST role and merge endpoints run the `User` methods (AB#8412).** `PUT users/{userName}/roles`,
   `PUT`/`DELETE users/{userName}/roles/{roleName}` and `POST users/{userName}/merge` are facades of `User.SetRoles-1`,
   `User.AddRole-1`, `User.RemoveRole-1` and `User.Merge-1`: the controller resolves the user (and the role ids / names) and

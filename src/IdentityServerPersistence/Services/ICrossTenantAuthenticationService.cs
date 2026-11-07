@@ -34,12 +34,14 @@ public interface ICrossTenantAuthenticationService
         string targetTenantId, string sourceTenantId, string sourceUserId);
 
     /// <summary>
-    /// AB#8343: <c>true</c> when <paramref name="sourceTenantId"/> is no registry ancestor of
-    /// <paramref name="targetTenantId"/>, the target holds a grant (mapping) for the user, but the source tenant does not
-    /// permit the target (any more). The token exchange answers this case with <c>access_denied</c> instead of the
-    /// generic refusal of an unrelated tenant. Never throws; an unreadable state answers <c>false</c>.
+    /// AB#8343, AB#8344: why a source tenant that is no registry ancestor of <paramref name="targetTenantId"/> holds no
+    /// usable grant there for the user — the source does not permit the target (any more), the grant has no effective
+    /// role left, or the grant was removed after the user switched in (see <see cref="SiblingGrantRefusal"/>). The token
+    /// exchange answers these cases with <c>access_denied</c> instead of the generic refusal of an unrelated tenant.
+    /// Never throws; an unreadable state answers <see cref="SiblingGrantRefusal.None"/>.
     /// </summary>
-    Task<bool> IsWithdrawnSiblingGrantAsync(string targetTenantId, string sourceTenantId, string sourceUserId);
+    Task<SiblingGrantRefusal> GetSiblingGrantRefusalAsync(string targetTenantId, string sourceTenantId,
+        string sourceUserId);
 
     /// <summary>
     /// Resolves the RtId of a user identified by user name within a specific tenant. Used by the

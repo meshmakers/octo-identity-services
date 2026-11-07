@@ -368,6 +368,16 @@ The first exchange is recorded for every source tenant.
   `docs/authentication.md`). No GroupMember / AssignedRole edge of a deleted mapping stays behind; re-granting the same
   user works without `409` and yields the new groups' roles only. The role-less `xt_` user left behind is removed by the
   cleanup of AB#8305.
+- As built (AB#8344): the gate's sibling check (`CrossTenantAuthenticationService.EvaluateSiblingGrantAsync`) also
+  requires an effective role of the mapping in T (direct `MappedRoleIds` plus the roles of its groups, nested groups
+  included, roles that still exist). The exchange words the refusals through
+  `ICrossTenantAuthenticationService.GetSiblingGrantRefusalAsync` (`SiblingGrantRefusal`): `NotPermitted` →
+  `access_denied` / `grant_not_permitted`; `NoEffectiveRole` and `Removed` (no mapping, but the user's `xt_` shadow user
+  exists in T) → `access_denied` / `tenant_not_provisioned`; a sibling user T never granted keeps `unauthorized_client`.
+  Roles or groups attached directly to the `xt_` user are **not honoured** without an effective grant (decision: not
+  removed — no write on the shadow user, AB#8305 deletes it). The delete paths needed no change: `DeleteOptions.Erase`
+  takes the mapping's `GroupMember` edges with it (proven by test). Token lifetime and audit: `docs/authentication.md`,
+  *Removing a Sibling-Tenant Grant*.
 
 ## 9. Client flow (Studio AB#8314, octo-cli, MCP)
 
