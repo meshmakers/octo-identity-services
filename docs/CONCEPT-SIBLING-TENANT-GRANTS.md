@@ -260,10 +260,10 @@ tenant, mapping id, group names. Never the looked-up identifier of a miss in cle
 | `Identity.CrossTenantExchangeRefused` (exchange refused for a sibling source) | T and S |
 | `Identity.CrossTenantGrantPermissionsChanged` (permission list changed, AB#8345) | S |
 
-Grant events name S and the source user exactly as the administrator of T sent them; until AB#8343 nothing checks them at
-create time. So that no tenant can place (or flood) events in a foreign tenant's log, `RecordGrantAsync` writes into S
-only when S is a registry ancestor of T or `ISourceTenantGrantPolicy` says S permits T; otherwise the event is recorded in
-T only (a failed decision counts as "not permitted", AB#8436).
+Grant events name S and the source user exactly as the administrator of T sent them. So that no tenant can place (or
+flood) events in a foreign tenant's log, `RecordGrantAsync` writes into S only when S is a registry ancestor of T or
+`ISourceTenantGrantPolicy` says S permits T; otherwise the event is recorded in T only (a failed decision counts as "not
+permitted", AB#8436).
 
 An audit write never breaks the request; a failure is logged. `docs/authentication.md` (section "Cross-Tenant Grant
 Audit Events") lists the events and how an administrator reads them.
