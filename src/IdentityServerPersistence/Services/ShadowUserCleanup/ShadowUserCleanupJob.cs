@@ -62,7 +62,7 @@ public sealed class ShadowUserCleanupJob(
             : (tenantId, message) => eventRepository.StoreInformationEvent(tenantId, RtEventSourcesEnum.IdentityService, message);
 
         await RunAsync(tenants, mode,
-            repository => new OctoUserStore(new FixedTenantResolver(repository), groupRoleResolver, null),
+            repository => new OctoUserStore(new ShadowUserCleanupTenantResolver(repository), groupRoleResolver, null),
             audit, logger, cancellationToken);
     }
 
@@ -123,16 +123,9 @@ public sealed class ShadowUserCleanupJob(
 
         logger.LogInformation(
             "ShadowUserCleanup {Mode} finished: {TenantCount} tenants ({FailedCount} failed), {ShadowUserCount} xt_ users, " +
-            "{CandidateCount} candidates, {DeletedCount} deleted",
+            "{CandidateCount} candidates, {DeletedCount} deleted, {DeletedMappingCount} empty mappings deleted",
             effectiveMode, tenants.Count, failed, results.Sum(r => r.Decisions.Count), results.Sum(r => r.CandidateCount),
-            results.Sum(r => r.Deleted.Count));
+            results.Sum(r => r.Deleted.Count), results.Sum(r => r.DeletedMappings.Count));
         return results;
-    }
-
-    /// <summary>Binds a store to one tenant repository, independent of any request's tenant.</summary>
-    private sealed class FixedTenantResolver(ITenantRepository repository) : IMultiTenancyResolverService
-    {
-        public ITenantRepository GetTenantRepository() => repository;
-        public string GetTenantId() => repository.TenantId;
     }
 }

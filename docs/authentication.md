@@ -986,8 +986,8 @@ the exchange was refused. Those left-overs have no right and cannot act. `Identi
 | Mode | Effect |
 |------|--------|
 | `Off` (default) | Nothing is read or written. |
-| `DryRun` | Per tenant: one log line per candidate (`candidate rtId=… userName=… created=…`), one per kept `xt_` user with its reasons (`kept … reasons=…`), and a summary line; writes nothing. |
-| `Apply` | The same plan, then each candidate is re-checked and deleted through the identity user store (`IUserStore.DeleteAsync`, no raw database delete); one information event `[Identity.ShadowUserDeleted]` per deleted user in the tenant's event log. |
+| `DryRun` | Per tenant: one log line per candidate (`candidate rtId=… userName=… created=… emptyMappings=… oauthTokens=… oauthAuthorizations=…`), one per kept `xt_` user with its reasons (`kept … reasons=…`), and a summary line; writes nothing. |
+| `Apply` | The same plan, then each candidate is re-checked and, in this order, (1) its OAuth tokens and authorizations are revoked through the OpenIddict stores, (2) its empty mappings are deleted, (3) the user is deleted through the identity user store (`IUserStore.DeleteAsync`, no raw user delete); one information event `[Identity.ShadowUserDeleted]` per deleted user in the tenant's event log, naming the deleted mapping ids and the number of revoked tokens and authorizations. |
 
 The run starts once per process, two minutes after the application has started (`ShadowUserCleanupHostService`), in the
 background: it never blocks or fails the identity start-up. It covers the system tenant and every registered tenant
@@ -996,11 +996,19 @@ that fails is a skip reason:
 
 - the user name starts with `xt_` (other users are not looked at);
 - `role` — no `AssignedRole`; `group` — no `GroupMember`; `association:<id>` — no other association in either direction;
-- `mapping` — no external tenant user mapping in this tenant for any identity of its name chain (a mapping whose
-  `{SourceTenantId}_{SourceUserName}` ends the user name; needs no registry and errs towards keeping);
+- `mapping` — no external tenant user mapping in this tenant for any identity of its name chain **that grants a role**
+  (a mapping whose `{SourceTenantId}_{SourceUserName}` ends the user name; needs no registry and errs towards keeping).
+  **Rule A** (Odin, 2026-11-07): a mapping grants a role when its `MappedRoleIds` is not empty, or when it is a
+  `GroupMember` of a group that holds a role directly or through its `ChildGroup` groups (the same walk as
+  `GroupRoleResolver` at token time, depth 10). An empty mapping — the left-over that the token exchange (until AB#7088)
+  and the interactive sign-in and tenant switch (until AB#8439) wrote together with the shadow user — keeps nobody: it is
+  listed with the candidate and deleted together with it. An empty mapping that also belongs to a kept `xt_` user stays;
 - `chain-source` — no mapping in any tenant uses the user as its source (source tenant = this tenant, source user name =
   the user name or source user id = its rtId);
-- `direct-use:<kind>` — no password, two-factor, external login, user token, claim, OAuth token or OAuth authorization.
+- `direct-use:<kind>` — no password, two-factor, external login, user token or claim.
+
+OAuth tokens and authorizations never keep a user (rule A): revoked, redeemed or expired ones are history, and a still
+valid one of a user who cannot obtain any role cannot carry a role either. `Apply` revokes them together with the user.
 
 A failing tenant is logged and the others continue. If the mappings of any tenant cannot be read, an `Apply` run deletes
 nothing (it runs as `DryRun`), because the chain-source rule cannot be decided. With several identity replicas each runs
@@ -1012,8 +1020,9 @@ the job; the per-user re-check and the idempotent plan (a second `Apply` finds n
 2. Read-only inventory with `scripts/identity-secret-management-role-check.sh` (AB#8155) for the baseline count of
    rights-less `xt_` users.
 3. Set `services.identity.shadowUserCleanup: DryRun`, deploy, wait ≥ 2 minutes, collect the `ShadowUserCleanup DryRun`
-   log lines of one identity pod. The candidate count should match the baseline; every difference is explained by a
-   skip reason.
+   log lines of one identity pod. The candidate count should match the baseline of users whose mappings grant no role;
+   every difference is explained by a skip reason. (test-2, 2026-11-07: 27 baseline users, of which 18 hold
+   TenantOwners through their mapping and stay; expected 9 candidates.)
 4. Gerald reviews the DryRun list.
 5. Set `Apply`, deploy, check the `ShadowUserCleanup Apply … deleted` lines and the summary.
 6. Set the value back to unset/`Off` and deploy, so the next start does not run again.

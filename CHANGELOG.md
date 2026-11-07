@@ -69,11 +69,15 @@ Notable changes of the OctoMesh identity services. The CK model `System.Identity
 - **Cleanup of rights-less `xt_` shadow users (AB#8305).** `IdentityApiAuthorization:ShadowUserCleanup`
   (`OCTO_IDENTITYAPIAUTHORIZATION__SHADOWUSERCLEANUP`, Helm `services.identity.shadowUserCleanup`) = `Off` (default) /
   `DryRun` / `Apply`. Two minutes after the start, identity checks every `xt_` user of the system tenant and of every
-  registered tenant once: a user without role, group, any other association, mapping of its name chain in the tenant,
-  mapping elsewhere that uses it as source, and without password, two-factor, external login, user token, claim or OAuth
-  token/authorization is a candidate. `DryRun` logs every candidate (tenant, rtId, user name, creation date), the skip
-  reasons of every other `xt_` user and a summary per tenant, and writes nothing; `Apply` deletes the candidates through the
-  identity user store with one `Identity.ShadowUserDeleted` event per user in the tenant's event log. Off reads nothing. A
+  registered tenant once: a user without role, group, any other association, role-granting mapping of its name chain in
+  the tenant, mapping elsewhere that uses it as source, and without password, two-factor, external login, user token or
+  claim is a candidate. **Rule A:** a mapping keeps its user only when it grants a role (non-empty `MappedRoleIds`, or a
+  member of a group that holds a role, nested groups included); an empty mapping is deleted together with its user, and
+  OAuth tokens/authorizations (valid or not) keep nobody and are revoked with the user. `DryRun` logs every candidate
+  (tenant, rtId, user name, creation date, empty mappings, OAuth counts), the skip reasons of every other `xt_` user and a
+  summary per tenant, and writes nothing; `Apply` re-checks each candidate, revokes its tokens and authorizations, deletes
+  its empty mappings and the user through the identity user store, with one `Identity.ShadowUserDeleted` event per user
+  (naming the deleted mapping ids) in the tenant's event log. Off reads nothing. A
   failing tenant does not stop the others, the run never blocks the start-up, and an Apply whose mapping read fails in any
   tenant runs as DryRun. Runbook in `docs/authentication.md`.
 - **Source tenant decides which tenants may look up and grant its users (AB#8345, security).** `GET/PUT

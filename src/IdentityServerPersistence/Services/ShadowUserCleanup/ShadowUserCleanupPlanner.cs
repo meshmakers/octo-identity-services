@@ -16,27 +16,67 @@ internal enum ShadowUserEdgeKind
 /// <summary>One association edge of a shadow user, in either direction.</summary>
 internal sealed record ShadowUserEdge(ShadowUserEdgeKind Kind, string RoleId);
 
+/// <summary>
+///     The OAuth tokens and authorizations whose subject is the user. They never keep a user (rule A, AB#8305): a token
+///     cannot carry a role the user cannot obtain, so Apply revokes them together with the user.
+/// </summary>
+/// <param name="ActiveTokens">Tokens with status <c>valid</c> that have not expired.</param>
+/// <param name="InactiveTokens">Revoked, redeemed, expired or otherwise inactive tokens.</param>
+/// <param name="ActiveAuthorizations">Authorizations with status <c>valid</c>.</param>
+/// <param name="InactiveAuthorizations">Revoked or otherwise inactive authorizations.</param>
+internal sealed record ShadowUserOAuthUse(
+    int ActiveTokens,
+    int InactiveTokens,
+    int ActiveAuthorizations,
+    int InactiveAuthorizations)
+{
+    public static readonly ShadowUserOAuthUse None = new(0, 0, 0, 0);
+
+    public bool Any => ActiveTokens + InactiveTokens + ActiveAuthorizations + InactiveAuthorizations > 0;
+}
+
 /// <summary>What the cleanup knows about one <c>xt_</c> user of a tenant.</summary>
 /// <param name="HasDirectUseData">
-///     Names of the direct-use evidence the user carries (password, two-factor, external logins, user tokens, claims,
-///     OAuth tokens or authorizations). Empty for a user that only the token exchange created.
+///     Names of the direct-use evidence the user carries (password, two-factor, external logins, user tokens, claims).
+///     Empty for a user that only the token exchange created. OAuth tokens and authorizations are not direct-use data
+///     any more (rule A); they are in <paramref name="OAuth" />.
 /// </param>
 internal sealed record ShadowUserFacts(
     string RtId,
     string UserName,
     DateTime? CreatedAt,
     IReadOnlyCollection<ShadowUserEdge> Edges,
-    IReadOnlyCollection<string> HasDirectUseData);
+    IReadOnlyCollection<string> HasDirectUseData,
+    ShadowUserOAuthUse? OAuth = null);
 
-/// <summary>The source identity of an external tenant user mapping.</summary>
-internal sealed record ShadowUserMappingSource(string SourceTenantId, string SourceUserId, string SourceUserName);
+/// <summary>An external tenant user mapping as the cleanup sees it.</summary>
+/// <param name="MappingRtId">The mapping's rtId; empty where only the source identity matters (chain-source rule).</param>
+/// <param name="GrantsRole">
+///     Rule A (AB#8305): true when the mapping actually grants a role — a non-empty <c>MappedRoleIds</c> list, or a
+///     membership in a group that holds at least one role (nested groups included, as at token time) — or carries any
+///     association other than a group membership. Only such a mapping keeps its <c>xt_</c> user. Defaults to true so that a
+///     mapping whose grant was not evaluated always keeps the user.
+/// </param>
+internal sealed record ShadowUserMappingSource(
+    string SourceTenantId,
+    string SourceUserId,
+    string SourceUserName,
+    string MappingRtId = "",
+    bool GrantsRole = true);
 
 /// <summary>The decision for one <c>xt_</c> user: a candidate when <see cref="SkipReasons" /> is empty.</summary>
+/// <param name="EmptyMappingIds">
+///     For a candidate: the rtIds of the empty mappings of its name chain (no role grant) that Apply deletes together with
+///     the user. A mapping that also matches a kept <c>xt_</c> user of the tenant is not listed. Empty for a kept user.
+/// </param>
+/// <param name="OAuth">The user's OAuth tokens and authorizations; Apply revokes them together with the user.</param>
 internal sealed record ShadowUserCleanupDecision(
     string RtId,
     string UserName,
     DateTime? CreatedAt,
-    IReadOnlyList<string> SkipReasons)
+    IReadOnlyList<string> SkipReasons,
+    IReadOnlyList<string> EmptyMappingIds,
+    ShadowUserOAuthUse OAuth)
 {
     public bool IsCandidate => SkipReasons.Count == 0;
 }
@@ -53,15 +93,20 @@ internal sealed record ShadowUserCleanupDecision(
 ///         <item><c>role</c>: no AssignedRole edge;</item>
 ///         <item><c>group</c>: no GroupMember edge;</item>
 ///         <item><c>association:&lt;id&gt;</c>: no other association of any kind, in either direction;</item>
-///         <item><c>mapping</c>: no external tenant user mapping in this tenant for any identity of its name chain.
-///             Every tier of a chain <c>xt_a_xt_r_n</c> (<c>a/xt_r_n</c>, <c>r/n</c>) is a suffix of the name, so a
-///             mapping whose <c>{SourceTenantId}_{SourceUserName}</c> ends the name (case-insensitive) blocks it. This
-///             needs no tenant registry and errs on the side of keeping a user;</item>
+///         <item><c>mapping</c>: no external tenant user mapping in this tenant for any identity of its name chain
+///             that grants a role (<see cref="ShadowUserMappingSource.GrantsRole" />, rule A). Every tier of a chain
+///             <c>xt_a_xt_r_n</c> (<c>a/xt_r_n</c>, <c>r/n</c>) is a suffix of the name, so a mapping whose
+///             <c>{SourceTenantId}_{SourceUserName}</c> ends the name (case-insensitive) belongs to it. This needs no
+///             tenant registry and errs on the side of keeping a user. An empty mapping (no role, no group with a role)
+///             does not keep the user; it is listed in <see cref="ShadowUserCleanupDecision.EmptyMappingIds" /> and
+///             deleted with it, unless it also belongs to a kept <c>xt_</c> user;</item>
 ///         <item><c>chain-source</c>: no mapping in any tenant uses this user as its source (source tenant = this
 ///             tenant and source user name = this user name or source user id = this rtId);</item>
-///         <item><c>direct-use:&lt;kind&gt;</c>: no password, two-factor, external login, user token, claim, OAuth
-///             token or authorization — evidence the user was used other than through the token exchange.</item>
+///         <item><c>direct-use:&lt;kind&gt;</c>: no password, two-factor, external login, user token or claim —
+///             evidence the user was used other than through the token exchange.</item>
 ///     </list>
+///     OAuth tokens and authorizations never keep a user (rule A): revoked, redeemed or expired ones are history, and a
+///     still valid one of a user who cannot obtain any role cannot carry a role either. Apply revokes them with the user.
 /// </remarks>
 internal static class ShadowUserCleanupPlanner
 {
@@ -71,7 +116,7 @@ internal static class ShadowUserCleanupPlanner
         IReadOnlyCollection<ShadowUserMappingSource> mappingsInTenant,
         IReadOnlyCollection<ShadowUserMappingSource> mappingsInAllTenants)
     {
-        var decisions = new List<ShadowUserCleanupDecision>();
+        var planned = new List<(ShadowUserFacts User, List<string> Reasons, List<ShadowUserMappingSource> ChainMappings)>();
         foreach (var user in users
                      .Where(u => CrossTenantShadowUserName.IsShadowUserName(u.UserName))
                      .OrderBy(u => u.RtId, StringComparer.Ordinal))
@@ -93,7 +138,8 @@ internal static class ShadowUserCleanupPlanner
                 .Distinct(StringComparer.Ordinal)
                 .OrderBy(r => r, StringComparer.Ordinal));
 
-            if (mappingsInTenant.Any(m => IsMappingOfChain(user.UserName, m)))
+            var chainMappings = mappingsInTenant.Where(m => IsMappingOfChain(user.UserName, m)).ToList();
+            if (chainMappings.Any(m => m.GrantsRole))
             {
                 reasons.Add("mapping");
             }
@@ -108,10 +154,33 @@ internal static class ShadowUserCleanupPlanner
                 .OrderBy(d => d, StringComparer.Ordinal)
                 .Select(d => $"direct-use:{d}"));
 
-            decisions.Add(new ShadowUserCleanupDecision(user.RtId, user.UserName, user.CreatedAt, reasons));
+            planned.Add((user, reasons, chainMappings));
         }
 
-        return decisions;
+        // An empty mapping that also belongs to a kept user stays: deleting it would change that user's state.
+        var mappingsOfKeptUsers = planned
+            .Where(p => p.Reasons.Count > 0)
+            .SelectMany(p => p.ChainMappings)
+            .Select(m => m.MappingRtId)
+            .ToHashSet(StringComparer.Ordinal);
+
+        return planned
+            .Select(p => new ShadowUserCleanupDecision(
+                p.User.RtId,
+                p.User.UserName,
+                p.User.CreatedAt,
+                p.Reasons,
+                p.Reasons.Count > 0
+                    ? []
+                    : p.ChainMappings
+                        .Where(m => !m.GrantsRole && !string.IsNullOrEmpty(m.MappingRtId)
+                                                  && !mappingsOfKeptUsers.Contains(m.MappingRtId))
+                        .Select(m => m.MappingRtId)
+                        .Distinct(StringComparer.Ordinal)
+                        .OrderBy(id => id, StringComparer.Ordinal)
+                        .ToList(),
+                p.User.OAuth ?? ShadowUserOAuthUse.None))
+            .ToList();
     }
 
     /// <summary>True when the mapping's source identity is one tier of the shadow user's name chain.</summary>
