@@ -44,8 +44,10 @@ public static class CrossTenantGrantAuditEvents
 
 /// <summary>
 ///     Writes the cross-tenant grant audit events into the runtime event logs of the target tenant T and the source
-///     tenant S (AB#8342). An event goes to S only when S is a registered tenant other than T. Never carries the
-///     looked-up identifier, an e-mail address, a token or a password. Never throws into the caller.
+///     tenant S (AB#8342). An event goes to S only when S is a registered tenant other than T; a grant event
+///     (create/change/remove) additionally only when S is a registry ancestor of T or permits T
+///     (<see cref="ISourceTenantGrantPolicy" />, AB#8436). Never carries the looked-up identifier, an e-mail address, a
+///     token or a password. Never throws into the caller.
 /// </summary>
 public interface ICrossTenantGrantAuditRecorder
 {
@@ -61,6 +63,11 @@ public interface ICrossTenantGrantAuditRecorder
     /// <param name="actorName">User name or client id of the administrator of T who made the change.</param>
     /// <param name="mapping">The mapping as stored (for a removal: as it was before).</param>
     /// <param name="groupNames">The T groups the mapping is a member of.</param>
+    /// <remarks>
+    ///     The source tenant and the user name of a mapping are supplied by the administrator of T. So that nobody can
+    ///     place events into a foreign tenant's log, the event reaches S only when S is a registry ancestor of T or
+    ///     permits T; otherwise it is recorded in T only (AB#8436).
+    /// </remarks>
     Task RecordGrantAsync(string eventName, string targetTenantId, string actorName,
         RtExternalTenantUserMapping mapping, IReadOnlyList<string> groupNames);
 
@@ -89,6 +96,7 @@ internal sealed class CrossTenantGrantAuditRecorder(
     IIdentityAuditService auditService,
     ITenantRegistry tenantRegistry,
     ICrossTenantAncestryGuard ancestryGuard,
+    ISourceTenantGrantPolicy grantPolicy,
     IGroupStore groupStore,
     ILogger<CrossTenantGrantAuditRecorder> logger) : ICrossTenantGrantAuditRecorder
 {
@@ -145,7 +153,8 @@ internal sealed class CrossTenantGrantAuditRecorder(
         var message =
             $"'{actorName}' of tenant '{targetTenantId}' {verb} user '{mapping.SourceUserName}' of tenant '{mapping.SourceTenantId}' (mapping {mapping.RtId}, groups [{details["groupNames"]}])";
 
-        return WriteAsync(eventName, warning: false, targetTenantId, mapping.SourceTenantId, message, details);
+        return WriteAsync(eventName, warning: false, targetTenantId, mapping.SourceTenantId, message, details,
+            sourceMustPermitTarget: true);
     }
 
     /// <inheritdoc />
@@ -225,16 +234,25 @@ internal sealed class CrossTenantGrantAuditRecorder(
 
     /// <summary>
     ///     Writes the event into T and — when <paramref name="sourceTenantId" /> names a registered tenant other than T —
-    ///     into S. Each write is guarded on its own; nothing throws.
+    ///     into S. With <paramref name="sourceMustPermitTarget" /> S must also be a registry ancestor of T or permit T
+    ///     (AB#8436). Each write is guarded on its own; nothing throws.
     /// </summary>
     private async Task WriteAsync(string eventName, bool warning, string targetTenantId, string? sourceTenantId,
-        string message, IReadOnlyDictionary<string, string> details)
+        string message, IReadOnlyDictionary<string, string> details, bool sourceMustPermitTarget = false)
     {
         try
         {
             await StoreAsync(warning, targetTenantId, eventName, message, details);
 
             var source = await ResolveSourceTenantAsync(targetTenantId, sourceTenantId);
+            if (source != null && sourceMustPermitTarget && !await SourceAdmitsTargetAsync(source, targetTenantId))
+            {
+                logger.LogInformation(
+                    "Cross-tenant audit event {EventName} is recorded in target tenant {TargetTenantId} only: source tenant {SourceTenantId} is no registry ancestor and does not permit it (AB#8436)",
+                    eventName, targetTenantId, source);
+                source = null;
+            }
+
             if (source != null)
             {
                 await StoreAsync(warning, source, eventName, message, details);
@@ -251,6 +269,31 @@ internal sealed class CrossTenantGrantAuditRecorder(
         => warning
             ? auditService.StoreWarningAsync(tenantId, eventName, message, details)
             : auditService.StoreInfoAsync(tenantId, eventName, message, details);
+
+    /// <summary>
+    ///     <c>true</c> when S is a registry ancestor of T or the grant policy says S permits T. Any failure answers
+    ///     <c>false</c>: the event then stays in T, which is the safe side (AB#8436).
+    /// </summary>
+    private async Task<bool> SourceAdmitsTargetAsync(string sourceTenantId, string targetTenantId)
+    {
+        try
+        {
+            if ((await ancestryGuard.GetRegistryAncestorsAsync(targetTenantId))
+                .Contains(sourceTenantId, StringComparer.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+
+            return await grantPolicy.IsPermittedAsync(sourceTenantId, targetTenantId);
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex,
+                "Cross-tenant audit: could not decide whether source tenant {SourceTenantId} admits target tenant {TargetTenantId}; the event is recorded in the target tenant only (AB#8436)",
+                sourceTenantId, targetTenantId);
+            return false;
+        }
+    }
 
     /// <summary>The registered id of S, or <c>null</c> when S is empty, equals T or is not a registered tenant.</summary>
     private async Task<string?> ResolveSourceTenantAsync(string targetTenantId, string? sourceTenantId)

@@ -117,6 +117,12 @@ Notable changes of the OctoMesh identity services. The CK model `System.Identity
 
 ### Fixed
 
+- **Grant audit events no longer reach a tenant that does not admit the target (AB#8436, security).** A mapping names its
+  source tenant and user name as T's administrator sends them, so since AB#8342 an administrator of any tenant could write
+  `Identity.CrossTenantGrantCreated` / `GrantChanged` / `GrantRemoved` events with free text into (and flood) the event log
+  of any other registered tenant. The grant event now goes to S only when S is a registry ancestor of T or permits T
+  (`ISourceTenantGrantPolicy`); otherwise it is recorded in T only. The mapping routes accept and refuse exactly as before
+  (the create gate is AB#8343).
 - **The read-only role-check script works through the Rancher proxy (AB#8431).**
   `scripts/identity-secret-management-role-check.sh` passed its JavaScript with `mongosh --eval` inside the `kubectl exec`
   request; through Rancher the 5.5 KB inventory step returned an nginx error page. The JavaScript now travels on stdin
