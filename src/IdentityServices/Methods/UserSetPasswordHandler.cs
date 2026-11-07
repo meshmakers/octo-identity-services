@@ -100,7 +100,10 @@ internal sealed class UserSetPasswordHandler(
         var result = await userManager.AddPasswordAsync(user, context.Parameters.NewPassword).ConfigureAwait(false);
         if (!result.Succeeded)
         {
-            return Failure(result);
+            // The pre-check and the write are not atomic: a concurrent call (double submit) set a password in between.
+            return result.Errors.Any(e => e.Code == nameof(IdentityErrorDescriber.UserAlreadyHasPassword))
+                ? CkMethodOutcome.Fail(PasswordAlreadySet)
+                : Failure(result);
         }
 
         // Rotates the security stamp, revokes the refresh tokens and authorizations of the user in this tenant and logs
