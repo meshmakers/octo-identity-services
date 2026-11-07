@@ -153,3 +153,8 @@ Notable changes of the OctoMesh identity services. The CK model `System.Identity
   (Studio *Add Cross-Tenant User*, `CreateExternalTenantUserMapping`, `ProvisionCurrentUser -ttid`), no longer
   by granting a role to a left-over `xt_` user. Existing role-less `xt_` users are cleaned up separately
   (AB#8305). See `docs/authentication.md`.
+- **Deleting an `AdminProvisioning` mapping no longer fails when its audit group read fails (AB#8437).**
+  `DELETE AdminProvisioning/{targetTenantId}/{mappingRtId}` read the mapping's group names for the
+  `Identity.CrossTenantGrantRemoved` event inside the delete transaction and unguarded, so a failing read answered `500`.
+  The read now runs in a session of its own and is guarded: a failure is logged, the event is recorded without groups and
+  the mapping is deleted. Concept §7 now states that the `AdminProvisioning` routes write grant events (as built in AB#8342).

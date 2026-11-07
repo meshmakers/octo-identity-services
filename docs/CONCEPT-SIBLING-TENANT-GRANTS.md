@@ -268,8 +268,12 @@ As built (AB#8342): the event name is the event **category** (dotted, platform c
 `Identity.CrossTenantGrantChanged` is written by the role `PUT`; the group route of AB#8343 calls the same recorder
 (`ICrossTenantGrantAuditRecorder.RecordGrantAsync`). AB#8345 writes the permission-list event (constant
 `CrossTenantGrantAuditEvents.GrantPermissionsChanged`) by calling `IIdentityAuditService.StoreInfoAsync(sourceTenantId, eventName, message, details)`. Grant events are
-written for every mapping write through `ExternalTenantUserMappings` (also for an ancestor source); the ancestor flows under
-`adminProvisioning` stay without them (§1). The first exchange is recorded for every source tenant.
+written for every mapping write through `ExternalTenantUserMappings` (also for an ancestor source) and for the ancestor flows
+under `AdminProvisioning/{targetTenantId}`: `POST` and `POST withGroups` → `GrantCreated`, `DELETE {mappingRtId}` →
+`GrantRemoved`, `provisionCurrentUser` → `GrantCreated` (outcome `created`) or `GrantChanged` (outcome `repaired`;
+`already-provisioned` writes nothing) — see `docs/authentication.md`. The group names of a removal are read before the
+delete in a session of their own; a failed read records the event without groups and never breaks the deletion (AB#8437).
+The first exchange is recorded for every source tenant.
 
 ## 8. Token exchange and revocation (AB#8343, AB#8344)
 
