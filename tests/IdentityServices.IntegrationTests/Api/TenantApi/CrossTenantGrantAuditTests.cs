@@ -25,6 +25,9 @@ using Microsoft.Extensions.DependencyInjection;
 using NSubstitute;
 using Persistence.IdentityCkModel.Generated.System.Identity.v3;
 using Xunit;
+// Communication.Contracts also ships a CrossTenantGrantPermissionsDto (AB#8346); the test sends the controller's own.
+using CrossTenantGrantPermissionsDto =
+    Meshmakers.Octo.Backend.IdentityServices.TenantApi.v1.Controllers.CrossTenantGrantPermissionsDto;
 
 namespace IdentityServices.IntegrationTests.Api.TenantApi;
 
