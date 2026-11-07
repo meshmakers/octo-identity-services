@@ -233,6 +233,9 @@ try
                 c.AddCkMethodHandlerDiscovery();
             }
 
+            // AB#8412: the dispatcher of the REST facades (registered by AddIdentityCkMethodHost) keeps its registry here.
+            c.AddCkMethodHandlerRegistryFeed();
+
             c.AddBroadcastEventConsumer<IdentityProviderUpdateConsumer, IdentityProviderUpdate>();
             c.AddBroadcastEventConsumer<IdentityCorsClientsUpdateConsumer, CorsClientsUpdate>();
             c.AddBroadcastEventConsumer<IdentityTenantManagementConsumer, PreDeleteTenant>();

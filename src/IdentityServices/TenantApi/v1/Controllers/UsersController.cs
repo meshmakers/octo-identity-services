@@ -5,13 +5,16 @@ using IdentityServerPersistence;
 using IdentityServerPersistence.Services;
 using IdentityServerPersistence.SystemStores;
 using Meshmakers.Octo.Backend.IdentityServices.Authorization.RoleChange;
+using Meshmakers.Octo.Backend.IdentityServices.Methods;
 using Meshmakers.Octo.Backend.IdentityServices.OpenIddict;
 using Meshmakers.Octo.Backend.IdentityServices.Services;
 using Meshmakers.Octo.Communication.Contracts.DataTransferObjects;
 using Meshmakers.Octo.Communication.Contracts.DataTransferObjects.ApiErrors;
 using Meshmakers.Octo.ConstructionKit.Contracts;
 using Meshmakers.Octo.Runtime.Contracts.RepositoryEntities;
+using Meshmakers.Octo.Services.Contracts.DistributionEventHub.Methods;
 using Meshmakers.Octo.Services.Infrastructure.Services;
+using Meshmakers.Octo.Services.Methods.Facades;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Mvc;
@@ -47,6 +50,7 @@ public class UsersController : ControllerBase
     private readonly IUserSessionRevocationService _userSessionRevocationService;
     private readonly IRoleChangeGuard _roleChangeGuard;
     private readonly IIdentityAuditService _identityAuditService;
+    private readonly IIdentityMethodFacade _methodFacade;
 
     /// <summary>
     ///     Constructor
@@ -60,6 +64,7 @@ public class UsersController : ControllerBase
     /// <param name="userSessionRevocationService">Revokes all sessions and tokens of a user (AB#7899)</param>
     /// <param name="roleChangeGuard">Self-grant, role-not-held and last-administrator rules (AB#7914)</param>
     /// <param name="identityAuditService">Audit of refused role changes</param>
+    /// <param name="methodFacade">Calls the <c>User</c> methods the role and merge endpoints serve (AB#8412)</param>
     /// <param name="logger">Logger</param>
     public UsersController(
         UserManager<RtUser> userManager,
@@ -71,6 +76,7 @@ public class UsersController : ControllerBase
         IUserSessionRevocationService userSessionRevocationService,
         IRoleChangeGuard roleChangeGuard,
         IIdentityAuditService identityAuditService,
+        IIdentityMethodFacade methodFacade,
         ILogger<UsersController> logger)
     {
         _userManager = userManager;
@@ -82,6 +88,7 @@ public class UsersController : ControllerBase
         _userSessionRevocationService = userSessionRevocationService;
         _roleChangeGuard = roleChangeGuard;
         _identityAuditService = identityAuditService;
+        _methodFacade = methodFacade;
         _logger = logger;
     }
 
@@ -573,7 +580,15 @@ public class UsersController : ControllerBase
         }
     }
 
-    // PUT system/v1/users/demo/roles/users
+    // PUT system/v1/users/demo/roles
+    /// <summary>
+    ///     Replaces the direct roles of a user. Facade of the CK method <c>User.SetRoles-1</c> (AB#8412).
+    /// </summary>
+    /// <remarks>
+    ///     The endpoint resolves the user name and the role ids (an unknown id is <c>404</c> and changes nothing) and calls
+    ///     <c>User.SetRoles</c> in-process: role change guard (AB#7914), difference of the direct roles, one
+    ///     <c>Identity.Method</c> audit event. Status codes and bodies are unchanged.
+    /// </remarks>
     [HttpPut("{userName}/roles")]
     [Authorize(IdentityServiceConstants.IdentityUserAdministrationWritePolicy)]
     [EndpointSummary("Adds roles to an user.")]
@@ -588,8 +603,8 @@ public class UsersController : ControllerBase
             return NotFound(new NotFoundErrorDto($"User with name '{userName}' not found."));
         }
 
-        // AB#7914: validate every role id first, so an unknown id changes nothing (it used to strip the roles first).
-        var wanted = new Dictionary<string, RtRole>(StringComparer.Ordinal); // normalized name -> role
+        // REST names the roles by id, the method by name: resolve every id first, so an unknown id changes nothing.
+        var roleIdsByName = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         foreach (var roleId in roleIds)
         {
             var role = await _roleManager.FindByIdAsync(roleId.ToString());
@@ -600,35 +615,27 @@ public class UsersController : ControllerBase
 
             if (role.NormalizedName != null)
             {
-                wanted[role.NormalizedName] = role;
+                roleIdsByName[role.Name ?? role.NormalizedName] = roleId.ToString();
             }
         }
 
-        // Only directly assigned roles are replaced (not group-inherited ones), and only the difference is written.
-        var currentDirectRoles = await _octoUserStore.GetDirectRolesAsync(user);
-        var current = currentDirectRoles.Select(r => r.ToUpperInvariant()).ToHashSet(StringComparer.Ordinal);
-
-        var refusal = await CheckRoleChangeAsync(user, wanted.Values.Select(r => r.Name ?? r.NormalizedName!).ToList(),
-            currentDirectRoles);
-        if (refusal != null)
-        {
-            return refusal;
-        }
-
-        foreach (var normalized in current.Where(c => !wanted.ContainsKey(c)))
-        {
-            await _userManager.RemoveFromRoleAsync(user, normalized);
-        }
-
-        foreach (var normalized in wanted.Keys.Where(w => !current.Contains(w)))
-        {
-            await _userManager.AddToRoleAsync(user, normalized);
-        }
-
-        return Ok();
+        var response = await _methodFacade.InvokeAsync(IdentityMethodFacade.UserCkTypeId,
+            SystemIdentityCkIds.UserSetRolesMethodId, user.RtId.ToString(),
+            new UserSetRolesParameters { RoleNames = roleIdsByName.Keys.ToList() }, User, HttpContext.RequestAborted);
+        return await ToRoleFacadeResultAsync(response, user, new CkMethodFacadeOptions()
+            .MapError(UserRoleMethodErrors.RoleNotFound, error =>
+                NotFound(new NotFoundErrorDto(
+                    $"Role with id '{RoleParameter(error, roleIdsByName)}' not found."))));
     }
 
     // PUT system/v1/users/demo/roles/users
+    /// <summary>
+    ///     Adds a direct role to a user. Facade of the CK method <c>User.AddRole-1</c> (AB#8412).
+    /// </summary>
+    /// <remarks>
+    ///     A role the user already holds, also through a group, is <c>400</c> as before; the rest (role change guard, write,
+    ///     <c>Identity.Method</c> audit event) is the method.
+    /// </remarks>
     [HttpPut("{userName}/roles/{roleName}")]
     [Authorize(IdentityServiceConstants.IdentityUserAdministrationWritePolicy)]
     [EndpointSummary("Adds a role to a user.")]
@@ -649,24 +656,20 @@ public class UsersController : ControllerBase
             return NotFound(new NotFoundErrorDto($"Role with name '{roleName}' not found."));
         }
 
+        // REST contract: a role held through a group counts as held (the method looks at the direct roles only).
+        var alreadyHeld = new OperationFailedErrorDto($"User '{user.UserName}' already has role '{role.Name}'");
         if (role.NormalizedName != null && await _userManager.IsInRoleAsync(user, role.NormalizedName))
         {
-            return BadRequest(new OperationFailedErrorDto($"User '{user.UserName}' already has role '{role.Name}'"));
+            return BadRequest(alreadyHeld);
         }
 
-        var directRoles = await _octoUserStore.GetDirectRolesAsync(user);
-        var refusal = await CheckRoleChangeAsync(user, directRoles.Append(role.Name ?? roleName).ToList(), directRoles);
-        if (refusal != null)
-        {
-            return refusal;
-        }
-
-        if (role.NormalizedName != null)
-        {
-            await _userManager.AddToRoleAsync(user, role.NormalizedName);
-        }
-
-        return Ok();
+        var response = await _methodFacade.InvokeAsync(IdentityMethodFacade.UserCkTypeId,
+            SystemIdentityCkIds.UserAddRoleMethodId, user.RtId.ToString(),
+            new UserAddRoleParameters { RoleName = role.Name ?? roleName }, User, HttpContext.RequestAborted);
+        return await ToRoleFacadeResultAsync(response, user, new CkMethodFacadeOptions()
+            .MapError(UserRoleMethodErrors.RoleNotFound,
+                _ => NotFound(new NotFoundErrorDto($"Role with name '{roleName}' not found.")))
+            .MapError(UserRoleMethodErrors.RoleAlreadyAssigned, _ => BadRequest(alreadyHeld)));
     }
 
     // POST system/v1/users/{userName}/merge
@@ -675,9 +678,10 @@ public class UsersController : ControllerBase
     ///     This is useful for consolidating duplicate accounts created by external identity providers.
     /// </summary>
     /// <remarks>
-    ///     Runs <see cref="IUserMergeService" />, the same code as the CK method <c>User.Merge-1</c> (AB#7778): role change
-    ///     guard on the deletion of the source user, logins moved, sessions and refresh tokens of the source user revoked,
-    ///     source user deleted. Roles, groups and claims of the source user are not transferred.
+    ///     Facade of the CK method <c>User.Merge-1</c> (AB#8412): role change guard on the deletion of the source user,
+    ///     write permission on the source user, logins moved, sessions and refresh tokens of the source user revoked,
+    ///     source user deleted, one <c>Identity.Method</c> audit event. Roles, groups and claims of the source user are not
+    ///     transferred.
     /// </remarks>
     [HttpPost("{userName}/merge")]
     [Authorize(IdentityServiceConstants.IdentityUserAdministrationWritePolicy)]
@@ -689,8 +693,7 @@ public class UsersController : ControllerBase
         [Required] [Description("The target username (this user will be kept)")]
         string userName,
         [Required] [FromBody] [Description("The merge request containing the source username")]
-        MergeUsersRequestDto mergeRequest,
-        [FromServices] IUserMergeService userMergeService)
+        MergeUsersRequestDto mergeRequest)
     {
         if (!ModelState.IsValid)
         {
@@ -703,37 +706,44 @@ public class UsersController : ControllerBase
             return NotFound(new NotFoundErrorDto($"Target user '{userName}' not found."));
         }
 
-        var sourceUser = await _userManager.FindByNameAsync(mergeRequest.SourceUserName);
-        if (sourceUser == null)
+        var response = await _methodFacade.InvokeAsync(IdentityMethodFacade.UserCkTypeId,
+            SystemIdentityCkIds.UserMergeMethodId, targetUser.RtId.ToString(),
+            new UserMergeParameters { SourceUserName = mergeRequest.SourceUserName }, User, HttpContext.RequestAborted);
+
+        // AB#7914: the source user is deleted at the end; that must not remove the last user administrator.
+        if (RoleChangeRefusal(response) is { } decision)
         {
-            return NotFound(new NotFoundErrorDto($"Source user '{mergeRequest.SourceUserName}' not found."));
+            var sourceUser = await _userManager.FindByNameAsync(mergeRequest.SourceUserName.Trim());
+            if (sourceUser != null)
+            {
+                return await RefuseRoleChangeAsync(sourceUser, RoleChangeCaller.FromPrincipal(User), decision);
+            }
+
+            return RoleChangeProblems.ToResult(decision);
         }
 
-        try
-        {
-            var result = await userMergeService.MergeAsync(targetUser, sourceUser, RoleChangeCaller.FromPrincipal(User),
-                AuditActor.FromPrincipal(User), HttpContext.RequestAborted);
-            return result.Status switch
-            {
-                UserMergeStatus.Merged => Ok(),
-                UserMergeStatus.SameUser => BadRequest(new OperationFailedErrorDto("Cannot merge a user into itself.")),
-                // AB#7914: the source user is deleted at the end; that must not remove the last user administrator.
-                UserMergeStatus.RoleChangeRefused => await RefuseRoleChangeAsync(sourceUser, RoleChangeCaller.FromPrincipal(User),
-                    result.Refusal!),
-                UserMergeStatus.LoginRemoveFailed => GetBadRequestResultWithErrorDescription(
-                    $"Failed to remove login '{result.LoginProvider}' from source user", result.Errors),
-                UserMergeStatus.LoginAddFailed => GetBadRequestResultWithErrorDescription(
-                    $"Failed to transfer login '{result.LoginProvider}' to target user", result.Errors),
-                _ => GetBadRequestResultWithErrorDescription("Failed to delete source user after merge", result.Errors)
-            };
-        }
-        catch (Exception e)
-        {
-            return StatusCode(StatusCodes.Status500InternalServerError, new InternalServerErrorDto(e.Message));
-        }
+        return response.ToActionResult(new CkMethodFacadeOptions()
+            .MapSuccess(_ => Ok())
+            .MapError(CkMethodErrorCodes.MethodTargetNotFound,
+                _ => NotFound(new NotFoundErrorDto($"Target user '{userName}' not found.")))
+            .MapError(UserMergeHandler.SourceUserNotFound,
+                _ => NotFound(new NotFoundErrorDto($"Source user '{mergeRequest.SourceUserName}' not found.")))
+            .MapError(UserMergeHandler.CannotMergeIntoItself,
+                _ => BadRequest(new OperationFailedErrorDto("Cannot merge a user into itself.")))
+            .MapError(UserMergeHandler.MergeFailed, MergeFailedResult)
+            .MapError(CkMethodErrorCodes.MethodHandlerFailed,
+                _ => StatusCode(StatusCodes.Status500InternalServerError,
+                    new InternalServerErrorDto("Merging the users failed."))));
     }
 
     // DELETE system/v1/users/demo/roles/Users
+    /// <summary>
+    ///     Removes a direct role from a user. Facade of the CK method <c>User.RemoveRole-1</c> (AB#8412).
+    /// </summary>
+    /// <remarks>
+    ///     A role the user does not hold at all is <c>400</c> as before; a role held only through a group is <c>200</c> and
+    ///     changes nothing, as before. The rest (role change guard, write, <c>Identity.Method</c> audit event) is the method.
+    /// </remarks>
     [HttpDelete("{userName}/roles/{roleName}")]
     [Authorize(IdentityServiceConstants.IdentityUserAdministrationWritePolicy)]
     [EndpointSummary("Removes a role from a user.")]
@@ -754,26 +764,81 @@ public class UsersController : ControllerBase
             return NotFound(new NotFoundErrorDto($"Role with name '{roleName}' not found."));
         }
 
+        // REST contract: a role held through a group counts as held (the method looks at the direct roles only).
         if (role.NormalizedName != null && !await _userManager.IsInRoleAsync(user, role.NormalizedName))
         {
             return BadRequest(new OperationFailedErrorDto($"User '{user.UserName}' doesn't have role '{role.Name}'"));
         }
 
-        var directRoles = await _octoUserStore.GetDirectRolesAsync(user);
-        var refusal = await CheckRoleChangeAsync(user,
-            directRoles.Where(r => !string.Equals(r, role.Name, StringComparison.OrdinalIgnoreCase)).ToList(),
-            directRoles);
-        if (refusal != null)
+        var response = await _methodFacade.InvokeAsync(IdentityMethodFacade.UserCkTypeId,
+            SystemIdentityCkIds.UserRemoveRoleMethodId, user.RtId.ToString(),
+            new UserRemoveRoleParameters { RoleName = role.Name ?? roleName }, User, HttpContext.RequestAborted);
+        return await ToRoleFacadeResultAsync(response, user, new CkMethodFacadeOptions()
+            .MapError(UserRoleMethodErrors.RoleNotFound,
+                _ => NotFound(new NotFoundErrorDto($"Role with name '{roleName}' not found.")))
+            // held only through a group: REST has always answered 200 without a change
+            .MapError(UserRoleMethodErrors.RoleNotAssigned, _ => Ok()));
+    }
+
+    /// <summary>
+    ///     The REST answer of a role method (AB#8412): <c>200</c> on success, the problem answer of the role change guard
+    ///     (403 / 409, with the WARN log and the <c>Identity.RoleChangeRefused</c> audit record of AB#7914), a missing user
+    ///     as <c>404</c>, the endpoint's own mappings, else the facade defaults.
+    /// </summary>
+    private async Task<IActionResult> ToRoleFacadeResultAsync(CkMethodResponse response, RtUser user,
+        CkMethodFacadeOptions options)
+    {
+        if (RoleChangeRefusal(response) is { } decision)
         {
-            return refusal;
+            return await RefuseRoleChangeAsync(user, RoleChangeCaller.FromPrincipal(User), decision);
         }
 
-        if (role.NormalizedName != null)
+        return response.ToActionResult(options
+            .MapSuccess(_ => Ok())
+            .MapError(CkMethodErrorCodes.MethodTargetNotFound,
+                _ => NotFound(new NotFoundErrorDto($"User with name '{user.UserName}' not found."))));
+    }
+
+    /// <summary>
+    ///     The decision of the role change guard when the method refused the call because of it (<c>METHOD_FORBIDDEN</c>
+    ///     with a guard <c>reason</c>), else <c>null</c>. Other refusals (<c>role-required</c>, <c>data-permission</c>) are
+    ///     not guard decisions.
+    /// </summary>
+    private static RoleChangeDecision? RoleChangeRefusal(CkMethodResponse response)
+    {
+        if (response.Success || response.Error is not { Code: CkMethodErrorCodes.MethodForbidden } error ||
+            !error.Parameters.TryGetValue("reason", out var reason) ||
+            reason is not (RoleChangeReasons.SelfGrant or RoleChangeReasons.RoleNotHeld or
+                RoleChangeReasons.LastAdministrator))
         {
-            await _userManager.RemoveFromRoleAsync(user, role.NormalizedName);
+            return null;
         }
 
-        return Ok();
+        var roleNames = error.Parameters.TryGetValue("roleNames", out var names)
+            ? names.Split(',', StringSplitOptions.RemoveEmptyEntries)
+            : [];
+        return new RoleChangeDecision(reason, roleNames);
+    }
+
+    /// <summary>The role id of a <c>ROLE_NOT_FOUND</c> answer of <c>User.SetRoles</c> (the method names the role).</summary>
+    private static string RoleParameter(CkMethodError error, IReadOnlyDictionary<string, string> roleIdsByName) =>
+        error.Parameters.TryGetValue(UserRoleMethodErrors.RoleNameParameter, out var name) &&
+        roleIdsByName.TryGetValue(name, out var id)
+            ? id
+            : name ?? string.Empty;
+
+    /// <summary>The <c>400</c> answer of a failed merge step, with the error codes of the user manager.</summary>
+    private BadRequestObjectResult MergeFailedResult(CkMethodError error)
+    {
+        error.Parameters.TryGetValue("loginProvider", out var loginProvider);
+        var message = error.Parameters.GetValueOrDefault("step") switch
+        {
+            "removeLogin" => $"Failed to remove login '{loginProvider}' from source user",
+            "addLogin" => $"Failed to transfer login '{loginProvider}' to target user",
+            _ => "Failed to delete source user after merge"
+        };
+        return BadRequest(new OperationFailedErrorDto(message,
+            (error.Details ?? []).Select(d => new FailedDetailsDto { Code = d.Code })));
     }
 
     /// <summary>

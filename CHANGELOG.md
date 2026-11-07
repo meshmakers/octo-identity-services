@@ -5,6 +5,27 @@ Notable changes of the OctoMesh identity services. The CK model `System.Identity
 
 ## Unreleased
 
+### Changed
+
+- **REST role and merge endpoints run the `User` methods (AB#8412).** `PUT users/{userName}/roles`,
+  `PUT`/`DELETE users/{userName}/roles/{roleName}` and `POST users/{userName}/merge` are facades of `User.SetRoles-1`,
+  `User.AddRole-1`, `User.RemoveRole-1` and `User.Merge-1`: the controller resolves the user (and the role ids / names) and
+  calls the method in-process through the dispatcher (AB#8411, nothing on the bus); the role change guard, the role
+  difference and the merge exist once, in the handlers. Routes, request and response shapes and status codes are unchanged.
+  Behaviour changes for REST callers:
+  - every call writes one `Identity.Method` audit event (success and refusal; `rolesBefore`/`rolesAfter`, merge details);
+    a guard refusal keeps the `Identity.RoleChangeRefused` record and the WARN log of AB#7914;
+  - merge: the caller needs write access to the source user (data permissions, AB#7035) — not readable answers `404`
+    "Source user … not found", not writable `403` problem `METHOD_FORBIDDEN` (only with enforcing data-permission policies);
+  - merge: a failed login or delete step answers `400` as before, but the `failedDetails` carry only the error `code`
+    (no `description`); an unexpected failure answers `500` with the message "Merging the users failed." instead of the
+    exception text; the source user name is trimmed;
+  - role endpoints: an unexpected failure answers `500` problem details (`METHOD_HANDLER_FAILED`);
+  - with `IdentityApiAuthorization:RoleEnforcement=Warn` (not the default) a caller without `UserManagement` is now
+    refused (`403`) by the method instead of being let through with a warning.
+  The endpoints work whatever `Methods:Identity:EnablePasswordMethods` says (no secret). See `CLAUDE.md`, section
+  "REST facades of the role and merge endpoints (AB#8412)", for the parity table.
+
 ### Added
 
 - **Exact source user lookup for sibling-tenant grants (AB#8341, security).** `POST
@@ -28,6 +49,9 @@ Notable changes of the OctoMesh identity services. The CK model `System.Identity
 
 ### Fixed
 
+- **`User.Merge` with a caller whose subject is not an object id (AB#8412).** The handler looked the acting user up by the
+  `sub` claim and failed with `METHOD_HANDLER_FAILED` when it was no object id; it now skips the lookup (the actor is
+  logged with subject and client).
 - **The login page no longer offers parent tenants the tenant registry does not back, and names a refused tenant switch
   (AB#8367).** Under `IdentityApiAuthorization:CrossTenantAncestry=Enforce` the login page lists only OctoTenant
   identity providers whose parent is a registry ancestor (under `Warn` all, with the AB#8339 warning).

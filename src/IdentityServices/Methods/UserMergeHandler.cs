@@ -134,7 +134,8 @@ internal sealed class UserMergeHandler(IServiceProvider services)
     {
         var principal = call.Principal;
         string? userName = null;
-        if (principal.SubjectId != null)
+        // A subject that is not an object id names no local user (the store would throw on it, AB#8412).
+        if (principal.SubjectId != null && OctoObjectId.TryParse(principal.SubjectId, out _))
         {
             var caller = await userManager.FindByIdAsync(principal.SubjectId).ConfigureAwait(false);
             userName = caller?.UserName;
