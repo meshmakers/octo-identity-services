@@ -1022,6 +1022,7 @@ public class TenantExchangeIntegrationTests : IClassFixture<IdentityServicesFixt
             BuildUserManager(targetResolver),
             Substitute.For<IHttpContextAccessor>(),
             Substitute.For<IIdentityAuditService>(),
+            Substitute.For<Meshmakers.Octo.Backend.IdentityServices.CrossTenantAudit.ICrossTenantGrantAuditRecorder>(),
             NullLogger<TenantExchangeProcessor>.Instance);
     }
 

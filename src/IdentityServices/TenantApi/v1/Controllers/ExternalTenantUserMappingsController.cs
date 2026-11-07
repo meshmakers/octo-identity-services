@@ -15,6 +15,7 @@ using Meshmakers.Octo.Services.Infrastructure.Services;
 using Persistence.IdentityCkModel.Generated.System.Identity.v3;
 using Meshmakers.Octo.Backend.Authentication;
 using Meshmakers.Octo.Backend.IdentityServices.Authorization.RoleChange;
+using Meshmakers.Octo.Backend.IdentityServices.CrossTenantAudit;
 
 namespace Meshmakers.Octo.Backend.IdentityServices.TenantApi.v1.Controllers;
 
@@ -30,8 +31,48 @@ public class ExternalTenantUserMappingsController(
     IExternalTenantUserMappingStore mappingStore,
     IGroupStore groupStore,
     IRoleChangeGuard roleChangeGuard,
-    IRoleChangeRefusals roleChangeRefusals) : ControllerBase
+    IRoleChangeRefusals roleChangeRefusals,
+    ICrossTenantGrantAuditRecorder grantAudit,
+    IMultiTenancyResolverService multiTenancyResolverService,
+    ILogger<ExternalTenantUserMappingsController> logger) : ControllerBase
 {
+    /// <summary>User name (or client id) of the caller, for logs and audit events — never a token.</summary>
+    private string CallerName()
+        => User.Identity?.Name ?? User.FindFirst("preferred_username")?.Value ??
+           User.FindFirst("client_id")?.Value ?? User.FindFirst("sub")?.Value ?? "unknown";
+
+    /// <summary>The mapping's group names for an audit event; a read error yields none and never fails the request.</summary>
+    private async Task<IReadOnlyList<string>> GroupNamesForAuditAsync(RtExternalTenantUserMapping mapping)
+    {
+        try
+        {
+            return await groupStore.GetGroupNamesForExternalUserMappingAsync(mapping.RtId);
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex, "Group names of mapping {MappingId} could not be read for the audit event (AB#8342)",
+                mapping.RtId);
+            return [];
+        }
+    }
+
+    /// <summary>Records a grant event in T and S (AB#8342); never fails the request.</summary>
+    private async Task AuditGrantAsync(string eventName, RtExternalTenantUserMapping mapping,
+        IReadOnlyList<string>? groupNames = null)
+    {
+        try
+        {
+            groupNames ??= await GroupNamesForAuditAsync(mapping);
+            await grantAudit.RecordGrantAsync(eventName, multiTenancyResolverService.GetTenantId(), CallerName(),
+                mapping, groupNames);
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex, "Audit event {EventName} of mapping {MappingId} could not be recorded (AB#8342)",
+                eventName, mapping.RtId);
+        }
+    }
+
     /// <summary>
     /// Runs the role change guard (AB#7927). Returns the 403/409 problem answer (audited), or <c>null</c> when allowed.
     /// </summary>
@@ -141,6 +182,7 @@ public class ExternalTenantUserMappingsController(
         };
 
         await mappingStore.StoreAsync(mapping);
+        await AuditGrantAsync(CrossTenantGrantAuditEvents.GrantCreated, mapping);
 
         // NB: use Created(location, value) rather than CreatedAtAction(nameof(GetById), …). The
         // GetById action takes an OctoObjectId route value, for which no route template matches when
@@ -174,8 +216,7 @@ public class ExternalTenantUserMappingsController(
         [FromBody][ValidateNever][Description("Source tenant id and exact user name or e-mail")]
         SourceUserLookupRequestDto request,
         [FromServices] ISourceUserLookupService lookupService,
-        [FromServices] ISourceUserLookupRateLimiter rateLimiter,
-        [FromServices] IMultiTenancyResolverService multiTenancyResolverService)
+        [FromServices] ISourceUserLookupRateLimiter rateLimiter)
     {
         var targetTenantId = multiTenancyResolverService.GetTenantId();
         var callerKey = User.FindFirst("sub")?.Value ?? $"client:{User.FindFirst("client_id")?.Value}";
@@ -184,10 +225,8 @@ public class ExternalTenantUserMappingsController(
             return SourceUserLookupProblems.RateLimited(Response, retryAfterSeconds);
         }
 
-        var callerName = User.Identity?.Name ?? User.FindFirst("preferred_username")?.Value ??
-            User.FindFirst("client_id")?.Value ?? callerKey;
         var match = await lookupService.LookupAsync(targetTenantId, request.SourceTenantId, request.Identifier,
-            callerName, HttpContext.RequestAborted);
+            CallerName(), HttpContext.RequestAborted);
         if (match == null)
         {
             return SourceUserLookupProblems.NotFound();
@@ -232,6 +271,7 @@ public class ExternalTenantUserMappingsController(
             : null;
 
         await mappingStore.StoreAsync(existing);
+        await AuditGrantAsync(CrossTenantGrantAuditEvents.GrantChanged, existing);
 
         return Ok(MapToDto(existing));
     }
@@ -258,7 +298,10 @@ public class ExternalTenantUserMappingsController(
             return refusal;
         }
 
+        // Group names before the removal: the mapping's GroupMember edges go with it.
+        var groupNames = await GroupNamesForAuditAsync(existing);
         await mappingStore.RemoveAsync(rtId);
+        await AuditGrantAsync(CrossTenantGrantAuditEvents.GrantRemoved, existing, groupNames);
         return Ok();
     }
 

@@ -66,6 +66,15 @@ Notable changes of the OctoMesh identity services. The CK model `System.Identity
 
 ### Added
 
+- **Cross-tenant grant audit events in both tenants (AB#8342, security).** Lookups, grant create / change / removal through
+  `ExternalTenantUserMappings`, the first token exchange into a tenant and refused exchanges from a sibling source are written
+  into the runtime event log of the target tenant T **and** the source tenant S (categories `Identity.CrossTenantLookup`,
+  `Identity.CrossTenantGrantCreated`, `…GrantChanged`, `…GrantRemoved`, `…FirstExchange`, `…ExchangeRefused`; a lookup naming
+  a non-existent tenant only in T). Details name actor, source and target tenant, mapping id, groups and roles — never the
+  identifier of a missed lookup, an e-mail address, a token or a password. `IIdentityAuditService` gains `StoreInfoAsync` /
+  `StoreWarningAsync` for an explicit tenant; failure auditing is unchanged, and a failed audit write never breaks the request.
+  Replaces the no-op `ISourceUserLookupAuditSink` of AB#8341. No CK change (existing `System.Notification` `category` /
+  `details`). See `docs/authentication.md` → "Cross-Tenant Grant Audit Events".
 - **Exact source user lookup for sibling-tenant grants (AB#8341, security).** `POST
   {T}/v1/ExternalTenantUserMappings/sourceUserLookup` (policy `IdentityUserAdministrationWritePolicy` in T) finds exactly
   one user of a source tenant S by exact user name or exact e-mail and returns id, user name and display name — no

@@ -390,6 +390,7 @@ public class CrossTenantAncestryIntegrationTests : IClassFixture<IdentityService
             userManager,
             Substitute.For<IHttpContextAccessor>(),
             Substitute.For<IIdentityAuditService>(),
+            Substitute.For<Meshmakers.Octo.Backend.IdentityServices.CrossTenantAudit.ICrossTenantGrantAuditRecorder>(),
             NullLogger<TenantExchangeProcessor>.Instance);
     }
 

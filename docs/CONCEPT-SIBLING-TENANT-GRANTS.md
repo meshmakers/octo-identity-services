@@ -228,18 +228,26 @@ Written through `IIdentityAuditService` into the runtime event log of the tenant
 `RtEventSourcesEnum.IdentityService`). Fields: event name, actor (caller tenant + user name), source tenant, target
 tenant, mapping id, group names. Never the looked-up identifier of a miss in clear, never tokens or passwords.
 
-| Event | Written to |
+| Event (= event category) | Written to |
 |-------|-----------|
-| `CrossTenantLookup` (hit / miss) | T and S; a miss for a non-existent S only in T |
-| `CrossTenantGrantCreated` | T and S |
-| `CrossTenantGrantChanged` (groups) | T and S |
-| `CrossTenantGrantRemoved` | T and S |
-| `CrossTenantFirstExchange` (shadow user created with roles) | T and S |
-| exchange refused for a sibling source | T and S |
-| permission list changed (AB#8345) | S |
+| `Identity.CrossTenantLookup` (hit / miss) | T and S; a miss for a non-existent S only in T |
+| `Identity.CrossTenantGrantCreated` | T and S |
+| `Identity.CrossTenantGrantChanged` (roles / groups) | T and S |
+| `Identity.CrossTenantGrantRemoved` | T and S |
+| `Identity.CrossTenantFirstExchange` (shadow user created with roles) | T and S |
+| `Identity.CrossTenantExchangeRefused` (exchange refused for a sibling source) | T and S |
+| `Identity.CrossTenantGrantPermissionsChanged` (permission list changed, AB#8345) | S |
 
-An audit write never breaks the request; a failure is logged. `docs/authentication.md` lists the events and how an
-administrator reads them once AB#8342 is merged.
+An audit write never breaks the request; a failure is logged. `docs/authentication.md` (section "Cross-Tenant Grant
+Audit Events") lists the events and how an administrator reads them.
+
+As built (AB#8342): the event name is the event **category** (dotted, platform convention); `LIKE
+"Identity.CrossTenant*"` reads them all. The refused exchange has level Warning and is written only for a sibling source.
+`Identity.CrossTenantGrantChanged` is written by the role `PUT`; the group route of AB#8343 calls the same recorder
+(`ICrossTenantGrantAuditRecorder.RecordGrantAsync`). AB#8345 writes the permission-list event (constant
+`CrossTenantGrantAuditEvents.GrantPermissionsChanged`) by calling `IIdentityAuditService.StoreInfoAsync(sourceTenantId, eventName, message, details)`. Grant events are
+written for every mapping write through `ExternalTenantUserMappings` (also for an ancestor source); the ancestor flows under
+`adminProvisioning` stay without them (§1). The first exchange is recorded for every source tenant.
 
 ## 8. Token exchange and revocation (AB#8343, AB#8344)
 

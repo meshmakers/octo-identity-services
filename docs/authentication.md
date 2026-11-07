@@ -1116,6 +1116,68 @@ OpenIddict does not validate, so there the processor check is the only one. The 
 convention). Tests: `CrossTenantSecondFactorTests.TokenExchange_IdTokenAsSubjectToken_IsRefused`,
 `TenantExchangeSubjectTokenTypeTests`, `OnBehalfOfProcessorTests.IdTokenAsSubjectToken_IsRejectedAsInvalidGrant`.
 
+### Cross-Tenant Grant Audit Events (AB#8342)
+
+Every lookup, grant change and exchange that concerns a user of another tenant is written into the runtime event log of
+**both** tenants involved: the target tenant T (where the grant lives, the request tenant) and the source tenant S (where
+the user lives). So the administrator of each tenant sees it in their own event log. Contract:
+`docs/CONCEPT-SIBLING-TENANT-GRANTS.md` §7.
+
+| Category | When | Written to | Level |
+|----------|------|-----------|-------|
+| `Identity.CrossTenantLookup` | `POST ExternalTenantUserMappings/sourceUserLookup`, detail `outcome` = `hit` / `miss` | T and S; a lookup naming a tenant that does not exist only in T | Information |
+| `Identity.CrossTenantGrantCreated` | `POST ExternalTenantUserMappings` succeeded | T and S | Information |
+| `Identity.CrossTenantGrantChanged` | `PUT ExternalTenantUserMappings/{rtId}` succeeded (roles; groups at the time) | T and S | Information |
+| `Identity.CrossTenantGrantRemoved` | `DELETE ExternalTenantUserMappings/{rtId}` succeeded (groups before the removal) | T and S | Information |
+| `Identity.CrossTenantFirstExchange` | a token exchange created the `xt_` shadow user in T with roles (any source tenant) | T and S | Information |
+| `Identity.CrossTenantExchangeRefused` | a token exchange from a **sibling** source (S no registry ancestor of T) was refused | T and S | Warning |
+| `Identity.CrossTenantGrantPermissionsChanged` | S changed the list of target tenants it permits (AB#8345) | S | Information |
+
+Details (key/value, `details` of the event): `actorTenantId` and `actorName` (who acted: the administrator of T by user
+name or client id; for exchanges the source user), `sourceTenantId`, `targetTenantId`, `mappingId`, `sourceUserId`,
+`sourceUserName`, `groupNames` and `roleIds` / `roles` (comma-separated), `shadowUserName` (first exchange), `outcome`
+(lookup) and `reason` (refused exchange). An event goes to S only when S is a registered tenant other than T.
+
+Never written: the identifier typed for a lookup miss (not even hashed — the log line of the lookup carries a hash
+prefix), e-mail addresses, tokens, passwords or secrets. A refused exchange from an ancestor source keeps only the
+existing `Token Exchange Failure` error event in T; that failure event is also still written for a sibling source, next to
+`Identity.CrossTenantExchangeRefused`. Mapping writes of the ancestor flows (`AdminProvisioning/{targetTenantId}`) are not
+part of these events.
+
+Writing an event never breaks the request: `IIdentityAuditService.StoreInfoAsync` / `StoreWarningAsync` (explicit
+tenant, event name = category, optional details) log a failed write and return. Implementation:
+`CrossTenantAudit/CrossTenantGrantAuditRecorder.cs` (also the `ISourceUserLookupAuditSink` of AB#8341).
+
+**How an administrator reads them.** GraphQL on the tenant (`/{tenant}/graphql`, as an administrator of that tenant), all
+cross-tenant events at once:
+
+```graphql
+{
+  runtime {
+    systemNotificationEvent(
+      fieldFilter: [{ attributePath: "category", operator: LIKE, comparisonValue: "Identity.CrossTenant*" }]
+    ) {
+      totalCount
+      items {
+        rtId
+        message
+        level
+        category
+        details { key value }
+      }
+    }
+  }
+}
+```
+
+One kind: `operator: EQUALS, comparisonValue: "Identity.CrossTenantGrantCreated"`. From the CLI, save the query as
+`xt-audit.graphql` and run `octo-cli -c GraphQl -tid <tenant> -f xt-audit.graphql` (the response JSON is the only output, so
+it pipes into `jq`).
+
+Tests: `CrossTenantGrantAuditTests` (exactly one event in T and one in S per action, absent S only in T, no e-mail /
+token / password, a failing event store breaks neither lookup, grant nor exchange) and `IdentityAuditServiceTests`
+(failure auditing unchanged, explicit-tenant events).
+
 ### Delegation / On-Behalf-Of (AB#5026)
 
 A **service account** (a machine-to-machine `Client`) can obtain an access token that runs on a

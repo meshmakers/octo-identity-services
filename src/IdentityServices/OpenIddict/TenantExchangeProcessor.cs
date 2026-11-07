@@ -2,6 +2,7 @@ using IdentityServerPersistence.Configuration.Options;
 using IdentityServerPersistence.Services;
 using IdentityServerPersistence.SystemStores;
 using Meshmakers.Common.Shared;
+using Meshmakers.Octo.Backend.IdentityServices.CrossTenantAudit;
 using Meshmakers.Octo.Services.Infrastructure;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.Extensions.Options;
@@ -56,6 +57,7 @@ public class TenantExchangeProcessor(
     UserManager<RtUser> userManager,
     IHttpContextAccessor httpContextAccessor,
     IIdentityAuditService auditService,
+    ICrossTenantGrantAuditRecorder grantAudit,
     ILogger<TenantExchangeProcessor> logger)
 {
     /// <summary>The RFC 8693 token type identifier for an access token.</summary>
@@ -189,7 +191,7 @@ public class TenantExchangeProcessor(
             logger.LogWarning(
                 "Token exchange denied: user '{SourceUserId}' from tenant '{SourceTenantId}' may not access target tenant '{TargetTenantId}'",
                 sourceUserId, sourceTenantId, targetTenantId);
-            await RaiseFailureAsync(sourceUserId, sourceTenantId, targetTenantId, "cross-tenant access denied");
+            await RaiseExchangeFailureAsync(sourceUserId, sourceTenantId, targetTenantId, "cross-tenant access denied");
             return ExchangeOutcome.Failed(Errors.UnauthorizedClient,
                 "cross-tenant access to the target tenant is denied");
         }
@@ -201,7 +203,7 @@ public class TenantExchangeProcessor(
             logger.LogWarning(
                 "Token exchange denied: user '{SourceUserId}' from tenant '{SourceTenantId}' has two-factor authentication enabled, but the subject token carries no second-factor evidence",
                 sourceUserId, sourceTenantId);
-            await RaiseFailureAsync(sourceUserId, sourceTenantId, targetTenantId,
+            await RaiseExchangeFailureAsync(sourceUserId, sourceTenantId, targetTenantId,
                 "second factor required, subject token has no amr=mfa");
             return ExchangeOutcome.Failed(Errors.AccessDenied,
                 $"{SecondFactorEvidence.RequiredMarker}: the user has two-factor authentication enabled; " +
@@ -229,7 +231,7 @@ public class TenantExchangeProcessor(
             logger.LogError(
                 "Token exchange failed: could not provision the B-shadow user in tenant '{TargetTenantId}'",
                 targetTenantId);
-            await RaiseFailureAsync(sourceUserId, sourceTenantId, targetTenantId,
+            await RaiseExchangeFailureAsync(sourceUserId, sourceTenantId, targetTenantId,
                 "shadow user provisioning failed");
             return ExchangeOutcome.Failed(Errors.InvalidGrant, "failed to provision the target-tenant user");
         }
@@ -237,9 +239,16 @@ public class TenantExchangeProcessor(
         // (e) Ancestry gives no roles. The same store that stamps the token's role claims decides: a
         //     shadow user without a single effective role in B is not provisioned there (an existing,
         //     role-less shadow user from before AB#8304 is refused here and left as it is).
-        if ((await userManager.GetRolesAsync(shadowUser)).Count == 0)
+        var roles = await userManager.GetRolesAsync(shadowUser);
+        if (roles.Count == 0)
         {
             return await RefuseNotProvisionedAsync(sourceUserId, sourceTenantId, targetTenantId);
+        }
+
+        // (f) AB#8342: the first exchange created the shadow user with roles — recorded in T and S.
+        if (existingShadowUser == null)
+        {
+            await RecordFirstExchangeAsync(targetTenantId, crossTenantResult, shadowUser, roles.ToList());
         }
 
         logger.LogInformation(
@@ -320,11 +329,39 @@ public class TenantExchangeProcessor(
         logger.LogWarning(
             "Token exchange denied: user '{SourceUserId}' from tenant '{SourceTenantId}' holds no role in target tenant '{TargetTenantId}' (not provisioned)",
             sourceUserId, sourceTenantId, targetTenantId);
-        await RaiseFailureAsync(sourceUserId, sourceTenantId, targetTenantId,
+        await RaiseExchangeFailureAsync(sourceUserId, sourceTenantId, targetTenantId,
             "not provisioned in target tenant (no role)");
         return ExchangeOutcome.Failed(Errors.AccessDenied,
             $"{NotProvisionedMarker}: the user holds no role in tenant '{targetTenantId}'; " +
             "an administrator of that tenant must provision the user there (ProvisionCurrentUser -ttid)");
+    }
+
+    /// <summary>
+    ///     A refused exchange after the subject token and the target tenant were validated: the failure event in T as
+    ///     before, plus — for a sibling (non-ancestor) source — <c>CrossTenantExchangeRefused</c> in T and S (AB#8342).
+    /// </summary>
+    private async Task RaiseExchangeFailureAsync(string sourceUserId, string sourceTenantId, string targetTenantId,
+        string reason)
+    {
+        await RaiseFailureAsync(sourceUserId, sourceTenantId, targetTenantId, reason);
+        await grantAudit.RecordExchangeRefusedAsync(targetTenantId, sourceTenantId, sourceUserId, reason);
+    }
+
+    private async Task RecordFirstExchangeAsync(string targetTenantId, CrossTenantAuthResult source, RtUser shadowUser,
+        IReadOnlyList<string> roles)
+    {
+        try
+        {
+            var mapping = await externalTenantUserMappingStore.FindBySourceUserAsync(source.SourceTenantId,
+                source.SourceUserId);
+            await grantAudit.RecordFirstExchangeAsync(targetTenantId, source, shadowUser.UserName ?? string.Empty,
+                mapping, roles);
+        }
+        catch (Exception ex)
+        {
+            // Auditing never breaks the exchange.
+            logger.LogWarning(ex, "Token exchange: the first-exchange audit event could not be recorded (AB#8342)");
+        }
     }
 
     private Task RaiseFailureAsync(string sourceUserId, string sourceTenantId, string targetTenantId,

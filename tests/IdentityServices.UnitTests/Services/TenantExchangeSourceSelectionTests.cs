@@ -72,6 +72,7 @@ public class TenantExchangeSourceSelectionTests
                 Substitute.For<ILogger<UserManager<RtUser>>>()),
             Substitute.For<IHttpContextAccessor>(),
             Substitute.For<IIdentityAuditService>(),
+            Substitute.For<Meshmakers.Octo.Backend.IdentityServices.CrossTenantAudit.ICrossTenantGrantAuditRecorder>(),
             Substitute.For<ILogger<TenantExchangeProcessor>>());
     }
 
