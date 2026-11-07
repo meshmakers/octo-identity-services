@@ -716,6 +716,9 @@ PUT {S}/v1/CrossTenantGrantPermissions  { "targetTenantIds": ["customer-a", "cus
   A non-permitted T gets the same `404 SourceUserNotFound` as for a tenant that does not exist.
 - **Withdrawal:** removing T stops T's lookups (and, with AB#8343, its new grants) with the next request; grants that
   already exist are refused at T's next token exchange (AB#8344).
+- **Audit:** every change is written into S's event log, category `Identity.CrossTenantGrantPermissionsChanged`
+  (details `actorTenantId`, `actorName`, `sourceTenantId`, `permittedTargetTenantIds`, `addedTargetTenantIds`,
+  `removedTargetTenantIds`); a `PUT` that leaves the list unchanged writes no event. See *Cross-Tenant Grant Audit Events*.
 - **Storage:** tenant configuration row `CrossTenantGrantPermissions` in S's database — no CK model change. Details:
   `docs/CONCEPT-SIBLING-TENANT-GRANTS.md` §6.
 

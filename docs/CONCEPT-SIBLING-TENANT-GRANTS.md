@@ -240,7 +240,7 @@ As built (AB#8345, `src/IdentityServerPersistence/Services/SourceTenantGrants/`)
   parent-tenant token reads the list; a parent administrator switches into S first). `PUT` replaces the whole list;
   validation (`400`, nothing written): list required, no empty entry, valid tenant id format (≤ 64 ASCII letters,
   digits, `-`, `_`), at most 200 entries, not S itself. Entries are **not** checked for existence, so the route is no
-  tenant directory. Each change is logged (`added`, `removed`, caller); the audit event in S follows with AB#8342.
+  tenant directory. Each change is logged (`added`, `removed`, caller); every change (added or removed entries) is also written into S's event log as `Identity.CrossTenantGrantPermissionsChanged` (§7); a `PUT` that leaves the list unchanged writes no event.
 - The lookup route (AB#8341) uses the policy now; mapping create (`403 SourceTenantNotPermitted`, AB#8343) and the
   exchange gate and revocation (AB#8343, AB#8344) ask the same `ISourceTenantGrantPolicy`.
 

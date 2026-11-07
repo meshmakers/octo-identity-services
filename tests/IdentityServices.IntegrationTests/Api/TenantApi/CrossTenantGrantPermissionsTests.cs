@@ -5,12 +5,16 @@ using FluentAssertions;
 using IdentityServerPersistence.Services;
 using IdentityServerPersistence.Services.SourceTenantGrants;
 using IdentityServices.IntegrationTests.Infrastructure;
+using Meshmakers.Octo.Backend.IdentityServices.CrossTenantAudit;
+using Meshmakers.Octo.Backend.IdentityServices.OpenIddict;
 using Meshmakers.Octo.Backend.IdentityServices.TenantApi.v1.Controllers;
 using Meshmakers.Octo.Communication.Contracts.DataTransferObjects;
 using Meshmakers.Octo.ConstructionKit.Contracts;
 using Meshmakers.Octo.Runtime.Contracts.MongoDb;
 using Meshmakers.Octo.Services.Infrastructure.Services;
+using Microsoft.AspNetCore.TestHost;
 using Microsoft.Extensions.DependencyInjection;
+using NSubstitute;
 using Persistence.IdentityCkModel.Generated.System.Identity.v3;
 using Xunit;
 
@@ -233,6 +237,49 @@ public class CrossTenantGrantPermissionsTests : IntegrationTestBase
 
         (await CreateAnonymousClient().GetAsync(Url(a.Source), TestContext.Current.CancellationToken)).StatusCode
             .Should().Be(HttpStatusCode.Unauthorized);
+    }
+
+    // ---------------------------------------------------------------- audit
+
+    [Fact]
+    public async Task Change_IsAuditedInTheSourceTenantOnly_AndAnUnchangedPutWritesNothing()
+    {
+        // The source tenant is fresh: the shared arrangement's list is changed by other tests of this class.
+        var source = await CreateTenantAsync("cga");
+        var audit = Substitute.For<IIdentityAuditService>();
+        using var host = Factory.WithWebHostBuilder(b =>
+            b.ConfigureTestServices(services => services.AddSingleton(audit)));
+        HttpClient Admin()
+        {
+            var client = host.CreateClient();
+            client.DefaultRequestHeaders.Authorization =
+                new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", "test-token");
+            client.DefaultRequestHeaders.Add(TestAuthHandler.UserIdHeader, $"sadmin-{Guid.NewGuid():N}");
+            client.DefaultRequestHeaders.Add(TestAuthHandler.UserNameHeader, "source-admin");
+            client.DefaultRequestHeaders.Add(TestAuthHandler.EmailHeader, "source-admin@example.com");
+            client.DefaultRequestHeaders.Add(TestAuthHandler.RoleHeader, UserManagement);
+            client.DefaultRequestHeaders.Add(TestAuthHandler.RoleHeader, TenantManagement);
+            return client;
+        }
+
+        (await PutAsync(Admin(), source, ["cgt-one", "cgt-two"])).StatusCode.Should().Be(HttpStatusCode.OK);
+        (await PutAsync(Admin(), source, ["cgt-two", "cgt-one"])).StatusCode.Should().Be(HttpStatusCode.OK);
+        (await PutAsync(Admin(), source, ["cgt-two", "cgt-three"])).StatusCode.Should().Be(HttpStatusCode.OK);
+
+        var calls = audit.ReceivedCalls()
+            .Where(c => c.GetMethodInfo().Name == nameof(IIdentityAuditService.StoreInfoAsync)).ToList();
+        calls.Should().HaveCount(2, "the second PUT leaves the list unchanged");
+        calls.Select(c => (string)c.GetArguments()[0]!).Should().AllBe(source, "the event goes into S only");
+        calls.Select(c => (string)c.GetArguments()[1]!).Should()
+            .AllBe(CrossTenantGrantAuditEvents.GrantPermissionsChanged);
+        var last = (IReadOnlyDictionary<string, string>)calls[1].GetArguments()[3]!;
+        last["sourceTenantId"].Should().Be(source);
+        last["actorTenantId"].Should().Be(source);
+        last["actorName"].Should().Be("source-admin");
+        last["permittedTargetTenantIds"].Should().Be("cgt-three,cgt-two");
+        last["addedTargetTenantIds"].Should().Be("cgt-three");
+        last["removedTargetTenantIds"].Should().Be("cgt-one");
+        await audit.DidNotReceiveWithAnyArgs().StoreWarningAsync(default!, default!, default!, default);
     }
 
     // ---------------------------------------------------------------- helpers

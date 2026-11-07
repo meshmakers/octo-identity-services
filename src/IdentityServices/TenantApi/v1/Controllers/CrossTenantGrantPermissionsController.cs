@@ -2,6 +2,8 @@ using System.ComponentModel;
 using Asp.Versioning;
 using IdentityServerPersistence;
 using IdentityServerPersistence.Services.SourceTenantGrants;
+using Meshmakers.Octo.Backend.IdentityServices.CrossTenantAudit;
+using Meshmakers.Octo.Backend.IdentityServices.OpenIddict;
 using Meshmakers.Octo.Backend.Authentication;
 using Meshmakers.Octo.Services.Infrastructure.Services;
 using Microsoft.AspNetCore.Authorization;
@@ -27,6 +29,7 @@ namespace Meshmakers.Octo.Backend.IdentityServices.TenantApi.v1.Controllers;
 public class CrossTenantGrantPermissionsController(
     ICrossTenantGrantPermissionStore permissionStore,
     IMultiTenancyResolverService multiTenancyResolverService,
+    IIdentityAuditService auditService,
     TimeProvider timeProvider,
     ILogger<CrossTenantGrantPermissionsController> logger) : ControllerBase
 {
@@ -92,6 +95,23 @@ public class CrossTenantGrantPermissionsController(
             "Cross-tenant grant permissions of tenant {TenantId} replaced by {CallerName}: added [{Added}], removed [{Removed}], now [{TargetTenantIds}] (AB#8345)",
             tenantId, callerName, string.Join(",", added), string.Join(",", removed),
             string.Join(",", after.TargetTenantIds));
+
+        // AB#8342 audit API: a change is written into this (source) tenant's event log only. A PUT that leaves the list
+        // as it was writes no event. Never throws into the request.
+        if (added.Count > 0 || removed.Count > 0)
+        {
+            await auditService.StoreInfoAsync(tenantId, CrossTenantGrantAuditEvents.GrantPermissionsChanged,
+                $"Cross-tenant grant permissions of tenant '{tenantId}' changed by '{callerName}'",
+                new Dictionary<string, string>
+                {
+                    ["actorTenantId"] = tenantId,
+                    ["actorName"] = callerName,
+                    ["sourceTenantId"] = tenantId,
+                    ["permittedTargetTenantIds"] = string.Join(",", after.TargetTenantIds),
+                    ["addedTargetTenantIds"] = string.Join(",", added),
+                    ["removedTargetTenantIds"] = string.Join(",", removed)
+                });
+        }
 
         return Ok(new CrossTenantGrantPermissionsDto { TargetTenantIds = after.TargetTenantIds });
     }
