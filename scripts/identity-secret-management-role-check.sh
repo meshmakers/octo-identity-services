@@ -27,11 +27,13 @@
 # It never loads secret material (every query projects the attributes it needs; password hashes, security stamps,
 # client secrets and tokens are not read) and masks e-mail addresses unless --with-email. The MongoDB password is read
 # from the cluster secret into a shell variable and passed to mongosh on stdin -- never in argv, the environment or
-# the output.
+# the output. The JavaScript also travels on stdin (AB#8431): the exec request carries only a short runner, so the
+# script works through the Rancher proxy; the runner keeps the JavaScript (no secret) in a private temporary file in
+# the pod for the run and removes it afterwards.
 #
 # Access: kubectl access to the namespace of the MongoDB pods (get secret, list pods, exec) -- on shared clusters via
 # breakglass or Semaphore (agent-operating-rules), never through extra RBAC rights.
-# Requirements: bash >= 3.2, kubectl, jq.
+# Requirements: bash >= 3.2, kubectl, jq; in the MongoDB pod: sh, mktemp and mongosh.
 # Exit codes: 0 = every tenant has the role and nobody loses access, 2 = findings, 1 = error / incomplete /
 # snapshot changed.
 
@@ -173,13 +175,21 @@ print("CONN " + (seedHello.setName ? "replicaSet=" + seedHello.setName + " membe
 JS
 PRELUDE_JS="${PRELUDE_JS//__MONGO_USER__/$(jq -cn --arg u "$MONGO_USER" '$u')}"
 
+# AB#8431: the JavaScript travels on stdin, not in the exec command. "mongosh --eval <script>" put the whole script into
+# the exec request URL; through the Rancher proxy the 5.5 KB inventory came back as an nginx error page. Only this short
+# runner crosses the URL: it reads the password (first stdin line) into a shell variable, writes the rest of stdin (the
+# JavaScript, no secret) to a private temporary file in the pod, runs it with mongosh (password on mongosh's stdin via
+# the printf builtin, never in argv) and removes the file. mongosh needs a file to run a script with its shell API.
+read -r -d '' REMOTE_SH <<'SH' || true
+umask 077; d="$(mktemp -d)" || exit 1; trap 'rm -rf "$d"' EXIT; IFS= read -r pw; cat >"$d/run.js"
+printf '%s\n' "$pw" | mongosh --quiet --nodb "$d/run.js"
+SH
+
 # run_js <name> <js-file>: runs prelude + params + file in mongosh inside the pod; stdout -> $WORK/<name>.out.
 run_js() {
     local name="$1" file="$2"
-    if ! printf '%s\n' "$MONGO_PW" | "${KUBECTL[@]}" exec -i "$POD" -c mongod -- \
-        mongosh --quiet --nodb --eval "$PRELUDE_JS
-$PARAMS_JS
-$(cat "$file")" >"$WORK/$name.out" 2>"$WORK/$name.err"; then
+    if ! { printf '%s\n' "$MONGO_PW"; printf '%s\n%s\n' "$PRELUDE_JS" "$PARAMS_JS"; cat "$file"; } \
+        | "${KUBECTL[@]}" exec -i "$POD" -c mongod -- sh -c "$REMOTE_SH" >"$WORK/$name.out" 2>"$WORK/$name.err"; then
         # mongosh errors do not contain the password; strip any credentials from URIs anyway.
         sed -E 's#//[^/@[:space:]]*@#//***@#g' "$WORK/$name.err" | grep -v -E 'EACCES|history' | tail -3 >&2 || true
         return 1

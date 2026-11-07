@@ -149,7 +149,10 @@ Order per cluster: **test-2 → prod-2 → prod-1**.
    to run on any write-capable call (tested by `scripts/tests/identity-secret-management-role-check.test.sh`), and an
    identity snapshot (users, `xt_` users, mappings, newest change per tenant DB) taken before and after must be equal —
    otherwise exit 1. Queries project only the attributes they need (no password hashes, security stamps or client
-   secrets); the MongoDB password goes from the cluster secret to `mongosh` on stdin only.
+   secrets); the MongoDB password goes from the cluster secret to `mongosh` on stdin only. The JavaScript travels on
+   stdin as well (AB#8431): the `kubectl exec` request carries only a short runner that writes the script to a private
+   temporary file in the pod, runs it and removes it — with `mongosh --eval` the 5.5 KB inventory was part of the exec
+   URL and came back as an nginx error page through the Rancher proxy.
    `LOSES` rows hold `TenantManagement`/`UserManagement` but not `SecretManagement`; `NO-ROLE` = tenant without the
    role (bootstrap < 1.7.0, identity not restarted since); `ERROR` = tenant database not found (exit 1).
 
