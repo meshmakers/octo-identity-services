@@ -891,6 +891,7 @@ public class TenantExchangeIntegrationTests : IClassFixture<IdentityServicesFixt
             systemContext, Substitute.For<Meshmakers.Octo.Backend.Authentication.DynamicAuth.IDynamicAuthSchemeService>(),
             new CrossTenantShadowUserChainResolver(systemContext),
             TestAncestryGuards.Create(systemContext),
+            Substitute.For<Meshmakers.Octo.Backend.IdentityServices.CrossTenantAudit.ICrossTenantGrantAuditRecorder>(),
             NullLogger<AdminProvisioningController>.Instance)
         {
             ControllerContext = new Microsoft.AspNetCore.Mvc.ControllerContext { HttpContext = httpContext }
@@ -1022,6 +1023,7 @@ public class TenantExchangeIntegrationTests : IClassFixture<IdentityServicesFixt
             BuildUserManager(targetResolver),
             Substitute.For<IHttpContextAccessor>(),
             Substitute.For<IIdentityAuditService>(),
+            Substitute.For<Meshmakers.Octo.Backend.IdentityServices.CrossTenantAudit.ICrossTenantGrantAuditRecorder>(),
             NullLogger<TenantExchangeProcessor>.Instance);
     }
 

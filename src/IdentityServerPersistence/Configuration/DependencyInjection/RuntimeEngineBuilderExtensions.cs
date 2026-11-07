@@ -91,8 +91,9 @@ public static class RuntimeEngineBuilderExtensions
         builder.Services.AddScoped<IOctoTenantLoginProviders, OctoTenantLoginProviders>();
         builder.Services.AddScoped<ICrossTenantAuthenticationService, CrossTenantAuthenticationService>();
         // AB#8341: exact source user lookup for sibling-tenant grants. The policy defaults to "deny every non-ancestor"
-        // until the allow-list of AB#8345 replaces it; the audit sink is a no-op until AB#8342. TryAdd so hosts (tests,
-        // the later stories) can register their own implementation first.
+        // until the allow-list of AB#8345 replaces it. The audit sink is a no-op here; the identity host registers the
+        // AB#8342 sink that writes into the event logs of T and S. TryAdd so hosts (tests, the later stories) can register
+        // their own implementation first.
         builder.Services.TryAddScoped<ISourceTenantGrantPolicy, DenyNonAncestorsSourceTenantGrantPolicy>();
         builder.Services.TryAddSingleton<ISourceUserLookupAuditSink, NoOpSourceUserLookupAuditSink>();
         builder.Services.TryAddSingleton<ISourceUserLookupRateLimiter, SourceUserLookupRateLimiter>();

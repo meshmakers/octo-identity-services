@@ -271,6 +271,11 @@ try
     builder.Services.AddScoped<ImpersonationProcessor>();
     builder.Services.AddScoped<ClientCredentialsTenantProcessor>();
     builder.Services.AddScoped<IIdentityAuditService, IdentityAuditService>();
+    // AB#8342: cross-tenant grant audit events in T and S; replaces the no-op lookup audit hook of AB#8341.
+    builder.Services.AddScoped<Meshmakers.Octo.Backend.IdentityServices.CrossTenantAudit.ICrossTenantGrantAuditRecorder,
+        Meshmakers.Octo.Backend.IdentityServices.CrossTenantAudit.CrossTenantGrantAuditRecorder>();
+    builder.Services.AddScoped<IdentityServerPersistence.Services.SourceTenantGrants.ISourceUserLookupAuditSink,
+        Meshmakers.Octo.Backend.IdentityServices.CrossTenantAudit.SourceUserLookupAuditSink>();
 
     // Mirror secret telemetry (AB#5065): records WHICH secret a mirrored client authenticated with —
     // the copy inherited from its parent tenant, or the one that belongs to that mirror alone. The

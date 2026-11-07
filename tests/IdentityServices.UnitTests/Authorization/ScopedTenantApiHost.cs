@@ -120,6 +120,8 @@ internal sealed class ScopedTenantApiHost : IAsyncDisposable
         services.AddSingleton(ancestryGuard);
         services.AddSingleton(Substitute.For<IdentityServerPersistence.SystemStores.IOctoClientStore>());
         services.AddSingleton(Substitute.For<IClientMirrorProvisioningService>());
+        // AB#8342: the provisioning writes record grant audit events.
+        services.AddSingleton(Substitute.For<Meshmakers.Octo.Backend.IdentityServices.CrossTenantAudit.ICrossTenantGrantAuditRecorder>());
 
         // The very registration of production: scope + tenant-role policies and their handler.
         services.AddSingleton<IAuthorizationHandler, IdentityApiRoleAuthorizationHandler>();

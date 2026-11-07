@@ -21,6 +21,7 @@ using Microsoft.AspNetCore.Mvc;
 using Persistence.IdentityCkModel.Generated.System.Identity.v3;
 using Meshmakers.Octo.Backend.Authentication;
 using Meshmakers.Octo.Backend.IdentityServices.Authorization;
+using Meshmakers.Octo.Backend.IdentityServices.CrossTenantAudit;
 
 namespace Meshmakers.Octo.Backend.IdentityServices.TenantApi.v1.Controllers;
 
@@ -40,8 +41,32 @@ public class AdminProvisioningController(
     IDynamicAuthSchemeService dynamicAuthSchemeService,
     ICrossTenantShadowUserChainResolver shadowUserChainResolver,
     ICrossTenantAncestryGuard ancestryGuard,
+    ICrossTenantGrantAuditRecorder grantAudit,
     ILogger<AdminProvisioningController> logger) : ControllerBase
 {
+    /// <summary>User name (or client id) of the caller, for audit events — never a token.</summary>
+    private string CallerName()
+        => User.Identity?.Name ?? User.FindFirstValue(JwtClaimTypes.PreferredUserName) ??
+           User.FindFirstValue("client_id") ?? User.FindFirstValue(JwtClaimTypes.Subject) ?? "unknown";
+
+    /// <summary>
+    /// Records a grant event in the target tenant T and the source tenant S (AB#8342). Called after the commit;
+    /// never fails the request.
+    /// </summary>
+    private async Task AuditGrantAsync(string eventName, string targetTenantId, RtExternalTenantUserMapping mapping,
+        IReadOnlyList<string> groupNames)
+    {
+        try
+        {
+            await grantAudit.RecordGrantAsync(eventName, targetTenantId, CallerName(), mapping, groupNames);
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex, "Audit event {EventName} of mapping {MappingId} could not be recorded (AB#8342)",
+                eventName, mapping.RtId);
+        }
+    }
+
     /// <summary>
     /// Response header of <c>provisionCurrentUser</c> that tells what the call did (AB#7088):
     /// <see cref="OutcomeCreated"/>, <see cref="OutcomeRepaired"/> or <see cref="OutcomeAlreadyProvisioned"/>.
@@ -191,6 +216,7 @@ public class AdminProvisioningController(
         // Ensure OctoTenantIdentityProvider exists so cross-tenant login works
         await EnsureOctoTenantIdentityProviderAsync(tenantRepository, targetTenantId, dto.SourceTenantId);
 
+        await AuditGrantAsync(CrossTenantGrantAuditEvents.GrantCreated, targetTenantId, mapping, groupNames);
         return Created(string.Empty, MapToDto(mapping, groupNames));
     }
 
@@ -468,6 +494,7 @@ public class AdminProvisioningController(
 
         await session.CommitTransactionAsync();
 
+        await AuditGrantAsync(CrossTenantGrantAuditEvents.GrantCreated, tenantRepository.TenantId, mapping, groupNames);
         Response.Headers[ProvisioningOutcomeHeader] = OutcomeCreated;
         return Created(string.Empty, MapToDto(mapping, groupNames));
     }
@@ -565,6 +592,7 @@ public class AdminProvisioningController(
             "Repaired external tenant user mapping '{MappingRtId}' of user '{SourceUserId}' from tenant '{SourceTenantId}' in tenant '{TargetTenantId}' (rolesFilled={RolesFilled}, nameCorrected={NameCorrected})",
             mapping.RtId, userId, tenantId, tenantRepository.TenantId, !grantsRole, nameNeedsCorrection);
 
+        await AuditGrantAsync(CrossTenantGrantAuditEvents.GrantChanged, tenantRepository.TenantId, mapping, groupNames);
         Response.Headers[ProvisioningOutcomeHeader] = OutcomeRepaired;
         return Ok(MapToDto(mapping, groupNames));
     }
@@ -597,6 +625,30 @@ public class AdminProvisioningController(
                 roleId: IdentityAssociationConstants.AssignedRoleId));
         var held = edges.Items.Select(e => e.TargetRtId.ToString()).ToHashSet(StringComparer.OrdinalIgnoreCase);
         return roleIds.All(held.Contains);
+    }
+
+    /// <summary>Names of the target-tenant groups the mapping is a member of (for audit events).</summary>
+    private static async Task<IReadOnlyList<string>> GroupNamesOfMappingAsync(
+        ITenantRepository tenantRepository, IOctoSession session, RtExternalTenantUserMapping mapping)
+    {
+        var associations = await tenantRepository.GetRtAssociationsAsync(
+            session,
+            mapping.ToRtEntityId(),
+            RtAssociationExtendedQueryOptions.Create(
+                GraphDirections.Inbound,
+                roleId: IdentityAssociationConstants.GroupMemberId));
+        var groupCkTypeId = RtEntityExtensions.GetRtCkTypeId<RtGroup>();
+        var names = new List<string>();
+        foreach (var assoc in associations.Items.Where(a => a.OriginCkTypeId == groupCkTypeId))
+        {
+            var group = await tenantRepository.GetRtEntityByRtIdAsync<RtGroup>(session, assoc.OriginRtId);
+            if (group != null)
+            {
+                names.Add(group.GroupName);
+            }
+        }
+
+        return names;
     }
 
     /// <summary>The TenantOwners group of the target tenant, or <c>null</c> when the tenant has none.</summary>
@@ -656,10 +708,13 @@ public class AdminProvisioningController(
             return NotFound($"Mapping '{mappingRtId}' not found in tenant '{targetTenantId}'.");
         }
 
+        // Group names before the removal: the mapping's GroupMember edges go with it (AB#8342 audit).
+        var groupNames = await GroupNamesOfMappingAsync(tenantRepository, session, existing);
         await tenantRepository
             .DeleteOneRtEntityByRtIdAsync<RtExternalTenantUserMapping>(session, mappingRtId, DeleteOptions.Erase);
         await session.CommitTransactionAsync();
 
+        await AuditGrantAsync(CrossTenantGrantAuditEvents.GrantRemoved, targetTenantId, existing, groupNames);
         return Ok();
     }
 
@@ -858,6 +913,7 @@ public class AdminProvisioningController(
         // Ensure OctoTenantIdentityProvider exists so cross-tenant login works
         await EnsureOctoTenantIdentityProviderAsync(tenantRepository, targetTenantId, dto.SourceTenantId);
 
+        await AuditGrantAsync(CrossTenantGrantAuditEvents.GrantCreated, targetTenantId, mapping, groupNames);
         return Created(string.Empty, MapToDto(mapping, groupNames));
     }
 

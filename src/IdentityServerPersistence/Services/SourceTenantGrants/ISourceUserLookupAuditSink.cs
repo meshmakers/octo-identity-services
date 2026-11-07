@@ -21,8 +21,9 @@ public sealed record SourceUserLookupAuditEvent(
     string? SourceUserName);
 
 /// <summary>
-///     Hook for the audit events of the source user lookup. AB#8342 replaces the registration with the implementation
-///     that writes into the runtime event logs of T and S; until then <see cref="NoOpSourceUserLookupAuditSink" />.
+///     Hook for the audit events of the source user lookup. The identity host registers the AB#8342 implementation
+///     (<c>SourceUserLookupAuditSink</c>) that writes into the runtime event logs of T and S; hosts without it get
+///     <see cref="NoOpSourceUserLookupAuditSink" />.
 ///     An implementation must never throw into the request (log the failure instead).
 /// </summary>
 public interface ISourceUserLookupAuditSink
@@ -31,7 +32,7 @@ public interface ISourceUserLookupAuditSink
     Task RecordAsync(SourceUserLookupAuditEvent auditEvent, CancellationToken cancellationToken = default);
 }
 
-/// <summary>No audit until AB#8342 (the lookup itself is logged without the identifier).</summary>
+/// <summary>No audit (hosts without the AB#8342 sink); the lookup itself is logged without the identifier.</summary>
 public sealed class NoOpSourceUserLookupAuditSink : ISourceUserLookupAuditSink
 {
     /// <inheritdoc />

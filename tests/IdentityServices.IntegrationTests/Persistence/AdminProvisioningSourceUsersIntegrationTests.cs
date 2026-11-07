@@ -11,6 +11,7 @@ using Meshmakers.Octo.Runtime.Contracts.Repositories.Query;
 using Meshmakers.Octo.Services.Infrastructure.Services;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Logging.Abstractions;
+using NSubstitute;
 using Persistence.IdentityCkModel.Generated.System.Identity.v3;
 using Xunit;
 
@@ -191,6 +192,7 @@ public class AdminProvisioningSourceUsersIntegrationTests : IClassFixture<Identi
         => new(systemContext, new NoOpAuthSchemeService(),
             new CrossTenantShadowUserChainResolver(systemContext),
             TestAncestryGuards.Create(systemContext),
+            Substitute.For<Meshmakers.Octo.Backend.IdentityServices.CrossTenantAudit.ICrossTenantGrantAuditRecorder>(),
             NullLogger<AdminProvisioningController>.Instance);
 
     private static async Task<List<ProvisioningSourceUserDto>> OkValue(
