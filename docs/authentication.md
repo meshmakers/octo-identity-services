@@ -1193,9 +1193,9 @@ the user lives). So the administrator of each tenant sees it in their own event 
 | Category | When | Written to | Level |
 |----------|------|-----------|-------|
 | `Identity.CrossTenantLookup` | `POST ExternalTenantUserMappings/sourceUserLookup`, detail `outcome` = `hit` / `miss` | T and S; a lookup naming a tenant that does not exist only in T | Information |
-| `Identity.CrossTenantGrantCreated` | `POST ExternalTenantUserMappings` succeeded (and the `AdminProvisioning` creates, see below) | T and S | Information |
-| `Identity.CrossTenantGrantChanged` | `PUT ExternalTenantUserMappings/{rtId}` succeeded (roles; groups at the time) | T and S | Information |
-| `Identity.CrossTenantGrantRemoved` | `DELETE ExternalTenantUserMappings/{rtId}` or `DELETE AdminProvisioning/{targetTenantId}/{mappingRtId}` succeeded (groups before the removal) | T and S | Information |
+| `Identity.CrossTenantGrantCreated` | `POST ExternalTenantUserMappings` succeeded (and the `AdminProvisioning` creates, see below) | T; S only when S admits T (below) | Information |
+| `Identity.CrossTenantGrantChanged` | `PUT ExternalTenantUserMappings/{rtId}` succeeded (roles; groups at the time) | T; S only when S admits T (below) | Information |
+| `Identity.CrossTenantGrantRemoved` | `DELETE ExternalTenantUserMappings/{rtId}` or `DELETE AdminProvisioning/{targetTenantId}/{mappingRtId}` succeeded (groups before the removal) | T; S only when S admits T (below) | Information |
 | `Identity.CrossTenantFirstExchange` | a token exchange created the `xt_` shadow user in T with roles (any source tenant) | T and S | Information |
 | `Identity.CrossTenantExchangeRefused` | a token exchange from a **sibling** source (S no registry ancestor of T) was refused | T and S | Warning |
 | `Identity.CrossTenantGrantPermissionsChanged` | S changed the list of target tenants it permits (AB#8345) | S | Information |
@@ -1203,7 +1203,11 @@ the user lives). So the administrator of each tenant sees it in their own event 
 Details (key/value, `details` of the event): `actorTenantId` and `actorName` (who acted: the administrator of T by user
 name or client id; for exchanges the source user), `sourceTenantId`, `targetTenantId`, `mappingId`, `sourceUserId`,
 `sourceUserName`, `groupNames` and `roleIds` / `roles` (comma-separated), `shadowUserName` (first exchange), `outcome`
-(lookup) and `reason` (refused exchange). An event goes to S only when S is a registered tenant other than T.
+(lookup) and `reason` (refused exchange). An event goes to S only when S is a registered tenant other than T. A grant
+event (`GrantCreated` / `GrantChanged` / `GrantRemoved`) additionally goes to S only when S *admits* T — S is a registry
+ancestor of T or permits T through the source-tenant grant policy; the source tenant and user name of a mapping are
+input of T's administrator, so any other tenant named there receives nothing (AB#8436). A failed decision keeps the
+event in T only.
 
 Never written: the identifier typed for a lookup miss (not even hashed — the log line of the lookup carries a hash
 prefix), e-mail addresses, tokens, passwords or secrets. A refused exchange from an ancestor source keeps only the
