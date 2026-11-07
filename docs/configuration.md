@@ -186,6 +186,15 @@ requirement of the tenant REST API (see `docs/system-api.md` § Authorization Po
 | `SecretManagementRoleEnforcement` | `OCTO_IDENTITYAPIAUTHORIZATION__SECRETMANAGEMENTROLEENFORCEMENT` | `Warn` (default) \| `Enforce` (AB#5861). Stages the `SecretManagement` requirement of the API secret writes: `Warn` still lets `TenantManagement`/`UserManagement` through and logs "would be denied with SecretManagementRoleEnforcement=Enforce (AB#5861)"; `Enforce` accepts only `SecretManagement`. Switch per cluster after the precheck (`docs/rollout-identity-rest-role-enforcement.md`). `RoleEnforcement=Warn` also relaxes it. |
 | `CrossTenantAncestry` | `OCTO_IDENTITYAPIAUTHORIZATION__CROSSTENANTANCESTRY` | `Warn` (default) \| `Enforce` (AB#8339; Helm `services.identity.crossTenantAncestry`). Whether a tenant the tenant registry does not confirm as ancestor may still act as one because the target's OctoTenant identity providers point at it — for the provisioning source users, the tenant switch / token exchange and the cross-tenant login. `Warn` lets it through as before and logs `...allowed by CrossTenantAncestry=Warn ... (AB#8339)` with both tenant ids; `Enforce` refuses it, and the admin provisioning writes (`403 CrossTenantSourceNotAncestor`) and OctoTenant provider writes (`400 OctoTenantParentNotAncestor`) refuse a non-ancestor. Read by `CrossTenantAncestryOptions` (same section). See `docs/authentication.md`, *Registry Decides Cross-Tenant Ancestry*. |
 
+REST deprecation waves (`RestDeprecationOptions`, octo-common-services, AB#8415) — the dates of the deprecated REST
+endpoints of a wave; see octo-common-services `docs/rest-deprecation.md`. Identity wave 1 is `IdentityUsers1` (`PUT users/{u}/roles`,
+`PUT`/`DELETE users/{u}/roles/{r}`, `POST users/{u}/merge`):
+
+| Option | Env variable | Description |
+|--------|-------------|-------------|
+| `RestDeprecation:Waves:IdentityUsers1:Since` | `OCTO_RestDeprecation__Waves__IdentityUsers1__Since` | `yyyy-MM-dd` (UTC). Delivery day of the release that deprecates the wave; drives the `Deprecation` header. Unset: no `Deprecation` header. Helm `restDeprecation.waves.IdentityUsers1.since`. |
+| `RestDeprecation:Waves:IdentityUsers1:Sunset` | `OCTO_RestDeprecation__Waves__IdentityUsers1__Sunset` | `yyyy-MM-dd` (UTC), after `Since`. One week after that release runs on prod-1 and prod-2; drives the `Sunset` header. Unset: no `Sunset` header. Helm `restDeprecation.waves.IdentityUsers1.sunset`. |
+
 ### Configuration Sources
 
 Configuration is loaded in this order (later sources override earlier):

@@ -17,6 +17,7 @@ using Meshmakers.Octo.Services.Contracts.DistributionEventHub.Methods;
 using Meshmakers.Octo.Services.Infrastructure.Services;
 using Meshmakers.Octo.Services.Methods;
 using Meshmakers.Octo.Services.Methods.Facades;
+using Meshmakers.Octo.Services.RestDeprecation;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Mvc;
@@ -637,9 +638,11 @@ public class UsersController : ControllerBase
     /// <remarks>
     ///     The endpoint resolves the user name and the role ids (an unknown id is <c>404</c> and changes nothing) and calls
     ///     <c>User.SetRoles</c> in-process: role change guard (AB#7914), difference of the direct roles, one
-    ///     <c>Identity.Method</c> audit event. Status codes and bodies are unchanged.
+    ///     <c>Identity.Method</c> audit event. Status codes and bodies are unchanged. Deprecated in identity wave 1 (AB#8415):
+    ///     <c>Deprecation</c>/<c>Sunset</c>/<c>Link</c> headers, see <see cref="IdentityRestDeprecation" />.
     /// </remarks>
     [HttpPut("{userName}/roles")]
+    [OctoRestDeprecated(Wave = IdentityRestDeprecation.UsersWave1, Link = IdentityRestDeprecation.UserRoleMethodsLink)]
     [Authorize(IdentityServiceConstants.IdentityUserAdministrationWritePolicy)]
     [EndpointSummary("Adds roles to an user.")]
     [ProducesResponseType(StatusCodes.Status200OK)]
@@ -684,9 +687,10 @@ public class UsersController : ControllerBase
     /// </summary>
     /// <remarks>
     ///     A role the user already holds, also through a group, is <c>400</c> as before; the rest (role change guard, write,
-    ///     <c>Identity.Method</c> audit event) is the method.
+    ///     <c>Identity.Method</c> audit event) is the method. Deprecated in identity wave 1 (AB#8415).
     /// </remarks>
     [HttpPut("{userName}/roles/{roleName}")]
+    [OctoRestDeprecated(Wave = IdentityRestDeprecation.UsersWave1, Link = IdentityRestDeprecation.UserRoleMethodsLink)]
     [Authorize(IdentityServiceConstants.IdentityUserAdministrationWritePolicy)]
     [EndpointSummary("Adds a role to a user.")]
     [ProducesResponseType(StatusCodes.Status200OK)]
@@ -731,9 +735,10 @@ public class UsersController : ControllerBase
     ///     Facade of the CK method <c>User.Merge-1</c> (AB#8412): role change guard on the deletion of the source user,
     ///     write permission on the source user, logins moved, sessions and refresh tokens of the source user revoked,
     ///     source user deleted, one <c>Identity.Method</c> audit event. Roles, groups and claims of the source user are not
-    ///     transferred.
+    ///     transferred. Deprecated in identity wave 1 (AB#8415).
     /// </remarks>
     [HttpPost("{userName}/merge")]
+    [OctoRestDeprecated(Wave = IdentityRestDeprecation.UsersWave1, Link = IdentityRestDeprecation.UserMergeMethodLink)]
     [Authorize(IdentityServiceConstants.IdentityUserAdministrationWritePolicy)]
     [EndpointSummary("Merges external logins from source user into target user and deletes source user.")]
     [ProducesResponseType(StatusCodes.Status200OK)]
@@ -792,9 +797,10 @@ public class UsersController : ControllerBase
     /// </summary>
     /// <remarks>
     ///     A role the user does not hold at all is <c>400</c> as before; a role held only through a group is <c>200</c> and
-    ///     changes nothing, as before. The rest (role change guard, write, <c>Identity.Method</c> audit event) is the method.
+    ///     changes nothing, as before. The rest (role change guard, write, <c>Identity.Method</c> audit event) is the method. Deprecated in identity wave 1 (AB#8415).
     /// </remarks>
     [HttpDelete("{userName}/roles/{roleName}")]
+    [OctoRestDeprecated(Wave = IdentityRestDeprecation.UsersWave1, Link = IdentityRestDeprecation.UserRoleMethodsLink)]
     [Authorize(IdentityServiceConstants.IdentityUserAdministrationWritePolicy)]
     [EndpointSummary("Removes a role from a user.")]
     [ProducesResponseType(StatusCodes.Status200OK)]
@@ -930,26 +936,9 @@ public class UsersController : ControllerBase
     /// </summary>
     private IEnumerable<FailedDetailsDto> DescribeIdentityErrors(CkMethodError error)
     {
-        var describer = _userManager.ErrorDescriber;
-        var password = _userManager.Options.Password;
-        return (error.Details ?? []).Select(d => d.Code).Where(c => !string.IsNullOrWhiteSpace(c)).Select(code =>
-            new FailedDetailsDto
-            {
-                Code = code,
-                Description = code switch
-                {
-                    nameof(IdentityErrorDescriber.PasswordTooShort) => describer.PasswordTooShort(password.RequiredLength)
-                        .Description,
-                    nameof(IdentityErrorDescriber.PasswordRequiresUniqueChars) => describer
-                        .PasswordRequiresUniqueChars(password.RequiredUniqueChars).Description,
-                    nameof(IdentityErrorDescriber.PasswordRequiresNonAlphanumeric) => describer
-                        .PasswordRequiresNonAlphanumeric().Description,
-                    nameof(IdentityErrorDescriber.PasswordRequiresDigit) => describer.PasswordRequiresDigit().Description,
-                    nameof(IdentityErrorDescriber.PasswordRequiresLower) => describer.PasswordRequiresLower().Description,
-                    nameof(IdentityErrorDescriber.PasswordRequiresUpper) => describer.PasswordRequiresUpper().Description,
-                    _ => code
-                }
-            }).ToList();
+        // One rebuild for every REST facade (AB#8414 follow-up, AB#8415): the account page uses the same describer.
+        return PasswordPolicyErrorDescriber.Describe(_userManager, error)
+            .Select(e => new FailedDetailsDto { Code = e.Code, Description = e.Description }).ToList();
     }
 
     /// <summary>The REST <c>failedDetails</c> entry of a <c>METHOD_VALIDATION_FAILED</c> answer of <c>User.CreateUser</c>.</summary>

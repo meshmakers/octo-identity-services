@@ -2266,6 +2266,24 @@ unchanged REST suites (`RoleChangeGuardTests`, `UsersMergeTests`, `UserRoleMetho
 `UserMergeMethodTests.Method_MergingAwayTheLastUserAdministrator…` now expects two `Identity.Method` events (its method call and its
 REST call each write one).
 
+### Deprecation of the role and merge endpoints: identity wave 1 (AB#8415)
+
+The four endpoints above carry `[OctoRestDeprecated(Wave = IdentityRestDeprecation.UsersWave1, Link = …)]`
+(`src/IdentityServices/TenantApi/v1/IdentityRestDeprecation.cs`; octo-common-services `docs/rest-deprecation.md`). Links:
+`User.SetRoles/AddRole/RemoveRole` -> `…/identityService/methods#user-roles`, `User.Merge` -> `…#usermerge`.
+
+- **No dates in code.** Gerald's rule (2026-11-07): deprecated from the delivery of the release that contains it, sunset one
+  week after that release runs on prod-1 **and** prod-2. Both dates come from `RestDeprecation:Waves:IdentityUsers1:Since|Sunset`
+  (env `OCTO_RestDeprecation__Waves__IdentityUsers1__Since|Sunset`, Helm `restDeprecation.waves.IdentityUsers1.since|sunset` in
+  octo-helm-core). Unset -> no `Deprecation`/`Sunset` header; `Link`, OpenAPI `deprecated` and the counter
+  `octo.rest.deprecated.calls` always apply. An invalid configured date fails the start.
+- **Not in this wave**: `POST users` and `POST users/ResetPassword` (password, AB#8418 after B0) and the account pages of
+  `ManageApiController` (facades without deprecation, Odin 2026-11-07). AB#8418 decides whether they join `IdentityUsers1`
+  (same release) or get a wave of their own (another release, other dates).
+- **Tests**: `Api/TenantApi/UsersRestDeprecationTests` — headers per endpoint with and without configured dates, a counted
+  successful call (`client_id` `octo-cli`, endpoint template, no user name or tenant), unmarked user endpoints without headers,
+  exactly the four endpoints carry the attribute.
+
 ### REST facades of create user and password reset (AB#8413)
 
 `UsersController.Post` (`POST users`) and `UsersController.ResetPassword` (`POST users/ResetPassword`) are **facades** of the static

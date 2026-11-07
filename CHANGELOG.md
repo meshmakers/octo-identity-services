@@ -5,7 +5,24 @@ Notable changes of the OctoMesh identity services. The CK model `System.Identity
 
 ## Unreleased
 
+### Deprecated
+
+- **Identity wave 1 of the REST user endpoints (AB#8415).** `PUT users/{userName}/roles`,
+  `PUT`/`DELETE users/{userName}/roles/{roleName}` and `POST users/{userName}/merge` are deprecated in favour of the methods
+  `User.SetRoles`, `User.AddRole`, `User.RemoveRole` and `User.Merge` (GraphQL `systemIdentityUsers { … }`). Every response
+  carries `Link: <method documentation>; rel="deprecation"`, the OpenAPI operations are `deprecated: true` and every call is
+  counted on `octo.rest.deprecated.calls` (endpoint template, client id, status class). The dates follow Gerald's rule
+  (2026-11-07) and are **set at rollout**, not in this release: `Deprecation` is sent once
+  `RestDeprecation:Waves:IdentityUsers1:Since` (Helm `restDeprecation.waves.IdentityUsers1.since`) is set to the delivery day
+  of the release that contains this change; `Sunset` once `…:Sunset` is set to one week after that release runs on both
+  prod-1 and prod-2. The dates are entered here and on the deprecated-endpoints page when they are set. Behaviour, routes,
+  bodies and status codes are unchanged. `POST users` and `POST users/ResetPassword` follow with AB#8418.
+
 ### Changed
+
+- **One password-policy describer for every REST facade (AB#8415, follow-up of AB#8414).** `UsersController` rebuilds the
+  `failedDetails` of a `PASSWORD_POLICY_VIOLATION` with `PasswordPolicyErrorDescriber`, as the account page does; codes and
+  descriptions are unchanged.
 
 - **REST role and merge endpoints run the `User` methods (AB#8412).** `PUT users/{userName}/roles`,
   `PUT`/`DELETE users/{userName}/roles/{roleName}` and `POST users/{userName}/merge` are facades of `User.SetRoles-1`,
