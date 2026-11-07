@@ -1265,7 +1265,12 @@ An administrator of T who removes a sibling user's grant can rely on that user g
 
 - **Effective role of the grant.** A sibling user passes only while the mapping itself grants a role that exists in T:
   its direct `roleIds` and the roles of all its groups taken together. Removing one of two groups keeps the roles of the
-  other; only when nothing is left is the user refused.
+  other; only when nothing is left is the user refused. A direct `roleIds` entry of a role that was deleted later grants
+  nothing (the id stays in the list, the gate ignores it).
+- **What the refused user is told.** The description keeps the `tenant_not_provisioned` prefix, but for a removed or
+  role-less sibling grant it says that the grant from the source tenant was removed or grants no role and that an
+  administrator of T must grant access again — a new grant (`POST {T}/v1/ExternalTenantUserMappings` with groups), not
+  `ProvisionCurrentUser -ttid`, which serves registry-ancestor sources only.
 - **The mapping is the grant.** A role or group a T administrator attached directly to the `xt_` shadow user adds to the
   grant while the grant holds; it does **not** keep the sibling user in T once the mapping is deleted or grants nothing.
   Such direct edges are neither removed nor honoured then (no write on the shadow user); for a registry-ancestor source
@@ -1284,9 +1289,11 @@ An administrator of T who removes a sibling user's grant can rely on that user g
   the sibling source is `Identity.CrossTenantExchangeRefused` in T and S with `reason` = `grant was removed from target
   tenant`, `grant has no effective role in target tenant` or `source tenant does not permit the target tenant`, next to
   the `Token Exchange Failure` event in T.
-- Tests: `SiblingTenantGrantTests` (revocation region), `CrossTenantGrantAuditTests.ExchangeAfterTheGrantWasDeleted_*`,
-  `CrossTenantSecondFactorTests.TokenExchange_AfterTheGrantIsDeleted_*` (HTTP: no refresh token, `exp` = `expires_in`,
-  issued token still valid after the deletion, next exchange `access_denied`).
+- Tests: `SiblingTenantGrantTests` (revocation region; the membership, group-role and dead-role cases give the shadow
+  user a direct role, so only the grant check refuses), `CrossTenantGrantAuditTests.ExchangeAfterTheGrantWasDeleted_*`,
+  `CrossTenantSecondFactorTests.TokenExchange_AfterTheGrantIsDeleted_*` (HTTP, child tenant as source: proves the token
+  lifetime only — no refresh token, `exp` = `expires_in`, issued token still valid after the deletion, next exchange
+  `access_denied`).
 
 The admin-provisioning routes (`POST adminProvisioning/{target}`, `…/withGroups`, routed via a parent tenant) are
 unchanged: registry ancestors only, and `withGroups` still skips unknown group ids.

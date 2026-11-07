@@ -39,7 +39,9 @@ Notable changes of the OctoMesh identity services. The CK model `System.Identity
   once the mapping is deleted or grants nothing. The next exchange after a deleted grant, a removed last group or emptied
   group roles answers `access_denied` with the prefix `tenant_not_provisioned` (before: `unauthorized_client` after a
   deletion, or admitted through a direct role of the shadow user); a withdrawn permission keeps `grant_not_permitted`. Each
-  refusal is audited in T and S (`Identity.CrossTenantExchangeRefused`, `reason`). Already issued exchanged tokens stay
+  refusal is audited in T and S (`Identity.CrossTenantExchangeRefused`, `reason`); its description tells the user that an
+  administrator of T must grant access again (not `ProvisionCurrentUser -ttid`, which serves ancestor sources only). A direct
+  `roleIds` entry of a deleted role grants nothing. Already issued exchanged tokens stay
   valid until `exp` (no refresh token; the client's `AccessTokenLifetime`, default 1 h). Ancestor sources are unchanged.
   See `docs/authentication.md`, "Removing a Sibling-Tenant Grant".
 

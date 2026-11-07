@@ -211,10 +211,10 @@ public class TenantExchangeProcessor(
                     return ExchangeOutcome.Failed(Errors.AccessDenied,
                         $"{GrantNotPermittedMarker}: the source tenant does not permit access to tenant '{targetTenantId}'");
                 case SiblingGrantRefusal.NoEffectiveRole:
-                    return await RefuseNotProvisionedAsync(sourceUserId, sourceTenantId, targetTenantId,
+                    return await RefuseSiblingGrantGoneAsync(sourceUserId, sourceTenantId, targetTenantId,
                         "grant has no effective role in target tenant");
                 case SiblingGrantRefusal.Removed:
-                    return await RefuseNotProvisionedAsync(sourceUserId, sourceTenantId, targetTenantId,
+                    return await RefuseSiblingGrantGoneAsync(sourceUserId, sourceTenantId, targetTenantId,
                         "grant was removed from target tenant");
             }
 
@@ -392,6 +392,25 @@ public class TenantExchangeProcessor(
         return ExchangeOutcome.Failed(Errors.AccessDenied,
             $"{NotProvisionedMarker}: the user holds no role in tenant '{targetTenantId}'; " +
             "an administrator of that tenant must provision the user there (ProvisionCurrentUser -ttid)");
+    }
+
+    /// <summary>
+    ///     AB#8344: the grant of a sibling (non-ancestor) source was removed or grants no role any more. Same answer prefix
+    ///     as <see cref="RefuseNotProvisionedAsync" />, but the remedy differs: <c>ProvisionCurrentUser -ttid</c> serves
+    ///     ancestor sources only, a sibling user needs a new grant (<c>POST ExternalTenantUserMappings</c> with groups) from
+    ///     an administrator of T.
+    /// </summary>
+    private async Task<ExchangeOutcome> RefuseSiblingGrantGoneAsync(
+        string sourceUserId, string sourceTenantId, string targetTenantId, string reason)
+    {
+        logger.LogWarning(
+            "Token exchange denied: the grant of user '{SourceUserId}' from tenant '{SourceTenantId}' in target tenant '{TargetTenantId}' no longer admits the user ({Reason})",
+            sourceUserId, sourceTenantId, targetTenantId, reason);
+        await RaiseExchangeFailureAsync(sourceUserId, sourceTenantId, targetTenantId, reason);
+        return ExchangeOutcome.Failed(Errors.AccessDenied,
+            $"{NotProvisionedMarker}: the user holds no role in tenant '{targetTenantId}' because the grant from tenant " +
+            $"'{sourceTenantId}' was removed or grants no role; an administrator of tenant '{targetTenantId}' must grant " +
+            "the user access again");
     }
 
     /// <summary>
