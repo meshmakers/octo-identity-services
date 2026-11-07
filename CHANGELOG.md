@@ -38,7 +38,10 @@ Notable changes of the OctoMesh identity services. The CK model `System.Identity
     by the user name of its `sub` (a client-credentials caller stays `client <id>`);
   - create trims the user name and the e-mail address and stores a blank e-mail as `null`;
   - an unexpected failure answers `500` with "Creation of user failed." / "Reset of password failed." instead of the exception text;
-  - with `IdentityApiAuthorization:RoleEnforcement=Warn` (not the default) a caller without `UserManagement` is now refused (`403`).
+  - with `IdentityApiAuthorization:RoleEnforcement=Warn` (not the default) a caller without `UserManagement` is now refused (`403`);
+  - create with `resetPasswordOnLogin: true`: the flag is a second write after the method stored the user; when that write fails the
+    endpoint answers `500` "The user was created, but ResetPasswordOnLogin could not be set." instead of `200` (the user exists without
+    the flag; CodeRabbit follow-up of #269).
   The password-reset notification is still sent once per reset (by the facade until AB#7775 moves it into the method). See
   `CLAUDE.md`, section "REST facades of create user and password reset (AB#8413)", for the parity table.
 

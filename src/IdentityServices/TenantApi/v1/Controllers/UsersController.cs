@@ -36,6 +36,10 @@ namespace Meshmakers.Octo.Backend.IdentityServices.TenantApi.v1.Controllers;
 [ApiVersion(IdentityServiceConstants.ApiVersion1)]
 public class UsersController : ControllerBase
 {
+    /// <summary>500 message of <c>POST users</c> when the user was created but <c>ResetPasswordOnLogin</c> could not be set.</summary>
+    internal const string ResetPasswordOnLoginNotSetMessage =
+        "The user was created, but ResetPasswordOnLogin could not be set.";
+
     // AB#5708: the xt_ prefix marks cross-tenant shadow users, whose name is trusted to unwind to the
     // person's home identity (roles, allowed_tenants, token exchange). A local user carrying it could
     // impersonate another tenant's user.
@@ -324,9 +328,11 @@ public class UsersController : ControllerBase
         if (response.Success)
         {
             // The method has no parameter for the REST-only flag; keep the REST payload meaning (AB#8413 parity table).
-            if (userDto.ResetPasswordOnLogin)
+            // A lost flag must not look like success: the user would keep the administrator-chosen password.
+            if (userDto.ResetPasswordOnLogin && !await SetResetPasswordOnLoginAsync(response))
             {
-                await SetResetPasswordOnLoginAsync(response);
+                return StatusCode(StatusCodes.Status500InternalServerError,
+                    new InternalServerErrorDto(ResetPasswordOnLoginNotSetMessage));
             }
 
             return Ok();
@@ -346,15 +352,19 @@ public class UsersController : ControllerBase
                 StatusCode(StatusCodes.Status500InternalServerError, new InternalServerErrorDto(operation + "."))));
     }
 
-    /// <summary>Sets the REST-only flag <c>ResetPasswordOnLogin</c> on the user <c>User.CreateUser</c> just created.</summary>
-    private async Task SetResetPasswordOnLoginAsync(CkMethodResponse response)
+    /// <summary>
+    ///     Sets the REST-only flag <c>ResetPasswordOnLogin</c> on the user <c>User.CreateUser</c> just created.
+    /// </summary>
+    /// <returns><c>false</c> when the created user is not found or the update fails; the caller answers 500.</returns>
+    private async Task<bool> SetResetPasswordOnLoginAsync(CkMethodResponse response)
     {
         // The result of User.CreateUser is the bare rtId string on the wire (UserCreateUserWireFormTests).
         var rtId = response.ResultJson == null ? null : JsonSerializer.Deserialize<string>(response.ResultJson);
         var user = rtId == null ? null : await _userManager.FindByIdAsync(rtId);
         if (user == null)
         {
-            return;
+            _logger.LogError("Create user (ResetPasswordOnLogin): the created user {RtId} was not found", rtId);
+            return false;
         }
 
         user.ResetPasswordOnLogin = true;
@@ -362,7 +372,10 @@ public class UsersController : ControllerBase
         if (!result.Succeeded)
         {
             LogIdentityError("Create user (ResetPasswordOnLogin)", result.Errors);
+            return false;
         }
+
+        return true;
     }
 
     // PUT system/v1/users/5

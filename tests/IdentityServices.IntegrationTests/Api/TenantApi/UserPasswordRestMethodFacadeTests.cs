@@ -228,6 +228,28 @@ public class UserPasswordRestMethodFacadeTests : IntegrationTestBase, IDisposabl
         (await FindAsync(name))!.ResetPasswordOnLogin.Should().BeTrue();
     }
 
+    [Fact]
+    public async Task RestCreate_ResetPasswordOnLoginWriteFails_Is500_NotASilentSuccess()
+    {
+        // CodeRabbit on #269: the flag is a second write after User.CreateUser. A failed write must not answer 200, or
+        // the user keeps the administrator-chosen password without being told to change it.
+        var host = Host(configureServices: services =>
+            services.AddScoped<IUserValidator<RtUser>, RefuseResetPasswordOnLoginValidator>());
+        var name = NewName();
+        using var client = RestClient(host, Guid.NewGuid().ToString("N"), [UserManagement]);
+
+        var response = await client.PostAsJsonAsync(TenantApiUrl("users"),
+            new { name, email = $"{name}@example.com", password = OldPassword, resetPasswordOnLogin = true },
+            TestContext.Current.CancellationToken);
+
+        var body = await response.Content.ReadAsStringAsync(TestContext.Current.CancellationToken);
+        response.StatusCode.Should().Be(HttpStatusCode.InternalServerError, body);
+        body.Should().Contain("ResetPasswordOnLogin could not be set");
+        var created = await FindAsync(name);
+        created.Should().NotBeNull("User.CreateUser stored the user before the flag write failed");
+        created!.ResetPasswordOnLogin.Should().BeFalse();
+    }
+
     #endregion
 
     #region REST and the method give the same end state (switch on: the GraphQL path exists)
@@ -349,7 +371,8 @@ public class UserPasswordRestMethodFacadeTests : IntegrationTestBase, IDisposabl
 
     #region Helpers
 
-    private WebApplicationFactory<Program> Host(string? enablePasswordMethods = null)
+    private WebApplicationFactory<Program> Host(string? enablePasswordMethods = null,
+        Action<IServiceCollection>? configureServices = null)
     {
         var host = Factory.WithWebHostBuilder(b =>
         {
@@ -375,6 +398,7 @@ public class UserPasswordRestMethodFacadeTests : IntegrationTestBase, IDisposabl
                 services.RemoveAll<IUserEmailInteractionService>();
                 services.AddSingleton(_mail);
                 services.AddLogging(l => l.AddProvider(_logs));
+                configureServices?.Invoke(services);
             });
         });
         _hosts.Add(host);
@@ -473,6 +497,15 @@ public class UserPasswordRestMethodFacadeTests : IntegrationTestBase, IDisposabl
             .Build();
         (await userManager.CreateAsync(shadow)).Succeeded.Should().BeTrue();
         return shadow;
+    }
+
+    /// <summary>Lets the create pass and refuses the later update that sets <c>ResetPasswordOnLogin</c>.</summary>
+    private sealed class RefuseResetPasswordOnLoginValidator : IUserValidator<RtUser>
+    {
+        public Task<IdentityResult> ValidateAsync(UserManager<RtUser> manager, RtUser user) =>
+            Task.FromResult(user.ResetPasswordOnLogin
+                ? IdentityResult.Failed(new IdentityError { Code = "TestRefused", Description = "Refused by the test." })
+                : IdentityResult.Success);
     }
 
     private sealed class CapturingLoggerProvider : ILoggerProvider

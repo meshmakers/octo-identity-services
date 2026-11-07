@@ -157,6 +157,19 @@ host); a new background timer or long-running loop in startup code needs a dispo
 The shared MongoDB container still grows to ~10 GiB per run (outside the test process; a `--wiredTigerCacheSizeGB 1` cap did not
 change that and a 4 GiB container limit got mongod OOM-killed), which is tracked with the CI agent memory work (AB#8336).
 
+**A stale DebugL feed starves the suite on driver threads (AB#8424).** Every repository client of the runtime engine is a
+MongoDB driver cluster of its own (heartbeat, RTT monitor and pool maintenance thread each). Since AB#8281
+(engine-mongodb #229, 2026-11-05) a disposed host closes all of them; a `Meshmakers.Octo.Runtime.Engine.MongoDb` 999.0.0
+in `../nuget` built **before** that keeps every cluster of every host the suite ever built. Measured on a Mac (16 cores,
+2026-11-07, same identity commit): with the stale feed the test host passed 3,100 threads after 9.5 min with ~500 of ~1,000
+tests done and throughput collapsing (thread stacks: ~390 × `ServerMonitor`, ~390 × `RoundTripTimeMonitor`, ~390 ×
+`MaintenanceHelper`; dump: 497 clusters in `ClusterRegistry`, rooted only by the registry); with the library chain rebuilt
+from main the same suite stays bounded (numbers in AB#8424). CI is not affected (its feed is built from main). Symptoms of a
+stale feed: thousands of threads at ~50 % CPU, transaction aborts, server-selection timeouts and canceled operations in
+unrelated classes, a run that never ends. `Infrastructure/TestHostMongoClientReleaseTests` pins the release on the server
+(`$currentOp` by the host's system database name) and turns red within seconds against such a feed — then rebuild the chain
+(`Invoke-BuildRange` from `octo-construction-kit-engine-mongodb`, or the whole DebugL chain) before you hunt for test defects.
+
 Der NLog-Fall ist der einzige, den man **nicht** per-Fixture eindeutig machen kann: `Program.cs` lädt
 die globale Konfiguration am Entry-Point und räumt sie im `finally` mit `LogManager.Shutdown()` wieder
 ab (dort gegen den Segfault beim Prozessende auf Linux). Unter `WebApplicationFactory<Program>` läuft
@@ -2268,7 +2281,8 @@ rtId is `null` for the static create). Creation, policy, lockout, session revoca
 - **Notification.** The method does not send the password-reset notification yet (AB#7775); the facade sends it after a success. When
   AB#7775 lands, remove that call: `UserPasswordRestMethodFacadeTests` counts exactly one notification per REST reset.
 - **REST-only field.** `RegisterUserDto.ResetPasswordOnLogin` has no method parameter; when true the facade sets it on the new user after the
-  method returned (the rtId is the bare result string).
+  method returned (the rtId is the bare result string). If the user is not found or that update fails, the endpoint answers `500`
+  (`ResetPasswordOnLoginNotSetMessage`), never `200` — the user then exists without the flag (`RestCreate_ResetPasswordOnLoginWriteFails_Is500_NotASilentSuccess`).
 - **Error bodies.** The envelope carries only rule codes; the facade rebuilds the REST `details` (code + description) of a policy violation or an
   invalid user name / e-mail from `UserManager.ErrorDescriber` and the password options, so `OperationFailedErrorDto` keeps its shape.
 
