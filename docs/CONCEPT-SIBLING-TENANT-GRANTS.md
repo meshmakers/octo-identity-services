@@ -222,6 +222,28 @@ built.
 - S removes T from the list: lookups and new grants from T stop at once; existing grants are refused at the next token
   exchange (§8).
 
+As built (AB#8345, `src/IdentityServerPersistence/Services/SourceTenantGrants/`):
+
+- Storage: no CK change. The list is the tenant configuration row `CrossTenantGrantPermissions` (a
+  `System/TenantConfiguration` entity, the storage of `ITenantContext.Get/SetConfigurationAsync`) in **S's own
+  database**, value `{ "targetTenantIds": [...], "changedAtUtc": ..., "changedBy": ... }`. A tenant without the row —
+  every tenant before the upgrade — has an empty list. `CrossTenantGrantPermissionStore` reads and writes it.
+- `AllowListSourceTenantGrantPolicy` (registered `TryAddScoped`, replaces `DenyNonAncestorsSourceTenantGrantPolicy`)
+  answers `true` exactly when T is on S's list (case-insensitive). Read on every call, no cache, so a removal acts with
+  the next request. Fails closed without throwing: unknown S, unreadable registry or unreadable row → `false`. For an
+  unknown S the same row read runs against T's database and is discarded, so "S absent" costs the same round trip as
+  "S does not permit T". Directional: T on S's list never lets S look up T's users. A tenant on its own list does not
+  count.
+- Routes: `GET/PUT {S}/v1/CrossTenantGrantPermissions`, policy `IdentityCrossTenantGrantPermissionsPolicy` — scope
+  `octo_api`, roles `UserManagement` **and** `TenantManagement`, and a token issued for S (the own-tenant check is
+  unconditional, also under `RoleEnforcement=Warn`, so neither a T administrator nor a parent administrator with a
+  parent-tenant token reads the list; a parent administrator switches into S first). `PUT` replaces the whole list;
+  validation (`400`, nothing written): list required, no empty entry, valid tenant id format (≤ 64 ASCII letters,
+  digits, `-`, `_`), at most 200 entries, not S itself. Entries are **not** checked for existence, so the route is no
+  tenant directory. Each change is logged (`added`, `removed`, caller); the audit event in S follows with AB#8342.
+- The lookup route (AB#8341) uses the policy now; mapping create (`403 SourceTenantNotPermitted`, AB#8343) and the
+  exchange gate and revocation (AB#8343, AB#8344) ask the same `ISourceTenantGrantPolicy`.
+
 ## 7. Audit events (AB#8342)
 
 Written through `IIdentityAuditService` into the runtime event log of the tenant(s) named (source

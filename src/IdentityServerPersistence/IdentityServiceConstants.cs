@@ -32,6 +32,11 @@ public static class IdentityServiceConstants
     // tenant role SecretManagement. Staged by IdentityApiAuthorization:SecretManagementRoleEnforcement.
     public const string IdentitySecretAdministrationPolicy = "IdentitySecretAdministrationPolicy";
 
+    // AB#8345: the source tenant's allow-list for sibling-tenant grants (CrossTenantGrantPermissions) → scope octo_api,
+    // the tenant roles UserManagement AND TenantManagement, and a token issued for the route tenant (unconditional, so
+    // no administrator of another tenant reads which tenants a source tenant permits).
+    public const string IdentityCrossTenantGrantPermissionsPolicy = "IdentityCrossTenantGrantPermissionsPolicy";
+
     public const string MailNotificationConfigurationName = "MailNotificationConfiguration";
 
     public const string WelcomeEmailTemplateName = "Welcome_Email_Template";

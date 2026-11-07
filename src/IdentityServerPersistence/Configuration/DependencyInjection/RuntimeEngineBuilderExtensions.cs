@@ -90,11 +90,12 @@ public static class RuntimeEngineBuilderExtensions
         // AB#8367: the login page offers only the OctoTenant providers the ancestry check lets through.
         builder.Services.AddScoped<IOctoTenantLoginProviders, OctoTenantLoginProviders>();
         builder.Services.AddScoped<ICrossTenantAuthenticationService, CrossTenantAuthenticationService>();
-        // AB#8341: exact source user lookup for sibling-tenant grants. The policy defaults to "deny every non-ancestor"
-        // until the allow-list of AB#8345 replaces it. The audit sink is a no-op here; the identity host registers the
-        // AB#8342 sink that writes into the event logs of T and S. TryAdd so hosts (tests, the later stories) can register
-        // their own implementation first.
-        builder.Services.TryAddScoped<ISourceTenantGrantPolicy, DenyNonAncestorsSourceTenantGrantPolicy>();
+        // AB#8341: exact source user lookup for sibling-tenant grants. The policy is the allow-list each source tenant
+        // keeps (AB#8345, empty = nobody). The audit sink is a no-op here; the identity host registers the AB#8342 sink
+        // that writes into the event logs of T and S. TryAdd so hosts (tests, the later stories) can register their own
+        // implementation first.
+        builder.Services.TryAddScoped<ISourceTenantGrantPolicy, AllowListSourceTenantGrantPolicy>();
+        builder.Services.TryAddSingleton<ICrossTenantGrantPermissionStore, CrossTenantGrantPermissionStore>();
         builder.Services.TryAddSingleton<ISourceUserLookupAuditSink, NoOpSourceUserLookupAuditSink>();
         builder.Services.TryAddSingleton<ISourceUserLookupRateLimiter, SourceUserLookupRateLimiter>();
         builder.Services.AddScoped<ISourceUserLookupService, SourceUserLookupService>();

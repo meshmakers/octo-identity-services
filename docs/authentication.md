@@ -650,7 +650,8 @@ of the system tenant). `RtOctoTenantIdentityProvider` entries are a tenant's **o
 - Every tenant the walk reaches must also be a **registry ancestor** of the child; a provider pointing anywhere else
   widens nothing (see *Registry Decides Cross-Tenant Ancestry* below)
 - A user in "octosystem" (root) can access all descendant tenants
-- Lateral access (sibling-to-sibling) is not permitted
+- Lateral access (sibling-to-sibling) is not permitted, unless the source tenant permits the target on its allow-list
+  (AB#8345, see *Source Tenant Permits Sibling-Tenant Grants* below)
 
 ### Registry Decides Cross-Tenant Ancestry (AB#8339)
 
@@ -696,6 +697,27 @@ Helm `services.identity.crossTenantAncestry`):
 A registry row written before the parent field existed (no `parentTenantId`) makes its tenant a direct child of the
 system tenant; under `Enforce` its real parent is then no ancestor. Such tenants show up in the Warn log and the
 inventory; give their registry rows the parent before enforcing. Admitting users of a tenant **outside** the ancestor chain needs that tenant's permission (AB#8313).
+
+### Source Tenant Permits Sibling-Tenant Grants (AB#8345)
+
+A tenant S that is **no** registry ancestor of T lets T's administrators find one of its users (exact user name or
+e-mail, `POST {T}/v1/ExternalTenantUserMappings/sourceUserLookup`) and grant that user access to T only when S's
+administrators have put T on S's allow-list:
+
+```
+GET {S}/v1/CrossTenantGrantPermissions            → { "targetTenantIds": ["customer-a"] }
+PUT {S}/v1/CrossTenantGrantPermissions  { "targetTenantIds": ["customer-a", "customer-b"] }
+```
+
+- **Default: nobody.** Every tenant — existing tenants after the upgrade included — starts with an empty list; nothing
+  changes until an S administrator writes it.
+- **Who:** scope `octo_api`, roles `UserManagement` and `TenantManagement`, and a token issued for S itself
+  (`IdentityCrossTenantGrantPermissionsPolicy`). T's administrators get `403`; no route reveals which tenants S permits.
+  A non-permitted T gets the same `404 SourceUserNotFound` as for a tenant that does not exist.
+- **Withdrawal:** removing T stops T's lookups (and, with AB#8343, its new grants) with the next request; grants that
+  already exist are refused at T's next token exchange (AB#8344).
+- **Storage:** tenant configuration row `CrossTenantGrantPermissions` in S's database — no CK model change. Details:
+  `docs/CONCEPT-SIBLING-TENANT-GRANTS.md` §6.
 
 ### Cross-Tenant Login Flow
 

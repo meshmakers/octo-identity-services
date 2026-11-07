@@ -431,11 +431,14 @@ public class CustomWebApplicationFactory : WebApplicationFactory<Program>, IAsyn
                 services.Remove(descriptor);
             }
 
-            // AB#8341: tests permit the sibling pairs they arrange; every other pair keeps the shipped default (deny).
+            // AB#8341: tests permit the sibling pairs they arrange; every other pair is decided by the production policy,
+            // the allow-list each source tenant keeps (AB#8345, empty = nobody).
             services.RemoveAll<IdentityServerPersistence.Services.SourceTenantGrants.ISourceTenantGrantPolicy>();
             services.AddSingleton(SourceTenantGrantPolicy);
-            services.AddSingleton<IdentityServerPersistence.Services.SourceTenantGrants.ISourceTenantGrantPolicy>(
-                SourceTenantGrantPolicy);
+            services.AddScoped<IdentityServerPersistence.Services.SourceTenantGrants.AllowListSourceTenantGrantPolicy>();
+            services.AddScoped<IdentityServerPersistence.Services.SourceTenantGrants.ISourceTenantGrantPolicy>(sp =>
+                SourceTenantGrantPolicy.Over(sp.GetRequiredService<
+                    IdentityServerPersistence.Services.SourceTenantGrants.AllowListSourceTenantGrantPolicy>()));
 
             // AB#8337: ASP.NET Core's RateLimitingMiddleware never disposes its limiter, whose heartbeat timer then roots
             // this host (and the fixtures of the test that started it) for the rest of the process. Registered last, so it
