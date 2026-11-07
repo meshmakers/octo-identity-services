@@ -76,7 +76,17 @@ Notable changes of the OctoMesh identity services. The CK model `System.Identity
   identity user store with one `Identity.ShadowUserDeleted` event per user in the tenant's event log. Off reads nothing. A
   failing tenant does not stop the others, the run never blocks the start-up, and an Apply whose mapping read fails in any
   tenant runs as DryRun. Runbook in `docs/authentication.md`.
-
+- **Source tenant decides which tenants may look up and grant its users (AB#8345, security).** `GET/PUT
+  {S}/v1/CrossTenantGrantPermissions` (`{ "targetTenantIds": [...] }`) keeps the allow-list of a source tenant S;
+  only S's administrators (`UserManagement` and `TenantManagement`, token issued for S —
+  `IdentityCrossTenantGrantPermissionsPolicy`) read or change it, T's administrators get `403`. The new production
+  `ISourceTenantGrantPolicy` (`AllowListSourceTenantGrantPolicy`) permits T exactly when T is on S's list, read on every
+  call (removal acts with the next request) and fails closed. Every change is written into S's event log
+  (`Identity.CrossTenantGrantPermissionsChanged`, AB#8342 audit API). Default for every tenant, existing ones included: empty
+  list = nobody, so behaviour is unchanged after the upgrade. Stored as the tenant configuration row
+  `CrossTenantGrantPermissions` in S — **no CK change**. A sibling lookup from a permitted T now finds the user; from
+  any other tenant it answers the same `404` as for a non-existent tenant. See `docs/CONCEPT-SIBLING-TENANT-GRANTS.md`
+  §6, `docs/authentication.md`, `docs/system-api.md`.
 - **Cross-tenant grant audit events in both tenants (AB#8342, security).** Lookups, grant create / change / removal through
   `ExternalTenantUserMappings` and `AdminProvisioning`, the first token exchange into a tenant and refused exchanges from a sibling source are written
   into the runtime event log of the target tenant T **and** the source tenant S (categories `Identity.CrossTenantLookup`,

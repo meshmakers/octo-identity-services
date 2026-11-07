@@ -265,6 +265,58 @@ public class IdentityApiAuthorizationPolicyTests
             IdentityServiceConstants.IdentityUserDirectoryReadPolicy)).Should().BeFalse();
     }
 
+    // ------------------------------------------------------------------ AB#8345 cross-tenant grant permissions
+
+    [Theory]
+    [InlineData(new[] { "UserManagement", "TenantManagement" }, true)]
+    [InlineData(new[] { "UserManagement" }, false)]
+    [InlineData(new[] { "TenantManagement" }, false)]
+    [InlineData(new[] { "AdminPanelManagement", "TenantManagement" }, false)]
+    [InlineData(new string[0], false)]
+    public async Task CrossTenantGrantPermissions_RequiresUserAndTenantManagement(string[] roles, bool expected)
+    {
+        var service = CreateAuthorizationService();
+
+        (await AuthorizeAsync(service, DirectoryCaller(CustomerTenantId, roles: roles),
+            IdentityServiceConstants.IdentityCrossTenantGrantPermissionsPolicy)).Should().Be(expected);
+    }
+
+    [Theory]
+    [InlineData(IdentityApiRoleEnforcementMode.Enforce)]
+    [InlineData(IdentityApiRoleEnforcementMode.Warn)]
+    public async Task CrossTenantGrantPermissions_AdministratorOfAnotherTenant_IsDenied_EvenInWarnMode(
+        IdentityApiRoleEnforcementMode mode)
+    {
+        var service = CreateAuthorizationService(mode);
+
+        (await AuthorizeAsync(service,
+            DirectoryCaller("other-tenant", roles: ["UserManagement", "TenantManagement"]),
+            IdentityServiceConstants.IdentityCrossTenantGrantPermissionsPolicy)).Should().BeFalse();
+        (await AuthorizeAsync(service,
+            DirectoryCaller(null, clientCredentials: true, roles: ["UserManagement", "TenantManagement"]),
+            IdentityServiceConstants.IdentityCrossTenantGrantPermissionsPolicy)).Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task CrossTenantGrantPermissions_ReadOnlyScope_IsDenied()
+    {
+        var service = CreateAuthorizationService();
+
+        (await AuthorizeAsync(service,
+            DirectoryCaller(CustomerTenantId, scope: "octo_api.read_only", roles: ["UserManagement", "TenantManagement"]),
+            IdentityServiceConstants.IdentityCrossTenantGrantPermissionsPolicy)).Should().BeFalse();
+    }
+
+    [Fact]
+    public void CrossTenantGrantPermissionsController_EveryAction_UsesItsOwnPolicy()
+    {
+        var actions = EnumerateActions()
+            .Where(a => a.Name.StartsWith(nameof(CrossTenantGrantPermissionsController) + ".")).ToList();
+
+        actions.Should().HaveCount(2);
+        actions.Should().OnlyContain(a => a.Policy == IdentityServiceConstants.IdentityCrossTenantGrantPermissionsPolicy);
+    }
+
     // ------------------------------------------------------------------ AB#5861 secret administration
 
     [Theory]
@@ -400,7 +452,8 @@ public class IdentityApiAuthorizationPolicyTests
         IdentityServiceConstants.IdentityTenantAdministrationWritePolicy,
         IdentityServiceConstants.IdentityDirectoryReadPolicy,
         IdentityServiceConstants.IdentityServiceAdministrationPolicy,
-        IdentityServiceConstants.IdentitySecretAdministrationPolicy
+        IdentityServiceConstants.IdentitySecretAdministrationPolicy,
+        IdentityServiceConstants.IdentityCrossTenantGrantPermissionsPolicy
     ];
 
     private static readonly string[] ReadPolicies =

@@ -32,6 +32,7 @@ tokens: the client's effective roles, AB#4183). The check probes the raw `role` 
 | `IdentityDirectoryReadPolicy` | `octo_api` or `octo_api.read_only` | `UserManagement`, `TenantManagement`, `AdminPanelManagement`, `CommunicationManagement` | `GET roles`, `GET roles/GetPaged`, `GET roles/names/{roleName}`, `GET clients/{id}`, `GET clients/{id}/roles`, `GET clients/{id}/actors` (service-account panels, communication controller) |
 | `IdentityServiceAdministrationPolicy` | `octo_api` | `TenantManagement`, **system tenant route only** | `POST diagnostics/reconfigureLogLevel` (process-wide) |
 | `IdentityUserDirectoryReadPolicy` | `octo_api` or `octo_api.read_only` | — (**token must be issued for the route tenant**, no Warn mode, no exemptions) | `GET users/directory` (id + display name only, for pickers) |
+| `IdentityCrossTenantGrantPermissionsPolicy` (AB#8345) | `octo_api` | `UserManagement` **and** `TenantManagement`; **token must be issued for the route tenant** (unconditional, also under `RoleEnforcement=Warn`) | `GET`/`PUT CrossTenantGrantPermissions` (the tenant's allow-list as a source of sibling-tenant grants) |
 | `IdentityApiReadOnlyPolicy` | `octo_api` or `octo_api.read_only` | — | `GET tools/generatePassword` |
 
 Open to every authenticated caller: `GET diagnostics` (the caller's own claims). `POST setup` is unchanged
@@ -498,6 +499,26 @@ Manages cross-tenant user role mappings. Each mapping links a user from a parent
   "userId": "string",
   "userName": "string",
   "displayName": "string | null"
+}
+```
+
+### Cross-Tenant Grant Permissions (`/{tenantId}/v1/crossTenantGrantPermissions`)
+
+The allow-list of this tenant as a **source** of sibling-tenant grants (AB#8345): the target tenants whose
+administrators may look up this tenant's users by exact user name or e-mail (`sourceUserLookup`) and grant them
+access. Empty = nobody, the default of every tenant. Only this tenant's administrators read or change it
+(`IdentityCrossTenantGrantPermissionsPolicy`); an administrator of another tenant gets `403`, and no route of any tenant
+reveals which tenants permit a target tenant. Contract: `CONCEPT-SIBLING-TENANT-GRANTS.md` §6.
+
+| Method | Endpoint | Policy | Description |
+|--------|----------|--------|-------------|
+| GET | `/crossTenantGrantPermissions` | ReadWrite + both roles | The permitted target tenant ids |
+| PUT | `/crossTenantGrantPermissions` | ReadWrite + both roles | Replace the list (`[]` = nobody). Entries are trimmed, lower-cased, de-duplicated; each at most 64 ASCII letters, digits, `-` or `_`; at most 200; not the tenant itself → otherwise `400` validation problem, nothing changed. Entries are not checked for existence |
+
+```typescript
+// CrossTenantGrantPermissionsDto (GET response, PUT request and response)
+{
+  "targetTenantIds": ["string"]  // required on PUT
 }
 ```
 

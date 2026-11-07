@@ -6,8 +6,8 @@ namespace IdentityServerPersistence.Services.SourceTenantGrants;
 /// </summary>
 /// <remarks>
 ///     Registry ancestors are admitted by the callers through <see cref="ICrossTenantAncestryGuard" /> and never reach
-///     this policy's decision. The shipped implementation is <see cref="DenyNonAncestorsSourceTenantGrantPolicy" />; the
-///     allow-list kept in S replaces it with AB#8345.
+///     this policy's decision. The shipped implementation is <see cref="AllowListSourceTenantGrantPolicy" /> (AB#8345): the
+///     allow-list kept in S, empty by default.
 /// </remarks>
 public interface ISourceTenantGrantPolicy
 {
@@ -19,8 +19,9 @@ public interface ISourceTenantGrantPolicy
 }
 
 /// <summary>
-///     Default until AB#8345: no tenant permits any other tenant. Together with the registry check of the callers this is
-///     "deny every non-ancestor" — a sibling lookup answers the uniform <c>404</c>.
+///     No tenant permits any other tenant. Together with the registry check of the callers this is "deny every
+///     non-ancestor" — a sibling lookup answers the uniform <c>404</c>. The shipped default until AB#8345; kept for tests
+///     and as the behaviour every tenant has with an empty allow-list.
 /// </summary>
 public sealed class DenyNonAncestorsSourceTenantGrantPolicy : ISourceTenantGrantPolicy
 {

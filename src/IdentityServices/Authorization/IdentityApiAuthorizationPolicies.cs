@@ -41,6 +41,10 @@ namespace Meshmakers.Octo.Backend.IdentityServices.Authorization;
 ///             <c>AdminPanelManagement</c> or <c>CommunicationManagement</c>.
 ///         </item>
 ///         <item>
+///             The allow-list for sibling-tenant grants (<c>CrossTenantGrantPermissions</c>, AB#8345):
+///             <c>UserManagement</c> and <c>TenantManagement</c>, and a token issued for the route tenant.
+///         </item>
+///         <item>
 ///             Log level: <c>TenantManagement</c> in the system tenant only.
 ///         </item>
 ///         <item>
@@ -97,6 +101,12 @@ internal static class IdentityApiAuthorizationPolicies
     internal static readonly IReadOnlyList<string> ServiceAdministrationRoles = [CommonConstants.TenantManagementRole];
 
     /// <summary>
+    ///     AB#8345: the role a source tenant administrator needs, in addition to <see cref="UserAdministrationRoles" />,
+    ///     to read or change the tenant's allow-list for sibling-tenant grants.
+    /// </summary>
+    internal static readonly IReadOnlyList<string> CrossTenantGrantPermissionRoles = [CommonConstants.TenantManagementRole];
+
+    /// <summary>
     ///     Registers the policies.
     /// </summary>
     public static void AddIdentityApiPolicies(this AuthorizationOptions options)
@@ -136,6 +146,14 @@ internal static class IdentityApiAuthorizationPolicies
             policyBuilder.RequireClaim(InfrastructureCommon.ClaimScope,
                     CommonConstants.OctoApiFullAccess)
                 .AddRequirements(SecretAdministrationRequirement));
+
+        // AB#8345: both roles (each its own requirement) and the unconditional own-tenant check.
+        options.AddPolicy(IdentityServiceConstants.IdentityCrossTenantGrantPermissionsPolicy, policyBuilder =>
+            policyBuilder.RequireClaim(InfrastructureCommon.ClaimScope,
+                    CommonConstants.OctoApiFullAccess)
+                .AddRequirements(new IdentityApiRoleRequirement(UserAdministrationRoles),
+                    new IdentityApiRoleRequirement(CrossTenantGrantPermissionRoles),
+                    new IdentityApiOwnTenantRequirement()));
 
         options.AddPolicy(IdentityServiceConstants.IdentityDirectoryReadPolicy, policyBuilder =>
             policyBuilder.RequireClaim(InfrastructureCommon.ClaimScope,
