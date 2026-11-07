@@ -522,6 +522,9 @@ reveals which tenants permit a target tenant. Contract: `CONCEPT-SIBLING-TENANT-
 }
 ```
 
+The .NET type is `CrossTenantGrantPermissionsDto` in `Meshmakers.Octo.Communication.Contracts` (octo-sdk, AB#8346).
+A `PUT` body without `targetTenantIds` (or with `null`) is a `400`; it never clears the list.
+
 Concurrent edits (AB#8432): the tag is derived from the normalized list only, so an unchanged list keeps its tag. Read
 the list, keep its `ETag`, send it back as `If-Match`; on `412` read again and apply the change to the current list.
 The identity CORS policy exposes `ETag` to browser clients. Details and the client rollout:

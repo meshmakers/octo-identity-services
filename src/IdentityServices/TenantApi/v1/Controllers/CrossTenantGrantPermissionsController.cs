@@ -5,6 +5,7 @@ using IdentityServerPersistence.Services.SourceTenantGrants;
 using Meshmakers.Octo.Backend.IdentityServices.CrossTenantAudit;
 using Meshmakers.Octo.Backend.IdentityServices.OpenIddict;
 using Meshmakers.Octo.Backend.Authentication;
+using Meshmakers.Octo.Communication.Contracts.DataTransferObjects;
 using Meshmakers.Octo.Services.Infrastructure.Services;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -84,7 +85,7 @@ public class CrossTenantGrantPermissionsController(
     public async Task<ActionResult<CrossTenantGrantPermissionsDto>> Put(
         // ValidateNever: the list is validated below with one combined, readable answer.
         [FromBody][ValidateNever][Description("The complete list of permitted target tenant ids")]
-        CrossTenantGrantPermissionsDto dto)
+        CrossTenantGrantPermissionsPutBody dto)
     {
         var tenantId = multiTenancyResolverService.GetTenantId();
         var errors = CrossTenantGrantPermissionList.Validate(tenantId, dto.TargetTenantIds);
@@ -92,7 +93,7 @@ public class CrossTenantGrantPermissionsController(
         {
             foreach (var error in errors)
             {
-                ModelState.AddModelError(nameof(CrossTenantGrantPermissionsDto.TargetTenantIds), error);
+                ModelState.AddModelError(nameof(CrossTenantGrantPermissionsPutBody.TargetTenantIds), error);
             }
 
             return ValidationProblem(ModelState);
@@ -214,11 +215,16 @@ public class CrossTenantGrantPermissionsController(
 }
 
 /// <summary>
-/// Body of <c>GET/PUT {tenant}/v1/CrossTenantGrantPermissions</c> (AB#8345): the target tenants this (source) tenant
-/// permits to look up and grant access to its users.
+/// Request body of <c>PUT {tenant}/v1/CrossTenantGrantPermissions</c> (AB#8345). Same JSON as the SDK's
+/// <see cref="CrossTenantGrantPermissionsDto" /> (<c>{"targetTenantIds":[…]}</c>), which every answer uses.
 /// </summary>
-public sealed class CrossTenantGrantPermissionsDto
+/// <remarks>
+/// AB#8521: the SDK DTO defaults <c>TargetTenantIds</c> to <c>[]</c>, so a body without the property (<c>{}</c>) would
+/// bind as "permit nobody" and silently clear the list. This server-side body keeps the property nullable, so a missing
+/// or <c>null</c> list stays a <c>400</c> as the contract (<c>docs/CONCEPT-SIBLING-TENANT-GRANTS.md</c> §6) requires.
+/// </remarks>
+public sealed class CrossTenantGrantPermissionsPutBody
 {
-    /// <summary>Target tenant ids; empty = nobody. Required on <c>PUT</c> (send <c>[]</c> to clear).</summary>
+    /// <summary>Target tenant ids; required (send <c>[]</c> to permit no tenant).</summary>
     public List<string>? TargetTenantIds { get; set; }
 }

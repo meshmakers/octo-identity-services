@@ -20,6 +20,11 @@ Notable changes of the OctoMesh identity services. The CK model `System.Identity
 
 ### Changed
 
+- **The cross-tenant allow-list answers with the SDK's `CrossTenantGrantPermissionsDto` (AB#8521).** octo-sdk #102 (AB#8346)
+  added the DTO to `Communication.Contracts`; the controller-local class of the same name made the build fail (CS0104). The
+  `GET`/`PUT CrossTenantGrantPermissions` answers now use the SDK type; the `PUT` body binds to the server-side
+  `CrossTenantGrantPermissionsPutBody`, because the SDK DTO defaults the list to `[]` and a body without
+  `targetTenantIds` must stay a `400` instead of clearing the list. JSON, ETag/`If-Match`, `412` and `428` are unchanged.
 - **One password-policy describer for every REST facade (AB#8415, follow-up of AB#8414).** `UsersController` rebuilds the
   `failedDetails` of a `PASSWORD_POLICY_VIOLATION` with `PasswordPolicyErrorDescriber`, as the account page does; codes and
   descriptions are unchanged.
