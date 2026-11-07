@@ -55,6 +55,7 @@ public class CrossTenantAuthenticationServiceTests
             _passwordHasher,
             _chainResolver,
             CreateAncestryGuard(),
+            new IdentityServerPersistence.Services.SourceTenantGrants.DenyNonAncestorsSourceTenantGrantPolicy(),
             Microsoft.Extensions.Options.Options.Create(_identityOptions),
             _logger);
     }

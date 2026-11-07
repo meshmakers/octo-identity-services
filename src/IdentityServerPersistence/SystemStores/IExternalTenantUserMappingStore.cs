@@ -40,6 +40,12 @@ public interface IExternalTenantUserMappingStore
     Task StoreAsync(RtExternalTenantUserMapping mapping);
 
     /// <summary>
+    /// Inserts a new mapping and makes it a member of <paramref name="groups"/> in one transaction (AB#8343): either
+    /// the mapping with all its group memberships is stored, or nothing.
+    /// </summary>
+    Task InsertWithGroupsAsync(RtExternalTenantUserMapping mapping, IReadOnlyCollection<RtGroup> groups);
+
+    /// <summary>
     /// Removes a mapping by its RtId.
     /// </summary>
     Task RemoveAsync(OctoObjectId rtId);

@@ -358,6 +358,7 @@ public class CrossTenantAncestryIntegrationTests : IClassFixture<IdentityService
             new PasswordHasher<RtUser>(),
             new CrossTenantShadowUserChainResolver(systemContext),
             TestAncestryGuards.Create(systemContext, mode, log),
+            new IdentityServerPersistence.Services.SourceTenantGrants.DenyNonAncestorsSourceTenantGrantPolicy(),
             Options.Create(new IdentityOptions()),
             NullLogger<CrossTenantAuthenticationService>.Instance);
     }

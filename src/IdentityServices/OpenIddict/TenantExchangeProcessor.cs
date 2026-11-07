@@ -73,6 +73,13 @@ public class TenantExchangeProcessor(
     /// </summary>
     public const string NotProvisionedMarker = "tenant_not_provisioned";
 
+    /// <summary>
+    ///     Stable prefix of the <c>error_description</c> (with <c>error=access_denied</c>) when the target tenant holds a
+    ///     grant for a user of a non-ancestor source tenant, but the source tenant does not permit the target (any more,
+    ///     AB#8343). Clients match on this prefix.
+    /// </summary>
+    public const string GrantNotPermittedMarker = "grant_not_permitted";
+
     /// <summary>Outcome of a token exchange attempt: either a B-shadow user or an OAuth error.</summary>
     public sealed record ExchangeOutcome
     {
@@ -191,6 +198,16 @@ public class TenantExchangeProcessor(
             logger.LogWarning(
                 "Token exchange denied: user '{SourceUserId}' from tenant '{SourceTenantId}' may not access target tenant '{TargetTenantId}'",
                 sourceUserId, sourceTenantId, targetTenantId);
+            // AB#8343: a grant T holds for a sibling user whose source tenant no longer permits T is a denial of that
+            // grant (access_denied), not the refusal of an unrelated tenant. Nothing is created in T either way (AB#8304).
+            if (await crossTenantAuthService.IsWithdrawnSiblingGrantAsync(targetTenantId, sourceTenantId, sourceUserId))
+            {
+                await RaiseExchangeFailureAsync(sourceUserId, sourceTenantId, targetTenantId,
+                    "source tenant does not permit the target tenant");
+                return ExchangeOutcome.Failed(Errors.AccessDenied,
+                    $"{GrantNotPermittedMarker}: the source tenant does not permit access to tenant '{targetTenantId}'");
+            }
+
             await RaiseExchangeFailureAsync(sourceUserId, sourceTenantId, targetTenantId, "cross-tenant access denied");
             return ExchangeOutcome.Failed(Errors.UnauthorizedClient,
                 "cross-tenant access to the target tenant is denied");

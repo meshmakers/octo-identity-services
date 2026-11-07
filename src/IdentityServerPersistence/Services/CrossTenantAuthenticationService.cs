@@ -1,3 +1,4 @@
+using IdentityServerPersistence.Services.SourceTenantGrants;
 using IdentityServerPersistence.SystemStores;
 using Meshmakers.Octo.Runtime.Contracts.Repositories.Query;
 using Microsoft.AspNetCore.Identity;
@@ -13,6 +14,7 @@ public class CrossTenantAuthenticationService(
     IPasswordHasher<RtUser> passwordHasher,
     ICrossTenantShadowUserChainResolver shadowUserChainResolver,
     ICrossTenantAncestryGuard ancestryGuard,
+    ISourceTenantGrantPolicy grantPolicy,
     IOptions<IdentityOptions> identityOptions,
     ILogger<CrossTenantAuthenticationService> logger) : ICrossTenantAuthenticationService
 {
@@ -66,13 +68,14 @@ public class CrossTenantAuthenticationService(
     public async Task<CrossTenantAuthResult?> ValidateCrossTenantAccessAsync(
         string targetTenantId, string sourceTenantId, string sourceUserId)
     {
-        // Verify the source tenant is an ancestor of the target tenant
-        // by walking up from the target tenant
+        // Verify the source tenant is an ancestor of the target tenant by walking up from the target tenant — or, for a
+        // source that is no registry ancestor, that T holds a grant for this user and S permits T right now (AB#8343).
         var isAncestor = await IsAncestorTenantAsync(targetTenantId, sourceTenantId);
-        if (!isAncestor)
+        if (!isAncestor &&
+            await EvaluateSiblingGrantAsync(targetTenantId, sourceTenantId, sourceUserId) != SiblingGrant.Admitted)
         {
             logger.LogWarning(
-                "Tenant switch denied: '{SourceTenantId}' is not an ancestor of '{TargetTenantId}'",
+                "Tenant switch denied: '{SourceTenantId}' is not an ancestor of '{TargetTenantId}' and holds no permitted grant there",
                 sourceTenantId, targetTenantId);
             return null;
         }
@@ -360,6 +363,75 @@ public class CrossTenantAuthenticationService(
         }
 
         return await ancestryGuard.IsTrustedAncestorAsync(childTenantId, ancestorTenantId, "tenant switch");
+    }
+
+    /// <inheritdoc />
+    public async Task<bool> IsWithdrawnSiblingGrantAsync(string targetTenantId, string sourceTenantId,
+        string sourceUserId)
+        => await EvaluateSiblingGrantAsync(targetTenantId, sourceTenantId, sourceUserId) == SiblingGrant.NotPermitted;
+
+    /// <summary>State of a grant for a source tenant that is no registry ancestor of the target (AB#8343).</summary>
+    private enum SiblingGrant
+    {
+        /// <summary>No grant applies: S is a registry ancestor, T holds no mapping, or the state cannot be read.</summary>
+        None,
+
+        /// <summary>T holds a mapping for the user, but S does not permit T.</summary>
+        NotPermitted,
+
+        /// <summary>T holds a mapping for the user and S permits T.</summary>
+        Admitted
+    }
+
+    /// <summary>
+    ///     AB#8343: a source tenant S that is no registry ancestor of T reaches T only through an explicit grant — a mapping
+    ///     for (S, user) stored in <b>T</b> — and only while S permits T (<see cref="ISourceTenantGrantPolicy" />, asked at
+    ///     every exchange, so withdrawing T from S's allow-list stops the next exchange). A registry ancestor never takes
+    ///     this path: its rules (provider opt-in, AB#8339) stay as they are. Fails closed: an unreadable registry, T or
+    ///     policy admits nothing.
+    /// </summary>
+    private async Task<SiblingGrant> EvaluateSiblingGrantAsync(string targetTenantId, string sourceTenantId,
+        string sourceUserId)
+    {
+        try
+        {
+            var registryAncestors = await ancestryGuard.GetRegistryAncestorsAsync(targetTenantId);
+            if (registryAncestors.Contains(sourceTenantId, StringComparer.OrdinalIgnoreCase))
+            {
+                return SiblingGrant.None;
+            }
+
+            var targetRepository = await tenantRegistry.TryGetRepositoryAsync(targetTenantId);
+            if (targetRepository == null)
+            {
+                LogUnregisteredTenant(targetTenantId);
+                return SiblingGrant.None;
+            }
+
+            var mapping = await ExternalTenantUserMappingLookup.FindOldestAsync(targetRepository, sourceTenantId,
+                sourceUserId, logger);
+            if (mapping == null)
+            {
+                return SiblingGrant.None;
+            }
+
+            if (!await grantPolicy.IsPermittedAsync(sourceTenantId, targetTenantId))
+            {
+                logger.LogWarning(
+                    "Tenant switch denied: '{SourceTenantId}' does not permit '{TargetTenantId}'; grant {MappingId} is not honoured (AB#8343)",
+                    sourceTenantId, targetTenantId, mapping.RtId);
+                return SiblingGrant.NotPermitted;
+            }
+
+            return SiblingGrant.Admitted;
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex,
+                "Tenant switch denied: the grant of '{SourceTenantId}' in '{TargetTenantId}' could not be checked (AB#8343)",
+                sourceTenantId, targetTenantId);
+            return SiblingGrant.None;
+        }
     }
 
     /// <summary>

@@ -1,7 +1,9 @@
 using Meshmakers.Octo.ConstructionKit.Contracts;
+using Meshmakers.Octo.Runtime.Contracts;
 using Meshmakers.Octo.Runtime.Contracts.MongoDb.Repositories;
 using Meshmakers.Octo.Runtime.Contracts.Repositories;
 using Meshmakers.Octo.Runtime.Contracts.Repositories.Query;
+using Meshmakers.Octo.Runtime.Contracts.RepositoryEntities;
 using Meshmakers.Octo.Services.Infrastructure.Services;
 using Microsoft.Extensions.Logging;
 using Persistence.IdentityCkModel.Generated.System.Identity.v3;
@@ -101,6 +103,25 @@ public class ExternalTenantUserMappingStore(
         else
         {
             await GetRepository().ReplaceOneRtEntityByIdAsync(session, mapping.RtId, mapping);
+        }
+
+        await session.CommitTransactionAsync();
+    }
+
+    public async Task InsertWithGroupsAsync(RtExternalTenantUserMapping mapping, IReadOnlyCollection<RtGroup> groups)
+    {
+        var repository = GetRepository();
+        var session = await repository.GetSessionAsync();
+        session.StartTransaction();
+
+        await repository.InsertOneRtEntityAsync(session, mapping);
+        if (groups.Count > 0)
+        {
+            var updates = groups
+                .Select(group => AssociationUpdateInfo.CreateInsert(group.ToRtEntityId(), mapping.ToRtEntityId(),
+                    IdentityAssociationConstants.GroupMemberId))
+                .ToList();
+            await repository.ApplyChangesAsync(session, updates, new OperationResult());
         }
 
         await session.CommitTransactionAsync();

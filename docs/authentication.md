@@ -638,7 +638,7 @@ Cross-tenant authentication enables users from a parent tenant to log in to chil
 | `RtExternalTenantUserMapping` | CK Model | Maps parent-tenant user to child-tenant roles |
 | `ICrossTenantAuthenticationService` | `IdentityServerPersistence/Services/` | Validates credentials across tenant hierarchy |
 | `IExternalTenantUserMappingStore` | `IdentityServerPersistence/SystemStores/` | CRUD for cross-tenant user mappings; `FindBySourceUserAsync` tolerates duplicates (oldest `RtId` wins, WARN once per request scope; AB#6975); effective roles are the union over all matching mappings |
-| `ExternalTenantUserMappingsController` | `TenantApi/v1/Controllers/` | REST API for managing mappings; a mapping is unique per (source tenant, source user): creating a second one (here and in `AdminProvisioningController`) answers `409 problem+json`, code `ExternalTenantUserMappingAlreadyExists`, update the existing mapping's roles instead (AB#6975) |
+| `ExternalTenantUserMappingsController` | `TenantApi/v1/Controllers/` | REST API for managing mappings; a mapping is unique per (source tenant, source user): creating a second one (here and in `AdminProvisioningController`) answers `409 problem+json`, code `ExternalTenantUserMappingAlreadyExists`, update the existing mapping's roles instead (AB#6975). Create checks the source (`403 SourceTenantNotPermitted`) and takes optional `groupIds` (`400 UnknownGroup`), see *Granting a Sibling-Tenant User With Groups* (AB#8343) |
 
 ### Tenant Hierarchy
 
@@ -667,7 +667,7 @@ new tenants):
 | Path | Rule |
 |------|------|
 | `GET adminProvisioning/{target}/sourceUsers` | only tenants that the target's providers reach **and** the registry confirms as ancestors |
-| Tenant switch: token exchange (RFC 8693), `POST auth/cross-tenant-token`, and the other `ValidateCrossTenantAccessAsync` callers | the source must be reachable through the target's providers **and** a registry ancestor; the `xt_` sibling-shadow step (concept step 1a) is unchanged — the shadow's home tenant is judged, and it is a registry ancestor |
+| Tenant switch: token exchange (RFC 8693), `POST auth/cross-tenant-token`, and the other `ValidateCrossTenantAccessAsync` callers | the source must be reachable through the target's providers **and** a registry ancestor; the `xt_` sibling-shadow step (concept step 1a) is unchanged — the shadow's home tenant is judged, and it is a registry ancestor. A non-ancestor source passes only with a grant in the target that its tenant permits (AB#8343, below) |
 | Cross-tenant password login | a tenant the provider walk reaches is asked for the password only when it is a registry ancestor of the login tenant; otherwise it is skipped (no password check, no lockout counting of a stranger's users) and not walked beyond |
 | `POST adminProvisioning/{target}` and `…/withGroups` | a `SourceTenantId` that is no registry ancestor of the target → `403 problem+json`, code `CrossTenantSourceNotAncestor`, nothing written |
 | `POST`/`PUT identityProviders` with an OctoTenant provider | a `ParentTenantId` that is no registry ancestor of the tenant → `400 problem+json`, code `OctoTenantParentNotAncestor`, nothing written. A `PUT` that only disables a stored provider (same parent, `isEnabled: false`) is always allowed, so such a provider can be switched off; `DELETE` is unchecked |
@@ -714,8 +714,8 @@ PUT {S}/v1/CrossTenantGrantPermissions  { "targetTenantIds": ["customer-a", "cus
 - **Who:** scope `octo_api`, roles `UserManagement` and `TenantManagement`, and a token issued for S itself
   (`IdentityCrossTenantGrantPermissionsPolicy`). T's administrators get `403`; no route reveals which tenants S permits.
   A non-permitted T gets the same `404 SourceUserNotFound` as for a tenant that does not exist.
-- **Withdrawal:** removing T stops T's lookups (and, with AB#8343, its new grants) with the next request; grants that
-  already exist are refused at T's next token exchange (AB#8344).
+- **Withdrawal:** removing T stops T's lookups and new grants with the next request; grants that already exist are
+  refused at T's next token exchange (`access_denied`, AB#8343; deletion and the last effective role: AB#8344).
 - **Audit:** every change is written into S's event log, category `Identity.CrossTenantGrantPermissionsChanged`
   (details `actorTenantId`, `actorName`, `sourceTenantId`, `permittedTargetTenantIds`, `addedTargetTenantIds`,
   `removedTargetTenantIds`); a `PUT` that leaves the list unchanged writes no event. See *Cross-Tenant Grant Audit Events*.
@@ -1191,6 +1191,37 @@ processor runs ("The specified token is not an access token", verified over HTTP
 OpenIddict does not validate, so there the processor check is the only one. The audience stays unchecked (platform
 convention). Tests: `CrossTenantSecondFactorTests.TokenExchange_IdTokenAsSubjectToken_IsRefused`,
 `TenantExchangeSubjectTokenTypeTests`, `OnBehalfOfProcessorTests.IdTokenAsSubjectToken_IsRejectedAsInvalidGrant`.
+
+### Granting a Sibling-Tenant User With Groups (AB#8343)
+
+An administrator of T grants one user of S with chosen T groups through the tenant-scoped mapping route — the same route
+for a registry-ancestor source and for a sibling source. Contract: `docs/CONCEPT-SIBLING-TENANT-GRANTS.md` §2.2 and §8.
+
+```
+POST {T}/v1/ExternalTenantUserMappings
+{ "sourceTenantId": "meshmakers", "sourceUserId": "<id from the lookup>", "sourceUserName": "alice",
+  "roleIds": null, "groupIds": ["<T group id>"] }
+```
+
+| Step | Rule |
+|------|------|
+| Source gate (`ISourceTenantGrantAdmission`) | S is a **registry** ancestor of T, or S permits T (`ISourceTenantGrantPolicy`, the allow-list of AB#8345); and a user with `sourceUserId` exists in S. For a non-ancestor S the user must also be no `xt_` shadow user and may sign in (not locked out, sign-in rules; AB#7855). Every refusal answers the same `403 problem+json`, code `SourceTenantNotPermitted`. `CrossTenantAncestry=Warn` does not widen this route |
+| User name | the mapping stores — and its audit events name — the user name of S's user record and the registry's spelling of S; the request's `sourceUserName` is not used (a free-text name never reaches any event log) |
+| Duplicate | a mapping for (S, user) exists → `409`, code `ExternalTenantUserMappingAlreadyExists` (AB#6975, unchanged) |
+| Groups | every `groupIds` entry must be a group of T; otherwise `400`, code `UnknownGroup`, extension `unknownGroupIds`, **nothing** stored. The mapping and its `GroupMember` edges are written in one transaction |
+| Role-change guard (AB#7927) | the effective roles of the groups count as granted, like direct `roleIds`: a built-in role the caller does not hold is refused (`403`, `role-not-held`) |
+| No login provider | a grant never creates an `RtOctoTenantIdentityProvider` in T: T's login page offers no "Login via S". The sibling user reaches T by tenant switch / token exchange from an S session |
+
+**Exchange gate.** `CrossTenantAuthenticationService.ValidateCrossTenantAccessAsync` (token exchange and every other
+caller) admits a source that is no registry ancestor of T only when T holds a mapping for (S, user) **and** S permits T at
+that moment. Withdrawn permission with a mapping in place → the exchange answers `access_denied` with the description
+prefix `grant_not_permitted` (`TenantExchangeProcessor.GrantNotPermittedMarker`); no mapping → `unauthorized_client` as
+before. Either way nothing is written into T (AB#8304). On the first admitted exchange the `xt_{S}_{user}` shadow user is
+created with exactly the roles of the mapping's groups and its direct roles — nothing from S, nothing else in T. Ancestor
+sources keep their rules (provider opt-in and registry, AB#8339).
+
+The admin-provisioning routes (`POST adminProvisioning/{target}`, `…/withGroups`, routed via a parent tenant) are
+unchanged: registry ancestors only, and `withGroups` still skips unknown group ids.
 
 ### Cross-Tenant Grant Audit Events (AB#8342)
 
