@@ -201,6 +201,52 @@ public class ShadowUserCleanupIntegrationTests : IClassFixture<IdentityServicesF
     }
 
     [Fact]
+    public async Task Apply_TwoTierChain_DeletesTheChainedCandidatesEmptyMapping_AndKeepsTheNearestTierMappingOfAKeptUser()
+    {
+        // AB#8305 DryRun 2 on test-2 (gastrodemo/handelsdemo): xt_accountingmanagement_xt_octosystem_<n> and the longer
+        // kept xt_karlplus_xt_accountingmanagement_xt_octosystem_<n> both match the empty mapping
+        // accountingmanagement/xt_octosystem_<n>. The kept user has its own role-granting mapping, so the empty one
+        // belongs to the candidate alone and goes with it.
+        var (tenantId, repo) = await CreateTenantAsync();
+        var role = OctoObjectId.GenerateNewId();
+        await InsertAsync(repo, new RtRole { RtId = role, Name = "Owner", NormalizedName = "OWNER" });
+        var group = await InsertGroupAsync(repo, "Members");
+
+        var person = Suffix();
+        var candidate = await InsertUserAsync(repo, $"xt_accountingmanagement_xt_octosystem_{person}");
+        var candidateMapping = await InsertMappingAsync(repo, "accountingmanagement",
+            OctoObjectId.GenerateNewId().ToString(), $"xt_octosystem_{person}");
+        var keptLonger = await InsertUserAsync(repo, $"xt_karlplus_xt_accountingmanagement_xt_octosystem_{person}");
+        await LinkAsync(repo, Group(group), User(keptLonger), IdentityAssociationConstants.GroupMemberId);
+        var keptLongerMapping = await InsertMappingAsync(repo, "karlplus", OctoObjectId.GenerateNewId().ToString(),
+            $"xt_accountingmanagement_xt_octosystem_{person}", mappedRoleIds: [role.ToString()]);
+
+        // The other way round: the empty mapping is the nearest tier (the grant) of the kept shorter user and only a
+        // deeper tier of the rights-less longer one — it stays.
+        var other = Suffix();
+        var longerCandidate = await InsertUserAsync(repo, $"xt_karlplus_xt_accountingmanagement_xt_octosystem_{other}");
+        var keptShorter = await InsertUserAsync(repo, $"xt_accountingmanagement_xt_octosystem_{other}");
+        await LinkAsync(repo, Group(group), User(keptShorter), IdentityAssociationConstants.GroupMemberId);
+        var keptShorterMapping = await InsertMappingAsync(repo, "accountingmanagement",
+            OctoObjectId.GenerateNewId().ToString(), $"xt_octosystem_{other}");
+
+        var dryRun = (await RunAsync(ShadowUserCleanupMode.DryRun, [], (tenantId, repo))).Single();
+        Decision(dryRun, candidate).EmptyMappingIds.Should().Equal(candidateMapping.ToString());
+        Decision(dryRun, longerCandidate).EmptyMappingIds.Should().BeEmpty();
+
+        var audits = new List<string>();
+        var result = (await RunAsync(ShadowUserCleanupMode.Apply, audits, (tenantId, repo))).Single();
+
+        result.Deleted.Should().BeEquivalentTo(candidate.ToString(), longerCandidate.ToString());
+        result.DeletedMappings.Should().Equal(candidateMapping.ToString());
+        Reasons(result, keptLonger).Should().Equal("group", "mapping");
+        Reasons(result, keptShorter).Should().Equal("group");
+        (await UserExistsAsync(repo, keptLonger)).Should().BeTrue();
+        (await UserExistsAsync(repo, keptShorter)).Should().BeTrue();
+        (await MappingIdsAsync(repo)).Should().BeEquivalentTo(keptLongerMapping.ToString(), keptShorterMapping.ToString());
+    }
+
+    [Fact]
     public async Task Apply_AMappingInAGroupWhoseChildGroupHoldsARole_KeepsItsUser_ARoleLessGroupTreeDoesNot()
     {
         // Same walk as GroupRoleResolver at token time: a group grants the roles of its ChildGroup targets.

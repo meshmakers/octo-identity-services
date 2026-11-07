@@ -67,7 +67,8 @@ internal sealed record ShadowUserMappingSource(
 /// <summary>The decision for one <c>xt_</c> user: a candidate when <see cref="SkipReasons" /> is empty.</summary>
 /// <param name="EmptyMappingIds">
 ///     For a candidate: the rtIds of the empty mappings of its name chain (no role grant) that Apply deletes together with
-///     the user. A mapping that also matches a kept <c>xt_</c> user of the tenant is not listed. Empty for a kept user.
+///     the user. A mapping a kept <c>xt_</c> user of the tenant depends on (its nearest tier, or its only mappings) is not
+///     listed. Empty for a kept user.
 /// </param>
 /// <param name="OAuth">The user's OAuth tokens and authorizations; Apply revokes them together with the user.</param>
 internal sealed record ShadowUserCleanupDecision(
@@ -99,7 +100,7 @@ internal sealed record ShadowUserCleanupDecision(
 ///             <c>{SourceTenantId}_{SourceUserName}</c> ends the name (case-insensitive) belongs to it. This needs no
 ///             tenant registry and errs on the side of keeping a user. An empty mapping (no role, no group with a role)
 ///             does not keep the user; it is listed in <see cref="ShadowUserCleanupDecision.EmptyMappingIds" /> and
-///             deleted with it, unless it also belongs to a kept <c>xt_</c> user;</item>
+///             deleted with it, unless a kept <c>xt_</c> user depends on it (<see cref="MappingsAKeptUserDependsOn" />);</item>
 ///         <item><c>chain-source</c>: no mapping in any tenant uses this user as its source (source tenant = this
 ///             tenant and source user name = this user name or source user id = this rtId);</item>
 ///         <item><c>direct-use:&lt;kind&gt;</c>: no password, two-factor, external login, user token or claim —
@@ -157,10 +158,10 @@ internal static class ShadowUserCleanupPlanner
             planned.Add((user, reasons, chainMappings));
         }
 
-        // An empty mapping that also belongs to a kept user stays: deleting it would change that user's state.
+        // An empty mapping that a kept user depends on stays: deleting it would change that user's state.
         var mappingsOfKeptUsers = planned
             .Where(p => p.Reasons.Count > 0)
-            .SelectMany(p => p.ChainMappings)
+            .SelectMany(p => MappingsAKeptUserDependsOn(p.User.UserName, p.ChainMappings))
             .Select(m => m.MappingRtId)
             .ToHashSet(StringComparer.Ordinal);
 
@@ -182,6 +183,36 @@ internal static class ShadowUserCleanupPlanner
                 p.User.OAuth ?? ShadowUserOAuthUse.None))
             .ToList();
     }
+
+    /// <summary>
+    ///     The mappings of a kept user's name chain that deleting would change that user's state with (AB#8305, chained
+    ///     names). A chained name shares the deeper tiers of its chain with shorter shadow users of the same person:
+    ///     <c>xt_karlplus_xt_acc_xt_os_n</c> and <c>xt_acc_xt_os_n</c> both match a mapping <c>acc/xt_os_n</c>. For the
+    ///     longer, kept user such a deeper-tier mapping only matters when it grants something (never deleted anyway) or
+    ///     when it is the user's only evidence of explicit provisioning:
+    ///     <list type="bullet">
+    ///         <item>an empty mapping adds no role (token-time role resolution reads only role and group grants);</item>
+    ///         <item>a sibling tenant switch checks the mapping of the immediate source, the nearest tier, only;</item>
+    ///         <item>explicit provisioning and the allowed tenants need any one mapping of the chain.</item>
+    ///     </list>
+    ///     So a kept user depends on its nearest-tier mappings always, and on all its chain mappings when it has neither a
+    ///     nearest-tier nor a role-granting mapping.
+    /// </summary>
+    internal static IEnumerable<ShadowUserMappingSource> MappingsAKeptUserDependsOn(
+        string userName, IReadOnlyCollection<ShadowUserMappingSource> chainMappings)
+    {
+        var nearest = chainMappings.Where(m => IsNearestTierMapping(userName, m)).ToList();
+        return nearest.Count > 0 || chainMappings.Any(m => m.GrantsRole) ? nearest : chainMappings;
+    }
+
+    /// <summary>
+    ///     True when the mapping's source identity is the nearest tier of the shadow user's name chain: its whole name is
+    ///     <c>xt_{SourceTenantId}_{SourceUserName}</c> (case-insensitive), the name the exchange builds for that source.
+    /// </summary>
+    internal static bool IsNearestTierMapping(string userName, ShadowUserMappingSource mapping)
+        => !string.IsNullOrEmpty(mapping.SourceTenantId) && !string.IsNullOrEmpty(mapping.SourceUserName)
+           && string.Equals(userName, CrossTenantShadowUserName.Build(mapping.SourceTenantId, mapping.SourceUserName),
+               StringComparison.OrdinalIgnoreCase);
 
     /// <summary>True when the mapping's source identity is one tier of the shadow user's name chain.</summary>
     internal static bool IsMappingOfChain(string userName, ShadowUserMappingSource mapping)
