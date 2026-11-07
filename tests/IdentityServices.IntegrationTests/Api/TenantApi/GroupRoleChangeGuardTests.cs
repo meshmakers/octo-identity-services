@@ -552,16 +552,21 @@ public class GroupRoleChangeGuardTests : IntegrationTestBase, IDisposable
         // The services read tenants through the cached registry of the host the requests go to (miss refresh throttled);
         // wait until it knows the new tenant.
         var deadline = DateTimeOffset.UtcNow + TenantRegistry.MissRefreshInterval + TimeSpan.FromSeconds(10);
-        while (DateTimeOffset.UtcNow < deadline)
+        var known = false;
+        while (!known && DateTimeOffset.UtcNow < deadline)
         {
             using var scope = _host.Services.CreateScope();
-            if (await scope.ServiceProvider.GetRequiredService<ITenantRegistry>().TryGetRepositoryAsync(sourceTenantId) !=
-                null)
+            known = await scope.ServiceProvider.GetRequiredService<ITenantRegistry>()
+                .TryGetRepositoryAsync(sourceTenantId) != null;
+            if (!known)
             {
-                break;
+                await Task.Delay(TimeSpan.FromMilliseconds(500), TestContext.Current.CancellationToken);
             }
+        }
 
-            await Task.Delay(TimeSpan.FromMilliseconds(500), TestContext.Current.CancellationToken);
+        if (!known)
+        {
+            throw new InvalidOperationException($"Tenant '{sourceTenantId}' did not appear in the tenant registry");
         }
 
         return new { sourceTenantId, sourceUserId = user.RtId.ToString(), sourceUserName = userName, roleIds };

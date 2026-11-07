@@ -135,6 +135,32 @@ public class SiblingTenantGrantTests(CustomWebApplicationFactory factory) : Inte
     }
 
     [Fact]
+    public async Task ExchangeFromAShadowUserOfTheGrantedUser_FollowsTheHomeGrant_AndIsAccessDeniedOnceWithdrawn()
+    {
+        // The caller holds a token of tenant A as xt_{S}_{bob} (bob switched into A earlier). The grant in T names the
+        // home identity (S, bob); the exchange judges that candidate too (AB#4966), also for the withdrawn case.
+        var (source, target) = await SiblingsAsync(permitted: false);
+        var other = await CreateTenantAsync("sga");
+        var bob = await InsertUserAsync(source, "bob");
+        var shadowInOther = await InsertUserAsync(other, CrossTenantShadowUserName.Build(source, bob.UserName),
+            exactName: true);
+        var group = await InsertGroupAsync(target, "grp", (await InsertRoleAsync(target, "r1")).Id);
+
+        await SetAllowListAsync(source, [target]);
+        (await CreateAsync(target, source, bob, groupIds: [group.Id.ToString()])).StatusCode.Should()
+            .Be(HttpStatusCode.Created);
+
+        (await ExchangeAsync(target, other, shadowInOther.Id.ToString())).Outcome.Error.Should()
+            .BeNull("the home identity holds a permitted grant");
+
+        await SetAllowListAsync(source, []);
+        var (refused, _) = await ExchangeAsync(target, other, shadowInOther.Id.ToString());
+
+        refused.Error.Should().Be(Errors.AccessDenied);
+        refused.ErrorDescription.Should().StartWith(TenantExchangeProcessor.GrantNotPermittedMarker);
+    }
+
+    [Fact]
     public async Task ExchangeWithoutAGrantInTheTarget_IsRefused_AndLeavesTheTargetUnchanged()
     {
         var (source, target) = await SiblingsAsync(permitted: true);
@@ -324,11 +350,14 @@ public class SiblingTenantGrantTests(CustomWebApplicationFactory factory) : Inte
     private async Task<ITenantRepository> RepositoryOfAsync(string tenantId)
         => (await Factory.Services.GetRequiredService<ISystemContext>().TryFindTenantRepositoryAsync(tenantId))!;
 
-    private async Task<TestUser> InsertUserAsync(string tenantId, string prefix, bool lockedOut = false)
+    private async Task<TestUser> InsertUserAsync(string tenantId, string prefix, bool lockedOut = false,
+        bool exactName = false)
     {
-        var userName = prefix.StartsWith("xt_", StringComparison.Ordinal)
-            ? $"{prefix}{Guid.NewGuid():N}"[..24]
-            : $"{prefix}{Guid.NewGuid():N}"[..20];
+        var userName = exactName
+            ? prefix
+            : prefix.StartsWith("xt_", StringComparison.Ordinal)
+                ? $"{prefix}{Guid.NewGuid():N}"[..24]
+                : $"{prefix}{Guid.NewGuid():N}"[..20];
         var email = $"{userName}@user.example";
         var user = new RtUser
         {
