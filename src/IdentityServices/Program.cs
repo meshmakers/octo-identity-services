@@ -218,12 +218,15 @@ try
     // refresh — operators bump the embedded blueprint version to roll forward.
     builder.Services.AddBlueprintSystemIdentityBootstrapV1();
 
-    // CK methods hosted by the identity service (AB#5672). Handlers of methods with a password or secret are only
-    // registered with Methods:Identity:EnablePasswordMethods=true (default false, production gate of 2026-10-23).
+    // CK methods hosted by the identity service (AB#5672). Handlers of methods with a password or secret are only offered on
+    // the bus with Methods:Identity:EnablePasswordMethods=true (default false, production gate of 2026-10-23). With the switch
+    // off, the ones a REST facade calls (User.CreateUser, User.ResetPassword) are registered local only (AB#8413).
     var identityMethodOptions = IdentityMethodHost.ReadOptions(builder.Configuration);
     var identityMethodHandlers = IdentityMethodHost.SelectHandlers(identityMethodOptions);
-    logger.Info("CK method handlers: {0} of {1} registered (EnablePasswordMethods={2})", identityMethodHandlers.Count,
-        IdentityMethodHost.Handlers.Count, identityMethodOptions.EnablePasswordMethods);
+    var identityLocalOnlyHandlers = IdentityMethodHost.SelectLocalOnlyHandlers(identityMethodOptions);
+    logger.Info("CK method handlers: {0} of {1} on the bus, {2} local only (EnablePasswordMethods={3})",
+        identityMethodHandlers.Count, IdentityMethodHost.Handlers.Count, identityLocalOnlyHandlers.Count,
+        identityMethodOptions.EnablePasswordMethods);
 
     builder.Services.AddRuntimeEngine()
         .AddOctoIdentityPersistence(configureDistributionEventHub: c =>
@@ -246,7 +249,7 @@ try
         });
 
     // After AddOctoIdentityPersistence: replaces the tenant resolver that AddOctoServiceInfrastructure registers.
-    builder.Services.AddIdentityCkMethodHost(identityMethodHandlers);
+    builder.Services.AddIdentityCkMethodHost(identityMethodHandlers, identityLocalOnlyHandlers);
 
     // Register Identity-specific CORS policy provider AFTER AddOctoIdentityPersistence,
     // which internally calls AddOctoServiceInfrastructure and registers its own ICorsPolicyProvider.

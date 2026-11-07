@@ -137,7 +137,8 @@ public class CredentialsNotInUrlTests : IntegrationTestBase
 
         response.StatusCode.Should().Be(HttpStatusCode.OK, await response.Content.ReadAsStringAsync(ct));
         var audit = _logs.Lines.Select(l => l.Text).Where(t => t.StartsWith("Password changed:", StringComparison.Ordinal))
-            .Should().ContainSingle(t => t.Contains("AdminResetPassword")).Subject;
+            .Should().ContainSingle(t => t.Contains("MethodResetPassword"),
+                "since AB#8413 the endpoint runs User.ResetPassword in-process; the log line names that path").Subject;
         audit.Should().Contain($"acting user 'client {serviceClientId}'").And.NotContain("anonymous");
     }
 
@@ -147,10 +148,13 @@ public class CredentialsNotInUrlTests : IntegrationTestBase
         var ct = TestContext.Current.CancellationToken;
         var userName = NewUserName();
         await CreateTestUserAsync(userName, password: OldPassword);
+        // A real user token: sub is the administrator's rtId (AB#8413: the method names the actor from the user store).
+        var admin = await CreateTestUserAsync($"admin-8008-{Guid.NewGuid():N}", password: OldPassword);
         var client = _traceHost.CreateClient();
         client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", "test-token");
         client.DefaultRequestHeaders.Add(TestAuthHandler.CliUserTokenHeader, "true");
-        client.DefaultRequestHeaders.Add(TestAuthHandler.UserNameHeader, "admin-8008");
+        client.DefaultRequestHeaders.Add(TestAuthHandler.UserIdHeader, admin.RtId.ToString());
+        client.DefaultRequestHeaders.Add(TestAuthHandler.UserNameHeader, admin.UserName!);
         client.DefaultRequestHeaders.Add(TestAuthHandler.RoleHeader, "UserManagement");
 
         var response = await client.PostAsJsonAsync(TenantApiUrl("users/ResetPassword"),
@@ -159,7 +163,7 @@ public class CredentialsNotInUrlTests : IntegrationTestBase
         response.StatusCode.Should().Be(HttpStatusCode.OK, await response.Content.ReadAsStringAsync(ct));
         _logs.Lines.Select(l => l.Text)
             .Should().Contain(t => t.StartsWith("Password changed:", StringComparison.Ordinal) &&
-                                   t.Contains("acting user 'admin-8008'"));
+                                   t.Contains($"acting user '{admin.UserName}'"));
     }
 
     // ---------------------------------------------------------------- secret delete and lookup

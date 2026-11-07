@@ -26,6 +26,22 @@ Notable changes of the OctoMesh identity services. The CK model `System.Identity
   The endpoints work whatever `Methods:Identity:EnablePasswordMethods` says (no secret). See `CLAUDE.md`, section
   "REST facades of the role and merge endpoints (AB#8412)", for the parity table.
 
+- **REST user create and administrator password reset run the `User` methods (AB#8413).** `POST users` and
+  `POST users/ResetPassword` are facades of `User.CreateUser-1` and `User.ResetPassword-1`, called in-process through the
+  dispatcher. With `Methods:Identity:EnablePasswordMethods=false` (the production gate until B0) the two handlers are registered
+  local only (not announced, no queue): REST keeps working, GraphQL still answers `METHOD_HANDLER_NOT_AVAILABLE`, and no password
+  reaches the broker. The switch now governs the bus offering only (`docs/configuration.md`). Routes, request and response shapes and
+  status codes are unchanged; the query-parameter form of ResetPassword stays refused (AB#8008). Behaviour changes for REST callers:
+  - **an administrator reset lifts the lockout** (`LockoutEnd` cleared, `AccessFailedCount` 0), as the method does;
+  - every call writes one `Identity.Method` audit event (create: `userName`, `withPassword`; reset: `lockoutLifted`); the
+    "Password changed" log line of a reset names the path `MethodResetPassword` (was `AdminResetPassword`) and the acting user
+    by the user name of its `sub` (a client-credentials caller stays `client <id>`);
+  - create trims the user name and the e-mail address and stores a blank e-mail as `null`;
+  - an unexpected failure answers `500` with "Creation of user failed." / "Reset of password failed." instead of the exception text;
+  - with `IdentityApiAuthorization:RoleEnforcement=Warn` (not the default) a caller without `UserManagement` is now refused (`403`).
+  The password-reset notification is still sent once per reset (by the facade until AB#7775 moves it into the method). See
+  `CLAUDE.md`, section "REST facades of create user and password reset (AB#8413)", for the parity table.
+
 ### Added
 
 - **Exact source user lookup for sibling-tenant grants (AB#8341, security).** `POST
@@ -49,6 +65,8 @@ Notable changes of the OctoMesh identity services. The CK model `System.Identity
 
 ### Fixed
 
+- **`User.ResetPassword` with a caller whose subject is not an object id (AB#8413).** The handler looked the acting user up by
+  the `sub` claim and failed with `METHOD_HANDLER_FAILED`; it now skips the lookup, like `User.Merge`.
 - **`User.Merge` with a caller whose subject is not an object id (AB#8412).** The handler looked the acting user up by the
   `sub` claim and failed with `METHOD_HANDLER_FAILED` when it was no object id; it now skips the lookup (the actor is
   logged with subject and client).

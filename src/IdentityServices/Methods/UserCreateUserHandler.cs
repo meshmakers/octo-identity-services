@@ -13,7 +13,8 @@ namespace Meshmakers.Octo.Backend.IdentityServices.Methods;
 /// </summary>
 /// <remarks>
 ///     <para>
-///         <b>Only way besides REST.</b> The method and <c>POST {tenant}/v1/users</c> share <see cref="IUserCreationService" />
+///         <b>The only create.</b> <c>POST {tenant}/v1/users</c> is a facade of this method since AB#8413 (in-process, also
+///         while the switch keeps the method off the bus). Both run <see cref="IUserCreationService" />
 ///         (user manager: user validators, password policy, normalised name and e-mail, security stamp; then the welcome
 ///         notification). The generic paths refuse a new user: GraphQL create, caller <c>ImportRt</c>, blueprint seeds and
 ///         pipeline inserts answer <c>GENERIC_CREATE_REPLACED_BY_METHOD</c> naming this method (engine
@@ -34,9 +35,10 @@ namespace Meshmakers.Octo.Backend.IdentityServices.Methods;
 ///         <c>METHOD_VALIDATION_FAILED</c>. Any other failure of the user manager throws (<c>METHOD_HANDLER_FAILED</c>).
 ///     </para>
 ///     <para>
-///         <b>Secrets and audit.</b> The method has a <c>sensitive</c> parameter (<c>password</c>), so the handler is hosted only
-///         when <c>Methods:Identity:EnablePasswordMethods</c> is on - also for invitations without a password, the switch is per
-///         method. The password is read only here and passed to the user manager; it never reaches a log, an audit record or an
+///         <b>Secrets and audit.</b> The method has a <c>sensitive</c> parameter (<c>password</c>), so the handler is offered on the bus
+///         only when <c>Methods:Identity:EnablePasswordMethods</c> is on - also for invitations without a password, the switch is
+///         per method. With the switch off it is registered local only (AB#8413): the REST facade calls it in-process, the
+///         gateway gets <c>METHOD_HANDLER_NOT_AVAILABLE</c>. The password is read only here and passed to the user manager; it never reaches a log, an audit record or an
 ///         error parameter. One <c>Identity.Method</c> event per call (success, every refusal, <c>METHOD_HANDLER_FAILED</c>) with
 ///         the new user's rtId as target and the details <c>userName</c> and <c>withPassword</c>.
 ///     </para>

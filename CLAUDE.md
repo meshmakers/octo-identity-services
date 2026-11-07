@@ -1117,8 +1117,12 @@ The identity service hosts CK methods as a remote handler (bus transport, SDK `M
   carry no secret and are always selected, so the host runs in every configuration and only the password methods wait for the switch.
 - **Production gate `Methods:Identity:EnablePasswordMethods`** (default **false**, env `OCTO_Methods__Identity__EnablePasswordMethods`, Helm: the same key under
   the identity service configuration / environment): decided by Gerald 2026-10-23, no method carrying a password or secret on staging-1, prod-1,
-  prod-2 before B0 (restricted broker user, Heimdall). Off: handlers whose registration has `CarriesSecret = true` are not registered, the service
-  announces no password method and the gateway answers `METHOD_HANDLER_NOT_AVAILABLE`. On (local, test-2 with test accounts): hosted.
+  prod-2 before B0 (restricted broker user, Heimdall). **The switch controls the bus only** (AB#8413). Off: handlers whose registration has
+  `CarriesSecret = true` are not offered on the bus, the service announces no password method and the gateway (GraphQL) answers
+  `METHOD_HANDLER_NOT_AVAILABLE`; the rows with `ServesRestFacade = true` (`User.CreateUser`, `User.ResetPassword`) are registered **local only**
+  (`HandleLocalOnly`, `IdentityMethodHost.SelectLocalOnlyHandlers`: no announcement, no queue) so their REST facades `POST users` and
+  `POST users/ResetPassword` keep working in-process; `ChangePassword` and the client secret methods stay unregistered. On (local, test-2 with
+  test accounts): all offered on the bus (and called in-process by the facades).
   `IdentityMethodDeclarationsIntegrationTests.EveryHandlerRegistration_FlagsASecretCarryingMethod_AsTheModelDeclaresIt` compares every
   `CarriesSecret` with the compiled model (a sensitive parameter or result), so a new handler cannot pass the gate by a forgotten flag.
   The switch is read while the service collection is built: restart the service after changing it.
@@ -1279,14 +1283,15 @@ through the stores, not the guarded controllers, on purpose. The scratch-tenant 
 
 ### `User.ResetPassword` (AB#7774)
 
-`UserResetPasswordHandler` (`src/IdentityServices/Methods/`, one row in `IdentityMethodHost.Handlers`, `CarriesSecret = true`: gated by
-`Methods:Identity:EnablePasswordMethods`, off = `METHOD_HANDLER_NOT_AVAILABLE`). A user administrator (`UserManagement`) sets a new password
+`UserResetPasswordHandler` (`src/IdentityServices/Methods/`, one row in `IdentityMethodHost.Handlers`, `CarriesSecret = true`: offered on the
+bus only with `Methods:Identity:EnablePasswordMethods`, off = `METHOD_HANDLER_NOT_AVAILABLE` for the gateway; `ServesRestFacade = true`: local
+only while the switch is off, for the REST facade `POST users/ResetPassword`, AB#8413). A user administrator (`UserManagement`) sets a new password
 without the current one.
 
 - **Caller.** The SDK evaluates the declared role before the handler; the handler checks `CallerPrincipal.Roles` for `UserManagement` again
   (defense in depth, `METHOD_FORBIDDEN` / `missing-role`) **before** the tenant is bound or the target is looked up, so an unauthorized caller gets the same answer
   for an existing and a missing target and `METHOD_TARGET_NOT_FOUND` is only seen by an authorized one. Service tokens with the role are allowed
-  (actor = client id). A user without the role cannot reset their own password with it (`ChangePassword` is for that).
+  (actor `client <id>`, the `AuditActor` form; a user caller is named by the user name looked up from `sub`). A user without the role cannot reset their own password with it (`ChangePassword` is for that).
 - **Order.** role, tenant, user, shadow user (`SHADOW_USER_PASSWORD_NOT_ALLOWED`), remember `IsLockedOutAsync`, `GeneratePasswordResetTokenAsync` +
   `ResetPasswordAsync` (policy failure = `PASSWORD_POLICY_VIOLATION`, codes only, **nothing else changes, the lockout stays**), then
   `SetLockoutEndDateAsync(user, null)` + `ResetAccessFailedCountAsync(user)` through `UserManager` (guarded, versioned store write of AB#7908; never write the user
@@ -2108,10 +2113,11 @@ forged caller, REST 404/403, no authenticator material in audit or logs).
 
 ### `User.CreateUser` and the only ways to create a user (AB#7777)
 
-A user is created only by this service: REST `POST {tenant}/v1/users` or the static CK method `User.CreateUser-1`
+A user is created only by this service: the static CK method `User.CreateUser-1` (REST `POST {tenant}/v1/users` is its facade since AB#8413)
 (`UserCreateUserHandler`, one row in `IdentityMethodHost.Handlers`, `CarriesSecret = true` because of the optional `sensitive`
-`password`: **hosted only with `Methods:Identity:EnablePasswordMethods`**, also for invitations without a password - the switch is
-per method; off = `METHOD_HANDLER_NOT_AVAILABLE`). Both share `IUserCreationService` (`Services/UserCreationService.cs`, scoped):
+`password`: **offered on the bus only with `Methods:Identity:EnablePasswordMethods`**, also for invitations without a password - the
+switch is per method; off = `METHOD_HANDLER_NOT_AVAILABLE` for the gateway, while the handler is hosted local only for the REST facade,
+AB#8413). Both share `IUserCreationService` (`Services/UserCreationService.cs`, scoped):
 `UserManager.CreateAsync` with or without the password (user validators, password policy before the user is stored, normalised name
 and e-mail, security stamp), then the welcome notification (with password: e-mail confirmation; without: the invitation to set a
 password). Since AB#8064 the service also refuses an e-mail address another user of the tenant already has (see the table).
@@ -2214,8 +2220,8 @@ call the method through `IIdentityMethodFacade` (`src/IdentityServices/Methods/I
   `AddCkMethodHandlerRegistryFeed()` to the event hub. The identity service hosts the handlers, so the dispatcher runs them in this
   process (transport `in-process`, nothing on the broker, same invocation core as a bus call: declared authorization, validation,
   audit, `ck.method.*` metrics). The four methods carry no secret and are hosted whatever `Methods:Identity:EnablePasswordMethods`
-  says, so the endpoints work on every cluster. AB#8413/AB#8414 reuse `IIdentityMethodFacade` (password methods with
-  `HandleLocalOnly` while the switch is off).
+  says, so the endpoints work on every cluster. AB#8413 (create, reset - see the next section) and AB#8414 reuse
+  `IIdentityMethodFacade` (password methods with `HandleLocalOnly` while the switch is off).
 - **Caller.** `CkMethodPrincipal.FromClaimsPrincipal(User)` in a `CkMethodPrincipalScope`. The write policy of the endpoints already
   requires scope `octo_api` and role `UserManagement`, which is what the handlers check again; no token reaches the facade without it.
 - **Audit.** Every REST call writes exactly one `Identity.Method` event (the handler's). A guard refusal (`METHOD_FORBIDDEN` with
@@ -2245,6 +2251,55 @@ REST and the dispatcher call side by side, in-process transport, both switch val
 unchanged REST suites (`RoleChangeGuardTests`, `UsersMergeTests`, `UserRoleMethodParityTests`, `TenantApiRoleAuthorizationTests`).
 `UserMergeMethodTests.Method_MergingAwayTheLastUserAdministrator…` now expects two `Identity.Method` events (its method call and its
 REST call each write one).
+
+### REST facades of create user and password reset (AB#8413)
+
+`UsersController.Post` (`POST users`) and `UsersController.ResetPassword` (`POST users/ResetPassword`) are **facades** of the static
+`User.CreateUser-1` and of `User.ResetPassword-1`, through `IIdentityMethodFacade` like the role and merge endpoints (AB#8412; the target
+rtId is `null` for the static create). Creation, policy, lockout, session revocation and audit exist only in the handlers.
+
+- **Password in-process only, whatever the switch says.** With `Methods:Identity:EnablePasswordMethods=false` (staging-1, prod-1, prod-2
+  until B0) the two handlers are registered with `HandleLocalOnly` (`IdentityMethodHandlerRegistration.ServesRestFacade`,
+  `IdentityMethodHost.SelectLocalOnlyHandlers`): not announced, no queue, so GraphQL `User.CreateUser` / `User.ResetPassword` still answer
+  `METHOD_HANDLER_NOT_AVAILABLE` and no password reaches the broker. With the switch on they are bus handlers and the dispatcher still runs the
+  REST call in-process (AB#8411). One row in `IdentityMethodHost.Handlers` stays the single list (`For<THandler>(id, carriesSecret,
+  servesRestFacade)` builds both registration forms).
+- **Notification.** The method does not send the password-reset notification yet (AB#7775); the facade sends it after a success. When
+  AB#7775 lands, remove that call: `UserPasswordRestMethodFacadeTests` counts exactly one notification per REST reset.
+- **REST-only field.** `RegisterUserDto.ResetPasswordOnLogin` has no method parameter; when true the facade sets it on the new user after the
+  method returned (the rtId is the bare result string).
+- **Error bodies.** The envelope carries only rule codes; the facade rebuilds the REST `details` (code + description) of a policy violation or an
+  invalid user name / e-mail from `UserManager.ErrorDescriber` and the password options, so `OperationFailedErrorDto` keeps its shape.
+
+Parity table (REST before -> facade):
+
+| Point | REST before | Now |
+|---|---|---|
+| Routes, request and response bodies, status codes | - | unchanged (create and reset: `200` empty) |
+| `EnablePasswordMethods=false` | own code, worked | works: handlers local only, in-process, nothing on the broker |
+| Password in the query string (AB#8008) | 400 | unchanged (`[RefuseCredentialInQuery]`, `CredentialsNotInUrlTests`) |
+| Create without password | 400 (model validation, `Password` is `[Required]`) | unchanged; an invitation without password stays method-only |
+| Create: user name / e-mail | stored as sent | trimmed by the method; a blank e-mail is stored as `null` |
+| Create: duplicate name / e-mail | 409 problem `USER_ALREADY_EXISTS`, `field` | unchanged (`USER_ALREADY_EXISTS` mapped by `field`) |
+| Create: reserved `xt_` name | 400 message | unchanged (pre-check; `USER_NAME_RESERVED` maps to the same answer) |
+| Policy violation / invalid name or e-mail | 400 `OperationFailedErrorDto`, details code + description | unchanged (descriptions rebuilt from the codes) |
+| Create: welcome notification | once | once (`IUserCreationService` in the handler) |
+| Reset: lockout | left in place | **lifted** (`LockoutEnd = null`, `AccessFailedCount = 0`) |
+| Reset: sessions | revoked (`PasswordChangePath.AdminResetPassword`) | revoked (`PasswordChangePath.MethodResetPassword` in the "Password changed" log line) |
+| Reset: acting user in that log line (AB#8008) | `AuditActor`: `preferred_username`, else `client <id>` | user name looked up from `sub`, else `client <id>`, else the subject |
+| Reset: notification | once | once (facade, until AB#7775) |
+| Reset: unknown user / shadow user | 404 / 400 | unchanged (pre-checks; `METHOD_TARGET_NOT_FOUND` / `SHADOW_USER_PASSWORD_NOT_ALLOWED` map to the same) |
+| Audit | none (reset: the credential-change log line) | one `Identity.Method` event (create: `userName`, `withPassword`; reset: `lockoutLifted`) |
+| Unexpected failure | 500 `InternalServerErrorDto(exception message)` | 500 `InternalServerErrorDto("Creation of user failed." / "Reset of password failed.")`, no exception text |
+| `RoleEnforcement=Warn` (not the default) | caller without `UserManagement` let through and logged | refused by the method (403 problem) |
+
+Fix on the way: `UserResetPasswordHandler` looked the acting user up by `sub` and threw for a subject that is no object id (like
+`User.Merge`, AB#8412); it now skips the lookup. Tests: `Api/TenantApi/UserPasswordRestMethodFacadeTests` (both switch values: locked-out
+user reset over REST - sign-in, lockout lifted, refresh tokens revoked, one audit event, one notification, no `CkMethodRequest` on the event
+hub, canary absent from logs, audit and activity tags; REST create the same; policy violation; REST and dispatcher side by side for create
+with password, invitation, duplicate name and e-mail, policy violation, unknown user, shadow user), `Methods/IdentityMethodHostTests`
+(local-only selection, registration forms, never both), plus the unchanged REST suites (`UsersCreateTests`, `ShadowUserPasswordTests`,
+`CredentialsNotInUrlTests`, `PasswordChangeRevokesSessionsTests`, `TenantApiRoleAuthorizationTests`).
 
 ### System.Identity 2.x -> 3.x needs migration entries (AB#8157)
 

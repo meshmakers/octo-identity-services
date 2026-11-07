@@ -1,5 +1,6 @@
 using IdentityServerPersistence.Services;
 using Meshmakers.Octo.Backend.IdentityServices.Services;
+using Meshmakers.Octo.ConstructionKit.Contracts;
 using Meshmakers.Octo.Services.Contracts.DistributionEventHub.Methods;
 using Meshmakers.Octo.Services.Methods;
 using Meshmakers.Octo.Services.Methods.Authorization;
@@ -21,11 +22,11 @@ namespace Meshmakers.Octo.Backend.IdentityServices.Methods;
 ///         by an authorized caller.
 ///     </para>
 ///     <para>
-///         <b>Lockout.</b> Unlike the REST endpoint <c>POST system/v1/users/ResetPassword</c> (which leaves the lockout in
-///         place and e-mails a second reset token), the method lifts the lockout: <c>LockoutEnd</c> becomes <c>null</c> and
-///         <c>AccessFailedCount</c> 0. Both go through <see cref="UserManager{TUser}" /> (the store applies them with the
+///         <b>Lockout.</b> The method lifts the lockout: <c>LockoutEnd</c> becomes <c>null</c> and <c>AccessFailedCount</c>
+///         0 (since AB#8413 also for <c>POST {tenant}/v1/users/ResetPassword</c>, its REST facade, which left the lockout in
+///         place before). Both go through <see cref="UserManager{TUser}" /> (the store applies them with the
 ///         versioned, guarded write of AB#7908, never as a whole-document replace). A failed call lifts nothing. No e-mail
-///         is sent (AB#7775).
+///         is sent (AB#7775); the REST facade sends the reset notification after a success until then.
 ///     </para>
 ///     <para>
 ///         <b>Sessions.</b> After the password is stored the shared helper of AB#7765 rotates the security stamp and revokes
@@ -47,6 +48,12 @@ internal sealed class UserResetPasswordHandler(
 
     /// <summary>Audit detail: the call lifted an active lockout (<c>true</c>/<c>false</c>).</summary>
     internal const string LockoutLiftedDetail = "lockoutLifted";
+
+    /// <summary>Declared error: the new password violates the password policy (details: codes of the failed rules).</summary>
+    internal const string PasswordPolicyViolation = "PASSWORD_POLICY_VIOLATION";
+
+    /// <summary>Declared error: a cross-tenant shadow user has no local password (AB#5708).</summary>
+    internal const string ShadowUserPasswordNotAllowed = "SHADOW_USER_PASSWORD_NOT_ALLOWED";
 
     public async Task<CkMethodOutcome> HandleAsync(CkMethodContext<UserResetPasswordParameters> context,
         CancellationToken cancellationToken)
@@ -97,7 +104,7 @@ internal sealed class UserResetPasswordHandler(
         // AB#5708: cross-tenant shadow users sign in through their home tenant and have no local password.
         if (CrossTenantShadowUserName.IsShadowUserName(user.UserName))
         {
-            return (CkMethodOutcome.Fail("SHADOW_USER_PASSWORD_NOT_ALLOWED"), false);
+            return (CkMethodOutcome.Fail(ShadowUserPasswordNotAllowed), false);
         }
 
         var wasLockedOut = userManager.SupportsUserLockout && await userManager.IsLockedOutAsync(user).ConfigureAwait(false);
@@ -132,9 +139,19 @@ internal sealed class UserResetPasswordHandler(
         return (CkMethodOutcome.Ok(), wasLockedOut);
     }
 
+    /// <summary>
+    ///     The acting user of the credential-change log line, in the form of <c>AuditActor.Actor</c> (AB#8008, kept for the
+    ///     REST facade since AB#8413): the user name, for a client-credentials caller <c>client &lt;id&gt;</c>, else the subject.
+    /// </summary>
     private static async Task<string?> ActingUserAsync(UserManager<RtUser> userManager, CkMethodPrincipal principal)
     {
-        if (principal.SubjectId == null)
+        if (principal.IsServiceToken)
+        {
+            return $"client {principal.ClientId}";
+        }
+
+        // A subject that is not an object id names no local user (the store would throw on it; same rule as User.Merge).
+        if (principal.SubjectId == null || !OctoObjectId.TryParse(principal.SubjectId, out _))
         {
             return principal.Subject;
         }
@@ -153,6 +170,6 @@ internal sealed class UserResetPasswordHandler(
         logger.LogInformation(
             "User.ResetPassword refused: the new password violates the password policy ({RuleCount} rule(s))",
             details.Count);
-        return CkMethodOutcome.Fail(new CkMethodFailure("PASSWORD_POLICY_VIOLATION", details: details));
+        return CkMethodOutcome.Fail(new CkMethodFailure(PasswordPolicyViolation, details: details));
     }
 }
