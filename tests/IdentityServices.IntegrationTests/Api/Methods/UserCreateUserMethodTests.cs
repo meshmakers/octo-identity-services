@@ -80,11 +80,16 @@ public class UserCreateUserMethodTests : IntegrationTestBase
     }
 
     [Fact]
-    public void SwitchOff_TheHostRegistersNoHandler_SoTheGatewayAnswersHandlerNotAvailable()
+    public void SwitchOff_TheHandlerIsHostedLocalOnly_SoTheGatewayAnswersHandlerNotAvailable()
     {
-        // The method carries the sensitive initial password: by default (every environment) it is not hosted.
+        // The method carries the sensitive initial password: by default (every environment) it is not offered on the bus.
+        // AB#8413: it is hosted local only, for the REST facade POST users (in-process, never over the broker).
         using var scope = Factory.Services.CreateScope();
-        scope.ServiceProvider.GetService<UserCreateUserHandler>().Should().BeNull();
+        scope.ServiceProvider.GetService<UserCreateUserHandler>().Should().NotBeNull("the REST facade calls it in-process");
+        Factory.Services.GetRequiredService<ICkInProcessMethodTransport>().CanHandle(SystemIdentityCkIds.UserCreateUserMethodId)
+            .Should().BeTrue();
+        // Not announced: HandleLocalOnly (unit test IdentityMethodHostTests); no message reaches the broker
+        // (UserPasswordRestMethodFacadeTests).
     }
 
     [Fact]

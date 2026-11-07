@@ -7,6 +7,7 @@ using Meshmakers.Common.Shared;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Options;
 using Persistence.IdentityCkModel.Generated.System.Identity.v3;
+using static Meshmakers.Octo.Backend.IdentityServices.Methods.IdentityMethodHandlerRegistration;
 
 namespace Meshmakers.Octo.Backend.IdentityServices.Methods;
 
@@ -15,15 +16,31 @@ namespace Meshmakers.Octo.Backend.IdentityServices.Methods;
 /// <param name="HandlerType">The handler class.</param>
 /// <param name="CarriesSecret">
 ///     The method has a password or another secret as a parameter or result (<c>sensitive</c> in the CK model). Such a
-///     handler is registered only when <see cref="IdentityMethodsOptions.EnablePasswordMethods" /> is on. A test compares this
-///     flag with the compiled model, so a later story cannot forget it.
+///     handler is offered on the bus only when <see cref="IdentityMethodsOptions.EnablePasswordMethods" /> is on. A test
+///     compares this flag with the compiled model, so a later story cannot forget it.
 /// </param>
-/// <param name="Register">Registers the handler in the method host.</param>
+/// <param name="ServesRestFacade">
+///     A REST endpoint of this service is a facade of the method and must keep working while the switch keeps the method off
+///     the bus (AB#8413): with the switch off such a secret-carrying handler is registered <b>local only</b>
+///     (<see cref="RegisterLocalOnly" />: not announced, no queue, only this process calls it), so the password reaches the
+///     handler in-process and never the broker.
+/// </param>
+/// <param name="Register">Registers the handler for the bus (announced, queue) and for in-process calls.</param>
+/// <param name="RegisterLocalOnly">Registers the handler local only (<c>HandleLocalOnly</c>, AB#8411).</param>
 internal sealed record IdentityMethodHandlerRegistration(
     string MethodId,
     Type HandlerType,
     bool CarriesSecret,
-    Action<ICkMethodHandlerRegistrationBuilder> Register);
+    bool ServesRestFacade,
+    Action<ICkMethodHandlerRegistrationBuilder> Register,
+    Action<ICkMethodHandlerRegistrationBuilder> RegisterLocalOnly)
+{
+    /// <summary>One row of <see cref="IdentityMethodHost.Handlers" />: both registration forms from the handler type.</summary>
+    public static IdentityMethodHandlerRegistration For<THandler>(string methodId, bool carriesSecret,
+        bool servesRestFacade = false) where THandler : class, ICkMethodHandler =>
+        new(methodId, typeof(THandler), carriesSecret, servesRestFacade, b => b.Handle<THandler>(methodId),
+            b => b.HandleLocalOnly<THandler>(methodId));
+}
 
 /// <summary>
 ///     The one place that hosts CK methods in the identity service (AB#5672). A later story adds a handler class and one row
@@ -37,49 +54,49 @@ internal static class IdentityMethodHost
     /// <summary>All handlers of the identity service; the switch decides which of them are registered.</summary>
     public static IReadOnlyList<IdentityMethodHandlerRegistration> Handlers { get; } =
     [
-        new(SystemIdentityCkIds.UserChangePasswordMethodId, typeof(UserChangePasswordHandler), true,
-            b => b.Handle<UserChangePasswordHandler>(SystemIdentityCkIds.UserChangePasswordMethodId)),
+        For<UserChangePasswordHandler>(SystemIdentityCkIds.UserChangePasswordMethodId, true),
         // Role methods carry no password or secret: registered whatever the switch says (AB#7776).
-        new(SystemIdentityCkIds.UserSetRolesMethodId, typeof(UserSetRolesHandler), false,
-            b => b.Handle<UserSetRolesHandler>(SystemIdentityCkIds.UserSetRolesMethodId)),
-        new(SystemIdentityCkIds.UserAddRoleMethodId, typeof(UserAddRoleHandler), false,
-            b => b.Handle<UserAddRoleHandler>(SystemIdentityCkIds.UserAddRoleMethodId)),
-        new(SystemIdentityCkIds.UserRemoveRoleMethodId, typeof(UserRemoveRoleHandler), false,
-            b => b.Handle<UserRemoveRoleHandler>(SystemIdentityCkIds.UserRemoveRoleMethodId)),
-        new(SystemIdentityCkIds.UserResetPasswordMethodId, typeof(UserResetPasswordHandler), true,
-            b => b.Handle<UserResetPasswordHandler>(SystemIdentityCkIds.UserResetPasswordMethodId)),
-        new(SystemIdentityCkIds.UserDisableTwoFactorMethodId, typeof(UserDisableTwoFactorHandler), false,
-            b => b.Handle<UserDisableTwoFactorHandler>(SystemIdentityCkIds.UserDisableTwoFactorMethodId)),
+        For<UserSetRolesHandler>(SystemIdentityCkIds.UserSetRolesMethodId, false),
+        For<UserAddRoleHandler>(SystemIdentityCkIds.UserAddRoleMethodId, false),
+        For<UserRemoveRoleHandler>(SystemIdentityCkIds.UserRemoveRoleMethodId, false),
+        // REST POST users/ResetPassword is its facade (AB#8413): local only while the switch is off.
+        For<UserResetPasswordHandler>(SystemIdentityCkIds.UserResetPasswordMethodId, true, servesRestFacade: true),
+        For<UserDisableTwoFactorHandler>(SystemIdentityCkIds.UserDisableTwoFactorMethodId, false),
         // Merge carries no password or secret: registered whatever the switch says (AB#7778).
-        new(SystemIdentityCkIds.UserMergeMethodId, typeof(UserMergeHandler), false,
-            b => b.Handle<UserMergeHandler>(SystemIdentityCkIds.UserMergeMethodId)),
+        For<UserMergeHandler>(SystemIdentityCkIds.UserMergeMethodId, false),
         // The static create carries the optional, sensitive initial password: gated like the password methods (AB#7777).
-        new(SystemIdentityCkIds.UserCreateUserMethodId, typeof(UserCreateUserHandler), true,
-            b => b.Handle<UserCreateUserHandler>(SystemIdentityCkIds.UserCreateUserMethodId)),
+        // REST POST users is its facade (AB#8413): local only while the switch is off.
+        For<UserCreateUserHandler>(SystemIdentityCkIds.UserCreateUserMethodId, true, servesRestFacade: true),
         // Group and data-permission methods carry no password or secret either (AB#7779).
-        new(SystemIdentityCkIds.GroupAddMemberMethodId, typeof(GroupAddMemberHandler), false,
-            b => b.Handle<GroupAddMemberHandler>(SystemIdentityCkIds.GroupAddMemberMethodId)),
-        new(SystemIdentityCkIds.GroupRemoveMemberMethodId, typeof(GroupRemoveMemberHandler), false,
-            b => b.Handle<GroupRemoveMemberHandler>(SystemIdentityCkIds.GroupRemoveMemberMethodId)),
-        new(SystemIdentityCkIds.GroupSetRolesMethodId, typeof(GroupSetRolesHandler), false,
-            b => b.Handle<GroupSetRolesHandler>(SystemIdentityCkIds.GroupSetRolesMethodId)),
-        new(SystemIdentityCkIds.DataPermissionGrantToRoleMethodId, typeof(DataPermissionGrantToRoleHandler), false,
-            b => b.Handle<DataPermissionGrantToRoleHandler>(SystemIdentityCkIds.DataPermissionGrantToRoleMethodId)),
-        new(SystemIdentityCkIds.DataPermissionRevokeFromRoleMethodId, typeof(DataPermissionRevokeFromRoleHandler), false,
-            b => b.Handle<DataPermissionRevokeFromRoleHandler>(SystemIdentityCkIds.DataPermissionRevokeFromRoleMethodId)),
+        For<GroupAddMemberHandler>(SystemIdentityCkIds.GroupAddMemberMethodId, false),
+        For<GroupRemoveMemberHandler>(SystemIdentityCkIds.GroupRemoveMemberMethodId, false),
+        For<GroupSetRolesHandler>(SystemIdentityCkIds.GroupSetRolesMethodId, false),
+        For<DataPermissionGrantToRoleHandler>(SystemIdentityCkIds.DataPermissionGrantToRoleMethodId, false),
+        For<DataPermissionRevokeFromRoleHandler>(SystemIdentityCkIds.DataPermissionRevokeFromRoleMethodId, false),
         // Client secret methods carry a secret (sensitive result / parameter): gated like the password methods (AB#7780).
-        new(SystemIdentityCkIds.ClientAddSecretMethodId, typeof(ClientAddSecretHandler), true,
-            b => b.Handle<ClientAddSecretHandler>(SystemIdentityCkIds.ClientAddSecretMethodId)),
-        new(SystemIdentityCkIds.ClientRemoveSecretMethodId, typeof(ClientRemoveSecretHandler), true,
-            b => b.Handle<ClientRemoveSecretHandler>(SystemIdentityCkIds.ClientRemoveSecretMethodId))
+        For<ClientAddSecretHandler>(SystemIdentityCkIds.ClientAddSecretMethodId, true),
+        For<ClientRemoveSecretHandler>(SystemIdentityCkIds.ClientRemoveSecretMethodId, true)
     ];
 
     /// <summary>
-    ///     The handlers that are registered for this configuration: all without a secret, and those with a secret only when
-    ///     <c>Methods:Identity:EnablePasswordMethods</c> is true (production gate of 2026-10-23, default false).
+    ///     The handlers offered on the bus for this configuration (announced, with a queue): all without a secret, and those
+    ///     with a secret only when <c>Methods:Identity:EnablePasswordMethods</c> is true (production gate of 2026-10-23,
+    ///     default false). This process calls them in-process as well.
     /// </summary>
     public static IReadOnlyList<IdentityMethodHandlerRegistration> SelectHandlers(IdentityMethodsOptions options) =>
         Handlers.Where(h => !h.CarriesSecret || options.EnablePasswordMethods).ToList();
+
+    /// <summary>
+    ///     The handlers registered <b>local only</b> for this configuration (AB#8413): with the switch off, the secret-carrying
+    ///     handlers that a REST facade of this service calls (<see cref="IdentityMethodHandlerRegistration.ServesRestFacade" />).
+    ///     They are not announced and have no queue, so another service (the GraphQL gateway) still gets
+    ///     <c>METHOD_HANDLER_NOT_AVAILABLE</c> and no password reaches the broker. Empty when the switch is on (then
+    ///     <see cref="SelectHandlers" /> offers them on the bus).
+    /// </summary>
+    public static IReadOnlyList<IdentityMethodHandlerRegistration> SelectLocalOnlyHandlers(IdentityMethodsOptions options) =>
+        options.EnablePasswordMethods
+            ? []
+            : Handlers.Where(h => h.CarriesSecret && h.ServesRestFacade).ToList();
 
     /// <summary>Reads the options from the configuration (the host registration runs before the service provider exists).</summary>
     public static IdentityMethodsOptions ReadOptions(IConfiguration configuration) =>
@@ -87,21 +104,24 @@ internal static class IdentityMethodHost
         new IdentityMethodsOptions();
 
     /// <summary>
-    ///     Registers the method host with the selected handlers: handler registrations, caller token validation against the
-    ///     authority of this service, and the tenant binding that the handlers need on the bus. Without a selected handler
-    ///     nothing is hosted at all (no queue, no announcement): the gateway then answers <c>METHOD_HANDLER_NOT_AVAILABLE</c>.
+    ///     Registers the method host with the selected handlers: bus handlers (<paramref name="selected" />), local-only
+    ///     handlers (<paramref name="localOnly" />, AB#8413), caller token validation against the authority of this service, and
+    ///     the tenant binding that the handlers need. Without any handler nothing is hosted at all (no queue, no announcement):
+    ///     the gateway then answers <c>METHOD_HANDLER_NOT_AVAILABLE</c>.
     /// </summary>
-    /// <returns><c>true</c> when at least one handler is hosted (the caller then adds the discovery consumer to the event hub).</returns>
+    /// <returns><c>true</c> when at least one handler is hosted.</returns>
     public static bool AddIdentityCkMethodHost(this IServiceCollection services,
-        IReadOnlyList<IdentityMethodHandlerRegistration> selected)
+        IReadOnlyList<IdentityMethodHandlerRegistration> selected,
+        IReadOnlyList<IdentityMethodHandlerRegistration>? localOnly = null)
     {
+        localOnly ??= [];
         services.AddOptions<IdentityMethodsOptions>().BindConfiguration(IdentityMethodsOptions.SectionName);
 
         // AB#8412: the REST facades of UsersController call the methods through the dispatcher; a method this service
         // hosts runs in-process (AB#8411), nothing is sent to the broker. Program.cs adds the registry feed to the event hub.
         services.AddCkMethodDispatcher();
         services.TryAddScoped<IIdentityMethodFacade, IdentityMethodFacade>();
-        if (selected.Count == 0)
+        if (selected.Count == 0 && localOnly.Count == 0)
         {
             return false;
         }
@@ -111,6 +131,12 @@ internal static class IdentityMethodHost
             foreach (var handler in selected)
             {
                 handler.Register(builder);
+            }
+
+            // AB#8413: not announced, no queue - only the REST facades of this process call them (password in-process only).
+            foreach (var handler in localOnly)
+            {
+                handler.RegisterLocalOnly(builder);
             }
         });
 

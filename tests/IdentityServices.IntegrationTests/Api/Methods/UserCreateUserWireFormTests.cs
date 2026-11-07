@@ -23,7 +23,7 @@ namespace IdentityServices.IntegrationTests.Api.Methods;
 ///     <c>{"value":"&lt;rtId&gt;"}</c> that the asset-repo gateway used to hand to the client as the String result. The call goes
 ///     through the real host core of octo-common-services (registration, parameter JSON, authorization, handler adapter, result
 ///     serialization), the in-process transport, which produces the envelope of the bus path. The bus registration of the handler is
-///     off (<c>EnablePasswordMethods</c> false), so the handler is registered once, in-process only.
+///     off (<c>EnablePasswordMethods</c> false), so the host registers it local only (AB#8413), in-process.
 /// </summary>
 public sealed class UserCreateUserWireFormTests : IntegrationTestBase, IDisposable
 {
@@ -43,8 +43,8 @@ public sealed class UserCreateUserWireFormTests : IntegrationTestBase, IDisposab
 
             services.RemoveAll<IUserEmailInteractionService>();
             services.AddSingleton(Substitute.For<IUserEmailInteractionService>());
-            services.AddCkInProcessMethodHandlers(
-                m => m.Handle<UserCreateUserHandler>(SystemIdentityCkIds.UserCreateUserMethodId));
+            // Since AB#8413 the host itself registers the handler local only while EnablePasswordMethods is off (the REST
+            // facade POST users calls it in-process); a second registration here would be refused at start.
         }));
     }
 

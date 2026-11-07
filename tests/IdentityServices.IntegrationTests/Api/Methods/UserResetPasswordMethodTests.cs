@@ -90,12 +90,17 @@ public class UserResetPasswordMethodTests : IntegrationTestBase
     }
 
     [Fact]
-    public void SwitchOff_TheHostRegistersNoHandler_SoTheGatewayAnswersHandlerNotAvailable()
+    public void SwitchOff_TheHandlerIsHostedLocalOnly_SoTheGatewayAnswersHandlerNotAvailable()
     {
-        // the default configuration of every environment: the handler of a password method is not registered, so it is
-        // not announced and the gateway answers METHOD_HANDLER_NOT_AVAILABLE (the role methods are hosted regardless).
+        // the default configuration of every environment: the handler of a password method is not offered on the bus, so it
+        // is not announced and the gateway answers METHOD_HANDLER_NOT_AVAILABLE. AB#8413: it is hosted local only, for the
+        // REST facade POST users/ResetPassword (in-process, never over the broker).
         using var scope = Factory.Services.CreateScope();
-        scope.ServiceProvider.GetService<UserResetPasswordHandler>().Should().BeNull();
+        scope.ServiceProvider.GetService<UserResetPasswordHandler>().Should().NotBeNull("the REST facade calls it in-process");
+        Factory.Services.GetRequiredService<ICkInProcessMethodTransport>().CanHandle(SystemIdentityCkIds.UserResetPasswordMethodId)
+            .Should().BeTrue();
+        // Not announced: HandleLocalOnly (unit test IdentityMethodHostTests); no message reaches the broker
+        // (UserPasswordRestMethodFacadeTests).
     }
 
     [Fact]

@@ -1,5 +1,6 @@
 ﻿using System.ComponentModel;
 using System.ComponentModel.DataAnnotations;
+using System.Text.Json;
 using Asp.Versioning;
 using IdentityServerPersistence;
 using IdentityServerPersistence.Services;
@@ -14,6 +15,7 @@ using Meshmakers.Octo.ConstructionKit.Contracts;
 using Meshmakers.Octo.Runtime.Contracts.RepositoryEntities;
 using Meshmakers.Octo.Services.Contracts.DistributionEventHub.Methods;
 using Meshmakers.Octo.Services.Infrastructure.Services;
+using Meshmakers.Octo.Services.Methods;
 using Meshmakers.Octo.Services.Methods.Facades;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Identity;
@@ -46,7 +48,6 @@ public class UsersController : ControllerBase
     private readonly IUserEmailInteractionService _userEmailInteractionService;
     private readonly UserManager<RtUser> _userManager;
     private readonly OctoUserStore _octoUserStore;
-    private readonly IUserCredentialChangeService _userCredentialChangeService;
     private readonly IUserSessionRevocationService _userSessionRevocationService;
     private readonly IRoleChangeGuard _roleChangeGuard;
     private readonly IIdentityAuditService _identityAuditService;
@@ -60,11 +61,10 @@ public class UsersController : ControllerBase
     /// <param name="multiTenancyResolverService">Multi-tenancy resolver service</param>
     /// <param name="userEmailInteractionService"></param>
     /// <param name="userStore">The user store for direct role queries</param>
-    /// <param name="userCredentialChangeService">Revokes sessions after a password change</param>
     /// <param name="userSessionRevocationService">Revokes all sessions and tokens of a user (AB#7899)</param>
     /// <param name="roleChangeGuard">Self-grant, role-not-held and last-administrator rules (AB#7914)</param>
     /// <param name="identityAuditService">Audit of refused role changes</param>
-    /// <param name="methodFacade">Calls the <c>User</c> methods the role and merge endpoints serve (AB#8412)</param>
+    /// <param name="methodFacade">Calls the <c>User</c> methods the role, merge, create and password reset endpoints serve (AB#8412, AB#8413)</param>
     /// <param name="logger">Logger</param>
     public UsersController(
         UserManager<RtUser> userManager,
@@ -72,7 +72,6 @@ public class UsersController : ControllerBase
         IMultiTenancyResolverService multiTenancyResolverService,
         IUserEmailInteractionService userEmailInteractionService,
         IUserStore<RtUser> userStore,
-        IUserCredentialChangeService userCredentialChangeService,
         IUserSessionRevocationService userSessionRevocationService,
         IRoleChangeGuard roleChangeGuard,
         IIdentityAuditService identityAuditService,
@@ -84,7 +83,6 @@ public class UsersController : ControllerBase
         _multiTenancyResolverService = multiTenancyResolverService;
         _userEmailInteractionService = userEmailInteractionService;
         _octoUserStore = (OctoUserStore)userStore;
-        _userCredentialChangeService = userCredentialChangeService;
         _userSessionRevocationService = userSessionRevocationService;
         _roleChangeGuard = roleChangeGuard;
         _identityAuditService = identityAuditService;
@@ -278,18 +276,28 @@ public class UsersController : ControllerBase
     }
 
     // POST system/v1/users
+    /// <summary>
+    ///     Creates a new user with an initial password. Facade of the static CK method <c>User.CreateUser-1</c> (AB#8413).
+    /// </summary>
+    /// <remarks>
+    ///     The endpoint calls <c>User.CreateUser</c> in-process (the password never reaches the broker, also while
+    ///     <c>Methods:Identity:EnablePasswordMethods</c> keeps the method off the bus): normalised user name and e-mail, user
+    ///     validators, password policy, welcome notification, one <c>Identity.Method</c> audit event. Routes, bodies and status
+    ///     codes are unchanged; see the parity table in the identity <c>CLAUDE.md</c>.
+    /// </remarks>
     [HttpPost]
     [Authorize(IdentityServiceConstants.IdentityUserAdministrationWritePolicy)]
     [EndpointSummary("Creates a new user.")]
     [EndpointDescription("Refuses a user name or an e-mail address another user of the tenant already has (case-insensitive) " +
                          "with 409 application/problem+json, code USER_ALREADY_EXISTS, field userName or email - the same " +
-                         "rule as the CK method User.CreateUser-1. A taken user name wins over a taken e-mail address.")]
+                         "rule as the CK method User.CreateUser-1, which this endpoint calls. A taken user name wins over a " +
+                         "taken e-mail address.")]
     [ProducesResponseType(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
     [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status409Conflict)]
     public async Task<IActionResult> Post(
         [Required] [FromBody] [Description("The user data transfer object instance")]
-        RegisterUserDto userDto,
-        [FromServices] IUserCreationService userCreationService)
+        RegisterUserDto userDto)
     {
         if (!ModelState.IsValid)
         {
@@ -301,39 +309,59 @@ public class UsersController : ControllerBase
             return BadRequest(ReservedUserNameMessage);
         }
 
-        var rtUser = userDto.ToEntity();
-
-        try
-        {
-            // AB#7777: the same creation as the CK method User.CreateUser-1 (user manager, then the welcome notification).
-            // With a password it is validated before the user is stored, so a policy failure never leaves a user (AB#4503).
-            var result = await userCreationService.CreateAsync(_multiTenancyResolverService.GetTenantId(), rtUser,
-                userDto.Password);
-            if (!result.Succeeded)
+        const string operation = "Creation of user failed";
+        var response = await _methodFacade.InvokeAsync(IdentityMethodFacade.UserCkTypeId,
+            SystemIdentityCkIds.UserCreateUserMethodId, null,
+            new UserCreateUserParameters
             {
-                // AB#8083: a duplicate user name is a conflict with the same code as the method (USER_ALREADY_EXISTS,
-                // field userName), like the e-mail (AB#8064). Logged without the name or address.
-                if (result.Errors.Any(e => e.Code == nameof(IdentityErrorDescriber.DuplicateUserName)))
-                {
-                    _logger.LogInformation("Create user refused: another user of the tenant has the same user name");
-                    return UserCreationProblems.DuplicateUserName();
-                }
+                UserName = userDto.Name ?? string.Empty,
+                Email = userDto.Email,
+                FirstName = userDto.FirstName,
+                LastName = userDto.LastName,
+                Password = userDto.Password
+            }, User, HttpContext.RequestAborted);
 
-                if (result.Errors.Any(e => e.Code == nameof(IdentityErrorDescriber.DuplicateEmail)))
-                {
-                    _logger.LogInformation("Create user refused: another user of the tenant has the same e-mail address");
-                    return UserCreationProblems.DuplicateEmail();
-                }
-
-                LogIdentityError("Create user", result.Errors);
-                return GetBadRequestResultWithErrorDescription("Creation of user failed", result.Errors);
+        if (response.Success)
+        {
+            // The method has no parameter for the REST-only flag; keep the REST payload meaning (AB#8413 parity table).
+            if (userDto.ResetPasswordOnLogin)
+            {
+                await SetResetPasswordOnLoginAsync(response);
             }
 
             return Ok();
         }
-        catch (Exception e)
+
+        return response.ToActionResult(new CkMethodFacadeOptions()
+            .MapError(UserCreateUserHandler.UserNameReserved, _ => BadRequest(ReservedUserNameMessage))
+            .MapError(UserCreateUserHandler.UserAlreadyExists, error =>
+                error.Parameters.GetValueOrDefault(CkMethodErrorParameters.Field) == UserCreationProblems.EmailField
+                    ? UserCreationProblems.DuplicateEmail()
+                    : UserCreationProblems.DuplicateUserName())
+            .MapError(UserCreateUserHandler.PasswordPolicyViolation, error =>
+                BadRequest(new OperationFailedErrorDto(operation, DescribeIdentityErrors(error))))
+            .MapError(CkMethodErrorCodes.MethodValidationFailed, error =>
+                BadRequest(new OperationFailedErrorDto(operation, [DescribeValidationFailure(error, userDto)])))
+            .MapError(CkMethodErrorCodes.MethodHandlerFailed, _ =>
+                StatusCode(StatusCodes.Status500InternalServerError, new InternalServerErrorDto(operation + "."))));
+    }
+
+    /// <summary>Sets the REST-only flag <c>ResetPasswordOnLogin</c> on the user <c>User.CreateUser</c> just created.</summary>
+    private async Task SetResetPasswordOnLoginAsync(CkMethodResponse response)
+    {
+        // The result of User.CreateUser is the bare rtId string on the wire (UserCreateUserWireFormTests).
+        var rtId = response.ResultJson == null ? null : JsonSerializer.Deserialize<string>(response.ResultJson);
+        var user = rtId == null ? null : await _userManager.FindByIdAsync(rtId);
+        if (user == null)
         {
-            return StatusCode(StatusCodes.Status500InternalServerError, new InternalServerErrorDto(e.Message));
+            return;
+        }
+
+        user.ResetPasswordOnLogin = true;
+        var result = await _userManager.UpdateAsync(user);
+        if (!result.Succeeded)
+        {
+            LogIdentityError("Create user (ResetPasswordOnLogin)", result.Errors);
         }
     }
 
@@ -409,15 +437,25 @@ public class UsersController : ControllerBase
 
     // POST: {tenant}/v1/users/ResetPassword
     /// <summary>
-    ///     Sets a new password for a user (administrator reset). AB#8008: the user name and the new password travel only
-    ///     in the JSON body; the former query-parameter form (<c>?userName=…&amp;password=…</c>) is refused with 400, so a
-    ///     password never lands in a request URL (request logs, traces, proxy access logs).
+    ///     Sets a new password for a user (administrator reset). Facade of the CK method <c>User.ResetPassword-1</c> (AB#8413).
+    ///     AB#8008: the user name and the new password travel only in the JSON body; the former query-parameter form
+    ///     (<c>?userName=…&amp;password=…</c>) is refused with 400, so a password never lands in a request URL (request logs,
+    ///     traces, proxy access logs).
     /// </summary>
+    /// <remarks>
+    ///     The endpoint resolves the user name and calls <c>User.ResetPassword</c> in-process (never over the broker, also while
+    ///     <c>Methods:Identity:EnablePasswordMethods</c> keeps the method off the bus): password policy, the lockout is lifted,
+    ///     security stamp rotated, refresh tokens and authorizations revoked, one <c>Identity.Method</c> audit event. After a
+    ///     success the endpoint sends the password-reset notification as before - until the method sends it itself (AB#7775,
+    ///     then this call goes; a test counts exactly one notification per reset).
+    /// </remarks>
     [HttpPost]
     [Route("ResetPassword")]
     [Authorize(IdentityServiceConstants.IdentityUserAdministrationWritePolicy)]
     [RefuseCredentialInQuery("password")]
     [EndpointSummary("Resets the password of an user.")]
+    [EndpointDescription("Runs the CK method User.ResetPassword-1: also lifts a lockout of the user and ends the user's " +
+                         "sessions (refresh tokens).")]
     [ProducesResponseType(StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
@@ -431,42 +469,41 @@ public class UsersController : ControllerBase
         }
 
         var userName = request.UserName;
-        var password = request.Password;
-
-        try
+        var user = await _userManager.FindByNameAsync(userName);
+        if (user == null)
         {
-            var user = await _userManager.FindByNameAsync(userName);
-            if (user == null)
-            {
-                return NotFound(new NotFoundErrorDto($"User '{userName}' not found."));
-            }
-
-            // AB#5708: shadow users authenticate in their home tenant; a local password would bypass it.
-            // ShadowUserPasswordValidator refuses it anyway — this answers before a token or mail goes out.
-            if (CrossTenantShadowUserName.IsShadowUserName(user.UserName))
-            {
-                return BadRequest(ShadowUserPasswordValidator.ErrorMessage);
-            }
-
-            var token = await _userManager.GeneratePasswordResetTokenAsync(user);
-
-            var result = await _userManager.ResetPasswordAsync(user, token, password);
-            if (result.Succeeded)
-            {
-                // AB#8008: the caller as the audit names it - the user name, for a client-credentials token the client.
-                await _userCredentialChangeService.OnPasswordChangedAsync(user, PasswordChangePath.AdminResetPassword,
-                    AuditActor.FromPrincipal(User).Actor, HttpContext.RequestAborted);
-                await _userEmailInteractionService.SendPasswordResetNotificationAsync(_multiTenancyResolverService.GetTenantId(),
-                    user);
-                return Ok();
-            }
-
-            return GetBadRequestResultWithErrorDescription("Reset of password failed.", result.Errors);
+            return NotFound(new NotFoundErrorDto($"User '{userName}' not found."));
         }
-        catch (InvalidOperationException e)
+
+        // AB#5708: shadow users authenticate in their home tenant; a local password would bypass it. Answered before the
+        // call, as before; the method refuses it as well (SHADOW_USER_PASSWORD_NOT_ALLOWED, mapped to the same answer).
+        if (CrossTenantShadowUserName.IsShadowUserName(user.UserName))
         {
-            return StatusCode(StatusCodes.Status500InternalServerError, new InternalServerErrorDto(e.Message));
+            return BadRequest(ShadowUserPasswordValidator.ErrorMessage);
         }
+
+        const string operation = "Reset of password failed.";
+        var response = await _methodFacade.InvokeAsync(IdentityMethodFacade.UserCkTypeId,
+            SystemIdentityCkIds.UserResetPasswordMethodId, user.RtId.ToString(),
+            new UserResetPasswordParameters { NewPassword = request.Password }, User, HttpContext.RequestAborted);
+
+        if (response.Success)
+        {
+            // Until AB#7775 the method sends no e-mail; the REST contract keeps exactly one notification per reset.
+            await _userEmailInteractionService.SendPasswordResetNotificationAsync(
+                _multiTenancyResolverService.GetTenantId(), user);
+            return Ok();
+        }
+
+        return response.ToActionResult(new CkMethodFacadeOptions()
+            .MapError(CkMethodErrorCodes.MethodTargetNotFound,
+                _ => NotFound(new NotFoundErrorDto($"User '{userName}' not found.")))
+            .MapError(UserResetPasswordHandler.ShadowUserPasswordNotAllowed,
+                _ => BadRequest(ShadowUserPasswordValidator.ErrorMessage))
+            .MapError(UserResetPasswordHandler.PasswordPolicyViolation,
+                error => BadRequest(new OperationFailedErrorDto(operation, DescribeIdentityErrors(error))))
+            .MapError(CkMethodErrorCodes.MethodHandlerFailed,
+                _ => StatusCode(StatusCodes.Status500InternalServerError, new InternalServerErrorDto(operation))));
     }
 
     // POST {tenant}/v1/users/{userName}/revokeSessions
@@ -871,6 +908,47 @@ public class UsersController : ControllerBase
         _logger.LogWarning("{Message}", message);
         await _identityAuditService.StoreFailureAsync(RoleChangeProblems.AuditEventName, message);
         return RoleChangeProblems.ToResult(decision);
+    }
+
+    /// <summary>
+    ///     The REST <c>failedDetails</c> of a password policy refusal (AB#8413): the envelope carries only the codes of the failed
+    ///     rules (never a value), the description is rebuilt from the error describer and the password options of this
+    ///     service, so the body keeps code and description as before.
+    /// </summary>
+    private IEnumerable<FailedDetailsDto> DescribeIdentityErrors(CkMethodError error)
+    {
+        var describer = _userManager.ErrorDescriber;
+        var password = _userManager.Options.Password;
+        return (error.Details ?? []).Select(d => d.Code).Where(c => !string.IsNullOrWhiteSpace(c)).Select(code =>
+            new FailedDetailsDto
+            {
+                Code = code,
+                Description = code switch
+                {
+                    nameof(IdentityErrorDescriber.PasswordTooShort) => describer.PasswordTooShort(password.RequiredLength)
+                        .Description,
+                    nameof(IdentityErrorDescriber.PasswordRequiresUniqueChars) => describer
+                        .PasswordRequiresUniqueChars(password.RequiredUniqueChars).Description,
+                    nameof(IdentityErrorDescriber.PasswordRequiresNonAlphanumeric) => describer
+                        .PasswordRequiresNonAlphanumeric().Description,
+                    nameof(IdentityErrorDescriber.PasswordRequiresDigit) => describer.PasswordRequiresDigit().Description,
+                    nameof(IdentityErrorDescriber.PasswordRequiresLower) => describer.PasswordRequiresLower().Description,
+                    nameof(IdentityErrorDescriber.PasswordRequiresUpper) => describer.PasswordRequiresUpper().Description,
+                    _ => code
+                }
+            }).ToList();
+    }
+
+    /// <summary>The REST <c>failedDetails</c> entry of a <c>METHOD_VALIDATION_FAILED</c> answer of <c>User.CreateUser</c>.</summary>
+    private FailedDetailsDto DescribeValidationFailure(CkMethodError error, UserDto userDto)
+    {
+        var describer = _userManager.ErrorDescriber;
+        var identityError = error.Parameters.GetValueOrDefault(CkMethodErrorParameters.Field) switch
+        {
+            "email" => describer.InvalidEmail(userDto.Email),
+            _ => describer.InvalidUserName(userDto.Name)
+        };
+        return new FailedDetailsDto { Code = identityError.Code, Description = identityError.Description };
     }
 
     private void LogIdentityError(string operation, IEnumerable<IdentityError> errors)

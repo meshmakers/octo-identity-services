@@ -18,10 +18,11 @@ public interface IIdentityMethodFacade
 {
     /// <summary>
     ///     Calls <paramref name="methodId" /> on the entity <paramref name="targetRtId" /> of <paramref name="ckTypeId" /> with
-    ///     <paramref name="parameters" /> as the caller <paramref name="user" />. Never throws for a failing call; the failure is
-    ///     the returned envelope.
+    ///     <paramref name="parameters" /> as the caller <paramref name="user" />; <paramref name="targetRtId" /> is <c>null</c>
+    ///     for a static method (<c>User.CreateUser</c>, AB#8413). Never throws for a failing call; the failure is the returned
+    ///     envelope.
     /// </summary>
-    Task<CkMethodResponse> InvokeAsync<TParameters>(string ckTypeId, string methodId, string targetRtId,
+    Task<CkMethodResponse> InvokeAsync<TParameters>(string ckTypeId, string methodId, string? targetRtId,
         TParameters parameters, ClaimsPrincipal user, CancellationToken cancellationToken) where TParameters : class;
 }
 
@@ -33,7 +34,7 @@ internal sealed class IdentityMethodFacade(
     /// <summary>CK type id of the identity user (the declaring type of the <c>User.*</c> methods).</summary>
     public const string UserCkTypeId = "System.Identity/User";
 
-    public async Task<CkMethodResponse> InvokeAsync<TParameters>(string ckTypeId, string methodId, string targetRtId,
+    public async Task<CkMethodResponse> InvokeAsync<TParameters>(string ckTypeId, string methodId, string? targetRtId,
         TParameters parameters, ClaimsPrincipal user, CancellationToken cancellationToken) where TParameters : class
     {
         var tenantId = tenantResolver.GetTenantId();

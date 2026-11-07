@@ -75,6 +75,73 @@ public class IdentityMethodHostTests
     }
 
     [Fact]
+    public void SwitchOff_CreateUserAndResetPassword_AreRegisteredLocalOnly_ForTheirRestFacades()
+    {
+        // AB#8413: POST users and POST users/ResetPassword call these methods in-process; with the switch off they are
+        // registered local only (not announced, no queue), so the gateway still answers METHOD_HANDLER_NOT_AVAILABLE.
+        IdentityMethodHost.SelectLocalOnlyHandlers(new IdentityMethodsOptions()).Select(h => h.MethodId).Should()
+            .BeEquivalentTo(SystemIdentityCkIds.UserCreateUserMethodId, SystemIdentityCkIds.UserResetPasswordMethodId);
+        IdentityMethodHost.SelectLocalOnlyHandlers(new IdentityMethodsOptions { EnablePasswordMethods = true }).Should()
+            .BeEmpty("with the switch on they are offered on the bus (SelectHandlers) and called in-process from there");
+    }
+
+    [Fact]
+    public void SwitchOff_ChangePasswordAndTheClientSecretMethods_StayUnregistered()
+    {
+        // No REST facade calls them yet (ChangePassword: AB#8414): neither on the bus nor local only.
+        var off = new IdentityMethodsOptions();
+        var registered = IdentityMethodHost.SelectHandlers(off).Concat(IdentityMethodHost.SelectLocalOnlyHandlers(off))
+            .Select(h => h.MethodId).ToList();
+
+        registered.Should().NotContain([
+            SystemIdentityCkIds.UserChangePasswordMethodId, SystemIdentityCkIds.ClientAddSecretMethodId,
+            SystemIdentityCkIds.ClientRemoveSecretMethodId
+        ]);
+    }
+
+    [Fact]
+    public void OnlySecretCarryingMethods_AreMarkedAsLocalOnlyFacades_AndNoMethodIsInBothLists()
+    {
+        IdentityMethodHost.Handlers.Where(h => h.ServesRestFacade).Should().OnlyContain(h => h.CarriesSecret,
+            "a method without a secret is offered on the bus anyway, and the REST facade calls it in-process from there");
+        foreach (var options in new[] { new IdentityMethodsOptions(), new IdentityMethodsOptions { EnablePasswordMethods = true } })
+        {
+            IdentityMethodHost.SelectHandlers(options).Select(h => h.MethodId).Should()
+                .NotIntersectWith(IdentityMethodHost.SelectLocalOnlyHandlers(options).Select(h => h.MethodId),
+                    "a method is registered for the bus or local only, never both (the start-up validation refuses it)");
+        }
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void TheRowsRegisterTheirHandler_OnTheBusWithHandle_AndLocalOnlyWithHandleLocalOnly(bool localOnly)
+    {
+        var builder = new RecordingRegistrationBuilder();
+
+        foreach (var row in IdentityMethodHost.Handlers)
+        {
+            (localOnly ? row.RegisterLocalOnly : row.Register)(builder);
+        }
+
+        builder.Calls.Should().Equal(IdentityMethodHost.Handlers.Select(h =>
+            (localOnly ? "HandleLocalOnly" : "Handle", h.MethodId, h.HandlerType)));
+    }
+
+    [Fact]
+    public void SwitchOff_TheHostIsAddedWithTheLocalOnlyHandlers()
+    {
+        var services = new ServiceCollection();
+        var off = new IdentityMethodsOptions();
+
+        IdentityMethodHost.AddIdentityCkMethodHost(services, [],
+            IdentityMethodHost.SelectLocalOnlyHandlers(off)).Should().BeTrue("a local-only handler alone is hosted");
+
+        services.Should().Contain(d => d.ServiceType == typeof(UserResetPasswordHandler));
+        services.Should().Contain(d => d.ServiceType == typeof(UserCreateUserHandler));
+    }
+
+    [Fact]
     public void ClientSecretMethods_CarryASecret_AndAreSelectedOnlyWithTheSwitch()
     {
         string[] secretMethods = [SystemIdentityCkIds.ClientAddSecretMethodId, SystemIdentityCkIds.ClientRemoveSecretMethodId];
@@ -262,5 +329,24 @@ public class IdentityMethodHostTests
 
         details!.Should().Contain(new KeyValuePair<string, string>("lockoutLifted", "true"));
         details.Select(d => d.Key).Should().Contain(["methodId", "outcome", "targetRtId", "callerSubject"]);
+    }
+
+    private sealed class RecordingRegistrationBuilder : ICkMethodHandlerRegistrationBuilder
+    {
+        public List<(string Kind, string MethodId, Type HandlerType)> Calls { get; } = [];
+
+        public ICkMethodHandlerRegistrationBuilder Handle<THandler>(string qualifiedMethodId)
+            where THandler : class, ICkMethodHandler
+        {
+            Calls.Add(("Handle", qualifiedMethodId, typeof(THandler)));
+            return this;
+        }
+
+        public ICkMethodHandlerRegistrationBuilder HandleLocalOnly<THandler>(string qualifiedMethodId)
+            where THandler : class, ICkMethodHandler
+        {
+            Calls.Add(("HandleLocalOnly", qualifiedMethodId, typeof(THandler)));
+            return this;
+        }
     }
 }
