@@ -952,6 +952,48 @@ lifecycle (and `FindCrossTenantUserAsync` would stop treating the user as the pe
 `auth/reset-password`. The message is "Cross-tenant users (user names starting with 'xt_') sign in
 through their home tenant and cannot have a password."
 
+#### Cleanup of rights-less shadow users (AB#8305)
+
+Until AB#8304 the token exchange created the caller's `xt_` user in the target tenant before it decided, and kept it when
+the exchange was refused. Those left-overs have no right and cannot act. `IdentityApiAuthorization:ShadowUserCleanup`
+(`OCTO_IDENTITYAPIAUTHORIZATION__SHADOWUSERCLEANUP`, Helm `services.identity.shadowUserCleanup`) removes them:
+
+| Mode | Effect |
+|------|--------|
+| `Off` (default) | Nothing is read or written. |
+| `DryRun` | Per tenant: one log line per candidate (`candidate rtId=… userName=… created=…`), one per kept `xt_` user with its reasons (`kept … reasons=…`), and a summary line; writes nothing. |
+| `Apply` | The same plan, then each candidate is re-checked and deleted through the identity user store (`IUserStore.DeleteAsync`, no raw database delete); one information event `[Identity.ShadowUserDeleted]` per deleted user in the tenant's event log. |
+
+The run starts once per process, two minutes after the application has started (`ShadowUserCleanupHostService`), in the
+background: it never blocks or fails the identity start-up. It covers the system tenant and every registered tenant
+(`ShadowUserCleanupJob`, rule in `ShadowUserCleanupPlanner`). A user is a **candidate only when all rules hold**; every rule
+that fails is a skip reason:
+
+- the user name starts with `xt_` (other users are not looked at);
+- `role` — no `AssignedRole`; `group` — no `GroupMember`; `association:<id>` — no other association in either direction;
+- `mapping` — no external tenant user mapping in this tenant for any identity of its name chain (a mapping whose
+  `{SourceTenantId}_{SourceUserName}` ends the user name; needs no registry and errs towards keeping);
+- `chain-source` — no mapping in any tenant uses the user as its source (source tenant = this tenant, source user name =
+  the user name or source user id = its rtId);
+- `direct-use:<kind>` — no password, two-factor, external login, user token, claim, OAuth token or OAuth authorization.
+
+A failing tenant is logged and the others continue. If the mappings of any tenant cannot be read, an `Apply` run deletes
+nothing (it runs as `DryRun`), because the chain-source rule cannot be decided. With several identity replicas each runs
+the job; the per-user re-check and the idempotent plan (a second `Apply` finds nothing) keep the result the same.
+
+**Runbook per cluster** (changes identity data; each cluster needs the go of the cluster owner):
+
+1. Make sure the cluster runs identity with AB#8304 (refused exchanges create no `xt_` user any more).
+2. Read-only inventory with `scripts/identity-secret-management-role-check.sh` (AB#8155) for the baseline count of
+   rights-less `xt_` users.
+3. Set `services.identity.shadowUserCleanup: DryRun`, deploy, wait ≥ 2 minutes, collect the `ShadowUserCleanup DryRun`
+   log lines of one identity pod. The candidate count should match the baseline; every difference is explained by a
+   skip reason.
+4. Gerald reviews the DryRun list.
+5. Set `Apply`, deploy, check the `ShadowUserCleanup Apply … deleted` lines and the summary.
+6. Set the value back to unset/`Off` and deploy, so the next start does not run again.
+7. Re-run the read-only inventory: 0 rights-less `xt_` users; again one week later.
+
 ### Tenant Switch Flow
 
 A user signed in to tenant B as a cross-tenant shadow user can re-establish the B session from one of their own

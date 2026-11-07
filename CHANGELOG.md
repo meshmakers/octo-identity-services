@@ -66,6 +66,17 @@ Notable changes of the OctoMesh identity services. The CK model `System.Identity
 
 ### Added
 
+- **Cleanup of rights-less `xt_` shadow users (AB#8305).** `IdentityApiAuthorization:ShadowUserCleanup`
+  (`OCTO_IDENTITYAPIAUTHORIZATION__SHADOWUSERCLEANUP`, Helm `services.identity.shadowUserCleanup`) = `Off` (default) /
+  `DryRun` / `Apply`. Two minutes after the start, identity checks every `xt_` user of the system tenant and of every
+  registered tenant once: a user without role, group, any other association, mapping of its name chain in the tenant,
+  mapping elsewhere that uses it as source, and without password, two-factor, external login, user token, claim or OAuth
+  token/authorization is a candidate. `DryRun` logs every candidate (tenant, rtId, user name, creation date), the skip
+  reasons of every other `xt_` user and a summary per tenant, and writes nothing; `Apply` deletes the candidates through the
+  identity user store with one `Identity.ShadowUserDeleted` event per user in the tenant's event log. Off reads nothing. A
+  failing tenant does not stop the others, the run never blocks the start-up, and an Apply whose mapping read fails in any
+  tenant runs as DryRun. Runbook in `docs/authentication.md`.
+
 - **Cross-tenant grant audit events in both tenants (AB#8342, security).** Lookups, grant create / change / removal through
   `ExternalTenantUserMappings` and `AdminProvisioning`, the first token exchange into a tenant and refused exchanges from a sibling source are written
   into the runtime event log of the target tenant T **and** the source tenant S (categories `Identity.CrossTenantLookup`,
