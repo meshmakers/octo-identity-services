@@ -96,6 +96,11 @@ internal static class IdentityMethodHost
         IReadOnlyList<IdentityMethodHandlerRegistration> selected)
     {
         services.AddOptions<IdentityMethodsOptions>().BindConfiguration(IdentityMethodsOptions.SectionName);
+
+        // AB#8412: the REST facades of UsersController call the methods through the dispatcher; a method this service
+        // hosts runs in-process (AB#8411), nothing is sent to the broker. Program.cs adds the registry feed to the event hub.
+        services.AddCkMethodDispatcher();
+        services.TryAddScoped<IIdentityMethodFacade, IdentityMethodFacade>();
         if (selected.Count == 0)
         {
             return false;

@@ -1179,8 +1179,8 @@ documented difference, self grant), `IdentityMethodHostTests`. The integration t
 ### Role change guard: no escalation, last administrator stays (AB#7914)
 
 `IRoleChangeGuard` (`src/IdentityServices/Authorization/RoleChange/RoleChangeGuard.cs`, scoped) is the one rule set for changes of the **direct** roles of a
-user. Callers: `UsersController` (`PUT users/{u}/roles`, `PUT`/`DELETE users/{u}/roles/{r}`, `DELETE users/{u}`, `POST users/{u}/merge` = source user) and the
-three role method handlers (`UserRoleMethodHandlerBase.GuardAsync`). It is **never** called from `OctoUserStore`/`UserManager`: first admin of a new tenant
+user. Callers: `UsersController` (`DELETE users/{u}`; since AB#8412 the role endpoints and `POST users/{u}/merge` run the methods, section
+"REST facades of the role and merge endpoints"), the three role method handlers (`UserRoleMethodHandlerBase.GuardAsync`) and `IUserMergeService` (source user). It is **never** called from `OctoUserStore`/`UserManager`: first admin of a new tenant
 (`UserManagementService`), the Bootstrap blueprint seed, the one-time grants (`SecretManagementAdminGrant`, file role grants), the scratch-tenant creator grant, cross-tenant
 provisioning and the login group rules assign roles through the store and stay unrestricted (`TheGuard_IsNotCalledFromTheUserStoreOrTheUserManager…` pins the constructors).
 AB#7927 (groups, mappings, role definitions, next section) and AB#7928 (client roles, section below) reuse it: `EvaluateGrantAsync(caller, addedRoleNames)` is the "grant only what you hold" part alone.
@@ -2200,6 +2200,51 @@ a refusal); the revocation writes its own log line with the acting user. A faili
 compared state by state, audit, every refusal, data permission, last administrator, forged caller, `MERGE_FAILED` mapping),
 `Api/TenantApi/UsersMergeTests` (REST), `RoleChangeGuardTests` (REST guard). Since this handler every declared System.Identity method has
 one; `UserChangePasswordMethodTests.AMethodWithoutHandler_…` uses an undeclared id.
+
+### REST facades of the role and merge endpoints (AB#8412)
+
+`UsersController.UpdateUserRoles` (`PUT users/{u}/roles`), `AddUserToRole` (`PUT users/{u}/roles/{r}`), `RemoveRoleFromUser`
+(`DELETE users/{u}/roles/{r}`) and `MergeUsers` (`POST users/{u}/merge`) are **facades** of `User.SetRoles-1`, `User.AddRole-1`,
+`User.RemoveRole-1` and `User.Merge-1`. They contain no role-change or merge rule of their own (no `AddToRoleAsync`,
+`RemoveFromRoleAsync` or `IUserMergeService` call): they resolve the user name to the rtId (and SetRoles the role ids to names),
+call the method through `IIdentityMethodFacade` (`src/IdentityServices/Methods/IdentityMethodFacade.cs`) and map the envelope with
+`CkMethodFacadeResults.ToActionResult` (octo-common-services, AB#8411) plus per-endpoint `CkMethodFacadeOptions`.
+
+- **In-process.** `IdentityMethodHost.AddIdentityCkMethodHost` registers `AddCkMethodDispatcher()` and the facade; `Program.cs` adds
+  `AddCkMethodHandlerRegistryFeed()` to the event hub. The identity service hosts the handlers, so the dispatcher runs them in this
+  process (transport `in-process`, nothing on the broker, same invocation core as a bus call: declared authorization, validation,
+  audit, `ck.method.*` metrics). The four methods carry no secret and are hosted whatever `Methods:Identity:EnablePasswordMethods`
+  says, so the endpoints work on every cluster. AB#8413/AB#8414 reuse `IIdentityMethodFacade` (password methods with
+  `HandleLocalOnly` while the switch is off).
+- **Caller.** `CkMethodPrincipal.FromClaimsPrincipal(User)` in a `CkMethodPrincipalScope`. The write policy of the endpoints already
+  requires scope `octo_api` and role `UserManagement`, which is what the handlers check again; no token reaches the facade without it.
+- **Audit.** Every REST call writes exactly one `Identity.Method` event (the handler's). A guard refusal (`METHOD_FORBIDDEN` with
+  `reason` `self-grant` / `role-not-held` / `last-administrator`) is turned back into the AB#7914 answer: 403/409 problem+json via
+  `RoleChangeProblems`, the WARN log and the `Identity.RoleChangeRefused` record (REST contract, kept).
+
+Parity table (REST before -> facade; the method wins unless the REST contract would change):
+
+| Point | REST before | Now |
+|---|---|---|
+| Routes, request and response bodies, status codes | - | unchanged (success `200` empty, `MapSuccess`) |
+| User / role not found | 404 `NotFoundErrorDto` | unchanged: resolved in the controller; `METHOD_TARGET_NOT_FOUND` / `ROLE_NOT_FOUND` (race) map to the same 404 |
+| SetRoles unknown role id | 404, nothing changed | unchanged (ids resolved before the call) |
+| AddRole of a role held **through a group** | 400 "already has role" (`IsInRoleAsync`) | **kept** in the facade (read-only `IsInRoleAsync` pre-check); the method alone would add the direct role |
+| RemoveRole of a role held **only through a group** | 200, nothing changed | **kept**: `ROLE_NOT_ASSIGNED` maps to 200; audit outcome `ROLE_NOT_ASSIGNED` |
+| Guard refusals | 403/409 problem, `Identity.RoleChangeRefused`, WARN | unchanged, plus the `Identity.Method` event |
+| Audit of a success | none | one `Identity.Method` event (`rolesBefore`/`rolesAfter`; merge: `sourceUserName`, `sourceRtId`, `transferredLogins`, `revokedTokens`) |
+| Merge source data permission (AB#7035) | none | method wins: not readable = 404 "Source user ... not found", not writable = 403 problem `METHOD_FORBIDDEN` (`data-permission`) |
+| Merge login/delete failure | 400, `failedDetails` with code + description | 400, same message, `failedDetails` with `code` only (the envelope carries codes) |
+| Unexpected failure | merge: 500 `InternalServerErrorDto(exception message)`; roles: unhandled 500 | merge: 500 `InternalServerErrorDto("Merging the users failed.")`; roles: 500 problem `METHOD_HANDLER_FAILED`; no exception text leaves the service |
+| `RoleEnforcement=Warn` (not the default) | caller without `UserManagement` let through and logged | refused by the method (403 problem, `role-required`) |
+| Merge `sourceUserName` | as sent | trimmed by the method |
+
+Fix on the way: `UserMergeHandler` looked the acting user up by `sub` and threw for a subject that is no object id; it now skips
+the lookup. Tests: `Api/TenantApi/UserRestMethodFacadeTests` (one `Identity.Method` event per REST call incl. refusal and merge,
+REST and the dispatcher call side by side, in-process transport, both switch values, group-inherited role contract) plus the
+unchanged REST suites (`RoleChangeGuardTests`, `UsersMergeTests`, `UserRoleMethodParityTests`, `TenantApiRoleAuthorizationTests`).
+`UserMergeMethodTests.Method_MergingAwayTheLastUserAdministrator…` now expects two `Identity.Method` events (its method call and its
+REST call each write one).
 
 ### System.Identity 2.x -> 3.x needs migration entries (AB#8157)
 

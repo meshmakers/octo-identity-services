@@ -269,7 +269,10 @@ public class UserMergeMethodTests : IntegrationTestBase, IDisposable
         outcome.Failure.Parameters!["reason"].Should().Be("last-administrator");
         response.StatusCode.Should().Be(HttpStatusCode.Conflict);
         await AssertUnchangedAsync(fixture);
-        SingleAudit(fixture.Target.RtId.ToString()).Details["reason"].Should().Be("last-administrator");
+        // AB#8412: REST runs User.Merge too, so the method call and the REST call write one Identity.Method event each
+        _events.Where(e => e.Category == IdentityMethodAuditWriter.Category &&
+                           e.Details.GetValueOrDefault("targetRtId") == fixture.Target.RtId.ToString())
+            .Select(e => e.Details["reason"]).Should().Equal("last-administrator", "last-administrator");
     }
 
     [Fact]
