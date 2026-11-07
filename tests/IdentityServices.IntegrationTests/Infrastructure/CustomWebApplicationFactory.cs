@@ -75,6 +75,12 @@ public class CustomWebApplicationFactory : WebApplicationFactory<Program>, IAsyn
 
     public string MongoConnectionString => SharedMongoDbContainer.ConnectionString;
 
+    /// <summary>
+    ///     The system database of this host (unique per factory). Every MongoDB application name of the host's repository
+    ///     clients for it contains this name (AB#8424, <see cref="TestHostMongoClientReleaseTests" />).
+    /// </summary>
+    internal string SystemDatabaseName => _systemDatabaseName;
+
     public async ValueTask InitializeAsync()
     {
         // Write to stderr for immediate output (stdout is buffered)
