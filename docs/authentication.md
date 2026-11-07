@@ -1002,7 +1002,13 @@ that fails is a skip reason:
   `GroupMember` of a group that holds a role directly or through its `ChildGroup` groups (the same walk as
   `GroupRoleResolver` at token time, depth 10). An empty mapping — the left-over that the token exchange (until AB#7088)
   and the interactive sign-in and tenant switch (until AB#8439) wrote together with the shadow user — keeps nobody: it is
-  listed with the candidate and deleted together with it. An empty mapping that also belongs to a kept `xt_` user stays;
+  listed with the candidate and deleted together with it. An empty mapping a kept `xt_` user depends on stays: its
+  nearest tier (the mapping whose `xt_{SourceTenantId}_{SourceUserName}` is the whole user name — the sibling grant of
+  its tenant switch), and every mapping of its chain when it has neither a nearest-tier nor a role-granting mapping (then
+  that mapping is its only explicit provisioning). A deeper tier of a longer kept chain adds nothing to that user (no role,
+  and its own mapping already provisions it), so it does not protect the mapping: in test-2 `gastrodemo`,
+  `accountingmanagement/xt_octosystem_<n>` belongs to the candidate `xt_accountingmanagement_xt_octosystem_<n>`, not to the
+  kept `xt_karlplus_xt_accountingmanagement_xt_octosystem_<n>` with its own mapping `karlplus/…` (DryRun 2, AB#8305);
 - `chain-source` — no mapping in any tenant uses the user as its source (source tenant = this tenant, source user name =
   the user name or source user id = its rtId);
 - `direct-use:<kind>` — no password, two-factor, external login, user token or claim.

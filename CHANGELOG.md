@@ -94,6 +94,12 @@ Notable changes of the OctoMesh identity services. The CK model `System.Identity
   (naming the deleted mapping ids) in the tenant's event log. Off reads nothing. A
   failing tenant does not stop the others, the run never blocks the start-up, and an Apply whose mapping read fails in any
   tenant runs as DryRun. Runbook in `docs/authentication.md`.
+  **Chained names:** an empty mapping is kept for a kept `xt_` user only when that user depends on it — its nearest tier
+  (`xt_{SourceTenantId}_{SourceUserName}` = the whole name), or all of its chain mappings when it has neither a nearest-tier
+  nor a role-granting mapping. Before, any kept user whose longer chain merely ended with the mapping's tier protected it,
+  so `xt_accountingmanagement_xt_octosystem_<n>` in test-2 `gastrodemo`/`handelsdemo` was a candidate with
+  `emptyMappings=none` (the kept `xt_karlplus_xt_accountingmanagement_…` matched the same mapping) and Apply would have
+  left its empty mapping behind.
 - **Source tenant decides which tenants may look up and grant its users (AB#8345, security).** `GET/PUT
   {S}/v1/CrossTenantGrantPermissions` (`{ "targetTenantIds": [...] }`) keeps the allow-list of a source tenant S;
   only S's administrators (`UserManagement` and `TenantManagement`, token issued for S —

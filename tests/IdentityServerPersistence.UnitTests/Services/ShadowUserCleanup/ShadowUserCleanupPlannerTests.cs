@@ -221,6 +221,94 @@ public class ShadowUserCleanupPlannerTests
         plan.Single(d => d.RtId == "u2").SkipReasons.Should().Equal("group");
     }
 
+    // ---------- chained names (AB#8305, DryRun 2 on test-2: gastrodemo/handelsdemo) ----------
+
+    private const string ChainedCandidate = "xt_accountingmanagement_xt_octosystem_gerald";
+    private const string LongerKeptChain = "xt_karlplus_xt_accountingmanagement_xt_octosystem_gerald";
+
+    [Fact]
+    public void ChainedCandidate_ListsItsEmptyMapping_WhenALongerKeptChainHasItsOwnRoleGrantingMapping()
+    {
+        // test-2 gastrodemo: the candidate's empty mapping accountingmanagement/xt_octosystem_gerald is a deeper tier of
+        // the kept xt_karlplus_… user too, but that user is kept by its own mapping karlplus/xt_accountingmanagement_….
+        var plan = ShadowUserCleanupPlanner.Plan(Tenant,
+            [
+                User(rtId: "u1", userName: ChainedCandidate),
+                User(rtId: "u2", userName: LongerKeptChain,
+                    edges: [new ShadowUserEdge(ShadowUserEdgeKind.GroupMember, "System.Identity/GroupMember")])
+            ],
+            [
+                EmptyMapping("m-empty", "accountingmanagement", "xt_octosystem_gerald"),
+                GrantingMapping("m-kept", "karlplus", "xt_accountingmanagement_xt_octosystem_gerald")
+            ], []);
+
+        var candidate = plan.Single(d => d.RtId == "u1");
+        candidate.IsCandidate.Should().BeTrue();
+        candidate.EmptyMappingIds.Should().Equal("m-empty");
+        plan.Single(d => d.RtId == "u2").SkipReasons.Should().Equal("group", "mapping");
+    }
+
+    [Fact]
+    public void ChainedCandidate_ListsItsEmptyMapping_WhenALongerKeptChainHasAnEmptyNearestTierMapping()
+    {
+        // The kept user's own (nearest-tier) mapping is its sibling grant and explicit provisioning; the deeper one adds
+        // nothing to it. The nearest-tier mapping itself stays.
+        var plan = ShadowUserCleanupPlanner.Plan(Tenant,
+            [
+                User(rtId: "u1", userName: ChainedCandidate),
+                User(rtId: "u2", userName: LongerKeptChain,
+                    edges: [new ShadowUserEdge(ShadowUserEdgeKind.GroupMember, "System.Identity/GroupMember")])
+            ],
+            [
+                EmptyMapping("m-empty", "accountingmanagement", "xt_octosystem_gerald"),
+                EmptyMapping("m-kept", "Karlplus", "XT_accountingmanagement_xt_octosystem_gerald")
+            ], []);
+
+        plan.Single(d => d.RtId == "u1").EmptyMappingIds.Should().Equal("m-empty");
+        plan.Single(d => d.RtId == "u2").SkipReasons.Should().Equal("group");
+    }
+
+    [Fact]
+    public void ChainedCandidate_KeepsTheEmptyMapping_ThatIsTheNearestTierOfAKeptUser()
+    {
+        // The candidate xt_karlplus_… matches the empty mapping accountingmanagement/xt_octosystem_gerald only as a deeper
+        // tier; for the kept xt_accountingmanagement_… user it is the nearest tier — its grant. It stays.
+        var plan = ShadowUserCleanupPlanner.Plan(Tenant,
+            [
+                User(rtId: "u1", userName: LongerKeptChain),
+                User(rtId: "u2", userName: ChainedCandidate,
+                    edges: [new ShadowUserEdge(ShadowUserEdgeKind.GroupMember, "System.Identity/GroupMember")])
+            ],
+            [EmptyMapping("m-shared", "accountingmanagement", "xt_octosystem_gerald")], []);
+
+        var candidate = plan.Single(d => d.RtId == "u1");
+        candidate.IsCandidate.Should().BeTrue();
+        candidate.EmptyMappingIds.Should().BeEmpty();
+    }
+
+    [Fact]
+    public void ChainedCandidate_NeverListsARoleGrantingMappingOfItsChain()
+    {
+        var decision = Decide(User(userName: ChainedCandidate),
+            inTenant: [GrantingMapping("m1", "accountingmanagement", "xt_octosystem_gerald")]);
+
+        decision.SkipReasons.Should().Equal("mapping");
+        decision.EmptyMappingIds.Should().BeEmpty();
+    }
+
+    [Theory]
+    [InlineData("accountingmanagement", "xt_octosystem_gerald", true)]
+    [InlineData("ACCOUNTINGMANAGEMENT", "XT_OCTOSYSTEM_GERALD", true)]
+    [InlineData("octosystem", "gerald", false)]
+    [InlineData("management", "xt_octosystem_gerald", false)]
+    [InlineData("", "xt_octosystem_gerald", false)]
+    public void NearestTier_IsTheWholeName(string sourceTenant, string sourceUserName, bool expected)
+    {
+        ShadowUserCleanupPlanner.IsNearestTierMapping(ChainedCandidate,
+                new ShadowUserMappingSource(sourceTenant, "src-id", sourceUserName))
+            .Should().Be(expected);
+    }
+
     [Fact]
     public void EmptyMappingOfTwoCandidates_IsListedForBoth()
     {
