@@ -106,6 +106,9 @@ public class UserManagementService(
         await TryAddRole(adminUser, CommonConstants.CommunicationManagementRole);
         await TryAddRole(adminUser, CommonConstants.BotManagementRole);
         await TryAddRole(adminUser, CommonConstants.AdminPanelManagementRole);
+        // AB#8529: importing CK models, catalog imports and blueprint install/update/uninstall require this role in the
+        // asset repository (DataModelManagementPolicy); TenantOwners carries it, the fallback must too.
+        await TryAddRole(adminUser, CommonConstants.DataModelManagementRole);
         // Optional like the file roles: a tenant set up from a bootstrap seed older than 1.7.0 has no
         // SecretManagement role yet; the one-time grant (AB#5544) gives it to the administrators later.
         await TryAddRole(adminUser, CommonConstants.SecretManagementRole, required: false);

@@ -20,6 +20,11 @@ Notable changes of the OctoMesh identity services. The CK model `System.Identity
 
 ### Changed
 
+- **AB#8529** — the first tenant administrator of a tenant without the `TenantOwners` group (direct-role fallback of
+  `UserManagementService.CreateAdminUserAsync`) also gets the role `DataModelManagement`, which the asset repository now
+  requires for importing CK models, catalog imports, `FixAll`, blueprint install/update/uninstall and catalog refresh.
+  `TenantOwners` already carries the role; no seed change.
+
 - **The cross-tenant allow-list answers with the SDK's `CrossTenantGrantPermissionsDto` (AB#8521).** octo-sdk #102 (AB#8346)
   added the DTO to `Communication.Contracts`; the controller-local class of the same name made the build fail (CS0104). The
   `GET`/`PUT CrossTenantGrantPermissions` answers now use the SDK type; the `PUT` body binds to the server-side
