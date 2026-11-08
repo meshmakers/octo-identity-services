@@ -248,6 +248,36 @@ public class GroupMethodTests(CustomWebApplicationFactory factory) : GroupMethod
     }
 
     [Fact]
+    public async Task AddMember_AClientIntoAGroupWithAnAppRole_ByAUserAdministrator_Succeeds_AB8564()
+    {
+        // an app role: built-in, but not seeded by System.Identity.Bootstrap (judged by the production catalog)
+        var app = await NewAppRoleAsync();
+        var group = await NewGroupAsync(app);
+        var client = await NewClientAsync();
+
+        var outcome = await AddAsync(group, Admin(), RtGroupMemberKindEnum.Client, client.RtId.ToString());
+
+        outcome.IsSuccess.Should().BeTrue();
+        (await ClientMembersAsync(group)).Should().Equal(client.RtId.ToString());
+    }
+
+    [Fact]
+    public async Task AddMember_AGroupMixingAppAndPlatformRoles_IsRefusedForThePlatformRoleOnly_AB8564()
+    {
+        var app = await NewAppRoleAsync();
+        var platform = await NewRoleAsync(builtIn: true);
+        var group = await NewGroupAsync(app, platform);
+        var client = await NewClientAsync();
+
+        // Group methods add users and clients only; nesting is REST (AppRoleGrantTests)
+        var member = await AddAsync(group, Admin(), RtGroupMemberKindEnum.Client, client.RtId.ToString());
+
+        AssertForbidden(member, "role-not-held");
+        member.Failure!.Parameters.Should().Contain("roleNames", platform);
+        (await ClientMembersAsync(group)).Should().BeEmpty();
+    }
+
+    [Fact]
     public async Task SetRoles_ABuiltInRoleTheCallerLacks_IsRefused_ButHeldAndCustomRolesSucceed()
     {
         var secret = await NewRoleAsync(builtIn: true);

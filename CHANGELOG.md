@@ -18,6 +18,17 @@ Notable changes of the OctoMesh identity services. The CK model `System.Identity
   prod-1 and prod-2. The dates are entered here and on the deprecated-endpoints page when they are set. Behaviour, routes,
   bodies and status codes are unchanged. `POST users` and `POST users/ResetPassword` follow with AB#8418.
 
+### Fixed
+
+- **Tenant owners can assign the roles their tenant's blueprints seed (AB#8564).** The role change guard of AB#7914/AB#7927/AB#7928
+  refused every built-in role the caller did not hold, so a tenant owner could not give a client or user `EnergyCommunityManagement`,
+  `EnergyCommunityReporting`, `MeterReporter` or `MeshmakersAccounting`, neither directly nor through group membership or nesting
+  (`403 role-not-held`). A caller holding `UserManagement` may now grant **app roles** (built-in roles of a blueprint other than
+  `System.Identity.Bootstrap`) without holding them. **Platform roles**, the 17 roles of the Bootstrap seed, keep the protection; a group
+  that carries both needs only its platform roles held. The platform set is read from the embedded Bootstrap blueprint (no hand-kept list;
+  fail closed when it cannot be read). Callers without `UserManagement`, `self-grant`, `last-administrator` and the data-policy protection of
+  AB#5859 are unchanged. Refusals are logged as before; an allowed app-role grant is logged at INFO with caller, target and roles.
+
 ### Changed
 
 - **AB#8529** — the first tenant administrator of a tenant without the `TenantOwners` group (direct-role fallback of

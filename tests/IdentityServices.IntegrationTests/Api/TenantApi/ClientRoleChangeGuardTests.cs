@@ -273,10 +273,10 @@ public class ClientRoleChangeGuardTests : IntegrationTestBase, IDisposable
 
     private static string NewName(string prefix) => $"{prefix}_{Guid.NewGuid():N}";
 
-    /// <summary>A role; a built-in one carries an rtWellKnownName like the roles of the Bootstrap blueprint.</summary>
+    /// <summary>A role; a built-in one carries an rtWellKnownName and counts as a platform role (<see cref="TestPlatformRoles" />).</summary>
     private async Task<string> NewRoleAsync(bool builtIn = false)
     {
-        var name = NewName(builtIn ? "b7928" : "c7928");
+        var name = NewName(builtIn ? TestPlatformRoles.Prefix + "b7928" : "c7928");
         using var scope = CreateScope();
         var role = new RtRoleBuilder().WithName(name).Build();
         if (builtIn)

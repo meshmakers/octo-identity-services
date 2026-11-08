@@ -13,7 +13,11 @@ public static class RoleChangeReasons
     /// <summary>The caller tried to add a direct role to their own user.</summary>
     public const string SelfGrant = "self-grant";
 
-    /// <summary>The caller tried to grant a built-in role they do not hold themselves.</summary>
+    /// <summary>
+    ///     The caller tried to grant a built-in role they do not hold themselves. Since AB#8564 a caller holding
+    ///     <c>UserManagement</c> is refused only for platform roles (<see cref="IPlatformRoleCatalog" />); app roles are free
+    ///     for them.
+    /// </summary>
     public const string RoleNotHeld = "role-not-held";
 
     /// <summary>The change would leave the tenant without a user that effectively holds <c>UserManagement</c>.</summary>
@@ -101,6 +105,12 @@ public sealed record RoleChangeDecision(string? Reason, IReadOnlyList<string> Ro
     /// <summary>The change may be applied.</summary>
     public static RoleChangeDecision Allowed { get; } = new(null, []);
 
+    /// <summary>
+    ///     AB#8564: the app roles an allowed change grants although the caller does not hold them (the caller holds
+    ///     <c>UserManagement</c>). Empty for a refusal and for a change that grants only held, custom or no roles.
+    /// </summary>
+    public IReadOnlyList<string> AppRolesNotHeld { get; init; } = [];
+
     /// <summary><c>true</c> when the change may be applied.</summary>
     public bool IsAllowed => Reason == null;
 
@@ -137,10 +147,13 @@ public interface IRoleChangeGuard
 
     /// <summary>
     ///     Checks only that the caller may grant <paramref name="addedRoleNames" />: every built-in role (a role with an
-    ///     <c>rtWellKnownName</c>) must be one the caller holds; custom roles are free.
+    ///     <c>rtWellKnownName</c>) must be one the caller holds; custom roles are free. AB#8564: a caller holding
+    ///     <c>UserManagement</c> may also grant app roles it does not hold; only platform roles (seeded by
+    ///     <c>System.Identity.Bootstrap</c>) must be held. <paramref name="target" /> names what is changed, e.g.
+    ///     <c>client my-client</c>, for the info log of such a grant.
     /// </summary>
     Task<RoleChangeDecision> EvaluateGrantAsync(RoleChangeCaller caller, IEnumerable<string> addedRoleNames,
-        CancellationToken cancellationToken = default);
+        CancellationToken cancellationToken = default, string? target = null);
 
     /// <summary>
     ///     Checks a change of a group or of an external tenant user mapping (AB#7927), in this order: self-grant (the change
@@ -164,7 +177,9 @@ internal sealed class RoleChangeGuard(
     IGroupRoleResolver groupRoleResolver,
     IUserStore<RtUser> userStore,
     IExternalTenantUserMappingStore mappingStore,
-    ICrossTenantShadowUserChainResolver chainResolver) : IRoleChangeGuard
+    ICrossTenantShadowUserChainResolver chainResolver,
+    IPlatformRoleCatalog platformRoles,
+    ILogger<RoleChangeGuard> logger) : IRoleChangeGuard
 {
     private const int MaxGroupDepth = 10;
 
@@ -181,7 +196,7 @@ internal sealed class RoleChangeGuard(
             return new RoleChangeDecision(RoleChangeReasons.SelfGrant, added);
         }
 
-        var grant = await EvaluateGrantAsync(request.Caller, added, cancellationToken).ConfigureAwait(false);
+        var grant = await EvaluateGrantCoreAsync(request.Caller, added, cancellationToken).ConfigureAwait(false);
         if (!grant.IsAllowed)
         {
             return grant;
@@ -198,13 +213,27 @@ internal sealed class RoleChangeGuard(
             return new RoleChangeDecision(RoleChangeReasons.LastAdministrator, [userManagement]);
         }
 
-        return RoleChangeDecision.Allowed;
+        return LogAppRoleGrant(request.Caller, grant, $"user {request.Target.RtId}");
     }
 
     public async Task<RoleChangeDecision> EvaluateGrantAsync(RoleChangeCaller caller,
-        IEnumerable<string> addedRoleNames, CancellationToken cancellationToken = default)
+        IEnumerable<string> addedRoleNames, CancellationToken cancellationToken = default, string? target = null)
     {
+        var decision = await EvaluateGrantCoreAsync(caller, addedRoleNames, cancellationToken).ConfigureAwait(false);
+        return decision.IsAllowed ? LogAppRoleGrant(caller, decision, target ?? "unspecified") : decision;
+    }
+
+    /// <summary>
+    ///     The grant rule: a built-in role the caller does not hold is refused, unless it is an app role and the caller holds
+    ///     <c>UserManagement</c> (AB#8564). A group or mapping that carries platform and app roles therefore needs only the
+    ///     platform roles held. Writes no log; the caller of this method logs once the whole change is allowed.
+    /// </summary>
+    private async Task<RoleChangeDecision> EvaluateGrantCoreAsync(RoleChangeCaller caller,
+        IEnumerable<string> addedRoleNames, CancellationToken cancellationToken)
+    {
+        var administersUsers = caller.Roles.Contains(CommonConstants.UserManagementRole, StringComparer.OrdinalIgnoreCase);
         var refused = new List<string>();
+        var appRoles = new List<string>();
         foreach (var name in addedRoleNames)
         {
             cancellationToken.ThrowIfCancellationRequested();
@@ -216,15 +245,42 @@ internal sealed class RoleChangeGuard(
             }
 
             var roleName = role.Name ?? name;
-            if (!caller.Roles.Contains(roleName, StringComparer.OrdinalIgnoreCase))
+            if (caller.Roles.Contains(roleName, StringComparer.OrdinalIgnoreCase))
             {
-                refused.Add(roleName);
+                continue;
             }
+
+            if (administersUsers && !platformRoles.IsPlatformRole(role))
+            {
+                appRoles.Add(roleName);
+                continue;
+            }
+
+            refused.Add(roleName);
         }
 
-        return refused.Count == 0
+        if (refused.Count > 0)
+        {
+            return new RoleChangeDecision(RoleChangeReasons.RoleNotHeld, refused);
+        }
+
+        return appRoles.Count == 0
             ? RoleChangeDecision.Allowed
-            : new RoleChangeDecision(RoleChangeReasons.RoleNotHeld, refused);
+            : RoleChangeDecision.Allowed with { AppRolesNotHeld = appRoles };
+    }
+
+    /// <summary>Writes the info log of an allowed grant of app roles the caller does not hold (AB#8564) and returns the decision.</summary>
+    private RoleChangeDecision LogAppRoleGrant(RoleChangeCaller caller, RoleChangeDecision decision, string target)
+    {
+        if (decision.AppRolesNotHeld.Count > 0)
+        {
+            var callerText = caller.Subject != null ? $"subject {caller.Subject}" : $"client {caller.ClientId}";
+            logger.LogInformation(
+                "Role change allowed (app-role-grant): caller {Caller}, target {Target}, app roles [{Roles}]",
+                callerText, target, string.Join(",", decision.AppRolesNotHeld));
+        }
+
+        return decision;
     }
 
     public async Task<RoleChangeDecision> EvaluateAsync(RoleChangeCaller caller, RoleGraphChange change,
@@ -235,6 +291,7 @@ internal sealed class RoleChangeGuard(
 
         var granted = new HashSet<string>(StringComparer.Ordinal);
         var self = false;
+        var allowed = RoleChangeDecision.Allowed;
         switch (change)
         {
             case RoleGraphChange.GroupRoles roles when graph.Groups.TryGetValue(roles.GroupId, out var group):
@@ -278,11 +335,13 @@ internal sealed class RoleChangeGuard(
                 return new RoleChangeDecision(RoleChangeReasons.SelfGrant, names);
             }
 
-            var grant = await EvaluateGrantAsync(caller, names, cancellationToken).ConfigureAwait(false);
+            var grant = await EvaluateGrantCoreAsync(caller, names, cancellationToken).ConfigureAwait(false);
             if (!grant.IsAllowed)
             {
                 return grant;
             }
+
+            allowed = grant;
         }
 
         var holdersBefore = graph.Holders();
@@ -296,8 +355,18 @@ internal sealed class RoleChangeGuard(
             }
         }
 
-        return RoleChangeDecision.Allowed;
+        return LogAppRoleGrant(caller, allowed, Describe(change));
     }
+
+    /// <summary>The target of a graph change for the log, in the words of the refusal log (<c>group 1234</c>).</summary>
+    private static string Describe(RoleGraphChange change) => change switch
+    {
+        RoleGraphChange.GroupRoles roles => $"group {roles.GroupId}",
+        RoleGraphChange.MemberAdded add => $"group {add.GroupId}, {add.Kind.ToString().ToLowerInvariant()} member {add.MemberId}",
+        RoleGraphChange.MappingRoles { MappingId: not null } mapping => $"mapping {mapping.MappingId}",
+        RoleGraphChange.MappingRoles mapping => $"new mapping {mapping.SourceTenantId}/{mapping.SourceUserName}",
+        _ => change.GetType().Name
+    };
 
     public RoleChangeDecision EvaluateRoleDefinition(RtRole role, string? newName)
     {

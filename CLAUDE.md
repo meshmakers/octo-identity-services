@@ -583,7 +583,8 @@ fail closed. A service account lacking the tenant's fachliche roles (e.g. Accoun
 the feature go quiet with no error anywhere. When setting up delegation for a tenant, grant
 `octo-pipeline-sa-{adapterRtId}` those roles as well —
 `PUT {tenantId}/v1/clients/{clientId}/roles/{roleName}` or `octo-cli AddClientToRole`. Since AB#7928 the caller must hold
-a built-in role itself to grant it to a client (403 `role-not-held` otherwise); custom roles are free.
+a built-in role itself to grant it to a client (403 `role-not-held` otherwise); custom roles are free, and since AB#8564 a caller holding
+`UserManagement` may also grant app roles (roles a blueprint other than `System.Identity.Bootstrap` seeds) it does not hold.
 
 **Deployment order:** identity first, then the Communication Controller. An identity that predates
 this change ignores the new fields and would create a secretless client.
@@ -1206,7 +1207,7 @@ AB#7927 (groups, mappings, role definitions, next section) and AB#7928 (client r
 | Rule (checked in this order, on the **difference** before/after, never on the full list) | REST | Method (`METHOD_FORBIDDEN`, parameter `reason`) |
 |---|---|---|
 | `self-grant`: caller `sub` == target rtId and a direct role is **added** (removing own roles and an unchanged list are fine) | 403 problem+json, `code` | `self-grant` |
-| `role-not-held`: an added **built-in** role (stored `RtWellKnownName`) is not in the caller's role claims; custom roles are free; removing is never judged | 403, `code`, `roleNames` | `role-not-held` + `roleNames` (comma separated) |
+| `role-not-held`: an added **built-in** role (stored `RtWellKnownName`) is not in the caller's role claims; custom roles are free; removing is never judged. Since AB#8564 a caller holding `UserManagement` is refused only for **platform** roles; **app** roles are free for it (section "App roles and platform roles" below) | 403, `code`, `roleNames` | `role-not-held` + `roleNames` (comma separated) |
 | `last-administrator`: the target effectively holds `UserManagement` now, not after the change, and **no other user** holds it (direct, through groups incl. nested, `xt_` shadow users through mappings via `IGroupRoleResolver`; **clients do not count**; a tenant with zero holders is not blocked) | 409, `code` | `last-administrator` |
 
 - **Caller** = `RoleChangeCaller` (`sub`, `client_id`, `role` claims of the validated token; for methods the validated `CkMethodPrincipal`, never the informational `Caller`).
@@ -1222,6 +1223,32 @@ AB#7927 (groups, mappings, role definitions, next section) and AB#7928 (client r
 - **Tests:** `Api/TenantApi/RoleChangeGuardTests` (every rule through REST and through the method handlers with the same assertions: self-grant, held/not held/custom, difference,
   client caller, last administrator direct/group/nested group/mapping/client-not-counted/zero holders, delete + merge, audit records), `UserRoleMethod*Tests` (updated parity),
   `RoleChangeCallerTests`. The tests that need "exactly one administrator" first remove every holder of the test database (`ClearAdministratorsAsync`).
+
+### App roles and platform roles (AB#8564)
+
+Tenant owners could not hand out the roles their own blueprints seed (e.g. `EnergyCommunityManagement` of EnergyCommunity.Base):
+`role-not-held` judged every built-in role alike. Decision by Gerald (2026-11-08): holders of `UserManagement` may grant **app roles**;
+**platform roles** keep the AB#7914 protection.
+
+- **Platform role** = a built-in role (stored `RtWellKnownName`) that `System.Identity.Bootstrap` seeds (today the 17 roles of
+  `seed-data/roles.yaml`: `TenantManagement`, `UserManagement`, `StreamDataAdmin`, `SecretManagement`, `DataModelManagement`, …).
+  **App role** = every other built-in role, i.e. one a blueprint installed in the tenant seeds. Custom roles (no `RtWellKnownName`) stay free for everybody.
+- **How the service knows.** `IPlatformRoleCatalog` / `BootstrapPlatformRoleCatalog` (`Authorization/RoleChange/PlatformRoleCatalog.cs`, singleton) reads the
+  seed files of the **embedded** Bootstrap blueprint (`IBlueprintEmbeddedSource` of `System.Identity.Bootstrap`, the same resources the service applies to every
+  tenant) once and collects `rtWellKnownName` and `rtId` of every `System.Identity/Role` entity. A role matches by either. No hand-kept name list: a role added to the
+  Bootstrap seed is a platform role with the same build. **Fail closed:** when no role can be read, every built-in role counts as a platform role (the old rule) and an
+  ERROR is logged. The engine stores no per-entity blueprint ownership (`BlueprintInstallation` has none), so the seed is the reliable source.
+- **Rule** (`RoleChangeGuard.EvaluateGrantCoreAsync`, used by direct user roles, client roles, group roles, group membership, group nesting and mappings): an added
+  built-in role the caller does not hold is allowed when the caller holds `UserManagement` **and** the role is not a platform role; otherwise `role-not-held`.
+  A group (or nested group tree) with app **and** platform roles needs only its platform roles held; the refusal lists only those. `self-grant` and
+  `last-administrator` are unchanged and still win (a tenant owner cannot add themselves to an app-role group). Callers without `UserManagement` get no relaxation.
+  The data-policy protection of AB#5859 (`identity.administration`) is untouched.
+- **Log.** Refusals are unchanged (WARN + `Identity.RoleChangeRefused`). An allowed grant of app roles the caller does not hold writes one INFO line
+  `Role change allowed (app-role-grant): caller …, target …, app roles [...]` (`RoleChangeDecision.AppRolesNotHeld`); it is written only when the whole change is allowed.
+- **Tests:** `Api/TenantApi/AppRoleGrantTests` (REST, real MongoDB, production catalog: direct grant to client and user, group membership, group roles, nesting, each with
+  app role / platform role / mixed group, caller with and without `UserManagement`, self-grant still refused), `Authorization/RoleChangeGuardAppRoleTests` (rule and INFO log),
+  `Authorization/PlatformRoleCatalogTests` (the 17 seed roles, app roles, rtId match, fail closed). The older guard tests create many distinct "built-in" roles; in the test host a
+  role whose `rtWellKnownName` starts with `platform-` counts as a platform role (`Infrastructure/TestPlatformRoles.cs`), so those AB#7914/7927/7928 tests keep judging platform roles.
 
 ### Role change guard on groups, mappings and role definitions (AB#7927)
 

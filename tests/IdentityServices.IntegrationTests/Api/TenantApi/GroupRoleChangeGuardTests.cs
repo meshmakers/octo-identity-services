@@ -572,10 +572,10 @@ public class GroupRoleChangeGuardTests : IntegrationTestBase, IDisposable
         return new { sourceTenantId, sourceUserId = user.RtId.ToString(), sourceUserName = userName, roleIds };
     }
 
-    /// <summary>A role; a built-in one carries an rtWellKnownName like the roles of the Bootstrap blueprint.</summary>
+    /// <summary>A role; a built-in one carries an rtWellKnownName and counts as a platform role (<see cref="TestPlatformRoles" />).</summary>
     private async Task<string> NewRoleAsync(bool builtIn = false)
     {
-        var name = NewName(builtIn ? "b7927" : "c7927");
+        var name = NewName(builtIn ? TestPlatformRoles.Prefix + "b7927" : "c7927");
         using var scope = CreateScope();
         var role = new RtRoleBuilder().WithName(name).Build();
         if (builtIn)

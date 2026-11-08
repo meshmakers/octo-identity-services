@@ -104,6 +104,8 @@ try
     // AB#7899: administrator revokes all sessions and tokens of a user / of the shadow users of a tenant.
     builder.Services.AddScoped<IUserSessionRevocationService, UserSessionRevocationService>();
     builder.Services.AddScoped<IRoleChangeGuard, RoleChangeGuard>(); // AB#7914
+    // AB#8564: platform roles = the roles of the embedded System.Identity.Bootstrap seed; other built-in roles are app roles.
+    builder.Services.AddSingleton<IPlatformRoleCatalog, BootstrapPlatformRoleCatalog>();
     builder.Services.AddScoped<IRoleChangeRefusals, RoleChangeRefusals>(); // AB#7927
     builder.Services.AddSingleton<IQrCodeService, QrCodeService>();
     builder.Services

@@ -167,10 +167,10 @@ public abstract class GroupMethodTestBase : IntegrationTestBase, IDisposable
 
     #region Data
 
-    /// <summary>A role; a built-in one carries an rtWellKnownName like the roles of the Bootstrap blueprint.</summary>
+    /// <summary>A role; a built-in one carries an rtWellKnownName and counts as a platform role (<see cref="TestPlatformRoles" />).</summary>
     protected async Task<string> NewRoleAsync(bool builtIn = false)
     {
-        var name = NewName(builtIn ? "b7779" : "c7779");
+        var name = NewName(builtIn ? TestPlatformRoles.Prefix + "b7779" : "c7779");
         using var scope = CreateScope();
         var role = new RtRoleBuilder().WithName(name).Build();
         if (builtIn)
@@ -178,6 +178,18 @@ public abstract class GroupMethodTestBase : IntegrationTestBase, IDisposable
             role.RtWellKnownName = name;
         }
 
+        (await scope.ServiceProvider.GetRequiredService<RoleManager<RtRole>>().CreateAsync(role)).Succeeded.Should()
+            .BeTrue();
+        return name;
+    }
+
+    /// <summary>An app role (AB#8564): built-in, but not one of the System.Identity.Bootstrap roles.</summary>
+    protected async Task<string> NewAppRoleAsync()
+    {
+        var name = NewName("app7779");
+        using var scope = CreateScope();
+        var role = new RtRoleBuilder().WithName(name).Build();
+        role.RtWellKnownName = name;
         (await scope.ServiceProvider.GetRequiredService<RoleManager<RtRole>>().CreateAsync(role)).Succeeded.Should()
             .BeTrue();
         return name;

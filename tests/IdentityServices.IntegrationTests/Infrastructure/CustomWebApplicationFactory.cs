@@ -2,6 +2,7 @@ using IdentityServerPersistence.Configuration.Options;
 using IdentityServices.IntegrationTests.Configuration;
 using IdentityServices.IntegrationTests.Fixtures;
 using MassTransit;
+using Meshmakers.Octo.Backend.IdentityServices.Authorization.RoleChange;
 using Meshmakers.Octo.Common.DistributionEventHub;
 using Meshmakers.Octo.Common.DistributionEventHub.Services;
 using Meshmakers.Octo.Runtime.Contracts.MongoDb;
@@ -321,6 +322,10 @@ public class CustomWebApplicationFactory : WebApplicationFactory<Program>, IAsyn
                 opts.SignInRateLimit.PermitsPerClientIpPerMinute = 100_000;
                 opts.SignInRateLimit.PermitsPerAccountPerMinute = 10_000;
             });
+
+            // AB#8564: test roles named platform-* count as platform roles; all others follow the real Bootstrap seed.
+            services.AddSingleton<BootstrapPlatformRoleCatalog>();
+            services.AddSingleton<IPlatformRoleCatalog, TestPlatformRoleCatalog>();
 
             // AB#7859: the security-stamp validator's clock, so a test can step past its revalidation interval.
             services.Configure<Microsoft.AspNetCore.Identity.SecurityStampValidatorOptions>(o =>
