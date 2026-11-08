@@ -171,7 +171,7 @@ public class UserManagementServiceTests
         await _sut.CreateAdminUserAsync(dto);
 
         // Assert
-        await _userManager.Received(13).AddToRoleAsync(Arg.Any<RtUser>(), Arg.Any<string>());
+        await _userManager.Received(14).AddToRoleAsync(Arg.Any<RtUser>(), Arg.Any<string>());
     }
 
     [Fact]
@@ -217,7 +217,7 @@ public class UserManagementServiceTests
 
         await _sut.CreateAdminUserAsync(dto);
 
-        await _userManager.Received(11).AddToRoleAsync(Arg.Any<RtUser>(), Arg.Any<string>());
+        await _userManager.Received(12).AddToRoleAsync(Arg.Any<RtUser>(), Arg.Any<string>());
         await _userManager.DidNotReceive().AddToRoleAsync(Arg.Any<RtUser>(), "FileManagement");
     }
 
@@ -242,6 +242,19 @@ public class UserManagementServiceTests
     }
 
     [Fact]
+    public async Task CreateAdminUserAsync_WithoutTenantOwners_GrantsDataModelManagement()
+    {
+        // AB#8529: importing CK models and installing blueprints require DataModelManagement in the asset repository;
+        // the direct-role fallback (no TenantOwners group) must not lock the first administrator out of it.
+        var dto = new AdminUserDto { EMail = "admin@test.com", Password = "SecurePass123!" };
+        ArrangeValidSetup(dto);
+
+        await _sut.CreateAdminUserAsync(dto);
+
+        await _userManager.Received(1).AddToRoleAsync(Arg.Any<RtUser>(), CommonConstants.DataModelManagementRole);
+    }
+
+    [Fact]
     public async Task CreateAdminUserAsync_WhenSecretManagementRoleIsMissing_StillGrantsTheOtherRoles()
     {
         // AB#5544: a tenant seeded by a bootstrap blueprint older than 1.7.0 has no SecretManagement role; the
@@ -259,7 +272,7 @@ public class UserManagementServiceTests
 
         await _sut.CreateAdminUserAsync(dto);
 
-        await _userManager.Received(12).AddToRoleAsync(Arg.Any<RtUser>(), Arg.Any<string>());
+        await _userManager.Received(13).AddToRoleAsync(Arg.Any<RtUser>(), Arg.Any<string>());
         await _userManager.DidNotReceive().AddToRoleAsync(Arg.Any<RtUser>(), CommonConstants.SecretManagementRole);
     }
 
@@ -385,7 +398,7 @@ public class UserManagementServiceTests
 
         await _sut.CreateAdminUserAsync(dto);
 
-        await _userManager.Received(13).AddToRoleAsync(Arg.Any<RtUser>(), Arg.Any<string>());
+        await _userManager.Received(14).AddToRoleAsync(Arg.Any<RtUser>(), Arg.Any<string>());
         await _groupStore.DidNotReceive().AddMemberUserAsync(Arg.Any<OctoObjectId>(), Arg.Any<string>());
     }
 
@@ -398,7 +411,7 @@ public class UserManagementServiceTests
 
         await _sut.CreateAdminUserAsync(dto);
 
-        await _userManager.Received(13).AddToRoleAsync(Arg.Any<RtUser>(), Arg.Any<string>());
+        await _userManager.Received(14).AddToRoleAsync(Arg.Any<RtUser>(), Arg.Any<string>());
         await _groupStore.DidNotReceive().AddMemberUserAsync(Arg.Any<OctoObjectId>(), Arg.Any<string>());
     }
 
@@ -422,6 +435,7 @@ public class UserManagementServiceTests
             CommonConstants.CommunicationManagementRole,
             CommonConstants.BotManagementRole,
             CommonConstants.AdminPanelManagementRole,
+            CommonConstants.DataModelManagementRole,
             CommonConstants.SecretManagementRole,
             CommonConstants.DashboardViewerRole,
             CommonConstants.DashboardManagementRole,

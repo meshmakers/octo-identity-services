@@ -1291,6 +1291,10 @@ also adds that user to the `TenantOwners` group (`AddToTenantOwnersAsync`, via `
 re-run is refused anyway while users exist) and optional like the file roles: a tenant without the group logs a warning and keeps the direct roles. The setup goes
 through the stores, not the guarded controllers, on purpose. The scratch-tenant creator (`ScratchTenantGrantService`) and cross-tenant admin provisioning
 (`AdminProvisioningController`) already put their subject into `TenantOwners`; nothing changed there.
+Since AB#8529 the direct-role fallback (tenant without `TenantOwners`, `AddDirectAdministratorRolesAsync`) also grants `DataModelManagement`: the asset
+repository's `DataModelManagementPolicy` requires that role for `ImportCk`, catalog imports, `FixAll`, blueprint install/update/uninstall and catalog
+refresh, so a fallback administrator would otherwise be locked out of every data model change. `TenantOwners` already carries the role (bootstrap seed,
+role `66…0B`), so no seed bump is needed.
 
 - **Tests:** `UserManagementServiceTests` (membership added / not twice / missing group) and `Api/Setup/SetupAdminTenantOwnersTests` (real MongoDB: setup via REST, the admin adds
   another user to `TenantOwners`, control case without the membership = 403 `role-not-held`, re-run refused without a second edge, guard not injected into setup/group store).
