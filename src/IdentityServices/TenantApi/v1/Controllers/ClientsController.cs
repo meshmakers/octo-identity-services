@@ -84,7 +84,8 @@ public class ClientsController : ControllerBase
         }
 
         var caller = RoleChangeCaller.FromPrincipal(User);
-        var decision = await _roleChangeGuard.EvaluateGrantAsync(caller, addedRoleNames, HttpContext.RequestAborted);
+        var decision = await _roleChangeGuard.EvaluateGrantAsync(caller, addedRoleNames, HttpContext.RequestAborted,
+            $"client {client.ClientId}");
         return decision.IsAllowed
             ? null
             : await _roleChangeRefusals.RefuseAsync(HttpContext, caller, decision, $"client {client.ClientId}");

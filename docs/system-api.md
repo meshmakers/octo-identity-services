@@ -101,6 +101,12 @@ removal of the last user that effectively holds `UserManagement` (`409`, `code: 
 `application/problem+json` with the `code` extension and a readable `title`. `PUT /users/{userName}/roles` validates all role ids first (unknown id: `404`, nothing changed) and writes only the
 difference. Every refusal is audited as `Identity.RoleChangeRefused`. The same rules apply to the methods `User.SetRoles/AddRole/RemoveRole` (see CLAUDE.md).
 
+**App roles (AB#8564).** A caller holding `UserManagement` (for example a member of `TenantOwners`) may grant **app roles** it does not hold: built-in roles that
+a blueprint other than `System.Identity.Bootstrap` seeds, such as `EnergyCommunityManagement`. This holds for every path above and below: direct user and client roles,
+group roles, group membership, group nesting and mappings. **Platform roles**, the roles `System.Identity.Bootstrap` seeds (`TenantManagement`, `UserManagement`,
+`StreamDataAdmin`, `SecretManagement`, `DataModelManagement`, …), must still be held (`403 role-not-held`); in a group that carries both, only its platform roles must be
+held and `roleNames` lists only those. Callers without `UserManagement` keep the old rule. Every allowed app-role grant is logged at INFO with caller, target and roles.
+
 **Role change rules for groups, mappings and role definitions (AB#7927).** The same guard judges `PUT /groups/{id}/roles`, `PUT`/`DELETE /groups/{id}/members/users|groups/{id}`,
 `PUT /groups/{id}/members/clients/{id}`, `DELETE /groups/{id}` and create/update/delete of external tenant user mappings: `403 self-grant`, `403 role-not-held` (built-in roles the caller does not hold,
 also through nested groups), `409 last-administrator` (nobody effectively holds `UserManagement` afterwards). `PUT /roles/{roleName}` with another name and `DELETE /roles/{roleName}` of a built-in
@@ -177,8 +183,8 @@ Transfers all external logins (e.g., Google, Microsoft) from the source user to 
 | DELETE | `/clients/{id}/roles/{roleName}` | ReadWrite | Remove one role by name |
 
 **Client role rules (AB#7928).** `PUT /clients/{id}/roles` and `PUT /clients/{id}/roles/{roleName}` refuse to give a client a built-in role
-(stored `rtWellKnownName`) the caller does not hold: `403`, `application/problem+json`, `code: role-not-held`, `roleNames`. Custom roles are
-free, only the added roles are judged (a role the client already holds and any removal pass), and `PUT /clients/{id}/roles` validates every
+(stored `rtWellKnownName`) the caller does not hold: `403`, `application/problem+json`, `code: role-not-held`, `roleNames`. App roles are
+free for a caller holding `UserManagement` (AB#8564, see above). Custom roles are free, only the added roles are judged (a role the client already holds and any removal pass), and `PUT /clients/{id}/roles` validates every
 role id first (unknown or malformed id: `404`, nothing written) and writes only the difference (kept roles are not written again). Every refusal is audited as `Identity.RoleChangeRefused`. Service-internal
 client provisioning over the bus (service accounts, client mirroring) is not affected.
 

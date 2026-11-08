@@ -42,7 +42,8 @@ public class ClientsControllerRoleGuardTests
         _clientStore.FindRtClientByIdAsync(ClientId).Returns(_client);
         _notHeld = Role("BuiltInNotHeld");
         _custom = Role("Custom");
-        _guard.EvaluateGrantAsync(Arg.Any<RoleChangeCaller>(), Arg.Any<IEnumerable<string>>(), Arg.Any<CancellationToken>())
+        _guard.EvaluateGrantAsync(Arg.Any<RoleChangeCaller>(), Arg.Any<IEnumerable<string>>(), Arg.Any<CancellationToken>(),
+                Arg.Any<string?>())
             .Returns(RoleChangeDecision.Allowed);
 
         _sut = new ClientsController(_clientStore, Substitute.For<IDistributionEventHubService>(), _clientRoleStore,
@@ -76,7 +77,8 @@ public class ClientsControllerRoleGuardTests
 
         result.Should().BeOfType<OkResult>();
         await _guard.Received(1).EvaluateGrantAsync(Arg.Any<RoleChangeCaller>(),
-            Arg.Is<IEnumerable<string>>(n => n.SequenceEqual(new[] { "Custom" })), Arg.Any<CancellationToken>());
+            Arg.Is<IEnumerable<string>>(n => n.SequenceEqual(new[] { "Custom" })), Arg.Any<CancellationToken>(),
+            $"client {ClientId}");
         await _clientRoleStore.Received(1).ApplyRoleChangesAsync(_client.RtId,
             Arg.Is<IReadOnlyCollection<string>>(a => a.SequenceEqual(new[] { _custom.RtId.ToString() })),
             Arg.Is<IReadOnlyCollection<string>>(r => r.Count == 0));

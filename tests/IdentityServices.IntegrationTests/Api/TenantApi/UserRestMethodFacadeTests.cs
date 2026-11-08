@@ -388,7 +388,7 @@ public class UserRestMethodFacadeTests : IntegrationTestBase, IDisposable
 
     private async Task<string> NewRoleAsync(bool builtIn = false)
     {
-        var name = NewName(builtIn ? "b8412" : "c8412");
+        var name = NewName(builtIn ? TestPlatformRoles.Prefix + "b8412" : "c8412");
         using var scope = CreateScope();
         var role = new RtRoleBuilder().WithName(name).Build();
         if (builtIn)
