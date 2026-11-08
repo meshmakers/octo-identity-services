@@ -736,7 +736,8 @@ PUT {S}/v1/CrossTenantGrantPermissions  { "targetTenantIds": ["customer-a", "cus
   (`IdentityCrossTenantGrantPermissionsPolicy`). T's administrators get `403`; no route reveals which tenants S permits.
   A non-permitted T gets the same `404 SourceUserNotFound` as for a tenant that does not exist.
 - **Withdrawal:** removing T stops T's lookups and new grants with the next request; grants that already exist are
-  refused at T's next token exchange (`access_denied`, AB#8343; deletion and the last effective role: AB#8344).
+  refused at T's next token exchange (`access_denied`, AB#8343; deletion and the last effective role: AB#8344, see
+  *Removing a Sibling-Tenant Grant*).
 - **Audit:** every change is written into S's event log, category `Identity.CrossTenantGrantPermissionsChanged`
   (details `actorTenantId`, `actorName`, `sourceTenantId`, `permittedTargetTenantIds`, `addedTargetTenantIds`,
   `removedTargetTenantIds`); a `PUT` that leaves the list unchanged writes no event. See *Cross-Tenant Grant Audit Events*.
@@ -1246,9 +1247,53 @@ POST {T}/v1/ExternalTenantUserMappings
 caller) admits a source that is no registry ancestor of T only when T holds a mapping for (S, user) **and** S permits T at
 that moment. Withdrawn permission with a mapping in place → the exchange answers `access_denied` with the description
 prefix `grant_not_permitted` (`TenantExchangeProcessor.GrantNotPermittedMarker`); no mapping → `unauthorized_client` as
-before. Either way nothing is written into T (AB#8304). On the first admitted exchange the `xt_{S}_{user}` shadow user is
+before (a removed grant answers `access_denied`, AB#8344 below). Either way nothing is written into T (AB#8304). On the first admitted exchange the `xt_{S}_{user}` shadow user is
 created with exactly the roles of the mapping's groups and its direct roles — nothing from S, nothing else in T. Ancestor
 sources keep their rules (provider opt-in and registry, AB#8339).
+
+### Removing a Sibling-Tenant Grant (AB#8344)
+
+An administrator of T who removes a sibling user's grant can rely on that user getting **no new T token**. The gate
+(`ValidateCrossTenantAccessAsync`, every tenant-switch caller) judges the grant at every exchange, nothing is cached:
+
+| Change in T or S | Next exchange into T |
+|------------------|----------------------|
+| `DELETE {T}/v1/ExternalTenantUserMappings/{rtId}` or `DELETE {parent}/v1/AdminProvisioning/{T}/{rtId}` | `access_denied`, description prefix `tenant_not_provisioned` |
+| the mapping stays, but is member of no group any more and has no direct `roleIds` | `access_denied`, `tenant_not_provisioned` |
+| the mapping's groups grant no role any more (roles removed from the group, nested groups included) | `access_denied`, `tenant_not_provisioned` |
+| S removes T from its allow-list (`PUT {S}/v1/CrossTenantGrantPermissions`, AB#8345) while the mapping exists | `access_denied`, prefix `grant_not_permitted` |
+
+- **Effective role of the grant.** A sibling user passes only while the mapping itself grants a role that exists in T:
+  its direct `roleIds` and the roles of all its groups taken together. Removing one of two groups keeps the roles of the
+  other; only when nothing is left is the user refused. A direct `roleIds` entry of a role that was deleted later grants
+  nothing (the id stays in the list, the gate ignores it).
+- **What the refused user is told.** The description keeps the `tenant_not_provisioned` prefix, but for a removed or
+  role-less sibling grant it says that the grant from the source tenant was removed or grants no role and that an
+  administrator of T must grant access again — a new grant (`POST {T}/v1/ExternalTenantUserMappings` with groups), not
+  `ProvisionCurrentUser -ttid`, which serves registry-ancestor sources only.
+- **The mapping is the grant.** A role or group a T administrator attached directly to the `xt_` shadow user adds to the
+  grant while the grant holds; it does **not** keep the sibling user in T once the mapping is deleted or grants nothing.
+  Such direct edges are neither removed nor honoured then (no write on the shadow user); for a registry-ancestor source
+  they keep counting as before (`Exchange_AfterDirectRoleGrantToTheShadowUser_Succeeds`). Nothing is materialised on the
+  shadow user from the mapping (roles are resolved at token time, AB#5708), so there is nothing else to strip.
+- **No edge stays behind.** Deleting a mapping (`DeleteOptions.Erase`) removes its `GroupMember` edges with it; a group
+  lists no member that no longer exists. Re-granting the same user afterwards is a plain create (no `409`) and yields the
+  new groups' roles only; the existing shadow user is used again.
+- **Tokens already issued.** An access token from an earlier exchange is self-contained and stays valid until its `exp`.
+  Exchanged tokens carry **no refresh token** (`offline_access` is removed) and live as long as the exchanging client's
+  `AccessTokenLifetime` (seeded default 3600 s = 1 h; check the client, e.g. `octo-cli`, `octo-mcpServices-device`). So
+  the removal is complete at the latest one access-token lifetime after it. A session that needs T again re-exchanges
+  and is refused.
+- **Left-over shadow user.** The role-less `xt_` user stays in T; the cleanup of AB#8305 removes it.
+- **Audit.** The removal is `Identity.CrossTenantGrantRemoved` (T, and S when S admits T); every refused exchange from
+  the sibling source is `Identity.CrossTenantExchangeRefused` in T and S with `reason` = `grant was removed from target
+  tenant`, `grant has no effective role in target tenant` or `source tenant does not permit the target tenant`, next to
+  the `Token Exchange Failure` event in T.
+- Tests: `SiblingTenantGrantTests` (revocation region; the membership, group-role and dead-role cases give the shadow
+  user a direct role, so only the grant check refuses), `CrossTenantGrantAuditTests.ExchangeAfterTheGrantWasDeleted_*`,
+  `CrossTenantSecondFactorTests.TokenExchange_AfterTheGrantIsDeleted_*` (HTTP, child tenant as source: proves the token
+  lifetime only — no refresh token, `exp` = `expires_in`, issued token still valid after the deletion, next exchange
+  `access_denied`).
 
 The admin-provisioning routes (`POST adminProvisioning/{target}`, `…/withGroups`, routed via a parent tenant) are
 unchanged: registry ancestors only, and `withGroups` still skips unknown group ids.

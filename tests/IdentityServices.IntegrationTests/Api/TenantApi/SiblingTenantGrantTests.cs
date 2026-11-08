@@ -14,7 +14,10 @@ using Meshmakers.Octo.Communication.Contracts.DataTransferObjects.ApiErrors;
 using Meshmakers.Octo.ConstructionKit.Contracts;
 using Meshmakers.Octo.Runtime.Contracts.MongoDb;
 using Meshmakers.Octo.Runtime.Contracts.MongoDb.Repositories;
+using Meshmakers.Octo.Runtime.Contracts;
+using Meshmakers.Octo.Runtime.Contracts.Repositories;
 using Meshmakers.Octo.Runtime.Contracts.Repositories.Query;
+using Meshmakers.Octo.Runtime.Contracts.RepositoryEntities;
 using Meshmakers.Octo.Services.Infrastructure;
 using Meshmakers.Octo.Services.Infrastructure.Services;
 using Microsoft.AspNetCore.Http;
@@ -22,6 +25,9 @@ using Microsoft.Extensions.DependencyInjection;
 using Persistence.IdentityCkModel.Generated.System.Identity.v3;
 using Xunit;
 using static OpenIddict.Abstractions.OpenIddictConstants;
+// Communication.Contracts also ships a CrossTenantGrantPermissionsDto (AB#8346); the test sends the controller's own.
+using CrossTenantGrantPermissionsDto =
+    Meshmakers.Octo.Backend.IdentityServices.TenantApi.v1.Controllers.CrossTenantGrantPermissionsDto;
 
 namespace IdentityServices.IntegrationTests.Api.TenantApi;
 
@@ -225,11 +231,266 @@ public class SiblingTenantGrantTests(CustomWebApplicationFactory factory) : Inte
         (await MappingsAsync(target)).Should().BeEmpty();
     }
 
+    // ------------------------------------------------------------------ revocation (AB#8344)
+
+    [Fact]
+    public async Task DeletingTheGrant_RefusesTheNextExchangeWithAccessDenied_AndLeavesNoEdgeOfTheMapping()
+    {
+        var g = await GrantedAndSwitchedInAsync();
+
+        var delete = await AdminClient().DeleteAsync($"/{g.Target}/v1/ExternalTenantUserMappings/{g.Mapping.RtId}",
+            TestContext.Current.CancellationToken);
+        delete.StatusCode.Should().Be(HttpStatusCode.OK);
+
+        await AssertRevokedAsync(g, "the grant was deleted");
+        await AssertNoEdgeOfAsync(g.Target, g.Mapping, g.Group);
+    }
+
+    [Fact]
+    public async Task DeletingTheGrantThroughAdminProvisioning_RefusesTheNextExchange_AndLeavesNoEdgeOfTheMapping()
+    {
+        var g = await GrantedAndSwitchedInAsync();
+
+        var delete = await AdminClient().DeleteAsync(
+            $"/{NormalizedSystemTenantId}/v1/AdminProvisioning/{g.Target}/{g.Mapping.RtId}",
+            TestContext.Current.CancellationToken);
+        delete.StatusCode.Should().Be(HttpStatusCode.OK);
+
+        await AssertRevokedAsync(g, "the grant was deleted through the AdminProvisioning route");
+        await AssertNoEdgeOfAsync(g.Target, g.Mapping, g.Group);
+    }
+
+    [Fact]
+    public async Task RemovingTheGrantsOnlyGroupMembership_RefusesTheNextExchange()
+    {
+        var g = await GrantedAndSwitchedInAsync();
+        await GiveDirectRoleToShadowUserAsync(g);
+
+        await GroupsOf(g.Target).RemoveMemberExternalUserAsync(g.Group.Id, g.Mapping.RtId.ToString());
+
+        await AssertRevokedAsync(g, "the mapping stays, but is member of no group any more");
+        (await MappingsAsync(g.Target)).Should().ContainSingle("removing the membership does not delete the grant");
+    }
+
+    [Fact]
+    public async Task EmptyingTheGroupsRoles_RefusesTheNextExchange()
+    {
+        var g = await GrantedAndSwitchedInAsync();
+        await GiveDirectRoleToShadowUserAsync(g);
+
+        await GroupsOf(g.Target).SetRoleIdsAsync(g.Group.Id, []);
+
+        await AssertRevokedAsync(g, "the mapping's only group grants no role any more");
+    }
+
+    [Fact]
+    public async Task RemovingOneOfTwoGroups_KeepsTheRolesOfTheOtherGroup()
+    {
+        var g = await GrantedAndSwitchedInAsync();
+        var r3 = await InsertRoleAsync(g.Target, "r3");
+        var second = await InsertGroupAsync(g.Target, "gr2", r3.Id);
+        await GroupsOf(g.Target).AddMemberExternalUserAsync(second.Id, g.Mapping.RtId.ToString());
+
+        await GroupsOf(g.Target).RemoveMemberExternalUserAsync(g.Group.Id, g.Mapping.RtId.ToString());
+        var (outcome, roles) = await ExchangeAsync(g.Target, g.Source, g.Bob.Id.ToString());
+
+        outcome.Error.Should().BeNull("another group of the grant still grants a role: {0}", outcome.ErrorDescription);
+        roles.Should().BeEquivalentTo([r3.Name], "only the remaining group's roles");
+    }
+
+    [Fact]
+    public async Task WithdrawingThePermission_AfterTheUserSwitchedIn_RefusesTheNextExchangeWithGrantNotPermitted()
+    {
+        var (source, target) = await SiblingsAsync(permitted: false);
+        await SetAllowListAsync(source, [target]);
+        var g = await GrantedAndSwitchedInAsync(source, target);
+
+        await SetAllowListAsync(source, []);
+        var (outcome, _) = await ExchangeAsync(g.Target, g.Source, g.Bob.Id.ToString());
+
+        outcome.Error.Should().Be(Errors.AccessDenied);
+        outcome.ErrorDescription.Should().StartWith(TenantExchangeProcessor.GrantNotPermittedMarker);
+        outcome.ShadowUser.Should().BeNull();
+        (await MappingsAsync(g.Target)).Should().ContainSingle("the grant stays; S's permission decides");
+    }
+
+    [Fact]
+    public async Task ARoleGivenDirectlyToTheShadowUser_DoesNotOutliveTheGrant()
+    {
+        // The mapping is the grant of a sibling user: a role a T administrator attached to the xt_ user directly
+        // counts only while the mapping itself grants a role (concept §8). It is neither removed nor honoured after.
+        var g = await GrantedAndSwitchedInAsync();
+        var direct = await InsertRoleAsync(g.Target, "dir");
+        await GiveDirectRoleAsync(g.Target, g.ShadowUser, direct.Name);
+        (await ExchangeAsync(g.Target, g.Source, g.Bob.Id.ToString())).Roles.Should()
+            .BeEquivalentTo([g.R1.Name, g.R2.Name, direct.Name], "while the grant holds, the direct role adds to it");
+
+        await GroupsOf(g.Target).RemoveMemberExternalUserAsync(g.Group.Id, g.Mapping.RtId.ToString());
+        await AssertRevokedAsync(g, "the mapping grants nothing; the shadow user's direct role does not keep bob in T");
+
+        (await AdminClient().DeleteAsync($"/{g.Target}/v1/ExternalTenantUserMappings/{g.Mapping.RtId}",
+            TestContext.Current.CancellationToken)).StatusCode.Should().Be(HttpStatusCode.OK);
+        await AssertRevokedAsync(g, "the grant is gone; the shadow user's direct role does not keep bob in T");
+    }
+
+    [Fact]
+    public async Task AMappedRoleThatNoLongerExists_GrantsNothing()
+    {
+        // MappedRoleIds is a free string list, not an association: deleting the role leaves its id behind. A dead id
+        // grants no role in T (as in OctoUserStore.GetRolesAsync), so it must not keep the grant alive either.
+        var g = await GrantedAndSwitchedInAsync();
+        await GiveDirectRoleToShadowUserAsync(g);
+        var mapped = await InsertRoleAsync(g.Target, "map");
+        await SetMappedRoleIdsAsync(g.Target, g.Mapping.RtId, [mapped.Id.ToString()]);
+        await GroupsOf(g.Target).RemoveMemberExternalUserAsync(g.Group.Id, g.Mapping.RtId.ToString());
+        var (admitted, _) = await ExchangeAsync(g.Target, g.Source, g.Bob.Id.ToString());
+        admitted.Error.Should().BeNull("the mapping's own role grants access: {0}", admitted.ErrorDescription);
+
+        await DeleteRoleAsync(g.Target, mapped.Id);
+
+        await AssertRevokedAsync(g, "the mapping names only a role that no longer exists in T");
+        (await MappingsAsync(g.Target)).Should().ContainSingle().Which.MappedRoleIds.Should()
+            .Contain(mapped.Id.ToString(), "the dead id stays in the list; only the gate ignores it");
+    }
+
+    [Fact]
+    public async Task RegrantingAfterDeletion_IsACreate_AndYieldsOnlyTheNewGroupsRoles()
+    {
+        var g = await GrantedAndSwitchedInAsync();
+        (await AdminClient().DeleteAsync($"/{g.Target}/v1/ExternalTenantUserMappings/{g.Mapping.RtId}",
+            TestContext.Current.CancellationToken)).StatusCode.Should().Be(HttpStatusCode.OK);
+        await AssertRevokedAsync(g, "the grant was deleted");
+
+        var r3 = await InsertRoleAsync(g.Target, "r3");
+        var newGroup = await InsertGroupAsync(g.Target, "new", r3.Id);
+        var create = await CreateAsync(g.Target, g.Source, g.Bob, groupIds: [newGroup.Id.ToString()]);
+
+        create.StatusCode.Should().Be(HttpStatusCode.Created, "no 409 from the deleted mapping: {0}",
+            await create.Content.ReadAsStringAsync(TestContext.Current.CancellationToken));
+        var (outcome, roles) = await ExchangeAsync(g.Target, g.Source, g.Bob.Id.ToString());
+        outcome.Error.Should().BeNull(outcome.ErrorDescription);
+        outcome.ShadowUser!.RtId.Should().Be(g.ShadowUser.RtId, "the existing shadow user is used again");
+        roles.Should().BeEquivalentTo([r3.Name], "only the new group's roles, nothing of the removed grant");
+    }
+
     // ------------------------------------------------------------------ helpers
 
     private sealed record TestUser(OctoObjectId Id, string UserName, string Email);
 
     private sealed record Named(OctoObjectId Id, string Name);
+
+    private sealed record Granted(
+        string Source,
+        string Target,
+        TestUser Bob,
+        Named R1,
+        Named R2,
+        Named Group,
+        RtExternalTenantUserMapping Mapping,
+        RtUser ShadowUser);
+
+    /// <summary>AB#8344 arrangement: bob of S, granted in T with one group (roles R1, R2), switched into T once.</summary>
+    private async Task<Granted> GrantedAndSwitchedInAsync(string? source = null, string? target = null)
+    {
+        if (source == null || target == null)
+        {
+            (source, target) = await SiblingsAsync(permitted: true);
+        }
+
+        var bob = await InsertUserAsync(source, "bob");
+        var r1 = await InsertRoleAsync(target, "r1");
+        var r2 = await InsertRoleAsync(target, "r2");
+        var group = await InsertGroupAsync(target, "grp", r1.Id, r2.Id);
+        (await CreateAsync(target, source, bob, groupIds: [group.Id.ToString()])).StatusCode.Should()
+            .Be(HttpStatusCode.Created);
+
+        var (outcome, roles) = await ExchangeAsync(target, source, bob.Id.ToString());
+        outcome.Error.Should().BeNull(outcome.ErrorDescription);
+        roles.Should().BeEquivalentTo([r1.Name, r2.Name]);
+
+        var mapping = (await MappingsAsync(target)).Should().ContainSingle().Subject;
+        return new Granted(source, target, bob, r1, r2, group, mapping, outcome.ShadowUser!);
+    }
+
+    /// <summary>
+    ///     The next exchange is refused with <c>access_denied</c> (<c>tenant_not_provisioned</c>), issues nothing and creates
+    ///     nothing; the left-over shadow user stays for the cleanup of AB#8305.
+    /// </summary>
+    private async Task AssertRevokedAsync(Granted g, string because)
+    {
+        var (outcome, _) = await ExchangeAsync(g.Target, g.Source, g.Bob.Id.ToString());
+
+        outcome.Error.Should().Be(Errors.AccessDenied, because);
+        outcome.ErrorDescription.Should().StartWith(TenantExchangeProcessor.NotProvisionedMarker, because);
+        outcome.ErrorDescription.Should().Contain("must grant the user access again", "a sibling user needs a new grant")
+            .And.NotContain("ProvisionCurrentUser", "that route serves ancestor sources only");
+        outcome.ShadowUser.Should().BeNull(because);
+        (await ShadowUsersAsync(g.Target)).Should().ContainSingle(because)
+            .Which.RtId.Should().Be(g.ShadowUser.RtId, "this story does not delete the shadow user (AB#8305 does)");
+    }
+
+    /// <summary>No association of any role (GroupMember, AssignedRole, …) still points at or from the deleted mapping.</summary>
+    private async Task AssertNoEdgeOfAsync(string tenantId, RtExternalTenantUserMapping mapping, Named group)
+    {
+        (await MappingsAsync(tenantId)).Should().BeEmpty();
+        var repo = await RepositoryOfAsync(tenantId);
+        using (var session = await repo.GetSessionAsync())
+        {
+            session.StartTransaction();
+            var edges = await repo.GetRtAssociationsAsync(session, mapping.ToRtEntityId(),
+                RtAssociationExtendedQueryOptions.Create(GraphDirections.Any));
+            await session.CommitTransactionAsync();
+            edges.Items.Should().BeEmpty("the delete takes every edge of the mapping with it");
+        }
+
+        (await GroupsOf(tenantId).GetAllMemberSubjectIdsAsync(group.Id)).Should()
+            .NotContain(mapping.RtId.ToString(), "the group lists no member that does not exist");
+    }
+
+    private GroupStore GroupsOf(string tenantId)
+        => new(new FixedTenantResolver(RepositoryOfAsync(tenantId).GetAwaiter().GetResult()));
+
+    private async Task GiveDirectRoleAsync(string tenantId, RtUser user, string roleName)
+    {
+        var repo = await RepositoryOfAsync(tenantId);
+        var resolver = new FixedTenantResolver(repo);
+        var chainResolver = new CrossTenantShadowUserChainResolver(Factory.Services.GetRequiredService<ISystemContext>());
+        var userStore = new OctoUserStore(resolver,
+            new GroupRoleResolver(new GroupStore(resolver), new ExternalTenantUserMappingStore(resolver), chainResolver),
+            null);
+        await userStore.AddToRoleAsync(user, roleName.ToUpperInvariant(), TestContext.Current.CancellationToken);
+    }
+
+    /// <summary>
+    ///     A role a T administrator attached to bob's <c>xt_</c> user directly. It keeps the user's role set non-empty, so
+    ///     a refusal afterwards comes from the sibling gate (AB#8344) and not from the no-role check of the exchange.
+    /// </summary>
+    private async Task GiveDirectRoleToShadowUserAsync(Granted g)
+    {
+        var direct = await InsertRoleAsync(g.Target, "dir");
+        await GiveDirectRoleAsync(g.Target, g.ShadowUser, direct.Name);
+    }
+
+    private async Task SetMappedRoleIdsAsync(string tenantId, OctoObjectId mappingId, List<string> roleIds)
+    {
+        var repo = await RepositoryOfAsync(tenantId);
+        using var session = await repo.GetSessionAsync();
+        session.StartTransaction();
+        var mapping = await repo.GetRtEntityByRtIdAsync<RtExternalTenantUserMapping>(session, mappingId);
+        mapping!.MappedRoleIds = new AttributeStringValueList(roleIds);
+        await repo.ReplaceOneRtEntityByIdAsync(session, mapping.RtId, mapping);
+        await session.CommitTransactionAsync();
+    }
+
+    /// <summary>Removes the role entity only — no store, so nothing strips its id from a mapping's <c>MappedRoleIds</c>.</summary>
+    private async Task DeleteRoleAsync(string tenantId, OctoObjectId roleId)
+    {
+        var repo = await RepositoryOfAsync(tenantId);
+        using var session = await repo.GetSessionAsync();
+        session.StartTransaction();
+        await repo.DeleteOneRtEntityByRtIdAsync<RtRole>(session, roleId, DeleteOptions.Erase);
+        await session.CommitTransactionAsync();
+    }
 
     private HttpClient AdminClient()
     {

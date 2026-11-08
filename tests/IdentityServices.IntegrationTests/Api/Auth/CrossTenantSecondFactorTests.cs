@@ -10,16 +10,20 @@ using IdentityServerPersistence.Services;
 using IdentityServerPersistence.SystemStores;
 using IdentityServices.IntegrationTests.Infrastructure;
 using IdentityServices.IntegrationTests.Persistence;
+using IdentityServerPersistence.Configuration.Options;
 using Meshmakers.Octo.Backend.IdentityServices.Controllers.Api;
+using Meshmakers.Octo.Backend.IdentityServices.OpenIddict;
 using Meshmakers.Octo.ConstructionKit.Contracts;
 using Meshmakers.Octo.Runtime.Contracts;
 using Meshmakers.Octo.Runtime.Contracts.MongoDb;
+using Meshmakers.Octo.Runtime.Contracts.Repositories.Query;
 using Meshmakers.Octo.Runtime.Contracts.RepositoryEntities;
 using Meshmakers.Octo.Services.Infrastructure.Services;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
 using Microsoft.IdentityModel.JsonWebTokens;
+using OpenIddict.Server;
 using OtpNet;
 using Persistence.IdentityCkModel.Generated.System.Identity.v3;
 using Shared.TestUtilities.Builders;
@@ -409,6 +413,59 @@ public class CrossTenantSecondFactorTests : IntegrationTestBase
         status.Should().Be(HttpStatusCode.OK, "the subject token proves the second factor (error: {0})", ErrorOf(body));
         var exchanged = JsonNode.Parse(body)!["access_token"]!.GetValue<string>();
         AmrOf(exchanged).Should().Contain("mfa", "the evidence travels with the exchanged token (chained exchanges)");
+    }
+
+    [Fact]
+    public async Task TokenExchange_AfterTheGrantIsDeleted_IsAccessDenied_WhileTheIssuedTokenStaysValidOnlyUntilItsExp()
+    {
+        // AB#8344: removing a grant stops the NEXT exchange; a token issued before is self-contained, carries no refresh
+        // token and is accepted until its exp — the client's access token lifetime — and not beyond.
+        var ct = TestContext.Current.CancellationToken;
+        var childTenantId = await CreateChildTenantAsync();
+        var userName = $"xt2fa_exch_revoke_{Guid.NewGuid():N}";
+        var rtUser = await CreateTestUserAsync(userName, password: DefaultPassword);
+        await GrantChildRoleAsync(childTenantId, rtUser.RtId.ToString(), userName);
+        var session = (await LoginAndGetAuthenticatedClientAsync(userName, DefaultPassword, ct))!;
+        var subjectToken = await GetAccessTokenAsync(session, ct);
+
+        var (status, body) = await ExchangeAsync(subjectToken, childTenantId, ct);
+        status.Should().Be(HttpStatusCode.OK, "the grant holds (error: {0})", ErrorOf(body));
+        var response = JsonNode.Parse(body)!.AsObject();
+        response.ContainsKey("refresh_token").Should().BeFalse("an exchanged token never carries a refresh token");
+        var issued = new JsonWebToken(response["access_token"]!.GetValue<string>());
+        var expiresIn = response["expires_in"]!.GetValue<long>();
+        (issued.ValidTo - issued.IssuedAt).TotalSeconds.Should().BeApproximately(expiresIn, 1);
+        expiresIn.Should().BeInRange(1, 3600, "short-lived: the exchanging client's AccessTokenLifetime (default 3600 s)");
+
+        var mappingId = await MappingIdOfAsync(childTenantId, rtUser.RtId.ToString());
+        var admin = CreateAuthenticatedClient(userId: OctoObjectId.GenerateNewId().ToString(), roles: ["UserManagement"]);
+        (await admin.DeleteAsync($"/{childTenantId}/v1/ExternalTenantUserMappings/{mappingId}", ct)).StatusCode
+            .Should().Be(HttpStatusCode.OK);
+
+        var (refusedStatus, refusedBody) = await ExchangeAsync(subjectToken, childTenantId, ct);
+        refusedStatus.Should().NotBe(HttpStatusCode.OK, "the grant is gone");
+        ErrorOf(refusedBody).Should().StartWith($"access_denied: {TenantExchangeProcessor.NotProvisionedMarker}");
+
+        var validation = SubjectTokenValidation.ForAccessToken(
+            Factory.Services.GetRequiredService<IOptions<OctoIdentityServicesOptions>>().Value.AuthorityUrl,
+            Factory.Services.GetRequiredService<IOptionsMonitor<OpenIddictServerOptions>>().CurrentValue
+                .SigningCredentials.Select(c => c.Key));
+        var handler = new JsonWebTokenHandler();
+        (await handler.ValidateTokenAsync(issued.EncodedToken, validation)).IsValid.Should()
+            .BeTrue("the token issued before the deletion is still accepted — lifetime validation ends it at its exp");
+
+    }
+
+    private async Task<string> MappingIdOfAsync(string tenantId, string sourceUserId)
+    {
+        var repo = (await Factory.Services.GetRequiredService<ISystemContext>().TryFindTenantRepositoryAsync(tenantId))!;
+        using var session = await repo.GetSessionAsync();
+        session.StartTransaction();
+        var mappings = await repo.GetRtEntitiesByTypeAsync<RtExternalTenantUserMapping>(session,
+            RtEntityQueryOptions.Create()
+                .FieldEquals(nameof(RtExternalTenantUserMapping.SourceUserId), sourceUserId));
+        await session.CommitTransactionAsync();
+        return mappings.Items.Single().RtId.ToString();
     }
 
     [Fact]
