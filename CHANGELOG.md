@@ -20,6 +20,15 @@ Notable changes of the OctoMesh identity services. The CK model `System.Identity
 
 ### Fixed
 
+- **A client can no longer grant roles to itself (AB#8569).** The `self-grant` rule of the role change guard only knew user sessions, so a
+  client-credentials client holding `UserManagement` (e.g. through `TenantOwners`) could add itself to a group carrying an app role such as
+  `EnergyCommunityOperators` and gain `EnergyCommunityManagement` with its own token. A client-credentials caller is now "self" for its own client,
+  with the semantics of the user path: direct client roles (`PUT clients/{id}/roles`, `PUT clients/{id}/roles/{roleName}`), its own group membership
+  (REST and `Group.AddMember`), a role added to a group its client is in, directly or through a parent group (REST and `Group.SetRoles`), and a group nested into
+  such a group answer `403 self-grant` (`METHOD_FORBIDDEN`, `reason=self-grant`), with the same WARN log and `Identity.RoleChangeRefused` event. A user
+  session that carries the client's id as `client_id` is not that client. Removing its own rights, grants to other principals (AB#8564), `role-not-held` for
+  platform roles and service-internal provisioning over the bus are unchanged. A scratch-tenant creator client can no longer give itself an app role.
+
 - **Tenant owners can assign the roles their tenant's blueprints seed (AB#8564).** The role change guard of AB#7914/AB#7927/AB#7928
   refused every built-in role the caller did not hold, so a tenant owner could not give a client or user `EnergyCommunityManagement`,
   `EnergyCommunityReporting`, `MeterReporter` or `MeshmakersAccounting`, neither directly nor through group membership or nesting

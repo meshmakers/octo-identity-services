@@ -10,7 +10,10 @@ namespace Meshmakers.Octo.Backend.IdentityServices.Authorization.RoleChange;
 /// <summary>Why a role change is refused (AB#7914). The strings are the stable codes of both transports.</summary>
 public static class RoleChangeReasons
 {
-    /// <summary>The caller tried to add a direct role to their own user.</summary>
+    /// <summary>
+    ///     The caller tried to give roles to itself: a user to its own user, or (AB#8569) a client-credentials caller to its own
+    ///     client, directly or through a group it is in.
+    /// </summary>
     public const string SelfGrant = "self-grant";
 
     /// <summary>
@@ -29,13 +32,22 @@ public static class RoleChangeReasons
 
 /// <summary>
 ///     The caller of a role change, from the validated token (REST) or the validated principal of the method host.
-///     A client-credentials caller has no subject, so it is never "self".
+///     A user session is "self" for its own user (<see cref="Subject" />). A client-credentials caller has no subject; since
+///     AB#8569 it is "self" for its own client (<see cref="SelfClientId" />, the OAuth client id of the token).
 /// </summary>
 /// <param name="Subject">User id (<c>sub</c>), <c>null</c> for a client-credentials token.</param>
 /// <param name="ClientId">Client id of the token, if any.</param>
 /// <param name="Roles">The effective role names of the token (<c>role</c> claims).</param>
 public sealed record RoleChangeCaller(string? Subject, string? ClientId, IReadOnlyCollection<string> Roles)
 {
+    /// <summary>
+    ///     AB#8569: the OAuth client id the caller acts as when it is a client-credentials caller (no subject), otherwise
+    ///     <c>null</c>. A user session also carries a <c>client_id</c> (the application the user signed in with); that client is
+    ///     not the user's identity and its roles do not reach the user's token, so it is never "self". An impersonated token
+    ///     (AB#5114) carries the target's client id and the target's roles, so the target is "self".
+    /// </summary>
+    public string? SelfClientId => Subject == null && !string.IsNullOrEmpty(ClientId) ? ClientId : null;
+
     /// <summary>The caller of a REST request: the <c>sub</c>, <c>client_id</c> and role claims of the bearer token.</summary>
     public static RoleChangeCaller FromPrincipal(ClaimsPrincipal principal) => new(
         principal.FindFirst("sub")?.Value,
@@ -156,6 +168,14 @@ public interface IRoleChangeGuard
         CancellationToken cancellationToken = default, string? target = null);
 
     /// <summary>
+    ///     Checks a change of the direct roles of a client (AB#8569), in the order of the user path: self-grant (a
+    ///     client-credentials caller adds a role to its own client), then the grant rule of
+    ///     <see cref="EvaluateGrantAsync" />. Removals are never judged.
+    /// </summary>
+    Task<RoleChangeDecision> EvaluateClientGrantAsync(RoleChangeCaller caller, RtClient target,
+        IReadOnlyCollection<string> addedRoleNames, CancellationToken cancellationToken = default);
+
+    /// <summary>
     ///     Checks a change of a group or of an external tenant user mapping (AB#7927), in this order: self-grant (the change
     ///     gives the caller a role), built-in roles the caller does not hold, last user administrator (nobody effectively holds
     ///     <c>UserManagement</c> afterwards, judged over direct roles, groups, nested groups, mappings and shadow users).
@@ -179,6 +199,7 @@ internal sealed class RoleChangeGuard(
     IExternalTenantUserMappingStore mappingStore,
     ICrossTenantShadowUserChainResolver chainResolver,
     IPlatformRoleCatalog platformRoles,
+    IOctoClientStore clientStore,
     ILogger<RoleChangeGuard> logger) : IRoleChangeGuard
 {
     private const int MaxGroupDepth = 10;
@@ -221,6 +242,20 @@ internal sealed class RoleChangeGuard(
     {
         var decision = await EvaluateGrantCoreAsync(caller, addedRoleNames, cancellationToken).ConfigureAwait(false);
         return decision.IsAllowed ? LogAppRoleGrant(caller, decision, target ?? "unspecified") : decision;
+    }
+
+    public async Task<RoleChangeDecision> EvaluateClientGrantAsync(RoleChangeCaller caller, RtClient target,
+        IReadOnlyCollection<string> addedRoleNames, CancellationToken cancellationToken = default)
+    {
+        if (addedRoleNames.Count > 0 && caller.SelfClientId != null &&
+            string.Equals(caller.SelfClientId, target.ClientId, StringComparison.Ordinal))
+        {
+            return new RoleChangeDecision(RoleChangeReasons.SelfGrant,
+                addedRoleNames.Order(StringComparer.OrdinalIgnoreCase).ToList());
+        }
+
+        return await EvaluateGrantAsync(caller, addedRoleNames, cancellationToken, $"client {target.ClientId}")
+            .ConfigureAwait(false);
     }
 
     /// <summary>
@@ -288,6 +323,7 @@ internal sealed class RoleChangeGuard(
     {
         var graph = await RoleGraph.LoadAsync(userManager, roleManager, userStore, groupStore, mappingStore,
             chainResolver).ConfigureAwait(false);
+        var selfClientRtId = await SelfClientRtIdAsync(caller).ConfigureAwait(false);
 
         var granted = new HashSet<string>(StringComparer.Ordinal);
         var self = false;
@@ -296,20 +332,21 @@ internal sealed class RoleChangeGuard(
         {
             case RoleGraphChange.GroupRoles roles when graph.Groups.TryGetValue(roles.GroupId, out var group):
                 granted.UnionWith(roles.NewRoleIds.Where(r => !group.Roles.Contains(r)));
-                self = CallerIsServedByGroup(caller, graph, roles.GroupId);
+                self = CallerIsServedByGroup(caller, selfClientRtId, graph, roles.GroupId);
                 break;
             case RoleGraphChange.MemberAdded add when graph.Groups.TryGetValue(add.GroupId, out var target) &&
                                                       !Members(target, add.Kind).Contains(add.MemberId):
                 if (add.Kind == GroupMemberKind.Group)
                 {
                     granted.UnionWith(graph.EffectiveRoles(add.MemberId));
-                    self = CallerIsServedByGroup(caller, graph, add.GroupId);
+                    self = CallerIsServedByGroup(caller, selfClientRtId, graph, add.GroupId);
                 }
                 else
                 {
                     granted.UnionWith(graph.EffectiveRoles(add.GroupId));
-                    self = add.Kind == GroupMemberKind.User && caller.Subject != null &&
-                           string.Equals(add.MemberId, caller.Subject, StringComparison.Ordinal);
+                    self = add.Kind == GroupMemberKind.User
+                        ? caller.Subject != null && string.Equals(add.MemberId, caller.Subject, StringComparison.Ordinal)
+                        : IsSelfClient(caller, selfClientRtId, add.MemberId);
                 }
 
                 break;
@@ -396,16 +433,44 @@ internal sealed class RoleChangeGuard(
         return names;
     }
 
-    /// <summary>Whether roles of the group reach the caller: the caller (or a mapping serving it) is in the group or a parent group.</summary>
-    private static bool CallerIsServedByGroup(RoleChangeCaller caller, RoleGraph graph, string groupId)
+    /// <summary>
+    ///     Whether roles of the group reach the caller: the caller (or a mapping serving it) is in the group or a parent group.
+    ///     AB#8569: for a client-credentials caller the same holds for its own client.
+    /// </summary>
+    private static bool CallerIsServedByGroup(RoleChangeCaller caller, string? selfClientRtId, RoleGraph graph,
+        string groupId)
     {
-        if (caller.Subject == null)
+        if (caller.Subject != null)
         {
-            return false;
+            return graph.GroupsReachingSubject(caller.Subject, graph.MappingsServing(caller.Subject)).Contains(groupId);
         }
 
-        return graph.GroupsReachingSubject(caller.Subject, graph.MappingsServing(caller.Subject)).Contains(groupId);
+        return selfClientRtId != null && graph.GroupsReachingClient(selfClientRtId).Contains(groupId);
     }
+
+    /// <summary>
+    ///     AB#8569: the rtId of the client a client-credentials caller acts as, <c>null</c> for a user session or a client that
+    ///     does not exist in this tenant.
+    /// </summary>
+    private async Task<string?> SelfClientRtIdAsync(RoleChangeCaller caller)
+    {
+        if (caller.SelfClientId == null)
+        {
+            return null;
+        }
+
+        var client = await clientStore.FindRtClientByIdAsync(caller.SelfClientId).ConfigureAwait(false);
+        return client?.RtId.ToString();
+    }
+
+    /// <summary>
+    ///     Whether a client member id names the caller's own client. Group routes take the rtId of the client; the OAuth
+    ///     client id is compared too, so neither spelling escapes the rule.
+    /// </summary>
+    private static bool IsSelfClient(RoleChangeCaller caller, string? selfClientRtId, string memberId) =>
+        caller.SelfClientId != null &&
+        ((selfClientRtId != null && string.Equals(memberId, selfClientRtId, StringComparison.OrdinalIgnoreCase)) ||
+         string.Equals(memberId, caller.SelfClientId, StringComparison.Ordinal));
 
     private async Task<bool> CallerIsServedByMappingAsync(RoleChangeCaller caller, RoleGraph graph,
         RoleGraphChange.MappingRoles mapping)

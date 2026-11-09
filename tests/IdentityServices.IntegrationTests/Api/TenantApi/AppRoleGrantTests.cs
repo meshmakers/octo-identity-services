@@ -253,6 +253,102 @@ public class AppRoleGrantTests(CustomWebApplicationFactory factory) : Integratio
 
     #endregion
 
+    #region Client self-grant (AB#8569)
+
+    // Gerald 2026-11-08: the self-grant block holds for app roles too (four-eyes principle). A client-credentials caller is
+    // "self" for its own client, as a user session is for its own user; it may still grant app roles to other principals.
+
+    private static CallerInfo AsClient(RtClient client) => new(null, client.ClientId, [TenantManagement, UserManagement]);
+
+    [Fact]
+    public async Task ClientSelf_AddingItselfToAGroupWithAnAppRole_IsRefusedAsSelfGrant()
+    {
+        var group = await NewGroupAsync(await NewAppRoleAsync());
+        var self = await NewClientAsync();
+
+        var response = await PutAsync(AsClient(self), $"groups/{group}/members/clients/{self.RtId}");
+
+        // the same answer as for a user (no roleNames for self-grant)
+        await AssertProblemAsync(response, HttpStatusCode.Forbidden, "self-grant");
+        (await MemberClientIdsAsync(group)).Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task ClientSelf_AddingAnAppRoleToItself_IsRefusedAsSelfGrant_SingleAndReplaceAll()
+    {
+        var self = await NewClientAsync();
+        var app = await NewAppRoleAsync();
+
+        var single = await PutAsync(AsClient(self), $"clients/{self.ClientId}/roles/{app}");
+        var replaceAll = await PutJsonAsync(AsClient(self), $"clients/{self.ClientId}/roles", new[] { await RoleIdAsync(app) });
+
+        await AssertProblemAsync(single, HttpStatusCode.Forbidden, "self-grant");
+        await AssertProblemAsync(replaceAll, HttpStatusCode.Forbidden, "self-grant");
+        (await ClientRoleIdsAsync(self)).Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task ClientSelf_GrantingAnAppRoleToAnotherClient_IsAllowed_DirectAndThroughAGroup()
+    {
+        var self = await NewClientAsync();
+        var other = await NewClientAsync();
+        var app = await NewAppRoleAsync();
+        var group = await NewGroupAsync(await NewAppRoleAsync());
+
+        var direct = await PutAsync(AsClient(self), $"clients/{other.ClientId}/roles/{app}");
+        var membership = await PutAsync(AsClient(self), $"groups/{group}/members/clients/{other.RtId}");
+
+        direct.StatusCode.Should().Be(HttpStatusCode.OK,
+            await direct.Content.ReadAsStringAsync(TestContext.Current.CancellationToken));
+        membership.StatusCode.Should().Be(HttpStatusCode.OK,
+            await membership.Content.ReadAsStringAsync(TestContext.Current.CancellationToken));
+        (await ClientRoleIdsAsync(other)).Should().Equal(await RoleIdAsync(app));
+        (await MemberClientIdsAsync(group)).Should().Equal(other.RtId.ToString());
+    }
+
+    [Fact]
+    public async Task ClientSelf_WideningAGroupItIsIn_IsRefusedAsSelfGrant_ByNestingAndByAddingARole()
+    {
+        var self = await NewClientAsync();
+        var parent = await NewGroupAsync();
+        await AddClientMemberAsync(parent, self);
+        var child = await NewGroupAsync();
+        await PutAsync(TenantOwner, $"groups/{parent}/members/groups/{child}");
+        var appGroup = await NewGroupAsync(await NewAppRoleAsync());
+        var app = await RoleIdAsync(await NewAppRoleAsync());
+
+        var nesting = await PutAsync(AsClient(self), $"groups/{parent}/members/groups/{appGroup}");
+        var nestedRole = await PutJsonAsync(AsClient(self), $"groups/{child}/roles", new[] { app });
+
+        await AssertProblemAsync(nesting, HttpStatusCode.Forbidden, "self-grant");
+        await AssertProblemAsync(nestedRole, HttpStatusCode.Forbidden, "self-grant");
+        (await MemberGroupIdsAsync(parent)).Should().Equal(child.ToString());
+        (await GroupRoleIdsAsync(child)).Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task ClientSelf_RemovingItsOwnRoleAndMembership_IsAllowed()
+    {
+        var self = await NewClientAsync();
+        var app = await NewAppRoleAsync();
+        var group = await NewGroupAsync(await NewAppRoleAsync());
+        (await PutAsync(TenantOwner, $"clients/{self.ClientId}/roles/{app}")).StatusCode.Should().Be(HttpStatusCode.OK);
+        await AddClientMemberAsync(group, self);
+
+        using var client = RestClient(AsClient(self));
+        var role = await client.DeleteAsync(TenantApiUrl($"clients/{self.ClientId}/roles/{app}"),
+            TestContext.Current.CancellationToken);
+        var membership = await client.DeleteAsync(TenantApiUrl($"groups/{group}/members/clients/{self.RtId}"),
+            TestContext.Current.CancellationToken);
+
+        role.StatusCode.Should().Be(HttpStatusCode.OK);
+        membership.StatusCode.Should().Be(HttpStatusCode.OK);
+        (await ClientRoleIdsAsync(self)).Should().BeEmpty();
+        (await MemberClientIdsAsync(group)).Should().BeEmpty();
+    }
+
+    #endregion
+
     #region Helpers
 
     private sealed record CallerInfo(string? Subject, string? ClientId, string[] Roles);
@@ -372,6 +468,12 @@ public class AppRoleGrantTests(CustomWebApplicationFactory factory) : Integratio
     {
         using var scope = CreateScope();
         return await scope.ServiceProvider.GetRequiredService<IClientRoleStore>().GetDirectRoleIdsAsync(client.RtId);
+    }
+
+    private async Task AddClientMemberAsync(OctoObjectId group, RtClient client)
+    {
+        using var scope = CreateScope();
+        await scope.ServiceProvider.GetRequiredService<IGroupStore>().AddMemberClientAsync(group, client.RtId.ToString());
     }
 
     private async Task<IReadOnlyList<string>> MemberUserIdsAsync(OctoObjectId group)

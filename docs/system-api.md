@@ -107,6 +107,11 @@ group roles, group membership, group nesting and mappings. **Platform roles**, t
 `StreamDataAdmin`, `SecretManagement`, `DataModelManagement`, …), must still be held (`403 role-not-held`); in a group that carries both, only its platform roles must be
 held and `roleNames` lists only those. Callers without `UserManagement` keep the old rule. Every allowed app-role grant is logged at INFO with caller, target and roles.
 
+**Client-credentials callers (AB#8569).** A client-credentials token (no `sub`) is "self" for its own client, as a user session is for its own user: adding a role to
+its own client (`PUT /clients/{id}/roles`, `PUT /clients/{id}/roles/{roleName}`), adding its own client to a group, adding a role to a group its client is in (directly or
+through a parent group) and nesting a group into such a group answer `403 self-grant`, app roles included. Granting to other clients and users and removing its own rights
+stay allowed. Service-internal provisioning over the bus is not affected.
+
 **Role change rules for groups, mappings and role definitions (AB#7927).** The same guard judges `PUT /groups/{id}/roles`, `PUT`/`DELETE /groups/{id}/members/users|groups/{id}`,
 `PUT /groups/{id}/members/clients/{id}`, `DELETE /groups/{id}` and create/update/delete of external tenant user mappings: `403 self-grant`, `403 role-not-held` (built-in roles the caller does not hold,
 also through nested groups), `409 last-administrator` (nobody effectively holds `UserManagement` afterwards). `PUT /roles/{roleName}` with another name and `DELETE /roles/{roleName}` of a built-in

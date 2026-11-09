@@ -42,8 +42,8 @@ public class ClientsControllerRoleGuardTests
         _clientStore.FindRtClientByIdAsync(ClientId).Returns(_client);
         _notHeld = Role("BuiltInNotHeld");
         _custom = Role("Custom");
-        _guard.EvaluateGrantAsync(Arg.Any<RoleChangeCaller>(), Arg.Any<IEnumerable<string>>(), Arg.Any<CancellationToken>(),
-                Arg.Any<string?>())
+        _guard.EvaluateClientGrantAsync(Arg.Any<RoleChangeCaller>(), Arg.Any<RtClient>(),
+                Arg.Any<IReadOnlyCollection<string>>(), Arg.Any<CancellationToken>())
             .Returns(RoleChangeDecision.Allowed);
 
         _sut = new ClientsController(_clientStore, Substitute.For<IDistributionEventHubService>(), _clientRoleStore,
@@ -76,9 +76,8 @@ public class ClientsControllerRoleGuardTests
         var result = await _sut.UpdateClientRoles(ClientId, [_notHeld.RtId.ToString(), _custom.RtId.ToString()]);
 
         result.Should().BeOfType<OkResult>();
-        await _guard.Received(1).EvaluateGrantAsync(Arg.Any<RoleChangeCaller>(),
-            Arg.Is<IEnumerable<string>>(n => n.SequenceEqual(new[] { "Custom" })), Arg.Any<CancellationToken>(),
-            $"client {ClientId}");
+        await _guard.Received(1).EvaluateClientGrantAsync(Arg.Any<RoleChangeCaller>(), _client,
+            Arg.Is<IReadOnlyCollection<string>>(n => n.SequenceEqual(new[] { "Custom" })), Arg.Any<CancellationToken>());
         await _clientRoleStore.Received(1).ApplyRoleChangesAsync(_client.RtId,
             Arg.Is<IReadOnlyCollection<string>>(a => a.SequenceEqual(new[] { _custom.RtId.ToString() })),
             Arg.Is<IReadOnlyCollection<string>>(r => r.Count == 0));
@@ -93,7 +92,7 @@ public class ClientsControllerRoleGuardTests
         var result = await _sut.UpdateClientRoles(ClientId, [_custom.RtId.ToString()]);
 
         result.Should().BeOfType<OkResult>();
-        await _guard.DidNotReceiveWithAnyArgs().EvaluateGrantAsync(default!, default!, TestContext.Current.CancellationToken);
+        await _guard.DidNotReceiveWithAnyArgs().EvaluateClientGrantAsync(default!, default!, default!, TestContext.Current.CancellationToken);
         await _clientRoleStore.Received(1).ApplyRoleChangesAsync(_client.RtId,
             Arg.Is<IReadOnlyCollection<string>>(a => a.Count == 0),
             Arg.Is<IReadOnlyCollection<string>>(r => r.SequenceEqual(new[] { _notHeld.RtId.ToString() })));
@@ -107,7 +106,7 @@ public class ClientsControllerRoleGuardTests
         var result = await _sut.AddClientToRole(ClientId, _notHeld.Name!);
 
         result.Should().BeOfType<OkResult>();
-        await _guard.DidNotReceiveWithAnyArgs().EvaluateGrantAsync(default!, default!, TestContext.Current.CancellationToken);
+        await _guard.DidNotReceiveWithAnyArgs().EvaluateClientGrantAsync(default!, default!, default!, TestContext.Current.CancellationToken);
         await _clientRoleStore.DidNotReceiveWithAnyArgs().AddRoleAsync(default, default!);
     }
 }
