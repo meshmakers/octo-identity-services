@@ -567,18 +567,21 @@ Done identity-side, through two writers:
   `Identity: Caller` or change the policies instead.
 - **Not through the role change guard.** Both writers are system grants, not role changes by a caller, so the guard of
   AB#7914/AB#7928/AB#8569 (`role-not-held`, `self-grant`) does not apply — the same as for `FileManagement` since
-  AB#6467. That is safe because the grant is narrow: only clients whose id starts with `octo-pipeline-sa-`
-  (ordinal, case-sensitive), only the two fixed roles of `PipelineServiceAccountBaselineRoles`, only when the role is
-  seeded in the tenant (nothing is created), and only additive.
+  AB#6467. The grant is narrow: only clients whose id starts with `octo-pipeline-sa-` (ordinal, case-sensitive), only
+  the two fixed roles of `PipelineServiceAccountBaselineRoles`, only when the role is seeded in the tenant (nothing is
+  created), and only additive. **Known gap (AB#8618):** the prefix is the only trust check — see the next point.
 - **Covered when?** Exactly in the identity-data command that creates or touches the account (seconds after the
   controller provisions it); accounts that existed before at the first identity start with this version; the worst
   case (role seed pending at creation) at the next identity start or full tenant update. Legacy accounts therefore need
   no manual `AddClientToRole` for `StreamDataReader` before a tenant switches the stream-data gate to `Enforce`.
-- **The prefix is not reserved.** Nothing in the identity API rejects a client id starting with `octo-pipeline-sa-`
-  (`POST api/Clients`, tenant-administration write policy, accepts any free id): such a client is treated as a
-  pipeline service account and receives the baseline roles at the next tenant setup or identity-data command. Only
-  tenant administrators can create clients, and they can assign these roles anyway, but do not use the prefix for other
-  clients. The prefix octo-pipeline-sa- is a convention, not a security boundary: whoever can create clients and assign roles (tenant administration) can already grant any role.
+- **The prefix is not reserved (known gap, AB#8618).** Nothing in the identity API rejects a client id starting with
+  `octo-pipeline-sa-` (`POST api/Clients`, tenant-administration write policy — `TenantManagement` or `UserManagement` —
+  accepts any free id): such a client is treated as a pipeline service account and receives the baseline roles at the
+  next tenant setup. Since AB#7928 a caller may grant a platform role to a client only when it holds the role itself
+  (`403 role-not-held`), so a client administrator who does not hold `FileManagement` / `StreamDataReader` can obtain
+  them for a client it controls through the prefix. This gap exists for `FileManagement` since AB#6467 and AB#8581
+  extends it to `StreamDataReader`; closing it (reserving the prefix, a controller-owned marker, or checking the adapter
+  named in the client id) is tracked in AB#8618. Do not use the prefix for other clients.
 - **Concurrency:** the setup pass and the consumer take a per-tenant in-process lock (`PipelineServiceAccountRoleLock`)
   and re-read the edges before inserting, because the engine does not reject a second identical `AssignedRole` edge.
   Two identity replicas starting at the same instant can still duplicate the edge; role reads treat the edges as a set

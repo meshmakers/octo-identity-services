@@ -2851,7 +2851,9 @@ Reporting marker still get it) and the recurring
   declarative sync, additive for a `null` list) and caught up at every tenant setup (not run-once, not on the nightly
   `CacheOnly` update). Only seeded roles, only the exact prefix; a system grant, not through the role change guard.
   A new baseline role is one entry in `PipelineServiceAccountBaselineRoles`, never a second copy of the grant.
-- The prefix octo-pipeline-sa- is a convention, not a security boundary: whoever can create clients and assign roles (tenant administration) can already grant any role.
+- The prefix octo-pipeline-sa- is the only trust check and it is not reserved: since AB#7928 a client administrator may
+  not grant platform roles it does not hold, but it can create a prefixed client that the setup pass then grants the
+  baseline roles. Known gap, tracked in AB#8618.
 - Customer client-credentials clients and octo-cli `LogInClientCredentials` carry no roles: 403 on the Files API
   until the client is given a File role. Reporting uses in-process system sessions and needs nothing.
 - Tests: `FilesDataPermissionsSeedTests`, `PipelineServiceAccountRoleGrant*Tests`,

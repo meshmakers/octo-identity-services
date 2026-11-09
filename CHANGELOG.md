@@ -16,6 +16,8 @@ Notable changes of the OctoMesh identity services. The CK model `System.Identity
   the role is seeded. Both baseline roles now come from one list (`PipelineServiceAccountBaselineRoles`); the former
   `PipelineServiceAccountFileRoleGrant` / `PipelineServiceAccountFileRoleLock` are `PipelineServiceAccountRoleGrant` /
   `PipelineServiceAccountRoleLock`. The REST/CLI proof report of AB#6542 still covers `FileManagement` only.
+  Known gap, unchanged from AB#6467 and now also for `StreamDataReader`: the client-id prefix is the only trust check, so a
+  client administrator can obtain the baseline roles for a client it creates under the prefix without holding them (AB#8618).
 
   **Operator note:** the manual `octo-cli -c AddClientToRole … StreamDataReader` step for legacy pipeline service accounts before a
   tenant switches the stream-data gate to `Enforce` is **no longer needed**. Once identity with this change runs, the next identity
