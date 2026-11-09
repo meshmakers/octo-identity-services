@@ -1129,8 +1129,9 @@ The identity service hosts CK methods as a remote handler (bus transport, SDK `M
   validates the forwarded access token before the handler runs (a call without a valid token is `METHOD_FORBIDDEN`) and hands the validated caller
   as `context.CallerPrincipal`. Without any selected handler nothing is hosted (no queue, no announcement, no token validation requirement); since AB#7776 the role methods
   carry no secret and are always selected, so the host runs in every configuration and only the password methods wait for the switch.
-- **Production gate `Methods:Identity:EnablePasswordMethods`** (default **false**, env `OCTO_Methods__Identity__EnablePasswordMethods`, Helm: the same key under
-  the identity service configuration / environment): decided by Gerald 2026-10-23, no method carrying a password or secret on staging-1, prod-1,
+- **Production gate `Methods:Identity:EnablePasswordMethods`** (default **false**, env `OCTO_Methods__Identity__EnablePasswordMethods`, Helm value
+  `services.identity.methods.enablePasswordMethods` in the octo-helm-core `octo-mesh` chart, set per cluster in octo-mesh-deployment
+  `clusters/<c>/values-octo-mesh.yaml` (AB#8603: test-2 on; staging-1, prod-1, prod-2 off until Gerald's go per cluster)): decided by Gerald 2026-10-23, no method carrying a password or secret on staging-1, prod-1,
   prod-2 before B0 (restricted broker user, Heimdall). **The switch controls the bus only** (AB#8413). Off: handlers whose registration has
   `CarriesSecret = true` are not offered on the bus, the service announces no password method and the gateway (GraphQL) answers
   `METHOD_HANDLER_NOT_AVAILABLE`; the rows with `ServesRestFacade = true` (`User.CreateUser`, `User.ResetPassword`, since AB#8414 also
