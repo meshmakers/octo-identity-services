@@ -6,6 +6,7 @@ using IdentityServerPersistence;
 using IdentityServerPersistence.Services.ScratchTenants;
 using IdentityServerPersistence.SystemStores;
 using Meshmakers.Octo.Communication.Contracts.DataTransferObjects;
+using Meshmakers.Octo.Communication.Contracts.DataTransferObjects.ApiErrors;
 using Meshmakers.Octo.ConstructionKit.Contracts;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -13,6 +14,7 @@ using Meshmakers.Octo.Services.Infrastructure.Services;
 using Persistence.IdentityCkModel.Generated.System.Identity.v3;
 using Meshmakers.Octo.Backend.Authentication;
 using Meshmakers.Octo.Backend.IdentityServices.Authorization.RoleChange;
+using Meshmakers.Octo.Backend.IdentityServices.Services;
 
 namespace Meshmakers.Octo.Backend.IdentityServices.TenantApi.v1.Controllers;
 
@@ -28,7 +30,8 @@ public class GroupsController(
     IScratchTenantGrantService scratchTenantGrantService,
     IMultiTenancyResolverService multiTenancyResolverService,
     IRoleChangeGuard roleChangeGuard,
-    IRoleChangeRefusals roleChangeRefusals) : ControllerBase
+    IRoleChangeRefusals roleChangeRefusals,
+    IOctoClientStore clientStore) : ControllerBase
 {
     /// <summary>
     /// Runs the role change guard (AB#7927): self-grant, built-in roles the caller does not hold, last user administrator.
@@ -387,13 +390,14 @@ public class GroupsController(
     }
 
     /// <summary>
-    /// Adds a client to a group.
+    /// Adds a client to a group. The client is named by its OAuth client id or by its rtId (AB#8571).
     /// </summary>
     [HttpPut("{rtId}/members/clients/{clientId}")]
     [Authorize(IdentityServiceConstants.IdentityUserAdministrationWritePolicy)]
     [EndpointSummary("Adds a client to a group.")]
+    [EndpointDescription("The client is named by its OAuth client id or by its rtId. 404 when the group or the client does not exist.")]
     [ProducesResponseType(StatusCodes.Status200OK)]
-    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [ProducesResponseType(typeof(NotFoundErrorDto), StatusCodes.Status404NotFound)]
     public async Task<IActionResult> AddClientMember(
         [Required] OctoObjectId rtId,
         [Required] string clientId)
@@ -404,25 +408,34 @@ public class GroupsController(
             return NotFound();
         }
 
-        var refusal = await GuardAsync(new RoleGraphChange.MemberAdded(rtId.ToString(), GroupMemberKind.Client, clientId),
+        var client = await GroupClientMemberResolver.ResolveAsync(clientStore,
+            multiTenancyResolverService.GetTenantRepository(), clientId);
+        if (client == null)
+        {
+            return ClientNotFound(clientId);
+        }
+
+        var clientRtId = client.RtId.ToString();
+        var refusal = await GuardAsync(new RoleGraphChange.MemberAdded(rtId.ToString(), GroupMemberKind.Client, clientRtId),
             rtId.ToString());
         if (refusal != null)
         {
             return refusal;
         }
 
-        await groupStore.AddMemberClientAsync(rtId, clientId);
+        await groupStore.AddMemberClientAsync(rtId, clientRtId);
         return Ok();
     }
 
     /// <summary>
-    /// Removes a client from a group.
+    /// Removes a client from a group. The client is named by its OAuth client id or by its rtId (AB#8571).
     /// </summary>
     [HttpDelete("{rtId}/members/clients/{clientId}")]
     [Authorize(IdentityServiceConstants.IdentityUserAdministrationWritePolicy)]
     [EndpointSummary("Removes a client from a group.")]
+    [EndpointDescription("The client is named by its OAuth client id or by its rtId. 404 when the group or the client does not exist.")]
     [ProducesResponseType(StatusCodes.Status200OK)]
-    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [ProducesResponseType(typeof(NotFoundErrorDto), StatusCodes.Status404NotFound)]
     public async Task<IActionResult> RemoveClientMember(
         [Required] OctoObjectId rtId,
         [Required] string clientId)
@@ -433,21 +446,35 @@ public class GroupsController(
             return NotFound();
         }
 
+        // An rtId of a client that no longer exists still removes its leftover membership edge, as before AB#8571.
+        var client = await GroupClientMemberResolver.ResolveAsync(clientStore,
+            multiTenancyResolverService.GetTenantRepository(), clientId);
+        OctoObjectId clientRtId;
+        if (client != null)
+        {
+            clientRtId = client.RtId;
+        }
+        else if (!OctoObjectId.TryParse(clientId, out clientRtId))
+        {
+            return ClientNotFound(clientId);
+        }
+
         // No guard call: removing a client gives nothing to anybody and clients do not count as administrators (AB#7927).
         // AB#7192: taking the creator's mirror out of TenantOwners of a scratch tenant is a revoke - persisted, so the
         // tenant setup does not grant it again. The revoke is recorded BEFORE the membership is removed: a failure
         // between the two steps then leaves a revoked marker with the membership still in place (harmless, the caller
         // sees the error and repeats), never a removed membership that the next setup grants again. A no-op for every
         // other removal.
-        if (OctoObjectId.TryParse(clientId, out var clientRtId))
-        {
-            await scratchTenantGrantService.RecordRevocationAsync(multiTenancyResolverService.GetTenantId(), rtId,
-                clientRtId, GetCallerLabel());
-        }
+        await scratchTenantGrantService.RecordRevocationAsync(multiTenancyResolverService.GetTenantId(), rtId,
+            clientRtId, GetCallerLabel());
 
-        await groupStore.RemoveMemberClientAsync(rtId, clientId);
+        await groupStore.RemoveMemberClientAsync(rtId, clientRtId.ToString());
         return Ok();
     }
+
+    private NotFoundObjectResult ClientNotFound(string clientId) =>
+        NotFound(new NotFoundErrorDto(
+            $"Client '{clientId}' not found. Name the client by its client id or by its rtId."));
 
     private string GetCallerLabel()
     {

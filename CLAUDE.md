@@ -1635,7 +1635,9 @@ call role-protected endpoints (e.g. the `FromHttpRequest` trigger node). CK mode
   consumers need no client-specific code path. (Replaces the former Duende
   `ClientCredentialsRoleTokenValidator`.)
 - **REST API:** `ClientsController` — `GET/PUT /clients/{id}/roles`, `PUT/DELETE /clients/{id}/roles/{roleName}`.
-  `GroupsController` — `GET/PUT/DELETE /groups/{rtId}/members/clients[/{clientId}]`. `GroupDto` gained
+  `GroupsController` — `GET/PUT/DELETE /groups/{rtId}/members/clients[/{clientId}]`; `{clientId}` is the OAuth client id
+  or the client's rtId, resolved by `GroupClientMemberResolver` (rtId first, then client id; also used by `Group.AddMember` /
+  `Group.RemoveMember`), unknown → `404` with `NotFoundErrorDto` (AB#8571; before, a client id answered 500). `GroupDto` gained
   `MemberClientIds`; `ClientDto` gained `RtId` (read-only, identifies the client as a group member).
 - **Blueprint cleanup gate:** `PreBlueprintCleanupMigration` now sweeps orphan `AssignedRole` edges for
   `RtClient` origins too (aligned with the user-side strategy). No capture/restore pass is needed for

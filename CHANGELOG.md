@@ -38,6 +38,12 @@ Notable changes of the OctoMesh identity services. The CK model `System.Identity
 
 ### Fixed
 
+- **`AddClientToGroup -cid <clientId>` works with the client id (AB#8571).** `PUT`/`DELETE {tenant}/v1/groups/{group}/members/clients/{client}`
+  passed the value straight into an rtId parse, so the OAuth client id — what octo-cli documents and sends — answered `500`; only the client's
+  rtId worked. Both now work: the rtId of an existing client wins, otherwise the value is looked up as client id (so a client id that looks like an
+  rtId works too). An unknown client id or rtId answers `404` with a message instead of `500` and writes nothing. `DELETE` with the rtId of a deleted client still removes its leftover edge. `Group.AddMember` / `Group.RemoveMember` resolve clients the same
+  way (shared `GroupClientMemberResolver`). The role change guard judges the resolved client as before.
+
 - **A client can no longer grant roles to itself (AB#8569).** The `self-grant` rule of the role change guard only knew user sessions, so a
   client-credentials client holding `UserManagement` (e.g. through `TenantOwners`) could add itself to a group carrying an app role such as
   `EnergyCommunityOperators` and gain `EnergyCommunityManagement` with its own token. A client-credentials caller is now "self" for its own client,
