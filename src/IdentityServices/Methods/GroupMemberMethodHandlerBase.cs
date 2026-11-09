@@ -2,6 +2,7 @@ using IdentityServerPersistence;
 using IdentityServerPersistence.Services.ScratchTenants;
 using IdentityServerPersistence.SystemStores;
 using Meshmakers.Octo.Backend.IdentityServices.Authorization.RoleChange;
+using Meshmakers.Octo.Backend.IdentityServices.Services;
 using Meshmakers.Octo.ConstructionKit.Contracts;
 using Meshmakers.Octo.Runtime.Contracts;
 using Meshmakers.Octo.Runtime.Contracts.DataPermissions;
@@ -36,10 +37,11 @@ internal static class GroupMethodErrors
 ///         mirror, so the tenant setup does not grant it again (AB#7192), exactly like REST.
 ///     </para>
 ///     <para>
-///         <b>Typed answers where REST is silent or fails.</b> REST ends in an unhandled engine error for a member that does
-///         not exist and is silent about duplicates; the methods answer <c>MEMBER_NOT_FOUND</c> for a member that does not
+///         <b>Typed answers where REST is silent.</b> REST answers 404 for a member that does not exist and is silent about
+///         duplicates; the methods answer <c>MEMBER_NOT_FOUND</c> for a member that does not
 ///         exist (or that the caller cannot read, AB#7035), <c>MEMBER_ALREADY_IN_GROUP</c> and <c>MEMBER_NOT_IN_GROUP</c>.
-///         The member of kind <c>Client</c> is the rtId of the client (as in the REST route); the OAuth client id is accepted too.
+///         The member of kind <c>Client</c> is the rtId of the client or its OAuth client id, resolved by
+///         <see cref="GroupClientMemberResolver" /> exactly as in the REST route (AB#8571).
 ///     </para>
 ///     <para>
 ///         <b>Audit.</b> One <c>Identity.Method</c> event per call with <c>memberKind</c>, <c>memberId</c> and, for a refusal
@@ -111,39 +113,28 @@ internal abstract class GroupMemberMethodHandlerBase<TParameters>(IServiceProvid
 
     private static async Task<ResolvedMember> ResolveAsync(IdentityMethodCall call, GroupMemberKind kind, string memberId)
     {
-        var type = kind == GroupMemberKind.User
-            ? RtEntityExtensions.GetRtCkTypeId<RtUser>()
-            : RtEntityExtensions.GetRtCkTypeId<RtClient>();
-        if (kind == GroupMemberKind.Client && !OctoObjectId.TryParse(memberId, out _))
+        if (kind == GroupMemberKind.Client)
         {
-            // The OAuth client id of the client instead of its rtId.
-            var client = await call.Services.GetRequiredService<IOctoClientStore>().FindRtClientByIdAsync(memberId)
+            // The rtId or the OAuth client id of the client, resolved the same way as REST (AB#8571).
+            var clientType = RtEntityExtensions.GetRtCkTypeId<RtClient>();
+            var client = await GroupClientMemberResolver.ResolveAsync(
+                    call.Services.GetRequiredService<IOctoClientStore>(),
+                    call.Services.GetRequiredService<IMultiTenancyResolverService>().GetTenantRepository(), memberId)
                 .ConfigureAwait(false);
             return client == null
-                ? ResolvedMember.Missing(type, memberId)
-                : new ResolvedMember(client.RtId.ToString(), new RtEntityId(type, client.RtId), true);
+                ? ResolvedMember.Missing(clientType, memberId)
+                : new ResolvedMember(client.RtId.ToString(), new RtEntityId(clientType, client.RtId), true);
         }
 
+        var userType = RtEntityExtensions.GetRtCkTypeId<RtUser>();
         if (!OctoObjectId.TryParse(memberId, out var rtId))
         {
-            return ResolvedMember.Missing(type, memberId);
+            return ResolvedMember.Missing(userType, memberId);
         }
 
-        var exists = kind == GroupMemberKind.User
-            ? await call.Services.GetRequiredService<UserManager<RtUser>>().FindByIdAsync(rtId.ToString())
-                .ConfigureAwait(false) != null
-            : await ClientExistsAsync(call, rtId).ConfigureAwait(false);
-        return new ResolvedMember(rtId.ToString(), new RtEntityId(type, rtId), exists);
-    }
-
-    private static async Task<bool> ClientExistsAsync(IdentityMethodCall call, OctoObjectId rtId)
-    {
-        var repository = call.Services.GetRequiredService<IMultiTenancyResolverService>().GetTenantRepository();
-        using var session = await repository.GetSessionAsync().ConfigureAwait(false);
-        session.StartTransaction();
-        var client = await repository.GetRtEntityByRtIdAsync<RtClient>(session, rtId).ConfigureAwait(false);
-        await session.CommitTransactionAsync().ConfigureAwait(false);
-        return client != null;
+        var exists = await call.Services.GetRequiredService<UserManager<RtUser>>().FindByIdAsync(rtId.ToString())
+            .ConfigureAwait(false) != null;
+        return new ResolvedMember(rtId.ToString(), new RtEntityId(userType, rtId), exists);
     }
 }
 

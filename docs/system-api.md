@@ -112,6 +112,11 @@ its own client (`PUT /clients/{id}/roles`, `PUT /clients/{id}/roles/{roleName}`)
 through a parent group) and nesting a group into such a group answer `403 self-grant`, app roles included. Granting to other clients and users and removing its own rights
 stay allowed. Service-internal provisioning over the bus is not affected.
 
+**Client members of a group (AB#8571).** `PUT`/`DELETE /groups/{id}/members/clients/{client}` take the OAuth client id (what
+`octo-cli AddClientToGroup -cid` passes) or the client's rtId. A value that is the rtId of an existing client wins; otherwise it is
+looked up as client id. An unknown client answers `404` with a message (never `500`); `DELETE` with the rtId of a deleted client still
+removes the leftover membership. `GET /groups/{id}/members/clients` keeps returning rtIds.
+
 **Role change rules for groups, mappings and role definitions (AB#7927).** The same guard judges `PUT /groups/{id}/roles`, `PUT`/`DELETE /groups/{id}/members/users|groups/{id}`,
 `PUT /groups/{id}/members/clients/{id}`, `DELETE /groups/{id}` and create/update/delete of external tenant user mappings: `403 self-grant`, `403 role-not-held` (built-in roles the caller does not hold,
 also through nested groups), `409 last-administrator` (nobody effectively holds `UserManagement` afterwards). `PUT /roles/{roleName}` with another name and `DELETE /roles/{roleName}` of a built-in
