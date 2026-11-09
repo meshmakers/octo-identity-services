@@ -5,6 +5,22 @@ Notable changes of the OctoMesh identity services. The CK model `System.Identity
 
 ## Unreleased
 
+### Added
+
+- **Every pipeline service account holds `StreamDataReader` (AB#8581).** The asset repository gates stream-data reads on a
+  StreamData role (AB#8559). The Communication Controller adds `StreamDataReader` to declarative service accounts on reconcile
+  (AB#8563), but not to legacy accounts (created before CK 3.32.0, no `AssignedRoleNames`). Identity now grants the role to every
+  `octo-pipeline-sa-*` client the same way it grants `FileManagement`: in the identity-data command that creates or touches the
+  account, and at every tenant setup (identity start, tenant create, full tenant update). The grant is additive — a legacy account
+  keeps every role it had — a declarative account holds the role once, only clients with the exact prefix are touched and only when
+  the role is seeded. Both baseline roles now come from one list (`PipelineServiceAccountBaselineRoles`); the former
+  `PipelineServiceAccountFileRoleGrant` / `PipelineServiceAccountFileRoleLock` are `PipelineServiceAccountRoleGrant` /
+  `PipelineServiceAccountRoleLock`. The REST/CLI proof report of AB#6542 still covers `FileManagement` only.
+
+  **Operator note:** the manual `octo-cli -c AddClientToRole … StreamDataReader` step for legacy pipeline service accounts before a
+  tenant switches the stream-data gate to `Enforce` is **no longer needed**. Once identity with this change runs, the next identity
+  start (or tenant setup, or workload deploy) grants the role.
+
 ### Deprecated
 
 - **Identity wave 1 of the REST user endpoints (AB#8415).** `PUT users/{userName}/roles`,

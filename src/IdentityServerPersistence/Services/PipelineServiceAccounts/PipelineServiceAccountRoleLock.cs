@@ -1,16 +1,16 @@
 using System.Collections.Concurrent;
 
-namespace IdentityServerPersistence.Services.FileRoles;
+namespace IdentityServerPersistence.Services.PipelineServiceAccounts;
 
 /// <summary>
-///     Serialises the writers of the pipeline service accounts' FileManagement edge inside this process (AB#6457,
-///     review of #163): the tenant-setup pass and the identity-data consumer can reach the same account at the same
-///     moment, and the engine does not reject a second identical <c>AssignedRole</c> edge — six concurrent runs left six
+///     Serialises the writers of the pipeline service accounts' baseline role edges (FileManagement, StreamDataReader)
+///     inside this process (AB#6457, review of #163; AB#8581): the tenant-setup pass and the identity-data consumer can
+///     reach the same account at the same moment, and the engine does not reject a second identical <c>AssignedRole</c> edge — six concurrent runs left six
 ///     edges in the integration test. Writers take the lock, re-read the edges and insert only what is missing.
 ///     Several identity replicas starting at the same instant can still race; the edge is then duplicated, which the
 ///     role reads treat as a set, and the next run finds the account covered.
 /// </summary>
-public static class PipelineServiceAccountFileRoleLock
+public static class PipelineServiceAccountRoleLock
 {
     private static readonly ConcurrentDictionary<string, SemaphoreSlim> Locks = new(StringComparer.Ordinal);
 

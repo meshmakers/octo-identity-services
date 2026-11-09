@@ -2842,17 +2842,21 @@ Blueprint `System.Identity.Bootstrap` 1.6.0 seeds the roles `FileManagement` / `
 baseline). Details, the one-time `FileRoleGrant` (Reporting roles → File roles), the one-time
 `TenantAdministratorFileRoleGrant` (AB#6578: human tenant administrators → `FileManagement`, own marker so tenants with the
 Reporting marker still get it) and the recurring
-`PipelineServiceAccountFileRoleGrant` are in `docs/persistence.md`. Rules to remember:
+`PipelineServiceAccountRoleGrant` are in `docs/persistence.md`. Rules to remember:
 
-- Pipeline service accounts (`octo-pipeline-sa-*`) always hold `FileManagement`: granted by
-  `CreateIdentityDataCommandRequestConsumer` in the command that creates/touches them (kept by the declarative sync)
-  and caught up at every tenant setup (not run-once, not on the nightly `CacheOnly` update).
+- Pipeline service accounts (`octo-pipeline-sa-*`) always hold the baseline roles of
+  `PipelineServiceAccountBaselineRoles` — `FileManagement` (tenant setup: only with System.Files) and
+  `StreamDataReader` (AB#8581: the stream-data gate of AB#8559; covers legacy accounts without `AssignedRoleNames`):
+  granted by `CreateIdentityDataCommandRequestConsumer` in the command that creates/touches them (kept by the
+  declarative sync, additive for a `null` list) and caught up at every tenant setup (not run-once, not on the nightly
+  `CacheOnly` update). Only seeded roles, only the exact prefix; a system grant, not through the role change guard.
+  A new baseline role is one entry in `PipelineServiceAccountBaselineRoles`, never a second copy of the grant.
 - The prefix octo-pipeline-sa- is a convention, not a security boundary: whoever can create clients and assign roles (tenant administration) can already grant any role.
 - Customer client-credentials clients and octo-cli `LogInClientCredentials` carry no roles: 403 on the Files API
   until the client is given a File role. Reporting uses in-process system sessions and needs nothing.
-- Tests: `FilesDataPermissionsSeedTests`, `PipelineServiceAccountFileRoleGrant*Tests`,
-  `TenantAdministratorFileRoleGrant*Tests`,
-  `PipelineServiceAccountFileManagementConsumerIntegrationTests` (own class: the other provisioning tests assert
+- Tests: `FilesDataPermissionsSeedTests`, `PipelineServiceAccountRoleGrant*Tests`,
+  `PipelineServiceAccountBaselineRolesTests`, `TenantAdministratorFileRoleGrant*Tests`,
+  `PipelineServiceAccountBaselineRolesConsumerIntegrationTests` (own class: the other provisioning tests assert
   exact role sets).
 
 ## Scratch tenants: the creator becomes administrator (AB#7192)

@@ -1,6 +1,7 @@
 using IdentityServerPersistence;
 using IdentityServerPersistence.Configuration.Options;
 using IdentityServerPersistence.Services.FileRoles;
+using IdentityServerPersistence.Services.PipelineServiceAccounts;
 using IdentityServerPersistence.Services.ClientGrants;
 using IdentityServerPersistence.Services.Migrations;
 using IdentityServerPersistence.Services.ScratchTenants;
@@ -349,19 +350,21 @@ internal class DefaultConfigurationCreatorService(
                 "retried on the next tenant setup", tenantId);
         }
 
-        // AB#6467 / AB#6457: the pipeline service accounts (octo-pipeline-sa-*) hold FileManagement, because their
-        // file nodes run in the adapter engine where the System.Files data policies (blueprint 1.6.0) apply.
-        // Unlike the grant above this is NOT run-once: it runs on every setup so accounts the Communication
+        // AB#6467 / AB#6457 / AB#8581: the pipeline service accounts (octo-pipeline-sa-*) hold the baseline roles of
+        // PipelineServiceAccountBaselineRoles — FileManagement (their file nodes run in the adapter engine where the
+        // System.Files data policies apply; only with System.Files) and StreamDataReader (the asset repository's
+        // stream-data gate, AB#8559; covers legacy accounts without AssignedRoleNames the controller cannot touch).
+        // Unlike the grants above this is NOT run-once: it runs on every setup so accounts the Communication
         // Controller created later are picked up (additive, idempotent). A failure is logged, not fatal.
         try
         {
-            await PipelineServiceAccountFileRoleGrant.EnsureAsync(tenantContext, () => TenantHasFilesModel(tenantId), logger);
+            await PipelineServiceAccountRoleGrant.EnsureAsync(tenantContext, () => TenantHasFilesModel(tenantId), logger);
         }
         catch (Exception ex)
         {
             logger.LogError(ex,
-                "Granting {Role} to the pipeline service accounts failed for tenant '{TenantId}'; retried on the next tenant setup",
-                IdentityServiceConstants.FileManagementRole, tenantId);
+                "Granting the baseline roles to the pipeline service accounts failed for tenant '{TenantId}'; retried on " +
+                "the next tenant setup", tenantId);
         }
 
         // AB#5544: one-time grant of SecretManagement (blueprint 1.7.0, 660…60) to the tenant's existing

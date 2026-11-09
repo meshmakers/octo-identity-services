@@ -19,17 +19,20 @@ using Xunit;
 namespace IdentityServices.IntegrationTests.Persistence;
 
 /// <summary>
-///     AB#6467 / AB#6457: every pipeline service account (<c>octo-pipeline-sa-*</c>) holds FileManagement, granted by
-///     the identity-data command consumer the moment the Communication Controller creates or touches it and kept by
-///     the declarative role sync. Own class (own database) because the other provisioning tests assert exact role
-///     sets and must not see the FileManagement role.
+///     AB#6467 / AB#6457 / AB#8581: every pipeline service account (<c>octo-pipeline-sa-*</c>) holds the baseline roles
+///     FileManagement and StreamDataReader, granted by the identity-data command consumer the moment the Communication
+///     Controller creates or touches it and kept by the declarative role sync. Own class (own database) because the other
+///     provisioning tests assert exact role sets and must not see the baseline roles.
 /// </summary>
 [Collection("Sequential")]
-public class PipelineServiceAccountFileManagementConsumerIntegrationTests : IClassFixture<IdentityServicesFixture>
+public class PipelineServiceAccountBaselineRolesConsumerIntegrationTests : IClassFixture<IdentityServicesFixture>
 {
+    private const string FileManagement = IdentityServiceConstants.FileManagementRole;
+    private const string StreamDataReader = IdentityServiceConstants.StreamDataReaderRole;
+
     private readonly IdentityServicesFixture _fixture;
 
-    public PipelineServiceAccountFileManagementConsumerIntegrationTests(IdentityServicesFixture fixture,
+    public PipelineServiceAccountBaselineRolesConsumerIntegrationTests(IdentityServicesFixture fixture,
         ITestOutputHelper outputHelper)
     {
         _fixture = fixture;
@@ -37,58 +40,72 @@ public class PipelineServiceAccountFileManagementConsumerIntegrationTests : ICla
     }
 
     [Fact]
-    public async Task PipelineServiceAccount_GetsFileManagementOnCreation_AndTheDeclarativeSyncKeepsIt()
+    public async Task PipelineServiceAccount_GetsTheBaselineRolesOnCreation_AndTheDeclarativeSyncKeepsThem()
     {
         await ArrangeAsync();
-        await EnsureRoleAsync(IdentityServiceConstants.FileManagementRole);
         var clientId = NewClientId();
 
         await ConsumeAsync(BuildServiceAccountRequest(clientId, "plaintext-secret-files-1"));
-        var expected = new[] { CommonConstants.CommunicationManagementRole, IdentityServiceConstants.FileManagementRole };
-        (await GetAssignedRoleNamesAsync((await LoadClientAsync(clientId))!)).Should().BeEquivalentTo(expected,
-            "the controller declares only CommunicationManagement; FileManagement is implicit");
+        (await GetAssignedRoleNamesAsync(clientId)).Should().BeEquivalentTo(
+            [CommonConstants.CommunicationManagementRole, FileManagement, StreamDataReader],
+            "the declaration names only CommunicationManagement; the baseline roles are implicit");
 
-        // A repeated declaration neither duplicates nor removes the implicit role, and a shrunk declaration keeps it.
+        // A repeated declaration neither duplicates nor removes the implicit roles, and a shrunk declaration keeps them.
         await ConsumeAsync(BuildServiceAccountRequest(clientId, "plaintext-secret-files-1"));
         var empty = BuildServiceAccountRequest(clientId, "plaintext-secret-files-1");
         empty.Clients = [empty.Clients!.Single() with { AssignedRoleNames = [] }];
         await ConsumeAsync(empty);
-        (await GetAssignedRoleNamesAsync((await LoadClientAsync(clientId))!)).Should()
-            .BeEquivalentTo([IdentityServiceConstants.FileManagementRole]);
+        (await GetAssignedRoleNamesAsync(clientId)).Should().BeEquivalentTo([FileManagement, StreamDataReader]);
     }
 
     [Fact]
-    public async Task PipelineServiceAccount_WithANullRoleList_StillGetsFileManagement_WithoutLosingOtherEdges()
+    public async Task DeclarativeAccount_DeclaringStreamDataReader_HoldsItOnce_AndKeepsTheDeclaredRoles()
     {
+        // AB#8563: the controller now declares StreamDataReader itself; identity also treats it as a baseline role.
         await ArrangeAsync();
-        await EnsureRoleAsync(IdentityServiceConstants.FileManagementRole);
         var clientId = NewClientId();
-        await ConsumeAsync(BuildServiceAccountRequest(clientId, "plaintext-secret-files-2"));
-        await RemoveRoleEdgeAsync((await LoadClientAsync(clientId))!, IdentityServiceConstants.FileManagementRole);
-        (await GetAssignedRoleNamesAsync((await LoadClientAsync(clientId))!)).Should()
-            .BeEquivalentTo([CommonConstants.CommunicationManagementRole], "precondition: an account without the role");
-
-        // The controller sends null for rotations and legacy accounts: the role edges stay, FileManagement is added.
-        var rotation = BuildServiceAccountRequest(clientId, "plaintext-secret-files-2");
-        rotation.Clients = [rotation.Clients!.Single() with { AssignedRoleNames = null }];
-        await ConsumeAsync(rotation);
-
-        (await GetAssignedRoleNamesAsync((await LoadClientAsync(clientId))!)).Should().BeEquivalentTo(
-            [CommonConstants.CommunicationManagementRole, IdentityServiceConstants.FileManagementRole]);
-    }
-
-    [Fact]
-    public async Task ClientOutsideThePrefix_NeverGetsFileManagementFromTheConsumer()
-    {
-        await ArrangeAsync();
-        await EnsureRoleAsync(IdentityServiceConstants.FileManagementRole);
-        var clientId = $"customer-client-{Guid.NewGuid():N}";
-        var request = BuildServiceAccountRequest(clientId, "plaintext-secret-files-3");
+        var request = BuildServiceAccountRequest(clientId, "plaintext-secret-sdr-1",
+            [CommonConstants.CommunicationManagementRole, StreamDataReader]);
 
         await ConsumeAsync(request);
+        await ConsumeAsync(request);
 
-        (await GetAssignedRoleNamesAsync((await LoadClientAsync(clientId))!)).Should()
-            .BeEquivalentTo([CommonConstants.CommunicationManagementRole]);
+        (await GetAssignedRoleNamesAsync(clientId)).Should().BeEquivalentTo(
+            [CommonConstants.CommunicationManagementRole, FileManagement, StreamDataReader],
+            "every declared role is kept and no role edge is written twice");
+    }
+
+    [Fact]
+    public async Task LegacyAccount_WithANullRoleList_GetsTheBaselineRoles_WithoutLosingAnyRoleItHad()
+    {
+        // AB#8581 AC1: a pre-3.32.0 account has no AssignedRoleNames; the controller sends null and cannot add roles.
+        await ArrangeAsync();
+        await EnsureRoleAsync("LegacyOperatorRole");
+        var clientId = NewClientId();
+        await ConsumeAsync(BuildServiceAccountRequest(clientId, "plaintext-secret-files-2",
+            [CommonConstants.CommunicationManagementRole, "LegacyOperatorRole"]));
+        await RemoveRoleEdgeAsync(clientId, FileManagement);
+        await RemoveRoleEdgeAsync(clientId, StreamDataReader);
+        (await GetAssignedRoleNamesAsync(clientId)).Should().BeEquivalentTo(
+            [CommonConstants.CommunicationManagementRole, "LegacyOperatorRole"],
+            "precondition: a legacy account with its own roles and without the baseline roles");
+
+        var legacy = BuildServiceAccountRequest(clientId, "plaintext-secret-files-2", assignedRoleNames: null);
+        await ConsumeAsync(legacy);
+
+        (await GetAssignedRoleNamesAsync(clientId)).Should().BeEquivalentTo(
+            [CommonConstants.CommunicationManagementRole, "LegacyOperatorRole", FileManagement, StreamDataReader]);
+    }
+
+    [Fact]
+    public async Task ClientOutsideThePrefix_NeverGetsTheBaselineRolesFromTheConsumer()
+    {
+        await ArrangeAsync();
+        var clientId = $"customer-client-{Guid.NewGuid():N}";
+
+        await ConsumeAsync(BuildServiceAccountRequest(clientId, "plaintext-secret-files-3"));
+
+        (await GetAssignedRoleNamesAsync(clientId)).Should().BeEquivalentTo([CommonConstants.CommunicationManagementRole]);
     }
 
     // ---------- helpers ----------
@@ -102,6 +119,8 @@ public class PipelineServiceAccountFileManagementConsumerIntegrationTests : ICla
         await _fixture.InitializeAsync();
         await _fixture.GetService<IDefaultConfigurationCreatorService>().SetupAsync(SystemTenantId);
         await EnsureRoleAsync(CommonConstants.CommunicationManagementRole);
+        await EnsureRoleAsync(FileManagement);
+        await EnsureRoleAsync(StreamDataReader);
     }
 
     private async Task EnsureRoleAsync(string roleName)
@@ -123,7 +142,11 @@ public class PipelineServiceAccountFileManagementConsumerIntegrationTests : ICla
         await session.CommitTransactionAsync();
     }
 
-    private CreateIdentityDataCommandRequest BuildServiceAccountRequest(string clientId, string? clientSecret)
+    private CreateIdentityDataCommandRequest BuildServiceAccountRequest(string clientId, string? clientSecret) =>
+        BuildServiceAccountRequest(clientId, clientSecret, [CommonConstants.CommunicationManagementRole]);
+
+    private CreateIdentityDataCommandRequest BuildServiceAccountRequest(string clientId, string? clientSecret,
+        string[]? assignedRoleNames)
     {
         return new CreateIdentityDataCommandRequest(SystemTenantId)
         {
@@ -139,7 +162,7 @@ public class PipelineServiceAccountFileManagementConsumerIntegrationTests : ICla
                     AllowOfflineAccess = false,
                     ClientSecret = clientSecret,
                     RequireClientSecret = true,
-                    AssignedRoleNames = [CommonConstants.CommunicationManagementRole]
+                    AssignedRoleNames = assignedRoleNames
                 }
             ]
         };
@@ -163,8 +186,9 @@ public class PipelineServiceAccountFileManagementConsumerIntegrationTests : ICla
         return result.Items.FirstOrDefault();
     }
 
-    private async Task RemoveRoleEdgeAsync(RtClient client, string roleName)
+    private async Task RemoveRoleEdgeAsync(string clientId, string roleName)
     {
+        var client = (await LoadClientAsync(clientId))!;
         var repo = _fixture.GetSystemContext().GetSystemTenantRepositoryAsAdmin();
         using var session = await repo.GetSessionAsync();
         session.StartTransaction();
@@ -181,8 +205,10 @@ public class PipelineServiceAccountFileManagementConsumerIntegrationTests : ICla
         await session.CommitTransactionAsync();
     }
 
-    private async Task<IReadOnlyList<string>> GetAssignedRoleNamesAsync(RtClient client)
+    /// <summary>The role names of every outbound AssignedRole edge, duplicates included.</summary>
+    private async Task<IReadOnlyList<string>> GetAssignedRoleNamesAsync(string clientId)
     {
+        var client = (await LoadClientAsync(clientId))!;
         var repo = _fixture.GetSystemContext().GetSystemTenantRepositoryAsAdmin();
         using var session = await repo.GetSessionAsync();
         var associations = await repo.GetRtAssociationsAsync(session,

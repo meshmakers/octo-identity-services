@@ -52,7 +52,7 @@ internal sealed record TenantAdministratorFileRoleGrantResult(
 /// <remarks>
 ///     <para>
 ///         Complements <see cref="FileRoleGrant"/> (Reporting role holders, kept untouched) and
-///         <see cref="PipelineServiceAccountFileRoleGrant"/>. It has its OWN marker
+///         <see cref="PipelineServiceAccounts.PipelineServiceAccountRoleGrant"/>. It has its OWN marker
 ///         (<see cref="IdentityServiceConstants.TenantAdministratorFileRoleGrantKey"/>), so tenants that already
 ///         carry the <see cref="IdentityServiceConstants.FileRoleGrantKey"/> marker from the Reporting-based grant
 ///         — the tenants this fix is for — still receive the administrator grant on the next identity start.

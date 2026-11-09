@@ -12,5 +12,6 @@ Run it before S9 (AB#6183 / AB#6181) on each tenant.
   System.Files model) and `RoleMissing` (FileManagement not seeded yet; the next setup retries).
 - A missing account is fixed by the existing grant, which re-runs on identity start, tenant create, full tenant
   update, failed-tenant retry and on every controller identity-data command. Re-run the check afterwards.
-- The check never writes. It reuses `PipelineServiceAccountFileRoleGrant.Plan` as the single definition of
-  "holds the role".
+- The check never writes. It reuses `PipelineServiceAccountRoleGrant.Plan` as the single definition of
+  "holds the role". It reports `FileManagement` only; the same grant also gives every pipeline service account
+  `StreamDataReader` (AB#8581, see `persistence.md`).
