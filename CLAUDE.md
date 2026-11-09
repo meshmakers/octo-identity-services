@@ -1137,7 +1137,10 @@ The identity service hosts CK methods as a remote handler (bus transport, SDK `M
   `METHOD_HANDLER_NOT_AVAILABLE`; the rows with `ServesRestFacade = true` (`User.CreateUser`, `User.ResetPassword`, since AB#8414 also
   `User.ChangePassword`, `User.SetPassword`) are registered **local only** (`HandleLocalOnly`, `IdentityMethodHost.SelectLocalOnlyHandlers`: no
   announcement, no queue) so their REST facades `POST users`, `POST users/ResetPassword`, `api/manage/change-password` and `set-password` keep
-  working in-process; the client secret methods stay unregistered. On (local, test-2 with
+  working in-process; the client secret methods stay unregistered. A GraphQL call of a method that is off is refused by the asset-repo
+  gateway before the send (AB#8634, common-services dispatcher: no live handler in the registry = `METHOD_HANDLER_NOT_AVAILABLE` /
+  `no-live-handler`, nothing on the broker, no `S-FAULT`); with an asset-repo on an older common-services package one non-persistent
+  send still reached RabbitMQ and came back unroutable. On (local, test-2 with
   test accounts): all offered on the bus (and called in-process by the facades).
   `IdentityMethodDeclarationsIntegrationTests.EveryHandlerRegistration_FlagsASecretCarryingMethod_AsTheModelDeclaresIt` compares every
   `CarriesSecret` with the compiled model (a sensitive parameter or result), so a new handler cannot pass the gate by a forgotten flag.
