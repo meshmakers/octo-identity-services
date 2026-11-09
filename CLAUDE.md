@@ -2443,9 +2443,12 @@ from logs, audit and activity tags; set the same; wrong current password counted
 `PASSWORD_ALREADY_SET`, shadow user, another user and an administrator `METHOD_FORBIDDEN`; tokens without `octo_api` refused; a bearer
 token does not reach the endpoints; the facade guard), `Api/Methods/UserChangePasswordMethodTests` (switch off: local only),
 `Methods/IdentityMethodHostTests`, `IdentityMethodDeclarationsIntegrationTests` (declaration, sensitive parameter, `CarriesSecret` vs.
-model), plus the unchanged `PasswordChangeRevokesSessionsTests` and `ShadowUserPasswordTests`. Follow-up: `UsersController` keeps its own
-copy of the description rebuild (`DescribeIdentityErrors`); it can move onto `PasswordPolicyErrorDescriber` once the AB#8413 follow-up
-on that file is merged.
+model), plus the unchanged `PasswordChangeRevokesSessionsTests` and `ShadowUserPasswordTests`. `UsersController.DescribeIdentityErrors`
+is a pure mapper onto `PasswordPolicyErrorDescriber` since AB#8415 (33d0dbbe); no REST or account path builds password-policy texts
+itself. `Api/PasswordPolicyMessageParityTests` (AB#8523) keeps it that way: one password that breaks several rules gets the same rule
+codes from `User.CreateUser`, `User.ResetPassword` and `User.ChangePassword`, and REST `POST users`, REST `POST users/ResetPassword`
+(code + description) and the account page's `change-password` and `set-password` (descriptions) show exactly
+`PasswordPolicyErrorDescriber.Describe` of the method envelope, in `en` and `de` (same `Accept-Language` on every path).
 
 ### System.Identity 2.x -> 3.x needs migration entries (AB#8157)
 
