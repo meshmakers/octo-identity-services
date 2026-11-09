@@ -37,10 +37,16 @@ public class RoleChangeCallerTests
     }
 
     [Theory]
-    [InlineData(RoleChangeReasons.SelfGrant, "own user")]
+    [InlineData(RoleChangeReasons.SelfGrant, "to yourself")]
     [InlineData(RoleChangeReasons.LastAdministrator, "without a user administrator")]
     public void Title_IsAReadableSentence(string reason, string fragment) =>
         new RoleChangeDecision(reason, []).Title.Should().Contain(fragment);
+
+    [Fact]
+    public void Title_OfSelfGrant_DoesNotSpeakOfAUser() =>
+        // AB#8583: the same refusal reaches client-credentials callers (AB#8569), so the sentence must not say "your own user".
+        new RoleChangeDecision(RoleChangeReasons.SelfGrant, []).Title
+            .Should().Be("You cannot grant additional roles to yourself.");
 
     [Fact]
     public void Title_OfRoleNotHeld_NamesTheRoles() =>

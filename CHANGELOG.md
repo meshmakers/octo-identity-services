@@ -38,6 +38,10 @@ Notable changes of the OctoMesh identity services. The CK model `System.Identity
 
 ### Fixed
 
+- **The self-grant refusal reads correctly for clients (AB#8583).** The `title` of the REST `403 self-grant` problem said
+  "You cannot grant additional roles to your own user." also to client-credentials callers (AB#8569). It now reads "You cannot grant additional roles to yourself." for users and clients. The code `self-grant` and the method error
+  (`METHOD_FORBIDDEN`, `reason=self-grant`) are unchanged.
+
 - **`AddClientToGroup -cid <clientId>` works with the client id (AB#8571).** `PUT`/`DELETE {tenant}/v1/groups/{group}/members/clients/{client}`
   passed the value straight into an rtId parse, so the OAuth client id — what octo-cli documents and sends — answered `500`; only the client's
   rtId worked. Both now work: the rtId of an existing client wins, otherwise the value is looked up as client id (so a client id that looks like an

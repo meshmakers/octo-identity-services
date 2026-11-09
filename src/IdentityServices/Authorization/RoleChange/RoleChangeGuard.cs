@@ -126,10 +126,13 @@ public sealed record RoleChangeDecision(string? Reason, IReadOnlyList<string> Ro
     /// <summary><c>true</c> when the change may be applied.</summary>
     public bool IsAllowed => Reason == null;
 
-    /// <summary>A readable sentence for the refusal (Studio shows the <c>title</c> of the REST problem as it is).</summary>
+    /// <summary>
+    ///     A readable sentence for the refusal (Studio shows the <c>title</c> of the REST problem as it is). The self-grant
+    ///     sentence says "yourself" so that it reads correctly for a user session and for a client-credentials caller (AB#8583).
+    /// </summary>
     public string Title => Reason switch
     {
-        RoleChangeReasons.SelfGrant => "You cannot grant additional roles to your own user.",
+        RoleChangeReasons.SelfGrant => "You cannot grant additional roles to yourself.",
         RoleChangeReasons.RoleNotHeld =>
             $"You cannot grant built-in roles you do not hold yourself: {string.Join(", ", RoleNames)}.",
         RoleChangeReasons.LastAdministrator =>
