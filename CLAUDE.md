@@ -1265,7 +1265,7 @@ and gain the app role: `self-grant` only knew user sessions. Decision by Gerald 
   self-grant first, then the grant rule), group membership (`MemberAdded` of its own client, REST and `Group.AddMember`), a role added to a group its client reaches
   (`GroupRoles`, directly or through a parent group, REST and `Group.SetRoles`) and a group nested into such a group (`MemberAdded` of kind group); the walk is
   `RoleGraph.GroupsReachingClient`, the same as for users and as `GroupRoleResolver`. Answer and audit are those of the user path (`403 self-grant`, `METHOD_FORBIDDEN`
-  + `reason=self-grant`, WARN `caller client <id>` + `Identity.RoleChangeRefused`). The `title` text still says "your own user" (shared with the user path).
+  + `reason=self-grant`, WARN `caller client <id>` + `Identity.RoleChangeRefused`). The `title` reads "You cannot grant additional roles to yourself." for both callers (AB#8583).
 - **Free:** removing its own roles or memberships, granting to other clients and users (AB#8564 unchanged), and every path that does not call the guard: the bus
   path (`DistClientDto.AssignedRoleNames`, pipeline service accounts of the communication controller), Bootstrap seed, setup, the scratch-tenant creator grant
   (`TenantOwners`), cross-tenant provisioning.
