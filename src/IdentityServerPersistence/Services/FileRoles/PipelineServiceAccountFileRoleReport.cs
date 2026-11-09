@@ -6,6 +6,7 @@ using Meshmakers.Octo.Runtime.Contracts.MongoDb.Repositories;
 using Meshmakers.Octo.Runtime.Contracts.Repositories;
 using Meshmakers.Octo.Runtime.Contracts.Repositories.Query;
 using Meshmakers.Octo.Runtime.Contracts.RepositoryEntities;
+using IdentityServerPersistence.Services.PipelineServiceAccounts;
 using Persistence.IdentityCkModel.Generated.System.Identity.v3;
 
 namespace IdentityServerPersistence.Services.FileRoles;
@@ -47,9 +48,9 @@ public sealed record PipelineServiceAccountFileRoleReportResult(
     IReadOnlyList<PipelineServiceAccountFileRoleEntry> Accounts);
 
 /// <summary>
-///     AB#6542: proof report for <see cref="PipelineServiceAccountFileRoleGrant"/>. Lists the pipeline service
+///     AB#6542: proof report for the FileManagement part of <see cref="PipelineServiceAccountRoleGrant"/>. Lists the pipeline service
 ///     accounts of a tenant and whether each holds FileManagement. Strictly read-only; "holds the role" is decided by
-///     the grant's own pure rule (<see cref="PipelineServiceAccountFileRoleGrant.Plan"/>), not redefined here.
+///     the grant's own pure rule (<see cref="PipelineServiceAccountRoleGrant.Plan"/>), not redefined here.
 /// </summary>
 public static class PipelineServiceAccountFileRoleReport
 {
@@ -76,7 +77,9 @@ public static class PipelineServiceAccountFileRoleReport
             return new(tenantId, PipelineServiceAccountFileRoleReportStatus.RoleMissing, 0, []);
         }
 
-        var missing = PipelineServiceAccountFileRoleGrant.Plan(clients, fileManagementRoleId).ToHashSet(StringComparer.Ordinal);
+        var missing = PipelineServiceAccountRoleGrant.Plan(clients, [fileManagementRoleId])
+            .Select(e => e.ClientRtId)
+            .ToHashSet(StringComparer.Ordinal);
         var entries = accounts
             .Select(c => new PipelineServiceAccountFileRoleEntry(c.Value.ClientId, c.Key, !missing.Contains(c.Key)))
             .OrderBy(e => e.ClientId, StringComparer.Ordinal)

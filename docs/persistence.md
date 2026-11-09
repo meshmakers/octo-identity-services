@@ -539,40 +539,56 @@ re-seeded is not open in between. ReportingManagement / ReportingViewer holders 
 one-time `FileRoleGrant` above. Machine clients (client credentials) carry no roles: give a client that must use
 the Files API the FileViewer / FileManagement role.
 
-### FileManagement for the pipeline service accounts (AB#6467 / AB#6457, decision Gerald 2026-10-11)
+### Baseline roles of the pipeline service accounts (AB#6467 / AB#6457 / AB#8581)
 
 The pipeline service accounts (client id `octo-pipeline-sa-{adapterRtId}`, one per adapter, created by the
-Communication Controller) hold `FileManagement`. Their file nodes (`CreateFileSystemUpdate`,
-`GetFileSystemContent`) run in the adapter's own engine, where the System.Files data policies above apply to the
-roles of the identity the node runs as; without the role a node running as `ServiceAccount` (or as `Caller` with no
-caller — cron and HTTP triggers) is refused, which looks like a pipeline that "does nothing". Done identity-side, not
-through the controller's default roles:
+Communication Controller) hold the baseline roles of `PipelineServiceAccountBaselineRoles`, the single list both
+writers use:
+
+| Role | Why | Granted when |
+| --- | --- | --- |
+| `FileManagement` (AB#6467 / AB#6457, decision Gerald 2026-10-11) | The file nodes (`CreateFileSystemUpdate`, `GetFileSystemContent`) run in the adapter's own engine, where the System.Files data policies above apply to the roles of the identity the node runs as; without the role a node running as `ServiceAccount` (or as `Caller` with no caller — cron and HTTP triggers) is refused, which looks like a pipeline that "does nothing". | The role is seeded; the tenant-setup pass additionally needs System.Files in the tenant's CK cache. |
+| `StreamDataReader` (AB#8581) | The asset repository gates stream-data reads on `StreamDataReader`, `StreamDataWriter` or `StreamDataAdmin` (AB#8559, mode `Off`/`Warn`/`Enforce`). The controller adds the role to every *declarative* account on reconcile (AB#8563), but it cannot add a role to a **legacy** account (created before CK 3.32.0, no `AssignedRoleNames`) without removing the roles it has. Identity grants it additively, so legacy accounts keep reading stream data under `Enforce`. | The role is seeded (every tenant with `System.Identity.Bootstrap`). |
+
+Done identity-side, through two writers:
 
 - **At creation and on every identity-data command** (`CreateIdentityDataCommandRequestConsumer`): for a client with
-  the prefix `octo-pipeline-sa-` the consumer adds the `AssignedRole` edge to `FileManagement` when the role exists —
-  also for a `null` role list (rotation, legacy account) — and treats it as implicitly declared, so the declarative
-  role sync (AB#5111) never removes it. A new account is therefore covered in the same command that creates it. If the
-  role does not exist yet (seed pending) the consumer logs a warning.
-- **At every tenant setup** (`PipelineServiceAccountFileRoleGrant`, `SetupTenantAsync` after `FileRoleGrant`): every
-  existing `octo-pipeline-sa-*` client without the role receives it. This is **not** run-once: identity start, tenant
-  create, full tenant update (not the nightly `CacheOnly` update) and the failed-tenant retry all run it, additive and
-  idempotent (a repeated run finds every account covered and writes nothing). It only runs for tenants that have
-  System.Files in their CK cache. Consequence: an operator cannot remove `FileManagement` from a pipeline service
-  account for good; restrict a pipeline with `Identity: Caller` or change the policies instead.
+  the prefix `octo-pipeline-sa-` the consumer adds the `AssignedRole` edges to the seeded baseline roles — also for a
+  `null` role list (rotation, legacy account), where it only adds and never removes — and treats them as implicitly
+  declared, so the declarative role sync (AB#5111) never removes them. A role the declaration names as well (the
+  controller declares `StreamDataReader` since AB#8563) is written once. A new account is therefore covered in the same
+  command that creates it. If a role does not exist yet (seed pending) the consumer logs a warning.
+- **At every tenant setup** (`PipelineServiceAccountRoleGrant`, `SetupTenantAsync` after `FileRoleGrant`): every
+  existing `octo-pipeline-sa-*` client receives the baseline roles it lacks. This is **not** run-once: identity start,
+  tenant create, full tenant update (not the nightly `CacheOnly` update) and the failed-tenant retry all run it,
+  additive and idempotent (a repeated run finds every account covered and writes nothing). `FileManagement` is only
+  granted in tenants that have System.Files in their CK cache; `StreamDataReader` in every tenant. Consequence: an
+  operator cannot remove a baseline role from a pipeline service account for good; restrict a pipeline with
+  `Identity: Caller` or change the policies instead.
+- **Not through the role change guard.** Both writers are system grants, not role changes by a caller, so the guard of
+  AB#7914/AB#7928/AB#8569 (`role-not-held`, `self-grant`) does not apply — the same as for `FileManagement` since
+  AB#6467. The grant is narrow: only clients whose id starts with `octo-pipeline-sa-` (ordinal, case-sensitive), only
+  the two fixed roles of `PipelineServiceAccountBaselineRoles`, only when the role is seeded in the tenant (nothing is
+  created), and only additive. **Known gap (AB#8618):** the prefix is the only trust check — see the next point.
 - **Covered when?** Exactly in the identity-data command that creates or touches the account (seconds after the
-  controller provisions it); accounts that existed before 1.6.0 at the first identity start with this version; the
-  worst case (role seed pending at creation) at the next identity start or full tenant update.
-- **The prefix is not reserved.** Nothing in the identity API rejects a client id starting with `octo-pipeline-sa-`
-  (`POST api/Clients`, tenant-administration write policy, accepts any free id): such a client is treated as a
-  pipeline service account and receives FileManagement at the next tenant setup or identity-data command. Only tenant
-  administrators can create clients, and they can assign FileManagement anyway, but do not use the prefix for other
-  clients. The prefix octo-pipeline-sa- is a convention, not a security boundary: whoever can create clients and assign roles (tenant administration) can already grant any role.
-- **Concurrency:** the setup pass and the consumer take a per-tenant in-process lock (`PipelineServiceAccountFileRoleLock`)
+  controller provisions it); accounts that existed before at the first identity start with this version; the worst
+  case (role seed pending at creation) at the next identity start or full tenant update. Legacy accounts therefore need
+  no manual `AddClientToRole` for `StreamDataReader` before a tenant switches the stream-data gate to `Enforce`.
+- **The prefix is not reserved (known gap, AB#8618).** Nothing in the identity API rejects a client id starting with
+  `octo-pipeline-sa-` (`POST api/Clients`, tenant-administration write policy — `TenantManagement` or `UserManagement` —
+  accepts any free id): such a client is treated as a pipeline service account and receives the baseline roles at the
+  next tenant setup. Since AB#7928 a caller may grant a platform role to a client only when it holds the role itself
+  (`403 role-not-held`), so a client administrator who does not hold `FileManagement` / `StreamDataReader` can obtain
+  them for a client it controls through the prefix. This gap exists for `FileManagement` since AB#6467 and AB#8581
+  extends it to `StreamDataReader`; closing it (reserving the prefix, a controller-owned marker, or checking the adapter
+  named in the client id) is tracked in AB#8618. Do not use the prefix for other clients.
+- **Concurrency:** the setup pass and the consumer take a per-tenant in-process lock (`PipelineServiceAccountRoleLock`)
   and re-read the edges before inserting, because the engine does not reject a second identical `AssignedRole` edge.
   Two identity replicas starting at the same instant can still duplicate the edge; role reads treat the edges as a set
   and the next run finds the account covered.
-- **Detection:** `PipelineServiceAccountFileRoleGrant.FindAccountsWithoutRoleAsync` names the accounts without the
-  role (read-only).
+- **Detection:** `PipelineServiceAccountRoleGrant.FindMissingRolesAsync` names the accounts and the baseline roles they
+  lack (read-only). The REST/CLI proof report (`runbook-pipeline-service-account-file-roles.md`) covers
+  `FileManagement` only.
 
 Not covered on purpose: **customer client-credentials clients** and **octo-cli with `LogInClientCredentials`** carry
 no user roles and get 403 on the Files API (REST) and on System.Files in the engine until the client itself is given

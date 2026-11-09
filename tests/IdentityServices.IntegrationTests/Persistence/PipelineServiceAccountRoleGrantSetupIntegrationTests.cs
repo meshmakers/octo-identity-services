@@ -15,18 +15,19 @@ using Xunit;
 namespace IdentityServices.IntegrationTests.Persistence;
 
 /// <summary>
-///     AB#6467 / AB#6457: the production trigger of the recurring pipeline service account grant — a tenant setup in
-///     a tenant that has System.Files grants FileManagement to the existing <c>octo-pipeline-sa-*</c> accounts and
-///     leaves other clients alone; a repeated setup writes nothing new.
+///     AB#6467 / AB#6457 / AB#8581: the production trigger of the recurring pipeline service account grant — a tenant
+///     setup in a tenant that has System.Files grants FileManagement and StreamDataReader to the existing
+///     <c>octo-pipeline-sa-*</c> accounts and leaves other clients alone; a repeated setup writes nothing new.
 /// </summary>
 [Collection("Sequential")]
-public class PipelineServiceAccountFileRoleGrantSetupIntegrationTests : IClassFixture<IdentityServicesWithFilesModelFixture>
+public class PipelineServiceAccountRoleGrantSetupIntegrationTests : IClassFixture<IdentityServicesWithFilesModelFixture>
 {
     private static readonly OctoObjectId FileManagementRtId = new("660000000000000000000061");
+    private static readonly OctoObjectId StreamDataReaderRtId = new("66000000000000000000000E");
 
     private readonly IdentityServicesWithFilesModelFixture _fixture;
 
-    public PipelineServiceAccountFileRoleGrantSetupIntegrationTests(IdentityServicesWithFilesModelFixture fixture,
+    public PipelineServiceAccountRoleGrantSetupIntegrationTests(IdentityServicesWithFilesModelFixture fixture,
         ITestOutputHelper outputHelper)
     {
         _fixture = fixture;
@@ -34,7 +35,7 @@ public class PipelineServiceAccountFileRoleGrantSetupIntegrationTests : IClassFi
     }
 
     [Fact]
-    public async Task TenantSetup_GrantsTheRoleToExistingPipelineAccounts_AndASecondSetupAddsNothing()
+    public async Task TenantSetup_GrantsBothRolesToExistingPipelineAccounts_AndASecondSetupAddsNothing()
     {
         await _fixture.InitializeAsync();
         var systemContext = _fixture.GetSystemContext();
@@ -51,29 +52,28 @@ public class PipelineServiceAccountFileRoleGrantSetupIntegrationTests : IClassFi
 
         await setup.SetupAsync(tenantId);
         var repo = (await systemContext.GetChildTenantContextAsync(tenantId)).GetTenantRepositoryAsAdmin();
-        await InsertRoleAsync(repo);
+        await InsertRoleAsync(repo, FileManagementRtId, IdentityServiceConstants.FileManagementRole);
+        await InsertRoleAsync(repo, StreamDataReaderRtId, IdentityServiceConstants.StreamDataReaderRole);
         var account = await InsertClientAsync(repo, "octo-pipeline-sa-");
         var other = await InsertClientAsync(repo, "customer-integration-");
 
         await setup.SetupAsync(tenantId);
 
-        (await CountEdgesAsync(repo, account)).Should().Be(1, "the setup grants the existing pipeline account");
-        (await CountEdgesAsync(repo, other)).Should().Be(0, "other clients are untouched");
+        (await RoleIdsAsync(repo, account)).Should().BeEquivalentTo([FileManagementRtId, StreamDataReaderRtId],
+            "the setup grants both baseline roles to the existing pipeline account");
+        (await RoleIdsAsync(repo, other)).Should().BeEmpty("other clients are untouched");
 
         await setup.SetupAsync(tenantId);
-        (await CountEdgesAsync(repo, account)).Should().Be(1, "a second setup finds the account covered");
+        (await RoleIdsAsync(repo, account)).Should().HaveCount(2, "a second setup finds the account covered");
     }
 
-    private static async Task InsertRoleAsync(ITenantRepository repo)
+    private static async Task InsertRoleAsync(ITenantRepository repo, OctoObjectId rtId, string name)
     {
         using var session = await repo.GetSessionAsync();
         session.StartTransaction();
         await repo.InsertOneRtEntityAsync(session, new RtRole
         {
-            RtId = FileManagementRtId,
-            Name = IdentityServiceConstants.FileManagementRole,
-            NormalizedName = IdentityServiceConstants.FileManagementRole.ToUpperInvariant(),
-            RtWellKnownName = IdentityServiceConstants.FileManagementRole
+            RtId = rtId, Name = name, NormalizedName = name.ToUpperInvariant(), RtWellKnownName = name
         });
         await session.CommitTransactionAsync();
     }
@@ -97,13 +97,13 @@ public class PipelineServiceAccountFileRoleGrantSetupIntegrationTests : IClassFi
         return rtId;
     }
 
-    private static async Task<int> CountEdgesAsync(ITenantRepository repo, OctoObjectId client)
+    private static async Task<IReadOnlyList<OctoObjectId>> RoleIdsAsync(ITenantRepository repo, OctoObjectId client)
     {
         using var session = await repo.GetSessionAsync();
         var edges = await repo.GetRtAssociationsAsync(session,
             new RtEntityId(RtEntityExtensions.GetRtCkTypeId<RtClient>(), client),
             RtAssociationExtendedQueryOptions.Create(GraphDirections.Outbound,
                 roleId: IdentityAssociationConstants.AssignedRoleId));
-        return edges.Items.Count(e => e.TargetRtId == FileManagementRtId);
+        return edges.Items.Select(e => e.TargetRtId).ToList();
     }
 }

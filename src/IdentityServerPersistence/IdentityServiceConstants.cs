@@ -57,9 +57,18 @@ public static class IdentityServiceConstants
     /// <summary>
     /// AB#6457 / AB#6467: client-id prefix of the Communication Controller's pipeline service accounts
     /// (<c>PipelineServiceAccountProvisioningService.BuildClientId</c> → <c>octo-pipeline-sa-{adapterRtId}</c>).
-    /// These accounts hold <see cref="FileManagementRole"/> (see <c>PipelineServiceAccountFileRoleGrant</c>).
+    /// These accounts hold the baseline roles of <c>PipelineServiceAccountBaselineRoles</c>
+    /// (<see cref="FileManagementRole"/>, <see cref="StreamDataReaderRole"/>), granted by
+    /// <c>PipelineServiceAccountRoleGrant</c> and <c>CreateIdentityDataCommandRequestConsumer</c>.
     /// </summary>
     public const string PipelineServiceAccountClientIdPrefix = "octo-pipeline-sa-";
+
+    /// <summary>
+    /// AB#8581: tenant role that may read stream data (the asset repository's stream-data gate of AB#8559 accepts
+    /// <c>StreamDataReader</c>, <c>StreamDataWriter</c> or <c>StreamDataAdmin</c>). Seeded by
+    /// <c>System.Identity.Bootstrap</c> (660…0E). Same name as <c>CommonConstants.StreamDataReaderRole</c>.
+    /// </summary>
+    public const string StreamDataReaderRole = "StreamDataReader";
 
     /// <summary>
     /// AB#6180: tenant role that may browse and download the platform file system (read-only). Seeded by
