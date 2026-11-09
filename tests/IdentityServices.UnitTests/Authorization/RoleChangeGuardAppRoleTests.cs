@@ -43,7 +43,7 @@ public class RoleChangeGuardAppRoleTests
         _sut = new RoleChangeGuard(userManager, _roleManager, Substitute.For<IGroupStore>(),
             Substitute.For<IGroupRoleResolver>(), Substitute.For<IUserStore<RtUser>>(),
             Substitute.For<IExternalTenantUserMappingStore>(), Substitute.For<ICrossTenantShadowUserChainResolver>(),
-            _platformRoles, _logger);
+            _platformRoles, Substitute.For<IOctoClientStore>(), _logger);
     }
 
     private void AddRole(string name, bool builtIn, bool platform)

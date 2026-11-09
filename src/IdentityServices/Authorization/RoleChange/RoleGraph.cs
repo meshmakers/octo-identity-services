@@ -144,6 +144,24 @@ internal sealed class RoleGraph
         return result;
     }
 
+    /// <summary>
+    ///     AB#8569: the groups that give their roles to the client: those it is a direct member of and their nested groups
+    ///     (the same walk as <see cref="GroupsReachingSubject" /> and <c>GroupRoleResolver</c>).
+    /// </summary>
+    public HashSet<string> GroupsReachingClient(string clientRtId)
+    {
+        var result = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var (id, group) in Groups)
+        {
+            if (group.Clients.Contains(clientRtId))
+            {
+                CollectGroups(id, result, 0);
+            }
+        }
+
+        return result;
+    }
+
     /// <summary>The mappings that serve the user (empty for a local user).</summary>
     public IReadOnlyCollection<string> MappingsServing(string? userId) =>
         userId != null && ShadowUserMappings.TryGetValue(userId, out var mappings) ? mappings : [];

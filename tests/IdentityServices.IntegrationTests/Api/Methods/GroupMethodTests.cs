@@ -307,6 +307,62 @@ public class GroupMethodTests(CustomWebApplicationFactory factory) : GroupMethod
         (await RoleIdsAsync(group)).Should().BeEmpty();
     }
 
+    /// <summary>AB#8569: the token of a client-credentials caller of <paramref name="client" /> (no subject).</summary>
+    private static CkMethodPrincipal ClientPrincipal(RtClient client) =>
+        new(null, [UserManagement], ["octo_api"], client.ClientId);
+
+    [Fact]
+    public async Task AddMember_AClientAddingItselfToAnAppRoleGroup_IsRefused_SelfGrant_AB8569()
+    {
+        var group = await NewGroupAsync(await NewAppRoleAsync());
+        var client = await NewClientAsync();
+
+        var byRtId = await AddAsync(group, ClientPrincipal(client), RtGroupMemberKindEnum.Client, client.RtId.ToString());
+        var byClientId = await AddAsync(group, ClientPrincipal(client), RtGroupMemberKindEnum.Client, client.ClientId!);
+
+        AssertForbidden(byRtId, "self-grant");
+        AssertForbidden(byClientId, "self-grant");
+        (await ClientMembersAsync(group)).Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task AddMember_AClientAddingAnotherClientToAnAppRoleGroup_Succeeds_AB8569()
+    {
+        var group = await NewGroupAsync(await NewAppRoleAsync());
+        var caller = await NewClientAsync();
+        var other = await NewClientAsync();
+
+        var outcome = await AddAsync(group, ClientPrincipal(caller), RtGroupMemberKindEnum.Client, other.RtId.ToString());
+
+        outcome.IsSuccess.Should().BeTrue();
+        (await ClientMembersAsync(group)).Should().Equal(other.RtId.ToString());
+    }
+
+    [Fact]
+    public async Task SetRoles_AClient_AddingARoleToAGroupItBelongsTo_IsRefused_SelfGrant_AB8569()
+    {
+        var group = await NewGroupAsync();
+        var client = await NewClientAsync();
+        await AddClientMemberAsync(group, client.RtId);
+
+        AssertForbidden(await SetRolesAsync(group, ClientPrincipal(client), await NewAppRoleAsync()), "self-grant");
+        (await RoleIdsAsync(group)).Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task RemoveMember_AClientRemovingItself_Succeeds_AB8569()
+    {
+        var group = await NewGroupAsync(await NewAppRoleAsync());
+        var client = await NewClientAsync();
+        await AddClientMemberAsync(group, client.RtId);
+
+        var outcome = await RemoveAsync(group, ClientPrincipal(client), RtGroupMemberKindEnum.Client,
+            client.RtId.ToString());
+
+        outcome.IsSuccess.Should().BeTrue();
+        (await ClientMembersAsync(group)).Should().BeEmpty();
+    }
+
     [Fact]
     public async Task LastAdministrator_RemovingTheOnlyHolderFromTheGroup_IsRefused_WithASecondHolderItSucceeds()
     {

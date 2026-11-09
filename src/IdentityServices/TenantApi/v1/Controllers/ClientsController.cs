@@ -75,6 +75,8 @@ public class ClientsController : ControllerBase
     ///     custom roles are free and removals are never judged. Otherwise a tenant administrator could hand a client e.g.
     ///     <c>UserManagement</c> and act as that client. Returns the audited 403 <c>role-not-held</c> answer, or <c>null</c>.
     ///     The bus path (<c>DistClientDto.AssignedRoleNames</c>, service-internal client provisioning) does not come here.
+    ///     AB#8569: a client-credentials caller is refused any role for its own client (<c>self-grant</c>), like a user for
+    ///     its own user.
     /// </summary>
     private async Task<ObjectResult?> GuardClientRoleGrantAsync(RtClient client, IReadOnlyCollection<string> addedRoleNames)
     {
@@ -84,8 +86,8 @@ public class ClientsController : ControllerBase
         }
 
         var caller = RoleChangeCaller.FromPrincipal(User);
-        var decision = await _roleChangeGuard.EvaluateGrantAsync(caller, addedRoleNames, HttpContext.RequestAborted,
-            $"client {client.ClientId}");
+        var decision = await _roleChangeGuard.EvaluateClientGrantAsync(caller, client, addedRoleNames,
+            HttpContext.RequestAborted);
         return decision.IsAllowed
             ? null
             : await _roleChangeRefusals.RefuseAsync(HttpContext, caller, decision, $"client {client.ClientId}");
