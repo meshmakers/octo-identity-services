@@ -193,7 +193,7 @@ endpoints of a wave; see octo-common-services `docs/rest-deprecation.md`. Identi
 | Option | Env variable | Description |
 |--------|-------------|-------------|
 | `RestDeprecation:Waves:IdentityUsers1:Since` | `OCTO_RestDeprecation__Waves__IdentityUsers1__Since` | `yyyy-MM-dd` (UTC). Delivery day of the release that deprecates the wave; drives the `Deprecation` header. Unset: no `Deprecation` header. Helm `restDeprecation.waves.IdentityUsers1.since`. |
-| `RestDeprecation:Waves:IdentityUsers1:Sunset` | `OCTO_RestDeprecation__Waves__IdentityUsers1__Sunset` | `yyyy-MM-dd` (UTC), after `Since`. One week after that release runs on prod-1 and prod-2; drives the `Sunset` header. Unset: no `Sunset` header. Helm `restDeprecation.waves.IdentityUsers1.sunset`. |
+| `RestDeprecation:Waves:IdentityUsers1:Sunset` | `OCTO_RestDeprecation__Waves__IdentityUsers1__Sunset` | `yyyy-MM-dd` (UTC), after `Since`. Since + 3 months (Identity wave 1: since `2026-11-08`, sunset `2027-02-08`, set in `octo-mesh-deployment`); drives the `Sunset` header. Unset: no `Sunset` header. Helm `restDeprecation.waves.IdentityUsers1.sunset`. |
 
 ### Configuration Sources
 
