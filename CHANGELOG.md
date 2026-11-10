@@ -29,12 +29,14 @@ Notable changes of the OctoMesh identity services. The CK model `System.Identity
   `PUT`/`DELETE users/{userName}/roles/{roleName}` and `POST users/{userName}/merge` are deprecated in favour of the methods
   `User.SetRoles`, `User.AddRole`, `User.RemoveRole` and `User.Merge` (GraphQL `systemIdentityUsers { … }`). Every response
   carries `Link: <method documentation>; rel="deprecation"`, the OpenAPI operations are `deprecated: true` and every call is
-  counted on `octo.rest.deprecated.calls` (endpoint template, client id, status class). The dates follow Gerald's rule
-  (2026-11-07) and are **set at rollout**, not in this release: `Deprecation` is sent once
-  `RestDeprecation:Waves:IdentityUsers1:Since` (Helm `restDeprecation.waves.IdentityUsers1.since`) is set to the delivery day
-  of the release that contains this change; `Sunset` once `…:Sunset` is set to one week after that release runs on both
-  prod-1 and prod-2. The dates are entered here and on the deprecated-endpoints page when they are set. Behaviour, routes,
-  bodies and status codes are unchanged. `POST users` and `POST users/ResetPassword` follow with AB#8418.
+  counted on `octo.rest.deprecated.calls` (endpoint template, client id, status class). The dates are configuration, not code
+  (`RestDeprecation:Waves:IdentityUsers1:Since|Sunset`, Helm `restDeprecation.waves.IdentityUsers1.since|sunset`): **deprecated
+  since 2026-11-08** (first production delivery of r3.5.68, the first release with this change), **sunset 2027-02-08** (since plus
+  three months, concept decision 13; Gerald 2026-11-10, replaces the "one week after prod" rule of 2026-11-07 for this wave). The
+  values are set for all clusters in `octo-mesh-deployment` and take effect with each cluster's next deploy; until then a cluster
+  sends no `Deprecation`/`Sunset` header. The endpoints are removed only after the sunset and only when the call counts show that
+  the clients have switched. Behaviour, routes, bodies and status codes are unchanged. `POST users` and
+  `POST users/ResetPassword` are not part of this wave; they follow with AB#8418 in a wave of their own.
 
 ### Fixed
 
