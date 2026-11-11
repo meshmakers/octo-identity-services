@@ -182,10 +182,9 @@ public class UsersRestDeprecationTests : IntegrationTestBase, IDisposable
             if (dates != null)
             {
                 b.UseSetting($"RestDeprecation:Waves:{Wave}:Since", dates.Value.Since);
-                if (dates.Value.Sunset != null)
-                {
-                    b.UseSetting($"RestDeprecation:Waves:{Wave}:Sunset", dates.Value.Sunset);
-                }
+                // No sunset: set the key explicitly to empty so that a Sunset configured in the environment
+                // (OCTO_RestDeprecation__Waves__IdentityUsers1__Sunset) cannot reach the since-only host.
+                b.UseSetting($"RestDeprecation:Waves:{Wave}:Sunset", dates.Value.Sunset ?? string.Empty);
             }
         });
         _hosts.Add(host);
