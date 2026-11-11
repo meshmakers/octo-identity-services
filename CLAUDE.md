@@ -2335,9 +2335,10 @@ The four endpoints above carry `[OctoRestDeprecated(Wave = IdentityRestDeprecati
 (`src/IdentityServices/TenantApi/v1/IdentityRestDeprecation.cs`; octo-common-services `docs/rest-deprecation.md`). Links:
 `User.SetRoles/AddRole/RemoveRole` -> `…/identityService/methods#user-roles`, `User.Merge` -> `…#usermerge`.
 
-- **No dates in code.** Wave dates (Gerald 2026-11-10, replaces the one-week rule of 2026-11-07 for this wave): since
-  **2026-11-08** (first prod delivery of r3.5.68, the first release with 33d0dbbe), sunset **2027-02-08** (since + 3 months,
-  concept decision 13); removal only on the `octo.rest.deprecated.calls` evidence. Set in `octo-mesh-deployment`
+- **No dates in code.** Wave dates (Gerald 2026-11-11, replaces the rules of 2026-11-07 and 2026-11-10): since
+  **2026-11-08** (first prod delivery of r3.5.68, the first release with 33d0dbbe), sunset **to be announced** — no fixed
+  compatibility window, Gerald decides the date once the migration functions are implemented; until then `sunset` stays empty
+  and no `Sunset` header is sent. Removal only on the `octo.rest.deprecated.calls` evidence. Set in `octo-mesh-deployment`
   `base/values-octo-mesh.yaml` (all clusters, effective with each cluster's next deploy). Both dates come from `RestDeprecation:Waves:IdentityUsers1:Since|Sunset`
   (env `OCTO_RestDeprecation__Waves__IdentityUsers1__Since|Sunset`, Helm `restDeprecation.waves.IdentityUsers1.since|sunset` in
   octo-helm-core). Unset -> no `Deprecation`/`Sunset` header; `Link`, OpenAPI `deprecated` and the counter

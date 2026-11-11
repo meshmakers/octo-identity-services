@@ -88,6 +88,25 @@ public class UsersRestDeprecationTests : IntegrationTestBase, IDisposable
         response.Headers.GetValues("Link").Should().Equal(link);
     }
 
+    /// <remarks>
+    ///     The shape the clusters run today (Gerald 2026-11-11): <c>since</c> is configured, the sunset date is to be
+    ///     announced and stays empty, so no <c>Sunset</c> header is sent.
+    /// </remarks>
+    [Theory]
+    [MemberData(nameof(Endpoints))]
+    public async Task Endpoint_WithSinceButNoSunset_CarriesDeprecationAndLink_ButNoSunset(string method, string path,
+        string link)
+    {
+        using var client = RestClient(Host((Since, null)));
+
+        var response = await SendAsync(client, method, path, $"nouser_{Guid.NewGuid():N}");
+
+        response.StatusCode.Should().Be(HttpStatusCode.NotFound);
+        response.Headers.GetValues("Deprecation").Should().Equal(DeprecationHeader);
+        response.Headers.Contains("Sunset").Should().BeFalse("the sunset date is to be announced and not configured");
+        response.Headers.GetValues("Link").Should().Equal(link);
+    }
+
     [Fact]
     public async Task SuccessfulCall_CarriesTheHeaders_AndIsCountedWithEndpointTemplateAndClientId()
     {
@@ -156,14 +175,17 @@ public class UsersRestDeprecationTests : IntegrationTestBase, IDisposable
 
     private WebApplicationFactory<Program> DatedHost() => Host((Since, Sunset));
 
-    private WebApplicationFactory<Program> Host((string Since, string Sunset)? dates)
+    private WebApplicationFactory<Program> Host((string Since, string? Sunset)? dates)
     {
         var host = Factory.WithWebHostBuilder(b =>
         {
             if (dates != null)
             {
                 b.UseSetting($"RestDeprecation:Waves:{Wave}:Since", dates.Value.Since);
-                b.UseSetting($"RestDeprecation:Waves:{Wave}:Sunset", dates.Value.Sunset);
+                if (dates.Value.Sunset != null)
+                {
+                    b.UseSetting($"RestDeprecation:Waves:{Wave}:Sunset", dates.Value.Sunset);
+                }
             }
         });
         _hosts.Add(host);
