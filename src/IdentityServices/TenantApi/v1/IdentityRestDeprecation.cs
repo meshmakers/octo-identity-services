@@ -5,9 +5,9 @@ namespace Meshmakers.Octo.Backend.IdentityServices.TenantApi.v1;
 /// </summary>
 /// <remarks>
 ///     <para>
-///         The dates of a wave are not in the code: Gerald's rule (2026-11-07) deprecates an endpoint from the delivery of
-///         the release that contains it and sets the sunset one week after that release runs on prod-1 and prod-2, so both
-///         are only known at rollout. They come from the configuration <c>RestDeprecation:Waves:&lt;wave&gt;:Since|Sunset</c>
+///         The dates of a wave are not in the code: Gerald's rule (2026-11-11) deprecates an endpoint from the delivery of
+///         the release that contains it; the sunset date is to be announced (Gerald decides it once the migration functions
+///         are implemented), so both are only known at rollout. They come from the configuration <c>RestDeprecation:Waves:&lt;wave&gt;:Since|Sunset</c>
 ///         (Helm values <c>restDeprecation.waves</c> of the octo-mesh chart); see <c>docs/rest-deprecation.md</c> in
 ///         octo-common-services.
 ///     </para>
