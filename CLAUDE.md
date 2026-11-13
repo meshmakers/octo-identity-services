@@ -141,6 +141,18 @@ change configuration files at run time); `TestHostConfigurationTests` pins it. D
 (`WithWebHostBuilder`) at the end of the test (`GroupMethodTestBase`, `ClientMirrorReconciliationTests`, `UserRoleMethodTests`,
 `UserChangePasswordMethodTests`); otherwise they live until the class fixture ends.
 
+**No developer user secrets in the test hosts (AB#8949).** The factory runs the host in the Development environment, so
+`WebApplication.CreateBuilder` adds the user secrets of `IdentityServices` (and `Program.cs` adds them again). A developer's
+secret changed the host on that machine only: with `Identity:DataProtectionKeysPath` set, the key store imported an old unencrypted
+`key-*.xml` and `DataProtectionKeyEncryptionHostTests` failed locally while CI (no user secrets) stayed green.
+`CustomWebApplicationFactory` therefore passes the host setting `DisableUserSecrets=true` (`UseSetting`, inherited by every
+`WithWebHostBuilder` derivative). A host setting reaches `Program` as a command-line argument, so `Program.cs` removes every
+`secrets.json` source right after `CreateBuilder` and skips its own `AddUserSecrets`
+(`Configuration/UserSecretsConfiguration.cs`). This happens before the values `Program` reads while it registers the services
+(e.g. `Methods:Identity:EnablePasswordMethods`); the factory's `ConfigureAppConfiguration` would come too late for those.
+Without the setting nothing changes. `TestHostConfigurationTests` and `UserSecretsConfigurationTests` pin it. A test that needs a
+setting puts it into the factory's in-memory configuration or `appsettings.test.json`, never into user secrets.
+
 **Test host memory: every in-process host must be collectable (AB#8337).** ASP.NET Core's `RateLimitingMiddleware`
 (`app.UseRateLimiter()`, policies `tenant-discovery` and `dcr`) never disposes its `DefaultPartitionedRateLimiter`, whose 100 ms
 heartbeat timer is a GC root for the whole request pipeline and the host's services, and whose captured `ExecutionContext` holds

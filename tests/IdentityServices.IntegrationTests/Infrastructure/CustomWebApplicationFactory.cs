@@ -3,6 +3,7 @@ using IdentityServices.IntegrationTests.Configuration;
 using IdentityServices.IntegrationTests.Fixtures;
 using MassTransit;
 using Meshmakers.Octo.Backend.IdentityServices.Authorization.RoleChange;
+using Meshmakers.Octo.Backend.IdentityServices.Configuration;
 using Meshmakers.Octo.Common.DistributionEventHub;
 using Meshmakers.Octo.Common.DistributionEventHub.Services;
 using Meshmakers.Octo.Runtime.Contracts.MongoDb;
@@ -235,6 +236,11 @@ public class CustomWebApplicationFactory : WebApplicationFactory<Program>, IAsyn
 
         // Use Development environment to skip production-only services (like AddOctoSigningCredential)
         builder.UseEnvironment("Development");
+
+        // AB#8949: no user secrets of the developer. A host setting reaches Program as a command-line argument, so Program
+        // removes them right after CreateBuilder, before it reads anything while it registers the services (a secret such as
+        // Identity:DataProtectionKeysPath made tests fail on developer machines only). Inherited by WithWebHostBuilder.
+        builder.UseSetting(UserSecretsConfiguration.DisableSettingKey, "true");
 
         builder.ConfigureAppConfiguration((_, config) =>
         {
