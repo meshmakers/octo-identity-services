@@ -1664,6 +1664,12 @@ the system tenant and the request failed with `401 invalid_client` (login loop b
   any replica and after a restart.
 - **Values issued before AB#7892** carry no marker and keep the old fallback: `acr_values` where the grant honours it,
   otherwise the system tenant (a value of another tenant is unknown there and rejected).
+- **Rollout and rollback.** Pods older than AB#7892 do not understand the marker: a marked code, refresh token or
+  `request_uri` sent to an old pod fails. Deploy this version with a single replica and the `Recreate` strategy first, so
+  old and new pods never serve side by side; enable several replicas (or `RollingUpdate`) only after every pod runs this
+  version. A rollback below this version makes the refresh tokens issued since the update unusable; those users sign in
+  again (accepted, AB#7892). Before AB#7892 every restart dropped the in-memory map anyway, so sub-tenant flows already
+  broke on every rollout.
 - **Pushed Authorization Request (PAR, RFC 9126).** The client POSTs the authorization parameters (including
   `acr_values=tenant:{tenantId}`) to `/connect/par` and gets a `request_uri`; the follow-up `/connect/authorize` carries
   only `request_uri`. PAR is used automatically by `Microsoft.AspNetCore.Authentication.OpenIdConnect` (.NET 9+) because

@@ -20,7 +20,9 @@ Notable changes of the OctoMesh identity services. The CK model `System.Identity
   refresh token of a sub-tenant public client without a bearer header failed with `invalid_client`).
   **Client impact:** none — codes, refresh tokens and `request_uri`s are opaque and passed back unchanged; their values
   are longer by the tenant prefix. Values issued before the update keep the old fallback (`acr_values`, else system
-  tenant). **Operator note:** identity can run with more than one replica once this is deployed.
+  tenant). **Operator note:** deploy with a single replica and the `Recreate` strategy first; enable more than one replica only
+  after every pod runs this version (old pods reject marked values). A rollback below this version makes refresh tokens
+  issued since the update unusable; those users sign in again.
 
 ### Added
 
