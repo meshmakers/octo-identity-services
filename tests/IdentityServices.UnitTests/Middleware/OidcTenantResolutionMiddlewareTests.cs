@@ -135,6 +135,22 @@ public class OidcTenantResolutionMiddlewareTests
         result.Should().Be("/callback#state=xyz&code=child-a%3ADEF456");
     }
 
+    [Fact]
+    public void MarkCodeInRedirectUri_FragmentCodeWins_OverACodeQueryParameterOfTheRedirectUri()
+    {
+        var result = OidcTenantResolutionMiddleware.MarkCodeInRedirectUri(
+            "https://app.example/cb?code=app-own#code=ISSUED&state=xyz", "child-a");
+
+        result.Should().Be("https://app.example/cb?code=app-own#code=child-a%3AISSUED&state=xyz");
+    }
+
+    [Fact]
+    public void MarkCodeInRedirectUri_FragmentWithoutCode_LeavesTheQueryAlone()
+    {
+        OidcTenantResolutionMiddleware.MarkCodeInRedirectUri(
+            "https://app.example/cb?code=app-own#error=access_denied", "child-a").Should().BeNull();
+    }
+
     [Theory]
     [InlineData("https://localhost:4200/callback?state=xyz")]
     [InlineData("https://localhost:4200/callback")]

@@ -1,6 +1,7 @@
 using System.Collections.Immutable;
 using System.Security.Claims;
 using IdentityServerPersistence.SystemStores;
+using Meshmakers.Octo.Backend.IdentityServices.Middleware;
 using Meshmakers.Octo.Backend.IdentityServices.OpenIddict;
 using Meshmakers.Octo.Backend.IdentityServices.OpenIddict.Interaction;
 using Meshmakers.Octo.Services.Infrastructure;
@@ -72,7 +73,8 @@ public class AuthorizeController(
                 Request.HasFormContentType
                     ? (await Request.ReadFormAsync()).Where(p => p.Key != Parameters.Prompt)
                         .ToDictionary(p => p.Key, p => p.Value.LastOrDefault())
-                    : Request.Query.Where(p => p.Key != Parameters.Prompt)
+                    : OidcTenantResolutionMiddleware.ContinuationQuery(HttpContext)
+                        .Where(p => p.Key != Parameters.Prompt)
                         .ToDictionary(p => p.Key, p => p.Value.LastOrDefault()));
 
             return Redirect($"/{tenantId}/login?ReturnUrl={Uri.EscapeDataString(returnUrl)}");
@@ -86,7 +88,8 @@ public class AuthorizeController(
             // Session references a user that no longer exists (deleted, cross-tenant edge) —
             // force a fresh login.
             await HttpContext.SignOutAsync(IdentityConstants.ApplicationScheme);
-            var returnUrl = Request.PathBase + Request.Path + Request.QueryString;
+            var returnUrl = Request.PathBase + Request.Path +
+                            OidcTenantResolutionMiddleware.ContinuationQueryString(HttpContext);
             return Redirect($"/{tenantId}/login?ReturnUrl={Uri.EscapeDataString(returnUrl)}");
         }
 
@@ -137,7 +140,8 @@ public class AuthorizeController(
                         OpenIddictServerAspNetCoreDefaults.AuthenticationScheme);
                 }
 
-                var returnUrl = Request.PathBase + Request.Path + Request.QueryString;
+                var returnUrl = Request.PathBase + Request.Path +
+                            OidcTenantResolutionMiddleware.ContinuationQueryString(HttpContext);
                 return Redirect($"/{tenantId}/consent?returnUrl={Uri.EscapeDataString(returnUrl)}");
             }
 

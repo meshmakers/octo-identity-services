@@ -110,6 +110,42 @@ public class OidcTenantResolutionReplicaTests : IntegrationTestBase
     }
 
     [Fact]
+    public async Task PushedAuthorizationRequest_WithoutSession_LoginContinuationKeepsTheTenant_OnAnotherReplica()
+    {
+        // The browser has no session yet: authorize sends it to the tenant's login page. The ReturnUrl must keep the
+        // tenant-marked request_uri, so the authorize call after the login resolves the tenant on any replica.
+        var ct = TestContext.Current.CancellationToken;
+        var tenantId = await CreateTenantWithClientAsync();
+        var userName = await CreateLocalUserAsync(tenantId);
+        var replicaA = NewReplica();
+        var replicaB = NewReplica();
+        var cookies = new CookieContainer();
+
+        var par = await AnonymousClient(replicaA).PostAsync("/connect/par",
+            new FormUrlEncodedContent(AuthorizeParameters(tenantId)), ct);
+        par.StatusCode.Should().Be(HttpStatusCode.Created);
+        var requestUri = JsonNode.Parse(await par.Content.ReadAsStringAsync(ct))!["request_uri"]!.GetValue<string>();
+        ForgetProcessState();
+
+        var authorize = await CookieClient(replicaB, cookies).GetAsync(
+            $"/connect/authorize?client_id={ClientId}&request_uri={Uri.EscapeDataString(requestUri)}", ct);
+        ((int)authorize.StatusCode).Should().BeInRange(302, 303);
+        var login = authorize.Headers.Location!.OriginalString;
+        login.Should().StartWith($"/{tenantId}/login?ReturnUrl=", "the tenant is resolved from the marked request_uri");
+        var returnUrl = Uri.UnescapeDataString(login[(login.IndexOf('=') + 1)..]);
+        HttpUtility.ParseQueryString(returnUrl[returnUrl.IndexOf('?')..])["request_uri"].Should().Be(requestUri,
+            "the continuation keeps the value the client sent, marker included");
+        ForgetProcessState();
+
+        await SignInAsync(replicaA, cookies, tenantId, userName, ct);
+        var code = await AuthorizeAsync(replicaA, cookies, returnUrl[(returnUrl.IndexOf('?') + 1)..], ct);
+        var token = await RedeemCodeAsync(replicaB, code, ct);
+        var raw = await token.Content.ReadAsStringAsync(ct);
+        token.StatusCode.Should().Be(HttpStatusCode.OK, ErrorOf(raw));
+        TenantOf(JsonNode.Parse(raw)!["access_token"]!.GetValue<string>()).Should().BeEquivalentTo(tenantId);
+    }
+
+    [Fact]
     public async Task RefreshToken_WithoutAcrValues_AfterRestart_RefreshesInTheSubTenant()
     {
         var ct = TestContext.Current.CancellationToken;

@@ -1667,12 +1667,16 @@ the system tenant and the request failed with `401 invalid_client` (login loop b
 - **Pushed Authorization Request (PAR, RFC 9126).** The client POSTs the authorization parameters (including
   `acr_values=tenant:{tenantId}`) to `/connect/par` and gets a `request_uri`; the follow-up `/connect/authorize` carries
   only `request_uri`. PAR is used automatically by `Microsoft.AspNetCore.Authentication.OpenIdConnect` (.NET 9+) because
-  OpenIddict advertises `pushed_authorization_request_endpoint`. A discovery redirect keeps the marked `request_uri` in
-  its `returnUrl`.
+  OpenIddict advertises `pushed_authorization_request_endpoint`. The discovery redirect and the login/consent
+  continuation URLs of `AuthorizeController` keep the marked `request_uri` (the query as the client sent it,
+  `OidcTenantResolutionMiddleware.ContinuationQueryString`), so the authorize call after the login resolves the tenant
+  on any replica; only OpenIddict sees the unmarked value.
+- **`response_mode=fragment`**: the code in the fragment is marked; a `code` query parameter of the registered redirect
+  URI is left alone.
 - **`response_mode=form_post`** (server-side OIDC clients such as the Asset Repository GraphQL Playground): the code is
   marked in the hidden `<input name='code'>` field.
 - Tests: `OidcTenantResolutionReplicaTests` (two hosts over one database and a host restart: authorization code issued on
-  A and redeemed on B for a sub-tenant client; PAR created on A and used on B; refresh without `acr_values` after a
+  A and redeemed on B for a sub-tenant client; PAR created on A and used on B, also through the login continuation; refresh without `acr_values` after a
   restart; changed markers rejected; revocation of a marked refresh token; no static state in the middleware),
   `DeviceFlowReplicaTests`, `OidcTenantMarkerTests`, `OidcTenantResolutionMiddlewareTests`.
 

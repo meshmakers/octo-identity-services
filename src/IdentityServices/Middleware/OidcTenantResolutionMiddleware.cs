@@ -675,28 +675,23 @@ internal class OidcTenantResolutionMiddleware(
             return null;
         }
 
+        // The fragment first: with response_mode=fragment the code is there, while a `code` query parameter would
+        // belong to the registered redirect URI. A query-mode response has no fragment (RFC 6749 §3.1.2).
         var fragmentIndex = locationUri.IndexOf('#');
-        var queryIndex = locationUri.IndexOf('?');
-        if (queryIndex >= 0 && (fragmentIndex < 0 || queryIndex < fragmentIndex))
-        {
-            var queryEnd = fragmentIndex < 0 ? locationUri.Length : fragmentIndex;
-            var marked = MarkCodeInParameters(locationUri[(queryIndex + 1)..queryEnd], tenantId);
-            if (marked != null)
-            {
-                return locationUri[..(queryIndex + 1)] + marked + locationUri[queryEnd..];
-            }
-        }
-
         if (fragmentIndex >= 0)
         {
-            var marked = MarkCodeInParameters(locationUri[(fragmentIndex + 1)..], tenantId);
-            if (marked != null)
-            {
-                return locationUri[..(fragmentIndex + 1)] + marked;
-            }
+            var markedFragment = MarkCodeInParameters(locationUri[(fragmentIndex + 1)..], tenantId);
+            return markedFragment == null ? null : locationUri[..(fragmentIndex + 1)] + markedFragment;
         }
 
-        return null;
+        var queryIndex = locationUri.IndexOf('?');
+        if (queryIndex < 0)
+        {
+            return null;
+        }
+
+        var marked = MarkCodeInParameters(locationUri[(queryIndex + 1)..], tenantId);
+        return marked == null ? null : locationUri[..(queryIndex + 1)] + marked;
     }
 
     /// <summary>
@@ -861,6 +856,9 @@ internal class OidcTenantResolutionMiddleware(
             }
         }
 
+        // Login/consent continuation URLs must keep the marked value — the follow-up authorize call may hit another
+        // replica — while OpenIddict reads the unmarked one (AuthorizeController uses ContinuationQueryString).
+        context.Items[OriginalAuthorizeQueryItem] = context.Request.QueryString;
         context.Request.QueryString = builder.ToQueryString();
 
         if (tenantId != null)
@@ -969,6 +967,28 @@ internal class OidcTenantResolutionMiddleware(
     ///     scope to the response marking (AB#5311, AB#7892).
     /// </summary>
     private const string ParDiscoveryScopeItem = "octo.oidc.par.tenant_scope";
+
+    /// <summary>
+    ///     HttpContext.Items key of the <c>/connect/authorize</c> query as the client sent it, before the PAR
+    ///     <c>request_uri</c> marker was removed (AB#7892).
+    /// </summary>
+    private const string OriginalAuthorizeQueryItem = "octo.oidc.authorize.original_query";
+
+    /// <summary>
+    ///     The query string for login/consent continuation URLs of <c>/connect/authorize</c>: the query as the client
+    ///     sent it, so a marked PAR <c>request_uri</c> keeps its tenant when the browser comes back — possibly to
+    ///     another replica (AB#7892). Equal to <see cref="HttpRequest.QueryString" /> when nothing was unmarked.
+    /// </summary>
+    internal static QueryString ContinuationQueryString(HttpContext context)
+        => context.Items[OriginalAuthorizeQueryItem] is QueryString original
+            ? original
+            : context.Request.QueryString;
+
+    /// <summary>The parsed <see cref="ContinuationQueryString" />.</summary>
+    internal static IQueryCollection ContinuationQuery(HttpContext context)
+        => context.Items[OriginalAuthorizeQueryItem] is QueryString original
+            ? new QueryCollection(QueryHelpers.ParseQuery(original.Value))
+            : context.Request.Query;
 
     /// <summary>
     ///     The <c>/tenant-discovery</c> redirect. The scope travels as its own query parameter so
