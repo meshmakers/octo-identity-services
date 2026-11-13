@@ -1,4 +1,3 @@
-using System.Collections.Concurrent;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
@@ -26,12 +25,14 @@ namespace Meshmakers.Octo.Backend.IdentityServices.Middleware;
 /// <para>
 /// <b>Resolution strategy by endpoint:</b>
 /// <list type="bullet">
-///   <item><c>/connect/authorize</c>: parses <c>acr_values=tenant:{tenantId}</c> from query string
-///     and captures the authorization code from the 302 response for later tenant resolution</item>
-///   <item><c>/connect/token</c>: reads the authorization code or refresh token from the form body
-///     and resolves the tenant from the token-to-tenant mapping, or the tenant marker of a device code
-///     (stateless, AB#7891); also captures new refresh tokens
-///     from the response for future exchanges</item>
+///   <item><c>/connect/authorize</c>: parses <c>acr_values=tenant:{tenantId}</c> from the query string, or the
+///     tenant marked into a PAR <c>request_uri</c>, and marks the issued authorization code with the tenant</item>
+///   <item><c>/connect/par</c>: reads <c>acr_values</c> from the form and marks the issued <c>request_uri</c> with the
+///     tenant (or the discovery scope, AB#5311)</item>
+///   <item><c>/connect/token</c>: reads the tenant from the marker of the authorization code, refresh token or device
+///     code (AB#7891/AB#7892), or from <c>acr_values</c>; marks the issued refresh token with the tenant</item>
+///   <item><c>/connect/revocation</c>, <c>/connect/introspect</c>: tenant marker of the <c>token</c> field, else the
+///     bearer token's <c>tenant_id</c></item>
 ///   <item><c>/connect/deviceauthorization</c>: reads <c>acr_values=tenant:{tenantId}</c> from the form,
 ///     marks the issued <c>device_code</c> with the tenant and points the verification URIs to the
 ///     tenant's device page (AB#7891)</item>
@@ -40,6 +41,11 @@ namespace Meshmakers.Octo.Backend.IdentityServices.Middleware;
 ///   <item><c>/connect/endsession</c>: decodes <c>id_token_hint</c> JWT payload to read <c>tenant_id</c>
 ///     claim; falls back to <c>acr_values</c></item>
 /// </list>
+/// </para>
+/// <para>
+/// <b>No process-local state (AB#7892).</b> Every value a later request sends back carries its tenant
+/// (<see cref="OidcTenantMarker" />), so identity can run with several replicas and restart without breaking
+/// in-flight sign-ins or refreshes.
 /// </para>
 /// <para>
 /// This middleware must run <b>after</b> routing (so route values are available) and <b>before</b>
@@ -51,29 +57,22 @@ internal class OidcTenantResolutionMiddleware(
     ILogger<OidcTenantResolutionMiddleware> logger,
     IOptions<OctoSystemConfiguration> octoSystemConfiguration)
 {
-    /// <summary>
-    /// Maps authorization codes and refresh tokens to tenant IDs. Authorization codes are captured
-    /// from <c>/connect/authorize</c> responses (both 302 redirects and form_post HTML bodies);
-    /// refresh tokens are captured from <c>/connect/token</c> JSON responses. Used by
-    /// <c>/connect/token</c> to set the correct tenant context for user/client/resource lookups.
-    /// Device-flow codes are deliberately <b>not</b> held here (AB#7891): the device_code carries its
-    /// tenant (<see cref="DeviceCodeTenantMarker" />) and the verification page names its tenant, so the
-    /// device flow works on any replica and across restarts.
-    /// </summary>
-    private static readonly ConcurrentDictionary<string, (string TenantId, DateTime Expiry)> TokenToTenantMap = new();
-
-    /// <summary>Keys currently held in the in-process tenant map — for tests (AB#7891: no device entries).</summary>
-    internal static IReadOnlyCollection<string> MappedKeysSnapshot() => TokenToTenantMap.Keys.ToArray();
-
-    private static readonly TimeSpan AuthCodeEntryLifetime = TimeSpan.FromMinutes(10);
-    private static readonly TimeSpan RefreshTokenEntryLifetime = TimeSpan.FromDays(30);
-
-    /// <summary>
-    /// Lifetime of a PAR <c>request_uri</c> → tenant mapping. PAR request_uris are short-lived
-    /// (bounded by OpenIddict's authorization-code lifetime, minutes at most), so a 5-minute window safely covers the
-    /// time between <c>/connect/par</c> and the follow-up <c>/connect/authorize?request_uri=...</c>.
-    /// </summary>
-    private static readonly TimeSpan ParRequestUriEntryLifetime = TimeSpan.FromMinutes(5);
+    // AB#7892 — no process-local state. The tenant of every value that a later request sends back travels inside the
+    // value itself (OidcTenantMarker), so any replica and a restarted process resolve it. Decision per entry type:
+    //  * Authorization code (persisted per tenant as RtOAuthToken): marked on the /connect/authorize
+    //    response (Location query/fragment or form_post field), stripped on /connect/token. Lives exactly as long as
+    //    the code; nothing extra stored.
+    //  * PAR request_uri (+ the AB#5311 discovery scope): marked inside the URN on the /connect/par response,
+    //    stripped on /connect/authorize?request_uri=… . Lives exactly as long as the request token.
+    //  * Refresh token (persisted per tenant): marked on every /connect/token response that carries one, stripped on
+    //    grant refresh_token and on /connect/revocation + /connect/introspect. Rotated tokens are marked again.
+    //  * Device code: marked since AB#7891.
+    // A store lookup ("which tenant holds this token?") was rejected: codes and refresh tokens are encrypted
+    // self-contained tokens whose store id is only readable after decryption, so the tenant would have to be found by
+    // scanning every tenant database. A shared collection with a TTL index was not needed: every key can be carried.
+    // A changed marker only points OpenIddict at a token store that does not hold the value — rejected like any
+    // unknown value (fail closed). Values without a marker (issued before AB#7892) keep today's behaviour: acr_values
+    // where the grant honours it, otherwise the system tenant — where a token of another tenant is unknown as well.
 
     /// <summary>
     /// Matches the authorization code from an HTML form_post response body.
@@ -98,31 +97,30 @@ internal class OidcTenantResolutionMiddleware(
 
         var resolvedTenantId = context.Items[InfrastructureCommon.TenantIdName] as string;
 
-        // For /connect/token with a resolved tenant, wrap the response body to capture
-        // refresh tokens from the JSON response for future tenant resolution.
+        // For /connect/token with a resolved tenant, wrap the response body to mark the issued
+        // refresh token with the tenant (AB#7892, OidcTenantMarker).
         var isTokenEndpoint = path != null &&
             path.StartsWith("/connect/token", StringComparison.OrdinalIgnoreCase);
 
         // For /connect/deviceauthorization with a resolved tenant, wrap the response body
         // to rewrite verification_uri and verification_uri_complete to the tenant-specific path
-        // and to mark the device_code with the tenant (AB#7891, DeviceCodeTenantMarker).
+        // and to mark the device_code with the tenant (AB#7891, OidcTenantMarker).
         var isDeviceAuthEndpoint = path != null &&
             path.StartsWith("/connect/deviceauthorization", StringComparison.OrdinalIgnoreCase);
 
-        // For /connect/authorize with a resolved tenant, wrap the response body to capture
-        // the authorization code from both 302 redirects (response_mode=query) and
-        // 200 HTML responses (response_mode=form_post).
+        // For /connect/authorize with a resolved tenant, wrap the response body to mark
+        // the authorization code with the tenant (AB#7892) in both redirects (response_mode=query/fragment)
+        // and 200 HTML responses (response_mode=form_post).
         var isAuthorizeEndpoint = path != null &&
             path.StartsWith("/connect/authorize", StringComparison.OrdinalIgnoreCase);
 
-        // For /connect/par with a resolved tenant, wrap the response body to capture
-        // the issued request_uri from the PAR JSON response (RFC 9126).
-        // The follow-up /connect/authorize?request_uri=... uses the captured mapping
-        // to recover the tenant context (since acr_values is not on the URL anymore).
+        // For /connect/par with a resolved tenant, wrap the response body to mark
+        // the issued request_uri (RFC 9126) with the tenant (AB#7892). The follow-up
+        // /connect/authorize?request_uri=... reads the tenant back from it (acr_values is not on the URL anymore).
         var isParEndpoint = path != null &&
             path.StartsWith("/connect/par", StringComparison.OrdinalIgnoreCase);
 
-        // A scope-only PAR resolves no tenant but still needs its request_uri captured (AB#5311).
+        // A scope-only PAR resolves no tenant but still needs its request_uri marked with the scope (AB#5311).
         var parScope = isParEndpoint ? context.Items[ParDiscoveryScopeItem] as string : null;
         var needsResponseCapture = (resolvedTenantId != null &&
                                     (isTokenEndpoint || isDeviceAuthEndpoint || isAuthorizeEndpoint || isParEndpoint))
@@ -139,38 +137,37 @@ internal class OidcTenantResolutionMiddleware(
                 await next(context);
 
                 memoryStream.Position = 0;
+                byte[]? rewritten = null;
                 if (isAuthorizeEndpoint)
                 {
-                    CaptureAuthorizationCode(context, memoryStream, resolvedTenantId!);
-                    memoryStream.Position = 0;
+                    rewritten = MarkAuthorizationCode(context, memoryStream, resolvedTenantId!);
                 }
                 else if (isParEndpoint &&
                          (context.Response.StatusCode == StatusCodes.Status201Created ||
                           context.Response.StatusCode == StatusCodes.Status200OK))
                 {
-                    CaptureRequestUriFromParResponse(memoryStream, resolvedTenantId, parScope);
-                    memoryStream.Position = 0;
+                    rewritten = MarkRequestUriInParResponse(memoryStream, resolvedTenantId, parScope);
                 }
                 else if (context.Response.StatusCode == StatusCodes.Status200OK)
                 {
                     if (isTokenEndpoint)
                     {
-                        CaptureRefreshTokenFromResponse(memoryStream, resolvedTenantId!);
+                        rewritten = MarkRefreshTokenInTokenResponse(memoryStream, resolvedTenantId!);
                     }
                     else if (isDeviceAuthEndpoint)
                     {
-                        var rewritten = RewriteDeviceAuthorizationResponse(memoryStream, resolvedTenantId!);
-                        if (rewritten != null)
-                        {
-                            context.Response.ContentLength = rewritten.Length;
-                            memoryStream.SetLength(0);
-                            memoryStream.Write(rewritten);
-                        }
+                        rewritten = RewriteDeviceAuthorizationResponse(memoryStream, resolvedTenantId!);
                     }
-
-                    memoryStream.Position = 0;
                 }
 
+                if (rewritten != null)
+                {
+                    context.Response.ContentLength = rewritten.Length;
+                    memoryStream.SetLength(0);
+                    memoryStream.Write(rewritten);
+                }
+
+                memoryStream.Position = 0;
                 await memoryStream.CopyToAsync(originalBody);
             }
             finally
@@ -197,10 +194,16 @@ internal class OidcTenantResolutionMiddleware(
 
         if (path.StartsWith("/connect/authorize", StringComparison.OrdinalIgnoreCase))
         {
+            // The URL as the client sent it — the discovery redirects below hand it back unchanged,
+            // including a marked request_uri.
+            var authorizeUrl = context.Request.GetEncodedUrl();
+
             // PAR (RFC 9126): when the client used /connect/par, the follow-up authorize call
-            // carries only request_uri=urn:ietf:params:oauth:request_uri:... — the tenant was
-            // resolved during /connect/par and stored in TokenToTenantMap.
-            tenantId = ExtractTenantFromRequestUri(context);
+            // carries only request_uri=urn:ietf:params:oauth:request_uri:... — the tenant (or the
+            // AB#5311 discovery scope) was marked into it on /connect/par (AB#7892). The marker is
+            // removed here, so OpenIddict sees the request_uri it issued.
+            var (requestUriTenantId, requestUriScopeTenantId) = UnmarkRequestUri(context);
+            tenantId = requestUriTenantId;
 
             if (string.IsNullOrEmpty(tenantId))
             {
@@ -216,14 +219,13 @@ internal class OidcTenantResolutionMiddleware(
             {
                 // No acr_values=tenant:X — check for existing session cookies before
                 // redirecting to tenant discovery page
-                var authorizeUrl = context.Request.GetEncodedUrl();
                 var sessionTenants = FindTenantIdsFromSessionCookies(context);
 
                 // AB#5311: an app host that serves one tenant subtree names it as a second
                 // acr_values entry, `tenant_scope:{rootTenantId}`. The scope narrows both
                 // shortcuts below — a session cookie for a tenant outside the subtree must not
                 // short-circuit the discovery — and the discovery page's lookup.
-                var scopeTenantId = ExtractScopeFromAcrValues(context) ?? ExtractScopeFromRequestUri(context);
+                var scopeTenantId = ExtractScopeFromAcrValues(context) ?? requestUriScopeTenantId;
                 if (!string.IsNullOrEmpty(scopeTenantId) && sessionTenants.Count == 1)
                 {
                     var discovery = context.RequestServices.GetRequiredService<ITenantDiscoveryService>();
@@ -318,9 +320,14 @@ internal class OidcTenantResolutionMiddleware(
         {
             tenantId = ExtractTenantFromIdTokenHint(context) ?? ExtractTenantFromAcrValues(context);
         }
-        else if (path.StartsWith("/connect/userinfo", StringComparison.OrdinalIgnoreCase)
-                 || path.StartsWith("/connect/introspect", StringComparison.OrdinalIgnoreCase)
+        else if (path.StartsWith("/connect/introspect", StringComparison.OrdinalIgnoreCase)
                  || path.StartsWith("/connect/revocation", StringComparison.OrdinalIgnoreCase))
+        {
+            // AB#7892: a refresh token sent for revocation/introspection carries its tenant marker;
+            // it names the token store the token lives in. Otherwise the caller's bearer token.
+            tenantId = await UnmarkFormTokenAsync(context) ?? ExtractTenantFromBearerToken(context);
+        }
+        else if (path.StartsWith("/connect/userinfo", StringComparison.OrdinalIgnoreCase))
         {
             tenantId = ExtractTenantFromBearerToken(context);
         }
@@ -346,36 +353,40 @@ internal class OidcTenantResolutionMiddleware(
     }
 
     /// <summary>
-    /// Captures the authorization code from the authorize response and maps it to the tenant ID.
-    /// Supports both redirects (<c>response_mode=query</c>, code in Location header — OpenIddict emits
+    /// Marks the authorization code of the authorize response with the tenant (AB#7892, <see cref="OidcTenantMarker" />).
+    /// Supports redirects (<c>response_mode=query</c> or <c>fragment</c>, code in the Location header — OpenIddict emits
     /// 302 Found or 303 See Other depending on response mode/handler) and 200 HTML responses
-    /// (<c>response_mode=form_post</c>, code in hidden form field).
+    /// (<c>response_mode=form_post</c>, code in a hidden form field). Returns the rewritten body for form_post,
+    /// otherwise <c>null</c> (the Location header is rewritten in place).
     /// </summary>
-    private void CaptureAuthorizationCode(HttpContext context, MemoryStream responseBody, string tenantId)
+    private byte[]? MarkAuthorizationCode(HttpContext context, MemoryStream responseBody, string tenantId)
     {
-        string? code = null;
-
         if (context.Response.StatusCode is StatusCodes.Status302Found or StatusCodes.Status303SeeOther)
         {
             var location = context.Response.Headers.Location.ToString();
-            code = ExtractCodeFromRedirectUri(location);
+            var marked = MarkCodeInRedirectUri(location, tenantId);
+            if (marked != null)
+            {
+                context.Response.Headers.Location = marked;
+                logger.LogDebug("Marked authorization code with tenant '{TenantId}' (response status {StatusCode})",
+                    tenantId, context.Response.StatusCode);
+            }
+
+            return null;
         }
-        else if (context.Response.StatusCode == StatusCodes.Status200OK)
+
+        if (context.Response.StatusCode == StatusCodes.Status200OK)
         {
-            code = ExtractCodeFromFormPostBody(responseBody);
+            var rewritten = MarkCodeInFormPostBody(responseBody, tenantId);
+            if (rewritten != null)
+            {
+                logger.LogDebug("Marked authorization code with tenant '{TenantId}' (form_post)", tenantId);
+            }
+
+            return rewritten;
         }
 
-        if (code == null)
-        {
-            return;
-        }
-
-        TokenToTenantMap[code] = (tenantId, DateTime.UtcNow.Add(AuthCodeEntryLifetime));
-        logger.LogDebug(
-            "Captured authorization code → tenant '{TenantId}' mapping (response status {StatusCode})",
-            tenantId, context.Response.StatusCode);
-
-        CleanupExpiredEntries();
+        return null;
     }
 
     /// <summary>
@@ -427,24 +438,29 @@ internal class OidcTenantResolutionMiddleware(
 
             if (string.Equals(grantType, "authorization_code", StringComparison.Ordinal))
             {
-                var code = form["code"].FirstOrDefault();
-                if (code != null && TokenToTenantMap.TryRemove(code, out var entry))
+                // AB#7892: the code carries its tenant (marked on /connect/authorize), so any replica and a
+                // restarted process resolve it. The marker is removed before OpenIddict reads the form.
+                var markedCode = form["code"].FirstOrDefault();
+                if (OidcTenantMarker.TryDecode(markedCode, out var codeTenantId, out var code))
                 {
+                    ReplaceFormValue(context, form, "code", code);
                     logger.LogDebug("Resolved tenant '{TenantId}' from authorization code for /connect/token",
-                        entry.TenantId);
-                    return entry.TenantId;
+                        codeTenantId);
+                    return codeTenantId;
                 }
 
+                // An unmarked code was issued before AB#7892 (or is not ours). The system tenant is the
+                // only safe choice: a code of another tenant is unknown in its token store and rejected.
                 logger.LogWarning(
-                    "No tenant mapping found for authorization code on /connect/token — user/client lookups will use system tenant");
+                    "Authorization code on /connect/token carries no tenant marker — user/client lookups will use system tenant");
             }
             else if (string.Equals(grantType, "urn:ietf:params:oauth:grant-type:device_code", StringComparison.Ordinal))
             {
-                // AB#7891: the tenant travels inside the device_code (DeviceCodeTenantMarker), so any
+                // AB#7891: the tenant travels inside the device_code (OidcTenantMarker), so any
                 // replica — also one started after the device authorization — resolves it. The marker
                 // is removed before OpenIddict reads the form.
                 var markedDeviceCode = form["device_code"].FirstOrDefault();
-                if (DeviceCodeTenantMarker.TryDecode(markedDeviceCode, out var deviceTenantId, out var deviceCode))
+                if (OidcTenantMarker.TryDecode(markedDeviceCode, out var deviceTenantId, out var deviceCode))
                 {
                     ReplaceFormValue(context, form, "device_code", deviceCode);
                     logger.LogDebug("Resolved tenant '{TenantId}' from device code for /connect/token",
@@ -548,36 +564,40 @@ internal class OidcTenantResolutionMiddleware(
             }
             else if (string.Equals(grantType, "refresh_token", StringComparison.Ordinal))
             {
-                var refreshToken = form["refresh_token"].FirstOrDefault();
-
-                // Prefer acr_values from the client — the SPA knows which tenant it's in
-                // and sends acr_values=tenant:{tenantId} with every refresh token request.
-                // This takes priority over the in-memory cache, which may be stale or
-                // polluted from a previous request that fell back to the system tenant.
+                // AB#7892: the refresh token carries its tenant (marked on every /connect/token response),
+                // so clients without acr_values (octo-sdk without a tenant, services) keep refreshing on any
+                // replica and after a restart. The marker names the token store the token lives in and wins
+                // over acr_values; the marker is removed before OpenIddict reads the form.
+                var markedRefreshToken = form["refresh_token"].FirstOrDefault();
                 var acrTenantId = ParseTenantFromAcrValues(form["acr_values"].ToString());
-                if (!string.IsNullOrEmpty(acrTenantId))
+                if (OidcTenantMarker.TryDecode(markedRefreshToken, out var refreshTenantId, out var refreshToken))
                 {
-                    if (refreshToken != null)
+                    ReplaceFormValue(context, form, "refresh_token", refreshToken);
+                    if (!string.IsNullOrEmpty(acrTenantId) &&
+                        !string.Equals(acrTenantId, refreshTenantId, StringComparison.OrdinalIgnoreCase))
                     {
-                        TokenToTenantMap[refreshToken] = (acrTenantId, DateTime.UtcNow.Add(RefreshTokenEntryLifetime));
+                        logger.LogWarning(
+                            "acr_values tenant '{AcrTenantId}' differs from the refresh token's tenant '{TenantId}' on /connect/token — using the token's tenant",
+                            acrTenantId, refreshTenantId);
                     }
 
+                    logger.LogDebug("Resolved tenant '{TenantId}' from refresh token for /connect/token",
+                        refreshTenantId);
+                    return refreshTenantId;
+                }
+
+                // An unmarked refresh token was issued before AB#7892. The SPA names its tenant with
+                // acr_values=tenant:{tenantId} on every refresh.
+                if (!string.IsNullOrEmpty(acrTenantId))
+                {
                     logger.LogDebug(
                         "Resolved tenant '{TenantId}' from acr_values for refresh_token on /connect/token",
                         acrTenantId);
                     return acrTenantId;
                 }
 
-                // Fallback: in-memory cache (for clients that don't send acr_values)
-                if (refreshToken != null && TokenToTenantMap.TryGetValue(refreshToken, out var entry))
-                {
-                    logger.LogDebug("Resolved tenant '{TenantId}' from refresh token cache for /connect/token",
-                        entry.TenantId);
-                    return entry.TenantId;
-                }
-
                 logger.LogDebug(
-                    "No tenant mapping found for refresh token on /connect/token — user/client lookups will use system tenant");
+                    "Refresh token on /connect/token carries no tenant marker and no acr_values — user/client lookups will use system tenant");
             }
         }
         finally
@@ -589,81 +609,136 @@ internal class OidcTenantResolutionMiddleware(
     }
 
     /// <summary>
-    /// Captures the <c>refresh_token</c> from a successful <c>/connect/token</c> JSON response
-    /// and maps it to the tenant ID for future refresh token exchanges.
+    /// Marks the <c>refresh_token</c> of a successful <c>/connect/token</c> JSON response with the tenant
+    /// (AB#7892), so the next refresh resolves the tenant on any replica. Returns the rewritten body, or
+    /// <c>null</c> when the response carries no refresh token.
     /// </summary>
-    private void CaptureRefreshTokenFromResponse(MemoryStream responseBody, string tenantId)
+    internal byte[]? MarkRefreshTokenInTokenResponse(MemoryStream responseBody, string tenantId)
     {
         try
         {
-            using var doc = JsonDocument.Parse(responseBody);
-            if (doc.RootElement.TryGetProperty("refresh_token", out var refreshTokenElement))
+            if (JsonNode.Parse(responseBody.ToArray()) is JsonObject body &&
+                body["refresh_token"] is JsonValue refreshTokenValue &&
+                refreshTokenValue.TryGetValue<string>(out var refreshToken) &&
+                !string.IsNullOrEmpty(refreshToken))
             {
-                var refreshToken = refreshTokenElement.GetString();
-                if (!string.IsNullOrEmpty(refreshToken))
-                {
-                    TokenToTenantMap[refreshToken] = (tenantId, DateTime.UtcNow.Add(RefreshTokenEntryLifetime));
-                    logger.LogDebug("Captured refresh token → tenant '{TenantId}' mapping", tenantId);
-                }
+                body["refresh_token"] = OidcTenantMarker.Encode(tenantId, refreshToken);
+                logger.LogDebug("Marked refresh token with tenant '{TenantId}'", tenantId);
+                return Encoding.UTF8.GetBytes(body.ToJsonString(DeviceResponseJsonOptions));
             }
         }
-        catch
+        catch (JsonException)
         {
-            // Non-JSON response or parse error; skip
-        }
-    }
-
-    /// <summary>
-    /// Extracts the <c>code</c> query parameter from an OAuth2 redirect URI.
-    /// </summary>
-    internal static string? ExtractCodeFromRedirectUri(string? locationUri)
-    {
-        if (string.IsNullOrEmpty(locationUri))
-        {
-            return null;
-        }
-
-        try
-        {
-            var queryIndex = locationUri.IndexOf('?');
-            if (queryIndex < 0)
-            {
-                return null;
-            }
-
-            var queryString = locationUri[(queryIndex + 1)..];
-            var query = QueryHelpers.ParseQuery(queryString);
-
-            if (query.TryGetValue("code", out var codeValues))
-            {
-                return codeValues.FirstOrDefault();
-            }
-        }
-        catch
-        {
-            // Malformed URI; fall through
+            // Non-JSON response; leave it alone
         }
 
         return null;
     }
 
     /// <summary>
-    /// Extracts the <c>code</c> value from an OAuth2 <c>response_mode=form_post</c> HTML response body.
-    /// OpenIddict returns an HTML page with a self-submitting form containing hidden fields
-    /// such as <c>&lt;input type='hidden' name='code' value='...' /&gt;</c>.
+    /// Removes the tenant marker of the <c>token</c> form field (<c>/connect/revocation</c>,
+    /// <c>/connect/introspect</c>; AB#7892) and returns its tenant, or <c>null</c> for an unmarked token.
     /// </summary>
-    internal static string? ExtractCodeFromFormPostBody(MemoryStream responseBody)
+    private static async Task<string?> UnmarkFormTokenAsync(HttpContext context)
     {
-        try
-        {
-            var html = Encoding.UTF8.GetString(responseBody.ToArray());
-            var match = FormPostCodePattern.Match(html);
-            return match.Success ? match.Groups[1].Value : null;
-        }
-        catch
+        if (!context.Request.HasFormContentType)
         {
             return null;
         }
+
+        context.Request.EnableBuffering();
+        try
+        {
+            var form = await context.Request.ReadFormAsync();
+            if (!OidcTenantMarker.TryDecode(form["token"].FirstOrDefault(), out var tenantId, out var token))
+            {
+                return null;
+            }
+
+            ReplaceFormValue(context, form, "token", token);
+            return tenantId;
+        }
+        finally
+        {
+            context.Request.Body.Position = 0;
+        }
+    }
+
+    /// <summary>
+    /// Marks the <c>code</c> parameter of an OAuth2 redirect URI (query or fragment) with the tenant.
+    /// Returns <c>null</c> when the URI carries no code.
+    /// </summary>
+    internal static string? MarkCodeInRedirectUri(string? locationUri, string tenantId)
+    {
+        if (string.IsNullOrEmpty(locationUri))
+        {
+            return null;
+        }
+
+        // The fragment first: with response_mode=fragment the code is there, while a `code` query parameter would
+        // belong to the registered redirect URI. A query-mode response has no fragment (RFC 6749 §3.1.2).
+        var fragmentIndex = locationUri.IndexOf('#');
+        if (fragmentIndex >= 0)
+        {
+            var markedFragment = MarkCodeInParameters(locationUri[(fragmentIndex + 1)..], tenantId);
+            return markedFragment == null ? null : locationUri[..(fragmentIndex + 1)] + markedFragment;
+        }
+
+        var queryIndex = locationUri.IndexOf('?');
+        if (queryIndex < 0)
+        {
+            return null;
+        }
+
+        var marked = MarkCodeInParameters(locationUri[(queryIndex + 1)..], tenantId);
+        return marked == null ? null : locationUri[..(queryIndex + 1)] + marked;
+    }
+
+    /// <summary>
+    /// Marks the <c>code</c> entry of an <c>application/x-www-form-urlencoded</c> parameter string; every other
+    /// entry stays byte for byte. Returns <c>null</c> when there is no code.
+    /// </summary>
+    private static string? MarkCodeInParameters(string parameters, string tenantId)
+    {
+        var parts = parameters.Split('&');
+        for (var i = 0; i < parts.Length; i++)
+        {
+            if (!parts[i].StartsWith("code=", StringComparison.Ordinal))
+            {
+                continue;
+            }
+
+            var code = Uri.UnescapeDataString(parts[i]["code=".Length..].Replace('+', ' '));
+            if (string.IsNullOrEmpty(code))
+            {
+                return null;
+            }
+
+            parts[i] = "code=" + Uri.EscapeDataString(OidcTenantMarker.Encode(tenantId, code));
+            return string.Join('&', parts);
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// Marks the hidden <c>code</c> field of an OAuth2 <c>response_mode=form_post</c> HTML response with the tenant.
+    /// Returns <c>null</c> when the body carries no code.
+    /// </summary>
+    internal static byte[]? MarkCodeInFormPostBody(MemoryStream responseBody, string tenantId)
+    {
+        var html = Encoding.UTF8.GetString(responseBody.ToArray());
+        var match = FormPostCodePattern.Match(html);
+        if (!match.Success)
+        {
+            return null;
+        }
+
+        // The tenant id holds only [A-Za-z0-9_-] and the separator ':' — nothing that needs HTML encoding.
+        var group = match.Groups[1];
+        var marked = html[..group.Index] + OidcTenantMarker.Encode(tenantId, group.Value) +
+                     html[(group.Index + group.Length)..];
+        return Encoding.UTF8.GetBytes(marked);
     }
 
     /// <summary>
@@ -704,18 +779,6 @@ internal class OidcTenantResolutionMiddleware(
         }
 
         return tenantIds;
-    }
-
-    private static void CleanupExpiredEntries()
-    {
-        var now = DateTime.UtcNow;
-        foreach (var kvp in TokenToTenantMap)
-        {
-            if (kvp.Value.Expiry < now)
-            {
-                TokenToTenantMap.TryRemove(kvp.Key, out _);
-            }
-        }
     }
 
     /// <summary>
@@ -769,72 +832,82 @@ internal class OidcTenantResolutionMiddleware(
     }
 
     /// <summary>
-    /// Resolves the tenant for a <c>/connect/authorize?request_uri=...</c> call by looking up the
-    /// previously captured <see cref="TokenToTenantMap"/> entry produced during <c>/connect/par</c>.
+    /// Reads the tenant (or the AB#5311 discovery scope) marked into the <c>request_uri</c> of a
+    /// <c>/connect/authorize?request_uri=...</c> call and removes the marker from the query, so OpenIddict sees
+    /// the request_uri it issued on <c>/connect/par</c> (AB#7892).
     /// </summary>
-    private string? ExtractTenantFromRequestUri(HttpContext context)
+    private (string? TenantId, string? ScopeTenantId) UnmarkRequestUri(HttpContext context)
     {
-        if (!context.Request.Query.TryGetValue("request_uri", out var requestUriValues))
+        if (!context.Request.Query.TryGetValue("request_uri", out var requestUriValues) ||
+            !OidcTenantMarker.TryDecodeRequestUri(requestUriValues.FirstOrDefault(), out var tenantId,
+                out var scopeTenantId, out var requestUri))
         {
-            return null;
+            return (null, null);
         }
 
-        var requestUri = requestUriValues.FirstOrDefault();
-        if (string.IsNullOrEmpty(requestUri))
+        var query = QueryHelpers.ParseQuery(context.Request.QueryString.Value);
+        query["request_uri"] = requestUri;
+        var builder = new QueryBuilder();
+        foreach (var (key, values) in query)
         {
-            return null;
+            foreach (var value in values)
+            {
+                builder.Add(key, value ?? string.Empty);
+            }
         }
 
-        if (TokenToTenantMap.TryGetValue(requestUri, out var entry))
+        // Login/consent continuation URLs must keep the marked value — the follow-up authorize call may hit another
+        // replica — while OpenIddict reads the unmarked one (AuthorizeController uses ContinuationQueryString).
+        context.Items[OriginalAuthorizeQueryItem] = context.Request.QueryString;
+        context.Request.QueryString = builder.ToQueryString();
+
+        if (tenantId != null)
         {
-            logger.LogDebug("Resolved tenant '{TenantId}' from PAR request_uri on /connect/authorize",
-                entry.TenantId);
-            return entry.TenantId;
+            logger.LogDebug("Resolved tenant '{TenantId}' from PAR request_uri on /connect/authorize", tenantId);
+        }
+        else
+        {
+            logger.LogDebug("Restored discovery scope '{ScopeTenantId}' from PAR request_uri on /connect/authorize",
+                scopeTenantId);
         }
 
-        return null;
+        return (tenantId, scopeTenantId);
     }
 
     /// <summary>
-    /// Captures the <c>request_uri</c> from a successful <c>/connect/par</c> JSON response
-    /// (RFC 9126) and maps it to the tenant ID. The follow-up <c>/connect/authorize?request_uri=...</c>
-    /// uses this mapping to recover the tenant context.
+    /// Marks the <c>request_uri</c> of a successful <c>/connect/par</c> JSON response (RFC 9126) with the tenant —
+    /// or, for a scope-only PAR, with the discovery scope (AB#5311) — so the follow-up
+    /// <c>/connect/authorize?request_uri=...</c> recovers it on any replica (AB#7892). Returns the rewritten body,
+    /// or <c>null</c> when nothing was marked.
     /// </summary>
-    private void CaptureRequestUriFromParResponse(MemoryStream responseBody, string? tenantId,
-        string? scopeTenantId)
+    internal byte[]? MarkRequestUriInParResponse(MemoryStream responseBody, string? tenantId, string? scopeTenantId)
     {
         try
         {
-            using var doc = JsonDocument.Parse(responseBody);
-            if (doc.RootElement.TryGetProperty("request_uri", out var requestUriElement))
+            if (JsonNode.Parse(responseBody.ToArray()) is JsonObject body &&
+                body["request_uri"] is JsonValue requestUriValue &&
+                requestUriValue.TryGetValue<string>(out var requestUri) &&
+                !string.IsNullOrEmpty(requestUri))
             {
-                var requestUri = requestUriElement.GetString();
-                if (!string.IsNullOrEmpty(requestUri))
+                var marked = OidcTenantMarker.EncodeRequestUri(requestUri, tenantId, scopeTenantId);
+                if (marked == null)
                 {
-                    var expiry = DateTime.UtcNow.Add(ParRequestUriEntryLifetime);
-                    if (!string.IsNullOrEmpty(tenantId))
-                    {
-                        TokenToTenantMap[requestUri] = (tenantId, expiry);
-                        logger.LogDebug("Captured PAR request_uri → tenant '{TenantId}' mapping", tenantId);
-                    }
-
-                    // AB#5311: the discovery scope of a scope-only PAR, keyed apart from the
-                    // tenant entries so the two can never be confused.
-                    if (!string.IsNullOrEmpty(scopeTenantId))
-                    {
-                        TokenToTenantMap[ScopeMapKey(requestUri)] = (scopeTenantId, expiry);
-                        logger.LogDebug("Captured PAR request_uri → discovery scope '{ScopeTenantId}' mapping",
-                            scopeTenantId);
-                    }
-
-                    CleanupExpiredEntries();
+                    logger.LogWarning("PAR request_uri has an unexpected form and was not marked with the tenant");
+                    return null;
                 }
+
+                body["request_uri"] = marked;
+                logger.LogDebug("Marked PAR request_uri with tenant '{TenantId}' / discovery scope '{ScopeTenantId}'",
+                    tenantId ?? "-", scopeTenantId ?? "-");
+                return Encoding.UTF8.GetBytes(body.ToJsonString(DeviceResponseJsonOptions));
             }
         }
-        catch (Exception ex)
+        catch (JsonException ex)
         {
-            logger.LogWarning(ex, "Failed to capture PAR request_uri from response");
+            logger.LogWarning(ex, "Failed to mark the PAR request_uri with the tenant");
         }
+
+        return null;
     }
 
     internal static string? ParseTenantFromAcrValues(string acrValues)
@@ -891,37 +964,31 @@ internal class OidcTenantResolutionMiddleware(
 
     /// <summary>
     ///     HttpContext.Items key under which a scope-only <c>/connect/par</c> hands its discovery
-    ///     scope to the response capture (AB#5311).
+    ///     scope to the response marking (AB#5311, AB#7892).
     /// </summary>
     private const string ParDiscoveryScopeItem = "octo.oidc.par.tenant_scope";
 
     /// <summary>
-    ///     Map key of a PAR request_uri's discovery scope — distinct from the tenant entry keyed by
-    ///     the bare request_uri.
+    ///     HttpContext.Items key of the <c>/connect/authorize</c> query as the client sent it, before the PAR
+    ///     <c>request_uri</c> marker was removed (AB#7892).
     /// </summary>
-    internal static string ScopeMapKey(string requestUri) => $"scope:{requestUri}";
+    private const string OriginalAuthorizeQueryItem = "octo.oidc.authorize.original_query";
 
     /// <summary>
-    ///     The discovery scope a scope-only PAR stored for this <c>request_uri</c>, if any (AB#5311).
+    ///     The query string for login/consent continuation URLs of <c>/connect/authorize</c>: the query as the client
+    ///     sent it, so a marked PAR <c>request_uri</c> keeps its tenant when the browser comes back — possibly to
+    ///     another replica (AB#7892). Equal to <see cref="HttpRequest.QueryString" /> when nothing was unmarked.
     /// </summary>
-    private string? ExtractScopeFromRequestUri(HttpContext context)
-    {
-        if (!context.Request.Query.TryGetValue("request_uri", out var requestUriValues))
-        {
-            return null;
-        }
+    internal static QueryString ContinuationQueryString(HttpContext context)
+        => context.Items[OriginalAuthorizeQueryItem] is QueryString original
+            ? original
+            : context.Request.QueryString;
 
-        var requestUri = requestUriValues.FirstOrDefault();
-        if (string.IsNullOrEmpty(requestUri) ||
-            !TokenToTenantMap.TryGetValue(ScopeMapKey(requestUri), out var entry))
-        {
-            return null;
-        }
-
-        logger.LogDebug("Restored discovery scope '{ScopeTenantId}' from PAR request_uri on /connect/authorize",
-            entry.TenantId);
-        return entry.TenantId;
-    }
+    /// <summary>The parsed <see cref="ContinuationQueryString" />.</summary>
+    internal static IQueryCollection ContinuationQuery(HttpContext context)
+        => context.Items[OriginalAuthorizeQueryItem] is QueryString original
+            ? new QueryCollection(QueryHelpers.ParseQuery(original.Value))
+            : context.Request.Query;
 
     /// <summary>
     ///     The <c>/tenant-discovery</c> redirect. The scope travels as its own query parameter so
@@ -1035,7 +1102,7 @@ internal class OidcTenantResolutionMiddleware(
                 deviceCodeValue.TryGetValue<string>(out var deviceCode) &&
                 !string.IsNullOrEmpty(deviceCode))
             {
-                body["device_code"] = DeviceCodeTenantMarker.Encode(tenantId, deviceCode);
+                body["device_code"] = OidcTenantMarker.Encode(tenantId, deviceCode);
                 logger.LogDebug("Marked device code with tenant '{TenantId}'", tenantId);
                 return Encoding.UTF8.GetBytes(body.ToJsonString(DeviceResponseJsonOptions));
             }

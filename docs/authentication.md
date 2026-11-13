@@ -402,16 +402,17 @@ The former `DeviceApiController` (`/api/device/*`) now only holds the DTOs — t
      store only; a code of another tenant is an unknown code there ("Invalid or expired device code"), nothing about
      other tenants is looked up or revealed. Without a hint the system tenant applies (system-tenant device logins).
    - *Token poll*: `/connect/deviceauthorization` returns the device code as `{tenantId}:{device_code}`
-     (`DeviceCodeTenantMarker`). On `/connect/token` the middleware takes the tenant from the prefix and replaces the
+     (`OidcTenantMarker`). On `/connect/token` the middleware takes the tenant from the prefix and replaces the
      form value with OpenIddict's own code. RFC 8628 makes the device code opaque, so clients pass it back unchanged —
      octo-cli/octo-sdk need no change. The prefix is not signed on purpose: it only selects the tenant whose token store
      OpenIddict searches; a changed prefix points to a store without the code and answers `invalid_grant`. A code
      without a marker (issued before AB#7891) falls back to `acr_values`, else to the system tenant.
    - *Clean-up*: nothing extra is stored. Device and user codes live in the tenant's token store (`RtOAuthToken`) with
      the client's `DeviceCodeLifetime` and are pruned by `TokenCleanupHostService` as before.
-   - Authorization-code, refresh-token and PAR entries still use the in-process `TokenToTenantMap` (AB#7892).
+   - Authorization codes, refresh tokens and PAR request_uris carry their tenant the same way since AB#7892 — see
+     "OIDC Endpoint Tenant Resolution" below.
    - Tests: `DeviceFlowReplicaTests` (two hosts over one database; host recreated between authorization and approval;
-     foreign user code; changed marker; system tenant), `DeviceCodeTenantMarkerTests`, `OidcTenantResolutionMiddlewareTests`.
+     foreign user code; changed marker; system tenant), `OidcTenantMarkerTests`, `OidcTenantResolutionMiddlewareTests`.
 
 6. **CLI Integration**: The `octo-cli` tool's `AuthenticationService` handles both scenarios:
    - With refresh token: Attempts token refresh before expiration
@@ -1626,20 +1627,64 @@ OIDC endpoints (`/connect/*`) don't include a `{tenantId}` route segment. The `O
 
 | Endpoint | Tenant Source |
 |----------|--------------|
-| `/connect/par` | `acr_values=tenant:{tenantId}` from form body (RFC 9126 Pushed Authorization Request); captures `request_uri` from JSON response → tenant mapping |
-| `/connect/authorize` | `request_uri` query parameter → tenant mapping (captured during PAR); fallback to `acr_values=tenant:{tenantId}` from query string; captures `code` → tenant mapping from both 302 redirects (`response_mode=query`) and 200 HTML responses (`response_mode=form_post`) |
-| `/connect/token` (authorization_code, refresh_token) | Authorization code / refresh token → tenant mapping (captured earlier, in-process); for refresh tokens, `acr_values=tenant:{tenantId}` from the form body is **preferred** when the client sends it; sets tenant context for user/client lookups |
-| `/connect/token` (device_code) | Tenant marker of the device code (`{tenantId}:{code}`, `DeviceCodeTenantMarker`), stripped before OpenIddict reads the form; fallback `acr_values=tenant:{tenantId}`, else system tenant. No in-process state (AB#7891) |
+| `/connect/par` | `acr_values=tenant:{tenantId}` from form body (RFC 9126 Pushed Authorization Request); marks the returned `request_uri` with the tenant (`urn:ietf:params:oauth:request_uri:{tenantId}:{reference}`), or with the discovery scope of a scope-only PAR (`…:tenant_scope.{scopeTenantId}:{reference}`, AB#5311) |
+| `/connect/authorize` | Tenant marker of `request_uri` (stripped before OpenIddict reads the query); fallback `acr_values=tenant:{tenantId}` from query string; marks the issued `code` with the tenant in redirects (`response_mode=query`/`fragment`) and in 200 HTML responses (`response_mode=form_post`) |
+| `/connect/token` (authorization_code) | Tenant marker of the code (`{tenantId}:{code}`), stripped before OpenIddict reads the form; an unmarked code (issued before AB#7892) uses the system tenant |
+| `/connect/token` (refresh_token) | Tenant marker of the refresh token (wins over `acr_values`), stripped before OpenIddict reads the form; an unmarked token (issued before AB#7892) uses `acr_values=tenant:{tenantId}`, else the system tenant. Every token response that carries a refresh token marks it with the tenant |
+| `/connect/token` (device_code) | Tenant marker of the device code (`{tenantId}:{code}`, `OidcTenantMarker`), stripped before OpenIddict reads the form; fallback `acr_values=tenant:{tenantId}`, else system tenant. No in-process state (AB#7891) |
 | `/connect/token` (client_credentials, token exchange) | `acr_values=tenant:{tenantId}` from form body — **required**; without it the client lookup falls back to the system tenant, so tenant-registered clients fail with `invalid_client`, and a **mirrored** client id is refused outright with `invalid_request` (AB#5058, see below) |
 | `/connect/deviceauthorization` | `acr_values=tenant:{tenantId}` from the form body; marks the returned `device_code` with the tenant and rewrites `verification_uri` to the SPA page `/{tenantId}/device` (with `?userCode=`); nothing is stored (AB#7891) |
 | `/connect/deviceverification` | Tenant hint `acr_values=tenant:{tenantId}` the device page sends (query on GET, form body on POST); without it the system tenant. The user code is validated in that tenant's token store only (AB#7891) |
 | `/connect/endsession` | `id_token_hint` JWT payload → `tenant_id` claim; fallback to `acr_values` |
+| `/connect/revocation`, `/connect/introspect` | Tenant marker of the `token` form field (a refresh token), stripped before OpenIddict reads the form; else the bearer token's `tenant_id` claim |
+| `/connect/userinfo` | Bearer token's `tenant_id` claim |
 
-**Pushed Authorization Request (PAR, RFC 9126):** When the client uses PAR, it POSTs the full set of authorization parameters (including `acr_values=tenant:{tenantId}`) to `/connect/par`. The server returns a `request_uri` (e.g., `urn:ietf:params:oauth:request_uri:...`); the subsequent `/connect/authorize` call carries only `request_uri` on the URL, no `acr_values`. The middleware extracts the tenant from the form body during `/connect/par`, captures the issued `request_uri` from the JSON response, and stores the mapping (5-minute lifetime). On `/connect/authorize?request_uri=...`, the middleware looks up the tenant from this mapping before falling back to query-string `acr_values`. PAR is enabled automatically by `Microsoft.AspNetCore.Authentication.OpenIdConnect` (.NET 9+) when the IdP advertises `pushed_authorization_request_endpoint` in its discovery document — which OpenIddict does (as Duende did before). This capture stage, like the authorization-code and refresh-token stages, is golden-verified against OpenIddict's response shapes.
+**Safe with several replicas and across restarts (AB#7891, AB#7892).** The middleware holds **no process-local state**.
+Every value a later request sends back — device code, authorization code, refresh token, PAR `request_uri` — carries
+its tenant (`OidcTenantMarker`): the middleware adds the marker on the response that hands the value to the client and
+removes it from the request before OpenIddict reads it, so OpenIddict only ever sees its own values. Any replica, and a
+restarted process, resolves the tenant from the request alone. Before AB#7892 authorization codes, refresh tokens and PAR
+`request_uri`s were mapped to their tenant in a static in-process dictionary; with two replicas the token request of an
+app whose OIDC client lives in a sub-tenant often landed on the replica without the entry, the client was looked up in
+the system tenant and the request failed with `401 invalid_client` (login loop back to tenant discovery, test-2,
+2026-11-12).
 
-**Authorization code → tenant mapping:** During `/connect/authorize`, the middleware wraps the response body to capture the authorization code and maps it to the resolved tenant ID in an in-memory `ConcurrentDictionary`. This supports both `response_mode=query` (code extracted from the 302 redirect `Location` header) and `response_mode=form_post` (code extracted from the hidden `<input name='code'>` field in the 200 HTML response). The `form_post` mode is used by server-side OIDC clients such as the Asset Repository Services' GraphQL Playground. When `/connect/token` is called with `grant_type=authorization_code`, the middleware reads the `code` from the form body, looks up the tenant from the mapping, and sets the correct tenant context. This ensures `OctoUserStore`, `ClientStore`, and other per-tenant stores use the correct tenant database during the token exchange. The mapping entries expire after 10 minutes and are cleaned up opportunistically.
-
-**Refresh token → tenant mapping (in-memory only, preferring `acr_values`):** Clients that know their tenant (the SPAs) send `acr_values=tenant:{tenantId}` with every refresh-token request — the preferred, restart-safe path. As a fallback, when `/connect/token` returns a successful response containing a `refresh_token`, the middleware captures the token and maps it to the current tenant ID in the in-memory cache (entries expire after 30 days) and looks it up on the next refresh. There is **no persistent hash fallback anymore** — the former SHA-256 lookup against the system-tenant `RtPersistedGrant` store was retired together with centralized grant storage (grants now live per tenant in `RtOAuthAuthorization`/`RtOAuthToken` via the OpenIddict stores).
+- **Why the marker is not signed.** It only selects the tenant whose token store OpenIddict searches. Codes, refresh
+  tokens and PAR request tokens are persisted per tenant (`RtOAuthToken`), so a changed marker points OpenIddict at a store
+  that does not hold the value: `invalid_grant` (or `invalid_request` for a `request_uri`), like any unknown value. A
+  value can never resolve to another tenant.
+- **Why not look the token up in the stores.** Codes and refresh tokens are encrypted, self-contained tokens; their store
+  id is only readable after decryption, so the tenant would have to be found by scanning every tenant database. A shared
+  collection was not needed either — every key can be carried by the value itself.
+- **Clean-up.** Nothing extra is stored: the tenant lives exactly as long as the value. Codes, refresh tokens and request
+  tokens are pruned by `TokenCleanupHostService` as before.
+- **Clients.** Codes, refresh tokens and `request_uri`s are opaque to clients (RFC 6749, RFC 9126); Studio, apps,
+  octo-cli/octo-sdk and services pass them back unchanged. The `request_uri` stays a `urn:ietf:params:oauth:request_uri:`
+  URN. Clients without `acr_values` on refresh (octo-sdk without a configured tenant, services) now keep their session on
+  any replica and after a restart.
+- **Values issued before AB#7892** carry no marker and keep the old fallback: `acr_values` where the grant honours it,
+  otherwise the system tenant (a value of another tenant is unknown there and rejected).
+- **Rollout and rollback.** Pods older than AB#7892 do not understand the marker: a marked code, refresh token or
+  `request_uri` sent to an old pod fails. Deploy this version with a single replica and the `Recreate` strategy first, so
+  old and new pods never serve side by side; enable several replicas (or `RollingUpdate`) only after every pod runs this
+  version. A rollback below this version makes the refresh tokens issued since the update unusable; those users sign in
+  again (accepted, AB#7892). Before AB#7892 every restart dropped the in-memory map anyway, so sub-tenant flows already
+  broke on every rollout.
+- **Pushed Authorization Request (PAR, RFC 9126).** The client POSTs the authorization parameters (including
+  `acr_values=tenant:{tenantId}`) to `/connect/par` and gets a `request_uri`; the follow-up `/connect/authorize` carries
+  only `request_uri`. PAR is used automatically by `Microsoft.AspNetCore.Authentication.OpenIdConnect` (.NET 9+) because
+  OpenIddict advertises `pushed_authorization_request_endpoint`. The discovery redirect and the login/consent
+  continuation URLs of `AuthorizeController` keep the marked `request_uri` (the query as the client sent it,
+  `OidcTenantResolutionMiddleware.ContinuationQueryString`), so the authorize call after the login resolves the tenant
+  on any replica; only OpenIddict sees the unmarked value.
+- **`response_mode=fragment`**: the code in the fragment is marked; a `code` query parameter of the registered redirect
+  URI is left alone.
+- **`response_mode=form_post`** (server-side OIDC clients such as the Asset Repository GraphQL Playground): the code is
+  marked in the hidden `<input name='code'>` field.
+- Tests: `OidcTenantResolutionReplicaTests` (two hosts over one database and a host restart: authorization code issued on
+  A and redeemed on B for a sub-tenant client; PAR created on A and used on B, also through the login continuation; refresh without `acr_values` after a
+  restart; changed markers rejected; revocation of a marked refresh token; no static state in the middleware),
+  `DeviceFlowReplicaTests`, `OidcTenantMarkerTests`, `OidcTenantResolutionMiddlewareTests`.
 
 The middleware runs after routing, before the OpenIddict endpoints handle the request:
 

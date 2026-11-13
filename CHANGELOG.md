@@ -5,6 +5,25 @@ Notable changes of the OctoMesh identity services. The CK model `System.Identity
 
 ## Unreleased
 
+### Fixed
+
+- **Sign-in and token refresh work with several identity replicas and across restarts (AB#7892).** Authorization codes,
+  refresh tokens and PAR `request_uri`s were mapped to their tenant in a static in-process dictionary. With two replicas
+  (test-2, AB#8402) the token request of an app whose OIDC client lives in a sub-tenant (Energy Community) often hit the
+  replica without the entry; the client was looked up in the system tenant and `POST /connect/token` answered
+  `401 invalid_client`, the app looped back to tenant discovery. After a restart, clients refreshing without `acr_values`
+  fell back to the system tenant the same way. Now every such value carries its tenant (`OidcTenantMarker`,
+  `{tenantId}:{value}`; inside the URN for `request_uri`), like the device code since AB#7891: marked on the response,
+  stripped before OpenIddict reads the request. The marker only selects the tenant token store, so a changed marker is
+  rejected like an unknown value (`invalid_grant`). Nothing extra is stored; `TokenToTenantMap` is gone.
+  `/connect/revocation` and `/connect/introspect` resolve the tenant of a marked refresh token too (before, revoking the
+  refresh token of a sub-tenant public client without a bearer header failed with `invalid_client`).
+  **Client impact:** none — codes, refresh tokens and `request_uri`s are opaque and passed back unchanged; their values
+  are longer by the tenant prefix. Values issued before the update keep the old fallback (`acr_values`, else system
+  tenant). **Operator note:** deploy with a single replica and the `Recreate` strategy first; enable more than one replica only
+  after every pod runs this version (old pods reject marked values). A rollback below this version makes refresh tokens
+  issued since the update unusable; those users sign in again.
+
 ### Added
 
 - **Every pipeline service account holds `StreamDataReader` (AB#8581).** The asset repository gates stream-data reads on a

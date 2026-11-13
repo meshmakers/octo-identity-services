@@ -36,10 +36,10 @@ namespace IdentityServices.IntegrationTests.Api.Protocol;
 ///         octo-cli sends (client_id + device_code, no acr_values).
 ///     </para>
 ///     <para>
-///         The former in-process <c>TokenToTenantMap</c> is static, i.e. shared by all hosts of this test process, so two
-///         hosts alone would not have caught the bug. The tests therefore also pin that no device entry is held there
-///         (<see cref="OidcTenantResolutionMiddleware.MappedKeysSnapshot" />): with nothing in process memory the flow can
-///         only succeed because the tenant is derived from the request.
+///         The former in-process <c>TokenToTenantMap</c> was static, i.e. shared by all hosts of this test process, so two
+///         hosts alone would not have caught the bug. The tests therefore also pin that the middleware holds no static
+///         map (removed with AB#7892): with nothing in process memory the flow can only succeed because the tenant is
+///         derived from the request.
 ///     </para>
 /// </remarks>
 public class DeviceFlowReplicaTests : IntegrationTestBase
@@ -62,7 +62,7 @@ public class DeviceFlowReplicaTests : IntegrationTestBase
         var cookies = new System.Net.CookieContainer();
 
         var (userCode, deviceCode) = await StartDeviceFlowAsync(replicaA, tenantId, ct);
-        AssertNoDeviceEntryInProcessMemory(userCode, deviceCode);
+        AssertNoDeviceEntryInProcessMemory(deviceCode);
 
         await SignInAsync(replicaA, cookies, tenantId, userName, ct);
         var context = await GetVerificationContextAsync(replicaB, cookies, tenantId, userCode, ct);
@@ -93,7 +93,7 @@ public class DeviceFlowReplicaTests : IntegrationTestBase
 
         // A fresh host = a restarted process: nothing of the first host survives except the database.
         using var afterRestart = Factory.WithWebHostBuilder(_ => { });
-        AssertNoDeviceEntryInProcessMemory(userCode, deviceCode);
+        AssertNoDeviceEntryInProcessMemory(deviceCode);
 
         await SignInAsync(afterRestart, cookies, tenantId, userName, ct);
         var context = await GetVerificationContextAsync(afterRestart, cookies, tenantId, userCode, ct);
@@ -142,9 +142,9 @@ public class DeviceFlowReplicaTests : IntegrationTestBase
         await SignInAsync(Factory, cookies, tenantId, userName, ct);
         (await ApproveAsync(Factory, cookies, tenantId, userCode, ct)).Should().BeTrue();
 
-        DeviceCodeTenantMarker.TryDecode(deviceCode, out var markedTenant, out var innerCode).Should().BeTrue();
+        OidcTenantMarker.TryDecode(deviceCode, out var markedTenant, out var innerCode).Should().BeTrue();
         markedTenant.Should().BeEquivalentTo(tenantId);
-        var response = await PollAsync(Factory, DeviceCodeTenantMarker.Encode(otherTenantId, innerCode), ct);
+        var response = await PollAsync(Factory, OidcTenantMarker.Encode(otherTenantId, innerCode), ct);
 
         response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
         JsonNode.Parse(await response.Content.ReadAsStringAsync(ct))!["error"]!.GetValue<string>()
@@ -167,13 +167,17 @@ public class DeviceFlowReplicaTests : IntegrationTestBase
         TenantOf(await RedeemAsync(Factory, deviceCode, ct)).Should().BeEquivalentTo(NormalizedSystemTenantId);
     }
 
-    private static void AssertNoDeviceEntryInProcessMemory(string userCode, string deviceCode)
+    private static void AssertNoDeviceEntryInProcessMemory(string deviceCode)
     {
-        DeviceCodeTenantMarker.TryDecode(deviceCode, out _, out var innerCode).Should().BeTrue(
+        OidcTenantMarker.TryDecode(deviceCode, out _, out _).Should().BeTrue(
             "the device_code carries the tenant marker");
-        OidcTenantResolutionMiddleware.MappedKeysSnapshot().Should().NotContain(
-            k => k.Contains(userCode) || k.Contains(innerCode),
-            "device entries are no longer held in the static in-process map");
+        // AB#7892: the middleware keeps no process-local token state at all (see
+        // OidcTenantResolutionReplicaTests.Middleware_HoldsNoProcessLocalTokenToTenantState).
+        typeof(OidcTenantResolutionMiddleware)
+            .GetFields(System.Reflection.BindingFlags.Static | System.Reflection.BindingFlags.NonPublic |
+                       System.Reflection.BindingFlags.Public)
+            .Should().NotContain(f => typeof(System.Collections.IDictionary).IsAssignableFrom(f.FieldType),
+                "no device entry can be held in a static in-process map");
     }
 
     private static HttpClient AnonymousClient(WebApplicationFactory<Program> host)

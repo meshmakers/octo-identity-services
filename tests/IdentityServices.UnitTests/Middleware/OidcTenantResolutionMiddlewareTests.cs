@@ -2,10 +2,14 @@ using System.Text;
 using FluentAssertions;
 using Meshmakers.Octo.Backend.IdentityServices.Middleware;
 using Meshmakers.Octo.Backend.IdentityServices.Services;
+using Meshmakers.Octo.Runtime.Contracts.MongoDb;
 using Meshmakers.Octo.Runtime.Contracts.MongoDb.Configuration;
+using Meshmakers.Octo.Services.Infrastructure;
 using Microsoft.AspNetCore.Http;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
+using NSubstitute;
 using Xunit;
 
 namespace IdentityServices.UnitTests.Middleware;
@@ -111,114 +115,158 @@ public class OidcTenantResolutionMiddlewareTests
         result.Should().BeNull();
     }
 
-    [Fact]
-    public void ExtractCodeFromRedirectUri_WithAbsoluteUri_ReturnsCode()
-    {
-        var result = OidcTenantResolutionMiddleware.ExtractCodeFromRedirectUri(
-            "https://localhost:4200/callback?code=ABC123&state=xyz");
+    // AB#7892: the authorization code carries its tenant, so the token request needs no in-process map.
 
-        result.Should().Be("ABC123");
+    [Fact]
+    public void MarkCodeInRedirectUri_Query_MarksOnlyTheCode()
+    {
+        var result = OidcTenantResolutionMiddleware.MarkCodeInRedirectUri(
+            "https://localhost:4200/callback?code=ABC123&state=xyz&iss=https%3A%2F%2Fid", "child-a");
+
+        result.Should().Be("https://localhost:4200/callback?code=child-a%3AABC123&state=xyz&iss=https%3A%2F%2Fid");
     }
 
     [Fact]
-    public void ExtractCodeFromRedirectUri_WithRelativeUri_ReturnsCode()
+    public void MarkCodeInRedirectUri_Fragment_MarksTheCode()
     {
-        var result = OidcTenantResolutionMiddleware.ExtractCodeFromRedirectUri(
-            "/callback?code=DEF456&state=xyz");
+        var result = OidcTenantResolutionMiddleware.MarkCodeInRedirectUri(
+            "/callback#state=xyz&code=DEF456", "child-a");
 
-        result.Should().Be("DEF456");
+        result.Should().Be("/callback#state=xyz&code=child-a%3ADEF456");
     }
 
     [Fact]
-    public void ExtractCodeFromRedirectUri_WithNoCodeParam_ReturnsNull()
+    public void MarkCodeInRedirectUri_FragmentCodeWins_OverACodeQueryParameterOfTheRedirectUri()
     {
-        var result = OidcTenantResolutionMiddleware.ExtractCodeFromRedirectUri(
-            "https://localhost:4200/callback?state=xyz");
+        var result = OidcTenantResolutionMiddleware.MarkCodeInRedirectUri(
+            "https://app.example/cb?code=app-own#code=ISSUED&state=xyz", "child-a");
 
-        result.Should().BeNull();
+        result.Should().Be("https://app.example/cb?code=app-own#code=child-a%3AISSUED&state=xyz");
     }
 
     [Fact]
-    public void ExtractCodeFromRedirectUri_WithNoQueryString_ReturnsNull()
+    public void MarkCodeInRedirectUri_FragmentWithoutCode_LeavesTheQueryAlone()
     {
-        var result = OidcTenantResolutionMiddleware.ExtractCodeFromRedirectUri(
-            "https://localhost:4200/callback");
+        OidcTenantResolutionMiddleware.MarkCodeInRedirectUri(
+            "https://app.example/cb?code=app-own#error=access_denied", "child-a").Should().BeNull();
+    }
 
-        result.Should().BeNull();
+    [Theory]
+    [InlineData("https://localhost:4200/callback?state=xyz")]
+    [InlineData("https://localhost:4200/callback")]
+    [InlineData("https://localhost:4200/callback?error=access_denied&state=xyz")]
+    [InlineData("")]
+    [InlineData(null)]
+    public void MarkCodeInRedirectUri_WithoutCode_ReturnsNull(string? location)
+    {
+        OidcTenantResolutionMiddleware.MarkCodeInRedirectUri(location, "child-a").Should().BeNull();
+    }
+
+    [Theory]
+    [InlineData("<input type='hidden' name='code' value='AUTH_CODE_123' />", "<input type='hidden' name='code' value='child-a:AUTH_CODE_123' />")]
+    [InlineData("<input type=\"hidden\" name=\"code\" value=\"MY_CODE_456\" />", "<input type=\"hidden\" name=\"code\" value=\"child-a:MY_CODE_456\" />")]
+    public void MarkCodeInFormPostBody_MarksTheHiddenCodeField(string field, string expected)
+    {
+        var html = $"<html><body><form method='post' action='https://app/cb'>{field}<input type='hidden' name='state' value='s' /></form></body></html>";
+        using var stream = new MemoryStream(Encoding.UTF8.GetBytes(html));
+
+        var result = OidcTenantResolutionMiddleware.MarkCodeInFormPostBody(stream, "child-a");
+
+        Encoding.UTF8.GetString(result!).Should().Be(html.Replace(field, expected));
     }
 
     [Fact]
-    public void ExtractCodeFromRedirectUri_WithNull_ReturnsNull()
+    public void MarkCodeInFormPostBody_WithoutCode_ReturnsNull()
     {
-        var result = OidcTenantResolutionMiddleware.ExtractCodeFromRedirectUri(null);
+        using var stream = new MemoryStream("<form><input type='hidden' name='state' value='s' /></form>"u8.ToArray());
 
-        result.Should().BeNull();
+        OidcTenantResolutionMiddleware.MarkCodeInFormPostBody(stream, "child-a").Should().BeNull();
     }
 
     [Fact]
-    public void ExtractCodeFromRedirectUri_WithEmptyString_ReturnsNull()
+    public async Task ResolveTenantFromTokenRequest_MarkedAuthorizationCode_ResolvesTenantAndStripsMarker()
     {
-        var result = OidcTenantResolutionMiddleware.ExtractCodeFromRedirectUri("");
+        var context = FormRequest("/connect/token",
+            ("grant_type", "authorization_code"), ("client_id", "ec-app"), ("code", "child-a:opaque.code"));
 
-        result.Should().BeNull();
+        var result = await CreateMiddleware().ResolveTenantFromTokenRequestAsync(context);
+
+        result.Should().Be("child-a");
+        var form = await context.Request.ReadFormAsync(TestContext.Current.CancellationToken);
+        form["code"].ToString().Should().Be("opaque.code", "OpenIddict must only see its own value");
+        form["client_id"].ToString().Should().Be("ec-app");
     }
 
     [Fact]
-    public void ExtractCodeFromFormPostBody_WithStandardFormPost_ReturnsCode()
+    public async Task ResolveTenantFromTokenRequest_UnmarkedAuthorizationCode_ReturnsNull()
     {
-        var html = """
-            <html><body>
-            <form method='post' action='https://localhost:5001/signin-oidc'>
-                <input type='hidden' name='code' value='AUTH_CODE_123' />
-                <input type='hidden' name='state' value='some_state' />
-            </form>
-            </body></html>
-            """;
-        using var stream = new MemoryStream(System.Text.Encoding.UTF8.GetBytes(html));
+        // Issued before AB#7892: system tenant, where a code of another tenant is unknown (fail closed).
+        var context = FormRequest("/connect/token", ("grant_type", "authorization_code"), ("code", "opaque.code"));
 
-        var result = OidcTenantResolutionMiddleware.ExtractCodeFromFormPostBody(stream);
-
-        result.Should().Be("AUTH_CODE_123");
+        (await CreateMiddleware().ResolveTenantFromTokenRequestAsync(context)).Should().BeNull();
     }
 
     [Fact]
-    public void ExtractCodeFromFormPostBody_WithDoubleQuotes_ReturnsCode()
+    public async Task ResolveTenantFromTokenRequest_MarkedRefreshToken_WinsOverAcrValues()
     {
-        var html = """
-            <form method="post" action="https://localhost:5001/signin-oidc">
-                <input type="hidden" name="code" value="MY_CODE_456" />
-            </form>
-            """;
-        using var stream = new MemoryStream(System.Text.Encoding.UTF8.GetBytes(html));
+        var context = FormRequest("/connect/token",
+            ("grant_type", "refresh_token"), ("refresh_token", "child-a:opaque.rt"), ("acr_values", "tenant:child-b"));
 
-        var result = OidcTenantResolutionMiddleware.ExtractCodeFromFormPostBody(stream);
+        var result = await CreateMiddleware().ResolveTenantFromTokenRequestAsync(context);
 
-        result.Should().Be("MY_CODE_456");
+        result.Should().Be("child-a", "the marker names the store the token lives in");
+        (await context.Request.ReadFormAsync(TestContext.Current.CancellationToken))["refresh_token"].ToString()
+            .Should().Be("opaque.rt");
     }
 
     [Fact]
-    public void ExtractCodeFromFormPostBody_WithNoCodeField_ReturnsNull()
+    public async Task ResolveTenantFromTokenRequest_UnmarkedRefreshToken_UsesAcrValuesOrNothing()
     {
-        var html = """
-            <form method='post' action='https://localhost:5001/signin-oidc'>
-                <input type='hidden' name='state' value='some_state' />
-            </form>
-            """;
-        using var stream = new MemoryStream(System.Text.Encoding.UTF8.GetBytes(html));
+        var withAcr = FormRequest("/connect/token",
+            ("grant_type", "refresh_token"), ("refresh_token", "opaque.rt"), ("acr_values", "tenant:child-b"));
+        (await CreateMiddleware().ResolveTenantFromTokenRequestAsync(withAcr)).Should().Be("child-b");
 
-        var result = OidcTenantResolutionMiddleware.ExtractCodeFromFormPostBody(stream);
-
-        result.Should().BeNull();
+        var withoutAcr = FormRequest("/connect/token", ("grant_type", "refresh_token"), ("refresh_token", "opaque.rt"));
+        (await CreateMiddleware().ResolveTenantFromTokenRequestAsync(withoutAcr)).Should().BeNull();
     }
 
     [Fact]
-    public void ExtractCodeFromFormPostBody_WithEmptyBody_ReturnsNull()
+    public void MarkRefreshTokenInTokenResponse_MarksOnlyTheRefreshToken()
     {
-        using var stream = new MemoryStream();
+        using var body = new MemoryStream(
+            """{"access_token":"a.b.c","token_type":"Bearer","expires_in":3600,"refresh_token":"opaque.rt","scope":"openid offline_access"}"""u8.ToArray());
 
-        var result = OidcTenantResolutionMiddleware.ExtractCodeFromFormPostBody(stream);
+        var rewritten = CreateMiddleware().MarkRefreshTokenInTokenResponse(body, "child-a");
 
-        result.Should().BeNull();
+        var json = System.Text.Json.Nodes.JsonNode.Parse(rewritten!)!.AsObject();
+        json["refresh_token"]!.GetValue<string>().Should().Be("child-a:opaque.rt");
+        json["access_token"]!.GetValue<string>().Should().Be("a.b.c", "the access token is never touched");
+        json["expires_in"]!.GetValue<int>().Should().Be(3600);
+        json["scope"]!.GetValue<string>().Should().Be("openid offline_access");
+    }
+
+    [Fact]
+    public void MarkRefreshTokenInTokenResponse_WithoutRefreshToken_IsLeftAlone()
+    {
+        using var body = new MemoryStream("""{"access_token":"a.b.c","token_type":"Bearer"}"""u8.ToArray());
+
+        CreateMiddleware().MarkRefreshTokenInTokenResponse(body, "child-a").Should().BeNull();
+    }
+
+    [Fact]
+    public async Task Revocation_MarkedToken_ResolvesTenantAndStripsMarker()
+    {
+        var context = FormRequest("/connect/revocation",
+            ("token", "child-a:opaque.rt"), ("token_type_hint", "refresh_token"), ("client_id", "ec-app"));
+        var systemContext = Substitute.For<ISystemContext>();
+        context.RequestServices = ServicesWith(systemContext);
+
+        await CreateMiddleware().InvokeAsync(context);
+
+        await systemContext.Received(1).TryFindTenantRepositoryAsync("child-a");
+
+        var form = await context.Request.ReadFormAsync(TestContext.Current.CancellationToken);
+        form["token"].ToString().Should().Be("opaque.rt");
     }
 
     /// <summary>
@@ -367,20 +415,6 @@ public class OidcTenantResolutionMiddlewareTests
     }
 
     [Fact]
-    public void RewriteDeviceAuthorizationResponse_KeepsNothingInTheInProcessMap()
-    {
-        var deviceCode = $"device-{Guid.NewGuid():N}";
-        var userCode = $"USER-{Guid.NewGuid():N}";
-        using var body = new MemoryStream(System.Text.Encoding.UTF8.GetBytes(
-            $$"""{"device_code":"{{deviceCode}}","user_code":"{{userCode}}","verification_uri":"https://id.example/connect/deviceverification"}"""));
-
-        CreateMiddleware().RewriteDeviceAuthorizationResponse(body, "child-a");
-
-        OidcTenantResolutionMiddleware.MappedKeysSnapshot()
-            .Should().NotContain(k => k.Contains(deviceCode) || k.Contains(userCode));
-    }
-
-    [Fact]
     public void RewriteDeviceAuthorizationResponse_ErrorBodyWithoutDeviceCode_IsLeftAlone()
     {
         using var body = new MemoryStream("""{"error":"invalid_client"}"""u8.ToArray());
@@ -399,6 +433,20 @@ public class OidcTenantResolutionMiddlewareTests
         context.Request.ContentLength = bytes.Length;
         context.Request.Body = new MemoryStream(bytes);
         return context;
+    }
+
+    /// <summary>Request services whose system context knows no tenant (the lookup returns <c>null</c>).</summary>
+    private static IServiceProvider ServicesWithoutTenants()
+    {
+        var systemContext = Substitute.For<ISystemContext>();
+        systemContext.TryFindTenantRepositoryAsync(Arg.Any<string>())
+            .Returns(Task.FromResult<Meshmakers.Octo.Runtime.Contracts.MongoDb.Repositories.ITenantRepository?>(null));
+        return ServicesWith(systemContext);
+    }
+
+    private static IServiceProvider ServicesWith(ISystemContext systemContext)
+    {
+        return new ServiceCollection().AddSingleton(systemContext).BuildServiceProvider();
     }
 
     private static OidcTenantResolutionMiddleware CreateMiddleware() =>
@@ -507,13 +555,16 @@ public class OidcTenantResolutionMiddlewareTests
         par.Request.Body = new MemoryStream(Encoding.UTF8.GetBytes("client_id=x&acr_values=tenant_scope%3Aaccounting"));
         par.Response.Body = new MemoryStream();
         await middleware.InvokeAsync(par);
+        par.Response.Body.Position = 0;
+        var markedRequestUri = System.Text.Json.Nodes.JsonNode.Parse(par.Response.Body)!["request_uri"]!.GetValue<string>();
+        markedRequestUri.Should().StartWith(OidcTenantMarker.RequestUriPrefix, "the request_uri stays a PAR URN");
 
         var authorize = new DefaultHttpContext();
         authorize.Request.Method = "GET";
         authorize.Request.Scheme = "https";
         authorize.Request.Host = new HostString("id.test");
         authorize.Request.Path = "/connect/authorize";
-        authorize.Request.QueryString = new QueryString($"?client_id=x&request_uri={Uri.EscapeDataString(requestUri)}");
+        authorize.Request.QueryString = new QueryString($"?client_id=x&request_uri={Uri.EscapeDataString(markedRequestUri)}");
         authorize.Response.Body = new MemoryStream();
         await middleware.InvokeAsync(authorize);
 
@@ -521,6 +572,54 @@ public class OidcTenantResolutionMiddlewareTests
         var location = authorize.Response.Headers.Location.ToString();
         location.Should().StartWith("/tenant-discovery?returnUrl=");
         location.Should().EndWith("&scopeTenantId=accounting");
+        location.Should().Contain(Uri.EscapeDataString(Uri.EscapeDataString(markedRequestUri)),
+            "the returnUrl hands the request_uri back as the client sent it");
+    }
+
+    [Fact]
+    public async Task TenantPar_MarksTheRequestUri_AndAuthorizeResolvesTheTenantAndSeesTheOriginalValue()
+    {
+        var requestUri = "urn:ietf:params:oauth:request_uri:" + Guid.NewGuid().ToString("N");
+        string? requestUriSeenByOpenIddict = null;
+        RequestDelegate next = async ctx =>
+        {
+            if (ctx.Request.Path.StartsWithSegments("/connect/par"))
+            {
+                ctx.Response.StatusCode = StatusCodes.Status201Created;
+                ctx.Response.ContentType = "application/json";
+                await ctx.Response.WriteAsync($"{{\"request_uri\":\"{requestUri}\",\"expires_in\":60}}");
+            }
+            else
+            {
+                requestUriSeenByOpenIddict = ctx.Request.Query["request_uri"];
+            }
+        };
+        var middleware = new OidcTenantResolutionMiddleware(next,
+            NullLogger<OidcTenantResolutionMiddleware>.Instance, Options.Create(new OctoSystemConfiguration()));
+
+        var par = FormRequest("/connect/par", ("client_id", "x"), ("acr_values", "tenant:child-a"));
+        par.Items[InfrastructureCommon.TenantIdName] = "child-a";
+        par.RequestServices = ServicesWithoutTenants();
+        par.Response.Body = new MemoryStream();
+        await middleware.InvokeAsync(par);
+        par.Response.Body.Position = 0;
+        var marked = System.Text.Json.Nodes.JsonNode.Parse(par.Response.Body)!["request_uri"]!.GetValue<string>();
+
+        OidcTenantMarker.TryDecodeRequestUri(marked, out var tenantId, out var scope, out var original).Should().BeTrue();
+        tenantId.Should().Be("child-a");
+        scope.Should().BeNull();
+        original.Should().Be(requestUri);
+
+        var authorize = new DefaultHttpContext();
+        authorize.Request.Method = "GET";
+        authorize.Request.Path = "/connect/authorize";
+        authorize.Request.QueryString = new QueryString($"?client_id=x&request_uri={Uri.EscapeDataString(marked)}");
+        authorize.Response.Body = new MemoryStream();
+        // The tenant repository lookup needs the system context; this test stops at the query rewrite.
+        authorize.RequestServices = ServicesWithoutTenants();
+        await middleware.InvokeAsync(authorize);
+
+        requestUriSeenByOpenIddict.Should().Be(requestUri, "OpenIddict only ever sees the value it issued");
     }
 
     [Fact]
@@ -542,11 +641,5 @@ public class OidcTenantResolutionMiddlewareTests
 
         authorize.Response.StatusCode.Should().Be(StatusCodes.Status302Found);
         authorize.Response.Headers.Location.ToString().Should().NotContain("scopeTenantId=");
-    }
-
-    [Fact]
-    public void ScopeMapKey_IsDistinctFromTheTenantKey()
-    {
-        OidcTenantResolutionMiddleware.ScopeMapKey("urn:x").Should().Be("scope:urn:x");
     }
 }
