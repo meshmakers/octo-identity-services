@@ -3,6 +3,7 @@ using IdentityServices.IntegrationTests.Configuration;
 using IdentityServices.IntegrationTests.Fixtures;
 using MassTransit;
 using Meshmakers.Octo.Backend.IdentityServices.Authorization.RoleChange;
+using Meshmakers.Octo.Backend.IdentityServices.Configuration;
 using Meshmakers.Octo.Common.DistributionEventHub;
 using Meshmakers.Octo.Common.DistributionEventHub.Services;
 using Meshmakers.Octo.Runtime.Contracts.MongoDb;
@@ -13,7 +14,6 @@ using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.AspNetCore.TestHost;
 using Microsoft.Extensions.Configuration;
-using Microsoft.Extensions.Configuration.Json;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Hosting;
@@ -225,30 +225,6 @@ public class CustomWebApplicationFactory : WebApplicationFactory<Program>, IAsyn
     /// <summary>AB#8341: the source tenant grant policy of this host; tests permit the pairs they arrange.</summary>
     public Helpers.TestSourceTenantGrantPolicy SourceTenantGrantPolicy { get; } = new();
 
-    /// <summary>
-    ///     File name of the user secrets file (<c>dotnet user-secrets</c>).
-    /// </summary>
-    internal const string UserSecretsFileName = "secrets.json";
-
-    /// <summary>
-    ///     AB#8949: the host must not read the developer's user secrets. <c>WebApplication.CreateBuilder</c> adds them in
-    ///     the Development environment the tests use, and <c>Program</c> adds them once more. A secret such as
-    ///     <c>Identity:DataProtectionKeysPath</c> changed the behaviour of the host on a developer machine only (it imported
-    ///     the keys of that folder), so the tests passed in CI and failed locally. The tests depend on their own
-    ///     configuration only.
-    /// </summary>
-    private static void RemoveUserSecrets(IConfigurationBuilder config)
-    {
-        var userSecrets = config.Sources
-            .OfType<JsonConfigurationSource>()
-            .Where(s => string.Equals(s.Path, UserSecretsFileName, StringComparison.OrdinalIgnoreCase))
-            .ToList();
-        foreach (var source in userSecrets)
-        {
-            config.Sources.Remove(source);
-        }
-    }
-
     protected override void ConfigureWebHost(IWebHostBuilder builder)
     {
         Console.Error.WriteLine("[WebFactory] ConfigureWebHost called");
@@ -261,11 +237,15 @@ public class CustomWebApplicationFactory : WebApplicationFactory<Program>, IAsyn
         // Use Development environment to skip production-only services (like AddOctoSigningCredential)
         builder.UseEnvironment("Development");
 
+        // AB#8949: no user secrets of the developer. A host setting reaches Program as a command-line argument, so Program
+        // removes them right after CreateBuilder, before it reads anything while it registers the services (a secret such as
+        // Identity:DataProtectionKeysPath made tests fail on developer machines only). Inherited by WithWebHostBuilder.
+        builder.UseSetting(UserSecretsConfiguration.DisableSettingKey, "true");
+
         builder.ConfigureAppConfiguration((_, config) =>
         {
             Console.Error.WriteLine("[WebFactory] ConfigureAppConfiguration called");
             Console.Error.Flush();
-            RemoveUserSecrets(config);
             config.AddJsonFile("appsettings.test.json", optional: true);
 
             // Disable RabbitMQ/Distribution Event Hub for tests - must be set in configuration

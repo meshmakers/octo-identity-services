@@ -69,6 +69,14 @@ try
         WebRootPath = "wwwroot",
     });
 
+    // AB#8949: a host started with DisableUserSecrets (the integration test host) reads no user secrets. Removed here, before
+    // anything is read while the services are registered; CreateBuilder added them in the Development environment.
+    var userSecretsDisabled = UserSecretsConfiguration.IsDisabled(builder.Configuration);
+    if (userSecretsDisabled)
+    {
+        UserSecretsConfiguration.RemoveFrom(builder.Configuration);
+    }
+
     builder.AddObservability()
         .AddSystemContextHealthCheck();
     // AB#8019: the identity service's own meter (client mirror reconciliation). An unregistered meter drops every
@@ -86,8 +94,11 @@ try
 
     // additional providers here needed.
     // allow environment variables to override values from other providers.
-    builder.Configuration.AddEnvironmentVariables("OCTO_").AddCommandLine(args)
-        .AddUserSecrets(typeof(Program).Assembly, true);
+    builder.Configuration.AddEnvironmentVariables("OCTO_").AddCommandLine(args);
+    if (!userSecretsDisabled)
+    {
+        builder.Configuration.AddUserSecrets(typeof(Program).Assembly, true);
+    }
 
 
     builder.Services.AddOemServices(builder.Configuration);

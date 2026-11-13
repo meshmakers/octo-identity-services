@@ -1,4 +1,5 @@
 using FluentAssertions;
+using Meshmakers.Octo.Backend.IdentityServices.Configuration;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Configuration.Json;
 using Microsoft.Extensions.DependencyInjection;
@@ -35,7 +36,9 @@ public class TestHostConfigurationTests(CustomWebApplicationFactory factory) : I
 
     /// <summary>
     ///     AB#8949: <c>WebApplication.CreateBuilder</c> (Development environment) and <c>Program</c> both add the user secrets of
-    ///     the service. A developer's secret (e.g. <c>Identity:DataProtectionKeysPath</c>) must not change the test host.
+    ///     the service. A developer's secret (e.g. <c>Identity:DataProtectionKeysPath</c>) must not change the test host. Only
+    ///     <c>Program</c> removes them (the factory passes the host setting), and it does so only when the setting has arrived
+    ///     before it reads anything; <c>UserSecretsConfigurationTests</c> covers a value read while the services are registered.
     /// </summary>
     [Fact]
     public void TheTestHost_DoesNotReadUserSecrets()
@@ -57,7 +60,6 @@ public class TestHostConfigurationTests(CustomWebApplicationFactory factory) : I
     private static List<FileConfigurationSource> UserSecretsSources(IConfigurationRoot root) =>
         root.Providers.OfType<JsonConfigurationProvider>()
             .Select(p => p.Source)
-            .Where(s => string.Equals(s.Path, CustomWebApplicationFactory.UserSecretsFileName,
-                StringComparison.OrdinalIgnoreCase))
+            .Where(UserSecretsConfiguration.IsUserSecrets)
             .ToList();
 }
