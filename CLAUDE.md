@@ -2008,9 +2008,9 @@ Because grants live per tenant, the `/connect/token` request must be wired to th
 
 When backend OIDC clients (built on `Microsoft.AspNetCore.Authentication.OpenIdConnect` .NET 9+) authenticate, they automatically use **PAR (RFC 9126)** if the IdP advertises a `pushed_authorization_request_endpoint` — which OpenIddict does (as Duende did before). This means the authorization parameters (including `acr_values=tenant:{tenantId}`) are POSTed to `/connect/par`, and the subsequent browser redirect to `/connect/authorize` contains only `request_uri=urn:ietf:params:oauth:request_uri:...` — no `acr_values` on the URL.
 
-`OidcTenantResolutionMiddleware` handles this in two stages:
-1. On `POST /connect/par`, it reads `acr_values` from the form body, then wraps the response to capture the issued `request_uri` from the JSON body, and stores the `request_uri → tenantId` mapping (5-minute lifetime)
-2. On `GET /connect/authorize?request_uri=...`, it looks up the tenant from this mapping before falling back to query-string `acr_values`
+`OidcTenantResolutionMiddleware` handles this in two stages (AB#7892, no process-local state):
+1. On `POST /connect/par`, it reads `acr_values` from the form body and marks the issued `request_uri` in the JSON response with the tenant (`urn:ietf:params:oauth:request_uri:{tenantId}:{reference}`; a scope-only PAR carries `tenant_scope.{scopeTenantId}` instead, AB#5311)
+2. On `GET /connect/authorize?request_uri=...`, it reads the tenant from the marker and removes the marker from the query before OpenIddict sees it; fallback query-string `acr_values`
 
 Without this, every PAR-using client would land on `/tenant-discovery` because the URL no longer carries `acr_values`.
 
@@ -2018,17 +2018,26 @@ Without this, every PAR-using client would land on `/tenant-discovery` because t
 
 The `/connect/token` endpoint has no `{tenantId}` route segment. To ensure `OctoUserStore`, `ClientStore`, and other per-tenant stores use the correct tenant database, `OidcTenantResolutionMiddleware` resolves the tenant per grant type. All capture stages work against OpenIddict responses (golden-verified):
 
-**Authorization codes:**
-1. During `/connect/authorize`, the middleware wraps the response body and captures the authorization code, mapping it to the tenant in an in-memory `ConcurrentDictionary` (10-minute expiry). Supports both `response_mode=query` (code from 302 Location header) and `response_mode=form_post` (code from hidden form field in 200 HTML response, used by server-side OIDC clients like the Asset Repository Services' GraphQL Playground)
-2. During `/connect/token` with `grant_type=authorization_code`, the middleware reads `code` from the form body and looks up the tenant
+**No process-local state — safe with several replicas and across restarts (AB#7891, AB#7892).** Every value a later
+request sends back carries its tenant (`OidcTenantMarker`, `{tenantId}:{value}`): the middleware marks it on the response
+that hands it out and strips the marker from the request before OpenIddict reads the form. The marker is not signed on
+purpose — it only selects the tenant token store; a changed marker points to a store without the value (`invalid_grant`).
+Nothing extra is stored, so no mapping outlives its token. Rationale per entry type: code comment at the top of
+`OidcTenantResolutionMiddleware` and `docs/authentication.md` ("OIDC Endpoint Tenant Resolution").
 
-**Refresh tokens (in-memory only, preferring `acr_values`):**
-1. Clients that know their tenant (the SPAs) send `acr_values=tenant:{tenantId}` with every refresh request — this is the preferred, restart-safe path
-2. As a fallback, when `/connect/token` returns a new refresh token, the middleware captures it in the in-memory cache (30-day expiry) and looks it up on the next refresh
+**Authorization codes:** marked on the `/connect/authorize` response — `Location` query or fragment
+(`response_mode=query`/`fragment`) or the hidden form field (`response_mode=form_post`, e.g. the Asset Repository GraphQL
+Playground); on `/connect/token` with `grant_type=authorization_code` the tenant comes from the marker. An unmarked code
+(issued before AB#7892) uses the system tenant — before AB#7892 a missing map entry on a second replica made the client
+lookup run in the system tenant: `401 invalid_client` and a login loop for sub-tenant clients (test-2, 2026-11-12).
 
-The refresh-token→tenant mapping is **in-memory only** — there is no persistent SHA-256 hash fallback anymore (that mechanism was tied to the retired centralized `RtPersistedGrant` storage).
+**Refresh tokens:** marked in every `/connect/token` response that carries one (rotated tokens too). On refresh the marker
+wins over `acr_values` (it names the store the token lives in); an unmarked token falls back to `acr_values`, else the
+system tenant. `/connect/revocation` and `/connect/introspect` strip the marker of the `token` field and use its tenant.
 
-**Device flow:** the middleware captures `user_code` → tenant on `/connect/deviceauthorization` and resolves `/connect/deviceverification` requests from it. The `verification_uri` in device authorization responses is rewritten to the SPA page `/{tenant}/device` with `?userCode=`.
+**Device flow (AB#7891):** the `device_code` carries the tenant marker; `/connect/deviceverification` gets the tenant hint
+from the device page (`acr_values=tenant:{tenantId}`). The `verification_uri` in device authorization responses is
+rewritten to the SPA page `/{tenant}/device` with `?userCode=`.
 
 **`client_credentials` and token exchange:** `acr_values=tenant:{tenantId}` from the form body — required.
 
@@ -2039,7 +2048,7 @@ Auth cookies are scoped per tenant via `TenantCookieManager` (`src/IdentityServi
 Key components:
 - **`OctoAuthSchemes`** (`src/Authentication/`): the cookie schemes — `Identity.Application` (tenant-scoped by `TenantCookieManager`) and `Identity.External`. The Duende `idsrv` / `idsrv.session` / `idsrv.external` cookies no longer exist.
 - **`TenantCookieManager`**: Custom `ICookieManager` that scopes the `Identity.Application` cookie per tenant
-- **`OidcTenantResolutionMiddleware`**: Resolves tenant for `/connect/*` OIDC endpoints from `acr_values`, `id_token_hint`, user_code, or authorization code → tenant mapping
+- **`OidcTenantResolutionMiddleware`**: Resolves tenant for `/connect/*` OIDC endpoints from `acr_values`, `id_token_hint`, or the tenant marker of codes, refresh tokens and PAR `request_uri`s (`OidcTenantMarker`, no process-local state, AB#7892)
 - **`OctoTokenClaimsService`**: Adds `tenant_id` and `allowed_tenants` claims to tokens (used by endsession for cookie resolution and by backend middleware for tenant authorization)
 
 See `docs/authentication.md` for detailed architecture and edge cases.
@@ -2685,7 +2694,7 @@ The CI/CD pipeline will fail if there are any lint errors. Common issues:
 ### Device flow loop guard (AB#6993)
 
 `/{tenant}/device/confirm` loads `GET /connect/deviceverification` (tenant-free URL; the tenant comes
-from the in-memory `user_code` -> tenant map of `OidcTenantResolutionMiddleware`, fallback system
+from the tenant hint `acr_values=tenant:{tenantId}` the page sends, AB#7891; fallback system
 tenant). On 401 it navigates **once** to `/{tenant}/login` with a `loginAttempted=1` marker inside the
 `returnUrl`; the login page's "already signed in" shortcut (AB#4961) sends an authenticated user straight
 back. If the endpoint still answers 401 with the marker present, the page stops and shows

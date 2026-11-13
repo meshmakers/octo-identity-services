@@ -74,7 +74,7 @@ The issued access token contains tenant-specific claims:
 
 | Component | Responsibility |
 |-----------|---------------|
-| `OidcTenantResolutionMiddleware` | Parses `acr_values=tenant:{tenantId}` from the authorize request, sets the tenant context, and captures authorization codes from both 302 redirects and `form_post` HTML responses |
+| `OidcTenantResolutionMiddleware` | Parses `acr_values=tenant:{tenantId}` from the authorize request, sets the tenant context, and marks authorization codes with the tenant in both redirects and `form_post` HTML responses (AB#7892) |
 | `TenantLoginRedirectMiddleware` | Rewrites the login redirect from `/System/login` to `/{tenantId}/login` |
 | `UserProfileService` | Adds `tenant_id` and `allowed_tenants` claims to the issued token |
 | `OctoUserStore` | Resolves user identity and roles from the correct tenant database |
@@ -105,13 +105,12 @@ The client must be provisioned in **each tenant** where users should be able to 
 
 ## 7. Refresh Token Handling
 
-When `AllowOfflineAccess: true` is configured on the client, refresh tokens are issued alongside access tokens. The Identity Server tracks the tenant context for refresh tokens:
+When `AllowOfflineAccess: true` is configured on the client, refresh tokens are issued alongside access tokens. The refresh token carries its tenant (AB#7892):
 
-1. During token issuance, `OidcTenantResolutionMiddleware` captures the refresh token and maps it to the tenant in an in-memory cache (30-day expiry)
-2. `PersistentGrantStore` stores the tenant ID in the `Description` field of the persisted grant
-3. On refresh, the middleware resolves the tenant from the cache or falls back to the persistent grant store
+1. Every `/connect/token` response that carries a refresh token returns it as `{tenantId}:{token}` (`OidcTenantMarker`)
+2. On refresh, `OidcTenantResolutionMiddleware` takes the tenant from that marker and strips it before OpenIddict reads the form; refresh tokens are persisted per tenant (`RtOAuthToken`)
 
-This ensures refresh token exchanges continue to use the correct tenant context, even after Identity Server restarts.
+This ensures refresh token exchanges use the correct tenant context on any identity replica and after restarts, also for clients that send no `acr_values`.
 
 ## 8. Multi-Tenant Considerations
 

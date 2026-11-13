@@ -305,8 +305,9 @@ Phases 1–6 (AB#4990–AB#4996) are implemented on the feature branch; the oper
 - **Grant storage went per-tenant** (open question (a) resolved the other way): the OpenIddict
   authorization/token stores persist in new per-tenant CK types `RtOAuthAuthorization`/`RtOAuthToken`
   (System.Identity-2.12.0, migration 21→22), not in the system-tenant `RtPersistedGrant`. The
-  refresh-token→tenant resolution in `OidcTenantResolutionMiddleware` is in-memory only, preferring
-  `acr_values` sent by clients (no persistent SHA-256 hash fallback).
+  refresh-token→tenant resolution in `OidcTenantResolutionMiddleware` was in-memory only, preferring
+  `acr_values` sent by clients (no persistent SHA-256 hash fallback). Since AB#7892 the refresh token (like
+  authorization codes and PAR `request_uri`s) carries its tenant itself (`OidcTenantMarker`) — no in-memory state.
 - **No separate encryption certificate** (open question (b)): the static PKCS#12 signing certificate
   doubles as the encryption credential for OpenIddict-internal token payloads;
   `DisableAccessTokenEncryption` keeps access tokens as plain signed JWTs and the JWKS unchanged.
