@@ -288,10 +288,13 @@ public class UsersController : ControllerBase
     ///     The endpoint calls <c>User.CreateUser</c> in-process (the password never reaches the broker, also while
     ///     <c>Methods:Identity:EnablePasswordMethods</c> keeps the method off the bus): normalised user name and e-mail, user
     ///     validators, password policy, welcome notification, one <c>Identity.Method</c> audit event. Routes, bodies and status
-    ///     codes are unchanged; see the parity table in the identity <c>CLAUDE.md</c>.
+    ///     codes are unchanged; see the parity table in the identity <c>CLAUDE.md</c>. Deprecated (AB#8860, wave
+    ///     <c>IdentityUsersPassword</c>): callers use <c>User.CreateUser</c>.
     /// </remarks>
     [HttpPost]
     [Authorize(IdentityServiceConstants.IdentityUserAdministrationWritePolicy)]
+    [OctoRestDeprecated(Wave = IdentityRestDeprecation.UsersPasswordWave,
+        Link = IdentityRestDeprecation.UserCreateUserMethodLink)]
     [EndpointSummary("Creates a new user.")]
     [EndpointDescription("Refuses a user name or an e-mail address another user of the tenant already has (case-insensitive) " +
                          "with 409 application/problem+json, code USER_ALREADY_EXISTS, field userName or email - the same " +
@@ -461,11 +464,14 @@ public class UsersController : ControllerBase
     ///     <c>Methods:Identity:EnablePasswordMethods</c> keeps the method off the bus): password policy, the lockout is lifted,
     ///     security stamp rotated, refresh tokens and authorizations revoked, one <c>Identity.Method</c> audit event. After a
     ///     success the endpoint sends the password-reset notification as before - until the method sends it itself (AB#7775,
-    ///     then this call goes; a test counts exactly one notification per reset).
+    ///     then this call goes; a test counts exactly one notification per reset). Deprecated (AB#8860, wave
+    ///     <c>IdentityUsersPassword</c>): callers use <c>User.ResetPassword</c>.
     /// </remarks>
     [HttpPost]
     [Route("ResetPassword")]
     [Authorize(IdentityServiceConstants.IdentityUserAdministrationWritePolicy)]
+    [OctoRestDeprecated(Wave = IdentityRestDeprecation.UsersPasswordWave,
+        Link = IdentityRestDeprecation.UserResetPasswordMethodLink)]
     [RefuseCredentialInQuery("password")]
     [EndpointSummary("Resets the password of an user.")]
     [EndpointDescription("Runs the CK method User.ResetPassword-1: also lifts a lockout of the user and ends the user's " +

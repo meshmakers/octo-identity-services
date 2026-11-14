@@ -55,7 +55,16 @@ Notable changes of the OctoMesh identity services. The CK model `System.Identity
   no `Sunset` value is configured and no `Sunset` header is sent until then). `since` is set for all clusters in
   `octo-mesh-deployment` and takes effect with each cluster's next deploy; until then a cluster sends no `Deprecation` header. The endpoints are removed only after the sunset and only when the call counts show that
   the clients have switched. Behaviour, routes, bodies and status codes are unchanged. `POST users` and
-  `POST users/ResetPassword` are not part of this wave; they follow with AB#8418 in a wave of their own.
+  `POST users/ResetPassword` are not part of this wave; they have a wave of their own (next entry).
+- **Identity password wave of the REST user endpoints (AB#8860).** `POST users` and `POST users/ResetPassword` are deprecated
+  in favour of the methods `User.CreateUser` and `User.ResetPassword` (GraphQL `systemIdentityUsers { … }`, SDK
+  `RtUserMethodClient.CreateUserAsync` / `ResetPasswordAsync`). Same mechanics as wave 1: `Link` header to the method
+  documentation (`…/identityService/methods#usercreateuser`, `#userresetpassword`), OpenAPI `deprecated: true`, counter
+  `octo.rest.deprecated.calls`; no header or label carries the user name, e-mail or password. Own wave, because it starts with
+  another release: `RestDeprecation:Waves:IdentityUsersPassword:Since|Sunset` (Helm
+  `restDeprecation.waves.IdentityUsersPassword.since|sunset`). `since` = delivery day of the release with AB#8418, set by Ops at
+  rollout; sunset to be announced, as for wave 1. Without configured dates the endpoints answer exactly as before. The REST
+  reset still sends the password-reset e-mail; the method sends none until AB#7775.
 
 ### Fixed
 

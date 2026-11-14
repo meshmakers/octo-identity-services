@@ -1,7 +1,7 @@
 namespace Meshmakers.Octo.Backend.IdentityServices.TenantApi.v1;
 
 /// <summary>
-///     Waves and documentation links of the deprecated identity REST endpoints (AB#8415, F5.1).
+///     Waves and documentation links of the deprecated identity REST endpoints (AB#8415, AB#8860, F5.1).
 /// </summary>
 /// <remarks>
 ///     <para>
@@ -20,6 +20,13 @@ internal static class IdentityRestDeprecation
     /// </summary>
     public const string UsersWave1 = "IdentityUsers1";
 
+    /// <summary>
+    ///     Identity wave of the user endpoints that carry a password (AB#8860): <c>POST users</c> and
+    ///     <c>POST users/ResetPassword</c>. A wave of its own because it starts with another release than wave 1: the
+    ///     release that delivers AB#8418 (the first-party clients call <c>User.CreateUser</c> / <c>User.ResetPassword</c>).
+    /// </summary>
+    public const string UsersPasswordWave = "IdentityUsersPassword";
+
     /// <summary>Documentation of <c>User.SetRoles</c>, <c>User.AddRole</c> and <c>User.RemoveRole</c>.</summary>
     public const string UserRoleMethodsLink =
         "https://docs.meshmakers.cloud/docs/technologyGuide/identityService/methods#user-roles";
@@ -27,4 +34,12 @@ internal static class IdentityRestDeprecation
     /// <summary>Documentation of <c>User.Merge</c>.</summary>
     public const string UserMergeMethodLink =
         "https://docs.meshmakers.cloud/docs/technologyGuide/identityService/methods#usermerge";
+
+    /// <summary>Documentation of <c>User.CreateUser</c>.</summary>
+    public const string UserCreateUserMethodLink =
+        "https://docs.meshmakers.cloud/docs/technologyGuide/identityService/methods#usercreateuser";
+
+    /// <summary>Documentation of <c>User.ResetPassword</c>.</summary>
+    public const string UserResetPasswordMethodLink =
+        "https://docs.meshmakers.cloud/docs/technologyGuide/identityService/methods#userresetpassword";
 }
