@@ -1,5 +1,3 @@
-using System.Collections.Concurrent;
-using System.Diagnostics.Metrics;
 using System.Net;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
@@ -19,7 +17,7 @@ namespace IdentityServices.IntegrationTests.Api.TenantApi;
 ///     <c>POST users/{userName}/merge</c> carry the deprecation headers on every response, are deprecated in the OpenAPI
 ///     document (through the endpoint metadata) and are counted per endpoint template and client id. The dates come from
 ///     <c>RestDeprecation:Waves:IdentityUsers1</c>; without them only the <c>Link</c> header is sent. <c>POST users</c> and
-///     <c>POST users/ResetPassword</c> are not part of this story (AB#8418) and stay unmarked.
+///     <c>POST users/ResetPassword</c> have a wave of their own (AB#8860, <see cref="UsersPasswordRestDeprecationTests" />).
 /// </summary>
 public class UsersRestDeprecationTests : IntegrationTestBase, IDisposable
 {
@@ -138,10 +136,9 @@ public class UsersRestDeprecationTests : IntegrationTestBase, IDisposable
 
         var get = await client.GetAsync(TenantApiUrl($"users/nouser_{Guid.NewGuid():N}"),
             TestContext.Current.CancellationToken);
-        // POST users (AB#8418) is not deprecated yet: an invalid body is enough to see its headers.
-        var create = await client.PostAsJsonAsync(TenantApiUrl("users"), new { }, TestContext.Current.CancellationToken);
+        var getAll = await client.GetAsync(TenantApiUrl("users"), TestContext.Current.CancellationToken);
 
-        foreach (var response in new[] { get, create })
+        foreach (var response in new[] { get, getAll })
         {
             response.Headers.Contains("Deprecation").Should().BeFalse();
             response.Headers.Contains("Sunset").Should().BeFalse();
@@ -155,14 +152,14 @@ public class UsersRestDeprecationTests : IntegrationTestBase, IDisposable
     ///     identity OpenAPI document (package XML docs are not in the test output).
     /// </remarks>
     [Fact]
-    public void ExactlyTheFourWave1Endpoints_CarryTheAttribute_WithTheirLinks()
+    public void ExactlyTheIdentityWaveEndpoints_CarryTheAttribute_WithTheirLinks()
     {
         var marked = DatedHost().Services.GetRequiredService<EndpointDataSource>().Endpoints
             .OfType<RouteEndpoint>()
             .Select(e => (Endpoint: e, Attribute: e.Metadata.GetMetadata<OctoRestDeprecatedAttribute>()))
             .Where(e => e.Attribute != null)
             .Select(e => $"{string.Join(",", e.Endpoint.Metadata.GetMetadata<IHttpMethodMetadata>()!.HttpMethods)} " +
-                         $"{e.Endpoint.RoutePattern.RawText![(e.Endpoint.RoutePattern.RawText!.IndexOf("/Users/", StringComparison.OrdinalIgnoreCase) + 1)..]} " +
+                         $"{e.Endpoint.RoutePattern.RawText![(e.Endpoint.RoutePattern.RawText!.IndexOf("/Users", StringComparison.OrdinalIgnoreCase) + 1)..]} " +
                          $"{e.Attribute!.Wave} {e.Attribute.Link[(e.Attribute.Link.IndexOf('#') + 1)..]}")
             .ToList();
 
@@ -170,7 +167,9 @@ public class UsersRestDeprecationTests : IntegrationTestBase, IDisposable
             "PUT Users/{userName}/roles IdentityUsers1 user-roles",
             "PUT Users/{userName}/roles/{roleName} IdentityUsers1 user-roles",
             "DELETE Users/{userName}/roles/{roleName} IdentityUsers1 user-roles",
-            "POST Users/{userName}/merge IdentityUsers1 usermerge");
+            "POST Users/{userName}/merge IdentityUsers1 usermerge",
+            "POST Users IdentityUsersPassword usercreateuser",
+            "POST Users/ResetPassword IdentityUsersPassword userresetpassword");
     }
 
     private WebApplicationFactory<Program> DatedHost() => Host((Since, Sunset));
@@ -210,40 +209,4 @@ public class UsersRestDeprecationTests : IntegrationTestBase, IDisposable
         };
         return await client.SendAsync(request, TestContext.Current.CancellationToken);
     }
-
-    /// <summary>Collects the measurements of <c>octo.rest.deprecated.calls</c> while it lives.</summary>
-    private sealed class DeprecatedCallCollector : IDisposable
-    {
-        private readonly MeterListener _listener = new();
-        private readonly ConcurrentQueue<Measurement> _measurements = new();
-
-        public DeprecatedCallCollector()
-        {
-            _listener.InstrumentPublished = (instrument, listener) =>
-            {
-                if (instrument.Meter.Name == "Meshmakers.Octo.RestDeprecation" &&
-                    instrument.Name == "octo.rest.deprecated.calls")
-                {
-                    listener.EnableMeasurementEvents(instrument);
-                }
-            };
-            _listener.SetMeasurementEventCallback<long>((_, value, tags, _) =>
-            {
-                var dictionary = new Dictionary<string, string>();
-                foreach (var tag in tags)
-                {
-                    dictionary[tag.Key] = tag.Value?.ToString() ?? string.Empty;
-                }
-
-                _measurements.Enqueue(new Measurement(value, dictionary));
-            });
-            _listener.Start();
-        }
-
-        public IReadOnlyList<Measurement> Snapshot() => _measurements.ToArray();
-
-        public void Dispose() => _listener.Dispose();
-    }
-
-    private sealed record Measurement(long Value, IReadOnlyDictionary<string, string> Tags);
 }
