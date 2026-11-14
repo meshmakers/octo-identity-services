@@ -178,13 +178,10 @@ public class UsersRestDeprecationTests : IntegrationTestBase, IDisposable
     {
         var host = Factory.WithWebHostBuilder(b =>
         {
-            if (dates != null)
-            {
-                b.UseSetting($"RestDeprecation:Waves:{Wave}:Since", dates.Value.Since);
-                // No sunset: set the key explicitly to empty so that a Sunset configured in the environment
-                // (OCTO_RestDeprecation__Waves__IdentityUsers1__Sunset) cannot reach the since-only host.
-                b.UseSetting($"RestDeprecation:Waves:{Wave}:Sunset", dates.Value.Sunset ?? string.Empty);
-            }
+            // Every key is set explicitly (empty = no date), so that dates configured in the environment
+            // (OCTO_RestDeprecation__Waves__<wave>__Since|Sunset) cannot reach a host of this test.
+            b.UseSetting($"RestDeprecation:Waves:{Wave}:Since", dates?.Since ?? string.Empty);
+            b.UseSetting($"RestDeprecation:Waves:{Wave}:Sunset", dates?.Sunset ?? string.Empty);
         });
         _hosts.Add(host);
         return host;
