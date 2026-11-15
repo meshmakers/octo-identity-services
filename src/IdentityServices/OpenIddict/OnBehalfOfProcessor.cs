@@ -3,6 +3,7 @@ using IdentityServerPersistence.Services;
 using Meshmakers.Common.Shared;
 using Meshmakers.Octo.Backend.IdentityServices.Services;
 using Meshmakers.Octo.Services.Infrastructure;
+using Meshmakers.Octo.Services.Infrastructure.TenantGeneration;
 using Microsoft.Extensions.Options;
 using Microsoft.IdentityModel.JsonWebTokens;
 using Microsoft.IdentityModel.Tokens;
@@ -37,7 +38,9 @@ namespace Meshmakers.Octo.Backend.IdentityServices.OpenIddict;
 ///     <para>
 ///         <b>Same tenant only (v1).</b> The tenant in <c>acr_values</c>, the <c>tenant_id</c> of
 ///         the subject token and the tenant the request was wired to must all agree; any divergence
-///         fails closed with <c>invalid_target</c>. Cross-tenant identity movement is what the
+///         fails closed with <c>invalid_target</c>. A subject token of an earlier tenant with the same id is
+///         refused with <c>invalid_grant</c> (AB#9017, <see cref="IGrantTenantGenerationGuard" />).
+///         Cross-tenant identity movement is what the
 ///         RFC 8693 exchange grant (<see cref="TenantExchangeProcessor" />) is for.
 ///     </para>
 ///     <para>
@@ -73,6 +76,7 @@ public class OnBehalfOfProcessor(
     IImpersonatedIdentityResolver impersonatedIdentityResolver,
     IHttpContextAccessor httpContextAccessor,
     IIdentityAuditService auditService,
+    IGrantTenantGenerationGuard grantTenantGenerationGuard,
     ILogger<OnBehalfOfProcessor> logger)
 {
     /// <summary>The RFC 8693 token type identifier for an access token.</summary>
@@ -223,6 +227,23 @@ public class OnBehalfOfProcessor(
                 "cross-tenant delegation is not supported");
             return DelegationOutcome.Failed(Errors.InvalidTarget,
                 "the subject_token belongs to a different tenant; delegation is same-tenant only");
+        }
+
+        // (c1) AB#9017: the user's access token must belong to the current tenant with its tenant_id, not to an
+        //      earlier tenant with the same id. Before the actor check and the role resolution, for plain and
+        //      actor-delegated on-behalf-of alike.
+        var generationCheck = await grantTenantGenerationGuard.CheckAsync(subjectTenantId,
+            TenantGenerationClaim.FromPrincipal(new System.Security.Claims.ClaimsPrincipal(validation.ClaimsIdentity)),
+            GrantTenantGenerationGrantTypes.OnBehalfOf,
+            claims.FirstOrDefault(c => c.Type == Claims.ClientId)?.Value, cancellationToken);
+        if (generationCheck.IsRefused)
+        {
+            logger.LogWarning(
+                "Delegation rejected: subject_token of user '{UserSubjectId}' (tenant '{TenantId}') failed the tenant generation check ({Outcome})",
+                userSubjectId, subjectTenantId, generationCheck.Outcome);
+            await RaiseFailureAsync(actorClientId, userSubjectId, targetTenantId,
+                $"subject token tenant generation {generationCheck.Outcome}");
+            return DelegationOutcome.Failed(generationCheck.Error!, generationCheck.ErrorDescription!);
         }
 
         // (c2) AB#5114: when requested_client_id names a service account other than the

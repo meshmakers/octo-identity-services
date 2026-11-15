@@ -223,6 +223,9 @@ try
     // AB#5032: lets an operator narrow the client-credentials exemption of
     // UseOctoTenantAuthorization() per environment (OCTO_TENANTAUTHORIZATION__…). The defaults
     // reproduce the previous behaviour and only add the audit log.
+    // AB#9017: since identity labels validated bearer identities "Bearer" (ConfigureJwtBearerOptions), this middleware
+    // really runs on identity's own API, with the library defaults (Enforce for user and service tokens). An operator can
+    // fall back to OCTO_TENANTAUTHORIZATION__USERTOKENENFORCEMENT / __SERVICETOKENENFORCEMENT=LogOnly per environment.
     builder.Services.AddOctoTenantAuthorization(builder.Configuration);
 
     // Service-managed Identity tenant seed: the single source of truth for Roles, OIDC
@@ -281,6 +284,12 @@ try
     builder.Services.AddScoped<IOctoTokenClaimsService, OctoTokenClaimsService>();
     builder.Services.AddScoped<TenantExchangeProcessor>();
     builder.Services.AddScoped<OnBehalfOfProcessor>();
+    // AB#9017: token exchange, on-behalf-of and the redemption of refresh tokens, codes and device codes refuse a
+    // subject token or grant of an earlier tenant with the same id. The check, its cached reader, the option
+    // TenantAuthorization:TenantGenerationEnforcement and the metric come from octo-common-services (AB#8999);
+    // AddOctoTenantGenerationCheck is idempotent (AddOctoServiceInfrastructure registers it too).
+    builder.Services.AddOctoTenantGenerationCheck();
+    builder.Services.AddSingleton<IGrantTenantGenerationGuard, GrantTenantGenerationGuard>();
     builder.Services.AddScoped<ImpersonationProcessor>();
     builder.Services.AddScoped<ClientCredentialsTenantProcessor>();
     builder.Services.AddScoped<IIdentityAuditService, IdentityAuditService>();

@@ -173,8 +173,8 @@ public class TenantGenerationClaimHttpTests : IntegrationTestBase
             ((int)authorize.StatusCode).Should().BeInRange(302, 303);
             var code = HttpUtility.ParseQueryString(authorize.Headers.Location!.Query)["code"];
             code.Should().NotBeNullOrEmpty();
-            (Factory.TenantLifecycleStore.ReadsOf(NormalizedSystemTenantId) - readsBefore).Should().Be(0,
-                "issuing the authorization code generates no access token, so nothing is read");
+            (Factory.TenantLifecycleStore.ReadsOf(NormalizedSystemTenantId) - readsBefore).Should().Be(1,
+                "issuing the authorization code reads once: the code stores the generation (AB#9017)");
 
             var http = CreateAnonymousClient();
             var redeemed = await PostTokenAsync(http, new Dictionary<string, string>
@@ -187,8 +187,8 @@ public class TenantGenerationClaimHttpTests : IntegrationTestBase
             }, ct);
             redeemed.StatusCode.Should().Be(HttpStatusCode.OK, "code redemption failed: {0}", redeemed.Raw);
 
-            (Factory.TenantLifecycleStore.ReadsOf(NormalizedSystemTenantId) - readsBefore).Should().Be(1,
-                "one lifecycle read for the redeemed access token");
+            (Factory.TenantLifecycleStore.ReadsOf(NormalizedSystemTenantId) - readsBefore).Should().Be(2,
+                "one lifecycle read for the redeemed access token (and the refresh token it issues)");
             var accessToken = redeemed.Body!["access_token"]!.GetValue<string>();
             DecodePayload(accessToken)["tenant_gen"]!.GetValue<string>().Should().Be(Generation1Ms);
             var idToken = DecodePayload(redeemed.Body["id_token"]!.GetValue<string>());
@@ -217,7 +217,7 @@ public class TenantGenerationClaimHttpTests : IntegrationTestBase
             refreshed.StatusCode.Should().Be(HttpStatusCode.OK, "refresh failed: {0}", refreshed.Raw);
             DecodePayload(refreshed.Body!["access_token"]!.GetValue<string>())["tenant_gen"]!.GetValue<string>()
                 .Should().Be(Generation2Ms, "the refresh grant stamps the generation read at issuance");
-            (Factory.TenantLifecycleStore.ReadsOf(NormalizedSystemTenantId) - readsBefore).Should().Be(2,
+            (Factory.TenantLifecycleStore.ReadsOf(NormalizedSystemTenantId) - readsBefore).Should().Be(3,
                 "the refresh grant reads the record once more; userinfo (token validation) reads nothing");
             DecodePayload(refreshed.Body["id_token"]!.GetValue<string>()).ContainsKey("tenant_gen").Should().BeFalse();
         }

@@ -36,6 +36,13 @@ internal class ConfigureJwtBearerOptions : IConfigureNamedOptions<JwtBearerOptio
         // the identity service cannot yet reach its own discovery endpoint.
         options.TokenValidationParameters.ValidIssuer = authorityUrl;
 
+        // AB#9017: label the validated identity "Bearer". TenantAuthorizationMiddleware (octo-common-services) only checks
+        // a principal whose Identity.AuthenticationType is "Bearer" (that keeps cookie principals out); the JWT handler
+        // otherwise leaves the framework default "AuthenticationTypes.Federation", which made the tenant check of
+        // identity's own API (route tenant vs. tenant_id, and the tenant_gen check of AB#8999) a silent no-op for every
+        // bearer request. Same setting as octo-mcp-service.
+        options.TokenValidationParameters.AuthenticationType = JwtBearerDefaults.AuthenticationScheme;
+
         // Disable inbound claim mapping so JWT claim types (sub, name, preferred_username,
         // tenant_id, etc.) are preserved as-is instead of being remapped to long XML namespaces.
         // This is required for controllers that read IdentityModel JwtClaimTypes from the token.

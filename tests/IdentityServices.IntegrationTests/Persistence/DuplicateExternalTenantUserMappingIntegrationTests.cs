@@ -140,6 +140,7 @@ public class DuplicateExternalTenantUserMappingIntegrationTests : IClassFixture<
             Substitute.For<IHttpContextAccessor>(),
             Substitute.For<IIdentityAuditService>(),
             Substitute.For<Meshmakers.Octo.Backend.IdentityServices.CrossTenantAudit.ICrossTenantGrantAuditRecorder>(),
+            Substitute.For<Meshmakers.Octo.Backend.IdentityServices.OpenIddict.IGrantTenantGenerationGuard>(),
             NullLogger<TenantExchangeProcessor>.Instance);
 
         var source = await processor.ResolveExchangeSourceAsync(

@@ -26,6 +26,34 @@ Notable changes of the OctoMesh identity services. The CK model `System.Identity
 
 ### Added
 
+- **Identity refuses token exchange, on-behalf-of, refresh tokens, authorization codes and device codes of an earlier
+  tenant with the same id (AB#9017, Security, AB#8970).** Refresh tokens, authorization codes and device codes now store
+  the tenant generation read at issuance as a private claim of the stored grant (`octo_grant_tenant_gen`, never in a token
+  or userinfo). On redemption, and for the `subject_token` of a token exchange or on-behalf-of request (its `tenant_gen`),
+  identity compares that value with the tenant's current generation through the AB#8999 check of octo-common-services.
+  The option is the one of the resource services, `TenantAuthorization:TenantGenerationEnforcement`
+  (`OCTO_TENANTAUTHORIZATION__TENANTGENERATIONENFORCEMENT`): `LogOnly` (default) only logs and counts
+  (`octo.tenant_auth.generation_checks`, `transport=grant`, `grant_type`), `Enforce` answers `invalid_grant` for a
+  mismatch or a missing value (`server_error` when the generation cannot be read); the system tenant and tenants without
+  a generation are never refused. A refused grant is not redeemed (a refresh token is not rotated) and a refused exchange
+  creates no shadow user. Issuing an authorization code or approving a device code now reads the tenant lifecycle record
+  once. **Client impact:** none in `LogOnly`; in `Enforce` users with a refresh token issued before this version sign in
+  again. **Rollout:** identity with this version on an environment before AB#9000 switches it to `Enforce`. Details:
+  `docs/authentication.md` § Grants of an earlier tenant.
+
+- **Identity's own API now runs the platform tenant check on bearer tokens (AB#9017, Security).** The JWT bearer
+  handler labelled validated identities `AuthenticationTypes.Federation`, and `TenantAuthorizationMiddleware` only checks
+  identities labelled `Bearer`, so the route-tenant check (and the `tenant_gen` check of AB#8999) never ran on a bearer
+  request to identity; only the role and own-tenant requirements of the identity API stopped foreign tokens.
+  `ConfigureJwtBearerOptions` now sets `TokenValidationParameters.AuthenticationType = "Bearer"`, like octo-mcp-service.
+  Identity uses the library defaults, `UserTokenEnforcement=Enforce` and `ServiceTokenEnforcement=Enforce`: a user or
+  service token of another tenant on a tenant route of identity is answered 403 (exceptions as everywhere:
+  `TenantAuthorization:CrossTenantServiceClientIds`, endpoints marked for parent-tenant administration). The identity API
+  tests already expected this (the test host labels its bearer principals `Bearer`). **Client impact:** a caller that
+  used a foreign-tenant token against identity gets 403; such a caller must use a token of the route tenant (token
+  exchange). **Fallback:** `OCTO_TENANTAUTHORIZATION__USERTOKENENFORCEMENT=LogOnly` /
+  `OCTO_TENANTAUTHORIZATION__SERVICETOKENENFORCEMENT=LogOnly` on identity only logs "would be denied".
+
 - **Every access token names the generation of its tenant: claim `tenant_gen` (AB#8997, Security, AB#8970).** The value is
   the `CreatedUtc` of the tenant's lifecycle record (system database) as Unix milliseconds, a decimal string such as
   `"1763193600123"`. Identity stamps it on the access tokens of every grant — authorization code, device code, refresh

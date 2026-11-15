@@ -1538,10 +1538,10 @@ tenant would otherwise still pass every `tenant_id` check until it expires (secu
 | Format | Unix milliseconds as a decimal **string**, invariant culture, e.g. `"1763193600123"`. `CreatedUtc` is normalised to UTC (`Utc` as is, `Local` converted, `Unspecified` taken as UTC — the rule of `CkMethodTenantLifecycleGeneration` in octo-common-services) and truncated to the millisecond (never rounded). |
 | Grants | All that issue an access token: authorization code, device code, refresh token, client credentials, RFC 8693 token exchange (OpenIddict issues it as the "issued token"), on-behalf-of, impersonation; a cross-tenant login or an exchange gets the generation of the target tenant in `tenant_id`. |
 | Refresh | Read again from the lifecycle record at issuance, never copied from the stored principal. |
-| Destination | Access token only — never the id token (also not for `AlwaysIncludeUserClaimsInIdToken` clients), never userinfo, never the principal stored in a code or refresh token. |
+| Destination | Access token only — never the id token (also not for `AlwaysIncludeUserClaimsInIdToken` clients), never userinfo, never the principal stored in a code or refresh token (the stored grant has its own private claim, see *Grants of an earlier tenant* below). |
 | No generation | No lifecycle record, or `CreatedUtc` unset (legacy tenants, a system tenant without a record): no claim, the token is issued. |
 | Lookup failure | The token request fails with `server_error` (HTTP 5xx); no token is issued without the claim for a tenant that may have one. The read runs **before** OpenIddict redeems the authorization code, device code or refresh token, so the client can retry with the same value. The ERROR log names the tenant and the exception type, never a token or secret. |
-| Cost | One lifecycle read per token request (none when only a code is issued); nothing on token validation. |
+| Cost | One lifecycle read per token request, and since AB#9017 one per issued authorization code or approved device code; nothing on token validation. |
 
 Implementation: `OctoTenantGenerationClaimHandler` (`src/IdentityServices/OpenIddict/`), three OpenIddict
 `ProcessSignInContext` handlers:
@@ -1568,6 +1568,84 @@ Tests:
   `CrossTenantSecondFactorTests.TokenExchange_ExchangedAccessToken_CarriesTheGenerationOfTheTargetTenant` (a real
   exchange into a child tenant).
 - On-behalf-of and cross-tenant login use the same handlers; their cases are unit tests.
+
+#### Grants of an earlier tenant (AB#9017)
+
+`tenant_gen` is read fresh at issuance, so without a further check an old credential turned into a new token stamped
+with the **new** generation: a token-exchange or on-behalf-of `subject_token`, or a refresh token, authorization code or
+device code, issued for tenant `X` before `X` was deleted and created again, would have bought an access token that
+resource services accept. Identity therefore checks the generation of the credential itself before it issues anything.
+
+| Grant | Generation checked | Against | On refusal |
+|---|---|---|---|
+| RFC 8693 token exchange | `tenant_gen` of the `subject_token` | current generation of the subject token's `tenant_id` (the source tenant) | `invalid_grant`, before the shadow user is looked up or created; failure audit event |
+| On-behalf-of (also through an actor, `requested_client_id`) | `tenant_gen` of the `subject_token` | current generation of its `tenant_id` | `invalid_grant`, before the actor check and the role resolution; delegation failure audit event |
+| Refresh token, authorization code, device code | the private claim `octo_grant_tenant_gen` of the stored grant | current generation of the stored `tenant_id` | `invalid_grant`, before any user lookup and before OpenIddict redeems the grant: a refused refresh token is not rotated, a refused code stays as it is |
+
+- **Stored grants carry the generation.** Refresh tokens, authorization codes and device codes issued from this version
+  on store the generation read at issuance as the private claim `octo_grant_tenant_gen`
+  (`OctoClaimTypes.GrantTenantGeneration`) of their (encrypted) principal. It has no destination: never an access
+  token, id token or userinfo claim. Stamped by `OctoTenantGenerationClaimHandler.StampAuthorizationCode`,
+  `StampRefreshToken` and `StampDeviceCode` (after `PrepareAuthorizationCodePrincipal`, `PrepareRefreshTokenPrincipal`,
+  `PrepareDeviceCodePrincipal`); the device authorization request (no user, no tenant) stores none, the end-user
+  verification that approves the code does. Issuing a code reads the lifecycle record once and refuses with
+  `server_error` when it cannot be read, like the token endpoint.
+- **One option for resource services and identity.** The check is the evaluator of octo-common-services (AB#8999,
+  `ITenantGenerationCheck`, `docs/tenant-generation-check.md` there) behind `IGrantTenantGenerationGuard`
+  (`src/IdentityServices/OpenIddict/GrantTenantGenerationGuard.cs`), with the same option
+  `TenantAuthorization:TenantGenerationEnforcement` (`Disabled` / `LogOnly` / `Enforce`, default `LogOnly`), the same
+  30 s cache (invalidated by the tenant events) and the same metric.
+
+| Mode | `match` | `mismatch` | `missing` | `not_checked` | `lookup_failed` |
+|---|---|---|---|---|---|
+| `Disabled` | no check, no metric | | | | |
+| `LogOnly` (default) | allowed | allowed, WARN log (rate-limited), counted | allowed, counted | allowed | allowed, counted |
+| `Enforce` | allowed | `invalid_grant` | `invalid_grant` | allowed | `server_error` |
+
+- **Not checked:** the system tenant (`System:SystemTenantId`, which carries `tenant_gen` locally) is never refused;
+  a tenant without lifecycle record or `CreatedUtc` is `not_checked` and allowed.
+- **Missing:** subject tokens issued before AB#8997 and refresh tokens, codes and device codes issued before this version
+  carry no generation. In `LogOnly` they keep working (counted as `missing`); in `Enforce` they are refused, so their users
+  sign in again. A refresh in `LogOnly` stores the current generation on the rotated refresh token, so active sessions
+  migrate by themselves.
+- **No laundering in `LogOnly`:** a refresh token whose stored generation is a `mismatch` is let through in `LogOnly`, but
+  the rotated refresh token keeps the **old** value (transaction property set by `TokenEndpointController`), so it is
+  refused as soon as the environment enforces.
+- **Metric:** `octo.tenant_auth.generation_checks` on meter `Meshmakers.Octo.TenantAuthorization` with `transport=grant`
+  and `grant_type` = `token_exchange`, `on_behalf_of`, `refresh_token`, `authorization_code` or `device_code`;
+  `client_id` is the client the checked token or grant was issued to (the subject token's `client_id`, the redeeming
+  client for stored grants). Never tenant, user, `sub`, `tenant_gen` or a token value. The response
+  (`error_description`) names no tenant and no value.
+- **Before `Enforce` (AB#9000):** identity must run this version on the environment first. The gate of an environment
+  must also account for the longest refresh-token lifetime: `missing` with `transport=grant` and
+  `grant_type=refresh_token` must reach zero, or the switch accepts that users with older refresh tokens sign in again.
+
+Tests: `GrantTenantGenerationGuardTests` (unit, real evaluator: match, mismatch, missing in `LogOnly` / `Enforce`, not
+checked, system tenant, lookup failure per grant type, metric labels; token exchange and on-behalf-of with genuinely
+signed subject tokens, incl. the actor variant and a numeric `tenant_gen`), `OctoTenantGenerationGrantStampTests`
+(stamp order, private claim, carry-over, failure), `GrantTenantGenerationHttpTests` (real token endpoint, a recreated
+tenant: refresh token and code refused and not redeemed, fresh sign-in works, missing in `Enforce` / `LogOnly`,
+`LogOnly` counted and the rotated refresh token keeps the old value, token exchange refused without a shadow user and
+allowed in `LogOnly`).
+
+#### Identity's own API: the tenant check runs on bearer tokens (AB#9017)
+
+`TenantAuthorizationMiddleware` (octo-common-services) only checks a principal whose `Identity.AuthenticationType` is
+`Bearer`, which keeps cookie principals out. The label comes from `TokenValidationParameters.AuthenticationType`, and the
+JWT bearer handler leaves the framework default `AuthenticationTypes.Federation` unless the host sets it. Identity did
+not, so the route-tenant check and the `tenant_gen` check (`transport=http`) never ran on a bearer call of identity's
+tenant API; foreign tokens were stopped only by the role and own-tenant requirements of that API.
+`ConfigureJwtBearerOptions` now sets the label to `Bearer` (as octo-mcp-service does).
+
+Identity keeps the library defaults, `UserTokenEnforcement=Enforce` and `ServiceTokenEnforcement=Enforce`: a user or
+service token issued for another tenant is answered 403 on a tenant route of identity (allow-list
+`TenantAuthorization:CrossTenantServiceClientIds` and endpoints marked `IAllowParentTenantAdministration` as in every
+service). The identity API tests already assumed this: the test host labels its bearer principals `Bearer`
+(`TestAuthHandler.RealBearerPrincipalHeader`, e.g. `SourceUserLookupTests.TokenOfAnotherTenant_IsRefused`). Fallback per
+environment: `OCTO_TENANTAUTHORIZATION__USERTOKENENFORCEMENT=LogOnly` / `OCTO_TENANTAUTHORIZATION__SERVICETOKENENFORCEMENT=LogOnly`
+(only logs "would be denied"). `TenantGenerationEnforcement` keeps its own default (`LogOnly`). Tests:
+`GrantTenantGenerationGuardTests.JwtBearer_LabelsTheIdentityBearer_SoTheTenantAuthorizationMiddlewareChecksIt`,
+`GrantTenantGenerationHttpTests.IdentityRunsTheUserAndServiceTokenTenantCheckWithTheLibraryDefaults_AndTheConfigurationCanLowerIt`.
 
 **Consumers.** Resource services compare `tenant_gen` with the current generation of the tenant from AB#8999 on
 (`TenantAuthorizationMiddleware` and the CK method caller rule in octo-common-services, option

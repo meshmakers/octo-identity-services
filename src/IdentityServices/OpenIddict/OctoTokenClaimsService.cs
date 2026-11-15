@@ -152,4 +152,13 @@ public static class OctoClaimTypes
     ///     (AB#8997).
     /// </summary>
     public const string TenantGeneration = "tenant_gen";
+
+    /// <summary>
+    ///     The generation of the tenant in <see cref="TenantId" /> read when a refresh token, authorization code or device
+    ///     code was issued (AB#9017). A <b>private</b> claim of the stored grant principal only: it has no destination, so it
+    ///     never reaches an access token, an id token or the userinfo response. Checked on redemption by
+    ///     <c>TokenEndpointController</c> through <see cref="IGrantTenantGenerationGuard" />; stamped by
+    ///     <see cref="OctoTenantGenerationClaimHandler" />.
+    /// </summary>
+    public const string GrantTenantGeneration = "octo_grant_tenant_gen";
 }

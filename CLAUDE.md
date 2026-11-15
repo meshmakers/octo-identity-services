@@ -315,6 +315,25 @@ becomes load-bearing again. No cache, no invalidation event — entity caching i
   `Helpers/TestTenantLifecycleStore` over the real store (`CustomWebApplicationFactory.TenantLifecycleStore`) to arrange
   generations; the test system tenant has no record, so the golden token shapes are unchanged. Details:
   `docs/authentication.md` § Tenant Generation.
+- **Grants of an earlier tenant (AB#9017, Security):** token exchange and on-behalf-of check the `tenant_gen` of the
+  `subject_token`, `TokenEndpointController` checks the private claim `octo_grant_tenant_gen` that refresh tokens,
+  authorization codes and device codes store at issuance (`StampAuthorizationCode` / `StampRefreshToken` /
+  `StampDeviceCode` in `OctoTenantGenerationClaimHandler`, no destination), each against the current generation of the
+  token's `tenant_id`, through `IGrantTenantGenerationGuard` over the AB#8999 `ITenantGenerationCheck`
+  (`AddOctoTenantGenerationCheck()` in `Program.cs`). Same option as the resource services,
+  `TenantAuthorization:TenantGenerationEnforcement` (default `LogOnly`); `Enforce` maps Deny to `invalid_grant` and
+  Unavailable to `server_error`. The check runs before the shadow user / role resolution and before OpenIddict redeems a
+  grant (a refused refresh token is not rotated). 🔴 In `LogOnly` a mismatched refresh token is let through, but the
+  rotated token keeps the old value (transaction property `CarriedGrantGenerationPropertyName`), never the current one.
+  Metric `transport=grant` + `grant_type`. Issuing a code now costs one lifecycle read (the #304 read-count assertions in
+  `TenantGenerationClaimHttpTests` changed accordingly). The HTTP tests (`GrantTenantGenerationHttpTests`) use derived
+  hosts whose check is built with another `SystemTenantId`, because the test host signs in to its system tenant, which is
+  never checked. Details: `docs/authentication.md` § Grants of an earlier tenant.
+- **Bearer label (AB#9017):** `ConfigureJwtBearerOptions` sets `TokenValidationParameters.AuthenticationType = "Bearer"`,
+  otherwise `TenantAuthorizationMiddleware` skips every bearer request to identity's API. Identity keeps the library
+  defaults (`UserTokenEnforcement` / `ServiceTokenEnforcement` = `Enforce`); `OCTO_TENANTAUTHORIZATION__*=LogOnly` is the
+  per-environment fallback. The test host forwards
+  `Bearer` to `TestAuthHandler` and does not run `ConfigureJwtBearerOptions`; the label is pinned by a unit test.
 - `OctoAccessTokenShapeHandler`: enforces the Duende-compatible wire format — `scope` as one claim
   per value (platform-wide `RequireClaim(scope, …)` policies compare full values), **no `sub` on
   `client_credentials` tokens** (`TenantAuthorizationMiddleware` identifies service tokens by its

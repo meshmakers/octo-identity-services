@@ -1,9 +1,11 @@
+using System.Security.Claims;
 using IdentityServerPersistence.Configuration.Options;
 using IdentityServerPersistence.Services;
 using IdentityServerPersistence.SystemStores;
 using Meshmakers.Common.Shared;
 using Meshmakers.Octo.Backend.IdentityServices.CrossTenantAudit;
 using Meshmakers.Octo.Services.Infrastructure;
+using Meshmakers.Octo.Services.Infrastructure.TenantGeneration;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.Extensions.Options;
 using Microsoft.IdentityModel.JsonWebTokens;
@@ -34,7 +36,10 @@ namespace Meshmakers.Octo.Backend.IdentityServices.OpenIddict;
 ///         Fail-closed at each step (invalid subject token, missing target tenant, target tenant
 ///         not wired into the request by <c>OidcTenantResolutionMiddleware</c>, non-ancestor
 ///         relationship, failed shadow provisioning) with an OAuth error and a persisted failure
-///         audit event. v1 semantics preserved: no refresh token is issued for exchanged tokens.
+///         audit event. v1 semantics preserved: no refresh token is issued for exchanged tokens. Since AB#9017 a subject
+///         token of an earlier tenant A with the same id (its <c>tenant_gen</c> differs from A's current generation, or
+///         it has none while Enforce is on) is refused with <c>invalid_grant</c> before the shadow user is resolved
+///         (<see cref="IGrantTenantGenerationGuard" />).
 ///     </para>
 ///     <para>
 ///         <b>Ancestry is not authority (AB#6839, decision Gerald 2026-10-17).</b> Being a user of an
@@ -58,6 +63,7 @@ public class TenantExchangeProcessor(
     IHttpContextAccessor httpContextAccessor,
     IIdentityAuditService auditService,
     ICrossTenantGrantAuditRecorder grantAudit,
+    IGrantTenantGenerationGuard grantTenantGenerationGuard,
     ILogger<TenantExchangeProcessor> logger)
 {
     /// <summary>The RFC 8693 token type identifier for an access token.</summary>
@@ -172,6 +178,23 @@ public class TenantExchangeProcessor(
                 "target tenant not wired into request");
             return ExchangeOutcome.Failed(Errors.InvalidTarget,
                 "target tenant could not be resolved for this request");
+        }
+
+        // (b3) AB#9017: the subject token must belong to the current tenant A, not to an earlier tenant with the same
+        //      id. Checked against A's generation before any shadow user is looked up or created, so a refused
+        //      exchange leaves nothing in B.
+        var generationCheck = await grantTenantGenerationGuard.CheckAsync(sourceTenantId,
+            TenantGenerationClaim.FromPrincipal(new ClaimsPrincipal(validation.ClaimsIdentity)),
+            GrantTenantGenerationGrantTypes.TokenExchange,
+            claims.FirstOrDefault(c => c.Type == Claims.ClientId)?.Value, cancellationToken);
+        if (generationCheck.IsRefused)
+        {
+            logger.LogWarning(
+                "Token exchange rejected: subject_token of user '{SourceUserId}' (tenant '{SourceTenantId}') failed the tenant generation check ({Outcome})",
+                sourceUserId, sourceTenantId, generationCheck.Outcome);
+            await RaiseFailureAsync(sourceUserId, sourceTenantId, targetTenantId,
+                $"subject token tenant generation {generationCheck.Outcome}");
+            return ExchangeOutcome.Failed(generationCheck.Error!, generationCheck.ErrorDescription!);
         }
 
         return await ExchangeAsync(sourceTenantId, sourceUserId, targetTenantId,
