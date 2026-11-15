@@ -1143,7 +1143,7 @@ The identity service hosts CK methods as a remote handler (bus transport, SDK `M
   carry no secret and are always selected, so the host runs in every configuration and only the password methods wait for the switch.
 - **Production gate `Methods:Identity:EnablePasswordMethods`** (default **false**, env `OCTO_Methods__Identity__EnablePasswordMethods`, Helm value
   `services.identity.methods.enablePasswordMethods` in the octo-helm-core `octo-mesh` chart, set per cluster in octo-mesh-deployment
-  `clusters/<c>/values-octo-mesh.yaml` (AB#8603: test-2 on; staging-1, prod-1, prod-2 off until Gerald's go per cluster)): decided by Gerald 2026-10-23, no method carrying a password or secret on staging-1, prod-1,
+  `clusters/<c>/values-octo-mesh.yaml` (AB#8603: on in test-2, staging-1, prod-1 and prod-2 since 2026-11-10/11, startup log `EnablePasswordMethods=True`)): decided by Gerald 2026-10-23, no method carrying a password or secret on staging-1, prod-1,
   prod-2 before B0 (restricted broker user, Heimdall). **The switch controls the bus only** (AB#8413). Off: handlers whose registration has
   `CarriesSecret = true` are not offered on the bus, the service announces no password method and the gateway (GraphQL) answers
   `METHOD_HANDLER_NOT_AVAILABLE`; the rows with `ServesRestFacade = true` (`User.CreateUser`, `User.ResetPassword`, since AB#8414 also
@@ -2364,12 +2364,27 @@ The four endpoints above carry `[OctoRestDeprecated(Wave = IdentityRestDeprecati
   (env `OCTO_RestDeprecation__Waves__IdentityUsers1__Since|Sunset`, Helm `restDeprecation.waves.IdentityUsers1.since|sunset` in
   octo-helm-core). Unset -> no `Deprecation`/`Sunset` header; `Link`, OpenAPI `deprecated` and the counter
   `octo.rest.deprecated.calls` always apply. An invalid configured date fails the start.
-- **Not in this wave**: `POST users` and `POST users/ResetPassword` (password, AB#8418 after B0) and the account pages of
-  `ManageApiController` (facades without deprecation, Odin 2026-11-07). AB#8418 decides whether they join `IdentityUsers1`
-  (same release) or get a wave of their own (another release, other dates).
+- **Not in this wave**: `POST users` and `POST users/ResetPassword` (own wave `IdentityUsersPassword`, next section) and the
+  account pages of `ManageApiController` (facades without deprecation, Odin 2026-11-07).
 - **Tests**: `Api/TenantApi/UsersRestDeprecationTests` — headers per endpoint with and without configured dates, a counted
   successful call (`client_id` `octo-cli`, endpoint template, no user name or tenant), unmarked user endpoints without headers,
-  exactly the four endpoints carry the attribute.
+  exactly the wave endpoints carry the attribute (four of wave 1, two of the password wave).
+
+### Deprecation of create user and admin reset: identity password wave (AB#8860)
+
+`POST users` and `POST users/ResetPassword` carry `[OctoRestDeprecated(Wave = IdentityRestDeprecation.UsersPasswordWave, Link = …)]`
+(wave `IdentityUsersPassword`; links `…/identityService/methods#usercreateuser` and `…#userresetpassword`). A wave of its own
+because it starts with another release than wave 1: `since` is the delivery day of the release that contains AB#8418 (octo-cli and
+octo-mcp-service call the methods), set by Ops in `octo-mesh-deployment` (`restDeprecation.waves.IdentityUsersPassword.since`,
+env `OCTO_RestDeprecation__Waves__IdentityUsersPassword__Since|Sunset`); sunset to be announced (Gerald's rule of 2026-11-11, as
+wave 1). The Helm chart renders every wave generically, no chart change. Without dates the endpoints answer exactly as before; only
+`Link`, the OpenAPI flag and the counter are added. The headers are computed from the attribute and the configuration only, never
+from the request, so no user name, e-mail or password reaches a header or a metric label. Not changed: the REST reset still sends
+the password-reset e-mail, the method does not (AB#7775). SDK side: `IIdentityServicesClient.CreateUser` / `ResetPassword` are
+`[Obsolete]` (octo-sdk, AB#8860).
+Tests: `Api/TenantApi/UsersPasswordRestDeprecationTests` (headers with dates, since without sunset, both endpoints without dates
+behave as before, successful calls counted, request canaries in no header and no label); the endpoint set is pinned in
+`UsersRestDeprecationTests`. Shared collector: `Api/TenantApi/DeprecatedCallCollector`.
 
 ### REST facades of create user and password reset (AB#8413)
 
