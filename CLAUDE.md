@@ -302,6 +302,16 @@ becomes load-bearing again. No cache, no invalidation event — entity caching i
   `aud` (replaces `UserProfileService`).
 - `OctoClaimsDestinations`: claim→token mapping; profile claims are NOT embedded in tokens —
   userinfo serves them.
+- `OctoTenantGenerationClaimHandler` (AB#8997, security item AB#8970): `tenant_gen` on **every** access token =
+  `TenantLifecycleRecord.CreatedUtc` of the tenant in `tenant_id` (`ITenantLifecycleStore`, read directly at issuance)
+  as Unix milliseconds, decimal string, UTC-normalised and truncated like `CkMethodTenantLifecycleGeneration`. An
+  OpenIddict `ProcessSignInContext` handler after `PrepareAccessTokenPrincipal` (filter `RequireAccessTokenGenerated`),
+  so it covers every grant incl. refresh (re-read, never copied) without touching `TokenEndpointController`. Access
+  token only (not id token, not userinfo). No record / no `CreatedUtc` → no claim; a failing read → `server_error`,
+  no token. Resource services check it from AB#8999 on. The HTTP test host layers
+  `Helpers/TestTenantLifecycleStore` over the real store (`CustomWebApplicationFactory.TenantLifecycleStore`) to arrange
+  generations; the test system tenant has no record, so the golden token shapes are unchanged. Details:
+  `docs/authentication.md` § Tenant Generation.
 - `OctoAccessTokenShapeHandler`: enforces the Duende-compatible wire format — `scope` as one claim
   per value (platform-wide `RequireClaim(scope, …)` policies compare full values), **no `sub` on
   `client_credentials` tokens** (`TenantAuthorizationMiddleware` identifies service tokens by its

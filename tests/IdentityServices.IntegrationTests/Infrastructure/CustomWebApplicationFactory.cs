@@ -225,6 +225,9 @@ public class CustomWebApplicationFactory : WebApplicationFactory<Program>, IAsyn
     /// <summary>AB#8341: the source tenant grant policy of this host; tests permit the pairs they arrange.</summary>
     public Helpers.TestSourceTenantGrantPolicy SourceTenantGrantPolicy { get; } = new();
 
+    /// <summary>AB#8997: the tenant lifecycle store of this host; tests arrange the generations they need.</summary>
+    public Helpers.TestTenantLifecycleStore TenantLifecycleStore { get; } = new();
+
     protected override void ConfigureWebHost(IWebHostBuilder builder)
     {
         Console.Error.WriteLine("[WebFactory] ConfigureWebHost called");
@@ -450,6 +453,19 @@ public class CustomWebApplicationFactory : WebApplicationFactory<Program>, IAsyn
             services.AddScoped<IdentityServerPersistence.Services.SourceTenantGrants.ISourceTenantGrantPolicy>(sp =>
                 SourceTenantGrantPolicy.Over(sp.GetRequiredService<
                     IdentityServerPersistence.Services.SourceTenantGrants.AllowListSourceTenantGrantPolicy>()));
+
+            // AB#8997: tests arrange the lifecycle record (tenant_gen) per tenant; every other read and every write
+            // goes to the production store.
+            var lifecycleDescriptor = services.Last(d =>
+                d.ServiceType == typeof(Meshmakers.Octo.Runtime.Contracts.MongoDb.TenantLifecycle.ITenantLifecycleStore));
+            services.RemoveAll<Meshmakers.Octo.Runtime.Contracts.MongoDb.TenantLifecycle.ITenantLifecycleStore>();
+            var lifecycleType = lifecycleDescriptor.ImplementationType ?? throw new InvalidOperationException(
+                "ITenantLifecycleStore is expected as a type registration; adapt the AB#8997 test decorator.");
+            services.AddSingleton(lifecycleType);
+            services.AddSingleton<Meshmakers.Octo.Runtime.Contracts.MongoDb.TenantLifecycle.ITenantLifecycleStore>(sp =>
+                TenantLifecycleStore.Over(
+                    (Meshmakers.Octo.Runtime.Contracts.MongoDb.TenantLifecycle.ITenantLifecycleStore)
+                    sp.GetRequiredService(lifecycleType)));
 
             // AB#8337: ASP.NET Core's RateLimitingMiddleware never disposes its limiter, whose heartbeat timer then roots
             // this host (and the fixtures of the test that started it) for the rest of the process. Registered last, so it
