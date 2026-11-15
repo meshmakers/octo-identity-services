@@ -226,7 +226,10 @@ public class IdentityMethodHostTests
     {
         // The real definition source of the resolved SDK package, built from the host registration with the default
         // "OctoSystem": it must ask the CK cache for the lower case key (AB#7912), otherwise the service would not start.
+        // Only the lower-case key is loaded: since AB#8969 the source no longer skips an unloaded tenant but throws
+        // ("cache not loaded"), so a lookup under the mixed-case key fails the test as well.
         var cache = Substitute.For<ICkCacheService>();
+        cache.IsTenantLoaded("octosystem").Returns(true);
         var services = new ServiceCollection();
         services.AddLogging();
         services.AddSingleton<IConfiguration>(new ConfigurationBuilder().Build());

@@ -1162,6 +1162,9 @@ The identity service hosts CK methods as a remote handler (bus transport, SDK `M
   `Methods:ValidationTenantIds` any more (the AB#5672 workaround was removed). Needs the common-services package of AB#7912 or newer.
   `TheStartupValidation_NeedsNoIdentityWorkaround_WithTheDefaultConfiguration` pins that the host adds nothing. On a rolling upgrade the System.Identity model of
   the system tenant must already be the embedded version when the validation runs; the identity setup imports it first.
+  Since common-services AB#8969 the validation loads (or waits for) the CK cache of the validation tenant within `Methods:CacheLoadTimeout`
+  instead of skipping an unloaded tenant; a test that fakes `ICkCacheService` must answer `IsTenantLoaded` with `true` for the lower-case key
+  (`TheStartupValidation_LooksTheMethodUpInTheLowerCaseCacheOfTheDefaultSystemTenant`), otherwise the source throws "cache not loaded".
 - **Tenant on the bus.** A handler has no HTTP request, but every store resolves its tenant through `IMultiTenancyResolverService`. The handler calls
   `IMethodTenantAccessor.BindAsync(context.TenantId)` **before** it resolves `UserManager`, the stores or `IUserCredentialChangeService` from its scope
   (it takes `IServiceProvider` for exactly that reason); `MethodTenantResolverService` answers with the bound tenant and falls back to the HTTP
