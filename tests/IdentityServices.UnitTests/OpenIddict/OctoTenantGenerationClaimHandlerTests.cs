@@ -119,7 +119,8 @@ public class OctoTenantGenerationClaimHandlerTests
         issued.Order.Should().BeLessThan(OpenIddictServerHandlers.GenerateIssuedToken.Descriptor.Order);
         issued.FilterTypes.Should().Equal(typeof(OpenIddictServerHandlerFilters.RequireIssuedTokenGenerated));
 
-        OctoTenantGenerationClaimHandler.Descriptors.Should().Equal(lookup, access, issued);
+        // AB#9017: the stored-grant stamps follow (OctoTenantGenerationGrantStampTests).
+        OctoTenantGenerationClaimHandler.Descriptors.Take(3).Should().Equal(lookup, access, issued);
     }
 
     // --- claim on every grant -------------------------------------------------------------------------------------

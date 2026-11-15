@@ -1025,6 +1025,7 @@ public class TenantExchangeIntegrationTests : IClassFixture<IdentityServicesFixt
             Substitute.For<IHttpContextAccessor>(),
             Substitute.For<IIdentityAuditService>(),
             Substitute.For<Meshmakers.Octo.Backend.IdentityServices.CrossTenantAudit.ICrossTenantGrantAuditRecorder>(),
+            Substitute.For<Meshmakers.Octo.Backend.IdentityServices.OpenIddict.IGrantTenantGenerationGuard>(),
             NullLogger<TenantExchangeProcessor>.Instance);
     }
 

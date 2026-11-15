@@ -48,6 +48,7 @@ public class OnBehalfOfProcessorTests
     private readonly IImpersonatedIdentityResolver _impersonationResolver =
         Substitute.For<IImpersonatedIdentityResolver>();
     private readonly IDelegatedIdentityResolver _resolver = Substitute.For<IDelegatedIdentityResolver>();
+    private readonly IGrantTenantGenerationGuard _generationGuard = Substitute.For<IGrantTenantGenerationGuard>();
     private readonly RsaSecurityKey _signingKey = new(RSA.Create(2048)) { KeyId = "unit-test-key" };
     private readonly OnBehalfOfProcessor _sut;
 
@@ -77,6 +78,7 @@ public class OnBehalfOfProcessorTests
             _impersonationResolver,
             _httpContextAccessor,
             _auditService,
+            _generationGuard,
             NullLogger<OnBehalfOfProcessor>.Instance);
     }
 

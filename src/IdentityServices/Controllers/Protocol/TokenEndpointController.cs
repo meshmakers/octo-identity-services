@@ -4,6 +4,7 @@ using IdentityServerPersistence.SystemStores;
 using Microsoft.AspNetCore;
 using Meshmakers.Octo.Backend.IdentityServices.OpenIddict;
 using Meshmakers.Octo.Backend.IdentityServices.Services;
+using Meshmakers.Octo.Services.Infrastructure.TenantGeneration;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Identity;
@@ -30,7 +31,11 @@ namespace Meshmakers.Octo.Backend.IdentityServices.Controllers.Protocol;
 ///             <c>urn:ietf:params:oauth:grant-type:device_code</c>: the stored principal is
 ///             refreshed — user existence/lockout re-checked, roles and tenant claims re-resolved
 ///             on every redemption (our clients set <c>UpdateAccessTokenClaimsOnRefresh</c>, so
-///             role/tenant changes must take effect without a re-login).</item>
+///             role/tenant changes must take effect without a re-login). Before anything else the
+///             generation the grant stored at issuance is checked against the current generation of its
+///             tenant (AB#9017, <see cref="IGrantTenantGenerationGuard" />): a grant of an earlier tenant
+///             with the same id is refused with <c>invalid_grant</c> and is not redeemed (a refused refresh
+///             token is not rotated).</item>
 ///     </list>
 ///     OpenIddict has already authenticated the client (secret validation via
 ///     <c>OctoApplicationManager</c>) and validated grant/scope permissions before this action runs.
@@ -45,6 +50,7 @@ public class TokenEndpointController(
     OnBehalfOfProcessor onBehalfOfProcessor,
     ImpersonationProcessor impersonationProcessor,
     ClientCredentialsTenantProcessor clientCredentialsTenantProcessor,
+    IGrantTenantGenerationGuard grantTenantGenerationGuard,
     UserManager<RtUser> userManager,
     SignInManager<RtUser> signInManager,
     ILogger<TokenEndpointController> logger) : ControllerBase
@@ -274,6 +280,31 @@ public class TokenEndpointController(
         var subject = storedPrincipal.GetClaim(Claims.Subject);
         var loginTenantId = storedPrincipal.GetClaim(OctoClaimTypes.TenantId) ?? string.Empty;
 
+        // AB#9017: the grant must belong to the current tenant with its tenant_id. Checked before any lookup and before
+        // OpenIddict redeems the grant (that happens during the sign-in below), so a refused refresh token is not rotated
+        // and a refused code stays as it is.
+        var storedGeneration = ReadStoredGeneration(storedPrincipal);
+        var generationCheck = await grantTenantGenerationGuard.CheckAsync(loginTenantId, storedGeneration.Claim,
+            UserGrantType(request), request.ClientId, HttpContext.RequestAborted);
+        if (generationCheck.IsRefused)
+        {
+            logger.LogWarning(
+                "Grant redemption refused: {GrantType} of client '{ClientId}' for tenant '{TenantId}' failed the tenant generation check ({Outcome})",
+                UserGrantType(request), request.ClientId ?? "(none)", loginTenantId, generationCheck.Outcome);
+            return ForbidWithError(generationCheck.Error!, generationCheck.ErrorDescription!);
+        }
+
+        if (generationCheck.Outcome == TenantGenerationOutcome.Mismatch && storedGeneration.RawValue != null &&
+            !string.IsNullOrWhiteSpace(loginTenantId))
+        {
+            // LogOnly let a mismatched grant through: the rotated refresh token keeps the old value, so the evidence is
+            // not laundered into a valid stamp and Enforce still refuses it later.
+            HttpContext.Features.Get<OpenIddictServerAspNetCoreFeature>()?.Transaction?.Properties[
+                    OctoTenantGenerationClaimHandler.CarriedGrantGenerationPropertyName] =
+                new OctoTenantGenerationClaimHandler.CarriedGrantGeneration(
+                    OctoTenantGenerationClaimHandler.NormalizeTenantId(loginTenantId), storedGeneration.RawValue);
+        }
+
         var user = subject != null ? await userManager.FindByIdAsync(subject) : null;
         if (user == null || !await signInManager.CanSignInAsync(user))
         {
@@ -303,6 +334,35 @@ public class TokenEndpointController(
             OctoClaimsDestinations.ForClient(redeemingClient?.AlwaysIncludeUserClaimsInIdToken == true));
 
         return SignIn(new ClaimsPrincipal(identity), OpenIddictServerAspNetCoreDefaults.AuthenticationScheme);
+    }
+
+    /// <summary>The <c>grant_type</c> metric label of a user grant (AB#9017).</summary>
+    private static string UserGrantType(OpenIddictRequest request)
+    {
+        if (request.IsAuthorizationCodeGrantType())
+        {
+            return GrantTenantGenerationGrantTypes.AuthorizationCode;
+        }
+
+        return request.IsRefreshTokenGrantType()
+            ? GrantTenantGenerationGrantTypes.RefreshToken
+            : GrantTenantGenerationGrantTypes.DeviceCode;
+    }
+
+    /// <summary>
+    ///     The private generation claim of a stored grant (AB#9017): the claim the check evaluates (<c>null</c> when the
+    ///     grant carries none, i.e. it was issued before AB#9017) and its raw value for the carry-over of a mismatch.
+    /// </summary>
+    internal static (TenantGenerationClaim? Claim, string? RawValue) ReadStoredGeneration(ClaimsPrincipal principal)
+    {
+        var claims = principal.FindAll(OctoClaimTypes.GrantTenantGeneration).ToList();
+        return claims.Count switch
+        {
+            0 => (null, null),
+            // Stored by this service as a string claim; anything else is not well formed (a mismatch).
+            1 => (TenantGenerationClaim.FromValue(claims[0].Value), claims[0].Value),
+            _ => (TenantGenerationClaim.FromValue(null, isString: false), null)
+        };
     }
 
     private static ClaimsIdentity CreateIdentity() => new(

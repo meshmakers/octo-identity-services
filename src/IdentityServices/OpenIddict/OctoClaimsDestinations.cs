@@ -94,6 +94,11 @@ public static class OctoClaimsDestinations
                 yield return Destinations.AccessToken;
                 break;
 
+            case OctoClaimTypes.GrantTenantGeneration:
+                // AB#9017: the generation stored in a refresh token, authorization code or device code is private to
+                // the grant. No destination: never an access token, id token or userinfo claim.
+                break;
+
             case Services.DelegationConstants.ActClaimType:
                 // Delegation (AB#5026): downstream services and the audit trail tell a delegated
                 // token apart from one the user obtained themselves.

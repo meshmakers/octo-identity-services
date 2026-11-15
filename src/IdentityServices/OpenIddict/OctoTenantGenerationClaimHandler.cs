@@ -30,10 +30,19 @@ namespace Meshmakers.Octo.Backend.IdentityServices.OpenIddict;
 ///             exchange issues an access token (OpenIddict generates it as the "issued token", not as the access
 ///             token).</item>
 ///     </list>
+///     Since AB#9017 three more handlers stamp the <b>stored grants</b>: <see cref="StampAuthorizationCode" />,
+///     <see cref="StampRefreshToken" /> and <see cref="StampDeviceCode" /> (after <c>PrepareAuthorizationCodePrincipal</c>,
+///     <c>PrepareRefreshTokenPrincipal</c>, <c>PrepareDeviceCodePrincipal</c>) add the generation read at issuance as the
+///     private claim <see cref="OctoClaimTypes.GrantTenantGeneration" /> (no destination). <c>TokenEndpointController</c>
+///     compares it with the current generation when the grant is redeemed (<see cref="IGrantTenantGenerationGuard" />).
+///     Issuing an authorization code (authorization endpoint) or approving a device code (end-user verification
+///     endpoint) therefore costs one lifecycle read too. When that read fails the grant is issued without a generation
+///     (WARN log) instead of failing the sign-in; it counts as <c>missing</c> when redeemed.
 ///     <list type="bullet">
 ///         <item>The claim is added to the access-token (or issued access-token) principal only: it never reaches the
 ///             id token, the userinfo response, or the principal stored in a refresh token / authorization code. A
-///             refresh grant therefore reads the generation again at issuance instead of copying it.</item>
+///             refresh grant therefore reads the generation again at issuance instead of copying it. The stored grant
+///             carries its own private claim instead (AB#9017, above).</item>
 ///         <item>No lifecycle record, or a record without <c>CreatedUtc</c> (legacy tenants, a system tenant without a
 ///             record): no claim, issuance succeeds.</item>
 ///         <item>The lifecycle read fails: the token request fails with <c>server_error</c> — never a token without the
@@ -46,6 +55,17 @@ public static class OctoTenantGenerationClaimHandler
 {
     /// <summary>Transaction property that carries the lookup result from <see cref="Lookup" /> to the stamps.</summary>
     internal const string LookupPropertyName = "octo:tenant_generation";
+
+    /// <summary>
+    ///     Transaction property set by <c>TokenEndpointController</c> when a redeemed grant carried a generation that
+    ///     does not match (LogOnly lets the request through): the rotated refresh token keeps that value instead of the
+    ///     current one, so the evidence survives until Enforce refuses it (AB#9017). Value:
+    ///     <see cref="CarriedGrantGeneration" />.
+    /// </summary>
+    internal const string CarriedGrantGenerationPropertyName = "octo:grant_tenant_generation_carried";
+
+    /// <summary>The value a rotated grant keeps (see <see cref="CarriedGrantGenerationPropertyName" />).</summary>
+    internal sealed record CarriedGrantGeneration(string TenantId, string Value);
 
     /// <summary>Result of the lifecycle read for one tenant id; <see cref="Value" /> is null without a generation.</summary>
     internal sealed record LookupResult(string TenantId, string? Value);
@@ -68,8 +88,9 @@ public static class OctoTenantGenerationClaimHandler
         {
             ArgumentNullException.ThrowIfNull(context);
 
-            // Only the token endpoint issues access tokens on this server (no implicit or hybrid flow); the
-            // authorization and device-verification endpoints issue codes and must not cost a read.
+            // Only the token endpoint issues access tokens on this server (no implicit or hybrid flow). The
+            // authorization and device-verification endpoints issue codes; their generation is read by the grant stamps
+            // (AB#9017) after the principal is prepared, never before the code is redeemed.
             if (context.EndpointType != OpenIddictServerEndpointType.Token)
             {
                 return;
@@ -147,9 +168,130 @@ public static class OctoTenantGenerationClaimHandler
         }
     }
 
+    /// <summary>Stores the generation in an authorization code (AB#9017).</summary>
+    public sealed class StampAuthorizationCode(
+        ITenantLifecycleStore lifecycleStore,
+        ILogger<StampAuthorizationCode> logger) : IOpenIddictServerHandler<ProcessSignInContext>
+    {
+        public static OpenIddictServerHandlerDescriptor Descriptor { get; }
+            = OpenIddictServerHandlerDescriptor.CreateBuilder<ProcessSignInContext>()
+                .AddFilter<OpenIddictServerHandlerFilters.RequireAuthorizationCodeGenerated>()
+                .UseSingletonHandler<StampAuthorizationCode>()
+                .SetOrder(OpenIddictServerHandlers.PrepareAuthorizationCodePrincipal.Descriptor.Order + 1)
+                .SetType(OpenIddictServerHandlerType.Custom)
+                .Build();
+
+        public ValueTask HandleAsync(ProcessSignInContext context)
+        {
+            ArgumentNullException.ThrowIfNull(context);
+            return StampGrantAsync(context, context.AuthorizationCodePrincipal, lifecycleStore, logger);
+        }
+    }
+
+    /// <summary>Stores the generation in a refresh token (AB#9017).</summary>
+    public sealed class StampRefreshToken(
+        ITenantLifecycleStore lifecycleStore,
+        ILogger<StampRefreshToken> logger) : IOpenIddictServerHandler<ProcessSignInContext>
+    {
+        public static OpenIddictServerHandlerDescriptor Descriptor { get; }
+            = OpenIddictServerHandlerDescriptor.CreateBuilder<ProcessSignInContext>()
+                .AddFilter<OpenIddictServerHandlerFilters.RequireRefreshTokenGenerated>()
+                .UseSingletonHandler<StampRefreshToken>()
+                .SetOrder(OpenIddictServerHandlers.PrepareRefreshTokenPrincipal.Descriptor.Order + 1)
+                .SetType(OpenIddictServerHandlerType.Custom)
+                .Build();
+
+        public ValueTask HandleAsync(ProcessSignInContext context)
+        {
+            ArgumentNullException.ThrowIfNull(context);
+            return StampGrantAsync(context, context.RefreshTokenPrincipal, lifecycleStore, logger);
+        }
+    }
+
+    /// <summary>
+    ///     Stores the generation in a device code (AB#9017). The device authorization request has no user and usually no
+    ///     tenant claim yet (nothing to stamp); the end-user verification sign-in updates the device code with the user's
+    ///     principal, and that one is stamped.
+    /// </summary>
+    public sealed class StampDeviceCode(
+        ITenantLifecycleStore lifecycleStore,
+        ILogger<StampDeviceCode> logger) : IOpenIddictServerHandler<ProcessSignInContext>
+    {
+        public static OpenIddictServerHandlerDescriptor Descriptor { get; }
+            = OpenIddictServerHandlerDescriptor.CreateBuilder<ProcessSignInContext>()
+                .AddFilter<OpenIddictServerHandlerFilters.RequireDeviceCodeGenerated>()
+                .UseSingletonHandler<StampDeviceCode>()
+                .SetOrder(OpenIddictServerHandlers.PrepareDeviceCodePrincipal.Descriptor.Order + 1)
+                .SetType(OpenIddictServerHandlerType.Custom)
+                .Build();
+
+        public ValueTask HandleAsync(ProcessSignInContext context)
+        {
+            ArgumentNullException.ThrowIfNull(context);
+            return StampGrantAsync(context, context.DeviceCodePrincipal, lifecycleStore, logger);
+        }
+    }
+
     /// <summary>All descriptors, in the order OpenIddict runs them.</summary>
     public static IReadOnlyList<OpenIddictServerHandlerDescriptor> Descriptors { get; } =
-        [Lookup.Descriptor, StampAccessToken.Descriptor, StampIssuedToken.Descriptor];
+    [
+        Lookup.Descriptor, StampAccessToken.Descriptor, StampIssuedToken.Descriptor, StampAuthorizationCode.Descriptor,
+        StampRefreshToken.Descriptor, StampDeviceCode.Descriptor
+    ];
+
+    private static async ValueTask StampGrantAsync(ProcessSignInContext context, ClaimsPrincipal? principal,
+        ITenantLifecycleStore lifecycleStore, ILogger logger)
+    {
+        if (principal?.Identity is not ClaimsIdentity identity)
+        {
+            return;
+        }
+
+        // The stored value is always the one decided for this issuance; drop anything copied in.
+        foreach (var stale in identity.FindAll(OctoClaimTypes.GrantTenantGeneration).ToList())
+        {
+            identity.TryRemoveClaim(stale);
+        }
+
+        var tenantId = identity.FindFirst(OctoClaimTypes.TenantId)?.Value;
+        if (string.IsNullOrWhiteSpace(tenantId))
+        {
+            return;
+        }
+
+        var normalized = NormalizeTenantId(tenantId);
+        string? value;
+        if (context.Transaction.Properties.TryGetValue(CarriedGrantGenerationPropertyName, out var carried) &&
+            carried is CarriedGrantGeneration carriedValue &&
+            string.Equals(carriedValue.TenantId, normalized, StringComparison.Ordinal))
+        {
+            // A mismatched grant redeemed in LogOnly: the rotated grant keeps the old value (see the property).
+            value = carriedValue.Value;
+        }
+        else
+        {
+            var result = context.Transaction.Properties.TryGetValue(LookupPropertyName, out var stored) &&
+                         stored is LookupResult lookup &&
+                         string.Equals(lookup.TenantId, normalized, StringComparison.Ordinal)
+                ? lookup
+                : await ReadAsync(context, lifecycleStore, logger, tenantId, rejectOnFailure: false);
+            if (result != null)
+            {
+                // Later stamps of the same request (access token, other grants) reuse this read.
+                context.Transaction.Properties[LookupPropertyName] = result;
+            }
+
+            value = result?.Value;
+        }
+
+        if (value is null)
+        {
+            return;
+        }
+
+        // No destination: the claim stays in the stored (encrypted) grant and never reaches a token or userinfo.
+        identity.AddClaim(new Claim(OctoClaimTypes.GrantTenantGeneration, value, ClaimValueTypes.String));
+    }
 
     private static async ValueTask StampAsync(ProcessSignInContext context, ClaimsPrincipal? principal,
         ITenantLifecycleStore lifecycleStore, ILogger logger)
@@ -189,9 +331,14 @@ public static class OctoTenantGenerationClaimHandler
         identity.AddClaim(claim);
     }
 
-    /// <summary>Reads the generation; rejects the context with <c>server_error</c> and returns null on a failure.</summary>
+    /// <summary>
+    ///     Reads the generation; returns null on a failure. With <paramref name="rejectOnFailure" /> (access tokens) the
+    ///     context is rejected with <c>server_error</c>. Without it (stored grants, AB#9017) the grant is issued without a
+    ///     generation: a failed read on the authorization or verification endpoint must not break sign-in while the
+    ///     check is Disabled or LogOnly; the grant then counts as <c>missing</c> on redemption.
+    /// </summary>
     private static async Task<LookupResult?> ReadAsync(ProcessSignInContext context,
-        ITenantLifecycleStore lifecycleStore, ILogger logger, string tenantId)
+        ITenantLifecycleStore lifecycleStore, ILogger logger, string tenantId, bool rejectOnFailure = true)
     {
         var normalized = NormalizeTenantId(tenantId);
         TenantLifecycleRecord? record;
@@ -201,6 +348,14 @@ public static class OctoTenantGenerationClaimHandler
         }
         catch (Exception ex) when (!(ex is OperationCanceledException && context.CancellationToken.IsCancellationRequested))
         {
+            if (!rejectOnFailure)
+            {
+                logger.LogWarning(ex,
+                    "Grant for tenant '{TenantId}' stored without a tenant generation: the generation could not be read ({ExceptionType}). It counts as missing when it is redeemed",
+                    tenantId, ex.GetType().Name);
+                return null;
+            }
+
             logger.LogError(ex,
                 "Access token for tenant '{TenantId}' refused: the tenant generation could not be read ({ExceptionType})",
                 tenantId, ex.GetType().Name);
