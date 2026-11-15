@@ -516,6 +516,46 @@ public class CrossTenantSecondFactorTests : IntegrationTestBase
         status.Should().Be(HttpStatusCode.OK, "behaviour without 2FA is unchanged (error: {0})", ErrorOf(body));
     }
 
+    /// <summary>
+    ///     AB#8997: the RFC 8693 exchange runs OpenIddict's issued-token path (no regular access token); the exchanged
+    ///     access token carries <c>tenant_gen</c> of the TARGET tenant in its <c>tenant_id</c>, never the source
+    ///     tenant's (CodeRabbit finding on PR #304).
+    /// </summary>
+    [Fact]
+    public async Task TokenExchange_ExchangedAccessToken_CarriesTheGenerationOfTheTargetTenant()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        var childTenantId = await CreateChildTenantAsync();
+        var userName = $"xt2fa_exch_gen_{Guid.NewGuid():N}";
+        var rtUser = await CreateTestUserAsync(userName, password: DefaultPassword);
+        await GrantChildRoleAsync(childTenantId, rtUser.RtId.ToString(), userName);
+        var session = (await LoginAndGetAuthenticatedClientAsync(userName, DefaultPassword, ct))!;
+        try
+        {
+            Factory.TenantLifecycleStore.ArrangeGeneration(SourceTenantId.ToLowerInvariant(),
+                new DateTime(2025, 1, 1, 0, 0, 0, 111, DateTimeKind.Utc));
+            Factory.TenantLifecycleStore.ArrangeGeneration(childTenantId,
+                new DateTime(2025, 11, 15, 8, 0, 0, 123, DateTimeKind.Utc));
+            var subjectToken = await GetAccessTokenAsync(session, ct);
+            new JsonWebToken(subjectToken).GetClaim("tenant_gen").Value.Should().Be("1735689600111",
+                "the subject token of the source tenant carries the source generation");
+            var childReadsBefore = Factory.TenantLifecycleStore.ReadsOf(childTenantId);
+
+            var (status, body) = await ExchangeAsync(subjectToken, childTenantId, ct);
+
+            status.Should().Be(HttpStatusCode.OK, "exchange failed (error: {0})", ErrorOf(body));
+            var exchanged = new JsonWebToken(JsonNode.Parse(body)!["access_token"]!.GetValue<string>());
+            exchanged.GetClaim("tenant_id").Value.Should().Be(childTenantId);
+            exchanged.GetClaim("tenant_gen").Value.Should().Be("1763193600123",
+                "the exchanged token names the generation of the target tenant");
+            (Factory.TenantLifecycleStore.ReadsOf(childTenantId) - childReadsBefore).Should().Be(1);
+        }
+        finally
+        {
+            Factory.TenantLifecycleStore.Reset();
+        }
+    }
+
     #endregion
 
     #region 6. Locked-out or disabled source user (AB#7855)

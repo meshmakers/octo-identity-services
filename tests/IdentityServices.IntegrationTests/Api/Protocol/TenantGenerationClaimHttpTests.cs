@@ -23,10 +23,9 @@ namespace IdentityServices.IntegrationTests.Api.Protocol;
 ///     never on the id token or the userinfo response; re-read on refresh; absent without a record; a failing lookup
 ///     refuses the token. The lifecycle record is arranged through
 ///     <see cref="Helpers.TestTenantLifecycleStore" /> (the test host has no asset repository that writes one).
-///     Impersonation is covered over HTTP in <c>ImpersonationHttpGoldenTests</c>. Token exchange, on-behalf-of and
-///     cross-tenant login run through the same sign-in handler; this HTTP host cannot complete them (they need a child
-///     tenant and a signed subject token), so their grant-type cases are pinned in
-///     <c>OctoTenantGenerationClaimHandlerTests</c> (unit).
+///     Impersonation is covered over HTTP in <c>ImpersonationHttpGoldenTests</c>, the RFC 8693 exchange into a child
+///     tenant in <c>CrossTenantSecondFactorTests</c>. On-behalf-of and cross-tenant login run through the same handlers;
+///     their grant-type cases are pinned in <c>OctoTenantGenerationClaimHandlerTests</c> (unit).
 /// </summary>
 public class TenantGenerationClaimHttpTests : IntegrationTestBase
 {
@@ -221,6 +220,68 @@ public class TenantGenerationClaimHttpTests : IntegrationTestBase
             (Factory.TenantLifecycleStore.ReadsOf(NormalizedSystemTenantId) - readsBefore).Should().Be(2,
                 "the refresh grant reads the record once more; userinfo (token validation) reads nothing");
             DecodePayload(refreshed.Body["id_token"]!.GetValue<string>()).ContainsKey("tenant_gen").Should().BeFalse();
+        }
+        finally
+        {
+            Factory.TenantLifecycleStore.Reset();
+        }
+    }
+
+    /// <summary>
+    ///     The lifecycle read runs before OpenIddict redeems the authorization code (CodeRabbit finding on PR #304): a
+    ///     failed read answers <c>server_error</c> and leaves the single-use code valid, so the retry succeeds.
+    /// </summary>
+    [Fact]
+    public async Task AuthorizationCode_StoreFailure_DoesNotConsumeTheCode_TheRetrySucceeds()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        try
+        {
+            await EnsureApiResourcesAsync();
+            await CreateClientAsync("tenantgen-spa-retry", builder => builder
+                .WithGrantTypes("authorization_code")
+                .WithScopes("openid", "profile", ApiScope)
+                .WithRedirectUris(RedirectUri)
+                .RequirePkce());
+            await CreateTestUserAsync("tenantgenretry", "tenantgen-retry@example.com");
+            var browser = await LoginAndGetAuthenticatedClientAsync("tenantgenretry", DefaultPassword, ct);
+            browser.Should().NotBeNull();
+
+            const string codeVerifier = "tenantgen-retry-verifier-tenantgen-retry-verifier-8997";
+            var authorize = await browser!.GetAsync("/connect/authorize" +
+                                                    "?client_id=tenantgen-spa-retry" +
+                                                    $"&redirect_uri={Uri.EscapeDataString(RedirectUri)}" +
+                                                    "&response_type=code" +
+                                                    $"&scope={Uri.EscapeDataString($"openid profile {ApiScope}")}" +
+                                                    "&state=s&nonce=n" +
+                                                    $"&code_challenge={Base64UrlSha256(codeVerifier)}&code_challenge_method=S256" +
+                                                    $"&acr_values={Uri.EscapeDataString($"tenant:{NormalizedSystemTenantId}")}",
+                ct);
+            ((int)authorize.StatusCode).Should().BeInRange(302, 303);
+            var code = HttpUtility.ParseQueryString(authorize.Headers.Location!.Query)["code"]!;
+            var redeem = new Dictionary<string, string>
+            {
+                ["grant_type"] = "authorization_code",
+                ["client_id"] = "tenantgen-spa-retry",
+                ["code"] = code,
+                ["redirect_uri"] = RedirectUri,
+                ["code_verifier"] = codeVerifier
+            };
+            var http = CreateAnonymousClient();
+
+            Factory.TenantLifecycleStore.ArrangeFailure(NormalizedSystemTenantId,
+                new TimeoutException("lifecycle store unreachable"));
+            var failed = await PostTokenAsync(http, redeem, ct);
+            ((int)failed.StatusCode).Should().BeGreaterThanOrEqualTo(500, "body: {0}", failed.Raw);
+            failed.Body!["error"]!.GetValue<string>().Should().Be("server_error");
+
+            Factory.TenantLifecycleStore.ArrangeGeneration(NormalizedSystemTenantId, Generation1);
+            var retried = await PostTokenAsync(http, redeem, ct);
+
+            retried.StatusCode.Should().Be(HttpStatusCode.OK,
+                "the failed request must not have redeemed the single-use code: {0}", retried.Body?["error"]);
+            DecodePayload(retried.Body!["access_token"]!.GetValue<string>())["tenant_gen"]!.GetValue<string>()
+                .Should().Be(Generation1Ms);
         }
         finally
         {

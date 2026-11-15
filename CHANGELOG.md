@@ -31,7 +31,8 @@ Notable changes of the OctoMesh identity services. The CK model `System.Identity
   `"1763193600123"`. Identity stamps it on the access tokens of every grant — authorization code, device code, refresh
   token (read again at each refresh), client credentials, token exchange, on-behalf-of, impersonation and cross-tenant
   login — and never on id tokens or userinfo. A tenant without a lifecycle record or without `CreatedUtc` gets no claim;
-  when the record cannot be read the token request fails with `server_error` instead of issuing a token without it.
+  when the record cannot be read the token request fails with `server_error` instead of issuing a token without it
+  (before the code or refresh token is redeemed, so a retry works).
   Resource services use it from AB#8999 on to refuse tokens of a deleted tenant presented to a new tenant with the same
   id. **Client impact:** one more claim in the access token, nothing else. **Rollout:** identity before the services
   that check the claim. Details: `docs/authentication.md` § Tenant Generation.
