@@ -26,6 +26,17 @@ Notable changes of the OctoMesh identity services. The CK model `System.Identity
 
 ### Added
 
+- **Every access token names the generation of its tenant: claim `tenant_gen` (AB#8997, Security, AB#8970).** The value is
+  the `CreatedUtc` of the tenant's lifecycle record (system database) as Unix milliseconds, a decimal string such as
+  `"1763193600123"`. Identity stamps it on the access tokens of every grant — authorization code, device code, refresh
+  token (read again at each refresh), client credentials, token exchange, on-behalf-of, impersonation and cross-tenant
+  login — and never on id tokens or userinfo. A tenant without a lifecycle record or without `CreatedUtc` gets no claim;
+  when the record cannot be read the token request fails with `server_error` instead of issuing a token without it
+  (before the code or refresh token is redeemed, so a retry works).
+  Resource services use it from AB#8999 on to refuse tokens of a deleted tenant presented to a new tenant with the same
+  id. **Client impact:** one more claim in the access token, nothing else. **Rollout:** identity before the services
+  that check the claim. Details: `docs/authentication.md` § Tenant Generation.
+
 - **Every pipeline service account holds `StreamDataReader` (AB#8581).** The asset repository gates stream-data reads on a
   StreamData role (AB#8559). The Communication Controller adds `StreamDataReader` to declarative service accounts on reconcile
   (AB#8563), but not to legacy accounts (created before CK 3.32.0, no `AssignedRoleNames`). Identity now grants the role to every

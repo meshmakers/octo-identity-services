@@ -1525,6 +1525,55 @@ The Identity CK model and default roles are installed in **all** tenants (not ju
 
 Cross-tenant users receive a `home_tenant_id` claim in their tokens, indicating which tenant owns their actual user account.
 
+#### Tenant Generation (`tenant_gen`, AB#8997)
+
+Every access token that names a tenant in `tenant_id` also names the **generation** of that tenant in `tenant_gen`.
+A tenant id can be used again: when tenant `X` is deleted and a new tenant `X` is created, an access token of the old
+tenant would otherwise still pass every `tenant_id` check until it expires (security item AB#8970).
+
+| Aspect | Rule |
+|---|---|
+| Meaning | The creation cycle of the tenant in `tenant_id`. A new creation of the id gives a new value; a restore over the existing tenant keeps it. |
+| Source | `TenantLifecycleRecord.CreatedUtc` of the tenant (`ITenantLifecycleStore.GetAsync`, system database; the tenant setup inserts the record when a creation cycle starts, the delete removes it once settled). Identity reads the store directly at issuance. |
+| Format | Unix milliseconds as a decimal **string**, invariant culture, e.g. `"1763193600123"`. `CreatedUtc` is normalised to UTC (`Utc` as is, `Local` converted, `Unspecified` taken as UTC — the rule of `CkMethodTenantLifecycleGeneration` in octo-common-services) and truncated to the millisecond (never rounded). |
+| Grants | All that issue an access token: authorization code, device code, refresh token, client credentials, RFC 8693 token exchange (OpenIddict issues it as the "issued token"), on-behalf-of, impersonation; a cross-tenant login or an exchange gets the generation of the target tenant in `tenant_id`. |
+| Refresh | Read again from the lifecycle record at issuance, never copied from the stored principal. |
+| Destination | Access token only — never the id token (also not for `AlwaysIncludeUserClaimsInIdToken` clients), never userinfo, never the principal stored in a code or refresh token. |
+| No generation | No lifecycle record, or `CreatedUtc` unset (legacy tenants, a system tenant without a record): no claim, the token is issued. |
+| Lookup failure | The token request fails with `server_error` (HTTP 5xx); no token is issued without the claim for a tenant that may have one. The read runs **before** OpenIddict redeems the authorization code, device code or refresh token, so the client can retry with the same value. The ERROR log names the tenant and the exception type, never a token or secret. |
+| Cost | One lifecycle read per token request (none when only a code is issued); nothing on token validation. |
+
+Implementation: `OctoTenantGenerationClaimHandler` (`src/IdentityServices/OpenIddict/`), three OpenIddict
+`ProcessSignInContext` handlers:
+
+- `Lookup` — token endpoint only, right after `ValidateSignInDemand` and before `RedeemTokenEntry`: reads the record for
+  the `tenant_id` of the principal `TokenEndpointController` built, and refuses with `server_error` before anything is
+  redeemed.
+- `StampAccessToken` — after `PrepareAccessTokenPrincipal` (`RequireAccessTokenGenerated`): adds the claim to the
+  access-token principal.
+- `StampIssuedToken` — after `PrepareIssuedTokenPrincipal` (`RequireIssuedTokenGenerated`, issued token type access
+  token): adds the claim to the token an RFC 8693 exchange issues. OpenIddict 7.6 sets `GenerateAccessToken=false` for an
+  exchange, so a stamp on the access-token principal alone would miss it.
+
+An exchange that requests another token type (refresh or id token) issues no access token and is not looked up.
+
+Tests:
+
+- `OctoTenantGenerationClaimHandlerTests` (unit): value and precision, handler order against OpenIddict, every grant
+  type incl. the issued-token path, destination, refresh, no claim, failure before redemption.
+- `TenantGenerationClaimHttpTests` (real token endpoint): client credentials, authorization code + refresh, device code,
+  id token, userinfo, read counts, no record, failure, and a failed read that leaves the authorization code valid for
+  the retry. The record is arranged with `Helpers/TestTenantLifecycleStore`.
+- `ImpersonationHttpGoldenTests.Impersonation_AccessTokenCarriesTheTenantGeneration` and
+  `CrossTenantSecondFactorTests.TokenExchange_ExchangedAccessToken_CarriesTheGenerationOfTheTargetTenant` (a real
+  exchange into a child tenant).
+- On-behalf-of and cross-tenant login use the same handlers; their cases are unit tests.
+
+**Consumers.** Resource services compare `tenant_gen` with the current generation of the tenant from AB#8999 on
+(`TenantAuthorizationMiddleware` and the CK method caller rule in octo-common-services, option
+`TenantAuthorization:TenantGenerationEnforcement`, first released in `LogOnly`). Identity must be rolled out first:
+tokens issued before carry no claim and are counted as `missing` until they expire.
+
 ### Tenant-Aware Login Redirects
 
 When `/connect/authorize` determines the user isn't authenticated (or consent is required), the passthrough `AuthorizeController` (`Controllers/Protocol/`) issues the login/consent redirect **directly with the correct tenant prefix**, e.g. `/{tenantId}/login?ReturnUrl=...`. The tenant comes from `acr_values=tenant:{tenantId}` (resolved by `OidcTenantResolutionMiddleware`).

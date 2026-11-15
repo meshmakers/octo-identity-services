@@ -130,6 +130,14 @@ public static class OpenIddictConfiguration
                 // client_credentials, no oi_* private claims, no per-token DB entry (AB#4992).
                 serverOptions.AddEventHandler(OctoAccessTokenShapeHandler.Descriptor);
 
+                // AB#8997: tenant_gen (generation of the token's tenant) on every access token, read from the
+                // tenant lifecycle record before any code or refresh token is redeemed; refused with server_error
+                // when the record cannot be read. Access tokens and RFC 8693 issued access tokens.
+                foreach (var descriptor in OctoTenantGenerationClaimHandler.Descriptors)
+                {
+                    serverOptions.AddEventHandler(descriptor);
+                }
+
                 // Device flow: render the verification result as the JSON DTO the SPA expects.
                 serverOptions.AddEventHandler(OctoDeviceVerificationResponseHandler.Descriptor);
 

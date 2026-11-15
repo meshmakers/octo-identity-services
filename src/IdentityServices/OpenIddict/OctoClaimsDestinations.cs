@@ -87,6 +87,13 @@ public static class OctoClaimsDestinations
                 // (pre-migration wire format — keeps tokens small).
                 break;
 
+            case OctoClaimTypes.TenantGeneration:
+                // AB#8997: the tenant generation is checked by resource services on access tokens only. It is
+                // normally added by OctoTenantGenerationClaimHandler to the access-token principal; this entry
+                // keeps the destination explicit should a principal ever carry it.
+                yield return Destinations.AccessToken;
+                break;
+
             case Services.DelegationConstants.ActClaimType:
                 // Delegation (AB#5026): downstream services and the audit trail tell a delegated
                 // token apart from one the user obtained themselves.

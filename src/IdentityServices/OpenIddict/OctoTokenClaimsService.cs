@@ -145,4 +145,11 @@ public static class OctoClaimTypes
     public const string TenantId = "tenant_id";
     public const string AllowedTenants = "allowed_tenants";
     public const string HomeTenantId = "home_tenant_id";
+
+    /// <summary>
+    ///     Generation of the tenant in <see cref="TenantId" />: the <c>CreatedUtc</c> of its lifecycle record as Unix
+    ///     milliseconds (decimal string). Access tokens only; stamped by <see cref="OctoTenantGenerationClaimHandler" />
+    ///     (AB#8997).
+    /// </summary>
+    public const string TenantGeneration = "tenant_gen";
 }

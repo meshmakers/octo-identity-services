@@ -151,6 +151,51 @@ public class ImpersonationHttpGoldenTests : IntegrationTestBase
                 "the denial must come from the MayActAs check, not from grant/permission plumbing: {0}", raw);
     }
 
+    /// <summary>
+    ///     AB#8997: the impersonated (client-credentials-shaped) token carries <c>tenant_gen</c> of the tenant in its
+    ///     <c>tenant_id</c>, read once at issuance.
+    /// </summary>
+    [Fact]
+    public async Task Impersonation_AccessTokenCarriesTheTenantGeneration()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        try
+        {
+            Factory.TenantLifecycleStore.ArrangeGeneration(NormalizedSystemTenantId,
+                new DateTime(2025, 11, 15, 8, 0, 0, 123, DateTimeKind.Utc).AddTicks(4_567));
+            await EnsureImpersonationApiResourcesAsync();
+
+            const string actorId = "impersonation-actor-tenantgen";
+            const string targetId = "impersonation-target-tenantgen";
+            var actor = await CreateImpersonationClientAsync(actorId, builder => builder
+                .WithGrantTypes(ImpersonationConstants.ImpersonationGrantType)
+                .WithScopes(ImpersonationApiScope)
+                .WithSecret("SharedSecret", Sha256Base64(ActorSecret))
+                .RequireClientSecret()
+                .RequirePkce(false));
+            var target = await CreateImpersonationClientAsync(targetId, builder => builder
+                .WithGrantTypes("client_credentials")
+                .WithScopes(ImpersonationApiScope)
+                .RequirePkce(false));
+            await WriteMayActAsEdgeAsync(actor.RtId, target.RtId);
+            var readsBefore = Factory.TenantLifecycleStore.ReadsOf(NormalizedSystemTenantId);
+
+            var response = await PostImpersonationTokenRequestAsync(actorId, ActorSecret, targetId, ct);
+
+            var raw = await response.Content.ReadAsStringAsync(ct);
+            response.StatusCode.Should().Be(HttpStatusCode.OK, "impersonation token request failed: {0}", raw);
+            var token = new JsonWebToken(JsonNode.Parse(raw)!["access_token"]!.GetValue<string>());
+            token.GetClaim("tenant_id").Value.Should().Be(NormalizedSystemTenantId);
+            token.GetClaim("tenant_gen").Value.Should().Be("1763193600123");
+            (Factory.TenantLifecycleStore.ReadsOf(NormalizedSystemTenantId) - readsBefore).Should().Be(1,
+                "reads before the request: {0}", readsBefore);
+        }
+        finally
+        {
+            Factory.TenantLifecycleStore.Reset();
+        }
+    }
+
     #region Arrange helpers
 
     private Task<HttpResponseMessage> PostImpersonationTokenRequestAsync(
