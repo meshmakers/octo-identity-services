@@ -36,7 +36,8 @@ namespace Meshmakers.Octo.Backend.IdentityServices.OpenIddict;
 ///     private claim <see cref="OctoClaimTypes.GrantTenantGeneration" /> (no destination). <c>TokenEndpointController</c>
 ///     compares it with the current generation when the grant is redeemed (<see cref="IGrantTenantGenerationGuard" />).
 ///     Issuing an authorization code (authorization endpoint) or approving a device code (end-user verification
-///     endpoint) therefore costs one lifecycle read too, and refuses with <c>server_error</c> when it fails.
+///     endpoint) therefore costs one lifecycle read too. When that read fails the grant is issued without a generation
+///     (WARN log) instead of failing the sign-in; it counts as <c>missing</c> when redeemed.
 ///     <list type="bullet">
 ///         <item>The claim is added to the access-token (or issued access-token) principal only: it never reaches the
 ///             id token, the userinfo response, or the principal stored in a refresh token / authorization code. A
@@ -273,7 +274,7 @@ public static class OctoTenantGenerationClaimHandler
                          stored is LookupResult lookup &&
                          string.Equals(lookup.TenantId, normalized, StringComparison.Ordinal)
                 ? lookup
-                : await ReadAsync(context, lifecycleStore, logger, tenantId);
+                : await ReadAsync(context, lifecycleStore, logger, tenantId, rejectOnFailure: false);
             if (result != null)
             {
                 // Later stamps of the same request (access token, other grants) reuse this read.
@@ -330,9 +331,14 @@ public static class OctoTenantGenerationClaimHandler
         identity.AddClaim(claim);
     }
 
-    /// <summary>Reads the generation; rejects the context with <c>server_error</c> and returns null on a failure.</summary>
+    /// <summary>
+    ///     Reads the generation; returns null on a failure. With <paramref name="rejectOnFailure" /> (access tokens) the
+    ///     context is rejected with <c>server_error</c>. Without it (stored grants, AB#9017) the grant is issued without a
+    ///     generation: a failed read on the authorization or verification endpoint must not break sign-in while the
+    ///     check is Disabled or LogOnly; the grant then counts as <c>missing</c> on redemption.
+    /// </summary>
     private static async Task<LookupResult?> ReadAsync(ProcessSignInContext context,
-        ITenantLifecycleStore lifecycleStore, ILogger logger, string tenantId)
+        ITenantLifecycleStore lifecycleStore, ILogger logger, string tenantId, bool rejectOnFailure = true)
     {
         var normalized = NormalizeTenantId(tenantId);
         TenantLifecycleRecord? record;
@@ -342,6 +348,14 @@ public static class OctoTenantGenerationClaimHandler
         }
         catch (Exception ex) when (!(ex is OperationCanceledException && context.CancellationToken.IsCancellationRequested))
         {
+            if (!rejectOnFailure)
+            {
+                logger.LogWarning(ex,
+                    "Grant for tenant '{TenantId}' stored without a tenant generation: the generation could not be read ({ExceptionType}). It counts as missing when it is redeemed",
+                    tenantId, ex.GetType().Name);
+                return null;
+            }
+
             logger.LogError(ex,
                 "Access token for tenant '{TenantId}' refused: the tenant generation could not be read ({ExceptionType})",
                 tenantId, ex.GetType().Name);

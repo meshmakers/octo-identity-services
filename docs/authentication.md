@@ -1541,7 +1541,7 @@ tenant would otherwise still pass every `tenant_id` check until it expires (secu
 | Destination | Access token only — never the id token (also not for `AlwaysIncludeUserClaimsInIdToken` clients), never userinfo, never the principal stored in a code or refresh token (the stored grant has its own private claim, see *Grants of an earlier tenant* below). |
 | No generation | No lifecycle record, or `CreatedUtc` unset (legacy tenants, a system tenant without a record): no claim, the token is issued. |
 | Lookup failure | The token request fails with `server_error` (HTTP 5xx); no token is issued without the claim for a tenant that may have one. The read runs **before** OpenIddict redeems the authorization code, device code or refresh token, so the client can retry with the same value. The ERROR log names the tenant and the exception type, never a token or secret. |
-| Cost | One lifecycle read per token request, and since AB#9017 one per issued authorization code or approved device code; nothing on token validation. |
+| Cost | One lifecycle read per token request, and since AB#9017 one per issued authorization code or approved device code (a failure there issues the grant without a generation instead of refusing); nothing on token validation. |
 
 Implementation: `OctoTenantGenerationClaimHandler` (`src/IdentityServices/OpenIddict/`), three OpenIddict
 `ProcessSignInContext` handlers:
@@ -1588,8 +1588,8 @@ resource services accept. Identity therefore checks the generation of the creden
   token, id token or userinfo claim. Stamped by `OctoTenantGenerationClaimHandler.StampAuthorizationCode`,
   `StampRefreshToken` and `StampDeviceCode` (after `PrepareAuthorizationCodePrincipal`, `PrepareRefreshTokenPrincipal`,
   `PrepareDeviceCodePrincipal`); the device authorization request (no user, no tenant) stores none, the end-user
-  verification that approves the code does. Issuing a code reads the lifecycle record once and refuses with
-  `server_error` when it cannot be read, like the token endpoint.
+  verification that approves the code does. Issuing a code reads the lifecycle record once; when it cannot be read the
+  code is issued without a generation (WARN log) instead of failing the sign-in, and counts as `missing` on redemption.
 - **One option for resource services and identity.** The check is the evaluator of octo-common-services (AB#8999,
   `ITenantGenerationCheck`, `docs/tenant-generation-check.md` there) behind `IGrantTenantGenerationGuard`
   (`src/IdentityServices/OpenIddict/GrantTenantGenerationGuard.cs`), with the same option
@@ -1608,9 +1608,13 @@ resource services accept. Identity therefore checks the generation of the creden
   carry no generation. In `LogOnly` they keep working (counted as `missing`); in `Enforce` they are refused, so their users
   sign in again. A refresh in `LogOnly` stores the current generation on the rotated refresh token, so active sessions
   migrate by themselves.
-- **No laundering in `LogOnly`:** a refresh token whose stored generation is a `mismatch` is let through in `LogOnly`, but
-  the rotated refresh token keeps the **old** value (transaction property set by `TokenEndpointController`), so it is
-  refused as soon as the environment enforces.
+- **A mismatch is not laundered in `LogOnly`:** a refresh token whose stored generation is a `mismatch` is let through in
+  `LogOnly`, but the rotated refresh token keeps the **old** value (transaction property set by `TokenEndpointController`),
+  so it is refused as soon as the environment enforces. A `missing` value is migrated to the current generation instead
+  (above): it cannot be told apart from a grant of the same tenant issued before this version. Residual risk, accepted: a
+  refresh token from before this version that belongs to an earlier tenant (only possible when an old dump is restored into
+  the recreated tenant; a plain delete drops the token entries with the database) becomes valid once it is refreshed in
+  `LogOnly`.
 - **Metric:** `octo.tenant_auth.generation_checks` on meter `Meshmakers.Octo.TenantAuthorization` with `transport=grant`
   and `grant_type` = `token_exchange`, `on_behalf_of`, `refresh_token`, `authorization_code` or `device_code`;
   `client_id` is the client the checked token or grant was issued to (the subject token's `client_id`, the redeeming

@@ -133,7 +133,7 @@ public class OctoTenantGenerationGrantStampTests
     }
 
     [Fact]
-    public async Task StoreFailure_RefusesTheIssuanceWithServerError()
+    public async Task StoreFailure_IssuesTheGrantWithoutAGeneration_InsteadOfFailingTheSignIn()
     {
         _store.GetAsync(TenantId, Arg.Any<CancellationToken>()).ThrowsAsync(new TimeoutException("down"));
         var context = CreateContext(OpenIddictServerEndpointType.Authorization);
@@ -142,9 +142,9 @@ public class OctoTenantGenerationGrantStampTests
         await new OctoTenantGenerationClaimHandler.StampAuthorizationCode(_store,
             NullLogger<OctoTenantGenerationClaimHandler.StampAuthorizationCode>.Instance).HandleAsync(context);
 
-        context.IsRejected.Should().BeTrue();
-        context.Error.Should().Be(Errors.ServerError);
-        context.AuthorizationCodePrincipal.FindAll(OctoClaimTypes.GrantTenantGeneration).Should().BeEmpty();
+        context.IsRejected.Should().BeFalse("a failed read must not break sign-in while the check is Disabled or LogOnly");
+        context.AuthorizationCodePrincipal.FindAll(OctoClaimTypes.GrantTenantGeneration).Should()
+            .BeEmpty("the grant counts as missing when it is redeemed");
     }
 
     [Fact]

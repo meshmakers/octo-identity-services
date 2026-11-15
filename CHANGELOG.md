@@ -37,7 +37,7 @@ Notable changes of the OctoMesh identity services. The CK model `System.Identity
   mismatch or a missing value (`server_error` when the generation cannot be read); the system tenant and tenants without
   a generation are never refused. A refused grant is not redeemed (a refresh token is not rotated) and a refused exchange
   creates no shadow user. Issuing an authorization code or approving a device code now reads the tenant lifecycle record
-  once. **Client impact:** none in `LogOnly`; in `Enforce` users with a refresh token issued before this version sign in
+  once (a failed read issues the grant without a generation instead of failing the sign-in). **Client impact:** none in `LogOnly`; in `Enforce` users with a refresh token issued before this version sign in
   again. **Rollout:** identity with this version on an environment before AB#9000 switches it to `Enforce`. Details:
   `docs/authentication.md` § Grants of an earlier tenant.
 
