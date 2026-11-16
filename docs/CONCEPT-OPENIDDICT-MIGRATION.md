@@ -1,10 +1,15 @@
+---
+description: Background: concept and plan of the migration from Duende IdentityServer to OpenIddict
+background: true
+---
+
 # Concept: Migrating from Duende IdentityServer to OpenIddict
 
-**Status:** Implemented on feature branch (2026-09-01) — phases 1–6 complete, cutover (AB#4998) pending · **Epic:** AB#4989 · **Related:** AB#4988 (license renewal), work items AB#4990–AB#4998
+**Status:** Implemented on feature branch (2026-09-01) — phases 1–6 complete, cutover pending · **Related:** license renewal
 
 ## 1. Motivation
 
-Our Duende IdentityServer license expired on 2026-08-30 (AB#4988) and renewal is uncertain. The
+Our Duende IdentityServer license expired on 2026-08-30 and renewal is uncertain. The
 June 2026 Duende license agreement grants no perpetual use right: after termination we must cease
 use (§10.C), with audit rights surviving 18 months. The tier we would need (Standard: server-side
 sessions + device flow, plus redistribution rights for customer deployments) starts at $12,500/yr.
@@ -204,7 +209,7 @@ so controller code stops referencing any OIDC-server library directly:
   (OpenIddict request accessor + client lookup).
 - `IsValidReturnUrl`, `GetErrorContextAsync`, `GetLogoutContextAsync` → own implementations
   (return-URL validation = local URL or registered redirect; error context via our error id
-  round-trip, cf. AB#4950).
+  round-trip, cf. the Duende-compatible response work).
 - Consent: `GrantConsentAsync`/`DenyAuthorizationAsync` → create/deny an `RtOAuthAuthorization`
   and resume the authorize flow.
 - Grants page: `GetAllUserGrantsAsync`/`RevokeUserConsentAsync` → authorization/token store
@@ -223,7 +228,7 @@ then possibly simplify). The refresh-token→tenant persistent lookup switches t
 `TenantId` attribute (§4.2). Each stage gets an integration test pinning the OpenIddict response
 shape so future OpenIddict upgrades fail loudly here instead of silently.
 
-## 5. Implementation plan (maps to AB#4990–4998)
+## 5. Implementation plan (by phase)
 
 | Phase | WI | Content | Depends on |
 |---|---|---|---|
@@ -269,7 +274,7 @@ and middleware re-pinning dominate.
    (swept later). Rollback window closes once the transition CK types are removed (final cleanup
    rev) — keep that rev at least one train behind the cutover.
 5. Until cutover: stay on Duende 8.0.6 (runs with warnings). Clarify the contractual position of
-   the actually-signed order (pre-June-2026 terms may be milder) — tracked in AB#4998.
+   the actually-signed order (pre-June-2026 terms may be milder) — tracked in the cutover work.
 
 ## 8. Risks & open questions
 
@@ -292,21 +297,21 @@ avoid overlapping identity-service trains.
 ## Implementation notes (2026-09-01)
 
 > **test/0.2-dev merge note (2026-09-02):** the golden baseline was deliberately re-recorded for two
-> intentional wire-format changes that landed on this branch: AB#5007 (user access tokens now carry
-> `email`, `name`, `preferred_username` — caller identity for resource servers) and AB#5026
+> intentional wire-format changes that landed on this branch: user access tokens now carry
+> `email`, `name`, `preferred_username` (caller identity for resource servers) and the delegation
 > (`grant_types_supported` additionally advertises
 > `urn:meshmakers:params:oauth:grant-type:on-behalf-of`). Everything else remains byte-identical to
 > the pre-migration recording. The delegation grant itself was ported from the extension-grant
 > validator to `OnBehalfOfProcessor` + `TokenEndpointController` (see docs/authentication.md).
 
-Phases 1–6 (AB#4990–AB#4996) are implemented on the feature branch; the operational cutover
-(AB#4998) is pending. Deviations from / decisions beyond the concept above:
+Phases 1–6 are implemented on the feature branch; the operational cutover
+ is pending. Deviations from / decisions beyond the concept above:
 
 - **Grant storage went per-tenant** (open question (a) resolved the other way): the OpenIddict
   authorization/token stores persist in new per-tenant CK types `RtOAuthAuthorization`/`RtOAuthToken`
   (System.Identity-2.12.0, migration 21→22), not in the system-tenant `RtPersistedGrant`. The
   refresh-token→tenant resolution in `OidcTenantResolutionMiddleware` was in-memory only, preferring
-  `acr_values` sent by clients (no persistent SHA-256 hash fallback). Since AB#7892 the refresh token (like
+  `acr_values` sent by clients (no persistent SHA-256 hash fallback). The refresh token (like
   authorization codes and PAR `request_uri`s) carries its tenant itself (`OidcTenantMarker`) — no in-memory state.
 - **No separate encryption certificate** (open question (b)): the static PKCS#12 signing certificate
   doubles as the encryption credential for OpenIddict-internal token payloads;

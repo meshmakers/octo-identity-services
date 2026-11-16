@@ -39,12 +39,12 @@ The CI/CD pipeline will fail if there are any lint errors. Common issues:
 - **Unused variables**: Prefix with `_` (e.g., `_unusedParam`)
 - **Empty functions**: Add a comment or remove the empty function
 
-## Toolchain (AB#5075)
+## Toolchain
 
 - Build, serve and extract-i18n run on `@angular/build` (esbuild/Vite); `@angular-devkit/build-angular`
   is gone. The `application` builder writes a **flat `dist/`** (`outputPath.browser: ""`) because
   `IdentityServices.csproj` copies `ClientApp/dist/**` to `wwwroot` and checks for `dist/index.html`.
-- Unit tests: Vitest on jsdom via `@angular/build:unit-test` (AB#6993, same setup as Refinery Studio).
+- Unit tests: Vitest on jsdom via `@angular/build:unit-test` (same setup as Refinery Studio).
   Run `npm test` (= `ng test --watch=false`) in `ClientApp`; a single spec:
   `npm test -- --include='**/device-confirm.component.spec.ts'`. Never call `npx vitest` directly.
   Specs live next to the component (`*.spec.ts`), `tsconfig.spec.json` pulls in `vitest/globals`.
@@ -61,17 +61,17 @@ The CI/CD pipeline will fail if there are any lint errors. Common issues:
 - Expected result of a clean `npm ci` + `npm run build`: no allow-scripts advisory, no other
   deprecation, 0 vulnerabilities, no build warnings.
 
-## Device flow loop guard (AB#6993)
+## Device flow loop guard
 
 `/{tenant}/device/confirm` loads `GET /connect/deviceverification` (tenant-free URL; the tenant comes
-from the tenant hint `acr_values=tenant:{tenantId}` the page sends, AB#7891; fallback system
+from the tenant hint `acr_values=tenant:{tenantId}` the page sends; fallback system
 tenant). On 401 it navigates **once** to `/{tenant}/login` with a `loginAttempted=1` marker inside the
-`returnUrl`; the login page's "already signed in" shortcut (AB#4961) sends an authenticated user straight
+`returnUrl`; the login page's "already signed in" shortcut sends an authenticated user straight
 back. If the endpoint still answers 401 with the marker present, the page stops and shows
 `DEVICE.ERROR_SESSION_REJECTED` (EN/DE) instead of bouncing forever. The consent page has no 401
 redirect and `AuthorizeController` strips `prompt=login` and signs out stale sessions, so neither loops.
 
-## Device confirm feedback (AB#7090)
+## Device confirm feedback
 
 `POST /connect/deviceverification` always answers **HTTP 200** with `{ success, errorMessage, error }`
 (`OctoDeviceVerificationResponseHandler`; `error` is the OAuth code: `access_denied` = denied by the user
@@ -95,7 +95,7 @@ ones (HTTP 5xx, cross-tenant refusal) show a banner above the buttons. Specs:
 - `src/app/features/` - Feature components (login, logout, consent, device, manage, grants, error, setup)
 - `src/styles/` - LCARS design system (variables, mixins, Kendo overrides)
 
-## i18n (AB#5137)
+## i18n
 
 The ClientApp is fully internationalized with **@ngx-translate/core 17** — the same library and
 pattern as the meshmakers-app (custom `TranslateLoader` over `HttpClient` in `app.config.ts`, no
@@ -142,7 +142,7 @@ Located in `Controllers/Api/`:
 - `ConsentApiController` - OAuth consent flow; its device methods drive the OpenIddict end-user verification endpoint (`/connect/deviceverification`, form-encoded) via the SPA's `ConsentApiService`
 - `DeviceApiController` - Holds the device-flow DTOs only (the flow itself runs through `/connect/deviceverification`)
 - `ManageApiController` - User profile, password, external logins
-- `MyIdentifiersApiController` - Self-service verified identifiers (phone/e-mail OTP, certificate) at `{tenantId}/api/manage/identifiers`, plus the AB#5149 preferred outbound channel (`GET`/`PUT .../preferredChannel`); accepts cookie AND bearer schemes
+- `MyIdentifiersApiController` - Self-service verified identifiers (phone/e-mail OTP, certificate) at `{tenantId}/api/manage/identifiers`, plus the preferred outbound channel (`GET`/`PUT .../preferredChannel`); accepts cookie AND bearer schemes
 - `GrantsApiController` - OAuth grants management
 - `OemApiController` - OEM configuration
 - `SetupApiController` - Anonymous initial admin user setup (returns 404 after setup complete)

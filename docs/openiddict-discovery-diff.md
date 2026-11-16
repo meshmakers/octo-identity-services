@@ -1,6 +1,11 @@
+---
+description: Background: differences of the discovery document between Duende and OpenIddict
+background: true
+---
+
 # Discovery Document Diff: Duende IdentityServer 8.0.6 → OpenIddict 7.6.0
 
-**Status:** verified against the golden baseline, 2026-09-01 · **Epic:** AB#4989 · **Work items:** AB#4990/AB#4996
+**Status:** verified against the golden baseline, 2026-09-01
 
 This document lists every difference in `/.well-known/openid-configuration` between the
 Duende-based identity service and the OpenIddict-based one, with the consumer impact
@@ -16,7 +21,7 @@ Unchanged and load-bearing (pinned): `issuer`, `authorization_endpoint`, `token_
 (`/connect/register`, custom DCR), `code_challenge_methods_supported` (S256),
 `grant_types_supported` for every flow the platform uses (authorization_code,
 client_credentials, refresh_token, device_code, token-exchange, and the OctoMesh
-delegation grant `urn:meshmakers:params:oauth:grant-type:on-behalf-of` — AB#5026), and
+delegation grant `urn:meshmakers:params:oauth:grant-type:on-behalf-of`), and
 `check_session_iframe` (`/connect/checksession`, own OIDC Session Management
 implementation — `session_state` on authorize responses + `idsrv.session[.tenant]`
 browser cookie; angular-oauth2-oidc's `sessionChecksEnabled` depends on it to

@@ -1,8 +1,12 @@
-# Concept — Sibling-tenant user lookup and grants (AB#8313)
+---
+description: Background: contract of sibling-tenant user lookup and cross-tenant grants
+background: true
+---
 
-Contract fixed by AB#8340 (first story of Feature AB#8313). Studio (AB#8314), octo-cli and the MCP server build against
-it before the backend stories are finished. Changes to this contract after merge go through a comment on AB#8340 and on
-AB#8314.
+# Concept — Sibling-tenant user lookup and grants
+
+Contract fixed first. Studio, octo-cli and the MCP server build against it before the backend parts are finished.
+Changes to this contract after merge are agreed with the owners of those clients.
 
 ## 1. Goal and boundaries
 
@@ -17,10 +21,10 @@ customer tenant). T's administrator never sees S's user directory:
 Out of scope and unchanged:
 
 - The ancestor flows under `adminProvisioning/{targetTenantId}` (`sourceUsers`, `withGroups`, `provisionCurrentUser`)
-  stay as they are. Ancestry is decided by the tenant registry through `ICrossTenantAncestryGuard` (AB#8339, AB#8367,
+  stay as they are. Ancestry is decided by the tenant registry through `ICrossTenantAncestryGuard` (
   switch `IdentityApiAuthorization:CrossTenantAncestry` = `Warn`/`Enforce`).
 - A sibling grant creates **no** `RtOctoTenantIdentityProvider` in T: T's login page does not offer "Login via S". The
-  sibling user reaches T by tenant switch / token exchange from an S session (AB#8343).
+  sibling user reaches T by tenant switch / token exchange from an S session.
 - CK model: no change (`RtExternalTenantUserMapping` and the GroupMember association exist).
 
 ## 2. Routes
@@ -28,16 +32,16 @@ Out of scope and unchanged:
 All routes of the grant are tenant-scoped in the **target tenant T** — `/{T}/identity/api/v1/…` — so Studio can offer
 the action on T's own Users page. Route segments are case-insensitive; the SDK uses camelCase.
 
-| Method and route (in T) | Purpose | Policy | Story |
-|-------------------------|---------|--------|-------|
-| `POST ExternalTenantUserMappings/sourceUserLookup` | find exactly one user of S | `IdentityUserAdministrationWritePolicy` | AB#8341 |
-| `POST ExternalTenantUserMappings` | create the mapping, now with optional `groupIds` | `IdentityUserAdministrationWritePolicy` | AB#8343 |
-| `GET ExternalTenantUserMappings` | list T's mappings (unchanged) | `IdentityUserAdministrationReadPolicy` | — |
-| `GET ExternalTenantUserMappings/{rtId}` | one mapping (unchanged) | `IdentityUserAdministrationReadPolicy` | — |
-| `PUT ExternalTenantUserMappings/{rtId}` | change the mapping's roles (unchanged) | `IdentityUserAdministrationWritePolicy` | — |
-| `DELETE ExternalTenantUserMappings/{rtId}` | remove the grant (unchanged route; revocation §8) | `IdentityUserAdministrationWritePolicy` | AB#8344 |
+| Method and route (in T) | Purpose | Policy |
+|-------------------------|---------|--------|
+| `POST ExternalTenantUserMappings/sourceUserLookup` | find exactly one user of S | `IdentityUserAdministrationWritePolicy` |
+| `POST ExternalTenantUserMappings` | create the mapping, now with optional `groupIds` | `IdentityUserAdministrationWritePolicy` |
+| `GET ExternalTenantUserMappings` | list T's mappings (unchanged) | `IdentityUserAdministrationReadPolicy` |
+| `GET ExternalTenantUserMappings/{rtId}` | one mapping (unchanged) | `IdentityUserAdministrationReadPolicy` |
+| `PUT ExternalTenantUserMappings/{rtId}` | change the mapping's roles (unchanged) | `IdentityUserAdministrationWritePolicy` |
+| `DELETE ExternalTenantUserMappings/{rtId}` | remove the grant (unchanged route; revocation §8) | `IdentityUserAdministrationWritePolicy` |
 
-Permission routes in the **source tenant S** (owned by AB#8345, §6):
+Permission routes in the **source tenant S** (owned by the allow-list part, §6):
 
 | Method and route (in S) | Purpose | Policy |
 |-------------------------|---------|--------|
@@ -104,7 +108,7 @@ Request — `CreateExternalTenantUserMappingDto` (existing fields unchanged, `gr
 | Field | Type | Rule |
 |-------|------|------|
 | `sourceTenantId`, `sourceUserId`, `sourceUserName` | string, required | as today; take them from the lookup result |
-| `roleIds` | string[], optional | as today (direct roles, role-change guard AB#7927) |
+| `roleIds` | string[], optional | as today (direct roles, role-change guard) |
 | `groupIds` | string[], optional | ids of **T** groups; the mapping becomes their member. `null`/absent = behaviour as before. The SDK does not send the field when it is `null`. |
 
 Answers:
@@ -114,12 +118,12 @@ Answers:
 | `201` | `ExternalTenantUserMappingDto` (`groupNames` filled) | stored |
 | `400` | problem, code `UnknownGroup`, extension `unknownGroupIds` | a `groupIds` entry is no group of T; **nothing** is stored (no silent skip as in `adminProvisioning/{t}/withGroups`) |
 | `403` | problem, code `SourceTenantNotPermitted` | S is no registry ancestor of T and S does not permit T, **or** the user does not exist / is blocked in S — one answer for all of these |
-| `403` | problem from the role-change guard | the groups' or direct roles exceed what the caller may grant (AB#7927) |
-| `409` | problem, code `ExternalTenantUserMappingAlreadyExists`, extension `existingMappingId` | a mapping for (S, user) exists (AB#6975, unchanged) |
+| `403` | problem from the role-change guard | the groups' or direct roles exceed what the caller may grant |
+| `409` | problem, code `ExternalTenantUserMappingAlreadyExists`, extension `existingMappingId` | a mapping for (S, user) exists (unchanged) |
 
 For a registry-ancestor source the create behaves as today; `groupIds` works for ancestors too.
 
-As built (AB#8343):
+As built:
 
 - Order of the checks: source gate (`403 SourceTenantNotPermitted`) → duplicate (`409`) → groups (`400 UnknownGroup`) →
   role-change guard (`403`) → write. The gate is `ISourceTenantGrantAdmission`
@@ -129,20 +133,20 @@ As built (AB#8343):
   also be no `xt_` shadow user and may sign in. When S is not registered, the read runs against T's database and is
   discarded (same idea as the lookup's timing rule).
 - The stored `sourceUserName` (and the name in the grant events of §7) is the user name of S's user record, the stored
-  `sourceTenantId` the registry's spelling of S. The request's `sourceUserName` is not used (Ariadne's review of AB#8436:
+  `sourceTenantId` the registry's spelling of S. The request's `sourceUserName` is not used (review finding:
   a free-text name for an ancestor S, the system tenant included, must not reach S's event log).
 - `groupIds`: duplicates count once; a malformed id or the id of another tenant's group is unknown. The mapping and its
   `GroupMember` edges are written in one transaction (`IExternalTenantUserMappingStore.InsertWithGroupsAsync`). The `201`
   body carries `groupNames`.
 - Role-change guard: the effective roles of the groups (nested groups included) count as granted, like `roleIds`
   (`RoleGraphChange.MappingRoles.GroupIds`).
-- Behaviour change for existing callers: before AB#8343 this route stored any `sourceTenantId` / `sourceUserId`
+- Behaviour change for existing callers: earlier this route stored any `sourceTenantId` / `sourceUserId`
   unchecked (the exchange refused unrelated sources later). Now a mapping for a source that is neither a registry ancestor
   nor permitting T, or for a user id S does not have, is refused with `403` — also under `CrossTenantAncestry=Warn` for a
   tenant that is an "ancestor" only through T's own providers.
 
 `GET`, `PUT` and `DELETE` keep their shape. `ExternalTenantUserMappingDto` already returns `sourceTenantId`,
-`sourceUserName` and `groupNames`, which is what the granted-users list of AB#8314 shows.
+`sourceUserName` and `groupNames`, which is what the granted-users list shows.
 
 ## 3. Uniform-404 rule
 
@@ -153,7 +157,7 @@ The lookup answers **one** `404 SourceUserNotFound` with an identical body for e
 - no user with that exact user name or e-mail;
 - more than one user with that e-mail (never a list);
 - the user is an `xt_` shadow user;
-- the user is locked out or blocked by the sign-in rules (same check as AB#7855);
+- the user is locked out or blocked by the sign-in rules (same check as the sign-in block);
 - the identifier is empty or whitespace;
 - the identifier is not the complete user name or e-mail of a user: there is no prefix, substring, wildcard, regular
   expression or Mongo operator semantics. `ali` finds a user whose user name (or e-mail) is exactly `ali`, never
@@ -167,27 +171,27 @@ Body (`application/problem+json`):
   "code": "SourceUserNotFound" }
 ```
 
-Implementation rules (AB#8341): no early return before the user query (the policy and tenant checks do not shorten the
+Implementation rules: no early return before the user query (the policy and tenant checks do not shorten the
 path, so timing does not tell the cases apart); tests assert the identical body for each case; the existing
 `SearchUsersInTenantAsync` (substring, empty search = first users) is **not** used for non-ancestors.
 
-As built (AB#8341, `src/IdentityServerPersistence/Services/SourceTenantGrants/`):
+As built (`src/IdentityServerPersistence/Services/SourceTenantGrants/`):
 
 - `SourceUserLookupService` reads the registry ancestors of T (`ICrossTenantAncestryGuard.GetRegistryAncestorsAsync` —
-  the registry alone; the `Warn` mode of AB#8339 does **not** widen this route), asks `ISourceTenantGrantPolicy`, then
+  the registry alone; the `Warn` mode does **not** widen this route), asks `ISourceTenantGrantPolicy`, then
   always runs the same two equality queries (`NormalizedUserName == X`, `NormalizedEmail == X`, X = trimmed,
   upper-cased identifier, passed as a value, never as an operator). When S is unknown or empty the queries run against
   T's database and the result is discarded, so "tenant absent" costs the same database round trips as "user absent".
   Only then is the decision taken. Remaining, small differences: an unknown S may trigger the registry's throttled miss
   refresh (at most every 5 s per pod), and a found user costs the in-memory sign-in check.
 - The default policy `DenyNonAncestorsSourceTenantGrantPolicy` answers `false` for every pair; registry ancestors are
-  admitted before the policy is asked. AB#8345 replaces the registration (`TryAddScoped`).
+  admitted before the policy is asked. The allow-list part replaces the registration (`TryAddScoped`).
 - A policy that throws counts as "not permitted"; a read error of S counts as "no user"; both answer the uniform `404`.
 - Logs carry caller, T, S, the internal outcome and a 12-character SHA-256 prefix of the normalized identifier — never
   the identifier itself. The outcome is never part of the answer.
-- Audit hook for AB#8342: `ISourceUserLookupAuditSink.RecordAsync(SourceUserLookupAuditEvent)` is called once per
+- Audit hook: `ISourceUserLookupAuditSink.RecordAsync(SourceUserLookupAuditEvent)` is called once per
   lookup (T, S, caller, hit/miss, whether S exists, user id and name of a hit; no identifier). Registered as
-  `NoOpSourceUserLookupAuditSink` until AB#8342 replaces it; a failing sink is logged and never breaks the request.
+  `NoOpSourceUserLookupAuditSink` earlier replaces it; a failing sink is logged and never breaks the request.
 
 Create (`403 SourceTenantNotPermitted`) follows the same idea: one answer for "S unknown", "S does not permit T" and
 "user absent or blocked in S".
@@ -224,32 +228,32 @@ and stable; title and detail are English text for humans. The codes are PascalCa
 | `SourceUserLookupRateLimited` | 429 | lookup | `retryAfterSeconds` (integer, same value as the `Retry-After` header) |
 | `SourceTenantNotPermitted` | 403 | create | — |
 | `UnknownGroup` | 400 | create | `unknownGroupIds` |
-| `ExternalTenantUserMappingAlreadyExists` | 409 | create (existing, AB#6975) | `existingMappingId` |
-| `CrossTenantSourceNotAncestor` | 403 | `adminProvisioning` writes only (existing, AB#8339) | — |
-| `CrossTenantGrantPermissionsChanged` | 412 | `PUT CrossTenantGrantPermissions` (AB#8432) | — (current tag in the `ETag` header) |
-| `IfMatchRequired` | 428 | `PUT CrossTenantGrantPermissions` (AB#8432, only with `RequireIfMatch` on) | — |
+| `ExternalTenantUserMappingAlreadyExists` | 409 | create (existing) | `existingMappingId` |
+| `CrossTenantSourceNotAncestor` | 403 | `adminProvisioning` writes only (existing) | — |
+| `CrossTenantGrantPermissionsChanged` | 412 | `PUT CrossTenantGrantPermissions` | — (current tag in the `ETag` header) |
+| `IfMatchRequired` | 428 | `PUT CrossTenantGrantPermissions` (only with `RequireIfMatch` on) | — |
 
-The two AB#8432 codes are constants of the identity service (`CrossTenantGrantPermissionsController.ListChangedCode`,
+The two optimistic-concurrency codes are constants of the identity service (`CrossTenantGrantPermissionsController.ListChangedCode`,
 `.IfMatchRequiredCode`), not yet of `CrossTenantGrantProblemCodes` in the SDK; clients branch on the status.
 
-## 6. Source-tenant permission (AB#8345)
+## 6. Source-tenant permission
 
 Decided by Gerald on 2026-11-06 (option A): **S keeps an allow-list of target tenants.** Per-grant consent is not
 built.
 
 - `GET/PUT /{S}/identity/api/v1/CrossTenantGrantPermissions`, body `{ "targetTenantIds": ["customer-a", "customer-b"] }`
-  (DTO and storage fixed by AB#8345; additive only if a CK change is needed).
+  (DTO and storage fixed by the allow-list part; additive only if a CK change is needed).
 - Default: empty list = no tenant may look up or grant S's users. Existing tenants are unchanged by the upgrade.
 - Only S administrators read or change the list; T administrators get `403`. No endpoint reveals which tenants S
   permits — a non-permitted T sees the same `404`/`403` as for a non-existent tenant.
 - Every change is audited in S (§7).
 - The backend stories build against `ISourceTenantGrantPolicy.IsPermittedAsync(sourceTenantId, targetTenantId)`. Until
-  AB#8345 ships, the default implementation **denies every non-ancestor**: lookups of sibling users answer `404`,
+  the allow-list part ships, the default implementation **denies every non-ancestor**: lookups of sibling users answer `404`,
   sibling creates `403`. Tests use a permitting test policy.
 - S removes T from the list: lookups and new grants from T stop at once; existing grants are refused at the next token
   exchange (§8).
 
-As built (AB#8345, `src/IdentityServerPersistence/Services/SourceTenantGrants/`):
+As built (`src/IdentityServerPersistence/Services/SourceTenantGrants/`):
 
 - Storage: no CK change. The list is the tenant configuration row `CrossTenantGrantPermissions` (a
   `System/TenantConfiguration` entity, the storage of `ITenantContext.Get/SetConfigurationAsync`) in **S's own
@@ -268,14 +272,14 @@ As built (AB#8345, `src/IdentityServerPersistence/Services/SourceTenantGrants/`)
   validation (`400`, nothing written): list required, no empty entry, valid tenant id format (≤ 64 ASCII letters,
   digits, `-`, `_`), at most 200 entries, not S itself. Entries are **not** checked for existence, so the route is no
   tenant directory. Each change is logged (`added`, `removed`, caller); every change (added or removed entries) is also written into S's event log as `Identity.CrossTenantGrantPermissionsChanged` (§7); a `PUT` that leaves the list unchanged writes no event.
-- Concurrency (AB#8432, see §6.1).
-- The lookup route (AB#8341) uses the policy now; mapping create (`403 SourceTenantNotPermitted`, AB#8343) and the
-  exchange gate and revocation (AB#8343, AB#8344) ask the same `ISourceTenantGrantPolicy`.
+- Concurrency (see §6.1).
+- The lookup route uses the policy now; mapping create (`403 SourceTenantNotPermitted`) and the
+  exchange gate and revocation ask the same `ISourceTenantGrantPolicy`.
 
-### 6.1 Concurrent edits: `ETag` / `If-Match` (AB#8432)
+### 6.1 Concurrent edits: `ETag` / `If-Match`
 
 `PUT` replaces the whole list, so two administrators editing at once could lose each other's entry. Optimistic
-concurrency prevents it (decided by Odin, wireframe AB#8426 open point O2):
+concurrency prevents it (decided in review, wireframe open point O2):
 
 - `GET` and every successful `PUT` answer an `ETag`: a strong tag derived **from the normalized list only**
   (SHA-256, quoted). The same list always has the same tag — a tenant that never set the list and one that set `[]`
@@ -287,7 +291,7 @@ concurrency prevents it (decided by Odin, wireframe AB#8426 open point O2):
   (`W/"…"`) or an unparsable header never matches; a list of tags matches when one does; `*` matches any list.
 - `PUT` without `If-Match`: **`428`** (`IfMatchRequired`, nothing written) when
   `Identity:CrossTenantGrantPermissions:RequireIfMatch` is on (env `OCTO_IDENTITY__CROSSTENANTGRANTPERMISSIONS__REQUIREIFMATCH=true`).
-  While it is off — the default during the client rollout — the list is replaced unconditionally, as before AB#8432.
+  While it is off — the default during the client rollout — the list is replaced unconditionally, as earlier.
 - A `PUT` that leaves the list as it is writes **nothing** — not even `changedBy`/`changedAtUtc` — records no event and
   answers `200` with the unchanged tag. An unreadable row (written by hand) reads as empty and is always rewritten, so
   a `PUT` repairs it.
@@ -299,8 +303,8 @@ concurrency prevents it (decided by Odin, wireframe AB#8426 open point O2):
 
 Client rollout (switch order):
 
-1. Identity with AB#8432 (`RequireIfMatch` off): `ETag` everywhere, `If-Match` checked when sent. Clients without it
-   (Refinery Studio AB#8430, octo-frontend-libraries `setCrossTenantGrantPermissions(ids)`, octo-sdk
+1. Identity with the `ETag` support (`RequireIfMatch` off): `ETag` everywhere, `If-Match` checked when sent. Clients without it
+   (Refinery Studio, octo-frontend-libraries `setCrossTenantGrantPermissions(ids)`, octo-sdk
    `UpdateCrossTenantGrantPermissions(dto)` without `ifMatch`) keep working unchanged, with last-writer-wins.
 2. Clients read the `ETag` and send it as `If-Match` (octo-frontend-libraries: read the header and pass it back;
    Studio: keep the tag of the loaded list; octo-sdk: a get method that returns the tag). `412` is already handled
@@ -308,7 +312,7 @@ Client rollout (switch order):
 3. `RequireIfMatch=true` per cluster once every client of that cluster sends `If-Match`; later the default becomes
    `true`.
 
-## 7. Audit events (AB#8342)
+## 7. Audit events
 
 Written through `IIdentityAuditService` into the runtime event log of the tenant(s) named (source
 `RtEventSourcesEnum.IdentityService`). Fields: event name, actor (caller tenant + user name), source tenant, target
@@ -317,44 +321,44 @@ tenant, mapping id, group names. Never the looked-up identifier of a miss in cle
 | Event (= event category) | Written to |
 |-------|-----------|
 | `Identity.CrossTenantLookup` (hit / miss) | T and S; a miss for a non-existent S only in T |
-| `Identity.CrossTenantGrantCreated` | T; S only when S is a registry ancestor of T or permits T (AB#8436) |
-| `Identity.CrossTenantGrantChanged` (roles / groups) | T; S only when S is a registry ancestor of T or permits T (AB#8436) |
-| `Identity.CrossTenantGrantRemoved` | T; S only when S is a registry ancestor of T or permits T (AB#8436) |
+| `Identity.CrossTenantGrantCreated` | T; S only when S is a registry ancestor of T or permits T |
+| `Identity.CrossTenantGrantChanged` (roles / groups) | T; S only when S is a registry ancestor of T or permits T |
+| `Identity.CrossTenantGrantRemoved` | T; S only when S is a registry ancestor of T or permits T |
 | `Identity.CrossTenantFirstExchange` (shadow user created with roles) | T and S |
 | `Identity.CrossTenantExchangeRefused` (exchange refused for a sibling source) | T and S |
-| `Identity.CrossTenantGrantPermissionsChanged` (permission list changed, AB#8345) | S |
+| `Identity.CrossTenantGrantPermissionsChanged` (permission list changed) | S |
 
-Grant events name S and the source user as stored in the mapping: since AB#8343 the create takes the user name from
+Grant events name S and the source user as stored in the mapping: the create takes the user name from
 S's user record and refuses a user S does not have, so a newly created mapping carries no free-text name. Mappings
-stored before AB#8343 keep the name the administrator of T sent. So that no tenant can place (or
+stored earlier keep the name the administrator of T sent. So that no tenant can place (or
 flood) events in a foreign tenant's log, `RecordGrantAsync` writes into S only when S is a registry ancestor of T or
 `ISourceTenantGrantPolicy` says S permits T; otherwise the event is recorded in T only (a failed decision counts as "not
-permitted", AB#8436).
+permitted").
 
 An audit write never breaks the request; a failure is logged. `docs/authentication.md` (section "Cross-Tenant Grant
 Audit Events") lists the events and how an administrator reads them.
 
-As built (AB#8342): the event name is the event **category** (dotted, platform convention); `LIKE
+As built: the event name is the event **category** (dotted, platform convention); `LIKE
 "Identity.CrossTenant*"` reads them all. The refused exchange has level Warning and is written only for a sibling source.
-`Identity.CrossTenantGrantChanged` is written by the role `PUT`; the group route of AB#8343 calls the same recorder
-(`ICrossTenantGrantAuditRecorder.RecordGrantAsync`). AB#8345 writes the permission-list event (constant
+`Identity.CrossTenantGrantChanged` is written by the role `PUT`; the group route calls the same recorder
+(`ICrossTenantGrantAuditRecorder.RecordGrantAsync`). The allow-list part writes the permission-list event (constant
 `CrossTenantGrantAuditEvents.GrantPermissionsChanged`) by calling `IIdentityAuditService.StoreInfoAsync(sourceTenantId, eventName, message, details)`. Grant events are
 written for every mapping write through `ExternalTenantUserMappings` (also for an ancestor source) and for the ancestor flows
 under `AdminProvisioning/{targetTenantId}`: `POST` and `POST withGroups` → `GrantCreated`, `DELETE {mappingRtId}` →
 `GrantRemoved`, `provisionCurrentUser` → `GrantCreated` (outcome `created`) or `GrantChanged` (outcome `repaired`;
 `already-provisioned` writes nothing) — see `docs/authentication.md`. The group names of a removal are read before the
-delete in a session of their own; a failed read records the event without groups and never breaks the deletion (AB#8437).
+delete in a session of their own; a failed read records the event without groups and never breaks the deletion.
 The first exchange is recorded for every source tenant.
 
-## 8. Token exchange and revocation (AB#8343, AB#8344)
+## 8. Token exchange and revocation
 
 - Exchange gate (`CrossTenantAuthenticationService.ValidateCrossTenantAccessAsync`, used by `TenantExchangeProcessor`):
   when S is no registry ancestor of T, admit only if a mapping for (S, user) exists in T **and** the policy permits
-  (S, T) **at exchange time**. AB#7855 (sign-in block), AB#8304 (decide, then create the `xt_` user) and "no refresh
+  (S, T) **at exchange time**. the sign-in block, the decide-then-create rule for the `xt_` user and "no refresh
   token on exchanged tokens" are unchanged.
 - First exchange: the `xt_` shadow user gets exactly the roles of the mapping's groups plus its direct roles — nothing
   from S, nothing else in T.
-- As built (AB#8343): the gate reads the mapping from T's database (`ExternalTenantUserMappingLookup`) and asks the
+- As built: the gate reads the mapping from T's database (`ExternalTenantUserMappingLookup`) and asks the
   policy on every call. With a mapping in place but S no longer permitting T, the token exchange answers
   `access_denied` with the description prefix `grant_not_permitted`
   (`TenantExchangeProcessor.GrantNotPermittedMarker`); without a mapping it answers `unauthorized_client` as before. The
@@ -364,22 +368,22 @@ The first exchange is recorded for every source tenant.
   withdraws T from its allow-list, or when the mapping has **no effective role left** — its direct `roleIds` and the
   roles of all its groups taken together (removing one group or emptying one group's roles revokes only if nothing else
   still grants a role). A token already issued stays valid until its
-  `exp` (exchanged tokens are short-lived and carry no refresh token; AB#8344 documents the lifetime in
+  `exp` (exchanged tokens are short-lived and carry no refresh token; the revocation part documents the lifetime in
   `docs/authentication.md`). No GroupMember / AssignedRole edge of a deleted mapping stays behind; re-granting the same
   user works without `409` and yields the new groups' roles only. The role-less `xt_` user left behind is removed by the
-  cleanup of AB#8305.
-- As built (AB#8344): the gate's sibling check (`CrossTenantAuthenticationService.EvaluateSiblingGrantAsync`) also
+  cleanup.
+- As built: the gate's sibling check (`CrossTenantAuthenticationService.EvaluateSiblingGrantAsync`) also
   requires an effective role of the mapping in T (direct `MappedRoleIds` plus the roles of its groups, nested groups
   included, roles that still exist). The exchange words the refusals through
   `ICrossTenantAuthenticationService.GetSiblingGrantRefusalAsync` (`SiblingGrantRefusal`): `NotPermitted` →
   `access_denied` / `grant_not_permitted`; `NoEffectiveRole` and `Removed` (no mapping, but the user's `xt_` shadow user
   exists in T) → `access_denied` / `tenant_not_provisioned`; a sibling user T never granted keeps `unauthorized_client`.
   Roles or groups attached directly to the `xt_` user are **not honoured** without an effective grant (decision: not
-  removed — no write on the shadow user, AB#8305 deletes it). The delete paths needed no change: `DeleteOptions.Erase`
+  removed — no write on the shadow user, the shadow-user cleanup deletes it). The delete paths needed no change: `DeleteOptions.Erase`
   takes the mapping's `GroupMember` edges with it (proven by test). Token lifetime and audit: `docs/authentication.md`,
   *Removing a Sibling-Tenant Grant*.
 
-## 9. Client flow (Studio AB#8314, octo-cli, MCP)
+## 9. Client flow (Studio, octo-cli, MCP)
 
 1. The administrator, signed in to T, enters the source tenant id and the exact user name or e-mail.
 2. `POST ExternalTenantUserMappings/sourceUserLookup` → `200` shows `userName` / `displayName`; `404` shows one neutral
@@ -396,19 +400,6 @@ SDK (octo-sdk, `IIdentityServicesClient`, client's tenant = T):
 | `Task CreateExternalTenantUserMapping(CreateExternalTenantUserMappingDto mapping)` | create, `GroupIds` optional |
 | `GetExternalTenantUserMappings`, `GetExternalTenantUserMapping`, `DeleteExternalTenantUserMapping` | unchanged |
 
-Compatibility: an identity service without AB#8343 ignores `groupIds` (the mapping is stored without groups) and has no
+Compatibility: an identity service without the group support ignores `groupIds` (the mapping is stored without groups) and has no
 lookup route (`404` without code — the SDK throws, it does not answer `null`). Clients send `groupIds` and call the
-lookup only against identity services that contain AB#8341/AB#8343.
-
-## 10. Stories
-
-| Story | Part |
-|-------|------|
-| AB#8340 | this contract, SDK DTOs and client signatures |
-| AB#8341 | lookup route, uniform 404, rate limit |
-| AB#8342 | audit events in both tenants |
-| AB#8343 | create with `groupIds`, exchange gate for sibling sources |
-| AB#8344 | revocation at the next exchange |
-| AB#8345 | allow-list in S, production `ISourceTenantGrantPolicy`, permission routes |
-| AB#8432 | `ETag` / `If-Match` on the allow-list, unchanged `PUT` writes nothing |
-| AB#8314 | Studio dialog (Feature of Studio & UX) |
+lookup only against identity services that contain the lookup route and the group support.

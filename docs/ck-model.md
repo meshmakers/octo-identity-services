@@ -5,7 +5,7 @@ applies_to: src/Persistence.IdentityCkModel/**, src/IdentityServerPersistence/Se
 
 # CK model, ownership and data migrations
 
-## CK Model Data Migrations Run Once per Tenant Setup (CK v2 D8/N2, AB#5902)
+## CK Model Data Migrations Run Once per Tenant Setup (CK v2 D8/N2)
 
 `DefaultConfigurationCreatorService.SetupTenantAsync` captures the tenant's schema versions **before** the
 CK model imports, imports System.Identity / System.Notification, and then runs its own data-migration pass
@@ -28,9 +28,9 @@ History comes from `ICkModelUpgradeService.GetInstalledVersionsAsync` (latest su
 the same source the upgrade service uses. Tests:
 `tests/IdentityServerPersistence.UnitTests/Services/DefaultConfigurationCreatorServiceSchemaVersionMergeTests.cs`.
 
-## Embedded CK Models: "Embedded or Newer" (CK v2 Phase 1 G-H2 / R-L4, AB#5902)
+## Embedded CK Models: "Embedded or Newer" (CK v2 Phase 1 G-H2 / R-L4)
 
-Since the engine's downgrade guard (engine-mongodb, AB#5900) a tenant may keep a **newer** System /
+Since the engine's downgrade guard (engine-mongodb) a tenant may keep a **newer** System /
 System.Identity / System.Notification than this service embeds (rollback, an old replica during a
 rolling update). Never decide with `ITenantContext.IsCkModelExistingAsync(SystemIdentityCkIds.CkModelId)`:
 it matches the **exact** version `[x.y.z]`. Use `CkModelCompatibility`
@@ -60,10 +60,10 @@ check (`IsCkModelSatisfiedAsync`, any major). Tests: `CkModelCompatibilityTests`
 `tests/IdentityServices.IntegrationTests/Persistence/CkModelCompatibilityIntegrationTests.cs`, which
 re-key the tenant's System.Identity `CkModel` row to a newer version.
 
-## Tenant-owned attributes: a blueprint update never reverts an administrator's decision (AB#6324, AB#6329; System.Identity 2.23.0)
+## Tenant-owned attributes: a blueprint update never reverts an administrator's decision (System.Identity 2.23.0)
 
 A blueprint update imports its seed with `ImportStrategy.Upsert` (a full ReplaceOne); the engine keeps an attribute only when its
-ownership is not seed-owned. Audit AB#6317 (incident class AB#6310) found decisions an administrator takes in the product that were
+ownership is not seed-owned. An audit found decisions an administrator takes in the product that were
 seed-owned, so an update silently undid them. System.Identity 2.23.0 (minor, `ownership` change per `ck-semver-rules`; attribute ids,
 types and defaults unchanged, no migration entry) marks them:
 
@@ -72,7 +72,7 @@ types and defaults unchanged, no migration entry) marks them:
 | `DataPolicy` | `PolicyEnforcementMode`, `PolicyScope` | `TenantOwned` | Seeds ship AuditOnly / All; the administrator flips to Enforce / narrows to OwnedOnly. Reverting would silently switch authorization enforcement off. Not a credential, part of the tenant's definition, so an `ExportRt` carries it |
 | `Client` (assignment overrides) | `System/Enabled`, `AllowedGrantTypes`, `AllowedScopes`, `AutoProvisionInChildTenants` | `TenantOwned` | An update must not re-enable a disabled client or widen narrowed access. `System/Enabled` is shared, hence an override, not a definition change |
 | `Client` (assignment override) | `Secrets` | `Secret` | Credential hashes: kept on a re-apply, left out of an `ExportRt` |
-| `ApiResource` (assignment override) | `Secrets` (`ApiSecrets`) | `Secret` | Introspection secret hashes, same decision as `Client.Secrets`. The Identity.Bootstrap seed writes the attribute (empty) on both seeded API resources, so it was seed-owned in effect (AB#6443, System.Identity 2.24.0) |
+| `ApiResource` (assignment override) | `Secrets` (`ApiSecrets`) | `Secret` | Introspection secret hashes, same decision as `Client.Secrets`. The Identity.Bootstrap seed writes the attribute (empty) on both seeded API resources, so it was seed-owned in effect (System.Identity 2.24.0) |
 | `Resource` (inherited by `ApiResource`, `ApiScope`, `IdentityResource`) | `System/Enabled` | `TenantOwned` | Same as the client switch |
 
 A fresh tenant still gets the seed values. **Consequence for blueprint authors:** a seed initialises these values on a new entity but can
@@ -81,7 +81,7 @@ no longer change them on an existing one (not even tighten a policy or a client)
 `BlueprintOwnershipIntegrationTests` (real MongoDB; compiled ownership, shipped policy seed, Enforce over an AuditOnly seed, client,
 secrets, resources).
 
-## Credential material of a user is `Secret`: never exported, kept on a re-apply (AB#7766; System.Identity 2.27.0)
+## Credential material of a user is `Secret`: never exported, kept on a re-apply (System.Identity 2.27.0)
 
 Audit finding H3: `User.PasswordHash`, `User.SecurityStamp` and `User.UserTokens` (the `UserToken` record holds the TOTP key and the
 recovery codes in `Value`) were `SeedOwned`, so an `ExportRt` (export as template, tenant clone) carried them. They are now
@@ -91,45 +91,45 @@ recovery codes in `Value`) were `SeedOwned`, so an `ExportRt` (export as templat
 rates it **Minor**, ids, types and defaults are unchanged, no migration entry, still ckLanguage 1 (the access modifiers followed with 2.28.0, below).
 **Consequence (only up to 2.27.0):** a tenant cloned with ExportRt/ImportRt under 2.27.0 carried its users without password and 2FA
 material; they reset the password in the target tenant. **Since 2.28.0 `ImportRt` refuses users altogether** — there is no user
-export/import any more; the supported ways are listed in octo-documentation `technologyGuide/identityService/users-and-roles.md`
+export/import any more; the supported ways are listed in `octo-documentation/src/octo-mesh-documentation/docs/technologyGuide/identityService/users-and-roles.md`
 § *Moving Users to Another Tenant* (`#moving-users-to-another-tenant`): repository dump/restore, creating the users again, a
 cross-tenant user mapping, external sign-in with self-registration. No blueprint seeds `System.Identity/User` (`BootstrapBlueprintSeed_DoesNotSeedUsers` guards it). A repository
 dump is unaffected. Tests: `CredentialMaterialExportIntegrationTests` (real MongoDB; compiled ownership, converter output of a user
 with hash/stamp/tokens, Upsert of a seed-shaped user keeps all three).
 
-## Identity method declarations (AB#7773; System.Identity 2.29.0)
+## Identity method declarations (System.Identity 2.29.0)
 
 `User`, `Group`, `Client` and `DataPermission` declare their identity operations as CK methods (declarations only; the handlers and the
-method host follow with AB#5672, AB#7774, AB#7776-AB#7780, the typed GraphQL mutations with F3.7). Until a handler is registered the gateway
+method host follow with the handler stories, the typed GraphQL mutations with F3.7). Until a handler is registered the gateway
 answers `METHOD_HANDLER_NOT_AVAILABLE`; the REST API is unchanged. **Release the identity service with this model only when the handler
 stories are merged.**
 
 | Type | Methods (`-1`) | Roles |
 |------|----------------|-------|
-| `User` | `ChangePassword` (instance, `allowSelf`, no role), `ResetPassword`, `SetRoles`, `AddRole`, `RemoveRole`, `Merge` (handler AB#7778), static `CreateUser` (handler AB#7777); `DisableTwoFactor` since 2.30.0 (AB#7879) | `UserManagement` |
+| `User` | `ChangePassword` (instance, `allowSelf`, no role), `ResetPassword`, `SetRoles`, `AddRole`, `RemoveRole`, `Merge` (own handler), static `CreateUser` (own handler); `DisableTwoFactor` since 2.30.0 | `UserManagement` |
 | `Group` | `AddMember`, `RemoveMember` (`memberKind` enum `GroupMemberKind` = `User`/`Client`, `memberId`), `SetRoles` | `UserManagement` |
 | `Client` | `AddSecret` (result `sensitive`: the generated secret, shown once), `RemoveSecret` (by `secretValue`, REST parity) | `TenantManagement`, `UserManagement` |
 | `DataPermission` | `GrantToRole`, `RevokeFromRole` | `UserManagement` |
 
 Rules behind the shape (do not change them without reading this):
 - **Roles = REST parity** (`IdentityApiAuthorizationPolicies`: `UserAdministrationRoles`, `TenantAdministrationRoles`). Every method declares
-  `authorization.dataAccess: Write` explicitly (AB#7036; the effective default, so no SemVer change; it raises the model's `minEngineVersion`).
+  `authorization.dataAccess: Write` explicitly (the effective default, so no SemVer change; it raises the model's `minEngineVersion`).
 - **`sensitive` on every password or secret parameter** (`currentPassword`, `newPassword`, `password`, `secretValue`) and on the `AddSecret`
   result; such a method can never have a pipeline handler (compiler messages 132/134). Pinned by `IdentityMethodDeclarationsIntegrationTests`.
 - **`Create` is a reserved method name** (compiler error 102: `Create`, `Update`, `Delete` belong to the generic mutations) - the static user
   method is `CreateUser-1`.
-- **`replacesGenericCreate` only on `User.CreateUser-1` (3.0.0, AB#8053).** Group, Client and DataPermission are seeded by
-  `System.Identity.Bootstrap` (the flag would make AB#7121 refuse every new tenant), so they do not carry it. On `User` the flag is a
-  **MAJOR** change of the model (row M16 of `docs/ck-semver-rules.md` in octo-construction-kit-engine: a new method with the flag on an
+- **`replacesGenericCreate` only on `User.CreateUser-1` (3.0.0).** Group, Client and DataPermission are seeded by
+  `System.Identity.Bootstrap` (the flag would make the engine refuse every new tenant), so they do not carry it. On `User` the flag is a
+  **MAJOR** change of the model (row M16 of `octo-construction-kit-engine/docs/ck-semver-rules.md`: a new method with the flag on an
   existing type, decision 2026-10-19) and shipped with System.Identity 3.0.0; until 2.30.0 the engine stood in for it with a runtime rule
-  (AB#7777), which was removed. No blueprint seeds a User.
-- **No `LAST_ADMIN_PROTECTED`**: the REST API has no last-admin rule (AB#7914 refuses it with `METHOD_FORBIDDEN` / `last-administrator`). `User.DisableTwoFactor-1` followed in 2.30.0 (AB#7879, section below).
+ , which was removed. No blueprint seeds a User.
+- **No `LAST_ADMIN_PROTECTED`**: the REST API has no last-admin rule (refuses it with `METHOD_FORBIDDEN` / `last-administrator`). `User.DisableTwoFactor-1` followed in 2.30.0 (section below).
 - `compatibility.acknowledge` of 2.28.0 is gone (an acknowledgement is valid for one release, OCTO-CK204). `octo-ckc ValidateVersion`
   against the published 2.28.0: **MINOR** (15 additions, no Major row).
 - Tests: `IdentityMethodDeclarationsIntegrationTests` (compiled model from the CK cache of a real tenant: method set, roles, sensitive
-  parameters and result, write access, no replacesGenericCreate). Docs: octo-documentation `identityService/methods.md` (en + de).
+  parameters and result, write access, no replacesGenericCreate). Docs: `octo-documentation/src/octo-mesh-documentation/docs/technologyGuide/identityService/methods.md` (en + de).
 
-## Access modifiers on `RtUser`, first ckLanguage 2 release (AB#7772; System.Identity 2.28.0)
+## Access modifiers on `RtUser`, first ckLanguage 2 release (System.Identity 2.28.0)
 
 Closes accepted risk R13 (password hashes and security fields readable through generic GraphQL). `ckModel.yaml` is `ckLanguage: 2`; the
 `User` assignments carry `access`:
@@ -141,7 +141,7 @@ Closes accepted risk R13 (password hashes and security fields readable through g
 | `ReadOnly` | `AccessFailedCount`, `LockoutEnd` (readable; importable; written by the identity service) |
 
 `ConcurrencyStamp` does not exist in this model. All seven attribute definitions are `securitySensitive: true`, so the tightening is **Minor +
-acknowledge** (row T7a of `docs/ck-semver-rules.md` in `octo-construction-kit-engine`: the one release that moves a classic model to
+acknowledge** (row T7a of `octo-construction-kit-engine/docs/ck-semver-rules.md`: the one release that moves a classic model to
 ckLanguage 2, once per model; entries in `compatibility.acknowledge`). The next release follows the normal rule (T7) again: loosening is Minor,
 tightening another attribute is Major. Every existing type and record declares `derivable: Any` (the ckLanguage 2 default is `Model`; the flip
 would be a Major of its own) - **declare it on every new type/record that should stay derivable elsewhere**.
@@ -153,10 +153,10 @@ identity seed, blueprint or migration writes these attributes (`BootstrapBluepri
 an import (a test seed, a tool) creates the user through the repository instead. Tests: `CredentialMaterialExportIntegrationTests` (compiled
 access values, `OCTO-CK139` refusal per attribute, ReadOnly import still possible, repository writes of all seven attributes still work).
 
-## Blueprint-owned opt-in: `DataPolicy.ProtectBlueprintLocked` (AB#6384; System.Identity 2.24.0)
+## Blueprint-owned opt-in: `DataPolicy.ProtectBlueprintLocked` (System.Identity 2.24.0)
 
 `ProtectBlueprintLocked` (optional Boolean, default `false`) is the opt-in of the engine's blueprint-lock write guard
-(`DataPermissionWriteGuard` in `octo-construction-kit-engine`, message number 6384, `docs/blueprints.md` there). It is a
+(`DataPermissionWriteGuard` in `octo-construction-kit-engine`, message number 6384, `octo-construction-kit-engine/docs/blueprints.md`). It is a
 **restriction, not a grant**: for the policy's target CK types (derived types inherit) a non-system caller can no longer update or delete an
 entity whose stored `RtBlueprintLocked` is `true`, nor set or change `RtBlueprintLocked`, `RtBlueprintSource` and `RtBlueprintAppliedAt`. The policy's own
 `PolicyEnforcementMode` decides between refusal (`Enforce`) and audit only (`AuditOnly`).
@@ -164,7 +164,7 @@ entity whose stored `RtBlueprintLocked` is `true`, nor set or change `RtBlueprin
 - **Ownership: `SeedOwned`** (blueprint-owned) - the opposite of `PolicyEnforcementMode` / `PolicyScope`. The blueprint author decides which
   types are protected; every blueprint update or forced re-apply puts the product's value back, so a user with write access to `DataPolicy`
   cannot switch the protection off for good, and a later blueprint version can tighten or loosen it. A policy without the attribute reads as
-  `false`. A seed that merely *omits* it does not switch a stored `true` off (the import's blanking guard keeps the value, AB#6313): ship an explicit
+  `false`. A seed that merely *omits* it does not switch a stored `true` off (the import's blanking guard keeps the value): ship an explicit
   `false` to take a protection back.
 - **Default `false`**; an engine or tenant on an older System.Identity reads the attribute as `false`: existing policies and tenants are
   unaffected. The shipped `System.Identity.Bootstrap` policies do not opt in.
@@ -176,12 +176,12 @@ entity whose stored `RtBlueprintLocked` is `true`, nor set or change `RtBlueprin
   attribute = false, bootstrap policies do not opt in, and an end-to-end check that a policy with the flag makes the engine guard refuse a user
   write on a locked entity while an unlocked one and the system stay writable).
 - CK dependents: no CK model depends on `System.Identity`; blueprints pin it by ranges (`[2.11,3.0)` up to `[2.14.0,3.0)`), which 2.24.0 satisfied, so
-  no dependent needed a rebuild. Only a blueprint that uses the flag needs the raised floor. **Since 3.0.0 (AB#8053) every `[2.x,3.0)` range is
+  no dependent needed a rebuild. Only a blueprint that uses the flag needs the raised floor. **Since 3.0.0 every `[2.x,3.0)` range is
   unsatisfied** (a range stays inside one major): each dependent blueprint needs a new version with `System.Identity-[3.0.0,4.0)`.
 
-## System.Identity 2.x -> 3.x needs migration entries (AB#8157)
+## System.Identity 2.x -> 3.x needs migration entries
 
-The CK engine refuses a schema-only bridge across a major (`CkMigrationMajorVersionGuard`, AB#4924 G3) as soon as the target model ships
+The CK engine refuses a schema-only bridge across a major (`CkMigrationMajorVersionGuard`) as soon as the target model ships
 a `migration-meta.yaml`, which System.Identity does. System.Identity 3.0.0 shipped without an entry from 2.x: every tenant upgrade failed with
 "No migration path found from System.Identity-2.30.0 to System.Identity-3.0.0" and the identity service stopped (test-2 outage). 3.0.1 adds
 one entry per 2.x minor from 2.9.0 to 2.30.0, all pointing at the empty script `2.x-to-3.0.1.yaml` (`steps: []`; nothing is migrated - the
@@ -190,16 +190,16 @@ on a release line must extend the list.** Test: `SystemIdentityMajorUpgradeInteg
 and upgraded through `SetupAsync`; the path finder for every 2.x minor from 2.0.0). The earlier asset-repo `IdentityMajorUpgradeFlowTests`
 missed the outage because its embedded 3.0.0 snapshot carries no migration-meta (no-migrations bridge).
 
-## Identity-owned User fields are refused on the generic paths (AB#8042, AB#8053)
+## Identity-owned User fields are refused on the generic paths
 
-Generic writes of the identity-owned User fields are refused by the model since System.Identity 3.0.0 (AB#8053): `NormalizedUserName`,
+Generic writes of the identity-owned User fields are refused by the model since System.Identity 3.0.0: `NormalizedUserName`,
 `NormalizedEmail`, `EmailConfirmed`, `PhoneNumberConfirmed`, `TwoFactorEnabled`, `LockoutEnabled`, `LockoutEnd`, `AccessFailedCount`,
 `ResetPasswordOnLogin`, `Claims` (`UserClaims`), `UserLogins` and `PreferredChannelBindingId` are `access: MethodOnly` in `ck-user.yaml`
 (with `UserName` and `Email` from 2.28.0), and their definitions are `securitySensitive: true`. The generic access guards enforce it for
 every caller: asset-repo GraphQL (`ATTRIBUTE_NOT_WRITABLE`), `ImportRt` and blueprint seeds (OCTO-CK139), the mesh-adapter write nodes. The
 engine keeps only the **associations** in a list (`IdentityOwnedWrites.AssociationRoleIds`: `AssignedRole`, `GroupMember`, `ChildGroup`,
 `MayActAs`, `GrantsPermission`; asset-repo GraphQL, mesh-adapter write nodes, caller `ImportRt`, message 140) because the CK access model
-cannot restrict association writes. In 2.x (AB#8042) the attributes were a runtime list, because tightening attributes that were never
-`securitySensitive` is a Major (row T7, AB#6585). **Nothing in this service is affected**: every identity write (stores, REST, methods,
+cannot restrict association writes. In 2.x the attributes were a runtime list, because tightening attributes that were never
+`securitySensitive` is a Major (row T7). **Nothing in this service is affected**: every identity write (stores, REST, methods,
 provisioning, migrations, the bus consumer's `MayActAs`/`AssignedRole` edges, the preferred-channel self-service) goes through
 `ITenantRepository`, which the guards do not touch, and the Bootstrap seed (TenantOwners `AssignedRole` edges) is a system import.

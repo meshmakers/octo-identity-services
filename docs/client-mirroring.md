@@ -5,9 +5,9 @@ applies_to: ClientMirror*.cs, src/IdentityServices/Services/**
 
 # Tenant binding of client-credentials tokens and client mirroring
 
-## `tenant_id` on Client-Credentials Tokens (AB#5032)
+## `tenant_id` on Client-Credentials Tokens
 
-Until AB#5032 a `client_credentials` access token carried `client_id`, `scope` and (since AB#4183)
+Previously a `client_credentials` access token carried `client_id`, `scope` and (since client roles)
 `role` — but **no `tenant_id`**. The claim had a single producer, the user profile/claims path, which
 the client-credentials grant never reaches because it has no subject. `acr_values=tenant:X` on
 `/connect/token` only selected which tenant's `ClientStore` resolved the client; nothing copied X into
@@ -25,7 +25,7 @@ tenant, and `TokenEndpointController.HandleClientCredentialsAsync` stamps it:
 
 - The tenant comes from `HttpContext.Items[tenantId]`, which `OidcTenantResolutionMiddleware` wrote
   from `acr_values`. When no `acr_values` was sent, the client lookup ran against the **system
-  tenant** — so that is what is stamped. ⚠️ **That fall-back was narrowed by AB#5058 (below): it now
+  tenant** — so that is what is stamped. ⚠️ **That fall-back was narrowed by the ambiguity refusal (below): it now
   applies only when the client id is unambiguously bound to one tenant.**
 - The claim is stamped **before** the roles. Under Duende the role branch returned early for a client
   with no roles, which would have left exactly the most likely legacy clients shipping tenant-less
@@ -49,7 +49,7 @@ and `octo-mesh-adapter` `ServiceAccountTokenService` adds it from the adapter's 
 `ServiceAccountConfiguration.TenantId` on all three of its client-credentials call sites. So the
 `tenant_id` match alone carries them; no client-id allow-list is needed for either.
 
-Consumers narrow the exemption behind their own staged switch — see octo-common-services CLAUDE.md
+Consumers narrow the exemption behind their own staged switch — see `octo-common-services/docs/tenant-authorization.md`
 § "Tenant Authorization — the service-token exemption". This service also calls
 `AddOctoTenantAuthorization(builder.Configuration)` so the switch is settable per environment
 (`OCTO_TENANTAUTHORIZATION__…`); its defaults keep today's behaviour.
@@ -58,19 +58,19 @@ Tests: `tests/IdentityServices.UnitTests/Services/ClientCredentialsTokenClaimsTe
 decision, plus `ClientCredentialsClaimCompositionTests` for the destination routing) and — the
 wire-level proof — `TokenShapeGoldenTests.ClientCredentials_AccessTokenShape_MatchesGoldenBaseline`,
 whose recorded `client-credentials-access-token.json` now carries `tenant_id`. That is a **deliberate
-golden re-record**, the third of the migration after the access-token identity claims (AB#5007) and
-the on-behalf-of grant entry (AB#5026); the diff is exactly that one added claim.
+golden re-record**, the third of the migration after the access-token identity claims and
+the on-behalf-of grant entry; the diff is exactly that one added claim.
 
-## Ambiguous Tenant Binding on `client_credentials` (AB#5058)
+## Ambiguous Tenant Binding on `client_credentials`
 
-AB#5032's fall-back — "no `acr_values` ⇒ the client store resolved against the system tenant, so
+The tenant-stamping fall-back — "no `acr_values` ⇒ the client store resolved against the system tenant, so
 stamp the system tenant" — **does not survive client mirroring**. `AutoProvisionInChildTenants`
 provisions the *same* `ClientId` with the *same* secret into every child tenant
 (`ClientMirrorProvisioningService.CreateMirrorClient` copies `ClientSecrets` verbatim). For such a
 client id, "found in the system tenant" is not evidence of "belongs to the system tenant" — the
 binding is **ambiguous**, and a caller holding a child tenant's credentials could simply omit
 `acr_values` and be handed a system-tenant token. Every authorization asking "is the caller in the
-system tenant" — which is what the system-route hardening (AB#5055) builds on — was therefore
+system tenant" — which is what the system-route hardening builds on — was therefore
 trivially satisfiable with a service token.
 
 `ClientCredentialsTenantProcessor` now **refuses to guess**. On a `client_credentials` request
@@ -85,7 +85,7 @@ with no `acr_values` it decides the binding **server-side**, from state no calle
 Ambiguous ⇒ `invalid_request` with a description naming the remedy (the token endpoint answers with
 `Forbid`, which OpenIddict renders as the OAuth error response), plus a runtime-event-log entry
 "Client Credentials Tenant Ambiguity" carrying the client id and the reason, persisted through
-`IIdentityAuditService`. Unambiguous ⇒ unchanged AB#5032 behaviour, system tenant stamped.
+`IIdentityAuditService`. Unambiguous ⇒ unchanged tenant-stamping behaviour, system tenant stamped.
 
 > The Duende-era `ClientCredentialsTenantAmbiguityEvent` (category `ClientCredentials`, ID `50580`,
 > expanded by `OctoEventSink`) is gone with the event sink itself. `IIdentityAuditService` is the
@@ -97,14 +97,14 @@ Ambiguous ⇒ `invalid_request` with a description naming the remedy (the token 
   back to "system" — guessing there is exactly the escalation being closed. The blast radius is
   bounded: the probe runs *only* on the no-`acr_values` path.
 - 🔴 **Ordering matters.** The processor runs **before any claim is composed**, so a refused request
-  never carries a guessed `tenant_id`, and the AB#5032 invariant (tenant stamped before the roles) is
+  never carries a guessed `tenant_id`, and the tenant-stamping invariant (tenant stamped before the roles) is
   preserved for every accepted request.
 - **Caller inventory (checked across the whole `dev` checkout, not assumed).** No production caller
   is broken: `octo-mesh-adapter` `ServiceAccountTokenService` (all 3 call sites),
   `octo-ai-services` `McpTokenIssuer` and `octo-cli` (via `AuthenticatorOptions.TenantId`, guarded
   in `LogInClientCredentialsCommand`) all send `acr_values`. The only callers that omit it are the
   `octo-sdk` sample `Sdk.GraphQlCodeGenSample` (never assigns `AuthenticatorOptions.TenantId`) and
-  the `curl` recipe in `demo-energy-iq/docs/data-access-fh-salzburg.md` — both use ordinary,
+  the `curl` recipe of an energy demo repository — both use ordinary,
   unmirrored clients, so both keep working. Three call sites set the parameter only *conditionally*
   and would now surface a misconfiguration as a token error instead of a silent system-tenant token:
   `octo-sdk` `AuthenticatorClient.BuildClientCredentialsTokenRequest`, the two auto-re-acquisition
@@ -115,7 +115,7 @@ Ambiguous ⇒ `invalid_request` with a description naming the remedy (the token 
 - ⚠️ **Residual, by construction of the mirroring feature.** A mirror shares the parent's secret, so
   whoever holds a mirror's credentials also holds the parent's and can ask for the system tenant
   *explicitly*. No token-endpoint check distinguishes those two callers. The processor logs a
-  warning whenever a mirroring source obtains a system-tenant token, and **AB#5055 must not treat
+  warning whenever a mirroring source obtains a system-tenant token, and **system-route authorization must not treat
   `tenant_id == systemTenant` on a client-credentials token as proof of provenance on its own.**
   Closing it for real needs per-tenant mirror secrets.
 
@@ -129,9 +129,9 @@ and `Persistence/ClientMirrorProvisioningIntegrationTests.cs`
 a real mirror in MongoDB; the unit tests stub `GetMirrorsAsync`, so only these prove that an actually
 provisioned mirror is what makes the id ambiguous).
 
-## Per-Tenant Mirror Secrets (AB#5061) — step 1 of 2, gap still open
+## Per-Tenant Mirror Secrets — step 1 of 2, gap still open
 
-AB#5058 closed the *silent* half of the mirroring escalation. This is the start of the *explicit*
+The ambiguity refusal closed the *silent* half of the mirroring escalation. This is the start of the *explicit*
 half: a mirror shares the parent's secret, so a child credential **is** a parent credential and can
 ask for the system tenant outright.
 
@@ -153,7 +153,7 @@ why the fix could not simply forbid mirroring.
 - 🔴 **Preservation is load-bearing.** `ReconcileOwnSecret` carries an already-issued own secret across
   re-provisioning *and* across parent-side secret rotation. Both paths rewrite the mirror from the
   **parent's** state, so without it every service restart would silently invalidate every per-tenant
-  credential handed out. Same trap as the AB#5027 bus consumer's preserve branch.
+  credential handed out. Same trap as the service-account bus consumer's preserve branch.
 - 🔴 **`CreateMirrorClient` now deep-copies `ClientSecrets`.** It previously assigned the parent's list
   *by reference*; appending an own secret to it would make `SyncMirrorsForClientAsync` hand child *N*
   the secrets of children 1..*N-1* — a cumulative credential leak between sibling tenants.
@@ -163,12 +163,12 @@ why the fix could not simply forbid mirroring.
   (workload-deployment pipeline, one Vault pair per cluster — its own comments state the intent),
   `octo-ai-adapter` (`McpTokenIssuer`, one Helm/Vault pair per cluster) and `claude-agent`. None of
   them appears in any git-tracked config; all three are created with
-  `octo-cli -c AddClientCredentialsClient … -apic`. **AB#5055 must keep treating
+  `octo-cli -c AddClientCredentialsClient … -apic`. **system-route authorization must keep treating
   `tenant_id == systemTenant` on a client-credentials token as unproven** until the follow-up step
   removes the inherited secret.
 - The migration sequence, and the open decision between "own secrets only" and "forbid confidential
   mirroring entirely" (the counter-model being the per-tenant `octo-pipeline-sa-*` accounts of
-  AB#5027), are in `docs/CONCEPT-PER-TENANT-MIRROR-SECRETS.md`.
+  the service-account clients), are in `docs/CONCEPT-PER-TENANT-MIRROR-SECRETS.md`.
 
 Tests: `ClientMirrorOwnSecretTests` (own secret ≠ parent's, public client untouched, preservation on
 both rewrite paths, sibling-leak regression, no secret in the **rendered** log output via
@@ -182,7 +182,7 @@ superseded value).
 
 ## Client Mirroring Is Intentional — and What It Does Not Prove
 
-Worth stating plainly, because the AB#5032 / AB#5058 / AB#5061 sections above are all about the
+Worth stating plainly, because the tenant-stamping, ambiguity-refusal and mirror-secret sections above are all about the
 escalation and read as if mirroring were a defect. It is not.
 
 - **Mirroring is the point.** A client is described **once**, in one tenant, and made available to
@@ -202,15 +202,15 @@ escalation and read as if mirroring were a defect. It is not.
 - 🔴 **While the inherited secret is accepted, a `tenant_id` claim on a client-credentials token does
   not prove which tenant the caller came from** — only which tenant the token was issued *for*.
   Whoever holds a child's credentials holds the parent's. **Do not authorize on it** (this is exactly
-  what blocks **AB#5055**: `tenant_id == systemTenant` is not proof of provenance). Authorization for
+  what blocks **system-route authorization**: `tenant_id == systemTenant` is not proof of provenance). Authorization for
   service tokens belongs on **roles assigned to the client in the addressed tenant** — those are
   per-tenant by construction, and they answer the question authorization actually asks. Whether the
-  inherited secret is still in use is now measured (**AB#5065**, below).
+  inherited secret is still in use is now measured (**mirror-secret telemetry**, below).
 
-## Which Mirror Secret Matched (AB#5065) — step 3 of the migration
+## Which Mirror Secret Matched — step 3 of the migration
 
 Step 4 (drop the inherited secret) cannot be justified without knowing that nobody uses it, and before
-AB#5061 split the secrets there was nothing to tell apart. `MirrorSecretUsageTelemetry`
+the secrets were split there was nothing to tell apart. `MirrorSecretUsageTelemetry`
 (`IdentityServices/OpenIddict/`) supplies that number.
 
 - **Where it hangs — and why it moved.** Under Duende this decorated `ISecretsListValidator`, the one
@@ -245,7 +245,7 @@ AB#5061 split the secrets there was nothing to tell apart. `MirrorSecretUsageTel
   (`/octo-logs` skill).
 - 🔴 **No secret material is ever logged** — not the credential, not the stored hash, not a prefix.
   Pinned against the **rendered** output via `CapturingLogger<T>`, not against format strings.
-- **Log-only on purpose.** AB#5058's refusal next door persists an audit entry via
+- **Log-only on purpose.** The ambiguity refusal next door persists an audit entry via
   `IIdentityAuditService`, but that fires on a *rejected*
   request. This one fires on every
   *successful* authentication of the affected clients, so a runtime-event-log write per token request

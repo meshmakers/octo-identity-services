@@ -1,7 +1,12 @@
-# Concept — Resource indicators (RFC 8707) validated against the API resource store (AB#5193)
+---
+description: Background: concept of RFC 8707 resource indicators validated against the API resource store
+background: true
+---
+
+# Concept — Resource indicators (RFC 8707) validated against the API resource store
 
 Restores the pre-migration behaviour of the `resource` request parameter. Under Duende it was
-validated against the tenant's API resources; after the OpenIddict migration (AB#4989) it was
+validated against the tenant's API resources; after the OpenIddict migration it was
 validated against an allow-list nothing fills, so **every** value was rejected with
 `invalid_target` and no interactive MCP client (Claude Code) could log in on any environment.
 

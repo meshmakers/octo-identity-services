@@ -1,10 +1,15 @@
-# Rollout: Data Protection key ring encrypted at rest (AB#5530)
+---
+description: Background: rollout runbook for the Data Protection key ring encrypted at rest
+background: true
+---
+
+# Rollout: Data Protection key ring encrypted at rest
 
 The ASP.NET Data Protection key ring of identity services (cookies, antiforgery tokens, cross-tenant tokens
 `auth/cross-tenant-token`, everything protected with `IDataProtector`) is stored in the system MongoDB database
-(`RtDataProtectionKey`). Before AB#5530 the key material was stored as plain XML, so a database dump contained
+(`RtDataProtectionKey`). Previously the key material was stored as plain XML, so a database dump contained
 usable keys. Now the secret part of each key is wrapped with the **platform key ring** `SecretEncryption` — the
-same AES-256 key ring as `Secret` attributes (AB#5528/AB#5536). No certificate and no new secret are needed.
+same AES-256 key ring as `Secret` attributes. No certificate and no new secret are needed.
 
 Key ids, creation/activation/expiration dates and key material stay the same: **nobody is logged out** by the
 encryption or by the migration of existing keys. Details: `persistence.md` § Encryption at Rest.
@@ -12,7 +17,7 @@ encryption or by the migration of existing keys. Details: `persistence.md` § En
 ## Behaviour by flag
 
 `Identity:DataProtection:EncryptExistingKeys` — env `OCTO_IDENTITY__DATAPROTECTION__ENCRYPTEXISTINGKEYS`,
-helm value proposal `services.identity.dataProtection.encryptExistingKeys` (octo-helm-core, Heimdall's lane).
+helm value proposal `services.identity.dataProtection.encryptExistingKeys` (octo-helm-core).
 
 | | `false` (default, release 1) | `true` (step 2, per cluster) |
 |---|---|---|
@@ -54,7 +59,7 @@ tokens) becomes invalid. Therefore:
    unencrypted` is `0`. A second pod reports `0 encrypted now, 0 re-wrapped, 0 still unencrypted`.
 3. Verification (test-2 before prod): sign in to Refinery Studio with an existing session (no re-login), run a
    cross-tenant login, and confirm that the stored keys contain no plain key material: either from the startup log
-   (`P still unencrypted = 0`) or with a read-only query by Odysseus on the system database: no
+   (`P still unencrypted = 0`) or with a read-only query by an operator on the system database: no
    `RtDataProtectionKey` document whose `XmlData` contains `masterKey`. The test
    `RawDatabaseDump_ContainsNoUsableKeyMaterial` proves the same on a local database.
 4. Fresh installations (empty key store) need no step: their first key is already encrypted.

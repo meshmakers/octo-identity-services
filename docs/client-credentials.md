@@ -5,7 +5,7 @@ applies_to: **/SystemStores/Client*.cs, **/Services/{ClientGrants,PipelineServic
 
 # Client credentials, service accounts and client roles
 
-## Service-Account Clients over the Distribution Event Hub (AB#5027)
+## Service-Account Clients over the Distribution Event Hub
 
 The Communication Controller provisions one `client_credentials` service account per mesh adapter, so
 pipeline execution runs under a real identity. It can only reach this service **over the bus**: the
@@ -17,7 +17,7 @@ never wrote a `ClientSecrets` entry and never touched an association:
 | `DistClientDto` field (octo-common-services `Meshmakers.Octo.Services.Contracts`) | Consumer behaviour |
 |---|---|
 | `ClientSecret` (**plaintext**, optional) | Hashed with `OctoSecretHasher.HashSecret` (the same legacy SHA-256 convention `ClientsController` uses) and written as the single `ClientSecrets` entry. **Never** persisted or logged in the clear. |
-| `RequireClientSecret` (default `false`) | Written verbatim. The default reproduces the previous hard-coded behaviour, so every pre-AB#5027 producer keeps creating public clients unchanged. |
+| `RequireClientSecret` (default `false`) | Written verbatim. The default reproduces the previous hard-coded behaviour, so every producer that predates this option keeps creating public clients unchanged. |
 | `AssignedRoleNames` (optional) | Additive, idempotent `AssignedRole` edges — matched on `RtRole.NormalizedName` (upper-invariant). Roles not listed are never removed; an **unknown role name is logged and skipped**, not fatal, because the tenant's role seed runs on an independent trigger (the `SuccessIdentityDataSeedPending` case) and losing the whole identity-data setup over it would be far worse. |
 
 Two traps worth knowing:
@@ -39,8 +39,8 @@ success**, not an error: a token is issued, it simply has no `role` claim, and r
 fail closed. A service account lacking the tenant's fachliche roles (e.g. Accounting) therefore makes
 the feature go quiet with no error anywhere. When setting up delegation for a tenant, grant
 `octo-pipeline-sa-{adapterRtId}` those roles as well —
-`PUT {tenantId}/v1/clients/{clientId}/roles/{roleName}` or `octo-cli AddClientToRole`. Since AB#7928 the caller must hold
-a built-in role itself to grant it to a client (403 `role-not-held` otherwise); custom roles are free, and since AB#8564 a caller holding
+`PUT {tenantId}/v1/clients/{clientId}/roles/{roleName}` or `octo-cli AddClientToRole`. The caller must hold
+a built-in role itself to grant it to a client (403 `role-not-held` otherwise); custom roles are free, and a caller holding
 `UserManagement` may also grant app roles (roles a blueprint other than `System.Identity.Bootstrap` seeds) it does not hold.
 
 **Deployment order:** identity first, then the Communication Controller. An identity that predates
@@ -49,7 +49,7 @@ this change ignores the new fields and would create a secretless client.
 Tests: `tests/IdentityServices.IntegrationTests/Persistence/ServiceAccountClientProvisioningIntegrationTests.cs`
 (hashed secret + both grant types + scope + role on create; a second run with the same secret rotates
 nothing and creates no duplicate client or role edge; a re-run without a secret preserves the existing
-one; a pre-AB#5027-shaped client stays public and secretless; an unknown role name is skipped instead
+one; a client of the earlier shape stays public and secretless; an unknown role name is skipped instead
 of failing the setup).
 - **Tests:** `DelegatedIdentityResolverTests` (intersection arithmetic), `DelegationClaimCompositionTests`
   (the anti-placebo proof: real `GrantValidationResult` → real `ApplyDelegationClaims`),
@@ -102,7 +102,7 @@ nested customer sub-tenants are out of scope for v1, see
 
 **Upkeep hooks (#4044 — done):**
 
-- `ClientStore.MutateAsync` (the only way to change a stored client since AB#8015) fires `SyncMirrorsForClientAsync`
+- `ClientStore.MutateAsync` (the only way to change a stored client) fires `SyncMirrorsForClientAsync`
   after commit when the post-update client carries `AutoProvisionInChildTenants=true`.
   Propagates secret rotation / scope / lifetime changes onto every mirror
   and bumps each mirror's `SecretHashVersion`.
@@ -120,7 +120,7 @@ back to the primary operation (client update, client delete, tenant delete).
 The same holds for the secret writes of `Client.AddSecret` / `Client.RemoveSecret`
 and the REST secret endpoints (sync after commit, error logged).
 
-**Periodic mirror reconciliation (AB#8019, Security).** Before it, only the next identity start
+**Periodic mirror reconciliation.** Before it, only the next identity start
 re-converged a mirror that a failed sync left behind, so a secret removed in the parent stayed valid
 in the child tenants until a restart. A compensation job (decision OD-6: no outbox) closes the window:
 
@@ -143,25 +143,25 @@ in the child tenants until a restart. A compensation job (decision OD-6: no outb
 - **Deleted parent client** (delete cleanup failed): the mirror is removed on the **second consecutive** pass that misses the
   parent (`MissingParentPassesBeforeRemoval`, per process), and only a child client carrying this parent's marker.
 - 🔴 **Every mirror writer is version-checked (replica safety, review finding on #230).** A replace *without* an expected version
-  writes the entity as given and does **not** advance `rtVersion` (engine AB#7769), so the check only holds when every writer
+  writes the entity as given and does **not** advance `rtVersion` (engine), so the check only holds when every writer
   takes part. All child-mirror writes go through `ConvergeChildMirrorAsync` (immediate sync, start-up provisioning, backfill,
   reconciliation: read child, read parent, derive, replace with the read `rtVersion`, re-read and re-derive on
   `RtVersionConflictException`, at most `MaxMirrorWriteAttempts` = 5) or the versioned `RotateMirrorSecretAsync`. The sync re-reads
   the parent after the child (the passed snapshot is only the fallback), so a delayed sync cannot write an older parent state over
   a newer one. Result: a write after our child read makes our replace fail, a write before it is visible to the comparison while
   the parent was read after it; neither a removed secret nor a superseded own secret can come back.
-- 🔴 **All other writers of a client record are versioned too (AB#8054).** Every writer that can touch a mirror writes with the
+- 🔴 **All other writers of a client record are versioned too.** Every writer that can touch a mirror writes with the
   `rtVersion` it read, so its write advances `rtVersion` and a reconciliation pass that read the mirror before it fails its check
   and re-reads (before, such a write left `rtVersion` unchanged and the stale pass overwrote it unnoticed):
 
   | Writer | How |
   |---|---|
-  | REST client `PUT`, overlay URIs, overlay clean-up, `PATCH autoProvisionInChildTenants` (any tenant, mirrors included) | `IOctoClientStore.MutateAsync` (AB#8015; `UpdateAsync` is gone), retry on conflict, `409` after 20 attempts |
+  | REST client `PUT`, overlay URIs, overlay clean-up, `PATCH autoProvisionInChildTenants` (any tenant, mirrors included) | `IOctoClientStore.MutateAsync` (`UpdateAsync` is gone), retry on conflict, `409` after 20 attempts |
   | `octo-cli` token-exchange grant step (`OctoCliTokenExchangeGrant`) | replace with the version read in the same transaction |
   | Post-blueprint URI restore / URI family pass (`DefaultConfigurationCreatorService`) | replace with the version read in the same transaction |
   | Bus consumer `CreateIdentityDataCommandRequestConsumer` (existing client) | replace with the version read in the same transaction; a conflict fails the message, which is retried |
   | Tracking row: immediate sync, start-up provisioning, mirror secret rotation | the row is re-read right before the write (sync) and written with its version; a concurrent bump wins (the counter is informational). When the sync or the provisioning had to **insert** the mirror, the versioned row write claims the insert, exactly as the reconciliation does: a row that changed or vanished meanwhile (another writer re-created the mirror, `RemoveMirrorAsync`, the delete cleanup) withdraws the inserted client, so no duplicate and no untracked mirror (a removed mirror the sync would otherwise have re-created) stays behind |
-  | **Blueprint seed upsert** (engine `ImportRt`, `ImportStrategy.Upsert`) | **not changed** (decision AB#8054, see below) |
+  | **Blueprint seed upsert** (engine `ImportRt`, `ImportStrategy.Upsert`) | **not changed** (see below) |
 
   **Blueprint seed upsert - why no engine change.** The import reads the stored entity (to keep its `Secret` / `TenantOwned`
   attributes) and replaces it in **one MongoDB transaction**. A write that commits after that read makes the replace fail with a
@@ -173,7 +173,7 @@ in the child tenants until a restart. A compensation job (decision OD-6: no outb
   version-checked would change every `ImportRt` caller (blueprints, migrations, user imports) for no security gain.
   `TransactionalReadModifyWrite_ThatReadTheMirrorBeforeTheJobsWrite_CannotWriteTheRemovedSecretBack` pins the guarantee.
 - Logs: a failing mirror or tenant is a Warning (not an Error every pass); test seams `BeforeMirrorWriteForTests` (client id,
-  child tenant id) / `BeforeMirrorInsertForTests` / `BeforeMissingMirrorWriteForTests` (AB#8054: between the child read of a missing
+  child tenant id) / `BeforeMirrorInsertForTests` / `BeforeMissingMirrorWriteForTests` (between the child read of a missing
   mirror and its insert) (internal) let the integration tests interleave writers.
 - **Expiry is copied now.** `CopySecrets` dropped `ExpirationDateTime`, so a parent secret that expired kept
   authenticating in every child tenant; mirrors now carry the expiry (also the carried-over own secret).
@@ -189,7 +189,7 @@ in the child tenants until a restart. A compensation job (decision OD-6: no outb
   valid in the child after the failed sync, gone after the job, child token refused; added secret; expired parent
   secret; in-sync mirror (rich client) not written; orphaned mirror removed after the grace pass; two parallel passes
   without a duplicate; a mirror secret rotation and an immediate sync interleaved between the job's parent read and its
-  write (red with unversioned writers); AB#8054: a client `PUT` in the child tenant, the `octo-cli` grant step and an immediate sync
+  write (red with unversioned writers); a client `PUT` in the child tenant, the `octo-cli` grant step and an immediate sync
   that re-creates a missing mirror, each between the job's reads and its write (red with unversioned writers), and a transactional
   stale write that cannot bring a removed secret back; a missing mirror whose row is removed before the insert; two parallel passes
   re-creating a missing mirror; metric and log canary),
@@ -211,7 +211,7 @@ in the child tenants until a restart. A compensation job (decision OD-6: no outb
 
 Backed by `ClientMirrorController` + `ClientAutoProvisionFlagController` in
 `TenantApi/v1/Controllers/`. The `PATCH` flow piggybacks on
-`ClientStore.MutateAsync` (version-checked, AB#8015) so the post-commit upkeep hook (#4044) fires
+`ClientStore.MutateAsync` (version-checked) so the post-commit upkeep hook (#4044) fires
 automatically — flipping the flag from `false` → `true` does **not**
 backfill existing sub-tenants; the operator must explicitly trigger
 `provisionInExistingTenants` for that (or wait for the next service
@@ -236,7 +236,7 @@ satisfied in tests too.
 The CLI commands and the Studio UI are tracked under **ADO #4047–#4051**
 (Epic 3054).
 
-## Client Role & Group Assignment (AB#4183)
+## Client Role & Group Assignment
 
 A **Client** (machine-to-machine identity) can be assigned roles and group memberships with the same
 semantics as a user, so a `client_credentials` access token carries the resolved role claims and can
@@ -260,7 +260,7 @@ call role-protected endpoints (e.g. the `FromHttpRequest` trigger node). CK mode
 - **REST API:** `ClientsController` — `GET/PUT /clients/{id}/roles`, `PUT/DELETE /clients/{id}/roles/{roleName}`.
   `GroupsController` — `GET/PUT/DELETE /groups/{rtId}/members/clients[/{clientId}]`; `{clientId}` is the OAuth client id
   or the client's rtId, resolved by `GroupClientMemberResolver` (rtId first, then client id; also used by `Group.AddMember` /
-  `Group.RemoveMember`), unknown → `404` with `NotFoundErrorDto` (AB#8571; before, a client id answered 500). `GroupDto` gained
+  `Group.RemoveMember`), unknown → `404` with `NotFoundErrorDto` (before, a client id answered 500). `GroupDto` gained
   `MemberClientIds`; `ClientDto` gained `RtId` (read-only, identifies the client as a group member).
 - **Blueprint cleanup gate:** `PreBlueprintCleanupMigration` now sweeps orphan `AssignedRole` edges for
   `RtClient` origins too (aligned with the user-side strategy). No capture/restore pass is needed for

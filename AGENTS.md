@@ -5,7 +5,12 @@ code it covers.
 
 ## What this repo is
 
-Octo Identity Services is a .NET 10 identity and authentication service built on **OpenIddict 7.6** (migrated from Duende IdentityServer 8.0.6 — Epic AB#4989, work items AB#4990–AB#4996; see `docs/CONCEPT-OPENIDDICT-MIGRATION.md`). It provides OAuth2/OpenID Connect authentication with support for multiple identity providers (Google, Facebook, Microsoft, Azure Entra ID, OpenLDAP, Microsoft AD). The wire protocol (endpoint paths, discovery, JWKS, token shape, claims) is kept Duende-compatible so all consumers work unchanged; the remaining discovery-document differences are documented in `docs/openiddict-discovery-diff.md`.
+Octo Identity Services is a .NET 10 identity and authentication service built on **OpenIddict 7.6** (migrated from
+Duende IdentityServer 8.0.6; see `docs/CONCEPT-OPENIDDICT-MIGRATION.md`). It provides OAuth2/OpenID Connect
+authentication with support for multiple identity providers (Google, Facebook, Microsoft, Azure Entra ID, OpenLDAP,
+Microsoft AD). The wire protocol (endpoint paths, discovery, JWKS, token shape, claims) is kept Duende-compatible so all
+consumers work unchanged; the remaining discovery-document differences are documented in
+`docs/openiddict-discovery-diff.md`.
 
 ## Read before you change
 
@@ -25,6 +30,12 @@ Octo Identity Services is a .NET 10 identity and authentication service built on
 | `DefaultConfiguration*.cs`, `**/Services/{Admin,FileRoles,ScratchTenants,RoleGrants}/**`, `ITenantSetupCompletedHandler.cs` | `docs/tenant-provisioning.md` |
 | `tests/**` | `docs/testing.md` |
 <!-- <<< end generated: routing -->
+
+Background, not routed (open when the task names the topic): the concept documents `docs/CONCEPT-*.md`, the rollout
+runbooks `docs/rollout-*.md` and `docs/runbook-*.md`, the reference documents `docs/authentication.md`,
+`docs/persistence.md`, `docs/system-api.md`, `docs/configuration.md`, `docs/architecture-overview.md` and
+`docs/README.md` (index), and the feature references `docs/login-and-providers.md`,
+`docs/user-create-merge-methods.md` and `docs/identity-rest-facades.md`.
 
 ## Build & test
 
@@ -53,15 +64,15 @@ dotnet test Octo.Identity.sln -c Release
 
 ### 🔴 `dotnet test` auf der Solution startet alle vier Testhosts gleichzeitig
 
-`dotnet test <sln>` baut und startet die vier Testprojekte **parallel** (ein Testhost-Prozess pro
-Projekt). `IdentityServices.IntegrationTests` fährt dabei seine MongoDB-Testcontainer hoch, während die
-drei Unit-Test-Hosts dieselbe Maschine belegen — Container-Kontention, die es beim Einzelaufruf nicht
-gibt. Vor AB#5160, als jede Testklasse ihren eigenen Container bekam (32 Container pro Lauf), war das
-massiv: dasselbe Integrationsprojekt **einzeln** 4:48 mit 188/188 grün — **in der Solution** 27 min, mit
-sporadischem `commitTransaction ... has been aborted`, weil der Tenant-Setup in einer Mongo-Transaktion
-läuft und unter Last das 60-s-Default-Limit riss.
+`dotnet test <sln>` baut und startet die vier Testprojekte **parallel** (ein Testhost-Prozess pro Projekt).
+`IdentityServices.IntegrationTests` fährt dabei seine MongoDB-Testcontainer hoch, während die drei Unit-Test-Hosts
+dieselbe Maschine belegen — Container-Kontention, die es beim Einzelaufruf nicht gibt. Vor der Umstellung auf
+Collection-Fixtures, als jede Testklasse ihren eigenen Container bekam (32 Container pro Lauf), war das massiv: dasselbe
+Integrationsprojekt **einzeln** 4:48 mit 188/188 grün — **in der Solution** 27 min, mit sporadischem `commitTransaction
+... has been aborted`, weil der Tenant-Setup in einer Mongo-Transaktion läuft und unter Last das 60-s-Default-Limit
+riss.
 
-AB#5160 hat beide Ursachen entschärft (5 statt 32 Container, `transactionLifetimeLimitSeconds = 300`);
+Die Umstellung hat beide Ursachen entschärft (5 statt 32 Container, `transactionLifetimeLimitSeconds = 300`);
 gemessen danach: Solution-Lauf 1:37, alle 681 Tests grün. **Der Mechanismus ist aber nicht weg** — auf
 einer belasteten Maschine bleibt der parallele Solution-Lauf die anfälligste Variante. Bei einem
 Abbruch aus dieser Ecke (Transaktions-Abort, Testcontainer-Timeout) also erst seriell gegenprüfen,
@@ -92,7 +103,7 @@ dotnet test Octo.Identity.sln -c DebugL
 🔴 **`-c Release` funktioniert lokal auf `test/0.2-dev` nicht — das ist kein kaputter Branch.**
 Die Paket-Lane kommt aus der Pipeline: `azure-pipelines.yml` reicht `octoCoreLibVersion` als
 `octoCoreLibVersionOverride` ans CI-Template, und nur dort steht die 0.2-Lane. Lokal greift der
-Fallback in `Directory.Build.props` — `0.1.*` mit privatem Feed, sonst gar keiner (seit AB#6297
+Fallback in `Directory.Build.props` — `0.1.*` mit privatem Feed, sonst gar keiner (seit der Umstellung
 gibt es keinen Release-Fallback mehr; ohne Version bricht der Build mit `OCTO0001` ab) —, also nie
 die 0.2-Lane, und ohne konfigurierten `OctoNugetPrivateServer` sind `0.2.*`-Pakete
 ohnehin nicht erreichbar. Der Build bricht dann mit einer Wand aus `CS0246` auf Typen ab, die es nur
@@ -103,27 +114,36 @@ in der 0.2-Lane gibt (z.B. `DataPermissionDto` aus `Communication.Contracts` im
 Konfiguration auf diesem Branch — so wie in allen anderen Repos auch. Die Release-Absicherung leistet
 die CI, die die Lane injiziert.
 
-- Gilt für **jeden** Commit und **jeden** Push — auch für vermeintlich triviale Änderungen, Doc-Updates, Renames oder "nur einen Index hinzufügen".
-- Gilt für Unit- **und** Integration-Tests. Wenn Testcontainers/Docker lokal nicht verfügbar sind, das **explizit** dem User melden und auf Freigabe warten — **nicht** stillschweigend nur Unit-Tests laufen lassen.
+- Gilt für **jeden** Commit und **jeden** Push — auch für vermeintlich triviale Änderungen, Doc-Updates, Renames oder
+  "nur einen Index hinzufügen".
+- Gilt für Unit- **und** Integration-Tests. Wenn Testcontainers/Docker lokal nicht verfügbar sind, das **explizit** dem
+  User melden und auf Freigabe warten — **nicht** stillschweigend nur Unit-Tests laufen lassen.
 - **Niemals** `--no-verify`, `git commit -n` oder Hook-Skips verwenden, um diese Regel zu umgehen.
 - **Niemals** auf "die CI fängt es schon ab" verlassen — die CI ist die letzte, nicht die erste Verteidigungslinie.
 - Bei rotem Test: erst fixen, dann committen. Niemals "fix in einem nachfolgenden Commit" versprechen.
 
-Build #35223 (PR #95) ist genau wegen Verstoß gegen diese Regel fehlgeschlagen. Wenn lokale Validierung übersprungen wird, sind alle anderen Pre-Commit-Regeln (Lint etc.) ebenfalls hinfällig.
+Build #35223 (PR #95) ist genau wegen Verstoß gegen diese Regel fehlgeschlagen. Wenn lokale Validierung übersprungen
+wird, sind alle anderen Pre-Commit-Regeln (Lint etc.) ebenfalls hinfällig.
 
 ## Rules
 
-### Every attribute declares its ownership; the build enforces it (AB#6326)
+- Credentials never reach a log property, a request URL or a DTO `ToString()`; read `docs/credential-security.md`
+  before you touch logging, secrets or password endpoints.
+- Every change of roles, groups or role definitions goes through the role change guard: `docs/role-guards.md`.
+- Integration tests share no process-wide or machine-wide state: `docs/testing.md`.
+
+### Every attribute declares its ownership; the build enforces it
 
 `Persistence.IdentityCkModel.csproj` sets `OctoEnforceRuntimeStateMarkers=true`: the `CkLintRuntimeStateMarkers` task of
 `Meshmakers.Octo.ConstructionKit.MsBuildTasks` fails the build with `OCTO-CK001` when an attribute in
-`ConstructionKit/attributes/*.yaml` declares neither `ownership` nor the deprecated `isRuntimeState` (`OCTO-CK003` for both,
-`OCTO-CK004` for an unknown value). AB#6326 made the existing behaviour explicit: 151 attributes got `ownership: SeedOwned`
-(a restatement - the same resolved ownership, so `octo-ckc ValidateVersion` reports "no bump required" and System.Identity stays
-2.24.0); the `TenantOwned` / `Secret` decisions of the table above and the four `isRuntimeState: true` URI lists are unchanged.
-Assignment overrides on types (`Client`, `Resource`, `ApiResource`) are not linted; they still win over the definition.
-**Review question for every new attribute:** could an operator or user type this value in the product? Yes → `TenantOwned` (or
-`Secret` for a credential); a service writes it → `RuntimeState`; the product ships and corrects it → `SeedOwned`.
+`ConstructionKit/attributes/*.yaml` declares neither `ownership` nor the deprecated `isRuntimeState` (`OCTO-CK003` for
+both, `OCTO-CK004` for an unknown value). The ownership rule made the existing behaviour explicit: 151 attributes got
+`ownership: SeedOwned` (a restatement - the same resolved ownership, so `octo-ckc ValidateVersion` reports "no bump
+required" and System.Identity stays 2.24.0); the `TenantOwned` / `Secret` decisions of the table above and the four
+`isRuntimeState: true` URI lists are unchanged. Assignment overrides on types (`Client`, `Resource`, `ApiResource`) are
+not linted; they still win over the definition. **Review question for every new attribute:** could an operator or user
+type this value in the product? Yes → `TenantOwned` (or `Secret` for a credential); a service writes it →
+`RuntimeState`; the product ships and corrects it → `SeedOwned`.
 
 ### Documentation Guidelines
 
@@ -137,7 +157,7 @@ All documentation MUST be written in **English**. This includes:
 - Code comments
 - API documentation
 - Architecture documents
-- CLAUDE.md files
+- AGENTS.md files
 
 #### Mandatory Documentation Updates
 
@@ -151,7 +171,7 @@ After making ANY code changes, you MUST update the relevant documentation:
    - Update `docs/` with new feature documentation
    - Add API endpoint documentation for new endpoints
    - Update architecture documents if new patterns are introduced
-   - Update this `CLAUDE.md` if project structure changes
+   - Update this `AGENTS.md` (or the routed `docs/` file) if project structure changes
 
 3. **For Refactoring**:
    - Update architecture documents to reflect new structure
@@ -171,4 +191,4 @@ After making ANY code changes, you MUST update the relevant documentation:
 | `docs/persistence.md` | Data layer changes |
 | `docs/system-api.md` | API endpoint changes |
 | `docs/configuration.md` | Config option changes |
-| `CLAUDE.md` | Project structure changes |
+| `AGENTS.md` | Project structure changes |

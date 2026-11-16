@@ -5,25 +5,25 @@ background: true
 
 # REST facades, deprecations and account pages
 
-## REST facades of the role and merge endpoints (AB#8412)
+## REST facades of the role and merge endpoints
 
 `UsersController.UpdateUserRoles` (`PUT users/{u}/roles`), `AddUserToRole` (`PUT users/{u}/roles/{r}`), `RemoveRoleFromUser`
 (`DELETE users/{u}/roles/{r}`) and `MergeUsers` (`POST users/{u}/merge`) are **facades** of `User.SetRoles-1`, `User.AddRole-1`,
 `User.RemoveRole-1` and `User.Merge-1`. They contain no role-change or merge rule of their own (no `AddToRoleAsync`,
 `RemoveFromRoleAsync` or `IUserMergeService` call): they resolve the user name to the rtId (and SetRoles the role ids to names),
 call the method through `IIdentityMethodFacade` (`src/IdentityServices/Methods/IdentityMethodFacade.cs`) and map the envelope with
-`CkMethodFacadeResults.ToActionResult` (octo-common-services, AB#8411) plus per-endpoint `CkMethodFacadeOptions`.
+`CkMethodFacadeResults.ToActionResult` (octo-common-services) plus per-endpoint `CkMethodFacadeOptions`.
 
 - **In-process.** `IdentityMethodHost.AddIdentityCkMethodHost` registers `AddCkMethodDispatcher()` and the facade; `Program.cs` adds
   `AddCkMethodHandlerRegistryFeed()` to the event hub. The identity service hosts the handlers, so the dispatcher runs them in this
   process (transport `in-process`, nothing on the broker, same invocation core as a bus call: declared authorization, validation,
   audit, `ck.method.*` metrics). The four methods carry no secret and are hosted whatever `Methods:Identity:EnablePasswordMethods`
-  says, so the endpoints work on every cluster. AB#8413 (create, reset - see the next section) and AB#8414 reuse
+  says, so the endpoints work on every cluster. The create and reset facades (see the next section) and the account pages reuse
   `IIdentityMethodFacade` (password methods with `HandleLocalOnly` while the switch is off).
 - **Caller.** `CkMethodPrincipal.FromClaimsPrincipal(User)` in a `CkMethodPrincipalScope`. The write policy of the endpoints already
   requires scope `octo_api` and role `UserManagement`, which is what the handlers check again; no token reaches the facade without it.
 - **Audit.** Every REST call writes exactly one `Identity.Method` event (the handler's). A guard refusal (`METHOD_FORBIDDEN` with
-  `reason` `self-grant` / `role-not-held` / `last-administrator`) is turned back into the AB#7914 answer: 403/409 problem+json via
+  `reason` `self-grant` / `role-not-held` / `last-administrator`) is turned back into the role-change-guard answer: 403/409 problem+json via
   `RoleChangeProblems`, the WARN log and the `Identity.RoleChangeRefused` record (REST contract, kept).
 
 Parity table (REST before -> facade; the method wins unless the REST contract would change):
@@ -37,7 +37,7 @@ Parity table (REST before -> facade; the method wins unless the REST contract wo
 | RemoveRole of a role held **only through a group** | 200, nothing changed | **kept**: `ROLE_NOT_ASSIGNED` maps to 200; audit outcome `ROLE_NOT_ASSIGNED` |
 | Guard refusals | 403/409 problem, `Identity.RoleChangeRefused`, WARN | unchanged, plus the `Identity.Method` event |
 | Audit of a success | none | one `Identity.Method` event (`rolesBefore`/`rolesAfter`; merge: `sourceUserName`, `sourceRtId`, `transferredLogins`, `revokedTokens`) |
-| Merge source data permission (AB#7035) | none | method wins: not readable = 404 "Source user ... not found", not writable = 403 problem `METHOD_FORBIDDEN` (`data-permission`) |
+| Merge source data permission | none | method wins: not readable = 404 "Source user ... not found", not writable = 403 problem `METHOD_FORBIDDEN` (`data-permission`) |
 | Merge login/delete failure | 400, `failedDetails` with code + description | 400, same message, `failedDetails` with `code` only (the envelope carries codes) |
 | Unexpected failure | merge: 500 `InternalServerErrorDto(exception message)`; roles: unhandled 500 | merge: 500 `InternalServerErrorDto("Merging the users failed.")`; roles: 500 problem `METHOD_HANDLER_FAILED`; no exception text leaves the service |
 | `RoleEnforcement=Warn` (not the default) | caller without `UserManagement` let through and logged | refused by the method (403 problem, `role-required`) |
@@ -50,10 +50,10 @@ unchanged REST suites (`RoleChangeGuardTests`, `UsersMergeTests`, `UserRoleMetho
 `UserMergeMethodTests.Method_MergingAwayTheLastUserAdministrator…` now expects two `Identity.Method` events (its method call and its
 REST call each write one).
 
-## Deprecation of the role and merge endpoints: identity wave 1 (AB#8415)
+## Deprecation of the role and merge endpoints: identity wave 1
 
 The four endpoints above carry `[OctoRestDeprecated(Wave = IdentityRestDeprecation.UsersWave1, Link = …)]`
-(`src/IdentityServices/TenantApi/v1/IdentityRestDeprecation.cs`; octo-common-services `docs/rest-deprecation.md`). Links:
+(`src/IdentityServices/TenantApi/v1/IdentityRestDeprecation.cs`; `octo-common-services/docs/rest-deprecation.md`). Links:
 `User.SetRoles/AddRole/RemoveRole` -> `…/identityService/methods#user-roles`, `User.Merge` -> `…#usermerge`.
 
 - **No dates in code.** Wave dates (Gerald 2026-11-11, replaces the rules of 2026-11-07 and 2026-11-10): since
@@ -65,41 +65,41 @@ The four endpoints above carry `[OctoRestDeprecated(Wave = IdentityRestDeprecati
   octo-helm-core). Unset -> no `Deprecation`/`Sunset` header; `Link`, OpenAPI `deprecated` and the counter
   `octo.rest.deprecated.calls` always apply. An invalid configured date fails the start.
 - **Not in this wave**: `POST users` and `POST users/ResetPassword` (own wave `IdentityUsersPassword`, next section) and the
-  account pages of `ManageApiController` (facades without deprecation, Odin 2026-11-07).
+  account pages of `ManageApiController` (facades without deprecation, decided 2026-11-07).
 - **Tests**: `Api/TenantApi/UsersRestDeprecationTests` — headers per endpoint with and without configured dates, a counted
   successful call (`client_id` `octo-cli`, endpoint template, no user name or tenant), unmarked user endpoints without headers,
   exactly the wave endpoints carry the attribute (four of wave 1, two of the password wave).
 
-## Deprecation of create user and admin reset: identity password wave (AB#8860)
+## Deprecation of create user and admin reset: identity password wave
 
 `POST users` and `POST users/ResetPassword` carry `[OctoRestDeprecated(Wave = IdentityRestDeprecation.UsersPasswordWave, Link = …)]`
 (wave `IdentityUsersPassword`; links `…/identityService/methods#usercreateuser` and `…#userresetpassword`). A wave of its own
-because it starts with another release than wave 1: `since` is the delivery day of the release that contains AB#8418 (octo-cli and
+because it starts with another release than wave 1: `since` is the delivery day of the release that contains the password wave (octo-cli and
 octo-mcp-service call the methods), set by Ops in `octo-mesh-deployment` (`restDeprecation.waves.IdentityUsersPassword.since`,
 env `OCTO_RestDeprecation__Waves__IdentityUsersPassword__Since|Sunset`); sunset to be announced (Gerald's rule of 2026-11-11, as
 wave 1). The Helm chart renders every wave generically, no chart change. Without dates the endpoints answer exactly as before; only
 `Link`, the OpenAPI flag and the counter are added. The headers are computed from the attribute and the configuration only, never
 from the request, so no user name, e-mail or password reaches a header or a metric label. Not changed: the REST reset still sends
-the password-reset e-mail, the method does not (AB#7775). SDK side: `IIdentityServicesClient.CreateUser` / `ResetPassword` are
-`[Obsolete]` (octo-sdk, AB#8860).
+the password-reset e-mail, the method does not. SDK side: `IIdentityServicesClient.CreateUser` / `ResetPassword` are
+`[Obsolete]` (octo-sdk).
 Tests: `Api/TenantApi/UsersPasswordRestDeprecationTests` (headers with dates, since without sunset, both endpoints without dates
 behave as before, successful calls counted, request canaries in no header and no label); the endpoint set is pinned in
 `UsersRestDeprecationTests`. Shared collector: `Api/TenantApi/DeprecatedCallCollector`.
 
-## REST facades of create user and password reset (AB#8413)
+## REST facades of create user and password reset
 
 `UsersController.Post` (`POST users`) and `UsersController.ResetPassword` (`POST users/ResetPassword`) are **facades** of the static
-`User.CreateUser-1` and of `User.ResetPassword-1`, through `IIdentityMethodFacade` like the role and merge endpoints (AB#8412; the target
+`User.CreateUser-1` and of `User.ResetPassword-1`, through `IIdentityMethodFacade` like the role and merge endpoints (the target
 rtId is `null` for the static create). Creation, policy, lockout, session revocation and audit exist only in the handlers.
 
 - **Password in-process only, whatever the switch says.** With `Methods:Identity:EnablePasswordMethods=false` (staging-1, prod-1, prod-2
   until B0) the two handlers are registered with `HandleLocalOnly` (`IdentityMethodHandlerRegistration.ServesRestFacade`,
   `IdentityMethodHost.SelectLocalOnlyHandlers`): not announced, no queue, so GraphQL `User.CreateUser` / `User.ResetPassword` still answer
   `METHOD_HANDLER_NOT_AVAILABLE` and no password reaches the broker. With the switch on they are bus handlers and the dispatcher still runs the
-  REST call in-process (AB#8411). One row in `IdentityMethodHost.Handlers` stays the single list (`For<THandler>(id, carriesSecret,
+  REST call in-process. One row in `IdentityMethodHost.Handlers` stays the single list (`For<THandler>(id, carriesSecret,
   servesRestFacade)` builds both registration forms).
-- **Notification.** The method does not send the password-reset notification yet (AB#7775); the facade sends it after a success. When
-  AB#7775 lands, remove that call: `UserPasswordRestMethodFacadeTests` counts exactly one notification per REST reset.
+- **Notification.** The method does not send the password-reset notification yet; the facade sends it after a success. When
+  the follow-up that removes the duplicate notification lands, remove that call: `UserPasswordRestMethodFacadeTests` counts exactly one notification per REST reset.
 - **REST-only field.** `RegisterUserDto.ResetPasswordOnLogin` has no method parameter; when true the facade sets it on the new user after the
   method returned (the rtId is the bare result string). If the user is not found or that update fails, the endpoint answers `500`
   (`ResetPasswordOnLoginNotSetMessage`), never `200` — the user then exists without the flag (`RestCreate_ResetPasswordOnLoginWriteFails_Is500_NotASilentSuccess`).
@@ -112,7 +112,7 @@ Parity table (REST before -> facade):
 |---|---|---|
 | Routes, request and response bodies, status codes | - | unchanged (create and reset: `200` empty) |
 | `EnablePasswordMethods=false` | own code, worked | works: handlers local only, in-process, nothing on the broker |
-| Password in the query string (AB#8008) | 400 | unchanged (`[RefuseCredentialInQuery]`, `CredentialsNotInUrlTests`) |
+| Password in the query string | 400 | unchanged (`[RefuseCredentialInQuery]`, `CredentialsNotInUrlTests`) |
 | Create without password | 400 (model validation, `Password` is `[Required]`) | unchanged; an invitation without password stays method-only |
 | Create: user name / e-mail | stored as sent | trimmed by the method; a blank e-mail is stored as `null` |
 | Create: duplicate name / e-mail | 409 problem `USER_ALREADY_EXISTS`, `field` | unchanged (`USER_ALREADY_EXISTS` mapped by `field`) |
@@ -121,27 +121,27 @@ Parity table (REST before -> facade):
 | Create: welcome notification | once | once (`IUserCreationService` in the handler) |
 | Reset: lockout | left in place | **lifted** (`LockoutEnd = null`, `AccessFailedCount = 0`) |
 | Reset: sessions | revoked (`PasswordChangePath.AdminResetPassword`) | revoked (`PasswordChangePath.MethodResetPassword` in the "Password changed" log line) |
-| Reset: acting user in that log line (AB#8008) | `AuditActor`: `preferred_username`, else `client <id>` | user name looked up from `sub`, else `client <id>`, else the subject |
-| Reset: notification | once | once (facade, until AB#7775) |
+| Reset: acting user in that log line | `AuditActor`: `preferred_username`, else `client <id>` | user name looked up from `sub`, else `client <id>`, else the subject |
+| Reset: notification | once | once (facade, earlier) |
 | Reset: unknown user / shadow user | 404 / 400 | unchanged (pre-checks; `METHOD_TARGET_NOT_FOUND` / `SHADOW_USER_PASSWORD_NOT_ALLOWED` map to the same) |
 | Audit | none (reset: the credential-change log line) | one `Identity.Method` event (create: `userName`, `withPassword`; reset: `lockoutLifted`) |
 | Unexpected failure | 500 `InternalServerErrorDto(exception message)` | 500 `InternalServerErrorDto("Creation of user failed." / "Reset of password failed.")`, no exception text |
 | `RoleEnforcement=Warn` (not the default) | caller without `UserManagement` let through and logged | refused by the method (403 problem) |
 
 Fix on the way: `UserResetPasswordHandler` looked the acting user up by `sub` and threw for a subject that is no object id (like
-`User.Merge`, AB#8412); it now skips the lookup. Tests: `Api/TenantApi/UserPasswordRestMethodFacadeTests` (both switch values: locked-out
+`User.Merge`); it now skips the lookup. Tests: `Api/TenantApi/UserPasswordRestMethodFacadeTests` (both switch values: locked-out
 user reset over REST - sign-in, lockout lifted, refresh tokens revoked, one audit event, one notification, no `CkMethodRequest` on the event
 hub, canary absent from logs, audit and activity tags; REST create the same; policy violation; REST and dispatcher side by side for create
 with password, invitation, duplicate name and e-mail, policy violation, unknown user, shadow user), `Methods/IdentityMethodHostTests`
 (local-only selection, registration forms, never both), plus the unchanged REST suites (`UsersCreateTests`, `ShadowUserPasswordTests`,
 `CredentialsNotInUrlTests`, `PasswordChangeRevokesSessionsTests`, `TenantApiRoleAuthorizationTests`).
 
-## Account pages run the password methods (AB#8414; System.Identity 3.2.0)
+## Account pages run the password methods (System.Identity 3.2.0)
 
 `ManageApiController.ChangePassword` (`POST {tenant}/api/manage/change-password`) and `ManageApiController.SetPassword`
 (`POST {tenant}/api/manage/set-password`) - the backend of the identity account SPA, session cookie, same origin - are **facades** of
 `User.ChangePassword-1` and of the new `User.SetPassword-1` (`UserSetPasswordHandler`). They stay facades **without deprecation**
-(Odin, 2026-11-07: same-origin account pages, not a public API). Password rules, lockout, session revocation and audit exist only in
+(decided 2026-11-07: same-origin account pages, not a public API). Password rules, lockout, session revocation and audit exist only in
 the handlers.
 
 - **`User.SetPassword-1`** (`ck-user.yaml`, System.Identity 3.2.0, additive Minor): `allowSelf`, `newPassword` sensitive, errors
@@ -188,8 +188,8 @@ from logs, audit and activity tags; set the same; wrong current password counted
 token does not reach the endpoints; the facade guard), `Api/Methods/UserChangePasswordMethodTests` (switch off: local only),
 `Methods/IdentityMethodHostTests`, `IdentityMethodDeclarationsIntegrationTests` (declaration, sensitive parameter, `CarriesSecret` vs.
 model), plus the unchanged `PasswordChangeRevokesSessionsTests` and `ShadowUserPasswordTests`. `UsersController.DescribeIdentityErrors`
-is a pure mapper onto `PasswordPolicyErrorDescriber` since AB#8415 (33d0dbbe); no REST or account path builds password-policy texts
-itself. `Api/PasswordPolicyMessageParityTests` (AB#8523) keeps it that way: one password that breaks several rules gets the same rule
+is a pure mapper onto `PasswordPolicyErrorDescriber` (33d0dbbe); no REST or account path builds password-policy texts
+itself. `Api/PasswordPolicyMessageParityTests` keeps it that way: one password that breaks several rules gets the same rule
 codes from `User.CreateUser`, `User.ResetPassword` and `User.ChangePassword`, and REST `POST users`, REST `POST users/ResetPassword`
 (code + description) and the account page's `change-password` and `set-password` (descriptions) show exactly
 `PasswordPolicyErrorDescriber.Describe` of the method envelope, in `en` and `de` (same `Accept-Language` on every path).

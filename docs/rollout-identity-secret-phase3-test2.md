@@ -1,4 +1,9 @@
-# Pilot runbook: SECRET phase 3 for identity on test-2 (AB#5528 / AB#5540 / AB#5544)
+---
+description: Background: pilot runbook for SECRET phase 3 of the identity service
+background: true
+---
+
+# Pilot runbook: SECRET phase 3 for identity on test-2
 
 Identity is the phase-3 pilot (decision D3): the external identity providers' `ClientSecret` (Google,
 Microsoft, Facebook, Azure Entra ID) becomes a CK `Secret` attribute (`System.Identity-2.25.0`), and
@@ -31,7 +36,7 @@ then the value stays a plain string in MongoDB.
   `StrictMode: false` (state 2026-10-08: met).
 - **Strict mode stays off** (`SecretEncryption:StrictMode=false`) until phase 5 — with strict mode on,
   legacy clear-text provider secrets are rejected and those providers are skipped.
-- AB#5859 role enforcement rollout (`rollout-identity-rest-role-enforcement.md`) is understood: the
+- The role enforcement rollout (`rollout-identity-rest-role-enforcement.md`) is understood: the
   identity-provider endpoints need `TenantManagement` or `UserManagement`.
 - Backup: tenant dumps of the tenants with external providers (or a MongoDB snapshot) taken before the
   rollout — needed only for the rollback path below.

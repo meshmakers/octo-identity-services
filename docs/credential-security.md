@@ -5,7 +5,7 @@ applies_to: src/IdentityServices/Logging/**, OctoUser*.cs, UserTokenRevocation.c
 
 # Credential handling, sessions and logging
 
-## Logging: credentials never reach a log property (AB#5792)
+## Logging: credentials never reach a log property
 
 `nlog.config` renders JSON with `includeEventProperties="true"`, which serializes every message-template
 argument **by reflection over its public properties** — bypassing any redacting `ToString()`. Two leaks
@@ -33,10 +33,10 @@ properties: a credential-bearing DTO passed as a message-template argument (`{Dt
 reflected by the JSON layout. Never do that unless an NLog object transformation in
 `LogSecretRedaction` covers the type; log selected non-secret members instead.
 
-**Token values (AB#8324, Security).** OpenIddict logs issued tokens as plain string arguments at Trace/Debug
+**Token values.** OpenIddict logs issued tokens as plain string arguments at Trace/Debug
 (EventId 6013 `A new '{Type}' JSON Web Token was successfully created: {Payload}.` = the complete signed access
 token; also `{Token}`, `{ReferenceId}`), which the object transformation above never sees. `CredentialLogRedaction`
-(the `ILoggerFactory` decorator of AB#8008) therefore also masks, for every provider and level: JWT-shaped values
+(the `ILoggerFactory` decorator) therefore also masks, for every provider and level: JWT-shaped values
 (JWS/JWE, `eyJ…`) and Data Protection payloads (`CfDJ8…`) in every string value and in the formatted message of any
 state; every value whose argument name is in `CredentialLogRedaction.TokenValueNames` (opaque reference tokens;
 not `Code`, the dev OTP stub logs its code on purpose); `Payload` in `OpenIddict.*` categories only. The line stays
@@ -47,17 +47,17 @@ templates, non-list state, real `nlog.config` JSON record at Trace) and
 `Api/Protocol/TokenValuesNotInLogTests` (real token endpoint at Trace: the issued access token, its signature and
 the client secret are in no line; the 6013 line is present and masked).
 
-## REST secret delete removes by predicate (AB#7989, Security)
+## REST secret delete removes by predicate
 
 `ApiSecretsController.DeleteSecretOfClient` / `DeleteSecretOfApiResource` (`DELETE {tenant}/v1/apiSecrets/client|apiResource/{id}/{base64(hash)}`)
 answered 200 but removed nothing for an entity read from MongoDB: the `AttributeRecordValueList` of such an entity holds plain `RtRecord`s and
 hands out **new** `RtSecretRecord` wrappers on every enumeration, so `Remove(wrapper)` found nothing and returned `false` silently; a revoked
-client secret kept authenticating. Both endpoints now call `RemoveAll(predicate)` (as the `Client.RemoveSecret` method of AB#7780 does) and
+client secret kept authenticating. Both endpoints now call `RemoveAll(predicate)` (as the `Client.RemoveSecret` method does) and
 answer 404 when nothing matched. **Every REST secret write** (POST, PUT, DELETE for clients and API resources) is now a version-checked
 read-modify-write (`IOctoClientStore.MutateAsync`, `IOctoResourceStore.MutateApiResourceAsync`, helper `GuardedEntityMutation`: read in a transaction,
 change, replace with the `rtVersion` that was read, re-read and re-apply on `RtVersionConflictException`, 20 attempts, then `409` problem). Before,
 `UpdateAsync` replaced the snapshot unversioned, so two overlapping secret writes could bring a deleted secret back or drop an added one
-(review finding on PR #225). **The full updates followed (AB#8015):** the client `PUT` (and the overlay URI endpoints and the flag `PATCH`) and the API
+(review finding on PR #225). **The full updates followed:** the client `PUT` (and the overlay URI endpoints and the flag `PATCH`) and the API
 resource `PUT` applied their DTO to an entity read before and replaced it without an expected version, so a full update that overlapped a secret
 delete wrote the deleted secret back. They now run as `MutateAsync` / `MutateApiResourceAsync` too (the DTO is applied to the fresh read, again on a
 conflict; `409` problem after 20 attempts); `ClientStore.UpdateAsync` and `ResourceStore.UpdateApiResourceAsync` were removed, so no unversioned
@@ -71,9 +71,9 @@ test. Tests: `ApiSecretsControllerTests` (`DeleteClientSecret_*` with the token 
 403, PUT of an API resource secret persisted, no hash in the logs at the deployed levels, `ConcurrentSecretWrites_*`: four deletes and six creates at
 once lose nothing and bring nothing back, red with the unversioned write).
 
-## No credential values in request URLs (AB#8008, Security)
+## No credential values in request URLs
 
-Found in the AB#7765 verification: the admin reset took the new password as a query parameter, and the ASP.NET Core request
+Found while verifying the password-change session rule: the admin reset took the new password as a query parameter, and the ASP.NET Core request
 log (INFO, `Microsoft.AspNetCore.Hosting.Diagnostics`) plus the TRACE argument log of `ControllerActionInvoker` wrote it into
 the log file; ingress access logs and traces would capture such URLs too. The REST secret delete/get carried the stored hash
 in the path. Decided by Gerald 2026-11-01:
@@ -83,14 +83,14 @@ in the path. Decided by Gerald 2026-11-01:
   the single place of the refusal) answers `400` problem details with an update hint when the query carries `password` - after
   authorization (an unauthorized caller still gets 401/403), before model binding, so the action and its TRACE argument log
   never run. Hard refusal, no fallback: octo-cli, the SDK (`IdentityServicesClient.ResetPassword`) and Refinery Studio
-  (`@meshmakers/octo-services` `IdentityService.resetPassword`) send the body since AB#8008; release identity only together with
+  (`@meshmakers/octo-services` `IdentityService.resetPassword`) send the body; release identity only together with
   or after them.
 - **Audit actor:** `UsersController.ResetPassword` passes `AuditActor.FromPrincipal(User).Actor` (user name, else `client <id>`),
   not `User.Identity?.Name` (always null under `MapInboundClaims = false`, hence the former `(anonymous reset token)`).
 - **Secrets:** `POST apiSecrets/{client|apiResource}/{id}/delete` and `.../lookup` with body `ApiSecretValueRequestDto { valueEncrypted }`
   (POST sub-resource, not DELETE with a body: no defined DELETE body semantics, proxies/clients may drop it, the API already uses POST
   action sub-resources). The path variants `DELETE`/`GET .../{secretValue}` stay **for one release** (removal is the follow-up of
-  AB#8008); they no longer bind the value as an action argument (read from `RouteData` in `TakeLegacySecretValue`, the single place
+  the no-credentials-in-URLs rule); they no longer bind the value as an action argument (read from `RouteData` in `TakeLegacySecretValue`, the single place
   of the deprecated path), log one WARN `Deprecated API secret request: {Operation} for {OwnerKind} '{Owner}' ...` without the
   value, and overwrite the trace tag `url.path` with the masked path. `PUT` already carried the hash in the body.
 - **Log redaction:** `Logging/CredentialLogRedaction.cs` - `AddCredentialLogRedaction()` (Program.cs, after `UseNLog()`) replaces the
@@ -107,9 +107,9 @@ in the path. Decided by Gerald 2026-11-01:
   the hint for a caller without the role; audit `acting user 'client <id>'` and user name; secret lookup/delete by body for client and API
   resource with neither hash nor Base64 hash in any line and no deprecation WARN; body without value 400; reader 403; deprecated path variants
   work, WARN twice without value, path masked), `Logging/CredentialLogRedactionTests` (patterns, decorator, later providers, the real
-  `nlog.config` JSON record), and the AB#7765/AB#5708 reset tests moved to the body form.
+  `nlog.config` JSON record), and the reset tests moved to the body form.
 
-## Credential guard regression tests of the REST API (AB#7781)
+## Credential guard regression tests of the REST API
 
 `tests/IdentityServices.IntegrationTests/Api/TenantApi/IdentityCredentialGuardRestTests` pins that the tenant API v1 never returns
 or accepts a credential: a user whose `PasswordHash`, `SecurityStamp`, authenticator key and recovery codes hold fixed dummy values
@@ -119,10 +119,9 @@ or accepts a credential: a user whose `PasswordHash`, `SecurityStamp`, authentic
 the clear text nor the stored hash of a client secret, a secret record in a client body is not bound and `clientSecret` is stored hashed;
 `apiSecrets/client/{id}` and its `lookup` return the stored hash (the handle, by design) but never the clear text. A capturing log provider
 at Debug (the MongoDB command log of every store write included) must carry no dummy value, and must contain the rendered command of the
-seed write (non-vacuous). There is no export endpoint in this service. Path table of all repositories: octo-documentation
-`constructionKits/ckLanguage2/accessModifiers.md` § Regression tests.
+seed write (non-vacuous). There is no export endpoint in this service. Path table of all repositories: `octo-documentation/src/octo-mesh-documentation/docs/technologyGuide/constructionKits/ckLanguage2/accessModifiers.md` § Regression tests.
 
-## Administrator revokes all sessions of a user (AB#7899)
+## Administrator revokes all sessions of a user
 
 `POST {tenant}/v1/users/{userName}/revokeSessions` and the bulk `POST {tenant}/v1/users/revokeSessions?scope=shadowUsers`
 (dry run unless `dryRun=false`) rotate the security stamp, revoke OAuth tokens and authorizations and delete the
@@ -130,26 +129,26 @@ seed write (non-vacuous). There is no export endpoint in this service. Path tabl
 `IdentityUserAdministrationWritePolicy`). Issued JWT access tokens stay valid until expiry. Details:
 `docs/authentication.md` § Administrator Revokes All Sessions of a User; tests `UserSessionRevocationTests`.
 
-## Password change ends the user's sessions (AB#7765, review finding M3)
+## Password change ends the user's sessions
 
 Redeeming a refresh token checks only `CanSignInAsync`, never the security stamp, so a password change
 revokes explicitly. **Every** REST password path calls `IUserCredentialChangeService.OnPasswordChangedAsync`
 (`Services/UserCredentialChangeService.cs`, scoped) after the new password is persisted:
 `POST {tenant}/api/manage/change-password`, `.../set-password` (through `User.ChangePassword` / `User.SetPassword` since
-AB#8414), admin `POST system/v1/users/ResetPassword` (through `User.ResetPassword` since AB#8413)
+the account-page change), admin `POST system/v1/users/ResetPassword` (through `User.ResetPassword`)
 and the anonymous `POST {tenant}/api/auth/reset-password`. The helper (1) rotates the security stamp,
 (2) revokes every token and authorization of the user's subject (`RtId`) through the OpenIddict stores of
 the **current tenant** (other users and the same user in another tenant are untouched; the old refresh
 token answers `invalid_grant`), (3) writes one `Information` audit log line naming tenant, subject, acting
 user (`(anonymous reset token)` for the token reset; the admin REST reset passes `AuditActor.FromPrincipal(User).Actor`
-since AB#8008, i.e. the user name or `client <id>` for a client-credentials caller) and path - never a password, hash or token value.
+since that rule, i.e. the user name or `client <id>` for a client-credentials caller) and path - never a password, hash or token value.
 A failing revocation throws, so the endpoint never reports success while old refresh tokens still work;
 the caller keeps a new sign-in via `RefreshSignInAsync` (change/set-password). A new password path - REST or
-CK method handler (AB#5672, AB#7774) - must call the same helper. Tests:
+CK method handler - must call the same helper. Tests:
 `UserCredentialChangeServiceTests`, `Api/Manage/PasswordChangeRevokesSessionsTests` (all four paths against the
 real token endpoint), `Persistence/PasswordChangeRevocationTenantIsolationIntegrationTests`.
 
-**Revoke before and after the password write (AB#8018, Security; decision OD-6: ordering, no outbox).** The user store and
+**Revoke before and after the password write (Security; decision OD-6: ordering, no outbox).** The user store and
 the token/authorization stores are separate writes without a shared transaction (each store opens its own session), so a
 stop between the password write and the helper above left old refresh tokens redeemable. `OctoUserManager` overrides
 `ChangePasswordAsync`, `ResetPasswordAsync` and `AddPasswordAsync` (bodies follow the framework step by step) and calls
@@ -166,11 +165,11 @@ write); the manager built by `CrossTenantSecondFactorVerifier` has no revocation
 methods `User.ChangePassword`/`User.ResetPassword`; the post-write helper is replaced by a failing one, the new password works and
 the old refresh token answers `invalid_grant`; red without the pre-write revocation) plus `FailedPasswordChange_RevokesNothing`.
 
-## Two-factor enabled without a usable second factor is refused (AB#7830)
+## Two-factor enabled without a usable second factor is refused
 
 ASP.NET Core Identity challenges only when `TwoFactorEnabled` is set **and** a provider is valid, so a user with
 `TwoFactorEnabled = true` but no authenticator key would sign in with the password alone. That state arises in a
-tenant cloned with ExportRt/ImportRt under System.Identity 2.27.0 (`UserTokens` is `Secret` since AB#7766, `TwoFactorEnabled`
+tenant cloned with ExportRt/ImportRt under System.Identity 2.27.0 (`UserTokens` is `Secret`, `TwoFactorEnabled`
 was exported; since 2.28.0 `ImportRt` refuses users), after a restore from another environment (key ring), after an
 import of edited user data, or when an admin deletes `UserTokens`. Rule (decided by Gerald 2026-10-30, option a, fails closed):
 `POST {tenant}/api/auth/login` verifies the password with `CheckPasswordSignInAsync` (no cookie) for such a user and,
@@ -180,16 +179,16 @@ only) and issues no cookie. A wrong password follows the normal failure path (lo
 confirm the password). The login UI shows the translated text (`LOGIN.ERROR_SECOND_FACTOR_SETUP_REQUIRED`).
 *Usable* means an authenticator key only: the confirmed-e-mail provider is valid for ASP.NET Identity but its code is
 not delivered (tracked as its own bug), recovery codes only work after a challenge. Recovery: an admin switches
-the second factor off with `User.DisableTwoFactor-1` or `POST {tenant}/v1/users/{userName}/disableTwoFactor` (AB#7879, section
-below; since AB#8042 a generic GraphQL/ImportRt write of `TwoFactorEnabled` is refused); the user signs in and enrols again. The cross-tenant password login refuses the
-same state on top of AB#7804: when `ICrossTenantSecondFactorVerifier.GetOptionsAsync` reports
+the second factor off with `User.DisableTwoFactor-1` or `POST {tenant}/v1/users/{userName}/disableTwoFactor` (section
+below; a generic GraphQL/ImportRt write of `TwoFactorEnabled` is refused); the user signs in and enrols again. The cross-tenant password login refuses the
+same state on top: when `ICrossTenantSecondFactorVerifier.GetOptionsAsync` reports
 `CanUseAuthenticator = false` for the source user, `Login` answers `secondFactorSetupRequired` instead of issuing
 a challenge. Tests: `Api/Auth/TwoFactorUnusableLoginTests` (with and without confirmed e-mail, wrong password,
 recovery after 2FA off), `CrossTenantSecondFactorTests.PasswordLogin_SourceUserWithTwoFactorButNoAuthenticator_*`.
 
-## User store concurrency: every user write advances `rtVersion` (AB#7770, AB#7908)
+## User store concurrency: every user write advances `rtVersion`
 
-`OctoUserStore` writes users with the expected `rtVersion` (engine guard, AB#7769). The rules:
+`OctoUserStore` writes users with the expected `rtVersion` (engine guard). The rules:
 
 - **`UpdateAsync`** replaces the user with the `RtVersion` the instance was read with. A concurrent change of the same
   user (profile, password, lockout, counter, token) returns `IdentityResult.Failed(ConcurrencyFailure)` instead of
@@ -199,10 +198,10 @@ recovery after 2FA off), `CrossTenantSecondFactorTests.PasswordLogin_SourceUserW
   through it: read the user in a transaction, change it, replace it with the read version (so `rtVersion` advances), re-read
   and re-apply on `RtVersionConflictException` (at most `MaxConcurrencyAttempts` = 40), MongoDB write conflicts are retried
   inside by `MongoWriteRetry`. Callers: `RecordAccessFailureAsync` / `ResetAccessFailedCountAtomicallyAsync` (the
-  `IAtomicUserLockoutStore` that **production** uses through `OctoUserManager`, AB#7854), the static cross-tenant variants
+  `IAtomicUserLockoutStore` that **production** uses through `OctoUserManager`), the static cross-tenant variants
   (`RecordAccessFailureAsync(ITenantRepository, …)`, `ResetAccessFailedCountAsync(ITenantRepository, …)`), recovery-code
   redemption, `SetTokenAsync` / `RemoveTokenAsync` and the `IUserLockoutStore` members below.
-  🔴 AB#7908: the atomic lockout store used to replace *without* an expected version and kept the old `rtVersion`, so a stale
+  🔴 The atomic lockout store used to replace *without* an expected version and kept the old `rtVersion`, so a stale
   `UpdateAsync` (profile edit, admin edit, password rehash) that read the user before a failure/lockout/reset succeeded and
   wrote the pre-lockout counter and lockout end back. Never write a stored user without the version it was read with.
 - **`IUserLockoutStore` members** `IncrementAccessFailedCountAsync`, `ResetAccessFailedCountAsync`,

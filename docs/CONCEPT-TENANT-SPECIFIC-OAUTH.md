@@ -1,3 +1,8 @@
+---
+description: Background: concept of tenant-specific OAuth sign-in through acr_values
+background: true
+---
+
 # Concept: Tenant-Specific OAuth Authentication via acr_values
 
 ## Status: Implemented (existing capability)
@@ -66,7 +71,7 @@ OAuth Client                Identity Server              Tenant "{tenantId}"
 The issued access token contains tenant-specific claims:
 
 - `tenant_id`: The tenant the user authenticated against (matches the `acr_values` parameter)
-- `allowed_tenants`: All tenants the user is authorized to access — the login tenant, the home tenants a cross-tenant shadow user's `xt_{home}_{name}` chain unwinds to, and every descendant tenant that maps the user (`ExternalTenantUserMapping`). A parent the login tenant merely delegates authentication to (`OctoTenantIdentityProvider`) is not included unless the user actually exists there (AB#5170)
+- `allowed_tenants`: All tenants the user is authorized to access — the login tenant, the home tenants a cross-tenant shadow user's `xt_{home}_{name}` chain unwinds to, and every descendant tenant that maps the user (`ExternalTenantUserMapping`). A parent the login tenant merely delegates authentication to (`OctoTenantIdentityProvider`) is not included unless the user actually exists there
 - `role`: Roles assigned to the user in the login tenant (direct + group-inherited)
 - `sub`: The user's unique identifier within the tenant
 
@@ -74,7 +79,7 @@ The issued access token contains tenant-specific claims:
 
 | Component | Responsibility |
 |-----------|---------------|
-| `OidcTenantResolutionMiddleware` | Parses `acr_values=tenant:{tenantId}` from the authorize request, sets the tenant context, and marks authorization codes with the tenant in both redirects and `form_post` HTML responses (AB#7892) |
+| `OidcTenantResolutionMiddleware` | Parses `acr_values=tenant:{tenantId}` from the authorize request, sets the tenant context, and marks authorization codes with the tenant in both redirects and `form_post` HTML responses |
 | `TenantLoginRedirectMiddleware` | Rewrites the login redirect from `/System/login` to `/{tenantId}/login` |
 | `UserProfileService` | Adds `tenant_id` and `allowed_tenants` claims to the issued token |
 | `OctoUserStore` | Resolves user identity and roles from the correct tenant database |
@@ -105,7 +110,7 @@ The client must be provisioned in **each tenant** where users should be able to 
 
 ## 7. Refresh Token Handling
 
-When `AllowOfflineAccess: true` is configured on the client, refresh tokens are issued alongside access tokens. The refresh token carries its tenant (AB#7892):
+When `AllowOfflineAccess: true` is configured on the client, refresh tokens are issued alongside access tokens. The refresh token carries its tenant:
 
 1. Every `/connect/token` response that carries a refresh token returns it as `{tenantId}:{token}` (`OidcTenantMarker`)
 2. On refresh, `OidcTenantResolutionMiddleware` takes the tenant from that marker and strips it before OpenIddict reads the form; refresh tokens are persisted per tenant (`RtOAuthToken`)
@@ -180,7 +185,7 @@ Content-Type: application/json
 { "emailOrUsername": "user@example.com", "scopeTenantId": "accounting" }
 ```
 
-`scopeTenantId` is optional (AB#5311). When present, only tenants strictly below it in the
+`scopeTenantId` is optional. When present, only tenants strictly below it in the
 registry hierarchy — direct and indirect descendants — are returned; the scope itself, its
 siblings and ancestors never are. An unknown scope answers "not found". The scope originates from
 the authorize request as a second `acr_values` entry, `acr_values=tenant_scope:accounting`, which
@@ -211,7 +216,7 @@ This is used by Grafana's `org_attribute_path` to map users to Grafana organizat
 ```ini
 [auth.generic_oauth]
 org_attribute_path = allowed_tenants
-org_mapping = meshtest:Meshtest:Viewer sbeg:SBEG:Editor
+org_mapping = meshtest:Meshtest:Viewer acme:ACME:Editor
 scopes = openid profile email role allowed_tenants
 ```
 

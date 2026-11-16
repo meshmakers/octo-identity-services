@@ -1,3 +1,8 @@
+---
+description: Background: implementation notes of external identity provider support
+background: true
+---
+
 # External Identity Provider Implementation
 
 ## Overview

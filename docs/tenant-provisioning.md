@@ -10,7 +10,7 @@ applies_to: DefaultConfiguration*.cs, **/Services/{Admin,FileRoles,ScratchTenant
 The Identity CK model, default roles, identity resources, API scopes, API resources, and OIDC clients are provisioned to **all tenants** (not just the system tenant) during startup. This ensures OAuth/OIDC flows work when targeting any tenant. For child tenants, roles are written directly to the child tenant database via `EnsureRoleInChildTenantAsync()` using the same `childRepo` pattern as clients and resources. The identity service writes its data directly to child tenant databases (including the `octo-data-refinery-studio` SPA client when `RefineryStudioUrl` is configured), while other services (asset-repo, bot, etc.) send their data via the Distribution Event Hub. Cross-tenant users receive a `home_tenant_id` claim in their tokens.
 
 **The system tenant is only bootstrapped when its database is genuinely absent — or an
-infrastructure-only shell (AB#4762, AB#4854).** `SetupTenantAsync` used to call
+infrastructure-only shell.** `SetupTenantAsync` used to call
 `CreateSystemTenantAsync()` whenever `IsSystemTenantExistingAsync()` returned false. That is false not
 only for a missing database but also for a **present, fully populated** one whose System CK model is
 absent or not at the exact expected version — the state `EnsureSystemCkModelAsync()` leaves behind when
@@ -23,7 +23,7 @@ The caller now checks `systemContext.IsSystemDatabaseBootstrappableAsync()` firs
 the database is absent or contains nothing but the engine's own infrastructure collections
 (lifecycle / setup-retry / lock bookkeeping) — the "shell" the engine's plumbing can materialize on a
 virgin server before the bootstrap runs. Refusing over such a shell wedged every 3.4.93 fresh install,
-because the bootstrap is the only path that creates the datasource user (AB#4854). For any other
+because the bootstrap is the only path that creates the datasource user. For any other
 existing database it throws with the real cause instead: the System CK model needs repairing, and
 system-tenant setup is deliberately fatal (`DefaultConfigurationInitializationService`), so failing
 loudly and diagnosably is correct — repairing itself by dropping the platform database is not. The
@@ -43,7 +43,7 @@ pins this.
 
 **Deferred tenant startup is parallelized.** `DefaultConfigurationCreatorServiceStandardized.StartDeferredTenantsAsync` (in `octo-common-services`) processes the deferred identity-data setup and the per-tenant `StartTenantAsync` loop with `Parallel.ForEachAsync` and a bounded degree of `min(ProcessorCount, 8)`. This keeps the Identity-service cold start roughly linear in `tenants / parallelism` instead of `O(tenants)` — sequential per-tenant `CkModelUpgradeService` + `MigrationService` runs (~2-3s each) were the dominant cold-start cost (~44s for 13 tenants on test-2). MongoDB databases are tenant-isolated, so the work parallelizes safely; `_pendingIdentityDataTenantIds` is guarded with a `lock` and `failedTenants` is collected into a `ConcurrentBag`. `RetryFailedTenantsAsync` deliberately stays sequential to avoid bursting MongoDB on repeated failures.
 
-**A failed tenant setup is retried durably (AB#4690).** `SetupTenantAsync` applies the
+**A failed tenant setup is retried durably.** `SetupTenantAsync` applies the
 `System.Identity.Bootstrap` blueprint with `throwOnFailure: true`, and Identity derives from
 `DefaultConfigurationCreatorServiceBase`, whose `RetryFailedTenantsAsync` used to be a no-op — so a setup
 that threw once was lost. That happened in production when a tenant was deleted and recreated under the
@@ -58,7 +58,7 @@ only the *caller's* API scopes, resources and clients; the tenant's own roles/gr
 `SetupTenantAsync`. Answering `Success` regardless made the asset repository record the tenant as fully
 provisioned while it had no roles. The consumer now checks for roles and answers
 `CreateIdentityDataResult.SuccessIdentityDataSeedPending` when there are none, which the caller treats as
-a retriable not-ready condition (AB#4690).
+a retriable not-ready condition.
 
 **Manual recovery** for a tenant that is already stuck without roles, without restarting the service:
 `PUT {systemTenant}/v1/tenants/clearCache?childTenantId=<tenant>` on the asset repository publishes
@@ -67,9 +67,9 @@ a retriable not-ready condition (AB#4690).
 
 ## Admin Provisioning (Cross-Tenant Pre-Provisioning)
 
-The `AdminProvisioningController` allows users with the TenantManagement or UserManagement role to pre-provision cross-tenant user mappings in a **target tenant** without needing `allowed_tenants` for that tenant. Since AB#5859 the target must be the caller's own tenant or one of its registry descendants (system-tenant callers: any tenant) — `AdminProvisioningTargetScopeFilter`; before, the role was documented but not checked and any target was reachable. It is routed via the system tenant: `{tenantId}/v1/adminProvisioning/{targetTenantId}`.
+The `AdminProvisioningController` allows users with the TenantManagement or UserManagement role to pre-provision cross-tenant user mappings in a **target tenant** without needing `allowed_tenants` for that tenant. The target must be the caller's own tenant or one of its registry descendants (system-tenant callers: any tenant) — `AdminProvisioningTargetScopeFilter`; before, the role was documented but not checked and any target was reachable. It is routed via the system tenant: `{tenantId}/v1/adminProvisioning/{targetTenantId}`.
 
-**Regression tests and the route rule (AB#4824):** every route whose path contains `{targetTenantId}` must carry
+**Regression tests and the route rule:** every route whose path contains `{targetTenantId}` must carry
 `[TypeFilter(typeof(AdminProvisioningTargetScopeFilter))]` (class or action). `AdminProvisioningRouteCoverageTests`
 derives the route set by reflection over all controllers, so a new route without the filter fails the unit tests.
 `AdminProvisioningPipelineTests` runs the real routing, `AdminProvisioningController`,
@@ -77,7 +77,7 @@ derives the route set by reflection over all controllers, so a new route without
 sibling, sibling descendant, unrelated, system and unknown target 403 with an identical response; system caller
 any registered tenant (unknown tenant: 404 from the action); create-then-provision; policy and filter together
 (roleless caller stopped by the policy, role holder by the filter); `RoleEnforcement=Warn` (the filter only
-logs, the call passes — the fix depends on `Enforce`). Since AB#6758 the rule covers every action that names a target tenant — `{targetTenantId}`/`{childTenantId}` in
+logs, the call passes — the fix depends on `Enforce`). The rule covers every action that names a target tenant — `{targetTenantId}`/`{childTenantId}` in
 the route **or** a `targetTenantId`/`childTenantId` parameter (e.g. the query of
 `clients/{id}/mirrors/provisionInTenant?childTenantId=`): `ClientMirrorController.ProvisionInTenant`, `RotateSecret` and
 `Delete` carry the filter (it reads route and query values; every named tenant must be in scope), and
@@ -101,7 +101,7 @@ This solves the chicken-and-egg problem: after creating a child tenant, the user
 | `POST` | `/{targetTenantId}/provisionCurrentUser` | Auto-provision current user with all roles |
 | `DELETE` | `/{targetTenantId}/{mappingRtId}` | Delete a mapping in target tenant |
 
-**`provisionCurrentUser` from a shadow user (AB#8017):** when the calling token's subject is a cross-tenant
+**`provisionCurrentUser` from a shadow user:** when the calling token's subject is a cross-tenant
 shadow user (`xt_…`, e.g. a session or octo-cli context scoped to an intermediate tenant A that provisions into
 grandchild B), the mapping is written for the caller's **home identity** — the root of its `xt_` chain
 (`ICrossTenantShadowUserChainResolver.GetSourceChainAsync`, last tier), looked up by name in the home tenant — not
@@ -109,7 +109,7 @@ for the shadow user. Before, the mapping was keyed on (A, shadow); the exchange 
 octo-cli do for every later call) never finds such a mapping (`ResolveExchangeSourceAsync` only tries the subject
 and its home, `GroupRoleResolver` only the B shadow's chain), so the call answered success and the user stayed
 `tenant_not_provisioned`. One home mapping serves both paths: from the home token directly, and from the A shadow
-(dual-candidate rule AB#4966). The exchange was deliberately **not** widened to ancestor shadow mappings. The
+(dual-candidate rule). The exchange was deliberately **not** widened to ancestor shadow mappings. The
 caller's name is taken from the user stored in its tenant (the token claim only when the user cannot be read). A
 shadow whose chain is ambiguous or broken, whose home tenant is unregistered, whose home user does not exist or
 whose home tenant is the target itself is refused with **409** (`ProblemDetails`, names the caller and says to
@@ -139,7 +139,7 @@ of the selected groups — the same mechanism `provisionCurrentUser` uses with `
 > already stored) and surfaced as a 500. It now returns `Created(relativeSelfLink, dto)`. The
 > `AdminProvisioningController.Create` was never affected — it already used `Created(string.Empty, …)`.
 > `EmailDomainGroupRulesController.Create` had the same bug (`CreatedAtAction(nameof(GetByIdAsync), …)`: MVC
-> strips the `Async` suffix from action names, so no route matched). AB#6648 fixed it with a **named route**:
+> strips the `Async` suffix from action names, so no route matched). It was fixed with a **named route**:
 > `[HttpGet("{rtId}", Name = …)]` plus `CreatedAtRoute(name, new { tenantId, version, rtId }, dto)`, pinned by
 > `EmailDomainGroupRulesCreateTests` (also with a trailing slash on the POST URL). **Rule for new create
 > actions:** use a named route, not `CreatedAtAction` (breaks on the `Async` suffix) and not a hand-built
@@ -148,32 +148,32 @@ of the selected groups — the same mechanism `provisionCurrentUser` uses with `
 > prefix, link generation does not fill them in and answers "No route matches". The hand-built link in
 > `ExternalTenantUserMappingsController.Create` predates this rule and still has those two weaknesses.
 
-The `provisionCurrentUser` endpoint extracts `sub`, `preferred_username`, and `tenant_id` from the JWT, fetches all roles from the target tenant, and creates an `RtExternalTenantUserMapping` with all role IDs. It also adds the mapping as a member of the **TenantOwners** group (via `GroupMember` association), so the user inherits all roles through group membership. If a mapping already exists it is judged, not just returned (AB#7088): one that grants no effective role (no existing role in `MappedRoleIds`, none via a group) or carries a wrong `SourceUserName` (role lookup keys on the NAME, this lookup on the user id) is repaired in place; one that already grants a role is left alone. The `X-Provisioning-Outcome` response header reports `created` / `repaired` / `already-provisioned`. No login path stores a mapping any more (`FindOrCreateCrossTenantUserAsync(..., storeMappingIfMissing: false)`): the token exchange since AB#7088, the interactive cross-tenant login (`SignInCrossTenantUserAsync`) and the tenant switch since AB#8439 — a bare mapping counted as explicit provisioning and bypassed `AllowSelfRegistration=false`. Only an admin action creates a mapping.
+The `provisionCurrentUser` endpoint extracts `sub`, `preferred_username`, and `tenant_id` from the JWT, fetches all roles from the target tenant, and creates an `RtExternalTenantUserMapping` with all role IDs. It also adds the mapping as a member of the **TenantOwners** group (via `GroupMember` association), so the user inherits all roles through group membership. If a mapping already exists it is judged, not just returned: one that grants no effective role (no existing role in `MappedRoleIds`, none via a group) or carries a wrong `SourceUserName` (role lookup keys on the NAME, this lookup on the user id) is repaired in place; one that already grants a role is left alone. The `X-Provisioning-Outcome` response header reports `created` / `repaired` / `already-provisioned`. No login path stores a mapping any more (`FindOrCreateCrossTenantUserAsync(..., storeMappingIfMissing: false)`): the token exchange, the interactive cross-tenant login (`SignInCrossTenantUserAsync`) and the tenant switch — a bare mapping counted as explicit provisioning and bypassed `AllowSelfRegistration=false`. Only an admin action creates a mapping.
 
 The `GET` endpoint returns `ExternalTenantUserMappingDto` with a `GroupNames` field populated by querying inbound `GroupMember` associations for each mapping entity.
 
-The **per-tenant** `ExternalTenantUserMappingsController` (`{tenantId}/v1/externalTenantUserMappings`, used by `octo-cli GetExternalTenantUserMappings` and `IdentityServicesClient`) also resolves `GroupNames` on `GetAll`/`GetById` via `IGroupStore.GetGroupNamesForExternalUserMappingAsync` (inbound `GroupMember` walk, mirrors the AdminProvisioning resolution). Before AB#4660 this controller left `GroupNames` empty, so a group-based grant looked like "no roles/groups" even though roles were inherited via the group. `IGroupStore` also exposes symmetric `AddMemberExternalUserAsync` / `RemoveMemberExternalUserAsync` (previously only user/client member add/remove existed).
+The **per-tenant** `ExternalTenantUserMappingsController` (`{tenantId}/v1/externalTenantUserMappings`, used by `octo-cli GetExternalTenantUserMappings` and `IdentityServicesClient`) also resolves `GroupNames` on `GetAll`/`GetById` via `IGroupStore.GetGroupNamesForExternalUserMappingAsync` (inbound `GroupMember` walk, mirrors the AdminProvisioning resolution). Previously this controller left `GroupNames` empty, so a group-based grant looked like "no roles/groups" even though roles were inherited via the group. `IGroupStore` also exposes symmetric `AddMemberExternalUserAsync` / `RemoveMemberExternalUserAsync` (previously only user/client member add/remove existed).
 
-# File roles, System.Files data policies and machine clients (AB#6180, AB#6467, AB#6457)
+# File roles, System.Files data policies and machine clients
 
 Blueprint `System.Identity.Bootstrap` 1.6.0 seeds the roles `FileManagement` / `FileViewer`, the data permissions
 `files.read` / `files.manage` (660…52/53) and the enforcing policies 660…54/55 on `System.Files/FileSystemEntity`
 (FileViewer reads; FileManagement reads and writes; the asset repository carries the same rules as a built-in
 baseline). Details, the one-time `FileRoleGrant` (Reporting roles → File roles), the one-time
-`TenantAdministratorFileRoleGrant` (AB#6578: human tenant administrators → `FileManagement`, own marker so tenants with the
+`TenantAdministratorFileRoleGrant` (human tenant administrators → `FileManagement`, own marker so tenants with the
 Reporting marker still get it) and the recurring
 `PipelineServiceAccountRoleGrant` are in `docs/persistence.md`. Rules to remember:
 
 - Pipeline service accounts (`octo-pipeline-sa-*`) always hold the baseline roles of
   `PipelineServiceAccountBaselineRoles` — `FileManagement` (tenant setup: only with System.Files) and
-  `StreamDataReader` (AB#8581: the stream-data gate of AB#8559; covers legacy accounts without `AssignedRoleNames`):
+  `StreamDataReader` (the stream-data gate; covers legacy accounts without `AssignedRoleNames`):
   granted by `CreateIdentityDataCommandRequestConsumer` in the command that creates/touches them (kept by the
   declarative sync, additive for a `null` list) and caught up at every tenant setup (not run-once, not on the nightly
   `CacheOnly` update). Only seeded roles, only the exact prefix; a system grant, not through the role change guard.
   A new baseline role is one entry in `PipelineServiceAccountBaselineRoles`, never a second copy of the grant.
-- The prefix octo-pipeline-sa- is the only trust check and it is not reserved: since AB#7928 a client administrator may
+- The prefix octo-pipeline-sa- is the only trust check and it is not reserved: a client administrator may
   not grant platform roles it does not hold, but it can create a prefixed client that the setup pass then grants the
-  baseline roles. Known gap, tracked in AB#8618.
+  baseline roles. Known gap.
 - Customer client-credentials clients and octo-cli `LogInClientCredentials` carry no roles: 403 on the Files API
   until the client is given a File role. Reporting uses in-process system sessions and needs nothing.
 - Tests: `FilesDataPermissionsSeedTests`, `PipelineServiceAccountRoleGrant*Tests`,
@@ -181,7 +181,7 @@ Reporting marker still get it) and the recurring
   `PipelineServiceAccountBaselineRolesConsumerIntegrationTests` (own class: the other provisioning tests assert
   exact role sets).
 
-# Scratch tenants: the creator becomes administrator (AB#7192)
+# Scratch tenants: the creator becomes administrator
 
 An agent that creates a scratch child tenant with its client-credentials client has to work in it and clean it up without a human
 login. `CreateTenant` takes an opt-in `scratch` flag (asset repository, octo-cli `--scratch`, MCP `create_tenant`); a `Restore` has none - restoring into an existing scratch tenant keeps its marker; the tenant then
@@ -208,6 +208,6 @@ create / attach / plain restore.
 - **Audit:** grant and revoke are information events (source IdentityService) in the event log of the tenant **and** of the system tenant (which
   outlives the tenant); no secret is in the text.
 - The child token of the agent is the ordinary one: `client_credentials`, `acr_values=tenant:<child>`, `scope=octo_api`, with the mirror's own
-  secret (`RotateMirrorSecret`) or - while AB#5061 keeps the inherited secret - the parent client's secret.
+  secret (`RotateMirrorSecret`) or - while per-tenant mirror secrets keep the inherited secret - the parent client's secret.
 - Tests: `ScratchTenantCreatorGrantIntegrationTests` (real MongoDB: grant only for the creator, none without a marker, repeated setup, re-provisioned
   mirror, persisted revoke, foreign parent, non-mirror client, non-system parent, audit without secrets), `GroupsControllerScratchRevokeTests`.

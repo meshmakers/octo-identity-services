@@ -1,3 +1,8 @@
+---
+description: Background: concept and decisions for two-factor authentication (German)
+background: true
+---
+
 # Konzept: Two-Factor Authentication (2FA)
 
 ## Status: Entscheidungen getroffen - Bereit zur Implementierung

@@ -1,3 +1,8 @@
+---
+description: Background: single logout implementation across tabs and client applications
+background: true
+---
+
 # Single Logout (SLO) Implementation
 
 This document describes the Single Logout (SLO) implementation for the Octo Mesh Platform, enabling coordinated logout across multiple browser tabs and client applications.

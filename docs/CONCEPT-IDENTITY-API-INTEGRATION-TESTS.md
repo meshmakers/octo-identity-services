@@ -1,3 +1,8 @@
+---
+description: Background: concept of the identity API integration tests
+background: true
+---
+
 # Concept: Identity API Integration Tests
 
 This document describes the concept for integration tests that verify all Identity Server API endpoints.
@@ -29,7 +34,7 @@ The integration tests ensure that all Identity Server API endpoints work correct
 - **`TestSigningCredentialStore`**: In-memory RSA key for token signing
 - **Builders**: `RtUserBuilder`, `RtClientBuilder` for test data creation
 
-### 2.1.1 Fixture Isolation: One Server, One Database Per Fixture (AB#5117)
+### 2.1.1 Fixture Isolation: One Server, One Database Per Fixture
 
 Every fixture used to start a MongoDB replica-set Testcontainer of its own, because all of them
 shared the hardcoded system database name `identityintegrationtests` and therefore needed a private
@@ -58,7 +63,7 @@ pristine database (`DataProtectionKeySeedIntegrationTests` needs an empty `RtDat
 collection, `VirginSystemDatabaseBootstrapIntegrationTests` creates and destroys the system tenant),
 which per-class fixture instances give for free now that each one owns a database.
 
-### 2.1.2 Test Log Volume (AB#5117)
+### 2.1.2 Test Log Volume
 
 The fixtures logged at `LogLevel.Trace`. The pipeline runs `dotnet test` with
 `--logger "console;verbosity=detailed"`, which writes xUnit's per-test output for passing tests too,

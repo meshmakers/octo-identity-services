@@ -1,3 +1,8 @@
+---
+description: Background: environment variables and deployment configuration reference
+background: true
+---
+
 # Configuration and Deployment
 
 ## Environment Variables
@@ -38,17 +43,17 @@ export OCTO_Identity__SigningCertificatePassword="secret"
 }
 ```
 
-##### CK methods hosted by the Identity service (AB#5672)
+##### CK methods hosted by the Identity service
 
 | Setting | Default | Meaning |
 |---------|---------|---------|
-| `Methods:Identity:EnablePasswordMethods` (env `OCTO_Methods__Identity__EnablePasswordMethods`) | `false` | Offers the handlers of CK methods with a sensitive (password / secret) parameter or result **on the bus**: `User.ChangePassword`, `User.SetPassword` (AB#8414), `User.ResetPassword`, `User.CreateUser`, `Client.AddSecret`, `Client.RemoveSecret` (AB#7780). Off: the service announces no password method and the gateway (GraphQL) answers `METHOD_HANDLER_NOT_AVAILABLE`. The switch governs the bus only (AB#8413): the REST endpoints `POST users` and `POST users/ResetPassword` are facades of `User.CreateUser` / `User.ResetPassword`, and the account pages' `POST api/manage/change-password` / `set-password` of `User.ChangePassword` / `User.SetPassword` (AB#8414); they work in either state - with the switch off these four handlers are registered local only (in-process, no queue), so the password never reaches the broker. A GraphQL call of a method that is off is refused by the asset-repo gateway **before** it sends anything (AB#8634, octo-common-services dispatcher: no live handler in its registry = `METHOD_HANDLER_NOT_AVAILABLE` / `no-live-handler` without a send), so the parameters never reach RabbitMQ and MassTransit logs no `S-FAULT`; needs an asset-repo built with the common-services package of AB#8634 (before it, one non-persistent send went to the broker and came back unroutable). **Production gate (2026-10-23): keep it off on staging-1, prod-1 and prod-2 until the restricted broker user (B0) is rolled out.** Read at start; restart after a change. **Helm (AB#8603):** `services.identity.methods.enablePasswordMethods` (`true`/`false`; unset renders no variable) in the octo-helm-core `octo-mesh` chart, set per cluster in octo-mesh-deployment `clusters/<cluster>/values-octo-mesh.yaml`; a CD run restarts identity and the startup log shows `EnablePasswordMethods=True/False`. Cluster state: on in test-2, staging-1, prod-1 and prod-2 since 2026-11-10/11 (recorded on AB#8603 and AB#8860). Rollback: `false` (or unset) and the CD. |
+| `Methods:Identity:EnablePasswordMethods` (env `OCTO_Methods__Identity__EnablePasswordMethods`) | `false` | Offers the handlers of CK methods with a sensitive (password / secret) parameter or result **on the bus**: `User.ChangePassword`, `User.SetPassword`, `User.ResetPassword`, `User.CreateUser`, `Client.AddSecret`, `Client.RemoveSecret`. Off: the service announces no password method and the gateway (GraphQL) answers `METHOD_HANDLER_NOT_AVAILABLE`. The switch governs the bus only: the REST endpoints `POST users` and `POST users/ResetPassword` are facades of `User.CreateUser` / `User.ResetPassword`, and the account pages' `POST api/manage/change-password` / `set-password` of `User.ChangePassword` / `User.SetPassword`; they work in either state - with the switch off these four handlers are registered local only (in-process, no queue), so the password never reaches the broker. A GraphQL call of a method that is off is refused by the asset-repo gateway **before** it sends anything (octo-common-services dispatcher: no live handler in its registry = `METHOD_HANDLER_NOT_AVAILABLE` / `no-live-handler` without a send), so the parameters never reach RabbitMQ and MassTransit logs no `S-FAULT`; needs an asset-repo built with the common-services package (before it, one non-persistent send went to the broker and came back unroutable). **Production gate (2026-10-23): keep it off on staging-1, prod-1 and prod-2 until the restricted broker user (B0) is rolled out.** Read at start; restart after a change. **Helm:** `services.identity.methods.enablePasswordMethods` (`true`/`false`; unset renders no variable) in the octo-helm-core `octo-mesh` chart, set per cluster in octo-mesh-deployment `clusters/<cluster>/values-octo-mesh.yaml`; a CD run restarts identity and the startup log shows `EnablePasswordMethods=True/False`. Cluster state: on in test-2, staging-1, prod-1 and prod-2 since 2026-11-10/11 (recorded in the rollout notes). Rollback: `false` (or unset) and the CD. |
 | `Methods:Token:*` | authority = `Identity:AuthorityUrl` | Caller token validation of the method host (issuer, keys, scope, tenant); only needed to override the defaults. See the common-services method handler SDK. |
 
-Helm: set the first row as an environment variable of the identity service. Details and the handler pattern: `CLAUDE.md`, section
+Helm: set the first row as an environment variable of the identity service. Details and the handler pattern: `docs/identity-methods.md`, section
 "CK method host of the identity service".
 
-##### Client mirror reconciliation (AB#8019)
+##### Client mirror reconciliation
 
 | Setting | Default | Meaning |
 |---------|---------|---------|
@@ -60,14 +65,14 @@ reconciliation) writes with the version it read and retries on a conflict, so a 
 `identity.client_mirror.reconcile.runs` (label `outcome`: `ok`, `tenant_failed`). Logs name client ids and tenants, never a
 secret or its hash.
 
-##### CORS policy cache (AB#5487)
+##### CORS policy cache
 
 The Identity service builds its CORS policy from the client origins (`allowedCorsOrigins`) of the system tenant
 and all registered tenants and caches it in process memory.
 
 | Setting | Default | Meaning |
 |---------|---------|---------|
-| `Identity:CorsPolicyCacheSeconds` (env `OCTO_IDENTITY__CORSPOLICYCACHESECONDS`) | `60` | Lifetime of the cached policy. After it expires the next request rebuilds the policy from the database, so a missed `CorsClientsUpdate` event (another pod, a client written without event) or a removed origin heals on its own. `0` or less disables the time-based expiry (event-driven invalidation only). The rebuild is single-flight per pod (AB#8035): requests that find the policy expired or invalidated share one load of the origins. The rebuild is logged at Debug; Information (`Identity CORS origins changed: …`, with added and removed origins) only when the origin set differs from the previous load. |
+| `Identity:CorsPolicyCacheSeconds` (env `OCTO_IDENTITY__CORSPOLICYCACHESECONDS`) | `60` | Lifetime of the cached policy. After it expires the next request rebuilds the policy from the database, so a missed `CorsClientsUpdate` event (another pod, a client written without event) or a removed origin heals on its own. `0` or less disables the time-based expiry (event-driven invalidation only). The rebuild is single-flight per pod: requests that find the policy expired or invalidated share one load of the origins. The rebuild is logged at Debug; Information (`Identity CORS origins changed: …`, with added and removed origins) only when the origin set differs from the previous load. |
 
 Behaviour that does not depend on the setting:
 
@@ -78,7 +83,7 @@ Behaviour that does not depend on the setting:
   (`POST {tenant}/v1/clients/{id}/overlayUris`) publishes the event even when it added no URI, so an idempotent re-apply
   refreshes the cache without touching the client.
 
-##### Sign-in rate limits (AB#7854)
+##### Sign-in rate limits
 
 In-memory limits per pod on the interactive sign-in endpoints (`login`, `ldap-login`, `login-2fa`, `login-2fa-email`,
 `send-2fa-email`, `login-recovery`); a refused attempt gets `429` with `Retry-After: 60`. Details:
@@ -92,7 +97,7 @@ In-memory limits per pod on the interactive sign-in endpoints (`login`, `ldap-lo
 | `Identity:SignInRateLimit:PermitsPerClientIpPerMinute` | `60` | Attempts per client address over all accounts and endpoints in a sliding minute. |
 | `Identity:SignInRateLimit:UseForwardedFor` | `true` | Client address = right-most `X-Forwarded-For` entry (set by the ingress). Turn off only when the service is reachable without such a proxy — a client could otherwise choose its own address. |
 
-##### Source user lookup rate limit (AB#8341)
+##### Source user lookup rate limit
 
 In-memory limit per pod on `POST ExternalTenantUserMappings/sourceUserLookup` (exact lookup of a user of another tenant
 for a grant, `CONCEPT-SIBLING-TENANT-GRANTS.md`), per caller (subject, or client id of a service token) and target
@@ -107,9 +112,9 @@ wait time in the `Retry-After` header and the body field `retryAfterSeconds`.
 
 ##### Token signing (OpenIddict)
 
-Since AB#4989/AB#4996 the OAuth2/OIDC server is **OpenIddict** (Duende IdentityServer removed).
+The OAuth2/OIDC server is **OpenIddict** (Duende IdentityServer removed).
 `Identity:IdentityServerLicenseKey` no longer exists, and neither does `Identity:AutoMapperLicenseKey`
-(AutoMapper was removed in AB#6506; a leftover `OCTO_IDENTITY__AutoMapperLicenseKey` is ignored). Token signing still comes from the static
+(AutoMapper was removed; a leftover `OCTO_IDENTITY__AutoMapperLicenseKey` is ignored). Token signing still comes from the static
 PKCS#12 certificate (`KeyFilePath` / `KeyFilePassword`), now registered via
 `AddSigningCertificate` in `OpenIddictConfiguration` — the JWKS is unchanged from the Duende
 setup, so access tokens issued before the migration keep validating. The same certificate is
@@ -119,8 +124,8 @@ Development environment, development certificates are generated automatically.
 
 #### Secret Encryption (`SecretEncryption` section)
 
-Key ring for CK attributes of value type `Secret` (AB#5528; here the identity-provider
-`ClientSecret`, AB#5540), bound by `AddRuntimeEngine()` like in every engine host:
+Key ring for CK attributes of value type `Secret` (here the identity-provider
+`ClientSecret`), bound by `AddRuntimeEngine()` like in every engine host:
 
 | Variable | Meaning |
 |----------|---------|
@@ -144,14 +149,14 @@ the `${octo.scheme}://<slug>.${octo.domain}` composition used by `${octo.mcp.pub
 `Blueprints:Domain` nor the dev override `Identity:ServicePublicUrlOverrides:mcp` is set, the
 variable composes to an empty string and the blueprint seeds a broken mcpApi resource (`Name = "/"`)
 plus relative MCP client URIs — interactive MCP logins then fail with `invalid_target`** (seen live
-on test-2, AB#4338). In cluster deployments the helm chart wires these values; local dev uses
+on test-2). In cluster deployments the helm chart wires these values; local dev uses
 `OCTO_IDENTITY__SERVICEPUBLICURLOVERRIDES__MCP` instead.
 
 ```json
 {
   "Blueprints": {
     "Scheme": "https",
-    "Domain": "test-2.mm.cloud",
+    "Domain": "<environment-domain>",
     "Environment": "test",
     "SystemTenantId": "OctoSystem"
   }
@@ -164,38 +169,38 @@ Key options in `OctoIdentityServicesOptions`:
 |--------|-------------|-------------|
 | `AuthorityUrl` | `OCTO_IDENTITY__AuthorityUrl` | Public URL of the Identity service (default: `https://localhost:5003`) |
 | `RefineryStudioUrl` | `OCTO_IDENTITY__RefineryStudioUrl` | Public URL of the Data Refinery Studio SPA. When set, the `octo-data-refinery-studio` OIDC client is auto-provisioned in all tenants. |
-| `DataProtection:EncryptExistingKeys` | `OCTO_IDENTITY__DATAPROTECTION__ENCRYPTEXISTINGKEYS` | AB#5530, default `false`. Encryption at rest of the Data Protection key ring with the platform key ring (`SecretEncryption`). `false`: stored keys are read as they are, new keys are written unencrypted while the store holds keys (an empty store gets encrypted keys). `true`: new keys encrypted and every stored plain key rewritten encrypted at startup; identity refuses to start without a `SecretEncryption` key. Switch on per cluster only after every pod runs an image with the decryptor — see `rollout-identity-dataprotection-encryption.md`. Setting it back to `false` does not decrypt stored keys. |
+| `DataProtection:EncryptExistingKeys` | `OCTO_IDENTITY__DATAPROTECTION__ENCRYPTEXISTINGKEYS` | Default `false`. Encryption at rest of the Data Protection key ring with the platform key ring (`SecretEncryption`). `false`: stored keys are read as they are, new keys are written unencrypted while the store holds keys (an empty store gets encrypted keys). `true`: new keys encrypted and every stored plain key rewritten encrypted at startup; identity refuses to start without a `SecretEncryption` key. Switch on per cluster only after every pod runs an image with the decryptor — see `rollout-identity-dataprotection-encryption.md`. Setting it back to `false` does not decrypt stored keys. |
 | `DataProtectionKeysPath` | `OCTO_IDENTITY__DataProtectionKeysPath` | **Legacy / seed-only.** When set and the directory contains `key-*.xml` files, those keys are imported once into MongoDB at startup (zero-logout migration from the old PVC). Safe to leave unset in new deployments — DataProtection keys are always stored in MongoDB (`RtDataProtectionKey`, system tenant). |
 
-Tenant-authorization options (`TenantAuthorizationOptions`, octo-common-services, AB#5032) — how the
+Tenant-authorization options (`TenantAuthorizationOptions`, octo-common-services) — how the
 shared `TenantAuthorizationMiddleware` treats client-credentials ("service") tokens. Bound by
-`AddOctoTenantAuthorization(builder.Configuration)`; the defaults reproduce the pre-AB#5032 request
+`AddOctoTenantAuthorization(builder.Configuration)`; the defaults reproduce the earlier request
 behaviour, so leaving the section out changes nothing:
 
 | Option | Env variable | Description |
 |--------|-------------|-------------|
-| `ServiceTokenEnforcement` | `OCTO_TENANTAUTHORIZATION__SERVICETOKENENFORCEMENT` | `Disabled` \| `LogOnly` \| `Enforce` (default since AB#5077). `LogOnly` lets every request through but logs each service token that addresses a tenant it was not issued for — the consumer inventory to evaluate before switching an environment to `Enforce`. `Enforce` answers those with 403, including service tokens carrying no `tenant_id` at all. |
+| `ServiceTokenEnforcement` | `OCTO_TENANTAUTHORIZATION__SERVICETOKENENFORCEMENT` | `Disabled` \| `LogOnly` \| `Enforce` (default). `LogOnly` lets every request through but logs each service token that addresses a tenant it was not issued for — the consumer inventory to evaluate before switching an environment to `Enforce`. `Enforce` answers those with 403, including service tokens carrying no `tenant_id` at all. |
 | `CrossTenantServiceClientIds` | `OCTO_TENANTAUTHORIZATION__CROSSTENANTSERVICECLIENTIDS__0`, `…__1`, … | Escape hatch for a service that genuinely fans out across tenants with one token. **Expected to stay empty** — the AI adapter worker and the mesh adapter both mint tenant-bound tokens (`acr_values=tenant:X`) and pass the `tenant_id` match on their own. Case-insensitive; a trailing `*` matches a prefix. Never list the per-tenant `octo-pipeline-sa-*` accounts, and never use this as a migration aid — that is what `LogOnly` is for. |
 
-Identity API authorization options (`IdentityApiAuthorizationOptions`, AB#5859) — the tenant role
+Identity API authorization options (`IdentityApiAuthorizationOptions`) — the tenant role
 requirement of the tenant REST API (see `docs/system-api.md` § Authorization Policies):
 
 | Option | Env variable | Description |
 |--------|-------------|-------------|
 | `RoleEnforcement` | `OCTO_IDENTITYAPIAUTHORIZATION__ROLEENFORCEMENT` | `Enforce` (default) \| `Warn`. `Warn` lets callers without the required tenant role through and logs every such call as a warning ("would be denied") — the caller inventory to review before switching to `Enforce`. The scope requirement and the system-tenant-only rule of the log-level endpoint are always enforced. |
-| `SecretManagementRoleEnforcement` | `OCTO_IDENTITYAPIAUTHORIZATION__SECRETMANAGEMENTROLEENFORCEMENT` | `Warn` (default) \| `Enforce` (AB#5861). Stages the `SecretManagement` requirement of the API secret writes: `Warn` still lets `TenantManagement`/`UserManagement` through and logs "would be denied with SecretManagementRoleEnforcement=Enforce (AB#5861)"; `Enforce` accepts only `SecretManagement`. Switch per cluster after the precheck (`docs/rollout-identity-rest-role-enforcement.md`). `RoleEnforcement=Warn` also relaxes it. |
-| `CrossTenantAncestry` | `OCTO_IDENTITYAPIAUTHORIZATION__CROSSTENANTANCESTRY` | `Warn` (default) \| `Enforce` (AB#8339; Helm `services.identity.crossTenantAncestry`). Whether a tenant the tenant registry does not confirm as ancestor may still act as one because the target's OctoTenant identity providers point at it — for the provisioning source users, the tenant switch / token exchange and the cross-tenant login. `Warn` lets it through as before and logs `...allowed by CrossTenantAncestry=Warn ... (AB#8339)` with both tenant ids; `Enforce` refuses it, and the admin provisioning writes (`403 CrossTenantSourceNotAncestor`) and OctoTenant provider writes (`400 OctoTenantParentNotAncestor`) refuse a non-ancestor. Read by `CrossTenantAncestryOptions` (same section). See `docs/authentication.md`, *Registry Decides Cross-Tenant Ancestry*. |
+| `SecretManagementRoleEnforcement` | `OCTO_IDENTITYAPIAUTHORIZATION__SECRETMANAGEMENTROLEENFORCEMENT` | `Warn` (default) \| `Enforce`. Stages the `SecretManagement` requirement of the API secret writes: `Warn` still lets `TenantManagement`/`UserManagement` through and logs "would be denied with SecretManagementRoleEnforcement=Enforce"; `Enforce` accepts only `SecretManagement`. Switch per cluster after the precheck (`docs/rollout-identity-rest-role-enforcement.md`). `RoleEnforcement=Warn` also relaxes it. |
+| `CrossTenantAncestry` | `OCTO_IDENTITYAPIAUTHORIZATION__CROSSTENANTANCESTRY` | `Warn` (default) \| `Enforce` (Helm `services.identity.crossTenantAncestry`). Whether a tenant the tenant registry does not confirm as ancestor may still act as one because the target's OctoTenant identity providers point at it — for the provisioning source users, the tenant switch / token exchange and the cross-tenant login. `Warn` lets it through as before and logs `...allowed by CrossTenantAncestry=Warn ...` with both tenant ids; `Enforce` refuses it, and the admin provisioning writes (`403 CrossTenantSourceNotAncestor`) and OctoTenant provider writes (`400 OctoTenantParentNotAncestor`) refuse a non-ancestor. Read by `CrossTenantAncestryOptions` (same section). See `docs/authentication.md`, *Registry Decides Cross-Tenant Ancestry*. |
 
-REST deprecation waves (`RestDeprecationOptions`, octo-common-services, AB#8415) — the dates of the deprecated REST
-endpoints of a wave; see octo-common-services `docs/rest-deprecation.md`. Identity wave 1 is `IdentityUsers1` (`PUT users/{u}/roles`,
+REST deprecation waves (`RestDeprecationOptions`, octo-common-services) — the dates of the deprecated REST
+endpoints of a wave; see `octo-common-services/docs/rest-deprecation.md`. Identity wave 1 is `IdentityUsers1` (`PUT users/{u}/roles`,
 `PUT`/`DELETE users/{u}/roles/{r}`, `POST users/{u}/merge`); the password wave is `IdentityUsersPassword` (`POST users`,
-`POST users/ResetPassword`, AB#8860):
+`POST users/ResetPassword`):
 
 | Option | Env variable | Description |
 |--------|-------------|-------------|
 | `RestDeprecation:Waves:IdentityUsers1:Since` | `OCTO_RestDeprecation__Waves__IdentityUsers1__Since` | `yyyy-MM-dd` (UTC). Delivery day of the release that deprecates the wave; drives the `Deprecation` header. Unset: no `Deprecation` header. Helm `restDeprecation.waves.IdentityUsers1.since`. |
 | `RestDeprecation:Waves:IdentityUsers1:Sunset` | `OCTO_RestDeprecation__Waves__IdentityUsers1__Sunset` | `yyyy-MM-dd` (UTC), after `Since`. Identity wave 1: since `2026-11-08`; sunset to be announced (decided by Gerald once the migration functions are implemented), so it stays empty in `octo-mesh-deployment`; drives the `Sunset` header. Unset: no `Sunset` header. Helm `restDeprecation.waves.IdentityUsers1.sunset`. |
-| `RestDeprecation:Waves:IdentityUsersPassword:Since` | `OCTO_RestDeprecation__Waves__IdentityUsersPassword__Since` | `yyyy-MM-dd` (UTC). Password wave (AB#8860): the delivery day of the release that contains AB#8418 and this wave (the first-party clients call `User.CreateUser` / `User.ResetPassword`); set by Ops at rollout. Unset: no `Deprecation` header, the endpoints answer exactly as before (plus the `Link` header). Helm `restDeprecation.waves.IdentityUsersPassword.since`. |
+| `RestDeprecation:Waves:IdentityUsersPassword:Since` | `OCTO_RestDeprecation__Waves__IdentityUsersPassword__Since` | `yyyy-MM-dd` (UTC). Password wave: the delivery day of the release that contains this wave (the first-party clients call `User.CreateUser` / `User.ResetPassword`); set by Ops at rollout. Unset: no `Deprecation` header, the endpoints answer exactly as before (plus the `Link` header). Helm `restDeprecation.waves.IdentityUsersPassword.since`. |
 | `RestDeprecation:Waves:IdentityUsersPassword:Sunset` | `OCTO_RestDeprecation__Waves__IdentityUsersPassword__Sunset` | `yyyy-MM-dd` (UTC), after `Since`. Same date rule as wave 1: to be announced, stays empty until Gerald decides it; drives the `Sunset` header. Unset: no `Sunset` header. Helm `restDeprecation.waves.IdentityUsersPassword.sunset`. |
 
 ### Configuration Sources
@@ -447,7 +452,7 @@ Logging is configured via `nlog.config`:
 </nlog>
 ```
 
-### Credentials in logs (AB#5792)
+### Credentials in logs
 
 The JSON layout serializes message-template arguments by reflection (`includeEventProperties="true"`).
 To keep credentials out of those properties, `Program.cs` registers an NLog object transformation for
@@ -458,11 +463,11 @@ tokens, client secrets, passwords or 2FA codes to the log. The DTO redaction cov
 a credential-bearing DTO passed as a message-template argument would still be reflected into the JSON
 event properties, so such DTOs must not be logged that way.
 
-### Token values in logs (AB#8324)
+### Token values in logs
 
 OpenIddict writes issued tokens at **Trace/Debug** as plain message arguments, not as message objects: EventId 6013
 (`A new '{Type}' JSON Web Token was successfully created: {Payload}.`) carried the complete signed access token,
-other events carry `{Token}` or `{ReferenceId}`. The AB#5792 object transformation does not see strings, so
+other events carry `{Token}` or `{ReferenceId}`. The object transformation does not see strings, so
 `CredentialLogRedaction` (the `ILoggerFactory` decorator, every provider, see `docs/authentication.md`) also masks:
 
 - **JWT-shaped values** (JWS `eyJ….….…`, JWE with five segments) and **ASP.NET Core Data Protection payloads**

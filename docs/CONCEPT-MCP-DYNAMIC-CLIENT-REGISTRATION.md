@@ -1,9 +1,14 @@
-# Concept — MCP Dynamic Client Registration (RFC 7591), AB#4338 Option A
+---
+description: Background: concept of RFC 7591 dynamic client registration for MCP clients
+background: true
+---
 
-> **Note (2026-09-02):** superseded in parts by AB#4989 — the server now runs OpenIddict; discovery customization uses `ApplyConfigurationResponseContext` handlers instead of Duende `Discovery.CustomEntries`.
+# Concept — MCP Dynamic Client Registration (RFC 7591), Option A
+
+> **Note (2026-09-02):** superseded in parts by the OpenIddict migration — the server now runs OpenIddict; discovery customization uses `ApplyConfigurationResponseContext` handlers instead of Duende `Discovery.CustomEntries`.
 
 Status: PROPOSED implementation plan. Enables spec-compliant interactive MCP clients (Claude Code
-2.1.x) to authenticate against the AB#4315-gated MCP transport, which requires RFC 7591 Dynamic
+2.1.x) to authenticate against the gated MCP transport, which requires RFC 7591 Dynamic
 Client Registration (DCR) — verified live: Claude Code fails with "Incompatible auth server: does not
 support dynamic client registration" because our Duende exposes no `registration_endpoint`.
 
@@ -57,7 +62,7 @@ support dynamic client registration" because our Duende exposes no `registration
    code → loopback callback.
 5. → `POST /connect/token` (PKCE) → access token (allowed_tenants; aud carries the mcp resource) +
    refresh token.
-6. Claude Code sends `Authorization: Bearer` to `https://mcp/mcp` → AB#4315 validates → connected;
+6. Claude Code sends `Authorization: Bearer` to `https://mcp/mcp` → the MCP gate validates → connected;
    per-tool `tenantId` selects the tenant to operate on (within allowed_tenants).
 
 ## Tenant switching (CORRECTED 2026-07-11 — one token = one operating tenant)
@@ -65,7 +70,7 @@ support dynamic client registration" because our Duende exposes no `registration
 IMPORTANT correction: switching tenants is NOT free. The shared `TenantAuthorizationMiddleware`
 (octo-common-services) authorizes the route tenant **strictly against the token's `tenant_id` claim**;
 its own comment states `allowed_tenants` is used ONLY for tenant selection (the picker UI), NOT for
-authorization. A token with `tenant_id=energyiq` gets **403** at voestalpine's API even if voestalpine ∈
+authorization. A token with `tenant_id=tenant-a` gets **403** at tenant-b's API even if tenant-b ∈
 `allowed_tenants`. Two tenant concepts:
 - **Login / operating tenant** — the one the user authenticated against; `tenant_id` in the token; the
   ONLY tenant that token can act on.
@@ -82,7 +87,7 @@ Consequences (verified live 2026-07-11):
   the DCR client stays tenant-agnostic. But per-switch re-auth is unavoidable under the current
   `tenant_id`-based authorization model.
 
-Options for SEAMLESS switching (future, beyond AB#4338):
+Options for SEAMLESS switching (future):
 - **REJECTED — naive token re-scope** (swap `tenant_id` on the existing token): INSECURE. The token
   carries tenant-specific ROLES resolved in the login tenant; reusing them under another `tenant_id`
   would grant the user the wrong tenant's rights (privilege leak). A valid token for tenant Y MUST
@@ -91,7 +96,7 @@ Options for SEAMLESS switching (future, beyond AB#4338):
 1. **Silent cross-tenant token issuance with role re-resolution** (the only secure seamless path).
    Reuse the existing cross-tenant auto-login machinery (`/{parent}/api/auth/cross-tenant-token` →
    `/{child}/api/auth/cross-tenant-login`, which re-resolves roles in the target via
-   `ExternalTenantUserMapping` roles resolved at token time (AB#5708) — no credential prompt, no role leak) and
+   `ExternalTenantUserMapping` roles resolved at token time — no credential prompt, no role leak) and
    extend it to mint a target-tenant **bearer access token** (today it yields a browser session).
    Real, security-sensitive feature; its own work item.
 2. **Authorize on `allowed_tenants`** instead of strict `tenant_id` — REJECTED: would leak roles across
@@ -110,11 +115,11 @@ Results:
   `RegistrationEndpointMode = <use-static>` (exact enum name to confirm at impl time). The DCR endpoint
   HANDLER is NOT in the base package (confirmed) → we still hand-roll it (plan unchanged).
 - **Tenant path — confirmed.** authorize WITHOUT acr → `302 /tenant-discovery?returnUrl=…` (the §9 path,
-  returnUrl preserves resource+PKCE). authorize WITH `acr_values=tenant:energyiq` + the seeded
-  interactive client (mirrored into energyiq) → `303 /energyiq/login` → client found in the child tenant,
+  returnUrl preserves resource+PKCE). authorize WITH `acr_values=tenant:tenant-a` + the seeded
+  interactive client (mirrored into tenant-a) → `303 /tenant-a/login` → client found in the child tenant,
   flow proceeds. Client-placement = standard mirror pattern, CONFIRMED (no ClientStore hack).
 - **Resource indicator (RFC 8707) — confirmed validated.** `resource=https://localhost:5017/` (mcpApi)
-  → proceeds to login (accepted). `resource=https://bogus.example/` → `303 /energyiq/error` (invalid_target,
+  → proceeds to login (accepted). `resource=https://bogus.example/` → `303 /tenant-a/error` (invalid_target,
   rejected). So a public authz-code client can request the mcp resource; a wrong resource is refused.
 
 → **Green-light Phase 1.** No blockers found; the tenant + resource + discovery mechanics all work with
@@ -196,7 +201,7 @@ intent). Dedupe + per-tenant cap already landed in Phase 2. Original Phase 4 det
   green): valid loopback → system-tenant client (DynamicRegistration + AutoProvision + PKCE + offline)
   + mirrored into child; non-loopback / no-redirect / confidential-auth / bad-grant rejected; disabled →
   Disabled; identical redirect set deduped → existing re-issued; per-tenant cap → CapExceeded.
-- **Docs**: `docs/authentication.md` § Dynamic Client Registration; `CLAUDE.md` config option.
+- **Docs**: `docs/authentication.md` § Dynamic Client Registration; `docs/architecture.md` § Configuration (config option).
 - **STILL PENDING: live Claude Code e2e** — needs the local identity restarted with
   `OCTO_IDENTITY__DYNAMICCLIENTREGISTRATION__ENABLED=true`, then `claude mcp login` against
   `https://localhost:5017/mcp` (email-first tenant-discovery in the browser).
@@ -208,7 +213,7 @@ intent). Dedupe + per-tenant cap already landed in Phase 2. Original Phase 4 det
   preserves; authz-code+PKCE with the mcp resource succeeds.
 - Live: Claude Code 2.1.x `octomesh` server → Authenticate → browser (email-first tenant-discovery) →
   connected; whoami/list_tenants.
-- Docs: `docs/authentication.md`, `CLAUDE.md`.
+- Docs: `docs/authentication.md`, `docs/architecture.md`.
 
 ## Files
 Create: `DynamicClientRegistrationService`(+iface), registration endpoint + DTOs, index migration,

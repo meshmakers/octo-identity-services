@@ -1,15 +1,20 @@
+---
+description: Background: historical concept of the Angular LCARS identity UI
+background: true
+---
+
 # Concept: Angular-based Identity Server UI with LCARS Theme
 
 **Created:** 2026-01-22
 **Status:** Approved
 **Version:** 1.0
 
-> **Implementation status (2026-09, AB#5075):** this concept is a historical snapshot; the code has
+> **Implementation status (2026-09):** this concept is a historical snapshot; the code has
 > moved on. The ClientApp runs on Angular 22 with the `@angular/build` toolchain and writes a **flat
 > `dist/`** (not `dist/identity-ui/browser`), which the MSBuild targets in `IdentityServices.csproj`
 > copy to `wwwroot`. There is no `test` script or Karma target, and `@angular/platform-browser-dynamic`
 > and `@angular-devkit/build-angular` are no longer dependencies. The authoritative build, install-script
-> and toolchain description is the "Angular ClientApp" section in `CLAUDE.md`; the snippets below
+> and toolchain description is the "Angular ClientApp" section in `docs/angular-clientapp.md`; the snippets below
 > document the original design.
 
 ---
@@ -589,7 +594,7 @@ export class ScopeListComponent {
 [Route("{tenantId}/api/auth")]
 public class AuthApiController : ControllerBase
 {
-    private readonly IOctoInteractionService _interaction; // (historical sample, pre-AB#4989 — originally IIdentityServerInteractionService)
+    private readonly IOctoInteractionService _interaction; // (historical sample, before the OpenIddict migration — originally IIdentityServerInteractionService)
     private readonly IAuthenticationSchemeProvider _schemeProvider;
 
     [HttpGet("login-context")]

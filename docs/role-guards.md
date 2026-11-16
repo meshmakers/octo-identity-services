@@ -25,25 +25,25 @@ Key components:
 - **`GroupsController`**: REST API at `{tenantId}/v1/groups` with full CRUD, role assignment, member management, and circular group prevention
 - **`TenantOwners`** group: Default group provisioned in every tenant with all 10 default roles. Created by `DefaultConfigurationCreatorService` and `IdentityAssociationMigration` (migration 9→10)
 
-Current identity schema (migration) version: `23` (migration 21→22 added the `RtOAuthAuthorization`/`RtOAuthToken` OpenIddict store types; 22→23 re-runs the full index update so abstract collection roots get their indexes, AB#5261). Current CK model version: `System.Identity-2.30.0` (2.30.0 = `User.DisableTwoFactor-1`, AB#7879, see below; 2.29.0 = the identity method declarations, AB#7773, see below; 2.28.0 = first ckLanguage 2 release with access modifiers, AB#7772, see below; 2.19.0–2.23.0 were ownership/runtime-state classifications, 2.24.0 added `DataPolicy.ProtectBlueprintLocked`, 2.25.0 the `Secret` identity-provider `ClientSecret`, 2.27.0 the `Secret` credential material of a user, see the sections below) — the 2.12.0→2.17.0 changes (verified-identifier directory AB#5122+) are additive schema needing no numeric migration; 2.17.0→2.18.0 REPLACED `RtUser.PreferredChannel` with `RtUser.PreferredChannelBindingId` (AB#5149 revision, binding-specific preference). The feature shipped the day before the replacement with no external consumers, so the old attribute was dropped without a migration — any stored kind-level values are simply ignored (users re-select).
+Current identity schema (migration) version: `23` (migration 21→22 added the `RtOAuthAuthorization`/`RtOAuthToken` OpenIddict store types; 22→23 re-runs the full index update so abstract collection roots get their indexes). Current CK model version: `System.Identity-2.30.0` (2.30.0 = `User.DisableTwoFactor-1`, see below; 2.29.0 = the identity method declarations, see below; 2.28.0 = first ckLanguage 2 release with access modifiers, see below; 2.19.0–2.23.0 were ownership/runtime-state classifications, 2.24.0 added `DataPolicy.ProtectBlueprintLocked`, 2.25.0 the `Secret` identity-provider `ClientSecret`, 2.27.0 the `Secret` credential material of a user, see the sections below) — the 2.12.0→2.17.0 changes (verified-identifier directory) are additive schema needing no numeric migration; 2.17.0→2.18.0 REPLACED `RtUser.PreferredChannel` with `RtUser.PreferredChannelBindingId` (revision, binding-specific preference). The feature shipped the day before the replacement with no external consumers, so the old attribute was dropped without a migration — any stored kind-level values are simply ignored (users re-select).
 
-## Role change guard: no escalation, last administrator stays (AB#7914)
+## Role change guard: no escalation, last administrator stays
 
 `IRoleChangeGuard` (`src/IdentityServices/Authorization/RoleChange/RoleChangeGuard.cs`, scoped) is the one rule set for changes of the **direct** roles of a
-user. Callers: `UsersController` (`DELETE users/{u}`; since AB#8412 the role endpoints and `POST users/{u}/merge` run the methods, section
+user. Callers: `UsersController` (`DELETE users/{u}`; the role endpoints and `POST users/{u}/merge` run the methods, section
 "REST facades of the role and merge endpoints"), the three role method handlers (`UserRoleMethodHandlerBase.GuardAsync`) and `IUserMergeService` (source user). It is **never** called from `OctoUserStore`/`UserManager`: first admin of a new tenant
 (`UserManagementService`), the Bootstrap blueprint seed, the one-time grants (`SecretManagementAdminGrant`, file role grants), the scratch-tenant creator grant, cross-tenant
 provisioning and the login group rules assign roles through the store and stay unrestricted (`TheGuard_IsNotCalledFromTheUserStoreOrTheUserManager…` pins the constructors).
-AB#7927 (groups, mappings, role definitions, next section) and AB#7928 (client roles, section below) reuse it: `EvaluateGrantAsync(caller, addedRoleNames)` is the "grant only what you hold" part alone.
+The role change guards on groups, mappings and role definitions (next section) and on client roles (section below) reuse it: `EvaluateGrantAsync(caller, addedRoleNames)` is the "grant only what you hold" part alone.
 
 | Rule (checked in this order, on the **difference** before/after, never on the full list) | REST | Method (`METHOD_FORBIDDEN`, parameter `reason`) |
 |---|---|---|
 | `self-grant`: caller `sub` == target rtId and a direct role is **added** (removing own roles and an unchanged list are fine) | 403 problem+json, `code` | `self-grant` |
-| `role-not-held`: an added **built-in** role (stored `RtWellKnownName`) is not in the caller's role claims; custom roles are free; removing is never judged. Since AB#8564 a caller holding `UserManagement` is refused only for **platform** roles; **app** roles are free for it (section "App roles and platform roles" below) | 403, `code`, `roleNames` | `role-not-held` + `roleNames` (comma separated) |
+| `role-not-held`: an added **built-in** role (stored `RtWellKnownName`) is not in the caller's role claims; custom roles are free; removing is never judged. A caller holding `UserManagement` is refused only for **platform** roles; **app** roles are free for it (section "App roles and platform roles" below) | 403, `code`, `roleNames` | `role-not-held` + `roleNames` (comma separated) |
 | `last-administrator`: the target effectively holds `UserManagement` now, not after the change, and **no other user** holds it (direct, through groups incl. nested, `xt_` shadow users through mappings via `IGroupRoleResolver`; **clients do not count**; a tenant with zero holders is not blocked) | 409, `code` | `last-administrator` |
 
 - **Caller** = `RoleChangeCaller` (`sub`, `client_id`, `role` claims of the validated token; for methods the validated `CkMethodPrincipal`, never the informational `Caller`).
-  A client-credentials caller has no `sub`: never self for a **user**, judged with the client's roles; since AB#8569 it is self for its **own client**
+  A client-credentials caller has no `sub`: never self for a **user**, judged with the client's roles; it is self for its **own client**
   (section "Client-credentials callers are self for their own client" below). No exemption for services (none calls these endpoints).
 - **No CK change.** Error contract is `METHOD_FORBIDDEN` + `reason` (`CkMethodOutcome.Forbidden`); a new declared code would be a Major of System.Identity.
   REST answers `application/problem+json` (`RoleChangeProblems`, `code` extension, readable `title` that Studio shows). Hard switch, no warn mode.
@@ -57,11 +57,11 @@ AB#7927 (groups, mappings, role definitions, next section) and AB#7928 (client r
   client caller, last administrator direct/group/nested group/mapping/client-not-counted/zero holders, delete + merge, audit records), `UserRoleMethod*Tests` (updated parity),
   `RoleChangeCallerTests`. The tests that need "exactly one administrator" first remove every holder of the test database (`ClearAdministratorsAsync`).
 
-## App roles and platform roles (AB#8564)
+## App roles and platform roles
 
 Tenant owners could not hand out the roles their own blueprints seed (e.g. `EnergyCommunityManagement` of EnergyCommunity.Base):
 `role-not-held` judged every built-in role alike. Decision by Gerald (2026-11-08): holders of `UserManagement` may grant **app roles**;
-**platform roles** keep the AB#7914 protection.
+**platform roles** keep the role change guard protection.
 
 - **Platform role** = a built-in role (stored `RtWellKnownName`) that `System.Identity.Bootstrap` seeds (today the 17 roles of
   `seed-data/roles.yaml`: `TenantManagement`, `UserManagement`, `StreamDataAdmin`, `SecretManagement`, `DataModelManagement`, …).
@@ -75,15 +75,15 @@ Tenant owners could not hand out the roles their own blueprints seed (e.g. `Ener
   built-in role the caller does not hold is allowed when the caller holds `UserManagement` **and** the role is not a platform role; otherwise `role-not-held`.
   A group (or nested group tree) with app **and** platform roles needs only its platform roles held; the refusal lists only those. `self-grant` and
   `last-administrator` are unchanged and still win (a tenant owner cannot add themselves to an app-role group). Callers without `UserManagement` get no relaxation.
-  The data-policy protection of AB#5859 (`identity.administration`) is untouched.
+  The data-policy protection (`identity.administration`) is untouched.
 - **Log.** Refusals are unchanged (WARN + `Identity.RoleChangeRefused`). An allowed grant of app roles the caller does not hold writes one INFO line
   `Role change allowed (app-role-grant): caller …, target …, app roles [...]` (`RoleChangeDecision.AppRolesNotHeld`); it is written only when the whole change is allowed.
 - **Tests:** `Api/TenantApi/AppRoleGrantTests` (REST, real MongoDB, production catalog: direct grant to client and user, group membership, group roles, nesting, each with
   app role / platform role / mixed group, caller with and without `UserManagement`, self-grant still refused), `Authorization/RoleChangeGuardAppRoleTests` (rule and INFO log),
   `Authorization/PlatformRoleCatalogTests` (the 17 seed roles, app roles, rtId match, fail closed). The older guard tests create many distinct "built-in" roles; in the test host a
-  role whose `rtWellKnownName` starts with `platform-` counts as a platform role (`Infrastructure/TestPlatformRoles.cs`), so those AB#7914/7927/7928 tests keep judging platform roles.
+  role whose `rtWellKnownName` starts with `platform-` counts as a platform role (`Infrastructure/TestPlatformRoles.cs`), so those role-change-guard tests keep judging platform roles.
 
-## Client-credentials callers are self for their own client (AB#8569)
+## Client-credentials callers are self for their own client
 
 A client-credentials client holding `UserManagement` (e.g. through `TenantOwners`) could add itself to `EnergyCommunityOperators` with its own token
 and gain the app role: `self-grant` only knew user sessions. Decision by Gerald (2026-11-08): the self-grant block holds for app roles too
@@ -96,17 +96,17 @@ and gain the app role: `self-grant` only knew user sessions. Decision by Gerald 
   self-grant first, then the grant rule), group membership (`MemberAdded` of its own client, REST and `Group.AddMember`), a role added to a group its client reaches
   (`GroupRoles`, directly or through a parent group, REST and `Group.SetRoles`) and a group nested into such a group (`MemberAdded` of kind group); the walk is
   `RoleGraph.GroupsReachingClient`, the same as for users and as `GroupRoleResolver`. Answer and audit are those of the user path (`403 self-grant`, `METHOD_FORBIDDEN`
-  + `reason=self-grant`, WARN `caller client <id>` + `Identity.RoleChangeRefused`). The `title` reads "You cannot grant additional roles to yourself." for both callers (AB#8583).
-- **Free:** removing its own roles or memberships, granting to other clients and users (AB#8564 unchanged), and every path that does not call the guard: the bus
+  + `reason=self-grant`, WARN `caller client <id>` + `Identity.RoleChangeRefused`). The `title` reads "You cannot grant additional roles to yourself." for both callers.
+- **Free:** removing its own roles or memberships, granting to other clients and users (unchanged), and every path that does not call the guard: the bus
   path (`DistClientDto.AssignedRoleNames`, pipeline service accounts of the communication controller), Bootstrap seed, setup, the scratch-tenant creator grant
   (`TenantOwners`), cross-tenant provisioning.
 - **Consequence:** a scratch-tenant creator client (`Create --scratch`, member of `TenantOwners`) can no longer give itself an app role a blueprint seeds later;
   a user administrator or another client grants it.
 - **Tests:** `Authorization/RoleChangeGuardClientSelfTests` (unit: membership by rtId and client id, group roles direct and nested, nesting, other client,
-  removal, user session with the same `client_id`, direct client grant), `Api/TenantApi/AppRoleGrantTests` region "Client self-grant (AB#8569)" (REST) and the
+  removal, user session with the same `client_id`, direct client grant), `Api/TenantApi/AppRoleGrantTests` region "Client self-grant" (REST) and the
   `*_AB8569` cases of `Api/Methods/GroupMethodTests`.
 
-## Role change guard on groups, mappings and role definitions (AB#7927)
+## Role change guard on groups, mappings and role definitions
 
 `IRoleChangeGuard` (above) also judges the group / mapping graph and role definitions, with the same reasons, status codes and audit
 (`Identity.RoleChangeRefused`, written by `IRoleChangeRefusals`, scoped, used by the three controllers):
@@ -125,17 +125,17 @@ and gain the app role: `self-grant` only knew user sessions. Decision by Gerald 
 - **Granted roles** = for `GroupRoles` the added role ids, for `MemberAdded` the effective roles (own + nested) of the group (for a child group: of the child), for
   `MappingRoles` the added mapped role ids; a member that is already there grants nothing. **Self** = the caller is the added user, or the group whose roles
   grow (or the group a child is added to) is reached by the caller (member directly, via a mapping that serves it, or a parent group of it), or the mapping serves the
-  caller (for a new mapping its source identity is in the caller's `xt_` chain). Since AB#8569 a client-credentials caller is self the same way for its own client
+  caller (for a new mapping its source identity is in the caller's `xt_` chain). A client-credentials caller is self the same way for its own client
   (the added client, or a group its client reaches directly or as a parent group). Self wins over `role-not-held`; roles are resolved to names and judged with
   `EvaluateGrantAsync` (built-in only). Group create with roles is not judged (it has no members); the roles take effect only through a judged member add.
 - **Not guarded on purpose:** `GroupStore`/`ExternalTenantUserMappingStore` and everything that uses them directly: Bootstrap seed, setup, scratch-tenant grant,
-  cross-tenant provisioning (`AdminProvisioningController`), `LoginGroupAssignmentService`. Group methods (AB#7779) call `EvaluateAsync(caller, RoleGraphChange)`
-  and answer `METHOD_FORBIDDEN` with the `reason`; direct client roles: AB#7928 (next section but one).
+  cross-tenant provisioning (`AdminProvisioningController`), `LoginGroupAssignmentService`. Group methods call `EvaluateAsync(caller, RoleGraphChange)`
+  and answer `METHOD_FORBIDDEN` with the `reason`; direct client roles: see the section on client roles.
 - **Tests:** `Api/TenantApi/GroupRoleChangeGuardTests` (REST on real MongoDB: self-grant direct / via parent / via child / via mapping, role-not-held for roles, members,
   clients, nested groups, mappings, idempotent re-add, last administrator for member removal, role removal, delete, child group, mapping update / delete, mapping-in-group,
   clients not counting, built-in role rename / delete, audit record, unchanged flows) and `Authorization/RoleGraphTests` (holders, clone, cycle, references).
 
-## Role change guard on client roles (AB#7928)
+## Role change guard on client roles
 
 A tenant administrator (`TenantManagement` is enough for the client endpoints) could give a client a built-in role they do not
 hold (e.g. `UserManagement`) and then act as that client. `ClientsController` therefore runs the "grant only what you hold" part of
@@ -148,7 +148,7 @@ hold (e.g. `UserManagement`) and then act as that client. `ClientsController` th
 | `DELETE clients/{id}/roles/{roleName}` | never (removing is no escalation) | - |
 
 - **Built-in roles only** (stored `RtWellKnownName`); custom roles are free. No last-administrator rule for clients (clients are no
-  administrators, AB#7914 decision 2). Since AB#8569 the self-grant rule applies to a client-credentials caller changing its own client
+  administrators, role change guard decision 2). The self-grant rule applies to a client-credentials caller changing its own client
   (`EvaluateClientGrantAsync`, section below). The caller is the token (`RoleChangeCaller.FromPrincipal`): user or client-credentials token, judged with its own
   role claims. Hard switch, no warn mode.
 - **Audit:** `IRoleChangeRefusals` writes the WARN line and the `Identity.RoleChangeRefused` event (caller, `client <clientId>`, reason, role names), as for groups.
@@ -159,24 +159,24 @@ hold (e.g. `UserManagement`) and then act as that client. `ClientsController` th
   `ClientRoleAssignmentIntegrationTests.ApplyRoleChanges_WritesOnlyTheGivenDifference_AndNeverRestoresAnUnlistedRole`.
 - **Not guarded on purpose:** the bus path (`CreateIdentityDataCommandRequestConsumer`, `DistClientDto.AssignedRoleNames`: service accounts and
   client mirroring between services, no caller) and `IClientRoleStore` itself; client mirrors get no roles anyway. Granting a client roles through
-  a group (REST `PUT groups/{id}/members/clients/{c}`, method `Group.AddMember` with `memberKind=Client`) was already judged by AB#7927 / AB#7779.
-- **No client role method exists** in System.Identity 2.29.0 (`Client` declares only `AddSecret` / `RemoveSecret`, AB#7780); the method transport for
+  a group (REST `PUT groups/{id}/members/clients/{c}`, method `Group.AddMember` with `memberKind=Client`) was already judged by the group guard and the group methods.
+- **No client role method exists** in System.Identity 2.29.0 (`Client` declares only `AddSecret` / `RemoveSecret`); the method transport for
   client roles is `Group.AddMember`. No CK change.
 - **Tests:** `Api/TenantApi/ClientRoleChangeGuardTests` (REST on real MongoDB: not held / held / custom for both endpoints, `TenantManagement` without
   `UserManagement` cannot grant `UserManagement`, difference only, client-credentials caller, unknown / malformed id, audit record, guard not on the bus
   or store path), `ServiceAccountClientProvisioningIntegrationTests.BusPath_StillAssignsABuiltInRole_WithoutTheRoleChangeGuard`,
   `GroupMethodTests.AddMember_AClientIntoAGroupWithABuiltInRoleTheCallerLacks_IsRefused_RoleNotHeld` (method transport).
 
-## First administrator is a member of TenantOwners (AB#7946)
+## First administrator is a member of TenantOwners
 
-`UserManagementService.CreateAdminUserAsync` (setup endpoints `setup/create-admin` and `v1/setup`) grants the first administrator the 13 direct roles and, since AB#7946,
+`UserManagementService.CreateAdminUserAsync` (setup endpoints `setup/create-admin` and `v1/setup`) grants the first administrator the 13 direct roles and 
 also adds that user to the `TenantOwners` group (`AddToTenantOwnersAsync`, via `IGroupStore`). `TenantOwners` carries every non-secret built-in role (incl. `DataModelManagement`,
 `StreamData*`), which the direct grants lack; without the membership the administrator holds fewer roles than the group and the guard above refuses adding anyone to it
 (`role-not-held`). `SecretManagement` stays a direct grant only (not in `TenantOwners`). The step is idempotent (an existing membership is not added again; a setup
 re-run is refused anyway while users exist) and optional like the file roles: a tenant without the group logs a warning and keeps the direct roles. The setup goes
 through the stores, not the guarded controllers, on purpose. The scratch-tenant creator (`ScratchTenantGrantService`) and cross-tenant admin provisioning
 (`AdminProvisioningController`) already put their subject into `TenantOwners`; nothing changed there.
-Since AB#8529 the direct-role fallback (tenant without `TenantOwners`, `AddDirectAdministratorRolesAsync`) also grants `DataModelManagement`: the asset
+The direct-role fallback (tenant without `TenantOwners`, `AddDirectAdministratorRolesAsync`) also grants `DataModelManagement`: the asset
 repository's `DataModelManagementPolicy` requires that role for `ImportCk`, catalog imports, `FixAll`, blueprint install/update/uninstall and catalog
 refresh, so a fallback administrator would otherwise be locked out of every data model change. `TenantOwners` already carries the role (bootstrap seed,
 role `66…0B`), so no seed bump is needed.

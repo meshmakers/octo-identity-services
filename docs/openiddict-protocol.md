@@ -5,7 +5,7 @@ applies_to: src/IdentityServices/{OpenIddict,Cookies}/**, src/IdentityServices/C
 
 # OpenIddict protocol stack and tenant resolution
 
-## OpenIddict Protocol Stack (Epic AB#4989)
+## OpenIddict Protocol Stack
 
 The OAuth2/OIDC server is **OpenIddict 7.6.0**, configured in
 `src/IdentityServices/Configuration/OpenIddictConfiguration.cs`:
@@ -54,7 +54,7 @@ rotation was needed at cutover.
   endpoint; the Angular device page posts form-encoded to it (`DeviceApiController` now only holds
   the DTOs).
 
-**Resource indicators (RFC 8707, AB#5193):** the `resource` parameter is validated against the
+**Resource indicators (RFC 8707):** the `resource` parameter is validated against the
 requesting tenant's API resources, not against OpenIddict's static `RegisterResources(...)`
 allow-list — that list has no per-tenant form and was never filled, so **every** indicator was
 rejected with `invalid_target` and no interactive MCP client could log in (Duende validated against
@@ -79,7 +79,7 @@ becomes load-bearing again. No cache, no invalidation event — entity caching i
   `aud` (replaces `UserProfileService`).
 - `OctoClaimsDestinations`: claim→token mapping; profile claims are NOT embedded in tokens —
   userinfo serves them.
-- `OctoTenantGenerationClaimHandler` (AB#8997, security item AB#8970): `tenant_gen` on **every** access token =
+- `OctoTenantGenerationClaimHandler` (security item): `tenant_gen` on **every** access token =
   `TenantLifecycleRecord.CreatedUtc` of the tenant in `tenant_id` (`ITenantLifecycleStore`, read directly at issuance)
   as Unix milliseconds, decimal string, UTC-normalised and truncated like `CkMethodTenantLifecycleGeneration`. Three
   OpenIddict `ProcessSignInContext` handlers: `Lookup` (token endpoint, before `RedeemTokenEntry`, so a failed read
@@ -88,15 +88,15 @@ becomes load-bearing again. No cache, no invalidation event — entity caching i
   the RFC 8693 exchanged access token as the "issued token" with `GenerateAccessToken=false` — a handler on the
   access-token principal alone misses every exchange). Covers every grant incl. refresh (re-read, never copied)
   without touching `TokenEndpointController`. Access token only (not id token, not userinfo). No record / no
-  `CreatedUtc` → no claim. Resource services check it from AB#8999 on. The HTTP test host layers
+  `CreatedUtc` → no claim. Resource services check it from the release that ships the generation check. The HTTP test host layers
   `Helpers/TestTenantLifecycleStore` over the real store (`CustomWebApplicationFactory.TenantLifecycleStore`) to arrange
   generations; the test system tenant has no record, so the golden token shapes are unchanged. Details:
   `docs/authentication.md` § Tenant Generation.
-- **Grants of an earlier tenant (AB#9017, Security):** token exchange and on-behalf-of check the `tenant_gen` of the
+- **Grants of an earlier tenant:** token exchange and on-behalf-of check the `tenant_gen` of the
   `subject_token`, `TokenEndpointController` checks the private claim `octo_grant_tenant_gen` that refresh tokens,
   authorization codes and device codes store at issuance (`StampAuthorizationCode` / `StampRefreshToken` /
   `StampDeviceCode` in `OctoTenantGenerationClaimHandler`, no destination), each against the current generation of the
-  token's `tenant_id`, through `IGrantTenantGenerationGuard` over the AB#8999 `ITenantGenerationCheck`
+  token's `tenant_id`, through `IGrantTenantGenerationGuard` over the `ITenantGenerationCheck`
   (`AddOctoTenantGenerationCheck()` in `Program.cs`). Same option as the resource services,
   `TenantAuthorization:TenantGenerationEnforcement` (default `LogOnly`); `Enforce` maps Deny to `invalid_grant` and
   Unavailable to `server_error`. The check runs before the shadow user / role resolution and before OpenIddict redeems a
@@ -106,7 +106,7 @@ becomes load-bearing again. No cache, no invalidation event — entity caching i
   `TenantGenerationClaimHttpTests` changed accordingly). The HTTP tests (`GrantTenantGenerationHttpTests`) use derived
   hosts whose check is built with another `SystemTenantId`, because the test host signs in to its system tenant, which is
   never checked. Details: `docs/authentication.md` § Grants of an earlier tenant.
-- **Bearer label (AB#9017):** `ConfigureJwtBearerOptions` sets `TokenValidationParameters.AuthenticationType = "Bearer"`,
+- **Bearer label:** `ConfigureJwtBearerOptions` sets `TokenValidationParameters.AuthenticationType = "Bearer"`,
   otherwise `TenantAuthorizationMiddleware` skips every bearer request to identity's API. Identity keeps the library
   defaults (`UserTokenEnforcement` / `ServiceTokenEnforcement` = `Enforce`); `OCTO_TENANTAUTHORIZATION__*=LogOnly` is the
   per-environment fallback. The test host forwards
@@ -170,7 +170,7 @@ External identity provider schemes (Google, Microsoft, Azure Entra ID, Facebook,
 
 ## OAuth Grant Storage (per tenant)
 
-OAuth grants (authorization codes, refresh tokens, device codes, remembered consents) are stored **per tenant** in the new CK types `RtOAuthAuthorization`/`RtOAuthToken` via `OpenIddictAuthorizationStore`/`OpenIddictTokenStore` (System.Identity-2.12.0, migration 21→22). Grants are NOT centralized — the old "Centralized Grant Storage" design (system-tenant `RtPersistedGrant` with tenant id in `Description` and a SHA-256 hash fallback) was already stale since AB#1586 and is fully gone with the OpenIddict migration.
+OAuth grants (authorization codes, refresh tokens, device codes, remembered consents) are stored **per tenant** in the new CK types `RtOAuthAuthorization`/`RtOAuthToken` via `OpenIddictAuthorizationStore`/`OpenIddictTokenStore` (System.Identity-2.12.0, migration 21→22). Grants are NOT centralized — the old "Centralized Grant Storage" design (system-tenant `RtPersistedGrant` with tenant id in `Description` and a SHA-256 hash fallback) was already stale and is fully gone with the OpenIddict migration.
 
 Because grants live per tenant, the `/connect/token` request must be wired to the right tenant before the store is consulted — that is `OidcTenantResolutionMiddleware`'s job (see Token Endpoint Tenant Resolution below). Access tokens are plain JWTs and get **no DB entry**. `TokenCleanupHostService` sweeps expired sessions, OAuth token entries, and legacy grants for the system tenant plus all child tenants.
 
@@ -178,8 +178,8 @@ Because grants live per tenant, the `/connect/token` request must be wired to th
 
 When backend OIDC clients (built on `Microsoft.AspNetCore.Authentication.OpenIdConnect` .NET 9+) authenticate, they automatically use **PAR (RFC 9126)** if the IdP advertises a `pushed_authorization_request_endpoint` — which OpenIddict does (as Duende did before). This means the authorization parameters (including `acr_values=tenant:{tenantId}`) are POSTed to `/connect/par`, and the subsequent browser redirect to `/connect/authorize` contains only `request_uri=urn:ietf:params:oauth:request_uri:...` — no `acr_values` on the URL.
 
-`OidcTenantResolutionMiddleware` handles this in two stages (AB#7892, no process-local state):
-1. On `POST /connect/par`, it reads `acr_values` from the form body and marks the issued `request_uri` in the JSON response with the tenant (`urn:ietf:params:oauth:request_uri:{tenantId}:{reference}`; a scope-only PAR carries `tenant_scope.{scopeTenantId}` instead, AB#5311)
+`OidcTenantResolutionMiddleware` handles this in two stages (no process-local state):
+1. On `POST /connect/par`, it reads `acr_values` from the form body and marks the issued `request_uri` in the JSON response with the tenant (`urn:ietf:params:oauth:request_uri:{tenantId}:{reference}`; a scope-only PAR carries `tenant_scope.{scopeTenantId}` instead)
 2. On `GET /connect/authorize?request_uri=...`, it reads the tenant from the marker and removes the marker from the query before OpenIddict sees it; fallback query-string `acr_values`
 
 Without this, every PAR-using client would land on `/tenant-discovery` because the URL no longer carries `acr_values`.
@@ -188,7 +188,7 @@ Without this, every PAR-using client would land on `/tenant-discovery` because t
 
 The `/connect/token` endpoint has no `{tenantId}` route segment. To ensure `OctoUserStore`, `ClientStore`, and other per-tenant stores use the correct tenant database, `OidcTenantResolutionMiddleware` resolves the tenant per grant type. All capture stages work against OpenIddict responses (golden-verified):
 
-**No process-local state — safe with several replicas and across restarts (AB#7891, AB#7892).** Every value a later
+**No process-local state — safe with several replicas and across restarts.** Every value a later
 request sends back carries its tenant (`OidcTenantMarker`, `{tenantId}:{value}`): the middleware marks it on the response
 that hands it out and strips the marker from the request before OpenIddict reads the form. The marker is not signed on
 purpose — it only selects the tenant token store; a changed marker points to a store without the value (`invalid_grant`).
@@ -198,14 +198,14 @@ Nothing extra is stored, so no mapping outlives its token. Rationale per entry t
 **Authorization codes:** marked on the `/connect/authorize` response — `Location` query or fragment
 (`response_mode=query`/`fragment`) or the hidden form field (`response_mode=form_post`, e.g. the Asset Repository GraphQL
 Playground); on `/connect/token` with `grant_type=authorization_code` the tenant comes from the marker. An unmarked code
-(issued before AB#7892) uses the system tenant — before AB#7892 a missing map entry on a second replica made the client
+(issued earlier) uses the system tenant — earlier a missing map entry on a second replica made the client
 lookup run in the system tenant: `401 invalid_client` and a login loop for sub-tenant clients (test-2, 2026-11-12).
 
 **Refresh tokens:** marked in every `/connect/token` response that carries one (rotated tokens too). On refresh the marker
 wins over `acr_values` (it names the store the token lives in); an unmarked token falls back to `acr_values`, else the
 system tenant. `/connect/revocation` and `/connect/introspect` strip the marker of the `token` field and use its tenant.
 
-**Device flow (AB#7891):** the `device_code` carries the tenant marker; `/connect/deviceverification` gets the tenant hint
+**Device flow:** the `device_code` carries the tenant marker; `/connect/deviceverification` gets the tenant hint
 from the device page (`acr_values=tenant:{tenantId}`). The `verification_uri` in device authorization responses is
 rewritten to the SPA page `/{tenant}/device` with `?userCode=`.
 
@@ -213,12 +213,12 @@ rewritten to the SPA page `/{tenant}/device` with `?userCode=`.
 
 ## Per-Tenant Cookie Scoping
 
-Auth cookies are scoped per tenant via `TenantCookieManager` (`src/IdentityServices/Cookies/TenantCookieManager.cs`). This prevents cross-tenant session leakage by appending `.{tenantId}` to cookie names (e.g., `.AspNetCore.Identity.Application.sbeg`).
+Auth cookies are scoped per tenant via `TenantCookieManager` (`src/IdentityServices/Cookies/TenantCookieManager.cs`). This prevents cross-tenant session leakage by appending `.{tenantId}` to cookie names (e.g., `.AspNetCore.Identity.Application.acme`).
 
 Key components:
 - **`OctoAuthSchemes`** (`src/Authentication/`): the cookie schemes — `Identity.Application` (tenant-scoped by `TenantCookieManager`) and `Identity.External`. The Duende `idsrv` / `idsrv.session` / `idsrv.external` cookies no longer exist.
 - **`TenantCookieManager`**: Custom `ICookieManager` that scopes the `Identity.Application` cookie per tenant
-- **`OidcTenantResolutionMiddleware`**: Resolves tenant for `/connect/*` OIDC endpoints from `acr_values`, `id_token_hint`, or the tenant marker of codes, refresh tokens and PAR `request_uri`s (`OidcTenantMarker`, no process-local state, AB#7892)
+- **`OidcTenantResolutionMiddleware`**: Resolves tenant for `/connect/*` OIDC endpoints from `acr_values`, `id_token_hint`, or the tenant marker of codes, refresh tokens and PAR `request_uri`s (`OidcTenantMarker`, no process-local state)
 - **`OctoTokenClaimsService`**: Adds `tenant_id` and `allowed_tenants` claims to tokens (used by endsession for cookie resolution and by backend middleware for tenant authorization)
 
 See `docs/authentication.md` for detailed architecture and edge cases.
@@ -228,8 +228,8 @@ See `docs/authentication.md` for detailed architecture and edge cases.
 Access tokens include `allowed_tenants` claims listing all tenants a user may access. Backend middleware validates the route tenant against these claims.
 
 Key components:
-- **`IAllowedTenantsResolver`** / **`AllowedTenantsResolver`** (`IdentityServerPersistence/Services/`): Resolves allowed tenants at token issuance time: the login tenant, the home tenants a shadow user's `xt_{home}_{name}` chain unwinds to, and every descendant reachable through cross-tenant user mappings (BFS that follows the xt_ chain tier by tier). It does **not** add ancestors by walking the `OctoTenantIdentityProvider` graph (AB#5170): a provider says where a tenant delegates authentication to, not that its users exist up there, and the blanket walk offered a locally created operating-tenant user the management tenant and the platform root — in `allowed_tenants`, the Studio switcher and the email-first tenant discovery — where no account of theirs exists and the switch gate refuses them. Pinned by `tests/IdentityServices.IntegrationTests/Persistence/AllowedTenantsResolverIntegrationTests.cs`
-- **`ITenantRegistry`** / **`TenantRegistry`** (`IdentityServerPersistence/Services/`, AB#6393): cached tenant registry (id → `OctoTenant`, 45 s `IMemoryCache`, one re-read at most every 5 s on an unknown id) that opens tenant repositories without I/O via `ISystemContext.GetRegisteredTenantRepository` — no existence probe, admin session or CK auto-import. Used by `AllowedTenantsResolver` and `CrossTenantAuthenticationService`. 🔴 An id that is not in the registry yields `null` (fail closed); never fall back to `FindTenantRepositoryAsync` for hot paths. The system tenant is not a registry entry and is handled separately.
+- **`IAllowedTenantsResolver`** / **`AllowedTenantsResolver`** (`IdentityServerPersistence/Services/`): Resolves allowed tenants at token issuance time: the login tenant, the home tenants a shadow user's `xt_{home}_{name}` chain unwinds to, and every descendant reachable through cross-tenant user mappings (BFS that follows the xt_ chain tier by tier). It does **not** add ancestors by walking the `OctoTenantIdentityProvider` graph: a provider says where a tenant delegates authentication to, not that its users exist up there, and the blanket walk offered a locally created operating-tenant user the management tenant and the platform root — in `allowed_tenants`, the Studio switcher and the email-first tenant discovery — where no account of theirs exists and the switch gate refuses them. Pinned by `tests/IdentityServices.IntegrationTests/Persistence/AllowedTenantsResolverIntegrationTests.cs`
+- **`ITenantRegistry`** / **`TenantRegistry`** (`IdentityServerPersistence/Services/`): cached tenant registry (id → `OctoTenant`, 45 s `IMemoryCache`, one re-read at most every 5 s on an unknown id) that opens tenant repositories without I/O via `ISystemContext.GetRegisteredTenantRepository` — no existence probe, admin session or CK auto-import. Used by `AllowedTenantsResolver` and `CrossTenantAuthenticationService`. 🔴 An id that is not in the registry yields `null` (fail closed); never fall back to `FindTenantRepositoryAsync` for hot paths. The system tenant is not a registry entry and is handled separately.
 - **`OctoTokenClaimsService`** (`IdentityServices/OpenIddict/`): Adds `allowed_tenants` claims to all issued tokens (replaces the former `UserProfileService`)
 - **`TenantAuthorizationMiddleware`** (`octo-common-services`): Validates route tenant against `allowed_tenants` claims; registered after `UseAuthorization()` in all backend services
 
