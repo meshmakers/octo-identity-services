@@ -1389,10 +1389,12 @@ hold (e.g. `UserManagement`) and then act as that client. `ClientsController` th
 ### First administrator is a member of TenantOwners (AB#7946)
 
 `UserManagementService.CreateAdminUserAsync` (setup endpoints `setup/create-admin` and `v1/setup`) adds the first administrator to the `TenantOwners` group (`AddToTenantOwnersAsync`, via `IGroupStore`; AB#7946). Since AB#8161 that membership
-replaces the direct roles: the 13 direct roles (`AddDirectAdministratorRolesAsync`) are only the fallback for a tenant without a usable group.
-`TenantOwners` carries every built-in platform role (incl. `DataModelManagement`, `StreamData*` and, since AB#8161, `SecretManagement`), which the direct grants lack; without the membership the administrator holds fewer roles than the group and the guard above refuses adding anyone to it
-(`role-not-held`). The first administrator therefore holds `SecretManagement` through the group (see "API secret writes need
-`SecretManagement`" below); the XML doc of `AddToTenantOwnersAsync` ("every non-secret built-in role") predates AB#8161. The step is idempotent (an existing membership is not added again; a setup
+replaces the direct roles: the direct roles (`AddDirectAdministratorRolesAsync`, incl. `DataModelManagement` and `SecretManagement`) are only the
+fallback for a tenant without a usable group. `TenantOwners` carries every built-in platform role (since AB#8161 `SecretManagement` too), among them the
+`StreamData*` roles the direct grants lack; without the membership the administrator holds fewer roles than the group and the guard above refuses adding anyone to it
+(`role-not-held`). The first administrator therefore holds `SecretManagement` through the group once the setup step
+`TenantOwnersSecretManagementGrant` has added the edge; if that step fails (logged, setup continues, retried on the next setup) the
+administrator lacks the role until then (see "API secret writes need `SecretManagement`" below); the XML doc of `AddToTenantOwnersAsync` ("every non-secret built-in role") predates AB#8161. The step is idempotent (an existing membership is not added again; a setup
 re-run is refused anyway while users exist) and optional like the file roles: a tenant without the group logs a warning and keeps the direct roles. The setup goes
 through the stores, not the guarded controllers, on purpose. The scratch-tenant creator (`ScratchTenantGrantService`) and cross-tenant admin provisioning
 (`AdminProvisioningController`) already put their subject into `TenantOwners`; nothing changed there.
