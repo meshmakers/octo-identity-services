@@ -34,7 +34,9 @@ The `Persistence.IdentityCkModel` project uses YAML-based model definitions that
 
 `CreateIdentityData` (`CreateIdentityDataCommandRequestConsumer`, queue `octo::identity::create-identity-data`) is
 registered **shared** (competing consumers) in `Consumers/IdentityCommandConsumers.cs`, called from `Program.cs`:
-with two or more replicas every replica consumes it and each command is processed **exactly once** by one of them.
+with two or more replicas every replica consumes it and each command is delivered to **one** of them. A command can
+still run more than once (a conflict is retried, a sender may resend the same payload at its start); its effects are
+idempotent (see "Safe under competing consumers" below).
 Previously it was the classic exclusive consumer: only one replica consumed, the others waited, and a hung owner
 (prod-1 2026-10-18/19, NotReady node) blocked identity provisioning.
 

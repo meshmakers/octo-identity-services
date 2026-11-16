@@ -171,7 +171,8 @@ entity whose stored `RtBlueprintLocked` is `true`, nor set or change `RtBlueprin
 - **Blueprint authors:** ship one `DataPolicy` per opted-in type in a policy group of its own (never on shared master-data policies), with
   `ProtectBlueprintLocked: true`, the actions the roles need and a `PolicyPermission` granted to those roles - a policy with the flag still
   counts as a normal policy for the grant logic (only the listed roles get access). Raise the blueprint's `ckModelDependencies` floor to
-  `System.Identity-[2.24.0,3.0)` (otherwise an older Identity silently drops the attribute). The policy table is cached per tenant for 60 s.
+  a System.Identity version that has the attribute - 2.24.0 or later, today `System.Identity-[3.0.0,4.0)` (see "CK dependents" below;
+  otherwise an older Identity silently drops the attribute). The policy table is cached per tenant for 60 s.
 - Regression tests: `BlueprintLockProtectionIntegrationTests` (real MongoDB: compiled ownership, fresh install, update re-applies, missing
   attribute = false, bootstrap policies do not opt in, and an end-to-end check that a policy with the flag makes the engine guard refuse a user
   write on a locked entity while an unlocked one and the system stay writable).

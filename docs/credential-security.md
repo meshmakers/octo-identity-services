@@ -111,8 +111,9 @@ in the path. Decided by Gerald 2026-11-01:
 
 ## Credential guard regression tests of the REST API
 
-`tests/IdentityServices.IntegrationTests/Api/TenantApi/IdentityCredentialGuardRestTests` pins that the tenant API v1 never returns
-or accepts a credential: a user whose `PasswordHash`, `SecurityStamp`, authenticator key and recovery codes hold fixed dummy values
+`tests/IdentityServices.IntegrationTests/Api/TenantApi/IdentityCredentialGuardRestTests` pins the credential guarantees of the tenant API v1:
+no stored user credential is returned and no caller-supplied hash, security stamp or token is accepted, and no client secret is returned
+in clear text (a `clientSecret` is accepted on create and update and stored hashed; the secret endpoints return the stored hash as the handle). In detail: a user whose `PasswordHash`, `SecurityStamp`, authenticator key and recovery codes hold fixed dummy values
 (written through `UserManager` and the user store, as the service does) is read through `users`, `users/GetPaged`, `users/{name|email|rtId}`,
 `users/directory`, `users/{name}/roles|directRoles`, `groups` (all reads, the user as a member); `PUT users/{name}` and `POST users` with
 `passwordHash` / `securityStamp` / `userTokens` / `password` in the body change no credential; `GET clients` (all reads) carries neither

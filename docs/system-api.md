@@ -19,7 +19,9 @@ All endpoints are tenant-scoped via the `{tenantId}` route parameter. The system
 
 ## Authorization Policies
 
-Every administration endpoint requires **both** an `octo_api` scope and a **tenant role**.
+Every administration endpoint requires **both** a scope and a **tenant role**: read endpoints accept `octo_api` or
+`octo_api.read_only` (exception: `CrossTenantGrantPermissions` needs `octo_api` also for `GET`), write endpoints need `octo_api`
+(table below).
 Previously the API checked the scope only — which every interactive client requests — so every
 signed-in user of a tenant could administer its identity. The role rule matches the GraphQL side
 (built-in data policy `IdentityAdministrationPolicy` grants the identity entities to `UserManagement`).

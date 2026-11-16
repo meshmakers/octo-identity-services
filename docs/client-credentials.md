@@ -36,7 +36,7 @@ Two traps worth knowing:
 `octo_api` scope plus `CommunicationManagement`. For the delegation grant above, the issued token
 carries the **intersection** of service-account and user roles — and an **empty intersection is a
 success**, not an error: a token is issued, it simply has no `role` claim, and role-gated consumers
-fail closed. A service account lacking the tenant's fachliche roles (e.g. Accounting) therefore makes
+fail closed. A service account lacking the tenant's business roles (e.g. Accounting) therefore makes
 the feature go quiet with no error anywhere. When setting up delegation for a tenant, grant
 `octo-pipeline-sa-{adapterRtId}` those roles as well —
 `PUT {tenantId}/v1/clients/{clientId}/roles/{roleName}` or `octo-cli AddClientToRole`. The caller must hold
@@ -62,7 +62,7 @@ of failing the setup).
 
 See `docs/authentication.md` § Delegation / On-Behalf-Of.
 
-## Multi-Tenant Client Credentials (Auto-Provisioning) — Phase 1 in flight
+## Multi-Tenant Client Credentials (Auto-Provisioning)
 
 Schema groundwork for the cross-tenant ClientCredentials feature lives in CK
 model `System.Identity-2.5.0` (schema version 15):

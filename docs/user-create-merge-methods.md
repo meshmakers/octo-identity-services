@@ -29,7 +29,9 @@ forged caller, REST 404/403, no authenticator material in audit or logs).
 
 ## `User.CreateUser` and the only ways to create a user
 
-A user is created only by this service: the static CK method `User.CreateUser-1` (REST `POST {tenant}/v1/users` is its facade)
+The other creating paths (external-login and LDAP auto-provisioning, cross-tenant shadow users, tenant admin bootstrap) are listed in the
+path table under the duplicate e-mail rule further below. An administrator creates a user only through this service: the static CK method
+`User.CreateUser-1` (REST `POST {tenant}/v1/users` is its facade)
 (`UserCreateUserHandler`, one row in `IdentityMethodHost.Handlers`, `CarriesSecret = true` because of the optional `sensitive`
 `password`: **offered on the bus only with `Methods:Identity:EnablePasswordMethods`**, also for invitations without a password - the
 switch is per method; off = `METHOD_HANDLER_NOT_AVAILABLE` for the gateway, while the handler is hosted local only for the REST facade,
