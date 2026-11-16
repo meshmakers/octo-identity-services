@@ -1,6 +1,6 @@
 ---
 description: Service-account clients over the event hub, multi-tenant client-credentials auto-provisioning, client roles and group assignment
-applies_to: **/SystemStores/Client*.cs, **/Services/{ClientGrants,PipelineServiceAccounts,DynamicClientRegistration}/**
+applies_to: **/SystemStores/*Client*.cs, **/Services/{ClientGrants,PipelineServiceAccounts,DynamicClientRegistration}/**, *ClientMirror*.cs, ClientsController.cs
 ---
 
 # Client credentials, service accounts and client roles

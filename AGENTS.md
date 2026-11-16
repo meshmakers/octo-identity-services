@@ -18,24 +18,32 @@ consumers work unchanged; the remaining discovery-document differences are docum
 | When you change | Read first |
 |---|---|
 | `src/IdentityServices/ClientApp/**` | `docs/angular-clientapp.md` |
-| `Program.cs`, `*.csproj`, `Dockerfile`, `azure-pipelines.yml`, `appsettings*.json`, `**/{Configuration,Mapping,Consumers}/**`, `src/IdentityServices.Resources/**` | `docs/architecture.md` |
+| `{Program,IdentityApi*,*KeyStore}.cs`, `*.csproj`, `Dockerfile`, `appsettings*.json`, `azure-pipelines.yml`, `**/{Configuration,Mapping,Consumers,DataProtection}/**` | `docs/architecture.md` |
 | `src/Persistence.IdentityCkModel/**`, `src/IdentityServerPersistence/Services/Migrations/**`, `CkModelCompatibility.cs` | `docs/ck-model.md` |
-| `**/SystemStores/Client*.cs`, `**/Services/{ClientGrants,PipelineServiceAccounts,DynamicClientRegistration}/**` | `docs/client-credentials.md` |
-| `ClientMirror*.cs`, `src/IdentityServices/Services/**` | `docs/client-mirroring.md` |
-| `src/IdentityServices/Logging/**`, `OctoUser*.cs`, `UserTokenRevocation.cs`, `SecondFactorEvidence.cs`, `src/IdentityServices/Controllers/Api/**` | `docs/credential-security.md` |
-| `CrossTenant*.cs`, `**/{CrossTenantAudit,SourceTenantGrants,ShadowUserCleanup}/**`, `TenantProbeGuard*.cs`, `AllowedTenants*.cs`, `*IdentityResolver.cs` | `docs/cross-tenant-authentication.md` |
-| `src/IdentityServices/Methods/**`, `**/Services/{SelfService,SecretManagement}/**` | `docs/identity-methods.md` |
-| `src/IdentityServices/{OpenIddict,Cookies}/**`, `src/IdentityServices/Controllers/Protocol/**`, `OpenIddictConfiguration.cs`, `**/SystemStores/OpenIddict/**` | `docs/openiddict-protocol.md` |
-| `src/IdentityServices/Authorization/**`, `GroupRoleResolver.cs`, `GuardedEntityMutation.cs`, `**/AdminRoleMigration/**`, `OctoRoleStore.cs`, `GroupStore.cs` | `docs/role-guards.md` |
-| `DefaultConfiguration*.cs`, `**/Services/{Admin,FileRoles,ScratchTenants,RoleGrants}/**`, `ITenantSetupCompletedHandler.cs` | `docs/tenant-provisioning.md` |
+| `**/SystemStores/*Client*.cs`, `**/Services/{ClientGrants,PipelineServiceAccounts,DynamicClientRegistration}/**`, `*ClientMirror*.cs`, `ClientsController.cs` | `docs/client-credentials.md` |
+| `*ClientMirror*.cs`, `{ClientCredentialsTenantProcessor,MirrorSecretUsageTelemetry,OctoApplicationManager}.cs` | `docs/client-mirroring.md` |
+| `src/IdentityServices/{Logging,TenantApi,Controllers/Api}/**`, `{OctoUser*,*Revocation*,SecondFactorEvidence,*UserCredentialChangeService}.cs` | `docs/credential-security.md` |
+| `*CrossTenant*.cs`, `**/{CrossTenantAudit,SourceTenantGrants,ShadowUserCleanup}/**`, `{TenantProbeGuard*,AllowedTenants*,*IdentityResolver,*Processor}.cs` | `docs/cross-tenant-authentication.md` |
+| `src/IdentityServices/Methods/**`, `**/Services/{SelfService,SecretManagement}/**`, `*DataPermission*.cs` | `docs/identity-methods.md` |
+| `{IdentityMethodFacade,IdentityRestDeprecation,UsersController,ManageApiController,RoleChangeProblems,ResetUserPasswordRequestDto}.cs` | `docs/identity-rest-facades.md` |
+| `src/Authentication/**`, `**/Services/Login/**`, `{TenantDiscovery*,TenantTopology*,*IdentityProvider*,*EmailDomainGroupRule*,*Channel*}.cs` | `docs/login-and-providers.md` |
+| `src/IdentityServices/{OpenIddict,Cookies,Middleware,Controllers/Protocol}/**`, `**/{SystemStores/OpenIddict,DynamicAuth}/**`, `OpenIddictConfiguration.cs` | `docs/openiddict-protocol.md` |
+| `**/{Authorization/RoleChange,AdminRoleMigration}/**`, `{GroupRoleResolver,GuardedEntityMutation,OctoRoleStore,*GroupStore,RolesController,GroupsController}.cs` | `docs/role-guards.md` |
+| `**/Services/{Admin,FileRoles,ScratchTenants,RoleGrants}/**`, `{DefaultConfiguration*,AdminProvisioning*,PipelineServiceAccountFileRoles*}.cs` | `docs/tenant-provisioning.md` |
 | `tests/**` | `docs/testing.md` |
+| `User{CreateUser,Merge,DisableTwoFactor}Handler.cs`, `User{Creation,Merge,TwoFactorAdministration,Management}Service.cs`, `UserEmailUniqueness.cs` | `docs/user-create-merge-methods.md` |
 <!-- <<< end generated: routing -->
 
-Background, not routed (open when the task names the topic): the concept documents `docs/CONCEPT-*.md`, the rollout
-runbooks `docs/rollout-*.md` and `docs/runbook-*.md`, the reference documents `docs/authentication.md`,
-`docs/persistence.md`, `docs/system-api.md`, `docs/configuration.md`, `docs/architecture-overview.md` and
-`docs/README.md` (index), and the feature references `docs/login-and-providers.md`,
-`docs/user-create-merge-methods.md` and `docs/identity-rest-facades.md`.
+Background, not path-triggered (open when the task names the topic):
+
+- `docs/authentication.md` (large reference): sign-in attempt counting and rate limits, external provider and LDAP
+  login flows, device flow, impersonation, dynamic client registration, resource indicators, authorize error page.
+- `docs/system-api.md` (REST reference), `docs/persistence.md` (CK entities, stores, indexes),
+  `docs/configuration.md` (environment variables), `docs/architecture-overview.md`, `docs/README.md` (index).
+- `docs/external-identity-provider-setup.md` and `docs/external-identity-provider-concept.md` (provider setup),
+  `docs/SINGLE-LOGOUT-IMPLEMENTATION.md`, `docs/openiddict-discovery-diff.md`.
+- Decisions and history: the concepts `docs/CONCEPT-*.md` and `docs/TODO-TENANT-DISCOVERY-IMPROVEMENTS.md`; rollouts:
+  `docs/rollout-*.md` and `docs/runbook-*.md`.
 
 ## Build & test
 

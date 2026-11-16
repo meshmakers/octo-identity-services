@@ -1,6 +1,6 @@
 ---
 description: tenant_id on client-credentials tokens, ambiguous tenant binding, per-tenant mirror secrets and which mirror matched
-applies_to: ClientMirror*.cs, src/IdentityServices/Services/**
+applies_to: *ClientMirror*.cs, {ClientCredentialsTenantProcessor,MirrorSecretUsageTelemetry,OctoApplicationManager}.cs
 ---
 
 # Tenant binding of client-credentials tokens and client mirroring

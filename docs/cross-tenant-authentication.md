@@ -1,6 +1,6 @@
 ---
 description: Cross-tenant sign-in, shadow users, token exchange, sibling grants, delegation, tenant probe guard
-applies_to: CrossTenant*.cs, **/{CrossTenantAudit,SourceTenantGrants,ShadowUserCleanup}/**, TenantProbeGuard*.cs, AllowedTenants*.cs, *IdentityResolver.cs
+applies_to: *CrossTenant*.cs, **/{CrossTenantAudit,SourceTenantGrants,ShadowUserCleanup}/**, {TenantProbeGuard*,AllowedTenants*,*IdentityResolver,*Processor}.cs
 ---
 
 # Cross-tenant authentication and delegation

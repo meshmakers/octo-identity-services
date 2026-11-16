@@ -1,6 +1,6 @@
 ---
 description: Default-configuration provisioning, admin pre-provisioning, file roles and pipeline service accounts, scratch tenants
-applies_to: DefaultConfiguration*.cs, **/Services/{Admin,FileRoles,ScratchTenants,RoleGrants}/**, ITenantSetupCompletedHandler.cs
+applies_to: **/Services/{Admin,FileRoles,ScratchTenants,RoleGrants}/**, {DefaultConfiguration*,AdminProvisioning*,PipelineServiceAccountFileRoles*}.cs
 ---
 
 # Tenant provisioning, default configuration and scratch tenants

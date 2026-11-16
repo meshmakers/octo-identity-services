@@ -1,6 +1,6 @@
 ---
 description: REST facades of the role, merge, create-user and password methods, deprecation waves, account pages running the password methods
-background: true
+applies_to: {IdentityMethodFacade,IdentityRestDeprecation,UsersController,ManageApiController,RoleChangeProblems,ResetUserPasswordRequestDto}.cs
 ---
 
 # REST facades, deprecations and account pages
