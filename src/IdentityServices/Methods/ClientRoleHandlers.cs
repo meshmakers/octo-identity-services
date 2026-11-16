@@ -120,6 +120,28 @@ internal abstract class ClientRoleMethodHandlerBase<TParameters>(IServiceProvide
         call.Details["rolesAfter"] = await NamesAsync(call, stored).ConfigureAwait(false);
     }
 
+    /// <summary><c>true</c> when the caller may read every role of <paramref name="roleIds" />.</summary>
+    internal static async Task<bool> AllReadableAsync(IdentityMethodCall call, IEnumerable<string> roleIds,
+        CancellationToken cancellationToken)
+    {
+        foreach (var id in roleIds)
+        {
+            if (!OctoObjectId.TryParse(id, out var rtId))
+            {
+                continue;
+            }
+
+            var verdict = await call.EvaluateAsync(new RtEntityId(RtEntityExtensions.GetRtCkTypeId<RtRole>(), rtId),
+                RtDataAction.Read, cancellationToken).ConfigureAwait(false);
+            if (!verdict.IsAllowed)
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
     /// <summary>A <c>ROLE_NOT_FOUND</c> answer naming the role.</summary>
     protected static CkMethodOutcome RoleNotFound(string? roleName) =>
         CkMethodOutcome.Fail(new CkMethodFailure(UserRoleMethodErrors.RoleNotFound,
@@ -187,6 +209,12 @@ internal sealed class ClientSetRolesHandler(IServiceProvider services)
         }
 
         var removedIds = current.Where(id => !wanted.Contains(id)).ToList();
+        // as RemoveRole: a held role the caller cannot read is not removed behind its back - the call is refused
+        if (!await AllReadableAsync(call, removedIds, cancellationToken).ConfigureAwait(false))
+        {
+            return call.NotPermitted();
+        }
+
         if (addedIds.Count > 0 || removedIds.Count > 0)
         {
             await call.Services.GetRequiredService<IClientRoleStore>()
@@ -245,15 +273,16 @@ internal sealed class ClientRemoveRoleHandler(IServiceProvider services)
         IReadOnlySet<string> current, ClientRemoveRoleParameters parameters, CancellationToken cancellationToken)
     {
         var (role, readable) = await FindRoleAsync(call, parameters.RoleName, cancellationToken).ConfigureAwait(false);
-        var id = role?.RtId.ToString();
-        if (role == null || (!readable && !current.Contains(id!)))
+        if (role == null)
         {
             return RoleNotFound(parameters.RoleName);
         }
 
-        if (!current.Contains(id!))
+        var id = role.RtId.ToString();
+        if (!current.Contains(id))
         {
-            return CkMethodOutcome.Ok();
+            // not held: an unreadable role answers like an unknown one (its existence is not told)
+            return readable ? CkMethodOutcome.Ok() : RoleNotFound(parameters.RoleName);
         }
 
         // The client's role ids are visible through the client: a held role the caller cannot read is refused, not
@@ -263,7 +292,7 @@ internal sealed class ClientRemoveRoleHandler(IServiceProvider services)
             return call.NotPermitted();
         }
 
-        await call.Services.GetRequiredService<IClientRoleStore>().ApplyRoleChangesAsync(client.RtId, [], [id!])
+        await call.Services.GetRequiredService<IClientRoleStore>().ApplyRoleChangesAsync(client.RtId, [], [id])
             .ConfigureAwait(false);
         await RecordAfterAsync(call, client).ConfigureAwait(false);
         return CkMethodOutcome.Ok();

@@ -18,7 +18,8 @@ namespace Meshmakers.Octo.Backend.IdentityServices.Methods;
 ///     <see cref="IRoleChangeGuard" /> judges the same role ids (<see cref="RoleGraphChange.GroupRoles" />: self-grant,
 ///     <c>role-not-held</c> for built-in roles, last administrator through groups). The REST endpoint is the facade of this
 ///     method: it resolves the role ids to names first. The method checks all names first and one unknown (or unreadable) role
-///     changes nothing (<c>ROLE_NOT_FOUND</c>), which never grants more. The audit event carries <c>rolesBefore</c> and
+///     changes nothing (<c>ROLE_NOT_FOUND</c>), which never grants more; dropping a held role the caller cannot read is
+///     <c>METHOD_FORBIDDEN</c> (<c>data-permission</c>). The audit event carries <c>rolesBefore</c> and
 ///     <c>rolesAfter</c> (role names).
 /// </remarks>
 internal sealed class GroupSetRolesHandler(IServiceProvider services)
@@ -64,6 +65,13 @@ internal sealed class GroupSetRolesHandler(IServiceProvider services)
         if (!decision.IsAllowed)
         {
             return call.Refuse(decision);
+        }
+
+        // a held role the caller cannot read is not removed behind its back - the call is refused
+        if (!await ClientRoleMethodHandlerBase<ClientSetRolesParameters>.AllReadableAsync(call,
+                before.Where(id => !wanted.ContainsKey(id)), cancellationToken).ConfigureAwait(false))
+        {
+            return call.NotPermitted();
         }
 
         await groupStore.SetRoleIdsAsync(group.RtId, wanted.Keys.ToList()).ConfigureAwait(false);

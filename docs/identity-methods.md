@@ -178,8 +178,8 @@ hosted whatever `EnablePasswordMethods` says.
 
 - **Roles** (`Methods/ClientRoleHandlers.cs`, `ClientRoleMethodHandlerBase<T>`): only the direct roles (`AssignedRole`) are read and written,
   only the difference is written (`IClientRoleStore.ApplyRoleChangesAsync`), so a kept role is never written again. A role that is unknown or
-  not readable is `ROLE_NOT_FOUND` and nothing changes; `RemoveRole` of a held role the caller cannot read is `METHOD_FORBIDDEN`
-  (`data-permission`). `rolesAfter` in the audit is read back from the store after the write. Every added role runs `IRoleChangeGuard.EvaluateClientGrantAsync`: a built-in role the
+  not readable is `ROLE_NOT_FOUND` and nothing changes; removing a held role the caller cannot read (`RemoveRole`, or dropping it in
+  `SetRoles`; `Group.SetRoles` the same) is `METHOD_FORBIDDEN` (`data-permission`). `rolesAfter` in the audit is read back from the store after the write. Every added role runs `IRoleChangeGuard.EvaluateClientGrantAsync`: a built-in role the
   caller does not hold (`role-not-held`) and any role for a client-credentials caller's own client (`self-grant`) are refused with
   `METHOD_FORBIDDEN` - the same answer as `User.AddRole`. Removals are never judged. Audit: `clientId`, `rolesBefore`, `rolesAfter`.
 - **Overlay URIs** (`Methods/ClientOverlayHandlers.cs`, rules in `ClientOverlayUris`): an overlay URI is written with

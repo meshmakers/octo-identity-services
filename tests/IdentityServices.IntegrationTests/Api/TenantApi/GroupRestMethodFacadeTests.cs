@@ -245,6 +245,29 @@ public class GroupRestMethodFacadeTests : IntegrationTestBase, IDisposable
     }
 
     [Fact]
+    public async Task SetRoles_DroppingAHeldRoleTheCallerCannotRead_Is403_AndTheRoleStays()
+    {
+        var host = Host(denyReads: true);
+        var group = await NewGroupAsync();
+        var roleId = await NewRoleIdAsync();
+        await WithGroupStoreAsync(s => s.SetRoleIdsAsync(group.RtId, [roleId]));
+        using var client = FacadeCaller.User(UserManagement).Client(host);
+
+        var response = await client.PutAsJsonAsync(TenantApiUrl($"groups/{group.RtId}/roles"), Array.Empty<string>(),
+            TestContext.Current.CancellationToken);
+
+        response.StatusCode.Should().Be(HttpStatusCode.Forbidden);
+        var problem = await response.Content.ReadFromJsonAsync<JsonElement>(TestContext.Current.CancellationToken);
+        problem.GetProperty("code").GetString().Should().Be(CkMethodErrorCodes.MethodForbidden);
+        problem.GetProperty("parameters").GetProperty("reason").GetString().Should().Be("data-permission");
+        var method = await DispatchAsync(host, new CkMethodPrincipal(Guid.NewGuid().ToString("N"), [UserManagement],
+            ["octo_api"]), SystemIdentityCkIds.GroupSetRolesMethodId, group, new GroupSetRolesParameters { RoleNames = [] });
+        method.Error!.Parameters.Should().Contain("reason", "data-permission");
+        using var scope = CreateScope();
+        (await scope.ServiceProvider.GetRequiredService<IGroupStore>().GetRoleIdsAsync(group.RtId)).Should().Equal(roleId);
+    }
+
+    [Fact]
     public void TheGroupMethods_RunInThisProcess()
     {
         var transport = Host().Services.GetRequiredService<ICkInProcessMethodTransport>();

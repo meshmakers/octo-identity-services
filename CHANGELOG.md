@@ -20,7 +20,8 @@ Notable changes of the OctoMesh identity services. The CK model `System.Identity
     nothing (both were an unhandled engine error, `500`); a member or child group id that is no object id
     answers `404` (add, remove child group) or `200` (remove user) instead of an unhandled `500`;
   - with an enforcing data policy on users, clients, groups or roles, a member or role the caller may not read is treated as unknown
-    when added, and removing one the group or client holds answers `403` (`METHOD_FORBIDDEN`, `data-permission`) without a change
+    when added, and removing one the group or client holds (also by dropping it in `PUT .../roles`) answers `403`
+    (`METHOD_FORBIDDEN`, `data-permission`) without a change
     (REST changed it regardless of the data policy);
   - an unexpected failure no longer returns the exception text (overlay and clean keep `400`, with a fixed message);
   - a caller admitted only by `RoleEnforcement=Warn` (not the default) is refused, as for the user facades.

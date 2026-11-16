@@ -344,6 +344,48 @@ public class ClientRestMethodFacadeTests : IntegrationTestBase, IDisposable
     }
 
     [Fact]
+    public async Task SetRoles_DroppingAHeldRoleTheCallerCannotRead_Is403_AndTheRoleStays()
+    {
+        var host = Host(denyReads: true);
+        var role = await NewRoleAsync();
+        var target = await NewClientAsync();
+        await AssignAsync(target, role);
+        using var client = FacadeCaller.User(TenantManagement).Client(host);
+
+        var response = await client.PutAsJsonAsync(TenantApiUrl($"clients/{target.ClientId}/roles"), Array.Empty<string>(),
+            TestContext.Current.CancellationToken);
+
+        response.StatusCode.Should().Be(HttpStatusCode.Forbidden);
+        var problem = await response.Content.ReadFromJsonAsync<JsonElement>(TestContext.Current.CancellationToken);
+        problem.GetProperty("code").GetString().Should().Be(CkMethodErrorCodes.MethodForbidden);
+        problem.GetProperty("parameters").GetProperty("reason").GetString().Should().Be("data-permission");
+
+        // the method itself, as the GraphQL path reaches it
+        var method = await DispatchAsync(host, Admin(), SystemIdentityCkIds.ClientSetRolesMethodId, target.RtId.ToString(),
+            new ClientSetRolesParameters { RoleNames = [] });
+        method.Error!.Code.Should().Be(CkMethodErrorCodes.MethodForbidden);
+        method.Error.Parameters.Should().Contain("reason", "data-permission");
+        (await DirectRoleIdsAsync(target)).Should().Equal(await RoleIdAsync(role));
+    }
+
+    [Fact]
+    public async Task RemoveRole_OfAnUnreadableRoleTheClientDoesNotHold_AnswersAsForAnUnknownRole()
+    {
+        // existence is not told: the method answers ROLE_NOT_FOUND, REST keeps its 200 for an unknown role
+        var host = Host(denyReads: true);
+        var role = await NewRoleAsync();
+        var target = await NewClientAsync();
+        using var client = FacadeCaller.User(TenantManagement).Client(host);
+
+        (await client.DeleteAsync(TenantApiUrl($"clients/{target.ClientId}/roles/{role}"),
+            TestContext.Current.CancellationToken)).StatusCode.Should().Be(HttpStatusCode.OK);
+        var method = await DispatchAsync(host, Admin(), SystemIdentityCkIds.ClientRemoveRoleMethodId,
+            target.RtId.ToString(), new ClientRemoveRoleParameters { RoleName = role });
+        method.Error!.Code.Should().Be(UserRoleMethodErrors.RoleNotFound);
+        (await DirectRoleIdsAsync(target)).Should().BeEmpty();
+    }
+
+    [Fact]
     public async Task TheAuditRecordsTheRolesAsStored()
     {
         var host = Host();
