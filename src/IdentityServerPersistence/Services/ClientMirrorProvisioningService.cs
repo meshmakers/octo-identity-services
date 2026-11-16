@@ -238,6 +238,11 @@ public class ClientMirrorProvisioningService(
                     verifyClientId,
                     async () => await FindParentClientAsync(parentRepo, parentSession, verifyClientId) ?? parentClient,
                     skipWhenInSync: false);
+                if (BeforeTrackingRowWriteForTests != null)
+                {
+                    await BeforeTrackingRowWriteForTests(verifyClientId, childTenantId);
+                }
+
                 // AB#8054: a mirror this pass had to insert again is claimed by a versioned write of its tracking row,
                 // like the reconciliation does; a row that changed or vanished meanwhile withdraws the insert.
                 await ClaimTrackingRowAsync(parentRepo, parentSession, existingMirrorResult.Items.First(), trackedWrite,
@@ -250,9 +255,14 @@ public class ClientMirrorProvisioningService(
             //     query-or-insert pattern used by DefaultConfigurationCreatorService for
             //     the built-in OctoTool/Studio/Swagger clients.
             var newClientId = parentClient.ClientId;
-            await ConvergeChildMirrorAsync(childRepo, childSession, parentTenantId, newClientId,
+            var newWrite = await ConvergeChildMirrorAsync(childRepo, childSession, parentTenantId, newClientId,
                 async () => await FindParentClientAsync(parentRepo, parentSession, newClientId) ?? parentClient,
                 skipWhenInSync: false);
+
+            if (BeforeTrackingRowWriteForTests != null)
+            {
+                await BeforeTrackingRowWriteForTests(newClientId, childTenantId);
+            }
 
             // 2b. Record the tracking row in the parent's DB.
             var mirrorRecord = new RtClientMirror
@@ -264,7 +274,25 @@ public class ClientMirrorProvisioningService(
                 ProvisionedAt = DateTime.UtcNow,
                 SecretHashVersion = 0
             };
-            await parentRepo.InsertOneRtEntityAsync(parentSession, mirrorRecord);
+            try
+            {
+                await parentRepo.InsertOneRtEntityAsync(parentSession, mirrorRecord);
+            }
+            catch (Exception ex) when (IsDuplicateKey(ex))
+            {
+                // The row is unique per (client, child). Every identity replica sets a tenant up when it is created or
+                // re-attached (a restore drops the tenant, which drops its tracking rows, and attaches it again), so two
+                // replicas can provision the same pair at the same moment, and a replica that read before the other
+                // one's insert finds the row taken. The one that recorded the row first owns the mirror; this run
+                // withdraws its own insert when it left a second client of that id behind. Any other failure of the
+                // insert still reaches the caller.
+                await WithdrawLosingMirrorInsertAsync(childRepo, childSession, newClientId, newWrite);
+                logger.LogDebug(
+                    "Client mirror clientId='{ClientId}' child='{ChildTenantId}' was recorded concurrently (another replica)",
+                    newClientId, childTenantId);
+                alreadyPresent++;
+                continue;
+            }
 
             newlyProvisioned++;
             logger.LogInformation(
@@ -573,7 +601,12 @@ public class ClientMirrorProvisioningService(
             return MirrorReconcileOutcome.InSync;
         }
 
-        await BumpTrackingRowAsync(parentRepo, parentSession, row);
+        if (!await BumpTrackingRowAsync(parentRepo, parentSession, row))
+        {
+            // Removed while we repaired the mirror (removal of the mirror, or the tenant is being deleted or restored).
+            return MirrorReconcileOutcome.Skipped;
+        }
+
         await PublishCorsClientsUpdateAsync(row.ChildTenantId);
 
         // Names only: never a secret value or hash.
@@ -677,8 +710,61 @@ public class ClientMirrorProvisioningService(
         return MirrorReconcileOutcome.Removed;
     }
 
-    /// <summary>The counter is informational; a concurrent bump wins and is not retried.</summary>
-    private async Task BumpTrackingRowAsync(ITenantRepository parentRepo, IOctoSession parentSession, RtClientMirror row)
+    /// <summary>
+    ///     Test seam: runs in the start-up provisioning after the child mirror was written and before its tracking row is
+    ///     inserted or bumped (arguments: client id, child tenant id), i.e. where another replica can record the same pair
+    ///     first or remove the row.
+    /// </summary>
+    internal Func<string, string, Task>? BeforeTrackingRowWriteForTests { get; set; }
+
+    /// <summary>
+    ///     Called when another writer recorded the tracking row of a pair this provisioning run had just written. When this
+    ///     run <b>inserted</b> a mirror and the child now holds more than one client of that id (both writers inserted),
+    ///     the duplicates are erased by the same rule <see cref="ConvergeChildMirrorAsync" /> uses (the blueprint-range
+    ///     record, else the first one read), so this run and a concurrent reconciliation pass keep the same record and
+    ///     never erase both. When the other writer replaced this run's insert, that insert is the one mirror and stays. A
+    ///     replaced or unchanged mirror needs nothing.
+    /// </summary>
+    private async Task WithdrawLosingMirrorInsertAsync(ITenantRepository childRepo, IOctoSession childSession,
+        string clientId, MirrorWriteResult write)
+    {
+        if (write.InsertedRtId == null)
+        {
+            return;
+        }
+
+        var clients = await GetChildClientsAsync(childRepo, childSession, clientId);
+        if (clients.Count < 2)
+        {
+            return;
+        }
+
+        var canonical = clients.FirstOrDefault(IsBlueprintRtId) ?? clients[0];
+        foreach (var duplicate in clients.Where(c => !c.RtId.Equals(canonical.RtId)))
+        {
+            try
+            {
+                await childRepo.DeleteOneRtEntityByRtIdAsync<RtClient>(childSession, duplicate.RtId,
+                    DeleteOptions.Erase);
+            }
+            catch (EntityNotFoundException)
+            {
+                // Erased by the other writer's duplicate cleanup first.
+            }
+        }
+
+        logger.LogDebug(
+            "Removed the second mirror of clientId='{ClientId}' in child '{ChildTenantId}': another replica provisioned it too",
+            clientId, childRepo.TenantId);
+    }
+
+    /// <summary>
+    ///     The counter is informational: a concurrent bump wins and is not retried, and a row removed meanwhile stays
+    ///     removed (never written again here).
+    /// </summary>
+    /// <returns><c>false</c> when the row was removed meanwhile.</returns>
+    private async Task<bool> BumpTrackingRowAsync(ITenantRepository parentRepo, IOctoSession parentSession,
+        RtClientMirror row)
     {
         try
         {
@@ -690,6 +776,39 @@ public class ClientMirrorProvisioningService(
             logger.LogDebug("Tracking row of clientId='{ClientId}' child='{ChildTenantId}' changed concurrently",
                 row.ParentClientId, row.ChildTenantId);
         }
+        catch (EntityNotFoundException)
+        {
+            // Removed meanwhile: the child tenant is being deleted or restored (the PreDeleteTenant cleanup on another
+            // replica), or the mirror was removed. The row is not written again; the next setup of a tenant that still
+            // exists records it anew.
+            logger.LogDebug("Tracking row of clientId='{ClientId}' child='{ChildTenantId}' was removed concurrently",
+                row.ParentClientId, row.ChildTenantId);
+            return false;
+        }
+
+        return true;
+    }
+
+    /// <summary>
+    ///     <c>true</c> when <paramref name="exception" /> (or one of its inner exceptions) is a unique-index violation. A
+    ///     single insert reports it as <see cref="DuplicateKeyException" />, a bulk insert as an
+    ///     <c>OperationFailedException</c> around the driver's bulk write error, so the driver errors are checked as well.
+    /// </summary>
+    internal static bool IsDuplicateKey(Exception exception)
+    {
+        for (var current = exception; current != null; current = current.InnerException)
+        {
+            switch (current)
+            {
+                case DuplicateKeyException:
+                case MongoDB.Driver.MongoWriteException { WriteError.Category: MongoDB.Driver.ServerErrorCategory.DuplicateKey }:
+                case MongoDB.Driver.MongoBulkWriteException bulk
+                    when bulk.WriteErrors.Any(e => e.Category == MongoDB.Driver.ServerErrorCategory.DuplicateKey):
+                    return true;
+            }
+        }
+
+        return false;
     }
 
     /// <summary>
@@ -700,18 +819,14 @@ public class ClientMirrorProvisioningService(
     ///     client delete cleanup) withdraws the inserted client again, so no duplicate and no untracked mirror stays behind.
     ///     For a replaced or unchanged mirror a concurrent bump wins (the counter is informational).
     /// </summary>
-    /// <returns><c>false</c> when the insert was withdrawn.</returns>
+    /// <returns><c>false</c> when the insert was withdrawn or the row was removed meanwhile.</returns>
     private async Task<bool> ClaimTrackingRowAsync(ITenantRepository parentRepo, IOctoSession parentSession,
         RtClientMirror row, MirrorWriteResult write, ITenantRepository childRepo, IOctoSession childSession)
     {
         if (write.InsertedRtId == null)
         {
-            if (write == MirrorWriteResult.Replaced)
-            {
-                await BumpTrackingRowAsync(parentRepo, parentSession, row);
-            }
-
-            return true;
+            // A row removed meanwhile (removal of the mirror, or the tenant is being deleted or restored) reports false.
+            return write != MirrorWriteResult.Replaced || await BumpTrackingRowAsync(parentRepo, parentSession, row);
         }
 
         try
