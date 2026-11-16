@@ -40,7 +40,7 @@ Parity table (REST before -> facade; the method wins unless the REST contract wo
 | Merge source data permission | none | method wins: not readable = 404 "Source user ... not found", not writable = 403 problem `METHOD_FORBIDDEN` (`data-permission`) |
 | Merge login/delete failure | 400, `failedDetails` with code + description | 400, same message, `failedDetails` with `code` only (the envelope carries codes) |
 | Unexpected failure | merge: 500 `InternalServerErrorDto(exception message)`; roles: unhandled 500 | merge: 500 `InternalServerErrorDto("Merging the users failed.")`; roles: 500 problem `METHOD_HANDLER_FAILED`; no exception text leaves the service |
-| `RoleEnforcement=Warn` (not the default) | caller without `UserManagement` let through and logged | refused by the method (403 problem, `role-required`) |
+| `RoleEnforcement=Warn` (not the default) | caller without `UserManagement` let through and logged | **intended REST change:** refused by the method (403 problem, `role-required`), as for the user facades - a method has no staged warn mode, and `Enforce` is the default |
 | Merge `sourceUserName` | as sent | trimmed by the method |
 
 Fix on the way: `UserMergeHandler` looked the acting user up by `sub` and threw for a subject that is no object id; it now skips
@@ -193,3 +193,102 @@ itself. `Api/PasswordPolicyMessageParityTests` keeps it that way: one password t
 codes from `User.CreateUser`, `User.ResetPassword` and `User.ChangePassword`, and REST `POST users`, REST `POST users/ResetPassword`
 (code + description) and the account page's `change-password` and `set-password` (descriptions) show exactly
 `PasswordPolicyErrorDescriber.Describe` of the method envelope, in `en` and `de` (same `Accept-Language` on every path).
+
+## REST facades of the group role and membership endpoints (System.Identity 3.3.0)
+
+The seven write endpoints of `GroupsController` are **facades** of the `Group` methods; the controller holds no role-diff, membership
+or cycle rule of its own (no `IGroupStore` write, no guard call, no scratch-tenant revoke):
+
+| REST endpoint | Method |
+|---|---|
+| `PUT groups/{g}/roles` (role ids in the body) | `Group.SetRoles-1` (role names) |
+| `PUT` / `DELETE groups/{g}/members/users/{user}` | `Group.AddMember-1` / `Group.RemoveMember-1`, `memberKind` `User` |
+| `PUT` / `DELETE groups/{g}/members/clients/{client}` | `Group.AddMember-1` / `Group.RemoveMember-1`, `memberKind` `Client` |
+| `PUT` / `DELETE groups/{g}/members/groups/{child}` | `Group.AddChildGroup-1` / `Group.RemoveChildGroup-1` (new in 3.3.0) |
+
+Same path as the user facades: `IIdentityMethodFacade` (in-process, outside the request, caller from the bearer token), envelope mapped with
+`CkMethodFacadeOptions`. The `dataAccess: Write` check on the target is a check of the method gateway of the asset repository (GraphQL);
+the in-process REST path checks the REST policy and the handler rules, as before. A guard refusal (`METHOD_FORBIDDEN` with `reason` `self-grant` / `role-not-held` / `last-administrator`, decoded by
+`RoleChangeProblems.RefusalOf`) is turned back into the audited REST answer of `IRoleChangeRefusals` (403/409 problem, WARN log,
+`Identity.RoleChangeRefused`, target `group <rtId>`). `Group.AddChildGroup` and `Group.RemoveChildGroup` are own methods instead of a third
+`GroupMemberKind` value, because the cycle refusal needs its own error code and an error code added to `Group.AddMember-1` is a Major
+(row M8 of the CK SemVer rules).
+
+Parity table (REST before -> facade):
+
+| Point | REST before | Now |
+|---|---|---|
+| Routes, bodies, status codes of a success | `200` empty | unchanged |
+| Group not found | `404` empty | unchanged (`METHOD_TARGET_NOT_FOUND` -> empty `404`) |
+| SetRoles: unknown role id | engine error (`RuntimeRepositoryException`), unhandled `500` | **intended REST change:** `404` `Role with id '…' not found.`, nothing changed - the `500` was a bug |
+| Add a user that does not exist (or an id that is no object id) | engine error (`RuntimeRepositoryException`), unhandled `500` | **intended REST change:** `404` `User '…' not found.` (`MEMBER_NOT_FOUND`) - the `500` was a bug |
+| Add a member twice | `200` | `200`, nothing written (`MEMBER_ALREADY_IN_GROUP` / `CHILD_GROUP_ALREADY_IN_GROUP`) |
+| Remove a non-member / unknown user | `200` (an id that is no object id: unhandled `500`) | `200` (`MEMBER_NOT_IN_GROUP` / `MEMBER_NOT_FOUND` mapped back); the `500` for a malformed id was a bug |
+| Add / remove client by client id or rtId | resolver in the controller | same resolver in the handler; unknown client id `404` `Client '…' not found. …`, leftover edge of a deleted client's rtId still removed, an rtId that is no member `200` |
+| Remove client from TenantOwners of a scratch tenant | revoke recorded first, revoker = `preferred_username`, else `client_id` | revoke recorded first by the handler; the stored revoker is the caller's subject (user id), else its client id (internal record, no REST answer changes) |
+| Child group in itself | `400` `A group cannot be a member of itself.` | unchanged (`GROUP_CYCLE`, `cycle=self`) |
+| Child group cycle (group reachable from the child) | `400` `Adding this group would create a circular reference.` | unchanged (`GROUP_CYCLE`, `cycle=descendant`) |
+| Child group that does not exist / no object id | `404` `Child group not found.` / unhandled `500` | `404` `Child group not found.` for both (`CHILD_GROUP_NOT_FOUND`); **intended REST change** for the malformed id - the `500` was a bug |
+| Member or child group the caller cannot read (only with an enforcing data policy on the type; open by default) | not checked: changed anyway | **intended REST change:** treated as not found - add `404`; remove answers like for an unknown member (`200` without a change for a user or a client named by rtId, `404` for a child group or a client named by client id). REST ignoring an enforcing data policy was the gap the data-permission check closes; the answer never tells that an unreadable entity exists |
+| Remove a child group: id that is no object id | unhandled `500` | **intended REST change:** `404` `Child group not found.` - the `500` was a bug |
+| Guard refusals | 403/409 problem, `Identity.RoleChangeRefused`, WARN | unchanged, plus the `Identity.Method` event |
+| Audit of a success | none | one `Identity.Method` event per call (`rolesBefore`/`rolesAfter`; members `memberKind`, `memberId`) |
+| Unexpected failure | unhandled `500` | `500` problem `METHOD_HANDLER_FAILED` (same status, no exception text) |
+| `RoleEnforcement=Warn` (not the default) | caller without `UserManagement` let through and logged | **intended REST change:** refused by the method (403 problem, `role-required`), as for the user facades - a method has no staged warn mode, and `Enforce` is the default |
+
+Not in this change: group create, update, delete and the group reads (generic CRUD story of the Feature). Group create with initial roles
+still writes them without the guard.
+
+Tests: `Api/TenantApi/GroupRestMethodFacadeTests` (per endpoint: exactly one `Identity.Method` event, in-process, the ambient-state probe sees
+no request state at handler entry; 403 for a caller without `UserManagement`; the two cycle answers with today's body; REST and the dispatcher
+side by side for the child group methods; non-member removals), `Methods/IdentityMethodHostTests`, the controller unit tests
+`GroupsControllerScratchRevokeTests` (real handler behind the controller, `HandlerBackedMethodFacade`), plus the unchanged REST suites
+(`GroupRoleChangeGuardTests`, `GroupMethodTests`, `GroupMethodParityTests`, `TenantApiRoleAuthorizationTests`).
+
+## REST facades of the client role and overlay endpoints (System.Identity 3.3.0)
+
+The role and overlay write endpoints of `ClientsController` are **facades** of new `Client` methods. The controller resolves the OAuth client
+id of the route to the rtId (the method target) and, for the replace-all, the role ids to names; every rule lives in the handler
+(`Methods/ClientRoleHandlers.cs`, `Methods/ClientOverlayHandlers.cs`):
+
+| REST endpoint | Method |
+|---|---|
+| `PUT clients/{id}/roles` (role ids) | `Client.SetRoles-1` (role names) |
+| `PUT clients/{id}/roles/{role}` | `Client.AddRole-1` |
+| `DELETE clients/{id}/roles/{role}` | `Client.RemoveRole-1` |
+| `POST clients/{id}/overlayUris` | `Client.ApplyOverlayUris-1` (result record `ClientOverlayUrisResult`) |
+| `DELETE clients/cleanOverlayEntries[?overlayName=]` | static `Client.CleanOverlayEntries-1` (result record `ClientOverlayCleanResult`) |
+
+The declared roles are the REST policy `IdentityTenantAdministrationWritePolicy` (`TenantManagement` or `UserManagement`); the handlers check
+the same rule again on the validated principal (`IdentityMethodCallerRules.IsTenantAdministrator`). The REST bodies of the overlay endpoints
+are rebuilt from the result records (same shape as before).
+
+Parity table (REST before -> facade):
+
+| Point | REST before | Now |
+|---|---|---|
+| Routes, bodies, status codes of a success | `200` (overlay: result DTO) | unchanged |
+| Client not found | `404` | unchanged (resolved in the controller) |
+| SetRoles: unknown role id | `404`, nothing changed | unchanged |
+| SetRoles / AddRole: a built-in role the caller does not hold, any role for the caller's own client | 403 problem `role-not-held` / `self-grant`, audited | unchanged (the method's `METHOD_FORBIDDEN` is mapped back), plus the `Identity.Method` event; the same refusal as `User.AddRole` |
+| AddRole: role already held directly | `200`, nothing written | unchanged (the method succeeds without a write) |
+| AddRole: unknown role | `404` | unchanged (`ROLE_NOT_FOUND`) |
+| RemoveRole: unknown role / role not held | `200`, nothing changed | unchanged (`ROLE_NOT_FOUND` mapped to `200`; a role not held is a success) |
+| Role the caller cannot read (only with an enforcing data policy on roles; open by default) | not checked: changed anyway | **intended REST change:** treated as unknown - SetRoles / AddRole `404`, RemoveRole `200` without a change (as for an unknown role). REST ignoring an enforcing data policy was the gap the data-permission check closes; the answer never tells that an unreadable role exists |
+| Overlay: invalid overlay name / no non-blank URI | `400` with the model state, before the client lookup | unchanged, same order (model validation and a read-only request check before the lookup; the method enforces the same rules, `INVALID_OVERLAY_NAME` / `NO_OVERLAY_URIS` map to the same body) |
+| Overlay: dedupe, `overlay:<name>` source, no write when nothing is added, CORS refresh on every call | controller | unchanged, in the method |
+| Overlay / clean: unresolved concurrent change | `409` problem | unchanged (`CONCURRENT_CHANGE`) |
+| Clean: conflict after some clients were cleaned | `409`, no CORS refresh | `409`; the CORS refresh is published for the clients already cleaned |
+| Unexpected failure | overlay / clean: `400` `InternalServerErrorDto(exception message)`; roles: unhandled `500` | same status codes; **intended body change:** a fixed message instead of the exception text (no internal detail leaves the service); roles: `500` problem `METHOD_HANDLER_FAILED` |
+| Audit | none | one `Identity.Method` event per call (`clientId`, `rolesBefore`/`rolesAfter`; overlay `overlayName`, `added`, `skipped`; clean `overlayName`, `clientsAffected`, `removed`; never a URI) |
+| `RoleEnforcement=Warn` (not the default) | caller without the role let through and logged | **intended REST change:** refused by the method (403 problem, `role-required`), as for the user facades - a method has no staged warn mode, and `Enforce` is the default |
+
+Tests: `Api/TenantApi/ClientRestMethodFacadeTests` (per endpoint one `Identity.Method` event, in-process, no request state at handler entry;
+REST and the dispatcher side by side per method - same direct roles, same URI lists and counts; the escalation guard answers exactly as
+`User.AddRole`; a token of another tenant (`METHOD_FORBIDDEN` `tenant-not-allowed` / REST 403) and a caller without the declared role change
+nothing), the controller unit tests `ClientsControllerOverlayUrisTests`, `ClientsControllerCleanOverlayEntriesTests` and
+`ClientsControllerRoleGuardTests` (real handlers behind the controller through `HandlerBackedMethodFacade`), plus the unchanged
+`ClientRoleChangeGuardTests`.
+
+Both groups of endpoints carry no deprecation yet: the deprecation wave of identity wave 2 is its own story; REST is not removed and gets no
+`Sunset` header.

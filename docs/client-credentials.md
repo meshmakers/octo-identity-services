@@ -42,6 +42,9 @@ the feature go quiet with no error anywhere. When setting up delegation for a te
 `PUT {tenantId}/v1/clients/{clientId}/roles/{roleName}` or `octo-cli AddClientToRole`. The caller must hold
 a built-in role itself to grant it to a client (403 `role-not-held` otherwise); custom roles are free, and a caller holding
 `UserManagement` may also grant app roles (roles a blueprint other than `System.Identity.Bootstrap` seeds) it does not hold.
+The client role endpoints and the overlay URI endpoints of `ClientsController` are facades of the `Client.SetRoles`,
+`Client.AddRole`, `Client.RemoveRole`, `Client.ApplyOverlayUris` and `Client.CleanOverlayEntries` methods (System.Identity 3.3.0):
+`docs/identity-methods.md` and `docs/identity-rest-facades.md`.
 
 **Deployment order:** identity first, then the Communication Controller. An identity that predates
 this change ignores the new fields and would create a secretless client.

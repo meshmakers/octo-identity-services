@@ -5,6 +5,26 @@ Notable changes of the OctoMesh identity services. The CK model `System.Identity
 
 ## Unreleased
 
+### Changed
+
+- **The REST group role and membership endpoints run the `Group` methods, the REST client role and overlay endpoints run new
+  `Client` methods (System.Identity 3.3.0).** `PUT groups/{g}/roles`, `PUT/DELETE groups/{g}/members/users|clients|groups/{id}`,
+  `PUT clients/{id}/roles`, `PUT/DELETE clients/{id}/roles/{role}`, `POST clients/{id}/overlayUris` and
+  `DELETE clients/cleanOverlayEntries` are facades of `Group.SetRoles`, `Group.AddMember`, `Group.RemoveMember`, the new
+  `Group.AddChildGroup` / `Group.RemoveChildGroup`, and the new `Client.SetRoles`, `Client.AddRole`, `Client.RemoveRole`,
+  `Client.ApplyOverlayUris` and static `Client.CleanOverlayEntries`. One implementation, one guard set, one `Identity.Method` audit event
+  per call; the method runs in-process outside the request. Routes, bodies and status codes stay; where a method answers differently
+  the facade maps it back to today's answer. Intended REST changes, each because today's behaviour was a bug (parity tables in
+  `docs/identity-rest-facades.md`):
+  - `PUT groups/{g}/roles` with an unknown role id and adding a user that does not exist to a group answer `404` and change
+    nothing (both were an unhandled engine error, `500`); a member or child group id that is no object id
+    answers `404` (add, remove child group) or `200` (remove user) instead of an unhandled `500`;
+  - with an enforcing data policy on users, clients, groups or roles, a member or role the caller may not read is treated as unknown
+    (REST changed it regardless of the data policy);
+  - an unexpected failure no longer returns the exception text (overlay and clean keep `400`, with a fixed message);
+  - a caller admitted only by `RoleEnforcement=Warn` (not the default) is refused, as for the user facades.
+  **Client impact:** none for callers that pass valid ids under the default configuration; REST is not deprecated by this change.
+
 ### Fixed
 
 - **Sign-in and token refresh work with several identity replicas and across restarts (AB#7892).** Authorization codes,

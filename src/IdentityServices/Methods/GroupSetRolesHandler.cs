@@ -16,10 +16,10 @@ namespace Meshmakers.Octo.Backend.IdentityServices.Methods;
 /// <remarks>
 ///     REST takes role ids; the method takes role names (the model's parameter) and resolves them first, so the
 ///     <see cref="IRoleChangeGuard" /> judges the same role ids (<see cref="RoleGraphChange.GroupRoles" />: self-grant,
-///     <c>role-not-held</c> for built-in roles, last administrator through groups, AB#7927). REST writes any id it is given;
-///     the method checks all names first and one unknown (or, AB#7035, unreadable) role changes nothing (<c>ROLE_NOT_FOUND</c>),
-///     which is stricter and never grants more. The end state of a successful call is the same. The audit event carries
-///     <c>rolesBefore</c> and <c>rolesAfter</c> (role names).
+///     <c>role-not-held</c> for built-in roles, last administrator through groups). The REST endpoint is the facade of this
+///     method: it resolves the role ids to names first. The method checks all names first and one unknown (or unreadable) role
+///     changes nothing (<c>ROLE_NOT_FOUND</c>), which never grants more. The audit event carries <c>rolesBefore</c> and
+///     <c>rolesAfter</c> (role names).
 /// </remarks>
 internal sealed class GroupSetRolesHandler(IServiceProvider services)
     : IdentityAdminMethodHandlerBase<GroupSetRolesParameters>(services)

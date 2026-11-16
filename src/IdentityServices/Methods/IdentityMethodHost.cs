@@ -74,6 +74,16 @@ internal static class IdentityMethodHost
         For<GroupAddMemberHandler>(SystemIdentityCkIds.GroupAddMemberMethodId, false),
         For<GroupRemoveMemberHandler>(SystemIdentityCkIds.GroupRemoveMemberMethodId, false),
         For<GroupSetRolesHandler>(SystemIdentityCkIds.GroupSetRolesMethodId, false),
+        // Nested groups (System.Identity 3.3.0): REST PUT/DELETE groups/{group}/members/groups/{child} are their facades.
+        For<GroupAddChildGroupHandler>(SystemIdentityCkIds.GroupAddChildGroupMethodId, false),
+        For<GroupRemoveChildGroupHandler>(SystemIdentityCkIds.GroupRemoveChildGroupMethodId, false),
+        // Client roles and overlay URIs (System.Identity 3.3.0) carry no secret: registered whatever the switch says. The
+        // REST role and overlay endpoints of ClientsController are their facades.
+        For<ClientSetRolesHandler>(SystemIdentityCkIds.ClientSetRolesMethodId, false),
+        For<ClientAddRoleHandler>(SystemIdentityCkIds.ClientAddRoleMethodId, false),
+        For<ClientRemoveRoleHandler>(SystemIdentityCkIds.ClientRemoveRoleMethodId, false),
+        For<ClientApplyOverlayUrisHandler>(SystemIdentityCkIds.ClientApplyOverlayUrisMethodId, false),
+        For<ClientCleanOverlayEntriesHandler>(SystemIdentityCkIds.ClientCleanOverlayEntriesMethodId, false),
         For<DataPermissionGrantToRoleHandler>(SystemIdentityCkIds.DataPermissionGrantToRoleMethodId, false),
         For<DataPermissionRevokeFromRoleHandler>(SystemIdentityCkIds.DataPermissionRevokeFromRoleMethodId, false),
         // Client secret methods carry a secret (sensitive result / parameter): gated like the password methods (AB#7780).

@@ -113,7 +113,7 @@ and gain the app role: `self-grant` only knew user sessions. Decision by Gerald 
 
 | Caller | Check |
 |---|---|
-| `GroupsController`: `PUT groups/{id}/roles`, `PUT members/users/{u}`, `PUT members/clients/{c}`, `PUT members/groups/{g}`, `DELETE members/users/{u}`, `DELETE members/groups/{g}`, `DELETE groups/{id}` | `EvaluateAsync(caller, RoleGraphChange)` (`GroupRoles`, `MemberAdded`, `MemberRemoved`, `GroupDeleted`). `DELETE members/clients/{c}` is not judged (nothing is granted, clients are no administrators); the scratch-tenant revoke marker stays |
+| `GroupsController`: `PUT groups/{id}/roles`, `PUT members/users/{u}`, `PUT members/clients/{c}`, `PUT members/groups/{g}`, `DELETE members/users/{u}`, `DELETE members/groups/{g}`, `DELETE groups/{id}` | `EvaluateAsync(caller, RoleGraphChange)` (`GroupRoles`, `MemberAdded`, `MemberRemoved`, `GroupDeleted`). `DELETE members/clients/{c}` is not judged (nothing is granted, clients are no administrators); the scratch-tenant revoke marker stays. Since System.Identity 3.3.0 the role and member endpoints are facades: the `Group.*` handlers call the guard and the controller maps the refusal back (`RoleChangeProblems.RefusalOf`, `docs/identity-rest-facades.md`); only `DELETE groups/{id}` calls it in the controller |
 | `ExternalTenantUserMappingsController`: create, update, delete | `MappingRoles` (existing id, or the source identity of a new mapping), `MappingDeleted` |
 | `RolesController`: `PUT roles/{name}` with another name, `DELETE roles/{name}` | `EvaluateRoleDefinition(role, newName)`: a role with an `rtWellKnownName` answers 409 `built-in-role` (+ `roleNames`); custom roles and a same-name save are untouched |
 

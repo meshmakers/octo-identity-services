@@ -139,6 +139,8 @@ wird, sind alle anderen Pre-Commit-Regeln (Lint etc.) ebenfalls hinfällig.
 - **An administrator creates a user only through `User.CreateUser` and merges only through `User.Merge`** (REST runs
   the same methods); the other creating paths are listed in `docs/user-create-merge-methods.md`. The password and role
   methods: `docs/identity-methods.md`.
+- **Group roles and members and client roles and overlay URIs change only in the `Group.*` / `Client.*` handlers**;
+  their REST endpoints are facades without own rules: `docs/identity-rest-facades.md`.
 - **The wire protocol stays Duende-compatible** (endpoint paths, discovery, token shape, claims); the golden-file
   tests pin it: `docs/openiddict-protocol.md`.
 - **Every CK attribute declares its `ownership`** (`OCTO-CK001` fails the build), and a change of System.Identity

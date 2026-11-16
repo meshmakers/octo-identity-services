@@ -1,0 +1,61 @@
+"$schema": "https://schemas.meshmakers.cloud/construction-kit-elements.schema.json"
+# 3.3.0: members of the overlay method result records (records/ck-clientOverlayResults.yaml). They are answers of a method
+# call and are never stored on an entity or seeded, hence RuntimeState.
+attributes:
+  - id: OverlayResultOverlayName
+    valueType: String
+    ownership: RuntimeState
+    description: "Method result member: the overlay name of the call (empty for a clean of every overlay)."
+  - id: OverlayResultClientId
+    valueType: String
+    ownership: RuntimeState
+    description: "Method result member: the OAuth client id."
+  - id: OverlayResultRedirectUrisAdded
+    valueType: Int
+    ownership: RuntimeState
+    description: "Method result member: redirect URIs added."
+  - id: OverlayResultRedirectUrisSkipped
+    valueType: Int
+    ownership: RuntimeState
+    description: "Method result member: redirect URIs skipped because the list already held them."
+  - id: OverlayResultPostLogoutRedirectUrisAdded
+    valueType: Int
+    ownership: RuntimeState
+    description: "Method result member: post-logout redirect URIs added."
+  - id: OverlayResultPostLogoutRedirectUrisSkipped
+    valueType: Int
+    ownership: RuntimeState
+    description: "Method result member: post-logout redirect URIs skipped because the list already held them."
+  - id: OverlayResultAllowedCorsOriginsAdded
+    valueType: Int
+    ownership: RuntimeState
+    description: "Method result member: CORS origins added."
+  - id: OverlayResultAllowedCorsOriginsSkipped
+    valueType: Int
+    ownership: RuntimeState
+    description: "Method result member: CORS origins skipped because the list already held them."
+  - id: OverlayResultClientsAffected
+    valueType: Int
+    ownership: RuntimeState
+    description: "Method result member: number of clients that had at least one overlay entry removed."
+  - id: OverlayResultTotalEntriesRemoved
+    valueType: Int
+    ownership: RuntimeState
+    description: "Method result member: overlay entries removed across all lists of all clients."
+  - id: OverlayResultClientResults
+    valueType: RecordArray
+    valueCkRecordId: ${this}/ClientOverlayCleanEntry
+    ownership: RuntimeState
+    description: "Method result member: one entry per client that had at least one overlay entry removed."
+  - id: OverlayResultRedirectUrisRemoved
+    valueType: Int
+    ownership: RuntimeState
+    description: "Method result member: redirect URI overlay entries removed."
+  - id: OverlayResultPostLogoutRedirectUrisRemoved
+    valueType: Int
+    ownership: RuntimeState
+    description: "Method result member: post-logout redirect URI overlay entries removed."
+  - id: OverlayResultAllowedCorsOriginsRemoved
+    valueType: Int
+    ownership: RuntimeState
+    description: "Method result member: CORS origin overlay entries removed."

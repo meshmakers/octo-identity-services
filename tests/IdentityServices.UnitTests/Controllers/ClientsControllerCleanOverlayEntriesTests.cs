@@ -1,3 +1,6 @@
+using Meshmakers.Octo.Services.Contracts.DistributionEventHub.Messages;
+using Meshmakers.Octo.Runtime.Contracts;
+using Microsoft.AspNetCore.Http;
 using Meshmakers.Octo.Backend.IdentityServices.Authorization.RoleChange;
 using Microsoft.AspNetCore.Identity;
 using FluentAssertions;
@@ -38,9 +41,14 @@ public class ClientsControllerCleanOverlayEntriesTests
     {
         _clientStore.TenantId.Returns(TenantId);
         _writes = ClientStoreMutations.Attach(_clientStore);
+        // The endpoint is a facade of the static Client.CleanOverlayEntries: the real handler runs behind it.
         _sut = new ClientsController(_clientStore, _eventHub, _clientRoleStore, _clientImpersonationStore,
             Substitute.For<RoleManager<RtRole>>(Substitute.For<IRoleStore<RtRole>>(), null, null, null, null),
-            Substitute.For<IRoleChangeGuard>(), Substitute.For<IRoleChangeRefusals>());
+            Substitute.For<IRoleChangeRefusals>(),
+            new HandlerBackedMethodFacade(_clientStore, eventHub: _eventHub))
+        {
+            ControllerContext = new ControllerContext { HttpContext = new DefaultHttpContext() }
+        };
     }
 
     [Fact]
@@ -269,5 +277,42 @@ public class ClientsControllerCleanOverlayEntriesTests
         var result = await _sut.CleanOverlayEntries(overlayName: null);
 
         result.Should().BeOfType<OkObjectResult>();
+    }
+
+    [Fact]
+    public async Task CleanOverlayEntries_ConflictAfterTheFirstClient_Is409_AndTheAuditNamesWhatWasCleaned()
+    {
+        // The clients cleaned before an unresolved conflict stay cleaned; the one audit event of the call says so.
+        var first = new RtClientBuilder().WithClientId("first").Build();
+        first.RedirectUris.Add(new RtClientUriEntryRecord { Uri = "https://a/", Source = ClientUriSources.OverlayPrefix + "x" });
+        var second = new RtClientBuilder().WithClientId("second").Build();
+        second.RedirectUris.Add(new RtClientUriEntryRecord { Uri = "https://b/", Source = ClientUriSources.OverlayPrefix + "x" });
+        var store = Substitute.For<IOctoClientStore>();
+        store.TenantId.Returns(TenantId);
+        store.GetClients().Returns([first, second]);
+        store.MutateAsync("first", Arg.Any<Func<RtClient, bool>>())
+            .Returns(call =>
+            {
+                call.ArgAt<Func<RtClient, bool>>(1)(first);
+                return first;
+            });
+        store.MutateAsync("second", Arg.Any<Func<RtClient, bool>>())
+            .Returns<RtClient?>(_ => throw new RtVersionConflictException(default, 1));
+        var methods = new HandlerBackedMethodFacade(store, eventHub: _eventHub);
+        var sut = new ClientsController(store, _eventHub, _clientRoleStore, _clientImpersonationStore,
+            Substitute.For<RoleManager<RtRole>>(Substitute.For<IRoleStore<RtRole>>(), null, null, null, null),
+            Substitute.For<IRoleChangeRefusals>(), methods)
+        {
+            ControllerContext = new ControllerContext { HttpContext = new DefaultHttpContext() }
+        };
+
+        var result = await sut.CleanOverlayEntries(overlayName: null);
+
+        result.Should().BeOfType<ObjectResult>().Which.StatusCode.Should().Be(StatusCodes.Status409Conflict);
+        var record = methods.Audit.Records.Should().ContainSingle().Subject;
+        record.Outcome.Should().Be("CONCURRENT_CHANGE");
+        record.Details!["clientsAffected"].Should().Be("1");
+        record.Details["removed"].Should().Be("1");
+        await _eventHub.Received(1).PublishAsync(Arg.Any<CorsClientsUpdate>());
     }
 }

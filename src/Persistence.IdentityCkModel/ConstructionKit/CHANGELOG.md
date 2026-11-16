@@ -1,5 +1,26 @@
 # Changelog
 
+## 3.3.0 - 2026-11-16
+
+_Required bump level: minor._
+
+System.Identity 3.3.0 adds methods so the REST group and client endpoints become facades of them:
+`Group.AddChildGroup-1` and `Group.RemoveChildGroup-1` (nested groups; errors `CHILD_GROUP_NOT_FOUND`, `CHILD_GROUP_ALREADY_IN_GROUP`,
+`CHILD_GROUP_NOT_IN_GROUP`, `GROUP_CYCLE`), and `Client.SetRoles-1`, `Client.AddRole-1`, `Client.RemoveRole-1`,
+`Client.ApplyOverlayUris-1` and the static `Client.CleanOverlayEntries-1` (roles `TenantManagement` or `UserManagement`), with the result
+records `ClientOverlayUrisResult`, `ClientOverlayCleanResult`, `ClientOverlayCleanEntry` and their `RuntimeState` attributes. The child
+group methods are their own methods instead of a third `GroupMemberKind` value because an error code added to `Group.AddMember-1` would be
+a Major. Compile gate against the published 3.2.0: required level MINOR, minimum version 3.3.0.
+
+Rollout: service-managed - ships inside the identity service with the regular identity release train. No catalog import,
+no per-tenant step, **no FixAll**. No data migration; ranges `System.Identity-[3.0.0,4.0)` stay satisfied.
+
+### Added
+
+- Methods 'Group-1/AddChildGroup-1', 'Group-1/RemoveChildGroup-1' added _(minor — purely additive methods)_
+- Methods 'Client-1/SetRoles-1', 'Client-1/AddRole-1', 'Client-1/RemoveRole-1', 'Client-1/ApplyOverlayUris-1', 'Client-1/CleanOverlayEntries-1' added _(minor — purely additive methods)_
+- Records 'ClientOverlayUrisResult-1', 'ClientOverlayCleanResult-1', 'ClientOverlayCleanEntry-1' and their attributes added _(minor — purely additive)_
+
 ## 3.2.0 - 2026-11-07
 
 _Required bump level: minor._

@@ -1,20 +1,21 @@
 using System.ComponentModel;
 using System.ComponentModel.DataAnnotations;
 using Asp.Versioning;
-using System.Security.Claims;
 using IdentityServerPersistence;
-using IdentityServerPersistence.Services.ScratchTenants;
 using IdentityServerPersistence.SystemStores;
 using Meshmakers.Octo.Communication.Contracts.DataTransferObjects;
 using Meshmakers.Octo.Communication.Contracts.DataTransferObjects.ApiErrors;
 using Meshmakers.Octo.ConstructionKit.Contracts;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
-using Meshmakers.Octo.Services.Infrastructure.Services;
 using Persistence.IdentityCkModel.Generated.System.Identity.v3;
 using Meshmakers.Octo.Backend.Authentication;
 using Meshmakers.Octo.Backend.IdentityServices.Authorization.RoleChange;
-using Meshmakers.Octo.Backend.IdentityServices.Services;
+using Microsoft.AspNetCore.Identity;
+using Meshmakers.Octo.Services.Methods.Facades;
+using Meshmakers.Octo.Services.Methods;
+using Meshmakers.Octo.Services.Contracts.DistributionEventHub.Methods;
+using Meshmakers.Octo.Backend.IdentityServices.Methods;
 
 namespace Meshmakers.Octo.Backend.IdentityServices.TenantApi.v1.Controllers;
 
@@ -27,11 +28,10 @@ namespace Meshmakers.Octo.Backend.IdentityServices.TenantApi.v1.Controllers;
 [ApiVersion(IdentityServiceConstants.ApiVersion1)]
 public class GroupsController(
     IGroupStore groupStore,
-    IScratchTenantGrantService scratchTenantGrantService,
-    IMultiTenancyResolverService multiTenancyResolverService,
     IRoleChangeGuard roleChangeGuard,
     IRoleChangeRefusals roleChangeRefusals,
-    IOctoClientStore clientStore) : ControllerBase
+    IIdentityMethodFacade methodFacade,
+    RoleManager<RtRole> roleManager) : ControllerBase
 {
     /// <summary>
     /// Runs the role change guard (AB#7927): self-grant, built-in roles the caller does not hold, last user administrator.
@@ -256,8 +256,12 @@ public class GroupsController(
     }
 
     /// <summary>
-    /// Replaces the role assignments for a group.
+    /// Replaces the role assignments for a group. Facade of the CK method <c>Group.SetRoles-1</c>.
     /// </summary>
+    /// <remarks>
+    /// The endpoint resolves the role ids to names (an unknown id is <c>404</c> and changes nothing) and calls
+    /// <c>Group.SetRoles</c> in-process: role change guard, write, one <c>Identity.Method</c> audit event.
+    /// </remarks>
     [HttpPut("{rtId}/roles")]
     [Authorize(IdentityServiceConstants.IdentityUserAdministrationWritePolicy)]
     [EndpointSummary("Replaces the role assignments for a group.")]
@@ -267,20 +271,25 @@ public class GroupsController(
         [Required] OctoObjectId rtId,
         [Required][FromBody] List<string> roleIds)
     {
-        var group = await groupStore.FindByIdAsync(rtId);
-        if (group == null)
+        // REST names the roles by id, the method by name: resolve every id first, so an unknown id changes nothing.
+        var roleIdsByName = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var roleId in roleIds)
         {
-            return NotFound();
+            var role = OctoObjectId.TryParse(roleId, out _) ? await roleManager.FindByIdAsync(roleId) : null;
+            if (role == null)
+            {
+                return NotFound(new NotFoundErrorDto($"Role with id '{roleId}' not found."));
+            }
+
+            roleIdsByName[role.Name ?? role.RtId.ToString()] = roleId;
         }
 
-        var refusal = await GuardAsync(new RoleGraphChange.GroupRoles(rtId.ToString(), roleIds), rtId.ToString());
-        if (refusal != null)
-        {
-            return refusal;
-        }
-
-        await groupStore.SetRoleIdsAsync(rtId, roleIds);
-        return Ok();
+        var response = await methodFacade.InvokeAsync(IdentityMethodFacade.GroupCkTypeId,
+            SystemIdentityCkIds.GroupSetRolesMethodId, rtId.ToString(),
+            new GroupSetRolesParameters { RoleNames = roleIdsByName.Keys.ToList() }, User, HttpContext.RequestAborted);
+        return await ToFacadeResultAsync(response, rtId, new CkMethodFacadeOptions()
+            .MapError(UserRoleMethodErrors.RoleNotFound, error => NotFound(new NotFoundErrorDto(
+                $"Role with id '{RoleIdOf(error, roleIdsByName)}' not found."))));
     }
 
     // ========================================
@@ -308,8 +317,9 @@ public class GroupsController(
     }
 
     /// <summary>
-    /// Adds a user to a group.
+    /// Adds a user to a group. Facade of the CK method <c>Group.AddMember-1</c> (member kind <c>User</c>).
     /// </summary>
+    /// <remarks>A user that does not exist is <c>404</c>; a user that already is a member is <c>200</c> without a change.</remarks>
     [HttpPut("{rtId}/members/users/{userId}")]
     [Authorize(IdentityServiceConstants.IdentityUserAdministrationWritePolicy)]
     [EndpointSummary("Adds a user to a group.")]
@@ -319,26 +329,19 @@ public class GroupsController(
         [Required] OctoObjectId rtId,
         [Required] string userId)
     {
-        var group = await groupStore.FindByIdAsync(rtId);
-        if (group == null)
-        {
-            return NotFound();
-        }
-
-        var refusal = await GuardAsync(new RoleGraphChange.MemberAdded(rtId.ToString(), GroupMemberKind.User, userId),
-            rtId.ToString());
-        if (refusal != null)
-        {
-            return refusal;
-        }
-
-        await groupStore.AddMemberUserAsync(rtId, userId);
-        return Ok();
+        var response = await methodFacade.InvokeAsync(IdentityMethodFacade.GroupCkTypeId,
+            SystemIdentityCkIds.GroupAddMemberMethodId, rtId.ToString(),
+            new GroupAddMemberParameters { MemberKind = RtGroupMemberKindEnum.User, MemberId = userId }, User,
+            HttpContext.RequestAborted);
+        return await ToFacadeResultAsync(response, rtId, new CkMethodFacadeOptions()
+            .MapError(GroupMethodErrors.MemberNotFound, _ => UserNotFound(userId))
+            .MapError(GroupMethodErrors.MemberAlreadyInGroup, _ => Ok()));
     }
 
     /// <summary>
-    /// Removes a user from a group.
+    /// Removes a user from a group. Facade of the CK method <c>Group.RemoveMember-1</c> (member kind <c>User</c>).
     /// </summary>
+    /// <remarks>A user that is not a member (or does not exist) is <c>200</c> without a change, as before.</remarks>
     [HttpDelete("{rtId}/members/users/{userId}")]
     [Authorize(IdentityServiceConstants.IdentityUserAdministrationWritePolicy)]
     [EndpointSummary("Removes a user from a group.")]
@@ -348,21 +351,13 @@ public class GroupsController(
         [Required] OctoObjectId rtId,
         [Required] string userId)
     {
-        var group = await groupStore.FindByIdAsync(rtId);
-        if (group == null)
-        {
-            return NotFound();
-        }
-
-        var refusal = await GuardAsync(new RoleGraphChange.MemberRemoved(rtId.ToString(), GroupMemberKind.User, userId),
-            rtId.ToString());
-        if (refusal != null)
-        {
-            return refusal;
-        }
-
-        await groupStore.RemoveMemberUserAsync(rtId, userId);
-        return Ok();
+        var response = await methodFacade.InvokeAsync(IdentityMethodFacade.GroupCkTypeId,
+            SystemIdentityCkIds.GroupRemoveMemberMethodId, rtId.ToString(),
+            new GroupRemoveMemberParameters { MemberKind = RtGroupMemberKindEnum.User, MemberId = userId }, User,
+            HttpContext.RequestAborted);
+        return await ToFacadeResultAsync(response, rtId, new CkMethodFacadeOptions()
+            .MapError(GroupMethodErrors.MemberNotInGroup, _ => Ok())
+            .MapError(GroupMethodErrors.MemberNotFound, _ => Ok()));
     }
 
     // ========================================
@@ -390,7 +385,8 @@ public class GroupsController(
     }
 
     /// <summary>
-    /// Adds a client to a group. The client is named by its OAuth client id or by its rtId (AB#8571).
+    /// Adds a client to a group. The client is named by its OAuth client id or by its rtId. Facade of the CK
+    /// method <c>Group.AddMember-1</c> (member kind <c>Client</c>).
     /// </summary>
     [HttpPut("{rtId}/members/clients/{clientId}")]
     [Authorize(IdentityServiceConstants.IdentityUserAdministrationWritePolicy)]
@@ -402,34 +398,24 @@ public class GroupsController(
         [Required] OctoObjectId rtId,
         [Required] string clientId)
     {
-        var group = await groupStore.FindByIdAsync(rtId);
-        if (group == null)
-        {
-            return NotFound();
-        }
-
-        var client = await GroupClientMemberResolver.ResolveAsync(clientStore,
-            multiTenancyResolverService.GetTenantRepository(), clientId);
-        if (client == null)
-        {
-            return ClientNotFound(clientId);
-        }
-
-        var clientRtId = client.RtId.ToString();
-        var refusal = await GuardAsync(new RoleGraphChange.MemberAdded(rtId.ToString(), GroupMemberKind.Client, clientRtId),
-            rtId.ToString());
-        if (refusal != null)
-        {
-            return refusal;
-        }
-
-        await groupStore.AddMemberClientAsync(rtId, clientRtId);
-        return Ok();
+        var response = await methodFacade.InvokeAsync(IdentityMethodFacade.GroupCkTypeId,
+            SystemIdentityCkIds.GroupAddMemberMethodId, rtId.ToString(),
+            new GroupAddMemberParameters { MemberKind = RtGroupMemberKindEnum.Client, MemberId = clientId }, User,
+            HttpContext.RequestAborted);
+        return await ToFacadeResultAsync(response, rtId, new CkMethodFacadeOptions()
+            .MapError(GroupMethodErrors.MemberNotFound, _ => ClientNotFound(clientId))
+            .MapError(GroupMethodErrors.MemberAlreadyInGroup, _ => Ok()));
     }
 
     /// <summary>
-    /// Removes a client from a group. The client is named by its OAuth client id or by its rtId (AB#8571).
+    /// Removes a client from a group. The client is named by its OAuth client id or by its rtId. Facade of the
+    /// CK method <c>Group.RemoveMember-1</c> (member kind <c>Client</c>).
     /// </summary>
+    /// <remarks>
+    /// An rtId of a client that no longer exists still removes its leftover membership edge, and an rtId that is no member
+    /// is <c>200</c> without a change, as before; a client id that names no client is <c>404</c>. The method records the
+    /// revocation of a scratch tenant's creator mirror before the membership goes.
+    /// </remarks>
     [HttpDelete("{rtId}/members/clients/{clientId}")]
     [Authorize(IdentityServiceConstants.IdentityUserAdministrationWritePolicy)]
     [EndpointSummary("Removes a client from a group.")]
@@ -440,53 +426,23 @@ public class GroupsController(
         [Required] OctoObjectId rtId,
         [Required] string clientId)
     {
-        var group = await groupStore.FindByIdAsync(rtId);
-        if (group == null)
-        {
-            return NotFound();
-        }
-
-        // An rtId of a client that no longer exists still removes its leftover membership edge, as before AB#8571.
-        var client = await GroupClientMemberResolver.ResolveAsync(clientStore,
-            multiTenancyResolverService.GetTenantRepository(), clientId);
-        OctoObjectId clientRtId;
-        if (client != null)
-        {
-            clientRtId = client.RtId;
-        }
-        else if (!OctoObjectId.TryParse(clientId, out clientRtId))
-        {
-            return ClientNotFound(clientId);
-        }
-
-        // No guard call: removing a client gives nothing to anybody and clients do not count as administrators (AB#7927).
-        // AB#7192: taking the creator's mirror out of TenantOwners of a scratch tenant is a revoke - persisted, so the
-        // tenant setup does not grant it again. The revoke is recorded BEFORE the membership is removed: a failure
-        // between the two steps then leaves a revoked marker with the membership still in place (harmless, the caller
-        // sees the error and repeats), never a removed membership that the next setup grants again. A no-op for every
-        // other removal.
-        await scratchTenantGrantService.RecordRevocationAsync(multiTenancyResolverService.GetTenantId(), rtId,
-            clientRtId, GetCallerLabel());
-
-        await groupStore.RemoveMemberClientAsync(rtId, clientRtId.ToString());
-        return Ok();
+        var response = await methodFacade.InvokeAsync(IdentityMethodFacade.GroupCkTypeId,
+            SystemIdentityCkIds.GroupRemoveMemberMethodId, rtId.ToString(),
+            new GroupRemoveMemberParameters { MemberKind = RtGroupMemberKindEnum.Client, MemberId = clientId }, User,
+            HttpContext.RequestAborted);
+        return await ToFacadeResultAsync(response, rtId, new CkMethodFacadeOptions()
+            .MapError(GroupMethodErrors.MemberNotInGroup, _ => Ok())
+            // an rtId that names no client and no member: nothing to remove, as before; anything else names no client
+            .MapError(GroupMethodErrors.MemberNotFound,
+                error => OctoObjectId.TryParse(clientId.Trim(), out _) ? Ok() : ClientNotFound(clientId)));
     }
 
     private NotFoundObjectResult ClientNotFound(string clientId) =>
         NotFound(new NotFoundErrorDto(
             $"Client '{clientId}' not found. Name the client by its client id or by its rtId."));
 
-    private string GetCallerLabel()
-    {
-        // A client-credentials token has no user: name the client. Both the unmapped and the mapped claim names are
-        // checked because the JWT handler may remap them.
-        return User.FindFirstValue("preferred_username")
-               ?? User.FindFirstValue(ClaimTypes.Name)
-               ?? User.FindFirstValue("client_id")
-               ?? User.FindFirstValue("sub")
-               ?? User.FindFirstValue(ClaimTypes.NameIdentifier)
-               ?? "unknown";
-    }
+    private NotFoundObjectResult UserNotFound(string userId) =>
+        NotFound(new NotFoundErrorDto($"User '{userId}' not found."));
 
     // ========================================
     // Nested group members
@@ -513,8 +469,13 @@ public class GroupsController(
     }
 
     /// <summary>
-    /// Adds a nested group to a group. Rejects if it would create a cycle.
+    /// Adds a nested group to a group. Rejects if it would create a cycle. Facade of the CK method
+    /// <c>Group.AddChildGroup-1</c>.
     /// </summary>
+    /// <remarks>
+    /// A group in itself and a cycle are <c>400</c> with the earlier messages (<c>GROUP_CYCLE</c>); a child group that is
+    /// already a member is <c>200</c> without a change.
+    /// </remarks>
     [HttpPut("{rtId}/members/groups/{childGroupId}")]
     [Authorize(IdentityServiceConstants.IdentityUserAdministrationWritePolicy)]
     [EndpointSummary("Adds a nested group. Rejects if it would create a circular reference.")]
@@ -525,45 +486,23 @@ public class GroupsController(
         [Required] OctoObjectId rtId,
         [Required] string childGroupId)
     {
-        var group = await groupStore.FindByIdAsync(rtId);
-        if (group == null)
-        {
-            return NotFound();
-        }
-
-        var childGroup = await groupStore.FindByIdAsync(new OctoObjectId(childGroupId));
-        if (childGroup == null)
-        {
-            return NotFound("Child group not found.");
-        }
-
-        // Prevent self-reference
-        if (rtId == childGroup.RtId)
-        {
-            return BadRequest("A group cannot be a member of itself.");
-        }
-
-        // Circular reference check: verify that the parent (rtId) is not reachable
-        // from the child group via ChildGroup associations
-        if (await WouldCreateCycleAsync(rtId, childGroup.RtId))
-        {
-            return BadRequest("Adding this group would create a circular reference.");
-        }
-
-        var refusal = await GuardAsync(new RoleGraphChange.MemberAdded(rtId.ToString(), GroupMemberKind.Group,
-            childGroup.RtId.ToString()), rtId.ToString());
-        if (refusal != null)
-        {
-            return refusal;
-        }
-
-        await groupStore.AddMemberGroupAsync(rtId, childGroupId);
-        return Ok();
+        var response = await methodFacade.InvokeAsync(IdentityMethodFacade.GroupCkTypeId,
+            SystemIdentityCkIds.GroupAddChildGroupMethodId, rtId.ToString(),
+            new GroupAddChildGroupParameters { ChildGroupId = childGroupId }, User, HttpContext.RequestAborted);
+        return await ToFacadeResultAsync(response, rtId, new CkMethodFacadeOptions()
+            .MapError(GroupChildGroupErrors.ChildGroupNotFound, _ => NotFound(ChildGroupNotFoundMessage))
+            .MapError(GroupChildGroupErrors.ChildGroupAlreadyInGroup, _ => Ok())
+            .MapError(GroupChildGroupErrors.GroupCycle, error =>
+                BadRequest(error.Parameters.GetValueOrDefault(GroupChildGroupErrors.CycleKindParameter) ==
+                           GroupChildGroupErrors.CycleSelf
+                    ? "A group cannot be a member of itself."
+                    : "Adding this group would create a circular reference.")));
     }
 
     /// <summary>
-    /// Removes a nested group from a group.
+    /// Removes a nested group from a group. Facade of the CK method <c>Group.RemoveChildGroup-1</c>.
     /// </summary>
+    /// <remarks>A child group that is not a member is <c>200</c> without a change, as before.</remarks>
     [HttpDelete("{rtId}/members/groups/{childGroupId}")]
     [Authorize(IdentityServiceConstants.IdentityUserAdministrationWritePolicy)]
     [EndpointSummary("Removes a nested group from a group.")]
@@ -573,64 +512,42 @@ public class GroupsController(
         [Required] OctoObjectId rtId,
         [Required] string childGroupId)
     {
-        var group = await groupStore.FindByIdAsync(rtId);
-        if (group == null)
-        {
-            return NotFound();
-        }
-
-        var refusal = await GuardAsync(new RoleGraphChange.MemberRemoved(rtId.ToString(), GroupMemberKind.Group,
-            childGroupId), rtId.ToString());
-        if (refusal != null)
-        {
-            return refusal;
-        }
-
-        await groupStore.RemoveMemberGroupAsync(rtId, childGroupId);
-        return Ok();
+        var response = await methodFacade.InvokeAsync(IdentityMethodFacade.GroupCkTypeId,
+            SystemIdentityCkIds.GroupRemoveChildGroupMethodId, rtId.ToString(),
+            new GroupRemoveChildGroupParameters { ChildGroupId = childGroupId }, User, HttpContext.RequestAborted);
+        return await ToFacadeResultAsync(response, rtId, new CkMethodFacadeOptions()
+            .MapError(GroupChildGroupErrors.ChildGroupNotFound, _ => NotFound(ChildGroupNotFoundMessage))
+            .MapError(GroupChildGroupErrors.ChildGroupNotInGroup, _ => Ok()));
     }
+
+    private const string ChildGroupNotFoundMessage = "Child group not found.";
 
     /// <summary>
-    /// Checks if adding childGroupId as a member of parentId would create a cycle.
-    /// Uses DFS via ChildGroup associations from the child to see if the parent is reachable.
+    /// The REST answer of a group method: <c>200</c> on success, the audited 403/409 problem answer of the role change guard
+    /// (WARN log and <c>Identity.RoleChangeRefused</c> record) for a guard refusal, a missing group as an empty
+    /// <c>404</c>, the endpoint's own mappings, else the facade defaults (an unexpected failure is <c>500</c>
+    /// <c>METHOD_HANDLER_FAILED</c> without exception text).
     /// </summary>
-    private async Task<bool> WouldCreateCycleAsync(OctoObjectId parentId, OctoObjectId childGroupId)
+    private async Task<IActionResult> ToFacadeResultAsync(CkMethodResponse response, OctoObjectId groupRtId,
+        CkMethodFacadeOptions options)
     {
-        var visited = new HashSet<string>();
-        var stack = new Stack<string>();
-
-        // Start from the child's nested groups
-        var childGroupMemberIds = await groupStore.GetMemberGroupIdsAsync(childGroupId);
-        foreach (var id in childGroupMemberIds)
+        if (RoleChangeProblems.RefusalOf(response) is { } decision)
         {
-            stack.Push(id);
+            return await roleChangeRefusals.RefuseAsync(HttpContext, RoleChangeCaller.FromPrincipal(User), decision,
+                $"group {groupRtId}");
         }
 
-        var parentIdString = parentId.ToString();
-
-        while (stack.Count > 0)
-        {
-            var currentId = stack.Pop();
-
-            if (currentId == parentIdString)
-            {
-                return true;
-            }
-
-            if (!visited.Add(currentId))
-            {
-                continue;
-            }
-
-            var nestedGroupIds = await groupStore.GetMemberGroupIdsAsync(new OctoObjectId(currentId));
-            foreach (var nestedId in nestedGroupIds)
-            {
-                stack.Push(nestedId);
-            }
-        }
-
-        return false;
+        return response.ToActionResult(options
+            .MapSuccess(_ => Ok())
+            .MapError(CkMethodErrorCodes.MethodTargetNotFound, _ => NotFound()));
     }
+
+    /// <summary>The role id of a <c>ROLE_NOT_FOUND</c> answer of <c>Group.SetRoles</c> (the method names the role).</summary>
+    private static string RoleIdOf(CkMethodError error, IReadOnlyDictionary<string, string> roleIdsByName) =>
+        error.Parameters.TryGetValue(UserRoleMethodErrors.RoleNameParameter, out var name) &&
+        roleIdsByName.TryGetValue(name, out var id)
+            ? id
+            : name ?? string.Empty;
 
     private async Task<GroupDto> MapToDtoAsync(RtGroup group)
     {

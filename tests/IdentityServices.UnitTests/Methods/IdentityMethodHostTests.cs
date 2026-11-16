@@ -50,6 +50,10 @@ public class IdentityMethodHostTests
             SystemIdentityCkIds.UserMergeMethodId,
             SystemIdentityCkIds.GroupAddMemberMethodId,
             SystemIdentityCkIds.GroupRemoveMemberMethodId, SystemIdentityCkIds.GroupSetRolesMethodId,
+            SystemIdentityCkIds.GroupAddChildGroupMethodId, SystemIdentityCkIds.GroupRemoveChildGroupMethodId,
+            SystemIdentityCkIds.ClientSetRolesMethodId, SystemIdentityCkIds.ClientAddRoleMethodId,
+            SystemIdentityCkIds.ClientRemoveRoleMethodId, SystemIdentityCkIds.ClientApplyOverlayUrisMethodId,
+            SystemIdentityCkIds.ClientCleanOverlayEntriesMethodId,
             SystemIdentityCkIds.DataPermissionGrantToRoleMethodId, SystemIdentityCkIds.DataPermissionRevokeFromRoleMethodId);
         selected.Should().OnlyContain(h => !h.CarriesSecret);
     }

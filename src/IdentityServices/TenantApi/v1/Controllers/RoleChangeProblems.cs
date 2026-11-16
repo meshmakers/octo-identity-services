@@ -1,4 +1,6 @@
 using Meshmakers.Octo.Backend.IdentityServices.Authorization.RoleChange;
+using Meshmakers.Octo.Services.Contracts.DistributionEventHub.Methods;
+using Meshmakers.Octo.Services.Methods;
 using Microsoft.AspNetCore.Mvc;
 
 namespace Meshmakers.Octo.Backend.IdentityServices.TenantApi.v1.Controllers;
@@ -34,5 +36,27 @@ public static class RoleChangeProblems
             StatusCode = status,
             ContentTypes = { "application/problem+json" }
         };
+    }
+
+    /// <summary>
+    ///     The decision of the role change guard when a REST facade's method refused the call because of it
+    ///     (<c>METHOD_FORBIDDEN</c> with a guard <c>reason</c>), else <c>null</c>. Other refusals (<c>role-required</c>,
+    ///     <c>data-permission</c>) are not guard decisions. The facade turns the decision back into the REST answer
+    ///     (<see cref="ToResult" />, with the WARN log and the <see cref="AuditEventName" /> record).
+    /// </summary>
+    public static RoleChangeDecision? RefusalOf(CkMethodResponse response)
+    {
+        if (response.Success || response.Error is not { Code: CkMethodErrorCodes.MethodForbidden } error ||
+            !error.Parameters.TryGetValue("reason", out var reason) ||
+            reason is not (RoleChangeReasons.SelfGrant or RoleChangeReasons.RoleNotHeld or
+                RoleChangeReasons.LastAdministrator))
+        {
+            return null;
+        }
+
+        var roleNames = error.Parameters.TryGetValue("roleNames", out var names)
+            ? names.Split(',', StringSplitOptions.RemoveEmptyEntries)
+            : [];
+        return new RoleChangeDecision(reason, roleNames);
     }
 }

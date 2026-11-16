@@ -46,8 +46,11 @@ public class ClientsControllerRoleGuardTests
                 Arg.Any<IReadOnlyCollection<string>>(), Arg.Any<CancellationToken>())
             .Returns(RoleChangeDecision.Allowed);
 
+        // The endpoints are facades of Client.SetRoles / Client.AddRole: the real handlers run behind them.
+        var methods = new HandlerBackedMethodFacade(_clientStore, _clientRoleStore, _roleManager, _guard);
+        methods.Know(_client);
         _sut = new ClientsController(_clientStore, Substitute.For<IDistributionEventHubService>(), _clientRoleStore,
-            Substitute.For<IClientImpersonationStore>(), _roleManager, _guard, Substitute.For<IRoleChangeRefusals>())
+            Substitute.For<IClientImpersonationStore>(), _roleManager, Substitute.For<IRoleChangeRefusals>(), methods)
         {
             ControllerContext = new ControllerContext
             {
@@ -107,6 +110,6 @@ public class ClientsControllerRoleGuardTests
 
         result.Should().BeOfType<OkResult>();
         await _guard.DidNotReceiveWithAnyArgs().EvaluateClientGrantAsync(default!, default!, default!, TestContext.Current.CancellationToken);
-        await _clientRoleStore.DidNotReceiveWithAnyArgs().AddRoleAsync(default, default!);
+        await _clientRoleStore.DidNotReceiveWithAnyArgs().ApplyRoleChangesAsync(default, default!, default!);
     }
 }

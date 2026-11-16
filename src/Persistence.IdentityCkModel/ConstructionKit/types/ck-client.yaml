@@ -212,3 +212,80 @@ types:
         authorization:
           roles: [ TenantManagement, UserManagement, SecretManagement ]
           dataAccess: Write
+      # 3.3.0: client roles and overlay URIs. Roles follow the REST parity (ClientsController:
+      # IdentityTenantAdministrationWritePolicy = TenantManagement or UserManagement). Granting a built-in role the caller does
+      # not hold, or any role to the caller's own client, is refused by the role change guard (METHOD_FORBIDDEN, reason
+      # role-not-held / self-grant), exactly as on the user role methods.
+      - methodId: SetRoles-1
+        description: "Replaces the directly assigned roles of the client by the given role names; only the difference is written."
+        parameters:
+          - { name: roleNames, valueType: StringArray, description: "The complete list of role names." }
+        errors:
+          - { code: ROLE_NOT_FOUND, description: "A role name does not exist." }
+        authorization:
+          roles: [ TenantManagement, UserManagement ]
+          dataAccess: Write
+        execution:
+          timeoutSeconds: 30
+          idempotent: true
+      - methodId: AddRole-1
+        description: "Assigns a role to the client. A role the client already holds directly changes nothing."
+        parameters:
+          - { name: roleName, valueType: String }
+        errors:
+          - { code: ROLE_NOT_FOUND, description: "The role does not exist." }
+        authorization:
+          roles: [ TenantManagement, UserManagement ]
+          dataAccess: Write
+        execution:
+          timeoutSeconds: 30
+          idempotent: true
+      - methodId: RemoveRole-1
+        description: "Removes a directly assigned role from the client. A role the client does not hold changes nothing."
+        parameters:
+          - { name: roleName, valueType: String }
+        errors:
+          - { code: ROLE_NOT_FOUND, description: "The role does not exist." }
+        authorization:
+          roles: [ TenantManagement, UserManagement ]
+          dataAccess: Write
+        execution:
+          timeoutSeconds: 30
+          idempotent: true
+      - methodId: ApplyOverlayUris-1
+        description: "Appends overlay URIs (source overlay:<overlayName>) to the redirect, post-logout redirect and CORS lists of the client; a URI already in a list (any source) is skipped."
+        parameters:
+          - { name: overlayName, valueType: String, description: "Overlay name: letters, digits, '.', '-' and '_'." }
+          - { name: redirectUris, valueType: StringArray, isOptional: true }
+          - { name: postLogoutRedirectUris, valueType: StringArray, isOptional: true }
+          - { name: allowedCorsOrigins, valueType: StringArray, isOptional: true }
+        result:
+          valueType: Record
+          valueCkRecordId: ${this}/ClientOverlayUrisResult
+        errors:
+          - { code: INVALID_OVERLAY_NAME, description: "The overlay name contains a character other than letters, digits, '.', '-' and '_'." }
+          - { code: NO_OVERLAY_URIS, description: "None of the three lists contains a non-blank URI." }
+          - { code: CONCURRENT_CHANGE, description: "The client was changed concurrently by other requests; retry." }
+        authorization:
+          roles: [ TenantManagement, UserManagement ]
+          dataAccess: Write
+        execution:
+          timeoutSeconds: 30
+          idempotent: true
+      - methodId: CleanOverlayEntries-1
+        kind: Static
+        description: "Removes the overlay URI entries (all overlay:* sources, or only overlay:<overlayName>) from every client of the tenant."
+        parameters:
+          - { name: overlayName, valueType: String, isOptional: true, description: "Without it every overlay:* entry is removed." }
+        result:
+          valueType: Record
+          valueCkRecordId: ${this}/ClientOverlayCleanResult
+        errors:
+          - { code: INVALID_OVERLAY_NAME, description: "The overlay name contains a character other than letters, digits, '.', '-' and '_'." }
+          - { code: CONCURRENT_CHANGE, description: "A client was changed concurrently by other requests; retry." }
+        authorization:
+          roles: [ TenantManagement, UserManagement ]
+          dataAccess: Write
+        execution:
+          timeoutSeconds: 60
+          idempotent: true

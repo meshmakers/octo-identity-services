@@ -51,6 +51,12 @@ internal sealed class IdentityMethodFacade(
     /// <summary>CK type id of the identity user (the declaring type of the <c>User.*</c> methods).</summary>
     public const string UserCkTypeId = "System.Identity/User";
 
+    /// <summary>CK type id of the identity group (the declaring type of the <c>Group.*</c> methods).</summary>
+    public const string GroupCkTypeId = "System.Identity/Group";
+
+    /// <summary>CK type id of the OAuth client (the declaring type of the <c>Client.*</c> methods).</summary>
+    public const string ClientCkTypeId = "System.Identity/Client";
+
     public Task<CkMethodResponse> InvokeAsync<TParameters>(string ckTypeId, string methodId, string? targetRtId,
         TParameters parameters, ClaimsPrincipal user, CancellationToken cancellationToken) where TParameters : class =>
         DispatchAsync(ckTypeId, methodId, targetRtId, parameters, CkMethodPrincipal.FromClaimsPrincipal(user),

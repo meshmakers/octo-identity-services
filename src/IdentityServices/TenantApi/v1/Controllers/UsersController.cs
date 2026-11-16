@@ -772,7 +772,7 @@ public class UsersController : ControllerBase
             new UserMergeParameters { SourceUserName = mergeRequest.SourceUserName }, User, HttpContext.RequestAborted);
 
         // AB#7914: the source user is deleted at the end; that must not remove the last user administrator.
-        if (RoleChangeRefusal(response) is { } decision)
+        if (RoleChangeProblems.RefusalOf(response) is { } decision)
         {
             var sourceUser = await _userManager.FindByNameAsync(mergeRequest.SourceUserName.Trim());
             if (sourceUser != null)
@@ -850,7 +850,7 @@ public class UsersController : ControllerBase
     private async Task<IActionResult> ToRoleFacadeResultAsync(CkMethodResponse response, RtUser user,
         CkMethodFacadeOptions options)
     {
-        if (RoleChangeRefusal(response) is { } decision)
+        if (RoleChangeProblems.RefusalOf(response) is { } decision)
         {
             return await RefuseRoleChangeAsync(user, RoleChangeCaller.FromPrincipal(User), decision);
         }
@@ -859,27 +859,6 @@ public class UsersController : ControllerBase
             .MapSuccess(_ => Ok())
             .MapError(CkMethodErrorCodes.MethodTargetNotFound,
                 _ => NotFound(new NotFoundErrorDto($"User with name '{user.UserName}' not found."))));
-    }
-
-    /// <summary>
-    ///     The decision of the role change guard when the method refused the call because of it (<c>METHOD_FORBIDDEN</c>
-    ///     with a guard <c>reason</c>), else <c>null</c>. Other refusals (<c>role-required</c>, <c>data-permission</c>) are
-    ///     not guard decisions.
-    /// </summary>
-    private static RoleChangeDecision? RoleChangeRefusal(CkMethodResponse response)
-    {
-        if (response.Success || response.Error is not { Code: CkMethodErrorCodes.MethodForbidden } error ||
-            !error.Parameters.TryGetValue("reason", out var reason) ||
-            reason is not (RoleChangeReasons.SelfGrant or RoleChangeReasons.RoleNotHeld or
-                RoleChangeReasons.LastAdministrator))
-        {
-            return null;
-        }
-
-        var roleNames = error.Parameters.TryGetValue("roleNames", out var names)
-            ? names.Split(',', StringSplitOptions.RemoveEmptyEntries)
-            : [];
-        return new RoleChangeDecision(reason, roleNames);
     }
 
     /// <summary>The role id of a <c>ROLE_NOT_FOUND</c> answer of <c>User.SetRoles</c> (the method names the role).</summary>
