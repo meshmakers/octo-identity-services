@@ -107,7 +107,7 @@ them may still provision while another drops the rows. The tracking row is uniqu
   `DuplicateKeyException`, or a bulk write error with a duplicate key behind an `OperationFailedException`;
   `IsDuplicateKey` checks the whole exception chain). The pair counts as already present. When this run had
   inserted the child mirror and both replicas inserted one, the duplicate is erased by the rule the convergence
-  uses (blueprint-range record, else the first one read), so a reconciliation pass running at the same time
+  uses (blueprint-range record, else the lowest rtId; never the read order), so a reconciliation pass running at the same time
   keeps the same record; when the other replica replaced this run's insert, that is the one mirror and stays.
 - *Row dropped by another replica:* the version-checked bump of a tracked pair finds the row gone
   (`EntityNotFoundException`). That is a debug line, and the row is not written again: the tenant is being

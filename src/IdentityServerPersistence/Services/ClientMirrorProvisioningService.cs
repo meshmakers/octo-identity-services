@@ -721,7 +721,8 @@ public class ClientMirrorProvisioningService(
     ///     Called when another writer recorded the tracking row of a pair this provisioning run had just written. When this
     ///     run <b>inserted</b> a mirror and the child now holds more than one client of that id (both writers inserted),
     ///     the duplicates are erased by the same rule <see cref="ConvergeChildMirrorAsync" /> uses (the blueprint-range
-    ///     record, else the first one read), so this run and a concurrent reconciliation pass keep the same record and
+    ///     record, else the lowest rtId; <see cref="SelectCanonicalMirror" />), so this run and a concurrent
+    ///     reconciliation pass keep the same record and
     ///     never erase both. When the other writer replaced this run's insert, that insert is the one mirror and stays. A
     ///     replaced or unchanged mirror needs nothing.
     /// </summary>
@@ -739,7 +740,7 @@ public class ClientMirrorProvisioningService(
             return;
         }
 
-        var canonical = clients.FirstOrDefault(IsBlueprintRtId) ?? clients[0];
+        var canonical = SelectCanonicalMirror(clients);
         foreach (var duplicate in clients.Where(c => !c.RtId.Equals(canonical.RtId)))
         {
             try
@@ -1502,7 +1503,7 @@ public class ClientMirrorProvisioningService(
     ///     The one write path of a child-tenant mirror (sync, start-up provisioning, reconciliation; AB#8019): read the
     ///     child's clients of that id, then the parent client (<paramref name="readParent" />), derive the mirror
     ///     (<see cref="CreateMirrorClient" /> + <see cref="ReconcileOwnSecret" />) and write it. No client yet: insert.
-    ///     Otherwise the canonical record (blueprint rtId range, else the first) is kept, duplicates are erased and the
+    ///     Otherwise the canonical record (<see cref="SelectCanonicalMirror" />) is kept, duplicates are erased and the
     ///     canonical one is replaced <b>with the version that was read</b>; a concurrent writer makes the replace fail,
     ///     and the read-derive-write runs again (at most <see cref="MaxMirrorWriteAttempts" /> times, then the
     ///     <see cref="RtVersionConflictException" /> reaches the caller). Every writer must use this path or another
@@ -1534,12 +1535,12 @@ public class ClientMirrorProvisioningService(
 
             // Multiple entries with the same OAuth ClientId are an inconsistent state — the
             // protocol client lookup returns the first match and the other(s) become ghosts
-            // that fight back at every login attempt. Begdemo's 2026-06-19 stale staging/prod-URI
-            // copy alongside the freshly-applied blueprint client at 660…30 was the trigger to
-            // harden this path. The blueprint-managed entity (stable rtId 660…xx) is the canonical
-            // one — keep it and erase the rest. When no stable-rtId entry is found, fall back to
-            // the first match (preserves the original upsert semantics).
-            var canonical = existingItems.FirstOrDefault(IsBlueprintRtId) ?? existingItems[0];
+            // that fight back at every login attempt (seen as a stale copy with old redirect URIs
+            // beside the freshly-applied blueprint client). The blueprint-managed entity (stable
+            // rtId 660…xx) is the canonical one — keep it and erase the rest. Without a stable-rtId
+            // entry the lowest rtId (the oldest) is kept, never the first one read: an unsorted read
+            // has no order, and two replicas must keep the same record.
+            var canonical = SelectCanonicalMirror(existingItems);
             foreach (var duplicate in existingItems.Where(d => !d.RtId.Equals(canonical.RtId)))
             {
                 logger.LogWarning(
@@ -1653,6 +1654,17 @@ public class ClientMirrorProvisioningService(
         }
 
         return copy;
+    }
+
+    /// <summary>
+    ///     The record that survives when a child holds several clients of one id: the blueprint-managed one (stable rtId
+    ///     range), else the lowest rtId (the oldest). Chosen by the ids only, never by the read order (an unsorted MongoDB
+    ///     read has none), so every writer and every replica keeps the same record and none erases the one another keeps.
+    /// </summary>
+    internal static RtClient SelectCanonicalMirror(IReadOnlyList<RtClient> clients)
+    {
+        var blueprint = clients.Where(IsBlueprintRtId).ToList();
+        return (blueprint.Count > 0 ? blueprint : clients).MinBy(c => c.RtId)!;
     }
 
     private static bool IsBlueprintRtId(RtClient entity)

@@ -232,7 +232,8 @@ public class ClientMirrorProvisioningServiceTests
 
         result.Should().Be(new ClientMirrorProvisioningResult(1, 0, 1),
             "the other replica recorded the pair; this run is no failure and provisioned nothing new");
-        // The duplicate goes by the rule of the convergence (first record read), so a reconciliation pass agrees.
+        // The duplicate goes by the rule of the convergence (lowest rtId; the other replica's mirror is older), so a
+        // reconciliation pass agrees.
         await _childRepo.Received(1).DeleteOneRtEntityByRtIdAsync<RtClient>(
             _childSession, ours()!.RtId, Arg.Any<DeleteOptions>());
         await _childRepo.DidNotReceive().DeleteOneRtEntityByRtIdAsync<RtClient>(
@@ -280,6 +281,18 @@ public class ClientMirrorProvisioningServiceTests
 
         result.Should().Be(new ClientMirrorProvisioningResult(1, 0, 1));
         await _parentRepo.DidNotReceiveWithAnyArgs().InsertOneRtEntityAsync(default!, default(RtClientMirror)!);
+    }
+
+    [Fact]
+    public void SelectCanonicalMirror_DoesNotDependOnTheReadOrder()
+    {
+        var older = new RtClientBuilder().WithClientId("ci-deploy").Build();
+        var newer = new RtClientBuilder().WithClientId("ci-deploy").Build();
+        var expected = older.RtId.CompareTo(newer.RtId) < 0 ? older : newer;
+
+        // Two replicas may read the duplicates in different orders; both must keep the same record.
+        ClientMirrorProvisioningService.SelectCanonicalMirror([older, newer]).RtId.Should().Be(expected.RtId);
+        ClientMirrorProvisioningService.SelectCanonicalMirror([newer, older]).RtId.Should().Be(expected.RtId);
     }
 
     [Fact]
