@@ -1,6 +1,6 @@
 # Cookie-Bloat Fix: Server-Side Sessions + MongoDB DataProtection Key Ring
 
-> **Historical plan — superseded by AB#4989.** The Duende-based implementation described below was replaced by OpenIddict + OctoTicketStore; code samples no longer compile.
+> **Historical plan — superseded by the OpenIddict migration (`docs/CONCEPT-OPENIDDICT-MIGRATION.md`).** The Duende-based implementation described below was replaced by OpenIddict + OctoTicketStore; code samples no longer compile.
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
