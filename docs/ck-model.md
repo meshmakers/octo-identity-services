@@ -121,8 +121,8 @@ Rules behind the shape (do not change them without reading this):
 - **`replacesGenericCreate` only on `User.CreateUser-1` (3.0.0).** Group, Client and DataPermission are seeded by
   `System.Identity.Bootstrap` (the flag would make the engine refuse every new tenant), so they do not carry it. On `User` the flag is a
   **MAJOR** change of the model (row M16 of `octo-construction-kit-engine/docs/ck-semver-rules.md`: a new method with the flag on an
-  existing type, decision 2026-10-19) and shipped with System.Identity 3.0.0; until 2.30.0 the engine stood in for it with a runtime rule
- , which was removed. No blueprint seeds a User.
+  existing type, decision 2026-10-19) and shipped with System.Identity 3.0.0; until 2.30.0 the engine stood in for it with a runtime rule,
+ which was removed. No blueprint seeds a User.
 - **No `LAST_ADMIN_PROTECTED`**: the REST API has no last-admin rule (refuses it with `METHOD_FORBIDDEN` / `last-administrator`). `User.DisableTwoFactor-1` followed in 2.30.0 (section below).
 - `compatibility.acknowledge` of 2.28.0 is gone (an acknowledgement is valid for one release, OCTO-CK204). `octo-ckc ValidateVersion`
   against the published 2.28.0: **MINOR** (15 additions, no Major row).

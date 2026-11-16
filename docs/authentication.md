@@ -934,7 +934,7 @@ effective roles(shadow user U in tenant B) =
 ```
 
 The name chain unwinds the `xt_` prefixes (`CrossTenantShadowUserName.GetSourceChain`):
-`xt_karlplus_xt_meshmakers_gerald` → `(karlplus, xt_meshmakers_gerald)`, `(meshmakers, gerald)`.
+`xt_tenant-c_xt_meshmakers_gerald` → `(tenant-c, xt_meshmakers_gerald)`, `(meshmakers, gerald)`.
 Every tier is the same person — the rule already used by the token exchange and
 `allowed_tenants` — so a mapping an admin created for the home identity also applies when the
 person arrives through the parent's shadow user.
@@ -985,7 +985,7 @@ Consequences:
 
 **One shadow user per person.** The source identity depends on the login path: the password login
 unwinds to the home tenant (`xt_meshmakers_gerald`), a tenant switch or auto-login starts at the
-parent's shadow user (`xt_karlplus_xt_meshmakers_gerald`). `FindCrossTenantUserAsync` returns the
+parent's shadow user (`xt_tenant-c_xt_meshmakers_gerald`). `FindCrossTenantUserAsync` returns the
 exactly named shadow user if it exists; otherwise any shadow user whose chain unwinds to the same
 home identity (case-insensitive) and that has **no password** — shortest chain first. Only when
 none exists is a new one created. Legacy duplicates keep working unchanged: each login path still
@@ -1037,8 +1037,8 @@ that fails is a skip reason:
   its tenant switch), and every mapping of its chain when it has neither a nearest-tier nor a role-granting mapping (then
   that mapping is its only explicit provisioning). A deeper tier of a longer kept chain adds nothing to that user (no role,
   and its own mapping already provisions it), so it does not protect the mapping: in test-2 a demo tenant,
-  `accountingmanagement/xt_octosystem_<n>` belongs to the candidate `xt_accountingmanagement_xt_octosystem_<n>`, not to the
-  kept `xt_karlplus_xt_accountingmanagement_xt_octosystem_<n>` with its own mapping `karlplus/…` (DryRun 2);
+  `tenant-b/xt_octosystem_<n>` belongs to the candidate `xt_tenant-b_xt_octosystem_<n>`, not to the
+  kept `xt_tenant-c_xt_tenant-b_xt_octosystem_<n>` with its own mapping `tenant-c/…` (DryRun 2);
 - `chain-source` — no mapping in any tenant uses the user as its source (source tenant = this tenant, source user name =
   the user name or source user id = its rtId);
 - `direct-use:<kind>` — no password, two-factor, external login, user token or claim.

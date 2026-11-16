@@ -120,7 +120,7 @@ back to the primary operation (client update, client delete, tenant delete).
 The same holds for the secret writes of `Client.AddSecret` / `Client.RemoveSecret`
 and the REST secret endpoints (sync after commit, error logged).
 
-**Periodic mirror reconciliation.** Before it, only the next identity start
+**Periodic mirror reconciliation (Security).** Before it, only the next identity start
 re-converged a mirror that a failed sync left behind, so a secret removed in the parent stayed valid
 in the child tenants until a restart. A compensation job (decision OD-6: no outbox) closes the window:
 

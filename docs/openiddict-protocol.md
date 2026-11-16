@@ -92,7 +92,7 @@ becomes load-bearing again. No cache, no invalidation event — entity caching i
   `Helpers/TestTenantLifecycleStore` over the real store (`CustomWebApplicationFactory.TenantLifecycleStore`) to arrange
   generations; the test system tenant has no record, so the golden token shapes are unchanged. Details:
   `docs/authentication.md` § Tenant Generation.
-- **Grants of an earlier tenant:** token exchange and on-behalf-of check the `tenant_gen` of the
+- **Grants of an earlier tenant (Security):** token exchange and on-behalf-of check the `tenant_gen` of the
   `subject_token`, `TokenEndpointController` checks the private claim `octo_grant_tenant_gen` that refresh tokens,
   authorization codes and device codes store at issuance (`StampAuthorizationCode` / `StampRefreshToken` /
   `StampDeviceCode` in `OctoTenantGenerationClaimHandler`, no destination), each against the current generation of the

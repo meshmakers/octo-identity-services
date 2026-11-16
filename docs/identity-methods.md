@@ -53,7 +53,7 @@ The identity service hosts CK methods as a remote handler (bus transport, SDK `M
   policy failure = `PASSWORD_POLICY_VIOLATION` with one detail per failed rule, code only e.g. `PasswordTooShort`, never a value), counter reset, then
   `IUserCredentialChangeService.OnPasswordChangedAsync(..., PasswordChangePath.MethodChangePassword, ...)` (security stamp, revocation of all refresh
   tokens and authorizations of the user in this tenant, log line). A failing revocation throws, the caller gets `METHOD_HANDLER_FAILED`.
-  REST: `ManageApiController.ChangePassword` is its facade (section "Account pages run the password methods").
+  REST: `ManageApiController.ChangePassword` is its facade (`docs/identity-rest-facades.md`, section "Account pages run the password methods").
 - **Audit.** `IdentityMethodAuditWriter` writes one event per call (success and failure) into the event log of the tenant (category `Identity.Method`,
   details `methodId`, `invocationId`, `outcome` (`SUCCESS` or the error code), `targetRtId`, `callerSubject`; no parameter, no hash, no token). It is
   not `IIdentityAuditService` (that one reads the tenant from the HTTP request and persists failures only). The gateway-side one-per-invocation record
@@ -106,7 +106,7 @@ without the current one.
   `SetLockoutEndDateAsync(user, null)` + `ResetAccessFailedCountAsync(user)` through `UserManager` (guarded, versioned store write; never write the user
   entity directly), then `IUserCredentialChangeService.OnPasswordChangedAsync(..., PasswordChangePath.MethodResetPassword, <caller user name>)` (security
   stamp, revocation of refresh tokens and authorizations; throws on failure = `METHOD_HANDLER_FAILED`).
-- **REST difference** (`UsersController.ResetPassword`; body-only, see "No credential values in request URLs"): REST does **not** lift the lockout and e-mails a second reset token; the method lifts
+- **REST difference** (`UsersController.ResetPassword`; body-only, see "No credential values in request URLs" in `docs/credential-security.md`): REST does **not** lift the lockout and e-mails a second reset token; the method lifts
   the lockout and sends **no** e-mail (adds the notification).
 - **Audit.** `IdentityMethodAuditWriter.RecordAsync(..., extraDetails)`: one `Identity.Method` event per call in a `finally` (success, every failure, and an
   exception as `METHOD_HANDLER_FAILED`), details as `ChangePassword` plus `lockoutLifted` (`true` only when the user was locked out at call time and the call succeeded).

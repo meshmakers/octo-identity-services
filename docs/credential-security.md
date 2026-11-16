@@ -33,7 +33,7 @@ properties: a credential-bearing DTO passed as a message-template argument (`{Dt
 reflected by the JSON layout. Never do that unless an NLog object transformation in
 `LogSecretRedaction` covers the type; log selected non-secret members instead.
 
-**Token values.** OpenIddict logs issued tokens as plain string arguments at Trace/Debug
+**Token values (Security).** OpenIddict logs issued tokens as plain string arguments at Trace/Debug
 (EventId 6013 `A new '{Type}' JSON Web Token was successfully created: {Payload}.` = the complete signed access
 token; also `{Token}`, `{ReferenceId}`), which the object transformation above never sees. `CredentialLogRedaction`
 (the `ILoggerFactory` decorator) therefore also masks, for every provider and level: JWT-shaped values
@@ -47,7 +47,7 @@ templates, non-list state, real `nlog.config` JSON record at Trace) and
 `Api/Protocol/TokenValuesNotInLogTests` (real token endpoint at Trace: the issued access token, its signature and
 the client secret are in no line; the 6013 line is present and masked).
 
-## REST secret delete removes by predicate
+## REST secret delete removes by predicate (Security)
 
 `ApiSecretsController.DeleteSecretOfClient` / `DeleteSecretOfApiResource` (`DELETE {tenant}/v1/apiSecrets/client|apiResource/{id}/{base64(hash)}`)
 answered 200 but removed nothing for an entity read from MongoDB: the `AttributeRecordValueList` of such an entity holds plain `RtRecord`s and
@@ -71,7 +71,7 @@ test. Tests: `ApiSecretsControllerTests` (`DeleteClientSecret_*` with the token 
 403, PUT of an API resource secret persisted, no hash in the logs at the deployed levels, `ConcurrentSecretWrites_*`: four deletes and six creates at
 once lose nothing and bring nothing back, red with the unversioned write).
 
-## No credential values in request URLs
+## No credential values in request URLs (Security)
 
 Found while verifying the password-change session rule: the admin reset took the new password as a query parameter, and the ASP.NET Core request
 log (INFO, `Microsoft.AspNetCore.Hosting.Diagnostics`) plus the TRACE argument log of `ControllerActionInvoker` wrote it into

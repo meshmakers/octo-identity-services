@@ -208,7 +208,7 @@ access token as `subject_token`; the issued token runs on the **user's** `sub` b
 - **No seeded service account here** — the client must carry the URN in `AllowedGrantTypes` or
   OpenIddict rejects the request before the token controller runs. The real pipeline service account
   is created by the Communication Controller over the bus; see "Service-Account Clients over the
-  Distribution Event Hub" below.
+  Distribution Event Hub" in `docs/client-credentials.md`.
 
 # One broken tenant database must not slow every token request
 

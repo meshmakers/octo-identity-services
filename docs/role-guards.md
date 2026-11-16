@@ -31,7 +31,7 @@ Current identity schema (migration) version: `23` (migration 21→22 added the `
 
 `IRoleChangeGuard` (`src/IdentityServices/Authorization/RoleChange/RoleChangeGuard.cs`, scoped) is the one rule set for changes of the **direct** roles of a
 user. Callers: `UsersController` (`DELETE users/{u}`; the role endpoints and `POST users/{u}/merge` run the methods, section
-"REST facades of the role and merge endpoints"), the three role method handlers (`UserRoleMethodHandlerBase.GuardAsync`) and `IUserMergeService` (source user). It is **never** called from `OctoUserStore`/`UserManager`: first admin of a new tenant
+"REST facades of the role and merge endpoints" in `docs/identity-rest-facades.md`), the three role method handlers (`UserRoleMethodHandlerBase.GuardAsync`) and `IUserMergeService` (source user). It is **never** called from `OctoUserStore`/`UserManager`: first admin of a new tenant
 (`UserManagementService`), the Bootstrap blueprint seed, the one-time grants (`SecretManagementAdminGrant`, file role grants), the scratch-tenant creator grant, cross-tenant
 provisioning and the login group rules assign roles through the store and stay unrestricted (`TheGuard_IsNotCalledFromTheUserStoreOrTheUserManager…` pins the constructors).
 The role change guards on groups, mappings and role definitions (next section) and on client roles (section below) reuse it: `EvaluateGrantAsync(caller, addedRoleNames)` is the "grant only what you hold" part alone.
