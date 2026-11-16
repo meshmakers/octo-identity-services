@@ -113,7 +113,10 @@ nested customer sub-tenants are out of scope for v1, see
   subscribes to `PreDeleteTenant` and calls
   `RemoveMirrorsForChildTenantAsync(systemContext.TenantId, deletedTenantId)`.
   The mirror's child-side `RtClient` is gone with the tenant DB, so this
-  only drops the parent's tracking rows.
+  only drops the parent's tracking rows. `PreDeleteTenant` reaches every
+  identity replica, so each replica drops the same rows; a row another
+  replica dropped first is skipped with a debug line, not an error. Any
+  other failure to drop a row is still logged as an error.
 
 All three paths are best-effort: failures are logged and **do not** bubble
 back to the primary operation (client update, client delete, tenant delete).

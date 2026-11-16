@@ -466,6 +466,70 @@ public class ClientMirrorProvisioningServiceTests
     }
 
     [Fact]
+    public async Task RemoveForChildTenant_RowAlreadyDroppedByAnotherReplica_LogsNoError()
+    {
+        var logger = Substitute.For<ILogger<ClientMirrorProvisioningService>>();
+        logger.IsEnabled(Arg.Any<LogLevel>()).Returns(true);
+        var sut = new ClientMirrorProvisioningService(
+            logger, _systemContext, Substitute.For<ITenantDiscoveryService>(), _eventHub);
+        var gone = new RtClientMirrorBuilder()
+            .WithParentClientId("ci-deploy")
+            .WithChildTenantId(ChildTenantId)
+            .Build();
+        var present = new RtClientMirrorBuilder()
+            .WithParentClientId("ci-watcher")
+            .WithChildTenantId(ChildTenantId)
+            .Build();
+        SetupChildTenantMirrorQuery(gone, present);
+        _parentRepo.DeleteOneRtEntityByRtIdAsync<RtClientMirror>(
+                _parentSession, gone.RtId, Arg.Any<DeleteOptions>())
+            .Returns(Task.FromException(EntityNotFoundException.IdNotFound(nameof(RtClientMirror), gone.RtId.ToString())));
+
+        var removed = await sut.RemoveMirrorsForChildTenantAsync(ParentTenantId, ChildTenantId);
+
+        removed.Should().Be(1);
+        await _parentRepo.Received(1).DeleteOneRtEntityByRtIdAsync<RtClientMirror>(
+            _parentSession, present.RtId, Arg.Any<DeleteOptions>());
+        LoggedAt(logger, LogLevel.Error).Should().Be(0);
+        LoggedAt(logger, LogLevel.Debug).Should().Be(1);
+    }
+
+    [Fact]
+    public async Task RemoveForChildTenant_RealDropFailure_StillLogsError()
+    {
+        var logger = Substitute.For<ILogger<ClientMirrorProvisioningService>>();
+        logger.IsEnabled(Arg.Any<LogLevel>()).Returns(true);
+        var sut = new ClientMirrorProvisioningService(
+            logger, _systemContext, Substitute.For<ITenantDiscoveryService>(), _eventHub);
+        var mirror = new RtClientMirrorBuilder()
+            .WithParentClientId("ci-deploy")
+            .WithChildTenantId(ChildTenantId)
+            .Build();
+        SetupChildTenantMirrorQuery(mirror);
+        _parentRepo.DeleteOneRtEntityByRtIdAsync<RtClientMirror>(
+                _parentSession, mirror.RtId, Arg.Any<DeleteOptions>())
+            .Returns(Task.FromException(new InvalidOperationException("database unavailable")));
+
+        var removed = await sut.RemoveMirrorsForChildTenantAsync(ParentTenantId, ChildTenantId);
+
+        removed.Should().Be(0);
+        LoggedAt(logger, LogLevel.Error).Should().Be(1);
+    }
+
+    private void SetupChildTenantMirrorQuery(params RtClientMirror[] mirrors)
+    {
+        var queryResult = Substitute.For<IResultSet<RtClientMirror>>();
+        queryResult.Items.Returns(mirrors);
+        _parentRepo.GetRtEntitiesByTypeAsync<RtClientMirror>(
+                _parentSession, Arg.Any<RtEntityQueryOptions>())
+            .Returns(queryResult);
+    }
+
+    private static int LoggedAt(ILogger logger, LogLevel level) =>
+        logger.ReceivedCalls().Count(c =>
+            c.GetMethodInfo().Name == nameof(ILogger.Log) && (LogLevel)c.GetArguments()[0]! == level);
+
+    [Fact]
     public async Task RemoveForChildTenant_ParentMissing_ReturnsZero()
     {
         _systemContext.TryFindTenantRepositoryAsync(ParentTenantId).Returns((ITenantRepository?)null);

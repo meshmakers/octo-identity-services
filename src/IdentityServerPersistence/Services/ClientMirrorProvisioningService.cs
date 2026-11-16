@@ -930,6 +930,15 @@ public class ClientMirrorProvisioningService(
                     parentSession, mirror.RtId, DeleteOptions.Erase);
                 removed++;
             }
+            catch (EntityNotFoundException)
+            {
+                // PreDeleteTenant reaches every identity replica, and each one drops the rows of the
+                // deleted child. The replica that comes second finds them gone: the row is dropped, which is all
+                // this method promises, so that is no error.
+                logger.LogDebug(
+                    "Mirror tracking row {RtId} for child '{ChildTenantId}' was already dropped (another replica)",
+                    mirror.RtId, childTenantId);
+            }
             catch (Exception ex)
             {
                 logger.LogError(ex,
