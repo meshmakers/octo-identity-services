@@ -23,15 +23,15 @@ consumers work unchanged; the remaining discovery-document differences are docum
 | `**/SystemStores/*Client*.cs`, `**/Services/{ClientGrants,PipelineServiceAccounts,DynamicClientRegistration}/**`, `*ClientMirror*.cs`, `ClientsController.cs` | `docs/client-credentials.md` |
 | `*ClientMirror*.cs`, `{ClientCredentialsTenantProcessor,MirrorSecretUsageTelemetry,OctoApplicationManager}.cs` | `docs/client-mirroring.md` |
 | `src/IdentityServices/{Logging,TenantApi,Controllers/Api}/**`, `{OctoUser*,*Revocation*,SecondFactorEvidence,*UserCredentialChangeService}.cs` | `docs/credential-security.md` |
-| `*CrossTenant*.cs`, `**/{CrossTenantAudit,SourceTenantGrants,ShadowUserCleanup}/**`, `{TenantProbeGuard*,AllowedTenants*,*IdentityResolver,*Processor}.cs` | `docs/cross-tenant-authentication.md` |
+| `{*CrossTenant*,TenantProbeGuard,Allowed*,*IdentityResolver,*Processor,*ShadowUser*,*ExternalTenantUser*,*SourceT*,*SourceU*,Sibling*,AuthApiController}.cs` | `docs/cross-tenant-authentication.md` |
 | `src/IdentityServices/Methods/**`, `**/Services/{SelfService,SecretManagement}/**`, `*DataPermission*.cs` | `docs/identity-methods.md` |
 | `{IdentityMethodFacade,IdentityRestDeprecation,UsersController,ManageApiController,RoleChangeProblems,ResetUserPasswordRequestDto}.cs` | `docs/identity-rest-facades.md` |
-| `src/Authentication/**`, `**/Services/Login/**`, `{TenantDiscovery*,TenantTopology*,*IdentityProvider*,*EmailDomainGroupRule*,*Channel*}.cs` | `docs/login-and-providers.md` |
-| `src/IdentityServices/{OpenIddict,Cookies,Middleware,Controllers/Protocol}/**`, `**/{SystemStores/OpenIddict,DynamicAuth}/**`, `OpenIddictConfiguration.cs` | `docs/openiddict-protocol.md` |
-| `**/{Authorization/RoleChange,AdminRoleMigration}/**`, `{GroupRoleResolver,GuardedEntityMutation,OctoRoleStore,*GroupStore,RolesController,GroupsController}.cs` | `docs/role-guards.md` |
+| `src/Authentication/**`, `**/Services/Login/**`, `{TenantDiscovery*,TenantTopology*,*IdentityProvider*,*EmailDomainGroupRule*,*Channel*,AuthApiController}.cs` | `docs/login-and-providers.md` |
+| `**/{OpenIddict,Cookies,Middleware,Protocol,DynamicAuth}/**`, `{OpenIddictConfiguration,*PersistentGrantStore,TokenCleanup*}.cs` | `docs/openiddict-protocol.md` |
+| `**/{Authorization/RoleChange,AdminRoleMigration}/**`, `{Group*Resolver,GuardedEntityMutation,OctoRoleStore,*GroupStore,RolesController,GroupsController}.cs` | `docs/role-guards.md` |
 | `**/Services/{Admin,FileRoles,ScratchTenants,RoleGrants}/**`, `{DefaultConfiguration*,AdminProvisioning*,PipelineServiceAccountFileRoles*}.cs` | `docs/tenant-provisioning.md` |
 | `tests/**` | `docs/testing.md` |
-| `User{CreateUser,Merge,DisableTwoFactor}Handler.cs`, `User{Creation,Merge,TwoFactorAdministration,Management}Service.cs`, `UserEmailUniqueness.cs` | `docs/user-create-merge-methods.md` |
+| `User{CreateUser,Merge,DisableTwoFactor}Handler.cs`, `*User{Creation,Merge,TwoFactorAdministration,Management}Service.cs`, `UserEmailUniqueness.cs` | `docs/user-create-merge-methods.md` |
 <!-- <<< end generated: routing -->
 
 Background, not path-triggered (open when the task names the topic):
@@ -49,25 +49,22 @@ Background, not path-triggered (open when the task names the topic):
 
 ### Build commands
 
-Locally only `-c DebugL` builds. `Directory.Build.props` has no version fallback: the commands without a
-configuration and with `-c Release` stop with `OCTO0001` unless the pipeline sets the version (or you pass
+Locally only `-c DebugL` builds. `Directory.Build.props` has no version fallback: a command without a
+configuration or with `-c Release` stops with `OCTO0001` unless the pipeline sets the version (or you pass
 `-p:OctoVersion=X.Y.Z`, or `-p:OctoNugetPrivateServer=<feed>` for the main line `0.1.*`). DebugL restores the upstream
 `999.0.0` packages from `../nuget`; on a fresh workspace build the dependency chain first
 (`Invoke-BuildAll -configuration DebugL`, octo-tools).
 
 ```bash
-# Restore and build
-dotnet restore Octo.Identity.sln
-dotnet build Octo.Identity.sln
-
-# Build with specific configuration
-dotnet build Octo.Identity.sln -c Release
-dotnet build Octo.Identity.sln -c DebugL  # Local development with version 999.0.0
+# Local build and tests (version 999.0.0)
+dotnet build Octo.Identity.sln -c DebugL
+dotnet test Octo.Identity.sln -c DebugL
 
 # Run the identity service
-dotnet run --project src/IdentityServices/IdentityServices.csproj
+dotnet run --project src/IdentityServices/IdentityServices.csproj -c DebugL
 
-# Run tests
+# Pipeline only (needs a version, see above)
+dotnet build Octo.Identity.sln -c Release
 dotnet test Octo.Identity.sln -c Release
 ```
 
@@ -122,8 +119,8 @@ wird, sind alle anderen Pre-Commit-Regeln (Lint etc.) ebenfalls hinfällig.
 
 ## Rules
 
-- **This repository is public.** No work item ids, internal hostnames, customer or tenant names, or secrets in code
-  comments, docs or test names.
+- **This repository is public.** No work item ids, internal hostnames, customer or tenant names, or secrets in docs
+  and in new or changed code comments and test names; remove an existing one when you touch its line.
 - **Credentials never reach a log property, a request URL or a DTO `ToString()`.** Read
   `docs/credential-security.md` before you touch logging, secrets or password endpoints.
 - **Every administration endpoint carries a policy of `IdentityApiAuthorizationPolicies`** (scope and tenant role;
@@ -139,8 +136,9 @@ wird, sind alle anderen Pre-Commit-Regeln (Lint etc.) ebenfalls hinfällig.
   `docs/cross-tenant-authentication.md`.
 - **A client-credentials token names its tenant, and an ambiguous tenant binding is refused**, never guessed:
   `docs/client-mirroring.md`.
-- **A user is created only through `User.CreateUser` and merged only through `User.Merge`**:
-  `docs/user-create-merge-methods.md`. The password and role methods: `docs/identity-methods.md`.
+- **An administrator creates a user only through `User.CreateUser` and merges only through `User.Merge`** (REST runs
+  the same methods); the other creating paths are listed in `docs/user-create-merge-methods.md`. The password and role
+  methods: `docs/identity-methods.md`.
 - **The wire protocol stays Duende-compatible** (endpoint paths, discovery, token shape, claims); the golden-file
   tests pin it: `docs/openiddict-protocol.md`.
 - **Every CK attribute declares its `ownership`** (`OCTO-CK001` fails the build), and a change of System.Identity

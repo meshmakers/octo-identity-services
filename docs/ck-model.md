@@ -186,7 +186,7 @@ entity whose stored `RtBlueprintLocked` is `true`, nor set or change `RtBlueprin
 `ConstructionKit/attributes/*.yaml` declares neither `ownership` nor the deprecated `isRuntimeState` (`OCTO-CK003` for
 both, `OCTO-CK004` for an unknown value). The ownership rule made the existing behaviour explicit: 151 attributes got
 `ownership: SeedOwned` (a restatement - the same resolved ownership, so `octo-ckc ValidateVersion` reports "no bump
-required" and System.Identity stays 2.24.0); the `TenantOwned` / `Secret` decisions of the table above
+required" and System.Identity stayed 2.24.0 at the time); the `TenantOwned` / `Secret` decisions of the table in "Tenant-owned attributes" above
 and the four `isRuntimeState: true` URI lists are unchanged. Assignment overrides on types (`Client`, `Resource`,
 `ApiResource`) are not linted; they still win over the definition. **Review question for every new attribute:** could an
 operator or user type this value in the product? Yes → `TenantOwned` (or `Secret` for a credential); a service writes it

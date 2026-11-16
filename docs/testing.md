@@ -12,6 +12,8 @@ applies_to: tests/**
 > branch line. The integration tests share one MongoDB container through `Fixtures/SharedMongoDbContainer.cs`, and the
 > test classes use `IClassFixture<…>` or `[Collection("Sequential")]`. Look at a neighbouring test class before you
 > follow the rule for new test classes below. The rules on process-wide state in the next section apply unchanged.
+> The container counts, test counts and run times in this section and in the last section of this file were measured
+> with the collection fixtures and do not describe the current code; the advice to re-run serially (`-m:1`) holds.
 
 `IdentityServices.IntegrationTests` teilt seine MongoDB-Testcontainer über **Collection**-Fixtures, nicht
 mehr über `IClassFixture` (das erzeugt eine Fixture-Instanz **pro Testklasse** — vorher 32 Container pro
@@ -56,7 +58,7 @@ calls `AddDevelopmentSigningCertificate()`, which publishes **every** certificat
 `CN=OpenIddict Server Signing Certificate` from the current user's X509 store — expired ones and
 duplicates created by concurrently starting hosts included. On a long-lived CI agent that store
 persists across builds, so the JWKS depended on the agent (`TokenShapeGoldenTests.JwksDocument_*` saw
-two keys on `azure-devops-agents-ci-1` only). `CustomWebApplicationFactory` therefore replaces the
+two keys on one long-lived CI agent only). `CustomWebApplicationFactory` therefore replaces the
 signing and encryption credentials with one in-memory certificate (`Infrastructure/TestSigningCertificate.cs`),
 and the JWKS test asserts that this is the only published key. Never let a test host read key material
 from the user/machine store.

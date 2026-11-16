@@ -1,6 +1,6 @@
 ---
 description: Self-registration, AD group sync, identity provider REST API, tenant discovery and topology, OTP delivery, channel preference
-applies_to: src/Authentication/**, **/Services/Login/**, {TenantDiscovery*,TenantTopology*,*IdentityProvider*,*EmailDomainGroupRule*,*Channel*}.cs
+applies_to: src/Authentication/**, **/Services/Login/**, {TenantDiscovery*,TenantTopology*,*IdentityProvider*,*EmailDomainGroupRule*,*Channel*,AuthApiController}.cs
 ---
 
 # Login configuration, identity providers and tenant discovery

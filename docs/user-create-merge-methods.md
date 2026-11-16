@@ -1,6 +1,6 @@
 ---
 description: User.CreateUser, User.Merge and the administrator second-factor reset: the only ways to create, merge and reset a user
-applies_to: User{CreateUser,Merge,DisableTwoFactor}Handler.cs, User{Creation,Merge,TwoFactorAdministration,Management}Service.cs, UserEmailUniqueness.cs
+applies_to: User{CreateUser,Merge,DisableTwoFactor}Handler.cs, *User{Creation,Merge,TwoFactorAdministration,Management}Service.cs, UserEmailUniqueness.cs
 ---
 
 # User create, merge and second-factor methods
