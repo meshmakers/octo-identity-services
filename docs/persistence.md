@@ -640,8 +640,12 @@ automatically, through `SecretManagementAdminGrant`
   insert (the engine does not reject a second identical `AssignedRole` edge). Two identity replicas starting at the
   same instant can still race; a duplicate edge is harmless (role reads treat the edges as a set) and the marker
   stops further runs.
-- **Everybody else outside `TenantOwners`** (e.g. a user with only `AdminPanelManagement`, service accounts and
-  provisioned administrators that are no group members) gets the role by an explicit grant in the user administration (`octo-cli AddUserToRole`).
+- **Everybody else** - an account that none of the automatic paths covers (not a qualifying local administrator of
+  `SecretManagementAdminGrant`, not a `TenantOwners` member, not a qualifying octosystem mapping of
+  `TenantOwnersSecretManagementGrant`) - gets the role only by an explicit grant: a local user (e.g. one with only
+  `AdminPanelManagement`) with `octo-cli AddUserToRole`, a client with `octo-cli AddClientToRole` or by adding it to
+  `TenantOwners`. A provisioned parent-tenant administrator outside the group can be granted it as a user only after its
+  first login has created the local user.
 
 ## Migration System
 
