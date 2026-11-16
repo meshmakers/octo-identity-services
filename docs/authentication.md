@@ -1,10 +1,15 @@
+---
+description: "Background: authentication architecture - dynamic providers, cross-tenant flows, tokens, client mirroring, DCR, resource indicators"
+background: true
+---
+
 # Authentication Architecture
 
 ## Overview
 
 Octo Identity Services implements a dynamic authentication framework that supports multiple identity provider types. Providers can be configured at runtime through the database, enabling flexible authentication without code deployment.
 
-The OAuth2/OIDC protocol stack is **OpenIddict 7.6** (migrated from Duende IdentityServer, Epic AB#4989). Endpoint paths, discovery, JWKS, and token/claims shapes are kept Duende-compatible; the remaining discovery-document differences are documented in [openiddict-discovery-diff.md](openiddict-discovery-diff.md). Cookie authentication uses the schemes defined in `OctoAuthSchemes` (`src/Authentication/`): `Identity.Application` (tenant-scoped) and `Identity.External`.
+The OAuth2/OIDC protocol stack is **OpenIddict 7.6** (migrated from Duende IdentityServer). Endpoint paths, discovery, JWKS, and token/claims shapes are kept Duende-compatible; the remaining discovery-document differences are documented in [openiddict-discovery-diff.md](openiddict-discovery-diff.md). Cookie authentication uses the schemes defined in `OctoAuthSchemes` (`src/Authentication/`): `Identity.Application` (tenant-scoped) and `Identity.External`.
 
 ## Supported Identity Providers
 
@@ -123,7 +128,7 @@ SignInManager.PasswordSignInAsync()
         └── Failure ──► Raise UserLoginFailureEvent ──► Show error
 ```
 
-### Sign-In Attempts: Atomic Counting and Rate Limits (AB#7854)
+### Sign-In Attempts: Atomic Counting and Rate Limits
 
 Passwords, second-factor codes and recovery codes cannot be guessed faster than the lockout allows — neither with
 parallel requests nor through a child tenant.
@@ -138,7 +143,7 @@ the count; a successful sign-in resets the stored counter, whatever the caller's
 values back onto the caller's instance, because `SignInManager` checks `IsLockedOutAsync` on it right after.
 Every such write is a version-matched replace (expected `rtVersion`), so it advances the stored user's version: a profile or
 admin update that read the user *before* a failure, lockout or reset is refused with a concurrency failure and re-reads
-instead of restoring the old counter or lifting the lockout (AB#7908).
+instead of restoring the old counter or lifting the lockout.
 
 **Recovery codes are single-use under concurrency.** `OctoUserStore.RedeemCodeAsync` finds and removes the code in the
 same transaction; two parallel requests with the same code redeem it once.
@@ -147,7 +152,7 @@ same transaction; two parallel requests with the same code redeem it once.
 `CrossTenantAuthenticationService` tries the parent tenants, a wrong password counts against the parent-tenant user it was
 tried on (same arithmetic, in that tenant's database), a correct one resets the counter (only when that user has no
 second factor; otherwise the verified code resets it), and a locked-out parent user is not verified at all.
-Cross-tenant second-factor codes already counted against the source user (AB#7804); that counting is atomic now too.
+Cross-tenant second-factor codes already counted against the source user; that counting is atomic now too.
 
 **Rate limits** (`ISignInRateLimiter` / `SignInRateLimiter`, asked by `AuthApiController`) on `login`, `ldap-login`,
 `login-2fa`, `login-2fa-email`, `send-2fa-email` and `login-recovery`:
@@ -168,7 +173,7 @@ Tests: `SignInAttemptConcurrencyTests` (real MongoDB: parallel failures all coun
 user out, reset of a stale copy, parallel recovery-code redemption succeeds once, parallel wrong TOTP codes over HTTP, lockout
 through a child tenant, 429 per account and per client), `SignInRateLimiterTests`, `CrossTenantAuthenticationServiceTests`.
 
-### Administrator Revokes All Sessions of a User (AB#7899)
+### Administrator Revokes All Sessions of a User
 
 `POST {tenant}/v1/users/{userName}/revokeSessions` (policy `IdentityUserAdministrationWritePolicy`: `UserManagement` in that
 tenant) ends everything of the user **in that tenant**: the security stamp is rotated, all OAuth tokens (refresh tokens,
@@ -179,21 +184,21 @@ removedSessions }`.
 `POST {tenant}/v1/users/revokeSessions?scope=shadowUsers&dryRun=true` does the same for every cross-tenant shadow user
 (`xt_…`) of the tenant. **Dry run by default**: nothing changes, the answer carries the counts (`users`, `tokens`,
 `authorizations`, `sessions`) and the first 100 user names; `dryRun=false` applies and returns the applied counts. Dry run
-and apply use **one** selection (AB#7957): every token and authorization of the subject that is not revoked yet (`valid`,
+and apply use **one** selection: every token and authorization of the subject that is not revoked yet (`valid`,
 `redeemed`, `inactive`, …) plus its browser sessions — so the dry run reports exactly what the apply revokes; entries that
 are already `revoked` are counted by neither (the single-user call uses the same selection). Only
 `scope=shadowUsers` exists (400 otherwise). Run it per tenant (octo-cli, child tenants via token exchange) — used at the
-rollout of AB#7804/AB#7815 to end sessions created before the second-factor rule.
+rollout to end sessions created before the second-factor rule.
 
 Every call writes one `Information` audit log line (tenant, subject or counts, and the caller — never a token value). The
-caller is read from the access token claims by `AuditActor` (AB#7958): subject (`sub`), user name (`preferred_username`,
+caller is read from the access token claims by `AuditActor`: subject (`sub`), user name (`preferred_username`,
 else `name`, else the identity name), client id (`client_id`, else `azp`) and the caller's `tenant_id`; a
 client-credentials caller is recorded as `client <id>`. No other claim value is logged. Limit:
 issued JWT access tokens are not stored and stay valid until they expire (resource servers do not introspect); refresh
 tokens, browser sessions and remembered consents stop working at once. Logic: `IUserSessionRevocationService`; tests:
 `UserSessionRevocationTests`.
 
-### Password Change Ends Existing Sessions (AB#7765)
+### Password Change Ends Existing Sessions
 
 Every REST password change (`change-password`, `set-password`, administrator `ResetPassword`, token
 `reset-password`) rotates the user's security stamp and revokes all refresh tokens and authorizations the
@@ -201,11 +206,11 @@ user holds **in that tenant**. A client presenting an old refresh token gets `in
 signs in again with the new password; other users and the same user in another tenant are not affected.
 One audit log line records tenant, subject, acting user and path (no password or token value). The acting
 user of the administrator `ResetPassword` is the caller's user name, for a client-credentials token
-`client <id>` (AB#8008; before, every non-cookie caller was recorded as `(anonymous reset token)`, which now
+`client <id>` (before, every non-cookie caller was recorded as `(anonymous reset token)`, which now
 only the token `reset-password` path writes). The logic lives in `IUserCredentialChangeService`, which any new
 password path must call.
 
-**Revoked before and after the password write (AB#8018).** The password (user store) and the tokens (OpenIddict token
+**Revoked before and after the password write.** The password (user store) and the tokens (OpenIddict token
 and authorization stores) are separate writes in the tenant database without a shared transaction. A service that
 stopped between them used to leave the new password active and the old refresh tokens redeemable (redemption checks
 only `CanSignIn`, not the security stamp). `OctoUserManager` therefore revokes the user's tokens and authorizations in
@@ -221,7 +226,7 @@ nothing is stored and the request fails. One transaction over both stores was no
 session, and sharing one would mean an ambient session through the user store and both OpenIddict stores (decision
 OD-6: ordering/compensation, no outbox).
 
-### No Credential Values in Request URLs (AB#8008)
+### No Credential Values in Request URLs
 
 A URL ends up in the ASP.NET Core request log (`Request starting/finished …`, written before any controller
 code runs), in traces (`url.path`, `url.query`) and in ingress/proxy access logs. Therefore:
@@ -238,7 +243,7 @@ code runs), in traces (`url.path`, `url.query`) and in ingress/proxy access logs
   `clientSecret` and the value segment of `…/apiSecrets/{client|apiResource}/{id}/{value}` with `***`, so a
   request of an outdated client does not write the credential either. The request DTOs override `ToString()`, so
   the ASP.NET Core TRACE log of the action arguments carries no password.
-- Since AB#8324 the same decorator masks token values at every level: JWT- and Data-Protection-shaped values in any
+- The same decorator masks token values at every level: JWT- and Data-Protection-shaped values in any
   string value or formatted message, and arguments named like a token (`Token`, `ReferenceId`, `AccessToken`, …;
   `Payload` in OpenIddict categories). OpenIddict's Trace event 6013 ("A new … JSON Web Token was successfully
   created") stays in the log with `***` instead of the token. Details: `docs/configuration.md` § Token values in logs.
@@ -280,7 +285,7 @@ GET /ExternalLogin/{provider}/Callback
 Redirect to original returnUrl
 ```
 
-#### External Login Security Model (Bug 3430)
+#### External Login Security Model
 
 External login user creation follows a strict security model:
 
@@ -290,7 +295,7 @@ External login user creation follows a strict security model:
 
 3. **Provider key matching only**: Returning users are identified exclusively via `FindByLoginAsync(provider, providerKey)`, which matches the external provider's unique user identifier. This ensures that only the same person from the same provider can access the same account.
 
-4. **Duplicate e-mail rule does not apply (AB#8084)**: the user administration refuses a second user with an e-mail address another user already has (create AB#8064, change AB#8084). External-login and LDAP auto-provisioning deliberately keep creating the dedicated account even when a local user has the address — refusing it would lock the external user out, linking it is the escalation of point 1. Cross-tenant shadow users follow the same rule. Changing this needs a product decision.
+4. **Duplicate e-mail rule does not apply**: the user administration refuses a second user with an e-mail address another user already has (on create). External-login and LDAP auto-provisioning deliberately keep creating the dedicated account even when a local user has the address — refusing it would lock the external user out, linking it is the escalation of point 1. Cross-tenant shadow users follow the same rule. Changing this needs a product decision.
 
 5. **Separate database indexes**: The User CK model defines separate `Ascending` indexes on `NormalizedEmail` and `NormalizedUserName` for efficient lookups.
 
@@ -332,7 +337,7 @@ CLI initiates device authorization
 POST /connect/deviceauthorization
         │
         ├── OidcTenantResolutionMiddleware reads acr_values=tenant:{tenantId}, marks the
-        │   device_code with the tenant ({tenantId}:{device_code}, AB#7891) and rewrites
+        │   device_code with the tenant ({tenantId}:{device_code}) and rewrites
         │   verification_uri to the SPA page /{tenantId}/device (with ?userCode= for
         │   verification_uri_complete)
         ├── Returns: device_code (tenant-marked), user_code, verification_uri
@@ -351,10 +356,10 @@ GET /{tenantId}/device?userCode={userCode}
         ▼
 GET /connect/deviceverification?user_code={userCode}&acr_values=tenant:{tenantId}
         │   (OpenIddict end-user verification endpoint, DeviceVerificationController;
-        │    tenant = the hint the page sends, i.e. its /{tenantId} route — AB#7891)
+        │    tenant = the hint the page sends, i.e. its /{tenantId} route)
         ├── Validates the user code
         ├── Returns: client info, scopes requested, target tenant (tenantId) and the
-        │   signed-in account (accountUserName, accountEmail) — AB#7959
+        │   signed-in account (accountUserName, accountEmail)
         └── User reviews permissions, tenant and account
         │
         ▼
@@ -366,7 +371,7 @@ POST /connect/deviceverification (form-encoded allow/deny incl. acr_values=tenan
         ▼
 CLI polls: POST /connect/token (grant_type=device_code, device_code as received)
         │   OidcTenantResolutionMiddleware takes the tenant from the device_code marker and
-        │   strips it before OpenIddict reads the form (AB#7891)
+        │   strips it before OpenIddict reads the form
         ├── Pending: authorization_pending error
         ├── Denied: access_denied error
         └── Approved: Returns access_token (no refresh_token)
@@ -382,21 +387,20 @@ The former `DeviceApiController` (`/api/device/*`) now only holds the DTOs — t
 
 2. **URL Parameters**: The device authorization URL supports passing `userCode` as a query parameter (`?userCode=123456`). When present, the Angular SPA automatically navigates to the confirmation page.
 
-3. **Tenant and account on the confirmation (AB#7959)**: RFC 8628 §5.4 asks the server to show what the user
+3. **Tenant and account on the confirmation**: RFC 8628 §5.4 asks the server to show what the user
    authorizes, so a request that is not theirs is recognisable. With an existing parent session the cross-tenant
    hand-off signs the user into a child tenant silently and lands directly on the Allow dialog; the dialog therefore
    names the tenant the device code is bound to and the signed-in account next to client, user code and scopes.
 
-4. **CSRF protection of the verification POST (AB#7959)**: `DeviceVerificationController` carries
+4. **CSRF protection of the verification POST**: `DeviceVerificationController` carries
    `[IgnoreAntiforgeryToken]` (the SPA posts a form via XHR). It relies on the tenant-scoped application cookie
    (`.AspNetCore.Identity.Application.{tenant}`) not being sent on cross-site POSTs: `ConfigureApplicationCookie` sets
    `Cookie.SameSite = Lax` **explicitly** (the `CookiePolicyOptions.MinimumSameSitePolicy = None` in `Program.cs` never
    lowers it). Only the OIDC session-check cookie (`idsrv.session.{tenant}`, `SessionCheckCookie`) stays `SameSite=None`
    for the check-session iframe / silent renew. Tests: `DeviceConfirmationContextTests`.
 
-5. **Tenant resolution without server-side state — safe with several replicas (AB#7891)**: the device flow keeps no
-   code → tenant mapping in process memory, so identity can run with more than one replica (test-2 runs two since
-   AB#8402) and may restart in the middle of a device login.
+5. **Tenant resolution without server-side state — safe with several replicas**: the device flow keeps no
+   code → tenant mapping in process memory, so identity can run with more than one replica (test-2 runs two) and may restart in the middle of a device login.
    - *Verification*: the Angular device page runs under `/{tenantId}/device` and sends `acr_values=tenant:{tenantId}`
      on every `GET`/`POST /connect/deviceverification`. OpenIddict validates the user code in **that** tenant's token
      store only; a code of another tenant is an unknown code there ("Invalid or expired device code"), nothing about
@@ -406,10 +410,10 @@ The former `DeviceApiController` (`/api/device/*`) now only holds the DTOs — t
      form value with OpenIddict's own code. RFC 8628 makes the device code opaque, so clients pass it back unchanged —
      octo-cli/octo-sdk need no change. The prefix is not signed on purpose: it only selects the tenant whose token store
      OpenIddict searches; a changed prefix points to a store without the code and answers `invalid_grant`. A code
-     without a marker (issued before AB#7891) falls back to `acr_values`, else to the system tenant.
+     without a marker (issued earlier) falls back to `acr_values`, else to the system tenant.
    - *Clean-up*: nothing extra is stored. Device and user codes live in the tenant's token store (`RtOAuthToken`) with
      the client's `DeviceCodeLifetime` and are pruned by `TokenCleanupHostService` as before.
-   - Authorization codes, refresh tokens and PAR request_uris carry their tenant the same way since AB#7892 — see
+   - Authorization codes, refresh tokens and PAR request_uris carry their tenant the same way — see
      "OIDC Endpoint Tenant Resolution" below.
    - Tests: `DeviceFlowReplicaTests` (two hosts over one database; host recreated between authorization and approval;
      foreign user code; changed marker; system tenant), `OidcTenantMarkerTests`, `OidcTenantResolutionMiddlewareTests`.
@@ -422,7 +426,7 @@ The former `DeviceApiController` (`/api/device/*`) now only holds the DTOs — t
 
 All scheme creators accept an optional `schemeNameOverride` parameter. When provided (e.g., a tenant-prefixed name like `octosystem:Google`), the scheme is registered under that name instead of the provider's `Name` property. The display name remains unchanged.
 
-### Who May Manage API Secrets (AB#5861)
+### Who May Manage API Secrets
 
 API secrets are the credentials of OAuth clients (client credentials grant) and API resources (introspection).
 Creating, rotating and deleting them needs the tenant role `SecretManagement` (role `660000000000000000000060`,
@@ -439,10 +443,10 @@ System.Identity.Bootstrap 1.7.0) in the caller's token, on every path:
 Reading the secret list (description, expiry, stored one-way hash, never a clear text) keeps
 `IdentityTenantAdministrationReadPolicy`.
 
-Who holds `SecretManagement`: the one-time grant `SecretManagementAdminGrant` (AB#5544) gave it, per tenant and once
+Who holds `SecretManagement`: the one-time grant `SecretManagementAdminGrant` gave it, per tenant and once
 (marker `SecretManagementAdminGrant` in the tenant configuration), to every **local** user holding both
 `AdminPanelManagement` and `TenantManagement` at that moment; the first administrator of a new tenant gets it at setup.
-Since AB#8161 (decision Gerald 2026-11-02) `TenantOwners` carries it as well: the once-per-tenant step
+Since decision Gerald 2026-11-02 `TenantOwners` carries it as well: the once-per-tenant step
 `TenantOwnersSecretManagementGrant` (marker `TenantOwnersSecretManagementGrant`, runs in every tenant setup, existing
 and new) adds the `AssignedRole` edge TenantOwners → SecretManagement and appends `SecretManagement` to the
 `MappedRoleIds` of every external tenant user mapping whose source tenant is the system tenant (octosystem) that
@@ -451,12 +455,12 @@ clients that are members of TenantOwners**. Mappings of other source tenants, us
 changed. New administrators are TenantOwners members, not holders of direct roles: the first administrator of a tenant
 (setup) and mappings created by `ProvisionCurrentUser` or by `POST` admin provisioning with `TenantManagement`
 (fallback to the direct role list when the tenant has no usable TenantOwners group). Moving existing direct role
-assignments to the group is a separate, switchable migration (AB#8165). Because administrators added elsewhere can still
+assignments to the group is a separate, switchable migration. Because administrators added elsewhere can still
 lack the role, the requirement is staged:
 `IdentityApiAuthorization:SecretManagementRoleEnforcement` defaults to `Warn` (previous roles still pass, logged) and
-goes to `Enforce` per cluster after the precheck (`docs/rollout-identity-rest-role-enforcement.md` § AB#5861).
+goes to `Enforce` per cluster after the precheck (`docs/rollout-identity-rest-role-enforcement.md` § `SecretManagement` for API secret writes).
 
-#### Admin role migration (AB#8165)
+#### Admin role migration
 
 Existing tenant admins hold their roles directly. `IdentityApiAuthorization:AdminRoleMigration`
 (`OCTO_IDENTITYAPIAUTHORIZATION__ADMINROLEMIGRATION`, Helm `services.identity.adminRoleMigration`) moves them to
@@ -470,10 +474,10 @@ whose `TenantOwners` group is missing or does not carry `TenantManagement` and `
 the move would remove access. Changes role data: per cluster, `DryRun` first, `Apply` only with the go of the
 cluster owner.
 
-### Client Secrets of External Providers (AB#5540)
+### Client Secrets of External Providers
 
 Since `System.Identity-2.25.0` the `ClientSecret` of Google, Microsoft, Facebook and Azure Entra ID
-providers is a CK `Secret` attribute (concept AB#5528 in `octo-construction-kit-engine/docs/`): stored
+providers is a CK `Secret` attribute (concept in `octo-construction-kit-engine/docs/`): stored
 as an `enc:v2:<kid>:…` envelope, never projected by an API, preserved on blueprint re-apply and left
 out of `ExportRt`.
 
@@ -516,7 +520,7 @@ public class GoogleAuthSchemeCreator : IAuthSchemeCreator<RtGoogleIdentityProvid
         var schemeName = schemeNameOverride ?? provider.Name;
         var options = _builder.CreateOptions(schemeName);
         options.ClientId = provider.ClientId;
-        // Secret value type (AB#5540): counted decrypt via ISecretAttributeProtector
+        // Secret value type: counted decrypt via ISecretAttributeProtector
         options.ClientSecret = _secretReader.GetClientSecret(provider, tenantId) ?? string.Empty;
 
         return new AuthenticationScheme(
@@ -659,12 +663,12 @@ Cross-tenant authentication enables users from a parent tenant to log in to chil
 | `RtOctoTenantIdentityProvider` | CK Model | Configures a parent-tenant auth link |
 | `RtExternalTenantUserMapping` | CK Model | Maps parent-tenant user to child-tenant roles |
 | `ICrossTenantAuthenticationService` | `IdentityServerPersistence/Services/` | Validates credentials across tenant hierarchy |
-| `IExternalTenantUserMappingStore` | `IdentityServerPersistence/SystemStores/` | CRUD for cross-tenant user mappings; `FindBySourceUserAsync` tolerates duplicates (oldest `RtId` wins, WARN once per request scope; AB#6975); effective roles are the union over all matching mappings |
-| `ExternalTenantUserMappingsController` | `TenantApi/v1/Controllers/` | REST API for managing mappings; a mapping is unique per (source tenant, source user): creating a second one (here and in `AdminProvisioningController`) answers `409 problem+json`, code `ExternalTenantUserMappingAlreadyExists`, update the existing mapping's roles instead (AB#6975). Create checks the source (`403 SourceTenantNotPermitted`) and takes optional `groupIds` (`400 UnknownGroup`), see *Granting a Sibling-Tenant User With Groups* (AB#8343) |
+| `IExternalTenantUserMappingStore` | `IdentityServerPersistence/SystemStores/` | CRUD for cross-tenant user mappings; `FindBySourceUserAsync` tolerates duplicates (oldest `RtId` wins, WARN once per request scope); effective roles are the union over all matching mappings |
+| `ExternalTenantUserMappingsController` | `TenantApi/v1/Controllers/` | REST API for managing mappings; a mapping is unique per (source tenant, source user): creating a second one (here and in `AdminProvisioningController`) answers `409 problem+json`, code `ExternalTenantUserMappingAlreadyExists`, update the existing mapping's roles instead. Create checks the source (`403 SourceTenantNotPermitted`) and takes optional `groupIds` (`400 UnknownGroup`), see *Granting a Sibling-Tenant User With Groups* |
 
 ### Tenant Hierarchy
 
-The **tenant registry** decides who is an ancestor of whom (AB#8339): the registry rows of the system database
+The **tenant registry** decides who is an ancestor of whom: the registry rows of the system database
 (`RtEntity_SystemTenant`), each stamped with its logical parent (`parentTenantId`; a row without one is a direct child
 of the system tenant). `RtOctoTenantIdentityProvider` entries are a tenant's **opt-in**, not the trust source:
 - Each child tenant can have one or more `OctoTenantIdentityProvider` pointing to parent tenants
@@ -673,11 +677,11 @@ of the system tenant). `RtOctoTenantIdentityProvider` entries are a tenant's **o
   widens nothing (see *Registry Decides Cross-Tenant Ancestry* below)
 - A user in "octosystem" (root) can access all descendant tenants
 - Lateral access (sibling-to-sibling) is not permitted, unless the source tenant permits the target on its allow-list
-  (AB#8345, see *Source Tenant Permits Sibling-Tenant Grants* below)
+  (see *Source Tenant Permits Sibling-Tenant Grants* below)
 
-### Registry Decides Cross-Tenant Ancestry (AB#8339)
+### Registry Decides Cross-Tenant Ancestry
 
-Before AB#8339 the providers alone decided ancestry — and a tenant's own administrator writes them. Pointing an
+Previously the providers alone decided ancestry — and a tenant's own administrator writes them. Pointing an
 OctoTenant provider (or an admin-provisioning mapping, which creates one) at **any** tenant of the cluster made that
 tenant an "ancestor": its user directory became searchable through `adminProvisioning/{target}/sourceUsers`, its users
 could switch into the target (token exchange, cross-tenant token) and log in there with their password.
@@ -689,38 +693,38 @@ new tenants):
 | Path | Rule |
 |------|------|
 | `GET adminProvisioning/{target}/sourceUsers` | only tenants that the target's providers reach **and** the registry confirms as ancestors |
-| Tenant switch: token exchange (RFC 8693), `POST auth/cross-tenant-token`, and the other `ValidateCrossTenantAccessAsync` callers | the source must be reachable through the target's providers **and** a registry ancestor; the `xt_` sibling-shadow step (concept step 1a) is unchanged — the shadow's home tenant is judged, and it is a registry ancestor. A non-ancestor source passes only with a grant in the target that its tenant permits (AB#8343, below) |
+| Tenant switch: token exchange (RFC 8693), `POST auth/cross-tenant-token`, and the other `ValidateCrossTenantAccessAsync` callers | the source must be reachable through the target's providers **and** a registry ancestor; the `xt_` sibling-shadow step (concept step 1a) is unchanged — the shadow's home tenant is judged, and it is a registry ancestor. A non-ancestor source passes only with a grant in the target that its tenant permits (below) |
 | Cross-tenant password login | a tenant the provider walk reaches is asked for the password only when it is a registry ancestor of the login tenant; otherwise it is skipped (no password check, no lockout counting of a stranger's users) and not walked beyond |
 | `POST adminProvisioning/{target}` and `…/withGroups` | a `SourceTenantId` that is no registry ancestor of the target → `403 problem+json`, code `CrossTenantSourceNotAncestor`, nothing written |
 | `POST`/`PUT identityProviders` with an OctoTenant provider | a `ParentTenantId` that is no registry ancestor of the tenant → `400 problem+json`, code `OctoTenantParentNotAncestor`, nothing written. A `PUT` that only disables a stored provider (same parent, `isEnabled: false`) is always allowed, so such a provider can be switched off; `DELETE` is unchecked |
 
 The registry confirms; it does not widen: a registry ancestor the target has no provider for is still no source.
 
-**Login page (AB#8367).** Under `Enforce`, `GET {tenant}/api/auth/login-context` offers only the OctoTenant providers
+**Login page.** Under `Enforce`, `GET {tenant}/api/auth/login-context` offers only the OctoTenant providers
 whose parent is a registry ancestor (`IOctoTenantLoginProviders`, same guard, one registry read per page); a "Login via
 <sibling>" button would only lead into a refused switch. Under `Warn` every enabled provider is offered and the guard
 logs the non-ancestor ones (operation `login page provider list`). When `POST {source}/api/auth/cross-tenant-token`
 refuses because the registry does not confirm the source, it answers `403 problem+json` with code
 `CrossTenantSourceNotAncestor`; the login page shows the reason at once ("This tenant does not accept sign-in from
 <source>", `LOGIN.ERROR_CROSS_TENANT_NOT_ALLOWED`) instead of sending the user through the source tenant's login. Every
-other refusal keeps the plain `403` (e.g. a missing second factor, AB#7804), and `401` (no session in the source) still
+other refusal keeps the plain `403` (e.g. a missing second factor), and `401` (no session in the source) still
 sends the user to the source tenant's login once.
 
 **Staged by `IdentityApiAuthorization:CrossTenantAncestry`** (env `OCTO_IDENTITYAPIAUTHORIZATION__CROSSTENANTANCESTRY`,
 Helm `services.identity.crossTenantAncestry`):
 
-- `Warn` (default): every path behaves as before AB#8339; each use of a provider-only ancestor is logged as a warning
+- `Warn` (default): every path behaves as earlier; each use of a provider-only ancestor is logged as a warning
   with both tenant ids and the path — `Cross-tenant ancestry not confirmed by the tenant registry, allowed by
   CrossTenantAncestry=Warn: {ClaimedAncestorTenantId} is not an ancestor of {TenantId} ({Operation}). This would be
-  denied with CrossTenantAncestry=Enforce (AB#8339)`.
+  denied with CrossTenantAncestry=Enforce`.
 - `Enforce`: the rules of the table apply. Switch per cluster after the inventory of non-ancestor providers and mappings
-  (AB#8339 comments) is reviewed and the Warn log stays empty; that switch is a security decision of the maintainers.
+  (comments) is reviewed and the Warn log stays empty; that switch is a security decision of the maintainers.
 
 A registry row written before the parent field existed (no `parentTenantId`) makes its tenant a direct child of the
 system tenant; under `Enforce` its real parent is then no ancestor. Such tenants show up in the Warn log and the
-inventory; give their registry rows the parent before enforcing. Admitting users of a tenant **outside** the ancestor chain needs that tenant's permission (AB#8313).
+inventory; give their registry rows the parent before enforcing. Admitting users of a tenant **outside** the ancestor chain needs that tenant's permission.
 
-### Source Tenant Permits Sibling-Tenant Grants (AB#8345)
+### Source Tenant Permits Sibling-Tenant Grants
 
 A tenant S that is **no** registry ancestor of T lets T's administrators find one of its users (exact user name or
 e-mail, `POST {T}/v1/ExternalTenantUserMappings/sourceUserLookup`) and grant that user access to T only when S's
@@ -737,12 +741,12 @@ PUT {S}/v1/CrossTenantGrantPermissions  { "targetTenantIds": ["customer-a", "cus
   (`IdentityCrossTenantGrantPermissionsPolicy`). T's administrators get `403`; no route reveals which tenants S permits.
   A non-permitted T gets the same `404 SourceUserNotFound` as for a tenant that does not exist.
 - **Withdrawal:** removing T stops T's lookups and new grants with the next request; grants that already exist are
-  refused at T's next token exchange (`access_denied`, AB#8343; deletion and the last effective role: AB#8344, see
+  refused at T's next token exchange (`access_denied`; deletion and the last effective role, see
   *Removing a Sibling-Tenant Grant*).
 - **Audit:** every change is written into S's event log, category `Identity.CrossTenantGrantPermissionsChanged`
   (details `actorTenantId`, `actorName`, `sourceTenantId`, `permittedTargetTenantIds`, `addedTargetTenantIds`,
   `removedTargetTenantIds`); a `PUT` that leaves the list unchanged writes no event. See *Cross-Tenant Grant Audit Events*.
-- **Concurrent edits (AB#8432):** `GET` and `PUT` answer an `ETag`; a `PUT` with a stale `If-Match` gets `412` and
+- **Concurrent edits:** `GET` and `PUT` answer an `ETag`; a `PUT` with a stale `If-Match` gets `412` and
   changes nothing. Without `If-Match` the answer is `428` once `Identity:CrossTenantGrantPermissions:RequireIfMatch` is
   on (default off during the client rollout). An unchanged `PUT` writes nothing.
 - **Storage:** tenant configuration row `CrossTenantGrantPermissions` in S's database — no CK model change. Details:
@@ -772,7 +776,7 @@ Try local authentication (existing SignInManager flow)
                 │
                 ├── Not found in any parent ──► Login failed
                 │
-                ├── Found, source user has 2FA (AB#7804) ──► requiresTwoFactor
+                ├── Found, source user has 2FA ──► requiresTwoFactor
                 │       (no session yet; login-2fa / login-2fa-email / login-recovery
                 │        verify the SOURCE user's code, then continue below)
                 │
@@ -840,14 +844,14 @@ POST /{childTenantId}/api/auth/cross-tenant-login
 - Loop prevention: `crossTenantAutoLogin` param is stripped from the URL immediately; on failure after redirect, an error message is shown without retrying
 - Expired token (>60s): Returns error; user can click the button again
 - Target tenant mismatch: Returns error (token was issued for a different tenant)
-- No cross-tenant mapping: the login creates the shadow user without a mapping (AB#8439; before, `FindOrCreateCrossTenantUserAsync` wrote an empty one with no roles and no groups)
-- Self-registration gate (AB#5015): when the `OctoTenantIdentityProvider` has `AllowSelfRegistration=false` and the person has no local shadow user yet, the login is denied — **unless** an `ExternalTenantUserMapping` exists in the target tenant for the source user (matched by `SourceTenantId` + `SourceUserId`, or — AB#5708 — by `SourceTenantId` + `SourceUserName` for any identity of the source's `xt_` chain). A mapping created by an admin (e.g. via `provisionCurrentUser`) is explicit provisioning, not self-registration, so the first login is allowed to create the shadow user. The same rule applies to the cross-tenant **password** login path in `AuthApiController.Login` and, since AB#8439, to the tenant switch (`tenant-switch`) before it creates a shadow user. No login path and not the tenant switch writes a mapping (AB#8439; the token exchange since AB#7088): the shadow user is created without one, so a mapping always stems from an admin action and only such a mapping lets a person past `AllowSelfRegistration=false`.
+- No cross-tenant mapping: the login creates the shadow user without a mapping (before, `FindOrCreateCrossTenantUserAsync` wrote an empty one with no roles and no groups)
+- Self-registration gate: when the `OctoTenantIdentityProvider` has `AllowSelfRegistration=false` and the person has no local shadow user yet, the login is denied — **unless** an `ExternalTenantUserMapping` exists in the target tenant for the source user (matched by `SourceTenantId` + `SourceUserId`, or, for any identity of the source's `xt_` chain, by `SourceTenantId` + `SourceUserName` for any identity of the source's `xt_` chain). A mapping created by an admin (e.g. via `provisionCurrentUser`) is explicit provisioning, not self-registration, so the first login is allowed to create the shadow user. The same rule applies to the cross-tenant **password** login path in `AuthApiController.Login` and  to the tenant switch (`tenant-switch`) before it creates a shadow user. No login path and not the tenant switch writes a mapping (the token exchange): the shadow user is created without one, so a mapping always stems from an admin action and only such a mapping lets a person past `AllowSelfRegistration=false`.
 
-### Second Factor Across Tenant Boundaries (AB#7804, AB#7815)
+### Second Factor Across Tenant Boundaries
 
 **Rule:** a user who has two-factor authentication enabled in the source tenant — or whose `xt_` name chain unwinds
 to an identity that has it — gets no session and no token in another tenant without second-factor evidence. Before
-AB#7804 every cross-tenant path checked only the password (or the source session) and the opt-in second factor could
+the second-factor check every cross-tenant path checked only the password (or the source session) and the opt-in second factor could
 be skipped through any child tenant.
 
 **Evidence** is the `amr` value `mfa` (`SecondFactorEvidence`, `IdentityServerPersistence/Services/`). ASP.NET Core
@@ -867,14 +871,14 @@ the user's own `TwoFactorEnabled`, or that of any tier of its `xt_` chain — a 
 | Cross-tenant device approval (`/connect/deviceverification`) | `access_denied` ("Cross-tenant access denied") | The approving session must carry `amr=mfa`. |
 | RFC 8693 token exchange | `403 access_denied`, `error_description` starts with `second_factor_required` | The subject token must carry `amr=mfa`; the exchanged token gets `amr=["token_exchange","mfa"]`. |
 
-**No usable second factor (AB#7830):** a source user with two-factor enabled but no authenticator key (e.g. in a tenant cloned with ExportRt/ImportRt under `System.Identity` 2.27.0 — since 2.28.0 `ImportRt` refuses users —, after a restore from another environment, or after an import of edited user data) gets `secondFactorSetupRequired: true` and no session, on this path and on the local `POST /{tenant}/api/auth/login`. Only an authenticator key counts as usable. Recovery: a user administrator switches the second factor off with `POST /{tenant}/v1/users/{userName}/disableTwoFactor` or the method `User.DisableTwoFactor-1` (AB#7879: removes the authenticator key and recovery codes, rotates the security stamp, revokes the refresh tokens); the user then signs in with the password and enrols again. A generic GraphQL or ImportRt write of `TwoFactorEnabled` is refused since AB#8042.
+**No usable second factor:** a source user with two-factor enabled but no authenticator key (e.g. in a tenant cloned with ExportRt/ImportRt under `System.Identity` 2.27.0 — since 2.28.0 `ImportRt` refuses users —, after a restore from another environment, or after an import of edited user data) gets `secondFactorSetupRequired: true` and no session, on this path and on the local `POST /{tenant}/api/auth/login`. Only an authenticator key counts as usable. Recovery: a user administrator switches the second factor off with `POST /{tenant}/v1/users/{userName}/disableTwoFactor` or the method `User.DisableTwoFactor-1` (removes the authenticator key and recovery codes, rotates the security stamp, revokes the refresh tokens); the user then signs in with the password and enrols again. A generic GraphQL or ImportRt write of `TwoFactorEnabled` is refused.
 
 Users without 2FA are unaffected. Not covered by the cross-tenant rule: a session that a "remember this machine"
 cookie skipped the second factor for, and external-provider sign-ins (Google, Entra ID, …), carry no `amr=mfa`; a 2FA
 user signed in that way is refused at the boundary (fail closed) and signs in once more with the second factor.
 "Remember this machine" is not offered for the source user's second factor on a child tenant.
 
-**Hardening (AB#7861).**
+**Hardening.**
 - *Single-use challenge:* the cross-tenant challenge cookie carries a nonce; completing it (success, lockout, user gone),
   a logout and a successful local sign-in mark the nonce used (`ICrossTenantChallengeReplayGuard`, in process memory for
   the 5-minute cookie lifetime) and delete the cookie, so a copy of the cookie is void too. A challenge without a nonce
@@ -885,13 +889,13 @@ user signed in that way is refused at the boundary (fail closed) and signs in on
   second factor instead of adding nothing.
 - *Server-only evidence:* `OctoUserStore.GetClaimsAsync` never returns a stored `amr` claim, so nothing that can write
   `RtUser.Claims` (an import, another service) can mint `amr=mfa`; the evidence comes only from the sign-in itself.
-- *No cross-tenant provisioning on the device endpoint (AB#7884):* `DeviceVerificationController` used to provision a
+- *No cross-tenant provisioning on the device endpoint:* `DeviceVerificationController` used to provision a
   shadow user when the approving session's subject did not exist in the device code's tenant. The branch was unreachable
   (the session cookie is scoped to that tenant) and was removed; such an approval is now refused with `access_denied` and a
   warning. Cross-tenant device logins use a session in the child tenant (cross-tenant login) or the token exchange. The
   approval keeps passing the session's `amr` on, so a 2FA user's device token still carries `amr=mfa`.
 
-**The evidence survives session refresh (AB#7859).** The security-stamp validator rebuilds the cookie principal from the
+**The evidence survives session refresh.** The security-stamp validator rebuilds the cookie principal from the
 user every 30 minutes (`SecurityStampValidatorOptions.ValidationInterval`) and used to drop `amr`: after the first
 revalidation every new token said `amr=pwd` and a 2FA user was refused at the boundaries above. `SessionClaimPreservation`
 (registered as `OnRefreshingPrincipal`) copies the sign-in claims `amr`, `idp` and `sid` from the verified principal onto the
@@ -900,7 +904,7 @@ principal carries it, `TokenEndpointController.CopySessionClaims`); that is now 
 `SecondFactorEvidenceRefreshTests` (the factory's `SecurityStampClock` steps 31 minutes ahead; session, new token and
 `cross-tenant-token` after the revalidation; refresh grant), `SessionClaimPreservationTests`.
 
-**Locked-out or disabled source users cross no boundary (AB#7855).** `ValidateCrossTenantAccessAsync` — called on every
+**Locked-out or disabled source users cross no boundary.** `ValidateCrossTenantAccessAsync` — called on every
 crossing (cross-tenant-token, cross-tenant-login, tenant-switch, token exchange, completion of
 the cross-tenant second factor) — refuses a source user that is locked out (`LockoutEnabled` and `LockoutEnd` in the future)
 or that the sign-in rules refuse (`IdentityOptions.SignIn`: confirmed e-mail / phone / account, the rules
@@ -913,7 +917,7 @@ Tests: `tests/IdentityServices.IntegrationTests/Api/Auth/CrossTenantSecondFactor
 enrollment, real authorization-code tokens; every entry point above, with and without 2FA), plus unit tests in
 `CrossTenantAuthenticationServiceTests` and `CrossTenantLoginTests`.
 
-### Cross-Tenant Shadow User Roles and Identity (AB#5708)
+### Cross-Tenant Shadow User Roles and Identity
 
 **Effective roles are computed at token time, never copied onto the shadow user.** Every token
 issuance, refresh redemption and role check reads them through `OctoUserStore.GetRolesAsync` →
@@ -930,8 +934,8 @@ effective roles(shadow user U in tenant B) =
 ```
 
 The name chain unwinds the `xt_` prefixes (`CrossTenantShadowUserName.GetSourceChain`):
-`xt_karlplus_xt_meshmakers_gerald` → `(karlplus, xt_meshmakers_gerald)`, `(meshmakers, gerald)`.
-Every tier is the same person — the rule already used by the token exchange (AB#4966) and
+`xt_tenant-c_xt_meshmakers_gerald` → `(tenant-c, xt_meshmakers_gerald)`, `(meshmakers, gerald)`.
+Every tier is the same person — the rule already used by the token exchange and
 `allowed_tenants` — so a mapping an admin created for the home identity also applies when the
 person arrives through the parent's shadow user.
 
@@ -970,7 +974,7 @@ Consequences:
 
 - A role a blueprint adds to `TenantOwners` (`IdentityAssociationMigration.EnsureTenantOwnersGroupAsync`)
   or to any group the mapping is in reaches cross-tenant owners on their next token — no manual
-  group edit. Before AB#5708 only groups containing the **user** counted, and `MappedRoleIds` (a
+  group edit. Previously only groups containing the **user** counted, and `MappedRoleIds` (a
   snapshot of the roles that existed at tenant creation) was copied onto the user at login.
 - Removing a mapping from a group, a role from a group, or a role from `MappedRoleIds` takes the
   role away on the next token. Manually assigned direct roles and direct group memberships of the
@@ -981,7 +985,7 @@ Consequences:
 
 **One shadow user per person.** The source identity depends on the login path: the password login
 unwinds to the home tenant (`xt_meshmakers_gerald`), a tenant switch or auto-login starts at the
-parent's shadow user (`xt_karlplus_xt_meshmakers_gerald`). `FindCrossTenantUserAsync` returns the
+parent's shadow user (`xt_tenant-c_xt_meshmakers_gerald`). `FindCrossTenantUserAsync` returns the
 exactly named shadow user if it exists; otherwise any shadow user whose chain unwinds to the same
 home identity (case-insensitive) and that has **no password** — shortest chain first. Only when
 none exists is a new one created. Legacy duplicates keep working unchanged: each login path still
@@ -1003,9 +1007,9 @@ lifecycle (and `FindCrossTenantUserAsync` would stop treating the user as the pe
 `auth/reset-password`. The message is "Cross-tenant users (user names starting with 'xt_') sign in
 through their home tenant and cannot have a password."
 
-#### Cleanup of rights-less shadow users (AB#8305)
+#### Cleanup of rights-less shadow users
 
-Until AB#8304 the token exchange created the caller's `xt_` user in the target tenant before it decided, and kept it when
+Previously the token exchange created the caller's `xt_` user in the target tenant before it decided, and kept it when
 the exchange was refused. Those left-overs have no right and cannot act. `IdentityApiAuthorization:ShadowUserCleanup`
 (`OCTO_IDENTITYAPIAUTHORIZATION__SHADOWUSERCLEANUP`, Helm `services.identity.shadowUserCleanup`) removes them:
 
@@ -1024,17 +1028,17 @@ that fails is a skip reason:
 - `role` — no `AssignedRole`; `group` — no `GroupMember`; `association:<id>` — no other association in either direction;
 - `mapping` — no external tenant user mapping in this tenant for any identity of its name chain **that grants a role**
   (a mapping whose `{SourceTenantId}_{SourceUserName}` ends the user name; needs no registry and errs towards keeping).
-  **Rule A** (Odin, 2026-11-07): a mapping grants a role when its `MappedRoleIds` is not empty, or when it is a
+  **Rule A** (2026-11-07): a mapping grants a role when its `MappedRoleIds` is not empty, or when it is a
   `GroupMember` of a group that holds a role directly or through its `ChildGroup` groups (the same walk as
-  `GroupRoleResolver` at token time, depth 10). An empty mapping — the left-over that the token exchange (until AB#7088)
-  and the interactive sign-in and tenant switch (until AB#8439) wrote together with the shadow user — keeps nobody: it is
+  `GroupRoleResolver` at token time, depth 10). An empty mapping — the left-over that the token exchange (in earlier versions)
+  and the interactive sign-in and tenant switch (in earlier versions) wrote together with the shadow user — keeps nobody: it is
   listed with the candidate and deleted together with it. An empty mapping a kept `xt_` user depends on stays: its
   nearest tier (the mapping whose `xt_{SourceTenantId}_{SourceUserName}` is the whole user name — the sibling grant of
   its tenant switch), and every mapping of its chain when it has neither a nearest-tier nor a role-granting mapping (then
   that mapping is its only explicit provisioning). A deeper tier of a longer kept chain adds nothing to that user (no role,
-  and its own mapping already provisions it), so it does not protect the mapping: in test-2 `gastrodemo`,
-  `accountingmanagement/xt_octosystem_<n>` belongs to the candidate `xt_accountingmanagement_xt_octosystem_<n>`, not to the
-  kept `xt_karlplus_xt_accountingmanagement_xt_octosystem_<n>` with its own mapping `karlplus/…` (DryRun 2, AB#8305);
+  and its own mapping already provisions it), so it does not protect the mapping: in test-2 a demo tenant,
+  `tenant-b/xt_octosystem_<n>` belongs to the candidate `xt_tenant-b_xt_octosystem_<n>`, not to the
+  kept `xt_tenant-c_xt_tenant-b_xt_octosystem_<n>` with its own mapping `tenant-c/…` (DryRun 2);
 - `chain-source` — no mapping in any tenant uses the user as its source (source tenant = this tenant, source user name =
   the user name or source user id = its rtId);
 - `direct-use:<kind>` — no password, two-factor, external login, user token or claim.
@@ -1048,8 +1052,8 @@ the job; the per-user re-check and the idempotent plan (a second `Apply` finds n
 
 **Runbook per cluster** (changes identity data; each cluster needs the go of the cluster owner):
 
-1. Make sure the cluster runs identity with AB#8304 (refused exchanges create no `xt_` user any more).
-2. Read-only inventory with `scripts/identity-secret-management-role-check.sh` (AB#8155) for the baseline count of
+1. Make sure the cluster runs identity with the change that decides first and then creates the user (refused exchanges create no `xt_` user any more).
+2. Read-only inventory with `scripts/identity-secret-management-role-check.sh` for the baseline count of
    rights-less `xt_` users.
 3. Set `services.identity.shadowUserCleanup: DryRun`, deploy, wait ≥ 2 minutes, collect the `ShadowUserCleanup DryRun`
    log lines of one identity pod. The candidate count should match the baseline of users whose mappings grant no role;
@@ -1063,10 +1067,10 @@ the job; the per-user re-check and the idempotent plan (a second `Apply` finds n
 ### Tenant Switch Flow
 
 A user signed in to tenant B as a cross-tenant shadow user can re-establish the B session from one of their own
-source identities without re-entering credentials. **The source identity is always the caller's own** (AB#7815): it is
+source identities without re-entering credentials. **The source identity is always the caller's own**: it is
 the tier of the signed-in user's `xt_` name chain that lives in `SourceTenantId`; the request may name only that tenant
 and, optionally, repeat that tier's user id — any other `SourceUserId` is refused (`Success=false`, a
-`Tenant Switch Failure` audit entry). Before AB#7815 the source user was taken from the request body, so any user with
+`Tenant Switch Failure` audit entry). Previously the source user was taken from the request body, so any user with
 a B session could sign in as the shadow of any user of an ancestor tenant. A local (non-shadow) B user has no source
 identity and cannot switch. The second-factor rule above applies. No client in the platform calls this endpoint today
 (the SPA uses cross-tenant-token / cross-tenant-login, non-interactive clients the token exchange).
@@ -1090,7 +1094,7 @@ POST /{targetTenantId}/api/auth/tenant-switch
         └── Access granted ──► 200 { success: true, roles: [...] }
 ```
 
-### Cross-Tenant Token Exchange (RFC 8693, AB#4338)
+### Cross-Tenant Token Exchange (RFC 8693)
 
 For **non-interactive** clients (the MCP server), the browser tenant-switch flow above is replaced by
 an OAuth 2.0 Token Exchange grant. It lets an already-authenticated user obtain a **target-tenant (B)
@@ -1114,9 +1118,9 @@ POST /connect/token
         ├── (b) Read target B from acr_values; assert HttpContext tenant == B (fail closed → invalid_target)
         ├── (c) ValidateCrossTenantAccessAsync(B, A, subA) → null ⇒ unauthorized_client
         ├── (c2) source user has 2FA and subject token has no amr=mfa ⇒ access_denied
-        │       (error_description starts with second_factor_required, AB#7804)
+        │       (error_description starts with second_factor_required)
         ├── (d) FindOrCreateCrossTenantUserAsync(result, B) → B-shadow user (xt_A_user)
-        │       (AB#4966 dual-candidate source selection preserved)
+        │       (dual-candidate source selection preserved)
         └── Build the principal with subject = B-shadow user's RtId
         │
         ▼
@@ -1150,25 +1154,25 @@ interactive MCP clients self-register via Dynamic Client Registration (`octo-dcr
 ever consumed the static client (its fixed `:8976` loopback redirects never matched Claude Code's
 random-port callbacks).
 
-**octo-cli (AB#6839, blueprint 1.8.0).** The `octo-cli` client (rtId 660…31, public, no secret) carries
+**octo-cli (blueprint 1.8.0).** The `octo-cli` client (rtId 660…31, public, no secret) carries
 the token-exchange grant next to `device_code`, so an operator signed in to the root tenant can
 exchange that token for a child-tenant token (`acr_values=tenant:{child}`, `client_id=octo-cli`) instead
 of presenting the root token to a child route. Child tenants get the grant from their own seeded
 `octo-cli` and from the `AutoProvisionInChildTenants` mirror (which copies `AllowedGrantTypes`).
 
-*Existing tenants (AB#6839).* The seed alone does not reach a tenant that already has the client:
-`Client.AllowedGrantTypes` is `TenantOwned` (AB#6324), so the blueprint import keeps the stored value and
+*Existing tenants.* The seed alone does not reach a tenant that already has the client:
+`Client.AllowedGrantTypes` is `TenantOwned`, so the blueprint import keeps the stored value and
 the 1.8.0 apply logs `updated=0` for it. Identity therefore runs a one-time, additive step per tenant at
 every start (`OctoCliTokenExchangeGrant`, called from `SetupTenantAsync` after the blueprint apply and the
 client-mirror provisioning): it appends the token-exchange URN to `AllowedGrantTypes` of the `octo-cli`
 client and changes nothing else (no other grant, attribute or client). It logs one line per tenant
-(`AB#6839 octo-cli token-exchange grant: tenant=… result=Added|AlreadyPresent|ClientMissing|AlreadyDone`)
+(`… octo-cli token-exchange grant: tenant=… result=Added|AlreadyPresent|ClientMissing|AlreadyDone`)
 and records a run-once marker (tenant configuration `OctoCliTokenExchangeGrant`) once the client was handled,
 so a grant an administrator removes later stays removed. A tenant without an `octo-cli` client records no
 marker and is retried on the next setup. Root and child tenants both run the step; a child whose
 `octo-cli` is a mirror ends with the grant even when its parent is not fixed yet (the step runs after the
 mirror copy). Mirrors are re-synced from the root on every identity start, on every client update and by the periodic
-mirror reconciliation (AB#8019, below).
+mirror reconciliation (below).
 
 **Ancestry is not authority — provisioning is a required operator step.** The exchange proves that the
 caller's tenant is an ancestor of the target; it grants no role. The roles of the issued token are those
@@ -1178,7 +1182,7 @@ tenant, also for newly created tenants**; there is no implicit admin role for an
 2026-10-17). Nested tenants work the same way from any context of the operator: when `ProvisionCurrentUser`
 runs with a token of an intermediate tenant (subject = shadow `xt_…`), identity writes the mapping for the
 operator's home identity, so the exchange from the home token and from the intermediate tenant both succeed
-(AB#8017). A caller that is an ancestor user but holds no role in the target is refused at the exchange:
+. A caller that is an ancestor user but holds no role in the target is refused at the exchange:
 
 ```
 HTTP 403
@@ -1191,17 +1195,17 @@ marker; the text after it may change). A caller whose tenant is not an ancestor 
 `unauthorized_client`, an invalid subject token `invalid_grant`. Exchanged tokens never carry a refresh
 token — re-exchange from the root token. Every refusal is persisted as a `Token Exchange Failure` audit event.
 
-**A refused exchange writes nothing into the target tenant (AB#8304).** The exchange decides before it
+**A refused exchange writes nothing into the target tenant.** The exchange decides before it
 creates: when the caller has no B-shadow user yet, the roles its mappings in B would grant (directly or
 through the mapping's groups) are resolved first, without writing. No role → the refusal above, and B keeps
 no `xt_` user, no mapping and no association. At least one role → the shadow user is created on this first
 accepted exchange. An existing shadow user is used as before (a role-less one is refused and left as it is).
-Before AB#8304 the shadow user was created first and kept on refusal — every tenant switch into a tenant
+Previously the shadow user was created first and kept on refusal — every tenant switch into a tenant
 without rights (`octo-cli -tid`, Studio tenant switch) left a role-less `xt_` user behind.
 
 *Behaviour change for administrators:* waiting for a refused user's `xt_` user to appear and granting it a
 role directly is no longer the way to let a new cross-tenant user in. Grant through the mapping instead:
-Refinery Studio, *General → Child tenants → {tenant} → Provisioning → Add Cross-Tenant User* (AB#4652, an
+Refinery Studio, *General → Child tenants → {tenant} → Provisioning → Add Cross-Tenant User* (an
 `ExternalTenantUserMapping` that is a member of the chosen groups), `CreateExternalTenantUserMapping`, or
 `ProvisionCurrentUser -ttid` for the operator. The user's first exchange afterwards creates the `xt_` user
 with exactly the granted roles. A direct role on an existing shadow user keeps working. Tests:
@@ -1211,7 +1215,7 @@ with exactly the granted roles. A direct role on an existing shadow user keeps w
 `Exchange_UserAddedAsCrossTenantUserWithGroups_GetsExactlyTheGroupsRolesOnTheFirstExchange`,
 `Exchange_AfterDirectRoleGrantToTheShadowUser_Succeeds`.
 
-#### Only access tokens are subject tokens (AB#7860)
+#### Only access tokens are subject tokens
 
 Both `subject_token` consumers — the token exchange (`TenantExchangeProcessor`) and the on-behalf-of grant
 (`OnBehalfOfProcessor`) — validate with `SubjectTokenValidation.ForAccessToken`: signature, issuer, lifetime **and** the JWT
@@ -1224,7 +1228,7 @@ OpenIddict does not validate, so there the processor check is the only one. The 
 convention). Tests: `CrossTenantSecondFactorTests.TokenExchange_IdTokenAsSubjectToken_IsRefused`,
 `TenantExchangeSubjectTokenTypeTests`, `OnBehalfOfProcessorTests.IdTokenAsSubjectToken_IsRejectedAsInvalidGrant`.
 
-### Granting a Sibling-Tenant User With Groups (AB#8343)
+### Granting a Sibling-Tenant User With Groups
 
 An administrator of T grants one user of S with chosen T groups through the tenant-scoped mapping route — the same route
 for a registry-ancestor source and for a sibling source. Contract: `docs/CONCEPT-SIBLING-TENANT-GRANTS.md` §2.2 and §8.
@@ -1237,22 +1241,22 @@ POST {T}/v1/ExternalTenantUserMappings
 
 | Step | Rule |
 |------|------|
-| Source gate (`ISourceTenantGrantAdmission`) | S is a **registry** ancestor of T, or S permits T (`ISourceTenantGrantPolicy`, the allow-list of AB#8345); and a user with `sourceUserId` exists in S. For a non-ancestor S the user must also be no `xt_` shadow user and may sign in (not locked out, sign-in rules; AB#7855). Every refusal answers the same `403 problem+json`, code `SourceTenantNotPermitted`. `CrossTenantAncestry=Warn` does not widen this route |
+| Source gate (`ISourceTenantGrantAdmission`) | S is a **registry** ancestor of T, or S permits T (`ISourceTenantGrantPolicy`, the allow-list); and a user with `sourceUserId` exists in S. For a non-ancestor S the user must also be no `xt_` shadow user and may sign in (not locked out, sign-in rules). Every refusal answers the same `403 problem+json`, code `SourceTenantNotPermitted`. `CrossTenantAncestry=Warn` does not widen this route |
 | User name | the mapping stores — and its audit events name — the user name of S's user record and the registry's spelling of S; the request's `sourceUserName` is not used (a free-text name never reaches any event log) |
-| Duplicate | a mapping for (S, user) exists → `409`, code `ExternalTenantUserMappingAlreadyExists` (AB#6975, unchanged) |
+| Duplicate | a mapping for (S, user) exists → `409`, code `ExternalTenantUserMappingAlreadyExists` (unchanged) |
 | Groups | every `groupIds` entry must be a group of T; otherwise `400`, code `UnknownGroup`, extension `unknownGroupIds`, **nothing** stored. The mapping and its `GroupMember` edges are written in one transaction |
-| Role-change guard (AB#7927) | the effective roles of the groups count as granted, like direct `roleIds`: a built-in role the caller does not hold is refused (`403`, `role-not-held`) |
+| Role-change guard | the effective roles of the groups count as granted, like direct `roleIds`: a built-in role the caller does not hold is refused (`403`, `role-not-held`) |
 | No login provider | a grant never creates an `RtOctoTenantIdentityProvider` in T: T's login page offers no "Login via S". The sibling user reaches T by tenant switch / token exchange from an S session |
 
 **Exchange gate.** `CrossTenantAuthenticationService.ValidateCrossTenantAccessAsync` (token exchange and every other
 caller) admits a source that is no registry ancestor of T only when T holds a mapping for (S, user) **and** S permits T at
 that moment. Withdrawn permission with a mapping in place → the exchange answers `access_denied` with the description
 prefix `grant_not_permitted` (`TenantExchangeProcessor.GrantNotPermittedMarker`); no mapping → `unauthorized_client` as
-before (a removed grant answers `access_denied`, AB#8344 below). Either way nothing is written into T (AB#8304). On the first admitted exchange the `xt_{S}_{user}` shadow user is
+before (a removed grant answers `access_denied`, see below). Either way nothing is written into T. On the first admitted exchange the `xt_{S}_{user}` shadow user is
 created with exactly the roles of the mapping's groups and its direct roles — nothing from S, nothing else in T. Ancestor
-sources keep their rules (provider opt-in and registry, AB#8339).
+sources keep their rules (provider opt-in and registry).
 
-### Removing a Sibling-Tenant Grant (AB#8344)
+### Removing a Sibling-Tenant Grant
 
 An administrator of T who removes a sibling user's grant can rely on that user getting **no new T token**. The gate
 (`ValidateCrossTenantAccessAsync`, every tenant-switch caller) judges the grant at every exchange, nothing is cached:
@@ -1262,7 +1266,7 @@ An administrator of T who removes a sibling user's grant can rely on that user g
 | `DELETE {T}/v1/ExternalTenantUserMappings/{rtId}` or `DELETE {parent}/v1/AdminProvisioning/{T}/{rtId}` | `access_denied`, description prefix `tenant_not_provisioned` |
 | the mapping stays, but is member of no group any more and has no direct `roleIds` | `access_denied`, `tenant_not_provisioned` |
 | the mapping's groups grant no role any more (roles removed from the group, nested groups included) | `access_denied`, `tenant_not_provisioned` |
-| S removes T from its allow-list (`PUT {S}/v1/CrossTenantGrantPermissions`, AB#8345) while the mapping exists | `access_denied`, prefix `grant_not_permitted` |
+| S removes T from its allow-list (`PUT {S}/v1/CrossTenantGrantPermissions`) while the mapping exists | `access_denied`, prefix `grant_not_permitted` |
 
 - **Effective role of the grant.** A sibling user passes only while the mapping itself grants a role that exists in T:
   its direct `roleIds` and the roles of all its groups taken together. Removing one of two groups keeps the roles of the
@@ -1276,7 +1280,7 @@ An administrator of T who removes a sibling user's grant can rely on that user g
   grant while the grant holds; it does **not** keep the sibling user in T once the mapping is deleted or grants nothing.
   Such direct edges are neither removed nor honoured then (no write on the shadow user); for a registry-ancestor source
   they keep counting as before (`Exchange_AfterDirectRoleGrantToTheShadowUser_Succeeds`). Nothing is materialised on the
-  shadow user from the mapping (roles are resolved at token time, AB#5708), so there is nothing else to strip.
+  shadow user from the mapping (roles are resolved at token time), so there is nothing else to strip.
 - **No edge stays behind.** Deleting a mapping (`DeleteOptions.Erase`) removes its `GroupMember` edges with it; a group
   lists no member that no longer exists. Re-granting the same user afterwards is a plain create (no `409`) and yields the
   new groups' roles only; the existing shadow user is used again.
@@ -1285,7 +1289,7 @@ An administrator of T who removes a sibling user's grant can rely on that user g
   `AccessTokenLifetime` (seeded default 3600 s = 1 h; check the client, e.g. `octo-cli`, `octo-mcpServices-device`). So
   the removal is complete at the latest one access-token lifetime after it. A session that needs T again re-exchanges
   and is refused.
-- **Left-over shadow user.** The role-less `xt_` user stays in T; the cleanup of AB#8305 removes it.
+- **Left-over shadow user.** The role-less `xt_` user stays in T; the cleanup removes it.
 - **Audit.** The removal is `Identity.CrossTenantGrantRemoved` (T, and S when S admits T); every refused exchange from
   the sibling source is `Identity.CrossTenantExchangeRefused` in T and S with `reason` = `grant was removed from target
   tenant`, `grant has no effective role in target tenant` or `source tenant does not permit the target tenant`, next to
@@ -1299,7 +1303,7 @@ An administrator of T who removes a sibling user's grant can rely on that user g
 The admin-provisioning routes (`POST adminProvisioning/{target}`, `…/withGroups`, routed via a parent tenant) are
 unchanged: registry ancestors only, and `withGroups` still skips unknown group ids.
 
-### Cross-Tenant Grant Audit Events (AB#8342)
+### Cross-Tenant Grant Audit Events
 
 Every lookup, grant change and exchange that concerns a user of another tenant is written into the runtime event log of
 **both** tenants involved: the target tenant T (where the grant lives, the request tenant) and the source tenant S (where
@@ -1314,7 +1318,7 @@ the user lives). So the administrator of each tenant sees it in their own event 
 | `Identity.CrossTenantGrantRemoved` | `DELETE ExternalTenantUserMappings/{rtId}` or `DELETE AdminProvisioning/{targetTenantId}/{mappingRtId}` succeeded (groups before the removal) | T; S only when S admits T (below) | Information |
 | `Identity.CrossTenantFirstExchange` | a token exchange created the `xt_` shadow user in T with roles (any source tenant) | T and S | Information |
 | `Identity.CrossTenantExchangeRefused` | a token exchange from a **sibling** source (S no registry ancestor of T) was refused | T and S | Warning |
-| `Identity.CrossTenantGrantPermissionsChanged` | S changed the list of target tenants it permits (AB#8345) | S | Information |
+| `Identity.CrossTenantGrantPermissionsChanged` | S changed the list of target tenants it permits | S | Information |
 
 Details (key/value, `details` of the event): `actorTenantId` and `actorName` (who acted: the administrator of T by user
 name or client id; for exchanges the source user), `sourceTenantId`, `targetTenantId`, `mappingId`, `sourceUserId`,
@@ -1322,7 +1326,7 @@ name or client id; for exchanges the source user), `sourceTenantId`, `targetTena
 (lookup) and `reason` (refused exchange). An event goes to S only when S is a registered tenant other than T. A grant
 event (`GrantCreated` / `GrantChanged` / `GrantRemoved`) additionally goes to S only when S *admits* T — S is a registry
 ancestor of T or permits T through the source-tenant grant policy; the source tenant and user name of a mapping are
-input of T's administrator, so any other tenant named there receives nothing (AB#8436). A failed decision keeps the
+input of T's administrator, so any other tenant named there receives nothing. A failed decision keeps the
 event in T only.
 
 Never written: the identifier typed for a lookup miss (not even hashed — the log line of the lookup carries a hash
@@ -1335,7 +1339,7 @@ tenant) write the same grant events into T and the ancestor source S: `POST` and
 
 Writing an event never breaks the request: `IIdentityAuditService.StoreInfoAsync` / `StoreWarningAsync` (explicit
 tenant, event name = category, optional details) log a failed write and return. Implementation:
-`CrossTenantAudit/CrossTenantGrantAuditRecorder.cs` (also the `ISourceUserLookupAuditSink` of AB#8341).
+`CrossTenantAudit/CrossTenantGrantAuditRecorder.cs` (also the `ISourceUserLookupAuditSink`).
 
 **How an administrator reads them.** GraphQL on the tenant (`/{tenant}/graphql`, as an administrator of that tenant), all
 cross-tenant events at once:
@@ -1367,7 +1371,7 @@ Tests: `CrossTenantGrantAuditTests` (exactly one event in T and one in S per act
 token / password, a failing event store breaks neither lookup, grant nor exchange) and `IdentityAuditServiceTests`
 (failure auditing unchanged, explicit-tenant events).
 
-### Delegation / On-Behalf-Of (AB#5026)
+### Delegation / On-Behalf-Of
 
 A **service account** (a machine-to-machine `Client`) can obtain an access token that runs on a
 **user's** identity, so work it performs on that user's behalf is attributable to the user and bounded
@@ -1450,7 +1454,7 @@ user identity across tenants today, use the cross-tenant **token exchange** gran
 `urn:meshmakers:params:oauth:grant-type:on-behalf-of` in its `AllowedGrantTypes` —
 `ClientPermissionsMapper` turns that into the custom-flow grant permission, and OpenIddict rejects
 the request before the token controller runs otherwise. Seeding the actual pipeline service account (client,
-secret and roles) is **AB#5027** — AB#5026 ships the grant only.
+secret and roles) is the service-account client work — the delegation grant ships the grant only.
 
 **Refresh tokens are rejected, not merely discouraged.** A delegation request that carries
 `offline_access` among its scopes is refused with `invalid_scope`, and the rejection is persisted
@@ -1525,11 +1529,11 @@ The Identity CK model and default roles are installed in **all** tenants (not ju
 
 Cross-tenant users receive a `home_tenant_id` claim in their tokens, indicating which tenant owns their actual user account.
 
-#### Tenant Generation (`tenant_gen`, AB#8997)
+#### Tenant Generation (`tenant_gen`)
 
 Every access token that names a tenant in `tenant_id` also names the **generation** of that tenant in `tenant_gen`.
 A tenant id can be used again: when tenant `X` is deleted and a new tenant `X` is created, an access token of the old
-tenant would otherwise still pass every `tenant_id` check until it expires (security item AB#8970).
+tenant would otherwise still pass every `tenant_id` check until it expires (security item).
 
 | Aspect | Rule |
 |---|---|
@@ -1541,7 +1545,7 @@ tenant would otherwise still pass every `tenant_id` check until it expires (secu
 | Destination | Access token only — never the id token (also not for `AlwaysIncludeUserClaimsInIdToken` clients), never userinfo, never the principal stored in a code or refresh token (the stored grant has its own private claim, see *Grants of an earlier tenant* below). |
 | No generation | No lifecycle record, or `CreatedUtc` unset (legacy tenants, a system tenant without a record): no claim, the token is issued. |
 | Lookup failure | The token request fails with `server_error` (HTTP 5xx); no token is issued without the claim for a tenant that may have one. The read runs **before** OpenIddict redeems the authorization code, device code or refresh token, so the client can retry with the same value. The ERROR log names the tenant and the exception type, never a token or secret. |
-| Cost | One lifecycle read per token request, and since AB#9017 one per issued authorization code or approved device code (a failure there issues the grant without a generation instead of refusing); nothing on token validation. |
+| Cost | One lifecycle read per token request, and one per issued authorization code or approved device code (a failure there issues the grant without a generation instead of refusing); nothing on token validation. |
 
 Implementation: `OctoTenantGenerationClaimHandler` (`src/IdentityServices/OpenIddict/`), three OpenIddict
 `ProcessSignInContext` handlers:
@@ -1569,7 +1573,7 @@ Tests:
   exchange into a child tenant).
 - On-behalf-of and cross-tenant login use the same handlers; their cases are unit tests.
 
-#### Grants of an earlier tenant (AB#9017)
+#### Grants of an earlier tenant
 
 `tenant_gen` is read fresh at issuance, so without a further check an old credential turned into a new token stamped
 with the **new** generation: a token-exchange or on-behalf-of `subject_token`, or a refresh token, authorization code or
@@ -1590,8 +1594,8 @@ resource services accept. Identity therefore checks the generation of the creden
   `PrepareDeviceCodePrincipal`); the device authorization request (no user, no tenant) stores none, the end-user
   verification that approves the code does. Issuing a code reads the lifecycle record once; when it cannot be read the
   code is issued without a generation (WARN log) instead of failing the sign-in, and counts as `missing` on redemption.
-- **One option for resource services and identity.** The check is the evaluator of octo-common-services (AB#8999,
-  `ITenantGenerationCheck`, `docs/tenant-generation-check.md` there) behind `IGrantTenantGenerationGuard`
+- **One option for resource services and identity.** The check is the evaluator of octo-common-services (
+  `ITenantGenerationCheck`, `octo-common-services/docs/tenant-generation-check.md`) behind `IGrantTenantGenerationGuard`
   (`src/IdentityServices/OpenIddict/GrantTenantGenerationGuard.cs`), with the same option
   `TenantAuthorization:TenantGenerationEnforcement` (`Disabled` / `LogOnly` / `Enforce`, default `LogOnly`), the same
   30 s cache (invalidated by the tenant events) and the same metric.
@@ -1604,7 +1608,7 @@ resource services accept. Identity therefore checks the generation of the creden
 
 - **Not checked:** the system tenant (`System:SystemTenantId`, which carries `tenant_gen` locally) is never refused;
   a tenant without lifecycle record or `CreatedUtc` is `not_checked` and allowed.
-- **Missing:** subject tokens issued before AB#8997 and refresh tokens, codes and device codes issued before this version
+- **Missing:** subject tokens issued earlier and refresh tokens, codes and device codes issued before this version
   carry no generation. In `LogOnly` they keep working (counted as `missing`); in `Enforce` they are refused, so their users
   sign in again. A refresh in `LogOnly` stores the current generation on the rotated refresh token, so active sessions
   migrate by themselves.
@@ -1620,7 +1624,7 @@ resource services accept. Identity therefore checks the generation of the creden
   `client_id` is the client the checked token or grant was issued to (the subject token's `client_id`, the redeeming
   client for stored grants). Never tenant, user, `sub`, `tenant_gen` or a token value. The response
   (`error_description`) names no tenant and no value.
-- **Before `Enforce` (AB#9000):** identity must run this version on the environment first. The gate of an environment
+- **Before `Enforce`:** identity must run this version on the environment first. The gate of an environment
   must also account for the longest refresh-token lifetime: `missing` with `transport=grant` and
   `grant_type=refresh_token` must reach zero, or the switch accepts that users with older refresh tokens sign in again.
 
@@ -1632,7 +1636,7 @@ tenant: refresh token and code refused and not redeemed, fresh sign-in works, mi
 `LogOnly` counted and the rotated refresh token keeps the old value, token exchange refused without a shadow user and
 allowed in `LogOnly`).
 
-#### Identity's own API: the tenant check runs on bearer tokens (AB#9017)
+#### Identity's own API: the tenant check runs on bearer tokens
 
 `TenantAuthorizationMiddleware` (octo-common-services) only checks a principal whose `Identity.AuthenticationType` is
 `Bearer`, which keeps cookie principals out. The label comes from `TokenValidationParameters.AuthenticationType`, and the
@@ -1651,7 +1655,7 @@ environment: `OCTO_TENANTAUTHORIZATION__USERTOKENENFORCEMENT=LogOnly` / `OCTO_TE
 `GrantTenantGenerationGuardTests.JwtBearer_LabelsTheIdentityBearer_SoTheTenantAuthorizationMiddlewareChecksIt`,
 `GrantTenantGenerationHttpTests.IdentityRunsTheUserAndServiceTokenTenantCheckWithTheLibraryDefaults_AndTheConfigurationCanLowerIt`.
 
-**Consumers.** Resource services compare `tenant_gen` with the current generation of the tenant from AB#8999 on
+**Consumers.** Resource services compare `tenant_gen` with the current generation of the tenant from that version on
 (`TenantAuthorizationMiddleware` and the CK method caller rule in octo-common-services, option
 `TenantAuthorization:TenantGenerationEnforcement`, first released in `LogOnly`). Identity must be rolled out first:
 tokens issued before carry no claim and are counted as `missing` until they expire.
@@ -1727,7 +1731,7 @@ The `octo-data-refinery-studio` client is a public SPA (no client secret) using 
 
 ### Problem
 
-Without cookie scoping, all tenants share a single `Identity.Application` auth cookie at path `/`. When a user logs into tenant "sbeg", the cookie is sent for all tenant routes. Navigating to `/octosystem/manage` sends the same cookie, but `UserManager` looks up the user in octosystem's database — user not found — 404.
+Without cookie scoping, all tenants share a single `Identity.Application` auth cookie at path `/`. When a user logs into tenant "acme", the cookie is sent for all tenant routes. Navigating to `/octosystem/manage` sends the same cookie, but `UserManager` looks up the user in octosystem's database — user not found — 404.
 
 ### Solution: TenantCookieManager
 
@@ -1736,7 +1740,7 @@ A custom `ICookieManager` (`src/IdentityServices/Cookies/TenantCookieManager.cs`
 Cookie schemes are defined in `OctoAuthSchemes` (`src/Authentication/`): `Identity.Application` (the tenant-scoped session cookie) and `Identity.External` (external-login handshake). The Duende-era `idsrv` / `idsrv.session` / `idsrv.external` cookies **no longer exist** since the OpenIddict migration.
 
 **Scoped cookies** (tenant suffix added):
-- `.AspNetCore.Identity.Application` → `.AspNetCore.Identity.Application.sbeg`
+- `.AspNetCore.Identity.Application` → `.AspNetCore.Identity.Application.acme`
 
 **Global cookies** (unchanged):
 - `Identity.External` — written at `/signin-google` (no tenant in URL)
@@ -1758,23 +1762,23 @@ OIDC endpoints (`/connect/*`) don't include a `{tenantId}` route segment. The `O
 
 | Endpoint | Tenant Source |
 |----------|--------------|
-| `/connect/par` | `acr_values=tenant:{tenantId}` from form body (RFC 9126 Pushed Authorization Request); marks the returned `request_uri` with the tenant (`urn:ietf:params:oauth:request_uri:{tenantId}:{reference}`), or with the discovery scope of a scope-only PAR (`…:tenant_scope.{scopeTenantId}:{reference}`, AB#5311) |
+| `/connect/par` | `acr_values=tenant:{tenantId}` from form body (RFC 9126 Pushed Authorization Request); marks the returned `request_uri` with the tenant (`urn:ietf:params:oauth:request_uri:{tenantId}:{reference}`), or with the discovery scope of a scope-only PAR (`…:tenant_scope.{scopeTenantId}:{reference}`) |
 | `/connect/authorize` | Tenant marker of `request_uri` (stripped before OpenIddict reads the query); fallback `acr_values=tenant:{tenantId}` from query string; marks the issued `code` with the tenant in redirects (`response_mode=query`/`fragment`) and in 200 HTML responses (`response_mode=form_post`) |
-| `/connect/token` (authorization_code) | Tenant marker of the code (`{tenantId}:{code}`), stripped before OpenIddict reads the form; an unmarked code (issued before AB#7892) uses the system tenant |
-| `/connect/token` (refresh_token) | Tenant marker of the refresh token (wins over `acr_values`), stripped before OpenIddict reads the form; an unmarked token (issued before AB#7892) uses `acr_values=tenant:{tenantId}`, else the system tenant. Every token response that carries a refresh token marks it with the tenant |
-| `/connect/token` (device_code) | Tenant marker of the device code (`{tenantId}:{code}`, `OidcTenantMarker`), stripped before OpenIddict reads the form; fallback `acr_values=tenant:{tenantId}`, else system tenant. No in-process state (AB#7891) |
-| `/connect/token` (client_credentials, token exchange) | `acr_values=tenant:{tenantId}` from form body — **required**; without it the client lookup falls back to the system tenant, so tenant-registered clients fail with `invalid_client`, and a **mirrored** client id is refused outright with `invalid_request` (AB#5058, see below) |
-| `/connect/deviceauthorization` | `acr_values=tenant:{tenantId}` from the form body; marks the returned `device_code` with the tenant and rewrites `verification_uri` to the SPA page `/{tenantId}/device` (with `?userCode=`); nothing is stored (AB#7891) |
-| `/connect/deviceverification` | Tenant hint `acr_values=tenant:{tenantId}` the device page sends (query on GET, form body on POST); without it the system tenant. The user code is validated in that tenant's token store only (AB#7891) |
+| `/connect/token` (authorization_code) | Tenant marker of the code (`{tenantId}:{code}`), stripped before OpenIddict reads the form; an unmarked code (issued earlier) uses the system tenant |
+| `/connect/token` (refresh_token) | Tenant marker of the refresh token (wins over `acr_values`), stripped before OpenIddict reads the form; an unmarked token (issued earlier) uses `acr_values=tenant:{tenantId}`, else the system tenant. Every token response that carries a refresh token marks it with the tenant |
+| `/connect/token` (device_code) | Tenant marker of the device code (`{tenantId}:{code}`, `OidcTenantMarker`), stripped before OpenIddict reads the form; fallback `acr_values=tenant:{tenantId}`, else system tenant. No in-process state |
+| `/connect/token` (client_credentials, token exchange) | `acr_values=tenant:{tenantId}` from form body — **required**; without it the client lookup falls back to the system tenant, so tenant-registered clients fail with `invalid_client`, and a **mirrored** client id is refused outright with `invalid_request` (see below) |
+| `/connect/deviceauthorization` | `acr_values=tenant:{tenantId}` from the form body; marks the returned `device_code` with the tenant and rewrites `verification_uri` to the SPA page `/{tenantId}/device` (with `?userCode=`); nothing is stored |
+| `/connect/deviceverification` | Tenant hint `acr_values=tenant:{tenantId}` the device page sends (query on GET, form body on POST); without it the system tenant. The user code is validated in that tenant's token store only |
 | `/connect/endsession` | `id_token_hint` JWT payload → `tenant_id` claim; fallback to `acr_values` |
 | `/connect/revocation`, `/connect/introspect` | Tenant marker of the `token` form field (a refresh token), stripped before OpenIddict reads the form; else the bearer token's `tenant_id` claim |
 | `/connect/userinfo` | Bearer token's `tenant_id` claim |
 
-**Safe with several replicas and across restarts (AB#7891, AB#7892).** The middleware holds **no process-local state**.
+**Safe with several replicas and across restarts.** The middleware holds **no process-local state**.
 Every value a later request sends back — device code, authorization code, refresh token, PAR `request_uri` — carries
 its tenant (`OidcTenantMarker`): the middleware adds the marker on the response that hands the value to the client and
 removes it from the request before OpenIddict reads it, so OpenIddict only ever sees its own values. Any replica, and a
-restarted process, resolves the tenant from the request alone. Before AB#7892 authorization codes, refresh tokens and PAR
+restarted process, resolves the tenant from the request alone. Previously authorization codes, refresh tokens and PAR
 `request_uri`s were mapped to their tenant in a static in-process dictionary; with two replicas the token request of an
 app whose OIDC client lives in a sub-tenant often landed on the replica without the entry, the client was looked up in
 the system tenant and the request failed with `401 invalid_client` (login loop back to tenant discovery, test-2,
@@ -1793,13 +1797,13 @@ the system tenant and the request failed with `401 invalid_client` (login loop b
   octo-cli/octo-sdk and services pass them back unchanged. The `request_uri` stays a `urn:ietf:params:oauth:request_uri:`
   URN. Clients without `acr_values` on refresh (octo-sdk without a configured tenant, services) now keep their session on
   any replica and after a restart.
-- **Values issued before AB#7892** carry no marker and keep the old fallback: `acr_values` where the grant honours it,
+- **Values issued before the marker** carry no marker and keep the old fallback: `acr_values` where the grant honours it,
   otherwise the system tenant (a value of another tenant is unknown there and rejected).
-- **Rollout and rollback.** Pods older than AB#7892 do not understand the marker: a marked code, refresh token or
+- **Rollout and rollback.** Pods older than the marker do not understand the marker: a marked code, refresh token or
   `request_uri` sent to an old pod fails. Deploy this version with a single replica and the `Recreate` strategy first, so
   old and new pods never serve side by side; enable several replicas (or `RollingUpdate`) only after every pod runs this
   version. A rollback below this version makes the refresh tokens issued since the update unusable; those users sign in
-  again (accepted, AB#7892). Before AB#7892 every restart dropped the in-memory map anyway, so sub-tenant flows already
+  again (accepted). Previously every restart dropped the in-memory map anyway, so sub-tenant flows already
   broke on every rollout.
 - **Pushed Authorization Request (PAR, RFC 9126).** The client POSTs the authorization parameters (including
   `acr_values=tenant:{tenantId}`) to `/connect/par` and gets a `request_uri`; the follow-up `/connect/authorize` carries
@@ -1845,7 +1849,7 @@ handler and iframe script must stay in sync.
 
 `OctoClaimsDestinations.ForClient(bool alwaysIncludeUserClaimsInIdToken)` decides which claims flow into the access token vs. the id token. For clients with `AlwaysIncludeUserClaimsInIdToken = true` (e.g. Refinery Studio), the user claims (`role`, `tenant_id`, `allowed_tenants`, `home_tenant_id`, `name`, `preferred_username`, `email`, `family_name`, `given_name`) are additionally emitted into the id token — SPAs based on angular-oauth2-oidc read the user identity from id-token claims and enter a login redirect loop if they are missing.
 
-**Client-credentials tokens (AB#5032).** The `tenant_id` claim has a single producer, the user claims
+**Client-credentials tokens.** The `tenant_id` claim has a single producer, the user claims
 path, which a `client_credentials` token never reaches because it has no subject — so such a token
 carried no `tenant_id` at all, which is why the backend tenant gates skipped them entirely, letting
 any client-credentials client of this authority address any tenant.
@@ -1856,11 +1860,11 @@ client store actually resolved the client from). It is stamped before the roles,
 roles gets it too, and `OctoClaimsDestinations` routes it into the **access** token. Pinned on the
 wire by the golden baseline (`client-credentials-access-token.json`). Consumers narrow their exemption
 behind `TenantAuthorizationOptions.ServiceTokenEnforcement` in octo-common-services — default
-`Enforce` since AB#5077, i.e. a service token addressing a foreign tenant is answered with 403.
+`Enforce`, i.e. a service token addressing a foreign tenant is answered with 403.
 Setting `LogOnly` restores the migration behaviour: unchanged request outcomes plus an audit line
 per foreign-tenant access.
 
-**Ambiguous tenant binding is refused, not guessed (AB#5058).** The "otherwise the system tenant"
+**Ambiguous tenant binding is refused, not guessed.** The "otherwise the system tenant"
 half of the rule above rested on the idea that the directory which resolved the client is also the
 tenant the client belongs to. Client mirroring breaks that: `AutoProvisionInChildTenants` provisions
 the **same** `ClientId` with the **same** secret into every child tenant, so for a mirrored client id
@@ -1893,9 +1897,9 @@ endpoint can tell those callers apart; the credential is instance-wide by constr
 mirroring feature. The processor logs a warning whenever a mirroring source obtains a system-tenant
 token, and system-route authorization must not treat `tenant_id == systemTenant` on a
 client-credentials token as proof of provenance on its own. A real fix requires per-tenant mirror
-secrets — **started in AB#5061, see below; still open.**
+secrets — **started with per-tenant mirror secrets, see below; still open.**
 
-### Per-Tenant Mirror Secrets (AB#5061) — step 1 of 2
+### Per-Tenant Mirror Secrets — step 1 of 2
 
 Every mirror of a **confidential** parent client now additionally carries its **own** generated
 secret, marked `Description = "octo:mirror-own-secret"`. Possession of it proves exactly one tenant,
@@ -1927,7 +1931,7 @@ because live fleet credentials authenticate with it against child tenants today 
 `ci-deploy-{cluster}` (the workload-deployment pipeline, one Vault credential pair per cluster),
 `octo-ai-adapter` (`McpTokenIssuer`) and `claude-agent`. Removing it in the same step would break
 every workload rollout on every cluster. **Until the follow-up step removes the inherited secret,
-`tenant_id == systemTenant` on a client-credentials token remains unproven and AB#5055 stays
+`tenant_id == systemTenant` on a client-credentials token remains unproven and system-route authorization stays
 blocked.** The migration sequence and the open end-state decision are in
 `docs/CONCEPT-PER-TENANT-MIRROR-SECRETS.md`.
 
@@ -1970,13 +1974,13 @@ back to — not a credential. None of them can obtain a `client_credentials` tok
 **Roles are not mirrored.** `ClientMirrorProvisioningService` copies `RtClient` *attributes*; it
 touches no `AssignedRole` edge and no group membership. A mirrored client therefore arrives in the
 child tenant **authenticated but without any rights**, until somebody grants it roles *there*
-(`PUT {tenantId}/v1/clients/{clientId}/roles/{roleName}`, or `octo-cli AddClientToRole`; since AB#7928 only with built-in
+(`PUT {tenantId}/v1/clients/{clientId}/roles/{roleName}`, or `octo-cli AddClientToRole`; only with built-in
 roles the granting administrator holds). That is the
 real boundary downwards, and it is the one to reason about: the mirror can prove who it is, and can
 do nothing until the child tenant says what it may do.
 
 🔴 **What a mirrored credential does *not* prove, while the inherited secret is still accepted.**
-A confidential mirror carries both the copy of its parent's secret and (since AB#5061) one of its
+A confidential mirror carries both the copy of its parent's secret and (since per-tenant mirror secrets) one of its
 own. As long as the inherited copy is valid, holding a *child's* credentials is indistinguishable
 from holding the *parent's* — so **a `tenant_id` claim on a client-credentials token does not
 establish which tenant the caller came from.** It records which tenant the token was *issued for*,
@@ -1986,23 +1990,23 @@ Consequences for anyone writing authorization:
 
 - **Do not authorize on the tenant claim of a service token.** In particular, `tenant_id ==
   systemTenant` is not proof of system-tenant provenance — that is why the system-route hardening
-  (**AB#5055**) is blocked on this and must not be built on the claim alone.
+  (**system-route authorization**) is blocked on this and must not be built on the claim alone.
 - **Authorize service tokens on roles instead** — the roles assigned to that client **in the tenant
   being addressed**. Those are per-tenant by construction (they are not mirrored, see above), so they
   say what this caller may do *here*, which is the question authorization actually asks.
 - The claim remains correct and useful for *routing* and for the tenant gate's "is this token even
   addressed at this tenant" check. It is provenance that it cannot carry.
 
-This is measured, not assumed: **AB#5065** records which of the two secrets each caller actually
+This is measured, not assumed: **The mirror-secret telemetry** records which of the two secrets each caller actually
 uses (below). Once the inherited copy is gone, the tenant claim on a client-credentials token becomes
-provenance and AB#5055 unblocks.
+provenance and system-route authorization unblocks.
 
-### Mirror Reconciliation: a Removed Parent Secret Reaches Every Mirror (AB#8019)
+### Mirror Reconciliation: a Removed Parent Secret Reaches Every Mirror
 
 A mirror holds copies of the parent client's secrets. The copy after a parent change (REST secret endpoints,
 `Client.AddSecret` / `Client.RemoveSecret`, client update) runs after the parent write committed and is best effort:
 if it fails (child database unreachable, timeout, crash), the removed secret stays valid in the child tenants. Before
-AB#8019 only the next identity start repaired that.
+Previously only the next identity start repaired that.
 
 Every identity replica now runs a reconciliation every `Identity:ClientMirrorReconciliationInterval` seconds
 (default 300, `docs/configuration.md`): for every tracked mirror it reads the child mirror, then the parent client,
@@ -2018,10 +2022,10 @@ Bound: a parent secret that was removed, added, rotated or expired is accepted o
 tenant like in the parent within about one interval. No secret value or hash is logged; the meter
 `Meshmakers.Octo.Identity` counts reconciled mirrors (`identity.client_mirror.reconciled`).
 
-### Which Mirror Secret Was Used? (AB#5065) — step 3 of the migration
+### Which Mirror Secret Was Used? — step 3 of the migration
 
 Step 4 — dropping the inherited secret from every mirror — is only defensible once it is *known* that
-nobody authenticates with it any more, and until AB#5061 split the secrets there was nothing to tell
+nobody authenticates with it any more, and earlier split the secrets there was nothing to tell
 apart. `MirrorSecretUsageTelemetry` (`IdentityServices/OpenIddict/`) is that measurement.
 
 **Where it hangs.** Under Duende this decorated `ISecretsListValidator`, the one service that saw the
@@ -2074,7 +2078,7 @@ either. Only the client id, the tenant and the literal `own` / `inherited`.
 from the *presence* of an own secret, because reading `ProvisionedByParentTenantId` from a freshly
 loaded record would be a database round trip
 on every token request. A mirror that has no own secret yet — a public parent, or a confidential one
-whose provisioning loop has not run since AB#5061 shipped — produces no record. Step 4 must not be
+whose provisioning loop has not run shipped — produces no record. Step 4 must not be
 executed in that state anyway: every mirror holding its own secret is already the first row of the
 migration table in `docs/CONCEPT-PER-TENANT-MIRROR-SECRETS.md`. **A zero inherited-use count is only
 evidence once that precondition is verified per environment.**
@@ -2199,7 +2203,7 @@ Access token includes: allowed_tenants: ["tenant1", "tenant2", ...]
 
 1. **Always include the login tenant** (the tenant the user authenticated against)
 2. **Cross-tenant users** (`xt_{homeTenant}_{username}`): include the home tenant of every tier, split
-   against the tenant registry (`ICrossTenantShadowUserChainResolver`, AB#5708); an ambiguous or
+   against the tenant registry (`ICrossTenantShadowUserChainResolver`); an ambiguous or
    unregistered prefix ends the chain (fail closed)
 3. **Walk up ancestor chain**: Starting from the login tenant, query `RtOctoTenantIdentityProvider.ParentTenantId`, add each ancestor (max depth: 10, with circular reference protection)
 4. **BFS down through descendants**: Starting from the source tenant (with original username) and login tenant (with login username), check child tenants for `ExternalTenantUserMapping` matching `SourceTenantId` + `SourceUserName`
@@ -2212,7 +2216,7 @@ This ensures cascading tenant hierarchies work correctly. Example: `octosystem �
 - User "xt_octosystem_admin" logging into meshtest → BFS finds subtenant1 (sourceUserName=xt_octosystem_admin), ancestors add octosystem
 - User logging into subtenant1 → ancestors add meshtest and octosystem
 
-**Cost and caching (AB#6307, AB#6308):**
+**Cost and caching:**
 - Results are cached in `IMemoryCache` for 45 s (`CacheTtl`): the tenant registry list and every mapping probe
   (tenant, source tenant, source user → bool), negative results included, failures not.
 - A mapping probe opens the child tenant's repository with `ISystemContext.GetRegisteredTenantRepository(OctoTenant)`
@@ -2223,7 +2227,7 @@ This ensures cascading tenant hierarchies work correctly. Example: `octosystem �
   order, so the traversal — which parent claims a child first and thereby decides the `xt_` shadow user name of its
   descendants — is deterministic.
 
-**Cross-tenant login, switch and exchange (AB#6393):** `CrossTenantAuthenticationService` only knows tenant ids
+**Cross-tenant login, switch and exchange:** `CrossTenantAuthenticationService` only knows tenant ids
 (password login walks the parent providers, `ValidateCrossTenantAccessAsync` and the `tenant_exchange` lookups walk
 the provider graph and open the source tenant), so it used `FindTenantRepositoryAsync` per hop — the same 7–9
 round trips. It now opens every tenant through `ITenantRegistry.TryGetRepositoryAsync(tenantId)`
@@ -2255,7 +2259,7 @@ Placed after `UseAuthentication()` + `UseAuthorization()` in each service's pipe
 {
   "sub": "user-id",
   "tenant_id": "meshtest",
-  "allowed_tenants": ["meshtest", "sbeg", "octosystem"],
+  "allowed_tenants": ["meshtest", "acme", "octosystem"],
   "home_tenant_id": "octosystem"
 }
 ```
@@ -2272,7 +2276,7 @@ The `AuthorizeService` in `@meshmakers/shared-auth`:
 
 The resolver runs **only at token issuance time** (login, token refresh), not per-request. The number of tenants is typically small (< 100), making the per-tenant mapping query acceptable.
 
-## Dynamic Client Registration (RFC 7591) — AB#4338
+## Dynamic Client Registration (RFC 7591)
 
 Spec-compliant interactive MCP clients (e.g. Claude Code) require **RFC 7591 Dynamic Client
 Registration** — they self-register a client at a `registration_endpoint` and do not accept a
@@ -2310,7 +2314,7 @@ their mirrors each cleanup interval. `PreBlueprintCleanupMigration` never sweeps
 (the existing non-expired client is re-issued) to avoid per-launch accumulation.
 
 **Management-surface exposure:** `ClientsController.CreateClientDto` emits `DynamicRegistration` +
-`DynamicRegistrationExpiresAt` read-only on the shared `ClientDto` (SDK ≥ the AB#4338 bump), so
+`DynamicRegistrationExpiresAt` read-only on the shared `ClientDto` (SDK ≥ the bump that added it), so
 Studio / octo-cli / MCP tools can mark dynamic clients. `ApplyToClient` never reads them back —
 accepting them would let a caller move an ordinary client into (or a dynamic client out of) the
 DCR TTL lifecycle, bypassing the hard gate.
@@ -2327,7 +2331,7 @@ Non-DCR clients are never touched.
 
 See `docs/CONCEPT-MCP-DYNAMIC-CLIENT-REGISTRATION.md` for the full design and phasing.
 
-## Authorize Error Page (AB#4950)
+## Authorize Error Page
 
 When `/connect/authorize` fails validation, the browser is redirected to
 `{tenantId}/error?errorId=<opaque>`. The `errorId` is a self-contained DataProtection-protected
@@ -2364,7 +2368,7 @@ falls back to the pre-existing `?error=`/`?errorDescription=` query parameters �
 callback still produces — whenever it is absent or the call fails. Raw OAuth codes, the description and
 the request/activity ids live in a collapsed "Technical details" block rather than in the headline.
 
-## Resource Indicators (RFC 8707) — AB#5193
+## Resource Indicators (RFC 8707)
 
 Clients that discover this authority through RFC 9728 protected-resource metadata — today the
 interactive MCP clients (Claude Code) talking to `octo-mcp-service` — send a `resource` parameter

@@ -188,8 +188,8 @@ Notable changes of the OctoMesh identity services. The CK model `System.Identity
   - role endpoints: an unexpected failure answers `500` problem details (`METHOD_HANDLER_FAILED`);
   - with `IdentityApiAuthorization:RoleEnforcement=Warn` (not the default) a caller without `UserManagement` is now
     refused (`403`) by the method instead of being let through with a warning.
-  The endpoints work whatever `Methods:Identity:EnablePasswordMethods` says (no secret). See `CLAUDE.md`, section
-  "REST facades of the role and merge endpoints (AB#8412)", for the parity table.
+  The endpoints work whatever `Methods:Identity:EnablePasswordMethods` says (no secret). See `docs/identity-rest-facades.md`, section
+  "REST facades of the role and merge endpoints", for the parity table.
 
 - **REST user create and administrator password reset run the `User` methods (AB#8413).** `POST users` and
   `POST users/ResetPassword` are facades of `User.CreateUser-1` and `User.ResetPassword-1`, called in-process through the
@@ -208,7 +208,7 @@ Notable changes of the OctoMesh identity services. The CK model `System.Identity
     endpoint answers `500` "The user was created, but ResetPasswordOnLogin could not be set." instead of `200` (the user exists without
     the flag; CodeRabbit follow-up of #269).
   The password-reset notification is still sent once per reset (by the facade until AB#7775 moves it into the method). See
-  `CLAUDE.md`, section "REST facades of create user and password reset (AB#8413)", for the parity table.
+  `docs/identity-rest-facades.md`, section "REST facades of create user and password reset", for the parity table.
 
 - **Account pages change and set passwords through `User` methods; new `User.SetPassword-1` (AB#8414, System.Identity
   3.2.0).** `POST {tenant}/api/manage/change-password` and `POST {tenant}/api/manage/set-password` (the identity account SPA,
@@ -227,7 +227,7 @@ Notable changes of the OctoMesh identity services. The CK model `System.Identity
   - an unexpected failure (handler failed, timeout) answers `500` with `Success=false` and the generic message instead of an
     unhandled exception;
   - after a success the session cookie is re-issued from the stored user, i.e. with the new security stamp.
-  See `CLAUDE.md`, section "Account pages run the password methods (AB#8414)".
+  See `docs/identity-rest-facades.md`, section "Account pages run the password methods".
 
 ### Added
 

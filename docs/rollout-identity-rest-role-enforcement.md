@@ -1,6 +1,11 @@
-# Rollout: role enforcement on the identity REST API (AB#5859)
+---
+description: "Background: rollout runbook for role enforcement on the identity REST API"
+background: true
+---
 
-Since AB#5859 the tenant REST API (`{tenant}/v1/...`) needs a tenant role in addition to `octo_api`
+# Rollout: role enforcement on the identity REST API
+
+The tenant REST API (`{tenant}/v1/...`) needs a tenant role in addition to `octo_api`
 (table: `docs/system-api.md` § Authorization Policies). Before, any signed-in user could administer identity.
 Decision: **`Enforce` on every environment**, with a precheck before each rollout. `Warn` is only the
 emergency exit.
@@ -19,7 +24,7 @@ Order: **test-2 → prod-2 → prod-1**. Only move to the next environment once 
 
 ```bash
 scripts/identity-rest-role-precheck.sh --context <env>_octosystem --discover all            # whole installation
-scripts/identity-rest-role-precheck.sh --context <env>_octosystem meshtest energyiq --all   # selected tenants, incl. INFO rows
+scripts/identity-rest-role-precheck.sh --context <env>_octosystem meshtest tenant-a --all   # selected tenants, incl. INFO rows
 ```
 
 - `<env>` = `test-2`, `prod-2`, `prod-1`. octo-cli has no per-call tenant switch: the script uses one
@@ -58,7 +63,7 @@ clients/API resources/identity providers. Then re-run step 1 until no `FINDING` 
 
 ## 3. Release identity + chart (default `Enforce`)
 
-- Identity image with AB#5859 through the services train / hotfix (`octo-mesh-deployment`).
+- An identity image with the role enforcement through the services train / hotfix (`octo-mesh-deployment`).
 - `octo-mesh` chart (octo-helm-core) with `services.identity.apiRoleEnforcement` (default `Enforce`,
   env `OCTO_IDENTITYAPIAUTHORIZATION__ROLEENFORCEMENT`). Do **not** set the value in
   `clusters/<env>/values-octo-mesh.yaml` - the default applies.
@@ -79,7 +84,7 @@ clients/API resources/identity providers. Then re-run step 1 until no `FINDING` 
    `CommunicationManagement`); CI/provisioning (`ci-deploy`, `claude-agent`) runs one read
    command against the identity API.
 5. **Logs** for 30-60 min: no unexpected `Identity API call denied` lines
-   (Dash0, dataset `<env>`: `k8s.container.name is identity` + `otel.log.body contains AB#5859`). Evaluate a log extract with the script:
+   (Dash0, dataset `<env>`: `k8s.container.name is identity` + `otel.log.body contains` the work-item marker that `scripts/identity-rest-role-precheck.sh` filters on). Evaluate a log extract with the script:
 
 ```bash
 scripts/identity-rest-role-precheck.sh --warn-log identity-<env>.log --context <env>_octosystem
@@ -109,16 +114,16 @@ subject IDs to user names.
 3. Once the warn log has no new `would-deny` lines: remove the value again (default `Enforce`),
    deploy, and repeat step 4.
 
-## AB#5861: `SecretManagement` for API secret writes
+## `SecretManagement` for API secret writes
 
-Since AB#5861 creating, rotating and deleting API secrets (REST `apiSecrets/*` writes, a `clientSecret` in client
+Creating, rotating and deleting API secrets (REST `apiSecrets/*` writes, a `clientSecret` in client
 create/update, the `Client.AddSecret`/`RemoveSecret` methods) needs the tenant role `SecretManagement`. It ships
 **staged**: `IdentityApiAuthorization:SecretManagementRoleEnforcement` defaults to `Warn` — `TenantManagement` or
 `UserManagement` still pass and every such call is logged
-`This would be denied with SecretManagementRoleEnforcement=Enforce (AB#5861)`. Releasing the identity image changes
+`This would be denied with SecretManagementRoleEnforcement=Enforce`. Releasing the identity image changes
 nothing for callers; only the switch to `Enforce` does.
 
-**Why staged (lockout analysis):** `SecretManagementAdminGrant` (AB#5544, runs once per tenant from
+**Why staged (lockout analysis):** `SecretManagementAdminGrant` (runs once per tenant from
 `SetupTenantAsync` on identity start, existing tenants included) granted the role only to local users holding both
 `AdminPanelManagement` and `TenantManagement` at that moment. Not covered, so denied under `Enforce` unless assigned:
 cross-tenant administrators (shadow users `xt_*`, external tenant user mappings — e.g. platform admins administering
@@ -150,13 +155,13 @@ Order per cluster: **test-2 → prod-2 → prod-1**.
    identity snapshot (users, `xt_` users, mappings, newest change per tenant DB) taken before and after must be equal —
    otherwise exit 1. Queries project only the attributes they need (no password hashes, security stamps or client
    secrets); the MongoDB password goes from the cluster secret to `mongosh` on stdin only. The JavaScript travels on
-   stdin as well (AB#8431): the `kubectl exec` request carries only a short runner that writes the script to a private
+   stdin as well: the `kubectl exec` request carries only a short runner that writes the script to a private
    temporary file in the pod, runs it and removes it — with `mongosh --eval` the 5.5 KB inventory was part of the exec
    URL and came back as an nginx error page through the Rancher proxy.
    `LOSES` rows hold `TenantManagement`/`UserManagement` but not `SecretManagement`; `NO-ROLE` = tenant without the
    role (bootstrap < 1.7.0, identity not restarted since); `ERROR` = tenant database not found (exit 1).
 
-   > The earlier version (until AB#8155) ran `octo-cli GraphQl -tid <tenant>` per tenant. That token exchange created
+   > The earlier version (in earlier versions) ran `octo-cli GraphQl -tid <tenant>` per tenant. That token exchange created
    > an `xt_` shadow user for the caller in every tenant that had none yet — the inventory was not read-only. Shadow
    > users created by earlier runs are not removed by the new script.
 2. **Deploy the identity release** (default `Warn`, nothing changes) and let it run for a while.
@@ -164,7 +169,7 @@ Order per cluster: **test-2 → prod-2 → prod-1**.
    ```bash
    scripts/identity-rest-role-precheck.sh --warn-log identity-<env>.log --context <env>_octosystem
    ```
-   (Dash0, dataset `<env>`: `k8s.container.name is identity` + `otel.log.body contains AB#5861`.) Every
+   (Dash0, dataset `<env>`: `k8s.container.name is identity` + `otel.log.body contains` the work-item marker that `scripts/identity-rest-role-precheck.sh` filters on.) Every
    `would-deny-secret` row is a subject that needs `SecretManagement`.
 4. **Assign the role** to the people (and the documented automations) from steps 1 and 3 (Gerald):
    ```bash
@@ -172,7 +177,7 @@ Order per cluster: **test-2 → prod-2 → prod-1**.
    # cross-tenant administrator: -rids REPLACES the role list - include the existing roles
    octo-cli --context <env>_<tenant> -c UpdateExternalTenantUserMapping -id "<mapping-rtid>" -rids "<existing>,SecretManagement"
    ```
-5. **Switch to `Enforce` per cluster through values** (the AB#7581 pattern: chart value with the same default as the
+5. **Switch to `Enforce` per cluster through values** (the established pattern: chart value with the same default as the
    code, overridden per cluster in `octo-mesh-deployment`, `clusters/<env>/values-octo-mesh.yaml`):
    ```yaml
    services:
@@ -188,7 +193,7 @@ Order per cluster: **test-2 → prod-2 → prod-1**.
 6. **Emergency exit**: back to `Warn` (remove the cluster value and run the CD) — or the cluster-wide `apiRoleEnforcement: Warn`, which
    relaxes every role policy including this one.
 
-### AB#8095: the method path admits `SecretManagement` (System.Identity 3.1.0)
+### The method path admits `SecretManagement` (System.Identity 3.1.0)
 
 Up to System.Identity 3.0.1 the CK declared `authorization.roles: [ TenantManagement, UserManagement ]` on
 `Client.AddSecret-1` and `Client.RemoveSecret-1`. The method gateway checks the declared roles (any-of), so a caller
@@ -200,10 +205,10 @@ System.Identity **3.1.0** declares `[ TenantManagement, UserManagement, SecretMa
 | Caller holds only | `Warn` | `Enforce` |
 |-------------------|--------|-----------|
 | `SecretManagement` (direct, via group, via external tenant user mapping) | allowed | allowed |
-| `TenantManagement` or `UserManagement` | allowed, logged (`AB#5861`) | `METHOD_FORBIDDEN` from the handler (`reason` = `role-required`), nothing changes, one audit record |
+| `TenantManagement` or `UserManagement` | allowed, logged (work-item marker) | `METHOD_FORBIDDEN` from the handler (`reason` = `role-required`), nothing changes, one audit record |
 
-- **Minor**, not Major: a role added is a method authorization widening (row M12 of `docs/ck-semver-rules.md` in
-  `octo-construction-kit-engine`), acknowledged in `ckModel.yaml` (`compatibility.acknowledge`, valid for the release that
+- **Minor**, not Major: a role added is a method authorization widening (row M12 of
+  `octo-construction-kit-engine/docs/ck-semver-rules.md`), acknowledged in `ckModel.yaml` (`compatibility.acknowledge`, valid for the release that
   published 3.1.0 only; removed right after it, because a build against the published 3.1.0 fails with `OCTO-CK204`).
   The compiled model carries the acknowledgements, so the model without them is a different content and cannot be
   published as 3.1.0 again (`OCTO-CK205`, published versions are immutable): it ships as the patch **3.1.1** (same
@@ -212,8 +217,8 @@ System.Identity **3.1.0** declares `[ TenantManagement, UserManagement, SecretMa
   the declaration is a role removal (Major) and waits for the next System.Identity major.
 - **Rollout:** System.Identity is service-managed - it ships inside the identity service with the regular identity release
   train and is applied on identity startup in every tenant (with `System.Identity.Bootstrap`). No catalog import, no
-  per-tenant step. **No FixAll** (AB#7998: FixAll upgrades libraries beyond the ranges of installed dependents, e.g.
+  per-tenant step. **No FixAll** (FixAll upgrades libraries beyond the ranges of installed dependents, e.g.
   Basic.Energy 2.0.0 over EnergyIQ's `[1.9,2.0)`); a Minor inside `[3.0.0,4.0)` needs none. A tenant that shows
   `ResolveFailed` afterwards is repaired with a targeted `ImportFromCatalog` of the affected model.
 - **Check after the release reaches a cluster:** `octo-cli --context <env>_<tenant> -c LibraryStatus` shows
-  System.Identity 3.1.1 and no `ResolveFailed`, in a sample of tenants including `energyiq`.
+  System.Identity 3.1.1 and no `ResolveFailed`, in a sample of tenants including a large tenant.

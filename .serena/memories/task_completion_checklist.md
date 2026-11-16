@@ -109,7 +109,7 @@ Types:
 ## Documentation Updates
 
 If applicable:
-- [ ] Update CLAUDE.md if architecture changes
+- [ ] Update AGENTS.md (or the routed docs/ file) if architecture changes
 - [ ] Update API documentation
 - [ ] Update README if deployment changes
 - [ ] Document breaking changes

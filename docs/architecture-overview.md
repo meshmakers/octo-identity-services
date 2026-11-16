@@ -1,8 +1,13 @@
+---
+description: "Background: system architecture overview of the identity service, components and request flow"
+background: true
+---
+
 # Architecture Overview
 
 ## System Architecture
 
-Octo Identity Services is an OAuth 2.0 / OpenID Connect identity provider built on **OpenIddict 7.6** (migrated from Duende IdentityServer 8.0.6, Epic AB#4989 — see [CONCEPT-OPENIDDICT-MIGRATION.md](CONCEPT-OPENIDDICT-MIGRATION.md)). It provides centralized authentication and authorization for the Octo platform with support for multiple identity providers. Endpoint paths, discovery, JWKS, and token/claims shapes are kept Duende-compatible so consumers work unchanged; the remaining discovery differences are documented in [openiddict-discovery-diff.md](openiddict-discovery-diff.md).
+Octo Identity Services is an OAuth 2.0 / OpenID Connect identity provider built on **OpenIddict 7.6** (migrated from Duende IdentityServer 8.0.6 — see [CONCEPT-OPENIDDICT-MIGRATION.md](CONCEPT-OPENIDDICT-MIGRATION.md)). It provides centralized authentication and authorization for the Octo platform with support for multiple identity providers. Endpoint paths, discovery, JWKS, and token/claims shapes are kept Duende-compatible so consumers work unchanged; the remaining discovery differences are documented in [openiddict-discovery-diff.md](openiddict-discovery-diff.md).
 
 ```
                                     ┌─────────────────────────────────────┐
@@ -174,7 +179,7 @@ Entity models are defined in YAML and compiled to C# at build time. Benefits:
 - Compile-time type safety
 - Generated documentation
 
-### 3. OpenIddict Integration (Epic AB#4989)
+### 3. OpenIddict Integration
 
 Custom stores replace OpenIddict's default EF Core / MongoDB stores and project the existing CK entities — no data migration was needed:
 - `OpenIddictApplicationStore` - read-only projection of `RtClient` (application id = client_id; enabled + DCR-TTL gates), permissions derived by `ClientPermissionsMapper`

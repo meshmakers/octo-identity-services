@@ -288,7 +288,7 @@ public class UsersController : ControllerBase
     ///     The endpoint calls <c>User.CreateUser</c> in-process (the password never reaches the broker, also while
     ///     <c>Methods:Identity:EnablePasswordMethods</c> keeps the method off the bus): normalised user name and e-mail, user
     ///     validators, password policy, welcome notification, one <c>Identity.Method</c> audit event. Routes, bodies and status
-    ///     codes are unchanged; see the parity table in the identity <c>CLAUDE.md</c>. Deprecated (AB#8860, wave
+    ///     codes are unchanged; see the parity table in <c>docs/identity-rest-facades.md</c>. Deprecated (wave
     ///     <c>IdentityUsersPassword</c>): callers use <c>User.CreateUser</c>.
     /// </remarks>
     [HttpPost]

@@ -1,4 +1,9 @@
-# Pilot runbook: SECRET phase 3 for identity on test-2 (AB#5528 / AB#5540 / AB#5544)
+---
+description: "Background: pilot runbook for SECRET phase 3 of the identity service"
+background: true
+---
+
+# Pilot runbook: SECRET phase 3 for identity on test-2
 
 Identity is the phase-3 pilot (decision D3): the external identity providers' `ClientSecret` (Google,
 Microsoft, Facebook, Azure Entra ID) becomes a CK `Secret` attribute (`System.Identity-2.25.0`), and
@@ -14,7 +19,7 @@ Order: **test-2 only** for the pilot. Other environments follow the release plan
 | Step at identity startup, per tenant | Effect |
 |---|---|
 | CK import `System.Identity-2.25.0` | `ClientSecret` String → Secret (Minor, no data migration). Stored strings stay as they are and are read as **legacy clear text** (counted, warned once per type without the value). |
-| Blueprint `System.Identity.Bootstrap-1.7.0` | Creates role `SecretManagement` (rtId `660…60`); not assigned to `TenantOwners` by the blueprint (since AB#8161 a later setup step adds TenantOwners → SecretManagement). |
+| Blueprint `System.Identity.Bootstrap-1.7.0` | Creates role `SecretManagement` (rtId `660…60`); not assigned to `TenantOwners` by the blueprint (a later setup step adds TenantOwners → SecretManagement). |
 | `SecretManagementAdminGrant` (once, marker in tenant config) | Grants `SecretManagement` directly to local users holding **both** `AdminPanelManagement` and `TenantManagement` (also via groups); never to groups, clients or `xt_` shadow users. Additive only; failures are logged and do not fail tenant setup. |
 | REST API identity providers | Responses never contain the secret (`clientSecretIsSet`, `clientSecretKeyMissing`, `clientSecretSetAt` instead). A new secret is encrypted on write (`enc:v2:k1:…`); saving a new secret without key ring answers **503** `SecretEncryptionNotConfigured`. |
 
@@ -31,7 +36,7 @@ then the value stays a plain string in MongoDB.
   `StrictMode: false` (state 2026-10-08: met).
 - **Strict mode stays off** (`SecretEncryption:StrictMode=false`) until phase 5 — with strict mode on,
   legacy clear-text provider secrets are rejected and those providers are skipped.
-- AB#5859 role enforcement rollout (`rollout-identity-rest-role-enforcement.md`) is understood: the
+- The role enforcement rollout (`rollout-identity-rest-role-enforcement.md`) is understood: the
   identity-provider endpoints need `TenantManagement` or `UserManagement`.
 - Backup: tenant dumps of the tenants with external providers (or a MongoDB snapshot) taken before the
   rollout — needed only for the rollback path below.
@@ -58,7 +63,7 @@ then the value stays a plain string in MongoDB.
   once with a local account; Studio loads.
 - `octo-cli -c GetIdentityProviders` (octo-cli from wave 1 or later): no `clientSecret` value; `clientSecretIsSet: true`
   for configured OAuth/OIDC providers, `clientSecretKeyMissing: false`.
-- `octo-cli -c GetRoles` shows `SecretManagement`; `GetGroup` of `TenantOwners` does **not** list it on an identity without AB#8161; with AB#8161 (tenant setup step
+- `octo-cli -c GetRoles` shows `SecretManagement`; `GetGroup` of `TenantOwners` does **not** list it on an identity without the TenantOwners grant step; with it (tenant setup step
   `TenantOwnersSecretManagementGrant`) it **does**, and that is correct; a local tenant
   administrator (AdminPanelManagement + TenantManagement) has it as a direct role after a re-login, a pipeline service
   account and a provisioned parent-tenant administrator (`xt_…`) do not.

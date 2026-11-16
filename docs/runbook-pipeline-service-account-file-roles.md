@@ -1,7 +1,12 @@
-# Runbook: pipeline service accounts hold FileManagement (AB#6542)
+---
+description: "Background: runbook proving pipeline service accounts hold FileManagement"
+background: true
+---
+
+# Runbook: pipeline service accounts hold FileManagement
 
 Proof report for the grant described in `persistence.md` ("FileManagement for the pipeline service accounts").
-Run it before S9 (AB#6183 / AB#6181) on each tenant.
+Run it before S9 on each tenant.
 
 - Endpoint (read-only, policy `IdentityTenantAdministrationReadPolicy`):
   `GET {identity}/{tenantId}/system/v1/pipelineServiceAccountFileRoles`
@@ -14,4 +19,4 @@ Run it before S9 (AB#6183 / AB#6181) on each tenant.
   update, failed-tenant retry and on every controller identity-data command. Re-run the check afterwards.
 - The check never writes. It reuses `PipelineServiceAccountRoleGrant.Plan` as the single definition of
   "holds the role". It reports `FileManagement` only; the same grant also gives every pipeline service account
-  `StreamDataReader` (AB#8581, see `persistence.md`).
+  `StreamDataReader` (see `persistence.md`).

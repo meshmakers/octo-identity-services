@@ -1,3 +1,8 @@
+---
+description: "Background: planned improvements of the email-first tenant discovery"
+background: true
+---
+
 # TODO: Tenant Discovery Improvements
 
 ## Status: Planned
@@ -55,7 +60,7 @@ These improvements address security, usability, and scalability concerns with th
 
 **Recommended approach:** Option A (domain mapping) as the primary path, with full scan as fallback for users whose email domain has no mapping.
 
-**Status (AB#6308):** the per-tenant cost of the full scan is reduced, the scan itself remains. `TenantDiscoveryService`
+**Status:** the per-tenant cost of the full scan is reduced, the scan itself remains. `TenantDiscoveryService`
 opens each tenant's repository with `ISystemContext.GetRegisteredTenantRepository(OctoTenant)` from the registry entry
 instead of `FindTenantRepositoryAsync`, so a lookup no longer runs the system-tenant existence probe, an admin session
 and the system CK auto-import per tenant — one user query per tenant is what is left. Options A–C still apply to that.

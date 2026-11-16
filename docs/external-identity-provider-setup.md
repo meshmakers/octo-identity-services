@@ -1,3 +1,8 @@
+---
+description: "Background: step-by-step setup of external identity providers"
+background: true
+---
+
 # External Identity Provider Setup Guide
 
 This document provides step-by-step instructions for configuring external identity providers with Octo Identity Services.
@@ -83,7 +88,7 @@ and fill in the provider section, then run:
 
 ```powershell
 ./scripts/om_idprov_add_microsoft.ps1                          # active octo-cli context
-./scripts/om_idprov_add_microsoft.ps1 -context local_salzburgdev
+./scripts/om_idprov_add_microsoft.ps1 -context local_dev
 ```
 
 The same pattern applies to `om_idprov_add_google.ps1`, `om_idprov_add_entra.ps1`

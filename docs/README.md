@@ -1,6 +1,14 @@
+---
+description: "Background: index of the developer documentation of the identity service"
+background: true
+---
+
 # Octo Identity Services - Developer Documentation
 
 This documentation provides a comprehensive architectural deep-dive into the Octo Identity Services codebase.
+
+The instructions for coding agents are in `AGENTS.md` at the repository root; it routes to the topic documents in this
+folder by the code you change.
 
 ## Table of Contents
 
@@ -12,7 +20,7 @@ This documentation provides a comprehensive architectural deep-dive into the Oct
 | [Persistence](persistence.md) | Data layer, Construction Kit model, and MongoDB integration |
 | [System API](system-api.md) | REST API reference, endpoints, and authorization |
 | [Configuration](configuration.md) | Environment variables, build configurations, and deployment |
-| [Sibling-Tenant Grants (concept)](CONCEPT-SIBLING-TENANT-GRANTS.md) | API contract for looking up and granting users of a non-ancestor tenant (AB#8313/AB#8340) |
+| [Sibling-Tenant Grants (concept)](CONCEPT-SIBLING-TENANT-GRANTS.md) | API contract for looking up and granting users of a non-ancestor tenant |
 
 ## Quick Reference
 
@@ -43,6 +51,6 @@ src/
 ### Key Technologies
 
 - **.NET 10** - Target framework
-- **OpenIddict 7.6** - OAuth 2.0 / OpenID Connect implementation (migrated from Duende IdentityServer, Epic AB#4989 — see [CONCEPT-OPENIDDICT-MIGRATION.md](CONCEPT-OPENIDDICT-MIGRATION.md) and [openiddict-discovery-diff.md](openiddict-discovery-diff.md))
+- **OpenIddict 7.6** - OAuth 2.0 / OpenID Connect implementation (migrated from Duende IdentityServer — see [CONCEPT-OPENIDDICT-MIGRATION.md](CONCEPT-OPENIDDICT-MIGRATION.md) and [openiddict-discovery-diff.md](openiddict-discovery-diff.md))
 - **MongoDB** - Data persistence via Octo Runtime Engine
 - **ASP.NET Core Identity** - User and role management

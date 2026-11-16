@@ -1,10 +1,15 @@
+---
+description: "Background: concept of per-tenant authentication cookie scoping"
+background: true
+---
+
 # Concept: Per-Tenant Cookie Scoping
 
 ## Status: Ready for Implementation
 
 ## 1. Problem Statement
 
-IdentityServer uses a single auth cookie (`Identity.Application`) at path `/` for all tenants. When a user logs into tenant "sbeg", the cookie is sent for all tenant routes. Navigating to `/octosystem/manage` sends the same cookie, but `UserManager` looks up the user in octosystem's database — user not found — 404.
+IdentityServer uses a single auth cookie (`Identity.Application`) at path `/` for all tenants. When a user logs into tenant "acme", the cookie is sent for all tenant routes. Navigating to `/octosystem/manage` sends the same cookie, but `UserManager` looks up the user in octosystem's database — user not found — 404.
 
 ### Root Cause
 
@@ -15,7 +20,7 @@ IdentityServer uses a single auth cookie (`Identity.Application`) at path `/` fo
 
 ## 2. Goals
 
-1. **Tenant-isolated sessions**: Login in "sbeg" must not affect "octosystem"
+1. **Tenant-isolated sessions**: Login in "acme" must not affect "octosystem"
 2. **Concurrent multi-tenant sessions**: A user can be logged into multiple tenants simultaneously
 3. **No breaking changes**: External login flows, 2FA, and OIDC must continue to work
 4. **Minimal invasiveness**: Reuse existing middleware patterns; no IdentityServer fork
@@ -92,7 +97,7 @@ Register `TenantCookieManager` in test services.
 ### Step 7: Documentation (UPDATE)
 
 - `docs/authentication.md` — cookie scoping architecture
-- `CLAUDE.md` — per-tenant cookie section
+- `docs/openiddict-protocol.md` — per-tenant cookie section
 
 ## 6. Middleware Pipeline Order
 
@@ -128,13 +133,13 @@ UseRouting()
 | `tests/.../Cookies/TenantCookieManagerTests.cs` | **NEW** |
 | `tests/.../Middleware/OidcTenantResolutionMiddlewareTests.cs` | **NEW** |
 | `docs/authentication.md` | **MODIFY** |
-| `CLAUDE.md` | **MODIFY** |
+| `docs/openiddict-protocol.md` | **MODIFY** |
 
 ## 9. Verification
 
 1. `dotnet build Octo.Identity.sln -c DebugL` — 0 errors
 2. `dotnet test Octo.Identity.sln -c DebugL` — all tests pass
-3. Login to sbeg → navigate to `/octosystem/manage` → should redirect to login (not 404)
+3. Login to acme → navigate to `/octosystem/manage` → should redirect to login (not 404)
 4. Login to octosystem → profile shows octosystem tenant
-5. Navigate back to `/sbeg/manage` → still logged in (separate cookie)
-6. OIDC flow with `acr_values=tenant:sbeg` → correct tenant login
+5. Navigate back to `/acme/manage` → still logged in (separate cookie)
+6. OIDC flow with `acr_values=tenant:acme` → correct tenant login

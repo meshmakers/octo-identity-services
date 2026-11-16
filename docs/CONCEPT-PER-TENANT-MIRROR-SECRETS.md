@@ -1,6 +1,11 @@
-# Per-Tenant Mirror Secrets (AB#5061)
+---
+description: "Background: concept of per-tenant mirror secrets and the open escalation gap"
+background: true
+---
 
-> **Status:** step 1 (AB#5061) and the telemetry of step 3 (AB#5065) implemented.
+# Per-Tenant Mirror Secrets
+
+> **Status:** step 1 and the telemetry of step 3 implemented.
 > ⚠️ **The escalation is still open** — see
 > [§6 When the gap actually closes](#6-when-the-gap-actually-closes).
 
@@ -18,10 +23,10 @@ The consequence is an **upward** privilege escalation:
 - No check at the token endpoint can tell that caller apart from the real parent, because it is
   byte-for-byte the same credential.
 
-AB#5058 closed the *silent* variant — omitting `acr_values` and being handed a system-tenant token
+The ambiguity refusal closed the *silent* variant — omitting `acr_values` and being handed a system-tenant token
 for free — by refusing to guess when a client id is mirrored. It could not close the *explicit*
 variant. That is why **a `tenant_id == systemTenant` claim on a client-credentials token is not proof
-of provenance**, and why the system-route hardening (AB#5055) is blocked.
+of provenance**, and why the system-route hardening is blocked.
 
 ## 2. Caller inventory
 
@@ -57,7 +62,7 @@ These exist in **no** git-tracked configuration. They are created with
 | `claude-agent` | agent automation against temporary tenants | `~/.octo-cli/claude-agent.secret` | yes, per tenant |
 
 🔴 **All three deliberately use parent (`octosystem`) credentials against child tenants.** The deploy
-pipeline says so in its own comments: *"log in fresh (mirrored client from Epic 3054 Phase 1 means
+pipeline says so in its own comments: *"log in fresh (mirrored client from […] Phase 1 means
 same ClientId/Secret works in every sub-tenant)"*. These are exactly the callers a naive fix breaks,
 and they are load-bearing: every workload rollout on every cluster goes through `ci-deploy`.
 
@@ -108,7 +113,7 @@ Additive and non-breaking by construction.
 2. **The own secret is preserved** across re-provisioning and across parent-side secret rotation.
    🔴 Load-bearing: both paths rewrite the mirror from the *parent's* state, so without preservation
    every service restart would silently invalidate every per-tenant credential issued so far. This is
-   the same trap already documented for the AB#5027 bus consumer.
+   the same trap already documented for the service-account bus consumer.
 3. **`POST {parentTenant}/v1/clients/{clientId}/mirrors/{childTenantId}/secret`** issues a fresh
    secret for one mirror and returns it **once**. Calling it again rotates and retires the previous
    one. Requires `IdentityApiFullAccess` in the parent tenant. Both the response DTO and the service
@@ -125,7 +130,7 @@ the *rendered* log output rather than against format strings.
 ## 6. When the gap actually closes
 
 ⚠️ **Not yet.** As long as a mirror accepts the inherited parent secret, a child credential is still
-a parent credential, and **AB#5055 must continue to treat `tenant_id == systemTenant` on a
+a parent credential, and **system-route authorization must continue to treat `tenant_id == systemTenant` on a
 client-credentials token as unproven**. Step 1 makes the fix *possible* and *adoptable*; it does not
 make it *effective*.
 
@@ -135,9 +140,9 @@ The gap closes at the moment the inherited secret is removed from mirrors. Seque
 |---|---|---|---|
 | 1 | Ship step 1. Confirm per cluster which confidential clients are actually flagged — in particular whether `octo-ai-adapter` is (§2.2 note). | identity | inventory per cluster written down |
 | 2 | For each caller in §2.2, obtain a per-tenant secret via the rotation endpoint and store it per tenant: CI/CD in Vault (or rotate-and-use inside the pipeline run, which needs no Vault change), `octo-ai-adapter` per tenant, `claude-agent` locally. Needs an `octo-cli` command wrapping the endpoint and a change in `octo-mesh-deployment/pipelines/templates/deploy-workload.yml`. | deployment / AI / CLI | every caller authenticates with a mirror-own secret |
-| 3 | Verify no caller uses the inherited secret any more. **Telemetry shipped (AB#5065):** `MirrorSecretUsageTelemetry` is called from `OctoApplicationManager.ValidateClientSecretAsync` (the OpenIddict-era seat; it decorated Duende's `ISecretsListValidator` before AB#4989) and records `secretKind=own` / `secretKind=inherited` with `clientId` and `tenantId` on every successful client-secret authentication of a mirror. Query per environment: `{namespace="octo", container="identity"} \|= "MirrorSecretUsage" \|= "secretKind=inherited"`. ⚠️ It infers mirror-ness from the *presence* of an own secret, so **row 1's per-cluster inventory is a hard precondition** — a mirror without an own secret produces no record, and a zero count would then mean "not measured", not "not used". | identity | one full release with zero inherited-secret matches, **after** every confidential mirror is confirmed to hold an own secret |
+| 3 | Verify no caller uses the inherited secret any more. **Telemetry shipped:** `MirrorSecretUsageTelemetry` is called from `OctoApplicationManager.ValidateClientSecretAsync` (the OpenIddict-era seat; it decorated Duende's `ISecretsListValidator` earlier) and records `secretKind=own` / `secretKind=inherited` with `clientId` and `tenantId` on every successful client-secret authentication of a mirror. Query per environment: `{namespace="octo", container="identity"} \|= "MirrorSecretUsage" \|= "secretKind=inherited"`. ⚠️ It infers mirror-ness from the *presence* of an own secret, so **row 1's per-cluster inventory is a hard precondition** — a mirror without an own secret produces no record, and a zero count would then mean "not measured", not "not used". | identity | one full release with zero inherited-secret matches, **after** every confidential mirror is confirmed to hold an own secret |
 | 4 | **Drop the inherited secret from every mirror.** `InheritedParentSecret_IsStillCopied_SoTheGapIsDocumentedNotClosed` must be inverted — its failure is the signal the gap closed. | identity | mirrors carry only their own secret |
-| 5 | Unblock AB#5055. | identity | system-route authorization may trust the system-tenant claim |
+| 5 | Unblock system-route authorization. | identity | system-route authorization may trust the system-tenant claim |
 
 **Open decision — the end state.** Two variants, to be chosen before step 4:
 
@@ -151,11 +156,11 @@ B is the stronger end state; A is reachable sooner. This is the decision the wor
 
 ## 7. Related
 
-- `docs/authentication.md` § *Ambiguous Tenant Binding on `client_credentials`* — AB#5058, the silent
+- `docs/authentication.md` § *Ambiguous Tenant Binding on `client_credentials`* — the ambiguity refusal, the silent
   half of this escalation.
-- `CLAUDE.md` § *Service-Account Clients over the Distribution Event Hub (AB#5027)* — the per-tenant
+- `docs/client-credentials.md` § *Service-Account Clients over the Distribution Event Hub* — the per-tenant
   secret provisioning that already works, and the "preserve the existing secret" trap that recurs here.
-- `docs/authentication.md` § *Which Mirror Secret Was Used? (AB#5065)* — the step-3 telemetry, its
+- `docs/authentication.md` § *Which Mirror Secret Was Used?* — the step-3 telemetry, its
   Dash0 log query and its blind spot.
 - `docs/authentication.md` § *Client Mirroring — What It Is For, and What a Mirrored Credential
   Proves* — why mirroring is intentional, why roles are the real boundary downwards, and why the

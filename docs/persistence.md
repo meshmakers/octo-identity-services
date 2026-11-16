@@ -1,3 +1,8 @@
+---
+description: "Background: persistence architecture, CK entities, stores, indexes, role grants"
+background: true
+---
+
 # Persistence Architecture
 
 ## Overview
@@ -112,7 +117,7 @@ Key properties:
 - `indexes` - MongoDB index definitions (supports `Ascending`, `UniqueNotDeleted`, etc.)
 
 **User Entity Indexes:**
-- `Ascending` on `NormalizedEmail` - Efficient email lookups. Note: Multiple users can share the same email (e.g., a local user and external provider users). External logins create dedicated user accounts with provider-prefixed usernames to prevent privilege escalation (Bug 3430). The user administration refuses only new duplicates (create AB#8064, e-mail change AB#8084); existing ones stay.
+- `Ascending` on `NormalizedEmail` - Efficient email lookups. Note: Multiple users can share the same email (e.g., a local user and external provider users). External logins create dedicated user accounts with provider-prefixed usernames to prevent privilege escalation. The user administration refuses only new duplicates (on create and on e-mail change); existing ones stay.
 - `Ascending` on `NormalizedUserName` - Efficient username lookups.
 
 **Group Entity (`ck-group.yaml`):**
@@ -160,8 +165,8 @@ Records are embedded within parent entities as arrays.
 
 Every attribute of a type has an `ownership` (`SeedOwned`, `TenantOwned`, `RuntimeState`, `Secret`) that decides what a blueprint
 update (an `Upsert` import, a full replace) does with a stored value. The System.Identity decisions, with the reason, are in
-`CLAUDE.md` ("Tenant-owned attributes ..."). Every attribute definition states its ownership explicitly; the build fails with `OCTO-CK001`
-when a new attribute has none (AB#6326). Two of the decisions are worth knowing for blueprint authors:
+`docs/ck-model.md` ("Tenant-owned attributes ..."). Every attribute definition states its ownership explicitly; the build fails with `OCTO-CK001`
+when a new attribute has none. Two of the decisions are worth knowing for blueprint authors:
 
 | Attribute | Ownership | Effect |
 |-----------|-----------|--------|
@@ -169,11 +174,10 @@ when a new attribute has none (AB#6326). Two of the decisions are worth knowing 
 | `DataPolicy.ProtectBlueprintLocked` (since 2.24.0) | `SeedOwned` | The blueprint owns it: every update or forced re-apply puts the shipped value back |
 | `ApiResource.Secrets`, `Client.Secrets` | `Secret` | Kept on a re-apply, left out of an `ExportRt` |
 
-### `DataPolicy.ProtectBlueprintLocked` (AB#6384)
+### `DataPolicy.ProtectBlueprintLocked`
 
 Optional Boolean, default `false` (an absent value reads as `false`, so older tenants and policies are unaffected). When `true` on a
-data policy, the engine's write guard (`DataPermissionWriteGuard`, message number 6384; see `docs/blueprints.md` in
-`octo-construction-kit-engine`) treats the policy's target CK types (derived types inherit) as follows for non-system callers:
+data policy, the engine's write guard (`DataPermissionWriteGuard`, message number 6384; see `octo-construction-kit-engine/docs/blueprints.md`) treats the policy's target CK types (derived types inherit) as follows for non-system callers:
 
 - updating, replacing or deleting an entity whose stored `RtBlueprintLocked` is `true` is refused for the whole change set;
 - setting or changing `RtBlueprintLocked`, `RtBlueprintSource` and `RtBlueprintAppliedAt` is refused;
@@ -229,8 +233,8 @@ All generated entities:
 - `RtUser` - User identity
 - `RtRole` - Role definition
 - `RtGroup` - Role group with user/group members
-- `RtPersistedGrant` - legacy grant type — email-confirmation & password-reset token store (OAuth grants moved to the OpenIddict types below at the AB#4989 cutover)
-- `RtOAuthAuthorization`, `RtOAuthToken` - OpenIddict authorization/token model (AB#4991, model `System.Identity-2.12.0`)
+- `RtPersistedGrant` - legacy grant type — email-confirmation & password-reset token store (OAuth grants moved to the OpenIddict types below at the OpenIddict cutover)
+- `RtOAuthAuthorization`, `RtOAuthToken` - OpenIddict authorization/token model (model `System.Identity-2.12.0`)
 - `RtApiResource`, `RtApiScope`, `RtIdentityResource`
 - `RtIdentityProvider` and subtypes
 
@@ -245,9 +249,9 @@ Located in `src/IdentityServerPersistence/SystemStores/`:
 | `ClientStore` | `IOctoClientStore` | OAuth/OIDC clients |
 | `ResourceStore` | `IOctoResourceStore` | API resources, scopes, identity resources |
 | `PersistentGrantStore` | `IOctoPersistentGrantStore` | Legacy grant store — email-confirmation & password-reset tokens |
-| `OpenIddict/OpenIddictApplicationStore` | `IOpenIddictApplicationStore<RtClient>` | OpenIddict view of clients (read-only projection incl. `ClientPermissionsMapper` grant-type→permissions transform, AB#4991) |
+| `OpenIddict/OpenIddictApplicationStore` | `IOpenIddictApplicationStore<RtClient>` | OpenIddict view of clients (read-only projection incl. `ClientPermissionsMapper` grant-type→permissions transform) |
 | `OpenIddict/OpenIddictScopeStore` | `IOpenIddictScopeStore<RtApiScope>` | OpenIddict view of API scopes incl. scope→audience resolution |
-| `OpenIddict/OpenIddictResourceStore` | `IOpenIddictResourceStore<RtApiResource>` | Resource-indicator (RFC 8707) lookup over the tenant's API resources — enabled-only, trailing-slash tolerant (`ResourceIdentifiers`). Local interface mirroring the OpenIddict 8.x store; OpenIddict 7.x has no resource store to replace (AB#5193) |
+| `OpenIddict/OpenIddictResourceStore` | `IOpenIddictResourceStore<RtApiResource>` | Resource-indicator (RFC 8707) lookup over the tenant's API resources — enabled-only, trailing-slash tolerant (`ResourceIdentifiers`). Local interface mirroring the OpenIddict 8.x store; OpenIddict 7.x has no resource store to replace |
 | `OpenIddict/OpenIddictAuthorizationStore` | `IOpenIddictAuthorizationStore<RtOAuthAuthorization>` | OpenIddict authorizations (consent / flow links), per tenant |
 | `OpenIddict/OpenIddictTokenStore` | `IOpenIddictTokenStore<RtOAuthToken>` | OpenIddict tokens (codes, refresh, device/user codes), per tenant |
 | `IdentityProviderStore` | `IOctoIdentityProviderStore` | External identity providers |
@@ -279,7 +283,7 @@ public class ClientStore : IOctoClientStore
 
 ### PersistentGrantStore
 
-Legacy store for `RtPersistedGrant`. Since the OpenIddict cutover (AB#4989) it holds **no OAuth grants**:
+Legacy store for `RtPersistedGrant`. Since the OpenIddict cutover it holds **no OAuth grants**:
 authorization codes, refresh tokens, device codes and remembered consents live in `RtOAuthToken` /
 `RtOAuthAuthorization` (`OpenIddictTokenStore` / `OpenIddictAuthorizationStore`). Its only writer is
 `UserEmailInteractionService`, which stores e-mail confirmation and password-reset tokens.
@@ -473,12 +477,12 @@ Every tenant is provisioned with a `TenantOwners` group that has all 10 default 
 - Provisioned to child tenants via `EnsureGroupInChildTenantAsync()`
 - Migrated to existing tenants via `IdentityAssociationMigration` (migration 9→10)
 
-### File Roles and the One-Time Grant from the Reporting Roles (AB#6180)
+### File Roles and the One-Time Grant from the Reporting Roles
 
 `System.Identity.Bootstrap` 1.5.0 seeds the tenant roles `FileManagement` (rtId `660…61`) and `FileViewer`
-(rtId `660…62`) for the platform file system (`System/FileSystemItem`, Studio "Files" page, epic AB#6171
+(rtId `660…62`) for the platform file system (`System/FileSystemItem`, Studio "Files" page, platform file system epic
 decision D5) and assigns both to `TenantOwners`; a new tenant's initial administrator gets both from
-`UserManagementService.CreateAdminUserAsync`. (`660…60` is taken by `SecretManagement`, AB#5544, which ships as blueprint 1.7.0; there is no 1.4.0.) Existing tenants receive them once, automatically, through `FileRoleGrant`
+`UserManagementService.CreateAdminUserAsync`. (`660…60` is taken by `SecretManagement`, which ships as blueprint 1.7.0; there is no 1.4.0.) Existing tenants receive them once, automatically, through `FileRoleGrant`
 (`src/IdentityServerPersistence/Services/FileRoles/`), so nobody loses access when the Studio and the file
 APIs switch from the Reporting roles to the File roles:
 
@@ -501,7 +505,7 @@ APIs switch from the Reporting roles to the File roles:
   step does nothing, so an operator who later removes a File role from someone does not see it come back. If a
   File role does not exist yet, nothing is written and no marker is recorded (retried on the next setup). A
   failure is logged and does not fail tenant setup.
-- **Tenant administrators (AB#6578, `TenantAdministratorFileRoleGrant`, rule v2):** the grant above only reaches
+- **Tenant administrators (`TenantAdministratorFileRoleGrant`, rule v2):** the grant above only reaches
   holders of the Reporting roles. A tenant without Reporting then had nobody with a File role, so its
   administrators saw an empty file system (data permissions are fail-closed, read needs `FileViewer` or
   `FileManagement`) while the platform-services admin session still found the default file root ("already
@@ -509,17 +513,17 @@ APIs switch from the Reporting roles to the File roles:
   `FileManagement` once: a local user holding `AdminPanelManagement` AND `TenantManagement` (directly, via groups
   or via `TenantOwners`), as a **direct** `AssignedRole` edge. Never granted: groups (members of any kind would
   inherit it), clients and service accounts, external tenant user mappings, cross-tenant shadow users (`xt_`,
-  AB#5708), and users with only one of the two roles. Users that already hold `FileManagement` (directly or via a
+  `provisionCurrentUser`), and users with only one of the two roles. Users that already hold `FileManagement` (directly or via a
   group) are skipped. It has its **own** marker `FileRoleGrantTenantAdministrators`
   (`IdentityServiceConstants.TenantAdministratorFileRoleGrantKey`, `Version` 2), so tenants that already carry the
   Reporting-based `FileRoleGrant` marker get the administrator grant on the next identity start / tenant setup.
   Same non-fatal, additive, run-once semantics; the pure rule is `TenantAdministratorFileRoleGrantPlanner`.
 
-### File Roles and Data Permissions on System.Files (AB#6467, blueprint 1.6.0)
+### File Roles and Data Permissions on System.Files (blueprint 1.6.0)
 
 Roles alone do not protect anything on the server: the engine treats a CK type that no data policy targets as
 unrestricted, so before 1.6.0 every caller with the API scope could write through the Files API. Blueprint
-`System.Identity.Bootstrap` 1.6.0 (the Files line, AB#6457; the SECRET line follows as 1.7.0) seeds, in
+`System.Identity.Bootstrap` 1.6.0 (the Files line; the SECRET line follows as 1.7.0) seeds, in
 `seed-data/data-permissions.yaml` and `seed-data/roles.yaml`:
 
 | Seed | rtId | Content |
@@ -539,7 +543,7 @@ re-seeded is not open in between. ReportingManagement / ReportingViewer holders 
 one-time `FileRoleGrant` above. Machine clients (client credentials) carry no roles: give a client that must use
 the Files API the FileViewer / FileManagement role.
 
-### Baseline roles of the pipeline service accounts (AB#6467 / AB#6457 / AB#8581)
+### Baseline roles of the pipeline service accounts
 
 The pipeline service accounts (client id `octo-pipeline-sa-{adapterRtId}`, one per adapter, created by the
 Communication Controller) hold the baseline roles of `PipelineServiceAccountBaselineRoles`, the single list both
@@ -547,16 +551,16 @@ writers use:
 
 | Role | Why | Granted when |
 | --- | --- | --- |
-| `FileManagement` (AB#6467 / AB#6457, decision Gerald 2026-10-11) | The file nodes (`CreateFileSystemUpdate`, `GetFileSystemContent`) run in the adapter's own engine, where the System.Files data policies above apply to the roles of the identity the node runs as; without the role a node running as `ServiceAccount` (or as `Caller` with no caller — cron and HTTP triggers) is refused, which looks like a pipeline that "does nothing". | The role is seeded; the tenant-setup pass additionally needs System.Files in the tenant's CK cache. |
-| `StreamDataReader` (AB#8581) | The asset repository gates stream-data reads on `StreamDataReader`, `StreamDataWriter` or `StreamDataAdmin` (AB#8559, mode `Off`/`Warn`/`Enforce`). The controller adds the role to every *declarative* account on reconcile (AB#8563), but it cannot add a role to a **legacy** account (created before CK 3.32.0, no `AssignedRoleNames`) without removing the roles it has. Identity grants it additively, so legacy accounts keep reading stream data under `Enforce`. | The role is seeded (every tenant with `System.Identity.Bootstrap`). |
+| `FileManagement` (decision Gerald 2026-10-11) | The file nodes (`CreateFileSystemUpdate`, `GetFileSystemContent`) run in the adapter's own engine, where the System.Files data policies above apply to the roles of the identity the node runs as; without the role a node running as `ServiceAccount` (or as `Caller` with no caller — cron and HTTP triggers) is refused, which looks like a pipeline that "does nothing". | The role is seeded; the tenant-setup pass additionally needs System.Files in the tenant's CK cache. |
+| `StreamDataReader` | The asset repository gates stream-data reads on `StreamDataReader`, `StreamDataWriter` or `StreamDataAdmin` (mode `Off`/`Warn`/`Enforce`). The controller adds the role to every *declarative* account on reconcile, but it cannot add a role to a **legacy** account (created before CK 3.32.0, no `AssignedRoleNames`) without removing the roles it has. Identity grants it additively, so legacy accounts keep reading stream data under `Enforce`. | The role is seeded (every tenant with `System.Identity.Bootstrap`). |
 
 Done identity-side, through two writers:
 
 - **At creation and on every identity-data command** (`CreateIdentityDataCommandRequestConsumer`): for a client with
   the prefix `octo-pipeline-sa-` the consumer adds the `AssignedRole` edges to the seeded baseline roles — also for a
   `null` role list (rotation, legacy account), where it only adds and never removes — and treats them as implicitly
-  declared, so the declarative role sync (AB#5111) never removes them. A role the declaration names as well (the
-  controller declares `StreamDataReader` since AB#8563) is written once. A new account is therefore covered in the same
+  declared, so the declarative role sync never removes them. A role the declaration names as well (the
+  controller declares `StreamDataReader`) is written once. A new account is therefore covered in the same
   command that creates it. If a role does not exist yet (seed pending) the consumer logs a warning.
 - **At every tenant setup** (`PipelineServiceAccountRoleGrant`, `SetupTenantAsync` after `FileRoleGrant`): every
   existing `octo-pipeline-sa-*` client receives the baseline roles it lacks. This is **not** run-once: identity start,
@@ -566,22 +570,22 @@ Done identity-side, through two writers:
   operator cannot remove a baseline role from a pipeline service account for good; restrict a pipeline with
   `Identity: Caller` or change the policies instead.
 - **Not through the role change guard.** Both writers are system grants, not role changes by a caller, so the guard of
-  AB#7914/AB#7928/AB#8569 (`role-not-held`, `self-grant`) does not apply — the same as for `FileManagement` since
-  AB#6467. The grant is narrow: only clients whose id starts with `octo-pipeline-sa-` (ordinal, case-sensitive), only
+  the role change guards (`role-not-held`, `self-grant`) does not apply — the same as for `FileManagement` since
+  the file-role grant. The grant is narrow: only clients whose id starts with `octo-pipeline-sa-` (ordinal, case-sensitive), only
   the two fixed roles of `PipelineServiceAccountBaselineRoles`, only when the role is seeded in the tenant (nothing is
-  created), and only additive. **Known gap (AB#8618):** the prefix is the only trust check — see the next point.
+  created), and only additive. **Known gap:** the prefix is the only trust check — see the next point.
 - **Covered when?** Exactly in the identity-data command that creates or touches the account (seconds after the
   controller provisions it); accounts that existed before at the first identity start with this version; the worst
   case (role seed pending at creation) at the next identity start or full tenant update. Legacy accounts therefore need
   no manual `AddClientToRole` for `StreamDataReader` before a tenant switches the stream-data gate to `Enforce`.
-- **The prefix is not reserved (known gap, AB#8618).** Nothing in the identity API rejects a client id starting with
+- **The prefix is not reserved (known gap).** Nothing in the identity API rejects a client id starting with
   `octo-pipeline-sa-` (`POST api/Clients`, tenant-administration write policy — `TenantManagement` or `UserManagement` —
   accepts any free id): such a client is treated as a pipeline service account and receives the baseline roles at the
-  next tenant setup. Since AB#7928 a caller may grant a platform role to a client only when it holds the role itself
+  next tenant setup. A caller may grant a platform role to a client only when it holds the role itself
   (`403 role-not-held`), so a client administrator who does not hold `FileManagement` / `StreamDataReader` can obtain
-  them for a client it controls through the prefix. This gap exists for `FileManagement` since AB#6467 and AB#8581
+  them for a client it controls through the prefix. This gap exists for `FileManagement` and the stream-data reader role
   extends it to `StreamDataReader`; closing it (reserving the prefix, a controller-owned marker, or checking the adapter
-  named in the client id) is tracked in AB#8618. Do not use the prefix for other clients.
+  named in the client id) is a known gap. Do not use the prefix for other clients.
 - **Concurrency:** the setup pass and the consumer take a per-tenant in-process lock (`PipelineServiceAccountRoleLock`)
   and re-read the edges before inserting, because the engine does not reject a second identical `AssignedRole` edge.
   Two identity replicas starting at the same instant can still duplicate the edge; role reads treat the edges as a set
@@ -595,13 +599,13 @@ no user roles and get 403 on the Files API (REST) and on System.Files in the eng
 `FileViewer` or `FileManagement` (`octo-cli AddClientToRole`). The **Reporting service** needs nothing: it reads and
 writes files in-process with a session without security context (system), and its client ids are only OIDC audiences.
 
-### SecretManagement Grant for Existing Administrators (AB#5544)
+### SecretManagement Grant for Existing Administrators
 
 `System.Identity.Bootstrap` 1.7.0 (the SECRET line, on top of the Files line 1.6.0) seeds the tenant role `SecretManagement` (rtId `660…60`; may trigger
 secret sweeps and delete a pre-sweep dump early). The blueprint does not assign it to
-`TenantOwners`; the step below grants it directly to human administrators. Since AB#8161 the separate step
+`TenantOwners`; the step below grants it directly to human administrators. The separate step
 `TenantOwnersSecretManagementGrant` (below) adds it to `TenantOwners`, so every member inherits it, including client
-service accounts and provisioned parent-tenant administrators (AB#5708) - intended (AB#9065; the earlier rule
+service accounts and provisioned parent-tenant administrators - intended (the earlier rule
 "human administrators only", decision 2026-10-11, is superseded). A new tenant's initial administrator gets it
 through `TenantOwners`, or directly from `UserManagementService.CreateAdminUserAsync` in the fallback without the group. Existing tenants receive it once,
 automatically, through `SecretManagementAdminGrant`
@@ -616,8 +620,8 @@ automatically, through `SecretManagementAdminGrant`
   does not hold `SecretManagement` yet gets a **direct** `AssignedRole` edge. This step never grants it to:
   - **groups** — a role on a group is inherited by all members, including client service accounts
     (`octo-pipeline-sa-*`, any client in the group) and external tenant user mappings (parent-tenant administrators
-    provisioned through `provisionCurrentUser`, AB#5708, sit in `TenantOwners`); so this step writes no group-level
-    grant. The `TenantOwners` edge comes from the separate step below (AB#8161), whose members - clients included -
+    provisioned through `provisionCurrentUser`, sit in `TenantOwners`); so this step writes no group-level
+    grant. The `TenantOwners` edge comes from the separate step below, whose members - clients included -
     inherit the role on purpose;
   - **clients and external tenant user mappings** — they are not `RtUser`s and never subjects;
   - **cross-tenant shadow users** (user name prefix `xt_`, reserved by `CrossTenantShadowUserName`) — provisioned
@@ -629,13 +633,13 @@ automatically, through `SecretManagementAdminGrant`
   who later removes the role from someone does not see it come back. If the role does not exist yet, nothing
   is written and no marker is recorded (retried on the next setup). A failure is logged and does not fail
   tenant setup.
-- **TenantOwners grant (AB#8161):** `TenantOwnersSecretManagementGrant` runs right after this step from
+- **TenantOwners grant:** `TenantOwnersSecretManagementGrant` runs right after this step from
   `SetupTenantAsync`, once per tenant (tenant configuration row `TenantOwnersSecretManagementGrant`,
   `IdentityServiceConstants.TenantOwnersSecretManagementGrantKey`). It writes one `AssignedRole` edge
   TenantOwners → SecretManagement and appends the role to octosystem mappings that carry `TenantManagement` and are
   no TenantOwners members (pure rule: `TenantOwnersSecretManagementGrantPlanner`). Additive only; no marker while the
   role or the group is missing, so it is retried on the next setup. Every TenantOwners member inherits the role,
-  including clients such as the scratch creator's mirror (`ScratchTenantGrantService`); this is intended (AB#9065).
+  including clients such as the scratch creator's mirror (`ScratchTenantGrantService`); this is intended.
 - **Concurrency:** the step takes a per-tenant in-process lock and re-reads each user's edges right before the
   insert (the engine does not reject a second identical `AssignedRole` edge). Two identity replicas starting at the
   same instant can still race; a duplicate edge is harmless (role reads treat the edges as a set) and the marker
@@ -692,12 +696,12 @@ Migrations run automatically on application startup.
 
 ## DTO Mapping
 
-Entities and REST DTOs are mapped by explicit code in `src/IdentityServices/Mapping/` (AB#6506; there
+Entities and REST DTOs are mapped by explicit code in `src/IdentityServices/Mapping/` (there
 is no mapping library and no license key):
 
 | Mapper | Direction | Notes |
 |--------|-----------|-------|
-| `IdentityProviderDtoMapper` (singleton, injected) | `RtIdentityProvider` → `IdentityProviderDto` | Picks the DTO subtype from the entity type. The client secret is never projected; `ClientSecretIsSet`, `ClientSecretKeyMissing` and `ClientSecretSetAt` come from `IIdentityProviderSecretReader` (stored form only, AB#5540) |
+| `IdentityProviderDtoMapper` (singleton, injected) | `RtIdentityProvider` → `IdentityProviderDto` | Picks the DTO subtype from the entity type. The client secret is never projected; `ClientSecretIsSet`, `ClientSecretKeyMissing` and `ClientSecretSetAt` come from `IIdentityProviderSecretReader` (stored form only) |
 | `IdentityProviderEntityMapping.ToEntity()` | `IdentityProviderDto` → `RtIdentityProvider` | A non-empty `ClientSecret` becomes `RtSecretValue.Pending`; `null` / `""` leaves the attribute **unassigned** — assigning `null` would write the attribute and clear the stored secret on replace |
 | `UserMapping` | `RtUser` ↔ `UserDto` | `ToDto`, `ToEntity`, `ApplyTo` (update in place). Id and logins are never taken from the request |
 | `RoleMapping` | `RtRole` ↔ `RoleDto` | `ApplyTo` changes only the name |
@@ -733,7 +737,7 @@ builder.Services.AddIdentity<RtUser, RtRole>()
 
 ### Storage Model
 
-Server-side authentication sessions are stored per-tenant in MongoDB as `RtServerSideSession` entities (CK type). The store is `OctoTicketStore` (`src/IdentityServices/OpenIddict/`), an ASP.NET Core `ITicketStore` over `RtServerSideSession` in the tenant's CK runtime repository (it replaced the former Duende `ServerSideSessionStore` in the OpenIddict migration, AB#4989).
+Server-side authentication sessions are stored per-tenant in MongoDB as `RtServerSideSession` entities (CK type). The store is `OctoTicketStore` (`src/IdentityServices/OpenIddict/`), an ASP.NET Core `ITicketStore` over `RtServerSideSession` in the tenant's CK runtime repository (it replaced the former Duende `ServerSideSessionStore` in the OpenIddict migration).
 
 | Attribute | Index | Description |
 |-----------|-------|-------------|
@@ -772,7 +776,7 @@ ASP.NET Data Protection keys are stored as `RtDataProtectionKey` entities in the
 
 When `OCTO_IDENTITY__DataProtectionKeysPath` is set and the directory contains `key-*.xml` files, the service imports those files into MongoDB **once** at startup. After a successful import, the environment variable can be removed from all deployments. This ensures a zero-logout upgrade from the old PVC-backed file storage.
 
-### Pre-Bootstrap Guard (AB#4854)
+### Pre-Bootstrap Guard
 
 The Data Protection key-ring preload (`AddDataProtection()`) runs before the setup initializer that
 bootstraps the system tenant. A key persisted at that point would materialize a collection in the
@@ -784,7 +788,7 @@ its once-per-process latch) while `IsSystemTenantExistingAsync()` is false. The 
 failed persist as best-effort; the key is re-created and persisted on the first real Data Protection
 use after the bootstrap.
 
-### Encryption at Rest (AB#5530)
+### Encryption at Rest
 
 The secret part of each key (`<masterKey requiresEncryption="true">`) is wrapped with the platform key ring
 `SecretEncryption` (the same AES-256 key ring as `Secret` attributes, delivered per cluster as
