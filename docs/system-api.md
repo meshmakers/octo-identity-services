@@ -712,7 +712,7 @@ When the caller is a cross-tenant shadow user (`xt_…`; e.g. a session scoped t
 ```typescript
 // GeneratedPasswordDto
 {
-  "password": "***REMOVED-DEMO-PASSWORD-AB3837***"  // 16-character alphanumeric
+  "password": "***REMOVED-DEMO-PASSWORD***"  // 16-character alphanumeric
 }
 ```
 

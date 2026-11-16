@@ -285,7 +285,7 @@ GET /ExternalLogin/{provider}/Callback
 Redirect to original returnUrl
 ```
 
-#### External Login Security Model (Bug 3430)
+#### External Login Security Model
 
 External login user creation follows a strict security model:
 

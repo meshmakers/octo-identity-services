@@ -154,7 +154,7 @@ The `GET` endpoint returns `ExternalTenantUserMappingDto` with a `GroupNames` fi
 
 The **per-tenant** `ExternalTenantUserMappingsController` (`{tenantId}/v1/externalTenantUserMappings`, used by `octo-cli GetExternalTenantUserMappings` and `IdentityServicesClient`) also resolves `GroupNames` on `GetAll`/`GetById` via `IGroupStore.GetGroupNamesForExternalUserMappingAsync` (inbound `GroupMember` walk, mirrors the AdminProvisioning resolution). Previously this controller left `GroupNames` empty, so a group-based grant looked like "no roles/groups" even though roles were inherited via the group. `IGroupStore` also exposes symmetric `AddMemberExternalUserAsync` / `RemoveMemberExternalUserAsync` (previously only user/client member add/remove existed).
 
-# File roles, System.Files data policies and machine clients
+## File roles, System.Files data policies and machine clients
 
 Blueprint `System.Identity.Bootstrap` 1.6.0 seeds the roles `FileManagement` / `FileViewer`, the data permissions
 `files.read` / `files.manage` (660…52/53) and the enforcing policies 660…54/55 on `System.Files/FileSystemEntity`
@@ -181,7 +181,7 @@ Reporting marker still get it) and the recurring
   `PipelineServiceAccountBaselineRolesConsumerIntegrationTests` (own class: the other provisioning tests assert
   exact role sets).
 
-# Scratch tenants: the creator becomes administrator
+## Scratch tenants: the creator becomes administrator
 
 An agent that creates a scratch child tenant with its client-credentials client has to work in it and clean it up without a human
 login. `CreateTenant` takes an opt-in `scratch` flag (asset repository, octo-cli `--scratch`, MCP `create_tenant`); a `Restore` has none - restoring into an existing scratch tenant keeps its marker; the tenant then

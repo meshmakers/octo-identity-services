@@ -117,7 +117,7 @@ die CI, die die Lane injiziert.
 - **Niemals** auf "die CI fängt es schon ab" verlassen — die CI ist die letzte, nicht die erste Verteidigungslinie.
 - Bei rotem Test: erst fixen, dann committen. Niemals "fix in einem nachfolgenden Commit" versprechen.
 
-Build #35223 (PR #95) ist genau wegen Verstoß gegen diese Regel fehlgeschlagen. Wenn lokale Validierung übersprungen
+Der Build von PR #95 ist genau wegen Verstoß gegen diese Regel fehlgeschlagen. Wenn lokale Validierung übersprungen
 wird, sind alle anderen Pre-Commit-Regeln (Lint etc.) ebenfalls hinfällig.
 
 ## Rules

@@ -69,7 +69,7 @@ blueprint seeds and pipelines cannot write it), `ManageApiController` has no e-m
 
 | Path | Behaviour | Why |
 |---|---|---|
-| External-login and LDAP auto-provisioning (`AuthApiController.CreateUserFromExternalProvider`) | creates a separate `{Provider}_{email}` user even when a local user has the address | Bug 3430 (`docs/authentication.md` § External Login Security Model): never link by e-mail (privilege escalation); refusing would lock the external user out |
+| External-login and LDAP auto-provisioning (`AuthApiController.CreateUserFromExternalProvider`) | creates a separate `{Provider}_{email}` user even when a local user has the address | no automatic account linking (`docs/authentication.md` § External Login Security Model): never link by e-mail (privilege escalation); refusing would lock the external user out |
 | Cross-tenant shadow users (`CrossTenantUserProvisioningService`) | created with, and synced on every login to, the home user's address | a dedicated account of the home identity (excluded from tenant discovery); refusing locks the person out of the child tenant, linking would hand a local user's roles to the home identity |
 | Tenant admin bootstrap (`UserManagementService`) | not checked | runs only in a tenant without users |
 

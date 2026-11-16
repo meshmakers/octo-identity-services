@@ -210,7 +210,7 @@ access token as `subject_token`; the issued token runs on the **user's** `sub` b
   is created by the Communication Controller over the bus; see "Service-Account Clients over the
   Distribution Event Hub" in `docs/client-credentials.md`.
 
-# One broken tenant database must not slow every token request
+## One broken tenant database must not slow every token request
 
 Token issuance (`AllowedTenantsResolver`: cross-tenant mapping probe of **every** registered tenant database),
 tenant discovery (user search in every tenant) and the CORS policy rebuild (client origins of every tenant) read from

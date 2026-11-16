@@ -7,6 +7,12 @@ applies_to: tests/**
 
 ## Integration-Test-Fixtures: fünf Collections, fünf Container
 
+> **State of the code (checked 2026-11-16):** the collection classes this section names
+> (`IdentityPersistenceCollection`, `WebFactoryCollection`, the folder `tests/…/Collections/`) do not exist in this
+> branch line. The integration tests share one MongoDB container through `Fixtures/SharedMongoDbContainer.cs`, and the
+> test classes use `IClassFixture<…>` or `[Collection("Sequential")]`. Look at a neighbouring test class before you
+> follow the rule for new test classes below. The rules on process-wide state in the next section apply unchanged.
+
 `IdentityServices.IntegrationTests` teilt seine MongoDB-Testcontainer über **Collection**-Fixtures, nicht
 mehr über `IClassFixture` (das erzeugt eine Fixture-Instanz **pro Testklasse** — vorher 32 Container pro
 Lauf, davon ~50 % der CI-Testzeit reines Setup). Die Definitionen liegen in `tests/…/Collections/`:

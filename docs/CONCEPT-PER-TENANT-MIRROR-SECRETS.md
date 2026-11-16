@@ -62,7 +62,7 @@ These exist in **no** git-tracked configuration. They are created with
 | `claude-agent` | agent automation against temporary tenants | `~/.octo-cli/claude-agent.secret` | yes, per tenant |
 
 🔴 **All three deliberately use parent (`octosystem`) credentials against child tenants.** The deploy
-pipeline says so in its own comments: *"log in fresh (mirrored client from Epic 3054 Phase 1 means
+pipeline says so in its own comments: *"log in fresh (mirrored client from […] Phase 1 means
 same ClientId/Secret works in every sub-tenant)"*. These are exactly the callers a naive fix breaks,
 and they are load-bearing: every workload rollout on every cluster goes through `ci-deploy`.
 

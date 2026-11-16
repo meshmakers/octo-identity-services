@@ -82,7 +82,7 @@ model `System.Identity-2.5.0` (schema version 15):
   consumer bumps on every rotation, so mirrors that fell behind can be
   detected and re-synced.
 
-**Provisioning service (#4043 — done):**
+**Provisioning service (done):**
 `IClientMirrorProvisioningService.ProvisionForChildTenantAsync(parentTenantId, childTenantId)`
 in `IdentityServerPersistence/Services/` walks the parent's flagged clients
 and (idempotently) materialises each as an `RtClient` in the child tenant's
@@ -100,7 +100,7 @@ question (intentional):** parent is hard-wired to `systemContext.TenantId` —
 nested customer sub-tenants are out of scope for v1, see
 `octo-communication-controller-services/docs/concepts/cicd-workload-deployment.md`.
 
-**Upkeep hooks (#4044 — done):**
+**Upkeep hooks (done):**
 
 - `ClientStore.MutateAsync` (the only way to change a stored client) fires `SyncMirrorsForClientAsync`
   after commit when the post-update client carries `AutoProvisionInChildTenants=true`.
@@ -198,7 +198,7 @@ in the child tenants until a restart. A compensation job (decision OD-6: no outb
   insert, row gone on the re-read),
   `tests/IdentityServices.UnitTests/Services/ClientMirrorReconciliationHostServiceTests.cs` (interval).
 
-**Management REST endpoints (#4045 — done):** all under
+**Management REST endpoints (done):** all under
 `{tenantId}/v1/clients/{clientId}/...`:
 
 | Method | Path | Purpose |
@@ -211,13 +211,13 @@ in the child tenants until a restart. A compensation job (decision OD-6: no outb
 
 Backed by `ClientMirrorController` + `ClientAutoProvisionFlagController` in
 `TenantApi/v1/Controllers/`. The `PATCH` flow piggybacks on
-`ClientStore.MutateAsync` (version-checked) so the post-commit upkeep hook (#4044) fires
+`ClientStore.MutateAsync` (version-checked) so the post-commit upkeep hook fires
 automatically — flipping the flag from `false` → `true` does **not**
 backfill existing sub-tenants; the operator must explicitly trigger
 `provisionInExistingTenants` for that (or wait for the next service
 startup, which runs the same provisioning loop).
 
-**End-to-end coverage (#4046 — done):**
+**End-to-end coverage (done):**
 `tests/IdentityServices.IntegrationTests/Persistence/ClientMirrorProvisioningIntegrationTests.cs`
 exercises the full stack against a Testcontainers-backed MongoDB:
 fresh-child provision, idempotency on repeat, backfill into three
@@ -228,13 +228,12 @@ the existing `IdentityServicesFixture` and call
 into both the system tenant and the new child tenants — this is also the
 real production path, so the integration coverage includes the
 `DefaultConfigurationCreatorService` ↔ `IClientMirrorProvisioningService`
-hookup added in #4043. `ServiceCollectionFixture` now registers
+hookup added with the provisioning service. `ServiceCollectionFixture` now registers
 `AddMigrations(typeof(IdentityServiceConstants).Assembly)` so the same
 constructor parameter that production resolves to `MigrationService` is
 satisfied in tests too.
 
-The CLI commands and the Studio UI are tracked under **ADO #4047–#4051**
-(Epic 3054).
+The CLI commands and the Studio UI are tracked separately.
 
 ## Client Role & Group Assignment
 

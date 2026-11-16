@@ -104,7 +104,7 @@ and gain the app role: `self-grant` only knew user sessions. Decision by Gerald 
   a user administrator or another client grants it.
 - **Tests:** `Authorization/RoleChangeGuardClientSelfTests` (unit: membership by rtId and client id, group roles direct and nested, nesting, other client,
   removal, user session with the same `client_id`, direct client grant), `Api/TenantApi/AppRoleGrantTests` region "Client self-grant" (REST) and the
-  `*_AB8569` cases of `Api/Methods/GroupMethodTests`.
+  client-caller cases (`AddMember_AClient…`, `SetRoles_AClient…`, `RemoveMember_AClient…`) of `Api/Methods/GroupMethodTests`.
 
 ## Role change guard on groups, mappings and role definitions
 

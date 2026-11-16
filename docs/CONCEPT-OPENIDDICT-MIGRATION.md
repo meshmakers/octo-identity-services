@@ -291,7 +291,7 @@ and middleware re-pinning dominate.
 **Open questions:** (a) keep grants centralized in the system tenant DB vs. move per-tenant now
 that `TenantId` is first-class — proposal: keep centralized, revisit separately; (b) adopt
 OpenIddict's encryption certificate for id-token/`request_uri` protection — yes, new stable cert
-in the same secret chain; (c) timing relative to Data-Permissions Epic 4969 rollout — sequence to
+in the same secret chain; (c) timing relative to Data-Permissions epic rollout — sequence to
 avoid overlapping identity-service trains.
 
 ## Implementation notes (2026-09-01)
