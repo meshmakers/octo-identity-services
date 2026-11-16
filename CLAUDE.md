@@ -1388,11 +1388,11 @@ hold (e.g. `UserManagement`) and then act as that client. `ClientsController` th
 
 ### First administrator is a member of TenantOwners (AB#7946)
 
-`UserManagementService.CreateAdminUserAsync` (setup endpoints `setup/create-admin` and `v1/setup`) grants the first administrator the 13 direct roles and, since AB#7946,
-also adds that user to the `TenantOwners` group (`AddToTenantOwnersAsync`, via `IGroupStore`). `TenantOwners` carries every built-in platform role (incl. `DataModelManagement`,
-`StreamData*` and, since AB#8161, `SecretManagement`), which the direct grants lack; without the membership the administrator holds fewer roles than the group and the guard above refuses adding anyone to it
-(`role-not-held`). The first administrator also holds `SecretManagement` directly (AB#5544); since AB#8161 `TenantOwners` carries it too (see
-"API secret writes need `SecretManagement`" below). The step is idempotent (an existing membership is not added again; a setup
+`UserManagementService.CreateAdminUserAsync` (setup endpoints `setup/create-admin` and `v1/setup`) adds the first administrator to the `TenantOwners` group (`AddToTenantOwnersAsync`, via `IGroupStore`; AB#7946). Since AB#8161 that membership
+replaces the direct roles: the 13 direct roles (`AddDirectAdministratorRolesAsync`) are only the fallback for a tenant without a usable group.
+`TenantOwners` carries every built-in platform role (incl. `DataModelManagement`, `StreamData*` and, since AB#8161, `SecretManagement`), which the direct grants lack; without the membership the administrator holds fewer roles than the group and the guard above refuses adding anyone to it
+(`role-not-held`). The first administrator therefore holds `SecretManagement` through the group (see "API secret writes need
+`SecretManagement`" below); the XML doc of `AddToTenantOwnersAsync` ("every non-secret built-in role") predates AB#8161. The step is idempotent (an existing membership is not added again; a setup
 re-run is refused anyway while users exist) and optional like the file roles: a tenant without the group logs a warning and keeps the direct roles. The setup goes
 through the stores, not the guarded controllers, on purpose. The scratch-tenant creator (`ScratchTenantGrantService`) and cross-tenant admin provisioning
 (`AdminProvisioningController`) already put their subject into `TenantOwners`; nothing changed there.
@@ -2163,13 +2163,17 @@ declared roles stay `TenantManagement`/`UserManagement`). Reads keep `IdentityTe
 logged `...SecretManagementRoleEnforcement=Enforce (AB#5861)`) | `Enforce` — because the role was at first granted only once to
 local human admins (AB#5544). Since AB#8161 (decision Gerald 2026-11-02, confirmed for clients 2026-11-16, AB#9065)
 `TenantOwners` carries `SecretManagement` (`TenantOwnersSecretManagementGrant`, once per tenant in `SetupTenantAsync`), and
-every member inherits it: users, octosystem admin mappings and **clients**, e.g. the scratch creator's mirror
-(`ScratchTenantGrantService`). That is intended: agents create clients with a secret in their scratch tenants, which
-`Enforce` refuses without the role. The role is tenant-scoped (only the tenant whose group holds it) and allows: create/
-rotate/delete secrets of the tenant's clients and API resources (incl. a `clientSecret` in `POST/PUT clients` and
-`Client.AddSecret`/`RemoveSecret`), the mirror secret rotation, and the bot-services secret sweep and its dumps
-(`POST jobs/secret-sweep`, sweep-run dump delete/restore). A TenantOwners member already holds `TenantManagement` there,
-so the added reach stays inside that tenant. `Warn` never allows less than
+every member inherits it: users, external tenant user mappings (provisioned parent-tenant administrators, from octosystem
+or any other parent) and **clients**, e.g. the scratch creator's mirror (`ScratchTenantGrantService`). That is intended:
+agents create clients with a secret in their scratch tenants, which `Enforce` refuses without the role. What it allows:
+create/rotate/delete secrets of the tenant's clients and API resources (incl. a `clientSecret` in `POST/PUT clients` and
+`Client.AddSecret`/`RemoveSecret`), rotating mirror secrets (`ClientMirrorController.RotateSecret`, target = a descendant
+tenant, `AdminProvisioningTargetScopeFilter`), and in bot-services the secret sweep and its dumps (`POST jobs/secret-sweep`,
+sweep-run dump delete/restore; `SecretManagementPolicy` there is **not** staged, it always requires the role). Scope: the
+role counts in the tenant whose `TenantOwners` carries it; the mirror rotation and the bot-services jobs (class-level
+`[AllowParentTenantAdministration]`, role checked on the caller's own token) extend it to that tenant's **descendants**, never to
+siblings or parents. A TenantOwners member already holds `TenantManagement` with the same parent-administration reach, so the
+role adds secret writes, not new tenants. `Warn` never allows less than
 before; `RoleEnforcement=Warn` relaxes it too. A refused `IdentityApiRoleRequirement` answers 403
 `{"message": "...requires the role 'X'..."}` (`IdentityApiForbiddenReasonResultHandler`, AB#5227 shape). Tests:
 `ApiSecretsControllerTests` (role x verb x kind x mode matrix, TenantOwners member, client create/update),
@@ -2982,7 +2986,8 @@ create / attach / plain restore.
   outlives the tenant); no secret is in the text.
 - **Roles of the creator:** the mirror inherits every role of `TenantOwners` in that child - all built-in platform roles **including
   `SecretManagement`** (since AB#8161; intended, AB#9065: the agent creates clients with a secret in its scratch tenant), but no app role a
-  blueprint seeds later. All of it is scoped to that one child tenant.
+  blueprint seeds later. It counts in that child and, for the parent-administration endpoints (mirror secret rotation,
+  bot-services jobs), in tenants below it - never in the parent or sibling tenants.
 - The child token of the agent is the ordinary one: `client_credentials`, `acr_values=tenant:<child>`, `scope=octo_api`, with the mirror's own
   secret (`RotateMirrorSecret`) or - while AB#5061 keeps the inherited secret - the parent client's secret.
 - Tests: `ScratchTenantCreatorGrantIntegrationTests` (real MongoDB: grant only for the creator, none without a marker, repeated setup, re-provisioned

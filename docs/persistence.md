@@ -611,7 +611,7 @@ automatically, through `SecretManagementAdminGrant`
   (`PosCreateTenant`/`PosUpdateTenant`), so the first identity start with blueprint 1.7.0 grants it.
 - **Who** (`SecretManagementGrantPlanner`, pure and unit-tested): every **local user** who holds both
   `AdminPanelManagement` **and** `TenantManagement` (directly, via groups — `TenantOwners` included — or mixed) and
-  does not hold `SecretManagement` yet gets a **direct** `AssignedRole` edge. Never granted:
+  does not hold `SecretManagement` yet gets a **direct** `AssignedRole` edge. This step never grants it to:
   - **groups** — a role on a group is inherited by all members, including client service accounts
     (`octo-pipeline-sa-*`, any client in the group) and external tenant user mappings (parent-tenant administrators
     provisioned through `provisionCurrentUser`, AB#5708, sit in `TenantOwners`); so this step writes no group-level

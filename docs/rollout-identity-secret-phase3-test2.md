@@ -58,7 +58,8 @@ then the value stays a plain string in MongoDB.
   once with a local account; Studio loads.
 - `octo-cli -c GetIdentityProviders` (octo-cli from wave 1 or later): no `clientSecret` value; `clientSecretIsSet: true`
   for configured OAuth/OIDC providers, `clientSecretKeyMissing: false`.
-- `octo-cli -c GetRoles` shows `SecretManagement`; `GetGroup` of `TenantOwners` does **not** list it at this rollout step (since AB#8161 it does); a local tenant
+- `octo-cli -c GetRoles` shows `SecretManagement`; `GetGroup` of `TenantOwners` does **not** list it on an identity without AB#8161; with AB#8161 (tenant setup step
+  `TenantOwnersSecretManagementGrant`) it **does**, and that is correct; a local tenant
   administrator (AdminPanelManagement + TenantManagement) has it as a direct role after a re-login, a pipeline service
   account and a provisioned parent-tenant administrator (`xt_…`) do not.
 - `octo-cli -c LibraryStatus --installed-only`: `System.Identity` 2.25.0 Available in every tenant.
