@@ -1389,9 +1389,10 @@ hold (e.g. `UserManagement`) and then act as that client. `ClientsController` th
 ### First administrator is a member of TenantOwners (AB#7946)
 
 `UserManagementService.CreateAdminUserAsync` (setup endpoints `setup/create-admin` and `v1/setup`) grants the first administrator the 13 direct roles and, since AB#7946,
-also adds that user to the `TenantOwners` group (`AddToTenantOwnersAsync`, via `IGroupStore`). `TenantOwners` carries every non-secret built-in role (incl. `DataModelManagement`,
-`StreamData*`), which the direct grants lack; without the membership the administrator holds fewer roles than the group and the guard above refuses adding anyone to it
-(`role-not-held`). `SecretManagement` stays a direct grant only (not in `TenantOwners`). The step is idempotent (an existing membership is not added again; a setup
+also adds that user to the `TenantOwners` group (`AddToTenantOwnersAsync`, via `IGroupStore`). `TenantOwners` carries every built-in platform role (incl. `DataModelManagement`,
+`StreamData*` and, since AB#8161, `SecretManagement`), which the direct grants lack; without the membership the administrator holds fewer roles than the group and the guard above refuses adding anyone to it
+(`role-not-held`). The first administrator also holds `SecretManagement` directly (AB#5544); since AB#8161 `TenantOwners` carries it too (see
+"API secret writes need `SecretManagement`" below). The step is idempotent (an existing membership is not added again; a setup
 re-run is refused anyway while users exist) and optional like the file roles: a tenant without the group logs a warning and keeps the direct roles. The setup goes
 through the stores, not the guarded controllers, on purpose. The scratch-tenant creator (`ScratchTenantGrantService`) and cross-tenant admin provisioning
 (`AdminProvisioningController`) already put their subject into `TenantOwners`; nothing changed there.
@@ -2159,8 +2160,16 @@ delete in `ApiSecretsController`, the mirror secret rotation (`ClientMirrorContr
 `IAuthorizationService`) and the `Client.AddSecret`/`RemoveSecret` handlers (`DecideClientSecretCaller`; the CK model's
 declared roles stay `TenantManagement`/`UserManagement`). Reads keep `IdentityTenantAdministrationReadPolicy`. Staged by
 `OCTO_IDENTITYAPIAUTHORIZATION__SECRETMANAGEMENTROLEENFORCEMENT` = `Warn` (**default**: the previous roles still pass,
-logged `...SecretManagementRoleEnforcement=Enforce (AB#5861)`) | `Enforce` — because the role was granted only once to
-local human admins (AB#5544), not to `TenantOwners`, cross-tenant admins or clients. `Warn` never allows less than
+logged `...SecretManagementRoleEnforcement=Enforce (AB#5861)`) | `Enforce` — because the role was at first granted only once to
+local human admins (AB#5544). Since AB#8161 (decision Gerald 2026-11-02, confirmed for clients 2026-11-16, AB#9065)
+`TenantOwners` carries `SecretManagement` (`TenantOwnersSecretManagementGrant`, once per tenant in `SetupTenantAsync`), and
+every member inherits it: users, octosystem admin mappings and **clients**, e.g. the scratch creator's mirror
+(`ScratchTenantGrantService`). That is intended: agents create clients with a secret in their scratch tenants, which
+`Enforce` refuses without the role. The role is tenant-scoped (only the tenant whose group holds it) and allows: create/
+rotate/delete secrets of the tenant's clients and API resources (incl. a `clientSecret` in `POST/PUT clients` and
+`Client.AddSecret`/`RemoveSecret`), the mirror secret rotation, and the bot-services secret sweep and its dumps
+(`POST jobs/secret-sweep`, sweep-run dump delete/restore). A TenantOwners member already holds `TenantManagement` there,
+so the added reach stays inside that tenant. `Warn` never allows less than
 before; `RoleEnforcement=Warn` relaxes it too. A refused `IdentityApiRoleRequirement` answers 403
 `{"message": "...requires the role 'X'..."}` (`IdentityApiForbiddenReasonResultHandler`, AB#5227 shape). Tests:
 `ApiSecretsControllerTests` (role x verb x kind x mode matrix, TenantOwners member, client create/update),
@@ -2177,7 +2186,8 @@ identity-provider `ClientSecret` into the Secret value type (AB#5540). Whoever b
 published maximum (`octo-ckc -c ValidateVersion` against the catalogs). The upgrade path is pinned by
 `BootstrapUpgradeToSecretLineIntegrationTests` (frozen 1.5.0 / 1.6.0 seed snapshots under
 `tests/IdentityServices.IntegrationTests/BootstrapSnapshots/`): nothing is lost, and from 1.6.0 the delta is exactly the
-SecretManagement role (no TenantOwners edge: human administrators only) and the direct grants to existing local administrators. A new bootstrap version
+SecretManagement role (no TenantOwners edge in the seed) and the direct grants to existing local administrators. The TenantOwners → SecretManagement
+edge is not part of the blueprint: since AB#8161 the setup step `TenantOwnersSecretManagementGrant` adds it once per tenant. A new bootstrap version
 that changes seeds should add its own snapshot.
 
 ## Logging: credentials never reach a log property (AB#5792)
@@ -2970,6 +2980,9 @@ create / attach / plain restore.
   (`UnprovisionClientFromTenant`, `DeleteClient` in the child): the next mirror provisioning creates the mirror again and the grant with it.
 - **Audit:** grant and revoke are information events (source IdentityService) in the event log of the tenant **and** of the system tenant (which
   outlives the tenant); no secret is in the text.
+- **Roles of the creator:** the mirror inherits every role of `TenantOwners` in that child - all built-in platform roles **including
+  `SecretManagement`** (since AB#8161; intended, AB#9065: the agent creates clients with a secret in its scratch tenant), but no app role a
+  blueprint seeds later. All of it is scoped to that one child tenant.
 - The child token of the agent is the ordinary one: `client_credentials`, `acr_values=tenant:<child>`, `scope=octo_api`, with the mirror's own
   secret (`RotateMirrorSecret`) or - while AB#5061 keeps the inherited secret - the parent client's secret.
 - Tests: `ScratchTenantCreatorGrantIntegrationTests` (real MongoDB: grant only for the creator, none without a marker, repeated setup, re-provisioned

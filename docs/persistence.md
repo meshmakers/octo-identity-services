@@ -614,8 +614,9 @@ automatically, through `SecretManagementAdminGrant`
   does not hold `SecretManagement` yet gets a **direct** `AssignedRole` edge. Never granted:
   - **groups** — a role on a group is inherited by all members, including client service accounts
     (`octo-pipeline-sa-*`, any client in the group) and external tenant user mappings (parent-tenant administrators
-    provisioned through `provisionCurrentUser`, AB#5708, sit in `TenantOwners`); so there is no group-level grant and
-    no `TenantOwners` edge;
+    provisioned through `provisionCurrentUser`, AB#5708, sit in `TenantOwners`); so this step writes no group-level
+    grant. The `TenantOwners` edge comes from the separate step below (AB#8161), whose members - clients included -
+    inherit the role on purpose;
   - **clients and external tenant user mappings** — they are not `RtUser`s and never subjects;
   - **cross-tenant shadow users** (user name prefix `xt_`, reserved by `CrossTenantShadowUserName`) — provisioned
     parent-tenant administrators who exist as local users after their first login;
@@ -631,7 +632,8 @@ automatically, through `SecretManagementAdminGrant`
   `IdentityServiceConstants.TenantOwnersSecretManagementGrantKey`). It writes one `AssignedRole` edge
   TenantOwners → SecretManagement and appends the role to octosystem mappings that carry `TenantManagement` and are
   no TenantOwners members (pure rule: `TenantOwnersSecretManagementGrantPlanner`). Additive only; no marker while the
-  role or the group is missing, so it is retried on the next setup.
+  role or the group is missing, so it is retried on the next setup. Every TenantOwners member inherits the role,
+  including clients such as the scratch creator's mirror (`ScratchTenantGrantService`); this is intended (AB#9065).
 - **Concurrency:** the step takes a per-tenant in-process lock and re-reads each user's edges right before the
   insert (the engine does not reject a second identical `AssignedRole` edge). Two identity replicas starting at the
   same instant can still race; a duplicate edge is harmless (role reads treat the edges as a set) and the marker
