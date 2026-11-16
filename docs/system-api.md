@@ -59,9 +59,10 @@ scope requirement and the system-tenant-only rule are enforced in both modes.
 `UserManagement` (the rule before AB#5861) is let through and logged
 `This would be denied with SecretManagementRoleEnforcement=Enforce (AB#5861)`; a caller without any of these roles is
 denied — `Warn` never allows less than before. `Enforce`: only `SecretManagement`. `RoleEnforcement=Warn` stays the
-emergency exit and relaxes this policy too. The default is `Warn` because `SecretManagement` was granted only once,
-to the local human administrators (AB#5544): cross-tenant administrators, clients and later administrators do not
-hold it, and `TenantOwners` does not carry it. Rollout: `docs/rollout-identity-rest-role-enforcement.md` § AB#5861.
+emergency exit and relaxes this policy too. The default is `Warn` because `SecretManagement` was at first granted only
+once, to the local human administrators (AB#5544). Since AB#8161 `TenantOwners` carries it as well, so its members -
+users, external tenant user mappings (provisioned parent-tenant administrators) and clients such as the scratch
+creator's mirror - hold it in that tenant (intended, AB#9065); administrators added outside the group may still lack it. Rollout: `docs/rollout-identity-rest-role-enforcement.md` § AB#5861.
 
 **403 reason (AB#5861):** a refused role requirement answers `403` with the body
 `{"message": "Access is denied: this operation requires the role 'SecretManagement' in the tenant. ..."}` (AB#5227

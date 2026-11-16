@@ -598,10 +598,12 @@ writes files in-process with a session without security context (system), and it
 ### SecretManagement Grant for Existing Administrators (AB#5544)
 
 `System.Identity.Bootstrap` 1.7.0 (the SECRET line, on top of the Files line 1.6.0) seeds the tenant role `SecretManagement` (rtId `660…60`; may trigger
-secret sweeps and delete a pre-sweep dump early). It is for **human administrators only** (decision Gerald
-2026-10-11) and therefore deliberately **not** assigned to `TenantOwners`: that group also holds client service
-accounts and provisioned parent-tenant administrators (AB#5708), who would inherit it. A new tenant's initial
-administrator gets it from `UserManagementService.CreateAdminUserAsync`. Existing tenants receive it once,
+secret sweeps and delete a pre-sweep dump early). The blueprint does not assign it to
+`TenantOwners`; the step below grants it directly to human administrators. Since AB#8161 the separate step
+`TenantOwnersSecretManagementGrant` (below) adds it to `TenantOwners`, so every member inherits it, including client
+service accounts and provisioned parent-tenant administrators (AB#5708) - intended (AB#9065; the earlier rule
+"human administrators only", decision 2026-10-11, is superseded). A new tenant's initial administrator gets it
+through `TenantOwners`, or directly from `UserManagementService.CreateAdminUserAsync` in the fallback without the group. Existing tenants receive it once,
 automatically, through `SecretManagementAdminGrant`
 (`src/IdentityServerPersistence/Services/SecretManagement/`):
 
@@ -611,11 +613,12 @@ automatically, through `SecretManagementAdminGrant`
   (`PosCreateTenant`/`PosUpdateTenant`), so the first identity start with blueprint 1.7.0 grants it.
 - **Who** (`SecretManagementGrantPlanner`, pure and unit-tested): every **local user** who holds both
   `AdminPanelManagement` **and** `TenantManagement` (directly, via groups — `TenantOwners` included — or mixed) and
-  does not hold `SecretManagement` yet gets a **direct** `AssignedRole` edge. Never granted:
+  does not hold `SecretManagement` yet gets a **direct** `AssignedRole` edge. This step never grants it to:
   - **groups** — a role on a group is inherited by all members, including client service accounts
     (`octo-pipeline-sa-*`, any client in the group) and external tenant user mappings (parent-tenant administrators
-    provisioned through `provisionCurrentUser`, AB#5708, sit in `TenantOwners`); so there is no group-level grant and
-    no `TenantOwners` edge;
+    provisioned through `provisionCurrentUser`, AB#5708, sit in `TenantOwners`); so this step writes no group-level
+    grant. The `TenantOwners` edge comes from the separate step below (AB#8161), whose members - clients included -
+    inherit the role on purpose;
   - **clients and external tenant user mappings** — they are not `RtUser`s and never subjects;
   - **cross-tenant shadow users** (user name prefix `xt_`, reserved by `CrossTenantShadowUserName`) — provisioned
     parent-tenant administrators who exist as local users after their first login;
@@ -631,13 +634,18 @@ automatically, through `SecretManagementAdminGrant`
   `IdentityServiceConstants.TenantOwnersSecretManagementGrantKey`). It writes one `AssignedRole` edge
   TenantOwners → SecretManagement and appends the role to octosystem mappings that carry `TenantManagement` and are
   no TenantOwners members (pure rule: `TenantOwnersSecretManagementGrantPlanner`). Additive only; no marker while the
-  role or the group is missing, so it is retried on the next setup.
+  role or the group is missing, so it is retried on the next setup. Every TenantOwners member inherits the role,
+  including clients such as the scratch creator's mirror (`ScratchTenantGrantService`); this is intended (AB#9065).
 - **Concurrency:** the step takes a per-tenant in-process lock and re-reads each user's edges right before the
   insert (the engine does not reject a second identical `AssignedRole` edge). Two identity replicas starting at the
   same instant can still race; a duplicate edge is harmless (role reads treat the edges as a set) and the marker
   stops further runs.
-- **Everybody else** (e.g. a user with only `AdminPanelManagement`, service accounts, provisioned administrators)
-  gets the role by an explicit grant in the user administration (`octo-cli AddUserToRole`).
+- **Everybody else** - an account that none of the automatic paths covers (not a qualifying local administrator of
+  `SecretManagementAdminGrant`, not a `TenantOwners` member, not a qualifying octosystem mapping of
+  `TenantOwnersSecretManagementGrant`) - gets the role only by an explicit grant: a local user (e.g. one with only
+  `AdminPanelManagement`) with `octo-cli AddUserToRole`, a client with `octo-cli AddClientToRole` or by adding it to
+  `TenantOwners`. A provisioned parent-tenant administrator outside the group can be granted it as a user only after its
+  first login has created the local user.
 
 ## Migration System
 
