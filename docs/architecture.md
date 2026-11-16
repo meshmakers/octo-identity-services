@@ -85,8 +85,20 @@ delete in `ApiSecretsController`, the mirror secret rotation (`ClientMirrorContr
 `IAuthorizationService`) and the `Client.AddSecret`/`RemoveSecret` handlers (`DecideClientSecretCaller`; the CK model's
 declared roles stay `TenantManagement`/`UserManagement`). Reads keep `IdentityTenantAdministrationReadPolicy`. Staged by
 `OCTO_IDENTITYAPIAUTHORIZATION__SECRETMANAGEMENTROLEENFORCEMENT` = `Warn` (**default**: the previous roles still pass,
-logged `...SecretManagementRoleEnforcement=Enforce`) | `Enforce` — because the role was granted only once to
-local human admins, not to `TenantOwners`, cross-tenant admins or clients. `Warn` never allows less than
+logged `...SecretManagementRoleEnforcement=Enforce`) | `Enforce` — because the role was at first granted only once to
+local human admins. By decision (Gerald 2026-11-02, confirmed for clients 2026-11-16)
+`TenantOwners` carries `SecretManagement` (`TenantOwnersSecretManagementGrant`, once per tenant in `SetupTenantAsync`), and
+every member inherits it: users, external tenant user mappings (provisioned parent-tenant administrators, from octosystem
+or any other parent) and **clients**, e.g. the scratch creator's mirror (`ScratchTenantGrantService`). That is intended:
+agents create clients with a secret in their scratch tenants, which `Enforce` refuses without the role. What it allows:
+create/rotate/delete secrets of the tenant's clients and API resources (incl. a `clientSecret` in `POST/PUT clients` and
+`Client.AddSecret`/`RemoveSecret`), rotating mirror secrets (`ClientMirrorController.RotateSecret`, target = a descendant
+tenant, `AdminProvisioningTargetScopeFilter`), and in bot-services the secret sweep and its dumps (`POST jobs/secret-sweep`,
+sweep-run dump delete/restore; `SecretManagementPolicy` there is **not** staged, it always requires the role). Scope: the
+role counts in the tenant whose `TenantOwners` carries it; the mirror rotation and the bot-services jobs (class-level
+`[AllowParentTenantAdministration]`, role checked on the caller's own token) extend it to that tenant's **descendants**, never to
+siblings or parents. A TenantOwners member already holds `TenantManagement` with the same parent-administration reach, so the
+role adds secret writes, not new tenants. `Warn` never allows less than
 before; `RoleEnforcement=Warn` relaxes it too. A refused `IdentityApiRoleRequirement` answers 403
 `{"message": "...requires the role 'X'..."}` (`IdentityApiForbiddenReasonResultHandler`). Tests:
 `ApiSecretsControllerTests` (role x verb x kind x mode matrix, TenantOwners member, client create/update),
@@ -103,7 +115,8 @@ identity-provider `ClientSecret` into the Secret value type. Whoever bumps next 
 published maximum (`octo-ckc -c ValidateVersion` against the catalogs). The upgrade path is pinned by
 `BootstrapUpgradeToSecretLineIntegrationTests` (frozen 1.5.0 / 1.6.0 seed snapshots under
 `tests/IdentityServices.IntegrationTests/BootstrapSnapshots/`): nothing is lost, and from 1.6.0 the delta is exactly the
-SecretManagement role (no TenantOwners edge: human administrators only) and the direct grants to existing local administrators. A new bootstrap version
+SecretManagement role (no TenantOwners edge in the seed) and the direct grants to existing local administrators. The TenantOwners → SecretManagement
+edge is not part of the blueprint: the setup step `TenantOwnersSecretManagementGrant` adds it once per tenant. A new bootstrap version
 that changes seeds should add its own snapshot.
 
 ## Configuration

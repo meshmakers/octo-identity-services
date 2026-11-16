@@ -169,10 +169,13 @@ hold (e.g. `UserManagement`) and then act as that client. `ClientsController` th
 
 ## First administrator is a member of TenantOwners
 
-`UserManagementService.CreateAdminUserAsync` (setup endpoints `setup/create-admin` and `v1/setup`) grants the first administrator the 13 direct roles and 
-also adds that user to the `TenantOwners` group (`AddToTenantOwnersAsync`, via `IGroupStore`). `TenantOwners` carries every non-secret built-in role (incl. `DataModelManagement`,
-`StreamData*`), which the direct grants lack; without the membership the administrator holds fewer roles than the group and the guard above refuses adding anyone to it
-(`role-not-held`). `SecretManagement` stays a direct grant only (not in `TenantOwners`). The step is idempotent (an existing membership is not added again; a setup
+`UserManagementService.CreateAdminUserAsync` (setup endpoints `setup/create-admin` and `v1/setup`) adds the first administrator to the `TenantOwners` group (`AddToTenantOwnersAsync`, via `IGroupStore`). That membership
+replaces the direct roles: the direct roles (`AddDirectAdministratorRolesAsync`, incl. `DataModelManagement` and `SecretManagement`) are only the
+fallback for a tenant without a usable group. `TenantOwners` carries every built-in platform role (`SecretManagement` too), among them the
+`StreamData*` roles the direct grants lack; without the membership the administrator holds fewer roles than the group and the guard above refuses adding anyone to it
+(`role-not-held`). The first administrator therefore holds `SecretManagement` through the group once the setup step
+`TenantOwnersSecretManagementGrant` has added the edge; if that step fails (logged, setup continues, retried on the next setup) the
+administrator lacks the role until then (see "API secret writes need `SecretManagement`" in `docs/architecture.md`); the XML doc of `AddToTenantOwnersAsync` ("every non-secret built-in role") predates that change. The step is idempotent (an existing membership is not added again; a setup
 re-run is refused anyway while users exist) and optional like the file roles: a tenant without the group logs a warning and keeps the direct roles. The setup goes
 through the stores, not the guarded controllers, on purpose. The scratch-tenant creator (`ScratchTenantGrantService`) and cross-tenant admin provisioning
 (`AdminProvisioningController`) already put their subject into `TenantOwners`; nothing changed there.

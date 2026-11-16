@@ -207,6 +207,10 @@ create / attach / plain restore.
   (`UnprovisionClientFromTenant`, `DeleteClient` in the child): the next mirror provisioning creates the mirror again and the grant with it.
 - **Audit:** grant and revoke are information events (source IdentityService) in the event log of the tenant **and** of the system tenant (which
   outlives the tenant); no secret is in the text.
+- **Roles of the creator:** the mirror inherits every role of `TenantOwners` in that child - all built-in platform roles **including
+  `SecretManagement`** (intended: the agent creates clients with a secret in its scratch tenant), but no app role a
+  blueprint seeds later. It counts in that child and, for the parent-administration endpoints (mirror secret rotation,
+  bot-services jobs), in tenants below it - never in the parent or sibling tenants.
 - The child token of the agent is the ordinary one: `client_credentials`, `acr_values=tenant:<child>`, `scope=octo_api`, with the mirror's own
   secret (`RotateMirrorSecret`) or - while per-tenant mirror secrets keep the inherited secret - the parent client's secret.
 - Tests: `ScratchTenantCreatorGrantIntegrationTests` (real MongoDB: grant only for the creator, none without a marker, repeated setup, re-provisioned

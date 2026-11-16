@@ -19,7 +19,7 @@ Order: **test-2 only** for the pilot. Other environments follow the release plan
 | Step at identity startup, per tenant | Effect |
 |---|---|
 | CK import `System.Identity-2.25.0` | `ClientSecret` String → Secret (Minor, no data migration). Stored strings stay as they are and are read as **legacy clear text** (counted, warned once per type without the value). |
-| Blueprint `System.Identity.Bootstrap-1.7.0` | Creates role `SecretManagement` (rtId `660…60`); not assigned to `TenantOwners` (human administrators only). |
+| Blueprint `System.Identity.Bootstrap-1.7.0` | Creates role `SecretManagement` (rtId `660…60`); not assigned to `TenantOwners` by the blueprint (a later setup step adds TenantOwners → SecretManagement). |
 | `SecretManagementAdminGrant` (once, marker in tenant config) | Grants `SecretManagement` directly to local users holding **both** `AdminPanelManagement` and `TenantManagement` (also via groups); never to groups, clients or `xt_` shadow users. Additive only; failures are logged and do not fail tenant setup. |
 | REST API identity providers | Responses never contain the secret (`clientSecretIsSet`, `clientSecretKeyMissing`, `clientSecretSetAt` instead). A new secret is encrypted on write (`enc:v2:k1:…`); saving a new secret without key ring answers **503** `SecretEncryptionNotConfigured`. |
 
@@ -63,7 +63,8 @@ then the value stays a plain string in MongoDB.
   once with a local account; Studio loads.
 - `octo-cli -c GetIdentityProviders` (octo-cli from wave 1 or later): no `clientSecret` value; `clientSecretIsSet: true`
   for configured OAuth/OIDC providers, `clientSecretKeyMissing: false`.
-- `octo-cli -c GetRoles` shows `SecretManagement`; `GetGroup` of `TenantOwners` does **not** list it; a local tenant
+- `octo-cli -c GetRoles` shows `SecretManagement`; `GetGroup` of `TenantOwners` does **not** list it on an identity without the TenantOwners grant step; with it (tenant setup step
+  `TenantOwnersSecretManagementGrant`) it **does**, and that is correct; a local tenant
   administrator (AdminPanelManagement + TenantManagement) has it as a direct role after a re-login, a pipeline service
   account and a provisioned parent-tenant administrator (`xt_…`) do not.
 - `octo-cli -c LibraryStatus --installed-only`: `System.Identity` 2.25.0 Available in every tenant.
