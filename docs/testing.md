@@ -1,0 +1,120 @@
+---
+description: Integration-test collections and fixtures, parallel-host rules, test-host leaks (memory, threads, user secrets, signing certificates)
+applies_to: tests/**
+---
+
+# Integration-test fixtures and parallel hosts
+
+## Integration-Test-Fixtures: fünf Collections, fünf Container (AB#5160)
+
+`IdentityServices.IntegrationTests` teilt seine MongoDB-Testcontainer über **Collection**-Fixtures, nicht
+mehr über `IClassFixture` (das erzeugt eine Fixture-Instanz **pro Testklasse** — vorher 32 Container pro
+Lauf, davon ~50 % der CI-Testzeit reines Setup). Die Definitionen liegen in `tests/…/Collections/`:
+
+| Collection | Fixture | Wer |
+| --- | --- | --- |
+| `IdentityPersistence` | `IdentityServicesFixture` | 14 Persistence-Klassen |
+| `DataProtectionKeySeed` | `IdentityServicesFixture` | nur `DataProtectionKeySeedIntegrationTests` |
+| `DataProtectionKeyEncryption` | `IdentityServicesFixture` | nur `DataProtectionKeyEncryptionIntegrationTests` (AB#5530, leert den Key-Store je Fact) |
+| `VirginBootstrap` | `VirginBootstrapFixture` | nur `VirginSystemDatabaseBootstrapIntegrationTests` |
+| `ZWebFactory` | `CustomWebApplicationFactory` | 15 HTTP-Klassen (Basis `IntegrationTestBase`) |
+| `ZSetupApi` | `CustomWebApplicationFactory` | nur `SetupApiTests` |
+
+**Regel für neue Testklassen:** `[Collection(IdentityPersistenceCollection.Name)]` bzw.
+`[Collection(WebFactoryCollection.Name)]` setzen und alle Entitäten mit GUID-Suffix anlegen
+(`$"foo-{Guid.NewGuid():N}"`) — dann ist der akkumulierte Zustand der Geschwisterklassen unsichtbar.
+Wer auf den Zustand der **ganzen** Datenbank angewiesen ist (leere Collection erwartet, alles löscht,
+System-Tenant droppt), bekommt eine **eigene** Collection — so wie die drei Einzelgänger oben. Ein
+Container mehr ist billiger als ein flakiger oder vakuum-grüner Test; niemals stattdessen die Assertion
+aufweichen. Vorbild: `octo-asset-repo-services` (7 Collections) / `octo-communication-controller-services`
+(AB#4963).
+
+## 🔴 Collections laufen PARALLEL — prozessweiter Zustand ist die Fehlerklasse (AB#5117, AB#5440)
+
+`xunit.runner.json` hält `parallelizeTestCollections: true` mit `maxParallelThreads: 4`. (Diese Doku
+behauptete bis AB#5440 `false`; das war seit AB#5117 falsch.) Nur **ein** MongoDB-Container lebt
+gleichzeitig — die Isolationsgrenze ist seit AB#5117 die **Datenbank**, nicht der Server —, aber bis zu
+vier Collections bauen gleichzeitig Hosts hoch und ab.
+
+Damit ist **jeder prozessweite Zustand ein Race**, und das ist die einzige Fehlerklasse, die diese
+Suite wirklich flakig macht. Bisher dreimal getreten:
+
+| Geteilter Zustand | Symptom | Behandlung |
+| --- | --- | --- |
+| Test-Tenant-ID `test-tenant` (⇒ DB-Name, serverweiter Namensraum) | Fixtures überschreiben sich | GUID-Suffix (AB#5117) |
+| System-Tenant-ID `octosystem` ⇒ statisches `DefaultConfigurationCreatorServiceBase.TenantsInHandling` | Fixtures überspringen still den CK-Import, dann `CkCacheException` | GUID-Suffix, Präfix gekürzt (AB#5117) |
+| **statisches `NLog.LogManager.Configuration`** | `ConfigurationException: LogManager configuration not found` aus `HostedInitializer.StartAsync`, wandernde Testmenge | Aufrufer tolerant (AB#5440) |
+
+**Machine-wide state counts too (AB#5880).** In the Development environment `OpenIddictConfiguration`
+calls `AddDevelopmentSigningCertificate()`, which publishes **every** certificate with subject
+`CN=OpenIddict Server Signing Certificate` from the current user's X509 store — expired ones and
+duplicates created by concurrently starting hosts included. On a long-lived CI agent that store
+persists across builds, so the JWKS depended on the agent (`TokenShapeGoldenTests.JwksDocument_*` saw
+two keys on `azure-devops-agents-ci-1` only). `CustomWebApplicationFactory` therefore replaces the
+signing and encryption credentials with one in-memory certificate (`Infrastructure/TestSigningCertificate.cs`),
+and the JWKS test asserts that this is the only published key. Never let a test host read key material
+from the user/machine store.
+
+**Linux agents: inotify instance limit (AB#8019).** Every in-process host (each `CustomWebApplicationFactory` and each
+`WithWebHostBuilder` derivative) used to load `appsettings*.json` with reload-on-change, i.e. one file watcher per file and host.
+On the Linux CI agents the inotify instance limit (128) was reached across the suite and unrelated tests failed at host start
+(`The configured user limit (128) on the number of inotify instances has been reached`). The static constructor of
+`CustomWebApplicationFactory` therefore sets `DOTNET_hostBuilder__reloadConfigOnChange=false` for the test process (tests never
+change configuration files at run time); `TestHostConfigurationTests` pins it. Dispose derived factories a test creates
+(`WithWebHostBuilder`) at the end of the test (`GroupMethodTestBase`, `ClientMirrorReconciliationTests`, `UserRoleMethodTests`,
+`UserChangePasswordMethodTests`); otherwise they live until the class fixture ends.
+
+**No developer user secrets in the test hosts (AB#8949).** The factory runs the host in the Development environment, so
+`WebApplication.CreateBuilder` adds the user secrets of `IdentityServices` (and `Program.cs` adds them again). A developer's
+secret changed the host on that machine only: with `Identity:DataProtectionKeysPath` set, the key store imported an old unencrypted
+`key-*.xml` and `DataProtectionKeyEncryptionHostTests` failed locally while CI (no user secrets) stayed green.
+`CustomWebApplicationFactory` therefore passes the host setting `DisableUserSecrets=true` (`UseSetting`, inherited by every
+`WithWebHostBuilder` derivative). A host setting reaches `Program` as a command-line argument, so `Program.cs` removes every
+`secrets.json` source right after `CreateBuilder` and skips its own `AddUserSecrets`
+(`Configuration/UserSecretsConfiguration.cs`). This happens before the values `Program` reads while it registers the services
+(e.g. `Methods:Identity:EnablePasswordMethods`); the factory's `ConfigureAppConfiguration` would come too late for those.
+Without the setting nothing changes. `TestHostConfigurationTests` and `UserSecretsConfigurationTests` pin it. A test that needs a
+setting puts it into the factory's in-memory configuration or `appsettings.test.json`, never into user secrets.
+
+**Test host memory: every in-process host must be collectable (AB#8337).** ASP.NET Core's `RateLimitingMiddleware`
+(`app.UseRateLimiter()`, policies `tenant-discovery` and `dcr`) never disposes its `DefaultPartitionedRateLimiter`, whose 100 ms
+heartbeat timer is a GC root for the whole request pipeline and the host's services, and whose captured `ExecutionContext` holds
+xUnit's `TestContext` and with it the class fixtures. In production that is one pipeline per process; the suite builds ~300 hosts
+and none was ever collected: the live heap after a full GC grew monotonically to **8.6 GB** (dump: 295 live meter providers,
+3.6 GB OpenTelemetry `MetricPoint[]` alone), which hit the 9 GiB GC heap hard limit of a 12 Gi CI agent (OutOfMemoryException in
+random tests, builds 65745, 65817). `CustomWebApplicationFactory` therefore registers `Infrastructure/RateLimiterReleaser` (hosted
+service, last registration, inherited by every `WithWebHostBuilder` derivative): when the host stops it finds the middleware's
+limiters by reflection over the built pipeline and disposes them. Measured locally (Mac mini, `GC.GetTotalMemory(true)` every 15 s,
+engine-mongodb main incl. AB#8281): live heap peak **8.6 GB → 3.3-3.5 GB**, suite duration unchanged (~9:40-10:00 min).
+`RateLimiterReleaserTests` fails when a framework update changes the internal shape the walk relies on — fix the walk then, never
+delete the test. Rules: a `StopAsync` of a test-only hosted service must never throw (it aborts the factory's dispose and leaks the
+host); a new background timer or long-running loop in startup code needs a dispose path, or every test host keeps it.
+The shared MongoDB container still grows to ~10 GiB per run (outside the test process; a `--wiredTigerCacheSizeGB 1` cap did not
+change that and a 4 GiB container limit got mongod OOM-killed), which is tracked with the CI agent memory work (AB#8336).
+
+**A stale DebugL feed starves the suite on driver threads (AB#8424).** Every repository client of the runtime engine is a
+MongoDB driver cluster of its own (heartbeat, RTT monitor and pool maintenance thread each). Since AB#8281
+(engine-mongodb #229, 2026-11-05) a disposed host closes all of them; a `Meshmakers.Octo.Runtime.Engine.MongoDb` 999.0.0
+in `../nuget` built **before** that keeps every cluster of every host the suite ever built. Measured on a Mac (16 cores,
+2026-11-07, same identity commit): with the stale feed the test host passed 3,100 threads after 9.5 min with ~500 of ~1,000
+tests done and throughput collapsing (thread stacks: ~390 × `ServerMonitor`, ~390 × `RoundTripTimeMonitor`, ~390 ×
+`MaintenanceHelper`; dump: 497 clusters in `ClusterRegistry`, rooted only by the registry); with the library chain rebuilt
+from main the same suite stays bounded (numbers in AB#8424). CI is not affected (its feed is built from main). Symptoms of a
+stale feed: thousands of threads at ~50 % CPU, transaction aborts, server-selection timeouts and canceled operations in
+unrelated classes, a run that never ends. `Infrastructure/TestHostMongoClientReleaseTests` pins the release on the server
+(`$currentOp` by the host's system database name) and turns red within seconds against such a feed — then rebuild the chain
+(`Invoke-BuildRange` from `octo-construction-kit-engine-mongodb`, or the whole DebugL chain) before you hunt for test defects.
+
+Der NLog-Fall ist der einzige, den man **nicht** per-Fixture eindeutig machen kann: `Program.cs` lädt
+die globale Konfiguration am Entry-Point und räumt sie im `finally` mit `LogManager.Shutdown()` wieder
+ab (dort gegen den Segfault beim Prozessende auf Linux). Unter `WebApplicationFactory<Program>` läuft
+der Entry-Point pro Factory-Instanz und `app.Run()` wird kurzgeschlossen — das `finally` feuert also
+direkt nach dem Host-Build, während eine andere Factory die Konfiguration gerade liest. Deshalb fängt
+`DefaultConfigurationCreatorService.InitializeAsync` die `ConfigurationException` und warnt nur;
+`DiagnosticsService` selbst **wirft weiter**, weil sein anderer Aufrufer der operator-sichtbare
+`DiagnosticsController` ist, wo ein stiller No-op der schlimmere Fehler wäre.
+
+**Regel für neue Tests und neuen Startup-Code:** bevor du etwas in einen `static` legst oder aus einem
+`static` liest, das ein Host beim Start oder beim Dispose anfasst — annehmen, dass vier Hosts es
+gleichzeitig tun. Ein wandernder Satz fehlgeschlagener Tests über mehrere Retry-Versuche ist die
+Signatur dieser Klasse, nie ein Testdefekt.
