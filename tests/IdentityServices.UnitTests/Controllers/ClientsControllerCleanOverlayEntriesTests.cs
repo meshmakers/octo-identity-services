@@ -315,4 +315,37 @@ public class ClientsControllerCleanOverlayEntriesTests
         record.Details["removed"].Should().Be("1");
         await _eventHub.Received(1).PublishAsync(Arg.Any<CorsClientsUpdate>());
     }
+
+    [Fact]
+    public async Task CleanOverlayEntries_AnotherFailureAfterTheFirstClient_StillRefreshesTheCache()
+    {
+        // The removals before the failure are stored; a retry finds nothing left and would not refresh the cache.
+        var first = new RtClientBuilder().WithClientId("first").Build();
+        first.RedirectUris.Add(new RtClientUriEntryRecord { Uri = "https://a/", Source = ClientUriSources.OverlayPrefix + "x" });
+        var second = new RtClientBuilder().WithClientId("second").Build();
+        second.RedirectUris.Add(new RtClientUriEntryRecord { Uri = "https://b/", Source = ClientUriSources.OverlayPrefix + "x" });
+        var store = Substitute.For<IOctoClientStore>();
+        store.TenantId.Returns(TenantId);
+        store.GetClients().Returns([first, second]);
+        store.MutateAsync("first", Arg.Any<Func<RtClient, bool>>()).Returns(call =>
+        {
+            call.ArgAt<Func<RtClient, bool>>(1)(first);
+            return first;
+        });
+        store.MutateAsync("second", Arg.Any<Func<RtClient, bool>>())
+            .Returns<RtClient?>(_ => throw new InvalidOperationException("database down"));
+        var methods = new HandlerBackedMethodFacade(store, eventHub: _eventHub);
+        var sut = new ClientsController(store, _eventHub, _clientRoleStore, _clientImpersonationStore,
+            Substitute.For<RoleManager<RtRole>>(Substitute.For<IRoleStore<RtRole>>(), null, null, null, null),
+            Substitute.For<IRoleChangeRefusals>(), methods)
+        {
+            ControllerContext = new ControllerContext { HttpContext = new DefaultHttpContext() }
+        };
+
+        var result = await sut.CleanOverlayEntries(overlayName: null);
+
+        result.Should().BeOfType<BadRequestObjectResult>("an unexpected failure keeps the earlier 400");
+        await _eventHub.Received(1).PublishAsync(Arg.Any<CorsClientsUpdate>());
+        methods.Audit.Records.Should().ContainSingle().Which.Outcome.Should().Be("METHOD_HANDLER_FAILED");
+    }
 }

@@ -157,7 +157,8 @@ an error code added to `Group.AddMember-1` is a Major. Handlers in `Methods/Grou
   member (`CHILD_GROUP_ALREADY_IN_GROUP`), a cycle - the group reachable from the child through its child groups, depth-first
   (`GroupGraph.WouldCreateCycleAsync`; `GROUP_CYCLE`, `cycle` = `descendant`), the role change guard (`RoleGraphChange.MemberAdded` with
   `GroupMemberKind.Group`), write.
-- **RemoveChildGroup**: not a member = `CHILD_GROUP_NOT_IN_GROUP`; guard `MemberRemoved`; the edge to a group that no longer exists is still removed.
+- **RemoveChildGroup**: not a member = `CHILD_GROUP_NOT_IN_GROUP`; a member the caller cannot read = `METHOD_FORBIDDEN` (`data-permission`); guard
+  `MemberRemoved`; the edge to a group that no longer exists is still removed. `Group.RemoveMember` refuses an unreadable member of the group the same way.
 - `execution`: timeout 30 s, not idempotent (a repeated call answers the typed error). REST facades: `docs/identity-rest-facades.md`.
 
 ## Client role and overlay methods (System.Identity 3.3.0)
@@ -177,7 +178,8 @@ hosted whatever `EnablePasswordMethods` says.
 
 - **Roles** (`Methods/ClientRoleHandlers.cs`, `ClientRoleMethodHandlerBase<T>`): only the direct roles (`AssignedRole`) are read and written,
   only the difference is written (`IClientRoleStore.ApplyRoleChangesAsync`), so a kept role is never written again. A role that is unknown or
-  not readable is `ROLE_NOT_FOUND` and nothing changes. Every added role runs `IRoleChangeGuard.EvaluateClientGrantAsync`: a built-in role the
+  not readable is `ROLE_NOT_FOUND` and nothing changes; `RemoveRole` of a held role the caller cannot read is `METHOD_FORBIDDEN`
+  (`data-permission`). `rolesAfter` in the audit is read back from the store after the write. Every added role runs `IRoleChangeGuard.EvaluateClientGrantAsync`: a built-in role the
   caller does not hold (`role-not-held`) and any role for a client-credentials caller's own client (`self-grant`) are refused with
   `METHOD_FORBIDDEN` - the same answer as `User.AddRole`. Removals are never judged. Audit: `clientId`, `rolesBefore`, `rolesAfter`.
 - **Overlay URIs** (`Methods/ClientOverlayHandlers.cs`, rules in `ClientOverlayUris`): an overlay URI is written with

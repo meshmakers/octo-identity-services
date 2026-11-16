@@ -324,6 +324,43 @@ public class ClientRestMethodFacadeTests : IntegrationTestBase, IDisposable
         (await LoadAsync(target)).RedirectUris.Should().BeEmpty();
     }
 
+    [Fact]
+    public async Task RemovingAHeldRoleTheCallerCannotRead_Is403_AndTheRoleStays()
+    {
+        var host = Host(denyReads: true);
+        var role = await NewRoleAsync();
+        var target = await NewClientAsync();
+        await AssignAsync(target, role);
+        using var client = FacadeCaller.User(TenantManagement).Client(host);
+
+        var response = await client.DeleteAsync(TenantApiUrl($"clients/{target.ClientId}/roles/{role}"),
+            TestContext.Current.CancellationToken);
+
+        response.StatusCode.Should().Be(HttpStatusCode.Forbidden);
+        var problem = await response.Content.ReadFromJsonAsync<JsonElement>(TestContext.Current.CancellationToken);
+        problem.GetProperty("code").GetString().Should().Be(CkMethodErrorCodes.MethodForbidden);
+        problem.GetProperty("parameters").GetProperty("reason").GetString().Should().Be("data-permission");
+        (await DirectRoleIdsAsync(target)).Should().Equal(await RoleIdAsync(role));
+    }
+
+    [Fact]
+    public async Task TheAuditRecordsTheRolesAsStored()
+    {
+        var host = Host();
+        var (a, b) = (await NewRoleAsync(), await NewRoleAsync());
+        var target = await NewClientAsync();
+        await AssignAsync(target, a);
+        using var client = FacadeCaller.User(TenantManagement).Client(host);
+
+        (await client.PutAsync(TenantApiUrl($"clients/{target.ClientId}/roles/{b}"), null,
+            TestContext.Current.CancellationToken)).StatusCode.Should().Be(HttpStatusCode.OK);
+
+        var record = _audit.For(SystemIdentityCkIds.ClientAddRoleMethodId, target.RtId.ToString()).Should()
+            .ContainSingle().Subject;
+        record["rolesBefore"].Should().Be(a);
+        record["rolesAfter"].Split(',').Should().BeEquivalentTo(a, b);
+    }
+
     #endregion
 
     #region Helpers
@@ -331,7 +368,7 @@ public class ClientRestMethodFacadeTests : IntegrationTestBase, IDisposable
     private static CkMethodPrincipal Admin() =>
         new(Guid.NewGuid().ToString("N"), [TenantManagement, UserManagement], ["octo_api"]);
 
-    private WebApplicationFactory<Program> Host(bool enforceTenantGate = false)
+    private WebApplicationFactory<Program> Host(bool enforceTenantGate = false, bool denyReads = false)
     {
         var host = Factory.WithWebHostBuilder(b =>
         {
@@ -345,6 +382,10 @@ public class ClientRestMethodFacadeTests : IntegrationTestBase, IDisposable
                 services.AddSingleton(_audit.Events);
                 services.AddSingleton<ICkInProcessAmbientStateProbe>(_probe);
                 services.AddSingleton<IStartupFilter, MarkRequestsStartupFilter>();
+                if (denyReads)
+                {
+                    services.AddSingleton(FacadeDataPolicy.DenyAllReads());
+                }
             });
         });
         _hosts.Add(host);

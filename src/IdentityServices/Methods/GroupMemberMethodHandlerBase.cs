@@ -39,7 +39,9 @@ internal static class GroupMethodErrors
 ///     <para>
 ///         <b>Typed answers where REST is silent.</b> REST answers 404 for a member that does not exist and is silent about
 ///         duplicates; the methods answer <c>MEMBER_NOT_FOUND</c> for a member that does not
-///         exist (or that the caller cannot read, AB#7035), <c>MEMBER_ALREADY_IN_GROUP</c> and <c>MEMBER_NOT_IN_GROUP</c>.
+///         exist (or that the caller cannot read), <c>MEMBER_ALREADY_IN_GROUP</c> and <c>MEMBER_NOT_IN_GROUP</c>. Removing a member
+///         of the group that the caller cannot read is <c>METHOD_FORBIDDEN</c> (<c>reason</c> = <c>data-permission</c>): the
+///         membership is visible through the group, and a success that changed nothing would mislead.
 ///         The member of kind <c>Client</c> is the rtId of the client or its OAuth client id, resolved by
 ///         <see cref="GroupClientMemberResolver" /> exactly as in the REST route (AB#8571).
 ///     </para>
@@ -57,9 +59,12 @@ internal abstract class GroupMemberMethodHandlerBase<TParameters>(IServiceProvid
     /// <summary>The member id parameter.</summary>
     protected abstract string? MemberId(TParameters parameters);
 
-    /// <summary>Applies the change; the member was resolved, the group exists.</summary>
+    /// <summary>
+    ///     Applies the change; the member was resolved, the group exists. <paramref name="readable" /> is <c>false</c> for an
+    ///     existing member the caller cannot read (data permission).
+    /// </summary>
     protected abstract Task<CkMethodOutcome> ApplyMemberAsync(IdentityMethodCall call, RtGroup group,
-        GroupMemberKind kind, ResolvedMember member, bool isMember, CancellationToken cancellationToken);
+        GroupMemberKind kind, ResolvedMember member, bool isMember, bool readable, CancellationToken cancellationToken);
 
     protected sealed override async Task<CkMethodOutcome> ApplyAsync(IdentityMethodCall call, OctoObjectId targetRtId,
         TParameters parameters, CancellationToken cancellationToken)
@@ -87,17 +92,16 @@ internal abstract class GroupMemberMethodHandlerBase<TParameters>(IServiceProvid
             : await groupStore.GetMemberClientIdsAsync(group.RtId).ConfigureAwait(false);
         var isMember = memberIds.Contains(member.RtId, StringComparer.OrdinalIgnoreCase);
 
+        var readable = true;
         if (member.Exists)
         {
             var verdict = await call.EvaluateAsync(member.Entity, RtDataAction.Read, cancellationToken)
                 .ConfigureAwait(false);
-            if (!verdict.IsAllowed)
-            {
-                return MemberNotFound();
-            }
+            readable = verdict.IsAllowed;
         }
 
-        return await ApplyMemberAsync(call, group, kind, member, isMember, cancellationToken).ConfigureAwait(false);
+        return await ApplyMemberAsync(call, group, kind, member, isMember, readable, cancellationToken)
+            .ConfigureAwait(false);
     }
 
     /// <summary>Runs the role change guard on a change of the group graph; <c>null</c> when it is allowed.</summary>
@@ -157,9 +161,10 @@ internal sealed class GroupAddMemberHandler(IServiceProvider services)
     protected override string? MemberId(GroupAddMemberParameters parameters) => parameters.MemberId;
 
     protected override async Task<CkMethodOutcome> ApplyMemberAsync(IdentityMethodCall call, RtGroup group,
-        GroupMemberKind kind, ResolvedMember member, bool isMember, CancellationToken cancellationToken)
+        GroupMemberKind kind, ResolvedMember member, bool isMember, bool readable, CancellationToken cancellationToken)
     {
-        if (!member.Exists)
+        // a member the caller cannot read answers like a missing one (its existence is not told)
+        if (!member.Exists || !readable)
         {
             return MemberNotFound();
         }
@@ -202,13 +207,20 @@ internal sealed class GroupRemoveMemberHandler(IServiceProvider services)
     protected override string? MemberId(GroupRemoveMemberParameters parameters) => parameters.MemberId;
 
     protected override async Task<CkMethodOutcome> ApplyMemberAsync(IdentityMethodCall call, RtGroup group,
-        GroupMemberKind kind, ResolvedMember member, bool isMember, CancellationToken cancellationToken)
+        GroupMemberKind kind, ResolvedMember member, bool isMember, bool readable, CancellationToken cancellationToken)
     {
         if (!isMember)
         {
-            return member.Exists
+            return member.Exists && readable
                 ? CkMethodOutcome.Fail(GroupMethodErrors.MemberNotInGroup)
                 : MemberNotFound();
+        }
+
+        // The membership is visible through the group, so the refusal tells nothing new: the caller may not change a member
+        // it cannot read (data permission), and is told so instead of getting a success that changed nothing.
+        if (!readable)
+        {
+            return call.NotPermitted();
         }
 
         var groupStore = call.Services.GetRequiredService<IGroupStore>();

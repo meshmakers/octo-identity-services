@@ -214,6 +214,37 @@ public class GroupRestMethodFacadeTests : IntegrationTestBase, IDisposable
     }
 
     [Fact]
+    public async Task RemovingAMemberTheCallerCannotRead_Is403_AndTheMembershipStays()
+    {
+        // With an enforcing data policy the caller may not read the member; the membership is visible through the group,
+        // so the removal is refused (403 METHOD_FORBIDDEN / data-permission) instead of answering a success that changed nothing.
+        var host = Host(denyReads: true);
+        var group = await NewGroupAsync();
+        var user = await NewUserAsync();
+        var child = await NewGroupAsync();
+        await WithGroupStoreAsync(s => s.AddMemberUserAsync(group.RtId, user.RtId.ToString()));
+        await WithGroupStoreAsync(s => s.AddMemberGroupAsync(group.RtId, child.RtId.ToString()));
+        using var client = FacadeCaller.User(UserManagement).Client(host);
+        var ct = TestContext.Current.CancellationToken;
+
+        var removeUser = await client.DeleteAsync(TenantApiUrl($"groups/{group.RtId}/members/users/{user.RtId}"), ct);
+        var removeChild = await client.DeleteAsync(TenantApiUrl($"groups/{group.RtId}/members/groups/{child.RtId}"), ct);
+
+        foreach (var response in new[] { removeUser, removeChild })
+        {
+            response.StatusCode.Should().Be(HttpStatusCode.Forbidden);
+            var problem = await response.Content.ReadFromJsonAsync<JsonElement>(ct);
+            problem.GetProperty("code").GetString().Should().Be(CkMethodErrorCodes.MethodForbidden);
+            problem.GetProperty("parameters").GetProperty("reason").GetString().Should().Be("data-permission");
+        }
+
+        using var scope = CreateScope();
+        var store = scope.ServiceProvider.GetRequiredService<IGroupStore>();
+        (await store.GetMemberUserIdsAsync(group.RtId)).Should().Equal(user.RtId.ToString());
+        (await store.GetMemberGroupIdsAsync(group.RtId)).Should().Equal(child.RtId.ToString());
+    }
+
+    [Fact]
     public void TheGroupMethods_RunInThisProcess()
     {
         var transport = Host().Services.GetRequiredService<ICkInProcessMethodTransport>();
@@ -231,13 +262,17 @@ public class GroupRestMethodFacadeTests : IntegrationTestBase, IDisposable
 
     #region Helpers
 
-    private WebApplicationFactory<Program> Host()
+    private WebApplicationFactory<Program> Host(bool denyReads = false)
     {
         var host = Factory.WithWebHostBuilder(b => b.ConfigureTestServices(services =>
         {
             services.AddSingleton(_audit.Events);
             services.AddSingleton<ICkInProcessAmbientStateProbe>(_probe);
             services.AddSingleton<IStartupFilter, MarkRequestsStartupFilter>();
+            if (denyReads)
+            {
+                services.AddSingleton(FacadeDataPolicy.DenyAllReads());
+            }
         }));
         _hosts.Add(host);
         return host;

@@ -32,8 +32,9 @@ internal static class GroupChildGroupErrors
 /// </summary>
 /// <remarks>
 ///     The child group is named by its rtId. One that is not an object id, does not exist or that the caller cannot read
-///     is <c>CHILD_GROUP_NOT_FOUND</c>. Adding and removing a child group runs the role change guard
-///     (<see cref="RoleGraphChange.MemberAdded" /> / <see cref="RoleGraphChange.MemberRemoved" /> with
+///     is <c>CHILD_GROUP_NOT_FOUND</c>; removing a child group of the group that the caller cannot read is
+///     <c>METHOD_FORBIDDEN</c> (<c>reason</c> = <c>data-permission</c>). Adding and removing a child group runs the role
+///     change guard (<see cref="RoleGraphChange.MemberAdded" /> / <see cref="RoleGraphChange.MemberRemoved" /> with
 ///     <see cref="GroupMemberKind.Group" />): the members of the child group inherit the roles of the group. The audit event
 ///     carries <c>memberKind</c> <c>Group</c> and <c>memberId</c>.
 /// </remarks>
@@ -43,9 +44,12 @@ internal abstract class GroupChildGroupHandlerBase<TParameters>(IServiceProvider
     /// <summary>The child group id parameter.</summary>
     protected abstract string? ChildGroupId(TParameters parameters);
 
-    /// <summary>Applies the change; the group exists, the child id is an object id.</summary>
+    /// <summary>
+    ///     Applies the change; the group exists, the child id is an object id. <paramref name="child" /> is <c>null</c> for a
+    ///     group that does not exist; <paramref name="readable" /> is <c>false</c> for one the caller cannot read.
+    /// </summary>
     protected abstract Task<CkMethodOutcome> ApplyChildAsync(IdentityMethodCall call, IGroupStore groupStore, RtGroup group,
-        OctoObjectId childId, RtGroup? child, bool isMember, CancellationToken cancellationToken);
+        OctoObjectId childId, RtGroup? child, bool isMember, bool readable, CancellationToken cancellationToken);
 
     protected sealed override async Task<CkMethodOutcome> ApplyAsync(IdentityMethodCall call, OctoObjectId targetRtId,
         TParameters parameters, CancellationToken cancellationToken)
@@ -66,20 +70,18 @@ internal abstract class GroupChildGroupHandlerBase<TParameters>(IServiceProvider
         }
 
         var child = await groupStore.FindByIdAsync(childId).ConfigureAwait(false);
+        var readable = true;
         if (child != null)
         {
             var verdict = await call.EvaluateAsync(
                 new RtEntityId(RtEntityExtensions.GetRtCkTypeId<RtGroup>(), child.RtId), RtDataAction.Read,
                 cancellationToken).ConfigureAwait(false);
-            if (!verdict.IsAllowed)
-            {
-                return CkMethodOutcome.Fail(GroupChildGroupErrors.ChildGroupNotFound);
-            }
+            readable = verdict.IsAllowed;
         }
 
         var memberIds = await groupStore.GetMemberGroupIdsAsync(group.RtId).ConfigureAwait(false);
         var isMember = memberIds.Contains(childId.ToString(), StringComparer.OrdinalIgnoreCase);
-        return await ApplyChildAsync(call, groupStore, group, childId, child, isMember, cancellationToken)
+        return await ApplyChildAsync(call, groupStore, group, childId, child, isMember, readable, cancellationToken)
             .ConfigureAwait(false);
     }
 
@@ -105,9 +107,11 @@ internal sealed class GroupAddChildGroupHandler(IServiceProvider services)
     protected override string? ChildGroupId(GroupAddChildGroupParameters parameters) => parameters.ChildGroupId;
 
     protected override async Task<CkMethodOutcome> ApplyChildAsync(IdentityMethodCall call, IGroupStore groupStore,
-        RtGroup group, OctoObjectId childId, RtGroup? child, bool isMember, CancellationToken cancellationToken)
+        RtGroup group, OctoObjectId childId, RtGroup? child, bool isMember, bool readable,
+        CancellationToken cancellationToken)
     {
-        if (child == null)
+        // a group the caller cannot read answers like a missing one (its existence is not told)
+        if (child == null || !readable)
         {
             return CkMethodOutcome.Fail(GroupChildGroupErrors.ChildGroupNotFound);
         }
@@ -156,11 +160,20 @@ internal sealed class GroupRemoveChildGroupHandler(IServiceProvider services)
     protected override string? ChildGroupId(GroupRemoveChildGroupParameters parameters) => parameters.ChildGroupId;
 
     protected override async Task<CkMethodOutcome> ApplyChildAsync(IdentityMethodCall call, IGroupStore groupStore,
-        RtGroup group, OctoObjectId childId, RtGroup? child, bool isMember, CancellationToken cancellationToken)
+        RtGroup group, OctoObjectId childId, RtGroup? child, bool isMember, bool readable,
+        CancellationToken cancellationToken)
     {
         if (!isMember)
         {
-            return CkMethodOutcome.Fail(GroupChildGroupErrors.ChildGroupNotInGroup);
+            return readable
+                ? CkMethodOutcome.Fail(GroupChildGroupErrors.ChildGroupNotInGroup)
+                : CkMethodOutcome.Fail(GroupChildGroupErrors.ChildGroupNotFound);
+        }
+
+        // the membership is visible through the group: a child group the caller cannot read is refused, not silently kept
+        if (!readable)
+        {
+            return call.NotPermitted();
         }
 
         var refusal = await GuardAsync(call,

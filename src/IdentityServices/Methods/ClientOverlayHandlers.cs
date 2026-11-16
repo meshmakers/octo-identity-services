@@ -207,10 +207,19 @@ internal sealed class ClientApplyOverlayUrisHandler(IServiceProvider services)
         (int Added, int Skipped) redirect = default, postLogout = default, cors = default;
         var clientStore = Services.GetRequiredService<IOctoClientStore>();
         RtClient? stored;
+        var replaced = false;
         try
         {
             stored = await clientStore.MutateAsync(client.ClientId, current =>
             {
+                // MutateAsync resolves the client id: never change another client that took over the id meanwhile. Set on
+                // every run: the callback runs again after a version conflict.
+                replaced = current.RtId != rtId;
+                if (replaced)
+                {
+                    return false;
+                }
+
                 redirect = ClientOverlayUris.Append(current.RedirectUris, parameters.RedirectUris, sourceTag);
                 postLogout = ClientOverlayUris.Append(current.PostLogoutRedirectUris,
                     parameters.PostLogoutRedirectUris, sourceTag);
@@ -223,7 +232,7 @@ internal sealed class ClientApplyOverlayUrisHandler(IServiceProvider services)
             return CkMethodOutcome<ClientApplyOverlayUrisResult>.Fail(ClientOverlayErrors.ConcurrentChange);
         }
 
-        if (stored == null)
+        if (stored == null || replaced)
         {
             return CkMethodOutcome<ClientApplyOverlayUrisResult>.TargetNotFound();
         }
@@ -319,6 +328,25 @@ internal sealed class ClientCleanOverlayEntriesHandler(IServiceProvider services
                 RecordCounts(details, entries.Count, totalRemoved);
                 await PublishIfChangedAsync(clientStore, totalRemoved).ConfigureAwait(false);
                 return CkMethodOutcome<ClientCleanOverlayEntriesResult>.Fail(ClientOverlayErrors.ConcurrentChange);
+            }
+            catch
+            {
+                // any other failure: the removals before it are stored, so the cache is refreshed for them before the
+                // failure propagates (a retry finds nothing left to remove and would not refresh it)
+                RecordCounts(details, entries.Count, totalRemoved);
+                try
+                {
+                    await PublishIfChangedAsync(clientStore, totalRemoved).ConfigureAwait(false);
+                }
+                catch (Exception publishFailure)
+                {
+                    // best effort: the original failure is the answer, the refresh failure is only logged
+                    Services.GetRequiredService<ILogger<ClientCleanOverlayEntriesHandler>>().LogWarning(publishFailure,
+                        "CORS refresh after a failed overlay clean could not be published in tenant {TenantId}",
+                        context.TenantId);
+                }
+
+                throw;
             }
 
             var clientTotal = redirect + postLogout + cors;

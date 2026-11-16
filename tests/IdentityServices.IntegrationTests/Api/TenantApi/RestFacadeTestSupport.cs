@@ -3,6 +3,8 @@ using IdentityServices.IntegrationTests.Infrastructure;
 using Meshmakers.Octo.Backend.IdentityServices.Methods;
 using Meshmakers.Octo.ConstructionKit.Contracts;
 using Meshmakers.Octo.Runtime.Contracts;
+using Meshmakers.Octo.Runtime.Contracts.DataPermissions;
+using Meshmakers.Octo.Runtime.Contracts.Repositories;
 using Microsoft.Extensions.DependencyInjection;
 using Meshmakers.Octo.Runtime.Contracts.RepositoryEntities;
 using Meshmakers.Octo.Services.Methods;
@@ -185,4 +187,17 @@ internal sealed class MarkRequestsStartupFilter : IStartupFilter
         });
         next(app);
     };
+}
+
+/// <summary>A data-permission evaluator of an enforcing policy for the facade tests: the caller may read nothing.</summary>
+internal static class FacadeDataPolicy
+{
+    public static IRtDataPermissionEvaluator DenyAllReads()
+    {
+        var evaluator = Substitute.For<IRtDataPermissionEvaluator>();
+        evaluator.EvaluateAsync(Arg.Any<IRuntimeRepository>(), Arg.Any<RtSecurityContext>(), Arg.Any<RtEntityId>(),
+                Arg.Any<RtDataAction>(), Arg.Any<bool>(), Arg.Any<CancellationToken>())
+            .Returns(new RtDataPermissionVerdict(RtDataPermissionDecision.NotVisible, RtDataPermissionReason.NoGrant));
+        return evaluator;
+    }
 }

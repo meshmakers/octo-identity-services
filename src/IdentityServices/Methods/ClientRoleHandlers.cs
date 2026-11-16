@@ -24,7 +24,8 @@ namespace Meshmakers.Octo.Backend.IdentityServices.Methods;
 ///     </para>
 ///     <para>
 ///         <b>Roles.</b> Only the directly assigned roles (<c>AssignedRole</c>) are read and written; a role that is unknown or
-///         that the caller cannot read is <c>ROLE_NOT_FOUND</c> and nothing changes. Only the difference is written,
+///         that the caller cannot read is <c>ROLE_NOT_FOUND</c> and nothing changes (removing a held role the caller cannot
+///         read is <c>METHOD_FORBIDDEN</c>, <c>reason</c> = <c>data-permission</c>). Only the difference is written,
 ///         so a kept role is never written again. Every role the call adds runs the client grant rule of the role change
 ///         guard: a built-in role the caller does not hold is refused (<c>role-not-held</c>) and a client-credentials
 ///         caller cannot give its own client a role (<c>self-grant</c>); removals are never judged, as in REST. A refusal is
@@ -69,21 +70,29 @@ internal abstract class ClientRoleMethodHandlerBase<TParameters>(IServiceProvide
     protected static async Task<RtRole?> FindReadableRoleAsync(IdentityMethodCall call, string? roleName,
         CancellationToken cancellationToken)
     {
+        var (role, readable) = await FindRoleAsync(call, roleName, cancellationToken).ConfigureAwait(false);
+        return readable ? role : null;
+    }
+
+    /// <summary>The role named <paramref name="roleName" /> (or <c>null</c>) and whether the caller may read it.</summary>
+    protected static async Task<(RtRole? Role, bool Readable)> FindRoleAsync(IdentityMethodCall call, string? roleName,
+        CancellationToken cancellationToken)
+    {
         if (string.IsNullOrWhiteSpace(roleName))
         {
-            return null;
+            return (null, false);
         }
 
         var role = await call.Services.GetRequiredService<RoleManager<RtRole>>().FindByNameAsync(roleName.Trim())
             .ConfigureAwait(false);
         if (role == null)
         {
-            return null;
+            return (null, false);
         }
 
         var verdict = await call.EvaluateAsync(new RtEntityId(RtEntityExtensions.GetRtCkTypeId<RtRole>(), role.RtId),
             RtDataAction.Read, cancellationToken).ConfigureAwait(false);
-        return verdict.IsAllowed ? role : null;
+        return (role, verdict.IsAllowed);
     }
 
     /// <summary>The client grant rule of the role change guard for the added roles; <c>null</c> when allowed or nothing is added.</summary>
@@ -100,9 +109,16 @@ internal abstract class ClientRoleMethodHandlerBase<TParameters>(IServiceProvide
         return decision.IsAllowed ? null : call.Refuse(decision);
     }
 
-    /// <summary>Records the direct roles after the call in the audit details.</summary>
-    protected static async Task RecordAfterAsync(IdentityMethodCall call, IEnumerable<string> roleIds) =>
-        call.Details["rolesAfter"] = await NamesAsync(call, roleIds).ConfigureAwait(false);
+    /// <summary>
+    ///     Records the direct roles of the client as stored after the write in the audit details (read again, so a concurrent
+    ///     change between the read and the write shows as it was stored).
+    /// </summary>
+    protected static async Task RecordAfterAsync(IdentityMethodCall call, RtClient client)
+    {
+        var stored = await call.Services.GetRequiredService<IClientRoleStore>().GetDirectRoleIdsAsync(client.RtId)
+            .ConfigureAwait(false);
+        call.Details["rolesAfter"] = await NamesAsync(call, stored).ConfigureAwait(false);
+    }
 
     /// <summary>A <c>ROLE_NOT_FOUND</c> answer naming the role.</summary>
     protected static CkMethodOutcome RoleNotFound(string? roleName) =>
@@ -177,7 +193,7 @@ internal sealed class ClientSetRolesHandler(IServiceProvider services)
                 .ApplyRoleChangesAsync(client.RtId, addedIds, removedIds).ConfigureAwait(false);
         }
 
-        await RecordAfterAsync(call, wanted).ConfigureAwait(false);
+        await RecordAfterAsync(call, client).ConfigureAwait(false);
         return CkMethodOutcome.Ok();
     }
 }
@@ -212,7 +228,7 @@ internal sealed class ClientAddRoleHandler(IServiceProvider services)
 
         await call.Services.GetRequiredService<IClientRoleStore>().ApplyRoleChangesAsync(client.RtId, [id], [])
             .ConfigureAwait(false);
-        await RecordAfterAsync(call, current.Append(id)).ConfigureAwait(false);
+        await RecordAfterAsync(call, client).ConfigureAwait(false);
         return CkMethodOutcome.Ok();
     }
 }
@@ -228,21 +244,28 @@ internal sealed class ClientRemoveRoleHandler(IServiceProvider services)
     protected override async Task<CkMethodOutcome> ApplyRolesAsync(IdentityMethodCall call, RtClient client,
         IReadOnlySet<string> current, ClientRemoveRoleParameters parameters, CancellationToken cancellationToken)
     {
-        var role = await FindReadableRoleAsync(call, parameters.RoleName, cancellationToken).ConfigureAwait(false);
-        if (role == null)
+        var (role, readable) = await FindRoleAsync(call, parameters.RoleName, cancellationToken).ConfigureAwait(false);
+        var id = role?.RtId.ToString();
+        if (role == null || (!readable && !current.Contains(id!)))
         {
             return RoleNotFound(parameters.RoleName);
         }
 
-        var id = role.RtId.ToString();
-        if (!current.Contains(id))
+        if (!current.Contains(id!))
         {
             return CkMethodOutcome.Ok();
         }
 
-        await call.Services.GetRequiredService<IClientRoleStore>().ApplyRoleChangesAsync(client.RtId, [], [id])
+        // The client's role ids are visible through the client: a held role the caller cannot read is refused, not
+        // silently kept.
+        if (!readable)
+        {
+            return call.NotPermitted();
+        }
+
+        await call.Services.GetRequiredService<IClientRoleStore>().ApplyRoleChangesAsync(client.RtId, [], [id!])
             .ConfigureAwait(false);
-        await RecordAfterAsync(call, current.Where(r => r != id)).ConfigureAwait(false);
+        await RecordAfterAsync(call, client).ConfigureAwait(false);
         return CkMethodOutcome.Ok();
     }
 }

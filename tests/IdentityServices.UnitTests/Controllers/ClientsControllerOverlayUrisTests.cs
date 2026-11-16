@@ -1,3 +1,4 @@
+using Meshmakers.Octo.ConstructionKit.Contracts;
 using Microsoft.AspNetCore.Http;
 using Meshmakers.Octo.Backend.IdentityServices.Authorization.RoleChange;
 using Meshmakers.Octo.Backend.IdentityServices.Methods;
@@ -306,5 +307,58 @@ public class ClientsControllerOverlayUrisTests
         dto!.RedirectUris.Added.Should().Be(1);
         client.RedirectUris.Should().HaveCount(1);
         client.RedirectUris.Single().Uri.Should().Be("https://localhost:4200/");
+    }
+
+    [Fact]
+    public async Task ApplyOverlayUris_TheClientIdWasTakenOverByAnotherClient_Is404_AndChangesNeither()
+    {
+        // The method targets the rtId; the store resolves the client id. A client that replaced the target under the same
+        // client id between the load and the write is never changed.
+        var original = new RtClientBuilder().WithClientId(ClientId).Build();
+        Given(original);
+        var successor = new RtClientBuilder().WithClientId(ClientId).Build();
+        successor.RtId = OctoObjectId.GenerateNewId();
+        _clientStore.MutateAsync(ClientId, Arg.Any<Func<RtClient, bool>>()).Returns(call =>
+            {
+                call.ArgAt<Func<RtClient, bool>>(1)(successor);
+                return successor;
+            });
+
+        var result = await _sut.ApplyOverlayUris(ClientId, new ApplyOverlayUrisDto
+        {
+            OverlayName = OverlayName,
+            RedirectUris = new List<string> { "https://localhost:4200/" }
+        });
+
+        result.Should().BeOfType<NotFoundObjectResult>();
+        successor.RedirectUris.Should().BeEmpty();
+        original.RedirectUris.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task ApplyOverlayUris_ARetryThatFindsTheTargetAgain_IsASuccess()
+    {
+        // The store runs the change again after a version conflict; the second run decides.
+        var original = new RtClientBuilder().WithClientId(ClientId).Build();
+        Given(original);
+        var successor = new RtClientBuilder().WithClientId(ClientId).Build();
+        successor.RtId = OctoObjectId.GenerateNewId();
+        _clientStore.MutateAsync(ClientId, Arg.Any<Func<RtClient, bool>>()).Returns(call =>
+        {
+            var mutate = call.ArgAt<Func<RtClient, bool>>(1);
+            mutate(successor);
+            mutate(original);
+            return original;
+        });
+
+        var result = await _sut.ApplyOverlayUris(ClientId, new ApplyOverlayUrisDto
+        {
+            OverlayName = OverlayName,
+            RedirectUris = new List<string> { "https://localhost:4200/" }
+        });
+
+        result.Should().BeOfType<OkObjectResult>();
+        original.RedirectUris.Should().ContainSingle();
+        successor.RedirectUris.Should().BeEmpty();
     }
 }
