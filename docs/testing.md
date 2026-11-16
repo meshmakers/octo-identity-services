@@ -118,3 +118,31 @@ direkt nach dem Host-Build, während eine andere Factory die Konfiguration gerad
 `static` liest, das ein Host beim Start oder beim Dispose anfasst — annehmen, dass vier Hosts es
 gleichzeitig tun. Ein wandernder Satz fehlgeschlagener Tests über mehrere Retry-Versuche ist die
 Signatur dieser Klasse, nie ein Testdefekt.
+
+## 🔴 `dotnet test` auf der Solution startet alle vier Testhosts gleichzeitig
+
+`dotnet test <sln>` baut und startet die vier Testprojekte **parallel** (ein Testhost-Prozess pro Projekt).
+`IdentityServices.IntegrationTests` fährt dabei seine MongoDB-Testcontainer hoch, während die drei Unit-Test-Hosts
+dieselbe Maschine belegen — Container-Kontention, die es beim Einzelaufruf nicht gibt. Vor der Umstellung auf
+Collection-Fixtures, als jede Testklasse ihren eigenen Container bekam (32 Container pro Lauf), war das massiv: dasselbe
+Integrationsprojekt **einzeln** 4:48 mit 188/188 grün — **in der Solution** 27 min, mit sporadischem `commitTransaction
+... has been aborted`, weil der Tenant-Setup in einer Mongo-Transaktion läuft und unter Last das 60-s-Default-Limit
+riss.
+
+Die Umstellung hat beide Ursachen entschärft (5 statt 32 Container, `transactionLifetimeLimitSeconds = 300`);
+gemessen danach: Solution-Lauf 1:37, alle 681 Tests grün. **Der Mechanismus ist aber nicht weg** — auf
+einer belasteten Maschine bleibt der parallele Solution-Lauf die anfälligste Variante. Bei einem
+Abbruch aus dieser Ecke (Transaktions-Abort, Testcontainer-Timeout) also erst seriell gegenprüfen,
+bevor man ihn für einen echten Testfehler hält:
+
+```bash
+dotnet test Octo.Identity.sln -c DebugL -m:1      # Projekte nacheinander
+# oder Projekte einzeln:
+dotnet test tests/IdentityServices.IntegrationTests/IdentityServices.IntegrationTests.csproj -c DebugL
+dotnet test tests/IdentityServices.UnitTests/IdentityServices.UnitTests.csproj -c DebugL
+dotnet test tests/IdentityServerPersistence.UnitTests/IdentityServerPersistence.UnitTests.csproj -c DebugL
+dotnet test tests/Authentication.UnitTests/Authentication.UnitTests.csproj -c DebugL
+```
+
+Das ist eine Empfehlung zur **Ausführungsart**, keine Erlaubnis, Projekte wegzulassen: grün müssen
+weiterhin alle vier sein.

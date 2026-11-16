@@ -179,6 +179,19 @@ entity whose stored `RtBlueprintLocked` is `true`, nor set or change `RtBlueprin
   no dependent needed a rebuild. Only a blueprint that uses the flag needs the raised floor. **Since 3.0.0 every `[2.x,3.0)` range is
   unsatisfied** (a range stays inside one major): each dependent blueprint needs a new version with `System.Identity-[3.0.0,4.0)`.
 
+## Every attribute declares its ownership; the build enforces it
+
+`Persistence.IdentityCkModel.csproj` sets `OctoEnforceRuntimeStateMarkers=true`: the `CkLintRuntimeStateMarkers` task of
+`Meshmakers.Octo.ConstructionKit.MsBuildTasks` fails the build with `OCTO-CK001` when an attribute in
+`ConstructionKit/attributes/*.yaml` declares neither `ownership` nor the deprecated `isRuntimeState` (`OCTO-CK003` for
+both, `OCTO-CK004` for an unknown value). The ownership rule made the existing behaviour explicit: 151 attributes got
+`ownership: SeedOwned` (a restatement - the same resolved ownership, so `octo-ckc ValidateVersion` reports "no bump
+required" and System.Identity stays 2.24.0); the `TenantOwned` / `Secret` decisions of the table above
+and the four `isRuntimeState: true` URI lists are unchanged. Assignment overrides on types (`Client`, `Resource`,
+`ApiResource`) are not linted; they still win over the definition. **Review question for every new attribute:** could an
+operator or user type this value in the product? Yes → `TenantOwned` (or `Secret` for a credential); a service writes it
+→ `RuntimeState`; the product ships and corrects it → `SeedOwned`.
+
 ## System.Identity 2.x -> 3.x needs migration entries
 
 The CK engine refuses a schema-only bridge across a major (`CkMigrationMajorVersionGuard`) as soon as the target model ships
