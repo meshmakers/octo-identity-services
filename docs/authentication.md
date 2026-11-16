@@ -1,5 +1,5 @@
 ---
-description: Background: authentication architecture - dynamic providers, cross-tenant flows, tokens, client mirroring, DCR, resource indicators
+description: "Background: authentication architecture - dynamic providers, cross-tenant flows, tokens, client mirroring, DCR, resource indicators"
 background: true
 ---
 

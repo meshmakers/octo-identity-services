@@ -1,5 +1,5 @@
 ---
-description: Background: implementation notes of external identity provider support
+description: "Background: implementation notes of external identity provider support"
 background: true
 ---
 

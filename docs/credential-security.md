@@ -1,6 +1,6 @@
 ---
-description: Credentials never in logs or URLs, REST secret delete, session revocation, second-factor guard, user store concurrency
-applies_to: src/IdentityServices/{Logging,TenantApi,Controllers/Api}/**, {OctoUser*,*Revocation*,SecondFactorEvidence,*UserCredentialChangeService}.cs
+description: "Credentials never in logs or URLs, REST secret delete, session revocation, second-factor guard, user store concurrency"
+applies_to: "src/IdentityServices/{Logging,TenantApi,Controllers/Api}/**, {OctoUser*,*Revocation*,SecondFactorEvidence,*UserCredentialChangeService}.cs"
 ---
 
 # Credential handling, sessions and logging

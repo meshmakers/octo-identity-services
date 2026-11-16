@@ -1,5 +1,5 @@
 ---
-description: Background: rollout runbook for the Data Protection key ring encrypted at rest
+description: "Background: rollout runbook for the Data Protection key ring encrypted at rest"
 background: true
 ---
 

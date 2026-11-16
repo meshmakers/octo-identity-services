@@ -244,7 +244,7 @@ public class TenantApiRoleAuthorizationTests : IntegrationTestBase
     public async Task ReconfigureLogLevel_WithoutTenantManagement_Is403()
     {
         // Only the denial is exercised: a granted call would reconfigure the process-wide NLog
-        // configuration, which parallel test hosts share (see docs/testing.md, AB#5440).
+        // configuration, which parallel test hosts share (see docs/testing.md).
         const string url = "diagnostics/reconfigureLogLevel?minLogLevel=Info&maxLogLevel=Fatal&loggerName=AB5859";
 
         var denied = await ClientWithRoles(UserManagement)

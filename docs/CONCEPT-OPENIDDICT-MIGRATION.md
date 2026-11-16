@@ -1,5 +1,5 @@
 ---
-description: Background: concept and plan of the migration from Duende IdentityServer to OpenIddict
+description: "Background: concept and plan of the migration from Duende IdentityServer to OpenIddict"
 background: true
 ---
 

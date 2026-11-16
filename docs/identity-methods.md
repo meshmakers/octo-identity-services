@@ -1,6 +1,6 @@
 ---
-description: Identity CK method declarations and host, User.ChangePassword/ResetPassword, role, group and client-secret methods
-applies_to: src/IdentityServices/Methods/**, **/Services/{SelfService,SecretManagement}/**, *DataPermission*.cs
+description: "Identity CK method declarations and host, User.ChangePassword/ResetPassword, role, group and client-secret methods"
+applies_to: "src/IdentityServices/Methods/**, **/Services/{SelfService,SecretManagement}/**, *DataPermission*.cs"
 ---
 
 # Identity CK methods

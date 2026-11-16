@@ -1,6 +1,6 @@
 ---
-description: OpenIddict endpoints and handlers, token shape, sessions, tenant resolution at authorize/token/PAR, cookie scoping, token validation
-applies_to: **/{OpenIddict,Cookies,Middleware,Protocol,DynamicAuth}/**, {OpenIddictConfiguration,*PersistentGrantStore,TokenCleanup*}.cs
+description: "OpenIddict endpoints and handlers, token shape, sessions, tenant resolution at authorize/token/PAR, cookie scoping, token validation"
+applies_to: "**/{OpenIddict,Cookies,Middleware,Protocol,DynamicAuth}/**, {OpenIddictConfiguration,*PersistentGrantStore,TokenCleanup*}.cs"
 ---
 
 # OpenIddict protocol stack and tenant resolution

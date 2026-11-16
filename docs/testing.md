@@ -1,6 +1,6 @@
 ---
-description: Integration-test collections and fixtures, parallel-host rules, test-host leaks (memory, threads, user secrets, signing certificates)
-applies_to: tests/**
+description: "Integration-test collections and fixtures, parallel-host rules, test-host leaks (memory, threads, user secrets, signing certificates)"
+applies_to: "tests/**"
 ---
 
 # Integration-test fixtures and parallel hosts

@@ -1,5 +1,5 @@
 ---
-description: Background: system architecture overview of the identity service, components and request flow
+description: "Background: system architecture overview of the identity service, components and request flow"
 background: true
 ---
 

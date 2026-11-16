@@ -1,5 +1,5 @@
 ---
-description: Background: pilot runbook for SECRET phase 3 of the identity service
+description: "Background: pilot runbook for SECRET phase 3 of the identity service"
 background: true
 ---
 

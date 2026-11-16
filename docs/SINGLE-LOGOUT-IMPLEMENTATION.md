@@ -1,5 +1,5 @@
 ---
-description: Background: single logout implementation across tabs and client applications
+description: "Background: single logout implementation across tabs and client applications"
 background: true
 ---
 

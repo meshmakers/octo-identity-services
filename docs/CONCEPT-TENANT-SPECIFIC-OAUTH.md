@@ -1,5 +1,5 @@
 ---
-description: Background: concept of tenant-specific OAuth sign-in through acr_values
+description: "Background: concept of tenant-specific OAuth sign-in through acr_values"
 background: true
 ---
 

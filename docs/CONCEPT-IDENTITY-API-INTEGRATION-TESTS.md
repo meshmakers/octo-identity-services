@@ -1,5 +1,5 @@
 ---
-description: Background: concept of the identity API integration tests
+description: "Background: concept of the identity API integration tests"
 background: true
 ---
 

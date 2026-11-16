@@ -1,5 +1,5 @@
 ---
-description: Background: concept of cross-tenant token exchange for MCP tenant switching
+description: "Background: concept of cross-tenant token exchange for MCP tenant switching"
 background: true
 ---
 

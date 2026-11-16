@@ -1,6 +1,6 @@
 ---
-description: Cross-tenant sign-in, shadow users, token exchange, sibling grants, delegation, tenant probe guard
-applies_to: {*CrossTenant*,TenantProbeGuard,Allowed*,*IdentityResolver,*Processor,*ShadowUser*,*ExternalTenantUser*,*SourceT*,*SourceU*,Sibling*,AuthApiController}.cs
+description: "Cross-tenant sign-in, shadow users, token exchange, sibling grants, delegation, tenant probe guard"
+applies_to: "{*CrossTenant*,TenantProbeGuard,Allowed*,*IdentityResolver,*Processor,*ShadowUser*,*ExternalTenantUser*,*SourceT*,*SourceU*,Sibling*,AuthApiController}.cs"
 ---
 
 # Cross-tenant authentication and delegation
@@ -32,7 +32,7 @@ The service supports hierarchical cross-tenant authentication where parent-tenan
 - `POST /{childTenantId}/api/auth/cross-tenant-login` — Exchanges the token for a session in the child tenant
 - The Angular login component automatically attempts token-based auto-login when clicking "LOGIN VIA {parent}". If no parent session exists, it redirects to the parent tenant's login page (where all auth methods are available); after authentication there, it redirects back with a `crossTenantAutoLogin` query param to auto-complete the token exchange
 
-**Cross-tenant role sync**: When a cross-tenant user logs in (via `FindOrCreateCrossTenantUserAsync`), `SyncMappedRolesAsync` resolves mapped role IDs to role names by querying the tenant repository directly (via `IMultiTenancyResolverService.GetTenantRepository()`), then calls `UserManager.AddToRoleAsync` with the role **name** (not ID). This runs on every login, ensuring existing users get role updates. Important: `RoleManager<RtRole>` must NOT be used for this — it may resolve to the wrong tenant context during cross-tenant login. The tenant repository approach reads from `HttpContext.Items["tenantRepository"]` which is correctly set by the inline middleware.
+**Cross-tenant roles**: the effective roles of a cross-tenant (shadow) user are computed at token time and are never copied onto the shadow user. Every token issuance, refresh redemption and role check reads them through `OctoUserStore.GetRolesAsync` → `IGroupRoleResolver.ResolveEffectiveUserRoleIdsAsync`, so a changed or removed mapping takes effect with the next token. Do not add a login-time role copy: copied roles would stay after the mapping changes. Details: `docs/authentication.md` § Cross-Tenant Shadow User Roles and Identity.
 
 **Second factor across tenant boundaries:** every cross-tenant entry point (password login
 fallback, cross-tenant-token/-login, tenant-switch, token exchange; the device approval no longer crosses tenants) refuses a source user

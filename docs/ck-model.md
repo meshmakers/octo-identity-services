@@ -1,6 +1,6 @@
 ---
-description: Embedded CK models, run-once data migrations, tenant-owned and secret attributes, access modifiers, blueprint-owned opt-in
-applies_to: src/Persistence.IdentityCkModel/**, src/IdentityServerPersistence/Services/Migrations/**, CkModelCompatibility.cs
+description: "Embedded CK models, run-once data migrations, tenant-owned and secret attributes, access modifiers, blueprint-owned opt-in"
+applies_to: "src/Persistence.IdentityCkModel/**, src/IdentityServerPersistence/Services/Migrations/**, CkModelCompatibility.cs"
 ---
 
 # CK model, ownership and data migrations

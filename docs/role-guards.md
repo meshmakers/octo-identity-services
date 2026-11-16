@@ -1,6 +1,6 @@
 ---
-description: Group-based role inheritance, role change guard (no escalation, last administrator), app and platform roles, first administrator
-applies_to: **/{Authorization/RoleChange,AdminRoleMigration}/**, {Group*Resolver,GuardedEntityMutation,OctoRoleStore,*GroupStore,RolesController,GroupsController}.cs
+description: "Group-based role inheritance, role change guard (no escalation, last administrator), app and platform roles, first administrator"
+applies_to: "**/{Authorization/RoleChange,AdminRoleMigration}/**, {Group*Resolver,GuardedEntityMutation,OctoRoleStore,*GroupStore,RolesController,GroupsController}.cs"
 ---
 
 # Role inheritance and role change guards

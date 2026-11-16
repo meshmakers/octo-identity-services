@@ -1,5 +1,5 @@
 ---
-description: Background: concept of RFC 7591 dynamic client registration for MCP clients
+description: "Background: concept of RFC 7591 dynamic client registration for MCP clients"
 background: true
 ---
 

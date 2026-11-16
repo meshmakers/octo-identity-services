@@ -1,5 +1,5 @@
 ---
-description: Background: concept of RFC 8707 resource indicators validated against the API resource store
+description: "Background: concept of RFC 8707 resource indicators validated against the API resource store"
 background: true
 ---
 

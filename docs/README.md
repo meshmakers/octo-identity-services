@@ -1,5 +1,5 @@
 ---
-description: Background: index of the developer documentation of the identity service
+description: "Background: index of the developer documentation of the identity service"
 background: true
 ---
 

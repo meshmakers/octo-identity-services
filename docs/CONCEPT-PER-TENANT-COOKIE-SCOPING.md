@@ -1,5 +1,5 @@
 ---
-description: Background: concept of per-tenant authentication cookie scoping
+description: "Background: concept of per-tenant authentication cookie scoping"
 background: true
 ---
 

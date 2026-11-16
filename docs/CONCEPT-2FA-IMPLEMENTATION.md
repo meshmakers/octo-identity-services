@@ -1,5 +1,5 @@
 ---
-description: Background: concept and decisions for two-factor authentication (German)
+description: "Background: concept and decisions for two-factor authentication (German)"
 background: true
 ---
 

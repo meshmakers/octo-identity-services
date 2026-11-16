@@ -1,5 +1,5 @@
 ---
-description: Background: step-by-step setup of external identity providers
+description: "Background: step-by-step setup of external identity providers"
 background: true
 ---
 

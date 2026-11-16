@@ -1,5 +1,5 @@
 ---
-description: Background: planned improvements of the email-first tenant discovery
+description: "Background: planned improvements of the email-first tenant discovery"
 background: true
 ---
 

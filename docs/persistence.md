@@ -1,5 +1,5 @@
 ---
-description: Background: persistence architecture, CK entities, stores, indexes, role grants
+description: "Background: persistence architecture, CK entities, stores, indexes, role grants"
 background: true
 ---
 

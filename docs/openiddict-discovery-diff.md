@@ -1,5 +1,5 @@
 ---
-description: Background: differences of the discovery document between Duende and OpenIddict
+description: "Background: differences of the discovery document between Duende and OpenIddict"
 background: true
 ---
 

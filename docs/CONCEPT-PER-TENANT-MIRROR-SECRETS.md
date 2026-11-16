@@ -1,5 +1,5 @@
 ---
-description: Background: concept of per-tenant mirror secrets and the open escalation gap
+description: "Background: concept of per-tenant mirror secrets and the open escalation gap"
 background: true
 ---
 

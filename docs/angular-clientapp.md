@@ -1,6 +1,6 @@
 ---
-description: Angular ClientApp (LCARS UI): build, lint, toolchain, device flow, i18n, SPA version, API controllers
-applies_to: src/IdentityServices/ClientApp/**
+description: "Angular ClientApp (LCARS UI): build, lint, toolchain, device flow, i18n, SPA version, API controllers"
+applies_to: "src/IdentityServices/ClientApp/**"
 ---
 
 # Angular ClientApp (LCARS UI)

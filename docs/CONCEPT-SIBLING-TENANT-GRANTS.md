@@ -1,5 +1,5 @@
 ---
-description: Background: contract of sibling-tenant user lookup and cross-tenant grants
+description: "Background: contract of sibling-tenant user lookup and cross-tenant grants"
 background: true
 ---
 

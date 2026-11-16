@@ -1,5 +1,5 @@
 ---
-description: Background: historical concept of the Angular LCARS identity UI
+description: "Background: historical concept of the Angular LCARS identity UI"
 background: true
 ---
 

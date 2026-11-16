@@ -1,6 +1,6 @@
 ---
-description: Projects, dependencies, CK model id, API versioning, consumers, configuration options, password policy, data protection keys, Docker
-applies_to: {Program,IdentityApi*,*KeyStore}.cs, *.csproj, Dockerfile, appsettings*.json, azure-pipelines.yml, **/{Configuration,Mapping,Consumers,DataProtection}/**
+description: "Projects, dependencies, CK model id, API versioning, consumers, configuration options, password policy, data protection keys, Docker"
+applies_to: "{Program,IdentityApi*,*KeyStore}.cs, *.csproj, Dockerfile, appsettings*.json, azure-pipelines.yml, **/{Configuration,Mapping,Consumers,DataProtection}/**"
 ---
 
 # Architecture, configuration and operations

@@ -1,5 +1,5 @@
 ---
-description: Background: rollout runbook for role enforcement on the identity REST API
+description: "Background: rollout runbook for role enforcement on the identity REST API"
 background: true
 ---
 

@@ -1,6 +1,6 @@
 ---
-description: Service-account clients over the event hub, multi-tenant client-credentials auto-provisioning, client roles and group assignment
-applies_to: **/SystemStores/*Client*.cs, **/Services/{ClientGrants,PipelineServiceAccounts,DynamicClientRegistration}/**, *ClientMirror*.cs, ClientsController.cs
+description: "Service-account clients over the event hub, multi-tenant client-credentials auto-provisioning, client roles and group assignment"
+applies_to: "**/SystemStores/*Client*.cs, **/Services/{ClientGrants,PipelineServiceAccounts,DynamicClientRegistration}/**, *ClientMirror*.cs, ClientsController.cs"
 ---
 
 # Client credentials, service accounts and client roles
@@ -207,7 +207,7 @@ in the child tenants until a restart. A compensation job (decision OD-6: no outb
 | `POST` | `mirrors/provisionInExistingTenants` | Backfill — provision into every existing sub-tenant of the caller. Requires the client to be flagged (400 otherwise). |
 | `POST` | `mirrors/provisionInTenant?childTenantId=…` | One-shot provision into a specific sub-tenant. |
 | `DELETE` | `mirrors/{childTenantId}` | Remove a single mirror (drops both the child-side `RtClient` and the parent's tracking row). |
-| `PATCH` | `autoProvisionInChildTenants` | Flip the `AutoProvisionInChildTenants` flag on the client without rewriting the full client object. Body: `{ "enabled": true|false }`. |
+| `PATCH` | `autoProvisionInChildTenants` | Flip the `AutoProvisionInChildTenants` flag on the client without rewriting the full client object. Body: `{ "enabled": true\|false }`. |
 
 Backed by `ClientMirrorController` + `ClientAutoProvisionFlagController` in
 `TenantApi/v1/Controllers/`. The `PATCH` flow piggybacks on
