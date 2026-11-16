@@ -62,9 +62,12 @@ public class UserManagementService(
     }
 
     /// <summary>
-    ///     The first administrator becomes a member of <c>TenantOwners</c>, which carries every non-secret built-in
-    ///     role. Without it the administrator holds only the direct roles above and, under the role change guard (grant
-    ///     only built-in roles you hold), could not add anyone to <c>TenantOwners</c>. The group is part of the
+    ///     The first administrator becomes a member of <c>TenantOwners</c>, which carries every built-in role including
+    ///     <c>SecretManagement</c> (the bootstrap seed assigns all others, <c>TenantOwnersSecretManagementGrant</c> adds
+    ///     <c>SecretManagement</c> once per tenant after the blueprint apply). Every member inherits these roles, clients
+    ///     included, and through the parent-administration endpoints they reach the tenant's descendants. Without it the
+    ///     administrator holds only the direct roles above and, under the role change guard (grant only built-in roles
+    ///     you hold), could not add anyone to <c>TenantOwners</c>. The group is part of the
     ///     bootstrap blueprint; a tenant without it keeps the direct roles only. Idempotent: an existing membership is
     ///     left alone. This is the setup path and does not go through the guarded controllers by design.
     /// </summary>

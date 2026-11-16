@@ -184,7 +184,8 @@ ckModelDependencies:
 # All files below are merged into ONE runtime model before the import runs, so the order
 # is presentation only and associations may cross files (the UserManagement role in
 # roles.yaml grants the DataPermission in data-permissions.yaml; the TenantOwners group
-# in groups.yaml references sixteen of the seventeen roles, all but SecretManagement).
+# in groups.yaml references sixteen of the seventeen roles, all but SecretManagement, which the
+# identity service adds to the group after the apply - see the comment in groups.yaml).
 seedDataPaths:
   - seed-data/roles.yaml
   - seed-data/identity-resources.yaml
