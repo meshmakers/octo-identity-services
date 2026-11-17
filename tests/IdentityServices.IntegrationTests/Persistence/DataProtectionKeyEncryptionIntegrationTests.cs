@@ -335,6 +335,28 @@ public class DataProtectionKeyEncryptionIntegrationTests : IClassFixture<Identit
     }
 
     /// <summary>
+    ///     A service key wrapped with a platform key id identity does not have (e.g. after the old key id was removed
+    ///     from identity's configuration, or a service with another ring) never makes identity refuse to start; the
+    ///     unknown-key-id refusal applies to identity's own keys only.
+    /// </summary>
+    [Fact]
+    public async Task ForeignServiceKeyWithAnUnknownPlatformKeyId_DoesNotStopIdentity()
+    {
+        await GivenEmptyKeyStoreAsync();
+        var identityRing = Track(PlatformKeyRing.CreateK1());
+        var serviceRing = Track(Track(Track(PlatformKeyRing.CreateK1()).RotateTo("k2")).Without("k1", "k2"));
+        var serviceKey = CreateServiceKeyXml(serviceRing, encrypted: true);
+        serviceKey.ToString().Should().Contain("enc:v2:k2:");
+        await GivenRawKeyAsync(serviceKey, $"{ServiceApplicationName}/key-{serviceKey.Attribute("id")!.Value}");
+        var before = (await LoadRawKeysAsync()).Single().XmlData;
+
+        await CreateStartupService(identityRing, encryptExistingKeys: true)
+            .Invoking(s => s.StartAsync(TestContext.Current.CancellationToken))
+            .Should().NotThrowAsync();
+        (await LoadRawKeysAsync()).Single().XmlData.Should().Be(before);
+    }
+
+    /// <summary>
     ///     A store that holds only keys of other services counts as empty for identity: its first own key is stored
     ///     encrypted even with the flag off (fresh-store rule), exactly as in a store without any key.
     /// </summary>

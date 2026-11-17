@@ -76,9 +76,10 @@ tokens) becomes invalid. Therefore:
 4. The key rings of the other services (shared key store of octo-common-services, names `<ApplicationName>/key-…`)
    are **not** re-wrapped — not by identity and not by the services. Removing `k1` makes their keys wrapped with `k1`
    unusable: the services create new keys and their users sign in again (no service refuses to start). An expired
-   key still unprotects the payloads it protected, so expiry alone is not a safe deadline: keep `k1` until the newest
-   service key wrapped with it has expired (90 days after its creation) **plus** the longest lifetime of a payload it
-   protected (the longest authentication cookie or session lifetime of these services), or accept that sign-in.
+   key still unprotects the payloads it protected, so expiry alone is not a safe deadline: keep `k1` until the
+   `expirationDate` in the XML of the newest service key wrapped with it (about 90 days after its activation; ASP.NET
+   creates the next key up to 48 hours before it is activated) **plus** the longest lifetime of a payload it protected
+   (the longest authentication cookie or session lifetime of these services), or accept that sign-in.
 
 ## Rollback
 
