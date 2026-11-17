@@ -1,5 +1,5 @@
 ---
-description: "REST facades of the role, merge, create-user, password, group, client, secret and data-permission methods, deprecation waves, account pages running the password methods"
+description: "REST facades of role, merge, create-user, password, group, client, secret and data-permission methods; deprecation waves; account pages run password methods"
 applies_to: "{IdentityMethodFacade,IdentityRestDeprecation,UsersController,ManageApiController,RoleChangeProblems,ResetUserPasswordRequestDto,ApiSecretsController,DataPermissionsController}.cs"
 ---
 
