@@ -1,0 +1,45 @@
+"$schema": "https://schemas.meshmakers.cloud/construction-kit-elements.schema.json"
+# 3.5.0: the result records of the client mirror and admin provisioning methods. Each has the shape of the REST response of
+# the same operation (ClientMirrorBackfillResponseDto, ClientMirrorProvisionResponseDto, ExternalTenantUserMappingDto plus the
+# provisioning outcome), so the method answers what the REST endpoint answers. They take the ckLanguage 2 default
+# `derivable: Model`: answers, not extension points.
+records:
+  - recordId: ClientMirrorBackfillResult
+    description: "Result of Client.ProvisionMirrors: child tenants considered, mirrors newly provisioned and mirrors already present."
+    isFinal: true
+    attributes:
+      - id: ${this}/MirrorResultChildTenantsConsidered
+        name: ChildTenantsConsidered
+      - id: ${this}/MirrorResultNewlyProvisioned
+        name: NewlyProvisioned
+      - id: ${this}/MirrorResultAlreadyPresent
+        name: AlreadyPresent
+  - recordId: ClientMirrorProvisionResult
+    description: "Result of Client.ProvisionMirrorInTenant: flagged clients considered, mirrors newly provisioned and mirrors already present."
+    isFinal: true
+    attributes:
+      - id: ${this}/MirrorResultFlaggedClientsConsidered
+        name: FlaggedClientsConsidered
+      - id: ${this}/MirrorResultNewlyProvisioned
+        name: NewlyProvisioned
+      - id: ${this}/MirrorResultAlreadyPresent
+        name: AlreadyPresent
+  - recordId: AdminProvisioningResult
+    description: "Result of the ExternalTenantUserMapping provisioning methods: the mapping as stored, the groups it joined and, for ProvisionCurrentUser, what the call did."
+    isFinal: true
+    attributes:
+      - id: ${this}/ProvisioningResultMappingRtId
+        name: MappingRtId
+      - id: ${this}/ProvisioningResultSourceTenantId
+        name: SourceTenantId
+      - id: ${this}/ProvisioningResultSourceUserId
+        name: SourceUserId
+      - id: ${this}/ProvisioningResultSourceUserName
+        name: SourceUserName
+      - id: ${this}/ProvisioningResultRoleIds
+        name: RoleIds
+      - id: ${this}/ProvisioningResultGroupNames
+        name: GroupNames
+      - id: ${this}/ProvisioningResultOutcome
+        name: Outcome
+        isOptional: true

@@ -1,6 +1,10 @@
 using System.Net;
+using System.Security.Claims;
 using FluentAssertions;
 using Meshmakers.Octo.Backend.IdentityServices.Authorization;
+using Meshmakers.Octo.Backend.IdentityServices.Methods;
+using Meshmakers.Octo.Services.Contracts.DistributionEventHub.Methods;
+using Persistence.IdentityCkModel.Generated.System.Identity.v3;
 using Meshmakers.Octo.Backend.IdentityServices.TenantApi.v1.Controllers;
 using Shared.TestUtilities.Fakes;
 using NSubstitute;
@@ -109,16 +113,25 @@ public class AdminProvisioningPipelineTests : IAsyncDisposable
     [Fact]
     public async Task SystemCaller_OnAnUnknownTenant_PassesTheFilter_AndTheActionAnswers404()
     {
-        // Documents the current behavior (live repro AB#4824): the system caller is allowed to learn that a
-        // tenant does not exist; the filter lets it through and the action answers 404.
+        // Documents the current behavior: the system caller is allowed to learn that a tenant does not exist; the
+        // filter lets it through and the action (a facade of ExternalTenantUserMapping.ProvisionCurrentUser) answers the
+        // method's TENANT_NOT_FOUND with 404. The tenant lookup itself is the handler's, covered by its integration test.
         await StartAsync();
+        _host.MethodFacade.InvokeAsync(Arg.Any<string>(), Arg.Any<string>(), Arg.Any<string?>(),
+                Arg.Any<ExternalTenantUserMappingProvisionCurrentUserParameters>(), Arg.Any<ClaimsPrincipal>(),
+                Arg.Any<CancellationToken>())
+            .Returns(CkMethodResponse.Failed(Guid.NewGuid(), "test",
+                new CkMethodError { Code = AdminProvisioningMethodErrors.TenantNotFound }));
 
         var result = await ProvisionAsync(SystemTenant, "does-not-exist");
 
         result.Status.Should().Be(HttpStatusCode.NotFound);
         result.Body.Should().Contain("not found");
         _filterLog.AllText.Should().BeEmpty();
-        await _systemContext.Received(1).TryFindTenantRepositoryAsync("does-not-exist");
+        await _host.MethodFacade.Received(1).InvokeAsync(Arg.Any<string>(),
+            Arg.Is(SystemIdentityCkIds.ExternalTenantUserMappingProvisionCurrentUserMethodId), Arg.Is<string?>(t => t == null),
+            Arg.Is<ExternalTenantUserMappingProvisionCurrentUserParameters>(p => p.TargetTenantId == "does-not-exist"),
+            Arg.Any<ClaimsPrincipal>(), Arg.Any<CancellationToken>());
     }
 
     [Fact]

@@ -59,6 +59,7 @@ internal sealed class ScopedTenantApiHost : IAsyncDisposable
     public CapturingLogger<AdminProvisioningTargetScopeFilter> FilterLog { get; }
     public CapturingLogger<IdentityApiRoleAuthorizationHandler> PolicyLog { get; }
     public ISystemContext SystemContext { get; }
+    public Meshmakers.Octo.Backend.IdentityServices.Methods.IIdentityMethodFacade MethodFacade { get; private init; } = null!;
 
     // octosystem
     //   +- a            (the caller's tenant)
@@ -92,6 +93,7 @@ internal sealed class ScopedTenantApiHost : IAsyncDisposable
         var filterLog = new CapturingLogger<AdminProvisioningTargetScopeFilter>();
         var policyLog = new CapturingLogger<IdentityApiRoleAuthorizationHandler>();
         var systemContext = Substitute.For<ISystemContext>();
+        var methodFacade = Substitute.For<Meshmakers.Octo.Backend.IdentityServices.Methods.IIdentityMethodFacade>();
         systemContext.TryFindTenantRepositoryAsync(Arg.Any<string>())
             .Returns(Task.FromResult<ITenantRepository?>(null));
 
@@ -120,6 +122,7 @@ internal sealed class ScopedTenantApiHost : IAsyncDisposable
         services.AddSingleton(ancestryGuard);
         services.AddSingleton(Substitute.For<IdentityServerPersistence.SystemStores.IOctoClientStore>());
         services.AddSingleton(Substitute.For<IClientMirrorProvisioningService>());
+        services.AddSingleton(methodFacade);
         // AB#8342: the provisioning writes record grant audit events.
         services.AddSingleton(Substitute.For<Meshmakers.Octo.Backend.IdentityServices.CrossTenantAudit.ICrossTenantGrantAuditRecorder>());
 
@@ -152,7 +155,7 @@ internal sealed class ScopedTenantApiHost : IAsyncDisposable
         app.UseAuthorization();
         app.MapControllers();
         await app.StartAsync();
-        return new ScopedTenantApiHost(app, registry, filterLog, policyLog, systemContext);
+        return new ScopedTenantApiHost(app, registry, filterLog, policyLog, systemContext) { MethodFacade = methodFacade };
     }
 
     public async ValueTask DisposeAsync()

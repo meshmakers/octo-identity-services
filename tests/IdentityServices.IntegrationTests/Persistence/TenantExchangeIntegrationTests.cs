@@ -887,15 +887,7 @@ public class TenantExchangeIntegrationTests : IClassFixture<IdentityServicesFixt
         {
             User = new System.Security.Claims.ClaimsPrincipal(new System.Security.Claims.ClaimsIdentity(claims, "test"))
         };
-        var controller = new AdminProvisioningController(
-            systemContext, Substitute.For<Meshmakers.Octo.Backend.Authentication.DynamicAuth.IDynamicAuthSchemeService>(),
-            new CrossTenantShadowUserChainResolver(systemContext),
-            TestAncestryGuards.Create(systemContext),
-            Substitute.For<Meshmakers.Octo.Backend.IdentityServices.CrossTenantAudit.ICrossTenantGrantAuditRecorder>(),
-            NullLogger<AdminProvisioningController>.Instance)
-        {
-            ControllerContext = new Microsoft.AspNetCore.Mvc.ControllerContext { HttpContext = httpContext }
-        };
+        var controller = ProvisioningMethodTestFacade.Controller(systemContext, httpContext: httpContext);
 
         var result = await controller.ProvisionCurrentUser(targetTenantId);
 

@@ -35,9 +35,15 @@ public class IdentityApiAuthorizationOptions
 
     /// <summary>
     ///     Whether a missing tenant role is denied (<see cref="IdentityApiRoleEnforcementMode.Enforce" />,
-    ///     default) or only logged (<see cref="IdentityApiRoleEnforcementMode.Warn" />). The scope
+    ///     default) or only logged (<see cref="IdentityApiRoleEnforcementMode.Warn" />) by the REST policies. The scope
     ///     requirement (<c>octo_api.*</c>) is always enforced, independent of this switch.
     /// </summary>
+    /// <remarks>
+    ///     The identity methods are not staged: a REST endpoint that is a facade of a method (the role, group, client,
+    ///     secret, data-permission, client mirror and admin provisioning writes, <c>docs/identity-rest-facades.md</c>)
+    ///     refuses a caller without the role in every mode (<c>METHOD_FORBIDDEN</c>, <c>role-required</c>). The
+    ///     target-tenant rule of the cross-tenant methods keeps the <c>Warn</c> staging for REST facade calls only.
+    /// </remarks>
     public IdentityApiRoleEnforcementMode RoleEnforcement { get; set; } = IdentityApiRoleEnforcementMode.Enforce;
 
     /// <summary>

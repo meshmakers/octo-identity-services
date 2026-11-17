@@ -381,3 +381,170 @@ and over the method gives the same fail-closed read verdict of the engine for a 
 without the role; revoke of a granted unreadable role; policy and permission not readable), `Api/Methods/DataPermissionMethodTests`.
 
 Neither group of endpoints carries a deprecation yet (deprecation wave of identity wave 2 is its own story); REST is not removed and gets no `Sunset` header.
+
+## The target's data permission on every facade (transport-independent verdict)
+
+The GraphQL gateway evaluates the declared `dataAccess: Write` of a method on its **target** before it dispatches; a REST facade dispatches
+in-process (`IIdentityMethodFacade`), where no gateway runs. So every handler that serves a REST facade evaluates its target itself, with the
+gateway's answers: a target the caller cannot read = `METHOD_TARGET_NOT_FOUND`, one it may read but not write = `METHOD_FORBIDDEN` with
+`reason = data-permission`, nothing changed. One place for the instance methods of `IdentityAdminMethodHandlerBase` (the target's CK type
+comes from the method id the handler is registered for, never from the request): `Group.*`, `Client.SetRoles/AddRole/RemoveRole`,
+`DataPermission.*`, `DataPolicy.SetEnforcementMode`, `User.Merge`, `User.DisableTwoFactor`; plus `UserRoleMethodHandlerBase`
+(`User.SetRoles/AddRole/RemoveRole`), `User.ResetPassword` and `Client.ApplyOverlayUris`. The secret methods
+(`SecretOwnerMethodHandlerBase`) and the client mirror methods (`ClientMirrorMethodHandlerBase`) use the same check
+(`IdentityMethodCall.CheckTargetWritableAsync`). On the GraphQL path nothing changes: the gateway refuses first with the same codes.
+
+Static methods have no target entity; the gateway checks the caller's `Write` permission on the declaring type instead. Their handlers check the
+same (`IdentityMethodCall.CheckTypeWritableAsync`, after the tenant bind): the five `ExternalTenantUserMapping` methods, `User.CreateUser` and
+`Client.CleanOverlayEntries`. A type the caller cannot see answers `METHOD_TARGET_NOT_FOUND` (`404`), a type they may read but not write
+`METHOD_FORBIDDEN` (`data-permission`, `403`). Not affected: the account-owner methods (`User.ChangePassword`, `User.SetPassword`: `allowSelf` on the caller's own
+user through the account pages).
+
+Changed REST answers - only with an **enforcing data policy on the target type** (open by default); **intended change**, reason: the verdict no
+longer depends on the transport (REST wrote a target that GraphQL refused, CWE-863):
+
+| REST endpoint | Target type | Before | Now: target not readable / readable but not writable |
+|---|---|---|---|
+| `PUT groups/{group}/roles` | Group | `200`, written | `404` / `403` problem `METHOD_FORBIDDEN` (`data-permission`), nothing changed |
+| `PUT` / `DELETE groups/{group}/members/users/{user}`, `…/members/clients/{client}` | Group | `200`, written | `404` / `403`, nothing changed |
+| `PUT` / `DELETE groups/{group}/members/groups/{child}` | Group | `200`, written | `404` / `403`, nothing changed |
+| `PUT clients/{client}/roles`, `PUT` / `DELETE clients/{client}/roles/{role}` | Client | `200`, written | `404` / `403`, nothing changed |
+| `POST clients/{client}/overlayUris` | Client | `200`, written | `404` / `403`, nothing changed |
+| `PUT users/{user}/roles`, `PUT` / `DELETE users/{user}/roles/{role}` | User | `200`, written | `404` / `403`, nothing changed |
+| `POST users/{user}/merge` (the target user; the source was already checked) | User | `200`, merged | `404` / `403`, nothing merged |
+| `POST users/ResetPassword` | User | `200`, password reset | `404` / `403`, password unchanged |
+| `POST users` (static `User.CreateUser`: the declaring type) | User | `200`, created | `404` / `403`, no user created |
+| `DELETE clients/cleanOverlayEntries` (static `Client.CleanOverlayEntries`: the declaring type) | Client | `200`, cleaned | `404` / `403`, nothing removed |
+
+Unchanged: the secret writes, the data-permission grants and the enforcement switch (they checked their target already) and the client mirror
+endpoints (their parent client is checked from the start). The admin provisioning endpoints and `POST externalTenantUserMappings` answer the same
+`404` / `403` under an enforcing data policy on `ExternalTenantUserMapping` that denies the caller `Write` (before: `200`/`201`, written); their
+target-tenant rule is unchanged. Each refusal writes the usual `Identity.Method` event with the code (and `reason`).
+
+Tests: `Api/TenantApi/TargetDataPermissionRestParityTests` (every row above that writes a role, member, overlay URI or password, both decisions: the REST
+answer and the dispatcher's answer agree, one event each, nothing changed; without an enforcing policy REST still writes).
+
+## REST facades of the client mirror endpoints (System.Identity 3.5.0)
+
+The write endpoints of `ClientMirrorController` and `ClientAutoProvisionFlagController` are **facades** of the client mirror methods on the parent
+client; the controller resolves the route's OAuth client id to the method target (rtId) and maps the envelope, every rule lives in the handlers
+(`Methods/ClientMirrorHandlers.cs`). The method runs in the parent tenant; the handler writes into the child tenant through
+`IClientMirrorProvisioningService`.
+
+| REST endpoint | Method |
+|---|---|
+| `POST clients/{clientId}/mirrors/provisionInExistingTenants` | `Client.ProvisionMirrors-1` |
+| `POST clients/{clientId}/mirrors/provisionInTenant?childTenantId=` | `Client.ProvisionMirrorInTenant-1` |
+| `POST clients/{clientId}/mirrors/{childTenantId}/secret` | `Client.RotateMirrorSecret-1` (result `sensitive`) |
+| `DELETE clients/{clientId}/mirrors/{childTenantId}` | `Client.RemoveMirror-1` |
+| `PATCH clients/{clientId}/autoProvisionInChildTenants` | `Client.SetMirrorAutoProvision-1` |
+
+`GET clients/{clientId}/mirrors` stays a REST read.
+
+- **Switch.** Only the rotation carries a secret (its result): `CarriesSecret = true`, `ServesRestFacade = true`, so it is local only while
+  `Methods:Identity:EnablePasswordMethods` is off (the REST endpoint keeps working, GraphQL answers `METHOD_HANDLER_NOT_AVAILABLE`, the secret never
+  reaches the broker). The other four are bus handlers whatever the switch says.
+- **Caller.** The REST policies are unchanged (`IdentityTenantAdministrationWritePolicy`; the rotation `IdentitySecretAdministrationPolicy`, staged by
+  `SecretManagementRoleEnforcement`); the handlers repeat them on the validated principal.
+- **Child tenant, two checks before any write.** The handler checks the child against the caller's token tenant (the `tenant_id` the token was
+  issued for, also on the bus path; `AdminProvisioningTargetScope`, the rule of `AdminProvisioningTargetScopeFilter`; `RoleEnforcement=Warn` stages it
+  only for REST calls, a bus or GraphQL call is refused in either mode), and the mirror service checks it against the parent tenant's subtree.
+  Either refusal is `METHOD_FORBIDDEN` with `reason = tenant-out-of-scope`; nothing is written in the child tenant. REST still runs the filter first
+  and answers the empty `403`.
+- **Parent client.** CWE-863: the handler checks that the caller may read and write the parent client (`IRtDataPermissionEvaluator`) before
+  anything changes in either tenant.
+- **Secret.** The rotated secret is minted, hashed and marked as the mirror's own secret by `RotateMirrorSecretAsync` (the mirror sync keeps
+  it); the clear text is only the sensitive result and the one-time REST body, never in a log line, audit detail or trace.
+
+Parity table (REST before -> facade):
+
+| Point | REST before | Now |
+|---|---|---|
+| Routes, bodies, status codes of a success | backfill / provision `200` + counts, rotation `200` + `MirrorSecretResponseDto`, delete / flag `204` | unchanged |
+| Unknown client | `404` (`NotFoundErrorDto`; rotation and delete: "No mirror tracked for client … in child tenant …") | unchanged (resolved in the controller) |
+| Client not flagged (backfill, provision) | `400` "… is not flagged AutoProvisionInChildTenants. Set the flag first." | unchanged (`AUTO_PROVISION_DISABLED`) |
+| Untracked pair (rotation, delete) | `404` | unchanged (`MIRROR_NOT_FOUND`) |
+| Public client (rotation) | `400` | unchanged (`CLIENT_SECRET_NOT_REQUIRED`) |
+| Child outside the caller's or the parent's subtree | empty `403` (filter, service) | unchanged; the same rule now also holds for a GraphQL / bus caller. Under `RoleEnforcement=Warn` (not the default) a REST call is logged and allowed by the filter and the handler (staging, as before); a GraphQL / bus call is refused: a new path without existing callers |
+| Lost concurrent write of the flag | `409` problem | unchanged (`CONCURRENT_CHANGE`) |
+| Tracking row whose parent client no longer exists (rotation, delete) | delete `204` (row removed), rotation `404` | **intended REST change:** `404` for both: the method target is the parent client. The reconciliation job removes such rows after two passes |
+| Parent client the caller cannot read / write (only with an enforcing data policy on clients; open by default) | not checked: changed anyway | **intended REST change:** cannot read = `404`, read but not write = `403` problem `METHOD_FORBIDDEN` (`data-permission`); nothing changes in either tenant (CWE-863) |
+| Other flagged clients of the parent (provision, backfill) | the service mirrors **every** flagged client of the parent, not only the named one | unchanged, also under an enforcing client data policy for flagged clients the caller cannot read: their own flag asks for the mirrors (the same sync the tenant setup and the reconciliation run). The answer and the audit carry only counts and the named client's id, never another client's id, name or secret |
+| Backfill duration | no limit | the method's timeout of 300 s (`execution.timeoutSeconds`); a longer backfill answers `504` (`METHOD_TIMEOUT`), the provisioning already done stays (idempotent, re-run to finish) |
+| Unexpected failure | unhandled `500` | `500` problem `METHOD_HANDLER_FAILED` (same status, no exception text) |
+| `RoleEnforcement=Warn` (not the default) | caller without the role let through and logged | **intended REST change:** refused by the method (403 problem, `role-required`), as for the other facades |
+| Audit | none | one `Identity.Method` event per call (`clientId`, `childTenantId`, `enabled`, `newlyProvisioned`); never a secret or hash |
+
+Tests: `Api/TenantApi/ClientMirrorRestMethodFacadeTests` (both switch values: every write endpoint runs its method in-process outside the request, one
+event each, nothing on the broker; REST and the dispatcher leave the same tracking rows and child clients; a rotated secret authenticates in its child
+tenant only and is in no log, audit or trace; a child outside the caller's subtree and outside the parent's subtree is refused and nothing is written
+there; another tenant's token; a caller without the role; an unreadable parent client; the rotation under `SecretManagementRoleEnforcement=Enforce`),
+`Controllers/ClientMirrorControllerTests` (unit, real handlers), `Authorization/ClientMirrorScopePipelineTests`.
+
+## REST facades of admin provisioning and the mapping create (System.Identity 3.5.0)
+
+The writes of `AdminProvisioningController` and the create of `ExternalTenantUserMappingsController` are **facades** of static methods on
+`System.Identity/ExternalTenantUserMapping` (`Methods/AdminProvisioningHandlers.cs`; the provisioning logic itself is `AdminProvisioning/AdminProvisioningService.cs`).
+They are the Feature's `Tenant.ProvisionAdmin`: the host type is `ExternalTenantUserMapping` because every one of them creates, repairs or removes such a
+mapping, and a static method needs no target entity in the caller's tenant.
+
+| REST endpoint | Method |
+|---|---|
+| `POST adminProvisioning/{targetTenantId}` | `ExternalTenantUserMapping.ProvisionAdmin-1` |
+| `POST adminProvisioning/{targetTenantId}/withGroups` | `ExternalTenantUserMapping.ProvisionAdminWithGroups-1` |
+| `POST adminProvisioning/{targetTenantId}/provisionCurrentUser` | `ExternalTenantUserMapping.ProvisionCurrentUser-1` (result `outcome`: `created`, `repaired`, `already-provisioned`) |
+| `DELETE adminProvisioning/{targetTenantId}/{mappingRtId}` | `ExternalTenantUserMapping.RemoveAdminProvisioning-1` |
+| `POST externalTenantUserMappings` | `ExternalTenantUserMapping.CreateMapping-1` |
+
+The reads (`GET adminProvisioning/{target}`, `sourceUsers`, `roles`, `groups`, `externalTenantUserMappings` and `sourceUserLookup`) stay REST reads.
+Update and delete of `externalTenantUserMappings` stay REST (generic CRUD story of the Feature).
+
+- **Caller.** `ProvisionAdmin*`, `ProvisionCurrentUser`, `RemoveAdminProvisioning`: `TenantManagement` or `UserManagement` (`IdentityTenantAdministrationWritePolicy`);
+  `CreateMapping`: `UserManagement` (`IdentityUserAdministrationWritePolicy`); repeated in the handlers on the validated principal.
+- **Target tenant.** The provisioning methods run in the caller's tenant and write into `targetTenantId`, which must be the caller's token tenant or lie
+  in its subtree (`AdminProvisioningTargetScope`, the rule of `AdminProvisioningTargetScopeFilter`; `RoleEnforcement=Warn` stages it only for REST
+  calls, a bus or GraphQL call is refused in either mode) - before any lookup or
+  write; refused = `METHOD_FORBIDDEN`, `reason = tenant-out-of-scope`. Then: the target exists (`TENANT_NOT_FOUND`), the source tenant is a registry
+  ancestor of the target (`SOURCE_TENANT_NOT_ANCESTOR`), no mapping exists for the source user (`MAPPING_ALREADY_EXISTS`, parameter `existingMappingId`).
+  Data access beyond the call's tenant: the mapping, its `TenantOwners` / group membership and the `OctoTenantIdentityProvider` in the target tenant,
+  written through the system context as before; the target-tenant rule is the access rule for them (no data permission of the target tenant is evaluated,
+  as before).
+- **The caller of `ProvisionCurrentUser`** is the validated principal: its subject and the tenant its token was issued for; a service caller or a token
+  without a tenant is `CALLER_NOT_A_USER` (parameter `missing` = `subject` / `tenant`).
+- **`CreateMapping`** keeps the cross-tenant checks of the REST create: `SOURCE_TENANT_NOT_PERMITTED` (one answer for every refused source),
+  `MAPPING_ALREADY_EXISTS`, `UNKNOWN_GROUP` (parameter `unknownGroupIds`), the role change guard (`METHOD_FORBIDDEN` + `reason`). It does **not** set
+  `replacesGenericCreate`: on the existing type `ExternalTenantUserMapping` the flag is a Major (row M16 of the CK SemVer rules), so the generic GraphQL
+  create of the type stays possible until the next System.Identity major.
+
+Parity table (REST before -> facade):
+
+| Point | REST before | Now |
+|---|---|---|
+| Routes, bodies, status codes of a success | create `201` + `ExternalTenantUserMappingDto`, `provisionCurrentUser` `201` / `200` + `X-Provisioning-Outcome`, delete `200`, mapping create `201` with the relative `Location` | unchanged |
+| Target outside the caller's subtree | empty `403` (filter) | unchanged; the same rule now also holds for a GraphQL / bus caller. Under `RoleEnforcement=Warn` (not the default) a REST call is logged and allowed (staging, as before); a GraphQL / bus call is refused: a new path without existing callers |
+| Unknown target tenant | `404` "Tenant '…' not found." | unchanged (`TENANT_NOT_FOUND`) |
+| Source tenant not an ancestor | `403` problem `SourceTenantNotAncestor` | unchanged (`SOURCE_TENANT_NOT_ANCESTOR`) |
+| Mapping exists for the source user | `409` problem with `existingMappingId` | unchanged (`MAPPING_ALREADY_EXISTS`) |
+| `provisionCurrentUser` without `sub` / `tenant_id` in the token | `400` "Cannot determine user identity / source tenant from token." | unchanged (`CALLER_NOT_A_USER`); now checked after the target-tenant rule and before the tenant lookup, so such a token on an unknown target gets the `400` instead of the `404` |
+| `provisionCurrentUser`: shadow user without a resolvable home identity | `409` problem | unchanged (`HOME_IDENTITY_UNRESOLVED`); the caller named in `detail` comes from the token's name claims (the stored name before) |
+| `provisionCurrentUser`: target still initializing | `503` after the retries | unchanged (`TENANT_INITIALIZING`, retries in the handler) |
+| `provisionCurrentUser`: user name written to the mapping | the token's `preferred_username` / `name` claim, else the stored name | **intended change:** the user name stored in the caller's tenant (the method caller carries no profile claims; the stored name is the one the token exchange matches) |
+| `withGroups`: a group id that is no object id | unhandled `500` | **intended REST change:** skipped like an unknown group id - the `500` was a bug |
+| Delete: unknown mapping | `404` "Mapping '…' not found in tenant '…'." | unchanged (`MAPPING_NOT_FOUND`) |
+| Mapping create: refused source, duplicate, unknown group, guard refusal | `403` / `409` / `400` problems, guard `403` / `409` with WARN and `Identity.RoleChangeRefused` | unchanged |
+| Cross-tenant grant audit events (`Identity.CrossTenantGrant*`), `actorName` | the token's name claim (`name` / `preferred_username`), a service caller its `client_id`, else `sub` | **intended change:** the user name stored for the caller's subject in its token tenant (the name the identity service writes into the tokens it issues), a service caller its client id; no stored user (a deleted user, a token of another issuer) = the subject with a WARN line that names no user. Reason: the method caller carries no profile claims, and a name parameter would be caller-controlled |
+| Unexpected failure | unhandled `500` | `500` problem `METHOD_HANDLER_FAILED` (same status, no exception text) |
+| `RoleEnforcement=Warn` (not the default) | caller without the role let through and logged | **intended REST change:** refused by the method (403 problem, `role-required`), as for the other facades |
+| Audit | grant events only | plus one `Identity.Method` event per call (`targetTenantId`, `sourceTenantId`, `mappingRtId`, `provisioningOutcome`) |
+
+Generic create callers of `ExternalTenantUserMapping` (first party): none in this repository (the identity service writes mappings through its stores and
+these methods; the token exchange creates bare mappings through the store, not through GraphQL).
+
+Tests: `Api/TenantApi/AdminProvisioningRestMethodFacadeTests` (every write endpoint runs its method in-process outside the request, one event each, nothing on
+the broker; REST and the dispatcher leave the same mapping, roles and groups; `ProvisionCurrentUser` created / already-provisioned and the service caller;
+the handler's tenant lookup for an unknown target; a target outside the caller's subtree refused on every method with nothing written; another tenant's
+token; a caller without the role; the cross-tenant checks of `CreateMapping`), the controller-level suites through `ProvisioningMethodTestFacade`
+(`DuplicateExternalTenantUserMappingIntegrationTests`, `CrossTenantAncestryIntegrationTests`, `AdminProvisioningSourceUsersIntegrationTests`,
+`TenantExchangeIntegrationTests`), `Authorization/AdminProvisioningPipelineTests`.
+
+Neither group carries a deprecation (deprecation wave of identity wave 2 is its own story); REST is not removed and gets no `Sunset` header.

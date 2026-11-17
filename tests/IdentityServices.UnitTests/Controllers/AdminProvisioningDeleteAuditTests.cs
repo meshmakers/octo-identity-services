@@ -2,16 +2,14 @@ using FluentAssertions;
 using IdentityServerPersistence;
 using IdentityServerPersistence.Services;
 using Meshmakers.Octo.Backend.Authentication.DynamicAuth;
+using Meshmakers.Octo.Backend.IdentityServices.AdminProvisioning;
 using Meshmakers.Octo.Backend.IdentityServices.CrossTenantAudit;
-using Meshmakers.Octo.Backend.IdentityServices.TenantApi.v1.Controllers;
 using Meshmakers.Octo.ConstructionKit.Contracts;
 using Meshmakers.Octo.Runtime.Contracts;
 using Meshmakers.Octo.Runtime.Contracts.MongoDb;
 using Meshmakers.Octo.Runtime.Contracts.MongoDb.Repositories;
 using Meshmakers.Octo.Runtime.Contracts.Repositories;
 using Meshmakers.Octo.Runtime.Contracts.Repositories.Query;
-using Microsoft.AspNetCore.Http;
-using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Logging.Abstractions;
 using NSubstitute;
 using NSubstitute.ExceptionExtensions;
@@ -21,8 +19,9 @@ using Xunit;
 namespace IdentityServices.UnitTests.Controllers;
 
 /// <summary>
-///     AB#8437: <c>DELETE AdminProvisioning/{targetTenantId}/{mappingRtId}</c> reads the mapping's group names only for the
-///     <c>Identity.CrossTenantGrantRemoved</c> audit event. A failing read must not break the deletion (AB#8342 AC 3).
+///     The deletion behind <c>DELETE AdminProvisioning/{targetTenantId}/{mappingRtId}</c> (the service the
+///     <c>RemoveAdminProvisioning</c> method calls) reads the mapping's group names only for the
+///     <c>Identity.CrossTenantGrantRemoved</c> audit event. A failing read must not break the deletion.
 /// </summary>
 public class AdminProvisioningDeleteAuditTests
 {
@@ -51,9 +50,9 @@ public class AdminProvisioningDeleteAuditTests
                 Arg.Any<RtAssociationExtendedQueryOptions>())
             .ThrowsAsync(new InvalidOperationException("association read failed"));
 
-        var result = await Controller().Delete(Target, _mapping.RtId);
+        var result = await Service().DeleteAsync(Target, _mapping.RtId, "caller");
 
-        result.Should().BeOfType<OkResult>();
+        result.Status.Should().Be(AdminProvisioningStatus.Removed);
         await _repository.Received(1).DeleteOneRtEntityByRtIdAsync<RtExternalTenantUserMapping>(
             Arg.Any<IOctoSession>(), _mapping.RtId, DeleteOptions.Erase);
         await _audit.Received(1).RecordGrantAsync(CrossTenantGrantAuditEvents.GrantRemoved, Target,
@@ -68,18 +67,15 @@ public class AdminProvisioningDeleteAuditTests
         _repository.GetSessionAsync().Returns(Task.FromResult(deleteSession),
             Task.FromException<IOctoSession>(new InvalidOperationException("no session")));
 
-        var result = await Controller().Delete(Target, _mapping.RtId);
+        var result = await Service().DeleteAsync(Target, _mapping.RtId, "caller");
 
-        result.Should().BeOfType<OkResult>();
+        result.Status.Should().Be(AdminProvisioningStatus.Removed);
         await _repository.Received(1).DeleteOneRtEntityByRtIdAsync<RtExternalTenantUserMapping>(deleteSession,
             _mapping.RtId, DeleteOptions.Erase);
         await deleteSession.Received(1).CommitTransactionAsync();
     }
 
-    private AdminProvisioningController Controller() => new(_systemContext,
+    private AdminProvisioningService Service() => new(_systemContext,
         Substitute.For<IDynamicAuthSchemeService>(), Substitute.For<ICrossTenantShadowUserChainResolver>(),
-        Substitute.For<ICrossTenantAncestryGuard>(), _audit, NullLogger<AdminProvisioningController>.Instance)
-    {
-        ControllerContext = new ControllerContext { HttpContext = new DefaultHttpContext() }
-    };
+        Substitute.For<ICrossTenantAncestryGuard>(), _audit, NullLogger<AdminProvisioningService>.Instance);
 }

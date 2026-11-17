@@ -189,11 +189,7 @@ public class AdminProvisioningSourceUsersIntegrationTests : IClassFixture<Identi
     // ---------- helpers ----------
 
     private AdminProvisioningController CreateController(ISystemContext systemContext)
-        => new(systemContext, new NoOpAuthSchemeService(),
-            new CrossTenantShadowUserChainResolver(systemContext),
-            TestAncestryGuards.Create(systemContext),
-            Substitute.For<Meshmakers.Octo.Backend.IdentityServices.CrossTenantAudit.ICrossTenantGrantAuditRecorder>(),
-            NullLogger<AdminProvisioningController>.Instance);
+        => ProvisioningMethodTestFacade.Controller(systemContext);
 
     private static async Task<List<ProvisioningSourceUserDto>> OkValue(
         Task<ActionResult<IEnumerable<ProvisioningSourceUserDto>>> action)

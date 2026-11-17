@@ -151,8 +151,10 @@ public class CrossTenantGrantAuditTests : IntegrationTestBase, IDisposable
     public async Task GrantCreateChangeAndDelete_AreEachRecordedOnceInTargetAndOnceInSource()
     {
         var a = await ArrangeAsync();
-        var caller = NewCallerName();
-        var client = AdminClient(caller);
+        // The create runs a method: its audit names the caller by the user name stored for the token's subject.
+        var callerUser = await InsertUserAsync(a.Target, "admin");
+        var caller = callerUser.UserName;
+        var client = AdminClient(caller, callerUser.Id);
         var user = await InsertUserAsync(a.Source, "grant");
 
         var create = await client.PostAsJsonAsync($"/{a.Target}/v1/ExternalTenantUserMappings",
@@ -321,8 +323,10 @@ public class CrossTenantGrantAuditTests : IntegrationTestBase, IDisposable
     {
         // The provisioning route (via the system tenant) only takes registry ancestors as source: S = system tenant.
         var a = await ArrangeAsync();
-        var caller = NewCallerName();
-        var client = AdminClient(caller);
+        // The provisioning runs a method: its audit names the caller by the user name stored for the token's subject.
+        var callerUser = await InsertUserAsync(NormalizedSystemTenantId, "admin");
+        var caller = callerUser.UserName;
+        var client = AdminClient(caller, callerUser.Id);
         var sourceUserName = $"prov{Guid.NewGuid():N}"[..20];
 
         var create = await client.PostAsJsonAsync($"/{NormalizedSystemTenantId}/v1/AdminProvisioning/{a.Target}",
@@ -535,11 +539,11 @@ public class CrossTenantGrantAuditTests : IntegrationTestBase, IDisposable
 
     private static string NewCallerName() => $"admin{Guid.NewGuid():N}"[..20];
 
-    private HttpClient AdminClient(string userName)
+    private HttpClient AdminClient(string userName, OctoObjectId? userId = null)
     {
         var client = _host.CreateClient();
         client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", "test-token");
-        client.DefaultRequestHeaders.Add(TestAuthHandler.UserIdHeader, OctoObjectId.GenerateNewId().ToString());
+        client.DefaultRequestHeaders.Add(TestAuthHandler.UserIdHeader, (userId ?? OctoObjectId.GenerateNewId()).ToString());
         client.DefaultRequestHeaders.Add(TestAuthHandler.UserNameHeader, userName);
         client.DefaultRequestHeaders.Add(TestAuthHandler.EmailHeader, $"{userName}@caller.example");
         client.DefaultRequestHeaders.Add(TestAuthHandler.RoleHeader, UserManagement);

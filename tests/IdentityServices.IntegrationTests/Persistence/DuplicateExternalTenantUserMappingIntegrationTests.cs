@@ -154,12 +154,21 @@ public class DuplicateExternalTenantUserMappingIntegrationTests : IClassFixture<
     public async Task ExternalTenantUserMappingsController_CreateForExistingPair_Returns409Problem_AndInsertsNothing()
     {
         var ctx = await ArrangeWithDuplicateAsync(duplicate: false);
+        // The REST create is a facade of ExternalTenantUserMapping.CreateMapping-1: the harness runs its real handler.
+        var facade = new ProvisioningMethodTestFacade(_fixture.GetSystemContext(), mappingStore: ctx.Store,
+            grantAdmission: AdmitsLogin(ctx));
         var controller = new ExternalTenantUserMappingsController(ctx.Store, Substitute.For<IGroupStore>(),
             Substitute.For<IRoleChangeGuard>(), Substitute.For<IRoleChangeRefusals>(),
             Substitute.For<Meshmakers.Octo.Backend.IdentityServices.CrossTenantAudit.ICrossTenantGrantAuditRecorder>(),
             Substitute.For<IMultiTenancyResolverService>(),
-            AdmitsLogin(ctx),
-            NullLogger<ExternalTenantUserMappingsController>.Instance);
+            facade,
+            NullLogger<ExternalTenantUserMappingsController>.Instance)
+        {
+            ControllerContext = new Microsoft.AspNetCore.Mvc.ControllerContext
+            {
+                HttpContext = new Microsoft.AspNetCore.Http.DefaultHttpContext()
+            }
+        };
 
         var result = await controller.Create(new CreateExternalTenantUserMappingDto
         {
@@ -177,12 +186,7 @@ public class DuplicateExternalTenantUserMappingIntegrationTests : IClassFixture<
     public async Task AdminProvisioningController_CreateForExistingPair_Returns409Problem_AndInsertsNothing()
     {
         var ctx = await ArrangeWithDuplicateAsync(duplicate: false);
-        var controller = new AdminProvisioningController(
-            _fixture.GetSystemContext(), new NoOpAuthSchemeService(),
-            new CrossTenantShadowUserChainResolver(_fixture.GetSystemContext()),
-            TestAncestryGuards.Create(_fixture.GetSystemContext()),
-            Substitute.For<Meshmakers.Octo.Backend.IdentityServices.CrossTenantAudit.ICrossTenantGrantAuditRecorder>(),
-            NullLogger<AdminProvisioningController>.Instance);
+        var controller = ProvisioningMethodTestFacade.Controller(_fixture.GetSystemContext());
 
         var result = await controller.Create(ctx.ChildTenantId, new CreateExternalTenantUserMappingDto
         {
@@ -200,12 +204,7 @@ public class DuplicateExternalTenantUserMappingIntegrationTests : IClassFixture<
     public async Task AdminProvisioningController_CreateWithGroupsForExistingPair_Returns409Problem_AndInsertsNothing()
     {
         var ctx = await ArrangeWithDuplicateAsync(duplicate: false);
-        var controller = new AdminProvisioningController(
-            _fixture.GetSystemContext(), new NoOpAuthSchemeService(),
-            new CrossTenantShadowUserChainResolver(_fixture.GetSystemContext()),
-            TestAncestryGuards.Create(_fixture.GetSystemContext()),
-            Substitute.For<Meshmakers.Octo.Backend.IdentityServices.CrossTenantAudit.ICrossTenantGrantAuditRecorder>(),
-            NullLogger<AdminProvisioningController>.Instance);
+        var controller = ProvisioningMethodTestFacade.Controller(_fixture.GetSystemContext());
 
         var result = await controller.CreateWithGroups(ctx.ChildTenantId, new CreateExternalTenantUserGroupMappingDto
         {
@@ -223,12 +222,7 @@ public class DuplicateExternalTenantUserMappingIntegrationTests : IClassFixture<
     public async Task AdminProvisioningController_CreateForNewPair_StillCreates()
     {
         var ctx = await ArrangeWithDuplicateAsync(duplicate: false);
-        var controller = new AdminProvisioningController(
-            _fixture.GetSystemContext(), new NoOpAuthSchemeService(),
-            new CrossTenantShadowUserChainResolver(_fixture.GetSystemContext()),
-            TestAncestryGuards.Create(_fixture.GetSystemContext()),
-            Substitute.For<Meshmakers.Octo.Backend.IdentityServices.CrossTenantAudit.ICrossTenantGrantAuditRecorder>(),
-            NullLogger<AdminProvisioningController>.Instance);
+        var controller = ProvisioningMethodTestFacade.Controller(_fixture.GetSystemContext());
 
         var result = await controller.Create(ctx.ChildTenantId, new CreateExternalTenantUserMappingDto
         {

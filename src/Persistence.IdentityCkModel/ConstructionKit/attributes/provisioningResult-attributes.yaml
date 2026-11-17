@@ -1,0 +1,48 @@
+"$schema": "https://schemas.meshmakers.cloud/construction-kit-elements.schema.json"
+# 3.5.0: members of the mirror and provisioning method result records (records/ck-provisioningResults.yaml). They are
+# answers of a method call and are never stored on an entity or seeded, hence RuntimeState.
+attributes:
+  - id: MirrorResultChildTenantsConsidered
+    valueType: Int
+    ownership: RuntimeState
+    description: "Method result member: child tenants the backfill looked at."
+  - id: MirrorResultFlaggedClientsConsidered
+    valueType: Int
+    ownership: RuntimeState
+    description: "Method result member: clients with AutoProvisionInChildTenants that were considered."
+  - id: MirrorResultNewlyProvisioned
+    valueType: Int
+    ownership: RuntimeState
+    description: "Method result member: mirrors created by the call."
+  - id: MirrorResultAlreadyPresent
+    valueType: Int
+    ownership: RuntimeState
+    description: "Method result member: mirrors that existed already."
+  - id: ProvisioningResultMappingRtId
+    valueType: String
+    ownership: RuntimeState
+    description: "Method result member: runtime id of the mapping in the tenant it was written to."
+  - id: ProvisioningResultSourceTenantId
+    valueType: String
+    ownership: RuntimeState
+    description: "Method result member: tenant of the mapped user."
+  - id: ProvisioningResultSourceUserId
+    valueType: String
+    ownership: RuntimeState
+    description: "Method result member: id of the mapped user in its tenant."
+  - id: ProvisioningResultSourceUserName
+    valueType: String
+    ownership: RuntimeState
+    description: "Method result member: user name of the mapped user as stored on the mapping."
+  - id: ProvisioningResultRoleIds
+    valueType: StringArray
+    ownership: RuntimeState
+    description: "Method result member: role ids the mapping carries directly."
+  - id: ProvisioningResultGroupNames
+    valueType: StringArray
+    ownership: RuntimeState
+    description: "Method result member: groups of the target tenant the mapping is a member of."
+  - id: ProvisioningResultOutcome
+    valueType: String
+    ownership: RuntimeState
+    description: "Method result member: what ProvisionCurrentUser did - created, repaired or already-provisioned; empty for the other methods."

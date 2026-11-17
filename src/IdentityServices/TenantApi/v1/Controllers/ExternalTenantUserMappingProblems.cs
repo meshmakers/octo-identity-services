@@ -15,9 +15,12 @@ public static class ExternalTenantUserMappingProblems
 
     /// <summary>Builds the 409 <c>application/problem+json</c> answer naming the existing mapping.</summary>
     public static ObjectResult AlreadyExists(
-        RtExternalTenantUserMapping existing, string sourceTenantId, string sourceUserId)
+        RtExternalTenantUserMapping existing, string sourceTenantId, string sourceUserId) =>
+        AlreadyExists(existing.RtId.ToString(), sourceTenantId, sourceUserId);
+
+    /// <summary>The 409 answer naming the existing mapping by its runtime id (a method's <c>MAPPING_ALREADY_EXISTS</c>).</summary>
+    public static ObjectResult AlreadyExists(string existingId, string sourceTenantId, string sourceUserId)
     {
-        var existingId = existing.RtId.ToString();
         var problem = new ProblemDetails
         {
             Status = StatusCodes.Status409Conflict,

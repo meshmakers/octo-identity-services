@@ -44,16 +44,28 @@ public class IdentityMethodDeclarationsIntegrationTests : IClassFixture<Identity
             "Client",
             [
                 "AddSecret-1", "RemoveSecret-1", "UpdateSecret-1", "SetRoles-1", "AddRole-1", "RemoveRole-1",
-                "ApplyOverlayUris-1", "CleanOverlayEntries-1"
+                "ApplyOverlayUris-1", "CleanOverlayEntries-1",
+                // System.Identity 3.5.0: client mirrors
+                "ProvisionMirrors-1", "ProvisionMirrorInTenant-1", "RotateMirrorSecret-1", "RemoveMirror-1",
+                "SetMirrorAutoProvision-1"
             ]
         },
         { "DataPermission", ["GrantToRole-1", "RevokeFromRole-1"] },
         // System.Identity 3.4.0
         { "ApiResource", ["AddSecret-1", "RemoveSecret-1", "UpdateSecret-1"] },
-        { "DataPolicy", ["SetEnforcementMode-1"] }
+        { "DataPolicy", ["SetEnforcementMode-1"] },
+        // System.Identity 3.5.0: admin provisioning and the mapping create
+        {
+            "ExternalTenantUserMapping",
+            [
+                "ProvisionAdmin-1", "ProvisionAdminWithGroups-1", "ProvisionCurrentUser-1", "RemoveAdminProvisioning-1",
+                "CreateMapping-1"
+            ]
+        }
     };
 
-    private static readonly string[] MethodTypes = ["User", "Group", "Client", "DataPermission", "ApiResource", "DataPolicy"];
+    private static readonly string[] MethodTypes =
+        ["User", "Group", "Client", "DataPermission", "ApiResource", "DataPolicy", "ExternalTenantUserMapping"];
 
     [Theory]
     [MemberData(nameof(DeclaredMethods))]
@@ -122,6 +134,26 @@ public class IdentityMethodDeclarationsIntegrationTests : IClassFixture<Identity
                 .BeEquivalentTo([TenantManagement, UserManagement, "SecretManagement"], method.QualifiedMethodId);
         }
 
+        // System.Identity 3.5.0: the mirror methods carry the REST policies of ClientMirrorController (the rotation the secret
+        // policy), the provisioning methods the policy of AdminProvisioningController, the mapping create the policy of
+        // ExternalTenantUserMappingsController.
+        foreach (var id in new[] { "ProvisionMirrors-1", "ProvisionMirrorInTenant-1", "RemoveMirror-1", "SetMirrorAutoProvision-1" })
+        {
+            client.AllMethods[id].Definition.Authorization!.Roles.Should()
+                .BeEquivalentTo([TenantManagement, UserManagement], id);
+        }
+
+        client.AllMethods["RotateMirrorSecret-1"].Definition.Authorization!.Roles.Should()
+            .BeEquivalentTo([TenantManagement, UserManagement, "SecretManagement"]);
+        var mapping = await GetTypeAsync("ExternalTenantUserMapping");
+        foreach (var id in new[] { "ProvisionAdmin-1", "ProvisionAdminWithGroups-1", "ProvisionCurrentUser-1", "RemoveAdminProvisioning-1" })
+        {
+            mapping.AllMethods[id].Definition.Authorization!.Roles.Should()
+                .BeEquivalentTo([TenantManagement, UserManagement], id);
+        }
+
+        mapping.AllMethods["CreateMapping-1"].Definition.Authorization!.Roles.Should().BeEquivalentTo([UserManagement]);
+
         // System.Identity 3.3.0: the client role and overlay methods carry the REST policy of ClientsController
         // (IdentityTenantAdministrationWritePolicy: TenantManagement or UserManagement).
         foreach (var id in new[] { "SetRoles-1", "AddRole-1", "RemoveRole-1", "ApplyOverlayUris-1", "CleanOverlayEntries-1" })
@@ -159,7 +191,7 @@ public class IdentityMethodDeclarationsIntegrationTests : IClassFixture<Identity
     }
 
     [Fact]
-    public async Task OnlyTheAddSecretMethods_HaveASensitiveResult_TheGeneratedSecretIsShownOnce()
+    public async Task OnlyTheSecretIssuingMethods_HaveASensitiveResult_TheGeneratedSecretIsShownOnce()
     {
         var results = new List<string>();
         foreach (var type in MethodTypes)
@@ -168,7 +200,8 @@ public class IdentityMethodDeclarationsIntegrationTests : IClassFixture<Identity
                 .Select(m => m.QualifiedMethodId));
         }
 
-        results.Should().BeEquivalentTo(["System.Identity/Client.AddSecret-1", "System.Identity/ApiResource.AddSecret-1"]);
+        results.Should().BeEquivalentTo(["System.Identity/Client.AddSecret-1", "System.Identity/ApiResource.AddSecret-1",
+            "System.Identity/Client.RotateMirrorSecret-1"]);
         foreach (var type in new[] { "Client", "ApiResource" })
         {
             (await GetTypeAsync(type)).AllMethods["AddSecret-1"].Definition.Result!.ValueType.Should()
@@ -182,7 +215,9 @@ public class IdentityMethodDeclarationsIntegrationTests : IClassFixture<Identity
         // Group, Client and DataPermission are seeded by the System.Identity.Bootstrap blueprint: a flag there makes
         // every new tenant's bootstrap fail (AB#7121). The flag on User (Major, row M16) is set since System.Identity 3.0.0
         // (AB#8053): a user is created only by User.CreateUser-1 or the REST API, never through the generic create.
-        foreach (var type in new[] { "Group", "Client", "DataPermission", "ApiResource", "DataPolicy" })
+        // ExternalTenantUserMapping: the flag on CreateMapping-1 is a Major on this existing type (row M16) and waits for the
+        // next System.Identity major.
+        foreach (var type in new[] { "Group", "Client", "DataPermission", "ApiResource", "DataPolicy", "ExternalTenantUserMapping" })
         {
             (await GetTypeAsync(type)).AllMethods.Values.Where(m => m.ReplacesGenericCreate)
                 .Should().BeEmpty(type);

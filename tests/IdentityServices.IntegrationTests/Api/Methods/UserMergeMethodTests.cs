@@ -222,11 +222,30 @@ public class UserMergeMethodTests : IntegrationTestBase, IDisposable
     {
         var ct = TestContext.Current.CancellationToken;
         var fixture = await NewFixtureAsync("noread");
-        using var restricted = WithEvaluator(_ => RtDataPermissionDecision.NotVisible);
+        using var restricted = WithEvaluator(_ => RtDataPermissionDecision.NotVisible, only: fixture.Source.RtId);
 
         var outcome = await MergeAsync(Admin(), fixture.Target.RtId.ToString(), fixture.Source.UserName, ct, restricted);
 
         outcome.Failure!.Code.Should().Be(UserMergeHandler.SourceUserNotFound);
+        await AssertUnchangedAsync(fixture);
+    }
+
+    [Theory]
+    [InlineData(RtDataPermissionDecision.NotVisible, CkMethodErrorCodes.MethodTargetNotFound)]
+    [InlineData(RtDataPermissionDecision.NotPermitted, CkMethodErrorCodes.MethodForbidden)]
+    public async Task Method_TargetTheCallerMayNotWrite_IsRefusedLikeTheGateway_AndNothingChanges(
+        RtDataPermissionDecision onTarget, string expectedCode)
+    {
+        var ct = TestContext.Current.CancellationToken;
+        var fixture = await NewFixtureAsync("tgt");
+        using var restricted = WithEvaluator(action => onTarget == RtDataPermissionDecision.NotVisible ||
+                                                       action == RtDataAction.Write
+            ? onTarget
+            : RtDataPermissionDecision.Allowed, only: fixture.Target.RtId);
+
+        var outcome = await MergeAsync(Admin(), fixture.Target.RtId.ToString(), fixture.Source.UserName, ct, restricted);
+
+        outcome.Failure!.Code.Should().Be(expectedCode);
         await AssertUnchangedAsync(fixture);
     }
 
@@ -238,7 +257,7 @@ public class UserMergeMethodTests : IntegrationTestBase, IDisposable
         var evaluator = Substitute.For<IRtDataPermissionEvaluator>();
         using var restricted = WithEvaluator(action => action == RtDataAction.Write
             ? RtDataPermissionDecision.NotPermitted
-            : RtDataPermissionDecision.Allowed, evaluator);
+            : RtDataPermissionDecision.Allowed, evaluator, only: fixture.Source.RtId);
         var caller = Guid.NewGuid().ToString("N")[..24];
 
         var outcome = await MergeAsync(new CkMethodPrincipal(caller, AdminRoles, ["octo_api"]),
@@ -437,8 +456,12 @@ public class UserMergeMethodTests : IntegrationTestBase, IDisposable
         return client;
     }
 
+    /// <summary>
+    ///     A host whose data policy answers <paramref name="decide" /> for <paramref name="only" /> (every other entity is open),
+    ///     or for every entity when <paramref name="only" /> is <c>null</c>.
+    /// </summary>
     private WebApplicationFactory<Program> WithEvaluator(Func<RtDataAction, RtDataPermissionDecision> decide,
-        IRtDataPermissionEvaluator? evaluator = null)
+        IRtDataPermissionEvaluator? evaluator = null, OctoObjectId? only = null)
     {
         evaluator ??= Substitute.For<IRtDataPermissionEvaluator>();
         evaluator.EvaluateAsync(Arg.Any<Meshmakers.Octo.Runtime.Contracts.Repositories.IRuntimeRepository>(),
@@ -446,7 +469,9 @@ public class UserMergeMethodTests : IntegrationTestBase, IDisposable
                 Arg.Any<CancellationToken>())
             .Returns(call =>
             {
-                var decision = decide(call.ArgAt<RtDataAction>(3));
+                var decision = only == null || call.ArgAt<RtEntityId>(2).RtId == only
+                    ? decide(call.ArgAt<RtDataAction>(3))
+                    : RtDataPermissionDecision.Allowed;
                 return new RtDataPermissionVerdict(decision,
                     decision == RtDataPermissionDecision.Allowed ? RtDataPermissionReason.Open : RtDataPermissionReason.NoGrant);
             });

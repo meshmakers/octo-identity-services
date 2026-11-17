@@ -22,3 +22,106 @@ types:
           - attributePaths:
               - SourceTenantId
               - SourceUserId
+    # 3.5.0: admin provisioning and the mapping create as static methods. The ProvisionAdmin* methods run in the caller's
+    # tenant and write into targetTenantId, which must be the caller's own tenant or lie in its subtree (METHOD_FORBIDDEN,
+    # reason tenant-out-of-scope); roles follow AdminProvisioningController (IdentityTenantAdministrationWritePolicy).
+    # CreateMapping-1 writes into the caller's tenant (ExternalTenantUserMappingsController, IdentityUserAdministrationWritePolicy).
+    # No replacesGenericCreate: on this existing type the flag removes the generic create for its callers and is a Major
+    # (row M16 of the CK SemVer rules). NEXT MAJOR: set replacesGenericCreate on CreateMapping-1.
+    methods:
+      - methodId: ProvisionAdmin-1
+        kind: Static
+        description: "Creates a mapping of a source-tenant user in the target tenant with the given roles; a mapping that carries TenantManagement also joins TenantOwners. Registers the source tenant as the target's login parent."
+        parameters:
+          - { name: targetTenantId, valueType: String, description: "The tenant the mapping is written to: the caller's tenant or one of its descendants." }
+          - { name: sourceTenantId, valueType: String, description: "The tenant of the user; it must be a registry ancestor of the target." }
+          - { name: sourceUserId, valueType: String }
+          - { name: sourceUserName, valueType: String }
+          - { name: roleIds, valueType: StringArray, isOptional: true, description: "Role ids of the target tenant." }
+        result:
+          valueType: Record
+          valueCkRecordId: ${this}/AdminProvisioningResult
+        errors:
+          - { code: TENANT_NOT_FOUND, description: "The target tenant does not exist." }
+          - { code: SOURCE_TENANT_NOT_ANCESTOR, description: "The source tenant is not a registry ancestor of the target tenant." }
+          - { code: MAPPING_ALREADY_EXISTS, description: "A mapping for this source user exists in the target tenant." }
+        authorization:
+          roles: [ TenantManagement, UserManagement ]
+          dataAccess: Write
+        execution:
+          timeoutSeconds: 60
+      - methodId: ProvisionAdminWithGroups-1
+        kind: Static
+        description: "Creates a mapping of a source-tenant user in the target tenant as a member of the given target-tenant groups (unknown group ids are skipped). Registers the source tenant as the target's login parent."
+        parameters:
+          - { name: targetTenantId, valueType: String, description: "The tenant the mapping is written to: the caller's tenant or one of its descendants." }
+          - { name: sourceTenantId, valueType: String, description: "The tenant of the user; it must be a registry ancestor of the target." }
+          - { name: sourceUserId, valueType: String }
+          - { name: sourceUserName, valueType: String }
+          - { name: groupIds, valueType: StringArray, isOptional: true, description: "Group ids of the target tenant." }
+        result:
+          valueType: Record
+          valueCkRecordId: ${this}/AdminProvisioningResult
+        errors:
+          - { code: TENANT_NOT_FOUND, description: "The target tenant does not exist." }
+          - { code: SOURCE_TENANT_NOT_ANCESTOR, description: "The source tenant is not a registry ancestor of the target tenant." }
+          - { code: MAPPING_ALREADY_EXISTS, description: "A mapping for this source user exists in the target tenant." }
+        authorization:
+          roles: [ TenantManagement, UserManagement ]
+          dataAccess: Write
+        execution:
+          timeoutSeconds: 60
+      - methodId: ProvisionCurrentUser-1
+        kind: Static
+        description: "Provisions the calling user (a cross-tenant shadow user as its home identity) in the target tenant as an administrator. Idempotent and self-healing: the result outcome is created, repaired or already-provisioned."
+        parameters:
+          - { name: targetTenantId, valueType: String, description: "The tenant the caller is provisioned in: the caller's tenant or one of its descendants." }
+        result:
+          valueType: Record
+          valueCkRecordId: ${this}/AdminProvisioningResult
+        errors:
+          - { code: TENANT_NOT_FOUND, description: "The target tenant does not exist." }
+          - { code: CALLER_NOT_A_USER, description: "The caller has no user identity (subject) or no tenant in its token." }
+          - { code: HOME_IDENTITY_UNRESOLVED, description: "The caller is a cross-tenant shadow user whose home identity could not be resolved; nothing was written." }
+          - { code: TENANT_INITIALIZING, description: "The target tenant is still initializing; retry shortly." }
+        authorization:
+          roles: [ TenantManagement, UserManagement ]
+          dataAccess: Write
+        execution:
+          timeoutSeconds: 90
+          idempotent: true
+      - methodId: RemoveAdminProvisioning-1
+        kind: Static
+        description: "Deletes a mapping in the target tenant."
+        parameters:
+          - { name: targetTenantId, valueType: String, description: "The tenant of the mapping: the caller's tenant or one of its descendants." }
+          - { name: mappingRtId, valueType: String, description: "The runtime id of the mapping in the target tenant." }
+        errors:
+          - { code: TENANT_NOT_FOUND, description: "The target tenant does not exist." }
+          - { code: MAPPING_NOT_FOUND, description: "The target tenant has no mapping with this id." }
+        authorization:
+          roles: [ TenantManagement, UserManagement ]
+          dataAccess: Write
+        execution:
+          timeoutSeconds: 60
+      - methodId: CreateMapping-1
+        kind: Static
+        description: "Creates a mapping of a source-tenant user in this tenant with roles and groups of this tenant, with the cross-tenant checks of the REST create: the source tenant must be a registry ancestor or permit this tenant and the user must exist there; the stored user name is the source tenant's."
+        parameters:
+          - { name: sourceTenantId, valueType: String }
+          - { name: sourceUserId, valueType: String }
+          - { name: sourceUserName, valueType: String, description: "Informational; the user name of the source tenant's user record is stored." }
+          - { name: roleIds, valueType: StringArray, isOptional: true, description: "Role ids of this tenant." }
+          - { name: groupIds, valueType: StringArray, isOptional: true, description: "Group ids of this tenant." }
+        result:
+          valueType: Record
+          valueCkRecordId: ${this}/AdminProvisioningResult
+        errors:
+          - { code: SOURCE_TENANT_NOT_PERMITTED, description: "The source tenant is neither a registry ancestor nor permits this tenant, or the user is absent or blocked there." }
+          - { code: MAPPING_ALREADY_EXISTS, description: "A mapping for this source user exists in this tenant." }
+          - { code: UNKNOWN_GROUP, description: "A group id is no group of this tenant; nothing was stored." }
+        authorization:
+          roles: [ UserManagement ]
+          dataAccess: Write
+        execution:
+          timeoutSeconds: 60

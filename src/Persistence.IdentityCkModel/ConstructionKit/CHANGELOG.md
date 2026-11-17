@@ -1,5 +1,28 @@
 # Changelog
 
+## 3.5.0 - 2026-11-17
+
+_Required bump level: minor._
+
+System.Identity 3.5.0 adds methods so the REST client mirror and admin provisioning endpoints become facades of them:
+`Client.ProvisionMirrors-1`, `Client.ProvisionMirrorInTenant-1`, `Client.RotateMirrorSecret-1` (result `sensitive`),
+`Client.RemoveMirror-1` and `Client.SetMirrorAutoProvision-1` (roles `TenantManagement`, `UserManagement`; the rotation also
+`SecretManagement`), and the static `ExternalTenantUserMapping.ProvisionAdmin-1`, `ProvisionAdminWithGroups-1`,
+`ProvisionCurrentUser-1`, `RemoveAdminProvisioning-1` (roles `TenantManagement`, `UserManagement`) and `CreateMapping-1` (role
+`UserManagement`), with the result records `ClientMirrorBackfillResult`, `ClientMirrorProvisionResult`, `AdminProvisioningResult`
+and their `RuntimeState` attributes. `CreateMapping-1` does not set `replacesGenericCreate`: on the existing type
+`ExternalTenantUserMapping` the flag is a Major (row M16); it is planned for the next major. Compile gate against the published
+3.4.0: required level MINOR, minimum version 3.5.0.
+
+Rollout: service-managed - ships inside the identity service with the regular identity release train. No catalog import,
+no per-tenant step, **no FixAll**. No data migration; ranges `System.Identity-[3.0.0,4.0)` stay satisfied.
+
+### Added
+
+- Methods 'Client-1/ProvisionMirrors-1', 'Client-1/ProvisionMirrorInTenant-1', 'Client-1/RotateMirrorSecret-1', 'Client-1/RemoveMirror-1', 'Client-1/SetMirrorAutoProvision-1' added _(minor — purely additive methods)_
+- Methods 'ExternalTenantUserMapping-1/ProvisionAdmin-1', 'ExternalTenantUserMapping-1/ProvisionAdminWithGroups-1', 'ExternalTenantUserMapping-1/ProvisionCurrentUser-1', 'ExternalTenantUserMapping-1/RemoveAdminProvisioning-1', 'ExternalTenantUserMapping-1/CreateMapping-1' added _(minor — purely additive methods)_
+- Records 'ClientMirrorBackfillResult-1', 'ClientMirrorProvisionResult-1', 'AdminProvisioningResult-1' and their attributes added _(minor — purely additive)_
+
 ## 3.4.0 - 2026-11-17
 
 _Required bump level: minor._

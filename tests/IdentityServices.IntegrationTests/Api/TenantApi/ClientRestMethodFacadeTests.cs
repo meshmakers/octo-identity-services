@@ -17,6 +17,12 @@ using Microsoft.AspNetCore.TestHost;
 using Microsoft.Extensions.DependencyInjection;
 using Persistence.IdentityCkModel.Generated.System.Identity.v3;
 using Shared.TestUtilities.Builders;
+using Meshmakers.Octo.Runtime.Contracts.DataPermissions;
+using Meshmakers.Octo.Runtime.Contracts.Repositories;
+using Meshmakers.Octo.Runtime.Contracts;
+using Meshmakers.Octo.ConstructionKit.Contracts;
+using NSubstitute;
+using Meshmakers.Octo.Runtime.Contracts.RepositoryEntities;
 using Xunit;
 
 namespace IdentityServices.IntegrationTests.Api.TenantApi;
@@ -426,7 +432,7 @@ public class ClientRestMethodFacadeTests : IntegrationTestBase, IDisposable
                 services.AddSingleton<IStartupFilter, MarkRequestsStartupFilter>();
                 if (denyReads)
                 {
-                    services.AddSingleton(FacadeDataPolicy.DenyAllReads());
+                    services.AddSingleton(DenyAllReadsButTheTarget<RtClient>());
                 }
             });
         });
@@ -512,6 +518,22 @@ public class ClientRestMethodFacadeTests : IntegrationTestBase, IDisposable
 
     private static string[] Shape(IEnumerable<RtClientUriEntryRecord> entries) =>
         entries.Select(e => $"{e.Source}|{e.Uri}").ToArray();
+
+    /// <summary>
+    ///     An enforcing policy that hides every entity except the target type <typeparamref name="TTarget" />: the referenced
+    ///     roles and members are unreadable, the target itself stays readable and writable (the handler checks the target too).
+    /// </summary>
+    private static IRtDataPermissionEvaluator DenyAllReadsButTheTarget<TTarget>() where TTarget : RtEntity, new()
+    {
+        var targetType = RtEntityExtensions.GetRtCkTypeId<TTarget>();
+        var evaluator = Substitute.For<IRtDataPermissionEvaluator>();
+        evaluator.EvaluateAsync(Arg.Any<IRuntimeRepository>(), Arg.Any<RtSecurityContext>(), Arg.Any<RtEntityId>(),
+                Arg.Any<RtDataAction>(), Arg.Any<bool>(), Arg.Any<CancellationToken>())
+            .Returns(call => call.ArgAt<RtEntityId>(2).CkTypeId == targetType
+                ? new RtDataPermissionVerdict(RtDataPermissionDecision.Allowed, RtDataPermissionReason.Open)
+                : new RtDataPermissionVerdict(RtDataPermissionDecision.NotVisible, RtDataPermissionReason.NoGrant));
+        return evaluator;
+    }
 
     #endregion
 }

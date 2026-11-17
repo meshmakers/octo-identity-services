@@ -55,7 +55,14 @@ public class IdentityMethodHostTests
             SystemIdentityCkIds.ClientRemoveRoleMethodId, SystemIdentityCkIds.ClientApplyOverlayUrisMethodId,
             SystemIdentityCkIds.ClientCleanOverlayEntriesMethodId,
             SystemIdentityCkIds.DataPermissionGrantToRoleMethodId, SystemIdentityCkIds.DataPermissionRevokeFromRoleMethodId,
-            SystemIdentityCkIds.DataPolicySetEnforcementModeMethodId);
+            SystemIdentityCkIds.DataPolicySetEnforcementModeMethodId,
+            SystemIdentityCkIds.ClientProvisionMirrorsMethodId, SystemIdentityCkIds.ClientProvisionMirrorInTenantMethodId,
+            SystemIdentityCkIds.ClientRemoveMirrorMethodId, SystemIdentityCkIds.ClientSetMirrorAutoProvisionMethodId,
+            SystemIdentityCkIds.ExternalTenantUserMappingProvisionAdminMethodId,
+            SystemIdentityCkIds.ExternalTenantUserMappingProvisionAdminWithGroupsMethodId,
+            SystemIdentityCkIds.ExternalTenantUserMappingProvisionCurrentUserMethodId,
+            SystemIdentityCkIds.ExternalTenantUserMappingRemoveAdminProvisioningMethodId,
+            SystemIdentityCkIds.ExternalTenantUserMappingCreateMappingMethodId);
         selected.Should().OnlyContain(h => !h.CarriesSecret);
     }
 
@@ -93,7 +100,8 @@ public class IdentityMethodHostTests
                 SystemIdentityCkIds.UserChangePasswordMethodId, SystemIdentityCkIds.UserSetPasswordMethodId,
                 SystemIdentityCkIds.ClientAddSecretMethodId, SystemIdentityCkIds.ClientUpdateSecretMethodId,
                 SystemIdentityCkIds.ClientRemoveSecretMethodId, SystemIdentityCkIds.ApiResourceAddSecretMethodId,
-                SystemIdentityCkIds.ApiResourceUpdateSecretMethodId, SystemIdentityCkIds.ApiResourceRemoveSecretMethodId);
+                SystemIdentityCkIds.ApiResourceUpdateSecretMethodId, SystemIdentityCkIds.ApiResourceRemoveSecretMethodId,
+                SystemIdentityCkIds.ClientRotateMirrorSecretMethodId);
         IdentityMethodHost.SelectLocalOnlyHandlers(new IdentityMethodsOptions { EnablePasswordMethods = true }).Should()
             .BeEmpty("with the switch on they are offered on the bus (SelectHandlers) and called in-process from there");
     }
@@ -105,7 +113,8 @@ public class IdentityMethodHostTests
         IdentityMethodHost.SelectHandlers(new IdentityMethodsOptions()).Select(h => h.MethodId).Should().NotContain([
             SystemIdentityCkIds.ClientAddSecretMethodId, SystemIdentityCkIds.ClientUpdateSecretMethodId,
             SystemIdentityCkIds.ClientRemoveSecretMethodId, SystemIdentityCkIds.ApiResourceAddSecretMethodId,
-            SystemIdentityCkIds.ApiResourceUpdateSecretMethodId, SystemIdentityCkIds.ApiResourceRemoveSecretMethodId
+            SystemIdentityCkIds.ApiResourceUpdateSecretMethodId, SystemIdentityCkIds.ApiResourceRemoveSecretMethodId,
+            SystemIdentityCkIds.ClientRotateMirrorSecretMethodId
         ]);
     }
 
