@@ -217,7 +217,8 @@ public class IdentityCommandConsumerReplicaTests : IClassFixture<IdentityService
     ///     before the exactly-once assertion reads it. A redelivery that a replica has not started yet is not visible
     ///     here; with the shared queue that happens only after a consumer faulted or its channel closed (no ack), which
     ///     these tests do not cause, and its client would still be counted by <see cref="CountClientsAsync" />.
-    ///     The assertions that follow stay unchanged; a command that was never processed still fails them after the wait.
+    ///     The wait fails when a consume is still running at its deadline. The assertions that follow stay unchanged; a
+    ///     command that was never processed still fails them after the wait.
     /// </summary>
     private async Task WaitUntilRecordedAsync(IReadOnlyCollection<string> clientIds)
     {
@@ -227,6 +228,11 @@ public class IdentityCommandConsumerReplicaTests : IClassFixture<IdentityService
         {
             await Task.Delay(50, TestContext.Current.CancellationToken);
         }
+
+        // A consume still running at the deadline could be a duplicate not yet in the ledger: the exactly-once check
+        // that follows would read an incomplete ledger, so the wait itself fails.
+        _inFlight.Count.Should().Be(0,
+            "no CreateIdentityData consume may still be running when exactly-once is checked");
     }
 
     // -------------------------------------------------------------------------------------------------------------
