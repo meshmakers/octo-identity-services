@@ -74,6 +74,22 @@ dotnet test Octo.Identity.sln -c Release
 timeout, run the projects one after the other (`-m:1`) before you treat it as a test failure; all four projects must
 be green either way. Detail: `docs/testing.md`.
 
+The suite is meant to stay green on a busy machine (other builds or suites running). Two rules keep it so
+(`docs/testing.md`, "Load on the machine"):
+
+- **Method deadline floor of the test host.** `CustomWebApplicationFactory` wraps the CK method timeout resolver in
+  `TestHostMethodDeadlineFloor`: a REST call that runs a CK method waits at least **120 s** instead of the CK default of
+  15 s, so load cannot turn a correct call into `METHOD_TIMEOUT` / HTTP 504. The real deadline (CK timeout -> deadline,
+  `METHOD_TIMEOUT` at the deadline, clamping) is proven in octo-common-services (`CkMethodTimeoutResolverTests`,
+  `InProcessTransportTests`, `CkMethodDispatcherBusTests`). A test that builds a `CkMethodRequest` itself sets
+  `DeadlineUtc = TestHostMethodDeadlineFloor.DeadlineFromNow()`, the same bound. The factory's HTTP clients (derived
+  hosts included) wait 180 s, longer than the floor. A test that needs the real deadline builds its own host.
+- **Wait for the effect, not for the response.** A test that reads what a consumer or a background step recorded waits
+  (bounded) until it is there; a response can arrive before the observer has recorded the message.
+
+No identity test carries the trait `Category=LoadSensitive` (the wall-clock tests of octo-construction-kit-engine-mongodb
+and octo-asset-repo-services do); `dotnet test Octo.Identity.sln -c DebugL` is the full local suite.
+
 ## Before you commit
 
 1. `dotnet test Octo.Identity.sln -c DebugL`: all four test projects green, unit and integration (the integration

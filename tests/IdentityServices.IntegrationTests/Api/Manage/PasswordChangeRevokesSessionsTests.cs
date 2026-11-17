@@ -410,7 +410,7 @@ public class PasswordChangeRevokesSessionsTests : IntegrationTestBase
         MethodId = methodId,
         CkTypeId = "System.Identity/User",
         TargetRtId = target,
-        DeadlineUtc = DateTime.UtcNow.AddSeconds(30),
+        DeadlineUtc = Infrastructure.TestHostMethodDeadlineFloor.DeadlineFromNow(),
         ParametersJson = JsonSerializer.Serialize(new { newPassword = NewPassword })
     };
 

@@ -395,7 +395,7 @@ public class DataPermissionRestMethodFacadeTests : IntegrationTestBase, IDisposa
             CkTypeId = ckTypeId,
             TargetRtId = targetRtId,
             ParametersJson = JsonSerializer.Serialize(parameters, parameters.GetType(), CkMethodJson.Options),
-            DeadlineUtc = DateTime.UtcNow.AddSeconds(30)
+            DeadlineUtc = Infrastructure.TestHostMethodDeadlineFloor.DeadlineFromNow()
         };
         using (CkMethodPrincipalScope.Begin(caller))
         {

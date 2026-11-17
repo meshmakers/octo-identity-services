@@ -313,7 +313,7 @@ public class UserChangePasswordMethodTests : IntegrationTestBase, IAsyncDisposab
         MethodId = SystemIdentityCkIds.UserChangePasswordMethodId,
         CkTypeId = "System.Identity/User",
         TargetRtId = target,
-        DeadlineUtc = DateTime.UtcNow.AddSeconds(30),
+        DeadlineUtc = Infrastructure.TestHostMethodDeadlineFloor.DeadlineFromNow(),
         CallerAccessToken = token,
         ParametersJson = JsonSerializer.Serialize(new { currentPassword = OldPassword, newPassword = NewPassword })
     };

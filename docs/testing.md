@@ -154,3 +154,19 @@ dotnet test tests/Authentication.UnitTests/Authentication.UnitTests.csproj -c De
 
 Das ist eine Empfehlung zur **Ausführungsart**, keine Erlaubnis, Projekte wegzulassen: grün müssen
 weiterhin alle vier sein.
+
+## Load on the machine
+
+Several agent lanes or a second checkout often build and test on the same machine. Measured on 2026-11-17: the
+integration project took 17 min on a quiet machine and 35 min at a load average of 50-95 (14 cores), all 1309 tests green
+with the two rules below. Without them two kinds of failures appeared only under load:
+
+| Symptom | Cause | Rule |
+| --- | --- | --- |
+| REST role/group/client endpoints answered `METHOD_TIMEOUT` / HTTP 504 | the REST facades run CK methods in process with the CK deadline; methods without `timeoutSeconds` get the CK default of 15 s, and one call took longer on a loaded machine (slowest guard test 49 s in total) | `Infrastructure/TestHostMethodDeadlineFloor`: the factory host waits at least 120 s per method call of its REST facades, and tests that build a `CkMethodRequest` themselves (dispatcher or handler called directly) set `DeadlineUtc = TestHostMethodDeadlineFloor.DeadlineFromNow()`. The factory's HTTP clients (derived hosts included) wait `ClientTimeout` = floor + 60 s, so the client's 100 s default cannot end a call first. Pinned by `TestHostMethodDeadlineFloorTests` (factory and derived host use it; short timeouts raised, long ones and "unknown method" kept). The real deadline is proven in octo-common-services (`Methods.Tests/Dispatching/CkMethodTimeoutResolverTests`, `Methods.Tests/InProcess/InProcessTransportTests`, `Methods.IntegrationTests/CkMethodDispatcherBusTests`). |
+| `IdentityCommandConsumerReplicaTests`: the ledger missed commands whose responses had arrived | the consumer responds before the consume observer's `PostConsume` records the message | `WaitUntilRecordedAsync`: wait (at most 30 s) until every expected id is recorded and no CreateIdentityData consume is in flight (a consume still running at the deadline fails the test), then assert exactly once and on which replica, unchanged |
+
+A test that needs the real CK deadline of an identity method builds its own host instead of the factory. A new test that
+reads what a consumer, an observer or a background step recorded waits for it with a bound; it never asserts right after
+the response.
+

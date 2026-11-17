@@ -559,7 +559,7 @@ public class UserMergeMethodTests : IntegrationTestBase, IDisposable
         MethodId = SystemIdentityCkIds.UserMergeMethodId,
         CkTypeId = "System.Identity/User",
         TargetRtId = target,
-        DeadlineUtc = DateTime.UtcNow.AddSeconds(30),
+        DeadlineUtc = Infrastructure.TestHostMethodDeadlineFloor.DeadlineFromNow(),
         CallerAccessToken = token,
         ParametersJson = JsonSerializer.Serialize(new { sourceUserName })
     };
