@@ -75,8 +75,10 @@ tokens) becomes invalid. Therefore:
    wrapped with `k1`); add `k1` back to recover — nothing is lost.
 4. The key rings of the other services (shared key store of octo-common-services, names `<ApplicationName>/key-…`)
    are **not** re-wrapped — not by identity and not by the services. Removing `k1` makes their keys wrapped with `k1`
-   unusable: the services create new keys and their users sign in again (no service refuses to start). Keep `k1`
-   until those keys have expired (90 days after their creation) or accept that sign-in.
+   unusable: the services create new keys and their users sign in again (no service refuses to start). An expired
+   key still unprotects the payloads it protected, so expiry alone is not a safe deadline: keep `k1` until the newest
+   service key wrapped with it has expired (90 days after its creation) **plus** the longest lifetime of a payload it
+   protected (the longest authentication cookie or session lifetime of these services), or accept that sign-in.
 
 ## Rollback
 
