@@ -4,6 +4,8 @@ types:
     derivable: Any
     description: "A group that can be assigned roles. Users and other groups can be members."
     derivedFromCkTypeId: ${System}/Entity
+    writeAccess:
+      channels: [ System.Identity/IdentityService ]
     isFinal: true
     isAbstract: false
     attributes:

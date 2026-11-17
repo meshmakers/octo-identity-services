@@ -4,6 +4,8 @@ types:
     derivable: Any
     description: "Server-side authentication session (cookie ticket store). Holds the data-protected authentication ticket server-side so the per-tenant browser cookie only carries a session key (fixes multi-KB cookie bloat)."
     derivedFromCkTypeId: ${System}/Entity
+    writeAccess:
+      channels: [ System.Identity/IdentityService ]
     isFinal: true
     isAbstract: false
     attributes:

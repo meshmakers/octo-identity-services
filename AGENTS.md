@@ -172,6 +172,9 @@ wird, sind alle anderen Pre-Commit-Regeln (Lint etc.) ebenfalls hinfällig.
   `docs/identity-rest-facades.md`.
 - **The wire protocol stays Duende-compatible** (endpoint paths, discovery, token shape, claims); the golden-file
   tests pin it: `docs/openiddict-protocol.md`.
+- **Only system sessions write identity types** (`writeAccess` on every root type of System.Identity since 3.6.0): never open a
+  caller-scoped session (`RtSecurityContext.ForUser`) for an identity write, and never set the channel `System.Identity/IdentityService`
+  in service code; generic GraphQL, caller `ImportRt` and adapter writes are refused with message 144: `docs/ck-model.md`.
 - **Every CK attribute declares its `ownership`** (`OCTO-CK001` fails the build), and a change of System.Identity
   follows the version and migration rules: `docs/ck-model.md`.
 - **Integration tests share no process-wide or machine-wide state**: `docs/testing.md`.

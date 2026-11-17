@@ -4,6 +4,8 @@ types:
     derivable: Any
     description: Named data permission (dot-namespaced), granted to roles via GrantsPermission; DataPolicies bind it to CK types (AB#4972).
     derivedFromCkTypeId: ${System}/Entity
+    writeAccess:
+      channels: [ System.Identity/IdentityService ]
     isFinal: true
     isAbstract: false
     displayNameRule: "${PermissionId}"

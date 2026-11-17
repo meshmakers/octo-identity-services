@@ -3,6 +3,8 @@ types:
   - typeId: User
     derivable: Any
     derivedFromCkTypeId: ${System}/Entity
+    writeAccess:
+      channels: [ System.Identity/IdentityService ]
     isFinal: true
     isAbstract: false
     attributes:

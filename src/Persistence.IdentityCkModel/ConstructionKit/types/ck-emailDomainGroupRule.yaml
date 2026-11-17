@@ -4,6 +4,8 @@ types:
     derivable: Any
     description: "Maps an email domain pattern to a group for automatic group assignment on user login."
     derivedFromCkTypeId: ${System}/Entity
+    writeAccess:
+      channels: [ System.Identity/IdentityService ]
     isFinal: true
     isAbstract: false
     attributes:
