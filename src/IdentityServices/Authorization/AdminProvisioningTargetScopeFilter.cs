@@ -107,7 +107,8 @@ internal sealed class AdminProvisioningTargetScopeFilter(
 
         foreach (var target in targets)
         {
-            if (!await IsInCallerScopeAsync(callerTenantId, target))
+            if (!await AdminProvisioningTargetScope.IsInCallerScopeAsync(tenantDiscoveryService,
+                    systemConfiguration.Value.SystemTenantId, callerTenantId, target))
             {
                 return false;
             }
@@ -115,8 +116,20 @@ internal sealed class AdminProvisioningTargetScopeFilter(
 
         return true;
     }
+}
 
-    private async Task<bool> IsInCallerScopeAsync(string? callerTenantId, string? targetTenantId)
+/// <summary>
+///     The target-tenant rule of admin provisioning and of the client mirror actions that name a child tenant, shared by the
+///     REST filter (<see cref="AdminProvisioningTargetScopeFilter" />) and the method handlers those endpoints are facades of:
+///     the target must be the caller's own tenant (the <c>tenant_id</c> its token was issued for) or a direct or indirect
+///     child of it in the tenant registry; a caller of the system tenant reaches every tenant. A missing caller tenant or
+///     target is out of scope.
+/// </summary>
+internal static class AdminProvisioningTargetScope
+{
+    /// <summary><c>true</c> when <paramref name="targetTenantId" /> is in the subtree of <paramref name="callerTenantId" />.</summary>
+    public static async Task<bool> IsInCallerScopeAsync(ITenantDiscoveryService tenantDiscoveryService,
+        string systemTenantId, string? callerTenantId, string? targetTenantId)
     {
         if (string.IsNullOrWhiteSpace(callerTenantId) || string.IsNullOrWhiteSpace(targetTenantId))
         {
@@ -126,8 +139,7 @@ internal sealed class AdminProvisioningTargetScopeFilter(
         var caller = callerTenantId.Trim();
         var target = targetTenantId.Trim();
 
-        if (string.Equals(caller, systemConfiguration.Value.SystemTenantId.Trim(),
-                StringComparison.OrdinalIgnoreCase) ||
+        if (string.Equals(caller, systemTenantId.Trim(), StringComparison.OrdinalIgnoreCase) ||
             string.Equals(caller, target, StringComparison.OrdinalIgnoreCase))
         {
             return true;

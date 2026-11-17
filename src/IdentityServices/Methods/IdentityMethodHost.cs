@@ -97,7 +97,28 @@ internal static class IdentityMethodHost
         For<ApiResourceRemoveSecretHandler>(SystemIdentityCkIds.ApiResourceRemoveSecretMethodId, true,
             servesRestFacade: true),
         For<ApiResourceUpdateSecretHandler>(SystemIdentityCkIds.ApiResourceUpdateSecretMethodId, true,
-            servesRestFacade: true)
+            servesRestFacade: true),
+        // System.Identity 3.5.0: client mirrors. The REST endpoints of ClientMirrorController and
+        // ClientAutoProvisionFlagController are their facades. Only the rotation carries a secret (its result): gated like the
+        // secret methods, local only for its facade while the switch is off.
+        For<ClientProvisionMirrorsHandler>(SystemIdentityCkIds.ClientProvisionMirrorsMethodId, false),
+        For<ClientProvisionMirrorInTenantHandler>(SystemIdentityCkIds.ClientProvisionMirrorInTenantMethodId, false),
+        For<ClientRotateMirrorSecretHandler>(SystemIdentityCkIds.ClientRotateMirrorSecretMethodId, true,
+            servesRestFacade: true),
+        For<ClientRemoveMirrorHandler>(SystemIdentityCkIds.ClientRemoveMirrorMethodId, false),
+        For<ClientSetMirrorAutoProvisionHandler>(SystemIdentityCkIds.ClientSetMirrorAutoProvisionMethodId, false),
+        // System.Identity 3.5.0: admin provisioning (AdminProvisioningController) and the mapping create
+        // (ExternalTenantUserMappingsController) as static methods; no secret.
+        For<ExternalTenantUserMappingProvisionAdminHandler>(
+            SystemIdentityCkIds.ExternalTenantUserMappingProvisionAdminMethodId, false),
+        For<ExternalTenantUserMappingProvisionAdminWithGroupsHandler>(
+            SystemIdentityCkIds.ExternalTenantUserMappingProvisionAdminWithGroupsMethodId, false),
+        For<ExternalTenantUserMappingProvisionCurrentUserHandler>(
+            SystemIdentityCkIds.ExternalTenantUserMappingProvisionCurrentUserMethodId, false),
+        For<ExternalTenantUserMappingRemoveAdminProvisioningHandler>(
+            SystemIdentityCkIds.ExternalTenantUserMappingRemoveAdminProvisioningMethodId, false),
+        For<ExternalTenantUserMappingCreateMappingHandler>(
+            SystemIdentityCkIds.ExternalTenantUserMappingCreateMappingMethodId, false)
     ];
 
     /// <summary>

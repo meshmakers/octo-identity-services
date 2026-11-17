@@ -306,3 +306,75 @@ types:
         execution:
           timeoutSeconds: 60
           idempotent: true
+      # 3.5.0: client mirrors (a ClientCredentials client with AutoProvisionInChildTenants copied into child tenants). The
+      # method runs in the parent tenant on the parent client; the handler writes into the child tenant. A child tenant must
+      # lie in the caller's tenant subtree and in the parent's subtree (METHOD_FORBIDDEN, reason tenant-out-of-scope). Roles
+      # follow the REST parity of ClientMirrorController: IdentityTenantAdministrationWritePolicy, and for the secret
+      # rotation IdentitySecretAdministrationPolicy (SecretManagement, staged by SecretManagementRoleEnforcement).
+      - methodId: ProvisionMirrors-1
+        description: "Backfill: provisions every client of this tenant that has AutoProvisionInChildTenants into every existing child tenant. The target client must carry the flag. Idempotent."
+        result:
+          valueType: Record
+          valueCkRecordId: ${this}/ClientMirrorBackfillResult
+        errors:
+          - { code: AUTO_PROVISION_DISABLED, description: "The client is not flagged AutoProvisionInChildTenants." }
+          - { code: BACKFILL_NOT_STARTED, description: "The backfill could not be started (the parent tenant or the flagged client was not found)." }
+        authorization:
+          roles: [ TenantManagement, UserManagement ]
+          dataAccess: Write
+        execution:
+          timeoutSeconds: 300
+          idempotent: true
+      - methodId: ProvisionMirrorInTenant-1
+        description: "Provisions the flagged clients of this tenant into one child tenant. The target client must carry AutoProvisionInChildTenants. Idempotent."
+        parameters:
+          - { name: childTenantId, valueType: String, description: "The child tenant to provision into; it must lie in the caller's tenant subtree." }
+        result:
+          valueType: Record
+          valueCkRecordId: ${this}/ClientMirrorProvisionResult
+        errors:
+          - { code: AUTO_PROVISION_DISABLED, description: "The client is not flagged AutoProvisionInChildTenants." }
+        authorization:
+          roles: [ TenantManagement, UserManagement ]
+          dataAccess: Write
+        execution:
+          timeoutSeconds: 120
+          idempotent: true
+      - methodId: RotateMirrorSecret-1
+        description: "Issues a fresh secret for the mirror of the client in one child tenant and returns it once; only its hash is stored and the previous mirror secret stops working."
+        parameters:
+          - { name: childTenantId, valueType: String, description: "The child tenant whose mirror gets the new secret." }
+        result:
+          valueType: String
+          sensitive: true
+        errors:
+          - { code: MIRROR_NOT_FOUND, description: "No mirror of the client is tracked for this child tenant." }
+          - { code: CLIENT_SECRET_NOT_REQUIRED, description: "The client is public; it has no secret, so there is no per-tenant secret to issue." }
+        authorization:
+          roles: [ TenantManagement, UserManagement, SecretManagement ]
+          dataAccess: Write
+        execution:
+          timeoutSeconds: 60
+      - methodId: RemoveMirror-1
+        description: "Removes the mirror of the client in one child tenant (the client in the child tenant and the tracking row)."
+        parameters:
+          - { name: childTenantId, valueType: String, description: "The child tenant to remove the mirror from." }
+        errors:
+          - { code: MIRROR_NOT_FOUND, description: "No mirror of the client is tracked for this child tenant." }
+        authorization:
+          roles: [ TenantManagement, UserManagement ]
+          dataAccess: Write
+        execution:
+          timeoutSeconds: 60
+      - methodId: SetMirrorAutoProvision-1
+        description: "Sets AutoProvisionInChildTenants of the client. Switching it off leaves existing mirrors in place."
+        parameters:
+          - { name: enabled, valueType: Boolean }
+        errors:
+          - { code: CONCURRENT_CHANGE, description: "The client was changed concurrently by other requests; retry." }
+        authorization:
+          roles: [ TenantManagement, UserManagement ]
+          dataAccess: Write
+        execution:
+          timeoutSeconds: 30
+          idempotent: true

@@ -25,7 +25,7 @@ consumers work unchanged; the remaining discovery-document differences are docum
 | `src/IdentityServices/{Logging,TenantApi,Controllers/Api}/**`, `{OctoUser*,*Revocation*,SecondFactorEvidence,*UserCredentialChangeService}.cs` | `docs/credential-security.md` |
 | `{*CrossTenant*,TenantProbeGuard,Allowed*,*IdentityResolver,*Processor,*ShadowUser*,*ExternalTenantUser*,*SourceT*,*SourceU*,Sibling*,AuthApiController}.cs` | `docs/cross-tenant-authentication.md` |
 | `src/IdentityServices/Methods/**`, `**/Services/{SelfService,SecretManagement}/**`, `*DataPermission*.cs` | `docs/identity-methods.md` |
-| `{IdentityMethodFacade,IdentityRestDeprecation,UsersController,ManageApiController,RoleChangeProblems,ResetUserPasswordRequestDto,ApiSecretsController,DataPermissionsController}.cs` | `docs/identity-rest-facades.md` |
+| `{IdentityMethodFacade,IdentityRestDeprecation,UsersController,ManageApiController,RoleChangeProblems,ResetUserPasswordRequestDto,ApiSecretsController,DataPermissionsController,ClientMirrorController,AdminProvisioningController}.cs` | `docs/identity-rest-facades.md` |
 | `src/Authentication/**`, `**/Services/Login/**`, `{TenantDiscovery*,TenantTopology*,*IdentityProvider*,*EmailDomainGroupRule*,*Channel*,AuthApiController}.cs` | `docs/login-and-providers.md` |
 | `**/{OpenIddict,Cookies,Middleware,Protocol,DynamicAuth}/**`, `{OpenIddictConfiguration,*PersistentGrantStore,TokenCleanup*}.cs` | `docs/openiddict-protocol.md` |
 | `**/{Authorization/RoleChange,AdminRoleMigration}/**`, `{Group*Resolver,GuardedEntityMutation,OctoRoleStore,*GroupStore,RolesController,GroupsController}.cs` | `docs/role-guards.md` |
@@ -145,6 +145,11 @@ wird, sind alle anderen Pre-Commit-Regeln (Lint etc.) ebenfalls hinfällig.
   handlers** (`*.AddSecret/UpdateSecret/RemoveSecret`, `DataPermission.*`, `DataPolicy.SetEnforcementMode`); the REST write
   endpoints are facades, the secret handlers run local only while `EnablePasswordMethods` is off, and a handler checks the data
   permission of its target itself (the in-process path has no gateway): `docs/identity-rest-facades.md`, `docs/identity-methods.md`.
+- **Client mirrors and admin provisioning change only in their handlers** (`Client.*Mirror*`, the static
+  `ExternalTenantUserMapping.ProvisionAdmin*` / `ProvisionCurrentUser` / `RemoveAdminProvisioning` / `CreateMapping`, logic in
+  `AdminProvisioningService`); the REST writes are facades. A handler that writes into another tenant checks that tenant against the caller's token
+  tenant subtree (`AdminProvisioningTargetScope`, shared with the REST filter) before any lookup or write: `docs/identity-rest-facades.md`,
+  `docs/identity-methods.md`.
 - **The wire protocol stays Duende-compatible** (endpoint paths, discovery, token shape, claims); the golden-file
   tests pin it: `docs/openiddict-protocol.md`.
 - **Every CK attribute declares its `ownership`** (`OCTO-CK001` fails the build), and a change of System.Identity

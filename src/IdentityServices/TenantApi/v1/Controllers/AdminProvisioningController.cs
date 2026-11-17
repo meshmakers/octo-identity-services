@@ -6,7 +6,10 @@ using Duende.IdentityModel;
 using IdentityServerPersistence;
 using IdentityServerPersistence.Services;
 using IdentityServerPersistence.SystemStores;
-using Meshmakers.Octo.Backend.Authentication.DynamicAuth;
+using Meshmakers.Octo.Backend.Authentication;
+using Meshmakers.Octo.Backend.IdentityServices.AdminProvisioning;
+using Meshmakers.Octo.Backend.IdentityServices.Authorization;
+using Meshmakers.Octo.Backend.IdentityServices.Methods;
 using Meshmakers.Octo.Communication.Contracts;
 using Meshmakers.Octo.Communication.Contracts.DataTransferObjects;
 using Meshmakers.Octo.ConstructionKit.Contracts;
@@ -16,20 +19,21 @@ using Meshmakers.Octo.Runtime.Contracts.MongoDb.Repositories;
 using Meshmakers.Octo.Runtime.Contracts.Repositories;
 using Meshmakers.Octo.Runtime.Contracts.Repositories.Query;
 using Meshmakers.Octo.Runtime.Contracts.RepositoryEntities;
+using Meshmakers.Octo.Services.Contracts.DistributionEventHub.Methods;
+using Meshmakers.Octo.Services.Methods.Facades;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Persistence.IdentityCkModel.Generated.System.Identity.v3;
-using Meshmakers.Octo.Backend.Authentication;
-using Meshmakers.Octo.Backend.IdentityServices.Authorization;
-using Meshmakers.Octo.Backend.IdentityServices.CrossTenantAudit;
 
 namespace Meshmakers.Octo.Backend.IdentityServices.TenantApi.v1.Controllers;
 
 /// <summary>
 /// REST Controller for pre-provisioning cross-tenant user mappings in a target tenant.
-/// Routed via the system tenant so that the calling user does not need allowed_tenants for the target tenant.
-/// AB#5859: requires TenantManagement or UserManagement, and the target must be the caller's own tenant or
-/// one of its descendants (<see cref="AdminProvisioningTargetScopeFilter"/>).
+/// Routed via the caller's tenant so that the calling user does not need allowed_tenants for the target tenant.
+/// Requires TenantManagement or UserManagement, and the target must be the caller's own tenant or
+/// one of its descendants (<see cref="AdminProvisioningTargetScopeFilter"/>, again in the method handlers).
+/// Every write is a facade of a static <c>ExternalTenantUserMapping</c> method (docs/identity-rest-facades.md); the
+/// reads stay REST reads.
 /// </summary>
 [Authorize(AuthenticationSchemes = AuthenticationConstants.BearerAuthenticationScheme)]
 [TypeFilter(typeof(AdminProvisioningTargetScopeFilter))]
@@ -38,49 +42,23 @@ namespace Meshmakers.Octo.Backend.IdentityServices.TenantApi.v1.Controllers;
 [ApiVersion(IdentityServiceConstants.ApiVersion1)]
 public class AdminProvisioningController(
     ISystemContext systemContext,
-    IDynamicAuthSchemeService dynamicAuthSchemeService,
-    ICrossTenantShadowUserChainResolver shadowUserChainResolver,
     ICrossTenantAncestryGuard ancestryGuard,
-    ICrossTenantGrantAuditRecorder grantAudit,
-    ILogger<AdminProvisioningController> logger) : ControllerBase
+    IIdentityMethodFacade methodFacade) : ControllerBase
 {
-    /// <summary>User name (or client id) of the caller, for audit events — never a token.</summary>
-    private string CallerName()
-        => User.Identity?.Name ?? User.FindFirstValue(JwtClaimTypes.PreferredUserName) ??
-           User.FindFirstValue("client_id") ?? User.FindFirstValue(JwtClaimTypes.Subject) ?? "unknown";
-
     /// <summary>
-    /// Records a grant event in the target tenant T and the source tenant S (AB#8342). Called after the commit;
-    /// never fails the request.
-    /// </summary>
-    private async Task AuditGrantAsync(string eventName, string targetTenantId, RtExternalTenantUserMapping mapping,
-        IReadOnlyList<string> groupNames)
-    {
-        try
-        {
-            await grantAudit.RecordGrantAsync(eventName, targetTenantId, CallerName(), mapping, groupNames);
-        }
-        catch (Exception ex)
-        {
-            logger.LogWarning(ex, "Audit event {EventName} of mapping {MappingId} could not be recorded (AB#8342)",
-                eventName, mapping.RtId);
-        }
-    }
-
-    /// <summary>
-    /// Response header of <c>provisionCurrentUser</c> that tells what the call did (AB#7088):
+    /// Response header of <c>provisionCurrentUser</c> that tells what the call did:
     /// <see cref="OutcomeCreated"/>, <see cref="OutcomeRepaired"/> or <see cref="OutcomeAlreadyProvisioned"/>.
     /// </summary>
     public const string ProvisioningOutcomeHeader = "X-Provisioning-Outcome";
 
     /// <summary>No mapping existed; one with all target roles and TenantOwners membership was created.</summary>
-    public const string OutcomeCreated = "created";
+    public const string OutcomeCreated = AdminProvisioningService.OutcomeCreated;
 
     /// <summary>A mapping existed but granted no effective role (or carried a wrong user name); it was fixed.</summary>
-    public const string OutcomeRepaired = "repaired";
+    public const string OutcomeRepaired = AdminProvisioningService.OutcomeRepaired;
 
     /// <summary>A mapping with an effective role and the right user name existed; nothing was changed.</summary>
-    public const string OutcomeAlreadyProvisioned = "already-provisioned";
+    public const string OutcomeAlreadyProvisioned = AdminProvisioningService.OutcomeAlreadyProvisioned;
 
     /// <summary>
     /// Returns all external tenant user mappings in the target tenant.
@@ -142,7 +120,8 @@ public class AdminProvisioningController(
     }
 
     /// <summary>
-    /// Creates a new external tenant user mapping in the target tenant.
+    /// Creates a new external tenant user mapping in the target tenant. Facade of the CK method
+    /// <c>ExternalTenantUserMapping.ProvisionAdmin-1</c>.
     /// </summary>
     [HttpPost]
     [Authorize(IdentityServiceConstants.IdentityTenantAdministrationWritePolicy)]
@@ -161,72 +140,27 @@ public class AdminProvisioningController(
             return BadRequest(ModelState);
         }
 
-        var tenantRepository = await systemContext.TryFindTenantRepositoryAsync(targetTenantId);
-        if (tenantRepository == null)
-        {
-            return NotFound($"Tenant '{targetTenantId}' not found.");
-        }
-
-        // AB#8339: only a registry ancestor of the target is an implicit source; the mapping would also register the
-        // source as the target's login parent (EnsureOctoTenantIdentityProviderAsync).
-        if (!await ancestryGuard.IsTrustedAncestorAsync(targetTenantId, dto.SourceTenantId,
-                "admin provisioning mapping"))
-        {
-            return CrossTenantAncestryProblems.SourceTenantNotAncestor(targetTenantId, dto.SourceTenantId);
-        }
-
-        // A mapping is unique per (source tenant, source user): a second one would lock the user out (AB#6975).
-        var duplicate = await ExternalTenantUserMappingLookup.FindOldestAsync(
-            tenantRepository, dto.SourceTenantId, dto.SourceUserId, logger);
-        if (duplicate != null)
-        {
-            return ExternalTenantUserMappingProblems.AlreadyExists(duplicate, dto.SourceTenantId, dto.SourceUserId);
-        }
-
-        var mapping = new RtExternalTenantUserMapping
-        {
-            RtId = OctoObjectId.GenerateNewId(),
-            SourceTenantId = dto.SourceTenantId,
-            SourceUserId = dto.SourceUserId,
-            SourceUserName = dto.SourceUserName,
-            MappedRoleIds = dto.RoleIds != null
-                ? new AttributeStringValueList(dto.RoleIds)
-                : null
-        };
-
-        var session = await tenantRepository.GetSessionAsync();
-        session.StartTransaction();
-        await tenantRepository.InsertOneRtEntityAsync(session, mapping);
-
-        // AB#8161: a mapping that carries TenantManagement is an administrator mapping: it joins TenantOwners
-        // (which holds every role including SecretManagement) in addition to the roles it was created with.
-        var groupNames = new List<string>();
-        if (dto.RoleIds != null && await ContainsTenantManagementRoleAsync(tenantRepository, session, dto.RoleIds))
-        {
-            var tenantOwnersGroup = await FindTenantOwnersGroupAsync(tenantRepository, session);
-            if (tenantOwnersGroup != null)
+        var response = await methodFacade.InvokeAsync(IdentityMethodFacade.ExternalTenantUserMappingCkTypeId,
+            SystemIdentityCkIds.ExternalTenantUserMappingProvisionAdminMethodId, null,
+            new ExternalTenantUserMappingProvisionAdminParameters
             {
-                await AddToTenantOwnersGroupAsync(tenantRepository, session, tenantOwnersGroup, mapping);
-                groupNames.Add(tenantOwnersGroup.GroupName);
-            }
-        }
-
-        await session.CommitTransactionAsync();
-
-        // Ensure OctoTenantIdentityProvider exists so cross-tenant login works
-        await EnsureOctoTenantIdentityProviderAsync(tenantRepository, targetTenantId, dto.SourceTenantId);
-
-        await AuditGrantAsync(CrossTenantGrantAuditEvents.GrantCreated, targetTenantId, mapping, groupNames);
-        return Created(string.Empty, MapToDto(mapping, groupNames));
+                TargetTenantId = targetTenantId,
+                SourceTenantId = dto.SourceTenantId,
+                SourceUserId = dto.SourceUserId,
+                SourceUserName = dto.SourceUserName,
+                RoleIds = dto.RoleIds?.ToList()
+            }, User, HttpContext.RequestAborted);
+        return WriteResult(response, targetTenantId, dto.SourceTenantId, dto.SourceUserId);
     }
 
     /// <summary>
-    /// Provisions the current user in the target tenant with all available roles. Idempotent and self-healing
-    /// (AB#7088): 201 + <c>X-Provisioning-Outcome: created</c> for a new mapping; 200 + <c>repaired</c> when a
+    /// Provisions the current user in the target tenant with all available roles. Idempotent and self-healing:
+    /// 201 + <c>X-Provisioning-Outcome: created</c> for a new mapping; 200 + <c>repaired</c> when a
     /// mapping existed but granted no effective role or carried a wrong user name; 200 +
-    /// <c>already-provisioned</c> when nothing needed to change.
+    /// <c>already-provisioned</c> when nothing needed to change. Facade of the CK method
+    /// <c>ExternalTenantUserMapping.ProvisionCurrentUser-1</c>.
     /// <para>
-    /// AB#8017: when the caller is a cross-tenant shadow user (<c>xt_…</c>, e.g. a session scoped to an
+    /// When the caller is a cross-tenant shadow user (<c>xt_…</c>, e.g. a session scoped to an
     /// intermediate tenant A that provisions into grandchild B), the mapping is written for the caller's
     /// <b>home identity</b> — the root of its <c>xt_</c> chain — not for the shadow user. The token exchange
     /// accepts a home mapping for every path of the same person (from the home tenant directly and from the
@@ -246,48 +180,29 @@ public class AdminProvisioningController(
     public async Task<ActionResult<ExternalTenantUserMappingDto>> ProvisionCurrentUser(
         [Required] string targetTenantId)
     {
-        var tenantRepository = await systemContext.TryFindTenantRepositoryAsync(targetTenantId);
-        if (tenantRepository == null)
-        {
-            return NotFound($"Tenant '{targetTenantId}' not found.");
-        }
-
-        // Extract user info from claims — check both unmapped (sub, preferred_username)
-        // and mapped (ClaimTypes.NameIdentifier, ClaimTypes.Name) variants because
-        // JwtBearerOptions.MapInboundClaims may remap JWT claims to XML namespace URIs.
-        var userId = HttpContext.User.FindFirstValue(JwtClaimTypes.Subject)
-                     ?? HttpContext.User.FindFirstValue(ClaimTypes.NameIdentifier);
-        var tenantId = HttpContext.User.FindFirstValue("tenant_id");
-
-        if (string.IsNullOrEmpty(userId))
-        {
-            return BadRequest("Cannot determine user identity from token.");
-        }
-
-        if (string.IsNullOrEmpty(tenantId))
-        {
-            return BadRequest("Cannot determine source tenant from token.");
-        }
-
-        // Access tokens typically don't include profile claims (name, preferred_username).
-        // Try claims first, then fall back to the user stored in the source tenant.
-        var claimUserName = HttpContext.User.FindFirstValue(JwtClaimTypes.PreferredUserName)
-                            ?? HttpContext.User.FindFirstValue(JwtClaimTypes.Name)
-                            ?? HttpContext.User.FindFirstValue(ClaimTypes.Name);
-        var storedUserName = await FindUserNameByIdAsync(tenantId, userId);
-        var userName = !string.IsNullOrEmpty(claimUserName) ? claimUserName : storedUserName ?? userId;
-
-        // AB#8017: a shadow user (session scoped to an intermediate tenant) is provisioned as its home identity.
-        // The stored name is authoritative; the claim only counts when the user cannot be read.
-        var callerName = storedUserName ?? claimUserName;
-        if (CrossTenantShadowUserName.IsShadowUserName(callerName))
-        {
-            var home = await ResolveHomeIdentityAsync(callerName!);
-            if (home == null || string.Equals(home.Value.TenantId, targetTenantId, StringComparison.OrdinalIgnoreCase))
+        var response = await methodFacade.InvokeAsync(IdentityMethodFacade.ExternalTenantUserMappingCkTypeId,
+            SystemIdentityCkIds.ExternalTenantUserMappingProvisionCurrentUserMethodId, null,
+            new ExternalTenantUserMappingProvisionCurrentUserParameters { TargetTenantId = targetTenantId }, User,
+            HttpContext.RequestAborted);
+        var options = CommonOptions(targetTenantId)
+            .MapSuccess(result =>
             {
-                logger.LogWarning(
-                    "ProvisionCurrentUser refused: caller '{CallerUserName}' of tenant '{CallerTenantId}' is a cross-tenant shadow user whose home identity could not be resolved (target tenant '{TargetTenantId}')",
-                    callerName, tenantId, targetTenantId);
+                var record = ClientMirrorController.Deserialize<RtAdminProvisioningResultRecord>(result.ResultJson);
+                Response.Headers[ProvisioningOutcomeHeader] = record.Outcome;
+                return record.Outcome == OutcomeCreated
+                    ? Created(string.Empty, MapToDto(record))
+                    : Ok(MapToDto(record));
+            })
+            .MapError(AdminProvisioningMethodErrors.CallerNotAUser, error =>
+                BadRequest(error.Parameters.GetValueOrDefault(AdminProvisioningMethodErrors.MissingParameter) == "tenant"
+                    ? "Cannot determine source tenant from token."
+                    : "Cannot determine user identity from token."))
+            .MapError(AdminProvisioningMethodErrors.HomeIdentityUnresolved, _ =>
+            {
+                var callerName = User.FindFirstValue(JwtClaimTypes.PreferredUserName) ??
+                                 User.FindFirstValue(JwtClaimTypes.Name) ?? User.FindFirstValue(ClaimTypes.Name) ??
+                                 User.FindFirstValue(JwtClaimTypes.Subject) ?? "unknown";
+                var tenantId = User.FindFirstValue("tenant_id");
                 return Conflict(new ProblemDetails
                 {
                     Status = StatusCodes.Status409Conflict,
@@ -296,412 +211,16 @@ public class AdminProvisioningController(
                              "home identity could not be resolved, so no mapping was written. Sign in to the home " +
                              $"tenant of the user and run provisionCurrentUser for '{targetTenantId}' from there."
                 });
-            }
-
-            logger.LogInformation(
-                "ProvisionCurrentUser: caller '{CallerUserName}' of tenant '{CallerTenantId}' is a cross-tenant shadow user; provisioning its home identity '{HomeUserName}' ({HomeUserId}) of tenant '{HomeTenantId}' into tenant '{TargetTenantId}'",
-                callerName, tenantId, home.Value.UserName, home.Value.UserId, home.Value.TenantId, targetTenantId);
-
-            tenantId = home.Value.TenantId;
-            userId = home.Value.UserId;
-            userName = home.Value.UserName;
-        }
-
-        // The target tenant may still be initializing (CK model import + default-configuration
-        // seeding run asynchronously after tenant creation). Retry with backoff while the tenant is
-        // not ready, and once the budget is exhausted surface a clean 503 — not a generic 500.
-        const int maxRetries = 10;
-        const int retryDelayMs = 1000;
-        for (var attempt = 1; attempt <= maxRetries; attempt++)
-        {
-            try
-            {
-                return await ProvisionCurrentUserInternal(tenantRepository, userId, userName, tenantId);
-            }
-            catch (Exception ex) when (IsTenantInitializing(ex))
-            {
-                logger.LogInformation(ex,
-                    "Target tenant '{TargetTenantId}' is not ready yet (attempt {Attempt}/{MaxRetries}).",
-                    targetTenantId, attempt, maxRetries);
-
-                // On the final attempt do NOT rethrow — the previous code's `attempt < maxRetries`
-                // guard let the last not-ready failure bubble up as a 500 (AB#4348). Return 503 so
-                // the operator/CLI gets an actionable "still initializing" signal instead.
-                if (attempt >= maxRetries)
-                {
-                    return StatusCode(StatusCodes.Status503ServiceUnavailable,
-                        $"Tenant '{targetTenantId}' is still initializing. Please try again shortly.");
-                }
-
-                await Task.Delay(retryDelayMs * attempt);
-            }
-        }
-
-        // Unreachable — the loop either returns a mapping or the 503 above — but the compiler needs
-        // a terminal return.
-        return StatusCode(StatusCodes.Status503ServiceUnavailable,
-            $"Tenant '{targetTenantId}' is still initializing. Please try again shortly.");
-    }
-
-    /// <summary>The user name stored for <paramref name="userId" /> in <paramref name="tenantId" />, or <c>null</c>.</summary>
-    private async Task<string?> FindUserNameByIdAsync(string tenantId, string userId)
-    {
-        if (!OctoObjectId.TryParse(userId, out var userRtId))
-        {
-            return null;
-        }
-
-        var repository = await systemContext.TryFindTenantRepositoryAsync(tenantId);
-        if (repository == null)
-        {
-            return null;
-        }
-
-        using var session = await repository.GetSessionAsync();
-        session.StartTransaction();
-        var user = await repository.GetRtEntityByRtIdAsync<RtUser>(session, userRtId);
-        await session.CommitTransactionAsync();
-        return user?.UserName;
+            })
+            .MapError(AdminProvisioningMethodErrors.TenantInitializing, _ =>
+                StatusCode(StatusCodes.Status503ServiceUnavailable,
+                    $"Tenant '{targetTenantId}' is still initializing. Please try again shortly."));
+        return Unwrap(response.ToActionResult(options));
     }
 
     /// <summary>
-    /// AB#8017: unwinds a shadow user name (<c>xt_{tenant}_{user}</c>, possibly nested) against the tenant
-    /// registry to the root identity and looks that user up in its tenant. Returns <c>null</c> — fail closed —
-    /// when the chain is ambiguous or broken (the last tier is still a shadow name), the home tenant is not
-    /// registered or the home user does not exist.
-    /// </summary>
-    private async Task<(string TenantId, string UserId, string UserName)?> ResolveHomeIdentityAsync(
-        string shadowUserName)
-    {
-        var chain = await shadowUserChainResolver.GetSourceChainAsync(shadowUserName);
-        if (chain.Count == 0)
-        {
-            return null;
-        }
-
-        var (homeTenantId, homeUserName) = chain[^1];
-        if (CrossTenantShadowUserName.IsShadowUserName(homeUserName))
-        {
-            return null;
-        }
-
-        var repository = await systemContext.TryFindTenantRepositoryAsync(homeTenantId);
-        if (repository == null)
-        {
-            return null;
-        }
-
-        using var session = await repository.GetSessionAsync();
-        session.StartTransaction();
-        var result = await repository.GetRtEntitiesByTypeAsync<RtUser>(session,
-            RtEntityQueryOptions.Create()
-                .FieldEquals(nameof(RtUser.NormalizedUserName), homeUserName.ToUpperInvariant()));
-        await session.CommitTransactionAsync();
-
-        var homeUser = result.Items.FirstOrDefault();
-        return homeUser == null
-            ? null
-            : (homeTenantId, homeUser.RtId.ToString(), homeUser.UserName ?? homeUserName);
-    }
-
-    /// <summary>
-    /// Returns true when an exception indicates the target tenant is still being provisioned and the
-    /// provisioning should be retried: an unpopulated CK cache (<see cref="CkCacheException"/>), missing
-    /// default configuration / roles (<see cref="TenantNotReadyException"/>), or a freshly-provisioned
-    /// identity database whose first read fails with MongoDB errorCode 13 ("requires authentication")
-    /// because the tenant database user is not yet in place (AB#4348). Walks the inner-exception chain so
-    /// wrapped failures are matched too.
-    /// </summary>
-    private static bool IsTenantInitializing(Exception exception)
-    {
-        for (Exception? ex = exception; ex is not null; ex = ex.InnerException)
-        {
-            if (ex is CkCacheException or TenantNotReadyException)
-            {
-                return true;
-            }
-
-            if (ex is MongoDB.Driver.MongoCommandException { Code: 13 })
-            {
-                return true;
-            }
-        }
-
-        return false;
-    }
-
-    private async Task<ActionResult<ExternalTenantUserMappingDto>> ProvisionCurrentUserInternal(
-        ITenantRepository tenantRepository, string userId, string userName, string tenantId)
-    {
-        var session = await tenantRepository.GetSessionAsync();
-        session.StartTransaction();
-
-        // Check if mapping already exists
-        var existingQuery = RtEntityQueryOptions.Create()
-            .FieldEquals(nameof(RtExternalTenantUserMapping.SourceTenantId), tenantId)
-            .FieldEquals(nameof(RtExternalTenantUserMapping.SourceUserId), userId);
-        var existingResult = await tenantRepository
-            .GetRtEntitiesByTypeAsync<RtExternalTenantUserMapping>(session, existingQuery);
-
-        var existingMapping = ExternalTenantUserMappingLookup.PickOldest(
-            existingResult.Items.ToList(), tenantId, userId, logger);
-
-        // Get all roles from target tenant. Needed to fill a new mapping and to judge whether an existing
-        // one grants anything. If no roles exist yet, the default configuration has not been initialized —
-        // throw to trigger a retry in the caller.
-        var roleResult = await tenantRepository
-            .GetRtEntitiesByTypeAsync<RtRole>(session, RtEntityQueryOptions.Create());
-        if (!roleResult.Items.Any())
-        {
-            await session.CommitTransactionAsync();
-            throw new TenantNotReadyException("No roles found in target tenant — default configuration not yet initialized.");
-        }
-
-        var roleIds = roleResult.Items.Select(r => r.RtId.ToString()).ToList();
-
-        if (existingMapping != null)
-        {
-            return await RepairOrConfirmExistingMappingAsync(
-                tenantRepository, session, existingMapping, roleIds, userId, userName, tenantId);
-        }
-
-        // AB#8161: an administrator is a TenantOwners member, not the holder of direct roles; the group carries
-        // every role. A tenant without the group, or with a group that carries no role, keeps the role list.
-        var tenantOwnersGroup = await FindTenantOwnersGroupAsync(tenantRepository, session);
-        var groupCarriesRoles = tenantOwnersGroup != null
-                                && await GroupHasAllRolesAsync(tenantRepository, session, tenantOwnersGroup, roleIds);
-        var mapping = new RtExternalTenantUserMapping
-        {
-            RtId = OctoObjectId.GenerateNewId(),
-            SourceTenantId = tenantId,
-            SourceUserId = userId,
-            SourceUserName = userName,
-            MappedRoleIds = groupCarriesRoles ? null : new AttributeStringValueList(roleIds)
-        };
-
-        await tenantRepository.InsertOneRtEntityAsync(session, mapping);
-
-        // Ensure OctoTenantIdentityProvider exists so cross-tenant login works
-        await EnsureOctoTenantIdentityProviderAsync(tenantRepository, tenantRepository.TenantId, tenantId);
-
-        // Add mapping as member of TenantOwners group
-        var groupNames = new List<string>();
-        if (tenantOwnersGroup != null)
-        {
-            await AddToTenantOwnersGroupAsync(tenantRepository, session, tenantOwnersGroup, mapping);
-            groupNames.Add(tenantOwnersGroup.GroupName);
-        }
-
-        await session.CommitTransactionAsync();
-
-        await AuditGrantAsync(CrossTenantGrantAuditEvents.GrantCreated, tenantRepository.TenantId, mapping, groupNames);
-        Response.Headers[ProvisioningOutcomeHeader] = OutcomeCreated;
-        return Created(string.Empty, MapToDto(mapping, groupNames));
-    }
-
-    /// <summary>
-    /// A mapping for (source tenant, source user) already exists (AB#7088). It only counts as provisioned when
-    /// it grants an effective role and carries the user name the role lookup keys on: the token exchange
-    /// resolves roles by source tenant + source user NAME, this lookup finds the mapping by user ID. A bare
-    /// mapping (stored by the cross-tenant login before anybody provisioned the user), one that lists no
-    /// existing role and is in no group with roles, or one with a wrong name leaves the user denied — it is
-    /// repaired here instead of being reported as provisioned. A mapping that already grants a role is never
-    /// widened: only a wrong name is corrected.
-    /// </summary>
-    private async Task<ActionResult<ExternalTenantUserMappingDto>> RepairOrConfirmExistingMappingAsync(
-        ITenantRepository tenantRepository, IOctoSession session, RtExternalTenantUserMapping mapping,
-        IReadOnlyList<string> targetRoleIds, string userId, string userName, string tenantId)
-    {
-        var targetRoleIdSet = targetRoleIds.ToHashSet(StringComparer.OrdinalIgnoreCase);
-
-        // Groups the mapping is a member of (names for the response, roles to judge the grant).
-        var associations = await tenantRepository.GetRtAssociationsAsync(
-            session,
-            mapping.ToRtEntityId(),
-            RtAssociationExtendedQueryOptions.Create(
-                GraphDirections.Inbound,
-                roleId: IdentityAssociationConstants.GroupMemberId));
-
-        var groupNames = new List<string>();
-        var groupRoleIds = new List<string>();
-        var groupCkTypeId = RtEntityExtensions.GetRtCkTypeId<RtGroup>();
-        foreach (var assoc in associations.Items.Where(a => a.OriginCkTypeId == groupCkTypeId))
-        {
-            var group = await tenantRepository.GetRtEntityByRtIdAsync<RtGroup>(session, assoc.OriginRtId);
-            if (group == null)
-            {
-                continue;
-            }
-
-            groupNames.Add(group.GroupName);
-
-            var groupRoleAssociations = await tenantRepository.GetRtAssociationsAsync(
-                session,
-                group.ToRtEntityId(),
-                RtAssociationExtendedQueryOptions.Create(
-                    GraphDirections.Outbound,
-                    roleId: IdentityAssociationConstants.AssignedRoleId));
-            groupRoleIds.AddRange(groupRoleAssociations.Items.Select(a => a.TargetRtId.ToString()));
-        }
-
-        var grantsRole = (mapping.MappedRoleIds?.Any(targetRoleIdSet.Contains) ?? false)
-                         || groupRoleIds.Any(targetRoleIdSet.Contains);
-
-        // The user name only replaces a stored one when it is a real name; the user id is the fallback
-        // used when the name could not be determined and must not overwrite a good name.
-        var nameNeedsCorrection = !string.IsNullOrEmpty(userName)
-                                  && !string.Equals(userName, userId, StringComparison.Ordinal)
-                                  && !string.Equals(mapping.SourceUserName, userName, StringComparison.OrdinalIgnoreCase);
-
-        if (grantsRole && !nameNeedsCorrection)
-        {
-            await session.CommitTransactionAsync();
-            Response.Headers[ProvisioningOutcomeHeader] = OutcomeAlreadyProvisioned;
-            return Ok(MapToDto(mapping, groupNames));
-        }
-
-        // AB#8161: repair through the TenantOwners group when it carries roles; the role list is the
-        // fallback for a tenant without a usable group.
-        var repairGroup = !grantsRole ? await FindTenantOwnersGroupAsync(tenantRepository, session) : null;
-        var repairViaGroup = repairGroup != null && await GroupHasAllRolesAsync(tenantRepository, session, repairGroup, targetRoleIds);
-        if (!grantsRole && !repairViaGroup)
-        {
-            mapping.MappedRoleIds = new AttributeStringValueList(targetRoleIds.ToList());
-        }
-
-        if (nameNeedsCorrection)
-        {
-            mapping.SourceUserName = userName;
-        }
-
-        await tenantRepository.ReplaceOneRtEntityByIdAsync(session, mapping.RtId, mapping);
-
-        if (repairGroup != null && !grantsRole
-            && !groupNames.Contains(CommonConstants.TenantOwnersGroup, StringComparer.OrdinalIgnoreCase))
-        {
-            await AddToTenantOwnersGroupAsync(tenantRepository, session, repairGroup, mapping);
-            groupNames.Add(repairGroup.GroupName);
-        }
-
-        // Ensure OctoTenantIdentityProvider exists so cross-tenant login works
-        await EnsureOctoTenantIdentityProviderAsync(tenantRepository, tenantRepository.TenantId, tenantId);
-
-        await session.CommitTransactionAsync();
-
-        logger.LogInformation(
-            "Repaired external tenant user mapping '{MappingRtId}' of user '{SourceUserId}' from tenant '{SourceTenantId}' in tenant '{TargetTenantId}' (rolesFilled={RolesFilled}, nameCorrected={NameCorrected})",
-            mapping.RtId, userId, tenantId, tenantRepository.TenantId, !grantsRole, nameNeedsCorrection);
-
-        await AuditGrantAsync(CrossTenantGrantAuditEvents.GrantChanged, tenantRepository.TenantId, mapping, groupNames);
-        Response.Headers[ProvisioningOutcomeHeader] = OutcomeRepaired;
-        return Ok(MapToDto(mapping, groupNames));
-    }
-
-    /// <summary>True when one of <paramref name="roleIds"/> is the TenantManagement role of the target tenant.</summary>
-    private static async Task<bool> ContainsTenantManagementRoleAsync(
-        ITenantRepository tenantRepository, IOctoSession session, IEnumerable<string> roleIds)
-    {
-        var roles = await tenantRepository.GetRtEntitiesByTypeAsync<RtRole>(
-            session,
-            RtEntityQueryOptions.Create().FieldEquals(
-                nameof(RtRole.NormalizedName), CommonConstants.TenantManagementRole.ToUpperInvariant()));
-        var tenantManagement = roles.Items.FirstOrDefault();
-        return tenantManagement != null
-               && roleIds.Contains(tenantManagement.RtId.ToString(), StringComparer.OrdinalIgnoreCase);
-    }
-
-    /// <summary>
-    /// True when the group has an <c>AssignedRole</c> edge to every one of <paramref name="roleIds"/>: only then the
-    /// group alone replaces the direct role list of a mapping.
-    /// </summary>
-    private static async Task<bool> GroupHasAllRolesAsync(
-        ITenantRepository tenantRepository, IOctoSession session, RtGroup group, IEnumerable<string> roleIds)
-    {
-        var edges = await tenantRepository.GetRtAssociationsAsync(
-            session,
-            group.ToRtEntityId(),
-            RtAssociationExtendedQueryOptions.Create(
-                GraphDirections.Outbound,
-                roleId: IdentityAssociationConstants.AssignedRoleId));
-        var held = edges.Items.Select(e => e.TargetRtId.ToString()).ToHashSet(StringComparer.OrdinalIgnoreCase);
-        return roleIds.All(held.Contains);
-    }
-
-    /// <summary>
-    /// The mapping's target-tenant group names for an audit event, read in a session of their own (outside the caller's
-    /// transaction). A read error yields none and never fails the request (AB#8437, like
-    /// <c>ExternalTenantUserMappingsController.GroupNamesForAuditAsync</c>).
-    /// </summary>
-    private async Task<IReadOnlyList<string>> GroupNamesForAuditAsync(ITenantRepository tenantRepository,
-        RtExternalTenantUserMapping mapping)
-    {
-        try
-        {
-            using var auditSession = await tenantRepository.GetSessionAsync();
-            return await GroupNamesOfMappingAsync(tenantRepository, auditSession, mapping);
-        }
-        catch (Exception ex)
-        {
-            logger.LogWarning(ex, "Group names of mapping {MappingId} could not be read for the audit event (AB#8437)",
-                mapping.RtId);
-            return [];
-        }
-    }
-
-    /// <summary>Names of the target-tenant groups the mapping is a member of (for audit events).</summary>
-    private static async Task<IReadOnlyList<string>> GroupNamesOfMappingAsync(
-        ITenantRepository tenantRepository, IOctoSession session, RtExternalTenantUserMapping mapping)
-    {
-        var associations = await tenantRepository.GetRtAssociationsAsync(
-            session,
-            mapping.ToRtEntityId(),
-            RtAssociationExtendedQueryOptions.Create(
-                GraphDirections.Inbound,
-                roleId: IdentityAssociationConstants.GroupMemberId));
-        var groupCkTypeId = RtEntityExtensions.GetRtCkTypeId<RtGroup>();
-        var names = new List<string>();
-        foreach (var assoc in associations.Items.Where(a => a.OriginCkTypeId == groupCkTypeId))
-        {
-            var group = await tenantRepository.GetRtEntityByRtIdAsync<RtGroup>(session, assoc.OriginRtId);
-            if (group != null)
-            {
-                names.Add(group.GroupName);
-            }
-        }
-
-        return names;
-    }
-
-    /// <summary>The TenantOwners group of the target tenant, or <c>null</c> when the tenant has none.</summary>
-    private static async Task<RtGroup?> FindTenantOwnersGroupAsync(
-        ITenantRepository tenantRepository, IOctoSession session)
-    {
-        var groupQuery = RtEntityQueryOptions.Create()
-            .FieldEquals(nameof(RtGroup.NormalizedGroupName),
-                CommonConstants.TenantOwnersGroup.ToUpperInvariant());
-        var groupResult = await tenantRepository
-            .GetRtEntitiesByTypeAsync<RtGroup>(session, groupQuery);
-        return groupResult.Items.FirstOrDefault();
-    }
-
-    /// <summary>Adds the mapping to the given TenantOwners group as a member.</summary>
-    private static async Task AddToTenantOwnersGroupAsync(
-        ITenantRepository tenantRepository, IOctoSession session, RtGroup tenantOwnersGroup,
-        RtExternalTenantUserMapping mapping)
-    {
-        var updates = new List<AssociationUpdateInfo>
-        {
-            AssociationUpdateInfo.CreateInsert(
-                tenantOwnersGroup.ToRtEntityId(),
-                mapping.ToRtEntityId(),
-                IdentityAssociationConstants.GroupMemberId)
-        };
-        var opResult = new OperationResult();
-        await tenantRepository.ApplyChangesAsync(session, updates, opResult);
-    }
-
-    /// <summary>
-    /// Deletes an external tenant user mapping in the target tenant.
+    /// Deletes an external tenant user mapping in the target tenant. Facade of the CK method
+    /// <c>ExternalTenantUserMapping.RemoveAdminProvisioning-1</c>.
     /// </summary>
     [HttpDelete("{mappingRtId}")]
     [Authorize(IdentityServiceConstants.IdentityTenantAdministrationWritePolicy)]
@@ -712,32 +231,16 @@ public class AdminProvisioningController(
         [Required] string targetTenantId,
         [Required] OctoObjectId mappingRtId)
     {
-        var tenantRepository = await systemContext.TryFindTenantRepositoryAsync(targetTenantId);
-        if (tenantRepository == null)
-        {
-            return NotFound($"Tenant '{targetTenantId}' not found.");
-        }
-
-        var session = await tenantRepository.GetSessionAsync();
-        session.StartTransaction();
-
-        var existing = await tenantRepository
-            .GetRtEntityByRtIdAsync<RtExternalTenantUserMapping>(session, mappingRtId);
-        if (existing == null)
-        {
-            await session.CommitTransactionAsync();
-            return NotFound($"Mapping '{mappingRtId}' not found in tenant '{targetTenantId}'.");
-        }
-
-        // Group names before the removal: the mapping's GroupMember edges go with it (AB#8342 audit). Read in a session
-        // of their own and guarded: a failing read never breaks or aborts the deletion (AB#8437).
-        var groupNames = await GroupNamesForAuditAsync(tenantRepository, existing);
-        await tenantRepository
-            .DeleteOneRtEntityByRtIdAsync<RtExternalTenantUserMapping>(session, mappingRtId, DeleteOptions.Erase);
-        await session.CommitTransactionAsync();
-
-        await AuditGrantAsync(CrossTenantGrantAuditEvents.GrantRemoved, targetTenantId, existing, groupNames);
-        return Ok();
+        var response = await methodFacade.InvokeAsync(IdentityMethodFacade.ExternalTenantUserMappingCkTypeId,
+            SystemIdentityCkIds.ExternalTenantUserMappingRemoveAdminProvisioningMethodId, null,
+            new ExternalTenantUserMappingRemoveAdminProvisioningParameters
+            {
+                TargetTenantId = targetTenantId, MappingRtId = mappingRtId.ToString()
+            }, User, HttpContext.RequestAborted);
+        return response.ToActionResult(CommonOptions(targetTenantId)
+            .MapSuccess(_ => Ok())
+            .MapError(AdminProvisioningMethodErrors.MappingNotFound,
+                _ => NotFound($"Mapping '{mappingRtId}' not found in tenant '{targetTenantId}'.")));
     }
 
     /// <summary>
@@ -849,7 +352,8 @@ public class AdminProvisioningController(
     /// <summary>
     /// Creates a cross-tenant user mapping and makes it a member of the given target-tenant groups, so
     /// the user inherits the groups' roles. This is the group-based counterpart of <see cref="Create"/>
-    /// and mirrors how <see cref="ProvisionCurrentUser"/> grants access via the TenantOwners group.
+    /// and mirrors how <see cref="ProvisionCurrentUser"/> grants access via the TenantOwners group. Facade of the CK
+    /// method <c>ExternalTenantUserMapping.ProvisionAdminWithGroups-1</c>.
     /// </summary>
     [HttpPost("withGroups")]
     [Authorize(IdentityServiceConstants.IdentityTenantAdministrationWritePolicy)]
@@ -869,75 +373,47 @@ public class AdminProvisioningController(
             return BadRequest(ModelState);
         }
 
-        var tenantRepository = await systemContext.TryFindTenantRepositoryAsync(targetTenantId);
-        if (tenantRepository == null)
-        {
-            return NotFound($"Tenant '{targetTenantId}' not found.");
-        }
-
-        // AB#8339: only a registry ancestor of the target is an implicit source; the mapping would also register the
-        // source as the target's login parent (EnsureOctoTenantIdentityProviderAsync).
-        if (!await ancestryGuard.IsTrustedAncestorAsync(targetTenantId, dto.SourceTenantId,
-                "admin provisioning mapping"))
-        {
-            return CrossTenantAncestryProblems.SourceTenantNotAncestor(targetTenantId, dto.SourceTenantId);
-        }
-
-        // A mapping is unique per (source tenant, source user): a second one would lock the user out (AB#6975).
-        var duplicate = await ExternalTenantUserMappingLookup.FindOldestAsync(
-            tenantRepository, dto.SourceTenantId, dto.SourceUserId, logger);
-        if (duplicate != null)
-        {
-            return ExternalTenantUserMappingProblems.AlreadyExists(duplicate, dto.SourceTenantId, dto.SourceUserId);
-        }
-
-        var mapping = new RtExternalTenantUserMapping
-        {
-            RtId = OctoObjectId.GenerateNewId(),
-            SourceTenantId = dto.SourceTenantId,
-            SourceUserId = dto.SourceUserId,
-            SourceUserName = dto.SourceUserName,
-            MappedRoleIds = null
-        };
-
-        var session = await tenantRepository.GetSessionAsync();
-        session.StartTransaction();
-        await tenantRepository.InsertOneRtEntityAsync(session, mapping);
-
-        var groupNames = new List<string>();
-        if (dto.GroupIds is { Count: > 0 })
-        {
-            var updates = new List<AssociationUpdateInfo>();
-            foreach (var groupId in dto.GroupIds)
+        var response = await methodFacade.InvokeAsync(IdentityMethodFacade.ExternalTenantUserMappingCkTypeId,
+            SystemIdentityCkIds.ExternalTenantUserMappingProvisionAdminWithGroupsMethodId, null,
+            new ExternalTenantUserMappingProvisionAdminWithGroupsParameters
             {
-                var group = await tenantRepository
-                    .GetRtEntityByRtIdAsync<RtGroup>(session, new OctoObjectId(groupId));
-                if (group == null)
-                {
-                    continue;
-                }
-
-                updates.Add(AssociationUpdateInfo.CreateInsert(
-                    group.ToRtEntityId(),
-                    mapping.ToRtEntityId(),
-                    IdentityAssociationConstants.GroupMemberId));
-                groupNames.Add(group.GroupName);
-            }
-
-            if (updates.Count > 0)
-            {
-                await tenantRepository.ApplyChangesAsync(session, updates, new OperationResult());
-            }
-        }
-
-        await session.CommitTransactionAsync();
-
-        // Ensure OctoTenantIdentityProvider exists so cross-tenant login works
-        await EnsureOctoTenantIdentityProviderAsync(tenantRepository, targetTenantId, dto.SourceTenantId);
-
-        await AuditGrantAsync(CrossTenantGrantAuditEvents.GrantCreated, targetTenantId, mapping, groupNames);
-        return Created(string.Empty, MapToDto(mapping, groupNames));
+                TargetTenantId = targetTenantId,
+                SourceTenantId = dto.SourceTenantId,
+                SourceUserId = dto.SourceUserId,
+                SourceUserName = dto.SourceUserName,
+                GroupIds = dto.GroupIds?.ToList()
+            }, User, HttpContext.RequestAborted);
+        return WriteResult(response, targetTenantId, dto.SourceTenantId, dto.SourceUserId);
     }
+
+    /// <summary>The REST answer of a mapping create: 201 with the mapping, else the shared mappings.</summary>
+    private ActionResult<ExternalTenantUserMappingDto> WriteResult(CkMethodResponse response, string targetTenantId,
+        string sourceTenantId, string sourceUserId) =>
+        Unwrap(response.ToActionResult(CommonOptions(targetTenantId)
+            .MapSuccess(result => Created(string.Empty,
+                MapToDto(ClientMirrorController.Deserialize<RtAdminProvisioningResultRecord>(result.ResultJson))))
+            .MapError(AdminProvisioningMethodErrors.SourceTenantNotAncestor,
+                _ => CrossTenantAncestryProblems.SourceTenantNotAncestor(targetTenantId, sourceTenantId))
+            .MapError(AdminProvisioningMethodErrors.MappingAlreadyExists, error =>
+                ExternalTenantUserMappingProblems.AlreadyExists(
+                    error.Parameters.GetValueOrDefault(AdminProvisioningMethodErrors.ExistingMappingIdParameter) ??
+                    string.Empty, sourceTenantId, sourceUserId))));
+
+    /// <summary>
+    /// The mappings every write shares: a target outside the caller's subtree the empty <c>403</c> of the scope filter, a
+    /// missing target tenant the earlier <c>404</c> text. Other refusals keep the default <c>403</c> problem, a handler
+    /// failure the default <c>500</c> problem.
+    /// </summary>
+    private CkMethodFacadeOptions CommonOptions(string targetTenantId) =>
+        new CkMethodFacadeOptions()
+            .MapError(CkMethodErrorCodes.MethodForbidden, error =>
+                error.Parameters.GetValueOrDefault("reason") == CrossTenantMethodSupport.TenantOutOfScopeReason
+                    ? new ForbidResult()
+                    : CkMethodFacadeResults.Problem(error, StatusCodes.Status403Forbidden))
+            .MapError(AdminProvisioningMethodErrors.TenantNotFound, _ => NotFound($"Tenant '{targetTenantId}' not found."));
+
+    private static ActionResult<ExternalTenantUserMappingDto> Unwrap(IActionResult result) =>
+        result is ActionResult actionResult ? actionResult : new ObjectResult(result);
 
     /// <summary>
     /// The tenants whose users may be offered as cross-tenant sources of the target: the tenants the target's
@@ -1056,45 +532,6 @@ public class AdminProvisioningController(
             .ToList();
     }
 
-    /// <summary>
-    /// Ensures the OctoTenantIdentityProvider exists in the target tenant, pointing to the source tenant.
-    /// This enables "LOGIN VIA {sourceTenant}" on the target tenant's login page.
-    /// </summary>
-    private async Task EnsureOctoTenantIdentityProviderAsync(
-        ITenantRepository tenantRepository, string targetTenantId, string sourceTenantId)
-    {
-        var session = await tenantRepository.GetSessionAsync();
-        session.StartTransaction();
-
-        var existingResult = await tenantRepository
-            .GetRtEntitiesByTypeAsync<RtOctoTenantIdentityProvider>(session, RtEntityQueryOptions.Create());
-
-        if (existingResult.Items.Any(p =>
-                string.Equals(p.ParentTenantId, sourceTenantId, StringComparison.OrdinalIgnoreCase)))
-        {
-            await session.CommitTransactionAsync();
-            return;
-        }
-
-        var provider = new RtOctoTenantIdentityProvider
-        {
-            Name = $"ParentTenant_{sourceTenantId}",
-            IsEnabled = true,
-            DisplayName = $"Login via {sourceTenantId}",
-            ParentTenantId = sourceTenantId
-        };
-
-        await tenantRepository.InsertOneRtEntityAsync(session, provider);
-        await session.CommitTransactionAsync();
-
-        // Refresh auth schemes so the new provider is immediately available
-        await dynamicAuthSchemeService.ConfigureAsync(targetTenantId);
-
-        logger.LogInformation(
-            "Created OctoTenantIdentityProvider in tenant '{TargetTenantId}' pointing to '{SourceTenantId}'",
-            targetTenantId, sourceTenantId);
-    }
-
     private static ExternalTenantUserMappingDto MapToDto(
         RtExternalTenantUserMapping mapping, List<string> groupNames) =>
         new()
@@ -1106,9 +543,15 @@ public class AdminProvisioningController(
             RoleIds = mapping.MappedRoleIds?.ToList() ?? [],
             GroupNames = groupNames
         };
-}
 
-/// <summary>
-/// Thrown when the target tenant's default configuration (roles, groups) is not yet initialized.
-/// </summary>
-internal class TenantNotReadyException(string message) : Exception(message);
+    private static ExternalTenantUserMappingDto MapToDto(RtAdminProvisioningResultRecord record) =>
+        new()
+        {
+            Id = OctoObjectId.Parse(record.MappingRtId),
+            SourceTenantId = record.SourceTenantId,
+            SourceUserId = record.SourceUserId,
+            SourceUserName = record.SourceUserName,
+            RoleIds = record.RoleIds?.ToList() ?? [],
+            GroupNames = record.GroupNames?.ToList() ?? []
+        };
+}

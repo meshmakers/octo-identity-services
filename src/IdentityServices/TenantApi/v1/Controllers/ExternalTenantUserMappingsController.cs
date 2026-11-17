@@ -16,6 +16,8 @@ using Persistence.IdentityCkModel.Generated.System.Identity.v3;
 using Meshmakers.Octo.Backend.Authentication;
 using Meshmakers.Octo.Backend.IdentityServices.Authorization.RoleChange;
 using Meshmakers.Octo.Backend.IdentityServices.CrossTenantAudit;
+using Meshmakers.Octo.Backend.IdentityServices.Methods;
+using Meshmakers.Octo.Services.Methods.Facades;
 
 namespace Meshmakers.Octo.Backend.IdentityServices.TenantApi.v1.Controllers;
 
@@ -34,7 +36,7 @@ public class ExternalTenantUserMappingsController(
     IRoleChangeRefusals roleChangeRefusals,
     ICrossTenantGrantAuditRecorder grantAudit,
     IMultiTenancyResolverService multiTenancyResolverService,
-    ISourceTenantGrantAdmission grantAdmission,
+    IIdentityMethodFacade methodFacade,
     ILogger<ExternalTenantUserMappingsController> logger) : ControllerBase
 {
     /// <summary>User name (or client id) of the caller, for logs and audit events — never a token.</summary>
@@ -141,14 +143,15 @@ public class ExternalTenantUserMappingsController(
     }
 
     /// <summary>
-    /// Creates a new external tenant user mapping, optionally as a member of groups of this tenant.
+    /// Creates a new external tenant user mapping, optionally as a member of groups of this tenant. Facade of the CK
+    /// method <c>ExternalTenantUserMapping.CreateMapping-1</c>.
     /// </summary>
     /// <remarks>
-    /// The source tenant must be a registry ancestor of this tenant or permit it (its allow-list, AB#8345), and the user
+    /// The source tenant must be a registry ancestor of this tenant or permit it (its allow-list), and the user
     /// must exist in the source tenant (for a non-ancestor also: no shadow user, may sign in). Every refusal answers the
     /// same <c>403 SourceTenantNotPermitted</c>. The stored user name is the one of the source tenant's user record, not
     /// <c>sourceUserName</c> of the request. A <c>groupIds</c> entry that is no group of this tenant answers
-    /// <c>400 UnknownGroup</c> and nothing is stored. Contract: <c>docs/CONCEPT-SIBLING-TENANT-GRANTS.md</c> §2.2 (AB#8343).
+    /// <c>400 UnknownGroup</c> and nothing is stored. Contract: <c>docs/CONCEPT-SIBLING-TENANT-GRANTS.md</c> §2.2.
     /// </remarks>
     [HttpPost]
     [Authorize(IdentityServiceConstants.IdentityUserAdministrationWritePolicy)]
@@ -165,100 +168,53 @@ public class ExternalTenantUserMappingsController(
             return BadRequest(ModelState);
         }
 
-        // AB#8343: registry ancestor or permitted by S, and the user exists in S — one 403 for every refusal.
-        var source = await grantAdmission.AdmitAsync(multiTenancyResolverService.GetTenantId(), dto.SourceTenantId,
-            dto.SourceUserId, HttpContext?.RequestAborted ?? CancellationToken.None);
-        if (source == null)
-        {
-            return ExternalTenantUserMappingProblems.SourceTenantNotPermitted();
-        }
-
-        // A mapping is unique per (source tenant, source user): a second one would lock the user out (AB#6975).
-        var duplicate = await mappingStore.FindBySourceUserAsync(source.SourceTenantId, source.SourceUserId);
-        if (duplicate != null)
-        {
-            return ExternalTenantUserMappingProblems.AlreadyExists(duplicate, source.SourceTenantId,
-                source.SourceUserId);
-        }
-
-        var (groups, unknownGroupIds) = await ResolveGroupsAsync(dto.GroupIds);
-        if (unknownGroupIds.Count > 0)
-        {
-            return ExternalTenantUserMappingProblems.UnknownGroup(unknownGroupIds);
-        }
-
-        var refusal = await GuardAsync(new RoleGraphChange.MappingRoles(null, source.SourceTenantId,
-                source.SourceUserName, dto.RoleIds ?? [], groups.Select(g => g.RtId.ToString()).ToList()),
-            $"mapping {source.SourceTenantId}/{source.SourceUserName}");
-        if (refusal != null)
-        {
-            return refusal;
-        }
-
-        if (!string.Equals(dto.SourceUserName, source.SourceUserName, StringComparison.Ordinal))
-        {
-            logger.LogInformation(
-                "Mapping create: the requested user name differs from the user record of source tenant {SourceTenantId}; the record's name is stored (AB#8343)",
-                source.SourceTenantId);
-        }
-
-        var mapping = new RtExternalTenantUserMapping
-        {
-            RtId = OctoObjectId.GenerateNewId(),
-            SourceTenantId = source.SourceTenantId,
-            SourceUserId = source.SourceUserId,
-            SourceUserName = source.SourceUserName,
-            MappedRoleIds = dto.RoleIds != null
-                ? new AttributeStringValueList(dto.RoleIds)
-                : null
-        };
-
-        var groupNames = groups.Select(g => g.GroupName).ToList();
-        if (groups.Count > 0)
-        {
-            await mappingStore.InsertWithGroupsAsync(mapping, groups);
-        }
-        else
-        {
-            await mappingStore.StoreAsync(mapping);
-        }
-
-        await AuditGrantAsync(CrossTenantGrantAuditEvents.GrantCreated, mapping, groupNames);
-
-        // NB: use Created(location, value) rather than CreatedAtAction(nameof(GetById), …). The
-        // GetById action takes an OctoObjectId route value, for which no route template matches when
-        // MVC formats the 201 Location header — CreatedAtAction then threw
-        // "No route matches the supplied values" AFTER the entity was already stored, surfacing as a
-        // 500 to octo-cli (the mapping was created regardless). A relative self-link avoids the
-        // link-generation step entirely.
-        return Created($"{Request.Path}/{mapping.RtId}", MapToDto(mapping, groupNames));
-    }
-
-    /// <summary>
-    /// The groups of this tenant named by <paramref name="groupIds"/> (duplicates once), and the ids that are no group
-    /// of this tenant (malformed ids included). <c>null</c> or empty: no groups.
-    /// </summary>
-    private async Task<(List<RtGroup> Groups, List<string> UnknownGroupIds)> ResolveGroupsAsync(
-        IReadOnlyCollection<string>? groupIds)
-    {
-        var groups = new List<RtGroup>();
-        var unknown = new List<string>();
-        foreach (var groupId in (groupIds ?? []).Distinct(StringComparer.Ordinal))
-        {
-            var group = groupId != null && OctoObjectId.TryParse(groupId, out var rtId)
-                ? await groupStore.FindByIdAsync(rtId)
-                : null;
-            if (group == null)
+        var response = await methodFacade.InvokeAsync(IdentityMethodFacade.ExternalTenantUserMappingCkTypeId,
+            SystemIdentityCkIds.ExternalTenantUserMappingCreateMappingMethodId, null,
+            new ExternalTenantUserMappingCreateMappingParameters
             {
-                unknown.Add(groupId ?? string.Empty);
-            }
-            else if (groups.All(g => g.RtId != group.RtId))
-            {
-                groups.Add(group);
-            }
+                SourceTenantId = dto.SourceTenantId,
+                SourceUserId = dto.SourceUserId,
+                SourceUserName = dto.SourceUserName,
+                RoleIds = dto.RoleIds?.ToList(),
+                GroupIds = dto.GroupIds?.ToList()
+            }, User, HttpContext?.RequestAborted ?? CancellationToken.None);
+
+        // A refusal of the role change guard keeps its REST answer (403/409 problem, WARN log, audit record).
+        if (RoleChangeProblems.RefusalOf(response) is { } decision)
+        {
+            return await roleChangeRefusals.RefuseAsync(HttpContext!, RoleChangeCaller.FromPrincipal(User), decision,
+                $"mapping {dto.SourceTenantId}/{dto.SourceUserName}");
         }
 
-        return (groups, unknown);
+        var result = response.ToActionResult(new CkMethodFacadeOptions()
+            .MapSuccess(success =>
+            {
+                var record = ClientMirrorController.Deserialize<RtAdminProvisioningResultRecord>(success.ResultJson);
+                var created = new ExternalTenantUserMappingDto
+                {
+                    Id = OctoObjectId.Parse(record.MappingRtId),
+                    SourceTenantId = record.SourceTenantId,
+                    SourceUserId = record.SourceUserId,
+                    SourceUserName = record.SourceUserName,
+                    RoleIds = record.RoleIds?.ToList() ?? [],
+                    GroupNames = record.GroupNames?.ToList() ?? []
+                };
+
+                // A relative self-link (not CreatedAtAction): the GetById route value is an OctoObjectId, for which no
+                // route template matches when MVC formats the Location header.
+                return Created($"{Request.Path}/{record.MappingRtId}", created);
+            })
+            .MapError(AdminProvisioningMethodErrors.SourceTenantNotPermitted,
+                _ => ExternalTenantUserMappingProblems.SourceTenantNotPermitted())
+            .MapError(AdminProvisioningMethodErrors.MappingAlreadyExists, error =>
+                ExternalTenantUserMappingProblems.AlreadyExists(
+                    error.Parameters.GetValueOrDefault(AdminProvisioningMethodErrors.ExistingMappingIdParameter) ??
+                    string.Empty, dto.SourceTenantId, dto.SourceUserId))
+            .MapError(AdminProvisioningMethodErrors.UnknownGroup, error =>
+                ExternalTenantUserMappingProblems.UnknownGroup(
+                    (error.Parameters.GetValueOrDefault(AdminProvisioningMethodErrors.UnknownGroupIdsParameter) ??
+                     string.Empty).Split(',').ToList())));
+        return result is ActionResult actionResult ? actionResult : new ObjectResult(result);
     }
 
     /// <summary>

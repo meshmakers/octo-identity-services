@@ -1,4 +1,5 @@
 using System.ComponentModel;
+using System.Text.Json;
 using System.ComponentModel.DataAnnotations;
 using Asp.Versioning;
 using IdentityServerPersistence;
@@ -12,15 +13,20 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Meshmakers.Octo.Backend.Authentication;
 using Meshmakers.Octo.Backend.IdentityServices.Authorization;
+using Meshmakers.Octo.Backend.IdentityServices.Methods;
+using Meshmakers.Octo.Services.Contracts.DistributionEventHub.Methods;
+using Meshmakers.Octo.Services.Methods;
+using Meshmakers.Octo.Services.Methods.Facades;
 
 namespace Meshmakers.Octo.Backend.IdentityServices.TenantApi.v1.Controllers;
 
 /// <summary>
 /// Manages <c>ClientCredentials</c> client mirrors — i.e. clients that have been
 /// auto-provisioned from the calling (parent) tenant into one or more child tenants
-/// because of the <c>AutoProvisionInChildTenants</c> flag. AB#6758: the actions that name a child tenant
+/// because of the <c>AutoProvisionInChildTenants</c> flag. The actions that name a child tenant
 /// (<c>provisionInTenant</c>, mirror secret rotation, mirror removal) only reach the caller's own tenant subtree
-/// (<see cref="AdminProvisioningTargetScopeFilter"/>, and again in the service).
+/// (<see cref="AdminProvisioningTargetScopeFilter"/>, again in the method handler and in the service).
+/// Every write is a facade of a <c>Client.*Mirror*</c> method (docs/identity-rest-facades.md); the list stays a REST read.
 /// </summary>
 [Authorize(AuthenticationSchemes = AuthenticationConstants.BearerAuthenticationScheme)]
 [Route(IdentityServiceConstants.ApiPathPrefix + "/clients/{clientId}/mirrors")]
@@ -30,13 +36,21 @@ public class ClientMirrorController : ControllerBase
 {
     private readonly IOctoClientStore _clientStore;
     private readonly IClientMirrorProvisioningService _mirrorService;
+    private readonly IIdentityMethodFacade _methodFacade;
 
+    /// <param name="clientStore">Resolves the OAuth client id of the route to the method target</param>
+    /// <param name="mirrorService">Lists the mirrors of a client (the read)</param>
+    /// <param name="methodFacade">
+    ///     Calls the mirror methods the write endpoints are facades of, in-process, outside any request transaction
+    /// </param>
     public ClientMirrorController(
         IOctoClientStore clientStore,
-        IClientMirrorProvisioningService mirrorService)
+        IClientMirrorProvisioningService mirrorService,
+        IIdentityMethodFacade methodFacade)
     {
         _clientStore = clientStore;
         _mirrorService = mirrorService;
+        _methodFacade = methodFacade;
     }
 
     // GET {tenantId}/v1/clients/{clientId}/mirrors
@@ -65,6 +79,7 @@ public class ClientMirrorController : ControllerBase
     }
 
     // POST {tenantId}/v1/clients/{clientId}/mirrors/provisionInExistingTenants
+    /// <summary>Facade of the CK method <c>Client.ProvisionMirrors-1</c>.</summary>
     [HttpPost("provisionInExistingTenants")]
     [Authorize(IdentityServiceConstants.IdentityTenantAdministrationWritePolicy)]
     [EndpointSummary("Backfill: provisions this client into every existing sub-tenant of the caller. Idempotent.")]
@@ -74,36 +89,29 @@ public class ClientMirrorController : ControllerBase
     public async Task<IActionResult> ProvisionInExistingTenants(
         [Required][Description("Client ID")] string clientId)
     {
+        var clientMissing = NotFound(new NotFoundErrorDto($"Client with id '{clientId}' does not exist."));
         var client = await _clientStore.FindRtClientByIdAsync(clientId);
         if (client == null)
         {
-            return NotFound(new NotFoundErrorDto($"Client with id '{clientId}' does not exist."));
+            return clientMissing;
         }
 
-        if (!client.AutoProvisionInChildTenants)
-        {
-            return BadRequest(new OperationFailedErrorDto(
-                $"Client '{clientId}' is not flagged AutoProvisionInChildTenants. Set the flag first."));
-        }
-
-        var result = await _mirrorService.ProvisionForAllChildTenantsAsync(
-            _clientStore.TenantId, clientId);
-
-        // The service returns null when the client either doesn't exist or isn't flagged —
-        // both already short-circuited above, so this shouldn't happen. Defensive:
-        if (result == null)
-        {
-            return BadRequest(new OperationFailedErrorDto(
-                $"Backfill could not be started for client '{clientId}'."));
-        }
-
-        return Ok(new ClientMirrorBackfillResponseDto(
-            result.ChildTenantsConsidered,
-            result.NewlyProvisioned,
-            result.AlreadyPresent));
+        var response = await _methodFacade.InvokeAsync(IdentityMethodFacade.ClientCkTypeId,
+            SystemIdentityCkIds.ClientProvisionMirrorsMethodId, client.RtId.ToString(),
+            new ClientProvisionMirrorsParameters(), User, HttpContext.RequestAborted);
+        return response.ToActionResult(MirrorOptions(clientId, clientMissing)
+            .MapSuccess(result =>
+            {
+                var record = Deserialize<RtClientMirrorBackfillResultRecord>(result.ResultJson);
+                return Ok(new ClientMirrorBackfillResponseDto(record.ChildTenantsConsidered, record.NewlyProvisioned,
+                    record.AlreadyPresent));
+            })
+            .MapError(ClientMirrorMethodErrors.BackfillNotStarted, _ => BadRequest(new OperationFailedErrorDto(
+                $"Backfill could not be started for client '{clientId}'."))));
     }
 
     // POST {tenantId}/v1/clients/{clientId}/mirrors/provisionInTenant?childTenantId=…
+    /// <summary>Facade of the CK method <c>Client.ProvisionMirrorInTenant-1</c>.</summary>
     [HttpPost("provisionInTenant")]
     [TypeFilter(typeof(AdminProvisioningTargetScopeFilter))]
     [Authorize(IdentityServiceConstants.IdentityTenantAdministrationWritePolicy)]
@@ -115,38 +123,30 @@ public class ClientMirrorController : ControllerBase
         [Required][Description("Client ID")] string clientId,
         [Required][FromQuery][Description("ID of the child tenant to provision into")] string childTenantId)
     {
+        var clientMissing = NotFound(new NotFoundErrorDto($"Client with id '{clientId}' does not exist."));
         var client = await _clientStore.FindRtClientByIdAsync(clientId);
         if (client == null)
         {
-            return NotFound(new NotFoundErrorDto($"Client with id '{clientId}' does not exist."));
+            return clientMissing;
         }
 
-        if (!client.AutoProvisionInChildTenants)
-        {
-            return BadRequest(new OperationFailedErrorDto(
-                $"Client '{clientId}' is not flagged AutoProvisionInChildTenants. Set the flag first."));
-        }
-
-        ClientMirrorProvisioningResult result;
-        try
-        {
-            result = await _mirrorService.ProvisionInTenantAsync(_clientStore.TenantId, clientId, childTenantId);
-        }
-        catch (ClientMirrorScopeException)
-        {
-            return new ForbidResult();
-        }
-
-        return Ok(new ClientMirrorProvisionResponseDto(
-            result.FlaggedClientsConsidered,
-            result.NewlyProvisioned,
-            result.AlreadyPresent));
+        var response = await _methodFacade.InvokeAsync(IdentityMethodFacade.ClientCkTypeId,
+            SystemIdentityCkIds.ClientProvisionMirrorInTenantMethodId, client.RtId.ToString(),
+            new ClientProvisionMirrorInTenantParameters { ChildTenantId = childTenantId }, User,
+            HttpContext.RequestAborted);
+        return response.ToActionResult(MirrorOptions(clientId, clientMissing)
+            .MapSuccess(result =>
+            {
+                var record = Deserialize<RtClientMirrorProvisionResultRecord>(result.ResultJson);
+                return Ok(new ClientMirrorProvisionResponseDto(record.FlaggedClientsConsidered, record.NewlyProvisioned,
+                    record.AlreadyPresent));
+            }));
     }
 
     // POST {tenantId}/v1/clients/{clientId}/mirrors/{childTenantId}/secret
     /// <summary>
-    ///     Issues a fresh, tenant-specific secret for one mirror and returns it <b>once</b>
-    ///     (AB#5061).
+    ///     Issues a fresh, tenant-specific secret for one mirror and returns it <b>once</b>. Facade of the CK method
+    ///     <c>Client.RotateMirrorSecret-1</c>.
     /// </summary>
     /// <remarks>
     ///     <para>
@@ -158,7 +158,7 @@ public class ClientMirrorController : ControllerBase
     ///     <para>
     ///         🔴 The value is <b>not recoverable</b> — only its SHA-256 hash is stored. Capture it
     ///         from this response; calling again issues a new secret and invalidates the previous
-    ///         one. It is never written to a log.
+    ///         one. It is never written to a log, an audit record or a trace.
     ///     </para>
     ///     <para>
     ///         ⚠️ The mirror also keeps accepting the inherited parent secret until the migration
@@ -167,7 +167,7 @@ public class ClientMirrorController : ControllerBase
     /// </remarks>
     [HttpPost("{childTenantId}/secret")]
     [TypeFilter(typeof(AdminProvisioningTargetScopeFilter))]
-    // AB#5861: issuing (rotating) a mirror's secret is an API secret write -> SecretManagement (staged).
+    // Issuing (rotating) a mirror's secret is an API secret write -> SecretManagement (staged).
     [Authorize(IdentityServiceConstants.IdentitySecretAdministrationPolicy)]
     [EndpointSummary("Issues a fresh tenant-specific secret for this mirror and returns it once.")]
     [ProducesResponseType(typeof(MirrorSecretResponseDto), StatusCodes.Status200OK)]
@@ -177,33 +177,33 @@ public class ClientMirrorController : ControllerBase
         [Required][Description("Client ID")] string clientId,
         [Required][Description("Sub-tenant whose mirror gets the new secret")] string childTenantId)
     {
-        MirrorSecretRotationResult? result;
-        try
+        var mirrorMissing = MirrorNotFound(clientId, childTenantId);
+        var client = await _clientStore.FindRtClientByIdAsync(clientId);
+        if (client == null)
         {
-            result = await _mirrorService.RotateMirrorSecretAsync(_clientStore.TenantId, clientId, childTenantId);
-        }
-        catch (ClientMirrorScopeException)
-        {
-            return new ForbidResult();
+            return mirrorMissing;
         }
 
-        if (result == null)
-        {
-            return NotFound(new NotFoundErrorDto(
-                $"No mirror tracked for client '{clientId}' in child tenant '{childTenantId}'."));
-        }
-
-        if (result.NotApplicable)
-        {
-            return BadRequest(new OperationFailedErrorDto(
+        var response = await _methodFacade.InvokeAsync(IdentityMethodFacade.ClientCkTypeId,
+            SystemIdentityCkIds.ClientRotateMirrorSecretMethodId, client.RtId.ToString(),
+            new ClientRotateMirrorSecretParameters { ChildTenantId = childTenantId }, User, HttpContext.RequestAborted);
+        return response.ToActionResult(MirrorOptions(clientId, mirrorMissing)
+            .MapSuccess(result =>
+            {
+                // The clear text is read from the in-process envelope only to build the one-time body; never logged.
+                var secret = result.ResultJson == null ? null : JsonSerializer.Deserialize<string>(result.ResultJson);
+                return string.IsNullOrEmpty(secret)
+                    ? BadRequest(new InternalServerErrorDto("Issuing the mirror secret failed."))
+                    : Ok(new MirrorSecretResponseDto(clientId, childTenantId, secret));
+            })
+            .MapError(ClientMirrorMethodErrors.MirrorNotFound, _ => mirrorMissing)
+            .MapError(ClientMirrorMethodErrors.ClientSecretNotRequired, _ => BadRequest(new OperationFailedErrorDto(
                 $"Client '{clientId}' is a public client — it has no secret, so there is no "
-                + "per-tenant secret to issue for its mirrors."));
-        }
-
-        return Ok(new MirrorSecretResponseDto(clientId, childTenantId, result.Secret!));
+                + "per-tenant secret to issue for its mirrors."))));
     }
 
     // DELETE {tenantId}/v1/clients/{clientId}/mirrors/{childTenantId}
+    /// <summary>Facade of the CK method <c>Client.RemoveMirror-1</c>.</summary>
     [HttpDelete("{childTenantId}")]
     [TypeFilter(typeof(AdminProvisioningTargetScopeFilter))]
     [Authorize(IdentityServiceConstants.IdentityTenantAdministrationWritePolicy)]
@@ -214,28 +214,47 @@ public class ClientMirrorController : ControllerBase
         [Required][Description("Client ID")] string clientId,
         [Required][Description("Sub-tenant ID to remove the mirror from")] string childTenantId)
     {
-        bool removed;
-        try
+        var mirrorMissing = MirrorNotFound(clientId, childTenantId);
+        var client = await _clientStore.FindRtClientByIdAsync(clientId);
+        if (client == null)
         {
-            removed = await _mirrorService.RemoveMirrorAsync(_clientStore.TenantId, clientId, childTenantId);
-        }
-        catch (ClientMirrorScopeException)
-        {
-            return new ForbidResult();
+            return mirrorMissing;
         }
 
-        if (!removed)
-        {
-            return NotFound(new NotFoundErrorDto(
-                $"No mirror tracked for client '{clientId}' in child tenant '{childTenantId}'."));
-        }
-
-        return NoContent();
+        var response = await _methodFacade.InvokeAsync(IdentityMethodFacade.ClientCkTypeId,
+            SystemIdentityCkIds.ClientRemoveMirrorMethodId, client.RtId.ToString(),
+            new ClientRemoveMirrorParameters { ChildTenantId = childTenantId }, User, HttpContext.RequestAborted);
+        return response.ToActionResult(MirrorOptions(clientId, mirrorMissing)
+            .MapSuccess(_ => NoContent())
+            .MapError(ClientMirrorMethodErrors.MirrorNotFound, _ => mirrorMissing));
     }
+
+    private NotFoundObjectResult MirrorNotFound(string clientId, string childTenantId) =>
+        NotFound(new NotFoundErrorDto($"No mirror tracked for client '{clientId}' in child tenant '{childTenantId}'."));
+
+    /// <summary>
+    ///     The mappings the mirror writes share: the client gone (or not readable) <paramref name="targetMissing" />, a child
+    ///     tenant outside the caller's or the parent's subtree the empty <c>403</c> of the scope filter, a client without the
+    ///     flag <c>400</c> with the earlier message. Other refusals keep the default <c>403</c> problem, a handler failure the
+    ///     default <c>500</c> problem (no exception text leaves the service).
+    /// </summary>
+    private CkMethodFacadeOptions MirrorOptions(string clientId, IActionResult targetMissing) =>
+        new CkMethodFacadeOptions()
+            .MapError(CkMethodErrorCodes.MethodTargetNotFound, _ => targetMissing)
+            .MapError(CkMethodErrorCodes.MethodForbidden, error =>
+                error.Parameters.GetValueOrDefault("reason") == CrossTenantMethodSupport.TenantOutOfScopeReason
+                    ? new ForbidResult()
+                    : CkMethodFacadeResults.Problem(error, StatusCodes.Status403Forbidden))
+            .MapError(ClientMirrorMethodErrors.AutoProvisionDisabled, _ => BadRequest(new OperationFailedErrorDto(
+                $"Client '{clientId}' is not flagged AutoProvisionInChildTenants. Set the flag first.")));
+
+    internal static T Deserialize<T>(string? resultJson) where T : class =>
+        (resultJson == null ? null : JsonSerializer.Deserialize<T>(resultJson, CkMethodJson.Options))
+        ?? throw new InvalidOperationException($"The method answered without a {typeof(T).Name}.");
 }
 
 /// <summary>
-///     One-time response of the mirror-secret rotation endpoint (AB#5061).
+///     One-time response of the mirror-secret rotation endpoint.
 /// </summary>
 /// <param name="ClientId">The mirrored client id — unchanged by rotation.</param>
 /// <param name="ChildTenantId">The tenant this secret is valid for, and only this one.</param>
@@ -255,7 +274,8 @@ public sealed record MirrorSecretResponseDto(string ClientId, string ChildTenant
 
 /// <summary>
 /// Sub-resource on the existing clients route to flip <c>AutoProvisionInChildTenants</c>
-/// without requiring callers to PUT the full client object back.
+/// without requiring callers to PUT the full client object back. Facade of the CK method
+/// <c>Client.SetMirrorAutoProvision-1</c>.
 /// </summary>
 [Authorize(AuthenticationSchemes = AuthenticationConstants.BearerAuthenticationScheme)]
 [Route(IdentityServiceConstants.ApiPathPrefix + "/clients/{clientId}/autoProvisionInChildTenants")]
@@ -264,10 +284,14 @@ public sealed record MirrorSecretResponseDto(string ClientId, string ChildTenant
 public class ClientAutoProvisionFlagController : ControllerBase
 {
     private readonly IOctoClientStore _clientStore;
+    private readonly IIdentityMethodFacade _methodFacade;
 
-    public ClientAutoProvisionFlagController(IOctoClientStore clientStore)
+    /// <param name="clientStore">Resolves the OAuth client id of the route to the method target</param>
+    /// <param name="methodFacade">Calls <c>Client.SetMirrorAutoProvision-1</c> in-process, outside any request transaction</param>
+    public ClientAutoProvisionFlagController(IOctoClientStore clientStore, IIdentityMethodFacade methodFacade)
     {
         _clientStore = clientStore;
+        _methodFacade = methodFacade;
     }
 
     // PATCH {tenantId}/v1/clients/{clientId}/autoProvisionInChildTenants
@@ -280,30 +304,24 @@ public class ClientAutoProvisionFlagController : ControllerBase
         [Required][Description("Client ID")] string clientId,
         [Required][FromBody] SetAutoProvisionInChildTenantsDto body)
     {
-        // MutateAsync is a version-checked read-modify-write (AB#8015) and its post-commit hook (#4044)
-        // propagates the new state to mirrors when applicable. Flipping the flag from true → false leaves
-        // existing mirrors in place; the operator removes them explicitly via DELETE mirrors/{childTenantId}
-        // or by deleting the parent client.
-        RtClient? client;
-        try
-        {
-            client = await _clientStore.MutateAsync(clientId, current =>
-            {
-                current.AutoProvisionInChildTenants = body.Enabled;
-                return true;
-            });
-        }
-        catch (RtVersionConflictException)
-        {
-            return Problem(detail: "The client was changed concurrently by other requests. Please retry.",
-                statusCode: StatusCodes.Status409Conflict);
-        }
-
+        // The method is a version-checked read-modify-write and the store's post-commit hook propagates the new state to
+        // mirrors when applicable. Flipping the flag from true → false leaves existing mirrors in place; the operator
+        // removes them explicitly via DELETE mirrors/{childTenantId} or by deleting the parent client.
+        var clientMissing = NotFound(new NotFoundErrorDto($"Client with id '{clientId}' does not exist."));
+        var client = await _clientStore.FindRtClientByIdAsync(clientId);
         if (client == null)
         {
-            return NotFound(new NotFoundErrorDto($"Client with id '{clientId}' does not exist."));
+            return clientMissing;
         }
 
-        return NoContent();
+        var response = await _methodFacade.InvokeAsync(IdentityMethodFacade.ClientCkTypeId,
+            SystemIdentityCkIds.ClientSetMirrorAutoProvisionMethodId, client.RtId.ToString(),
+            new ClientSetMirrorAutoProvisionParameters { Enabled = body.Enabled }, User, HttpContext.RequestAborted);
+        return response.ToActionResult(new CkMethodFacadeOptions()
+            .MapSuccess(_ => NoContent())
+            .MapError(CkMethodErrorCodes.MethodTargetNotFound, _ => clientMissing)
+            .MapError(ClientMirrorMethodErrors.ConcurrentChange, _ => Problem(
+                detail: "The client was changed concurrently by other requests. Please retry.",
+                statusCode: StatusCodes.Status409Conflict)));
     }
 }

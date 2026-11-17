@@ -1,4 +1,18 @@
 "$schema": "https://schemas.meshmakers.cloud/construction-kit-meta.schema.json"
+# 3.5.0 (Feature F5.2 identity wave 2) adds methods only, so the REST client mirror and admin provisioning endpoints become
+# facades:
+#   * Client.ProvisionMirrors-1, Client.ProvisionMirrorInTenant-1, Client.RotateMirrorSecret-1 (result sensitive),
+#     Client.RemoveMirror-1, Client.SetMirrorAutoProvision-1 (roles TenantManagement, UserManagement; the rotation also
+#     SecretManagement), with the result records ClientMirrorBackfillResult and ClientMirrorProvisionResult.
+#   * The static ExternalTenantUserMapping.ProvisionAdmin-1, ProvisionAdminWithGroups-1, ProvisionCurrentUser-1,
+#     RemoveAdminProvisioning-1 (roles TenantManagement, UserManagement) and CreateMapping-1 (role UserManagement), with the
+#     result record AdminProvisioningResult.
+# New methods, records and RuntimeState attributes are additive: Minor (rows M1, T1), nothing to acknowledge. No existing
+# type, attribute, record, method, id or default changes; no data migration; ranges [3.0.0,4.0) stay satisfied.
+# Service-managed: ships with the identity release, no catalog import, no FixAll.
+# NEXT MAJOR: set replacesGenericCreate on ExternalTenantUserMapping.CreateMapping-1, so the generic create cannot bypass the
+# cross-tenant checks (on this existing type the flag is a Major, row M16; it waits for the next major that happens anyway).
+#
 # 3.4.0 (Feature F5.2 identity wave 2) adds methods only, so the REST secret and data-policy endpoints become
 # facades:
 #   * Client.UpdateSecret-1, ApiResource.AddSecret-1, ApiResource.RemoveSecret-1, ApiResource.UpdateSecret-1 (roles
@@ -160,7 +174,7 @@
 # concept AB#5528 in octo-construction-kit-engine). String -> Secret is Minor
 # (CkSemVerClassifier): stored clear-text values stay readable as legacy values
 # until the encrypt sweep has run. Secret requires System >= 2.5 (decision 12).
-modelId: System.Identity-3.4.0
+modelId: System.Identity-3.5.0
 ckLanguage: 2
 dependencies:
   - System-[2.5,3.0)

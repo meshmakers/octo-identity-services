@@ -4,6 +4,7 @@ using IdentityServerPersistence.SystemStores;
 using Meshmakers.Octo.Backend.IdentityServices.TenantApi.v1.Controllers;
 using Meshmakers.Octo.Communication.Contracts.DataTransferObjects;
 using Meshmakers.Octo.Communication.Contracts.DataTransferObjects.ApiErrors;
+using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Meshmakers.Octo.ConstructionKit.Contracts;
 using Meshmakers.Octo.Runtime.Contracts;
@@ -29,15 +30,30 @@ public class ClientMirrorControllerTests
     private readonly IOctoClientStore _clientStore = Substitute.For<IOctoClientStore>();
     private readonly IClientMirrorProvisioningService _mirrorService =
         Substitute.For<IClientMirrorProvisioningService>();
+    private readonly MirrorHandlerBackedFacade _facade;
     private readonly ClientMirrorController _sut;
 
     public ClientMirrorControllerTests()
     {
         _clientStore.TenantId.Returns(ParentTenantId);
-        _sut = new ClientMirrorController(_clientStore, _mirrorService);
+        // The write endpoints are facades of the mirror methods; the facade runs the real handlers.
+        _facade = new MirrorHandlerBackedFacade(_clientStore, _mirrorService);
+        _sut = new ClientMirrorController(_clientStore, _mirrorService, _facade)
+        {
+            ControllerContext = new ControllerContext { HttpContext = new DefaultHttpContext() }
+        };
+        Arrange(new RtClientBuilder().WithClientId(ClientId).Build());
     }
 
-    // ----- POST mirrors/{childTenantId}/secret (AB#5061) --------------------
+    /// <summary>The client of the route, as the store and the method target see it.</summary>
+    private RtClient Arrange(RtClient client)
+    {
+        _facade.Know(client);
+        _clientStore.FindRtClientByIdAsync(ClientId).Returns(client);
+        return client;
+    }
+
+    // ----- POST mirrors/{childTenantId}/secret --------------------
 
     /// <summary>
     ///     The happy path is the distribution mechanism: the caller gets the plaintext back once,
@@ -119,7 +135,7 @@ public class ClientMirrorControllerTests
     public async Task Get_ReturnsMirrorsAsDtos()
     {
         var client = new RtClientBuilder().WithClientId(ClientId).Build();
-        _clientStore.FindRtClientByIdAsync(ClientId).Returns(client);
+        Arrange(client);
 
         var mirror = new RtClientMirrorBuilder()
             .WithParentClientId(ClientId)
@@ -157,7 +173,7 @@ public class ClientMirrorControllerTests
     {
         var client = new RtClientBuilder().WithClientId(ClientId).Build();
         // AutoProvisionInChildTenants defaults to false.
-        _clientStore.FindRtClientByIdAsync(ClientId).Returns(client);
+        Arrange(client);
 
         var result = await _sut.ProvisionInExistingTenants(ClientId);
 
@@ -173,7 +189,7 @@ public class ClientMirrorControllerTests
             .WithClientId(ClientId)
             .WithAutoProvisionInChildTenants()
             .Build();
-        _clientStore.FindRtClientByIdAsync(ClientId).Returns(client);
+        Arrange(client);
         _mirrorService.ProvisionForAllChildTenantsAsync(ParentTenantId, ClientId)
             .Returns(new ClientMirrorBackfillResult(3, 2, 1));
 
@@ -192,7 +208,7 @@ public class ClientMirrorControllerTests
     public async Task ProvisionInTenant_NotFlagged_Returns400()
     {
         var client = new RtClientBuilder().WithClientId(ClientId).Build();
-        _clientStore.FindRtClientByIdAsync(ClientId).Returns(client);
+        Arrange(client);
 
         var result = await _sut.ProvisionInTenant(ClientId, ChildTenantId);
 
@@ -208,7 +224,7 @@ public class ClientMirrorControllerTests
             .WithClientId(ClientId)
             .WithAutoProvisionInChildTenants()
             .Build();
-        _clientStore.FindRtClientByIdAsync(ClientId).Returns(client);
+        Arrange(client);
         _mirrorService.ProvisionInTenantAsync(ParentTenantId, ClientId, ChildTenantId)
             .Returns(new ClientMirrorProvisioningResult(1, 1, 0));
 
@@ -243,13 +259,12 @@ public class ClientMirrorControllerTests
         result.Should().BeOfType<NoContentResult>();
     }
 
-    // ----- AB#6758: the service refuses a child outside the subtree -> 403 ----------------------
+    // ----- the service refuses a child outside the subtree -> 403 ----------------------
 
     [Fact]
     public async Task ProvisionInTenant_ScopeViolation_Returns403()
     {
-        _clientStore.FindRtClientByIdAsync(ClientId).Returns(new RtClientBuilder()
-            .WithClientId(ClientId).WithAutoProvisionInChildTenants().Build());
+        Arrange(new RtClientBuilder().WithClientId(ClientId).WithAutoProvisionInChildTenants().Build());
         _mirrorService.ProvisionInTenantAsync(ParentTenantId, ClientId, ChildTenantId)
             .Returns<ClientMirrorProvisioningResult>(_ => throw new ClientMirrorScopeException(ParentTenantId, ChildTenantId));
 
@@ -283,13 +298,26 @@ public class ClientAutoProvisionFlagControllerTests
 {
     private const string ClientId = "ci-deploy";
     private readonly IOctoClientStore _clientStore = Substitute.For<IOctoClientStore>();
+    private readonly MirrorHandlerBackedFacade _facade;
     private readonly ClientAutoProvisionFlagController _sut;
     private readonly List<string> _writes;
 
     public ClientAutoProvisionFlagControllerTests()
     {
         _writes = ClientStoreMutations.Attach(_clientStore);
-        _sut = new ClientAutoProvisionFlagController(_clientStore);
+        // The endpoint is a facade of Client.SetMirrorAutoProvision; the facade runs the real handler.
+        _facade = new MirrorHandlerBackedFacade(_clientStore, Substitute.For<IClientMirrorProvisioningService>());
+        _sut = new ClientAutoProvisionFlagController(_clientStore, _facade)
+        {
+            ControllerContext = new ControllerContext { HttpContext = new DefaultHttpContext() }
+        };
+    }
+
+    private RtClient Arrange(RtClient client)
+    {
+        _facade.Know(client);
+        _clientStore.FindRtClientByIdAsync(ClientId).Returns(client);
+        return client;
     }
 
     [Fact]
@@ -307,7 +335,7 @@ public class ClientAutoProvisionFlagControllerTests
     public async Task Set_FlippingFlag_PersistsViaVersionCheckedMutation()
     {
         var client = new RtClientBuilder().WithClientId(ClientId).Build();
-        _clientStore.FindRtClientByIdAsync(ClientId).Returns(client);
+        Arrange(client);
 
         var result = await _sut.Set(ClientId, new SetAutoProvisionInChildTenantsDto(true));
 
@@ -323,7 +351,7 @@ public class ClientAutoProvisionFlagControllerTests
             .WithClientId(ClientId)
             .WithAutoProvisionInChildTenants()
             .Build();
-        _clientStore.FindRtClientByIdAsync(ClientId).Returns(client);
+        Arrange(client);
 
         var result = await _sut.Set(ClientId, new SetAutoProvisionInChildTenantsDto(false));
 
@@ -335,6 +363,7 @@ public class ClientAutoProvisionFlagControllerTests
     [Fact]
     public async Task Set_RepeatedConcurrentChanges_Returns409()
     {
+        Arrange(new RtClientBuilder().WithClientId(ClientId).Build());
         _clientStore.MutateAsync(ClientId, Arg.Any<Func<RtClient, bool>>())
             .ThrowsAsync(new RtVersionConflictException(new RtEntityId($"System.Identity/Client@{OctoObjectId.GenerateNewId()}"), 1));
 

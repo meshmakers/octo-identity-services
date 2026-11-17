@@ -260,3 +260,62 @@ secret write endpoints of `ApiSecretsController` are their facades (`docs/identi
   (every REST write runs its method in-process with one event and nothing on the broker, both switch values; REST and method side by side for add, update,
   expired secret, unknown value, duplicate records and unknown owner, client and API resource; canary of the clear text; `SecretManagementRoleEnforcement=Enforce`
   on both paths; another tenant's token, a caller without the role; an owner the caller cannot read or write).
+
+## Client mirror methods (System.Identity 3.5.0)
+
+Instance methods on the **parent** client: the method runs in the parent tenant, the handler writes into the child tenant through
+`IClientMirrorProvisioningService` (`Methods/ClientMirrorHandlers.cs`, shared flow `ClientMirrorMethodHandlerBase<TParameters, TOutcome>`). Roles
+`TenantManagement` or `UserManagement` (REST `IdentityTenantAdministrationWritePolicy`), the rotation also `SecretManagement` (REST
+`IdentitySecretAdministrationPolicy`, staged by `SecretManagementRoleEnforcement` exactly like the secret methods); `dataAccess: Write`.
+
+| Method | Parameters | Result | Errors | Idempotent / timeout |
+|---|---|---|---|---|
+| `ProvisionMirrors` | - | `ClientMirrorBackfillResult` (child tenants considered, newly provisioned, already present) | `AUTO_PROVISION_DISABLED`, `BACKFILL_NOT_STARTED` | yes / 300 s |
+| `ProvisionMirrorInTenant` | `childTenantId` | `ClientMirrorProvisionResult` (flagged clients considered, newly provisioned, already present) | `AUTO_PROVISION_DISABLED` | yes / 120 s |
+| `RotateMirrorSecret` | `childTenantId` | `String`, **sensitive** (the new secret, once) | `MIRROR_NOT_FOUND`, `CLIENT_SECRET_NOT_REQUIRED` | no / 60 s |
+| `RemoveMirror` | `childTenantId` | - | `MIRROR_NOT_FOUND` | no / 60 s |
+| `SetMirrorAutoProvision` | `enabled` | - | `CONCURRENT_CHANGE` | yes / 30 s |
+
+- **Order of checks, before any write in either tenant:** caller rule -> target client exists (`METHOD_TARGET_NOT_FOUND`) -> the caller may read
+  **and** write the parent client (`IRtDataPermissionEvaluator`: not visible = `METHOD_TARGET_NOT_FOUND`, read only = `METHOD_FORBIDDEN` /
+  `data-permission`) -> a named child tenant lies in the subtree of the caller's token tenant (`CrossTenantMethodSupport.CheckTargetTenantAsync`, the
+  rule `AdminProvisioningTargetScope` that the REST filter uses, staged by `RoleEnforcement`) -> the mirror service checks it again against the parent
+  tenant's subtree. A child outside either subtree is `METHOD_FORBIDDEN` with `reason = tenant-out-of-scope`; nothing is written in the child tenant.
+- **Caller tenant.** `CkMethodPrincipal.TenantId` (validated by the bus host) or `TokenTenantId` (the `tenant_id` claim of the in-process caller); none
+  = out of scope (fail closed).
+- **Rotation.** `CarriesSecret = true`, `ServesRestFacade = true`: bus handler only with `EnablePasswordMethods`, else local only for its REST facade. The
+  secret is minted and stored as the mirror's own secret (description marker `octo:mirror-own-secret`, so the mirror sync and the reconciliation keep it);
+  the clear text is only the result. Audit details never carry it or its hash.
+- **Audit:** one `Identity.Method` event per call: `clientId`, `childTenantId`, `enabled` (flag), `newlyProvisioned` (backfill), `reason` on a refusal.
+- REST facades and parity table: `docs/identity-rest-facades.md`. Tests: `Api/TenantApi/ClientMirrorRestMethodFacadeTests`,
+  `Controllers/ClientMirrorControllerTests`, `Methods/IdentityMethodHostTests`, `Persistence/IdentityMethodDeclarationsIntegrationTests`.
+
+## Admin provisioning and the mapping create (System.Identity 3.5.0)
+
+Static methods on `System.Identity/ExternalTenantUserMapping` (`Methods/AdminProvisioningHandlers.cs`); the provisioning writes are
+`AdminProvisioning/AdminProvisioningService.cs` (moved out of `AdminProvisioningController`, created per call from the invocation's services). They
+are the Feature's `Tenant.ProvisionAdmin`.
+
+| Method | Parameters | Result | Errors | Roles / timeout |
+|---|---|---|---|---|
+| `ProvisionAdmin` | `targetTenantId`, `sourceTenantId`, `sourceUserId`, `sourceUserName`, optional `roleIds` | `AdminProvisioningResult` | `TENANT_NOT_FOUND`, `SOURCE_TENANT_NOT_ANCESTOR`, `MAPPING_ALREADY_EXISTS` | `TenantManagement`, `UserManagement` / 60 s |
+| `ProvisionAdminWithGroups` | `targetTenantId`, `sourceTenantId`, `sourceUserId`, `sourceUserName`, optional `groupIds` | `AdminProvisioningResult` | as `ProvisionAdmin` | `TenantManagement`, `UserManagement` / 60 s |
+| `ProvisionCurrentUser` | `targetTenantId` | `AdminProvisioningResult` with `outcome` = `created` / `repaired` / `already-provisioned` | `TENANT_NOT_FOUND`, `CALLER_NOT_A_USER`, `HOME_IDENTITY_UNRESOLVED`, `TENANT_INITIALIZING` | `TenantManagement`, `UserManagement` / 90 s, idempotent |
+| `RemoveAdminProvisioning` | `targetTenantId`, `mappingRtId` | - | `TENANT_NOT_FOUND`, `MAPPING_NOT_FOUND` | `TenantManagement`, `UserManagement` / 60 s |
+| `CreateMapping` | `sourceTenantId`, `sourceUserId`, `sourceUserName`, optional `roleIds`, `groupIds` | `AdminProvisioningResult` | `SOURCE_TENANT_NOT_PERMITTED`, `MAPPING_ALREADY_EXISTS`, `UNKNOWN_GROUP` | `UserManagement` / 60 s |
+
+- **Target tenant first.** The `ProvisionAdmin*`, `ProvisionCurrentUser` and `RemoveAdminProvisioning` methods run in the caller's tenant and check
+  `targetTenantId` against the caller's token tenant subtree before any lookup (`METHOD_FORBIDDEN`, `reason = tenant-out-of-scope`); a caller of the
+  system tenant reaches every tenant. Then the rules of the REST endpoints: target exists, source tenant is a registry ancestor of the target
+  (`ICrossTenantAncestryGuard`), one mapping per source user (`existingMappingId` names the existing one), the source tenant becomes the target's login
+  parent (`OctoTenantIdentityProvider`), a mapping that carries `TenantManagement` joins `TenantOwners`.
+- **`ProvisionCurrentUser`** provisions the validated caller (subject + token tenant), never a parameter; a cross-tenant shadow user as its home identity.
+  The user name is the one stored in the caller's tenant (the method caller carries no profile claims). A target that is still initializing is retried
+  with back-off (10 attempts), then `TENANT_INITIALIZING`.
+- **`CreateMapping`** writes into the tenant of the call with the cross-tenant checks of the REST create (`ISourceTenantGrantAdmission`, duplicates,
+  groups, `IRoleChangeGuard` with `RoleGraphChange.MappingRoles`); a guard refusal is `METHOD_FORBIDDEN` + `reason` (+ `roleNames`). It does not set
+  `replacesGenericCreate` (a Major on the existing type, row M16; next major).
+- **Audit:** one `Identity.Method` event per call (`targetTenantId`, `sourceTenantId`, `mappingRtId`, `provisioningOutcome`, `reason`), plus the cross-tenant grant
+  events (`Identity.CrossTenantGrantCreated/Changed/Removed`) as before, with the caller's stored user name (a service caller: its client id).
+- REST facades and parity table: `docs/identity-rest-facades.md`. Tests: `Api/TenantApi/AdminProvisioningRestMethodFacadeTests`, the controller-level
+  persistence suites through `ProvisioningMethodTestFacade`, `Controllers/AdminProvisioningDeleteAuditTests`.

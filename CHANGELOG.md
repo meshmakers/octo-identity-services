@@ -7,6 +7,33 @@ Notable changes of the OctoMesh identity services. The CK model `System.Identity
 
 ### Changed
 
+- **The REST client mirror endpoints run the client mirror methods, the REST admin provisioning writes and the mapping create run
+  static `ExternalTenantUserMapping` methods (System.Identity 3.5.0).** `POST clients/{clientId}/mirrors/provisionInExistingTenants`,
+  `…/provisionInTenant`, `…/{childTenantId}/secret`, `DELETE …/mirrors/{childTenantId}` and `PATCH clients/{clientId}/autoProvisionInChildTenants` are
+  facades of the new `Client.ProvisionMirrors`, `ProvisionMirrorInTenant`, `RotateMirrorSecret`, `RemoveMirror` and `SetMirrorAutoProvision`;
+  `POST adminProvisioning/{target}`, `…/withGroups`, `…/provisionCurrentUser`, `DELETE adminProvisioning/{target}/{mappingRtId}` and
+  `POST externalTenantUserMappings` are facades of the new static `ExternalTenantUserMapping.ProvisionAdmin`, `ProvisionAdminWithGroups`,
+  `ProvisionCurrentUser`, `RemoveAdminProvisioning` and `CreateMapping`. One implementation, one `Identity.Method` audit event per call, in-process
+  outside the request. The target-tenant rule of the REST filter (the child or target tenant must lie in the caller's tenant subtree) now also holds
+  for a GraphQL caller; the mirror service keeps its own parent-subtree check. The mirror secret rotation is registered local only while
+  `Methods:Identity:EnablePasswordMethods` is off; its secret is never logged, audited or traced. Routes, bodies and status codes stay. Intended REST
+  changes, each with its reason (parity tables in `docs/identity-rest-facades.md`):
+  - with an **enforcing data policy** on clients (open by default), a parent client the caller cannot read answers like an unknown one (`404`), one
+    they may read but not write `403` (`METHOD_FORBIDDEN`, `data-permission`), and nothing changes in either tenant (REST ignored the data policy:
+    CWE-863);
+  - rotating or deleting the mirror of a parent client that no longer exists answers `404` (the delete removed the orphaned tracking row before):
+    the method target is the parent client; the reconciliation job removes such rows;
+  - the backfill is bound by the method timeout of 300 s (`504` after it; provisioning done so far stays, a re-run finishes it);
+  - `provisionCurrentUser` writes the user name stored in the caller's tenant instead of the token's name claim (the method caller carries no
+    profile claims; the stored name is the one the token exchange matches), and the cross-tenant grant audit events name the caller by that stored
+    name;
+  - a `withGroups` group id that is no object id is skipped like an unknown group id (an unhandled `500` before);
+  - an unexpected failure answers the `500` problem `METHOD_HANDLER_FAILED` without the exception text; under `RoleEnforcement=Warn` a caller
+    without the role is refused by the method, as for the other facades.
+  `CreateMapping` does not yet replace the generic GraphQL create of `ExternalTenantUserMapping`: that flag is a Major on the existing type and is
+  planned for the next System.Identity major. **Client impact:** none for callers with the documented roles and tenants under the default
+  configuration.
+
 - **The REST secret write endpoints run the secret methods, the REST data-permission grant, revoke and enforcement-mode
   endpoints run the `DataPermission` / `DataPolicy` methods (System.Identity 3.4.0).** `POST`, `PUT`,
   `POST …/delete` and the deprecated `DELETE …/{secretValue}` of `apiSecrets/client/{clientId}` and

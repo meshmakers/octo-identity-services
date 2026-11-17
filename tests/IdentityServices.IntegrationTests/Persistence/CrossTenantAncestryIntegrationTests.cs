@@ -317,10 +317,8 @@ public class CrossTenantAncestryIntegrationTests : IClassFixture<IdentityService
         ILogger<CrossTenantAncestryGuard>? log = null)
     {
         var systemContext = _fixture.GetSystemContext();
-        return new AdminProvisioningController(systemContext, new NoOpAuthSchemeService(),
-            new CrossTenantShadowUserChainResolver(systemContext), TestAncestryGuards.Create(systemContext, mode, log),
-            Substitute.For<Meshmakers.Octo.Backend.IdentityServices.CrossTenantAudit.ICrossTenantGrantAuditRecorder>(),
-            NullLogger<AdminProvisioningController>.Instance);
+        return ProvisioningMethodTestFacade.Controller(systemContext,
+            TestAncestryGuards.Create(systemContext, mode, log));
     }
 
     private static async Task<List<ProvisioningSourceUserDto>> SourceUsersAsync(AdminProvisioningController controller,
