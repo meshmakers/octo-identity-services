@@ -90,6 +90,7 @@ tokens) becomes invalid. Therefore:
 | Release 1 deployed, flag still `false`, cluster had keys before | previous image | none: all keys are still plain |
 | Flag `true` was set | set flag `false` | **does not decrypt** — keys stay encrypted; release 1+ keeps reading them. Only stops encrypting new keys. |
 | Flag `true` was set (or fresh install on release 1) and the image is rolled back to one **without** the decryptor | previous image | **all users are logged out**, protected payloads (cookies, cross-tenant tokens in flight) become invalid; the old image creates a new plain key and continues. No outage, no data loss. |
+| A platform key id was removed while service keys (shared key store, `<ApplicationName>/key-…`) are still wrapped with it, and identity is rolled back to an image **without** the service-key filter | previous image | **identity refuses to start**: the older startup check also checks the service keys and finds the removed key id. Add the removed key id back, or delete those service keys (their users sign in again), then start the older image. |
 
 Guard: never roll identity back past release 1 once a cluster has encrypted keys — release notes of release 1
 carry this warning, and step 2 is only done when release 1 is the oldest image a cluster may roll back to.

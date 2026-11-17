@@ -179,10 +179,12 @@ key rings with the shared helper `AddOctoDataProtectionKeyRing(applicationName)`
 **only names without `/`** (`IsIdentityKey`, rule `DataProtectionKeyNames.IsUnprefixed` of the helper); identity's own names are
 `key-<guid>` and stay unchanged, so no key is migrated and nobody is logged out.
 - **Rollout order: this identity image before the first service that uses the helper.** An older identity (without the filter) was
-  checked against the real store: it tolerates encrypted service keys (startup check neither refuses nor rewrites them; the key ring
+  checked against the real store: while the platform key ids are unchanged it tolerates encrypted service keys (startup check neither refuses nor rewrites them; the key ring
   cannot resolve their decryptor and ignores them, identity payloads keep working; when a service key is the newest one, identity creates
   one extra key of its own). It would rewrite an *unencrypted* service key with its own decryptor; the helper never writes one (no key ring
-  = the service does not use the shared store).
+  = the service does not use the shared store). After a platform key rotation an older identity does see the service keys: it
+  re-wraps them with the new key id (harmless) and, once the old key id is removed, **refuses to start** while a service key is still
+  wrapped with it — so never roll identity back to an image without the filter in that state (rollout doc, Rollback).
 - Tests: `DataProtectionKeyEncryptionIntegrationTests.ForeignServiceKeys_InTheSharedStore_AreIgnoredByIdentity` (encrypted and plain
   service keys are never loaded or rewritten) and `…SharedServiceKeyRing_OnTheSystemDatabase_IsSharedAndKeptApartFromIdentity` (the
   helper on the real system database: replicas share keys, keys survive a restart, another application name cannot unprotect, identity
