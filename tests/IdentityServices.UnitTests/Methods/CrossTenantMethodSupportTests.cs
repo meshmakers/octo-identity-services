@@ -83,15 +83,22 @@ public class CrossTenantMethodSupportTests
     ///     (the staging of the REST filter), a call over the bus is refused; under <c>Enforce</c> both are refused.
     /// </summary>
     [Theory]
-    [InlineData(IdentityApiRoleEnforcementMode.Warn, true, true)]
-    [InlineData(IdentityApiRoleEnforcementMode.Warn, false, false)]
-    [InlineData(IdentityApiRoleEnforcementMode.Enforce, true, false)]
-    [InlineData(IdentityApiRoleEnforcementMode.Enforce, false, false)]
+    [InlineData(IdentityApiRoleEnforcementMode.Warn, true, false, true)]
+    [InlineData(IdentityApiRoleEnforcementMode.Warn, false, false, false)]
+    [InlineData(IdentityApiRoleEnforcementMode.Warn, false, true, false)]
+    [InlineData(IdentityApiRoleEnforcementMode.Enforce, true, false, false)]
+    [InlineData(IdentityApiRoleEnforcementMode.Enforce, false, false, false)]
     public async Task TargetOutsideTheSubtree_IsStagedOnlyForRestCalls(IdentityApiRoleEnforcementMode mode, bool restCall,
-        bool allowed)
+        bool busWithoutTenant, bool allowed)
     {
+        // A bus principal carries the tenant the host validated; one without it is still a bus call, never a REST call.
         var caller = new CkMethodPrincipal(OctoObjectId.GenerateNewId().ToString(), [], [], null,
-            restCall ? null : TokenTenant) { TokenTenantId = TokenTenant, IsFromAccessToken = true };
+            restCall || busWithoutTenant ? null : TokenTenant) { TokenTenantId = TokenTenant, IsFromAccessToken = true };
+        if (restCall)
+        {
+            RestFacadePrincipals.Mark(caller);
+        }
+
         var discovery = Substitute.For<ITenantDiscoveryService>();
         discovery.GetScopeDescendantsAsync(TokenTenant)
             .Returns(Task.FromResult<IReadOnlySet<string>?>(new HashSet<string> { "child" }));

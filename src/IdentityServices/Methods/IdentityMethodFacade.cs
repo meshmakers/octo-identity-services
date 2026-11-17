@@ -106,9 +106,29 @@ internal sealed class IdentityMethodFacade(
             DeadlineUtc = timeouts.GetDeadlineUtc(tenantId, ckTypeId, methodId)
         };
 
+        // The in-process transport hands exactly this principal object to the handler; a bus message can never produce it.
+        RestFacadePrincipals.Mark(caller);
         using (CkMethodPrincipalScope.Begin(caller))
         {
             return await dispatcher.InvokeAsync(request, cancellationToken).ConfigureAwait(false);
         }
     }
+}
+
+/// <summary>
+///     The method callers a REST facade of this process built (<see cref="IdentityMethodFacade" />), told apart by object
+///     identity: the in-process transport passes the facade's principal to the handler unchanged, while a call over the bus
+///     gets a principal the host builds from the validated token. So whether a call came through a REST facade is decided by
+///     the transport, never by anything a bus message carries or omits. Weak references: an entry lives as long as the call.
+/// </summary>
+internal static class RestFacadePrincipals
+{
+    private static readonly System.Runtime.CompilerServices.ConditionalWeakTable<CkMethodPrincipal, object> Marked = new();
+
+    /// <summary>Marks <paramref name="principal" /> as built by a REST facade of this process.</summary>
+    public static void Mark(CkMethodPrincipal principal) => Marked.AddOrUpdate(principal, Marked);
+
+    /// <summary><c>true</c> when <paramref name="principal" /> is the very object a REST facade of this process built.</summary>
+    public static bool IsMarked(CkMethodPrincipal? principal) =>
+        principal != null && Marked.TryGetValue(principal, out _);
 }

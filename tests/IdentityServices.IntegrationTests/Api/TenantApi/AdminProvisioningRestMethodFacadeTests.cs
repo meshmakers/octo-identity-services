@@ -308,6 +308,49 @@ public class AdminProvisioningRestMethodFacadeTests : IntegrationTestBase, IDisp
     }
 
     [Fact]
+    public async Task UnderWarn_ATargetOutsideTheSubtree_IsAllowedForRest_ButRefusedForABusCallWithOrWithoutTenant()
+    {
+        var host = Host(roleEnforcementWarn: true);
+        var callerTenant = await CreateChildTenantAsync();
+        var sibling = await CreateChildTenantAsync();
+        var busUser = await CreateTestUserAsync(NewName("apw"));
+        var restUser = await CreateTestUserAsync(NewName("apv"));
+
+        // Not through a REST facade (here: the dispatcher with a principal no facade built, as a bus caller gets one) - with
+        // and without the tenant a bus host validates. Not token-mapped, so the in-process caller tenant filter (another
+        // rule) does not answer first and the target-tenant rule itself is under test.
+        foreach (var bus in new[]
+                 {
+                     Admin() with { TokenTenantId = callerTenant, TenantId = callerTenant },
+                     Admin() with { TokenTenantId = callerTenant, TenantId = null }
+                 })
+        {
+            var refusal = await DispatchAsync(host, bus, SystemIdentityCkIds.ExternalTenantUserMappingProvisionAdminMethodId,
+                new ExternalTenantUserMappingProvisionAdminParameters
+                {
+                    TargetTenantId = sibling, SourceTenantId = NormalizedSystemTenantId,
+                    SourceUserId = busUser.RtId.ToString(), SourceUserName = busUser.UserName!
+                });
+            refusal.Error!.Code.Should().Be(CkMethodErrorCodes.MethodForbidden);
+            refusal.Error.Parameters.Should().Contain("reason", CrossTenantMethodSupport.TenantOutOfScopeReason);
+        }
+
+        (await MappingAsync(sibling, busUser.RtId.ToString())).Should().BeNull();
+
+        // Over REST the staging of the filter applies, as before: logged and allowed.
+        // The caller signs in to its own tenant and addresses the sibling from there (route and token tenant = callerTenant).
+        using var http = FacadeCaller.User(TenantManagement).Client(host);
+        var rest = await http.PostAsJsonAsync(TenantApiUrl($"adminProvisioning/{sibling}", callerTenant), new
+        {
+            sourceTenantId = NormalizedSystemTenantId, sourceUserId = restUser.RtId.ToString(),
+            sourceUserName = restUser.UserName
+        }, TestContext.Current.CancellationToken);
+        rest.StatusCode.Should().Be(HttpStatusCode.Created,
+            await rest.Content.ReadAsStringAsync(TestContext.Current.CancellationToken));
+        (await MappingAsync(sibling, restUser.RtId.ToString())).Should().NotBeNull();
+    }
+
+    [Fact]
     public async Task ATokenOfAnotherTenant_IsRefused_AndNothingChanges()
     {
         var host = Host(enforceTenantGate: true);
@@ -357,6 +400,11 @@ public class AdminProvisioningRestMethodFacadeTests : IntegrationTestBase, IDisp
             (await DispatchAsync(host, outsider, methodId, parameters)).Error!.Code.Should()
                 .Be(CkMethodErrorCodes.MethodForbidden, methodId);
         }
+
+        // REST: the policy refuses the same caller before the facade runs; nothing is provisioned for it either.
+        using var http = (FacadeCaller.User("CommunicationManagement") with { Subject = user.RtId.ToString() }).Client(host);
+        (await http.PostAsync(ProvisioningUrl(target, "provisionCurrentUser"), null, TestContext.Current.CancellationToken))
+            .StatusCode.Should().Be(HttpStatusCode.Forbidden);
 
         // CreateMapping needs UserManagement (the REST policy of the mapping create): TenantManagement alone is refused
         var tenantManager = new CkMethodPrincipal(user.RtId.ToString(), [TenantManagement], ["octo_api"])
@@ -440,10 +488,15 @@ public class AdminProvisioningRestMethodFacadeTests : IntegrationTestBase, IDisp
     private string ProvisioningUrl(string target, string path) =>
         TenantApiUrl(path.Length == 0 ? $"adminProvisioning/{target}" : $"adminProvisioning/{target}/{path}");
 
-    private WebApplicationFactory<Program> Host(bool enforceTenantGate = false)
+    private WebApplicationFactory<Program> Host(bool enforceTenantGate = false, bool roleEnforcementWarn = false)
     {
         var host = Factory.WithWebHostBuilder(b =>
         {
+            if (roleEnforcementWarn)
+            {
+                b.UseSetting("IdentityApiAuthorization:RoleEnforcement", "Warn");
+            }
+
             if (enforceTenantGate)
             {
                 b.UseSetting("TenantAuthorization:UserTokenEnforcement", "Enforce");

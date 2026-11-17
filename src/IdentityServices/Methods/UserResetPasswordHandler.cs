@@ -60,12 +60,14 @@ internal sealed class UserResetPasswordHandler(
         CancellationToken cancellationToken)
     {
         var lockoutLifted = false;
+        string? refusalReason = null;
         var outcomeCode = "METHOD_HANDLER_FAILED";
         try
         {
             var (outcome, lifted) = await ResetAsync(context, cancellationToken).ConfigureAwait(false);
             lockoutLifted = lifted;
             outcomeCode = outcome.Failure?.Code ?? IdentityMethodAuditWriter.SuccessOutcome;
+            refusalReason = outcome.Failure?.Parameters.GetValueOrDefault("reason");
             return outcome;
         }
         finally
@@ -74,7 +76,12 @@ internal sealed class UserResetPasswordHandler(
             var audit = services.GetRequiredService<IIdentityMethodAuditWriter>();
             await audit.RecordAsync(context.TenantId, context.MethodId, context.InvocationId, context.TargetRtId,
                 context.CallerPrincipal?.Subject, outcomeCode,
-                new Dictionary<string, string> { [LockoutLiftedDetail] = lockoutLifted ? "true" : "false" })
+                refusalReason == null
+                    ? new Dictionary<string, string> { [LockoutLiftedDetail] = lockoutLifted ? "true" : "false" }
+                    : new Dictionary<string, string>
+                    {
+                        [LockoutLiftedDetail] = lockoutLifted ? "true" : "false", ["reason"] = refusalReason
+                    })
                 .ConfigureAwait(false);
         }
     }

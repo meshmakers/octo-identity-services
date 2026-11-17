@@ -71,11 +71,11 @@ internal static class CrossTenantMethodSupport
     }
 
     /// <summary>
-    ///     <c>true</c> for a caller a REST facade of this process mapped from the HTTP user (in-process path): mapped from an
-    ///     access token, but without the tenant the bus host sets on every principal it validates (<c>TenantId</c>).
+    ///     <c>true</c> for a call a REST facade of this process made through the in-process transport: the principal is the
+    ///     very object the facade built (<see cref="RestFacadePrincipals" />). Decided by the transport, not by the
+    ///     principal's content: a bus call - with or without a tenant - is never a REST call.
     /// </summary>
-    public static bool IsRestFacadeCall(CkMethodPrincipal principal) =>
-        principal.IsFromAccessToken && principal.TenantId == null;
+    public static bool IsRestFacadeCall(CkMethodPrincipal principal) => RestFacadePrincipals.IsMarked(principal);
 
     /// <summary>The <c>METHOD_FORBIDDEN</c> answer for a target tenant outside the caller's (or the parent's) subtree.</summary>
     public static CkMethodFailure OutOfScope(IdentityMethodCall call)

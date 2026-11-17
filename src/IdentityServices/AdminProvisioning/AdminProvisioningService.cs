@@ -152,7 +152,7 @@ internal sealed class AdminProvisioningService(
             MappedRoleIds = roleIds != null ? new AttributeStringValueList(roleIds.ToList()) : null
         };
 
-        var session = await tenantRepository.GetSessionAsync();
+        using var session = await tenantRepository.GetSessionAsync();
         session.StartTransaction();
         await tenantRepository.InsertOneRtEntityAsync(session, mapping);
 
@@ -212,7 +212,7 @@ internal sealed class AdminProvisioningService(
             MappedRoleIds = null
         };
 
-        var session = await tenantRepository.GetSessionAsync();
+        using var session = await tenantRepository.GetSessionAsync();
         session.StartTransaction();
         await tenantRepository.InsertOneRtEntityAsync(session, mapping);
 
@@ -345,7 +345,7 @@ internal sealed class AdminProvisioningService(
             return AdminProvisioningOutcome.Of(AdminProvisioningStatus.TenantNotFound);
         }
 
-        var session = await tenantRepository.GetSessionAsync();
+        using var session = await tenantRepository.GetSessionAsync();
         session.StartTransaction();
 
         var existing = await tenantRepository
@@ -457,7 +457,7 @@ internal sealed class AdminProvisioningService(
     private async Task<AdminProvisioningOutcome> ProvisionCurrentUserInternal(
         ITenantRepository tenantRepository, string userId, string userName, string tenantId, string callerName)
     {
-        var session = await tenantRepository.GetSessionAsync();
+        using var session = await tenantRepository.GetSessionAsync();
         session.StartTransaction();
 
         // Check if mapping already exists
@@ -730,7 +730,7 @@ internal sealed class AdminProvisioningService(
     private async Task EnsureOctoTenantIdentityProviderAsync(
         ITenantRepository tenantRepository, string targetTenantId, string sourceTenantId)
     {
-        var session = await tenantRepository.GetSessionAsync();
+        using var session = await tenantRepository.GetSessionAsync();
         session.StartTransaction();
 
         var existingResult = await tenantRepository

@@ -161,6 +161,9 @@ public class TargetDataPermissionRestParityTests : IntegrationTestBase, IDisposa
             {
                 var group = await NewGroupAsync();
                 var child = await NewGroupAsync();
+                // Both are groups: the policy targets the parent only, so the child stays readable and a missing parent
+                // check would let the call through instead of failing on the child.
+                _targetIds.Add(group.RtId);
                 return (await http.PutAsync(TenantApiUrl($"groups/{group.RtId}/members/groups/{child.RtId}"), null, ct),
                     SystemIdentityCkIds.GroupAddChildGroupMethodId, group.RtId.ToString(),
                     new GroupAddChildGroupParameters { ChildGroupId = child.RtId.ToString() },
@@ -265,7 +268,7 @@ public class TargetDataPermissionRestParityTests : IntegrationTestBase, IDisposa
                 services.AddSingleton(_audit.Events);
                 services.RemoveAll<IDistributionEventHubService>();
                 services.AddSingleton(Substitute.For<IDistributionEventHubService>());
-                services.AddSingleton(PolicyOnTarget(targetKind, onTarget));
+                services.AddSingleton(PolicyOnTarget(targetKind, onTarget, _targetIds));
             });
         });
         _hosts.Add(host);
@@ -276,7 +279,11 @@ public class TargetDataPermissionRestParityTests : IntegrationTestBase, IDisposa
     ///     An enforcing policy on the target type only: <see cref="RtDataPermissionDecision.NotVisible" /> for every action, or
     ///     <see cref="RtDataPermissionDecision.NotPermitted" /> = may read, may not write. Every other type is open.
     /// </summary>
-    private static IRtDataPermissionEvaluator PolicyOnTarget(string targetKind, RtDataPermissionDecision onTarget)
+    /// <summary>When not empty, the policy applies to exactly these targets instead of every entity of the target type.</summary>
+    private readonly HashSet<OctoObjectId> _targetIds = [];
+
+    private static IRtDataPermissionEvaluator PolicyOnTarget(string targetKind, RtDataPermissionDecision onTarget,
+        HashSet<OctoObjectId> targetIds)
     {
         var targetType = targetKind switch
         {
@@ -293,6 +300,7 @@ public class TargetDataPermissionRestParityTests : IntegrationTestBase, IDisposa
                 var entity = call.ArgAt<RtEntityId>(2);
                 var action = call.ArgAt<RtDataAction>(3);
                 var decision = targetType != null && entity.CkTypeId == targetType &&
+                               (targetIds.Count == 0 || targetIds.Contains(entity.RtId)) &&
                                (onTarget == RtDataPermissionDecision.NotVisible || action != RtDataAction.Read)
                     ? onTarget
                     : RtDataPermissionDecision.Allowed;

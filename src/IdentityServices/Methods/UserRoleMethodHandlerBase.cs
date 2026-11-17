@@ -197,7 +197,8 @@ internal sealed class UserRoleChange
     {
         if (!Loaded)
         {
-            return null;
+            // A refusal before the roles were read (the target's data permission) still names its reason; no roles.
+            return RefusalReason == null ? null : new Dictionary<string, string> { ["reason"] = RefusalReason };
         }
 
         var details = new Dictionary<string, string>
