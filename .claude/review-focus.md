@@ -12,8 +12,8 @@ under `docs/`, or the pull request whose review found the problem.
 
 - Every new or changed administration endpoint carries a policy of `IdentityApiAuthorizationPolicies`, and secret writes
   require `SecretManagement` (`AGENTS.md`, "Rules"; `docs/architecture.md`).
-- Role, group and role-definition changes go through the role change guard, and the "last administrator stays" check
-  happens in the same atomic step as the change (`docs/role-guards.md`; PR #310, `GroupChildGroupHandlers.cs`).
+- Role, group and role-definition changes go through the role change guard (no escalation, the last administrator
+  stays) (`AGENTS.md`, "Rules"; `docs/role-guards.md`).
 - REST write endpoints for groups, clients, secrets and data permissions stay facades: the rule lives in the
   `Group.*` / `Client.*` / `DataPermission.*` handler, and the REST status code matches what the handler actually stored,
   with no `200` for a write that did not happen (`docs/identity-rest-facades.md`; PR #310, PR #269).
@@ -38,4 +38,4 @@ under `docs/`, or the pull request whose review found the problem.
 - A successful write to policies, CORS origins or client overlays invalidates the matching cache on every path, including
   partial failures (PR #310, PR #313).
 - Integration tests share no process-wide or machine-wide state, clean up what they change (policies, settings), and
-  fail when a wait times out instead of passing silently (`docs/testing.md`; PR #313, PR #315).
+  fail when a wait times out instead of passing silently (`docs/testing.md`; PR #313).
