@@ -432,8 +432,9 @@ public class DataProtectionKeyEncryptionIntegrationTests : IClassFixture<Identit
     private const string ServiceApplicationName = "OctoAssetRepositoryServices";
 
     /// <summary>
-    ///     Version-free decryptor type name the shared key store of octo-common-services writes; deliberately a string
-    ///     here, so the test also models an identity image that does not ship the type.
+    ///     Version-free decryptor type name the shared key store of octo-common-services writes, kept as a literal so
+    ///     the stored XML matches what a service writes; the identity filter is what keeps such keys out, not whether
+    ///     the type can be resolved.
     /// </summary>
     private const string ServiceDecryptorTypeName =
         "Meshmakers.Octo.Services.Infrastructure.DataProtection.PlatformKeyRingXmlDecryptor, " +

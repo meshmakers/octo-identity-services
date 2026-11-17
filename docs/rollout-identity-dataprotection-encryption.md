@@ -69,13 +69,15 @@ tokens) becomes invalid. Therefore:
 1. Add the new key and make it active: `KEYS__k2=…`, `ACTIVEKEYID=k2`, **keep `KEYS__k1`**.
 2. Restart identity: the startup step re-wraps every Data Protection key with `k2` (`R re-wrapped`). This is
    identity's own step — the octo-cli `ReprotectSecrets` sweep covers `Secret` attributes, not the Data Protection
-   key ring.
+   key ring. Also restart every service that uses the shared key store (asset repository, bot, reporting, AI) with
+   `k2` active: until it restarts, a service keeps wrapping its new keys with `k1`.
 3. Remove `k1` only after every identity pod logged the re-wrap **and** every other consumer of `k1` (secret sweep,
    encrypted dumps) is done with it. Removing `k1` too early makes identity refuse to start (it names the keys
    wrapped with `k1`); add `k1` back to recover — nothing is lost.
 4. The key rings of the other services (shared key store of octo-common-services, names `<ApplicationName>/key-…`)
    are **not** re-wrapped — not by identity and not by the services. Removing `k1` makes their keys wrapped with `k1`
-   unusable: the services create new keys and their users sign in again (no service refuses to start). An expired
+   unusable: the services create new keys and their users sign in again (no service refuses to start). The deadline
+   can only be read after the restarts of step 2, when no service writes `k1` keys any more. An expired
    key still unprotects the payloads it protected, so expiry alone is not a safe deadline: keep `k1` until the
    `expirationDate` in the XML of the newest service key wrapped with it (about 90 days after its activation; ASP.NET
    creates the next key up to 48 hours before it is activated) **plus** the longest lifetime of a payload it protected
