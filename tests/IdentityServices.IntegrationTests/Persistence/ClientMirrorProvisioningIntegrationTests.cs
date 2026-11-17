@@ -250,6 +250,71 @@ public class ClientMirrorProvisioningIntegrationTests : IClassFixture<IdentitySe
         (await CountTrackingRowsAsync(systemContext, clientId, childTenantId)).Should().Be(1);
     }
 
+    /// <summary>
+    ///     A duplicate of the mirror (stale copy of a restore) must not survive the removal of the mirror: every client of
+    ///     the id this parent provisioned is erased, not only the first one read; a client of the child itself stays.
+    /// </summary>
+    [Fact]
+    public async Task RemoveMirrorsForClient_ErasesEveryClientOfTheId_DuplicatesIncluded()
+    {
+        await _fixture.InitializeAsync();
+        var systemContext = _fixture.GetSystemContext();
+        await EnsureSystemSetupAsync();
+
+        var childTenantId = await CreateChildTenantAsync($"child-rmdu-{Guid.NewGuid():N}".Substring(0, 24));
+        var clientId = $"rmdu-{Guid.NewGuid():N}".Substring(0, 24);
+        await CreateFlaggedClientAsync(systemContext, clientId);
+        await CreateService(systemContext).ProvisionForChildTenantAsync(systemContext.TenantId, childTenantId);
+        await InsertStaleChildClientAsync(systemContext, childTenantId, clientId);
+        // A client of the child itself with the same id (not provisioned by this parent) is not a mirror.
+        await InsertStaleChildClientAsync(systemContext, childTenantId, clientId, provisionedByParentTenantId: "");
+        (await CountChildClientsAsync(systemContext, childTenantId, clientId)).Should().Be(3);
+
+        await CreateService(systemContext).RemoveMirrorsForClientAsync(systemContext.TenantId, clientId);
+
+        (await CountChildClientsAsync(systemContext, childTenantId, clientId)).Should().Be(1,
+            "both mirrors of the parent are erased, the child's own client stays");
+        (await CountTrackingRowsAsync(systemContext, clientId, childTenantId)).Should().Be(0);
+    }
+
+    /// <summary>
+    ///     The reconciliation's replace finds the mirror erased by another writer (which also removed the tracking row)
+    ///     and inserts it again on the retry. Like every insert it is claimed by the versioned row write: the row is gone,
+    ///     so the insert is withdrawn and no untracked client stays behind.
+    /// </summary>
+    [Fact]
+    public async Task Reconciliation_InsertAfterAConcurrentErase_IsWithdrawn_WhenTheRowIsGone()
+    {
+        await _fixture.InitializeAsync();
+        var systemContext = _fixture.GetSystemContext();
+        await EnsureSystemSetupAsync();
+
+        var childTenantId = await CreateChildTenantAsync($"child-rcwd-{Guid.NewGuid():N}".Substring(0, 24));
+        var clientId = $"rcwd-{Guid.NewGuid():N}".Substring(0, 24);
+        await CreateFlaggedClientAsync(systemContext, clientId);
+        await CreateService(systemContext).ProvisionForChildTenantAsync(systemContext.TenantId, childTenantId);
+        // The parent changes without a sync, so the reconciliation has to replace the mirror.
+        await UpdateParentClientSecretAsync(systemContext, clientId, "rotated-hash");
+
+        var service = CreateConcreteService(systemContext);
+        var removed = 0;
+        service.BeforeMirrorWriteForTests = async (id, child) =>
+        {
+            if (id == clientId && Interlocked.Increment(ref removed) == 1)
+            {
+                // Another writer removes the mirror: the child client and its tracking row.
+                await CreateService(systemContext).RemoveMirrorsForClientAsync(systemContext.TenantId, id);
+            }
+        };
+
+        await service.ReconcileMirrorsAsync(systemContext.TenantId, TestContext.Current.CancellationToken);
+
+        removed.Should().BeGreaterThanOrEqualTo(1);
+        (await CountTrackingRowsAsync(systemContext, clientId, childTenantId)).Should().Be(0);
+        (await CountChildClientsAsync(systemContext, childTenantId, clientId)).Should().Be(0,
+            "the re-inserted mirror has no tracking row and is withdrawn");
+    }
+
     [Fact]
     public async Task ProvisionForAllChildTenantsAsync_Backfill_HitsEveryChild()
     {
@@ -671,11 +736,11 @@ public class ClientMirrorProvisioningIntegrationTests : IClassFixture<IdentitySe
     }
 
     /// <summary>
-    ///     A second client of the id in the child, as a restore from an older backup leaves it beside the mirror. Its
-    ///     rtId is generated after the mirror's, so the mirror stays the canonical record.
+    ///     A second client of the id in the child, as a restore from an older backup leaves it beside the mirror (an
+    ///     older copy of the mirror). Its rtId is generated after the mirror's, so the mirror stays the canonical record.
     /// </summary>
     private static async Task InsertStaleChildClientAsync(ISystemContext systemContext, string childTenantId,
-        string clientId)
+        string clientId, string? provisionedByParentTenantId = null)
     {
         var childRepo = (await systemContext.TryFindTenantRepositoryAsync(childTenantId))!;
         using var session = await childRepo.GetSessionAsync();
@@ -691,7 +756,8 @@ public class ClientMirrorProvisioningIntegrationTests : IClassFixture<IdentitySe
             ClientSecrets = new AttributeRecordValueList<RtSecretRecord>
             {
                 new() { Value = "stale-hash", Type = "SharedSecret" }
-            }
+            },
+            ProvisionedByParentTenantId = provisionedByParentTenantId ?? systemContext.TenantId
         });
     }
 

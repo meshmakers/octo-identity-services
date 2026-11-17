@@ -116,10 +116,11 @@ them may still provision while another drops the rows. The tracking row is uniqu
   (`EntityNotFoundException`). That is a debug line, and the row is not written again: the tenant is being
   deleted or restored, and the setup after the re-attach records it anew. The immediate sync and the
   reconciliation count such a pair as skipped.
-- *Client erased by another writer:* an erase of a child client that finds it gone counts as done; a
-  replace that finds the mirror gone reads again (as on a version conflict).
+- *Client erased by another writer:* an erase of a child client that finds it gone counts as done (a
+  removal erases every mirror of the id); a replace that finds the mirror gone reads again, and a new
+  insert is claimed by the row write.
 
-Every other failure of these writes still reaches the setup and is logged as an error. **Open
+Every other failure of these writes reaches the setup and is logged as an error. **Open
 question (intentional):** parent is hard-wired to `systemContext.TenantId` —
 nested customer sub-tenants are out of scope for v1, see
 `octo-communication-controller-services/docs/concepts/cicd-workload-deployment.md`.

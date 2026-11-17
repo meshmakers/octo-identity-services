@@ -601,7 +601,20 @@ public class ClientMirrorProvisioningService(
             return MirrorReconcileOutcome.InSync;
         }
 
-        if (!await BumpTrackingRowAsync(parentRepo, parentSession, row))
+        // The converge may have inserted the mirror again (another writer erased it between the read and the replace);
+        // like every insert it is claimed by the versioned row write, and withdrawn when the row changed or is gone. The
+        // row of this pass's listing may be older than a sync of another replica, so an insert is claimed on the row as
+        // it is now.
+        var claimRow = write.InsertedRtId == null
+            ? row
+            : await FindTrackingRowAsync(parentRepo, parentSession, row.ParentClientId, row.ChildTenantId);
+        if (claimRow == null)
+        {
+            await TryEraseChildClientAsync(childRepo, childSession, write.InsertedRtId!.Value);
+            return MirrorReconcileOutcome.Skipped;
+        }
+
+        if (!await ClaimTrackingRowAsync(parentRepo, parentSession, claimRow, write, childRepo, childSession))
         {
             // Removed while we repaired the mirror (removal of the mirror, or the tenant is being deleted or restored).
             return MirrorReconcileOutcome.Skipped;
@@ -976,7 +989,7 @@ public class ClientMirrorProvisioningService(
                 if (childRepo != null)
                 {
                     using var childSession = await childRepo.GetSessionAsync();
-                    await DeleteClientFromChildAsync(childRepo, childSession, parentClientId);
+                    await DeleteClientFromChildAsync(childRepo, childSession, parentTenantId, parentClientId);
                 }
                 // If the child tenant is gone, the client is gone too — just drop the
                 // tracking row. RemoveMirrorsForChildTenantAsync would otherwise need to
@@ -1235,7 +1248,7 @@ public class ClientMirrorProvisioningService(
         if (childRepo != null)
         {
             using var childSession = await childRepo.GetSessionAsync();
-            await DeleteClientFromChildAsync(childRepo, childSession, parentClientId);
+            await DeleteClientFromChildAsync(childRepo, childSession, parentTenantId, parentClientId);
         }
 
         await parentRepo.DeleteOneRtEntityByRtIdAsync<RtClientMirror>(
@@ -1378,16 +1391,23 @@ public class ClientMirrorProvisioningService(
     }
 
     private static async Task DeleteClientFromChildAsync(
-        ITenantRepository childRepo, IOctoSession childSession, string clientId)
+        ITenantRepository childRepo, IOctoSession childSession, string parentTenantId, string clientId)
     {
         var existing = await childRepo.GetRtEntitiesByTypeAsync<RtClient>(
             childSession,
             RtEntityQueryOptions.Create()
                 .FieldFilter(nameof(RtClient.ClientId), FieldFilterOperator.Equals, clientId));
-        var found = existing.Items.FirstOrDefault();
-        if (found != null)
+        // Every mirror of the id this parent provisioned: a duplicate left by a replica race or a restore must not
+        // survive the removal of its mirror, and a client another writer erased first does not prove that the others are
+        // gone. A client of the child itself with the same id (provisioned by no or another parent) is left alone. When no
+        // client names this parent (a mirror written before the field existed), the first client of the id is erased,
+        // as before.
+        var clients = existing.Items.ToList();
+        var mirrors = clients.Where(c =>
+            string.Equals(c.ProvisionedByParentTenantId, parentTenantId, StringComparison.OrdinalIgnoreCase)).ToList();
+        foreach (var client in mirrors.Count > 0 ? mirrors : clients.Take(1))
         {
-            await TryEraseChildClientAsync(childRepo, childSession, found.RtId);
+            await TryEraseChildClientAsync(childRepo, childSession, client.RtId);
         }
     }
 
