@@ -189,6 +189,122 @@ public class ClientMirrorProvisioningServiceTests
         await _parentRepo.DidNotReceiveWithAnyArgs().InsertOneRtEntityAsync(default!, default(RtClientMirror)!);
     }
 
+    // ----- Two replicas provisioning the same pair (tenant setup after create or restore) -------------
+
+    /// <summary>
+    ///     Arranges a flagged client without tracking row and an empty child for the first read; the tracking-row insert
+    ///     fails with <paramref name="rowInsertFailure" />. Returns the mirror this run inserts (captured) and sets the
+    ///     child's second read to <paramref name="otherWritersMirrors" /> (inserted earlier, so read first) plus that mirror.
+    /// </summary>
+    private Func<RtClient?> ArrangeRowInsertFailure(Exception rowInsertFailure, params RtClient[] otherWritersMirrors)
+    {
+        var client = new RtClientBuilder().WithClientId("ci-deploy").WithAutoProvisionInChildTenants().Build();
+        SetupParentFlaggedClients(client);
+        SetupParentMirrorLookup(client.ClientId, Array.Empty<RtClientMirror>());
+
+        RtClient? inserted = null;
+        _childRepo.InsertOneRtEntityAsync(_childSession, Arg.Do<RtClient>(c => inserted = c)).Returns(Task.CompletedTask);
+        var reads = 0;
+        _childRepo.GetRtEntitiesByTypeAsync<RtClient>(_childSession, Arg.Any<RtEntityQueryOptions>())
+            .Returns(_ =>
+            {
+                var resultSet = Substitute.For<IResultSet<RtClient>>();
+                resultSet.Items.Returns(reads++ == 0
+                    ? Array.Empty<RtClient>()
+                    : otherWritersMirrors.Append(inserted!).ToArray());
+                return Task.FromResult(resultSet);
+            });
+        _parentRepo.InsertOneRtEntityAsync(_parentSession, Arg.Any<RtClientMirror>())
+            .Returns(Task.FromException(rowInsertFailure));
+        return () => inserted;
+    }
+
+    private static DuplicateKeyException RowAlreadyRecorded() =>
+        new("Error adding item", typeof(RtClientMirror), new InvalidOperationException("E11000 duplicate key"));
+
+    [Fact]
+    public async Task TrackingRowRecordedConcurrently_CountsAsPresent_AndWithdrawsTheSecondMirror()
+    {
+        var theirs = new RtClientBuilder().WithClientId("ci-deploy").Build();
+        var ours = ArrangeRowInsertFailure(RowAlreadyRecorded(), theirs);
+
+        var result = await _sut.ProvisionForChildTenantAsync(ParentTenantId, ChildTenantId);
+
+        result.Should().Be(new ClientMirrorProvisioningResult(1, 0, 1),
+            "the other replica recorded the pair; this run is no failure and provisioned nothing new");
+        // The duplicate goes by the rule of the convergence (lowest rtId; the other replica's mirror is older), so a
+        // reconciliation pass agrees.
+        await _childRepo.Received(1).DeleteOneRtEntityByRtIdAsync<RtClient>(
+            _childSession, ours()!.RtId, Arg.Any<DeleteOptions>());
+        await _childRepo.DidNotReceive().DeleteOneRtEntityByRtIdAsync<RtClient>(
+            _childSession, theirs.RtId, Arg.Any<DeleteOptions>());
+    }
+
+    [Fact]
+    public async Task TrackingRowRecordedConcurrently_KeepsTheInsertedMirror_WhenItIsTheOnlyOne()
+    {
+        // The other replica replaced this run's insert (same rtId) instead of inserting its own: it is the one mirror.
+        ArrangeRowInsertFailure(RowAlreadyRecorded());
+
+        var result = await _sut.ProvisionForChildTenantAsync(ParentTenantId, ChildTenantId);
+
+        result.Should().Be(new ClientMirrorProvisioningResult(1, 0, 1));
+        await _childRepo.DidNotReceiveWithAnyArgs().DeleteOneRtEntityByRtIdAsync<RtClient>(default!, default, default!);
+    }
+
+    [Fact]
+    public async Task TrackingRowInsert_OtherFailure_StillFailsTheProvisioning()
+    {
+        ArrangeRowInsertFailure(new InvalidOperationException("database unavailable"));
+
+        var act = () => _sut.ProvisionForChildTenantAsync(ParentTenantId, ChildTenantId);
+
+        await act.Should().ThrowAsync<InvalidOperationException>(
+            "only a concurrent record of the same pair is expected; every other failure reaches the caller's error log");
+        await _childRepo.DidNotReceiveWithAnyArgs().DeleteOneRtEntityByRtIdAsync<RtClient>(default!, default, default!);
+    }
+
+    [Fact]
+    public async Task TrackedPair_RowRemovedConcurrently_DoesNotFail_AndIsNotWrittenAgain()
+    {
+        var client = new RtClientBuilder().WithClientId("ci-deploy").WithAutoProvisionInChildTenants().Build();
+        SetupParentFlaggedClients(client);
+        var row = new RtClientMirrorBuilder().WithParentClientId("ci-deploy").WithParentTenantId(ParentTenantId)
+            .WithChildTenantId(ChildTenantId).Build();
+        SetupParentMirrorLookup(client.ClientId, new[] { row });
+        SetupChildClientLookup(client.ClientId, new[] { new RtClientBuilder().WithClientId("ci-deploy").Build() });
+        // Another replica's PreDeleteTenant cleanup removed the row between the read and the bump.
+        _parentRepo.ReplaceOneRtEntityByIdAsync(_parentSession, row.RtId, Arg.Any<RtClientMirror>(), Arg.Any<ulong>())
+            .Returns(Task.FromException(EntityNotFoundException.IdNotFound(nameof(RtClientMirror), row.RtId.ToString())));
+
+        var result = await _sut.ProvisionForChildTenantAsync(ParentTenantId, ChildTenantId);
+
+        result.Should().Be(new ClientMirrorProvisioningResult(1, 0, 1));
+        await _parentRepo.DidNotReceiveWithAnyArgs().InsertOneRtEntityAsync(default!, default(RtClientMirror)!);
+    }
+
+    [Fact]
+    public void SelectCanonicalMirror_DoesNotDependOnTheReadOrder()
+    {
+        var older = new RtClientBuilder().WithClientId("ci-deploy").Build();
+        var newer = new RtClientBuilder().WithClientId("ci-deploy").Build();
+        var expected = older.RtId.CompareTo(newer.RtId) < 0 ? older : newer;
+
+        // Two replicas may read the duplicates in different orders; both must keep the same record.
+        ClientMirrorProvisioningService.SelectCanonicalMirror([older, newer]).RtId.Should().Be(expected.RtId);
+        ClientMirrorProvisioningService.SelectCanonicalMirror([newer, older]).RtId.Should().Be(expected.RtId);
+    }
+
+    [Fact]
+    public void IsDuplicateKey_FindsTheViolationAlsoBehindAWrapper()
+    {
+        ClientMirrorProvisioningService.IsDuplicateKey(RowAlreadyRecorded()).Should().BeTrue();
+        ClientMirrorProvisioningService.IsDuplicateKey(new InvalidOperationException("bulk import failed",
+            RowAlreadyRecorded())).Should().BeTrue();
+        ClientMirrorProvisioningService.IsDuplicateKey(new InvalidOperationException("database unavailable"))
+            .Should().BeFalse();
+    }
+
     [Theory]
     [InlineData("", ChildTenantId)]
     [InlineData(ParentTenantId, "")]

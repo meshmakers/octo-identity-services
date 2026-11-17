@@ -90,6 +90,125 @@ public class ClientMirrorProvisioningIntegrationTests : IClassFixture<IdentitySe
             "second run must not create a duplicate tracking row");
     }
 
+    /// <summary>
+    ///     Every identity replica runs the tenant setup when a tenant is created or re-attached by a restore (the restore
+    ///     drops the tenant first, which drops its tracking rows). Both replicas then provision the same pair at once. The
+    ///     seam holds both runs right before the tracking-row insert, so each has written its child mirror and one insert
+    ///     hits the unique index on (client, child). Neither run may fail, and exactly one row and one mirror stay.
+    /// </summary>
+    [Fact]
+    public async Task TwoReplicasProvisioningTheSamePair_RecordOneRowAndOneMirror_WithoutFailing()
+    {
+        await _fixture.InitializeAsync();
+        var systemContext = _fixture.GetSystemContext();
+        await EnsureSystemSetupAsync();
+
+        var childTenantId = await CreateChildTenantAsync($"child-race-{Guid.NewGuid():N}".Substring(0, 24));
+        var clientId = $"race-{Guid.NewGuid():N}".Substring(0, 24);
+        await CreateFlaggedClientAsync(systemContext, clientId);
+
+        var arrived = 0;
+        var bothArrived = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        async Task HoldUntilBothArrived(string id, string child)
+        {
+            if (id != clientId)
+            {
+                return;
+            }
+
+            if (Interlocked.Increment(ref arrived) == 2)
+            {
+                bothArrived.TrySetResult();
+            }
+
+            await bothArrived.Task.WaitAsync(TimeSpan.FromSeconds(30));
+        }
+
+        var replicaA = CreateConcreteService(systemContext);
+        var replicaB = CreateConcreteService(systemContext);
+        replicaA.BeforeTrackingRowWriteForTests = HoldUntilBothArrived;
+        replicaB.BeforeTrackingRowWriteForTests = HoldUntilBothArrived;
+
+        // Neither run throws. Whether both inserted a mirror or one replaced the other's depends on the read order;
+        // the unit tests pin both branches of the duplicate cleanup.
+        await Task.WhenAll(
+            Task.Run(() => replicaA.ProvisionForChildTenantAsync(systemContext.TenantId, childTenantId)),
+            Task.Run(() => replicaB.ProvisionForChildTenantAsync(systemContext.TenantId, childTenantId)));
+
+        arrived.Should().Be(2, "both runs reached the tracking-row insert, so one of them hit the unique index");
+        (await CountTrackingRowsAsync(systemContext, clientId, childTenantId)).Should().Be(1);
+        (await CountChildClientsAsync(systemContext, childTenantId, clientId)).Should().Be(1,
+            "the run that lost the row withdraws its second mirror");
+        (await FindChildClientAsync(systemContext, childTenantId, clientId))!.ProvisionedByParentTenantId
+            .Should().Be(systemContext.TenantId);
+    }
+
+    /// <summary>
+    ///     The other replica recorded the row after it replaced this run's freshly inserted mirror (same rtId): that
+    ///     mirror is the only one and must stay.
+    /// </summary>
+    [Fact]
+    public async Task RowRecordedByAnotherReplica_KeepsTheOnlyMirror()
+    {
+        await _fixture.InitializeAsync();
+        var systemContext = _fixture.GetSystemContext();
+        await EnsureSystemSetupAsync();
+
+        var childTenantId = await CreateChildTenantAsync($"child-rrow-{Guid.NewGuid():N}".Substring(0, 24));
+        var clientId = $"rrow-{Guid.NewGuid():N}".Substring(0, 24);
+        await CreateFlaggedClientAsync(systemContext, clientId);
+
+        var service = CreateConcreteService(systemContext);
+        service.BeforeTrackingRowWriteForTests = async (id, child) =>
+        {
+            if (id == clientId)
+            {
+                await InsertTrackingRowAsync(systemContext, id, child);
+            }
+        };
+
+        var result = await service.ProvisionForChildTenantAsync(systemContext.TenantId, childTenantId);
+
+        result.AlreadyPresent.Should().BeGreaterThanOrEqualTo(1);
+        (await CountTrackingRowsAsync(systemContext, clientId, childTenantId)).Should().Be(1);
+        (await CountChildClientsAsync(systemContext, childTenantId, clientId)).Should().Be(1);
+    }
+
+    /// <summary>
+    ///     A tenant delete or restore sends PreDeleteTenant, and one replica drops the tracking rows of the tenant while
+    ///     another replica is still provisioning it (tracked pair, so the row is bumped). The bump finds the row gone: no
+    ///     failure, and the row of the tenant that is going away is not written again.
+    /// </summary>
+    [Fact]
+    public async Task TrackingRowDroppedByAnotherReplicaDuringProvisioning_DoesNotFail_AndStaysDropped()
+    {
+        await _fixture.InitializeAsync();
+        var systemContext = _fixture.GetSystemContext();
+        await EnsureSystemSetupAsync();
+
+        var childTenantId = await CreateChildTenantAsync($"child-drop-{Guid.NewGuid():N}".Substring(0, 24));
+        var clientId = $"drop-{Guid.NewGuid():N}".Substring(0, 24);
+        await CreateFlaggedClientAsync(systemContext, clientId);
+        await CreateService(systemContext).ProvisionForChildTenantAsync(systemContext.TenantId, childTenantId);
+        (await CountTrackingRowsAsync(systemContext, clientId, childTenantId)).Should().Be(1);
+
+        var deletingReplica = CreateService(systemContext);
+        var provisioningReplica = CreateConcreteService(systemContext);
+        provisioningReplica.BeforeTrackingRowWriteForTests = async (id, child) =>
+        {
+            if (id == clientId)
+            {
+                await deletingReplica.RemoveMirrorsForChildTenantAsync(systemContext.TenantId, child);
+            }
+        };
+
+        var result = await provisioningReplica.ProvisionForChildTenantAsync(systemContext.TenantId, childTenantId);
+
+        result.AlreadyPresent.Should().BeGreaterThanOrEqualTo(1);
+        (await CountTrackingRowsAsync(systemContext, clientId, childTenantId)).Should().Be(0,
+            "the PreDeleteTenant cleanup removed the row; the provisioning must not resurrect it");
+    }
+
     [Fact]
     public async Task ProvisionForAllChildTenantsAsync_Backfill_HitsEveryChild()
     {
@@ -478,8 +597,53 @@ public class ClientMirrorProvisioningIntegrationTests : IClassFixture<IdentitySe
     }
 
     private IClientMirrorProvisioningService CreateService(ISystemContext systemContext)
-        => new ClientMirrorProvisioningService(NullLogger<ClientMirrorProvisioningService>.Instance, systemContext,
+        => CreateConcreteService(systemContext);
+
+    private static ClientMirrorProvisioningService CreateConcreteService(ISystemContext systemContext)
+        => new(NullLogger<ClientMirrorProvisioningService>.Instance, systemContext,
             Substitute.For<IdentityServerPersistence.Services.ITenantDiscoveryService>());
+
+    private static async Task<int> CountTrackingRowsAsync(
+        ISystemContext systemContext, string clientId, string childTenantId)
+    {
+        var parentRepo = systemContext.GetSystemTenantRepositoryAsAdmin();
+        using var session = await parentRepo.GetSessionAsync();
+        var result = await parentRepo.GetRtEntitiesByTypeAsync<RtClientMirror>(
+            session,
+            RtEntityQueryOptions.Create()
+                .FieldFilter(nameof(RtClientMirror.ParentClientId), FieldFilterOperator.Equals, clientId)
+                .FieldFilter(nameof(RtClientMirror.ChildTenantId), FieldFilterOperator.Equals, childTenantId));
+        return result.Items.Count();
+    }
+
+    private static async Task<int> CountChildClientsAsync(
+        ISystemContext systemContext, string childTenantId, string clientId)
+    {
+        var childRepo = await systemContext.TryFindTenantRepositoryAsync(childTenantId);
+        if (childRepo == null) return 0;
+        using var session = await childRepo.GetSessionAsync();
+        var result = await childRepo.GetRtEntitiesByTypeAsync<RtClient>(
+            session,
+            RtEntityQueryOptions.Create()
+                .FieldFilter(nameof(RtClient.ClientId), FieldFilterOperator.Equals, clientId));
+        return result.Items.Count();
+    }
+
+    /// <summary>The tracking row another replica records for the pair (as the provisioning writes it).</summary>
+    private static async Task InsertTrackingRowAsync(ISystemContext systemContext, string clientId, string childTenantId)
+    {
+        var parentRepo = systemContext.GetSystemTenantRepositoryAsAdmin();
+        using var session = await parentRepo.GetSessionAsync();
+        await parentRepo.InsertOneRtEntityAsync(session, new RtClientMirror
+        {
+            RtId = OctoObjectId.GenerateNewId(),
+            ParentClientId = clientId,
+            ParentTenantId = systemContext.TenantId,
+            ChildTenantId = childTenantId,
+            ProvisionedAt = DateTime.UtcNow,
+            SecretHashVersion = 0
+        });
+    }
 
     /// <summary>
     /// Brings the system tenant + the identity CK model online so we can persist

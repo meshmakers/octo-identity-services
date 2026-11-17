@@ -95,7 +95,26 @@ itself become a source of further mirroring.
 invokes `ProvisionForChildTenantAsync(systemContext.TenantId, tenantId)` for
 every child tenant. Runs on every startup → mirrors are also backfilled
 automatically for tenants that pre-date the flag being set on the parent.
-Provisioning failures are logged but never break tenant setup. **Open
+Provisioning failures are logged but never break tenant setup.
+
+**Several replicas, restore.** Every identity replica runs the tenant setup on `PosCreateTenant`, and a
+restore sends `PreDeleteTenant` (its drop removes the tracking rows, see below), then attaches the tenant
+again (`PosCreateTenant`). So several replicas provision the same (client, child) pair at once, and one of
+them may still provision while another drops the rows. The tracking row is unique per pair
+(`ParentClientId` + `ChildTenantId`), and the provisioning handles both races without an error:
+
+- *Row recorded by another replica:* the insert of the tracking row hits the unique index (a
+  `DuplicateKeyException`, or a bulk write error with a duplicate key behind an `OperationFailedException`;
+  `IsDuplicateKey` checks the whole exception chain). The pair counts as already present. When this run had
+  inserted the child mirror and both replicas inserted one, the duplicate is erased by the rule the convergence
+  uses (blueprint-range record, else the lowest rtId; never the read order), so a reconciliation pass running at the same time
+  keeps the same record; when the other replica replaced this run's insert, that is the one mirror and stays.
+- *Row dropped by another replica:* the version-checked bump of a tracked pair finds the row gone
+  (`EntityNotFoundException`). That is a debug line, and the row is not written again: the tenant is being
+  deleted or restored, and the setup after the re-attach records it anew. The immediate sync and the
+  reconciliation count such a pair as skipped, not as synced or repaired.
+
+Every other failure of these writes still reaches the setup and is logged as an error. **Open
 question (intentional):** parent is hard-wired to `systemContext.TenantId` —
 nested customer sub-tenants are out of scope for v1, see
 `octo-communication-controller-services/docs/concepts/cicd-workload-deployment.md`.
