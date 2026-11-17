@@ -1,5 +1,25 @@
 # Changelog
 
+## 3.4.0 - 2026-11-17
+
+_Required bump level: minor._
+
+AB#9037, AB#9039: System.Identity 3.4.0 adds methods so the REST secret write endpoints and the data-policy enforcement switch become
+facades of them: `Client.UpdateSecret-1`, `ApiResource.AddSecret-1`, `ApiResource.RemoveSecret-1`, `ApiResource.UpdateSecret-1` (roles
+`TenantManagement`, `UserManagement`, `SecretManagement`; `secretValue` and the generated secret `sensitive`; errors `SECRET_NOT_FOUND`,
+`CONCURRENT_CHANGE`) and `DataPolicy.SetEnforcementMode-1` (role `UserManagement`). `Client.AddSecret-1` and `Client.RemoveSecret-1` are
+unchanged (an error code added to them would be a Major, row M8). Compile gate against the published 3.3.0: required level MINOR, minimum
+version 3.4.0.
+
+Rollout: service-managed - ships inside the identity service with the regular identity release train. No catalog import,
+no per-tenant step, **no FixAll**. No data migration; ranges `System.Identity-[3.0.0,4.0)` stay satisfied.
+
+### Added
+
+- Method 'Client-1/UpdateSecret-1' added _(minor — purely additive method)_
+- Methods 'ApiResource-1/AddSecret-1', 'ApiResource-1/RemoveSecret-1', 'ApiResource-1/UpdateSecret-1' added _(minor — purely additive methods)_
+- Method 'DataPolicy-1/SetEnforcementMode-1' added _(minor — purely additive method)_
+
 ## 3.3.0 - 2026-11-16
 
 _Required bump level: minor._

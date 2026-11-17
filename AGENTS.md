@@ -25,7 +25,7 @@ consumers work unchanged; the remaining discovery-document differences are docum
 | `src/IdentityServices/{Logging,TenantApi,Controllers/Api}/**`, `{OctoUser*,*Revocation*,SecondFactorEvidence,*UserCredentialChangeService}.cs` | `docs/credential-security.md` |
 | `{*CrossTenant*,TenantProbeGuard,Allowed*,*IdentityResolver,*Processor,*ShadowUser*,*ExternalTenantUser*,*SourceT*,*SourceU*,Sibling*,AuthApiController}.cs` | `docs/cross-tenant-authentication.md` |
 | `src/IdentityServices/Methods/**`, `**/Services/{SelfService,SecretManagement}/**`, `*DataPermission*.cs` | `docs/identity-methods.md` |
-| `{IdentityMethodFacade,IdentityRestDeprecation,UsersController,ManageApiController,RoleChangeProblems,ResetUserPasswordRequestDto}.cs` | `docs/identity-rest-facades.md` |
+| `{IdentityMethodFacade,IdentityRestDeprecation,UsersController,ManageApiController,RoleChangeProblems,ResetUserPasswordRequestDto,ApiSecretsController,DataPermissionsController}.cs` | `docs/identity-rest-facades.md` |
 | `src/Authentication/**`, `**/Services/Login/**`, `{TenantDiscovery*,TenantTopology*,*IdentityProvider*,*EmailDomainGroupRule*,*Channel*,AuthApiController}.cs` | `docs/login-and-providers.md` |
 | `**/{OpenIddict,Cookies,Middleware,Protocol,DynamicAuth}/**`, `{OpenIddictConfiguration,*PersistentGrantStore,TokenCleanup*}.cs` | `docs/openiddict-protocol.md` |
 | `**/{Authorization/RoleChange,AdminRoleMigration}/**`, `{Group*Resolver,GuardedEntityMutation,OctoRoleStore,*GroupStore,RolesController,GroupsController}.cs` | `docs/role-guards.md` |
@@ -141,6 +141,10 @@ wird, sind alle anderen Pre-Commit-Regeln (Lint etc.) ebenfalls hinfällig.
   methods: `docs/identity-methods.md`.
 - **Group roles and members and client roles and overlay URIs change only in the `Group.*` / `Client.*` handlers**;
   their REST endpoints are facades without own rules: `docs/identity-rest-facades.md`.
+- **Client and API resource secrets, data-permission grants and the enforcement mode of a data policy change only in their
+  handlers** (`*.AddSecret/UpdateSecret/RemoveSecret`, `DataPermission.*`, `DataPolicy.SetEnforcementMode`); the REST write
+  endpoints are facades, the secret handlers run local only while `EnablePasswordMethods` is off, and a handler checks the data
+  permission of its target itself (the in-process path has no gateway): `docs/identity-rest-facades.md`, `docs/identity-methods.md`.
 - **The wire protocol stays Duende-compatible** (endpoint paths, discovery, token shape, claims); the golden-file
   tests pin it: `docs/openiddict-protocol.md`.
 - **Every CK attribute declares its `ownership`** (`OCTO-CK001` fails the build), and a change of System.Identity

@@ -123,6 +123,18 @@ internal sealed class FacadeAuditCapture
         }
     }
 
+    /// <summary>Every captured <c>Identity.Method</c> event.</summary>
+    public List<Dictionary<string, string>> All
+    {
+        get
+        {
+            lock (_methodEvents)
+            {
+                return _methodEvents.ToList();
+            }
+        }
+    }
+
     /// <summary>All <c>Identity.Method</c> events whose details carry <paramref name="key" /> = <paramref name="value" />.</summary>
     public List<Dictionary<string, string>> Where(string key, string value)
     {

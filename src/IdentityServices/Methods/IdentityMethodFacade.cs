@@ -57,6 +57,15 @@ internal sealed class IdentityMethodFacade(
     /// <summary>CK type id of the OAuth client (the declaring type of the <c>Client.*</c> methods).</summary>
     public const string ClientCkTypeId = "System.Identity/Client";
 
+    /// <summary>CK type id of the API resource (the declaring type of the <c>ApiResource.*</c> methods, AB#9037).</summary>
+    public const string ApiResourceCkTypeId = "System.Identity/ApiResource";
+
+    /// <summary>CK type id of the data permission (the declaring type of the <c>DataPermission.*</c> methods, AB#9039).</summary>
+    public const string DataPermissionCkTypeId = "System.Identity/DataPermission";
+
+    /// <summary>CK type id of the data policy (the declaring type of <c>DataPolicy.SetEnforcementMode</c>, AB#9039).</summary>
+    public const string DataPolicyCkTypeId = "System.Identity/DataPolicy";
+
     public Task<CkMethodResponse> InvokeAsync<TParameters>(string ckTypeId, string methodId, string? targetRtId,
         TParameters parameters, ClaimsPrincipal user, CancellationToken cancellationToken) where TParameters : class =>
         DispatchAsync(ckTypeId, methodId, targetRtId, parameters, CkMethodPrincipal.FromClaimsPrincipal(user),

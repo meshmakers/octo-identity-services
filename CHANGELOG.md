@@ -7,6 +7,39 @@ Notable changes of the OctoMesh identity services. The CK model `System.Identity
 
 ### Changed
 
+- **The REST secret write endpoints run the secret methods, the REST data-permission grant, revoke and enforcement-mode
+  endpoints run the `DataPermission` / `DataPolicy` methods (System.Identity 3.4.0, AB#9037, AB#9039).** `POST`, `PUT`,
+  `POST …/delete` and the deprecated `DELETE …/{secretValue}` of `apiSecrets/client/{clientId}` and
+  `apiSecrets/apiResource/{name}` are facades of `Client.AddSecret`, the new `Client.UpdateSecret`, `Client.RemoveSecret` and the new
+  `ApiResource.AddSecret` / `UpdateSecret` / `RemoveSecret`; `POST/DELETE dataPermissions/{permissionId}/roles/{roleName}` and
+  `PUT dataPermissions/policies/{policyRtId}/enforcementMode` are facades of `DataPermission.GrantToRole`,
+  `DataPermission.RevokeFromRole` and the new `DataPolicy.SetEnforcementMode`. One implementation, one `Identity.Method` audit event
+  per call (the enforcement switch names the old and the new mode); the method runs in-process outside the request. The secret
+  handlers are registered **local only** while `Methods:Identity:EnablePasswordMethods` is off, so the REST endpoints keep working on
+  every cluster, GraphQL still answers `METHOD_HANDLER_NOT_AVAILABLE` there and no secret reaches the broker. Routes, bodies and
+  status codes stay (the add still answers the clear text once plus the stored hash; the secret reads stay REST reads). Intended REST
+  changes, each with its reason (parity tables in `docs/identity-rest-facades.md`):
+  - adding a secret to a **public client** (`RequireClientSecret` false) or with an **expiration in the past**, adding or
+    updating a secret with the reserved description `octo:mirror-own-secret` and updating a mirror's own secret, answer `400` and store nothing (the secret could never be
+    used, or the mirror sync would treat it as a mirror's own credential; the methods refused it from the start);
+  - with an **enforcing data policy** on clients, API resources, data permissions, data policies or roles (open by default): an owner,
+    permission or policy the caller cannot read answers like an unknown one (`404`), one they may read but not write answers `403`
+    (`METHOD_FORBIDDEN`, `data-permission`), revoking a permission from a role the caller cannot read while that role holds it
+    answers `403` without a change, and switching the enforcement mode also needs the right to write the policy's data permission
+    (REST changed it regardless of the data policy: CWE-863);
+  - an unknown data permission, role or data policy and a malformed policy id answer `404` (an unhandled `500` before);
+  - an unexpected failure of a secret write answers `400` with a fixed message instead of the exception text; for `Client.AddSecret` and
+    `Client.RemoveSecret`, a write that loses 20 times against concurrent writers is such a failure (`409` before): a new error code on
+    those existing methods would be a Major (row M8); the new methods answer `409` as before (`CONCURRENT_CHANGE`);
+  - an update or remove also finds the secret by its clear text, not only by the stored value; an update keeps the secret's `Type`
+    (`SharedSecret`) instead of clearing it.
+  The enforcement switch also clears the cached policy table of the identity replica that served the call, so the new mode applies
+  there at once. **Lag:** other identity replicas and every other service that enforces data policies (asset repository, mesh adapter,
+  report and bot services) still pick the new mode up only when their cached policy table expires (TTL 60 s,
+  `DataPermissionResolver`); there is no invalidation event, as before with REST - up to one minute after the switch they may still
+  apply the old mode. **Client impact:** none for callers of confidential clients with valid ids under the default
+  configuration; REST is not deprecated by this change.
+
 - **The REST group role and membership endpoints run the `Group` methods, the REST client role and overlay endpoints run new
   `Client` methods (System.Identity 3.3.0).** `PUT groups/{g}/roles`, `PUT/DELETE groups/{g}/members/users|clients|groups/{id}`,
   `PUT clients/{id}/roles`, `PUT/DELETE clients/{id}/roles/{role}`, `POST clients/{id}/overlayUris` and

@@ -323,9 +323,11 @@ an older copy; `409` after repeated conflicts.
 | GET | `/apiSecrets/client/{clientId}/{secretValue}` | ReadOnly | **Deprecated** (stored hash in the path), kept for one release; use `…/lookup` |
 | DELETE | `/apiSecrets/client/{clientId}/{secretValue}` | ReadWrite + `SecretManagement` | **Deprecated** (stored hash in the path), kept for one release; use `…/delete` |
 
-The same operations exist as CK methods on the client entity: `System.Identity/Client.AddSecret-1` (result = the generated
-secret, shown once, `sensitive`) and `Client.RemoveSecret-1` (`secretValue` = stored value or clear text). They are hosted only with
-`Methods:Identity:EnablePasswordMethods=true`; rules and differences to REST: `docs/identity-methods.md`, section "Client secret methods".
+The write endpoints are facades of CK methods on the client entity (AB#9037): `System.Identity/Client.AddSecret-1` (result = the
+generated secret, shown once, `sensitive`), `Client.UpdateSecret-1` and `Client.RemoveSecret-1` (`secretValue` = stored value or clear
+text); the API resource endpoints below of `ApiResource.AddSecret-1` / `UpdateSecret-1` / `RemoveSecret-1`. GraphQL reaches them only with
+`Methods:Identity:EnablePasswordMethods=true`; REST works in either state. Rules: `docs/identity-methods.md`, section "Secret methods";
+REST parity: `docs/identity-rest-facades.md`.
 
 #### API Resource Secrets
 

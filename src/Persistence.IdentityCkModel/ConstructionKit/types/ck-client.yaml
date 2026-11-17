@@ -212,6 +212,23 @@ types:
         authorization:
           roles: [ TenantManagement, UserManagement, SecretManagement ]
           dataAccess: Write
+      # 3.4.0 (AB#9037): the REST PUT apiSecrets/client/{clientId} becomes a facade of this method. Same roles as AddSecret and
+      # RemoveSecret (REST IdentitySecretAdministrationPolicy, staged by SecretManagementRoleEnforcement in the handler).
+      - methodId: UpdateSecret-1
+        description: "Replaces the description and the expiration date of a secret of the client, identified by its stored value (as the list of secrets shows it) or its clear text. The secret value itself never changes; an omitted description or expiration date is cleared (REST parity: PUT apiSecrets/client/{clientId})."
+        parameters:
+          - { name: secretValue, valueType: String, sensitive: true, description: "The stored value (or the clear text) of the secret that is updated." }
+          - { name: description, valueType: String, isOptional: true, description: "Free text shown in the list of secrets; omitted clears it." }
+          - { name: expirationDate, valueType: DateTime, isOptional: true, description: "Expiration of the secret; omitted means the secret does not expire." }
+        errors:
+          - { code: SECRET_NOT_FOUND, description: "The client has no secret with this value." }
+          - { code: CONCURRENT_CHANGE, description: "The secrets of the client were changed concurrently by other requests; retry." }
+        authorization:
+          roles: [ TenantManagement, UserManagement, SecretManagement ]
+          dataAccess: Write
+        execution:
+          timeoutSeconds: 30
+          idempotent: true
       # 3.3.0: client roles and overlay URIs. Roles follow the REST parity (ClientsController:
       # IdentityTenantAdministrationWritePolicy = TenantManagement or UserManagement). Granting a built-in role the caller does
       # not hold, or any role to the caller's own client, is refused by the role change guard (METHOD_FORBIDDEN, reason

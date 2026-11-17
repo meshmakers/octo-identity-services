@@ -1,4 +1,15 @@
 "$schema": "https://schemas.meshmakers.cloud/construction-kit-meta.schema.json"
+# 3.4.0 (AB#9037, AB#9039, Feature F5.2 identity wave 2) adds methods only, so the REST secret and data-policy endpoints become
+# facades:
+#   * Client.UpdateSecret-1, ApiResource.AddSecret-1, ApiResource.RemoveSecret-1, ApiResource.UpdateSecret-1 (roles
+#     TenantManagement, UserManagement, SecretManagement as Client.AddSecret-1; secretValue and the generated secret sensitive;
+#     errors SECRET_NOT_FOUND, CONCURRENT_CHANGE). Client.AddSecret-1 and Client.RemoveSecret-1 are unchanged: no error code is
+#     added to them (row M8).
+#   * DataPolicy.SetEnforcementMode-1 (role UserManagement, parameter enforcementMode of the enum DataPolicyEnforcementMode).
+# New methods are additive: Minor (row M1), nothing to acknowledge. No existing type, attribute, record, method, id or default
+# changes; no data migration; ranges [3.0.0,4.0) stay satisfied. Service-managed: ships with the identity release, no catalog
+# import, no FixAll.
+#
 # 3.3.0 (Feature F5.2 identity wave 2) adds methods only, so the REST group and client endpoints become facades:
 #   * Group.AddChildGroup-1 / Group.RemoveChildGroup-1 (nested groups; errors CHILD_GROUP_NOT_FOUND,
 #     CHILD_GROUP_ALREADY_IN_GROUP, CHILD_GROUP_NOT_IN_GROUP, GROUP_CYCLE). Own methods, not a third GroupMemberKind value:
@@ -149,7 +160,7 @@
 # concept AB#5528 in octo-construction-kit-engine). String -> Secret is Minor
 # (CkSemVerClassifier): stored clear-text values stay readable as legacy values
 # until the encrypt sweep has run. Secret requires System >= 2.5 (decision 12).
-modelId: System.Identity-3.3.0
+modelId: System.Identity-3.4.0
 ckLanguage: 2
 dependencies:
   - System-[2.5,3.0)

@@ -54,7 +54,8 @@ public class IdentityMethodHostTests
             SystemIdentityCkIds.ClientSetRolesMethodId, SystemIdentityCkIds.ClientAddRoleMethodId,
             SystemIdentityCkIds.ClientRemoveRoleMethodId, SystemIdentityCkIds.ClientApplyOverlayUrisMethodId,
             SystemIdentityCkIds.ClientCleanOverlayEntriesMethodId,
-            SystemIdentityCkIds.DataPermissionGrantToRoleMethodId, SystemIdentityCkIds.DataPermissionRevokeFromRoleMethodId);
+            SystemIdentityCkIds.DataPermissionGrantToRoleMethodId, SystemIdentityCkIds.DataPermissionRevokeFromRoleMethodId,
+            SystemIdentityCkIds.DataPolicySetEnforcementModeMethodId);
         selected.Should().OnlyContain(h => !h.CarriesSecret);
     }
 
@@ -85,24 +86,26 @@ public class IdentityMethodHostTests
     {
         // AB#8413: POST users and POST users/ResetPassword call these methods in-process; AB#8414: so do the account pages'
         // api/manage/change-password and set-password. With the switch off they are registered local only (not announced,
-        // no queue), so the gateway still answers METHOD_HANDLER_NOT_AVAILABLE.
+        // no queue), so the gateway still answers METHOD_HANDLER_NOT_AVAILABLE. AB#9037: the same for the six secret methods,
+        // whose REST facades are the secret write endpoints of ApiSecretsController.
         IdentityMethodHost.SelectLocalOnlyHandlers(new IdentityMethodsOptions()).Select(h => h.MethodId).Should()
             .BeEquivalentTo(SystemIdentityCkIds.UserCreateUserMethodId, SystemIdentityCkIds.UserResetPasswordMethodId,
-                SystemIdentityCkIds.UserChangePasswordMethodId, SystemIdentityCkIds.UserSetPasswordMethodId);
+                SystemIdentityCkIds.UserChangePasswordMethodId, SystemIdentityCkIds.UserSetPasswordMethodId,
+                SystemIdentityCkIds.ClientAddSecretMethodId, SystemIdentityCkIds.ClientUpdateSecretMethodId,
+                SystemIdentityCkIds.ClientRemoveSecretMethodId, SystemIdentityCkIds.ApiResourceAddSecretMethodId,
+                SystemIdentityCkIds.ApiResourceUpdateSecretMethodId, SystemIdentityCkIds.ApiResourceRemoveSecretMethodId);
         IdentityMethodHost.SelectLocalOnlyHandlers(new IdentityMethodsOptions { EnablePasswordMethods = true }).Should()
             .BeEmpty("with the switch on they are offered on the bus (SelectHandlers) and called in-process from there");
     }
 
     [Fact]
-    public void SwitchOff_TheClientSecretMethods_StayUnregistered()
+    public void SwitchOff_TheSecretMethods_AreNeverOfferedOnTheBus()
     {
-        // No REST facade calls them yet: neither on the bus nor local only.
-        var off = new IdentityMethodsOptions();
-        var registered = IdentityMethodHost.SelectHandlers(off).Concat(IdentityMethodHost.SelectLocalOnlyHandlers(off))
-            .Select(h => h.MethodId).ToList();
-
-        registered.Should().NotContain([
-            SystemIdentityCkIds.ClientAddSecretMethodId, SystemIdentityCkIds.ClientRemoveSecretMethodId
+        // AB#9037: local only (REST facades), never announced while the switch is off.
+        IdentityMethodHost.SelectHandlers(new IdentityMethodsOptions()).Select(h => h.MethodId).Should().NotContain([
+            SystemIdentityCkIds.ClientAddSecretMethodId, SystemIdentityCkIds.ClientUpdateSecretMethodId,
+            SystemIdentityCkIds.ClientRemoveSecretMethodId, SystemIdentityCkIds.ApiResourceAddSecretMethodId,
+            SystemIdentityCkIds.ApiResourceUpdateSecretMethodId, SystemIdentityCkIds.ApiResourceRemoveSecretMethodId
         ]);
     }
 

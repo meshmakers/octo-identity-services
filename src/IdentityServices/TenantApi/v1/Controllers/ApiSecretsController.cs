@@ -1,17 +1,17 @@
-using System.Buffers.Text;
 using System.Diagnostics;
 using System.ComponentModel;
 using System.ComponentModel.DataAnnotations;
-using System.Security.Cryptography;
+using System.Text.Json;
 using Asp.Versioning;
 using IdentityServerPersistence;
 using IdentityServerPersistence.SystemStores;
 using Meshmakers.Common.Shared;
-using Meshmakers.Octo.Common.DistributionEventHub.Services;
 using Meshmakers.Octo.Communication.Contracts.DataTransferObjects;
 using Meshmakers.Octo.Communication.Contracts.DataTransferObjects.ApiErrors;
 using Meshmakers.Octo.Runtime.Contracts;
-using Meshmakers.Octo.Services.Contracts.DistributionEventHub.Messages;
+using Meshmakers.Octo.Services.Contracts.DistributionEventHub.Methods;
+using Meshmakers.Octo.Services.Methods.Facades;
+using Meshmakers.Octo.Backend.IdentityServices.Methods;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Persistence.IdentityCkModel.Generated.System.Identity.v3;
@@ -28,19 +28,28 @@ namespace Meshmakers.Octo.Backend.IdentityServices.TenantApi.v1.Controllers;
 // AB#5861: reads (list, lookup) keep IdentityTenantAdministrationReadPolicy — they return metadata and the stored
 // one-way hash, never a clear text. Every write (create, rotate, delete) needs IdentitySecretAdministrationPolicy
 // (role SecretManagement, staged by IdentityApiAuthorization:SecretManagementRoleEnforcement).
+// AB#9037: every write is a facade of a Client.* / ApiResource.* secret method (docs/identity-rest-facades.md); the reads
+// stay REST reads (secrets are not exposed through GraphQL).
 public class ApiSecretsController : ControllerBase
 {
-    private readonly IDistributionEventHubService _distributionEventHubService;
     private readonly IOctoClientStore _octoClientStore;
     private readonly IOctoResourceStore _octoResourceStore;
+    private readonly IIdentityMethodFacade _methodFacade;
     private readonly ILogger<ApiSecretsController> _logger;
 
+    /// <param name="octoClientStore">Resolves the OAuth client id of the route to the method target</param>
+    /// <param name="octoResourceStore">Resolves the API resource name of the route to the method target</param>
+    /// <param name="methodFacade">
+    ///     Calls the secret methods the write endpoints are facades of (AB#9037): <c>Client.AddSecret/UpdateSecret/RemoveSecret</c>
+    ///     and <c>ApiResource.AddSecret/UpdateSecret/RemoveSecret</c>, in-process, outside any request transaction
+    /// </param>
+    /// <param name="logger">Logger</param>
     public ApiSecretsController(IOctoClientStore octoClientStore, IOctoResourceStore octoResourceStore,
-        IDistributionEventHubService distributionEventHubService, ILogger<ApiSecretsController> logger)
+        IIdentityMethodFacade methodFacade, ILogger<ApiSecretsController> logger)
     {
         _octoClientStore = octoClientStore;
         _octoResourceStore = octoResourceStore;
-        _distributionEventHubService = distributionEventHubService;
+        _methodFacade = methodFacade;
         _logger = logger;
     }
 
@@ -205,6 +214,7 @@ public class ApiSecretsController : ControllerBase
     }
 
     // POST system/v1/apiSecrets/client/xyz
+    /// <summary>Creates a new secret for a client. Facade of the CK method <c>Client.AddSecret-1</c> (AB#9037).</summary>
     [HttpPost("client/{clientId}")]
     [Authorize(IdentityServiceConstants.IdentitySecretAdministrationPolicy)]
     [EndpointSummary("Creates a new secret for a client")]
@@ -220,36 +230,26 @@ public class ApiSecretsController : ControllerBase
             return BadRequest(ModelState);
         }
 
-        var secretDto = GenerateSecret(request);
+        var client = await _octoClientStore.FindRtClientByIdAsync(clientId);
+        if (client == null)
+        {
+            return NotFound();
+        }
 
-        try
-        {
-            var client = await _octoClientStore.MutateAsync(clientId, current =>
+        var response = await _methodFacade.InvokeAsync(IdentityMethodFacade.ClientCkTypeId,
+            SystemIdentityCkIds.ClientAddSecretMethodId, client.RtId.ToString(),
+            new ClientAddSecretParameters { Description = request.Description, ExpirationDate = request.ExpirationDate },
+            User, HttpContext.RequestAborted);
+        return response.ToActionResult(AddSecretOptions(request)
+            .MapError(ClientSecretMethodErrors.ClientSecretNotRequired, _ =>
             {
-                RtSecretRecord secret = new();
-                ApplyToApiSecret(secret, secretDto);
-                current.ClientSecrets.Add(secret);
-                return true;
-            });
-            if (client == null)
-            {
-                return NotFound();
-            }
-
-            await ClearCacheAsync();
-            return Ok(secretDto);
-        }
-        catch (RtVersionConflictException)
-        {
-            return Problem(detail: ConcurrentChangeMessage, statusCode: StatusCodes.Status409Conflict);
-        }
-        catch (Exception e)
-        {
-            return BadRequest(new InternalServerErrorDto(e.Message));
-        }
+                ModelState.AddModelError(nameof(clientId), ClientSecretNotRequiredMessage);
+                return BadRequest(ModelState);
+            }));
     }
 
     // POST system/v1/apiSecrets/apiResource/xyz
+    /// <summary>Creates a new secret for an API resource. Facade of the CK method <c>ApiResource.AddSecret-1</c> (AB#9037).</summary>
     [HttpPost("apiResource/{apiResourceName}")]
     [Authorize(IdentityServiceConstants.IdentitySecretAdministrationPolicy)]
     [EndpointSummary("Creates a new secret for an API resource")]
@@ -265,36 +265,23 @@ public class ApiSecretsController : ControllerBase
             return BadRequest(ModelState);
         }
 
-        var secretDto = GenerateSecret(request);
+        var apiResource = await FindApiResourceAsync(apiResourceName);
+        if (apiResource == null)
+        {
+            return NotFound();
+        }
 
-        try
-        {
-            var apiResource = await _octoResourceStore.MutateApiResourceAsync(apiResourceName, current =>
+        var response = await _methodFacade.InvokeAsync(IdentityMethodFacade.ApiResourceCkTypeId,
+            SystemIdentityCkIds.ApiResourceAddSecretMethodId, apiResource.RtId.ToString(),
+            new ApiResourceAddSecretParameters
             {
-                RtSecretRecord secret = new();
-                ApplyToApiSecret(secret, secretDto);
-                current.ApiSecrets.Add(secret);
-                return true;
-            });
-            if (apiResource == null)
-            {
-                return NotFound();
-            }
-
-            await ClearCacheAsync();
-            return Ok(secretDto);
-        }
-        catch (RtVersionConflictException)
-        {
-            return Problem(detail: ConcurrentChangeMessage, statusCode: StatusCodes.Status409Conflict);
-        }
-        catch (Exception e)
-        {
-            return BadRequest(new InternalServerErrorDto(e.Message));
-        }
+                Description = request.Description, ExpirationDate = request.ExpirationDate
+            }, User, HttpContext.RequestAborted);
+        return response.ToActionResult(AddSecretOptions(request));
     }
 
-    // PUT system/v1/apiSecrets/apiResource/xyz
+    // PUT system/v1/apiSecrets/client/xyz
+    /// <summary>Updates a secret of a client. Facade of the CK method <c>Client.UpdateSecret-1</c> (AB#9037).</summary>
     [HttpPut("client/{clientId}")]
     [Authorize(IdentityServiceConstants.IdentitySecretAdministrationPolicy)]
     [EndpointSummary("Updates a secret")]
@@ -316,36 +303,25 @@ public class ApiSecretsController : ControllerBase
             return BadRequest(ModelState);
         }
 
-        try
+        var client = await _octoClientStore.FindRtClientByIdAsync(clientId);
+        if (client == null)
         {
-            var replaced = false;
-            var client = await _octoClientStore.MutateAsync(clientId,
-                current => replaced = ReplaceSecret(current.ClientSecrets, apiSecretDto));
-            if (client == null)
+            return NotFound();
+        }
+
+        var response = await _methodFacade.InvokeAsync(IdentityMethodFacade.ClientCkTypeId,
+            SystemIdentityCkIds.ClientUpdateSecretMethodId, client.RtId.ToString(),
+            new ClientUpdateSecretParameters
             {
-                return NotFound();
-            }
-
-            if (!replaced)
-            {
-                return NotFound(new NotFoundErrorDto(SecretNotFoundMessage));
-            }
-
-            await ClearCacheAsync();
-        }
-        catch (RtVersionConflictException)
-        {
-            return Problem(detail: ConcurrentChangeMessage, statusCode: StatusCodes.Status409Conflict);
-        }
-        catch (Exception e)
-        {
-            return BadRequest(new InternalServerErrorDto(e.Message));
-        }
-
-        return Ok();
+                SecretValue = apiSecretDto.ValueEncrypted,
+                Description = apiSecretDto.Description,
+                ExpirationDate = apiSecretDto.ExpirationDate
+            }, User, HttpContext.RequestAborted);
+        return response.ToActionResult(WriteSecretOptions(NotFound(), "Updating the secret failed."));
     }
 
     // PUT system/v1/apiSecrets/apiResource/xyz
+    /// <summary>Updates a secret of an API resource. Facade of the CK method <c>ApiResource.UpdateSecret-1</c> (AB#9037).</summary>
     [HttpPut("apiResource/{apiResourceName}")]
     [Authorize(IdentityServiceConstants.IdentitySecretAdministrationPolicy)]
     [EndpointSummary("Updates a secret")]
@@ -367,33 +343,21 @@ public class ApiSecretsController : ControllerBase
             return BadRequest(ModelState);
         }
 
-        try
+        var apiResource = await FindApiResourceAsync(apiResourceName);
+        if (apiResource == null)
         {
-            var replaced = false;
-            var apiResource = await _octoResourceStore.MutateApiResourceAsync(apiResourceName,
-                current => replaced = ReplaceSecret(current.ApiSecrets, apiSecretDto));
-            if (apiResource == null)
+            return NotFound();
+        }
+
+        var response = await _methodFacade.InvokeAsync(IdentityMethodFacade.ApiResourceCkTypeId,
+            SystemIdentityCkIds.ApiResourceUpdateSecretMethodId, apiResource.RtId.ToString(),
+            new ApiResourceUpdateSecretParameters
             {
-                return NotFound();
-            }
-
-            if (!replaced)
-            {
-                return NotFound(new NotFoundErrorDto(SecretNotFoundMessage));
-            }
-
-            await ClearCacheAsync();
-        }
-        catch (RtVersionConflictException)
-        {
-            return Problem(detail: ConcurrentChangeMessage, statusCode: StatusCodes.Status409Conflict);
-        }
-        catch (Exception e)
-        {
-            return BadRequest(new InternalServerErrorDto(e.Message));
-        }
-
-        return Ok();
+                SecretValue = apiSecretDto.ValueEncrypted,
+                Description = apiSecretDto.Description,
+                ExpirationDate = apiSecretDto.ExpirationDate
+            }, User, HttpContext.RequestAborted);
+        return response.ToActionResult(WriteSecretOptions(NotFound(), "Updating the secret failed."));
     }
 
 
@@ -401,7 +365,8 @@ public class ApiSecretsController : ControllerBase
     /// <summary>
     ///     Deletes one secret of a client, named by its stored value in the body (AB#8008). A POST sub-resource, not a
     ///     DELETE with a body: a DELETE body has no defined semantics (RFC 9110) and proxies and client libraries may drop
-    ///     it; the API already uses POST sub-resources for actions (<c>users/{userName}/revokeSessions</c>).
+    ///     it; the API already uses POST sub-resources for actions (<c>users/{userName}/revokeSessions</c>). Facade of the CK
+    ///     method <c>Client.RemoveSecret-1</c> (AB#9037).
     /// </summary>
     [HttpPost("client/{clientId}/" + DeleteAction)]
     [Authorize(IdentityServiceConstants.IdentitySecretAdministrationPolicy)]
@@ -425,7 +390,7 @@ public class ApiSecretsController : ControllerBase
     // DELETE {tenant}/v1/apiSecrets/client/xyz/{base64(stored hash)}
     /// <summary>
     ///     Deprecated (AB#8008): the stored value travels in the URL path. Kept for one release for older octo-cli/SDK
-    ///     clients; use <c>POST apiSecrets/client/{clientId}/delete</c>.
+    ///     clients; use <c>POST apiSecrets/client/{clientId}/delete</c>. Facade of <c>Client.RemoveSecret-1</c> (AB#9037).
     /// </summary>
     [HttpDelete("client/{clientId}/{" + LegacySecretRouteValue + "}")]
     [Authorize(IdentityServiceConstants.IdentitySecretAdministrationPolicy)]
@@ -446,42 +411,24 @@ public class ApiSecretsController : ControllerBase
 
     private async Task<IActionResult> DeleteSecretOfClientCoreAsync(string clientId, string storedValue)
     {
-        try
+        var clientMissing = NotFound(new NotFoundErrorDto($"Client with id '{clientId}' does not exist."));
+        var client = await _octoClientStore.FindRtClientByIdAsync(clientId);
+        if (client == null)
         {
-            // RemoveAll with a predicate (AB#7989): the list of an entity read from the database hands out new
-            // wrapper instances of the stored records, so Remove(wrapper) found nothing and the secret stayed.
-            // The write is version-checked, so a concurrent secret write cannot bring the removed secret back.
-            var removed = 0;
-            var octoClient = await _octoClientStore.MutateAsync(clientId,
-                current => (removed = current.ClientSecrets.RemoveAll(x => x.Value == storedValue)) > 0);
-            if (octoClient == null)
-            {
-                return NotFound(new NotFoundErrorDto($"Client with id '{clientId}' does not exist."));
-            }
+            return clientMissing;
+        }
 
-            if (removed == 0)
-            {
-                return NotFound(new NotFoundErrorDto(SecretNotFoundMessage));
-            }
-
-            await ClearCacheAsync();
-            return Ok();
-        }
-        catch (RtVersionConflictException)
-        {
-            return Problem(detail: ConcurrentChangeMessage, statusCode: StatusCodes.Status409Conflict);
-        }
-        catch (Exception e)
-        {
-            return BadRequest(new InternalServerErrorDto(e.Message));
-        }
+        var response = await _methodFacade.InvokeAsync(IdentityMethodFacade.ClientCkTypeId,
+            SystemIdentityCkIds.ClientRemoveSecretMethodId, client.RtId.ToString(),
+            new ClientRemoveSecretParameters { SecretValue = storedValue }, User, HttpContext.RequestAborted);
+        return response.ToActionResult(WriteSecretOptions(clientMissing, "Deleting the secret failed."));
     }
 
 
     // POST {tenant}/v1/apiSecrets/apiResource/xyz/delete   body: { "valueEncrypted": "<stored hash>" }
     /// <summary>
     ///     Deletes one secret of an API resource, named by its stored value in the body (AB#8008), see
-    ///     <see cref="DeleteClientSecret" />.
+    ///     <see cref="DeleteClientSecret" />. Facade of the CK method <c>ApiResource.RemoveSecret-1</c> (AB#9037).
     /// </summary>
     [HttpPost("apiResource/{apiResourceName}/" + DeleteAction)]
     [Authorize(IdentityServiceConstants.IdentitySecretAdministrationPolicy)]
@@ -505,7 +452,8 @@ public class ApiSecretsController : ControllerBase
     // DELETE {tenant}/v1/apiSecrets/apiResource/xyz/{base64(stored hash)}
     /// <summary>
     ///     Deprecated (AB#8008): the stored value travels in the URL path. Kept for one release for older octo-cli/SDK
-    ///     clients; use <c>POST apiSecrets/apiResource/{apiResourceName}/delete</c>.
+    ///     clients; use <c>POST apiSecrets/apiResource/{apiResourceName}/delete</c>. Facade of
+    ///     <c>ApiResource.RemoveSecret-1</c> (AB#9037).
     /// </summary>
     [HttpDelete("apiResource/{apiResourceName}/{" + LegacySecretRouteValue + "}")]
     [Authorize(IdentityServiceConstants.IdentitySecretAdministrationPolicy)]
@@ -526,34 +474,74 @@ public class ApiSecretsController : ControllerBase
 
     private async Task<IActionResult> DeleteSecretOfApiResourceCoreAsync(string apiResourceName, string storedValue)
     {
-        try
+        var apiResource = await FindApiResourceAsync(apiResourceName);
+        if (apiResource == null)
         {
-            // RemoveAll with a predicate and a version-checked write (AB#7989), see DeleteSecretOfClientCoreAsync.
-            var removed = 0;
-            var apiResource = await _octoResourceStore.MutateApiResourceAsync(apiResourceName,
-                current => (removed = current.ApiSecrets.RemoveAll(x => x.Value == storedValue)) > 0);
-            if (apiResource == null)
-            {
-                return NotFound();
-            }
+            return NotFound();
+        }
 
-            if (removed == 0)
-            {
-                return NotFound(new NotFoundErrorDto(SecretNotFoundMessage));
-            }
-
-            await ClearCacheAsync();
-            return Ok();
-        }
-        catch (RtVersionConflictException)
-        {
-            return Problem(detail: ConcurrentChangeMessage, statusCode: StatusCodes.Status409Conflict);
-        }
-        catch (Exception e)
-        {
-            return BadRequest(new InternalServerErrorDto(e.Message));
-        }
+        var response = await _methodFacade.InvokeAsync(IdentityMethodFacade.ApiResourceCkTypeId,
+            SystemIdentityCkIds.ApiResourceRemoveSecretMethodId, apiResource.RtId.ToString(),
+            new ApiResourceRemoveSecretParameters { SecretValue = storedValue }, User, HttpContext.RequestAborted);
+        return response.ToActionResult(WriteSecretOptions(NotFound(), "Deleting the secret failed."));
     }
+
+    private async Task<RtApiResource?> FindApiResourceAsync(string apiResourceName) =>
+        (await _octoResourceStore.FindRtApiResourcesByNameAsync(new[] { apiResourceName })).FirstOrDefault();
+
+    /// <summary>
+    ///     The REST answer of an add: the earlier body (clear text shown once, the stored hash, the request's expiration date and
+    ///     description), else the shared write mappings. The clear text is only read from the in-process envelope here; it is
+    ///     never logged.
+    /// </summary>
+    private CkMethodFacadeOptions AddSecretOptions(CreateApiSecretRequestDto request) =>
+        WriteSecretOptions(NotFound(), "Creating the secret failed.")
+            .MapSuccess(response =>
+            {
+                var clearText = response.ResultJson == null
+                    ? null
+                    : JsonSerializer.Deserialize<string>(response.ResultJson);
+                if (string.IsNullOrEmpty(clearText))
+                {
+                    return BadRequest(new InternalServerErrorDto("Creating the secret failed."));
+                }
+
+                return Ok(new ApiSecretDto
+                {
+                    ValueClearText = clearText,
+                    ValueEncrypted = OctoSecretHasher.HashSecret(clearText),
+                    ExpirationDate = request.ExpirationDate,
+                    Description = request.Description
+                });
+            });
+
+    /// <summary>
+    ///     The mappings every secret write shares: success <c>200</c> empty, the owner gone <paramref name="ownerMissing" />,
+    ///     no secret with the value <c>404</c> (never echoing the value), a lost concurrent write <c>409</c>, a validation
+    ///     failure <c>400</c> with the field, any other failure <c>400</c> with a fixed message (no exception text leaves the
+    ///     service). Refusals (<c>METHOD_FORBIDDEN</c>) keep the default <c>403</c> problem.
+    /// </summary>
+    private CkMethodFacadeOptions WriteSecretOptions(IActionResult ownerMissing, string failedMessage) =>
+        new CkMethodFacadeOptions()
+            .MapSuccess(_ => Ok())
+            .MapError(CkMethodErrorCodes.MethodTargetNotFound, _ => ownerMissing)
+            .MapError(ClientSecretMethodErrors.SecretNotFound, _ => NotFound(new NotFoundErrorDto(SecretNotFoundMessage)))
+            .MapError(ClientSecretMethodErrors.ConcurrentChange,
+                _ => Problem(detail: ConcurrentChangeMessage, statusCode: StatusCodes.Status409Conflict))
+            .MapError(CkMethodErrorCodes.MethodValidationFailed, error =>
+            {
+                ModelState.AddModelError(error.Parameters.GetValueOrDefault("field") ?? "request",
+                    ValidationMessage(error.Parameters.GetValueOrDefault("field")));
+                return BadRequest(ModelState);
+            })
+            .MapError(CkMethodErrorCodes.MethodHandlerFailed, _ => BadRequest(new InternalServerErrorDto(failedMessage)));
+
+    private static string ValidationMessage(string? field) => field switch
+    {
+        "expirationDate" => "The expiration date must lie in the future.",
+        "description" => "This description is reserved.",
+        _ => "The request is invalid."
+    };
 
     // AB#8008: the action segments of the body variants, and the route value of the deprecated path variants.
     private const string DeleteAction = "delete";
@@ -589,46 +577,8 @@ public class ApiSecretsController : ControllerBase
     private const string ValueEncryptedRequiredMessage =
         "ValueEncrypted is required to identify the secret to update.";
 
-    /// <summary>
-    ///     Generates a new secret: 32 bytes (256 bit) from the CSPRNG, URL-safe Base64 without padding. The
-    ///     returned DTO carries the clear text (shown once) and the stored hash; nothing of it is logged.
-    /// </summary>
-    private static ApiSecretDto GenerateSecret(CreateApiSecretRequestDto request)
-    {
-        var clearText = Base64Url.EncodeToString(RandomNumberGenerator.GetBytes(32));
-        return new ApiSecretDto
-        {
-            ValueClearText = clearText,
-            ValueEncrypted = OctoSecretHasher.HashSecret(clearText),
-            ExpirationDate = request.ExpirationDate,
-            Description = request.Description
-        };
-    }
-
-    // The records handed out by the secret list are snapshots: changing one in place is not written back
-    // with the entity, so the updated record replaces the old one in the list. Returns false when no secret
-    // has the value of the update.
-    private static bool ReplaceSecret(IList<RtSecretRecord> secrets, ApiSecretDto update)
-    {
-        for (var i = 0; i < secrets.Count; i++)
-        {
-            if (secrets[i].Value == update.ValueEncrypted)
-            {
-                RtSecretRecord replacement = new();
-                ApplyToApiSecret(replacement, update);
-                secrets[i] = replacement;
-                return true;
-            }
-        }
-
-        return false;
-    }
-
-    private Task ClearCacheAsync()
-    {
-        return _distributionEventHubService.PublishAsync(new CorsClientsUpdate(_octoResourceStore.TenantId,
-            Guid.NewGuid(), DateTime.Now));
-    }
+    private const string ClientSecretNotRequiredMessage =
+        "The client does not use a secret (RequireClientSecret is false).";
 
     private static ApiSecretDto CreateApiSecret(RtSecretRecord secret)
     {
@@ -640,12 +590,5 @@ public class ApiSecretsController : ControllerBase
         };
 
         return apiSecretDto;
-    }
-
-    private static void ApplyToApiSecret(RtSecretRecord secret, ApiSecretDto apiSecretDto)
-    {
-        secret.ExpirationDateTime = apiSecretDto.ExpirationDate;
-        secret.Description = apiSecretDto.Description;
-        secret.Value = apiSecretDto.ValueEncrypted;
     }
 }

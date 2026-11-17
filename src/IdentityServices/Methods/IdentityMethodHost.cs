@@ -86,9 +86,18 @@ internal static class IdentityMethodHost
         For<ClientCleanOverlayEntriesHandler>(SystemIdentityCkIds.ClientCleanOverlayEntriesMethodId, false),
         For<DataPermissionGrantToRoleHandler>(SystemIdentityCkIds.DataPermissionGrantToRoleMethodId, false),
         For<DataPermissionRevokeFromRoleHandler>(SystemIdentityCkIds.DataPermissionRevokeFromRoleMethodId, false),
-        // Client secret methods carry a secret (sensitive result / parameter): gated like the password methods (AB#7780).
-        For<ClientAddSecretHandler>(SystemIdentityCkIds.ClientAddSecretMethodId, true),
-        For<ClientRemoveSecretHandler>(SystemIdentityCkIds.ClientRemoveSecretMethodId, true)
+        // System.Identity 3.4.0 (AB#9039): REST PUT dataPermissions/policies/{policyRtId}/enforcementMode is its facade.
+        For<DataPolicySetEnforcementModeHandler>(SystemIdentityCkIds.DataPolicySetEnforcementModeMethodId, false),
+        // Secret methods carry a secret (sensitive result / parameter): gated like the password methods (AB#7780). The REST
+        // secret write endpoints of ApiSecretsController are their facades (AB#9037): local only while the switch is off.
+        For<ClientAddSecretHandler>(SystemIdentityCkIds.ClientAddSecretMethodId, true, servesRestFacade: true),
+        For<ClientRemoveSecretHandler>(SystemIdentityCkIds.ClientRemoveSecretMethodId, true, servesRestFacade: true),
+        For<ClientUpdateSecretHandler>(SystemIdentityCkIds.ClientUpdateSecretMethodId, true, servesRestFacade: true),
+        For<ApiResourceAddSecretHandler>(SystemIdentityCkIds.ApiResourceAddSecretMethodId, true, servesRestFacade: true),
+        For<ApiResourceRemoveSecretHandler>(SystemIdentityCkIds.ApiResourceRemoveSecretMethodId, true,
+            servesRestFacade: true),
+        For<ApiResourceUpdateSecretHandler>(SystemIdentityCkIds.ApiResourceUpdateSecretMethodId, true,
+            servesRestFacade: true)
     ];
 
     /// <summary>

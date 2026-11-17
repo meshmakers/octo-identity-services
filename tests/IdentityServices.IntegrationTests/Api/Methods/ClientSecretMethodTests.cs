@@ -92,12 +92,26 @@ public class ClientSecretMethodTests : IntegrationTestBase
     }
 
     [Fact]
-    public void SwitchOff_TheHostRegistersNoSecretHandler_SoTheGatewayAnswersHandlerNotAvailable()
+    public void SwitchOff_TheSecretHandlersAreLocalOnly_ForTheRestFacades_AndNotOfferedOnTheBus()
     {
-        using var scope = Factory.Services.CreateScope();
-        scope.ServiceProvider.GetService<ClientAddSecretHandler>().Should().BeNull();
-        scope.ServiceProvider.GetService<ClientRemoveSecretHandler>().Should().BeNull();
+        // AB#9037: the REST secret write endpoints are facades of the secret methods, so with the switch off (every
+        // environment's default) their handlers are registered local only: this process calls them in-process, the gateway
+        // still gets METHOD_HANDLER_NOT_AVAILABLE and no secret reaches the broker.
+        var transport = Factory.Services.GetRequiredService<ICkInProcessMethodTransport>();
+        var offered = IdentityMethodHost.SelectHandlers(new IdentityMethodsOptions()).Select(h => h.MethodId).ToList();
+        foreach (var methodId in SecretMethodIds)
+        {
+            transport.CanHandle(methodId).Should().BeTrue(methodId);
+            offered.Should().NotContain(methodId);
+        }
     }
+
+    private static readonly string[] SecretMethodIds =
+    [
+        SystemIdentityCkIds.ClientAddSecretMethodId, SystemIdentityCkIds.ClientRemoveSecretMethodId,
+        SystemIdentityCkIds.ClientUpdateSecretMethodId, SystemIdentityCkIds.ApiResourceAddSecretMethodId,
+        SystemIdentityCkIds.ApiResourceRemoveSecretMethodId, SystemIdentityCkIds.ApiResourceUpdateSecretMethodId
+    ];
 
     [Fact]
     public void SwitchOn_TheHostHostsBothHandlers()
