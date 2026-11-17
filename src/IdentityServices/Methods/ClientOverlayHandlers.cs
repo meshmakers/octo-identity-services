@@ -164,11 +164,12 @@ internal sealed class ClientApplyOverlayUrisHandler(IServiceProvider services)
         CkMethodContext<ClientApplyOverlayUrisParameters> context, CancellationToken cancellationToken)
     {
         var details = new Dictionary<string, string>(StringComparer.Ordinal);
-        return AuditedAsync(context, details, () => ApplyAsync(context, details));
+        return AuditedAsync(context, details, () => ApplyAsync(context, details, cancellationToken));
     }
 
     private async Task<CkMethodOutcome<ClientApplyOverlayUrisResult>> ApplyAsync(
-        CkMethodContext<ClientApplyOverlayUrisParameters> context, Dictionary<string, string> details)
+        CkMethodContext<ClientApplyOverlayUrisParameters> context, Dictionary<string, string> details,
+        CancellationToken cancellationToken)
     {
         if (await AdmitAsync(context.CallerPrincipal, context.TenantId).ConfigureAwait(false) is { } refused)
         {
@@ -200,6 +201,20 @@ internal sealed class ClientApplyOverlayUrisHandler(IServiceProvider services)
         if (client == null || string.IsNullOrWhiteSpace(client.ClientId))
         {
             return CkMethodOutcome<ClientApplyOverlayUrisResult>.TargetNotFound();
+        }
+
+        // CWE-863: the target client's data permission, as the GraphQL gateway checks it before dispatch; the REST facade
+        // calls in-process.
+        var call = new IdentityMethodCall(Services, context.CallerPrincipal!);
+        if (await call.CheckTargetWritableAsync(client.ToRtEntityId(), cancellationToken).ConfigureAwait(false) is
+            { } denied)
+        {
+            foreach (var (key, value) in call.Details)
+            {
+                details[key] = value;
+            }
+
+            return CkMethodOutcome<ClientApplyOverlayUrisResult>.Fail(denied.Failure!);
         }
 
         details[ClientSecretMethodHandlerBase.ClientIdDetail] = client.ClientId;

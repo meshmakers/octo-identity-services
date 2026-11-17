@@ -1,3 +1,4 @@
+using Meshmakers.Octo.Runtime.Contracts;
 using IdentityServerPersistence.SystemStores;
 using Meshmakers.Octo.Backend.IdentityServices.Authorization.RoleChange;
 using Meshmakers.Octo.Communication.Contracts;
@@ -130,6 +131,16 @@ internal abstract class UserRoleMethodHandlerBase<TParameters>(IServiceProvider 
         if (user == null)
         {
             return CkMethodOutcome.TargetNotFound();
+        }
+
+        // CWE-863: the target user's data permission, as the GraphQL gateway checks it before dispatch (see
+        // IdentityMethodCall.CheckTargetWritableAsync); the REST facades call in-process.
+        if (await new IdentityMethodCall(services, context.CallerPrincipal!).CheckTargetWritableAsync(
+                new RtEntityId(RtEntityExtensions.GetRtCkTypeId<RtUser>(), user.RtId), cancellationToken)
+                .ConfigureAwait(false) is { } denied)
+        {
+            change.RefusalReason = denied.Failure?.Parameters.GetValueOrDefault("reason");
+            return denied;
         }
 
         var scope = new UserRoleScope(userManager, services.GetRequiredService<RoleManager<RtRole>>(),

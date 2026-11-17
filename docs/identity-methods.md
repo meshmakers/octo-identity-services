@@ -319,3 +319,11 @@ are the Feature's `Tenant.ProvisionAdmin`.
   events (`Identity.CrossTenantGrantCreated/Changed/Removed`) as before, with the caller's stored user name (a service caller: its client id).
 - REST facades and parity table: `docs/identity-rest-facades.md`. Tests: `Api/TenantApi/AdminProvisioningRestMethodFacadeTests`, the controller-level
   persistence suites through `ProvisioningMethodTestFacade`, `Controllers/AdminProvisioningDeleteAuditTests`.
+
+## Target data permission in the handlers
+
+Every handler of an instance method that a REST facade calls evaluates its target with `IdentityMethodCall.CheckTargetWritableAsync`
+(not readable = `METHOD_TARGET_NOT_FOUND`, read only = `METHOD_FORBIDDEN` / `data-permission`), the check the GraphQL gateway runs before
+dispatch: in `IdentityAdminMethodHandlerBase` for all its methods (target type from the registered method id), in `UserRoleMethodHandlerBase`,
+`UserResetPasswordHandler`, `ClientApplyOverlayUrisHandler`, `SecretOwnerMethodHandlerBase` and `ClientMirrorMethodHandlerBase`. List of the REST
+answers this changed: `docs/identity-rest-facades.md` ("The target's data permission on every facade").

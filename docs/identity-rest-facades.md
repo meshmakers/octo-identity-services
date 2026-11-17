@@ -382,6 +382,42 @@ without the role; revoke of a granted unreadable role; policy and permission not
 
 Neither group of endpoints carries a deprecation yet (deprecation wave of identity wave 2 is its own story); REST is not removed and gets no `Sunset` header.
 
+## The target's data permission on every facade (transport-independent verdict)
+
+The GraphQL gateway evaluates the declared `dataAccess: Write` of a method on its **target** before it dispatches; a REST facade dispatches
+in-process (`IIdentityMethodFacade`), where no gateway runs. So every handler that serves a REST facade evaluates its target itself, with the
+gateway's answers: a target the caller cannot read = `METHOD_TARGET_NOT_FOUND`, one it may read but not write = `METHOD_FORBIDDEN` with
+`reason = data-permission`, nothing changed. One place for the instance methods of `IdentityAdminMethodHandlerBase` (the target's CK type
+comes from the method id the handler is registered for, never from the request): `Group.*`, `Client.SetRoles/AddRole/RemoveRole`,
+`DataPermission.*`, `DataPolicy.SetEnforcementMode`, `User.Merge`, `User.DisableTwoFactor`; plus `UserRoleMethodHandlerBase`
+(`User.SetRoles/AddRole/RemoveRole`), `User.ResetPassword` and `Client.ApplyOverlayUris`. The secret methods
+(`SecretOwnerMethodHandlerBase`) and the client mirror methods (`ClientMirrorMethodHandlerBase`) use the same check
+(`IdentityMethodCall.CheckTargetWritableAsync`). On the GraphQL path nothing changes: the gateway refuses first with the same codes.
+
+Not affected: the static methods (`User.CreateUser`, `Client.CleanOverlayEntries`, the `ExternalTenantUserMapping` methods: no target entity, the
+gateway has nothing to evaluate either) and the account-owner methods (`User.ChangePassword`, `User.SetPassword`: `allowSelf` on the caller's own
+user through the account pages).
+
+Changed REST answers - only with an **enforcing data policy on the target type** (open by default); **intended change**, reason: the verdict no
+longer depends on the transport (REST wrote a target that GraphQL refused, CWE-863):
+
+| REST endpoint | Target type | Before | Now: target not readable / readable but not writable |
+|---|---|---|---|
+| `PUT groups/{group}/roles` | Group | `200`, written | `404` / `403` problem `METHOD_FORBIDDEN` (`data-permission`), nothing changed |
+| `PUT` / `DELETE groups/{group}/members/users/{user}`, `…/members/clients/{client}` | Group | `200`, written | `404` / `403`, nothing changed |
+| `PUT` / `DELETE groups/{group}/members/groups/{child}` | Group | `200`, written | `404` / `403`, nothing changed |
+| `PUT clients/{client}/roles`, `PUT` / `DELETE clients/{client}/roles/{role}` | Client | `200`, written | `404` / `403`, nothing changed |
+| `POST clients/{client}/overlayUris` | Client | `200`, written | `404` / `403`, nothing changed |
+| `PUT users/{user}/roles`, `PUT` / `DELETE users/{user}/roles/{role}` | User | `200`, written | `404` / `403`, nothing changed |
+| `POST users/{user}/merge` (the target user; the source was already checked) | User | `200`, merged | `404` / `403`, nothing merged |
+| `POST users/ResetPassword` | User | `200`, password reset | `404` / `403`, password unchanged |
+
+Unchanged: the secret writes, the data-permission grants and the enforcement switch (they checked their target already), the client mirror and admin
+provisioning endpoints (checked from the start). Each refusal writes the usual `Identity.Method` event with the code (and `reason`).
+
+Tests: `Api/TenantApi/TargetDataPermissionRestParityTests` (every row above that writes a role, member, overlay URI or password, both decisions: the REST
+answer and the dispatcher's answer agree, one event each, nothing changed; without an enforcing policy REST still writes).
+
 ## REST facades of the client mirror endpoints (System.Identity 3.5.0)
 
 The write endpoints of `ClientMirrorController` and `ClientAutoProvisionFlagController` are **facades** of the client mirror methods on the parent

@@ -581,8 +581,10 @@ public class GroupMethodTests(CustomWebApplicationFactory factory) : GroupMethod
         evaluator.EvaluateAsync(Arg.Any<Meshmakers.Octo.Runtime.Contracts.Repositories.IRuntimeRepository>(),
                 Arg.Any<RtSecurityContext>(), Arg.Any<RtEntityId>(), Arg.Any<RtDataAction>(), Arg.Any<bool>(),
                 Arg.Any<CancellationToken>())
-            .Returns(new RtDataPermissionVerdict(RtDataPermissionDecision.NotVisible,
-                RtDataPermissionReason.NoGrant));
+            // the target group stays readable and writable (the handler checks it); the member and the role are hidden
+            .Returns(call => call.ArgAt<RtEntityId>(2).CkTypeId == RtEntityExtensions.GetRtCkTypeId<RtGroup>()
+                ? new RtDataPermissionVerdict(RtDataPermissionDecision.Allowed, RtDataPermissionReason.Open)
+                : new RtDataPermissionVerdict(RtDataPermissionDecision.NotVisible, RtDataPermissionReason.NoGrant));
         using var restricted = Host.WithWebHostBuilder(b => b.ConfigureTestServices(s => s.AddSingleton(evaluator)));
         var group = await NewGroupAsync();
         var user = await NewUserAsync();

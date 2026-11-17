@@ -16,6 +16,11 @@ using Microsoft.AspNetCore.TestHost;
 using Microsoft.Extensions.DependencyInjection;
 using Persistence.IdentityCkModel.Generated.System.Identity.v3;
 using Shared.TestUtilities.Builders;
+using Meshmakers.Octo.Runtime.Contracts.DataPermissions;
+using Meshmakers.Octo.Runtime.Contracts.Repositories;
+using Meshmakers.Octo.Runtime.Contracts;
+using NSubstitute;
+using Meshmakers.Octo.Runtime.Contracts.RepositoryEntities;
 using Xunit;
 
 namespace IdentityServices.IntegrationTests.Api.TenantApi;
@@ -220,6 +225,7 @@ public class GroupRestMethodFacadeTests : IntegrationTestBase, IDisposable
         // so the removal is refused (403 METHOD_FORBIDDEN / data-permission) instead of answering a success that changed nothing.
         var host = Host(denyReads: true);
         var group = await NewGroupAsync();
+        _readableTargets.Add(group.RtId);
         var user = await NewUserAsync();
         var child = await NewGroupAsync();
         await WithGroupStoreAsync(s => s.AddMemberUserAsync(group.RtId, user.RtId.ToString()));
@@ -249,6 +255,7 @@ public class GroupRestMethodFacadeTests : IntegrationTestBase, IDisposable
     {
         var host = Host(denyReads: true);
         var group = await NewGroupAsync();
+        _readableTargets.Add(group.RtId);
         var roleId = await NewRoleIdAsync();
         await WithGroupStoreAsync(s => s.SetRoleIdsAsync(group.RtId, [roleId]));
         using var client = FacadeCaller.User(UserManagement).Client(host);
@@ -294,7 +301,7 @@ public class GroupRestMethodFacadeTests : IntegrationTestBase, IDisposable
             services.AddSingleton<IStartupFilter, MarkRequestsStartupFilter>();
             if (denyReads)
             {
-                services.AddSingleton(FacadeDataPolicy.DenyAllReads());
+                services.AddSingleton(DenyAllReadsButTheTargets());
             }
         }));
         _hosts.Add(host);
@@ -402,6 +409,24 @@ public class GroupRestMethodFacadeTests : IntegrationTestBase, IDisposable
         using var scope = CreateScope();
         return (await scope.ServiceProvider.GetRequiredService<IGroupStore>().GetMemberGroupIdsAsync(group.RtId))
             .Order().ToArray();
+    }
+
+    /// <summary>The target groups of the enforcing-policy tests: readable and writable (the handler checks the target too).</summary>
+    private readonly HashSet<OctoObjectId> _readableTargets = [];
+
+    /// <summary>
+    ///     An enforcing policy that hides every entity except the groups in <see cref="_readableTargets" />: members, child
+    ///     groups and roles are unreadable, the target group itself may be read and written.
+    /// </summary>
+    private IRtDataPermissionEvaluator DenyAllReadsButTheTargets()
+    {
+        var evaluator = Substitute.For<IRtDataPermissionEvaluator>();
+        evaluator.EvaluateAsync(Arg.Any<IRuntimeRepository>(), Arg.Any<RtSecurityContext>(), Arg.Any<RtEntityId>(),
+                Arg.Any<RtDataAction>(), Arg.Any<bool>(), Arg.Any<CancellationToken>())
+            .Returns(call => _readableTargets.Contains(call.ArgAt<RtEntityId>(2).RtId)
+                ? new RtDataPermissionVerdict(RtDataPermissionDecision.Allowed, RtDataPermissionReason.Open)
+                : new RtDataPermissionVerdict(RtDataPermissionDecision.NotVisible, RtDataPermissionReason.NoGrant));
+        return evaluator;
     }
 
     #endregion

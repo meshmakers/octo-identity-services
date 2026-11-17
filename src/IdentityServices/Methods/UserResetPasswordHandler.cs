@@ -1,3 +1,4 @@
+using Meshmakers.Octo.Runtime.Contracts;
 using IdentityServerPersistence.Services;
 using Meshmakers.Octo.Backend.IdentityServices.Services;
 using Meshmakers.Octo.ConstructionKit.Contracts;
@@ -99,6 +100,15 @@ internal sealed class UserResetPasswordHandler(
         if (user == null)
         {
             return (CkMethodOutcome.TargetNotFound(), false);
+        }
+
+        // CWE-863: the target user's data permission, as the GraphQL gateway checks it before dispatch; the REST facade
+        // calls in-process.
+        if (await new IdentityMethodCall(services, principal).CheckTargetWritableAsync(
+                new RtEntityId(RtEntityExtensions.GetRtCkTypeId<RtUser>(), user.RtId), cancellationToken)
+                .ConfigureAwait(false) is { } denied)
+        {
+            return (denied, false);
         }
 
         // AB#5708: cross-tenant shadow users sign in through their home tenant and have no local password.

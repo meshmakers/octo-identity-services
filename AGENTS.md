@@ -150,6 +150,10 @@ wird, sind alle anderen Pre-Commit-Regeln (Lint etc.) ebenfalls hinfällig.
   `AdminProvisioningService`); the REST writes are facades. A handler that writes into another tenant checks that tenant against the caller's token
   tenant subtree (`AdminProvisioningTargetScope`, shared with the REST filter) before any lookup or write: `docs/identity-rest-facades.md`,
   `docs/identity-methods.md`.
+- **Every handler that serves a REST facade checks its target's data permission itself** (`IdentityMethodCall.CheckTargetWritableAsync`,
+  gateway answers `METHOD_TARGET_NOT_FOUND` / `METHOD_FORBIDDEN` `data-permission`): the REST facade dispatches in-process, where the GraphQL
+  gateway's check does not run. A new instance method on `IdentityAdminMethodHandlerBase` gets it for free; any other handler base must call it:
+  `docs/identity-rest-facades.md`.
 - **The wire protocol stays Duende-compatible** (endpoint paths, discovery, token shape, claims); the golden-file
   tests pin it: `docs/openiddict-protocol.md`.
 - **Every CK attribute declares its `ownership`** (`OCTO-CK001` fails the build), and a change of System.Identity

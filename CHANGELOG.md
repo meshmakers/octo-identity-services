@@ -5,6 +5,16 @@ Notable changes of the OctoMesh identity services. The CK model `System.Identity
 
 ## Unreleased
 
+### Security
+
+- **Every REST facade of an identity method checks the target's data permission, as the GraphQL gateway does.** Under an enforcing data
+  policy on groups, clients or users, the REST group role and membership endpoints, the client role and overlay URI endpoints, the user role
+  endpoints, the user merge (target user) and the administrator password reset wrote a target the caller may not read or write, while the
+  same method over GraphQL refused it (CWE-863: the REST facade dispatches in-process, where no gateway runs). The handlers now evaluate
+  the target themselves with the gateway's answers: not readable = `404` (`METHOD_TARGET_NOT_FOUND`), readable but not writable = `403`
+  problem `METHOD_FORBIDDEN` (`data-permission`), nothing changed. Intended REST change, listed per endpoint in
+  `docs/identity-rest-facades.md`; the GraphQL answers do not change, and nothing changes without an enforcing policy (open by default).
+
 ### Changed
 
 - **The REST client mirror endpoints run the client mirror methods, the REST admin provisioning writes and the mapping create run
