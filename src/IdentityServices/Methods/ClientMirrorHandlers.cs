@@ -193,8 +193,8 @@ internal abstract class ClientMirrorVoidHandlerBase<TParameters>(IServiceProvide
 ///     Handler of <c>System.Identity/Client.ProvisionMirrors-1</c>: the backfill of every flagged client of the tenant into
 ///     every existing child tenant. REST facade: <c>POST {tenant}/v1/clients/{clientId}/mirrors/provisionInExistingTenants</c>.
 ///     The target client must carry <c>AutoProvisionInChildTenants</c> (<c>AUTO_PROVISION_DISABLED</c>). The child tenants
-///     come from the tenant registry (direct children; every tenant for the system tenant), so no caller-named tenant is
-///     involved.
+///     come from the tenant registry (direct children; every tenant for the system tenant). The tenant of the call itself must
+///     lie in the caller's tenant subtree (the target rule of <see cref="CrossTenantMethodSupport.CheckTargetTenantAsync" />).
 /// </summary>
 internal sealed class ClientProvisionMirrorsHandler(IServiceProvider services)
     : ClientMirrorResultHandlerBase<ClientProvisionMirrorsParameters, ClientProvisionMirrorsResult>(services)
@@ -202,6 +202,14 @@ internal sealed class ClientProvisionMirrorsHandler(IServiceProvider services)
     protected override async Task<CkMethodOutcome<ClientProvisionMirrorsResult>> ApplyAsync(IdentityMethodCall call,
         RtClient client, ClientProvisionMirrorsParameters parameters, string tenantId, CancellationToken cancellationToken)
     {
+        // The backfill writes into the children of the tenant of the call: an allow-listed cross-tenant service client may
+        // call in a tenant outside its own subtree, so that tenant is judged by the target rule like a named child tenant.
+        if (await CrossTenantMethodSupport.CheckTargetTenantAsync(call, SystemIdentityCkIds.ClientProvisionMirrorsMethodId,
+                tenantId).ConfigureAwait(false) is { } outOfScope)
+        {
+            return outOfScope;
+        }
+
         if (!client.AutoProvisionInChildTenants)
         {
             return new CkMethodFailure(ClientMirrorMethodErrors.AutoProvisionDisabled);
@@ -279,7 +287,8 @@ internal sealed class ClientProvisionMirrorInTenantHandler(IServiceProvider serv
 /// </summary>
 /// <remarks>
 ///     Caller rule of the REST policy <c>IdentitySecretAdministrationPolicy</c>: <c>SecretManagement</c>, staged by
-///     <c>SecretManagementRoleEnforcement</c> (as the secret methods). The mirror is identified by its tracking row; an
+///     <c>SecretManagementRoleEnforcement</c> (as the secret methods) - for a call of its REST facade only; a call over the
+///     bus or the GraphQL gateway is never staged. The mirror is identified by its tracking row; an
 ///     untracked pair is <c>MIRROR_NOT_FOUND</c>, a public client <c>CLIENT_SECRET_NOT_REQUIRED</c>. The secret is minted,
 ///     hashed and stored by <see cref="IClientMirrorProvisioningService.RotateMirrorSecretAsync" /> (marked as the mirror's
 ///     own secret, so the mirror sync keeps it); the clear text goes only into the result, never into a log, audit detail or
@@ -292,6 +301,14 @@ internal sealed class ClientRotateMirrorSecretHandler(IServiceProvider services)
     {
         var decision = SecretOwnerMethodHandlerBase<RtClient>.DecideSecretCaller(principal,
             Services.GetRequiredService<IOptionsMonitor<IdentityApiAuthorizationOptions>>().CurrentValue);
+        // The staged Warn exists for existing REST callers. A call that did not come from a REST facade of this process
+        // (the GraphQL gateway, the bus) is a new path and is never staged: decided by the transport, not by the principal.
+        if (decision == IdentityApiRoleDecision.AllowedByStagedWarn &&
+            (principal == null || !CrossTenantMethodSupport.IsRestFacadeCall(principal)))
+        {
+            decision = IdentityApiRoleDecision.Denied;
+        }
+
         if (decision == IdentityApiRoleDecision.AllowedByStagedWarn)
         {
             Services.GetRequiredService<ILogger<ClientRotateMirrorSecretHandler>>().LogWarning(

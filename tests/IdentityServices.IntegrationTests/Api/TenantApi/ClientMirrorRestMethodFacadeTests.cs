@@ -393,6 +393,53 @@ public class ClientMirrorRestMethodFacadeTests : IntegrationTestBase, IDisposabl
             .Equal(ownBefore, "no new mirror secret was issued");
     }
 
+    [Fact]
+    public async Task TheBackfill_InATenantOutsideTheCallersSubtree_IsRefused_AndNothingIsWritten()
+    {
+        var host = Host(true);
+        var (parent, child, client) = await IsolatedParentAsync();
+        var sibling = await CreateChildTenantAsync();
+        // A caller past the tenant check whose token tenant is a sibling of the tenant it calls in, as an allow-listed
+        // cross-tenant service client is: the backfill would write into the children of a tenant outside its subtree.
+        var caller = Admin(sibling);
+
+        var refusal = await DispatchAsync(host, caller, SystemIdentityCkIds.ClientProvisionMirrorsMethodId,
+            client.RtId.ToString(), new ClientProvisionMirrorsParameters(), parent);
+
+        refusal.Error!.Code.Should().Be(CkMethodErrorCodes.MethodForbidden);
+        refusal.Error.Parameters.Should().Contain("reason", CrossTenantMethodSupport.TenantOutOfScopeReason);
+        (await GetTrackingRowAsync(client.ClientId!, child, parent)).Should().BeNull();
+        (await FindMirrorAsync(child, client.ClientId!)).Should().BeNull("no client is written in the child tenant");
+    }
+
+    [Fact]
+    public async Task TheRotation_UnderRoleEnforcementWarn_IsStagedForItsRestFacadeOnly_NeverOnTheBus()
+    {
+        var host = Host(true, enforceSecretManagement: true, roleEnforcementWarn: true);
+        var ct = TestContext.Current.CancellationToken;
+        var client = await NewClientAsync(flagged: true);
+        var child = await CreateChildTenantAsync();
+        await ProvisionAsync(host, client, child);
+        var ownBefore = OwnSecretValues(await FindMirrorAsync(child, client.ClientId!));
+
+        // A caller with TenantManagement only, without SecretManagement: refused over the bus (the GraphQL gateway).
+        var refusal = await DispatchAsync(host,
+            new CkMethodPrincipal(Guid.NewGuid().ToString("N"), [TenantManagement], ["octo_api"])
+                { TokenTenantId = NormalizedSystemTenantId },
+            SystemIdentityCkIds.ClientRotateMirrorSecretMethodId, client.RtId.ToString(),
+            new ClientRotateMirrorSecretParameters { ChildTenantId = child });
+
+        refusal.Error!.Code.Should().Be(CkMethodErrorCodes.MethodForbidden);
+        refusal.Error.Parameters.Should().Contain("reason", "role-required");
+        OwnSecretValues(await FindMirrorAsync(child, client.ClientId!)).Should()
+            .Equal(ownBefore, "no new mirror secret was issued over the bus");
+
+        // The same caller through the REST facade keeps the staged answer of existing REST callers.
+        using var http = FacadeCaller.User(TenantManagement).Client(host);
+        var rotated = await http.PostAsync(MirrorsUrl(client, $"{child}/secret"), null, ct);
+        rotated.StatusCode.Should().Be(HttpStatusCode.OK, await rotated.Content.ReadAsStringAsync(ct));
+    }
+
     #endregion
 
     #region Helpers
@@ -433,10 +480,15 @@ public class ClientMirrorRestMethodFacadeTests : IntegrationTestBase, IDisposabl
     }
 
     private WebApplicationFactory<Program> Host(bool enablePasswordMethods, bool enforceTenantGate = false,
-        bool enforceSecretManagement = false, IRtDataPermissionEvaluator? evaluator = null)
+        bool enforceSecretManagement = false, IRtDataPermissionEvaluator? evaluator = null, bool roleEnforcementWarn = false)
     {
         var host = Factory.WithWebHostBuilder(b =>
         {
+            if (roleEnforcementWarn)
+            {
+                b.UseSetting("IdentityApiAuthorization:RoleEnforcement", "Warn");
+            }
+
             b.UseSetting("Methods:Identity:EnablePasswordMethods", enablePasswordMethods ? "true" : "false");
             if (enforceTenantGate)
             {
