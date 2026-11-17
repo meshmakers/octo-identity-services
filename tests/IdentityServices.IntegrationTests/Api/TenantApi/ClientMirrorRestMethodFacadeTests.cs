@@ -227,6 +227,34 @@ public class ClientMirrorRestMethodFacadeTests : IntegrationTestBase, IDisposabl
         AssertSecretNowhere(methodSecret);
     }
 
+    [Fact]
+    public async Task Backfill_RestAndMethod_ProvisionTheSameMirrors()
+    {
+        var host = Host(true);
+        var ct = TestContext.Current.CancellationToken;
+        var (restParent, restChild, restClient) = await IsolatedParentAsync();
+        var (methodParent, methodChild, methodClient) = await IsolatedParentAsync();
+        using var http = FacadeCaller.User(TenantManagement).Client(host);
+
+        var rest = await http.PostAsync(MirrorsUrl(restClient, "provisionInExistingTenants", restParent), null, ct);
+        var method = await DispatchAsync(host, Admin(methodParent), SystemIdentityCkIds.ClientProvisionMirrorsMethodId,
+            methodClient.RtId.ToString(), new ClientProvisionMirrorsParameters(), methodParent);
+
+        rest.StatusCode.Should().Be(HttpStatusCode.OK, await rest.Content.ReadAsStringAsync(ct));
+        method.Success.Should().BeTrue(method.Error?.Code);
+        var restBody = (await rest.Content.ReadFromJsonAsync<ClientMirrorBackfillResponseDto>(ct))!;
+        using var methodBody = JsonDocument.Parse(method.ResultJson!);
+        restBody.ChildTenantsConsidered.Should().Be(1);
+        restBody.NewlyProvisioned.Should().Be(1);
+        methodBody.RootElement.GetProperty("childTenantsConsidered").GetInt32().Should().Be(restBody.ChildTenantsConsidered);
+        methodBody.RootElement.GetProperty("newlyProvisioned").GetInt32().Should().Be(restBody.NewlyProvisioned);
+        methodBody.RootElement.GetProperty("alreadyPresent").GetInt32().Should().Be(restBody.AlreadyPresent);
+        (await GetTrackingRowAsync(restClient.ClientId!, restChild, restParent)).Should().NotBeNull();
+        (await GetTrackingRowAsync(methodClient.ClientId!, methodChild, methodParent)).Should().NotBeNull();
+        (await FindMirrorAsync(restChild, restClient.ClientId!)).Should().NotBeNull();
+        (await FindMirrorAsync(methodChild, methodClient.ClientId!)).Should().NotBeNull();
+    }
+
     #endregion
 
     #region Cross-tenant rule and abuse cases
@@ -315,7 +343,8 @@ public class ClientMirrorRestMethodFacadeTests : IntegrationTestBase, IDisposabl
                      (SystemIdentityCkIds.ClientRotateMirrorSecretMethodId,
                          new ClientRotateMirrorSecretParameters { ChildTenantId = child }),
                      (SystemIdentityCkIds.ClientSetMirrorAutoProvisionMethodId,
-                         new ClientSetMirrorAutoProvisionParameters { Enabled = false })
+                         new ClientSetMirrorAutoProvisionParameters { Enabled = false }),
+                     (SystemIdentityCkIds.ClientRemoveMirrorMethodId, new ClientRemoveMirrorParameters { ChildTenantId = child })
                  })
         {
             (await DispatchAsync(host, outsider, methodId, client.RtId.ToString(), parameters, parent)).Error!.Code.Should()

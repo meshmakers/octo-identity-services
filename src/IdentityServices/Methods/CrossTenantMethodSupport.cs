@@ -30,10 +30,15 @@ internal static class CrossTenantMethodSupport
 
     /// <summary>
     ///     The REST target rule (<see cref="AdminProvisioningTargetScope" />) on the method path: <paramref name="targetTenantId" />
-    ///     must be the caller's tenant or lie in its subtree. Staged like the REST filter by
-    ///     <c>IdentityApiAuthorization:RoleEnforcement</c>: <c>Warn</c> logs and lets the call through, <c>Enforce</c> answers
-    ///     <c>METHOD_FORBIDDEN</c> (<c>reason</c> = <see cref="TenantOutOfScopeReason" />). Returns <c>null</c> when allowed.
+    ///     must be the caller's tenant or lie in its subtree, else <c>METHOD_FORBIDDEN</c> (<c>reason</c> =
+    ///     <see cref="TenantOutOfScopeReason" />). Returns <c>null</c> when allowed.
     /// </summary>
+    /// <remarks>
+    ///     <c>IdentityApiAuthorization:RoleEnforcement=Warn</c> stages the rule only for a call a REST facade of this process
+    ///     made (<see cref="IsRestFacadeCall" />), exactly like <c>AdminProvisioningTargetScopeFilter</c>: logged and allowed,
+    ///     so existing REST callers are surfaced, not broken. A call that arrived over the bus (the GraphQL gateway, another
+    ///     service) is a new path without existing callers and is refused in either mode.
+    /// </remarks>
     public static async Task<CkMethodFailure?> CheckTargetTenantAsync(IdentityMethodCall call, string methodId,
         string? targetTenantId)
     {
@@ -48,11 +53,12 @@ internal static class CrossTenantMethodSupport
         }
 
         var logger = services.GetRequiredService<ILogger<IdentityMethodCall>>();
-        if (services.GetRequiredService<IOptionsMonitor<IdentityApiAuthorizationOptions>>().CurrentValue.RoleEnforcement ==
+        if (IsRestFacadeCall(call.Principal) &&
+            services.GetRequiredService<IOptionsMonitor<IdentityApiAuthorizationOptions>>().CurrentValue.RoleEnforcement ==
             IdentityApiRoleEnforcementMode.Warn)
         {
             logger.LogWarning(
-                "Cross-tenant method {MethodId} outside the caller's tenant subtree allowed by RoleEnforcement=Warn: caller tenant {CallerTenantId}, target tenant {TargetTenantId}. " +
+                "Cross-tenant method {MethodId} outside the caller's tenant subtree allowed by RoleEnforcement=Warn for a REST call: caller tenant {CallerTenantId}, target tenant {TargetTenantId}. " +
                 "This would be denied with RoleEnforcement=Enforce",
                 methodId, callerTenantId, targetTenantId);
             return null;
@@ -63,6 +69,13 @@ internal static class CrossTenantMethodSupport
             methodId, callerTenantId, targetTenantId);
         return OutOfScope(call);
     }
+
+    /// <summary>
+    ///     <c>true</c> for a caller a REST facade of this process mapped from the HTTP user (in-process path): mapped from an
+    ///     access token, but without the tenant the bus host sets on every principal it validates (<c>TenantId</c>).
+    /// </summary>
+    public static bool IsRestFacadeCall(CkMethodPrincipal principal) =>
+        principal.IsFromAccessToken && principal.TenantId == null;
 
     /// <summary>The <c>METHOD_FORBIDDEN</c> answer for a target tenant outside the caller's (or the parent's) subtree.</summary>
     public static CkMethodFailure OutOfScope(IdentityMethodCall call)

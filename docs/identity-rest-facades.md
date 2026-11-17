@@ -412,8 +412,9 @@ longer depends on the transport (REST wrote a target that GraphQL refused, CWE-8
 | `POST users/{user}/merge` (the target user; the source was already checked) | User | `200`, merged | `404` / `403`, nothing merged |
 | `POST users/ResetPassword` | User | `200`, password reset | `404` / `403`, password unchanged |
 
-Unchanged: the secret writes, the data-permission grants and the enforcement switch (they checked their target already), the client mirror and admin
-provisioning endpoints (checked from the start). Each refusal writes the usual `Identity.Method` event with the code (and `reason`).
+Unchanged: the secret writes, the data-permission grants and the enforcement switch (they checked their target already) and the client mirror
+endpoints (their parent client is checked from the start). The admin provisioning methods are static and not affected: they have no target entity,
+their access rule is the target-tenant rule. Each refusal writes the usual `Identity.Method` event with the code (and `reason`).
 
 Tests: `Api/TenantApi/TargetDataPermissionRestParityTests` (every row above that writes a role, member, overlay URI or password, both decisions: the REST
 answer and the dispatcher's answer agree, one event each, nothing changed; without an enforcing policy REST still writes).
@@ -441,7 +442,8 @@ client; the controller resolves the route's OAuth client id to the method target
 - **Caller.** The REST policies are unchanged (`IdentityTenantAdministrationWritePolicy`; the rotation `IdentitySecretAdministrationPolicy`, staged by
   `SecretManagementRoleEnforcement`); the handlers repeat them on the validated principal.
 - **Child tenant, two checks before any write.** The handler checks the child against the caller's token tenant (the `tenant_id` the token was
-  issued for, also on the bus path; `AdminProvisioningTargetScope`, the rule of `AdminProvisioningTargetScopeFilter`, staged by `RoleEnforcement`), and the mirror service checks it against the parent tenant's subtree.
+  issued for, also on the bus path; `AdminProvisioningTargetScope`, the rule of `AdminProvisioningTargetScopeFilter`; `RoleEnforcement=Warn` stages it
+  only for REST calls, a bus or GraphQL call is refused in either mode), and the mirror service checks it against the parent tenant's subtree.
   Either refusal is `METHOD_FORBIDDEN` with `reason = tenant-out-of-scope`; nothing is written in the child tenant. REST still runs the filter first
   and answers the empty `403`.
 - **Parent client.** CWE-863: the handler checks that the caller may read and write the parent client (`IRtDataPermissionEvaluator`) before
@@ -458,7 +460,7 @@ Parity table (REST before -> facade):
 | Client not flagged (backfill, provision) | `400` "… is not flagged AutoProvisionInChildTenants. Set the flag first." | unchanged (`AUTO_PROVISION_DISABLED`) |
 | Untracked pair (rotation, delete) | `404` | unchanged (`MIRROR_NOT_FOUND`) |
 | Public client (rotation) | `400` | unchanged (`CLIENT_SECRET_NOT_REQUIRED`) |
-| Child outside the caller's or the parent's subtree | empty `403` (filter, service) | unchanged; the same rule now also holds for a GraphQL / bus caller |
+| Child outside the caller's or the parent's subtree | empty `403` (filter, service) | unchanged; the same rule now also holds for a GraphQL / bus caller. Under `RoleEnforcement=Warn` (not the default) a REST call is logged and allowed by the filter and the handler (staging, as before); a GraphQL / bus call is refused: a new path without existing callers |
 | Lost concurrent write of the flag | `409` problem | unchanged (`CONCURRENT_CHANGE`) |
 | Tracking row whose parent client no longer exists (rotation, delete) | delete `204` (row removed), rotation `404` | **intended REST change:** `404` for both: the method target is the parent client. The reconciliation job removes such rows after two passes |
 | Parent client the caller cannot read / write (only with an enforcing data policy on clients; open by default) | not checked: changed anyway | **intended REST change:** cannot read = `404`, read but not write = `403` problem `METHOD_FORBIDDEN` (`data-permission`); nothing changes in either tenant (CWE-863) |
@@ -495,7 +497,8 @@ Update and delete of `externalTenantUserMappings` stay REST (generic CRUD story 
 - **Caller.** `ProvisionAdmin*`, `ProvisionCurrentUser`, `RemoveAdminProvisioning`: `TenantManagement` or `UserManagement` (`IdentityTenantAdministrationWritePolicy`);
   `CreateMapping`: `UserManagement` (`IdentityUserAdministrationWritePolicy`); repeated in the handlers on the validated principal.
 - **Target tenant.** The provisioning methods run in the caller's tenant and write into `targetTenantId`, which must be the caller's token tenant or lie
-  in its subtree (`AdminProvisioningTargetScope`, staged by `RoleEnforcement`, the rule of `AdminProvisioningTargetScopeFilter`) - before any lookup or
+  in its subtree (`AdminProvisioningTargetScope`, the rule of `AdminProvisioningTargetScopeFilter`; `RoleEnforcement=Warn` stages it only for REST
+  calls, a bus or GraphQL call is refused in either mode) - before any lookup or
   write; refused = `METHOD_FORBIDDEN`, `reason = tenant-out-of-scope`. Then: the target exists (`TENANT_NOT_FOUND`), the source tenant is a registry
   ancestor of the target (`SOURCE_TENANT_NOT_ANCESTOR`), no mapping exists for the source user (`MAPPING_ALREADY_EXISTS`, parameter `existingMappingId`).
   Data access beyond the call's tenant: the mapping, its `TenantOwners` / group membership and the `OctoTenantIdentityProvider` in the target tenant,
@@ -513,7 +516,7 @@ Parity table (REST before -> facade):
 | Point | REST before | Now |
 |---|---|---|
 | Routes, bodies, status codes of a success | create `201` + `ExternalTenantUserMappingDto`, `provisionCurrentUser` `201` / `200` + `X-Provisioning-Outcome`, delete `200`, mapping create `201` with the relative `Location` | unchanged |
-| Target outside the caller's subtree | empty `403` (filter) | unchanged; the same rule now also holds for a GraphQL / bus caller |
+| Target outside the caller's subtree | empty `403` (filter) | unchanged; the same rule now also holds for a GraphQL / bus caller. Under `RoleEnforcement=Warn` (not the default) a REST call is logged and allowed (staging, as before); a GraphQL / bus call is refused: a new path without existing callers |
 | Unknown target tenant | `404` "Tenant '…' not found." | unchanged (`TENANT_NOT_FOUND`) |
 | Source tenant not an ancestor | `403` problem `SourceTenantNotAncestor` | unchanged (`SOURCE_TENANT_NOT_ANCESTOR`) |
 | Mapping exists for the source user | `409` problem with `existingMappingId` | unchanged (`MAPPING_ALREADY_EXISTS`) |

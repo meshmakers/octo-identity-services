@@ -279,7 +279,8 @@ Instance methods on the **parent** client: the method runs in the parent tenant,
 - **Order of checks, before any write in either tenant:** caller rule -> target client exists (`METHOD_TARGET_NOT_FOUND`) -> the caller may read
   **and** write the parent client (`IRtDataPermissionEvaluator`: not visible = `METHOD_TARGET_NOT_FOUND`, read only = `METHOD_FORBIDDEN` /
   `data-permission`) -> a named child tenant lies in the subtree of the caller's token tenant (`CrossTenantMethodSupport.CheckTargetTenantAsync`, the
-  rule `AdminProvisioningTargetScope` that the REST filter uses, staged by `RoleEnforcement`) -> the mirror service checks it again against the parent
+  rule `AdminProvisioningTargetScope` that the REST filter uses; `RoleEnforcement=Warn` stages it only for REST facade calls, a bus
+  or GraphQL call is refused in either mode) -> the mirror service checks it again against the parent
   tenant's subtree. A child outside either subtree is `METHOD_FORBIDDEN` with `reason = tenant-out-of-scope`; nothing is written in the child tenant.
 - **Caller tenant.** `CkMethodPrincipal.TokenTenantId` (the `tenant_id` claim, set on both transports), else `TenantId` (validated by the bus host);
   none = out of scope (fail closed). Not the tenant of the call: an allow-listed cross-tenant service client is judged by its own tenant.

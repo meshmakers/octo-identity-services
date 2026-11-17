@@ -44,7 +44,9 @@ Notable changes of the OctoMesh identity services. The CK model `System.Identity
     enforcing client data policy (their own flag asks for the mirrors); the answer and the audit carry only counts and the named client;
   - a `withGroups` group id that is no object id is skipped like an unknown group id (an unhandled `500` before);
   - an unexpected failure answers the `500` problem `METHOD_HANDLER_FAILED` without the exception text; under `RoleEnforcement=Warn` a caller
-    without the role is refused by the method, as for the other facades.
+    without the role is refused by the method, as for the other facades;
+  - the target-tenant rule keeps the staging of the REST filter for REST calls (`RoleEnforcement=Warn` logs and allows a target outside the
+    caller's subtree, as before), but a call over the bus or GraphQL is refused in either mode: a new path without existing callers to surface.
   `CreateMapping` does not yet replace the generic GraphQL create of `ExternalTenantUserMapping`: that flag is a Major on the existing type and is
   planned for the next System.Identity major. **Client impact:** none for callers with the documented roles and tenants under the default
   configuration.

@@ -1,9 +1,14 @@
 using FluentAssertions;
+using IdentityServerPersistence.Services;
+using Meshmakers.Octo.Backend.IdentityServices.Authorization;
+using Meshmakers.Octo.Runtime.Contracts.MongoDb.Configuration;
+using Microsoft.Extensions.Options;
 using Meshmakers.Octo.Backend.IdentityServices.Methods;
 using Meshmakers.Octo.ConstructionKit.Contracts;
 using Meshmakers.Octo.Runtime.Contracts;
 using Meshmakers.Octo.Runtime.Contracts.MongoDb;
 using Meshmakers.Octo.Runtime.Contracts.MongoDb.Repositories;
+using Meshmakers.Octo.Services.Contracts.DistributionEventHub.Methods;
 using Meshmakers.Octo.Services.Methods.Authorization;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
@@ -71,6 +76,49 @@ public class CrossTenantMethodSupportTests
         var service = new CkMethodPrincipal(null, [], [], "svc-client") { TokenTenantId = TokenTenant };
 
         (await CrossTenantMethodSupport.CallerNameAsync(Call(service), "call-tenant")).Should().Be("svc-client");
+    }
+
+    /// <summary>
+    ///     A target outside the caller's subtree: under <c>RoleEnforcement=Warn</c> a REST facade call is logged and allowed
+    ///     (the staging of the REST filter), a call over the bus is refused; under <c>Enforce</c> both are refused.
+    /// </summary>
+    [Theory]
+    [InlineData(IdentityApiRoleEnforcementMode.Warn, true, true)]
+    [InlineData(IdentityApiRoleEnforcementMode.Warn, false, false)]
+    [InlineData(IdentityApiRoleEnforcementMode.Enforce, true, false)]
+    [InlineData(IdentityApiRoleEnforcementMode.Enforce, false, false)]
+    public async Task TargetOutsideTheSubtree_IsStagedOnlyForRestCalls(IdentityApiRoleEnforcementMode mode, bool restCall,
+        bool allowed)
+    {
+        var caller = new CkMethodPrincipal(OctoObjectId.GenerateNewId().ToString(), [], [], null,
+            restCall ? null : TokenTenant) { TokenTenantId = TokenTenant, IsFromAccessToken = true };
+        var discovery = Substitute.For<ITenantDiscoveryService>();
+        discovery.GetScopeDescendantsAsync(TokenTenant)
+            .Returns(Task.FromResult<IReadOnlySet<string>?>(new HashSet<string> { "child" }));
+        var options = Substitute.For<IOptionsMonitor<IdentityApiAuthorizationOptions>>();
+        options.CurrentValue.Returns(new IdentityApiAuthorizationOptions { RoleEnforcement = mode });
+        var call = new IdentityMethodCall(new ServiceCollection()
+            .AddSingleton(discovery)
+            .AddSingleton(Options.Create(new OctoSystemConfiguration { SystemTenantId = "octosystem" }))
+            .AddSingleton(options)
+            .AddSingleton<ILogger<IdentityMethodCall>>(_log)
+            .BuildServiceProvider(), caller);
+
+        CrossTenantMethodSupport.IsRestFacadeCall(caller).Should().Be(restCall);
+        (await CrossTenantMethodSupport.CheckTargetTenantAsync(call, "m", "child")).Should().BeNull("in the subtree");
+        var outside = await CrossTenantMethodSupport.CheckTargetTenantAsync(call, "m", "sibling");
+
+        if (allowed)
+        {
+            outside.Should().BeNull();
+        }
+        else
+        {
+            outside!.Code.Should().Be(CkMethodErrorCodes.MethodForbidden);
+            outside.Parameters.Should().Contain("reason", CrossTenantMethodSupport.TenantOutOfScopeReason);
+        }
+
+        _log.Warnings.Should().ContainSingle("the refusal and the staged allowance are both logged");
     }
 
     private static CkMethodPrincipal User(OctoObjectId id) =>
