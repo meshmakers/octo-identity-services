@@ -8,6 +8,7 @@ using Meshmakers.Octo.Runtime.Contracts.MongoDb.Repositories;
 using Meshmakers.Octo.Runtime.Contracts.Repositories;
 using Meshmakers.Octo.Runtime.Contracts.Repositories.Query;
 using Meshmakers.Octo.Runtime.Contracts.Secrets;
+using DataProtectionKeyNames = Meshmakers.Octo.Services.Infrastructure.DataProtection.DataProtectionKeyNames;
 using Microsoft.AspNetCore.DataProtection.Repositories;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
@@ -23,6 +24,10 @@ namespace IdentityServerPersistence.SystemStores;
 ///     The key ring is service-global (shared by all pods, used across all tenants), so it is
 ///     stored in the SYSTEM tenant database via <see cref="ISystemContext" /> — the per-request
 ///     tenant resolver cannot be used because Data Protection runs outside any HTTP context.
+///     <para>
+///     Only the identity key ring is read and written: elements whose name contains a <c>/</c> belong to the key
+///     rings of other services (<see cref="DataProtectionKeyNames" />) and are ignored everywhere in this store.
+///     </para>
 ///     <para>
 ///     Zero-logout migration: when the store is EMPTY and the legacy file path
 ///     (<c>Identity:DataProtectionKeysPath</c>) still exists (old chart still mounts the PVC),
@@ -96,7 +101,18 @@ public class DataProtectionKeyStore(
         var result = await repository.GetRtEntitiesByTypeAsync<RtDataProtectionKey>(session,
             RtEntityQueryOptions.Create());
         await session.CommitTransactionAsync();
-        return result.Items.ToList();
+        return result.Items.Where(IsIdentityKey).ToList();
+    }
+
+    /// <summary>
+    ///     True for an element of the identity key ring. Other services keep their own key rings in the same collection
+    ///     under <c>&lt;applicationName&gt;/&lt;name&gt;</c> (shared key store of octo-common-services); identity never
+    ///     loads, checks, rewrites or counts them.
+    /// </summary>
+    internal static bool IsIdentityKey(RtDataProtectionKey key)
+    {
+        // A missing name never comes from another service (the shared store always writes a prefixed name).
+        return string.IsNullOrEmpty(key.FriendlyName) || DataProtectionKeyNames.IsUnprefixed(key.FriendlyName);
     }
 
     private async Task StoreElementAsync(XElement element, string friendlyName)
@@ -149,7 +165,7 @@ public class DataProtectionKeyStore(
             {
                 var anyKey = await repository.GetRtEntitiesByTypeAsync<RtDataProtectionKey>(session,
                     RtEntityQueryOptions.Create());
-                encrypt = !anyKey.Items.Any();
+                encrypt = !anyKey.Items.Any(IsIdentityKey);
             }
 
             var rtKey = new RtDataProtectionKey
