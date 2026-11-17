@@ -238,7 +238,8 @@ identity data:
 | Tenant restore, system path of `ImportRt` | system | unchanged |
 | Generic GraphQL runtime mutations (create, update, delete, association changes, query rows) | caller session | **refused**, message 144 |
 | Caller path of `ImportRt` (an import a user or client starts through the API) | caller import | **refused** before the first write, message 144; the whole file is rejected |
-| Mesh adapter write nodes and any other caller-scoped write | caller session | **refused**, message 144 |
+| Mesh adapter write nodes (service-account or caller sessions) and any other caller-scoped write | caller session | **refused**, message 144 |
+| Mesh adapter nodes with `identity: System` | system session | written, as before: deploying such a pipeline needs `UserManagement` (adapter service of the communication controller); the node does not run the identity guards (role change guard, validation) |
 
 Why: before 3.6.0 a caller with nothing but the `octo_api` scope could create, update or delete roles (role claims are role
 names, so a rename changed every holder's rights), groups, clients (secrets, scopes, redirect URIs), identity providers (including
@@ -255,11 +256,17 @@ octo-construction-kit-engine), one entry per root type in `ckModel.yaml` for thi
 `minEngineVersion` to **3.5.71**: an older engine refuses the model (message 126), so every service of an environment must run an
 engine >= 3.5.71 before an identity build with System.Identity 3.6.0 reaches it.
 
+Not closed by this release (tracked separately): a caller with the role `DataModelManagement` can replace the tenant's System.Identity
+through the asset-repo `ImportCk` endpoint with a hand-built model without `writeAccess` (removing the block is only Minor + acknowledge)
+or an explicit downgrade to 3.5.0; the embedded-import guard keeps the installed newer model, so the restriction would be gone for that
+tenant. The fix belongs to the CK import of the asset repository (refuse a caller import of a service-managed `System.*` model).
+
 Next major: `Hidden` for the stored secret values (`Client.Secrets`, `ApiResource.Secrets`) and `replacesGenericCreate` for types
 whose create becomes a method (rows T7, M16).
 
 Tests: `Persistence/IdentityTypeWriteAccessIntegrationTests` (compiled model: every type restricted to the channel; caller
 sessions of every principal kind refused on create, rename, delete, derived types, client secrets, the enforcement mode and an
-association; caller `ImportRt` refused before any write; Bootstrap seeds, system import and system sessions still write; a session
-on the channel is admitted). `BlueprintLockProtectionIntegrationTests` opens its user session on the channel, so the blueprint-lock
+association; caller `ImportRt` refused before any write and no refused edge stored; Bootstrap seeds, system import and system sessions still write;
+a tenant backup and restore brings identity data back, the restored tenant is written by system sessions and still refuses caller
+writes; a session on the channel is admitted). `BlueprintLockProtectionIntegrationTests` opens its user session on the channel, so the blueprint-lock
 guard is still what it tests.

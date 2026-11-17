@@ -14,7 +14,8 @@ Notable changes of the OctoMesh identity services. The CK model `System.Identity
   (enforcement mode) and data permissions through the generic GraphQL mutations, the caller path of `ImportRt` and adapter write nodes,
   without the roles, guards, validation and cache refresh of the REST API and the methods. These writes are now refused by the engine
   (message 144) before anything is written; generic reads are unchanged. Not affected: the REST API and the CK methods, blueprint seeds,
-  the system path of `ImportRt` and tenant restores. **Behaviour change:** an import a user starts through the API (`ImportRt`, caller
+  the system path of `ImportRt`, tenant restores and mesh adapter nodes configured with `identity: System` (system session; deploying
+  such a pipeline needs `UserManagement`). **Behaviour change:** an import a user starts through the API (`ImportRt`, caller
   path) that contains identity entities is refused as a whole; use a blueprint or the REST API for them. **Rollout gate:** the model
   needs engine 3.5.71 or newer (`minEngineVersion`); every service of an environment must run it before this identity build, an older
   engine refuses the model. Details: `docs/ck-model.md`.

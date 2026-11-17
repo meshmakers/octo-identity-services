@@ -513,8 +513,9 @@ Update and delete of `externalTenantUserMappings` stay REST (generic CRUD story 
   without a tenant is `CALLER_NOT_A_USER` (parameter `missing` = `subject` / `tenant`).
 - **`CreateMapping`** keeps the cross-tenant checks of the REST create: `SOURCE_TENANT_NOT_PERMITTED` (one answer for every refused source),
   `MAPPING_ALREADY_EXISTS`, `UNKNOWN_GROUP` (parameter `unknownGroupIds`), the role change guard (`METHOD_FORBIDDEN` + `reason`). It does **not** set
-  `replacesGenericCreate`: on the existing type `ExternalTenantUserMapping` the flag is a Major (row M16 of the CK SemVer rules), so the generic GraphQL
-  create of the type stays possible until the next System.Identity major.
+  `replacesGenericCreate`: on the existing type `ExternalTenantUserMapping` the flag is a Major (row M16 of the CK SemVer rules). Since System.Identity
+  3.6.0 the generic create is refused anyway: the type carries `writeAccess` (only system sessions write it, engine message 144 for every caller-scoped
+  write; `docs/ck-model.md`), so the cross-tenant checks cannot be bypassed through GraphQL or a caller `ImportRt`.
 
 Parity table (REST before -> facade):
 

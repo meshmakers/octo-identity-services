@@ -6,6 +6,7 @@ using Meshmakers.Octo.ConstructionKit.Contracts;
 using Meshmakers.Octo.Runtime.Contracts;
 using Meshmakers.Octo.Runtime.Contracts.DataPermissions;
 using Meshmakers.Octo.Runtime.Contracts.Exchange;
+using Meshmakers.Octo.Runtime.Contracts.MongoDb;
 using Meshmakers.Octo.Runtime.Contracts.MongoDb.Repositories;
 using Meshmakers.Octo.Runtime.Contracts.Repositories;
 using Meshmakers.Octo.Runtime.Contracts.Repositories.Query;
@@ -195,6 +196,15 @@ public class IdentityTypeWriteAccessIntegrationTests : IClassFixture<IdentitySer
 
         refused.Should().NotBeNull();
         refused!.OperationResult!.Messages.Should().Contain(m => m.MessageNumber == WriteAccessRefusedMessageNumber);
+
+        using var session = await repo.GetSessionAsync();
+        session.StartTransaction();
+        var edges = await repo.GetRtAssociationsAsync(session,
+            new RtEntityId(RtEntityExtensions.GetRtCkTypeId<RtDataPolicy>(), policyRtId),
+            RtAssociationExtendedQueryOptions.Create(GraphDirections.Outbound,
+                roleId: new RtCkId<CkAssociationRoleId>("System.Identity/PolicyPermission")));
+        await session.CommitTransactionAsync();
+        edges.Items.Should().BeEmpty("the refused association is not stored");
     }
 
     // ----------------------------------------------------------------------------------------------
@@ -261,6 +271,88 @@ public class IdentityTypeWriteAccessIntegrationTests : IClassFixture<IdentitySer
         ]);
         renamed.Should().BeNull("a system session (the identity stores) is never restricted");
         (await FindAsync<RtRole>(repo, rtId))!.Name.Should().Be(name + "-renamed");
+    }
+
+    [Fact]
+    public async Task TenantRestore_BringsBackIdentityData_AndTheRestoredTenantKeepsTheRestriction()
+    {
+        await GetRepositoryAsync();
+        var systemContext = _fixture.GetSystemContext();
+        var originalTenantId = $"wabackup{Guid.NewGuid():N}"[..20];
+        var restoredTenantId = $"warestore{Guid.NewGuid():N}"[..20];
+        var backupDirectory = Path.Combine(Path.GetTempPath(), $"identity-write-access-{Guid.NewGuid():N}");
+        var archivePath = Path.Combine(backupDirectory, "backup.tar.gz");
+        var rtId = OctoObjectId.GenerateNewId();
+        var name = $"restored-role-{Guid.NewGuid():N}";
+
+        try
+        {
+            using (var session = await systemContext.GetAdminSessionAsync())
+            {
+                session.StartTransaction();
+                await systemContext.CreateChildTenantAsync(session, originalTenantId, originalTenantId);
+                await session.CommitTransactionAsync();
+            }
+
+            await _fixture.GetService<IDefaultConfigurationCreatorService>().SetupAsync(originalTenantId);
+            var original = await systemContext.FindTenantRepositoryAsync(originalTenantId)
+                           ?? throw new InvalidOperationException("The child tenant was not created.");
+            await ImportAsync(original, RoleSeed(rtId, name));
+
+            Directory.CreateDirectory(backupDirectory);
+            var backup = await systemContext.BackupTenantAsync(originalTenantId, archivePath);
+            backup.Success.Should().BeTrue(backup.Error);
+
+            // A restore is a database restore (mongorestore) plus attach: no engine write path, so writeAccess cannot refuse it.
+            var restore = await systemContext.RestoreTenantAsync(restoredTenantId, restoredTenantId, archivePath,
+                sourceDatabaseName: originalTenantId, dropExistingTenant: true, attachTenant: true,
+                timeout: TimeSpan.FromMinutes(5));
+            restore.Success.Should().BeTrue(restore.Error);
+
+            var restored = await systemContext.FindTenantRepositoryAsync(restoredTenantId)
+                           ?? throw new InvalidOperationException("The restored tenant was not attached.");
+            (await FindAsync<RtRole>(restored, rtId))!.Name.Should().Be(name, "the restore brings the identity data back");
+
+            var roleId = new RtEntityId(RtEntityExtensions.GetRtCkTypeId<RtRole>(), rtId);
+            (await TryApplyAsync(restored, RtSecurityContext.System,
+            [
+                EntityUpdateInfo<RtEntity>.CreateUpdate(roleId,
+                    new RtRole { Name = name + "-system", NormalizedName = (name + "-system").ToUpperInvariant() })
+            ])).Should().BeNull("the identity stores (system sessions) write the restored tenant");
+
+            AssertRefused(await TryApplyAsync(restored, Caller(RtPrincipalKind.Interactive),
+            [
+                EntityUpdateInfo<RtEntity>.CreateUpdate(roleId,
+                    new RtRole { Name = "TenantManagement", NormalizedName = "TENANTMANAGEMENT" })
+            ]), "System.Identity/Role");
+            (await FindAsync<RtRole>(restored, rtId))!.Name.Should().Be(name + "-system");
+        }
+        finally
+        {
+            foreach (var tenantId in new[] { originalTenantId, restoredTenantId })
+            {
+                try
+                {
+                    using var session = await systemContext.GetAdminSessionAsync();
+                    session.StartTransaction();
+                    if (await systemContext.IsChildTenantExistingAsync(session, tenantId))
+                    {
+                        await systemContext.DropChildTenantAsync(session, tenantId);
+                    }
+
+                    await session.CommitTransactionAsync();
+                }
+                catch (Exception)
+                {
+                    // Best effort: the shared test database is dropped with the container.
+                }
+            }
+
+            if (Directory.Exists(backupDirectory))
+            {
+                Directory.Delete(backupDirectory, true);
+            }
+        }
     }
 
     [Fact]
