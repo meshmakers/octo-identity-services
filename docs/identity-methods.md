@@ -281,8 +281,8 @@ Instance methods on the **parent** client: the method runs in the parent tenant,
   `data-permission`) -> a named child tenant lies in the subtree of the caller's token tenant (`CrossTenantMethodSupport.CheckTargetTenantAsync`, the
   rule `AdminProvisioningTargetScope` that the REST filter uses, staged by `RoleEnforcement`) -> the mirror service checks it again against the parent
   tenant's subtree. A child outside either subtree is `METHOD_FORBIDDEN` with `reason = tenant-out-of-scope`; nothing is written in the child tenant.
-- **Caller tenant.** `CkMethodPrincipal.TenantId` (validated by the bus host) or `TokenTenantId` (the `tenant_id` claim of the in-process caller); none
-  = out of scope (fail closed).
+- **Caller tenant.** `CkMethodPrincipal.TokenTenantId` (the `tenant_id` claim, set on both transports), else `TenantId` (validated by the bus host);
+  none = out of scope (fail closed). Not the tenant of the call: an allow-listed cross-tenant service client is judged by its own tenant.
 - **Rotation.** `CarriesSecret = true`, `ServesRestFacade = true`: bus handler only with `EnablePasswordMethods`, else local only for its REST facade. The
   secret is minted and stored as the mirror's own secret (description marker `octo:mirror-own-secret`, so the mirror sync and the reconciliation keep it);
   the clear text is only the result. Audit details never carry it or its hash.

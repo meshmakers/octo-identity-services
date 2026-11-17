@@ -25,8 +25,13 @@ Notable changes of the OctoMesh identity services. The CK model `System.Identity
     the method target is the parent client; the reconciliation job removes such rows;
   - the backfill is bound by the method timeout of 300 s (`504` after it; provisioning done so far stays, a re-run finishes it);
   - `provisionCurrentUser` writes the user name stored in the caller's tenant instead of the token's name claim (the method caller carries no
-    profile claims; the stored name is the one the token exchange matches), and the cross-tenant grant audit events name the caller by that stored
-    name;
+    profile claims; the stored name is the one the token exchange matches);
+  - the cross-tenant grant audit events (`Identity.CrossTenantGrant*`) name the caller (`actorName`) by the user name stored for its subject in
+    its token tenant instead of the token's name claim (the same value for tokens this service issues; the method caller carries no profile
+    claims and a name parameter would be caller-controlled); a service caller stays its client id, and a subject without a stored user is
+    recorded as the subject with a WARN line;
+  - provisioning into a child tenant still mirrors every flagged client of the parent, also flagged clients the caller cannot read under an
+    enforcing client data policy (their own flag asks for the mirrors); the answer and the audit carry only counts and the named client;
   - a `withGroups` group id that is no object id is skipped like an unknown group id (an unhandled `500` before);
   - an unexpected failure answers the `500` problem `METHOD_HANDLER_FAILED` without the exception text; under `RoleEnforcement=Warn` a caller
     without the role is refused by the method, as for the other facades.

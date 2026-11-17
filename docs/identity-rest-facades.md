@@ -404,8 +404,8 @@ client; the controller resolves the route's OAuth client id to the method target
   reaches the broker). The other four are bus handlers whatever the switch says.
 - **Caller.** The REST policies are unchanged (`IdentityTenantAdministrationWritePolicy`; the rotation `IdentitySecretAdministrationPolicy`, staged by
   `SecretManagementRoleEnforcement`); the handlers repeat them on the validated principal.
-- **Child tenant, two checks before any write.** The handler checks the child against the caller's token tenant (`AdminProvisioningTargetScope`, the
-  rule of `AdminProvisioningTargetScopeFilter`, staged by `RoleEnforcement`), and the mirror service checks it against the parent tenant's subtree.
+- **Child tenant, two checks before any write.** The handler checks the child against the caller's token tenant (the `tenant_id` the token was
+  issued for, also on the bus path; `AdminProvisioningTargetScope`, the rule of `AdminProvisioningTargetScopeFilter`, staged by `RoleEnforcement`), and the mirror service checks it against the parent tenant's subtree.
   Either refusal is `METHOD_FORBIDDEN` with `reason = tenant-out-of-scope`; nothing is written in the child tenant. REST still runs the filter first
   and answers the empty `403`.
 - **Parent client.** CWE-863: the handler checks that the caller may read and write the parent client (`IRtDataPermissionEvaluator`) before
@@ -426,6 +426,7 @@ Parity table (REST before -> facade):
 | Lost concurrent write of the flag | `409` problem | unchanged (`CONCURRENT_CHANGE`) |
 | Tracking row whose parent client no longer exists (rotation, delete) | delete `204` (row removed), rotation `404` | **intended REST change:** `404` for both: the method target is the parent client. The reconciliation job removes such rows after two passes |
 | Parent client the caller cannot read / write (only with an enforcing data policy on clients; open by default) | not checked: changed anyway | **intended REST change:** cannot read = `404`, read but not write = `403` problem `METHOD_FORBIDDEN` (`data-permission`); nothing changes in either tenant (CWE-863) |
+| Other flagged clients of the parent (provision, backfill) | the service mirrors **every** flagged client of the parent, not only the named one | unchanged, also under an enforcing client data policy for flagged clients the caller cannot read: their own flag asks for the mirrors (the same sync the tenant setup and the reconciliation run). The answer and the audit carry only counts and the named client's id, never another client's id, name or secret |
 | Backfill duration | no limit | the method's timeout of 300 s (`execution.timeoutSeconds`); a longer backfill answers `504` (`METHOD_TIMEOUT`), the provisioning already done stays (idempotent, re-run to finish) |
 | Unexpected failure | unhandled `500` | `500` problem `METHOD_HANDLER_FAILED` (same status, no exception text) |
 | `RoleEnforcement=Warn` (not the default) | caller without the role let through and logged | **intended REST change:** refused by the method (403 problem, `role-required`), as for the other facades |
@@ -487,7 +488,7 @@ Parity table (REST before -> facade):
 | `withGroups`: a group id that is no object id | unhandled `500` | **intended REST change:** skipped like an unknown group id - the `500` was a bug |
 | Delete: unknown mapping | `404` "Mapping '…' not found in tenant '…'." | unchanged (`MAPPING_NOT_FOUND`) |
 | Mapping create: refused source, duplicate, unknown group, guard refusal | `403` / `409` / `400` problems, guard `403` / `409` with WARN and `Identity.RoleChangeRefused` | unchanged |
-| Cross-tenant grant audit events (`Identity.CrossTenantGrant*`) | caller = token name claim | caller = the user name stored for the caller's subject (a service caller: its client id) |
+| Cross-tenant grant audit events (`Identity.CrossTenantGrant*`), `actorName` | the token's name claim (`name` / `preferred_username`), a service caller its `client_id`, else `sub` | **intended change:** the user name stored for the caller's subject in its token tenant (the name the identity service writes into the tokens it issues), a service caller its client id; no stored user (a deleted user, a token of another issuer) = the subject with a WARN line that names no user. Reason: the method caller carries no profile claims, and a name parameter would be caller-controlled |
 | Unexpected failure | unhandled `500` | `500` problem `METHOD_HANDLER_FAILED` (same status, no exception text) |
 | `RoleEnforcement=Warn` (not the default) | caller without the role let through and logged | **intended REST change:** refused by the method (403 problem, `role-required`), as for the other facades |
 | Audit | grant events only | plus one `Identity.Method` event per call (`targetTenantId`, `sourceTenantId`, `mappingRtId`, `provisioningOutcome`) |

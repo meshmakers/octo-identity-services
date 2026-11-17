@@ -292,6 +292,17 @@ public class AdminProvisioningRestMethodFacadeTests : IntegrationTestBase, IDisp
             refusal.Error.Parameters.Should().Contain("reason", CrossTenantMethodSupport.TenantOutOfScopeReason);
         }
 
+        // On the bus path the host sets TenantId to the tenant of the call; the token's own tenant still decides.
+        var busCaller = caller with { TenantId = NormalizedSystemTenantId };
+        var busRefusal = await DispatchAsync(host, busCaller,
+            SystemIdentityCkIds.ExternalTenantUserMappingProvisionAdminMethodId,
+            new ExternalTenantUserMappingProvisionAdminParameters
+            {
+                TargetTenantId = sibling, SourceTenantId = NormalizedSystemTenantId,
+                SourceUserId = OctoObjectId.GenerateNewId().ToString(), SourceUserName = "z"
+            });
+        busRefusal.Error!.Parameters.Should().Contain("reason", CrossTenantMethodSupport.TenantOutOfScopeReason);
+
         (await MappingCountAsync(sibling)).Should().Be(1, "only the seeded mapping; nothing written, nothing removed");
         (await MappingAsync(sibling, user.RtId.ToString())).Should().NotBeNull();
     }

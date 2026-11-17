@@ -21,10 +21,12 @@ internal static class CrossTenantMethodSupport
     public const string TenantOutOfScopeReason = "tenant-out-of-scope";
 
     /// <summary>
-    ///     The tenant the caller's token was issued for: the tenant the bus host validated it for, else the <c>tenant_id</c>
-    ///     claim of the in-process caller. <c>null</c> when neither is known (the target rule then refuses).
+    ///     The tenant the caller's token was issued for: its <c>tenant_id</c> claim (<see cref="CkMethodPrincipal.TokenTenantId" />,
+    ///     set on the in-process and on the bus path), else the tenant the bus host validated the token for. Not the tenant
+    ///     of the call: an allow-listed cross-tenant service client calls in other tenants, and the target rule must judge it
+    ///     by its own tenant on every transport. <c>null</c> when neither is known (the target rule then refuses).
     /// </summary>
-    public static string? CallerTenantId(CkMethodPrincipal principal) => principal.TenantId ?? principal.TokenTenantId;
+    public static string? CallerTenantId(CkMethodPrincipal principal) => principal.TokenTenantId ?? principal.TenantId;
 
     /// <summary>
     ///     The REST target rule (<see cref="AdminProvisioningTargetScope" />) on the method path: <paramref name="targetTenantId" />
@@ -71,9 +73,10 @@ internal static class CrossTenantMethodSupport
     }
 
     /// <summary>
-    ///     The name of the caller for the cross-tenant grant audit events (the REST path used the user name of the token):
-    ///     the client id of a service caller, else the user name stored for the subject in the caller's tenant, else the
-    ///     subject. Never a token.
+    ///     The name of the caller for the cross-tenant grant audit events (<c>actorName</c>). The method caller carries no
+    ///     profile claims, so: the client id of a service caller; else the user name stored for the subject in the caller's
+    ///     token tenant (the name the identity service writes into the tokens it issues); else - a deleted user or a token
+    ///     of another issuer - the subject, with a WARN line that names no user. Never empty, never a token.
     /// </summary>
     public static async Task<string> CallerNameAsync(IdentityMethodCall call, string callTenantId)
     {
@@ -109,6 +112,8 @@ internal static class CrossTenantMethodSupport
             }
         }
 
+        call.Services.GetRequiredService<ILogger<IdentityMethodCall>>().LogWarning(
+            "Cross-tenant grant audit: no user is stored for the caller's subject in its token tenant; the subject is recorded as the actor");
         return principal.Subject ?? "unknown";
     }
 
