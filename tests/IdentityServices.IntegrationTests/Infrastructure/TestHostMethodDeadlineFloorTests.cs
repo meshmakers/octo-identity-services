@@ -26,6 +26,19 @@ public class TestHostMethodDeadlineFloorTests(CustomWebApplicationFactory factor
     }
 
     [Fact]
+    public void TheClientsOfTheTestHostAndADerivedHost_WaitLongerThanTheFloor()
+    {
+        using var client = Factory.CreateClient();
+        client.Timeout.Should().Be(TestHostMethodDeadlineFloor.ClientTimeout);
+
+        using var derived = Factory.WithWebHostBuilder(_ => { });
+        using var derivedClient = derived.CreateClient();
+        derivedClient.Timeout.Should().Be(TestHostMethodDeadlineFloor.ClientTimeout);
+
+        TestHostMethodDeadlineFloor.ClientTimeout.Should().BeGreaterThan(TestHostMethodDeadlineFloor.Floor);
+    }
+
+    [Fact]
     public void AShortCkTimeout_IsRaisedToTheFloor_InTimeoutAndDeadline()
     {
         var now = new DateTimeOffset(2026, 1, 1, 12, 0, 0, TimeSpan.Zero);

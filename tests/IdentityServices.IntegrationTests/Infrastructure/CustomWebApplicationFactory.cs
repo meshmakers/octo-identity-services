@@ -228,6 +228,17 @@ public class CustomWebApplicationFactory : WebApplicationFactory<Program>, IAsyn
     /// <summary>AB#8997: the tenant lifecycle store of this host; tests arrange the generations they need.</summary>
     public Helpers.TestTenantLifecycleStore TenantLifecycleStore { get; } = new();
 
+    /// <summary>
+    ///     Clients of this host and of its derived hosts wait longer than the test-host method deadline floor, so a
+    ///     slow REST call that runs a CK method ends with the method's answer (or its <c>METHOD_TIMEOUT</c>) and not with
+    ///     the client's 100 s default timeout.
+    /// </summary>
+    protected override void ConfigureClient(HttpClient client)
+    {
+        base.ConfigureClient(client);
+        client.Timeout = TestHostMethodDeadlineFloor.ClientTimeout;
+    }
+
     protected override void ConfigureWebHost(IWebHostBuilder builder)
     {
         Console.Error.WriteLine("[WebFactory] ConfigureWebHost called");

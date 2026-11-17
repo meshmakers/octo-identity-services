@@ -82,8 +82,8 @@ The suite is meant to stay green on a busy machine (other builds or suites runni
   15 s, so load cannot turn a correct call into `METHOD_TIMEOUT` / HTTP 504. The real deadline (CK timeout -> deadline,
   `METHOD_TIMEOUT` at the deadline, clamping) is proven in octo-common-services (`CkMethodTimeoutResolverTests`,
   `InProcessTransportTests`, `CkMethodDispatcherBusTests`). A test that builds a `CkMethodRequest` itself sets
-  `DeadlineUtc = TestHostMethodDeadlineFloor.DeadlineFromNow()`, the same bound. A test that needs the real deadline
-  builds its own host.
+  `DeadlineUtc = TestHostMethodDeadlineFloor.DeadlineFromNow()`, the same bound. The factory's HTTP clients (derived
+  hosts included) wait 180 s, longer than the floor. A test that needs the real deadline builds its own host.
 - **Wait for the effect, not for the response.** A test that reads what a consumer or a background step recorded waits
   (bounded) until it is there; a response can arrive before the observer has recorded the message.
 
