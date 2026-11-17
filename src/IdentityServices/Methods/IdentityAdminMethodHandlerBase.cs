@@ -1,3 +1,4 @@
+using Meshmakers.Octo.Backend.IdentityServices.Authorization;
 using Meshmakers.Octo.Backend.IdentityServices.Authorization.RoleChange;
 using Meshmakers.Octo.Communication.Contracts;
 using Meshmakers.Octo.ConstructionKit.Contracts;
@@ -25,6 +26,17 @@ internal static class IdentityMethodCallerRules
         principal != null &&
         principal.Scopes.Contains(RequiredScope, StringComparer.Ordinal) &&
         principal.Roles.Contains(CommonConstants.UserManagementRole, StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>
+    ///     <c>true</c> when the validated principal may use the client administration methods: scope <c>octo_api</c> and one of
+    ///     the roles of <c>IdentityTenantAdministrationWritePolicy</c> (<c>TenantManagement</c> or <c>UserManagement</c>), the
+    ///     REST policy of the client endpoints.
+    /// </summary>
+    public static bool IsTenantAdministrator(CkMethodPrincipal? principal) =>
+        principal != null &&
+        principal.Scopes.Contains(RequiredScope, StringComparer.Ordinal) &&
+        IdentityApiAuthorizationPolicies.TenantAdministrationRoles.Any(role =>
+            principal.Roles.Contains(role, StringComparer.OrdinalIgnoreCase));
 
     /// <summary>The caller as the role change guard and the data-permission evaluator see it.</summary>
     public static RoleChangeCaller ToRoleChangeCaller(CkMethodPrincipal? principal) =>
@@ -117,6 +129,13 @@ internal abstract class IdentityAdminMethodHandlerBase<TParameters>(IServiceProv
         return outcome;
     }
 
+    /// <summary>
+    ///     The caller rule of the method, checked on the validated principal before the target is looked up. Default: the user
+    ///     administration rule (<see cref="IdentityMethodCallerRules.IsAdministrator" />); the client methods use the tenant
+    ///     administration rule of their REST policy.
+    /// </summary>
+    protected virtual bool IsAdmitted(CkMethodPrincipal principal) => IdentityMethodCallerRules.IsAdministrator(principal);
+
     /// <summary>Applies the method on the target (<paramref name="targetRtId" />); the caller is an administrator and the tenant is bound.</summary>
     protected abstract Task<CkMethodOutcome> ApplyAsync(IdentityMethodCall call, OctoObjectId targetRtId,
         TParameters parameters, CancellationToken cancellationToken);
@@ -124,7 +143,7 @@ internal abstract class IdentityAdminMethodHandlerBase<TParameters>(IServiceProv
     private async Task<CkMethodOutcome> RunAsync(CkMethodContext<TParameters> context, IdentityMethodCall? call,
         CancellationToken cancellationToken)
     {
-        if (call == null || !IdentityMethodCallerRules.IsAdministrator(call.Principal))
+        if (call == null || !IsAdmitted(call.Principal))
         {
             return CkMethodOutcome.Forbidden("role-required");
         }

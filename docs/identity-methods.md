@@ -1,5 +1,5 @@
 ---
-description: "Identity CK method declarations and host, User.ChangePassword/ResetPassword, role, group and client-secret methods"
+description: "Identity CK method declarations and host, User.ChangePassword/ResetPassword, role, group, child-group, client role/overlay and client-secret methods"
 applies_to: "src/IdentityServices/Methods/**, **/Services/{SelfService,SecretManagement}/**, *DataPermission*.cs"
 ---
 
@@ -145,6 +145,52 @@ user role handlers use (scope `octo_api` + role `UserManagement` on the **valida
 - **Tests:** `Api/Methods/GroupMethodTests` (all operations, every refusal, caller theory, forged caller, audit, evaluator), `GroupMethodParityTests` (REST and method side
   by side per guard), `DataPermissionMethodTests` (operations, errors, caller theory, forged caller, REST parity, audit, evaluator), `Methods/IdentityMethodHostTests`
   (selection). The last-administrator tests clear the administrators of the shared test database first, like `GroupRoleChangeGuardTests`.
+
+## Child group methods `Group.AddChildGroup`, `Group.RemoveChildGroup` (System.Identity 3.3.0)
+
+Nested groups (`ChildGroup` association). Own methods, not a third `GroupMemberKind` value: the cycle refusal needs its own error code, and
+an error code added to `Group.AddMember-1` is a Major. Handlers in `Methods/GroupChildGroupHandlers.cs` (`GroupChildGroupHandlerBase<T>` on
+`IdentityAdminMethodHandlerBase<T>`: caller `UserManagement`, one `Identity.Method` event per call with `memberKind` `Group` and `memberId`).
+
+- **Parameter** `childGroupId` (rtId). Not an object id, not existing, or not readable by the caller = `CHILD_GROUP_NOT_FOUND`.
+- **AddChildGroup** order (as the REST endpoint): group, child group, a group in itself (`GROUP_CYCLE`, parameter `cycle` = `self`), already a
+  member (`CHILD_GROUP_ALREADY_IN_GROUP`), a cycle - the group reachable from the child through its child groups, depth-first
+  (`GroupGraph.WouldCreateCycleAsync`; `GROUP_CYCLE`, `cycle` = `descendant`), the role change guard (`RoleGraphChange.MemberAdded` with
+  `GroupMemberKind.Group`), write.
+- **RemoveChildGroup**: not a member = `CHILD_GROUP_NOT_IN_GROUP`; a member the caller cannot read = `METHOD_FORBIDDEN` (`data-permission`); guard
+  `MemberRemoved`; the edge to a group that no longer exists is still removed. `Group.RemoveMember` refuses an unreadable member of the group the same way.
+- `execution`: timeout 30 s, not idempotent (a repeated call answers the typed error). REST facades: `docs/identity-rest-facades.md`.
+
+## Client role and overlay methods (System.Identity 3.3.0)
+
+`Client.SetRoles-1`, `Client.AddRole-1`, `Client.RemoveRole-1`, `Client.ApplyOverlayUris-1` and the static `Client.CleanOverlayEntries-1`.
+Roles `TenantManagement` or `UserManagement` (the REST policy `IdentityTenantAdministrationWritePolicy` of `ClientsController`),
+`dataAccess: Write`; the handlers repeat the rule on the validated principal (`IdentityMethodCallerRules.IsTenantAdministrator`). No secret:
+hosted whatever `EnablePasswordMethods` says.
+
+| Method | Parameters | Result | Errors | Idempotent / timeout |
+|---|---|---|---|---|
+| `SetRoles` | `roleNames` (complete list) | - | `ROLE_NOT_FOUND` | yes / 30 s |
+| `AddRole` | `roleName` | - | `ROLE_NOT_FOUND` | yes (a role held directly is a success without a write) / 30 s |
+| `RemoveRole` | `roleName` | - | `ROLE_NOT_FOUND` | yes (a role not held is a success) / 30 s |
+| `ApplyOverlayUris` | `overlayName`, optional `redirectUris`, `postLogoutRedirectUris`, `allowedCorsOrigins` | `ClientOverlayUrisResult` (added / skipped per list) | `INVALID_OVERLAY_NAME`, `NO_OVERLAY_URIS`, `CONCURRENT_CHANGE` | yes (a re-run adds and writes nothing) / 30 s |
+| `CleanOverlayEntries` (static) | optional `overlayName` | `ClientOverlayCleanResult` (clients affected, entries removed, one `ClientOverlayCleanEntry` per changed client) | `INVALID_OVERLAY_NAME`, `CONCURRENT_CHANGE` | yes / 60 s |
+
+- **Roles** (`Methods/ClientRoleHandlers.cs`, `ClientRoleMethodHandlerBase<T>`): only the direct roles (`AssignedRole`) are read and written,
+  only the difference is written (`IClientRoleStore.ApplyRoleChangesAsync`), so a kept role is never written again. A role that is unknown or
+  not readable is `ROLE_NOT_FOUND` and nothing changes; removing a held role the caller cannot read (`RemoveRole`, or dropping it in
+  `SetRoles`; `Group.SetRoles` the same) is `METHOD_FORBIDDEN` (`data-permission`). `rolesAfter` in the audit is read back from the store after the write. Every added role runs `IRoleChangeGuard.EvaluateClientGrantAsync`: a built-in role the
+  caller does not hold (`role-not-held`) and any role for a client-credentials caller's own client (`self-grant`) are refused with
+  `METHOD_FORBIDDEN` - the same answer as `User.AddRole`. Removals are never judged. Audit: `clientId`, `rolesBefore`, `rolesAfter`.
+- **Overlay URIs** (`Methods/ClientOverlayHandlers.cs`, rules in `ClientOverlayUris`): an overlay URI is written with
+  `Source = "overlay:<overlayName>"`; a URI already in the list (any source, ordinal) is skipped; blanks are ignored. Every write is one
+  version-checked read-modify-write through `IOctoClientStore.MutateAsync`; nothing is written when nothing changes. `ApplyOverlayUris`
+  publishes the CORS client refresh after every successful call; `CleanOverlayEntries` once when anything was removed. Audit details are
+  counts and the overlay name, never a URI.
+- **Result records** (`records/ck-clientOverlayResults.yaml`, attributes `attributes/clientOverlayResult-attributes.yaml`, `RuntimeState`): the
+  shape of the REST responses, flattened per list.
+- REST facades and parity tables: `docs/identity-rest-facades.md`. Tests: `Api/TenantApi/ClientRestMethodFacadeTests`,
+  `Methods/IdentityMethodHostTests`, the `ClientsController*` unit tests.
 
 ## Client secret methods `Client.AddSecret`, `Client.RemoveSecret`
 

@@ -11,6 +11,7 @@ using Meshmakers.Octo.Runtime.Contracts.MongoDb.Repositories;
 using Meshmakers.Octo.Runtime.Contracts.Repositories;
 using Meshmakers.Octo.Services.Infrastructure.Services;
 using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Mvc;
 using NSubstitute;
 using Persistence.IdentityCkModel.Generated.System.Identity.v3;
@@ -20,8 +21,9 @@ namespace IdentityServices.UnitTests.Controllers;
 
 /// <summary>
 ///     AB#7192: removing a client from a group is the revoke of a scratch tenant's creator grant when the group is
-///     TenantOwners and the client is the creator's mirror. The controller hands every removal to the grant service,
-///     which decides; the removal itself is unchanged.
+///     TenantOwners and the client is the creator's mirror. The endpoint is a facade of <c>Group.RemoveMember</c>; the
+///     handler (run here behind the controller) hands every removal to the grant service, which decides; the removal itself
+///     is unchanged. The revoker is the caller's subject (a client-credentials caller: its client id).
 /// </summary>
 public class GroupsControllerScratchRevokeTests
 {
@@ -46,8 +48,11 @@ public class GroupsControllerScratchRevokeTests
             .Returns(new RtClient { RtId = _clientId, ClientId = "agent-mirror" });
         _clientStore.FindRtClientByIdAsync("agent-mirror")
             .Returns(new RtClient { RtId = _clientId, ClientId = "agent-mirror" });
-        _sut = new GroupsController(_groupStore, _grantService, _tenantResolver, Substitute.For<IRoleChangeGuard>(),
-            Substitute.For<IRoleChangeRefusals>(), _clientStore)
+        _groupStore.GetMemberClientIdsAsync(_groupId).Returns([_clientId.ToString()]);
+        var methods = new HandlerBackedMethodFacade(_clientStore, groupStore: _groupStore, grantService: _grantService,
+            tenantResolver: _tenantResolver);
+        _sut = new GroupsController(_groupStore, Substitute.For<IRoleChangeGuard>(), Substitute.For<IRoleChangeRefusals>(),
+            methods, Substitute.For<RoleManager<RtRole>>(Substitute.For<IRoleStore<RtRole>>(), null, null, null, null))
         {
             ControllerContext = new ControllerContext { HttpContext = new DefaultHttpContext() }
         };
@@ -59,7 +64,7 @@ public class GroupsControllerScratchRevokeTests
     [Fact]
     public async Task RemoveClientMember_RemovesTheMember_ThenOffersTheRemovalToTheGrantService()
     {
-        SignInAs(new Claim("preferred_username", "tenant-admin"));
+        SignInAs(new Claim("sub", "tenant-admin"), new Claim("preferred_username", "admin"));
 
         var result = await _sut.RemoveClientMember(_groupId, _clientId.ToString());
 
@@ -71,7 +76,7 @@ public class GroupsControllerScratchRevokeTests
     [Fact]
     public async Task RemoveClientMember_RecordsTheRevoke_BeforeTheMembershipIsRemoved()
     {
-        SignInAs(new Claim("preferred_username", "tenant-admin"));
+        SignInAs(new Claim("sub", "tenant-admin"), new Claim("preferred_username", "admin"));
 
         await _sut.RemoveClientMember(_groupId, _clientId.ToString());
 
@@ -85,12 +90,13 @@ public class GroupsControllerScratchRevokeTests
     [Fact]
     public async Task RemoveClientMember_WhenTheRemovalFails_TheRevokeIsAlreadyPersisted()
     {
-        SignInAs(new Claim("preferred_username", "tenant-admin"));
+        SignInAs(new Claim("sub", "tenant-admin"), new Claim("preferred_username", "admin"));
         _groupStore.RemoveMemberClientAsync(_groupId, _clientId.ToString())
             .Returns(Task.FromException(new InvalidOperationException("db down")));
 
-        await Assert.ThrowsAsync<InvalidOperationException>(() =>
-            _sut.RemoveClientMember(_groupId, _clientId.ToString()));
+        var result = await _sut.RemoveClientMember(_groupId, _clientId.ToString());
+
+        result.Should().BeOfType<ObjectResult>().Which.StatusCode.Should().Be(StatusCodes.Status500InternalServerError);
 
         await _grantService.Received(1).RecordRevocationAsync(TenantId, _groupId, _clientId, "tenant-admin");
     }
@@ -108,7 +114,7 @@ public class GroupsControllerScratchRevokeTests
     [Fact]
     public async Task RemoveClientMember_UnknownGroup_Is404_AndRevokesNothing()
     {
-        SignInAs(new Claim("preferred_username", "tenant-admin"));
+        SignInAs(new Claim("sub", "tenant-admin"), new Claim("preferred_username", "admin"));
         var unknown = OctoObjectId.GenerateNewId();
         _groupStore.FindByIdAsync(unknown).Returns((RtGroup?)null);
 
@@ -123,7 +129,7 @@ public class GroupsControllerScratchRevokeTests
     public async Task RemoveClientMember_ByClientId_RemovesTheClientsRtId_AndOffersTheRevoke()
     {
         // AB#8571: the OAuth client id names the same client as its rtId.
-        SignInAs(new Claim("preferred_username", "tenant-admin"));
+        SignInAs(new Claim("sub", "tenant-admin"), new Claim("preferred_username", "admin"));
 
         var result = await _sut.RemoveClientMember(_groupId, "agent-mirror");
 
@@ -135,8 +141,9 @@ public class GroupsControllerScratchRevokeTests
     [Fact]
     public async Task RemoveClientMember_TheRtIdOfADeletedClient_StillRemovesTheLeftoverEdge()
     {
-        SignInAs(new Claim("preferred_username", "tenant-admin"));
+        SignInAs(new Claim("sub", "tenant-admin"), new Claim("preferred_username", "admin"));
         var deleted = OctoObjectId.GenerateNewId();
+        _groupStore.GetMemberClientIdsAsync(_groupId).Returns([_clientId.ToString(), deleted.ToString()]);
 
         var result = await _sut.RemoveClientMember(_groupId, deleted.ToString());
 
@@ -147,7 +154,7 @@ public class GroupsControllerScratchRevokeTests
     [Fact]
     public async Task RemoveClientMember_AnUnknownClientId_Is404_AndChangesNothing()
     {
-        SignInAs(new Claim("preferred_username", "tenant-admin"));
+        SignInAs(new Claim("sub", "tenant-admin"), new Claim("preferred_username", "admin"));
 
         var result = await _sut.RemoveClientMember(_groupId, "no-such-client");
 

@@ -20,6 +20,11 @@ using Meshmakers.Octo.Backend.IdentityServices.Authorization;
 using Meshmakers.Octo.Backend.IdentityServices.Authorization.RoleChange;
 using Meshmakers.Octo.ConstructionKit.Contracts;
 using Microsoft.AspNetCore.Identity;
+using Meshmakers.Octo.Services.Methods.Facades;
+using Meshmakers.Octo.Services.Methods;
+using Meshmakers.Octo.Services.Contracts.DistributionEventHub.Methods;
+using Meshmakers.Octo.Backend.IdentityServices.Methods;
+using System.Text.Json;
 
 namespace Meshmakers.Octo.Backend.IdentityServices.TenantApi.v1.Controllers;
 
@@ -40,8 +45,8 @@ public class ClientsController : ControllerBase
     private readonly IClientRoleStore _clientRoleStore;
     private readonly IClientImpersonationStore _clientImpersonationStore;
     private readonly RoleManager<RtRole> _roleManager;
-    private readonly IRoleChangeGuard _roleChangeGuard;
     private readonly IRoleChangeRefusals _roleChangeRefusals;
+    private readonly IIdentityMethodFacade _methodFacade;
 
     /// <summary>
     ///     Constructor
@@ -50,47 +55,24 @@ public class ClientsController : ControllerBase
     /// <param name="distributionEventHubService">Distributed cache with REDIS</param>
     /// <param name="clientRoleStore">The store managing client role assignments</param>
     /// <param name="clientImpersonationStore">The store reading the MayActAs impersonation edges</param>
-    /// <param name="roleManager">Resolves the roles a client role change names</param>
-    /// <param name="roleChangeGuard">"Grant only built-in roles you hold" for client roles (AB#7928)</param>
+    /// <param name="roleManager">Resolves the role ids of a replace-all role change to names</param>
     /// <param name="roleChangeRefusals">Answers and audits a refused role change</param>
+    /// <param name="methodFacade">Calls the <c>Client.*</c> methods the role and overlay endpoints are facades of</param>
     public ClientsController(IOctoClientStore octoClientStore,
         IDistributionEventHubService distributionEventHubService,
         IClientRoleStore clientRoleStore,
         IClientImpersonationStore clientImpersonationStore,
         RoleManager<RtRole> roleManager,
-        IRoleChangeGuard roleChangeGuard,
-        IRoleChangeRefusals roleChangeRefusals)
+        IRoleChangeRefusals roleChangeRefusals,
+        IIdentityMethodFacade methodFacade)
     {
         _octoClientStore = octoClientStore;
         _distributionEventHubService = distributionEventHubService;
         _clientRoleStore = clientRoleStore;
         _clientImpersonationStore = clientImpersonationStore;
         _roleManager = roleManager;
-        _roleChangeGuard = roleChangeGuard;
         _roleChangeRefusals = roleChangeRefusals;
-    }
-
-    /// <summary>
-    ///     AB#7928: a client may only be given built-in roles (roles with an <c>rtWellKnownName</c>) the caller holds itself;
-    ///     custom roles are free and removals are never judged. Otherwise a tenant administrator could hand a client e.g.
-    ///     <c>UserManagement</c> and act as that client. Returns the audited 403 <c>role-not-held</c> answer, or <c>null</c>.
-    ///     The bus path (<c>DistClientDto.AssignedRoleNames</c>, service-internal client provisioning) does not come here.
-    ///     AB#8569: a client-credentials caller is refused any role for its own client (<c>self-grant</c>), like a user for
-    ///     its own user.
-    /// </summary>
-    private async Task<ObjectResult?> GuardClientRoleGrantAsync(RtClient client, IReadOnlyCollection<string> addedRoleNames)
-    {
-        if (addedRoleNames.Count == 0)
-        {
-            return null;
-        }
-
-        var caller = RoleChangeCaller.FromPrincipal(User);
-        var decision = await _roleChangeGuard.EvaluateClientGrantAsync(caller, client, addedRoleNames,
-            HttpContext.RequestAborted);
-        return decision.IsAllowed
-            ? null
-            : await _roleChangeRefusals.RefuseAsync(HttpContext, caller, decision, $"client {client.ClientId}");
+        _methodFacade = methodFacade;
     }
 
     // GET: system/v1/clients
@@ -200,6 +182,14 @@ public class ClientsController : ControllerBase
     }
 
     // PUT system/v1/clients/{id}/roles
+    /// <summary>
+    ///     Replaces the directly assigned roles of a client. Facade of the CK method <c>Client.SetRoles-1</c>.
+    /// </summary>
+    /// <remarks>
+    ///     The endpoint resolves the client id and the role ids (an unknown id is <c>404</c> and changes nothing) and calls
+    ///     <c>Client.SetRoles</c> in-process: client grant rule of the role change guard, only the difference is
+    ///     written, one <c>Identity.Method</c> audit event.
+    /// </remarks>
     [HttpPut("{id}/roles")]
     [Authorize(IdentityServiceConstants.IdentityTenantAdministrationWritePolicy)]
     [EndpointSummary("Replaces the directly-assigned roles of a client (replace-all).")]
@@ -216,13 +206,8 @@ public class ClientsController : ControllerBase
             return NotFound(new NotFoundErrorDto($"Client with id '{id}' not found."));
         }
 
-        // AB#7928: every role id is resolved first (an unknown id changes nothing), then only the added roles are judged,
-        // and only the difference is written: a kept role is never written again, so a role that a concurrent request
-        // removed is not restored without the check.
-        var current = (await _clientRoleStore.GetDirectRoleIdsAsync(client.RtId)).ToHashSet(StringComparer.Ordinal);
-        var wanted = new HashSet<string>(StringComparer.Ordinal);
-        var addedRoleIds = new List<string>();
-        var addedRoleNames = new List<string>();
+        // REST names the roles by id, the method by name: resolve every id first, so an unknown id changes nothing.
+        var roleIdsByName = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         foreach (var roleId in roleIds)
         {
             var role = OctoObjectId.TryParse(roleId, out _) ? await _roleManager.FindByIdAsync(roleId) : null;
@@ -231,26 +216,20 @@ public class ClientsController : ControllerBase
                 return NotFound(new NotFoundErrorDto($"Role with id '{roleId}' not found."));
             }
 
-            var canonicalId = role.RtId.ToString();
-            if (wanted.Add(canonicalId) && !current.Contains(canonicalId))
-            {
-                addedRoleIds.Add(canonicalId);
-                addedRoleNames.Add(role.Name ?? canonicalId);
-            }
+            roleIdsByName[role.Name ?? role.RtId.ToString()] = roleId;
         }
 
-        var refusal = await GuardClientRoleGrantAsync(client, addedRoleNames);
-        if (refusal != null)
-        {
-            return refusal;
-        }
-
-        await _clientRoleStore.ApplyRoleChangesAsync(client.RtId, addedRoleIds,
-            current.Where(id => !wanted.Contains(id)).ToList());
-        return Ok();
+        var response = await _methodFacade.InvokeAsync(IdentityMethodFacade.ClientCkTypeId,
+            SystemIdentityCkIds.ClientSetRolesMethodId, client.RtId.ToString(),
+            new ClientSetRolesParameters { RoleNames = roleIdsByName.Keys.ToList() }, User, HttpContext.RequestAborted);
+        return await ToRoleFacadeResultAsync(response, client, new CkMethodFacadeOptions()
+            .MapError(UserRoleMethodErrors.RoleNotFound, error => NotFound(new NotFoundErrorDto(
+                $"Role with id '{RoleIdOf(error, roleIdsByName)}' not found."))));
     }
 
     // PUT system/v1/clients/{id}/roles/{roleName}
+    /// <summary>Assigns a role to a client. Facade of the CK method <c>Client.AddRole-1</c>.</summary>
+    /// <remarks>A role the client already holds directly is <c>200</c> without a write, as before.</remarks>
     [HttpPut("{id}/roles/{roleName}")]
     [Authorize(IdentityServiceConstants.IdentityTenantAdministrationWritePolicy)]
     [EndpointSummary("Assigns a single role (by name) to a client.")]
@@ -267,37 +246,20 @@ public class ClientsController : ControllerBase
             return NotFound(new NotFoundErrorDto($"Client with id '{id}' not found."));
         }
 
-        // AB#7928: a role the client already holds directly grants nothing and is not written again (so a concurrent
-        // removal is not undone unchecked); an unknown role is the store's 404 below.
-        var role = await _roleManager.FindByNameAsync(roleName);
-        if (role != null)
-        {
-            var current = await _clientRoleStore.GetDirectRoleIdsAsync(client.RtId);
-            if (current.Contains(role.RtId.ToString()))
-            {
-                return Ok();
-            }
-
-            var refusal = await GuardClientRoleGrantAsync(client, [role.Name ?? roleName]);
-            if (refusal != null)
-            {
-                return refusal;
-            }
-        }
-
-        try
-        {
-            await _clientRoleStore.AddRoleAsync(client.RtId, roleName);
-        }
-        catch (InvalidOperationException)
-        {
-            return NotFound(new NotFoundErrorDto($"Role with name '{roleName}' not found."));
-        }
-
-        return Ok();
+        var response = await _methodFacade.InvokeAsync(IdentityMethodFacade.ClientCkTypeId,
+            SystemIdentityCkIds.ClientAddRoleMethodId, client.RtId.ToString(),
+            new ClientAddRoleParameters { RoleName = roleName }, User, HttpContext.RequestAborted);
+        return await ToRoleFacadeResultAsync(response, client, new CkMethodFacadeOptions()
+            .MapError(UserRoleMethodErrors.RoleNotFound,
+                _ => NotFound(new NotFoundErrorDto($"Role with name '{roleName}' not found."))));
     }
 
     // DELETE system/v1/clients/{id}/roles/{roleName}
+    /// <summary>Removes a role from a client. Facade of the CK method <c>Client.RemoveRole-1</c>.</summary>
+    /// <remarks>
+    ///     A role the client does not hold, and a role that does not exist, are <c>200</c> without a change, as before (the
+    ///     method answers <c>ROLE_NOT_FOUND</c> for the latter).
+    /// </remarks>
     [HttpDelete("{id}/roles/{roleName}")]
     [Authorize(IdentityServiceConstants.IdentityTenantAdministrationWritePolicy)]
     [EndpointSummary("Removes a single role (by name) from a client.")]
@@ -313,9 +275,40 @@ public class ClientsController : ControllerBase
             return NotFound(new NotFoundErrorDto($"Client with id '{id}' not found."));
         }
 
-        await _clientRoleStore.RemoveRoleAsync(client.RtId, roleName);
-        return Ok();
+        var response = await _methodFacade.InvokeAsync(IdentityMethodFacade.ClientCkTypeId,
+            SystemIdentityCkIds.ClientRemoveRoleMethodId, client.RtId.ToString(),
+            new ClientRemoveRoleParameters { RoleName = roleName }, User, HttpContext.RequestAborted);
+        return await ToRoleFacadeResultAsync(response, client, new CkMethodFacadeOptions()
+            // REST contract: an unknown role has always been 200 without a change
+            .MapError(UserRoleMethodErrors.RoleNotFound, _ => Ok()));
     }
+
+    /// <summary>
+    ///     The REST answer of a client role method: <c>200</c> on success, the audited 403 problem answer of the role change
+    ///     guard (WARN log and <c>Identity.RoleChangeRefused</c> record), a client that vanished as <c>404</c>, the
+    ///     endpoint's own mappings, else the facade defaults.
+    /// </summary>
+    private async Task<IActionResult> ToRoleFacadeResultAsync(CkMethodResponse response, RtClient client,
+        CkMethodFacadeOptions options)
+    {
+        if (RoleChangeProblems.RefusalOf(response) is { } decision)
+        {
+            return await _roleChangeRefusals.RefuseAsync(HttpContext, RoleChangeCaller.FromPrincipal(User), decision,
+                $"client {client.ClientId}");
+        }
+
+        return response.ToActionResult(options
+            .MapSuccess(_ => Ok())
+            .MapError(CkMethodErrorCodes.MethodTargetNotFound,
+                _ => NotFound(new NotFoundErrorDto($"Client with id '{client.ClientId}' not found."))));
+    }
+
+    /// <summary>The role id of a <c>ROLE_NOT_FOUND</c> answer of <c>Client.SetRoles</c> (the method names the role).</summary>
+    private static string RoleIdOf(CkMethodError error, IReadOnlyDictionary<string, string> roleIdsByName) =>
+        error.Parameters.TryGetValue(UserRoleMethodErrors.RoleNameParameter, out var name) &&
+        roleIdsByName.TryGetValue(name, out var id)
+            ? id
+            : name ?? string.Empty;
 
     // POST api/Clients
     [HttpPost]
@@ -414,12 +407,17 @@ public class ClientsController : ControllerBase
     }
 
     // POST: system/v1/clients/{id}/overlayUris
-    // AB#4209 Step 4 — declarative overlay URI write. The cmdlet caller (octo-tools
-    // Apply-IdentityOverlay → octo-cli ApplyClientOverlay → this endpoint) passes the three
-    // URI lists for one client; we dedupe each against the existing list contents and append
-    // new entries with Source = "overlay:<OverlayName>". The Step 2a preservation pass keeps
-    // them across blueprint re-apply; the future DumpTenant --clean filter strips them from
-    // sanitised exports. See concept doc §4.3 and §4.5.
+    /// <summary>
+    ///     Declarative overlay URI write (octo-tools Apply-IdentityOverlay -> octo-cli ApplyClientOverlay -> this endpoint).
+    ///     Facade of the CK method <c>Client.ApplyOverlayUris-1</c>: the overlay rules (dedupe against every source, entries
+    ///     written with <c>Source = "overlay:&lt;OverlayName&gt;"</c>, no write when nothing is added, CORS refresh event on
+    ///     every call) live in the method.
+    /// </summary>
+    /// <remarks>
+    ///     Status codes and the response body are unchanged, in the earlier order: <c>400</c> with the model state for an
+    ///     invalid overlay name or no non-blank URI (checked before the client is looked up), <c>404</c> for an unknown client,
+    ///     <c>409</c> for a concurrent change that could not be resolved.
+    /// </remarks>
     [HttpPost("{id}/overlayUris")]
     [Authorize(IdentityServiceConstants.IdentityTenantAdministrationWritePolicy)]
     [EndpointSummary("Applies an overlay URI set to a client. Idempotent — duplicates are skipped.")]
@@ -435,90 +433,54 @@ public class ClientsController : ControllerBase
             return BadRequest(ModelState);
         }
 
-        // Count only non-whitespace inputs so a payload like {RedirectUris: ["   ", ""]}
-        // hits the same 400 as the all-null case below — both are no-op intent and the
-        // endpoint should reject them up front rather than walk the dedup path for nothing.
-        var meaningfulCount = CountNonWhitespace(dto.RedirectUris)
-                              + CountNonWhitespace(dto.PostLogoutRedirectUris)
-                              + CountNonWhitespace(dto.AllowedCorsOrigins);
-        if (meaningfulCount == 0)
+        // REST contract: a request without any non-blank URI is 400 before the client is looked up (also for an unknown
+        // client). Read-only request validation; the method enforces the same rule (NO_OVERLAY_URIS, mapped below).
+        if (ClientOverlayUris.CountNonWhitespace(dto.RedirectUris) +
+            ClientOverlayUris.CountNonWhitespace(dto.PostLogoutRedirectUris) +
+            ClientOverlayUris.CountNonWhitespace(dto.AllowedCorsOrigins) == 0)
         {
-            ModelState.AddModelError(nameof(dto),
-                "At least one of RedirectUris, PostLogoutRedirectUris, or AllowedCorsOrigins must contain a non-whitespace URI.");
-            return BadRequest(ModelState);
+            return NoOverlayUris(nameof(dto));
         }
 
-        var sourceTag = ClientUriSources.OverlayPrefix + dto.OverlayName;
-        ApplyOverlayUrisListCountDto redirectResult = new(), postLogoutResult = new(), corsResult = new();
-        RtClient? appClient;
-        try
+        var client = await _octoClientStore.FindRtClientByIdAsync(id);
+        if (client == null)
         {
-            // AB#8015: version-checked read-modify-write; the merge runs again on a fresh read after a conflict, so the
-            // reported counts belong to the write that was stored.
-            //
-            // No-op short-circuit for the DB: if every incoming URI hit the dedup branch, the client entity
-            // is byte-identical to what we loaded, so nothing is written and the endpoint holds its
-            // "re-run is no DB churn" contract — important for the cmdlet caller that re-applies the overlay
-            // on every Start-Octo / CI run.
-            appClient = await _octoClientStore.MutateAsync(id, current =>
+            return ClientDoesNotExist(id);
+        }
+
+        var response = await _methodFacade.InvokeAsync(IdentityMethodFacade.ClientCkTypeId,
+            SystemIdentityCkIds.ClientApplyOverlayUrisMethodId, client.RtId.ToString(),
+            new ClientApplyOverlayUrisParameters
             {
-                redirectResult = AppendOverlayUris(current.RedirectUris, dto.RedirectUris, sourceTag);
-                postLogoutResult = AppendOverlayUris(current.PostLogoutRedirectUris, dto.PostLogoutRedirectUris,
-                    sourceTag);
-                corsResult = AppendOverlayUris(current.AllowedCorsOrigins, dto.AllowedCorsOrigins, sourceTag);
-                return redirectResult.Added + postLogoutResult.Added + corsResult.Added > 0;
-            });
-            if (appClient == null)
+                OverlayName = dto.OverlayName,
+                RedirectUris = dto.RedirectUris,
+                PostLogoutRedirectUris = dto.PostLogoutRedirectUris,
+                AllowedCorsOrigins = dto.AllowedCorsOrigins
+            }, User, HttpContext.RequestAborted);
+        return response.ToActionResult(new CkMethodFacadeOptions()
+            .MapSuccess(result => Ok(ToApplyOverlayUrisResultDto(result.ResultJson)))
+            .MapError(CkMethodErrorCodes.MethodTargetNotFound, _ => ClientDoesNotExist(id))
+            .MapError(ClientOverlayErrors.NoOverlayUris, _ => NoOverlayUris(nameof(dto)))
+            .MapError(ClientOverlayErrors.InvalidOverlayName, _ =>
             {
-                return NotFound(new NotFoundErrorDto($"Client with id '{id}' does not exist."));
-            }
-
-            // The CORS refresh event is published unconditionally (AB#5487): "0 added" still means the caller
-            // asked for a refresh, and an idempotent re-apply is the obvious repair for a policy that was cached
-            // before the client's origins existed. The event is cheap (a cache invalidation).
-            await ClearCacheAsync();
-        }
-        catch (RtVersionConflictException)
-        {
-            return Problem(detail: ConcurrentChangeMessage, statusCode: StatusCodes.Status409Conflict);
-        }
-        catch (Exception e)
-        {
-            return BadRequest(new InternalServerErrorDto(e.Message));
-        }
-
-        return Ok(new ApplyOverlayUrisResultDto
-        {
-            OverlayName = dto.OverlayName,
-            ClientId = appClient.ClientId,
-            RedirectUris = redirectResult,
-            PostLogoutRedirectUris = postLogoutResult,
-            AllowedCorsOrigins = corsResult
-        });
+                ModelState.AddModelError(nameof(ApplyOverlayUrisDto.OverlayName), OverlayNameRuleMessage);
+                return BadRequest(ModelState);
+            })
+            .MapError(ClientOverlayErrors.ConcurrentChange, _ => ConcurrentChange())
+            .MapError(CkMethodErrorCodes.MethodHandlerFailed,
+                _ => BadRequest(new InternalServerErrorDto("Applying the overlay URIs failed."))));
     }
 
     // DELETE: /{tenantId}/v1/clients/cleanOverlayEntries
-    // AB#4209 Step 5 PR 1 — strip overlay URI entries from every blueprint-managed
-    // RtClient in the tenant. Used by the future DumpTenant --clean orchestrator
-    // (bot-services clones the tenant DB to a temp DB, calls this against the temp DB,
-    // mongodumps the temp DB, drops it) so the resulting archive carries no overlay:*
-    // entries and is safe to re-import as Blueprint seed material.
-    //
-    // Without overlayName: strips every entry where Source starts with "overlay:" —
-    // every overlay across every overlayName goes away.
-    // With overlayName: strips only entries where Source matches "overlay:<name>"
-    // exactly — useful for per-overlay clean-out (e.g. drop gerald-laptop overlays
-    // but keep the shared local-dev ones).
-    //
-    // Idempotent — skips the UpdateAsync + cache bust for clients that had nothing to
-    // remove (matches the ApplyOverlayUris no-op contract on re-runs). See concept doc
-    // §4.5 (source taxonomy) and §4.7 (--clean filter rule).
-    //
-    // PHASE-3 MIGRATION CANDIDATE: when octo-platform-services grows to Phase 3
-    // (blueprint orchestration + cross-cutting tenant operations), this endpoint and
-    // the bot-services orchestration that calls it move under platform-services as the
-    // central tenant-clean-export flow. The endpoint stays here because identity-services
-    // is the owner of RtClient + ClientUriSources; the orchestration moves out.
+    /// <summary>
+    ///     Strips overlay URI entries from every client of the tenant (all <c>overlay:*</c> sources, or only
+    ///     <c>overlay:&lt;overlayName&gt;</c>). Used by the DumpTenant --clean orchestration so an archive carries no overlay
+    ///     entries. Facade of the static CK method <c>Client.CleanOverlayEntries-1</c>.
+    /// </summary>
+    /// <remarks>
+    ///     Idempotent: clients without matches are never written and the cache is invalidated once, only when anything was
+    ///     removed. Status codes and the response body are unchanged.
+    /// </remarks>
     [HttpDelete("cleanOverlayEntries")]
     [Authorize(IdentityServiceConstants.IdentityTenantAdministrationWritePolicy)]
     [EndpointSummary("Strips overlay URI entries from every client in the tenant. Idempotent — clients without matches are skipped (no DB write, no cache invalidation).")]
@@ -527,192 +489,77 @@ public class ClientsController : ControllerBase
     public async Task<IActionResult> CleanOverlayEntries(
         [FromQuery][Description("Optional overlay name. Without it, every Source matching 'overlay:*' is removed. With it, only Source == 'overlay:<overlayName>' is removed (same regex constraint as ApplyOverlayUris).")] string? overlayName = null)
     {
-        if (overlayName != null && !System.Text.RegularExpressions.Regex.IsMatch(overlayName, "^[A-Za-z0-9._-]+$"))
-        {
-            ModelState.AddModelError(nameof(overlayName),
-                "overlayName may only contain letters (A-Z, a-z), digits (0-9), and the characters '.', '-', and '_'.");
-            return BadRequest(ModelState);
-        }
-
-        // null = "match every overlay:* prefix"; non-null = "match overlay:<name> exactly"
-        var targetSource = overlayName != null
-            ? ClientUriSources.OverlayPrefix + overlayName
-            : null;
-
-        var allClients = await _octoClientStore.GetClients();
-        var perClientResults = new List<CleanOverlayEntriesClientResultDto>();
-        var totalRemoved = 0;
-
-        foreach (var listed in allClients)
-        {
-            // Cheap pre-check on the listed snapshot: clients without a matching entry are never written.
-            if (!HasOverlayEntries(listed.RedirectUris, targetSource) &&
-                !HasOverlayEntries(listed.PostLogoutRedirectUris, targetSource) &&
-                !HasOverlayEntries(listed.AllowedCorsOrigins, targetSource))
+        var response = await _methodFacade.InvokeAsync(IdentityMethodFacade.ClientCkTypeId,
+            SystemIdentityCkIds.ClientCleanOverlayEntriesMethodId, null,
+            new ClientCleanOverlayEntriesParameters { OverlayName = overlayName }, User, HttpContext.RequestAborted);
+        return response.ToActionResult(new CkMethodFacadeOptions()
+            .MapSuccess(result => Ok(ToCleanOverlayEntriesResultDto(result.ResultJson)))
+            .MapError(ClientOverlayErrors.InvalidOverlayName, _ =>
             {
-                continue;
-            }
-
-            int redirectRemoved = 0, postLogoutRemoved = 0, corsRemoved = 0;
-            try
-            {
-                // AB#8015: version-checked read-modify-write per client; the removal runs on the fresh read.
-                var stored = await _octoClientStore.MutateAsync(listed.ClientId, current =>
-                {
-                    redirectRemoved = RemoveOverlayEntries(current.RedirectUris, targetSource);
-                    postLogoutRemoved = RemoveOverlayEntries(current.PostLogoutRedirectUris, targetSource);
-                    corsRemoved = RemoveOverlayEntries(current.AllowedCorsOrigins, targetSource);
-                    return redirectRemoved + postLogoutRemoved + corsRemoved > 0;
-                });
-                if (stored == null)
-                {
-                    continue;
-                }
-            }
-            catch (RtVersionConflictException)
-            {
-                return Problem(detail: ConcurrentChangeMessage, statusCode: StatusCodes.Status409Conflict);
-            }
-            catch (Exception e)
-            {
-                return BadRequest(new InternalServerErrorDto(
-                    $"Failed to update client '{listed.ClientId}' while removing overlay entries: {e.Message}"));
-            }
-
-            var clientTotal = redirectRemoved + postLogoutRemoved + corsRemoved;
-            if (clientTotal == 0)
-            {
-                continue;
-            }
-
-            perClientResults.Add(new CleanOverlayEntriesClientResultDto
-            {
-                ClientId = listed.ClientId,
-                RedirectUrisRemoved = redirectRemoved,
-                PostLogoutRedirectUrisRemoved = postLogoutRemoved,
-                AllowedCorsOriginsRemoved = corsRemoved
-            });
-            totalRemoved += clientTotal;
-        }
-
-        // Cache invalidation is per-tenant, not per-client; bust once after the loop iff
-        // anything changed, mirroring the ApplyOverlayUris contract.
-        if (totalRemoved > 0)
-        {
-            await ClearCacheAsync();
-        }
-
-        return Ok(new CleanOverlayEntriesResultDto
-        {
-            OverlayName = overlayName,
-            ClientsAffected = perClientResults.Count,
-            TotalEntriesRemoved = totalRemoved,
-            ClientResults = perClientResults
-        });
+                ModelState.AddModelError(nameof(overlayName),
+                    "overlayName may only contain letters (A-Z, a-z), digits (0-9), and the characters '.', '-', and '_'.");
+                return BadRequest(ModelState);
+            })
+            .MapError(ClientOverlayErrors.ConcurrentChange, _ => ConcurrentChange())
+            .MapError(CkMethodErrorCodes.MethodHandlerFailed,
+                _ => BadRequest(new InternalServerErrorDto("Removing the overlay entries failed."))));
     }
 
-    /// <summary>
-    ///     Removes entries from <paramref name="targetList"/> whose <c>Source</c> matches the
-    ///     target. <paramref name="targetSource"/> = <c>null</c> matches every
-    ///     <c>overlay:*</c> prefix; non-null matches the exact source string. Returns the
-    ///     number of entries removed (0 if nothing matched).
-    /// </summary>
-    /// <remarks>
-    ///     Walks the list in reverse so the RemoveAt indices stay valid as entries vanish.
-    ///     <c>IAttributeValueList&lt;T&gt;</c> does not expose <c>RemoveAll</c>, hence the
-    ///     index loop.
-    /// </remarks>
-    private static int RemoveOverlayEntries(
-        IAttributeValueList<RtClientUriEntryRecord> targetList,
-        string? targetSource)
+    private const string OverlayNameRuleMessage =
+        "OverlayName may only contain letters (A-Z, a-z), digits (0-9), and the characters '.', '-', and '_'.";
+
+    private BadRequestObjectResult NoOverlayUris(string key)
     {
-        var removed = 0;
-        for (var i = targetList.Count - 1; i >= 0; i--)
-        {
-            var entry = targetList[i];
-            var matches = targetSource != null
-                ? string.Equals(entry.Source, targetSource, StringComparison.Ordinal)
-                : entry.Source.StartsWith(ClientUriSources.OverlayPrefix, StringComparison.Ordinal);
-            if (matches)
-            {
-                targetList.RemoveAt(i);
-                removed++;
-            }
-        }
-        return removed;
+        ModelState.AddModelError(key,
+            "At least one of RedirectUris, PostLogoutRedirectUris, or AllowedCorsOrigins must contain a non-whitespace URI.");
+        return BadRequest(ModelState);
     }
 
-    private static bool HasOverlayEntries(IAttributeValueList<RtClientUriEntryRecord>? list, string? targetSource) =>
-        list != null && list.Any(entry => targetSource != null
-            ? string.Equals(entry.Source, targetSource, StringComparison.Ordinal)
-            : entry.Source.StartsWith(ClientUriSources.OverlayPrefix, StringComparison.Ordinal));
+    private NotFoundObjectResult ClientDoesNotExist(string id) =>
+        NotFound(new NotFoundErrorDto($"Client with id '{id}' does not exist."));
 
-    private static int CountNonWhitespace(List<string>? list)
+    private ObjectResult ConcurrentChange() =>
+        Problem(detail: ConcurrentChangeMessage, statusCode: StatusCodes.Status409Conflict);
+
+    /// <summary>The REST body of <c>Client.ApplyOverlayUris</c>: the result record in the shape of the earlier response.</summary>
+    private static ApplyOverlayUrisResultDto ToApplyOverlayUrisResultDto(string? result)
     {
-        if (list == null || list.Count == 0)
+        var record = Deserialize<RtClientOverlayUrisResultRecord>(result);
+        return new ApplyOverlayUrisResultDto
         {
-            return 0;
-        }
-
-        var count = 0;
-        foreach (var item in list)
-        {
-            if (!string.IsNullOrWhiteSpace(item))
-            {
-                count++;
-            }
-        }
-        return count;
+            OverlayName = record.OverlayName,
+            ClientId = record.ClientId,
+            RedirectUris = new ApplyOverlayUrisListCountDto
+                { Added = record.RedirectUrisAdded, SkippedDuplicate = record.RedirectUrisSkipped },
+            PostLogoutRedirectUris = new ApplyOverlayUrisListCountDto
+                { Added = record.PostLogoutRedirectUrisAdded, SkippedDuplicate = record.PostLogoutRedirectUrisSkipped },
+            AllowedCorsOrigins = new ApplyOverlayUrisListCountDto
+                { Added = record.AllowedCorsOriginsAdded, SkippedDuplicate = record.AllowedCorsOriginsSkipped }
+        };
     }
 
-    /// <summary>
-    ///     Appends each URI from <paramref name="incoming"/> to <paramref name="targetList"/>
-    ///     unless an entry with the same <c>Uri</c> already exists (regardless of source).
-    ///     Returns the per-list count breakdown for the response body.
-    /// </summary>
-    /// <remarks>
-    ///     Dedup is by URI string (Ordinal comparison) — matches the Step 2a Merge contract so
-    ///     re-running the overlay apply against the same DB is a no-op. Conflict policy: any
-    ///     existing source (base / api / overlay:* / family:*) wins, the overlay-incoming entry
-    ///     is silently dropped. Mirrors the concept doc §4.3 "skip-duplicate" rule.
-    /// </remarks>
-    private static ApplyOverlayUrisListCountDto AppendOverlayUris(
-        IAttributeValueList<RtClientUriEntryRecord> targetList,
-        List<string>? incoming,
-        string sourceTag)
+    /// <summary>The REST body of <c>Client.CleanOverlayEntries</c>: the result record in the shape of the earlier response.</summary>
+    private static CleanOverlayEntriesResultDto ToCleanOverlayEntriesResultDto(string? result)
     {
-        if (incoming == null || incoming.Count == 0)
+        var record = Deserialize<RtClientOverlayCleanResultRecord>(result);
+        return new CleanOverlayEntriesResultDto
         {
-            return new ApplyOverlayUrisListCountDto { Added = 0, SkippedDuplicate = 0 };
-        }
-
-        var existingUris = new HashSet<string>(StringComparer.Ordinal);
-        foreach (var entry in targetList)
-        {
-            existingUris.Add(entry.Uri);
-        }
-
-        var added = 0;
-        var skipped = 0;
-        foreach (var uri in incoming)
-        {
-            if (string.IsNullOrWhiteSpace(uri))
+            OverlayName = record.OverlayName,
+            ClientsAffected = record.ClientsAffected,
+            TotalEntriesRemoved = record.TotalEntriesRemoved,
+            ClientResults = record.ClientResults.Select(entry => new CleanOverlayEntriesClientResultDto
             {
-                continue;
-            }
-
-            if (!existingUris.Add(uri))
-            {
-                skipped++;
-                continue;
-            }
-
-            targetList.Add(new RtClientUriEntryRecord { Uri = uri, Source = sourceTag });
-            added++;
-        }
-
-        return new ApplyOverlayUrisListCountDto { Added = added, SkippedDuplicate = skipped };
+                ClientId = entry.ClientId,
+                RedirectUrisRemoved = entry.RedirectUrisRemoved,
+                PostLogoutRedirectUrisRemoved = entry.PostLogoutRedirectUrisRemoved,
+                AllowedCorsOriginsRemoved = entry.AllowedCorsOriginsRemoved
+            }).ToList()
+        };
     }
+
+    private static T Deserialize<T>(string? resultJson) where T : class =>
+        (resultJson == null ? null : JsonSerializer.Deserialize<T>(resultJson, CkMethodJson.Options))
+        ?? throw new InvalidOperationException($"The method answered without a {typeof(T).Name}.");
 
     // DELETE api/Clients/5
     [HttpDelete("{id}")]

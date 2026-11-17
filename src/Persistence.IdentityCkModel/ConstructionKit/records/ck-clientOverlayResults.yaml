@@ -1,0 +1,50 @@
+"$schema": "https://schemas.meshmakers.cloud/construction-kit-elements.schema.json"
+# 3.3.0: the result records of Client.ApplyOverlayUris-1 and Client.CleanOverlayEntries-1. Each has the shape of the REST
+# response of the same operation (ApplyOverlayUrisResultDto, CleanOverlayEntriesResultDto), so the method answers what the
+# REST endpoint answers. They take the ckLanguage 2 default `derivable: Model`: answers, not extension points.
+records:
+  - recordId: ClientOverlayUrisResult
+    description: "Result of Client.ApplyOverlayUris: per URI list, how many overlay URIs were added and how many were skipped as duplicates."
+    isFinal: true
+    attributes:
+      - id: ${this}/OverlayResultOverlayName
+        name: OverlayName
+      - id: ${this}/OverlayResultClientId
+        name: ClientId
+      - id: ${this}/OverlayResultRedirectUrisAdded
+        name: RedirectUrisAdded
+      - id: ${this}/OverlayResultRedirectUrisSkipped
+        name: RedirectUrisSkipped
+      - id: ${this}/OverlayResultPostLogoutRedirectUrisAdded
+        name: PostLogoutRedirectUrisAdded
+      - id: ${this}/OverlayResultPostLogoutRedirectUrisSkipped
+        name: PostLogoutRedirectUrisSkipped
+      - id: ${this}/OverlayResultAllowedCorsOriginsAdded
+        name: AllowedCorsOriginsAdded
+      - id: ${this}/OverlayResultAllowedCorsOriginsSkipped
+        name: AllowedCorsOriginsSkipped
+  - recordId: ClientOverlayCleanResult
+    description: "Result of Client.CleanOverlayEntries: how many clients and overlay entries were cleaned, with one entry per changed client."
+    isFinal: true
+    attributes:
+      - id: ${this}/OverlayResultOverlayName
+        name: OverlayName
+        isOptional: true
+      - id: ${this}/OverlayResultClientsAffected
+        name: ClientsAffected
+      - id: ${this}/OverlayResultTotalEntriesRemoved
+        name: TotalEntriesRemoved
+      - id: ${this}/OverlayResultClientResults
+        name: ClientResults
+  - recordId: ClientOverlayCleanEntry
+    description: "One client of a Client.CleanOverlayEntries result: the overlay entries removed per URI list."
+    isFinal: true
+    attributes:
+      - id: ${this}/OverlayResultClientId
+        name: ClientId
+      - id: ${this}/OverlayResultRedirectUrisRemoved
+        name: RedirectUrisRemoved
+      - id: ${this}/OverlayResultPostLogoutRedirectUrisRemoved
+        name: PostLogoutRedirectUrisRemoved
+      - id: ${this}/OverlayResultAllowedCorsOriginsRemoved
+        name: AllowedCorsOriginsRemoved

@@ -66,3 +66,33 @@ types:
         authorization:
           roles: [ UserManagement ]
           dataAccess: Write
+      # 3.3.0: nested groups (ChildGroup). Own methods instead of a third GroupMemberKind value, because the cycle refusal
+      # needs its own error code and an error code added to AddMember-1 would be a Major (row M8). REST parity:
+      # PUT/DELETE groups/{group}/members/groups/{child} (IdentityUserAdministrationWritePolicy = UserManagement).
+      - methodId: AddChildGroup-1
+        description: "Adds a group as a nested member (child group) of the group. Refuses a group in itself and a cycle."
+        parameters:
+          - { name: childGroupId, valueType: String, description: "The rtId of the child group." }
+        errors:
+          - { code: CHILD_GROUP_NOT_FOUND, description: "The child group does not exist." }
+          - { code: CHILD_GROUP_ALREADY_IN_GROUP, description: "The child group is already a member of the group." }
+          - { code: GROUP_CYCLE, description: "The group would become a member of itself, directly or through its child groups." }
+        authorization:
+          roles: [ UserManagement ]
+          dataAccess: Write
+        execution:
+          timeoutSeconds: 30
+          idempotent: false
+      - methodId: RemoveChildGroup-1
+        description: "Removes a nested member (child group) from the group."
+        parameters:
+          - { name: childGroupId, valueType: String, description: "The rtId of the child group." }
+        errors:
+          - { code: CHILD_GROUP_NOT_FOUND, description: "The child group id is not a valid id, or the caller may not read that group." }
+          - { code: CHILD_GROUP_NOT_IN_GROUP, description: "The child group is not a member of the group." }
+        authorization:
+          roles: [ UserManagement ]
+          dataAccess: Write
+        execution:
+          timeoutSeconds: 30
+          idempotent: false

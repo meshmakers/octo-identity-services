@@ -1,4 +1,16 @@
 "$schema": "https://schemas.meshmakers.cloud/construction-kit-meta.schema.json"
+# 3.3.0 (Feature F5.2 identity wave 2) adds methods only, so the REST group and client endpoints become facades:
+#   * Group.AddChildGroup-1 / Group.RemoveChildGroup-1 (nested groups; errors CHILD_GROUP_NOT_FOUND,
+#     CHILD_GROUP_ALREADY_IN_GROUP, CHILD_GROUP_NOT_IN_GROUP, GROUP_CYCLE). Own methods, not a third GroupMemberKind value:
+#     the cycle refusal needs its own error code, and an error code added to Group.AddMember-1 is a Major (row M8).
+#   * Client.SetRoles-1, Client.AddRole-1, Client.RemoveRole-1, Client.ApplyOverlayUris-1 and the static
+#     Client.CleanOverlayEntries-1 (roles TenantManagement or UserManagement, the REST policy of ClientsController), with the
+#     result records ClientOverlayUrisResult, ClientOverlayCleanResult and ClientOverlayCleanEntry and their RuntimeState
+#     attributes.
+# New methods, records and attributes are additive: Minor (rows M1, T1), nothing to acknowledge. No existing type, attribute,
+# record, method, id or default changes; no data migration; ranges [3.0.0,4.0) stay satisfied. Service-managed: ships with
+# the identity release, no catalog import, no FixAll.
+#
 # 3.2.0 (AB#8414, Feature AB#5699) adds the method User.SetPassword-1: the signed-in user who has only external logins sets a
 # first local password (allowSelf, `newPassword` sensitive, errors PASSWORD_POLICY_VIOLATION, PASSWORD_ALREADY_SET,
 # SHADOW_USER_PASSWORD_NOT_ALLOWED). The account page's POST {tenant}/api/manage/set-password is its facade (in-process). A new
@@ -137,7 +149,7 @@
 # concept AB#5528 in octo-construction-kit-engine). String -> Secret is Minor
 # (CkSemVerClassifier): stored clear-text values stay readable as legacy values
 # until the encrypt sweep has run. Secret requires System >= 2.5 (decision 12).
-modelId: System.Identity-3.2.0
+modelId: System.Identity-3.3.0
 ckLanguage: 2
 dependencies:
   - System-[2.5,3.0)
