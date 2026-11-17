@@ -73,6 +73,10 @@ tokens) becomes invalid. Therefore:
 3. Remove `k1` only after every identity pod logged the re-wrap **and** every other consumer of `k1` (secret sweep,
    encrypted dumps) is done with it. Removing `k1` too early makes identity refuse to start (it names the keys
    wrapped with `k1`); add `k1` back to recover — nothing is lost.
+4. The key rings of the other services (shared key store of octo-common-services, names `<ApplicationName>/key-…`)
+   are **not** re-wrapped — not by identity and not by the services. Removing `k1` makes their keys wrapped with `k1`
+   unusable: the services create new keys and their users sign in again (no service refuses to start). Keep `k1`
+   until those keys have expired (90 days after their creation) or accept that sign-in.
 
 ## Rollback
 

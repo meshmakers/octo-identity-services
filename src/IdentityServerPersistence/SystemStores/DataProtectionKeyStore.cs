@@ -111,7 +111,8 @@ public class DataProtectionKeyStore(
     /// </summary>
     internal static bool IsIdentityKey(RtDataProtectionKey key)
     {
-        return DataProtectionKeyNames.IsUnprefixed(key.FriendlyName);
+        // A missing name never comes from another service (the shared store always writes a prefixed name).
+        return string.IsNullOrEmpty(key.FriendlyName) || DataProtectionKeyNames.IsUnprefixed(key.FriendlyName);
     }
 
     private async Task StoreElementAsync(XElement element, string friendlyName)

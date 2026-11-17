@@ -335,6 +335,25 @@ public class DataProtectionKeyEncryptionIntegrationTests : IClassFixture<Identit
     }
 
     /// <summary>
+    ///     A store that holds only keys of other services counts as empty for identity: its first own key is stored
+    ///     encrypted even with the flag off (fresh-store rule), exactly as in a store without any key.
+    /// </summary>
+    [Fact]
+    public async Task StoreWithOnlyForeignServiceKeys_IsAFreshStoreForIdentity_FirstKeyEncryptedWithFlagOff()
+    {
+        await GivenEmptyKeyStoreAsync();
+        var ring = Track(PlatformKeyRing.CreateK1());
+        var serviceKey = CreateServiceKeyXml(ring, encrypted: false);
+        await GivenRawKeyAsync(serviceKey, $"{ServiceApplicationName}/key-{serviceKey.Attribute("id")!.Value}");
+
+        CreateHost(CreateStore(ring, encryptExistingKeys: false), ring).GetDataProtector(Purpose).Protect("cookie");
+
+        var identityKey = (await LoadRawKeysAsync()).Single(k => !k.FriendlyName.Contains('/'));
+        DataProtectionKeyXml.ContainsUnencryptedSecret(XElement.Parse(identityKey.XmlData)).Should().BeFalse(
+            "keys of other services do not make the identity key store non-empty");
+    }
+
+    /// <summary>
     ///     The shared key store of octo-common-services on the real system database, next to the identity key ring:
     ///     replicas of a service share their keys, the keys survive a restart, they are stored encrypted under the
     ///     service prefix, and identity neither loads nor rewrites them.
