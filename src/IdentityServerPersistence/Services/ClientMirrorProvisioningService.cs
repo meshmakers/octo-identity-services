@@ -667,8 +667,7 @@ public class ClientMirrorProvisioningService(
         catch (Exception ex) when (ex is RtVersionConflictException or EntityNotFoundException &&
                                    write.InsertedRtId != null)
         {
-            await childRepo.DeleteOneRtEntityByRtIdAsync<RtClient>(childSession, write.InsertedRtId.Value,
-                DeleteOptions.Erase);
+            await TryEraseChildClientAsync(childRepo, childSession, write.InsertedRtId.Value);
             logger.LogDebug(
                 "Mirror reconciliation withdrew its insert of clientId='{ClientId}' in child '{ChildTenantId}': the tracking row changed",
                 row.ParentClientId, row.ChildTenantId);
@@ -698,7 +697,7 @@ public class ClientMirrorProvisioningService(
         foreach (var orphan in (await GetChildClientsAsync(childRepo, childSession, row.ParentClientId)).Where(c =>
                      string.Equals(c.ProvisionedByParentTenantId, parentTenantId, StringComparison.OrdinalIgnoreCase)))
         {
-            await childRepo.DeleteOneRtEntityByRtIdAsync<RtClient>(childSession, orphan.RtId, DeleteOptions.Erase);
+            await TryEraseChildClientAsync(childRepo, childSession, orphan.RtId);
         }
 
         await parentRepo.DeleteOneRtEntityByRtIdAsync<RtClientMirror>(parentSession, row.RtId, DeleteOptions.Erase);
@@ -716,6 +715,13 @@ public class ClientMirrorProvisioningService(
     ///     first or remove the row.
     /// </summary>
     internal Func<string, string, Task>? BeforeTrackingRowWriteForTests { get; set; }
+
+    /// <summary>
+    ///     Test seam: runs in <see cref="ConvergeChildMirrorAsync" /> when the child holds more than one client of the id,
+    ///     after the read and before the duplicates are erased (arguments: client id, child tenant id), i.e. where another
+    ///     replica can erase the same duplicate first.
+    /// </summary>
+    internal Func<string, string, Task>? BeforeDuplicateMirrorEraseForTests { get; set; }
 
     /// <summary>
     ///     Called when another writer recorded the tracking row of a pair this provisioning run had just written. When this
@@ -743,15 +749,8 @@ public class ClientMirrorProvisioningService(
         var canonical = SelectCanonicalMirror(clients);
         foreach (var duplicate in clients.Where(c => !c.RtId.Equals(canonical.RtId)))
         {
-            try
-            {
-                await childRepo.DeleteOneRtEntityByRtIdAsync<RtClient>(childSession, duplicate.RtId,
-                    DeleteOptions.Erase);
-            }
-            catch (EntityNotFoundException)
-            {
-                // Erased by the other writer's duplicate cleanup first.
-            }
+            // Erased by the other writer's duplicate cleanup first when it reports false.
+            await TryEraseChildClientAsync(childRepo, childSession, duplicate.RtId);
         }
 
         logger.LogDebug(
@@ -838,8 +837,7 @@ public class ClientMirrorProvisioningService(
         }
         catch (Exception ex) when (ex is RtVersionConflictException or EntityNotFoundException)
         {
-            await childRepo.DeleteOneRtEntityByRtIdAsync<RtClient>(childSession, write.InsertedRtId.Value,
-                DeleteOptions.Erase);
+            await TryEraseChildClientAsync(childRepo, childSession, write.InsertedRtId.Value);
             logger.LogDebug(
                 "Withdrew the insert of the mirror of clientId='{ClientId}' in child '{ChildTenantId}': the tracking row changed",
                 row.ParentClientId, row.ChildTenantId);
@@ -1389,8 +1387,26 @@ public class ClientMirrorProvisioningService(
         var found = existing.Items.FirstOrDefault();
         if (found != null)
         {
-            await childRepo.DeleteOneRtEntityByRtIdAsync<RtClient>(
-                childSession, found.RtId, DeleteOptions.Erase);
+            await TryEraseChildClientAsync(childRepo, childSession, found.RtId);
+        }
+    }
+
+    /// <summary>
+    ///     Erases a client of a child tenant. Every caller wants the client gone, so a client another writer erased
+    ///     first (a second replica, the reconciliation, a removal) is no failure.
+    /// </summary>
+    /// <returns><c>false</c> when the client was already gone.</returns>
+    private static async Task<bool> TryEraseChildClientAsync(ITenantRepository childRepo, IOctoSession childSession,
+        OctoObjectId rtId)
+    {
+        try
+        {
+            await childRepo.DeleteOneRtEntityByRtIdAsync<RtClient>(childSession, rtId, DeleteOptions.Erase);
+            return true;
+        }
+        catch (EntityNotFoundException)
+        {
+            return false;
         }
     }
 
@@ -1504,9 +1520,10 @@ public class ClientMirrorProvisioningService(
     ///     child's clients of that id, then the parent client (<paramref name="readParent" />), derive the mirror
     ///     (<see cref="CreateMirrorClient" /> + <see cref="ReconcileOwnSecret" />) and write it. No client yet: insert.
     ///     Otherwise the canonical record (<see cref="SelectCanonicalMirror" />) is kept, duplicates are erased and the
-    ///     canonical one is replaced <b>with the version that was read</b>; a concurrent writer makes the replace fail,
-    ///     and the read-derive-write runs again (at most <see cref="MaxMirrorWriteAttempts" /> times, then the
-    ///     <see cref="RtVersionConflictException" /> reaches the caller). Every writer must use this path or another
+    ///     canonical one is replaced <b>with the version that was read</b>; a concurrent writer makes the replace fail
+    ///     (changed: <see cref="RtVersionConflictException" />, erased: <see cref="EntityNotFoundException" />), and the
+    ///     read-derive-write runs again (at most <see cref="MaxMirrorWriteAttempts" /> times, then the exception reaches
+    ///     the caller). A duplicate another writer erased first counts as erased. Every writer must use this path or another
     ///     version-checked write: a plain replace does not advance <c>rtVersion</c> and would defeat the check.
     /// </summary>
     private async Task<MirrorWriteResult> ConvergeChildMirrorAsync(ITenantRepository childRepo,
@@ -1541,14 +1558,29 @@ public class ClientMirrorProvisioningService(
             // entry the lowest rtId (the oldest) is kept, never the first one read: an unsorted read
             // has no order, and two replicas must keep the same record.
             var canonical = SelectCanonicalMirror(existingItems);
+            if (existingItems.Count > 1 && BeforeDuplicateMirrorEraseForTests != null)
+            {
+                await BeforeDuplicateMirrorEraseForTests(clientId, childRepo.TenantId);
+            }
+
             foreach (var duplicate in existingItems.Where(d => !d.RtId.Equals(canonical.RtId)))
             {
+                if (!await TryEraseChildClientAsync(childRepo, childSession, duplicate.RtId))
+                {
+                    // Another writer (a second replica setting the same tenant up, the reconciliation) read the same
+                    // duplicates and erased this one first; both keep the same canonical record, so the duplicate is
+                    // gone as intended.
+                    logger.LogDebug(
+                        "Duplicate RtClient with clientId='{ClientId}' rtId='{RtId}' in tenant '{TenantId}' was already "
+                        + "removed by another writer",
+                        mirror.ClientId, duplicate.RtId, childRepo.TenantId);
+                    continue;
+                }
+
                 logger.LogWarning(
-                    "Removing duplicate RtClient with clientId='{ClientId}' rtId='{RtId}' from tenant '{TenantId}': "
-                    + "keeping canonical rtId='{CanonicalRtId}' (blueprint-stable={IsBlueprintStable}).",
+                    "Removed duplicate RtClient with clientId='{ClientId}' rtId='{RtId}' from tenant '{TenantId}': "
+                    + "kept canonical rtId='{CanonicalRtId}' (blueprint-stable={IsBlueprintStable}).",
                     mirror.ClientId, duplicate.RtId, childRepo.TenantId, canonical.RtId, IsBlueprintRtId(canonical));
-                await childRepo.DeleteOneRtEntityByRtIdAsync<RtClient>(childSession, duplicate.RtId,
-                    DeleteOptions.Erase);
             }
 
             // Reuse the canonical RtId on the child side; secret/scope changes still propagate.
@@ -1564,9 +1596,11 @@ public class ClientMirrorProvisioningService(
                 await childRepo.ReplaceOneRtEntityByIdAsync(childSession, canonical.RtId, mirror, canonical.RtVersion);
                 return MirrorWriteResult.Replaced;
             }
-            catch (RtVersionConflictException) when (attempt < MaxMirrorWriteAttempts)
+            catch (Exception ex) when (ex is RtVersionConflictException or EntityNotFoundException &&
+                                       attempt < MaxMirrorWriteAttempts)
             {
-                // Another writer changed the mirror after our read: read child and parent again and re-derive.
+                // Another writer changed the mirror after our read, or erased it (its duplicate cleanup or the
+                // withdrawal of its own insert): read child and parent again and re-derive.
             }
         }
     }

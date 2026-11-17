@@ -209,6 +209,47 @@ public class ClientMirrorProvisioningIntegrationTests : IClassFixture<IdentitySe
             "the PreDeleteTenant cleanup removed the row; the provisioning must not resurrect it");
     }
 
+    /// <summary>
+    ///     A restored child can hold a stale second client of a mirrored id beside the mirror. Every replica that sets the
+    ///     tenant up reads both and erases the duplicate. Here one replica erases it between the other replica's read
+    ///     and its delete: the late replica must treat the client as removed, not fail the setup, and one mirror stays.
+    /// </summary>
+    [Fact]
+    public async Task DuplicateErasedByAnotherReplicaFirst_DoesNotFailTheProvisioning_AndOneMirrorStays()
+    {
+        await _fixture.InitializeAsync();
+        var systemContext = _fixture.GetSystemContext();
+        await EnsureSystemSetupAsync();
+
+        var childTenantId = await CreateChildTenantAsync($"child-dupe-{Guid.NewGuid():N}".Substring(0, 24));
+        var clientId = $"dupe-{Guid.NewGuid():N}".Substring(0, 24);
+        await CreateFlaggedClientAsync(systemContext, clientId);
+        await CreateService(systemContext).ProvisionForChildTenantAsync(systemContext.TenantId, childTenantId);
+        var mirror = await FindChildClientAsync(systemContext, childTenantId, clientId);
+        await InsertStaleChildClientAsync(systemContext, childTenantId, clientId);
+        (await CountChildClientsAsync(systemContext, childTenantId, clientId)).Should().Be(2);
+
+        var fastReplica = CreateService(systemContext);
+        var lateReplica = CreateConcreteService(systemContext);
+        var erasedByFastReplica = 0;
+        lateReplica.BeforeDuplicateMirrorEraseForTests = async (id, child) =>
+        {
+            if (id == clientId && Interlocked.Increment(ref erasedByFastReplica) == 1)
+            {
+                await fastReplica.ProvisionForChildTenantAsync(systemContext.TenantId, child);
+            }
+        };
+
+        var result = await lateReplica.ProvisionForChildTenantAsync(systemContext.TenantId, childTenantId);
+
+        erasedByFastReplica.Should().Be(1, "the late replica read both clients before the fast replica erased one");
+        result.AlreadyPresent.Should().BeGreaterThanOrEqualTo(1);
+        (await CountChildClientsAsync(systemContext, childTenantId, clientId)).Should().Be(1);
+        (await FindChildClientAsync(systemContext, childTenantId, clientId))!.RtId.Should().Be(mirror!.RtId,
+            "both replicas keep the same canonical record (the lowest rtId)");
+        (await CountTrackingRowsAsync(systemContext, clientId, childTenantId)).Should().Be(1);
+    }
+
     [Fact]
     public async Task ProvisionForAllChildTenantsAsync_Backfill_HitsEveryChild()
     {
@@ -627,6 +668,31 @@ public class ClientMirrorProvisioningIntegrationTests : IClassFixture<IdentitySe
             RtEntityQueryOptions.Create()
                 .FieldFilter(nameof(RtClient.ClientId), FieldFilterOperator.Equals, clientId));
         return result.Items.Count();
+    }
+
+    /// <summary>
+    ///     A second client of the id in the child, as a restore from an older backup leaves it beside the mirror. Its
+    ///     rtId is generated after the mirror's, so the mirror stays the canonical record.
+    /// </summary>
+    private static async Task InsertStaleChildClientAsync(ISystemContext systemContext, string childTenantId,
+        string clientId)
+    {
+        var childRepo = (await systemContext.TryFindTenantRepositoryAsync(childTenantId))!;
+        using var session = await childRepo.GetSessionAsync();
+        await childRepo.InsertOneRtEntityAsync(session, new RtClient
+        {
+            RtId = OctoObjectId.GenerateNewId(),
+            Enabled = true,
+            ClientId = clientId,
+            ProtocolType = "oidc",
+            RequireClientSecret = true,
+            AllowedGrantTypes = new AttributeStringValueList { "client_credentials" },
+            AllowedScopes = new AttributeStringValueList { "octo_api" },
+            ClientSecrets = new AttributeRecordValueList<RtSecretRecord>
+            {
+                new() { Value = "stale-hash", Type = "SharedSecret" }
+            }
+        });
     }
 
     /// <summary>The tracking row another replica records for the pair (as the provisioning writes it).</summary>
