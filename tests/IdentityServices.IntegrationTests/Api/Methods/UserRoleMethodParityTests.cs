@@ -251,7 +251,7 @@ public class UserRoleMethodParityTests : IntegrationTestBase
             MethodId = methodId,
             CkTypeId = "System.Identity/User",
             TargetRtId = target,
-            DeadlineUtc = DateTime.UtcNow.AddSeconds(30),
+            DeadlineUtc = Infrastructure.TestHostMethodDeadlineFloor.DeadlineFromNow(),
             ParametersJson = "{}"
         };
         return await handler.HandleAsync(new CkMethodContext<TParameters>(request, parameters)

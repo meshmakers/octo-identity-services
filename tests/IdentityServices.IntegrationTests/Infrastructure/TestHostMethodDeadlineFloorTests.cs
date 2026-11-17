@@ -60,6 +60,17 @@ public class TestHostMethodDeadlineFloorTests(CustomWebApplicationFactory factor
         sut.GetTimeout(Tenant, Type, Method).Should().Be(TestHostMethodDeadlineFloor.Floor);
     }
 
+    [Fact]
+    public void ADeadlineATestBuildsItself_IsAtLeastTheFloorAhead()
+    {
+        var before = DateTime.UtcNow;
+
+        var deadline = TestHostMethodDeadlineFloor.DeadlineFromNow();
+
+        deadline.Should().BeOnOrAfter(before + TestHostMethodDeadlineFloor.Floor);
+        deadline.Kind.Should().Be(DateTimeKind.Utc);
+    }
+
     private sealed class FixedResolver(TimeSpan timeout, bool known, DateTimeOffset now) : ICkMethodTimeoutResolver
     {
         public bool TryGetTimeout(string tenantId, string ckTypeId, string methodId, out TimeSpan value)

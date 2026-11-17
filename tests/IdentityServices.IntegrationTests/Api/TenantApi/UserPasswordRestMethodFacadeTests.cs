@@ -434,7 +434,7 @@ public class UserPasswordRestMethodFacadeTests : IntegrationTestBase, IDisposabl
             CkTypeId = IdentityMethodFacade.UserCkTypeId,
             TargetRtId = targetRtId,
             ParametersJson = JsonSerializer.Serialize(parameters, CkMethodJson.Options),
-            DeadlineUtc = DateTime.UtcNow.AddSeconds(30)
+            DeadlineUtc = Infrastructure.TestHostMethodDeadlineFloor.DeadlineFromNow()
         };
         using (CkMethodPrincipalScope.Begin(caller))
         {

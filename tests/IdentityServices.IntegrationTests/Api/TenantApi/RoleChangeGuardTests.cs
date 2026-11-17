@@ -516,7 +516,7 @@ public class RoleChangeGuardTests : IntegrationTestBase, IDisposable
             MethodId = methodId,
             CkTypeId = "System.Identity/User",
             TargetRtId = target.RtId.ToString(),
-            DeadlineUtc = DateTime.UtcNow.AddSeconds(30),
+            DeadlineUtc = Infrastructure.TestHostMethodDeadlineFloor.DeadlineFromNow(),
             ParametersJson = "{}"
         };
         var outcome = await handler.HandleAsync(new CkMethodContext<TParameters>(request, parameters)

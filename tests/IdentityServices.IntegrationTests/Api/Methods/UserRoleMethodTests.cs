@@ -468,7 +468,7 @@ public class UserRoleMethodTests : IntegrationTestBase, IAsyncDisposable
             MethodId = methodId,
             CkTypeId = "System.Identity/User",
             TargetRtId = target,
-            DeadlineUtc = DateTime.UtcNow.AddSeconds(30),
+            DeadlineUtc = Infrastructure.TestHostMethodDeadlineFloor.DeadlineFromNow(),
             CallerAccessToken = token,
             ParametersJson = parametersJson
         };

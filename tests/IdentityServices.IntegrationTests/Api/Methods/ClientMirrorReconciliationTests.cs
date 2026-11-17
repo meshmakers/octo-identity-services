@@ -758,7 +758,7 @@ public class ClientMirrorReconciliationTests : IntegrationTestBase, IDisposable
         MethodId = methodId,
         CkTypeId = "System.Identity/Client",
         TargetRtId = target,
-        DeadlineUtc = DateTime.UtcNow.AddSeconds(30),
+        DeadlineUtc = Infrastructure.TestHostMethodDeadlineFloor.DeadlineFromNow(),
         ParametersJson = "{}"
     };
 

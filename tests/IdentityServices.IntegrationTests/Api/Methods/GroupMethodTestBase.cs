@@ -104,7 +104,7 @@ public abstract class GroupMethodTestBase : IntegrationTestBase, IDisposable
             MethodId = methodId,
             CkTypeId = ckTypeId,
             TargetRtId = target,
-            DeadlineUtc = DateTime.UtcNow.AddSeconds(30),
+            DeadlineUtc = Infrastructure.TestHostMethodDeadlineFloor.DeadlineFromNow(),
             CallerAccessToken = token,
             ParametersJson = parametersJson
         };

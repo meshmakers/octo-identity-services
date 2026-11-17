@@ -32,6 +32,12 @@ internal sealed class TestHostMethodDeadlineFloor(ICkMethodTimeoutResolver inner
     /// <summary>The lowest method timeout the test host uses.</summary>
     public static readonly TimeSpan Floor = TimeSpan.FromSeconds(120);
 
+    /// <summary>
+    ///     The deadline for a <c>CkMethodRequest</c> a test builds itself (dispatcher or handler called directly): now
+    ///     plus <see cref="Floor" />, the same bound the factory host gives the requests of its REST facades.
+    /// </summary>
+    public static DateTime DeadlineFromNow() => DateTime.UtcNow + Floor;
+
     public bool TryGetTimeout(string tenantId, string ckTypeId, string methodId, out TimeSpan timeout)
     {
         var known = inner.TryGetTimeout(tenantId, ckTypeId, methodId, out timeout);

@@ -668,7 +668,7 @@ public class ClientSecretMethodTests : IntegrationTestBase
         MethodId = methodId,
         CkTypeId = "System.Identity/Client",
         TargetRtId = target,
-        DeadlineUtc = DateTime.UtcNow.AddSeconds(30),
+        DeadlineUtc = Infrastructure.TestHostMethodDeadlineFloor.DeadlineFromNow(),
         CallerAccessToken = token,
         ParametersJson = methodId == SystemIdentityCkIds.ClientRemoveSecretMethodId
             ? JsonSerializer.Serialize(new { secretValue = "forged-call-value" })

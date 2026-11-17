@@ -66,7 +66,7 @@ public sealed class UserCreateUserWireFormTests : IntegrationTestBase, IDisposab
                 InvocationId = Guid.NewGuid(),
                 MethodId = SystemIdentityCkIds.UserCreateUserMethodId,
                 CkTypeId = "System.Identity/User",
-                DeadlineUtc = DateTime.UtcNow.AddSeconds(30),
+                DeadlineUtc = Infrastructure.TestHostMethodDeadlineFloor.DeadlineFromNow(),
                 ParametersJson = JsonSerializer.Serialize(new { userName, email = $"{userName}@example.invalid" })
             }, ct);
         }

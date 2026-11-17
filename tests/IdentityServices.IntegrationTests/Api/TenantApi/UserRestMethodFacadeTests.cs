@@ -368,7 +368,7 @@ public class UserRestMethodFacadeTests : IntegrationTestBase, IDisposable
             CkTypeId = IdentityMethodFacade.UserCkTypeId,
             TargetRtId = target.RtId.ToString(),
             ParametersJson = JsonSerializer.Serialize(parameters, CkMethodJson.Options),
-            DeadlineUtc = DateTime.UtcNow.AddSeconds(30)
+            DeadlineUtc = Infrastructure.TestHostMethodDeadlineFloor.DeadlineFromNow()
         };
         using (CkMethodPrincipalScope.Begin(caller))
         {

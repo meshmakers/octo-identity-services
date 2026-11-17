@@ -405,7 +405,7 @@ public class UserCreateUserMethodTests : IntegrationTestBase
         MethodId = SystemIdentityCkIds.UserCreateUserMethodId,
         CkTypeId = "System.Identity/User",
         TargetRtId = null,
-        DeadlineUtc = DateTime.UtcNow.AddSeconds(30),
+        DeadlineUtc = Infrastructure.TestHostMethodDeadlineFloor.DeadlineFromNow(),
         CallerAccessToken = token,
         ParametersJson = JsonSerializer.Serialize(new { userName, password = InitialPassword })
     };
