@@ -25,7 +25,7 @@ types:
     associations:
       - id: ${this}/PolicyPermission
         targetCkTypeId: ${this}/DataPermission
-    # 3.4.0 (AB#9039): the REST PUT dataPermissions/policies/{policyRtId}/enforcementMode becomes a facade of this method.
+    # 3.4.0: the REST PUT dataPermissions/policies/{policyRtId}/enforcementMode becomes a facade of this method.
     # Roles follow the REST parity (DataPermissionsController: IdentityUserAdministrationWritePolicy = UserManagement). The
     # enforcement mode changes data visibility tenant-wide: the audit names the policy, the old and the new mode.
     methods:

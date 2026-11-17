@@ -77,7 +77,7 @@ public class UserRoleMethodTests : IntegrationTestBase, IAsyncDisposable
         scope.ServiceProvider.GetService<UserSetRolesHandler>().Should().NotBeNull();
         scope.ServiceProvider.GetService<UserAddRoleHandler>().Should().NotBeNull();
         scope.ServiceProvider.GetService<UserRemoveRoleHandler>().Should().NotBeNull();
-        // Secret-carrying methods stay off the bus behind the switch. Since AB#8414 ChangePassword and since AB#9037 the secret
+        // Secret-carrying methods stay off the bus behind the switch. ChangePassword and the secret
         // methods are registered local only for their REST facades (in-process, not announced).
         IdentityMethodHost.SelectHandlers(new IdentityMethodsOptions()).Select(h => h.MethodId).Should()
             .NotContain(SystemIdentityCkIds.UserChangePasswordMethodId, "password methods are not offered on the bus")

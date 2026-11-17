@@ -17,7 +17,7 @@ using Persistence.IdentityCkModel.Generated.System.Identity.v3;
 
 namespace Meshmakers.Octo.Backend.IdentityServices.Methods;
 
-/// <summary>Declared error codes of the secret methods (System.Identity 2.29.0, AB#7773; 3.4.0, AB#9037).</summary>
+/// <summary>Declared error codes of the secret methods (System.Identity 2.29.0 and 3.4.0).</summary>
 internal static class ClientSecretMethodErrors
 {
     /// <summary><c>Client.AddSecret</c>: the client is public (<c>RequireClientSecret</c> is false) and never uses a secret.</summary>
@@ -36,8 +36,8 @@ internal static class ClientSecretMethodErrors
 }
 
 /// <summary>
-///     Shared flow of the secret methods of a secret owner (<c>Client.*Secret</c>, AB#7780; <c>ApiResource.*Secret</c>,
-///     AB#9037): caller rule, tenant binding, target and its data permission, version-checked write of the owner (cache event
+///     Shared flow of the secret methods of a secret owner (<c>Client.*Secret</c>, <c>ApiResource.*Secret</c>):
+///     caller rule, tenant binding, target and its data permission, version-checked write of the owner (cache event
 ///     as <c>ApiSecretsController</c>) and exactly one <c>Identity.Method</c> event per call.
 /// </summary>
 /// <remarks>
@@ -51,7 +51,7 @@ internal static class ClientSecretMethodErrors
 ///         caller gets <c>METHOD_FORBIDDEN</c> whether the target exists or not.
 ///     </para>
 ///     <para>
-///         <b>Target data permission (AB#9037).</b> The secrets are part of the owner. Before anything is changed the owner is
+///         <b>Target data permission.</b> The secrets are part of the owner. Before anything is changed the owner is
 ///         evaluated for <c>Write</c> with the caller's roles (<see cref="IRtDataPermissionEvaluator" />): an owner the caller
 ///         cannot read answers like a missing one (<c>METHOD_TARGET_NOT_FOUND</c>), one they may read but not write is
 ///         <c>METHOD_FORBIDDEN</c> (<c>reason</c> = <c>data-permission</c>). The GraphQL gateway checks the declared
@@ -72,7 +72,7 @@ internal abstract class SecretOwnerMethodHandlerBase<TOwner>(IServiceProvider se
     /// <summary>Audit detail: number of secret records of the owner after the call.</summary>
     internal const string SecretCountDetail = "secretCount";
 
-    /// <summary>Parameter of a caller refusal: the tenant role to ask for (AB#8095).</summary>
+    /// <summary>Parameter of a caller refusal: the tenant role to ask for.</summary>
     internal const string RequiredRoleParameter = "requiredRole";
 
     /// <summary>Attempts of the version-checked read-modify-write before the call fails.</summary>
@@ -97,7 +97,7 @@ internal abstract class SecretOwnerMethodHandlerBase<TOwner>(IServiceProvider se
 
     /// <summary>
     ///     Decides whether the validated principal may administer secrets: scope <c>octo_api</c> and the shared requirement of
-    ///     the REST policy (<c>IdentityApiAuthorizationPolicies.SecretAdministrationRequirement</c>, AB#5861). A principal without
+    ///     the REST policy (<c>IdentityApiAuthorizationPolicies.SecretAdministrationRequirement</c>). A principal without
     ///     the scope is always <see cref="IdentityApiRoleDecision.Denied" />.
     /// </summary>
     internal static IdentityApiRoleDecision DecideSecretCaller(CkMethodPrincipal? principal,
@@ -182,7 +182,7 @@ internal abstract class SecretOwnerMethodHandlerBase<TOwner>(IServiceProvider se
         }
 
         // The secrets are part of the owner: a caller who cannot read it gets no answer that tells it exists, one who may
-        // read but not write it changes nothing (AB#9037, the in-process REST path has no gateway check of dataAccess).
+        // read but not write it changes nothing (the in-process REST path has no gateway check of dataAccess).
         var verdict = await Services.GetRequiredService<IRtDataPermissionEvaluator>()
             .EvaluateAsync(repository, IdentityMethodCallerRules.ToSecurityContext(principal!),
                 new RtEntityId(RtEntityExtensions.GetRtCkTypeId<TOwner>(), owner.RtId), RtDataAction.Write,
@@ -339,7 +339,7 @@ internal abstract class SecretOwnerMethodHandlerBase<TOwner>(IServiceProvider se
             return (CkMethodOutcome.ValidationFailed("expirationDate", "in-the-past").Failure, null);
         }
 
-        // The mirror machinery treats this description as the marker of a mirror's own secret (AB#5061); a user-supplied
+        // The mirror machinery treats this description as the marker of a mirror's own secret; a user-supplied
         // secret with it would be carried into the child tenants as if it were their own credential.
         if (string.Equals(description, ClientMirrorSecrets.OwnSecretDescription, StringComparison.Ordinal))
         {
@@ -389,7 +389,7 @@ internal abstract class SecretOwnerMethodHandlerBase<TOwner>(IServiceProvider se
         var refused = await MutateOwnerAsync(owner!.RtId, current =>
         {
             // RemoveAll with a predicate: the list hands out wrapper instances of the stored records, so a Remove by
-            // instance does not find a record that was read from the database (AB#7989).
+            // instance does not find a record that was read from the database.
             removed = Secrets(current)?.RemoveAll(s => Matches(s, secretValue)) ?? 0;
             return removed == 0 ? new CkMethodFailure(ClientSecretMethodErrors.SecretNotFound) : null;
         }, details, concurrentChangeCode, cancellationToken).ConfigureAwait(false);
@@ -417,7 +417,7 @@ internal abstract class SecretOwnerMethodHandlerBase<TOwner>(IServiceProvider se
             return CkMethodOutcome.ValidationFailed("secretValue", "required").Failure;
         }
 
-        // The mirror machinery's marker (AB#5061) is reserved here as on AddSecret: an update must not turn a user secret
+        // The mirror machinery's marker is reserved here as on AddSecret: an update must not turn a user secret
         // into what the mirror sync treats as a mirror's own credential, nor (below) a mirror's own secret into a user secret.
         if (string.Equals(description, ClientMirrorSecrets.OwnSecretDescription, StringComparison.Ordinal))
         {
@@ -435,7 +435,7 @@ internal abstract class SecretOwnerMethodHandlerBase<TOwner>(IServiceProvider se
                     continue;
                 }
 
-                // A mirror's own secret carries the marker the mirror sync relies on (AB#5061); overwriting its
+                // A mirror's own secret carries the marker the mirror sync relies on; overwriting its
                 // description would turn it into what the sync treats as an inherited copy.
                 if (ClientMirrorSecrets.IsOwnSecret(secrets[i]))
                 {
@@ -497,8 +497,8 @@ internal abstract class SecretOwnerMethodHandlerBase<TOwner>(IServiceProvider se
 }
 
 /// <summary>
-///     Shared flow of the client secret methods <c>Client.AddSecret</c>, <c>Client.RemoveSecret</c> (AB#7780) and
-///     <c>Client.UpdateSecret</c> (AB#9037), see <see cref="SecretOwnerMethodHandlerBase{TOwner}" />. After the write the mirrors
+///     Shared flow of the client secret methods <c>Client.AddSecret</c>, <c>Client.RemoveSecret</c> and
+///     <c>Client.UpdateSecret</c>, see <see cref="SecretOwnerMethodHandlerBase{TOwner}" />. After the write the mirrors
 ///     of a flagged client are synced (as <c>ClientStore.UpdateAsync</c> and REST do), then the cache event is published.
 /// </summary>
 internal abstract class ClientSecretMethodHandlerBase(IServiceProvider services)
@@ -543,7 +543,7 @@ internal abstract class ClientSecretMethodHandlerBase(IServiceProvider services)
 
 /// <summary>
 ///     Shared flow of the API resource secret methods <c>ApiResource.AddSecret</c>, <c>RemoveSecret</c> and
-///     <c>UpdateSecret</c> (System.Identity 3.4.0, AB#9037), see <see cref="SecretOwnerMethodHandlerBase{TOwner}" />.
+///     <c>UpdateSecret</c> (System.Identity 3.4.0), see <see cref="SecretOwnerMethodHandlerBase{TOwner}" />.
 /// </summary>
 internal abstract class ApiResourceSecretMethodHandlerBase(IServiceProvider services)
     : SecretOwnerMethodHandlerBase<RtApiResource>(services)

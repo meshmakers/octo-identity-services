@@ -48,7 +48,7 @@ public class IdentityMethodDeclarationsIntegrationTests : IClassFixture<Identity
             ]
         },
         { "DataPermission", ["GrantToRole-1", "RevokeFromRole-1"] },
-        // System.Identity 3.4.0 (AB#9037, AB#9039)
+        // System.Identity 3.4.0
         { "ApiResource", ["AddSecret-1", "RemoveSecret-1", "UpdateSecret-1"] },
         { "DataPolicy", ["SetEnforcementMode-1"] }
     };
@@ -112,7 +112,7 @@ public class IdentityMethodDeclarationsIntegrationTests : IClassFixture<Identity
 
         // AB#8095 (System.Identity 3.1.0): SecretManagement joins the REST-parity roles of the client secret methods; the
         // handler still requires SecretManagement under Enforce. TenantManagement/UserManagement leave with the next major.
-        // System.Identity 3.4.0 (AB#9037): UpdateSecret and the API resource secret methods carry the same roles.
+        // System.Identity 3.4.0: UpdateSecret and the API resource secret methods carry the same roles.
         var client = await GetTypeAsync("Client");
         var apiResource = await GetTypeAsync("ApiResource");
         foreach (var method in new[] { "AddSecret-1", "RemoveSecret-1", "UpdateSecret-1" }

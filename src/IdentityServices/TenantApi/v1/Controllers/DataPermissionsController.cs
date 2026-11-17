@@ -23,7 +23,7 @@ namespace Meshmakers.Octo.Backend.IdentityServices.TenantApi.v1.Controllers;
 /// REST controller for the data-permission model (AB#4972): DataPermissions, their DataPolicies
 /// and the role grants. The grant, revoke and enforcement-mode endpoints are facades of the CK methods
 /// <c>DataPermission.GrantToRole-1</c>, <c>DataPermission.RevokeFromRole-1</c> and <c>DataPolicy.SetEnforcementMode-1</c>
-/// (AB#9039, docs/identity-rest-facades.md); create and delete stay REST (generic CRUD story of Feature F5.2).
+/// (docs/identity-rest-facades.md); create and delete stay REST (generic CRUD story of Feature F5.2).
 /// </summary>
 [Authorize(AuthenticationSchemes = OidcConstants.AuthenticationSchemes.AuthorizationHeaderBearer)]
 [Route(IdentityServiceConstants.ApiPathPrefix + "/[controller]")]
@@ -123,7 +123,7 @@ public class DataPermissionsController(IDataPermissionStore dataPermissionStore,
 
     /// <summary>
     /// Switches a policy between Enforce and AuditOnly (the operator flip after the audit review). Facade of the CK method
-    /// <c>DataPolicy.SetEnforcementMode-1</c> (AB#9039).
+    /// <c>DataPolicy.SetEnforcementMode-1</c>.
     /// </summary>
     [HttpPut("policies/{policyRtId}/enforcementMode")]
     [Authorize(IdentityServiceConstants.IdentityUserAdministrationWritePolicy)]
@@ -147,7 +147,7 @@ public class DataPermissionsController(IDataPermissionStore dataPermissionStore,
     }
 
     /// <summary>
-    /// Grants the permission to a role. Facade of the CK method <c>DataPermission.GrantToRole-1</c> (AB#9039); a grant the
+    /// Grants the permission to a role. Facade of the CK method <c>DataPermission.GrantToRole-1</c>; a grant the
     /// role already holds is <c>200</c> without a change, as before.
     /// </summary>
     [HttpPost("{permissionId}/roles/{roleName}")]
@@ -171,7 +171,7 @@ public class DataPermissionsController(IDataPermissionStore dataPermissionStore,
     }
 
     /// <summary>
-    /// Revokes the permission from a role. Facade of the CK method <c>DataPermission.RevokeFromRole-1</c> (AB#9039); a role
+    /// Revokes the permission from a role. Facade of the CK method <c>DataPermission.RevokeFromRole-1</c>; a role
     /// that does not hold the permission is <c>200</c> without a change, as before.
     /// </summary>
     [HttpDelete("{permissionId}/roles/{roleName}")]

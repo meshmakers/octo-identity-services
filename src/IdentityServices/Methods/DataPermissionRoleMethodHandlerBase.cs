@@ -23,7 +23,7 @@ internal static class DataPermissionMethodErrors
 /// <summary>
 ///     Shared flow of <c>DataPermission.GrantToRole</c> and <c>DataPermission.RevokeFromRole</c> (AB#7779): the same rules as
 ///     <c>POST/DELETE system/v1/dataPermissions/{permissionId}/roles/{roleName}</c> of <c>DataPermissionsController</c>, which
-///     are their facades (AB#9039), never more.
+///     are their facades, never more.
 /// </summary>
 /// <remarks>
 ///     <para>
@@ -33,7 +33,7 @@ internal static class DataPermissionMethodErrors
 ///         <c>PERMISSION_NOT_GRANTED</c>; the facade maps the last two back to REST's silent <c>200</c>.
 ///     </para>
 ///     <para>
-///         <b>Data permissions (AB#7035, AB#9039).</b> The permission itself is evaluated for <c>Write</c> first
+///         <b>Data permissions.</b> The permission itself is evaluated for <c>Write</c> first
 ///         (<see cref="IdentityMethodCall.CheckTargetWritableAsync" />). The role is read through
 ///         <see cref="IRtDataPermissionEvaluator" /> with the caller's roles: a role the caller cannot read is
 ///         <c>ROLE_NOT_FOUND</c>, except that revoking it while it holds the permission is <c>METHOD_FORBIDDEN</c>
@@ -160,7 +160,7 @@ internal sealed class DataPermissionRevokeFromRoleHandler(IServiceProvider servi
 }
 
 /// <summary>
-///     Handler of <c>System.Identity/DataPolicy.SetEnforcementMode-1</c> (System.Identity 3.4.0, AB#9039): switches a data
+///     Handler of <c>System.Identity/DataPolicy.SetEnforcementMode-1</c> (System.Identity 3.4.0): switches a data
 ///     policy between <c>Enforce</c> and <c>AuditOnly</c>. REST facade: <c>PUT system/v1/dataPermissions/policies/{policyRtId}/enforcementMode</c>.
 /// </summary>
 /// <remarks>
@@ -169,9 +169,9 @@ internal sealed class DataPermissionRevokeFromRoleHandler(IServiceProvider servi
 ///     whether that permission is enforced at all). The before value of the audit is the mode read before the write. The mode the policy already has is a success without a
 ///     write. The mode changes data visibility tenant-wide, so the <c>Identity.Method</c> event names the policy (target)
 ///     and both modes (<c>enforcementModeBefore</c>, <c>enforcementModeAfter</c>). The write goes through
-///     <see cref="IDataPermissionStore.SetPolicyEnforcementModeAsync" />, as REST did; afterwards the cached
-///     policy table of this process is invalidated, so this replica applies the new mode at once (REST waited for the cache
-///     TTL of 60 s); other replicas and services still wait for their TTL.
+///     <see cref="IDataPermissionStore.SetPolicyEnforcementModeAsync" />, as REST did. After every
+///     successful call (also a no-op) the cached policy table of this process is invalidated, so this replica applies the
+///     stored mode at once (REST waited for the cache TTL of 60 s); other replicas and services still wait for their TTL.
 /// </remarks>
 internal sealed class DataPolicySetEnforcementModeHandler(IServiceProvider services)
     : IdentityAdminMethodHandlerBase<DataPolicySetEnforcementModeParameters>(services)
@@ -224,11 +224,13 @@ internal sealed class DataPolicySetEnforcementModeHandler(IServiceProvider servi
         {
             await call.Services.GetRequiredService<IDataPermissionStore>()
                 .SetPolicyEnforcementModeAsync(policy.RtId, mode).ConfigureAwait(false);
-            // The policy table of this process is cached (TTL); drop it so the switch applies here at once. Other identity
-            // replicas and other services (asset repository, mesh adapter, ...) pick it up when their own table expires (60 s,
-            // no invalidation event), as with REST before.
-            call.Services.GetService<IDataPermissionResolver>()?.Invalidate(repository.TenantId);
         }
+
+        // The policy table of this process is cached (TTL); drop it after every successful call - also when the stored mode
+        // already matched, because this replica's table may still hold a mode another replica changed - so the stored mode
+        // applies here at once. Other identity replicas and other services (asset repository, mesh adapter, ...) pick it up
+        // when their own table expires (60 s, no invalidation event), as with REST before.
+        call.Services.GetService<IDataPermissionResolver>()?.Invalidate(repository.TenantId);
 
         return CkMethodOutcome.Ok();
     }

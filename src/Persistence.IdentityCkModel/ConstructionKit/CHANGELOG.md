@@ -4,7 +4,7 @@
 
 _Required bump level: minor._
 
-AB#9037, AB#9039: System.Identity 3.4.0 adds methods so the REST secret write endpoints and the data-policy enforcement switch become
+System.Identity 3.4.0 adds methods so the REST secret write endpoints and the data-policy enforcement switch become
 facades of them: `Client.UpdateSecret-1`, `ApiResource.AddSecret-1`, `ApiResource.RemoveSecret-1`, `ApiResource.UpdateSecret-1` (roles
 `TenantManagement`, `UserManagement`, `SecretManagement`; `secretValue` and the generated secret `sensitive`; errors `SECRET_NOT_FOUND`,
 `CONCURRENT_CHANGE`) and `DataPolicy.SetEnforcementMode-1` (role `UserManagement`). `Client.AddSecret-1` and `Client.RemoveSecret-1` are

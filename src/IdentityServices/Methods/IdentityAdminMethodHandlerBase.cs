@@ -92,7 +92,7 @@ internal sealed class IdentityMethodCall(IServiceProvider services, CkMethodPrin
     }
 
     /// <summary>
-    ///     The data permission of the call's target itself (AB#9039): <c>null</c> when the caller may write it, else the answer
+    ///     The data permission of the call's target itself: <c>null</c> when the caller may write it, else the answer
     ///     - <c>METHOD_TARGET_NOT_FOUND</c> for a target the caller cannot read (its existence is not told), <c>METHOD_FORBIDDEN</c>
     ///     (<c>reason</c> = <c>data-permission</c>) for one they may read but not write. The GraphQL gateway checks the declared
     ///     <c>dataAccess: Write</c> before dispatch; a REST facade calls in-process, where only the handler can check it.

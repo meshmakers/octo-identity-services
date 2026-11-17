@@ -28,7 +28,7 @@ namespace Meshmakers.Octo.Backend.IdentityServices.TenantApi.v1.Controllers;
 // AB#5861: reads (list, lookup) keep IdentityTenantAdministrationReadPolicy — they return metadata and the stored
 // one-way hash, never a clear text. Every write (create, rotate, delete) needs IdentitySecretAdministrationPolicy
 // (role SecretManagement, staged by IdentityApiAuthorization:SecretManagementRoleEnforcement).
-// AB#9037: every write is a facade of a Client.* / ApiResource.* secret method (docs/identity-rest-facades.md); the reads
+// Every write is a facade of a Client.* / ApiResource.* secret method (docs/identity-rest-facades.md); the reads
 // stay REST reads (secrets are not exposed through GraphQL).
 public class ApiSecretsController : ControllerBase
 {
@@ -40,7 +40,7 @@ public class ApiSecretsController : ControllerBase
     /// <param name="octoClientStore">Resolves the OAuth client id of the route to the method target</param>
     /// <param name="octoResourceStore">Resolves the API resource name of the route to the method target</param>
     /// <param name="methodFacade">
-    ///     Calls the secret methods the write endpoints are facades of (AB#9037): <c>Client.AddSecret/UpdateSecret/RemoveSecret</c>
+    ///     Calls the secret methods the write endpoints are facades of: <c>Client.AddSecret/UpdateSecret/RemoveSecret</c>
     ///     and <c>ApiResource.AddSecret/UpdateSecret/RemoveSecret</c>, in-process, outside any request transaction
     /// </param>
     /// <param name="logger">Logger</param>
@@ -214,7 +214,7 @@ public class ApiSecretsController : ControllerBase
     }
 
     // POST system/v1/apiSecrets/client/xyz
-    /// <summary>Creates a new secret for a client. Facade of the CK method <c>Client.AddSecret-1</c> (AB#9037).</summary>
+    /// <summary>Creates a new secret for a client. Facade of the CK method <c>Client.AddSecret-1</c>.</summary>
     [HttpPost("client/{clientId}")]
     [Authorize(IdentityServiceConstants.IdentitySecretAdministrationPolicy)]
     [EndpointSummary("Creates a new secret for a client")]
@@ -249,7 +249,7 @@ public class ApiSecretsController : ControllerBase
     }
 
     // POST system/v1/apiSecrets/apiResource/xyz
-    /// <summary>Creates a new secret for an API resource. Facade of the CK method <c>ApiResource.AddSecret-1</c> (AB#9037).</summary>
+    /// <summary>Creates a new secret for an API resource. Facade of the CK method <c>ApiResource.AddSecret-1</c>.</summary>
     [HttpPost("apiResource/{apiResourceName}")]
     [Authorize(IdentityServiceConstants.IdentitySecretAdministrationPolicy)]
     [EndpointSummary("Creates a new secret for an API resource")]
@@ -281,7 +281,7 @@ public class ApiSecretsController : ControllerBase
     }
 
     // PUT system/v1/apiSecrets/client/xyz
-    /// <summary>Updates a secret of a client. Facade of the CK method <c>Client.UpdateSecret-1</c> (AB#9037).</summary>
+    /// <summary>Updates a secret of a client. Facade of the CK method <c>Client.UpdateSecret-1</c>.</summary>
     [HttpPut("client/{clientId}")]
     [Authorize(IdentityServiceConstants.IdentitySecretAdministrationPolicy)]
     [EndpointSummary("Updates a secret")]
@@ -321,7 +321,7 @@ public class ApiSecretsController : ControllerBase
     }
 
     // PUT system/v1/apiSecrets/apiResource/xyz
-    /// <summary>Updates a secret of an API resource. Facade of the CK method <c>ApiResource.UpdateSecret-1</c> (AB#9037).</summary>
+    /// <summary>Updates a secret of an API resource. Facade of the CK method <c>ApiResource.UpdateSecret-1</c>.</summary>
     [HttpPut("apiResource/{apiResourceName}")]
     [Authorize(IdentityServiceConstants.IdentitySecretAdministrationPolicy)]
     [EndpointSummary("Updates a secret")]
@@ -366,7 +366,7 @@ public class ApiSecretsController : ControllerBase
     ///     Deletes one secret of a client, named by its stored value in the body (AB#8008). A POST sub-resource, not a
     ///     DELETE with a body: a DELETE body has no defined semantics (RFC 9110) and proxies and client libraries may drop
     ///     it; the API already uses POST sub-resources for actions (<c>users/{userName}/revokeSessions</c>). Facade of the CK
-    ///     method <c>Client.RemoveSecret-1</c> (AB#9037).
+    ///     method <c>Client.RemoveSecret-1</c>.
     /// </summary>
     [HttpPost("client/{clientId}/" + DeleteAction)]
     [Authorize(IdentityServiceConstants.IdentitySecretAdministrationPolicy)]
@@ -390,7 +390,7 @@ public class ApiSecretsController : ControllerBase
     // DELETE {tenant}/v1/apiSecrets/client/xyz/{base64(stored hash)}
     /// <summary>
     ///     Deprecated (AB#8008): the stored value travels in the URL path. Kept for one release for older octo-cli/SDK
-    ///     clients; use <c>POST apiSecrets/client/{clientId}/delete</c>. Facade of <c>Client.RemoveSecret-1</c> (AB#9037).
+    ///     clients; use <c>POST apiSecrets/client/{clientId}/delete</c>. Facade of <c>Client.RemoveSecret-1</c>.
     /// </summary>
     [HttpDelete("client/{clientId}/{" + LegacySecretRouteValue + "}")]
     [Authorize(IdentityServiceConstants.IdentitySecretAdministrationPolicy)]
@@ -428,7 +428,7 @@ public class ApiSecretsController : ControllerBase
     // POST {tenant}/v1/apiSecrets/apiResource/xyz/delete   body: { "valueEncrypted": "<stored hash>" }
     /// <summary>
     ///     Deletes one secret of an API resource, named by its stored value in the body (AB#8008), see
-    ///     <see cref="DeleteClientSecret" />. Facade of the CK method <c>ApiResource.RemoveSecret-1</c> (AB#9037).
+    ///     <see cref="DeleteClientSecret" />. Facade of the CK method <c>ApiResource.RemoveSecret-1</c>.
     /// </summary>
     [HttpPost("apiResource/{apiResourceName}/" + DeleteAction)]
     [Authorize(IdentityServiceConstants.IdentitySecretAdministrationPolicy)]
@@ -453,7 +453,7 @@ public class ApiSecretsController : ControllerBase
     /// <summary>
     ///     Deprecated (AB#8008): the stored value travels in the URL path. Kept for one release for older octo-cli/SDK
     ///     clients; use <c>POST apiSecrets/apiResource/{apiResourceName}/delete</c>. Facade of
-    ///     <c>ApiResource.RemoveSecret-1</c> (AB#9037).
+    ///     <c>ApiResource.RemoveSecret-1</c>.
     /// </summary>
     [HttpDelete("apiResource/{apiResourceName}/{" + LegacySecretRouteValue + "}")]
     [Authorize(IdentityServiceConstants.IdentitySecretAdministrationPolicy)]

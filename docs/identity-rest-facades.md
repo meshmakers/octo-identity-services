@@ -295,7 +295,7 @@ nothing), the controller unit tests `ClientsControllerOverlayUrisTests`, `Client
 Both groups of endpoints carry no deprecation yet: the deprecation wave of identity wave 2 is its own story; REST is not removed and gets no
 `Sunset` header.
 
-## REST facades of the secret write endpoints (System.Identity 3.4.0, AB#9037)
+## REST facades of the secret write endpoints (System.Identity 3.4.0)
 
 The write endpoints of `ApiSecretsController` are **facades** of the secret methods; the controller resolves the route's OAuth client id or API resource
 name to the method target (rtId) and maps the envelope, every rule lives in the handlers (`Methods/ClientSecretHandlers.cs`,
@@ -335,7 +335,7 @@ Parity table (REST before -> facade; the method wins unless the REST contract wo
 | Update: secret `Type` | cleared (`null`) | kept (`SharedSecret`) |
 | Add to a public client (`RequireClientSecret` false) | `200`, a secret that is never used | **intended REST change:** `400` with the model state, nothing stored (`CLIENT_SECRET_NOT_REQUIRED`) |
 | Add with an expiration in the past | `200`, a secret that can never be used | **intended REST change:** `400` (`expirationDate`), nothing stored |
-| Add / update with the description `octo:mirror-own-secret`, update of a mirror's own secret (the record carries that description) | stored / overwritten | **intended REST change:** `400` (`description`): the mirror sync tells a mirror's own credential by that marker (AB#5061) |
+| Add / update with the description `octo:mirror-own-secret`, update of a mirror's own secret (the record carries that description) | stored / overwritten | **intended REST change:** `400` (`description`): the mirror sync tells a mirror's own credential by that marker |
 | Owner the caller cannot read / write (only with an enforcing data policy on clients or API resources; open by default) | not checked: changed anyway | **intended REST change:** cannot read = `404` (existence not told), read but not write = `403` problem `METHOD_FORBIDDEN` (`data-permission`); nothing changes (CWE-863: REST ignored the data policy) |
 | Lost concurrent write (20 attempts) | `409` problem | unchanged for update and the API resource methods (`CONCURRENT_CHANGE`); `Client.AddSecret` / `RemoveSecret`: `400` fixed message (`METHOD_HANDLER_FAILED`; a new error code on those methods would be a Major, row M8) |
 | Unexpected failure | `400` `InternalServerErrorDto(exception message)` | `400`, **intended body change:** a fixed message, no exception text leaves the service |
@@ -349,7 +349,7 @@ REST delete; public client and past expiration; `Enforce` on both paths; another
 writable), `Api/Methods/ClientSecretMethodTests`, the unchanged REST suite `Api/TenantApi/ApiSecretsControllerTests`, `CredentialsNotInUrlTests`,
 `IdentityMethodDeclarationsIntegrationTests`.
 
-## REST facades of the data-permission grants and the enforcement switch (System.Identity 3.4.0, AB#9039)
+## REST facades of the data-permission grants and the enforcement switch (System.Identity 3.4.0)
 
 | REST endpoint | Method |
 |---|---|

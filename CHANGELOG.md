@@ -8,7 +8,7 @@ Notable changes of the OctoMesh identity services. The CK model `System.Identity
 ### Changed
 
 - **The REST secret write endpoints run the secret methods, the REST data-permission grant, revoke and enforcement-mode
-  endpoints run the `DataPermission` / `DataPolicy` methods (System.Identity 3.4.0, AB#9037, AB#9039).** `POST`, `PUT`,
+  endpoints run the `DataPermission` / `DataPolicy` methods (System.Identity 3.4.0).** `POST`, `PUT`,
   `POST …/delete` and the deprecated `DELETE …/{secretValue}` of `apiSecrets/client/{clientId}` and
   `apiSecrets/apiResource/{name}` are facades of `Client.AddSecret`, the new `Client.UpdateSecret`, `Client.RemoveSecret` and the new
   `ApiResource.AddSecret` / `UpdateSecret` / `RemoveSecret`; `POST/DELETE dataPermissions/{permissionId}/roles/{roleName}` and

@@ -139,7 +139,7 @@ user role handlers use (scope `octo_api` + role `UserManagement` on the **valida
   with `IRtDataPermissionEvaluator` (`IdentityMethodCall.EvaluateAsync`, the caller's `RtSecurityContext` from the validated principal): not visible = `MEMBER_NOT_FOUND` /
   `ROLE_NOT_FOUND`; `DataPermission.GrantToRole` additionally needs `Write` on the role (the grant is stored on it), refusal = `METHOD_FORBIDDEN` / `reason` = `data-permission`.
   Without enforcing policies on those types (the default) every check is open, as in REST.
-- **Data permission methods check their target themselves (AB#9039).** The REST endpoints are facades that call in-process, where no gateway checks
+- **Data permission methods check their target themselves.** The REST endpoints are facades that call in-process, where no gateway checks
   `dataAccess`. `DataPermission.GrantToRole` / `RevokeFromRole` (and `DataPolicy.SetEnforcementMode`, next section) therefore evaluate the target permission
   (policy) for `Write` first (`IdentityMethodCall.CheckTargetWritableAsync`): not visible = `METHOD_TARGET_NOT_FOUND`, readable but not writable = `METHOD_FORBIDDEN` /
   `data-permission`. **Revoking from a role the caller cannot read** while the role holds the permission is `METHOD_FORBIDDEN` / `data-permission`, not
@@ -199,14 +199,14 @@ hosted whatever `EnablePasswordMethods` says.
 - REST facades and parity tables: `docs/identity-rest-facades.md`. Tests: `Api/TenantApi/ClientRestMethodFacadeTests`,
   `Methods/IdentityMethodHostTests`, the `ClientsController*` unit tests.
 
-## `DataPolicy.SetEnforcementMode` (System.Identity 3.4.0, AB#9039)
+## `DataPolicy.SetEnforcementMode` (System.Identity 3.4.0)
 
 `DataPolicySetEnforcementModeHandler` (`Methods/DataPermissionRoleMethodHandlerBase.cs`, one row in `IdentityMethodHost.Handlers`, `CarriesSecret = false`) switches a
 data policy between `Enforce` and `AuditOnly` (parameter `enforcementMode`, enum `DataPolicyEnforcementMode`). Caller rule of REST
 (`IdentityUserAdministrationWritePolicy`: `octo_api` + `UserManagement`), target = the policy rtId, evaluated for `Write` first (see above), then the data permission the policy is bound to (`PolicyPermission`; the mode decides
 whether that permission is enforced at all, so switching it is a change of the permission too). The mode the policy
-already has is a success without a write. The write goes through `IDataPermissionStore.SetPolicyEnforcementModeAsync`, as REST did; afterwards the handler
-invalidates the cached policy table of this process (`IDataPermissionResolver.Invalidate`), so the identity replica that served the call applies the
+already has is a success without a write. The write goes through `IDataPermissionStore.SetPolicyEnforcementModeAsync`, as REST did; after every successful call
+(also when the mode was already set) the handler invalidates the cached policy table of this process (`IDataPermissionResolver.Invalidate`), so the identity replica that served the call applies the
 new mode at once. Other identity replicas and every other service that evaluates data policies (asset repository, mesh adapter, report and bot services)
 pick it up only when their cached table expires (TTL 60 s, no invalidation event): up to one minute after the switch they may still apply the old mode. The mode changes
 data visibility tenant-wide, so the `Identity.Method` event carries `enforcementModeBefore` and `enforcementModeAfter`. REST facade:
@@ -216,7 +216,7 @@ same fail-closed read verdict).
 ## Secret methods `Client.AddSecret`, `Client.UpdateSecret`, `Client.RemoveSecret`, `ApiResource.AddSecret`, `ApiResource.UpdateSecret`, `ApiResource.RemoveSecret`
 
 `ClientAddSecretHandler` and `ClientRemoveSecretHandler` (declared in System.Identity 2.29.0), `ClientUpdateSecretHandler`, `ApiResourceAddSecretHandler`,
-`ApiResourceUpdateSecretHandler` and `ApiResourceRemoveSecretHandler` (System.Identity 3.4.0, AB#9037), all in `src/IdentityServices/Methods/ClientSecretHandlers.cs`.
+`ApiResourceUpdateSecretHandler` and `ApiResourceRemoveSecretHandler` (System.Identity 3.4.0), all in `src/IdentityServices/Methods/ClientSecretHandlers.cs`.
 The shared flow is `SecretOwnerMethodHandlerBase<TOwner>` (`ClientSecretMethodHandlerBase.cs`): caller rule, target, **data permission of the owner**,
 generate / update / remove, version-checked write, cache event and audit; `ClientSecretMethodHandlerBase` (owner `RtClient`, mirror sync after the write) and
 `ApiResourceSecretMethodHandlerBase` (owner `RtApiResource`) only name the owner and its secret list. Six rows in `IdentityMethodHost.Handlers`, all
@@ -229,7 +229,7 @@ secret write endpoints of `ApiSecretsController` are their facades (`docs/identi
   description is refused as on `AddSecret`, and so is any update of a mirror's own secret (the record that carries it). Errors `SECRET_NOT_FOUND`, `CONCURRENT_CHANGE`.
 - **API resource** (introspection secrets): the same generator, format, rules and audit as the client methods (the owner has no public variant, so no
   `CLIENT_SECRET_NOT_REQUIRED`); audit detail `apiResourceName` instead of `clientId`.
-- **Owner data permission (AB#9037).** Before anything is changed the owner is evaluated for `Write` with the caller's roles: not visible =
+- **Owner data permission.** Before anything is changed the owner is evaluated for `Write` with the caller's roles: not visible =
   `METHOD_TARGET_NOT_FOUND`, readable but not writable = `METHOD_FORBIDDEN` / `data-permission`. Open without an enforcing policy on the owner type.
 - **Concurrency.** `CONCURRENT_CHANGE` after 20 lost version-checked writes on the four new methods; `Client.AddSecret` / `Client.RemoveSecret` keep their error list
   (a new code would be a Major, row M8) and answer `METHOD_HANDLER_FAILED` in that case.
@@ -256,7 +256,7 @@ secret write endpoints of `ApiSecretsController` are their facades (`docs/identi
   target; unknown target; public client; expiration; unknown value without echo; failing store audited; forged caller on the host; canary: the secret and a
   clear-text `secretValue` in no audit event and no log line at any level, the hash in none at Information or above; parallel adds + remove lose no
   update; reserved description; broker down still returns the committed secret), `Methods/IdentityMethodHostTests` (gate and caller rule),
-  `Methods/ClientSecretHandlerFailureTests` (an exception is audited once as `METHOD_HANDLER_FAILED`), `Api/TenantApi/SecretRestMethodFacadeTests` (AB#9037:
-  every REST write runs its method in-process with one event and nothing on the broker, both switch values; REST and method side by side for add, update,
+  `Methods/ClientSecretHandlerFailureTests` (an exception is audited once as `METHOD_HANDLER_FAILED`), `Api/TenantApi/SecretRestMethodFacadeTests`
+  (every REST write runs its method in-process with one event and nothing on the broker, both switch values; REST and method side by side for add, update,
   expired secret, unknown value, duplicate records and unknown owner, client and API resource; canary of the clear text; `SecretManagementRoleEnforcement=Enforce`
   on both paths; another tenant's token, a caller without the role; an owner the caller cannot read or write).

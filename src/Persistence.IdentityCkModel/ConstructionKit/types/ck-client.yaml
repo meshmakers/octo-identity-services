@@ -212,7 +212,7 @@ types:
         authorization:
           roles: [ TenantManagement, UserManagement, SecretManagement ]
           dataAccess: Write
-      # 3.4.0 (AB#9037): the REST PUT apiSecrets/client/{clientId} becomes a facade of this method. Same roles as AddSecret and
+      # 3.4.0: the REST PUT apiSecrets/client/{clientId} becomes a facade of this method. Same roles as AddSecret and
       # RemoveSecret (REST IdentitySecretAdministrationPolicy, staged by SecretManagementRoleEnforcement in the handler).
       - methodId: UpdateSecret-1
         description: "Replaces the description and the expiration date of a secret of the client, identified by its stored value (as the list of secrets shows it) or its clear text. The secret value itself never changes; an omitted description or expiration date is cleared (REST parity: PUT apiSecrets/client/{clientId})."

@@ -1,5 +1,5 @@
 "$schema": "https://schemas.meshmakers.cloud/construction-kit-meta.schema.json"
-# 3.4.0 (AB#9037, AB#9039, Feature F5.2 identity wave 2) adds methods only, so the REST secret and data-policy endpoints become
+# 3.4.0 (Feature F5.2 identity wave 2) adds methods only, so the REST secret and data-policy endpoints become
 # facades:
 #   * Client.UpdateSecret-1, ApiResource.AddSecret-1, ApiResource.RemoveSecret-1, ApiResource.UpdateSecret-1 (roles
 #     TenantManagement, UserManagement, SecretManagement as Client.AddSecret-1; secretValue and the generated secret sensitive;

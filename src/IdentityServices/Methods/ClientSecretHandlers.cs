@@ -11,7 +11,7 @@ namespace Meshmakers.Octo.Backend.IdentityServices.Methods;
 /// </summary>
 /// <remarks>
 ///     <para>
-///         REST facade (AB#9037): <c>POST system/v1/apiSecrets/client/{clientId}</c> (<c>ApiSecretsController.PostClient</c>).
+///         REST facade: <c>POST system/v1/apiSecrets/client/{clientId}</c> (<c>ApiSecretsController.PostClient</c>).
 ///         Generator: 32 bytes from the CSPRNG, URL-safe Base64 (<see cref="ClientMirrorSecrets.GenerateSecret" />); stored
 ///         format <see cref="OctoSecretHasher.HashSecret" /> (Base64 SHA-256, which <see cref="OctoApplicationManager" />
 ///         validates against every unexpired record of the client); a version-checked write of the client, mirror sync after it.
@@ -20,7 +20,7 @@ namespace Meshmakers.Octo.Backend.IdentityServices.Methods;
 ///         A public client (<c>RequireClientSecret</c> false; it never authenticates with a secret) is refused with
 ///         <c>CLIENT_SECRET_NOT_REQUIRED</c>, an <c>expirationDate</c> in the past (a secret that could never be used) with
 ///         <c>METHOD_VALIDATION_FAILED</c>. The record gets <c>Type = SharedSecret</c> (the validation does not filter by type).
-///         The description <c>octo:mirror-own-secret</c> is reserved for the mirror machinery (AB#5061) and refused with
+///         The description <c>octo:mirror-own-secret</c> is reserved for the mirror machinery and refused with
 ///         <c>METHOD_VALIDATION_FAILED</c> (<c>field</c> = <c>description</c>).
 ///     </para>
 /// </remarks>
@@ -48,7 +48,7 @@ internal sealed class ClientAddSecretHandler(IServiceProvider services)
 ///     client can no longer authenticate with it.
 /// </summary>
 /// <remarks>
-///     <c>secretValue</c> is either the stored value as the list of secrets shows it (REST facade, AB#9037:
+///     <c>secretValue</c> is either the stored value as the list of secrets shows it (REST facade:
 ///     <c>POST system/v1/apiSecrets/client/{clientId}/delete</c> and the legacy <c>DELETE .../{secretValue}</c> pass the stored
 ///     SHA-256 value, because the clear text is shown only once) or the clear text of the secret (hashed and compared like the
 ///     token endpoint does). Every record that matches is removed. No match is <c>SECRET_NOT_FOUND</c> without any parameter:
@@ -68,7 +68,7 @@ internal sealed class ClientRemoveSecretHandler(IServiceProvider services)
 }
 
 /// <summary>
-///     Handler of <c>System.Identity/Client.UpdateSecret-1</c> (System.Identity 3.4.0, AB#9037): replaces description and
+///     Handler of <c>System.Identity/Client.UpdateSecret-1</c> (System.Identity 3.4.0): replaces description and
 ///     expiration date of a secret of the client. REST facade: <c>PUT system/v1/apiSecrets/client/{clientId}</c>.
 /// </summary>
 /// <remarks>
@@ -92,7 +92,7 @@ internal sealed class ClientUpdateSecretHandler(IServiceProvider services)
 }
 
 /// <summary>
-///     Handler of <c>System.Identity/ApiResource.AddSecret-1</c> (System.Identity 3.4.0, AB#9037): generates a new
+///     Handler of <c>System.Identity/ApiResource.AddSecret-1</c> (System.Identity 3.4.0): generates a new
 ///     (introspection) secret for an API resource, stores only its hash and returns the clear text exactly once. REST facade:
 ///     <c>POST system/v1/apiSecrets/apiResource/{name}</c>. Same generator, format and rules as <c>Client.AddSecret</c>
 ///     (expiration in the past and the reserved mirror description refused); an API resource has no public variant.
@@ -114,7 +114,7 @@ internal sealed class ApiResourceAddSecretHandler(IServiceProvider services)
 }
 
 /// <summary>
-///     Handler of <c>System.Identity/ApiResource.RemoveSecret-1</c> (System.Identity 3.4.0, AB#9037), see
+///     Handler of <c>System.Identity/ApiResource.RemoveSecret-1</c> (System.Identity 3.4.0), see
 ///     <see cref="ClientRemoveSecretHandler" />. REST facade: <c>POST system/v1/apiSecrets/apiResource/{name}/delete</c> and the
 ///     legacy <c>DELETE .../{secretValue}</c>.
 /// </summary>
@@ -133,7 +133,7 @@ internal sealed class ApiResourceRemoveSecretHandler(IServiceProvider services)
 }
 
 /// <summary>
-///     Handler of <c>System.Identity/ApiResource.UpdateSecret-1</c> (System.Identity 3.4.0, AB#9037), see
+///     Handler of <c>System.Identity/ApiResource.UpdateSecret-1</c> (System.Identity 3.4.0), see
 ///     <see cref="ClientUpdateSecretHandler" />. REST facade: <c>PUT system/v1/apiSecrets/apiResource/{name}</c>.
 /// </summary>
 internal sealed class ApiResourceUpdateSecretHandler(IServiceProvider services)

@@ -94,7 +94,7 @@ public class ClientSecretMethodTests : IntegrationTestBase
     [Fact]
     public void SwitchOff_TheSecretHandlersAreLocalOnly_ForTheRestFacades_AndNotOfferedOnTheBus()
     {
-        // AB#9037: the REST secret write endpoints are facades of the secret methods, so with the switch off (every
+        // The REST secret write endpoints are facades of the secret methods, so with the switch off (every
         // environment's default) their handlers are registered local only: this process calls them in-process, the gateway
         // still gets METHOD_HANDLER_NOT_AVAILABLE and no secret reaches the broker.
         var transport = Factory.Services.GetRequiredService<ICkInProcessMethodTransport>();

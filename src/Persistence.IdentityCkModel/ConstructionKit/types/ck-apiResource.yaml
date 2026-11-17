@@ -20,7 +20,7 @@ types:
         name: Scopes
       - id: ${this}/AllowedAccessTokenSigningAlgorithms
         name: AllowedAccessTokenSigningAlgorithms
-    # 3.4.0 (AB#9037): the secret methods of the API resource (introspection secrets). The REST secret write endpoints of
+    # 3.4.0: the secret methods of the API resource (introspection secrets). The REST secret write endpoints of
     # ApiSecretsController (POST/PUT apiSecrets/apiResource/{name}, POST .../delete, legacy DELETE .../{secretValue}) are their
     # facades. Roles as Client.AddSecret-1 (REST IdentitySecretAdministrationPolicy, staged by SecretManagementRoleEnforcement
     # in the handler). The generated secret and the secret value are sensitive: the handlers are offered on the bus only with

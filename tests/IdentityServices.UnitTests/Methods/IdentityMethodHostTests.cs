@@ -86,7 +86,7 @@ public class IdentityMethodHostTests
     {
         // AB#8413: POST users and POST users/ResetPassword call these methods in-process; AB#8414: so do the account pages'
         // api/manage/change-password and set-password. With the switch off they are registered local only (not announced,
-        // no queue), so the gateway still answers METHOD_HANDLER_NOT_AVAILABLE. AB#9037: the same for the six secret methods,
+        // no queue), so the gateway still answers METHOD_HANDLER_NOT_AVAILABLE. The same holds for the six secret methods,
         // whose REST facades are the secret write endpoints of ApiSecretsController.
         IdentityMethodHost.SelectLocalOnlyHandlers(new IdentityMethodsOptions()).Select(h => h.MethodId).Should()
             .BeEquivalentTo(SystemIdentityCkIds.UserCreateUserMethodId, SystemIdentityCkIds.UserResetPasswordMethodId,
@@ -101,7 +101,7 @@ public class IdentityMethodHostTests
     [Fact]
     public void SwitchOff_TheSecretMethods_AreNeverOfferedOnTheBus()
     {
-        // AB#9037: local only (REST facades), never announced while the switch is off.
+        // Local only (REST facades), never announced while the switch is off.
         IdentityMethodHost.SelectHandlers(new IdentityMethodsOptions()).Select(h => h.MethodId).Should().NotContain([
             SystemIdentityCkIds.ClientAddSecretMethodId, SystemIdentityCkIds.ClientUpdateSecretMethodId,
             SystemIdentityCkIds.ClientRemoveSecretMethodId, SystemIdentityCkIds.ApiResourceAddSecretMethodId,

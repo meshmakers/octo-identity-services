@@ -26,7 +26,7 @@ using Xunit;
 namespace IdentityServices.IntegrationTests.Api.TenantApi;
 
 /// <summary>
-///     AB#9039: <c>POST/DELETE dataPermissions/{permissionId}/roles/{roleName}</c> and
+///     <c>POST/DELETE dataPermissions/{permissionId}/roles/{roleName}</c> and
 ///     <c>PUT dataPermissions/policies/{policyRtId}/enforcementMode</c> are facades of <c>DataPermission.GrantToRole</c>,
 ///     <c>DataPermission.RevokeFromRole</c> and the new <c>DataPolicy.SetEnforcementMode</c>. Real MongoDB, real identity host.
 ///     The grant and revoke parity of the end state stays covered by <c>DataPermissionMethodTests</c>; these tests prove that
@@ -41,13 +41,23 @@ public class DataPermissionRestMethodFacadeTests : IntegrationTestBase, IDisposa
     private readonly FacadeAuditCapture _audit = new();
     private readonly RequestStateProbe _probe = new();
     private readonly List<WebApplicationFactory<Program>> _hosts = [];
+    private readonly List<string> _permissions = [];
 
     public DataPermissionRestMethodFacadeTests(CustomWebApplicationFactory factory) : base(factory)
     {
     }
 
+    /// <summary>
+    ///     Removes every data permission the test created, with its policies: an Enforce policy left in the shared database
+    ///     would hide its type from every later test.
+    /// </summary>
     public void Dispose()
     {
+        foreach (var permissionId in _permissions)
+        {
+            RemovePermissionAsync(permissionId).GetAwaiter().GetResult();
+        }
+
         foreach (var host in _hosts)
         {
             host.Dispose();
@@ -105,35 +115,29 @@ public class DataPermissionRestMethodFacadeTests : IntegrationTestBase, IDisposa
         const string methodType = "System/BlueprintHistory";
         var restPolicy = await NewPolicyAsync(restPermission, restType, "AuditOnly");
         var methodPolicy = await NewPolicyAsync(methodPermission, methodType, "AuditOnly");
-        try
-        {
-            // AuditOnly: a caller without the grant still reads (the violation is only logged)
-            (await ReadVerdictAsync(host, restType)).Should().Be(RtDataPermissionDecision.Allowed);
-            (await ReadVerdictAsync(host, methodType)).Should().Be(RtDataPermissionDecision.Allowed);
+        // the permissions and their (then enforcing) policies are removed in Dispose
 
-            using var http = FacadeCaller.User(UserManagement).Client(host);
-            (await http.PutAsJsonAsync(TenantApiUrl($"dataPermissions/policies/{restPolicy}/enforcementMode"), "Enforce",
-                TestContext.Current.CancellationToken)).StatusCode.Should().Be(HttpStatusCode.OK);
-            (await DispatchAsync(host, Admin(), SystemIdentityCkIds.DataPolicySetEnforcementModeMethodId,
-                    IdentityMethodFacade.DataPolicyCkTypeId, methodPolicy,
-                    new DataPolicySetEnforcementModeParameters { EnforcementMode = RtDataPolicyEnforcementModeEnum.Enforce }))
-                .Success.Should().BeTrue();
+        // AuditOnly: a caller without the grant still reads (the violation is only logged)
+        (await ReadVerdictAsync(host, restType)).Should().Be(RtDataPermissionDecision.Allowed);
+        (await ReadVerdictAsync(host, methodType)).Should().Be(RtDataPermissionDecision.Allowed);
 
-            (await StoredModeAsync(restPolicy)).Should().Be(RtDataPolicyEnforcementModeEnum.Enforce);
-            (await StoredModeAsync(methodPolicy)).Should().Be(RtDataPolicyEnforcementModeEnum.Enforce);
-            var restVerdict = await ReadVerdictAsync(host, restType);
-            var methodVerdict = await ReadVerdictAsync(host, methodType);
-            restVerdict.Should().Be(RtDataPermissionDecision.NotVisible, "fail-closed: no grant, nothing visible");
-            methodVerdict.Should().Be(restVerdict);
+        using var http = FacadeCaller.User(UserManagement).Client(host);
+        (await http.PutAsJsonAsync(TenantApiUrl($"dataPermissions/policies/{restPolicy}/enforcementMode"), "Enforce",
+            TestContext.Current.CancellationToken)).StatusCode.Should().Be(HttpStatusCode.OK);
+        (await DispatchAsync(host, Admin(), SystemIdentityCkIds.DataPolicySetEnforcementModeMethodId,
+                IdentityMethodFacade.DataPolicyCkTypeId, methodPolicy,
+                new DataPolicySetEnforcementModeParameters { EnforcementMode = RtDataPolicyEnforcementModeEnum.Enforce }))
+            .Success.Should().BeTrue();
 
-            var audit = _audit.For(SystemIdentityCkIds.DataPolicySetEnforcementModeMethodId, methodPolicy).Single();
-            audit.Should().Contain("enforcementModeBefore", "AuditOnly").And.Contain("enforcementModeAfter", "Enforce");
-        }
-        finally
-        {
-            await RemovePermissionAsync(restPermission);
-            await RemovePermissionAsync(methodPermission);
-        }
+        (await StoredModeAsync(restPolicy)).Should().Be(RtDataPolicyEnforcementModeEnum.Enforce);
+        (await StoredModeAsync(methodPolicy)).Should().Be(RtDataPolicyEnforcementModeEnum.Enforce);
+        var restVerdict = await ReadVerdictAsync(host, restType);
+        var methodVerdict = await ReadVerdictAsync(host, methodType);
+        restVerdict.Should().Be(RtDataPermissionDecision.NotVisible, "fail-closed: no grant, nothing visible");
+        methodVerdict.Should().Be(restVerdict);
+
+        var audit = _audit.For(SystemIdentityCkIds.DataPolicySetEnforcementModeMethodId, methodPolicy).Single();
+        audit.Should().Contain("enforcementModeBefore", "AuditOnly").And.Contain("enforcementModeAfter", "Enforce");
     }
 
     [Fact]
@@ -417,6 +421,7 @@ public class DataPermissionRestMethodFacadeTests : IntegrationTestBase, IDisposa
         var permissionId = $"dp9039.{Guid.NewGuid():N}";
         using var scope = CreateScope();
         var id = await scope.ServiceProvider.GetRequiredService<IDataPermissionStore>().CreateAsync(permissionId, null);
+        _permissions.Add(permissionId);
         return (id.ToString(), permissionId);
     }
 
@@ -428,11 +433,16 @@ public class DataPermissionRestMethodFacadeTests : IntegrationTestBase, IDisposa
         return rtId.ToString();
     }
 
+    /// <summary>Removes the permission and its policies (<see cref="IDataPermissionStore.RemoveAsync" />) and drops the cached policy tables.</summary>
     private async Task RemovePermissionAsync(string permissionId)
     {
         using var scope = CreateScope();
         await scope.ServiceProvider.GetRequiredService<IDataPermissionStore>().RemoveAsync(permissionId);
         scope.ServiceProvider.GetService<IDataPermissionResolver>()?.Invalidate(NormalizedSystemTenantId);
+        foreach (var host in _hosts)
+        {
+            host.Services.GetService<IDataPermissionResolver>()?.Invalidate(NormalizedSystemTenantId);
+        }
     }
 
     private async Task<RtDataPolicyEnforcementModeEnum> StoredModeAsync(string policyRtId)

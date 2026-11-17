@@ -36,7 +36,7 @@ using Xunit;
 namespace IdentityServices.IntegrationTests.Api.TenantApi;
 
 /// <summary>
-///     AB#9037: the secret write endpoints of <c>ApiSecretsController</c> are facades of <c>Client.AddSecret</c>,
+///     The secret write endpoints of <c>ApiSecretsController</c> are facades of <c>Client.AddSecret</c>,
 ///     <c>Client.UpdateSecret</c>, <c>Client.RemoveSecret</c> and <c>ApiResource.AddSecret/UpdateSecret/RemoveSecret</c>.
 ///     Real MongoDB, real identity host, both values of <c>Methods:Identity:EnablePasswordMethods</c>. The REST contract stays
 ///     covered by <see cref="ApiSecretsControllerTests" />; these tests prove that every endpoint runs its method in-process
@@ -271,7 +271,7 @@ public class SecretRestMethodFacadeTests : IntegrationTestBase, IDisposable
     [Fact]
     public async Task UpdatingAMirrorsOwnSecret_Is400_AndTheMarkerStays()
     {
-        // the marker tells the mirror sync that the record is the mirror's own credential (AB#5061)
+        // the marker tells the mirror sync that the record is the mirror's own credential
         var host = Host(false);
         var owner = await NewOwnerAsync(ClientKind);
         var hash = await AddRawSecretAsync(ClientKind, owner.Name, null, ClientMirrorSecrets.OwnSecretDescription);
