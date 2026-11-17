@@ -42,10 +42,18 @@ public class IdentityMethodDeclarationsIntegrationTests : IClassFixture<Identity
         { "Group", ["AddMember-1", "RemoveMember-1", "SetRoles-1", "AddChildGroup-1", "RemoveChildGroup-1"] },
         {
             "Client",
-            ["AddSecret-1", "RemoveSecret-1", "SetRoles-1", "AddRole-1", "RemoveRole-1", "ApplyOverlayUris-1", "CleanOverlayEntries-1"]
+            [
+                "AddSecret-1", "RemoveSecret-1", "UpdateSecret-1", "SetRoles-1", "AddRole-1", "RemoveRole-1",
+                "ApplyOverlayUris-1", "CleanOverlayEntries-1"
+            ]
         },
-        { "DataPermission", ["GrantToRole-1", "RevokeFromRole-1"] }
+        { "DataPermission", ["GrantToRole-1", "RevokeFromRole-1"] },
+        // System.Identity 3.4.0
+        { "ApiResource", ["AddSecret-1", "RemoveSecret-1", "UpdateSecret-1"] },
+        { "DataPolicy", ["SetEnforcementMode-1"] }
     };
+
+    private static readonly string[] MethodTypes = ["User", "Group", "Client", "DataPermission", "ApiResource", "DataPolicy"];
 
     [Theory]
     [MemberData(nameof(DeclaredMethods))]
@@ -60,7 +68,7 @@ public class IdentityMethodDeclarationsIntegrationTests : IClassFixture<Identity
     [Fact]
     public async Task EveryMethod_IsAuthorized_AndDeclaresWriteAccess_ExceptTheCreate()
     {
-        foreach (var type in new[] { "User", "Group", "Client", "DataPermission" })
+        foreach (var type in MethodTypes)
         {
             var graph = await GetTypeAsync(type);
             foreach (var method in graph.AllMethods.Values)
@@ -94,7 +102,7 @@ public class IdentityMethodDeclarationsIntegrationTests : IClassFixture<Identity
         setPassword.AllowSelf.Should().BeTrue("a user with external logins only sets their own first password");
         setPassword.Roles.Should().BeNullOrEmpty("an administrator uses ResetPassword");
 
-        foreach (var type in new[] { "Group", "DataPermission" })
+        foreach (var type in new[] { "Group", "DataPermission", "DataPolicy" })
         {
             foreach (var method in (await GetTypeAsync(type)).AllMethods.Values)
             {
@@ -104,11 +112,14 @@ public class IdentityMethodDeclarationsIntegrationTests : IClassFixture<Identity
 
         // AB#8095 (System.Identity 3.1.0): SecretManagement joins the REST-parity roles of the client secret methods; the
         // handler still requires SecretManagement under Enforce. TenantManagement/UserManagement leave with the next major.
+        // System.Identity 3.4.0: UpdateSecret and the API resource secret methods carry the same roles.
         var client = await GetTypeAsync("Client");
-        foreach (var id in new[] { "AddSecret-1", "RemoveSecret-1" })
+        var apiResource = await GetTypeAsync("ApiResource");
+        foreach (var method in new[] { "AddSecret-1", "RemoveSecret-1", "UpdateSecret-1" }
+                     .SelectMany(id => new[] { client.AllMethods[id], apiResource.AllMethods[id] }))
         {
-            client.AllMethods[id].Definition.Authorization!.Roles.Should()
-                .BeEquivalentTo([TenantManagement, UserManagement, "SecretManagement"], id);
+            method.Definition.Authorization!.Roles.Should()
+                .BeEquivalentTo([TenantManagement, UserManagement, "SecretManagement"], method.QualifiedMethodId);
         }
 
         // System.Identity 3.3.0: the client role and overlay methods carry the REST policy of ClientsController
@@ -124,7 +135,7 @@ public class IdentityMethodDeclarationsIntegrationTests : IClassFixture<Identity
     public async Task EveryParameterThatCarriesAPasswordOrSecret_IsSensitive_AndNothingElseIs()
     {
         var sensitive = new List<string>();
-        foreach (var type in new[] { "User", "Group", "Client", "DataPermission" })
+        foreach (var type in MethodTypes)
         {
             foreach (var method in (await GetTypeAsync(type)).AllMethods.Values)
             {
@@ -140,23 +151,29 @@ public class IdentityMethodDeclarationsIntegrationTests : IClassFixture<Identity
             "System.Identity/User.SetPassword-1(newPassword)",
             "System.Identity/User.ResetPassword-1(newPassword)",
             "System.Identity/User.CreateUser-1(password)",
-            "System.Identity/Client.RemoveSecret-1(secretValue)"
+            "System.Identity/Client.RemoveSecret-1(secretValue)",
+            "System.Identity/Client.UpdateSecret-1(secretValue)",
+            "System.Identity/ApiResource.RemoveSecret-1(secretValue)",
+            "System.Identity/ApiResource.UpdateSecret-1(secretValue)"
         ]);
     }
 
     [Fact]
-    public async Task OnlyTheClientAddSecret_HasASensitiveResult_TheGeneratedSecretIsShownOnce()
+    public async Task OnlyTheAddSecretMethods_HaveASensitiveResult_TheGeneratedSecretIsShownOnce()
     {
         var results = new List<string>();
-        foreach (var type in new[] { "User", "Group", "Client", "DataPermission" })
+        foreach (var type in MethodTypes)
         {
             results.AddRange((await GetTypeAsync(type)).AllMethods.Values.Where(m => m.HasSensitiveResult)
                 .Select(m => m.QualifiedMethodId));
         }
 
-        results.Should().BeEquivalentTo(["System.Identity/Client.AddSecret-1"]);
-        (await GetTypeAsync("Client")).AllMethods["AddSecret-1"].Definition.Result!.ValueType.Should()
-            .Be(AttributeValueTypesDto.String);
+        results.Should().BeEquivalentTo(["System.Identity/Client.AddSecret-1", "System.Identity/ApiResource.AddSecret-1"]);
+        foreach (var type in new[] { "Client", "ApiResource" })
+        {
+            (await GetTypeAsync(type)).AllMethods["AddSecret-1"].Definition.Result!.ValueType.Should()
+                .Be(AttributeValueTypesDto.String, type);
+        }
     }
 
     [Fact]
@@ -165,7 +182,7 @@ public class IdentityMethodDeclarationsIntegrationTests : IClassFixture<Identity
         // Group, Client and DataPermission are seeded by the System.Identity.Bootstrap blueprint: a flag there makes
         // every new tenant's bootstrap fail (AB#7121). The flag on User (Major, row M16) is set since System.Identity 3.0.0
         // (AB#8053): a user is created only by User.CreateUser-1 or the REST API, never through the generic create.
-        foreach (var type in new[] { "Group", "Client", "DataPermission" })
+        foreach (var type in new[] { "Group", "Client", "DataPermission", "ApiResource", "DataPolicy" })
         {
             (await GetTypeAsync(type)).AllMethods.Values.Where(m => m.ReplacesGenericCreate)
                 .Should().BeEmpty(type);
@@ -206,6 +223,16 @@ public class IdentityMethodDeclarationsIntegrationTests : IClassFixture<Identity
             parameter.ValueType.Should().Be(AttributeValueTypesDto.Enum);
             parameter.ValueCkEnumId.Should().NotBeNull();
         }
+    }
+
+    [Fact]
+    public async Task TheEnforcementModeOfSetEnforcementMode_IsTheDeclaredEnumOfThePolicyAttribute()
+    {
+        var parameter = (await GetTypeAsync("DataPolicy")).AllMethods["SetEnforcementMode-1"].Definition.Parameters!
+            .Single(p => p.Name == "enforcementMode");
+        parameter.ValueType.Should().Be(AttributeValueTypesDto.Enum);
+        parameter.ValueCkEnumId.Should().NotBeNull();
+        parameter.ValueCkEnumId!.ToString().Should().Contain("DataPolicyEnforcementMode");
     }
 
     private async Task<CkTypeGraph> GetTypeAsync(string type)

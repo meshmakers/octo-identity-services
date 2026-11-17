@@ -25,3 +25,17 @@ types:
     associations:
       - id: ${this}/PolicyPermission
         targetCkTypeId: ${this}/DataPermission
+    # 3.4.0: the REST PUT dataPermissions/policies/{policyRtId}/enforcementMode becomes a facade of this method.
+    # Roles follow the REST parity (DataPermissionsController: IdentityUserAdministrationWritePolicy = UserManagement). The
+    # enforcement mode changes data visibility tenant-wide: the audit names the policy, the old and the new mode.
+    methods:
+      - methodId: SetEnforcementMode-1
+        description: "Switches the policy between Enforce and AuditOnly (the operator flip after the audit review). Setting the mode the policy already has changes nothing."
+        parameters:
+          - { name: enforcementMode, valueType: Enum, valueCkEnumId: "${this}/DataPolicyEnforcementMode" }
+        authorization:
+          roles: [ UserManagement ]
+          dataAccess: Write
+        execution:
+          timeoutSeconds: 30
+          idempotent: true

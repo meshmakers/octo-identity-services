@@ -1,6 +1,6 @@
 ---
-description: "REST facades of the role, merge, create-user and password methods, deprecation waves, account pages running the password methods"
-applies_to: "{IdentityMethodFacade,IdentityRestDeprecation,UsersController,ManageApiController,RoleChangeProblems,ResetUserPasswordRequestDto}.cs"
+description: "REST facades of the role, merge, create-user, password, group, client, secret and data-permission methods, deprecation waves, account pages running the password methods"
+applies_to: "{IdentityMethodFacade,IdentityRestDeprecation,UsersController,ManageApiController,RoleChangeProblems,ResetUserPasswordRequestDto,ApiSecretsController,DataPermissionsController}.cs"
 ---
 
 # REST facades, deprecations and account pages
@@ -294,3 +294,90 @@ nothing), the controller unit tests `ClientsControllerOverlayUrisTests`, `Client
 
 Both groups of endpoints carry no deprecation yet: the deprecation wave of identity wave 2 is its own story; REST is not removed and gets no
 `Sunset` header.
+
+## REST facades of the secret write endpoints (System.Identity 3.4.0)
+
+The write endpoints of `ApiSecretsController` are **facades** of the secret methods; the controller resolves the route's OAuth client id or API resource
+name to the method target (rtId) and maps the envelope, every rule lives in the handlers (`Methods/ClientSecretHandlers.cs`,
+`SecretOwnerMethodHandlerBase<TOwner>`):
+
+| REST endpoint | Method |
+|---|---|
+| `POST apiSecrets/client/{clientId}` | `Client.AddSecret-1` |
+| `PUT apiSecrets/client/{clientId}` | `Client.UpdateSecret-1` (new) |
+| `POST apiSecrets/client/{clientId}/delete`, deprecated `DELETE apiSecrets/client/{clientId}/{secretValue}` | `Client.RemoveSecret-1` |
+| `POST apiSecrets/apiResource/{name}` | `ApiResource.AddSecret-1` (new) |
+| `PUT apiSecrets/apiResource/{name}` | `ApiResource.UpdateSecret-1` (new) |
+| `POST apiSecrets/apiResource/{name}/delete`, deprecated `DELETE apiSecrets/apiResource/{name}/{secretValue}` | `ApiResource.RemoveSecret-1` (new) |
+
+The secret reads (`GET`, `POST …/lookup`, deprecated `GET …/{secretValue}`) stay REST reads: secrets are not exposed through GraphQL.
+
+- **Switch.** All six rows carry `CarriesSecret = true` and `ServesRestFacade = true`: with `Methods:Identity:EnablePasswordMethods=false` they are registered
+  local only (in-process, no queue, not announced), so the REST endpoints work on every cluster, GraphQL answers `METHOD_HANDLER_NOT_AVAILABLE` and no secret
+  reaches the broker; with the switch on they are bus handlers and REST still calls in-process.
+- **Caller.** The REST policy `IdentitySecretAdministrationPolicy` is unchanged; the handlers repeat it on the principal (`SecretManagementRoleEnforcement`
+  staged the same way: `Warn` lets `TenantManagement`/`UserManagement` pass with the WARN inventory line, `Enforce` refuses them on both paths).
+- **Body of an add.** The method returns the clear text once (the sensitive result); the facade answers the earlier `ApiSecretDto`: `valueClearText`,
+  `valueEncrypted` = `OctoSecretHasher.HashSecret(clear text)` (the stored value), and the request's `expirationDate` and `description`. The clear text is read
+  from the in-process envelope only and is logged nowhere.
+
+Parity table (REST before -> facade; the method wins unless the REST contract would change):
+
+| Point | REST before | Now |
+|---|---|---|
+| Routes, request and response bodies, status codes of a success | add `200` + `ApiSecretDto`, update / delete `200` empty | unchanged |
+| Owner not found | `404` (delete client: `NotFoundErrorDto` "Client with id … does not exist.") | unchanged (resolved in the controller; `METHOD_TARGET_NOT_FOUND` of a race maps to the same answer) |
+| Update without `valueEncrypted` | `400` with the model state | unchanged (checked before the call) |
+| Unknown secret value (update, delete) | `404` "The secret does not exist." (no echo) | unchanged (`SECRET_NOT_FOUND`) |
+| Secret named by its clear text (update, delete) | not found (`404`) | found (the method hashes it like the token endpoint); the stored value still works |
+| Duplicate records with one value | delete removes all, update the first | unchanged |
+| Expiration in the past on update | accepted | unchanged (retires the secret) |
+| Update: secret `Type` | cleared (`null`) | kept (`SharedSecret`) |
+| Add to a public client (`RequireClientSecret` false) | `200`, a secret that is never used | **intended REST change:** `400` with the model state, nothing stored (`CLIENT_SECRET_NOT_REQUIRED`) |
+| Add with an expiration in the past | `200`, a secret that can never be used | **intended REST change:** `400` (`expirationDate`), nothing stored |
+| Add / update with the description `octo:mirror-own-secret`, update of a mirror's own secret (the record carries that description) | stored / overwritten | **intended REST change:** `400` (`description`): the mirror sync tells a mirror's own credential by that marker |
+| Owner the caller cannot read / write (only with an enforcing data policy on clients or API resources; open by default) | not checked: changed anyway | **intended REST change:** cannot read = `404` (existence not told), read but not write = `403` problem `METHOD_FORBIDDEN` (`data-permission`); nothing changes (CWE-863: REST ignored the data policy) |
+| Lost concurrent write (20 attempts) | `409` problem | unchanged for update and the API resource methods (`CONCURRENT_CHANGE`); `Client.AddSecret` / `RemoveSecret`: `400` fixed message (`METHOD_HANDLER_FAILED`; a new error code on those methods would be a Major, row M8) |
+| Unexpected failure | `400` `InternalServerErrorDto(exception message)` | `400`, **intended body change:** a fixed message, no exception text leaves the service |
+| Audit | none | one `Identity.Method` event per call (`clientId` / `apiResourceName`, `secretCount`, `removedCount`); never a secret, hash or description |
+| `EnablePasswordMethods=false` | own code, worked | works: handlers local only, in-process, nothing on the broker |
+
+Tests: `Api/TenantApi/SecretRestMethodFacadeTests` (both switch values and both owners: every write endpoint runs its method in-process outside the request,
+one event each, no `CkMethodRequest` on the event hub, clear text in no log, audit or trace tag, hash in no log at Information or above; REST and the dispatcher
+side by side for add, update to an expired date, unknown value, duplicate records, unknown owner; a REST-added client secret authenticates and stops after the
+REST delete; public client and past expiration; `Enforce` on both paths; another tenant's token; a caller without the role; owner not readable / not
+writable), `Api/Methods/ClientSecretMethodTests`, the unchanged REST suite `Api/TenantApi/ApiSecretsControllerTests`, `CredentialsNotInUrlTests`,
+`IdentityMethodDeclarationsIntegrationTests`.
+
+## REST facades of the data-permission grants and the enforcement switch (System.Identity 3.4.0)
+
+| REST endpoint | Method |
+|---|---|
+| `POST dataPermissions/{permissionId}/roles/{roleName}` | `DataPermission.GrantToRole-1` |
+| `DELETE dataPermissions/{permissionId}/roles/{roleName}` | `DataPermission.RevokeFromRole-1` |
+| `PUT dataPermissions/policies/{policyRtId}/enforcementMode` (body `"Enforce"` / `"AuditOnly"`) | `DataPolicy.SetEnforcementMode-1` (new) |
+
+Same path as the other facades (`IIdentityMethodFacade`, in-process, outside the request, one `Identity.Method` event per call). The controller resolves the
+permission id to the permission's rtId; the policy rtId is the target as it is. Create and delete of permissions and policies stay REST (generic CRUD story of
+Feature F5.2).
+
+Parity table (REST before -> facade):
+
+| Point | REST before | Now |
+|---|---|---|
+| Routes, bodies, status codes of a success | `200` empty | unchanged |
+| Grant twice / revoke without a grant | `200`, nothing changed | unchanged (`PERMISSION_ALREADY_GRANTED` / `PERMISSION_NOT_GRANTED` map to `200`) |
+| Invalid enforcement mode | `400` "EnforcementMode must be Enforce\|AuditOnly." | unchanged (checked before the call) |
+| Unknown permission, unknown role, unknown policy, policy id that is no object id | unhandled exception, `500` | **intended REST change:** `404` `NotFoundErrorDto` - the `500` was a bug |
+| Role, permission or policy the caller cannot read / write (only with an enforcing data policy on those types; open by default) | not checked: changed anyway | **intended REST change:** cannot read = `404`; may read but not write = `403` problem `METHOD_FORBIDDEN` (`data-permission`); the enforcement switch also needs `Write` on the policy's data permission (the mode decides whether that permission is enforced at all); **revoking from a role the caller cannot read while it holds the permission** = `403`, nothing changed (the grant is visible through the permission; CWE-863) |
+| Enforcement mode already set | `200`, written again | `200`, nothing written |
+| Effect of the enforcement switch | every service after its policy cache TTL (60 s) | at once in the identity replica that served the call (the handler invalidates its policy table); other identity replicas and every other service (asset repository, mesh adapter, report, bot) still after their TTL of 60 s, no invalidation event - they may apply the old mode for up to one minute |
+| Audit | none | one `Identity.Method` event per call (`permissionId`, `roleName`; switch: `enforcementModeBefore`, `enforcementModeAfter`) |
+| Unexpected failure | unhandled `500` | `500` problem `METHOD_HANDLER_FAILED` (same status, no exception text) |
+| `RoleEnforcement=Warn` (not the default) | caller without `UserManagement` let through and logged | **intended REST change:** refused by the method (403 problem, `role-required`), as for the other facades |
+
+Tests: `Api/TenantApi/DataPermissionRestMethodFacadeTests` (one event per endpoint, in-process, no request state at handler entry; switching to Enforce over REST
+and over the method gives the same fail-closed read verdict of the engine for a caller without the grant; the REST answers above; another tenant's token, a caller
+without the role; revoke of a granted unreadable role; policy and permission not readable), `Api/Methods/DataPermissionMethodTests`.
+
+Neither group of endpoints carries a deprecation yet (deprecation wave of identity wave 2 is its own story); REST is not removed and gets no `Sunset` header.

@@ -1,6 +1,5 @@
 using IdentityServerPersistence.Services;
 using Meshmakers.Octo.Backend.IdentityServices.OpenIddict;
-using Meshmakers.Octo.Runtime.Contracts.RepositoryEntities;
 using Meshmakers.Octo.Services.Methods;
 using Persistence.IdentityCkModel.Generated.System.Identity.v3;
 
@@ -12,92 +11,36 @@ namespace Meshmakers.Octo.Backend.IdentityServices.Methods;
 /// </summary>
 /// <remarks>
 ///     <para>
-///         REST parity: <c>POST system/v1/apiSecrets/client/{clientId}</c> (<c>ApiSecretsController.PostClient</c>), same
-///         generator (32 bytes from the CSPRNG, URL-safe Base64, <see cref="ClientMirrorSecrets.GenerateSecret" />), same
-///         stored format (<see cref="OctoSecretHasher.HashSecret" />: Base64 SHA-256, which <see cref="OctoApplicationManager" />
-///         validates against every unexpired record of the client), but a version-checked write of the client instead of the
-///         store's plain replace (mirror sync after it).
+///         REST facade: <c>POST system/v1/apiSecrets/client/{clientId}</c> (<c>ApiSecretsController.PostClient</c>).
+///         Generator: 32 bytes from the CSPRNG, URL-safe Base64 (<see cref="ClientMirrorSecrets.GenerateSecret" />); stored
+///         format <see cref="OctoSecretHasher.HashSecret" /> (Base64 SHA-256, which <see cref="OctoApplicationManager" />
+///         validates against every unexpired record of the client); a version-checked write of the client, mirror sync after it.
 ///     </para>
 ///     <para>
-///         Stricter than REST, never more: a public client (<c>RequireClientSecret</c> false; it never authenticates with a
-///         secret) is refused with <c>CLIENT_SECRET_NOT_REQUIRED</c>, and an <c>expirationDate</c> in the past (a secret that
-///         could never be used) with <c>METHOD_VALIDATION_FAILED</c>. The record gets <c>Type = SharedSecret</c> (REST leaves
-///         it empty; the validation does not filter by type). The description <c>octo:mirror-own-secret</c> is reserved for the
-///         mirror machinery (AB#5061) and refused with <c>METHOD_VALIDATION_FAILED</c> (<c>field</c> = <c>description</c>).
+///         A public client (<c>RequireClientSecret</c> false; it never authenticates with a secret) is refused with
+///         <c>CLIENT_SECRET_NOT_REQUIRED</c>, an <c>expirationDate</c> in the past (a secret that could never be used) with
+///         <c>METHOD_VALIDATION_FAILED</c>. The record gets <c>Type = SharedSecret</c> (the validation does not filter by type).
+///         The description <c>octo:mirror-own-secret</c> is reserved for the mirror machinery and refused with
+///         <c>METHOD_VALIDATION_FAILED</c> (<c>field</c> = <c>description</c>).
 ///     </para>
 /// </remarks>
 internal sealed class ClientAddSecretHandler(IServiceProvider services)
     : ClientSecretMethodHandlerBase(services), ICkMethodHandler<ClientAddSecretParameters, ClientAddSecretResult>
 {
-    public async Task<CkMethodOutcome<ClientAddSecretResult>> HandleAsync(
-        CkMethodContext<ClientAddSecretParameters> context, CancellationToken cancellationToken)
-    {
-        var details = new Dictionary<string, string>(StringComparer.Ordinal);
-        var outcomeCode = "METHOD_HANDLER_FAILED";
-        try
+    public Task<CkMethodOutcome<ClientAddSecretResult>> HandleAsync(
+        CkMethodContext<ClientAddSecretParameters> context, CancellationToken cancellationToken) =>
+        AuditedAsync(context, async details =>
         {
-            var outcome = await AddAsync(context, details, cancellationToken).ConfigureAwait(false);
-            outcomeCode = outcome.Failure?.Code ?? IdentityMethodAuditWriter.SuccessOutcome;
-            return outcome;
-        }
-        finally
-        {
-            // One audit record per call, also when the call throws (the host answers METHOD_HANDLER_FAILED then).
-            await AuditAsync(context, outcomeCode, details).ConfigureAwait(false);
-        }
-    }
-
-    private async Task<CkMethodOutcome<ClientAddSecretResult>> AddAsync(
-        CkMethodContext<ClientAddSecretParameters> context, Dictionary<string, string> details,
-        CancellationToken cancellationToken)
-    {
-        var (failure, client) = await ResolveTargetAsync(context.CallerPrincipal, context.TenantId, context.TargetRtId,
-            details).ConfigureAwait(false);
-        if (failure != null)
-        {
-            return CkMethodOutcome<ClientAddSecretResult>.Fail(failure);
-        }
-
-        DateTime? expiration = context.Parameters.ExpirationDate?.ToUniversalTime();
-        if (expiration != null && expiration <= DateTime.UtcNow)
-        {
-            return CkMethodOutcome<ClientAddSecretResult>.ValidationFailed("expirationDate", "in-the-past");
-        }
-
-        // The mirror machinery treats this description as the marker of a mirror's own secret (AB#5061); a user-supplied
-        // secret with it would be carried into the child tenants as if it were their own credential.
-        if (string.Equals(context.Parameters.Description, ClientMirrorSecrets.OwnSecretDescription, StringComparison.Ordinal))
-        {
-            return CkMethodOutcome<ClientAddSecretResult>.ValidationFailed("description", "reserved");
-        }
-
-        // Generated once, outside the write: a retried write stores the same hash as the clear text returned.
-        var clearText = ClientMirrorSecrets.GenerateSecret();
-        var hash = OctoSecretHasher.HashSecret(clearText);
-        var refused = await MutateClientAsync(client!.RtId, current =>
-        {
-            if (!current.RequireClientSecret)
-            {
-                return new CkMethodFailure(ClientSecretMethodErrors.ClientSecretNotRequired);
-            }
-
-            current.ClientSecrets ??= new AttributeRecordValueList<RtSecretRecord>();
-            current.ClientSecrets.Add(new RtSecretRecord
-            {
-                Type = ClientMirrorSecrets.SharedSecretType,
-                Value = hash,
-                Description = context.Parameters.Description,
-                ExpirationDateTime = expiration
-            });
-            return null;
-        }, details, cancellationToken).ConfigureAwait(false);
-        if (refused != null)
-        {
-            return CkMethodOutcome<ClientAddSecretResult>.Fail(refused);
-        }
-
-        return new ClientAddSecretResult { Value = clearText };
-    }
+            var (failure, clearText) = await AddSecretCoreAsync(context.CallerPrincipal, context.TenantId,
+                context.TargetRtId, context.Parameters.Description, context.Parameters.ExpirationDate,
+                current => current.RequireClientSecret
+                    ? null
+                    : new CkMethodFailure(ClientSecretMethodErrors.ClientSecretNotRequired),
+                null, details, cancellationToken).ConfigureAwait(false);
+            return failure != null
+                ? CkMethodOutcome<ClientAddSecretResult>.Fail(failure)
+                : new ClientAddSecretResult { Value = clearText };
+        }, outcome => outcome.Failure?.Code);
 }
 
 /// <summary>
@@ -105,71 +48,104 @@ internal sealed class ClientAddSecretHandler(IServiceProvider services)
 ///     client can no longer authenticate with it.
 /// </summary>
 /// <remarks>
-///     <c>secretValue</c> is either the stored value as the list of secrets shows it (REST parity:
-///     <c>DELETE system/v1/apiSecrets/client/{clientId}/{secretValue}</c> takes the stored SHA-256 value, because the clear
-///     text is shown only once) or the clear text of the secret (hashed and compared like the token endpoint does). Every record
-///     that matches is removed, as in REST. No match is <c>SECRET_NOT_FOUND</c> without any parameter: unlike REST, the answer
-///     never echoes the value.
+///     <c>secretValue</c> is either the stored value as the list of secrets shows it (REST facade:
+///     <c>POST system/v1/apiSecrets/client/{clientId}/delete</c> and the legacy <c>DELETE .../{secretValue}</c> pass the stored
+///     SHA-256 value, because the clear text is shown only once) or the clear text of the secret (hashed and compared like the
+///     token endpoint does). Every record that matches is removed. No match is <c>SECRET_NOT_FOUND</c> without any parameter:
+///     the answer never echoes the value.
 /// </remarks>
 internal sealed class ClientRemoveSecretHandler(IServiceProvider services)
     : ClientSecretMethodHandlerBase(services), ICkMethodHandler<ClientRemoveSecretParameters>
 {
-    /// <summary>Audit detail: number of secret records the call removed.</summary>
-    internal const string RemovedCountDetail = "removedCount";
-
-    public async Task<CkMethodOutcome> HandleAsync(CkMethodContext<ClientRemoveSecretParameters> context,
-        CancellationToken cancellationToken)
-    {
-        var details = new Dictionary<string, string>(StringComparer.Ordinal);
-        var outcomeCode = "METHOD_HANDLER_FAILED";
-        try
+    public Task<CkMethodOutcome> HandleAsync(CkMethodContext<ClientRemoveSecretParameters> context,
+        CancellationToken cancellationToken) =>
+        AuditedAsync(context, async details =>
         {
-            var outcome = await RemoveAsync(context, details, cancellationToken).ConfigureAwait(false);
-            outcomeCode = outcome.Failure?.Code ?? IdentityMethodAuditWriter.SuccessOutcome;
-            return outcome;
-        }
-        finally
-        {
-            await AuditAsync(context, outcomeCode, details).ConfigureAwait(false);
-        }
-    }
+            var failure = await RemoveSecretCoreAsync(context.CallerPrincipal, context.TenantId, context.TargetRtId,
+                context.Parameters.SecretValue, null, details, cancellationToken).ConfigureAwait(false);
+            return failure != null ? CkMethodOutcome.Fail(failure) : CkMethodOutcome.Ok();
+        }, outcome => outcome.Failure?.Code);
+}
 
-    private async Task<CkMethodOutcome> RemoveAsync(CkMethodContext<ClientRemoveSecretParameters> context,
-        Dictionary<string, string> details, CancellationToken cancellationToken)
-    {
-        var (failure, client) = await ResolveTargetAsync(context.CallerPrincipal, context.TenantId, context.TargetRtId,
-            details).ConfigureAwait(false);
-        if (failure != null)
+/// <summary>
+///     Handler of <c>System.Identity/Client.UpdateSecret-1</c> (System.Identity 3.4.0): replaces description and
+///     expiration date of a secret of the client. REST facade: <c>PUT system/v1/apiSecrets/client/{clientId}</c>.
+/// </summary>
+/// <remarks>
+///     The secret is named like on <c>RemoveSecret</c> (stored value or clear text); the first match is updated, its value and
+///     type stay. An omitted description or expiration date is cleared, as the REST <c>PUT</c> replaced both. An expiration in
+///     the past is accepted (it retires the secret). No match is <c>SECRET_NOT_FOUND</c>; a write that keeps losing against
+///     concurrent writers is <c>CONCURRENT_CHANGE</c>.
+/// </remarks>
+internal sealed class ClientUpdateSecretHandler(IServiceProvider services)
+    : ClientSecretMethodHandlerBase(services), ICkMethodHandler<ClientUpdateSecretParameters>
+{
+    public Task<CkMethodOutcome> HandleAsync(CkMethodContext<ClientUpdateSecretParameters> context,
+        CancellationToken cancellationToken) =>
+        AuditedAsync(context, async details =>
         {
-            return CkMethodOutcome.Fail(failure);
-        }
+            var failure = await UpdateSecretCoreAsync(context.CallerPrincipal, context.TenantId, context.TargetRtId,
+                context.Parameters.SecretValue, context.Parameters.Description, context.Parameters.ExpirationDate, details,
+                cancellationToken).ConfigureAwait(false);
+            return failure != null ? CkMethodOutcome.Fail(failure) : CkMethodOutcome.Ok();
+        }, outcome => outcome.Failure?.Code);
+}
 
-        var secretValue = context.Parameters.SecretValue;
-        if (string.IsNullOrEmpty(secretValue))
+/// <summary>
+///     Handler of <c>System.Identity/ApiResource.AddSecret-1</c> (System.Identity 3.4.0): generates a new
+///     (introspection) secret for an API resource, stores only its hash and returns the clear text exactly once. REST facade:
+///     <c>POST system/v1/apiSecrets/apiResource/{name}</c>. Same generator, format and rules as <c>Client.AddSecret</c>
+///     (expiration in the past and the reserved mirror description refused); an API resource has no public variant.
+/// </summary>
+internal sealed class ApiResourceAddSecretHandler(IServiceProvider services)
+    : ApiResourceSecretMethodHandlerBase(services), ICkMethodHandler<ApiResourceAddSecretParameters, ApiResourceAddSecretResult>
+{
+    public Task<CkMethodOutcome<ApiResourceAddSecretResult>> HandleAsync(
+        CkMethodContext<ApiResourceAddSecretParameters> context, CancellationToken cancellationToken) =>
+        AuditedAsync(context, async details =>
         {
-            return CkMethodOutcome.ValidationFailed("secretValue", "required");
-        }
+            var (failure, clearText) = await AddSecretCoreAsync(context.CallerPrincipal, context.TenantId,
+                context.TargetRtId, context.Parameters.Description, context.Parameters.ExpirationDate, null,
+                ClientSecretMethodErrors.ConcurrentChange, details, cancellationToken).ConfigureAwait(false);
+            return failure != null
+                ? CkMethodOutcome<ApiResourceAddSecretResult>.Fail(failure)
+                : new ApiResourceAddSecretResult { Value = clearText };
+        }, outcome => outcome.Failure?.Code);
+}
 
-        var removed = 0;
-        var refused = await MutateClientAsync(client!.RtId, current =>
+/// <summary>
+///     Handler of <c>System.Identity/ApiResource.RemoveSecret-1</c> (System.Identity 3.4.0), see
+///     <see cref="ClientRemoveSecretHandler" />. REST facade: <c>POST system/v1/apiSecrets/apiResource/{name}/delete</c> and the
+///     legacy <c>DELETE .../{secretValue}</c>.
+/// </summary>
+internal sealed class ApiResourceRemoveSecretHandler(IServiceProvider services)
+    : ApiResourceSecretMethodHandlerBase(services), ICkMethodHandler<ApiResourceRemoveSecretParameters>
+{
+    public Task<CkMethodOutcome> HandleAsync(CkMethodContext<ApiResourceRemoveSecretParameters> context,
+        CancellationToken cancellationToken) =>
+        AuditedAsync(context, async details =>
         {
-            // RemoveAll with a predicate: the list hands out wrapper instances of the stored records, so a Remove by
-            // instance does not find a record that was read from the database (AB#7989).
-            removed = current.ClientSecrets?.RemoveAll(s => Matches(s, secretValue)) ?? 0;
-            return removed == 0 ? new CkMethodFailure(ClientSecretMethodErrors.SecretNotFound) : null;
-        }, details, cancellationToken).ConfigureAwait(false);
-        details[RemovedCountDetail] = removed.ToString(System.Globalization.CultureInfo.InvariantCulture);
-        if (refused != null)
+            var failure = await RemoveSecretCoreAsync(context.CallerPrincipal, context.TenantId, context.TargetRtId,
+                context.Parameters.SecretValue, ClientSecretMethodErrors.ConcurrentChange, details, cancellationToken)
+                .ConfigureAwait(false);
+            return failure != null ? CkMethodOutcome.Fail(failure) : CkMethodOutcome.Ok();
+        }, outcome => outcome.Failure?.Code);
+}
+
+/// <summary>
+///     Handler of <c>System.Identity/ApiResource.UpdateSecret-1</c> (System.Identity 3.4.0), see
+///     <see cref="ClientUpdateSecretHandler" />. REST facade: <c>PUT system/v1/apiSecrets/apiResource/{name}</c>.
+/// </summary>
+internal sealed class ApiResourceUpdateSecretHandler(IServiceProvider services)
+    : ApiResourceSecretMethodHandlerBase(services), ICkMethodHandler<ApiResourceUpdateSecretParameters>
+{
+    public Task<CkMethodOutcome> HandleAsync(CkMethodContext<ApiResourceUpdateSecretParameters> context,
+        CancellationToken cancellationToken) =>
+        AuditedAsync(context, async details =>
         {
-            return CkMethodOutcome.Fail(refused);
-        }
-
-        return CkMethodOutcome.Ok();
-    }
-
-    /// <summary>The stored value as listed, or the clear text hashed as the token endpoint does (fixed-time compare).</summary>
-    private static bool Matches(RtSecretRecord secret, string secretValue) =>
-        !string.IsNullOrEmpty(secret.Value) &&
-        (string.Equals(secret.Value, secretValue, StringComparison.Ordinal) ||
-         OctoSecretHasher.Matches(secretValue, secret.Value));
+            var failure = await UpdateSecretCoreAsync(context.CallerPrincipal, context.TenantId, context.TargetRtId,
+                context.Parameters.SecretValue, context.Parameters.Description, context.Parameters.ExpirationDate, details,
+                cancellationToken).ConfigureAwait(false);
+            return failure != null ? CkMethodOutcome.Fail(failure) : CkMethodOutcome.Ok();
+        }, outcome => outcome.Failure?.Code);
 }

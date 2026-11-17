@@ -19,5 +19,50 @@ types:
       - id: ${this}/Scopes
         name: Scopes
       - id: ${this}/AllowedAccessTokenSigningAlgorithms
-        name: AllowedAccessTokenSigningAlgorithms        
-  
+        name: AllowedAccessTokenSigningAlgorithms
+    # 3.4.0: the secret methods of the API resource (introspection secrets). The REST secret write endpoints of
+    # ApiSecretsController (POST/PUT apiSecrets/apiResource/{name}, POST .../delete, legacy DELETE .../{secretValue}) are their
+    # facades. Roles as Client.AddSecret-1 (REST IdentitySecretAdministrationPolicy, staged by SecretManagementRoleEnforcement
+    # in the handler). The generated secret and the secret value are sensitive: the handlers are offered on the bus only with
+    # Methods:Identity:EnablePasswordMethods=true and run local only (REST facade) otherwise.
+    methods:
+      - methodId: AddSecret-1
+        description: "Generates a new secret for the API resource. The generated value is the result and is shown exactly once; only its hash is stored."
+        parameters:
+          - { name: description, valueType: String, isOptional: true, description: "Free text shown in the list of secrets." }
+          - { name: expirationDate, valueType: DateTime, isOptional: true, description: "Expiration of the secret; without it the secret does not expire." }
+        result:
+          valueType: String
+          sensitive: true
+        errors:
+          - { code: CONCURRENT_CHANGE, description: "The secrets of the API resource were changed concurrently by other requests; retry." }
+        authorization:
+          roles: [ TenantManagement, UserManagement, SecretManagement ]
+          dataAccess: Write
+      - methodId: RemoveSecret-1
+        description: "Removes a secret of the API resource, identified by its stored value (as the list of secrets shows it) or its clear text."
+        parameters:
+          - { name: secretValue, valueType: String, sensitive: true, description: "The stored value (or the clear text) of the secret that is removed." }
+        errors:
+          - { code: SECRET_NOT_FOUND, description: "The API resource has no secret with this value." }
+          - { code: CONCURRENT_CHANGE, description: "The secrets of the API resource were changed concurrently by other requests; retry." }
+        authorization:
+          roles: [ TenantManagement, UserManagement, SecretManagement ]
+          dataAccess: Write
+        execution:
+          timeoutSeconds: 30
+      - methodId: UpdateSecret-1
+        description: "Replaces the description and the expiration date of a secret of the API resource, identified by its stored value or its clear text. The secret value itself never changes; an omitted description or expiration date is cleared."
+        parameters:
+          - { name: secretValue, valueType: String, sensitive: true, description: "The stored value (or the clear text) of the secret that is updated." }
+          - { name: description, valueType: String, isOptional: true, description: "Free text shown in the list of secrets; omitted clears it." }
+          - { name: expirationDate, valueType: DateTime, isOptional: true, description: "Expiration of the secret; omitted means the secret does not expire." }
+        errors:
+          - { code: SECRET_NOT_FOUND, description: "The API resource has no secret with this value." }
+          - { code: CONCURRENT_CHANGE, description: "The secrets of the API resource were changed concurrently by other requests; retry." }
+        authorization:
+          roles: [ TenantManagement, UserManagement, SecretManagement ]
+          dataAccess: Write
+        execution:
+          timeoutSeconds: 30
+          idempotent: true

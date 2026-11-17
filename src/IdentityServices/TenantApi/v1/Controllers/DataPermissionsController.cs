@@ -6,7 +6,11 @@ using IdentityServerPersistence;
 using IdentityServerPersistence.SystemStores;
 
 using Meshmakers.Octo.Communication.Contracts.DataTransferObjects;
+using Meshmakers.Octo.Backend.IdentityServices.Methods;
 using Meshmakers.Octo.ConstructionKit.Contracts;
+using Meshmakers.Octo.Communication.Contracts.DataTransferObjects.ApiErrors;
+using Meshmakers.Octo.Services.Contracts.DistributionEventHub.Methods;
+using Meshmakers.Octo.Services.Methods.Facades;
 
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -17,13 +21,16 @@ namespace Meshmakers.Octo.Backend.IdentityServices.TenantApi.v1.Controllers;
 
 /// <summary>
 /// REST controller for the data-permission model (AB#4972): DataPermissions, their DataPolicies
-/// and the role grants.
+/// and the role grants. The grant, revoke and enforcement-mode endpoints are facades of the CK methods
+/// <c>DataPermission.GrantToRole-1</c>, <c>DataPermission.RevokeFromRole-1</c> and <c>DataPolicy.SetEnforcementMode-1</c>
+/// (docs/identity-rest-facades.md); create and delete stay REST (generic CRUD story of Feature F5.2).
 /// </summary>
 [Authorize(AuthenticationSchemes = OidcConstants.AuthenticationSchemes.AuthorizationHeaderBearer)]
 [Route(IdentityServiceConstants.ApiPathPrefix + "/[controller]")]
 [ApiController]
 [ApiVersion(IdentityServiceConstants.ApiVersion1)]
-public class DataPermissionsController(IDataPermissionStore dataPermissionStore) : ControllerBase
+public class DataPermissionsController(IDataPermissionStore dataPermissionStore, IIdentityMethodFacade methodFacade)
+    : ControllerBase
 {
     /// <summary>
     /// Returns all data permissions with their policies and role grants.
@@ -115,13 +122,15 @@ public class DataPermissionsController(IDataPermissionStore dataPermissionStore)
     }
 
     /// <summary>
-    /// Switches a policy between Enforce and AuditOnly (the operator flip after the audit review).
+    /// Switches a policy between Enforce and AuditOnly (the operator flip after the audit review). Facade of the CK method
+    /// <c>DataPolicy.SetEnforcementMode-1</c>.
     /// </summary>
     [HttpPut("policies/{policyRtId}/enforcementMode")]
     [Authorize(IdentityServiceConstants.IdentityUserAdministrationWritePolicy)]
     [EndpointSummary("Switches a policy between Enforce and AuditOnly.")]
     [ProducesResponseType(StatusCodes.Status200OK)]
-    public async Task<ActionResult> SetEnforcementMode([FromRoute] string policyRtId,
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> SetEnforcementMode([FromRoute] string policyRtId,
         [FromBody] string enforcementMode)
     {
         if (!TryParseEnforcementMode(enforcementMode, out var mode))
@@ -129,35 +138,78 @@ public class DataPermissionsController(IDataPermissionStore dataPermissionStore)
             return BadRequest("EnforcementMode must be Enforce|AuditOnly.");
         }
 
-        await dataPermissionStore.SetPolicyEnforcementModeAsync(OctoObjectId.Parse(policyRtId), mode);
-        return Ok();
+        var response = await methodFacade.InvokeAsync(IdentityMethodFacade.DataPolicyCkTypeId,
+            SystemIdentityCkIds.DataPolicySetEnforcementModeMethodId, policyRtId,
+            new DataPolicySetEnforcementModeParameters { EnforcementMode = mode }, User, HttpContext.RequestAborted);
+        return ToActionResult(response, new CkMethodFacadeOptions()
+            .MapError(CkMethodErrorCodes.MethodTargetNotFound,
+                _ => NotFound(new NotFoundErrorDto($"Data policy '{policyRtId}' not found."))));
     }
 
     /// <summary>
-    /// Grants the permission to a role.
+    /// Grants the permission to a role. Facade of the CK method <c>DataPermission.GrantToRole-1</c>; a grant the
+    /// role already holds is <c>200</c> without a change, as before.
     /// </summary>
     [HttpPost("{permissionId}/roles/{roleName}")]
     [Authorize(IdentityServiceConstants.IdentityUserAdministrationWritePolicy)]
     [EndpointSummary("Grants the permission to a role.")]
     [ProducesResponseType(StatusCodes.Status200OK)]
-    public async Task<ActionResult> GrantToRole([FromRoute] string permissionId, [FromRoute] string roleName)
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> GrantToRole([FromRoute] string permissionId, [FromRoute] string roleName)
     {
-        await dataPermissionStore.GrantToRoleAsync(permissionId, roleName);
-        return Ok();
+        var permission = await dataPermissionStore.FindByPermissionIdAsync(permissionId);
+        if (permission == null)
+        {
+            return PermissionNotFound(permissionId);
+        }
+
+        var response = await methodFacade.InvokeAsync(IdentityMethodFacade.DataPermissionCkTypeId,
+            SystemIdentityCkIds.DataPermissionGrantToRoleMethodId, permission.RtId.ToString(),
+            new DataPermissionGrantToRoleParameters { RoleName = roleName }, User, HttpContext.RequestAborted);
+        return ToActionResult(response, RoleGrantOptions(permissionId, roleName)
+            .MapError(DataPermissionMethodErrors.PermissionAlreadyGranted, _ => Ok()));
     }
 
     /// <summary>
-    /// Revokes the permission from a role.
+    /// Revokes the permission from a role. Facade of the CK method <c>DataPermission.RevokeFromRole-1</c>; a role
+    /// that does not hold the permission is <c>200</c> without a change, as before.
     /// </summary>
     [HttpDelete("{permissionId}/roles/{roleName}")]
     [Authorize(IdentityServiceConstants.IdentityUserAdministrationWritePolicy)]
     [EndpointSummary("Revokes the permission from a role.")]
     [ProducesResponseType(StatusCodes.Status200OK)]
-    public async Task<ActionResult> RevokeFromRole([FromRoute] string permissionId, [FromRoute] string roleName)
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> RevokeFromRole([FromRoute] string permissionId, [FromRoute] string roleName)
     {
-        await dataPermissionStore.RevokeFromRoleAsync(permissionId, roleName);
-        return Ok();
+        var permission = await dataPermissionStore.FindByPermissionIdAsync(permissionId);
+        if (permission == null)
+        {
+            return PermissionNotFound(permissionId);
+        }
+
+        var response = await methodFacade.InvokeAsync(IdentityMethodFacade.DataPermissionCkTypeId,
+            SystemIdentityCkIds.DataPermissionRevokeFromRoleMethodId, permission.RtId.ToString(),
+            new DataPermissionRevokeFromRoleParameters { RoleName = roleName }, User, HttpContext.RequestAborted);
+        return ToActionResult(response, RoleGrantOptions(permissionId, roleName)
+            .MapError(DataPermissionMethodErrors.PermissionNotGranted, _ => Ok()));
     }
+
+    /// <summary>The mappings grant and revoke share: <c>200</c> empty, unknown (or unreadable) permission or role <c>404</c>.</summary>
+    private CkMethodFacadeOptions RoleGrantOptions(string permissionId, string roleName) =>
+        new CkMethodFacadeOptions()
+            .MapError(CkMethodErrorCodes.MethodTargetNotFound, _ => PermissionNotFound(permissionId))
+            .MapError(UserRoleMethodErrors.RoleNotFound,
+                _ => NotFound(new NotFoundErrorDto($"Role '{roleName}' not found.")));
+
+    private NotFoundObjectResult PermissionNotFound(string permissionId) =>
+        NotFound(new NotFoundErrorDto($"Data permission '{permissionId}' not found."));
+
+    /// <summary>
+    /// The REST answer of a facade: <c>200</c> empty on success, the endpoint's mappings, refusals as the default
+    /// <c>403</c> problem, and an unexpected failure as <c>500</c> problem <c>METHOD_HANDLER_FAILED</c> (no exception text).
+    /// </summary>
+    private static IActionResult ToActionResult(CkMethodResponse response, CkMethodFacadeOptions options) =>
+        response.ToActionResult(options.MapSuccess(_ => new OkResult()));
 
     private async Task<DataPermissionDto> MapToDtoAsync(RtDataPermission permission)
     {

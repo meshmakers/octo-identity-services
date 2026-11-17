@@ -91,6 +91,23 @@ internal sealed class IdentityMethodCall(IServiceProvider services, CkMethodPrin
             .ConfigureAwait(false);
     }
 
+    /// <summary>
+    ///     The data permission of the call's target itself: <c>null</c> when the caller may write it, else the answer
+    ///     - <c>METHOD_TARGET_NOT_FOUND</c> for a target the caller cannot read (its existence is not told), <c>METHOD_FORBIDDEN</c>
+    ///     (<c>reason</c> = <c>data-permission</c>) for one they may read but not write. The GraphQL gateway checks the declared
+    ///     <c>dataAccess: Write</c> before dispatch; a REST facade calls in-process, where only the handler can check it.
+    /// </summary>
+    public async Task<CkMethodOutcome?> CheckTargetWritableAsync(RtEntityId target, CancellationToken cancellationToken)
+    {
+        var verdict = await EvaluateAsync(target, RtDataAction.Write, cancellationToken).ConfigureAwait(false);
+        return verdict.Decision switch
+        {
+            RtDataPermissionDecision.Allowed => null,
+            RtDataPermissionDecision.NotVisible => CkMethodOutcome.TargetNotFound(),
+            _ => NotPermitted()
+        };
+    }
+
     /// <summary>The <c>METHOD_FORBIDDEN</c> answer for a referenced entity the caller may see but not change.</summary>
     public CkMethodOutcome NotPermitted()
     {
