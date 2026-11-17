@@ -292,6 +292,145 @@ public class DataProtectionKeyEncryptionIntegrationTests : IClassFixture<Identit
         }
     }
 
+    /// <summary>
+    ///     Key rings of other services (shared Data Protection key store of octo-common-services) live in the same
+    ///     collection under the stored name <c>&lt;ApplicationName&gt;/key-…</c>, with a <c>decryptorType</c> identity
+    ///     cannot resolve. Identity keeps its own ring: it neither starts to use nor rewrites nor refuses such a key.
+    /// </summary>
+    [Fact]
+    public async Task ForeignServiceKeys_InTheSharedStore_AreIgnoredByIdentity()
+    {
+        await GivenEmptyKeyStoreAsync();
+        var ring = Track(PlatformKeyRing.CreateK1());
+        var identityKey = CreatePlainKeyXml(ring, out var identityPayload);
+        await GivenRawKeyAsync(identityKey);
+
+        // A newer key of another service: encrypted with the platform key ring like identity's, but referencing the
+        // decryptor of the shared helper, and another plain one (a service without SecretEncryption).
+        var encryptedServiceKey = CreateServiceKeyXml(ring, encrypted: true);
+        var plainServiceKey = CreateServiceKeyXml(ring, encrypted: false);
+        await GivenRawKeyAsync(encryptedServiceKey, $"{ServiceApplicationName}/key-{encryptedServiceKey.Attribute("id")!.Value}");
+        await GivenRawKeyAsync(plainServiceKey, $"{ServiceApplicationName}/key-{plainServiceKey.Attribute("id")!.Value}");
+        var before = await LoadRawKeysAsync();
+
+        // Startup check with the flag on: no refusal, no rewrite of the service keys.
+        await CreateStartupService(ring, encryptExistingKeys: true).StartAsync(TestContext.Current.CancellationToken);
+        var after = await LoadRawKeysAsync();
+        foreach (var serviceKey in before.Where(k => k.FriendlyName.Contains('/')))
+        {
+            after.Single(k => k.FriendlyName == serviceKey.FriendlyName).XmlData.Should().Be(serviceKey.XmlData,
+                "identity must never rewrite the key of another service");
+        }
+
+        // Key ring: identity reads its own payloads and protects with its own key.
+        var host = CreateHost(CreateStore(ring, encryptExistingKeys: true), ring);
+        host.GetDataProtector(Purpose).Unprotect(identityPayload).Should().Be("seeded");
+        var keyManager = host.GetRequiredService<IKeyManager>();
+        keyManager.GetAllKeys().Select(k => k.KeyId.ToString())
+            .Should().BeEquivalentTo([identityKey.Attribute("id")!.Value],
+                "the key ring of identity holds only the identity keys");
+        var payload = host.GetDataProtector(Purpose).Protect("new-cookie");
+        CreateHost(CreateStore(ring, encryptExistingKeys: true), ring).GetDataProtector(Purpose).Unprotect(payload)
+            .Should().Be("new-cookie");
+    }
+
+    /// <summary>
+    ///     The shared key store of octo-common-services on the real system database, next to the identity key ring:
+    ///     replicas of a service share their keys, the keys survive a restart, they are stored encrypted under the
+    ///     service prefix, and identity neither loads nor rewrites them.
+    /// </summary>
+    [Fact]
+    public async Task SharedServiceKeyRing_OnTheSystemDatabase_IsSharedAndKeptApartFromIdentity()
+    {
+        await GivenEmptyKeyStoreAsync();
+        var ring = Track(PlatformKeyRing.CreateK1());
+        var identityPayload = CreateHost(CreateStore(ring, encryptExistingKeys: true), ring).GetDataProtector(Purpose)
+            .Protect("identity-cookie");
+
+        var replicaA = CreateServiceHost(ServiceApplicationName, ring);
+        var replicaB = CreateServiceHost(ServiceApplicationName, ring);
+        var payload = replicaA.GetDataProtector(Purpose).Protect("oidc-state");
+        replicaB.GetDataProtector(Purpose).Unprotect(payload).Should().Be("oidc-state");
+        CreateServiceHost(ServiceApplicationName, ring).GetDataProtector(Purpose).Unprotect(payload)
+            .Should().Be("oidc-state", "the key survives a restart of all replicas");
+
+        var otherService = CreateServiceHost("OctoBotServices", ring);
+        otherService.Invoking(h => h.GetDataProtector(Purpose).Unprotect(payload))
+            .Should().Throw<System.Security.Cryptography.CryptographicException>();
+
+        var stored = await LoadRawKeysAsync();
+        var serviceKeys = stored.Where(k => k.FriendlyName.StartsWith(ServiceApplicationName + "/key-",
+            StringComparison.Ordinal)).ToList();
+        serviceKeys.Should().ContainSingle();
+        serviceKeys.Single().XmlData.Should().NotContain("masterKey").And.Contain("enc:v2:k1:")
+            .And.Contain(ServiceDecryptorTypeName);
+        stored.Should().ContainSingle(k => k.FriendlyName.StartsWith("OctoBotServices/key-", StringComparison.Ordinal));
+
+        var before = await LoadRawKeysAsync();
+        await CreateStartupService(ring, encryptExistingKeys: true).StartAsync(TestContext.Current.CancellationToken);
+        (await LoadRawKeysAsync()).Select(k => (k.FriendlyName, k.XmlData))
+            .Should().BeEquivalentTo(before.Select(k => (k.FriendlyName, k.XmlData)));
+        var identity = CreateHost(CreateStore(ring, encryptExistingKeys: true), ring);
+        identity.GetDataProtector(Purpose).Unprotect(identityPayload).Should().Be("identity-cookie");
+        identity.GetRequiredService<IKeyManager>().GetAllKeys().Should().ContainSingle(
+            "identity loads only its own key, not the two service keys");
+    }
+
+    /// <summary>A replica of another service: the shared key store of octo-common-services on the fixture's database.</summary>
+    private ServiceProvider CreateServiceHost(string applicationName, PlatformKeyRing ring)
+    {
+        var services = new ServiceCollection();
+        services.AddLogging();
+        services.AddSingleton(ring.Protector);
+        services.AddSingleton(_fixture.GetSystemContext());
+        Meshmakers.Octo.Services.Infrastructure.DataProtection.OctoDataProtectionServiceCollectionExtensions
+            .AddOctoDataProtectionKeyRing(services, applicationName);
+        return Track(services.BuildServiceProvider());
+    }
+
+    private const string ServiceApplicationName = "OctoAssetRepositoryServices";
+
+    /// <summary>
+    ///     Version-free decryptor type name the shared key store of octo-common-services writes; deliberately a string
+    ///     here, so the test also models an identity image that does not ship the type.
+    /// </summary>
+    private const string ServiceDecryptorTypeName =
+        "Meshmakers.Octo.Services.Infrastructure.DataProtection.PlatformKeyRingXmlDecryptor, " +
+        "Meshmakers.Octo.Services.Infrastructure";
+
+    /// <summary>A key as the shared key store of another service writes it.</summary>
+    private XElement CreateServiceKeyXml(PlatformKeyRing ring, bool encrypted)
+    {
+        var plain = CreatePlainKeyXml(ring);
+        if (!encrypted)
+        {
+            return plain;
+        }
+
+        var key = DataProtectionKeyXml.EncryptSecrets(plain, new PlatformKeyRingXmlEncryptor(ring.Protector));
+        foreach (var secret in key.Descendants(DataProtectionKeyXml.EncryptedSecretElementName))
+        {
+            secret.SetAttributeValue(DataProtectionKeyXml.DecryptorTypeAttributeName, ServiceDecryptorTypeName);
+        }
+
+        return key;
+    }
+
+    private async Task GivenRawKeyAsync(XElement key, string friendlyName)
+    {
+        var repository = _fixture.GetSystemContext().GetSystemTenantRepositoryAsAdmin();
+        using var session = await repository.GetSessionAsync();
+        session.StartTransaction();
+        await repository.InsertOneRtEntityAsync(session, new RtDataProtectionKey
+        {
+            RtId = OctoObjectId.GenerateNewId(),
+            FriendlyName = friendlyName,
+            XmlData = key.ToString(SaveOptions.DisableFormatting),
+            CreationDateTime = DateTime.UtcNow
+        });
+        await session.CommitTransactionAsync();
+    }
+
     private T Track<T>(T disposable) where T : IDisposable
     {
         _disposables.Add(disposable);

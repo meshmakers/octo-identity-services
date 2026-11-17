@@ -172,6 +172,22 @@ The `DataProtectionKeysPath` option (`OCTO_IDENTITY__DataProtectionKeysPath`) is
 - **Never rename or move `PlatformKeyRingXmlDecryptor`** — stored keys reference its type name. **Rollback** to an image without the decryptor after keys are encrypted logs every user out (old image cannot read the keys, creates new ones). Rollout/rollback: `docs/rollout-identity-dataprotection-encryption.md`.
 - Tests: `PlatformKeyRingXmlEncryptionTests` (unit, real ASP.NET stack), `DataProtectionKeyEncryptionIntegrationTests` (Mongo: multi-replica, migration, rotation, raw DB dump has no key material).
 
+**Key rings of other services in the same collection.** Other services (asset repository, bot, reporting, AI) persist their own
+key rings with the shared helper `AddOctoDataProtectionKeyRing(applicationName)` of octo-common-services
+(its doc `data-protection.md`) in the same `RtDataProtectionKey` collection, under the stored name
+`<ApplicationName>/key-<guid>` and with the decryptor type of that helper. `DataProtectionKeyStore` reads, checks, counts and rewrites
+**only names without `/`** (`IsIdentityKey`, rule `DataProtectionKeyNames.IsUnprefixed` of the helper); identity's own names are
+`key-<guid>` and stay unchanged, so no key is migrated and nobody is logged out.
+- **Rollout order: this identity image before the first service that uses the helper.** An older identity (without the filter) was
+  checked against the real store: it tolerates encrypted service keys (startup check neither refuses nor rewrites them; the key ring
+  cannot resolve their decryptor and ignores them, identity payloads keep working; when a service key is the newest one, identity creates
+  one extra key of its own). It would rewrite an *unencrypted* service key with its own decryptor; the helper never writes one (no key ring
+  = the service does not use the shared store).
+- Tests: `DataProtectionKeyEncryptionIntegrationTests.ForeignServiceKeys_InTheSharedStore_AreIgnoredByIdentity` (encrypted and plain
+  service keys are never loaded or rewritten) and `…SharedServiceKeyRing_OnTheSystemDatabase_IsSharedAndKeptApartFromIdentity` (the
+  helper on the real system database: replicas share keys, keys survive a restart, another application name cannot unprotect, identity
+  loads only its own key).
+
 ## Docker
 
 Build image using `src/IdentityServices/Dockerfile`. Requires build args:
