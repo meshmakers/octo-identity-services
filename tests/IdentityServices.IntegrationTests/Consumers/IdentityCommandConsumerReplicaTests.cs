@@ -39,10 +39,14 @@ public class IdentityCommandConsumerReplicaTests : IClassFixture<IdentityService
     private const int Commands = 16;
     private const string DeprecationMarker = "classic EXCLUSIVE";
 
+    /// <summary>How long a test waits for the ledger after the responses arrived (see <see cref="WaitUntilRecordedAsync" />).</summary>
+    private static readonly TimeSpan LedgerWait = TimeSpan.FromSeconds(30);
+
     private readonly IdentityServicesFixture _fixture;
     private readonly string _instancePrefix = $"id6910-{Guid.NewGuid():N}";
     private readonly List<Replica> _replicas = [];
     private readonly ConcurrentQueue<(string ClientId, string Replica)> _ledger = new();
+    private readonly InFlightCounter _inFlight = new();
     private readonly CapturingLoggerProvider _logs = new();
 
     public IdentityCommandConsumerReplicaTests(IdentityServicesFixture fixture, ITestOutputHelper outputHelper)
@@ -78,6 +82,7 @@ public class IdentityCommandConsumerReplicaTests : IClassFixture<IdentityService
 
         var clientIds = Enumerable.Range(0, Commands).Select(i => $"replica-6910-{i:D3}-{Guid.NewGuid():N}").ToList();
         var responses = await Task.WhenAll(clientIds.Select(id => SendAsync(sender, id)));
+        await WaitUntilRecordedAsync(clientIds);
 
         responses.Should().OnlyContain(r => r.Response == CreateIdentityDataResult.Success ||
                                             r.Response == CreateIdentityDataResult.SuccessIdentityDataSeedPending);
@@ -119,6 +124,7 @@ public class IdentityCommandConsumerReplicaTests : IClassFixture<IdentityService
         _ledger.Clear();
         var phaseA = Enumerable.Range(0, 6).Select(i => $"rolling-old-{i}-{Guid.NewGuid():N}").ToList();
         await Task.WhenAll(phaseA.Select(id => SendAsync(sender, id)));
+        await WaitUntilRecordedAsync(phaseA);
         _ledger.Select(e => e.ClientId).Should().BeEquivalentTo(phaseA);
         _ledger.Should().OnlyContain(e => e.Replica == "Old-1",
             "while an old replica runs, it keeps the classic traffic and the new one stands by");
@@ -131,6 +137,7 @@ public class IdentityCommandConsumerReplicaTests : IClassFixture<IdentityService
 
         var phaseB = Enumerable.Range(0, 6).Select(i => $"rolling-new-{i}-{Guid.NewGuid():N}").ToList();
         await Task.WhenAll(phaseB.Select(id => SendAsync(sender, id)));
+        await WaitUntilRecordedAsync(phaseB);
         _ledger.Select(e => e.ClientId).Should().BeEquivalentTo(phaseB, "nothing lost, nothing processed twice");
         _ledger.Should().OnlyContain(e => e.Replica == "Identity-1" || e.Replica == "Identity-2");
         foreach (var clientId in phaseA.Concat(phaseB))
@@ -201,6 +208,27 @@ public class IdentityCommandConsumerReplicaTests : IClassFixture<IdentityService
         throw new TimeoutException("No replica served the classic command address within 60 s.");
     }
 
+    /// <summary>
+    ///     Waits until the ledger holds every given client id and no consumer of any replica is still working on a
+    ///     CreateIdentityData message. The consumer sends its response before the consume observer's <c>PostConsume</c>
+    ///     records the message, so a caller can hold all responses while the last entries are still on their way into
+    ///     the ledger (seen on a loaded machine: 4 of 6 recorded right after the responses). Waiting for the in-flight
+    ///     count to reach 0 as well means a second delivery of a command that is already being consumed is in the ledger
+    ///     before the exactly-once assertion reads it. A redelivery that a replica has not started yet is not visible
+    ///     here; with the shared queue that happens only after a consumer faulted or its channel closed (no ack), which
+    ///     these tests do not cause, and its client would still be counted by <see cref="CountClientsAsync" />.
+    ///     The assertions that follow stay unchanged; a command that was never processed still fails them after the wait.
+    /// </summary>
+    private async Task WaitUntilRecordedAsync(IReadOnlyCollection<string> clientIds)
+    {
+        var deadline = DateTime.UtcNow + LedgerWait;
+        while (DateTime.UtcNow < deadline &&
+               (_inFlight.Count > 0 || !clientIds.All(id => _ledger.Any(e => e.ClientId == id))))
+        {
+            await Task.Delay(50, TestContext.Current.CancellationToken);
+        }
+    }
+
     // -------------------------------------------------------------------------------------------------------------
     // replicas
 
@@ -218,7 +246,7 @@ public class IdentityCommandConsumerReplicaTests : IClassFixture<IdentityService
         var services = new ServiceCollection();
         services.AddLogging(b => b.AddProvider(_logs).SetMinimumLevel(LogLevel.Information));
         services.AddSingleton(_fixture.GetSystemContext());
-        services.AddConsumeObserver(_ => new LedgerObserver(name, _ledger));
+        services.AddConsumeObserver(_ => new LedgerObserver(name, _ledger, _inFlight));
         services.Configure<DistributionEventHubOptions>(o =>
         {
             o.InstancePrefix = _instancePrefix;
@@ -260,25 +288,61 @@ public class IdentityCommandConsumerReplicaTests : IClassFixture<IdentityService
         await replica.Provider.DisposeAsync();
     }
 
-    /// <summary>Records every successfully processed CreateIdentityData command with the replica that processed it.</summary>
-    private sealed class LedgerObserver(string replica, ConcurrentQueue<(string ClientId, string Replica)> ledger)
-        : IConsumeObserver
+    /// <summary>
+    ///     Records every successfully processed CreateIdentityData command with the replica that processed it, and counts
+    ///     the CreateIdentityData messages (probes included) a consumer of any replica is working on right now.
+    /// </summary>
+    private sealed class LedgerObserver(
+        string replica,
+        ConcurrentQueue<(string ClientId, string Replica)> ledger,
+        InFlightCounter inFlight) : IConsumeObserver
     {
-        public Task PreConsume<T>(ConsumeContext<T> context) where T : class => Task.CompletedTask;
-
-        public Task PostConsume<T>(ConsumeContext<T> context) where T : class
+        public Task PreConsume<T>(ConsumeContext<T> context) where T : class
         {
-            if (context.Message is CreateIdentityDataCommandRequest request &&
-                request.Clients?.FirstOrDefault()?.ClientId is { } clientId && clientId != "probe-6910")
+            if (context.Message is CreateIdentityDataCommandRequest)
             {
-                ledger.Enqueue((clientId, replica));
+                inFlight.Enter();
             }
 
             return Task.CompletedTask;
         }
 
-        public Task ConsumeFault<T>(ConsumeContext<T> context, Exception exception) where T : class =>
-            Task.CompletedTask;
+        public Task PostConsume<T>(ConsumeContext<T> context) where T : class
+        {
+            if (context.Message is CreateIdentityDataCommandRequest request)
+            {
+                if (request.Clients?.FirstOrDefault()?.ClientId is { } clientId && clientId != "probe-6910")
+                {
+                    ledger.Enqueue((clientId, replica));
+                }
+
+                inFlight.Leave();
+            }
+
+            return Task.CompletedTask;
+        }
+
+        public Task ConsumeFault<T>(ConsumeContext<T> context, Exception exception) where T : class
+        {
+            if (context.Message is CreateIdentityDataCommandRequest)
+            {
+                inFlight.Leave();
+            }
+
+            return Task.CompletedTask;
+        }
+    }
+
+    /// <summary>CreateIdentityData messages between PreConsume and PostConsume/ConsumeFault, over all replicas.</summary>
+    private sealed class InFlightCounter
+    {
+        private int _count;
+
+        public int Count => Volatile.Read(ref _count);
+
+        public void Enter() => Interlocked.Increment(ref _count);
+
+        public void Leave() => Interlocked.Decrement(ref _count);
     }
 
     // -------------------------------------------------------------------------------------------------------------

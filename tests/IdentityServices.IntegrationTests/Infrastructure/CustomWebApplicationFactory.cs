@@ -445,6 +445,11 @@ public class CustomWebApplicationFactory : WebApplicationFactory<Program>, IAsyn
                 services.Remove(descriptor);
             }
 
+            // Test-host method deadline floor: REST calls that run a CK method wait at least 120 s instead of the CK
+            // default of 15 s, so a busy machine cannot turn a correct call into METHOD_TIMEOUT / 504. Rationale and
+            // where the real deadline is proven: TestHostMethodDeadlineFloor.
+            TestHostMethodDeadlineFloor.Register(services);
+
             // AB#8341: tests permit the sibling pairs they arrange; every other pair is decided by the production policy,
             // the allow-list each source tenant keeps (AB#8345, empty = nobody).
             services.RemoveAll<IdentityServerPersistence.Services.SourceTenantGrants.ISourceTenantGrantPolicy>();
