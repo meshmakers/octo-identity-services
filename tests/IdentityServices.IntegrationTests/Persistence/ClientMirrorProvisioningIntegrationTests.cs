@@ -7,6 +7,7 @@ using Microsoft.AspNetCore.Http;
 using Meshmakers.Octo.Runtime.Contracts;
 using Meshmakers.Octo.Runtime.Contracts.MongoDb;
 using Meshmakers.Octo.Runtime.Contracts.MongoDb.Repositories;
+using Meshmakers.Octo.Runtime.Contracts.Repositories;
 using Meshmakers.Octo.Runtime.Contracts.Repositories.Query;
 using Meshmakers.Octo.Runtime.Contracts.RepositoryEntities;
 using Meshmakers.Octo.Services.Infrastructure;
@@ -274,6 +275,32 @@ public class ClientMirrorProvisioningIntegrationTests : IClassFixture<IdentitySe
 
         (await CountChildClientsAsync(systemContext, childTenantId, clientId)).Should().Be(1,
             "both mirrors of the parent are erased, the child's own client stays");
+        (await CountTrackingRowsAsync(systemContext, clientId, childTenantId)).Should().Be(0);
+    }
+
+    /// <summary>
+    ///     Two removals of the same mirror overlap: the first erased the mirror, the second still holds the tracking row
+    ///     and finds only a client of the child itself with the same id. That client is not a mirror and stays.
+    /// </summary>
+    [Fact]
+    public async Task SecondRemoval_FindingOnlyTheChildsOwnClient_LeavesItIntact()
+    {
+        await _fixture.InitializeAsync();
+        var systemContext = _fixture.GetSystemContext();
+        await EnsureSystemSetupAsync();
+
+        var childTenantId = await CreateChildTenantAsync($"child-rmow-{Guid.NewGuid():N}".Substring(0, 24));
+        var clientId = $"rmow-{Guid.NewGuid():N}".Substring(0, 24);
+        await CreateFlaggedClientAsync(systemContext, clientId);
+        await CreateService(systemContext).ProvisionForChildTenantAsync(systemContext.TenantId, childTenantId);
+        // The first removal erased the mirror; the child has its own client of that id.
+        await EraseChildClientsAsync(systemContext, childTenantId, clientId);
+        await InsertStaleChildClientAsync(systemContext, childTenantId, clientId, provisionedByParentTenantId: "");
+
+        await CreateService(systemContext).RemoveMirrorsForClientAsync(systemContext.TenantId, clientId);
+
+        (await CountChildClientsAsync(systemContext, childTenantId, clientId)).Should().Be(1,
+            "the child's own client is not a mirror of this parent");
         (await CountTrackingRowsAsync(systemContext, clientId, childTenantId)).Should().Be(0);
     }
 
@@ -759,6 +786,18 @@ public class ClientMirrorProvisioningIntegrationTests : IClassFixture<IdentitySe
             },
             ProvisionedByParentTenantId = provisionedByParentTenantId ?? systemContext.TenantId
         });
+    }
+
+    private static async Task EraseChildClientsAsync(ISystemContext systemContext, string childTenantId, string clientId)
+    {
+        var childRepo = (await systemContext.TryFindTenantRepositoryAsync(childTenantId))!;
+        using var session = await childRepo.GetSessionAsync();
+        var clients = await childRepo.GetRtEntitiesByTypeAsync<RtClient>(session, RtEntityQueryOptions.Create()
+            .FieldFilter(nameof(RtClient.ClientId), FieldFilterOperator.Equals, clientId));
+        foreach (var client in clients.Items.ToList())
+        {
+            await childRepo.DeleteOneRtEntityByRtIdAsync<RtClient>(session, client.RtId, DeleteOptions.Erase);
+        }
     }
 
     /// <summary>The tracking row another replica records for the pair (as the provisioning writes it).</summary>

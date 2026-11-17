@@ -1399,13 +1399,12 @@ public class ClientMirrorProvisioningService(
                 .FieldFilter(nameof(RtClient.ClientId), FieldFilterOperator.Equals, clientId));
         // Every mirror of the id this parent provisioned: a duplicate left by a replica race or a restore must not
         // survive the removal of its mirror, and a client another writer erased first does not prove that the others are
-        // gone. A client of the child itself with the same id (provisioned by no or another parent) is left alone. When no
-        // client names this parent (a mirror written before the field existed), the first client of the id is erased,
-        // as before.
-        var clients = existing.Items.ToList();
-        var mirrors = clients.Where(c =>
-            string.Equals(c.ProvisionedByParentTenantId, parentTenantId, StringComparison.OrdinalIgnoreCase)).ToList();
-        foreach (var client in mirrors.Count > 0 ? mirrors : clients.Take(1))
+        // gone. Only clients marked as provisioned by this parent are erased: a client of the child itself with the same
+        // id (unmarked, or marked by another parent) is never a mirror of this parent, also when a concurrent removal
+        // already erased the mirror. Every mirror write sets the mark, so a mirror carries it after its next converge.
+        foreach (var client in existing.Items.Where(c =>
+                     string.Equals(c.ProvisionedByParentTenantId, parentTenantId, StringComparison.OrdinalIgnoreCase))
+                     .ToList())
         {
             await TryEraseChildClientAsync(childRepo, childSession, client.RtId);
         }

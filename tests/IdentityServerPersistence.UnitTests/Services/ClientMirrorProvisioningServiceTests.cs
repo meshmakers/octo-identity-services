@@ -599,6 +599,7 @@ public class ClientMirrorProvisioningServiceTests
             .Build();
         SetupParentMirrorLookup("ci-deploy", new[] { mirror });
         var childClient = new RtClientBuilder().WithClientId("ci-deploy").Build();
+        childClient.ProvisionedByParentTenantId = ParentTenantId;
         SetupChildClientLookup("ci-deploy", new[] { childClient });
 
         var result = await _sut.RemoveMirrorsForClientAsync(ParentTenantId, "ci-deploy");
@@ -606,6 +607,27 @@ public class ClientMirrorProvisioningServiceTests
         result.Should().Be(new ClientMirrorCleanupResult(1, 0));
         await _childRepo.Received(1).DeleteOneRtEntityByRtIdAsync<RtClient>(
             _childSession, childClient.RtId, Arg.Any<DeleteOptions>());
+        await _parentRepo.Received(1).DeleteOneRtEntityByRtIdAsync<RtClientMirror>(
+            _parentSession, mirror.RtId, Arg.Any<DeleteOptions>());
+    }
+
+    [Fact]
+    public async Task RemoveForClient_LeavesAClientOfTheChildItself_WithTheSameId()
+    {
+        var mirror = new RtClientMirrorBuilder()
+            .WithParentClientId("ci-deploy")
+            .WithChildTenantId(ChildTenantId)
+            .Build();
+        SetupParentMirrorLookup("ci-deploy", new[] { mirror });
+        // Not provisioned by this parent: e.g. a concurrent removal already erased the mirror, only the child's own
+        // client of that id is left.
+        var ownClient = new RtClientBuilder().WithClientId("ci-deploy").Build();
+        SetupChildClientLookup("ci-deploy", new[] { ownClient });
+
+        var result = await _sut.RemoveMirrorsForClientAsync(ParentTenantId, "ci-deploy");
+
+        result.Should().Be(new ClientMirrorCleanupResult(1, 0));
+        await _childRepo.DidNotReceiveWithAnyArgs().DeleteOneRtEntityByRtIdAsync<RtClient>(default!, default, default!);
         await _parentRepo.Received(1).DeleteOneRtEntityByRtIdAsync<RtClientMirror>(
             _parentSession, mirror.RtId, Arg.Any<DeleteOptions>());
     }
