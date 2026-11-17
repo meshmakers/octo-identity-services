@@ -37,5 +37,5 @@ under `docs/`, or the pull request whose review found the problem.
 
 - A successful write to policies, CORS origins or client overlays invalidates the matching cache on every path, including
   partial failures (PR #310, PR #313).
-- Integration tests share no process-wide or machine-wide state, clean up what they change (policies, settings), and
-  fail when a wait times out instead of passing silently (`docs/testing.md`; PR #313).
+- Integration tests share no process-wide or machine-wide state and clean up what they change (policies, settings)
+  (`docs/testing.md`; PR #313).
