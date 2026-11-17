@@ -109,6 +109,30 @@ internal sealed class IdentityMethodCall(IServiceProvider services, CkMethodPrin
     }
 
     /// <summary>
+    ///     The data permission of a static method's declaring type, as the GraphQL gateway evaluates it before it dispatches
+    ///     a static method with <c>dataAccess: Write</c>: <c>null</c> when the caller may write entities of
+    ///     <paramref name="ckTypeId" /> in the tenant of the call, else <c>METHOD_TARGET_NOT_FOUND</c> (type not visible) or
+    ///     <c>METHOD_FORBIDDEN</c> (<c>reason</c> = <c>data-permission</c>). A REST facade calls in-process, where only the
+    ///     handler can check it.
+    /// </summary>
+    public async Task<CkMethodFailure?> CheckTypeWritableAsync(RtCkId<CkTypeId> ckTypeId,
+        CancellationToken cancellationToken)
+    {
+        var repository = Services.GetRequiredService<IMultiTenancyResolverService>().GetTenantRepository();
+        var verdict = await Services.GetRequiredService<IRtDataPermissionEvaluator>()
+            .EvaluateTypeAsync(repository, IdentityMethodCallerRules.ToSecurityContext(Principal), ckTypeId,
+                RtDataAction.Write, publishAudit: true, cancellationToken)
+            .ConfigureAwait(false);
+        return verdict.Decision switch
+        {
+            RtDataPermissionDecision.Allowed => null,
+            RtDataPermissionDecision.NotVisible => CkMethodOutcome.TargetNotFound().Failure,
+            // Anything else, also a value a later engine adds, refuses.
+            _ => NotPermitted().Failure
+        };
+    }
+
+    /// <summary>
     ///     The target entity of an instance method: the declaring CK type of <paramref name="methodId" /> (the qualified id
     ///     the handler is registered for, <c>System.Identity/Group.AddMember-1</c> -> <c>System.Identity/Group</c>) and the
     ///     target rtId. Taken from the method id, never from the CK type id a request names.

@@ -5,6 +5,7 @@ using Meshmakers.Octo.Backend.IdentityServices.AdminProvisioning;
 using Meshmakers.Octo.Backend.IdentityServices.Authorization.RoleChange;
 using Meshmakers.Octo.Backend.IdentityServices.CrossTenantAudit;
 using Meshmakers.Octo.ConstructionKit.Contracts;
+using Meshmakers.Octo.Runtime.Contracts;
 using Meshmakers.Octo.Runtime.Contracts.RepositoryEntities;
 using Meshmakers.Octo.Services.Methods;
 using Meshmakers.Octo.Services.Methods.Authorization;
@@ -39,6 +40,15 @@ internal static class AdminProvisioningMethodErrors
 
     /// <summary>Audit detail: the runtime id of the mapping written or removed.</summary>
     public const string MappingRtIdDetail = "mappingRtId";
+}
+
+/// <summary>
+///     The declaring type of the static <c>ExternalTenantUserMapping</c> methods. The GraphQL gateway checks the caller's
+///     <c>Write</c> data permission on it before it dispatches a static method; the handlers check the same for REST facades.
+/// </summary>
+internal static class ExternalTenantUserMappingMethodType
+{
+    public static readonly RtCkId<CkTypeId> CkTypeId = RtEntityExtensions.GetRtCkTypeId<RtExternalTenantUserMapping>();
 }
 
 /// <summary>
@@ -81,6 +91,12 @@ internal abstract class ExternalTenantUserMappingHandlerBase<TParameters, TResul
         if (!await Services.GetRequiredService<IMethodTenantAccessor>().BindAsync(context.TenantId).ConfigureAwait(false))
         {
             return CkMethodOutcome<TResult>.TargetNotFound();
+        }
+
+        if (await call.CheckTypeWritableAsync(ExternalTenantUserMappingMethodType.CkTypeId, cancellationToken)
+                .ConfigureAwait(false) is { } denied)
+        {
+            return CkMethodOutcome<TResult>.Fail(denied);
         }
 
         return await ApplyAsync(call, context.TenantId, context.Parameters, cancellationToken).ConfigureAwait(false);
@@ -277,12 +293,13 @@ internal sealed class ExternalTenantUserMappingRemoveAdminProvisioningHandler(IS
         CancellationToken cancellationToken)
     {
         var call = context.CallerPrincipal == null ? null : new IdentityMethodCall(services, context.CallerPrincipal);
-        return IdentityMethodAudit.RunAsync(services, context, call, () => RunAsync(context, call),
+        return IdentityMethodAudit.RunAsync(services, context, call, () => RunAsync(context, call, cancellationToken),
             outcome => outcome.Failure?.Code);
     }
 
     private async Task<CkMethodOutcome> RunAsync(
-        CkMethodContext<ExternalTenantUserMappingRemoveAdminProvisioningParameters> context, IdentityMethodCall? call)
+        CkMethodContext<ExternalTenantUserMappingRemoveAdminProvisioningParameters> context, IdentityMethodCall? call,
+        CancellationToken cancellationToken)
     {
         if (call == null || !IdentityMethodCallerRules.IsTenantAdministrator(call.Principal))
         {
@@ -292,6 +309,12 @@ internal sealed class ExternalTenantUserMappingRemoveAdminProvisioningHandler(IS
         if (!await services.GetRequiredService<IMethodTenantAccessor>().BindAsync(context.TenantId).ConfigureAwait(false))
         {
             return CkMethodOutcome.TargetNotFound();
+        }
+
+        if (await call.CheckTypeWritableAsync(ExternalTenantUserMappingMethodType.CkTypeId, cancellationToken)
+                .ConfigureAwait(false) is { } denied)
+        {
+            return CkMethodOutcome.Fail(denied);
         }
 
         var parameters = context.Parameters;

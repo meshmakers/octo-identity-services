@@ -394,8 +394,10 @@ comes from the method id the handler is registered for, never from the request):
 (`SecretOwnerMethodHandlerBase`) and the client mirror methods (`ClientMirrorMethodHandlerBase`) use the same check
 (`IdentityMethodCall.CheckTargetWritableAsync`). On the GraphQL path nothing changes: the gateway refuses first with the same codes.
 
-Not affected: the static methods (`User.CreateUser`, `Client.CleanOverlayEntries`, the `ExternalTenantUserMapping` methods: no target entity, the
-gateway has nothing to evaluate either) and the account-owner methods (`User.ChangePassword`, `User.SetPassword`: `allowSelf` on the caller's own
+Static methods have no target entity; the gateway checks the caller's `Write` permission on the declaring type instead. Their handlers check the
+same (`IdentityMethodCall.CheckTypeWritableAsync`, after the tenant bind): the five `ExternalTenantUserMapping` methods, `User.CreateUser` and
+`Client.CleanOverlayEntries`. A type the caller cannot see answers `METHOD_TARGET_NOT_FOUND` (`404`), a type they may read but not write
+`METHOD_FORBIDDEN` (`data-permission`, `403`). Not affected: the account-owner methods (`User.ChangePassword`, `User.SetPassword`: `allowSelf` on the caller's own
 user through the account pages).
 
 Changed REST answers - only with an **enforcing data policy on the target type** (open by default); **intended change**, reason: the verdict no
@@ -411,10 +413,13 @@ longer depends on the transport (REST wrote a target that GraphQL refused, CWE-8
 | `PUT users/{user}/roles`, `PUT` / `DELETE users/{user}/roles/{role}` | User | `200`, written | `404` / `403`, nothing changed |
 | `POST users/{user}/merge` (the target user; the source was already checked) | User | `200`, merged | `404` / `403`, nothing merged |
 | `POST users/ResetPassword` | User | `200`, password reset | `404` / `403`, password unchanged |
+| `POST users` (static `User.CreateUser`: the declaring type) | User | `200`, created | `404` / `403`, no user created |
+| `DELETE clients/cleanOverlayEntries` (static `Client.CleanOverlayEntries`: the declaring type) | Client | `200`, cleaned | `404` / `403`, nothing removed |
 
 Unchanged: the secret writes, the data-permission grants and the enforcement switch (they checked their target already) and the client mirror
-endpoints (their parent client is checked from the start). The admin provisioning methods are static and not affected: they have no target entity,
-their access rule is the target-tenant rule. Each refusal writes the usual `Identity.Method` event with the code (and `reason`).
+endpoints (their parent client is checked from the start). The admin provisioning endpoints and `POST externalTenantUserMappings` answer the same
+`404` / `403` under an enforcing data policy on `ExternalTenantUserMapping` that denies the caller `Write` (before: `200`/`201`, written); their
+target-tenant rule is unchanged. Each refusal writes the usual `Identity.Method` event with the code (and `reason`).
 
 Tests: `Api/TenantApi/TargetDataPermissionRestParityTests` (every row above that writes a role, member, overlay URI or password, both decisions: the REST
 answer and the dispatcher's answer agree, one event each, nothing changed; without an enforcing policy REST still writes).

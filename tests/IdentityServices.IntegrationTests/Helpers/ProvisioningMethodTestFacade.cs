@@ -10,9 +10,11 @@ using Meshmakers.Octo.Backend.IdentityServices.Authorization.RoleChange;
 using Meshmakers.Octo.Backend.IdentityServices.CrossTenantAudit;
 using Meshmakers.Octo.Backend.IdentityServices.Methods;
 using Meshmakers.Octo.Backend.IdentityServices.TenantApi.v1.Controllers;
+using Meshmakers.Octo.Runtime.Contracts.DataPermissions;
 using Meshmakers.Octo.Runtime.Contracts.MongoDb;
 using Meshmakers.Octo.Runtime.Contracts.MongoDb.Configuration;
 using Meshmakers.Octo.Services.Contracts.DistributionEventHub.Methods;
+using Meshmakers.Octo.Services.Infrastructure.Services;
 using Meshmakers.Octo.Services.Methods;
 using Meshmakers.Octo.Services.Methods.Authorization;
 using Microsoft.AspNetCore.Http;
@@ -57,6 +59,10 @@ internal sealed class ProvisioningMethodTestFacade : IIdentityMethodFacade
 
         var authorization = Substitute.For<IOptionsMonitor<IdentityApiAuthorizationOptions>>();
         authorization.CurrentValue.Returns(new IdentityApiAuthorizationOptions());
+        // No data policy: the declaring type of the static methods is writable (the type check runs in the handlers).
+        var dataPermissions = Substitute.For<IRtDataPermissionEvaluator>();
+        dataPermissions.EvaluateTypeAsync(default!, default!, default!, default, default, default)
+            .ReturnsForAnyArgs(new RtDataPermissionVerdict(RtDataPermissionDecision.Allowed, RtDataPermissionReason.NoGrant));
         _services = new ServiceCollection()
             .AddSingleton(systemContext)
             .AddSingleton<IDynamicAuthSchemeService>(new NoOpAuthSchemes())
@@ -70,6 +76,8 @@ internal sealed class ProvisioningMethodTestFacade : IIdentityMethodFacade
             .AddSingleton<ITenantDiscoveryService>(_discovery)
             .AddSingleton(Options.Create(new OctoSystemConfiguration { SystemTenantId = systemContext.TenantId }))
             .AddSingleton(authorization)
+            .AddSingleton(dataPermissions)
+            .AddSingleton(Substitute.For<IMultiTenancyResolverService>())
             .AddSingleton<IMethodTenantAccessor>(new BoundTenant())
             .AddSingleton<IIdentityMethodAuditWriter>(_audit)
             .AddSingleton<ILoggerFactory>(NullLoggerFactory.Instance)

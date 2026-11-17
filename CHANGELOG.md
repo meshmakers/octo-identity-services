@@ -14,6 +14,14 @@ Notable changes of the OctoMesh identity services. The CK model `System.Identity
   the target themselves with the gateway's answers: not readable = `404` (`METHOD_TARGET_NOT_FOUND`), readable but not writable = `403`
   problem `METHOD_FORBIDDEN` (`data-permission`), nothing changed. Intended REST change, listed per endpoint in
   `docs/identity-rest-facades.md`; the GraphQL answers do not change, and nothing changes without an enforcing policy (open by default).
+  The static methods behind a REST facade - the `ExternalTenantUserMapping` methods (admin provisioning, the mapping create),
+  `User.CreateUser` (`POST users`) and `Client.CleanOverlayEntries` (`DELETE clients/cleanOverlayEntries`) - check the caller's `Write`
+  permission on their declaring type, as the gateway does for static methods: same `404` / `403` answers, nothing written.
+- **The client mirror backfill and the mirror secret rotation keep the cross-tenant and role rules on every transport.**
+  `Client.ProvisionMirrors` refuses a call tenant outside the caller's tenant subtree (`METHOD_FORBIDDEN`, `tenant-out-of-scope`), as
+  `ProvisionMirrorInTenant` does for a named child; an allow-listed cross-tenant service client can no longer backfill the children of a
+  tenant outside its own subtree. `Client.RotateMirrorSecret` stages `IdentityApiAuthorization:RoleEnforcement=Warn` only for its REST
+  facade; over the bus or the GraphQL gateway a caller without `SecretManagement` is refused.
 
 ### Changed
 

@@ -266,7 +266,8 @@ secret write endpoints of `ApiSecretsController` are their facades (`docs/identi
 Instance methods on the **parent** client: the method runs in the parent tenant, the handler writes into the child tenant through
 `IClientMirrorProvisioningService` (`Methods/ClientMirrorHandlers.cs`, shared flow `ClientMirrorMethodHandlerBase<TParameters, TOutcome>`). Roles
 `TenantManagement` or `UserManagement` (REST `IdentityTenantAdministrationWritePolicy`), the rotation also `SecretManagement` (REST
-`IdentitySecretAdministrationPolicy`, staged by `SecretManagementRoleEnforcement` exactly like the secret methods); `dataAccess: Write`.
+`IdentitySecretAdministrationPolicy`, staged by `SecretManagementRoleEnforcement` like the secret methods; `RoleEnforcement=Warn` stages it only for
+the REST facade, a bus or GraphQL call without `SecretManagement` is refused); `dataAccess: Write`.
 
 | Method | Parameters | Result | Errors | Idempotent / timeout |
 |---|---|---|---|---|
@@ -278,7 +279,7 @@ Instance methods on the **parent** client: the method runs in the parent tenant,
 
 - **Order of checks, before any write in either tenant:** caller rule -> target client exists (`METHOD_TARGET_NOT_FOUND`) -> the caller may read
   **and** write the parent client (`IRtDataPermissionEvaluator`: not visible = `METHOD_TARGET_NOT_FOUND`, read only = `METHOD_FORBIDDEN` /
-  `data-permission`) -> a named child tenant lies in the subtree of the caller's token tenant (`CrossTenantMethodSupport.CheckTargetTenantAsync`, the
+  `data-permission`) -> a named child tenant (for `ProvisionMirrors`: the tenant of the call, whose children it backfills) lies in the subtree of the caller's token tenant (`CrossTenantMethodSupport.CheckTargetTenantAsync`, the
   rule `AdminProvisioningTargetScope` that the REST filter uses; `RoleEnforcement=Warn` stages it only for REST facade calls, a bus
   or GraphQL call is refused in either mode) -> the mirror service checks it again against the parent
   tenant's subtree. A child outside either subtree is `METHOD_FORBIDDEN` with `reason = tenant-out-of-scope`; nothing is written in the child tenant.
@@ -305,7 +306,9 @@ are the Feature's `Tenant.ProvisionAdmin`.
 | `RemoveAdminProvisioning` | `targetTenantId`, `mappingRtId` | - | `TENANT_NOT_FOUND`, `MAPPING_NOT_FOUND` | `TenantManagement`, `UserManagement` / 60 s |
 | `CreateMapping` | `sourceTenantId`, `sourceUserId`, `sourceUserName`, optional `roleIds`, `groupIds` | `AdminProvisioningResult` | `SOURCE_TENANT_NOT_PERMITTED`, `MAPPING_ALREADY_EXISTS`, `UNKNOWN_GROUP` | `UserManagement` / 60 s |
 
-- **Target tenant first.** The `ProvisionAdmin*`, `ProvisionCurrentUser` and `RemoveAdminProvisioning` methods run in the caller's tenant and check
+- **Type data permission first.** After the tenant bind every handler checks the caller's `Write` permission on `ExternalTenantUserMapping`, as
+  the gateway does for static methods (not visible = `METHOD_TARGET_NOT_FOUND`, read only = `METHOD_FORBIDDEN` / `data-permission`).
+- **Target tenant.** The `ProvisionAdmin*`, `ProvisionCurrentUser` and `RemoveAdminProvisioning` methods run in the caller's tenant and check
   `targetTenantId` against the caller's token tenant subtree before any lookup (`METHOD_FORBIDDEN`, `reason = tenant-out-of-scope`); a caller of the
   system tenant reaches every tenant. Then the rules of the REST endpoints: target exists, source tenant is a registry ancestor of the target
   (`ICrossTenantAncestryGuard`), one mapping per source user (`existingMappingId` names the existing one), the source tenant becomes the target's login
@@ -328,3 +331,7 @@ Every handler of an instance method that a REST facade calls evaluates its targe
 dispatch: in `IdentityAdminMethodHandlerBase` for all its methods (target type from the registered method id), in `UserRoleMethodHandlerBase`,
 `UserResetPasswordHandler`, `ClientApplyOverlayUrisHandler`, `SecretOwnerMethodHandlerBase` and `ClientMirrorMethodHandlerBase`. List of the REST
 answers this changed: `docs/identity-rest-facades.md` ("The target's data permission on every facade").
+
+Static methods have no target entity; the gateway checks the caller's `Write` permission on the declaring type. Their handlers check the same
+with `IdentityMethodCall.CheckTypeWritableAsync` after the tenant bind (type not visible = `METHOD_TARGET_NOT_FOUND`, read only =
+`METHOD_FORBIDDEN` / `data-permission`): the `ExternalTenantUserMapping` methods, `User.CreateUser` and `Client.CleanOverlayEntries`.

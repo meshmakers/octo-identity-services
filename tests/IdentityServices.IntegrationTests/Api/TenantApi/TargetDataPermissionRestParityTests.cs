@@ -9,7 +9,10 @@ using Meshmakers.Octo.Common.DistributionEventHub.Services;
 using Meshmakers.Octo.ConstructionKit.Contracts;
 using Meshmakers.Octo.Runtime.Contracts;
 using Meshmakers.Octo.Runtime.Contracts.DataPermissions;
+using Meshmakers.Octo.Runtime.Contracts.MongoDb;
+using Meshmakers.Octo.Runtime.Contracts.MongoDb.Repositories;
 using Meshmakers.Octo.Runtime.Contracts.Repositories;
+using Meshmakers.Octo.Runtime.Contracts.Repositories.Query;
 using Meshmakers.Octo.Services.Contracts.DistributionEventHub.Methods;
 using Meshmakers.Octo.Services.Methods;
 using Meshmakers.Octo.Services.Methods.Authorization;
@@ -102,8 +105,104 @@ public class TargetDataPermissionRestParityTests : IntegrationTestBase, IDisposa
         }
 
         _audit.For(methodId, target).Should().HaveCount(2, "the REST call and the method call each wrote one event")
-            .And.OnlyContain(e => e["outcome"] == expectedCode);
+            .And.OnlyContain(e => e["outcome"] == expectedCode)
+            .And.OnlyContain(e => onTarget != RtDataPermissionDecision.NotPermitted ||
+                                  e.GetValueOrDefault("reason") == "data-permission");
         await assertUnchanged();
+    }
+
+    public static TheoryData<string, RtDataPermissionDecision> StaticMethodCases()
+    {
+        var data = new TheoryData<string, RtDataPermissionDecision>();
+        foreach (var endpoint in new[] { "mapping.create", "mapping.remove", "user.create", "client.cleanOverlayEntries" })
+        {
+            data.Add(endpoint, RtDataPermissionDecision.NotVisible);
+            data.Add(endpoint, RtDataPermissionDecision.NotPermitted);
+        }
+
+        return data;
+    }
+
+    /// <summary>
+    ///     Static methods have no target entity: the gateway checks the caller's <c>Write</c> permission on the declaring type
+    ///     before dispatch, and their REST facades must give the same verdict.
+    /// </summary>
+    [Theory]
+    [MemberData(nameof(StaticMethodCases))]
+    public async Task StaticMethods_RestAndMethod_GiveTheSameVerdictOnTheType_AndNothingChanges(string endpoint,
+        RtDataPermissionDecision onType)
+    {
+        var host = Host(endpoint[..endpoint.IndexOf('.')], onType);
+        using var http = (FacadeCaller.User(TenantManagement, UserManagement) with
+        {
+            Subject = OctoObjectId.GenerateNewId().ToString()
+        }).Client(host);
+        var ct = TestContext.Current.CancellationToken;
+        var user = await NewUserAsync();
+        HttpResponseMessage rest;
+        string methodId;
+        object parameters;
+        RtExternalTenantUserMapping? seeded = null;
+        var newUserName = NewName("tdn");
+        if (endpoint == "user.create")
+        {
+            rest = await http.PostAsJsonAsync(TenantApiUrl("users"),
+                new { name = newUserName, email = $"{newUserName}@example.invalid", password = "Td-P4ssw0rd!c" }, ct);
+            methodId = SystemIdentityCkIds.UserCreateUserMethodId;
+            parameters = new UserCreateUserParameters { UserName = newUserName, Email = $"{newUserName}@example.invalid" };
+        }
+        else if (endpoint == "client.cleanOverlayEntries")
+        {
+            rest = await http.DeleteAsync(TenantApiUrl("clients/cleanOverlayEntries?overlayName=tdp"), ct);
+            methodId = SystemIdentityCkIds.ClientCleanOverlayEntriesMethodId;
+            parameters = new ClientCleanOverlayEntriesParameters { OverlayName = "tdp" };
+        }
+        else if (endpoint == "mapping.create")
+        {
+            rest = await http.PostAsJsonAsync(TenantApiUrl("ExternalTenantUserMappings"), new
+            {
+                sourceTenantId = NormalizedSystemTenantId, sourceUserId = user.RtId.ToString(),
+                sourceUserName = user.UserName, roleIds = Array.Empty<string>()
+            }, ct);
+            methodId = SystemIdentityCkIds.ExternalTenantUserMappingCreateMappingMethodId;
+            parameters = new ExternalTenantUserMappingCreateMappingParameters
+            {
+                SourceTenantId = NormalizedSystemTenantId, SourceUserId = user.RtId.ToString(),
+                SourceUserName = user.UserName!
+            };
+        }
+        else
+        {
+            seeded = await SeedMappingAsync(user);
+            rest = await http.DeleteAsync(
+                TenantApiUrl($"adminProvisioning/{NormalizedSystemTenantId}/{seeded.RtId}"), ct);
+            methodId = SystemIdentityCkIds.ExternalTenantUserMappingRemoveAdminProvisioningMethodId;
+            parameters = new ExternalTenantUserMappingRemoveAdminProvisioningParameters
+            {
+                TargetTenantId = NormalizedSystemTenantId, MappingRtId = seeded.RtId.ToString()
+            };
+        }
+
+        var method = await DispatchAsync(host, methodId, null, parameters);
+
+        rest.StatusCode.Should().Be(onType == RtDataPermissionDecision.NotVisible
+            ? HttpStatusCode.NotFound
+            : HttpStatusCode.Forbidden, await rest.Content.ReadAsStringAsync(ct));
+        var expectedCode = onType == RtDataPermissionDecision.NotVisible
+            ? CkMethodErrorCodes.MethodTargetNotFound
+            : CkMethodErrorCodes.MethodForbidden;
+        method.Error!.Code.Should().Be(expectedCode);
+        if (onType == RtDataPermissionDecision.NotPermitted)
+        {
+            method.Error.Parameters.Should().Contain("reason", "data-permission");
+        }
+
+        _audit.For(methodId, null).Should().HaveCount(2, "the REST call and the method call each wrote one event")
+            .And.OnlyContain(e => e["outcome"] == expectedCode);
+        (await MappingsOfAsync(user)).Should().HaveCount(seeded == null ? 0 : 1, "no mapping was created or deleted");
+        using var scope = CreateScope();
+        (await scope.ServiceProvider.GetRequiredService<UserManager<RtUser>>().FindByNameAsync(newUserName)).Should()
+            .BeNull("no user was created");
     }
 
     [Fact]
@@ -290,9 +389,22 @@ public class TargetDataPermissionRestParityTests : IntegrationTestBase, IDisposa
             "group" => RtEntityExtensions.GetRtCkTypeId<RtGroup>(),
             "client" => RtEntityExtensions.GetRtCkTypeId<RtClient>(),
             "user" => RtEntityExtensions.GetRtCkTypeId<RtUser>(),
+            "mapping" => RtEntityExtensions.GetRtCkTypeId<RtExternalTenantUserMapping>(),
             _ => (RtCkId<CkTypeId>?)null
         };
         var evaluator = Substitute.For<IRtDataPermissionEvaluator>();
+        evaluator.EvaluateTypeAsync(Arg.Any<IRuntimeRepository>(), Arg.Any<RtSecurityContext>(),
+                Arg.Any<RtCkId<CkTypeId>>(), Arg.Any<RtDataAction>(), Arg.Any<bool>(), Arg.Any<CancellationToken>())
+            .Returns(call =>
+            {
+                var type = call.ArgAt<RtCkId<CkTypeId>>(2);
+                var action = call.ArgAt<RtDataAction>(3);
+                var decision = targetType != null && type == targetType &&
+                               (onTarget == RtDataPermissionDecision.NotVisible || action != RtDataAction.Read)
+                    ? onTarget
+                    : RtDataPermissionDecision.Allowed;
+                return new RtDataPermissionVerdict(decision, RtDataPermissionReason.NoGrant);
+            });
         evaluator.EvaluateAsync(Arg.Any<IRuntimeRepository>(), Arg.Any<RtSecurityContext>(), Arg.Any<RtEntityId>(),
                 Arg.Any<RtDataAction>(), Arg.Any<bool>(), Arg.Any<CancellationToken>())
             .Returns(call =>
@@ -311,7 +423,7 @@ public class TargetDataPermissionRestParityTests : IntegrationTestBase, IDisposa
 
     /// <summary>The method as the GraphQL gateway hands it to the identity service: the dispatcher, caller in scope.</summary>
     private async Task<CkMethodResponse> DispatchAsync(WebApplicationFactory<Program> host, string methodId,
-        string target, object parameters)
+        string? target, object parameters)
     {
         var request = new CkMethodRequest(NormalizedSystemTenantId)
         {
@@ -360,6 +472,33 @@ public class TargetDataPermissionRestParityTests : IntegrationTestBase, IDisposa
     }
 
     private Task<RtUser> NewUserAsync() => CreateTestUserAsync(NewName("tdu"));
+
+    private async Task<ITenantRepository> SystemRepositoryAsync() =>
+        (await Factory.Services.GetRequiredService<ISystemContext>().TryFindTenantRepositoryAsync(NormalizedSystemTenantId))!;
+
+    private async Task<RtExternalTenantUserMapping> SeedMappingAsync(RtUser user)
+    {
+        var repo = await SystemRepositoryAsync();
+        using var session = await repo.GetSessionAsync();
+        var mapping = new RtExternalTenantUserMapping
+        {
+            RtId = OctoObjectId.GenerateNewId(),
+            SourceTenantId = NormalizedSystemTenantId,
+            SourceUserId = user.RtId.ToString(),
+            SourceUserName = user.UserName!
+        };
+        await repo.InsertOneRtEntityAsync(session, mapping);
+        return mapping;
+    }
+
+    private async Task<IReadOnlyCollection<RtExternalTenantUserMapping>> MappingsOfAsync(RtUser user)
+    {
+        var repo = await SystemRepositoryAsync();
+        using var session = await repo.GetSessionAsync();
+        return (await repo.GetRtEntitiesByTypeAsync<RtExternalTenantUserMapping>(session, RtEntityQueryOptions.Create()
+                .FieldEquals(nameof(RtExternalTenantUserMapping.SourceUserId), user.RtId.ToString())))
+            .Items.ToList();
+    }
 
     private async Task WithGroupStoreAsync(Func<IGroupStore, Task> action)
     {

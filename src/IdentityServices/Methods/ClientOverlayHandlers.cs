@@ -291,15 +291,30 @@ internal sealed class ClientCleanOverlayEntriesHandler(IServiceProvider services
         CkMethodContext<ClientCleanOverlayEntriesParameters> context, CancellationToken cancellationToken)
     {
         var details = new Dictionary<string, string>(StringComparer.Ordinal);
-        return AuditedAsync(context, details, () => CleanAsync(context, details));
+        return AuditedAsync(context, details, () => CleanAsync(context, details, cancellationToken));
     }
 
     private async Task<CkMethodOutcome<ClientCleanOverlayEntriesResult>> CleanAsync(
-        CkMethodContext<ClientCleanOverlayEntriesParameters> context, Dictionary<string, string> details)
+        CkMethodContext<ClientCleanOverlayEntriesParameters> context, Dictionary<string, string> details,
+        CancellationToken cancellationToken)
     {
         if (await AdmitAsync(context.CallerPrincipal, context.TenantId).ConfigureAwait(false) is { } refused)
         {
             return refused;
+        }
+
+        // A static method has no target entity: the GraphQL gateway checks the caller's Write permission on the declaring
+        // type before dispatch; the REST facade calls in-process, where only the handler can check it.
+        var call = new IdentityMethodCall(Services, context.CallerPrincipal!);
+        if (await call.CheckTypeWritableAsync(RtEntityExtensions.GetRtCkTypeId<RtClient>(), cancellationToken)
+                .ConfigureAwait(false) is { } denied)
+        {
+            foreach (var (key, value) in call.Details)
+            {
+                details[key] = value;
+            }
+
+            return CkMethodOutcome<ClientCleanOverlayEntriesResult>.Fail(denied);
         }
 
         var overlayName = context.Parameters.OverlayName;

@@ -1,5 +1,6 @@
 using IdentityServerPersistence.Services;
 using Meshmakers.Octo.Backend.IdentityServices.Services;
+using Meshmakers.Octo.Runtime.Contracts;
 using Meshmakers.Octo.Services.Contracts.DistributionEventHub.Methods;
 using Meshmakers.Octo.Services.Methods;
 using Microsoft.AspNetCore.Identity;
@@ -115,6 +116,20 @@ internal sealed class UserCreateUserHandler(
                 .ConfigureAwait(false))
         {
             return CkMethodOutcome<UserCreateUserResult>.TargetNotFound();
+        }
+
+        // A static method has no target entity: the GraphQL gateway checks the caller's Write permission on the declaring
+        // type before dispatch; the REST facade calls in-process, where only the handler can check it.
+        var call = new IdentityMethodCall(services, context.CallerPrincipal!);
+        if (await call.CheckTypeWritableAsync(RtEntityExtensions.GetRtCkTypeId<RtUser>(), cancellationToken)
+                .ConfigureAwait(false) is { } denied)
+        {
+            foreach (var (key, value) in call.Details)
+            {
+                details[key] = value;
+            }
+
+            return CkMethodOutcome<UserCreateUserResult>.Fail(denied);
         }
 
         var userManager = services.GetRequiredService<UserManager<RtUser>>();
