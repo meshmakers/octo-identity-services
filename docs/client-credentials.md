@@ -96,28 +96,31 @@ itself become a source of further mirroring.
 
 **Setup-time hook:** `DefaultConfigurationCreatorService.SetupTenantAsync`
 invokes `ProvisionForChildTenantAsync(systemContext.TenantId, tenantId)` for
-every child tenant. Runs on every startup → mirrors are also backfilled
-automatically for tenants that pre-date the flag being set on the parent.
+every child tenant. Runs on every startup, so tenants that pre-date the flag
+on the parent are backfilled.
 Provisioning failures are logged but never break tenant setup.
 
 **Several replicas, restore.** Every identity replica runs the tenant setup on `PosCreateTenant`, and a
 restore sends `PreDeleteTenant` (its drop removes the tracking rows, see below), then attaches the tenant
 again (`PosCreateTenant`). So several replicas provision the same (client, child) pair at once, and one of
 them may still provision while another drops the rows. The tracking row is unique per pair
-(`ParentClientId` + `ChildTenantId`), and the provisioning handles both races without an error:
+(`ParentClientId` + `ChildTenantId`), and the provisioning handles these races without an error:
 
-- *Row recorded by another replica:* the insert of the tracking row hits the unique index (a
-  `DuplicateKeyException`, or a bulk write error with a duplicate key behind an `OperationFailedException`;
-  `IsDuplicateKey` checks the whole exception chain). The pair counts as already present. When this run had
+- *Row recorded by another replica:* the insert of the tracking row hits the unique index
+  (`IsDuplicateKey` checks the chain: `DuplicateKeyException`, or a bulk write duplicate key in an
+  `OperationFailedException`). The pair counts as already present. When this run had
   inserted the child mirror and both replicas inserted one, the duplicate is erased by the rule the convergence
-  uses (blueprint-range record, else the lowest rtId; never the read order), so a reconciliation pass running at the same time
+  uses (blueprint-range record, else the lowest rtId; never the read order), so a concurrent reconciliation
   keeps the same record; when the other replica replaced this run's insert, that is the one mirror and stays.
 - *Row dropped by another replica:* the version-checked bump of a tracked pair finds the row gone
   (`EntityNotFoundException`). That is a debug line, and the row is not written again: the tenant is being
   deleted or restored, and the setup after the re-attach records it anew. The immediate sync and the
-  reconciliation count such a pair as skipped, not as synced or repaired.
+  reconciliation count such a pair as skipped.
+- *Client erased by another writer:* an erase of a child client that finds it gone counts as done (a
+  removal erases every mirror of the id); a replace that finds the mirror gone reads again, and a new
+  insert is claimed by the row write.
 
-Every other failure of these writes still reaches the setup and is logged as an error. **Open
+Every other failure of these writes reaches the setup and is logged as an error. **Open
 question (intentional):** parent is hard-wired to `systemContext.TenantId` —
 nested customer sub-tenants are out of scope for v1, see
 `octo-communication-controller-services/docs/concepts/cicd-workload-deployment.md`.
@@ -134,9 +137,8 @@ nested customer sub-tenants are out of scope for v1, see
 - `IdentityTenantManagementConsumer` (in `IdentityServices/Consumers/`)
   subscribes to `PreDeleteTenant` and calls
   `RemoveMirrorsForChildTenantAsync(systemContext.TenantId, deletedTenantId)`.
-  The mirror's child-side `RtClient` is gone with the tenant DB, so this
-  only drops the parent's tracking rows. `PreDeleteTenant` reaches every
-  identity replica, so each replica drops the same rows; a row another
+  The child-side `RtClient` goes with the tenant DB, so this only drops
+  the parent's tracking rows. Every identity replica drops the same rows; a row another
   replica dropped first is skipped with a debug line, not an error. Any
   other failure to drop a row is still logged as an error.
 

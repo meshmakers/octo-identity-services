@@ -1,6 +1,7 @@
 using FluentAssertions;
 using IdentityServerPersistence.Services;
 using Meshmakers.Octo.Common.DistributionEventHub.Services;
+using Meshmakers.Octo.ConstructionKit.Contracts;
 using Meshmakers.Octo.Runtime.Contracts;
 using Meshmakers.Octo.Runtime.Contracts.MongoDb;
 using Meshmakers.Octo.Runtime.Contracts.MongoDb.Repositories;
@@ -284,6 +285,79 @@ public class ClientMirrorProvisioningServiceTests
     }
 
     [Fact]
+    public async Task TrackedPair_DuplicateErasedByAnotherReplicaFirst_DoesNotFail_AndReplacesTheCanonicalMirror()
+    {
+        var client = new RtClientBuilder().WithClientId("ci-deploy").WithAutoProvisionInChildTenants().Build();
+        SetupParentFlaggedClients(client);
+        var row = new RtClientMirrorBuilder().WithParentClientId("ci-deploy").WithParentTenantId(ParentTenantId)
+            .WithChildTenantId(ChildTenantId).Build();
+        SetupParentMirrorLookup(client.ClientId, new[] { row });
+        var first = new RtClientBuilder().WithClientId("ci-deploy").Build();
+        var second = new RtClientBuilder().WithClientId("ci-deploy").Build();
+        SetupChildClientLookup(client.ClientId, new[] { first, second });
+        var canonical = ClientMirrorProvisioningService.SelectCanonicalMirror([first, second]);
+        var duplicate = canonical.RtId.Equals(first.RtId) ? second : first;
+        // Another replica read the same duplicates and erased this one between our read and our delete.
+        _childRepo.DeleteOneRtEntityByRtIdAsync<RtClient>(_childSession, duplicate.RtId, Arg.Any<DeleteOptions>())
+            .Returns(Task.FromException(EntityNotFoundException.IdNotFound(nameof(RtClient), duplicate.RtId.ToString())));
+
+        var result = await _sut.ProvisionForChildTenantAsync(ParentTenantId, ChildTenantId);
+
+        result.Should().Be(new ClientMirrorProvisioningResult(1, 0, 1));
+        await _childRepo.Received(1).ReplaceOneRtEntityByIdAsync(_childSession, canonical.RtId,
+            Arg.Is<RtClient>(c => c.ClientId == "ci-deploy"), Arg.Any<ulong>());
+    }
+
+    [Fact]
+    public async Task TrackedPair_CanonicalMirrorErasedByAnotherWriterBeforeTheReplace_ReadsAgainAndInsertsIt()
+    {
+        var client = new RtClientBuilder().WithClientId("ci-deploy").WithAutoProvisionInChildTenants().Build();
+        SetupParentFlaggedClients(client);
+        var row = new RtClientMirrorBuilder().WithParentClientId("ci-deploy").WithParentTenantId(ParentTenantId)
+            .WithChildTenantId(ChildTenantId).Build();
+        SetupParentMirrorLookup(client.ClientId, new[] { row });
+        var theirs = new RtClientBuilder().WithClientId("ci-deploy").Build();
+        var reads = 0;
+        _childRepo.GetRtEntitiesByTypeAsync<RtClient>(_childSession, Arg.Any<RtEntityQueryOptions>())
+            .Returns(_ =>
+            {
+                var resultSet = Substitute.For<IResultSet<RtClient>>();
+                resultSet.Items.Returns(reads++ == 0 ? new[] { theirs } : Array.Empty<RtClient>());
+                return Task.FromResult(resultSet);
+            });
+        // The other writer withdrew its insert between our read and our replace.
+        _childRepo.ReplaceOneRtEntityByIdAsync(_childSession, theirs.RtId, Arg.Any<RtClient>(), Arg.Any<ulong>())
+            .Returns(Task.FromException(EntityNotFoundException.IdNotFound(nameof(RtClient), theirs.RtId.ToString())));
+
+        var result = await _sut.ProvisionForChildTenantAsync(ParentTenantId, ChildTenantId);
+
+        result.Should().Be(new ClientMirrorProvisioningResult(1, 0, 1));
+        await _childRepo.Received(1).InsertOneRtEntityAsync(_childSession,
+            Arg.Is<RtClient>(c => c.ClientId == "ci-deploy"));
+    }
+
+    [Fact]
+    public async Task TrackedPair_InsertWithdrawn_WhenAnotherWriterErasedItFirst_DoesNotFail()
+    {
+        var client = new RtClientBuilder().WithClientId("ci-deploy").WithAutoProvisionInChildTenants().Build();
+        SetupParentFlaggedClients(client);
+        var row = new RtClientMirrorBuilder().WithParentClientId("ci-deploy").WithParentTenantId(ParentTenantId)
+            .WithChildTenantId(ChildTenantId).Build();
+        SetupParentMirrorLookup(client.ClientId, new[] { row });
+        SetupChildClientLookup(client.ClientId, Array.Empty<RtClient>());
+        // Another writer re-created the mirror and bumped the row, and its duplicate cleanup erased our insert.
+        _parentRepo.ReplaceOneRtEntityByIdAsync(_parentSession, row.RtId, Arg.Any<RtClientMirror>(), Arg.Any<ulong>())
+            .Returns(Task.FromException(new RtVersionConflictException(default, 1)));
+        _childRepo.DeleteOneRtEntityByRtIdAsync<RtClient>(_childSession, Arg.Any<OctoObjectId>(), Arg.Any<DeleteOptions>())
+            .Returns(Task.FromException(EntityNotFoundException.IdNotFound(nameof(RtClient), "erased")));
+
+        var result = await _sut.ProvisionForChildTenantAsync(ParentTenantId, ChildTenantId);
+
+        result.Should().Be(new ClientMirrorProvisioningResult(1, 0, 1));
+        await _childRepo.ReceivedWithAnyArgs(1).DeleteOneRtEntityByRtIdAsync<RtClient>(default!, default, default!);
+    }
+
+    [Fact]
     public void SelectCanonicalMirror_DoesNotDependOnTheReadOrder()
     {
         var older = new RtClientBuilder().WithClientId("ci-deploy").Build();
@@ -525,6 +599,7 @@ public class ClientMirrorProvisioningServiceTests
             .Build();
         SetupParentMirrorLookup("ci-deploy", new[] { mirror });
         var childClient = new RtClientBuilder().WithClientId("ci-deploy").Build();
+        childClient.ProvisionedByParentTenantId = ParentTenantId;
         SetupChildClientLookup("ci-deploy", new[] { childClient });
 
         var result = await _sut.RemoveMirrorsForClientAsync(ParentTenantId, "ci-deploy");
@@ -532,6 +607,27 @@ public class ClientMirrorProvisioningServiceTests
         result.Should().Be(new ClientMirrorCleanupResult(1, 0));
         await _childRepo.Received(1).DeleteOneRtEntityByRtIdAsync<RtClient>(
             _childSession, childClient.RtId, Arg.Any<DeleteOptions>());
+        await _parentRepo.Received(1).DeleteOneRtEntityByRtIdAsync<RtClientMirror>(
+            _parentSession, mirror.RtId, Arg.Any<DeleteOptions>());
+    }
+
+    [Fact]
+    public async Task RemoveForClient_LeavesAClientOfTheChildItself_WithTheSameId()
+    {
+        var mirror = new RtClientMirrorBuilder()
+            .WithParentClientId("ci-deploy")
+            .WithChildTenantId(ChildTenantId)
+            .Build();
+        SetupParentMirrorLookup("ci-deploy", new[] { mirror });
+        // Not provisioned by this parent: e.g. a concurrent removal already erased the mirror, only the child's own
+        // client of that id is left.
+        var ownClient = new RtClientBuilder().WithClientId("ci-deploy").Build();
+        SetupChildClientLookup("ci-deploy", new[] { ownClient });
+
+        var result = await _sut.RemoveMirrorsForClientAsync(ParentTenantId, "ci-deploy");
+
+        result.Should().Be(new ClientMirrorCleanupResult(1, 0));
+        await _childRepo.DidNotReceiveWithAnyArgs().DeleteOneRtEntityByRtIdAsync<RtClient>(default!, default, default!);
         await _parentRepo.Received(1).DeleteOneRtEntityByRtIdAsync<RtClientMirror>(
             _parentSession, mirror.RtId, Arg.Any<DeleteOptions>());
     }
