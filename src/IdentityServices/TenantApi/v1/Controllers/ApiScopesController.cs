@@ -2,16 +2,16 @@ using System.ComponentModel.DataAnnotations;
 using Asp.Versioning;
 using IdentityServerPersistence;
 using IdentityServerPersistence.SystemStores;
-using Meshmakers.Octo.Common.DistributionEventHub.Services;
 using Meshmakers.Octo.Communication.Contracts.DataTransferObjects;
 using Meshmakers.Octo.Communication.Contracts.DataTransferObjects.ApiErrors;
 using MongoDB.Bson;
-using Meshmakers.Octo.Runtime.Contracts.RepositoryEntities;
-using Meshmakers.Octo.Services.Contracts.DistributionEventHub.Messages;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Persistence.IdentityCkModel.Generated.System.Identity.v3;
 using Meshmakers.Octo.Backend.Authentication;
+using Meshmakers.Octo.Backend.IdentityServices.Methods;
+using Meshmakers.Octo.Services.Contracts.DistributionEventHub.Methods;
+using Meshmakers.Octo.Services.Methods.Facades;
 
 namespace Meshmakers.Octo.Backend.IdentityServices.TenantApi.v1.Controllers;
 
@@ -21,13 +21,17 @@ namespace Meshmakers.Octo.Backend.IdentityServices.TenantApi.v1.Controllers;
 [ApiVersion(IdentityServiceConstants.ApiVersion1)]
 public class ApiScopesController : ControllerBase
 {
-    private readonly IDistributionEventHubService _distributionEventHubService;
+    private readonly IIdentityMethodFacade _methodFacade;
     private readonly IOctoResourceStore _octoResourceStore;
 
-    public ApiScopesController(IOctoResourceStore octoResourceStore, IDistributionEventHubService distributionEventHubService)
+    /// <summary>
+    ///     The write endpoints are facades of the <c>ApiScope.*</c> methods (in-process, one <c>Identity.Method</c> event per
+    ///     call); the methods refresh the client caches after every write.
+    /// </summary>
+    public ApiScopesController(IOctoResourceStore octoResourceStore, IIdentityMethodFacade methodFacade)
     {
         _octoResourceStore = octoResourceStore;
-        _distributionEventHubService = distributionEventHubService;
+        _methodFacade = methodFacade;
     }
 
     // GET: system/v1/apiScopes
@@ -87,6 +91,7 @@ public class ApiScopesController : ControllerBase
     }
 
     // POST api/apiScopes
+    /// <summary>Creates a new API scope. Facade of the static CK method <c>ApiScope.CreateApiScope-1</c>.</summary>
     [HttpPost]
     [Authorize(IdentityServiceConstants.IdentityTenantAdministrationWritePolicy)]
     [EndpointSummary("Creates a new API scope")]
@@ -98,27 +103,24 @@ public class ApiScopesController : ControllerBase
             return BadRequest(ModelState);
         }
 
-        if ((await _octoResourceStore.FindRtApiScopesByNameAsync(new[] { scopeDto.Name })).Any())
-        {
-            return Conflict($"Scope with name '{scopeDto.Name}' already exists.");
-        }
-
-        var apiScope = new RtApiScope();
-        ApplyToApiScope(apiScope, scopeDto);
-
-        try
-        {
-            await _octoResourceStore.CreateApiScopeAsync(apiScope);
-            await ClearCacheAsync();
-            return Ok();
-        }
-        catch (Exception e)
-        {
-            return BadRequest(new InternalServerErrorDto(e.Message));
-        }
+        var response = await _methodFacade.InvokeAsync(IdentityMethodFacade.ApiScopeCkTypeId,
+            SystemIdentityCkIds.ApiScopeCreateApiScopeMethodId, null,
+            new ApiScopeCreateApiScopeParameters
+            {
+                Name = scopeDto.Name,
+                DisplayName = scopeDto.DisplayName,
+                Description = scopeDto.Description,
+                Enabled = scopeDto.IsEnabled,
+                ShowInDiscoveryDocument = scopeDto.ShowInDiscoveryDocument,
+                Required = scopeDto.IsRequired,
+                Emphasized = scopeDto.IsEmphasize,
+                UserClaims = scopeDto.UserClaims?.ToList()
+            }, User, HttpContext.RequestAborted);
+        return response.ToActionResult(ScopeFailures(scopeDto.Name, "Creation of the API scope failed."));
     }
 
     // PUT api/apiScopes/5
+    /// <summary>Updates an API scope. Facade of the CK method <c>ApiScope.UpdateApiScope-1</c>.</summary>
     [HttpPut("{name}")]
     [Authorize(IdentityServiceConstants.IdentityTenantAdministrationWritePolicy)]
     [EndpointSummary("Updates an API scope")]
@@ -133,25 +135,28 @@ public class ApiScopesController : ControllerBase
         var apiScope = await _octoResourceStore.GetApiScopeByNameAsync(name);
         if (apiScope == null)
         {
-            return NotFound(new NotFoundErrorDto($"Scope with name '{name}' does not exist."));
+            return NotFound(ScopeNotFound(name));
         }
 
-        ApplyToApiScope(apiScope, scopeDto);
-
-        try
-        {
-            await _octoResourceStore.UpdateApiScopeAsync(name, apiScope);
-            await ClearCacheAsync();
-        }
-        catch (Exception e)
-        {
-            return BadRequest(new InternalServerErrorDto(e.Message));
-        }
-
-        return Ok();
+        var response = await _methodFacade.InvokeAsync(IdentityMethodFacade.ApiScopeCkTypeId,
+            SystemIdentityCkIds.ApiScopeUpdateApiScopeMethodId, apiScope.RtId.ToString(),
+            new ApiScopeUpdateApiScopeParameters
+            {
+                Name = scopeDto.Name ?? string.Empty,
+                DisplayName = scopeDto.DisplayName,
+                Description = scopeDto.Description,
+                Enabled = scopeDto.IsEnabled,
+                ShowInDiscoveryDocument = scopeDto.ShowInDiscoveryDocument,
+                Required = scopeDto.IsRequired,
+                Emphasized = scopeDto.IsEmphasize,
+                UserClaims = scopeDto.UserClaims?.ToList()
+            }, User, HttpContext.RequestAborted);
+        return response.ToActionResult(ScopeFailures(scopeDto.Name, "Update of the API scope failed.")
+            .MapError(CkMethodErrorCodes.MethodTargetNotFound, _ => NotFound(ScopeNotFound(name))));
     }
 
     // DELETE api/apiScopes/5
+    /// <summary>Deletes an API scope. Facade of the CK method <c>ApiScope.DeleteApiScope-1</c>.</summary>
     [HttpDelete("{name}")]
     [Authorize(IdentityServiceConstants.IdentityTenantAdministrationWritePolicy)]
     [EndpointSummary("Deletes an API scope")]
@@ -166,27 +171,32 @@ public class ApiScopesController : ControllerBase
         var octoApiScope = await _octoResourceStore.GetApiScopeByNameAsync(name);
         if (octoApiScope == null)
         {
-            return NotFound(new NotFoundErrorDto($"Scope with name '{name}' does not exist."));
+            return NotFound(ScopeNotFound(name));
         }
 
-        try
-        {
-            await _octoResourceStore.DeleteApiScopeAsync(octoApiScope.RtId);
-            await ClearCacheAsync();
-        }
-        catch (Exception e)
-        {
-            return BadRequest(new InternalServerErrorDto(e.Message));
-        }
-
-        return Ok();
+        var response = await _methodFacade.InvokeAsync(IdentityMethodFacade.ApiScopeCkTypeId,
+            SystemIdentityCkIds.ApiScopeDeleteApiScopeMethodId, octoApiScope.RtId.ToString(),
+            new ApiScopeDeleteApiScopeParameters(), User, HttpContext.RequestAborted);
+        return response.ToActionResult(new CkMethodFacadeOptions()
+            .MapSuccess(_ => Ok())
+            .MapError(CkMethodErrorCodes.MethodTargetNotFound, _ => NotFound(ScopeNotFound(name)))
+            .MapError(CkMethodErrorCodes.MethodHandlerFailed,
+                _ => BadRequest(new InternalServerErrorDto("Deletion of the API scope failed."))));
     }
 
-    private Task ClearCacheAsync()
-    {
-        return _distributionEventHubService.PublishAsync(new CorsClientsUpdate(_octoResourceStore.TenantId,
-            Guid.NewGuid(), DateTime.Now));
-    }
+    private static NotFoundErrorDto ScopeNotFound(string name) => new($"Scope with name '{name}' does not exist.");
+
+    /// <summary>
+    ///     The REST answers of a failed scope create or update: a taken name is <c>409</c> with the earlier text, a blank name
+    ///     <c>400</c> with the earlier message, an unexpected failure <c>400</c> with a fixed message (no exception text).
+    /// </summary>
+    private CkMethodFacadeOptions ScopeFailures(string? scopeName, string failedMessage) => new CkMethodFacadeOptions()
+        .MapSuccess(_ => Ok())
+        .MapError(IdentityCrudErrors.ApiScopeAlreadyExists,
+            _ => Conflict($"Scope with name '{scopeName}' already exists."))
+        .MapError(CkMethodErrorCodes.MethodValidationFailed,
+            _ => BadRequest(new InternalServerErrorDto("Scope name cannot be null or empty.")))
+        .MapError(CkMethodErrorCodes.MethodHandlerFailed, _ => BadRequest(new InternalServerErrorDto(failedMessage)));
 
     private static ApiScopeDto CreateApiScopeDto(RtApiScope apiScope)
     {
@@ -203,26 +213,5 @@ public class ApiScopesController : ControllerBase
         };
 
         return apiScopeDto;
-    }
-
-    private static void ApplyToApiScope(RtApiScope apiScope, ApiScopeDto apiScopeDto)
-    {
-        if (string.IsNullOrWhiteSpace(apiScopeDto.Name))
-        {
-            throw new InvalidOperationException("Scope name cannot be null or empty.");
-        }
-
-        apiScope.Enabled = apiScopeDto.IsEnabled;
-        apiScope.Name = apiScopeDto.Name;
-        apiScope.DisplayName = apiScopeDto.DisplayName;
-        apiScope.Description = apiScopeDto.Description;
-        apiScope.ShowInDiscoveryDocument = apiScopeDto.ShowInDiscoveryDocument;
-        if (apiScopeDto.UserClaims != null)
-        {
-            apiScope.Claims = new AttributeStringValueList(apiScopeDto.UserClaims.ToList());
-        }
-
-        apiScope.IsRequired = apiScopeDto.IsRequired;
-        apiScope.IsEmphasized = apiScopeDto.IsEmphasize;
     }
 }

@@ -118,7 +118,22 @@ internal static class IdentityMethodHost
         For<ExternalTenantUserMappingRemoveAdminProvisioningHandler>(
             SystemIdentityCkIds.ExternalTenantUserMappingRemoveAdminProvisioningMethodId, false),
         For<ExternalTenantUserMappingCreateMappingHandler>(
-            SystemIdentityCkIds.ExternalTenantUserMappingCreateMappingMethodId, false)
+            SystemIdentityCkIds.ExternalTenantUserMappingCreateMappingMethodId, false),
+        // System.Identity 3.7.0: create, update and delete of roles, groups, API scopes and API resources; the REST CRUD
+        // endpoints of RolesController, GroupsController, ApiScopesController and ApiResourcesController are their facades.
+        // No secret (API resource secrets change only through the secret methods).
+        For<RoleCreateRoleHandler>(SystemIdentityCkIds.RoleCreateRoleMethodId, false),
+        For<RoleUpdateRoleHandler>(SystemIdentityCkIds.RoleUpdateRoleMethodId, false),
+        For<RoleDeleteRoleHandler>(SystemIdentityCkIds.RoleDeleteRoleMethodId, false),
+        For<GroupCreateGroupHandler>(SystemIdentityCkIds.GroupCreateGroupMethodId, false),
+        For<GroupUpdateGroupHandler>(SystemIdentityCkIds.GroupUpdateGroupMethodId, false),
+        For<GroupDeleteGroupHandler>(SystemIdentityCkIds.GroupDeleteGroupMethodId, false),
+        For<ApiScopeCreateApiScopeHandler>(SystemIdentityCkIds.ApiScopeCreateApiScopeMethodId, false),
+        For<ApiScopeUpdateApiScopeHandler>(SystemIdentityCkIds.ApiScopeUpdateApiScopeMethodId, false),
+        For<ApiScopeDeleteApiScopeHandler>(SystemIdentityCkIds.ApiScopeDeleteApiScopeMethodId, false),
+        For<ApiResourceCreateApiResourceHandler>(SystemIdentityCkIds.ApiResourceCreateApiResourceMethodId, false),
+        For<ApiResourceUpdateApiResourceHandler>(SystemIdentityCkIds.ApiResourceUpdateApiResourceMethodId, false),
+        For<ApiResourceDeleteApiResourceHandler>(SystemIdentityCkIds.ApiResourceDeleteApiResourceMethodId, false)
     ];
 
     /// <summary>

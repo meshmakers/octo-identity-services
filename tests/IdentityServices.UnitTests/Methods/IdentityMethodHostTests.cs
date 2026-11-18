@@ -62,7 +62,16 @@ public class IdentityMethodHostTests
             SystemIdentityCkIds.ExternalTenantUserMappingProvisionAdminWithGroupsMethodId,
             SystemIdentityCkIds.ExternalTenantUserMappingProvisionCurrentUserMethodId,
             SystemIdentityCkIds.ExternalTenantUserMappingRemoveAdminProvisioningMethodId,
-            SystemIdentityCkIds.ExternalTenantUserMappingCreateMappingMethodId);
+            SystemIdentityCkIds.ExternalTenantUserMappingCreateMappingMethodId,
+            SystemIdentityCkIds.RoleCreateRoleMethodId, SystemIdentityCkIds.RoleUpdateRoleMethodId,
+            SystemIdentityCkIds.RoleDeleteRoleMethodId,
+            SystemIdentityCkIds.GroupCreateGroupMethodId, SystemIdentityCkIds.GroupUpdateGroupMethodId,
+            SystemIdentityCkIds.GroupDeleteGroupMethodId,
+            SystemIdentityCkIds.ApiScopeCreateApiScopeMethodId, SystemIdentityCkIds.ApiScopeUpdateApiScopeMethodId,
+            SystemIdentityCkIds.ApiScopeDeleteApiScopeMethodId,
+            SystemIdentityCkIds.ApiResourceCreateApiResourceMethodId,
+            SystemIdentityCkIds.ApiResourceUpdateApiResourceMethodId,
+            SystemIdentityCkIds.ApiResourceDeleteApiResourceMethodId);
         selected.Should().OnlyContain(h => !h.CarriesSecret);
     }
 

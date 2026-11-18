@@ -98,3 +98,37 @@ types:
         execution:
           timeoutSeconds: 30
           idempotent: false
+      # 3.7.0: create, update and delete run as methods (REST parity: GroupsController POST/PUT/DELETE,
+      # IdentityUserAdministrationWritePolicy = UserManagement). NormalizedGroupName is derived by the handler. The initial roles of
+      # CreateGroup pass the role change guard like SetRoles. No replacesGenericCreate (Major on this type, row M16; the generic
+      # create is refused by writeAccess since 3.6.0, the Bootstrap blueprint seeds through the system path).
+      - methodId: CreateGroup-1
+        kind: Static
+        description: "Creates a group, optionally with initial roles. The result is the rtId of the new group."
+        parameters:
+          - { name: groupName, valueType: String }
+          - { name: groupDescription, valueType: String, isOptional: true }
+          - { name: roleNames, valueType: StringArray, isOptional: true, description: "Initial roles by name." }
+        result:
+          valueType: String
+        errors:
+          - { code: GROUP_ALREADY_EXISTS, description: "A group with this name exists." }
+          - { code: ROLE_NOT_FOUND, description: "A role name does not exist." }
+        authorization:
+          roles: [ UserManagement ]
+          dataAccess: Write
+      - methodId: UpdateGroup-1
+        description: "Replaces the name and the description of the group (an omitted description is cleared)."
+        parameters:
+          - { name: groupName, valueType: String }
+          - { name: groupDescription, valueType: String, isOptional: true }
+        errors:
+          - { code: GROUP_ALREADY_EXISTS, description: "Another group has this name." }
+        authorization:
+          roles: [ UserManagement ]
+          dataAccess: Write
+      - methodId: DeleteGroup-1
+        description: "Deletes the group. Refused when it would remove the last user administrator (METHOD_FORBIDDEN)."
+        authorization:
+          roles: [ UserManagement ]
+          dataAccess: Write

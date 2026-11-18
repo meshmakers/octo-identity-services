@@ -1,3 +1,4 @@
+using System.Text.Json;
 using System.ComponentModel;
 using System.ComponentModel.DataAnnotations;
 using Asp.Versioning;
@@ -28,24 +29,10 @@ namespace Meshmakers.Octo.Backend.IdentityServices.TenantApi.v1.Controllers;
 [ApiVersion(IdentityServiceConstants.ApiVersion1)]
 public class GroupsController(
     IGroupStore groupStore,
-    IRoleChangeGuard roleChangeGuard,
     IRoleChangeRefusals roleChangeRefusals,
     IIdentityMethodFacade methodFacade,
     RoleManager<RtRole> roleManager) : ControllerBase
 {
-    /// <summary>
-    /// Runs the role change guard (AB#7927): self-grant, built-in roles the caller does not hold, last user administrator.
-    /// Returns the 403/409 problem answer (audited), or <c>null</c> when the change is allowed.
-    /// </summary>
-    private async Task<ObjectResult?> GuardAsync(RoleGraphChange change, string groupId)
-    {
-        var caller = RoleChangeCaller.FromPrincipal(User);
-        var decision = await roleChangeGuard.EvaluateAsync(caller, change, HttpContext.RequestAborted);
-        return decision.IsAllowed
-            ? null
-            : await roleChangeRefusals.RefuseAsync(HttpContext, caller, decision, $"group {groupId}");
-    }
-
     /// <summary>
     /// Returns all groups.
     /// </summary>
@@ -125,15 +112,21 @@ public class GroupsController(
     }
 
     /// <summary>
-    /// Creates a new group.
+    /// Creates a new group. Facade of the static CK method <c>Group.CreateGroup-1</c>.
     /// </summary>
+    /// <remarks>
+    /// The endpoint resolves the initial role ids to names (an unknown id is <c>404</c> and creates nothing) and calls
+    /// <c>Group.CreateGroup</c> in-process: duplicate name, initial roles through the role change guard, write, one
+    /// <c>Identity.Method</c> event. A refused initial role is the audited 403 problem of the guard.
+    /// </remarks>
     [HttpPost]
     [Authorize(IdentityServiceConstants.IdentityUserAdministrationWritePolicy)]
     [EndpointSummary("Creates a new group.")]
     [ProducesResponseType(typeof(GroupDto), StatusCodes.Status201Created)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
     [ProducesResponseType(StatusCodes.Status409Conflict)]
-    public async Task<ActionResult<GroupDto>> Create(
+    public async Task<IActionResult> Create(
         [Required][FromBody][Description("The group data")] CreateGroupDto dto)
     {
         if (!ModelState.IsValid)
@@ -141,33 +134,56 @@ public class GroupsController(
             return BadRequest(ModelState);
         }
 
-        var existing = await groupStore.FindByNameAsync(dto.GroupName.ToUpperInvariant());
-        if (existing != null)
+        var roleIdsByName = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var roleId in dto.RoleIds ?? [])
         {
-            return Conflict($"A group with name '{dto.GroupName}' already exists.");
+            var role = OctoObjectId.TryParse(roleId, out _) ? await roleManager.FindByIdAsync(roleId) : null;
+            if (role == null)
+            {
+                return NotFound(new NotFoundErrorDto($"Role with id '{roleId}' not found."));
+            }
+
+            roleIdsByName[role.Name ?? role.RtId.ToString()] = roleId;
         }
 
-        var group = new RtGroup
+        var response = await methodFacade.InvokeAsync(IdentityMethodFacade.GroupCkTypeId,
+            SystemIdentityCkIds.GroupCreateGroupMethodId, null,
+            new GroupCreateGroupParameters
+            {
+                GroupName = dto.GroupName,
+                GroupDescription = dto.GroupDescription,
+                RoleNames = roleIdsByName.Count > 0 ? roleIdsByName.Keys.ToList() : null
+            }, User, HttpContext.RequestAborted);
+        if (RoleChangeProblems.RefusalOf(response) is { } decision)
         {
-            RtId = OctoObjectId.GenerateNewId(),
-            GroupName = dto.GroupName,
-            NormalizedGroupName = dto.GroupName.ToUpperInvariant(),
-            GroupDescription = dto.GroupDescription
-        };
-
-        await groupStore.StoreAsync(group);
-
-        // Set initial role assignments via associations
-        if (dto.RoleIds is { Count: > 0 })
-        {
-            await groupStore.SetRoleIdsAsync(group.RtId, dto.RoleIds);
+            return await roleChangeRefusals.RefuseAsync(HttpContext, RoleChangeCaller.FromPrincipal(User), decision,
+                $"new group {dto.GroupName}");
         }
 
-        return StatusCode(StatusCodes.Status201Created, await MapToDtoAsync(group));
+        if (response.Success)
+        {
+            var rtId = response.ResultJson == null ? null : JsonSerializer.Deserialize<string>(response.ResultJson);
+            var group = rtId != null && OctoObjectId.TryParse(rtId, out var groupRtId)
+                ? await groupStore.FindByIdAsync(groupRtId)
+                : null;
+            return group == null
+                ? StatusCode(StatusCodes.Status500InternalServerError, new InternalServerErrorDto(CreateFailedMessage))
+                : StatusCode(StatusCodes.Status201Created, await MapToDtoAsync(group));
+        }
+
+        return response.ToActionResult(new CkMethodFacadeOptions()
+            .MapError(IdentityCrudErrors.GroupAlreadyExists,
+                _ => Conflict($"A group with name '{dto.GroupName}' already exists."))
+            .MapError(UserRoleMethodErrors.RoleNotFound, error => NotFound(new NotFoundErrorDto(
+                $"Role with id '{RoleIdOf(error, roleIdsByName)}' not found.")))
+            .MapError(CkMethodErrorCodes.MethodHandlerFailed, _ => StatusCode(StatusCodes.Status500InternalServerError,
+                new InternalServerErrorDto(CreateFailedMessage))));
     }
 
+    private const string CreateFailedMessage = "Creation of the group failed.";
+
     /// <summary>
-    /// Updates an existing group's name and description.
+    /// Updates an existing group's name and description. Facade of the CK method <c>Group.UpdateGroup-1</c>.
     /// </summary>
     [HttpPut("{rtId}")]
     [Authorize(IdentityServiceConstants.IdentityUserAdministrationWritePolicy)]
@@ -175,39 +191,30 @@ public class GroupsController(
     [ProducesResponseType(typeof(GroupDto), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     [ProducesResponseType(StatusCodes.Status409Conflict)]
-    public async Task<ActionResult<GroupDto>> Update(
+    public async Task<IActionResult> Update(
         [Required] OctoObjectId rtId,
         [Required][FromBody][Description("The updated group data")] UpdateGroupDto dto)
     {
-        var existing = await groupStore.FindByIdAsync(rtId);
-        if (existing == null)
+        var response = await methodFacade.InvokeAsync(IdentityMethodFacade.GroupCkTypeId,
+            SystemIdentityCkIds.GroupUpdateGroupMethodId, rtId.ToString(),
+            new GroupUpdateGroupParameters { GroupName = dto.GroupName, GroupDescription = dto.GroupDescription }, User,
+            HttpContext.RequestAborted);
+        if (response.Success)
         {
-            return NotFound();
+            var group = await groupStore.FindByIdAsync(rtId);
+            return group == null ? NotFound() : Ok(await MapToDtoAsync(group));
         }
 
-        // Check for name conflict if name changed
-        var newNormalized = dto.GroupName.ToUpperInvariant();
-        if (newNormalized != existing.NormalizedGroupName)
-        {
-            var conflict = await groupStore.FindByNameAsync(newNormalized);
-            if (conflict != null)
-            {
-                return Conflict($"A group with name '{dto.GroupName}' already exists.");
-            }
-        }
-
-        existing.GroupName = dto.GroupName;
-        existing.NormalizedGroupName = newNormalized;
-        existing.GroupDescription = dto.GroupDescription;
-
-        await groupStore.StoreAsync(existing);
-
-        return Ok(await MapToDtoAsync(existing));
+        return response.ToActionResult(new CkMethodFacadeOptions()
+            .MapError(CkMethodErrorCodes.MethodTargetNotFound, _ => NotFound())
+            .MapError(IdentityCrudErrors.GroupAlreadyExists,
+                _ => Conflict($"A group with name '{dto.GroupName}' already exists.")));
     }
 
     /// <summary>
-    /// Deletes a group.
+    /// Deletes a group. Facade of the CK method <c>Group.DeleteGroup-1</c>.
     /// </summary>
+    /// <remarks>Removing the last user administrator is the audited 409 problem of the role change guard, as before.</remarks>
     [HttpDelete("{rtId}")]
     [Authorize(IdentityServiceConstants.IdentityUserAdministrationWritePolicy)]
     [EndpointSummary("Deletes a group.")]
@@ -215,22 +222,11 @@ public class GroupsController(
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<IActionResult> Delete([Required] OctoObjectId rtId)
     {
-        var existing = await groupStore.FindByIdAsync(rtId);
-        if (existing == null)
-        {
-            return NotFound();
-        }
-
-        var refusal = await GuardAsync(new RoleGraphChange.GroupDeleted(rtId.ToString()), rtId.ToString());
-        if (refusal != null)
-        {
-            return refusal;
-        }
-
-        await groupStore.RemoveAsync(rtId);
-        return Ok();
+        var response = await methodFacade.InvokeAsync(IdentityMethodFacade.GroupCkTypeId,
+            SystemIdentityCkIds.GroupDeleteGroupMethodId, rtId.ToString(), new GroupDeleteGroupParameters(), User,
+            HttpContext.RequestAborted);
+        return await ToFacadeResultAsync(response, rtId, new CkMethodFacadeOptions());
     }
-
     // ========================================
     // Role assignments
     // ========================================

@@ -30,6 +30,21 @@ public interface IOctoResourceStore
     /// <returns>The API resource as stored; <c>null</c> when it does not exist.</returns>
     Task<RtApiResource?> MutateApiResourceAsync(string apiResourceName, Func<RtApiResource, bool> mutate);
 
+    /// <summary>The API scope with this rtId; <c>null</c> when it does not exist (the target of the API scope methods).</summary>
+    Task<RtApiScope?> GetApiScopeByIdAsync(OctoObjectId rtId);
+
+    /// <summary>Replaces the stored API scope with the rtId of <paramref name="apiScope" /> (as <see cref="UpdateApiScopeAsync" />).</summary>
+    Task ReplaceApiScopeAsync(RtApiScope apiScope);
+
+    /// <summary>The API resource with this rtId; <c>null</c> when it does not exist (the target of the API resource methods).</summary>
+    Task<RtApiResource?> GetApiResourceByIdAsync(OctoObjectId rtId);
+
+    /// <summary>
+    ///     <see cref="MutateApiResourceAsync" /> for the API resource with this rtId: one version-checked read-modify-write.
+    /// </summary>
+    /// <returns>The API resource as stored; <c>null</c> when it does not exist.</returns>
+    Task<RtApiResource?> MutateApiResourceByIdAsync(OctoObjectId rtId, Func<RtApiResource, bool> mutate);
+
     Task<IEnumerable<RtApiScope>> FindRtApiScopesByNameAsync(IEnumerable<string> scopeNames);
     Task<IEnumerable<RtApiResource>> FindRtApiResourcesByNameAsync(IEnumerable<string> apiResourceNames);
 

@@ -39,7 +39,14 @@ public class IdentityMethodDeclarationsIntegrationTests : IClassFixture<Identity
     public static TheoryData<string, string[]> DeclaredMethods => new()
     {
         { "User", ["ChangePassword-1", "SetPassword-1", "ResetPassword-1", "SetRoles-1", "AddRole-1", "RemoveRole-1", "Merge-1", "DisableTwoFactor-1", "CreateUser-1"] },
-        { "Group", ["AddMember-1", "RemoveMember-1", "SetRoles-1", "AddChildGroup-1", "RemoveChildGroup-1"] },
+        {
+            "Group",
+            [
+                "AddMember-1", "RemoveMember-1", "SetRoles-1", "AddChildGroup-1", "RemoveChildGroup-1",
+                // System.Identity 3.7.0: create, update and delete
+                "CreateGroup-1", "UpdateGroup-1", "DeleteGroup-1"
+            ]
+        },
         {
             "Client",
             [
@@ -52,7 +59,14 @@ public class IdentityMethodDeclarationsIntegrationTests : IClassFixture<Identity
         },
         { "DataPermission", ["GrantToRole-1", "RevokeFromRole-1"] },
         // System.Identity 3.4.0
-        { "ApiResource", ["AddSecret-1", "RemoveSecret-1", "UpdateSecret-1"] },
+        {
+            "ApiResource",
+            [
+                "AddSecret-1", "RemoveSecret-1", "UpdateSecret-1",
+                // System.Identity 3.7.0: create, update and delete
+                "CreateApiResource-1", "UpdateApiResource-1", "DeleteApiResource-1"
+            ]
+        },
         { "DataPolicy", ["SetEnforcementMode-1"] },
         // System.Identity 3.5.0: admin provisioning and the mapping create
         {
@@ -61,11 +75,15 @@ public class IdentityMethodDeclarationsIntegrationTests : IClassFixture<Identity
                 "ProvisionAdmin-1", "ProvisionAdminWithGroups-1", "ProvisionCurrentUser-1", "RemoveAdminProvisioning-1",
                 "CreateMapping-1"
             ]
-        }
+        },
+        // System.Identity 3.7.0: create, update and delete of roles and API scopes
+        { "Role", ["CreateRole-1", "UpdateRole-1", "DeleteRole-1"] },
+        { "ApiScope", ["CreateApiScope-1", "UpdateApiScope-1", "DeleteApiScope-1"] }
     };
 
     private static readonly string[] MethodTypes =
-        ["User", "Group", "Client", "DataPermission", "ApiResource", "DataPolicy", "ExternalTenantUserMapping"];
+        ["User", "Group", "Client", "DataPermission", "ApiResource", "DataPolicy", "ExternalTenantUserMapping", "Role",
+            "ApiScope"];
 
     [Theory]
     [MemberData(nameof(DeclaredMethods))]
@@ -154,6 +172,22 @@ public class IdentityMethodDeclarationsIntegrationTests : IClassFixture<Identity
 
         mapping.AllMethods["CreateMapping-1"].Definition.Authorization!.Roles.Should().BeEquivalentTo([UserManagement]);
 
+        // System.Identity 3.7.0: the CRUD methods carry the REST policies of RolesController (UserManagement; the group CRUD
+        // is covered by the Group loop above), ApiScopesController and ApiResourcesController (TenantManagement or
+        // UserManagement).
+        foreach (var method in (await GetTypeAsync("Role")).AllMethods.Values)
+        {
+            method.Definition.Authorization!.Roles.Should().BeEquivalentTo([UserManagement], method.QualifiedMethodId);
+        }
+
+        foreach (var method in (await GetTypeAsync("ApiScope")).AllMethods.Values.Concat(new[]
+                     { "CreateApiResource-1", "UpdateApiResource-1", "DeleteApiResource-1" }
+                     .Select(id => apiResource.AllMethods[id])))
+        {
+            method.Definition.Authorization!.Roles.Should()
+                .BeEquivalentTo([TenantManagement, UserManagement], method.QualifiedMethodId);
+        }
+
         // System.Identity 3.3.0: the client role and overlay methods carry the REST policy of ClientsController
         // (IdentityTenantAdministrationWritePolicy: TenantManagement or UserManagement).
         foreach (var id in new[] { "SetRoles-1", "AddRole-1", "RemoveRole-1", "ApplyOverlayUris-1", "CleanOverlayEntries-1" })
@@ -217,7 +251,11 @@ public class IdentityMethodDeclarationsIntegrationTests : IClassFixture<Identity
         // (AB#8053): a user is created only by User.CreateUser-1 or the REST API, never through the generic create.
         // ExternalTenantUserMapping: the flag on CreateMapping-1 is a Major on this existing type (row M16) and waits for the
         // next System.Identity major.
-        foreach (var type in new[] { "Group", "Client", "DataPermission", "ApiResource", "DataPolicy", "ExternalTenantUserMapping" })
+        foreach (var type in new[]
+                 {
+                     "Group", "Client", "DataPermission", "ApiResource", "DataPolicy", "ExternalTenantUserMapping", "Role",
+                     "ApiScope"
+                 })
         {
             (await GetTypeAsync(type)).AllMethods.Values.Where(m => m.ReplacesGenericCreate)
                 .Should().BeEmpty(type);

@@ -26,3 +26,35 @@ types:
     associations:
       - id: ${this}/GrantsPermission
         targetCkTypeId: ${this}/DataPermission
+    # 3.7.0: create, rename and delete run as methods (REST parity: RolesController POST/PUT/DELETE,
+    # IdentityUserAdministrationWritePolicy = UserManagement). Generic writes are refused since 3.6.0 (writeAccess), so these
+    # methods are the only caller path; the name is normalized by the role manager (NormalizedName is derived, never a parameter).
+    # Named CreateRole/UpdateRole/DeleteRole: Create, Update and Delete are reserved for the generic mutations (error 102).
+    # No replacesGenericCreate: on this existing type the flag is a Major (row M16), and writeAccess already refuses the generic create.
+    methods:
+      - methodId: CreateRole-1
+        kind: Static
+        description: "Creates a role. The result is the rtId of the new role."
+        parameters:
+          - { name: name, valueType: String, description: "The role name." }
+        result:
+          valueType: String
+        errors:
+          - { code: ROLE_ALREADY_EXISTS, description: "A role with this name exists." }
+        authorization:
+          roles: [ UserManagement ]
+          dataAccess: Write
+      - methodId: UpdateRole-1
+        description: "Renames the role. A built-in role cannot be renamed (METHOD_FORBIDDEN, reason built-in-role)."
+        parameters:
+          - { name: name, valueType: String, description: "The new role name." }
+        errors:
+          - { code: ROLE_ALREADY_EXISTS, description: "Another role has this name." }
+        authorization:
+          roles: [ UserManagement ]
+          dataAccess: Write
+      - methodId: DeleteRole-1
+        description: "Deletes the role. A built-in role cannot be deleted (METHOD_FORBIDDEN, reason built-in-role)."
+        authorization:
+          roles: [ UserManagement ]
+          dataAccess: Write

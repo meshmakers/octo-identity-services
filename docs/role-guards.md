@@ -127,7 +127,11 @@ and gain the app role: `self-grant` only knew user sessions. Decision by Gerald 
   grow (or the group a child is added to) is reached by the caller (member directly, via a mapping that serves it, or a parent group of it), or the mapping serves the
   caller (for a new mapping its source identity is in the caller's `xt_` chain). A client-credentials caller is self the same way for its own client
   (the added client, or a group its client reaches directly or as a parent group). Self wins over `role-not-held`; roles are resolved to names and judged with
-  `EvaluateGrantAsync` (built-in only). Group create with roles is not judged (it has no members); the roles take effect only through a judged member add.
+  `EvaluateGrantAsync` (built-in only). Group create with initial roles (`Group.CreateGroup`, REST `POST groups`, System.Identity 3.7.0) judges
+  them with the grant rule only (`EvaluateGrantAsync`: a built-in role the caller does not hold is `role-not-held`); a new group has no members, so the
+  self and last-administrator rules cannot apply. Before 3.7.0 the REST create wrote the initial roles unjudged.
+- **Role definitions:** `Role.UpdateRole` / `Role.DeleteRole` (REST `PUT` / `DELETE roles/{name}`) refuse a built-in role (`EvaluateRoleDefinition`,
+  `built-in-role`, 409 on REST).
 - **Not guarded on purpose:** `GroupStore`/`ExternalTenantUserMappingStore` and everything that uses them directly: Bootstrap seed, setup, scratch-tenant grant,
   cross-tenant provisioning (`AdminProvisioningController`), `LoginGroupAssignmentService`. Group methods call `EvaluateAsync(caller, RoleGraphChange)`
   and answer `METHOD_FORBIDDEN` with the `reason`; direct client roles: see the section on client roles.

@@ -57,6 +57,12 @@ internal sealed class IdentityMethodFacade(
     /// <summary>CK type id of the OAuth client (the declaring type of the <c>Client.*</c> methods).</summary>
     public const string ClientCkTypeId = "System.Identity/Client";
 
+    /// <summary>CK type id of the role (the declaring type of the <c>Role.*</c> methods).</summary>
+    public const string RoleCkTypeId = "System.Identity/Role";
+
+    /// <summary>CK type id of the API scope (the declaring type of the <c>ApiScope.*</c> methods).</summary>
+    public const string ApiScopeCkTypeId = "System.Identity/ApiScope";
+
     /// <summary>CK type id of the API resource (the declaring type of the <c>ApiResource.*</c> methods).</summary>
     public const string ApiResourceCkTypeId = "System.Identity/ApiResource";
 

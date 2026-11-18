@@ -334,4 +334,29 @@ answers this changed: `docs/identity-rest-facades.md` ("The target's data permis
 
 Static methods have no target entity; the gateway checks the caller's `Write` permission on the declaring type. Their handlers check the same
 with `IdentityMethodCall.CheckTypeWritableAsync` after the tenant bind (type not visible = `METHOD_TARGET_NOT_FOUND`, read only =
-`METHOD_FORBIDDEN` / `data-permission`): the `ExternalTenantUserMapping` methods, `User.CreateUser` and `Client.CleanOverlayEntries`.
+`METHOD_FORBIDDEN` / `data-permission`): the `ExternalTenantUserMapping` methods, `User.CreateUser`, `Client.CleanOverlayEntries` and the
+static creates of System.Identity 3.7.0 (`IdentityCreateMethodHandlerBase`).
+
+## Create, update and delete of roles, groups, API scopes and API resources (System.Identity 3.7.0)
+
+Generic writes of the identity types are refused since 3.6.0 (`writeAccess`), so their CRUD runs as methods (`Methods/RoleCrudHandlers.cs`,
+`GroupCrudHandlers.cs`, `ResourceCrudHandlers.cs`). The static creates derive from `IdentityCreateMethodHandlerBase` (caller rule, tenant bind,
+`CheckTypeWritableAsync`, one audit event with the new rtId as target); update and delete from `IdentityAdminMethodHandlerBase` (target check).
+
+| Method | Parameters | Result | Errors | Roles |
+|---|---|---|---|---|
+| static `Role.CreateRole` | `name` | rtId | `ROLE_ALREADY_EXISTS` | `UserManagement` |
+| `Role.UpdateRole` | `name` | - | `ROLE_ALREADY_EXISTS`; guard `built-in-role` | `UserManagement` |
+| `Role.DeleteRole` | - | - | guard `built-in-role` | `UserManagement` |
+| static `Group.CreateGroup` | `groupName`, optional `groupDescription`, `roleNames` | rtId | `GROUP_ALREADY_EXISTS`, `ROLE_NOT_FOUND`; guard `role-not-held` | `UserManagement` |
+| `Group.UpdateGroup` | `groupName`, optional `groupDescription` (omitted clears it) | - | `GROUP_ALREADY_EXISTS` | `UserManagement` |
+| `Group.DeleteGroup` | - | - | guard `last-administrator` | `UserManagement` |
+| static `ApiScope.CreateApiScope` / `ApiScope.UpdateApiScope` | `name`, optional `displayName`, `description`, `enabled`, `showInDiscoveryDocument`, `required`, `emphasized` (omitted = false), `userClaims` (omitted = unchanged) | create: rtId | `API_SCOPE_ALREADY_EXISTS` | `TenantManagement`, `UserManagement` |
+| `ApiScope.DeleteApiScope` | - | - | - | `TenantManagement`, `UserManagement` |
+| static `ApiResource.CreateApiResource` / `ApiResource.UpdateApiResource` | `name`, optional `displayName`, `description`, `enabled`, `showInDiscoveryDocument`, `requireResourceIndicator` (omitted = false), `userClaims`, `scopes` (omitted = unchanged), `allowedAccessTokenSigningAlgorithms` (omitted = server default) | create: rtId | `API_RESOURCE_ALREADY_EXISTS`; update also `CONCURRENT_CHANGE` | `TenantManagement`, `UserManagement` |
+| `ApiResource.DeleteApiResource` | - | - | - | `TenantManagement`, `UserManagement` |
+
+Derived fields (`NormalizedName`, `NormalizedGroupName`) are set by the handlers, never by a parameter; API resource secrets change only through the
+secret methods and survive an update. The scope and resource methods publish `CorsClientsUpdate` after every write. No method carries a secret, so all
+are bus handlers whatever `EnablePasswordMethods` says. REST facades and parity table: `docs/identity-rest-facades.md`. Tests:
+`Api/TenantApi/IdentityCrudRestMethodFacadeTests`.

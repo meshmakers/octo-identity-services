@@ -34,8 +34,22 @@ Notable changes of the OctoMesh identity services. The CK model `System.Identity
   `ProvisionMirrorInTenant` does for a named child; an allow-listed cross-tenant service client can no longer backfill the children of a
   tenant outside its own subtree. `Client.RotateMirrorSecret` stages `IdentityApiAuthorization:RoleEnforcement=Warn` only for its REST
   facade; over the bus or the GraphQL gateway a caller without `SecretManagement` is refused.
+- **A group created with initial roles passes the role change guard.** `POST groups` (and the new `Group.CreateGroup` method) refuse an initial
+  built-in role the caller does not hold (`403` problem `role-not-held`, audited, nothing created), as `PUT groups/{group}/roles` does. Before, a
+  caller could create a group with such a role and join it later. Intended REST change.
 
 ### Changed
+
+- **Create, update and delete of roles, groups, API scopes and API resources run CK methods (System.Identity 3.7.0).** The REST write endpoints of
+  `RolesController`, `GroupsController` (create, update, delete), `ApiScopesController` and `ApiResourcesController` are facades of the new
+  `Role.CreateRole/UpdateRole/DeleteRole`, `Group.CreateGroup/UpdateGroup/DeleteGroup`, `ApiScope.CreateApiScope/UpdateApiScope/DeleteApiScope` and
+  `ApiResource.CreateApiResource/UpdateApiResource/DeleteApiResource` methods (in-process, one `Identity.Method` event per call); the same methods
+  are the GraphQL path, since generic writes of these types are refused. Routes, bodies and status codes are unchanged except the intended changes
+  in the parity table of `docs/identity-rest-facades.md`: a group create with an unknown role id is `404` and creates nothing (was `500` with a
+  half-created group); a rename of an API scope or resource onto another one's name is `409` (was a duplicate); a blank scope name is `400` (was an
+  unhandled `500`); unexpected failures carry a fixed message instead of the exception text; under an enforcing data policy a caller who may not write
+  the type or the target is refused (`404` / `403`). Known limitation: the stored API resource secret hashes stay readable through generic GraphQL
+  until the next major (`access: Hidden` is a Major).
 
 - **The REST client mirror endpoints run the client mirror methods, the REST admin provisioning writes and the mapping create run
   static `ExternalTenantUserMapping` methods (System.Identity 3.5.0).** `POST clients/{clientId}/mirrors/provisionInExistingTenants`,

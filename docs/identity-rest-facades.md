@@ -1,6 +1,6 @@
 ---
-description: "REST facades of role, merge, create-user, password, group, client, secret and data-permission methods; deprecation waves; account pages run password methods"
-applies_to: "{IdentityMethodFacade,IdentityRestDeprecation,UsersController,ManageApiController,RoleChangeProblems,ResetUserPasswordRequestDto,ApiSecretsController,DataPermissionsController}.cs"
+description: "REST facades of the identity methods (users, groups, clients, secrets, data permissions, CRUD); deprecation waves; account pages"
+applies_to: "{IdentityMethodFacade,IdentityRestDeprecation,UsersController,ManageApiController,RoleChangeProblems,ResetUserPasswordRequestDto,ApiSecretsController,DataPermissionsController,ClientMirrorController,AdminProvisioningController,RolesController,GroupsController,ApiScopesController,ApiResourcesController}.cs"
 ---
 
 # REST facades, deprecations and account pages
@@ -237,8 +237,8 @@ Parity table (REST before -> facade):
 | Unexpected failure | unhandled `500` | `500` problem `METHOD_HANDLER_FAILED` (same status, no exception text) |
 | `RoleEnforcement=Warn` (not the default) | caller without `UserManagement` let through and logged | **intended REST change:** refused by the method (403 problem, `role-required`), as for the user facades - a method has no staged warn mode, and `Enforce` is the default |
 
-Not in this change: group create, update, delete and the group reads (generic CRUD story of the Feature). Group create with initial roles
-still writes them without the guard.
+Group create, update and delete are facades since System.Identity 3.7.0 (section "REST facades of the role, group, API scope and API resource
+CRUD" below); the group reads stay REST reads.
 
 Tests: `Api/TenantApi/GroupRestMethodFacadeTests` (per endpoint: exactly one `Identity.Method` event, in-process, the ambient-state probe sees
 no request state at handler entry; 403 for a caller without `UserManagement`; the two cycle answers with today's body; REST and the dispatcher
@@ -549,3 +549,71 @@ token; a caller without the role; the cross-tenant checks of `CreateMapping`), t
 `TenantExchangeIntegrationTests`), `Authorization/AdminProvisioningPipelineTests`.
 
 Neither group carries a deprecation (deprecation wave of identity wave 2 is its own story); REST is not removed and gets no `Sunset` header.
+
+## REST facades of the role, group, API scope and API resource CRUD (System.Identity 3.7.0)
+
+Since System.Identity 3.6.0 every caller-scoped generic write of these types is refused (`writeAccess`, `docs/ck-model.md`), so create, update and
+delete run as CK methods; generic GraphQL reads stay. The REST write endpoints are **facades** of them: the controller resolves the route's name to the
+rtId (roles by role name, scopes and resources by name, groups by rtId) and maps the envelope; every rule lives in the handlers
+(`Methods/RoleCrudHandlers.cs`, `GroupCrudHandlers.cs`, `ResourceCrudHandlers.cs`; the static creates share `IdentityCreateMethodHandlerBase`).
+
+| REST endpoint | Method | Roles (REST policy) |
+|---|---|---|
+| `POST roles` / `PUT roles/{roleName}` / `DELETE roles/{roleName}` | static `Role.CreateRole-1` / `Role.UpdateRole-1` / `Role.DeleteRole-1` | `UserManagement` (`IdentityUserAdministrationWritePolicy`) |
+| `POST groups` / `PUT groups/{rtId}` / `DELETE groups/{rtId}` | static `Group.CreateGroup-1` / `Group.UpdateGroup-1` / `Group.DeleteGroup-1` | `UserManagement` |
+| `POST apiScopes` / `PUT apiScopes/{name}` / `DELETE apiScopes/{name}` | static `ApiScope.CreateApiScope-1` / `ApiScope.UpdateApiScope-1` / `ApiScope.DeleteApiScope-1` | `TenantManagement` or `UserManagement` (`IdentityTenantAdministrationWritePolicy`) |
+| `POST apiResources` / `PUT apiResources/{name}` / `DELETE apiResources/{name}` | static `ApiResource.CreateApiResource-1` / `ApiResource.UpdateApiResource-1` / `ApiResource.DeleteApiResource-1` | `TenantManagement` or `UserManagement` |
+
+- **Same path as the other facades:** `IIdentityMethodFacade`, in-process, outside the request (no Mongo session or transaction of the request around
+  the call), caller from the bearer token, one `Identity.Method` event per call (details `name`, `nameBefore`; group create `rolesAfter`; never a
+  secret). The handlers repeat the declared roles on the validated principal.
+- **Derived fields are never parameters.** The role manager derives `Role.NormalizedName`, the group handlers `Group.NormalizedGroupName`
+  (upper-invariant, as before). API resource secrets are no parameter: they change only through the secret methods, and an update keeps them (one
+  version-checked read-modify-write, `CONCURRENT_CHANGE` when it loses).
+- **Data permission.** The static creates check the caller's `Write` permission on the declaring type (`CheckTypeWritableAsync`), the instance methods
+  the target (`CheckTargetWritableAsync`), with the gateway's answers: not visible = `METHOD_TARGET_NOT_FOUND` (`404`), visible but not writable =
+  `METHOD_FORBIDDEN` (`data-permission`, `403`).
+- **Guard.** `Role.UpdateRole` / `DeleteRole` refuse a built-in role (`built-in-role`), `Group.DeleteGroup` the removal of the last user administrator,
+  `Group.CreateGroup` an initial built-in role the caller does not hold (`role-not-held`, the grant rule of `Group.SetRoles`; `docs/role-guards.md`).
+  REST turns the refusal back into the audited problem answer (`RoleChangeProblems.RefusalOf`, WARN log, `Identity.RoleChangeRefused`).
+- **Caches.** The API scope and resource methods publish `CorsClientsUpdate` after every write, as REST did. A role rename needs no refresh: holders
+  keep the role by id, the next token and role check read the new name.
+- **Names.** `Create`, `Update` and `Delete` are reserved method names (compiler error 102), hence `CreateRole`, `UpdateGroup`, ... No method sets
+  `replacesGenericCreate`: on these existing types the flag is a Major (row M16), and `writeAccess` already refuses the generic create.
+
+Parity table (REST before -> facade):
+
+| Point | REST before | Now |
+|---|---|---|
+| Routes, bodies, status codes of a success | roles, scopes, resources `200` empty; group create `201` + `GroupDto`, update `200` + `GroupDto`, delete `200` | unchanged (the group DTO is read after the method) |
+| Unknown role / scope / resource name, unknown group | `404` (`NotFoundErrorDto`; group: empty) | unchanged (resolved in the controller; `METHOD_TARGET_NOT_FOUND` of a race maps to the same answer) |
+| Role: duplicate or invalid name | `400` `OperationFailedErrorDto`, role manager code + description | unchanged (`ROLE_ALREADY_EXISTS` / validation failure, description rebuilt with the role manager's describer) |
+| Role: rename or delete of a built-in role | `409` problem `built-in-role`, audited | unchanged, plus the `Identity.Method` event |
+| Group: duplicate name (create, rename) | `409` text `A group with name '…' already exists.` | unchanged (`GROUP_ALREADY_EXISTS`) |
+| Group create: unknown role id | group stored, then the role write failed with an unhandled `500` | **intended REST change:** `404` `Role with id '…' not found.`, nothing created - the `500` and the half-created group were a bug |
+| Group create: initial built-in role the caller does not hold | created with the role, no guard | **intended REST change:** `403` problem `role-not-held`, audited, nothing created. Reason: a caller could create a group with a role it does not hold and join it later (escalation gap); the same rule as `PUT groups/{g}/roles` |
+| Group create: initial role the caller cannot read (only with an enforcing data policy on roles) | written | **intended REST change:** `404` as for an unknown role id |
+| Group delete of the last user administrator | `409` problem, audited | unchanged |
+| API scope / resource: duplicate name on create | `409` text | unchanged (`API_SCOPE_ALREADY_EXISTS` / `API_RESOURCE_ALREADY_EXISTS`) |
+| API scope / resource: rename onto the name of another one | stored a second entry with the same name | **intended REST change:** `409` with the create's text, nothing changed - two scopes or resources with one name were a bug |
+| API scope: blank name (create, update) | unhandled `500` (the check threw outside the error handling) | **intended REST change:** `400` `InternalServerErrorDto("Scope name cannot be null or empty.")` |
+| API resource: blank name | `500` `InternalServerErrorDto("API Resource name cannot be null or empty.")` | unchanged |
+| API resource update: lost concurrent write | `409` problem | unchanged (`CONCURRENT_CHANGE`) |
+| Omitted user claims / scopes on update | kept | unchanged |
+| Unexpected failure | the exception text (`400` scopes, `500` roles, groups and resources) | same status; **intended body change:** a fixed message (`Creation of role failed.`, `Deletion of the API scope failed.`, ...), no exception text leaves the service; group update / delete `500` problem `METHOD_HANDLER_FAILED` |
+| Role: a role manager error other than a duplicate or invalid name (store failure) | `400` `OperationFailedErrorDto` with the store's errors | **intended REST change:** `500` with the fixed message - such an error is a failure of the service, not of the request |
+| Type or target the caller cannot read / write (only with an enforcing data policy on the type; open by default) | not checked: written anyway | **intended REST change:** `404` / `403` problem `METHOD_FORBIDDEN` (`data-permission`), nothing written (CWE-863, as for the other facades) |
+| `RoleEnforcement=Warn` (not the default) | caller without the role let through and logged | **intended REST change:** refused by the method (`403` problem, `role-required`), as for the other facades |
+| Audit | none | one `Identity.Method` event per call |
+
+**Known limitation:** the stored secret values of an API resource (`ApiResource.ApiSecrets`, hashes of the generated secrets, never the clear text) stay
+readable through generic GraphQL reads. Hiding them (`access: Hidden`) is a Major of System.Identity (row T7) and waits for the next major, like the
+other secret attributes.
+
+Tests: `Api/TenantApi/IdentityCrudRestMethodFacadeTests` (every endpoint runs its method in-process outside the request with one event; the REST policy;
+REST and the dispatcher side by side per type - stored state with derived names, duplicates, renames, deletes, unknown targets; the built-in role; a group
+create with an initial built-in role the caller does not hold, and with an unknown role id; a renamed role in the next role lookup without a restart; an
+update that keeps the API resource secrets; another tenant's token; a caller who may not write the type or the target), `Persistence/IdentityMethodDeclarationsIntegrationTests`,
+`Methods/IdentityMethodHostTests`, plus the unchanged REST suites (`RoleChangeGuardTests`, `GroupRoleChangeGuardTests`, `TenantApiRoleAuthorizationTests`).
+
+No deprecation yet (deprecation wave of identity wave 2 is its own story); REST is not removed and gets no `Sunset` header.

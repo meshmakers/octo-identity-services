@@ -1,5 +1,23 @@
 # Changelog
 
+## 3.7.0 - 2026-11-18
+
+_Required bump level: minor._
+
+System.Identity 3.7.0 adds the create, update and delete methods of roles, groups, API scopes and API resources, so their REST CRUD
+endpoints become facades (generic writes of these types are refused since 3.6.0). Compile gate against 3.6.0: required level MINOR, nothing
+to acknowledge; the acknowledgements of 3.6.0 are removed (valid for one release).
+
+Rollout: service-managed - ships inside the identity service with the regular identity release train. No catalog import, no per-tenant
+step, **no FixAll**. No data migration; ranges `System.Identity-[3.0.0,4.0)` stay satisfied.
+
+### Added
+
+- Static method 'Role.CreateRole-1', methods 'Role.UpdateRole-1', 'Role.DeleteRole-1' _(minor)_
+- Static method 'Group.CreateGroup-1', methods 'Group.UpdateGroup-1', 'Group.DeleteGroup-1' _(minor)_
+- Static method 'ApiScope.CreateApiScope-1', methods 'ApiScope.UpdateApiScope-1', 'ApiScope.DeleteApiScope-1' _(minor)_
+- Static method 'ApiResource.CreateApiResource-1', methods 'ApiResource.UpdateApiResource-1', 'ApiResource.DeleteApiResource-1' _(minor)_
+
 ## 3.6.0 - 2026-11-17
 
 _Required bump level: minor (acknowledged)._
