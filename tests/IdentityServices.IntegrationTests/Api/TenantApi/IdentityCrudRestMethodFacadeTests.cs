@@ -49,11 +49,13 @@ public class IdentityCrudRestMethodFacadeTests : IntegrationTestBase, IDisposabl
     {
     }
 
-    public static TheoryData<string> Endpoints => new()
-    {
+    private static readonly string[] EndpointNames =
+    [
         "createRole", "updateRole", "deleteRole", "createGroup", "updateGroup", "deleteGroup", "createScope",
         "updateScope", "deleteScope", "createResource", "updateResource", "deleteResource"
-    };
+    ];
+
+    public static TheoryData<string> Endpoints => new(EndpointNames);
 
     public void Dispose()
     {
@@ -553,6 +555,137 @@ public class IdentityCrudRestMethodFacadeTests : IntegrationTestBase, IDisposabl
     }
 
     [Fact]
+    public async Task ACallerWhoMayNotWriteTheTarget_IsRefusedOnScopeAndResourceUpdateAndDelete_AndNothingChanges()
+    {
+        var host = Host(denyReads: true);
+        var scopeName = await NewScopeAsync();
+        var resourceName = await NewResourceAsync();
+        var scopeRtId = (await WithResourceStoreAsync(s => s.GetApiScopeByNameAsync(scopeName)))!.RtId.ToString();
+        var resourceRtId = (await WithResourceStoreAsync(s => s.GetApiResourceByNameAsync(resourceName)))!.RtId.ToString();
+        using var client = FacadeCaller.User(UserManagement).Client(host);
+        var admin = Admin(UserManagement);
+        var ct = TestContext.Current.CancellationToken;
+
+        var changed = ScopeDto(scopeName);
+        changed.DisplayName = "changed";
+        (await client.PutAsJsonAsync(TenantApiUrl($"apiScopes/{scopeName}"), changed, ct)).StatusCode.Should()
+            .Be(HttpStatusCode.NotFound);
+        (await client.DeleteAsync(TenantApiUrl($"apiScopes/{scopeName}"), ct)).StatusCode.Should()
+            .Be(HttpStatusCode.NotFound);
+        var changedResource = ResourceDto(resourceName);
+        changedResource.DisplayName = "changed";
+        (await client.PutAsJsonAsync(TenantApiUrl($"apiResources/{resourceName}"), changedResource, ct)).StatusCode
+            .Should().Be(HttpStatusCode.NotFound);
+        (await client.DeleteAsync(TenantApiUrl($"apiResources/{resourceName}"), ct)).StatusCode.Should()
+            .Be(HttpStatusCode.NotFound);
+
+        // the method path (GraphQL) refuses alike: a target the caller cannot see is METHOD_TARGET_NOT_FOUND
+        foreach (var (methodId, typeId, target, parameters) in new (string, string, string, object)[]
+                 {
+                     (SystemIdentityCkIds.ApiScopeUpdateApiScopeMethodId, IdentityMethodFacade.ApiScopeCkTypeId, scopeRtId,
+                         new ApiScopeUpdateApiScopeParameters { Name = scopeName, DisplayName = "changed" }),
+                     (SystemIdentityCkIds.ApiScopeDeleteApiScopeMethodId, IdentityMethodFacade.ApiScopeCkTypeId, scopeRtId,
+                         new ApiScopeDeleteApiScopeParameters()),
+                     (SystemIdentityCkIds.ApiResourceUpdateApiResourceMethodId, IdentityMethodFacade.ApiResourceCkTypeId,
+                         resourceRtId, new ApiResourceUpdateApiResourceParameters { Name = resourceName, DisplayName = "changed" }),
+                     (SystemIdentityCkIds.ApiResourceDeleteApiResourceMethodId, IdentityMethodFacade.ApiResourceCkTypeId,
+                         resourceRtId, new ApiResourceDeleteApiResourceParameters())
+                 })
+        {
+            (await DispatchAsync(host, admin, methodId, typeId, target, parameters)).Error!.Code.Should()
+                .Be(CkMethodErrorCodes.MethodTargetNotFound, methodId);
+        }
+
+        var scope = await WithResourceStoreAsync(s => s.GetApiScopeByNameAsync(scopeName));
+        scope.Should().NotBeNull();
+        scope!.DisplayName.Should().NotBe("changed");
+        var resource = await WithResourceStoreAsync(s => s.GetApiResourceByNameAsync(resourceName));
+        resource.Should().NotBeNull();
+        resource!.DisplayName.Should().NotBe("changed");
+    }
+
+    [Fact]
+    public async Task AnUnknownScopeOrResource_Is404OnRest_AndMethodTargetNotFoundOnTheMethodPath()
+    {
+        var host = Host();
+        using var client = FacadeCaller.User(UserManagement).Client(host);
+        var admin = Admin(UserManagement);
+        var ct = TestContext.Current.CancellationToken;
+        var name = NewName("unknown");
+        var unknownRtId = OctoObjectId.GenerateNewId().ToString();
+
+        (await client.PutAsJsonAsync(TenantApiUrl($"apiScopes/{name}"), ScopeDto(name), ct)).StatusCode.Should()
+            .Be(HttpStatusCode.NotFound);
+        (await client.DeleteAsync(TenantApiUrl($"apiScopes/{name}"), ct)).StatusCode.Should().Be(HttpStatusCode.NotFound);
+        (await client.PutAsJsonAsync(TenantApiUrl($"apiResources/{name}"), ResourceDto(name), ct)).StatusCode.Should()
+            .Be(HttpStatusCode.NotFound);
+        (await client.DeleteAsync(TenantApiUrl($"apiResources/{name}"), ct)).StatusCode.Should()
+            .Be(HttpStatusCode.NotFound);
+
+        foreach (var (methodId, typeId, parameters) in new (string, string, object)[]
+                 {
+                     (SystemIdentityCkIds.ApiScopeUpdateApiScopeMethodId, IdentityMethodFacade.ApiScopeCkTypeId,
+                         new ApiScopeUpdateApiScopeParameters { Name = name }),
+                     (SystemIdentityCkIds.ApiScopeDeleteApiScopeMethodId, IdentityMethodFacade.ApiScopeCkTypeId,
+                         new ApiScopeDeleteApiScopeParameters()),
+                     (SystemIdentityCkIds.ApiResourceUpdateApiResourceMethodId, IdentityMethodFacade.ApiResourceCkTypeId,
+                         new ApiResourceUpdateApiResourceParameters { Name = name }),
+                     (SystemIdentityCkIds.ApiResourceDeleteApiResourceMethodId, IdentityMethodFacade.ApiResourceCkTypeId,
+                         new ApiResourceDeleteApiResourceParameters())
+                 })
+        {
+            (await DispatchAsync(host, admin, methodId, typeId, unknownRtId, parameters)).Error!.Code.Should()
+                .Be(CkMethodErrorCodes.MethodTargetNotFound, methodId);
+        }
+
+        (await WithResourceStoreAsync(s => s.GetApiScopeByNameAsync(name))).Should().BeNull();
+        (await WithResourceStoreAsync(s => s.GetApiResourceByNameAsync(name))).Should().BeNull();
+    }
+
+    /// <summary>
+    ///     Endpoint x caller of the method path (the GraphQL gateway's dispatcher call) that must be refused: CommunicationManagement
+    ///     on all twelve methods, TenantManagement alone on the role and group methods (they need UserManagement), and a token
+    ///     with both administration roles but without the <c>octo_api</c> scope on all twelve.
+    /// </summary>
+    public static TheoryData<string, string> MethodPathRefusals
+    {
+        get
+        {
+            var data = new TheoryData<string, string>();
+            foreach (var name in EndpointNames)
+            {
+                data.Add(name, "CommunicationManagement");
+                data.Add(name, NoOctoApiScope);
+                if (name.Contains("Role") || name.Contains("Group"))
+                {
+                    data.Add(name, TenantManagement);
+                }
+            }
+
+            return data;
+        }
+    }
+
+    private const string NoOctoApiScope = "UserManagement+TenantManagement without octo_api";
+
+    [Theory]
+    [MemberData(nameof(MethodPathRefusals))]
+    public async Task TheMethodPath_RefusesACallerWithoutTheDeclaredRoleOrScope_AndChangesNothing(string endpoint,
+        string callerKind)
+    {
+        var host = Host();
+        var caller = callerKind == NoOctoApiScope
+            ? new CkMethodPrincipal(Guid.NewGuid().ToString("N"), [UserManagement, TenantManagement], [])
+            : Admin(callerKind);
+        var call = await PrepareMethodCallAsync(endpoint);
+
+        var response = await DispatchAsync(host, caller, call.MethodId, call.CkTypeId, call.TargetRtId, call.Parameters);
+
+        response.Success.Should().BeFalse($"{endpoint} by {callerKind}");
+        response.Error!.Code.Should().Be(CkMethodErrorCodes.MethodForbidden, $"{endpoint} by {callerKind}");
+        await call.AssertUnchanged();
+    }
+    [Fact]
     public void TheCrudMethods_RunInThisProcess()
     {
         var transport = Host().Services.GetRequiredService<ICkInProcessMethodTransport>();
@@ -664,6 +797,104 @@ public class IdentityCrudRestMethodFacadeTests : IntegrationTestBase, IDisposabl
             default:
                 return new EndpointCall(await client.DeleteAsync(TenantApiUrl($"apiResources/{await NewResourceAsync()}"),
                     ct), SystemIdentityCkIds.ApiResourceDeleteApiResourceMethodId, HttpStatusCode.OK);
+        }
+    }
+
+    private sealed record MethodCall(string MethodId, string CkTypeId, string? TargetRtId, object Parameters,
+        Func<Task> AssertUnchanged);
+
+    /// <summary>
+    ///     One of the twelve methods with a valid change on fresh entities, as the GraphQL gateway sends it, and the check that
+    ///     nothing was written (no created entity, the target unchanged or still there).
+    /// </summary>
+    private async Task<MethodCall> PrepareMethodCallAsync(string endpoint)
+    {
+        var newName = NewName("mp");
+        switch (endpoint)
+        {
+            case "createRole":
+                return new MethodCall(SystemIdentityCkIds.RoleCreateRoleMethodId, IdentityMethodFacade.RoleCkTypeId, null,
+                    new RoleCreateRoleParameters { Name = newName },
+                    async () => (await FindRoleAsync(newName)).Should().BeNull());
+            case "updateRole":
+            case "deleteRole":
+            {
+                var role = await NewRoleAsync();
+                return new MethodCall(
+                    endpoint == "updateRole" ? SystemIdentityCkIds.RoleUpdateRoleMethodId : SystemIdentityCkIds.RoleDeleteRoleMethodId,
+                    IdentityMethodFacade.RoleCkTypeId, role.RtId.ToString(),
+                    endpoint == "updateRole" ? new RoleUpdateRoleParameters { Name = newName } : new RoleDeleteRoleParameters(),
+                    async () =>
+                    {
+                        (await FindRoleAsync(role.Name!)).Should().NotBeNull();
+                        (await FindRoleAsync(newName)).Should().BeNull();
+                    });
+            }
+            case "createGroup":
+                return new MethodCall(SystemIdentityCkIds.GroupCreateGroupMethodId, IdentityMethodFacade.GroupCkTypeId, null,
+                    new GroupCreateGroupParameters { GroupName = newName },
+                    async () => (await WithGroupStoreAsync(s => s.FindByNameAsync(newName.ToUpperInvariant()))).Should()
+                        .BeNull());
+            case "updateGroup":
+            case "deleteGroup":
+            {
+                var group = await NewGroupAsync();
+                return new MethodCall(
+                    endpoint == "updateGroup"
+                        ? SystemIdentityCkIds.GroupUpdateGroupMethodId
+                        : SystemIdentityCkIds.GroupDeleteGroupMethodId,
+                    IdentityMethodFacade.GroupCkTypeId, group.RtId.ToString(),
+                    endpoint == "updateGroup"
+                        ? new GroupUpdateGroupParameters { GroupName = newName }
+                        : new GroupDeleteGroupParameters(),
+                    async () => (await WithGroupStoreAsync(s => s.FindByIdAsync(group.RtId)))!.GroupName.Should()
+                        .Be(group.GroupName));
+            }
+            case "createScope":
+                return new MethodCall(SystemIdentityCkIds.ApiScopeCreateApiScopeMethodId, IdentityMethodFacade.ApiScopeCkTypeId,
+                    null, ScopeParameters(newName),
+                    async () => (await WithResourceStoreAsync(s => s.GetApiScopeByNameAsync(newName))).Should().BeNull());
+            case "updateScope":
+            case "deleteScope":
+            {
+                var name = await NewScopeAsync();
+                var rtId = (await WithResourceStoreAsync(s => s.GetApiScopeByNameAsync(name)))!.RtId.ToString();
+                return new MethodCall(
+                    endpoint == "updateScope"
+                        ? SystemIdentityCkIds.ApiScopeUpdateApiScopeMethodId
+                        : SystemIdentityCkIds.ApiScopeDeleteApiScopeMethodId,
+                    IdentityMethodFacade.ApiScopeCkTypeId, rtId,
+                    endpoint == "updateScope"
+                        ? new ApiScopeUpdateApiScopeParameters { Name = newName }
+                        : new ApiScopeDeleteApiScopeParameters(),
+                    async () =>
+                    {
+                        (await WithResourceStoreAsync(s => s.GetApiScopeByNameAsync(name))).Should().NotBeNull();
+                        (await WithResourceStoreAsync(s => s.GetApiScopeByNameAsync(newName))).Should().BeNull();
+                    });
+            }
+            case "createResource":
+                return new MethodCall(SystemIdentityCkIds.ApiResourceCreateApiResourceMethodId,
+                    IdentityMethodFacade.ApiResourceCkTypeId, null, ResourceParameters(newName),
+                    async () => (await WithResourceStoreAsync(s => s.GetApiResourceByNameAsync(newName))).Should().BeNull());
+            default:
+            {
+                var name = await NewResourceAsync();
+                var rtId = (await WithResourceStoreAsync(s => s.GetApiResourceByNameAsync(name)))!.RtId.ToString();
+                return new MethodCall(
+                    endpoint == "updateResource"
+                        ? SystemIdentityCkIds.ApiResourceUpdateApiResourceMethodId
+                        : SystemIdentityCkIds.ApiResourceDeleteApiResourceMethodId,
+                    IdentityMethodFacade.ApiResourceCkTypeId, rtId,
+                    endpoint == "updateResource"
+                        ? new ApiResourceUpdateApiResourceParameters { Name = newName }
+                        : new ApiResourceDeleteApiResourceParameters(),
+                    async () =>
+                    {
+                        (await WithResourceStoreAsync(s => s.GetApiResourceByNameAsync(name))).Should().NotBeNull();
+                        (await WithResourceStoreAsync(s => s.GetApiResourceByNameAsync(newName))).Should().BeNull();
+                    });
+            }
         }
     }
 

@@ -613,7 +613,9 @@ other secret attributes.
 Tests: `Api/TenantApi/IdentityCrudRestMethodFacadeTests` (every endpoint runs its method in-process outside the request with one event; the REST policy;
 REST and the dispatcher side by side per type - stored state with derived names, duplicates, renames, deletes, unknown targets; the built-in role; a group
 create with an initial built-in role the caller does not hold, and with an unknown role id; a renamed role in the next role lookup without a restart; an
-update that keeps the API resource secrets; another tenant's token; a caller who may not write the type or the target), `Persistence/IdentityMethodDeclarationsIntegrationTests`,
+update that keeps the API resource secrets; another tenant's token; a caller who may not write the type or the target, for all four types; an
+unknown scope or resource; on the method path every one of the twelve methods refuses a `CommunicationManagement` caller and a token without
+`octo_api`, and the role and group methods a `TenantManagement`-only caller, with nothing written), `Persistence/IdentityMethodDeclarationsIntegrationTests`,
 `Methods/IdentityMethodHostTests`, plus the unchanged REST suites (`RoleChangeGuardTests`, `GroupRoleChangeGuardTests`, `TenantApiRoleAuthorizationTests`).
 
 No deprecation yet (deprecation wave of identity wave 2 is its own story); REST is not removed and gets no `Sunset` header.
