@@ -245,7 +245,11 @@ public class BlueprintLockProtectionIntegrationTests : IClassFixture<IdentitySer
         // The policy table is cached per tenant (60 s); this test needs the policy now.
         _fixture.GetService<IDataPermissionResolver>().Invalidate(_fixture.GetSystemContext().TenantId);
 
-        var userContext = RtSecurityContext.ForUser("locktest-user", [roleName]);
+        // Since System.Identity 3.6.0 every identity type is written only on the identity channel (writeAccess); a plain
+        // caller session is refused before the policy guard runs (IdentityTypeWriteAccessIntegrationTests). The session
+        // here carries the channel, so the blueprint-lock guard of the opted-in policy is what decides.
+        var userContext = RtSecurityContext.ForUser("locktest-user", [roleName])
+            .WithWriteChannel("System.Identity/IdentityService");
 
         // 1. Locked entity: refused with the stable lock error, entity unchanged.
         var refused = await TryRenameAsync(repo, userContext, lockedRoleRtId, "renamed-by-user");

@@ -4,6 +4,8 @@ types:
     derivable: Any
     description: "ASP.NET Data Protection key-ring element. Service-global data persisted in the system tenant so every identity pod shares one key ring (replaces the file-system/PVC key store)."
     derivedFromCkTypeId: ${System}/Entity
+    writeAccess:
+      channels: [ System.Identity/IdentityService ]
     isFinal: true
     isAbstract: false
     attributes:

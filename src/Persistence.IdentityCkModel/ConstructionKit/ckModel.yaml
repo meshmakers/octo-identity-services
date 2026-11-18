@@ -1,4 +1,22 @@
 "$schema": "https://schemas.meshmakers.cloud/construction-kit-meta.schema.json"
+# 3.6.0 closes a write path around the identity service: every root type of System.Identity declares
+#   writeAccess: { channels: [ System.Identity/IdentityService ] }
+# (inherited by the derived types: the resources ApiScope, ApiResource, IdentityResource and every identity provider).
+# Before, a caller with nothing but the octo_api scope could create, update or delete roles, groups, clients (including
+# their secrets, scopes and redirect URIs), identity providers, data policies and data permissions through the generic
+# write paths (GraphQL runtime mutations, the caller path of ImportRt, adapter write nodes), without the role, guard,
+# validation and cache refresh of the identity REST API and methods. No service sets this channel: only system sessions
+# write these types - the identity service's own stores, blueprint seeds, the system path of ImportRt and tenant restores.
+# Every other (caller-scoped) write is refused by the engine with message 144. Generic reads are unchanged.
+# A writeAccess block added to a type is Minor + acknowledge (row T8 of docs/ck-semver-rules.md in
+# octo-construction-kit-engine); the acknowledgements below are valid for this release only (OCTO-CK204 afterwards).
+# The block raises minEngineVersion to 3.5.71 (WriteAccessMinEngineVersion): every service of an environment must run an
+# engine >= 3.5.71 before an identity build with this model reaches it; an older engine refuses the model (message 126).
+# No attribute, record, method, id or default changes; no data migration; ranges [3.0.0,4.0) stay satisfied.
+# Service-managed: ships with the identity release, no catalog import, no FixAll.
+# NEXT MAJOR: Hidden for the stored secret values (Client.Secrets, ApiResource.Secrets) and replacesGenericCreate where
+# the CRUD methods take over (both Majors by rows T7 / M16).
+#
 # 3.5.0 (Feature F5.2 identity wave 2) adds methods only, so the REST client mirror and admin provisioning endpoints become
 # facades:
 #   * Client.ProvisionMirrors-1, Client.ProvisionMirrorInTenant-1, Client.RotateMirrorSecret-1 (result sensitive),
@@ -174,7 +192,47 @@
 # concept AB#5528 in octo-construction-kit-engine). String -> Secret is Minor
 # (CkSemVerClassifier): stored clear-text values stay readable as legacy values
 # until the encrypt sweep has run. Secret requires System >= 2.5 (decision 12).
-modelId: System.Identity-3.5.0
+modelId: System.Identity-3.6.0
 ckLanguage: 2
 dependencies:
   - System-[2.5,3.0)
+compatibility:
+  acknowledge:
+    - change: "Type:Client-1#Modified:writeAccess"
+      reason: "Only the identity service writes identity data; generic caller writes bypassed its roles, guards and validation"
+    - change: "Type:ClientMirror-1#Modified:writeAccess"
+      reason: "Only the identity service writes identity data; generic caller writes bypassed its roles, guards and validation"
+    - change: "Type:DataPermission-1#Modified:writeAccess"
+      reason: "Only the identity service writes identity data; generic caller writes bypassed its roles, guards and validation"
+    - change: "Type:DataPolicy-1#Modified:writeAccess"
+      reason: "Only the identity service writes identity data; generic caller writes bypassed its roles, guards and validation"
+    - change: "Type:DataProtectionKey-1#Modified:writeAccess"
+      reason: "Only the identity service writes identity data; generic caller writes bypassed its roles, guards and validation"
+    - change: "Type:EmailDomainGroupRule-1#Modified:writeAccess"
+      reason: "Only the identity service writes identity data; generic caller writes bypassed its roles, guards and validation"
+    - change: "Type:ExternalTenantUserMapping-1#Modified:writeAccess"
+      reason: "Only the identity service writes identity data; generic caller writes bypassed its roles, guards and validation"
+    - change: "Type:Group-1#Modified:writeAccess"
+      reason: "Only the identity service writes identity data; generic caller writes bypassed its roles, guards and validation"
+    - change: "Type:IdentityProvider-1#Modified:writeAccess"
+      reason: "Only the identity service writes identity data; generic caller writes bypassed its roles, guards and validation"
+    - change: "Type:OAuthAuthorization-1#Modified:writeAccess"
+      reason: "Only the identity service writes identity data; generic caller writes bypassed its roles, guards and validation"
+    - change: "Type:OAuthToken-1#Modified:writeAccess"
+      reason: "Only the identity service writes identity data; generic caller writes bypassed its roles, guards and validation"
+    - change: "Type:Permission-1#Modified:writeAccess"
+      reason: "Only the identity service writes identity data; generic caller writes bypassed its roles, guards and validation"
+    - change: "Type:PermissionRole-1#Modified:writeAccess"
+      reason: "Only the identity service writes identity data; generic caller writes bypassed its roles, guards and validation"
+    - change: "Type:PersistedGrant-1#Modified:writeAccess"
+      reason: "Only the identity service writes identity data; generic caller writes bypassed its roles, guards and validation"
+    - change: "Type:Resource-1#Modified:writeAccess"
+      reason: "Only the identity service writes identity data; generic caller writes bypassed its roles, guards and validation"
+    - change: "Type:Role-1#Modified:writeAccess"
+      reason: "Only the identity service writes identity data; generic caller writes bypassed its roles, guards and validation"
+    - change: "Type:ServerSideSession-1#Modified:writeAccess"
+      reason: "Only the identity service writes identity data; generic caller writes bypassed its roles, guards and validation"
+    - change: "Type:User-1#Modified:writeAccess"
+      reason: "Only the identity service writes identity data; generic caller writes bypassed its roles, guards and validation"
+    - change: "Type:VerifiedExternalIdentifier-1#Modified:writeAccess"
+      reason: "Only the identity service writes identity data; generic caller writes bypassed its roles, guards and validation"

@@ -4,6 +4,8 @@ types:
     derivable: Any
     description: Binds a DataPermission to CK types with actions, scope and enforcement mode. A CK type is protected as soon as any policy targets it (AB#4972).
     derivedFromCkTypeId: ${System}/Entity
+    writeAccess:
+      channels: [ System.Identity/IdentityService ]
     isFinal: true
     isAbstract: false
     attributes:

@@ -217,3 +217,56 @@ cannot restrict association writes. In 2.x the attributes were a runtime list, b
 `securitySensitive` is a Major (row T7). **Nothing in this service is affected**: every identity write (stores, REST, methods,
 provisioning, migrations, the bus consumer's `MayActAs`/`AssignedRole` edges, the preferred-channel self-service) goes through
 `ITenantRepository`, which the guards do not touch, and the Bootstrap seed (TenantOwners `AssignedRole` edges) is a system import.
+
+## Only system sessions write identity types (System.Identity 3.6.0)
+
+Every root type of System.Identity declares the type write restriction of the engine (`writeAccess`, CK language 2):
+
+```yaml
+writeAccess:
+  channels: [ System.Identity/IdentityService ]
+```
+
+The resources (`ApiScope`, `ApiResource`, `IdentityResource`) and the identity providers inherit it from `Resource` and
+`IdentityProvider`. No principal kind is listed and no service opens a session on that channel, so only **system sessions** write
+identity data:
+
+| Writer | Session | Result |
+|---|---|---|
+| Identity stores (REST controllers, CK method handlers, provisioning, migrations, self-service) | `ITenantRepository.GetSessionAsync()` (system) | unchanged |
+| Blueprint seeds and updates (`System.Identity.Bootstrap`, app blueprints that seed roles, groups, clients, data permissions) | system import | unchanged |
+| Tenant restore, system path of `ImportRt` | system | unchanged |
+| Generic GraphQL runtime mutations (create, update, delete, association changes, query rows) | caller session | **refused**, message 144 |
+| Caller path of `ImportRt` (an import a user or client starts through the API) | caller import | **refused** before the first write, message 144; the whole file is rejected |
+| Mesh adapter write nodes (service-account or caller sessions) and any other caller-scoped write | caller session | **refused**, message 144 |
+| Mesh adapter nodes with `identity: System` | system session | written, as before: deploying such a pipeline needs `UserManagement` (adapter service of the communication controller); the node does not run the identity guards (role change guard, validation) |
+
+Why: before 3.6.0 a caller with nothing but the `octo_api` scope could create, update or delete roles (role claims are role
+names, so a rename changed every holder's rights), groups, clients (secrets, scopes, redirect URIs), identity providers (including
+the parent-tenant trust of an `OctoTenantIdentityProvider`), data policies (the enforcement mode) and data permissions through the
+generic paths, without the roles, guards, validation and cache refresh of the REST API and the CK methods. Generic **reads** are
+unchanged.
+
+Replacement for a refused write: the identity REST API (unchanged) or the identity CK methods; for data that ships with a
+product, a blueprint seed. A tenant clone through `ExportRt` / caller `ImportRt` no longer carries identity entities (users were
+already refused since 3.0.0); set them up in the target tenant with a blueprint or the REST API.
+
+SemVer and rollout: a `writeAccess` block added to a type is **Minor + acknowledge** (row T8 of `docs/ck-semver-rules.md` in
+octo-construction-kit-engine), one entry per root type in `ckModel.yaml` for this release only. The block raises the model's
+`minEngineVersion` to **3.5.71**: an older engine refuses the model (message 126), so every service of an environment must run an
+engine >= 3.5.71 before an identity build with System.Identity 3.6.0 reaches it.
+
+Not closed by this release (tracked separately): a caller with the role `DataModelManagement` can replace the tenant's System.Identity
+through the asset-repo `ImportCk` endpoint with a hand-built model without `writeAccess` (removing the block is only Minor + acknowledge)
+or an explicit downgrade to 3.5.0; the embedded-import guard keeps the installed newer model, so the restriction would be gone for that
+tenant. The fix belongs to the CK import of the asset repository (refuse a caller import of a service-managed `System.*` model).
+
+Next major: `Hidden` for the stored secret values (`Client.Secrets`, `ApiResource.Secrets`) and `replacesGenericCreate` for types
+whose create becomes a method (rows T7, M16).
+
+Tests: `Persistence/IdentityTypeWriteAccessIntegrationTests` (compiled model: every type restricted to the channel; caller
+sessions of every principal kind refused on create, rename, delete, derived types, client secrets, the enforcement mode and an
+association; caller `ImportRt` refused before any write and no refused edge stored; Bootstrap seeds, system import and system sessions still write;
+a tenant backup and restore brings identity data back, the restored tenant is written by system sessions and still refuses caller
+writes; a session on the channel is admitted). `BlueprintLockProtectionIntegrationTests` opens its user session on the channel, so the blueprint-lock
+guard is still what it tests.

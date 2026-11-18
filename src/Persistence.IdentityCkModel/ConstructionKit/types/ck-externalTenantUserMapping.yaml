@@ -4,6 +4,8 @@ types:
     derivable: Any
     description: "Maps a user from a parent tenant to roles in this (child) tenant."
     derivedFromCkTypeId: ${System}/Entity
+    writeAccess:
+      channels: [ System.Identity/IdentityService ]
     isFinal: true
     isAbstract: false
     attributes:

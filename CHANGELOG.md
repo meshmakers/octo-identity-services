@@ -7,6 +7,18 @@ Notable changes of the OctoMesh identity services. The CK model `System.Identity
 
 ### Security
 
+- **Only the identity service writes identity data (System.Identity 3.6.0).** Every root type of the model declares
+  `writeAccess: { channels: [ System.Identity/IdentityService ] }` (inherited by the resources and identity providers), and no service
+  opens a session on that channel. Before, a caller with nothing but the `octo_api` scope could create, update or delete roles (a
+  rename changed the rights of every holder), groups, clients (secrets, scopes, redirect URIs), identity providers, data policies
+  (enforcement mode) and data permissions through the generic GraphQL mutations, the caller path of `ImportRt` and adapter write nodes,
+  without the roles, guards, validation and cache refresh of the REST API and the methods. These writes are now refused by the engine
+  (message 144) before anything is written; generic reads are unchanged. Not affected: the REST API and the CK methods, blueprint seeds,
+  the system path of `ImportRt`, tenant restores and mesh adapter nodes configured with `identity: System` (system session; deploying
+  such a pipeline needs `UserManagement`). **Behaviour change:** an import a user starts through the API (`ImportRt`, caller
+  path) that contains identity entities is refused as a whole; use a blueprint or the REST API for them. **Rollout gate:** the model
+  needs engine 3.5.71 or newer (`minEngineVersion`); every service of an environment must run it before this identity build, an older
+  engine refuses the model. Details: `docs/ck-model.md`.
 - **Every REST facade of an identity method checks the target's data permission, as the GraphQL gateway does.** Under an enforcing data
   policy on groups, clients or users, the REST group role and membership endpoints, the client role and overlay URI endpoints, the user role
   endpoints, the user merge (target user) and the administrator password reset wrote a target the caller may not read or write, while the

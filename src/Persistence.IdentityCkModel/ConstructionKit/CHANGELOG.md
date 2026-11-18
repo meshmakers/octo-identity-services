@@ -1,5 +1,27 @@
 # Changelog
 
+## 3.6.0 - 2026-11-17
+
+_Required bump level: minor (acknowledged)._
+
+System.Identity 3.6.0 restricts who writes identity data: every root type declares
+`writeAccess: { channels: [ System.Identity/IdentityService ] }`, inherited by the resources (`ApiScope`, `ApiResource`,
+`IdentityResource`) and the identity providers. No service opens a session on that channel, so only system sessions write these types
+(the identity service's stores, blueprint seeds, the system path of `ImportRt`, tenant restores); every caller-scoped write - generic
+GraphQL mutations, the caller path of `ImportRt`, adapter write nodes - is refused by the engine with message 144. Generic reads are
+unchanged. Compile gate against the published 3.5.0: required level MINOR with 19 acknowledged changes (row T8), minimum version 3.6.0.
+
+Rollout: service-managed - ships inside the identity service with the regular identity release train. No catalog import,
+no per-tenant step, **no FixAll**. No data migration; ranges `System.Identity-[3.0.0,4.0)` stay satisfied. **Gate:** the model carries
+`minEngineVersion` 3.5.71; every service of the environment must run an engine >= 3.5.71 before this release reaches it.
+
+### Changed
+
+- `writeAccess` added to 'Client-1', 'ClientMirror-1', 'DataPermission-1', 'DataPolicy-1', 'DataProtectionKey-1',
+  'EmailDomainGroupRule-1', 'ExternalTenantUserMapping-1', 'Group-1', 'IdentityProvider-1', 'OAuthAuthorization-1', 'OAuthToken-1',
+  'Permission-1', 'PermissionRole-1', 'PersistedGrant-1', 'Resource-1', 'Role-1', 'ServerSideSession-1', 'User-1',
+  'VerifiedExternalIdentifier-1' _(minor + acknowledge — security: write access restricted, row T8)_
+
 ## 3.5.0 - 2026-11-17
 
 _Required bump level: minor._
