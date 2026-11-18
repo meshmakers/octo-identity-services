@@ -66,3 +66,49 @@ types:
         execution:
           timeoutSeconds: 30
           idempotent: true
+      # 3.7.0: create, update and delete run as methods (REST parity: ApiResourcesController POST/PUT/DELETE,
+      # IdentityTenantAdministrationWritePolicy). The secrets are not parameters: they change only through the secret methods.
+      # No replacesGenericCreate (Major on this type, row M16; writeAccess refuses the generic create).
+      - methodId: CreateApiResource-1
+        kind: Static
+        description: "Creates an API resource without secrets. The result is the rtId of the new resource."
+        parameters:
+          - { name: name, valueType: String }
+          - { name: displayName, valueType: String, isOptional: true }
+          - { name: description, valueType: String, isOptional: true }
+          - { name: enabled, valueType: Boolean, isOptional: true, description: "Omitted is false, as in the REST body." }
+          - { name: showInDiscoveryDocument, valueType: Boolean, isOptional: true, description: "Omitted is false, as in the REST body." }
+          - { name: requireResourceIndicator, valueType: Boolean, isOptional: true, description: "Omitted is false." }
+          - { name: userClaims, valueType: StringArray, isOptional: true, description: "Omitted leaves the user claims unchanged (empty on create)." }
+          - { name: scopes, valueType: StringArray, isOptional: true, description: "Omitted leaves the scopes unchanged (empty on create)." }
+          - { name: allowedAccessTokenSigningAlgorithms, valueType: StringArray, isOptional: true, description: "Omitted is the server default (empty)." }
+        result:
+          valueType: String
+        errors:
+          - { code: API_RESOURCE_ALREADY_EXISTS, description: "An API resource with this name exists." }
+        authorization:
+          roles: [ TenantManagement, UserManagement ]
+          dataAccess: Write
+      - methodId: UpdateApiResource-1
+        description: "Replaces the definition of the API resource, as the REST PUT does; its secrets stay."
+        parameters:
+          - { name: name, valueType: String }
+          - { name: displayName, valueType: String, isOptional: true }
+          - { name: description, valueType: String, isOptional: true }
+          - { name: enabled, valueType: Boolean, isOptional: true, description: "Omitted is false, as in the REST body." }
+          - { name: showInDiscoveryDocument, valueType: Boolean, isOptional: true, description: "Omitted is false, as in the REST body." }
+          - { name: requireResourceIndicator, valueType: Boolean, isOptional: true, description: "Omitted is false." }
+          - { name: userClaims, valueType: StringArray, isOptional: true, description: "Omitted leaves the user claims unchanged (empty on create)." }
+          - { name: scopes, valueType: StringArray, isOptional: true, description: "Omitted leaves the scopes unchanged (empty on create)." }
+          - { name: allowedAccessTokenSigningAlgorithms, valueType: StringArray, isOptional: true, description: "Omitted is the server default (empty)." }
+        errors:
+          - { code: API_RESOURCE_ALREADY_EXISTS, description: "Another API resource has this name." }
+          - { code: CONCURRENT_CHANGE, description: "The API resource was changed concurrently by other requests; retry." }
+        authorization:
+          roles: [ TenantManagement, UserManagement ]
+          dataAccess: Write
+      - methodId: DeleteApiResource-1
+        description: "Deletes the API resource with its secrets."
+        authorization:
+          roles: [ TenantManagement, UserManagement ]
+          dataAccess: Write

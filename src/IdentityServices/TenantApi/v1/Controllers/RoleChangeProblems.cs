@@ -49,7 +49,7 @@ public static class RoleChangeProblems
         if (response.Success || response.Error is not { Code: CkMethodErrorCodes.MethodForbidden } error ||
             !error.Parameters.TryGetValue("reason", out var reason) ||
             reason is not (RoleChangeReasons.SelfGrant or RoleChangeReasons.RoleNotHeld or
-                RoleChangeReasons.LastAdministrator))
+                RoleChangeReasons.LastAdministrator or RoleChangeReasons.BuiltInRole))
         {
             return null;
         }

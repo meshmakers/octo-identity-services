@@ -51,7 +51,7 @@ public class GroupsControllerScratchRevokeTests
         _groupStore.GetMemberClientIdsAsync(_groupId).Returns([_clientId.ToString()]);
         var methods = new HandlerBackedMethodFacade(_clientStore, groupStore: _groupStore, grantService: _grantService,
             tenantResolver: _tenantResolver);
-        _sut = new GroupsController(_groupStore, Substitute.For<IRoleChangeGuard>(), Substitute.For<IRoleChangeRefusals>(),
+        _sut = new GroupsController(_groupStore, Substitute.For<IRoleChangeRefusals>(),
             methods, Substitute.For<RoleManager<RtRole>>(Substitute.For<IRoleStore<RtRole>>(), null, null, null, null))
         {
             ControllerContext = new ControllerContext { HttpContext = new DefaultHttpContext() }

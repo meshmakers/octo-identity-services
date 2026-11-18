@@ -67,7 +67,7 @@ internal sealed class IdentityMethodCall(IServiceProvider services, CkMethodPrin
     {
         Details["reason"] = decision.Reason!;
         var parameters = new Dictionary<string, string> { ["reason"] = decision.Reason! };
-        if (decision.Reason == RoleChangeReasons.RoleNotHeld)
+        if (decision.Reason is RoleChangeReasons.RoleNotHeld or RoleChangeReasons.BuiltInRole)
         {
             var names = string.Join(",", decision.RoleNames);
             parameters["roleNames"] = names;

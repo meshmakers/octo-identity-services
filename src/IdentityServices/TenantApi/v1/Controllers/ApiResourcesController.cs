@@ -2,17 +2,18 @@ using System.ComponentModel.DataAnnotations;
 using Asp.Versioning;
 using IdentityServerPersistence;
 using IdentityServerPersistence.SystemStores;
-using Meshmakers.Octo.Common.DistributionEventHub.Services;
 using Meshmakers.Octo.Communication.Contracts.DataTransferObjects;
 using Meshmakers.Octo.Communication.Contracts.DataTransferObjects.ApiErrors;
 using MongoDB.Bson;
 using Meshmakers.Octo.Runtime.Contracts;
 using Meshmakers.Octo.Runtime.Contracts.RepositoryEntities;
-using Meshmakers.Octo.Services.Contracts.DistributionEventHub.Messages;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Persistence.IdentityCkModel.Generated.System.Identity.v3;
 using Meshmakers.Octo.Backend.Authentication;
+using Meshmakers.Octo.Backend.IdentityServices.Methods;
+using Meshmakers.Octo.Services.Contracts.DistributionEventHub.Methods;
+using Meshmakers.Octo.Services.Methods.Facades;
 
 namespace Meshmakers.Octo.Backend.IdentityServices.TenantApi.v1.Controllers;
 
@@ -25,14 +26,17 @@ public class ApiResourcesController : ControllerBase
     private const string ConcurrentChangeMessage =
         "The API resource was changed concurrently by other requests. Please retry.";
 
-    private readonly IDistributionEventHubService _distributionEventHubService;
+    private readonly IIdentityMethodFacade _methodFacade;
     private readonly IOctoResourceStore _octoResourceStore;
 
-    public ApiResourcesController(IOctoResourceStore octoResourceStore,
-        IDistributionEventHubService distributionEventHubService)
+    /// <summary>
+    ///     The write endpoints are facades of the <c>ApiResource.*</c> methods (in-process, one <c>Identity.Method</c> event
+    ///     per call); the methods refresh the client caches after every write.
+    /// </summary>
+    public ApiResourcesController(IOctoResourceStore octoResourceStore, IIdentityMethodFacade methodFacade)
     {
         _octoResourceStore = octoResourceStore;
-        _distributionEventHubService = distributionEventHubService;
+        _methodFacade = methodFacade;
     }
 
     // GET: system/v1/apiResources
@@ -116,6 +120,7 @@ public class ApiResourcesController : ControllerBase
     }
 
     // POST api/apiResources
+    /// <summary>Creates a new API resource. Facade of the static CK method <c>ApiResource.CreateApiResource-1</c>.</summary>
     [HttpPost]
     [Authorize(IdentityServiceConstants.IdentityTenantAdministrationWritePolicy)]
     [EndpointSummary("Creates a new API resource")]
@@ -125,32 +130,33 @@ public class ApiResourcesController : ControllerBase
     [ProducesResponseType(typeof(InternalServerErrorDto), StatusCodes.Status500InternalServerError)]
     public async Task<IActionResult> Post([Required][FromBody] ApiResourceDto apiResourceDto)
     {
-        try
+        if (!ModelState.IsValid || apiResourceDto.Name == null)
         {
-            if (!ModelState.IsValid || apiResourceDto.Name == null)
-            {
-                return BadRequest(ModelState);
-            }
-
-            if ((await _octoResourceStore.FindRtApiResourcesByNameAsync([apiResourceDto.Name])).Any())
-            {
-                return Conflict($"API resource with name '{apiResourceDto.Name}' already exists.");
-            }
-
-            var apiResource = new RtApiResource();
-            ApplyToRtApiResource(apiResource, apiResourceDto);
-
-            await _octoResourceStore.CreateApiResourceAsync(apiResource);
-            await ClearCacheAsync();
-            return Ok();
+            return BadRequest(ModelState);
         }
-        catch (Exception e)
-        {
-            return StatusCode(StatusCodes.Status500InternalServerError, new InternalServerErrorDto(e.Message));
-        }
+
+        var response = await _methodFacade.InvokeAsync(IdentityMethodFacade.ApiResourceCkTypeId,
+            SystemIdentityCkIds.ApiResourceCreateApiResourceMethodId, null,
+            new ApiResourceCreateApiResourceParameters
+            {
+                Name = apiResourceDto.Name,
+                DisplayName = apiResourceDto.DisplayName,
+                Description = apiResourceDto.Description,
+                Enabled = apiResourceDto.IsEnabled,
+                ShowInDiscoveryDocument = apiResourceDto.ShowInDiscoveryDocument,
+                RequireResourceIndicator = apiResourceDto.RequireResourceIndicator,
+                UserClaims = apiResourceDto.UserClaims?.ToList(),
+                Scopes = apiResourceDto.Scopes?.ToList(),
+                AllowedAccessTokenSigningAlgorithms = apiResourceDto.AllowedAccessTokenSigningAlgorithms?.ToList()
+            }, User, HttpContext.RequestAborted);
+        return response.ToActionResult(ResourceFailures(apiResourceDto.Name, "Creation of the API resource failed."));
     }
 
     // PUT api/apiResources/5
+    /// <summary>
+    ///     Updates an API resource. Facade of the CK method <c>ApiResource.UpdateApiResource-1</c>: one version-checked
+    ///     read-modify-write that keeps the stored secrets (the DTO carries none).
+    /// </summary>
     [HttpPut("{name}")]
     [Authorize(IdentityServiceConstants.IdentityTenantAdministrationWritePolicy)]
     [EndpointSummary("Updates an API resource")]
@@ -160,41 +166,40 @@ public class ApiResourcesController : ControllerBase
     [ProducesResponseType(typeof(InternalServerErrorDto), StatusCodes.Status500InternalServerError)]
     public async Task<IActionResult> Put([Required] string name, [Required][FromBody] ApiResourceDto apiResourceDto)
     {
-        try
+        if (!ModelState.IsValid || apiResourceDto.Name == null)
         {
-            if (!ModelState.IsValid || apiResourceDto.Name == null)
-            {
-                return BadRequest(ModelState);
-            }
+            return BadRequest(ModelState);
+        }
 
-            // AB#8015: one version-checked read-modify-write. The update used to load the resource, apply the DTO and
-            // replace it without an expected version, so a PUT that read the resource before a concurrent secret delete
-            // wrote the old secret list back. The DTO carries no secrets; the stored ones are the ones read in this step.
-            var octoApiResource = await _octoResourceStore.MutateApiResourceAsync(name, current =>
-            {
-                ApplyToRtApiResource(current, apiResourceDto);
-                return true;
-            });
-            if (octoApiResource == null)
-            {
-                return NotFound(new NotFoundErrorDto($"API resource with name '{name}' does not exist."));
-            }
+        var apiResource = await _octoResourceStore.GetApiResourceByNameAsync(name);
+        if (apiResource == null)
+        {
+            return NotFound(ResourceNotFound(name));
+        }
 
-            await ClearCacheAsync();
-            return Ok();
-        }
-        catch (RtVersionConflictException)
-        {
-            return Problem(detail: ConcurrentChangeMessage, statusCode: StatusCodes.Status409Conflict);
-        }
-        catch (Exception e)
-        {
-            return StatusCode(StatusCodes.Status500InternalServerError, new InternalServerErrorDto(e.Message));
-        }
+        var response = await _methodFacade.InvokeAsync(IdentityMethodFacade.ApiResourceCkTypeId,
+            SystemIdentityCkIds.ApiResourceUpdateApiResourceMethodId, apiResource.RtId.ToString(),
+            new ApiResourceUpdateApiResourceParameters
+            {
+                Name = apiResourceDto.Name,
+                DisplayName = apiResourceDto.DisplayName,
+                Description = apiResourceDto.Description,
+                Enabled = apiResourceDto.IsEnabled,
+                ShowInDiscoveryDocument = apiResourceDto.ShowInDiscoveryDocument,
+                RequireResourceIndicator = apiResourceDto.RequireResourceIndicator,
+                UserClaims = apiResourceDto.UserClaims?.ToList(),
+                Scopes = apiResourceDto.Scopes?.ToList(),
+                AllowedAccessTokenSigningAlgorithms = apiResourceDto.AllowedAccessTokenSigningAlgorithms?.ToList()
+            }, User, HttpContext.RequestAborted);
+        return response.ToActionResult(ResourceFailures(apiResourceDto.Name, "Update of the API resource failed.")
+            .MapError(CkMethodErrorCodes.MethodTargetNotFound, _ => NotFound(ResourceNotFound(name)))
+            .MapError(IdentityCrudErrors.ConcurrentChange,
+                _ => Problem(detail: ConcurrentChangeMessage, statusCode: StatusCodes.Status409Conflict)));
     }
 
 
     // DELETE api/apiResources/5
+    /// <summary>Deletes an API resource with its secrets. Facade of the CK method <c>ApiResource.DeleteApiResource-1</c>.</summary>
     [HttpDelete("{name}")]
     [Authorize(IdentityServiceConstants.IdentityTenantAdministrationWritePolicy)]
     [EndpointSummary("Deletes an API resource")]
@@ -203,29 +208,39 @@ public class ApiResourcesController : ControllerBase
     [ProducesResponseType(typeof(InternalServerErrorDto), StatusCodes.Status500InternalServerError)]
     public async Task<IActionResult> Delete([Required] string name)
     {
-        try
+        var apiResource = await _octoResourceStore.GetApiResourceByNameAsync(name);
+        if (apiResource == null)
         {
-            var octoApiResource = await _octoResourceStore.GetApiResourceByNameAsync(name);
-            if (octoApiResource == null)
-            {
-                return NotFound(new NotFoundErrorDto($"API resource with name '{name}' does not exist."));
-            }
+            return NotFound(ResourceNotFound(name));
+        }
 
-            await _octoResourceStore.DeleteApiResourceAsync(octoApiResource.RtId);
-            await ClearCacheAsync();
-            return Ok();
-        }
-        catch (Exception e)
-        {
-            return StatusCode(StatusCodes.Status500InternalServerError, new InternalServerErrorDto(e.Message));
-        }
+        var response = await _methodFacade.InvokeAsync(IdentityMethodFacade.ApiResourceCkTypeId,
+            SystemIdentityCkIds.ApiResourceDeleteApiResourceMethodId, apiResource.RtId.ToString(),
+            new ApiResourceDeleteApiResourceParameters(), User, HttpContext.RequestAborted);
+        return response.ToActionResult(new CkMethodFacadeOptions()
+            .MapSuccess(_ => Ok())
+            .MapError(CkMethodErrorCodes.MethodTargetNotFound, _ => NotFound(ResourceNotFound(name)))
+            .MapError(CkMethodErrorCodes.MethodHandlerFailed, _ => StatusCode(StatusCodes.Status500InternalServerError,
+                new InternalServerErrorDto("Deletion of the API resource failed."))));
     }
 
-    private Task ClearCacheAsync()
-    {
-        return _distributionEventHubService.PublishAsync(new CorsClientsUpdate(_octoResourceStore.TenantId,
-            Guid.NewGuid(), DateTime.Now));
-    }
+    private static NotFoundErrorDto ResourceNotFound(string name) =>
+        new($"API resource with name '{name}' does not exist.");
+
+    /// <summary>
+    ///     The REST answers of a failed resource create or update: a taken name is <c>409</c> with the earlier text, a blank
+    ///     name the earlier <c>500</c> message, an unexpected failure <c>500</c> with a fixed message (no exception text).
+    /// </summary>
+    private CkMethodFacadeOptions ResourceFailures(string resourceName, string failedMessage) =>
+        new CkMethodFacadeOptions()
+            .MapSuccess(_ => Ok())
+            .MapError(IdentityCrudErrors.ApiResourceAlreadyExists,
+                _ => Conflict($"API resource with name '{resourceName}' already exists."))
+            .MapError(CkMethodErrorCodes.MethodValidationFailed, _ => StatusCode(
+                StatusCodes.Status500InternalServerError,
+                new InternalServerErrorDto("API Resource name cannot be null or empty.")))
+            .MapError(CkMethodErrorCodes.MethodHandlerFailed, _ => StatusCode(StatusCodes.Status500InternalServerError,
+                new InternalServerErrorDto(failedMessage)));
 
     private static ApiResourceDto CreateApiResourceDto(RtApiResource apiResource)
     {
@@ -243,32 +258,5 @@ public class ApiResourcesController : ControllerBase
         };
 
         return apiResourceDto;
-    }
-
-    private static void ApplyToRtApiResource(RtApiResource apiResource, ApiResourceDto apiResourceDto)
-    {
-        if (string.IsNullOrWhiteSpace(apiResourceDto.Name))
-        {
-            throw new InvalidOperationException("API Resource name cannot be null or empty.");
-        }
-
-        apiResource.Enabled = apiResourceDto.IsEnabled;
-        apiResource.Name = apiResourceDto.Name;
-        apiResource.DisplayName = apiResourceDto.DisplayName;
-        apiResource.Description = apiResourceDto.Description;
-        apiResource.ShowInDiscoveryDocument = apiResourceDto.ShowInDiscoveryDocument;
-        apiResource.RequireResourceIndicator = apiResourceDto.RequireResourceIndicator;
-        if (apiResourceDto.UserClaims != null)
-        {
-            apiResource.Claims = new AttributeStringValueList(apiResourceDto.UserClaims.ToList());
-        }
-
-        if (apiResourceDto.Scopes != null)
-        {
-            apiResource.Scopes = new AttributeStringValueList(apiResourceDto.Scopes.ToList());
-        }
-
-        apiResource.AllowedAccessTokenSigningAlgorithms = new AttributeStringValueList(
-            apiResourceDto.AllowedAccessTokenSigningAlgorithms?.ToList() ?? new List<string>());
     }
 }

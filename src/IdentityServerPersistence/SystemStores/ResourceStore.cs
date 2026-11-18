@@ -149,6 +149,39 @@ public class ResourceStore(IMultiTenancyResolverService multiTenancyResolverServ
         return outcome?.Entity;
     }
 
+    public async Task<RtApiScope?> GetApiScopeByIdAsync(OctoObjectId rtId)
+    {
+        using var session = await TenantRepository.GetSessionAsync();
+        session.StartTransaction();
+        var apiScope = await TenantRepository.GetRtEntityByRtIdAsync<RtApiScope>(session, rtId);
+        await session.CommitTransactionAsync();
+        return apiScope;
+    }
+
+    public async Task ReplaceApiScopeAsync(RtApiScope apiScope)
+    {
+        using var session = await TenantRepository.GetSessionAsync();
+        session.StartTransaction();
+        await TenantRepository.ReplaceOneRtEntityByIdAsync(session, apiScope.RtId, apiScope);
+        await session.CommitTransactionAsync();
+    }
+
+    public async Task<RtApiResource?> GetApiResourceByIdAsync(OctoObjectId rtId)
+    {
+        using var session = await TenantRepository.GetSessionAsync();
+        session.StartTransaction();
+        var apiResource = await TenantRepository.GetRtEntityByRtIdAsync<RtApiResource>(session, rtId);
+        await session.CommitTransactionAsync();
+        return apiResource;
+    }
+
+    public async Task<RtApiResource?> MutateApiResourceByIdAsync(OctoObjectId rtId, Func<RtApiResource, bool> mutate)
+    {
+        var outcome = await GuardedEntityMutation.MutateAsync(TenantRepository,
+            session => TenantRepository.GetRtEntityByRtIdAsync<RtApiResource>(session, rtId), mutate);
+        return outcome?.Entity;
+    }
+
     public async Task<IEnumerable<RtApiResource>> FindRtApiResourcesByScopeNameAsync(IEnumerable<string> scopeNames)
     {
         using var session = await TenantRepository.GetSessionAsync();

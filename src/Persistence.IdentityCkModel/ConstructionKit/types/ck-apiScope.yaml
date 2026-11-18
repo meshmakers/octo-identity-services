@@ -11,3 +11,47 @@ types:
       - id: ${this}/IsRequired
         name: IsRequired
   
+    # 3.7.0: create, update and delete run as methods (REST parity: ApiScopesController POST/PUT/DELETE,
+    # IdentityTenantAdministrationWritePolicy = TenantManagement or UserManagement). Every write refreshes the clients' CORS and
+    # scope caches like REST. No replacesGenericCreate (Major on this type, row M16; writeAccess refuses the generic create).
+    methods:
+      - methodId: CreateApiScope-1
+        kind: Static
+        description: "Creates an API scope. The result is the rtId of the new scope."
+        parameters:
+          - { name: name, valueType: String }
+          - { name: displayName, valueType: String, isOptional: true }
+          - { name: description, valueType: String, isOptional: true }
+          - { name: enabled, valueType: Boolean, isOptional: true, description: "Omitted is false, as in the REST body." }
+          - { name: showInDiscoveryDocument, valueType: Boolean, isOptional: true, description: "Omitted is false, as in the REST body." }
+          - { name: required, valueType: Boolean, isOptional: true, description: "Omitted is false." }
+          - { name: emphasized, valueType: Boolean, isOptional: true, description: "Omitted is false." }
+          - { name: userClaims, valueType: StringArray, isOptional: true, description: "Omitted leaves the user claims unchanged (empty on create)." }
+        result:
+          valueType: String
+        errors:
+          - { code: API_SCOPE_ALREADY_EXISTS, description: "An API scope with this name exists." }
+        authorization:
+          roles: [ TenantManagement, UserManagement ]
+          dataAccess: Write
+      - methodId: UpdateApiScope-1
+        description: "Replaces the definition of the API scope, as the REST PUT does."
+        parameters:
+          - { name: name, valueType: String }
+          - { name: displayName, valueType: String, isOptional: true }
+          - { name: description, valueType: String, isOptional: true }
+          - { name: enabled, valueType: Boolean, isOptional: true, description: "Omitted is false, as in the REST body." }
+          - { name: showInDiscoveryDocument, valueType: Boolean, isOptional: true, description: "Omitted is false, as in the REST body." }
+          - { name: required, valueType: Boolean, isOptional: true, description: "Omitted is false." }
+          - { name: emphasized, valueType: Boolean, isOptional: true, description: "Omitted is false." }
+          - { name: userClaims, valueType: StringArray, isOptional: true, description: "Omitted leaves the user claims unchanged (empty on create)." }
+        errors:
+          - { code: API_SCOPE_ALREADY_EXISTS, description: "Another API scope has this name." }
+        authorization:
+          roles: [ TenantManagement, UserManagement ]
+          dataAccess: Write
+      - methodId: DeleteApiScope-1
+        description: "Deletes the API scope."
+        authorization:
+          roles: [ TenantManagement, UserManagement ]
+          dataAccess: Write

@@ -251,8 +251,8 @@ Replacement for a refused write: the identity REST API (unchanged) or the identi
 product, a blueprint seed. A tenant clone through `ExportRt` / caller `ImportRt` no longer carries identity entities (users were
 already refused since 3.0.0); set them up in the target tenant with a blueprint or the REST API.
 
-SemVer and rollout: a `writeAccess` block added to a type is **Minor + acknowledge** (row T8 of `docs/ck-semver-rules.md` in
-octo-construction-kit-engine), one entry per root type in `ckModel.yaml` for this release only. The block raises the model's
+SemVer and rollout: a `writeAccess` block added to a type is **Minor + acknowledge** (row T8 of
+`octo-construction-kit-engine/docs/ck-semver-rules.md`), one entry per root type in `ckModel.yaml` for this release only. The block raises the model's
 `minEngineVersion` to **3.5.71**: an older engine refuses the model (message 126), so every service of an environment must run an
 engine >= 3.5.71 before an identity build with System.Identity 3.6.0 reaches it.
 
@@ -270,3 +270,21 @@ association; caller `ImportRt` refused before any write and no refused edge stor
 a tenant backup and restore brings identity data back, the restored tenant is written by system sessions and still refuses caller
 writes; a session on the channel is admitted). `BlueprintLockProtectionIntegrationTests` opens its user session on the channel, so the blueprint-lock
 guard is still what it tests.
+
+## CRUD methods of roles, groups, API scopes and API resources (System.Identity 3.7.0)
+
+3.7.0 adds methods only: static `Role.CreateRole-1`, `Role.UpdateRole-1`, `Role.DeleteRole-1`, the same three for `Group`, `ApiScope` and
+`ApiResource` (`CreateGroup`, `CreateApiScope`, `CreateApiResource`, ...). Generic writes of these types are refused since 3.6.0, so the methods
+(and their REST facades) are the caller path; generic reads stay (`docs/identity-rest-facades.md`, `docs/identity-methods.md`).
+
+- **SemVer:** new methods are additive, **Minor** (row M1); nothing to acknowledge. The acknowledgements of 3.6.0 are removed (an acknowledgement is
+  valid for one release, OCTO-CK204). Compile gate against 3.6.0: required level MINOR. No existing type, attribute, record, method, id or default
+  changes; no data migration; ranges `System.Identity-[3.0.0,4.0)` stay satisfied. Service-managed: no catalog import, no FixAll.
+- **No access modifier on an existing attribute** (decided for the Feature: System.Identity stays on 3.x). Derived fields (`Role.NormalizedName`,
+  `Group.NormalizedGroupName`) are not parameters of the methods; `writeAccess` already refuses every caller-scoped write of them.
+- **No `replacesGenericCreate`** on the new creates: on these existing types the flag is a Major (row M16).
+- **Known limitation (next major):** `ApiResource.ApiSecrets` (stored hashes, never clear text) stays readable through generic GraphQL; `access: Hidden`
+  is a Major (row T7).
+- **Gate baseline:** the local compile gate diffs against the newest 3.x below 3.7.0 in the local or private catalog. While 3.6.0 is missing there
+  (e.g. before the main build published it), the gate reports `OCTO-CK203` for the `writeAccess` changes of 3.6.0; publish or sync 3.6.0 first
+  (`Sync-OctoCkIntermediateVersions`), never re-add the 3.6.0 acknowledgements.
