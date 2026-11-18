@@ -13,7 +13,7 @@ using Meshmakers.Octo.ConstructionKit.Contracts;
 namespace Meshmakers.Octo.Backend.IdentityServices.Methods;
 
 /// <summary>
-///     The cross-tenant grant audit of the mapping methods (AB#8342): one event in this and the source tenant. A failure is
+///     The cross-tenant grant audit of the mapping methods: one event in this and the source tenant. A failure is
 ///     logged and never fails the call, as on the REST endpoints.
 /// </summary>
 internal static class MappingGrantAudit
@@ -56,7 +56,7 @@ internal static class MappingGrantAudit
 
 /// <summary>
 ///     Handler of <c>System.Identity/ExternalTenantUserMapping.UpdateMapping-1</c> (System.Identity 3.8.0): replaces the roles of
-///     a mapping, as <c>PUT {tenant}/v1/externalTenantUserMappings/{rtId}</c> did. The role change guard (AB#7927) refuses a role
+///     a mapping, as <c>PUT {tenant}/v1/externalTenantUserMappings/{rtId}</c> did. The role change guard refuses a role
 ///     the caller does not hold or a grant to the caller itself (<c>METHOD_FORBIDDEN</c>); the grant audit records
 ///     <c>GrantChanged</c>.
 /// </summary>

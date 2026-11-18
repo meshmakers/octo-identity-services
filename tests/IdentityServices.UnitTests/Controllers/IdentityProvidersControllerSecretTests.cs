@@ -53,7 +53,7 @@ public sealed class IdentityProvidersControllerSecretTests : IDisposable
         var identityProviderDtoMapper =
             new IdentityProviderDtoMapper(_services.GetRequiredService<IIdentityProviderSecretReader>());
         _store.TenantId.Returns("test-tenant");
-        // AB#9042: the provider methods read the stored provider (replace needs an existing one, the response is the stored
+        // the provider methods read the stored provider (replace needs an existing one, the response is the stored
         // state); this in-memory store gives back what was written. A test may still stub GetByIdAsync for one id.
         _store.When(x => x.StoreAsync(Arg.Any<RtIdentityProvider>())).Do(call =>
         {
@@ -64,7 +64,7 @@ public sealed class IdentityProvidersControllerSecretTests : IDisposable
         });
         _store.GetByIdAsync(Arg.Any<OctoObjectId>())
             .Returns(call => _providers.GetValueOrDefault(call.Arg<OctoObjectId>()));
-        // AB#9042: create, replace and delete are facades of the IdentityProvider methods; the facade runs the real handlers.
+        // create, replace and delete are facades of the IdentityProvider methods; the facade runs the real handlers.
         _sut = new IdentityProvidersController(_store, identityProviderDtoMapper,
             new HandlerBackedMethodFacade(identityProviderStore: _store))
         {

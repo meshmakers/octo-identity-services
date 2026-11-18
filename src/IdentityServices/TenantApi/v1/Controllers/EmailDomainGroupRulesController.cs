@@ -61,7 +61,7 @@ public class EmailDomainGroupRulesController(
     }
 
     /// <summary>
-    ///     Facade of the static <c>EmailDomainGroupRule.CreateEmailDomainGroupRule-1</c> (System.Identity 3.8.0, AB#9042).
+    ///     Facade of the static <c>EmailDomainGroupRule.CreateEmailDomainGroupRule-1</c> (System.Identity 3.8.0).
     /// </summary>
     [HttpPost]
     [Authorize(IdentityServiceConstants.IdentityTenantAdministrationWritePolicy)]
@@ -101,7 +101,7 @@ public class EmailDomainGroupRulesController(
     }
 
     /// <summary>
-    ///     Facade of <c>EmailDomainGroupRule.UpdateEmailDomainGroupRule-1</c> (System.Identity 3.8.0, AB#9042). An unknown id
+    ///     Facade of <c>EmailDomainGroupRule.UpdateEmailDomainGroupRule-1</c> (System.Identity 3.8.0). An unknown id
     ///     is 404 (it was inserted before the facade).
     /// </summary>
     [HttpPut("{rtId}")]
@@ -132,7 +132,7 @@ public class EmailDomainGroupRulesController(
     }
 
     /// <summary>
-    ///     Facade of <c>EmailDomainGroupRule.DeleteEmailDomainGroupRule-1</c> (System.Identity 3.8.0, AB#9042). An unknown id
+    ///     Facade of <c>EmailDomainGroupRule.DeleteEmailDomainGroupRule-1</c> (System.Identity 3.8.0). An unknown id
     ///     is 404 (it was 200 before the facade; nothing was deleted then either).
     /// </summary>
     [HttpDelete("{rtId}")]

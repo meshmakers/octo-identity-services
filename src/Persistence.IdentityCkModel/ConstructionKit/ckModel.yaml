@@ -1,5 +1,5 @@
 "$schema": "https://schemas.meshmakers.cloud/construction-kit-meta.schema.json"
-# 3.8.0 (Feature F5.2 identity wave 2, AB#9042) adds methods only, so the remaining REST CRUD endpoints of identity
+# 3.8.0 (Feature F5.2 identity wave 2) adds methods only, so the remaining REST CRUD endpoints of identity
 # administration become facades (generic writes of these types are refused since 3.6.0, writeAccess):
 #   * static IdentityProvider.CreateIdentityProvider-1, IdentityProvider.UpdateIdentityProvider-1,
 #     IdentityProvider.DeleteIdentityProvider-1 on the abstract base, inherited by the seven concrete provider types; the

@@ -418,7 +418,7 @@ types:
           roles: [ TenantManagement, UserManagement ]
           dataAccess: Write
       - methodId: UpdateClient-1
-        description: "Changes the client; an omitted parameter leaves the value unchanged (allowedScopes: omitted resets to the octo default scopes, as in the REST body). A client secret replaces all secrets of the client and needs SecretManagement."
+        description: "Changes the client; an omitted parameter leaves the value unchanged. allowedScopes, when given, replaces the scopes (the octo default scopes are always kept). A client secret replaces all secrets of the client and needs SecretManagement."
         parameters:
           - { name: clientId, valueType: String, isOptional: true, description: "A new client id; omitted or empty keeps it." }
           - { name: enabled, valueType: Boolean, isOptional: true }

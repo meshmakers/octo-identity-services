@@ -43,7 +43,7 @@ public class IdentityProvidersController : ControllerBase
     /// <param name="identityProviderStore">Reads the providers (GET) and the stored provider after a write.</param>
     /// <param name="identityProviderDtoMapper">Maps a stored provider to its DTO (the secret only as "is set").</param>
     /// <param name="methodFacade">
-    ///     Runs the System.Identity 3.8.0 provider methods in-process: create, replace and delete are their facades (AB#9042).
+    ///     Runs the System.Identity 3.8.0 provider methods in-process: create, replace and delete are their facades.
     /// </param>
     public IdentityProvidersController(IOctoIdentityProviderStore identityProviderStore,
         IdentityProviderDtoMapper identityProviderDtoMapper, IIdentityMethodFacade methodFacade)
@@ -111,9 +111,9 @@ public class IdentityProvidersController : ControllerBase
             return ValidationProblem(ModelState);
         }
 
-        // AB#9042: the facade of IdentityProvider.CreateIdentityProvider-1 (System.Identity 3.8.0), called on the concrete
-        // provider type of the DTO. The method stores the provider, checks the OctoTenant parent (AB#8339) and announces the
-        // change; the response is mapped from the stored entity, never from the request (AB#5540).
+        // The facade of IdentityProvider.CreateIdentityProvider-1 (System.Identity 3.8.0), called on the concrete
+        // provider type of the DTO. The method stores the provider, checks the OctoTenant parent and announces the
+        // change; the response is mapped from the stored entity, never from the request.
         if (ProviderCkTypeIdOf(identityProviderDto) is not { } ckTypeId)
         {
             ModelState.AddModelError(nameof(IdentityProviderDto), "Unknown identity provider type.");
@@ -188,7 +188,7 @@ public class IdentityProvidersController : ControllerBase
             return BadRequest(ModelState);
         }
 
-        // AB#9042: the facade of IdentityProvider.DeleteIdentityProvider-1, called on the provider's own concrete type.
+        // The facade of IdentityProvider.DeleteIdentityProvider-1, called on the provider's own concrete type.
         // An unknown id is 404 (was 200 before the facade, nothing was deleted then either).
         var stored = await _identityProviderStore.GetByIdAsync(rtId);
         if (stored == null || ProviderCkTypeIdOf(stored) is not { } ckTypeId)
@@ -226,7 +226,7 @@ public class IdentityProvidersController : ControllerBase
             return ValidationProblem(ModelState);
         }
 
-        // AB#9042: the facade of IdentityProvider.UpdateIdentityProvider-1, called on the concrete type of the DTO. A
+        // The facade of IdentityProvider.UpdateIdentityProvider-1, called on the concrete type of the DTO. A
         // provider of another type, or an unknown id, is 404 (the type of a provider never changes; an unknown id was
         // inserted before the facade).
         if (ProviderCkTypeIdOf(identityProviderDto) is not { } ckTypeId)
@@ -251,7 +251,7 @@ public class IdentityProvidersController : ControllerBase
             return ToFailure(response, identityProviderDto);
         }
 
-        // AB#5540: never echo the request - it carries the write-only ClientSecret in clear text. The response is mapped
+        // never echo the request - it carries the write-only ClientSecret in clear text. The response is mapped
         // from the stored entity, whose Secret attribute is never projected.
         return await StoredDtoAsync(rtId);
     }
@@ -331,7 +331,7 @@ public class IdentityProvidersController : ControllerBase
         dto.Description, dto.AllowSelfRegistration, dto.DefaultGroupRtId, null, null, null, null, null, null, null, null,
         null, null);
 
-    /// <summary>The stored provider as the response (AB#5540: the secret only as "is set").</summary>
+    /// <summary>The stored provider as the response (the secret only as "is set").</summary>
     private async Task<ActionResult<IdentityProviderDto>> StoredDtoAsync(OctoObjectId rtId)
     {
         var stored = await _identityProviderStore.GetByIdAsync(rtId);

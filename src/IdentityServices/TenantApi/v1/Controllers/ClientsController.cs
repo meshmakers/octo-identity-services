@@ -324,7 +324,7 @@ public class ClientsController : ControllerBase
             return secretRefused;
         }
 
-        // AB#9042: the facade of the static Client.CreateClient-1 (System.Identity 3.8.0). The protocol defaults of a new
+        // The facade of the static Client.CreateClient-1 (System.Identity 3.8.0). The protocol defaults of a new
         // client, the default scopes, the hash of the secret and the URI source marker are set in the method.
         var c = ChangeOf(clientDto);
         var response = await _methodFacade.InvokeAsync(IdentityMethodFacade.ClientCkTypeId,
@@ -367,15 +367,16 @@ public class ClientsController : ControllerBase
             return secretRefused;
         }
 
-        // AB#9042: the facade of Client.UpdateClient-1 (System.Identity 3.8.0): one version-checked read-modify-write
-        // (AB#8015) in the method; an unresolved concurrent change is 409.
+        // The facade of Client.UpdateClient-1 (System.Identity 3.8.0): one version-checked read-modify-write
+        // in the method; an unresolved concurrent change is 409.
         var appClient = await _octoClientStore.FindRtClientByIdAsync(id);
         if (appClient == null)
         {
             return ClientDoesNotExist(id);
         }
 
-        var c = ChangeOf(clientDto);
+        // REST resets the allowed scopes to the octo defaults when the body has none; the method keeps them when omitted.
+        var c = ChangeOf(clientDto) with { AllowedScopes = clientDto.AllowedScopes?.ToList() ?? [] };
         var response = await _methodFacade.InvokeAsync(IdentityMethodFacade.ClientCkTypeId,
             SystemIdentityCkIds.ClientUpdateClientMethodId, appClient.RtId.ToString(),
             new ClientUpdateClientParameters
@@ -565,7 +566,7 @@ public class ClientsController : ControllerBase
             return NotFound(new NotFoundErrorDto($"Client with id '{id}' does not exist."));
         }
 
-        // AB#9042: the facade of Client.DeleteClient-1 (System.Identity 3.8.0).
+        // The facade of Client.DeleteClient-1 (System.Identity 3.8.0).
         var response = await _methodFacade.InvokeAsync(IdentityMethodFacade.ClientCkTypeId,
             SystemIdentityCkIds.ClientDeleteClientMethodId, appClient.RtId.ToString(), new ClientDeleteClientParameters(),
             User, HttpContext.RequestAborted);

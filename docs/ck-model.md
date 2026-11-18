@@ -291,7 +291,7 @@ guard is still what it tests.
 
 ## CRUD methods of providers, e-mail rules, data permissions, clients and mappings (System.Identity 3.8.0)
 
-3.8.0 (AB#9042) adds methods only: static `IdentityProvider.CreateIdentityProvider-1` with `UpdateIdentityProvider-1` and
+3.8.0 adds methods only: static `IdentityProvider.CreateIdentityProvider-1` with `UpdateIdentityProvider-1` and
 `DeleteIdentityProvider-1` on the abstract base (inherited by the seven provider types), static `EmailDomainGroupRule.CreateEmailDomainGroupRule-1`
 with update and delete, `ExternalTenantUserMapping.UpdateMapping-1` / `DeleteMapping-1`, static `DataPermission.CreateDataPermission-1`,
 `DataPermission.DeleteDataPermission-1`, `DataPermission.CreatePolicy-1`, `DataPolicy.DeleteDataPolicy-1`, static `Client.CreateClient-1`,

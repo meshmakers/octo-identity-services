@@ -123,7 +123,7 @@ public class IdentityMethodDeclarationsIntegrationTests : IClassFixture<Identity
     [InlineData("OctoTenantIdentityProvider")]
     public async Task EveryConcreteProviderType_InheritsTheProviderMethods_AndStoresNoReadableSecret(string type)
     {
-        // System.Identity 3.8.0 (AB#9042): the GraphQL gateway exposes methods only on concrete types (an abstract type has no
+        // System.Identity 3.8.0: the GraphQL gateway exposes methods only on concrete types (an abstract type has no
         // mutation field), so each provider type must carry the inherited CRUD methods.
         var graph = await GetTypeAsync(type);
         graph.AllMethods.Keys.Should().BeEquivalentTo(

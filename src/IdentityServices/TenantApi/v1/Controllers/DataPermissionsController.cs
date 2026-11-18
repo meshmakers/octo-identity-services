@@ -67,7 +67,7 @@ public class DataPermissionsController(IDataPermissionStore dataPermissionStore,
             return BadRequest("PermissionId is required.");
         }
 
-        // AB#9042: the facade of the static DataPermission.CreateDataPermission-1 (System.Identity 3.8.0). A duplicate
+        // The facade of the static DataPermission.CreateDataPermission-1 (System.Identity 3.8.0). A duplicate
         // permission id is 409 (was an unhandled 500).
         var response = await methodFacade.InvokeAsync(IdentityMethodFacade.DataPermissionCkTypeId,
             SystemIdentityCkIds.DataPermissionCreateDataPermissionMethodId, null,
@@ -89,7 +89,7 @@ public class DataPermissionsController(IDataPermissionStore dataPermissionStore,
     [ProducesResponseType(StatusCodes.Status200OK)]
     public async Task<ActionResult> Delete([FromRoute] string permissionId)
     {
-        // AB#9042: the facade of DataPermission.DeleteDataPermission-1 (System.Identity 3.8.0). An unknown permission is
+        // The facade of DataPermission.DeleteDataPermission-1 (System.Identity 3.8.0). An unknown permission is
         // 404 (was an unhandled 500).
         var permission = await dataPermissionStore.FindByPermissionIdAsync(permissionId);
         if (permission == null)
@@ -125,7 +125,7 @@ public class DataPermissionsController(IDataPermissionStore dataPermissionStore,
             return BadRequest("Scope must be All|OwnedOnly, EnforcementMode must be Enforce|AuditOnly.");
         }
 
-        // AB#9042: the facade of DataPermission.CreatePolicy-1 (System.Identity 3.8.0). An unknown permission is 404 (was
+        // The facade of DataPermission.CreatePolicy-1 (System.Identity 3.8.0). An unknown permission is 404 (was
         // an unhandled 500).
         var permission = await dataPermissionStore.FindByPermissionIdAsync(permissionId);
         if (permission == null)
@@ -160,7 +160,7 @@ public class DataPermissionsController(IDataPermissionStore dataPermissionStore,
     [ProducesResponseType(StatusCodes.Status200OK)]
     public async Task<ActionResult> DeletePolicy([FromRoute] string policyRtId)
     {
-        // AB#9042: the facade of DataPolicy.DeleteDataPolicy-1 (System.Identity 3.8.0). An unknown policy is 404, a malformed
+        // The facade of DataPolicy.DeleteDataPolicy-1 (System.Identity 3.8.0). An unknown policy is 404, a malformed
         // id too (both were unhandled before).
         var response = await methodFacade.InvokeAsync(IdentityMethodFacade.DataPolicyCkTypeId,
             SystemIdentityCkIds.DataPolicyDeleteDataPolicyMethodId, policyRtId, new DataPolicyDeleteDataPolicyParameters(),

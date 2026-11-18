@@ -72,7 +72,7 @@ public class IdentityMethodHostTests
             SystemIdentityCkIds.ApiResourceCreateApiResourceMethodId,
             SystemIdentityCkIds.ApiResourceUpdateApiResourceMethodId,
             SystemIdentityCkIds.ApiResourceDeleteApiResourceMethodId,
-            // System.Identity 3.8.0 (AB#9042): the CRUD methods without a secret parameter.
+            // System.Identity 3.8.0: the CRUD methods without a secret parameter.
             SystemIdentityCkIds.IdentityProviderDeleteIdentityProviderMethodId,
             SystemIdentityCkIds.EmailDomainGroupRuleCreateEmailDomainGroupRuleMethodId,
             SystemIdentityCkIds.EmailDomainGroupRuleUpdateEmailDomainGroupRuleMethodId,
@@ -122,7 +122,7 @@ public class IdentityMethodHostTests
                 SystemIdentityCkIds.ClientRemoveSecretMethodId, SystemIdentityCkIds.ApiResourceAddSecretMethodId,
                 SystemIdentityCkIds.ApiResourceUpdateSecretMethodId, SystemIdentityCkIds.ApiResourceRemoveSecretMethodId,
                 SystemIdentityCkIds.ClientRotateMirrorSecretMethodId,
-                // System.Identity 3.8.0 (AB#9042): the client secret parameter of the provider and client create/update.
+                // System.Identity 3.8.0: the client secret parameter of the provider and client create/update.
                 SystemIdentityCkIds.IdentityProviderCreateIdentityProviderMethodId,
                 SystemIdentityCkIds.IdentityProviderUpdateIdentityProviderMethodId,
                 SystemIdentityCkIds.ClientCreateClientMethodId, SystemIdentityCkIds.ClientUpdateClientMethodId);

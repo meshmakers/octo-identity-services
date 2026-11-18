@@ -363,7 +363,7 @@ are bus handlers whatever `EnablePasswordMethods` says. REST facades and parity 
 
 ## Create, update and delete of identity providers, e-mail rules, data permissions, clients and mappings (System.Identity 3.8.0)
 
-AB#9042. Handlers in `Methods/IdentityProviderCrudHandlers.cs`, `EmailDomainGroupRuleCrudHandlers.cs`, `MappingCrudHandlers.cs`,
+Handlers in `Methods/IdentityProviderCrudHandlers.cs`, `EmailDomainGroupRuleCrudHandlers.cs`, `MappingCrudHandlers.cs`,
 `DataPermissionCrudHandlers.cs` and `ClientCrudHandlers.cs`. Static creates derive from `IdentityCreateMethodHandlerBase`, update and delete from
 `IdentityAdminMethodHandlerBase`; `DataPermission.CreatePolicy` (an instance method with a result) runs the same steps itself.
 
@@ -380,7 +380,7 @@ AB#9042. Handlers in `Methods/IdentityProviderCrudHandlers.cs`, `EmailDomainGrou
 | `DataPermission.CreatePolicy` | `targetCkTypeIds` (not empty), optional `actions`, `scope` (enum `DataPolicyScope`), `enforcementMode` (enum `DataPolicyEnforcementMode`) | policy rtId | - | `UserManagement` |
 | `DataPolicy.DeleteDataPolicy` | - | - | - | `UserManagement` |
 | static `Client.CreateClient` | `clientId`; optional `enabled`, `clientName`, `clientUri`, `allowedGrantTypes`, `redirectUris`, `postLogoutRedirectUris`, `allowedCorsOrigins`, `allowedScopes` (added to the octo defaults), `allowOfflineAccess`, `requireClientSecret`, `clientSecret` (sensitive), the four logout fields, `autoProvisionInChildTenants` | rtId | `CLIENT_ALREADY_EXISTS` | `TenantManagement`, `UserManagement` (+ `SecretManagement` for `clientSecret`) |
-| `Client.UpdateClient` | the same, all optional (omitted = unchanged; `allowedScopes` omitted = the octo defaults, as REST) | - | `CONCURRENT_CHANGE` | as create |
+| `Client.UpdateClient` | the same, all optional (omitted = unchanged; the REST facade passes an empty `allowedScopes` for a body without them, so REST still resets them to the octo defaults) | - | `CONCURRENT_CHANGE` | as create |
 | `Client.DeleteClient` | - | - | - | `TenantManagement`, `UserManagement` |
 
 - **Concrete provider type.** The provider methods are declared on the abstract `IdentityProvider`; the handlers read the concrete type from

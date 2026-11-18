@@ -13,7 +13,7 @@ using Xunit;
 namespace IdentityServices.IntegrationTests.Persistence;
 
 /// <summary>
-///     AB#9042: the creates of <c>Client</c> and <c>DataPermission</c> are static methods since System.Identity 3.8.0, without
+///     the creates of <c>Client</c> and <c>DataPermission</c> are static methods since System.Identity 3.8.0, without
 ///     <c>replacesGenericCreate</c> (a Major on these existing types). A fresh tenant on the 3.8.0 model must therefore still get
 ///     every seed of <c>System.Identity.Bootstrap</c>: the test creates a new child tenant, runs identity's tenant setup (imports
 ///     the compiled System.Identity model), installs the complete <c>seed-data</c> of the blueprint through the system import the

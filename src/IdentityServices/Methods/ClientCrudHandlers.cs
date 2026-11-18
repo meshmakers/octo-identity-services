@@ -33,7 +33,7 @@ internal static class ClientCrudErrors
 ///     A change of a client as the create and update methods take it: the fields of the REST <c>ClientDto</c> a caller may set.
 ///     <see cref="ApplyTo" /> is the rule the REST endpoints applied (an omitted value leaves the stored one; the allowed scopes
 ///     always include the octo default scopes; URIs carry the <c>api</c> source marker; a secret replaces all secrets with its
-///     hash). The dynamic registration flags and <c>ProvisionedByParentTenantId</c> are no part of it (AB#4338).
+///     hash). The dynamic registration flags and <c>ProvisionedByParentTenantId</c> are no part of it.
 /// </summary>
 internal sealed record ClientChange(
     string? ClientId,
@@ -72,8 +72,12 @@ internal sealed record ClientChange(
         RequireConsent = false
     };
 
-    /// <summary>Applies the change to <paramref name="client" />, exactly as the REST create and update did.</summary>
-    public void ApplyTo(RtClient client)
+    /// <summary>
+    ///     Applies the change to <paramref name="client" /> as the REST create and update did. Omitted <c>AllowedScopes</c>:
+    ///     the octo default scopes on a create, unchanged on an update (the REST update facade passes an empty list for an
+    ///     omitted body value, so REST keeps resetting them to the defaults).
+    /// </summary>
+    public void ApplyTo(RtClient client, bool isCreate)
     {
         if (Enabled.HasValue)
         {
@@ -115,9 +119,15 @@ internal sealed record ClientChange(
             client.AllowedCorsOrigins = WrapAsApiSourcedUris(AllowedCorsOrigins);
         }
 
-        client.AllowedScopes = AllowedScopes != null
-            ? new AttributeStringValueList(CommonConstants.OctoDefaultScopes.Concat(AllowedScopes).Distinct().ToList())
-            : new AttributeStringValueList(CommonConstants.OctoDefaultScopes.ToList());
+        if (AllowedScopes != null)
+        {
+            client.AllowedScopes = new AttributeStringValueList(
+                CommonConstants.OctoDefaultScopes.Concat(AllowedScopes).Distinct().ToList());
+        }
+        else if (isCreate)
+        {
+            client.AllowedScopes = new AttributeStringValueList(CommonConstants.OctoDefaultScopes.ToList());
+        }
 
         if (AllowOfflineAccess.HasValue)
         {
@@ -160,7 +170,7 @@ internal sealed record ClientChange(
 
         // Multi-tenant client credentials (#4042–#4047): the flag lands on the client; the store's post-commit hook fans
         // out to mirrors on an update. DynamicRegistration / DynamicRegistrationExpiresAt are deliberately not applied
-        // (owned by DynamicClientRegistrationService and the TTL sweep, AB#4338).
+        // (owned by DynamicClientRegistrationService and the TTL sweep).
         if (AutoProvisionInChildTenants.HasValue)
         {
             client.AutoProvisionInChildTenants = AutoProvisionInChildTenants.Value;
@@ -205,7 +215,7 @@ internal static class ClientCrudSupport
         {
             call.Services.GetRequiredService<ILogger<ClientChange>>().LogWarning(
                 "Identity client secret method without required role allowed by SecretManagementRoleEnforcement=Warn by subject {Subject} / client {ClientId}, required any of [{RequiredRoles}]. " +
-                "This would be denied with SecretManagementRoleEnforcement=Enforce (AB#5861)",
+                "This would be denied with SecretManagementRoleEnforcement=Enforce",
                 call.Principal.SubjectId, call.Principal.ClientId, CommonConstants.SecretManagementRole);
         }
 
@@ -267,7 +277,7 @@ internal sealed class ClientCreateClientHandler(IServiceProvider services)
         }
 
         var client = ClientChange.NewClient();
-        change.ApplyTo(client);
+        change.ApplyTo(client, isCreate: true);
         await store.CreateAsync(client).ConfigureAwait(false);
         await ClientCrudSupport.PublishClientsUpdateAsync(call).ConfigureAwait(false);
         return new ClientCreateClientResult { Value = client.RtId.ToString() };
@@ -278,7 +288,7 @@ internal sealed class ClientCreateClientHandler(IServiceProvider services)
 
 /// <summary>
 ///     Handler of <c>System.Identity/Client.UpdateClient-1</c> (System.Identity 3.8.0): changes a client in one version-checked
-///     read-modify-write, as <c>PUT system/v1/clients/{id}</c> did (AB#8015); an unresolved concurrent change is
+///     read-modify-write, as <c>PUT system/v1/clients/{id}</c> did; an unresolved concurrent change is
 ///     <c>CONCURRENT_CHANGE</c>.
 /// </summary>
 internal sealed class ClientUpdateClientHandler(IServiceProvider services)
@@ -311,7 +321,7 @@ internal sealed class ClientUpdateClientHandler(IServiceProvider services)
             var updated = await call.Services.GetRequiredService<IOctoClientStore>().MutateAsync(client.ClientId,
                 current =>
                 {
-                    change.ApplyTo(current);
+                    change.ApplyTo(current, isCreate: false);
                     return true;
                 }).ConfigureAwait(false);
             if (updated == null)

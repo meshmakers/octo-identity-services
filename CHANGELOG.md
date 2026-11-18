@@ -41,7 +41,7 @@ Notable changes of the OctoMesh identity services. The CK model `System.Identity
 ### Changed
 
 - **Create, update and delete of identity providers, e-mail domain group rules, data permissions and policies and clients, and the update
-  and delete of external tenant user mappings, run CK methods (System.Identity 3.8.0, AB#9042).** The REST write endpoints of
+  and delete of external tenant user mappings, run CK methods (System.Identity 3.8.0).** The REST write endpoints of
   `IdentityProvidersController`, `EmailDomainGroupRulesController`, `DataPermissionsController` (create, delete, policy create and delete),
   `ClientsController` (create, update, delete) and `ExternalTenantUserMappingsController` (update, delete) are facades of the new
   `IdentityProvider.CreateIdentityProvider/UpdateIdentityProvider/DeleteIdentityProvider` (declared on the abstract base, inherited by the seven

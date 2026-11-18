@@ -622,7 +622,7 @@ No deprecation yet (deprecation wave of identity wave 2 is its own story); REST 
 
 ## REST facades of the provider, e-mail rule, data permission, client and mapping CRUD (System.Identity 3.8.0)
 
-AB#9042. Since System.Identity 3.6.0 every caller-scoped generic write of these types is refused (`writeAccess`), so their create, update and
+Since System.Identity 3.6.0 every caller-scoped generic write of these types is refused (`writeAccess`), so their create, update and
 delete run as CK methods; generic GraphQL reads stay. The REST write endpoints are **facades** (same path as the other facades: `IIdentityMethodFacade`,
 in-process, outside the request, one `Identity.Method` event per call, the handler repeats the declared roles on the validated principal).
 
@@ -647,7 +647,7 @@ in-process, outside the request, one `Identity.Method` event per call, the handl
   (`CkMethodRequest.CkTypeId`, version-less; a model version in it is ignored), never from a parameter; the abstract type or any other type is
   refused (`METHOD_VALIDATION_FAILED` on `ckTypeId` for the create, `METHOD_TARGET_NOT_FOUND` for update and delete). One parameter list serves
   all provider types; the required fields per type are those of the REST DTOs, the defaults too (`port` 636, OpenLDAP `useTls` true and
-  `userNameAttribute` `uid`, `allowSelfRegistration` true). The OctoTenant parent rule of AB#8339 runs in the handler
+  `userNameAttribute` `uid`, `allowSelfRegistration` true). The OctoTenant parent rule (registry ancestor) runs in the handler
   (`PARENT_TENANT_NOT_ANCESTOR`, REST keeps its `400` problem). Every write announces `IdentityProviderUpdate`.
 - **Client create needs server-side generation**, so it is a static method: the protocol defaults of a new client (`RequirePkce`, Jwt access
   tokens, `AllowAccessTokensViaBrowser`, `AlwaysIncludeUserClaimsInIdToken`, no consent, no client secret required), the octo default scopes, the
@@ -655,11 +655,11 @@ in-process, outside the request, one `Identity.Method` event per call, the handl
   on the existing type the flag is a Major (row M16); `writeAccess` already refuses every caller-scoped generic create, and the
   `System.Identity.Bootstrap` blueprint keeps seeding its clients and data permissions through the system import. Update is one version-checked
   read-modify-write (`CONCURRENT_CHANGE`, `409`). Every client write announces `CorsClientsUpdate`.
-- **Mappings.** The role change guard (AB#7927) and the cross-tenant grant audit (AB#8342, `GrantChanged` / `GrantRemoved`) run in the handlers;
+- **Mappings.** The role change guard and the cross-tenant grant audit (`GrantChanged` / `GrantRemoved`) run in the handlers;
   REST turns a guard refusal back into the audited problem answer.
 - **Data permission.** The static creates check the caller's `Write` permission on the type (for providers the concrete type), the instance
   methods the target; `CreatePolicy` also the type `DataPolicy`. Not visible = `404`, visible but not writable = `403` (`data-permission`).
-  Data access beyond the target entity (AB#8420 / AB#7040): `DataPermission.DeleteDataPermission` deletes the permission's policies with it, as
+  Data access beyond the target entity: `DataPermission.DeleteDataPermission` deletes the permission's policies with it, as
   REST did; `DataPermission.CreatePolicy` creates a `DataPolicy` entity bound to the permission.
 
 Parity table (REST before -> facade):
@@ -680,6 +680,8 @@ Parity table (REST before -> facade):
 | Client secret without `SecretManagement` (under `Enforce`) | `403` | unchanged (REST check first; the handler refuses alike on GraphQL, `requiredRole`) |
 | Client update losing a concurrent change | `409` problem | unchanged (`CONCURRENT_CHANGE`) |
 | Unexpected client write failure | `400` `InternalServerErrorDto` with the exception text | **intended REST change:** `400` with a fixed message (no internal text) |
+| Provider create with an `rtId` in the body | the provider was stored under that rtId (an existing one was replaced) | **intended REST change:** a new rtId is always generated; replace with `PUT` |
+| Client update without `allowedScopes` | scopes reset to the octo defaults | unchanged on REST; the method keeps the scopes when the parameter is omitted |
 | Client create without `isEnabled` | `400` with the exception text (the mandatory `Enabled` was missing) | **intended REST change:** the client is created enabled |
 | Mapping: role change guard refusal | `403` / `409` problem, audited | unchanged, plus the `Identity.Method` event |
 | Any write under an enforcing data policy the caller may not write | written | **intended REST change:** `404` / `403` as on the other facades |

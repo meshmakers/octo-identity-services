@@ -26,7 +26,7 @@ using Xunit;
 namespace IdentityServices.IntegrationTests.Api.TenantApi;
 
 /// <summary>
-///     AB#9042: the REST create, update and delete endpoints of identity providers, e-mail domain group rules, data permissions
+///     the REST create, update and delete endpoints of identity providers, e-mail domain group rules, data permissions
 ///     and policies and clients, and the update and delete of external tenant user mappings, are facades of the
 ///     System.Identity 3.8.0 methods. Real MongoDB, real identity host (the secret-carrying methods registered on the bus,
 ///     <c>Methods:Identity:EnablePasswordMethods=true</c>, so the dispatcher path is the GraphQL gateway's). The tests prove:
@@ -423,6 +423,10 @@ public class IdentityCrudWave2RestMethodFacadeTests : IntegrationTestBase, IDisp
         (await FindClientAsync(restId))!.ClientName.Should().Be("Renamed");
         (await FindClientAsync(methodId))!.ClientName.Should().Be("Renamed");
         (await FindClientAsync(methodId))!.ClientSecrets.Should().ContainSingle("an update without a secret keeps it");
+        (await FindClientAsync(methodId))!.AllowedScopes.Should().Contain("custom_scope",
+            "an update without allowedScopes keeps the scopes on the method path");
+        (await FindClientAsync(restId))!.AllowedScopes.Should().NotContain("custom_scope",
+            "REST resets the scopes to the octo defaults when the body has none, as before");
 
         // delete: REST and the method; unknown = 404 / not found
         (await client.DeleteAsync(TenantApiUrl($"clients/{restId}"), ct)).StatusCode.Should().Be(HttpStatusCode.OK);
@@ -968,7 +972,7 @@ public class IdentityCrudWave2RestMethodFacadeTests : IntegrationTestBase, IDisp
     {
         var client = ClientChange.NewClient();
         new ClientChange(NewName("cc"), true, "Client", null, ["client_credentials"], null, null, null, null, null, null,
-            null, null, null, null, null, null).ApplyTo(client);
+            null, null, null, null, null, null).ApplyTo(client, isCreate: true);
         await WithStoreAsync<IOctoClientStore, bool>(async s =>
         {
             await s.CreateAsync(client);

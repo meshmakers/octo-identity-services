@@ -238,8 +238,8 @@ public class ExternalTenantUserMappingsController(
             return NotFound();
         }
 
-        // AB#9042: the facade of ExternalTenantUserMapping.UpdateMapping-1 (System.Identity 3.8.0): the role change guard
-        // (AB#7927) and the grant audit (AB#8342) run in the method; a refusal keeps its audited 403/409 answer.
+        // The facade of ExternalTenantUserMapping.UpdateMapping-1 (System.Identity 3.8.0): the role change guard
+        // and the grant audit run in the method; a refusal keeps its audited 403/409 answer.
         var response = await methodFacade.InvokeAsync(IdentityMethodFacade.ExternalTenantUserMappingCkTypeId,
             SystemIdentityCkIds.ExternalTenantUserMappingUpdateMappingMethodId, rtId.ToString(),
             new ExternalTenantUserMappingUpdateMappingParameters { RoleIds = dto.RoleIds?.ToList() }, User,
@@ -269,7 +269,7 @@ public class ExternalTenantUserMappingsController(
             return NotFound();
         }
 
-        // AB#9042: the facade of ExternalTenantUserMapping.DeleteMapping-1 (System.Identity 3.8.0); guard and grant audit
+        // The facade of ExternalTenantUserMapping.DeleteMapping-1 (System.Identity 3.8.0); guard and grant audit
         // run in the method.
         var response = await methodFacade.InvokeAsync(IdentityMethodFacade.ExternalTenantUserMappingCkTypeId,
             SystemIdentityCkIds.ExternalTenantUserMappingDeleteMappingMethodId, rtId.ToString(),
@@ -279,7 +279,7 @@ public class ExternalTenantUserMappingsController(
 
     /// <summary>
     ///     The REST answer of a refused mapping method: a role change guard refusal keeps the audited 403/409 problem of the
-    ///     REST endpoint (AB#7927); everything else maps as the facade defaults (404 for an unknown or invisible mapping).
+    ///     REST endpoint; everything else maps as the facade defaults (404 for an unknown or invisible mapping).
     /// </summary>
     private async Task<IActionResult> FacadeFailureAsync(CkMethodResponse response, string target)
     {

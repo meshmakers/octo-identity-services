@@ -402,7 +402,7 @@ public class IdentityTypeWriteAccessIntegrationTests : IClassFixture<IdentitySer
 
     private async Task ImportBootstrapSeedsAsync(ITenantRepository repo)
     {
-        // AB#9042: the data permissions too - the creates of Client and DataPermission are methods since System.Identity 3.8.0,
+        // the data permissions too - the creates of Client and DataPermission are methods since System.Identity 3.8.0,
         // without replacesGenericCreate, so the blueprint's system import keeps seeding them.
         foreach (var file in new[] { "roles.yaml", "api-scopes.yaml", "clients/octo-tool.yaml", "data-permissions.yaml" })
         {

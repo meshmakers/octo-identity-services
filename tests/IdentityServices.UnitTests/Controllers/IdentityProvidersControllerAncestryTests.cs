@@ -40,7 +40,7 @@ public sealed class IdentityProvidersControllerAncestryTests : IDisposable
         _services = services.BuildServiceProvider();
 
         _store.TenantId.Returns(TenantId);
-        // AB#9042: create and replace are facades of the IdentityProvider methods; the parent rule runs in the handler.
+        // create and replace are facades of the IdentityProvider methods; the parent rule runs in the handler.
         _sut = new IdentityProvidersController(_store,
             new IdentityProviderDtoMapper(_services.GetRequiredService<IIdentityProviderSecretReader>()),
             new HandlerBackedMethodFacade(identityProviderStore: _store, ancestryGuard: _guard))

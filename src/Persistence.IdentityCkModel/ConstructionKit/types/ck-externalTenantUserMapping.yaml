@@ -128,8 +128,8 @@ types:
         execution:
           timeoutSeconds: 60
       # 3.8.0: REST PUT/DELETE externalTenantUserMappings/{rtId} become facades of these methods (UserManagement). The role
-      # change guard of AB#7927 applies (a role the caller does not hold, a self-grant: METHOD_FORBIDDEN); the cross-tenant
-      # grant audit (AB#8342) records GrantChanged / GrantRemoved in this and the source tenant.
+      # change guard applies (a role the caller does not hold, a self-grant: METHOD_FORBIDDEN); the cross-tenant
+      # grant audit records GrantChanged / GrantRemoved in this and the source tenant.
       - methodId: UpdateMapping-1
         description: "Replaces the roles of the mapping (null or omitted clears them, as in the REST body). The source user and the groups are unchanged."
         parameters:
