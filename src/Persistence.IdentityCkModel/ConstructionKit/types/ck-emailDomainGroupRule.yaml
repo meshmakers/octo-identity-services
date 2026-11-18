@@ -21,3 +21,37 @@ types:
         fields:
           - attributePaths:
               - EmailDomainPattern
+    # 3.8.0: create, replace and delete run as methods (REST parity: EmailDomainGroupRulesController POST/PUT/DELETE,
+    # IdentityTenantAdministrationWritePolicy = TenantManagement or UserManagement). Generic writes are refused since 3.6.0
+    # (writeAccess). No replacesGenericCreate: on this existing type the flag is a Major (row M16).
+    methods:
+      - methodId: CreateEmailDomainGroupRule-1
+        kind: Static
+        description: "Creates a rule that adds users whose e-mail matches the domain pattern to the target group on login. The result is the rtId of the new rule."
+        parameters:
+          - { name: emailDomainPattern, valueType: String, description: "The e-mail domain pattern, unique per tenant." }
+          - { name: targetGroupRtId, valueType: String, description: "The rtId of the group the user joins." }
+          - { name: description, valueType: String, isOptional: true }
+        result:
+          valueType: String
+        errors:
+          - { code: EMAIL_DOMAIN_GROUP_RULE_ALREADY_EXISTS, description: "A rule with this domain pattern exists." }
+        authorization:
+          roles: [ TenantManagement, UserManagement ]
+          dataAccess: Write
+      - methodId: UpdateEmailDomainGroupRule-1
+        description: "Replaces the rule's domain pattern, target group and description."
+        parameters:
+          - { name: emailDomainPattern, valueType: String }
+          - { name: targetGroupRtId, valueType: String }
+          - { name: description, valueType: String, isOptional: true, description: "Omitted clears it, as in the REST body." }
+        errors:
+          - { code: EMAIL_DOMAIN_GROUP_RULE_ALREADY_EXISTS, description: "Another rule has this domain pattern." }
+        authorization:
+          roles: [ TenantManagement, UserManagement ]
+          dataAccess: Write
+      - methodId: DeleteEmailDomainGroupRule-1
+        description: "Deletes the rule."
+        authorization:
+          roles: [ TenantManagement, UserManagement ]
+          dataAccess: Write

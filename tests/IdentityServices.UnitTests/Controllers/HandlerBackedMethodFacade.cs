@@ -1,3 +1,4 @@
+using IdentityServerPersistence.Services;
 using System.Reflection;
 using System.Security.Claims;
 using System.Text.Json;
@@ -41,7 +42,8 @@ internal sealed class HandlerBackedMethodFacade : IIdentityMethodFacade
     public HandlerBackedMethodFacade(IOctoClientStore? clientStore = null, IClientRoleStore? clientRoleStore = null,
         RoleManager<RtRole>? roleManager = null, IRoleChangeGuard? guard = null,
         IDistributionEventHubService? eventHub = null, IGroupStore? groupStore = null,
-        IScratchTenantGrantService? grantService = null, IMultiTenancyResolverService? tenantResolver = null)
+        IScratchTenantGrantService? grantService = null, IMultiTenancyResolverService? tenantResolver = null,
+        IOctoIdentityProviderStore? identityProviderStore = null, ICrossTenantAncestryGuard? ancestryGuard = null)
     {
         var repository = Substitute.For<ITenantRepository>();
         repository.GetRtEntityByRtIdAsync<RtClient>(Arg.Any<IOctoSession>(), Arg.Any<OctoObjectId>())
@@ -55,6 +57,8 @@ internal sealed class HandlerBackedMethodFacade : IIdentityMethodFacade
 
         var allowAll = Substitute.For<IRtDataPermissionEvaluator>();
         allowAll.EvaluateAsync(default!, default!, default, default, default, default).ReturnsForAnyArgs(
+            new RtDataPermissionVerdict(RtDataPermissionDecision.Allowed, default));
+        allowAll.EvaluateTypeAsync(default!, default!, default!, default, default, default).ReturnsForAnyArgs(
             new RtDataPermissionVerdict(RtDataPermissionDecision.Allowed, default));
         if (guard == null)
         {
@@ -74,6 +78,8 @@ internal sealed class HandlerBackedMethodFacade : IIdentityMethodFacade
             .AddSingleton(eventHub ?? Substitute.For<IDistributionEventHubService>())
             .AddSingleton(groupStore ?? Substitute.For<IGroupStore>())
             .AddSingleton(grantService ?? Substitute.For<IScratchTenantGrantService>())
+            .AddSingleton(identityProviderStore ?? Substitute.For<IOctoIdentityProviderStore>())
+            .AddSingleton(ancestryGuard ?? Substitute.For<ICrossTenantAncestryGuard>())
             .AddSingleton(allowAll)
             .AddSingleton<IIdentityMethodAuditWriter>(Audit)
             .AddSingleton<ILoggerFactory>(NullLoggerFactory.Instance)
@@ -173,6 +179,12 @@ internal sealed class HandlerBackedMethodFacade : IIdentityMethodFacade
         _ when methodId == SystemIdentityCkIds.ClientApplyOverlayUrisMethodId => new ClientApplyOverlayUrisHandler(Services),
         _ when methodId == SystemIdentityCkIds.ClientCleanOverlayEntriesMethodId =>
             new ClientCleanOverlayEntriesHandler(Services),
+        _ when methodId == SystemIdentityCkIds.IdentityProviderCreateIdentityProviderMethodId =>
+            new IdentityProviderCreateIdentityProviderHandler(Services),
+        _ when methodId == SystemIdentityCkIds.IdentityProviderUpdateIdentityProviderMethodId =>
+            new IdentityProviderUpdateIdentityProviderHandler(Services),
+        _ when methodId == SystemIdentityCkIds.IdentityProviderDeleteIdentityProviderMethodId =>
+            new IdentityProviderDeleteIdentityProviderHandler(Services),
         _ => throw new NotSupportedException(methodId)
     };
 

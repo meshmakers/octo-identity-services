@@ -53,8 +53,41 @@ public sealed class IdentityProvidersControllerSecretTests : IDisposable
         var identityProviderDtoMapper =
             new IdentityProviderDtoMapper(_services.GetRequiredService<IIdentityProviderSecretReader>());
         _store.TenantId.Returns("test-tenant");
-        _sut = new IdentityProvidersController(_store, identityProviderDtoMapper, Substitute.For<IDistributionEventHubService>(),
-            Substitute.For<IdentityServerPersistence.Services.ICrossTenantAncestryGuard>());
+        // AB#9042: the provider methods read the stored provider (replace needs an existing one, the response is the stored
+        // state); this in-memory store gives back what was written. A test may still stub GetByIdAsync for one id.
+        _store.When(x => x.StoreAsync(Arg.Any<RtIdentityProvider>())).Do(call =>
+        {
+            if (call.Arg<RtIdentityProvider>() is { } written)
+            {
+                _providers[written.RtId] = written;
+            }
+        });
+        _store.GetByIdAsync(Arg.Any<OctoObjectId>())
+            .Returns(call => _providers.GetValueOrDefault(call.Arg<OctoObjectId>()));
+        // AB#9042: create, replace and delete are facades of the IdentityProvider methods; the facade runs the real handlers.
+        _sut = new IdentityProvidersController(_store, identityProviderDtoMapper,
+            new HandlerBackedMethodFacade(identityProviderStore: _store))
+        {
+            // The facade passes the caller and the request's cancellation token to the method.
+            ControllerContext = new Microsoft.AspNetCore.Mvc.ControllerContext
+            {
+                HttpContext = new Microsoft.AspNetCore.Http.DefaultHttpContext
+                {
+                    User = new System.Security.Claims.ClaimsPrincipal(new System.Security.Claims.ClaimsIdentity(
+                        [new System.Security.Claims.Claim("sub", "admin-1")], "test"))
+                }
+            }
+        };
+    }
+
+    private readonly Dictionary<OctoObjectId, RtIdentityProvider> _providers = new();
+
+    /// <summary>A stored provider the replace can target; returns its rtId.</summary>
+    private OctoObjectId Existing(RtIdentityProvider provider)
+    {
+        provider.RtId = OctoObjectId.GenerateNewId();
+        _providers[provider.RtId] = provider;
+        return provider.RtId;
     }
 
     public void Dispose() => _services.Dispose();
@@ -177,7 +210,7 @@ public sealed class IdentityProvidersControllerSecretTests : IDisposable
     [Fact]
     public async Task Replace_WithNewSecret_DoesNotEchoTheRequest()
     {
-        var rtId = OctoObjectId.GenerateNewId();
+        var rtId = Existing(new RtAzureEntraIdIdentityProvider { Name = "Entra", TenantId = "tid", ClientId = "entra-client" });
         RtIdentityProvider? stored = null;
         await _store.StoreAsync(Arg.Do<RtIdentityProvider>(p => stored = p));
         var input = new AzureEntraIdProviderDto
@@ -294,7 +327,8 @@ public sealed class IdentityProvidersControllerSecretTests : IDisposable
         var input = new GoogleIdentityProviderDto
             { Name = "Google", IsEnabled = true, ClientId = "google-client" };
 
-        var result = await _sut.ReplaceProviderAsync(OctoObjectId.GenerateNewId(), input);
+        var result = await _sut.ReplaceProviderAsync(
+            Existing(new RtGoogleIdentityProvider { Name = "Google", ClientId = "google-client" }), input);
 
         // Nothing sent and nothing stored in this unit test: not set, no key missing, no SetAt.
         var response = result.Result.Should().BeOfType<OkObjectResult>().Subject.Value
@@ -318,7 +352,8 @@ public sealed class IdentityProvidersControllerSecretTests : IDisposable
             Name = "Microsoft", IsEnabled = true, ClientId = "ms-client", ClientSecret = omitted
         };
 
-        await _sut.ReplaceProviderAsync(OctoObjectId.GenerateNewId(), input);
+        await _sut.ReplaceProviderAsync(
+            Existing(new RtMicrosoftIdentityProvider { Name = "Microsoft", ClientId = "ms-client" }), input);
 
         stored.Should().NotBeNull();
         stored!.Attributes.ContainsKey("ClientSecret").Should().BeFalse();
@@ -361,7 +396,8 @@ public sealed class IdentityProvidersControllerSecretTests : IDisposable
             { Name = "Google", IsEnabled = true, ClientId = "google-client", ClientSecret = value };
 
         var created = await _sut.AddNewIdentityProviderAsync(Input());
-        var replaced = await _sut.ReplaceProviderAsync(OctoObjectId.GenerateNewId(), Input());
+        var replaced = await _sut.ReplaceProviderAsync(
+            Existing(new RtGoogleIdentityProvider { Name = "Google", ClientId = "google-client" }), Input());
 
         created.Value.Should().BeOfType<GoogleIdentityProviderDto>().Which.ClientSecretIsSet.Should().BeTrue();
         replaced.Result.Should().BeOfType<OkObjectResult>();
@@ -397,7 +433,9 @@ public sealed class IdentityProvidersControllerSecretTests : IDisposable
             ClientSecret = "rotated-secret"
         };
 
-        var result = await _sut.ReplaceProviderAsync(OctoObjectId.GenerateNewId(), input);
+        var result = await _sut.ReplaceProviderAsync(
+            Existing(new RtAzureEntraIdIdentityProvider { Name = "Entra", TenantId = "tid", ClientId = "entra-client" }),
+            input);
 
         AssertSecretEncryptionNotConfigured(result.Result);
     }
@@ -410,9 +448,12 @@ public sealed class IdentityProvidersControllerSecretTests : IDisposable
         var input = new GoogleIdentityProviderDto
             { Name = "Google", IsEnabled = true, ClientId = "google-client", ClientSecret = "write-only-secret" };
 
-        var act = () => _sut.AddNewIdentityProviderAsync(input);
+        var result = await _sut.AddNewIdentityProviderAsync(input);
 
-        await act.Should().ThrowAsync<InvalidOperationException>().WithMessage("database down");
+        // The method fails (METHOD_HANDLER_FAILED): 500 without the exception text or the secret, not the 503.
+        var failed = result.Result.Should().BeAssignableTo<ObjectResult>().Subject;
+        failed.StatusCode.Should().Be(500);
+        Serialize(failed.Value).Should().NotContain("database down").And.NotContain("write-only-secret");
     }
 
     private static void AssertSecretEncryptionNotConfigured(ActionResult? result)

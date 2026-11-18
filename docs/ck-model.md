@@ -288,3 +288,22 @@ guard is still what it tests.
 - **Gate baseline:** the local compile gate diffs against the newest 3.x below 3.7.0 in the local or private catalog. While 3.6.0 is missing there
   (e.g. before the main build published it), the gate reports `OCTO-CK203` for the `writeAccess` changes of 3.6.0; publish or sync 3.6.0 first
   (`Sync-OctoCkIntermediateVersions`), never re-add the 3.6.0 acknowledgements.
+
+## CRUD methods of providers, e-mail rules, data permissions, clients and mappings (System.Identity 3.8.0)
+
+3.8.0 (AB#9042) adds methods only: static `IdentityProvider.CreateIdentityProvider-1` with `UpdateIdentityProvider-1` and
+`DeleteIdentityProvider-1` on the abstract base (inherited by the seven provider types), static `EmailDomainGroupRule.CreateEmailDomainGroupRule-1`
+with update and delete, `ExternalTenantUserMapping.UpdateMapping-1` / `DeleteMapping-1`, static `DataPermission.CreateDataPermission-1`,
+`DataPermission.DeleteDataPermission-1`, `DataPermission.CreatePolicy-1`, `DataPolicy.DeleteDataPolicy-1`, static `Client.CreateClient-1`,
+`Client.UpdateClient-1`, `Client.DeleteClient-1` (`docs/identity-methods.md`, `docs/identity-rest-facades.md`).
+
+- **SemVer:** new methods are additive, **Minor** (row M1); nothing to acknowledge. Compile gate against 3.7.0: required level MINOR. No existing
+  type, attribute, record, method, id, access or default changes; no data migration; ranges `System.Identity-[3.0.0,4.0)` stay satisfied.
+  Service-managed: no catalog import, no FixAll.
+- **No secret becomes readable, no access modifier changes.** `IdentityProvider.ClientSecret` (Google, Microsoft, Facebook, Azure Entra ID) is a
+  `Secret` value: never projected by GraphQL or REST (only "is set"), kept out of an export. The LDAP providers (`MicrosoftAd`, `OpenLdap`) store
+  no password. The `clientSecret` method parameters are `sensitive`. The stored client and API resource secret **hashes** (`Client.ClientSecrets`,
+  `ApiResource.ApiSecrets`) stay readable through generic GraphQL until the next major (`access: Hidden` is a Major, row T7; accepted).
+- **No `replacesGenericCreate`.** On the existing types the flag is a Major (row M16); on the abstract `IdentityProvider` it is not allowed at all
+  (compiler error 133). `writeAccess` (3.6.0) already refuses every caller-scoped generic create, and the Bootstrap blueprint keeps seeding
+  clients and data permissions through the system import.

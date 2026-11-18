@@ -25,7 +25,7 @@ consumers work unchanged; the remaining discovery-document differences are docum
 | `src/IdentityServices/{Logging,TenantApi,Controllers/Api}/**`, `{OctoUser*,*Revocation*,SecondFactorEvidence,*UserCredentialChangeService}.cs` | `docs/credential-security.md` |
 | `{*CrossTenant*,TenantProbeGuard,Allowed*,*IdentityResolver,*Processor,*ShadowUser*,*ExternalTenantUser*,*SourceT*,*SourceU*,Sibling*,AuthApiController}.cs` | `docs/cross-tenant-authentication.md` |
 | `src/IdentityServices/Methods/**`, `**/Services/{SelfService,SecretManagement}/**`, `*DataPermission*.cs` | `docs/identity-methods.md` |
-| `{IdentityMethodFacade,IdentityRestDeprecation,UsersController,ManageApiController,RoleChangeProblems,ResetUserPasswordRequestDto,ApiSecretsController,DataPermissionsController,ClientMirrorController,AdminProvisioningController,RolesController,GroupsController,ApiScopesController,ApiResourcesController}.cs` | `docs/identity-rest-facades.md` |
+| `{IdentityMethodFacade,IdentityRestDeprecation,UsersController,ManageApiController,RoleChangeProblems,ResetUserPasswordRequestDto,ApiSecretsController,DataPermissionsController,ClientMirrorController,AdminProvisioningController,RolesController,GroupsController,ApiScopesController,ApiResourcesController,IdentityProvidersController,EmailDomainGroupRulesController,ExternalTenantUserMappingsController,ClientsController}.cs` | `docs/identity-rest-facades.md` |
 | `src/Authentication/**`, `**/Services/Login/**`, `{TenantDiscovery*,TenantTopology*,*IdentityProvider*,*EmailDomainGroupRule*,*Channel*,AuthApiController}.cs` | `docs/login-and-providers.md` |
 | `**/{OpenIddict,Cookies,Middleware,Protocol,DynamicAuth}/**`, `{OpenIddictConfiguration,*PersistentGrantStore,TokenCleanup*}.cs` | `docs/openiddict-protocol.md` |
 | `**/{Authorization/RoleChange,AdminRoleMigration}/**`, `{Group*Resolver,GuardedEntityMutation,OctoRoleStore,*GroupStore,RolesController,GroupsController}.cs` | `docs/role-guards.md` |
@@ -169,6 +169,11 @@ wird, sind alle anderen Pre-Commit-Regeln (Lint etc.) ebenfalls hinfällig.
 - **Roles, groups, API scopes and API resources are created, changed and deleted only in their CRUD handlers** (`Role.CreateRole/UpdateRole/DeleteRole`,
   `Group.CreateGroup/UpdateGroup/DeleteGroup`, `ApiScope.*` and `ApiResource.*` create/update/delete, System.Identity 3.7.0); the REST write endpoints
   are facades, derived names are set by the handlers, and the static creates check the caller's `Write` permission on the type: `docs/identity-rest-facades.md`.
+- **Identity providers, e-mail domain group rules, data permissions and policies and clients are created, changed and deleted only in their
+  CRUD handlers, mappings updated and deleted in theirs** (System.Identity 3.8.0, `Methods/{IdentityProvider,EmailDomainGroupRule,Mapping,
+  DataPermission,Client}CrudHandlers.cs`); the REST write endpoints are facades. The provider methods sit on the abstract `IdentityProvider` and
+  take the concrete provider type from the request's CK type id (`IdentityProviderMethodSupport.ProviderTypeOf`, never from a parameter).
+  `clientSecret` parameters are `sensitive` and write-only; never return, log or audit them: `docs/identity-rest-facades.md`, `docs/identity-methods.md`.
 - **Every handler that serves a REST facade checks its target's data permission itself** (`IdentityMethodCall.CheckTargetWritableAsync`,
   gateway answers `METHOD_TARGET_NOT_FOUND` / `METHOD_FORBIDDEN` `data-permission`): the REST facade dispatches in-process, where the GraphQL
   gateway's check does not run. A new instance method on `IdentityAdminMethodHandlerBase` gets it for free; any other handler base must call it:

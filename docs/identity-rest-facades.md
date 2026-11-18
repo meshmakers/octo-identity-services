@@ -1,6 +1,6 @@
 ---
 description: "REST facades of the identity methods (users, groups, clients, secrets, data permissions, CRUD); deprecation waves; account pages"
-applies_to: "{IdentityMethodFacade,IdentityRestDeprecation,UsersController,ManageApiController,RoleChangeProblems,ResetUserPasswordRequestDto,ApiSecretsController,DataPermissionsController,ClientMirrorController,AdminProvisioningController,RolesController,GroupsController,ApiScopesController,ApiResourcesController}.cs"
+applies_to: "{IdentityMethodFacade,IdentityRestDeprecation,UsersController,ManageApiController,RoleChangeProblems,ResetUserPasswordRequestDto,ApiSecretsController,DataPermissionsController,ClientMirrorController,AdminProvisioningController,RolesController,GroupsController,ApiScopesController,ApiResourcesController,IdentityProvidersController,EmailDomainGroupRulesController,ExternalTenantUserMappingsController,ClientsController}.cs"
 ---
 
 # REST facades, deprecations and account pages
@@ -619,3 +619,76 @@ unknown scope or resource; on the method path every one of the twelve methods re
 `Methods/IdentityMethodHostTests`, plus the unchanged REST suites (`RoleChangeGuardTests`, `GroupRoleChangeGuardTests`, `TenantApiRoleAuthorizationTests`).
 
 No deprecation yet (deprecation wave of identity wave 2 is its own story); REST is not removed and gets no `Sunset` header.
+
+## REST facades of the provider, e-mail rule, data permission, client and mapping CRUD (System.Identity 3.8.0)
+
+AB#9042. Since System.Identity 3.6.0 every caller-scoped generic write of these types is refused (`writeAccess`), so their create, update and
+delete run as CK methods; generic GraphQL reads stay. The REST write endpoints are **facades** (same path as the other facades: `IIdentityMethodFacade`,
+in-process, outside the request, one `Identity.Method` event per call, the handler repeats the declared roles on the validated principal).
+
+| REST endpoint | Method | Roles (REST policy) |
+|---|---|---|
+| `POST identityProviders` / `PUT identityProviders/{rtId}` / `DELETE identityProviders/{rtId}` | static `IdentityProvider.CreateIdentityProvider-1` / `IdentityProvider.UpdateIdentityProvider-1` / `IdentityProvider.DeleteIdentityProvider-1`, called on the concrete provider type | `TenantManagement` or `UserManagement` (`IdentityTenantAdministrationWritePolicy`) |
+| `POST emailDomainGroupRules` / `PUT .../{rtId}` / `DELETE .../{rtId}` | static `EmailDomainGroupRule.CreateEmailDomainGroupRule-1` / `UpdateEmailDomainGroupRule-1` / `DeleteEmailDomainGroupRule-1` | `TenantManagement` or `UserManagement` |
+| `PUT externalTenantUserMappings/{rtId}` / `DELETE externalTenantUserMappings/{rtId}` | `ExternalTenantUserMapping.UpdateMapping-1` / `DeleteMapping-1` | `UserManagement` (`IdentityUserAdministrationWritePolicy`) |
+| `POST dataPermissions` / `DELETE dataPermissions/{permissionId}` / `POST dataPermissions/{permissionId}/policies` / `DELETE dataPermissions/policies/{policyRtId}` | static `DataPermission.CreateDataPermission-1` / `DataPermission.DeleteDataPermission-1` / `DataPermission.CreatePolicy-1` / `DataPolicy.DeleteDataPolicy-1` | `UserManagement` |
+| `POST clients` / `PUT clients/{id}` / `DELETE clients/{id}` | static `Client.CreateClient-1` / `Client.UpdateClient-1` / `Client.DeleteClient-1` | `TenantManagement` or `UserManagement`; a `clientSecret` also `SecretManagement` (`IdentitySecretAdministrationPolicy`, checked by REST and again by the handler) |
+
+- **Secrets are write-only.** `clientSecret` of the provider and client create/update is a `sensitive` parameter: redacted in logs, traces and the
+  audit event (the event only says `clientSecretSet=true|false`), never part of a result (the creates return the rtId) or of a REST response (mapped
+  from the stored entity). The provider secret is stored as the encrypted Secret value (`SECRET_ENCRYPTION_NOT_CONFIGURED` / `503` without a key ring),
+  the client secret as a hash. An omitted or empty provider secret on update keeps the stored one. These four methods carry a secret, so they
+  follow the production gate of the secret methods: registered **local only** (REST facade) while `Methods:Identity:EnablePasswordMethods` is
+  off, on the bus (GraphQL) when it is on. No GraphQL read returns a provider secret (Secret value type) or an LDAP password (the LDAP providers
+  store none); the stored client and API resource secret **hashes** stay readable through generic GraphQL until the next major (accepted
+  risk, see the 3.6.0 NEXT MAJOR note in `ckModel.yaml`).
+- **Identity providers are polymorphic.** The methods are declared on the abstract `IdentityProvider` and inherited by the seven concrete types;
+  the GraphQL gateway exposes them only on the concrete types' mutation fields. The handler takes the provider type from the request's CK type id
+  (`CkMethodRequest.CkTypeId`, version-less; a model version in it is ignored), never from a parameter; the abstract type or any other type is
+  refused (`METHOD_VALIDATION_FAILED` on `ckTypeId` for the create, `METHOD_TARGET_NOT_FOUND` for update and delete). One parameter list serves
+  all provider types; the required fields per type are those of the REST DTOs, the defaults too (`port` 636, OpenLDAP `useTls` true and
+  `userNameAttribute` `uid`, `allowSelfRegistration` true). The OctoTenant parent rule of AB#8339 runs in the handler
+  (`PARENT_TENANT_NOT_ANCESTOR`, REST keeps its `400` problem). Every write announces `IdentityProviderUpdate`.
+- **Client create needs server-side generation**, so it is a static method: the protocol defaults of a new client (`RequirePkce`, Jwt access
+  tokens, `AllowAccessTokensViaBrowser`, `AlwaysIncludeUserClaimsInIdToken`, no consent, no client secret required), the octo default scopes, the
+  hash of the secret and the `api` source marker of the URIs are set by the handler (`ClientChange`), exactly as REST did. No `replacesGenericCreate`:
+  on the existing type the flag is a Major (row M16); `writeAccess` already refuses every caller-scoped generic create, and the
+  `System.Identity.Bootstrap` blueprint keeps seeding its clients and data permissions through the system import. Update is one version-checked
+  read-modify-write (`CONCURRENT_CHANGE`, `409`). Every client write announces `CorsClientsUpdate`.
+- **Mappings.** The role change guard (AB#7927) and the cross-tenant grant audit (AB#8342, `GrantChanged` / `GrantRemoved`) run in the handlers;
+  REST turns a guard refusal back into the audited problem answer.
+- **Data permission.** The static creates check the caller's `Write` permission on the type (for providers the concrete type), the instance
+  methods the target; `CreatePolicy` also the type `DataPolicy`. Not visible = `404`, visible but not writable = `403` (`data-permission`).
+  Data access beyond the target entity (AB#8420 / AB#7040): `DataPermission.DeleteDataPermission` deletes the permission's policies with it, as
+  REST did; `DataPermission.CreatePolicy` creates a `DataPolicy` entity bound to the permission.
+
+Parity table (REST before -> facade):
+
+| Point | REST before | Now |
+|---|---|---|
+| Routes, bodies, success status codes | provider create/replace `200` + DTO; rule create `201` + DTO, replace `200` + DTO; mapping update `200` + DTO; data permission create `200`, policy create `200` + rtId; client writes `200` empty; deletes `200` | unchanged (DTOs are read after the method) |
+| Provider: secret required on create, invalid name, missing required field | `400` validation problem | unchanged (checked by the controller first; the handler checks the same rules) |
+| Provider: OctoTenant parent not an ancestor | `400` problem `ParentTenantNotAncestor` | unchanged (`PARENT_TENANT_NOT_ANCESTOR`) |
+| Provider: no secret encryption key ring | `503` problem `SecretEncryptionNotConfigured` | unchanged (`SECRET_ENCRYPTION_NOT_CONFIGURED`) |
+| Provider / rule replace of an unknown id | inserted as a new entity | **intended REST change:** `404`, nothing written (a replace never creates) |
+| Provider replace with a DTO of another provider type | the stored provider was replaced by one of the new type | **intended REST change:** `404` (the type of a provider never changes; delete and create instead) |
+| Provider / rule delete of an unknown id | `200`, nothing deleted | **intended REST change:** `404` |
+| Rule or provider duplicate (unique index violated) | unhandled `500` | **intended REST change:** `409` problem |
+| Data permission create with an existing id | unhandled `500` | **intended REST change:** `409` text `Data permission '…' already exists.` |
+| Data permission delete / policy create with an unknown permission id, policy delete with an unknown or malformed id | unhandled `500` | **intended REST change:** `404` `NotFoundErrorDto` |
+| Client create with an existing client id | `409` text | unchanged (`CLIENT_ALREADY_EXISTS`) |
+| Client secret without `SecretManagement` (under `Enforce`) | `403` | unchanged (REST check first; the handler refuses alike on GraphQL, `requiredRole`) |
+| Client update losing a concurrent change | `409` problem | unchanged (`CONCURRENT_CHANGE`) |
+| Unexpected client write failure | `400` `InternalServerErrorDto` with the exception text | **intended REST change:** `400` with a fixed message (no internal text) |
+| Client create without `isEnabled` | `400` with the exception text (the mandatory `Enabled` was missing) | **intended REST change:** the client is created enabled |
+| Mapping: role change guard refusal | `403` / `409` problem, audited | unchanged, plus the `Identity.Method` event |
+| Any write under an enforcing data policy the caller may not write | written | **intended REST change:** `404` / `403` as on the other facades |
+
+Tests: `Api/TenantApi/IdentityCrudWave2RestMethodFacadeTests` (every endpoint runs its method in-process with one audit event; REST and the
+method store the same state per type; the secret is never in a response, result or audit event, stored encrypted or hashed; another tenant's token,
+a caller without the role or the scope and a caller who may not write the type are refused with nothing written), `Persistence/IdentityMethodDeclarationsIntegrationTests`
+(roles, sensitive parameters, the inherited provider methods, no readable provider secret), `Persistence/IdentityTypeWriteAccessIntegrationTests` and `Persistence/BootstrapFreshTenantIntegrationTests`
+(the Bootstrap seeds of clients and data permissions still import), `Controllers/IdentityProvidersController*Tests` (unit, real handlers),
+`Methods/IdentityMethodHostTests`.
+
+No deprecation and no `Sunset` header (Gerald decides the sunset after the F5.x Features); REST is not removed.

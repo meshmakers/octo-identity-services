@@ -1,3 +1,5 @@
+using Meshmakers.Octo.Services.Methods;
+using System.Text.Json;
 using Asp.Versioning;
 
 using Duende.IdentityModel;
@@ -65,8 +67,17 @@ public class DataPermissionsController(IDataPermissionStore dataPermissionStore,
             return BadRequest("PermissionId is required.");
         }
 
-        await dataPermissionStore.CreateAsync(dto.PermissionId, dto.Description);
-        return Ok();
+        // AB#9042: the facade of the static DataPermission.CreateDataPermission-1 (System.Identity 3.8.0). A duplicate
+        // permission id is 409 (was an unhandled 500).
+        var response = await methodFacade.InvokeAsync(IdentityMethodFacade.DataPermissionCkTypeId,
+            SystemIdentityCkIds.DataPermissionCreateDataPermissionMethodId, null,
+            new DataPermissionCreateDataPermissionParameters
+            {
+                PermissionId = dto.PermissionId, Description = dto.Description
+            }, User, HttpContext.RequestAborted);
+        return (ActionResult)ToActionResult(response, new CkMethodFacadeOptions()
+            .MapError(DataPermissionCrudSupport.DataPermissionAlreadyExists,
+                _ => Conflict($"Data permission '{dto.PermissionId}' already exists.")));
     }
 
     /// <summary>
@@ -78,8 +89,19 @@ public class DataPermissionsController(IDataPermissionStore dataPermissionStore,
     [ProducesResponseType(StatusCodes.Status200OK)]
     public async Task<ActionResult> Delete([FromRoute] string permissionId)
     {
-        await dataPermissionStore.RemoveAsync(permissionId);
-        return Ok();
+        // AB#9042: the facade of DataPermission.DeleteDataPermission-1 (System.Identity 3.8.0). An unknown permission is
+        // 404 (was an unhandled 500).
+        var permission = await dataPermissionStore.FindByPermissionIdAsync(permissionId);
+        if (permission == null)
+        {
+            return PermissionNotFound(permissionId);
+        }
+
+        var response = await methodFacade.InvokeAsync(IdentityMethodFacade.DataPermissionCkTypeId,
+            SystemIdentityCkIds.DataPermissionDeleteDataPermissionMethodId, permission.RtId.ToString(),
+            new DataPermissionDeleteDataPermissionParameters(), User, HttpContext.RequestAborted);
+        return (ActionResult)ToActionResult(response, new CkMethodFacadeOptions()
+            .MapError(CkMethodErrorCodes.MethodTargetNotFound, _ => PermissionNotFound(permissionId)));
     }
 
     /// <summary>
@@ -103,9 +125,30 @@ public class DataPermissionsController(IDataPermissionStore dataPermissionStore,
             return BadRequest("Scope must be All|OwnedOnly, EnforcementMode must be Enforce|AuditOnly.");
         }
 
-        var rtId = await dataPermissionStore.CreatePolicyAsync(permissionId, dto.TargetCkTypeIds, dto.Actions,
-            scope, enforcementMode);
-        return Ok(rtId.ToString());
+        // AB#9042: the facade of DataPermission.CreatePolicy-1 (System.Identity 3.8.0). An unknown permission is 404 (was
+        // an unhandled 500).
+        var permission = await dataPermissionStore.FindByPermissionIdAsync(permissionId);
+        if (permission == null)
+        {
+            return PermissionNotFound(permissionId);
+        }
+
+        var response = await methodFacade.InvokeAsync(IdentityMethodFacade.DataPermissionCkTypeId,
+            SystemIdentityCkIds.DataPermissionCreatePolicyMethodId, permission.RtId.ToString(),
+            new DataPermissionCreatePolicyParameters
+            {
+                TargetCkTypeIds = dto.TargetCkTypeIds, Actions = dto.Actions, Scope = scope,
+                EnforcementMode = enforcementMode
+            }, User, HttpContext.RequestAborted);
+        return response.ToActionResult(new CkMethodFacadeOptions()
+                .MapError(CkMethodErrorCodes.MethodTargetNotFound, _ => PermissionNotFound(permissionId))
+                .MapSuccess(r => new OkObjectResult(
+                    JsonSerializer.Deserialize<string>(r.ResultJson!, CkMethodJson.Options))))
+            switch
+            {
+                ActionResult actionResult => actionResult,
+                var other => new ObjectResult(other)
+            };
     }
 
     /// <summary>
@@ -117,8 +160,14 @@ public class DataPermissionsController(IDataPermissionStore dataPermissionStore,
     [ProducesResponseType(StatusCodes.Status200OK)]
     public async Task<ActionResult> DeletePolicy([FromRoute] string policyRtId)
     {
-        await dataPermissionStore.RemovePolicyAsync(OctoObjectId.Parse(policyRtId));
-        return Ok();
+        // AB#9042: the facade of DataPolicy.DeleteDataPolicy-1 (System.Identity 3.8.0). An unknown policy is 404, a malformed
+        // id too (both were unhandled before).
+        var response = await methodFacade.InvokeAsync(IdentityMethodFacade.DataPolicyCkTypeId,
+            SystemIdentityCkIds.DataPolicyDeleteDataPolicyMethodId, policyRtId, new DataPolicyDeleteDataPolicyParameters(),
+            User, HttpContext.RequestAborted);
+        return (ActionResult)ToActionResult(response, new CkMethodFacadeOptions()
+            .MapError(CkMethodErrorCodes.MethodTargetNotFound,
+                _ => NotFound(new NotFoundErrorDto($"Data policy '{policyRtId}' not found."))));
     }
 
     /// <summary>

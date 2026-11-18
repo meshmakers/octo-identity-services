@@ -41,3 +41,9 @@ types:
         execution:
           timeoutSeconds: 30
           idempotent: true
+      # 3.8.0: REST DELETE dataPermissions/policies/{policyRtId} becomes a facade of this method (UserManagement).
+      - methodId: DeleteDataPolicy-1
+        description: "Deletes the policy. Its CK types are no longer protected by it."
+        authorization:
+          roles: [ UserManagement ]
+          dataAccess: Write

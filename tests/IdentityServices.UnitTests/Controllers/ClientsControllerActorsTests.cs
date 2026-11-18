@@ -35,7 +35,7 @@ public class ClientsControllerActorsTests
 
     public ClientsControllerActorsTests()
     {
-        _sut = new ClientsController(_clientStore, _eventHub, _clientRoleStore, _clientImpersonationStore,
+        _sut = new ClientsController(_clientStore, _clientRoleStore, _clientImpersonationStore,
             Substitute.For<RoleManager<RtRole>>(Substitute.For<IRoleStore<RtRole>>(), null, null, null, null),
             Substitute.For<IRoleChangeRefusals>(),
             new HandlerBackedMethodFacade(_clientStore, eventHub: _eventHub));

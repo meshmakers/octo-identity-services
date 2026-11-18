@@ -49,7 +49,7 @@ public class ClientsControllerRoleGuardTests
         // The endpoints are facades of Client.SetRoles / Client.AddRole: the real handlers run behind them.
         var methods = new HandlerBackedMethodFacade(_clientStore, _clientRoleStore, _roleManager, _guard);
         methods.Know(_client);
-        _sut = new ClientsController(_clientStore, Substitute.For<IDistributionEventHubService>(), _clientRoleStore,
+        _sut = new ClientsController(_clientStore, _clientRoleStore,
             Substitute.For<IClientImpersonationStore>(), _roleManager, Substitute.For<IRoleChangeRefusals>(), methods)
         {
             ControllerContext = new ControllerContext

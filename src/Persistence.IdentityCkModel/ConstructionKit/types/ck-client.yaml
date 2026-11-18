@@ -380,3 +380,70 @@ types:
         execution:
           timeoutSeconds: 30
           idempotent: true
+      # 3.8.0: create, update and delete of the client run as methods (REST parity: ClientsController POST/PUT/DELETE,
+      # IdentityTenantAdministrationWritePolicy = TenantManagement or UserManagement; a client secret in the parameters also
+      # needs SecretManagement, as REST IdentitySecretAdministrationPolicy, staged by SecretManagementRoleEnforcement).
+      # The create needs server-side generation: the protocol defaults of a new client (RequirePkce, Jwt access tokens,
+      # AllowAccessTokensViaBrowser, AlwaysIncludeUserClaimsInIdToken, no consent, no client secret), the octo default scopes,
+      # the hash of the secret and the Source marker of the URIs. So the static CreateClient sets them, not the caller.
+      # No replacesGenericCreate: on this existing type the flag is a Major (row M16; NEXT MAJOR), and writeAccess (3.6.0)
+      # already refuses every caller-scoped generic create; the System.Identity.Bootstrap blueprint keeps seeding its clients
+      # through the system path.
+      - methodId: CreateClient-1
+        kind: Static
+        description: "Creates a client with the protocol defaults of a new client. The result is the rtId of the new client; a client secret is stored as a hash and never returned."
+        parameters:
+          - { name: clientId, valueType: String, description: "The OAuth client id, unique per tenant." }
+          - { name: enabled, valueType: Boolean, isOptional: true, description: "Omitted is true." }
+          - { name: clientName, valueType: String, isOptional: true }
+          - { name: clientUri, valueType: String, isOptional: true }
+          - { name: allowedGrantTypes, valueType: StringArray, isOptional: true }
+          - { name: redirectUris, valueType: StringArray, isOptional: true }
+          - { name: postLogoutRedirectUris, valueType: StringArray, isOptional: true }
+          - { name: allowedCorsOrigins, valueType: StringArray, isOptional: true }
+          - { name: allowedScopes, valueType: StringArray, isOptional: true, description: "Added to the octo default scopes." }
+          - { name: allowOfflineAccess, valueType: Boolean, isOptional: true }
+          - { name: requireClientSecret, valueType: Boolean, isOptional: true, description: "Omitted is false." }
+          - { name: clientSecret, valueType: String, isOptional: true, sensitive: true, description: "Sets the only secret of the client (stored as a hash). Needs SecretManagement. Write-only." }
+          - { name: frontChannelLogoutUri, valueType: String, isOptional: true }
+          - { name: frontChannelLogoutSessionRequired, valueType: Boolean, isOptional: true }
+          - { name: backChannelLogoutUri, valueType: String, isOptional: true }
+          - { name: backChannelLogoutSessionRequired, valueType: Boolean, isOptional: true }
+          - { name: autoProvisionInChildTenants, valueType: Boolean, isOptional: true }
+        result:
+          valueType: String
+        errors:
+          - { code: CLIENT_ALREADY_EXISTS, description: "A client with this client id exists." }
+        authorization:
+          roles: [ TenantManagement, UserManagement ]
+          dataAccess: Write
+      - methodId: UpdateClient-1
+        description: "Changes the client; an omitted parameter leaves the value unchanged (allowedScopes: omitted resets to the octo default scopes, as in the REST body). A client secret replaces all secrets of the client and needs SecretManagement."
+        parameters:
+          - { name: clientId, valueType: String, isOptional: true, description: "A new client id; omitted or empty keeps it." }
+          - { name: enabled, valueType: Boolean, isOptional: true }
+          - { name: clientName, valueType: String, isOptional: true }
+          - { name: clientUri, valueType: String, isOptional: true }
+          - { name: allowedGrantTypes, valueType: StringArray, isOptional: true }
+          - { name: redirectUris, valueType: StringArray, isOptional: true }
+          - { name: postLogoutRedirectUris, valueType: StringArray, isOptional: true }
+          - { name: allowedCorsOrigins, valueType: StringArray, isOptional: true }
+          - { name: allowedScopes, valueType: StringArray, isOptional: true }
+          - { name: allowOfflineAccess, valueType: Boolean, isOptional: true }
+          - { name: requireClientSecret, valueType: Boolean, isOptional: true }
+          - { name: clientSecret, valueType: String, isOptional: true, sensitive: true, description: "Replaces the secrets of the client (stored as a hash). Needs SecretManagement. Write-only." }
+          - { name: frontChannelLogoutUri, valueType: String, isOptional: true }
+          - { name: frontChannelLogoutSessionRequired, valueType: Boolean, isOptional: true }
+          - { name: backChannelLogoutUri, valueType: String, isOptional: true }
+          - { name: backChannelLogoutSessionRequired, valueType: Boolean, isOptional: true }
+          - { name: autoProvisionInChildTenants, valueType: Boolean, isOptional: true }
+        errors:
+          - { code: CONCURRENT_CHANGE, description: "The client was changed concurrently by other requests; retry." }
+        authorization:
+          roles: [ TenantManagement, UserManagement ]
+          dataAccess: Write
+      - methodId: DeleteClient-1
+        description: "Deletes the client."
+        authorization:
+          roles: [ TenantManagement, UserManagement ]
+          dataAccess: Write

@@ -158,11 +158,7 @@ public class DuplicateExternalTenantUserMappingIntegrationTests : IClassFixture<
         var facade = new ProvisioningMethodTestFacade(_fixture.GetSystemContext(), mappingStore: ctx.Store,
             grantAdmission: AdmitsLogin(ctx));
         var controller = new ExternalTenantUserMappingsController(ctx.Store, Substitute.For<IGroupStore>(),
-            Substitute.For<IRoleChangeGuard>(), Substitute.For<IRoleChangeRefusals>(),
-            Substitute.For<Meshmakers.Octo.Backend.IdentityServices.CrossTenantAudit.ICrossTenantGrantAuditRecorder>(),
-            Substitute.For<IMultiTenancyResolverService>(),
-            facade,
-            NullLogger<ExternalTenantUserMappingsController>.Instance)
+            Substitute.For<IRoleChangeRefusals>(), Substitute.For<IMultiTenancyResolverService>(), facade)
         {
             ControllerContext = new Microsoft.AspNetCore.Mvc.ControllerContext
             {

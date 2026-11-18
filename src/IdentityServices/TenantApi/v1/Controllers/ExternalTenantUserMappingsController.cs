@@ -1,3 +1,5 @@
+using Meshmakers.Octo.Services.Methods;
+using Meshmakers.Octo.Services.Contracts.DistributionEventHub.Methods;
 using System.ComponentModel;
 using System.ComponentModel.DataAnnotations;
 using Asp.Versioning;
@@ -32,61 +34,14 @@ namespace Meshmakers.Octo.Backend.IdentityServices.TenantApi.v1.Controllers;
 public class ExternalTenantUserMappingsController(
     IExternalTenantUserMappingStore mappingStore,
     IGroupStore groupStore,
-    IRoleChangeGuard roleChangeGuard,
     IRoleChangeRefusals roleChangeRefusals,
-    ICrossTenantGrantAuditRecorder grantAudit,
     IMultiTenancyResolverService multiTenancyResolverService,
-    IIdentityMethodFacade methodFacade,
-    ILogger<ExternalTenantUserMappingsController> logger) : ControllerBase
+    IIdentityMethodFacade methodFacade) : ControllerBase
 {
     /// <summary>User name (or client id) of the caller, for logs and audit events — never a token.</summary>
     private string CallerName()
         => User.Identity?.Name ?? User.FindFirst("preferred_username")?.Value ??
            User.FindFirst("client_id")?.Value ?? User.FindFirst("sub")?.Value ?? "unknown";
-
-    /// <summary>The mapping's group names for an audit event; a read error yields none and never fails the request.</summary>
-    private async Task<IReadOnlyList<string>> GroupNamesForAuditAsync(RtExternalTenantUserMapping mapping)
-    {
-        try
-        {
-            return await groupStore.GetGroupNamesForExternalUserMappingAsync(mapping.RtId);
-        }
-        catch (Exception ex)
-        {
-            logger.LogWarning(ex, "Group names of mapping {MappingId} could not be read for the audit event (AB#8342)",
-                mapping.RtId);
-            return [];
-        }
-    }
-
-    /// <summary>Records a grant event in T and S (AB#8342); never fails the request.</summary>
-    private async Task AuditGrantAsync(string eventName, RtExternalTenantUserMapping mapping,
-        IReadOnlyList<string>? groupNames = null)
-    {
-        try
-        {
-            groupNames ??= await GroupNamesForAuditAsync(mapping);
-            await grantAudit.RecordGrantAsync(eventName, multiTenancyResolverService.GetTenantId(), CallerName(),
-                mapping, groupNames);
-        }
-        catch (Exception ex)
-        {
-            logger.LogWarning(ex, "Audit event {EventName} of mapping {MappingId} could not be recorded (AB#8342)",
-                eventName, mapping.RtId);
-        }
-    }
-
-    /// <summary>
-    /// Runs the role change guard (AB#7927). Returns the 403/409 problem answer (audited), or <c>null</c> when allowed.
-    /// </summary>
-    private async Task<ObjectResult?> GuardAsync(RoleGraphChange change, string target)
-    {
-        var caller = RoleChangeCaller.FromPrincipal(User);
-        var decision = await roleChangeGuard.EvaluateAsync(caller, change, HttpContext.RequestAborted);
-        return decision.IsAllowed
-            ? null
-            : await roleChangeRefusals.RefuseAsync(HttpContext, caller, decision, target);
-    }
 
     /// <summary>
     /// Returns all external tenant user mappings.
@@ -283,21 +238,19 @@ public class ExternalTenantUserMappingsController(
             return NotFound();
         }
 
-        var refusal = await GuardAsync(new RoleGraphChange.MappingRoles(rtId.ToString(), null, null, dto.RoleIds ?? []),
-            $"mapping {rtId}");
-        if (refusal != null)
+        // AB#9042: the facade of ExternalTenantUserMapping.UpdateMapping-1 (System.Identity 3.8.0): the role change guard
+        // (AB#7927) and the grant audit (AB#8342) run in the method; a refusal keeps its audited 403/409 answer.
+        var response = await methodFacade.InvokeAsync(IdentityMethodFacade.ExternalTenantUserMappingCkTypeId,
+            SystemIdentityCkIds.ExternalTenantUserMappingUpdateMappingMethodId, rtId.ToString(),
+            new ExternalTenantUserMappingUpdateMappingParameters { RoleIds = dto.RoleIds?.ToList() }, User,
+            HttpContext.RequestAborted);
+        if (!response.Success)
         {
-            return refusal;
+            return (ActionResult)await FacadeFailureAsync(response, $"mapping {rtId}");
         }
 
-        existing.MappedRoleIds = dto.RoleIds != null
-            ? new AttributeStringValueList(dto.RoleIds)
-            : null;
-
-        await mappingStore.StoreAsync(existing);
-        await AuditGrantAsync(CrossTenantGrantAuditEvents.GrantChanged, existing);
-
-        return Ok(MapToDto(existing));
+        var updated = await mappingStore.GetByIdAsync(rtId);
+        return updated == null ? NotFound() : Ok(MapToDto(updated));
     }
 
     /// <summary>
@@ -316,17 +269,28 @@ public class ExternalTenantUserMappingsController(
             return NotFound();
         }
 
-        var refusal = await GuardAsync(new RoleGraphChange.MappingDeleted(rtId.ToString()), $"mapping {rtId}");
-        if (refusal != null)
+        // AB#9042: the facade of ExternalTenantUserMapping.DeleteMapping-1 (System.Identity 3.8.0); guard and grant audit
+        // run in the method.
+        var response = await methodFacade.InvokeAsync(IdentityMethodFacade.ExternalTenantUserMappingCkTypeId,
+            SystemIdentityCkIds.ExternalTenantUserMappingDeleteMappingMethodId, rtId.ToString(),
+            new ExternalTenantUserMappingDeleteMappingParameters(), User, HttpContext.RequestAborted);
+        return response.Success ? Ok() : await FacadeFailureAsync(response, $"mapping {rtId}");
+    }
+
+    /// <summary>
+    ///     The REST answer of a refused mapping method: a role change guard refusal keeps the audited 403/409 problem of the
+    ///     REST endpoint (AB#7927); everything else maps as the facade defaults (404 for an unknown or invisible mapping).
+    /// </summary>
+    private async Task<IActionResult> FacadeFailureAsync(CkMethodResponse response, string target)
+    {
+        if (RoleChangeProblems.RefusalOf(response) is { } decision)
         {
-            return refusal;
+            return await roleChangeRefusals.RefuseAsync(HttpContext, RoleChangeCaller.FromPrincipal(User), decision,
+                target);
         }
 
-        // Group names before the removal: the mapping's GroupMember edges go with it.
-        var groupNames = await GroupNamesForAuditAsync(existing);
-        await mappingStore.RemoveAsync(rtId);
-        await AuditGrantAsync(CrossTenantGrantAuditEvents.GrantRemoved, existing, groupNames);
-        return Ok();
+        return response.ToActionResult(new CkMethodFacadeOptions()
+            .MapError(CkMethodErrorCodes.MethodTargetNotFound, _ => NotFound()));
     }
 
     // Create/Update responses: the per-tenant mapping is not yet (or not) a group member at that point,

@@ -46,7 +46,7 @@ public class ClientsControllerOverlayUrisTests
         _writes = ClientStoreMutations.Attach(_clientStore);
         // The endpoint is a facade of Client.ApplyOverlayUris: the real handler runs behind it.
         _methods = new HandlerBackedMethodFacade(_clientStore, eventHub: _eventHub);
-        _sut = new ClientsController(_clientStore, _eventHub, _clientRoleStore, _clientImpersonationStore,
+        _sut = new ClientsController(_clientStore, _clientRoleStore, _clientImpersonationStore,
             Substitute.For<RoleManager<RtRole>>(Substitute.For<IRoleStore<RtRole>>(), null, null, null, null),
             Substitute.For<IRoleChangeRefusals>(), _methods)
         {

@@ -41,3 +41,36 @@ types:
         authorization:
           roles: [ UserManagement ]
           dataAccess: Write
+      # 3.8.0: create and delete of the permission and the create of its policies run as methods (REST parity:
+      # DataPermissionsController POST, DELETE {permissionId}, POST {permissionId}/policies; UserManagement). No
+      # replacesGenericCreate (row M16, and the Bootstrap blueprint seeds data permissions).
+      - methodId: CreateDataPermission-1
+        kind: Static
+        description: "Creates a data permission. The result is the rtId of the new permission."
+        parameters:
+          - { name: permissionId, valueType: String, description: "The dot-namespaced permission id, unique per tenant." }
+          - { name: description, valueType: String, isOptional: true }
+        result:
+          valueType: String
+        errors:
+          - { code: DATA_PERMISSION_ALREADY_EXISTS, description: "A permission with this id exists." }
+        authorization:
+          roles: [ UserManagement ]
+          dataAccess: Write
+      - methodId: DeleteDataPermission-1
+        description: "Deletes the permission together with its policies (a policy without a permission would still protect its targets)."
+        authorization:
+          roles: [ UserManagement ]
+          dataAccess: Write
+      - methodId: CreatePolicy-1
+        description: "Creates a policy that binds this permission to CK types. The result is the rtId of the new policy."
+        parameters:
+          - { name: targetCkTypeIds, valueType: StringArray, description: "The CK types the policy protects; not empty." }
+          - { name: actions, valueType: StringArray, isOptional: true, description: "The actions the policy grants; omitted is none." }
+          - { name: scope, valueType: Enum, valueCkEnumId: "${this}/DataPolicyScope" }
+          - { name: enforcementMode, valueType: Enum, valueCkEnumId: "${this}/DataPolicyEnforcementMode" }
+        result:
+          valueType: String
+        authorization:
+          roles: [ UserManagement ]
+          dataAccess: Write
