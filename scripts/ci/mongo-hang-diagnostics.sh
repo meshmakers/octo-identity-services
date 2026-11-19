@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# mongo-hang-diagnostics.sh -- hang evidence of the Testcontainers MongoDB of the identity integration tests (AB#6723).
+# mongo-hang-diagnostics.sh -- hang evidence of the Testcontainers MongoDB of the identity integration tests.
 #
 # Why: the Test step of azure-pipelines.yml sometimes ran into its step timeout without saying which test was in
 # flight or what MongoDB waited on. This script records a filtered view of the running operations while the tests
@@ -11,16 +11,20 @@
 #   report <dir> <job-status>    stops the sampler; when <job-status> is not "Succeeded" prints the last samples and
 #                                one fresh snapshot. Never fails the build.
 #
-# Output is filtered to what AB#6723 allows: op, ns, secs_running, waitingForLock, the lock modes (locks) and the
+# Output is filtered to what the evidence needs: op, ns, secs_running, waitingForLock, the lock modes (locks) and the
 # resource names of lockStats. No command documents, no client addresses, no credentials. The credentials are never on
-# a command line: mongosh runs INSIDE the container and reads MONGO_INITDB_ROOT_* from the container's own
-# environment (set there by the test fixture), so neither this script nor the build log ever holds them.
+# the agent's command line or the build log: mongosh runs INSIDE the container and reads MONGO_INITDB_ROOT_* from the
+# container's own environment (set there by the test fixture), so neither this script nor the build log ever holds them.
 set -u
 
 MODE="${1:-}"
 DIR="${2:-}"
 NAME_FILTER="${MONGO_DIAG_NAME_FILTER:-mongodb-identity-test-shared}"
 INTERVAL="${MONGO_DIAG_INTERVAL_SECONDS:-60}"
+# A starved mongod or a stuck docker daemon must not hold the agent: bound every exec
+# (coreutils timeout exists on the CI agent; without it, e.g. on macOS, the exec is unbounded).
+TIMEOUT_CMD=""
+if command -v timeout >/dev/null 2>&1; then TIMEOUT_CMD="timeout 60"; fi
 
 # The JavaScript runs inside mongosh in the container. It prints one JSON line per notable operation and no other
 # field of currentOp. "notable" = running >= 20 s or waiting for a lock; the idle-op count is the heartbeat.
@@ -46,7 +50,7 @@ find_container() {
 # Runs the JS in the container. The password stays inside the container shell ("$VAR" expands there).
 sample_once() {
   local cid="$1"
-  docker exec -i "$cid" sh -c 'mongosh --quiet -u "$MONGO_INITDB_ROOT_USERNAME" -p "$MONGO_INITDB_ROOT_PASSWORD" --authenticationDatabase admin --eval "$1"' sh "$MONGO_JS" 2>&1 \
+  $TIMEOUT_CMD docker exec -i "$cid" sh -c 'mongosh --quiet -u "$MONGO_INITDB_ROOT_USERNAME" -p "$MONGO_INITDB_ROOT_PASSWORD" --authenticationDatabase admin --eval "$1"' sh "$MONGO_JS" 2>&1 \
     | grep -E '^\{' || echo '{"error":"mongosh produced no JSON (container gone, auth or shell problem)"}'
 }
 
@@ -75,7 +79,7 @@ case "$MODE" in
     [ -n "$DIR" ] || { echo "usage: $0 report <dir> <job-status>"; exit 0; }
     STATUS="${3:-}"
     touch "$DIR/stop" 2>/dev/null || true
-    if [ "$STATUS" = "Succeeded" ]; then
+    if [ "$STATUS" = "Succeeded" ] || [ "$STATUS" = "SucceededWithIssues" ]; then
       echo "Test step succeeded - no hang evidence needed."
       exit 0
     fi

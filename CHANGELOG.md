@@ -61,9 +61,9 @@ Notable changes of the OctoMesh identity services. The CK model `System.Identity
   without it still defaults to true, as the REST DTO).
 =======
 - **CI: a stalled Test step names the test and the MongoDB state (AB#6723).** The Test step runs with `--blame-hang
-  --blame-hang-timeout 10m --blame-hang-dump-type none`, `xunit.runner.json` reports tests longer than 2 min, a filtered
+  --blame-hang-timeout 8m --blame-hang-dump-type none`, `xunit.runner.json` reports tests longer than 2 min, a filtered
   `$currentOp` summary of the Testcontainers MongoDB is printed on a failed job, and `Sequence_*.xml` plus the samples
-  are published as artifact `hang-evidence`. The Test step no longer retries (a retry could hide red tests). Where to
+  are published as artifact `hang-evidence-<attempt>`. The Test step no longer retries (a retry could hide red tests). Where to
   look: `docs/testing.md`, "Hang evidence in CI".
 >>>>>>> 86f0b53f (AB#6723 Chore: identity CI test step names the hanging test and the Mongo state)
 

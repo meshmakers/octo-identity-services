@@ -171,27 +171,29 @@ reads what a consumer, an observer or a background step recorded waits for it wi
 the response.
 
 
-## Hang evidence in CI (AB#6723)
+## Hang evidence in CI
 
-The Test step of `azure-pipelines.yml` has a step timeout of 25 min (AB#8334). A suite that stalls used to end there
-without saying which test was running or what MongoDB waited for (AB#9375). A healthy agent needs 10-14 min for the
-whole step. Since AB#6723 a stall leaves evidence in three places; read them in this order:
+The Test step of `azure-pipelines.yml` has a step timeout of 25 min. A suite that stalls used to end there
+without saying which test was running or what MongoDB waited for. A healthy agent needs 10-14 min for the
+whole step. A stall now leaves evidence in three places; read them in this order:
 
 1. **Build log of the Test step, `[Long Running Test]` lines.** `xunit.runner.json` sets `longRunningTestSeconds: 120` and
    `diagnosticMessages: true` (the runner prints the notice only with diagnostic messages on), so a test that runs longer
    than 2 min is named in the log while it is still running, and again every further 2 min.
-2. **`--blame-hang --blame-hang-timeout 10m --blame-hang-dump-type none`.** A single test that runs longer than 10 min
-   (the slowest seen: 7m21s on a degraded agent) aborts the test host; the step fails after 10 min instead of 25, and the
-   log names the tests in flight. No memory dump is written (GBs), only `Sequence_*.xml`. The steps *Collect hang
-   evidence* and *Publish hang evidence* print the tests that had started and not completed and publish the pipeline
-   artifact **`hang-evidence`** (`Sequence_*.xml`, `samples.log`) when the job failed.
+2. **`--blame-hang --blame-hang-timeout 8m --blame-hang-dump-type none`.** The test host is aborted when no test has
+   started or finished for 8 min. vstest measures inactivity, not the run time of one test: every start or end of a test
+   (also of the other parallel ones) resets the timer, so a hang is caught 8 min after the last test activity. The step then
+   fails before its 25 min, and the log names the tests in flight. No memory dump is written (GBs), only
+   `Sequence_*.xml`. The steps *Collect hang evidence* and *Publish hang evidence* print the tests that had started and
+   not completed and publish the pipeline artifact **`hang-evidence-<attempt>`** (`Sequence_*.xml`, `samples.log`) when the
+   job failed.
 3. **Step *Mongo hang evidence*, filtered `$currentOp` summary of the Testcontainers MongoDB**
    (`scripts/ci/mongo-hang-diagnostics.sh`). A sampler started before the tests writes one heartbeat line a minute
    (`activeOps`, `notable`) and one line per operation that runs >= 20 s or waits for a lock: `op`, `ns`, `secs_running`,
    `waitingForLock`, `locks` (lock modes) and the resource names of `lockStats`. Nothing else is kept: no command
    documents, client addresses or credentials (`mongosh` runs inside the container and reads the container's own
-   `MONGO_INITDB_ROOT_*` variables; no secret is on a command line or in the log). The step runs on a failed or cancelled
-   job before the cleanup step removes the container, prints the last 40 samples and one fresh snapshot, and never fails the
+   `MONGO_INITDB_ROOT_*` variables; no secret is on the agent's command line or in the log). The step runs on a failed or cancelled
+   job before the cleanup step removes the container, prints the last 40 samples and one fresh snapshot (time-boxed to 3 min), and never fails the
    build. Reading it: an operation with growing `secs_running` and `waitingForLock: true` waits on a lock (index build or
    transaction of a tenant setup); `waitingForLock: false` with a high `secs_running` is a slow operation itself; no
    notable operation at all means the test host waits on something else (MongoDB is idle: look at the tests in flight).

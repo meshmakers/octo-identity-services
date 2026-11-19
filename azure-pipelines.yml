@@ -177,7 +177,7 @@ stages:
             env:
               DOCKER_HOST: unix:///var/run/docker.sock
             condition: and(succeeded(), ne(variables['CiGuardEnded'], 'true'))
-          # AB#6723: records what MongoDB runs and waits for while the tests run (filtered: op, ns, secs_running,
+          # Records what MongoDB runs and waits for while the tests run (filtered: op, ns, secs_running,
           # waitingForLock, lock modes; never documents or credentials). A later step prints it on a failed Test step.
           - script: scripts/ci/mongo-hang-diagnostics.sh start "$(Agent.TempDirectory)/mongo-hang" 45
             displayName: 'Start Mongo hang sampler'
@@ -187,23 +187,24 @@ stages:
               DOCKER_HOST: unix:///var/run/docker.sock
           - task: DotNetCoreCLI@2
             condition: and(succeeded(), ne(variables['CiGuardEnded'], 'true'))
-            # AB#6723: no retryCountOnTaskFailure here. A retry re-ran the whole suite after a failure or a hang
+            # No retryCountOnTaskFailure here. A retry re-ran the whole suite after a failure or a hang
             # (up to 3 x 25 min against the 90 min job) and could turn a red test green. Restore and Build keep
             # their retries (feed hiccups); a flaky test is fixed per test.
-            # AB#8334: the identity suite takes 10-14 min on a healthy agent (measured 2026-11, AB#9375; the
-            # earlier "~6 min" is outdated). A test host that hangs (heap cap
+            # The identity suite takes 10-14 min on a healthy agent (measured 2026-11; the earlier "~6 min" is
+            # outdated). A test host that hangs (heap cap
             # reached in the 12 Gi agent pod, GC thrash) must not hold the agent for the 90 minutes of
             # the job timeout; the always() cleanup step below then reaps the leaked Mongo container.
             timeoutInMinutes: 25
             displayName: 'Test'
-            # AB#6723 hang evidence, three layers (read them in this order after a failed Test step):
+            # Hang evidence, three layers (read them in this order after a failed Test step):
             #   1. xunit.runner.json longRunningTestSeconds: the log names a test that runs longer than 2 min
             #      while it is still running ("[Long Running Test]").
-            #   2. --blame-hang --blame-hang-timeout 10m: a test that runs longer than 10 min (the slowest seen
-            #      was 7m21s on a degraded agent) aborts the test host, so the step fails after 10 min instead of
-            #      25, and the log names the tests in flight. --blame-hang-dump-type none: no GB-sized dump, only
+            #   2. --blame-hang --blame-hang-timeout 8m: the test host is aborted when no test has started or finished
+            #      for 8 min (vstest measures inactivity, not one test: every start or end of a test, also of the
+            #      other parallel ones, resets it; the slowest single test seen was 7m21s on a degraded agent).
+            #      The step then fails well before its 25 min, and the log names the tests in flight. --blame-hang-dump-type none: no GB-sized dump, only
             #      the Sequence_*.xml; the step 'Collect hang evidence' below prints the tests that were still
-            #      running and 'Publish hang evidence' keeps the files as pipeline artifact 'hang-evidence'.
+            #      running and 'Publish hang evidence' keeps the files as pipeline artifact 'hang-evidence-<attempt>'.
             #   3. 'Mongo hang evidence' below: filtered db.currentOp / lock summary of the Testcontainers MongoDB.
             # AB#5160:
             #   --no-build --no-restore: the 'Build' task above already builds the WHOLE solution
@@ -216,7 +217,7 @@ stages:
             #     logger and publishes the results, and failed tests still print their assertion message.
             inputs:
               command: 'test'
-              arguments: '--configuration $(buildConfiguration) --no-build --no-restore -p:OctoNugetPrivateServer=$(nugetPrivateServer) /p:OctoPublishCkModel=false --blame-hang --blame-hang-timeout 10m --blame-hang-dump-type none'
+              arguments: '--configuration $(buildConfiguration) --no-build --no-restore -p:OctoNugetPrivateServer=$(nugetPrivateServer) /p:OctoPublishCkModel=false --blame-hang --blame-hang-timeout 8m --blame-hang-dump-type none'
               projects: |
                 **/*Tests.csproj
                 !**/*SystemTests.csproj
@@ -224,15 +225,16 @@ stages:
               DOCKER_HOST: unix:///var/run/docker.sock
               TESTCONTAINERS_RYUK_DISABLED: 'true'
               TESTCONTAINERS_HOST_OVERRIDE: '172.17.0.1'
-          # AB#6723: must run before the cleanup step below, which removes the Mongo container.
+          # Must run before the cleanup step below, which removes the Mongo container.
           - script: scripts/ci/mongo-hang-diagnostics.sh report "$(Agent.TempDirectory)/mongo-hang" "$(Agent.JobStatus)"
             displayName: 'Mongo hang evidence (on a failed Test step)'
+            timeoutInMinutes: 3
             condition: and(always(), ne(variables['CiGuardEnded'], 'true'))
             continueOnError: true
             env:
               DOCKER_HOST: unix:///var/run/docker.sock
           - script: |
-              # AB#6723: blame-hang writes Sequence_*.xml (tests started and not completed) into the test results
+              # blame-hang writes Sequence_*.xml (tests started and not completed) into the test results
               # directory. Print the tests that were in flight and keep the files as an artifact.
               OUT="$(Build.ArtifactStagingDirectory)/hang-evidence"
               mkdir -p "$OUT"
@@ -253,7 +255,7 @@ stages:
             continueOnError: true
             inputs:
               targetPath: '$(Build.ArtifactStagingDirectory)/hang-evidence'
-              artifact: 'hang-evidence'
+              artifact: 'hang-evidence-$(System.JobAttempt)'
               publishLocation: 'pipeline'
           # AB#8334: Ryuk is disabled above, so nothing reaps the shared Mongo Testcontainer when the
           # test host dies before the assembly fixture disposes it (blame-hang kill, step timeout,
