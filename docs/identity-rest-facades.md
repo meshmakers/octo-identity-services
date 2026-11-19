@@ -647,7 +647,7 @@ in-process, outside the request, one `Identity.Method` event per call, the handl
   (`CkMethodRequest.CkTypeId`, version-less; a model version in it is ignored), never from a parameter; the abstract type or any other type is
   refused (`METHOD_VALIDATION_FAILED` on `ckTypeId` for the create, `METHOD_TARGET_NOT_FOUND` for update and delete). One parameter list serves
   all provider types; the required fields per type are those of the REST DTOs, the defaults too (`port` 636, OpenLDAP `useTls` true and
-  `userNameAttribute` `uid`, `allowSelfRegistration` true). The OctoTenant parent rule (registry ancestor) runs in the handler
+  `userNameAttribute` `uid`, `allowSelfRegistration` true on create; an update without it keeps the stored value). The OctoTenant parent rule (registry ancestor) runs in the handler
   (`PARENT_TENANT_NOT_ANCESTOR`, REST keeps its `400` problem). Every write announces `IdentityProviderUpdate`.
 - **Client create needs server-side generation**, so it is a static method: the protocol defaults of a new client (`RequirePkce`, Jwt access
   tokens, `AllowAccessTokensViaBrowser`, `AlwaysIncludeUserClaimsInIdToken`, no consent, no client secret required), the octo default scopes, the
@@ -660,7 +660,8 @@ in-process, outside the request, one `Identity.Method` event per call, the handl
 - **Data permission.** The static creates check the caller's `Write` permission on the type (for providers the concrete type), the instance
   methods the target; `CreatePolicy` also the type `DataPolicy`. Not visible = `404`, visible but not writable = `403` (`data-permission`).
   Data access beyond the target entity: `DataPermission.DeleteDataPermission` deletes the permission's policies with it, as
-  REST did; `DataPermission.CreatePolicy` creates a `DataPolicy` entity bound to the permission.
+  REST did, and needs `Write` on each of them: one the caller may not write (or not see) refuses the whole delete with `403`
+  (`data-permission`) and nothing is deleted; `DataPermission.CreatePolicy` creates a `DataPolicy` entity bound to the permission.
 
 Parity table (REST before -> facade):
 

@@ -55,6 +55,10 @@ Notable changes of the OctoMesh identity services. The CK model `System.Identity
   REST changes (parity table in `docs/identity-rest-facades.md`): an unknown id on update or delete is `404` (provider and rule update inserted
   before, deletes answered `200`); a duplicate data permission is `409` and an unknown permission or policy `404` (both were unhandled `500`); a
   provider update on another provider type is `404`; an unexpected client write failure carries a fixed message instead of the exception text.
+  `DataPermission.DeleteDataPermission` also deletes the bound policies, so it needs the write permission on each of them (as `CreatePolicy`
+  needs it on `DataPolicy`): one the caller may not write or see refuses the whole delete with `METHOD_FORBIDDEN` (`data-permission`, REST
+  `403`) and nothing is deleted. `IdentityProvider.UpdateIdentityProvider` without `allowSelfRegistration` keeps the stored value (a create
+  without it still defaults to true, as the REST DTO).
 
 - **Create, update and delete of roles, groups, API scopes and API resources run CK methods (System.Identity 3.7.0).** The REST write endpoints of
   `RolesController`, `GroupsController` (create, update, delete), `ApiScopesController` and `ApiResourcesController` are facades of the new

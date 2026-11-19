@@ -86,8 +86,23 @@ internal sealed class DataPermissionDeleteDataPermissionHandler(IServiceProvider
         }
 
         call.Details[DataPermissionCrudSupport.PermissionIdDetail] = permission.PermissionId;
-        await call.Services.GetRequiredService<IDataPermissionStore>().RemoveAsync(permission.PermissionId)
-            .ConfigureAwait(false);
+        var store = call.Services.GetRequiredService<IDataPermissionStore>();
+
+        // RemoveAsync deletes every policy bound to the permission as well. The caller must be able to write each of
+        // them, as CreatePolicy requires the write permission on DataPolicy: fail closed on the first policy the caller
+        // cannot write (or cannot see, whose existence is not told; both answer METHOD_FORBIDDEN data-permission, since
+        // the permission itself is visible). Nothing is deleted then.
+        var policyType = RtEntityExtensions.GetRtCkTypeId<RtDataPolicy>();
+        foreach (var policy in await store.GetPoliciesAsync(permission.RtId).ConfigureAwait(false))
+        {
+            if (await call.CheckTargetWritableAsync(new RtEntityId(policyType, policy.RtId), cancellationToken)
+                    .ConfigureAwait(false) != null)
+            {
+                return call.NotPermitted();
+            }
+        }
+
+        await store.RemoveAsync(permission.PermissionId).ConfigureAwait(false);
         return CkMethodOutcome.Ok();
     }
 }

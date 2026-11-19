@@ -394,7 +394,10 @@ internal sealed class IdentityProviderUpdateIdentityProviderHandler(IServiceProv
 
         call.Details[IdentityCrudErrors.NameBeforeDetail] = existing.Name ?? string.Empty;
         var failure = await IdentityProviderMethodSupport.StoreAsync(call, providerType,
-            new IdentityProviderConfiguration(p.Name, p.Enabled, p.Description, p.AllowSelfRegistration, p.DefaultGroupRtId,
+            new IdentityProviderConfiguration(p.Name, p.Enabled, p.Description,
+                // A replace without allowSelfRegistration keeps the stored value: an omitted flag must never switch
+                // self-registration on. The REST facade always sends the DTO's value (its class default is true).
+                p.AllowSelfRegistration ?? existing.AllowSelfRegistration, p.DefaultGroupRtId,
                 p.ClientId, p.ClientSecret, p.TenantId, p.Authority, p.Host, p.Port, p.UseTls, p.UserBaseDn,
                 p.UserNameAttribute, p.ParentTenantId), targetRtId, existing).ConfigureAwait(false);
         return failure != null ? CkMethodOutcome.Fail(failure) : CkMethodOutcome.Ok();

@@ -460,6 +460,89 @@ public class IdentityCrudWave2RestMethodFacadeTests : IntegrationTestBase, IDisp
             withoutSecret.Error?.Code, JsonSerializer.Serialize(withoutSecret.Error?.Parameters));
     }
 
+    [Theory]
+    [InlineData(RtDataPermissionDecision.NotPermitted)]
+    [InlineData(RtDataPermissionDecision.NotVisible)]
+    public async Task DeletingAPermission_WhoseBoundPolicyTheCallerMayNotWrite_IsRefused_AndNothingIsDeleted(
+        RtDataPermissionDecision policyDecision)
+    {
+        // RemoveAsync deletes the bound policies with the permission: the caller must be able to write each of them.
+        var host = Host(evaluator: PoliciesNotWritable(policyDecision));
+        using var client = FacadeCaller.User(UserManagement).Client(host);
+        var ct = TestContext.Current.CancellationToken;
+        var restId = await NewPermissionAsync();
+        var methodId = await NewPermissionAsync();
+        var restPolicy = await NewPolicyAsync(restId);
+        var methodPolicy = await NewPolicyAsync(methodId);
+        var methodPermission =
+            await WithStoreAsync<IDataPermissionStore, RtDataPermission?>(s => s.FindByPermissionIdAsync(methodId));
+
+        var refusal = await DispatchAsync(host, Admin(UserManagement),
+            SystemIdentityCkIds.DataPermissionDeleteDataPermissionMethodId, IdentityMethodFacade.DataPermissionCkTypeId,
+            methodPermission!.RtId.ToString(), new DataPermissionDeleteDataPermissionParameters());
+        refusal.Error!.Code.Should().Be(CkMethodErrorCodes.MethodForbidden);
+        refusal.Error.Parameters.Should().Contain("reason", "data-permission");
+        (await client.DeleteAsync(TenantApiUrl($"dataPermissions/{restId}"), ct)).StatusCode.Should()
+            .Be(HttpStatusCode.Forbidden);
+
+        foreach (var (permissionId, policyRtId) in new[] { (restId, restPolicy), (methodId, methodPolicy) })
+        {
+            (await WithStoreAsync<IDataPermissionStore, RtDataPermission?>(s => s.FindByPermissionIdAsync(permissionId)))
+                .Should().NotBeNull(permissionId);
+            (await LoadAsync<RtDataPolicy>(OctoObjectId.Parse(policyRtId))).Should().NotBeNull(policyRtId);
+        }
+
+        // Without a bound policy the same caller deletes the permission (the check is on the policies, not the permission).
+        var emptyId = await NewPermissionAsync();
+        (await client.DeleteAsync(TenantApiUrl($"dataPermissions/{emptyId}"), ct)).StatusCode.Should().Be(HttpStatusCode.OK);
+        (await WithStoreAsync<IDataPermissionStore, RtDataPermission?>(s => s.FindByPermissionIdAsync(emptyId))).Should()
+            .BeNull();
+    }
+
+    [Fact]
+    public async Task UpdatingAProvider_WithoutAllowSelfRegistration_KeepsTheStoredValue()
+    {
+        var host = Host();
+        var admin = Admin(TenantManagement);
+        var name = NewName("g");
+        var created = await DispatchAsync(host, admin, SystemIdentityCkIds.IdentityProviderCreateIdentityProviderMethodId,
+            GoogleCkTypeId, null, GoogleParameters(name, "s"));
+        created.Success.Should().BeTrue(created.Error?.Code);
+        var rtId = OctoObjectId.Parse(JsonSerializer.Deserialize<string>(created.ResultJson!)!);
+        (await LoadAsync<RtGoogleIdentityProvider>(rtId))!.AllowSelfRegistration.Should().BeFalse();
+
+        // omitted: the stored false stays (a full replace must not switch self-registration on)
+        var omitted = new IdentityProviderUpdateIdentityProviderParameters
+        {
+            Name = name, Enabled = true, Description = "A provider", ClientId = "google-client"
+        };
+        (await DispatchAsync(host, admin, SystemIdentityCkIds.IdentityProviderUpdateIdentityProviderMethodId,
+            GoogleCkTypeId, rtId.ToString(), omitted)).Success.Should().BeTrue();
+        (await LoadAsync<RtGoogleIdentityProvider>(rtId))!.AllowSelfRegistration.Should().BeFalse();
+
+        // an explicit value still replaces it, and an omitted one then keeps the new value
+        var enable = new IdentityProviderUpdateIdentityProviderParameters
+        {
+            Name = name, Enabled = true, AllowSelfRegistration = true, Description = "A provider", ClientId = "google-client"
+        };
+        (await DispatchAsync(host, admin, SystemIdentityCkIds.IdentityProviderUpdateIdentityProviderMethodId,
+            GoogleCkTypeId, rtId.ToString(), enable)).Success.Should().BeTrue();
+        (await DispatchAsync(host, admin, SystemIdentityCkIds.IdentityProviderUpdateIdentityProviderMethodId,
+            GoogleCkTypeId, rtId.ToString(), omitted)).Success.Should().BeTrue();
+        (await LoadAsync<RtGoogleIdentityProvider>(rtId))!.AllowSelfRegistration.Should().BeTrue();
+
+        // a create without it keeps the REST DTO default (true)
+        var createOmitted = new IdentityProviderCreateIdentityProviderParameters
+        {
+            Name = NewName("g"), Enabled = true, Description = "A provider", ClientId = "google-client", ClientSecret = "s"
+        };
+        var second = await DispatchAsync(host, admin, SystemIdentityCkIds.IdentityProviderCreateIdentityProviderMethodId,
+            GoogleCkTypeId, null, createOmitted);
+        second.Success.Should().BeTrue(second.Error?.Code);
+        (await LoadAsync<RtGoogleIdentityProvider>(OctoObjectId.Parse(JsonSerializer.Deserialize<string>(second.ResultJson!)!)))!
+            .AllowSelfRegistration.Should().BeTrue();
+    }
+
     [Fact]
     public async Task ATokenOfAnotherTenant_IsRefused_AndNothingIsCreated()
     {
@@ -494,10 +577,26 @@ public class IdentityCrudWave2RestMethodFacadeTests : IntegrationTestBase, IDisp
             refusal.Error.Parameters.Should().Contain("reason", "tenant-not-allowed");
         }
 
+        // The updates and deletes too: every instance method on a fresh target of this tenant, nothing changes.
+        foreach (var endpoint in EndpointNames.Where(e => !e.StartsWith("create", StringComparison.Ordinal) ||
+                                                          e == "createPolicy"))
+        {
+            var call = await PrepareMethodCallAsync(endpoint);
+            var refusal = await DispatchAsync(host, foreign, call.MethodId, call.CkTypeId, call.TargetRtId, call.Parameters);
+            refusal.Error!.Code.Should().Be(CkMethodErrorCodes.MethodForbidden, endpoint);
+            refusal.Error.Parameters.Should().Contain("reason", "tenant-not-allowed", endpoint);
+            await call.AssertUnchanged();
+        }
+
         using var client = (FacadeCaller.User(UserManagement, TenantManagement) with { TokenTenant = "othertenantcf" })
             .Client(host);
         (await client.PostAsJsonAsync(TenantApiUrl("clients"), ClientDto(clientId, null),
             TestContext.Current.CancellationToken)).StatusCode.Should().Be(HttpStatusCode.Forbidden);
+        var providerRtId = await NewProviderAsync();
+        (await client.DeleteAsync(TenantApiUrl($"identityProviders/{providerRtId}"),
+            TestContext.Current.CancellationToken)).StatusCode.Should().Be(HttpStatusCode.Forbidden);
+        (await WithStoreAsync<IOctoIdentityProviderStore, RtIdentityProvider?>(s => s.GetByIdAsync(providerRtId))).Should()
+            .NotBeNull();
 
         (await WithStoreAsync<IOctoIdentityProviderStore, RtIdentityProvider?>(s => s.GetByNameAsync(providerName))).Should()
             .BeNull();
@@ -607,7 +706,7 @@ public class IdentityCrudWave2RestMethodFacadeTests : IntegrationTestBase, IDisp
     #region Helpers
 
     private WebApplicationFactory<Program> Host(bool enforceTenantGate = false, bool denyReads = false,
-        string? secretRoleEnforcement = null)
+        string? secretRoleEnforcement = null, IRtDataPermissionEvaluator? evaluator = null)
     {
         var host = Factory.WithWebHostBuilder(b =>
         {
@@ -633,6 +732,10 @@ public class IdentityCrudWave2RestMethodFacadeTests : IntegrationTestBase, IDisp
                 {
                     services.AddSingleton(DenyEverything());
                 }
+                else if (evaluator != null)
+                {
+                    services.AddSingleton(evaluator);
+                }
             });
         });
         _hosts.Add(host);
@@ -646,6 +749,23 @@ public class IdentityCrudWave2RestMethodFacadeTests : IntegrationTestBase, IDisp
         evaluator.EvaluateTypeAsync(Arg.Any<IRuntimeRepository>(), Arg.Any<RtSecurityContext>(),
                 Arg.Any<RtCkId<CkTypeId>>(), Arg.Any<RtDataAction>(), Arg.Any<bool>(), Arg.Any<CancellationToken>())
             .Returns(new RtDataPermissionVerdict(RtDataPermissionDecision.NotVisible, RtDataPermissionReason.NoGrant));
+        return evaluator;
+    }
+
+    /// <summary>
+    ///     An enforcing data policy on data policies: every write of one answers <paramref name="decision" /> (a read too when
+    ///     it is <c>NotVisible</c>); everything else is open.
+    /// </summary>
+    private static IRtDataPermissionEvaluator PoliciesNotWritable(RtDataPermissionDecision decision)
+    {
+        var evaluator = Substitute.For<IRtDataPermissionEvaluator>();
+        evaluator.EvaluateAsync(Arg.Any<IRuntimeRepository>(), Arg.Any<RtSecurityContext>(), Arg.Any<RtEntityId>(),
+                Arg.Any<RtDataAction>(), Arg.Any<bool>(), Arg.Any<CancellationToken>())
+            .Returns(call =>
+                call.ArgAt<RtEntityId>(2).CkTypeId.ToString().EndsWith("/DataPolicy", StringComparison.Ordinal) &&
+                (call.ArgAt<RtDataAction>(3) != RtDataAction.Read || decision == RtDataPermissionDecision.NotVisible)
+                    ? new RtDataPermissionVerdict(decision, RtDataPermissionReason.NoGrant)
+                    : new RtDataPermissionVerdict(RtDataPermissionDecision.Allowed, RtDataPermissionReason.Open));
         return evaluator;
     }
 
@@ -960,9 +1080,9 @@ public class IdentityCrudWave2RestMethodFacadeTests : IntegrationTestBase, IDisp
         return permissionId;
     }
 
-    private async Task<string> NewPolicyAsync()
+    private async Task<string> NewPolicyAsync(string? permissionId = null)
     {
-        var permissionId = await NewPermissionAsync();
+        permissionId ??= await NewPermissionAsync();
         var rtId = await WithStoreAsync<IDataPermissionStore, OctoObjectId>(s => s.CreatePolicyAsync(permissionId,
             ["Test.Wave2/Thing"], [], RtDataPolicyScopeEnum.All, RtDataPolicyEnforcementModeEnum.AuditOnly));
         return rtId.ToString();

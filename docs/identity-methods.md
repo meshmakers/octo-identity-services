@@ -369,14 +369,14 @@ Handlers in `Methods/IdentityProviderCrudHandlers.cs`, `EmailDomainGroupRuleCrud
 
 | Method | Parameters | Result | Errors | Roles |
 |---|---|---|---|---|
-| static `IdentityProvider.CreateIdentityProvider` / `IdentityProvider.UpdateIdentityProvider` | `name`; optional `enabled` (omitted false), `description`, `allowSelfRegistration` (omitted true), `defaultGroupRtId`, `clientId`, `clientSecret` (sensitive), `tenantId`, `authority`, `host`, `port`, `useTls`, `userBaseDn`, `userNameAttribute`, `parentTenantId` | create: rtId | `IDENTITY_PROVIDER_ALREADY_EXISTS`, `PARENT_TENANT_NOT_ANCESTOR`, `SECRET_ENCRYPTION_NOT_CONFIGURED` | `TenantManagement`, `UserManagement` |
+| static `IdentityProvider.CreateIdentityProvider` / `IdentityProvider.UpdateIdentityProvider` | `name`; optional `enabled` (omitted false), `description`, `allowSelfRegistration` (omitted: true on create, the stored value on update), `defaultGroupRtId`, `clientId`, `clientSecret` (sensitive), `tenantId`, `authority`, `host`, `port`, `useTls`, `userBaseDn`, `userNameAttribute`, `parentTenantId` | create: rtId | `IDENTITY_PROVIDER_ALREADY_EXISTS`, `PARENT_TENANT_NOT_ANCESTOR`, `SECRET_ENCRYPTION_NOT_CONFIGURED` | `TenantManagement`, `UserManagement` |
 | `IdentityProvider.DeleteIdentityProvider` | - | - | - | `TenantManagement`, `UserManagement` |
 | static `EmailDomainGroupRule.CreateEmailDomainGroupRule` / `UpdateEmailDomainGroupRule` | `emailDomainPattern`, `targetGroupRtId`, optional `description` (omitted clears it) | create: rtId | `EMAIL_DOMAIN_GROUP_RULE_ALREADY_EXISTS` | `TenantManagement`, `UserManagement` |
 | `EmailDomainGroupRule.DeleteEmailDomainGroupRule` | - | - | - | `TenantManagement`, `UserManagement` |
 | `ExternalTenantUserMapping.UpdateMapping` | optional `roleIds` (omitted clears them) | - | guard `role-not-held`, `self-grant`, ... | `UserManagement` |
 | `ExternalTenantUserMapping.DeleteMapping` | - | - | guard | `UserManagement` |
 | static `DataPermission.CreateDataPermission` | `permissionId`, optional `description` | rtId | `DATA_PERMISSION_ALREADY_EXISTS` | `UserManagement` |
-| `DataPermission.DeleteDataPermission` | - (deletes the policies too) | - | - | `UserManagement` |
+| `DataPermission.DeleteDataPermission` | - (deletes the policies too; needs `Write` on each, else `METHOD_FORBIDDEN` and nothing is deleted) | - | - | `UserManagement` |
 | `DataPermission.CreatePolicy` | `targetCkTypeIds` (not empty), optional `actions`, `scope` (enum `DataPolicyScope`), `enforcementMode` (enum `DataPolicyEnforcementMode`) | policy rtId | - | `UserManagement` |
 | `DataPolicy.DeleteDataPolicy` | - | - | - | `UserManagement` |
 | static `Client.CreateClient` | `clientId`; optional `enabled`, `clientName`, `clientUri`, `allowedGrantTypes`, `redirectUris`, `postLogoutRedirectUris`, `allowedCorsOrigins`, `allowedScopes` (added to the octo defaults), `allowOfflineAccess`, `requireClientSecret`, `clientSecret` (sensitive), the four logout fields, `autoProvisionInChildTenants` | rtId | `CLIENT_ALREADY_EXISTS` | `TenantManagement`, `UserManagement` (+ `SecretManagement` for `clientSecret`) |
