@@ -208,12 +208,13 @@ public class IdentityCommandConsumerReplicaTests : IClassFixture<IdentityService
     ///     alive, after at most one probe interval). Probes create a probe client; they are not in the ledger.
     /// </summary>
     /// <remarks>
-    ///     Every probe has its own client id, so probes never contend on one client document; a new probe is sent only
-    ///     after the previous one finished or was cancelled and no consume of an earlier probe is still running. A probe
-    ///     that no replica picks up within <see cref="ProbePickUpWait" /> was sent into the hand-over window and is
+    ///     Every probe has its own client id, so probes never contend on one client document. A new probe is sent only
+    ///     after the previous one finished or was cancelled and no probe consume that has started is still running. A
+    ///     probe that no replica picks up within <see cref="ProbePickUpWait" /> was sent into the hand-over window and is
     ///     cancelled; a picked-up probe gets <see cref="ProbeTimeout" /> to answer (at most the time left until
-    ///     <see cref="ServeDeadline" />), which fits a loaded shared MongoDB container. A cancelled probe that a replica
-    ///     still consumes later works on its own client and is not counted by <see cref="WaitUntilRecordedAsync" />.
+    ///     <see cref="ServeDeadline" />), which fits a loaded shared MongoDB container. Cancelling does not withdraw the
+    ///     published message: a replica may still consume a cancelled probe later, next to a newer probe. That consume
+    ///     works on its own client and is not counted by <see cref="WaitUntilRecordedAsync" />.
     /// </remarks>
     private async Task WaitUntilServedAsync(Replica sender)
     {
