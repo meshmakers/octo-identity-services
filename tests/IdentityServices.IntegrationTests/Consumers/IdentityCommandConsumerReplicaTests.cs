@@ -56,7 +56,7 @@ public class IdentityCommandConsumerReplicaTests : IClassFixture<IdentityService
 
     /// <summary>
     ///     How long a picked-up probe may take to answer. The consumer creates the probe client in a MongoDB transaction;
-    ///     on the shared test container under a full suite run a commit took up to 57 s (AB#9418).
+    ///     on the shared test container under a full suite run a commit took up to 57 s.
     /// </summary>
     private static readonly TimeSpan ProbeTimeout = TimeSpan.FromSeconds(120);
 
@@ -208,11 +208,12 @@ public class IdentityCommandConsumerReplicaTests : IClassFixture<IdentityService
     ///     alive, after at most one probe interval). Probes create a probe client; they are not in the ledger.
     /// </summary>
     /// <remarks>
-    ///     AB#9418: every probe has its own client id, so probes never contend on one client document; a new probe is
-    ///     sent only after the previous one finished or was cancelled and no consume of an earlier probe is still
-    ///     running. A probe that no replica picks up within <see cref="ProbePickUpWait" /> was sent into the hand-over
-    ///     window and is cancelled; a picked-up probe gets <see cref="ProbeTimeout" /> to answer, which fits a loaded
-    ///     shared MongoDB container.
+    ///     Every probe has its own client id, so probes never contend on one client document; a new probe is sent only
+    ///     after the previous one finished or was cancelled and no consume of an earlier probe is still running. A probe
+    ///     that no replica picks up within <see cref="ProbePickUpWait" /> was sent into the hand-over window and is
+    ///     cancelled; a picked-up probe gets <see cref="ProbeTimeout" /> to answer (at most the time left until
+    ///     <see cref="ServeDeadline" />), which fits a loaded shared MongoDB container. A cancelled probe that a replica
+    ///     still consumes later works on its own client and is not counted by <see cref="WaitUntilRecordedAsync" />.
     /// </remarks>
     private async Task WaitUntilServedAsync(Replica sender)
     {
@@ -226,9 +227,15 @@ public class IdentityCommandConsumerReplicaTests : IClassFixture<IdentityService
                 await Task.Delay(50, testToken);
             }
 
+            var remaining = deadline - DateTime.UtcNow;
+            if (remaining <= TimeSpan.Zero)
+            {
+                break;
+            }
+
             var probeId = $"{ProbePrefix}{Guid.NewGuid():N}";
             using var probeCancellation = CancellationTokenSource.CreateLinkedTokenSource(testToken);
-            var probe = SendAsync(sender, probeId, ProbeTimeout, probeCancellation.Token);
+            var probe = SendAsync(sender, probeId, remaining < ProbeTimeout ? remaining : ProbeTimeout, probeCancellation.Token);
 
             var pickUpDeadline = DateTime.UtcNow + ProbePickUpWait;
             while (!probe.IsCompleted && !_probesPickedUp.ContainsKey(probeId) && DateTime.UtcNow < pickUpDeadline)
@@ -249,7 +256,8 @@ public class IdentityCommandConsumerReplicaTests : IClassFixture<IdentityService
             }
             catch (DistributionException)
             {
-                // not served (cancelled above) or no answer within the probe timeout: try again with a new probe
+                // Not served (cancelled above; the command client reports a cancellation as a DistributionException
+                // too) or no answer within the probe timeout: try again with a new probe.
             }
 
             await Task.Delay(200, testToken);
@@ -261,11 +269,12 @@ public class IdentityCommandConsumerReplicaTests : IClassFixture<IdentityService
 
     /// <summary>
     ///     Waits until the ledger holds every given client id and no consumer of any replica is still working on a
-    ///     CreateIdentityData message. The consumer sends its response before the consume observer's <c>PostConsume</c>
-    ///     records the message, so a caller can hold all responses while the last entries are still on their way into
-    ///     the ledger (seen on a loaded machine: 4 of 6 recorded right after the responses). Waiting for the in-flight
-    ///     count to reach 0 as well means a second delivery of a command that is already being consumed is in the ledger
-    ///     before the exactly-once assertion reads it. A redelivery that a replica has not started yet is not visible
+    ///     CreateIdentityData command (probes of <see cref="WaitUntilServedAsync" /> are not counted). The consumer sends
+    ///     its response before the consume observer's <c>PostConsume</c> records the message, so a caller can hold all
+    ///     responses while the last entries are still on their way into the ledger (seen on a loaded machine: 4 of 6
+    ///     recorded right after the responses). Waiting for the in-flight count to reach 0 as well means a second
+    ///     delivery of a command that is already being consumed is in the ledger before the exactly-once assertion reads
+    ///     it. A redelivery that a replica has not started yet is not visible
     ///     here; with the shared queue that happens only after a consumer faulted or its channel closed (no ack), which
     ///     these tests do not cause, and its client would still be counted by <see cref="CountClientsAsync" />.
     ///     The wait fails when a consume is still running at its deadline. The assertions that follow stay unchanged; a
@@ -347,7 +356,8 @@ public class IdentityCommandConsumerReplicaTests : IClassFixture<IdentityService
 
     /// <summary>
     ///     Records every successfully processed CreateIdentityData command with the replica that processed it, and counts
-    ///     the CreateIdentityData messages (probes included) a consumer of any replica is working on right now.
+    ///     the CreateIdentityData commands and, separately, the probes a consumer of any replica is working on right now;
+    ///     it also notes which probes a replica picked up.
     /// </summary>
     private sealed class LedgerObserver(
         string replica,
@@ -360,11 +370,14 @@ public class IdentityCommandConsumerReplicaTests : IClassFixture<IdentityService
         {
             if (context.Message is CreateIdentityDataCommandRequest request)
             {
-                inFlight.Enter();
                 if (ProbeId(request) is { } probeId)
                 {
                     probesInFlight.Enter();
                     probesPickedUp[probeId] = true;
+                }
+                else
+                {
+                    inFlight.Enter();
                 }
             }
 
@@ -379,12 +392,15 @@ public class IdentityCommandConsumerReplicaTests : IClassFixture<IdentityService
                 {
                     probesInFlight.Leave();
                 }
-                else if (request.Clients?.FirstOrDefault()?.ClientId is { } clientId)
+                else
                 {
-                    ledger.Enqueue((clientId, replica));
-                }
+                    if (request.Clients?.FirstOrDefault()?.ClientId is { } clientId)
+                    {
+                        ledger.Enqueue((clientId, replica));
+                    }
 
-                inFlight.Leave();
+                    inFlight.Leave();
+                }
             }
 
             return Task.CompletedTask;
@@ -398,8 +414,10 @@ public class IdentityCommandConsumerReplicaTests : IClassFixture<IdentityService
                 {
                     probesInFlight.Leave();
                 }
-
-                inFlight.Leave();
+                else
+                {
+                    inFlight.Leave();
+                }
             }
 
             return Task.CompletedTask;
@@ -412,7 +430,7 @@ public class IdentityCommandConsumerReplicaTests : IClassFixture<IdentityService
                 : null;
     }
 
-    /// <summary>CreateIdentityData messages between PreConsume and PostConsume/ConsumeFault, over all replicas.</summary>
+    /// <summary>CreateIdentityData messages of one kind between PreConsume and PostConsume/ConsumeFault, over all replicas.</summary>
     private sealed class InFlightCounter
     {
         private int _count;
