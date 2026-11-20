@@ -59,13 +59,12 @@ Notable changes of the OctoMesh identity services. The CK model `System.Identity
   needs it on `DataPolicy`): one the caller may not write or see refuses the whole delete with `METHOD_FORBIDDEN` (`data-permission`, REST
   `403`) and nothing is deleted. `IdentityProvider.UpdateIdentityProvider` without `allowSelfRegistration` keeps the stored value (a create
   without it still defaults to true, as the REST DTO).
-=======
+
 - **CI: a stalled Test step names the test and the MongoDB state (AB#6723).** The Test step runs with `--blame-hang
   --blame-hang-timeout 8m --blame-hang-dump-type none`, `xunit.runner.json` reports tests longer than 2 min, a filtered
   `$currentOp` summary of the Testcontainers MongoDB is printed on a failed job, and `Sequence_*.xml` plus the samples
   are published as artifact `hang-evidence-<attempt>`. The Test step no longer retries (a retry could hide red tests). Where to
   look: `docs/testing.md`, "Hang evidence in CI".
->>>>>>> 86f0b53f (AB#6723 Chore: identity CI test step names the hanging test and the Mongo state)
 
 - **Create, update and delete of roles, groups, API scopes and API resources run CK methods (System.Identity 3.7.0).** The REST write endpoints of
   `RolesController`, `GroupsController` (create, update, delete), `ApiScopesController` and `ApiResourcesController` are facades of the new
