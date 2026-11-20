@@ -44,6 +44,11 @@ for (const o of notable.slice(0, 25)) {
 JS
 
 find_container() {
+  # MONGO_DIAG_CONTAINER_ID pins one container (local use with several suites on one machine).
+  if [ -n "${MONGO_DIAG_CONTAINER_ID:-}" ]; then
+    docker ps -q --filter "id=${MONGO_DIAG_CONTAINER_ID}" 2>/dev/null | head -n 1
+    return
+  fi
   docker ps -q --filter "name=${NAME_FILTER}" 2>/dev/null | head -n 1
 }
 

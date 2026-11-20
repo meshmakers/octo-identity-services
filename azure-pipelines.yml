@@ -188,13 +188,13 @@ stages:
           - task: DotNetCoreCLI@2
             condition: and(succeeded(), ne(variables['CiGuardEnded'], 'true'))
             # No retryCountOnTaskFailure here. A retry re-ran the whole suite after a failure or a hang
-            # (up to 3 x 25 min against the 90 min job) and could turn a red test green. Restore and Build keep
+            # (up to 3 x the step timeout against the 90 min job) and could turn a red test green. Restore and Build keep
             # their retries (feed hiccups); a flaky test is fixed per test.
             # The identity suite takes 10-14 min on a healthy agent (measured 2026-11; the earlier "~6 min" is
             # outdated). A test host that hangs (heap cap
             # reached in the 12 Gi agent pod, GC thrash) must not hold the agent for the 90 minutes of
             # the job timeout; the always() cleanup step below then reaps the leaked Mongo container.
-            timeoutInMinutes: 25
+            timeoutInMinutes: 30
             displayName: 'Test'
             # Hang evidence, three layers (read them in this order after a failed Test step):
             #   1. xunit.runner.json longRunningTestSeconds: the log names a test that runs longer than 2 min
@@ -202,7 +202,8 @@ stages:
             #   2. --blame-hang --blame-hang-timeout 8m: the test host is aborted when no test has started or finished
             #      for 8 min (vstest measures inactivity, not one test: every start or end of a test, also of the
             #      other parallel ones, resets it; the slowest single test seen was 7m21s on a degraded agent).
-            #      The step then fails well before its 25 min, and the log names the tests in flight. --blame-hang-dump-type none: no GB-sized dump, only
+            #      The step then fails before its 30 min (the timer needs 8 min of silence after the last test activity, so the step
+            #      timeout leaves room for a suite of up to ~20 min), and the log names the tests in flight. --blame-hang-dump-type none: no GB-sized dump, only
             #      the Sequence_*.xml; the step 'Collect hang evidence' below prints the tests that were still
             #      running and 'Publish hang evidence' keeps the files as pipeline artifact 'hang-evidence-<attempt>'.
             #   3. 'Mongo hang evidence' below: filtered db.currentOp / lock summary of the Testcontainers MongoDB.
@@ -259,7 +260,7 @@ stages:
               publishLocation: 'pipeline'
           # AB#8334: Ryuk is disabled above, so nothing reaps the shared Mongo Testcontainer when the
           # test host dies before the assembly fixture disposes it (blame-hang kill, step timeout,
-          # cancel, and every retry of the Test step above starts a fresh one). The DinD sidecar's
+          # cancel). The DinD sidecar's
           # nested dockerd puts those containers in the node's root cgroup, outside the pod limits,
           # and an unlimited mongod grew to ~11 GiB each: nine leftovers held ~100 GiB of the 125 GiB
           # node srv-infra-01 and starved the other builds ("Free memory is lower than 5%", random
