@@ -24,6 +24,7 @@ using Meshmakers.Octo.Services.Methods.Facades;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Persistence.IdentityCkModel.Generated.System.Identity.v3;
+using Meshmakers.Octo.Services.RestDeprecation;
 
 namespace Meshmakers.Octo.Backend.IdentityServices.TenantApi.v1.Controllers;
 
@@ -124,6 +125,7 @@ public class AdminProvisioningController(
     /// <c>ExternalTenantUserMapping.ProvisionAdmin-1</c>.
     /// </summary>
     [HttpPost]
+    [OctoRestDeprecated(Wave = IdentityRestDeprecation.Wave2, Link = IdentityRestDeprecation.AdminProvisioningMethodsLink)]
     [Authorize(IdentityServiceConstants.IdentityTenantAdministrationWritePolicy)]
     [EndpointSummary("Creates a new external tenant user mapping in the target tenant.")]
     [ProducesResponseType(typeof(ExternalTenantUserMappingDto), StatusCodes.Status201Created)]
@@ -170,6 +172,7 @@ public class AdminProvisioningController(
     /// </para>
     /// </summary>
     [HttpPost("provisionCurrentUser")]
+    [OctoRestDeprecated(Wave = IdentityRestDeprecation.Wave2, Link = IdentityRestDeprecation.AdminProvisioningMethodsLink)]
     [Authorize(IdentityServiceConstants.IdentityTenantAdministrationWritePolicy)]
     [EndpointSummary("Provisions the current user in the target tenant with all roles.")]
     [ProducesResponseType(typeof(ExternalTenantUserMappingDto), StatusCodes.Status201Created)]
@@ -223,6 +226,7 @@ public class AdminProvisioningController(
     /// <c>ExternalTenantUserMapping.RemoveAdminProvisioning-1</c>.
     /// </summary>
     [HttpDelete("{mappingRtId}")]
+    [OctoRestDeprecated(Wave = IdentityRestDeprecation.Wave2, Link = IdentityRestDeprecation.AdminProvisioningMethodsLink)]
     [Authorize(IdentityServiceConstants.IdentityTenantAdministrationWritePolicy)]
     [EndpointSummary("Deletes an external tenant user mapping in the target tenant.")]
     [ProducesResponseType(StatusCodes.Status200OK)]
@@ -356,6 +360,7 @@ public class AdminProvisioningController(
     /// method <c>ExternalTenantUserMapping.ProvisionAdminWithGroups-1</c>.
     /// </summary>
     [HttpPost("withGroups")]
+    [OctoRestDeprecated(Wave = IdentityRestDeprecation.Wave2, Link = IdentityRestDeprecation.AdminProvisioningMethodsLink)]
     [Authorize(IdentityServiceConstants.IdentityTenantAdministrationWritePolicy)]
     [EndpointSummary("Creates a cross-tenant user mapping as a member of the given target-tenant groups.")]
     [ProducesResponseType(typeof(ExternalTenantUserMappingDto), StatusCodes.Status201Created)]

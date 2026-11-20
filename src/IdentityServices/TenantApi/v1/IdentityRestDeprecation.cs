@@ -27,6 +27,43 @@ internal static class IdentityRestDeprecation
     /// </summary>
     public const string UsersPasswordWave = "IdentityUsersPassword";
 
+    /// <summary>
+    ///     Identity wave 2: the REST write endpoints that are facades of the group, client, secret, client mirror, data
+    ///     permission, admin provisioning and CRUD methods (System.Identity 3.3.0 to 3.8.0). No <c>Sunset</c> until the
+    ///     sunset date is decided; the endpoints that stay REST carry no attribute (list with the reasons:
+    ///     <c>docs/identity-rest-facades.md</c>, "Deprecation of the identity wave 2 endpoints").
+    /// </summary>
+    public const string Wave2 = "IdentityWave2";
+
+    private const string MethodsPage = "https://docs.meshmakers.cloud/docs/technologyGuide/identityService/methods";
+
+    /// <summary>Documentation of the group role and membership methods (<c>Group.SetRoles</c>, <c>AddMember</c>, ...).</summary>
+    public const string GroupMethodsLink = MethodsPage + "#groups";
+
+    /// <summary>Documentation of the client role and overlay methods (<c>Client.SetRoles</c>, <c>ApplyOverlayUris</c>, ...).</summary>
+    public const string ClientRoleMethodsLink = MethodsPage + "#client-roles";
+
+    /// <summary>Documentation of the client and API resource secret methods (<c>AddSecret</c>, <c>UpdateSecret</c>, <c>RemoveSecret</c>).</summary>
+    public const string SecretMethodsLink = MethodsPage + "#client-secrets";
+
+    /// <summary>Documentation of <c>DataPermission.GrantToRole</c>, <c>RevokeFromRole</c> and <c>DataPolicy.SetEnforcementMode</c>.</summary>
+    public const string DataPermissionMethodsLink = MethodsPage + "#data-permissions";
+
+    /// <summary>Documentation of the client mirror methods (<c>Client.ProvisionMirrors</c>, <c>RotateMirrorSecret</c>, ...).</summary>
+    public const string ClientMirrorMethodsLink = MethodsPage + "#client-mirrors";
+
+    /// <summary>Documentation of the admin provisioning methods and <c>ExternalTenantUserMapping.CreateMapping</c>.</summary>
+    public const string AdminProvisioningMethodsLink = MethodsPage + "#admin-provisioning";
+
+    /// <summary>Documentation of the role, group, API scope and API resource create, update and delete methods.</summary>
+    public const string CrudMethodsLink = MethodsPage + "#crud";
+
+    /// <summary>
+    ///     Documentation of the identity provider, e-mail domain group rule, mapping, data permission and policy and client
+    ///     create, update and delete methods.
+    /// </summary>
+    public const string CrudWave2MethodsLink = MethodsPage + "#crud-wave-2";
+
     /// <summary>Documentation of <c>User.SetRoles</c>, <c>User.AddRole</c> and <c>User.RemoveRole</c>.</summary>
     public const string UserRoleMethodsLink =
         "https://docs.meshmakers.cloud/docs/technologyGuide/identityService/methods#user-roles";

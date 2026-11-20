@@ -18,6 +18,7 @@ using Persistence.IdentityCkModel.Generated.System.Identity.v3;
 using Meshmakers.Octo.Backend.IdentityServices.OpenIddict;
 using Meshmakers.Octo.Backend.Authentication;
 using Meshmakers.Octo.Backend.IdentityServices.Logging;
+using Meshmakers.Octo.Services.RestDeprecation;
 
 namespace Meshmakers.Octo.Backend.IdentityServices.TenantApi.v1.Controllers;
 
@@ -216,6 +217,7 @@ public class ApiSecretsController : ControllerBase
     // POST system/v1/apiSecrets/client/xyz
     /// <summary>Creates a new secret for a client. Facade of the CK method <c>Client.AddSecret-1</c>.</summary>
     [HttpPost("client/{clientId}")]
+    [OctoRestDeprecated(Wave = IdentityRestDeprecation.Wave2, Link = IdentityRestDeprecation.SecretMethodsLink)]
     [Authorize(IdentityServiceConstants.IdentitySecretAdministrationPolicy)]
     [EndpointSummary("Creates a new secret for a client")]
     [ProducesResponseType(typeof(ApiSecretDto), StatusCodes.Status200OK)]
@@ -251,6 +253,7 @@ public class ApiSecretsController : ControllerBase
     // POST system/v1/apiSecrets/apiResource/xyz
     /// <summary>Creates a new secret for an API resource. Facade of the CK method <c>ApiResource.AddSecret-1</c>.</summary>
     [HttpPost("apiResource/{apiResourceName}")]
+    [OctoRestDeprecated(Wave = IdentityRestDeprecation.Wave2, Link = IdentityRestDeprecation.SecretMethodsLink)]
     [Authorize(IdentityServiceConstants.IdentitySecretAdministrationPolicy)]
     [EndpointSummary("Creates a new secret for an API resource")]
     [ProducesResponseType(typeof(ApiSecretDto), StatusCodes.Status200OK)]
@@ -283,6 +286,7 @@ public class ApiSecretsController : ControllerBase
     // PUT system/v1/apiSecrets/client/xyz
     /// <summary>Updates a secret of a client. Facade of the CK method <c>Client.UpdateSecret-1</c>.</summary>
     [HttpPut("client/{clientId}")]
+    [OctoRestDeprecated(Wave = IdentityRestDeprecation.Wave2, Link = IdentityRestDeprecation.SecretMethodsLink)]
     [Authorize(IdentityServiceConstants.IdentitySecretAdministrationPolicy)]
     [EndpointSummary("Updates a secret")]
     [ProducesResponseType(StatusCodes.Status200OK)]
@@ -323,6 +327,7 @@ public class ApiSecretsController : ControllerBase
     // PUT system/v1/apiSecrets/apiResource/xyz
     /// <summary>Updates a secret of an API resource. Facade of the CK method <c>ApiResource.UpdateSecret-1</c>.</summary>
     [HttpPut("apiResource/{apiResourceName}")]
+    [OctoRestDeprecated(Wave = IdentityRestDeprecation.Wave2, Link = IdentityRestDeprecation.SecretMethodsLink)]
     [Authorize(IdentityServiceConstants.IdentitySecretAdministrationPolicy)]
     [EndpointSummary("Updates a secret")]
     [ProducesResponseType(StatusCodes.Status200OK)]
@@ -369,6 +374,7 @@ public class ApiSecretsController : ControllerBase
     ///     method <c>Client.RemoveSecret-1</c>.
     /// </summary>
     [HttpPost("client/{clientId}/" + DeleteAction)]
+    [OctoRestDeprecated(Wave = IdentityRestDeprecation.Wave2, Link = IdentityRestDeprecation.SecretMethodsLink)]
     [Authorize(IdentityServiceConstants.IdentitySecretAdministrationPolicy)]
     [EndpointSummary("Deletes a secret of a client (stored value in the body)")]
     [ProducesResponseType(StatusCodes.Status200OK)]
@@ -393,6 +399,7 @@ public class ApiSecretsController : ControllerBase
     ///     clients; use <c>POST apiSecrets/client/{clientId}/delete</c>. Facade of <c>Client.RemoveSecret-1</c>.
     /// </summary>
     [HttpDelete("client/{clientId}/{" + LegacySecretRouteValue + "}")]
+    [OctoRestDeprecated(Wave = IdentityRestDeprecation.Wave2, Link = IdentityRestDeprecation.SecretMethodsLink)]
     [Authorize(IdentityServiceConstants.IdentitySecretAdministrationPolicy)]
     [EndpointSummary("Deprecated: deletes a secret of a client (stored value in the path)")]
     [ProducesResponseType(StatusCodes.Status200OK)]
@@ -431,6 +438,7 @@ public class ApiSecretsController : ControllerBase
     ///     <see cref="DeleteClientSecret" />. Facade of the CK method <c>ApiResource.RemoveSecret-1</c>.
     /// </summary>
     [HttpPost("apiResource/{apiResourceName}/" + DeleteAction)]
+    [OctoRestDeprecated(Wave = IdentityRestDeprecation.Wave2, Link = IdentityRestDeprecation.SecretMethodsLink)]
     [Authorize(IdentityServiceConstants.IdentitySecretAdministrationPolicy)]
     [EndpointSummary("Deletes a secret of an API resource (stored value in the body)")]
     [ProducesResponseType(StatusCodes.Status200OK)]
@@ -456,6 +464,7 @@ public class ApiSecretsController : ControllerBase
     ///     <c>ApiResource.RemoveSecret-1</c>.
     /// </summary>
     [HttpDelete("apiResource/{apiResourceName}/{" + LegacySecretRouteValue + "}")]
+    [OctoRestDeprecated(Wave = IdentityRestDeprecation.Wave2, Link = IdentityRestDeprecation.SecretMethodsLink)]
     [Authorize(IdentityServiceConstants.IdentitySecretAdministrationPolicy)]
     [EndpointSummary("Deprecated: deletes a secret of an API resource (stored value in the path)")]
     [ProducesResponseType(StatusCodes.Status200OK)]

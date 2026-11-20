@@ -17,6 +17,7 @@ using Meshmakers.Octo.Backend.IdentityServices.Methods;
 using Meshmakers.Octo.Services.Contracts.DistributionEventHub.Methods;
 using Meshmakers.Octo.Services.Methods;
 using Meshmakers.Octo.Services.Methods.Facades;
+using Meshmakers.Octo.Services.RestDeprecation;
 
 namespace Meshmakers.Octo.Backend.IdentityServices.TenantApi.v1.Controllers;
 
@@ -81,6 +82,7 @@ public class ClientMirrorController : ControllerBase
     // POST {tenantId}/v1/clients/{clientId}/mirrors/provisionInExistingTenants
     /// <summary>Facade of the CK method <c>Client.ProvisionMirrors-1</c>.</summary>
     [HttpPost("provisionInExistingTenants")]
+    [OctoRestDeprecated(Wave = IdentityRestDeprecation.Wave2, Link = IdentityRestDeprecation.ClientMirrorMethodsLink)]
     [Authorize(IdentityServiceConstants.IdentityTenantAdministrationWritePolicy)]
     [EndpointSummary("Backfill: provisions this client into every existing sub-tenant of the caller. Idempotent.")]
     [ProducesResponseType(typeof(ClientMirrorBackfillResponseDto), StatusCodes.Status200OK)]
@@ -113,6 +115,7 @@ public class ClientMirrorController : ControllerBase
     // POST {tenantId}/v1/clients/{clientId}/mirrors/provisionInTenant?childTenantId=…
     /// <summary>Facade of the CK method <c>Client.ProvisionMirrorInTenant-1</c>.</summary>
     [HttpPost("provisionInTenant")]
+    [OctoRestDeprecated(Wave = IdentityRestDeprecation.Wave2, Link = IdentityRestDeprecation.ClientMirrorMethodsLink)]
     [TypeFilter(typeof(AdminProvisioningTargetScopeFilter))]
     [Authorize(IdentityServiceConstants.IdentityTenantAdministrationWritePolicy)]
     [EndpointSummary("Provisions this client into a single named sub-tenant. Idempotent.")]
@@ -166,6 +169,7 @@ public class ClientMirrorController : ControllerBase
     ///     </para>
     /// </remarks>
     [HttpPost("{childTenantId}/secret")]
+    [OctoRestDeprecated(Wave = IdentityRestDeprecation.Wave2, Link = IdentityRestDeprecation.ClientMirrorMethodsLink)]
     [TypeFilter(typeof(AdminProvisioningTargetScopeFilter))]
     // Issuing (rotating) a mirror's secret is an API secret write -> SecretManagement (staged).
     [Authorize(IdentityServiceConstants.IdentitySecretAdministrationPolicy)]
@@ -205,6 +209,7 @@ public class ClientMirrorController : ControllerBase
     // DELETE {tenantId}/v1/clients/{clientId}/mirrors/{childTenantId}
     /// <summary>Facade of the CK method <c>Client.RemoveMirror-1</c>.</summary>
     [HttpDelete("{childTenantId}")]
+    [OctoRestDeprecated(Wave = IdentityRestDeprecation.Wave2, Link = IdentityRestDeprecation.ClientMirrorMethodsLink)]
     [TypeFilter(typeof(AdminProvisioningTargetScopeFilter))]
     [Authorize(IdentityServiceConstants.IdentityTenantAdministrationWritePolicy)]
     [EndpointSummary("Manually removes the mirror of this client in a single sub-tenant.")]
@@ -296,6 +301,7 @@ public class ClientAutoProvisionFlagController : ControllerBase
 
     // PATCH {tenantId}/v1/clients/{clientId}/autoProvisionInChildTenants
     [HttpPatch]
+    [OctoRestDeprecated(Wave = IdentityRestDeprecation.Wave2, Link = IdentityRestDeprecation.ClientMirrorMethodsLink)]
     [Authorize(IdentityServiceConstants.IdentityTenantAdministrationWritePolicy)]
     [EndpointSummary("Sets the AutoProvisionInChildTenants flag on a client without rewriting the full client.")]
     [ProducesResponseType(StatusCodes.Status204NoContent)]

@@ -18,6 +18,7 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
 using Persistence.IdentityCkModel.Generated.System.Identity.v3;
+using Meshmakers.Octo.Services.RestDeprecation;
 
 namespace Meshmakers.Octo.Backend.IdentityServices.TenantApi.v1.Controllers;
 
@@ -57,6 +58,7 @@ public class DataPermissionsController(IDataPermissionStore dataPermissionStore,
     /// Creates a data permission.
     /// </summary>
     [HttpPost]
+    [OctoRestDeprecated(Wave = IdentityRestDeprecation.Wave2, Link = IdentityRestDeprecation.CrudWave2MethodsLink)]
     [Authorize(IdentityServiceConstants.IdentityUserAdministrationWritePolicy)]
     [EndpointSummary("Creates a data permission.")]
     [ProducesResponseType(StatusCodes.Status200OK)]
@@ -84,6 +86,7 @@ public class DataPermissionsController(IDataPermissionStore dataPermissionStore,
     /// Removes a data permission including its policies.
     /// </summary>
     [HttpDelete("{permissionId}")]
+    [OctoRestDeprecated(Wave = IdentityRestDeprecation.Wave2, Link = IdentityRestDeprecation.CrudWave2MethodsLink)]
     [Authorize(IdentityServiceConstants.IdentityUserAdministrationWritePolicy)]
     [EndpointSummary("Removes a data permission including its policies.")]
     [ProducesResponseType(StatusCodes.Status200OK)]
@@ -108,6 +111,7 @@ public class DataPermissionsController(IDataPermissionStore dataPermissionStore,
     /// Creates a policy bound to a data permission.
     /// </summary>
     [HttpPost("{permissionId}/policies")]
+    [OctoRestDeprecated(Wave = IdentityRestDeprecation.Wave2, Link = IdentityRestDeprecation.CrudWave2MethodsLink)]
     [Authorize(IdentityServiceConstants.IdentityUserAdministrationWritePolicy)]
     [EndpointSummary("Creates a policy bound to a data permission.")]
     [ProducesResponseType(typeof(string), StatusCodes.Status200OK)]
@@ -155,6 +159,7 @@ public class DataPermissionsController(IDataPermissionStore dataPermissionStore,
     /// Removes a policy.
     /// </summary>
     [HttpDelete("policies/{policyRtId}")]
+    [OctoRestDeprecated(Wave = IdentityRestDeprecation.Wave2, Link = IdentityRestDeprecation.CrudWave2MethodsLink)]
     [Authorize(IdentityServiceConstants.IdentityUserAdministrationWritePolicy)]
     [EndpointSummary("Removes a policy.")]
     [ProducesResponseType(StatusCodes.Status200OK)]
@@ -175,6 +180,7 @@ public class DataPermissionsController(IDataPermissionStore dataPermissionStore,
     /// <c>DataPolicy.SetEnforcementMode-1</c>.
     /// </summary>
     [HttpPut("policies/{policyRtId}/enforcementMode")]
+    [OctoRestDeprecated(Wave = IdentityRestDeprecation.Wave2, Link = IdentityRestDeprecation.DataPermissionMethodsLink)]
     [Authorize(IdentityServiceConstants.IdentityUserAdministrationWritePolicy)]
     [EndpointSummary("Switches a policy between Enforce and AuditOnly.")]
     [ProducesResponseType(StatusCodes.Status200OK)]
@@ -200,6 +206,7 @@ public class DataPermissionsController(IDataPermissionStore dataPermissionStore,
     /// role already holds is <c>200</c> without a change, as before.
     /// </summary>
     [HttpPost("{permissionId}/roles/{roleName}")]
+    [OctoRestDeprecated(Wave = IdentityRestDeprecation.Wave2, Link = IdentityRestDeprecation.DataPermissionMethodsLink)]
     [Authorize(IdentityServiceConstants.IdentityUserAdministrationWritePolicy)]
     [EndpointSummary("Grants the permission to a role.")]
     [ProducesResponseType(StatusCodes.Status200OK)]
@@ -224,6 +231,7 @@ public class DataPermissionsController(IDataPermissionStore dataPermissionStore,
     /// that does not hold the permission is <c>200</c> without a change, as before.
     /// </summary>
     [HttpDelete("{permissionId}/roles/{roleName}")]
+    [OctoRestDeprecated(Wave = IdentityRestDeprecation.Wave2, Link = IdentityRestDeprecation.DataPermissionMethodsLink)]
     [Authorize(IdentityServiceConstants.IdentityUserAdministrationWritePolicy)]
     [EndpointSummary("Revokes the permission from a role.")]
     [ProducesResponseType(StatusCodes.Status200OK)]

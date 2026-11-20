@@ -25,6 +25,7 @@ using Meshmakers.Octo.Services.Methods;
 using Meshmakers.Octo.Services.Contracts.DistributionEventHub.Methods;
 using Meshmakers.Octo.Backend.IdentityServices.Methods;
 using System.Text.Json;
+using Meshmakers.Octo.Services.RestDeprecation;
 
 namespace Meshmakers.Octo.Backend.IdentityServices.TenantApi.v1.Controllers;
 
@@ -187,6 +188,7 @@ public class ClientsController : ControllerBase
     ///     written, one <c>Identity.Method</c> audit event.
     /// </remarks>
     [HttpPut("{id}/roles")]
+    [OctoRestDeprecated(Wave = IdentityRestDeprecation.Wave2, Link = IdentityRestDeprecation.ClientRoleMethodsLink)]
     [Authorize(IdentityServiceConstants.IdentityTenantAdministrationWritePolicy)]
     [EndpointSummary("Replaces the directly-assigned roles of a client (replace-all).")]
     [ProducesResponseType(StatusCodes.Status200OK)]
@@ -227,6 +229,7 @@ public class ClientsController : ControllerBase
     /// <summary>Assigns a role to a client. Facade of the CK method <c>Client.AddRole-1</c>.</summary>
     /// <remarks>A role the client already holds directly is <c>200</c> without a write, as before.</remarks>
     [HttpPut("{id}/roles/{roleName}")]
+    [OctoRestDeprecated(Wave = IdentityRestDeprecation.Wave2, Link = IdentityRestDeprecation.ClientRoleMethodsLink)]
     [Authorize(IdentityServiceConstants.IdentityTenantAdministrationWritePolicy)]
     [EndpointSummary("Assigns a single role (by name) to a client.")]
     [ProducesResponseType(StatusCodes.Status200OK)]
@@ -257,6 +260,7 @@ public class ClientsController : ControllerBase
     ///     method answers <c>ROLE_NOT_FOUND</c> for the latter).
     /// </remarks>
     [HttpDelete("{id}/roles/{roleName}")]
+    [OctoRestDeprecated(Wave = IdentityRestDeprecation.Wave2, Link = IdentityRestDeprecation.ClientRoleMethodsLink)]
     [Authorize(IdentityServiceConstants.IdentityTenantAdministrationWritePolicy)]
     [EndpointSummary("Removes a single role (by name) from a client.")]
     [ProducesResponseType(StatusCodes.Status200OK)]
@@ -308,6 +312,7 @@ public class ClientsController : ControllerBase
 
     // POST api/Clients
     [HttpPost]
+    [OctoRestDeprecated(Wave = IdentityRestDeprecation.Wave2, Link = IdentityRestDeprecation.CrudWave2MethodsLink)]
     [Authorize(IdentityServiceConstants.IdentityTenantAdministrationWritePolicy)]
     [EndpointSummary("Creates a new client")]
     [ProducesResponseType(StatusCodes.Status200OK)]
@@ -350,6 +355,7 @@ public class ClientsController : ControllerBase
 
     // PUT api/Clients/5
     [HttpPut("{id}")]
+    [OctoRestDeprecated(Wave = IdentityRestDeprecation.Wave2, Link = IdentityRestDeprecation.CrudWave2MethodsLink)]
     [Authorize(IdentityServiceConstants.IdentityTenantAdministrationWritePolicy)]
     [EndpointSummary("Updates a client")]
     [ProducesResponseType(StatusCodes.Status200OK)]
@@ -411,6 +417,7 @@ public class ClientsController : ControllerBase
     ///     <c>409</c> for a concurrent change that could not be resolved.
     /// </remarks>
     [HttpPost("{id}/overlayUris")]
+    [OctoRestDeprecated(Wave = IdentityRestDeprecation.Wave2, Link = IdentityRestDeprecation.ClientRoleMethodsLink)]
     [Authorize(IdentityServiceConstants.IdentityTenantAdministrationWritePolicy)]
     [EndpointSummary("Applies an overlay URI set to a client. Idempotent — duplicates are skipped.")]
     [ProducesResponseType(typeof(ApplyOverlayUrisResultDto), StatusCodes.Status200OK)]
@@ -474,6 +481,7 @@ public class ClientsController : ControllerBase
     ///     removed. Status codes and the response body are unchanged.
     /// </remarks>
     [HttpDelete("cleanOverlayEntries")]
+    [OctoRestDeprecated(Wave = IdentityRestDeprecation.Wave2, Link = IdentityRestDeprecation.ClientRoleMethodsLink)]
     [Authorize(IdentityServiceConstants.IdentityTenantAdministrationWritePolicy)]
     [EndpointSummary("Strips overlay URI entries from every client in the tenant. Idempotent — clients without matches are skipped (no DB write, no cache invalidation).")]
     [ProducesResponseType(typeof(CleanOverlayEntriesResultDto), StatusCodes.Status200OK)]
@@ -555,6 +563,7 @@ public class ClientsController : ControllerBase
 
     // DELETE api/Clients/5
     [HttpDelete("{id}")]
+    [OctoRestDeprecated(Wave = IdentityRestDeprecation.Wave2, Link = IdentityRestDeprecation.CrudWave2MethodsLink)]
     [Authorize(IdentityServiceConstants.IdentityTenantAdministrationWritePolicy)]
     [EndpointSummary("Deletes a client")]
     [ProducesResponseType(StatusCodes.Status200OK)]

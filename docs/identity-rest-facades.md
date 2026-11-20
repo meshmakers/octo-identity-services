@@ -86,6 +86,45 @@ Tests: `Api/TenantApi/UsersPasswordRestDeprecationTests` (headers with dates, si
 behave as before, successful calls counted, request canaries in no header and no label); the endpoint set is pinned in
 `UsersRestDeprecationTests`. Shared collector: `Api/TenantApi/DeprecatedCallCollector`.
 
+## Deprecation of the identity wave 2 endpoints
+
+The 60 REST write endpoints that are facades of the group, client, secret, client mirror, data permission, admin provisioning and CRUD
+methods (sections below, System.Identity 3.3.0 to 3.8.0) carry `[OctoRestDeprecated(Wave = IdentityRestDeprecation.Wave2, Link = …)]`
+(wave `IdentityWave2`, `src/IdentityServices/TenantApi/v1/IdentityRestDeprecation.cs`; mechanics:
+`octo-common-services/docs/rest-deprecation.md`). Every response carries `Link: <…/identityService/methods#<anchor>>; rel="deprecation"`,
+OpenAPI marks the operations `deprecated`, and `octo.rest.deprecated.calls` counts them per endpoint template and client id (never tenant,
+user, `sub`, role or client names). The `Deprecation` header follows once `RestDeprecation:Waves:IdentityWave2:Since` is set (Helm
+`restDeprecation.waves.IdentityWave2.since`, env `OCTO_RestDeprecation__Waves__IdentityWave2__Since`, set by Ops in `octo-mesh-deployment`
+on the first production delivery of the release); `Sunset` is never configured (to be announced, Gerald decides it after the F5.x Features).
+REST is not removed; routes, bodies and status codes are unchanged.
+
+| Endpoints | Link anchor |
+|---|---|
+| `PUT groups/{g}/roles`, `PUT`/`DELETE groups/{g}/members/{users, clients or groups}/{member}` | `#groups` |
+| `PUT clients/{id}/roles`, `PUT`/`DELETE clients/{id}/roles/{role}`, `POST clients/{id}/overlayUris`, `DELETE clients/cleanOverlayEntries` | `#client-roles` |
+| `POST`/`PUT apiSecrets/client/{clientId}`, `POST …/delete`, `DELETE …/{secretValue}`; the same four of `apiSecrets/apiResource/{name}` | `#client-secrets` |
+| `POST`/`DELETE dataPermissions/{permissionId}/roles/{roleName}`, `PUT dataPermissions/policies/{policyRtId}/enforcementMode` | `#data-permissions` |
+| `POST clients/{clientId}/mirrors/provisionInExistingTenants`, `…/provisionInTenant`, `…/{childTenantId}/secret`, `DELETE …/{childTenantId}`, `PATCH clients/{clientId}/autoProvisionInChildTenants` | `#client-mirrors` |
+| `POST adminProvisioning/{targetTenantId}`, `…/withGroups`, `…/provisionCurrentUser`, `DELETE …/{mappingRtId}`, `POST externalTenantUserMappings` | `#admin-provisioning` |
+| `POST`/`PUT`/`DELETE` of `roles`, `groups`, `apiScopes`, `apiResources` | `#crud` |
+| `POST`/`PUT`/`DELETE` of `identityProviders`, `emailDomainGroupRules`, `clients`; `PUT`/`DELETE externalTenantUserMappings/{rtId}`; `POST dataPermissions`, `DELETE dataPermissions/{permissionId}`, `POST dataPermissions/{permissionId}/policies`, `DELETE dataPermissions/policies/{policyRtId}` | `#crud-wave-2` |
+
+What stays REST, without the attribute:
+
+| Endpoints | Why |
+|---|---|
+| every `GET` (lists, paged lists, by id or name, roles and members, actors, mirrors, permissions, mappings, rules, providers) | reads: no operation to move; generic GraphQL reads serve the same data |
+| `POST apiSecrets/client/{clientId}/lookup`, `POST apiSecrets/apiResource/{name}/lookup`, `GET apiSecrets/…/{secretValue}` | secret lookups: secrets are not exposed through GraphQL |
+| `POST externalTenantUserMappings/sourceUserLookup`, `GET adminProvisioning/{targetTenantId}/sourceUsers`, `…/roles`, `…/groups` | cross-tenant lookups: reads in another tenant, no method target in the caller's tenant |
+| `PUT crossTenantGrantPermissions`, `POST`/`DELETE emailIdentifierBindings` | not migrated by this Feature; a later wave may move them |
+| `PUT`/`DELETE users/{userName}`, `POST users/{userName}/revokeSessions`, `POST users/revokeSessions`, `POST users/{userName}/disableTwoFactor` | user endpoints outside waves 1 and password; not facades (`disableTwoFactor` shares the service with `User.DisableTwoFactor`, not the method) |
+| `POST setup`, `POST diagnostics/reconfigureLogLevel`, `GET tools/generatePassword` | setup, operations and stateless tools: no entity, no method |
+
+Tests: `Api/TenantApi/IdentityWave2RestDeprecationTests` — headers on every endpoint with `since` and without a date (never `Sunset`),
+endpoints that stay REST without headers, a counted call (labels `endpoint`, `client_id`, `status_class` only, no tenant or role name),
+and the pinned set of exactly these endpoints with wave, link anchor and empty dates (the snapshot of what OpenAPI marks: the flag is set by the
+transformer of octo-common-services from this metadata). `UsersRestDeprecationTests` pins the user waves.
+
 ## REST facades of create user and password reset
 
 `UsersController.Post` (`POST users`) and `UsersController.ResetPassword` (`POST users/ResetPassword`) are **facades** of the static
@@ -292,8 +331,7 @@ nothing), the controller unit tests `ClientsControllerOverlayUrisTests`, `Client
 `ClientsControllerRoleGuardTests` (real handlers behind the controller through `HandlerBackedMethodFacade`), plus the unchanged
 `ClientRoleChangeGuardTests`.
 
-Both groups of endpoints carry no deprecation yet: the deprecation wave of identity wave 2 is its own story; REST is not removed and gets no
-`Sunset` header.
+Deprecated in identity wave 2 (`IdentityWave2`, section "Deprecation of the identity wave 2 endpoints"); no `Sunset` header, REST is not removed.
 
 ## REST facades of the secret write endpoints (System.Identity 3.4.0)
 
@@ -380,7 +418,7 @@ Tests: `Api/TenantApi/DataPermissionRestMethodFacadeTests` (one event per endpoi
 and over the method gives the same fail-closed read verdict of the engine for a caller without the grant; the REST answers above; another tenant's token, a caller
 without the role; revoke of a granted unreadable role; policy and permission not readable), `Api/Methods/DataPermissionMethodTests`.
 
-Neither group of endpoints carries a deprecation yet (deprecation wave of identity wave 2 is its own story); REST is not removed and gets no `Sunset` header.
+Deprecated in identity wave 2 (`IdentityWave2`, section "Deprecation of the identity wave 2 endpoints"); no `Sunset` header, REST is not removed.
 
 ## The target's data permission on every facade (transport-independent verdict)
 
@@ -548,7 +586,7 @@ token; a caller without the role; the cross-tenant checks of `CreateMapping`), t
 (`DuplicateExternalTenantUserMappingIntegrationTests`, `CrossTenantAncestryIntegrationTests`, `AdminProvisioningSourceUsersIntegrationTests`,
 `TenantExchangeIntegrationTests`), `Authorization/AdminProvisioningPipelineTests`.
 
-Neither group carries a deprecation (deprecation wave of identity wave 2 is its own story); REST is not removed and gets no `Sunset` header.
+Deprecated in identity wave 2 (`IdentityWave2`, section "Deprecation of the identity wave 2 endpoints"); no `Sunset` header, REST is not removed.
 
 ## REST facades of the role, group, API scope and API resource CRUD (System.Identity 3.7.0)
 
@@ -618,7 +656,7 @@ unknown scope or resource; on the method path every one of the twelve methods re
 `octo_api`, and the role and group methods a `TenantManagement`-only caller, with nothing written), `Persistence/IdentityMethodDeclarationsIntegrationTests`,
 `Methods/IdentityMethodHostTests`, plus the unchanged REST suites (`RoleChangeGuardTests`, `GroupRoleChangeGuardTests`, `TenantApiRoleAuthorizationTests`).
 
-No deprecation yet (deprecation wave of identity wave 2 is its own story); REST is not removed and gets no `Sunset` header.
+Deprecated in identity wave 2 (`IdentityWave2`, section "Deprecation of the identity wave 2 endpoints"); no `Sunset` header, REST is not removed.
 
 ## REST facades of the provider, e-mail rule, data permission, client and mapping CRUD (System.Identity 3.8.0)
 
@@ -694,4 +732,4 @@ a caller without the role or the scope and a caller who may not write the type a
 (the Bootstrap seeds of clients and data permissions still import), `Controllers/IdentityProvidersController*Tests` (unit, real handlers),
 `Methods/IdentityMethodHostTests`.
 
-No deprecation and no `Sunset` header (Gerald decides the sunset after the F5.x Features); REST is not removed.
+Deprecated in identity wave 2 (`IdentityWave2`, section "Deprecation of the identity wave 2 endpoints"); no `Sunset` header, REST is not removed.

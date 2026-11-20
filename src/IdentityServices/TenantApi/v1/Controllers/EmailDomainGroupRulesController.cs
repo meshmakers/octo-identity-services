@@ -15,6 +15,7 @@ using Persistence.IdentityCkModel.Generated.System.Identity.v3;
 using Meshmakers.Octo.Backend.Authentication;
 using Meshmakers.Octo.Backend.IdentityServices.Mapping;
 using Meshmakers.Octo.Backend.IdentityServices.Methods;
+using Meshmakers.Octo.Services.RestDeprecation;
 
 namespace Meshmakers.Octo.Backend.IdentityServices.TenantApi.v1.Controllers;
 
@@ -64,6 +65,7 @@ public class EmailDomainGroupRulesController(
     ///     Facade of the static <c>EmailDomainGroupRule.CreateEmailDomainGroupRule-1</c> (System.Identity 3.8.0).
     /// </summary>
     [HttpPost]
+    [OctoRestDeprecated(Wave = IdentityRestDeprecation.Wave2, Link = IdentityRestDeprecation.CrudWave2MethodsLink)]
     [Authorize(IdentityServiceConstants.IdentityTenantAdministrationWritePolicy)]
     [EndpointSummary("Create a new email domain group rule.")]
     [ProducesResponseType(typeof(EmailDomainGroupRuleDto), StatusCodes.Status201Created)]
@@ -105,6 +107,7 @@ public class EmailDomainGroupRulesController(
     ///     is 404 (it was inserted before the facade).
     /// </summary>
     [HttpPut("{rtId}")]
+    [OctoRestDeprecated(Wave = IdentityRestDeprecation.Wave2, Link = IdentityRestDeprecation.CrudWave2MethodsLink)]
     [Authorize(IdentityServiceConstants.IdentityTenantAdministrationWritePolicy)]
     [EndpointSummary("Replace an existing email domain group rule.")]
     [ProducesResponseType(typeof(EmailDomainGroupRuleDto), StatusCodes.Status200OK)]
@@ -136,6 +139,7 @@ public class EmailDomainGroupRulesController(
     ///     is 404 (it was 200 before the facade; nothing was deleted then either).
     /// </summary>
     [HttpDelete("{rtId}")]
+    [OctoRestDeprecated(Wave = IdentityRestDeprecation.Wave2, Link = IdentityRestDeprecation.CrudWave2MethodsLink)]
     [Authorize(IdentityServiceConstants.IdentityTenantAdministrationWritePolicy)]
     [EndpointSummary("Delete an email domain group rule.")]
     [ProducesResponseType(StatusCodes.Status200OK)]

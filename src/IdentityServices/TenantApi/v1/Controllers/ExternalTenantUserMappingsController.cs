@@ -20,6 +20,7 @@ using Meshmakers.Octo.Backend.IdentityServices.Authorization.RoleChange;
 using Meshmakers.Octo.Backend.IdentityServices.CrossTenantAudit;
 using Meshmakers.Octo.Backend.IdentityServices.Methods;
 using Meshmakers.Octo.Services.Methods.Facades;
+using Meshmakers.Octo.Services.RestDeprecation;
 
 namespace Meshmakers.Octo.Backend.IdentityServices.TenantApi.v1.Controllers;
 
@@ -109,6 +110,7 @@ public class ExternalTenantUserMappingsController(
     /// <c>400 UnknownGroup</c> and nothing is stored. Contract: <c>docs/CONCEPT-SIBLING-TENANT-GRANTS.md</c> §2.2.
     /// </remarks>
     [HttpPost]
+    [OctoRestDeprecated(Wave = IdentityRestDeprecation.Wave2, Link = IdentityRestDeprecation.AdminProvisioningMethodsLink)]
     [Authorize(IdentityServiceConstants.IdentityUserAdministrationWritePolicy)]
     [EndpointSummary("Creates a new external tenant user mapping.")]
     [ProducesResponseType(typeof(ExternalTenantUserMappingDto), StatusCodes.Status201Created)]
@@ -224,6 +226,7 @@ public class ExternalTenantUserMappingsController(
     /// Updates an existing external tenant user mapping (changes roles).
     /// </summary>
     [HttpPut("{rtId}")]
+    [OctoRestDeprecated(Wave = IdentityRestDeprecation.Wave2, Link = IdentityRestDeprecation.CrudWave2MethodsLink)]
     [Authorize(IdentityServiceConstants.IdentityUserAdministrationWritePolicy)]
     [EndpointSummary("Updates an existing external tenant user mapping.")]
     [ProducesResponseType(typeof(ExternalTenantUserMappingDto), StatusCodes.Status200OK)]
@@ -257,6 +260,7 @@ public class ExternalTenantUserMappingsController(
     /// Deletes an external tenant user mapping.
     /// </summary>
     [HttpDelete("{rtId}")]
+    [OctoRestDeprecated(Wave = IdentityRestDeprecation.Wave2, Link = IdentityRestDeprecation.CrudWave2MethodsLink)]
     [Authorize(IdentityServiceConstants.IdentityUserAdministrationWritePolicy)]
     [EndpointSummary("Deletes an external tenant user mapping.")]
     [ProducesResponseType(StatusCodes.Status200OK)]

@@ -17,6 +17,7 @@ using Meshmakers.Octo.Services.Methods.Facades;
 using Meshmakers.Octo.Services.Methods;
 using Meshmakers.Octo.Services.Contracts.DistributionEventHub.Methods;
 using Meshmakers.Octo.Backend.IdentityServices.Methods;
+using Meshmakers.Octo.Services.RestDeprecation;
 
 namespace Meshmakers.Octo.Backend.IdentityServices.TenantApi.v1.Controllers;
 
@@ -120,6 +121,7 @@ public class GroupsController(
     /// <c>Identity.Method</c> event. A refused initial role is the audited 403 problem of the guard.
     /// </remarks>
     [HttpPost]
+    [OctoRestDeprecated(Wave = IdentityRestDeprecation.Wave2, Link = IdentityRestDeprecation.CrudMethodsLink)]
     [Authorize(IdentityServiceConstants.IdentityUserAdministrationWritePolicy)]
     [EndpointSummary("Creates a new group.")]
     [ProducesResponseType(typeof(GroupDto), StatusCodes.Status201Created)]
@@ -186,6 +188,7 @@ public class GroupsController(
     /// Updates an existing group's name and description. Facade of the CK method <c>Group.UpdateGroup-1</c>.
     /// </summary>
     [HttpPut("{rtId}")]
+    [OctoRestDeprecated(Wave = IdentityRestDeprecation.Wave2, Link = IdentityRestDeprecation.CrudMethodsLink)]
     [Authorize(IdentityServiceConstants.IdentityUserAdministrationWritePolicy)]
     [EndpointSummary("Updates an existing group.")]
     [ProducesResponseType(typeof(GroupDto), StatusCodes.Status200OK)]
@@ -216,6 +219,7 @@ public class GroupsController(
     /// </summary>
     /// <remarks>Removing the last user administrator is the audited 409 problem of the role change guard, as before.</remarks>
     [HttpDelete("{rtId}")]
+    [OctoRestDeprecated(Wave = IdentityRestDeprecation.Wave2, Link = IdentityRestDeprecation.CrudMethodsLink)]
     [Authorize(IdentityServiceConstants.IdentityUserAdministrationWritePolicy)]
     [EndpointSummary("Deletes a group.")]
     [ProducesResponseType(StatusCodes.Status200OK)]
@@ -259,6 +263,7 @@ public class GroupsController(
     /// <c>Group.SetRoles</c> in-process: role change guard, write, one <c>Identity.Method</c> audit event.
     /// </remarks>
     [HttpPut("{rtId}/roles")]
+    [OctoRestDeprecated(Wave = IdentityRestDeprecation.Wave2, Link = IdentityRestDeprecation.GroupMethodsLink)]
     [Authorize(IdentityServiceConstants.IdentityUserAdministrationWritePolicy)]
     [EndpointSummary("Replaces the role assignments for a group.")]
     [ProducesResponseType(StatusCodes.Status200OK)]
@@ -317,6 +322,7 @@ public class GroupsController(
     /// </summary>
     /// <remarks>A user that does not exist is <c>404</c>; a user that already is a member is <c>200</c> without a change.</remarks>
     [HttpPut("{rtId}/members/users/{userId}")]
+    [OctoRestDeprecated(Wave = IdentityRestDeprecation.Wave2, Link = IdentityRestDeprecation.GroupMethodsLink)]
     [Authorize(IdentityServiceConstants.IdentityUserAdministrationWritePolicy)]
     [EndpointSummary("Adds a user to a group.")]
     [ProducesResponseType(StatusCodes.Status200OK)]
@@ -339,6 +345,7 @@ public class GroupsController(
     /// </summary>
     /// <remarks>A user that is not a member (or does not exist) is <c>200</c> without a change, as before.</remarks>
     [HttpDelete("{rtId}/members/users/{userId}")]
+    [OctoRestDeprecated(Wave = IdentityRestDeprecation.Wave2, Link = IdentityRestDeprecation.GroupMethodsLink)]
     [Authorize(IdentityServiceConstants.IdentityUserAdministrationWritePolicy)]
     [EndpointSummary("Removes a user from a group.")]
     [ProducesResponseType(StatusCodes.Status200OK)]
@@ -385,6 +392,7 @@ public class GroupsController(
     /// method <c>Group.AddMember-1</c> (member kind <c>Client</c>).
     /// </summary>
     [HttpPut("{rtId}/members/clients/{clientId}")]
+    [OctoRestDeprecated(Wave = IdentityRestDeprecation.Wave2, Link = IdentityRestDeprecation.GroupMethodsLink)]
     [Authorize(IdentityServiceConstants.IdentityUserAdministrationWritePolicy)]
     [EndpointSummary("Adds a client to a group.")]
     [EndpointDescription("The client is named by its OAuth client id or by its rtId. 404 when the group or the client does not exist.")]
@@ -413,6 +421,7 @@ public class GroupsController(
     /// revocation of a scratch tenant's creator mirror before the membership goes.
     /// </remarks>
     [HttpDelete("{rtId}/members/clients/{clientId}")]
+    [OctoRestDeprecated(Wave = IdentityRestDeprecation.Wave2, Link = IdentityRestDeprecation.GroupMethodsLink)]
     [Authorize(IdentityServiceConstants.IdentityUserAdministrationWritePolicy)]
     [EndpointSummary("Removes a client from a group.")]
     [EndpointDescription("The client is named by its OAuth client id or by its rtId. 404 when the group or the client does not exist.")]
@@ -473,6 +482,7 @@ public class GroupsController(
     /// already a member is <c>200</c> without a change.
     /// </remarks>
     [HttpPut("{rtId}/members/groups/{childGroupId}")]
+    [OctoRestDeprecated(Wave = IdentityRestDeprecation.Wave2, Link = IdentityRestDeprecation.GroupMethodsLink)]
     [Authorize(IdentityServiceConstants.IdentityUserAdministrationWritePolicy)]
     [EndpointSummary("Adds a nested group. Rejects if it would create a circular reference.")]
     [ProducesResponseType(StatusCodes.Status200OK)]
@@ -500,6 +510,7 @@ public class GroupsController(
     /// </summary>
     /// <remarks>A child group that is not a member is <c>200</c> without a change, as before.</remarks>
     [HttpDelete("{rtId}/members/groups/{childGroupId}")]
+    [OctoRestDeprecated(Wave = IdentityRestDeprecation.Wave2, Link = IdentityRestDeprecation.GroupMethodsLink)]
     [Authorize(IdentityServiceConstants.IdentityUserAdministrationWritePolicy)]
     [EndpointSummary("Removes a nested group from a group.")]
     [ProducesResponseType(StatusCodes.Status200OK)]
