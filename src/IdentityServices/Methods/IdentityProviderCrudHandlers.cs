@@ -220,8 +220,8 @@ internal static class IdentityProviderMethodSupport
         new(CkTypeIdOf<T>(), (RtEntityExtensions.GetRtCkTypeId<T>(), typeof(T)));
 
     /// <summary>
-    ///     The version-less CK type id of a provider type as a method request carries it (<c>System.Identity/OpenLdapIdentityProvider</c>,
-    ///     the form of <see cref="CkMethodRequest.CkTypeId" /> and of the REST facades).
+    ///     The version-less CK type id of a provider type (<c>System.Identity/OpenLdapIdentityProvider</c>): the form the REST
+    ///     facades send in a method request and the key <see cref="ProviderTypeOf" /> matches on.
     /// </summary>
     public static string CkTypeIdOf<T>() where T : RtIdentityProvider => ModelName + "/" + typeof(T).Name[2..];
 
@@ -229,8 +229,12 @@ internal static class IdentityProviderMethodSupport
 
     /// <summary>
     ///     The concrete provider type the request names, or <c>null</c> for anything else (the abstract
-    ///     <c>IdentityProvider</c>, another type, nothing). Never taken from a parameter. A model version or major in the model
-    ///     part (<c>System.Identity-3.8.0/...</c>, <c>System.Identity@3/...</c>) is ignored.
+    ///     <c>IdentityProvider</c>, another type, nothing). Never taken from a parameter. The request id is matched in its
+    ///     version-less form: a model version or major in the model part (<c>System.Identity-3.8.0/...</c>,
+    ///     <c>System.Identity@3/...</c>) and an element version of any number in the element part
+    ///     (<c>.../OpenLdapIdentityProvider-1</c>, the full name of the type's <see cref="RtCkId{TElementId}" /> that the
+    ///     GraphQL gateway sends) are ignored, so a tenant that holds a newer System.Identity than the service embeds still
+    ///     resolves.
     /// </summary>
     public static (RtCkId<CkTypeId> CkTypeId, Type Type)? ProviderTypeOf(string? requestedCkTypeId)
     {
@@ -252,7 +256,17 @@ internal static class IdentityProviderMethodSupport
             model = ModelName;
         }
 
-        return ProviderTypes.TryGetValue(model + requestedCkTypeId[slash..], out var type) ? type : null;
+        var element = WithoutElementVersion(requestedCkTypeId[(slash + 1)..]);
+        return ProviderTypes.TryGetValue(model + "/" + element, out var type) ? type : null;
+    }
+
+    /// <summary>The element name without a trailing element version of any number (<c>Name-2</c> becomes <c>Name</c>).</summary>
+    private static string WithoutElementVersion(string element)
+    {
+        var dash = element.LastIndexOf('-');
+        return dash > 0 && dash < element.Length - 1 && element[(dash + 1)..].All(char.IsAsciiDigit)
+            ? element[..dash]
+            : element;
     }
 
     /// <summary>

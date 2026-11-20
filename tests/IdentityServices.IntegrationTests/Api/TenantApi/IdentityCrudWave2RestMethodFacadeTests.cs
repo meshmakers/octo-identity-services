@@ -219,6 +219,117 @@ public class IdentityCrudWave2RestMethodFacadeTests : IntegrationTestBase, IDisp
     }
 
     [Fact]
+    public async Task OpenIdConnectProvider_CalledWithTheGatewayCkTypeId_StoresWhatRestStores_AndUpdatesAndDeletes()
+    {
+        var host = Host();
+        using var client = FacadeCaller.User(TenantManagement).Client(host);
+        var admin = Admin(TenantManagement);
+        var ct = TestContext.Current.CancellationToken;
+        var gatewayCkTypeId = GatewayCkTypeIdOf<RtAzureEntraIdIdentityProvider>();
+        gatewayCkTypeId.Should().NotBe(IdentityProviderMethodSupport.CkTypeIdOf<RtAzureEntraIdIdentityProvider>(),
+            "the gateway sends the element-versioned id, not the version-less id of the REST facade");
+
+        IdentityProviderDto dto = new AzureEntraIdProviderDto
+        {
+            Name = NewName("e"), IsEnabled = true, AllowSelfRegistration = false, Description = "OpenID Connect",
+            TenantId = "entra-tenant", Authority = "https://login.example.test/entra-tenant/v2.0",
+            ClientId = "entra-client", ClientSecret = $"rest-secret-{Guid.NewGuid():N}"
+        };
+        var rest = await client.PostAsJsonAsync(TenantApiUrl("identityProviders"), dto, ct);
+        rest.StatusCode.Should().Be(HttpStatusCode.OK, await rest.Content.ReadAsStringAsync(ct));
+        var restRtId = (await rest.Content.ReadFromJsonAsync<IdentityProviderDto>(ct))!.RtId!.Value;
+
+        var methodName = NewName("e");
+        var parameters = new IdentityProviderCreateIdentityProviderParameters
+        {
+            Name = methodName, Enabled = true, AllowSelfRegistration = false, Description = "OpenID Connect",
+            TenantId = "entra-tenant", Authority = "https://login.example.test/entra-tenant/v2.0",
+            ClientId = "entra-client", ClientSecret = $"method-secret-{Guid.NewGuid():N}"
+        };
+        var created = await DispatchAsync(host, admin, SystemIdentityCkIds.IdentityProviderCreateIdentityProviderMethodId,
+            gatewayCkTypeId, null, parameters);
+        created.Success.Should().BeTrue(created.Error?.Code);
+        var methodRtId = JsonSerializer.Deserialize<string>(created.ResultJson!)!;
+
+        var restStored = await LoadAsync<RtAzureEntraIdIdentityProvider>(restRtId);
+        var methodStored = await LoadAsync<RtAzureEntraIdIdentityProvider>(OctoObjectId.Parse(methodRtId));
+        methodStored.Should().NotBeNull("the method created the concrete provider type");
+        methodStored!.TenantId.Should().Be(restStored!.TenantId).And.Be("entra-tenant");
+        methodStored.Authority.Should().Be(restStored.Authority);
+        methodStored.ClientId.Should().Be(restStored.ClientId).And.Be("entra-client");
+        methodStored.IsEnabled.Should().Be(restStored.IsEnabled).And.BeTrue();
+        methodStored.AllowSelfRegistration.Should().Be(restStored.AllowSelfRegistration).And.BeFalse();
+        methodStored.Description.Should().Be(restStored.Description);
+        methodStored.ClientSecret!.IsProtected.Should().Be(restStored.ClientSecret!.IsProtected).And.BeTrue();
+
+        // A tenant may hold a newer System.Identity: a higher element version names the same type.
+        var newer = await DispatchAsync(host, admin, SystemIdentityCkIds.IdentityProviderUpdateIdentityProviderMethodId,
+            "System.Identity/AzureEntraIdIdentityProvider-2", methodRtId, new IdentityProviderUpdateIdentityProviderParameters
+            {
+                Name = methodName, Enabled = false, AllowSelfRegistration = false, Description = "changed",
+                TenantId = "entra-tenant", ClientId = "entra-client"
+            });
+        newer.Success.Should().BeTrue(newer.Error?.Code);
+        var updated = await LoadAsync<RtAzureEntraIdIdentityProvider>(OctoObjectId.Parse(methodRtId));
+        updated!.Description.Should().Be("changed");
+        updated.IsEnabled.Should().BeFalse();
+
+        (await DispatchAsync(host, admin, SystemIdentityCkIds.IdentityProviderDeleteIdentityProviderMethodId,
+            gatewayCkTypeId, methodRtId, new IdentityProviderDeleteIdentityProviderParameters())).Success.Should().BeTrue();
+        (await LoadAsync<RtAzureEntraIdIdentityProvider>(OctoObjectId.Parse(methodRtId))).Should().BeNull();
+        (await client.DeleteAsync(TenantApiUrl($"identityProviders/{restRtId}"), ct)).StatusCode.Should()
+            .Be(HttpStatusCode.OK);
+    }
+
+    [Fact]
+    public async Task LdapProvider_CalledWithTheGatewayCkTypeId_StoresWhatRestStores_AndANewerElementVersionResolves()
+    {
+        var host = Host();
+        using var client = FacadeCaller.User(TenantManagement).Client(host);
+        var admin = Admin(TenantManagement);
+        var ct = TestContext.Current.CancellationToken;
+        var gatewayCkTypeId = GatewayCkTypeIdOf<RtOpenLdapIdentityProvider>();
+        gatewayCkTypeId.Should().NotBe(OpenLdapCkTypeId, "the gateway sends the element-versioned id");
+
+        IdentityProviderDto dto = new OpenLdapProviderDto
+        {
+            Name = NewName("l"), IsEnabled = true, Host = "ldap.example.test", UserBaseDn = "ou=people,dc=example"
+        };
+        var rest = await client.PostAsJsonAsync(TenantApiUrl("identityProviders"), dto, ct);
+        rest.StatusCode.Should().Be(HttpStatusCode.OK, await rest.Content.ReadAsStringAsync(ct));
+        var restStored = await LoadAsync<RtOpenLdapIdentityProvider>(
+            (await rest.Content.ReadFromJsonAsync<IdentityProviderDto>(ct))!.RtId!.Value);
+
+        foreach (var ckTypeId in new[] { gatewayCkTypeId, "System.Identity/OpenLdapIdentityProvider-2" })
+        {
+            var created = await DispatchAsync(host, admin,
+                SystemIdentityCkIds.IdentityProviderCreateIdentityProviderMethodId, ckTypeId, null,
+                new IdentityProviderCreateIdentityProviderParameters
+                {
+                    Name = NewName("l"), Enabled = true, Host = "ldap.example.test", UserBaseDn = "ou=people,dc=example"
+                });
+            created.Success.Should().BeTrue($"{ckTypeId}: {created.Error?.Code}");
+
+            var methodStored = await LoadAsync<RtOpenLdapIdentityProvider>(
+                OctoObjectId.Parse(JsonSerializer.Deserialize<string>(created.ResultJson!)!));
+            methodStored.Should().NotBeNull(ckTypeId);
+            methodStored!.Host.Should().Be(restStored!.Host);
+            methodStored.UserBaseDn.Should().Be(restStored.UserBaseDn);
+            methodStored.Port.Should().Be(restStored.Port).And.Be(636);
+            methodStored.UseTls.Should().Be(restStored.UseTls).And.BeTrue();
+            methodStored.UserNameAttribute.Should().Be(restStored.UserNameAttribute).And.Be("uid");
+            methodStored.IsEnabled.Should().Be(restStored.IsEnabled);
+        }
+
+        (await DispatchAsync(host, admin, SystemIdentityCkIds.IdentityProviderCreateIdentityProviderMethodId,
+                "System.Identity/IdentityProvider-1", null, new IdentityProviderCreateIdentityProviderParameters
+                {
+                    Name = NewName("l"), Enabled = true, Host = "ldap.example.test", UserBaseDn = "ou=people,dc=example"
+                })).Error!.Code
+            .Should().Be(CkMethodErrorCodes.MethodValidationFailed, "the abstract base is no provider type in any version");
+    }
+
+    [Fact]
     public async Task EmailDomainGroupRule_RestAndTheMethod_StoreTheSameRule()
     {
         var host = Host();
@@ -990,6 +1101,13 @@ public class IdentityCrudWave2RestMethodFacadeTests : IntegrationTestBase, IDisp
                 .InvokeAsync(request, TestContext.Current.CancellationToken);
         }
     }
+
+    /// <summary>
+    ///     The CK type id the GraphQL gateway puts into the method request: the full name of the concrete type's RtCkId, with
+    ///     the element version (the mutation field of the concrete type carries that id).
+    /// </summary>
+    private static string GatewayCkTypeIdOf<T>() where T : RtIdentityProvider, new() =>
+        RtEntityExtensions.GetRtCkTypeId<T>().FullName;
 
     private static string NewName(string prefix) => $"{prefix}_{Guid.NewGuid():N}";
 

@@ -385,7 +385,8 @@ Handlers in `Methods/IdentityProviderCrudHandlers.cs`, `EmailDomainGroupRuleCrud
 
 - **Concrete provider type.** The provider methods are declared on the abstract `IdentityProvider`; the handlers read the concrete type from
   `IdentityMethodCall.RequestedCkTypeId` (set by both handler bases from `CkMethodRequest.CkTypeId`) through
-  `IdentityProviderMethodSupport.ProviderTypeOf`, and check the data permission on that type
+  `IdentityProviderMethodSupport.ProviderTypeOf` (version-less match: the element version the GraphQL gateway sends, e.g.
+  `System.Identity/OpenLdapIdentityProvider-1`, and a model version are ignored), and check the data permission on that type
   (`IdentityCreateMethodHandlerBase.WrittenTypeOf`, `IdentityAdminMethodHandlerBase.TargetEntityOf`). An update or delete on a provider of
   another type is `METHOD_TARGET_NOT_FOUND`.
 - **Secret gate.** `CreateIdentityProvider`, `UpdateIdentityProvider`, `CreateClient` and `UpdateClient` carry a sensitive parameter

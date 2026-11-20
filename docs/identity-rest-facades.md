@@ -682,7 +682,10 @@ in-process, outside the request, one `Identity.Method` event per call, the handl
   risk, see the 3.6.0 NEXT MAJOR note in `ckModel.yaml`).
 - **Identity providers are polymorphic.** The methods are declared on the abstract `IdentityProvider` and inherited by the seven concrete types;
   the GraphQL gateway exposes them only on the concrete types' mutation fields. The handler takes the provider type from the request's CK type id
-  (`CkMethodRequest.CkTypeId`, version-less; a model version in it is ignored), never from a parameter; the abstract type or any other type is
+  (`CkMethodRequest.CkTypeId`), never from a parameter. It matches the version-less id: the REST facades send that form
+  (`System.Identity/OpenLdapIdentityProvider`), the GraphQL gateway sends the full name of the concrete type's `RtCkId` with the element
+  version (`System.Identity/OpenLdapIdentityProvider-1`); an element version of any number and a model version are ignored, so a tenant with a
+  newer System.Identity than the service embeds still resolves. The abstract type or any other type is
   refused (`METHOD_VALIDATION_FAILED` on `ckTypeId` for the create, `METHOD_TARGET_NOT_FOUND` for update and delete). One parameter list serves
   all provider types; the required fields per type are those of the REST DTOs, the defaults too (`port` 636, OpenLDAP `useTls` true and
   `userNameAttribute` `uid`, `allowSelfRegistration` true on create; an update without it keeps the stored value). The OctoTenant parent rule (registry ancestor) runs in the handler
