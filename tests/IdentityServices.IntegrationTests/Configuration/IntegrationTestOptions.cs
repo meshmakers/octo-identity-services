@@ -22,6 +22,21 @@ public class IntegrationTestOptions
     /// </remarks>
     public string MongoDbImage { get; set; } = "mongo:8.0.15";
 
+    /// <summary>
+    ///     Lets the shared MongoDB container acknowledge majority writes without waiting for the journal flush
+    ///     (<c>writeConcernMajorityJournalDefault: false</c>, AB#9375). Off by default, so a local run behaves as
+    ///     before; the CI pipeline switches it on with <c>OCTO_IT_integrationTest__MongoDbRelaxedDurability=true</c>.
+    ///     The suite's data is throw-away, so a crash losing the last moments of writes is irrelevant.
+    /// </summary>
+    /// <remarks>
+    ///     Why: with <c>maxParallelThreads</c> 4 the parallel tenant setups commit transactions through the one
+    ///     replica-set container; on the CI agents those commits (each waits for a journal fsync on the nested
+    ///     Docker storage) took 78-158 s without any lock wait and cancelled the setup (AB#6723 hang evidence,
+    ///     runs 103524 and 106127). The data stays on disk: a tmpfs data directory was measured and does not
+    ///     fit (about 2.6 GB after 13 min of the suite, more than a CI agent can spare in RAM).
+    /// </remarks>
+    public bool MongoDbRelaxedDurability { get; set; }
+
     public string AdminUser { get; set; } = "octo-system-admin";
 
     public string AdminUserPassword { get; set; } = null!;

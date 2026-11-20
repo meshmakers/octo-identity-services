@@ -147,6 +147,14 @@ internal static class SharedMongoDbContainer
                 Console.WriteLine(
                     $"[Testcontainers] transactionLifetimeLimitSeconds = {MongoTestContainerTuning.TransactionLifetimeLimitSeconds}");
 
+                if (options.MongoDbRelaxedDurability)
+                {
+                    // AB#9375: no journal fsync wait on majority commits (throw-away data, CI only).
+                    await MongoTestContainerTuning.RelaxMajorityJournalDurabilityAsync(
+                        host, options.AdminUser, options.AdminUserPassword);
+                    Console.WriteLine("[Testcontainers] writeConcernMajorityJournalDefault = false");
+                }
+
                 _host = host;
 
                 var elapsed = DateTime.UtcNow - startTime;

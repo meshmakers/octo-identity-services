@@ -21,12 +21,7 @@ public static class MongoTestContainerTuning
     /// </summary>
     public const int TransactionLifetimeLimitSeconds = 300;
 
-    /// <summary>
-    ///     Raises <see cref="TransactionLifetimeLimitSeconds" /> on the running container. Call this
-    ///     directly after <c>StartAsync</c> and before the first tenant is provisioned.
-    /// </summary>
-    public static async Task RaiseTransactionLifetimeLimitAsync(
-        string databaseHost, string adminUser, string adminUserPassword)
+    private static MongoClient CreateAdminClient(string databaseHost, string adminUser, string adminUserPassword)
     {
         var urlBuilder = new MongoUrlBuilder
         {
@@ -37,7 +32,38 @@ public static class MongoTestContainerTuning
             DirectConnection = true
         };
 
-        var adminClient = new MongoClient(urlBuilder.ToMongoUrl());
+        return new MongoClient(urlBuilder.ToMongoUrl());
+    }
+
+    /// <summary>
+    ///     Sets <c>writeConcernMajorityJournalDefault: false</c> in the replica-set configuration of the one-node
+    ///     test replica set (AB#9375), so a majority-acknowledged write (every transaction commit of the tenant
+    ///     setup) no longer waits for the journal to be flushed to disk. Test data only: a crash may lose the
+    ///     last moments of writes. Call directly after <c>StartAsync</c>, before the first tenant is provisioned.
+    /// </summary>
+    public static async Task RelaxMajorityJournalDurabilityAsync(
+        string databaseHost, string adminUser, string adminUserPassword)
+    {
+        var admin = CreateAdminClient(databaseHost, adminUser, adminUserPassword).GetDatabase("admin");
+
+        var current = await admin.RunCommandAsync<BsonDocument>(
+            new BsonDocumentCommand<BsonDocument>(new BsonDocument("replSetGetConfig", 1)));
+        var config = current["config"].AsBsonDocument;
+        config["writeConcernMajorityJournalDefault"] = false;
+        config["version"] = config["version"].ToInt32() + 1;
+
+        await admin.RunCommandAsync<BsonDocument>(
+            new BsonDocumentCommand<BsonDocument>(new BsonDocument("replSetReconfig", config)));
+    }
+
+    /// <summary>
+    ///     Raises <see cref="TransactionLifetimeLimitSeconds" /> on the running container. Call this
+    ///     directly after <c>StartAsync</c> and before the first tenant is provisioned.
+    /// </summary>
+    public static async Task RaiseTransactionLifetimeLimitAsync(
+        string databaseHost, string adminUser, string adminUserPassword)
+    {
+        var adminClient = CreateAdminClient(databaseHost, adminUser, adminUserPassword);
         var command = new BsonDocument
         {
             { "setParameter", 1 },

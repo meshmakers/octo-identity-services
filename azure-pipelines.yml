@@ -226,6 +226,11 @@ stages:
               DOCKER_HOST: unix:///var/run/docker.sock
               TESTCONTAINERS_RYUK_DISABLED: 'true'
               TESTCONTAINERS_HOST_OVERRIDE: '172.17.0.1'
+              # AB#9375: the test MongoDB acknowledges majority writes without waiting for the journal flush
+              # (writeConcernMajorityJournalDefault=false, see IntegrationTestOptions.MongoDbRelaxedDurability).
+              # The parallel tenant setups' commits took 78-158 s on the nested Docker storage (runs 103524,
+              # 106127) and cancelled the setup. Throw-away data only; local runs leave this unset.
+              OCTO_IT_integrationTest__MongoDbRelaxedDurability: 'true'
           # Must run before the cleanup step below, which removes the Mongo container.
           - script: scripts/ci/mongo-hang-diagnostics.sh report "$(Agent.TempDirectory)/mongo-hang" "$(Agent.JobStatus)"
             displayName: 'Mongo hang evidence (on a failed Test step)'

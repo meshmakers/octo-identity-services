@@ -11,6 +11,8 @@
 #   report <dir> <job-status>    stops the sampler; when <job-status> is not "Succeeded" prints the last samples and
 #                                one fresh snapshot. Never fails the build.
 #
+# Every heartbeat is followed by {"dataDirMB":n} (size of /data/db inside the container, a number only).
+#
 # Output is filtered to what the evidence needs: op, ns, secs_running, waitingForLock, the lock modes (locks) and the
 # resource names of lockStats. No command documents, no client addresses, no credentials. The credentials are never on
 # the agent's command line or the build log: mongosh runs INSIDE the container and reads MONGO_INITDB_ROOT_* from the
@@ -73,6 +75,9 @@ case "$MODE" in
         if [ -n "$cid" ]; then
           ts="$(date -u +%H:%M:%S)"
           sample_once "$cid" | sed "s/^/$ts /" >> "$DIR/samples.log"
+          # Size of the data directory (AB#9375: shows how much test data the suite accumulates). One number, no content.
+          mb="$($TIMEOUT_CMD docker exec "$cid" sh -c 'du -sm /data/db 2>/dev/null | cut -f1' 2>/dev/null | head -n 1)"
+          case "$mb" in ''|*[!0-9]*) ;; *) echo "$ts {\"dataDirMB\":$mb}" >> "$DIR/samples.log" ;; esac
         fi
         sleep "$INTERVAL"
       done
@@ -86,6 +91,11 @@ case "$MODE" in
     touch "$DIR/stop" 2>/dev/null || true
     if [ "$STATUS" = "Succeeded" ] || [ "$STATUS" = "SucceededWithIssues" ]; then
       echo "Test step succeeded - no hang evidence needed."
+      # One line of numbers so that runs can be compared (AB#9375): peaks of the sampler's heartbeat values.
+      if [ -s "$DIR/samples.log" ]; then
+        peak() { grep -o "\"$1\":[0-9]*" "$DIR/samples.log" | cut -d: -f2 | sort -n | tail -n 1; }
+        echo "Mongo samples: $(grep -c '"activeOps"' "$DIR/samples.log") heartbeats, peak activeOps $(peak activeOps), peak notable $(peak notable), peak dataDirMB $(peak dataDirMB)"
+      fi
       exit 0
     fi
     echo "=== Mongo hang evidence (job status: ${STATUS:-unknown}) ==="

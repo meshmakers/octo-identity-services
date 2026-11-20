@@ -40,6 +40,12 @@ Notable changes of the OctoMesh identity services. The CK model `System.Identity
 
 ### Changed
 
+- **CI: the test MongoDB acknowledges majority writes without the journal flush.** The Test step of `azure-pipelines.yml` sets
+  `OCTO_IT_integrationTest__MongoDbRelaxedDurability=true`; `SharedMongoDbContainer` then sets `writeConcernMajorityJournalDefault: false`
+  on the one-node Testcontainers replica set. The parallel tenant setups of the integration tests committed through the nested Docker
+  storage of the CI agents, where commits took 78-158 s and cancelled the setup (`OperationCanceledException` in the tenant-setup CK
+  import). Local runs are unchanged (the option is off by default). The Mongo sampler also records the size of the data directory and
+  prints one line of peaks on a green run. Details: `docs/testing.md`, "Test MongoDB: relaxed durability in CI".
 - **Create, update and delete of identity providers, e-mail domain group rules, data permissions and policies and clients, and the update
   and delete of external tenant user mappings, run CK methods (System.Identity 3.8.0).** The REST write endpoints of
   `IdentityProvidersController`, `EmailDomainGroupRulesController`, `DataPermissionsController` (create, delete, policy create and delete),

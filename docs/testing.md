@@ -202,3 +202,27 @@ whole step. A stall now leaves evidence in three places; read them in this order
 The Test step no longer has `retryCountOnTaskFailure` (a retry re-ran the whole suite and could hide red tests); restore and
 build keep theirs. Locally the sampler works the same way (set `MONGO_DIAG_CONTAINER_ID` to pin one container when several suites run on the machine): `scripts/ci/mongo-hang-diagnostics.sh start <dir> 10`, run the
 tests, then `scripts/ci/mongo-hang-diagnostics.sh report <dir> Failed`.
+
+## Test MongoDB: relaxed durability in CI
+
+What the hang evidence showed (runs 103524 and 106127): the suite was slow, not deadlocked. With `maxParallelThreads: 4`
+the parallel tenant setups commit transactions through the one replica-set container; on the CI agents its writes and
+commits ran 78-158 s with no lock wait (`admin.$cmd` commits, `config.system.sessions` updates), until the setup's
+cancellation token fired (`OperationCanceledException` in the tenant-setup CK import, `UpdateIndexCoreAsync`).
+
+- **Switch.** `integrationTest:mongoDbRelaxedDurability` (default `false`) makes `SharedMongoDbContainer` set
+  `writeConcernMajorityJournalDefault: false` in the replica-set configuration of the one-node test replica set
+  (`replSetReconfig`), so a majority-acknowledged write - every transaction commit of the tenant setup - no longer waits for the
+  journal flush. Neither the tests nor `octo-construction-kit-engine-mongodb` set an explicit write concern (`j: true` or `w`), so the
+  default (majority) applies. The pipeline turns it on for the Test step only, through the environment variable
+  `OCTO_IT_integrationTest__MongoDbRelaxedDurability=true` (the test configuration reads environment variables with the prefix
+  `OCTO_IT_`). A local run does not set it and behaves as before. The data is throw-away; a crash may lose the last moments of
+  writes. The checkpoint interval (`--syncdelay`) and `--journalCommitInterval` are not changed.
+- **Why not tmpfs.** A tmpfs data directory was tried and measured: the data directory of the suite grew to 2.6 GB after 13.5 min
+  (every test tenant keeps its databases until the process ends) and filled a 3 GiB tmpfs (WiredTiger error 14031). The test Mongo of
+  a CI job runs in the node-wide `/docker` memory cgroup, so a few GB per job times 8 agents would add to its memory pressure.
+- **Measuring.** The Mongo sampler adds `{"dataDirMB":n}` after every heartbeat and, on a green run, the step *Mongo hang
+  evidence* prints one line: `Mongo samples: <n> heartbeats, peak activeOps, peak notable, peak dataDirMB`. Compare the Test step
+  duration and that line between runs; on a failed run the usual evidence (above) applies.
+- **Parallelism and follow-up.** `maxParallelThreads` stays 4; it is lowered for CI only if the measured runs still show
+  cancellations. Test tenants that are never dropped (the size above) are a follow-up, not part of this change.
