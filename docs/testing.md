@@ -170,3 +170,35 @@ A test that needs the real CK deadline of an identity method builds its own host
 reads what a consumer, an observer or a background step recorded waits for it with a bound; it never asserts right after
 the response.
 
+
+## Hang evidence in CI
+
+The Test step of `azure-pipelines.yml` has a step timeout of 30 min. A suite that stalls used to end there
+without saying which test was running or what MongoDB waited for. A healthy agent needs 10-14 min for the
+whole step. A stall now leaves evidence in three places; read them in this order:
+
+1. **Build log of the Test step, `[Long Running Test]` lines.** `xunit.runner.json` sets `longRunningTestSeconds: 120` and
+   `diagnosticMessages: true` (the runner prints the notice only with diagnostic messages on), so a test that runs longer
+   than 2 min is named in the log while it is still running, and again every further 2 min.
+2. **`--blame-hang --blame-hang-timeout 8m --blame-hang-dump-type none`.** The test host is aborted when no test has
+   started or finished for 8 min. vstest measures inactivity, not the run time of one test: every start or end of a test
+   (also of the other parallel ones) resets the timer, so a hang is caught 8 min after the last test activity. The step then
+   fails before its 30 min (8 min of silence after the last test activity, so a suite that is still busy for
+   more than about 20 min can reach the step timeout first; the long-running notice and the Mongo samples remain), and the log names the tests in flight. No memory dump is written (GBs), only
+   `Sequence_*.xml`. The steps *Collect hang evidence* and *Publish hang evidence* print the tests that had started and
+   not completed and publish the pipeline artifact **`hang-evidence-<attempt>`** (`Sequence_*.xml`, `samples.log`) when the
+   job failed.
+3. **Step *Mongo hang evidence*, filtered `$currentOp` summary of the Testcontainers MongoDB**
+   (`scripts/ci/mongo-hang-diagnostics.sh`). A sampler started before the tests writes one heartbeat line a minute
+   (`activeOps`, `notable`) and one line per operation that runs >= 20 s or waits for a lock: `op`, `ns`, `secs_running`,
+   `waitingForLock`, `locks` (lock modes) and the resource names of `lockStats`. Nothing else is kept: no command
+   documents, client addresses or credentials (`mongosh` runs inside the container and reads the container's own
+   `MONGO_INITDB_ROOT_*` variables; no secret is on the agent's command line or in the log). The step runs on a failed or cancelled
+   job before the cleanup step removes the container, prints the last 40 samples and one fresh snapshot (time-boxed to 3 min), and never fails the
+   build. Reading it: an operation with growing `secs_running` and `waitingForLock: true` waits on a lock (index build or
+   transaction of a tenant setup); `waitingForLock: false` with a high `secs_running` is a slow operation itself; no
+   notable operation at all means the test host waits on something else (MongoDB is idle: look at the tests in flight).
+
+The Test step no longer has `retryCountOnTaskFailure` (a retry re-ran the whole suite and could hide red tests); restore and
+build keep theirs. Locally the sampler works the same way (set `MONGO_DIAG_CONTAINER_ID` to pin one container when several suites run on the machine): `scripts/ci/mongo-hang-diagnostics.sh start <dir> 10`, run the
+tests, then `scripts/ci/mongo-hang-diagnostics.sh report <dir> Failed`.

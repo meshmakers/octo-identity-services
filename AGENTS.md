@@ -72,7 +72,8 @@ dotnet test Octo.Identity.sln -c Release
 
 `dotnet test` on the solution starts the four test hosts in parallel. After a transaction abort or a Testcontainers
 timeout, run the projects one after the other (`-m:1`) before you treat it as a test failure; all four projects must
-be green either way. Detail: `docs/testing.md`.
+be green either way. Detail: `docs/testing.md`. A stalled CI Test step leaves its evidence (long-running tests,
+blame-hang sequence files, filtered Mongo `currentOp`) as described there, "Hang evidence in CI".
 
 The suite is meant to stay green on a busy machine (other builds or suites running). Two rules keep it so
 (`docs/testing.md`, "Load on the machine"):
