@@ -18,6 +18,7 @@ using Meshmakers.Octo.Backend.IdentityServices.Methods;
 using Meshmakers.Octo.Services.Contracts.DistributionEventHub.Methods;
 using Meshmakers.Octo.Services.Methods;
 using Meshmakers.Octo.Services.Methods.Facades;
+using Meshmakers.Octo.Services.RestDeprecation;
 
 namespace Meshmakers.Octo.Backend.IdentityServices.TenantApi.v1.Controllers;
 
@@ -146,6 +147,7 @@ public class RolesController : ControllerBase
     ///     role manager's code and description.
     /// </remarks>
     [HttpPost]
+    [OctoRestDeprecated(Wave = IdentityRestDeprecation.Wave2, Link = IdentityRestDeprecation.CrudMethodsLink)]
     [Authorize(IdentityServiceConstants.IdentityUserAdministrationWritePolicy)]
     [EndpointSummary("Creates a new role.")]
     [ProducesResponseType(StatusCodes.Status200OK)]
@@ -175,6 +177,7 @@ public class RolesController : ControllerBase
     ///     problem of the role change guard, as before.
     /// </remarks>
     [HttpPut("{roleName}")]
+    [OctoRestDeprecated(Wave = IdentityRestDeprecation.Wave2, Link = IdentityRestDeprecation.CrudMethodsLink)]
     [Authorize(IdentityServiceConstants.IdentityUserAdministrationWritePolicy)]
     [EndpointSummary("Updates a role.")]
     [ProducesResponseType(StatusCodes.Status200OK)]
@@ -208,6 +211,7 @@ public class RolesController : ControllerBase
     /// <summary>Deletes a role. Facade of the CK method <c>Role.DeleteRole-1</c>.</summary>
     /// <remarks>A built-in role is the audited <c>409</c> problem of the role change guard, as before.</remarks>
     [HttpDelete("{roleName}")]
+    [OctoRestDeprecated(Wave = IdentityRestDeprecation.Wave2, Link = IdentityRestDeprecation.CrudMethodsLink)]
     [Authorize(IdentityServiceConstants.IdentityUserAdministrationWritePolicy)]
     [EndpointSummary("Deletes a role.")]
     [ProducesResponseType(StatusCodes.Status200OK)]

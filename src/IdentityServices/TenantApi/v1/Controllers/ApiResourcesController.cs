@@ -14,6 +14,7 @@ using Meshmakers.Octo.Backend.Authentication;
 using Meshmakers.Octo.Backend.IdentityServices.Methods;
 using Meshmakers.Octo.Services.Contracts.DistributionEventHub.Methods;
 using Meshmakers.Octo.Services.Methods.Facades;
+using Meshmakers.Octo.Services.RestDeprecation;
 
 namespace Meshmakers.Octo.Backend.IdentityServices.TenantApi.v1.Controllers;
 
@@ -122,6 +123,7 @@ public class ApiResourcesController : ControllerBase
     // POST api/apiResources
     /// <summary>Creates a new API resource. Facade of the static CK method <c>ApiResource.CreateApiResource-1</c>.</summary>
     [HttpPost]
+    [OctoRestDeprecated(Wave = IdentityRestDeprecation.Wave2, Link = IdentityRestDeprecation.CrudMethodsLink)]
     [Authorize(IdentityServiceConstants.IdentityTenantAdministrationWritePolicy)]
     [EndpointSummary("Creates a new API resource")]
     [ProducesResponseType(StatusCodes.Status200OK)]
@@ -158,6 +160,7 @@ public class ApiResourcesController : ControllerBase
     ///     read-modify-write that keeps the stored secrets (the DTO carries none).
     /// </summary>
     [HttpPut("{name}")]
+    [OctoRestDeprecated(Wave = IdentityRestDeprecation.Wave2, Link = IdentityRestDeprecation.CrudMethodsLink)]
     [Authorize(IdentityServiceConstants.IdentityTenantAdministrationWritePolicy)]
     [EndpointSummary("Updates an API resource")]
     [ProducesResponseType(StatusCodes.Status200OK)]
@@ -201,6 +204,7 @@ public class ApiResourcesController : ControllerBase
     // DELETE api/apiResources/5
     /// <summary>Deletes an API resource with its secrets. Facade of the CK method <c>ApiResource.DeleteApiResource-1</c>.</summary>
     [HttpDelete("{name}")]
+    [OctoRestDeprecated(Wave = IdentityRestDeprecation.Wave2, Link = IdentityRestDeprecation.CrudMethodsLink)]
     [Authorize(IdentityServiceConstants.IdentityTenantAdministrationWritePolicy)]
     [EndpointSummary("Deletes an API resource")]
     [ProducesResponseType(StatusCodes.Status200OK)]

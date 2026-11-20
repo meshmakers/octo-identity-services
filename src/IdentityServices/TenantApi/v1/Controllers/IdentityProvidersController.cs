@@ -21,6 +21,7 @@ using Meshmakers.Octo.Services.Contracts.DistributionEventHub.Methods;
 using Meshmakers.Octo.Services.Methods;
 using Meshmakers.Octo.Services.Methods.Facades;
 using Meshmakers.Octo.Backend.IdentityServices.Methods;
+using Meshmakers.Octo.Services.RestDeprecation;
 
 namespace Meshmakers.Octo.Backend.IdentityServices.TenantApi.v1.Controllers;
 
@@ -86,6 +87,7 @@ public class IdentityProvidersController : ControllerBase
     }
 
     [HttpPost]
+    [OctoRestDeprecated(Wave = IdentityRestDeprecation.Wave2, Link = IdentityRestDeprecation.CrudWave2MethodsLink)]
     [ProducesResponseType(typeof(IdentityProviderDto), StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(UniquenessViolationErrorResponse), StatusCodes.Status400BadRequest)]
     [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status503ServiceUnavailable)]
@@ -177,6 +179,7 @@ public class IdentityProvidersController : ControllerBase
     }
 
     [HttpDelete("{rtId}")]
+    [OctoRestDeprecated(Wave = IdentityRestDeprecation.Wave2, Link = IdentityRestDeprecation.CrudWave2MethodsLink)]
     [Authorize(IdentityServiceConstants.IdentityTenantAdministrationWritePolicy)]
     [EndpointSummary("Delete an existing identity provider.")]
     [ProducesResponseType(StatusCodes.Status200OK)]
@@ -203,6 +206,7 @@ public class IdentityProvidersController : ControllerBase
     }
 
     [HttpPut("{rtId}")]
+    [OctoRestDeprecated(Wave = IdentityRestDeprecation.Wave2, Link = IdentityRestDeprecation.CrudWave2MethodsLink)]
     [ProducesResponseType(typeof(IdentityProviderDto), StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(UniquenessViolationErrorResponse), StatusCodes.Status400BadRequest)]
     [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status503ServiceUnavailable)]

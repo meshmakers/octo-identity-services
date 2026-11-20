@@ -194,7 +194,8 @@ requirement of the tenant REST API (see `docs/system-api.md` § Authorization Po
 REST deprecation waves (`RestDeprecationOptions`, octo-common-services) — the dates of the deprecated REST
 endpoints of a wave; see `octo-common-services/docs/rest-deprecation.md`. Identity wave 1 is `IdentityUsers1` (`PUT users/{u}/roles`,
 `PUT`/`DELETE users/{u}/roles/{r}`, `POST users/{u}/merge`); the password wave is `IdentityUsersPassword` (`POST users`,
-`POST users/ResetPassword`):
+`POST users/ResetPassword`); identity wave 2 is `IdentityWave2` (the 60 write endpoints that are facades of the group, client, secret,
+client mirror, data permission, admin provisioning and CRUD methods, `docs/identity-rest-facades.md`):
 
 | Option | Env variable | Description |
 |--------|-------------|-------------|
@@ -202,6 +203,8 @@ endpoints of a wave; see `octo-common-services/docs/rest-deprecation.md`. Identi
 | `RestDeprecation:Waves:IdentityUsers1:Sunset` | `OCTO_RestDeprecation__Waves__IdentityUsers1__Sunset` | `yyyy-MM-dd` (UTC), after `Since`. Identity wave 1: since `2026-11-08`; sunset to be announced (decided by Gerald once the migration functions are implemented), so it stays empty in `octo-mesh-deployment`; drives the `Sunset` header. Unset: no `Sunset` header. Helm `restDeprecation.waves.IdentityUsers1.sunset`. |
 | `RestDeprecation:Waves:IdentityUsersPassword:Since` | `OCTO_RestDeprecation__Waves__IdentityUsersPassword__Since` | `yyyy-MM-dd` (UTC). Password wave: the delivery day of the release that contains this wave (the first-party clients call `User.CreateUser` / `User.ResetPassword`); set by Ops at rollout. Unset: no `Deprecation` header, the endpoints answer exactly as before (plus the `Link` header). Helm `restDeprecation.waves.IdentityUsersPassword.since`. |
 | `RestDeprecation:Waves:IdentityUsersPassword:Sunset` | `OCTO_RestDeprecation__Waves__IdentityUsersPassword__Sunset` | `yyyy-MM-dd` (UTC), after `Since`. Same date rule as wave 1: to be announced, stays empty until Gerald decides it; drives the `Sunset` header. Unset: no `Sunset` header. Helm `restDeprecation.waves.IdentityUsersPassword.sunset`. |
+| `RestDeprecation:Waves:IdentityWave2:Since` | `OCTO_RestDeprecation__Waves__IdentityWave2__Since` | `yyyy-MM-dd` (UTC). Wave 2: the delivery day of the release that contains this wave; set by Ops in `octo-mesh-deployment` at rollout. Unset: no `Deprecation` header, the endpoints answer exactly as before (plus the `Link` header). Helm `restDeprecation.waves.IdentityWave2.since`. |
+| `RestDeprecation:Waves:IdentityWave2:Sunset` | `OCTO_RestDeprecation__Waves__IdentityWave2__Sunset` | `yyyy-MM-dd` (UTC), after `Since`. To be announced: stays empty until Gerald decides it; drives the `Sunset` header. Unset: no `Sunset` header. Helm `restDeprecation.waves.IdentityWave2.sunset`. |
 
 ### Configuration Sources
 

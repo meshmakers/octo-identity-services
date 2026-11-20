@@ -12,6 +12,7 @@ using Meshmakers.Octo.Backend.Authentication;
 using Meshmakers.Octo.Backend.IdentityServices.Methods;
 using Meshmakers.Octo.Services.Contracts.DistributionEventHub.Methods;
 using Meshmakers.Octo.Services.Methods.Facades;
+using Meshmakers.Octo.Services.RestDeprecation;
 
 namespace Meshmakers.Octo.Backend.IdentityServices.TenantApi.v1.Controllers;
 
@@ -93,6 +94,7 @@ public class ApiScopesController : ControllerBase
     // POST api/apiScopes
     /// <summary>Creates a new API scope. Facade of the static CK method <c>ApiScope.CreateApiScope-1</c>.</summary>
     [HttpPost]
+    [OctoRestDeprecated(Wave = IdentityRestDeprecation.Wave2, Link = IdentityRestDeprecation.CrudMethodsLink)]
     [Authorize(IdentityServiceConstants.IdentityTenantAdministrationWritePolicy)]
     [EndpointSummary("Creates a new API scope")]
     [ProducesResponseType(StatusCodes.Status200OK)]
@@ -122,6 +124,7 @@ public class ApiScopesController : ControllerBase
     // PUT api/apiScopes/5
     /// <summary>Updates an API scope. Facade of the CK method <c>ApiScope.UpdateApiScope-1</c>.</summary>
     [HttpPut("{name}")]
+    [OctoRestDeprecated(Wave = IdentityRestDeprecation.Wave2, Link = IdentityRestDeprecation.CrudMethodsLink)]
     [Authorize(IdentityServiceConstants.IdentityTenantAdministrationWritePolicy)]
     [EndpointSummary("Updates an API scope")]
     [ProducesResponseType(StatusCodes.Status200OK)]
@@ -158,6 +161,7 @@ public class ApiScopesController : ControllerBase
     // DELETE api/apiScopes/5
     /// <summary>Deletes an API scope. Facade of the CK method <c>ApiScope.DeleteApiScope-1</c>.</summary>
     [HttpDelete("{name}")]
+    [OctoRestDeprecated(Wave = IdentityRestDeprecation.Wave2, Link = IdentityRestDeprecation.CrudMethodsLink)]
     [Authorize(IdentityServiceConstants.IdentityTenantAdministrationWritePolicy)]
     [EndpointSummary("Deletes an API scope")]
     [ProducesResponseType(StatusCodes.Status200OK)]

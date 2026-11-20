@@ -236,6 +236,14 @@ Notable changes of the OctoMesh identity services. The CK model `System.Identity
 
 ### Deprecated
 
+- **Identity wave 2 of the REST write endpoints.** The 60 write endpoints that are facades of the group, client role and overlay,
+  secret, client mirror, data permission, admin provisioning and CRUD methods (System.Identity 3.3.0 to 3.8.0) are deprecated in
+  wave `IdentityWave2`: every response carries `Link: <…/identityService/methods#<anchor>>; rel="deprecation"`, the OpenAPI
+  operations are `deprecated`, and `octo.rest.deprecated.calls` counts the calls per endpoint template and client id. The
+  `Deprecation` header follows once `restDeprecation.waves.IdentityWave2.since` is set at the first production delivery; there is
+  no `Sunset` header and no sunset date. Response headers only; routes, bodies and status codes are unchanged. The endpoint list
+  and the endpoints that stay REST (reads, secret lookups, cross-tenant lookups) with the reasons: `docs/identity-rest-facades.md`,
+  "Deprecation of the identity wave 2 endpoints".
 - **Identity wave 1 of the REST user endpoints (AB#8415).** `PUT users/{userName}/roles`,
   `PUT`/`DELETE users/{userName}/roles/{roleName}` and `POST users/{userName}/merge` are deprecated in favour of the methods
   `User.SetRoles`, `User.AddRole`, `User.RemoveRole` and `User.Merge` (GraphQL `systemIdentityUsers { … }`). Every response

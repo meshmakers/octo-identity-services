@@ -157,7 +157,8 @@ public class UsersRestDeprecationTests : IntegrationTestBase, IDisposable
         var marked = DatedHost().Services.GetRequiredService<EndpointDataSource>().Endpoints
             .OfType<RouteEndpoint>()
             .Select(e => (Endpoint: e, Attribute: e.Metadata.GetMetadata<OctoRestDeprecatedAttribute>()))
-            .Where(e => e.Attribute != null)
+            // Wave 2 (groups, clients, secrets, ...) is pinned in IdentityWave2RestDeprecationTests.
+            .Where(e => e.Attribute != null && e.Attribute.Wave != "IdentityWave2")
             .Select(e => $"{string.Join(",", e.Endpoint.Metadata.GetMetadata<IHttpMethodMetadata>()!.HttpMethods)} " +
                          $"{e.Endpoint.RoutePattern.RawText![(e.Endpoint.RoutePattern.RawText!.IndexOf("/Users", StringComparison.OrdinalIgnoreCase) + 1)..]} " +
                          $"{e.Attribute!.Wave} {e.Attribute.Link[(e.Attribute.Link.IndexOf('#') + 1)..]}")

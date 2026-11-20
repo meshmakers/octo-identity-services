@@ -174,6 +174,10 @@ wird, sind alle anderen Pre-Commit-Regeln (Lint etc.) ebenfalls hinfällig.
   DataPermission,Client}CrudHandlers.cs`); the REST write endpoints are facades. The provider methods sit on the abstract `IdentityProvider` and
   take the concrete provider type from the request's CK type id (`IdentityProviderMethodSupport.ProviderTypeOf`, never from a parameter).
   `clientSecret` parameters are `sensitive` and write-only; never return, log or audit them: `docs/identity-rest-facades.md`, `docs/identity-methods.md`.
+- **Every REST facade endpoint is deprecated in its wave** (`[OctoRestDeprecated(Wave = …, Link = …)]`, constants in
+  `TenantApi/v1/IdentityRestDeprecation.cs`; wave 2 is `IdentityWave2`), never with a `Sunset` date in code; a new facade endpoint
+  gets the attribute and a row in the pinned set of its deprecation test, an endpoint that stays REST gets none:
+  `docs/identity-rest-facades.md`.
 - **Every handler that serves a REST facade checks its target's data permission itself** (`IdentityMethodCall.CheckTargetWritableAsync`,
   gateway answers `METHOD_TARGET_NOT_FOUND` / `METHOD_FORBIDDEN` `data-permission`): the REST facade dispatches in-process, where the GraphQL
   gateway's check does not run. A new instance method on `IdentityAdminMethodHandlerBase` gets it for free; any other handler base must call it:
