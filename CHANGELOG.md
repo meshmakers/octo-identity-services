@@ -40,6 +40,11 @@ Notable changes of the OctoMesh identity services. The CK model `System.Identity
 
 ### Changed
 
+- **CI: the integration tests run at most 2 collections in parallel.** The Test step of `azure-pipelines.yml` passes
+  `-- xUnit.MaxParallelThreads=$(testMaxParallelThreads)` (variable, default 2) to `dotnet test`, overriding `maxParallelThreads: 4` of
+  `xunit.runner.json` for CI only. The parallel tenant setups saturated the one test MongoDB of a job (replication and commit
+  waits of 30-158 s, tenant-setup cancellations, `waiting for replication timed out`). Local runs are unchanged. Details:
+  `docs/testing.md`, "Parallelism cap in CI".
 - **Create, update and delete of identity providers, e-mail domain group rules, data permissions and policies and clients, and the update
   and delete of external tenant user mappings, run CK methods (System.Identity 3.8.0).** The REST write endpoints of
   `IdentityProvidersController`, `EmailDomainGroupRulesController`, `DataPermissionsController` (create, delete, policy create and delete),

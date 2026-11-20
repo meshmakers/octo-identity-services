@@ -202,3 +202,18 @@ whole step. A stall now leaves evidence in three places; read them in this order
 The Test step no longer has `retryCountOnTaskFailure` (a retry re-ran the whole suite and could hide red tests); restore and
 build keep theirs. Locally the sampler works the same way (set `MONGO_DIAG_CONTAINER_ID` to pin one container when several suites run on the machine): `scripts/ci/mongo-hang-diagnostics.sh start <dir> 10`, run the
 tests, then `scripts/ci/mongo-hang-diagnostics.sh report <dir> Failed`.
+
+## Parallelism cap in CI
+
+What the hang evidence showed: the suite is slow, not deadlocked. The parallel tenant setups of up to 4 test collections run
+against the one replica-set test MongoDB; on the CI agents its commits and replication waits ran 30-158 s and the tenant setup was
+cancelled (`OperationCanceledException`, `WriteConcernError 64 "waiting for replication timed out"`, `IndexSetupMigration` failures).
+This happened without any other CI job on the pool (run 112804), so it is the suite's own concurrency. A relaxed journal
+durability was tried and did not help (the wait is for replication, not for the journal).
+
+- **The cap.** The Test step runs `dotnet test ... -- xUnit.MaxParallelThreads=$(testMaxParallelThreads)` (pipeline variable, default
+  `2`). The run-settings argument after `--` overrides `maxParallelThreads` of `xunit.runner.json` for that run only; the log line
+  `Starting: IdentityServices.IntegrationTests (parallel mode = collections [2 threads] ...)` shows the value in effect. A local
+  `dotnet test` does not pass it and keeps the 4 threads of `xunit.runner.json`.
+- **Measuring.** Compare the Test step duration and the Mongo peak line of the step *Mongo hang evidence* (`peak activeOps`,
+  `peak notable`) between runs; raise `testMaxParallelThreads` again when a run shows the cap is not needed.
