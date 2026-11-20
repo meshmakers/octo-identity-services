@@ -71,7 +71,18 @@ public class IdentityMethodHostTests
             SystemIdentityCkIds.ApiScopeDeleteApiScopeMethodId,
             SystemIdentityCkIds.ApiResourceCreateApiResourceMethodId,
             SystemIdentityCkIds.ApiResourceUpdateApiResourceMethodId,
-            SystemIdentityCkIds.ApiResourceDeleteApiResourceMethodId);
+            SystemIdentityCkIds.ApiResourceDeleteApiResourceMethodId,
+            // System.Identity 3.8.0: the CRUD methods without a secret parameter.
+            SystemIdentityCkIds.IdentityProviderDeleteIdentityProviderMethodId,
+            SystemIdentityCkIds.EmailDomainGroupRuleCreateEmailDomainGroupRuleMethodId,
+            SystemIdentityCkIds.EmailDomainGroupRuleUpdateEmailDomainGroupRuleMethodId,
+            SystemIdentityCkIds.EmailDomainGroupRuleDeleteEmailDomainGroupRuleMethodId,
+            SystemIdentityCkIds.ExternalTenantUserMappingUpdateMappingMethodId,
+            SystemIdentityCkIds.ExternalTenantUserMappingDeleteMappingMethodId,
+            SystemIdentityCkIds.DataPermissionCreateDataPermissionMethodId,
+            SystemIdentityCkIds.DataPermissionDeleteDataPermissionMethodId,
+            SystemIdentityCkIds.DataPermissionCreatePolicyMethodId, SystemIdentityCkIds.DataPolicyDeleteDataPolicyMethodId,
+            SystemIdentityCkIds.ClientDeleteClientMethodId);
         selected.Should().OnlyContain(h => !h.CarriesSecret);
     }
 
@@ -110,7 +121,11 @@ public class IdentityMethodHostTests
                 SystemIdentityCkIds.ClientAddSecretMethodId, SystemIdentityCkIds.ClientUpdateSecretMethodId,
                 SystemIdentityCkIds.ClientRemoveSecretMethodId, SystemIdentityCkIds.ApiResourceAddSecretMethodId,
                 SystemIdentityCkIds.ApiResourceUpdateSecretMethodId, SystemIdentityCkIds.ApiResourceRemoveSecretMethodId,
-                SystemIdentityCkIds.ClientRotateMirrorSecretMethodId);
+                SystemIdentityCkIds.ClientRotateMirrorSecretMethodId,
+                // System.Identity 3.8.0: the client secret parameter of the provider and client create/update.
+                SystemIdentityCkIds.IdentityProviderCreateIdentityProviderMethodId,
+                SystemIdentityCkIds.IdentityProviderUpdateIdentityProviderMethodId,
+                SystemIdentityCkIds.ClientCreateClientMethodId, SystemIdentityCkIds.ClientUpdateClientMethodId);
         IdentityMethodHost.SelectLocalOnlyHandlers(new IdentityMethodsOptions { EnablePasswordMethods = true }).Should()
             .BeEmpty("with the switch on they are offered on the bus (SelectHandlers) and called in-process from there");
     }
@@ -123,7 +138,10 @@ public class IdentityMethodHostTests
             SystemIdentityCkIds.ClientAddSecretMethodId, SystemIdentityCkIds.ClientUpdateSecretMethodId,
             SystemIdentityCkIds.ClientRemoveSecretMethodId, SystemIdentityCkIds.ApiResourceAddSecretMethodId,
             SystemIdentityCkIds.ApiResourceUpdateSecretMethodId, SystemIdentityCkIds.ApiResourceRemoveSecretMethodId,
-            SystemIdentityCkIds.ClientRotateMirrorSecretMethodId
+            SystemIdentityCkIds.ClientRotateMirrorSecretMethodId,
+            SystemIdentityCkIds.IdentityProviderCreateIdentityProviderMethodId,
+            SystemIdentityCkIds.IdentityProviderUpdateIdentityProviderMethodId,
+            SystemIdentityCkIds.ClientCreateClientMethodId, SystemIdentityCkIds.ClientUpdateClientMethodId
         ]);
     }
 

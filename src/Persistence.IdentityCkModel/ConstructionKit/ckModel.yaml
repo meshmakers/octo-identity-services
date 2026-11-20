@@ -1,4 +1,23 @@
 "$schema": "https://schemas.meshmakers.cloud/construction-kit-meta.schema.json"
+# 3.8.0 (Feature F5.2 identity wave 2) adds methods only, so the remaining REST CRUD endpoints of identity
+# administration become facades (generic writes of these types are refused since 3.6.0, writeAccess):
+#   * static IdentityProvider.CreateIdentityProvider-1, IdentityProvider.UpdateIdentityProvider-1,
+#     IdentityProvider.DeleteIdentityProvider-1 on the abstract base, inherited by the seven concrete provider types; the
+#     concrete type of the call is the provider type. clientSecret is a sensitive, write-only parameter (roles TenantManagement,
+#     UserManagement).
+#   * static EmailDomainGroupRule.CreateEmailDomainGroupRule-1, UpdateEmailDomainGroupRule-1, DeleteEmailDomainGroupRule-1
+#     (roles TenantManagement, UserManagement).
+#   * ExternalTenantUserMapping.UpdateMapping-1, DeleteMapping-1 (role UserManagement).
+#   * static DataPermission.CreateDataPermission-1, DataPermission.DeleteDataPermission-1, DataPermission.CreatePolicy-1,
+#     DataPolicy.DeleteDataPolicy-1 (role UserManagement).
+#   * static Client.CreateClient-1 (server-side protocol defaults), Client.UpdateClient-1, Client.DeleteClient-1 (roles
+#     TenantManagement, UserManagement; a clientSecret parameter also needs SecretManagement in the handler).
+# New methods are additive: Minor (row M1), nothing to acknowledge. No existing type, attribute, record, method, id, access or
+# default changes; no data migration; ranges [3.0.0,4.0) stay satisfied. No secret becomes readable: IdentityProvider.ClientSecret
+# is a Secret value (never projected), the LDAP providers store no password, the stored client and API resource secret hashes
+# stay as they are (accepted until the next major, see 3.6.0 NEXT MAJOR).
+# Service-managed: ships with the identity release, no catalog import, no FixAll.
+#
 # 3.7.0 (Feature F5.2 identity wave 2) adds methods only, so the REST create, update and delete endpoints of roles, groups,
 # API scopes and API resources become facades (generic writes of these types are refused since 3.6.0, writeAccess):
 #   * static Role.CreateRole-1, Role.UpdateRole-1, Role.DeleteRole-1 (role UserManagement),
@@ -205,7 +224,7 @@
 # concept AB#5528 in octo-construction-kit-engine). String -> Secret is Minor
 # (CkSemVerClassifier): stored clear-text values stay readable as legacy values
 # until the encrypt sweep has run. Secret requires System >= 2.5 (decision 12).
-modelId: System.Identity-3.7.0
+modelId: System.Identity-3.8.0
 ckLanguage: 2
 dependencies:
   - System-[2.5,3.0)

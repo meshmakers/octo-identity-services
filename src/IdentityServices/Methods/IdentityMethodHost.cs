@@ -133,7 +133,36 @@ internal static class IdentityMethodHost
         For<ApiScopeDeleteApiScopeHandler>(SystemIdentityCkIds.ApiScopeDeleteApiScopeMethodId, false),
         For<ApiResourceCreateApiResourceHandler>(SystemIdentityCkIds.ApiResourceCreateApiResourceMethodId, false),
         For<ApiResourceUpdateApiResourceHandler>(SystemIdentityCkIds.ApiResourceUpdateApiResourceMethodId, false),
-        For<ApiResourceDeleteApiResourceHandler>(SystemIdentityCkIds.ApiResourceDeleteApiResourceMethodId, false)
+        For<ApiResourceDeleteApiResourceHandler>(SystemIdentityCkIds.ApiResourceDeleteApiResourceMethodId, false),
+        // System.Identity 3.8.0: create, update and delete of identity providers, e-mail domain group rules, data permissions
+        // and policies, clients, and the update and delete of external tenant user mappings; the REST CRUD endpoints of
+        // IdentityProvidersController, EmailDomainGroupRulesController, DataPermissionsController, ClientsController and
+        // ExternalTenantUserMappingsController are their facades. The provider create/update and the client create/update
+        // carry a client secret (sensitive parameter): gated like the secret methods, local only for their facades while the
+        // switch is off.
+        For<IdentityProviderCreateIdentityProviderHandler>(SystemIdentityCkIds.IdentityProviderCreateIdentityProviderMethodId,
+            true, servesRestFacade: true),
+        For<IdentityProviderUpdateIdentityProviderHandler>(SystemIdentityCkIds.IdentityProviderUpdateIdentityProviderMethodId,
+            true, servesRestFacade: true),
+        For<IdentityProviderDeleteIdentityProviderHandler>(SystemIdentityCkIds.IdentityProviderDeleteIdentityProviderMethodId,
+            false),
+        For<EmailDomainGroupRuleCreateHandler>(SystemIdentityCkIds.EmailDomainGroupRuleCreateEmailDomainGroupRuleMethodId,
+            false),
+        For<EmailDomainGroupRuleUpdateHandler>(SystemIdentityCkIds.EmailDomainGroupRuleUpdateEmailDomainGroupRuleMethodId,
+            false),
+        For<EmailDomainGroupRuleDeleteHandler>(SystemIdentityCkIds.EmailDomainGroupRuleDeleteEmailDomainGroupRuleMethodId,
+            false),
+        For<ExternalTenantUserMappingUpdateMappingHandler>(SystemIdentityCkIds.ExternalTenantUserMappingUpdateMappingMethodId,
+            false),
+        For<ExternalTenantUserMappingDeleteMappingHandler>(SystemIdentityCkIds.ExternalTenantUserMappingDeleteMappingMethodId,
+            false),
+        For<DataPermissionCreateDataPermissionHandler>(SystemIdentityCkIds.DataPermissionCreateDataPermissionMethodId, false),
+        For<DataPermissionDeleteDataPermissionHandler>(SystemIdentityCkIds.DataPermissionDeleteDataPermissionMethodId, false),
+        For<DataPermissionCreatePolicyHandler>(SystemIdentityCkIds.DataPermissionCreatePolicyMethodId, false),
+        For<DataPolicyDeleteDataPolicyHandler>(SystemIdentityCkIds.DataPolicyDeleteDataPolicyMethodId, false),
+        For<ClientCreateClientHandler>(SystemIdentityCkIds.ClientCreateClientMethodId, true, servesRestFacade: true),
+        For<ClientUpdateClientHandler>(SystemIdentityCkIds.ClientUpdateClientMethodId, true, servesRestFacade: true),
+        For<ClientDeleteClientHandler>(SystemIdentityCkIds.ClientDeleteClientMethodId, false)
     ];
 
     /// <summary>

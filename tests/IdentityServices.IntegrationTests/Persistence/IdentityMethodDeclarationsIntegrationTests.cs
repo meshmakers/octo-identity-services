@@ -54,10 +54,19 @@ public class IdentityMethodDeclarationsIntegrationTests : IClassFixture<Identity
                 "ApplyOverlayUris-1", "CleanOverlayEntries-1",
                 // System.Identity 3.5.0: client mirrors
                 "ProvisionMirrors-1", "ProvisionMirrorInTenant-1", "RotateMirrorSecret-1", "RemoveMirror-1",
-                "SetMirrorAutoProvision-1"
+                "SetMirrorAutoProvision-1",
+                // System.Identity 3.8.0: create, update and delete
+                "CreateClient-1", "UpdateClient-1", "DeleteClient-1"
             ]
         },
-        { "DataPermission", ["GrantToRole-1", "RevokeFromRole-1"] },
+        {
+            "DataPermission",
+            [
+                "GrantToRole-1", "RevokeFromRole-1",
+                // System.Identity 3.8.0: create and delete, and the create of a policy
+                "CreateDataPermission-1", "DeleteDataPermission-1", "CreatePolicy-1"
+            ]
+        },
         // System.Identity 3.4.0
         {
             "ApiResource",
@@ -67,23 +76,32 @@ public class IdentityMethodDeclarationsIntegrationTests : IClassFixture<Identity
                 "CreateApiResource-1", "UpdateApiResource-1", "DeleteApiResource-1"
             ]
         },
-        { "DataPolicy", ["SetEnforcementMode-1"] },
+        { "DataPolicy", ["SetEnforcementMode-1", "DeleteDataPolicy-1"] },
         // System.Identity 3.5.0: admin provisioning and the mapping create
         {
             "ExternalTenantUserMapping",
             [
                 "ProvisionAdmin-1", "ProvisionAdminWithGroups-1", "ProvisionCurrentUser-1", "RemoveAdminProvisioning-1",
-                "CreateMapping-1"
+                "CreateMapping-1",
+                // System.Identity 3.8.0: update and delete
+                "UpdateMapping-1", "DeleteMapping-1"
             ]
         },
         // System.Identity 3.7.0: create, update and delete of roles and API scopes
         { "Role", ["CreateRole-1", "UpdateRole-1", "DeleteRole-1"] },
-        { "ApiScope", ["CreateApiScope-1", "UpdateApiScope-1", "DeleteApiScope-1"] }
+        { "ApiScope", ["CreateApiScope-1", "UpdateApiScope-1", "DeleteApiScope-1"] },
+        // System.Identity 3.8.0: create, update and delete of e-mail domain group rules and identity providers (the abstract
+        // base declares them; the concrete provider types inherit them)
+        {
+            "EmailDomainGroupRule",
+            ["CreateEmailDomainGroupRule-1", "UpdateEmailDomainGroupRule-1", "DeleteEmailDomainGroupRule-1"]
+        },
+        { "IdentityProvider", ["CreateIdentityProvider-1", "UpdateIdentityProvider-1", "DeleteIdentityProvider-1"] }
     };
 
     private static readonly string[] MethodTypes =
         ["User", "Group", "Client", "DataPermission", "ApiResource", "DataPolicy", "ExternalTenantUserMapping", "Role",
-            "ApiScope"];
+            "ApiScope", "EmailDomainGroupRule", "IdentityProvider"];
 
     [Theory]
     [MemberData(nameof(DeclaredMethods))]
@@ -92,7 +110,36 @@ public class IdentityMethodDeclarationsIntegrationTests : IClassFixture<Identity
         var graph = await GetTypeAsync(type);
 
         graph.DefinedMethods.Select(m => m.MethodId).Should().BeEquivalentTo(methodIds);
-        graph.AllMethods.Keys.Should().BeEquivalentTo(methodIds, "the types are final: nothing is inherited");
+        graph.AllMethods.Keys.Should().BeEquivalentTo(methodIds, "nothing is inherited from a base type");
+    }
+
+    [Theory]
+    [InlineData("GoogleIdentityProvider")]
+    [InlineData("MicrosoftIdentityProvider")]
+    [InlineData("FacebookIdentityProvider")]
+    [InlineData("AzureEntraIdIdentityProvider")]
+    [InlineData("MicrosoftAdIdentityProvider")]
+    [InlineData("OpenLdapIdentityProvider")]
+    [InlineData("OctoTenantIdentityProvider")]
+    public async Task EveryConcreteProviderType_InheritsTheProviderMethods_AndStoresNoReadableSecret(string type)
+    {
+        // System.Identity 3.8.0: the GraphQL gateway exposes methods only on concrete types (an abstract type has no
+        // mutation field), so each provider type must carry the inherited CRUD methods.
+        var graph = await GetTypeAsync(type);
+        graph.AllMethods.Keys.Should().BeEquivalentTo(
+            ["CreateIdentityProvider-1", "UpdateIdentityProvider-1", "DeleteIdentityProvider-1"], type);
+
+        // No GraphQL read returns a provider secret: the client secret is a Secret value (never projected, only "is set");
+        // the LDAP providers store no password at all.
+        foreach (var attribute in graph.AllAttributesByName)
+        {
+            if (attribute.Key.Contains("Secret", StringComparison.OrdinalIgnoreCase))
+            {
+                attribute.Value.ValueType.Should().Be(AttributeValueTypesDto.Secret, $"{type}.{attribute.Key}");
+            }
+
+            attribute.Key.Should().NotContainEquivalentOf("password", $"{type} stores no password");
+        }
     }
 
     [Fact]
@@ -172,6 +219,24 @@ public class IdentityMethodDeclarationsIntegrationTests : IClassFixture<Identity
 
         mapping.AllMethods["CreateMapping-1"].Definition.Authorization!.Roles.Should().BeEquivalentTo([UserManagement]);
 
+        // System.Identity 3.8.0: the mapping update and delete carry the policy of ExternalTenantUserMappingsController
+        // (UserManagement); the client, provider and rule CRUD the tenant administration policy (TenantManagement or
+        // UserManagement; a client secret also needs SecretManagement in the handler). The data permission and policy CRUD is
+        // covered by the UserManagement loop above.
+        foreach (var id in new[] { "UpdateMapping-1", "DeleteMapping-1" })
+        {
+            mapping.AllMethods[id].Definition.Authorization!.Roles.Should().BeEquivalentTo([UserManagement], id);
+        }
+
+        foreach (var method in new[] { "CreateClient-1", "UpdateClient-1", "DeleteClient-1" }
+                     .Select(id => client.AllMethods[id])
+                     .Concat((await GetTypeAsync("IdentityProvider")).AllMethods.Values)
+                     .Concat((await GetTypeAsync("EmailDomainGroupRule")).AllMethods.Values))
+        {
+            method.Definition.Authorization!.Roles.Should()
+                .BeEquivalentTo([TenantManagement, UserManagement], method.QualifiedMethodId);
+        }
+
         // System.Identity 3.7.0: the CRUD methods carry the REST policies of RolesController (UserManagement; the group CRUD
         // is covered by the Group loop above), ApiScopesController and ApiResourcesController (TenantManagement or
         // UserManagement).
@@ -220,7 +285,12 @@ public class IdentityMethodDeclarationsIntegrationTests : IClassFixture<Identity
             "System.Identity/Client.RemoveSecret-1(secretValue)",
             "System.Identity/Client.UpdateSecret-1(secretValue)",
             "System.Identity/ApiResource.RemoveSecret-1(secretValue)",
-            "System.Identity/ApiResource.UpdateSecret-1(secretValue)"
+            "System.Identity/ApiResource.UpdateSecret-1(secretValue)",
+            // System.Identity 3.8.0: the write-only client secret of the provider and client create/update
+            "System.Identity/IdentityProvider.CreateIdentityProvider-1(clientSecret)",
+            "System.Identity/IdentityProvider.UpdateIdentityProvider-1(clientSecret)",
+            "System.Identity/Client.CreateClient-1(clientSecret)",
+            "System.Identity/Client.UpdateClient-1(clientSecret)"
         ]);
     }
 
@@ -254,7 +324,7 @@ public class IdentityMethodDeclarationsIntegrationTests : IClassFixture<Identity
         foreach (var type in new[]
                  {
                      "Group", "Client", "DataPermission", "ApiResource", "DataPolicy", "ExternalTenantUserMapping", "Role",
-                     "ApiScope"
+                     "ApiScope", "EmailDomainGroupRule", "IdentityProvider"
                  })
         {
             (await GetTypeAsync(type)).AllMethods.Values.Where(m => m.ReplacesGenericCreate)

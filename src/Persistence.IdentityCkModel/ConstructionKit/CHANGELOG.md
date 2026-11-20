@@ -1,5 +1,25 @@
 # Changelog
 
+## 3.8.0 - 2026-11-18
+
+_Required bump level: minor._
+
+System.Identity 3.8.0 adds the create, update and delete methods of identity providers, e-mail domain group rules, data permissions
+and data policies and clients, and the update and delete of external tenant user mappings, so the remaining REST CRUD endpoints of
+identity administration become facades (generic writes of these types are refused since 3.6.0). No secret is readable or returned:
+the client secret parameters are `sensitive` and write-only. Compile gate against 3.7.0: required level MINOR, nothing to acknowledge.
+
+Rollout: service-managed - ships inside the identity service with the regular identity release train. No catalog import, no per-tenant
+step, **no FixAll**. No data migration; ranges `System.Identity-[3.0.0,4.0)` stay satisfied.
+
+### Added
+
+- Static method 'IdentityProvider.CreateIdentityProvider-1', methods 'IdentityProvider.UpdateIdentityProvider-1', 'IdentityProvider.DeleteIdentityProvider-1' _(minor)_
+- Static method 'EmailDomainGroupRule.CreateEmailDomainGroupRule-1', methods 'EmailDomainGroupRule.UpdateEmailDomainGroupRule-1', 'EmailDomainGroupRule.DeleteEmailDomainGroupRule-1' _(minor)_
+- Methods 'ExternalTenantUserMapping.UpdateMapping-1', 'ExternalTenantUserMapping.DeleteMapping-1' _(minor)_
+- Static method 'DataPermission.CreateDataPermission-1', methods 'DataPermission.DeleteDataPermission-1', 'DataPermission.CreatePolicy-1', 'DataPolicy.DeleteDataPolicy-1' _(minor)_
+- Static method 'Client.CreateClient-1', methods 'Client.UpdateClient-1', 'Client.DeleteClient-1' _(minor)_
+
 ## 3.7.0 - 2026-11-18
 
 _Required bump level: minor._

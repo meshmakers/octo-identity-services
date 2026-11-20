@@ -252,6 +252,7 @@ public class IdentityTypeWriteAccessIntegrationTests : IClassFixture<IdentitySer
         (await FirstAsync<RtRole>(repo)).Should().NotBeNull("the bootstrap blueprint seeds the roles");
         (await FirstAsync<RtClient>(repo)).Should().NotBeNull("and the clients");
         (await FirstAsync<RtApiScope>(repo)).Should().NotBeNull("and the API scopes");
+        (await FirstAsync<RtDataPermission>(repo)).Should().NotBeNull("and the data permissions");
     }
 
     [Fact]
@@ -401,7 +402,9 @@ public class IdentityTypeWriteAccessIntegrationTests : IClassFixture<IdentitySer
 
     private async Task ImportBootstrapSeedsAsync(ITenantRepository repo)
     {
-        foreach (var file in new[] { "roles.yaml", "api-scopes.yaml", "clients/octo-tool.yaml" })
+        // the data permissions too - the creates of Client and DataPermission are methods since System.Identity 3.8.0,
+        // without replacesGenericCreate, so the blueprint's system import keeps seeding them.
+        foreach (var file in new[] { "roles.yaml", "api-scopes.yaml", "clients/octo-tool.yaml", "data-permissions.yaml" })
         {
             await ImportAsync(repo, await File.ReadAllTextAsync(FindRepoFile(
                     $"src/Persistence.IdentityCkModel/Blueprints/System.Identity.Bootstrap/seed-data/{file}"),

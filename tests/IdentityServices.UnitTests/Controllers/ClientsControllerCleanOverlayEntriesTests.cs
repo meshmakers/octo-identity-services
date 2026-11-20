@@ -42,7 +42,7 @@ public class ClientsControllerCleanOverlayEntriesTests
         _clientStore.TenantId.Returns(TenantId);
         _writes = ClientStoreMutations.Attach(_clientStore);
         // The endpoint is a facade of the static Client.CleanOverlayEntries: the real handler runs behind it.
-        _sut = new ClientsController(_clientStore, _eventHub, _clientRoleStore, _clientImpersonationStore,
+        _sut = new ClientsController(_clientStore, _clientRoleStore, _clientImpersonationStore,
             Substitute.For<RoleManager<RtRole>>(Substitute.For<IRoleStore<RtRole>>(), null, null, null, null),
             Substitute.For<IRoleChangeRefusals>(),
             new HandlerBackedMethodFacade(_clientStore, eventHub: _eventHub))
@@ -299,7 +299,7 @@ public class ClientsControllerCleanOverlayEntriesTests
         store.MutateAsync("second", Arg.Any<Func<RtClient, bool>>())
             .Returns<RtClient?>(_ => throw new RtVersionConflictException(default, 1));
         var methods = new HandlerBackedMethodFacade(store, eventHub: _eventHub);
-        var sut = new ClientsController(store, _eventHub, _clientRoleStore, _clientImpersonationStore,
+        var sut = new ClientsController(store, _clientRoleStore, _clientImpersonationStore,
             Substitute.For<RoleManager<RtRole>>(Substitute.For<IRoleStore<RtRole>>(), null, null, null, null),
             Substitute.For<IRoleChangeRefusals>(), methods)
         {
@@ -335,7 +335,7 @@ public class ClientsControllerCleanOverlayEntriesTests
         store.MutateAsync("second", Arg.Any<Func<RtClient, bool>>())
             .Returns<RtClient?>(_ => throw new InvalidOperationException("database down"));
         var methods = new HandlerBackedMethodFacade(store, eventHub: _eventHub);
-        var sut = new ClientsController(store, _eventHub, _clientRoleStore, _clientImpersonationStore,
+        var sut = new ClientsController(store, _clientRoleStore, _clientImpersonationStore,
             Substitute.For<RoleManager<RtRole>>(Substitute.For<IRoleStore<RtRole>>(), null, null, null, null),
             Substitute.For<IRoleChangeRefusals>(), methods)
         {

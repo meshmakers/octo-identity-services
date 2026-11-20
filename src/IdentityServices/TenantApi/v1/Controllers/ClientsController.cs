@@ -40,7 +40,6 @@ public class ClientsController : ControllerBase
     private const string ConcurrentChangeMessage =
         "The client was changed concurrently by other requests. Please retry.";
 
-    private readonly IDistributionEventHubService _distributionEventHubService;
     private readonly IOctoClientStore _octoClientStore;
     private readonly IClientRoleStore _clientRoleStore;
     private readonly IClientImpersonationStore _clientImpersonationStore;
@@ -52,14 +51,12 @@ public class ClientsController : ControllerBase
     ///     Constructor
     /// </summary>
     /// <param name="octoClientStore">The storage service of clients</param>
-    /// <param name="distributionEventHubService">Distributed cache with REDIS</param>
     /// <param name="clientRoleStore">The store managing client role assignments</param>
     /// <param name="clientImpersonationStore">The store reading the MayActAs impersonation edges</param>
     /// <param name="roleManager">Resolves the role ids of a replace-all role change to names</param>
     /// <param name="roleChangeRefusals">Answers and audits a refused role change</param>
     /// <param name="methodFacade">Calls the <c>Client.*</c> methods the role and overlay endpoints are facades of</param>
     public ClientsController(IOctoClientStore octoClientStore,
-        IDistributionEventHubService distributionEventHubService,
         IClientRoleStore clientRoleStore,
         IClientImpersonationStore clientImpersonationStore,
         RoleManager<RtRole> roleManager,
@@ -67,7 +64,6 @@ public class ClientsController : ControllerBase
         IIdentityMethodFacade methodFacade)
     {
         _octoClientStore = octoClientStore;
-        _distributionEventHubService = distributionEventHubService;
         _clientRoleStore = clientRoleStore;
         _clientImpersonationStore = clientImpersonationStore;
         _roleManager = roleManager;
@@ -328,33 +324,28 @@ public class ClientsController : ControllerBase
             return secretRefused;
         }
 
-        if (await _octoClientStore.FindRtClientByIdAsync(clientDto.ClientId) != null)
-        {
-            return Conflict($"Client with id '{clientDto.ClientId}' already exists.");
-        }
-
-        var appClient = new RtClient
-        {
-            RequirePkce = true,
-            RequireClientSecret = false,
-
-            AccessTokenType = RtTokenTypeEnum.Jwt,
-            AllowAccessTokensViaBrowser = true,
-            AlwaysIncludeUserClaimsInIdToken = true,
-            RequireConsent = false
-        };
-        ApplyToClient(appClient, clientDto);
-
-        try
-        {
-            await _octoClientStore.CreateAsync(appClient);
-            await ClearCacheAsync();
-            return Ok();
-        }
-        catch (Exception e)
-        {
-            return BadRequest(new InternalServerErrorDto(e.Message));
-        }
+        // The facade of the static Client.CreateClient-1 (System.Identity 3.8.0). The protocol defaults of a new
+        // client, the default scopes, the hash of the secret and the URI source marker are set in the method.
+        var c = ChangeOf(clientDto);
+        var response = await _methodFacade.InvokeAsync(IdentityMethodFacade.ClientCkTypeId,
+            SystemIdentityCkIds.ClientCreateClientMethodId, null,
+            new ClientCreateClientParameters
+            {
+                ClientId = clientDto.ClientId, Enabled = c.Enabled, ClientName = c.ClientName, ClientUri = c.ClientUri,
+                AllowedGrantTypes = c.AllowedGrantTypes, RedirectUris = c.RedirectUris,
+                PostLogoutRedirectUris = c.PostLogoutRedirectUris, AllowedCorsOrigins = c.AllowedCorsOrigins,
+                AllowedScopes = c.AllowedScopes, AllowOfflineAccess = c.AllowOfflineAccess,
+                RequireClientSecret = c.RequireClientSecret, ClientSecret = c.ClientSecret,
+                FrontChannelLogoutUri = c.FrontChannelLogoutUri,
+                FrontChannelLogoutSessionRequired = c.FrontChannelLogoutSessionRequired,
+                BackChannelLogoutUri = c.BackChannelLogoutUri,
+                BackChannelLogoutSessionRequired = c.BackChannelLogoutSessionRequired,
+                AutoProvisionInChildTenants = c.AutoProvisionInChildTenants
+            }, User, HttpContext.RequestAborted);
+        return response.ToActionResult(ClientWriteFailures("Creation of client failed.")
+            .MapError(ClientCrudErrors.ClientAlreadyExists,
+                _ => Conflict($"Client with id '{clientDto.ClientId}' already exists."))
+            .MapSuccess(_ => new OkResult()));
     }
 
     // PUT api/Clients/5
@@ -376,34 +367,35 @@ public class ClientsController : ControllerBase
             return secretRefused;
         }
 
-        try
+        // The facade of Client.UpdateClient-1 (System.Identity 3.8.0): one version-checked read-modify-write
+        // in the method; an unresolved concurrent change is 409.
+        var appClient = await _octoClientStore.FindRtClientByIdAsync(id);
+        if (appClient == null)
         {
-            // AB#8015: one version-checked read-modify-write (read, apply the DTO, replace with the read rtVersion;
-            // re-read and re-apply on a conflict). The update used to apply the DTO to a client read before and replace
-            // it unversioned, so a PUT that overlapped a secret delete wrote the removed secret back (and the write did
-            // not advance rtVersion, which the client mirror reconciliation relies on, AB#8054).
-            var appClient = await _octoClientStore.MutateAsync(id, current =>
-            {
-                ApplyToClient(current, clientDto);
-                return true;
-            });
-            if (appClient == null)
-            {
-                return NotFound(new NotFoundErrorDto($"Client with id '{id}' does not exist."));
-            }
-
-            await ClearCacheAsync();
-        }
-        catch (RtVersionConflictException)
-        {
-            return Problem(detail: ConcurrentChangeMessage, statusCode: StatusCodes.Status409Conflict);
-        }
-        catch (Exception e)
-        {
-            return BadRequest(new InternalServerErrorDto(e.Message));
+            return ClientDoesNotExist(id);
         }
 
-        return Ok();
+        // REST resets the allowed scopes to the octo defaults when the body has none; the method keeps them when omitted.
+        var c = ChangeOf(clientDto) with { AllowedScopes = clientDto.AllowedScopes?.ToList() ?? [] };
+        var response = await _methodFacade.InvokeAsync(IdentityMethodFacade.ClientCkTypeId,
+            SystemIdentityCkIds.ClientUpdateClientMethodId, appClient.RtId.ToString(),
+            new ClientUpdateClientParameters
+            {
+                ClientId = c.ClientId, Enabled = c.Enabled, ClientName = c.ClientName, ClientUri = c.ClientUri,
+                AllowedGrantTypes = c.AllowedGrantTypes, RedirectUris = c.RedirectUris,
+                PostLogoutRedirectUris = c.PostLogoutRedirectUris, AllowedCorsOrigins = c.AllowedCorsOrigins,
+                AllowedScopes = c.AllowedScopes, AllowOfflineAccess = c.AllowOfflineAccess,
+                RequireClientSecret = c.RequireClientSecret, ClientSecret = c.ClientSecret,
+                FrontChannelLogoutUri = c.FrontChannelLogoutUri,
+                FrontChannelLogoutSessionRequired = c.FrontChannelLogoutSessionRequired,
+                BackChannelLogoutUri = c.BackChannelLogoutUri,
+                BackChannelLogoutSessionRequired = c.BackChannelLogoutSessionRequired,
+                AutoProvisionInChildTenants = c.AutoProvisionInChildTenants
+            }, User, HttpContext.RequestAborted);
+        return response.ToActionResult(ClientWriteFailures("Update of client failed.")
+            .MapError(IdentityCrudErrors.ConcurrentChange, _ => ConcurrentChange())
+            .MapError(CkMethodErrorCodes.MethodTargetNotFound, _ => ClientDoesNotExist(id))
+            .MapSuccess(_ => new OkResult()));
     }
 
     // POST: system/v1/clients/{id}/overlayUris
@@ -574,23 +566,13 @@ public class ClientsController : ControllerBase
             return NotFound(new NotFoundErrorDto($"Client with id '{id}' does not exist."));
         }
 
-        try
-        {
-            await _octoClientStore.DeleteAsync(id);
-            await ClearCacheAsync();
-        }
-        catch (Exception e)
-        {
-            return BadRequest(new InternalServerErrorDto(e.Message));
-        }
-
-        return Ok();
-    }
-
-    private Task ClearCacheAsync()
-    {
-        return _distributionEventHubService.PublishAsync(new CorsClientsUpdate(_octoClientStore.TenantId,
-            Guid.NewGuid(), DateTime.Now));
+        // The facade of Client.DeleteClient-1 (System.Identity 3.8.0).
+        var response = await _methodFacade.InvokeAsync(IdentityMethodFacade.ClientCkTypeId,
+            SystemIdentityCkIds.ClientDeleteClientMethodId, appClient.RtId.ToString(), new ClientDeleteClientParameters(),
+            User, HttpContext.RequestAborted);
+        return response.ToActionResult(ClientWriteFailures("Delete of client failed.")
+            .MapError(CkMethodErrorCodes.MethodTargetNotFound, _ => ClientDoesNotExist(id))
+            .MapSuccess(_ => new OkResult()));
     }
 
     private static ClientDto CreateClientDto(RtClient applicationClient)
@@ -650,135 +632,18 @@ public class ClientsController : ControllerBase
         return StatusCode(StatusCodes.Status403Forbidden, new { message = reason });
     }
 
-    private void ApplyToClient(RtClient applicationClient, ClientDto clientDto)
-    {
-        if (clientDto.IsEnabled.HasValue)
-        {
-            applicationClient.Enabled = clientDto.IsEnabled.Value;
-        }
-
-        if (!string.IsNullOrEmpty(clientDto.ClientId))
-        {
-            applicationClient.ClientId = clientDto.ClientId;
-        }
-
-        if (!string.IsNullOrEmpty(clientDto.ClientName))
-        {
-            applicationClient.ClientName = clientDto.ClientName;
-        }
-
-        if (!string.IsNullOrEmpty(clientDto.ClientUri))
-        {
-            applicationClient.ClientUri = clientDto.ClientUri;
-        }
-
-        if (clientDto.AllowedGrantTypes != null)
-        {
-            applicationClient.AllowedGrantTypes = new AttributeStringValueList(
-                clientDto.AllowedGrantTypes?.ToList() ?? new List<string>());
-        }
-
-        if (clientDto.RedirectUris != null)
-        {
-            applicationClient.RedirectUris = WrapAsApiSourcedUris(clientDto.RedirectUris);
-        }
-
-        if (clientDto.PostLogoutRedirectUris != null)
-        {
-            applicationClient.PostLogoutRedirectUris = WrapAsApiSourcedUris(clientDto.PostLogoutRedirectUris);
-        }
-
-        if (clientDto.AllowedCorsOrigins != null)
-        {
-            applicationClient.AllowedCorsOrigins = WrapAsApiSourcedUris(clientDto.AllowedCorsOrigins);
-        }
-
-        if (clientDto.AllowedScopes != null)
-        {
-            applicationClient.AllowedScopes = new AttributeStringValueList(
-                CommonConstants.OctoDefaultScopes.Concat(clientDto.AllowedScopes).Distinct().ToList());
-        }
-        else
-        {
-            applicationClient.AllowedScopes = new AttributeStringValueList(CommonConstants.OctoDefaultScopes.ToList());
-        }
-
-        if (clientDto.IsOfflineAccessEnabled.HasValue)
-        {
-            applicationClient.AllowOfflineAccess = clientDto.IsOfflineAccessEnabled.Value;
-        }
-
-        if (clientDto.RequireClientSecret.HasValue)
-        {
-            applicationClient.RequireClientSecret = clientDto.RequireClientSecret.Value;
-        }
-
-        if (!string.IsNullOrWhiteSpace(clientDto.ClientSecret))
-        {
-            applicationClient.ClientSecrets = new AttributeRecordValueList<RtSecretRecord>
-            {
-                new() { Value = OctoSecretHasher.HashSecret(clientDto.ClientSecret) }
-            };
-        }
-
-        // Single Logout (SLO) fields
-        if (!string.IsNullOrEmpty(clientDto.FrontChannelLogoutUri))
-        {
-            applicationClient.FrontChannelLogoutUri = clientDto.FrontChannelLogoutUri;
-        }
-
-        if (clientDto.FrontChannelLogoutSessionRequired.HasValue)
-        {
-            applicationClient.FrontChannelLogoutSessionRequired = clientDto.FrontChannelLogoutSessionRequired.Value;
-        }
-
-        if (!string.IsNullOrEmpty(clientDto.BackChannelLogoutUri))
-        {
-            applicationClient.BackChannelLogoutUri = clientDto.BackChannelLogoutUri;
-        }
-
-        if (clientDto.BackChannelLogoutSessionRequired.HasValue)
-        {
-            applicationClient.BackChannelLogoutSessionRequired = clientDto.BackChannelLogoutSessionRequired.Value;
-        }
-
-        // Phase 1 multi-tenant client credentials (#4042–#4047). When the caller sets
-        // AutoProvisionInChildTenants on POST or PUT, it lands on the RtClient.
-        // ClientStore.UpdateAsync's post-commit hook (#4044) then fans out to mirrors.
-        // For initial CREATE the flag is recorded but no backfill happens until the
-        // operator triggers provisionInExistingTenants or a new tenant is created —
-        // matches the PATCH behaviour for symmetry.
-        if (clientDto.AutoProvisionInChildTenants.HasValue)
-        {
-            applicationClient.AutoProvisionInChildTenants = clientDto.AutoProvisionInChildTenants.Value;
-        }
-
-        // DynamicRegistration / DynamicRegistrationExpiresAt are deliberately NOT applied
-        // (same read-only contract as ProvisionedByParentTenantId). They are owned by
-        // DynamicClientRegistrationService and the TTL sweep; accepting them here would let a
-        // caller flip an ordinary client into the DCR lifecycle (early TTL erasure) or pin a
-        // dynamic client past its TTL — both bypass the RFC 7591 hard gate (AB#4338).
-    }
+    /// <summary>The change a REST body describes, as the client create and update methods take it.</summary>
+    private static ClientChange ChangeOf(ClientDto dto) => new(dto.ClientId, dto.IsEnabled, dto.ClientName,
+        dto.ClientUri, dto.AllowedGrantTypes?.ToList(), dto.RedirectUris?.ToList(), dto.PostLogoutRedirectUris?.ToList(),
+        dto.AllowedCorsOrigins?.ToList(), dto.AllowedScopes?.ToList(), dto.IsOfflineAccessEnabled,
+        dto.RequireClientSecret, dto.ClientSecret, dto.FrontChannelLogoutUri, dto.FrontChannelLogoutSessionRequired,
+        dto.BackChannelLogoutUri, dto.BackChannelLogoutSessionRequired, dto.AutoProvisionInChildTenants);
 
     /// <summary>
-    ///     Wraps a caller-supplied list of URI strings as <see cref="ClientUriEntry"/> records with
-    ///     <c>Source = <see cref="ClientUriSources.Api"/></c> — the cleanup gate then preserves
-    ///     these entries across blueprint re-applies (an operator who added a URI through the API
-    ///     meant it to be persistent; see concept §4.5).
+    ///     The answers of a refused client write: an unexpected failure is 400 with a fixed message (the exception text is
+    ///     no longer returned), a refused secret write 403 as the REST secret policy answers it.
     /// </summary>
-    private static AttributeRecordValueList<RtClientUriEntryRecord> WrapAsApiSourcedUris(IEnumerable<string>? uris)
-    {
-        var list = new AttributeRecordValueList<RtClientUriEntryRecord>();
-        if (uris == null)
-        {
-            return list;
-        }
-
-        foreach (var uri in uris)
-        {
-            list.Add(new RtClientUriEntryRecord { Uri = uri, Source = ClientUriSources.Api });
-        }
-
-        return list;
-    }
+    private CkMethodFacadeOptions ClientWriteFailures(string operation) => new CkMethodFacadeOptions()
+        .MapError(CkMethodErrorCodes.MethodHandlerFailed, _ => BadRequest(new InternalServerErrorDto(operation)))
+        .MapError(CkMethodErrorCodes.MethodValidationFailed, _ => BadRequest(ModelState));
 }

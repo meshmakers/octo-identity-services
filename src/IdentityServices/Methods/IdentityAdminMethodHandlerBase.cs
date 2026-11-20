@@ -62,6 +62,13 @@ internal sealed class IdentityMethodCall(IServiceProvider services, CkMethodPrin
     /// <summary>Non-secret facts of the call for the <c>Identity.Method</c> event (identifiers, role names, reason).</summary>
     public Dictionary<string, string> Details { get; } = new(StringComparer.Ordinal);
 
+    /// <summary>
+    ///     The CK type id the request names (<see cref="CkMethodRequest.CkTypeId" />: the mutation the method was called on, or
+    ///     the type a REST facade passes). Set by the CRUD handler bases; a handler of a method inherited by several concrete
+    ///     types (the identity provider methods, System.Identity 3.8.0) reads the concrete type from it and validates it.
+    /// </summary>
+    public string? RequestedCkTypeId { get; init; }
+
     /// <summary>Records the refusal of the role change guard and returns the <c>METHOD_FORBIDDEN</c> answer.</summary>
     public CkMethodOutcome Refuse(RoleChangeDecision decision)
     {
@@ -169,7 +176,9 @@ internal abstract class IdentityAdminMethodHandlerBase<TParameters>(IServiceProv
         CancellationToken cancellationToken)
     {
         var principal = context.CallerPrincipal;
-        var call = principal == null ? null : new IdentityMethodCall(services, principal);
+        var call = principal == null
+            ? null
+            : new IdentityMethodCall(services, principal) { RequestedCkTypeId = context.Request.CkTypeId };
         CkMethodOutcome outcome;
         try
         {
@@ -197,6 +206,14 @@ internal abstract class IdentityAdminMethodHandlerBase<TParameters>(IServiceProv
     protected abstract Task<CkMethodOutcome> ApplyAsync(IdentityMethodCall call, OctoObjectId targetRtId,
         TParameters parameters, CancellationToken cancellationToken);
 
+    /// <summary>
+    ///     The target entity whose data permission the caller needs. Default: the declaring CK type of the method id
+    ///     (<see cref="IdentityMethodCall.TargetOf" />). A method inherited by several concrete types answers the concrete type
+    ///     of the call; <c>null</c> is <c>METHOD_TARGET_NOT_FOUND</c> (the type of the call has no such target).
+    /// </summary>
+    protected virtual RtEntityId? TargetEntityOf(IdentityMethodCall call, string methodId, OctoObjectId targetRtId) =>
+        IdentityMethodCall.TargetOf(methodId, targetRtId);
+
     private async Task<CkMethodOutcome> RunAsync(CkMethodContext<TParameters> context, IdentityMethodCall? call,
         CancellationToken cancellationToken)
     {
@@ -221,7 +238,12 @@ internal abstract class IdentityAdminMethodHandlerBase<TParameters>(IServiceProv
         // checks the declared dataAccess before dispatch; a REST facade calls in-process, where only the handler can check
         // it. Same answers as the gateway: not readable = METHOD_TARGET_NOT_FOUND, read only = METHOD_FORBIDDEN
         // (reason data-permission).
-        if (await call.CheckTargetWritableAsync(IdentityMethodCall.TargetOf(context.MethodId, target), cancellationToken)
+        if (TargetEntityOf(call, context.MethodId, target) is not { } targetEntity)
+        {
+            return CkMethodOutcome.TargetNotFound();
+        }
+
+        if (await call.CheckTargetWritableAsync(targetEntity, cancellationToken)
                 .ConfigureAwait(false) is { } denied)
         {
             return denied;

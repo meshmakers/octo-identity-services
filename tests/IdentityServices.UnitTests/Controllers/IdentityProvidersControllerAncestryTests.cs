@@ -40,9 +40,21 @@ public sealed class IdentityProvidersControllerAncestryTests : IDisposable
         _services = services.BuildServiceProvider();
 
         _store.TenantId.Returns(TenantId);
+        // create and replace are facades of the IdentityProvider methods; the parent rule runs in the handler.
         _sut = new IdentityProvidersController(_store,
             new IdentityProviderDtoMapper(_services.GetRequiredService<IIdentityProviderSecretReader>()),
-            Substitute.For<IDistributionEventHubService>(), _guard);
+            new HandlerBackedMethodFacade(identityProviderStore: _store, ancestryGuard: _guard))
+        {
+            // The facade passes the caller and the request's cancellation token to the method.
+            ControllerContext = new Microsoft.AspNetCore.Mvc.ControllerContext
+            {
+                HttpContext = new Microsoft.AspNetCore.Http.DefaultHttpContext
+                {
+                    User = new System.Security.Claims.ClaimsPrincipal(new System.Security.Claims.ClaimsIdentity(
+                        [new System.Security.Claims.Claim("sub", "admin-1")], "test"))
+                }
+            }
+        };
     }
 
     public void Dispose() => _services.Dispose();
@@ -67,8 +79,11 @@ public sealed class IdentityProvidersControllerAncestryTests : IDisposable
     public async Task Replace_ParentNotConfirmedByTheRegistry_Is400WithProblemCode_AndStoresNothing()
     {
         _guard.IsTrustedAncestorAsync(TenantId, "stranger", Arg.Any<string>()).Returns(false);
+        var rtId = OctoObjectId.GenerateNewId();
+        _store.GetByIdAsync(rtId).Returns(new RtOctoTenantIdentityProvider
+            { RtId = rtId, Name = "ParentTenant_parent", IsEnabled = true, ParentTenantId = "parent" });
 
-        var result = await _sut.ReplaceProviderAsync(OctoObjectId.GenerateNewId(), OctoTenantProvider("stranger"));
+        var result = await _sut.ReplaceProviderAsync(rtId, OctoTenantProvider("stranger"));
 
         AssertNotAncestorProblem(result.Result, "stranger");
         await _store.DidNotReceiveWithAnyArgs().StoreAsync(default!);
@@ -96,7 +111,7 @@ public sealed class IdentityProvidersControllerAncestryTests : IDisposable
     public async Task Replace_ChangedParentOrReEnabling_IsStillChecked(string parentTenantId, bool isEnabled)
     {
         var rtId = OctoObjectId.GenerateNewId();
-        _store.GetByIdAsync(rtId).Returns(new RtOctoTenantIdentityProvider { RtId = rtId, ParentTenantId = "stranger" });
+        _store.GetByIdAsync(rtId).Returns(new RtOctoTenantIdentityProvider { RtId = rtId, Name = "ParentTenant_stranger", ParentTenantId = "stranger" });
         _guard.IsTrustedAncestorAsync(TenantId, parentTenantId, Arg.Any<string>()).Returns(false);
         var dto = OctoTenantProvider(parentTenantId);
         dto.IsEnabled = isEnabled;

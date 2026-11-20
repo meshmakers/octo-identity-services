@@ -75,6 +75,9 @@ internal sealed class IdentityMethodFacade(
     /// <summary>CK type id of the cross-tenant user mapping (the declaring type of the static admin provisioning methods).</summary>
     public const string ExternalTenantUserMappingCkTypeId = "System.Identity/ExternalTenantUserMapping";
 
+    /// <summary>CK type id of the e-mail domain group rule (the declaring type of the <c>EmailDomainGroupRule.*</c> methods).</summary>
+    public const string EmailDomainGroupRuleCkTypeId = "System.Identity/EmailDomainGroupRule";
+
     public Task<CkMethodResponse> InvokeAsync<TParameters>(string ckTypeId, string methodId, string? targetRtId,
         TParameters parameters, ClaimsPrincipal user, CancellationToken cancellationToken) where TParameters : class =>
         DispatchAsync(ckTypeId, methodId, targetRtId, parameters, CkMethodPrincipal.FromClaimsPrincipal(user),

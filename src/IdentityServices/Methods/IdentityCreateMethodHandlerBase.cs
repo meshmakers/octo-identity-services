@@ -21,11 +21,20 @@ internal abstract class IdentityCreateMethodHandlerBase<TParameters, TResult>(IS
     /// <summary>The declaring CK type of the method (the type whose <c>Write</c> permission the caller needs).</summary>
     protected abstract RtCkId<CkTypeId> DeclaringType { get; }
 
+    /// <summary>
+    ///     The CK type the caller must be allowed to write for this call. Default: <see cref="DeclaringType" />. A static method
+    ///     inherited by several concrete types answers the concrete type of the call (<see cref="IdentityMethodCall.RequestedCkTypeId" />);
+    ///     <c>null</c> refuses the call with <c>METHOD_VALIDATION_FAILED</c> on <c>ckTypeId</c> (no type this method creates).
+    /// </summary>
+    protected virtual RtCkId<CkTypeId>? WrittenTypeOf(IdentityMethodCall call) => DeclaringType;
+
     public async Task<CkMethodOutcome<TResult>> HandleAsync(CkMethodContext<TParameters> context,
         CancellationToken cancellationToken)
     {
         var principal = context.CallerPrincipal;
-        var call = principal == null ? null : new IdentityMethodCall(services, principal);
+        var call = principal == null
+            ? null
+            : new IdentityMethodCall(services, principal) { RequestedCkTypeId = context.Request.CkTypeId };
         string? createdRtId = null;
         var outcomeCode = CkMethodErrorCodes.MethodHandlerFailed;
         try
@@ -72,7 +81,12 @@ internal abstract class IdentityCreateMethodHandlerBase<TParameters, TResult>(IS
             return CkMethodOutcome<TResult>.TargetNotFound();
         }
 
-        if (await call.CheckTypeWritableAsync(DeclaringType, cancellationToken).ConfigureAwait(false) is { } denied)
+        if (WrittenTypeOf(call) is not { } writtenType)
+        {
+            return CkMethodOutcome<TResult>.ValidationFailed("ckTypeId", "not-supported");
+        }
+
+        if (await call.CheckTypeWritableAsync(writtenType, cancellationToken).ConfigureAwait(false) is { } denied)
         {
             return CkMethodOutcome<TResult>.Fail(denied);
         }

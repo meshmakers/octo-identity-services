@@ -360,3 +360,39 @@ Derived fields (`NormalizedName`, `NormalizedGroupName`) are set by the handlers
 secret methods and survive an update. The scope and resource methods publish `CorsClientsUpdate` after every write. No method carries a secret, so all
 are bus handlers whatever `EnablePasswordMethods` says. REST facades and parity table: `docs/identity-rest-facades.md`. Tests:
 `Api/TenantApi/IdentityCrudRestMethodFacadeTests`.
+
+## Create, update and delete of identity providers, e-mail rules, data permissions, clients and mappings (System.Identity 3.8.0)
+
+Handlers in `Methods/IdentityProviderCrudHandlers.cs`, `EmailDomainGroupRuleCrudHandlers.cs`, `MappingCrudHandlers.cs`,
+`DataPermissionCrudHandlers.cs` and `ClientCrudHandlers.cs`. Static creates derive from `IdentityCreateMethodHandlerBase`, update and delete from
+`IdentityAdminMethodHandlerBase`; `DataPermission.CreatePolicy` (an instance method with a result) runs the same steps itself.
+
+| Method | Parameters | Result | Errors | Roles |
+|---|---|---|---|---|
+| static `IdentityProvider.CreateIdentityProvider` / `IdentityProvider.UpdateIdentityProvider` | `name`; optional `enabled` (omitted false), `description`, `allowSelfRegistration` (omitted: true on create, the stored value on update), `defaultGroupRtId`, `clientId`, `clientSecret` (sensitive), `tenantId`, `authority`, `host`, `port`, `useTls`, `userBaseDn`, `userNameAttribute`, `parentTenantId` | create: rtId | `IDENTITY_PROVIDER_ALREADY_EXISTS`, `PARENT_TENANT_NOT_ANCESTOR`, `SECRET_ENCRYPTION_NOT_CONFIGURED` | `TenantManagement`, `UserManagement` |
+| `IdentityProvider.DeleteIdentityProvider` | - | - | - | `TenantManagement`, `UserManagement` |
+| static `EmailDomainGroupRule.CreateEmailDomainGroupRule` / `UpdateEmailDomainGroupRule` | `emailDomainPattern`, `targetGroupRtId`, optional `description` (omitted clears it) | create: rtId | `EMAIL_DOMAIN_GROUP_RULE_ALREADY_EXISTS` | `TenantManagement`, `UserManagement` |
+| `EmailDomainGroupRule.DeleteEmailDomainGroupRule` | - | - | - | `TenantManagement`, `UserManagement` |
+| `ExternalTenantUserMapping.UpdateMapping` | optional `roleIds` (omitted clears them) | - | guard `role-not-held`, `self-grant`, ... | `UserManagement` |
+| `ExternalTenantUserMapping.DeleteMapping` | - | - | guard | `UserManagement` |
+| static `DataPermission.CreateDataPermission` | `permissionId`, optional `description` | rtId | `DATA_PERMISSION_ALREADY_EXISTS` | `UserManagement` |
+| `DataPermission.DeleteDataPermission` | - (deletes the policies too; needs `Write` on each, else `METHOD_FORBIDDEN` and nothing is deleted) | - | - | `UserManagement` |
+| `DataPermission.CreatePolicy` | `targetCkTypeIds` (not empty), optional `actions`, `scope` (enum `DataPolicyScope`), `enforcementMode` (enum `DataPolicyEnforcementMode`) | policy rtId | - | `UserManagement` |
+| `DataPolicy.DeleteDataPolicy` | - | - | - | `UserManagement` |
+| static `Client.CreateClient` | `clientId`; optional `enabled`, `clientName`, `clientUri`, `allowedGrantTypes`, `redirectUris`, `postLogoutRedirectUris`, `allowedCorsOrigins`, `allowedScopes` (added to the octo defaults), `allowOfflineAccess`, `requireClientSecret`, `clientSecret` (sensitive), the four logout fields, `autoProvisionInChildTenants` | rtId | `CLIENT_ALREADY_EXISTS` | `TenantManagement`, `UserManagement` (+ `SecretManagement` for `clientSecret`) |
+| `Client.UpdateClient` | the same, all optional (omitted = unchanged; the REST facade passes an empty `allowedScopes` for a body without them, so REST still resets them to the octo defaults) | - | `CONCURRENT_CHANGE` | as create |
+| `Client.DeleteClient` | - | - | - | `TenantManagement`, `UserManagement` |
+
+- **Concrete provider type.** The provider methods are declared on the abstract `IdentityProvider`; the handlers read the concrete type from
+  `IdentityMethodCall.RequestedCkTypeId` (set by both handler bases from `CkMethodRequest.CkTypeId`) through
+  `IdentityProviderMethodSupport.ProviderTypeOf`, and check the data permission on that type
+  (`IdentityCreateMethodHandlerBase.WrittenTypeOf`, `IdentityAdminMethodHandlerBase.TargetEntityOf`). An update or delete on a provider of
+  another type is `METHOD_TARGET_NOT_FOUND`.
+- **Secret gate.** `CreateIdentityProvider`, `UpdateIdentityProvider`, `CreateClient` and `UpdateClient` carry a sensitive parameter
+  (`CarriesSecret`), so `IdentityMethodHost` offers them on the bus only with `Methods:Identity:EnablePasswordMethods`; their REST facades call
+  them local only while it is off. The client secret role check is `SecretOwnerMethodHandlerBase.DecideSecretCaller` (staged by
+  `SecretManagementRoleEnforcement`, WARN line under `Warn`).
+- **Audit details** (never a secret): `name`, `nameBefore`, `providerType`, `clientSecretSet`, `parentTenantId`, `emailDomainPattern`,
+  `targetGroupRtId`, `sourceTenantId`, `permissionId`, `targetCkTypeIds`, `enforcementMode`, `policyRtId`, `clientId`.
+
+REST facades and the parity table: `docs/identity-rest-facades.md`.

@@ -40,6 +40,26 @@ Notable changes of the OctoMesh identity services. The CK model `System.Identity
 
 ### Changed
 
+- **Create, update and delete of identity providers, e-mail domain group rules, data permissions and policies and clients, and the update
+  and delete of external tenant user mappings, run CK methods (System.Identity 3.8.0).** The REST write endpoints of
+  `IdentityProvidersController`, `EmailDomainGroupRulesController`, `DataPermissionsController` (create, delete, policy create and delete),
+  `ClientsController` (create, update, delete) and `ExternalTenantUserMappingsController` (update, delete) are facades of the new
+  `IdentityProvider.CreateIdentityProvider/UpdateIdentityProvider/DeleteIdentityProvider` (declared on the abstract base, inherited by the seven
+  provider types; the concrete type of the call is the provider type), `EmailDomainGroupRule.CreateEmailDomainGroupRule/Update.../Delete...`,
+  `DataPermission.CreateDataPermission/DeleteDataPermission/CreatePolicy`, `DataPolicy.DeleteDataPolicy`, `Client.CreateClient/UpdateClient/
+  DeleteClient` and `ExternalTenantUserMapping.UpdateMapping/DeleteMapping` methods; generic writes of these types are refused since 3.6.0, so the
+  methods are the GraphQL path. Secrets stay write-only: the `clientSecret` parameters are `sensitive` (never logged, never in a result or an
+  audit event), the provider secret is stored encrypted, the client secret as a hash; the provider and client create/update are gated like the
+  other secret methods (`Methods:Identity:EnablePasswordMethods`, local only for their REST facade while it is off). `Client.CreateClient` sets
+  the protocol defaults of a new client on the server. Roles equal the REST policies; a client secret still needs `SecretManagement`. Intended
+  REST changes (parity table in `docs/identity-rest-facades.md`): an unknown id on update or delete is `404` (provider and rule update inserted
+  before, deletes answered `200`); a duplicate data permission is `409` and an unknown permission or policy `404` (both were unhandled `500`); a
+  provider update on another provider type is `404`; an unexpected client write failure carries a fixed message instead of the exception text.
+  `DataPermission.DeleteDataPermission` also deletes the bound policies, so it needs the write permission on each of them (as `CreatePolicy`
+  needs it on `DataPolicy`): one the caller may not write or see refuses the whole delete with `METHOD_FORBIDDEN` (`data-permission`, REST
+  `403`) and nothing is deleted. `IdentityProvider.UpdateIdentityProvider` without `allowSelfRegistration` keeps the stored value (a create
+  without it still defaults to true, as the REST DTO).
+
 - **Create, update and delete of roles, groups, API scopes and API resources run CK methods (System.Identity 3.7.0).** The REST write endpoints of
   `RolesController`, `GroupsController` (create, update, delete), `ApiScopesController` and `ApiResourcesController` are facades of the new
   `Role.CreateRole/UpdateRole/DeleteRole`, `Group.CreateGroup/UpdateGroup/DeleteGroup`, `ApiScope.CreateApiScope/UpdateApiScope/DeleteApiScope` and

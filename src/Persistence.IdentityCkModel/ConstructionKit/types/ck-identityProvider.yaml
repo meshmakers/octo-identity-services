@@ -23,3 +23,69 @@ types:
       - id: ${this}/DefaultGroupRtId
         name: DefaultGroupRtId
         isOptional: true
+    # 3.8.0: create, replace and delete run as methods (REST parity: IdentityProvidersController POST/PUT/DELETE,
+    # IdentityTenantAdministrationWritePolicy = TenantManagement or UserManagement). The type is abstract, so it has no mutation
+    # field of its own: every concrete provider type inherits the methods, and the concrete type of the call (the mutation the
+    # method is called on, CkMethodRequest.CkTypeId) is the type that is created or replaced. One parameter list for all
+    # provider types; a parameter the type does not have is ignored, a required one that is missing is METHOD_VALIDATION_FAILED.
+    # The client secret is write-only (`sensitive`, stored as the encrypted Secret value, never in a result).
+    # Generic writes are refused since 3.6.0 (writeAccess); no replacesGenericCreate (not allowed on an abstract type, error 133).
+    methods:
+      - methodId: CreateIdentityProvider-1
+        kind: Static
+        description: "Creates an identity provider of the concrete type the method is called on. The result is the rtId of the new provider; the client secret is never returned."
+        parameters:
+          - { name: name, valueType: String, description: "Unique provider name: ASCII letters, digits, '.', '_' and '-'; not 'xt' or 'xt_...'." }
+          - { name: enabled, valueType: Boolean, isOptional: true, description: "Omitted is false, as in the REST body." }
+          - { name: description, valueType: String, isOptional: true }
+          - { name: allowSelfRegistration, valueType: Boolean, isOptional: true, description: "Omitted is true, as in the REST body." }
+          - { name: defaultGroupRtId, valueType: String, isOptional: true, description: "Group a self-registered user joins." }
+          - { name: clientId, valueType: String, isOptional: true, description: "Google, Microsoft, Facebook, AzureEntraId: required." }
+          - { name: clientSecret, valueType: String, isOptional: true, sensitive: true, description: "Google, Microsoft, Facebook, AzureEntraId: required on create. Write-only." }
+          - { name: tenantId, valueType: String, isOptional: true, description: "AzureEntraId: the Entra tenant id (required)." }
+          - { name: authority, valueType: String, isOptional: true, description: "AzureEntraId: optional authority." }
+          - { name: host, valueType: String, isOptional: true, description: "MicrosoftAd, OpenLdap: required." }
+          - { name: port, valueType: Int, isOptional: true, description: "MicrosoftAd, OpenLdap: 1-65535, omitted is 636." }
+          - { name: useTls, valueType: Boolean, isOptional: true, description: "MicrosoftAd (omitted false), OpenLdap (omitted true)." }
+          - { name: userBaseDn, valueType: String, isOptional: true, description: "OpenLdap: required; MicrosoftAd: ignored, as in REST." }
+          - { name: userNameAttribute, valueType: String, isOptional: true, description: "OpenLdap: omitted is 'uid'." }
+          - { name: parentTenantId, valueType: String, isOptional: true, description: "OctoTenant: required, must be a trusted ancestor of this tenant." }
+        result:
+          valueType: String
+        errors:
+          - { code: IDENTITY_PROVIDER_ALREADY_EXISTS, description: "A provider with this name exists." }
+          - { code: PARENT_TENANT_NOT_ANCESTOR, description: "OctoTenant: the parent tenant is not a trusted ancestor of this tenant." }
+          - { code: SECRET_ENCRYPTION_NOT_CONFIGURED, description: "No secret encryption key ring is configured; the client secret cannot be stored." }
+        authorization:
+          roles: [ TenantManagement, UserManagement ]
+          dataAccess: Write
+      - methodId: UpdateIdentityProvider-1
+        description: "Replaces the provider with the given configuration (same parameters as the create). An omitted or empty client secret keeps the stored one. Called on another concrete type than the provider's, the target is not found."
+        parameters:
+          - { name: name, valueType: String, description: "Unique provider name (same rule as on create)." }
+          - { name: enabled, valueType: Boolean, isOptional: true, description: "Omitted is false, as in the REST body." }
+          - { name: description, valueType: String, isOptional: true }
+          - { name: allowSelfRegistration, valueType: Boolean, isOptional: true, description: "Omitted is true, as in the REST body." }
+          - { name: defaultGroupRtId, valueType: String, isOptional: true }
+          - { name: clientId, valueType: String, isOptional: true }
+          - { name: clientSecret, valueType: String, isOptional: true, sensitive: true, description: "Omitted or empty keeps the stored secret. Write-only." }
+          - { name: tenantId, valueType: String, isOptional: true }
+          - { name: authority, valueType: String, isOptional: true }
+          - { name: host, valueType: String, isOptional: true }
+          - { name: port, valueType: Int, isOptional: true }
+          - { name: useTls, valueType: Boolean, isOptional: true }
+          - { name: userBaseDn, valueType: String, isOptional: true }
+          - { name: userNameAttribute, valueType: String, isOptional: true }
+          - { name: parentTenantId, valueType: String, isOptional: true }
+        errors:
+          - { code: IDENTITY_PROVIDER_ALREADY_EXISTS, description: "Another provider has this name." }
+          - { code: PARENT_TENANT_NOT_ANCESTOR, description: "OctoTenant: the parent tenant is not a trusted ancestor of this tenant." }
+          - { code: SECRET_ENCRYPTION_NOT_CONFIGURED, description: "No secret encryption key ring is configured; the client secret cannot be stored." }
+        authorization:
+          roles: [ TenantManagement, UserManagement ]
+          dataAccess: Write
+      - methodId: DeleteIdentityProvider-1
+        description: "Deletes the provider."
+        authorization:
+          roles: [ TenantManagement, UserManagement ]
+          dataAccess: Write
