@@ -166,6 +166,14 @@ Notable changes of the OctoMesh identity services. The CK model `System.Identity
 
 ### Fixed
 
+- **The identity provider methods work through the GraphQL gateway.** `IdentityProvider.CreateIdentityProvider`,
+  `UpdateIdentityProvider` and `DeleteIdentityProvider` answered `METHOD_VALIDATION_FAILED` (`ckTypeId`, `not-supported`) or
+  `METHOD_TARGET_NOT_FOUND` for every call through the GraphQL gateway (octo-cli, MCP service): the gateway sends the CK type id of the
+  concrete type with its element version (`System.Identity/OpenLdapIdentityProvider-1`), the handlers knew only the version-less form of
+  the REST facades. `IdentityProviderMethodSupport.ProviderTypeOf` now matches the version-less id and ignores an element version of any
+  number (a tenant may hold a newer System.Identity than the service embeds), as it already ignored a model version. Tests call the methods
+  with the gateway's form for an OpenID Connect (Azure Entra ID) and an LDAP provider and compare the result with the REST facade.
+
 - **Sign-in and token refresh work with several identity replicas and across restarts (AB#7892).** Authorization codes,
   refresh tokens and PAR `request_uri`s were mapped to their tenant in a static in-process dictionary. With two replicas
   (test-2, AB#8402) the token request of an app whose OIDC client lives in a sub-tenant (Energy Community) often hit the
