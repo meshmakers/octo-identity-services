@@ -149,7 +149,7 @@ internal static class SharedMongoDbContainer
 
                 if (options.MongoDbRelaxedDurability)
                 {
-                    // AB#9375: no journal fsync wait on majority commits (throw-away data, CI only).
+                    // No journal flush wait on majority commits (throw-away data, CI only).
                     await MongoTestContainerTuning.RelaxMajorityJournalDurabilityAsync(
                         host, options.AdminUser, options.AdminUserPassword);
                     Console.WriteLine("[Testcontainers] writeConcernMajorityJournalDefault = false");

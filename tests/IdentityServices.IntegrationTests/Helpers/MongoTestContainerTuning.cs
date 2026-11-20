@@ -37,14 +37,35 @@ public static class MongoTestContainerTuning
 
     /// <summary>
     ///     Sets <c>writeConcernMajorityJournalDefault: false</c> in the replica-set configuration of the one-node
-    ///     test replica set (AB#9375), so a majority-acknowledged write (every transaction commit of the tenant
+    ///     test replica set, so a majority-acknowledged write (every transaction commit of the tenant
     ///     setup) no longer waits for the journal to be flushed to disk. Test data only: a crash may lose the
     ///     last moments of writes. Call directly after <c>StartAsync</c>, before the first tenant is provisioned.
     /// </summary>
     public static async Task RelaxMajorityJournalDurabilityAsync(
         string databaseHost, string adminUser, string adminUserPassword)
     {
-        var admin = CreateAdminClient(databaseHost, adminUser, adminUserPassword).GetDatabase("admin");
+        using var client = CreateAdminClient(databaseHost, adminUser, adminUserPassword);
+        var admin = client.GetDatabase("admin");
+
+        // The reconfig needs a writable primary; the container may report ready a moment before the one node has
+        // won its election.
+        var deadline = DateTime.UtcNow.AddSeconds(30);
+        while (true)
+        {
+            var hello = await admin.RunCommandAsync<BsonDocument>(
+                new BsonDocumentCommand<BsonDocument>(new BsonDocument("hello", 1)));
+            if (hello.GetValue("isWritablePrimary", false).ToBoolean())
+            {
+                break;
+            }
+
+            if (DateTime.UtcNow > deadline)
+            {
+                throw new TimeoutException("The test MongoDB did not become a writable primary within 30 s.");
+            }
+
+            await Task.Delay(TimeSpan.FromMilliseconds(500));
+        }
 
         var current = await admin.RunCommandAsync<BsonDocument>(
             new BsonDocumentCommand<BsonDocument>(new BsonDocument("replSetGetConfig", 1)));
@@ -63,7 +84,7 @@ public static class MongoTestContainerTuning
     public static async Task RaiseTransactionLifetimeLimitAsync(
         string databaseHost, string adminUser, string adminUserPassword)
     {
-        var adminClient = CreateAdminClient(databaseHost, adminUser, adminUserPassword);
+        using var adminClient = CreateAdminClient(databaseHost, adminUser, adminUserPassword);
         var command = new BsonDocument
         {
             { "setParameter", 1 },

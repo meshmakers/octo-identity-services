@@ -226,7 +226,7 @@ stages:
               DOCKER_HOST: unix:///var/run/docker.sock
               TESTCONTAINERS_RYUK_DISABLED: 'true'
               TESTCONTAINERS_HOST_OVERRIDE: '172.17.0.1'
-              # AB#9375: the test MongoDB acknowledges majority writes without waiting for the journal flush
+              # The test MongoDB acknowledges majority writes without waiting for the journal flush
               # (writeConcernMajorityJournalDefault=false, see IntegrationTestOptions.MongoDbRelaxedDurability).
               # The parallel tenant setups' commits took 78-158 s on the nested Docker storage (runs 103524,
               # 106127) and cancelled the setup. Throw-away data only; local runs leave this unset.

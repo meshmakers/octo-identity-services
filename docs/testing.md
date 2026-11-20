@@ -213,11 +213,14 @@ cancellation token fired (`OperationCanceledException` in the tenant-setup CK im
 - **Switch.** `integrationTest:mongoDbRelaxedDurability` (default `false`) makes `SharedMongoDbContainer` set
   `writeConcernMajorityJournalDefault: false` in the replica-set configuration of the one-node test replica set
   (`replSetReconfig`), so a majority-acknowledged write - every transaction commit of the tenant setup - no longer waits for the
-  journal flush. Neither the tests nor `octo-construction-kit-engine-mongodb` set an explicit write concern (`j: true` or `w`), so the
-  default (majority) applies. The pipeline turns it on for the Test step only, through the environment variable
+  journal flush. The repository clients of `octo-construction-kit-engine-mongodb` write with `w: majority` and a `wtimeout` of 30 s and
+  set no `j`, so the replica-set default decides whether the journal is awaited. The pipeline turns it on for the Test step only, through the environment variable
   `OCTO_IT_integrationTest__MongoDbRelaxedDurability=true` (the test configuration reads environment variables with the prefix
   `OCTO_IT_`). A local run does not set it and behaves as before. The data is throw-away; a crash may lose the last moments of
   writes. The checkpoint interval (`--syncdelay`) and `--journalCommitInterval` are not changed.
+- **A hypothesis, measured in CI.** A majority wait with `wtimeout` 30 s cannot by itself take 78-158 s, so the long commits may
+  also spend their time in storage I/O or checkpoints that this switch does not touch. Whether the switch helps is judged on the Test
+  step duration and the Mongo peak line of runs with and without it; if it does not, the next step is a lower `maxParallelThreads` in CI.
 - **Why not tmpfs.** A tmpfs data directory was tried and measured: the data directory of the suite grew to 2.6 GB after 13.5 min
   (every test tenant keeps its databases until the process ends) and filled a 3 GiB tmpfs (WiredTiger error 14031). The test Mongo of
   a CI job runs in the node-wide `/docker` memory cgroup, so a few GB per job times 8 agents would add to its memory pressure.

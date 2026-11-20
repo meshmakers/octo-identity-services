@@ -75,7 +75,7 @@ case "$MODE" in
         if [ -n "$cid" ]; then
           ts="$(date -u +%H:%M:%S)"
           sample_once "$cid" | sed "s/^/$ts /" >> "$DIR/samples.log"
-          # Size of the data directory (AB#9375: shows how much test data the suite accumulates). One number, no content.
+          # Size of the data directory (shows how much test data the suite accumulates). One number, no content.
           mb="$($TIMEOUT_CMD docker exec "$cid" sh -c 'du -sm /data/db 2>/dev/null | cut -f1' 2>/dev/null | head -n 1)"
           case "$mb" in ''|*[!0-9]*) ;; *) echo "$ts {\"dataDirMB\":$mb}" >> "$DIR/samples.log" ;; esac
         fi
@@ -91,7 +91,7 @@ case "$MODE" in
     touch "$DIR/stop" 2>/dev/null || true
     if [ "$STATUS" = "Succeeded" ] || [ "$STATUS" = "SucceededWithIssues" ]; then
       echo "Test step succeeded - no hang evidence needed."
-      # One line of numbers so that runs can be compared (AB#9375): peaks of the sampler's heartbeat values.
+      # One line of numbers so that runs can be compared : peaks of the sampler's heartbeat values.
       if [ -s "$DIR/samples.log" ]; then
         peak() { grep -o "\"$1\":[0-9]*" "$DIR/samples.log" | cut -d: -f2 | sort -n | tail -n 1; }
         echo "Mongo samples: $(grep -c '"activeOps"' "$DIR/samples.log") heartbeats, peak activeOps $(peak activeOps), peak notable $(peak notable), peak dataDirMB $(peak dataDirMB)"
@@ -100,7 +100,7 @@ case "$MODE" in
     fi
     echo "=== Mongo hang evidence (job status: ${STATUS:-unknown}) ==="
     echo "--- samples recorded while the tests ran (last 40 lines; UTC time, then a JSON line) ---"
-    if [ -s "$DIR/samples.log" ]; then tail -n 40 "$DIR/samples.log"; else echo "(no samples: container never seen or sampler did not run)"; fi
+    if [ -s "$DIR/samples.log" ]; then grep -v '"dataDirMB"' "$DIR/samples.log" | tail -n 40; else echo "(no samples: container never seen or sampler did not run)"; fi
     cid="$(find_container)"
     if [ -n "$cid" ]; then
       echo "--- fresh snapshot now ---"
