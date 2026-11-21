@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using IdentityServices.IntegrationTests.Configuration;
 using IdentityServices.IntegrationTests.Helpers;
+using MongoDB.Driver;
 using Testcontainers.MongoDb;
 using Xunit;
 
@@ -26,6 +27,7 @@ internal static class SharedMongoDbContainer
     private static readonly SemaphoreSlim Gate = new(1, 1);
     private static MongoDbContainer? _container;
     private static string? _host;
+    private static MongoClient? _adminClient;
 
     /// <summary>
     ///     Connection string of the already-started shared container. Only valid after a fixture has
@@ -65,6 +67,16 @@ internal static class SharedMongoDbContainer
     }
 
     /// <summary>
+    ///     One admin client of the test process for the test infrastructure itself (database cleanup of disposed
+    ///     fixtures, <see cref="FixtureDatabaseCleanup" />), or <c>null</c> before the container is started. Hosts and
+    ///     fixtures under test never use it; they build their own repository clients.
+    /// </summary>
+    public static IMongoClient? TryGetAdminClient()
+    {
+        return Volatile.Read(ref _adminClient);
+    }
+
+    /// <summary>
     ///     Stops and removes the shared container. Called once per test process by
     ///     <see cref="SharedMongoDbContainerDisposer" />; never by an individual fixture.
     /// </summary>
@@ -77,6 +89,9 @@ internal static class SharedMongoDbContainer
             {
                 return;
             }
+
+            await FixtureDatabaseCleanup.AbandonPendingDropsAsync();
+            Interlocked.Exchange(ref _adminClient, null)?.Dispose();
 
             try
             {
@@ -147,6 +162,8 @@ internal static class SharedMongoDbContainer
                 Console.WriteLine(
                     $"[Testcontainers] transactionLifetimeLimitSeconds = {MongoTestContainerTuning.TransactionLifetimeLimitSeconds}");
 
+                Volatile.Write(ref _adminClient,
+                    CreateAdminClient(host, options.AdminUser, options.AdminUserPassword));
                 _host = host;
 
                 var elapsed = DateTime.UtcNow - startTime;
@@ -180,6 +197,20 @@ internal static class SharedMongoDbContainer
 
         throw new UnreachableException(
             "The retry loop either returns a host or rethrows on the final attempt.");
+    }
+
+    private static MongoClient CreateAdminClient(string host, string adminUser, string adminUserPassword)
+    {
+        var urlBuilder = new MongoUrlBuilder
+        {
+            Server = MongoServerAddress.Parse(host),
+            Username = adminUser,
+            Password = adminUserPassword,
+            AuthenticationSource = "admin",
+            DirectConnection = true
+        };
+
+        return new MongoClient(urlBuilder.ToMongoUrl());
     }
 }
 

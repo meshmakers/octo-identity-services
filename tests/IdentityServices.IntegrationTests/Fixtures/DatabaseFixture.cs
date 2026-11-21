@@ -48,9 +48,19 @@ public class DatabaseFixture : ConfigurationFixture
 
     protected override Task DisposeServicesAsync()
     {
-        // Nothing to tear down here: the shared container outlives every individual fixture and is
-        // disposed once per test process by SharedMongoDbContainerDisposer. This fixture's database
-        // goes with it.
+        // The shared container outlives every individual fixture and is disposed once per test process by
+        // SharedMongoDbContainerDisposer. This fixture's databases are dropped once its provider is disposed
+        // (ReleaseAfterProviderDisposedAsync).
+        return Task.CompletedTask;
+    }
+
+    /// <summary>
+    ///     Drops this fixture's system database and every tenant database its registry names, so the shared server
+    ///     does not accumulate the databases of every finished test class (<see cref="FixtureDatabaseCleanup" />).
+    /// </summary>
+    protected override Task ReleaseAfterProviderDisposedAsync()
+    {
+        _ = FixtureDatabaseCleanup.ScheduleDropOfFixtureDatabases(SystemDatabaseName);
         return Task.CompletedTask;
     }
 

@@ -212,8 +212,11 @@ public class CustomWebApplicationFactory : WebApplicationFactory<Program>, IAsyn
     public new async ValueTask DisposeAsync()
     {
         // The shared MongoDB container outlives every factory instance and is disposed once per test
-        // process by SharedMongoDbContainerDisposer; this factory's database goes with it.
+        // process by SharedMongoDbContainerDisposer. This factory's databases (system database and every
+        // tenant database its registry names) are dropped once the host and its derived hosts are disposed,
+        // so the shared server does not accumulate the databases of every finished test class.
         await base.DisposeAsync();
+        _ = FixtureDatabaseCleanup.ScheduleDropOfFixtureDatabases(_systemDatabaseName);
     }
 
     /// <summary>
