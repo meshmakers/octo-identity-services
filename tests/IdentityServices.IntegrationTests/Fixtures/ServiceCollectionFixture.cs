@@ -96,6 +96,8 @@ public abstract class ServiceCollectionFixture : ITestOutputHelperAccessor, IAsy
         {
             await Provider.DisposeAsync();
         }
+
+        await ReleaseAfterProviderDisposedAsync();
     }
 
     public async ValueTask InitializeAsync()
@@ -117,6 +119,15 @@ public abstract class ServiceCollectionFixture : ITestOutputHelperAccessor, IAsy
     }
 
     protected abstract Task DisposeServicesAsync();
+
+    /// <summary>
+    ///     Runs after the service provider is disposed, when nothing of the fixture uses its resources any more (for
+    ///     example to drop the fixture's databases). Must not throw.
+    /// </summary>
+    protected virtual Task ReleaseAfterProviderDisposedAsync()
+    {
+        return Task.CompletedTask;
+    }
 
     public T GetService<T>() where T : notnull
     {

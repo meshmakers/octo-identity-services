@@ -97,8 +97,39 @@ engine-mongodb main incl. the disposal fix): live heap peak **8.6 GB → 3.3-3.5
 `RateLimiterReleaserTests` fails when a framework update changes the internal shape the walk relies on — fix the walk then, never
 delete the test. Rules: a `StopAsync` of a test-only hosted service must never throw (it aborts the factory's dispose and leaks the
 host); a new background timer or long-running loop in startup code needs a dispose path, or every test host keeps it.
-The shared MongoDB container still grows to ~10 GiB per run (outside the test process; a `--wiredTigerCacheSizeGB 1` cap did not
-change that and a 4 GiB container limit got mongod OOM-killed), which is tracked with the CI agent memory work.
+The shared MongoDB container used to grow to ~10 GiB per run (outside the test process); the cause was the databases of
+finished fixtures, which are now dropped (next section).
+
+## Disposed fixtures drop their databases
+
+Every class fixture creates a system database of its own (`DatabaseFixture` / `IdentityServicesFixture`,
+`CustomWebApplicationFactory`), and many tests create child tenants on top, each with a database of about 45 collections and
+their indexes. Nothing dropped them: all of them stayed in the one shared mongod until the container was removed at the end of
+the run. Measured locally (Mac mini, 1694 tests, DebugL): 469 databases, 21,447 collections, 95,783 open WiredTiger files and
+12.7 GB mongod resident memory after 14 minutes, 598 databases at the end. Every later tenant setup created its collections and
+indexes against that growing file set; on the CI agents the index builds (`UpdateIndexCoreAsync`) and majority commits of the
+late tenant setups stalled for minutes and tests ended with `OperationCanceledException` from the CK import.
+
+`Fixtures/FixtureDatabaseCleanup.cs` therefore drops, when a fixture is disposed, its system database and every database its
+tenant registry names (`RtEntity_SystemTenant` of the system database, which holds a row for every tenant, children of child
+tenants included):
+
+- **After the hosts.** `CustomWebApplicationFactory.DisposeAsync` schedules the drop after `base.DisposeAsync()` (which also
+  disposes the `WithWebHostBuilder` derivatives); `DatabaseFixture` after its service provider is disposed
+  (`ServiceCollectionFixture.ReleaseAfterProviderDisposedAsync`).
+- **In the background.** The dispose does not wait for the drop. A `dropDatabase` waits for the locks of transactions still
+  open on that database; one waited 304 s (the server's `transactionLifetimeLimitSeconds` of 300 s) in a local run. An awaited
+  drop held the test thread that long and made the run slower (21:56 min instead of 18:56 min).
+- **Bounded and quiet.** One fixture's cleanup gets 5 minutes; a failure is written to the console and leaves the databases to
+  the end of the run, as before. The drops still running when the shared container is disposed are abandoned (the container goes
+  away with them).
+- **Only its own databases.** Database names are unique per fixture (GUID suffix), so a drop never reaches a database of another
+  fixture. Never give a test tenant a fixed database name.
+
+Measured locally with the cleanup (same machine and suite, two runs): peak 79 and 85 databases instead of 598, all tests green,
+19:00 min (the local run was never I/O-bound, so its wall time stays the same; the CI agents are). `FixtureDatabaseCleanupTests`
+pins the behaviour on the server (`listDatabases`): a disposed identity fixture loses its system database, its test tenant and a
+tenant below the test tenant, a database of somebody else stays; a disposed web factory loses its system database.
 
 **A stale DebugL feed starves the suite on driver threads.** Every repository client of the runtime engine is a
 MongoDB driver cluster of its own (heartbeat, RTT monitor and pool maintenance thread each). Since the disposal fix

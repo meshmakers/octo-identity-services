@@ -166,6 +166,12 @@ Notable changes of the OctoMesh identity services. The CK model `System.Identity
 
 ### Fixed
 
+- **The integration test suite no longer fills its MongoDB with the databases of finished fixtures.** Every disposed class
+  fixture and web factory now drops its system database and the databases of every tenant it created, in the background
+  (`tests/IdentityServices.IntegrationTests/Fixtures/FixtureDatabaseCleanup.cs`). Before, all of them stayed in the shared test
+  container until the end of the run (598 databases, about 100,000 WiredTiger files and 12.7 GB mongod memory locally), and on
+  the CI agents the tenant setups of later tests stalled until they were cancelled. Test infrastructure only, no service change.
+  Details: `docs/testing.md`, "Disposed fixtures drop their databases".
 - **The identity provider methods work through the GraphQL gateway.** `IdentityProvider.CreateIdentityProvider`,
   `UpdateIdentityProvider` and `DeleteIdentityProvider` answered `METHOD_VALIDATION_FAILED` (`ckTypeId`, `not-supported`) or
   `METHOD_TARGET_NOT_FOUND` for every call through the GraphQL gateway (octo-cli, MCP service): the gateway sends the CK type id of the
