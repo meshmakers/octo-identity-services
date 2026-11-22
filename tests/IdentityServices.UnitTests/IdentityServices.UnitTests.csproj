@@ -24,7 +24,7 @@
         </PackageReference>
 
         <!-- In-memory ASP.NET Core pipeline (AB#4824 provisioning pipeline tests) -->
-        <PackageReference Include="Microsoft.AspNetCore.TestHost" Version="10.0.13" />
+        <PackageReference Include="Microsoft.AspNetCore.TestHost" Version="10.0.15" />
 
         <!-- Mocking -->
         <PackageReference Include="NSubstitute.Analyzers.CSharp" Version="1.0.17">
