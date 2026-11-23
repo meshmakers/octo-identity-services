@@ -9,7 +9,7 @@ background: true
 
 Octo Identity Services implements a dynamic authentication framework that supports multiple identity provider types. Providers can be configured at runtime through the database, enabling flexible authentication without code deployment.
 
-The OAuth2/OIDC protocol stack is **OpenIddict 7.6** (migrated from Duende IdentityServer). Endpoint paths, discovery, JWKS, and token/claims shapes are kept Duende-compatible; the remaining discovery-document differences are documented in [openiddict-discovery-diff.md](openiddict-discovery-diff.md). Cookie authentication uses the schemes defined in `OctoAuthSchemes` (`src/Authentication/`): `Identity.Application` (tenant-scoped) and `Identity.External`.
+The OAuth2/OIDC protocol stack is **OpenIddict 7.9** (migrated from Duende IdentityServer). Endpoint paths, discovery, JWKS, and token/claims shapes are kept Duende-compatible; the remaining discovery-document differences are documented in [openiddict-discovery-diff.md](openiddict-discovery-diff.md). Cookie authentication uses the schemes defined in `OctoAuthSchemes` (`src/Authentication/`): `Identity.Application` (tenant-scoped) and `Identity.External`.
 
 ## Supported Identity Providers
 
