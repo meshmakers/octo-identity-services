@@ -2,7 +2,7 @@ $schema: https://schemas.meshmakers.cloud/runtime-model.schema.json
 dependencies:
   - System.Identity-2.14.0
 
-# The three API scopes (660…14 – 660…16).
+# The API scopes: the three platform scopes (660…14 – 660…16) and the LLM gateway scope (660…17).
 # Part of the System.Identity.Bootstrap blueprint — see blueprint.yaml for the full file list.
 entities:
 
@@ -67,6 +67,39 @@ entities:
         value: []
       - id: System.Identity/ShowInDiscoveryDocument
         value: true
+      - id: System.Identity/IsRequired
+        value: false
+      - id: System.Identity/IsEmphasized
+        value: false
+
+  # ===========================================================================
+  # LLM GATEWAY SCOPE (660…17) — the AI service's central-key LLM
+  # gateway (POST /llm/anthropic/v1/messages, octo-ai-services
+  # docs/llm-gateway.md) requires it (LlmGatewayConstants.InvokeScope).
+  # Attached to octoAPI (api-resources.yaml), the audience the AI service
+  # validates. Machine-only: no client of this blueprint allows it, so no user
+  # login and no interactive client can obtain it. Only the clients that call
+  # the gateway hold it: the pipeline service accounts (`octo-pipeline-sa-*`,
+  # Communication Controller) and the AI service's client-credentials client
+  # (`octo-ai-adapter`). The scope alone opens nothing: the gateway also needs
+  # the tenant's KeySource=CentralKey, a monthly cap and the central key.
+  # Not advertised in the discovery document.
+  # ===========================================================================
+
+  - rtId: '660000000000000000000017'
+    ckTypeId: System.Identity/ApiScope
+    rtWellKnownName: ai.llm.invoke
+    attributes:
+      - id: System/Enabled
+        value: true
+      - id: System/Name
+        value: ai.llm.invoke
+      - id: System/DisplayName
+        value: Call the central-key LLM gateway of the AI service
+      - id: System.Identity/ResourceClaims
+        value: []
+      - id: System.Identity/ShowInDiscoveryDocument
+        value: false
       - id: System.Identity/IsRequired
         value: false
       - id: System.Identity/IsEmphasized
