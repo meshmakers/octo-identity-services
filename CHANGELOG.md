@@ -7,6 +7,13 @@ Notable changes of the OctoMesh identity services. The CK model `System.Identity
 
 ### Security
 
+- **New API scope `ai.llm.invoke` for the AI service's central-key LLM gateway (System.Identity.Bootstrap 1.10.0).** The
+  blueprint seeds the scope in the system tenant and every child tenant and attaches it to `octoAPI`, the audience the AI
+  service validates; existing tenants get it with the re-import the version bump triggers. No client of the blueprint
+  allows it, so neither a user login nor Refinery Studio, octo-cli, the swagger or the MCP clients can obtain it. The
+  pipeline service accounts (Communication Controller) and the AI service's client-credentials client grant it in their
+  own registration. The scope alone does not open the gateway: it also needs the central key, `KeySource=CentralKey` and a
+  cap for the tenant. Details: `docs/client-credentials.md`.
 - **Only the identity service writes identity data (System.Identity 3.6.0).** Every root type of the model declares
   `writeAccess: { channels: [ System.Identity/IdentityService ] }` (inherited by the resources and identity providers), and no service
   opens a session on that channel. Before, a caller with nothing but the `octo_api` scope could create, update or delete roles (a

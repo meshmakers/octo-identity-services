@@ -65,6 +65,40 @@ of failing the setup).
 
 See `docs/authentication.md` § Delegation / On-Behalf-Of.
 
+## The LLM gateway scope `ai.llm.invoke`
+
+The AI service's central-key LLM gateway (`POST /llm/anthropic/v1/messages`, documented in the octo-ai-services repository)
+accepts only tokens with the API scope `ai.llm.invoke` and a `tenant_id`. `System.Identity.Bootstrap` 1.10.0 seeds the
+scope (rtId `660…17`, enabled, not shown in the discovery document) in the system tenant and every child tenant and
+attaches it to the `octoAPI` resource, the audience the AI service validates. The `mcpApi` resource indicator does not
+carry it.
+
+| Who holds the scope | Where it is granted |
+|---|---|
+| Pipeline service accounts `octo-pipeline-sa-*` (the mesh adapter's token for LLM nodes) | Communication Controller, `AllowedScopes` of the client it sends over the bus |
+| `octo-ai-adapter`, the AI service's client-credentials client (system tenant) | AI service, `AllowedScopes` of the client it registers over the bus |
+| Every client of `System.Identity.Bootstrap` (`octo-data-refinery-studio`, `octo-cli`, the swagger clients, the MCP clients) | **Nobody** - so no user login and no interactive or device client can obtain it |
+
+OpenIddict enforces the client's `AllowedScopes` as scope permissions (`ClientPermissionsMapper`): a client without the
+scope that asks for it is refused (`invalid_request`, "not allowed to use the specified scope"), and a client with it
+gets it only when it asks for it. Whoever may administer clients of a tenant can create a client with this scope through
+the client API; the gateway charges the tenant named by the token's `tenant_id`. A client of the system tenant can be
+bound to other tenants (see "Multi-Tenant Client Credentials" below; `octo-ai-adapter` works that way), so granting the
+scope there is platform administration.
+
+The scope alone opens nothing. The gateway also needs, per environment and tenant, the central key, the tenant's
+`KeySource=CentralKey` and a monthly cap in its configuration; without them every call is refused.
+
+**Rollout order:** any. The bus consumer writes `AllowedScopes` verbatim and OpenIddict treats them as permission
+strings, so a Communication Controller or AI service that grants the scope before this blueprint version is applied only
+fails a request that asks for the missing scope (`invalid_scope`); its other scopes keep working.
+
+Tests: `AiLlmInvokeScopeSeedTests` (seed: scope, `octoAPI`, no blueprint client allows it, version bump),
+`AiLlmInvokeScopeTokenTests` (HTTP: client-credentials tokens of a pipeline service account and of `octo-ai-adapter`
+carry it with audience `octoAPI` and `tenant_id`; the seeded interactive and device clients are refused; a client
+granting a scope not registered yet keeps its other scopes), `BootstrapLlmInvokeScopeUpgradeIntegrationTests` (real
+MongoDB: upgrade from 1.9.0 adds the scope and attaches it to `octoAPI` only; a re-run is idempotent).
+
 ## Multi-Tenant Client Credentials (Auto-Provisioning)
 
 Schema groundwork for the cross-tenant ClientCredentials feature lives in CK

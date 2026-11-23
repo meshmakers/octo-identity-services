@@ -7,9 +7,11 @@ dependencies:
 entities:
 
   # ===========================================================================
-  # API RESOURCES (660…20) — OctoApi advertises all three scopes plus the
-  # `role` user claim so role-based authorization works on every protected
-  # endpoint.
+  # API RESOURCES (660…20) — OctoApi advertises the three platform scopes plus
+  # the `role` user claim so role-based authorization works on every protected
+  # endpoint, and the LLM gateway scope `ai.llm.invoke`: the AI
+  # service validates the audience octoAPI, so a token issued for that scope
+  # must carry it. No client of this blueprint allows `ai.llm.invoke`.
   # ===========================================================================
 
   - rtId: '660000000000000000000020'
@@ -46,6 +48,7 @@ entities:
           - octo_api
           - octo_api.read_only
           - octo_api.data_model_management
+          - ai.llm.invoke
       - id: System.Identity/AllowedAccessTokenSigningAlgorithms
         value: []
 
@@ -53,8 +56,9 @@ entities:
   # resource=<mcp public url> on /connect/authorize; the identity service (OpenIddict) matches the value exactly against an
   # ApiResource Name. Without this, the request fails with invalid_target. The MCP server itself does
   # not validate the audience (ValidateAudience=false), so this only satisfies the resource indicator
-  # — it is an isolated protocol shim, NOT a per-service audience: it carries the same scopes as
-  # octoAPI (660…020) and no resource server validates it. The trailing slash is required: the value
+  # — it is an isolated protocol shim, NOT a per-service audience: it carries the three platform scopes of
+  # octoAPI (660…020), deliberately not ai.llm.invoke (machine clients only), and no resource server
+  # validates it. The trailing slash is required: the value
   # must match byte-for-byte what the client transmits, and ${octo.mcp.publicUrl} resolves without one.
   - rtId: '660000000000000000000021'
     ckTypeId: System.Identity/ApiResource
