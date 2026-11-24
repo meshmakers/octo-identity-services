@@ -5,6 +5,11 @@ Notable changes of the OctoMesh identity services. The CK model `System.Identity
 
 ## Unreleased
 
+- AB#9325 Test: the System.Identity major-upgrade integration test installs the published 2.30.0 through the service
+  path (`ImportCkModelAsync(CkModelId)` from the in-memory test catalog `TestCkModelCatalog`) instead of the caller
+  import, which the engine will refuse for every `System`/`System.*` model (`CK_SERVICE_MANAGED_MODEL`). Test code
+  only; it passes with the current and the refusing engine.
+
 ### Security
 
 - **New API scope `ai.llm.invoke` for the AI service's central-key LLM gateway (System.Identity.Bootstrap 1.10.0).** The

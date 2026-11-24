@@ -1,3 +1,4 @@
+using Meshmakers.Octo.ConstructionKit.Contracts.ModelCatalogs;
 using IdentityServerPersistence;
 using MartinCostello.Logging.XUnit;
 using Meshmakers.Octo.Runtime.Contracts.MongoDb;
@@ -21,6 +22,9 @@ public abstract class ServiceCollectionFixture : ITestOutputHelperAccessor, IAsy
 {
     private bool _isInitialized;
 
+    /// <summary>In-memory CK catalog for models a test installs through the service path.</summary>
+    public TestCkModelCatalog TestCkModelCatalog { get; } = new();
+
     protected ServiceCollectionFixture()
     {
         Services = new ServiceCollection();
@@ -39,6 +43,11 @@ public abstract class ServiceCollectionFixture : ITestOutputHelperAccessor, IAsy
             .AddOctoIdentityPersistence(
                 _ => new OctoSystemConfiguration(),
                 configureDistributionEventHub: null);
+
+        // Historic System models (System.Identity 2.30.0) are installed through the service path from this in-memory
+        // catalog: the caller overload of ImportCkModelAsync refuses service-managed models.
+        Services.AddSingleton(TestCkModelCatalog);
+        Services.AddSingleton<ICatalog>(TestCkModelCatalog);
 
         // AB#6722: AddOctoServiceInfrastructure registers the real distribution event hub even with a null configuration, and
         // a provisioning publishes CorsClientsUpdate (AB#5487) through it. On a host without a broker on localhost:5672 (every CI
