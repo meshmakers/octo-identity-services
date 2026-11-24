@@ -100,6 +100,15 @@ host); a new background timer or long-running loop in startup code needs a dispo
 The shared MongoDB container used to grow to ~10 GiB per run (outside the test process); the cause was the databases of
 finished fixtures, which are now dropped (next section).
 
+## Historic System models come from the test catalog
+
+The engine refuses every caller import (`ImportCkModelAsync(CkCompiledModelRoot)`) of a `System` / `System.*` model with
+`CK_SERVICE_MANAGED_MODEL`. A test that needs a tenant on a historic System model (for example the published
+System.Identity 2.30.0 of `Persistence/SystemIdentityMajorUpgradeIntegrationTests`) installs it with
+`fixture.TestCkModelCatalog.ImportThroughServicePathAsync(tenant, model)` (`Fixtures/TestCkModelCatalog.cs`, registered by
+`ServiceCollectionFixture`): the model is put into an in-memory catalog that is asked first, imported by id through the
+downgrade-guarded service path, and removed again, so no other test sees it.
+
 ## Disposed fixtures drop their databases
 
 Every class fixture creates a system database of its own (`DatabaseFixture` / `IdentityServicesFixture`,

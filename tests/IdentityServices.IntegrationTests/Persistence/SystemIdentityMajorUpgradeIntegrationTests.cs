@@ -54,7 +54,10 @@ public class SystemIdentityMajorUpgradeIntegrationTests : IClassFixture<Identity
             var published = await _fixture.GetService<ICkJsonSerializer>()
                 .DeserializeCompiledModelRootAsync(await File.ReadAllTextAsync(path, TestContext.Current.CancellationToken),
                     path, new OperationResult());
-            await tenant.ImportCkModelAsync(published);
+            // System.Identity is service-managed: a caller import of it is refused (CK_SERVICE_MANAGED_MODEL), so the
+            // published 2.30.0 comes through the service path, from the test catalog.
+            var importResult = await _fixture.TestCkModelCatalog.ImportThroughServicePathAsync(tenant, published);
+            importResult.HasErrors.Should().BeFalse(string.Join("; ", importResult.Messages.Select(m => m.MessageText)));
             (await tenant.IsCkModelExistingAsync(new CkModelId($"System.Identity-{startVersion}"))).Should().BeTrue();
 
             // The service's own path: the embedded System.Identity of this build is imported over the old major.
