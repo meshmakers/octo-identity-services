@@ -6,6 +6,7 @@ using IdentityServerPersistence.Services.ClientGrants;
 using IdentityServerPersistence.Services.Migrations;
 using IdentityServerPersistence.Services.ScratchTenants;
 using IdentityServerPersistence.Services.AdminRoleMigration;
+using IdentityServerPersistence.Services.RoleGrants;
 using IdentityServerPersistence.Services.SecretManagement;
 using IdentityServerPersistence.SystemStores;
 using Meshmakers.Octo.Backend.IdentityServices.Resources;
@@ -395,6 +396,20 @@ internal class DefaultConfigurationCreatorService(
             logger.LogError(ex,
                 "SecretManagement grant to TenantOwners failed for tenant '{TenantId}'; retried on the next " +
                 "tenant setup", tenantId);
+        }
+
+        // AB#8690: one-time grant of the platform role AiBudgetAdmin (blueprint 1.11.0, 660…63) to the human
+        // administrators of the SYSTEM tenant only (same rule and mechanism as SecretManagement, own marker). Without it
+        // nobody could hold the role: the role-change guard lets only a holder grant a platform role. Not fatal.
+        try
+        {
+            await AiBudgetAdminGrant.EnsureAsync(tenantContext, systemContext.TenantId, logger);
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex,
+                "One-time AiBudgetAdmin grant to the system administrators failed for tenant '{TenantId}'; retried on " +
+                "the next tenant setup", tenantId);
         }
 
         // AB#8165: move the existing admins from direct roles to TenantOwners (Off by default, DryRun logs only).

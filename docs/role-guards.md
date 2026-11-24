@@ -32,7 +32,7 @@ Current identity schema (migration) version: `23` (migration 21→22 added the `
 `IRoleChangeGuard` (`src/IdentityServices/Authorization/RoleChange/RoleChangeGuard.cs`, scoped) is the one rule set for changes of the **direct** roles of a
 user. Callers: `UsersController` (`DELETE users/{u}`; the role endpoints and `POST users/{u}/merge` run the methods, section
 "REST facades of the role and merge endpoints" in `docs/identity-rest-facades.md`), the three role method handlers (`UserRoleMethodHandlerBase.GuardAsync`) and `IUserMergeService` (source user). It is **never** called from `OctoUserStore`/`UserManager`: first admin of a new tenant
-(`UserManagementService`), the Bootstrap blueprint seed, the one-time grants (`SecretManagementAdminGrant`, file role grants), the scratch-tenant creator grant, cross-tenant
+(`UserManagementService`), the Bootstrap blueprint seed, the one-time grants (`SecretManagementAdminGrant`, `AiBudgetAdminGrant`, file role grants), the scratch-tenant creator grant, cross-tenant
 provisioning and the login group rules assign roles through the store and stay unrestricted (`TheGuard_IsNotCalledFromTheUserStoreOrTheUserManager…` pins the constructors).
 The role change guards on groups, mappings and role definitions (next section) and on client roles (section below) reuse it: `EvaluateGrantAsync(caller, addedRoleNames)` is the "grant only what you hold" part alone.
 
@@ -190,3 +190,19 @@ role `66…0B`), so no seed bump is needed.
 
 - **Tests:** `UserManagementServiceTests` (membership added / not twice / missing group) and `Api/Setup/SetupAdminTenantOwnersTests` (real MongoDB: setup via REST, the admin adds
   another user to `TenantOwners`, control case without the membership = 403 `role-not-held`, re-run refused without a second edge, guard not injected into setup/group store).
+
+## AiBudgetAdmin: one-time grant in the system tenant (AB#8690)
+
+`AiBudgetAdmin` (660…63, System.Identity.Bootstrap 1.11.0) is a platform role: under the guard only a holder grants it.
+The seed gives it to nobody (not `TenantOwners`, not the first administrator), so the setup step `AiBudgetAdminGrant`
+(`src/IdentityServerPersistence/Services/RoleGrants/AiBudgetAdminGrant.cs`) gives it once to the human administrators of
+the **system tenant**: the same rule and code as `SecretManagementAdminGrant` (`AdministratorRoleOneTimeGrant`: local
+users holding `AdminPanelManagement` and `TenantManagement`, direct or through groups; direct edges only; no group,
+client or `xt_` shadow user). Never in a child tenant. The marker `AiBudgetAdminGrant` in the system tenant's
+configuration makes it run once; a run that finds no administrator (fresh installation) writes no marker, so the first
+setup after the first administrator exists grants it. The guard is unchanged: the step writes through the repository as
+the platform's own bootstrap, like the other one-time grants.
+
+Operator path for a further person: a holder runs `octo-cli -c AddUserToRole -un <user> -r AiBudgetAdmin` in the system
+tenant (`AddClientToRole` for a client; self-grants stay refused). Removing it: `RemoveUserFromRole`; the step does not
+re-add it.

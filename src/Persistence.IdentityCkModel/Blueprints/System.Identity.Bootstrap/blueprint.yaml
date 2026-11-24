@@ -11,7 +11,8 @@ description: |
   1.11.0 (AB#8690): adds the role `AiBudgetAdmin` (660…63). It sets the monthly LLM spend cap of a tenant in the AI
   service (`system/v1/aiSpendCaps`, octo-cli `SetAiSpendCap`) and counts only in a token of the system tenant: the AI
   service refuses a holder from a child tenant, so the role grants nothing in the child tenants it is seeded into.
-  Not assigned to TenantOwners and not granted to the initial administrator; the platform owner grants it explicitly.
+  Not assigned to TenantOwners; the identity setup step AiBudgetAdminGrant gives it once to the human administrators of
+  the system tenant, and holders grant it to further people.
   The version bump makes every existing tenant re-import the seed, which creates the role. No other change.
 
   1.10.0: adds the API scope `ai.llm.invoke` (660…17) and attaches it to the octoAPI resource (660…20),
