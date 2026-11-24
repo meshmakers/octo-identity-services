@@ -5,7 +5,7 @@ code it covers.
 
 ## What this repo is
 
-Octo Identity Services is a .NET 10 identity and authentication service built on **OpenIddict 7.6** (migrated from
+Octo Identity Services is a .NET 10 identity and authentication service built on **OpenIddict 7.9** (migrated from
 Duende IdentityServer 8.0.6; see `docs/CONCEPT-OPENIDDICT-MIGRATION.md`). It provides OAuth2/OpenID Connect
 authentication with support for multiple identity providers (Google, Facebook, Microsoft, Azure Entra ID, OpenLDAP,
 Microsoft AD). The wire protocol (endpoint paths, discovery, JWKS, token shape, claims) is kept Duende-compatible so all

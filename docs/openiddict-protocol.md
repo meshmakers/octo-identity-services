@@ -7,7 +7,7 @@ applies_to: "**/{OpenIddict,Cookies,Middleware,Protocol,DynamicAuth}/**, {OpenId
 
 ## OpenIddict Protocol Stack
 
-The OAuth2/OIDC server is **OpenIddict 7.6.0**, configured in
+The OAuth2/OIDC server is **OpenIddict 7.9.0**, configured in
 `src/IdentityServices/Configuration/OpenIddictConfiguration.cs`:
 
 - **Endpoint URIs are pinned to the previous Duende paths** (`/connect/authorize`, `/connect/token`,

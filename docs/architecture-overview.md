@@ -7,7 +7,7 @@ background: true
 
 ## System Architecture
 
-Octo Identity Services is an OAuth 2.0 / OpenID Connect identity provider built on **OpenIddict 7.6** (migrated from Duende IdentityServer 8.0.6 — see [CONCEPT-OPENIDDICT-MIGRATION.md](CONCEPT-OPENIDDICT-MIGRATION.md)). It provides centralized authentication and authorization for the Octo platform with support for multiple identity providers. Endpoint paths, discovery, JWKS, and token/claims shapes are kept Duende-compatible so consumers work unchanged; the remaining discovery differences are documented in [openiddict-discovery-diff.md](openiddict-discovery-diff.md).
+Octo Identity Services is an OAuth 2.0 / OpenID Connect identity provider built on **OpenIddict 7.9** (migrated from Duende IdentityServer 8.0.6 — see [CONCEPT-OPENIDDICT-MIGRATION.md](CONCEPT-OPENIDDICT-MIGRATION.md)). It provides centralized authentication and authorization for the Octo platform with support for multiple identity providers. Endpoint paths, discovery, JWKS, and token/claims shapes are kept Duende-compatible so consumers work unchanged; the remaining discovery differences are documented in [openiddict-discovery-diff.md](openiddict-discovery-diff.md).
 
 ```
                                     ┌─────────────────────────────────────┐

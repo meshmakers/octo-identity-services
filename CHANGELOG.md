@@ -47,6 +47,11 @@ Notable changes of the OctoMesh identity services. The CK model `System.Identity
 
 ### Changed
 
+- **NuGet dependencies updated within the .NET 10 line.** OpenIddict 7.6 to 7.9 (server and validation fixes, among them an audience
+  check of client assertions and the authorization entry check of the validation stack, neither of which this service's
+  configuration uses; token, cookie and signing behaviour is unchanged), `System.Security.Cryptography.Pkcs` and `.Xml` 10.0.15, QRCoder
+  1.9, NLog.Web 6.3 and the test packages (FluentAssertions, Testcontainers, xunit, coverlet). Held: Novell.Directory.Ldap 4.1 (changes
+  the LDAP connect path, no test covers it) and every 11.x package.
 - **Create, update and delete of identity providers, e-mail domain group rules, data permissions and policies and clients, and the update
   and delete of external tenant user mappings, run CK methods (System.Identity 3.8.0).** The REST write endpoints of
   `IdentityProvidersController`, `EmailDomainGroupRulesController`, `DataPermissionsController` (create, delete, policy create and delete),
