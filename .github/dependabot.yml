@@ -1,4 +1,4 @@
-# Dependabot standard configuration (AB#9625).
+# Dependabot standard configuration.
 # One entry per ecosystem and manifest directory, minor/patch updates grouped, an explicit
 # open-pull-requests-limit, and the majors we hold on purpose ignored (remove an ignore only
 # together with the story that delivers that migration).
@@ -12,10 +12,11 @@ updates:
     open-pull-requests-limit: 5
     groups:
       runtime-aligned:
-        patterns: ["Microsoft.Extensions.*", "Microsoft.AspNetCore.*", "System.Text.Json", "System.Composition.*", "System.IdentityModel.Tokens.Jwt"]
+        patterns: ["Microsoft.Extensions.*", "Microsoft.AspNetCore.*", "System.Text.Json", "System.Composition.*", "System.Security.Cryptography.*"]
         update-types: ["minor", "patch"]
       test-tooling:
-        patterns: ["xunit*", "TUnit*", "Microsoft.NET.Test.Sdk", "coverlet.*", "Moq", "NSubstitute", "FakeItEasy", "FluentAssertions"]
+        patterns: ["xunit*", "TUnit*", "Microsoft.NET.Test.Sdk", "coverlet.*", "Microsoft.Testing.*", "Moq*", "NSubstitute*", "FakeItEasy*", "FluentAssertions*", "Testcontainers*", "MartinCostello.Logging.XUnit*"]
+        update-types: ["minor", "patch"]
       meshmakers:
         patterns: ["Meshmakers.*"]
         update-types: ["minor", "patch"]
@@ -23,17 +24,20 @@ updates:
         patterns: ["*"]
         update-types: ["minor", "patch"]
     ignore:
-      # AB#9580
+      # held until the runtime major is adopted
       - dependency-name: "Microsoft.Extensions.*"
         update-types: ["version-update:semver-major"]
-      # AB#9580
+      # held until the runtime major is adopted
       - dependency-name: "Microsoft.AspNetCore.*"
         update-types: ["version-update:semver-major"]
-      # AB#9580
+      # held until the runtime major is adopted
       - dependency-name: "System.Text.Json"
         update-types: ["version-update:semver-major"]
-      # AB#9580
+      # held until the runtime major is adopted
       - dependency-name: "System.Composition.*"
+        update-types: ["version-update:semver-major"]
+      # held until the runtime major is adopted
+      - dependency-name: "System.Security.Cryptography.*"
         update-types: ["version-update:semver-major"]
       # MassTransit 9 is held on purpose
       - dependency-name: "MassTransit*"
@@ -52,7 +56,7 @@ updates:
     open-pull-requests-limit: 5
     groups:
       angular:
-        patterns: ["@angular/*", "@angular-devkit/*", "@schematics/*", "ng-packagr", "zone.js"]
+        patterns: ["@angular/*", "@angular-devkit/*", "@schematics/*", "ng-packagr", "zone.js", "typescript", "angular-eslint*"]
       kendo:
         patterns: ["@progress/*"]
         update-types: ["minor", "patch"]
@@ -89,11 +93,14 @@ updates:
       # a new .NET major is a platform decision, not a Dependabot bump
       - dependency-name: "mcr.microsoft.com/dotnet/*"
         update-types: ["version-update:semver-major"]
+      # same images, Dependabot may name them without the registry host
+      - dependency-name: "dotnet/*"
+        update-types: ["version-update:semver-major"]
       # Node majors are planned
       - dependency-name: "node"
         update-types: ["version-update:semver-major"]
       # nginx majors are planned
       - dependency-name: "nginx"
         update-types: ["version-update:semver-major"]
-      # internal images are built by our own pipelines
+      # internal images: legacy date-based tags sort above semver, our pipelines manage them
       - dependency-name: "meshmakers/*"
