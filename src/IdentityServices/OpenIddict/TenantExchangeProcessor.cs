@@ -1,9 +1,11 @@
 using System.Security.Claims;
 using IdentityServerPersistence.Configuration.Options;
 using IdentityServerPersistence.Services;
+using IdentityServerPersistence.Services.ServiceAccountExchange;
 using IdentityServerPersistence.SystemStores;
 using Meshmakers.Common.Shared;
 using Meshmakers.Octo.Backend.IdentityServices.CrossTenantAudit;
+using Meshmakers.Octo.Backend.IdentityServices.Services;
 using Meshmakers.Octo.Services.Infrastructure;
 using Meshmakers.Octo.Services.Infrastructure.TenantGeneration;
 using Microsoft.AspNetCore.Identity;
@@ -51,6 +53,14 @@ namespace Meshmakers.Octo.Backend.IdentityServices.OpenIddict;
 ///         <see cref="NotProvisionedMarker" />, so clients (octo-cli) can show a clear denial instead of
 ///         a later 403 on the first call. A token without roles could not pass role enforcement anyway.
 ///     </para>
+///     <para>
+///         <b>Service-account subjects (AB#9777).</b> A client-credentials token of A (no <c>sub</c>, a
+///         <c>client_id</c>) is judged by <see cref="IServiceAccountExchangeGate" /> instead of the user rules: B must be
+///         A's registry parent, sibling or child, the client unmirrored, and B must hold its own enabled shadow client
+///         <c>xt_{A}_{clientId}</c> with at least one role (and, for a parent or sibling B, A's allow-list must permit B).
+///         The request must be presented by that shadow client. The issued token is client-shaped for the shadow client
+///         with its B roles (<c>docs/cross-tenant-authentication.md</c>, "Service-account subjects").
+///     </para>
 /// </remarks>
 public class TenantExchangeProcessor(
     IOptionsMonitor<OpenIddictServerOptions> serverOptions,
@@ -64,6 +74,7 @@ public class TenantExchangeProcessor(
     IIdentityAuditService auditService,
     ICrossTenantGrantAuditRecorder grantAudit,
     IGrantTenantGenerationGuard grantTenantGenerationGuard,
+    IServiceAccountExchangeGate serviceAccountExchangeGate,
     ILogger<TenantExchangeProcessor> logger)
 {
     /// <summary>The RFC 8693 token type identifier for an access token.</summary>
@@ -86,6 +97,30 @@ public class TenantExchangeProcessor(
     /// </summary>
     public const string GrantNotPermittedMarker = "grant_not_permitted";
 
+    /// <summary>
+    ///     Stable prefix of the <c>error_description</c> (with <c>error=access_denied</c>) when the subject of a
+    ///     service-account exchange is a mirrored client, whose secret is shared with other tenants (AB#9777).
+    /// </summary>
+    public const string MirroredClientMarker = "mirrored_client";
+
+    /// <summary>
+    ///     Stable prefix of the <c>error_description</c> (with <c>error=access_denied</c>) when the subject client of a
+    ///     service-account exchange is itself a shadow client or its shadow name is ambiguous (AB#9777).
+    /// </summary>
+    public const string AmbiguousSubjectMarker = "ambiguous_subject";
+
+    /// <summary>
+    ///     Stable prefix of the <c>error_description</c> (with <c>error=access_denied</c>) when the shadow client of a
+    ///     service-account exchange can do more than present the exchange (AB#9777).
+    /// </summary>
+    public const string ShadowClientInvalidMarker = "shadow_client_invalid";
+
+    /// <summary>
+    ///     Lifetime of the token a service-account exchange issues (AB#9777): short, never refreshable; the caller exchanges
+    ///     again from its still-valid source token.
+    /// </summary>
+    public static readonly TimeSpan ServiceAccountTokenLifetime = TimeSpan.FromMinutes(5);
+
     /// <summary>Outcome of a token exchange attempt: either a B-shadow user or an OAuth error.</summary>
     public sealed record ExchangeOutcome
     {
@@ -105,6 +140,29 @@ public class TenantExchangeProcessor(
 
         public static ExchangeOutcome Succeeded(RtUser shadowUser, string targetTenantId, bool secondFactorVerified) =>
             new() { ShadowUser = shadowUser, TargetTenantId = targetTenantId, SecondFactorVerified = secondFactorVerified };
+
+        /// <summary>
+        ///     AB#9777: the subject was a service account of the source tenant; the token is issued for this shadow client
+        ///     of the target tenant (<c>xt_{source}_{clientId}</c>) with <see cref="ShadowClientRoleNames" />.
+        /// </summary>
+        public RtClient? ShadowClient { get; init; }
+
+        /// <summary>AB#9777: the effective roles of <see cref="ShadowClient" /> in the target tenant.</summary>
+        public IReadOnlySet<string>? ShadowClientRoleNames { get; init; }
+
+        /// <summary>AB#9777: the client id of the subject service account in the source tenant.</summary>
+        public string? SourceClientId { get; init; }
+
+        /// <summary>AB#9777: the source tenant of a service-account exchange.</summary>
+        public string? SourceTenantId { get; init; }
+
+        public static ExchangeOutcome SucceededForServiceAccount(RtClient shadowClient, IReadOnlySet<string> roleNames,
+            string sourceTenantId, string sourceClientId, string targetTenantId) =>
+            new()
+            {
+                ShadowClient = shadowClient, ShadowClientRoleNames = roleNames, SourceTenantId = sourceTenantId,
+                SourceClientId = sourceClientId, TargetTenantId = targetTenantId
+            };
     }
 
     /// <summary>
@@ -113,9 +171,14 @@ public class TenantExchangeProcessor(
     /// <param name="subjectToken">The caller's current A access token.</param>
     /// <param name="subjectTokenType">The RFC 8693 subject_token_type, if provided.</param>
     /// <param name="acrValues">The raw acr_values parameter carrying <c>tenant:{B}</c>.</param>
+    /// <param name="cancellationToken">Cancels the generation lookup.</param>
+    /// <param name="presentingClientId">
+    ///     The authenticated client that sends the exchange request. A service-account subject (AB#9777) is exchanged only
+    ///     by its shadow client of the target tenant.
+    /// </param>
     public async Task<ExchangeOutcome> ProcessAsync(
         string? subjectToken, string? subjectTokenType, string? acrValues,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default, string? presentingClientId = null)
     {
         // (a) Validate the subject token (signature + issuer + lifetime + typ at+jwt, ValidateAudience=false —
         //     platform-wide convention). Deliberately NOT bound to the request tenant: the request
@@ -149,14 +212,33 @@ public class TenantExchangeProcessor(
         var claims = validation.ClaimsIdentity.Claims.ToList();
         var sourceUserId = claims.FirstOrDefault(c => c.Type == Claims.Subject)?.Value;
         var sourceTenantId = claims.FirstOrDefault(c => c.Type == OctoClaimTypes.TenantId)?.Value;
+        // AB#9777: a client_credentials token carries no sub (OctoAccessTokenShapeHandler) but its client_id: a
+        // service-account subject, judged by IServiceAccountExchangeGate instead of the user rules.
+        var sourceClientId = string.IsNullOrEmpty(sourceUserId)
+            ? claims.FirstOrDefault(c => c.Type == Claims.ClientId)?.Value
+            : null;
+        var isServiceAccountSubject = !string.IsNullOrEmpty(sourceClientId);
 
-        if (string.IsNullOrEmpty(sourceUserId) || string.IsNullOrEmpty(sourceTenantId))
+        if ((string.IsNullOrEmpty(sourceUserId) && !isServiceAccountSubject) || string.IsNullOrEmpty(sourceTenantId))
         {
             logger.LogWarning(
-                "Token exchange rejected: subject_token lacks sub or tenant_id (user context required)");
+                "Token exchange rejected: subject_token lacks a subject (sub or client_id) or tenant_id");
             return ExchangeOutcome.Failed(Errors.InvalidGrant,
-                "subject_token must carry a user subject and tenant_id");
+                "subject_token must carry a user subject (or a service-account client_id) and tenant_id");
         }
+
+        // AB#9777: an impersonated or already exchanged service token (act) is no service account of its own tenant;
+        // no chains in v1.
+        if (isServiceAccountSubject && claims.Any(c => c.Type == DelegationConstants.ActClaimType))
+        {
+            logger.LogWarning(
+                "Token exchange rejected: the service-account subject_token of client '{ClientId}' carries act (impersonated or exchanged)",
+                sourceClientId);
+            return ExchangeOutcome.Failed(Errors.InvalidGrant,
+                "a subject_token that carries act (impersonated or exchanged) cannot be exchanged");
+        }
+
+        var subjectId = isServiceAccountSubject ? sourceClientId! : sourceUserId!;
 
         // (b) Target tenant B from acr_values, asserted against the tenant the middleware wired
         //     into the request — otherwise shadow user + roles would resolve against the wrong DB.
@@ -174,7 +256,7 @@ public class TenantExchangeProcessor(
             logger.LogError(
                 "Token exchange rejected: request tenant '{ResolvedTenantId}' does not match requested target '{TargetTenantId}' — refusing to resolve roles against the wrong database",
                 resolvedTenantId ?? "(none)", targetTenantId);
-            await RaiseFailureAsync(sourceUserId, sourceTenantId, targetTenantId,
+            await RaiseFailureAsync(subjectId, sourceTenantId, targetTenantId,
                 "target tenant not wired into request");
             return ExchangeOutcome.Failed(Errors.InvalidTarget,
                 "target tenant could not be resolved for this request");
@@ -190,14 +272,20 @@ public class TenantExchangeProcessor(
         if (generationCheck.IsRefused)
         {
             logger.LogWarning(
-                "Token exchange rejected: subject_token of user '{SourceUserId}' (tenant '{SourceTenantId}') failed the tenant generation check ({Outcome})",
-                sourceUserId, sourceTenantId, generationCheck.Outcome);
-            await RaiseFailureAsync(sourceUserId, sourceTenantId, targetTenantId,
+                "Token exchange rejected: subject_token of '{SubjectId}' (tenant '{SourceTenantId}') failed the tenant generation check ({Outcome})",
+                subjectId, sourceTenantId, generationCheck.Outcome);
+            await RaiseFailureAsync(subjectId, sourceTenantId, targetTenantId,
                 $"subject token tenant generation {generationCheck.Outcome}");
             return ExchangeOutcome.Failed(generationCheck.Error!, generationCheck.ErrorDescription!);
         }
 
-        return await ExchangeAsync(sourceTenantId, sourceUserId, targetTenantId,
+        if (isServiceAccountSubject)
+        {
+            return await ExchangeServiceAccountAsync(sourceTenantId, sourceClientId!, targetTenantId,
+                presentingClientId);
+        }
+
+        return await ExchangeAsync(sourceTenantId, sourceUserId!, targetTenantId,
             subjectHasSecondFactor: SecondFactorEvidence.IsPresent(claims));
     }
 
@@ -307,6 +395,72 @@ public class TenantExchangeProcessor(
 
         return ExchangeOutcome.Succeeded(shadowUser, targetTenantId, subjectHasSecondFactor);
     }
+
+    /// <summary>
+    ///     AB#9777: the authorization half of an exchange whose subject is a service account (client-credentials token)
+    ///     of <paramref name="sourceTenantId" />: <see cref="IServiceAccountExchangeGate" /> decides on relation, mirror
+    ///     state and the provisioning in the target tenant; the request must be sent by the shadow client
+    ///     <c>xt_{source}_{clientId}</c> of the target tenant itself. Every refusal raises the same failure audit as a
+    ///     refused user exchange.
+    /// </summary>
+    /// <param name="sourceTenantId">Tenant of the subject token.</param>
+    /// <param name="sourceClientId">client_id of the subject token.</param>
+    /// <param name="targetTenantId">The tenant the token is exchanged into.</param>
+    /// <param name="presentingClientId">The authenticated client that sent the exchange request.</param>
+    internal async Task<ExchangeOutcome> ExchangeServiceAccountAsync(string sourceTenantId, string sourceClientId,
+        string targetTenantId, string? presentingClientId)
+    {
+        var decision = await serviceAccountExchangeGate.EvaluateAsync(sourceTenantId, sourceClientId, targetTenantId);
+        if (!decision.IsAdmitted)
+        {
+            logger.LogWarning(
+                "Token exchange denied: service account '{SourceClientId}' of tenant '{SourceTenantId}' into tenant '{TargetTenantId}': {Reason}",
+                sourceClientId, sourceTenantId, targetTenantId, decision.Reason);
+            await RaiseExchangeFailureAsync(sourceClientId, sourceTenantId, targetTenantId,
+                $"service account: {decision.Reason}");
+            return MapServiceAccountRefusal(decision, targetTenantId);
+        }
+
+        var shadowClient = decision.ShadowClient!;
+        if (!string.Equals(presentingClientId, shadowClient.ClientId, StringComparison.Ordinal))
+        {
+            logger.LogWarning(
+                "Token exchange denied: the service-account subject '{SourceClientId}' of tenant '{SourceTenantId}' was presented by client '{PresentingClientId}', not by its shadow client '{ShadowClientId}' of tenant '{TargetTenantId}'",
+                sourceClientId, sourceTenantId, presentingClientId ?? "(none)", shadowClient.ClientId, targetTenantId);
+            await RaiseExchangeFailureAsync(sourceClientId, sourceTenantId, targetTenantId,
+                "service account: presented by another client than its shadow client");
+            return ExchangeOutcome.Failed(Errors.UnauthorizedClient,
+                $"a service-account subject is exchanged only by its shadow client '{shadowClient.ClientId}' of the target tenant");
+        }
+
+        logger.LogInformation(
+            "Token exchange succeeded: service account '{SourceClientId}' of tenant '{SourceTenantId}' exchanged into tenant '{TargetTenantId}' as shadow client '{ShadowClientId}' ({Relation})",
+            sourceClientId, sourceTenantId, targetTenantId, shadowClient.ClientId, decision.Relation);
+
+        return ExchangeOutcome.SucceededForServiceAccount(shadowClient, decision.RoleNames, sourceTenantId,
+            sourceClientId, targetTenantId);
+    }
+
+    private static ExchangeOutcome MapServiceAccountRefusal(ServiceAccountExchangeDecision decision,
+        string targetTenantId) => decision.Refusal switch
+    {
+        ServiceAccountExchangeRefusal.SourceClientUnknown => ExchangeOutcome.Failed(Errors.InvalidGrant,
+            "the subject service account does not exist in its tenant or is disabled"),
+        ServiceAccountExchangeRefusal.MirroredClient => ExchangeOutcome.Failed(Errors.AccessDenied,
+            $"{MirroredClientMarker}: the subject client is mirrored across tenants and cannot be exchanged"),
+        ServiceAccountExchangeRefusal.AmbiguousSubject => ExchangeOutcome.Failed(Errors.AccessDenied,
+            $"{AmbiguousSubjectMarker}: {decision.Reason}"),
+        ServiceAccountExchangeRefusal.NotProvisioned => ExchangeOutcome.Failed(Errors.AccessDenied,
+            $"{NotProvisionedMarker}: the service account holds no role in tenant '{targetTenantId}'; an administrator " +
+            "of that tenant must register its shadow client (xt_{sourceTenantId}_{clientId}) with roles there"),
+        ServiceAccountExchangeRefusal.ShadowClientNotExchangeOnly => ExchangeOutcome.Failed(Errors.AccessDenied,
+            $"{ShadowClientInvalidMarker}: {decision.Reason}"),
+        ServiceAccountExchangeRefusal.NotPermitted => ExchangeOutcome.Failed(Errors.AccessDenied,
+            $"{GrantNotPermittedMarker}: the source tenant does not permit access to tenant '{targetTenantId}'"),
+        ServiceAccountExchangeRefusal.StateUnreadable => ExchangeOutcome.Failed(Errors.AccessDenied,
+            "the service-account exchange could not be checked; try again later"),
+        _ => ExchangeOutcome.Failed(Errors.UnauthorizedClient, "cross-tenant access to the target tenant is denied")
+    };
 
     /// <summary>
     ///     Picks the source identity to exchange from and runs the B-authorization gate on it —

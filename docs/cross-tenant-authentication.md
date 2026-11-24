@@ -1,6 +1,6 @@
 ---
-description: "Cross-tenant sign-in, shadow users, token exchange, sibling grants, delegation, tenant probe guard"
-applies_to: "{*CrossTenant*,TenantProbeGuard,Allowed*,*IdentityResolver,*Processor,*ShadowUser*,*ExternalTenantUser*,*SourceT*,*SourceU*,Sibling*,AuthApiController}.cs"
+description: "Cross-tenant sign-in, shadow users, token exchange (users and service accounts), sibling grants, delegation, tenant probe guard"
+applies_to: "{*CrossTenant*,TenantProbeGuard,Allowed*,*IdentityResolver,*Processor,*ShadowUser*,*ExternalTenantUser*,*SourceT*,*SourceU*,Sibling*,AuthApiController,*ServiceAccountExchange*}.cs"
 ---
 
 # Cross-tenant authentication and delegation
@@ -157,6 +157,79 @@ counterpart of the browser tenant-switch, for the MCP server:
   `docs/authentication.md` § Cross-Tenant Token Exchange. Coverage:
   `tests/IdentityServices.IntegrationTests/Persistence/TenantExchangeIntegrationTests.cs`
   (privilege-escalation regression: resolved roles == B subset, not A's full set).
+
+## Service-account subjects of the token exchange (AB#9777)
+
+A pipeline service account (client-credentials token) of tenant **T** can obtain a token for a related tenant **U**
+through the same RFC 8693 grant (design note AB#9766 §3.3 option B). Identity stays the single authority: the roles
+come only from what U's administrator provisioned in U.
+
+**Request** (`POST /connect/token`, form):
+
+| Parameter | Value |
+|---|---|
+| `grant_type` | `urn:ietf:params:oauth:grant-type:token-exchange` |
+| `client_id` | the shadow client `xt_{T}_{clientId}` of U (public client of U with the token-exchange grant) |
+| `subject_token` | the service account's client-credentials access token of T (`tenant_id=T`, `client_id`, no `sub`) |
+| `subject_token_type` | `urn:ietf:params:oauth:token-type:access_token` (optional) |
+| `acr_values` | `tenant:{U}` (wires the request to U's directory, `OidcTenantResolutionMiddleware`) |
+| `scope` | scopes the shadow client is allowed; `offline_access` is dropped |
+
+The presenting client is authenticated in U's directory, so it is the shadow client itself: the client of T does not
+exist in a parent or sibling U. A request sent by any other client is refused (`unauthorized_client`), and a shadow
+client without the token-exchange grant is refused by OpenIddict (`unauthorized_client`).
+
+**Provisioning in U** (by U's administrator): a client with `ClientId = xt_{T}_{clientId}` (exact case), enabled, the
+scopes and roles of U (direct or through groups), and nothing that lets it act on its own: public (no secret,
+`RequireClientSecret` false), the token-exchange grant as its **only** grant type, no redirect or post-logout URIs, no
+offline access. A shadow client with more is refused (`shadow_client_invalid`). The exchange never creates the shadow
+client. A mirror (`ProvisionedByParentTenantId`, `AutoProvisionInChildTenants`) does not count as provisioning.
+
+**Rules** (`IdentityServerPersistence/Services/ServiceAccountExchange/ServiceAccountExchangeGate.cs`, all fail closed):
+
+- Relation from the tenant registry: U is T's **parent**, **sibling** (same parent, which is not the system tenant) or
+  **child**. Refused: the system tenant as source or target, T itself, grandchildren and deeper, grandparents, cousins,
+  unregistered tenants, and top-level tenants among each other.
+- For a parent or sibling U, T's allow-list must permit U (`ISourceTenantGrantPolicy`, the sibling-grant rule of users,
+  AB#8343). A child U needs no allow-list entry; the provisioning in U is its admission.
+- The subject client must be an enabled client of T and not mirrored (own flag, mirror marker or `RtClientMirror` rows
+  in T): a mirrored client shares its secret with other tenants (`CONCEPT-PER-TENANT-MIRROR-SECRETS.md` §1).
+- No chains: a subject token carrying `act` (impersonated or already exchanged) and a subject client named `xt_…` are
+  refused. A shadow name that also reads as a client of another registered tenant (tenant ids may contain `_`,
+  AB#5708) is refused.
+- The subject token's `tenant_gen` must match T's current generation (`IGrantTenantGenerationGuard`, AB#9017).
+- Every refusal writes the `Token Exchange Failure` audit event and the cross-tenant refusal event like a user exchange.
+
+| Refusal | `error` | `error_description` starts with |
+|---|---|---|
+| not provisioned in U, shadow disabled, mirror or without role | `access_denied` | `tenant_not_provisioned` |
+| T does not permit U | `access_denied` | `grant_not_permitted` |
+| subject client mirrored | `access_denied` | `mirrored_client` |
+| shadow subject or ambiguous name | `access_denied` | `ambiguous_subject` |
+| shadow client with another grant, redirect URIs, offline access or a secret | `access_denied` | `shadow_client_invalid` |
+| relation not allowed, system tenant, unknown tenant | `unauthorized_client` | `cross-tenant access` |
+| subject token invalid, expired or of another issuer; subject client unknown or disabled in T; `act` on the subject; earlier generation | `invalid_grant` | — |
+| presented by another client than the shadow client | `unauthorized_client` | `a service-account subject` |
+
+**Issued access token** (client-credentials shape, like impersonation; lifetime 5 minutes, no refresh token):
+
+| Claim | Value |
+|---|---|
+| `client_id` | `xt_{T}_{clientId}` (the shadow client of U) |
+| `sub` | absent (a service token is recognized by the absence of `sub`) |
+| `tenant_id` | U |
+| `tenant_gen` | U's current generation (`OctoTenantGenerationClaimHandler`) |
+| `role` | exactly the effective roles of the shadow client in U; no role of T |
+| `act` | the client id of the subject service account in T |
+| `amr` | `token_exchange` |
+| `scope`, `aud` | the requested scopes and their API resources |
+
+A consumer (the mesh adapter's cross-tenant guard, AB#9767) checks `tenant_id == U`, `tenant_gen` against U's current
+generation and `client_id == xt_{T}_{clientId}`, and uses only these roles in U.
+
+Tests: `ServiceAccountExchangeGateIntegrationTests` (every rule against MongoDB),
+`TenantExchangeServiceAccountSubjectTests` (protocol half, signed subject tokens),
+`TokenExchangeServiceAccountHttpTests` (token endpoint, wire shape, presenter and permission refusals).
 
 ## Delegation / On-Behalf-Of Grant
 
