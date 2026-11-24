@@ -23,7 +23,7 @@ public class PlatformRoleCatalogTests
         "TenantManagement", "UserManagement", "CommunicationManagement", "Development", "AdminPanelManagement",
         "BotManagement", "DashboardManagement", "DashboardViewer", "ReportingManagement", "ReportingViewer",
         "DataModelManagement", "StreamDataAdmin", "StreamDataWriter", "StreamDataReader", "SecretManagement",
-        "FileManagement", "FileViewer"
+        "FileManagement", "FileViewer", "AiBudgetAdmin"
     ];
 
     private static BootstrapPlatformRoleCatalog RealCatalog()
@@ -44,7 +44,7 @@ public class PlatformRoleCatalogTests
     }
 
     [Fact]
-    public void TheEmbeddedBootstrapSeed_YieldsExactlyTheSeventeenBuiltInRoles()
+    public void TheEmbeddedBootstrapSeed_YieldsExactlyTheEighteenBuiltInRoles()
     {
         RealCatalog().WellKnownNames.Should().BeEquivalentTo(PlatformRoleNames);
     }

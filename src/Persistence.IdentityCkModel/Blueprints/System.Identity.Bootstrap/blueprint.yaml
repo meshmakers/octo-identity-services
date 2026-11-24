@@ -1,12 +1,18 @@
 $schema: https://schemas.meshmakers.cloud/blueprint-meta.schema.json
-blueprintId: System.Identity.Bootstrap-1.10.0
+blueprintId: System.Identity.Bootstrap-1.11.0
 description: |
   Service-managed Identity tenant seed — system + every child tenant. Provides
-  the default role set (17 roles), the five OIDC identity resources, four API
+  the default role set (18 roles), the five OIDC identity resources, four API
   scopes (full-access / read-only / data-model-management / ai.llm.invoke), the OctoApi resource,
   the MCP resource indicator, the OAuth client baseline (OctoTool / IdentityServices
   Swagger / Refinery Studio SPA / MCP Services Swagger + Device / Platform Services
   Swagger) and the TenantOwners group with full role assignment.
+
+  1.11.0 (AB#8690): adds the role `AiBudgetAdmin` (660…63). It sets the monthly LLM spend cap of a tenant in the AI
+  service (`system/v1/aiSpendCaps`, octo-cli `SetAiSpendCap`) and counts only in a token of the system tenant: the AI
+  service refuses a holder from a child tenant, so the role grants nothing in the child tenants it is seeded into.
+  Not assigned to TenantOwners and not granted to the initial administrator; the platform owner grants it explicitly.
+  The version bump makes every existing tenant re-import the seed, which creates the role. No other change.
 
   1.10.0: adds the API scope `ai.llm.invoke` (660…17) and attaches it to the octoAPI resource (660…20),
   the audience the AI service validates. The AI service's central-key LLM gateway requires it. No client of this
@@ -193,8 +199,9 @@ ckModelDependencies:
 # All files below are merged into ONE runtime model before the import runs, so the order
 # is presentation only and associations may cross files (the UserManagement role in
 # roles.yaml grants the DataPermission in data-permissions.yaml; the TenantOwners group
-# in groups.yaml references sixteen of the seventeen roles, all but SecretManagement, which the
-# identity service adds to the group after the apply - see the comment in groups.yaml).
+# in groups.yaml references sixteen of the eighteen roles, all but SecretManagement, which the
+# identity service adds to the group after the apply - see the comment in groups.yaml -, and
+# AiBudgetAdmin, which is never assigned to the group).
 seedDataPaths:
   - seed-data/roles.yaml
   - seed-data/identity-resources.yaml
