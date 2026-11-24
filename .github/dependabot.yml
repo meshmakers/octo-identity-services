@@ -1,23 +1,106 @@
-# To get started with Dependabot version updates, you'll need to specify which
-# package ecosystems to update and where the package manifests are located.
-# Please see the documentation for all configuration options:
-# https://docs.github.com/github/administering-a-repository/configuration-options-for-dependency-updates
-
+# Dependabot standard configuration.
+# One entry per ecosystem and manifest directory, minor/patch updates grouped, an explicit
+# open-pull-requests-limit, and the majors we hold on purpose ignored (remove an ignore only
+# together with the story that delivers that migration).
 version: 2
 updates:
-  - package-ecosystem: "nuget" # See documentation for possible values
-    directory: "/" # Location of package manifests
+  - package-ecosystem: "nuget"
+    directory: "/"
     schedule:
       interval: "weekly"
+      day: "monday"
+    open-pull-requests-limit: 5
+    groups:
+      runtime-aligned:
+        patterns: ["Microsoft.Extensions.*", "Microsoft.AspNetCore.*", "System.Text.Json", "System.Composition.*", "System.Security.Cryptography.*"]
+        update-types: ["minor", "patch"]
+      test-tooling:
+        patterns: ["xunit*", "TUnit*", "Microsoft.NET.Test.Sdk", "coverlet.*", "Microsoft.Testing.*", "Moq*", "NSubstitute*", "FakeItEasy*", "FluentAssertions*", "Testcontainers*", "MartinCostello.Logging.XUnit*"]
+        update-types: ["minor", "patch"]
+      meshmakers:
+        patterns: ["Meshmakers.*"]
+        update-types: ["minor", "patch"]
+      nuget-minor-patch:
+        patterns: ["*"]
+        update-types: ["minor", "patch"]
+    ignore:
+      # held until the runtime major is adopted
+      - dependency-name: "Microsoft.Extensions.*"
+        update-types: ["version-update:semver-major"]
+      # held until the runtime major is adopted
+      - dependency-name: "Microsoft.AspNetCore.*"
+        update-types: ["version-update:semver-major"]
+      # held until the runtime major is adopted
+      - dependency-name: "System.Text.Json"
+        update-types: ["version-update:semver-major"]
+      # held until the runtime major is adopted
+      - dependency-name: "System.Composition.*"
+        update-types: ["version-update:semver-major"]
+      # held until the runtime major is adopted
+      - dependency-name: "System.Security.Cryptography.*"
+        update-types: ["version-update:semver-major"]
+      # MassTransit 9 is held on purpose
+      - dependency-name: "MassTransit*"
+        update-types: ["version-update:semver-major"]
+      # Telerik majors follow a licensed upgrade
+      - dependency-name: "Telerik.*"
+        update-types: ["version-update:semver-major"]
+      # KubeOps majors are planned migrations
+      - dependency-name: "KubeOps.*"
+        update-types: ["version-update:semver-major"]
   - package-ecosystem: "npm"
     directory: "/src/IdentityServices/ClientApp"
     schedule:
       interval: "weekly"
+      day: "monday"
+    open-pull-requests-limit: 5
+    groups:
+      angular:
+        patterns: ["@angular/*", "@angular-devkit/*", "@schematics/*", "ng-packagr", "zone.js", "typescript", "angular-eslint*"]
+      kendo:
+        patterns: ["@progress/*"]
+        update-types: ["minor", "patch"]
+      test-tooling:
+        patterns: ["karma*", "jasmine*", "@types/jasmine", "jest*", "@types/jest", "vitest", "@vitest/*"]
+        update-types: ["minor", "patch"]
+      npm-minor-patch:
+        patterns: ["*"]
+        update-types: ["minor", "patch"]
+    ignore:
+      # Kendo majors follow a licensed upgrade
+      - dependency-name: "@progress/*"
+        update-types: ["version-update:semver-major"]
+      # stay on graphql 16.x
+      - dependency-name: "graphql"
+        update-types: ["version-update:semver-major"]
+      # TypeScript 7 is held on purpose
+      - dependency-name: "typescript"
+        update-types: ["version-update:semver-major"]
+      # Angular majors are planned migrations
+      - dependency-name: "@angular/*"
+        update-types: ["version-update:semver-major"]
   - package-ecosystem: "docker"
     directory: "/src/IdentityServices"
     schedule:
       interval: "weekly"
+      day: "monday"
+    open-pull-requests-limit: 3
+    groups:
+      docker-minor-patch:
+        patterns: ["*"]
+        update-types: ["minor", "patch"]
     ignore:
-      # The meshmakers/* platform images are bumped deliberately with the platform toolchain;
-      # Dependabot misreads their legacy tag scheme (8.0-<date> sorts above 1.3.0.0).
+      # a new .NET major is a platform decision, not a Dependabot bump
+      - dependency-name: "mcr.microsoft.com/dotnet/*"
+        update-types: ["version-update:semver-major"]
+      # same images, Dependabot may name them without the registry host
+      - dependency-name: "dotnet/*"
+        update-types: ["version-update:semver-major"]
+      # Node majors are planned
+      - dependency-name: "node"
+        update-types: ["version-update:semver-major"]
+      # nginx majors are planned
+      - dependency-name: "nginx"
+        update-types: ["version-update:semver-major"]
+      # internal images: legacy date-based tags sort above semver, our pipelines manage them
       - dependency-name: "meshmakers/*"
