@@ -42,6 +42,10 @@ public class BootstrapUpgradeToSecretLineIntegrationTests : IClassFixture<Identi
     private static readonly OctoObjectId FileManagementRtId = new("660000000000000000000061");
     private static readonly OctoObjectId TenantOwnersRtId = new("660000000000000000000040");
 
+    // Seeds of later lines that the current seed brings along on top of the SECRET line: the role AiBudgetAdmin
+    // (1.11.0, AB#8690). It carries no edge (not in TenantOwners, granted to nobody), so it adds an entity only.
+    private static readonly string[] LaterLineSeedRtIds = ["660000000000000000000063"];
+
     // Files line seeds that appear with 1.6.0 (AB#6467): permissions 52/53, policies 54/55.
     private static readonly string[] FilesLineSeedRtIds =
     [
@@ -137,8 +141,11 @@ public class BootstrapUpgradeToSecretLineIntegrationTests : IClassFixture<Identi
             }, "local users holding both AdminPanelManagement and TenantManagement, directly or via a group / TenantOwners, " +
                "plus the TenantOwners group (AB#8161)");
 
-            // Everything else that is new is the Files line (only from 1.5.0), and nothing at all from 1.6.0.
-            var otherNewEntities = newEntities.Except(secretEntities).ToList();
+            // Everything else that is new is the Files line (only from 1.5.0), and nothing at all from 1.6.0
+            // (apart from the later-line roles above, which add no edge).
+            var laterLineEntities = newEntities.Where(e => LaterLineSeedRtIds.Any(id => e.EndsWith(id))).ToList();
+            laterLineEntities.Should().Equal($"{nameof(RtRole)}:{LaterLineSeedRtIds[0]}");
+            var otherNewEntities = newEntities.Except(secretEntities).Except(laterLineEntities).ToList();
             var otherNewEdges = after.Edges.Except(before.Edges).Except(secretEdges).ToList();
             if (fromVersion == "1.6.0")
             {

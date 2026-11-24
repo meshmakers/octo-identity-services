@@ -5,7 +5,7 @@ namespace IdentityServices.IntegrationTests.Infrastructure;
 
 /// <summary>
 ///     AB#8564: the guard tests need many distinct platform roles (built-in roles a caller with <c>UserManagement</c> must
-///     hold to grant), but the real platform set is the seventeen roles of <c>System.Identity.Bootstrap</c>. A test role whose
+///     hold to grant), but the real platform set is the eighteen roles of <c>System.Identity.Bootstrap</c>. A test role whose
 ///     <c>rtWellKnownName</c> starts with <see cref="Prefix" /> counts as a platform role in the test host; every other
 ///     built-in role is judged by the real <see cref="BootstrapPlatformRoleCatalog" />, so app-role tests use the
 ///     production rule.

@@ -24,6 +24,10 @@ Notable changes of the OctoMesh identity services. The CK model `System.Identity
 
 ### Security
 
+- **New platform role `AiBudgetAdmin` (System.Identity.Bootstrap 1.11.0, AB#8690).** Seeded with rtId 660…63 in the
+  system tenant and every child tenant (re-import through the version bump). The AI service accepts it only in a token
+  of the system tenant to set a tenant's monthly LLM spend cap (`system/v1/aiSpendCaps`, octo-cli `SetAiSpendCap`); a
+  holder in a child tenant is refused there. Not assigned to TenantOwners and not granted to the initial administrator.
 - **New API scope `ai.llm.invoke` for the AI service's central-key LLM gateway (System.Identity.Bootstrap 1.10.0).** The
   blueprint seeds the scope in the system tenant and every child tenant and attaches it to `octoAPI`, the audience the AI
   service validates; existing tenants get it with the re-import the version bump triggers. No client of the blueprint
