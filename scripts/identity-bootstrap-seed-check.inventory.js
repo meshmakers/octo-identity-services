@@ -109,17 +109,17 @@ const allTenants = [{ tenantId: PARAMS.systemDb, db: PARAMS.systemDb, parent: nu
             db: t.attributes.databaseName || t.attributes.tenantId,
             parent: t.attributes.parentTenantId || PARAMS.systemDb
         })));
-const byId = {};
-allTenants.forEach(t => { byId[t.tenantId] = t; });
+const byId = new Map();
+allTenants.forEach(t => byId.set(t.tenantId, t));
 // Client mirroring provisions a client from any ancestor of a tenant (the parent or a tenant above it), so
 // provisionedByParentTenantId is foreign when it names a tenant outside the tenant's ancestor chain.
 const ancestorsOf = tenant => {
     const result = [];
-    for (let p = tenant.parent; p && result.indexOf(p) < 0; p = byId[p] ? byId[p].parent : null) result.push(p);
+    for (let p = tenant.parent; p && result.indexOf(p) < 0; p = byId.has(p) ? byId.get(p).parent : null) result.push(p);
     return result;
 };
 const selected = PARAMS.tenants.length
-    ? PARAMS.tenants.map(id => byId[id] || { tenantId: id, db: null, parent: null })
+    ? PARAMS.tenants.map(id => byId.get(id) || { tenantId: id, db: null, parent: null })
     : allTenants.slice().sort((a, b) => a.tenantId < b.tenantId ? -1 : a.tenantId > b.tenantId ? 1 : 0);
 const existing = new Set(conn.getMongo().getDBNames());
 const seedIds = SEED_ENTITIES.map(e => ObjectId(e.rtId));
@@ -133,18 +133,22 @@ for (const t of selected) {
     const d = conn.getSiblingDB(t.db);
     // Entities of derived CK types share the collection of their root type, so every entity collection of the tenant
     // is searched for the seed rtIds and each document is judged by its ckTypeId.
-    const found = {};
+    const found = new Map();
     for (const name of d.getCollectionNames().filter(n => n.startsWith("RtEntity_")).sort()) {
         d.getCollection(name)
             .find({ _id: { $in: seedIds } }, { _id: 1, ckTypeId: 1, "attributes.provisionedByParentTenantId": 1 })
-            .forEach(doc => { (found[hex(doc._id)] = found[hex(doc._id)] || []).push({ collection: name, doc: doc }); });
+            .forEach(doc => {
+                const id = hex(doc._id);
+                if (!found.has(id)) found.set(id, []);
+                found.get(id).push({ collection: name, doc: doc });
+            });
     }
 
     const ancestors = ancestorsOf(t);
     let present = 0;
     const missing = [], unexpected = [];
     for (const e of SEED_ENTITIES) {
-        const hits = found[e.rtId] || [];
+        const hits = found.get(e.rtId) || [];
         if (hits.length === 0) {
             missing.push(e.rtId);
             emit([t.tenantId, "entity", e.rtId, e.ckTypeId, "MISSING"]);

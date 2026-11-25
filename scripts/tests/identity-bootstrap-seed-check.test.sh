@@ -101,6 +101,13 @@ PLANTED=(
     'd.getCollection("x")["insertOne"]({});'
     'eval("d.getCollection(1)");'
     'require("fs");'
+    'd.changeUserPassword("u", "p");'
+    'd.getCollection("x").ensureIndex({ a: 1 });'
+    'rs.reconfig({});'
+    'rs.stepDown();'
+    'Reflect.get(d.getCollection("x"), "insertOne");'
+    'const k = "insert" + "One"; d.getCollection("x")[k]({});'
+    'globalThis.db;'
 )
 i=0
 for call in "${PLANTED[@]}"; do
@@ -145,7 +152,13 @@ if [ "$RC" -eq 0 ] && ! grep -q 'get secret' <<<"$LOG" && ! grep -q 'get pods' <
 else fail "password file: rc=$RC log=$LOG err=$ERR"; fi
 
 run_fake clean 'bad"tenant'
-if [ "$RC" -eq 1 ] && grep -q 'invalid tenant id' <<<"$ERR" && [ ! -s "$FAKE_LOG.js" ]; then ok "tenant id with a quote is refused before mongosh"; else fail "invalid tenant: rc=$RC err=$ERR"; fi
+if [ "$RC" -eq 1 ] && grep -q 'invalid tenant id' <<<"$ERR" && [ ! -s "$FAKE_LOG" ]; then
+    ok "tenant id with a quote is refused before any kubectl call (no secret read)"
+else fail "invalid tenant: rc=$RC err=$ERR kubectl log=$LOG"; fi
+run_fake clean --system-db 'x");drop'
+if [ "$RC" -eq 1 ] && grep -q 'invalid --system-db' <<<"$ERR" && [ ! -s "$FAKE_LOG" ]; then
+    ok "--system-db with code is refused before any kubectl call"
+else fail "invalid system db: rc=$RC err=$ERR kubectl log=$LOG"; fi
 
 run_fake findings
 if [ "$RC" -eq 2 ] && grep -q $'^tenanta\tentity\t660000000000000000000001\tSystem.Identity/Role\tMISSING$' <<<"$OUT"; then

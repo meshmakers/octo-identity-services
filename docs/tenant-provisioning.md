@@ -72,7 +72,8 @@ hit: per tenant database it lists the seed entities of `System.Identity.Bootstra
 once or with another CK type, clients whose `provisionedByParentTenantId` names no ancestor of the tenant, and missing or
 duplicated seed associations (exit 0 = clean, 2 = findings, 1 = incomplete). It runs mongosh inside the MongoDB pod with
 read operations only (a write guard refuses the JavaScript otherwise; `--self-check`), reads no secret material and
-passes the MongoDB password on stdin only. The expected entities and associations are embedded in
+passes the MongoDB password on stdin only. The guard is a deny list; where a MongoDB user with read access only exists,
+pass it with `--mongo-user` and `--secret` to make the read-only promise technical. The expected entities and associations are embedded in
 `scripts/identity-bootstrap-seed-check.inventory.js`; `BootstrapSeedCheckManifestTests` keeps them equal to the seed
 files, so a seed change updates the list in the same change. Tests: `bash scripts/tests/identity-bootstrap-seed-check.test.sh`.
 A cluster run needs kubectl access to the MongoDB namespace (shared clusters only via breakglass and with the

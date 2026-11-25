@@ -67,12 +67,16 @@ die() { echo "ERROR: $*" >&2; exit 1; }
 info() { echo "$*" >&2; }
 
 # Write guard: the JavaScript may only read. Refuses write-capable collection/database calls, server commands,
-# $out/$merge stages, dynamic code (eval/Function/require/load) and member access by string literal (obj["insertOne"]),
-# which would hide a call from the other patterns. Comments are scanned too -- keep them free of such calls.
+# $out/$merge stages, dynamic code (eval/Function/require/load), Reflect/Proxy/globalThis and the replica-set and
+# sharding helpers (rs./sh.), and member access by string literal or by a computed key (obj["insertOne"], obj[k]),
+# which would hide a call from the other patterns. Comments are scanned too -- keep them free of such calls. The guard
+# is a deny list; a MongoDB user with read access only (--mongo-user, --secret) makes the read-only promise technical.
 WRITE_PATTERNS=(
-    '\.[[:space:]]*(insert|update|replace|delete|remove|save|drop|create|rename|bulkWrite|initializeOrderedBulkOp|initializeUnorderedBulkOp|findAndModify|findOneAnd|aggregate|mapReduce|watch|runCommand|adminCommand|grant|revoke|setProfilingLevel|fsync|shutdown|killOp|compact|reIndex|hideIndex|unhideIndex|convertToCapped|getCollectionWriteable)[A-Za-z]*[[:space:]]*\('
+    '\.[[:space:]]*(insert|update|replace|delete|remove|save|drop|create|rename|bulkWrite|initializeOrderedBulkOp|initializeUnorderedBulkOp|findAndModify|findOneAnd|aggregate|mapReduce|watch|runCommand|adminCommand|grant|revoke|setProfilingLevel|fsync|shutdown|killOp|compact|reIndex|hideIndex|unhideIndex|convertToCapped|getCollectionWriteable|changeUserPassword|ensureIndex|reconfig|stepDown|setFeatureCompatibilityVersion)[A-Za-z]*[[:space:]]*\('
     '\$(out|merge)'
     '(^|[^A-Za-z0-9_$.])(eval|Function|require|load|runCommand|adminCommand)[[:space:]]*\('
+    '(^|[^A-Za-z0-9_$])(Reflect|Proxy|globalThis|rs|sh)[[:space:]]*\.'
+    '[]A-Za-z0-9_$)][[:space:]]*\[[[:space:]]*[A-Za-z_$]'
     '[]A-Za-z0-9_$)][[:space:]]*\[[[:space:]]*["'"'"'`]'
 )
 write_guard() {
@@ -122,6 +126,17 @@ if [ "$SELF_CHECK" = true ]; then
     exit 0
 fi
 [ -n "$CONTEXT" ] || { usage >&2; die "--context is required"; }
+# Everything that can be refused is refused before the first kubectl call (no secret is read for a run that cannot run).
+# Names go into the JavaScript as string literals: allow only the characters tenant ids, database and user names use.
+NAME_RE='^[A-Za-z0-9_.-]+$'
+[[ "$SYSTEM_DB" =~ $NAME_RE ]] || die "invalid --system-db"
+[[ "$MONGO_USER" =~ $NAME_RE ]] || die "invalid --mongo-user"
+TENANTS_JSON=""
+for t in ${TENANTS[@]+"${TENANTS[@]}"}; do
+    [[ "$t" =~ $NAME_RE ]] || die "invalid tenant id: $t"
+    TENANTS_JSON="${TENANTS_JSON:+$TENANTS_JSON,}\"$t\""
+done
+PARAMS_JS="const PARAMS = {\"systemDb\":\"$SYSTEM_DB\",\"tenants\":[$TENANTS_JSON]};"
 command -v kubectl >/dev/null || die "kubectl is required"
 write_guard || die "write guard refused the JavaScript -- not running anything"
 
@@ -147,16 +162,6 @@ else
     [ -n "$MONGO_PW" ] || { sed -n '1,3p' "$WORK/kubectl.err" >&2; die "cannot read the password from secret $NAMESPACE/$SECRET"; }
 fi
 
-# Names go into the JavaScript as string literals: allow only the characters tenant ids, database and user names use.
-NAME_RE='^[A-Za-z0-9_.-]+$'
-[[ "$SYSTEM_DB" =~ $NAME_RE ]] || die "invalid --system-db"
-[[ "$MONGO_USER" =~ $NAME_RE ]] || die "invalid --mongo-user"
-TENANTS_JSON=""
-for t in ${TENANTS[@]+"${TENANTS[@]}"}; do
-    [[ "$t" =~ $NAME_RE ]] || die "invalid tenant id: $t"
-    TENANTS_JSON="${TENANTS_JSON:+$TENANTS_JSON,}\"$t\""
-done
-PARAMS_JS="const PARAMS = {\"systemDb\":\"$SYSTEM_DB\",\"tenants\":[$TENANTS_JSON]};"
 # Opens the connection with the password from stdin (first line). Not part of the guarded file: it reads stdin only.
 # The pod's own mongod is only the seed: hello() names the replica set and its members, and the check connects to the
 # replica set, so readPreference=secondaryPreferred is honoured and a member lagging more than maxStalenessSeconds is

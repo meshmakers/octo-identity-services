@@ -40,6 +40,9 @@ public class ConcurrentTenantSeedImportIntegrationTests : IClassFixture<Identity
     [Fact]
     public async Task ParallelTenantSetup_GivesEveryTenantExactlyItsOwnSeed_AndLogsNoDuplicate()
     {
+        // The initialization service runs min(ProcessorCount, 8) tenants at once; with one core nothing overlaps and the
+        // test could not catch shared import state.
+        Assert.SkipWhen(Environment.ProcessorCount < 2, "needs at least 2 cores to set tenants up in parallel");
         await _fixture.InitializeAsync();
         var systemContext = _fixture.GetSystemContext();
 
@@ -66,6 +69,7 @@ public class ConcurrentTenantSeedImportIntegrationTests : IClassFixture<Identity
 
         var (entities, associations) = ReadSeed();
         entities.Should().HaveCount(41, "System.Identity.Bootstrap 1.10.0 seeds 41 entities");
+        associations.Should().HaveCount(23, "and 23 associations (a parse that finds none would check nothing)");
 
         foreach (var tenantId in tenantIds)
         {
@@ -93,14 +97,15 @@ public class ConcurrentTenantSeedImportIntegrationTests : IClassFixture<Identity
                     "tenant {0} holds exactly the seed entities of type {1}", tenantId, group.Key);
             }
 
-            foreach (var (origin, originCkTypeId, roleId, target, targetCkTypeId) in associations)
+            // Every seed association exactly once: a dropped edge and an edge written twice both fail.
+            foreach (var (origin, originCkTypeId, roleId, target, _) in associations)
             {
-                var edge = await repo.GetRtAssociationOrDefaultAsync(check,
+                var edges = await repo.GetRtAssociationsAsync(check,
                     new RtEntityId(new RtCkId<CkTypeId>(originCkTypeId), OctoObjectId.Parse(origin)),
-                    new RtEntityId(new RtCkId<CkTypeId>(targetCkTypeId), OctoObjectId.Parse(target)),
-                    new RtCkId<CkAssociationRoleId>(roleId));
-                edge.Should().NotBeNull("tenant {0} holds seed association {1} -{2}-> {3}", tenantId, origin, roleId,
-                    target);
+                    RtAssociationExtendedQueryOptions.Create(GraphDirections.Outbound,
+                        new RtCkId<CkAssociationRoleId>(roleId)));
+                edges.Items.Count(e => e.TargetRtId == OctoObjectId.Parse(target)).Should().Be(1,
+                    "tenant {0} holds seed association {1} -{2}-> {3} exactly once", tenantId, origin, roleId, target);
             }
 
             await check.CommitTransactionAsync();
