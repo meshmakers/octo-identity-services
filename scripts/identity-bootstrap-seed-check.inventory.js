@@ -24,7 +24,7 @@
 
 // Generated from src/Persistence.IdentityCkModel/Blueprints/System.Identity.Bootstrap/seed-data (blueprint 1.10.0);
 // BootstrapSeedCheckManifestTests fails when the seed and this list differ.
-const SEED_BLUEPRINT = "System.Identity.Bootstrap-1.10.0";
+const SEED_BLUEPRINT = "System.Identity.Bootstrap-1.11.0";
 const SEED_ENTITIES = [
     { rtId: "660000000000000000000020", ckTypeId: "System.Identity/ApiResource" },
     { rtId: "660000000000000000000021", ckTypeId: "System.Identity/ApiResource" },
@@ -66,7 +66,8 @@ const SEED_ENTITIES = [
     { rtId: "66000000000000000000000e", ckTypeId: "System.Identity/Role" },
     { rtId: "660000000000000000000060", ckTypeId: "System.Identity/Role" },
     { rtId: "660000000000000000000061", ckTypeId: "System.Identity/Role" },
-    { rtId: "660000000000000000000062", ckTypeId: "System.Identity/Role" }
+    { rtId: "660000000000000000000062", ckTypeId: "System.Identity/Role" },
+    { rtId: "660000000000000000000063", ckTypeId: "System.Identity/Role" }
 ];
 // [origin rtId, association role, target rtId, target CK type]
 const SEED_ASSOCIATIONS = [
