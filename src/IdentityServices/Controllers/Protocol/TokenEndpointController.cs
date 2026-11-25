@@ -143,7 +143,13 @@ public class TokenEndpointController(
             (string?)request[Parameters.SubjectToken],
             (string?)request[Parameters.SubjectTokenType],
             (string?)request["acr_values"],
-            HttpContext.RequestAborted);
+            HttpContext.RequestAborted,
+            request.ClientId);
+
+        if (outcome.Error == null && outcome.ShadowClient != null)
+        {
+            return await SignInServiceAccountExchangeAsync(request, outcome);
+        }
 
         if (outcome.Error != null || outcome.ShadowUser == null)
         {
@@ -169,6 +175,42 @@ public class TokenEndpointController(
         identity.SetDestinations(OctoClaimsDestinations.Resolve);
 
         return SignIn(new ClaimsPrincipal(identity), OpenIddictServerAspNetCoreDefaults.AuthenticationScheme);
+    }
+
+    /// <summary>
+    ///     The token of an admitted service-account exchange is client-credentials-shaped FOR THE SHADOW CLIENT
+    ///     of the target tenant, like an impersonated token: <c>sub</c> carries the shadow client id only
+    ///     because OpenIddict requires a subject; <see cref="OctoAccessTokenShapeHandler" /> re-stamps <c>client_id</c>
+    ///     to it and strips <c>sub</c> (a service token is recognized by the absence of <c>sub</c>). <c>tenant_id</c> is the
+    ///     target tenant, the roles are exactly the shadow client's roles there, <c>act</c> names the subject service
+    ///     account of the source tenant; <c>tenant_gen</c> of the target is stamped by
+    ///     <c>OctoTenantGenerationClaimHandler</c>. No refresh token.
+    /// </summary>
+    private async Task<IActionResult> SignInServiceAccountExchangeAsync(OpenIddictRequest request,
+        TenantExchangeProcessor.ExchangeOutcome outcome)
+    {
+        var identity = CreateIdentity();
+        identity.SetClaim(Claims.Subject, outcome.ShadowClient!.ClientId);
+        identity.SetClaim(OctoClaimTypes.TenantId, outcome.TargetTenantId);
+        foreach (var roleName in outcome.ShadowClientRoleNames!)
+        {
+            identity.AddClaim(new Claim(Claims.Role, roleName));
+        }
+
+        identity.AddClaim(new Claim(DelegationConstants.ActClaimType, outcome.SourceClientId!));
+        identity.SetClaim(Claims.AuthenticationMethodReference, TenantExchangeProcessor.AuthenticationMethod);
+
+        var scopes = request.GetScopes().Remove(Scopes.OfflineAccess);
+        identity.SetScopes(scopes);
+        identity.SetResources(await tokenClaimsService.ResolveAudiencesAsync(scopes));
+        identity.SetDestinations(OctoClaimsDestinations.Resolve);
+
+        // Short-lived whatever the shadow client's own lifetime says; the exchange issues it as the "issued token".
+        var principal = new ClaimsPrincipal(identity);
+        principal.SetIssuedTokenLifetime(TenantExchangeProcessor.ServiceAccountTokenLifetime);
+        principal.SetAccessTokenLifetime(TenantExchangeProcessor.ServiceAccountTokenLifetime);
+
+        return SignIn(principal, OpenIddictServerAspNetCoreDefaults.AuthenticationScheme);
     }
 
     private async Task<IActionResult> HandleOnBehalfOfAsync(OpenIddictRequest request)

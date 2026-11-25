@@ -99,7 +99,16 @@ public class OctoAccessTokenShapeHandler : IOpenIddictServerHandler<GenerateToke
         // visible solely through the act claim.
         var isImpersonation = string.Equals(context.Request?.GrantType,
             ImpersonationConstants.ImpersonationGrantType, StringComparison.Ordinal);
-        if (isImpersonation && descriptor != null)
+
+        // A service-account token exchange issues a service token for the target tenant's shadow client, the
+        // same shape as impersonation: client_id = the shadow client parked in sub, no sub, act = the source account. A
+        // user exchange never carries act, so act tells the two apart.
+        var isServiceAccountExchange = context.Request?.IsTokenExchangeGrantType() == true && descriptor != null &&
+                                       (descriptor.Subject?.HasClaim(c => c.Type == DelegationConstants.ActClaimType) ==
+                                        true ||
+                                        descriptor.Claims?.ContainsKey(DelegationConstants.ActClaimType) == true);
+        var isServiceToken = isImpersonation || isServiceAccountExchange;
+        if (isServiceToken && descriptor != null)
         {
             var targetClientId =
                 descriptor.Subject?.FindFirst(Claims.Subject)?.Value ??
@@ -126,7 +135,7 @@ public class OctoAccessTokenShapeHandler : IOpenIddictServerHandler<GenerateToke
             // client_credentials access tokens must carry no sub claim — the platform's
             // TenantAuthorizationMiddleware identifies service-to-service tokens by its absence.
             // Impersonated tokens (AB#5114) are service tokens for the target and follow suit.
-            if (context.Request?.IsClientCredentialsGrantType() == true || isImpersonation)
+            if (context.Request?.IsClientCredentialsGrantType() == true || isServiceToken)
             {
                 descriptor.Claims.Remove(Claims.Subject);
             }
@@ -141,7 +150,7 @@ public class OctoAccessTokenShapeHandler : IOpenIddictServerHandler<GenerateToke
 
         if (descriptor?.Subject != null)
         {
-            if (context.Request?.IsClientCredentialsGrantType() == true || isImpersonation)
+            if (context.Request?.IsClientCredentialsGrantType() == true || isServiceToken)
             {
                 descriptor.Subject.TryRemoveClaim(descriptor.Subject.FindFirst(Claims.Subject));
             }

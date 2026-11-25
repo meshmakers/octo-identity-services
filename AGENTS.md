@@ -23,7 +23,7 @@ consumers work unchanged; the remaining discovery-document differences are docum
 | `**/SystemStores/*Client*.cs`, `**/Services/{ClientGrants,PipelineServiceAccounts,DynamicClientRegistration}/**`, `*ClientMirror*.cs`, `ClientsController.cs` | `docs/client-credentials.md` |
 | `*ClientMirror*.cs`, `{ClientCredentialsTenantProcessor,MirrorSecretUsageTelemetry,OctoApplicationManager}.cs` | `docs/client-mirroring.md` |
 | `src/IdentityServices/{Logging,TenantApi,Controllers/Api}/**`, `{OctoUser*,*Revocation*,SecondFactorEvidence,*UserCredentialChangeService}.cs` | `docs/credential-security.md` |
-| `{*CrossTenant*,TenantProbeGuard,Allowed*,*IdentityResolver,*Processor,*ShadowUser*,*ExternalTenantUser*,*SourceT*,*SourceU*,Sibling*,AuthApiController}.cs` | `docs/cross-tenant-authentication.md` |
+| `{*CrossTenant*,TenantProbeGuard,Allowed*,*IdentityResolver,*Processor,*ShadowUser*,*ExternalTenantUser*,*SourceT*,*SourceU*,Sibling*,AuthApiController,*ServiceAccountExchange*}.cs` | `docs/cross-tenant-authentication.md` |
 | `src/IdentityServices/Methods/**`, `**/Services/{SelfService,SecretManagement}/**`, `*DataPermission*.cs` | `docs/identity-methods.md` |
 | `{IdentityMethodFacade,IdentityRestDeprecation,UsersController,ManageApiController,RoleChangeProblems,ResetUserPasswordRequestDto,ApiSecretsController,DataPermissionsController,ClientMirrorController,AdminProvisioningController,RolesController,GroupsController,ApiScopesController,ApiResourcesController,IdentityProvidersController,EmailDomainGroupRulesController,ExternalTenantUserMappingsController,ClientsController}.cs` | `docs/identity-rest-facades.md` |
 | `src/Authentication/**`, `**/Services/Login/**`, `{TenantDiscovery*,TenantTopology*,*IdentityProvider*,*EmailDomainGroupRule*,*Channel*,AuthApiController}.cs` | `docs/login-and-providers.md` |
@@ -150,7 +150,9 @@ wird, sind alle anderen Pre-Commit-Regeln (Lint etc.) ebenfalls hinfällig.
   `docs/openiddict-protocol.md`.
 - **Ancestry is not authority.** A cross-tenant token exchange issues exactly the roles the shadow user resolves in
   the target tenant, and every cross-tenant entry point checks the second factor:
-  `docs/cross-tenant-authentication.md`.
+  `docs/cross-tenant-authentication.md`. A service-account subject gets exactly the roles of its shadow
+  client `xt_{T}_{clientId}` in a parent, sibling or child tenant, presented by that shadow client; mirrored
+  clients, chains and the system tenant are refused (same doc, "Service-account subjects").
 - **A client-credentials token names its tenant, and an ambiguous tenant binding is refused**, never guessed:
   `docs/client-mirroring.md`.
 - **An administrator creates a user only through `User.CreateUser` and merges only through `User.Merge`** (REST runs

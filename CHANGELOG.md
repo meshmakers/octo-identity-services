@@ -24,6 +24,14 @@ Notable changes of the OctoMesh identity services. The CK model `System.Identity
 
 ### Security
 
+- **Token exchange for service-account subjects (AB#9777).** A client-credentials token of tenant T can be exchanged
+  into T's registry parent, sibling (same parent, not the system tenant) or child U, presented by U's own public shadow
+  client `xt_{T}_{clientId}` (token-exchange grant only). The issued token is client-shaped for the shadow client
+  (`tenant_id=U`, U's `tenant_gen`, exactly the shadow client's roles in U, `act` = the source client, 5 minutes, no
+  refresh). Refused: the system tenant, other relations, mirrored or disabled subject clients, `act` subjects, `xt_` or
+  ambiguous names, unprovisioned or over-capable shadow clients and, for a parent or sibling, a U that T's allow-list
+  does not permit. User exchanges are unchanged. See `docs/cross-tenant-authentication.md`.
+
 - **New API scope `ai.llm.invoke` for the AI service's central-key LLM gateway (System.Identity.Bootstrap 1.10.0).** The
   blueprint seeds the scope in the system tenant and every child tenant and attaches it to `octoAPI`, the audience the AI
   service validates; existing tenants get it with the re-import the version bump triggers. No client of the blueprint
