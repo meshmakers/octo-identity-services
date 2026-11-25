@@ -8,7 +8,7 @@ namespace IdentityServerPersistence.Services.RoleGrants;
 public sealed class AiBudgetAdminGrantMarker : AdministratorRoleGrantMarker;
 
 /// <summary>
-///     AB#8690: one-time, additive grant of the platform role <c>AiBudgetAdmin</c> (blueprint 1.11.0, 660…63) to the
+///     One-time, additive grant of the platform role <c>AiBudgetAdmin</c> (blueprint 1.11.0, 660…63) to the
 ///     existing HUMAN administrators of the SYSTEM tenant — local users holding both <c>AdminPanelManagement</c> and
 ///     <c>TenantManagement</c>, as for <c>SecretManagement</c> (<see cref="AdministratorRoleOneTimeGrant"/>).
 /// </summary>

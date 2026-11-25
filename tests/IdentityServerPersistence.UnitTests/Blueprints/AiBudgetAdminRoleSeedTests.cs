@@ -4,7 +4,7 @@ using Xunit;
 namespace IdentityServerPersistence.UnitTests.Blueprints;
 
 /// <summary>
-///     AB#8690: the <c>System.Identity.Bootstrap</c> blueprint seeds the platform role <c>AiBudgetAdmin</c> (stable rtId
+///     The <c>System.Identity.Bootstrap</c> blueprint seeds the platform role <c>AiBudgetAdmin</c> (stable rtId
 ///     660…63), keeps it off the TenantOwners group and bumps the blueprint version to 1.11.0 so existing tenants re-import
 ///     the seed. The AI service accepts the role only in a token of the system tenant. Pinned against the seed files.
 /// </summary>
