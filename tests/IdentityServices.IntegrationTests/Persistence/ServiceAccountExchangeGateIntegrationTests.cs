@@ -8,6 +8,7 @@ using Meshmakers.Octo.ConstructionKit.Contracts;
 using Meshmakers.Octo.Runtime.Contracts;
 using Meshmakers.Octo.Runtime.Contracts.MongoDb;
 using Meshmakers.Octo.Runtime.Contracts.MongoDb.Repositories;
+using Meshmakers.Octo.Runtime.Contracts.Repositories.Query;
 using Meshmakers.Octo.Runtime.Contracts.RepositoryEntities;
 using Meshmakers.Octo.Services.Infrastructure.Services;
 using Microsoft.Extensions.Caching.Memory;
@@ -335,7 +336,8 @@ public class ServiceAccountExchangeGateIntegrationTests : IClassFixture<Identity
     [Fact]
     public async Task ShadowNameThatAlsoReadsAsAnotherTenantsClient_IsRefused()
     {
-        var h = await ArrangeAsync();
+        // Adds a tenant to the hierarchy, so it gets a hierarchy of its own.
+        var h = await ArrangeFreshAsync();
         // Tenant "<A>_b" exists, so xt_<A>_b_svc names client "b_svc" of A as well as client "svc" of "<A>_b".
         await CreateTenantAsync(h.G, $"{h.A}_b");
         var client = await CreateServiceAccountAsync(h.A, clientId: "b_svc");
@@ -361,7 +363,35 @@ public class ServiceAccountExchangeGateIntegrationTests : IClassFixture<Identity
 
     private sealed record Hierarchy(string System, string G, string A, string B, string C, string X, string Y);
 
+    // xUnit creates a new instance of this class per test, while the IdentityServicesFixture (and its databases)
+    // lives for the whole class. Creating the six tenants takes about 20 s, so the hierarchy is built once per
+    // fixture and shared by every test that only adds its own clients and roles to it (each test uses fresh client
+    // ids). A test that changes the tenant structure itself (adds, re-parents, disables or deletes a tenant) or a
+    // tenant's state (generation, allow-list) uses ArrangeFreshAsync instead.
+    private static readonly SemaphoreSlim SharedHierarchyLock = new(1, 1);
+    private static (IdentityServicesFixture Fixture, Hierarchy Hierarchy)? _sharedHierarchy;
+
     private async Task<Hierarchy> ArrangeAsync()
+    {
+        await SharedHierarchyLock.WaitAsync(TestContext.Current.CancellationToken);
+        try
+        {
+            if (_sharedHierarchy is { } shared && ReferenceEquals(shared.Fixture, _fixture))
+            {
+                return shared.Hierarchy;
+            }
+
+            var hierarchy = await ArrangeFreshAsync();
+            _sharedHierarchy = (_fixture, hierarchy);
+            return hierarchy;
+        }
+        finally
+        {
+            SharedHierarchyLock.Release();
+        }
+    }
+
+    private async Task<Hierarchy> ArrangeFreshAsync()
     {
         await _fixture.InitializeAsync();
         var systemContext = _fixture.GetSystemContext();
@@ -482,12 +512,19 @@ public class ServiceAccountExchangeGateIntegrationTests : IClassFixture<Identity
         using (var session = await repo.GetSessionAsync())
         {
             session.StartTransaction();
-            await repo.InsertOneRtEntityAsync(session, new RtRole
+            // The shared hierarchy is used by several tests: create each role of a tenant once.
+            var existing = await repo.GetRtEntitiesByTypeAsync<RtRole>(session, RtEntityQueryOptions.Create()
+                .FieldFilter(nameof(RtRole.NormalizedName), FieldFilterOperator.Equals, roleName.ToUpperInvariant()));
+            if (!existing.Items.Any())
             {
-                RtId = OctoObjectId.GenerateNewId(),
-                Name = roleName,
-                NormalizedName = roleName.ToUpperInvariant()
-            });
+                await repo.InsertOneRtEntityAsync(session, new RtRole
+                {
+                    RtId = OctoObjectId.GenerateNewId(),
+                    Name = roleName,
+                    NormalizedName = roleName.ToUpperInvariant()
+                });
+            }
+
             await session.CommitTransactionAsync();
         }
 
