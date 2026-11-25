@@ -158,10 +158,10 @@ counterpart of the browser tenant-switch, for the MCP server:
   `tests/IdentityServices.IntegrationTests/Persistence/TenantExchangeIntegrationTests.cs`
   (privilege-escalation regression: resolved roles == B subset, not A's full set).
 
-## Service-account subjects of the token exchange (AB#9777)
+## Service-account subjects of the token exchange
 
 A pipeline service account (client-credentials token) of tenant **T** can obtain a token for a related tenant **U**
-through the same RFC 8693 grant (design note AB#9766 §3.3 option B). Identity stays the single authority: the roles
+through the same RFC 8693 grant, presented by a shadow client U's administrator provisions. Identity stays the single authority: the roles
 come only from what U's administrator provisioned in U.
 
 **Request** (`POST /connect/token`, form):
@@ -190,15 +190,20 @@ client. A mirror (`ProvisionedByParentTenantId`, `AutoProvisionInChildTenants`) 
 - Relation from the tenant registry: U is T's **parent**, **sibling** (same parent, which is not the system tenant) or
   **child**. Refused: the system tenant as source or target, T itself, grandchildren and deeper, grandparents, cousins,
   unregistered tenants, and top-level tenants among each other.
-- For a parent or sibling U, T's allow-list must permit U (`ISourceTenantGrantPolicy`, the sibling-grant rule of users,
-  AB#8343). A child U needs no allow-list entry; the provisioning in U is its admission.
+- For a parent or sibling U, T's allow-list must permit U (`ISourceTenantGrantPolicy`, the sibling-grant rule of
+  users). A child U needs no allow-list entry; the provisioning in U is its admission.
 - The subject client must be an enabled client of T and not mirrored (own flag, mirror marker or `RtClientMirror` rows
   in T): a mirrored client shares its secret with other tenants (`CONCEPT-PER-TENANT-MIRROR-SECRETS.md` §1).
 - No chains: a subject token carrying `act` (impersonated or already exchanged) and a subject client named `xt_…` are
-  refused. A shadow name that also reads as a client of another registered tenant (tenant ids may contain `_`,
-  AB#5708) is refused.
-- The subject token's `tenant_gen` must match T's current generation (`IGrantTenantGenerationGuard`, AB#9017).
-- Every refusal writes the `Token Exchange Failure` audit event and the cross-tenant refusal event like a user exchange.
+  refused. A shadow name that also reads as a client of another registered tenant (tenant ids may contain `_`)
+  is refused.
+- The subject token's `tenant_gen` is checked against T's current generation (`IGrantTenantGenerationGuard`). It is
+  refused only with `TenantAuthorization:TenantGenerationEnforcement=Enforce`; the default `LogOnly` only logs and
+  counts a mismatch, `Disabled` skips the check.
+- Every refusal once the target tenant U is wired into the request (from the `act` check on) writes the
+  `Token Exchange Failure` audit event and, for a source T that is not a registry ancestor of U, the cross-tenant
+  refusal event, like a user exchange. A request whose U is not wired into it (`invalid_target`) writes only the
+  failure event; a missing or invalid subject token and a missing `acr_values` write none.
 
 | Refusal | `error` | `error_description` starts with |
 |---|---|---|
@@ -208,7 +213,9 @@ client. A mirror (`ProvisionedByParentTenantId`, `AutoProvisionInChildTenants`) 
 | shadow subject or ambiguous name | `access_denied` | `ambiguous_subject` |
 | shadow client with another grant, redirect URIs, offline access or a secret | `access_denied` | `shadow_client_invalid` |
 | relation not allowed, system tenant, unknown tenant | `unauthorized_client` | `cross-tenant access` |
-| subject token invalid, expired or of another issuer; subject client unknown or disabled in T; `act` on the subject; earlier generation | `invalid_grant` | — |
+| subject token invalid, expired or of another issuer; subject client unknown or disabled in T; `act` on the subject; earlier generation (`Enforce` only) | `invalid_grant` | — |
+| T's generation could not be read (`Enforce` only) | `server_error` | — |
+| registry, allow-list or directory state could not be read | `access_denied` | `the service-account exchange could not be checked` |
 | presented by another client than the shadow client | `unauthorized_client` | `a service-account subject` |
 
 **Issued access token** (client-credentials shape, like impersonation; lifetime 5 minutes, no refresh token):
@@ -224,7 +231,7 @@ client. A mirror (`ProvisionedByParentTenantId`, `AutoProvisionInChildTenants`) 
 | `amr` | `token_exchange` |
 | `scope`, `aud` | the requested scopes and their API resources |
 
-A consumer (the mesh adapter's cross-tenant guard, AB#9767) checks `tenant_id == U`, `tenant_gen` against U's current
+A consumer (such as the mesh adapter's cross-tenant guard) checks `tenant_id == U`, `tenant_gen` against U's current
 generation and `client_id == xt_{T}_{clientId}`, and uses only these roles in U.
 
 Tests: `ServiceAccountExchangeGateIntegrationTests` (every rule against MongoDB),

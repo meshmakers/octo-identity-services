@@ -20,7 +20,7 @@ using Xunit;
 namespace IdentityServices.IntegrationTests.Persistence;
 
 /// <summary>
-///     AB#9777 — <see cref="ServiceAccountExchangeGate" /> against a real MongoDB with a registry hierarchy below the
+///     <see cref="ServiceAccountExchangeGate" /> against a real MongoDB with a registry hierarchy below the
 ///     system tenant: <c>G</c> with children <c>A</c> and <c>B</c>, grandchild <c>C</c> below <c>A</c>, and an unrelated
 ///     top-level tenant <c>X</c> with child <c>Y</c>. Every abuse case of the story is one test; the roles of T never
 ///     appear in the decision for U.
@@ -118,7 +118,7 @@ public class ServiceAccountExchangeGateIntegrationTests : IClassFixture<Identity
         var decision = await CreateGate().EvaluateAsync(h.G, client, h.A);
 
         decision.Refusal.Should().Be(ServiceAccountExchangeRefusal.NotProvisioned,
-            "ancestry is not authority: without provisioning in the target no role is granted (AB#6839)");
+            "ancestry is not authority: without provisioning in the target no role is granted");
     }
 
     [Fact]

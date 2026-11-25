@@ -150,7 +150,7 @@ wird, sind alle anderen Pre-Commit-Regeln (Lint etc.) ebenfalls hinfällig.
   `docs/openiddict-protocol.md`.
 - **Ancestry is not authority.** A cross-tenant token exchange issues exactly the roles the shadow user resolves in
   the target tenant, and every cross-tenant entry point checks the second factor:
-  `docs/cross-tenant-authentication.md`. A service-account subject (AB#9777) gets exactly the roles of its shadow
+  `docs/cross-tenant-authentication.md`. A service-account subject gets exactly the roles of its shadow
   client `xt_{T}_{clientId}` in a parent, sibling or child tenant, presented by that shadow client; mirrored
   clients, chains and the system tenant are refused (same doc, "Service-account subjects").
 - **A client-credentials token names its tenant, and an ambiguous tenant binding is refused**, never guessed:

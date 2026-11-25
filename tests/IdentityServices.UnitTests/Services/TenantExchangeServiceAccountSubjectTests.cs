@@ -27,7 +27,7 @@ using static OpenIddict.Abstractions.OpenIddictConstants;
 namespace IdentityServices.UnitTests.Services;
 
 /// <summary>
-///     AB#9777 — the RFC 8693 exchange accepts a service-account (client-credentials) token of T as subject: the
+///     The RFC 8693 exchange accepts a service-account (client-credentials) token of T as subject: the
 ///     protocol half of <see cref="TenantExchangeProcessor" /> with genuinely signed subject tokens. The authorization
 ///     itself (relation, mirror, provisioning in U, allow-list) is <see cref="IServiceAccountExchangeGate" />, faked here
 ///     and covered against MongoDB by <c>ServiceAccountExchangeGateIntegrationTests</c>.
@@ -41,7 +41,7 @@ public class TenantExchangeServiceAccountSubjectTests
     private const string ClientId = "octo-pipeline-sa-0001";
     private const string ShadowClientId = "xt_acme-a_octo-pipeline-sa-0001";
 
-    private readonly RsaSecurityKey _signingKey = new(RSA.Create(2048)) { KeyId = "unit-test-key-9777" };
+    private readonly RsaSecurityKey _signingKey = new(RSA.Create(2048)) { KeyId = "unit-test-key-service-account" };
     private readonly IServiceAccountExchangeGate _gate = Substitute.For<IServiceAccountExchangeGate>();
     private readonly ICrossTenantAuthenticationService _crossTenant = Substitute.For<ICrossTenantAuthenticationService>();
     private readonly IIdentityAuditService _audit = Substitute.For<IIdentityAuditService>();
@@ -156,7 +156,7 @@ public class TenantExchangeServiceAccountSubjectTests
     }
 
     [Fact]
-    public async Task ServiceAccountSubject_CarryingAct_IsRefusedBeforeTheGate()
+    public async Task ServiceAccountSubject_CarryingAct_IsRefusedBeforeTheGate_AndAudited()
     {
         var outcome = await CreateSut().ProcessAsync(ServiceToken(extra: new Dictionary<string, object>
         {
@@ -165,6 +165,10 @@ public class TenantExchangeServiceAccountSubjectTests
 
         outcome.Error.Should().Be(Errors.InvalidGrant);
         await _gate.DidNotReceiveWithAnyArgs().EvaluateAsync(default!, default!, default!);
+        await _audit.Received(1).StoreFailureAsync("Token Exchange Failure",
+            Arg.Is<string>(m => m.Contains(ClientId) && m.Contains(Target) && m.Contains("act")));
+        await _grantAudit.Received(1).RecordExchangeRefusedAsync(Target, Source, ClientId,
+            Arg.Is<string>(r => r.Contains("act")));
     }
 
     [Fact]
@@ -181,6 +185,8 @@ public class TenantExchangeServiceAccountSubjectTests
         outcome.Error.Should().Be(Errors.InvalidGrant);
         outcome.ErrorDescription.Should().Be(GrantTenantGenerationGuard.RefusedDescription);
         await _gate.DidNotReceiveWithAnyArgs().EvaluateAsync(default!, default!, default!);
+        await _audit.Received(1).StoreFailureAsync("Token Exchange Failure", Arg.Is<string>(m => m.Contains(ClientId)));
+        await _grantAudit.Received(1).RecordExchangeRefusedAsync(Target, Source, ClientId, Arg.Any<string>());
     }
 
     [Fact]
@@ -191,6 +197,9 @@ public class TenantExchangeServiceAccountSubjectTests
 
         outcome.Error.Should().Be(Errors.InvalidTarget);
         await _gate.DidNotReceiveWithAnyArgs().EvaluateAsync(default!, default!, default!);
+        // The target is not wired into the request, so only the failure event is written, no cross-tenant event.
+        await _audit.Received(1).StoreFailureAsync("Token Exchange Failure", Arg.Is<string>(m => m.Contains(ClientId)));
+        await _grantAudit.DidNotReceiveWithAnyArgs().RecordExchangeRefusedAsync(default!, default!, default!, default!);
     }
 
     [Fact]

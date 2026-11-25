@@ -84,7 +84,7 @@ public class TokenExchangeHttpTests : IntegrationTestBase
 
         // The built-in authorized-party check would answer "The specified subject token cannot be
         // used by this client application". Reaching TenantExchangeProcessor instead yields ITS
-        // rejection: since AB#9777 a client_credentials token is a service-account subject, and the
+        // rejection: a client_credentials token is a service-account subject, and the
         // service-account gate never admits the system tenant.
         exchangeResponse.StatusCode.Should().Be(HttpStatusCode.BadRequest);
         body["error"]!.GetValue<string>().Should().Be("unauthorized_client");

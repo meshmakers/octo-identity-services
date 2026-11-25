@@ -9,7 +9,7 @@ using Persistence.IdentityCkModel.Generated.System.Identity.v3;
 
 namespace IdentityServerPersistence.Services.ServiceAccountExchange;
 
-/// <summary>Registry relation of the target tenant U to the source tenant T of a service-account exchange (AB#9777).</summary>
+/// <summary>Registry relation of the target tenant U to the source tenant T of a service-account exchange.</summary>
 public enum ServiceAccountExchangeRelation
 {
     /// <summary>U is the registry parent of T.</summary>
@@ -22,7 +22,7 @@ public enum ServiceAccountExchangeRelation
     Child
 }
 
-/// <summary>Why the gate refused a service-account exchange (AB#9777).</summary>
+/// <summary>Why the gate refused a service-account exchange.</summary>
 public enum ServiceAccountExchangeRefusal
 {
     /// <summary>Admitted.</summary>
@@ -90,7 +90,7 @@ public sealed record ServiceAccountExchangeDecision
 
 /// <summary>
 ///     The authorization of an RFC 8693 exchange whose subject is a service account (client-credentials token) of tenant
-///     T, into tenant U (AB#9777, design note AB#9766 §3.3 option B). Protocol-free: the subject token is validated by
+///     T, into tenant U, presented by U's shadow client. Protocol-free: the subject token is validated by
 ///     the caller; this gate decides on registry and directory state only.
 /// </summary>
 public interface IServiceAccountExchangeGate
@@ -109,7 +109,7 @@ public interface IServiceAccountExchangeGate
 ///         <c>xt_{T}_{clientId}</c> of U's own (no mirror) with at least one effective role (direct or through groups),
 ///         that can do nothing but present the exchange (public, the token-exchange grant only, no redirect URIs, no
 ///         offline access), and (5) for a parent or sibling U, T's allow-list permits U (<see cref="ISourceTenantGrantPolicy" />, the rule
-///         sibling grants of users follow, AB#8343). The roles of the issued token are exactly the shadow client's roles in
+///         sibling grants of users follow). The roles of the issued token are exactly the shadow client's roles in
 ///         U; no role of T is read. Every unreadable state refuses.
 ///     </para>
 ///     <para>
@@ -117,7 +117,7 @@ public interface IServiceAccountExchangeGate
 ///         secret with other tenants, so its token of T proves nothing about T.
 ///     </para>
 ///     <para>
-///         <b>Names are unambiguous or refused.</b> Tenant ids may contain <c>_</c> (AB#5708), so
+///         <b>Names are unambiguous or refused.</b> Tenant ids may contain <c>_</c>, so
 ///         <c>xt_{T}_{clientId}</c> could also be read with another registered tenant id as prefix; such a name is refused,
 ///         as is a subject that is itself a shadow client (no chains in v1).
 ///     </para>
@@ -242,7 +242,7 @@ public sealed class ServiceAccountExchangeGate(
                 "the shadow client holds no role in the target tenant", relation);
         }
 
-        // Parent and sibling are no registry descendants of T: T must permit U, as for sibling grants of users (AB#8343).
+        // Parent and sibling are no registry descendants of T: T must permit U, as for sibling grants of users.
         if (relation != ServiceAccountExchangeRelation.Child &&
             !await grantPolicy.IsPermittedAsync(source.TenantId, target.TenantId))
         {
@@ -321,7 +321,7 @@ public sealed class ServiceAccountExchangeGate(
     private static bool IsSame(string? a, string? b) => string.Equals(a, b, StringComparison.OrdinalIgnoreCase);
 
     /// <summary>
-    ///     Another registered tenant id that <c>{T}_{clientId}</c> could be split at, or <c>null</c> (AB#5708 rule for
+    ///     Another registered tenant id that <c>{T}_{clientId}</c> could be split at, or <c>null</c> (the rule for
     ///     shadow names: an ambiguous name grants nothing).
     /// </summary>
     private async Task<string?> FindOtherTenantPrefixAsync(string sourceTenantId, string sourceClientId)

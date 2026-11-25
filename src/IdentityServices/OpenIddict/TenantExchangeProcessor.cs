@@ -54,7 +54,7 @@ namespace Meshmakers.Octo.Backend.IdentityServices.OpenIddict;
 ///         a later 403 on the first call. A token without roles could not pass role enforcement anyway.
 ///     </para>
 ///     <para>
-///         <b>Service-account subjects (AB#9777).</b> A client-credentials token of A (no <c>sub</c>, a
+///         <b>Service-account subjects.</b> A client-credentials token of A (no <c>sub</c>, a
 ///         <c>client_id</c>) is judged by <see cref="IServiceAccountExchangeGate" /> instead of the user rules: B must be
 ///         A's registry parent, sibling or child, the client unmirrored, and B must hold its own enabled shadow client
 ///         <c>xt_{A}_{clientId}</c> with at least one role (and, for a parent or sibling B, A's allow-list must permit B).
@@ -99,24 +99,24 @@ public class TenantExchangeProcessor(
 
     /// <summary>
     ///     Stable prefix of the <c>error_description</c> (with <c>error=access_denied</c>) when the subject of a
-    ///     service-account exchange is a mirrored client, whose secret is shared with other tenants (AB#9777).
+    ///     service-account exchange is a mirrored client, whose secret is shared with other tenants.
     /// </summary>
     public const string MirroredClientMarker = "mirrored_client";
 
     /// <summary>
     ///     Stable prefix of the <c>error_description</c> (with <c>error=access_denied</c>) when the subject client of a
-    ///     service-account exchange is itself a shadow client or its shadow name is ambiguous (AB#9777).
+    ///     service-account exchange is itself a shadow client or its shadow name is ambiguous.
     /// </summary>
     public const string AmbiguousSubjectMarker = "ambiguous_subject";
 
     /// <summary>
     ///     Stable prefix of the <c>error_description</c> (with <c>error=access_denied</c>) when the shadow client of a
-    ///     service-account exchange can do more than present the exchange (AB#9777).
+    ///     service-account exchange can do more than present the exchange.
     /// </summary>
     public const string ShadowClientInvalidMarker = "shadow_client_invalid";
 
     /// <summary>
-    ///     Lifetime of the token a service-account exchange issues (AB#9777): short, never refreshable; the caller exchanges
+    ///     Lifetime of the token a service-account exchange issues: short, never refreshable; the caller exchanges
     ///     again from its still-valid source token.
     /// </summary>
     public static readonly TimeSpan ServiceAccountTokenLifetime = TimeSpan.FromMinutes(5);
@@ -142,18 +142,18 @@ public class TenantExchangeProcessor(
             new() { ShadowUser = shadowUser, TargetTenantId = targetTenantId, SecondFactorVerified = secondFactorVerified };
 
         /// <summary>
-        ///     AB#9777: the subject was a service account of the source tenant; the token is issued for this shadow client
+        ///     The subject was a service account of the source tenant; the token is issued for this shadow client
         ///     of the target tenant (<c>xt_{source}_{clientId}</c>) with <see cref="ShadowClientRoleNames" />.
         /// </summary>
         public RtClient? ShadowClient { get; init; }
 
-        /// <summary>AB#9777: the effective roles of <see cref="ShadowClient" /> in the target tenant.</summary>
+        /// <summary>The effective roles of <see cref="ShadowClient" /> in the target tenant.</summary>
         public IReadOnlySet<string>? ShadowClientRoleNames { get; init; }
 
-        /// <summary>AB#9777: the client id of the subject service account in the source tenant.</summary>
+        /// <summary>The client id of the subject service account in the source tenant.</summary>
         public string? SourceClientId { get; init; }
 
-        /// <summary>AB#9777: the source tenant of a service-account exchange.</summary>
+        /// <summary>The source tenant of a service-account exchange.</summary>
         public string? SourceTenantId { get; init; }
 
         public static ExchangeOutcome SucceededForServiceAccount(RtClient shadowClient, IReadOnlySet<string> roleNames,
@@ -173,7 +173,7 @@ public class TenantExchangeProcessor(
     /// <param name="acrValues">The raw acr_values parameter carrying <c>tenant:{B}</c>.</param>
     /// <param name="cancellationToken">Cancels the generation lookup.</param>
     /// <param name="presentingClientId">
-    ///     The authenticated client that sends the exchange request. A service-account subject (AB#9777) is exchanged only
+    ///     The authenticated client that sends the exchange request. A service-account subject is exchanged only
     ///     by its shadow client of the target tenant.
     /// </param>
     public async Task<ExchangeOutcome> ProcessAsync(
@@ -212,7 +212,7 @@ public class TenantExchangeProcessor(
         var claims = validation.ClaimsIdentity.Claims.ToList();
         var sourceUserId = claims.FirstOrDefault(c => c.Type == Claims.Subject)?.Value;
         var sourceTenantId = claims.FirstOrDefault(c => c.Type == OctoClaimTypes.TenantId)?.Value;
-        // AB#9777: a client_credentials token carries no sub (OctoAccessTokenShapeHandler) but its client_id: a
+        // A client_credentials token carries no sub (OctoAccessTokenShapeHandler) but its client_id: a
         // service-account subject, judged by IServiceAccountExchangeGate instead of the user rules.
         var sourceClientId = string.IsNullOrEmpty(sourceUserId)
             ? claims.FirstOrDefault(c => c.Type == Claims.ClientId)?.Value
@@ -225,17 +225,6 @@ public class TenantExchangeProcessor(
                 "Token exchange rejected: subject_token lacks a subject (sub or client_id) or tenant_id");
             return ExchangeOutcome.Failed(Errors.InvalidGrant,
                 "subject_token must carry a user subject (or a service-account client_id) and tenant_id");
-        }
-
-        // AB#9777: an impersonated or already exchanged service token (act) is no service account of its own tenant;
-        // no chains in v1.
-        if (isServiceAccountSubject && claims.Any(c => c.Type == DelegationConstants.ActClaimType))
-        {
-            logger.LogWarning(
-                "Token exchange rejected: the service-account subject_token of client '{ClientId}' carries act (impersonated or exchanged)",
-                sourceClientId);
-            return ExchangeOutcome.Failed(Errors.InvalidGrant,
-                "a subject_token that carries act (impersonated or exchanged) cannot be exchanged");
         }
 
         var subjectId = isServiceAccountSubject ? sourceClientId! : sourceUserId!;
@@ -262,6 +251,19 @@ public class TenantExchangeProcessor(
                 "target tenant could not be resolved for this request");
         }
 
+        // An impersonated or already exchanged service token (act) is no service account of its own tenant; no
+        // chains. Checked once the target tenant is wired, so the refusal is audited like every other one.
+        if (isServiceAccountSubject && claims.Any(c => c.Type == DelegationConstants.ActClaimType))
+        {
+            logger.LogWarning(
+                "Token exchange rejected: the service-account subject_token of client '{ClientId}' carries act (impersonated or exchanged)",
+                sourceClientId);
+            await RaiseExchangeFailureAsync(subjectId, sourceTenantId, targetTenantId,
+                "service account: subject token carries act (impersonated or exchanged)");
+            return ExchangeOutcome.Failed(Errors.InvalidGrant,
+                "a subject_token that carries act (impersonated or exchanged) cannot be exchanged");
+        }
+
         // (b3) AB#9017: the subject token must belong to the current tenant A, not to an earlier tenant with the same
         //      id. Checked against A's generation before any shadow user is looked up or created, so a refused
         //      exchange leaves nothing in B.
@@ -274,8 +276,16 @@ public class TenantExchangeProcessor(
             logger.LogWarning(
                 "Token exchange rejected: subject_token of '{SubjectId}' (tenant '{SourceTenantId}') failed the tenant generation check ({Outcome})",
                 subjectId, sourceTenantId, generationCheck.Outcome);
-            await RaiseFailureAsync(subjectId, sourceTenantId, targetTenantId,
-                $"subject token tenant generation {generationCheck.Outcome}");
+            var generationReason = $"subject token tenant generation {generationCheck.Outcome}";
+            if (isServiceAccountSubject)
+            {
+                await RaiseExchangeFailureAsync(subjectId, sourceTenantId, targetTenantId,
+                    $"service account: {generationReason}");
+            }
+            else
+            {
+                await RaiseFailureAsync(subjectId, sourceTenantId, targetTenantId, generationReason);
+            }
             return ExchangeOutcome.Failed(generationCheck.Error!, generationCheck.ErrorDescription!);
         }
 
@@ -397,7 +407,7 @@ public class TenantExchangeProcessor(
     }
 
     /// <summary>
-    ///     AB#9777: the authorization half of an exchange whose subject is a service account (client-credentials token)
+    ///     The authorization half of an exchange whose subject is a service account (client-credentials token)
     ///     of <paramref name="sourceTenantId" />: <see cref="IServiceAccountExchangeGate" /> decides on relation, mirror
     ///     state and the provisioning in the target tenant; the request must be sent by the shadow client
     ///     <c>xt_{source}_{clientId}</c> of the target tenant itself. Every refusal raises the same failure audit as a

@@ -178,8 +178,8 @@ public class TokenEndpointController(
     }
 
     /// <summary>
-    ///     AB#9777: the token of an admitted service-account exchange is client-credentials-shaped FOR THE SHADOW CLIENT
-    ///     of the target tenant, like an impersonated token (AB#5114): <c>sub</c> carries the shadow client id only
+    ///     The token of an admitted service-account exchange is client-credentials-shaped FOR THE SHADOW CLIENT
+    ///     of the target tenant, like an impersonated token: <c>sub</c> carries the shadow client id only
     ///     because OpenIddict requires a subject; <see cref="OctoAccessTokenShapeHandler" /> re-stamps <c>client_id</c>
     ///     to it and strips <c>sub</c> (a service token is recognized by the absence of <c>sub</c>). <c>tenant_id</c> is the
     ///     target tenant, the roles are exactly the shadow client's roles there, <c>act</c> names the subject service

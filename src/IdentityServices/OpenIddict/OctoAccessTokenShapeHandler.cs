@@ -100,7 +100,7 @@ public class OctoAccessTokenShapeHandler : IOpenIddictServerHandler<GenerateToke
         var isImpersonation = string.Equals(context.Request?.GrantType,
             ImpersonationConstants.ImpersonationGrantType, StringComparison.Ordinal);
 
-        // AB#9777: a service-account token exchange issues a service token for the target tenant's shadow client, the
+        // A service-account token exchange issues a service token for the target tenant's shadow client, the
         // same shape as impersonation: client_id = the shadow client parked in sub, no sub, act = the source account. A
         // user exchange never carries act, so act tells the two apart.
         var isServiceAccountExchange = context.Request?.IsTokenExchangeGrantType() == true && descriptor != null &&

@@ -91,7 +91,7 @@ public static class RuntimeEngineBuilderExtensions
         // AB#8367: the login page offers only the OctoTenant providers the ancestry check lets through.
         builder.Services.AddScoped<IOctoTenantLoginProviders, OctoTenantLoginProviders>();
         builder.Services.AddScoped<ICrossTenantAuthenticationService, CrossTenantAuthenticationService>();
-        // AB#9777: RFC 8693 exchange of a service-account token of T into a parent, sibling or child tenant U.
+        // RFC 8693 exchange of a service-account token of T into a parent, sibling or child tenant U.
         builder.Services.AddScoped<IServiceAccountExchangeGate, ServiceAccountExchangeGate>();
         // AB#8341: exact source user lookup for sibling-tenant grants. The policy is the allow-list each source tenant
         // keeps (AB#8345, empty = nobody). The audit sink is a no-op here; the identity host registers the AB#8342 sink

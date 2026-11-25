@@ -21,7 +21,7 @@ using Xunit;
 namespace IdentityServices.IntegrationTests.Api.Protocol;
 
 /// <summary>
-///     AB#9777 over the real token endpoint: the wire shape of the token a service-account exchange issues, and the
+///     Service-account subjects over the real token endpoint: the wire shape of the token a service-account exchange issues, and the
 ///     refusals OpenIddict and the processor add around <see cref="IServiceAccountExchangeGate" />.
 /// </summary>
 /// <remarks>
