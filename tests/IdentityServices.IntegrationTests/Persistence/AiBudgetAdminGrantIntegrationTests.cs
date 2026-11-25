@@ -18,7 +18,7 @@ using Xunit;
 namespace IdentityServices.IntegrationTests.Persistence;
 
 /// <summary>
-///     AB#8690: the one-time grant of the platform role AiBudgetAdmin to the human administrators of the SYSTEM tenant,
+///     The one-time grant of the platform role AiBudgetAdmin to the human administrators of the SYSTEM tenant,
 ///     against a real MongoDB. Each test uses its own child tenant; "system tenant" is simulated by passing that tenant's
 ///     id as the system tenant id (the grant compares the two), "child tenant" by passing another id. The roles and the
 ///     TenantOwners group are materialised in-test at their blueprint rtIds (the fixture has no blueprint catalog).
@@ -132,6 +132,37 @@ public class AiBudgetAdminGrantIntegrationTests : IClassFixture<IdentityServices
         second.Status.Should().Be(AdministratorRoleGrantStatus.Completed);
         second.GrantedUserIds.Should().Equal(admin.ToString());
         (await ReadMarkerAsync(tenantContext)).Should().NotBeNull();
+    }
+
+    [Fact]
+    public async Task SystemTenant_GrantCommittedButMarkerMissing_WritesTheMarker_AndNeverGrantsAgain()
+    {
+        // The edges of an earlier run were committed, but its marker write failed (pod killed, failover).
+        var (tenantContext, repo) = await CreateTenantAsync();
+        await InsertRoleAsync(repo, TenantManagementRtId, CommonConstants.TenantManagementRole);
+        await InsertRoleAsync(repo, AdminPanelManagementRtId, CommonConstants.AdminPanelManagementRole);
+        await InsertRoleAsync(repo, AiBudgetAdminRtId, IdentityServiceConstants.AiBudgetAdminRole);
+        var admin = await InsertUserAsync(repo, "granted-admin");
+        await LinkAsync(repo, User(admin), Role(TenantManagementRtId), IdentityAssociationConstants.AssignedRoleId);
+        await LinkAsync(repo, User(admin), Role(AdminPanelManagementRtId), IdentityAssociationConstants.AssignedRoleId);
+        await LinkAsync(repo, User(admin), Role(AiBudgetAdminRtId), IdentityAssociationConstants.AssignedRoleId);
+
+        var first = await AiBudgetAdminGrant.EnsureAsync(tenantContext, tenantContext.TenantId, NullLogger.Instance);
+
+        first.Status.Should().Be(AdministratorRoleGrantStatus.Completed, "every administrator already holds the role");
+        first.GrantedUserIds.Should().BeEmpty();
+        (await ReadMarkerAsync(tenantContext)).Should().NotBeNull("the step is done; otherwise it would run forever");
+
+        // An operator removes the role, and a new administrator joins: neither gets it from setup.
+        await UnlinkAsync(repo, User(admin), Role(AiBudgetAdminRtId), IdentityAssociationConstants.AssignedRoleId);
+        var newcomer = await InsertUserAsync(repo, "new-admin");
+        await LinkAsync(repo, User(newcomer), Role(TenantManagementRtId), IdentityAssociationConstants.AssignedRoleId);
+        await LinkAsync(repo, User(newcomer), Role(AdminPanelManagementRtId), IdentityAssociationConstants.AssignedRoleId);
+        var second = await AiBudgetAdminGrant.EnsureAsync(tenantContext, tenantContext.TenantId, NullLogger.Instance);
+
+        second.Status.Should().Be(AdministratorRoleGrantStatus.AlreadyDone);
+        (await HasBudgetRoleAsync(repo, User(admin))).Should().BeFalse();
+        (await HasBudgetRoleAsync(repo, User(newcomer))).Should().BeFalse();
     }
 
     private sealed record Admins(

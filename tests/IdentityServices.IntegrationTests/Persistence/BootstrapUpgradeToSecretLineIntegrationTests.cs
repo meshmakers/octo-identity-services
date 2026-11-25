@@ -43,7 +43,7 @@ public class BootstrapUpgradeToSecretLineIntegrationTests : IClassFixture<Identi
     private static readonly OctoObjectId TenantOwnersRtId = new("660000000000000000000040");
 
     // Seeds of later lines that the current seed brings along on top of the SECRET line: the role AiBudgetAdmin
-    // (1.11.0, AB#8690). It carries no edge (not in TenantOwners, granted to nobody), so it adds an entity only.
+    // (1.11.0). It carries no edge (not in TenantOwners, granted to nobody), so it adds an entity only.
     private static readonly string[] LaterLineSeedRtIds = ["660000000000000000000063"];
 
     // Files line seeds that appear with 1.6.0 (AB#6467): permissions 52/53, policies 54/55.

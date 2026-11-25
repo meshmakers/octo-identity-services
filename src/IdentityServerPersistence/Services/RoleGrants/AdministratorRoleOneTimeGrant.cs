@@ -54,8 +54,8 @@ internal sealed record AdministratorRoleGrantResult(
 ///     One-time, additive grant of a built-in role to the existing HUMAN administrators of a tenant — every local user
 ///     that holds both <c>AdminPanelManagement</c> and <c>TenantManagement</c> (direct, through groups or mixed). No group,
 ///     client or cross-tenant shadow user receives it; the edges are direct <c>AssignedRole</c> edges of the users. See
-///     <see cref="AdministratorRoleGrantPlanner"/>. Used for <c>SecretManagement</c> (AB#5544, every tenant) and
-///     <c>AiBudgetAdmin</c> (AB#8690, system tenant only).
+///     <see cref="AdministratorRoleGrantPlanner"/>. Used for <c>SecretManagement</c> (every tenant) and
+///     <c>AiBudgetAdmin</c> (system tenant only).
 /// </summary>
 /// <remarks>
 ///     <para>
@@ -73,6 +73,9 @@ internal sealed record AdministratorRoleGrantResult(
 internal static class AdministratorRoleOneTimeGrant
 {
     private static readonly ConcurrentDictionary<string, SemaphoreSlim> Locks = new(StringComparer.Ordinal);
+
+    // A role id no user holds: planning with it lists every qualifying administrator, holders of the target included.
+    private const string NoRoleId = "-";
 
     /// <param name="tenantContext">Tenant to grant in.</param>
     /// <param name="roleName">Name of the built-in role to grant.</param>
@@ -154,7 +157,13 @@ internal static class AdministratorRoleOneTimeGrant
                 graph.UserRoleIds, graph.GroupRoleIds, graph.GroupChildGroupIds, graph.GroupMemberUserIds,
                 graph.ExcludedUserIds, adminPanelRoleId, tenantManagementRoleId, targetRoleId.ToString());
 
-            if (plannedUserIds.Count == 0 && waitForAdministrator)
+            // Wait only when no qualifying administrator exists at all. The plan drops current holders, so an empty plan
+            // can also mean "every administrator already holds the role" (e.g. the edges were committed but the marker
+            // write failed): then the marker is written now, and a later removal of the role is never undone.
+            var anyAdministrator = plannedUserIds.Count > 0 || AdministratorRoleGrantPlanner.Plan(
+                graph.UserRoleIds, graph.GroupRoleIds, graph.GroupChildGroupIds, graph.GroupMemberUserIds,
+                graph.ExcludedUserIds, adminPanelRoleId, tenantManagementRoleId, NoRoleId).Count > 0;
+            if (!anyAdministrator && waitForAdministrator)
             {
                 logger.LogInformation(
                     "No human administrator to grant {RoleName} to in tenant '{TenantId}' yet; retried on the next " +
@@ -239,7 +248,7 @@ internal static class AdministratorRoleOneTimeGrant
         {
             if (CrossTenantShadowUserName.IsShadowUserName(user.UserName))
             {
-                // Provisioned parent-tenant administrator (AB#5708): not a local human administrator.
+                // Provisioned parent-tenant administrator: not a local human administrator.
                 excludedUsers.Add(user.RtId.ToString());
             }
 

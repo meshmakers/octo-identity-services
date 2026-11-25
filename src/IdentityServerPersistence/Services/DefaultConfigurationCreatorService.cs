@@ -398,7 +398,7 @@ internal class DefaultConfigurationCreatorService(
                 "tenant setup", tenantId);
         }
 
-        // AB#8690: one-time grant of the platform role AiBudgetAdmin (blueprint 1.11.0, 660…63) to the human
+        // One-time grant of the platform role AiBudgetAdmin (blueprint 1.11.0, 660…63) to the human
         // administrators of the SYSTEM tenant only (same rule and mechanism as SecretManagement, own marker). Without it
         // nobody could hold the role: the role-change guard lets only a holder grant a platform role. Not fatal.
         try

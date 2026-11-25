@@ -8,7 +8,7 @@ description: |
   Swagger / Refinery Studio SPA / MCP Services Swagger + Device / Platform Services
   Swagger) and the TenantOwners group with full role assignment.
 
-  1.11.0 (AB#8690): adds the role `AiBudgetAdmin` (660…63). It sets the monthly LLM spend cap of a tenant in the AI
+  1.11.0: adds the role `AiBudgetAdmin` (660…63). It sets the monthly LLM spend cap of a tenant in the AI
   service (`system/v1/aiSpendCaps`, octo-cli `SetAiSpendCap`) and counts only in a token of the system tenant: the AI
   service refuses a holder from a child tenant, so the role grants nothing in the child tenants it is seeded into.
   Not assigned to TenantOwners; the identity setup step AiBudgetAdminGrant gives it once to the human administrators of

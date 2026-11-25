@@ -192,7 +192,7 @@ entities:
         targetRtId: '660000000000000000000052'
         targetCkTypeId: System.Identity/DataPermission
 
-  # 1.11.0 (AB#8690): AiBudgetAdmin sets the monthly LLM spend cap of a tenant (AI service, system/v1/aiSpendCaps,
+  # 1.11.0: AiBudgetAdmin sets the monthly LLM spend cap of a tenant (AI service, system/v1/aiSpendCaps,
   # octo-cli SetAiSpendCap). It counts only in a token of the SYSTEM tenant: the AI service refuses a holder from any
   # child tenant, so seeding it into every tenant grants nothing there. It is NOT assigned to TenantOwners. The identity
   # setup step AiBudgetAdminGrant gives it once to the human administrators of the system tenant (direct edges, never in a

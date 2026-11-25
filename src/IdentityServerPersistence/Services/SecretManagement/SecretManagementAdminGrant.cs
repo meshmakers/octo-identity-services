@@ -9,7 +9,7 @@ namespace IdentityServerPersistence.Services.SecretManagement;
 /// <summary>
 ///     Marker persisted in the tenant configuration once <see cref="SecretManagementAdminGrant"/> has run for a
 ///     tenant. Its presence is the run-once gate: an operator who later removes the role from an administrator
-///     must not see it come back on the next restart. Same document shape as before AB#8690 (the base class carries
+///     must not see it come back on the next restart. Same document shape as before the shared base class (the base class carries
 ///     the properties).
 /// </summary>
 public sealed class SecretManagementAdminGrantMarker : AdministratorRoleGrantMarker;
@@ -51,7 +51,7 @@ internal sealed record SecretManagementAdminGrantResult(
 ///         new.
 ///     </para>
 ///     <para>
-///         Since AB#8690 the steps live in <see cref="AdministratorRoleOneTimeGrant"/>, shared with the
+///         The steps live in <see cref="AdministratorRoleOneTimeGrant"/>, shared with the
 ///         <c>AiBudgetAdmin</c> grant of the system tenant; this class keeps the role, the marker and the result types.
 ///     </para>
 /// </remarks>

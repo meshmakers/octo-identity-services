@@ -191,7 +191,7 @@ role `66…0B`), so no seed bump is needed.
 - **Tests:** `UserManagementServiceTests` (membership added / not twice / missing group) and `Api/Setup/SetupAdminTenantOwnersTests` (real MongoDB: setup via REST, the admin adds
   another user to `TenantOwners`, control case without the membership = 403 `role-not-held`, re-run refused without a second edge, guard not injected into setup/group store).
 
-## AiBudgetAdmin: one-time grant in the system tenant (AB#8690)
+## AiBudgetAdmin: one-time grant in the system tenant
 
 `AiBudgetAdmin` (660…63, System.Identity.Bootstrap 1.11.0) is a platform role: under the guard only a holder grants it.
 The seed gives it to nobody (not `TenantOwners`, not the first administrator), so the setup step `AiBudgetAdminGrant`
@@ -200,9 +200,15 @@ the **system tenant**: the same rule and code as `SecretManagementAdminGrant` (`
 users holding `AdminPanelManagement` and `TenantManagement`, direct or through groups; direct edges only; no group,
 client or `xt_` shadow user). Never in a child tenant. The marker `AiBudgetAdminGrant` in the system tenant's
 configuration makes it run once; a run that finds no administrator (fresh installation) writes no marker, so the first
-setup after the first administrator exists grants it. The guard is unchanged: the step writes through the repository as
+setup after the first administrator exists grants it. A run that finds administrators who all hold the role already
+(an earlier grant whose marker write failed) writes the marker and grants nobody. The guard is unchanged: the step writes through the repository as
 the platform's own bootstrap, like the other one-time grants.
 
 Operator path for a further person: a holder runs `octo-cli -c AddUserToRole -un <user> -r AiBudgetAdmin` in the system
 tenant (`AddClientToRole` for a client; self-grants stay refused). Removing it: `RemoveUserFromRole`; the step does not
 re-add it.
+
+The role exists in every tenant (seeded with the others), but it counts only in the system tenant: every service that
+checks it must also check that the token's tenant is the system tenant, as the AI service does. Recovery when the last
+holder is gone: delete the `AiBudgetAdminGrant` configuration row of the system tenant and restart the identity
+service; the next setup grants the role once more to the system tenant's human administrators.
