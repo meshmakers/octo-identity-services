@@ -11,6 +11,11 @@ Notable changes of the OctoMesh identity services. The CK model `System.Identity
   tenant seed imports on a shared import command could leave. mongosh in the MongoDB pod, read operations only (write
   guard), password on stdin only; `BootstrapSeedCheckManifestTests` keeps the embedded list equal to the seed files.
   Details: `docs/tenant-provisioning.md`.
+- AB#9803 Test: `ConcurrentTenantSeedImportIntegrationTests` runs the real `DefaultConfigurationInitializationService` over
+  six fresh child tenants (setup in parallel through one creator service) and checks that every tenant holds exactly the
+  System.Identity.Bootstrap seed and all its associations and that no "Duplicate RtId" warning is logged. It failed with
+  the engine that shared one import command between concurrent tenant imports and passes with the engine that takes one
+  command per import (octo-construction-kit-engine, same work item); this repository's code is unchanged.
 
 - AB#9325 Test: the System.Identity major-upgrade integration test installs the published 2.30.0 through the service
   path (`ImportCkModelAsync(CkModelId)` from the in-memory test catalog `TestCkModelCatalog`) instead of the caller
