@@ -350,6 +350,30 @@ public class ServiceAccountExchangeGateIntegrationTests : IClassFixture<Identity
     }
 
     [Fact]
+    public async Task ShadowNameOfTenantWithLeadingUnderscore_ThatAlsoReadsAsAnotherTenantsClient_IsRefused()
+    {
+        // Tenant ids may start with '_'. Tenants "_u" and "_u_b" both exist, so xt__u_b_svc names client "b_svc" of
+        // "_u" as well as client "svc" of "_u_b": every split point counts, also the ones after a leading '_'.
+        var h = await ArrangeFreshAsync();
+        var underscored = await CreateTenantAsync(h.G, "_" + NewId("u"));
+        var underscoredB = await CreateTenantAsync(h.G, $"{underscored}_b");
+        var gate = CreateGate();
+
+        var longClient = await CreateServiceAccountAsync(underscored, clientId: "b_svc");
+        await ProvisionShadowAsync(h.G, underscored, longClient, "TargetReader");
+        _permitted.Add((underscored, h.G));
+
+        var shortClient = await CreateServiceAccountAsync(underscoredB, clientId: "svc");
+        await ProvisionShadowAsync(underscored, underscoredB, shortClient, "TargetReader");
+        _permitted.Add((underscoredB, underscored));
+
+        (await gate.EvaluateAsync(underscored, longClient, h.G)).Refusal.Should()
+            .Be(ServiceAccountExchangeRefusal.AmbiguousSubject);
+        (await gate.EvaluateAsync(underscoredB, shortClient, underscored)).Refusal.Should()
+            .Be(ServiceAccountExchangeRefusal.AmbiguousSubject);
+    }
+
+    [Fact]
     public async Task SameTenant_IsRefused()
     {
         var h = await ArrangeAsync();

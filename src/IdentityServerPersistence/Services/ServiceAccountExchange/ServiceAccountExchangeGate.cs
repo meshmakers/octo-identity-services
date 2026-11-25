@@ -327,7 +327,8 @@ public sealed class ServiceAccountExchangeGate(
     private async Task<string?> FindOtherTenantPrefixAsync(string sourceTenantId, string sourceClientId)
     {
         var joined = $"{sourceTenantId}_{sourceClientId}";
-        for (var index = joined.IndexOf('_'); index > 0; index = joined.IndexOf('_', index + 1))
+        // Every '_' after position 0 is a split point; a tenant id may itself start with '_' (an empty prefix is none).
+        for (var index = joined.IndexOf('_', 1); index > 0; index = joined.IndexOf('_', index + 1))
         {
             var candidate = joined[..index];
             if (!IsSame(candidate, sourceTenantId) && await tenantRegistry.TryGetTenantAsync(candidate) != null)
