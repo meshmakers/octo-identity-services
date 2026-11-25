@@ -65,6 +65,24 @@ a retriable not-ready condition.
 `PreUpdateTenant` + `PosUpdateTenant`, which makes every service — including this one — re-run
 `SetupAsync` for that tenant.
 
+**Checking the Bootstrap seed of every tenant (read-only).** The child tenants are set up in parallel, and until the
+engine gave each blueprint apply its own import command, two tenant imports that overlapped shared one import state
+(a reset by one cleared the other's queues). `scripts/identity-bootstrap-seed-check.sh` shows whether a cluster was
+hit: per tenant database it lists the seed entities of `System.Identity.Bootstrap` that are missing, stored more than
+once or with another CK type, clients whose `provisionedByParentTenantId` names no ancestor of the tenant, and missing or
+duplicated seed associations (exit 0 = clean, 2 = findings, 1 = incomplete). It runs mongosh inside the MongoDB pod with
+read operations only (a write guard refuses the JavaScript otherwise; `--self-check`), reads no secret material and
+passes the MongoDB password on stdin only. The expected entities and associations are embedded in
+`scripts/identity-bootstrap-seed-check.inventory.js`; `BootstrapSeedCheckManifestTests` keeps them equal to the seed
+files, so a seed change updates the list in the same change. Tests: `bash scripts/tests/identity-bootstrap-seed-check.test.sh`.
+A cluster run needs kubectl access to the MongoDB namespace (shared clusters only via breakglass and with the
+developer's go):
+
+```bash
+scripts/identity-bootstrap-seed-check.sh --context <kube-context> [tenant ...]
+# local lane stack: --namespace octo-infra --pod mongodb-0 --container mongodb --password-file <file> --system-db <system db>
+```
+
 ## Admin Provisioning (Cross-Tenant Pre-Provisioning)
 
 The `AdminProvisioningController` allows users with the TenantManagement or UserManagement role to pre-provision cross-tenant user mappings in a **target tenant** without needing `allowed_tenants` for that tenant. The target must be the caller's own tenant or one of its registry descendants (system-tenant callers: any tenant) — `AdminProvisioningTargetScopeFilter`; before, the role was documented but not checked and any target was reachable. It is routed via the system tenant: `{tenantId}/v1/adminProvisioning/{targetTenantId}`.

@@ -5,6 +5,13 @@ Notable changes of the OctoMesh identity services. The CK model `System.Identity
 
 ## Unreleased
 
+- AB#9803 New: read-only seed check `scripts/identity-bootstrap-seed-check.sh`. Lists per tenant database whether the 41
+  entities and 23 associations of System.Identity.Bootstrap 1.10.0 exist exactly once, with their CK type, and whether a
+  seed client carries `provisionedByParentTenantId` of a tenant outside the tenant's ancestors - the traces concurrent
+  tenant seed imports on a shared import command could leave. mongosh in the MongoDB pod, read operations only (write
+  guard), password on stdin only; `BootstrapSeedCheckManifestTests` keeps the embedded list equal to the seed files.
+  Details: `docs/tenant-provisioning.md`.
+
 - AB#9325 Test: the System.Identity major-upgrade integration test installs the published 2.30.0 through the service
   path (`ImportCkModelAsync(CkModelId)` from the in-memory test catalog `TestCkModelCatalog`) instead of the caller
   import, which the engine will refuse for every `System`/`System.*` model (`CK_SERVICE_MANAGED_MODEL`). Test code
