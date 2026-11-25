@@ -238,6 +238,53 @@ Tests: `ServiceAccountExchangeGateIntegrationTests` (every rule against MongoDB)
 `TenantExchangeServiceAccountSubjectTests` (protocol half, signed subject tokens),
 `TokenExchangeServiceAccountHttpTests` (token endpoint, wire shape, presenter and permission refusals).
 
+## Agent token exchange (AB#9729)
+
+An agent's service-account client (created by MCP's `create_agent`) holds the API scope `octo_agent` instead of
+`octo_api`. The scope is attached to the MCP resource indicator only (`mcpApi`, System.Identity.Bootstrap 1.11.0), so a
+token of the agent opens no platform API: every API requires `octo_api`. MCP accepts the token only from a client that is
+an agent of the token's tenant and, for every downstream call, exchanges it for a short-lived `octo_api` token.
+
+**Request** (`POST /connect/token`, form): `grant_type=urn:ietf:params:oauth:grant-type:token-exchange`,
+`client_id=octo-mcpServices-agent-exchange` with its `client_secret`, `subject_token` = the agent token,
+`subject_token_type=urn:ietf:params:oauth:token-type:access_token`, `acr_values=tenant:{T}` (the agent's own tenant),
+`scope=octo_api`.
+
+**Rules** (`TenantExchangeProcessor`, agent rules, and `TokenEndpointController.SignInAgentExchangeAsync`; all fail
+closed, each refusal writes the `Token Exchange Failure` audit event):
+
+| Case | `error` |
+|---|---|
+| subject carries `octo_agent` and is presented by another client than `octo-mcpServices-agent-exchange` (exact case): the public device client `octo-mcpServices-device`, a shadow client `xt_…` of the service-account exchange, any other client | `unauthorized_client` |
+| target tenant is not the agent's own tenant | `unauthorized_client` |
+| the presenting `octo-mcpServices-agent-exchange` client of T is public, has no secret, is disabled, allows offline access, has redirect URIs or another grant type than the token exchange | `unauthorized_client` |
+| `octo_agent` on a user subject (`sub`) | `invalid_grant` |
+| `octo-mcpServices-agent-exchange` presents a subject without `octo_agent` | `invalid_grant` |
+| subject carries `act` (an already exchanged token) | `invalid_grant` |
+| the agent client does not exist in T or is disabled | `invalid_grant` |
+| a scope other than `octo_api` is requested | `invalid_scope` |
+
+The agent rules run before the service-account rules of AB#9777, so an agent token never reaches a parent, sibling or
+child tenant through a shadow client.
+
+**Issued access token** (client-credentials shape, lifetime 5 minutes, no refresh token):
+
+| Claim | Value |
+|---|---|
+| `client_id` | the agent client |
+| `sub` | absent |
+| `tenant_id` | T |
+| `role` | the effective roles of the agent client in T |
+| `act` | the agent client id (flat string, the v1 shape of `DelegationConstants.ActClaimType`) |
+| `amr` | `agent_exchange` |
+| `scope` | `octo_api` only |
+
+The exchange client is registered by MCP in every tenant with the secret from its configuration
+(`Mcp:AgentExchangeClientSecret`); without a secret MCP registers nothing and refuses every downstream call of an agent.
+
+Tests: `TenantExchangeServiceAccountSubjectTests` (agent cases, signed subject tokens), `AgentTokenExchangeHttpTests`
+(token endpoint, wire shape and refusals), `AgentScopeSeedTests` (seed).
+
 ## Delegation / On-Behalf-Of Grant
 
 A service-account `Client` authenticates with its own client credentials **and** presents a user's

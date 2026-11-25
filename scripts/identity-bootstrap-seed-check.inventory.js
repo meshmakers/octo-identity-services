@@ -32,6 +32,7 @@ const SEED_ENTITIES = [
     { rtId: "660000000000000000000015", ckTypeId: "System.Identity/ApiScope" },
     { rtId: "660000000000000000000016", ckTypeId: "System.Identity/ApiScope" },
     { rtId: "660000000000000000000017", ckTypeId: "System.Identity/ApiScope" },
+    { rtId: "660000000000000000000018", ckTypeId: "System.Identity/ApiScope" },
     { rtId: "660000000000000000000032", ckTypeId: "System.Identity/Client" },
     { rtId: "660000000000000000000033", ckTypeId: "System.Identity/Client" },
     { rtId: "660000000000000000000034", ckTypeId: "System.Identity/Client" },

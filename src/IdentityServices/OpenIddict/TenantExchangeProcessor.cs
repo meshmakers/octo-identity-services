@@ -156,6 +156,17 @@ public class TenantExchangeProcessor(
         /// <summary>The source tenant of a service-account exchange.</summary>
         public string? SourceTenantId { get; init; }
 
+        /// <summary>
+        ///     AB#9729: the subject was an agent token (scope <c>octo_agent</c>) of this client, exchanged by MCP's
+        ///     agent-exchange client in the agent's own tenant. The token is issued for this client with scope
+        ///     <c>octo_api</c> and <c>act</c> = this client id.
+        /// </summary>
+        public string? AgentClientId { get; init; }
+
+        public static ExchangeOutcome SucceededForAgent(string agentClientId, string tenantId) =>
+            new() { AgentClientId = agentClientId, SourceClientId = agentClientId, SourceTenantId = tenantId,
+                TargetTenantId = tenantId };
+
         public static ExchangeOutcome SucceededForServiceAccount(RtClient shadowClient, IReadOnlySet<string> roleNames,
             string sourceTenantId, string sourceClientId, string targetTenantId) =>
             new()
@@ -287,6 +298,24 @@ public class TenantExchangeProcessor(
                 await RaiseFailureAsync(subjectId, sourceTenantId, targetTenantId, generationReason);
             }
             return ExchangeOutcome.Failed(generationCheck.Error!, generationCheck.ErrorDescription!);
+        }
+
+        // AB#9729: an agent token (scope octo_agent) is exchanged only by MCP's agent-exchange client, only in its own
+        // tenant, and never through the service-account (AB#9777) or user rules. The agent-exchange client exchanges
+        // nothing else.
+        var agentRefusal = await CheckAgentExchangeAsync(claims, isServiceAccountSubject, subjectId, sourceTenantId,
+            targetTenantId, presentingClientId);
+        if (agentRefusal != null)
+        {
+            return agentRefusal;
+        }
+
+        if (HasScope(claims, AgentExchangeConstants.AgentScope))
+        {
+            logger.LogInformation(
+                "Token exchange admitted: agent client '{ClientId}' of tenant '{TenantId}' exchanged by '{PresentingClientId}'",
+                sourceClientId, sourceTenantId, presentingClientId);
+            return ExchangeOutcome.SucceededForAgent(sourceClientId!, sourceTenantId);
         }
 
         if (isServiceAccountSubject)
@@ -450,6 +479,88 @@ public class TenantExchangeProcessor(
         return ExchangeOutcome.SucceededForServiceAccount(shadowClient, decision.RoleNames, sourceTenantId,
             sourceClientId, targetTenantId);
     }
+
+    /// <summary>
+    ///     The agent rules of AB#9729 (fail closed). Returns the refusal, or <c>null</c> when the request may go on: either
+    ///     an admitted agent exchange (the subject carries <see cref="AgentExchangeConstants.AgentScope" />) or a request
+    ///     that has nothing to do with agents.
+    ///     <list type="bullet">
+    ///         <item>A subject with <c>octo_agent</c> must be a client token (no <c>sub</c>).</item>
+    ///         <item>It must be presented by <see cref="AgentExchangeConstants.ExchangeClientId" /> (exact case): neither the
+    ///             public MCP device client, nor a shadow client of the service-account exchange, nor any other client.</item>
+    ///         <item>The target tenant must be the subject's own tenant: an agent token never leaves its tenant.</item>
+    ///         <item>The agent-exchange client exchanges only agent tokens.</item>
+    ///     </list>
+    ///     That the presenting client is confidential and exchange-only, and that the agent client is enabled, is checked
+    ///     against the tenant's directory by the token endpoint before the token is issued.
+    /// </summary>
+    private async Task<ExchangeOutcome?> CheckAgentExchangeAsync(IReadOnlyCollection<Claim> claims,
+        bool isServiceAccountSubject, string subjectId, string sourceTenantId, string targetTenantId,
+        string? presentingClientId)
+    {
+        var isAgentSubject = HasScope(claims, AgentExchangeConstants.AgentScope);
+        var presentedByExchangeClient = string.Equals(presentingClientId, AgentExchangeConstants.ExchangeClientId,
+            StringComparison.Ordinal);
+        if (!isAgentSubject && !presentedByExchangeClient)
+        {
+            return null;
+        }
+
+        string? reason = null;
+        string error = Errors.UnauthorizedClient;
+        string? description = null;
+        if (!isAgentSubject)
+        {
+            reason = "agent exchange: the subject token carries no octo_agent scope";
+            error = Errors.InvalidGrant;
+            description = $"the client '{AgentExchangeConstants.ExchangeClientId}' exchanges only agent tokens";
+        }
+        else if (!isServiceAccountSubject)
+        {
+            reason = "agent exchange: an octo_agent subject token carries a user subject";
+            error = Errors.InvalidGrant;
+            description = "an octo_agent subject_token must be a client token";
+        }
+        else if (!presentedByExchangeClient)
+        {
+            reason = "agent exchange: presented by another client than the agent-exchange client";
+            description =
+                $"an agent token is exchanged only by the client '{AgentExchangeConstants.ExchangeClientId}'";
+        }
+        else if (!string.Equals(sourceTenantId, targetTenantId, StringComparison.OrdinalIgnoreCase))
+        {
+            reason = "agent exchange: the target tenant is not the agent's own tenant";
+            description = "an agent token is exchanged only within its own tenant";
+        }
+
+        if (reason == null)
+        {
+            return null;
+        }
+
+        logger.LogWarning(
+            "Token exchange rejected: subject '{SubjectId}' of tenant '{SourceTenantId}' into tenant '{TargetTenantId}' presented by '{PresentingClientId}': {Reason}",
+            subjectId, sourceTenantId, targetTenantId, presentingClientId ?? "(none)", reason);
+        if (isServiceAccountSubject)
+        {
+            await RaiseExchangeFailureAsync(subjectId, sourceTenantId, targetTenantId, reason);
+        }
+        else
+        {
+            await RaiseFailureAsync(subjectId, sourceTenantId, targetTenantId, reason);
+        }
+
+        return ExchangeOutcome.Failed(error, description!);
+    }
+
+    /// <summary>
+    ///     True when the token carries <paramref name="scope" />, in either wire form: one claim per scope (the platform's
+    ///     access token shape) or one space-delimited claim.
+    /// </summary>
+    internal static bool HasScope(IEnumerable<Claim> claims, string scope) =>
+        claims.Where(c => c.Type == Claims.Scope)
+            .SelectMany(c => c.Value.Split(' ', StringSplitOptions.RemoveEmptyEntries))
+            .Contains(scope, StringComparer.Ordinal);
 
     private static ExchangeOutcome MapServiceAccountRefusal(ServiceAccountExchangeDecision decision,
         string targetTenantId) => decision.Refusal switch

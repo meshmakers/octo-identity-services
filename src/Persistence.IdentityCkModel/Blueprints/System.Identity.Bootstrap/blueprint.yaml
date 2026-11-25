@@ -2,8 +2,8 @@ $schema: https://schemas.meshmakers.cloud/blueprint-meta.schema.json
 blueprintId: System.Identity.Bootstrap-1.11.0
 description: |
   Service-managed Identity tenant seed — system + every child tenant. Provides
-  the default role set (18 roles), the five OIDC identity resources, four API
-  scopes (full-access / read-only / data-model-management / ai.llm.invoke), the OctoApi resource,
+  the default role set (18 roles), the five OIDC identity resources, five API
+  scopes (full-access / read-only / data-model-management / ai.llm.invoke / octo_agent), the OctoApi resource,
   the MCP resource indicator, the OAuth client baseline (OctoTool / IdentityServices
   Swagger / Refinery Studio SPA / MCP Services Swagger + Device / Platform Services
   Swagger) and the TenantOwners group with every role except AiBudgetAdmin.
@@ -14,6 +14,13 @@ description: |
   Not assigned to TenantOwners; the identity setup step AiBudgetAdminGrant gives it once to the human administrators of
   the system tenant, and holders grant it to further people.
   The version bump makes every existing tenant re-import the seed, which creates the role. No other change.
+
+  1.11.0 (AB#9729): adds the API scope `octo_agent` (660…18) and attaches it to the MCP resource indicator mcpApi
+  (660…21) only, never to octoAPI. MCP's create_agent gives an agent's service-account client this scope instead of
+  octo_api, so an agent token opens no platform API by itself; MCP accepts it only from an agent of the token's tenant
+  and exchanges it (RFC 8693, its confidential client octo-mcpServices-agent-exchange, same tenant only) for a
+  five-minute octo_api token with act = the agent client id. No client of this blueprint allows the scope. The version
+  bump makes every existing tenant re-import the seed, which creates the scope and updates mcpApi; no manual step.
 
   1.10.0: adds the API scope `ai.llm.invoke` (660…17) and attaches it to the octoAPI resource (660…20),
   the audience the AI service validates. The AI service's central-key LLM gateway requires it. No client of this

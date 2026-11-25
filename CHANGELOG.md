@@ -5,6 +5,16 @@ Notable changes of the OctoMesh identity services. The CK model `System.Identity
 
 ## Unreleased
 
+- AB#9729 New: agent token exchange. An agent's service-account client gets the new API scope `octo_agent`
+  (System.Identity.Bootstrap 1.11.0, entity 660…18, attached to the MCP resource indicator only, never to octoAPI), so its
+  token opens no platform API. The RFC 8693 exchange turns it into a five-minute `octo_api` token for the agent client
+  (`act` = the agent client id, `amr=agent_exchange`, no refresh token) only when it is presented by the confidential,
+  exchange-only client `octo-mcpServices-agent-exchange` of the agent's own tenant and the agent client is enabled. Every
+  other way is refused: another tenant, the public MCP device client, a shadow client of the service-account exchange
+  (AB#9777 no longer carries an agent token into a parent, sibling or child tenant), any other client, a public client
+  of that id, a user subject with `octo_agent`, a subject that is no agent token, and a second exchange of the issued
+  token (it carries `act`). Details: `docs/cross-tenant-authentication.md`, "Agent token exchange".
+
 - AB#9803 New: read-only seed check `scripts/identity-bootstrap-seed-check.sh`. Lists per tenant database whether the 41
   entities and 23 associations of System.Identity.Bootstrap 1.10.0 exist exactly once, with their CK type, and whether a
   seed client carries `provisionedByParentTenantId` of a tenant outside the tenant's ancestors - the traces concurrent

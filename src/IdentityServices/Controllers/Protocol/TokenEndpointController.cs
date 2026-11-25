@@ -146,6 +146,11 @@ public class TokenEndpointController(
             HttpContext.RequestAborted,
             request.ClientId);
 
+        if (outcome.Error == null && outcome.AgentClientId != null)
+        {
+            return await SignInAgentExchangeAsync(request, outcome);
+        }
+
         if (outcome.Error == null && outcome.ShadowClient != null)
         {
             return await SignInServiceAccountExchangeAsync(request, outcome);
@@ -210,6 +215,78 @@ public class TokenEndpointController(
         principal.SetIssuedTokenLifetime(TenantExchangeProcessor.ServiceAccountTokenLifetime);
         principal.SetAccessTokenLifetime(TenantExchangeProcessor.ServiceAccountTokenLifetime);
 
+        return SignIn(principal, OpenIddictServerAspNetCoreDefaults.AuthenticationScheme);
+    }
+
+    /// <summary>
+    ///     AB#9729: issues the <c>octo_api</c> token of an admitted agent exchange (see
+    ///     <see cref="TenantExchangeProcessor" />, agent rules). Before it signs anything it checks, against the directory of
+    ///     the agent's tenant (wired into the request), that
+    ///     <list type="bullet">
+    ///         <item>the presenting client is the confidential, enabled, exchange-only client
+    ///             <see cref="AgentExchangeConstants.ExchangeClientId" /> (a public client of that id, which a tenant
+    ///             administrator could create, would let the agent exchange its own token without MCP);</item>
+    ///         <item>the agent client exists and is enabled (a disabled agent gets no downstream token);</item>
+    ///         <item>the request asks for no other scope than <see cref="AgentExchangeConstants.IssuedScope" />.</item>
+    ///     </list>
+    ///     The token is client-credentials-shaped for the agent client (<c>client_id</c> = agent client, no <c>sub</c>,
+    ///     the agent client's effective roles, the agent's tenant), carries <c>act</c> = the agent client id (flat string,
+    ///     <see cref="DelegationConstants.ActClaimType" />) and <c>amr</c> = <see cref="AgentExchangeConstants.AuthenticationMethod" />,
+    ///     scope <c>octo_api</c> only, lives 5 minutes and has no refresh token. Because it carries <c>act</c> it can never
+    ///     be exchanged again.
+    /// </summary>
+    private async Task<IActionResult> SignInAgentExchangeAsync(OpenIddictRequest request,
+        TenantExchangeProcessor.ExchangeOutcome outcome)
+    {
+        var presenter = await clientStore.FindRtClientByIdAsync(request.ClientId!);
+        if (presenter is not { Enabled: true, RequireClientSecret: true } ||
+            presenter.ClientSecrets?.Any() != true ||
+            presenter.AllowOfflineAccess ||
+            presenter.RedirectUris?.Any() == true ||
+            (presenter.AllowedGrantTypes?.ToList() ?? []) is not [GrantTypes.TokenExchange])
+        {
+            logger.LogWarning(
+                "Agent exchange rejected: the presenting client '{ClientId}' of tenant '{TenantId}' is not a confidential, exchange-only client",
+                request.ClientId, outcome.TargetTenantId);
+            return ForbidWithError(Errors.UnauthorizedClient,
+                $"the client '{AgentExchangeConstants.ExchangeClientId}' must be confidential and allow only the token exchange");
+        }
+
+        var requested = request.GetScopes();
+        if (requested.Any(s => !string.Equals(s, AgentExchangeConstants.IssuedScope, StringComparison.Ordinal)))
+        {
+            return ForbidWithError(Errors.InvalidScope,
+                $"an agent exchange issues only the scope '{AgentExchangeConstants.IssuedScope}'");
+        }
+
+        var agentClient = await clientStore.FindRtClientByIdAsync(outcome.AgentClientId!);
+        if (agentClient is not { Enabled: true } ||
+            !string.Equals(agentClient.ClientId, outcome.AgentClientId, StringComparison.Ordinal))
+        {
+            logger.LogWarning(
+                "Agent exchange rejected: agent client '{AgentClientId}' does not exist or is disabled in tenant '{TenantId}'",
+                outcome.AgentClientId, outcome.TargetTenantId);
+            return ForbidWithError(Errors.InvalidGrant, "the agent client does not exist or is disabled");
+        }
+
+        var identity = CreateIdentity();
+        identity.SetClaim(Claims.Subject, agentClient.ClientId);
+        identity.SetClaim(OctoClaimTypes.TenantId, outcome.TargetTenantId);
+        await tokenClaimsService.PopulateClientClaimsAsync(identity, agentClient);
+        identity.AddClaim(new Claim(DelegationConstants.ActClaimType, agentClient.ClientId!));
+        identity.SetClaim(Claims.AuthenticationMethodReference, AgentExchangeConstants.AuthenticationMethod);
+
+        string[] scopes = [AgentExchangeConstants.IssuedScope];
+        identity.SetScopes(scopes);
+        identity.SetResources(await tokenClaimsService.ResolveAudiencesAsync(scopes));
+        identity.SetDestinations(OctoClaimsDestinations.Resolve);
+
+        var principal = new ClaimsPrincipal(identity);
+        principal.SetIssuedTokenLifetime(TenantExchangeProcessor.ServiceAccountTokenLifetime);
+        principal.SetAccessTokenLifetime(TenantExchangeProcessor.ServiceAccountTokenLifetime);
+
+        logger.LogInformation("Agent exchange: issued an octo_api token for agent client '{AgentClientId}' of tenant '{TenantId}'",
+            agentClient.ClientId, outcome.TargetTenantId);
         return SignIn(principal, OpenIddictServerAspNetCoreDefaults.AuthenticationScheme);
     }
 
