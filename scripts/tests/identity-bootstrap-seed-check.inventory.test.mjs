@@ -44,7 +44,7 @@ function tenantDb(provisionedBy) {
 const CLIENT = SEED_ENTITIES.find(e => e.ckTypeId === "System.Identity/Client").rtId;
 const ROLE = SEED_ENTITIES.find(e => e.ckTypeId === "System.Identity/Role").rtId;
 const SCOPE = SEED_ENTITIES.find(e => e.ckTypeId === "System.Identity/ApiScope").rtId;
-const A0 = SEED_ASSOCIATIONS[0], A1 = SEED_ASSOCIATIONS[1];
+const A0 = SEED_ASSOCIATIONS[0], A1 = SEED_ASSOCIATIONS[1], A2 = SEED_ASSOCIATIONS[2];
 
 function makeData() {
     const data = {
@@ -65,7 +65,8 @@ function makeData() {
     b.RtEntity_SystemIdentityClient.find(d => d._id === CLIENT).attributes.provisionedByParentTenantId = "clean"; // FOREIGN
     b.RtEntity_SystemIdentityGroup.push({ _id: CLIENT, ckTypeId: "System.Identity/Client", attributes: {} });   // DUPLICATE
     b.RtAssociation = b.RtAssociation.filter(a => !(a.originRtId === A0[0] && a.targetRtId === A0[2]));     // ASSOC-MISSING
-    b.RtAssociation.push({ _id: "dup", originRtId: A1[0], associationRoleId: A1[1], targetRtId: A1[2] });  // ASSOC-DUPLICATE
+    b.RtAssociation.push({ _id: "dup", originRtId: A1[0], associationRoleId: A1[1], targetRtId: A1[2], targetCkTypeId: A1[3] }); // ASSOC-DUPLICATE
+    b.RtAssociation.find(a => a.originRtId === A2[0] && a.targetRtId === A2[2]).targetCkTypeId = "System.Identity/Role"; // wrong target type: missing
     return data;
 }
 
@@ -150,6 +151,7 @@ test("missing, duplicate, wrong-type and foreign entities and missing or duplica
     assert.deepEqual(classes.sort(), [
         `${A0[0]} -${A0[1]}-> ${A0[2]} ASSOC-MISSING`,
         `${A1[0]} -${A1[1]}-> ${A1[2]} ASSOC-DUPLICATE`,
+        `${A2[0]} -${A2[1]}-> ${A2[2]} ASSOC-MISSING`,
         `${CLIENT} DUPLICATE`,
         `${CLIENT} FOREIGN-PROVISIONING`,
         `${ROLE} MISSING`,
@@ -158,7 +160,7 @@ test("missing, duplicate, wrong-type and foreign entities and missing or duplica
     const sum = sums(lines)[0].split("\t");
     assert.deepEqual(sum.slice(0, 4), ["broken", "40", "41", ROLE]);
     assert.deepEqual(sum[4].split(",").sort(), [CLIENT, SCOPE].sort());
-    assert.deepEqual(sum.slice(5), ["22", "23", "1", "1"]);
+    assert.deepEqual(sum.slice(5), ["21", "23", "2", "1"]);
 });
 
 test("every tenant of the system database is checked by default, a tenant without database is NO-DATABASE", () => {

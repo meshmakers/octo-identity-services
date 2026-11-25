@@ -4,6 +4,7 @@ using IdentityServices.IntegrationTests.Fixtures;
 using Meshmakers.Octo.ConstructionKit.Contracts;
 using Meshmakers.Octo.Runtime.Contracts.Repositories.Query;
 using Meshmakers.Octo.Services.Infrastructure.Services;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Xunit;
 
@@ -59,6 +60,10 @@ public class ConcurrentTenantSeedImportIntegrationTests : IClassFixture<Identity
             await session.CommitTransactionAsync();
         }
 
+        // Positive control: a warning of a service resolved from the container reaches the sink, so the "no duplicate
+        // warning" assertion below cannot pass just because nothing is captured.
+        _fixture.GetService<ILogger<DefaultConfigurationInitializationService>>().LogWarning("capture probe");
+        _fixture.Warnings.Entries.Should().Contain(e => e.Message == "capture probe");
         _fixture.Warnings.Entries.Clear();
 
         // The real startup path: system tenant first, then every child tenant in parallel through one creator service.

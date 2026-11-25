@@ -181,7 +181,7 @@ for (const t of selected) {
     const associations = d.getCollection("RtAssociation");
     for (const a of SEED_ASSOCIATIONS) {
         const count = associations.countDocuments({
-            originRtId: ObjectId(a[0]), associationRoleId: a[1], targetRtId: ObjectId(a[2])
+            originRtId: ObjectId(a[0]), associationRoleId: a[1], targetRtId: ObjectId(a[2]), targetCkTypeId: a[3]
         });
         const id = a[0] + " -" + a[1] + "-> " + a[2];
         if (count === 0) {
