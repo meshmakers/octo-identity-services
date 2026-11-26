@@ -481,7 +481,12 @@ internal sealed class AdminProvisioningService(
             throw new TenantNotReadyException("No roles found in target tenant — default configuration not yet initialized.");
         }
 
-        var roleIds = roleResult.Items.Select(r => r.RtId.ToString()).ToList();
+        // AiBudgetAdmin is left out: TenantOwners never carries it (granted once to the system tenant's administrators,
+        // then only by a holder), so counting it would make the group look incomplete and put it into every mapping's
+        // direct role list.
+        var roleIds = roleResult.Items
+            .Where(r => !IsNeverProvisionedRole(r))
+            .Select(r => r.RtId.ToString()).ToList();
 
         if (existingMapping != null)
         {
@@ -632,6 +637,14 @@ internal sealed class AdminProvisioningService(
         return tenantManagement != null
                && roleIds.Contains(tenantManagement.RtId.ToString(), StringComparer.OrdinalIgnoreCase);
     }
+
+    /// <summary>
+    /// Roles a provisioned administrator never receives, neither through TenantOwners nor in a mapping's role list:
+    /// <c>AiBudgetAdmin</c> (System.Identity.Bootstrap 1.11.0) goes once to the system tenant's human administrators and
+    /// afterwards only from a holder.
+    /// </summary>
+    private static bool IsNeverProvisionedRole(RtRole role) =>
+        string.Equals(role.Name, IdentityServiceConstants.AiBudgetAdminRole, StringComparison.OrdinalIgnoreCase);
 
     /// <summary>
     /// True when the group has an <c>AssignedRole</c> edge to every one of <paramref name="roleIds"/>: only then the

@@ -63,7 +63,7 @@ Tenant owners could not hand out the roles their own blueprints seed (e.g. `Ener
 `role-not-held` judged every built-in role alike. Decision by Gerald (2026-11-08): holders of `UserManagement` may grant **app roles**;
 **platform roles** keep the role change guard protection.
 
-- **Platform role** = a built-in role (stored `RtWellKnownName`) that `System.Identity.Bootstrap` seeds (today the 17 roles of
+- **Platform role** = a built-in role (stored `RtWellKnownName`) that `System.Identity.Bootstrap` seeds (today the 18 roles of
   `seed-data/roles.yaml`: `TenantManagement`, `UserManagement`, `StreamDataAdmin`, `SecretManagement`, `DataModelManagement`, …).
   **App role** = every other built-in role, i.e. one a blueprint installed in the tenant seeds. Custom roles (no `RtWellKnownName`) stay free for everybody.
 - **How the service knows.** `IPlatformRoleCatalog` / `BootstrapPlatformRoleCatalog` (`Authorization/RoleChange/PlatformRoleCatalog.cs`, singleton) reads the
@@ -200,7 +200,7 @@ the **system tenant**: the same rule and code as `SecretManagementAdminGrant` (`
 users holding `AdminPanelManagement` and `TenantManagement`, direct or through groups; direct edges only; no group,
 client or `xt_` shadow user). Never in a child tenant. The marker `AiBudgetAdminGrant` in the system tenant's
 configuration makes it run once; a run that finds no administrator (fresh installation) writes no marker, so the first
-setup after the first administrator exists grants it. A run that finds administrators who all hold the role already
+setup after the first administrator exists grants it (in practice the next start of the identity service, so restart it once after the first setup; until then nobody can set an LLM cap). A run that finds administrators who all hold the role already
 (an earlier grant whose marker write failed) writes the marker and grants nobody. The guard is unchanged: the step writes through the repository as
 the platform's own bootstrap, like the other one-time grants.
 
