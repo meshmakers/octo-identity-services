@@ -239,7 +239,10 @@ public class AiBudgetAdminGrantIntegrationTests : IClassFixture<IdentityServices
         session.StartTransaction();
         await repo.InsertOneRtEntityAsync(session, new RtRole
         {
-            RtId = rtId, Name = name, NormalizedName = name.ToUpperInvariant(), RtWellKnownName = name
+            RtId = rtId,
+            Name = name,
+            NormalizedName = name.ToUpperInvariant(),
+            RtWellKnownName = name
         });
         await session.CommitTransactionAsync();
     }
@@ -269,7 +272,9 @@ public class AiBudgetAdminGrantIntegrationTests : IClassFixture<IdentityServices
         session.StartTransaction();
         await repo.InsertOneRtEntityAsync(session, new RtGroup
         {
-            RtId = rtId, GroupName = name, NormalizedGroupName = name.ToUpperInvariant()
+            RtId = rtId,
+            GroupName = name,
+            NormalizedGroupName = name.ToUpperInvariant()
         });
         await session.CommitTransactionAsync();
     }
