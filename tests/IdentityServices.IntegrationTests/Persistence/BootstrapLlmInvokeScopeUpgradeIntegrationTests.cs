@@ -25,7 +25,9 @@ namespace IdentityServices.IntegrationTests.Persistence;
 public class BootstrapLlmInvokeScopeUpgradeIntegrationTests : IClassFixture<IdentityServicesFixture>
 {
     private const string LlmScope = "ai.llm.invoke";
+    private const string AgentScope = "octo_agent";
     private static readonly OctoObjectId LlmScopeRtId = new("660000000000000000000017");
+    private static readonly OctoObjectId AgentScopeRtId = new("660000000000000000000018");
     private static readonly OctoObjectId OctoApiRtId = new("660000000000000000000020");
     private static readonly OctoObjectId McpApiRtId = new("660000000000000000000021");
 
@@ -57,9 +59,11 @@ public class BootstrapLlmInvokeScopeUpgradeIntegrationTests : IClassFixture<Iden
         after.Scopes.Should().ContainKey(LlmScopeRtId);
         after.Scopes[LlmScopeRtId].Should().Be($"{LlmScope}|enabled");
         after.ResourceScopes[OctoApiRtId].Should().BeEquivalentTo([..PlatformScopes, LlmScope]);
-        after.ResourceScopes[McpApiRtId].Should().BeEquivalentTo(PlatformScopes,
-            "the MCP resource indicator serves interactive clients and does not carry the gateway scope");
-        after.Scopes.Where(s => s.Key != LlmScopeRtId).Should().BeEquivalentTo(before.Scopes,
+        after.ResourceScopes[McpApiRtId].Should().BeEquivalentTo([..PlatformScopes, AgentScope],
+            "the MCP resource indicator does not carry the gateway scope; since 1.12.0 it carries the agent scope " +
+            "octo_agent (AB#9729), which is attached to it only");
+        after.ResourceScopes[OctoApiRtId].Should().NotContain(AgentScope, "octo_agent never opens the platform API");
+        after.Scopes.Where(s => s.Key != LlmScopeRtId && s.Key != AgentScopeRtId).Should().BeEquivalentTo(before.Scopes,
             "the platform scopes are unchanged");
     }
 
